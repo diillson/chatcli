@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -82,8 +81,7 @@ func (cli *ChatCLI) Start() {
 	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
 	fmt.Println("Digite '/exit' ou 'exit' para sair, '/switch' para trocar de provedor.")
 	fmt.Println("Use '@history', '@git', '@env' ou '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
-	fmt.Println("Use '@command <comando>' para executar comandos no terminal.")
-	fmt.Println("Ainda ficou com dúvidas? Use '/help'.\n")
+	fmt.Println("Ainda ficou com dúvidas ? use '/help'.\n")
 
 	for {
 		input, err := cli.line.Prompt("Você: ")
@@ -116,60 +114,41 @@ func (cli *ChatCLI) Start() {
 		// Processar comandos especiais
 		userInput, additionalContext := cli.processSpecialCommands(input)
 
-		// Adicionar a mensagem do usuário ao histórico, se houver
-		if userInput != "" {
-			cli.history = append(cli.history, models.Message{
-				Role:    "user",
-				Content: userInput,
-			})
+		// Adicionar a mensagem do usuário ao histórico
+		cli.history = append(cli.history, models.Message{
+			Role:    "user",
+			Content: userInput + additionalContext,
+		})
+
+		// Exibir mensagem "Pensando..." com animação
+		cli.showThinkingAnimation()
+
+		// Criar um contexto com timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		// Enviar o prompt para o LLM
+		aiResponse, err := cli.client.SendPrompt(ctx, userInput+additionalContext, cli.history)
+
+		// Parar a animação
+		cli.stopThinkingAnimation()
+
+		if err != nil {
+			fmt.Println("\nErro do LLM:", err)
+			cli.logger.Error("Erro do LLM", zap.Error(err))
+			continue
 		}
 
-		// Adicionar a saída do comando ao histórico como assistente, se houver
-		if additionalContext != "" {
-			cli.history = append(cli.history, models.Message{
-				Role:    "assistant",
-				Content: additionalContext,
-			})
+		// Adicionar a resposta da IA ao histórico
+		cli.history = append(cli.history, models.Message{
+			Role:    "assistant",
+			Content: aiResponse,
+		})
 
-			// Exibir a saída do comando diretamente para o usuário
-			fmt.Println(additionalContext)
-		}
-
-		// Se há entrada para enviar para a LLM
-		if userInput != "" {
-			// Exibir mensagem "Pensando..." com animação
-			cli.showThinkingAnimation()
-
-			// Criar um contexto com timeout
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
-
-			// Enviar o prompt para o LLM
-			aiResponse, err := cli.client.SendPrompt(ctx, userInput, cli.history)
-
-			// Parar a animação
-			cli.stopThinkingAnimation()
-
-			if err != nil {
-				fmt.Println("\nErro do LLM:", err)
-				cli.logger.Error("Erro do LLM", zap.Error(err))
-				continue
-			}
-
-			// Adicionar a resposta da IA ao histórico
-			cli.history = append(cli.history, models.Message{
-				Role:    "assistant",
-				Content: aiResponse,
-			})
-
-			// Renderizar a resposta da IA
-			renderedResponse := cli.renderMarkdown(aiResponse)
-			// Exibir a resposta da IA com efeito de digitação
-			cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse))
-		}
-
-		// Salvar o histórico ao final de cada interação
-		cli.saveHistory()
+		// Renderizar a resposta da IA
+		renderedResponse := cli.renderMarkdown(aiResponse)
+		// Exibir a resposta da IA com efeito de digitação
+		cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse))
 	}
 }
 
@@ -311,7 +290,6 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 //	return userInput, additionalContext
 //}
 
-// Função principal para processar comandos especiais
 func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 	var additionalContext string
 
@@ -327,9 +305,11 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 			if len(lines) > n {
 				lines = lines[len(lines)-n:]
 			}
+			// Enumerar os comandos a partir do total de comandos menos n
+			startNumber := len(historyData) - len(lines) + 1
 			formattedLines := make([]string, len(lines))
 			for i, cmd := range lines {
-				formattedLines[i] = fmt.Sprintf("%d: %s", i+1, cmd)
+				formattedLines[i] = fmt.Sprintf("%d: %s", startNumber+i, cmd)
 			}
 			limitedHistoryData := strings.Join(formattedLines, "\n")
 			additionalContext += "\nHistórico do Shell (últimos 10 comandos):\n" + limitedHistoryData
@@ -377,105 +357,11 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 				}
 			}
 		}
-		userInput = strings.ReplaceAll(userInput, "@file", "")
-	}
-
-	// Processar @command
-	if strings.Contains(userInput, "@command") {
-		commandStr, err := extractCommand(userInput)
-		if err != nil {
-			fmt.Println("\nErro ao processar o comando @command:", err)
-		} else {
-			// Executar o comando
-			output, err := executeCommand(commandStr)
-			if err != nil {
-				fmt.Printf("\nErro ao executar o comando '%s': %v\n", commandStr, err)
-			} else {
-				// Adicionar a saída do comando ao contexto adicional
-				additionalContext += fmt.Sprintf("\n📟 **Saída do Comando (%s):**\n```\n%s\n```\n", commandStr, output)
-			}
-		}
-		userInput = removeCommandCommand(userInput)
+		userInput = removeFileCommand(userInput)
 	}
 
 	return userInput, additionalContext
 }
-
-// Função auxiliar para extrair o comando após @command
-func extractCommand(input string) (string, error) {
-	parts := strings.Fields(input)
-	for i, part := range parts {
-		if part == "@command" && i+1 < len(parts) {
-			// Retornar o comando completo após @command
-			return strings.Join(parts[i+1:], " "), nil
-		}
-	}
-	return "", fmt.Errorf("comando @command mal formatado. Uso correto: @command <comando>")
-}
-
-// Função auxiliar para remover o comando @command da entrada do usuário
-func removeCommandCommand(input string) string {
-	parts := strings.Fields(input)
-	var filtered []string
-	skip := false
-	for _, part := range parts {
-		if skip {
-			// Ignorar todas as partes após @command
-			continue
-		}
-		if part == "@command" {
-			skip = true
-			continue
-		}
-		filtered = append(filtered, part)
-	}
-	return strings.Join(filtered, " ")
-}
-
-// Função para executar o comando no terminal
-func executeCommand(commandStr string) (string, error) {
-	// Dividir o comando em nome e argumentos
-	parts := strings.Fields(commandStr)
-	if len(parts) == 0 {
-		return "", fmt.Errorf("nenhum comando fornecido")
-	}
-
-	cmdName := parts[0]
-	cmdArgs := parts[1:]
-
-	//// Verificar se o comando é permitido
-	//if !allowedCommands[cmdName] {
-	//	return "", fmt.Errorf("comando '%s' não é permitido", cmdName)
-	//}
-
-	cmd := exec.Command(cmdName, cmdArgs...)
-	var out strings.Builder
-	var stderr strings.Builder
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err != nil {
-		return "", fmt.Errorf("%v: %s", err, stderr.String())
-	}
-
-	return out.String(), nil
-}
-
-// Lista de comandos permitidos para execução
-//var allowedCommands = map[string]bool{
-//	"ls":    true,
-//	"echo":  true,
-//	"pwd":   true,
-//	"cat":   true,
-//	"mkdir": true,
-//	"rm":    true,
-//	"touch": true,
-//	"grep":  true,
-//	"find":  true,
-//	"wc":    true,
-//	// Adicione outros comandos seguros conforme necessário
-//}
 
 // Função auxiliar para extrair o caminho do arquivo do comando @file
 func extractFilePath(input string) (string, error) {
