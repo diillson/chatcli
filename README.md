@@ -114,6 +114,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
     - `@git` - Incorpora o status atual do repositório Git, commits recentes e branches.
     - `@env` - Inclui variáveis de ambiente no chat.
     - `@file <caminho>` - Adiciona o conteúdo do arquivo especificado ao contexto da conversa. Suporta `~` como atalho para o diretório home.
+    - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa.
 
 ### Exemplos
 
