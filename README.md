@@ -149,6 +149,25 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 
    Este comando lerá o conteúdo de `main.go` do diretório `documentos` na pasta home e o incluirá no contexto da conversa.
 
+
+6. **sCREESHOTS:**
+
+###
+
+![01](images/01.png)
+
+###
+
+![02](images/02.png)
+
+###
+
+![03](images/03.png)
+
+###
+
+![04](images/04.png)
+
 ## 📂 Estrutura do Código
 
 O projeto está organizado em vários pacotes, cada um responsável por diferentes aspectos da aplicação:
