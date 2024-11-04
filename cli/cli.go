@@ -399,6 +399,9 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 	// Exibir a saída
 	fmt.Println("Saída do comando:", string(output))
 
+	// Adicionar o comando ao histórico do liner para persistir em .chatcli_history
+	cli.line.AppendHistory(fmt.Sprintf("@command %s", command))
+
 	// Armazenar a saída no histórico como uma mensagem de "sistema"
 	cli.history = append(cli.history, models.Message{
 		Role:    "system",
