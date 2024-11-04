@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -80,7 +81,7 @@ func (cli *ChatCLI) Start() {
 	fmt.Println("Bem-vindo ao ChatCLI!")
 	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
 	fmt.Println("Digite '/exit' ou 'exit' para sair, '/switch' para trocar de provedor.")
-	fmt.Println("Use '@history', '@git', '@env' ou '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
+	fmt.Println("Use '@history', '@git', '@env', '@command <seu_comando>' ou '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Ainda ficou com dúvidas ? use '/help'.\n")
 
 	for {
@@ -95,6 +96,13 @@ func (cli *ChatCLI) Start() {
 		}
 
 		input = strings.TrimSpace(input)
+
+		// Verificar se o input é um comando direto do sistema
+		if strings.HasPrefix(input, "@command") {
+			command := strings.TrimPrefix(input, "@command ")
+			cli.executeDirectCommand(command)
+			continue
+		}
 
 		if input == "" {
 			continue
@@ -208,6 +216,7 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 		fmt.Println("@git - Adiciona informações do Git ao contexto")
 		fmt.Println("@env - Adiciona variáveis de ambiente ao contexto")
 		fmt.Println("@file <caminho_do_arquivo> - Adiciona o conteúdo de um arquivo ao contexto")
+		fmt.Println("@command <seu_comando> - para executar um comando diretamente no sistema")
 		fmt.Println("/exit ou /quit - Sai do ChatCLI")
 		fmt.Println("/switch - Troca o provedor de LLM")
 		return false
@@ -216,79 +225,6 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 		return false
 	}
 }
-
-//func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
-//	var additionalContext string
-//
-//	// Processar @history
-//	if strings.Contains(userInput, "@history") {
-//		historyData, err := utils.GetShellHistory()
-//		if err != nil {
-//			fmt.Println("\nErro ao obter o histórico do shell:", err)
-//		} else {
-//			lines := strings.Split(historyData, "\n")
-//			lines = filterEmptyLines(lines) // Remove linhas vazias
-//			n := 10                         // Número de comandos recentes a incluir
-//			if len(lines) > n {
-//				lines = lines[len(lines)-n:]
-//			}
-//			// Enumerar os comandos a partir do total de comandos menos n
-//			startNumber := len(historyData) - len(lines) + 1
-//			formattedLines := make([]string, len(lines))
-//			for i, cmd := range lines {
-//				formattedLines[i] = fmt.Sprintf("%d: %s", startNumber+i, cmd)
-//			}
-//			limitedHistoryData := strings.Join(formattedLines, "\n")
-//			additionalContext += "\nHistórico do Shell (últimos 10 comandos):\n" + limitedHistoryData
-//		}
-//		userInput = strings.ReplaceAll(userInput, "@history", "")
-//	}
-//
-//	// Processar @git
-//	if strings.Contains(userInput, "@git") {
-//		gitData, err := utils.GetGitInfo()
-//		if err != nil {
-//			fmt.Println("\nErro ao obter informações do Git:", err)
-//		} else {
-//			additionalContext += "\nInformações do Git:\n" + gitData
-//		}
-//		userInput = strings.ReplaceAll(userInput, "@git", "")
-//	}
-//
-//	// Processar @env
-//	if strings.Contains(userInput, "@env") {
-//		envData := utils.GetEnvVariables()
-//		additionalContext += "\nVariáveis de Ambiente:\n" + envData
-//		userInput = strings.ReplaceAll(userInput, "@env", "")
-//	}
-//
-//	// Processar @file
-//	if strings.Contains(userInput, "@file") {
-//		// Extrair o caminho do arquivo
-//		filePath, err := extractFilePath(userInput)
-//		if err != nil {
-//			fmt.Println("\nErro ao processar o comando @file:", err)
-//		} else {
-//			// Ler o conteúdo do arquivo
-//			fileContent, err := utils.ReadFileContent(filePath)
-//			if err != nil {
-//				fmt.Println("\nErro ao ler o arquivo:", err)
-//			} else {
-//				// Detectar o tipo de arquivo com base na extensão
-//				fileType := detectFileType(filePath)
-//				// Adicionar o conteúdo ao contexto adicional com formatação de código se aplicável
-//				if isCodeFile(fileType) {
-//					additionalContext += fmt.Sprintf("\nConteúdo do Arquivo (%s - %s):\n```%s\n%s\n```\n", filePath, fileType, fileType, fileContent)
-//				} else {
-//					additionalContext += fmt.Sprintf("\nConteúdo do Arquivo (%s - %s):\n%s\n", filePath, fileType, fileContent)
-//				}
-//			}
-//		}
-//		userInput = removeFileCommand(userInput)
-//	}
-//
-//	return userInput, additionalContext
-//}
 
 func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 	var additionalContext string
@@ -449,6 +385,25 @@ func detectFileType(filePath string) string {
 	default:
 		return "Texto"
 	}
+}
+
+func (cli *ChatCLI) executeDirectCommand(command string) {
+	fmt.Println("Executando comando:", command)
+	cmd := exec.Command("bash", "-c", command) // Altere para o shell apropriado, se necessário
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Println("Erro ao executar comando:", err)
+		output = []byte(fmt.Sprintf("Erro: %v", err))
+	}
+
+	// Exibir a saída
+	fmt.Println("Saída do comando:", string(output))
+
+	// Armazenar a saída no histórico como uma mensagem de "sistema"
+	cli.history = append(cli.history, models.Message{
+		Role:    "system",
+		Content: fmt.Sprintf("Comando: %s\nSaída:\n%s", command, string(output)),
+	})
 }
 
 // Função auxiliar para verificar se o tipo de arquivo é código

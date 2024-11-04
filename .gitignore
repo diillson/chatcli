@@ -26,3 +26,5 @@ go.work.sum
 
 #Log
 app.log
+.chatcli_history
+chatcli

@@ -7,10 +7,11 @@
 - **Suporte a Múltiplos Provedores:** Alterne facilmente entre diferentes provedores de LLM como **StackSpot** e **OpenAI** conforme suas necessidades.
 - **Experiência Interativa na CLI:** Desfrute de uma interação suave na linha de comando com recursos como navegação de histórico e auto-completação de comandos.
 - **Comandos Contextuais:**
-  - `@history` - Integra o histórico recente de comandos do seu shell na conversa.
-  - `@git` - Adiciona informações do repositório Git atual, incluindo status, commits recentes e branches.
-  - `@env` - Inclui suas variáveis de ambiente no contexto do chat.
-  - `@file <caminho>` - Incorpora o conteúdo de arquivos especificados na conversa. Suporta `~` como atalho para o diretório home do usuário.
+    - `@history` - Integra o histórico recente de comandos do seu shell na conversa.
+    - `@git` - Adiciona informações do repositório Git atual, incluindo status, commits recentes e branches.
+    - `@env` - Inclui suas variáveis de ambiente no contexto do chat.
+    - `@file <caminho>` - Incorpora o conteúdo de arquivos especificados na conversa. Suporta `~` como atalho para o diretório home do usuário.
+    - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa para consultas posteriores com a LLM.
 - **Feedback Animado:** Animações visuais de "Pensando..." enquanto o LLM processa suas solicitações, aumentando o engajamento do usuário.
 - **Renderização de Markdown:** Respostas são renderizadas com Markdown para melhor legibilidade e formatação.
 - **Histórico Persistente:** O histórico de comandos é salvo entre sessões, permitindo revisitar interações anteriores com facilidade.
@@ -114,8 +115,9 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
     - `@git` - Incorpora o status atual do repositório Git, commits recentes e branches.
     - `@env` - Inclui variáveis de ambiente no chat.
     - `@file <caminho>` - Adiciona o conteúdo do arquivo especificado ao contexto da conversa. Suporta `~` como atalho para o diretório home.
+    - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa.
 
-### Exemplos
+### Exemplos de Uso
 
 1. **Conversa Básica:**
 
@@ -149,24 +151,62 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 
    Este comando lerá o conteúdo de `main.go` do diretório `documentos` na pasta home e o incluirá no contexto da conversa.
 
+6. **Executando Comando no Terminal com `@command`:**
 
-6. **sCREESHOTS:**
+   ```plaintext
+   Você: @command ls -la
+   ```
+   O comando `@command <comando>` permite a execução de comandos de sistema diretamente no `ChatCLI` sem interação com a LLM. A saída do comando é salva no histórico, possibilitando que você consulte a LLM posteriormente para análise ou diagnósticos com o contexto do comando.
 
-###
+   **Saída**:
+   ```plaintext
+   Executando comando: ls -la
+   Saída do comando:
+   total 8
+   drwxr-xr-x  3 user  staff    96 Nov  4 12:34 .
+   drwxr-xr-x  5 user  staff   160 Nov  4 10:12 ..
+   -rw-r--r--  1 user  staff  1024 Nov  4 12:33 example.txt
+   ```
 
-![01](images/01.png)
+7. **Consultando a LLM sobre um Erro em um Comando:**
 
-###
+   ```plaintext
+   Você: @command cat arquivo_inexistente.txt
+   ```
 
-![02](images/02.png)
+   **Saída**:
+   ```plaintext
+   Executando comando: cat arquivo_inexistente.txt
+   Saída do comando:
+   Erro: cat: arquivo_inexistente.txt: No such file or directory
+   ```
 
-###
+   Posteriormente, você pode consultar a LLM sobre o erro:
+   ```plaintext
+   Você: O que aconteceu no último comando?
+   ```
 
-![03](images/03.png)
+   A LLM terá acesso ao histórico e poderá explicar o erro ou sugerir correções.
 
-###
+### Capturas de Tela
 
-![04](images/04.png)
+#### Exemplo de Execução de Comando com `@command`
+
+![Executando Comando_01](images/05.png)
+
+#### Exemplo de pergunta a LLM após execução do comando
+
+![Executando Comando_02](images/06.png)
+
+#### Funcionamento Geral
+
+![Operando-1](images/01.png)
+
+![Operando-2](images/02.png)
+
+![Operando-3](images/03.png)
+
+![Operando-4](images/04.png)
 
 ## 📂 Estrutura do Código
 
@@ -182,6 +222,8 @@ O projeto está organizado em vários pacotes, cada um responsável por diferent
 
 - **[Zap](https://github.com/uber-go/zap)**: Logging estruturado e de alto desempenho.
 - **[Liner](https://github.com/peterh/liner)**: Fornece edição de linha e histórico para a CLI.
+
+
 - **[Glamour](https://github.com/charmbracelet/glamour)**: Renderiza Markdown no terminal.
 - **[Lumberjack](https://github.com/natefinch/lumberjack)**: Rotação de arquivos de log.
 - **[Godotenv](https://github.com/joho/godotenv)**: Carrega variáveis de ambiente a partir de um arquivo `.env`.
@@ -224,7 +266,7 @@ O ChatCLI integra **Zap** para logging estruturado e de alto desempenho. As prin
 
 2. **Processamento de Comandos:**
     - Os usuários interagem com o ChatCLI via terminal, inserindo comandos e mensagens.
-    - Comandos especiais como `@history`, `@git`, `@env` e `@file` são analisados e processados para incluir contexto adicional na conversa.
+    - Comandos especiais como `@history`, `@git`, `@env`, `@file` e `@command` são analisados e processados para incluir contexto adicional na conversa.
 
 3. **Interação com LLM:**
     - O ChatCLI envia a entrada do usuário juntamente com o histórico da conversa para o provedor de LLM selecionado.
@@ -268,7 +310,6 @@ Este projeto está licenciado sob a [Licença MIT](LICENSE).
 ## 📞 Contato
 
 Para quaisquer perguntas, feedback ou suporte, por favor, abra uma issue no repositório ou entre em contato pelo [www.edilsonfreitas.com.br/contato](https://www.edilsonfreitas.com/#section-contact).
-
 
 ---
 
