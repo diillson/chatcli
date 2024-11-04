@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -80,7 +81,7 @@ func (cli *ChatCLI) Start() {
 	fmt.Println("Bem-vindo ao ChatCLI!")
 	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
 	fmt.Println("Digite '/exit' ou 'exit' para sair, '/switch' para trocar de provedor.")
-	fmt.Println("Use '@history', '@git', '@env' ou '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
+	fmt.Println("Use '@history', '@git', '@env', '@command <seu_comando>' ou '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Ainda ficou com dúvidas ? use '/help'.\n")
 
 	for {
@@ -95,6 +96,13 @@ func (cli *ChatCLI) Start() {
 		}
 
 		input = strings.TrimSpace(input)
+
+		// Verificar se o input é um comando direto do sistema
+		if strings.HasPrefix(input, "@command") {
+			command := strings.TrimPrefix(input, "@command ")
+			cli.executeDirectCommand(command)
+			continue
+		}
 
 		if input == "" {
 			continue
@@ -208,6 +216,7 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 		fmt.Println("@git - Adiciona informações do Git ao contexto")
 		fmt.Println("@env - Adiciona variáveis de ambiente ao contexto")
 		fmt.Println("@file <caminho_do_arquivo> - Adiciona o conteúdo de um arquivo ao contexto")
+		fmt.Println("@command <seu_comando> - para executar um comando diretamente no sistema")
 		fmt.Println("/exit ou /quit - Sai do ChatCLI")
 		fmt.Println("/switch - Troca o provedor de LLM")
 		return false
@@ -376,6 +385,25 @@ func detectFileType(filePath string) string {
 	default:
 		return "Texto"
 	}
+}
+
+func (cli *ChatCLI) executeDirectCommand(command string) {
+	fmt.Println("Executando comando:", command)
+	cmd := exec.Command("bash", "-c", command) // Altere para o shell apropriado, se necessário
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Println("Erro ao executar comando:", err)
+		output = []byte(fmt.Sprintf("Erro: %v", err))
+	}
+
+	// Exibir a saída
+	fmt.Println("Saída do comando:", string(output))
+
+	// Armazenar a saída no histórico como uma mensagem de "sistema"
+	cli.history = append(cli.history, models.Message{
+		Role:    "system",
+		Content: fmt.Sprintf("Comando: %s\nSaída:\n%s", command, string(output)),
+	})
 }
 
 // Função auxiliar para verificar se o tipo de arquivo é código
