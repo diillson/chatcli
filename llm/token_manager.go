@@ -18,6 +18,8 @@ import (
 type TokenManager struct {
 	clientID     string
 	clientSecret string
+	slugName     string
+	tenantName   string
 	accessToken  string
 	expiresAt    time.Time
 	mu           sync.RWMutex
@@ -26,22 +28,32 @@ type TokenManager struct {
 }
 
 // NewTokenManager cria uma nova instância de TokenManager
-func NewTokenManager(clientID, clientSecret string, logger *zap.Logger) *TokenManager {
-	// Configurar o cliente HTTP com LoggingTransport para logar requisições de token
-	httpClient := &http.Client{
-		Transport: &utils.LoggingTransport{
-			Logger:    logger,
-			Transport: http.DefaultTransport,
-		},
-		Timeout: 30 * time.Second,
-	}
-
+func NewTokenManager(clientID, clientSecret, slugName, tenantName string, logger *zap.Logger) *TokenManager {
+	httpClient := utils.NewHTTPClient(logger, 30*time.Second)
 	return &TokenManager{
 		clientID:     clientID,
 		clientSecret: clientSecret,
+		slugName:     slugName,
+		tenantName:   tenantName,
 		logger:       logger,
 		client:       httpClient,
 	}
+}
+
+func (tm *TokenManager) GetSlugAndTenantName() (string, string) {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return tm.slugName, tm.tenantName
+}
+
+// Atualiza os valores e força uma nova solicitação de token
+func (tm *TokenManager) SetSlugAndTenantName(slugName, tenantName string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.slugName = slugName
+	tm.tenantName = tenantName
+	tm.accessToken = "" // Limpa o token para forçar a solicitação de um novo na próxima vez
+	tm.logger.Info("Valores de slug e tenantName atualizados", zap.String("slugName", slugName), zap.String("tenantName", tenantName))
 }
 
 // GetAccessToken retorna o token de acesso válido, renovando-o se necessário
@@ -60,6 +72,10 @@ func (tm *TokenManager) GetAccessToken(ctx context.Context) (string, error) {
 	return tm.refreshToken(ctx)
 }
 
+func (tm *TokenManager) RefreshToken(ctx context.Context) (string, error) {
+	return tm.refreshToken(ctx)
+}
+
 // refreshToken renova o token de acesso
 func (tm *TokenManager) refreshToken(ctx context.Context) (string, error) {
 	tm.mu.Lock()
@@ -67,7 +83,8 @@ func (tm *TokenManager) refreshToken(ctx context.Context) (string, error) {
 
 	tm.logger.Info("Renovando o access token...")
 
-	tokenURL := "https://idm.stackspot.com/zup/oidc/oauth/token"
+	// Monta a URL com os valores atuais de tenantName e slugName
+	tokenURL := fmt.Sprintf("https://idm.stackspot.com/%s/oidc/oauth/token", tm.tenantName)
 	data := strings.NewReader(fmt.Sprintf(
 		"grant_type=client_credentials&client_id=%s&client_secret=%s",
 		tm.clientID, tm.clientSecret))

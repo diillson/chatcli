@@ -7,43 +7,49 @@ import (
 )
 
 type LLMManager struct {
-	clients map[string]func(string) (LLMClient, error)
-	logger  *zap.Logger
+	clients      map[string]func(string) (LLMClient, error)
+	logger       *zap.Logger
+	tokenManager *TokenManager
 }
 
-func NewLLMManager(logger *zap.Logger) (*LLMManager, error) {
+// NewLLMManager cria uma nova instância de LLMManager com TokenManager configurado
+func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (*LLMManager, error) {
 	manager := &LLMManager{
 		clients: make(map[string]func(string) (LLMClient, error)),
 		logger:  logger,
 	}
 
-	// Configurar a fábrica para OpenAI
+	// Configurar TokenManager com valores dinâmicos
+	clientID := os.Getenv("CLIENT_ID")
+	clientSecret := os.Getenv("CLIENT_SECRET")
+
+	if clientID == "" || clientSecret == "" {
+		return nil, fmt.Errorf("CLIENT_ID ou CLIENT_SECRET não configurado")
+	}
+
+	manager.tokenManager = NewTokenManager(clientID, clientSecret, slugName, tenantName, logger)
+
+	// Configurar cliente para OpenAI
 	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		logger.Warn("OPENAI_API_KEY não está definido")
-	} else {
+	if apiKey != "" {
 		manager.clients["OPENAI"] = func(model string) (LLMClient, error) {
 			if model == "" {
-				model = "gpt-3.5-turbo" // Modelo padrão
+				model = "gpt-4o-mini" // Modelo padrão
 			}
 			return NewOpenAIClient(apiKey, model, logger), nil
 		}
 	}
 
-	// Configurar a fábrica para StackSpot
-	clientID := os.Getenv("CLIENT_ID")
-	clientSecret := os.Getenv("CLIENT_SECRET")
-	slug := os.Getenv("SLUG_NAME")
-	if clientID == "" || clientSecret == "" || slug == "" {
-		logger.Warn("As credenciais do StackSpot não estão definidas")
-	} else {
-		tokenManager := NewTokenManager(clientID, clientSecret, logger)
-		manager.clients["STACKSPOT"] = func(model string) (LLMClient, error) {
-			return NewStackSpotClient(tokenManager, slug, logger), nil
-		}
+	// Configurar cliente para StackSpot
+	manager.clients["STACKSPOT"] = func(model string) (LLMClient, error) {
+		return NewStackSpotClient(manager.tokenManager, slugName, logger), nil
 	}
 
 	return manager, nil
+}
+
+func (m *LLMManager) GetTokenManager() (*TokenManager, bool) {
+	return m.tokenManager, m.tokenManager != nil
 }
 
 func (m *LLMManager) GetClient(provider string, model string) (LLMClient, error) {

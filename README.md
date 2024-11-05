@@ -5,24 +5,40 @@
 ## 🚀 Funcionalidades
 
 - **Suporte a Múltiplos Provedores:** Alterne facilmente entre diferentes provedores de LLM como **StackSpot** e **OpenAI** conforme suas necessidades.
+
 - **Experiência Interativa na CLI:** Desfrute de uma interação suave na linha de comando com recursos como navegação de histórico e auto-completação de comandos.
+
 - **Comandos Contextuais:**
-    - `@history` - Integra o histórico recente de comandos do seu shell na conversa.
+
+    - `@history` - Integra o histórico recente de comandos do seu shell na conversa (suporta bash, zsh e fish).
     - `@git` - Adiciona informações do repositório Git atual, incluindo status, commits recentes e branches.
     - `@env` - Inclui suas variáveis de ambiente no contexto do chat.
-    - `@file <caminho>` - Incorpora o conteúdo de arquivos especificados na conversa. Suporta `~` como atalho para o diretório home do usuário.
+    - `@file <caminho>` - Incorpora o conteúdo de arquivos especificados na conversa. Suporta `~` como atalho para o diretório home do usuário e expande caminhos relativos.
     - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa para consultas posteriores com a LLM.
+
+- **Execução de Comandos Diretos:** Execute comandos de sistema diretamente a partir do ChatCLI usando `@command`, e a saída é salva no histórico para referência.
+
+- **Alteração Dinâmica de Configurações:** Mude o provedor de LLM, slug e tenantname diretamente do ChatCLI sem reiniciar a aplicação usando `/switch` com opções.
+
 - **Feedback Animado:** Animações visuais de "Pensando..." enquanto o LLM processa suas solicitações, aumentando o engajamento do usuário.
+
 - **Renderização de Markdown:** Respostas são renderizadas com Markdown para melhor legibilidade e formatação.
+
 - **Histórico Persistente:** O histórico de comandos é salvo entre sessões, permitindo revisitar interações anteriores com facilidade.
+
+- **Compatibilidade com Múltiplos Shells:** Suporte a diferentes shells (bash, zsh, fish) ao obter o histórico do shell.
+
+- **Limite de Tamanho de Arquivos:** Evita a leitura de arquivos muito grandes (acima de 1MB) ao usar o comando `@file`.
+
 - **Logging Robusto:** Registro abrangente utilizando **Zap** com rotação de logs e sanitização de informações sensíveis para garantir segurança e manutenibilidade.
+
 - **Tratamento Avançado de Erros:** Mensagens de erro amigáveis e informativas orientam você em caso de problemas, garantindo uma experiência de usuário fluida.
 
 ## 📦 Instalação
 
 ### Pré-requisitos
 
-- **Go:** Certifique-se de ter o Go instalado 1.21+. Você pode baixá-lo em [golang.org](https://golang.org/dl/).
+- **Go:** Certifique-se de ter o Go instalado (versão 1.21+). Você pode baixá-lo em [golang.org](https://golang.org/dl/).
 
 ### Passos
 
@@ -58,18 +74,22 @@ O ChatCLI depende de variáveis de ambiente para configurar seu comportamento e 
 ### Variáveis de Ambiente
 
 - **Geral:**
+
     - `LOG_LEVEL` - Define o nível de log (`debug`, `info`, `warn`, `error`). Padrão é `info`.
     - `ENV` - Define o ambiente (`prod` para produção, caso contrário, padrão é desenvolvimento).
+    - `LLM_PROVIDER` - Especifica o provedor de LLM padrão (`OPENAI` ou `STACKSPOT`). Padrão é `OPENAI`.
 
 - **Provedor OpenAI:**
-    - `LLM_PROVIDER` - Especifica o provedor de LLM (`OPENAI` ou `STACKSPOT`). Padrão é `OPENAI`.
+
     - `OPENAI_API_KEY` - Sua chave de API da OpenAI.
-    - `OPENAI_MODEL` - (Opcional) Especifica o modelo da OpenAI a ser usado. Padrão é `gpt-40-mini`.
+    - `OPENAI_MODEL` - (Opcional) Especifica o modelo da OpenAI a ser usado. Padrão é `gpt-3.5-turbo`.
 
 - **Provedor StackSpot:**
+
     - `CLIENT_ID` - ID do cliente StackSpot.
     - `CLIENT_SECRET` - Segredo do cliente StackSpot.
-    - `SLUG_NAME` - Nome do slug StackSpot.
+    - `SLUG_NAME` - Nome do slug StackSpot. Padrão é `testeai` se não definido.
+    - `TENANT_NAME` - Nome do helm (tenant name) StackSpot. Padrão é `zup` se não definido.
 
 ### Exemplo de Arquivo `.env`
 
@@ -77,16 +97,17 @@ O ChatCLI depende de variáveis de ambiente para configurar seu comportamento e 
 # Configurações Gerais
 LOG_LEVEL=info
 ENV=dev
+LLM_PROVIDER=STACKSPOT
 
 # Configurações do OpenAI
-LLM_PROVIDER=OPENAI
 OPENAI_API_KEY=sua-chave-openai
-OPENAI_MODEL=gpt-4
+OPENAI_MODEL=gpt-3.5-turbo
 
 # Configurações do StackSpot
 CLIENT_ID=seu-cliente-id
 CLIENT_SECRET=seu-cliente-secreto
 SLUG_NAME=seu-slug-stackspot
+HELM_NAME=seu-helm-name
 ```
 
 ## 🎯 Uso
@@ -102,19 +123,26 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 ### Comandos Disponíveis
 
 - **Sair do ChatCLI:**
+
     - `/exit` ou `exit` ou `/quit` ou `quit`
 
-- **Alternar Provedor de LLM:**
-    - `/switch`
+- **Alternar Provedor de LLM ou Configurações:**
+
+    - `/switch` - Troca o provedor de LLM (interativo).
+    - `/switch --slugname <slug>` - Atualiza o `slugName` sem trocar o provedor.
+    - `/switch --tenantname <tenant>` - Atualiza o `tenantName` sem trocar o provedor.
+    - Você pode combinar as opções: `/switch --slugname <slug> --tenantname <tenant>`
 
 - **Ajuda:**
+
     - `/help`
 
 - **Comandos Especiais:**
+
     - `@history` - Adiciona os últimos 10 comandos do shell ao contexto da conversa.
     - `@git` - Incorpora o status atual do repositório Git, commits recentes e branches.
     - `@env` - Inclui variáveis de ambiente no chat.
-    - `@file <caminho>` - Adiciona o conteúdo do arquivo especificado ao contexto da conversa. Suporta `~` como atalho para o diretório home.
+    - `@file <caminho>` - Adiciona o conteúdo do arquivo especificado ao contexto da conversa. Suporta `~` como atalho para o diretório home e expande caminhos relativos.
     - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa.
 
 ### Exemplos de Uso
@@ -156,9 +184,11 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
    ```plaintext
    Você: @command ls -la
    ```
+
    O comando `@command <comando>` permite a execução de comandos de sistema diretamente no `ChatCLI` sem interação com a LLM. A saída do comando é salva no histórico, possibilitando que você consulte a LLM posteriormente para análise ou diagnósticos com o contexto do comando.
 
    **Saída**:
+
    ```plaintext
    Executando comando: ls -la
    Saída do comando:
@@ -175,6 +205,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
    ```
 
    **Saída**:
+
    ```plaintext
    Executando comando: cat arquivo_inexistente.txt
    Saída do comando:
@@ -182,11 +213,37 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
    ```
 
    Posteriormente, você pode consultar a LLM sobre o erro:
+
    ```plaintext
    Você: O que aconteceu no último comando?
    ```
 
    A LLM terá acesso ao histórico e poderá explicar o erro ou sugerir correções.
+
+8. **Alterando Provedor de LLM:**
+
+   Para trocar o provedor de LLM durante a sessão:
+
+   ```plaintext
+   Você: /switch
+   ```
+
+   Você será solicitado a selecionar o provedor:
+
+   ```plaintext
+   Provedores disponíveis:
+   1. OPENAI
+   2. STACKSPOT
+   Selecione o provedor (1 ou 2):
+   ```
+
+9. **Atualizando `slugName` e `tenantName` sem trocar o provedor:**
+
+   ```plaintext
+   Você: /switch --slugname novo-slug --tenantname novo-tenant
+   ```
+
+   O `TokenManager` será atualizado com os novos valores, e um novo token será obtido.
 
 ### Capturas de Tela
 
@@ -213,22 +270,48 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 O projeto está organizado em vários pacotes, cada um responsável por diferentes aspectos da aplicação:
 
 - **`cli`**: Gerencia a interface de linha de comando, entrada do usuário, processamento de comandos e interação com os clientes LLM.
+
 - **`llm`**: Gerencia as interações com os Modelos de Linguagem, suportando múltiplos provedores como OpenAI e StackSpot.
-- **`utils`**: Contém funções utilitárias para operações de arquivo, expansão de caminhos, logging e mais.
-- **`models`**: Define as estruturas de dados utilizadas em toda a aplicação.
+
+    - **`llm_client.go`**: Define a interface `LLMClient` que todos os clientes LLM devem implementar.
+
+    - **`openai_client.go`**: Implementa o cliente para interagir com a API da OpenAI, incluindo tratamento de erros e retries.
+
+    - **`stackspot_client.go`**: Implementa o cliente para interagir com a API da StackSpot, gerenciando tokens de acesso e chamadas à API.
+
+    - **`token_manager.go`**: Gerencia a obtenção e renovação de tokens de acesso para a StackSpot.
+
+- **`utils`**: Contém funções utilitárias para operações de arquivo, expansão de caminhos, logging, leitura de histórico do shell, obtenção de informações do Git, entre outros.
+
+    - **`http_client.go`**: Cria um cliente HTTP personalizado com um `LoggingTransport` para registrar requisições e respostas.
+
+    - **`logging_transport.go`**: Implementa um `http.RoundTripper` personalizado para adicionar logs às requisições e respostas HTTP, com sanitização de dados sensíveis.
+
+    - **`path.go`**: Fornece funções para manipulação de caminhos de arquivos, incluindo expansão de `~` para o diretório home.
+
+    - **`shell_utils.go`**: Contém funções para detectar o shell do usuário e obter o histórico de comandos.
+
+    - **`git_utils.go`**: Fornece funções para obter informações do repositório Git atual.
+
+    - **`env_utils.go`**: Fornece funções para obter as variáveis de ambiente do sistema.
+
+- **`models`**: Define as estruturas de dados utilizadas em toda a aplicação, como `Message` e `ResponseData`.
+
 - **`main`**: Inicializa a aplicação, configura dependências e inicia a CLI.
 
 ## 📚 Bibliotecas e Dependências
 
 - **[Zap](https://github.com/uber-go/zap)**: Logging estruturado e de alto desempenho.
+
 - **[Liner](https://github.com/peterh/liner)**: Fornece edição de linha e histórico para a CLI.
 
-
 - **[Glamour](https://github.com/charmbracelet/glamour)**: Renderiza Markdown no terminal.
+
 - **[Lumberjack](https://github.com/natefinch/lumberjack)**: Rotação de arquivos de log.
+
 - **[Godotenv](https://github.com/joho/godotenv)**: Carrega variáveis de ambiente a partir de um arquivo `.env`.
-- **[Zap](https://github.com/uber-go/zap)**: Logging estruturado e nivelado.
-- **[Biblioteca Padrão do Go](https://pkg.go.dev/std)**: Utiliza diversos pacotes padrão para requisições HTTP, manipulação de arquivos, concorrência e mais.
+
+- **[Go Standard Library](https://pkg.go.dev/std)**: Utiliza diversos pacotes padrão para requisições HTTP, manipulação de arquivos, concorrência e mais.
 
 ## 🌟 Funcionalidades Avançadas
 
@@ -248,39 +331,72 @@ O projeto está organizado em vários pacotes, cada um responsável por diferent
 
 - **Compatibilidade com Shells:** Detecta automaticamente o shell do usuário (por exemplo, bash, zsh, fish) e lê o arquivo de histórico apropriado, melhorando a compatibilidade em diferentes ambientes.
 
+- **Persistência de Histórico de Comandos:** O ChatCLI salva o histórico de comandos em um arquivo `.chatcli_history` na pasta atual, permitindo que o histórico seja mantido entre sessões.
+
+- **Detecção de Tipo de Arquivo:** Ao usar `@file`, o ChatCLI detecta o tipo de arquivo com base na extensão e formata o conteúdo apropriadamente, incluindo suporte a sintaxe de código em blocos de Markdown.
+
 ## 📜 Integração de Logs
 
 O ChatCLI integra **Zap** para logging estruturado e de alto desempenho. As principais características do sistema de logging incluem:
 
 - **Níveis de Log Configuráveis:** Defina o nível de log desejado (`debug`, `info`, `warn`, `error`) via variáveis de ambiente para controlar a verbosidade.
+
 - **Rotação de Logs:** Utiliza **Lumberjack** para gerenciar a rotação de arquivos de log, prevenindo que os arquivos cresçam indefinidamente.
-- **Sanitização de Dados Sensíveis:** O `LoggingTransport` personalizado assegura que informações sensíveis como chaves de API e senhas sejam redigidas antes de serem registradas.
+
+- **Sanitização de Dados Sensíveis:** O `LoggingTransport` personalizado assegura que informações sensíveis como chaves de API, tokens e cabeçalhos de autorização sejam redigidas antes de serem registradas.
+
 - **Logging de Multi-Output:** Suporta logging tanto no console quanto em arquivos de log, dependendo do ambiente (desenvolvimento ou produção).
+
 - **Logs Detalhados de Requisições e Respostas:** Registra requisições HTTP e respostas, incluindo método, URL, cabeçalhos (com dados sensíveis redigidos), códigos de status e durações para monitoramento e depuração.
 
 ## 🧩 Como Funciona
 
 1. **Inicialização:**
+
     - A aplicação carrega as variáveis de ambiente e inicializa o logger.
+
     - Configura o `LLMManager` para gerenciar múltiplos provedores de LLM com base na configuração.
 
+    - Inicializa o `TokenManager` para gerenciar tokens de acesso quando necessário (por exemplo, para StackSpot).
+
 2. **Processamento de Comandos:**
+
     - Os usuários interagem com o ChatCLI via terminal, inserindo comandos e mensagens.
+
     - Comandos especiais como `@history`, `@git`, `@env`, `@file` e `@command` são analisados e processados para incluir contexto adicional na conversa.
 
+    - Comandos de sistema como `/exit`, `/switch`, `/help` são tratados separadamente para controlar o fluxo da aplicação.
+
 3. **Interação com LLM:**
+
     - O ChatCLI envia a entrada do usuário juntamente com o histórico da conversa para o provedor de LLM selecionado.
+
+    - Para o OpenAI, utiliza a API de chat com o histórico completo de mensagens.
+
+    - Para o StackSpot, gerencia a sessão e obtém a resposta através de polling com o `responseID`.
+
     - A resposta do LLM é recebida, renderizada com Markdown e exibida com um efeito de máquina de escrever para melhor legibilidade.
 
 4. **Logging e Tratamento de Erros:**
+
     - Todas as interações, incluindo requisições e respostas para/dos provedores de LLM, são registradas com níveis apropriados.
+
     - Erros são tratados de forma elegante, fornecendo mensagens informativas ao usuário e garantindo que a aplicação permaneça estável.
+
+    - Implementa lógica de retry com backoff exponencial para lidar com erros temporários de rede.
+
+5. **Persistência de Histórico:**
+
+    - O ChatCLI salva o histórico de comandos em `.chatcli_history`, permitindo que o histórico seja carregado em sessões futuras.
+
+    - O histórico da conversa com a LLM é mantido em memória durante a sessão para proporcionar contexto contínuo.
 
 ## 🧑‍💻 Contribuindo
 
 Contribuições são bem-vindas! Seja melhorando a documentação, adicionando novos recursos ou corrigindo bugs, sua ajuda é muito apreciada. Siga os passos abaixo para contribuir:
 
 1. **Fork o Repositório**
+
 2. **Crie uma Nova Branch:**
 
    ```bash

@@ -163,7 +163,7 @@ func (c *StackSpotClient) getLLMResponseWithRetry(ctx context.Context, responseI
 func (c *StackSpotClient) sendRequestToLLM(ctx context.Context, prompt, accessToken string) (string, error) {
 	conversationID := generateUUID()
 
-	url := fmt.Sprintf("https://genai-code-buddy-api.stackspot.com/v1/quick-commands/create-execution/%s?conversation_id=%s", c.slug, conversationID)
+	url := fmt.Sprintf("https://genai-code-buddy-api.stackspot.com/v1/quick-commands/create-execution/%s?conversation_id=%s", c.tokenManager.slugName, conversationID)
 	c.logger.Info("Fazendo POST para URL", zap.String("url", url))
 
 	requestBody := map[string]string{

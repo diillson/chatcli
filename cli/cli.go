@@ -81,6 +81,7 @@ func (cli *ChatCLI) Start() {
 	fmt.Println("Bem-vindo ao ChatCLI!")
 	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
 	fmt.Println("Digite '/exit' ou 'exit' para sair, '/switch' para trocar de provedor.")
+	fmt.Println("Digite '/switch --slugname <slug>' ou '/switch --tenantname <helm> - Troca do helm'")
 	fmt.Println("Use '@history', '@git', '@env', '@command <seu_comando>' ou '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Ainda ficou com dúvidas ? use '/help'.\n")
 
@@ -161,12 +162,59 @@ func (cli *ChatCLI) Start() {
 }
 
 func (cli *ChatCLI) handleCommand(userInput string) bool {
-	switch userInput {
-	case "/exit", "exit", "/quit", "quit":
+	switch {
+	case userInput == "/exit" || userInput == "exit" || userInput == "/quit" || userInput == "quit":
 		fmt.Println("Até mais!")
 		return true
-	case "/switch":
-		// Alternar o provedor de LLM
+	case strings.HasPrefix(userInput, "/switch"):
+		args := strings.Fields(userInput)
+		var newSlugName, newTenantName string
+		shouldUpdateToken := false
+
+		// Processar os argumentos de --slugname e --tenantname sem impactar um ao outro
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--slugname" && i+1 < len(args) {
+				newSlugName = args[i+1]
+				shouldUpdateToken = true
+				i++
+			} else if args[i] == "--tenantname" && i+1 < len(args) {
+				newTenantName = args[i+1]
+				shouldUpdateToken = true
+				i++
+			}
+		}
+
+		// Atualizar o TokenManager se houver mudanças
+		if newSlugName != "" || newTenantName != "" {
+			tokenManager, ok := cli.manager.GetTokenManager()
+			if ok {
+				currentSlugName, currentTenantName := tokenManager.GetSlugAndTenantName()
+
+				if newSlugName != "" {
+					fmt.Printf("Atualizando slugName de '%s' para '%s'\n", currentSlugName, newSlugName)
+					currentSlugName = newSlugName
+				}
+				if newTenantName != "" {
+					fmt.Printf("Atualizando tenantName de '%s' para '%s'\n", currentTenantName, newTenantName)
+					currentTenantName = newTenantName
+				}
+
+				tokenManager.SetSlugAndTenantName(currentSlugName, currentTenantName)
+
+				if shouldUpdateToken {
+					fmt.Println("Atualizando token com os novos valores...")
+					_, err := tokenManager.RefreshToken(context.Background())
+					if err != nil {
+						fmt.Println("Erro ao atualizar o token:", err)
+					} else {
+						fmt.Println("Token atualizado com sucesso!")
+					}
+				}
+			}
+			return false
+		}
+
+		// Se não houver argumentos, processar a troca de provedor
 		fmt.Println("Provedores disponíveis:")
 		fmt.Println("1. OPENAI")
 		fmt.Println("2. STACKSPOT")
@@ -181,8 +229,7 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 		}
 		choiceInput = strings.TrimSpace(choiceInput)
 
-		var newProvider string
-		var newModel string
+		var newProvider, newModel string
 		switch choiceInput {
 		case "1":
 			newProvider = "OPENAI"
@@ -209,8 +256,9 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 		cli.model = newModel
 		cli.history = nil // Reiniciar o histórico da conversa
 		fmt.Printf("Trocado para %s (%s)\n\n", cli.client.GetModelName(), cli.provider)
+
 		return false
-	case "/help":
+	case userInput == "/help":
 		fmt.Println("Comandos disponíveis:")
 		fmt.Println("@history - Adiciona o histórico do shell ao contexto")
 		fmt.Println("@git - Adiciona informações do Git ao contexto")
@@ -219,6 +267,7 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 		fmt.Println("@command <seu_comando> - para executar um comando diretamente no sistema")
 		fmt.Println("/exit ou /quit - Sai do ChatCLI")
 		fmt.Println("/switch - Troca o provedor de LLM")
+		fmt.Println("/switch --slugname <slug> --tenantname <tenant> - Define slug e tenant sem trocar o provedor")
 		return false
 	default:
 		fmt.Println("Comando desconhecido. Use /help para ver os comandos disponíveis.")
