@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,15 @@ func NewTokenManager(clientID, clientSecret, slugName, tenantName string, logger
 		logger:       logger,
 		client:       httpClient,
 	}
+}
+
+func GetEnv(key, defaultValue string, logger *zap.Logger) string {
+	value := os.Getenv(key)
+	if value == "" {
+		logger.Info(fmt.Sprintf("%s não definido, assumindo default: %s", key, defaultValue))
+		return defaultValue
+	}
+	return value
 }
 
 func (tm *TokenManager) GetSlugAndTenantName() (string, string) {

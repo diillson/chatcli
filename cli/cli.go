@@ -322,46 +322,59 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 
 	// Processar @file
 	if strings.Contains(userInput, "@file") {
-		// Extrair o caminho do arquivo
-		filePath, err := extractFilePath(userInput)
+		// Extrair todos os caminhos de arquivos
+		filePaths, err := extractAllFilePaths(userInput)
 		if err != nil {
-			fmt.Println("\nErro ao processar o comando @file:", err)
+			fmt.Println("\nErro ao processar os comandos @file:", err)
 		} else {
-			// Ler o conteúdo do arquivo
-			fileContent, err := utils.ReadFileContent(filePath)
-			if err != nil {
-				fmt.Println("\nErro ao ler o arquivo:", err)
-			} else {
-				// Detectar o tipo de arquivo com base na extensão
-				fileType := detectFileType(filePath)
-				// Adicionar o conteúdo ao contexto adicional com formatação de código se aplicável
-				if isCodeFile(fileType) {
-					additionalContext += fmt.Sprintf("\nConteúdo do Arquivo (%s - %s):\n```%s\n%s\n```\n", filePath, fileType, fileType, fileContent)
+			for _, filePath := range filePaths {
+				// Ler o conteúdo do arquivo
+				fileContent, err := utils.ReadFileContent(filePath)
+				if err != nil {
+					fmt.Printf("\nErro ao ler o arquivo '%s': %v\n", filePath, err)
 				} else {
-					additionalContext += fmt.Sprintf("\nConteúdo do Arquivo (%s - %s):\n%s\n", filePath, fileType, fileContent)
+					// Detectar o tipo de arquivo com base na extensão
+					fileType := detectFileType(filePath)
+					// Adicionar o conteúdo ao contexto adicional com formatação de código se aplicável
+					if isCodeFile(fileType) {
+						additionalContext += fmt.Sprintf("\nConteúdo do Arquivo (%s - %s):\n```%s\n%s\n```\n", filePath, fileType, fileType, fileContent)
+					} else {
+						additionalContext += fmt.Sprintf("\nConteúdo do Arquivo (%s - %s):\n%s\n", filePath, fileType, fileContent)
+					}
 				}
 			}
 		}
-		userInput = removeFileCommand(userInput)
+		// Remover todos os comandos @file da entrada do usuário
+		userInput = removeAllFileCommands(userInput)
 	}
 
 	return userInput, additionalContext
 }
 
-// Função auxiliar para extrair o caminho do arquivo do comando @file
-func extractFilePath(input string) (string, error) {
-	// Dividir a string em campos considerando aspas
-	fields, err := parseFields(input)
+// Função auxiliar para extrair todos os caminhos de arquivos dos comandos @file na entrada do usuário
+func extractAllFilePaths(input string) ([]string, error) {
+	var filePaths []string
+	tokens, err := parseFields(input)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	for i, field := range fields {
-		if field == "@file" && i+1 < len(fields) {
-			return fields[i+1], nil
+	skipNext := false
+	for i, token := range tokens {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if token == "@file" {
+			if i+1 < len(tokens) {
+				filePaths = append(filePaths, tokens[i+1])
+				skipNext = true
+			} else {
+				return nil, fmt.Errorf("comando @file sem caminho de arquivo")
+			}
 		}
 	}
-	return "", fmt.Errorf("comando @file mal formatado. Uso correto: @file <caminho_do_arquivo>")
+	return filePaths, nil
 }
 
 // Função auxiliar para dividir a string em campos considerando aspas
@@ -397,20 +410,20 @@ func parseFields(input string) ([]string, error) {
 }
 
 // Função auxiliar para remover o comando @file da entrada do usuário
-func removeFileCommand(input string) string {
-	fields := strings.Fields(input)
+func removeAllFileCommands(input string) string {
+	tokens, _ := parseFields(input) // Ignoramos o erro aqui porque já foi tratado
 	var filtered []string
 	skipNext := false
-	for _, field := range fields {
+	for i := 0; i < len(tokens); i++ {
 		if skipNext {
 			skipNext = false
 			continue
 		}
-		if field == "@file" {
+		if tokens[i] == "@file" {
 			skipNext = true
 			continue
 		}
-		filtered = append(filtered, field)
+		filtered = append(filtered, tokens[i])
 	}
 	return strings.Join(filtered, " ")
 }
