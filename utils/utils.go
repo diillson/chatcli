@@ -73,6 +73,25 @@ func GetUserShell() string {
 	return filepath.Base(shell)
 }
 
+func GetShellConfigFilePath(shellName string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Println("Erro ao obter o diretório home do usuário:", err)
+		return ""
+	}
+
+	switch shellName {
+	case "zsh":
+		return filepath.Join(homeDir, ".zshrc")
+	case "bash":
+		return filepath.Join(homeDir, ".bashrc")
+	case "fish":
+		return filepath.Join(homeDir, ".config", "fish", "config.fish")
+	default:
+		return ""
+	}
+}
+
 func getShellName(shellPath string) string {
 	parts := strings.Split(shellPath, "/")
 	return parts[len(parts)-1]
