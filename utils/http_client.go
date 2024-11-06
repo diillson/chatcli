@@ -11,8 +11,9 @@ import (
 func NewHTTPClient(logger *zap.Logger, timeout time.Duration) *http.Client {
 	return &http.Client{
 		Transport: &LoggingTransport{
-			Logger:    logger,
-			Transport: http.DefaultTransport,
+			Logger:      logger,
+			Transport:   http.DefaultTransport,
+			MaxBodySize: 2048, // Defina o tamanho máximo do corpo (1KB, por exemplo)
 		},
 		Timeout: timeout,
 	}

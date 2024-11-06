@@ -7,9 +7,8 @@ import (
 	"fmt"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
-	"io/ioutil"
+	"io"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +28,7 @@ type TokenManager struct {
 }
 
 // NewTokenManager cria uma nova instância de TokenManager
+// Recebe o clientID, clientSecret, slugName, tenantName e o logger.
 func NewTokenManager(clientID, clientSecret, slugName, tenantName string, logger *zap.Logger) *TokenManager {
 	httpClient := utils.NewHTTPClient(logger, 30*time.Second)
 	return &TokenManager{
@@ -41,22 +41,14 @@ func NewTokenManager(clientID, clientSecret, slugName, tenantName string, logger
 	}
 }
 
-func GetEnv(key, defaultValue string, logger *zap.Logger) string {
-	value := os.Getenv(key)
-	if value == "" {
-		logger.Info(fmt.Sprintf("%s não definido, assumindo default: %s", key, defaultValue))
-		return defaultValue
-	}
-	return value
-}
-
+// GetSlugAndTenantName retorna o slug e o tenantName atuais
 func (tm *TokenManager) GetSlugAndTenantName() (string, string) {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 	return tm.slugName, tm.tenantName
 }
 
-// Atualiza os valores e força uma nova solicitação de token
+// SetSlugAndTenantName atualiza os valores de slug e tenantName e força uma nova solicitação de token
 func (tm *TokenManager) SetSlugAndTenantName(slugName, tenantName string) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -67,6 +59,7 @@ func (tm *TokenManager) SetSlugAndTenantName(slugName, tenantName string) {
 }
 
 // GetAccessToken retorna o token de acesso válido, renovando-o se necessário
+// O contexto (ctx) pode ser usado para controlar o tempo de execução e cancelamento.
 func (tm *TokenManager) GetAccessToken(ctx context.Context) (string, error) {
 	tm.mu.RLock()
 	token := tm.accessToken
@@ -82,12 +75,45 @@ func (tm *TokenManager) GetAccessToken(ctx context.Context) (string, error) {
 	return tm.refreshToken(ctx)
 }
 
+// RefreshToken força a renovação do token de acesso
 func (tm *TokenManager) RefreshToken(ctx context.Context) (string, error) {
 	return tm.refreshToken(ctx)
 }
 
-// refreshToken renova o token de acesso
+// refreshToken renova o token de acesso com retry e backoff exponencial
 func (tm *TokenManager) refreshToken(ctx context.Context) (string, error) {
+	maxAttempts := 3
+	backoff := time.Second
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		token, err := tm.requestToken(ctx)
+		if err != nil {
+			if utils.IsTemporaryError(err) {
+				tm.logger.Warn("Erro temporário ao renovar o token",
+					zap.Int("attempt", attempt),
+					zap.Error(err),
+					zap.Duration("backoff", backoff),
+				)
+				if attempt < maxAttempts {
+					tm.logger.Warn("Aplicando backoff antes de nova tentativa",
+						zap.Int("attempt", attempt),
+						zap.Duration("backoff", backoff),
+					)
+					time.Sleep(backoff)
+					backoff *= 2 // Backoff exponencial
+					continue
+				}
+			}
+			return "", fmt.Errorf("erro ao renovar o token: %w", err)
+		}
+		return token, nil
+	}
+
+	return "", fmt.Errorf("falha ao renovar o token após %d tentativas", maxAttempts)
+}
+
+// requestToken faz a requisição para obter um novo token de acesso
+func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -114,7 +140,7 @@ func (tm *TokenManager) refreshToken(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("falha ao obter o token: status %d, resposta: %s", resp.StatusCode, string(bodyBytes))
 		tm.logger.Error("Falha na requisição de token", zap.String("response", errMsg))
 		return "", fmt.Errorf(errMsg)

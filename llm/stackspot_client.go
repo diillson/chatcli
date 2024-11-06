@@ -9,7 +9,7 @@ import (
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -20,9 +20,13 @@ type StackSpotClient struct {
 	slug         string
 	logger       *zap.Logger
 	client       *http.Client
+	maxAttempts  int
+	backoff      time.Duration
 }
 
-func NewStackSpotClient(tokenManager *TokenManager, slug string, logger *zap.Logger) *StackSpotClient {
+// NewStackSpotClient cria uma nova instância de StackSpotClient.
+// Recebe o tokenManager, o slug, o logger, o número máximo de tentativas e o tempo de backoff.
+func NewStackSpotClient(tokenManager *TokenManager, slug string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *StackSpotClient {
 	// Utilizar a função auxiliar para criar o cliente HTTP
 	httpClient := utils.NewHTTPClient(logger, 30*time.Second)
 
@@ -31,9 +35,12 @@ func NewStackSpotClient(tokenManager *TokenManager, slug string, logger *zap.Log
 		slug:         slug,
 		logger:       logger,
 		client:       httpClient,
+		maxAttempts:  maxAttempts,
+		backoff:      backoff,
 	}
 }
 
+// GetModelName retorna o nome do modelo de linguagem utilizado pelo cliente.
 func (c *StackSpotClient) GetModelName() string {
 	return "StackSpotAI"
 }
@@ -51,6 +58,9 @@ func formatConversationHistory(history []models.Message) string {
 	return conversationBuilder.String()
 }
 
+// SendPrompt envia um prompt para o modelo de linguagem e retorna a resposta.
+// O contexto (ctx) pode ser usado para controlar o tempo de execução e cancelamento.
+// O histórico (history) contém as mensagens anteriores da conversa.
 func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
 	token, err := c.tokenManager.GetAccessToken(ctx)
 	if err != nil {
@@ -72,8 +82,7 @@ func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history
 	}
 
 	var llmResponse string
-	maxAttempts := 50
-	for i := 0; i < maxAttempts; i++ {
+	for i := 0; i < c.maxAttempts; i++ {
 		select {
 		case <-ctx.Done():
 			c.logger.Warn("Contexto cancelado ou expirado", zap.Error(ctx.Err()))
@@ -107,10 +116,9 @@ func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history
 // Implementação das funções auxiliares com retry
 
 func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt, accessToken string) (string, error) {
-	maxAttempts := 5
-	backoff := time.Second
+	backoff := c.backoff
 
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
+	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
 		responseID, err := c.sendRequestToLLM(ctx, prompt, accessToken)
 		if err != nil {
 			if utils.IsTemporaryError(err) {
@@ -119,7 +127,11 @@ func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt,
 					zap.Error(err),
 					zap.Duration("backoff", backoff),
 				)
-				if attempt < maxAttempts {
+				if attempt < c.maxAttempts {
+					c.logger.Warn("Aplicando backoff antes de nova tentativa",
+						zap.Int("attempt", attempt),
+						zap.Duration("backoff", backoff),
+					)
 					time.Sleep(backoff)
 					backoff *= 2 // Backoff exponencial
 					continue
@@ -130,14 +142,13 @@ func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt,
 		return responseID, nil
 	}
 
-	return "", fmt.Errorf("falha ao enviar requisição para StackSpotAI após %d tentativas", maxAttempts)
+	return "", fmt.Errorf("falha ao enviar requisição para StackSpotAI após %d tentativas", c.maxAttempts)
 }
 
 func (c *StackSpotClient) getLLMResponseWithRetry(ctx context.Context, responseID, accessToken string) (string, error) {
-	maxAttempts := 3
-	backoff := time.Second
+	backoff := c.backoff
 
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
+	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
 		llmResponse, err := c.getLLMResponse(ctx, responseID, accessToken)
 		if err != nil {
 			if utils.IsTemporaryError(err) {
@@ -146,7 +157,11 @@ func (c *StackSpotClient) getLLMResponseWithRetry(ctx context.Context, responseI
 					zap.Error(err),
 					zap.Duration("backoff", backoff),
 				)
-				if attempt < maxAttempts {
+				if attempt < c.maxAttempts {
+					c.logger.Warn("Aplicando backoff antes de nova tentativa",
+						zap.Int("attempt", attempt),
+						zap.Duration("backoff", backoff),
+					)
 					time.Sleep(backoff)
 					backoff *= 2 // Backoff exponencial
 					continue
@@ -157,7 +172,7 @@ func (c *StackSpotClient) getLLMResponseWithRetry(ctx context.Context, responseI
 		return llmResponse, nil
 	}
 
-	return "", fmt.Errorf("falha ao obter resposta da StackSpotAI após %d tentativas", maxAttempts)
+	return "", fmt.Errorf("falha ao obter resposta da StackSpotAI após %d tentativas", c.maxAttempts)
 }
 
 func (c *StackSpotClient) sendRequestToLLM(ctx context.Context, prompt, accessToken string) (string, error) {
@@ -190,7 +205,7 @@ func (c *StackSpotClient) sendRequestToLLM(ctx context.Context, prompt, accessTo
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.logger.Error("Erro ao ler a resposta POST", zap.Error(err))
 		return "", fmt.Errorf("erro ao ler a resposta: %w", err)
@@ -233,7 +248,7 @@ func (c *StackSpotClient) getLLMResponse(ctx context.Context, responseID, access
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.logger.Error("Erro ao ler o corpo da resposta da LLM", zap.Error(err))
 		return "", fmt.Errorf("erro ao ler o corpo da resposta da LLM: %w", err)
