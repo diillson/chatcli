@@ -35,6 +35,7 @@ type ChatCLI struct {
 func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	provider := os.Getenv("LLM_PROVIDER")
 	if provider == "" {
+		logger.Warn("LLM_PROVIDER não definido, usando STACKSPOT como padrão")
 		provider = "STACKSPOT" // Provedor padrão
 	}
 
@@ -54,7 +55,7 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	}
 
 	line := liner.NewLiner()
-	line.SetCtrlCAborts(true) // Permite que Ctrl+C aborta o input
+	line.SetCtrlCAborts(true) // Permite que Ctrl+C aborte o input
 
 	cli := &ChatCLI{
 		client:         client,
@@ -83,7 +84,7 @@ func (cli *ChatCLI) Start() {
 	fmt.Println("Digite '/exit', 'exit', '/quit' ou 'quit' para sair, '/switch' para trocar de provedor.")
 	fmt.Println("Digite '/switch --slugname <slug> Troca de slug' ou '/switch --tenantname <tenant-id> - Troca de tenant'")
 	fmt.Println("Use '@history', '@git', '@env', '@command <seu_comando>' ou '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
-	fmt.Println("Ainda ficou com dúvidas ? use '/help'.\n")
+	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n")
 
 	for {
 		input, err := cli.line.Prompt("Você: ")
@@ -157,7 +158,7 @@ func (cli *ChatCLI) Start() {
 		// Renderizar a resposta da IA
 		renderedResponse := cli.renderMarkdown(aiResponse)
 		// Exibir a resposta da IA com efeito de digitação
-		cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse))
+		cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
 	}
 }
 
@@ -276,9 +277,17 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 }
 
 func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
-	var additionalContext string
+	userInput, historyContext := cli.processHistoryCommand(userInput)
+	userInput, gitContext := cli.processGitCommand(userInput)
+	userInput, envContext := cli.processEnvCommand(userInput)
+	userInput, fileContext := cli.processFileCommand(userInput)
 
-	// Processar @history
+	additionalContext := historyContext + gitContext + envContext + fileContext
+	return userInput, additionalContext
+}
+
+func (cli *ChatCLI) processHistoryCommand(userInput string) (string, string) {
+	var additionalContext string
 	if strings.Contains(userInput, "@history") {
 		historyData, err := utils.GetShellHistory()
 		if err != nil {
@@ -301,8 +310,11 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 		}
 		userInput = strings.ReplaceAll(userInput, "@history", "")
 	}
+	return userInput, additionalContext
+}
 
-	// Processar @git
+func (cli *ChatCLI) processGitCommand(userInput string) (string, string) {
+	var additionalContext string
 	if strings.Contains(userInput, "@git") {
 		gitData, err := utils.GetGitInfo()
 		if err != nil {
@@ -312,15 +324,21 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 		}
 		userInput = strings.ReplaceAll(userInput, "@git", "")
 	}
+	return userInput, additionalContext
+}
 
-	// Processar @env
+func (cli *ChatCLI) processEnvCommand(userInput string) (string, string) {
+	var additionalContext string
 	if strings.Contains(userInput, "@env") {
 		envData := utils.GetEnvVariables()
 		additionalContext += "\nVariáveis de Ambiente:\n" + envData
 		userInput = strings.ReplaceAll(userInput, "@env", "")
 	}
+	return userInput, additionalContext
+}
 
-	// Processar @file
+func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
+	var additionalContext string
 	if strings.Contains(userInput, "@file") {
 		// Extrair todos os caminhos de arquivos
 		filePaths, err := extractAllFilePaths(userInput)
@@ -329,7 +347,7 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 		} else {
 			for _, filePath := range filePaths {
 				// Ler o conteúdo do arquivo
-				fileContent, err := utils.ReadFileContent(filePath)
+				fileContent, err := utils.ReadFileContent(filePath, 2)
 				if err != nil {
 					fmt.Printf("\nErro ao ler o arquivo '%s': %v\n", filePath, err)
 				} else {
@@ -347,11 +365,9 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 		// Remover todos os comandos @file da entrada do usuário
 		userInput = removeAllFileCommands(userInput)
 	}
-
 	return userInput, additionalContext
 }
 
-// Função auxiliar para extrair todos os caminhos de arquivos dos comandos @file na entrada do usuário
 func extractAllFilePaths(input string) ([]string, error) {
 	var filePaths []string
 	tokens, err := parseFields(input)
@@ -377,7 +393,6 @@ func extractAllFilePaths(input string) ([]string, error) {
 	return filePaths, nil
 }
 
-// Função auxiliar para dividir a string em campos considerando aspas
 func parseFields(input string) ([]string, error) {
 	var fields []string
 	var current strings.Builder
@@ -409,7 +424,6 @@ func parseFields(input string) ([]string, error) {
 	return fields, nil
 }
 
-// Função auxiliar para remover o comando @file da entrada do usuário
 func removeAllFileCommands(input string) string {
 	tokens, _ := parseFields(input) // Ignoramos o erro aqui porque já foi tratado
 	var filtered []string
@@ -428,25 +442,21 @@ func removeAllFileCommands(input string) string {
 	return strings.Join(filtered, " ")
 }
 
-// Função auxiliar para detectar o tipo de arquivo com base na extensão
 func detectFileType(filePath string) string {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	switch ext {
-	case ".yaml", ".yml":
-		return "YAML"
-	case ".json":
-		return "JSON"
-	case ".tf":
-		return "Terraform"
-	case ".go":
-		return "Go"
-	case ".java":
-		return "Java"
-	case ".py":
-		return "Python"
-	default:
-		return "Texto"
+	fileTypes := map[string]string{
+		".yaml": "YAML",
+		".yml":  "YAML",
+		".json": "JSON",
+		".tf":   "Terraform",
+		".go":   "Go",
+		".java": "Java",
+		".py":   "Python",
 	}
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if fileType, exists := fileTypes[ext]; exists {
+		return fileType
+	}
+	return "Texto"
 }
 
 func (cli *ChatCLI) executeDirectCommand(command string) {
@@ -465,6 +475,7 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 	userShell := utils.GetUserShell()
 	shellPath, err := exec.LookPath(userShell)
 	if err != nil {
+		cli.logger.Error("Erro ao localizar o shell", zap.Error(err))
 		fmt.Println("Erro ao localizar o shell:", err)
 		return
 	}
@@ -532,7 +543,6 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 	cli.line.AppendHistory(fmt.Sprintf("@command %s", command))
 }
 
-// Função auxiliar para verificar se o tipo de arquivo é código
 func isCodeFile(fileType string) bool {
 	switch fileType {
 	case "Go", "Java", "Python":
@@ -542,7 +552,6 @@ func isCodeFile(fileType string) bool {
 	}
 }
 
-// Função auxiliar para remover linhas vazias
 func filterEmptyLines(lines []string) []string {
 	var filtered []string
 	for _, line := range lines {
@@ -579,7 +588,7 @@ func (cli *ChatCLI) showThinkingAnimation() {
 }
 
 func (cli *ChatCLI) stopThinkingAnimation() {
-	thinkingDone <- true
+	close(thinkingDone)
 	thinkingWG.Wait()
 	fmt.Printf("\n") // Garante que a próxima saída comece em uma nova linha
 }
@@ -597,7 +606,7 @@ func (cli *ChatCLI) renderMarkdown(input string) string {
 	return out
 }
 
-func (cli *ChatCLI) typewriterEffect(text string) {
+func (cli *ChatCLI) typewriterEffect(text string, delay time.Duration) {
 	reader := strings.NewReader(text)
 	inEscapeSequence := false
 
@@ -622,7 +631,7 @@ func (cli *ChatCLI) typewriterEffect(text string) {
 			continue // Não aplica delay dentro da sequência de escape
 		}
 
-		time.Sleep(2 * time.Millisecond) // Ajuste o delay conforme desejado
+		time.Sleep(delay) // Ajuste o delay conforme desejado
 	}
 }
 
