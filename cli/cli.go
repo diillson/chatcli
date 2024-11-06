@@ -35,14 +35,14 @@ type ChatCLI struct {
 func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	provider := os.Getenv("LLM_PROVIDER")
 	if provider == "" {
-		provider = "OPENAI" // Provedor padrão
+		provider = "STACKSPOT" // Provedor padrão
 	}
 
 	var model string
 	if provider == "OPENAI" {
 		model = os.Getenv("OPENAI_MODEL")
 		if model == "" {
-			model = "gpt-3.5-turbo"
+			model = "gpt-4o-mini"
 		}
 	} else {
 		model = "" // Para StackSpot, o modelo pode não ser necessário
@@ -80,8 +80,8 @@ func (cli *ChatCLI) Start() {
 
 	fmt.Println("Bem-vindo ao ChatCLI!")
 	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
-	fmt.Println("Digite '/exit' ou 'exit' para sair, '/switch' para trocar de provedor.")
-	fmt.Println("Digite '/switch --slugname <slug>' ou '/switch --tenantname <helm> - Troca do helm'")
+	fmt.Println("Digite '/exit', 'exit', '/quit' ou 'quit' para sair, '/switch' para trocar de provedor.")
+	fmt.Println("Digite '/switch --slugname <slug> Troca de slug' ou '/switch --tenantname <tenant-id> - Troca de tenant'")
 	fmt.Println("Use '@history', '@git', '@env', '@command <seu_comando>' ou '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Ainda ficou com dúvidas ? use '/help'.\n")
 
