@@ -286,7 +286,7 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 		} else {
 			lines := strings.Split(historyData, "\n")
 			lines = filterEmptyLines(lines) // Remove linhas vazias
-			n := 10                         // Número de comandos recentes a incluir
+			n := 30                         // Número de comandos recentes a incluir
 			if len(lines) > n {
 				lines = lines[len(lines)-n:]
 			}
