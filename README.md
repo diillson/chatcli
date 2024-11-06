@@ -89,7 +89,7 @@ O ChatCLI depende de variáveis de ambiente para configurar seu comportamento e 
     - `CLIENT_ID` - ID do cliente StackSpot.
     - `CLIENT_SECRET` - Segredo do cliente StackSpot.
     - `SLUG_NAME` - Nome do slug StackSpot. Padrão é `testeai` se não definido.
-    - `TENANT_NAME` - Nome do helm (tenant name) StackSpot. Padrão é `zup` se não definido.
+    - `TENANT_NAME` - Nome do tenat StackSpot. Padrão é `zup` se não definido.
 
 ### Exemplo de Arquivo `.env`
 
@@ -107,7 +107,7 @@ OPENAI_MODEL=gpt-3.5-turbo
 CLIENT_ID=seu-cliente-id
 CLIENT_SECRET=seu-cliente-secreto
 SLUG_NAME=seu-slug-stackspot
-HELM_NAME=seu-helm-name
+TENANT_NAME=seu-tenant-name
 ```
 
 ## 🎯 Uso
