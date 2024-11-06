@@ -451,24 +451,85 @@ func detectFileType(filePath string) string {
 
 func (cli *ChatCLI) executeDirectCommand(command string) {
 	fmt.Println("Executando comando:", command)
-	cmd := exec.Command("bash", "-c", command) // Altere para o shell apropriado, se necessário
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		fmt.Println("Erro ao executar comando:", err)
-		output = []byte(fmt.Sprintf("Erro: %v", err))
+
+	// Verificar se o comando é interativo
+	isInteractive := false
+	if strings.HasPrefix(command, "-i ") || strings.HasPrefix(command, "--interactive ") {
+		isInteractive = true
+		// Remover a flag do comando
+		command = strings.TrimPrefix(command, "-i ")
+		command = strings.TrimPrefix(command, "--interactive ")
 	}
 
-	// Exibir a saída
-	fmt.Println("Saída do comando:", string(output))
+	// Obter o shell do usuário
+	userShell := utils.GetUserShell()
+	shellPath, err := exec.LookPath(userShell)
+	if err != nil {
+		fmt.Println("Erro ao localizar o shell:", err)
+		return
+	}
+
+	// Obter o caminho do arquivo de configuração do shell
+	shellConfigPath := utils.GetShellConfigFilePath(userShell)
+	if shellConfigPath == "" {
+		fmt.Println("Não foi possível determinar o arquivo de configuração para o shell:", userShell)
+		return
+	}
+
+	// Construir o comando para carregar o arquivo de configuração e executar o comando do usuário
+	shellCommand := fmt.Sprintf("source %s && %s", shellConfigPath, command)
+
+	cmd := exec.Command(shellPath, "-c", shellCommand)
+
+	if isInteractive {
+		// Conectar os streams de entrada, saída e erro do comando ao terminal
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		// Fechar o liner para liberar o terminal antes de executar o comando interativo
+		cli.line.Close()
+
+		// Executar o comando
+		err = cmd.Run()
+
+		// Reabrir o liner após a execução do comando
+		cli.line = liner.NewLiner()
+		cli.line.SetCtrlCAborts(true)
+		cli.loadHistory()
+
+		if err != nil {
+			fmt.Println("Erro ao executar comando:", err)
+		}
+
+		// Informar que a saída não foi capturada
+		fmt.Println("A saída do comando não pôde ser capturada para o histórico.")
+
+		// Armazenar apenas o comando no histórico
+		cli.history = append(cli.history, models.Message{
+			Role:    "system",
+			Content: fmt.Sprintf("Comando executado: %s", command),
+		})
+	} else {
+		// Capturar a saída do comando
+		output, err := cmd.CombinedOutput()
+
+		// Exibir a saída
+		fmt.Println("Saída do comando:", string(output))
+
+		if err != nil {
+			fmt.Println("Erro ao executar comando:", err)
+		}
+
+		// Armazenar a saída no histórico
+		cli.history = append(cli.history, models.Message{
+			Role:    "system",
+			Content: fmt.Sprintf("Comando: %s\nSaída:\n%s", command, string(output)),
+		})
+	}
 
 	// Adicionar o comando ao histórico do liner para persistir em .chatcli_history
 	cli.line.AppendHistory(fmt.Sprintf("@command %s", command))
-
-	// Armazenar a saída no histórico como uma mensagem de "sistema"
-	cli.history = append(cli.history, models.Message{
-		Role:    "system",
-		Content: fmt.Sprintf("Comando: %s\nSaída:\n%s", command, string(output)),
-	})
 }
 
 // Função auxiliar para verificar se o tipo de arquivo é código
