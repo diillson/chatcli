@@ -1,25 +1,26 @@
-// utils/logging_transport.go
 package utils
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
+)
+
+const (
+	defaultMaxBodySize = 3070 // 3KB
 )
 
 // InitializeLogger configura e inicializa um logger com base nas variáveis de ambiente.
-// O nível de log é definido pela variável LOG_LEVEL, e o formato de saída é definido pela variável ENV.
-// O nome do arquivo de log pode ser configurado pela variável LOG_FILE.
-// Retorna um logger configurado e um erro, se houver.
 func InitializeLogger() (*zap.Logger, error) {
 	// Definir o nível de log via variável de ambiente, default para Info
 	logLevelEnv := strings.ToLower(os.Getenv("LOG_LEVEL"))
@@ -95,7 +96,7 @@ func InitializeLogger() (*zap.Logger, error) {
 type LoggingTransport struct {
 	Logger      *zap.Logger
 	Transport   http.RoundTripper
-	MaxBodySize int // Novo campo para o tamanho máximo do corpo
+	MaxBodySize int
 }
 
 // RoundTrip implementa a interface http.RoundTripper

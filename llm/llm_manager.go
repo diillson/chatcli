@@ -6,6 +6,10 @@ import (
 	"os"
 )
 
+const (
+	defaultOpenAIModel = "gpt-4o-mini"
+)
+
 // ConfigError representa um erro de configuração, como variáveis de ambiente ausentes
 type ConfigError struct {
 	Mensagem string
@@ -24,8 +28,6 @@ type LLMManager struct {
 }
 
 // NewLLMManager cria uma nova instância de LLMManager.
-// Recebe um logger, o nome do slug e o nome do tenant.
-// Retorna uma instância de LLMManager ou um erro, caso ocorra.
 func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (*LLMManager, error) {
 	manager := &LLMManager{
 		clients: make(map[string]func(string) (LLMClient, error)),
@@ -45,7 +47,7 @@ func (m *LLMManager) configurarOpenAIClient() {
 	if apiKey != "" {
 		m.clients["OPENAI"] = func(model string) (LLMClient, error) {
 			if model == "" {
-				model = "gpt-3.5-turbo" // Modelo padrão
+				model = defaultOpenAIModel
 			}
 			return NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
 		}
@@ -73,14 +75,16 @@ func (m *LLMManager) configurarStackSpotClient(slugName, tenantName string) {
 	}
 }
 
-// GetTokenManager retorna o TokenManager associado ao LLMManager.
-// Retorna o TokenManager e um booleano indicando se o TokenManager está configurado.
-func (m *LLMManager) GetTokenManager() (*TokenManager, bool) {
-	return m.tokenManager, m.tokenManager != nil
+// GetAvailableProviders retorna uma lista de provedores disponíveis configurados
+func (m *LLMManager) GetAvailableProviders() []string {
+	var providers []string
+	for provider := range m.clients {
+		providers = append(providers, provider)
+	}
+	return providers
 }
 
 // GetClient retorna um cliente LLM com base no provedor e no modelo especificados.
-// Retorna um erro se o provedor não for suportado ou se houver falha na criação do cliente.
 func (m *LLMManager) GetClient(provider string, model string) (LLMClient, error) {
 	factoryFunc, ok := m.clients[provider]
 	if !ok {
@@ -96,11 +100,6 @@ func (m *LLMManager) GetClient(provider string, model string) (LLMClient, error)
 	return client, nil
 }
 
-// GetAvailableProviders retorna uma lista de provedores disponíveis configurados
-func (m *LLMManager) GetAvailableProviders() []string {
-	var providers []string
-	for provider := range m.clients {
-		providers = append(providers, provider)
-	}
-	return providers
+func (m *LLMManager) GetTokenManager() (*TokenManager, bool) {
+	return m.tokenManager, m.tokenManager != nil
 }

@@ -20,6 +20,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// ChatCLI representa a interface de linha de comando do chat
 type ChatCLI struct {
 	client         llm.LLMClient
 	manager        *llm.LLMManager
@@ -27,26 +28,21 @@ type ChatCLI struct {
 	provider       string
 	model          string
 	history        []models.Message
-	terminalWidth  int
 	line           *liner.State
+	terminalWidth  int
 	commandHistory []string
 }
 
+// NewChatCLI cria uma nova instância de ChatCLI
 func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
-	provider := os.Getenv("LLM_PROVIDER")
-	if provider == "" {
-		logger.Warn("LLM_PROVIDER não definido, usando STACKSPOT como padrão")
-		provider = "STACKSPOT" // Provedor padrão
+	provider := utils.GetEnvOrDefault("LLM_PROVIDER", "STACKSPOT")
+	if provider == "STACKSPOT" {
+		logger.Warn("LLM_PROVIDER não definido ou usando STACKSPOT como padrão")
 	}
 
 	var model string
 	if provider == "OPENAI" {
-		model = os.Getenv("OPENAI_MODEL")
-		if model == "" {
-			model = "gpt-3.5-turbo"
-		}
-	} else {
-		model = "" // Para StackSpot, o modelo pode não ser necessário
+		model = utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-40-mini")
 	}
 
 	client, err := manager.GetClient(provider, model)
@@ -58,6 +54,13 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	line := liner.NewLiner()
 	line.SetCtrlCAborts(true) // Permite que Ctrl+C aborte o input
 
+	//// Obter a largura do terminal
+	//terminalWidth, _, err := utils.GetTerminalSize()
+	//if err != nil {
+	//	logger.Warn("Não foi possível obter o tamanho do terminal, usando largura padrão de 80")
+	//	terminalWidth = 80 // Largura padrão
+	//}
+
 	cli := &ChatCLI{
 		client:         client,
 		manager:        manager,
@@ -67,6 +70,7 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 		history:        []models.Message{},
 		line:           line,
 		commandHistory: []string{},
+		//terminalWidth:  terminalWidth,
 	}
 
 	cli.loadHistory()
@@ -74,11 +78,9 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	return cli, nil
 }
 
-func (cli *ChatCLI) Start() {
-	defer func() {
-		cli.line.Close()
-		cli.saveHistory()
-	}()
+// Start inicia o loop principal do ChatCLI
+func (cli *ChatCLI) Start(ctx context.Context) {
+	defer cli.cleanup()
 
 	fmt.Println("\n\nBem-vindo ao ChatCLI!")
 	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
@@ -91,79 +93,92 @@ func (cli *ChatCLI) Start() {
 	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n\n")
 
 	for {
-		input, err := cli.line.Prompt("Você: ")
-		if err != nil {
-			if err == liner.ErrPromptAborted {
-				fmt.Println("\nEntrada abortada!")
-				return
+		select {
+		case <-ctx.Done():
+			fmt.Println("\nAplicação encerrada.")
+			return
+		default:
+			input, err := cli.line.Prompt("Você: ")
+			if err != nil {
+				if err == liner.ErrPromptAborted {
+					fmt.Println("\nEntrada abortada!")
+					return
+				}
+				fmt.Println("Erro ao ler a entrada:", err)
+				continue
 			}
-			fmt.Println("Erro ao ler a entrada:", err)
-			continue
-		}
 
-		input = strings.TrimSpace(input)
+			input = strings.TrimSpace(input)
 
-		// Verificar se o input é um comando direto do sistema
-		if strings.Contains(input, "@command") {
-			command := strings.TrimPrefix(input, "@command ")
-			cli.executeDirectCommand(command)
-			continue
-		}
-
-		if input == "" {
-			continue
-		}
-
-		cli.commandHistory = append(cli.commandHistory, input)
-		cli.line.AppendHistory(input)
-
-		// Verificar por comandos
-		if strings.HasPrefix(input, "/") || input == "exit" || input == "quit" {
-			if cli.handleCommand(input) {
-				return
+			// Verificar se o input é um comando direto do sistema
+			if strings.Contains(input, "@command") {
+				command := strings.TrimPrefix(input, "@command ")
+				cli.executeDirectCommand(command)
+				continue
 			}
-			continue
+
+			if input == "" {
+				continue
+			}
+
+			cli.commandHistory = append(cli.commandHistory, input)
+			cli.line.AppendHistory(input)
+
+			// Verificar por comandos
+			if strings.HasPrefix(input, "/") || input == "exit" || input == "quit" {
+				if cli.handleCommand(input) {
+					return
+				}
+				continue
+			}
+
+			// Processar comandos especiais
+			userInput, additionalContext := cli.processSpecialCommands(input)
+
+			// Adicionar a mensagem do usuário ao histórico
+			cli.history = append(cli.history, models.Message{
+				Role:    "user",
+				Content: userInput + additionalContext,
+			})
+
+			// Exibir mensagem "Pensando..." com animação
+			cli.showThinkingAnimation()
+
+			// Criar um contexto com timeout
+			responseCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+
+			// Enviar o prompt para o LLM
+			aiResponse, err := cli.client.SendPrompt(responseCtx, userInput+additionalContext, cli.history)
+
+			// Parar a animação
+			cli.stopThinkingAnimation()
+
+			if err != nil {
+				fmt.Println("\nErro do LLM:", err)
+				cli.logger.Error("Erro do LLM", zap.Error(err))
+				continue
+			}
+
+			// Adicionar a resposta da IA ao histórico
+			cli.history = append(cli.history, models.Message{
+				Role:    "assistant",
+				Content: aiResponse,
+			})
+
+			// Renderizar a resposta da IA
+			renderedResponse := cli.renderMarkdown(aiResponse)
+			// Exibir a resposta da IA com efeito de digitação
+			cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
 		}
-
-		// Processar comandos especiais
-		userInput, additionalContext := cli.processSpecialCommands(input)
-
-		// Adicionar a mensagem do usuário ao histórico
-		cli.history = append(cli.history, models.Message{
-			Role:    "user",
-			Content: userInput + additionalContext,
-		})
-
-		// Exibir mensagem "Pensando..." com animação
-		cli.showThinkingAnimation()
-
-		// Criar um contexto com timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-
-		// Enviar o prompt para o LLM
-		aiResponse, err := cli.client.SendPrompt(ctx, userInput+additionalContext, cli.history)
-
-		// Parar a animação
-		cli.stopThinkingAnimation()
-
-		if err != nil {
-			fmt.Println("\nErro do LLM:", err)
-			cli.logger.Error("Erro do LLM", zap.Error(err))
-			continue
-		}
-
-		// Adicionar a resposta da IA ao histórico
-		cli.history = append(cli.history, models.Message{
-			Role:    "assistant",
-			Content: aiResponse,
-		})
-
-		// Renderizar a resposta da IA
-		renderedResponse := cli.renderMarkdown(aiResponse)
-		// Exibir a resposta da IA com efeito de digitação
-		cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
 	}
+}
+
+// cleanup realiza a limpeza de recursos ao encerrar o ChatCLI
+func (cli *ChatCLI) cleanup() {
+	cli.line.Close()
+	cli.saveHistory()
+	cli.logger.Sync()
 }
 
 func (cli *ChatCLI) handleCommand(userInput string) bool {
@@ -363,7 +378,7 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 		} else {
 			for _, filePath := range filePaths {
 				// Ler o conteúdo do arquivo
-				fileContent, err := utils.ReadFileContent(filePath, 2)
+				fileContent, err := utils.ReadFileContent(filePath, 5000000)
 				if err != nil {
 					fmt.Printf("\nErro ao ler o arquivo '%s': %v\n", filePath, err)
 				} else {
