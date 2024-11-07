@@ -36,17 +36,46 @@ func main() {
 	if slugIsDefault || tenantIsDefault {
 		fmt.Println("ATENÇÃO: As seguintes variáveis de ambiente não foram definidas e valores padrão estão sendo usados:")
 		if slugIsDefault {
-			fmt.Printf("- SLUG_NAME não definido, usando valor padrão: %s\n\n", slugName)
+			fmt.Printf("- SLUG_NAME não definido, usando valor padrão: %s\n", slugName)
 		}
 		if tenantIsDefault {
-			fmt.Printf("- TENANT_NAME não definido, usando valor padrão: %s\n\n", tenantName)
+			fmt.Printf("- TENANT_NAME não definido, usando valor padrão: %s\n", tenantName)
 		}
 	}
 
-	// Inicializar o LLMManager com TokenManager configurado
+	// Verificar variáveis de ambiente para os provedores
+
+	// Verificar STACKSPOT
+	clientID := os.Getenv("CLIENT_ID")
+	clientSecret := os.Getenv("CLIENT_SECRET")
+	if clientID == "" || clientSecret == "" {
+		fmt.Println("ATENÇÃO: Variáveis de ambiente necessárias para o provedor STACKSPOT não foram definidas:")
+		if clientID == "" {
+			fmt.Println("- CLIENT_ID (necessário para o provedor STACKSPOT)")
+		}
+		if clientSecret == "" {
+			fmt.Println("- CLIENT_SECRET (necessário para o provedor STACKSPOT)")
+		}
+		fmt.Println("O provedor STACKSPOT não estará disponível.")
+	}
+
+	// Verificar OPENAI
+	openAIKey := os.Getenv("OPENAI_API_KEY")
+	if openAIKey == "" {
+		fmt.Println("ATENÇÃO: OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível.")
+	}
+
+	// Inicializar o LLMManager
 	manager, err := llm.NewLLMManager(logger, slugName, tenantName)
 	if err != nil {
 		logger.Fatal("Erro ao inicializar o LLMManager", zap.Error(err))
+	}
+
+	// Verificar se há provedores disponíveis
+	availableProviders := manager.GetAvailableProviders()
+	if len(availableProviders) == 0 {
+		fmt.Println("Nenhum provedor LLM está configurado. Verifique suas variáveis de ambiente.")
+		os.Exit(1)
 	}
 
 	// Inicializar e iniciar o ChatCLI
