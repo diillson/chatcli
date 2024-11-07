@@ -82,7 +82,7 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 func (cli *ChatCLI) Start(ctx context.Context) {
 	defer cli.cleanup()
 
-	fmt.Println("Bem-vindo ao ChatCLI!")
+	fmt.Println("\n\nBem-vindo ao ChatCLI!")
 	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
 	fmt.Println("Digite '/exit', 'exit', '/quit' ou 'quit' para sair.")
 	fmt.Println("Digite '/switch' para trocar de provedor.")
@@ -90,7 +90,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	fmt.Println("Digite '/switch --tenantname <tenant-id>' para trocar o tenant.")
 	fmt.Println("Use '@history', '@git', '@env', '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando>' para interativo.")
-	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n")
+	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n\n")
 
 	for {
 		select {
