@@ -54,12 +54,12 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	line := liner.NewLiner()
 	line.SetCtrlCAborts(true) // Permite que Ctrl+C aborte o input
 
-	// Obter a largura do terminal
-	terminalWidth, _, err := utils.GetTerminalSize()
-	if err != nil {
-		logger.Warn("Não foi possível obter o tamanho do terminal, usando largura padrão de 80")
-		terminalWidth = 80 // Largura padrão
-	}
+	//// Obter a largura do terminal
+	//terminalWidth, _, err := utils.GetTerminalSize()
+	//if err != nil {
+	//	logger.Warn("Não foi possível obter o tamanho do terminal, usando largura padrão de 80")
+	//	terminalWidth = 80 // Largura padrão
+	//}
 
 	cli := &ChatCLI{
 		client:         client,
@@ -70,7 +70,7 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 		history:        []models.Message{},
 		line:           line,
 		commandHistory: []string{},
-		terminalWidth:  terminalWidth,
+		//terminalWidth:  terminalWidth,
 	}
 
 	cli.loadHistory()
