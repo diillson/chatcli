@@ -43,7 +43,7 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	if provider == "OPENAI" {
 		model = os.Getenv("OPENAI_MODEL")
 		if model == "" {
-			model = "gpt-4o-mini"
+			model = "gpt-3.5-turbo"
 		}
 	} else {
 		model = "" // Para StackSpot, o modelo pode não ser necessário
@@ -51,6 +51,7 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 
 	client, err := manager.GetClient(provider, model)
 	if err != nil {
+		fmt.Println("Erro ao obter o cliente LLM:", err)
 		return nil, err
 	}
 
@@ -79,20 +80,21 @@ func (cli *ChatCLI) Start() {
 		cli.saveHistory()
 	}()
 
-	fmt.Println("Bem-vindo ao ChatCLI!")
+	fmt.Println("\n\nBem-vindo ao ChatCLI!")
 	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
-	fmt.Println("Digite '/exit', 'exit', '/quit' ou 'quit' para sair, '/switch' para trocar de provedor.")
+	fmt.Println("Digite '/exit', 'exit', '/quit' ou 'quit' para sair.")
 	fmt.Println("Digite '/switch' para trocar de provedor.")
-	fmt.Println("Digite '/switch --slugname <slug> Troca de slug''/switch --tenantname <tenant-id> - Troca de tenant'")
+	fmt.Println("Digite '/switch --slugname <slug>' para trocar o slug.")
+	fmt.Println("Digite '/switch --tenantname <tenant-id>' para trocar o tenant.")
 	fmt.Println("Use '@history', '@git', '@env', '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
-	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando> para interativo'")
-	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n")
+	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando>' para interativo.")
+	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n\n")
 
 	for {
 		input, err := cli.line.Prompt("Você: ")
 		if err != nil {
 			if err == liner.ErrPromptAborted {
-				fmt.Println("\nAborted!")
+				fmt.Println("\nEntrada abortada!")
 				return
 			}
 			fmt.Println("Erro ao ler a entrada:", err)
@@ -213,18 +215,23 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 						fmt.Println("Token atualizado com sucesso!")
 					}
 				}
+			} else {
+				fmt.Println("TokenManager não configurado. O provedor STACKSPOT não está disponível.")
 			}
 			return false
 		}
 
 		// Se não houver argumentos, processar a troca de provedor
 		fmt.Println("Provedores disponíveis:")
-		fmt.Println("1. OPENAI")
-		fmt.Println("2. STACKSPOT")
-		choiceInput, err := cli.line.Prompt("Selecione o provedor (1 ou 2): ")
+		availableProviders := cli.manager.GetAvailableProviders()
+		for i, provider := range availableProviders {
+			fmt.Printf("%d. %s\n", i+1, provider)
+		}
+
+		choiceInput, err := cli.line.Prompt("Selecione o provedor pelo número: ")
 		if err != nil {
 			if err == liner.ErrPromptAborted {
-				fmt.Println("\nAborted!")
+				fmt.Println("\nEntrada abortada!")
 				return false
 			}
 			fmt.Println("Erro ao ler a escolha:", err)
@@ -232,20 +239,26 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 		}
 		choiceInput = strings.TrimSpace(choiceInput)
 
-		var newProvider, newModel string
-		switch choiceInput {
-		case "1":
-			newProvider = "OPENAI"
+		choiceIndex := -1
+		for i := range availableProviders {
+			if fmt.Sprintf("%d", i+1) == choiceInput {
+				choiceIndex = i
+				break
+			}
+		}
+
+		if choiceIndex == -1 {
+			fmt.Println("Escolha inválida.")
+			return false
+		}
+
+		newProvider := availableProviders[choiceIndex]
+		var newModel string
+		if newProvider == "OPENAI" {
 			newModel = os.Getenv("OPENAI_MODEL")
 			if newModel == "" {
 				newModel = "gpt-3.5-turbo"
 			}
-		case "2":
-			newProvider = "STACKSPOT"
-			newModel = ""
-		default:
-			fmt.Println("Escolha inválida.")
-			return false
 		}
 
 		newClient, err := cli.manager.GetClient(newProvider, newModel)
