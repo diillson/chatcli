@@ -82,8 +82,10 @@ func (cli *ChatCLI) Start() {
 	fmt.Println("Bem-vindo ao ChatCLI!")
 	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
 	fmt.Println("Digite '/exit', 'exit', '/quit' ou 'quit' para sair, '/switch' para trocar de provedor.")
-	fmt.Println("Digite '/switch --slugname <slug> Troca de slug' ou '/switch --tenantname <tenant-id> - Troca de tenant'")
-	fmt.Println("Use '@history', '@git', '@env', '@command <seu_comando>' ou '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
+	fmt.Println("Digite '/switch' para trocar de provedor.")
+	fmt.Println("Digite '/switch --slugname <slug> Troca de slug''/switch --tenantname <tenant-id> - Troca de tenant'")
+	fmt.Println("Use '@history', '@git', '@env', '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
+	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando> para interativo'")
 	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n")
 
 	for {
@@ -100,7 +102,7 @@ func (cli *ChatCLI) Start() {
 		input = strings.TrimSpace(input)
 
 		// Verificar se o input é um comando direto do sistema
-		if strings.HasPrefix(input, "@command") {
+		if strings.Contains(input, "@command") {
 			command := strings.TrimPrefix(input, "@command ")
 			cli.executeDirectCommand(command)
 			continue
@@ -266,9 +268,10 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 		fmt.Println("@env - Adiciona variáveis de ambiente ao contexto")
 		fmt.Println("@file <caminho_do_arquivo> - Adiciona o conteúdo de um arquivo ao contexto")
 		fmt.Println("@command <seu_comando> - para executar um comando diretamente no sistema")
+		fmt.Println("@command -i <seu_comando> - para executar um comando interativo")
 		fmt.Println("/exit ou /quit - Sai do ChatCLI")
 		fmt.Println("/switch - Troca o provedor de LLM")
-		fmt.Println("/switch --slugname <slug> --tenantname <tenant> - Define slug e tenant sem trocar o provedor")
+		fmt.Println("/switch --slugname <slug> --tenantname <tenant> - Define slug e tenant")
 		return false
 	default:
 		fmt.Println("Comando desconhecido. Use /help para ver os comandos disponíveis.")
@@ -464,7 +467,7 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 
 	// Verificar se o comando é interativo
 	isInteractive := false
-	if strings.HasPrefix(command, "-i ") || strings.HasPrefix(command, "--interactive ") {
+	if strings.Contains(command, "-i ") || strings.Contains(command, "--interactive ") {
 		isInteractive = true
 		// Remover a flag do comando
 		command = strings.TrimPrefix(command, "-i ")
