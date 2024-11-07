@@ -1,20 +1,28 @@
-// llm/stackspot_client.go
 package llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/diillson/chatcli/models"
-	"github.com/diillson/chatcli/utils"
-	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/utils"
+	"go.uber.org/zap"
 )
 
+const (
+	stackSpotBaseURL         = "https://genai-code-buddy-api.stackspot.com/v1/quick-commands"
+	defaultMaxAttempts       = 3
+	defaultBackoff           = time.Second
+	stackSpotDefaultModel    = "StackSpotAI"
+	stackSpotResponseTimeout = 2 * time.Second
+)
+
+// StackSpotClient implementa o cliente para interagir com a API da StackSpot
 type StackSpotClient struct {
 	tokenManager *TokenManager
 	slug         string
@@ -25,10 +33,14 @@ type StackSpotClient struct {
 }
 
 // NewStackSpotClient cria uma nova instância de StackSpotClient.
-// Recebe o tokenManager, o slug, o logger, o número máximo de tentativas e o tempo de backoff.
 func NewStackSpotClient(tokenManager *TokenManager, slug string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *StackSpotClient {
-	// Utilizar a função auxiliar para criar o cliente HTTP
 	httpClient := utils.NewHTTPClient(logger, 30*time.Second)
+	if maxAttempts <= 0 {
+		maxAttempts = defaultMaxAttempts
+	}
+	if backoff <= 0 {
+		backoff = defaultBackoff
+	}
 
 	return &StackSpotClient{
 		tokenManager: tokenManager,
@@ -42,25 +54,10 @@ func NewStackSpotClient(tokenManager *TokenManager, slug string, logger *zap.Log
 
 // GetModelName retorna o nome do modelo de linguagem utilizado pelo cliente.
 func (c *StackSpotClient) GetModelName() string {
-	return "StackSpotAI"
-}
-
-// Função para formatar o histórico da conversa
-func formatConversationHistory(history []models.Message) string {
-	var conversationBuilder strings.Builder
-	for _, msg := range history {
-		role := "Usuário"
-		if msg.Role == "assistant" {
-			role = "Assistente"
-		}
-		conversationBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
-	}
-	return conversationBuilder.String()
+	return stackSpotDefaultModel
 }
 
 // SendPrompt envia um prompt para o modelo de linguagem e retorna a resposta.
-// O contexto (ctx) pode ser usado para controlar o tempo de execução e cancelamento.
-// O histórico (history) contém as mensagens anteriores da conversa.
 func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
 	token, err := c.tokenManager.GetAccessToken(ctx)
 	if err != nil {
@@ -81,42 +78,32 @@ func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history
 		return "", fmt.Errorf("erro ao enviar a requisição: %w", err)
 	}
 
-	var llmResponse string
-	for i := 0; i < c.maxAttempts; i++ {
-		select {
-		case <-ctx.Done():
-			c.logger.Warn("Contexto cancelado ou expirado", zap.Error(ctx.Err()))
-			return "", fmt.Errorf("contexto cancelado ou expirado: %w", ctx.Err())
-		case <-time.After(2 * time.Second):
-			llmResponse, err = c.getLLMResponseWithRetry(ctx, responseID, token)
-			if err == nil {
-				c.logger.Info("Resposta obtida com sucesso", zap.Int("tentativas", i+1))
-				return llmResponse, nil
-			}
-
-			if strings.Contains(err.Error(), "resposta ainda não está pronta") {
-				c.logger.Info("Resposta ainda não está pronta", zap.Int("tentativa", i+1))
-				continue
-			}
-
-			if strings.Contains(err.Error(), "a execução da LLM falhou") {
-				c.logger.Error("Falha na execução da LLM", zap.Error(err))
-				return "", fmt.Errorf("a LLM não pôde processar a solicitação")
-			}
-
-			c.logger.Error("Erro ao obter a resposta da LLM", zap.Error(err))
-			return "", fmt.Errorf("erro ao obter a resposta: %w", err)
-		}
+	// Obter a resposta da LLM
+	llmResponse, err := c.pollLLMResponse(ctx, responseID, token)
+	if err != nil {
+		c.logger.Error("Erro ao obter a resposta da LLM", zap.Error(err))
+		return "", err
 	}
 
-	c.logger.Error("Timeout ao obter a resposta da LLM após todas as tentativas")
-	return "", fmt.Errorf("timeout ao obter a resposta da LLM")
+	return llmResponse, nil
 }
 
-// Implementação das funções auxiliares com retry
+// formatConversationHistory formata o histórico da conversa para ser enviado à LLM
+func formatConversationHistory(history []models.Message) string {
+	var conversationBuilder strings.Builder
+	for _, msg := range history {
+		role := "Usuário"
+		if msg.Role == "assistant" {
+			role = "Assistente"
+		}
+		conversationBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
+	}
+	return conversationBuilder.String()
+}
 
+// sendRequestToLLMWithRetry envia a requisição para a LLM com tentativas de retry
 func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt, accessToken string) (string, error) {
-	backoff := c.backoff
+	var backoff = c.backoff
 
 	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
 		responseID, err := c.sendRequestToLLM(ctx, prompt, accessToken)
@@ -128,10 +115,6 @@ func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt,
 					zap.Duration("backoff", backoff),
 				)
 				if attempt < c.maxAttempts {
-					c.logger.Warn("Aplicando backoff antes de nova tentativa",
-						zap.Int("attempt", attempt),
-						zap.Duration("backoff", backoff),
-					)
 					time.Sleep(backoff)
 					backoff *= 2 // Backoff exponencial
 					continue
@@ -145,41 +128,12 @@ func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt,
 	return "", fmt.Errorf("falha ao enviar requisição para StackSpotAI após %d tentativas", c.maxAttempts)
 }
 
-func (c *StackSpotClient) getLLMResponseWithRetry(ctx context.Context, responseID, accessToken string) (string, error) {
-	backoff := c.backoff
-
-	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
-		llmResponse, err := c.getLLMResponse(ctx, responseID, accessToken)
-		if err != nil {
-			if utils.IsTemporaryError(err) {
-				c.logger.Warn("Erro temporário ao obter resposta da StackSpotAI",
-					zap.Int("attempt", attempt),
-					zap.Error(err),
-					zap.Duration("backoff", backoff),
-				)
-				if attempt < c.maxAttempts {
-					c.logger.Warn("Aplicando backoff antes de nova tentativa",
-						zap.Int("attempt", attempt),
-						zap.Duration("backoff", backoff),
-					)
-					time.Sleep(backoff)
-					backoff *= 2 // Backoff exponencial
-					continue
-				}
-			}
-			return "", fmt.Errorf("erro ao obter resposta da StackSpotAI: %w", err)
-		}
-		return llmResponse, nil
-	}
-
-	return "", fmt.Errorf("falha ao obter resposta da StackSpotAI após %d tentativas", c.maxAttempts)
-}
-
+// sendRequestToLLM envia o prompt para a LLM e retorna o responseID
 func (c *StackSpotClient) sendRequestToLLM(ctx context.Context, prompt, accessToken string) (string, error) {
-	conversationID := generateUUID()
+	conversationID := utils.GenerateUUID()
 
-	url := fmt.Sprintf("https://genai-code-buddy-api.stackspot.com/v1/quick-commands/create-execution/%s?conversation_id=%s", c.tokenManager.slugName, conversationID)
-	c.logger.Info("Fazendo POST para URL", zap.String("url", url))
+	url := fmt.Sprintf("%s/create-execution/%s?conversation_id=%s", stackSpotBaseURL, c.tokenManager.slugName, conversationID)
+	c.logger.Info("Enviando requisição para URL", zap.String("url", url))
 
 	requestBody := map[string]string{
 		"input_data": prompt,
@@ -190,7 +144,7 @@ func (c *StackSpotClient) sendRequestToLLM(ctx context.Context, prompt, accessTo
 		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonValue))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(jsonValue)))
 	if err != nil {
 		c.logger.Error("Erro ao criar a requisição POST", zap.Error(err))
 		return "", fmt.Errorf("erro ao criar a requisição: %w", err)
@@ -229,11 +183,38 @@ func (c *StackSpotClient) sendRequestToLLM(ctx context.Context, prompt, accessTo
 	return responseID, nil
 }
 
+// pollLLMResponse faz polling para obter a resposta da LLM
+func (c *StackSpotClient) pollLLMResponse(ctx context.Context, responseID, accessToken string) (string, error) {
+	ticker := time.NewTicker(stackSpotResponseTimeout)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.logger.Warn("Contexto cancelado ou expirado", zap.Error(ctx.Err()))
+			return "", fmt.Errorf("contexto cancelado ou expirado: %w", ctx.Err())
+		case <-ticker.C:
+			llmResponse, err := c.getLLMResponse(ctx, responseID, accessToken)
+			if err == nil {
+				return llmResponse, nil
+			}
+
+			if strings.Contains(err.Error(), "resposta ainda não está pronta") {
+				c.logger.Info("Resposta ainda não está pronta, tentando novamente...")
+				continue
+			}
+
+			return "", err
+		}
+	}
+}
+
+// getLLMResponse obtém a resposta da LLM usando o responseID
 func (c *StackSpotClient) getLLMResponse(ctx context.Context, responseID, accessToken string) (string, error) {
-	url := fmt.Sprintf("https://genai-code-buddy-api.stackspot.com/v1/quick-commands/callback/%s", responseID)
+	url := fmt.Sprintf("%s/callback/%s", stackSpotBaseURL, responseID)
 	c.logger.Info("Fazendo GET para URL", zap.String("url", url))
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		c.logger.Error("Erro ao criar a requisição GET", zap.Error(err))
 		return "", fmt.Errorf("erro ao criar a requisição GET: %w", err)
@@ -269,14 +250,12 @@ func (c *StackSpotClient) getLLMResponse(ctx context.Context, responseID, access
 	switch callbackResponse.Progress.Status {
 	case "COMPLETED":
 		if len(callbackResponse.Steps) > 0 {
-			lastStepIndex := len(callbackResponse.Steps) - 1
-			lastStep := callbackResponse.Steps[lastStepIndex]
+			lastStep := callbackResponse.Steps[len(callbackResponse.Steps)-1]
 			llmAnswer := lastStep.StepResult.Answer
 			return llmAnswer, nil
-		} else {
-			c.logger.Error("Nenhuma resposta disponível na execução COMPLETED", zap.Any("CallbackResponse", callbackResponse))
-			return "", fmt.Errorf("nenhuma resposta disponível")
 		}
+		c.logger.Error("Nenhuma resposta disponível na execução COMPLETED", zap.Any("CallbackResponse", callbackResponse))
+		return "", fmt.Errorf("nenhuma resposta disponível")
 	case "FAILURE":
 		c.logger.Error("A execução falhou", zap.String("status", callbackResponse.Progress.Status))
 		return "", fmt.Errorf("a execução da LLM falhou")
@@ -324,9 +303,4 @@ type Source struct {
 type StepResult struct {
 	Answer  string   `json:"answer"`
 	Sources []Source `json:"sources"`
-}
-
-// Função para gerar um UUID (para fins de exemplo, substitua por uma implementação real)
-func generateUUID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
