@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	defaultOpenAIModel = "gpt-3.5-turbo"
+	defaultOpenAIModel = "gpt-4o-mini"
 )
 
 // ConfigError representa um erro de configuração, como variáveis de ambiente ausentes
