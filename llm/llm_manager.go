@@ -66,7 +66,7 @@ func (m *LLMManager) configureOpenAIClient() {
 			if model == "" {
 				model = "gpt-4o-mini" // Modelo padrão
 			}
-			return NewOpenAIClient(apiKey, model, m.logger, 5, 30), nil
+			return NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
 		}
 	}
 }
@@ -74,7 +74,7 @@ func (m *LLMManager) configureOpenAIClient() {
 // configureStackSpotClient configura o cliente StackSpot.
 func (m *LLMManager) configureStackSpotClient(slugName string) {
 	m.clients["STACKSPOT"] = func(model string) (LLMClient, error) {
-		return NewStackSpotClient(m.tokenManager, slugName, m.logger, 5, 30), nil
+		return NewStackSpotClient(m.tokenManager, slugName, m.logger, 50, 300), nil
 	}
 }
 
