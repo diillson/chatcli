@@ -5,13 +5,30 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 // GetUserShell retorna o shell do usuário atual com base na variável de ambiente SHELL.
 func GetUserShell() string {
 	shell := os.Getenv("SHELL")
-	return filepath.Base(shell)
+	if shell != "" {
+		return shell
+	}
+
+	// Em sistemas Windows, retorna cmd.exe
+	if runtime.GOOS == "windows" {
+		return "cmd.exe"
+	}
+
+	// Tentar obster o shell a partir do /etc/passwd
+	usr, err := user.Current()
+	if err == nil {
+		return usr.Uid
+	}
+
+	// Se tudo falhar, retorna /bin/sh como padrão
+	return "/bin/sh"
 }
 
 // GetHomeDir retorna o diretório home do usuário atual.
@@ -20,13 +37,14 @@ func GetHomeDir() (string, error) {
 }
 
 // GetShellConfigFilePath retorna o caminho do arquivo de configuração do shell com base no nome do shell.
-func GetShellConfigFilePath(shellName string) string {
+func GetShellConfigFilePath(shell string) string {
 	homeDir, err := GetHomeDir()
 	if err != nil {
 		fmt.Println("Erro ao obter o diretório home do usuário:", err)
 		return ""
 	}
 
+	shellName := filepath.Base(shell)
 	switch shellName {
 	case "zsh":
 		return filepath.Join(homeDir, ".zshrc")
