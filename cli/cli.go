@@ -114,7 +114,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			input = strings.TrimSpace(input)
 
 			// Verificar se o input é um comando direto do sistema
-			if strings.Contains(input, "@command ") {
+			if strings.HasPrefix(input, "@command ") {
 				command := strings.TrimPrefix(input, "@command ")
 				cli.executeDirectCommand(command)
 				continue
@@ -159,6 +159,14 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 			if err != nil {
 				cli.logger.Error("Erro do LLM", zap.Error(err))
+
+				// Verifique se o erro contém o código de status 429 explicitamente
+				if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RATE_LIMIT_EXCEEDED") {
+					fmt.Println("Limite de requisições excedido(100) em 1440 minutos. Por favor, aguarde antes de tentar novamente.")
+				} else {
+					fmt.Println("Ocorreu um erro ao processar a requisição.")
+				}
+
 				continue
 			}
 
