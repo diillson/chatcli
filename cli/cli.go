@@ -114,7 +114,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			input = strings.TrimSpace(input)
 
 			// Verificar se o input é um comando direto do sistema
-			if strings.HasPrefix(input, "@command ") {
+			if strings.Contains(input, "@command ") {
 				command := strings.TrimPrefix(input, "@command ")
 				cli.executeDirectCommand(command)
 				continue
