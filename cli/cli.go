@@ -162,7 +162,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 				// Verifique se o erro contém o código de status 429 explicitamente
 				if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RATE_LIMIT_EXCEEDED") {
-					fmt.Println("Limite de requisições excedido(100) em 1440 minutos. Por favor, aguarde antes de tentar novamente.")
+					fmt.Println("Limite de requisições excedido. Por favor, aguarde antes de tentar novamente.")
 				} else {
 					fmt.Println("Ocorreu um erro ao processar a requisição.")
 				}
