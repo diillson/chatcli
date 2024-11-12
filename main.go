@@ -23,13 +23,15 @@ func main() {
 	// Carregar variáveis de ambiente do arquivo .env
 	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
 		fmt.Println("Nenhum arquivo .env encontrado, continuando sem ele")
+	} else {
+		fmt.Printf("Erro ao carregar o arquivo .env: %v\n", err)
 	}
 
 	// Inicializar o logger
 	logger, err := utils.InitializeLogger()
 	if err != nil {
 		fmt.Printf("Não foi possível inicializar o logger: %v\n", err)
-		os.Exit(1)
+		os.Exit(1) // Encerrar a aplicação em caso de erro crítico
 	}
 	defer logger.Sync()
 
@@ -68,6 +70,7 @@ func main() {
 // handleGracefulShutdown configura o tratamento de sinais para um shutdown gracioso
 func handleGracefulShutdown(cancelFunc context.CancelFunc, logger *zap.Logger) {
 	signals := make(chan os.Signal, 1)
+	// Capturar sinais de interrupção e término
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		sig := <-signals
