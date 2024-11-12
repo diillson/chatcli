@@ -16,10 +16,10 @@ import (
 
 const (
 	stackSpotBaseURL         = "https://genai-code-buddy-api.stackspot.com/v1/quick-commands"
-	defaultMaxAttempts       = 3
-	defaultBackoff           = time.Second
+	defaultMaxAttempts       = 50
+	defaultBackoff           = 300 * time.Second
 	stackSpotDefaultModel    = "StackSpotAI"
-	stackSpotResponseTimeout = 2 * time.Second
+	stackSpotResponseTimeout = 5 * time.Second
 )
 
 // StackSpotClient implementa o cliente para interagir com a API da StackSpot
