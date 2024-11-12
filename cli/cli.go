@@ -20,6 +20,10 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	llmdDefault = "STACKSPOT"
+)
+
 // Logger interface para facilitar a testabilidade
 type Logger interface {
 	Info(msg string, fields ...zap.Field)
@@ -43,13 +47,20 @@ type ChatCLI struct {
 
 // NewChatCLI cria uma nova instância de ChatCLI
 func NewChatCLI(manager *llm.LLMManager, logger Logger) (*ChatCLI, error) {
-	provider := utils.GetEnvOrDefault("LLM_PROVIDER", "STACKSPOT")
+	provider := os.Getenv("LLM_PROVIDER")
+
+	if provider == "" {
+		logger.Warn("LLM_PROVIDER não definido, setando provider default: " + utils.GetEnvOrDefault(provider, llmdDefault))
+		provider = llmdDefault
+	}
+
 	if provider == "STACKSPOT" {
-		logger.Warn("LLM_PROVIDER não definido ou usando STACKSPOT como padrão")
+		logger.Info("Usando STACKSPOT como padrão")
 	}
 
 	var model string
 	if provider == "OPENAI" {
+		logger.Info("Usando OPENAI como padrão")
 		model = utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-40-mini")
 	}
 
