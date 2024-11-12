@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/joho/godotenv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,12 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	llmdDefault       = "STACKSPOT"
+	defaultSlugName   = "testeai"
+	defaultTenantName = "zup"
+)
+
 // Logger interface para facilitar a testabilidade
 type Logger interface {
 	Info(msg string, fields ...zap.Field)
@@ -32,7 +39,7 @@ type Logger interface {
 type ChatCLI struct {
 	client         llm.LLMClient
 	manager        *llm.LLMManager
-	logger         Logger
+	logger         *zap.Logger
 	provider       string
 	model          string
 	history        []models.Message
@@ -41,16 +48,113 @@ type ChatCLI struct {
 	commandHistory []string
 }
 
+// reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
+func (cli *ChatCLI) reconfigureLogger() {
+	cli.logger.Info("Reconfigurando o logger...")
+
+	// Sincronizar e fechar o logger atual
+	if err := cli.logger.Sync(); err != nil {
+		cli.logger.Error("Erro ao sincronizar o logger", zap.Error(err))
+	}
+
+	// Recriar o logger com base no novo valor da variável ENV
+	newLogger, err := utils.InitializeLogger()
+	if err != nil {
+		cli.logger.Error("Erro ao reinicializar o logger", zap.Error(err))
+		return
+	}
+
+	cli.logger = newLogger
+	cli.logger.Info("Logger reconfigurado com sucesso")
+}
+
+// reloadConfiguration recarrega as variáveis de ambiente e reconfigura o LLMManager
+func (cli *ChatCLI) reloadConfiguration() {
+	fmt.Println("Recarregando configurações...")
+
+	variablesToUnset := []string{
+		"LOG_LEVEL",
+		"ENV",
+		"LLM_PROVIDER",
+		"LOG_FILE",
+		"OPENAI_API_KEY",
+		"OPENAI_MODEL",
+		"CLIENT_ID",
+		"CLIENT_SECRET",
+		"SLUG_NAME",
+		"TENANT_NAM",
+	}
+
+	for _, variable := range variablesToUnset {
+		os.Unsetenv(variable) // Limpa todas as variáveis de ambiente em memória
+	}
+
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		fmt.Println("Nenhum arquivo .env encontrado, continuando sem ele")
+	}
+
+	cli.reconfigureLogger()
+
+	// Reutilizar o método de validação do ambiente e providers existente em main.go
+	utils.CheckEnvVariables(cli.logger, defaultSlugName, defaultTenantName)
+
+	// Recarregar a configuração do LLMManager usando as variáveis atualizadas
+	manager, err := llm.NewLLMManager(cli.logger, os.Getenv("SLUG_NAME"), os.Getenv("TENANT_NAME"))
+	if err != nil {
+		cli.logger.Error("Erro ao reconfigurar o LLMManager", zap.Error(err))
+		return
+	}
+
+	// Verificar se há provedores disponíveis
+	availableProviders := manager.GetAvailableProviders()
+	if len(availableProviders) == 0 {
+		fmt.Println("Nenhum provedor LLM está configurado. Verifique suas variáveis de ambiente.")
+		os.Exit(1)
+	}
+
+	// Atualizar o manager e recarregar os providers com base nas variáveis revalidadas
+	cli.manager = manager
+
+	// Configurar o provider e o modelo com base no ambiente recarregado
+	cli.provider = os.Getenv("LLM_PROVIDER")
+	if cli.provider == "" {
+		cli.provider = "STACKSPOT" // Usar padrão se não estiver definido
+	}
+	if cli.provider == "OPENAI" {
+		cli.model = os.Getenv("OPENAI_MODEL")
+		if cli.model == "" {
+			cli.model = "gpt-4o-mini"
+		}
+	}
+
+	// Atualizar o cliente LLM com base nas novas configurações
+	client, err := cli.manager.GetClient(cli.provider, cli.model)
+	if err != nil {
+		cli.logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
+		return
+	}
+
+	cli.client = client
+	fmt.Println("Configurações recarregadas com sucesso!")
+}
+
 // NewChatCLI cria uma nova instância de ChatCLI
-func NewChatCLI(manager *llm.LLMManager, logger Logger) (*ChatCLI, error) {
-	provider := utils.GetEnvOrDefault("LLM_PROVIDER", "STACKSPOT")
+func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
+	provider := os.Getenv("LLM_PROVIDER")
+
+	if provider == "" {
+		logger.Warn("LLM_PROVIDER não definido, setando provider default: " + utils.GetEnvOrDefault(provider, llmdDefault))
+		provider = llmdDefault
+	}
+
 	if provider == "STACKSPOT" {
-		logger.Warn("LLM_PROVIDER não definido ou usando STACKSPOT como padrão")
+		logger.Info("Usando STACKSPOT como padrão")
 	}
 
 	var model string
 	if provider == "OPENAI" {
-		model = utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-40-mini")
+		logger.Info("Usando OPENAI como padrão")
+		model = utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-4o-mini")
 	}
 
 	client, err := manager.GetClient(provider, model)
@@ -91,6 +195,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	fmt.Println("Digite '/switch' para trocar de provedor.")
 	fmt.Println("Digite '/switch --slugname <slug>' para trocar o slug.")
 	fmt.Println("Digite '/switch --tenantname <tenant-id>' para trocar o tenant.")
+	fmt.Println("Digite '/reload' para recarregar as variáveis e reconfigurar o chatcli.")
 	fmt.Println("Use '@history', '@git', '@env', '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando>' para interativo.")
 	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n\n")
@@ -162,7 +267,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 				// Verifique se o erro contém o código de status 429 explicitamente
 				if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RATE_LIMIT_EXCEEDED") {
-					fmt.Println("Limite de requisições excedido(100) em 1440 minutos. Por favor, aguarde antes de tentar novamente.")
+					fmt.Println("Limite de requisições excedido. Por favor, aguarde antes de tentar novamente.")
 				} else {
 					fmt.Println("Ocorreu um erro ao processar a requisição.")
 				}
@@ -196,6 +301,9 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 	case userInput == "/exit" || userInput == "exit" || userInput == "/quit" || userInput == "quit":
 		fmt.Println("Até mais!")
 		return true
+	case userInput == "/reload":
+		cli.reloadConfiguration()
+		return false
 	case strings.HasPrefix(userInput, "/switch"):
 		cli.handleSwitchCommand(userInput)
 		return false
@@ -296,10 +404,7 @@ func (cli *ChatCLI) switchProvider() {
 	newProvider := availableProviders[choiceIndex]
 	var newModel string
 	if newProvider == "OPENAI" {
-		newModel = os.Getenv("OPENAI_MODEL")
-		if newModel == "" {
-			newModel = "gpt-3.5-turbo"
-		}
+		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-4o-mini")
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
@@ -326,6 +431,8 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("/exit ou /quit - Sai do ChatCLI")
 	fmt.Println("/switch - Troca o provedor de LLM")
 	fmt.Println("/switch --slugname <slug> --tenantname <tenant> - Define slug e tenant")
+	fmt.Println("/reload para recarregar as variáveis e reconfigurar o chatcli.")
+
 }
 
 func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {

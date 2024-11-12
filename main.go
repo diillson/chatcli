@@ -21,19 +21,15 @@ const (
 
 func main() {
 	// Carregar variáveis de ambiente do arquivo .env
-	if err := godotenv.Load(); err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("Nenhum arquivo .env encontrado, continuando sem ele")
-		} else {
-			fmt.Printf("Erro ao carregar o arquivo .env: %v\n", err)
-		}
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		fmt.Println("Nenhum arquivo .env encontrado, continuando sem ele")
 	}
 
 	// Inicializar o logger
 	logger, err := utils.InitializeLogger()
 	if err != nil {
 		fmt.Printf("Não foi possível inicializar o logger: %v\n", err)
-		os.Exit(1) // Encerrar a aplicação em caso de erro crítico
+		os.Exit(1)
 	}
 	defer logger.Sync()
 
@@ -43,7 +39,7 @@ func main() {
 	handleGracefulShutdown(cancel, logger)
 
 	// Verificar variáveis de ambiente e informar o usuário
-	checkEnvVariables(logger)
+	utils.CheckEnvVariables(logger, defaultSlugName, defaultTenantName)
 
 	// Inicializar o LLMManager
 	slugName := utils.GetEnvOrDefault("SLUG_NAME", defaultSlugName)
@@ -72,53 +68,10 @@ func main() {
 // handleGracefulShutdown configura o tratamento de sinais para um shutdown gracioso
 func handleGracefulShutdown(cancelFunc context.CancelFunc, logger *zap.Logger) {
 	signals := make(chan os.Signal, 1)
-	// Capturar sinais de interrupção e término
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		sig := <-signals
 		logger.Info("Recebido sinal para finalizar a aplicação", zap.String("sinal", sig.String()))
 		cancelFunc()
 	}()
-}
-
-// checkEnvVariables verifica as variáveis de ambiente necessárias e informa o usuário
-func checkEnvVariables(logger *zap.Logger) {
-	// Verificar SLUG_NAME e TENANT_NAME
-	slugName, slugIsDefault := utils.CheckAndNotifyEnv("SLUG_NAME", defaultSlugName, logger)
-	tenantName, tenantIsDefault := utils.CheckAndNotifyEnv("TENANT_NAME", defaultTenantName, logger)
-	if slugIsDefault || tenantIsDefault {
-		fmt.Println("ATENÇÃO: Variáveis de ambiente não definidas, usando valores padrão:")
-		if slugIsDefault {
-			fmt.Printf("- SLUG_NAME não definido, usando valor padrão: %s\n", slugName)
-		}
-		if tenantIsDefault {
-			fmt.Printf("- TENANT_NAME não definido, usando valor padrão: %s\n", tenantName)
-		}
-	}
-
-	// Verificar variáveis de ambiente específicas dos provedores
-	checkProviderEnvVariables()
-}
-
-// checkProviderEnvVariables verifica e notifica sobre as variáveis de ambiente específicas dos provedores
-func checkProviderEnvVariables() {
-	// Verificar STACKSPOT
-	clientID := os.Getenv("CLIENT_ID")
-	clientSecret := os.Getenv("CLIENT_SECRET")
-	if clientID == "" || clientSecret == "" {
-		fmt.Println("ATENÇÃO: Variáveis de ambiente necessárias para o provedor STACKSPOT não foram definidas:")
-		if clientID == "" {
-			fmt.Println("- CLIENT_ID (necessário para o provedor STACKSPOT)")
-		}
-		if clientSecret == "" {
-			fmt.Println("- CLIENT_SECRET (necessário para o provedor STACKSPOT)")
-		}
-		fmt.Println("O provedor STACKSPOT não estará disponível.")
-	}
-
-	// Verificar OPENAI
-	openAIKey := os.Getenv("OPENAI_API_KEY")
-	if openAIKey == "" {
-		fmt.Println("ATENÇÃO: OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível.")
-	}
 }
