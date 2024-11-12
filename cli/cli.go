@@ -61,7 +61,7 @@ func NewChatCLI(manager *llm.LLMManager, logger Logger) (*ChatCLI, error) {
 	var model string
 	if provider == "OPENAI" {
 		logger.Info("Usando OPENAI como padrão")
-		model = utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-40-mini")
+		model = utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-4o-mini")
 	}
 
 	client, err := manager.GetClient(provider, model)
