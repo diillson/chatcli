@@ -47,7 +47,7 @@ func (m *LLMManager) configurarOpenAIClient() {
 	if apiKey != "" {
 		m.clients["OPENAI"] = func(model string) (LLMClient, error) {
 			if model == "" {
-				model = "gpt-4o-mini"
+				model = defaultOpenAIModel
 			}
 			return NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
 		}
