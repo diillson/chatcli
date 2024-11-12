@@ -34,7 +34,7 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (*LLMManager
 		logger:  logger,
 	}
 
-	// Configurar clientes LLM
+	// Configurar os providers
 	manager.configurarOpenAIClient()
 	manager.configurarStackSpotClient(slugName, tenantName)
 
@@ -47,7 +47,7 @@ func (m *LLMManager) configurarOpenAIClient() {
 	if apiKey != "" {
 		m.clients["OPENAI"] = func(model string) (LLMClient, error) {
 			if model == "" {
-				model = defaultOpenAIModel
+				model = "gpt-4o-mini"
 			}
 			return NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
 		}

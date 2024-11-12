@@ -50,3 +50,45 @@ func NewJSONReader(data []byte) io.Reader {
 func GetTerminalSize() (width int, height int, err error) {
 	return term.GetSize(int(os.Stdout.Fd()))
 }
+
+// CheckEnvVariables verifica as variáveis de ambiente necessárias e informa o usuário
+func CheckEnvVariables(logger *zap.Logger, defaultSlugName, defaultTenantName string) {
+	// Verificar SLUG_NAME e TENANT_NAME
+	slugName, slugIsDefault := CheckAndNotifyEnv("SLUG_NAME", defaultSlugName, logger)
+	tenantName, tenantIsDefault := CheckAndNotifyEnv("TENANT_NAME", defaultTenantName, logger)
+	if slugIsDefault || tenantIsDefault {
+		fmt.Println("ATENÇÃO: Variáveis de ambiente não definidas, usando valores padrão:")
+		if slugIsDefault {
+			fmt.Printf("- SLUG_NAME não definido, usando valor padrão: %s\n", slugName)
+		}
+		if tenantIsDefault {
+			fmt.Printf("- TENANT_NAME não definido, usando valor padrão: %s\n", tenantName)
+		}
+	}
+
+	// Verificar variáveis de ambiente específicas dos provedores
+	CheckProviderEnvVariables(logger)
+}
+
+// CheckProviderEnvVariables verifica e notifica sobre as variáveis de ambiente específicas dos provedores
+func CheckProviderEnvVariables(logger *zap.Logger) {
+	// Verificar STACKSPOT
+	clientID := os.Getenv("CLIENT_ID")
+	clientSecret := os.Getenv("CLIENT_SECRET")
+	if clientID == "" || clientSecret == "" {
+		fmt.Println("ATENÇÃO: Variáveis de ambiente necessárias para o provedor STACKSPOT não foram definidas:")
+		if clientID == "" {
+			fmt.Println("- CLIENT_ID (necessário para o provedor STACKSPOT)")
+		}
+		if clientSecret == "" {
+			fmt.Println("- CLIENT_SECRET (necessário para o provedor STACKSPOT)")
+		}
+		fmt.Println("O provedor STACKSPOT não estará disponível.")
+	}
+
+	// Verificar OPENAI
+	openAIKey := os.Getenv("OPENAI_API_KEY")
+	if openAIKey == "" {
+		fmt.Println("ATENÇÃO: OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível.")
+	}
+}
