@@ -23,8 +23,6 @@ func main() {
 	// Carregar variáveis de ambiente do arquivo .env
 	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
 		fmt.Println("Nenhum arquivo .env encontrado, continuando sem ele")
-	} else {
-		fmt.Printf("Erro ao carregar o arquivo .env: %v\n", err)
 	}
 
 	// Inicializar o logger
