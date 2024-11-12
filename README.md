@@ -14,6 +14,7 @@ ChatCLI é uma aplicação de interface de linha de comando (CLI) avançada que 
     - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa para consultas posteriores com a LLM.
 - **Execução de Comandos Diretos**: Execute comandos de sistema diretamente a partir do ChatCLI usando `@command`, e a saída é salva no histórico para referência.
 - **Alteração Dinâmica de Configurações**: Mude o provedor de LLM, slug e tenantname diretamente do ChatCLI sem reiniciar a aplicação usando `/switch` com opções.
+- **Recarregamento de Variáveis**: Altere suas consigurações de variaveis de ambiente usando `/reload` para que o chatcli leia e modifique as configurações.
 - **Feedback Animado**: Animações visuais de "Pensando..." enquanto o LLM processa suas solicitações, aumentando o engajamento do usuário.
 - **Renderização de Markdown**: Respostas são renderizadas com Markdown para melhor legibilidade e formatação.
 - **Histórico Persistente**: O histórico de comandos é salvo entre sessões, permitindo revisitar interações anteriores com facilidade.
@@ -118,6 +119,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
     - `/switch --slugname <slug>` - Atualiza o `slugName` sem trocar o provedor.
     - `/switch --tenantname <tenant>` - Atualiza o `tenantName` sem trocar o provedor.
     - Você pode combinar as opções: `/switch --slugname <slug> --tenantname <tenant>`
+    - `/reload` - Atualiza as configurações de variáveis em tempo de execução.
 
 - **Ajuda**:
     - `/help`
@@ -229,6 +231,14 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 
    O `TokenManager` será atualizado com os novos valores, e um novo token será obtido.
 
+10. **Refaz a leitura das variaveis de ambientes, identificando as mudanças e reconfigurando o ambiente.**:
+
+    ```
+    Você: /reload
+    ```
+
+    As `Variaveis` serão reconfiguradas com os novos valores, e uma nova validação de todos os recursos ocorrerá.
+
 ### Capturas de Tela
 
 #### Exemplo de Execução de Comando com `@command`
@@ -311,7 +321,7 @@ O ChatCLI integra Zap para logging estruturado e de alto desempenho. As principa
 2. **Processamento de Comandos**:
     - Os usuários interagem com o ChatCLI via terminal, inserindo comandos e mensagens.
     - Comandos especiais como `@history`, `@git`, `@env`, `@file` e `@command` são analisados e processados para incluir contexto adicional na conversa.
-    - Comandos de sistema como `/exit`, `/switch`, `/help` são tratados separadamente para controlar o fluxo da aplicação.
+    - Comandos de sistema como `/exit`, `/switch`,`/reload`, `/help` são tratados separadamente para controlar o fluxo da aplicação.
 
 3. **Interação com LLM**:
     - O ChatCLI envia a entrada do usuário juntamente com o histórico da conversa para o provedor de LLM selecionado.
