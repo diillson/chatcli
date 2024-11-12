@@ -307,7 +307,7 @@ func (cli *ChatCLI) switchProvider() {
 	newProvider := availableProviders[choiceIndex]
 	var newModel string
 	if newProvider == "OPENAI" {
-		utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-40-mini")
+		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-4o-mini")
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
