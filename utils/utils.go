@@ -91,4 +91,9 @@ func CheckProviderEnvVariables(logger *zap.Logger) {
 	if openAIKey == "" {
 		fmt.Println("ATENÇÃO: OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível.")
 	}
+	// Verificar OPENAI
+	claudeAIKey := os.Getenv("CLAUDEAI_API_KEY")
+	if claudeAIKey == "" {
+		fmt.Println("ATENÇÃO: CLAUDEAI_API_KEY não definida, o provedor CLAUDEAI não estará disponível.")
+	}
 }

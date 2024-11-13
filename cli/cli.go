@@ -22,9 +22,11 @@ import (
 )
 
 const (
-	llmdDefault       = "STACKSPOT"
-	defaultSlugName   = "testeai"
-	defaultTenantName = "zup"
+	llmdDefault          = "STACKSPOT"
+	defaultSlugName      = "testeai"
+	defaultTenantName    = "zup"
+	defaultClaudeAIModel = "claude-3-5-sonnet-20241022"
+	defaultOpenAIModel   = "gpt-4o-mini"
 )
 
 // Logger interface para facilitar a testabilidade
@@ -79,6 +81,8 @@ func (cli *ChatCLI) reloadConfiguration() {
 		"LOG_FILE",
 		"OPENAI_API_KEY",
 		"OPENAI_MODEL",
+		"CLAUDEAI_API_KEY",
+		"CLAUDEAI_MODEL",
 		"CLIENT_ID",
 		"CLIENT_SECRET",
 		"SLUG_NAME",
@@ -123,7 +127,13 @@ func (cli *ChatCLI) reloadConfiguration() {
 	if cli.provider == "OPENAI" {
 		cli.model = os.Getenv("OPENAI_MODEL")
 		if cli.model == "" {
-			cli.model = "gpt-4o-mini"
+			cli.model = defaultOpenAIModel
+		}
+	}
+	if cli.provider == "CLAUDEAI" {
+		cli.model = os.Getenv("CLAUDEAI_MODEL")
+		if cli.model == "" {
+			cli.model = defaultClaudeAIModel
 		}
 	}
 
@@ -154,7 +164,12 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	var model string
 	if provider == "OPENAI" {
 		logger.Info("Usando OPENAI como padrão")
-		model = utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-4o-mini")
+		model = utils.GetEnvOrDefault("OPENAI_MODEL", defaultOpenAIModel)
+	}
+
+	if provider == "CLAUDEAI" {
+		logger.Info("Usando CLAUDEAI como padrão")
+		model = utils.GetEnvOrDefault("CLAUDEAI_MODEL", defaultClaudeAIModel)
 	}
 
 	client, err := manager.GetClient(provider, model)
@@ -404,7 +419,11 @@ func (cli *ChatCLI) switchProvider() {
 	newProvider := availableProviders[choiceIndex]
 	var newModel string
 	if newProvider == "OPENAI" {
-		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", "gpt-4o-mini")
+		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", defaultOpenAIModel)
+	}
+
+	if newProvider == "CLAUDEAI" {
+		newModel = utils.GetEnvOrDefault("CLAUDEAI_MODEL", defaultClaudeAIModel)
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)

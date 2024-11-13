@@ -61,17 +61,23 @@ ChatCLI é uma aplicação de interface de linha de comando (CLI) avançada que 
 
 O ChatCLI depende de variáveis de ambiente para configurar seu comportamento e conectar-se aos provedores de LLM. Você pode definir essas variáveis em um arquivo `.env` na raiz do projeto ou exportá-las diretamente no seu shell.
 
+Aqui está o ajuste no `README.md` para incluir a ClaudeAI como um provedor suportado pelo ChatCLI:
+
+---
+
 ### Variáveis de Ambiente
+
+O ChatCLI agora suporta o ClaudeAI como um provedor adicional de LLM. Veja como configurar a ClaudeAI e as outras variáveis de ambiente para o funcionamento do ChatCLI:
 
 - **Geral**:
     - `LOG_LEVEL` - Define o nível de log (`debug`, `info`, `warn`, `error`). Padrão é `info`.
     - `ENV` - Define o ambiente (`prod` para produção, caso contrário, padrão é desenvolvimento).
-    - `LLM_PROVIDER` - Especifica o provedor de LLM padrão (`OPENAI` ou `STACKSPOT`). Padrão é `OPENAI`.
+    - `LLM_PROVIDER` - Especifica o provedor de LLM padrão (`OPENAI`, `STACKSPOT` ou `CLAUDEAI`). Padrão é `STACKSPOT`.
     - `LOG_FILE` - (Opcional) Define o nome do arquivo de log. Padrão é `app.log`.
 
 - **Provedor OpenAI**:
     - `OPENAI_API_KEY` - Sua chave de API da OpenAI.
-    - `OPENAI_MODEL` - (Opcional) Especifica o modelo da OpenAI a ser usado. Padrão é `gpt-3.5-turbo`.
+    - `OPENAI_MODEL` - (Opcional) Especifica o modelo da OpenAI a ser usado. Padrão é `gpt-4o-mini`.
 
 - **Provedor StackSpot**:
     - `CLIENT_ID` - ID do cliente StackSpot.
@@ -79,13 +85,17 @@ O ChatCLI depende de variáveis de ambiente para configurar seu comportamento e 
     - `SLUG_NAME` - Nome do slug StackSpot. Padrão é `testeai` se não definido.
     - `TENANT_NAME` - Nome do tenant StackSpot. Padrão é `zup` se não definido.
 
+- **Provedor ClaudeAI**:
+    - `CLAUDEAI_API_KEY` - Sua chave de API da ClaudeAI.
+    - `CLAUDEAI_MODEL` - (Opcional) Define o modelo da ClaudeAI. Padrão é `claude-3-5-sonnet-20241022`.
+
 ### Exemplo de Arquivo `.env`
 
 ```env
 # Configurações Gerais
 LOG_LEVEL=info
 ENV=dev
-LLM_PROVIDER=STACKSPOT
+LLM_PROVIDER=CLAUDEAI
 LOG_FILE=app.log
 
 # Configurações do OpenAI
@@ -97,7 +107,19 @@ CLIENT_ID=seu-cliente-id
 CLIENT_SECRET=seu-cliente-secreto
 SLUG_NAME=seu-slug-stackspot
 TENANT_NAME=seu-tenant-name
+
+# Configurações do ClaudeAI
+CLAUDEAI_API_KEY=sua-chave-claudeai
+CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
 ```
+
+### Adicionar ClaudeAI como Provedor no ChatCLI
+
+Agora você pode trocar dinamicamente para o ClaudeAI usando o comando `/switch` ou configurá-lo como o provedor padrão definindo `LLM_PROVIDER=CLAUDEAI` no `.env`.
+
+--- 
+
+Esses ajustes garantem que ClaudeAI esteja configurado e documentado no `README.md`, alinhando com as práticas dos outros provedores, como OpenAI e StackSpot.
 
 ## 🎯 Uso
 

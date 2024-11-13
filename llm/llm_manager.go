@@ -7,7 +7,8 @@ import (
 )
 
 const (
-	defaultOpenAIModel = "gpt-4o-mini"
+	defaultOpenAIModel   = "gpt-4o-mini"
+	defaultClaudeAIModel = "claude-3-5-sonnet-20241022"
 )
 
 // ConfigError representa um erro de configuração, como variáveis de ambiente ausentes
@@ -37,6 +38,7 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (*LLMManager
 	// Configurar os providers
 	manager.configurarOpenAIClient()
 	manager.configurarStackSpotClient(slugName, tenantName)
+	manager.configurarClaudeAIClient()
 
 	return manager, nil
 }
@@ -72,6 +74,20 @@ func (m *LLMManager) configurarStackSpotClient(slugName, tenantName string) {
 	// Configurar o cliente StackSpot
 	m.clients["STACKSPOT"] = func(model string) (LLMClient, error) {
 		return NewStackSpotClient(m.tokenManager, slugName, m.logger, 50, 300), nil
+	}
+}
+
+func (m *LLMManager) configurarClaudeAIClient() {
+	apiKey := os.Getenv("CLAUDEAI_API_KEY")
+	if apiKey != "" {
+		m.clients["CLAUDEAI"] = func(model string) (LLMClient, error) {
+			if model == "" {
+				model = defaultClaudeAIModel
+			}
+			return NewClaudeClient(apiKey, model, m.logger), nil
+		}
+	} else {
+		m.logger.Warn("CLAUDEAI_API_KEY não definida, o provedor ClaudeAI não estará disponível")
 	}
 }
 
