@@ -59,12 +59,6 @@ func (c *StackSpotClient) GetModelName() string {
 
 // SendPrompt envia um prompt para o modelo de linguagem e retorna a resposta.
 func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	token, err := c.tokenManager.GetAccessToken(ctx)
-	if err != nil {
-		c.logger.Error("Erro ao obter o token", zap.Error(err))
-		return "", fmt.Errorf("erro ao obter o token: %w", err)
-	}
-
 	// Formatar o histórico da conversa
 	conversationHistory := formatConversationHistory(history)
 
@@ -72,14 +66,14 @@ func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history
 	fullPrompt := fmt.Sprintf("%sUsuário: %s", conversationHistory, prompt)
 
 	// Enviar o prompt completo e obter o responseID
-	responseID, err := c.sendRequestToLLMWithRetry(ctx, fullPrompt, token)
+	responseID, err := c.sendRequestToLLMWithRetry(ctx, fullPrompt)
 	if err != nil {
 		c.logger.Error("Erro ao enviar a requisição para a LLM", zap.Error(err))
 		return "", fmt.Errorf("erro ao enviar a requisição: %w", err)
 	}
 
 	// Obter a resposta da LLM
-	llmResponse, err := c.pollLLMResponse(ctx, responseID, token)
+	llmResponse, err := c.pollLLMResponse(ctx, responseID)
 	if err != nil {
 		c.logger.Error("Erro ao obter a resposta da LLM", zap.Error(err))
 		return "", err
@@ -102,13 +96,15 @@ func formatConversationHistory(history []models.Message) string {
 }
 
 // sendRequestToLLMWithRetry envia a requisição para a LLM com tentativas de retry
-func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt, accessToken string) (string, error) {
+func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt string) (string, error) {
 	var backoff = c.backoff
 
 	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
-		responseID, err := c.sendRequestToLLM(ctx, prompt, accessToken)
+		responseID, err := c.executeWithTokenRetry(ctx, func(token string) (string, error) {
+			return c.sendRequestToLLM(ctx, prompt, token)
+		})
+
 		if err != nil {
-			// Verifica se o erro é temporário (ex: problemas de rede)
 			if utils.IsTemporaryError(err) {
 				c.logger.Warn("Erro temporário ao enviar requisição para StackSpotAI",
 					zap.Int("attempt", attempt),
@@ -121,31 +117,9 @@ func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt,
 					continue
 				}
 			}
-
-			// Verifica se o erro é 403 (token expirado ou inválido)
-			if strings.Contains(err.Error(), "403") {
-				c.logger.Warn("Token expirado ou inválido, tentando renovar...")
-
-				// Tenta renovar o token
-				newToken, tokenErr := c.tokenManager.RefreshToken(ctx)
-				if tokenErr != nil {
-					c.logger.Error("Erro ao renovar o token", zap.Error(tokenErr))
-					return "", fmt.Errorf("erro ao renovar o token: %w", tokenErr)
-				}
-
-				// Atualiza o token e tenta a requisição novamente
-				accessToken = newToken
-				c.logger.Info("Token renovado com sucesso, tentando novamente...")
-
-				// Reinicia o loop para tentar a requisição novamente com o novo token
-				continue
-			}
-
-			// Se não for um erro temporário ou 403, retorna o erro
 			return "", fmt.Errorf("erro ao enviar requisição para StackSpotAI: %w", err)
 		}
 
-		// Se a requisição for bem-sucedida, retorna o responseID
 		return responseID, nil
 	}
 
@@ -207,8 +181,45 @@ func (c *StackSpotClient) sendRequestToLLM(ctx context.Context, prompt, accessTo
 	return responseID, nil
 }
 
+// executeWithTokenRetry executa uma função que faz uma requisição HTTP, garantindo que o token seja renovado se necessário.
+// Ele tenta a requisição novamente se o token expirar (erro 403).
+func (c *StackSpotClient) executeWithTokenRetry(ctx context.Context, requestFunc func(string) (string, error)) (string, error) {
+	// Obtém o token de acesso válido
+	token, err := c.tokenManager.GetAccessToken(ctx)
+	if err != nil {
+		c.logger.Error("Erro ao obter o token", zap.Error(err))
+		return "", fmt.Errorf("erro ao obter o token: %w", err)
+	}
+
+	// Tenta executar a função de requisição com o token atual
+	response, err := requestFunc(token)
+	if err != nil {
+		// Se o erro for 403, tenta renovar o token e refazer a requisição
+		if strings.Contains(err.Error(), "403") {
+			c.logger.Warn("Token expirado ou inválido, tentando renovar...")
+
+			// Tenta renovar o token
+			newToken, tokenErr := c.tokenManager.RefreshToken(ctx)
+			if tokenErr != nil {
+				c.logger.Error("Erro ao renovar o token", zap.Error(tokenErr))
+				return "", fmt.Errorf("erro ao renovar o token: %w", tokenErr)
+			}
+
+			c.logger.Info("Token renovado com sucesso, tentando novamente...")
+
+			// Tenta a requisição novamente com o novo token
+			return requestFunc(newToken)
+		}
+
+		// Se não for um erro 403, retorna o erro original
+		return "", err
+	}
+
+	return response, nil
+}
+
 // pollLLMResponse faz polling para obter a resposta da LLM
-func (c *StackSpotClient) pollLLMResponse(ctx context.Context, responseID, accessToken string) (string, error) {
+func (c *StackSpotClient) pollLLMResponse(ctx context.Context, responseID string) (string, error) {
 	ticker := time.NewTicker(stackSpotResponseTimeout)
 	defer ticker.Stop()
 
@@ -218,39 +229,15 @@ func (c *StackSpotClient) pollLLMResponse(ctx context.Context, responseID, acces
 			c.logger.Warn("Contexto cancelado ou expirado", zap.Error(ctx.Err()))
 			return "", fmt.Errorf("contexto cancelado ou expirado: %w", ctx.Err())
 		case <-ticker.C:
-			// Verifica o token antes de cada requisição GET
-			token, err := c.tokenManager.GetAccessToken(ctx)
+			llmResponse, err := c.executeWithTokenRetry(ctx, func(token string) (string, error) {
+				return c.getLLMResponse(ctx, responseID, token)
+			})
+
 			if err != nil {
-				c.logger.Error("Erro ao obter o token", zap.Error(err))
-				return "", fmt.Errorf("erro ao obter o token: %w", err)
-			}
-
-			llmResponse, err := c.getLLMResponse(ctx, responseID, token)
-			if err != nil {
-				// Se o erro for 403, tenta renovar o token
-				if strings.Contains(err.Error(), "403") {
-					c.logger.Warn("Token expirado ou inválido, tentando renovar...")
-
-					// Tenta renovar o token
-					newToken, tokenErr := c.tokenManager.RefreshToken(ctx)
-					if tokenErr != nil {
-						c.logger.Error("Erro ao renovar o token", zap.Error(tokenErr))
-						return "", fmt.Errorf("erro ao renovar o token: %w", tokenErr)
-					}
-
-					// Atualiza o token e tenta a requisição novamente
-					accessToken = newToken
-					c.logger.Info("Token renovado com sucesso, tentando novamente...")
-
-					// Reinicia o loop para tentar a requisição novamente com o novo token
-					continue
-				}
-
 				if strings.Contains(err.Error(), "resposta ainda não está pronta") {
 					c.logger.Info("Resposta ainda não está pronta, tentando novamente...")
 					continue
 				}
-
 				return "", err
 			}
 
