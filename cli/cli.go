@@ -169,8 +169,12 @@ func NewChatCLI(manager llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	history, err := cli.historyManager.LoadHistory()
 	if err != nil {
 		cli.logger.Error("Erro ao carregar o histórico", zap.Error(err))
+	} else {
+		cli.commandHistory = history
+		for _, cmd := range history {
+			cli.line.AppendHistory(cmd) // Adicionar o histórico ao liner
+		}
 	}
-	cli.commandHistory = history
 
 	return cli, nil
 }
@@ -280,7 +284,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 // cleanup realiza a limpeza de recursos ao encerrar o ChatCLI
 func (cli *ChatCLI) cleanup() {
 	cli.line.Close()
-	cli.historyManager.SaveHistory(cli.commandHistory)
+	cli.historyManager.SaveHistory(cli.commandHistory) // Salvar o histórico
 	cli.logger.Sync()
 }
 
@@ -861,7 +865,7 @@ func (cli *ChatCLI) loadHistory() {
 	for scanner.Scan() {
 		line := scanner.Text()
 		cli.commandHistory = append(cli.commandHistory, line)
-		cli.line.AppendHistory(line)
+		cli.line.AppendHistory(line) // Adicionar ao liner para navegação
 	}
 
 	if err := scanner.Err(); err != nil {
