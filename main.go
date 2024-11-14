@@ -56,12 +56,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Inicializar e iniciar o ChatCLI
-	chatCLI, err := cli.NewChatCLI(manager, logger)
+	// Criar instâncias dos gerenciadores e executores
+	historyManager := cli.NewHistoryManager(".chatcli_history", logger)
+	commandExecutor := &cli.CommandExecutor{}
+	envManager := &cli.EnvironmentManager{}
+
+	// Inicializar o ChatCLI
+	chatCLI, err := cli.NewChatCLI(manager, logger, historyManager, commandExecutor, envManager)
 	if err != nil {
 		logger.Fatal("Erro ao inicializar o ChatCLI", zap.Error(err))
 	}
 
+	// Iniciar o ChatCLI
 	chatCLI.Start(ctx)
 }
 

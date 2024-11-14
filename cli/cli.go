@@ -1,12 +1,11 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"github.com/joho/godotenv"
+	"github.com/charmbracelet/glamour"
+	"github.com/diillson/chatcli/utils"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,22 +13,20 @@ import (
 
 	"github.com/diillson/chatcli/llm"
 	"github.com/diillson/chatcli/models"
-	"github.com/diillson/chatcli/utils"
-
-	"github.com/charmbracelet/glamour"
 	"github.com/peterh/liner"
 	"go.uber.org/zap"
 )
 
 const (
-	llmdDefault          = "STACKSPOT"
-	defaultSlugName      = "testeai"
-	defaultTenantName    = "zup"
-	defaultClaudeAIModel = "claude-3-5-sonnet-20241022"
-	defaultOpenAIModel   = "gpt-4o-mini"
+	defaultOpenAIModel    = "gpt-4o-mini"                // Modelo padrão do OpenAI
+	defaultClaudeAIModel  = "claude-3-5-sonnet-20241022" // Modelo padrão do ClaudeAI
+	defaultStackSpotModel = "StackSpotAI"                // Modelo padrão do StackSpot
 )
 
-// Logger interface para facilitar a testabilidade
+var thinkingWG sync.WaitGroup
+var thinkingDone chan bool
+
+// Interfaces para facilitar a testabilidade e reduzir o acoplamento
 type Logger interface {
 	Info(msg string, fields ...zap.Field)
 	Error(msg string, fields ...zap.Field)
@@ -37,165 +34,76 @@ type Logger interface {
 	Sync() error
 }
 
+type LLMClient interface {
+	GetModelName() string
+	SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error)
+}
+
 // ChatCLI representa a interface de linha de comando do chat
 type ChatCLI struct {
-	client         llm.LLMClient
-	manager        *llm.LLMManager
-	logger         *zap.Logger
-	provider       string
-	model          string
-	history        []models.Message
-	line           *liner.State
-	terminalWidth  int
-	commandHistory []string
-}
-
-// reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
-func (cli *ChatCLI) reconfigureLogger() {
-	cli.logger.Info("Reconfigurando o logger...")
-
-	// Sincronizar e fechar o logger atual
-	if err := cli.logger.Sync(); err != nil {
-		cli.logger.Error("Erro ao sincronizar o logger", zap.Error(err))
-	}
-
-	// Recriar o logger com base no novo valor da variável ENV
-	newLogger, err := utils.InitializeLogger()
-	if err != nil {
-		cli.logger.Error("Erro ao reinicializar o logger", zap.Error(err))
-		return
-	}
-
-	cli.logger = newLogger
-	cli.logger.Info("Logger reconfigurado com sucesso")
-}
-
-// reloadConfiguration recarrega as variáveis de ambiente e reconfigura o LLMManager
-func (cli *ChatCLI) reloadConfiguration() {
-	fmt.Println("Recarregando configurações...")
-
-	variablesToUnset := []string{
-		"LOG_LEVEL",
-		"ENV",
-		"LLM_PROVIDER",
-		"LOG_FILE",
-		"OPENAI_API_KEY",
-		"OPENAI_MODEL",
-		"CLAUDEAI_API_KEY",
-		"CLAUDEAI_MODEL",
-		"CLIENT_ID",
-		"CLIENT_SECRET",
-		"SLUG_NAME",
-		"TENANT_NAM",
-	}
-
-	for _, variable := range variablesToUnset {
-		os.Unsetenv(variable) // Limpa todas as variáveis de ambiente em memória
-	}
-
-	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
-		fmt.Println("Nenhum arquivo .env encontrado, continuando sem ele")
-	}
-
-	cli.reconfigureLogger()
-
-	// Reutilizar o método de validação do ambiente e providers existente em main.go
-	utils.CheckEnvVariables(cli.logger, defaultSlugName, defaultTenantName)
-
-	// Recarregar a configuração do LLMManager usando as variáveis atualizadas
-	manager, err := llm.NewLLMManager(cli.logger, os.Getenv("SLUG_NAME"), os.Getenv("TENANT_NAME"))
-	if err != nil {
-		cli.logger.Error("Erro ao reconfigurar o LLMManager", zap.Error(err))
-		return
-	}
-
-	// Verificar se há provedores disponíveis
-	availableProviders := manager.GetAvailableProviders()
-	if len(availableProviders) == 0 {
-		fmt.Println("Nenhum provedor LLM está configurado. Verifique suas variáveis de ambiente.")
-		os.Exit(1)
-	}
-
-	// Atualizar o manager e recarregar os providers com base nas variáveis revalidadas
-	cli.manager = manager
-
-	// Configurar o provider e o modelo com base no ambiente recarregado
-	cli.provider = os.Getenv("LLM_PROVIDER")
-	if cli.provider == "" {
-		cli.provider = "STACKSPOT" // Usar padrão se não estiver definido
-	}
-	if cli.provider == "OPENAI" {
-		cli.model = os.Getenv("OPENAI_MODEL")
-		if cli.model == "" {
-			cli.model = defaultOpenAIModel
-		}
-	}
-	if cli.provider == "CLAUDEAI" {
-		cli.model = os.Getenv("CLAUDEAI_MODEL")
-		if cli.model == "" {
-			cli.model = defaultClaudeAIModel
-		}
-	}
-
-	// Atualizar o cliente LLM com base nas novas configurações
-	client, err := cli.manager.GetClient(cli.provider, cli.model)
-	if err != nil {
-		cli.logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
-		return
-	}
-
-	cli.client = client
-	fmt.Println("Configurações recarregadas com sucesso!")
+	client          LLMClient
+	manager         *llm.LLMManager
+	logger          *zap.Logger
+	historyManager  *HistoryManager
+	commandExecutor *CommandExecutor
+	envManager      *EnvironmentManager
+	line            *liner.State
+	commandHistory  []string
+	provider        string
+	model           string
+	history         []models.Message
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
-func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
+func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger, historyManager *HistoryManager, commandExecutor *CommandExecutor, envManager *EnvironmentManager) (*ChatCLI, error) {
+	line := liner.NewLiner()
+	line.SetCtrlCAborts(true) // Permite que Ctrl+C aborte o input
+
+	// Verificar o provedor e o modelo com base nas variáveis de ambiente
 	provider := os.Getenv("LLM_PROVIDER")
-
 	if provider == "" {
-		logger.Warn("LLM_PROVIDER não definido, setando provider default: " + utils.GetEnvOrDefault(provider, llmdDefault))
-		provider = llmdDefault
-	}
-
-	if provider == "STACKSPOT" {
-		logger.Info("Usando STACKSPOT como padrão")
+		provider = "STACKSPOT" // Usar STACKSPOT como padrão se não estiver definido
 	}
 
 	var model string
-	if provider == "OPENAI" {
-		logger.Info("Usando OPENAI como padrão")
+	switch provider {
+	case "OPENAI":
 		model = utils.GetEnvOrDefault("OPENAI_MODEL", defaultOpenAIModel)
-	}
-
-	if provider == "CLAUDEAI" {
-		logger.Info("Usando CLAUDEAI como padrão")
+	case "CLAUDEAI":
 		model = utils.GetEnvOrDefault("CLAUDEAI_MODEL", defaultClaudeAIModel)
+	case "STACKSPOT":
+		model = defaultStackSpotModel
+	default:
+		logger.Warn("Provedor LLM desconhecido, usando STACKSPOT como padrão")
+		provider = "STACKSPOT"
+		model = defaultStackSpotModel
 	}
 
+	// Obter o cliente LLM com base no provedor e modelo
 	client, err := manager.GetClient(provider, model)
 	if err != nil {
 		logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
 		return nil, err
 	}
 
-	line := liner.NewLiner()
-	line.SetCtrlCAborts(true) // Permite que Ctrl+C aborte o input
-
 	cli := &ChatCLI{
-		client:         client,
-		manager:        manager,
-		logger:         logger,
-		provider:       provider,
-		model:          model,
-		history:        []models.Message{},
-		line:           line,
-		commandHistory: []string{},
+		client:          client,
+		manager:         manager,
+		logger:          logger,
+		historyManager:  historyManager,
+		commandExecutor: commandExecutor,
+		envManager:      envManager,
+		line:            line,
+		commandHistory:  []string{},
+		provider:        provider,
+		model:           model,
+		history:         []models.Message{},
 	}
 
 	// Definir a função de autocompletar
 	cli.line.SetCompleter(cli.completer)
 
-	cli.loadHistory()
+	cli.historyManager.LoadHistory(cli.line)
 
 	return cli, nil
 }
@@ -205,11 +113,9 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	defer cli.cleanup()
 
 	fmt.Println("\n\nBem-vindo ao ChatCLI!")
-	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
+	fmt.Printf("Você está conversando com %s (%s)\n", cli.model, cli.provider)
 	fmt.Println("Digite '/exit', 'exit', '/quit' ou 'quit' para sair.")
 	fmt.Println("Digite '/switch' para trocar de provedor.")
-	fmt.Println("Digite '/switch --slugname <slug>' para trocar o slug.")
-	fmt.Println("Digite '/switch --tenantname <tenant-id>' para trocar o tenant.")
 	fmt.Println("Digite '/reload' para recarregar as variáveis e reconfigurar o chatcli.")
 	fmt.Println("Use '@history', '@git', '@env', '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando>' para interativo.")
@@ -233,13 +139,6 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 			input = strings.TrimSpace(input)
 
-			// Verificar se o input é um comando direto do sistema
-			if strings.HasPrefix(input, "@command ") {
-				command := strings.TrimPrefix(input, "@command ")
-				cli.executeDirectCommand(command)
-				continue
-			}
-
 			if input == "" {
 				continue
 			}
@@ -255,15 +154,6 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				continue
 			}
 
-			// Processar comandos especiais
-			userInput, additionalContext := cli.processSpecialCommands(input)
-
-			// Adicionar a mensagem do usuário ao histórico
-			cli.history = append(cli.history, models.Message{
-				Role:    "user",
-				Content: userInput + additionalContext,
-			})
-
 			// Exibir mensagem "Pensando..." com animação
 			cli.showThinkingAnimation()
 
@@ -272,7 +162,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			defer cancel()
 
 			// Enviar o prompt para o LLM
-			aiResponse, err := cli.client.SendPrompt(responseCtx, userInput+additionalContext, cli.history)
+			aiResponse, err := cli.client.SendPrompt(responseCtx, input, cli.history)
 
 			// Parar a animação
 			cli.stopThinkingAnimation()
@@ -296,28 +186,23 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				Content: aiResponse,
 			})
 
-			// Renderizar a resposta da IA
+			// Renderizar a resposta da IA em Markdown
 			renderedResponse := cli.renderMarkdown(aiResponse)
-			// Exibir a resposta da IA com efeito de digitação
-			cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
+
+			// Exibir a resposta da IA com efeito de máquina de escrever (agora com 2ms de atraso)
+			cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
 		}
 	}
 }
 
-// cleanup realiza a limpeza de recursos ao encerrar o ChatCLI
-func (cli *ChatCLI) cleanup() {
-	cli.line.Close()
-	cli.saveHistory()
-	cli.logger.Sync()
-}
-
+// handleCommand lida com os comandos do usuário
 func (cli *ChatCLI) handleCommand(userInput string) bool {
 	switch {
 	case userInput == "/exit" || userInput == "exit" || userInput == "/quit" || userInput == "quit":
 		fmt.Println("Até mais!")
 		return true
 	case userInput == "/reload":
-		cli.reloadConfiguration()
+		cli.envManager.ReloadConfiguration(cli.logger, cli.manager)
 		return false
 	case strings.HasPrefix(userInput, "/switch"):
 		cli.handleSwitchCommand(userInput)
@@ -331,6 +216,55 @@ func (cli *ChatCLI) handleCommand(userInput string) bool {
 	}
 }
 
+// cleanup realiza a limpeza de recursos ao encerrar o ChatCLI
+func (cli *ChatCLI) cleanup() {
+	cli.line.Close()
+	cli.historyManager.SaveHistory(cli.commandHistory)
+	cli.logger.Sync()
+}
+
+// Função de autocompletar modularizada
+func (cli *ChatCLI) completer(line string) []string {
+	trimmedLine := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmedLine, "/") {
+		return cli.completeCommands(trimmedLine)
+	} else if strings.HasPrefix(trimmedLine, "@") {
+		return cli.completeSpecialCommands(trimmedLine)
+	} else {
+		return cli.completeFilePaths(trimmedLine)
+	}
+}
+
+// completeCommands autocompleta comandos do sistema
+func (cli *ChatCLI) completeCommands(line string) []string {
+	commands := []string{"/exit", "/quit", "/switch", "/help"}
+	var completions []string
+	for _, cmd := range commands {
+		if strings.HasPrefix(cmd, line) {
+			completions = append(completions, cmd)
+		}
+	}
+	return completions
+}
+
+// completeSpecialCommands autocompleta comandos especiais
+func (cli *ChatCLI) completeSpecialCommands(line string) []string {
+	specialCommands := []string{"@history", "@git", "@env", "@file", "@command"}
+	var completions []string
+	for _, cmd := range specialCommands {
+		if strings.HasPrefix(cmd, line) {
+			completions = append(completions, cmd)
+		}
+	}
+	return completions
+}
+
+// completeFilePaths autocompleta caminhos de arquivos
+func (cli *ChatCLI) completeFilePaths(line string) []string {
+	return cli.commandExecutor.CompleteFilePath(line)
+}
+
+// handleSwitchCommand lida com o comando /switch para trocar de provedor, slugname ou tenantname
 func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 	args := strings.Fields(userInput)
 	var newSlugName, newTenantName string
@@ -385,6 +319,7 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 	cli.switchProvider()
 }
 
+// switchProvider lida com a troca de provedores
 func (cli *ChatCLI) switchProvider() {
 	fmt.Println("Provedores disponíveis:")
 	availableProviders := cli.manager.GetAvailableProviders()
@@ -439,6 +374,7 @@ func (cli *ChatCLI) switchProvider() {
 	fmt.Printf("Trocado para %s (%s)\n\n", cli.client.GetModelName(), cli.provider)
 }
 
+// showHelp exibe a ajuda
 func (cli *ChatCLI) showHelp() {
 	fmt.Println("Comandos disponíveis:")
 	fmt.Println("@history - Adiciona o histórico do shell ao contexto")
@@ -451,9 +387,9 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("/switch - Troca o provedor de LLM")
 	fmt.Println("/switch --slugname <slug> --tenantname <tenant> - Define slug e tenant")
 	fmt.Println("/reload para recarregar as variáveis e reconfigurar o chatcli.")
-
 }
 
+// processSpecialCommands processa comandos especiais como @history, @git, etc.
 func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 	commands := []struct {
 		trigger string
@@ -474,6 +410,81 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 	}
 
 	return userInput, additionalContext
+}
+
+// showThinkingAnimation exibe a animação de "Pensando..."
+func (cli *ChatCLI) showThinkingAnimation() {
+	thinkingWG.Add(1)
+	thinkingDone = make(chan bool)
+
+	go func() {
+		defer thinkingWG.Done()
+		spinner := []string{"|", "/", "-", "\\"}
+		i := 0
+		for {
+			select {
+			case <-thinkingDone:
+				fmt.Printf("\r\033[K") // Limpa a linha corretamente
+				return
+			default:
+				fmt.Printf("\r%s está pensando... %s", cli.client.GetModelName(), spinner[i%len(spinner)])
+				time.Sleep(100 * time.Millisecond)
+				i++
+			}
+		}
+	}()
+}
+
+// stopThinkingAnimation para a animação de "Pensando..."
+func (cli *ChatCLI) stopThinkingAnimation() {
+	close(thinkingDone)
+	thinkingWG.Wait()
+	fmt.Printf("\r\033[K") // Limpa a linha da animação
+}
+
+// renderMarkdown renderiza o texto em Markdown
+func (cli *ChatCLI) renderMarkdown(input string) string {
+	// Usar a biblioteca glamour para renderizar o Markdown
+	renderer, _ := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(0), // Ajustar a largura para 80 colunas
+	)
+	out, err := renderer.Render(input)
+	if err != nil {
+		cli.logger.Error("Erro ao renderizar Markdown", zap.Error(err))
+		return input // Retornar o texto original se houver erro
+	}
+	return out
+}
+
+// typewriterEffect exibe o texto com efeito de máquina de escrever
+func (cli *ChatCLI) typewriterEffect(text string, delay time.Duration) {
+	reader := strings.NewReader(text)
+	inEscapeSequence := false
+
+	for {
+		char, _, err := reader.ReadRune()
+		if err != nil {
+			break // Fim do texto
+		}
+
+		// Verifica se é o início de uma sequência de escape
+		if char == '\033' {
+			inEscapeSequence = true
+		}
+
+		fmt.Printf("%c", char)
+
+		// Verifica o final da sequência de escape
+		if inEscapeSequence {
+			if char == 'm' {
+				inEscapeSequence = false
+			}
+			continue // Não aplica delay dentro da sequência de escape
+		}
+
+		time.Sleep(delay) // Ajuste o delay conforme desejado
+	}
 }
 
 // processHistoryCommand adiciona o histórico do shell ao contexto
@@ -676,329 +687,4 @@ func filterEmptyLines(lines []string) []string {
 		}
 	}
 	return filtered
-}
-
-// executeDirectCommand executa um comando diretamente no sistema
-func (cli *ChatCLI) executeDirectCommand(command string) {
-	fmt.Println("Executando comando:", command)
-
-	// Verificar se o comando é interativo
-	isInteractive := false
-	if strings.HasPrefix(command, "-i ") || strings.HasPrefix(command, "--interactive ") {
-		isInteractive = true
-		// Remover a flag do comando
-		command = strings.TrimPrefix(command, "-i ")
-		command = strings.TrimPrefix(command, "--interactive ")
-	}
-
-	// Obter o shell do usuário
-	userShell := utils.GetUserShell()
-	shellPath, err := exec.LookPath(userShell)
-	if err != nil {
-		cli.logger.Error("Erro ao localizar o shell", zap.Error(err))
-		fmt.Println("Erro ao localizar o shell:", err)
-		return
-	}
-
-	// Obter o caminho do arquivo de configuração do shell
-	shellConfigPath := utils.GetShellConfigFilePath(userShell)
-	if shellConfigPath == "" {
-		fmt.Println("Não foi possível determinar o arquivo de configuração para o shell:", userShell)
-		return
-	}
-
-	// Construir o comando para carregar o arquivo de configuração e executar o comando do usuário
-	shellCommand := fmt.Sprintf("source %s && %s", shellConfigPath, command)
-
-	cmd := exec.Command(shellPath, "-c", shellCommand)
-
-	if isInteractive {
-		// Conectar os streams de entrada, saída e erro do comando ao terminal
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		// Fechar o liner para liberar o terminal antes de executar o comando interativo
-		cli.line.Close()
-
-		// Executar o comando
-		err = cmd.Run()
-
-		// Reabrir o liner após a execução do comando
-		cli.line = liner.NewLiner()
-		cli.line.SetCtrlCAborts(true)
-		cli.loadHistory()
-		cli.line.SetCompleter(cli.completer) // Reconfigurar o autocompletar
-
-		if err != nil {
-			fmt.Println("Erro ao executar comando:", err)
-		}
-
-		// Informar que a saída não foi capturada
-		fmt.Println("A saída do comando não pôde ser capturada para o histórico.")
-
-		// Armazenar apenas o comando no histórico
-		cli.history = append(cli.history, models.Message{
-			Role:    "system",
-			Content: fmt.Sprintf("Comando executado: %s", command),
-		})
-	} else {
-		// Capturar a saída do comando
-		output, err := cmd.CombinedOutput()
-
-		// Exibir a saída
-		fmt.Println("Saída do comando:", string(output))
-
-		if err != nil {
-			fmt.Println("Erro ao executar comando:", err)
-		}
-
-		// Armazenar a saída no histórico
-		cli.history = append(cli.history, models.Message{
-			Role:    "system",
-			Content: fmt.Sprintf("Comando: %s\nSaída:\n%s", command, string(output)),
-		})
-	}
-
-	// Adicionar o comando ao histórico do liner para persistir em .chatcli_history
-	cli.line.AppendHistory(fmt.Sprintf("@command %s", command))
-}
-
-// loadHistory carrega o histórico do arquivo
-func (cli *ChatCLI) loadHistory() {
-	historyFile := ".chatcli_history"
-	f, err := os.Open(historyFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return // Nenhum histórico para carregar
-		}
-		cli.logger.Warn("Não foi possível carregar o histórico:", zap.Error(err))
-		return
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		cli.commandHistory = append(cli.commandHistory, line)
-		cli.line.AppendHistory(line)
-	}
-
-	if err := scanner.Err(); err != nil {
-		cli.logger.Warn("Erro ao ler o histórico:", zap.Error(err))
-	}
-}
-
-// saveHistory salva o histórico no arquivo
-func (cli *ChatCLI) saveHistory() {
-	historyFile := ".chatcli_history"
-	f, err := os.OpenFile(historyFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		cli.logger.Warn("Não foi possível salvar o histórico:", zap.Error(err))
-		return
-	}
-	defer f.Close()
-
-	for _, cmd := range cli.commandHistory {
-		fmt.Fprintln(f, cmd)
-	}
-}
-
-// Função de autocompletar
-func (cli *ChatCLI) completer(line string) []string {
-	var completions []string
-
-	trimmedLine := strings.TrimSpace(line)
-
-	// Comandos disponíveis
-	commands := []string{"/exit", "/quit", "/switch", "/help"}
-	specialCommands := []string{"@history", "@git", "@env", "@file", "@command"}
-
-	if strings.HasPrefix(trimmedLine, "/") {
-		for _, cmd := range commands {
-			if strings.HasPrefix(cmd, trimmedLine) {
-				completions = append(completions, cmd)
-			}
-		}
-	} else if strings.HasPrefix(trimmedLine, "@") {
-		// Verificar comandos especiais
-		for _, cmd := range specialCommands {
-			if strings.HasPrefix(cmd, trimmedLine) {
-				completions = append(completions, cmd)
-			}
-		}
-		if strings.HasPrefix(trimmedLine, "@file ") {
-			// Autocompletar caminhos de arquivos após "@file "
-			prefix := strings.TrimPrefix(trimmedLine, "@file ")
-			fileCompletions := cli.completeFilePath(prefix)
-			// Prepend "@file " to each completion
-			for _, comp := range fileCompletions {
-				completions = append(completions, "@file "+comp)
-			}
-		} else if strings.HasPrefix(trimmedLine, "@command ") {
-			// Autocompletar comandos do sistema após "@command "
-			prefix := strings.TrimPrefix(trimmedLine, "@command ")
-			commandCompletions := cli.completeSystemCommands(prefix)
-			// Prepend "@command " to each completion
-			for _, comp := range commandCompletions {
-				completions = append(completions, "@command "+comp)
-			}
-		}
-	} else {
-		// Autocompletar comandos anteriores
-		for _, historyCmd := range cli.commandHistory {
-			if strings.HasPrefix(historyCmd, trimmedLine) {
-				completions = append(completions, historyCmd)
-			}
-		}
-		// Autocompletar caminhos de arquivos
-		completions = append(completions, cli.completeFilePath(trimmedLine)...)
-	}
-
-	return completions
-}
-
-// completeFilePath autocompleta caminhos de arquivos
-func (cli *ChatCLI) completeFilePath(prefix string) []string {
-	var completions []string
-
-	dir, filePrefix := filepath.Split(prefix)
-	if dir == "" {
-		dir = "."
-	}
-
-	// Expandir "~" para o diretório home
-	dir = os.ExpandEnv(dir)
-	if strings.HasPrefix(dir, "~") {
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			dir = filepath.Join(homeDir, dir[1:])
-		}
-	}
-
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return completions
-	}
-
-	for _, entry := range files {
-		name := entry.Name()
-		if strings.HasPrefix(name, filePrefix) {
-			path := filepath.Join(dir, name)
-			if entry.IsDir() {
-				path += string(os.PathSeparator)
-			}
-			completions = append(completions, path)
-		}
-	}
-
-	return completions
-}
-
-// completeSystemCommands autocompleta comandos do sistema
-func (cli *ChatCLI) completeSystemCommands(prefix string) []string {
-	var completions []string
-
-	// Obter o PATH do sistema
-	pathEnv := os.Getenv("PATH")
-	paths := strings.Split(pathEnv, string(os.PathListSeparator))
-
-	seen := make(map[string]bool)
-
-	for _, pathDir := range paths {
-		files, err := os.ReadDir(pathDir)
-		if err != nil {
-			continue
-		}
-
-		for _, file := range files {
-			name := file.Name()
-			if strings.HasPrefix(name, prefix) && !seen[name] {
-				seen[name] = true
-				completions = append(completions, name)
-			}
-		}
-	}
-
-	return completions
-}
-
-// Animação de "Pensando..."
-var thinkingWG sync.WaitGroup
-var thinkingDone chan bool
-
-func (cli *ChatCLI) showThinkingAnimation() {
-	thinkingWG.Add(1)
-	thinkingDone = make(chan bool)
-
-	go func() {
-		defer thinkingWG.Done()
-		spinner := []string{"|", "/", "-", "\\"}
-		i := 0
-		for {
-			select {
-			case <-thinkingDone:
-				fmt.Printf("\r\033[K") // Limpa a linha corretamente
-				return
-			default:
-				fmt.Printf("\r%s está pensando... %s", cli.client.GetModelName(), spinner[i%len(spinner)])
-				time.Sleep(100 * time.Millisecond)
-				i++
-			}
-		}
-	}()
-}
-
-func (cli *ChatCLI) stopThinkingAnimation() {
-	close(thinkingDone)
-	thinkingWG.Wait()
-	fmt.Printf("\n") // Garante que a próxima saída comece em uma nova linha
-}
-
-// renderMarkdown renderiza o texto em Markdown
-func (cli *ChatCLI) renderMarkdown(input string) string {
-	// Ajustar a largura para o tamanho do terminal
-	//width, _, err := utils.GetTerminalSize()
-	//if err != nil || width <= 0 {
-	//	width = 80 // valor padrão
-	//}
-	renderer, _ := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(0),
-	)
-	out, err := renderer.Render(input)
-	if err != nil {
-		return input
-	}
-	return out
-}
-
-// typewriterEffect exibe o texto com efeito de máquina de escrever
-func (cli *ChatCLI) typewriterEffect(text string, delay time.Duration) {
-	reader := strings.NewReader(text)
-	inEscapeSequence := false
-
-	for {
-		char, _, err := reader.ReadRune()
-		if err != nil {
-			break // Fim do texto
-		}
-
-		// Verifica se é o início de uma sequência de escape
-		if char == '\033' {
-			inEscapeSequence = true
-		}
-
-		fmt.Printf("%c", char)
-
-		// Verifica o final da sequência de escape
-		if inEscapeSequence {
-			if char == 'm' {
-				inEscapeSequence = false
-			}
-			continue // Não aplica delay dentro da sequência de escape
-		}
-
-		time.Sleep(delay) // Ajuste o delay conforme desejado
-	}
 }
