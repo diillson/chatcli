@@ -52,7 +52,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 
 	reqBody := map[string]interface{}{
 		"model":      c.model,
-		"max_tokens": 1024,
+		"max_tokens": 10024,
 		"messages":   messages,
 	}
 	reqJSON, _ := json.Marshal(reqBody)

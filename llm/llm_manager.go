@@ -21,16 +21,23 @@ func (e *ConfigError) Error() string {
 	return fmt.Sprintf("ConfigError: %s", e.Mensagem)
 }
 
-// LLMManager gerencia diferentes clientes LLM e o TokenManager
-type LLMManager struct {
+// LLMManager é a interface que define os métodos que o gerenciador de LLMs deve implementar
+type LLMManager interface {
+	GetClient(provider string, model string) (LLMClient, error)
+	GetAvailableProviders() []string
+	GetTokenManager() (*TokenManager, bool)
+}
+
+// LLMManagerImpl gerencia diferentes clientes LLM e o TokenManager
+type LLMManagerImpl struct {
 	clients      map[string]func(string) (LLMClient, error)
 	logger       *zap.Logger
 	tokenManager *TokenManager
 }
 
-// NewLLMManager cria uma nova instância de LLMManager.
-func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (*LLMManager, error) {
-	manager := &LLMManager{
+// NewLLMManager cria uma nova instância de LLMManagerImpl.
+func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager, error) {
+	manager := &LLMManagerImpl{
 		clients: make(map[string]func(string) (LLMClient, error)),
 		logger:  logger,
 	}
@@ -44,7 +51,7 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (*LLMManager
 }
 
 // configurarOpenAIClient configura o cliente OpenAI se a variável de ambiente OPENAI_API_KEY estiver definida.
-func (m *LLMManager) configurarOpenAIClient() {
+func (m *LLMManagerImpl) configurarOpenAIClient() {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey != "" {
 		m.clients["OPENAI"] = func(model string) (LLMClient, error) {
@@ -59,7 +66,7 @@ func (m *LLMManager) configurarOpenAIClient() {
 }
 
 // configurarStackSpotClient configura o cliente StackSpot se as variáveis de ambiente necessárias estiverem definidas.
-func (m *LLMManager) configurarStackSpotClient(slugName, tenantName string) {
+func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string) {
 	clientID := os.Getenv("CLIENT_ID")
 	clientSecret := os.Getenv("CLIENT_SECRET")
 
@@ -77,7 +84,8 @@ func (m *LLMManager) configurarStackSpotClient(slugName, tenantName string) {
 	}
 }
 
-func (m *LLMManager) configurarClaudeAIClient() {
+// configurarClaudeAIClient configura o cliente ClaudeAI se a variável de ambiente CLAUDEAI_API_KEY estiver definida.
+func (m *LLMManagerImpl) configurarClaudeAIClient() {
 	apiKey := os.Getenv("CLAUDEAI_API_KEY")
 	if apiKey != "" {
 		m.clients["CLAUDEAI"] = func(model string) (LLMClient, error) {
@@ -92,7 +100,7 @@ func (m *LLMManager) configurarClaudeAIClient() {
 }
 
 // GetAvailableProviders retorna uma lista de provedores disponíveis configurados
-func (m *LLMManager) GetAvailableProviders() []string {
+func (m *LLMManagerImpl) GetAvailableProviders() []string {
 	var providers []string
 	for provider := range m.clients {
 		providers = append(providers, provider)
@@ -101,7 +109,7 @@ func (m *LLMManager) GetAvailableProviders() []string {
 }
 
 // GetClient retorna um cliente LLM com base no provedor e no modelo especificados.
-func (m *LLMManager) GetClient(provider string, model string) (LLMClient, error) {
+func (m *LLMManagerImpl) GetClient(provider string, model string) (LLMClient, error) {
 	factoryFunc, ok := m.clients[provider]
 	if !ok {
 		return nil, fmt.Errorf("Erro: Provedor LLM '%s' não suportado ou não configurado", provider)
@@ -116,6 +124,7 @@ func (m *LLMManager) GetClient(provider string, model string) (LLMClient, error)
 	return client, nil
 }
 
-func (m *LLMManager) GetTokenManager() (*TokenManager, bool) {
+// GetTokenManager retorna o TokenManager se ele estiver configurado.
+func (m *LLMManagerImpl) GetTokenManager() (*TokenManager, bool) {
 	return m.tokenManager, m.tokenManager != nil
 }
