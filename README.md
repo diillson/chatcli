@@ -1,10 +1,10 @@
 # ChatCLI
 
-ChatCLI é uma aplicação de interface de linha de comando (CLI) avançada que utiliza modelos de Linguagem de Aprendizado (LLMs) poderosos como StackSpot e OpenAI para facilitar conversas interativas e contextuais diretamente no seu terminal. Projetado para desenvolvedores, cientistas de dados e entusiastas de tecnologia, o ChatCLI aumenta a produtividade integrando diversas fontes de dados contextuais e proporcionando uma experiência rica e amigável ao usuário.
+ChatCLI é uma aplicação de interface de linha de comando (CLI) avançada que utiliza modelos de Linguagem de Aprendizado (LLMs) poderosos como StackSpot, OpenAI e ClaudeAI para facilitar conversas interativas e contextuais diretamente no seu terminal. Projetado para desenvolvedores, cientistas de dados e entusiastas de tecnologia, o ChatCLI aumenta a produtividade integrando diversas fontes de dados contextuais e proporcionando uma experiência rica e amigável ao usuário.
 
 ## 🚀 Funcionalidades
 
-- **Suporte a Múltiplos Provedores**: Alterne facilmente entre diferentes provedores de LLM como StackSpot e OpenAI conforme suas necessidades.
+- **Suporte a Múltiplos Provedores**: Alterne facilmente entre diferentes provedores de LLM como StackSpot, OpenAI e ClaudeAI conforme suas necessidades.
 - **Experiência Interativa na CLI**: Desfrute de uma interação suave na linha de comando com recursos como navegação de histórico e auto-completação de comandos.
 - **Comandos Contextuais**:
     - `@history` - Integra o histórico recente de comandos do seu shell na conversa (suporta bash, zsh e fish).
@@ -12,9 +12,10 @@ ChatCLI é uma aplicação de interface de linha de comando (CLI) avançada que 
     - `@env` - Inclui suas variáveis de ambiente no contexto do chat.
     - `@file <caminho>` - Incorpora o conteúdo de arquivos especificados na conversa. Suporta `~` como atalho para o diretório home do usuário e expande caminhos relativos.
     - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa para consultas posteriores com a LLM.
+    - **Novo**: `@command <comando> --ai | <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o pipe `|` para que a IA processe a saída conforme solicitado.
 - **Execução de Comandos Diretos**: Execute comandos de sistema diretamente a partir do ChatCLI usando `@command`, e a saída é salva no histórico para referência.
 - **Alteração Dinâmica de Configurações**: Mude o provedor de LLM, slug e tenantname diretamente do ChatCLI sem reiniciar a aplicação usando `/switch` com opções.
-- **Recarregamento de Variáveis**: Altere suas consigurações de variaveis de ambiente usando `/reload` para que o chatcli leia e modifique as configurações.
+- **Recarregamento de Variáveis**: Altere suas configurações de variáveis de ambiente usando `/reload` para que o ChatCLI leia e modifique as configurações.
 - **Feedback Animado**: Animações visuais de "Pensando..." enquanto o LLM processa suas solicitações, aumentando o engajamento do usuário.
 - **Renderização de Markdown**: Respostas são renderizadas com Markdown para melhor legibilidade e formatação.
 - **Histórico Persistente**: O histórico de comandos é salvo entre sessões, permitindo revisitar interações anteriores com facilidade.
@@ -60,8 +61,6 @@ ChatCLI é uma aplicação de interface de linha de comando (CLI) avançada que 
 ## 🛠 Configuração
 
 O ChatCLI depende de variáveis de ambiente para configurar seu comportamento e conectar-se aos provedores de LLM. Você pode definir essas variáveis em um arquivo `.env` na raiz do projeto ou exportá-las diretamente no seu shell.
-
-Aqui está o ajuste no `README.md` para incluir a ClaudeAI como um provedor suportado pelo ChatCLI:
 
 ---
 
@@ -113,10 +112,6 @@ CLAUDEAI_API_KEY=sua-chave-claudeai
 CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
 ```
 
-### Adicionar ClaudeAI como Provedor no ChatCLI
-
-Agora você pode trocar dinamicamente para o ClaudeAI usando o comando `/switch` ou configurá-lo como o provedor padrão definindo `LLM_PROVIDER=CLAUDEAI` no `.env`.
-
 --- 
 
 Esses ajustes garantem que ClaudeAI esteja configurado e documentado no `README.md`, alinhando com as práticas dos outros provedores, como OpenAI e StackSpot.
@@ -152,6 +147,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
     - `@env` - Inclui variáveis de ambiente no chat.
     - `@file <caminho>` - Adiciona o conteúdo do arquivo especificado ao contexto da conversa. Suporta `~` como atalho para o diretório home e expande caminhos relativos.
     - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa.
+    - **Novo**: `@command <comando> --ai | <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o pipe `|` para que a IA processe a saída conforme solicitado.
 
 ### Exemplos de Uso
 
@@ -228,7 +224,15 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 
    A LLM terá acesso ao histórico e poderá explicar o erro ou sugerir correções.
 
-8. **Alterando Provedor de LLM**:
+8. **Executando Comando e Enviando Saída para a LLM com Contexto**:
+
+   ```
+   Você: @command ls --ai | Filtrar apenas os arquivos .go
+   ```
+
+   O comando `ls` será executado, e a saída será enviada para a LLM com o contexto "Filtrar apenas os arquivos .go".
+
+9. **Alterando Provedor de LLM**:
 
    Para trocar o provedor de LLM durante a sessão:
 
@@ -242,25 +246,27 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
    Provedores disponíveis:
    1. OPENAI
    2. STACKSPOT
-   Selecione o provedor (1 ou 2):
+   3. CLAUDEAI
+   Selecione o provedor (1, 2 ou 3):
    ```
 
-9. **Atualizando `slugName` e `tenantName` sem trocar o provedor**:
+10. **Atualizando `slugName` e `tenantName` sem trocar o provedor**:
 
-   ```
-   Você: /switch --slugname novo-slug --tenantname novo-tenant
-   ```
+```
+Você: /switch --slugname novo-slug --tenantname novo-tenant
+```
 
-   O `TokenManager` será atualizado com os novos valores, e um novo token será obtido.
+O `TokenManager` será atualizado com os novos valores, e um novo token será obtido.
 
-10. **Refaz a leitura das variaveis de ambientes, identificando as mudanças e reconfigurando o ambiente.**:
+11. **Refaz a leitura das variáveis de ambiente, identificando as mudanças e reconfigurando o ambiente**:
 
     ```
     Você: /reload
     ```
 
-    As `Variaveis` serão reconfiguradas com os novos valores, e uma nova validação de todos os recursos ocorrerá.
+    As variáveis serão reconfiguradas com os novos valores, e uma nova validação de todos os recursos ocorrerá.
 
+---
 ### Capturas de Tela
 
 #### Exemplo de Execução de Comando com `@command`
@@ -283,23 +289,36 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 
 ## 📂 Estrutura do Código
 
-O projeto está organizado em vários pacotes, cada um responsável por diferentes aspectos da aplicação:
+O projeto está organizado em vários pacotes, cada um responsável por diferentes aspectos da aplicação. Recentemente, o código foi refatorado para melhorar a separação de responsabilidades e facilitar a manutenção e a escalabilidade. Aqui estão os principais componentes:
 
-- `cli`: Gerencia a interface de linha de comando, entrada do usuário, processamento de comandos e interação com os clientes LLM.
-- `llm`: Gerencia as interações com os Modelos de Linguagem, suportando múltiplos provedores como OpenAI e StackSpot.
-    - `llm_client.go`: Define a interface `LLMClient` que todos os clientes LLM devem implementar.
-    - `openai_client.go`: Implementa o cliente para interagir com a API da OpenAI, incluindo tratamento de erros e retries.
-    - `stackspot_client.go`: Implementa o cliente para interagir com a API da StackSpot, gerenciando tokens de acesso e chamadas à API.
-    - `token_manager.go`: Gerencia a obtenção e renovação de tokens de acesso para a StackSpot.
-- `utils`: Contém funções utilitárias para operações de arquivo, expansão de caminhos, logging, leitura de histórico do shell, obtenção de informações do Git, entre outros.
-    - `http_client.go`: Cria um cliente HTTP personalizado com um `LoggingTransport` para registrar requisições e respostas.
-    - `logging_transport.go`: Implementa um `http.RoundTripper` personalizado para adicionar logs às requisições e respostas HTTP, com sanitização de dados sensíveis.
-    - `path.go`: Fornece funções para manipulação de caminhos de arquivos, incluindo expansão de `~` para o diretório home.
-    - `shell_utils.go`: Contém funções para detectar o shell do usuário e obter o histórico de comandos.
-    - `git_utils.go`: Fornece funções para obter informações do repositório Git atual.
-    - `env_utils.go`: Fornece funções para obter as variáveis de ambiente do sistema.
-- `models`: Define as estruturas de dados utilizadas em toda a aplicação, como `Message` e `ResponseData`.
-- `main`: Inicializa a aplicação, configura dependências e inicia a CLI.
+- **`cli`**: Gerencia a interface de linha de comando, entrada do usuário, processamento de comandos e interação com os clientes LLM.
+    - **`ChatCLI`**: A classe principal que gerencia o loop de interação com o usuário, incluindo a execução de comandos e o envio de prompts para os LLMs.
+    - **`CommandHandler`**: Uma nova classe introduzida para lidar com comandos específicos da CLI, como `/exit`, `/switch`, `/reload`, e o novo `@command --ai`. Isso melhora a modularidade e facilita a adição de novos comandos no futuro.
+    - **`HistoryManager`**: Gerencia o histórico de comandos do usuário, permitindo que o histórico seja salvo e carregado entre sessões.
+    - **`AnimationManager`**: Gerencia animações visuais, como o feedback de "Pensando..." enquanto o LLM processa uma solicitação.
+
+- **`llm`**: Gerencia as interações com os Modelos de Linguagem, suportando múltiplos provedores como OpenAI, StackSpot e ClaudeAI.
+    - **`LLMClient`**: Interface que todos os clientes LLM devem implementar.
+    - **`OpenAIClient`**: Implementa o cliente para interagir com a API da OpenAI, incluindo tratamento de erros e retries.
+    - **`StackSpotClient`**: Implementa o cliente para interagir com a API da StackSpot, gerenciando tokens de acesso e chamadas à API.
+    - **`ClaudeAIClient`**: Implementa o cliente para interagir com a API da ClaudeAI.
+
+- **`token_manager.go`**: Gerencia a obtenção e renovação de tokens de acesso para a StackSpot e outros provedores que exigem autenticação.
+
+- **`utils`**: Contém funções utilitárias para operações de arquivo, expansão de caminhos, logging, leitura de histórico do shell, obtenção de informações do Git, entre outros.
+    - **`shell_utils.go`**: Contém funções para detectar o shell do usuário e obter o histórico de comandos.
+    - **`git_utils.go`**: Fornece funções para obter informações do repositório Git atual.
+    - **`env_utils.go`**: Fornece funções para obter as variáveis de ambiente do sistema.
+
+- **`http_client.go`**: Cria um cliente HTTP personalizado com um `LoggingTransport` para registrar requisições e respostas.
+
+- **`logging_transport.go`**: Implementa um `http.RoundTripper` personalizado para adicionar logs às requisições e respostas HTTP, com sanitização de dados sensíveis.
+
+- **`path.go`**: Fornece funções para manipulação de caminhos de arquivos, incluindo expansão de `~` para o diretório home.
+
+- **`models`**: Define as estruturas de dados utilizadas em toda a aplicação, como `Message` e `ResponseData`.
+
+- **`main`**: Inicializa a aplicação, configura dependências e inicia a CLI.
 
 ## 📚 Bibliotecas e Dependências
 
@@ -401,3 +420,5 @@ Para quaisquer perguntas, feedback ou suporte, por favor, abra uma issue no repo
 ChatCLI conecta a potência dos LLMs com a simplicidade da linha de comando, oferecendo uma ferramenta versátil para interações contínuas com IA dentro do seu ambiente de terminal. Abrace o futuro da produtividade na linha de comando com o ChatCLI!
 
 Boas conversas! 🗨️✨
+
+Aqui está uma sugestão de mensagem de commit:

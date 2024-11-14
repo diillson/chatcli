@@ -40,7 +40,7 @@ type Logger interface {
 // ChatCLI representa a interface de linha de comando do chat
 type ChatCLI struct {
 	client         llm.LLMClient
-	manager        *llm.LLMManager
+	manager        llm.LLMManager
 	logger         *zap.Logger
 	provider       string
 	model          string
@@ -48,6 +48,9 @@ type ChatCLI struct {
 	line           *liner.State
 	terminalWidth  int
 	commandHistory []string
+	historyManager *HistoryManager
+	animation      *AnimationManager
+	commandHandler *CommandHandler
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -74,52 +77,47 @@ func (cli *ChatCLI) reconfigureLogger() {
 func (cli *ChatCLI) reloadConfiguration() {
 	fmt.Println("Recarregando configurações...")
 
+	// Limpar variáveis de ambiente
 	variablesToUnset := []string{
-		"LOG_LEVEL",
-		"ENV",
-		"LLM_PROVIDER",
-		"LOG_FILE",
-		"OPENAI_API_KEY",
-		"OPENAI_MODEL",
-		"CLAUDEAI_API_KEY",
-		"CLAUDEAI_MODEL",
-		"CLIENT_ID",
-		"CLIENT_SECRET",
-		"SLUG_NAME",
-		"TENANT_NAM",
+		"LOG_LEVEL", "ENV", "LLM_PROVIDER", "LOG_FILE", "OPENAI_API_KEY", "OPENAI_MODEL",
+		"CLAUDEAI_API_KEY", "CLAUDEAI_MODEL", "CLIENT_ID", "CLIENT_SECRET", "SLUG_NAME", "TENANT_NAME",
 	}
 
 	for _, variable := range variablesToUnset {
-		os.Unsetenv(variable) // Limpa todas as variáveis de ambiente em memória
+		os.Unsetenv(variable)
 	}
 
-	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
-		fmt.Println("Nenhum arquivo .env encontrado, continuando sem ele")
+	// Recarregar o arquivo .env
+	err := godotenv.Load()
+	if err != nil && !os.IsNotExist(err) {
+		cli.logger.Error("Erro ao carregar o arquivo .env", zap.Error(err))
 	}
 
 	cli.reconfigureLogger()
 
-	// Reutilizar o método de validação do ambiente e providers existente em main.go
+	// Recarregar a configuração do LLMManager
 	utils.CheckEnvVariables(cli.logger, defaultSlugName, defaultTenantName)
 
-	// Recarregar a configuração do LLMManager usando as variáveis atualizadas
 	manager, err := llm.NewLLMManager(cli.logger, os.Getenv("SLUG_NAME"), os.Getenv("TENANT_NAME"))
 	if err != nil {
 		cli.logger.Error("Erro ao reconfigurar o LLMManager", zap.Error(err))
 		return
 	}
 
-	// Verificar se há provedores disponíveis
-	availableProviders := manager.GetAvailableProviders()
-	if len(availableProviders) == 0 {
-		fmt.Println("Nenhum provedor LLM está configurado. Verifique suas variáveis de ambiente.")
-		os.Exit(1)
+	cli.manager = manager
+	cli.configureProviderAndModel()
+
+	client, err := cli.manager.GetClient(cli.provider, cli.model)
+	if err != nil {
+		cli.logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
+		return
 	}
 
-	// Atualizar o manager e recarregar os providers com base nas variáveis revalidadas
-	cli.manager = manager
+	cli.client = client
+	fmt.Println("Configurações recarregadas com sucesso!")
+}
 
-	// Configurar o provider e o modelo com base no ambiente recarregado
+func (cli *ChatCLI) configureProviderAndModel() {
 	cli.provider = os.Getenv("LLM_PROVIDER")
 	if cli.provider == "" {
 		cli.provider = "STACKSPOT" // Usar padrão se não estiver definido
@@ -136,43 +134,20 @@ func (cli *ChatCLI) reloadConfiguration() {
 			cli.model = defaultClaudeAIModel
 		}
 	}
-
-	// Atualizar o cliente LLM com base nas novas configurações
-	client, err := cli.manager.GetClient(cli.provider, cli.model)
-	if err != nil {
-		cli.logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
-		return
-	}
-
-	cli.client = client
-	fmt.Println("Configurações recarregadas com sucesso!")
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
-func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
-	provider := os.Getenv("LLM_PROVIDER")
-
-	if provider == "" {
-		logger.Warn("LLM_PROVIDER não definido, setando provider default: " + utils.GetEnvOrDefault(provider, llmdDefault))
-		provider = llmdDefault
+func NewChatCLI(manager llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
+	cli := &ChatCLI{
+		manager:        manager,
+		logger:         logger,
+		historyManager: NewHistoryManager(logger),
+		animation:      NewAnimationManager(),
 	}
 
-	if provider == "STACKSPOT" {
-		logger.Info("Usando STACKSPOT como padrão")
-	}
+	cli.configureProviderAndModel()
 
-	var model string
-	if provider == "OPENAI" {
-		logger.Info("Usando OPENAI como padrão")
-		model = utils.GetEnvOrDefault("OPENAI_MODEL", defaultOpenAIModel)
-	}
-
-	if provider == "CLAUDEAI" {
-		logger.Info("Usando CLAUDEAI como padrão")
-		model = utils.GetEnvOrDefault("CLAUDEAI_MODEL", defaultClaudeAIModel)
-	}
-
-	client, err := manager.GetClient(provider, model)
+	client, err := manager.GetClient(cli.provider, cli.model)
 	if err != nil {
 		logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
 		return nil, err
@@ -181,21 +156,21 @@ func NewChatCLI(manager *llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	line := liner.NewLiner()
 	line.SetCtrlCAborts(true) // Permite que Ctrl+C aborte o input
 
-	cli := &ChatCLI{
-		client:         client,
-		manager:        manager,
-		logger:         logger,
-		provider:       provider,
-		model:          model,
-		history:        []models.Message{},
-		line:           line,
-		commandHistory: []string{},
-	}
+	cli.client = client
+	cli.line = line
+	cli.history = []models.Message{}
+	cli.commandHistory = []string{}
+	cli.commandHandler = NewCommandHandler(cli)
 
 	// Definir a função de autocompletar
 	cli.line.SetCompleter(cli.completer)
 
-	cli.loadHistory()
+	// Carregar o histórico
+	history, err := cli.historyManager.LoadHistory()
+	if err != nil {
+		cli.logger.Error("Erro ao carregar o histórico", zap.Error(err))
+	}
+	cli.commandHistory = history
 
 	return cli, nil
 }
@@ -213,6 +188,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	fmt.Println("Digite '/reload' para recarregar as variáveis e reconfigurar o chatcli.")
 	fmt.Println("Use '@history', '@git', '@env', '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando>' para interativo.")
+	fmt.Println("Use '@command --ai <seu_comando>' para enviar o ouput para a AI de forma direta e '|' {pipe} <seu contexto> para que a AI faça algo")
 	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n\n")
 
 	for {
@@ -244,12 +220,9 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				continue
 			}
 
-			cli.commandHistory = append(cli.commandHistory, input)
-			cli.line.AppendHistory(input)
-
 			// Verificar por comandos
 			if strings.HasPrefix(input, "/") || input == "exit" || input == "quit" {
-				if cli.handleCommand(input) {
+				if cli.commandHandler.HandleCommand(input) {
 					return
 				}
 				continue
@@ -265,7 +238,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			})
 
 			// Exibir mensagem "Pensando..." com animação
-			cli.showThinkingAnimation()
+			cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
 
 			// Criar um contexto com timeout
 			responseCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -275,7 +248,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			aiResponse, err := cli.client.SendPrompt(responseCtx, userInput+additionalContext, cli.history)
 
 			// Parar a animação
-			cli.stopThinkingAnimation()
+			cli.animation.StopThinkingAnimation()
 
 			if err != nil {
 				cli.logger.Error("Erro do LLM", zap.Error(err))
@@ -307,7 +280,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 // cleanup realiza a limpeza de recursos ao encerrar o ChatCLI
 func (cli *ChatCLI) cleanup() {
 	cli.line.Close()
-	cli.saveHistory()
+	cli.historyManager.SaveHistory(cli.commandHistory)
 	cli.logger.Sync()
 }
 
@@ -446,6 +419,7 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("@env - Adiciona variáveis de ambiente ao contexto")
 	fmt.Println("@file <caminho_do_arquivo> - Adiciona o conteúdo de um arquivo ao contexto")
 	fmt.Println("@command <seu_comando> - para executar um comando diretamente no sistema")
+	fmt.Println("@command --ai <seu_comando> para enviar o ouput para a AI de forma direta e '|' {pipe} <seu contexto> para que a AI faça algo")
 	fmt.Println("@command -i <seu_comando> - para executar um comando interativo")
 	fmt.Println("/exit ou /quit - Sai do ChatCLI")
 	fmt.Println("/switch - Troca o provedor de LLM")
@@ -454,6 +428,7 @@ func (cli *ChatCLI) showHelp() {
 
 }
 
+// processSpecialCommands processa comandos especiais como @history, @git, @env, @file
 func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 	commands := []struct {
 		trigger string
@@ -475,6 +450,49 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 
 	return userInput, additionalContext
 }
+
+// renderMarkdown renderiza o texto em Markdown
+//func (cli *ChatCLI) renderMarkdown(input string) string {
+//	renderer, _ := glamour.NewTermRenderer(
+//		glamour.WithAutoStyle(),
+//		glamour.WithWordWrap(0),
+//	)
+//	out, err := renderer.Render(input)
+//	if err != nil {
+//		return input
+//	}
+//	return out
+//}
+
+// typewriterEffect exibe o texto com efeito de máquina de escrever
+//func (cli *ChatCLI) typewriterEffect(text string, delay time.Duration) {
+//	reader := strings.NewReader(text)
+//	inEscapeSequence := false
+//
+//	for {
+//		char, _, err := reader.ReadRune()
+//		if err != nil {
+//			break // Fim do texto
+//		}
+//
+//		// Verifica se é o início de uma sequência de escape
+//		if char == '\033' {
+//			inEscapeSequence = true
+//		}
+//
+//		fmt.Printf("%c", char)
+//
+//		// Verifica o final da sequência de escape
+//		if inEscapeSequence {
+//			if char == 'm' {
+//				inEscapeSequence = false
+//			}
+//			continue // Não aplica delay dentro da sequência de escape
+//		}
+//
+//		time.Sleep(delay) // Ajuste o delay conforme desejado
+//	}
+//}
 
 // processHistoryCommand adiciona o histórico do shell ao contexto
 func (cli *ChatCLI) processHistoryCommand(userInput string) (string, string) {
@@ -691,6 +709,22 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 		command = strings.TrimPrefix(command, "--interactive ")
 	}
 
+	// Verificar se o comando contém a flag --send-ai e pipe |
+	sendToAI := false
+	var aiContext string
+	if strings.Contains(command, "-ai") {
+		sendToAI = true
+		// Remover a flag do comando
+		command = strings.Replace(command, "-ai", "", 1)
+	}
+
+	// Verificar se há um pipe | no comando
+	if strings.Contains(command, "|") {
+		parts := strings.Split(command, "|")
+		command = strings.TrimSpace(parts[0])
+		aiContext = strings.TrimSpace(parts[1])
+	}
+
 	// Obter o shell do usuário
 	userShell := utils.GetUserShell()
 	shellPath, err := exec.LookPath(userShell)
@@ -758,10 +792,56 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 			Role:    "system",
 			Content: fmt.Sprintf("Comando: %s\nSaída:\n%s", command, string(output)),
 		})
+
+		// se a flag --ai foi passada enviar o output para a IA
+		if sendToAI {
+			cli.sendOutputToAI(string(output), aiContext)
+		}
 	}
 
 	// Adicionar o comando ao histórico do liner para persistir em .chatcli_history
 	cli.line.AppendHistory(fmt.Sprintf("@command %s", command))
+}
+
+// sendOutputToAI envia o output do comando para a IA com o contexto adicional
+func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
+	fmt.Println("Enviando sáida do comando para a IA...")
+
+	// Adicionar o output do comando ao histórico como mensagem do usuário
+	cli.history = append(cli.history, models.Message{
+		Role:    "user",
+		Content: fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", output, aiContext),
+	})
+	// Exibir mensagem "Pensando..." com animação
+	cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
+
+	//Criar um contexto com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	//Enviar o output e o contexto para a IA
+	aiResponse, err := cli.client.SendPrompt(ctx, fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", output, aiContext), cli.history)
+
+	//parar a animação
+	cli.animation.StopThinkingAnimation()
+
+	if err != nil {
+		cli.logger.Error("Erro do LLM", zap.Error(err))
+		fmt.Println("Ocorreu um erro ao processar a requisição.")
+		return
+	}
+
+	// Adicionar a resposta da IA ao histórico
+	cli.history = append(cli.history, models.Message{
+		Role:    "assistant",
+		Content: aiResponse,
+	})
+
+	// Renderizar a resposta da IA
+	renderResponse := cli.renderMarkdown(aiResponse)
+
+	// Exibir a resposta da IA com efeito de digitação
+	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderResponse), 2*time.Millisecond)
 }
 
 // loadHistory carrega o histórico do arquivo
