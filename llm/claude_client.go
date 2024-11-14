@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 	"io"
 	"net/http"
@@ -26,11 +27,14 @@ type ClaudeClient struct {
 
 // NewClaudeClient cria um novo cliente ClaudeAI com configurações personalizáveis
 func NewClaudeClient(apiKey string, model string, logger *zap.Logger) *ClaudeClient {
+	// Usar o transporte HTTP com logging
+	httpClient := utils.NewHTTPClient(logger, 30*time.Second)
+
 	return &ClaudeClient{
 		apiKey: apiKey,
 		model:  model,
 		logger: logger,
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: httpClient,
 	}
 }
 
