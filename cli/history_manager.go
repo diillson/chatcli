@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,16 +28,47 @@ func NewHistoryManager(logger *zap.Logger) *HistoryManager {
 }
 
 // getMaxHistorySizeFromEnv lê a variável de ambiente HISTORY_MAX_SIZE e retorna o valor em bytes.
-// Se a variável não estiver definida ou for inválida, retorna o valor padrão (50MB).
+// Agora aceita valores como "50MB", "100KB", "1GB", etc.
 func getMaxHistorySizeFromEnv() int64 {
 	envValue := os.Getenv("HISTORY_MAX_SIZE")
 	if envValue != "" {
-		size, err := strconv.ParseInt(envValue, 10, 64)
+		size, err := parseSize(envValue)
 		if err == nil && size > 0 {
 			return size
 		}
 	}
 	return defaultMaxHistorySize
+}
+
+// parseSize converte uma string de tamanho legível (como "50MB", "100KB", "1GB") para bytes.
+func parseSize(sizeStr string) (int64, error) {
+	sizeStr = strings.TrimSpace(sizeStr)
+	unit := "B" // Padrão para bytes
+	var multiplier int64 = 1
+
+	// Verificar se a string termina com uma unidade de medida
+	if strings.HasSuffix(sizeStr, "KB") {
+		unit = "KB"
+		multiplier = 1024
+	} else if strings.HasSuffix(sizeStr, "MB") {
+		unit = "MB"
+		multiplier = 1024 * 1024
+	} else if strings.HasSuffix(sizeStr, "GB") {
+		unit = "GB"
+		multiplier = 1024 * 1024 * 1024
+	}
+
+	// Remover a unidade da string para obter apenas o número
+	sizeStr = strings.TrimSuffix(sizeStr, unit)
+	sizeStr = strings.TrimSpace(sizeStr)
+
+	// Converter o número para int64
+	size, err := strconv.ParseInt(sizeStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("tamanho inválido: %s", sizeStr)
+	}
+
+	return size * multiplier, nil
 }
 
 // LoadHistory carrega o histórico do arquivo

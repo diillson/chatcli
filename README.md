@@ -69,10 +69,11 @@ O ChatCLI depende de variáveis de ambiente para configurar seu comportamento e 
 O ChatCLI agora suporta o ClaudeAI como um provedor adicional de LLM. Veja como configurar a ClaudeAI e as outras variáveis de ambiente para o funcionamento do ChatCLI:
 
 - **Geral**:
-    - `LOG_LEVEL` - Define o nível de log (`debug`, `info`, `warn`, `error`). Padrão é `info`.
-    - `ENV` - Define o ambiente (`prod` para produção, caso contrário, padrão é desenvolvimento).
-    - `LLM_PROVIDER` - Especifica o provedor de LLM padrão (`OPENAI`, `STACKSPOT` ou `CLAUDEAI`). Padrão é `STACKSPOT`.
+    - `LOG_LEVEL` - (Opcional) Define o nível de log (`debug`, `info`, `warn`, `error`). Padrão é `info`.
+    - `ENV` - (Opcional) Define o ambiente (`prod` para produção, caso contrário, padrão é `dev` desenvolvimento) - Essencial pois muda a forma que o log transacional e exibido no terminal.
+    - `LLM_PROVIDER` - (Opacional) Especifica o provedor de LLM padrão (`OPENAI`, `STACKSPOT` ou `CLAUDEAI`). Padrão é `STACKSPOT`.
     - `LOG_FILE` - (Opcional) Define o nome do arquivo de log. Padrão é `app.log`.
+    - `HISTORY_MAX_SIZE` - (Opcional) Define o tamanho do historico de comandos do chat `.chatcli_history` padrão é `50MB`, pode usar escala de MB KB GB, ex: 10MB, 500KB, 1GB.
 
 - **Provedor OpenAI**:
     - `OPENAI_API_KEY` - Sua chave de API da OpenAI.
@@ -96,6 +97,7 @@ LOG_LEVEL=info
 ENV=dev
 LLM_PROVIDER=CLAUDEAI
 LOG_FILE=app.log
+HISTORY_MAX_SIZE=50MB
 
 # Configurações do OpenAI
 OPENAI_API_KEY=sua-chave-openai
