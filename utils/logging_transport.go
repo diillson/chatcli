@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 
 const (
 	defaultMaxBodySize = 3070 // 3KB
+	defaultMaxLogSize  = 50   // 10MB
 )
 
 // InitializeLogger configura e inicializa um logger com base nas variáveis de ambiente.
@@ -64,13 +66,16 @@ func InitializeLogger() (*zap.Logger, error) {
 		logFile = "app.log" // Valor padrão
 	}
 
+	// Tamanho máximo do arquivo de log configurável via variável de ambiente
+	maxLogSize := getMaxLogSizeFromEnv()
+
 	// Configuração do logger com rotação de logs
 	lumberjackLogger := &lumberjack.Logger{
 		Filename:   logFile,
-		MaxSize:    10,   // Megabytes
-		MaxBackups: 3,    // Número máximo de backups
-		MaxAge:     28,   // Dias
-		Compress:   true, // Compressão
+		MaxSize:    maxLogSize, // Tamanho máximo do arquivo de log em MB
+		MaxBackups: 3,          // Número máximo de backups
+		MaxAge:     28,         // Dias
+		Compress:   true,       // Compressão
 	}
 
 	// Configuração do WriteSyncer para Dev console e arquivo de log, para Prod apenas arquivo.
@@ -90,6 +95,51 @@ func InitializeLogger() (*zap.Logger, error) {
 	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
 
 	return logger, nil
+}
+
+// getMaxLogSizeFromEnv lê a variável de ambiente LOG_MAX_SIZE e retorna o valor em MB.
+// Agora aceita valores como "50MB", "100KB", "1GB", etc.
+func getMaxLogSizeFromEnv() int {
+	envValue := os.Getenv("LOG_MAX_SIZE")
+	if envValue != "" {
+		size, err := parseSize(envValue)
+		if err == nil && size > 0 {
+			// Convertemos o valor para MB, pois o lumberjack espera o tamanho em MB
+			return int(size / (1024 * 1024))
+		}
+	}
+	return defaultMaxLogSize
+}
+
+// parseSize converte uma string de tamanho legível (como "50MB", "100KB", "1GB") para bytes.
+func parseSize(sizeStr string) (int64, error) {
+	sizeStr = strings.TrimSpace(sizeStr)
+	unit := "B" // Padrão para bytes
+	var multiplier int64 = 1
+
+	// Verificar se a string termina com uma unidade de medida
+	if strings.HasSuffix(sizeStr, "KB") {
+		unit = "KB"
+		multiplier = 1024
+	} else if strings.HasSuffix(sizeStr, "MB") {
+		unit = "MB"
+		multiplier = 1024 * 1024
+	} else if strings.HasSuffix(sizeStr, "GB") {
+		unit = "GB"
+		multiplier = 1024 * 1024 * 1024
+	}
+
+	// Remover a unidade da string para obter apenas o número
+	sizeStr = strings.TrimSuffix(sizeStr, unit)
+	sizeStr = strings.TrimSpace(sizeStr)
+
+	// Converter o número para int64
+	size, err := strconv.ParseInt(sizeStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("tamanho inválido: %s", sizeStr)
+	}
+
+	return size * multiplier, nil
 }
 
 // LoggingTransport é um http.RoundTripper que adiciona logs às requisições e respostas
