@@ -28,7 +28,7 @@ type ClaudeClient struct {
 // NewClaudeClient cria um novo cliente ClaudeAI com configurações personalizáveis
 func NewClaudeClient(apiKey string, model string, logger *zap.Logger) *ClaudeClient {
 	// Usar o transporte HTTP com logging
-	httpClient := utils.NewHTTPClient(logger, 30*time.Second)
+	httpClient := utils.NewHTTPClient(logger, 300*time.Second)
 
 	return &ClaudeClient{
 		apiKey: apiKey,
