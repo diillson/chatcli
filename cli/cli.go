@@ -192,7 +192,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	fmt.Println("Digite '/reload' para recarregar as variáveis e reconfigurar o chatcli.")
 	fmt.Println("Use '@history', '@git', '@env', '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando>' para interativo.")
-	fmt.Println("Use '@command --ai <seu_comando>' para enviar o ouput para a AI de forma direta e '|' {pipe} <seu contexto> para que a AI faça algo")
+	fmt.Println("Use '@command --ai <seu_comando>' para enviar o ouput para a AI de forma direta e '>' {maior} <seu contexto> para que a AI faça algo")
 	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n\n")
 
 	for {
@@ -431,7 +431,7 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("@env - Adiciona variáveis de ambiente ao contexto")
 	fmt.Println("@file <caminho_do_arquivo> - Adiciona o conteúdo de um arquivo ao contexto")
 	fmt.Println("@command <seu_comando> - para executar um comando diretamente no sistema")
-	fmt.Println("@command --ai <seu_comando> para enviar o ouput para a AI de forma direta e '|' {pipe} <seu contexto> para que a AI faça algo")
+	fmt.Println("@command --ai <seu_comando> para enviar o ouput para a AI de forma direta e '>' {maior} <seu contexto> para que a AI faça algo")
 	fmt.Println("@command -i <seu_comando> - para executar um comando interativo")
 	fmt.Println("/exit ou /quit - Sai do ChatCLI")
 	fmt.Println("/switch - Troca o provedor de LLM")
@@ -731,8 +731,8 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 	}
 
 	// Verificar se há um pipe | no comando
-	if strings.Contains(command, "|") {
-		parts := strings.Split(command, "|")
+	if strings.Contains(command, ">") {
+		parts := strings.Split(command, ">")
 		command = strings.TrimSpace(parts[0])
 		aiContext = strings.TrimSpace(parts[1])
 	}
