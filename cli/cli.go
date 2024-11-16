@@ -213,6 +213,11 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 			input = strings.TrimSpace(input)
 
+			if input != "" {
+				cli.line.AppendHistory(input)
+				cli.commandHistory = append(cli.commandHistory, input)
+			}
+
 			// Verificar se o input é um comando direto do sistema
 			if strings.HasPrefix(input, "@command ") {
 				command := strings.TrimPrefix(input, "@command ")
@@ -284,7 +289,10 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 // cleanup realiza a limpeza de recursos ao encerrar o ChatCLI
 func (cli *ChatCLI) cleanup() {
 	cli.line.Close()
-	cli.historyManager.SaveHistory(cli.commandHistory) // Salvar o histórico
+	//cli.historyManager.SaveHistory(cli.commandHistory) // Salvar o histórico
+	if err := cli.historyManager.SaveHistory(cli.commandHistory); err != nil {
+		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
+	}
 	cli.logger.Sync()
 }
 
@@ -804,7 +812,7 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 	}
 
 	// Adicionar o comando ao histórico do liner para persistir em .chatcli_history
-	cli.line.AppendHistory(fmt.Sprintf("@command %s", command))
+	//cli.line.AppendHistory(fmt.Sprintf("@command %s", command))
 }
 
 // sendOutputToAI envia o output do comando para a IA com o contexto adicional
