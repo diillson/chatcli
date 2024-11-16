@@ -19,7 +19,7 @@ const (
 	defaultMaxAttempts       = 50
 	defaultBackoff           = 300 * time.Second
 	stackSpotDefaultModel    = "StackSpotAI"
-	stackSpotResponseTimeout = 5 * time.Second
+	stackSpotResponseTimeout = 2 * time.Second
 )
 
 // StackSpotClient implementa o cliente para interagir com a API da StackSpot
