@@ -793,7 +793,7 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 		output, err := cmd.CombinedOutput()
 
 		// Exibir a saída
-		fmt.Println("Saída do comando:", string(output))
+		fmt.Println("Saída do comando:\n", string(output))
 
 		if err != nil {
 			fmt.Println("Erro ao executar comando:", err)
