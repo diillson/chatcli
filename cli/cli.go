@@ -730,7 +730,7 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 		command = strings.Replace(command, "-ai", "", 1)
 	}
 
-	// Verificar se há um pipe | no comando
+	// Verificar se há um maior > no comando
 	if strings.Contains(command, ">") {
 		parts := strings.Split(command, ">")
 		command = strings.TrimSpace(parts[0])

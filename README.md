@@ -12,7 +12,7 @@ ChatCLI é uma aplicação de interface de linha de comando (CLI) avançada que 
     - `@env` - Inclui suas variáveis de ambiente no contexto do chat.
     - `@file <caminho>` - Incorpora o conteúdo de arquivos especificados na conversa. Suporta `~` como atalho para o diretório home do usuário e expande caminhos relativos.
     - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa para consultas posteriores com a LLM.
-    - **Novo**: `@command <comando> --ai > <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o sinal de maior `>` para que a IA processe a saída conforme solicitado.
+    - **Novo**: `@command --ai <comando> > <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o sinal de maior `>` para que a IA processe a saída conforme solicitado.
 - **Execução de Comandos Diretos**: Execute comandos de sistema diretamente a partir do ChatCLI usando `@command`, e a saída é salva no histórico para referência.
 - **Alteração Dinâmica de Configurações**: Mude o provedor de LLM, slug e tenantname diretamente do ChatCLI sem reiniciar a aplicação usando `/switch` com opções.
 - **Recarregamento de Variáveis**: Altere suas configurações de variáveis de ambiente usando `/reload` para que o ChatCLI leia e modifique as configurações.
@@ -150,7 +150,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
     - `@env` - Inclui variáveis de ambiente no chat.
     - `@file <caminho>` - Adiciona o conteúdo do arquivo especificado ao contexto da conversa. Suporta `~` como atalho para o diretório home e expande caminhos relativos.
     - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa.
-    - **Novo**: `@command <comando> --ai > <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o sinal de maior `>` para que a IA processe a saída conforme solicitado.
+    - **Novo**: `@command --ai <comando> > <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o sinal de maior `>` para que a IA processe a saída conforme solicitado.
 
 ### Exemplos de Uso
 
@@ -230,7 +230,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 8. **Executando Comando e Enviando Saída para a LLM com Contexto**:
 
    ```
-   Você: @command ls --ai > Filtrar apenas os arquivos .go
+   Você: @command --ai ls > Filtrar apenas os arquivos .go
    ```
 
    O comando `ls` será executado, e a saída será enviada para a LLM com o contexto "Filtrar apenas os arquivos .go".
@@ -423,5 +423,3 @@ Para quaisquer perguntas, feedback ou suporte, por favor, abra uma issue no repo
 ChatCLI conecta a potência dos LLMs com a simplicidade da linha de comando, oferecendo uma ferramenta versátil para interações contínuas com IA dentro do seu ambiente de terminal. Abrace o futuro da produtividade na linha de comando com o ChatCLI!
 
 Boas conversas! 🗨️✨
-
-Aqui está uma sugestão de mensagem de commit:
