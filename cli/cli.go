@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -37,20 +38,30 @@ type Logger interface {
 	Sync() error
 }
 
+// Adicione a interface Liner
+type Liner interface {
+	Prompt(string) (string, error)
+	Close() error
+	SetCtrlCAborts(bool)
+	AppendHistory(string)
+	SetCompleter(liner.Completer)
+}
+
 // ChatCLI representa a interface de linha de comando do chat
 type ChatCLI struct {
-	client         llm.LLMClient
-	manager        llm.LLMManager
-	logger         *zap.Logger
-	provider       string
-	model          string
-	history        []models.Message
-	line           *liner.State
-	terminalWidth  int
-	commandHistory []string
-	historyManager *HistoryManager
-	animation      *AnimationManager
-	commandHandler *CommandHandler
+	client            llm.LLMClient
+	manager           llm.LLMManager
+	logger            *zap.Logger
+	provider          string
+	model             string
+	history           []models.Message
+	line              Liner
+	terminalWidth     int
+	commandHistory    []string
+	historyManager    *HistoryManager
+	animation         *AnimationManager
+	commandHandler    *CommandHandler
+	lastCommandOutput string
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -141,6 +152,7 @@ func NewChatCLI(manager llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	cli := &ChatCLI{
 		manager:        manager,
 		logger:         logger,
+		history:        make([]models.Message, 0),
 		historyManager: NewHistoryManager(logger),
 		animation:      NewAnimationManager(),
 	}
@@ -193,8 +205,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	fmt.Println("Use '@history', '@git', '@env', '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando>' para interativo.")
 	fmt.Println("Use '@command --ai <seu_comando>' para enviar o ouput para a AI de forma direta e '>' {maior} <seu contexto> para que a AI faça algo")
-	fmt.Println("Ainda ficou com dúvidas? use '/help'.\n\n")
-
+	fmt.Printf("Ainda ficou com dúvidas? use '/help'.\n\n")
 	for {
 		select {
 		case <-ctx.Done():
@@ -219,7 +230,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			}
 
 			// Verificar se o input é um comando direto do sistema
-			if strings.HasPrefix(input, "@command ") {
+			if strings.Contains(strings.ToLower(input), "@command ") {
 				command := strings.TrimPrefix(input, "@command ")
 				cli.executeDirectCommand(command)
 				continue
@@ -440,76 +451,65 @@ func (cli *ChatCLI) showHelp() {
 
 }
 
+func (cli *ChatCLI) getConversationHistory() string {
+	var historyBuilder strings.Builder
+	for _, msg := range cli.history {
+		role := "Usuário"
+		if msg.Role == "assistant" {
+			role = "Assistente"
+		} else if msg.Role == "system" {
+			role = "Sistema"
+		}
+		historyBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
+	}
+	return historyBuilder.String()
+}
+
 // processSpecialCommands processa comandos especiais como @history, @git, @env, @file
 func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
-	commands := []struct {
-		trigger string
-		handler func(string) (string, string)
-	}{
-		{"@history", cli.processHistoryCommand},
-		{"@git", cli.processGitCommand},
-		{"@env", cli.processEnvCommand},
-		{"@file", cli.processFileCommand},
+	var additionalContext string
+
+	// Processar comandos especiais
+	userInput, context := cli.processHistoryCommand(userInput)
+	additionalContext += context
+
+	userInput, context = cli.processGitCommand(userInput)
+	additionalContext += context
+
+	userInput, context = cli.processEnvCommand(userInput)
+	additionalContext += context
+
+	userInput, context = cli.processFileCommand(userInput)
+	additionalContext += context
+
+	//userInput, context = cli.processCommandCommand(userInput)
+	//additionalContext += context
+
+	// Processar '>' como um operador para adicionar contexto
+	if idx := strings.Index(userInput, ">"); idx != -1 {
+		additionalContext += userInput[idx+1:] + "\n"
+		userInput = userInput[:idx]
 	}
 
-	additionalContext := ""
-	for _, cmd := range commands {
-		if strings.Contains(userInput, cmd.trigger) {
-			_, context := cmd.handler(userInput)
-			additionalContext += context
-		}
-	}
+	// Remover espaços extras
+	userInput = strings.TrimSpace(userInput)
 
 	return userInput, additionalContext
 }
 
-// renderMarkdown renderiza o texto em Markdown
-//func (cli *ChatCLI) renderMarkdown(input string) string {
-//	renderer, _ := glamour.NewTermRenderer(
-//		glamour.WithAutoStyle(),
-//		glamour.WithWordWrap(0),
-//	)
-//	out, err := renderer.Render(input)
-//	if err != nil {
-//		return input
-//	}
-//	return out
-//}
-
-// typewriterEffect exibe o texto com efeito de máquina de escrever
-//func (cli *ChatCLI) typewriterEffect(text string, delay time.Duration) {
-//	reader := strings.NewReader(text)
-//	inEscapeSequence := false
-//
-//	for {
-//		char, _, err := reader.ReadRune()
-//		if err != nil {
-//			break // Fim do texto
-//		}
-//
-//		// Verifica se é o início de uma sequência de escape
-//		if char == '\033' {
-//			inEscapeSequence = true
-//		}
-//
-//		fmt.Printf("%c", char)
-//
-//		// Verifica o final da sequência de escape
-//		if inEscapeSequence {
-//			if char == 'm' {
-//				inEscapeSequence = false
-//			}
-//			continue // Não aplica delay dentro da sequência de escape
-//		}
-//
-//		time.Sleep(delay) // Ajuste o delay conforme desejado
-//	}
-//}
+func removeCommandAndNormalizeSpaces(userInput, command string) string {
+	regexPattern := fmt.Sprintf(`(?i)\s*%s\s*`, regexp.QuoteMeta(command))
+	re := regexp.MustCompile(regexPattern)
+	userInput = re.ReplaceAllString(userInput, " ")
+	userInput = regexp.MustCompile(`\s+`).ReplaceAllString(userInput, " ")
+	userInput = strings.TrimSpace(userInput)
+	return userInput
+}
 
 // processHistoryCommand adiciona o histórico do shell ao contexto
 func (cli *ChatCLI) processHistoryCommand(userInput string) (string, string) {
 	var additionalContext string
-	if strings.Contains(userInput, "@history") {
+	if strings.Contains(strings.ToLower(userInput), "@history") {
 		historyData, err := utils.GetShellHistory()
 		if err != nil {
 			cli.logger.Error("Erro ao obter o histórico do shell", zap.Error(err))
@@ -529,7 +529,7 @@ func (cli *ChatCLI) processHistoryCommand(userInput string) (string, string) {
 			limitedHistoryData := strings.Join(formattedLines, "\n")
 			additionalContext += "\nHistórico do Shell (últimos 30 comandos):\n" + limitedHistoryData
 		}
-		userInput = strings.ReplaceAll(userInput, "@history", "")
+		userInput = removeCommandAndNormalizeSpaces(userInput, "@history")
 	}
 	return userInput, additionalContext
 }
@@ -537,14 +537,14 @@ func (cli *ChatCLI) processHistoryCommand(userInput string) (string, string) {
 // processGitCommand adiciona informações do Git ao contexto
 func (cli *ChatCLI) processGitCommand(userInput string) (string, string) {
 	var additionalContext string
-	if strings.Contains(userInput, "@git") {
+	if strings.Contains(strings.ToLower(userInput), "@git") {
 		gitData, err := utils.GetGitInfo()
 		if err != nil {
 			cli.logger.Error("Erro ao obter informações do Git", zap.Error(err))
 		} else {
 			additionalContext += "\nInformações do Git:\n" + gitData
 		}
-		userInput = strings.ReplaceAll(userInput, "@git", "")
+		userInput = removeCommandAndNormalizeSpaces(userInput, "@git")
 	}
 	return userInput, additionalContext
 }
@@ -552,10 +552,10 @@ func (cli *ChatCLI) processGitCommand(userInput string) (string, string) {
 // processEnvCommand adiciona as variáveis de ambiente ao contexto
 func (cli *ChatCLI) processEnvCommand(userInput string) (string, string) {
 	var additionalContext string
-	if strings.Contains(userInput, "@env") {
+	if strings.Contains(strings.ToLower(userInput), "@env") {
 		envData := utils.GetEnvVariables()
 		additionalContext += "\nVariáveis de Ambiente:\n" + envData
-		userInput = strings.ReplaceAll(userInput, "@env", "")
+		userInput = removeCommandAndNormalizeSpaces(userInput, "@env")
 	}
 	return userInput, additionalContext
 }
@@ -563,7 +563,7 @@ func (cli *ChatCLI) processEnvCommand(userInput string) (string, string) {
 // processFileCommand adiciona o conteúdo de um arquivo ao contexto
 func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 	var additionalContext string
-	if strings.Contains(userInput, "@file") {
+	if strings.Contains(strings.ToLower(userInput), "@file") {
 		// Extrair todos os caminhos de arquivos
 		filePaths, err := extractAllFilePaths(userInput)
 		if err != nil {
@@ -788,6 +788,7 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 			Role:    "system",
 			Content: fmt.Sprintf("Comando executado: %s", command),
 		})
+		cli.lastCommandOutput = ""
 	} else {
 		// Capturar a saída do comando
 		output, err := cmd.CombinedOutput()
@@ -804,10 +805,11 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 			Role:    "system",
 			Content: fmt.Sprintf("Comando: %s\nSaída:\n%s", command, string(output)),
 		})
+		cli.lastCommandOutput = string(output)
 
 		// se a flag --ai foi passada enviar o output para a IA
 		if sendToAI {
-			cli.sendOutputToAI(string(output), aiContext)
+			cli.sendOutputToAI(cli.lastCommandOutput, aiContext)
 		}
 	}
 
