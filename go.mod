@@ -4,10 +4,12 @@ go 1.23.2
 
 require (
 	github.com/charmbracelet/glamour v0.8.0
+	github.com/chzyer/readline v1.5.1
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/peterh/liner v1.2.2
 	go.uber.org/zap v1.27.0
+	golang.org/x/term v0.22.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
@@ -31,5 +33,4 @@ require (
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/net v0.27.0 // indirect
 	golang.org/x/sys v0.22.0 // indirect
-	golang.org/x/term v0.22.0 // indirect
 )
