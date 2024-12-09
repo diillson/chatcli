@@ -793,7 +793,7 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 		output, err := cmd.CombinedOutput()
 
 		// Exibir a saída
-		fmt.Println("Saída do comando:\n", string(output))
+		fmt.Println("Saída do comando:\n\n", string(output))
 
 		if err != nil {
 			fmt.Println("Erro ao executar comando:", err)
@@ -902,31 +902,109 @@ func (cli *ChatCLI) completer(line string) []string {
 	var completions []string
 	trimmedLine := strings.TrimSpace(line)
 
-	// Comandos disponíveis
 	commands := []string{"/exit", "/quit", "/switch", "/help", "/reload"}
 	specialCommands := []string{"@history", "@git", "@env", "@file", "@command"}
 
-	for _, cmd := range commands {
-		if strings.HasPrefix(trimmedLine, cmd) {
-			completions = append(completions, cmd)
+	if strings.HasPrefix(trimmedLine, "/") {
+		for _, cmd := range commands {
+			if strings.HasPrefix(cmd, trimmedLine) {
+				completions = append(completions, cmd)
+			}
 		}
+		return completions
 	}
-	for _, scmd := range specialCommands {
-		if strings.HasPrefix(trimmedLine, scmd) {
-			completions = append(completions, scmd)
+
+	// Verifica comandos especiais
+	if strings.HasPrefix(trimmedLine, "@") {
+		for _, scmd := range specialCommands {
+			if strings.HasPrefix(scmd, trimmedLine) {
+				completions = append(completions, scmd)
+			}
 		}
+
+		// Caso para @file
+		if strings.HasPrefix(trimmedLine, "@file ") {
+			prefix := strings.TrimPrefix(trimmedLine, "@file ")
+			fileCompletions := cli.completeFilePath(prefix)
+			// Reconstruir a linha com @file, mantendo o prefixo já digitado
+			for _, fc := range fileCompletions {
+				completions = append(completions, "@file "+fc)
+			}
+			return completions
+		}
+
+		// Caso para @command
+		if strings.HasPrefix(trimmedLine, "@command ") {
+			commandLine := strings.TrimPrefix(trimmedLine, "@command ")
+			tokens := strings.Fields(commandLine)
+
+			if len(tokens) == 0 {
+				systemCmds := cli.completeSystemCommands("")
+				for _, sc := range systemCmds {
+					completions = append(completions, "@command "+sc)
+				}
+				return completions
+			}
+
+			if len(tokens) == 1 {
+				lastToken := tokens[0]
+				systemCmds := cli.completeSystemCommands(lastToken)
+				for _, sc := range systemCmds {
+					completions = append(completions, "@command "+sc)
+				}
+				return completions
+			}
+
+			// Mais de um token, último é path
+			lastToken := tokens[len(tokens)-1]
+			fileCompletions := cli.completeFilePath(lastToken)
+
+			// Montar prefixo com @command + todos os tokens menos o último
+			prefix := "@command " + strings.Join(tokens[:len(tokens)-1], " ") + " "
+			for _, fc := range fileCompletions {
+				completions = append(completions, prefix+fc)
+			}
+			return completions
+		}
+
+		return completions
 	}
+
+	// Caso não seja / nem @, tratamos o último token
+	tokens := strings.Fields(line)
+	var lastToken string
+	var prefix string
+	if len(tokens) > 0 {
+		lastToken = tokens[len(tokens)-1]
+		// prefixo é tudo antes do último token
+		prefix = strings.Join(tokens[:len(tokens)-1], " ")
+		if prefix != "" {
+			prefix += " "
+		}
+	} else {
+		lastToken = trimmedLine
+	}
+
+	// Histórico
 	for _, historyCmd := range cli.commandHistory {
-		if strings.HasPrefix(trimmedLine, historyCmd) {
-			completions = append(completions, historyCmd)
+		if strings.HasPrefix(historyCmd, lastToken) {
+			// Reconstituir a linha adicionando o completion do histórico
+			completions = append(completions, prefix+historyCmd)
 		}
 	}
 
-	fileCompletions := cli.completeFilePath(trimmedLine)
-	completions = append(completions, fileCompletions...)
+	// Caminhos de arquivos
+	fileCompletions := cli.completeFilePath(lastToken)
+	for _, fc := range fileCompletions {
+		// Agora mantemos o que foi digitado antes do lastToken
+		completions = append(completions, prefix+fc)
+	}
 
-	commandCompletions := cli.completeSystemCommands(trimmedLine)
-	completions = append(completions, commandCompletions...)
+	// Comandos do sistema
+	commandCompletions := cli.completeSystemCommands(lastToken)
+	for _, cc := range commandCompletions {
+		completions = append(completions, prefix+cc)
+	}
 
 	return completions
 }
