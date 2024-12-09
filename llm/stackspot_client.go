@@ -195,7 +195,7 @@ func (c *StackSpotClient) executeWithTokenRetry(ctx context.Context, requestFunc
 	response, err := requestFunc(token)
 	if err != nil {
 		// Se o erro for 403, tenta renovar o token e refazer a requisição
-		if strings.Contains(err.Error(), "403") {
+		if strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "401") {
 			c.logger.Warn("Token expirado ou inválido, tentando renovar...")
 
 			// Tenta renovar o token
