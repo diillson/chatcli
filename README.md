@@ -68,6 +68,9 @@ O ChatCLI depende de variáveis de ambiente para configurar seu comportamento e 
 
 O ChatCLI agora suporta o ClaudeAI como um provedor adicional de LLM. Veja como configurar a ClaudeAI e as outras variáveis de ambiente para o funcionamento do ChatCLI:
 
+- **Definindo o local do seu arquivo .env**:
+   - `CHATCLI_DOTENV` - (Opcional) Define o local do seu arquivo `.env` com as suas variáveis, precisa definir no sistema para funcionar e não dentro do proprio .env, ele apontará para onde está o seu `.env` com as demais variáveis.
+
 - **Geral**:
     - `LOG_LEVEL` - (Opcional) Define o nível de log (`debug`, `info`, `warn`, `error`). Padrão é `info`.
     - `ENV` - (Opcional) Define o ambiente (`prod` para produção, caso contrário, padrão é `dev` desenvolvimento) - Essencial pois muda a forma que o log transacional e exibido no terminal.
