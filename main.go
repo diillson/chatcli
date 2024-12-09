@@ -21,8 +21,20 @@ const (
 
 func main() {
 	// Carregar variáveis de ambiente do arquivo .env
-	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
-		fmt.Println("Nenhum arquivo .env encontrado, continuando sem ele")
+	envFilePath := os.Getenv("CHATCLI_DOTENV")
+	if envFilePath == "" {
+		envFilePath = ".env"
+	} else {
+		expanded, err := utils.ExpandPath(envFilePath)
+		if err == nil {
+			envFilePath = expanded
+		} else {
+			fmt.Printf("Aviso: não foi possível expandir o caminho '%s': %v\n", envFilePath, err)
+		}
+	}
+
+	if err := godotenv.Load(envFilePath); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("Não foi encontrado o arquivo .env em %s\n", envFilePath)
 	}
 
 	// Inicializar o logger

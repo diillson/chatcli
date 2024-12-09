@@ -64,6 +64,13 @@ func InitializeLogger() (*zap.Logger, error) {
 	logFile := os.Getenv("LOG_FILE")
 	if logFile == "" {
 		logFile = "app.log" // Valor padrão
+	} else {
+		expanded, err := ExpandPath(logFile)
+		if err == nil {
+			logFile = expanded
+		} else {
+			fmt.Printf("Aviso: não foi possível expandir o caminho '%s': %v\n", logFile, err)
+		}
 	}
 
 	// Tamanho máximo do arquivo de log configurável via variável de ambiente
