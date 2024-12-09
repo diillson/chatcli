@@ -900,53 +900,33 @@ func (cli *ChatCLI) saveHistory() {
 // Função de autocompletar
 func (cli *ChatCLI) completer(line string) []string {
 	var completions []string
-
 	trimmedLine := strings.TrimSpace(line)
 
 	// Comandos disponíveis
-	commands := []string{"/exit", "/quit", "/switch", "/help"}
+	commands := []string{"/exit", "/quit", "/switch", "/help", "/reload"}
 	specialCommands := []string{"@history", "@git", "@env", "@file", "@command"}
 
-	if strings.HasPrefix(trimmedLine, "/") {
-		for _, cmd := range commands {
-			if strings.HasPrefix(cmd, trimmedLine) {
-				completions = append(completions, cmd)
-			}
+	for _, cmd := range commands {
+		if strings.HasPrefix(trimmedLine, cmd) {
+			completions = append(completions, cmd)
 		}
-	} else if strings.HasPrefix(trimmedLine, "@") {
-		// Verificar comandos especiais
-		for _, cmd := range specialCommands {
-			if strings.HasPrefix(cmd, trimmedLine) {
-				completions = append(completions, cmd)
-			}
-		}
-		if strings.HasPrefix(trimmedLine, "@file ") {
-			// Autocompletar caminhos de arquivos após "@file "
-			prefix := strings.TrimPrefix(trimmedLine, "@file ")
-			fileCompletions := cli.completeFilePath(prefix)
-			// Prepend "@file " to each completion
-			for _, comp := range fileCompletions {
-				completions = append(completions, "@file "+comp)
-			}
-		} else if strings.HasPrefix(trimmedLine, "@command ") {
-			// Autocompletar comandos do sistema após "@command "
-			prefix := strings.TrimPrefix(trimmedLine, "@command ")
-			commandCompletions := cli.completeSystemCommands(prefix)
-			// Prepend "@command " to each completion
-			for _, comp := range commandCompletions {
-				completions = append(completions, "@command "+comp)
-			}
-		}
-	} else {
-		// Autocompletar comandos anteriores
-		for _, historyCmd := range cli.commandHistory {
-			if strings.HasPrefix(historyCmd, trimmedLine) {
-				completions = append(completions, historyCmd)
-			}
-		}
-		// Autocompletar caminhos de arquivos
-		completions = append(completions, cli.completeFilePath(trimmedLine)...)
 	}
+	for _, scmd := range specialCommands {
+		if strings.HasPrefix(trimmedLine, scmd) {
+			completions = append(completions, scmd)
+		}
+	}
+	for _, historyCmd := range cli.commandHistory {
+		if strings.HasPrefix(trimmedLine, historyCmd) {
+			completions = append(completions, historyCmd)
+		}
+	}
+
+	fileCompletions := cli.completeFilePath(trimmedLine)
+	completions = append(completions, fileCompletions...)
+
+	commandCompletions := cli.completeSystemCommands(trimmedLine)
+	completions = append(completions, commandCompletions...)
 
 	return completions
 }
