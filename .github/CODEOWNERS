@@ -1,0 +1,17 @@
+# Owners padrão para todo o repositório
+* @diillson
+
+# Owners para arquivos Go
+#*.go @diillson
+
+# Owners para documentação
+#/docs/ @docs-team
+
+# Owners para testes
+#/tests/ @qa-team
+
+# Owners para CI/CD
+#/.github/workflows/ @devops-team
+
+# Owners para frontend
+#/frontend/ @frontend-team
