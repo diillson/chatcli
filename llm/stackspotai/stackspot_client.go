@@ -1,9 +1,10 @@
-package llm
+package stackspotai
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/diillson/chatcli/llm/token"
 	"io"
 	"net/http"
 	"strings"
@@ -24,7 +25,7 @@ const (
 
 // StackSpotClient implementa o cliente para interagir com a API da StackSpot
 type StackSpotClient struct {
-	tokenManager *TokenManager
+	tokenManager *token.TokenManager
 	slug         string
 	logger       *zap.Logger
 	client       *http.Client
@@ -33,7 +34,7 @@ type StackSpotClient struct {
 }
 
 // NewStackSpotClient cria uma nova instância de StackSpotClient.
-func NewStackSpotClient(tokenManager *TokenManager, slug string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *StackSpotClient {
+func NewStackSpotClient(tokenManager *token.TokenManager, slug string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *StackSpotClient {
 	httpClient := utils.NewHTTPClient(logger, 300*time.Second)
 	if maxAttempts <= 0 {
 		maxAttempts = defaultMaxAttempts
@@ -130,7 +131,7 @@ func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt 
 func (c *StackSpotClient) sendRequestToLLM(ctx context.Context, prompt, accessToken string) (string, error) {
 	conversationID := utils.GenerateUUID()
 
-	url := fmt.Sprintf("%s/create-execution/%s?conversation_id=%s", stackSpotBaseURL, c.tokenManager.slugName, conversationID)
+	url := fmt.Sprintf("%s/create-execution/%s?conversation_id=%s", stackSpotBaseURL, c.tokenManager.SlugName, conversationID)
 	c.logger.Info("Enviando requisição para URL", zap.String("url", url))
 
 	requestBody := map[string]string{

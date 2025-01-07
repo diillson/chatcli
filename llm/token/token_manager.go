@@ -1,4 +1,4 @@
-package llm
+package token
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 type TokenManager struct {
 	clientID     string
 	clientSecret string
-	slugName     string
+	SlugName     string
 	tenantName   string
 	accessToken  string
 	expiresAt    time.Time
@@ -33,7 +33,7 @@ func NewTokenManager(clientID, clientSecret, slugName, tenantName string, logger
 	return &TokenManager{
 		clientID:     clientID,
 		clientSecret: clientSecret,
-		slugName:     slugName,
+		SlugName:     slugName,
 		tenantName:   tenantName,
 		logger:       logger,
 		client:       httpClient,
@@ -44,14 +44,14 @@ func NewTokenManager(clientID, clientSecret, slugName, tenantName string, logger
 func (tm *TokenManager) GetSlugAndTenantName() (string, string) {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
-	return tm.slugName, tm.tenantName
+	return tm.SlugName, tm.tenantName
 }
 
 // SetSlugAndTenantName atualiza os valores de slug e tenantName e força uma nova solicitação de token
 func (tm *TokenManager) SetSlugAndTenantName(slugName, tenantName string) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	tm.slugName = slugName
+	tm.SlugName = slugName
 	tm.tenantName = tenantName
 	tm.accessToken = "" // Limpa o token para forçar a solicitação de um novo na próxima vez
 	tm.logger.Info("Valores de slug e tenantName atualizados", zap.String("slugName", slugName), zap.String("tenantName", tenantName))

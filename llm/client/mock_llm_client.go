@@ -1,4 +1,4 @@
-package llm
+package client
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 
 // MockLLMClient é um mock que implementa a interface LLMClient
 type MockLLMClient struct {
-	response string
-	err      error
+	Response string
+	Err      error
 }
 
 func (m *MockLLMClient) GetModelName() string {
@@ -17,5 +17,5 @@ func (m *MockLLMClient) GetModelName() string {
 }
 
 func (m *MockLLMClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	return m.response, m.err
+	return m.Response, m.Err
 }

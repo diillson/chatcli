@@ -1,7 +1,12 @@
-package llm
+package manager
 
 import (
 	"fmt"
+	"github.com/diillson/chatcli/llm/claudeai"
+	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/openai"
+	"github.com/diillson/chatcli/llm/stackspotai"
+	"github.com/diillson/chatcli/llm/token"
 	"go.uber.org/zap"
 	"os"
 )
@@ -23,22 +28,22 @@ func (e *ConfigError) Error() string {
 
 // LLMManager é a interface que define os métodos que o gerenciador de LLMs deve implementar
 type LLMManager interface {
-	GetClient(provider string, model string) (LLMClient, error)
+	GetClient(provider string, model string) (client.LLMClient, error)
 	GetAvailableProviders() []string
-	GetTokenManager() (*TokenManager, bool)
+	GetTokenManager() (*token.TokenManager, bool)
 }
 
 // LLMManagerImpl gerencia diferentes clientes LLM e o TokenManager
 type LLMManagerImpl struct {
-	clients      map[string]func(string) (LLMClient, error)
+	clients      map[string]func(string) (client.LLMClient, error)
 	logger       *zap.Logger
-	tokenManager *TokenManager
+	tokenManager *token.TokenManager
 }
 
 // NewLLMManager cria uma nova instância de LLMManagerImpl.
 func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager, error) {
 	manager := &LLMManagerImpl{
-		clients: make(map[string]func(string) (LLMClient, error)),
+		clients: make(map[string]func(string) (client.LLMClient, error)),
 		logger:  logger,
 	}
 
@@ -54,11 +59,11 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager,
 func (m *LLMManagerImpl) configurarOpenAIClient() {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey != "" {
-		m.clients["OPENAI"] = func(model string) (LLMClient, error) {
+		m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
 				model = defaultOpenAIModel
 			}
-			return NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
+			return openai.NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
 		}
 	} else {
 		m.logger.Warn("OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível")
@@ -76,11 +81,11 @@ func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string) 
 	}
 
 	// Inicializar o TokenManager
-	m.tokenManager = NewTokenManager(clientID, clientSecret, slugName, tenantName, m.logger)
+	m.tokenManager = token.NewTokenManager(clientID, clientSecret, slugName, tenantName, m.logger)
 
 	// Configurar o cliente StackSpot
-	m.clients["STACKSPOT"] = func(model string) (LLMClient, error) {
-		return NewStackSpotClient(m.tokenManager, slugName, m.logger, 50, 300), nil
+	m.clients["STACKSPOT"] = func(model string) (client.LLMClient, error) {
+		return stackspotai.NewStackSpotClient(m.tokenManager, slugName, m.logger, 50, 300), nil
 	}
 }
 
@@ -88,11 +93,11 @@ func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string) 
 func (m *LLMManagerImpl) configurarClaudeAIClient() {
 	apiKey := os.Getenv("CLAUDEAI_API_KEY")
 	if apiKey != "" {
-		m.clients["CLAUDEAI"] = func(model string) (LLMClient, error) {
+		m.clients["CLAUDEAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
 				model = defaultClaudeAIModel
 			}
-			return NewClaudeClient(apiKey, model, m.logger), nil
+			return claudeai.NewClaudeClient(apiKey, model, m.logger), nil
 		}
 	} else {
 		m.logger.Warn("CLAUDEAI_API_KEY não definida, o provedor ClaudeAI não estará disponível")
@@ -109,7 +114,7 @@ func (m *LLMManagerImpl) GetAvailableProviders() []string {
 }
 
 // GetClient retorna um cliente LLM com base no provedor e no modelo especificados.
-func (m *LLMManagerImpl) GetClient(provider string, model string) (LLMClient, error) {
+func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMClient, error) {
 	factoryFunc, ok := m.clients[provider]
 	if !ok {
 		return nil, fmt.Errorf("Erro: Provedor LLM '%s' não suportado ou não configurado", provider)
@@ -125,6 +130,6 @@ func (m *LLMManagerImpl) GetClient(provider string, model string) (LLMClient, er
 }
 
 // GetTokenManager retorna o TokenManager se ele estiver configurado.
-func (m *LLMManagerImpl) GetTokenManager() (*TokenManager, bool) {
+func (m *LLMManagerImpl) GetTokenManager() (*token.TokenManager, bool) {
 	return m.tokenManager, m.tokenManager != nil
 }

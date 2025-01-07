@@ -2,12 +2,13 @@ package cli
 
 import (
 	"context"
+	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/token"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/diillson/chatcli/llm"
 	"github.com/diillson/chatcli/models"
 	"github.com/peterh/liner"
 	"go.uber.org/zap"
@@ -30,7 +31,7 @@ func (m *MockLLMClient) SendPrompt(ctx context.Context, prompt string, history [
 // MockLLMManager é um mock para LLMManager
 type MockLLMManager struct{}
 
-func (m *MockLLMManager) GetClient(provider string, model string) (llm.LLMClient, error) {
+func (m *MockLLMManager) GetClient(provider string, model string) (client.LLMClient, error) {
 	return &MockLLMClient{response: "Resposta Mock"}, nil
 }
 
@@ -38,7 +39,7 @@ func (m *MockLLMManager) GetAvailableProviders() []string {
 	return []string{"MockProvider"}
 }
 
-func (m *MockLLMManager) GetTokenManager() (*llm.TokenManager, bool) {
+func (m *MockLLMManager) GetTokenManager() (*token.TokenManager, bool) {
 	return nil, false
 }
 

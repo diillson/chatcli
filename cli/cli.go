@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/manager"
 	"github.com/joho/godotenv"
 	"os"
 	"os/exec"
@@ -13,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/diillson/chatcli/llm"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 
@@ -49,8 +50,8 @@ type Liner interface {
 
 // ChatCLI representa a interface de linha de comando do chat
 type ChatCLI struct {
-	client            llm.LLMClient
-	manager           llm.LLMManager
+	client            client.LLMClient
+	manager           manager.LLMManager
 	logger            *zap.Logger
 	provider          string
 	model             string
@@ -109,7 +110,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 	// Recarregar a configuração do LLMManager
 	utils.CheckEnvVariables(cli.logger, defaultSlugName, defaultTenantName)
 
-	manager, err := llm.NewLLMManager(cli.logger, os.Getenv("SLUG_NAME"), os.Getenv("TENANT_NAME"))
+	manager, err := manager.NewLLMManager(cli.logger, os.Getenv("SLUG_NAME"), os.Getenv("TENANT_NAME"))
 	if err != nil {
 		cli.logger.Error("Erro ao reconfigurar o LLMManager", zap.Error(err))
 		return
@@ -148,7 +149,7 @@ func (cli *ChatCLI) configureProviderAndModel() {
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
-func NewChatCLI(manager llm.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
+func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	cli := &ChatCLI{
 		manager:        manager,
 		logger:         logger,
