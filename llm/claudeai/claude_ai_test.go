@@ -1,16 +1,17 @@
-package llm
+package claudeai
 
 import (
 	"context"
+	"github.com/diillson/chatcli/llm/client"
 	"testing"
 
 	"github.com/diillson/chatcli/models"
 )
 
-func TestStackSpotClient_SendPrompt(t *testing.T) {
-	client := &MockLLMClient{
-		response: "Resposta Mock StackSpot",
-		err:      nil,
+func TestClaudeClient_SendPrompt(t *testing.T) {
+	client := &client.MockLLMClient{
+		Response: "Resposta Mock ClaudeAI",
+		Err:      nil,
 	}
 
 	ctx := context.Background()
@@ -21,7 +22,7 @@ func TestStackSpotClient_SendPrompt(t *testing.T) {
 	if err != nil {
 		t.Errorf("Erro inesperado: %v", err)
 	}
-	if response != "Resposta Mock StackSpot" {
+	if response != "Resposta Mock ClaudeAI" {
 		t.Errorf("Resposta inesperada: %s", response)
 	}
 }

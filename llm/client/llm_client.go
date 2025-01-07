@@ -1,5 +1,5 @@
 // llm/llm_client.go
-package llm
+package client
 
 import (
 	"context"

@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/diillson/chatcli/llm/manager"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/diillson/chatcli/cli"
-	"github.com/diillson/chatcli/llm"
 	"github.com/diillson/chatcli/utils"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
@@ -56,7 +56,7 @@ func main() {
 	// Inicializar o LLMManager
 	slugName := utils.GetEnvOrDefault("SLUG_NAME", defaultSlugName)
 	tenantName := utils.GetEnvOrDefault("TENANT_NAME", defaultTenantName)
-	manager, err := llm.NewLLMManager(logger, slugName, tenantName)
+	manager, err := manager.NewLLMManager(logger, slugName, tenantName)
 	if err != nil {
 		logger.Fatal("Erro ao inicializar o LLMManager", zap.Error(err))
 	}

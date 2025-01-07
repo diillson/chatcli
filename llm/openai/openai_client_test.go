@@ -1,16 +1,17 @@
-package llm
+package openai
 
 import (
 	"context"
+	"github.com/diillson/chatcli/llm/client"
 	"testing"
 
 	"github.com/diillson/chatcli/models"
 )
 
 func TestOpenAIClient_SendPrompt(t *testing.T) {
-	client := &MockLLMClient{
-		response: "Resposta Mock OpenAI",
-		err:      nil,
+	client := &client.MockLLMClient{
+		Response: "Resposta Mock OpenAI",
+		Err:      nil,
 	}
 
 	ctx := context.Background()
