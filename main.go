@@ -29,7 +29,7 @@ func main() {
 		if err == nil {
 			envFilePath = expanded
 		} else {
-			fmt.Printf("Aviso: não foi possível expandir o caminho '%s': %v\n", envFilePath, err)
+			fmt.Printf("Aviso: não foi possível expandir o caminhoS '%s': %v\n", envFilePath, err)
 		}
 	}
 
