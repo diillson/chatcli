@@ -34,7 +34,7 @@ func main() {
 	}
 
 	if err := godotenv.Load(envFilePath); err != nil && !os.IsNotExist(err) {
-		fmt.Printf("Não foi encontra do o arquivo .env em %s\n", envFilePath)
+		fmt.Printf("Não foi encontrado o arquivo .env em %s\n", envFilePath)
 	}
 
 	// Inicializar o logger
