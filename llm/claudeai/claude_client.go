@@ -42,6 +42,8 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger) *ClaudeCli
 func (c *ClaudeClient) GetModelName() string {
 	if c.model == "claude-3-5-sonnet-20241022" {
 		return "claude 3.5 sonnet"
+	} else if c.model == "claude-3-7-sonnet-20250219" {
+		return "claude 3.7 sonnet"
 	}
 	return c.model
 }
