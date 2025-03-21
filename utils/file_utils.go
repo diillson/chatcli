@@ -40,7 +40,7 @@ func DefaultDirectoryScanOptions(logger *zap.Logger) DirectoryScanOptions {
 			".go", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".c", ".cpp", ".h", ".hpp",
 			".cs", ".rb", ".php", ".html", ".css", ".scss", ".less", ".json", ".xml", ".yaml",
 			".yml", ".md", ".txt", ".sql", ".sh", ".bash", ".zsh", ".env", ".toml", ".ini",
-			".config", ".rs", ".dart", ".swift", ".kt", ".groovy", ".scala", ".pl", ".pm",
+			".config", ".rs", ".dart", ".swift", ".kt", ".groovy", ".scala", ".pl", ".pm", ".tf",
 		},
 		ExcludeDirs: []string{
 			".git", "node_modules", "vendor", "build", "dist", "target",
@@ -61,6 +61,7 @@ func DefaultDirectoryScanOptions(logger *zap.Logger) DirectoryScanOptions {
 func DetectFileType(filePath string) string {
 	fileTypes := map[string]string{
 		".go":     "Go",
+		".tf":     "Terraform",
 		".py":     "Python",
 		".js":     "JavaScript",
 		".ts":     "TypeScript",
@@ -393,7 +394,7 @@ func isCodeFile(fileType string) bool {
 // Retorna o identificador de linguagem para code fences do markdown
 func getLanguageIdentifier(fileType string) string {
 	identifiers := map[string]string{
-		"Go": "go", "Python": "python", "JavaScript": "javascript",
+		"Go": "go", "Terraform": "hcl", "Python": "python", "JavaScript": "javascript",
 		"TypeScript": "typescript", "React JSX": "jsx", "React TSX": "tsx",
 		"Java": "java", "C": "c", "C++": "cpp", "C Header": "c",
 		"C++ Header": "cpp", "C#": "csharp", "Ruby": "ruby",
