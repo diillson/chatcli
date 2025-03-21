@@ -12,7 +12,8 @@ ChatCLI é uma aplicação de interface de linha de comando (CLI) avançada que 
     - `@env` - Inclui suas variáveis de ambiente no contexto do chat.
     - `@file <caminho>` - Incorpora o conteúdo de arquivos especificados na conversa. Suporta `~` como atalho para o diretório home do usuário e expande caminhos relativos.
     - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa para consultas posteriores com a LLM.
-    - **Novo**: `@command --ai <comando> > <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o sinal de maior `>` para que a IA processe a saída conforme solicitado.
+    - `@command --ai <comando> > <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o sinal de maior `>` para que a IA processe a saída conforme solicitado.
+- **Exploração de Diretórios Completos**: Com  @file <diretório> , o ChatCLI pode processar recursivamente todos os arquivos relevantes de um diretório, facilitando a análise de projetos inteiros.
 - **Execução de Comandos Diretos**: Execute comandos de sistema diretamente a partir do ChatCLI usando `@command`, e a saída é salva no histórico para referência.
 - **Alteração Dinâmica de Configurações**: Mude o provedor de LLM, slug e tenantname diretamente do ChatCLI sem reiniciar a aplicação usando `/switch` com opções.
 - **Recarregamento de Variáveis**: Altere suas configurações de variáveis de ambiente usando `/reload` para que o ChatCLI leia e modifique as configurações.
@@ -29,7 +30,7 @@ ChatCLI é uma aplicação de interface de linha de comando (CLI) avançada que 
 
 ### Pré-requisitos
 
-- **Go**: Certifique-se de ter o Go instalado (versão 1.21+). Você pode baixá-lo em [golang.org](https://golang.org/dl/).
+- **Go**: Certifique-se de ter o Go instalado (versão 1.23+). Você pode baixá-lo em [golang.org](https://golang.org/dl/).
 
 ### Passos
 
@@ -150,7 +151,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
     - `@history` - Adiciona os últimos 10 comandos do shell ao contexto da conversa.
     - `@git` - Incorpora o status atual do repositório Git, commits recentes e branches.
     - `@env` - Inclui variáveis de ambiente no chat.
-    - `@file <caminho>` - Adiciona o conteúdo do arquivo especificado ao contexto da conversa. Suporta `~` como atalho para o diretório home e expande caminhos relativos.
+    - `@file <caminho>` - Adiciona o conteúdo do arquivo especificado ao contexto. Suporta `~` como atalho para o diretório home e expande caminhos relativos. `Novidade:` Agora processa diretórios completos!
     - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa.
     - **Novo**: `@command --ai <comando> > <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o sinal de maior `>` para que a IA processe a saída conforme solicitado.
 
@@ -188,7 +189,14 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 
    Este comando lerá o conteúdo de `main.go` do diretório `documentos` na pasta home e o incluirá no contexto da conversa.
 
-6. **Executando Comando no Terminal com `@command`**:
+
+6. **Processando um Diretório Completo (Nova Funcionalidade):**
+   ```
+   Você: @file ~/projetos/minha-aplicacao/
+   ```
+   Este comando processará recursivamente o diretório, identificando e incluindo arquivos de código relevantes, ignorando diretórios como  node_modules ,  .git , etc.
+
+7. **Executando Comando no Terminal com `@command`**:
 
    ```
    Você: @command ls -la
@@ -207,7 +215,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
    -rw-r--r--  1 user  staff  1024 Nov  4 12:33 example.txt
    ```
 
-7. **Consultando a LLM sobre um Erro em um Comando**:
+8. **Consultando a LLM sobre um Erro em um Comando**:
 
    ```
    Você: @command cat arquivo_inexistente.txt
@@ -229,7 +237,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 
    A LLM terá acesso ao histórico e poderá explicar o erro ou sugerir correções.
 
-8. **Executando Comando e Enviando Saída para a LLM com Contexto**:
+9. **Executando Comando e Enviando Saída para a LLM com Contexto**:
 
    ```
    Você: @command --ai ls > Filtrar apenas os arquivos .go
@@ -237,7 +245,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
 
    O comando `ls` será executado, e a saída será enviada para a LLM com o contexto "Filtrar apenas os arquivos .go".
 
-9. **Alterando Provedor de LLM**:
+10. **Alterando Provedor de LLM**:
 
    Para trocar o provedor de LLM durante a sessão:
 
@@ -255,7 +263,7 @@ Após instalar e configurar, você pode começar a usar o ChatCLI com diversos c
    Selecione o provedor (1, 2 ou 3):
    ```
 
-10. **Atualizando `slugName` e `tenantName` sem trocar o provedor**:
+11. **Atualizando `slugName` e `tenantName` sem trocar o provedor**:
 
 ```
 Você: /switch --slugname novo-slug --tenantname novo-tenant
@@ -263,7 +271,7 @@ Você: /switch --slugname novo-slug --tenantname novo-tenant
 
 O `TokenManager` será atualizado com os novos valores, e um novo token será obtido.
 
-11. **Refaz a leitura das variáveis de ambiente, identificando as mudanças e reconfigurando o ambiente**:
+12. **Refaz a leitura das variáveis de ambiente, identificando as mudanças e reconfigurando o ambiente**:
 
     ```
     Você: /reload
@@ -296,34 +304,30 @@ O `TokenManager` será atualizado com os novos valores, e um novo token será ob
 
 O projeto está organizado em vários pacotes, cada um responsável por diferentes aspectos da aplicação. Recentemente, o código foi refatorado para melhorar a separação de responsabilidades e facilitar a manutenção e a escalabilidade. Aqui estão os principais componentes:
 
-- **`cli`**: Gerencia a interface de linha de comando, entrada do usuário, processamento de comandos e interação com os clientes LLM.
-    - **`ChatCLI`**: A classe principal que gerencia o loop de interação com o usuário, incluindo a execução de comandos e o envio de prompts para os LLMs.
-    - **`CommandHandler`**: Uma nova classe introduzida para lidar com comandos específicos da CLI, como `/exit`, `/switch`, `/reload`, e o novo `@command --ai`. Isso melhora a modularidade e facilita a adição de novos comandos no futuro.
-    - **`HistoryManager`**: Gerencia o histórico de comandos do usuário, permitindo que o histórico seja salvo e carregado entre sessões.
-    - **`AnimationManager`**: Gerencia animações visuais, como o feedback de "Pensando..." enquanto o LLM processa uma solicitação.
+- **`cli`**: Gerencia a interface de linha de comando e interação com usuário.
+    - **`ChatCLI`**: Classe principal que gerencia o loop de interação com o usuário.
+    - **`CommandHandler`**: Lida com comandos específicos da CLI como  `/exit` ,  `/switch` , etc.
+    - **`HistoryManager`**: Gerencia o histórico de comandos entre sessões.
+    - **`AnimationManager`**: Gerencia animações visuais durante o processamento.
 
-- **`llm`**: Gerencia as interações com os Modelos de Linguagem, suportando múltiplos provedores como OpenAI, StackSpot e ClaudeAI.
-    - **`LLMClient`**: Interface que todos os clientes LLM devem implementar.
-    - **`OpenAIClient`**: Implementa o cliente para interagir com a API da OpenAI, incluindo tratamento de erros e retries.
-    - **`StackSpotClient`**: Implementa o cliente para interagir com a API da StackSpot, gerenciando tokens de acesso e chamadas à API.
-    - **`ClaudeAIClient`**: Implementa o cliente para interagir com a API da ClaudeAI.
+- **`llm`**: Gerencia interações com diferentes Modelos de Linguagem.
+    - **`LLMClient`**: Interface para todos os clientes LLM.
+    - **`OpenAIClient`**: Cliente para API da OpenAI.
+    - **`StackSpotClient`**: Cliente para API da StackSpot.
+    - **`ClaudeAIClient`**: Cliente para API da ClaudeAI.
+    - **`LLMManager`**: Gerencia os diferentes clientes LLM.
+    - **`token_manager.go`**: Gerencia a obtenção e renovação de tokens dos clientes LLM.
 
-- **`token_manager.go`**: Gerencia a obtenção e renovação de tokens de acesso para a StackSpot e outros provedores que exigem autenticação.
+- **`utils`**: Contém funções utilitárias para diversas operações. 
+    - **`file_utils.go`** : (NOVO) Processamento avançado de arquivos e diretórios.
+    - **`shell_utils.go`**: Funções para shell e histórico de comandos.
+    - **`git_utils.go`**: Funções para obter informações do Git.
+    - **`http_client.go`** : Cliente HTTP personalizado com logging.
+    - **`logging_transport.go`**: Transporte HTTP com logs e sanitização.
+    - **`path.go`**: Manipulação de caminhos de arquivos.
 
-- **`utils`**: Contém funções utilitárias para operações de arquivo, expansão de caminhos, logging, leitura de histórico do shell, obtenção de informações do Git, entre outros.
-    - **`shell_utils.go`**: Contém funções para detectar o shell do usuário e obter o histórico de comandos.
-    - **`git_utils.go`**: Fornece funções para obter informações do repositório Git atual.
-    - **`env_utils.go`**: Fornece funções para obter as variáveis de ambiente do sistema.
-
-- **`http_client.go`**: Cria um cliente HTTP personalizado com um `LoggingTransport` para registrar requisições e respostas.
-
-- **`logging_transport.go`**: Implementa um `http.RoundTripper` personalizado para adicionar logs às requisições e respostas HTTP, com sanitização de dados sensíveis.
-
-- **`path.go`**: Fornece funções para manipulação de caminhos de arquivos, incluindo expansão de `~` para o diretório home.
-
-- **`models`**: Define as estruturas de dados utilizadas em toda a aplicação, como `Message` e `ResponseData`.
-
-- **`main`**: Inicializa a aplicação, configura dependências e inicia a CLI.
+- **`models`**: Define estruturas de dados como `Message` e `ResponseData`.
+- **`main`**: Inicializa a aplicação e configura dependências.
 
 ## 📚 Bibliotecas e Dependências
 
@@ -336,6 +340,11 @@ O projeto está organizado em vários pacotes, cada um responsável por diferent
 
 ## 🌟 Funcionalidades Avançadas
 
+- **Exploração Recursiva de Diretórios: (NOVO)** O comando  @file  agora pode processar diretórios inteiros, identificando automaticamente arquivos relevantes e ignorando diretórios como  node_modules ,  .git , etc.
+- **Processamento Paralelo de Arquivos: (NOVO)** Utiliza goroutines para processar múltiplos arquivos simultaneamente, melhorando significativamente o desempenho ao lidar com diretórios grandes.
+- **Filtragem Inteligente de Arquivos: (NOVO)** Filtra automaticamente tipos de arquivos irrelevantes (binários, logs, arquivos temporários) e se concentra em arquivos de código e texto.
+- **Formatação Contextual Avançada: (NOVO)** Formata automaticamente cada arquivo com o realce de sintaxe correto no Markdown, baseado no tipo de arquivo.
+- **Feedback Visual Durante Processamento: (NOVO)** Mostra indicadores de progresso enquanto processa arquivos grandes ou diretórios com muitos arquivos.
 - **Expansão de Caminhos com Suporte a `~`**: O comando `@file` expande inteligentemente `~` para o diretório home do usuário, permitindo entradas flexíveis de caminhos de arquivos semelhantes aos terminais Unix-like.
 - **Animações Concorrentes**: Implementa goroutines para gerenciar animações como "Pensando..." sem bloquear a thread principal, garantindo uma experiência de usuário responsiva.
 - **Mecanismo de Retry com Backoff Exponencial**: Tratamento robusto de erros com lógica de retry para requisições de rede aos provedores de LLM, aumentando a confiabilidade.
@@ -368,6 +377,14 @@ O ChatCLI integra Zap para logging estruturado e de alto desempenho. As principa
     - Os usuários interagem com o ChatCLI via terminal, inserindo comandos e mensagens.
     - Comandos especiais como `@history`, `@git`, `@env`, `@file` e `@command` são analisados e processados para incluir contexto adicional na conversa.
     - Comandos de sistema como `/exit`, `/switch`,`/reload`, `/help` são tratados separadamente para controlar o fluxo da aplicação.
+
+3. **Exploração de Diretórios: (NOVO)**
+   - Quando um diretório é especificado com  `@file` , o ChatCLI:
+   - Percorre recursivamente o diretório, identificando arquivos relevantes
+   - Processa arquivos em paralelo usando goroutines
+   - Filtra tipos de arquivo irrelevantes e diretórios como  `node_modules
+   - Formata o conteúdo com realce de sintaxe baseado no tipo de arquivo
+   - Organiza os resultados com índice e separadores claros
 
 3. **Interação com LLM**:
     - O ChatCLI envia a entrada do usuário juntamente com o histórico da conversa para o provedor de LLM selecionado.
