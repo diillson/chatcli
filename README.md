@@ -121,8 +121,6 @@ CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
 
 --- 
 
-Esses ajustes garantem que ClaudeAI esteja configurado e documentado no `README.md`, alinhando com as práticas dos outros provedores, como OpenAI e StackSpot.
-
 ## 🎯 Uso
 
 Após instalar e configurar, você pode começar a usar o ChatCLI com diversos comandos.
