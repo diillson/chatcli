@@ -560,35 +560,68 @@ func (cli *ChatCLI) processEnvCommand(userInput string) (string, string) {
 	return userInput, additionalContext
 }
 
-// processFileCommand adiciona o conteúdo de um arquivo ao contexto
+// processFileCommand adiciona o conteúdo de arquivos ou diretórios ao contexto
 func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 	var additionalContext string
+
 	if strings.Contains(strings.ToLower(userInput), "@file") {
-		// Extrair todos os caminhos de arquivos
-		filePaths, err := extractAllFilePaths(userInput)
+		// Extrair todos os caminhos de arquivos/diretórios
+		paths, err := extractAllFilePaths(userInput)
 		if err != nil {
 			cli.logger.Error("Erro ao processar os comandos @file", zap.Error(err))
 		} else {
-			for _, filePath := range filePaths {
-				// Ler o conteúdo do arquivo
-				fileContent, err := utils.ReadFileContent(filePath, 5000000)
+			// Inicia uma única animação para todo o processamento
+			cli.animation.ShowThinkingAnimation("Analisando arquivos")
+
+			for _, path := range paths {
+				// Configurar opções de processamento de diretório
+				options := utils.DefaultDirectoryScanOptions(cli.logger)
+				options.OnFileProcessed = func(info utils.FileInfo) {
+					// Apenas atualiza a mensagem, sem parar a animação
+					cli.animation.UpdateMessage(fmt.Sprintf("Processando %s", info.Path))
+				}
+
+				// Processar o caminho (arquivo ou diretório)
+				files, err := utils.ProcessDirectory(path, options)
+
 				if err != nil {
-					cli.logger.Error(fmt.Sprintf("Erro ao ler o arquivo '%s'", filePath), zap.Error(err))
+					cli.logger.Error(fmt.Sprintf("Erro ao processar '%s'", path), zap.Error(err))
+					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
+					continue
+				}
+
+				// Se não encontrou arquivos
+				if len(files) == 0 {
+					additionalContext += fmt.Sprintf("\nNenhum arquivo relevante encontrado em '%s'\n", path)
+					continue
+				}
+
+				// Formatar o conteúdo dos arquivos
+				formattedContent := utils.FormatDirectoryContent(files, options.MaxTotalSize)
+				additionalContext += fmt.Sprintf("\n%s\n", formattedContent)
+
+				// Exibir feedback para o usuário
+				if len(files) == 1 {
+					cli.animation.UpdateMessage(fmt.Sprintf("Arquivo processado: %s (%.2f KB)",
+						files[0].Path, float64(len(files[0].Content))/1024))
 				} else {
-					// Detectar o tipo de arquivo com base na extensão
-					fileType := detectFileType(filePath)
-					// Adicionar o conteúdo ao contexto adicional com formatação de código se aplicável
-					if isCodeFile(fileType) {
-						additionalContext += fmt.Sprintf("\nConteúdo do Arquivo (%s - %s):\n```%s\n%s\n```\n", filePath, fileType, fileType, fileContent)
-					} else {
-						additionalContext += fmt.Sprintf("\nConteúdo do Arquivo (%s - %s):\n%s\n", filePath, fileType, fileContent)
+					var totalSize int64
+					for _, f := range files {
+						totalSize += int64(len(f.Content))
 					}
+					cli.animation.UpdateMessage(fmt.Sprintf("Processados %d arquivos de '%s' (%.2f KB total)",
+						len(files), path, float64(totalSize)/1024))
 				}
 			}
+
+			// Para a animação após processar todos os caminhos
+			cli.animation.StopThinkingAnimation()
 		}
+
 		// Remover todos os comandos @file da entrada do usuário
 		userInput = removeAllFileCommands(userInput)
 	}
+
 	return userInput, additionalContext
 }
 

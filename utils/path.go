@@ -3,15 +3,15 @@ package utils
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// ReadFileContent lê o conteúdo de um arquivo, expandindo ~ para o diretório home.
-// O limite de tamanho do arquivo pode ser configurado via o parâmetro maxSize (em bytes).
-// Retorna o conteúdo do arquivo como string e um erro, se houver.
+// ReadFileContent lê o conteúdo de um arquivo, expandindo ~ para o diretório home,
+// mostrando um indicador de progresso para arquivos grandes.
 func ReadFileContent(filePath string, maxSize int64) (string, error) {
 	// Definir um limite de tamanho padrão (1MB) se maxSize não for especificado
 	if maxSize == 0 {
@@ -46,16 +46,57 @@ func ReadFileContent(filePath string, maxSize int64) (string, error) {
 
 	// Verificar o tamanho do arquivo
 	if info.Size() > maxSize {
-		return "", fmt.Errorf("o arquivo é muito grande (limite de %d bytes)", maxSize)
+		return "", fmt.Errorf("o arquivo '%s' é muito grande (%.2f MB, limite de %.2f MB)",
+			absPath, float64(info.Size())/1024/1024, float64(maxSize)/1024/1024)
 	}
 
-	// Ler o conteúdo do arquivo
-	data, err := os.ReadFile(absPath)
-	if err != nil {
-		return "", fmt.Errorf("erro ao ler o arquivo: %w", err)
-	}
+	// Para arquivos grandes, mostrar um indicador de progresso
+	showProgress := info.Size() > 1024*1024 // Maior que 1MB
 
-	content := string(data)
+	var content string
+
+	if showProgress {
+		// Ler o conteúdo com indicador de progresso
+		file, err := os.Open(absPath)
+		if err != nil {
+			return "", fmt.Errorf("erro ao abrir o arquivo: %w", err)
+		}
+		defer file.Close()
+
+		var data strings.Builder
+		buffer := make([]byte, 8192) // 8KB por vez
+		totalRead := int64(0)
+
+		for {
+			n, err := file.Read(buffer)
+			if err != nil && err != io.EOF {
+				return "", fmt.Errorf("erro ao ler o arquivo: %w", err)
+			}
+
+			if n == 0 {
+				break
+			}
+
+			data.Write(buffer[:n])
+			totalRead += int64(n)
+
+			// Atualizar progresso a cada 10%
+			if totalRead%(info.Size()/10) < 8192 {
+				percentComplete := int(float64(totalRead) / float64(info.Size()) * 100)
+				fmt.Printf("\rLendo %s... %d%% completo", filepath.Base(absPath), percentComplete)
+			}
+		}
+
+		fmt.Printf("\r\033[K") // Limpar a linha de progresso
+		content = data.String()
+	} else {
+		// Ler normalmente para arquivos pequenos
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			return "", fmt.Errorf("erro ao ler o arquivo: %w", err)
+		}
+		content = string(data)
+	}
 
 	// Opcional: Tratar diferentes codificações ou formatos, se necessário
 	// Por exemplo, remover caracteres nulos:
