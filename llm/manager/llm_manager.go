@@ -2,6 +2,7 @@ package manager
 
 import (
 	"fmt"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/openai"
@@ -9,11 +10,6 @@ import (
 	"github.com/diillson/chatcli/llm/token"
 	"go.uber.org/zap"
 	"os"
-)
-
-const (
-	defaultOpenAIModel   = "gpt-4o-mini"
-	defaultClaudeAIModel = "claude-3-5-sonnet-20241022"
 )
 
 // ConfigError representa um erro de configuração, como variáveis de ambiente ausentes
@@ -61,7 +57,7 @@ func (m *LLMManagerImpl) configurarOpenAIClient() {
 	if apiKey != "" {
 		m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
-				model = defaultOpenAIModel
+				model = config.DefaultOpenAIModel
 			}
 			return openai.NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
 		}
@@ -89,15 +85,21 @@ func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string) 
 	}
 }
 
-// configurarClaudeAIClient configura o cliente ClaudeAI se a variável de ambiente CLAUDEAI_API_KEY estiver definida.
+// configurarClaudeAIClient configura o cliente ClaudeAI
 func (m *LLMManagerImpl) configurarClaudeAIClient() {
 	apiKey := os.Getenv("CLAUDEAI_API_KEY")
 	if apiKey != "" {
 		m.clients["CLAUDEAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
-				model = defaultClaudeAIModel
+				model = config.DefaultClaudeAIModel
 			}
-			return claudeai.NewClaudeClient(apiKey, model, m.logger), nil
+			return claudeai.NewClaudeClient(
+				apiKey,
+				model,
+				m.logger,
+				config.ClaudeAIDefaultMaxAttempts,
+				config.ClaudeAIDefaultBackoff,
+			), nil
 		}
 	} else {
 		m.logger.Warn("CLAUDEAI_API_KEY não definida, o provedor ClaudeAI não estará disponível")

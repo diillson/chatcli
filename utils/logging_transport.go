@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/diillson/chatcli/config"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,11 +16,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
-)
-
-const (
-	defaultMaxBodySize = 3070 // 3KB
-	defaultMaxLogSize  = 50   // 10MB
 )
 
 // InitializeLogger configura e inicializa um logger com base nas variáveis de ambiente.
@@ -115,7 +111,7 @@ func getMaxLogSizeFromEnv() int {
 			return int(size / (1024 * 1024))
 		}
 	}
-	return defaultMaxLogSize
+	return config.DefaultMaxLogSize
 }
 
 // parseSize converte uma string de tamanho legível (como "50MB", "100KB", "1GB") para bytes.

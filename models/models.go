@@ -1,11 +1,6 @@
 package models
 
-// Constantes para os possíveis valores do campo Status em ResponseData
-const (
-	StatusProcessing = "processing"
-	StatusCompleted  = "completed"
-	StatusError      = "error"
-)
+import "github.com/diillson/chatcli/config"
 
 // Message representa uma mensagem trocada com o modelo de linguagem.
 type Message struct {
@@ -32,9 +27,9 @@ type ResponseData struct {
 // IsValid valida se o status da resposta é um dos valores esperados.
 func (r *ResponseData) IsValid() bool {
 	validStatuses := map[string]bool{
-		StatusProcessing: true,
-		StatusCompleted:  true,
-		StatusError:      true,
+		config.StatusProcessing: true,
+		config.StatusCompleted:  true,
+		config.StatusError:      true,
 	}
 	return validStatuses[r.Status]
 }

@@ -3,14 +3,13 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"github.com/diillson/chatcli/config"
 	"go.uber.org/zap"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
-
-const defaultMaxHistorySize = 50 * 1024 * 1024 // 50MB
 
 type HistoryManager struct {
 	historyFile    string
@@ -37,7 +36,7 @@ func getMaxHistorySizeFromEnv() int64 {
 			return size
 		}
 	}
-	return defaultMaxHistorySize
+	return config.DefaultMaxHistorySize
 }
 
 // parseSize converte uma string de tamanho legível (como "50MB", "100KB", "1GB") para bytes.
