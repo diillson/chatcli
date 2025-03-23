@@ -7,8 +7,6 @@ import (
 	"github.com/diillson/chatcli/config"
 	"io"
 	"net/http"
-	"os"
-	"strconv"
 	"time"
 
 	"github.com/diillson/chatcli/models"
@@ -71,18 +69,18 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 	})
 
 	// Obter max_tokens da variável de ambiente ou usar um valor padrão
-	maxTokens := config.OpenAIAIDefaultMaxTokens // Valor padrão
-	if tokenStr := os.Getenv("OPENAI_MAX_TOKENS"); tokenStr != "" {
-		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
-			maxTokens = parsedTokens
-			c.logger.Debug("Usando max_tokens personalizado", zap.Int("max_tokens", maxTokens))
-		}
-	}
+	//maxTokens := config.OpenAIAIDefaultMaxTokens // Valor padrão
+	//if tokenStr := os.Getenv("OPENAI_MAX_TOKENS"); tokenStr != "" {
+	//	if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
+	//		maxTokens = parsedTokens
+	//		c.logger.Debug("Usando max_completion_tokens personalizado", zap.Int("max_tokens", maxTokens))
+	//	}
+	//}
 
 	payload := map[string]interface{}{
-		"model":      c.model,
-		"messages":   messages,
-		"max_tokens": maxTokens,
+		"model":    c.model,
+		"messages": messages,
+		//"max_completion_tokens": maxTokens,
 	}
 
 	jsonValue, err := json.Marshal(payload)

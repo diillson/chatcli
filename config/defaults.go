@@ -18,14 +18,14 @@ const (
 	OpenAIAPIURL             = "https://api.openai.com/v1/chat/completions"
 	OpenAIDefaultMaxAttempts = 3
 	OpenAIDefaultBackoff     = time.Second
-	OpenAIAIDefaultMaxTokens = 32000 // Valor padrão para max_tokens
+	//OpenAIAIDefaultMaxTokens = 10384 // Valor padrão para max_tokens
 
 	// Valores padrão para ClaudeAI
 	DefaultClaudeAIModel       = "claude-3-5-sonnet-20241022"
 	ClaudeAIAPIURL             = "https://api.anthropic.com/v1/messages"
 	ClaudeAIDefaultMaxAttempts = 3
 	ClaudeAIDefaultBackoff     = time.Second
-	ClaudeAIDefaultMaxTokens   = 200000 // Valor padrão para max_tokens
+	ClaudeAIDefaultMaxTokens   = 8192 // Valor padrão para max_tokens
 
 	// Provedor padrão
 	DefaultLLMProvider = "OPENAI"
