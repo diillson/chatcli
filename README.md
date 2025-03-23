@@ -75,7 +75,7 @@ O ChatCLI agora suporta o ClaudeAI como um provedor adicional de LLM. Veja como 
 - **Geral**:
     - `LOG_LEVEL` - (Opcional) Define o nível de log (`debug`, `info`, `warn`, `error`). Padrão é `info`.
     - `ENV` - (Opcional) Define o ambiente (`prod` para produção, caso contrário, padrão é `dev` desenvolvimento) - Essencial pois muda a forma que o log transacional e exibido no terminal.
-    - `LLM_PROVIDER` - (Opacional) Especifica o provedor de LLM padrão (`OPENAI`, `STACKSPOT` ou `CLAUDEAI`). Padrão é `STACKSPOT`.
+    - `LLM_PROVIDER` - (Opacional) Especifica o provedor de LLM padrão (`OPENAI`, `STACKSPOT` ou `CLAUDEAI`). Padrão é `OPENAI`.
     - `LOG_FILE` - (Opcional) Define o nome do arquivo de log. Padrão é `app.log`.
     - `LOG_MAX_SIZE` (Opacional) Define o tamanho maximo do log antes de realizar o backup (`3`) ao maximo por `28` dias, padrão É `50MB`, pode usar escala de MB KB GB, ex: 10MB, 500KB, 1GB.
     - `HISTORY_MAX_SIZE` - (Opcional) Define o tamanho do historico de comandos do chat `.chatcli_history` padrão é `50MB`, pode usar escala de MB KB GB, ex: 10MB, 500KB, 1GB.

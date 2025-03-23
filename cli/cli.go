@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/joho/godotenv"
@@ -21,14 +22,6 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/peterh/liner"
 	"go.uber.org/zap"
-)
-
-const (
-	llmdDefault          = "STACKSPOT"
-	defaultSlugName      = "testeai"
-	defaultTenantName    = "zup"
-	defaultClaudeAIModel = "claude-3-5-sonnet-20241022"
-	defaultOpenAIModel   = "gpt-4o-mini"
 )
 
 // Logger interface para facilitar a testabilidade
@@ -108,7 +101,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 	cli.reconfigureLogger()
 
 	// Recarregar a configuração do LLMManager
-	utils.CheckEnvVariables(cli.logger, defaultSlugName, defaultTenantName)
+	utils.CheckEnvVariables(cli.logger)
 
 	manager, err := manager.NewLLMManager(cli.logger, os.Getenv("SLUG_NAME"), os.Getenv("TENANT_NAME"))
 	if err != nil {
@@ -132,18 +125,18 @@ func (cli *ChatCLI) reloadConfiguration() {
 func (cli *ChatCLI) configureProviderAndModel() {
 	cli.provider = os.Getenv("LLM_PROVIDER")
 	if cli.provider == "" {
-		cli.provider = "STACKSPOT" // Usar padrão se não estiver definido
+		cli.provider = config.DefaultLLMProvider
 	}
 	if cli.provider == "OPENAI" {
 		cli.model = os.Getenv("OPENAI_MODEL")
 		if cli.model == "" {
-			cli.model = defaultOpenAIModel
+			cli.model = config.DefaultOpenAIModel
 		}
 	}
 	if cli.provider == "CLAUDEAI" {
 		cli.model = os.Getenv("CLAUDEAI_MODEL")
 		if cli.model == "" {
-			cli.model = defaultClaudeAIModel
+			cli.model = config.DefaultClaudeAIModel
 		}
 	}
 }
@@ -416,11 +409,11 @@ func (cli *ChatCLI) switchProvider() {
 	newProvider := availableProviders[choiceIndex]
 	var newModel string
 	if newProvider == "OPENAI" {
-		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", defaultOpenAIModel)
+		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel)
 	}
 
 	if newProvider == "CLAUDEAI" {
-		newModel = utils.GetEnvOrDefault("CLAUDEAI_MODEL", defaultClaudeAIModel)
+		newModel = utils.GetEnvOrDefault("CLAUDEAI_MODEL", config.DefaultClaudeAIModel)
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
