@@ -83,7 +83,6 @@ O ChatCLI agora suporta o ClaudeAI como um provedor adicional de LLM. Veja como 
 - **Provedor OpenAI**:
     - `OPENAI_API_KEY` - Sua chave de API da OpenAI.
     - `OPENAI_MODEL` - (Opcional) Especifica o modelo da OpenAI a ser usado. Padrão é `gpt-4o-mini`.
-    - `OPENAI_MAX_TOKENS` - (Opcional) Define o número máximo de tokens na resposta. Padrão é `32000`, define conforme o modelo que usar.
   
 - **Provedor StackSpot**:
     - `CLIENT_ID` - ID do cliente StackSpot.
@@ -94,7 +93,7 @@ O ChatCLI agora suporta o ClaudeAI como um provedor adicional de LLM. Veja como 
 - **Provedor ClaudeAI**:
     - `CLAUDEAI_API_KEY` - Sua chave de API da ClaudeAI.
     - `CLAUDEAI_MODEL` - (Opcional) Define o modelo da ClaudeAI. Padrão é `claude-3-5-sonnet-20241022`.
-    - `CLAUDEAI_MAX_TOKENS` - (Opcional) Define o número máximo de tokens na resposta. Padrão é 200.000. Pode ser reduzido o maximo é 200.000 (combinação entrada+saída).
+    - `CLAUDEAI_MAX_TOKENS` - (Opcional) Define o número máximo de tokens na resposta. Padrão é `8192` para o `claude 3.5`, caso desejar `claude-3-7-sonnet-20250219` atende até `64.000`. veja mais em https://docs.anthropic.com/pt/api/rate-limits
 ### Exemplo de Arquivo `.env`
 
 ```env
@@ -109,7 +108,6 @@ HISTORY_MAX_SIZE=300MB
 # Configurações do OpenAI
 OPENAI_API_KEY=sua-chave-openai
 OPENAI_MODEL=gpt-4o-mini
-OPENAI_MAX_TOKENS=32000
 
 # Configurações do StackSpot
 CLIENT_ID=seu-cliente-id
@@ -120,7 +118,7 @@ TENANT_NAME=seu-tenant-name
 # Configurações do ClaudeAI
 CLAUDEAI_API_KEY=sua-chave-claudeai
 CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
-CLAUDEAI_MAX_TOKENS=16384
+CLAUDEAI_MAX_TOKENS=8192
 ```
 
 --- 
