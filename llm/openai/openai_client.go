@@ -4,19 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/diillson/chatcli/config"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
-)
-
-const (
-	openAIAPIURL             = "https://api.openai.com/v1/chat/completions"
-	openAIDefaultMaxAttempts = 3
-	openAIDefaultBackoff     = time.Second
 )
 
 // OpenAIClient implementa o cliente para interagir com a API da OpenAI
@@ -33,10 +30,10 @@ type OpenAIClient struct {
 func NewOpenAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenAIClient {
 	httpClient := utils.NewHTTPClient(logger, 300*time.Second)
 	if maxAttempts <= 0 {
-		maxAttempts = openAIDefaultMaxAttempts
+		maxAttempts = config.OpenAIDefaultMaxAttempts
 	}
 	if backoff <= 0 {
-		backoff = openAIDefaultBackoff
+		backoff = config.OpenAIDefaultBackoff
 	}
 
 	return &OpenAIClient{
@@ -73,9 +70,19 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		"content": prompt,
 	})
 
+	// Obter max_tokens da variável de ambiente ou usar um valor padrão
+	maxTokens := config.OpenAIAIDefaultMaxTokens // Valor padrão
+	if tokenStr := os.Getenv("OPENAI_MAX_TOKENS"); tokenStr != "" {
+		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
+			maxTokens = parsedTokens
+			c.logger.Debug("Usando max_tokens personalizado", zap.Int("max_tokens", maxTokens))
+		}
+	}
+
 	payload := map[string]interface{}{
-		"model":    c.model,
-		"messages": messages,
+		"model":      c.model,
+		"messages":   messages,
+		"max_tokens": maxTokens,
 	}
 
 	jsonValue, err := json.Marshal(payload)
@@ -119,7 +126,7 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 
 // sendRequest envia a requisição para a API da OpenAI
 func (c *OpenAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openAIAPIURL, utils.NewJSONReader(jsonValue))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, config.OpenAIAPIURL, utils.NewJSONReader(jsonValue))
 	if err != nil {
 		c.logger.Error("Erro ao criar a requisição", zap.Error(err))
 		return nil, fmt.Errorf("erro ao criar a requisição: %w", err)
