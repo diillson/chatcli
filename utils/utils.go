@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"fmt"
+	"github.com/diillson/chatcli/config"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/term"
@@ -52,10 +53,10 @@ func GetTerminalSize() (width int, height int, err error) {
 }
 
 // CheckEnvVariables verifica as variáveis de ambiente necessárias e informa o usuário
-func CheckEnvVariables(logger *zap.Logger, defaultSlugName, defaultTenantName string) {
+func CheckEnvVariables(logger *zap.Logger) {
 	// Verificar SLUG_NAME e TENANT_NAME
-	slugName, slugIsDefault := CheckAndNotifyEnv("SLUG_NAME", defaultSlugName, logger)
-	tenantName, tenantIsDefault := CheckAndNotifyEnv("TENANT_NAME", defaultTenantName, logger)
+	slugName, slugIsDefault := CheckAndNotifyEnv("SLUG_NAME", config.DefaultSlugName, logger)
+	tenantName, tenantIsDefault := CheckAndNotifyEnv("TENANT_NAME", config.DefaultTenantName, logger)
 	if slugIsDefault || tenantIsDefault {
 		fmt.Println("ATENÇÃO: Variáveis de ambiente não definidas, usando valores padrão:")
 		if slugIsDefault {
@@ -75,6 +76,7 @@ func CheckProviderEnvVariables(logger *zap.Logger) {
 	// Verificar STACKSPOT
 	clientID := os.Getenv("CLIENT_ID")
 	clientSecret := os.Getenv("CLIENT_SECRET")
+
 	if clientID == "" || clientSecret == "" {
 		fmt.Println("ATENÇÃO: Variáveis de ambiente necessárias para o provedor STACKSPOT não foram definidas:")
 		if clientID == "" {
@@ -88,12 +90,21 @@ func CheckProviderEnvVariables(logger *zap.Logger) {
 
 	// Verificar OPENAI
 	openAIKey := os.Getenv("OPENAI_API_KEY")
+	openAIModel := os.Getenv("OPENAI_MODEL")
 	if openAIKey == "" {
 		fmt.Println("ATENÇÃO: OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível.")
 	}
-	// Verificar OPENAI
+	if openAIModel == "" {
+		fmt.Printf("ATENÇÃO: OPENAI_MODEL não definido, usando valor padrão: %s\n", config.DefaultOpenAIModel)
+	}
+
+	// Verificar CLAUDEAI
 	claudeAIKey := os.Getenv("CLAUDEAI_API_KEY")
+	claudeAIModel := os.Getenv("CLAUDEAI_MODEL")
 	if claudeAIKey == "" {
 		fmt.Println("ATENÇÃO: CLAUDEAI_API_KEY não definida, o provedor CLAUDEAI não estará disponível.")
+	}
+	if claudeAIModel == "" {
+		fmt.Printf("ATENÇÃO: CLAUDEAI_MODEL não definido, usando valor padrão: %s\n", config.DefaultClaudeAIModel)
 	}
 }

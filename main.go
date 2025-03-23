@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/manager"
 	"os"
 	"os/signal"
@@ -12,11 +13,6 @@ import (
 	"github.com/diillson/chatcli/utils"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
-)
-
-const (
-	defaultSlugName   = "testeai"
-	defaultTenantName = "zup"
 )
 
 func main() {
@@ -51,11 +47,10 @@ func main() {
 	handleGracefulShutdown(cancel, logger)
 
 	// Verificar variáveis de ambiente e informar o usuário
-	utils.CheckEnvVariables(logger, defaultSlugName, defaultTenantName)
-
-	// Inicializar o LLMManager
-	slugName := utils.GetEnvOrDefault("SLUG_NAME", defaultSlugName)
-	tenantName := utils.GetEnvOrDefault("TENANT_NAME", defaultTenantName)
+	utils.CheckEnvVariables(logger)
+	// Inicializar o LLMManager com as constantes do pacote config
+	slugName := utils.GetEnvOrDefault("SLUG_NAME", config.DefaultSlugName)
+	tenantName := utils.GetEnvOrDefault("TENANT_NAME", config.DefaultTenantName)
 	manager, err := manager.NewLLMManager(logger, slugName, tenantName)
 	if err != nil {
 		logger.Fatal("Erro ao inicializar o LLMManager", zap.Error(err))
