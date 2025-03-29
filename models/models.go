@@ -1,6 +1,9 @@
 package models
 
-import "github.com/diillson/chatcli/config"
+import (
+	"github.com/diillson/chatcli/config"
+	"sort"
+)
 
 // Message representa uma mensagem trocada com o modelo de linguagem.
 type Message struct {
@@ -32,6 +35,115 @@ func (r *ResponseData) IsValid() bool {
 		config.StatusError:      true,
 	}
 	return validStatuses[r.Status]
+}
+
+// EstimateTokenCount estima o número de tokens em uma mensagem
+func (m *Message) EstimateTokenCount() int {
+	// Estimativa conservadora: cerca de 0.25 tokens por caractere
+	return int(float64(len(m.Content)) * 0.25)
+}
+
+// TrimHistory reduz o tamanho do histórico para ficar abaixo do limite de tokens
+// Mantém as mensagens mais recentes e informativas
+func TrimHistory(history []Message, maxTokens int) []Message {
+	// Se o histórico está vazio, não há nada a fazer
+	if len(history) == 0 {
+		return history
+	}
+
+	// Calcular o total de tokens no histórico atual
+	totalTokens := 0
+	for _, msg := range history {
+		totalTokens += msg.EstimateTokenCount()
+	}
+
+	// Se já estamos abaixo do limite, retornar o histórico original
+	if totalTokens <= maxTokens {
+		return history
+	}
+
+	// Precisamos reduzir o histórico
+	// Estratégia: manter a primeira mensagem (sistema) e as mensagens mais recentes
+
+	// Classificar mensagens por importância
+	type msgWithTokens struct {
+		index      int
+		msg        Message
+		tokenCount int
+		importance int // Maior = mais importante
+	}
+
+	msgs := make([]msgWithTokens, len(history))
+	for i, msg := range history {
+		importance := 0
+
+		// Mensagens do sistema são importantes
+		if msg.Role == "system" {
+			importance += 100
+		}
+
+		// Mensagens recentes são importantes (últimas 4)
+		if i >= len(history)-4 {
+			importance += (len(history) - i) * 10
+		}
+
+		// A mensagem atual do usuário (última) é a mais importante
+		if i == len(history)-1 && msg.Role == "user" {
+			importance += 1000
+		}
+
+		tokenCount := msg.EstimateTokenCount()
+		msgs[i] = msgWithTokens{
+			index:      i,
+			msg:        msg,
+			tokenCount: tokenCount,
+			importance: importance,
+		}
+	}
+
+	// Ordenar por importância (maior primeiro)
+	sort.Slice(msgs, func(i, j int) bool {
+		return msgs[i].importance > msgs[j].importance
+	})
+
+	// Selecionar mensagens até atingir o limite, respeitando a ordem original
+	selected := make(map[int]bool)
+	currentTotal := 0
+
+	for _, m := range msgs {
+		if currentTotal+m.tokenCount <= maxTokens {
+			selected[m.index] = true
+			currentTotal += m.tokenCount
+		} else if len(selected) == 0 {
+			// Se ainda não selecionamos nenhuma mensagem, inclua pelo menos esta
+			// mesmo que exceda o limite (será truncada depois)
+			selected[m.index] = true
+			break
+		}
+	}
+
+	// Reconstruir o histórico na ordem original, apenas com as mensagens selecionadas
+	var trimmedHistory []Message
+	for i, msg := range history {
+		if selected[i] {
+			// Se for a última mensagem e ainda estamos acima do limite, truncá-la
+			if i == len(history)-1 && currentTotal > maxTokens {
+				exceededBy := currentTotal - maxTokens
+				// Determinar quantos caracteres remover (aproximadamente)
+				charsToRemove := int(float64(exceededBy) / 0.25)
+
+				if len(msg.Content) > charsToRemove+100 {
+					// Truncar a mensagem, mantendo o início
+					msg.Content = msg.Content[:len(msg.Content)-charsToRemove] +
+						"\n\n[...Conteúdo truncado para respeitar o limite de tokens...]"
+				}
+			}
+
+			trimmedHistory = append(trimmedHistory, msg)
+		}
+	}
+
+	return trimmedHistory
 }
 
 //// Exemplo de teste unitário para a serialização e desserialização de Message

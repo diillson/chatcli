@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -245,6 +246,10 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			// Processar comandos especiais
 			userInput, additionalContext := cli.processSpecialCommands(input)
 
+			// Verificar e limitar o histórico antes de enviar
+			// Reservar até 180000 tokens para o histórico (deixando 20000 para o prompt atual)
+			cli.history = models.TrimHistory(cli.history, 180000)
+
 			// Adicionar a mensagem do usuário ao histórico
 			cli.history = append(cli.history, models.Message{
 				Role:    "user",
@@ -434,7 +439,8 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("@history - Adiciona o histórico do shell ao contexto")
 	fmt.Println("@git - Adiciona informações do Git ao contexto")
 	fmt.Println("@env - Adiciona variáveis de ambiente ao contexto")
-	fmt.Println("@file <caminho_do_arquivo> - Adiciona o conteúdo de um arquivo ao contexto")
+	fmt.Println("@file <caminho_do_arquivo_ou_diretório> - Adiciona o conteúdo ao contexto")
+	fmt.Println("@file --chunk <número_do_chunk> <caminho_do_diretório> - Processa um diretório grande em partes")
 	fmt.Println("@command <seu_comando> - para executar um comando diretamente no sistema")
 	fmt.Println("@command --ai <seu_comando> para enviar o ouput para a AI de forma direta e '>' {maior} <seu contexto> para que a AI faça algo.")
 	fmt.Println("@command -i <seu_comando> - para executar um comando interativo")
@@ -563,47 +569,83 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 		if err != nil {
 			cli.logger.Error("Erro ao processar os comandos @file", zap.Error(err))
 		} else {
+			// Verificar se há flags de chunking
+			useChunking := false
+			chunkIndex := 0
+
+			for i, arg := range paths {
+				if arg == "--chunk" && i+1 < len(paths) {
+					useChunking = true
+					if index, err := strconv.Atoi(paths[i+1]); err == nil {
+						chunkIndex = index
+						// Remover a flag e o índice da lista de paths
+						paths = append(paths[:i], paths[i+2:]...)
+					} else {
+						// Remover apenas a flag
+						paths = append(paths[:i], paths[i+1:]...)
+					}
+					break
+				}
+			}
+
 			// Inicia uma única animação para todo o processamento
 			cli.animation.ShowThinkingAnimation("Analisando arquivos")
 
-			for _, path := range paths {
-				// Configurar opções de processamento de diretório
-				options := utils.DefaultDirectoryScanOptions(cli.logger)
-				options.OnFileProcessed = func(info utils.FileInfo) {
-					// Apenas atualiza a mensagem, sem parar a animação
-					cli.animation.UpdateMessage(fmt.Sprintf("Processando %s", info.Path))
+			if useChunking {
+				additionalContext = cli.processWithChunking(paths, chunkIndex)
+
+				// Verificar o tamanho do contexto resultante e limitar se necessário
+				estimatedTokens := int(float64(len(additionalContext)) * 0.25)
+				if estimatedTokens > 180000 { // Limite mais seguro
+					// Reduzir o contexto para não exceder o limite
+					ratio := float64(180000) / float64(estimatedTokens)
+					maxChars := int(float64(len(additionalContext)) * ratio)
+
+					// Pegar o início e avisar sobre o truncamento
+					additionalContext = additionalContext[:maxChars] +
+						"\n\n[...Conteúdo truncado para respeitar o limite de tokens...]\n" +
+						fmt.Sprintf("O conteúdo completo excederia o limite (estimado em %d tokens).\n", estimatedTokens)
 				}
-
-				// Processar o caminho (arquivo ou diretório)
-				files, err := utils.ProcessDirectory(path, options)
-
-				if err != nil {
-					cli.logger.Error(fmt.Sprintf("Erro ao processar '%s'", path), zap.Error(err))
-					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
-					continue
-				}
-
-				// Se não encontrou arquivos
-				if len(files) == 0 {
-					additionalContext += fmt.Sprintf("\nNenhum arquivo relevante encontrado em '%s'\n", path)
-					continue
-				}
-
-				// Formatar o conteúdo dos arquivos
-				formattedContent := utils.FormatDirectoryContent(files, options.MaxTotalSize)
-				additionalContext += fmt.Sprintf("\n%s\n", formattedContent)
-
-				// Exibir feedback para o usuário
-				if len(files) == 1 {
-					cli.animation.UpdateMessage(fmt.Sprintf("Arquivo processado: %s (%.2f KB)",
-						files[0].Path, float64(len(files[0].Content))/1024))
-				} else {
-					var totalSize int64
-					for _, f := range files {
-						totalSize += int64(len(f.Content))
+			} else {
+				for _, path := range paths {
+					// Configurar opções de processamento de diretório
+					options := utils.DefaultDirectoryScanOptions(cli.logger)
+					options.OnFileProcessed = func(info utils.FileInfo) {
+						// Apenas atualiza a mensagem, sem parar a animação
+						cli.animation.UpdateMessage(fmt.Sprintf("Processando %s", info.Path))
 					}
-					cli.animation.UpdateMessage(fmt.Sprintf("Processados %d arquivos de '%s' (%.2f KB total)",
-						len(files), path, float64(totalSize)/1024))
+
+					// Processar o caminho (arquivo ou diretório)
+					files, err := utils.ProcessDirectory(path, options)
+
+					if err != nil {
+						cli.logger.Error(fmt.Sprintf("Erro ao processar '%s'", path), zap.Error(err))
+						additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
+						continue
+					}
+
+					// Se não encontrou arquivos
+					if len(files) == 0 {
+						additionalContext += fmt.Sprintf("\nNenhum arquivo relevante encontrado em '%s'\n", path)
+						continue
+					}
+
+					// Formatar o conteúdo dos arquivos
+					formattedContent := utils.FormatDirectoryContent(files, options.MaxTotalSize)
+					additionalContext += fmt.Sprintf("\n%s\n", formattedContent)
+
+					// Exibir feedback para o usuário
+					if len(files) == 1 {
+						cli.animation.UpdateMessage(fmt.Sprintf("Arquivo processado: %s (%.2f KB)",
+							files[0].Path, float64(len(files[0].Content))/1024))
+					} else {
+						var totalSize int64
+						for _, f := range files {
+							totalSize += int64(len(f.Content))
+						}
+						cli.animation.UpdateMessage(fmt.Sprintf("Processados %d arquivos de '%s' (%.2f KB total)",
+							len(files), path, float64(totalSize)/1024))
+					}
 				}
 			}
 
@@ -616,6 +658,92 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 	}
 
 	return userInput, additionalContext
+}
+
+// processWithChunking processa um diretório em chunks
+func (cli *ChatCLI) processWithChunking(paths []string, chunkIndex int) string {
+	if len(paths) == 0 {
+		return "\nErro: Nenhum caminho especificado para processamento em chunks\n"
+	}
+
+	// Vamos usar o primeiro caminho
+	path := paths[0]
+
+	// Expandir o caminho
+	expandedPath, err := utils.ExpandPath(path)
+	if err != nil {
+		return fmt.Sprintf("\nErro ao expandir o caminho '%s': %s\n", path, err.Error())
+	}
+
+	// Criar um ChunkManager
+	chunkManager := utils.NewChunkManager(cli.logger)
+
+	// Escanear o projeto
+	cli.animation.UpdateMessage(fmt.Sprintf("Escaneando projeto em '%s'", expandedPath))
+	files, err := chunkManager.ScanProject(expandedPath)
+	if err != nil {
+		return fmt.Sprintf("\nErro ao escanear o projeto '%s': %s\n", expandedPath, err.Error())
+	}
+
+	// Criar chunks
+	cli.animation.UpdateMessage("Dividindo projeto em chunks gerenciáveis")
+	chunks := chunkManager.CreateChunks(files)
+
+	// Verificar se o índice do chunk é válido
+	if chunkIndex < 0 || chunkIndex >= len(chunks) {
+		if len(chunks) == 0 {
+			return "\nNenhum arquivo relevante encontrado para processamento em chunks\n"
+		}
+
+		// Se o índice não foi especificado, mostrar informações sobre os chunks
+		var builder strings.Builder
+		builder.WriteString(fmt.Sprintf("\n📦 PROJETO DIVIDIDO EM %d CHUNKS\n\n", len(chunks)))
+		builder.WriteString("O projeto é muito grande para ser processado de uma vez.\n")
+		builder.WriteString("Foi dividido nas seguintes partes:\n\n")
+
+		for i, chunk := range chunks {
+			builder.WriteString(fmt.Sprintf("CHUNK %d: %d arquivos (%.2f KB, ~%d tokens)\n",
+				i+1, len(chunk.Files), float64(chunk.TotalSize)/1024, chunk.TotalTokens))
+
+			// Listar os 5 primeiros arquivos de cada chunk
+			maxToShow := 5
+			if len(chunk.Files) < maxToShow {
+				maxToShow = len(chunk.Files)
+			}
+
+			for j := 0; j < maxToShow; j++ {
+				file := chunk.Files[j]
+				builder.WriteString(fmt.Sprintf("  - %s (%.2f KB, ~%d tokens)\n",
+					file.Path, float64(file.Size)/1024, file.TokenCount))
+			}
+
+			if len(chunk.Files) > maxToShow {
+				builder.WriteString(fmt.Sprintf("  - ... e %d arquivos mais\n", len(chunk.Files)-maxToShow))
+			}
+
+			builder.WriteString("\n")
+		}
+
+		builder.WriteString("\nPara processar um chunk específico, use:\n")
+		builder.WriteString("@file --chunk <número_do_chunk> " + path + "\n")
+		builder.WriteString("Exemplo: @file --chunk 1 " + path + "\n")
+
+		return builder.String()
+	}
+
+	// Processar o chunk específico
+	chunk := chunks[chunkIndex-1] // Ajusta para indexação baseada em 1
+
+	cli.animation.UpdateMessage(fmt.Sprintf("Processando chunk %d/%d", chunkIndex, len(chunks)))
+	result, err := chunkManager.ProcessChunk(chunk, func(status string) {
+		cli.animation.UpdateMessage(status)
+	})
+
+	if err != nil {
+		return fmt.Sprintf("\nErro ao processar o chunk %d: %s\n", chunkIndex, err.Error())
+	}
+
+	return result
 }
 
 // Função auxiliar para extrair todos os caminhos de arquivos após @file
@@ -632,15 +760,29 @@ func extractAllFilePaths(input string) ([]string, error) {
 			skipNext = false
 			continue
 		}
+
 		if token == "@file" {
-			if i+1 < len(tokens) {
-				filePaths = append(filePaths, tokens[i+1])
-				skipNext = true
-			} else {
-				return nil, fmt.Errorf("comando @file sem caminho de arquivo")
+			// Coletar todos os tokens após @file até o próximo comando ou fim da entrada
+			j := i + 1
+			for j < len(tokens) {
+				// Se encontrar outro comando especial, parar
+				if strings.HasPrefix(tokens[j], "@") {
+					break
+				}
+
+				filePaths = append(filePaths, tokens[j])
+				j++
 			}
+
+			// Já coletamos todos os parâmetros, então podemos sair do loop
+			break
 		}
 	}
+
+	if len(filePaths) == 0 {
+		return nil, fmt.Errorf("comando @file sem caminho de arquivo")
+	}
+
 	return filePaths, nil
 }
 
@@ -931,6 +1073,7 @@ func (cli *ChatCLI) completer(line string) []string {
 
 	commands := []string{"/exit", "/quit", "/switch", "/help", "/reload"}
 	specialCommands := []string{"@history", "@git", "@env", "@file", "@command"}
+	fileOptions := []string{"--chunk"}
 
 	if strings.HasPrefix(trimmedLine, "/") {
 		for _, cmd := range commands {
@@ -952,6 +1095,38 @@ func (cli *ChatCLI) completer(line string) []string {
 		// Caso para @file
 		if strings.HasPrefix(trimmedLine, "@file ") {
 			prefix := strings.TrimPrefix(trimmedLine, "@file ")
+
+			// Verificar se estamos completando uma opção
+			if prefix == "" || prefix == "-" {
+				for _, opt := range fileOptions {
+					completions = append(completions, "@file "+opt)
+				}
+				return completions
+			}
+
+			if strings.HasPrefix(prefix, "--") {
+				for _, opt := range fileOptions {
+					if strings.HasPrefix(opt, prefix) {
+						completions = append(completions, "@file "+opt)
+					}
+				}
+				if len(completions) > 0 {
+					return completions
+				}
+			}
+
+			// Se temos --chunk, sugerir números
+			if strings.HasPrefix(prefix, "--chunk ") {
+				chunkPrefix := strings.TrimPrefix(prefix, "--chunk ")
+				if chunkPrefix == "" {
+					for i := 1; i <= 5; i++ { // Sugerir chunks 1-5
+						completions = append(completions, fmt.Sprintf("@file --chunk %d", i))
+					}
+					return completions
+				}
+			}
+
+			// Caso contrário, completar caminhos
 			fileCompletions := cli.completeFilePath(prefix)
 			// Reconstruir a linha com @file, mantendo o prefixo já digitado
 			for _, fc := range fileCompletions {

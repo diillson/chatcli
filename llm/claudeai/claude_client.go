@@ -61,6 +61,42 @@ func (c *ClaudeClient) GetModelName() string {
 func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
 	messages := c.buildMessages(prompt, history)
 
+	// Estimar o tamanho total do prompt
+	totalEstimatedTokens := 0
+	for _, msg := range messages {
+		totalEstimatedTokens += int(float64(len(msg["content"])) * 0.25)
+	}
+
+	// Se nosso prompt exceder o limite, faça um pré-tratamento
+	if totalEstimatedTokens > 195000 { // Deixar margem de segurança
+		c.logger.Warn("Prompt excederia o limite de tokens, fazendo pré-truncamento",
+			zap.Int("estimatedTokens", totalEstimatedTokens))
+
+		// Simplificar a estratégia: manter apenas a última mensagem do usuário
+		// e truncá-la se necessário
+		var simplifiedMessages []map[string]string
+		var userMessage map[string]string
+
+		for _, msg := range messages {
+			if msg["role"] == "user" {
+				userMessage = msg
+			}
+		}
+
+		if userMessage != nil {
+			// Truncar a mensagem do usuário se ainda for muito grande
+			content := userMessage["content"]
+			estimatedTokens := int(float64(len(content)) * 0.25)
+			if estimatedTokens > 195000 {
+				maxChars := int(195000 / 0.25)
+				userMessage["content"] = content[:maxChars] + "\n\n[Conteúdo truncado devido ao limite de tokens]"
+			}
+
+			simplifiedMessages = []map[string]string{userMessage}
+			messages = simplifiedMessages
+		}
+	}
+
 	// Obter max_tokens da variável de ambiente ou usar o padrão
 	maxTokens := config.ClaudeAIDefaultMaxTokens
 	if tokenStr := os.Getenv("CLAUDEAI_MAX_TOKENS"); tokenStr != "" {
