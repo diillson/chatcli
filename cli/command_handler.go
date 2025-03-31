@@ -28,6 +28,8 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/help":
 		ch.cli.showHelp()
 		return false
+	case userInput == "/nextchunk":
+		return ch.cli.handleNextChunk()
 	default:
 		fmt.Println("Comando desconhecido. Use /help para ver os comandos disponíveis.")
 		return false
