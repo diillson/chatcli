@@ -63,7 +63,9 @@ type ChatCLI struct {
 	animation         *AnimationManager
 	commandHandler    *CommandHandler
 	lastCommandOutput string
-	fileChunks        []FileChunk
+	fileChunks        []FileChunk // Chunks pendentes para processamento
+	failedChunks      []FileChunk // Chunks que falharam no processamento
+	lastFailedChunk   *FileChunk  // Referência ao último chunk que falhou
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -207,6 +209,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	fmt.Println("Use '@history', '@git', '@env', '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
 	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando>' para interativo.")
 	fmt.Println("Use '@command --ai <seu_comando>' para enviar o ouput para a AI de forma direta e '>' {maior} <seu contexto> para que a AI faça algo.")
+	fmt.Println("Para processamento em chunks, use '/nextchunk', '/retry', '/retryall' e '/skipchunk'.")
 	fmt.Printf("Ainda ficou com dúvidas? use '/help'.\n\n")
 	for {
 		select {
@@ -263,7 +266,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
 
 			// Criar um contexto com timeout
-			responseCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			responseCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer cancel()
 
 			// Enviar o prompt para o LLM
@@ -429,7 +432,12 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("/exit ou /quit - Sai do ChatCLI")
 	fmt.Println("/switch - Troca o provedor de LLM")
 	fmt.Println("/switch --slugname <slug> --tenantname <tenant> - Define slug e tenant")
-	fmt.Printf("/reload para recarregar as variáveis e reconfigurar o chatcli.\n\n")
+	fmt.Println("/reload - para recarregar as variáveis e reconfigurar o chatcli.")
+	fmt.Println("/nextchunk - Processa o próximo chunk de código quando usando @file com chunks.")
+	fmt.Println("/retry - Retenta o processamento do último chunk que falhou.")
+	fmt.Println("/retryall - Retenta o processamento de todos os chunks que falharam.")
+	fmt.Println("/skipchunk - Pula explicitamente um chunk, ignorando seu conteúdo.")
+	fmt.Printf("\n")
 }
 
 func (cli *ChatCLI) getConversationHistory() string {
@@ -1000,47 +1008,53 @@ func (cli *ChatCLI) processDirectoryChunked(path string, tokenEstimator func(str
 	return chunks, nil
 }
 
-// handleNextChunk processa o próximo chunk de arquivos
+// handleNextChunk processa o próximo chunk de arquivos com tratamento de falhas
 func (cli *ChatCLI) handleNextChunk() bool {
 	if len(cli.fileChunks) == 0 {
-		fmt.Println("Não há mais chunks de arquivos disponíveis.")
+		if len(cli.failedChunks) > 0 {
+			fmt.Printf("Não há mais chunks pendentes, mas existem %d chunks com falha. Use /retry para retentar o último chunk com falha ou /retryall para retentar todos.\n", len(cli.failedChunks))
+		} else {
+			fmt.Println("Não há mais chunks de arquivos disponíveis.")
+		}
 		return false
 	}
 
+	// Obter o próximo chunk
 	nextChunk := cli.fileChunks[0]
-	cli.fileChunks = cli.fileChunks[1:]
 
+	// Não remova o chunk da fila até que tenhamos sucesso
 	totalChunks := nextChunk.Total
 	currentChunk := nextChunk.Index
-	remainingChunks := len(cli.fileChunks)
+	remainingChunks := len(cli.fileChunks) - 1
 
 	fmt.Printf("Enviando chunk %d de %d... (%d restantes após este)\n",
 		currentChunk, totalChunks, remainingChunks)
 
-	// Adicionar um resumo de progresso para o usuário no começo do chunk
+	// Adicionar resumo de progresso
 	progressInfo := fmt.Sprintf("📊 PROGRESSO: Chunk %d/%d\n"+
 		"=============================\n"+
 		"▶️ %d chunks já processados\n"+
-		"▶️ %d chunks restantes\n"+
-		"▶️ Use '/nextchunk' para avançar após analisar este chunk\n\n"+
+		"▶️ %d chunks pendentes\n"+
+		"▶️ %d chunks com falha\n"+
+		"▶️ Use '/nextchunk' para avançar ou '/retry' se ocorrer falha\n\n"+
 		"=============================\n\n",
-		currentChunk, totalChunks, currentChunk-1, remainingChunks)
+		currentChunk, totalChunks, currentChunk-1, remainingChunks, len(cli.failedChunks))
 
-	// Adicionar o chunk como mensagem do usuário
+	// Preparar a mensagem
 	prompt := fmt.Sprintf("Este é o chunk %d/%d do código que solicitei anteriormente. Por favor continue a análise:",
 		currentChunk, totalChunks)
 
-	// Adicionar a mensagem do usuário ao histórico
+	// Adicionar a mensagem ao histórico
 	cli.history = append(cli.history, models.Message{
 		Role:    "user",
 		Content: prompt + "\n\n" + progressInfo + nextChunk.Content,
 	})
 
-	// Exibir mensagem "Pensando..." com animação
+	// Mostrar animação "Pensando..."
 	cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
 
-	// Criar um contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	// Criar contexto com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	// Enviar o prompt para o LLM
@@ -1050,32 +1064,202 @@ func (cli *ChatCLI) handleNextChunk() bool {
 	cli.animation.StopThinkingAnimation()
 
 	if err != nil {
-		cli.logger.Error("Erro do LLM", zap.Error(err))
-		fmt.Println("Ocorreu um erro ao processar a requisição.")
+		cli.logger.Error("Erro ao processar chunk com a LLM",
+			zap.Int("chunkIndex", nextChunk.Index),
+			zap.Int("totalChunks", nextChunk.Total),
+			zap.Error(err))
+
+		// Armazenar o chunk que falhou
+		cli.lastFailedChunk = &cli.fileChunks[0]
+		cli.failedChunks = append(cli.failedChunks, cli.fileChunks[0])
+
+		// Remover da fila principal
+		cli.fileChunks = cli.fileChunks[1:]
+
+		// Informar ao usuário
+		fmt.Printf("\n⚠️ Erro ao processar o chunk %d/%d: %s\n",
+			currentChunk, totalChunks, err.Error())
+		fmt.Println("O chunk foi movido para a fila de chunks com falha.")
+		fmt.Println("Use /retry para tentar novamente este chunk ou /nextchunk para continuar com o próximo.")
+
 		return false
 	}
 
-	// Adicionar a resposta da IA ao histórico
+	// Se chegou aqui, o processamento foi bem-sucedido
+
+	// Adicionar a resposta ao histórico
 	cli.history = append(cli.history, models.Message{
 		Role:    "assistant",
 		Content: aiResponse,
 	})
 
-	// Renderizar a resposta da IA
+	// Renderizar e mostrar a resposta
 	renderedResponse := cli.renderMarkdown(aiResponse)
-
-	// Exibir a resposta da IA com efeito de digitação
 	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
 
-	// Informar se ainda há mais chunks disponíveis
-	if len(cli.fileChunks) > 0 {
-		fmt.Printf("\nAinda há %d chunks adicionais disponíveis. Use /nextchunk para continuar.\n",
-			len(cli.fileChunks))
+	// Remover o chunk da fila apenas após processamento bem-sucedido
+	cli.fileChunks = cli.fileChunks[1:]
+
+	// Informar sobre chunks restantes
+	if len(cli.fileChunks) > 0 || len(cli.failedChunks) > 0 {
+		fmt.Printf("\nStatus dos chunks:\n")
+
+		if len(cli.fileChunks) > 0 {
+			fmt.Printf("- %d chunks pendentes. Use /nextchunk para continuar.\n", len(cli.fileChunks))
+		}
+
+		if len(cli.failedChunks) > 0 {
+			fmt.Printf("- %d chunks com falha. Use /retry ou /retryall para reprocessá-los.\n", len(cli.failedChunks))
+		}
 	} else {
-		fmt.Println("\nTodos os chunks foram processados.")
+		fmt.Println("\nTodos os chunks foram processados com sucesso.")
 	}
 
 	return false
+}
+
+// Novo método para reprocessar o último chunk que falhou
+func (cli *ChatCLI) handleRetryLastChunk() bool {
+	if cli.lastFailedChunk == nil || len(cli.failedChunks) == 0 {
+		fmt.Println("Não há chunks com falha para reprocessar.")
+		return false
+	}
+
+	// Obter o último chunk com falha
+	lastFailedIndex := len(cli.failedChunks) - 1
+	chunk := cli.failedChunks[lastFailedIndex]
+
+	// Remover da lista de falhas
+	cli.failedChunks = cli.failedChunks[:lastFailedIndex]
+
+	fmt.Printf("Retentando chunk %d/%d que falhou anteriormente...\n", chunk.Index, chunk.Total)
+
+	// Preparar resumo de progresso
+	progressInfo := fmt.Sprintf("📊 NOVA TENTATIVA: Chunk %d/%d\n"+
+		"=============================\n"+
+		"▶️ Retentando chunk que falhou anteriormente\n"+
+		"▶️ %d chunks pendentes\n"+
+		"▶️ %d outros chunks com falha\n"+
+		"=============================\n\n",
+		chunk.Index, chunk.Total, len(cli.fileChunks), len(cli.failedChunks))
+
+	// Preparar a mensagem
+	prompt := fmt.Sprintf("Este é o chunk %d/%d do código (nova tentativa após falha). Por favor continue a análise:",
+		chunk.Index, chunk.Total)
+
+	// Adicionar a mensagem ao histórico
+	cli.history = append(cli.history, models.Message{
+		Role:    "user",
+		Content: prompt + "\n\n" + progressInfo + chunk.Content,
+	})
+
+	// Mostrar animação "Pensando..."
+	cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
+
+	// Criar contexto com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Enviar o prompt para o LLM
+	aiResponse, err := cli.client.SendPrompt(ctx, prompt+"\n\n"+chunk.Content, cli.history)
+
+	// Parar a animação
+	cli.animation.StopThinkingAnimation()
+
+	if err != nil {
+		cli.logger.Error("Erro ao reprocessar chunk com a LLM",
+			zap.Int("chunkIndex", chunk.Index),
+			zap.Int("totalChunks", chunk.Total),
+			zap.Error(err))
+
+		// Devolver o chunk para a lista de falhas
+		cli.failedChunks = append(cli.failedChunks, chunk)
+
+		// Informar ao usuário
+		fmt.Printf("\n⚠️ Erro ao reprocessar o chunk %d/%d: %s\n",
+			chunk.Index, chunk.Total, err.Error())
+		fmt.Println("O chunk permanece na fila de chunks com falha.")
+
+		return false
+	}
+
+	// Adicionar a resposta ao histórico
+	cli.history = append(cli.history, models.Message{
+		Role:    "assistant",
+		Content: aiResponse,
+	})
+
+	// Renderizar e mostrar a resposta
+	renderedResponse := cli.renderMarkdown(aiResponse)
+	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
+
+	// Atualizar o lastFailedChunk
+	if len(cli.failedChunks) > 0 {
+		lastIndex := len(cli.failedChunks) - 1
+		cli.lastFailedChunk = &cli.failedChunks[lastIndex]
+	} else {
+		cli.lastFailedChunk = nil
+	}
+
+	fmt.Println("\nChunk reprocessado com sucesso!")
+
+	// Informar sobre o status dos chunks
+	cli.printChunkStatus()
+
+	return false
+}
+
+// Método para reprocessar todos os chunks com falha
+func (cli *ChatCLI) handleRetryAllChunks() bool {
+	if len(cli.failedChunks) == 0 {
+		fmt.Println("Não há chunks com falha para reprocessar.")
+		return false
+	}
+
+	fmt.Printf("Retentando todos os %d chunks com falha...\n", len(cli.failedChunks))
+
+	// Mover todos os chunks com falha para a fila de chunks pendentes
+	cli.fileChunks = append(cli.failedChunks, cli.fileChunks...)
+	cli.failedChunks = []FileChunk{}
+	cli.lastFailedChunk = nil
+
+	// Iniciar o processamento do primeiro chunk
+	return cli.handleNextChunk()
+}
+
+// Método para pular explicitamente um chunk
+func (cli *ChatCLI) handleSkipChunk() bool {
+	if len(cli.fileChunks) == 0 {
+		fmt.Println("Não há chunks pendentes para pular.")
+		return false
+	}
+
+	skippedChunk := cli.fileChunks[0]
+	cli.fileChunks = cli.fileChunks[1:]
+
+	fmt.Printf("Pulando chunk %d/%d...\n", skippedChunk.Index, skippedChunk.Total)
+
+	// Informar sobre o status dos chunks
+	cli.printChunkStatus()
+
+	return false
+}
+
+// Método auxiliar para imprimir o status dos chunks
+func (cli *ChatCLI) printChunkStatus() {
+	fmt.Printf("\nStatus dos chunks:\n")
+
+	if len(cli.fileChunks) > 0 {
+		fmt.Printf("- %d chunks pendentes. Use /nextchunk para continuar.\n", len(cli.fileChunks))
+	} else {
+		fmt.Println("- Não há chunks pendentes.")
+	}
+
+	if len(cli.failedChunks) > 0 {
+		fmt.Printf("- %d chunks com falha. Use /retry ou /retryall para reprocessá-los.\n", len(cli.failedChunks))
+	} else {
+		fmt.Println("- Não há chunks com falha.")
+	}
 }
 
 // extractUserQuery extrai a consulta do usuário do input
@@ -1395,7 +1579,7 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 	cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
 
 	//Criar um contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	//Enviar o output e o contexto para a IA

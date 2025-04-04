@@ -14,6 +14,7 @@ func NewCommandHandler(cli *ChatCLI) *CommandHandler {
 	return &CommandHandler{cli: cli}
 }
 
+// Atualizar o método HandleCommand no CommandHandler para incluir os novos comandos
 func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	switch {
 	case userInput == "/exit" || userInput == "exit" || userInput == "/quit" || userInput == "quit":
@@ -30,6 +31,12 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return false
 	case userInput == "/nextchunk":
 		return ch.cli.handleNextChunk()
+	case userInput == "/retry":
+		return ch.cli.handleRetryLastChunk()
+	case userInput == "/retryall":
+		return ch.cli.handleRetryAllChunks()
+	case userInput == "/skipchunk":
+		return ch.cli.handleSkipChunk()
 	default:
 		fmt.Println("Comando desconhecido. Use /help para ver os comandos disponíveis.")
 		return false
