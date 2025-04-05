@@ -1,4 +1,3 @@
-// command_handler.go
 package cli
 
 import (
@@ -14,7 +13,7 @@ func NewCommandHandler(cli *ChatCLI) *CommandHandler {
 	return &CommandHandler{cli: cli}
 }
 
-// Atualizar o método HandleCommand no CommandHandler para incluir os novos comandos
+// HandleCommand processa os comandos da CLI
 func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	switch {
 	case userInput == "/exit" || userInput == "exit" || userInput == "/quit" || userInput == "quit":
@@ -37,6 +36,12 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return ch.cli.handleRetryAllChunks()
 	case userInput == "/skipchunk":
 		return ch.cli.handleSkipChunk()
+	case strings.HasPrefix(userInput, "/rag"):
+		ch.cli.handleRagCommand(userInput)
+		return false
+	case strings.HasPrefix(userInput, "/projeto"):
+		ch.cli.handleProjectCommand(userInput)
+		return false
 	default:
 		fmt.Println("Comando desconhecido. Use /help para ver os comandos disponíveis.")
 		return false

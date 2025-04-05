@@ -41,6 +41,73 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 - **Configuração Dinâmica e Histórico Persistente**: Troque provedores, atualize configurações em tempo real e mantenha o histórico entre sessões.
 - **Retry com Backoff Exponencial**: Robustez no tratamento de erros e instabilidades na comunicação com APIs externas.
 
+  ## Suporte a APIs de Sessão
+
+  O ChatCLI agora oferece suporte às APIs de Sessão dos principais provedores de LLM, permitindo manter o contexto da conversa no lado do provedor de LLM:
+
+  ### Benefícios das APIs de Sessão
+
+    - **Economia de Tokens**: Elimina a necessidade de enviar todo o histórico de conversa em cada requisição
+    - **Conversas Mais Longas**: Supera as limitações locais de contexto, permitindo conversas praticamente ilimitadas
+    - **Respostas Mais Rápidas**: Processamento mais eficiente por não precisar interpretar o contexto completo a cada vez
+
+  ### Provedores Suportados
+
+    - **OpenAI Assistants API**: Utiliza threads e assistentes para manter contexto persistente
+    - **Claude Messages API**: Utiliza conversation_id para rastrear a conversa
+
+  ### Como Usar
+
+    1. **Via Variáveis de Ambiente**:
+       ```bash
+       # Para OpenAI
+       export OPENAI_USE_SESSION=true
+       
+       # Para Claude
+       export CLAUDEAI_USE_SESSION=true
+       
+       ps: pode adicionar em seu .env
+       ```
+    2. Interativamente: Ao usar  /switch  para trocar de provedor, o ChatCLI perguntará se você deseja usar a API de sessão
+
+  Para mais detalhes, consulte a documentação completa sobre APIs de Sessão /docs/SESSION_API.md.
+
+---
+
+## Requisitos de Sistema
+    
+- **Sistema Operacional**: Linux, macOS ou Windows (via WSL recomendado)
+- **Go**: Versão 1.23 ou superior
+- **Terminal**: Com suporte a cores e Unicode para melhor visualização
+- **Shells Suportados**: bash, zsh, fish (para funcionalidades completas de @history)
+- **Git**: (opcional) Para uso do comando @git
+
+---
+
+## Segurança e Privacidade
+
+- As chaves de API e tokens são armazenados apenas em variáveis de ambiente, não em arquivos persistentes.
+- O histórico de comandos é armazenado localmente (`.chatcli_history`).
+- Comunicações com as APIs dos provedores são feitas via HTTPS.
+- Em logs, os valores sensíveis (tokens, senhas) são automaticamente redatados.
+- Para ambientes corporativos, considere políticas adicionais de segurança para chaves de API.
+
+---
+
+## Compatibilidade de Modelos
+
+### OpenAI
+
+- Modelos Suportados: gpt-4o, gpt-4o-mini, gpt-4, gpt-3.5-turbo
+- Modelo Padrão: gpt-4o-mini
+
+### ClaudeAI
+- Modelos Suportados: claude-3-5-sonnet-20241022, claude-3-7-sonnet-20250219, claude-3-haiku, claude-3-opus
+- Modelo Padrão: claude-3-5-sonnet-20241022
+
+### StackSpot
+- Usa o modelo padrão configurado na plataforma StackSpot
+
 ---
 
 ## Instalação
@@ -175,6 +242,31 @@ Após a instalação e configuração, o ChatCLI oferece uma série de comandos 
 
 ---
 
+## Depuração com Contexto
+### Buscar ajuda para resolver um erro com contexto de ambiente
+```    
+Você: @command npm test > Ajude-me a entender por que estes testes estão falhando.
+```   
+
+### Análise de logs com contexto Git
+```
+Você: @command docker logs app-container | grep ERROR @git > O que pode estar causando estes erros em relação às alterações recentes?
+```
+---
+
+## Desenvolvimento Assistido
+
+### Gerar testes unitários para um arquivo
+```
+Você: @file ~/projeto/src/utils.js Gere testes Jest abrangentes para estas funções.
+```    
+
+### Criar documentação
+```
+Você: @file ~/projeto/api.go > Gere uma documentação OpenAPI 3.0 baseada nesta implementação.
+```
+---
+
 ## Processamento Avançado de Arquivos
 
 O ChatCLI possui um sistema robusto para o envio e processamento de arquivos e diretórios, com modos de operação que atendem desde análises rápidas até explorações detalhadas de projetos inteiros.
@@ -252,6 +344,54 @@ O comando `@file` pode operar em diferentes modos para atender às suas necessid
       ```
       Você: @file --mode=smart ~/meu-projeto/ Como funciona o sistema de login?
       ```
+---
+
+## RAG - (Retrieval Augmented Generation) - ESPECIFICO para projetos GRANDES e COMPLEXOS
+    
+O ChatCLI agora inclui suporte a RAG (Retrieval Augmented Generation) em memória, permitindo analisar e consultar projetos de código grandes de forma eficiente:
+    
+### Benefícios do RAG
+    
+- **Consulta Semântica**: Encontre partes relevantes do código com base no significado, não apenas em correspondências exatas
+- **Superação de Limites de Contexto**: Analise projetos muito maiores que o limite de contexto do LLM
+- **Respostas Mais Precisas**: Fornece ao LLM apenas o código relevante para sua pergunta
+- **Economia de Tokens**: Reduz significativamente o uso de tokens ao enviar apenas o conteúdo necessário
+    
+### Comandos RAG Principais
+    
+- **`/rag index <caminho>`**: Indexa um projeto para consultas
+- **`/rag query <pergunta>`**: Consulta o projeto indexado e recebe uma resposta
+- **`/rag clear`**: Limpa o índice atual
+- **`@inrag <consulta>`**: Incorpora resultados RAG em um prompt regular
+- **`/projeto <caminho> <pergunta>`**: Combina indexação e consulta em um único comando
+    
+### Exemplo de Uso
+    
+```bash
+  # Indexar um projeto
+  /rag index ~/projetos/minha-aplicacao
+    
+  # Consultar o código indexado
+  /rag query Como funciona o sistema de autenticação?
+    
+  # Incorporar contexto RAG em uma pergunta normal
+  Explique este algoritmo @inrag processamento de imagens
+    
+  # Analisar um projeto em um único comando
+  /projeto ~/projetos/minha-aplicacao Explique a arquitetura e os padrões de design usados
+```
+
+Para detalhes completos sobre o sistema RAG, consulte [RAG.md](/docs/RAG.md).
+
+---
+
+## Desempenho
+
+- **Processamento de Arquivos**: O sistema pode processar projetos de até ~50MB com divisão automática em chunks.
+- **Tempo de Resposta**: Varia de acordo com o provedor de LLM utilizado.
+- **Tempo de Inicialização**: <1 segundo em máquinas modernas.
+- **Uso de Memória**: Tipicamente <100MB para a aplicação base, variando conforme o tamanho dos arquivos processados.
+
 
 ---
 
@@ -287,6 +427,29 @@ Para projetos grandes, quando o modo `chunked` é utilizado:
       ▶️ Use '/nextchunk' para avançar após analisar este chunk
       =============================
       ```
+
+---
+
+## Solução de Problemas
+    
+### Erros Comuns
+    
+- **"Token Limit Exceeded"**: Ao processar arquivos grandes, tente usar o modo chunked (`@file --mode=chunked`) para dividir em partes menores.
+      
+- **"Rate Limit Exceeded"**: O ChatCLI implementa backoff exponencial, mas em caso de muitas requisições rápidas:
+- Aguarde alguns minutos antes de tentar novamente
+- Reduza o número de requisições consecutivas
+- Verifique os limites da sua conta no provedor utilizado
+    
+- **Erro ao Carregar o Arquivo .env**: Verifique se o arquivo está no mesmo diretório ou especifique o caminho correto via `CHATCLI_DOTENV`.
+    
+- **Erros de Autenticação**:
+- Verifique se as chaves de API estão corretas e não expiraram
+- Para o StackSpot, use `/switch --slugname <slug> --tenantname <tenant>` para atualizar credenciais
+    
+### Como Depurar
+    
+O ChatCLI implementa logs detalhados. Defina `LOG_LEVEL=debug` no seu `.env` para aumentar a verbosidade dos logs.
 
 ---
 
@@ -335,6 +498,15 @@ O ChatCLI utiliza o Zap para um logging robusto e estruturado, contando com:
 - **Sanitização de Dados Sensíveis**: Chaves de API, tokens e outros dados críticos são redigidos.
 - **Multi-Output**: Logs exibidos no console e salvos em arquivo.
 - **Detalhamento de Requisições**: Informações completas sobre métodos, URLs, cabeçalhos (com dados sensíveis removidos) e tempos de resposta.
+
+---
+
+## Como Citar
+    
+Se você utilizar o ChatCLI em um artigo, blog ou projeto, por favor cite:
+
+
+Freitas, E. (2025). ChatCLI: Uma interface de linha de comando para LLMs. GitHub. https://github.com/diillson/chatcli
 
 ---
 

@@ -6,10 +6,12 @@ import (
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/openai"
+	"github.com/diillson/chatcli/llm/session"
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/diillson/chatcli/llm/token"
 	"go.uber.org/zap"
 	"os"
+	"strconv"
 )
 
 // ConfigError representa um erro de configuração, como variáveis de ambiente ausentes
@@ -59,6 +61,22 @@ func (m *LLMManagerImpl) configurarOpenAIClient() {
 			if model == "" {
 				model = config.DefaultOpenAIModel
 			}
+
+			// Verificar se deve usar a API de sessões
+			useSessionAPI := os.Getenv("OPENAI_USE_SESSION")
+			if useSessionAPI == "true" {
+				// Usar SessionManager
+				sessionManager := session.NewOpenAISession(
+					apiKey,
+					model,
+					m.logger,
+					config.OpenAIDefaultMaxAttempts,
+					config.OpenAIDefaultBackoff,
+				)
+				return client.NewSessionClient(sessionManager), nil
+			}
+
+			// Usar cliente tradicional
 			return openai.NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
 		}
 	} else {
@@ -93,6 +111,31 @@ func (m *LLMManagerImpl) configurarClaudeAIClient() {
 			if model == "" {
 				model = config.DefaultClaudeAIModel
 			}
+
+			// Obter maxTokens da variável de ambiente ou usar o padrão
+			maxTokens := config.ClaudeAIDefaultMaxTokens
+			if tokenStr := os.Getenv("CLAUDEAI_MAX_TOKENS"); tokenStr != "" {
+				if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
+					maxTokens = parsedTokens
+				}
+			}
+
+			// Verificar se deve usar a API de sessões
+			useSessionAPI := os.Getenv("CLAUDEAI_USE_SESSION")
+			if useSessionAPI == "true" {
+				// Usar SessionManager
+				sessionManager := session.NewClaudeSession(
+					apiKey,
+					model,
+					m.logger,
+					config.ClaudeAIDefaultMaxAttempts,
+					config.ClaudeAIDefaultBackoff,
+					maxTokens,
+				)
+				return client.NewSessionClient(sessionManager), nil
+			}
+
+			// Usar cliente tradicional
 			return claudeai.NewClaudeClient(
 				apiKey,
 				model,

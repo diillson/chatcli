@@ -7,6 +7,7 @@ import (
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
+	ragmanager "github.com/diillson/chatcli/rag/manager"
 	"github.com/joho/godotenv"
 	"os"
 	"os/exec"
@@ -63,9 +64,10 @@ type ChatCLI struct {
 	animation         *AnimationManager
 	commandHandler    *CommandHandler
 	lastCommandOutput string
-	fileChunks        []FileChunk // Chunks pendentes para processamento
-	failedChunks      []FileChunk // Chunks que falharam no processamento
-	lastFailedChunk   *FileChunk  // Referência ao último chunk que falhou
+	fileChunks        []FileChunk            // Chunks pendentes para processamento
+	failedChunks      []FileChunk            // Chunks que falharam no processamento
+	lastFailedChunk   *FileChunk             // Referência ao último chunk que falhou
+	ragManager        *ragmanager.RagManager // Novo campo para o gerenciador RAG
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -137,16 +139,33 @@ func (cli *ChatCLI) configureProviderAndModel() {
 	if cli.provider == "" {
 		cli.provider = config.DefaultLLMProvider
 	}
+
+	// Verificar se deve usar APIs de sessão com base nas variáveis de ambiente
 	if cli.provider == "OPENAI" {
 		cli.model = os.Getenv("OPENAI_MODEL")
 		if cli.model == "" {
 			cli.model = config.DefaultOpenAIModel
 		}
+
+		// Verificar se devemos usar API de sessão
+		useSessionEnv := os.Getenv("OPENAI_USE_SESSION")
+		if useSessionEnv == "" {
+			// Valor padrão com base na configuração
+			os.Setenv("OPENAI_USE_SESSION", config.DefaultUseSessionAPI)
+		}
 	}
+
 	if cli.provider == "CLAUDEAI" {
 		cli.model = os.Getenv("CLAUDEAI_MODEL")
 		if cli.model == "" {
 			cli.model = config.DefaultClaudeAIModel
+		}
+
+		// Verificar se devemos usar API de sessão
+		useSessionEnv := os.Getenv("CLAUDEAI_USE_SESSION")
+		if useSessionEnv == "" {
+			// Valor padrão com base na configuração
+			os.Setenv("CLAUDEAI_USE_SESSION", config.DefaultUseSessionAPI)
 		}
 	}
 }
@@ -211,6 +230,17 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	fmt.Println("Use '@command --ai <seu_comando>' para enviar o ouput para a AI de forma direta e '>' {maior} <seu contexto> para que a AI faça algo.")
 	fmt.Println("Para processamento em chunks, use '/nextchunk', '/retry', '/retryall' e '/skipchunk'.")
 	fmt.Printf("Ainda ficou com dúvidas? use '/help'.\n\n")
+
+	// Verificar se estamos usando a API de sessões
+	var usingSessionAPI bool
+	if cli.provider == "OPENAI" && os.Getenv("OPENAI_USE_SESSION") == "true" {
+		usingSessionAPI = true
+		fmt.Println("🔄 Usando API de sessões OpenAI para manter o contexto no provedor de LLM.")
+	} else if cli.provider == "CLAUDEAI" && os.Getenv("CLAUDEAI_USE_SESSION") == "true" {
+		usingSessionAPI = true
+		fmt.Println("🔄 Usando API de sessões Claude para manter o contexto no proverdor de LLM.")
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -256,30 +286,43 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			// Processar comandos especiais
 			userInput, additionalContext := cli.processSpecialCommands(input)
 
-			// Adicionar a mensagem do usuário ao histórico
-			cli.history = append(cli.history, models.Message{
-				Role:    "user",
-				Content: userInput + additionalContext,
-			})
+			// Adicionar a mensagem do usuário ao histórico (apenas para cliente não-sessão)
+			if !usingSessionAPI {
+				cli.history = append(cli.history, models.Message{
+					Role:    "user",
+					Content: userInput + additionalContext,
+				})
+			}
 
 			// Exibir mensagem "Pensando..." com animação
 			cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
 
 			// Criar um contexto com timeout
 			responseCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-			defer cancel()
 
 			// Enviar o prompt para o LLM
-			aiResponse, err := cli.client.SendPrompt(responseCtx, userInput+additionalContext, cli.history)
+			var aiResponse string
+			var promptErr error
+
+			if usingSessionAPI {
+				// Para APIs de sessão, apenas enviamos o prompt atual
+				// O histórico é mantido no servidor
+				aiResponse, promptErr = cli.client.SendPrompt(responseCtx, userInput+additionalContext, nil)
+			} else {
+				// Para APIs tradicionais, enviamos o histórico completo
+				aiResponse, promptErr = cli.client.SendPrompt(responseCtx, userInput+additionalContext, cli.history)
+			}
+
+			cancel() // Cancelar o contexto após a resposta
 
 			// Parar a animação
 			cli.animation.StopThinkingAnimation()
 
-			if err != nil {
-				cli.logger.Error("Erro do LLM", zap.Error(err))
+			if promptErr != nil {
+				cli.logger.Error("Erro do LLM", zap.Error(promptErr))
 
 				// Verifique se o erro contém o código de status 429 explicitamente
-				if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RATE_LIMIT_EXCEEDED") {
+				if strings.Contains(promptErr.Error(), "429") || strings.Contains(promptErr.Error(), "RATE_LIMIT_EXCEEDED") {
 					fmt.Println("Limite de requisições excedido. Por favor, aguarde antes de tentar novamente.")
 				} else {
 					fmt.Println("Ocorreu um erro ao processar a requisição.")
@@ -288,11 +331,13 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				continue
 			}
 
-			// Adicionar a resposta da IA ao histórico
-			cli.history = append(cli.history, models.Message{
-				Role:    "assistant",
-				Content: aiResponse,
-			})
+			// Adicionar a resposta da IA ao histórico (apenas para cliente não-sessão)
+			if !usingSessionAPI {
+				cli.history = append(cli.history, models.Message{
+					Role:    "assistant",
+					Content: aiResponse,
+				})
+			}
 
 			// Renderizar a resposta da IA
 			renderedResponse := cli.renderMarkdown(aiResponse)
@@ -399,12 +444,33 @@ func (cli *ChatCLI) switchProvider() {
 
 	newProvider := availableProviders[choiceIndex]
 	var newModel string
+
 	if newProvider == "OPENAI" {
 		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel)
+
+		// Perguntar se deseja usar a API de sessões
+		useSessionInput, err := cli.line.Prompt("Deseja usar a API de sessões para manter o contexto no provedor de LLM? (s/n): ")
+		if err == nil && (strings.ToLower(useSessionInput) == "s" || strings.ToLower(useSessionInput) == "sim") {
+			os.Setenv("OPENAI_USE_SESSION", "true")
+			fmt.Println("Usando API de sessões OpenAI.")
+		} else {
+			os.Setenv("OPENAI_USE_SESSION", "false")
+			fmt.Println("Usando API tradicional OpenAI.")
+		}
 	}
 
 	if newProvider == "CLAUDEAI" {
 		newModel = utils.GetEnvOrDefault("CLAUDEAI_MODEL", config.DefaultClaudeAIModel)
+
+		// Perguntar se deseja usar a API de sessões
+		useSessionInput, err := cli.line.Prompt("Deseja usar a API de sessões para manter o contexto no provedor de LLM? (s/n): ")
+		if err == nil && (strings.ToLower(useSessionInput) == "s" || strings.ToLower(useSessionInput) == "sim") {
+			os.Setenv("CLAUDEAI_USE_SESSION", "true")
+			fmt.Println("Usando API de sessões Claude.")
+		} else {
+			os.Setenv("CLAUDEAI_USE_SESSION", "false")
+			fmt.Println("Usando API tradicional Claude.")
+		}
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
@@ -429,6 +495,7 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("@command <seu_comando> - para executar um comando diretamente no sistema")
 	fmt.Println("@command --ai <seu_comando> para enviar o ouput para a AI de forma direta e '>' {maior} <seu contexto> para que a AI faça algo.")
 	fmt.Println("@command -i <seu_comando> - para executar um comando interativo")
+	fmt.Println("@inrag <consulta> - Consulta o projeto indexado e adiciona ao contexto")
 	fmt.Println("/exit ou /quit - Sai do ChatCLI")
 	fmt.Println("/switch - Troca o provedor de LLM")
 	fmt.Println("/switch --slugname <slug> --tenantname <tenant> - Define slug e tenant")
@@ -437,6 +504,10 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("/retry - Retenta o processamento do último chunk que falhou.")
 	fmt.Println("/retryall - Retenta o processamento de todos os chunks que falharam.")
 	fmt.Println("/skipchunk - Pula explicitamente um chunk, ignorando seu conteúdo.")
+	fmt.Println("/rag index <caminho> - Indexa um projeto para consultas RAG.")
+	fmt.Println("/rag query <consulta> - Consulta o projeto indexado.")
+	fmt.Println("/rag clear - Limpa o índice RAG atual.")
+	fmt.Println("/projeto <caminho> <pergunta> - Indexa e consulta um projeto em um único comando.")
 	fmt.Printf("\n")
 }
 
@@ -471,6 +542,9 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 	userInput, context = cli.processFileCommand(userInput)
 	additionalContext += context
 
+	userInput, context = cli.processRagCommand(userInput)
+	additionalContext += context
+
 	//userInput, context = cli.processCommandCommand(userInput)
 	//additionalContext += context
 
@@ -482,6 +556,39 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 
 	// Remover espaços extras
 	userInput = strings.TrimSpace(userInput)
+
+	return userInput, additionalContext
+}
+
+// Método para processar comandos RAG inline
+func (cli *ChatCLI) processRagCommand(userInput string) (string, string) {
+	var additionalContext string
+
+	if strings.Contains(strings.ToLower(userInput), "@inrag") {
+		// Extrair a consulta (tudo após @inrag)
+		index := strings.Index(strings.ToLower(userInput), "@inrag")
+		query := strings.TrimSpace(userInput[index+6:])
+
+		// Verificar se o RAG Manager está inicializado
+		if cli.ragManager == nil {
+			additionalContext += "\n⚠️ RAG não inicializado. Use /rag index [caminho] primeiro.\n"
+			userInput = strings.Replace(userInput, "@inrag"+query, "", 1)
+			return userInput, additionalContext
+		}
+
+		// Recuperar contexto
+		ctx := context.Background()
+		retrievedContext, err := cli.ragManager.QueryProject(ctx, query)
+
+		if err != nil {
+			additionalContext += fmt.Sprintf("\n⚠️ Erro ao consultar RAG: %v\n", err)
+		} else {
+			additionalContext += "\n📂 CONTEXTO RAG RELEVANTE:\n" + retrievedContext
+		}
+
+		// Remover o comando @inrag da entrada do usuário
+		userInput = strings.Replace(userInput, "@inrag"+query, "", 1)
+	}
 
 	return userInput, additionalContext
 }
@@ -1008,6 +1115,87 @@ func (cli *ChatCLI) processDirectoryChunked(path string, tokenEstimator func(str
 	return chunks, nil
 }
 
+// Método para processar o comando de projeto
+func (cli *ChatCLI) handleProjectCommand(userInput string) {
+	parts := strings.Fields(userInput)
+	if len(parts) < 3 {
+		fmt.Println("Uso: /projeto [caminho] [pergunta/tarefa]")
+		fmt.Println("Exemplo: /projeto ~/meu-projeto 'Explique a arquitetura deste projeto'")
+		return
+	}
+
+	projectPath := parts[1]
+	query := strings.Join(parts[2:], " ")
+
+	// Inicializar e indexar com RAG
+	ctx := context.Background()
+
+	// Usar a chave API do provedor atual
+	var apiKey string
+	switch cli.provider {
+	case "OPENAI":
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	case "CLAUDEAI":
+		apiKey = os.Getenv("CLAUDEAI_API_KEY")
+	default:
+		fmt.Println("Comando /projeto suporta apenas os provedores OpenAI e Claude. Use /switch para mudar.")
+		return
+	}
+
+	cli.ragManager = ragmanager.NewRagManager(cli.logger, apiKey, cli.provider)
+
+	// Mostrar animação enquanto indexa
+	cli.animation.ShowThinkingAnimation("Indexando projeto")
+	err := cli.ragManager.IndexProject(ctx, projectPath)
+	cli.animation.StopThinkingAnimation()
+
+	if err != nil {
+		fmt.Printf("Erro ao indexar projeto: %v\n", err)
+		return
+	}
+
+	fmt.Println("Projeto indexado com sucesso! Consultando...")
+
+	// Consultar o índice
+	cli.animation.ShowThinkingAnimation("Recuperando contexto relevante")
+	retrievedContext, err := cli.ragManager.QueryProject(ctx, query)
+	cli.animation.StopThinkingAnimation()
+
+	if err != nil {
+		fmt.Printf("Erro ao consultar projeto: %v\n", err)
+		return
+	}
+
+	// Preparar o prompt final com o contexto e a consulta
+	prompt := fmt.Sprintf("Consulta: %s\n\n%s\n\nCom base no contexto do código acima, responda à consulta de forma detalhada.",
+		query, retrievedContext)
+
+	// Enviar para o LLM
+	cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
+	aiResponse, err := cli.client.SendPrompt(ctx, prompt, []models.Message{})
+	cli.animation.StopThinkingAnimation()
+
+	if err != nil {
+		fmt.Printf("Erro ao obter resposta: %v\n", err)
+		return
+	}
+
+	// Exibir a resposta da IA
+	renderedResponse := cli.renderMarkdown(aiResponse)
+	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
+
+	// Adicionar ao histórico para contexto
+	cli.history = append(cli.history, models.Message{
+		Role:    "user",
+		Content: prompt,
+	})
+
+	cli.history = append(cli.history, models.Message{
+		Role:    "assistant",
+		Content: aiResponse,
+	})
+}
+
 // handleNextChunk processa o próximo chunk de arquivos com tratamento de falhas
 func (cli *ChatCLI) handleNextChunk() bool {
 	if len(cli.fileChunks) == 0 {
@@ -1267,6 +1455,104 @@ func extractUserQuery(input string) string {
 	// Remover o comando @file e qualquer opção
 	cleaned := removeAllFileCommands(input)
 	return strings.TrimSpace(cleaned)
+}
+
+func (cli *ChatCLI) handleRagCommand(userInput string) {
+	parts := strings.Fields(userInput)
+	if len(parts) < 2 {
+		fmt.Println("Uso: /rag [index|query|clear] [caminho|consulta]")
+		return
+	}
+
+	// Inicializa o RAG Manager se ainda não estiver inicializado
+	if cli.ragManager == nil {
+		// Usar a chave API do provedor atual
+		var apiKey string
+		switch cli.provider {
+		case "OPENAI":
+			apiKey = os.Getenv("OPENAI_API_KEY")
+		case "CLAUDEAI":
+			apiKey = os.Getenv("CLAUDEAI_API_KEY")
+		default:
+			fmt.Println("RAG suporta apenas os provedores OpenAI e Claude. Use /switch para mudar.")
+			return
+		}
+
+		cli.ragManager = ragmanager.NewRagManager(cli.logger, apiKey, cli.provider)
+
+	}
+
+	ctx := context.Background()
+	switch parts[1] {
+	case "index":
+		if len(parts) < 3 {
+			fmt.Println("Uso: /rag index [caminho do projeto]")
+			return
+		}
+
+		projectPath := parts[2]
+
+		// Mostrar animação enquanto indexa
+		cli.animation.ShowThinkingAnimation("Indexando projeto")
+
+		err := cli.ragManager.IndexProject(ctx, projectPath)
+		cli.animation.StopThinkingAnimation()
+
+		if err != nil {
+			fmt.Printf("Erro ao indexar projeto: %v\n", err)
+			return
+		}
+
+		fmt.Println("Projeto indexado com sucesso! Use /rag query [sua pergunta] para consultar.")
+
+	case "query":
+		if len(parts) < 3 {
+			fmt.Println("Uso: /rag query [sua pergunta sobre o código]")
+			return
+		}
+
+		query := strings.Join(parts[2:], " ")
+
+		// Mostrar animação enquanto consulta
+		cli.animation.ShowThinkingAnimation("Consultando projeto")
+
+		retrievedContext, err := cli.ragManager.QueryProject(ctx, query)
+		cli.animation.StopThinkingAnimation()
+
+		if err != nil {
+			fmt.Printf("Erro ao consultar projeto: %v\n", err)
+			return
+		}
+
+		// Enviar a consulta com o contexto recuperado para o LLM
+		prompt := fmt.Sprintf("Consulta: %s\n\n%s\n\nBaseado no contexto acima, responda à consulta.",
+			query, retrievedContext)
+
+		cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
+
+		aiResponse, err := cli.client.SendPrompt(ctx, prompt, []models.Message{})
+		cli.animation.StopThinkingAnimation()
+
+		if err != nil {
+			fmt.Printf("Erro ao obter resposta: %v\n", err)
+			return
+		}
+
+		// Exibir a resposta da IA
+		renderedResponse := cli.renderMarkdown(aiResponse)
+		cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
+
+	case "clear":
+		err := cli.ragManager.ClearIndex()
+		if err != nil {
+			fmt.Printf("Erro ao limpar índice: %v\n", err)
+			return
+		}
+		fmt.Println("Índice RAG limpo com sucesso.")
+
+	default:
+		fmt.Println("Comando RAG desconhecido. Opções: index, query, clear")
+	}
 }
 
 // processDirectorySmart processa um diretório e seleciona partes relevantes para a consulta

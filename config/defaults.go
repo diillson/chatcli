@@ -46,4 +46,7 @@ const (
 	ModeSummary    = "summary" // Envia apenas uma descrição estrutural
 	ModeChunked    = "chunked" // Divide em partes menores para processamento em sequência
 	ModeSmartChunk = "smart"   // Seleciona partes relevantes com base na consulta do usuário
+
+	// Configuração padrão para uso de APIs de sessão
+	DefaultUseSessionAPI = "false" // Por padrão, não usar APIs de sessão
 )

@@ -366,7 +366,7 @@ func FormatDirectoryContent(files []FileInfo, maxTotalSize int64) string {
 			i+1, len(files), file.Path, file.Type))
 
 		// Formatar o conteúdo baseado no tipo do arquivo
-		if isCodeFile(file.Type) {
+		if IsCodeFile(file.Type) {
 			builder.WriteString(fmt.Sprintf("```%s\n%s\n```\n\n",
 				getLanguageIdentifier(file.Type), file.Content))
 		} else {
@@ -378,7 +378,7 @@ func FormatDirectoryContent(files []FileInfo, maxTotalSize int64) string {
 }
 
 // Determina se um tipo de arquivo é código
-func isCodeFile(fileType string) bool {
+func IsCodeFile(fileType string) bool {
 	codeTypes := map[string]bool{
 		"Go": true, "Python": true, "JavaScript": true, "TypeScript": true,
 		"React JSX": true, "React TSX": true, "Java": true, "C": true,
