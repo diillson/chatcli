@@ -40,4 +40,10 @@ const (
 
 	// Configurado MaxlogSize Default
 	DefaultMaxLogSize = 50 // 10MB
+
+	// Modos de processamento de arquivos
+	ModeFull       = "full"    // Envia o conteúdo completo (comportamento atual)
+	ModeSummary    = "summary" // Envia apenas uma descrição estrutural
+	ModeChunked    = "chunked" // Divide em partes menores para processamento em sequência
+	ModeSmartChunk = "smart"   // Seleciona partes relevantes com base na consulta do usuário
 )

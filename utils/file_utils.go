@@ -411,3 +411,14 @@ func getLanguageIdentifier(fileType string) string {
 	}
 	return "text"
 }
+
+// ShouldSkipDir verifica se um diretório deve ser ignorado
+func ShouldSkipDir(dirName string) bool {
+	skipDirs := map[string]bool{
+		"node_modules": true, ".git": true, "dist": true, "build": true,
+		".idea": true, ".vscode": true, "__pycache__": true, "venv": true,
+		"env": true, "bin": true, "obj": true, ".next": true, "target": true,
+	}
+
+	return skipDirs[dirName] || strings.HasPrefix(dirName, ".")
+}
