@@ -7,6 +7,7 @@ import (
 	"github.com/diillson/chatcli/rag/retriever"
 	"github.com/diillson/chatcli/rag/vectordb"
 	"go.uber.org/zap"
+	"os"
 )
 
 // RagManager coordena os componentes RAG para indexação e recuperação
@@ -15,34 +16,61 @@ type RagManager struct {
 	vectorDB       vectordb.VectorDB
 	embeddingGen   embeddings.EmbeddingGenerator
 	projectIndexer *indexer.ProjectIndexer
-	retriever      *retriever.ContextRetriever
+	retriever      *retriever.HybridRetriever // <-- Mudou para HybridRetriever
 	provider       string
 }
 
 // NewRagManager cria uma nova instância do RagManager
 func NewRagManager(logger *zap.Logger, apiKey string, provider string) *RagManager {
+	// Definir qual embedding usar:
+	// 1. Para OpenAI, usar a API OpenAI
+	// 2. Para Claude, tentar usar OpenAI API se disponível
+	// 3. Fallback para embeddings simples
 	var embeddingGen embeddings.EmbeddingGenerator
+	var useRobustEmbeddings bool = true
 
-	switch provider {
-	case "OPENAI":
-		embeddingGen = embeddings.NewOpenAIEmbedding(apiKey, logger)
-	case "CLAUDEAI":
-		// Para o Claude, ainda usamos a API da OpenAI mas com uma implementação específica
-		// que encapsula o pré-processamento e pós-processamento específicos do Claude
-		embeddingGen = embeddings.NewClaudeEmbedding(apiKey, logger)
-	default:
-		// Fallback para uma implementação básica local (que pode não ser tão eficaz)
-		embeddingGen = embeddings.NewSimpleEmbedding(logger)
+	// Tentar usar OpenAI para embeddings (melhor opção)
+	openaiKey := apiKey
+	if provider != "OPENAI" {
+		// Se não estiver usando OpenAI, verificar se temos uma chave OpenAI separada
+		openaiKey = os.Getenv("OPENAI_API_KEY")
+	}
+
+	if openaiKey != "" {
+		logger.Info("Usando embeddings OpenAI para qualidade máxima")
+		embeddingGen = embeddings.NewOpenAIEmbedding(openaiKey, logger)
+	} else {
+		// Fallback para embeddings simples
+		logger.Warn("API OpenAI não disponível, usando embeddings simples com qualidade reduzida")
+		useRobustEmbeddings = false
+
+		// Para Claude, usar embeddings específicos de Claude
+		if provider == "CLAUDEAI" {
+			embeddingGen = embeddings.NewClaudeEmbedding(apiKey, logger)
+		} else {
+			// Para outros provedores, usar embeddings simples
+			embeddingGen = embeddings.NewSimpleEmbedding(logger)
+		}
 	}
 
 	vectorDB := vectordb.NewInMemoryVectorDB(embeddingGen)
+
+	// Criar HybridRetriever em vez do ContextRetriever padrão
+	hybridRetriever := retriever.NewHybridRetriever(vectorDB, logger)
+
+	// Se estamos usando embeddings robustos, aumentar o número de documentos retornados
+	if useRobustEmbeddings {
+		hybridRetriever.MaxDocs = 8 // Aumentar para 8 documentos com embeddings bons
+	} else {
+		hybridRetriever.MaxDocs = 15 // Aumentar para 15 com embeddings simples para compensar
+	}
 
 	return &RagManager{
 		logger:         logger,
 		vectorDB:       vectorDB,
 		embeddingGen:   embeddingGen,
 		projectIndexer: indexer.NewProjectIndexer(vectorDB, logger),
-		retriever:      retriever.NewContextRetriever(vectorDB, logger),
+		retriever:      hybridRetriever,
 		provider:       provider,
 	}
 }

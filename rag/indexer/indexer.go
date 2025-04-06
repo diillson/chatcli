@@ -46,8 +46,8 @@ func (pi *ProjectIndexer) IndexProject(ctx context.Context, projectPath string) 
 	scanOptions := utils.DefaultDirectoryScanOptions(pi.logger)
 
 	// Remover limite de tamanho para indexação completa
-	scanOptions.MaxTotalSize = 5 * 1024 * 1024 // 5MB
-	scanOptions.MaxFilesToProcess = 1000       // Aumentar o limite de arquivos para indexação
+	scanOptions.MaxTotalSize = 30 * 1024 * 1024 // 30MB
+	scanOptions.MaxFilesToProcess = 1000        // Aumentar o limite de arquivos para indexação
 
 	// Adicionar callback para log de progresso
 	scanOptions.OnFileProcessed = func(info utils.FileInfo) {

@@ -1135,10 +1135,20 @@ func (cli *ChatCLI) handleProjectCommand(userInput string) {
 	switch cli.provider {
 	case "OPENAI":
 		apiKey = os.Getenv("OPENAI_API_KEY")
+		fmt.Println("🔍 Inicializando RAG com embeddings OpenAI (alta qualidade)")
 	case "CLAUDEAI":
 		apiKey = os.Getenv("CLAUDEAI_API_KEY")
+
+		// Verificar se temos acesso à API OpenAI para melhor qualidade
+		if openaiKey := os.Getenv("OPENAI_API_KEY"); openaiKey != "" {
+			fmt.Println("🔍 Inicializando RAG com embeddings OpenAI (alta qualidade)")
+			apiKey = openaiKey // Usar OpenAI para embeddings com Claude
+		} else {
+			fmt.Println("⚠️ API OpenAI não disponível - usando busca híbrida (semântica + palavras-chave)")
+			fmt.Println("💡 Dica: para melhores resultados, defina OPENAI_API_KEY no seu .env")
+		}
 	default:
-		fmt.Println("Comando /projeto suporta apenas os provedores OpenAI e Claude. Use /switch para mudar.")
+		fmt.Println("❌ RAG suporta apenas os provedores OpenAI e Claude. Use /switch para mudar.")
 		return
 	}
 
@@ -1471,15 +1481,24 @@ func (cli *ChatCLI) handleRagCommand(userInput string) {
 		switch cli.provider {
 		case "OPENAI":
 			apiKey = os.Getenv("OPENAI_API_KEY")
+			fmt.Println("🔍 Inicializando RAG com embeddings OpenAI (alta qualidade)")
 		case "CLAUDEAI":
 			apiKey = os.Getenv("CLAUDEAI_API_KEY")
+
+			// Verificar se temos acesso à API OpenAI para melhor qualidade
+			if openaiKey := os.Getenv("OPENAI_API_KEY"); openaiKey != "" {
+				fmt.Println("🔍 Inicializando RAG com embeddings OpenAI (alta qualidade)")
+				apiKey = openaiKey // Usar OpenAI para embeddings com Claude
+			} else {
+				fmt.Println("⚠️ API OpenAI não disponível - usando busca híbrida (semântica + palavras-chave)")
+				fmt.Println("💡 Dica: para melhores resultados, defina OPENAI_API_KEY no seu .env")
+			}
 		default:
-			fmt.Println("RAG suporta apenas os provedores OpenAI e Claude. Use /switch para mudar.")
+			fmt.Println("❌ RAG suporta apenas os provedores OpenAI e Claude. Use /switch para mudar.")
 			return
 		}
 
 		cli.ragManager = ragmanager.NewRagManager(cli.logger, apiKey, cli.provider)
-
 	}
 
 	ctx := context.Background()
