@@ -173,6 +173,19 @@ Após a instalação e configuração, o ChatCLI oferece uma série de comandos 
 - `@command <comando>` – Executa um comando do terminal e salva a saída.
 - **Novo**: `@command --ai <comando> > <contexto>` – Envia a saída do comando diretamente para a LLM com contexto adicional.
 
+### Modo Agente
+
+O Modo Agente permite que a IA execute tarefas no seu sistema através de comandos do terminal:
+
+-  `/agent <consulta>`  ou  `/run <consulta>`  – Inicia o modo agente com uma tarefa específica.
+- O agente analisará sua solicitação e sugerirá comandos apropriados para resolver a tarefa.
+- Você pode selecionar comandos específicos para executar ou executar todos os comandos sugeridos.
+- Exemplos de uso:
+```bash
+  "/agent" Liste todos os arquivos PDF no diretório atual
+  "/run" Crie um backup compactado da pasta src/
+  "/agent" Quais processos estão consumindo mais memória?
+```
 ---
 
 ## Processamento Avançado de Arquivos
@@ -299,6 +312,7 @@ O projeto está dividido em pacotes com responsabilidades específicas:
     - `CommandHandler`: Processa comandos especiais (ex.: `/exit`, `/switch`).
     - `HistoryManager`: Gerencia o histórico de comandos entre sessões.
     - `AnimationManager`: Controla animações visuais durante o processamento.
+    - `AgentMode` : Implementa o modo agente para execução de comandos.
 - **`llm`**: Comunicação com os provedores de LLM.
     - `LLMClient`: Interface para os clientes de LLM.
     - `OpenAIClient`, `StackSpotClient`, `ClaudeAIClient`: Clientes específicos.
