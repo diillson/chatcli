@@ -7,6 +7,7 @@ import (
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/joho/godotenv"
 	"os"
 	"os/exec"
@@ -66,6 +67,7 @@ type ChatCLI struct {
 	fileChunks        []FileChunk // Chunks pendentes para processamento
 	failedChunks      []FileChunk // Chunks que falharam no processamento
 	lastFailedChunk   *FileChunk  // Referência ao último chunk que falhou
+	agentMode         *AgentMode  // Modo de agente
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -177,6 +179,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	cli.history = []models.Message{}
 	cli.commandHistory = []string{}
 	cli.commandHandler = NewCommandHandler(cli)
+	cli.agentMode = NewAgentMode(cli, logger) // Inicializar o modo agente
 
 	// Definir a função de autocompletar
 	cli.line.SetCompleter(cli.completer)
@@ -407,6 +410,10 @@ func (cli *ChatCLI) switchProvider() {
 		newModel = utils.GetEnvOrDefault("CLAUDEAI_MODEL", config.DefaultClaudeAIModel)
 	}
 
+	if newProvider == "OPENAI_ASSISTANT" {
+		newModel = utils.GetEnvOrDefault("OPENAI_ASSISTANT_MODEL", "gpt-4o")
+	}
+
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
 	if err != nil {
 		cli.logger.Error("Erro ao trocar de provedor", zap.Error(err))
@@ -437,6 +444,8 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("/retry - Retenta o processamento do último chunk que falhou.")
 	fmt.Println("/retryall - Retenta o processamento de todos os chunks que falharam.")
 	fmt.Println("/skipchunk - Pula explicitamente um chunk, ignorando seu conteúdo.")
+	fmt.Println("/agent <consulta> - Inicia o modo agente que analisa e executa comandos para resolver sua tarefa")
+	fmt.Println("/run <consulta> - Alias para /agent")
 	fmt.Printf("\n")
 }
 
@@ -554,133 +563,144 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 	var additionalContext string
 
 	if strings.Contains(strings.ToLower(userInput), "@file") {
-		// Extração de modo e caminho
-		mode := config.ModeFull // Modo padrão
+		// Verificar se estamos usando o Assistente da OpenAI
+		_, isAssistant := cli.client.(*openai_assistant.OpenAIAssistantClient)
+
 		paths, options, err := extractFileCommandOptions(userInput)
 		if err != nil {
 			cli.logger.Error("Erro ao processar os comandos @file", zap.Error(err))
 			return userInput, fmt.Sprintf("\nErro ao processar @file: %s\n", err.Error())
 		}
 
-		// Verificar se o modo foi especificado (ex: --mode=summary, --mode=chunked, etc.)
-		if modeVal, ok := options["mode"]; ok {
-			mode = modeVal
-		}
+		// Se estamos usando o Assistente da OpenAI, usamos o método específico
+		if isAssistant {
+			assistantContext, err := cli.processFileCommandForAssistant(paths)
+			if err != nil {
+				return userInput, fmt.Sprintf("\nErro ao processar @file para Assistente: %s\n", err.Error())
+			}
+			additionalContext += assistantContext
+		} else {
+			// Usar o modo a partir das opções já extraídas
+			mode := config.ModeFull // Modo padrão
+			if modeVal, ok := options["mode"]; ok {
+				mode = modeVal
+			}
 
-		// Configurar estimador de tokens e obter limite máximo de tokens do LLM atual
-		tokenEstimator := cli.getTokenEstimatorForCurrentLLM()
-		maxTokens := cli.getMaxTokensForCurrentLLM()
+			// Configurar estimador de tokens e obter limite máximo de tokens do LLM atual
+			tokenEstimator := cli.getTokenEstimatorForCurrentLLM()
+			maxTokens := cli.getMaxTokensForCurrentLLM()
 
-		// Mostrar animação de “pensando” durante o processamento
-		cli.animation.ShowThinkingAnimation("Analisando arquivos")
+			// Mostrar animação de “pensando” durante o processamento
+			cli.animation.ShowThinkingAnimation("Analisando arquivos")
 
-		// Processar cada caminho encontrado após @file
-		for _, path := range paths {
-			// Escolher a forma de processar (summary, chunked, smartChunk ou full)
-			switch mode {
-			case config.ModeSummary:
-				summary, err := cli.processDirectorySummary(path, tokenEstimator, maxTokens)
-				if err != nil {
-					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
-				} else {
-					additionalContext += summary
-				}
+			// Processar cada caminho encontrado após @file
+			for _, path := range paths {
+				// Escolher a forma de processar (summary, chunked, smartChunk ou full)
+				switch mode {
+				case config.ModeSummary:
+					summary, err := cli.processDirectorySummary(path, tokenEstimator, maxTokens)
+					if err != nil {
+						additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
+					} else {
+						additionalContext += summary
+					}
 
-			case config.ModeChunked:
-				chunks, err := cli.processDirectoryChunked(path, tokenEstimator, maxTokens)
-				if err != nil {
-					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
-				} else {
-					// Apenas o primeiro chunk é adicionado diretamente ao contexto.
-					if len(chunks) > 0 {
-						// ===== Nova seção de resumo =====
-						totalChunks := len(chunks)
-						var totalFiles int
-						var totalSize int64
+				case config.ModeChunked:
+					chunks, err := cli.processDirectoryChunked(path, tokenEstimator, maxTokens)
+					if err != nil {
+						additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
+					} else {
+						// Apenas o primeiro chunk é adicionado diretamente ao contexto.
+						if len(chunks) > 0 {
+							// ===== Nova seção de resumo =====
+							totalChunks := len(chunks)
+							var totalFiles int
+							var totalSize int64
 
-						// Contar estimativa de arquivos e tamanho total
-						for _, chunk := range chunks {
-							fileCount := strings.Count(chunk.Content, "📄 ARQUIVO")
-							totalFiles += fileCount
-							totalSize += int64(len(chunk.Content))
-						}
+							// Contar estimativa de arquivos e tamanho total
+							for _, chunk := range chunks {
+								fileCount := strings.Count(chunk.Content, "📄 ARQUIVO")
+								totalFiles += fileCount
+								totalSize += int64(len(chunk.Content))
+							}
 
-						chunkSummary := fmt.Sprintf(
-							"📊 PROJETO DIVIDIDO EM CHUNKS\n"+
-								"=============================\n"+
-								"▶️ Total de chunks: %d\n"+
-								"▶️ Arquivos estimados: ~%d\n"+
-								"▶️ Tamanho total: %.2f MB\n"+
-								"▶️ Você está no chunk 1/%d\n"+
-								"▶️ Use '/nextchunk' para avançar para o próximo chunk\n\n"+
-								"=============================\n\n",
-							totalChunks, totalFiles, float64(totalSize)/1024/1024, totalChunks,
-						)
-
-						// Exibir o resumo no console e aguardar 5 segundos para o usuário ler
-						fmt.Println()
-						fmt.Println(chunkSummary)
-						fmt.Println("Aguarde 5 segundos antes de enviar o primeiro chunk...")
-
-						// Usar timer em vez de aguardar input do usuário
-						time.Sleep(5 * time.Second)
-
-						fmt.Println("Enviando primeiro chunk para a LLM...")
-
-						// Agora concatenamos ao contexto o resumo + o primeiro chunk
-						additionalContext += chunkSummary + chunks[0].Content
-
-						// Guardar os próximos chunks para o /nextchunk
-						cli.fileChunks = chunks[1:]
-
-						// Avisar o usuário sobre chunks pendentes
-						if len(cli.fileChunks) > 0 {
-							additionalContext += fmt.Sprintf(
-								"\n\n⚠️ ATENÇÃO: Ainda existem %d chunks adicionais. Use /nextchunk quando terminar de analisar este chunk.\n",
-								len(cli.fileChunks),
+							chunkSummary := fmt.Sprintf(
+								"📊 PROJETO DIVIDIDO EM CHUNKS\n"+
+									"=============================\n"+
+									"▶️ Total de chunks: %d\n"+
+									"▶️ Arquivos estimados: ~%d\n"+
+									"▶️ Tamanho total: %.2f MB\n"+
+									"▶️ Você está no chunk 1/%d\n"+
+									"▶️ Use '/nextchunk' para avançar para o próximo chunk\n\n"+
+									"=============================\n\n",
+								totalChunks, totalFiles, float64(totalSize)/1024/1024, totalChunks,
 							)
+
+							// Exibir o resumo no console e aguardar 5 segundos para o usuário ler
+							fmt.Println()
+							fmt.Println(chunkSummary)
+							fmt.Println("Aguarde 5 segundos antes de enviar o primeiro chunk...")
+
+							// Usar timer em vez de aguardar input do usuário
+							time.Sleep(5 * time.Second)
+
+							fmt.Println("Enviando primeiro chunk para a LLM...")
+
+							// Agora concatenamos ao contexto o resumo + o primeiro chunk
+							additionalContext += chunkSummary + chunks[0].Content
+
+							// Guardar os próximos chunks para o /nextchunk
+							cli.fileChunks = chunks[1:]
+
+							// Avisar o usuário sobre chunks pendentes
+							if len(cli.fileChunks) > 0 {
+								additionalContext += fmt.Sprintf(
+									"\n\n⚠️ ATENÇÃO: Ainda existem %d chunks adicionais. Use /nextchunk quando terminar de analisar este chunk.\n",
+									len(cli.fileChunks),
+								)
+							}
 						}
 					}
+
+				case config.ModeSmartChunk:
+					// Extrair a consulta do usuário (tudo o que vier após o @file + opções)
+					query := extractUserQuery(userInput)
+					relevantContent, err := cli.processDirectorySmart(path, query, tokenEstimator, maxTokens)
+					if err != nil {
+						additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
+					} else {
+						additionalContext += relevantContent
+					}
+
+				default: // ModeFull - comportamento atual (inclui todo o conteúdo relevante dentro de um limite)
+					scanOptions := utils.DefaultDirectoryScanOptions(cli.logger)
+					scanOptions.OnFileProcessed = func(info utils.FileInfo) {
+						cli.animation.UpdateMessage(fmt.Sprintf("Processando %s", info.Path))
+					}
+
+					// Ajustar limite de tamanho com base em tokens disponíveis
+					scanOptions.MaxTotalSize = estimateBytesFromTokens(maxTokens*3/4, tokenEstimator)
+
+					files, err := utils.ProcessDirectory(path, scanOptions)
+					if err != nil {
+						cli.logger.Error(fmt.Sprintf("Erro ao processar '%s'", path), zap.Error(err))
+						additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
+						continue
+					}
+
+					if len(files) == 0 {
+						additionalContext += fmt.Sprintf("\nNenhum arquivo relevante encontrado em '%s'\n", path)
+						continue
+					}
+
+					formattedContent := utils.FormatDirectoryContent(files, scanOptions.MaxTotalSize)
+					additionalContext += fmt.Sprintf("\n%s\n", formattedContent)
 				}
-
-			case config.ModeSmartChunk:
-				// Extrair a consulta do usuário (tudo o que vier após o @file + opções)
-				query := extractUserQuery(userInput)
-				relevantContent, err := cli.processDirectorySmart(path, query, tokenEstimator, maxTokens)
-				if err != nil {
-					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
-				} else {
-					additionalContext += relevantContent
-				}
-
-			default: // ModeFull - comportamento atual (inclui todo o conteúdo relevante dentro de um limite)
-				scanOptions := utils.DefaultDirectoryScanOptions(cli.logger)
-				scanOptions.OnFileProcessed = func(info utils.FileInfo) {
-					cli.animation.UpdateMessage(fmt.Sprintf("Processando %s", info.Path))
-				}
-
-				// Ajustar limite de tamanho com base em tokens disponíveis
-				scanOptions.MaxTotalSize = estimateBytesFromTokens(maxTokens*3/4, tokenEstimator)
-
-				files, err := utils.ProcessDirectory(path, scanOptions)
-				if err != nil {
-					cli.logger.Error(fmt.Sprintf("Erro ao processar '%s'", path), zap.Error(err))
-					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
-					continue
-				}
-
-				if len(files) == 0 {
-					additionalContext += fmt.Sprintf("\nNenhum arquivo relevante encontrado em '%s'\n", path)
-					continue
-				}
-
-				formattedContent := utils.FormatDirectoryContent(files, scanOptions.MaxTotalSize)
-				additionalContext += fmt.Sprintf("\n%s\n", formattedContent)
 			}
-		}
 
-		// Parar animação de análise de arquivos
-		cli.animation.StopThinkingAnimation()
+			// Parar animação de análise de arquivos
+			cli.animation.StopThinkingAnimation()
+		}
 
 		// Remover o comando @file do input original para não poluir o prompt final
 		userInput = removeAllFileCommands(userInput)
@@ -734,6 +754,40 @@ func (cli *ChatCLI) getTokenEstimatorForCurrentLLM() func(string) int {
 	return func(text string) int {
 		// Aproximadamente 4 caracteres por token para a maioria dos modelos
 		return len(text) / 4
+	}
+}
+
+// handleAgentCommand processa o comando /agent para entrar no modo agente
+func (cli *ChatCLI) handleAgentCommand(userInput string) {
+	// Extrair a consulta após o comando /agent ou /run
+	query := ""
+	if strings.HasPrefix(userInput, "/agent") {
+		query = strings.TrimSpace(strings.TrimPrefix(userInput, "/agent"))
+	} else {
+		query = strings.TrimSpace(strings.TrimPrefix(userInput, "/run"))
+	}
+
+	if query == "" {
+		fmt.Println("⚠️ É necessário fornecer uma consulta após o comando.")
+		fmt.Println("Exemplo: /agent Como posso listar todos os arquivos PDF neste diretório?")
+		return
+	}
+
+	fmt.Printf("\n🤖 Entrando no modo agente com a consulta: \"%s\"\n", query)
+	fmt.Println("O agente analisará sua solicitação e sugerirá comandos para resolver.")
+	fmt.Println("Você poderá revisar e aprovar cada comando antes da execução.")
+
+	// Iniciar o modo agente com a consulta
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Processar contextos especiais como em comandos normais
+	additionalContext := ""
+	query, additionalContext = cli.processSpecialCommands(query)
+
+	err := cli.agentMode.Run(ctx, query, additionalContext)
+	if err != nil {
+		fmt.Printf("❌ Erro no modo agente: %v\n", err)
 	}
 }
 
@@ -1855,4 +1909,56 @@ func (cli *ChatCLI) typewriterEffect(text string, delay time.Duration) {
 
 		time.Sleep(delay) // Ajuste o delay conforme desejado
 	}
+}
+
+// processFileCommandForAssistant processa o comando @file especificamente para o Assistente da OpenAI
+func (cli *ChatCLI) processFileCommandForAssistant(paths []string) (string, error) {
+	if len(paths) == 0 {
+		return "", fmt.Errorf("nenhum caminho especificado para o comando @file")
+	}
+
+	// Verificar se o cliente atual é um OpenAIAssistantClient
+	assistantClient, ok := cli.client.(*openai_assistant.OpenAIAssistantClient)
+	if !ok {
+		return "", fmt.Errorf("este comando só funciona com o Assistente da OpenAI")
+	}
+
+	// Mensagem informativa inicial
+	cli.animation.ShowThinkingAnimation("Preparando arquivos para o Assistente")
+
+	var contextMessage strings.Builder
+	contextMessage.WriteString("📂 Processando arquivos para o Assistente OpenAI:\n\n")
+
+	totalFiles := 0
+	totalSize := int64(0)
+	var fileIDs []string
+
+	// Processar cada caminho
+	for _, path := range paths {
+		ids, message, err := assistantClient.ProcessDirectoryForAssistant(context.Background(), path)
+		if err != nil {
+			contextMessage.WriteString(fmt.Sprintf("❌ Erro ao processar '%s': %s\n", path, err.Error()))
+			continue
+		}
+
+		// Atualizar o contexto com informações dos arquivos carregados
+		contextMessage.WriteString(fmt.Sprintf("✅ %s\n", message))
+		totalFiles += len(ids)
+
+		fileIDs = append(fileIDs, ids...)
+
+		// Aqui podemos adicionar também o tamanho total dos arquivos
+		// totalSize += ...
+	}
+
+	// Resumo final
+	contextMessage.WriteString(fmt.Sprintf("\n📊 RESUMO:\n"))
+	contextMessage.WriteString(fmt.Sprintf("▶️ Total de arquivos carregados: %d\n", totalFiles))
+	contextMessage.WriteString(fmt.Sprintf("▶️ Tamanho total: %.2f MB\n", float64(totalSize)/1024/1024))
+	contextMessage.WriteString("\nOs arquivos foram anexados ao Assistente OpenAI e estarão disponíveis para todas as consultas nesta conversa.\n")
+
+	// Parar a animação
+	cli.animation.StopThinkingAnimation()
+
+	return contextMessage.String(), nil
 }

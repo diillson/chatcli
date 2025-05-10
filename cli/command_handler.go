@@ -23,6 +23,9 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/reload":
 		ch.cli.reloadConfiguration()
 		return false
+	case strings.HasPrefix(userInput, "/agent") || strings.HasPrefix(userInput, "/run"):
+		ch.cli.handleAgentCommand(userInput)
+		return false
 	case strings.HasPrefix(userInput, "/switch"):
 		ch.cli.handleSwitchCommand(userInput)
 		return false

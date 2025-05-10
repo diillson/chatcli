@@ -6,6 +6,7 @@ import (
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/openai"
+	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/diillson/chatcli/llm/token"
 	"go.uber.org/zap"
@@ -55,11 +56,20 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager,
 func (m *LLMManagerImpl) configurarOpenAIClient() {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey != "" {
+		// Cliente OpenAI padrão (chat completions)
 		m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
 				model = config.DefaultOpenAIModel
 			}
 			return openai.NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
+		}
+
+		// Cliente OpenAI Assistente
+		m.clients["OPENAI_ASSISTANT"] = func(model string) (client.LLMClient, error) {
+			if model == "" {
+				model = "gpt-4o"
+			}
+			return openai_assistant.NewOpenAIAssistantClient(apiKey, model, m.logger)
 		}
 	} else {
 		m.logger.Warn("OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível")
