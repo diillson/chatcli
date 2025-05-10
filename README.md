@@ -1,99 +1,115 @@
 # ChatCLI
 
-ChatCLI é uma aplicação de interface de linha de comando (CLI) avançada que utiliza modelos de Linguagem de Aprendizado (LLMs) poderosos como StackSpot, OpenAI e ClaudeAI para facilitar conversas interativas e contextuais diretamente no seu terminal. Projetado para desenvolvedores, cientistas de dados e entusiastas de tecnologia, o ChatCLI aumenta a produtividade integrando diversas fontes de dados contextuais e proporcionando uma experiência rica e amigável ao usuário.
+O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra modelos de Linguagem de Aprendizado (LLMs) poderosos (como StackSpot, OpenAI e ClaudeAI) para facilitar conversas interativas e contextuais diretamente no seu terminal. Projetado para desenvolvedores, cientistas de dados e entusiastas de tecnologia, o ChatCLI potencializa a produtividade ao agregar diversas fontes de dados contextuais e oferecer uma experiência rica e amigável.
 
-## 🚀 Funcionalidades
+---
 
-- **Suporte a Múltiplos Provedores**: Alterne facilmente entre diferentes provedores de LLM como StackSpot, OpenAI e ClaudeAI conforme suas necessidades.
-- **Experiência Interativa na CLI**: Desfrute de uma interação suave na linha de comando com recursos como navegação de histórico e auto-completação de comandos.
-- **Comandos Contextuais**:
-    - `@history` - Integra o histórico recente de comandos do seu shell na conversa (suporta bash, zsh e fish).
-    - `@git` - Adiciona informações do repositório Git atual, incluindo status, commits recentes e branches.
-    - `@env` - Inclui suas variáveis de ambiente no contexto do chat.
-    - `@file <caminho>` - Incorpora o conteúdo de arquivos especificados na conversa. Suporta `~` como atalho para o diretório home do usuário e expande caminhos relativos.
-    - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa para consultas posteriores com a LLM.
-    - `@command --ai <comando> > <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o sinal de maior `>` para que a IA processe a saída conforme solicitado.
-- **Exploração de Diretórios Completos**: Com  @file <diretório> , o ChatCLI pode processar recursivamente todos os arquivos relevantes de um diretório, facilitando a análise de projetos inteiros.
-- **Execução de Comandos Diretos**: Execute comandos de sistema diretamente a partir do ChatCLI usando `@command`, e a saída é salva no histórico para referência.
-- **Alteração Dinâmica de Configurações**: Mude o provedor de LLM, slug e tenantname diretamente do ChatCLI sem reiniciar a aplicação usando `/switch` com opções.
-- **Recarregamento de Variáveis**: Altere suas configurações de variáveis de ambiente usando `/reload` para que o ChatCLI leia e modifique as configurações.
-- **Feedback Animado**: Animações visuais de "Pensando..." enquanto o LLM processa suas solicitações, aumentando o engajamento do usuário.
-- **Renderização de Markdown**: Respostas são renderizadas com Markdown para melhor legibilidade e formatação.
-- **Histórico Persistente**: O histórico de comandos é salvo entre sessões, permitindo revisitar interações anteriores com facilidade.
-- **Compatibilidade com Múltiplos Shells**: Suporte a diferentes shells (bash, zsh, fish) ao obter o histórico do shell.
-- **Limite de Tamanho de Arquivos Configurável**: Evita a leitura de arquivos muito grandes (acima de 1MB por padrão) ao usar o comando `@file`. O limite pode ser configurado via variáveis de ambiente.
-- **Logging Robusto**: Registro abrangente utilizando Zap com rotação de logs e sanitização de informações sensíveis para garantir segurança e manutenibilidade.
-- **Tratamento Avançado de Erros**: Mensagens de erro amigáveis e informativas orientam você em caso de problemas, garantindo uma experiência de usuário fluida.
-- **Retry com Backoff Exponencial**: Implementa lógica de retry com backoff exponencial para lidar com erros temporários de rede, garantindo maior confiabilidade nas interações com APIs externas.
+## Índice
 
-## 📦 Instalação
+- [Características Principais](#características-principais)
+- [Instalação](#instalação)
+- [Configuração](#configuração)
+- [Uso e Comandos](#uso-e-comandos)
+    - [Iniciando a Aplicação](#iniciando-a-aplicação)
+    - [Comandos Gerais](#comandos-gerais)
+    - [Comandos Contextuais](#comandos-contextuais)
+- [Processamento Avançado de Arquivos](#processamento-avançado-de-arquivos)
+    - [Envio de Arquivos e Diretórios](#envio-de-arquivos-e-diretórios)
+    - [Modos de Uso do Comando `@file`](#modos-de-uso-do-comando-file)
+    - [Sistema de Chunks em Detalhes](#sistema-de-chunks-em-detalhes)
+- [Estrutura do Código](#estrutura-do-código)
+- [Bibliotecas e Dependências](#bibliotecas-e-dependências)
+- [Integração de Logs](#integração-de-logs)
+- [Contribuindo](#contribuindo)
+- [Licença](#licença)
+- [Contato](#contato)
+
+---
+
+## Características Principais
+
+- **Suporte a Múltiplos Provedores**: Alterna entre StackSpot, OpenAI e ClaudeAI conforme a necessidade.
+- **Experiência Interativa na CLI**: Navegação de histórico, auto-completação e feedback animado (ex.: “Pensando…”).
+- **Comandos Contextuais Poderosos**:
+    - `@history` – Insere o histórico recente do shell (suporta bash, zsh e fish).
+    - `@git` – Incorpora informações do repositório Git atual (status, commits e branches).
+    - `@env` – Inclui as variáveis de ambiente no contexto.
+    - `@file <caminho>` – Insere conteúdo de arquivos ou diretórios com suporte à expansão de `~` e caminhos relativos.
+    - `@command <comando>` – Executa comandos do sistema e adiciona sua saída ao contexto.
+    - `@command --ai <comando> > <contexto>` – Executa o comando e envia a saída diretamente para a LLM com contexto adicional.
+- **Exploração Recursiva de Diretórios**: Processa projetos inteiros ignorando pastas irrelevantes (ex.: `node_modules`, `.git`).
+- **Configuração Dinâmica e Histórico Persistente**: Troque provedores, atualize configurações em tempo real e mantenha o histórico entre sessões.
+- **Retry com Backoff Exponencial**: Robustez no tratamento de erros e instabilidades na comunicação com APIs externas.
+
+---
+
+## Instalação
 
 ### Pré-requisitos
 
-- **Go**: Certifique-se de ter o Go instalado (versão 1.23+). Você pode baixá-lo em [golang.org](https://golang.org/dl/).
+- **Go (versão 1.23+)** – Disponível em [golang.org](https://golang.org/dl/).
 
-### Passos
+### Passos de Instalação
 
-1. **Clonar o Repositório**:
+1. **Clone o Repositório**:
 
    ```bash
    git clone https://github.com/diillson/chatcli.git
    cd chatcli
    ```
 
-2. **Instalar Dependências**:
+2. **Instale as Dependências**:
 
    ```bash
    go mod tidy
    ```
 
-3. **Compilar a Aplicação**:
+3. **Compile a Aplicação**:
 
    ```bash
    go build -o chatcli
    ```
 
-4. **Executar a Aplicação**:
+4. **Execute a Aplicação**:
 
    ```bash
    ./chatcli
    ```
 
-## 🛠 Configuração
-
-O ChatCLI depende de variáveis de ambiente para configurar seu comportamento e conectar-se aos provedores de LLM. Você pode definir essas variáveis em um arquivo `.env` na raiz do projeto ou exportá-las diretamente no seu shell.
-
 ---
+
+## Configuração
+
+O ChatCLI utiliza variáveis de ambiente para definir seu comportamento e conectar-se aos provedores de LLM. Essas variáveis podem ser configuradas via arquivo `.env` ou diretamente no shell.
 
 ### Variáveis de Ambiente
 
-O ChatCLI agora suporta o ClaudeAI como um provedor adicional de LLM. Veja como configurar a ClaudeAI e as outras variáveis de ambiente para o funcionamento do ChatCLI:
-
-- **Definindo o local do seu arquivo .env**:
-   - `CHATCLI_DOTENV` - (Opcional) Define o local do seu arquivo `.env` com as suas variáveis, precisa definir no sistema para funcionar e não dentro do proprio .env, ele apontará para onde está o seu `.env` com as demais variáveis.
+- **Local do `.env`**:
+    - `CHATCLI_DOTENV` – (Opcional) Define o caminho do seu arquivo `.env`.
 
 - **Geral**:
-    - `LOG_LEVEL` - (Opcional) Define o nível de log (`debug`, `info`, `warn`, `error`). Padrão é `info`.
-    - `ENV` - (Opcional) Define o ambiente (`prod` para produção, caso contrário, padrão é `dev` desenvolvimento) - Essencial pois muda a forma que o log transacional e exibido no terminal.
-    - `LLM_PROVIDER` - (Opacional) Especifica o provedor de LLM padrão (`OPENAI`, `STACKSPOT` ou `CLAUDEAI`). Padrão é `OPENAI`.
-    - `LOG_FILE` - (Opcional) Define o nome do arquivo de log. Padrão é `app.log`.
-    - `LOG_MAX_SIZE` (Opacional) Define o tamanho maximo do log antes de realizar o backup (`3`) ao maximo por `28` dias, padrão É `50MB`, pode usar escala de MB KB GB, ex: 10MB, 500KB, 1GB.
-    - `HISTORY_MAX_SIZE` - (Opcional) Define o tamanho do historico de comandos do chat `.chatcli_history` padrão é `50MB`, pode usar escala de MB KB GB, ex: 10MB, 500KB, 1GB.
+    - `LOG_LEVEL` – (Opcional) Níveis: `debug`, `info`, `warn`, `error` (padrão: `info`).
+    - `ENV` – (Opcional) Ambiente: `prod` para produção ou `dev` para desenvolvimento (padrão: `dev`).
+    - `LLM_PROVIDER` – (Opcional) Provedor padrão: `OPENAI`, `STACKSPOT` ou `CLAUDEAI` (padrão: `OPENAI`).
+    - `LOG_FILE` – (Opcional) Nome do arquivo de log (padrão: `app.log`).
+    - `LOG_MAX_SIZE` – (Opcional) Tamanho máximo do log antes da rotação (padrão: `50MB`).
+    - `HISTORY_MAX_SIZE` – (Opcional) Tamanho do histórico do ChatCLI (padrão: `50MB`).
 
 - **Provedor OpenAI**:
-    - `OPENAI_API_KEY` - Sua chave de API da OpenAI.
-    - `OPENAI_MODEL` - (Opcional) Especifica o modelo da OpenAI a ser usado. Padrão é `gpt-4o-mini`.
-  
+    - `OPENAI_API_KEY` – Chave de API da OpenAI.
+    - `OPENAI_MODEL` – (Opcional) Modelo a ser utilizado (padrão: `gpt-4o-mini`).
+
 - **Provedor StackSpot**:
-    - `CLIENT_ID` - ID do cliente StackSpot.
-    - `CLIENT_SECRET` - Segredo do cliente StackSpot.
-    - `SLUG_NAME` - Nome do slug StackSpot. Padrão é `testeai` se não definido.
-    - `TENANT_NAME` - Nome do tenant StackSpot. Padrão é `zup` se não definido.
+    - `CLIENT_ID` – ID do cliente.
+    - `CLIENT_SECRET` – Segredo do cliente.
+    - `SLUG_NAME` – (Opcional) Nome do slug (padrão: `testeai`).
+    - `TENANT_NAME` – (Opcional) Nome do tenant (padrão: `zup`).
 
 - **Provedor ClaudeAI**:
-    - `CLAUDEAI_API_KEY` - Sua chave de API da ClaudeAI.
-    - `CLAUDEAI_MODEL` - (Opcional) Define o modelo da ClaudeAI. Padrão é `claude-3-5-sonnet-20241022`.
-    - `CLAUDEAI_MAX_TOKENS` - (Opcional) Define o número máximo de tokens na resposta. Padrão é `8192` para o `claude 3.5`, caso desejar `claude-3-7-sonnet-20250219` atende até `64.000`. veja mais em https://docs.anthropic.com/pt/api/rate-limits
+    - `CLAUDEAI_API_KEY` – Chave de API da ClaudeAI.
+    - `CLAUDEAI_MODEL` – (Opcional) Modelo (padrão: `claude-3-5-sonnet-20241022`).
+    - `CLAUDEAI_MAX_TOKENS` – (Opcional) Máximo de tokens na resposta (padrão: `8192`).
+
 ### Exemplo de Arquivo `.env`
 
 ```env
@@ -121,325 +137,249 @@ CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
 CLAUDEAI_MAX_TOKENS=8192
 ```
 
---- 
+---
 
-## 🎯 Uso
+## Uso e Comandos
 
-Após instalar e configurar, você pode começar a usar o ChatCLI com diversos comandos.
+Após a instalação e configuração, o ChatCLI oferece uma série de comandos que facilitam a interação com a LLM.
 
-### Iniciando o ChatCLI
+### Iniciando a Aplicação
 
 ```bash
 ./chatcli
 ```
 
-### Comandos Disponíveis
+### Comandos Gerais
 
-- **Sair do ChatCLI**:
-    - `/exit` ou `exit` ou `/quit` ou `quit`
+- **Encerrar a Sessão**:
+    - `/exit`, `exit`, `/quit` ou `quit`
 
-- **Alternar Provedor de LLM ou Configurações**:
-    - `/switch` - Troca o provedor de LLM (interativo).
-    - `/switch --slugname <slug>` - Atualiza o `slugName` sem trocar o provedor.
-    - `/switch --tenantname <tenant>` - Atualiza o `tenantName` sem trocar o provedor.
-    - Você pode combinar as opções: `/switch --slugname <slug> --tenantname <tenant>`
-    - `/reload` - Atualiza as configurações de variáveis em tempo de execução.
+- **Alternar Provedor ou Configurações**:
+    - `/switch` – Troca o provedor de LLM (modo interativo).
+    - `/switch --slugname <slug>` – Atualiza somente o `slugName`.
+    - `/switch --tenantname <tenant>` – Atualiza somente o `tenantName`.
+    - Combinações: `/switch --slugname <slug> --tenantname <tenant>`
+    - `/reload` – Recarrega as variáveis de ambiente em tempo real.
 
 - **Ajuda**:
     - `/help`
 
-- **Comandos Especiais**:
-    - `@history` - Adiciona os últimos 10 comandos do shell ao contexto da conversa.
-    - `@git` - Incorpora o status atual do repositório Git, commits recentes e branches.
-    - `@env` - Inclui variáveis de ambiente no chat.
-    - `@file <caminho>` - Adiciona o conteúdo do arquivo especificado ao contexto. Suporta `~` como atalho para o diretório home e expande caminhos relativos. `Novidade:` Agora processa diretórios completos!
-    - `@command <comando>` - Executa o comando de terminal fornecido e adiciona a saída ao contexto da conversa.
-    - **Novo**: `@command --ai <comando> > <contexto>` - Executa o comando de terminal e envia a saída diretamente para a LLM, com a possibilidade de passar um contexto adicional após o sinal de maior `>` para que a IA processe a saída conforme solicitado.
+### Comandos Contextuais
 
-### Exemplos de Uso
-
-1. **Conversa Básica**:
-
-   ```
-   Você: Olá, como você está?
-   ```
-
-2. **Incluindo Histórico do Shell**:
-
-   ```
-   Você: @history
-   ```
-
-3. **Adicionando Informações do Git**:
-
-   ```
-   Você: @git
-   ```
-
-4. **Incluindo Variáveis de Ambiente**:
-
-   ```
-   Você: @env
-   ```
-
-5. **Incorporando Conteúdo de Arquivo**:
-
-   ```
-   Você: @file ~/documentos/main.go
-   ```
-
-   Este comando lerá o conteúdo de `main.go` do diretório `documentos` na pasta home e o incluirá no contexto da conversa.
-
-
-6. **Processando um Diretório Completo (Nova Funcionalidade):**
-   ```
-   Você: @file ~/projetos/minha-aplicacao/
-   ```
-   Este comando processará recursivamente o diretório, identificando e incluindo arquivos de código relevantes, ignorando diretórios como  node_modules ,  .git , etc.
-
-7. **Executando Comando no Terminal com `@command`**:
-
-   ```
-   Você: @command ls -la
-   ```
-
-   O comando `@command <comando>` permite a execução de comandos de sistema diretamente no ChatCLI sem interação com a LLM. A saída do comando é salva no histórico, possibilitando que você consulte a LLM posteriormente para análise ou diagnósticos com o contexto do comando.
-
-   **Saída**:
-
-   ```
-   Executando comando: ls -la
-   Saída do comando:
-   total 8
-   drwxr-xr-x  3 user  staff    96 Nov  4 12:34 .
-   drwxr-xr-x  5 user  staff   160 Nov  4 10:12 ..
-   -rw-r--r--  1 user  staff  1024 Nov  4 12:33 example.txt
-   ```
-
-8. **Consultando a LLM sobre um Erro em um Comando**:
-
-   ```
-   Você: @command cat arquivo_inexistente.txt
-   ```
-
-   **Saída**:
-
-   ```
-   Executando comando: cat arquivo_inexistente.txt
-   Saída do comando:
-   Erro: cat: arquivo_inexistente.txt: No such file or directory
-   ```
-
-   Posteriormente, você pode consultar a LLM sobre o erro:
-
-   ```
-   Você: O que aconteceu no último comando?
-   ```
-
-   A LLM terá acesso ao histórico e poderá explicar o erro ou sugerir correções.
-
-9. **Executando Comando e Enviando Saída para a LLM com Contexto**:
-
-   ```
-   Você: @command --ai ls > Filtrar apenas os arquivos .go
-   ```
-
-   O comando `ls` será executado, e a saída será enviada para a LLM com o contexto "Filtrar apenas os arquivos .go".
-
-10. **Alterando Provedor de LLM**:
-
-   Para trocar o provedor de LLM durante a sessão:
-
-   ```
-   Você: /switch
-   ```
-
-   Você será solicitado a selecionar o provedor:
-
-   ```
-   Provedores disponíveis:
-   1. OPENAI
-   2. STACKSPOT
-   3. CLAUDEAI
-   Selecione o provedor (1, 2 ou 3):
-   ```
-
-11. **Atualizando `slugName` e `tenantName` sem trocar o provedor**:
-
-```
-Você: /switch --slugname novo-slug --tenantname novo-tenant
-```
-
-O `TokenManager` será atualizado com os novos valores, e um novo token será obtido.
-
-12. **Refaz a leitura das variáveis de ambiente, identificando as mudanças e reconfigurando o ambiente**:
-
-    ```
-    Você: /reload
-    ```
-
-    As variáveis serão reconfiguradas com os novos valores, e uma nova validação de todos os recursos ocorrerá.
+- `@history` – Insere os últimos 10 comandos do shell.
+- `@git` – Incorpora informações do repositório Git.
+- `@env` – Insere variáveis de ambiente no contexto.
+- `@file <caminho>` – Insere o conteúdo de um arquivo ou diretório.
+- `@command <comando>` – Executa um comando do terminal e salva a saída.
+- **Novo**: `@command --ai <comando> > <contexto>` – Envia a saída do comando diretamente para a LLM com contexto adicional.
 
 ---
-### Capturas de Tela
 
-#### Exemplo de Execução de Comando com `@command`
+## Processamento Avançado de Arquivos
 
-![Executando Comando_01](/images/05.png)
+O ChatCLI possui um sistema robusto para o envio e processamento de arquivos e diretórios, com modos de operação que atendem desde análises rápidas até explorações detalhadas de projetos inteiros.
 
-#### Exemplo de pergunta à LLM após execução do comando
+### Envio de Arquivos e Diretórios
 
-![Executando Comando_02](/images/06.png)
+Para enviar um arquivo ou diretório, utilize o comando `@file` seguido do caminho desejado. O comando suporta:
 
-#### Funcionamento Geral
+- **Expansão de Caminhos**:
+    - `~` é expandido para o diretório home.
+    - Suporta caminhos relativos (`./src/utils.js`) e absolutos (`/usr/local/etc/config.json`).
 
-![Operando-1](/images/01.png)
+**Exemplos**:
 
-![Operando-2](/images/02.png)
+- Enviar um arquivo específico:
 
-![Operando-3](/images/03.png)
+  ```
+  Você: @file ~/documentos/main.go
+  ```
 
-![Operando-4](/images/04.png)
+- Enviar um diretório completo:
 
-## 📂 Estrutura do Código
+  ```
+  Você: @file ~/projetos/minha-aplicacao/
+  ```
 
-O projeto está organizado em vários pacotes, cada um responsável por diferentes aspectos da aplicação. Recentemente, o código foi refatorado para melhorar a separação de responsabilidades e facilitar a manutenção e a escalabilidade. Aqui estão os principais componentes:
+---
 
-- **`cli`**: Gerencia a interface de linha de comando e interação com usuário.
-    - **`ChatCLI`**: Classe principal que gerencia o loop de interação com o usuário.
-    - **`CommandHandler`**: Lida com comandos específicos da CLI como  `/exit` ,  `/switch` , etc.
-    - **`HistoryManager`**: Gerencia o histórico de comandos entre sessões.
-    - **`AnimationManager`**: Gerencia animações visuais durante o processamento.
+### Modos de Uso do Comando `@file`
 
-- **`llm`**: Gerencia interações com diferentes Modelos de Linguagem.
-    - **`LLMClient`**: Interface para todos os clientes LLM.
-    - **`OpenAIClient`**: Cliente para API da OpenAI.
-    - **`StackSpotClient`**: Cliente para API da StackSpot.
-    - **`ClaudeAIClient`**: Cliente para API da ClaudeAI.
-    - **`LLMManager`**: Gerencia os diferentes clientes LLM.
-    - **`token_manager.go`**: Gerencia a obtenção e renovação de tokens dos clientes LLM.
+O comando `@file` pode operar em diferentes modos para atender às suas necessidades:
 
-- **`utils`**: Contém funções utilitárias para diversas operações. 
-    - **`file_utils.go`** : (NOVO) Processamento avançado de arquivos e diretórios.
-    - **`shell_utils.go`**: Funções para shell e histórico de comandos.
-    - **`git_utils.go`**: Funções para obter informações do Git.
-    - **`http_client.go`** : Cliente HTTP personalizado com logging.
-    - **`logging_transport.go`**: Transporte HTTP com logs e sanitização.
-    - **`path.go`**: Manipulação de caminhos de arquivos.
+1. **Modo Padrão (Full)**
+    - **Uso**: Projetos pequenos a médios.
+    - **Funcionamento**:
+        - Escaneia o diretório e inclui o conteúdo dos arquivos até atingir os limites do modelo.
+        - Pode truncar conteúdos se o limite de tokens for excedido.
 
-- **`models`**: Define estruturas de dados como `Message` e `ResponseData`.
-- **`main`**: Inicializa a aplicação e configura dependências.
+2. **Modo de Chunks (Dividido)**
+    - **Uso**: Projetos grandes que precisam ser divididos em partes menores.
+    - **Funcionamento**:
+        - Divide o conteúdo em “chunks” (pedaços) gerenciáveis.
+        - Envia apenas o primeiro chunk inicialmente e armazena os demais.
+        - Você pode utilizar o comando `/nextchunk` para avançar manualmente entre os chunks.
+    - **Exemplo**:
+      ```
+      Você: @file --mode=chunked ~/meu-projeto-grande/
+      ```
+      Após o envio do primeiro chunk, a mensagem exibirá:
+      ```
+      📊 PROJETO DIVIDIDO EM CHUNKS
+      =============================
+      ▶️ Total de chunks: 5
+      ▶️ Arquivos estimados: ~42
+      ▶️ Tamanho total: 1.75 MB
+      ▶️ Você está no chunk 1/5
+      ▶️ Use '/nextchunk' para avançar para o próximo chunk
+      =============================
+      ```
 
-## 📚 Bibliotecas e Dependências
+3. **Modo de Resumo (Summary)**
+    - **Uso**: Quando você deseja apenas uma visão geral da estrutura do projeto, sem os conteúdos dos arquivos.
+    - **Funcionamento**:
+        - Retorna informações sobre a estrutura de diretórios, lista de arquivos com tamanhos e tipos e estatísticas gerais.
+    - **Exemplo**:
+      ```
+      Você: @file --mode=summary ~/meu-projeto/
+      ```
 
-- [Zap](https://github.com/uber-go/zap): Logging estruturado e de alto desempenho.
-- [Liner](https://github.com/peterh/liner): Fornece edição de linha e histórico para a CLI.
-- [Glamour](https://github.com/charmbracelet/glamour): Renderiza Markdown no terminal.
-- [Lumberjack](https://github.com/natefinch/lumberjack): Rotação de arquivos de log.
-- [Godotenv](https://github.com/joho/godotenv): Carrega variáveis de ambiente a partir de um arquivo `.env`.
-- [Go Standard Library](https://pkg.go.dev/std): Utiliza diversos pacotes padrão para requisições HTTP, manipulação de arquivos, concorrência e mais.
+4. **Modo Inteligente (Smart)**
+    - **Uso**: Análise focada, onde você fornece uma pergunta e o sistema seleciona os arquivos mais relevantes.
+    - **Funcionamento**:
+        - O ChatCLI atribui uma pontuação de relevância a cada arquivo com base na pergunta e inclui somente os mais pertinentes.
+    - **Exemplo**:
+      ```
+      Você: @file --mode=smart ~/meu-projeto/ Como funciona o sistema de login?
+      ```
 
-## 🌟 Funcionalidades Avançadas
+---
 
-- **Exploração Recursiva de Diretórios: (NOVO)** O comando  @file  agora pode processar diretórios inteiros, identificando automaticamente arquivos relevantes e ignorando diretórios como  node_modules ,  .git , etc.
-- **Processamento Paralelo de Arquivos: (NOVO)** Utiliza goroutines para processar múltiplos arquivos simultaneamente, melhorando significativamente o desempenho ao lidar com diretórios grandes.
-- **Filtragem Inteligente de Arquivos: (NOVO)** Filtra automaticamente tipos de arquivos irrelevantes (binários, logs, arquivos temporários) e se concentra em arquivos de código e texto.
-- **Formatação Contextual Avançada: (NOVO)** Formata automaticamente cada arquivo com o realce de sintaxe correto no Markdown, baseado no tipo de arquivo.
-- **Feedback Visual Durante Processamento: (NOVO)** Mostra indicadores de progresso enquanto processa arquivos grandes ou diretórios com muitos arquivos.
-- **Expansão de Caminhos com Suporte a `~`**: O comando `@file` expande inteligentemente `~` para o diretório home do usuário, permitindo entradas flexíveis de caminhos de arquivos semelhantes aos terminais Unix-like.
-- **Animações Concorrentes**: Implementa goroutines para gerenciar animações como "Pensando..." sem bloquear a thread principal, garantindo uma experiência de usuário responsiva.
-- **Mecanismo de Retry com Backoff Exponencial**: Tratamento robusto de erros com lógica de retry para requisições de rede aos provedores de LLM, aumentando a confiabilidade.
-- **Gerenciamento de Tokens para StackSpot**: Gerencia tokens de acesso de forma segura, lidando com a renovação automática antes da expiração para manter o serviço ininterrupto.
-- **Logging Sanitizado**: Garante que informações sensíveis como chaves de API e tokens sejam redigidas nos logs, mantendo as melhores práticas de segurança.
-- **Renderização de Markdown**: Utiliza Glamour para renderizar respostas em Markdown, proporcionando uma saída rica e formatada no terminal.
-- **Limitação de Tamanho de Arquivo Configurável**: Evita a leitura de arquivos excessivamente grandes (acima de 1MB por padrão) para manter o desempenho e prevenir possíveis problemas.
-- **Compatibilidade com Shells**: Detecta automaticamente o shell do usuário (por exemplo, bash, zsh, fish) e lê o arquivo de histórico apropriado, melhorando a compatibilidade em diferentes ambientes.
-- **Persistência de Histórico de Comandos**: O ChatCLI salva o histórico de comandos em um arquivo `.chatcli_history` na pasta atual, permitindo que o histórico seja mantido entre sessões.
-- **Detecção de Tipo de Arquivo**: Ao usar `@file`, o ChatCLI detecta o tipo de arquivo com base na extensão e formata o conteúdo apropriadamente, incluindo suporte a sintaxe de código em blocos de Markdown.
+### Sistema de Chunks em Detalhes
 
-## 📜 Integração de Logs
+Para projetos grandes, quando o modo `chunked` é utilizado:
 
-O ChatCLI integra Zap para logging estruturado e de alto desempenho. As principais características do sistema de logging incluem:
+1. **Inicialização dos Chunks**:
+    - O ChatCLI escaneia todo o diretório e divide o conteúdo em múltiplos chunks.
+    - Cada chunk recebe metadados (ex.: número do chunk, total de chunks).
+    - Apenas o primeiro chunk é enviado imediatamente, com os demais armazenados para envio subsequente.
 
-- **Níveis de Log Configuráveis**: Defina o nível de log desejado (`debug`, `info`, `warn`, `error`) via variáveis de ambiente para controlar a verbosidade.
-- **Rotação de Logs**: Utiliza Lumberjack para gerenciar a rotação de arquivos de log, prevenindo que os arquivos cresçam indefinidamente.
-- **Sanitização de Dados Sensíveis**: O `LoggingTransport` personalizado assegura que informações sensíveis como chaves de API, tokens e cabeçalhos de autorização sejam redigidas antes de serem registradas.
-- **Logging de Multi-Output**: Suporta logging tanto no console quanto em arquivos de log, dependendo do ambiente (desenvolvimento ou produção).
-- **Logs Detalhados de Requisições e Respostas**: Registra requisições HTTP e respostas, incluindo método, URL, cabeçalhos (com dados sensíveis redigidos), códigos de status e durações para monitoramento e depuração.
+2. **Navegação entre Chunks**:
+    - Após receber o primeiro chunk, utilize o comando `/nextchunk` para enviar o próximo.
+    - O sistema atualiza o progresso e informa quantos chunks ainda faltam.
 
-## 🧩 Como Funciona
+3. **Tratamento de Falhas**:
+    - Se ocorrer um erro em um chunk, ele é listado separadamente.
+    - Comandos para gerenciar falhas:
+        - `/retry` – Tenta novamente o último chunk que falhou.
+        - `/retryall` – Retenta todos os chunks com falha.
+        - `/skipchunk` – Pula um chunk problemático e continua.
+        - `/nextchunk` – Avança para o próximo chunk, mantendo o fluxo.
 
-1. **Inicialização**:
-    - A aplicação carrega as variáveis de ambiente e inicializa o logger.
-    - Configura o `LLMManager` para gerenciar múltiplos provedores de LLM com base na configuração.
-    - Inicializa o `TokenManager` para gerenciar tokens de acesso quando necessário (por exemplo, para StackSpot).
+4. **Feedback Visual**:
+    - Cada chunk enviado inclui um cabeçalho detalhado com informações de progresso, como:
+      ```
+      📊 PROGRESSO: Chunk 3/5
+      =============================
+      ▶️ 2 chunks já processados
+      ▶️ 2 chunks restantes
+      ▶️ 1 chunk com falha
+      ▶️ Use '/nextchunk' para avançar após analisar este chunk
+      =============================
+      ```
 
-2. **Processamento de Comandos**:
-    - Os usuários interagem com o ChatCLI via terminal, inserindo comandos e mensagens.
-    - Comandos especiais como `@history`, `@git`, `@env`, `@file` e `@command` são analisados e processados para incluir contexto adicional na conversa.
-    - Comandos de sistema como `/exit`, `/switch`,`/reload`, `/help` são tratados separadamente para controlar o fluxo da aplicação.
+---
 
-3. **Exploração de Diretórios: (NOVO)**
-   - Quando um diretório é especificado com  `@file` , o ChatCLI:
-   - Percorre recursivamente o diretório, identificando arquivos relevantes
-   - Processa arquivos em paralelo usando goroutines
-   - Filtra tipos de arquivo irrelevantes e diretórios como  `node_modules
-   - Formata o conteúdo com realce de sintaxe baseado no tipo de arquivo
-   - Organiza os resultados com índice e separadores claros
+## Estrutura do Código
 
-3. **Interação com LLM**:
-    - O ChatCLI envia a entrada do usuário juntamente com o histórico da conversa para o provedor de LLM selecionado.
-    - Para o OpenAI, utiliza a API de chat com o histórico completo de mensagens.
-    - Para o StackSpot, gerencia a sessão e obtém a resposta através de polling com o `responseID`.
-    - A resposta do LLM é recebida, renderizada com Markdown e exibida com um efeito de máquina de escrever para melhor legibilidade.
+O projeto está dividido em pacotes com responsabilidades específicas:
 
-4. **Logging e Tratamento de Erros**:
-    - Todas as interações, incluindo requisições e respostas para/dos provedores de LLM, são registradas com níveis apropriados.
-    - Erros são tratados de forma elegante, fornecendo mensagens informativas ao usuário e garantindo que a aplicação permaneça estável.
-    - Implementa lógica de retry com backoff exponencial para lidar com erros temporários de rede.
+- **`cli`**: Gerencia a interface de usuário.
+    - `ChatCLI`: Loop principal de interação.
+    - `CommandHandler`: Processa comandos especiais (ex.: `/exit`, `/switch`).
+    - `HistoryManager`: Gerencia o histórico de comandos entre sessões.
+    - `AnimationManager`: Controla animações visuais durante o processamento.
+- **`llm`**: Comunicação com os provedores de LLM.
+    - `LLMClient`: Interface para os clientes de LLM.
+    - `OpenAIClient`, `StackSpotClient`, `ClaudeAIClient`: Clientes específicos.
+    - `LLMManager`: Gerencia os clientes.
+    - `token_manager.go`: Gerencia tokens e suas renovações.
+- **`utils`**: Funções auxiliares.
+    - `file_utils.go`: Processamento de arquivos e diretórios.
+    - `shell_utils.go`: Interação com o shell e histórico.
+    - `git_utils.go`: Informações sobre o Git.
+    - `http_client.go` e `logging_transport.go`: Clientes HTTP com logging.
+    - `path.go`: Manipulação de caminhos.
+- **`models`**: Estruturas de dados (ex.: `Message`, `ResponseData`).
+- **`main`**: Inicialização da aplicação e configuração das dependências.
 
-5. **Persistência de Histórico**:
-    - O ChatCLI salva o histórico de comandos em `.chatcli_history`, permitindo que o histórico seja carregado em sessões futuras.
-    - O histórico da conversa com a LLM é mantido em memória durante a sessão para proporcionar contexto contínuo.
+---
 
-## 🧑‍💻 Contribuindo
+## Bibliotecas e Dependências
 
-Contribuições são bem-vindas! Seja melhorando a documentação, adicionando novos recursos ou corrigindo bugs, sua ajuda é muito apreciada. Siga os passos abaixo para contribuir:
+- [Zap](https://github.com/uber-go/zap) – Logging estruturado de alto desempenho.
+- [Liner](https://github.com/peterh/liner) – Edição de linha e histórico na CLI.
+- [Glamour](https://github.com/charmbracelet/glamour) – Renderização de Markdown no terminal.
+- [Lumberjack](https://github.com/natefinch/lumberjack) – Rotação de arquivos de log.
+- [Godotenv](https://github.com/joho/godotenv) – Carregamento de variáveis de ambiente.
+- [Go Standard Library](https://pkg.go.dev/std) – Diversos pacotes para HTTP, manipulação de arquivos e concorrência.
 
-1. **Fork o Repositório**
+---
 
+## Integração de Logs
+
+O ChatCLI utiliza o Zap para um logging robusto e estruturado, contando com:
+
+- **Níveis Configuráveis**: (`debug`, `info`, `warn`, `error`).
+- **Rotação de Logs**: Gerenciada pelo Lumberjack.
+- **Sanitização de Dados Sensíveis**: Chaves de API, tokens e outros dados críticos são redigidos.
+- **Multi-Output**: Logs exibidos no console e salvos em arquivo.
+- **Detalhamento de Requisições**: Informações completas sobre métodos, URLs, cabeçalhos (com dados sensíveis removidos) e tempos de resposta.
+
+---
+
+## Contribuindo
+
+Contribuições são sempre bem-vindas! Para colaborar:
+
+1. **Fork o Repositório.**
 2. **Crie uma Nova Branch**:
 
    ```bash
    git checkout -b feature/SeuNomeDeFeature
    ```
 
-3. **Commit suas Alterações**:
+3. **Faça Commits com suas Alterações**:
 
    ```bash
-   git commit -m "Adiciona sua mensagem"
+   git commit -m "Descrição da alteração"
    ```
 
-4. **Push para a Branch**:
+4. **Envie a Branch para o Repositório Remoto**:
 
    ```bash
    git push origin feature/SeuNomeDeFeature
    ```
 
-5. **Abra um Pull Request**
+5. **Abra um Pull Request.**
 
-Por favor, assegure-se de que seu código segue os padrões de codificação do projeto e passa por todos os testes existentes.
-
-## 📝 Licença
-
-Este projeto está licenciado sob a [Licença MIT](/LICENSE).
-
-## 📞 Contato
-
-Para quaisquer perguntas, feedback ou suporte, por favor, abra uma issue no repositório ou entre em contato pelo [www.edilsonfreitas.com.br/contato](https://www.edilsonfreitas.com/#section-contact).
+Certifique-se de seguir os padrões do projeto e que os testes estejam passando.
 
 ---
 
-ChatCLI conecta a potência dos LLMs com a simplicidade da linha de comando, oferecendo uma ferramenta versátil para interações contínuas com IA dentro do seu ambiente de terminal. Abrace o futuro da produtividade na linha de comando com o ChatCLI!
+## Licença
+
+Este projeto está licenciado sob a [Licença MIT](/LICENSE).
+
+---
+
+## Contato
+
+Para dúvidas, sugestões ou suporte, abra uma issue no repositório ou acesse:  
+[www.edilsonfreitas.com.br/contato](https://www.edilsonfreitas.com/#section-contact)
+
+---
+
+**ChatCLI** une a potência dos LLMs com a simplicidade da linha de comando, oferecendo uma ferramenta versátil para interações contínuas com IA diretamente no seu terminal. Aproveite e transforme sua experiência de produtividade!
 
 Boas conversas! 🗨️✨
