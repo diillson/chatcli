@@ -800,7 +800,7 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 		} else if cli.model == "gpt-4o-mini" {
 			return 50000
 		} else if strings.HasPrefix(cli.model, "gpt-4") {
-			return 8192
+			return 50000
 		} else {
 			return 8192 // gpt-3.5-turbo padrão
 		}
