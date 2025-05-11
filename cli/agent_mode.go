@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
-	"github.com/peterh/liner"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"regexp"
@@ -29,6 +31,15 @@ func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 	}
 }
 
+func askLine(msg string) string {
+	if msg != "" {
+		fmt.Print(msg)
+	}
+	reader := bufio.NewReader(os.Stdin)
+	resp, _ := reader.ReadString('\n')
+	return strings.TrimSpace(resp)
+}
+
 // CommandBlock representa um bloco de comandos executáveis
 type CommandBlock struct {
 	Description string   // Descrição do que o comando faz
@@ -36,12 +47,43 @@ type CommandBlock struct {
 	Language    string   // Linguagem (bash, python, etc.)
 }
 
+var dangerousPatterns = []string{
+	`(?i)rm\s+-rf\s+`,             // rm -rf
+	`(?i)rm\s+--no-preserve-root`, // rm --no-preserve-root
+	`(?i)dd\s+if=`,                // dd
+	`(?i)mkfs\w*\s+`,              // mkfs
+	`(?i)shutdown(\s+|$)`,         // shutdown
+	`(?i)reboot(\s+|$)`,           // reboot
+	`(?i)init\s+0`,                // init 0
+	`(?i)curl\s+[^\|;]*\|\s*sh`,   // pipe a shell
+	`(?i)wget\s+[^\|;]*\|\s*sh`,
+	`(?i)curl\s+[^\|;]*\|\s*bash`,
+	`(?i)wget\s+[^\|;]*\|\s*bash`,
+	`(?i)\bsudo\b.*`,          // comando usando sudo
+	`(?i)\bdrop\s+database\b`, // apagar bancos
+	`(?i)\bmkfs\b`,            // formatar partição
+	`(?i)\buserdel\b`,         // deletar usuário
+	`(?i)\bchmod\s+777\s+/.*`, // chmod 777 /
+}
+
+func isDangerous(cmd string) bool {
+	for _, pattern := range dangerousPatterns {
+		re := regexp.MustCompile(pattern)
+		if re.MatchString(cmd) {
+			return true
+		}
+	}
+	return false
+}
+
 // Run inicia o modo agente com uma pergunta do usuário
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string) error {
 	// 1. Enviar a pergunta para a LLM com instruções específicas sobre formato de resposta
 	systemInstruction := `Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema.
         Quando o usuário pede para realizar uma tarefa, analise o problema e sugira o melhor comando que possam resolver a questão.
-        
+
+		Antes de sugerir comandos destrutivos (como rm -rf, dd, mkfs, drop database, etc), coloque explicação e peça uma confirmação explícita do usuário.
+
         Para cada bloco de código executável, use o formato:
         ` + "```" + `execute:<tipo>
         <comandos>
@@ -197,106 +239,357 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 	fmt.Println("\n🤖 MODO AGENTE: Comandos sugeridos")
 	fmt.Println("===============================")
 
-	// Exibir todos os comandos disponíveis
-	for i, block := range blocks {
-		fmt.Printf("\n🔷 Comando #%d: %s\n", i+1, block.Description)
-		fmt.Printf("  Tipo: %s\n", block.Language)
-		fmt.Printf("  Comandos:\n")
-
-		// Exibir os comandos
-		for _, cmd := range block.Commands {
-			fmt.Printf("    %s\n", cmd)
-		}
+	type CommandOutput struct {
+		CommandBlock CommandBlock
+		Output       string
+		ErrorMsg     string
 	}
 
-	// Fechar o liner temporariamente para liberar o terminal
-	if a.cli.line != nil {
-		a.cli.line.Close()
-	}
+	outputs := make([]*CommandOutput, len(blocks))
 
-	// Usar o método mais básico possível para ler a entrada
-	fmt.Printf("\nDigite sua opção:\n")
-	fmt.Printf("- Um número entre 1 e %d para executar esse comando\n", len(blocks))
-	fmt.Printf("- 'a' para executar todos os comandos\n")
-	//fmt.Printf("- 'eX' para editar o comando número X (por exemplo, 'e2' para editar o comando 2)\n")
-	fmt.Printf("- 'q' para sair\n")
-	fmt.Print("Sua escolha: ")
+	// Seu menu agora é um laço, pode receber atualizações de blocks e outputs no ciclo
+	for {
 
-	var answer string
-	fmt.Scan(&answer) // Usa Scan para garantir a leitura
-
-	answer = strings.ToLower(strings.TrimSpace(answer))
-
-	// Recriar o liner após a leitura
-	a.cli.line = liner.NewLiner()
-	a.cli.line.SetCtrlCAborts(true)
-
-	if answer == "q" {
-		fmt.Println("Saindo do modo agente.")
-		return
-	} else if answer == "a" {
-		// Executar todos os comandos em sequência
-		fmt.Println("\n⚠️ Executando todos os comandos em sequência...")
+		// Mostra os comandos disponíveis
 		for i, block := range blocks {
-			fmt.Printf("\n🚀 Executando comando #%d:\n", i+1)
-			a.executeCommands(ctx, block)
+			fmt.Printf("\n🔷 Comando #%d: %s\n", i+1, block.Description)
+			fmt.Printf("  Tipo: %s\n", block.Language)
+			fmt.Printf("  Comandos:\n")
+			for _, cmd := range block.Commands {
+				fmt.Printf("    %s\n", cmd)
+			}
 		}
-		return
-	} else {
-		// Tentar interpretar como número de comando
-		cmdNum, err := strconv.Atoi(answer)
-		if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-			fmt.Println("Opção inválida.")
+
+		// Feche o liner se existir, nunca reabra aqui!
+		if a.cli.line != nil {
+			a.cli.line.Close()
+		}
+
+		fmt.Printf("\nDigite sua opção:\n")
+		fmt.Printf("- Um número entre 1 e %d para executar esse comando\n", len(blocks))
+		fmt.Printf("- 'a' para executar todos os comandos\n")
+		fmt.Printf("- 'eN' para editar o comando N antes de rodar (ex: e2)\n")
+		fmt.Printf("- 'tN' para simular (dry-run) o comando N (ex: t2)\n")
+		fmt.Printf("- 'cN' para pedir continuação à IA usando a saída do comando N (ex: c2)\n")
+		fmt.Printf("- 'q' para sair\n")
+		answer := strings.ToLower(askLine("Sua escolha: "))
+
+		switch {
+		case answer == "q":
+			fmt.Println("Saindo do modo agente.")
 			return
+
+		case answer == "a":
+			hasDanger := false
+			for _, b := range blocks {
+				for _, c := range b.Commands {
+					if isDangerous(c) {
+						hasDanger = true
+						break
+					}
+				}
+			}
+			if hasDanger {
+				fmt.Println("⚠️ AVISO: Um ou mais comandos a executar são potencialmente perigosos (destrutivos ou invasivos).")
+				fmt.Println("Confira comandos individuais antes de aprovar execução em lote!")
+			}
+			fmt.Println("\n⚠️ Executando todos os comandos em sequência...")
+			for i, block := range blocks {
+				fmt.Printf("\n🚀 Executando comando #%d:\n", i+1)
+				outStr, errStr := a.executeCommandsWithOutput(ctx, block)
+				outputs[i] = &CommandOutput{
+					CommandBlock: block,
+					Output:       outStr,
+					ErrorMsg:     errStr,
+				}
+				fmt.Print(outStr)
+			}
+
+		case strings.HasPrefix(answer, "e"):
+			cmdNumStr := strings.TrimPrefix(answer, "e")
+			cmdNum, err := strconv.Atoi(cmdNumStr)
+			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+				fmt.Println("Número de comando inválido para editar.")
+				continue
+			}
+			edited, err := a.editCommandBlock(blocks[cmdNum-1])
+			if err != nil {
+				fmt.Println("Erro ao editar comando:", err)
+				continue
+			}
+			editedBlock := blocks[cmdNum-1]
+			editedBlock.Commands = edited
+			outStr, errStr := a.executeCommandsWithOutput(ctx, editedBlock)
+			outputs[cmdNum-1] = &CommandOutput{
+				CommandBlock: editedBlock,
+				Output:       outStr,
+				ErrorMsg:     errStr,
+			}
+			fmt.Print(outStr)
+
+		case strings.HasPrefix(answer, "t"):
+			cmdNumStr := strings.TrimPrefix(answer, "t")
+			cmdNum, err := strconv.Atoi(cmdNumStr)
+			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+				fmt.Println("Número de comando inválido para simular.")
+				continue
+			}
+			a.simulateCommandBlock(ctx, blocks[cmdNum-1])
+			execNow := strings.ToLower(askLine("Deseja executar este comando agora? (s/N): "))
+			if execNow == "s" {
+				outStr, errStr := a.executeCommandsWithOutput(ctx, blocks[cmdNum-1])
+				outputs[cmdNum-1] = &CommandOutput{
+					CommandBlock: blocks[cmdNum-1],
+					Output:       outStr,
+					ErrorMsg:     errStr,
+				}
+				fmt.Print(outStr)
+			} else {
+				fmt.Println("Simulação concluída, comando NÃO executado.")
+			}
+
+		case strings.HasPrefix(answer, "c"):
+			cmdNumStr := strings.TrimPrefix(answer, "c")
+			cmdNum, err := strconv.Atoi(cmdNumStr)
+			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+				fmt.Println("Número inválido para continuação.")
+				continue
+			}
+			if outputs[cmdNum-1] == nil {
+				fmt.Println("Este comando ainda não foi executado, portanto não há saída para enviar à IA.")
+				continue
+			}
+
+			newBlocks, err := a.requestLLMContinuation(
+				ctx,
+				strings.Join(blocks[cmdNum-1].Commands, "\n"),
+				strings.Join(blocks[cmdNum-1].Commands, "\n"),
+				outputs[cmdNum-1].Output,
+				outputs[cmdNum-1].ErrorMsg,
+			)
+			if err != nil {
+				fmt.Println("Erro ao pedir continuação à IA:", err)
+				continue
+			}
+			if len(newBlocks) > 0 {
+				blocks = newBlocks // troca para os novos comandos da IA!
+				break              // Sai desse loop for & reinicia com novos comandos (outputs será resetado)
+			} else {
+				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
+			}
+
+		default:
+			cmdNum, err := strconv.Atoi(answer)
+			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+				fmt.Println("Opção inválida.")
+				continue
+			}
+			outStr, errStr := a.executeCommandsWithOutput(ctx, blocks[cmdNum-1])
+			outputs[cmdNum-1] = &CommandOutput{
+				CommandBlock: blocks[cmdNum-1],
+				Output:       outStr,
+				ErrorMsg:     errStr,
+			}
+			fmt.Print(outStr)
 		}
-
-		// Executar o comando selecionado
-		selectedBlock := blocks[cmdNum-1]
-		a.executeCommands(ctx, selectedBlock)
 	}
-
 	fmt.Println("\n✅ Processamento de comandos concluído.")
 }
 
-// executeCommands executa os comandos do bloco
-func (a *AgentMode) executeCommands(ctx context.Context, block CommandBlock) {
+// executeCommandsWithOutput executa todos os comandos do bloco (1 a 1), imprime e retorna o output total e último erro.
+func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block CommandBlock) (string, string) {
+	var allOutput strings.Builder
+	var lastError string
 	fmt.Printf("\n🚀 Executando comandos (tipo: %s):\n", block.Language)
 	fmt.Println("---------------------------------------")
-
-	// Mostrar um indicador de progresso
 	fmt.Printf("⌛ Processando: %s\n\n", block.Description)
 
-	// Determinar o shell a usar
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 
-	// Executar cada comando separadamente para melhor feedback
 	for i, cmd := range block.Commands {
 		if cmd == "" {
-			continue // Pular linhas vazias
+			continue
+		}
+		// Checagem de comando perigoso
+		if isDangerous(cmd) {
+			confirm := askLine("Se tem certeza que deseja executar, digite exatamente: 'sim, quero executar conscientemente'\nConfirma? ")
+			if confirm != "sim, quero executar conscientemente" {
+				outText := "Execução do comando perigoso ABORTADA pelo agente.\n"
+				allOutput.WriteString(outText)
+				fmt.Print(outText)
+				continue
+			}
 		}
 
-		fmt.Printf("⚙️ Comando %d/%d: %s\n", i+1, len(block.Commands), cmd)
+		header := fmt.Sprintf("⚙️ Comando %d/%d: %s\n", i+1, len(block.Commands), cmd)
+		allOutput.WriteString(header)
+		fmt.Print(header)
 
-		// Criar e configurar o comando
-		command := exec.CommandContext(ctx, shell, "-c", cmd)
-		command.Stdin = os.Stdin
-		command.Stdout = os.Stdout
-		command.Stderr = os.Stderr
+		output, err := a.captureCommandOutput(ctx, shell, []string{"-c", cmd})
 
-		// Executar o comando
-		err := command.Run()
+		outText := "📝 Saída do comando (stdout/stderr):\n" + string(output)
+		allOutput.WriteString(outText)
+		fmt.Print(outText)
+
 		if err != nil {
-			fmt.Printf("❌ Erro: %v\n\n", err)
+			errMsg := fmt.Sprintf("❌ Erro: %v\n\n", err)
+			allOutput.WriteString(errMsg)
+			fmt.Print(errMsg)
+			lastError = err.Error()
 		} else {
-			fmt.Printf("✓ Executado com sucesso\n\n")
+			okMsg := "✓ Executado com sucesso\n\n"
+			allOutput.WriteString(okMsg)
+			fmt.Print(okMsg)
 		}
 	}
 
+	finalMsg := "---------------------------------------\nExecução concluída.\n"
+	allOutput.WriteString(finalMsg)
+	fmt.Print(finalMsg)
+	return allOutput.String(), lastError
+}
+
+// simulateCommandBlock tenta rodar os comandos de um bloco em modo "simulado"
+// Para shell: adiciona "echo" antes, para docker/k8s/git: usa flag conhecida se suportado (rústico)
+// Não Garante 100% (uns comandos não suportam dry-run), mas serve para preview
+func (a *AgentMode) simulateCommandBlock(ctx context.Context, block CommandBlock) {
+	fmt.Printf("\n🔎 Simulando comandos (tipo: %s):\n", block.Language)
 	fmt.Println("---------------------------------------")
-	fmt.Println("Execução concluída.")
+
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+
+	for i, cmd := range block.Commands {
+		if cmd == "" {
+			continue
+		}
+		fmt.Printf("🔸 Dry-run %d/%d: %s\n", i+1, len(block.Commands), cmd)
+		// Para shell, prefixa-"echo"
+		simCmd := fmt.Sprintf("echo '[dry-run] Vai executar: %s'; %s", cmd, cmd)
+		// para outros tipos: analise e tente "simular"
+		if block.Language == "shell" {
+			out, err := a.captureCommandOutput(ctx, shell, []string{"-c", simCmd})
+			fmt.Println(string(out))
+			if err != nil {
+				fmt.Printf("❗ Dry-run falhou: %v\n", err)
+			}
+		} else if block.Language == "kubernetes" && strings.Contains(cmd, "apply") {
+			// Exemplo: kubectl apply --dry-run=client
+			cmdDry := cmd + " --dry-run=client"
+			out, err := a.captureCommandOutput(ctx, shell, []string{"-c", cmdDry})
+			fmt.Println(string(out))
+			if err != nil {
+				fmt.Printf("❗ Dry-run falhou: %v\n", err)
+			}
+		} else {
+			// padrão apenas echo
+			out, _ := a.captureCommandOutput(ctx, shell, []string{"-c", "echo '[dry-run] " + cmd + "'"})
+			fmt.Println(string(out))
+		}
+	}
+	fmt.Println("---------------------------------------")
+}
+
+// captureCommandOutput executa comando e captura stdout+stderr
+func (a *AgentMode) captureCommandOutput(ctx context.Context, shell string, args []string) ([]byte, error) {
+	var outBuf bytes.Buffer
+	var errBuf bytes.Buffer
+	cmd := exec.CommandContext(ctx, shell, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+
+	err := cmd.Run()
+	output := outBuf.Bytes()
+	if errBuf.Len() > 0 {
+		output = append(output, []byte("\n[stderr]:\n")...)
+		output = append(output, errBuf.Bytes()...)
+	}
+	return output, err
+}
+
+// editCommandBlock abre o(s) comando(s) em um editor e retorna o texto editado
+func (a *AgentMode) editCommandBlock(block CommandBlock) ([]string, error) {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vim"
+	}
+	tmpfile, err := ioutil.TempFile("", "agent-edit-*.sh")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tmpfile.Name())
+
+	content := strings.Join(block.Commands, "\n")
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		return nil, err
+	}
+	if err := tmpfile.Close(); err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(editor, tmpfile.Name())
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+
+	edited, err := ioutil.ReadFile(tmpfile.Name())
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(strings.ReplaceAll(string(edited), "\r\n", "\n"), "\n")
+	return lines, nil
+}
+
+// requestLLMContinuation reenvia o contexto/output para a LLM gerar novo comando
+func (a *AgentMode) requestLLMContinuation(ctx context.Context, userQuery, previousCommand, output, stderr string) ([]CommandBlock, error) {
+	retryPrompt := fmt.Sprintf(
+		`O comando sugerido anteriormente foi:
+    %s
+    
+    O resultado (stdout) foi:
+    %s
+    
+    O erro (stderr) foi:
+    %s
+    
+    Por favor, sugira uma correção OU explique o erro e proponha um novo bloco de comando. Não repita comandos que já claramente deram erro sem modificação.
+    
+    Se necessário, peça informações extras ao usuário.`, previousCommand, output, stderr)
+
+	// Adiciona o retryPrompt como novo turno "user"
+	a.cli.history = append(a.cli.history, models.Message{
+		Role:    "user",
+		Content: retryPrompt,
+	})
+
+	a.cli.animation.ShowThinkingAnimation(a.cli.client.GetModelName())
+	aiResponse, err := a.cli.client.SendPrompt(ctx, retryPrompt, a.cli.history)
+	a.cli.animation.StopThinkingAnimation()
+	if err != nil {
+		fmt.Println("❌ Erro ao pedir continuação à IA:", err)
+		return nil, err
+	}
+
+	// Adiciona resposta da IA ao histórico
+	a.cli.history = append(a.cli.history, models.Message{
+		Role:    "assistant",
+		Content: aiResponse,
+	})
+
+	// Processa normalmente (extrai comandos, mostra explicação, etc)
+	blocks := a.extractCommandBlocks(aiResponse)
+	a.displayResponseWithoutCommands(aiResponse, blocks)
+	return blocks, nil
 }
 
 // max retorna o maior entre dois inteiros
