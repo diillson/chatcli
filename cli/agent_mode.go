@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/peterh/liner"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -31,13 +32,62 @@ func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 	}
 }
 
-func askLine(msg string) string {
-	if msg != "" {
-		fmt.Print(msg)
+// safePrompt cria um novo liner, obtém input e fecha com segurança
+func (a *AgentMode) safePrompt(prompt string) (string, error) {
+	// Criar um novo liner para cada prompt
+	line := liner.NewLiner()
+	defer line.Close()
+
+	// Configurar o liner
+	line.SetCtrlCAborts(true)
+
+	// Opcional: configurar completador
+	if a.cli.completer != nil {
+		line.SetCompleter(a.cli.completer)
 	}
+
+	// Opcional: carregar histórico recente
+	for i := 0; i < len(a.cli.commandHistory) && i < 50; i++ {
+		idx := len(a.cli.commandHistory) - 1 - i
+		if idx >= 0 {
+			line.AppendHistory(a.cli.commandHistory[idx])
+		}
+	}
+
+	// Obter input
+	input, err := line.Prompt(prompt)
+	if err != nil {
+		return "", err
+	}
+
+	// Adicionar ao histórico global
+	if input != "" {
+		a.cli.commandHistory = append(a.cli.commandHistory, input)
+	}
+
+	return input, nil
+}
+
+// Função de fallback para quando o prompt seguro falhar
+func (a *AgentMode) fallbackPrompt(prompt string) string {
+	fmt.Print(prompt)
 	reader := bufio.NewReader(os.Stdin)
 	resp, _ := reader.ReadString('\n')
 	return strings.TrimSpace(resp)
+}
+
+// getInput obtém entrada do usuário de forma segura
+func (a *AgentMode) getInput(prompt string) string {
+	input, err := a.safePrompt(prompt)
+	if err != nil {
+		if err == liner.ErrPromptAborted {
+			return ""
+		}
+		// Fallback para método simples em caso de erro
+		a.logger.Warn("Erro ao usar liner, usando fallback", zap.Error(err))
+		return a.fallbackPrompt(prompt)
+	}
+	return input
 }
 
 // CommandBlock representa um bloco de comandos executáveis
@@ -45,6 +95,12 @@ type CommandBlock struct {
 	Description string   // Descrição do que o comando faz
 	Commands    []string // Os comandos a serem executados
 	Language    string   // Linguagem (bash, python, etc.)
+}
+
+type CommandOutput struct {
+	CommandBlock CommandBlock
+	Output       string
+	ErrorMsg     string
 }
 
 var dangerousPatterns = []string{
@@ -80,45 +136,45 @@ func isDangerous(cmd string) bool {
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string) error {
 	// 1. Enviar a pergunta para a LLM com instruções específicas sobre formato de resposta
 	systemInstruction := `Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema.
-        Quando o usuário pede para realizar uma tarefa, analise o problema e sugira o melhor comando que possam resolver a questão.
-
-		Antes de sugerir comandos destrutivos (como rm -rf, dd, mkfs, drop database, etc), coloque explicação e peça uma confirmação explícita do usuário.
-
-        Para cada bloco de código executável, use o formato:
-        ` + "```" + `execute:<tipo>
-        <comandos>
-        ` + "```" + `
-        
-        Exemplos de formatação:
-        
-        Para comandos shell:
-        ` + "```" + `execute:shell
-        ls -la | grep "\.txt$"
-        cat file.txt | grep "exemplo"
-        ` + "```" + `
-        
-        Para comandos Kubernetes:
-        ` + "```" + `execute:kubernetes
-        kubectl get pods -n my-namespace
-        kubectl describe pod my-pod -n my-namespace
-        ` + "```" + `
-        
-        Para outros tipos de comandos, use o identificador apropriado, como:
-        - execute:docker
-        - execute:terraform
-        - execute:git
-        - execute:sql
-        
-        IMPORTANTE:
-        1. Comece sua resposta com uma breve explicação do que você vai fazer
-        2. Descreva brevemente o que cada conjunto de comandos faz antes de mostrar o bloco execute
-        3. Use comando claro, simples e seguro
-        4. Caso possua mais de um comando, agrupe comandos relacionados no mesmo bloco execute quando tiverem o mesmo propósito
-        5. Cada comando em um bloco será executado individualmente, um após o outro
-        6. Não use comandos destrutivos (rm -rf, drop database, etc.) sem avisos claros
-        7. Se a tarefa for complexa, divida em múltiplos blocos execute com propósitos distintos
-        
-        Adapte o comando para o contexto do usuário, considerando o ambiente e as ferramentas disponíveis.`
+            Quando o usuário pede para realizar uma tarefa, analise o problema e sugira o melhor comando que possam resolver a questão.
+    
+            Antes de sugerir comandos destrutivos (como rm -rf, dd, mkfs, drop database, etc), coloque explicação e peça uma confirmação explícita do usuário.
+    
+            Para cada bloco de código executável, use o formato:
+            ` + "```" + `execute:<tipo>
+            <comandos>
+            ` + "```" + `
+            
+            Exemplos de formatação:
+            
+            Para comandos shell:
+            ` + "```" + `execute:shell
+            ls -la | grep "\.txt$"
+            cat file.txt | grep "exemplo"
+            ` + "```" + `
+            
+            Para comandos Kubernetes:
+            ` + "```" + `execute:kubernetes
+            kubectl get pods -n my-namespace
+            kubectl describe pod my-pod -n my-namespace
+            ` + "```" + `
+            
+            Para outros tipos de comandos, use o identificador apropriado, como:
+            - execute:docker
+            - execute:terraform
+            - execute:git
+            - execute:sql
+            
+            IMPORTANTE:
+            1. Comece sua resposta com uma breve explicação do que você vai fazer
+            2. Descreva brevemente o que cada conjunto de comandos faz antes de mostrar o bloco execute
+            3. Use comando claro, simples e seguro
+            4. Caso possua mais de um comando, agrupe comandos relacionados no mesmo bloco execute quando tiverem o mesmo propósito
+            5. Cada comando em um bloco será executado individualmente, um após o outro
+            6. Não use comandos destrutivos (rm -rf, drop database, etc.) sem avisos claros
+            7. Se a tarefa for complexa, divida em múltiplos blocos execute com propósitos distintos
+            
+            Adapte o comando para o contexto do usuário, considerando o ambiente e as ferramentas disponíveis.`
 
 	// 2. Adicionar a mensagem do sistema ao histórico
 	a.cli.history = append(a.cli.history, models.Message{
@@ -234,22 +290,88 @@ func (a *AgentMode) displayResponseWithoutCommands(response string, blocks []Com
 	a.cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", a.cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
 }
 
+// getMultilineInput obtém entrada de múltiplas linhas do usuário
+func (a *AgentMode) getMultilineInput(prompt string) string {
+	fmt.Print(prompt)
+
+	var lines []string
+	for {
+		// Ler cada linha usando getInput
+		line := a.getInput("")
+
+		// Se a linha for apenas "." ou vazia, terminamos
+		if line == "." {
+			break
+		}
+
+		// Se a primeira linha for vazia, o usuário não quer adicionar contexto
+		if len(lines) == 0 && line == "" {
+			return ""
+		}
+
+		// Adicionar a linha ao contexto
+		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// requestLLMContinuationWithContext reenvia o contexto/output + contexto adicional do usuário para a LLM
+func (a *AgentMode) requestLLMContinuationWithContext(ctx context.Context, previousCommand, output, stderr, userContext string) ([]CommandBlock, error) {
+	var prompt strings.Builder
+
+	prompt.WriteString("O comando sugerido anteriormente foi:\n")
+	prompt.WriteString(previousCommand)
+	prompt.WriteString("\n\nO resultado (stdout) foi:\n")
+	prompt.WriteString(output)
+
+	if stderr != "" {
+		prompt.WriteString("\n\nO erro (stderr) foi:\n")
+		prompt.WriteString(stderr)
+	}
+
+	if userContext != "" {
+		prompt.WriteString("\n\nContexto adicional fornecido pelo usuário:\n")
+		prompt.WriteString(userContext)
+	}
+
+	prompt.WriteString("\n\nPor favor, sugira uma correção ou próximos passos baseados no resultado e no contexto fornecido. ")
+	prompt.WriteString("Forneça comandos executáveis no formato apropriado.")
+
+	// Adiciona o prompt como novo turno "user"
+	a.cli.history = append(a.cli.history, models.Message{
+		Role:    "user",
+		Content: prompt.String(),
+	})
+
+	a.cli.animation.ShowThinkingAnimation(a.cli.client.GetModelName())
+	aiResponse, err := a.cli.client.SendPrompt(ctx, prompt.String(), a.cli.history)
+	a.cli.animation.StopThinkingAnimation()
+	if err != nil {
+		fmt.Println("❌ Erro ao pedir continuação à IA:", err)
+		return nil, err
+	}
+
+	// Adiciona resposta da IA ao histórico
+	a.cli.history = append(a.cli.history, models.Message{
+		Role:    "assistant",
+		Content: aiResponse,
+	})
+
+	// Processa normalmente (extrai comandos, mostra explicação, etc)
+	blocks := a.extractCommandBlocks(aiResponse)
+	a.displayResponseWithoutCommands(aiResponse, blocks)
+	return blocks, nil
+}
+
 // handleCommandBlocks processa cada bloco de comando
 func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlock) {
 	fmt.Println("\n🤖 MODO AGENTE: Comandos sugeridos")
 	fmt.Println("===============================")
 
-	type CommandOutput struct {
-		CommandBlock CommandBlock
-		Output       string
-		ErrorMsg     string
-	}
-
 	outputs := make([]*CommandOutput, len(blocks))
 
-	// Seu menu agora é um laço, pode receber atualizações de blocks e outputs no ciclo
 	for {
-
 		// Mostra os comandos disponíveis
 		for i, block := range blocks {
 			fmt.Printf("\n🔷 Comando #%d: %s\n", i+1, block.Description)
@@ -260,19 +382,18 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			}
 		}
 
-		// Feche o liner se existir, nunca reabra aqui!
-		if a.cli.line != nil {
-			a.cli.line.Close()
-		}
-
 		fmt.Printf("\nDigite sua opção:\n")
 		fmt.Printf("- Um número entre 1 e %d para executar esse comando\n", len(blocks))
 		fmt.Printf("- 'a' para executar todos os comandos\n")
 		fmt.Printf("- 'eN' para editar o comando N antes de rodar (ex: e2)\n")
 		fmt.Printf("- 'tN' para simular (dry-run) o comando N (ex: t2)\n")
 		fmt.Printf("- 'cN' para pedir continuação à IA usando a saída do comando N (ex: c2)\n")
+		fmt.Printf("- 'aCN' para adicionar contexto à saída do comando N e pedir continuação (ex: aC2)\n")
 		fmt.Printf("- 'q' para sair\n")
-		answer := strings.ToLower(askLine("Sua escolha: "))
+
+		// Usar o prompt seguro para a entrada
+		answer := a.getInput("Sua escolha: ")
+		answer = strings.ToLower(strings.TrimSpace(answer))
 
 		switch {
 		case answer == "q":
@@ -293,6 +414,13 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				fmt.Println("⚠️ AVISO: Um ou mais comandos a executar são potencialmente perigosos (destrutivos ou invasivos).")
 				fmt.Println("Confira comandos individuais antes de aprovar execução em lote!")
 			}
+
+			confirmation := a.getInput("\n⚠️ Executar todos os comandos em sequência? (s/N): ")
+			if strings.ToLower(strings.TrimSpace(confirmation)) != "s" {
+				fmt.Println("Execução em lote cancelada.")
+				continue
+			}
+
 			fmt.Println("\n⚠️ Executando todos os comandos em sequência...")
 			for i, block := range blocks {
 				fmt.Printf("\n🚀 Executando comando #%d:\n", i+1)
@@ -302,7 +430,6 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 					Output:       outStr,
 					ErrorMsg:     errStr,
 				}
-				fmt.Print(outStr)
 			}
 
 		case strings.HasPrefix(answer, "e"):
@@ -325,7 +452,6 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				Output:       outStr,
 				ErrorMsg:     errStr,
 			}
-			fmt.Print(outStr)
 
 		case strings.HasPrefix(answer, "t"):
 			cmdNumStr := strings.TrimPrefix(answer, "t")
@@ -335,17 +461,58 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				continue
 			}
 			a.simulateCommandBlock(ctx, blocks[cmdNum-1])
-			execNow := strings.ToLower(askLine("Deseja executar este comando agora? (s/N): "))
-			if execNow == "s" {
+
+			execNow := a.getInput("Deseja executar este comando agora? (s/N): ")
+			if strings.ToLower(strings.TrimSpace(execNow)) == "s" {
 				outStr, errStr := a.executeCommandsWithOutput(ctx, blocks[cmdNum-1])
 				outputs[cmdNum-1] = &CommandOutput{
 					CommandBlock: blocks[cmdNum-1],
 					Output:       outStr,
 					ErrorMsg:     errStr,
 				}
-				fmt.Print(outStr)
 			} else {
 				fmt.Println("Simulação concluída, comando NÃO executado.")
+			}
+
+		case strings.HasPrefix(answer, "ac"):
+			cmdNumStr := strings.TrimPrefix(answer, "ac")
+			cmdNum, err := strconv.Atoi(cmdNumStr)
+			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+				fmt.Println("Número inválido para adicionar contexto.")
+				continue
+			}
+			if outputs[cmdNum-1] == nil {
+				fmt.Println("Este comando ainda não foi executado, portanto não há saída para adicionar contexto.")
+				continue
+			}
+
+			// Mostrar o output para o usuário saber o que está contextualizando
+			fmt.Println("\n📋 Saída do comando que você está contextualizando:")
+			fmt.Println("---------------------------------------")
+			fmt.Print(outputs[cmdNum-1].Output)
+			fmt.Println("---------------------------------------")
+
+			// Obter o contexto adicional do usuário
+			userContext := a.getMultilineInput("Digite seu contexto adicional (termine com uma linha contendo apenas '.') ou pressione Enter para continuar:\n")
+
+			// Chamar método para tratar a continuação com contexto
+			newBlocks, err := a.requestLLMContinuationWithContext(
+				ctx,
+				strings.Join(blocks[cmdNum-1].Commands, "\n"),
+				outputs[cmdNum-1].Output,
+				outputs[cmdNum-1].ErrorMsg,
+				userContext,
+			)
+			if err != nil {
+				fmt.Println("Erro ao pedir continuação à IA:", err)
+				continue
+			}
+			if len(newBlocks) > 0 {
+				blocks = newBlocks                            // troca para os novos comandos da IA!
+				outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
+				break                                         // Sai desse loop for & reinicia com novos comandos
+			} else {
+				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
 			}
 
 		case strings.HasPrefix(answer, "c"):
@@ -372,8 +539,9 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				continue
 			}
 			if len(newBlocks) > 0 {
-				blocks = newBlocks // troca para os novos comandos da IA!
-				break              // Sai desse loop for & reinicia com novos comandos (outputs será resetado)
+				blocks = newBlocks                            // troca para os novos comandos da IA!
+				outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
+				break                                         // Sai desse loop for & reinicia com novos comandos
 			} else {
 				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
 			}
@@ -390,16 +558,21 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				Output:       outStr,
 				ErrorMsg:     errStr,
 			}
-			fmt.Print(outStr)
 		}
 	}
-	fmt.Println("\n✅ Processamento de comandos concluído.")
 }
 
 // executeCommandsWithOutput executa todos os comandos do bloco (1 a 1), imprime e retorna o output total e último erro.
 func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block CommandBlock) (string, string) {
 	var allOutput strings.Builder
 	var lastError string
+
+	// Adicionar apenas os cabeçalhos iniciais à string de saída
+	allOutput.WriteString(fmt.Sprintf("\n🚀 Executando comandos (tipo: %s):\n", block.Language))
+	allOutput.WriteString("---------------------------------------\n")
+	allOutput.WriteString(fmt.Sprintf("⌛ Processando: %s\n\n", block.Description))
+
+	// Imprimir os cabeçalhos iniciais para o usuário ver
 	fmt.Printf("\n🚀 Executando comandos (tipo: %s):\n", block.Language)
 	fmt.Println("---------------------------------------")
 	fmt.Printf("⌛ Processando: %s\n\n", block.Description)
@@ -413,9 +586,10 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 		if cmd == "" {
 			continue
 		}
+
 		// Checagem de comando perigoso
 		if isDangerous(cmd) {
-			confirm := askLine("Se tem certeza que deseja executar, digite exatamente: 'sim, quero executar conscientemente'\nConfirma? ")
+			confirm := a.getInput("Se tem certeza que deseja executar, digite exatamente: 'sim, quero executar conscientemente'\nConfirma? ")
 			if confirm != "sim, quero executar conscientemente" {
 				outText := "Execução do comando perigoso ABORTADA pelo agente.\n"
 				allOutput.WriteString(outText)
@@ -449,12 +623,12 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 	finalMsg := "---------------------------------------\nExecução concluída.\n"
 	allOutput.WriteString(finalMsg)
 	fmt.Print(finalMsg)
+
+	// Retornar a saída acumulada e o último erro
 	return allOutput.String(), lastError
 }
 
 // simulateCommandBlock tenta rodar os comandos de um bloco em modo "simulado"
-// Para shell: adiciona "echo" antes, para docker/k8s/git: usa flag conhecida se suportado (rústico)
-// Não Garante 100% (uns comandos não suportam dry-run), mas serve para preview
 func (a *AgentMode) simulateCommandBlock(ctx context.Context, block CommandBlock) {
 	fmt.Printf("\n🔎 Simulando comandos (tipo: %s):\n", block.Language)
 	fmt.Println("---------------------------------------")
@@ -470,7 +644,7 @@ func (a *AgentMode) simulateCommandBlock(ctx context.Context, block CommandBlock
 		}
 		fmt.Printf("🔸 Dry-run %d/%d: %s\n", i+1, len(block.Commands), cmd)
 		// Para shell, prefixa-"echo"
-		simCmd := fmt.Sprintf("echo '[dry-run] Vai executar: %s'; %s", cmd, cmd)
+		simCmd := fmt.Sprintf("echo '[dry-run] Vai executar: %s'", cmd)
 		// para outros tipos: analise e tente "simular"
 		if block.Language == "shell" {
 			out, err := a.captureCommandOutput(ctx, shell, []string{"-c", simCmd})
@@ -515,6 +689,31 @@ func (a *AgentMode) captureCommandOutput(ctx context.Context, shell string, args
 
 // editCommandBlock abre o(s) comando(s) em um editor e retorna o texto editado
 func (a *AgentMode) editCommandBlock(block CommandBlock) ([]string, error) {
+	choice := a.getInput("Editar no terminal (t) ou em editor externo (e)? [t/e]: ")
+	choice = strings.ToLower(strings.TrimSpace(choice))
+
+	if choice == "t" {
+		// Editar cada comando individualmente no terminal
+		editedCommands := make([]string, len(block.Commands))
+
+		for i, cmd := range block.Commands {
+			if cmd == "" {
+				continue
+			}
+
+			prompt := fmt.Sprintf("Comando %d/%d (%s): ", i+1, len(block.Commands), block.Language)
+			edited := a.getInput(prompt)
+
+			if edited == "" {
+				edited = cmd // Manter o comando original se o usuário não inserir nada
+			}
+
+			editedCommands[i] = edited
+		}
+
+		return editedCommands, nil
+	}
+
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "vim"
@@ -554,17 +753,17 @@ func (a *AgentMode) editCommandBlock(block CommandBlock) ([]string, error) {
 func (a *AgentMode) requestLLMContinuation(ctx context.Context, userQuery, previousCommand, output, stderr string) ([]CommandBlock, error) {
 	retryPrompt := fmt.Sprintf(
 		`O comando sugerido anteriormente foi:
-    %s
-    
-    O resultado (stdout) foi:
-    %s
-    
-    O erro (stderr) foi:
-    %s
-    
-    Por favor, sugira uma correção OU explique o erro e proponha um novo bloco de comando. Não repita comandos que já claramente deram erro sem modificação.
-    
-    Se necessário, peça informações extras ao usuário.`, previousCommand, output, stderr)
+        %s
+        
+        O resultado (stdout) foi:
+        %s
+        
+        O erro (stderr) foi:
+        %s
+        
+        Por favor, sugira uma correção OU explique o erro e proponha um novo bloco de comando. Não repita comandos que já claramente deram erro sem modificação.
+        
+        Se necessário, peça informações extras ao usuário.`, previousCommand, output, stderr)
 
 	// Adiciona o retryPrompt como novo turno "user"
 	a.cli.history = append(a.cli.history, models.Message{
