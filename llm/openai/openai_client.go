@@ -26,7 +26,7 @@ type OpenAIClient struct {
 
 // NewOpenAIClient cria uma nova instância de OpenAIClient.
 func NewOpenAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenAIClient {
-	httpClient := utils.NewHTTPClient(logger, 300*time.Second)
+	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 	if maxAttempts <= 0 {
 		maxAttempts = config.OpenAIDefaultMaxAttempts
 	}

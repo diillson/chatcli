@@ -802,7 +802,7 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 		} else if strings.HasPrefix(cli.model, "gpt-4") {
 			return 50000
 		} else {
-			return 8192 // gpt-3.5-turbo padrão
+			return 40000 // gpt-3.5-turbo padrão
 		}
 	case "CLAUDEAI":
 		if cli.model == "claude-3-5-sonnet-20241022" {
@@ -815,9 +815,9 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 			return 50000 // valor conservador para outros modelos Claude
 		}
 	case "STACKSPOT":
-		return 8192 // assumindo que usa gpt-4 no backend
+		return 50000 // assumindo que usa gpt-4 no backend
 	default:
-		return 4096 // valor padrão conservador
+		return 50000 // valor padrão conservador
 	}
 }
 

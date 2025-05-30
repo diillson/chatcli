@@ -28,7 +28,7 @@ type StackSpotClient struct {
 
 // NewStackSpotClient cria uma nova instância de StackSpotClient.
 func NewStackSpotClient(tokenManager *token.TokenManager, slug string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *StackSpotClient {
-	httpClient := utils.NewHTTPClient(logger, 300*time.Second)
+	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 	if maxAttempts <= 0 {
 		maxAttempts = config.DefaultMaxAttempts
 	}

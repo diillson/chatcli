@@ -29,7 +29,7 @@ type ClaudeClient struct {
 // NewClaudeClient cria um novo cliente ClaudeAI com configurações personalizáveis
 func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ClaudeClient {
 	// Usar o transporte HTTP com logging
-	httpClient := utils.NewHTTPClient(logger, 300*time.Second)
+	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 	if maxAttempts <= 0 {
 		maxAttempts = config.ClaudeAIDefaultMaxAttempts
 	}
