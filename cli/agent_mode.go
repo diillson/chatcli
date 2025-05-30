@@ -291,26 +291,82 @@ func (a *AgentMode) displayResponseWithoutCommands(response string, blocks []Com
 }
 
 // getMultilineInput obtém entrada de múltiplas linhas do usuário
+// Suporta:
+// - ENTER vazio na primeira linha para continuar sem contexto
+// - "." sozinho em uma linha para finalizar a entrada
+// - Control+D (EOF) para finalizar a entrada
 func (a *AgentMode) getMultilineInput(prompt string) string {
 	fmt.Print(prompt)
+	fmt.Println("(Digite '.' sozinho em uma linha para finalizar)")
+	fmt.Println("(Pressione ENTER sem digitar texto para continuar sem contexto)")
+	fmt.Println("(Ou use Control+D para finalizar a entrada)")
+
+	// Fechar o liner temporariamente
+	if a.cli.line != nil {
+		a.cli.line.Close()
+		a.cli.line = nil
+	}
 
 	var lines []string
-	for {
-		// Ler cada linha usando getInput
-		line := a.getInput("")
+	reader := bufio.NewReader(os.Stdin)
+	firstLine := true
 
-		// Se a linha for apenas "." ou vazia, terminamos
+	for {
+		// Ler uma linha
+		line, err := reader.ReadString('\n')
+
+		// Tratar EOF (Control+D)
+		if err != nil {
+			if len(lines) > 0 {
+				fmt.Println("Entrada finalizada com Control+D")
+				break
+			} else {
+				fmt.Println("Continuando sem adicionar contexto (Control+D)")
+				lines = nil
+				break
+			}
+		}
+
+		// Remover quebra de linha
+		line = strings.TrimRight(line, "\r\n")
+
+		// Verificar primeira linha vazia (apenas ENTER)
+		if firstLine && line == "" {
+			fmt.Println("Continuando sem adicionar contexto.")
+			lines = nil
+			break
+		}
+		firstLine = false
+
+		// Verificar linha com apenas "."
 		if line == "." {
+			fmt.Println("Entrada finalizada com '.'")
 			break
 		}
 
-		// Se a primeira linha for vazia, o usuário não quer adicionar contexto
-		if len(lines) == 0 && line == "" {
-			return ""
-		}
-
-		// Adicionar a linha ao contexto
+		// Adicionar linha ao buffer
 		lines = append(lines, line)
+	}
+
+	// Restaurar o liner
+	newLiner := liner.NewLiner()
+	newLiner.SetCtrlCAborts(true)
+
+	// Recarregar histórico
+	for _, cmd := range a.cli.commandHistory {
+		newLiner.AppendHistory(cmd)
+	}
+
+	// Restaurar completador
+	if a.cli.completer != nil {
+		newLiner.SetCompleter(a.cli.completer)
+	}
+
+	a.cli.line = newLiner
+
+	// Se não tivermos linhas, retornar string vazia
+	if lines == nil || len(lines) == 0 {
+		return ""
 	}
 
 	return strings.Join(lines, "\n")
@@ -493,26 +549,53 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			fmt.Println("---------------------------------------")
 
 			// Obter o contexto adicional do usuário
-			userContext := a.getMultilineInput("Digite seu contexto adicional (termine com uma linha contendo apenas '.') ou pressione Enter para continuar:\n")
+			userContext := a.getMultilineInput("Digite seu contexto adicional:\n")
 
-			// Chamar método para tratar a continuação com contexto
-			newBlocks, err := a.requestLLMContinuationWithContext(
-				ctx,
-				strings.Join(blocks[cmdNum-1].Commands, "\n"),
-				outputs[cmdNum-1].Output,
-				outputs[cmdNum-1].ErrorMsg,
-				userContext,
-			)
-			if err != nil {
-				fmt.Println("Erro ao pedir continuação à IA:", err)
-				continue
-			}
-			if len(newBlocks) > 0 {
-				blocks = newBlocks                            // troca para os novos comandos da IA!
-				outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
-				break                                         // Sai desse loop for & reinicia com novos comandos
+			// Se o usuário cancelou ou não forneceu contexto
+			if userContext == "" {
+				fmt.Println("Continuando sem contexto adicional...")
+
+				// Chamar método para tratar a continuação sem contexto adicional
+				newBlocks, err := a.requestLLMContinuationWithContext(
+					ctx,
+					strings.Join(blocks[cmdNum-1].Commands, "\n"),
+					outputs[cmdNum-1].Output,
+					outputs[cmdNum-1].ErrorMsg,
+					"", // Contexto vazio
+				)
+				if err != nil {
+					fmt.Println("Erro ao pedir continuação à IA:", err)
+					continue
+				}
+				if len(newBlocks) > 0 {
+					blocks = newBlocks                            // troca para os novos comandos da IA!
+					outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
+					break                                         // Sai desse loop for & reinicia com novos comandos
+				} else {
+					fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
+				}
 			} else {
-				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
+				fmt.Println("\nContexto recebido! Enviando para a IA...")
+
+				// Chamar método para tratar a continuação com contexto
+				newBlocks, err := a.requestLLMContinuationWithContext(
+					ctx,
+					strings.Join(blocks[cmdNum-1].Commands, "\n"),
+					outputs[cmdNum-1].Output,
+					outputs[cmdNum-1].ErrorMsg,
+					userContext,
+				)
+				if err != nil {
+					fmt.Println("Erro ao pedir continuação à IA:", err)
+					continue
+				}
+				if len(newBlocks) > 0 {
+					blocks = newBlocks                            // troca para os novos comandos da IA!
+					outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
+					break                                         // Sai desse loop for & reinicia com novos comandos
+				} else {
+					fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
+				}
 			}
 
 		case strings.HasPrefix(answer, "c"):
