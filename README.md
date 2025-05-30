@@ -205,37 +205,37 @@ Quando você usar a nova funcionalidade "aCN" , você poderá:
 4. Adicionar suas observações, informações adicionais ou perguntas (terminando com  .  em uma linha vazia)
 5. A IA responderá com base no comando, no resultado e no seu contexto adicional
 
-  ### Exemplo:
+#### Exemplo:
+```text
 
-  Você: aC1
+📋 Saída do comando executado:
+---------------------------------------
+🚀 Executando comandos (tipo: shell):
+---------------------------------------
+⌛ Processando: Exibir lista de arquivos
 
-  📋 Saída do comando que você está contextualizando:
-  ---------------------------------------
-  🚀 Executando comandos (tipo: shell):
-  ---------------------------------------
-  ⌛ Processando: Exibir lista de arquivos
+⚙️ Comando 1/1: ls -la
+📝 Saída do comando (stdout/stderr):
+total 24
+drwxr-xr-x  5 user  staff   160 May 15 10:23 .
+drwxr-xr-x  3 user  staff    96 May 15 10:22 ..
+-rw-r--r--  1 user  staff  2489 May 15 10:23 main.go
+-rw-r--r--  1 user  staff   217 May 15 10:23 go.mod
+-rw-r--r--  1 user  staff   358 May 15 10:23 go.sum
+✓ Executado com sucesso
 
-  ⚙️ Comando 1/1: ls -la
-  📝 Saída do comando (stdout/stderr):
-  total 24
-  drwxr-xr-x  5 user  staff   160 May 15 10:23 .
-  drwxr-xr-x  3 user  staff    96 May 15 10:22 ..
-  -rw-r--r--  1 user  staff  2489 May 15 10:23 main.go
-  -rw-r--r--  1 user  staff   217 May 15 10:23 go.mod
-  -rw-r--r--  1 user  staff   358 May 15 10:23 go.sum
-  ✓ Executado com sucesso
-    
-  ---------------------------------------
-  Execução concluída.
-  ---------------------------------------
+---------------------------------------
+Execução concluída.
+---------------------------------------
 
-  Digite seu contexto adicional (termine com uma linha contendo apenas '.') ou pressione Enter para continuar:
-  Eu preciso criar um script que liste apenas os arquivos .go neste diretório
-  e que conte quantas linhas cada um tem.
-  .
+Você: aC1
+Digite seu contexto adicional (termine com uma linha contendo apenas '.') ou pressione Enter para continuar:
+Eu preciso criar um script que liste apenas os arquivos .go neste diretório
+e que conte quantas linhas cada um tem.
+.
 
-  [A IA então responderá com uma explicação e um novo comando para atender à sua solicitação específica]
-
+[A IA então responderá com uma explicação e um novo comando para atender à sua solicitação específica]
+```
 ---
 
 ## Processamento Avançado de Arquivos
