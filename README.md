@@ -186,6 +186,56 @@ O Modo Agente permite que a IA execute tarefas no seu sistema através de comand
   "/run" Crie um backup compactado da pasta src/
   "/agent" Quais processos estão consumindo mais memória?
 ```
+- O agente pode executar comandos complexos, como listar arquivos, criar backups, verificar processos em execução e muito mais.
+- Você pode interagir com o agente, fornecendo feedback ou solicitando ajustes nas tarefas sugeridas.
+- O Modo Agente é ideal para automatizar tarefas repetitivas ou complexas, permitindo que você se concentre em atividades mais importantes.
+- O agente mantém um histórico de comandos executados, permitindo que você revise as ações tomadas e os resultados obtidos.
+- O Modo Agente é uma ferramenta poderosa para aumentar sua produtividade, permitindo que você delegue tarefas ao ChatCLI e obtenha resultados rapidamente.
+- O agente é projetado para ser seguro e respeitar as permissões do sistema, garantindo que apenas comandos autorizados sejam execut
+- O Modo Agente pode ser desativado a qualquer momento, retornando ao modo de conversa normal.
+
+#### Nova Funcionalidade no modo Agente !!
+- agora você pode adicionar contexto aos outputs dos comandos executados pelo agente
+
+Quando você usar a nova funcionalidade "aCN" , você poderá:
+
+1. Executar um comando (por exemplo,  1  para executar o comando #1)
+2. Ver o resultado do comando
+3. Digitar  aC1  para adicionar contexto ao comando #1
+4. Adicionar suas observações, informações adicionais ou perguntas (terminando com  .  em uma linha vazia)
+5. A IA responderá com base no comando, no resultado e no seu contexto adicional
+
+  ### Exemplo:
+
+  Você: aC1
+
+  📋 Saída do comando que você está contextualizando:
+  ---------------------------------------
+  🚀 Executando comandos (tipo: shell):
+  ---------------------------------------
+  ⌛ Processando: Exibir lista de arquivos
+
+  ⚙️ Comando 1/1: ls -la
+  📝 Saída do comando (stdout/stderr):
+  total 24
+  drwxr-xr-x  5 user  staff   160 May 15 10:23 .
+  drwxr-xr-x  3 user  staff    96 May 15 10:22 ..
+  -rw-r--r--  1 user  staff  2489 May 15 10:23 main.go
+  -rw-r--r--  1 user  staff   217 May 15 10:23 go.mod
+  -rw-r--r--  1 user  staff   358 May 15 10:23 go.sum
+  ✓ Executado com sucesso
+    
+  ---------------------------------------
+  Execução concluída.
+  ---------------------------------------
+
+  Digite seu contexto adicional (termine com uma linha contendo apenas '.') ou pressione Enter para continuar:
+  Eu preciso criar um script que liste apenas os arquivos .go neste diretório
+  e que conte quantas linhas cada um tem.
+  .
+
+  [A IA então responderá com uma explicação e um novo comando para atender à sua solicitação específica]
+
 ---
 
 ## Processamento Avançado de Arquivos
