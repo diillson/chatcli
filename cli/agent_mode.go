@@ -78,16 +78,29 @@ func (a *AgentMode) fallbackPrompt(prompt string) string {
 
 // getInput obtém entrada do usuário de forma segura
 func (a *AgentMode) getInput(prompt string) string {
-	input, err := a.safePrompt(prompt)
-	if err != nil {
-		if err == liner.ErrPromptAborted {
-			return ""
+	// Usar o liner da instância principal em vez de criar um novo
+	if a.cli.line != nil {
+		input, err := a.cli.line.Prompt(prompt)
+		if err != nil {
+			if err == liner.ErrPromptAborted {
+				return ""
+			}
+			// Fallback para método simples em caso de erro
+			a.logger.Warn("Erro ao usar liner, usando fallback", zap.Error(err))
+			return a.fallbackPrompt(prompt)
 		}
-		// Fallback para método simples em caso de erro
-		a.logger.Warn("Erro ao usar liner, usando fallback", zap.Error(err))
+
+		// Adicionar ao histórico global se não estiver vazio
+		if input != "" {
+			a.cli.line.AppendHistory(input)
+			a.cli.commandHistory = append(a.cli.commandHistory, input)
+		}
+
+		return input
+	} else {
+		// Se não houver liner disponível, usar o método fallback
 		return a.fallbackPrompt(prompt)
 	}
-	return input
 }
 
 // CommandBlock representa um bloco de comandos executáveis
@@ -471,22 +484,53 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				fmt.Println("Confira comandos individuais antes de aprovar execução em lote!")
 			}
 
-			confirmation := a.getInput("\n⚠️ Executar todos os comandos em sequência? (s/N): ")
-			if strings.ToLower(strings.TrimSpace(confirmation)) != "s" {
+			// Resetar o estado do terminal
+			cmd := exec.Command("stty", "sane")
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Run() // Ignoramos erros aqui propositalmente
+
+			// Solicitar confirmação diretamente
+			fmt.Print("\n⚠️ Executar todos os comandos em sequência? (s/N): ")
+
+			// Ler resposta
+			reader := bufio.NewReader(os.Stdin)
+			confirmationInput, _ := reader.ReadString('\n')
+			confirmation := strings.ToLower(strings.TrimSpace(confirmationInput))
+
+			// Verificar resposta explicitamente
+			if confirmation != "s" {
 				fmt.Println("Execução em lote cancelada.")
 				continue
 			}
 
-			fmt.Println("\n⚠️ Executando todos os comandos em sequência...")
+			// Adicionar log explícito para depuração
+			fmt.Println("\n⚠️ Confirmação recebida: '" + confirmation + "'")
+			fmt.Println("⚠️ Executando todos os comandos em sequência...")
+
+			// Executar os comandos um por um, com logs detalhados
 			for i, block := range blocks {
 				fmt.Printf("\n🚀 Executando comando #%d:\n", i+1)
+				fmt.Printf("  Tipo: %s\n", block.Language)
+				for j, cmd := range block.Commands {
+					fmt.Printf("  Comando %d/%d: %s\n", j+1, len(block.Commands), cmd)
+				}
+
+				// Executar o bloco e capturar a saída
 				outStr, errStr := a.executeCommandsWithOutput(ctx, block)
+
+				// Armazenar os resultados
 				outputs[i] = &CommandOutput{
 					CommandBlock: block,
 					Output:       outStr,
 					ErrorMsg:     errStr,
 				}
+
+				// Log após execução
+				fmt.Printf("✅ Comando #%d concluído\n", i+1)
 			}
+
+			fmt.Println("\n✅ Todos os comandos foram executados.")
 
 		case strings.HasPrefix(answer, "e"):
 			cmdNumStr := strings.TrimPrefix(answer, "e")
