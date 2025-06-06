@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -714,36 +715,85 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 			continue
 		}
 
+		// Verificar se o comando tem a flag de interatividade
+		isInteractive := false
+		if strings.HasSuffix(cmd, " --interactive") {
+			cmd = strings.TrimSuffix(cmd, " --interactive")
+			isInteractive = true
+		} else if strings.Contains(cmd, "#interactive") {
+			cmd = strings.Replace(cmd, "#interactive", "", -1)
+			cmd = strings.TrimSpace(cmd)
+			isInteractive = true
+		} else {
+			// Verificar se é um comando provavelmente interativo
+			isInteractive = isLikelyInteractiveCommand(cmd)
+		}
+
 		// Checagem de comando perigoso
 		if isDangerous(cmd) {
-			confirm := a.getInput("Se tem certeza que deseja executar, digite exatamente: 'sim, quero executar conscientemente'\nConfirma? ")
+			confirmPrompt := "Este comando é potencialmente perigoso e pode causar danos ao sistema.\nSe tem certeza que deseja executar, digite exatamente: 'sim, quero executar conscientemente' \n Confirma ? (Digite exatamente para confirmar): "
+			confirm := a.getCriticalInput(confirmPrompt)
+
 			if confirm != "sim, quero executar conscientemente" {
 				outText := "Execução do comando perigoso ABORTADA pelo agente.\n"
 				allOutput.WriteString(outText)
 				fmt.Print(outText)
 				continue
 			}
+
+			fmt.Println("⚠️ Confirmação recebida. Executando comando perigoso...")
 		}
 
 		header := fmt.Sprintf("⚙️ Comando %d/%d: %s\n", i+1, len(block.Commands), cmd)
 		allOutput.WriteString(header)
 		fmt.Print(header)
 
-		output, err := a.captureCommandOutput(ctx, shell, []string{"-c", cmd})
+		// Se o comando não foi explicitamente marcado como interativo
+		// mas pode ser interativo, perguntar ao usuário
+		if !isInteractive && mightBeInteractive(cmd) {
+			isInteractive = a.askUserIfInteractive(cmd)
+		}
 
-		outText := "📝 Saída do comando (stdout/stderr):\n" + string(output)
-		allOutput.WriteString(outText)
-		fmt.Print(outText)
+		if isInteractive {
+			// Para comandos interativos, usamos uma abordagem diferente
+			outText := "🖥️ Executando comando interativo. O controle será passado para o comando.\n"
+			outText += "Quando o comando terminar, você retornará ao modo agente.\n"
+			outText += "Pressione Ctrl+C para interromper o comando se necessário.\n\n"
 
-		if err != nil {
-			errMsg := fmt.Sprintf("❌ Erro: %v\n\n", err)
-			allOutput.WriteString(errMsg)
-			fmt.Print(errMsg)
-			lastError = err.Error()
+			allOutput.WriteString(outText)
+			fmt.Print(outText)
+
+			// Liberar o terminal e executar o comando interativo
+			err := a.executeInteractiveCommand(ctx, shell, cmd)
+
+			if err != nil {
+				errMsg := fmt.Sprintf("❌ Erro ao executar comando interativo: %v\n\n", err)
+				allOutput.WriteString(errMsg)
+				fmt.Print(errMsg)
+				lastError = err.Error()
+			} else {
+				okMsg := "✓ Comando interativo executado com sucesso\n\n"
+				allOutput.WriteString(okMsg)
+				fmt.Print(okMsg)
+			}
 		} else {
-			okMsg := "✓ Executado com sucesso\n\n"
-			allOutput.WriteString(okMsg)
-			fmt.Print(okMsg)
+			// Para comandos não interativos, capturar a saída normalmente
+			output, err := a.captureCommandOutput(ctx, shell, []string{"-c", cmd})
+
+			outText := "📝 Saída do comando (stdout/stderr):\n" + string(output)
+			allOutput.WriteString(outText)
+			fmt.Print(outText)
+
+			if err != nil {
+				errMsg := fmt.Sprintf("❌ Erro: %v\n\n", err)
+				allOutput.WriteString(errMsg)
+				fmt.Print(errMsg)
+				lastError = err.Error()
+			} else {
+				okMsg := "✓ Executado com sucesso\n\n"
+				allOutput.WriteString(okMsg)
+				fmt.Print(okMsg)
+			}
 		}
 	}
 
@@ -753,6 +803,194 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 
 	// Retornar a saída acumulada e o último erro
 	return allOutput.String(), lastError
+}
+
+// executeInteractiveCommand executa um comando interativo passando o controle do terminal
+func (a *AgentMode) executeInteractiveCommand(ctx context.Context, shell string, command string) error {
+	// Fechar o liner para liberar o terminal
+	if a.cli.line != nil {
+		a.cli.line.Close()
+		a.cli.line = nil
+	}
+
+	// Restaurar o terminal para o modo "sane"
+	sttyCmd := exec.Command("stty", "sane")
+	sttyCmd.Stdin = os.Stdin
+	sttyCmd.Stdout = os.Stdout
+	sttyCmd.Run() // Ignoramos erros aqui propositalmente
+
+	// Obter o caminho do arquivo de configuração do shell
+	shellConfigPath := a.getShellConfigPath(shell)
+
+	// Construir o comando com shell
+	var shellCommand string
+	if shellConfigPath != "" {
+		shellCommand = fmt.Sprintf("source %s 2>/dev/null || true; %s", shellConfigPath, command)
+	} else {
+		shellCommand = command
+	}
+
+	// Criar o comando com conexão direta ao terminal
+	cmd := exec.CommandContext(ctx, shell, "-c", shellCommand)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Executar o comando (bloqueante)
+	err := cmd.Run()
+
+	// Após o comando terminar, restaurar o terminal para o modo "sane" novamente
+	sttyCmd = exec.Command("stty", "sane")
+	sttyCmd.Stdin = os.Stdin
+	sttyCmd.Stdout = os.Stdout
+	sttyCmd.Run() // Ignoramos erros aqui propositalmente
+
+	fmt.Println("\nComando interativo finalizado. Retornando ao modo agente...")
+
+	// Reinstanciar o liner
+	if a.cli.line == nil {
+		newLiner := liner.NewLiner()
+		newLiner.SetCtrlCAborts(true)
+
+		// Recarregar histórico
+		for _, cmd := range a.cli.commandHistory {
+			newLiner.AppendHistory(cmd)
+		}
+
+		// Restaurar completador
+		if a.cli.completer != nil {
+			newLiner.SetCompleter(a.cli.completer)
+		}
+
+		a.cli.line = newLiner
+	}
+
+	return err
+}
+
+// getShellConfigPath obtém o caminho de configuração para o shell especificado
+func (a *AgentMode) getShellConfigPath(shell string) string {
+	shellName := filepath.Base(shell)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "" // Retorna vazio se não puder determinar o home
+	}
+
+	switch shellName {
+	case "bash":
+		return filepath.Join(homeDir, ".bashrc")
+	case "zsh":
+		return filepath.Join(homeDir, ".zshrc")
+	case "fish":
+		return filepath.Join(homeDir, ".config", "fish", "config.fish")
+	default:
+		return "" // Retorna vazio para shells desconhecidos
+	}
+}
+
+// isLikelyInteractiveCommand verifica se um comando provavelmente é interativo
+func isLikelyInteractiveCommand(cmd string) bool {
+	// Lista de comandos conhecidos por serem interativos
+	interactiveCommands := []string{
+		"top", "htop", "nettop", "iotop", "vi", "vim", "nano", "emacs", "less",
+		"more", "tail -f", "watch", "ssh", "mysql", "psql", "sqlite3", "python",
+		"ipython", "node", "irb", "R", "mongo", "redis-cli", "sqlplus", "ftp",
+		"sftp", "telnet", "screen", "tmux", "ncdu", "mc", "ranger", "irssi",
+		"weechat", "mutt", "lynx", "links", "w3m", "docker exec -it", "kubectl exec -it",
+	}
+
+	cmdLower := strings.ToLower(cmd)
+
+	// Verificar comandos conhecidos
+	for _, interactive := range interactiveCommands {
+		if strings.HasPrefix(cmdLower, interactive+" ") || cmdLower == interactive {
+			return true
+		}
+	}
+
+	// Verificar por flags que indicam interatividade
+	interactiveFlags := []string{
+		"-i ", "--interactive", "-t ", "--tty",
+	}
+
+	for _, flag := range interactiveFlags {
+		if strings.Contains(cmdLower, flag) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// mightBeInteractive verifica se um comando pode ser interativo mas não foi detectado automaticamente
+func mightBeInteractive(cmd string) bool {
+	// Lista de padrões que podem indicar interatividade, mas não são certeza
+	possiblyInteractivePatterns := []string{
+		"ping", "traceroute", "nc ", "netcat", "telnet", "ftp", "ssh", "console",
+		"monitor", "interactive", "curses", "dialog", "whiptail", "menu",
+	}
+
+	cmdLower := strings.ToLower(cmd)
+	for _, pattern := range possiblyInteractivePatterns {
+		if strings.Contains(cmdLower, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getCriticalInput obtém entrada do usuário para decisões críticas
+func (a *AgentMode) getCriticalInput(prompt string) string {
+	// Primeiro, tentar liberar o terminal se estiver usando liner
+	if a.cli.line != nil {
+		a.cli.line.Close()
+		a.cli.line = nil
+	}
+
+	// Resetar o estado do terminal
+	cmd := exec.Command("stty", "sane")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Run() // Ignoramos erros aqui propositalmente
+
+	// Exibir o prompt com formatação clara
+	fmt.Print("\n")
+	fmt.Print(prompt)
+
+	// Ler diretamente do stdin
+	reader := bufio.NewReader(os.Stdin)
+	response, _ := reader.ReadString('\n')
+	response = strings.TrimSpace(response)
+
+	fmt.Println() // Adicionar uma linha em branco após a resposta
+
+	// Reinstanciar o liner se necessário
+	if a.cli.line == nil {
+		newLiner := liner.NewLiner()
+		newLiner.SetCtrlCAborts(true)
+
+		// Recarregar histórico
+		for _, cmd := range a.cli.commandHistory {
+			newLiner.AppendHistory(cmd)
+		}
+
+		// Restaurar completador
+		if a.cli.completer != nil {
+			newLiner.SetCompleter(a.cli.completer)
+		}
+
+		a.cli.line = newLiner
+	}
+
+	return response
+}
+
+// askUserIfInteractive pergunta ao usuário se um comando deve ser executado em modo interativo
+func (a *AgentMode) askUserIfInteractive(cmd string) bool {
+	prompt := fmt.Sprintf("O comando '%s' pode ser interativo. Executar em modo interativo? (s/N): ", cmd)
+	response := a.getCriticalInput(prompt)
+	return strings.HasPrefix(strings.ToLower(response), "s")
 }
 
 // simulateCommandBlock tenta rodar os comandos de um bloco em modo "simulado"
