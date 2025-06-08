@@ -151,6 +151,8 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// 1. Enviar a pergunta para a LLM com instruções específicas sobre formato de resposta
 	systemInstruction := `Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema.
             Quando o usuário pede para realizar uma tarefa, analise o problema e sugira o melhor comando que possam resolver a questão.
+
+			Se precisar sugerir múltiplos comandos no mesmo bloco, separe-os por linha vazia dentro do bloco execute. Nunca use apenas quebra de linha simples para separar comandos multi-linha.
     
             Antes de sugerir comandos destrutivos (como rm -rf, dd, mkfs, drop database, etc), coloque explicação e peça uma confirmação explícita do usuário.
     
@@ -275,13 +277,33 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 
 			commandBlocks = append(commandBlocks, CommandBlock{
 				Description: description,
-				Commands:    strings.Split(commands, "\n"),
+				Commands:    splitCommandsByBlankLine(commands),
 				Language:    language,
 			})
 		}
 	}
 
 	return commandBlocks
+}
+
+func splitCommandsByBlankLine(src string) []string {
+	var cmds []string
+	var buf []string
+	lines := strings.Split(src, "\n")
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			if len(buf) > 0 {
+				cmds = append(cmds, strings.Join(buf, "\n"))
+				buf = nil
+			}
+		} else {
+			buf = append(buf, l)
+		}
+	}
+	if len(buf) > 0 {
+		cmds = append(cmds, strings.Join(buf, "\n"))
+	}
+	return cmds
 }
 
 // displayResponseWithoutCommands exibe a resposta sem os blocos de comando
