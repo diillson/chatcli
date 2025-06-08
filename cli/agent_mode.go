@@ -151,6 +151,8 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// 1. Enviar a pergunta para a LLM com instruções específicas sobre formato de resposta
 	systemInstruction := `Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema.
             Quando o usuário pede para realizar uma tarefa, analise o problema e sugira o melhor comando que possam resolver a questão.
+
+			Se precisar sugerir múltiplos comandos no mesmo bloco, separe-os por linha vazia dentro do bloco execute. Nunca use apenas quebra de linha simples para separar comandos multi-linha.
     
             Antes de sugerir comandos destrutivos (como rm -rf, dd, mkfs, drop database, etc), coloque explicação e peça uma confirmação explícita do usuário.
     
@@ -275,13 +277,33 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 
 			commandBlocks = append(commandBlocks, CommandBlock{
 				Description: description,
-				Commands:    strings.Split(commands, "\n"),
+				Commands:    splitCommandsByBlankLine(commands),
 				Language:    language,
 			})
 		}
 	}
 
 	return commandBlocks
+}
+
+func splitCommandsByBlankLine(src string) []string {
+	var cmds []string
+	var buf []string
+	lines := strings.Split(src, "\n")
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			if len(buf) > 0 {
+				cmds = append(cmds, strings.Join(buf, "\n"))
+				buf = nil
+			}
+		} else {
+			buf = append(buf, l)
+		}
+	}
+	if len(buf) > 0 {
+		cmds = append(cmds, strings.Join(buf, "\n"))
+	}
+	return cmds
 }
 
 // displayResponseWithoutCommands exibe a resposta sem os blocos de comando
@@ -388,6 +410,10 @@ func (a *AgentMode) getMultilineInput(prompt string) string {
 
 // requestLLMContinuationWithContext reenvia o contexto/output + contexto adicional do usuário para a LLM
 func (a *AgentMode) requestLLMContinuationWithContext(ctx context.Context, previousCommand, output, stderr, userContext string) ([]CommandBlock, error) {
+	// Criar um novo contexto com timeout para esta operação específica
+	newCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
 	var prompt strings.Builder
 
 	prompt.WriteString("O comando sugerido anteriormente foi:\n")
@@ -415,7 +441,7 @@ func (a *AgentMode) requestLLMContinuationWithContext(ctx context.Context, previ
 	})
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.client.GetModelName())
-	aiResponse, err := a.cli.client.SendPrompt(ctx, prompt.String(), a.cli.history)
+	aiResponse, err := a.cli.client.SendPrompt(newCtx, prompt.String(), a.cli.history)
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
 		fmt.Println("❌ Erro ao pedir continuação à IA:", err)
@@ -517,8 +543,11 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 					fmt.Printf("  Comando %d/%d: %s\n", j+1, len(block.Commands), cmd)
 				}
 
+				freshCtx, freshCancel := a.refreshContext()
+				defer freshCancel()
+
 				// Executar o bloco e capturar a saída
-				outStr, errStr := a.executeCommandsWithOutput(ctx, block)
+				outStr, errStr := a.executeCommandsWithOutput(freshCtx, block)
 
 				// Armazenar os resultados
 				outputs[i] = &CommandOutput{
@@ -545,9 +574,13 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				fmt.Println("Erro ao editar comando:", err)
 				continue
 			}
+
+			freshCtx, freshCancel := a.refreshContext()
+			defer freshCancel()
+
 			editedBlock := blocks[cmdNum-1]
 			editedBlock.Commands = edited
-			outStr, errStr := a.executeCommandsWithOutput(ctx, editedBlock)
+			outStr, errStr := a.executeCommandsWithOutput(freshCtx, editedBlock)
 			outputs[cmdNum-1] = &CommandOutput{
 				CommandBlock: editedBlock,
 				Output:       outStr,
@@ -564,8 +597,11 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			a.simulateCommandBlock(ctx, blocks[cmdNum-1])
 
 			execNow := a.getInput("Deseja executar este comando agora? (s/N): ")
+			freshCtx, freshCancel := a.refreshContext()
+			defer freshCancel()
+
 			if strings.ToLower(strings.TrimSpace(execNow)) == "s" {
-				outStr, errStr := a.executeCommandsWithOutput(ctx, blocks[cmdNum-1])
+				outStr, errStr := a.executeCommandsWithOutput(freshCtx, blocks[cmdNum-1])
 				outputs[cmdNum-1] = &CommandOutput{
 					CommandBlock: blocks[cmdNum-1],
 					Output:       outStr,
@@ -600,9 +636,12 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			if userContext == "" {
 				fmt.Println("Continuando sem contexto adicional...")
 
+				freshCtx, freshCancel := a.refreshContext()
+				defer freshCancel()
+
 				// Chamar método para tratar a continuação sem contexto adicional
 				newBlocks, err := a.requestLLMContinuationWithContext(
-					ctx,
+					freshCtx,
 					strings.Join(blocks[cmdNum-1].Commands, "\n"),
 					outputs[cmdNum-1].Output,
 					outputs[cmdNum-1].ErrorMsg,
@@ -622,9 +661,12 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			} else {
 				fmt.Println("\nContexto recebido! Enviando para a IA...")
 
+				freshCtx, freshCancel := a.refreshContext()
+				defer freshCancel()
+
 				// Chamar método para tratar a continuação com contexto
 				newBlocks, err := a.requestLLMContinuationWithContext(
-					ctx,
+					freshCtx,
 					strings.Join(blocks[cmdNum-1].Commands, "\n"),
 					outputs[cmdNum-1].Output,
 					outputs[cmdNum-1].ErrorMsg,
@@ -655,8 +697,11 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				continue
 			}
 
+			freshCtx, freshCancel := a.refreshContext()
+			defer freshCancel()
+
 			newBlocks, err := a.requestLLMContinuation(
-				ctx,
+				freshCtx,
 				strings.Join(blocks[cmdNum-1].Commands, "\n"),
 				strings.Join(blocks[cmdNum-1].Commands, "\n"),
 				outputs[cmdNum-1].Output,
@@ -688,6 +733,10 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			}
 		}
 	}
+}
+
+func (a *AgentMode) refreshContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 10*time.Minute)
 }
 
 // executeCommandsWithOutput executa todos os comandos do bloco (1 a 1), imprime e retorna o output total e último erro.

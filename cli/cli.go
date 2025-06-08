@@ -778,7 +778,7 @@ func (cli *ChatCLI) handleAgentCommand(userInput string) {
 	fmt.Println("Você poderá revisar e aprovar cada comando antes da execução.")
 
 	// Iniciar o modo agente com a consulta
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	// Processar contextos especiais como em comandos normais
