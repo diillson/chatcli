@@ -106,9 +106,10 @@ func (a *AgentMode) getInput(prompt string) string {
 
 // CommandBlock representa um bloco de comandos executáveis
 type CommandBlock struct {
-	Description string   // Descrição do que o comando faz
-	Commands    []string // Os comandos a serem executados
-	Language    string   // Linguagem (bash, python, etc.)
+	Description string             // Descrição do que o comando faz
+	Commands    []string           // Os comandos a serem executados
+	Language    string             // Linguagem (bash, python, etc.)
+	ContextInfo CommandContextInfo // Informações sobre a origem do comando
 }
 
 type CommandOutput struct {
@@ -799,8 +800,8 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 
 		// Se o comando não foi explicitamente marcado como interativo
 		// mas pode ser interativo, perguntar ao usuário
-		if !isInteractive && mightBeInteractive(cmd) {
-			isInteractive = a.askUserIfInteractive(cmd)
+		if !isInteractive && mightBeInteractive(cmd, block.ContextInfo) {
+			isInteractive = a.askUserIfInteractive(cmd, block.ContextInfo)
 		}
 
 		if isInteractive {
@@ -971,22 +972,89 @@ func isLikelyInteractiveCommand(cmd string) bool {
 	return false
 }
 
-// mightBeInteractive verifica se um comando pode ser interativo mas não foi detectado automaticamente
-func mightBeInteractive(cmd string) bool {
-	// Lista de padrões que podem indicar interatividade, mas não são certeza
-	possiblyInteractivePatterns := []string{
-		"ping", "traceroute", "nc ", "netcat", "telnet", "ftp", "ssh", "console",
-		"monitor", "interactive", "curses", "dialog", "whiptail", "menu",
+// Adicionar esta estrutura para rastrear a origem do conteúdo
+type CommandContextInfo struct {
+	SourceType    SourceType
+	FileExtension string
+	IsFromAgent   bool
+}
+
+type SourceType int
+
+const (
+	SourceTypeUserInput SourceType = iota
+	SourceTypeFile
+	SourceTypeCommandOutput
+)
+
+// mightBeInteractive verifica se um comando pode ser interativo com lógica aprimorada
+func mightBeInteractive(cmd string, contextInfo CommandContextInfo) bool {
+	// Se o comando veio de um arquivo de log ou código, geralmente não é interativo
+	if contextInfo.SourceType == SourceTypeFile {
+		// Verificar extensões de arquivo de código/log
+		if contextInfo.FileExtension != "" {
+			nonInteractiveExtensions := map[string]bool{
+				".log": true, ".js": true, ".ts": true, ".py": true, ".go": true,
+				".java": true, ".php": true, ".rb": true, ".c": true, ".cpp": true,
+			}
+			if nonInteractiveExtensions[contextInfo.FileExtension] {
+				return false
+			}
+		}
+
+		// Se for conteúdo de arquivo, verificar características de código
+		if hasCodeStructures(cmd) {
+			return false
+		}
 	}
 
-	cmdLower := strings.ToLower(cmd)
+	// Lista de padrões que podem indicar interatividade em comandos shell
+	possiblyInteractivePatterns := []string{
+		"^ping\\s", "^traceroute\\s", "^nc\\s", "^netcat\\s", "^telnet\\s",
+		"^ssh\\s", "^top$", "^htop$", "^vi\\s", "^vim\\s", "^nano\\s",
+		"^less\\s", "^more\\s", "^tail -f", "^mysql\\s", "^psql\\s",
+		"^docker exec -it", "^kubectl exec -it", "^python\\s+-i", "^node\\s+-i",
+	}
+
+	// Usar regex para verificar padrões de início de linha para comandos shell
 	for _, pattern := range possiblyInteractivePatterns {
-		if strings.Contains(cmdLower, pattern) {
+		matched, _ := regexp.MatchString(pattern, cmd)
+		if matched {
 			return true
 		}
 	}
 
 	return false
+}
+
+// hasCodeStructures detecta estruturas comuns de código (como blocos try/catch, funções, etc.)
+func hasCodeStructures(content string) bool {
+	codePatterns := []string{
+		// patterns de código comuns
+		"try\\s*{", "catch\\s*\\(", "function\\s+\\w+\\s*\\(", "=>\\s*{",
+		"import\\s+[\\w{}\\s]+from", "export\\s+", "class\\s+\\w+",
+
+		// Estruturas comuns em várias linguagens
+		"if\\s*\\(.+\\)\\s*{", "for\\s*\\(.+\\)\\s*{", "while\\s*\\(.+\\)\\s*{",
+		"switch\\s*\\(.+\\)\\s*{", "\\}\\s*else\\s*\\{",
+
+		// Sintaxe de encerramento de blocos multilinha
+		"};", "});", "});",
+	}
+
+	for _, pattern := range codePatterns {
+		matched, _ := regexp.MatchString(pattern, content)
+		if matched {
+			return true
+		}
+	}
+
+	// Contar chaves de abertura e fechamento para detectar blocos de código
+	openBraces := strings.Count(content, "{")
+	closeBraces := strings.Count(content, "}")
+
+	// Se há várias chaves balanceadas, provavelmente é código
+	return openBraces > 1 && closeBraces > 1
 }
 
 // getCriticalInput obtém entrada do usuário para decisões críticas
@@ -1036,7 +1104,13 @@ func (a *AgentMode) getCriticalInput(prompt string) string {
 }
 
 // askUserIfInteractive pergunta ao usuário se um comando deve ser executado em modo interativo
-func (a *AgentMode) askUserIfInteractive(cmd string) bool {
+func (a *AgentMode) askUserIfInteractive(cmd string, contextInfo CommandContextInfo) bool {
+	// Se for claramente código ou arquivo de log, não perguntar ao usuário
+	if contextInfo.SourceType == SourceTypeFile && hasCodeStructures(cmd) {
+		return false
+	}
+
+	// Caso contrário, perguntar ao usuário
 	prompt := fmt.Sprintf("O comando '%s' pode ser interativo. Executar em modo interativo? (s/N): ", cmd)
 	response := a.getCriticalInput(prompt)
 	return strings.HasPrefix(strings.ToLower(response), "s")
