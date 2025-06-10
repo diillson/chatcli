@@ -106,9 +106,10 @@ func (a *AgentMode) getInput(prompt string) string {
 
 // CommandBlock representa um bloco de comandos executáveis
 type CommandBlock struct {
-	Description string   // Descrição do que o comando faz
-	Commands    []string // Os comandos a serem executados
-	Language    string   // Linguagem (bash, python, etc.)
+	Description string
+	Commands    []string
+	Language    string
+	ContextInfo CommandContextInfo
 }
 
 type CommandOutput struct {
@@ -243,12 +244,11 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	return nil
 }
 
-// Extração de blocos de comandos para aceitar qualquer linguagem
+// extractCommandBlocks modificado para detectar scripts continuos
 func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 	var commandBlocks []CommandBlock
 
 	// Regex para encontrar blocos de código com o prefixo execute
-	// Captura: 1=linguagem (qualquer uma), 2=comandos
 	re := regexp.MustCompile("```execute:([a-zA-Z0-9_-]+)\\s*\n([\\s\\S]*?)```")
 	matches := re.FindAllStringSubmatch(response, -1)
 
@@ -260,7 +260,7 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 			language := strings.TrimSpace(match[1])
 			commands := strings.TrimSpace(match[2])
 
-			// Tentar encontrar a descrição antes do bloco de código
+			// Encontrar a descrição antes do bloco de código
 			description := ""
 			blockStartIndex := strings.Index(response, match[0])
 			if blockStartIndex > 0 {
@@ -275,11 +275,46 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 				}
 			}
 
-			commandBlocks = append(commandBlocks, CommandBlock{
-				Description: description,
-				Commands:    splitCommandsByBlankLine(commands),
-				Language:    language,
-			})
+			// Detectar se este é um script contínuo ou comandos separados
+			isScript := false
+
+			// Heurística para identificar scripts:
+			// 1. Presença de here-docs (<<EOF, <<ENDSCRIPT, etc.)
+			// 2. Comandos cat/echo que criam arquivos
+			// 3. Presença de estruturas multilinhas (if/then/fi, for/do/done)
+			if strings.Contains(commands, "<<") ||
+				strings.Contains(commands, "cat >") ||
+				strings.Contains(commands, "cat >>") ||
+				regexp.MustCompile(`if\s+.*\s+then`).MatchString(commands) ||
+				regexp.MustCompile(`for\s+.*\s+do`).MatchString(commands) {
+				isScript = true
+			}
+
+			if isScript {
+				// Tratar como um único comando (script)
+				commandBlocks = append(commandBlocks, CommandBlock{
+					Description: description,
+					Commands:    []string{commands}, // Todo o conteúdo como um único comando
+					Language:    language,
+					ContextInfo: CommandContextInfo{
+						SourceType: SourceTypeUserInput,
+						IsScript:   true,
+						ScriptType: language,
+					},
+				})
+			} else {
+				// Comportamento anterior para comandos separados
+				commandsList := splitCommandsByBlankLine(commands)
+				commandBlocks = append(commandBlocks, CommandBlock{
+					Description: description,
+					Commands:    commandsList,
+					Language:    language,
+					ContextInfo: CommandContextInfo{
+						SourceType: SourceTypeUserInput,
+						IsScript:   false,
+					},
+				})
+			}
 		}
 	}
 
@@ -744,13 +779,32 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 	var allOutput strings.Builder
 	var lastError string
 
+	// Verificar se este bloco é um script contínuo
+	isScript := block.ContextInfo.IsScript
+
 	// Adicionar apenas os cabeçalhos iniciais à string de saída
-	allOutput.WriteString(fmt.Sprintf("\n🚀 Executando comandos (tipo: %s):\n", block.Language))
+	allOutput.WriteString(fmt.Sprintf("\n🚀 Executando %s (tipo: %s):\n",
+		func() string {
+			if isScript {
+				return "script"
+			} else {
+				return "comandos"
+			}
+		}(),
+		block.Language))
 	allOutput.WriteString("---------------------------------------\n")
 	allOutput.WriteString(fmt.Sprintf("⌛ Processando: %s\n\n", block.Description))
 
 	// Imprimir os cabeçalhos iniciais para o usuário ver
-	fmt.Printf("\n🚀 Executando comandos (tipo: %s):\n", block.Language)
+	fmt.Printf("\n🚀 Executando %s (tipo: %s):\n",
+		func() string {
+			if isScript {
+				return "script"
+			} else {
+				return "comandos"
+			}
+		}(),
+		block.Language)
 	fmt.Println("---------------------------------------")
 	fmt.Printf("⌛ Processando: %s\n\n", block.Description)
 
@@ -759,89 +813,154 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 		shell = "/bin/sh"
 	}
 
-	for i, cmd := range block.Commands {
-		if cmd == "" {
-			continue
+	if isScript {
+		// Tratar todo o bloco como um único script
+		scriptContent := block.Commands[0]
+
+		// Criar um arquivo temporário para o script
+		tmpFile, err := ioutil.TempFile("", "chatcli-script-*.sh")
+		if err != nil {
+			errMsg := fmt.Sprintf("❌ Erro ao criar arquivo temporário para script: %v\n", err)
+			allOutput.WriteString(errMsg)
+			fmt.Print(errMsg)
+			return allOutput.String(), err.Error()
 		}
 
-		// Verificar se o comando tem a flag de interatividade
-		isInteractive := false
-		if strings.HasSuffix(cmd, " --interactive") {
-			cmd = strings.TrimSuffix(cmd, " --interactive")
-			isInteractive = true
-		} else if strings.Contains(cmd, "#interactive") {
-			cmd = strings.Replace(cmd, "#interactive", "", -1)
-			cmd = strings.TrimSpace(cmd)
-			isInteractive = true
-		} else {
-			// Verificar se é um comando provavelmente interativo
-			isInteractive = isLikelyInteractiveCommand(cmd)
+		scriptPath := tmpFile.Name()
+		defer os.Remove(scriptPath) // Limpar o arquivo temporário depois
+
+		// Escrever o conteúdo do script no arquivo
+		if _, err := tmpFile.WriteString(scriptContent); err != nil {
+			errMsg := fmt.Sprintf("❌ Erro ao escrever script em arquivo: %v\n", err)
+			allOutput.WriteString(errMsg)
+			fmt.Print(errMsg)
+			return allOutput.String(), err.Error()
 		}
 
-		// Checagem de comando perigoso
-		if isDangerous(cmd) {
-			confirmPrompt := "Este comando é potencialmente perigoso e pode causar danos ao sistema.\nSe tem certeza que deseja executar, digite exatamente: 'sim, quero executar conscientemente' \n Confirma ? (Digite exatamente para confirmar): "
-			confirm := a.getCriticalInput(confirmPrompt)
-
-			if confirm != "sim, quero executar conscientemente" {
-				outText := "Execução do comando perigoso ABORTADA pelo agente.\n"
-				allOutput.WriteString(outText)
-				fmt.Print(outText)
-				continue
-			}
-
-			fmt.Println("⚠️ Confirmação recebida. Executando comando perigoso...")
+		if err := tmpFile.Close(); err != nil {
+			errMsg := fmt.Sprintf("❌ Erro ao fechar arquivo de script: %v\n", err)
+			allOutput.WriteString(errMsg)
+			fmt.Print(errMsg)
+			return allOutput.String(), err.Error()
 		}
 
-		header := fmt.Sprintf("⚙️ Comando %d/%d: %s\n", i+1, len(block.Commands), cmd)
+		// Tornar o script executável
+		if err := os.Chmod(scriptPath, 0755); err != nil {
+			errMsg := fmt.Sprintf("❌ Erro ao tornar script executável: %v\n", err)
+			allOutput.WriteString(errMsg)
+			fmt.Print(errMsg)
+			return allOutput.String(), err.Error()
+		}
+
+		// Executar o script
+		header := fmt.Sprintf("⚙️ Executando script via %s:\n", shell)
 		allOutput.WriteString(header)
 		fmt.Print(header)
 
-		// Se o comando não foi explicitamente marcado como interativo
-		// mas pode ser interativo, perguntar ao usuário
-		if !isInteractive && mightBeInteractive(cmd) {
-			isInteractive = a.askUserIfInteractive(cmd)
-		}
+		cmd := exec.CommandContext(ctx, shell, scriptPath)
+		output, err := cmd.CombinedOutput()
 
-		if isInteractive {
-			// Para comandos interativos, usamos uma abordagem diferente
-			outText := "🖥️ Executando comando interativo. O controle será passado para o comando.\n"
-			outText += "Quando o comando terminar, você retornará ao modo agente.\n"
-			outText += "Pressione Ctrl+C para interromper o comando se necessário.\n\n"
+		outText := "📝 Saída do script:\n" + string(output)
+		allOutput.WriteString(outText)
+		fmt.Print(outText)
 
-			allOutput.WriteString(outText)
-			fmt.Print(outText)
-
-			// Liberar o terminal e executar o comando interativo
-			err := a.executeInteractiveCommand(ctx, shell, cmd)
-
-			if err != nil {
-				errMsg := fmt.Sprintf("❌ Erro ao executar comando interativo: %v\n\n", err)
-				allOutput.WriteString(errMsg)
-				fmt.Print(errMsg)
-				lastError = err.Error()
-			} else {
-				okMsg := "✓ Comando interativo executado com sucesso\n\n"
-				allOutput.WriteString(okMsg)
-				fmt.Print(okMsg)
-			}
+		if err != nil {
+			errMsg := fmt.Sprintf("❌ Erro: %v\n\n", err)
+			allOutput.WriteString(errMsg)
+			fmt.Print(errMsg)
+			lastError = err.Error()
 		} else {
-			// Para comandos não interativos, capturar a saída normalmente
-			output, err := a.captureCommandOutput(ctx, shell, []string{"-c", cmd})
+			okMsg := "✓ Script executado com sucesso\n\n"
+			allOutput.WriteString(okMsg)
+			fmt.Print(okMsg)
+		}
+	} else {
+		// Comportamento original para comandos individuais
+		for i, cmd := range block.Commands {
+			if cmd == "" {
+				continue
+			}
 
-			outText := "📝 Saída do comando (stdout/stderr):\n" + string(output)
-			allOutput.WriteString(outText)
-			fmt.Print(outText)
-
-			if err != nil {
-				errMsg := fmt.Sprintf("❌ Erro: %v\n\n", err)
-				allOutput.WriteString(errMsg)
-				fmt.Print(errMsg)
-				lastError = err.Error()
+			// Verificar se o comando tem a flag de interatividade
+			isInteractive := false
+			if strings.HasSuffix(cmd, " --interactive") {
+				cmd = strings.TrimSuffix(cmd, " --interactive")
+				isInteractive = true
+			} else if strings.Contains(cmd, "#interactive") {
+				cmd = strings.Replace(cmd, "#interactive", "", -1)
+				cmd = strings.TrimSpace(cmd)
+				isInteractive = true
 			} else {
-				okMsg := "✓ Executado com sucesso\n\n"
-				allOutput.WriteString(okMsg)
-				fmt.Print(okMsg)
+				// Verificar se é um comando provavelmente interativo
+				isInteractive = isLikelyInteractiveCommand(cmd)
+			}
+
+			// Checagem de comando perigoso
+			if isDangerous(cmd) {
+				confirmPrompt := "Este comando é potencialmente perigoso e pode causar danos ao sistema.\nSe tem certeza que deseja executar, digite exatamente: 'sim, quero executar conscientemente' \n Confirma ? (Digite exatamente para confirmar): "
+				confirm := a.getCriticalInput(confirmPrompt)
+
+				if confirm != "sim, quero executar conscientemente" {
+					outText := "Execução do comando perigoso ABORTADA pelo agente.\n"
+					allOutput.WriteString(outText)
+					fmt.Print(outText)
+					continue
+				}
+
+				fmt.Println("⚠️ Confirmação recebida. Executando comando perigoso...")
+			}
+
+			header := fmt.Sprintf("⚙️ Comando %d/%d: %s\n", i+1, len(block.Commands), cmd)
+			allOutput.WriteString(header)
+			fmt.Print(header)
+
+			// Se o comando não foi explicitamente marcado como interativo
+			// mas pode ser interativo, perguntar ao usuário
+			// Usando a ContextInfo do bloco para todas as chamadas
+			if !isInteractive && mightBeInteractive(cmd, block.ContextInfo) {
+				isInteractive = a.askUserIfInteractive(cmd, block.ContextInfo)
+			}
+
+			if isInteractive {
+				// Para comandos interativos, usamos uma abordagem diferente
+				outText := "🖥️ Executando comando interativo. O controle será passado para o comando.\n"
+				outText += "Quando o comando terminar, você retornará ao modo agente.\n"
+				outText += "Pressione Ctrl+C para interromper o comando se necessário.\n\n"
+
+				allOutput.WriteString(outText)
+				fmt.Print(outText)
+
+				// Liberar o terminal e executar o comando interativo
+				err := a.executeInteractiveCommand(ctx, shell, cmd)
+
+				if err != nil {
+					errMsg := fmt.Sprintf("❌ Erro ao executar comando interativo: %v\n\n", err)
+					allOutput.WriteString(errMsg)
+					fmt.Print(errMsg)
+					lastError = err.Error()
+				} else {
+					okMsg := "✓ Comando interativo executado com sucesso\n\n"
+					allOutput.WriteString(okMsg)
+					fmt.Print(okMsg)
+				}
+			} else {
+				// Para comandos não interativos, capturar a saída normalmente
+				output, err := a.captureCommandOutput(ctx, shell, []string{"-c", cmd})
+
+				outText := "📝 Saída do comando (stdout/stderr):\n" + string(output)
+				allOutput.WriteString(outText)
+				fmt.Print(outText)
+
+				if err != nil {
+					errMsg := fmt.Sprintf("❌ Erro: %v\n\n", err)
+					allOutput.WriteString(errMsg)
+					fmt.Print(errMsg)
+					lastError = err.Error()
+				} else {
+					okMsg := "✓ Executado com sucesso\n\n"
+					allOutput.WriteString(okMsg)
+					fmt.Print(okMsg)
+				}
 			}
 		}
 	}
@@ -971,22 +1090,110 @@ func isLikelyInteractiveCommand(cmd string) bool {
 	return false
 }
 
-// mightBeInteractive verifica se um comando pode ser interativo mas não foi detectado automaticamente
-func mightBeInteractive(cmd string) bool {
-	// Lista de padrões que podem indicar interatividade, mas não são certeza
-	possiblyInteractivePatterns := []string{
-		"ping", "traceroute", "nc ", "netcat", "telnet", "ftp", "ssh", "console",
-		"monitor", "interactive", "curses", "dialog", "whiptail", "menu",
+// CommandContextInfo contém metadados sobre a origem e natureza de um comando
+type CommandContextInfo struct {
+	SourceType    SourceType
+	FileExtension string
+	IsScript      bool
+	ScriptType    string // shell, python, etc.
+}
+
+type SourceType int
+
+const (
+	SourceTypeUserInput SourceType = iota
+	SourceTypeFile
+	SourceTypeCommandOutput
+)
+
+// detectHeredocs verifica a presença de heredocs em um script shell
+func detectHeredocs(script string) bool {
+	// Padrão para heredocs: <<EOF, <<'EOF', << EOF, <<-EOF etc.
+	heredocPattern := regexp.MustCompile(`<<-?\s*['"]?(\w+)['"]?`)
+	return heredocPattern.MatchString(script)
+}
+
+// isShellScript determina se o conteúdo é um script shell (e não apenas comandos individuais)
+func isShellScript(content string) bool {
+	// Verificar características específicas de scripts shell
+	return detectHeredocs(content) ||
+		strings.Contains(content, "#!/bin/") ||
+		regexp.MustCompile(`if\s+.*\s+then`).MatchString(content) ||
+		regexp.MustCompile(`for\s+.*\s+in\s+.*\s+do`).MatchString(content) ||
+		regexp.MustCompile(`while\s+.*\s+do`).MatchString(content) ||
+		regexp.MustCompile(`case\s+.*\s+in`).MatchString(content) ||
+		strings.Contains(content, "function ") ||
+		strings.Count(content, "{") > 1 && strings.Count(content, "}") > 1
+}
+
+// mightBeInteractive verifica se um comando pode ser interativo com lógica aprimorada
+func mightBeInteractive(cmd string, contextInfo CommandContextInfo) bool {
+	// Se o comando veio de um arquivo de log ou código, geralmente não é interativo
+	if contextInfo.SourceType == SourceTypeFile {
+		// Verificar extensões de arquivo de código/log
+		if contextInfo.FileExtension != "" {
+			nonInteractiveExtensions := map[string]bool{
+				".log": true, ".js": true, ".ts": true, ".py": true, ".go": true,
+				".java": true, ".php": true, ".rb": true, ".c": true, ".cpp": true,
+			}
+			if nonInteractiveExtensions[contextInfo.FileExtension] {
+				return false
+			}
+		}
+
+		// Se for conteúdo de arquivo, verificar características de código
+		if hasCodeStructures(cmd) {
+			return false
+		}
 	}
 
-	cmdLower := strings.ToLower(cmd)
+	// Lista de padrões que podem indicar interatividade em comandos shell
+	possiblyInteractivePatterns := []string{
+		"^ping\\s", "^traceroute\\s", "^nc\\s", "^netcat\\s", "^telnet\\s",
+		"^ssh\\s", "^top$", "^htop$", "^vi\\s", "^vim\\s", "^nano\\s",
+		"^less\\s", "^more\\s", "^tail -f", "^mysql\\s", "^psql\\s",
+		"^docker exec -it", "^kubectl exec -it", "^python\\s+-i", "^node\\s+-i",
+	}
+
+	// Usar regex para verificar padrões de início de linha para comandos shell
 	for _, pattern := range possiblyInteractivePatterns {
-		if strings.Contains(cmdLower, pattern) {
+		matched, _ := regexp.MatchString(pattern, cmd)
+		if matched {
 			return true
 		}
 	}
 
 	return false
+}
+
+// hasCodeStructures detecta estruturas comuns de código (como blocos try/catch, funções, etc.)
+func hasCodeStructures(content string) bool {
+	codePatterns := []string{
+		// patterns de código comuns
+		"try\\s*{", "catch\\s*\\(", "function\\s+\\w+\\s*\\(", "=>\\s*{",
+		"import\\s+[\\w{}\\s]+from", "export\\s+", "class\\s+\\w+",
+
+		// Estruturas comuns em várias linguagens
+		"if\\s*\\(.+\\)\\s*{", "for\\s*\\(.+\\)\\s*{", "while\\s*\\(.+\\)\\s*{",
+		"switch\\s*\\(.+\\)\\s*{", "\\}\\s*else\\s*\\{",
+
+		// Sintaxe de encerramento de blocos multilinha
+		"};", "});", "});",
+	}
+
+	for _, pattern := range codePatterns {
+		matched, _ := regexp.MatchString(pattern, content)
+		if matched {
+			return true
+		}
+	}
+
+	// Contar chaves de abertura e fechamento para detectar blocos de código
+	openBraces := strings.Count(content, "{")
+	closeBraces := strings.Count(content, "}")
+
+	// Se há várias chaves balanceadas, provavelmente é código
+	return openBraces > 1 && closeBraces > 1
 }
 
 // getCriticalInput obtém entrada do usuário para decisões críticas
@@ -1036,7 +1243,13 @@ func (a *AgentMode) getCriticalInput(prompt string) string {
 }
 
 // askUserIfInteractive pergunta ao usuário se um comando deve ser executado em modo interativo
-func (a *AgentMode) askUserIfInteractive(cmd string) bool {
+func (a *AgentMode) askUserIfInteractive(cmd string, contextInfo CommandContextInfo) bool {
+	// Se for claramente código ou arquivo de log, não perguntar ao usuário
+	if contextInfo.SourceType == SourceTypeFile && hasCodeStructures(cmd) {
+		return false
+	}
+
+	// Caso contrário, perguntar ao usuário
 	prompt := fmt.Sprintf("O comando '%s' pode ser interativo. Executar em modo interativo? (s/N): ", cmd)
 	response := a.getCriticalInput(prompt)
 	return strings.HasPrefix(strings.ToLower(response), "s")
