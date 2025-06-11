@@ -1065,6 +1065,10 @@ func isLikelyInteractiveCommand(cmd string) bool {
 		"ipython", "node", "irb", "R", "mongo", "redis-cli", "sqlplus", "ftp",
 		"sftp", "telnet", "screen", "tmux", "ncdu", "mc", "ranger", "irssi",
 		"weechat", "mutt", "lynx", "links", "w3m", "docker exec -it", "kubectl exec -it",
+		"terraform", "ansible", "git", "gitk", "git gui", "git rebase -i",
+		"kubectl", "helm", "oc", "minikube", "vagrant", "packer",
+		"terraform console", "gcloud", "aws", "az", "pulumi", "pulumi up",
+		"npm", "yarn", "pnpm", "composer", "bundle", "cargo",
 	}
 
 	cmdLower := strings.ToLower(cmd)
