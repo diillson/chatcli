@@ -1,5 +1,3 @@
-Absolutely! Here’s your **README.md** translated and fully adapted for an English-speaking audience, following the same structure and with a professional, native feel:
-
 ---
 
 # ChatCLI
