@@ -21,16 +21,15 @@ jobs:
 
       - name: Build binaries
         run: |
-#          COMMIT=$(git rev-parse HEAD)
-#          BUILD_TIME=$(date -u +'%Y-%m-%d %H:%M:%S')
-#          LDFLAGS="-X 'github.com/diillson/chatcli/pkg/version.Commit=${COMMIT}' -X 'github.com/diillson/chatcli/pkg/version.BuildTime=${BUILD_TIME}'"
+          # COMMIT=$(git rev-parse HEAD)
+          # BUILD_TIME=$(date -u +'%Y-%m-%d %H:%M:%S')
+          # LDFLAGS="-X 'github.com/diillson/chatcli/pkg/version.Commit=${COMMIT}' -X 'github.com/diillson/chatcli/pkg/version.BuildTime=${BUILD_TIME}'"
           # Build para várias plataformas
           GOOS=linux GOARCH=amd64 go build -o chatcli-linux-amd64 ./main.go
           GOOS=darwin GOARCH=amd64 go build -o chatcli-darwin-amd64 ./main.go
           GOOS=windows GOARCH=amd64 go build -o chatcli-windows-amd64.exe ./main.go
-          GOOS=linux GOARCH=arm64 go build -o chatcli-linux-arm64 ./main.go
           # Verifica a versão do binário
-#          ./chatcli-linux-amd64 --version
+          # ./chatcli-linux-amd64 --version
 
       - name: Create GitHub Release
         id: create_release
