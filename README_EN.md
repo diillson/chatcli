@@ -1,5 +1,3 @@
----
-
 # ChatCLI
 
 **ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) like StackSpot, OpenAI, and ClaudeAI, making interactive and contextual conversations accessible directly from your terminal. Designed for developers, data scientists, and tech enthusiasts, ChatCLI supercharges productivity by combining contextual data sources and offering a rich, user-friendly experience.
