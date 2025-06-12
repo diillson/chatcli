@@ -15,6 +15,7 @@ const (
 
 	// Valores padrão para OpenAI
 	DefaultOpenAIModel       = "gpt-4o-mini"
+	DefaultOpenAiAssistModel = "gpt-4o-mini"
 	OpenAIAPIURL             = "https://api.openai.com/v1/chat/completions"
 	OpenAIDefaultMaxAttempts = 3
 	OpenAIDefaultBackoff     = time.Second

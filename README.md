@@ -97,7 +97,8 @@ O ChatCLI utiliza variáveis de ambiente para definir seu comportamento e conect
 
 - **Provedor OpenAI**:
     - `OPENAI_API_KEY` – Chave de API da OpenAI.
-    - `OPENAI_MODEL` – (Opcional) Modelo a ser utilizado (padrão: `gpt-4o-mini`).
+    - `OPENAI_MODEL` – (Opcional) Modelo a ser utilizado (padrão: `gpt-4o-mini`)
+    - `OPENAI_ASSISTANT_MODEL` – (Opcional) Modelo a ser utilizado (padrão: `gpt-4o-mini`)
 
 - **Provedor StackSpot**:
     - `CLIENT_ID` – ID do cliente.

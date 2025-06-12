@@ -145,6 +145,12 @@ func (cli *ChatCLI) configureProviderAndModel() {
 			cli.model = config.DefaultOpenAIModel
 		}
 	}
+	if cli.provider == "OPENAI_ASSISTANT" {
+		cli.model = os.Getenv("OPENAI_ASSISTANT_MODEL")
+		if cli.model == "" {
+			cli.model = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel) // se não houver, usa o mesmo dos completions ou seta default
+		}
+	}
 	if cli.provider == "CLAUDEAI" {
 		cli.model = os.Getenv("CLAUDEAI_MODEL")
 		if cli.model == "" {
@@ -411,7 +417,10 @@ func (cli *ChatCLI) switchProvider() {
 	}
 
 	if newProvider == "OPENAI_ASSISTANT" {
-		newModel = utils.GetEnvOrDefault("OPENAI_ASSISTANT_MODEL", "gpt-4o")
+		newModel = utils.GetEnvOrDefault("OPENAI_ASSISTANT_MODEL", "")
+		if newModel == "" {
+			newModel = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel) // se não houver, usa o mesmo dos completions ou seta default
+		}
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
