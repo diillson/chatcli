@@ -67,7 +67,7 @@ func (m *LLMManagerImpl) configurarOpenAIClient() {
 		// Cliente OpenAI Assistente
 		m.clients["OPENAI_ASSISTANT"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
-				model = "gpt-4o"
+				model = config.DefaultOpenAiAssistModel
 			}
 			return openai_assistant.NewOpenAIAssistantClient(apiKey, model, m.logger)
 		}

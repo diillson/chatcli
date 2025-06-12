@@ -104,6 +104,7 @@ ChatCLI uses environment variables to control its behavior and connect to LLM pr
 
     * `OPENAI_API_KEY` – OpenAI API key.
     * `OPENAI_MODEL` – (Optional) Model to use (default: `gpt-4o-mini`).
+    * `OPENAI_ASSISTANT_MODEL` – (Opcional) Modelo a ser utilizado o mesmo que o `OPENAI_MODEL` se setado ou (padrão: `gpt-4o-mini`).
 
 * **StackSpot Provider:**
 

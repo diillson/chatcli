@@ -71,7 +71,7 @@ func NewOpenAIAssistantClient(apiKey, model string, logger *zap.Logger) (*OpenAI
 		map[string]string{
 			"Authorization": "Bearer " + apiKey,
 			"Content-Type":  "application/json",
-			"OpenAI-Beta":   "assistants=v1",
+			"OpenAI-Beta":   "assistants=v2",
 		},
 	)
 
@@ -184,7 +184,7 @@ func (c *OpenAIAssistantClient) initializeAssistant() error {
 			"padrões de projeto e possíveis problemas de segurança.",
 		"tools": []map[string]string{
 			{"type": "code_interpreter"},
-			{"type": "retrieval"},
+			{"type": "file_search"},
 		},
 	}
 
