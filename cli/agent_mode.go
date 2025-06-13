@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/peterh/liner"
 	"io/ioutil"
 	"os"
@@ -149,51 +150,66 @@ func isDangerous(cmd string) bool {
 
 // Run inicia o modo agente com uma pergunta do usuário
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string) error {
-	// 1. Enviar a pergunta para a LLM com instruções específicas sobre formato de resposta
-	systemInstruction := `Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema.
-            Quando o usuário pede para realizar uma tarefa, analise o problema e sugira o melhor comando que possam resolver a questão.
+	// Verificar se estamos usando o OpenAI Assistant
+	_, isAssistant := a.cli.Client.(*openai_assistant.OpenAIAssistantClient)
 
-			Se precisar sugerir múltiplos comandos no mesmo bloco, separe-os por linha vazia dentro do bloco execute. Nunca use apenas quebra de linha simples para separar comandos multi-linha.
-    
-            Antes de sugerir comandos destrutivos (como rm -rf, dd, mkfs, drop database, etc), coloque explicação e peça uma confirmação explícita do usuário.
-    
-            Para cada bloco de código executável, use o formato:
-            ` + "```" + `execute:<tipo>
-            <comandos>
-            ` + "```" + `
+	systemInstruction := ""
+	if isAssistant {
+		systemInstruction = `Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema.
+            Responda com comandos shell executáveis para resolver o problema apresentado.
             
-            Exemplos de formatação:
-            
-            Para comandos shell:
-            ` + "```" + `execute:shell
-            ls -la | grep "\.txt$"
-            cat file.txt | grep "exemplo"
-            ` + "```" + `
-            
-            Para comandos Kubernetes:
-            ` + "```" + `execute:kubernetes
-            kubectl get pods -n my-namespace
-            kubectl describe pod my-pod -n my-namespace
-            ` + "```" + `
-            
-            Para outros tipos de comandos, use o identificador apropriado, como:
-            - execute:docker
-            - execute:terraform
-            - execute:git
-            - execute:sql
-            
-            IMPORTANTE:
-            1. Comece sua resposta com uma breve explicação do que você vai fazer
-            2. Descreva brevemente o que cada conjunto de comandos faz antes de mostrar o bloco execute
-            3. Use comando claro, simples e seguro
-            4. Caso possua mais de um comando, agrupe comandos relacionados no mesmo bloco execute quando tiverem o mesmo propósito
-            5. Cada comando em um bloco será executado individualmente, um após o outro
-            6. Não use comandos destrutivos (rm -rf, drop database, etc.) sem avisos claros
-            7. Se a tarefa for complexa, divida em múltiplos blocos execute com propósitos distintos
-            
-            Adapte o comando para o contexto do usuário, considerando o ambiente e as ferramentas disponíveis.`
+            Para comandos executáveis, coloque-os em blocos de código com ` + "```" + ` ou apresente-os com um $ no início da linha.
 
-	// 2. Adicionar a mensagem do sistema ao histórico
+			Explique o propósito de cada comando antes de mostrá-lo.
+			Evite comandos destrutivos (como rm -rf, dd, mkfs, etc.) sem explicação clara.
+			Prefira comandos simples e seguros, e sempre explique o que cada comando faz.`
+	} else {
+		//1. Enviar a pergunta para a LLM com instruções específicas sobre formato de resposta
+		systemInstruction = `Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema.
+		       Quando o usuário pede para realizar uma tarefa, analise o problema e sugira o melhor comando que possam resolver a questão.
+		
+				Se precisar sugerir múltiplos comandos no mesmo bloco, separe-os por linha vazia dentro do bloco execute. Nunca use apenas quebra de linha simples para separar comandos multi-linha.
+		
+		       Antes de sugerir comandos destrutivos (como rm -rf, dd, mkfs, drop database, etc), coloque explicação e peça uma confirmação explícita do usuário.
+		
+		       Para cada bloco de código executável, use o formato:
+		       ` + "```" + `execute:<tipo>
+		       <comandos>
+		       ` + "```" + `
+		
+		       Exemplos de formatação:
+		
+		       Para comandos shell:
+		       ` + "```" + `execute:shell
+		       ls -la | grep "\.txt$"
+		       cat file.txt | grep "exemplo"
+		       ` + "```" + `
+		
+		       Para comandos Kubernetes:
+		       ` + "```" + `execute:kubernetes
+		       kubectl get pods -n my-namespace
+		       kubectl describe pod my-pod -n my-namespace
+		       ` + "```" + `
+		
+		       Para outros tipos de comandos, use o identificador apropriado, como:
+		       - execute:docker
+		       - execute:terraform
+		       - execute:git
+		       - execute:sql
+		
+		       IMPORTANTE:
+		       1. Comece sua resposta com uma breve explicação do que você vai fazer
+		       2. Descreva brevemente o que cada conjunto de comandos faz antes de mostrar o bloco execute
+		       3. Use comando claro, simples e seguro
+		       4. Caso possua mais de um comando, agrupe comandos relacionados no mesmo bloco execute quando tiverem o mesmo propósito
+		       5. Cada comando em um bloco será executado individualmente, um após o outro
+		       6. Não use comandos destrutivos (rm -rf, drop database, etc.) sem avisos claros
+		       7. Se a tarefa for complexa, divida em múltiplos blocos execute com propósitos distintos
+		
+		       Adapte o comando para o contexto do usuário, considerando o ambiente e as ferramentas disponíveis.`
+
+	}
+	//2. Adicionar a mensagem do sistema ao histórico
 	a.cli.history = append(a.cli.history, models.Message{
 		Role:    "system",
 		Content: systemInstruction,
@@ -211,10 +227,10 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	})
 
 	// 4. Mostrar animação "pensando..."
-	a.cli.animation.ShowThinkingAnimation(a.cli.client.GetModelName())
+	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
 	// 5. Enviar para a LLM e obter a resposta
-	aiResponse, err := a.cli.client.SendPrompt(ctx, fullQuery, a.cli.history)
+	aiResponse, err := a.cli.Client.SendPrompt(ctx, fullQuery, a.cli.history)
 	a.cli.animation.StopThinkingAnimation()
 
 	if err != nil {
@@ -247,6 +263,14 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 // extractCommandBlocks modificado para detectar scripts continuos
 func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 	var commandBlocks []CommandBlock
+
+	// Verificar se estamos usando o OpenAI Assistant
+	_, isAssistant := a.cli.Client.(*openai_assistant.OpenAIAssistantClient)
+
+	if isAssistant {
+		// Extração especial para o OpenAI Assistant
+		return a.extractCommandBlocksForAssistant(response)
+	}
 
 	// Regex para encontrar blocos de código com o prefixo execute
 	re := regexp.MustCompile("```execute:([a-zA-Z0-9_-]+)\\s*\n([\\s\\S]*?)```")
@@ -321,6 +345,91 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 	return commandBlocks
 }
 
+// Função para extrair comandos de respostas do OpenAI Assistant
+func (a *AgentMode) extractCommandBlocksForAssistant(response string) []CommandBlock {
+	var commandBlocks []CommandBlock
+
+	// Padrões de extração mais flexíveis para o assistente
+	// 1. Blocos de código padrão
+	codeBlockRe := regexp.MustCompile("```(?:sh|bash|shell)?\\s*\n([\\s\\S]*?)```")
+	codeMatches := codeBlockRe.FindAllStringSubmatch(response, -1)
+
+	// 2. Linhas que parecem comandos shell (começam com $ ou #)
+	commandLineRe := regexp.MustCompile(`(?m)^[$#]\s*(.+)$`)
+	commandMatches := commandLineRe.FindAllStringSubmatch(response, -1)
+
+	// Processar blocos de código
+	for _, match := range codeMatches {
+		if len(match) >= 2 {
+			commands := splitCommandsByBlankLine(match[1])
+
+			// Buscar descrição antes do bloco
+			description := findDescriptionBeforeBlock(response, match[0])
+
+			commandBlocks = append(commandBlocks, CommandBlock{
+				Description: description,
+				Commands:    commands,
+				Language:    "shell", // Assumir shell como padrão
+				ContextInfo: CommandContextInfo{
+					SourceType: SourceTypeUserInput,
+					IsScript:   len(commands) > 1 || isShellScript(match[1]),
+					ScriptType: "shell",
+				},
+			})
+		}
+	}
+
+	// Se não encontrar blocos de código, tentar linhas de comando
+	if len(commandBlocks) == 0 && len(commandMatches) > 0 {
+		var commands []string
+		for _, match := range commandMatches {
+			if len(match) >= 2 {
+				cmd := strings.TrimSpace(match[1])
+				if cmd != "" {
+					commands = append(commands, cmd)
+				}
+			}
+		}
+
+		if len(commands) > 0 {
+			commandBlocks = append(commandBlocks, CommandBlock{
+				Description: "Comandos extraídos da resposta",
+				Commands:    commands,
+				Language:    "shell",
+				ContextInfo: CommandContextInfo{
+					SourceType: SourceTypeUserInput,
+					IsScript:   false,
+				},
+			})
+		}
+	}
+
+	return commandBlocks
+}
+
+// Função auxiliar para encontrar uma descrição antes de um bloco de código
+func findDescriptionBeforeBlock(response, block string) string {
+	blockIndex := strings.Index(response, block)
+	if blockIndex <= 0 {
+		return ""
+	}
+
+	// Obter até 200 caracteres antes do bloco
+	startIndex := max(0, blockIndex-200)
+	prefix := response[startIndex:blockIndex]
+
+	// Dividir em linhas e pegar a última linha não vazia
+	lines := strings.Split(prefix, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
+			return line
+		}
+	}
+
+	return ""
+}
+
 func splitCommandsByBlankLine(src string) []string {
 	var cmds []string
 	var buf []string
@@ -358,7 +467,7 @@ func (a *AgentMode) displayResponseWithoutCommands(response string, blocks []Com
 
 	// Renderizar e exibir
 	renderedResponse := a.cli.renderMarkdown(displayResponse)
-	a.cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", a.cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
+	a.cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", a.cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
 }
 
 // getMultilineInput obtém entrada de múltiplas linhas do usuário
@@ -475,8 +584,8 @@ func (a *AgentMode) requestLLMContinuationWithContext(ctx context.Context, previ
 		Content: prompt.String(),
 	})
 
-	a.cli.animation.ShowThinkingAnimation(a.cli.client.GetModelName())
-	aiResponse, err := a.cli.client.SendPrompt(newCtx, prompt.String(), a.cli.history)
+	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
+	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt.String(), a.cli.history)
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
 		fmt.Println("❌ Erro ao pedir continuação à IA:", err)
@@ -1402,8 +1511,8 @@ func (a *AgentMode) requestLLMContinuation(ctx context.Context, userQuery, previ
 		Content: retryPrompt,
 	})
 
-	a.cli.animation.ShowThinkingAnimation(a.cli.client.GetModelName())
-	aiResponse, err := a.cli.client.SendPrompt(ctx, retryPrompt, a.cli.history)
+	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
+	aiResponse, err := a.cli.Client.SendPrompt(ctx, retryPrompt, a.cli.history)
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
 		fmt.Println("❌ Erro ao pedir continuação à IA:", err)

@@ -122,6 +122,7 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 		}
 		c.currentThreadID = threadID
 		c.activeThreads[threadID] = time.Now()
+		c.logger.Info("Thread criada", zap.String("threadID", threadID))
 	}
 
 	threadID := c.currentThreadID
@@ -129,32 +130,153 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 
 	// Adicionar a mensagem ao thread
 	if err := c.addMessageToThread(ctx, threadID, prompt); err != nil {
+		c.logger.Error("Erro ao adicionar mensagem ao thread",
+			zap.String("threadID", threadID),
+			zap.Error(err))
 		return "", fmt.Errorf("erro ao adicionar mensagem ao thread: %w", err)
 	}
 
 	// Executar o assistente no thread
 	runID, err := c.runAssistant(ctx, threadID)
 	if err != nil {
+		c.logger.Error("Erro ao executar o assistente",
+			zap.String("threadID", threadID),
+			zap.Error(err))
 		return "", fmt.Errorf("erro ao executar o assistente: %w", err)
 	}
+
+	c.logger.Debug("Assistente executando",
+		zap.String("threadID", threadID),
+		zap.String("runID", runID))
 
 	// Aguardar a conclusão da execução
 	runStatus, err := c.waitForRunCompletion(ctx, threadID, runID)
 	if err != nil {
+		c.logger.Error("Erro ao aguardar resposta",
+			zap.String("threadID", threadID),
+			zap.String("runID", runID),
+			zap.Error(err))
+
+		// Se for um erro de timeout, podemos tentar recuperar parcialmente
+		if strings.Contains(err.Error(), "timeout") {
+			c.logger.Warn("Tentando recuperar mensagens após timeout",
+				zap.String("threadID", threadID))
+
+			// Tentar obter a última resposta mesmo com timeout
+			partialResponse, getErr := c.getLatestResponse(ctx, threadID)
+			if getErr == nil && partialResponse != "" {
+				c.logger.Info("Resposta parcial recuperada com sucesso após timeout")
+				return fmt.Sprintf("[Resposta parcial devido a timeout] %s", partialResponse), nil
+			}
+		}
+
 		return "", fmt.Errorf("erro ao aguardar resposta: %w", err)
 	}
 
 	if runStatus != "completed" {
+		c.logger.Error("Execução do assistente falhou",
+			zap.String("threadID", threadID),
+			zap.String("runID", runID),
+			zap.String("status", runStatus))
 		return "", fmt.Errorf("execução do assistente falhou: %s", runStatus)
 	}
 
 	// Obter a resposta
 	response, err := c.getLatestResponse(ctx, threadID)
 	if err != nil {
+		c.logger.Error("Erro ao obter resposta",
+			zap.String("threadID", threadID),
+			zap.Error(err))
 		return "", fmt.Errorf("erro ao obter resposta: %w", err)
 	}
 
 	return response, nil
+}
+
+// Método para limpar threads ao fim da app
+func (c *OpenAIAssistantClient) Cleanup() error {
+	c.mu.RLock()
+	threadID := c.currentThreadID
+	c.mu.RUnlock()
+
+	if threadID == "" {
+		return nil // Nada para limpar
+	}
+
+	// Criar contexto com timeout para a limpeza
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Tenta finalizar qualquer run ativo na thread
+	c.finishActiveRuns(ctx, threadID)
+
+	c.logger.Info("Limpeza de recursos do OpenAI Assistant realizada")
+	return nil
+}
+
+// finishActiveRuns tenta encontrar e finalizar runs ativos em uma thread
+func (c *OpenAIAssistantClient) finishActiveRuns(ctx context.Context, threadID string) {
+	// Listar runs ativos
+	endpoint := fmt.Sprintf("/threads/%s/runs?limit=10", threadID)
+	resp, err := c.client.Get(ctx, endpoint)
+	if err != nil {
+		c.logger.Warn("Erro ao listar runs para limpeza", zap.Error(err))
+		return
+	}
+
+	var runsResponse struct {
+		Data []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(resp, &runsResponse); err != nil {
+		c.logger.Warn("Erro ao decodificar resposta de runs", zap.Error(err))
+		return
+	}
+
+	// Cancelar runs ativos
+	for _, run := range runsResponse.Data {
+		if run.Status == "in_progress" || run.Status == "queued" {
+			cancelEndpoint := fmt.Sprintf("/threads/%s/runs/%s/cancel", threadID, run.ID)
+			_, err := c.client.Post(ctx, cancelEndpoint, nil)
+			if err != nil {
+				c.logger.Warn("Erro ao cancelar run",
+					zap.String("runID", run.ID),
+					zap.Error(err))
+			} else {
+				c.logger.Info("Run cancelado com sucesso", zap.String("runID", run.ID))
+			}
+		}
+	}
+}
+
+// Método para deletar thread
+func (c *OpenAIAssistantClient) deleteThread(ctx context.Context, threadID string) error {
+	endpoint := fmt.Sprintf("/threads/%s", threadID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, AssistantAPIBaseURL+endpoint, nil)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("erro ao deletar thread: status %d, resposta: %s", resp.StatusCode, string(body))
+	}
+
+	c.logger.Info("Thread deletada com sucesso", zap.String("threadID", threadID))
+	return nil
 }
 
 // initializeAssistant cria ou recupera um assistente OpenAI
@@ -555,11 +677,24 @@ func (c *OpenAIAssistantClient) getLatestResponse(ctx context.Context, threadID 
 func (c *OpenAIAssistantClient) uploadFile(ctx context.Context, filePath string) (string, error) {
 	// Verificar o cache primeiro
 	if fileID, exists := c.fileRegistry.GetFileID(filePath); exists {
+		c.logger.Info("Arquivo encontrado no cache",
+			zap.String("path", filePath),
+			zap.String("fileID", fileID))
 		return fileID, nil
 	}
 
+	// Verificar se o contexto já expirou antes de iniciar o upload
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("contexto expirado antes de iniciar upload: %w", err)
+	}
+
 	// Limitar uploads concorrentes
-	c.fileUploadSem <- struct{}{}
+	select {
+	case c.fileUploadSem <- struct{}{}:
+		// Conseguiu um slot no semáforo
+	case <-ctx.Done():
+		return "", fmt.Errorf("contexto cancelado enquanto aguardava slot para upload: %w", ctx.Err())
+	}
 	defer func() { <-c.fileUploadSem }()
 
 	// Abrir o arquivo
@@ -577,6 +712,23 @@ func (c *OpenAIAssistantClient) uploadFile(ctx context.Context, filePath string)
 	if fileInfo.Size() > MaxFileSizeBytes {
 		return "", fmt.Errorf("arquivo muito grande: %s (%.2f MB, limite: 512MB)",
 			filePath, float64(fileInfo.Size())/1024/1024)
+	}
+
+	// Verificar se é um arquivo binário ou não suportado
+	ext := strings.ToLower(filepath.Ext(filePath))
+	unsupportedExts := map[string]bool{
+		".exe": true, ".dll": true, ".so": true, ".dylib": true,
+		".zip": true, ".tar": true, ".gz": true, ".rar": true,
+		".bin": true, ".dat": true, ".db": true, ".sqlite": true,
+	}
+
+	// Verificar se é um arquivo provavelmente binário pelo tamanho e extensão
+	if unsupportedExts[ext] || (fileInfo.Size() > 1024*1024 && !isTextFile(filePath)) {
+		c.logger.Warn("Pulando arquivo potencialmente binário ou não suportado",
+			zap.String("path", filePath),
+			zap.String("ext", ext),
+			zap.Int64("size", fileInfo.Size()))
+		return "", fmt.Errorf("arquivo parece ser binário ou não suportado: %s", filePath)
 	}
 
 	// Preparar o multipart/form-data
@@ -651,6 +803,47 @@ func (c *OpenAIAssistantClient) uploadFile(ctx context.Context, filePath string)
 		zap.Int64("size", fileInfo.Size()))
 
 	return fileID, nil
+}
+
+// Função auxiliar para verificar se um arquivo parece ser texto
+func isTextFile(filePath string) bool {
+	// Lista de extensões conhecidas por serem texto
+	textExts := map[string]bool{
+		".txt": true, ".md": true, ".js": true, ".ts": true, ".py": true,
+		".go": true, ".java": true, ".c": true, ".cpp": true, ".h": true,
+		".cs": true, ".php": true, ".html": true, ".css": true, ".json": true,
+		".xml": true, ".yaml": true, ".yml": true, ".sh": true, ".bash": true,
+		".sql": true, ".conf": true, ".ini": true, ".toml": true, ".rs": true,
+	}
+
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if textExts[ext] {
+		return true
+	}
+
+	// Para arquivos sem extensão reconhecida, verificar o conteúdo
+	file, err := os.Open(filePath)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	// Ler os primeiros 512 bytes para detecção de tipo
+	buffer := make([]byte, 512)
+	n, err := file.Read(buffer)
+	if err != nil && err != io.EOF {
+		return false
+	}
+
+	// Verificar se há bytes nulos ou caracteres de controle que indicariam arquivo binário
+	for i := 0; i < n; i++ {
+		if buffer[i] == 0 {
+			return false
+		}
+	}
+
+	// Se chegou aqui, é provavelmente um arquivo de texto
+	return true
 }
 
 // ProcessDirectoryForAssistant processa um diretório para o Assistente da OpenAI

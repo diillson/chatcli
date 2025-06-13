@@ -51,20 +51,20 @@ func main() {
 	// Inicializar o LLMManager com as constantes do pacote config
 	slugName := utils.GetEnvOrDefault("SLUG_NAME", config.DefaultSlugName)
 	tenantName := utils.GetEnvOrDefault("TENANT_NAME", config.DefaultTenantName)
-	manager, err := manager.NewLLMManager(logger, slugName, tenantName)
+	llmManager, err := manager.NewLLMManager(logger, slugName, tenantName)
 	if err != nil {
 		logger.Fatal("Erro ao inicializar o LLMManager", zap.Error(err))
 	}
 
 	// Verificar se há provedores disponíveis
-	availableProviders := manager.GetAvailableProviders()
+	availableProviders := llmManager.GetAvailableProviders()
 	if len(availableProviders) == 0 {
 		fmt.Println("Nenhum provedor LLM está configurado. Verifique suas variáveis de ambiente.")
 		os.Exit(1)
 	}
 
 	// Inicializar e iniciar o ChatCLI
-	chatCLI, err := cli.NewChatCLI(manager, logger)
+	chatCLI, err := cli.NewChatCLI(llmManager, logger)
 	if err != nil {
 		logger.Fatal("Erro ao inicializar o ChatCLI", zap.Error(err))
 	}
