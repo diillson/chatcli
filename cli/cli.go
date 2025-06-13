@@ -51,7 +51,7 @@ type Liner interface {
 
 // ChatCLI representa a interface de linha de comando do chat
 type ChatCLI struct {
-	client            client.LLMClient
+	Client            client.LLMClient
 	manager           manager.LLMManager
 	logger            *zap.Logger
 	provider          string
@@ -130,7 +130,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 		return
 	}
 
-	cli.client = client
+	cli.Client = client
 	fmt.Println("Configurações recarregadas com sucesso!")
 }
 
@@ -180,7 +180,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	line := liner.NewLiner()
 	line.SetCtrlCAborts(true) // Permite que Ctrl+C aborte o input
 
-	cli.client = client
+	cli.Client = client
 	cli.line = line
 	cli.history = []models.Message{}
 	cli.commandHistory = []string{}
@@ -209,7 +209,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	defer cli.cleanup()
 
 	fmt.Println("\n\nBem-vindo ao ChatCLI!")
-	fmt.Printf("Você está conversando com %s (%s)\n", cli.client.GetModelName(), cli.provider)
+	fmt.Printf("Você está conversando com %s (%s)\n", cli.Client.GetModelName(), cli.provider)
 	fmt.Println("Digite '/exit', 'exit', '/quit' ou 'quit' para sair.")
 	fmt.Println("Digite '/switch' para trocar de provedor.")
 	fmt.Println("Digite '/switch --slugname <slug>' para trocar o slug.")
@@ -272,14 +272,14 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			})
 
 			// Exibir mensagem "Pensando..." com animação
-			cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
+			cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
 			// Criar um contexto com timeout
 			responseCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer cancel()
 
 			// Enviar o prompt para o LLM
-			aiResponse, err := cli.client.SendPrompt(responseCtx, userInput+additionalContext, cli.history)
+			aiResponse, err := cli.Client.SendPrompt(responseCtx, userInput+additionalContext, cli.history)
 
 			// Parar a animação
 			cli.animation.StopThinkingAnimation()
@@ -306,7 +306,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			// Renderizar a resposta da IA
 			renderedResponse := cli.renderMarkdown(aiResponse)
 			// Exibir a resposta da IA com efeito de digitação
-			cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
+			cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
 		}
 	}
 }
@@ -429,11 +429,11 @@ func (cli *ChatCLI) switchProvider() {
 		return
 	}
 
-	cli.client = newClient
+	cli.Client = newClient
 	cli.provider = newProvider
 	cli.model = newModel
 	cli.history = nil // Reiniciar o histórico da conversa
-	fmt.Printf("Trocado para %s (%s)\n\n", cli.client.GetModelName(), cli.provider)
+	fmt.Printf("Trocado para %s (%s)\n\n", cli.Client.GetModelName(), cli.provider)
 }
 
 func (cli *ChatCLI) showHelp() {
@@ -573,7 +573,7 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 
 	if strings.Contains(strings.ToLower(userInput), "@file") {
 		// Verificar se estamos usando o Assistente da OpenAI
-		_, isAssistant := cli.client.(*openai_assistant.OpenAIAssistantClient)
+		_, isAssistant := cli.Client.(*openai_assistant.OpenAIAssistantClient)
 
 		paths, options, err := extractFileCommandOptions(userInput)
 		if err != nil {
@@ -1114,14 +1114,14 @@ func (cli *ChatCLI) handleNextChunk() bool {
 	})
 
 	// Mostrar animação "Pensando..."
-	cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
+	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
 	// Criar contexto com timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	// Enviar o prompt para o LLM
-	aiResponse, err := cli.client.SendPrompt(ctx, prompt+"\n\n"+nextChunk.Content, cli.history)
+	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+nextChunk.Content, cli.history)
 
 	// Parar a animação
 	cli.animation.StopThinkingAnimation()
@@ -1158,7 +1158,7 @@ func (cli *ChatCLI) handleNextChunk() bool {
 
 	// Renderizar e mostrar a resposta
 	renderedResponse := cli.renderMarkdown(aiResponse)
-	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
+	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
 
 	// Remover o chunk da fila apenas após processamento bem-sucedido
 	cli.fileChunks = cli.fileChunks[1:]
@@ -1217,14 +1217,14 @@ func (cli *ChatCLI) handleRetryLastChunk() bool {
 	})
 
 	// Mostrar animação "Pensando..."
-	cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
+	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
 	// Criar contexto com timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	// Enviar o prompt para o LLM
-	aiResponse, err := cli.client.SendPrompt(ctx, prompt+"\n\n"+chunk.Content, cli.history)
+	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+chunk.Content, cli.history)
 
 	// Parar a animação
 	cli.animation.StopThinkingAnimation()
@@ -1254,7 +1254,7 @@ func (cli *ChatCLI) handleRetryLastChunk() bool {
 
 	// Renderizar e mostrar a resposta
 	renderedResponse := cli.renderMarkdown(aiResponse)
-	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderedResponse), 2*time.Millisecond)
+	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
 
 	// Atualizar o lastFailedChunk
 	if len(cli.failedChunks) > 0 {
@@ -1639,14 +1639,14 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 		Content: fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", output, aiContext),
 	})
 	// Exibir mensagem "Pensando..." com animação
-	cli.animation.ShowThinkingAnimation(cli.client.GetModelName())
+	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
 	//Criar um contexto com timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	//Enviar o output e o contexto para a IA
-	aiResponse, err := cli.client.SendPrompt(ctx, fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", output, aiContext), cli.history)
+	aiResponse, err := cli.Client.SendPrompt(ctx, fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", output, aiContext), cli.history)
 
 	//parar a animação
 	cli.animation.StopThinkingAnimation()
@@ -1667,7 +1667,7 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 	renderResponse := cli.renderMarkdown(aiResponse)
 
 	// Exibir a resposta da IA com efeito de digitação
-	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.client.GetModelName(), renderResponse), 2*time.Millisecond)
+	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderResponse), 2*time.Millisecond)
 }
 
 // loadHistory carrega o histórico do arquivo
@@ -1927,13 +1927,14 @@ func (cli *ChatCLI) processFileCommandForAssistant(paths []string) (string, erro
 	}
 
 	// Verificar se o cliente atual é um OpenAIAssistantClient
-	assistantClient, ok := cli.client.(*openai_assistant.OpenAIAssistantClient)
+	assistantClient, ok := cli.Client.(*openai_assistant.OpenAIAssistantClient)
 	if !ok {
 		return "", fmt.Errorf("este comando só funciona com o Assistente da OpenAI")
 	}
 
 	// Mensagem informativa inicial
 	cli.animation.ShowThinkingAnimation("Preparando arquivos para o Assistente")
+	fmt.Println("\n📂 Iniciando processamento de arquivos para o Assistente OpenAI...")
 
 	var contextMessage strings.Builder
 	contextMessage.WriteString("📂 Processando arquivos para o Assistente OpenAI:\n\n")
@@ -1941,33 +1942,88 @@ func (cli *ChatCLI) processFileCommandForAssistant(paths []string) (string, erro
 	totalFiles := 0
 	totalSize := int64(0)
 	var fileIDs []string
+	var errors []string
 
 	// Processar cada caminho
 	for _, path := range paths {
-		ids, message, err := assistantClient.ProcessDirectoryForAssistant(context.Background(), path)
+		fmt.Printf("⏳ Processando: %s\n", path)
+
+		// Verificar se o caminho existe antes de processar
+		expandedPath, err := utils.ExpandPath(path)
 		if err != nil {
-			contextMessage.WriteString(fmt.Sprintf("❌ Erro ao processar '%s': %s\n", path, err.Error()))
+			errorMsg := fmt.Sprintf("❌ Erro ao expandir caminho '%s': %s\n", path, err.Error())
+			contextMessage.WriteString(errorMsg)
+			fmt.Println(errorMsg)
+			errors = append(errors, errorMsg)
+			continue
+		}
+
+		// Verificar se o arquivo/diretório existe
+		_, err = os.Stat(expandedPath)
+		if err != nil {
+			errorMsg := fmt.Sprintf("❌ Erro ao acessar '%s': %s\n", expandedPath, err.Error())
+			contextMessage.WriteString(errorMsg)
+			fmt.Println(errorMsg)
+			errors = append(errors, errorMsg)
+			continue
+		}
+
+		// Criar um contexto com timeout para a operação
+		processingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		ids, message, err := assistantClient.ProcessDirectoryForAssistant(processingCtx, expandedPath)
+		if err != nil {
+			errorMsg := fmt.Sprintf("❌ Erro ao processar '%s': %s\n", path, err.Error())
+			contextMessage.WriteString(errorMsg)
+			fmt.Println(errorMsg)
+			errors = append(errors, errorMsg)
 			continue
 		}
 
 		// Atualizar o contexto com informações dos arquivos carregados
 		contextMessage.WriteString(fmt.Sprintf("✅ %s\n", message))
+		fmt.Println(message)
 		totalFiles += len(ids)
-
 		fileIDs = append(fileIDs, ids...)
-
-		// Aqui podemos adicionar também o tamanho total dos arquivos
-		// totalSize += ...
 	}
 
 	// Resumo final
-	contextMessage.WriteString(fmt.Sprintf("\n📊 RESUMO:\n"))
-	contextMessage.WriteString(fmt.Sprintf("▶️ Total de arquivos carregados: %d\n", totalFiles))
-	contextMessage.WriteString(fmt.Sprintf("▶️ Tamanho total: %.2f MB\n", float64(totalSize)/1024/1024))
-	contextMessage.WriteString("\nOs arquivos foram anexados ao Assistente OpenAI e estarão disponíveis para todas as consultas nesta conversa.\n")
+	summaryMsg := fmt.Sprintf("\n📊 RESUMO FINAL:\n"+
+		"===============================\n"+
+		"▶️ Total de arquivos carregados: %d\n"+
+		"▶️ Tamanho total: %.2f MB\n"+
+		"▶️ Os arquivos estão disponíveis para consulta\n",
+		totalFiles, float64(totalSize)/1024/1024)
+
+	contextMessage.WriteString(summaryMsg)
+	fmt.Println(summaryMsg)
+
+	if len(errors) > 0 {
+		errorSummary := fmt.Sprintf("\n⚠️ ERROS ENCONTRADOS (%d):\n"+
+			"===============================\n", len(errors))
+		contextMessage.WriteString(errorSummary)
+		fmt.Println(errorSummary)
+
+		for i, err := range errors {
+			fmt.Printf("%d. %s\n", i+1, err)
+		}
+	}
+
+	if totalFiles == 0 {
+		errMsg := "❌ Nenhum arquivo pôde ser processado"
+		contextMessage.WriteString(errMsg)
+		fmt.Println(errMsg)
+		return contextMessage.String(), fmt.Errorf(errMsg)
+	}
 
 	// Parar a animação
 	cli.animation.StopThinkingAnimation()
+
+	// Força uma pequena pausa para permitir que o OpenAI API indexe os arquivos
+	fmt.Println("\n⏳ Aguardando indexação de arquivos... (5 segundos)")
+	time.Sleep(5 * time.Second)
+	fmt.Println("✅ Arquivos processados e prontos para uso!")
 
 	return contextMessage.String(), nil
 }
