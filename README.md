@@ -82,6 +82,7 @@ Para instalar o ChatCLI diretamente via Go, você pode usar o seguinte comando:
 go install github.com/diillson/chatcli@latest
 ```
 Isso instalará o ChatCLI na sua pasta `$GOPATH/bin`, permitindo que você execute o comando `chatcli` diretamente no terminal caso seu `$GOPATH/bin` esteja no seu PATH.
+
 ---
 
 ## Configuração
