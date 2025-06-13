@@ -75,7 +75,13 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
    ```bash
    ./chatcli
    ```
+### Instalação via Go Install (opcional)
+Para instalar o ChatCLI diretamente via Go, você pode usar o seguinte comando:
 
+```bash
+go install github.com/diillson/chatcli@latest
+```
+Isso instalará o ChatCLI na sua pasta `$GOPATH/bin`, permitindo que você execute o comando `chatcli` diretamente no terminal caso seu `$GOPATH/bin` esteja no seu PATH.
 ---
 
 ## Configuração

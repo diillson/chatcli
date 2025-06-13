@@ -79,6 +79,14 @@
    ./chatcli
    ```
 
+### Installation via Go Install (optional)
+To install ChatCLI directly via Go, you can use the following command:
+
+```bash
+go install github.com/diillson/chatcli@latest
+```
+This will install ChatCLI in your `$GOPATH/bin` folder, allowing you to run the `chatcli` command directly in the terminal if your `$GOPATH/bin` is in your `$PATH`.
+
 ---
 
 ## Configuration
@@ -104,7 +112,7 @@ ChatCLI uses environment variables to control its behavior and connect to LLM pr
 
     * `OPENAI_API_KEY` – OpenAI API key.
     * `OPENAI_MODEL` – (Optional) Model to use (default: `gpt-4o-mini`).
-    * `OPENAI_ASSISTANT_MODEL` – (Opcional) Modelo a ser utilizado o mesmo que o `OPENAI_MODEL` se setado ou (padrão: `gpt-4o-mini`).
+    * `OPENAI_ASSISTANT_MODEL` – (Optional) Model being used same as `OPENAI_MODEL` if set or (default: `gpt-4o-mini`).
 
 * **StackSpot Provider:**
 
