@@ -848,6 +848,16 @@ func isTextFile(filePath string) bool {
 
 // ProcessDirectoryForAssistant processa um diretório para o Assistente da OpenAI
 func (c *OpenAIAssistantClient) ProcessDirectoryForAssistant(ctx context.Context, dirPath string) ([]string, string, error) {
+	c.logger.Info("Iniciando processamento de diretório para o Assistente",
+		zap.String("path", dirPath))
+
+	// Adicionar verificação de timeout do contexto
+	if deadline, ok := ctx.Deadline(); ok {
+		c.logger.Debug("Contexto com deadline",
+			zap.Time("deadline", deadline),
+			zap.Duration("timeRemaining", time.Until(deadline)))
+	}
+
 	dirPath, err := utils.ExpandPath(dirPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("erro ao expandir o caminho: %w", err)
@@ -932,6 +942,14 @@ func (c *OpenAIAssistantClient) ProcessDirectoryForAssistant(ctx context.Context
 	// Fazer upload de cada arquivo e anexar ao assistente
 	var uploadedSize int64
 	for i, file := range files {
+		// Verificar se o contexto foi cancelado
+		if err := ctx.Err(); err != nil {
+			c.logger.Warn("Contexto cancelado durante o processamento",
+				zap.Error(err),
+				zap.Int("filesProcessed", i),
+				zap.Int("totalFiles", len(files)))
+			return fileIDs, summary.String(), fmt.Errorf("operação cancelada: %w", err)
+		}
 		progressPercent := float64(uploadedSize) / float64(totalSize) * 100
 		summary.WriteString(fmt.Sprintf("⏳ [%.1f%%] Processando %d/%d: %s\n",
 			progressPercent, i+1, len(files), filepath.Base(file.Path)))
@@ -963,6 +981,12 @@ func (c *OpenAIAssistantClient) ProcessDirectoryForAssistant(ctx context.Context
 
 		summary.WriteString(fmt.Sprintf("✅ Anexado: %s (%.2f KB)\n",
 			filepath.Base(file.Path), float64(file.Size)/1024))
+
+		// Adicionar log após cada arquivo para rastrear progresso
+		c.logger.Debug("Arquivo processado",
+			zap.String("path", file.Path),
+			zap.Int("current", i+1),
+			zap.Int("total", len(files)))
 	}
 
 	// Resumo final

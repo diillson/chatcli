@@ -803,6 +803,15 @@ func (cli *ChatCLI) handleAgentCommand(userInput string) {
 	additionalContext := ""
 	query, additionalContext = cli.processSpecialCommands(query)
 
+	// Garantir que o AgentMode tenha acesso ao completer atual
+	// Não precisamos passar o liner diretamente, pois o AgentMode
+	// já tem acesso ao cli.line através da referência ao cli
+
+	// Assegurar que o modo agente está inicializado
+	if cli.agentMode == nil {
+		cli.agentMode = NewAgentMode(cli, cli.logger)
+	}
+
 	err := cli.agentMode.Run(ctx, query, additionalContext)
 	if err != nil {
 		fmt.Printf("❌ Erro no modo agente: %v\n", err)
