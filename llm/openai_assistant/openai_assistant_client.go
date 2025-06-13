@@ -193,36 +193,62 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 	return response, nil
 }
 
-// Método para limpar threads antigas periodicamente
-func (c *OpenAIAssistantClient) CleanupOldThreads() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// Método para limpar threads ao fim da app
+func (c *OpenAIAssistantClient) Cleanup() error {
+	c.mu.RLock()
+	threadID := c.currentThreadID
+	c.mu.RUnlock()
 
-	threshold := time.Now().Add(-24 * time.Hour) // Threads mais antigas que 24h
-	var threadsToDelete []string
-
-	for threadID, lastActive := range c.activeThreads {
-		if lastActive.Before(threshold) {
-			threadsToDelete = append(threadsToDelete, threadID)
-		}
+	if threadID == "" {
+		return nil // Nada para limpar
 	}
 
-	if len(threadsToDelete) > 0 {
-		c.logger.Info("Limpando threads antigas",
-			zap.Int("count", len(threadsToDelete)))
+	// Criar contexto com timeout para a limpeza
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-		// Apagar threads antigas em segundo plano
-		go func(threads []string) {
-			for _, threadID := range threads {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				c.deleteThread(ctx, threadID)
-				cancel()
+	// Tenta finalizar qualquer run ativo na thread
+	c.finishActiveRuns(ctx, threadID)
 
-				c.mu.Lock()
-				delete(c.activeThreads, threadID)
-				c.mu.Unlock()
+	c.logger.Info("Limpeza de recursos do OpenAI Assistant realizada")
+	return nil
+}
+
+// finishActiveRuns tenta encontrar e finalizar runs ativos em uma thread
+func (c *OpenAIAssistantClient) finishActiveRuns(ctx context.Context, threadID string) {
+	// Listar runs ativos
+	endpoint := fmt.Sprintf("/threads/%s/runs?limit=10", threadID)
+	resp, err := c.client.Get(ctx, endpoint)
+	if err != nil {
+		c.logger.Warn("Erro ao listar runs para limpeza", zap.Error(err))
+		return
+	}
+
+	var runsResponse struct {
+		Data []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(resp, &runsResponse); err != nil {
+		c.logger.Warn("Erro ao decodificar resposta de runs", zap.Error(err))
+		return
+	}
+
+	// Cancelar runs ativos
+	for _, run := range runsResponse.Data {
+		if run.Status == "in_progress" || run.Status == "queued" {
+			cancelEndpoint := fmt.Sprintf("/threads/%s/runs/%s/cancel", threadID, run.ID)
+			_, err := c.client.Post(ctx, cancelEndpoint, nil)
+			if err != nil {
+				c.logger.Warn("Erro ao cancelar run",
+					zap.String("runID", run.ID),
+					zap.Error(err))
+			} else {
+				c.logger.Info("Run cancelado com sucesso", zap.String("runID", run.ID))
 			}
-		}(threadsToDelete)
+		}
 	}
 }
 

@@ -314,10 +314,19 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 // cleanup realiza a limpeza de recursos ao encerrar o ChatCLI
 func (cli *ChatCLI) cleanup() {
 	cli.line.Close()
-	//cli.historyManager.SaveHistory(cli.commandHistory) // Salvar o histórico
+
+	// Salvar o histórico
 	if err := cli.historyManager.SaveHistory(cli.commandHistory); err != nil {
 		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
 	}
+
+	// Se o cliente for um OpenAIAssistantClient, realizar limpeza específica
+	if assistantClient, ok := cli.Client.(*openai_assistant.OpenAIAssistantClient); ok {
+		if err := assistantClient.Cleanup(); err != nil {
+			cli.logger.Error("Erro na limpeza do OpenAI Assistant", zap.Error(err))
+		}
+	}
+
 	cli.logger.Sync()
 }
 
