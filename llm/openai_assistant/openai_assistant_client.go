@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -247,33 +245,6 @@ func (c *OpenAIAssistantClient) finishActiveRuns(ctx context.Context, threadID s
 			}
 		}
 	}
-}
-
-// Método para deletar thread
-func (c *OpenAIAssistantClient) deleteThread(ctx context.Context, threadID string) error {
-	endpoint := fmt.Sprintf("/threads/%s", threadID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, AssistantAPIBaseURL+endpoint, nil)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("OpenAI-Beta", "assistants=v2")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("erro ao deletar thread: status %d, resposta: %s", resp.StatusCode, string(body))
-	}
-
-	c.logger.Info("Thread deletada com sucesso", zap.String("threadID", threadID))
-	return nil
 }
 
 // initializeAssistant cria ou recupera um assistente OpenAI
@@ -519,24 +490,6 @@ func (r *FileRegistry) saveCache() {
 	r.logger.Debug("Cache salvo com sucesso",
 		zap.String("path", r.cachePath),
 		zap.Int("file_count", len(r.Files)))
-}
-
-// attachFileToAssistant anexa um arquivo ao assistente
-func (c *OpenAIAssistantClient) attachFileToAssistant(ctx context.Context, fileID string) error {
-	payload := map[string]interface{}{
-		"file_id": fileID,
-	}
-
-	endpoint := fmt.Sprintf("/assistants/%s/files", c.assistantID)
-	_, err := c.client.Post(ctx, endpoint, payload)
-	if err != nil {
-		return fmt.Errorf("erro ao anexar arquivo ao assistente: %w", err)
-	}
-
-	c.logger.Info("Arquivo anexado ao assistente",
-		zap.String("fileID", fileID),
-		zap.String("assistantID", c.assistantID))
-	return nil
 }
 
 // Criar um thread

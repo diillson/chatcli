@@ -1,0 +1,30 @@
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - gofmt
+    - goimports
+    - unused
+    - deadcode
+    - gocyclo
+    - ineffassign
+    - structcheck
+    - varcheck
+    - gosimple
+    - misspell
+    - revive
+    - dupl
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

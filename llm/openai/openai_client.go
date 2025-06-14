@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/diillson/chatcli/config"
 	"io"
@@ -156,7 +157,7 @@ func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
 			zap.Int("status", resp.StatusCode),
 			zap.String("resposta", string(bodyBytes)),
 		)
-		return "", fmt.Errorf(errMsg)
+		return "", errors.New(errMsg)
 	}
 
 	var result map[string]interface{}

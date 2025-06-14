@@ -1,5 +1,7 @@
 # ChatCLI
 
+![Lint & Test](https://github.com/diillson/chatcli/actions/workflows/lint.yml/badge.svg)
+
 **ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) like StackSpot, OpenAI, and ClaudeAI, making interactive and contextual conversations accessible directly from your terminal. Designed for developers, data scientists, and tech enthusiasts, ChatCLI supercharges productivity by combining contextual data sources and offering a rich, user-friendly experience.
 
 ---
@@ -141,6 +143,7 @@ HISTORY_MAX_SIZE=300MB
 # OpenAI Settings
 OPENAI_API_KEY=your-openai-key
 OPENAI_MODEL=gpt-4o-mini
+OPENAI_ASSISTANT_MODEL=gpt-4o-mini
 
 # StackSpot Settings
 CLIENT_ID=your-client-id

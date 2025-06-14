@@ -13,7 +13,6 @@ import (
 
 type HistoryManager struct {
 	historyFile    string
-	commandHistory []string
 	logger         *zap.Logger
 	maxHistorySize int64
 }
