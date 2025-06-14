@@ -49,12 +49,14 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempt
 
 // GetModelName retorna o nome do modelo configurado para ClaudeAI
 func (c *ClaudeClient) GetModelName() string {
-	if c.model == "claude-3-5-sonnet-20241022" {
+	switch c.model {
+	case "claude-3-5-sonnet-20241022":
 		return "claude 3.5 sonnet"
-	} else if c.model == "claude-3-7-sonnet-20250219" {
+	case "claude-3-7-sonnet-20250219":
 		return "claude 3.7 sonnet"
+	default:
+		return c.model
 	}
-	return c.model
 }
 
 // SendPrompt com exponential backoff
@@ -124,7 +126,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		// Verifica o status code da resposta
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			// Trata especificamente erros de rate limit
 			if resp.StatusCode == http.StatusTooManyRequests {

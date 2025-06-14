@@ -61,7 +61,7 @@ func ReadFileContent(filePath string, maxSize int64) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("erro ao abrir o arquivo: %w", err)
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		var data strings.Builder
 		buffer := make([]byte, 8192) // 8KB por vez

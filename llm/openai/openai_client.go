@@ -143,7 +143,7 @@ func (c *OpenAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http
 
 // processResponse processa a resposta da API da OpenAI
 func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

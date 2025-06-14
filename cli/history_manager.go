@@ -79,7 +79,7 @@ func (hm *HistoryManager) LoadHistory() ([]string, error) {
 		hm.logger.Warn("Não foi possível carregar o histórico:", zap.Error(err))
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var history []string
 	scanner := bufio.NewScanner(f)
@@ -117,11 +117,11 @@ func (hm *HistoryManager) SaveHistory(commandHistory []string) error {
 		hm.logger.Warn("Não foi possível salvar o histórico:", zap.Error(err))
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Escrever o histórico no arquivo
 	for _, cmd := range commandHistory {
-		fmt.Fprintln(f, cmd)
+		_, _ = fmt.Fprintln(f, cmd)
 	}
 
 	return nil
