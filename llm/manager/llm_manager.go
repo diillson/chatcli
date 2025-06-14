@@ -129,7 +129,7 @@ func (m *LLMManagerImpl) GetAvailableProviders() []string {
 func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMClient, error) {
 	factoryFunc, ok := m.clients[provider]
 	if !ok {
-		return nil, fmt.Errorf("Erro: Provedor LLM '%s' não suportado ou não configurado", provider)
+		return nil, fmt.Errorf("erro: Provedor LLM '%s' não suportado ou não configurado", provider)
 	}
 
 	client, err := factoryFunc(model)

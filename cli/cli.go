@@ -100,7 +100,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 	}
 
 	for _, variable := range variablesToUnset {
-		os.Unsetenv(variable)
+		_ = os.Unsetenv(variable)
 	}
 
 	// Recarregar o arquivo .env
@@ -312,7 +312,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 // cleanup realiza a limpeza de recursos ao encerrar o ChatCLI
 func (cli *ChatCLI) cleanup() {
-	cli.line.Close()
+	_ = cli.line.Close()
 
 	// Salvar o histórico
 	if err := cli.historyManager.SaveHistory(cli.commandHistory); err != nil {
@@ -812,9 +812,9 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 		if cli.model == "claude-3-5-sonnet-20241022" {
 			return 50000
 		} else if cli.model == "claude-3-haiku" {
-			return 50000
+			return 42000
 		} else if cli.model == "claude-3-opus" {
-			return 50000
+			return 32000
 		} else {
 			return 50000 // valor conservador para outros modelos Claude
 		}
@@ -1546,7 +1546,7 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 		cmd.Stderr = os.Stderr
 
 		// Fechar o liner para liberar o terminal antes de executar o comando interativo
-		cli.line.Close()
+		_ = cli.line.Close()
 
 		// Executar o comando
 		err = cmd.Run()
@@ -1650,7 +1650,7 @@ func (cli *ChatCLI) loadHistory() {
 		cli.logger.Warn("Não foi possível carregar o histórico:", zap.Error(err))
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {

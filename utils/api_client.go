@@ -95,7 +95,7 @@ func (c *APIClient) Request(ctx context.Context, method, path string, body []byt
 
 		// Ler o corpo da resposta
 		respBody, err = io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler resposta: %w", err)
 		}

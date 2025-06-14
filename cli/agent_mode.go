@@ -479,7 +479,7 @@ func (a *AgentMode) getMultilineInput(prompt string) string {
 
 	// Fechar o liner temporariamente
 	if a.cli.line != nil {
-		a.cli.line.Close()
+		_ = a.cli.line.Close()
 		a.cli.line = nil
 	}
 
@@ -930,7 +930,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 		}
 
 		scriptPath := tmpFile.Name()
-		defer os.Remove(scriptPath) // Limpar o arquivo temporário depois
+		defer func() { _ = os.Remove(scriptPath) }() // Limpar o arquivo temporário depois
 
 		// Escrever o conteúdo do script no arquivo
 		if _, err := tmpFile.WriteString(scriptContent); err != nil {
@@ -990,7 +990,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 				cmd = strings.TrimSuffix(cmd, " --interactive")
 				isInteractive = true
 			} else if strings.Contains(cmd, "#interactive") {
-				cmd = strings.Replace(cmd, "#interactive", "", -1)
+				cmd = strings.ReplaceAll(cmd, "#interactive", "")
 				cmd = strings.TrimSpace(cmd)
 				isInteractive = true
 			} else {
@@ -1080,7 +1080,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 func (a *AgentMode) executeInteractiveCommand(ctx context.Context, shell string, command string) error {
 	// Fechar o liner para liberar o terminal
 	if a.cli.line != nil {
-		a.cli.line.Close()
+		_ = a.cli.line.Close()
 		a.cli.line = nil
 	}
 
@@ -1452,7 +1452,7 @@ func (a *AgentMode) editCommandBlock(block CommandBlock) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() { _ = os.Remove(tmpfile.Name()) }()
 
 	content := strings.Join(block.Commands, "\n")
 	if _, err := tmpfile.Write([]byte(content)); err != nil {
