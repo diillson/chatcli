@@ -1,6 +1,12 @@
 # ChatCLI
 
 ![Lint & Test](https://github.com/diillson/chatcli/actions/workflows/lint.yml/badge.svg)
+[![GitHub release](https://img.shields.io/github/v/release/diillson/chatcli)](https://github.com/diillson/chatcli/releases)
+![GitHub issues](https://img.shields.io/github/issues/diillson/chatcli)
+![GitHub last commit](https://img.shields.io/github/last-commit/diillson/chatcli)
+![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/diillson/chatcli)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/diillson/chatcli?label=Go%20Version)
+![GitHub](https://img.shields.io/github/license/diillson/chatcli)
 
 **ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) like StackSpot, OpenAI, and ClaudeAI, making interactive and contextual conversations accessible directly from your terminal. Designed for developers, data scientists, and tech enthusiasts, ChatCLI supercharges productivity by combining contextual data sources and offering a rich, user-friendly experience.
 
