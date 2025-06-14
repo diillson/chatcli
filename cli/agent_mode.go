@@ -78,9 +78,14 @@ func (a *AgentMode) fallbackPrompt(prompt string) string {
 	return strings.TrimSpace(resp)
 }
 
+func (a *AgentMode) updateLiner(line *liner.State) {
+	// Atualizar a referência ao liner
+	a.cli.line = line
+}
+
 // getInput obtém entrada do usuário de forma segura
 func (a *AgentMode) getInput(prompt string) string {
-	// Usar o liner da instância principal em vez de criar um novo
+	// Usar o liner da instância principal
 	if a.cli.line != nil {
 		input, err := a.cli.line.Prompt(prompt)
 		if err != nil {
@@ -152,6 +157,11 @@ func isDangerous(cmd string) bool {
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string) error {
 	// Verificar se estamos usando o OpenAI Assistant
 	_, isAssistant := a.cli.Client.(*openai_assistant.OpenAIAssistantClient)
+
+	// Adicionar logs de debug para entender melhor o fluxo
+	if isAssistant {
+		a.logger.Debug("Executando modo agente com OpenAI Assistant")
+	}
 
 	systemInstruction := ""
 	if isAssistant {
@@ -230,7 +240,35 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
 	// 5. Enviar para a LLM e obter a resposta
-	aiResponse, err := a.cli.Client.SendPrompt(ctx, fullQuery, a.cli.history)
+	// Ajustar timeout específico para o OpenAI Assistant
+	var responseCtx context.Context
+	var cancel context.CancelFunc
+
+	if isAssistant {
+		// Timeout maior para o Assistant, já que o processamento de arquivos leva mais tempo
+		a.logger.Debug("Usando timeout estendido para OpenAI Assistant")
+		responseCtx, cancel = context.WithTimeout(ctx, 30*time.Minute)
+	} else {
+		responseCtx, cancel = context.WithTimeout(ctx, 30*time.Minute)
+	}
+	defer cancel()
+
+	// Adicionar log antes da chamada para SendPrompt
+	a.logger.Debug("Enviando prompt para o LLM",
+		zap.String("provider", a.cli.provider),
+		zap.Int("historyLength", len(a.cli.history)),
+		zap.Int("queryLength", len(fullQuery)))
+
+	aiResponse, err := a.cli.Client.SendPrompt(responseCtx, fullQuery, a.cli.history)
+
+	// Adicionar log após a chamada
+	if err != nil {
+		a.logger.Error("Erro ao obter resposta do LLM", zap.Error(err))
+	} else {
+		a.logger.Debug("Resposta recebida do LLM",
+			zap.Int("responseLength", len(aiResponse)))
+	}
+
 	a.cli.animation.StopThinkingAnimation()
 
 	if err != nil {
