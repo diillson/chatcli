@@ -605,6 +605,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 
 	outputs := make([]*CommandOutput, len(blocks))
 
+mainLoop:
 	for {
 		// Mostra os comandos disponíveis
 		for i, block := range blocks {
@@ -792,7 +793,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				if len(newBlocks) > 0 {
 					blocks = newBlocks                            // troca para os novos comandos da IA!
 					outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
-					break                                         // Sai desse loop for & reinicia com novos comandos
+					continue mainLoop                             // Sai desse loop for & reinicia com novos comandos
 				} else {
 					fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
 				}
@@ -817,7 +818,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				if len(newBlocks) > 0 {
 					blocks = newBlocks                            // troca para os novos comandos da IA!
 					outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
-					break                                         // Sai desse loop for & reinicia com novos comandos
+					continue mainLoop                             // Sai desse loop for & reinicia com novos comandos
 				} else {
 					fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
 				}
@@ -852,7 +853,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			if len(newBlocks) > 0 {
 				blocks = newBlocks                            // troca para os novos comandos da IA!
 				outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
-				break                                         // Sai desse loop for & reinicia com novos comandos
+				continue mainLoop                             // Sai desse loop for & reinicia com novos comandos
 			} else {
 				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
 			}
