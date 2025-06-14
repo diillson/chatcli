@@ -1305,7 +1305,7 @@ func hasCodeStructures(content string) bool {
 func (a *AgentMode) getCriticalInput(prompt string) string {
 	// Primeiro, tentar liberar o terminal se estiver usando liner
 	if a.cli.line != nil {
-		a.cli.line.Close()
+		_ = a.cli.line.Close()
 		a.cli.line = nil
 	}
 

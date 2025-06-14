@@ -809,13 +809,14 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 			return 40000 // gpt-3.5-turbo padrão
 		}
 	case "CLAUDEAI":
-		if cli.model == "claude-3-5-sonnet-20241022" {
+		switch cli.model {
+		case "claude-3-5-sonnet-20241022":
 			return 50000
-		} else if cli.model == "claude-3-haiku" {
+		case "claude-3-haiku":
 			return 42000
-		} else if cli.model == "claude-3-opus" {
+		case "claude-3-opus":
 			return 32000
-		} else {
+		default:
 			return 50000 // valor conservador para outros modelos Claude
 		}
 	case "STACKSPOT":
