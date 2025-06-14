@@ -58,7 +58,6 @@ type ChatCLI struct {
 	model             string
 	history           []models.Message
 	line              Liner
-	terminalWidth     int
 	commandHistory    []string
 	historyManager    *HistoryManager
 	animation         *AnimationManager
@@ -327,7 +326,9 @@ func (cli *ChatCLI) cleanup() {
 		}
 	}
 
-	cli.logger.Sync()
+	if err := cli.logger.Sync(); err != nil {
+		fmt.Printf("Falha ao sincronizar logger: %v\n", err)
+	}
 }
 
 func (cli *ChatCLI) handleSwitchCommand(userInput string) {
@@ -465,20 +466,6 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("/agent <consulta> - Inicia o modo agente que analisa e executa comandos para resolver sua tarefa")
 	fmt.Println("/run <consulta> - Alias para /agent")
 	fmt.Printf("\n")
-}
-
-func (cli *ChatCLI) getConversationHistory() string {
-	var historyBuilder strings.Builder
-	for _, msg := range cli.history {
-		role := "Usuário"
-		if msg.Role == "assistant" {
-			role = "Assistente"
-		} else if msg.Role == "system" {
-			role = "Sistema"
-		}
-		historyBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
-	}
-	return historyBuilder.String()
 }
 
 // processSpecialCommands processa comandos especiais como @history, @git, @env, @file
@@ -966,32 +953,6 @@ func (cli *ChatCLI) processDirectorySummary(path string, tokenEstimator func(str
 	}
 
 	return builder.String(), nil
-}
-
-// Função auxiliar para extrair todos os caminhos de arquivos após @file
-func extractAllFilePaths(input string) ([]string, error) {
-	var filePaths []string
-	tokens, err := parseFields(input)
-	if err != nil {
-		return nil, err
-	}
-
-	skipNext := false
-	for i, token := range tokens {
-		if skipNext {
-			skipNext = false
-			continue
-		}
-		if token == "@file" {
-			if i+1 < len(tokens) {
-				filePaths = append(filePaths, tokens[i+1])
-				skipNext = true
-			} else {
-				return nil, fmt.Errorf("comando @file sem caminho de arquivo")
-			}
-		}
-	}
-	return filePaths, nil
 }
 
 // processDirectoryChunked processa um diretório e divide o conteúdo em chunks

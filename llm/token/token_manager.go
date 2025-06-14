@@ -3,6 +3,7 @@ package token
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -142,7 +143,7 @@ func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("falha ao obter o token: status %d, resposta: %s", resp.StatusCode, string(bodyBytes))
 		tm.logger.Error("Falha na requisição de token", zap.String("response", errMsg))
-		return "", fmt.Errorf(errMsg)
+		return "", errors.New(errMsg)
 	}
 
 	var result map[string]interface{}

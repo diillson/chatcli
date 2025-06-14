@@ -39,7 +39,11 @@ func main() {
 		fmt.Printf("Não foi possível inicializar o logger: %v\n", err)
 		os.Exit(1) // Encerrar a aplicação em caso de erro crítico
 	}
-	defer logger.Sync()
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			fmt.Printf("Erro ao fechar logger: %v\n", err)
+		}
+	}()
 
 	// Configurar o contexto para o shutdown gracioso
 	ctx, cancel := context.WithCancel(context.Background())

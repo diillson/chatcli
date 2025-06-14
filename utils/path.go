@@ -106,9 +106,10 @@ func ReadFileContent(filePath string, maxSize int64) (string, error) {
 }
 
 // IsTemporaryError verifica se o erro é temporário e pode ser retryado.
+// Desde o Go 1.18, 'Temporary' é desaconselhado. Normalmente só timeout é considerado seguro para retry.
 func IsTemporaryError(err error) bool {
 	if ne, ok := err.(net.Error); ok {
-		return ne.Temporary() || ne.Timeout()
+		return ne.Timeout()
 	}
 	return false
 }

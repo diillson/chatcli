@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/peterh/liner"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,53 +33,12 @@ func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 	}
 }
 
-// safePrompt cria um novo liner, obtém input e fecha com segurança
-func (a *AgentMode) safePrompt(prompt string) (string, error) {
-	// Criar um novo liner para cada prompt
-	line := liner.NewLiner()
-	defer line.Close()
-
-	// Configurar o liner
-	line.SetCtrlCAborts(true)
-
-	// Opcional: configurar completador
-	if a.cli.completer != nil {
-		line.SetCompleter(a.cli.completer)
-	}
-
-	// Opcional: carregar histórico recente
-	for i := 0; i < len(a.cli.commandHistory) && i < 50; i++ {
-		idx := len(a.cli.commandHistory) - 1 - i
-		if idx >= 0 {
-			line.AppendHistory(a.cli.commandHistory[idx])
-		}
-	}
-
-	// Obter input
-	input, err := line.Prompt(prompt)
-	if err != nil {
-		return "", err
-	}
-
-	// Adicionar ao histórico global
-	if input != "" {
-		a.cli.commandHistory = append(a.cli.commandHistory, input)
-	}
-
-	return input, nil
-}
-
 // Função de fallback para quando o prompt seguro falhar
 func (a *AgentMode) fallbackPrompt(prompt string) string {
 	fmt.Print(prompt)
 	reader := bufio.NewReader(os.Stdin)
 	resp, _ := reader.ReadString('\n')
 	return strings.TrimSpace(resp)
-}
-
-func (a *AgentMode) updateLiner(line *liner.State) {
-	// Atualizar a referência ao liner
-	a.cli.line = line
 }
 
 // getInput obtém entrada do usuário de forma segura
@@ -576,14 +534,12 @@ func (a *AgentMode) getMultilineInput(prompt string) string {
 	}
 
 	// Restaurar completador
-	if a.cli.completer != nil {
-		newLiner.SetCompleter(a.cli.completer)
-	}
+	newLiner.SetCompleter(a.cli.completer)
 
 	a.cli.line = newLiner
 
 	// Se não tivermos linhas, retornar string vazia
-	if lines == nil || len(lines) == 0 {
+	if len(lines) == 0 {
 		return ""
 	}
 
@@ -697,7 +653,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			cmd := exec.Command("stty", "sane")
 			cmd.Stdin = os.Stdin
 			cmd.Stdout = os.Stdout
-			cmd.Run() // Ignoramos erros aqui propositalmente
+			_ = cmd.Run() // Ignoramos erros aqui propositalmente
 
 			// Solicitar confirmação diretamente
 			fmt.Print("\n⚠️ Executar todos os comandos em sequência? (s/N): ")
@@ -965,7 +921,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 		scriptContent := block.Commands[0]
 
 		// Criar um arquivo temporário para o script
-		tmpFile, err := ioutil.TempFile("", "chatcli-script-*.sh")
+		tmpFile, err := os.CreateTemp("", "chatcli-script-*.sh")
 		if err != nil {
 			errMsg := fmt.Sprintf("❌ Erro ao criar arquivo temporário para script: %v\n", err)
 			allOutput.WriteString(errMsg)
@@ -1132,7 +1088,7 @@ func (a *AgentMode) executeInteractiveCommand(ctx context.Context, shell string,
 	sttyCmd := exec.Command("stty", "sane")
 	sttyCmd.Stdin = os.Stdin
 	sttyCmd.Stdout = os.Stdout
-	sttyCmd.Run() // Ignoramos erros aqui propositalmente
+	_ = sttyCmd.Run() // Ignoramos erros aqui propositalmente
 
 	// Obter o caminho do arquivo de configuração do shell
 	shellConfigPath := a.getShellConfigPath(shell)
@@ -1158,7 +1114,7 @@ func (a *AgentMode) executeInteractiveCommand(ctx context.Context, shell string,
 	sttyCmd = exec.Command("stty", "sane")
 	sttyCmd.Stdin = os.Stdin
 	sttyCmd.Stdout = os.Stdout
-	sttyCmd.Run() // Ignoramos erros aqui propositalmente
+	_ = sttyCmd.Run() // Ignoramos erros aqui propositalmente
 
 	fmt.Println("\nComando interativo finalizado. Retornando ao modo agente...")
 
@@ -1173,9 +1129,7 @@ func (a *AgentMode) executeInteractiveCommand(ctx context.Context, shell string,
 		}
 
 		// Restaurar completador
-		if a.cli.completer != nil {
-			newLiner.SetCompleter(a.cli.completer)
-		}
+		newLiner.SetCompleter(a.cli.completer)
 
 		a.cli.line = newLiner
 	}
@@ -1359,7 +1313,7 @@ func (a *AgentMode) getCriticalInput(prompt string) string {
 	cmd := exec.Command("stty", "sane")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	cmd.Run() // Ignoramos erros aqui propositalmente
+	_ = cmd.Run()
 
 	// Exibir o prompt com formatação clara
 	fmt.Print("\n")
@@ -1383,9 +1337,7 @@ func (a *AgentMode) getCriticalInput(prompt string) string {
 		}
 
 		// Restaurar completador
-		if a.cli.completer != nil {
-			newLiner.SetCompleter(a.cli.completer)
-		}
+		newLiner.SetCompleter(a.cli.completer)
 
 		a.cli.line = newLiner
 	}
@@ -1496,7 +1448,7 @@ func (a *AgentMode) editCommandBlock(block CommandBlock) ([]string, error) {
 	if editor == "" {
 		editor = "vim"
 	}
-	tmpfile, err := ioutil.TempFile("", "agent-edit-*.sh")
+	tmpfile, err := os.CreateTemp("", "agent-edit-*.sh")
 	if err != nil {
 		return nil, err
 	}
@@ -1518,7 +1470,7 @@ func (a *AgentMode) editCommandBlock(block CommandBlock) ([]string, error) {
 		return nil, err
 	}
 
-	edited, err := ioutil.ReadFile(tmpfile.Name())
+	edited, err := os.ReadFile(tmpfile.Name())
 	if err != nil {
 		return nil, err
 	}
