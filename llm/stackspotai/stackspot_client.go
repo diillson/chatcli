@@ -149,7 +149,7 @@ func (c *StackSpotClient) sendRequestToLLM(ctx context.Context, prompt, accessTo
 		c.logger.Error("Erro ao fazer a requisição POST", zap.Error(err))
 		return "", fmt.Errorf("erro ao fazer a requisição: %w", err)
 	}
-	defer func() { resp.Body.Close() }()
+	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -258,7 +258,7 @@ func (c *StackSpotClient) getLLMResponse(ctx context.Context, responseID, access
 		c.logger.Error("Erro na requisição GET para a LLM", zap.Error(err))
 		return "", fmt.Errorf("erro na requisição GET para a LLM: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
