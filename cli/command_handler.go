@@ -3,6 +3,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/diillson/chatcli/models"
 	"strings"
 )
 
@@ -40,6 +41,10 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return ch.cli.handleRetryAllChunks()
 	case userInput == "/skipchunk":
 		return ch.cli.handleSkipChunk()
+	case userInput == "/newsession":
+		ch.cli.history = []models.Message{}
+		fmt.Println("Iniciada nova sessão de conversa; histórico foi limpo.")
+		return false
 	default:
 		fmt.Println("Comando desconhecido. Use /help para ver os comandos disponíveis.")
 		return false

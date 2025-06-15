@@ -442,7 +442,6 @@ func (cli *ChatCLI) switchProvider() {
 	cli.Client = newClient
 	cli.provider = newProvider
 	cli.model = newModel
-	cli.history = nil // Reiniciar o histórico da conversa
 	fmt.Printf("Trocado para %s (%s)\n\n", cli.Client.GetModelName(), cli.provider)
 }
 
