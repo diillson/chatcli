@@ -193,6 +193,14 @@ Once installed and configured, ChatCLI offers a suite of commands for seamless L
 
     * `/help`
 
+#### New Command: `/newsession`
+
+* **Start a New Session**:
+
+    * `/newsession` – Clears the current history and starts a new conversation session.
+    * **Usage**: Ideal for starting a conversation from scratch without previous context. Previously, switching the `LLM` provider would automatically clean the conversation and context history. Now, it's possible to continue the session with a new `LLM` provider without losing the existing history. If desired, you can use the `/newsession` command to reset the current history and context and start a fresh conversation with the new provider.
+  
+
 ### Contextual Commands
 
 * `@history` – Inserts the last 10 shell commands.
@@ -224,7 +232,8 @@ Agent Mode allows the AI to execute tasks on your system via terminal commands:
 * Agent Mode is designed for safety, respecting system permissions and ensuring only authorized commands are run.
 * You can exit Agent Mode at any time, returning to normal chat.
 
-#### New Feature in Agent Mode!!
+
+#### Adding Context to Outputs in Agent Mode!!
 
 * You can now add context to outputs of agent-executed commands.
 

@@ -181,6 +181,11 @@ Após a instalação e configuração, o ChatCLI oferece uma série de comandos 
 - **Ajuda**:
     - `/help`
 
+#### Novo Comando: `/newsession`
+- **Iniciar uma Nova Sessão**:
+    - `/newsession` – Limpa o histórico atual e inicia uma nova sessão de conversa.
+    - **Uso**: Ideal para começar uma conversa do zero sem o contexto anterior, anteriormente recebia um clean no historico de conversa e contexto ao trocar de provider `LLM`, hoje é possível continuar a sessão em novo provider `LLM` sem perder o histórico anterior, com o comando `/newsession` você pode zerar o histórico e contexto atual e iniciar uma nova sessão de conversa no novo provider se assim desejar.
+
 ### Comandos Contextuais
 
 - `@history` – Insere os últimos 10 comandos do shell.
@@ -211,7 +216,7 @@ O Modo Agente permite que a IA execute tarefas no seu sistema através de comand
 - O agente é projetado para ser seguro e respeitar as permissões do sistema, garantindo que apenas comandos autorizados sejam execut
 - O Modo Agente pode ser desativado a qualquer momento, retornando ao modo de conversa normal.
 
-#### Nova Funcionalidade no modo Agente !!
+#### Adicionando contexto aos outputs no modo Agente !!
 - agora você pode adicionar contexto aos outputs dos comandos executados pelo agente
 
 Quando você usar a nova funcionalidade "aCN" , você poderá:
