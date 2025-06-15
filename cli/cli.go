@@ -464,6 +464,7 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("/skipchunk - Pula explicitamente um chunk, ignorando seu conteúdo.")
 	fmt.Println("/agent <consulta> - Inicia o modo agente que analisa e executa comandos para resolver sua tarefa")
 	fmt.Println("/run <consulta> - Alias para /agent")
+	fmt.Println("/newsession - Inicia uma nova sessão de conversa, limpando o histórico atual")
 	fmt.Printf("\n")
 }
 
