@@ -1,0 +1,26 @@
+#name: Release Please (Version & Tag)
+#
+#on:
+#  push:
+#    branches:
+#      - main
+#
+#permissions:
+#  contents: write
+#  pull-requests: write
+#  id-token: write  # Necessário para algumas configurações de segurança
+#
+#jobs:
+#  release-please:
+#    runs-on: ubuntu-latest
+#    outputs:
+#      release_created: ${{ steps.release.outputs.release_created }}
+#      tag_name: ${{ steps.release.outputs.tag_name }}
+#    steps:
+#      - name: Release Please
+#        id: release
+#        uses: googleapis/release-please-action@v4
+#        with:
+#          release-type: go
+#          token: ${{ secrets.GITHUB_TOKEN }}
+#          command: release-pr

@@ -1,28 +1,46 @@
-name: Release Binaries
+name: Release Process
 
 on:
   push:
-    tags:
-      - 'v*'
-  # Opção para executar manualmente na UI do GitHub
+    branches:
+      - main
   workflow_dispatch:
     inputs:
-      tag_name:
-        description: 'Tag to release (leave empty to use latest)'
+      force_release:
+        description: 'Force new release even without qualifying commits'
         required: false
+        default: 'false'
 
 permissions:
   contents: write
+  pull-requests: write
   id-token: write
 
 jobs:
-  build:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Release Please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          skip-github-pull-request: true
+          release-type: go
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+
+  build-and-release:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -30,27 +48,12 @@ jobs:
           go-version: '1.23'
           cache: true
 
-      - name: Get tag name
-        id: get_tag
-        run: |
-          if [[ -n "${{ github.event.inputs.tag_name }}" ]]; then
-            echo "TAG_NAME=${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
-          elif [[ -n "${{ github.ref_name }}" ]]; then
-            echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
-          else
-            echo "TAG_NAME=$(git describe --tags --abbrev=0)" >> $GITHUB_ENV
-          fi
-
       - name: Build binaries
         run: |
           COMMIT_HASH=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          VERSION=${TAG_NAME}
+          VERSION=${{ needs.release-please.outputs.tag_name }}
           LDFLAGS="-X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'"
-          
-          echo "Building version: ${VERSION}"
-          echo "Commit hash: ${COMMIT_HASH}"
-          echo "Build date: ${BUILD_DATE}"
           
           # Build para várias plataformas
           GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-linux-amd64 ./main.go
@@ -61,11 +64,10 @@ jobs:
           # Verifica a versão do binário
           ./chatcli-linux-amd64 --version
 
-      - name: Create GitHub Release
-        id: create_release
+      - name: Update Release with Binaries
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ env.TAG_NAME }}
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: |
             chatcli-linux-amd64
             chatcli-darwin-amd64
@@ -74,6 +76,5 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-          name: "Release ${{ env.TAG_NAME }}"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Usar o token padrão é suficiente
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
