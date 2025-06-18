@@ -64,28 +64,45 @@
 
 1. **Clone the Repository:**
 
-   ```bash
-   git clone https://github.com/diillson/chatcli.git
-   cd chatcli
-   ```
+```bash
+git clone https://github.com/diillson/chatcli.git
+cd chatcli
+```
 
 2. **Install Dependencies:**
 
-   ```bash
-   go mod tidy
-   ```
+```bash
+go mod tidy
+```
 
 3. **Build the Application:**
 
-   ```bash
-   go build -o chatcli
-   ```
+```bash
+go build -o chatcli
+```
 
 4. **Run the Application:**
 
-   ```bash
-   ./chatcli
-   ```
+```bash
+./chatcli
+```
+
+#### Building with Version Information
+
+To compile the application with complete version information:
+
+```bash
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT_HASH=$(git rev-parse --short HEAD)
+BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+go build -ldflags "\
+  -X github.com/diillson/chatcli/version.Version=${VERSION} \
+  -X github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH} \
+  -X github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}" \
+  -o chatcli main.go
+```
+These flags inject version information into the binary, allowing the  /version  command to display accurate data.   
 
 ### Installation via Go Install (optional)
 To install ChatCLI directly via Go, you can use the following command:
@@ -189,17 +206,18 @@ Once installed and configured, ChatCLI offers a suite of commands for seamless L
     * Combine: `/switch --slugname <slug> --tenantname <tenant>`
     * `/reload` – Reload environment variables in real time.
 
+  * **Start a New Session**:
+      * `/newsession` – Clears the current history and starts a new conversation session.
+      * **Usage**: Ideal for starting a conversation from scratch without previous context. Previously, switching the `LLM` provider would automatically clean the conversation and context history. Now, it's possible to continue the session with a new `LLM` provider without losing the existing history. If desired, you can use the `/newsession` command to reset the current history and context and start a fresh conversation with the new provider.
+
+  * **Check Version and Updates:**
+      * `/version` or `/v` – Shows current version, commit hash, and checks for available updates.
+      * **Usage**: Useful to confirm which version is installed and if there are new versions available.
+      * **Alternative**: Run `chatcli --version` or `chatcli -v` directly from the terminal.
+
 * **Help:**
 
     * `/help`
-
-#### New Command: `/newsession`
-
-* **Start a New Session**:
-
-    * `/newsession` – Clears the current history and starts a new conversation session.
-    * **Usage**: Ideal for starting a conversation from scratch without previous context. Previously, switching the `LLM` provider would automatically clean the conversation and context history. Now, it's possible to continue the session with a new `LLM` provider without losing the existing history. If desired, you can use the `/newsession` command to reset the current history and context and start a fresh conversation with the new provider.
-  
 
 ### Contextual Commands
 

@@ -61,28 +61,45 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 
 1. **Clone o Repositório**:
 
-   ```bash
-   git clone https://github.com/diillson/chatcli.git
-   cd chatcli
-   ```
+```bash
+git clone https://github.com/diillson/chatcli.git
+cd chatcli
+```
 
 2. **Instale as Dependências**:
 
-   ```bash
-   go mod tidy
-   ```
+```bash
+go mod tidy
+```
 
 3. **Compile a Aplicação**:
 
-   ```bash
-   go build -o chatcli
-   ```
+```bash
+go build -o chatcli
+```
 
 4. **Execute a Aplicação**:
 
-   ```bash
-   ./chatcli
-   ```
+```bash
+./chatcli
+```
+#### Compilação com Informações de Versão
+
+Para compilar a aplicação com informações completas de versão:
+
+```bash
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT_HASH=$(git rev-parse --short HEAD)
+BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+go build -ldflags "\
+  -X github.com/diillson/chatcli/version.Version=${VERSION} \
+  -X github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH} \
+  -X github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}" \
+  -o chatcli main.go
+```
+Estas flags injetam informações de versão no binário, permitindo que o comando  /version  exiba dados precisos.
+   
 ### Instalação via Go Install (opcional)
 Para instalar o ChatCLI diretamente via Go, você pode usar o seguinte comando:
 
@@ -178,13 +195,17 @@ Após a instalação e configuração, o ChatCLI oferece uma série de comandos 
     - Combinações: `/switch --slugname <slug> --tenantname <tenant>`
     - `/reload` – Recarrega as variáveis de ambiente em tempo real.
 
-- **Ajuda**:
-    - `/help`
-
-#### Novo Comando: `/newsession`
 - **Iniciar uma Nova Sessão**:
     - `/newsession` – Limpa o histórico atual e inicia uma nova sessão de conversa.
     - **Uso**: Ideal para começar uma conversa do zero sem o contexto anterior, anteriormente recebia um clean no historico de conversa e contexto ao trocar de provider `LLM`, hoje é possível continuar a sessão em novo provider `LLM` sem perder o histórico anterior, com o comando `/newsession` você pode zerar o histórico e contexto atual e iniciar uma nova sessão de conversa no novo provider se assim desejar.
+
+- **Verificar Versão e Atualizações**:
+    - `/version` ou `/v` – Mostra a versão atual, o hash do commit e verifica se há atualizações disponíveis.
+    - **Uso**: Útil para confirmar qual versão está instalada e se há novas versões disponíveis.
+    - **Alternativa**: Execute `chatcli --version` ou `chatcli -v` diretamente do terminal.  
+
+- **Ajuda**:
+    - `/help`
 
 ### Comandos Contextuais
 

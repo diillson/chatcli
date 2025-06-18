@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/version"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +17,13 @@ import (
 )
 
 func main() {
+	// Exibir versão se especificado como argumento
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		versionInfo := version.GetCurrentVersion()
+		fmt.Println(version.FormatVersionInfo(versionInfo, true))
+		return
+	}
+
 	// Carregar variáveis de ambiente do arquivo .env
 	envFilePath := os.Getenv("CHATCLI_DOTENV")
 	if envFilePath == "" {

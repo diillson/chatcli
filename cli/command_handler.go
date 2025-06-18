@@ -33,6 +33,9 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/help":
 		ch.cli.showHelp()
 		return false
+	case userInput == "/version" || userInput == "/v":
+		ch.handleVersionCommand()
+		return false
 	case userInput == "/nextchunk":
 		return ch.cli.handleNextChunk()
 	case userInput == "/retry":

@@ -8,6 +8,7 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/openai_assistant"
+	"github.com/diillson/chatcli/version"
 	"github.com/joho/godotenv"
 	"os"
 	"os/exec"
@@ -465,6 +466,7 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("/agent <consulta> - Inicia o modo agente que analisa e executa comandos para resolver sua tarefa")
 	fmt.Println("/run <consulta> - Alias para /agent")
 	fmt.Println("/newsession - Inicia uma nova sessão de conversa, limpando o histórico atual")
+	fmt.Println("/version ou /v - Mostra informações sobre a versão instalada e verifica por atualizações")
 	fmt.Printf("\n")
 }
 
@@ -1888,4 +1890,10 @@ func (cli *ChatCLI) typewriterEffect(text string, delay time.Duration) {
 
 		time.Sleep(delay) // Ajuste o delay conforme desejado
 	}
+}
+
+func (ch *CommandHandler) handleVersionCommand() {
+	versionInfo := version.GetCurrentVersion()
+	formattedInfo := version.FormatVersionInfo(versionInfo, true)
+	fmt.Println(formattedInfo)
 }
