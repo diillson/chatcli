@@ -2,7 +2,7 @@ name: Go Lint & Test
 
 on:
   push:
-    branches: ["main"]
+    branches: ["develop"]
   pull_request:
     branches: ["main"]
 
