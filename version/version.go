@@ -56,7 +56,6 @@ func CheckLatestVersion() (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	// Corrigindo o erro de lint: verificar o erro do Close
 	defer func() {
 		err := resp.Body.Close()
 		if err != nil {
@@ -88,7 +87,7 @@ func CheckLatestVersion() (string, bool, error) {
 
 	// Extrai apenas a parte da tag da versão atual
 	// Para transformar algo como "v1.9.0-5-g1b6ecaa-dirty" em "1.9.0"
-	var currentVersionBase string // Corrigindo o erro de ineffassign
+	var currentVersionBase string
 
 	if strings.Contains(Version, "-") {
 		parts := strings.Split(Version, "-")
