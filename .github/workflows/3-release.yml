@@ -22,15 +22,17 @@ jobs:
 
       - name: Build binaries
         run: |
-          # COMMIT=$(git rev-parse HEAD)
-          # BUILD_TIME=$(date -u +'%Y-%m-%d %H:%M:%S')
-          # LDFLAGS="-X 'github.com/diillson/chatcli/pkg/version.Commit=${COMMIT}' -X 'github.com/diillson/chatcli/pkg/version.BuildTime=${BUILD_TIME}'"
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          LDFLAGS="-X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'"
           # Build para várias plataformas
-          GOOS=linux GOARCH=amd64 go build -o chatcli-linux-amd64 ./main.go
-          GOOS=darwin GOARCH=amd64 go build -o chatcli-darwin-amd64 ./main.go
-          GOOS=windows GOARCH=amd64 go build -o chatcli-windows-amd64.exe ./main.go
+          GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-linux-amd64 ./main.go
+          GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-amd64 ./main.go
+          GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-arm64 ./main.go
+          GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-windows-amd64.exe ./main.go
           # Verifica a versão do binário
-          # ./chatcli-linux-amd64 --version
+          ./chatcli-linux-amd64 --version
 
       - name: Create GitHub Release
         id: create_release
@@ -39,6 +41,7 @@ jobs:
           files: |
             chatcli-linux-amd64
             chatcli-darwin-amd64
+            chatcli-darwin-arm64
             chatcli-windows-amd64.exe
           draft: false
           prerelease: false
