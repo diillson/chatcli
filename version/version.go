@@ -56,7 +56,15 @@ func CheckLatestVersion() (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	defer resp.Body.Close()
+	// Corrigindo o erro de lint: verificar o erro do Close
+	defer func() {
+		err := resp.Body.Close()
+		if err != nil {
+			// Como estamos dentro de um defer, não podemos retornar o erro
+			// Então logamos ou ignoramos silenciosamente
+			fmt.Fprintf(os.Stderr, "Erro ao fechar response body: %v\n", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", false, fmt.Errorf("erro ao verificar versão: status %d", resp.StatusCode)
@@ -80,7 +88,8 @@ func CheckLatestVersion() (string, bool, error) {
 
 	// Extrai apenas a parte da tag da versão atual
 	// Para transformar algo como "v1.9.0-5-g1b6ecaa-dirty" em "1.9.0"
-	currentVersionBase := Version
+	var currentVersionBase string // Corrigindo o erro de ineffassign
+
 	if strings.Contains(Version, "-") {
 		parts := strings.Split(Version, "-")
 		currentVersionBase = strings.TrimPrefix(parts[0], "v")
@@ -90,9 +99,6 @@ func CheckLatestVersion() (string, bool, error) {
 
 	// Verifique se estamos em um commit específico (dev build)
 	isDev := Version == "dev" || strings.Contains(Version, "-dirty") || strings.Contains(Version, "-g")
-
-	// Compara versões (simplificado - para uma comparação mais robusta,
-	// considere usar um pacote como "github.com/hashicorp/go-version")
 
 	// Se estamos em modo dev, só indica atualização se a versão base for diferente
 	if isDev {
