@@ -1,0 +1,63 @@
+name: Push Binaries Process
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: 'Force new release even without qualifying commits'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Para garantir que o histórico completo esteja disponível
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Build binaries
+        run: |
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          VERSION=$(git describe --tags --abbrev=0)
+          LDFLAGS="-X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'"
+          
+          # Build para várias plataformas
+          GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-linux-amd64 ./main.go
+          GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-amd64 ./main.go
+          GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-arm64 ./main.go
+          GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-windows-amd64.exe ./main.go
+          
+          # Verifica a versão do binário
+          ./chatcli-linux-amd64 --version
+
+#      - name: Update Release with Binaries
+#        uses: softprops/action-gh-release@v1
+#        with:
+#          tag_name: ${{ needs.release-pr.outputs.tag_name }}
+#          files: |
+#            chatcli-linux-amd64
+#            chatcli-darwin-amd64
+#            chatcli-darwin-arm64
+#            chatcli-windows-amd64.exe
+#          draft: false
+#          prerelease: false
+#          generate_release_notes: true
+#        env:
+#          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
