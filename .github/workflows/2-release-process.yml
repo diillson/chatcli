@@ -48,6 +48,9 @@ jobs:
           ./chatcli-linux-amd64 --version
   release-please-release:
     runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      release_created: ${{ steps.release.outputs.release_created }}
     needs: [build]
     steps:
       - name: Release Please
@@ -77,8 +80,6 @@ jobs:
       - build
       - release-please-release
     runs-on: ubuntu-latest
-    outputs:
-      tag_name: ${{ steps.release-pr.outputs.tag_name }}
     steps:
       - id: release-pr
         name: Release Please PR
@@ -90,9 +91,10 @@ jobs:
           skip-github-release: true
       - name: Checkout code
         uses: actions/checkout@v4
+        if: ${{ steps.release-please-release.outputs.release_created }}
         with:
           fetch-depth: 0
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.release-please-release.outputs.tag_name }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -104,7 +106,7 @@ jobs:
         run: |
           COMMIT_HASH=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          VERSION=${{ needs.release-please.outputs.tag_name }}
+          VERSION=${{ needs.release-please-release.outputs.tag_name }}
           LDFLAGS="-X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'"
           
           # Build para várias plataformas
@@ -118,6 +120,7 @@ jobs:
 
       - name: Update Release with Binaries
         uses: softprops/action-gh-release@v1
+        if: ${{ needs.release-please-release.outputs.tag_name }}
         with:
           tag_name: ${{ needs.release-pr.outputs.tag_name }}
           files: |
