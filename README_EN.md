@@ -1,6 +1,6 @@
 # ChatCLI
 
-![Lint & Test](https://github.com/diillson/chatcli/actions/workflows/1-lint.yml/badge.svg)
+![Lint & Test](https://github.com/diillson/chatcli/actions/workflows/1-ci.yml/badge.svg)
 [![GitHub release](https://img.shields.io/github/v/release/diillson/chatcli)](https://github.com/diillson/chatcli/releases)
 ![GitHub issues](https://img.shields.io/github/issues/diillson/chatcli)
 ![GitHub last commit](https://img.shields.io/github/last-commit/diillson/chatcli)
