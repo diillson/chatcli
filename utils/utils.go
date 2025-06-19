@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/version"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/term"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -107,4 +109,15 @@ func CheckProviderEnvVariables(logger *zap.Logger) {
 	if claudeAIModel == "" {
 		fmt.Printf("ATENÇÃO: CLAUDEAI_MODEL não definido, usando valor padrão: %s\n", config.DefaultClaudeAIModel)
 	}
+}
+
+func LogStartupInfo(logger *zap.Logger) {
+	logger.Info("ChatCLI iniciado",
+		zap.String("version", version.Version),
+		zap.String("commit", version.CommitHash),
+		zap.String("buildDate", version.BuildDate),
+		zap.String("goVersion", runtime.Version()),
+		zap.String("os", runtime.GOOS),
+		zap.String("arch", runtime.GOARCH),
+	)
 }

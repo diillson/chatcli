@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -56,12 +57,11 @@ func CheckLatestVersion() (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
+
+	// Corrigindo o erro de lint: verificar o erro do Close
 	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			// Como estamos dentro de um defer, não podemos retornar o erro
-			// Então logamos ou ignoramos silenciosamente
-			fmt.Fprintf(os.Stderr, "Erro ao fechar response body: %v\n", err)
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Erro ao fechar response body: %v\n", closeErr)
 		}
 	}()
 
@@ -85,31 +85,88 @@ func CheckLatestVersion() (string, bool, error) {
 	// Remover 'v' do início da tag, se houver
 	latestVersion := strings.TrimPrefix(releaseInfo.TagName, "v")
 
-	// Extrai apenas a parte da tag da versão atual
-	// Para transformar algo como "v1.9.0-5-g1b6ecaa-dirty" em "1.9.0"
-	var currentVersionBase string
+	// Extrair a versão base atual sem prefixo 'v'
+	currentVersionBase := extractBaseVersion(Version)
 
-	if strings.Contains(Version, "-") {
-		parts := strings.Split(Version, "-")
-		currentVersionBase = strings.TrimPrefix(parts[0], "v")
-	} else {
-		currentVersionBase = strings.TrimPrefix(Version, "v")
-	}
+	// Verificar se é uma versão de desenvolvimento
+	isDev := Version == "dev" || Version == "unknown"
 
-	// Verifique se estamos em um commit específico (dev build)
-	isDev := Version == "dev" || strings.Contains(Version, "-dirty") || strings.Contains(Version, "-g")
-
-	// Se estamos em modo dev, só indica atualização se a versão base for diferente
+	// Se for uma versão de desenvolvimento, sempre sugerir atualização
 	if isDev {
-		// Se a versão base (como 1.9.0) for exatamente igual à última, não há atualização
-		// pois estamos provavelmente trabalhando na próxima versão
-		return latestVersion, currentVersionBase != latestVersion, nil
+		return latestVersion, true, nil
 	}
 
-	// Para versões de lançamento estáveis, comparação direta
-	needsUpdate := currentVersionBase != latestVersion
+	// Usar o método needsUpdate para uma comparação semântica adequada
+	needsUpdate := needsUpdate(currentVersionBase, latestVersion)
 
 	return latestVersion, needsUpdate, nil
+}
+
+// extractBaseVersion extrai a parte base da versão, sem prefixo 'v' e sem sufixos de desenvolvimento
+// Exemplo: "v1.9.0-5-g1b6ecaa-dirty" -> "1.9.0"
+func extractBaseVersion(version string) string {
+	// Remover prefixo 'v' se existir
+	version = strings.TrimPrefix(version, "v")
+
+	// Se contém hífen, pegar apenas a parte antes do primeiro hífen
+	if strings.Contains(version, "-") {
+		version = strings.Split(version, "-")[0]
+	}
+
+	return version
+}
+
+// needsUpdate verifica semanticamente se a versão atual precisa ser atualizada
+// comparando componente a componente (major.minor.patch)
+func needsUpdate(currentVersion, latestVersion string) bool {
+	// Tratar casos de versão vazia
+	if currentVersion == "" {
+		return true
+	}
+
+	// Extrair componentes semânticos (major.minor.patch)
+	currentParts := strings.Split(currentVersion, ".")
+	latestParts := strings.Split(latestVersion, ".")
+
+	// Garantir que temos pelo menos 3 componentes em cada versão (major.minor.patch)
+	for len(currentParts) < 3 {
+		currentParts = append(currentParts, "0")
+	}
+	for len(latestParts) < 3 {
+		latestParts = append(latestParts, "0")
+	}
+
+	// Comparar componente a componente
+	for i := 0; i < 3; i++ {
+		// Converter para inteiros com tratamento de erro
+		current, currentErr := strconv.Atoi(currentParts[i])
+		latest, latestErr := strconv.Atoi(latestParts[i])
+
+		// Se não conseguir converter, considerar como 0
+		if currentErr != nil {
+			current = 0
+		}
+		if latestErr != nil {
+			latest = 0
+		}
+
+		// Comparar os valores
+		if latest > current {
+			return true // Versão mais recente é maior
+		} else if current > latest {
+			return false // Versão atual é maior
+		}
+		// Se forem iguais, continua para o próximo componente
+	}
+
+	// Se chegou aqui, todos os componentes principais são iguais
+	// Verificar se a versão mais recente tem mais componentes (para pré-releases como 1.2.3-beta)
+	if len(latestParts) > 3 && len(currentParts) <= 3 {
+		return true
+	}
+
+	// Versões são iguais ou a atual é potencialmente mais recente (desenvolvedor)
+	return false
 }
 
 // FormatVersionInfo retorna uma string formatada com as informações de versão
@@ -188,4 +245,14 @@ func GetBuildInfo() (string, string, string) {
 	}
 
 	return version, commitHash, buildDate
+}
+
+// Helper para exibir informações de build ao iniciar o aplicativo
+func PrintStartupVersionInfo() {
+	if Version != "dev" && Version != "unknown" {
+		fmt.Printf("ChatCLI %s (commit: %s, built: %s)\n",
+			Version, CommitHash, BuildDate)
+		fmt.Println("Use '/version' para mais detalhes ou '--version' na linha de comando")
+		fmt.Println("-----------------------------------------------------------")
+	}
 }
