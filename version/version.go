@@ -199,7 +199,7 @@ func FormatVersionInfo(info VersionInfo, includeLatest bool) string {
 				result.WriteString(fmt.Sprintf("\n🔔 Atualização disponível! Versão mais recente: %s\n", latestVersion))
 				result.WriteString("   Execute 'go install github.com/diillson/chatcli@latest' para atualizar.\n")
 			} else {
-				result.WriteString("\n✅ Você está usando a versão mais recente.\n")
+				result.WriteString("\n✅ Está usando a versão mais recente.\n Pressione Enter para continuar.\n")
 			}
 		} else {
 			result.WriteString(fmt.Sprintf("\n⚠️ Não foi possível verificar atualizações: %s\n", err.Error()))
@@ -252,7 +252,7 @@ func PrintStartupVersionInfo() {
 	if Version != "dev" && Version != "unknown" {
 		fmt.Printf("ChatCLI %s (commit: %s, built: %s)\n",
 			Version, CommitHash, BuildDate)
-		fmt.Println("Use '/version' para mais detalhes ou '--version' na linha de comando")
+		fmt.Println("Use '/version' para mais detalhes ou 'chatcli --version' na linha de comando")
 		fmt.Println("-----------------------------------------------------------")
 	}
 }
