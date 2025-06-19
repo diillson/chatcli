@@ -91,7 +91,7 @@ jobs:
           skip-github-release: true
       - name: Checkout code
         uses: actions/checkout@v4
-        if: ${{ steps.release-please-release.outputs.release_created }}
+        if: ${{ needs.release-please-release.outputs.release_created }}
         with:
           fetch-depth: 0
           ref: ${{ needs.release-please-release.outputs.tag_name }}
@@ -103,7 +103,7 @@ jobs:
           cache: true
 
       - name: Build binaries
-        if: ${{ steps.release-please-release.outputs.release_created }}
+        if: ${{ needs.release-please-release.outputs.release_created }}
         run: |
           COMMIT_HASH=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -123,7 +123,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         if: ${{ needs.release-please-release.outputs.tag_name }}
         with:
-          tag_name: ${{ needs.release-pr.outputs.tag_name }}
+          tag_name: ${{ needs.release-please-release.outputs.tag_name }}
           files: |
             chatcli-linux-amd64
             chatcli-darwin-amd64
