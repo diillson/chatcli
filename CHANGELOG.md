@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.2](https://github.com/diillson/chatcli/compare/v1.10.1...v1.10.2) (2025-06-19)
+
+
+### Bug Fixes
+
+* corrigir referências e fluxo do workflow de release ([ca9150e](https://github.com/diillson/chatcli/commit/ca9150e0bcc58ae6c7bfdc1883a7b48099641b82))
+* corrigir referências e fluxo do workflow de release ([334d298](https://github.com/diillson/chatcli/commit/334d2988af29b569f0f50372da67339ab543d7c6))
+
 ## [1.10.1](https://github.com/diillson/chatcli/compare/v1.10.0...v1.10.1) (2025-06-19)
 
 
