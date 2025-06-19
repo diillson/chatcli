@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: MIT
+ */
 package cli
 
 import (
@@ -1892,8 +1897,36 @@ func (cli *ChatCLI) typewriterEffect(text string, delay time.Duration) {
 	}
 }
 
+// handleVersionCommand exibe informações detalhadas sobre a versão atual
+// do ChatCLI e verifica se há atualizações disponíveis no GitHub.
+//
+// O comando mostra:
+// - Versão atual (tag ou hash do commit)
+// - Hash do commit exato
+// - Data e hora de build
+// - Status de atualização (verificando o GitHub quando possível)
 func (ch *CommandHandler) handleVersionCommand() {
 	versionInfo := version.GetCurrentVersion()
-	formattedInfo := version.FormatVersionInfo(versionInfo, true)
-	fmt.Println(formattedInfo)
+
+	// Primeiro mostrar a versão atual sem verificar atualização
+	fmt.Println(version.FormatVersionInfo(versionInfo, false))
+
+	// Depois verificar atualização em background
+	fmt.Println("Verificando atualizações disponíveis...")
+
+	go func() {
+		latestVersion, hasUpdate, err := version.CheckLatestVersion()
+
+		if err != nil {
+			fmt.Printf("\n⚠️ Não foi possível verificar atualizações: %s\n", err.Error())
+			return
+		}
+
+		if hasUpdate {
+			fmt.Printf("\n🔔 Atualização disponível! Versão mais recente: %s\n", latestVersion)
+			fmt.Println("   Execute 'go install github.com/diillson/chatcli@latest' para atualizar.")
+		} else {
+			fmt.Println("\n✅ Você está usando a versão mais recente.")
+		}
+	}()
 }

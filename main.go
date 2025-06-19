@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: MIT
+ */
 package main
 
 import (
@@ -24,6 +29,8 @@ func main() {
 		return
 	}
 
+	version.PrintStartupVersionInfo()
+
 	// Carregar variáveis de ambiente do arquivo .env
 	envFilePath := os.Getenv("CHATCLI_DOTENV")
 	if envFilePath == "" {
@@ -47,6 +54,9 @@ func main() {
 		fmt.Printf("Não foi possível inicializar o logger: %v\n", err)
 		os.Exit(1) // Encerrar a aplicação em caso de erro crítico
 	}
+
+	utils.LogStartupInfo(logger)
+
 	defer func() {
 		if err := logger.Sync(); err != nil {
 			fmt.Printf("Erro ao fechar logger: %v\n", err)
