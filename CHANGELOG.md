@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/diillson/chatcli/compare/v1.10.0...v1.10.1) (2025-06-19)
+
+
+### Bug Fixes
+
+* Melhorar comparação semântica de versões e gestão de recursos ([eed3722](https://github.com/diillson/chatcli/commit/eed3722fbbc218bfc4c5bbd2c5dc5d3d3f25dab0))
+
 ## [1.10.0](https://github.com/diillson/chatcli/compare/v1.9.0...v1.10.0) (2025-06-18)
 
 
