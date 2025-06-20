@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.3](https://github.com/diillson/chatcli/compare/v1.10.2...v1.10.3) (2025-06-19)
+
+
+### Bug Fixes
+
+* Update message version. ([5f49fec](https://github.com/diillson/chatcli/commit/5f49fecf519837fb3602fce374d30f4ccbc5134f))
+* Update message version. ([c69df28](https://github.com/diillson/chatcli/commit/c69df286153e87b0861a419a05e61d15cd890327))
+
 ## [1.10.2](https://github.com/diillson/chatcli/compare/v1.10.1...v1.10.2) (2025-06-19)
 
 
