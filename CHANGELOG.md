@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.8](https://github.com/diillson/chatcli/compare/v1.10.7...v1.10.8) (2025-06-20)
+
+
+### Bug Fixes
+
+* melhorando o gestor de versão. ([15379aa](https://github.com/diillson/chatcli/commit/15379aa9cde99f52396c76173b73607277978263))
+
 ## [1.10.7](https://github.com/diillson/chatcli/compare/v1.10.6...v1.10.7) (2025-06-20)
 
 
