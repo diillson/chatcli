@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.7](https://github.com/diillson/chatcli/compare/v1.10.6...v1.10.7) (2025-06-20)
+
+
+### Bug Fixes
+
+* Rollback mensagem de systema para comandos api OPENAI ASSISTANT. ([f514a47](https://github.com/diillson/chatcli/commit/f514a47a96d15426f4fc8467964a27cea9b3d836))
+
 ## [1.10.6](https://github.com/diillson/chatcli/compare/v1.10.5...v1.10.6) (2025-06-20)
 
 
