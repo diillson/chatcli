@@ -119,16 +119,27 @@ func extractBaseVersion(version string) string {
 // needsUpdate verifica semanticamente se a versão atual precisa ser atualizada
 // comparando componente a componente (major.minor.patch)
 func needsUpdate(currentVersion, latestVersion string) bool {
-	// Tratar casos de versão vazia
-	if currentVersion == "" {
-		return true
+	// Remove prefixo "v" se houver
+	currentVersion = strings.TrimPrefix(currentVersion, "v")
+	latestVersion = strings.TrimPrefix(latestVersion, "v")
+
+	// Tratar casos de versão vazia ou de desenvolvimento
+	if currentVersion == "" || currentVersion == "dev" || currentVersion == "unknown" {
+		// Não é possível determinar, não force update
+		return false
+	}
+
+	// Tratar pseudo-version: v0.0.0-yyyymmddhhmmss-abcdef123456
+	if strings.HasPrefix(currentVersion, "0.0.0-") {
+		// Opcional: tente extrair o commit hash e comparar com o da release
+		// Se quiser, pode retornar false aqui para não sugerir update
+		return false
 	}
 
 	// Extrair componentes semânticos (major.minor.patch)
 	currentParts := strings.Split(currentVersion, ".")
 	latestParts := strings.Split(latestVersion, ".")
 
-	// Garantir que temos pelo menos 3 componentes em cada versão (major.minor.patch)
 	for len(currentParts) < 3 {
 		currentParts = append(currentParts, "0")
 	}
@@ -136,36 +147,26 @@ func needsUpdate(currentVersion, latestVersion string) bool {
 		latestParts = append(latestParts, "0")
 	}
 
-	// Comparar componente a componente
 	for i := 0; i < 3; i++ {
-		// Converter para inteiros com tratamento de erro
 		current, currentErr := strconv.Atoi(currentParts[i])
 		latest, latestErr := strconv.Atoi(latestParts[i])
-
-		// Se não conseguir converter, considerar como 0
 		if currentErr != nil {
 			current = 0
 		}
 		if latestErr != nil {
 			latest = 0
 		}
-
-		// Comparar os valores
 		if latest > current {
-			return true // Versão mais recente é maior
+			return true
 		} else if current > latest {
-			return false // Versão atual é maior
+			return false
 		}
-		// Se forem iguais, continua para o próximo componente
 	}
 
-	// Se chegou aqui, todos os componentes principais são iguais
-	// Verificar se a versão mais recente tem mais componentes (para pré-releases como 1.2.3-beta)
 	if len(latestParts) > 3 && len(currentParts) <= 3 {
 		return true
 	}
 
-	// Versões são iguais ou a atual é potencialmente mais recente (desenvolvedor)
 	return false
 }
 
@@ -215,19 +216,28 @@ func GetBuildInfo() (string, string, string) {
 	commitHash := CommitHash
 	buildDate := BuildDate
 
-	// Se estamos usando valores padrão, tentar obter do build info
-	if version == "dev" || commitHash == "unknown" || buildDate == "unknown" {
+	if version == "dev" || version == "unknown" ||
+		commitHash == "unknown" || buildDate == "unknown" {
+
 		if info, ok := debug.ReadBuildInfo(); ok {
-			// Procurar por informações do VCS nas configurações do build
-			for _, setting := range info.Settings {
-				switch setting.Key {
-				case "vcs.revision":
-					if commitHash == "unknown" {
-						commitHash = setting.Value[:8] // Pegar apenas os primeiros 8 caracteres
+			// Versão do módulo (ex: "v1.2.3" ou "v0.0.0-20240620123456-abcdef123456")
+			if (version == "dev" || version == "unknown") && info.Main.Version != "" && info.Main.Version != "(devel)" {
+				version = strings.TrimPrefix(info.Main.Version, "v")
+			}
+			// Commit hash de pseudo-version
+			if (commitHash == "unknown" || len(commitHash) < 7) && info.Main.Version != "" {
+				parts := strings.Split(info.Main.Version, "-")
+				if len(parts) >= 3 {
+					possibleCommit := parts[len(parts)-1]
+					if len(possibleCommit) >= 7 {
+						commitHash = possibleCommit
 					}
-				case "vcs.time":
-					if buildDate == "unknown" {
-						// Converter para formato mais amigável
+				}
+			}
+			// Build date do VCS info
+			if buildDate == "unknown" {
+				for _, setting := range info.Settings {
+					if setting.Key == "vcs.time" {
 						if t, err := time.Parse(time.RFC3339, setting.Value); err == nil {
 							buildDate = t.Format("2006-01-02 15:04:05")
 						} else {
@@ -236,14 +246,17 @@ func GetBuildInfo() (string, string, string) {
 					}
 				}
 			}
-
-			// Se ainda não temos versão mas temos o módulo, usar isso
-			if version == "dev" && info.Main.Version != "" {
-				version = info.Main.Version
+		}
+	}
+	// Fallback: data de modificação do binário
+	if buildDate == "unknown" {
+		if execPath, err := os.Executable(); err == nil {
+			if info, err := os.Stat(execPath); err == nil {
+				modTime := info.ModTime()
+				buildDate = fmt.Sprintf("%s (aproximado pela data do binário)", modTime.Format("2006-01-02 15:04:05"))
 			}
 		}
 	}
-
 	return version, commitHash, buildDate
 }
 
