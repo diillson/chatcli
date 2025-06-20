@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.5](https://github.com/diillson/chatcli/compare/v1.10.4...v1.10.5) (2025-06-20)
+
+
+### Bug Fixes
+
+* teste fluxo de sync automático na develop. ([ade51ec](https://github.com/diillson/chatcli/commit/ade51ecfdb01e6351ca5f3d001fb3af315092b29))
+* teste fluxo de sync automático na develop. ([579c6f6](https://github.com/diillson/chatcli/commit/579c6f658b49c613661140ffab7cc7adb90bd02f))
+
 ## [1.10.4](https://github.com/diillson/chatcli/compare/v1.10.3...v1.10.4) (2025-06-20)
 
 
