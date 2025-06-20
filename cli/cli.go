@@ -492,9 +492,6 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 	userInput, context = cli.processFileCommand(userInput)
 	additionalContext += context
 
-	//userInput, context = cli.processCommandCommand(userInput)
-	//additionalContext += context
-
 	// Processar '>' como um operador para adicionar contexto
 	if idx := strings.Index(userInput, ">"); idx != -1 {
 		additionalContext += userInput[idx+1:] + "\n"
