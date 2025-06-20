@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.4](https://github.com/diillson/chatcli/compare/v1.10.3...v1.10.4) (2025-06-20)
+
+
+### Bug Fixes
+
+* corrigindo erro no lint, nova linha redundante. ([d314362](https://github.com/diillson/chatcli/commit/d314362c9e63b358320d20d6e1416786c5d12870))
+* nova mensagem de prompt para Assistante API OPENAI. ([19232d6](https://github.com/diillson/chatcli/commit/19232d6e9bc4da33ce86358911057bb71dfb39c7))
+
 ## [1.10.3](https://github.com/diillson/chatcli/compare/v1.10.2...v1.10.3) (2025-06-19)
 
 
