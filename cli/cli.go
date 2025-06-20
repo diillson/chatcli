@@ -1926,7 +1926,7 @@ func (ch *CommandHandler) handleVersionCommand() {
 			fmt.Printf("\n🔔 Atualização disponível! Versão mais recente: %s\n", latestVersion)
 			fmt.Println("   Execute 'go install github.com/diillson/chatcli@latest' para atualizar.")
 		} else {
-			fmt.Println("\n✅ Você está usando a versão mais recente.")
+			fmt.Println("\n✅ Está usando a versão mais recente.\n Pressione Enter para continuar.\n")
 		}
 	}()
 }
