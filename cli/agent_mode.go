@@ -129,52 +129,19 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	systemInstruction := ""
 	if isAssistant {
 		systemInstruction = `Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema.
-		       Quando o usuário pede para realizar uma tarefa, analise o problema e sugira o melhor comando que possam resolver a questão.
-		
-				Se precisar sugerir múltiplos comandos no mesmo bloco, separe-os por linha vazia dentro do bloco execute. Nunca use apenas quebra de linha simples para separar comandos multi-linha.
-		
-		       Antes de sugerir comandos destrutivos (como rm -rf, dd, mkfs, drop database, etc), coloque explicação e peça uma confirmação explícita do usuário.
-		
-		       Para cada bloco de código executável, use o formato:
-		       ` + "```" + `execute:<tipo>
-		       <comandos>
-		       ` + "```" + `
-		
-		       Exemplos de formatação:
-		
-		       Para comandos shell:
-		       ` + "```" + `execute:shell
-		       ls -la | grep "\.txt$"
-		       cat file.txt | grep "exemplo"
-		       ` + "```" + `
-		
-		       Para comandos Kubernetes:
-		       ` + "```" + `execute:kubernetes
-		       kubectl get pods -n my-namespace
-		       kubectl describe pod my-pod -n my-namespace
-		       ` + "```" + `
-		
-		       Para outros tipos de comandos, use o identificador apropriado, como:
-		       - execute:docker
-		       - execute:terraform
-		       - execute:git
-		       - execute:sql
-		
-		       IMPORTANTE:
-		       1. Comece sua resposta com uma breve explicação do que você vai fazer
-		       2. Descreva brevemente o que cada conjunto de comandos faz antes de mostrar o bloco execute
-		       3. Use comando claro, simples e seguro
-		       4. Caso possua mais de um comando, agrupe comandos relacionados no mesmo bloco execute quando tiverem o mesmo propósito
-		       5. Cada comando em um bloco será executado individualmente, um após o outro
-		       6. Não use comandos destrutivos (rm -rf, drop database, etc.) sem avisos claros
-		       7. Se a tarefa for complexa, divida em múltiplos blocos execute com propósitos distintos
-		
-		       Adapte o comando para o contexto do usuário, considerando o ambiente e as ferramentas disponíveis.`
+            Quando o usuário pede para realizar uma tarefa, analise o problema e sugira os melhores comandos que possam resolver a questão.
+			Responda com comandos shell executáveis para resolver o problema apresentado.
+            
+            Para comandos executáveis, coloque-os em blocos de código com ` + "```" + ` ou apresente-os com um $ no início da linha.
+
+			Explique o propósito de cada comando antes de mostrá-lo.
+			Evite comandos destrutivos (como rm -rf, dd, mkfs, etc.) sem explicação clara.
+			Prefira comandos simples e seguros, e sempre explique o que cada comando faz.`
 
 	} else {
 		//1. Enviar a pergunta para a LLM com instruções específicas sobre formato de resposta
 		systemInstruction = `Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema.
-		       Quando o usuário pede para realizar uma tarefa, analise o problema e sugira o melhor comando que possam resolver a questão.
+		       Quando o usuário pede para realizar uma tarefa, analise o problema e sugira os melhores comandos que possam resolver a questão.
 		
 				Se precisar sugerir múltiplos comandos no mesmo bloco, separe-os por linha vazia dentro do bloco execute. Nunca use apenas quebra de linha simples para separar comandos multi-linha.
 		
