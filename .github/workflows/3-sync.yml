@@ -6,6 +6,11 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
 jobs:
   sync:
     if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release-please--branches--main')
@@ -20,6 +25,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add gh-token "https://${{ secrets.GITHUB_TOKEN}}@github.com/diillson/chatcli.git"
 
       - name: Merge main into develop
         run: |
