@@ -26,7 +26,8 @@ const (
 	ClaudeAIAPIURL             = "https://api.anthropic.com/v1/messages"
 	ClaudeAIDefaultMaxAttempts = 3
 	ClaudeAIDefaultBackoff     = time.Second
-	ClaudeAIDefaultMaxTokens   = 8192 // Valor padrão para max_tokens
+	ClaudeAIDefaultMaxTokens   = 8192         // Valor padrão para max_tokens
+	ClaudeAIAPIVersionDefault  = "2023-06-01" // Versão padrão da APIClaudeAI
 
 	// Provedor padrão
 	DefaultLLMProvider = "OPENAI"
