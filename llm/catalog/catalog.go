@@ -51,8 +51,9 @@ var registry = []ModelMeta{
 		Provider:        ProviderOpenAI,
 		ContextWindow:   50000,
 		MaxOutputTokens: 50000,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"json_mode", "tools"},
+		//PreferredAPI:    APIChatCompletions, // Possivel Roolback para APIResponses
+		PreferredAPI: APIResponses,
+		Capabilities: []string{"json_mode", "tools"},
 	},
 	// OpenAI GPT-4o e variantes já suportadas
 	{
