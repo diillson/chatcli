@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/openai_assistant"
@@ -801,60 +802,23 @@ func (cli *ChatCLI) handleAgentCommand(userInput string) {
 	}
 }
 
-// getMaxTokensForCurrentLLM retorna o limite máximo de tokens para o LLM atual
 func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 	// Overrides por ENV têm precedência e dão flexibilidade operacional
-	if cli.provider == "OPENAI" {
+	var override int
+	if strings.ToUpper(cli.provider) == "OPENAI" {
 		if v := os.Getenv("OPENAI_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				return n
+				override = n
 			}
 		}
-	}
-	if cli.provider == "CLAUDEAI" {
+	} else if strings.ToUpper(cli.provider) == "CLAUDEAI" {
 		if v := os.Getenv("CLAUDEAI_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				return n
+				override = n
 			}
 		}
 	}
-
-	switch cli.provider {
-	case "OPENAI":
-		m := strings.ToLower(cli.model)
-		// Reconhece GPT-5 (nominal) e mantém limites conservadores
-		if strings.HasPrefix(m, "gpt-5") {
-			return 50000
-		}
-		if m == "gpt-4o" || m == "gpt-4o-mini" || strings.HasPrefix(m, "gpt-4") {
-			return 50000
-		}
-		// fallback para outras famílias (ex.: gpt-3.5)
-		return 40000
-
-	case "CLAUDEAI":
-		m := strings.ToLower(cli.model)
-		// Família 4/4.1 (sonnet/opus) – valor conservador
-		if strings.HasPrefix(m, "claude-4") || strings.Contains(m, "opus-4.1") || strings.Contains(m, "sonnet-4") {
-			return 50000
-		}
-		// Família já suportada
-		switch m {
-		case "claude-3-5-sonnet-20241022":
-			return 50000
-		case "claude-3-haiku":
-			return 42000
-		case "claude-3-opus":
-			return 32000
-		default:
-			return 50000 // conservador para demais
-		}
-
-	case "STACKSPOT":
-		return 50000
-	default:
-		return 50000
-	}
+	return catalog.GetMaxTokens(cli.provider, cli.model, override)
 }
 
 // estimateBytesFromTokens estima a quantidade de bytes baseada em tokens
