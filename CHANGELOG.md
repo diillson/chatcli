@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.0](https://github.com/diillson/chatcli/compare/v1.10.8...v1.11.0) (2025-08-09)
+
+
+### Features
+
+* enhance model handling and token limits for ClaudeAI and OpenAI ([6cd1548](https://github.com/diillson/chatcli/commit/6cd1548b330b587a3055677c47893d062956211b))
+* enhance model handling and token limits for ClaudeAI and OpenAI ([62b5cce](https://github.com/diillson/chatcli/commit/62b5ccea671f82e78961fa6727dea5489c715ad5))
+
 ## [1.10.8](https://github.com/diillson/chatcli/compare/v1.10.7...v1.10.8) (2025-06-20)
 
 
