@@ -9,19 +9,21 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/version"
 	"github.com/joho/godotenv"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"sort"
-	"strings"
-	"time"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -801,19 +803,43 @@ func (cli *ChatCLI) handleAgentCommand(userInput string) {
 
 // getMaxTokensForCurrentLLM retorna o limite máximo de tokens para o LLM atual
 func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
+	// Overrides por ENV têm precedência e dão flexibilidade operacional
+	if cli.provider == "OPENAI" {
+		if v := os.Getenv("OPENAI_MAX_TOKENS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	if cli.provider == "CLAUDEAI" {
+		if v := os.Getenv("CLAUDEAI_MAX_TOKENS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+
 	switch cli.provider {
 	case "OPENAI":
-		if cli.model == "gpt-4o" {
+		m := strings.ToLower(cli.model)
+		// Reconhece GPT-5 (nominal) e mantém limites conservadores
+		if strings.HasPrefix(m, "gpt-5") {
 			return 50000
-		} else if cli.model == "gpt-4o-mini" {
-			return 50000
-		} else if strings.HasPrefix(cli.model, "gpt-4") {
-			return 50000
-		} else {
-			return 40000 // gpt-3.5-turbo padrão
 		}
+		if m == "gpt-4o" || m == "gpt-4o-mini" || strings.HasPrefix(m, "gpt-4") {
+			return 50000
+		}
+		// fallback para outras famílias (ex.: gpt-3.5)
+		return 40000
+
 	case "CLAUDEAI":
-		switch cli.model {
+		m := strings.ToLower(cli.model)
+		// Família 4/4.1 (sonnet/opus) – valor conservador
+		if strings.HasPrefix(m, "claude-4") || strings.Contains(m, "opus-4.1") || strings.Contains(m, "sonnet-4") {
+			return 50000
+		}
+		// Família já suportada
+		switch m {
 		case "claude-3-5-sonnet-20241022":
 			return 50000
 		case "claude-3-haiku":
@@ -821,12 +847,13 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 		case "claude-3-opus":
 			return 32000
 		default:
-			return 50000 // valor conservador para outros modelos Claude
+			return 50000 // conservador para demais
 		}
+
 	case "STACKSPOT":
-		return 50000 // assumindo que usa gpt-4 no backend
+		return 50000
 	default:
-		return 50000 // valor padrão conservador
+		return 50000
 	}
 }
 
