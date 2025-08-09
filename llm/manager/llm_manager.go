@@ -7,15 +7,19 @@ package manager
 
 import (
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/openai"
 	"github.com/diillson/chatcli/llm/openai_assistant"
+	"github.com/diillson/chatcli/llm/openai_responses"
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/diillson/chatcli/llm/token"
 	"go.uber.org/zap"
-	"os"
 )
 
 // ConfigError representa um erro de configuração, como variáveis de ambiente ausentes
@@ -61,11 +65,35 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager,
 func (m *LLMManagerImpl) configurarOpenAIClient() {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey != "" {
-		// Cliente OpenAI padrão (chat completions)
+		// Cliente OpenAI padrão (chat completions ou responses)
 		m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
 				model = config.DefaultOpenAIModel
 			}
+
+			// Seleção entre Chat Completions e Responses API
+			useResponses := false
+
+			// 1) Flag/env explícita
+			if v := os.Getenv("OPENAI_USE_RESPONSES"); strings.EqualFold(v, "true") {
+				useResponses = true
+			}
+
+			// 2) Preferência do registry (ex.: GPT-5)
+			if !useResponses && catalog.GetPreferredAPI(catalog.ProviderOpenAI, model) == catalog.APIResponses {
+				useResponses = true
+			}
+
+			if useResponses {
+				m.logger.Info("Usando OpenAI Responses API", zap.String("model", model))
+				return openai_responses.NewOpenAIResponsesClient(
+					apiKey, model, m.logger,
+					config.OpenAIDefaultMaxAttempts,
+					config.OpenAIDefaultBackoff,
+				), nil
+			}
+
+			m.logger.Info("Usando OpenAI Chat Completions API", zap.String("model", model))
 			return openai.NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
 		}
 

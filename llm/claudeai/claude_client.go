@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -53,28 +54,9 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempt
 	}
 }
 
-// GetModelName retorna o nome do modelo configurado para ClaudeAI
+// GetModelName retorna o nome amigável do modelo ClaudeAI
 func (c *ClaudeClient) GetModelName() string {
-	m := strings.ToLower(c.model)
-	switch {
-	case strings.HasPrefix(m, "claude-4.1-opus") || strings.Contains(m, "opus-4.1"):
-		return "claude 4.1 opus"
-
-	case strings.HasPrefix(m, "claude-4-opus") || strings.Contains(m, "opus-4"):
-		return "claude 4 opus"
-
-	case strings.HasPrefix(m, "claude-4-sonnet") || strings.Contains(m, "sonnet-4"):
-		return "claude 4 sonnet"
-
-	case m == "claude-3-5-sonnet-20241022":
-		return "claude 3.5 sonnet"
-
-	case strings.HasPrefix(m, "claude-3-7-sonnet"):
-		return "claude 3.7 sonnet"
-
-	default:
-		return c.model
-	}
+	return catalog.GetDisplayName(catalog.ProviderClaudeAI, c.model)
 }
 
 // SendPrompt com exponential backoff
@@ -119,7 +101,10 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 
 		apiVersion := os.Getenv("CLAUDEAI_API_VERSION")
 		if apiVersion == "" {
-			apiVersion = config.ClaudeAIAPIVersionDefault
+			apiVersion = catalog.GetAnthropicAPIVersion(c.model)
+			if apiVersion == "" {
+				apiVersion = config.ClaudeAIAPIVersionDefault
+			}
 		}
 		req.Header.Add("anthropic-version", apiVersion)
 

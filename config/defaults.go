@@ -17,6 +17,7 @@ const (
 	DefaultOpenAIModel       = "gpt-4o-mini"
 	DefaultOpenAiAssistModel = "gpt-4o-mini"
 	OpenAIAPIURL             = "https://api.openai.com/v1/chat/completions"
+	OpenAIResponsesAPIURL    = "https://api.openai.com/v1/responses"
 	OpenAIDefaultMaxAttempts = 3
 	OpenAIDefaultBackoff     = time.Second
 	//OpenAIAIDefaultMaxTokens = 10384 // Valor padrão para max_tokens

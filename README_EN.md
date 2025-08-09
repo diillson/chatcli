@@ -138,6 +138,8 @@ ChatCLI uses environment variables to control its behavior and connect to LLM pr
     * `OPENAI_API_KEY` – OpenAI API key.
     * `OPENAI_MODEL` – (Optional) Model to use (default: `gpt-4o-mini`).
     * `OPENAI_ASSISTANT_MODEL` – (Optional) Model being used same as `OPENAI_MODEL` if set or (default: `gpt-4o-mini`).
+    * `OPENAI_USE_RESPONSES` – (Optional) When `true`, use OpenAI Responses API for provider `OPENAI` (e.g., GPT‑5).
+    * `OPENAI_MAX_TOKENS` – (Optional) Override of token limit used internally for chunking/truncation.
 
 * **StackSpot Provider:**
 
@@ -151,6 +153,7 @@ ChatCLI uses environment variables to control its behavior and connect to LLM pr
     * `CLAUDEAI_API_KEY` – ClaudeAI API key.
     * `CLAUDEAI_MODEL` – (Optional) Model (default: `claude-3-5-sonnet-20241022`).
     * `CLAUDEAI_MAX_TOKENS` – (Optional) Max tokens in the response (default: `8192`).
+    * `CLAUDEAI_API_VERSION` – (Optional) Anthropic API version (default: `2023-06-01`).
 
 ### Example `.env` File
 
@@ -167,6 +170,8 @@ HISTORY_MAX_SIZE=300MB
 OPENAI_API_KEY=your-openai-key
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_ASSISTANT_MODEL=gpt-4o-mini
+OPENAI_USE_RESPONSES=true    # use Responses API (e.g., for gpt-5)
+OPENAI_MAX_TOKENS=60000
 
 # StackSpot Settings
 CLIENT_ID=your-client-id
@@ -177,7 +182,8 @@ TENANT_NAME=your-tenant-name
 # ClaudeAI Settings
 CLAUDEAI_API_KEY=your-claudeai-key
 CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
-CLAUDEAI_MAX_TOKENS=8192
+CLAUDEAI_MAX_TOKENS=20000
+CLAUDEAI_API_VERSION=2023-06-01
 ```
 
 ---
