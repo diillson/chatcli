@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.0](https://github.com/diillson/chatcli/compare/v1.11.0...v1.12.0) (2025-08-09)
+
+
+### Features
+
+* add support for OpenAI Responses API and enhance configuration options ([334f96e](https://github.com/diillson/chatcli/commit/334f96edf2bff4a013962c21863e5f12e5a68182))
+* introduce centralized catalog for model metadata and refactor LLM utilities ([811e00f](https://github.com/diillson/chatcli/commit/811e00ff201604ca08cb2f2b35c37e35713d4296))
+
 ## [1.11.0](https://github.com/diillson/chatcli/compare/v1.10.8...v1.11.0) (2025-08-09)
 
 
