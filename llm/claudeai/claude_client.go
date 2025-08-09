@@ -9,16 +9,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/diillson/chatcli/config"
-	"github.com/diillson/chatcli/models"
-	"github.com/diillson/chatcli/utils"
-	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/utils"
+	"go.uber.org/zap"
 )
 
 // ClaudeClient é uma estrutura que contém o cliente de ClaudeAI com suas configurações
@@ -54,11 +55,23 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempt
 
 // GetModelName retorna o nome do modelo configurado para ClaudeAI
 func (c *ClaudeClient) GetModelName() string {
-	switch c.model {
-	case "claude-3-5-sonnet-20241022":
+	m := strings.ToLower(c.model)
+	switch {
+	case strings.HasPrefix(m, "claude-4.1-opus") || strings.Contains(m, "opus-4.1"):
+		return "claude 4.1 opus"
+
+	case strings.HasPrefix(m, "claude-4-opus") || strings.Contains(m, "opus-4"):
+		return "claude 4 opus"
+
+	case strings.HasPrefix(m, "claude-4-sonnet") || strings.Contains(m, "sonnet-4"):
+		return "claude 4 sonnet"
+
+	case m == "claude-3-5-sonnet-20241022":
 		return "claude 3.5 sonnet"
-	case "claude-3-7-sonnet-20250219":
+
+	case strings.HasPrefix(m, "claude-3-7-sonnet"):
 		return "claude 3.7 sonnet"
+
 	default:
 		return c.model
 	}
@@ -103,7 +116,12 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 
 		req.Header.Add("Content-Type", "application/json")
 		req.Header.Add("x-api-key", c.apiKey)
-		req.Header.Add("anthropic-version", "2023-06-01")
+
+		apiVersion := os.Getenv("CLAUDEAI_API_VERSION")
+		if apiVersion == "" {
+			apiVersion = config.ClaudeAIAPIVersionDefault
+		}
+		req.Header.Add("anthropic-version", apiVersion)
 
 		// Executa a requisição
 		resp, err := c.client.Do(req)
