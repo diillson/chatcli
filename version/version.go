@@ -85,15 +85,31 @@ func CheckLatestVersion() (string, bool, error) {
 	// Remover 'v' do início da tag, se houver
 	latestVersion := strings.TrimPrefix(releaseInfo.TagName, "v")
 
-	// Extrair a versão base atual sem prefixo 'v'
-	currentVersionBase := extractBaseVersion(Version)
+	// Obter a versão atual de forma mais robusta
+	currentVersionFull, _, _ := GetBuildInfo()
 
-	// Verificar se é uma versão de desenvolvimento
-	isDev := Version == "dev" || Version == "unknown"
+	// Se não conseguimos determinar a versão atual com segurança,
+	// evitamos falso-positivo (não afirmar que há atualização).
+	if currentVersionFull == "" ||
+		currentVersionFull == "dev" ||
+		currentVersionFull == "unknown" ||
+		currentVersionFull == "(devel)" {
+		return latestVersion, false, nil
+	}
 
-	// Se for uma versão de desenvolvimento, sempre sugerir atualização
-	if isDev {
-		return latestVersion, true, nil
+	// Pseudo-version (ex.: 0.0.0-yyyymmddhhmmss-abcdef)
+	trimmedFull := strings.TrimPrefix(currentVersionFull, "v")
+	if strings.HasPrefix(trimmedFull, "0.0.0-") {
+		// Conservador: não afirmar que há atualização
+		return latestVersion, false, nil
+	}
+
+	// Extrair a versão base (ex.: "v1.9.0-5-gxxxx" -> "1.9.0")
+	currentVersionBase := extractBaseVersion(currentVersionFull)
+	if currentVersionBase == "" ||
+		currentVersionBase == "dev" ||
+		currentVersionBase == "unknown" {
+		return latestVersion, false, nil
 	}
 
 	// Usar o método needsUpdate para uma comparação semântica adequada
@@ -198,9 +214,9 @@ func FormatVersionInfo(info VersionInfo, includeLatest bool) string {
 		if err == nil {
 			if hasUpdate {
 				result.WriteString(fmt.Sprintf("\n🔔 Atualização disponível! Versão mais recente: %s\n", latestVersion))
-				result.WriteString("   Execute 'go install github.com/diillson/chatcli@latest' para atualizar.\n")
+				result.WriteString(fmt.Sprintf("   Execute 'go install github.com/diillson/chatcli@%s' para atualizar.\n Pressione ENTER para continuar", latestVersion))
 			} else {
-				result.WriteString("\n✅ Está usando a versão mais recente.")
+				result.WriteString("\n✅ Está usando a versão mais recente.\n Pressione ENTER para continuar.")
 			}
 		} else {
 			result.WriteString(fmt.Sprintf("\n⚠️ Não foi possível verificar atualizações: %s\n", err.Error()))
@@ -262,9 +278,14 @@ func GetBuildInfo() (string, string, string) {
 
 // Helper para exibir informações de build ao iniciar o aplicativo
 func PrintStartupVersionInfo() {
-	if Version != "dev" && Version != "unknown" {
-		fmt.Printf("ChatCLI %s (commit: %s, built: %s)\n",
-			Version, CommitHash, BuildDate)
+	v, c, d := GetBuildInfo()
+	if v == "" || v == "unknown" {
+		v = Version
+		c = CommitHash
+		d = BuildDate
+	}
+	if v != "" && v != "dev" && v != "unknown" {
+		fmt.Printf("ChatCLI %s (commit: %s, built: %s)\n", v, c, d)
 		fmt.Println("Use '/version' para mais detalhes ou 'chatcli --version' na linha de comando")
 		fmt.Println("-----------------------------------------------------------")
 	}
