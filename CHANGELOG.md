@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.1](https://github.com/diillson/chatcli/compare/v1.12.0...v1.12.1) (2025-08-11)
+
+
+### Bug Fixes
+
+* **version:** improve version detection and update prompts ([6ed8d2a](https://github.com/diillson/chatcli/commit/6ed8d2a5b0ec493c211b372dd8d8e0cbae4fb23e))
+* **version:** improve version detection and update prompts ([e50be13](https://github.com/diillson/chatcli/commit/e50be1324de4e0c5822e631664c62910a429702d))
+
 ## [1.12.0](https://github.com/diillson/chatcli/compare/v1.11.0...v1.12.0) (2025-08-09)
 
 
