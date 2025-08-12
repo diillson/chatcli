@@ -214,7 +214,7 @@ func FormatVersionInfo(info VersionInfo, includeLatest bool) string {
 		if err == nil {
 			if hasUpdate {
 				result.WriteString(fmt.Sprintf("\n🔔 Atualização disponível! Versão mais recente: %s\n", latestVersion))
-				result.WriteString(fmt.Sprintf("   Execute 'go install github.com/diillson/chatcli@%s' para atualizar.\n Pressione ENTER para continuar", latestVersion))
+				result.WriteString(fmt.Sprintf("   Execute 'go install github.com/diillson/chatcli@v%s' para atualizar.\n Pressione ENTER para continuar", latestVersion))
 			} else {
 				result.WriteString("\n✅ Está usando a versão mais recente.\n Pressione ENTER para continuar.")
 			}
