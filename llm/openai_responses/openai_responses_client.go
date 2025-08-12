@@ -54,8 +54,20 @@ func (c *OpenAIResponsesClient) GetModelName() string {
 }
 
 func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	// Flatten do histórico para um texto coerente, mantendo simplicidade/compatibilidade
-	input := buildTextFromHistory(history, prompt)
+	// Flatten do histórico para um texto coerente, sem duplicar o prompt.
+	// Aqui construímos SOMENTE a partir do history:
+	input := buildTextFromHistory(history, "")
+
+	// Fallback: se o history não tem o último turno do user (edge-case),
+	// anexa o prompt no final do input.
+	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+		if strings.TrimSpace(prompt) != "" {
+			if strings.TrimSpace(input) != "" {
+				input += "\n"
+			}
+			input += "User: " + prompt
+		}
+	}
 
 	reqBody := map[string]interface{}{
 		"model": c.model,
