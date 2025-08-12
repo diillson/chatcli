@@ -271,7 +271,13 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 			zap.String("model", c.model))
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			c.logger.Warn("Erro ao fechar corpo da resposta do Google AI",
+				zap.Error(cerr),
+				zap.String("model", c.model))
+		}
+	}()
 
 	// Log do tempo de resposta
 	c.logger.Debug("Resposta HTTP recebida",
