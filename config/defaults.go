@@ -30,6 +30,14 @@ const (
 	ClaudeAIDefaultMaxTokens   = 8192         // Valor padrão para max_tokens
 	ClaudeAIAPIVersionDefault  = "2023-06-01" // Versão padrão da APIClaudeAI
 
+	// Valores padrão para Google Gemini
+	DefaultGoogleAIModel       = "gemini-2.0-flash-lite"
+	GoogleAIAPIURL             = "https://generativelanguage.googleapis.com/v1beta"
+	GoogleAIDefaultMaxAttempts = 3
+	GoogleAIDefaultBackoff     = time.Second
+	GoogleAIDefaultMaxTokens   = 8192
+	DefaultGoogleAITimeout     = 5 * time.Minute
+
 	// Provedor padrão
 	DefaultLLMProvider = "OPENAI"
 

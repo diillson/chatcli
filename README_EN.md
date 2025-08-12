@@ -155,6 +155,11 @@ ChatCLI uses environment variables to control its behavior and connect to LLM pr
     * `CLAUDEAI_MAX_TOKENS` – (Optional) Max tokens in the response (default: `8192`).
     * `CLAUDEAI_API_VERSION` – (Optional) Anthropic API version (default: `2023-06-01`).
 
+* **Google AI Provider (Gemini)**:
+    * `GOOGLEAI_API_KEY` – Google AI API key.
+    * `GOOGLEAI_MODEL` – (Optional) Model to use (default: `gemini-2.0-flash-lite`)
+    * `GOOGLEAI_MAX_TOKENS` – (Optional) Max tokens in response (default: `8192`).
+
 ### Example `.env` File
 
 ```env
@@ -184,6 +189,11 @@ CLAUDEAI_API_KEY=your-claudeai-key
 CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
 CLAUDEAI_MAX_TOKENS=20000
 CLAUDEAI_API_VERSION=2023-06-01
+
+# GoogleAI Settings (Gemini)
+GOOGLEAI_API_KEY=sua-chave-googleai
+GOOGLEAI_MODEL=gemini-2.5-flash
+GOOGLEAI_MAX_TOKENS=20000
 ```
 
 ---

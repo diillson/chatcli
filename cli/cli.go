@@ -165,6 +165,12 @@ func (cli *ChatCLI) configureProviderAndModel() {
 			cli.model = config.DefaultClaudeAIModel
 		}
 	}
+	if cli.provider == "GOOGLEAI" {
+		cli.model = os.Getenv("GOOGLEAI_MODEL")
+		if cli.model == "" {
+			cli.model = config.DefaultGoogleAIModel
+		}
+	}
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
@@ -440,6 +446,10 @@ func (cli *ChatCLI) switchProvider() {
 		if newModel == "" {
 			newModel = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel) // se não houver, usa o mesmo dos completions ou seta default
 		}
+	}
+
+	if newProvider == "GOOGLEAI" {
+		newModel = utils.GetEnvOrDefault("GOOGLEAI_MODEL", config.DefaultGoogleAIModel)
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
@@ -813,6 +823,12 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 		}
 	} else if strings.ToUpper(cli.provider) == "CLAUDEAI" {
 		if v := os.Getenv("CLAUDEAI_MAX_TOKENS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				override = n
+			}
+		}
+	} else if strings.ToUpper(cli.provider) == "GOOGLEAI" {
+		if v := os.Getenv("GOOGLEAI_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				override = n
 			}
