@@ -76,12 +76,21 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 		zap.Int("history_length", len(history)),
 		zap.Int("prompt_length", len(prompt)))
 
-	contents := c.buildContents(prompt, history)
+	// Monta a conversa a partir do history, SEM duplicar o último prompt
+	// e extraindo system_instruction a partir das mensagens "system".
+	contents, systemInstruction := c.buildContentsAndSystem(history, prompt)
 
-	// Log do conteúdo construído
-	c.logger.Debug("Conteúdo preparado para Google AI",
-		zap.Int("contents_count", len(contents)),
-		zap.String("model", c.model))
+	// Fallback: se por algum motivo o history vier vazio, use o prompt diretamente
+	if len(contents) == 0 && strings.TrimSpace(prompt) != "" {
+		contents = []map[string]interface{}{
+			{
+				"role": "user",
+				"parts": []map[string]string{
+					{"text": prompt},
+				},
+			},
+		}
+	}
 
 	// Obter configurações de tokens
 	maxTokens := c.getMaxTokens()
@@ -103,6 +112,9 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 		"contents":         contents,
 		"generationConfig": generationConfig,
 		"safetySettings":   c.getSafetySettings(),
+	}
+	if systemInstruction != nil {
+		reqBody["system_instruction"] = systemInstruction
 	}
 
 	jsonValue, err := json.Marshal(reqBody)
@@ -127,9 +139,8 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 			zap.String("model", c.model))
 
 		response, err := c.executeRequest(ctx, jsonValue)
-
 		if err != nil {
-			// Verificar se é erro de rate limit
+			// Rate limit
 			if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RATE_LIMIT") {
 				c.logger.Warn("Rate limit excedido na API do Google AI",
 					zap.Int("attempt", attempt),
@@ -143,6 +154,7 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 					continue
 				}
 			} else if utils.IsTemporaryError(err) {
+				// Erro temporário
 				c.logger.Warn("Erro temporário ao chamar Google AI",
 					zap.Int("attempt", attempt),
 					zap.Error(err),
@@ -179,60 +191,51 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 	return "", fmt.Errorf("falha ao obter resposta do Google AI após %d tentativas", c.maxAttempts)
 }
 
-// buildContents constrói o array de conteúdos para a API do Gemini
-func (c *GeminiClient) buildContents(prompt string, history []models.Message) []map[string]interface{} {
+func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt string) ([]map[string]interface{}, map[string]interface{}) {
 	var contents []map[string]interface{}
+	var systemParts []map[string]string
 
-	// Log apenas estatísticas, não o conteúdo real
-	systemMessageCount := 0
-	userMessageCount := 0
-	assistantMessageCount := 0
-
-	// Processar histórico
+	// Monta o turn-by-turn do histórico
 	for _, msg := range history {
-		role := "user"
-		if msg.Role == "assistant" {
-			role = "model"
-			assistantMessageCount++
-		} else if msg.Role == "system" {
-			systemMessageCount++
-			// Gemini não tem role "system", converter para user com prefixo
+		switch strings.ToLower(msg.Role) {
+		case "assistant":
+			contents = append(contents, map[string]interface{}{
+				"role": "model",
+				"parts": []map[string]string{
+					{"text": msg.Content},
+				},
+			})
+		case "system":
+			// Gemini v1beta aceita system_instruction como top-level.
+			systemParts = append(systemParts, map[string]string{"text": msg.Content})
+		default: // "user"
 			contents = append(contents, map[string]interface{}{
 				"role": "user",
 				"parts": []map[string]string{
-					{"text": "[System]: " + msg.Content},
+					{"text": msg.Content},
 				},
 			})
-			continue
-		} else {
-			userMessageCount++
 		}
-
-		contents = append(contents, map[string]interface{}{
-			"role": role,
-			"parts": []map[string]string{
-				{"text": msg.Content},
-			},
-		})
 	}
 
-	// Adicionar prompt atual
-	contents = append(contents, map[string]interface{}{
-		"role": "user",
-		"parts": []map[string]string{
-			{"text": prompt},
-		},
-	})
+	// NÃO duplicar o prompt:
+	// O ChatCLI já adiciona a última mensagem do usuário no history antes de chamar SendPrompt().
+	// Só adicionaria aqui se fosse necessário cobrir algum edge-case:
+	// if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+	//     contents = append(contents, map[string]interface{}{
+	//         "role": "user",
+	//         "parts": []map[string]string{{"text": prompt}},
+	//     })
+	// }
 
-	// Log apenas estatísticas
-	c.logger.Debug("Histórico de mensagens preparado",
-		zap.Int("system_messages", systemMessageCount),
-		zap.Int("user_messages", userMessageCount),
-		zap.Int("assistant_messages", assistantMessageCount),
-		zap.Int("prompt_length", len(prompt)),
-		zap.String("model", c.model))
+	var systemInstruction map[string]interface{}
+	if len(systemParts) > 0 {
+		systemInstruction = map[string]interface{}{
+			"parts": systemParts,
+		}
+	}
 
-	return contents
+	return contents, systemInstruction
 }
 
 // executeRequest executa a requisição HTTP para a API do Gemini
