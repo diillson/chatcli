@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.14.1](https://github.com/diillson/chatcli/compare/v1.14.0...v1.14.1) (2025-08-12)
+
+
+### Bug Fixes
+
+* **version:** correct update command to include 'v' prefix in version string ([518e88e](https://github.com/diillson/chatcli/commit/518e88e5064e835c01802a899dbc98ac3a74a4a1))
+* **version:** correct update command to include 'v' prefix in version… ([5a09c42](https://github.com/diillson/chatcli/commit/5a09c426408e0abf026a3d9d8fe8aa054276271d))
+
 ## [1.14.0](https://github.com/diillson/chatcli/compare/v1.13.0...v1.14.0) (2025-08-12)
 
 
