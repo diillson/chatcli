@@ -61,7 +61,8 @@ func (c *ClaudeClient) GetModelName() string {
 
 // SendPrompt com exponential backoff
 func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	messages := c.buildMessages(prompt, history)
+	// Constrói mensagens e system a partir do history, sem duplicar o prompt
+	messages, systemStr := c.buildMessagesAndSystem(prompt, history)
 
 	// Obter max_tokens da variável de ambiente ou usar o padrão
 	maxTokens := config.ClaudeAIDefaultMaxTokens
@@ -79,13 +80,18 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		"messages":   messages,
 	}
 
+	// Incluir "system" top-level se houver
+	if strings.TrimSpace(systemStr) != "" {
+		reqBody["system"] = systemStr
+	}
+
 	jsonValue, err := json.Marshal(reqBody)
 	if err != nil {
 		c.logger.Error("Erro ao marshalizar o payload", zap.Error(err))
 		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
 	}
 
-	// Implementação do backoff exponencial
+	// Implementação do backoff exponencial (mantida)
 	var backoff = c.backoff
 
 	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
@@ -171,23 +177,47 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	return "", fmt.Errorf("falha ao obter resposta da Claude AI após %d tentativas", c.maxAttempts)
 }
 
-// buildMessages monta o histórico de mensagens para incluir na requisição
-func (c *ClaudeClient) buildMessages(prompt string, history []models.Message) []map[string]string {
-	messages := make([]map[string]string, len(history))
+// buildMessagesAndSystem monta o array de mensagens (user/assistant) e agrega
+// as mensagens "system" em um único system string top-level.
+// NÃO duplica o prompt: o ChatCLI já insere a última mensagem do usuário no history.
+func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Message) ([]map[string]string, string) {
+	var messages []map[string]string
+	var systemParts []string
 
-	// Processa o histórico, garantindo que role e content estejam bem definidos
-	for i, msg := range history {
-		role := "user"
-		if msg.Role == "assistant" {
-			role = "assistant"
+	for _, msg := range history {
+		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
+		case "assistant":
+			messages = append(messages, map[string]string{
+				"role":    "assistant",
+				"content": msg.Content,
+			})
+		case "system":
+			systemParts = append(systemParts, msg.Content)
+		default: // "user" e qualquer outro vira "user"
+			messages = append(messages, map[string]string{
+				"role":    "user",
+				"content": msg.Content,
+			})
 		}
-		messages[i] = map[string]string{"role": role, "content": msg.Content}
 	}
 
-	// Adiciona a mensagem atual do usuário ao final
-	messages = append(messages, map[string]string{"role": "user", "content": prompt})
+	// Fallback: se por algum motivo o history não tem o último turno do user,
+	// adicionar o prompt como user.
+	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+		if strings.TrimSpace(prompt) != "" {
+			messages = append(messages, map[string]string{
+				"role":    "user",
+				"content": prompt,
+			})
+		}
+	}
 
-	return messages
+	var systemStr string
+	if len(systemParts) > 0 {
+		systemStr = strings.Join(systemParts, "\n\n")
+	}
+
+	return messages, systemStr
 }
 
 // parseResponse decodifica e processa a resposta da ClaudeAI

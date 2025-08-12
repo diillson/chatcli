@@ -10,10 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/diillson/chatcli/config"
 	"io"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/config"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -57,36 +59,37 @@ func (c *OpenAIClient) GetModelName() string {
 
 // SendPrompt envia um prompt para o modelo de linguagem e retorna a resposta.
 func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	// Construir o array de mensagens
+	// Construir o array de mensagens APENAS a partir do history
 	messages := []map[string]string{}
 
-	// Adicionar o histórico
 	for _, msg := range history {
+		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		switch role {
+		case "system", "user", "assistant":
+			// válido
+		default:
+			role = "user"
+		}
 		messages = append(messages, map[string]string{
-			"role":    msg.Role,
+			"role":    role,
 			"content": msg.Content,
 		})
 	}
 
-	// Adicionar a nova mensagem do usuário
-	messages = append(messages, map[string]string{
-		"role":    "user",
-		"content": prompt,
-	})
-
-	// Obter max_tokens da variável de ambiente ou usar um valor padrão
-	//maxTokens := config.OpenAIAIDefaultMaxTokens // Valor padrão
-	//if tokenStr := os.Getenv("OPENAI_MAX_TOKENS"); tokenStr != "" {
-	//	if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
-	//		maxTokens = parsedTokens
-	//		c.logger.Debug("Usando max_completion_tokens personalizado", zap.Int("max_tokens", maxTokens))
-	//	}
-	//}
+	// Fallback: se history não tem o último prompt do user (edge-case),
+	// adiciona o "prompt" como user aqui.
+	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+		if strings.TrimSpace(prompt) != "" {
+			messages = append(messages, map[string]string{
+				"role":    "user",
+				"content": prompt,
+			})
+		}
+	}
 
 	payload := map[string]interface{}{
 		"model":    c.model,
 		"messages": messages,
-		//"max_completion_tokens": maxTokens,
 	}
 
 	jsonValue, err := json.Marshal(payload)
