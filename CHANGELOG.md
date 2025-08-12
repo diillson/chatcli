@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.14.0](https://github.com/diillson/chatcli/compare/v1.13.0...v1.14.0) (2025-08-12)
+
+
+### Features
+
+* refactor message building to avoid prompt duplication and add s… ([92a5c8b](https://github.com/diillson/chatcli/commit/92a5c8b284fe95bb4baa2841a001d57f0f8db5ac))
+* refactor message building to avoid prompt duplication and add system-level instructions ([8f140b3](https://github.com/diillson/chatcli/commit/8f140b3035466595bbd6313459aa4627494908bc))
+
+
+### Bug Fixes
+
+* **gemini:** simplify max tokens assignment logic ([7ae5b9a](https://github.com/diillson/chatcli/commit/7ae5b9a8dc03679cc480a6077f145c0a77e28df8))
+* **gemini:** simplify max tokens assignment logic ([954df53](https://github.com/diillson/chatcli/commit/954df532b847f26f1c0dfe7cb43013c1e3dd2f71))
+
 ## [1.13.0](https://github.com/diillson/chatcli/compare/v1.12.1...v1.13.0) (2025-08-12)
 
 
