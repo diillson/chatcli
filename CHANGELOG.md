@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.13.0](https://github.com/diillson/chatcli/compare/v1.12.1...v1.13.0) (2025-08-12)
+
+
+### Features
+
+* add Google AI (Gemini) provider support and configuration options ([de71481](https://github.com/diillson/chatcli/commit/de7148104530deca8ec4fb26cb083d2b8f40cf51))
+* add Google AI (Gemini) provider support and configuration options ([87dbec8](https://github.com/diillson/chatcli/commit/87dbec885058f3d24ad470e2e5e7782f388ea26b))
+
+
+### Bug Fixes
+
+* **gemini:** handle error when closing response body ([f2d2701](https://github.com/diillson/chatcli/commit/f2d2701b65239cbd8edd8686eecd802f4ae59d6a))
+* **gemini:** handle error when closing response body ([14d6622](https://github.com/diillson/chatcli/commit/14d6622fc7c9ff1c43c0e4472930b210e6f7e9ff))
+
 ## [1.12.1](https://github.com/diillson/chatcli/compare/v1.12.0...v1.12.1) (2025-08-11)
 
 
