@@ -3,15 +3,16 @@ package utils
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"os"
+	"runtime"
+	"strings"
+
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/version"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/term"
-	"io"
-	"os"
-	"runtime"
-	"strings"
 )
 
 // GetEnvOrDefault retorna o valor da variável de ambiente ou um valor padrão se não estiver definida
@@ -108,6 +109,16 @@ func CheckProviderEnvVariables(logger *zap.Logger) {
 	}
 	if claudeAIModel == "" {
 		fmt.Printf("ATENÇÃO: CLAUDEAI_MODEL não definido, usando valor padrão: %s\n", config.DefaultClaudeAIModel)
+	}
+
+	// Verificar GOOGLEAI
+	googleAIKey := os.Getenv("GOOGLEAI_API_KEY")
+	googleAIModel := os.Getenv("GOOGLEAI_MODEL")
+	if googleAIKey == "" {
+		fmt.Println("ATENÇÃO: GOOGLEAI_API_KEY não definida, o provedor GOOGLEAI não estará disponível.")
+	}
+	if googleAIModel == "" {
+		fmt.Printf("ATENÇÃO: GOOGLEAI_MODEL não definido, usando valor padrão: %s\n", config.DefaultGoogleAIModel)
 	}
 }
 

@@ -13,6 +13,7 @@ flowchart LR
         
     H --> K[Resposta LLM]
     I --> K
+    G -->|Google AI| K[Gemini Client]
     J -->|Gerencia Token| K
         
     K -->|Retorna| B
@@ -47,6 +48,7 @@ chatcli/
 │   ├── openai/
 │   ├── claudeai/
 │   ├── stackspotai/
+│   ├── googleai/
 │   ├── manager/
 │   ├── client/
 │   ├── token/
