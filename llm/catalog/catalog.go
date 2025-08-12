@@ -12,6 +12,7 @@ const (
 	ProviderOpenAIAssistant = "OPENAI_ASSISTANT"
 	ProviderClaudeAI        = "CLAUDEAI"
 	ProviderStackSpot       = "STACKSPOT"
+	ProviderGoogleAI        = "GOOGLEAI"
 )
 
 // PreferredAPI define qual API é preferida para o modelo
@@ -165,6 +166,57 @@ var registry = []ModelMeta{
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
 		Capabilities:    []string{"json_mode", "tools"},
 	},
+	// Google Gemini Models
+	{
+		ID:              "gemini-2.5-pro",
+		Aliases:         []string{"gemini-2.5-pro", "gemini-2.5-pro-latest"},
+		DisplayName:     "Gemini 2.5 Pro",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   2000000, // 2M tokens context window
+		MaxOutputTokens: 8192,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution"},
+	},
+	{
+		ID:              "gemini-2.5-flash",
+		Aliases:         []string{"gemini-2.5-flash"},
+		DisplayName:     "Gemini 2.5 Flash",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1000000, // 1M tokens
+		MaxOutputTokens: 8192,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gemini-2.5-flash-lite",
+		Aliases:         []string{"gemini-2.5-flash-lite", "gemini-2.5-flash-lite"},
+		DisplayName:     "Gemini 2.5 Flash Lite",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 8192,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "multimodal_live"},
+	},
+	{
+		ID:              "gemini-2.0-flash",
+		Aliases:         []string{"gemini-2.0-flash"},
+		DisplayName:     "Gemini 2.0 Flash",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1000000, // 1M tokens
+		MaxOutputTokens: 8192,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gemini-2.0-flash-lite",
+		Aliases:         []string{"gemini-2.0-flash-lite"},
+		DisplayName:     "Gemini 2.5 Flash Lite",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 8192,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "multimodal_live"},
+	},
 }
 
 // Resolve procura metadados por provedor e string de modelo (case-insensitive),
@@ -239,6 +291,8 @@ func GetMaxTokens(provider, model string, override int) int {
 		return 50000
 	case ProviderStackSpot:
 		return 50000
+	case ProviderGoogleAI:
+		return 10000
 	default:
 		return 50000
 	}
@@ -274,6 +328,8 @@ func GetPreferredAPI(provider, model string) PreferredAPI {
 		return APIAssistants
 	case ProviderClaudeAI:
 		return APIAnthropicMessages
+	case ProviderGoogleAI:
+		return PreferredAPI("gemini_api")
 	default:
 		return APIChatCompletions
 	}

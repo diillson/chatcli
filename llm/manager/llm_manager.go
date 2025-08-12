@@ -14,6 +14,7 @@ import (
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/googleai"
 	"github.com/diillson/chatcli/llm/openai"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/llm/openai_responses"
@@ -57,8 +58,35 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager,
 	manager.configurarOpenAIClient()
 	manager.configurarStackSpotClient(slugName, tenantName)
 	manager.configurarClaudeAIClient()
+	manager.configurarGoogleAIClient()
 
 	return manager, nil
+}
+
+// configurarGoogleAIClient configura o cliente Google AI (Gemini)
+func (m *LLMManagerImpl) configurarGoogleAIClient() {
+	apiKey := os.Getenv("GOOGLEAI_API_KEY")
+	if apiKey != "" {
+		// NÃO logar a API key diretamente
+		m.logger.Info("Configurando provedor Google AI",
+			zap.Bool("api_key_present", true),
+			zap.Int("api_key_length", len(apiKey))) // Apenas o tamanho, não o conteúdo
+
+		m.clients["GOOGLEAI"] = func(model string) (client.LLMClient, error) {
+			if model == "" {
+				model = config.DefaultGoogleAIModel
+			}
+			return googleai.NewGeminiClient(
+				apiKey,
+				model,
+				m.logger,
+				config.GoogleAIDefaultMaxAttempts,
+				config.GoogleAIDefaultBackoff,
+			), nil
+		}
+	} else {
+		m.logger.Warn("GOOGLEAI_API_KEY não definida, o provedor GOOGLEAI não estará disponível")
+	}
 }
 
 // configurarOpenAIClient configura o cliente OpenAI se a variável de ambiente OPENAI_API_KEY estiver definida.

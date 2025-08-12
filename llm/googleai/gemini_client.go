@@ -1,0 +1,475 @@
+package googleai
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/utils"
+	"go.uber.org/zap"
+)
+
+// GeminiClient implementa o cliente para interagir com a API do Google Gemini
+type GeminiClient struct {
+	apiKey      string
+	model       string
+	logger      *zap.Logger
+	client      *http.Client
+	maxAttempts int
+	backoff     time.Duration
+	baseURL     string
+}
+
+// NewGeminiClient cria uma nova instância de GeminiClient
+func NewGeminiClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *GeminiClient {
+	httpClient := utils.NewHTTPClient(logger, config.DefaultGoogleAITimeout)
+
+	if maxAttempts <= 0 {
+		maxAttempts = config.GoogleAIDefaultMaxAttempts
+	}
+	if backoff <= 0 {
+		backoff = config.GoogleAIDefaultBackoff
+	}
+	if model == "" {
+		model = config.DefaultGoogleAIModel
+	}
+
+	// Log de inicialização
+	logger.Info("Inicializando cliente Google AI (Gemini)",
+		zap.String("model", model),
+		zap.Int("max_attempts", maxAttempts),
+		zap.Duration("backoff", backoff),
+		zap.String("base_url", config.GoogleAIAPIURL),
+		zap.Bool("api_key_configured", apiKey != ""))
+
+	return &GeminiClient{
+		apiKey:      apiKey,
+		model:       model,
+		logger:      logger,
+		client:      httpClient,
+		maxAttempts: maxAttempts,
+		backoff:     backoff,
+		baseURL:     config.GoogleAIAPIURL,
+	}
+}
+
+// GetModelName retorna o nome amigável do modelo Gemini
+func (c *GeminiClient) GetModelName() string {
+	return catalog.GetDisplayName(catalog.ProviderGoogleAI, c.model)
+}
+
+// SendPrompt envia um prompt para o Gemini e retorna a resposta
+func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
+	// Log inicial da requisição
+	c.logger.Info("Iniciando requisição para Google AI",
+		zap.String("model", c.model),
+		zap.Int("history_length", len(history)),
+		zap.Int("prompt_length", len(prompt)))
+
+	contents := c.buildContents(prompt, history)
+
+	// Log do conteúdo construído
+	c.logger.Debug("Conteúdo preparado para Google AI",
+		zap.Int("contents_count", len(contents)),
+		zap.String("model", c.model))
+
+	// Obter configurações de tokens
+	maxTokens := c.getMaxTokens()
+
+	c.logger.Debug("Configuração de tokens",
+		zap.Int("max_tokens", maxTokens),
+		zap.String("model", c.model))
+
+	// Configurar generation config
+	generationConfig := map[string]interface{}{
+		"temperature":     0.7,
+		"topP":            0.95,
+		"topK":            40,
+		"maxOutputTokens": maxTokens,
+	}
+
+	// Montar o payload
+	reqBody := map[string]interface{}{
+		"contents":         contents,
+		"generationConfig": generationConfig,
+		"safetySettings":   c.getSafetySettings(),
+	}
+
+	jsonValue, err := json.Marshal(reqBody)
+	if err != nil {
+		c.logger.Error("Erro ao marshalizar o payload para Google AI",
+			zap.Error(err),
+			zap.String("model", c.model))
+		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
+	}
+
+	// Log do tamanho do payload
+	c.logger.Debug("Payload preparado",
+		zap.Int("payload_size", len(jsonValue)),
+		zap.String("model", c.model))
+
+	// Implementação com retry e backoff
+	var backoff = c.backoff
+	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
+		c.logger.Debug("Tentativa de requisição",
+			zap.Int("attempt", attempt),
+			zap.Int("max_attempts", c.maxAttempts),
+			zap.String("model", c.model))
+
+		response, err := c.executeRequest(ctx, jsonValue)
+
+		if err != nil {
+			// Verificar se é erro de rate limit
+			if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RATE_LIMIT") {
+				c.logger.Warn("Rate limit excedido na API do Google AI",
+					zap.Int("attempt", attempt),
+					zap.Error(err),
+					zap.Duration("backoff", backoff),
+					zap.String("model", c.model))
+
+				if attempt < c.maxAttempts {
+					time.Sleep(backoff)
+					backoff *= 2
+					continue
+				}
+			} else if utils.IsTemporaryError(err) {
+				c.logger.Warn("Erro temporário ao chamar Google AI",
+					zap.Int("attempt", attempt),
+					zap.Error(err),
+					zap.Duration("backoff", backoff),
+					zap.String("model", c.model))
+
+				if attempt < c.maxAttempts {
+					time.Sleep(backoff)
+					backoff *= 2
+					continue
+				}
+			}
+
+			c.logger.Error("Erro ao fazer requisição para Google AI",
+				zap.Error(err),
+				zap.Int("attempt", attempt),
+				zap.String("model", c.model))
+			return "", fmt.Errorf("erro ao fazer requisição para Google AI: %w", err)
+		}
+
+		// Log de sucesso
+		c.logger.Info("Resposta recebida do Google AI com sucesso",
+			zap.Int("attempt", attempt),
+			zap.String("model", c.model),
+			zap.Int("response_length", len(response)))
+
+		return response, nil
+	}
+
+	c.logger.Error("Falha ao obter resposta do Google AI após todas as tentativas",
+		zap.Int("max_attempts", c.maxAttempts),
+		zap.String("model", c.model))
+
+	return "", fmt.Errorf("falha ao obter resposta do Google AI após %d tentativas", c.maxAttempts)
+}
+
+// buildContents constrói o array de conteúdos para a API do Gemini
+func (c *GeminiClient) buildContents(prompt string, history []models.Message) []map[string]interface{} {
+	var contents []map[string]interface{}
+
+	// Log apenas estatísticas, não o conteúdo real
+	systemMessageCount := 0
+	userMessageCount := 0
+	assistantMessageCount := 0
+
+	// Processar histórico
+	for _, msg := range history {
+		role := "user"
+		if msg.Role == "assistant" {
+			role = "model"
+			assistantMessageCount++
+		} else if msg.Role == "system" {
+			systemMessageCount++
+			// Gemini não tem role "system", converter para user com prefixo
+			contents = append(contents, map[string]interface{}{
+				"role": "user",
+				"parts": []map[string]string{
+					{"text": "[System]: " + msg.Content},
+				},
+			})
+			continue
+		} else {
+			userMessageCount++
+		}
+
+		contents = append(contents, map[string]interface{}{
+			"role": role,
+			"parts": []map[string]string{
+				{"text": msg.Content},
+			},
+		})
+	}
+
+	// Adicionar prompt atual
+	contents = append(contents, map[string]interface{}{
+		"role": "user",
+		"parts": []map[string]string{
+			{"text": prompt},
+		},
+	})
+
+	// Log apenas estatísticas
+	c.logger.Debug("Histórico de mensagens preparado",
+		zap.Int("system_messages", systemMessageCount),
+		zap.Int("user_messages", userMessageCount),
+		zap.Int("assistant_messages", assistantMessageCount),
+		zap.Int("prompt_length", len(prompt)),
+		zap.String("model", c.model))
+
+	return contents
+}
+
+// executeRequest executa a requisição HTTP para a API do Gemini
+func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (string, error) {
+	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", c.baseURL, c.model, c.apiKey)
+
+	// Log da URL (sem a API key)
+	safeURL := fmt.Sprintf("%s/models/%s:generateContent?key=[REDACTED]", c.baseURL, c.model)
+	c.logger.Debug("Enviando requisição POST para Google AI",
+		zap.String("url", safeURL),
+		zap.String("model", c.model))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(jsonValue)))
+	if err != nil {
+		c.logger.Error("Erro ao criar requisição HTTP para Google AI",
+			zap.Error(err),
+			zap.String("model", c.model))
+		return "", fmt.Errorf("erro ao criar requisição: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	// Log dos headers (sem informações sensíveis)
+	c.logger.Debug("Headers da requisição",
+		zap.String("Content-Type", req.Header.Get("Content-Type")),
+		zap.String("model", c.model))
+
+	startTime := time.Now()
+	resp, err := c.client.Do(req)
+	duration := time.Since(startTime)
+
+	if err != nil {
+		c.logger.Error("Erro na requisição HTTP para Google AI",
+			zap.Error(err),
+			zap.Duration("duration", duration),
+			zap.String("model", c.model))
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	// Log do tempo de resposta
+	c.logger.Debug("Resposta HTTP recebida",
+		zap.Int("status_code", resp.StatusCode),
+		zap.Duration("duration", duration),
+		zap.String("model", c.model))
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.logger.Error("Erro ao ler corpo da resposta do Google AI",
+			zap.Error(err),
+			zap.String("model", c.model))
+		return "", fmt.Errorf("erro ao ler resposta: %w", err)
+	}
+
+	// Log do tamanho da resposta
+	c.logger.Debug("Corpo da resposta recebido",
+		zap.Int("response_size", len(bodyBytes)),
+		zap.String("model", c.model))
+
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Error("Erro na resposta do Google AI",
+			zap.Int("status", resp.StatusCode),
+			zap.String("body", string(bodyBytes)),
+			zap.String("model", c.model))
+		return "", fmt.Errorf("erro na API Google AI: status %d, body: %s",
+			resp.StatusCode, string(bodyBytes))
+	}
+
+	return c.parseResponse(bodyBytes)
+}
+
+// parseResponse extrai o texto da resposta do Gemini
+func (c *GeminiClient) parseResponse(bodyBytes []byte) (string, error) {
+	c.logger.Debug("Iniciando parse da resposta do Google AI",
+		zap.Int("body_size", len(bodyBytes)),
+		zap.String("model", c.model))
+
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+			FinishReason  string `json:"finishReason"`
+			SafetyRatings []struct {
+				Category    string `json:"category"`
+				Probability string `json:"probability"`
+			} `json:"safetyRatings"`
+		} `json:"candidates"`
+		UsageMetadata struct {
+			PromptTokenCount     int `json:"promptTokenCount"`
+			CandidatesTokenCount int `json:"candidatesTokenCount"`
+			TotalTokenCount      int `json:"totalTokenCount"`
+		} `json:"usageMetadata"`
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error,omitempty"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		sanitizedResponse := c.sanitizeErrorResponse(string(bodyBytes))
+
+		c.logger.Error("Erro ao decodificar resposta JSON do Google AI",
+			zap.Error(err),
+			zap.String("model", c.model),
+			zap.String("raw_response", sanitizedResponse[:min(500, len(sanitizedResponse))]))
+		return "", fmt.Errorf("erro ao decodificar resposta: %w", err)
+	}
+
+	// Verificar se há erro na resposta
+	if result.Error.Code != 0 {
+		c.logger.Error("Erro retornado pela API do Google AI",
+			zap.Int("error_code", result.Error.Code),
+			zap.String("error_message", result.Error.Message),
+			zap.String("error_status", result.Error.Status),
+			zap.String("model", c.model))
+		return "", fmt.Errorf("erro da API: %s (código: %d)", result.Error.Message, result.Error.Code)
+	}
+
+	if len(result.Candidates) == 0 {
+		c.logger.Error("Nenhum candidato na resposta do Google AI",
+			zap.String("model", c.model))
+		return "", fmt.Errorf("nenhuma resposta recebida do Google AI")
+	}
+
+	// Log detalhado de uso de tokens
+	c.logger.Info("Estatísticas de uso de tokens do Google AI",
+		zap.Int("prompt_tokens", result.UsageMetadata.PromptTokenCount),
+		zap.Int("response_tokens", result.UsageMetadata.CandidatesTokenCount),
+		zap.Int("total_tokens", result.UsageMetadata.TotalTokenCount),
+		zap.String("model", c.model))
+
+	// Log do finish reason
+	if len(result.Candidates) > 0 {
+		c.logger.Debug("Razão de finalização da resposta",
+			zap.String("finish_reason", result.Candidates[0].FinishReason),
+			zap.String("model", c.model))
+
+		// Log de safety ratings se disponível
+		if len(result.Candidates[0].SafetyRatings) > 0 {
+			for _, rating := range result.Candidates[0].SafetyRatings {
+				c.logger.Debug("Safety rating",
+					zap.String("category", rating.Category),
+					zap.String("probability", rating.Probability),
+					zap.String("model", c.model))
+			}
+		}
+	}
+
+	var responseText strings.Builder
+	partsCount := 0
+	for _, part := range result.Candidates[0].Content.Parts {
+		responseText.WriteString(part.Text)
+		partsCount++
+	}
+
+	c.logger.Debug("Resposta processada",
+		zap.Int("parts_count", partsCount),
+		zap.Int("total_length", responseText.Len()),
+		zap.String("model", c.model))
+
+	if responseText.Len() == 0 {
+		c.logger.Error("Resposta vazia do Google AI",
+			zap.String("model", c.model))
+		return "", fmt.Errorf("resposta vazia do Google AI")
+	}
+
+	c.logger.Info("Parse da resposta do Google AI concluído com sucesso",
+		zap.Int("response_length", responseText.Len()),
+		zap.String("model", c.model))
+
+	return responseText.String(), nil
+}
+
+// sanitizeErrorResponse remove informações sensíveis de mensagens de erro
+func (c *GeminiClient) sanitizeErrorResponse(response string) string {
+	// Remover padrões de API key
+	patterns := []struct {
+		pattern     *regexp.Regexp
+		replacement string
+	}{
+		{regexp.MustCompile(`key=[\w-]+`), "key=[REDACTED]"},
+		{regexp.MustCompile(`API key.*?: [\w-]+`), "API key: [REDACTED]"},
+		{regexp.MustCompile(`"api_key":\s*"[^"]+"`), `"api_key":"[REDACTED]"`},
+		{regexp.MustCompile(`AIza[\w-]{35}`), "[REDACTED_API_KEY]"}, // Padrão de API key do Google
+	}
+
+	sanitized := response
+	for _, p := range patterns {
+		sanitized = p.pattern.ReplaceAllString(sanitized, p.replacement)
+	}
+
+	return sanitized
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// getMaxTokens obtém o limite de tokens configurado
+func (c *GeminiClient) getMaxTokens() int {
+	if tokenStr := os.Getenv("GOOGLEAI_MAX_TOKENS"); tokenStr != "" {
+		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
+			c.logger.Debug("Usando max_tokens personalizado", zap.Int("max_tokens", parsedTokens))
+			return parsedTokens
+		}
+	}
+
+	// Usar o catálogo para obter limite baseado no modelo
+	return catalog.GetMaxTokens(catalog.ProviderGoogleAI, c.model, 0)
+}
+
+// getSafetySettings retorna as configurações de segurança para o Gemini
+func (c *GeminiClient) getSafetySettings() []map[string]string {
+	// Configurações mais permissivas para uso em desenvolvimento
+	return []map[string]string{
+		{
+			"category":  "HARM_CATEGORY_HARASSMENT",
+			"threshold": "BLOCK_ONLY_HIGH",
+		},
+		{
+			"category":  "HARM_CATEGORY_HATE_SPEECH",
+			"threshold": "BLOCK_ONLY_HIGH",
+		},
+		{
+			"category":  "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+			"threshold": "BLOCK_ONLY_HIGH",
+		},
+		{
+			"category":  "HARM_CATEGORY_DANGEROUS_CONTENT",
+			"threshold": "BLOCK_ONLY_HIGH",
+		},
+	}
+}

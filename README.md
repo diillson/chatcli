@@ -146,6 +146,11 @@ O ChatCLI utiliza variáveis de ambiente para definir seu comportamento e conect
     - `CLAUDEAI_MAX_TOKENS` – (Opcional) Máximo de tokens na resposta (padrão: `8192`).
     - `CLAUDEAI_API_VERSION`  – (Opcional) Versão da API da Anthropic (padrão: `2023-06-01`)
 
+- **Provedor Google AI (Gemini)**:
+    - `GOOGLEAI_API_KEY` – Chave de API do Google AI.
+    - `GOOGLEAI_MODEL` – (Opcional) Modelo a ser utilizado (padrão: `gemini-2.0-flash-lite`)
+    - `GOOGLEAI_MAX_TOKENS` – (Opcional) Máximo de tokens na resposta (padrão: `8192`).
+
 ### Exemplo de Arquivo `.env`
 
 ```env
@@ -175,6 +180,11 @@ CLAUDEAI_API_KEY=sua-chave-claudeai
 CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
 CLAUDEAI_MAX_TOKENS=20000
 CLAUDEAI_API_VERSION=2023-06-01
+
+# Configurações do Google AI (Gemini)
+GOOGLEAI_API_KEY=sua-chave-googleai
+GOOGLEAI_MODEL=gemini-2.5-flash
+GOOGLEAI_MAX_TOKENS=20000
 ```
 
 ---

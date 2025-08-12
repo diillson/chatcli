@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/diillson/chatcli/config"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/config"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -154,10 +156,12 @@ type LoggingTransport struct {
 
 // RoundTrip implementa a interface http.RoundTripper
 func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Log da requisição
+	safeURL := t.sanitizeURL(req.URL.String())
+
+	// Log da requisição com URL sanitizada
 	t.Logger.Info("Enviando Requisição",
 		zap.String("Método", req.Method),
-		zap.String("URL", req.URL.String()),
+		zap.String("URL", safeURL),
 		zap.String("Cabeçalhos", headersToString(req.Header)),
 	)
 
@@ -182,7 +186,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if err != nil {
 		t.Logger.Error("Erro na Requisição",
 			zap.String("Método", req.Method),
-			zap.String("URL", req.URL.String()),
+			zap.String("URL", safeURL),
 			zap.Error(err),
 			zap.Duration("Duração", duration),
 		)
@@ -192,7 +196,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// Log da resposta
 	t.Logger.Info("Recebendo Resposta",
 		zap.String("Método", req.Method),
-		zap.String("URL", req.URL.String()),
+		zap.String("URL", safeURL),
 		zap.Int("Status", resp.StatusCode),
 		zap.Duration("Duração", duration),
 		zap.String("Cabeçalhos", headersToString(resp.Header)),
@@ -215,12 +219,71 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return resp, nil
 }
 
+// método para sanitizar URLs do logging transport
+func (t *LoggingTransport) sanitizeURL(urlStr string) string {
+	// Parse a URL
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "[URL_INVÁLIDA]"
+	}
+
+	// Obter query parameters
+	query := u.Query()
+
+	// Lista de parâmetros sensíveis para sanitizar
+	sensitiveParams := []string{
+		"key",
+		"api_key",
+		"apikey",
+		"api-key",
+		"token",
+		"access_token",
+		"refresh_token",
+		"client_secret",
+		"password",
+		"secret",
+	}
+
+	// Sanitizar parâmetros sensíveis
+	for _, param := range sensitiveParams {
+		if query.Has(param) {
+			query.Set(param, "[REDACTED]")
+		}
+	}
+
+	// Reconstruir a URL com parâmetros sanitizados
+	u.RawQuery = query.Encode()
+
+	// Também verificar se a API key está no path (alguns serviços fazem isso)
+	path := u.Path
+	// Padrão de API key do Google (AIza...)
+	googleKeyPattern := regexp.MustCompile(`AIza[A-Za-z0-9_-]{35}`)
+	path = googleKeyPattern.ReplaceAllString(path, "[REDACTED_API_KEY]")
+
+	// Padrão genérico de API key
+	genericKeyPattern := regexp.MustCompile(`/[A-Za-z0-9]{32,}/`)
+	if genericKeyPattern.MatchString(path) {
+		path = genericKeyPattern.ReplaceAllString(path, "/[REDACTED]/")
+	}
+
+	u.Path = path
+
+	return u.String()
+}
+
 // headersToString converte os cabeçalhos para uma string legível
 func headersToString(headers http.Header) string {
 	var buf strings.Builder
 	for key, values := range headers {
 		lowerKey := strings.ToLower(key)
-		if lowerKey == "authorization" || lowerKey == "api-key" || lowerKey == "x-api-key" {
+		// Adicionar mais casos de headers sensíveis
+		if lowerKey == "authorization" ||
+			lowerKey == "api-key" ||
+			lowerKey == "x-api-key" ||
+			lowerKey == "x-goog-api-key" || // Google API key header
+			strings.Contains(lowerKey, "secret") ||
+			strings.Contains(lowerKey, "token") ||
+			strings.Contains(lowerKey, "password") {
 			buf.WriteString(fmt.Sprintf("%s: [REDACTED]; ", key))
 			continue
 		}
