@@ -449,12 +449,10 @@ func min(a, b int) int {
 
 // getMaxTokens obtém o limite de tokens configurado
 func (c *GeminiClient) getMaxTokens() int {
-	Tokens := config.GoogleAIDefaultMaxTokens
 	if tokenStr := os.Getenv("GOOGLEAI_MAX_TOKENS"); tokenStr != "" {
 		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
-			Tokens = parsedTokens
 			c.logger.Debug("Usando max_tokens personalizado", zap.Int("max_tokens", parsedTokens))
-			return Tokens
+			return parsedTokens
 		}
 	}
 
