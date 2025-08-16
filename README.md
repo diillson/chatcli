@@ -8,7 +8,7 @@
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/diillson/chatcli?label=Go%20Version)
 ![GitHub](https://img.shields.io/github/license/diillson/chatcli)
 
-O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra modelos de Linguagem de Aprendizado (LLMs) poderosos (como StackSpot, OpenAI e ClaudeAI) para facilitar conversas interativas e contextuais diretamente no seu terminal. Projetado para desenvolvedores, cientistas de dados e entusiastas de tecnologia, o ChatCLI potencializa a produtividade ao agregar diversas fontes de dados contextuais e oferecer uma experiência rica e amigável.
+O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra modelos de Linguagem de Aprendizado (LLMs) poderosos (como OpenAI, StackSpot, GoogleAI e ClaudeAI) para facilitar conversas interativas e contextuais diretamente no seu terminal. Projetado para desenvolvedores, cientistas de dados e entusiastas de tecnologia, o ChatCLI potencializa a produtividade ao agregar diversas fontes de dados contextuais e oferecer uma experiência rica e amigável.
 
 ---
 
@@ -210,6 +210,18 @@ Após a instalação e configuração, o ChatCLI oferece uma série de comandos 
     - `/switch --tenantname <tenant>` – Atualiza somente o `tenantName`.
     - Combinações: `/switch --slugname <slug> --tenantname <tenant>`
     - `/reload` – Recarrega as variáveis de ambiente em tempo real.
+    - `/config` ou `/status` (ou `/settings`) – Exibe as configurações atuais do ChatCLI.
+       - Mostra: provedor e modelo em uso (runtime), nome do modelo reportado pelo client, API preferida (catálogo), MaxTokens efetivo (estimado), overrides de tokens por ENV, caminho do `.env`, provedores disponíveis e (quando aplicável) `slugName`/`tenantName` da StackSpot.
+       - Segurança: nunca imprime valores de segredos (ex.: chaves de API); exibe apenas a presença como `[SET]`/`[NOT SET]` e não envia nada para a LLM.
+       - Exemplo de uso:
+         ```
+         /config
+         ```
+         Saída esperada (resumo):
+         - Provider atual: OPENAI
+         - Modelo atual: gpt-4o-mini (client: GPT-4o mini)
+         - API preferida: chat_completions
+         - MaxTokens efetivo: 50000
 
 - **Iniciar uma Nova Sessão**:
     - `/newsession` – Limpa o histórico atual e inicia uma nova sessão de conversa.
@@ -230,7 +242,9 @@ Após a instalação e configuração, o ChatCLI oferece uma série de comandos 
 - `@env` – Insere variáveis de ambiente no contexto.
 - `@file <caminho>` – Insere o conteúdo de um arquivo ou diretório.
 - `@command <comando>` – Executa um comando do terminal e salva a saída.
-- **Novo**: `@command --ai <comando> > <contexto>` – Envia a saída do comando diretamente para a LLM com contexto adicional.
+- `@command --ai <comando> > <contexto>` – Envia a saída do comando diretamente para a LLM com contexto adicional.
+- - Observação: variáveis sensíveis e saídas são sanitizadas (tokens/segredos são redigidos) antes de irem para a LLM.
+
 
 ### Modo Agente
 

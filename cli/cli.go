@@ -102,18 +102,42 @@ func (cli *ChatCLI) reconfigureLogger() {
 func (cli *ChatCLI) reloadConfiguration() {
 	fmt.Println("Recarregando configurações...")
 
-	// Limpar variáveis de ambiente
+	// Preservar provider/model atuais do runtime
+	prevProvider := cli.provider
+	prevModel := cli.model
+
+	// Determinar o arquivo .env (mesma lógica do main.go) e expandir caminho se necessário
+	envFilePath := os.Getenv("CHATCLI_DOTENV")
+	if envFilePath == "" {
+		envFilePath = ".env"
+	} else {
+		if expanded, err := utils.ExpandPath(envFilePath); err == nil {
+			envFilePath = expanded
+		} else {
+			fmt.Printf("Aviso: não foi possível expandir o caminho '%s': %v\n", envFilePath, err)
+		}
+	}
+	// Limpar variáveis de ambiente relevantes para garantir reload consistente
 	variablesToUnset := []string{
-		"LOG_LEVEL", "ENV", "LLM_PROVIDER", "LOG_FILE", "OPENAI_API_KEY", "OPENAI_MODEL",
-		"CLAUDEAI_API_KEY", "CLAUDEAI_MODEL", "CLIENT_ID", "CLIENT_SECRET", "SLUG_NAME", "TENANT_NAME",
+		// Gerais
+		"LOG_LEVEL", "ENV", "LLM_PROVIDER", "LOG_FILE", "LOG_MAX_SIZE", "HISTORY_MAX_SIZE",
+		// OpenAI
+		"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_ASSISTANT_MODEL",
+		"OPENAI_USE_RESPONSES", "OPENAI_MAX_TOKENS",
+		// ClaudeAI
+		"CLAUDEAI_API_KEY", "CLAUDEAI_MODEL", "CLAUDEAI_MAX_TOKENS", "CLAUDEAI_API_VERSION",
+		// Google AI (Gemini)
+		"GOOGLEAI_API_KEY", "GOOGLEAI_MODEL", "GOOGLEAI_MAX_TOKENS",
+		// StackSpot
+		"CLIENT_ID", "CLIENT_SECRET", "SLUG_NAME", "TENANT_NAME",
 	}
 
 	for _, variable := range variablesToUnset {
 		_ = os.Unsetenv(variable)
 	}
 
-	// Recarregar o arquivo .env
-	err := godotenv.Load()
+	// Recarregar o arquivo .env sobrescrevendo valores (garante atualização mesmo se já havia env setado)
+	err := godotenv.Overload(envFilePath)
 	if err != nil && !os.IsNotExist(err) {
 		cli.logger.Error("Erro ao carregar o arquivo .env", zap.Error(err))
 	}
@@ -130,16 +154,29 @@ func (cli *ChatCLI) reloadConfiguration() {
 	}
 
 	cli.manager = manager
-	cli.configureProviderAndModel()
 
-	client, err := cli.manager.GetClient(cli.provider, cli.model)
-	if err != nil {
-		cli.logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
-		return
+	// Tentar reaproveitar o provider/model escolhidos pelo usuário
+	if prevProvider != "" && prevModel != "" {
+		if client, err := cli.manager.GetClient(prevProvider, prevModel); err == nil {
+			cli.Client = client
+			cli.provider = prevProvider
+			cli.model = prevModel
+			fmt.Println("Configurações recarregadas com sucesso! (preservado provider/model atuais)")
+			return
+		}
+		// Se falhar (ex.: provider indisponível), caímos para o comportamento padrão
+		cli.logger.Warn("Falha ao preservar provider/model após reload; caindo para valores do .env",
+			zap.String("provider", prevProvider), zap.String("model", prevModel))
 	}
-
-	cli.Client = client
-	fmt.Println("Configurações recarregadas com sucesso!")
+	// Fallback: usar valores do .env
+	cli.configureProviderAndModel()
+	if client, err := cli.manager.GetClient(cli.provider, cli.model); err == nil {
+		cli.Client = client
+		fmt.Println("Configurações recarregadas com sucesso!")
+	} else {
+		cli.logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
+		fmt.Println("Falha ao reconfigurar cliente LLM após reload.")
+	}
 }
 
 func (cli *ChatCLI) configureProviderAndModel() {
@@ -477,6 +514,7 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("/switch - Troca o provedor de LLM")
 	fmt.Println("/switch --slugname <slug> --tenantname <tenant> - Define slug e tenant")
 	fmt.Println("/reload - para recarregar as variáveis e reconfigurar o chatcli.")
+	fmt.Println("/config, /status ou /settings - Mostra as configurações e o estado atual (sem exibir segredos)")
 	fmt.Println("/nextchunk - Processa o próximo chunk de código quando usando @file com chunks.")
 	fmt.Println("/retry - Retenta o processamento do último chunk que falhou.")
 	fmt.Println("/retryall - Retenta o processamento de todos os chunks que falharam.")
@@ -573,7 +611,7 @@ func (cli *ChatCLI) processGitCommand(userInput string) (string, string) {
 func (cli *ChatCLI) processEnvCommand(userInput string) (string, string) {
 	var additionalContext string
 	if strings.Contains(strings.ToLower(userInput), "@env") {
-		envData := utils.GetEnvVariables()
+		envData := utils.GetEnvVariablesSanitized()
 		additionalContext += "\nVariáveis de Ambiente:\n" + envData
 		userInput = removeCommandAndNormalizeSpaces(userInput, "@env")
 	}
@@ -1584,10 +1622,12 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 		cli.lastCommandOutput = ""
 	} else {
 		// Capturar a saída do comando
-		output, err := cmd.CombinedOutput()
+		outputRaw, err := cmd.CombinedOutput()
+		safeOutput := utils.SanitizeSensitiveText(string(outputRaw))
+		safeCmd := utils.SanitizeSensitiveText(command)
 
 		// Exibir a saída
-		fmt.Println("Saída do comando:\n\n", string(output))
+		fmt.Println("Saída do comando:\n\n", safeOutput)
 
 		if err != nil {
 			fmt.Println("Erro ao executar comando:", err)
@@ -1596,9 +1636,9 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 		// Armazenar a saída no histórico
 		cli.history = append(cli.history, models.Message{
 			Role:    "system",
-			Content: fmt.Sprintf("Comando: %s\nSaída:\n%s", command, string(output)),
+			Content: fmt.Sprintf("Comando: %s\nSaída:\n%s", safeCmd, safeOutput),
 		})
-		cli.lastCommandOutput = string(output)
+		cli.lastCommandOutput = safeOutput
 
 		// se a flag --ai foi passada enviar o output para a IA
 		if sendToAI {
@@ -1614,10 +1654,13 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 	fmt.Println("Enviando sáida do comando para a IA...")
 
+	safeOutput := utils.SanitizeSensitiveText(output)
+	safeContext := utils.SanitizeSensitiveText(aiContext)
+
 	// Adicionar o output do comando ao histórico como mensagem do usuário
 	cli.history = append(cli.history, models.Message{
 		Role:    "user",
-		Content: fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", output, aiContext),
+		Content: fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", safeOutput, safeContext),
 	})
 	// Exibir mensagem "Pensando..." com animação
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
@@ -1627,7 +1670,7 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 	defer cancel()
 
 	//Enviar o output e o contexto para a IA
-	aiResponse, err := cli.Client.SendPrompt(ctx, fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", output, aiContext), cli.history)
+	aiResponse, err := cli.Client.SendPrompt(ctx, fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", safeOutput, safeContext), cli.history)
 
 	//parar a animação
 	cli.animation.StopThinkingAnimation()
@@ -1899,6 +1942,88 @@ func (cli *ChatCLI) typewriterEffect(text string, delay time.Duration) {
 
 		time.Sleep(delay) // Ajuste o delay conforme desejado
 	}
+}
+
+// presence retorna "[SET]" ou "[NOT SET]" para uma env sensível
+func presence(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "[NOT SET]"
+	}
+	return "[SET]"
+}
+
+// showConfig exibe as configurações atuais e o estado efetivo do ChatCLI
+func (cli *ChatCLI) showConfig() {
+	fmt.Println("===== CONFIGURAÇÃO ATUAL =====")
+
+	// Arquivo .env efetivo
+	envFilePath := os.Getenv("CHATCLI_DOTENV")
+	if envFilePath == "" {
+		envFilePath = ".env"
+	} else {
+		if expanded, err := utils.ExpandPath(envFilePath); err == nil {
+			envFilePath = expanded
+		}
+	}
+	fmt.Printf("- Arquivo .env: %s\n", envFilePath)
+
+	// Provider/Model atuais (runtime)
+	fmt.Printf("- Provider atual (runtime): %s\n", cli.provider)
+	fmt.Printf("- Modelo atual (runtime): %s\n", cli.model)
+	fmt.Printf("- Nome do modelo (client): %s\n", cli.Client.GetModelName())
+
+	// Preferências/Metadados do catálogo de API (quando houver)
+	preferredAPI := catalog.GetPreferredAPI(cli.provider, cli.model)
+	fmt.Printf("- API preferida (catálogo): %s\n", string(preferredAPI))
+
+	maxTokens := cli.getMaxTokensForCurrentLLM()
+	fmt.Printf("- MaxTokens efetivo (estimado): %d\n", maxTokens)
+
+	// Overrides de tokens por ENV
+	fmt.Printf("- Overrides (ENV): OPENAI_MAX_TOKENS=%s | CLAUDEAI_MAX_TOKENS=%s | GOOGLEAI_MAX_TOKENS=%s\n",
+		os.Getenv("OPENAI_MAX_TOKENS"),
+		os.Getenv("CLAUDEAI_MAX_TOKENS"),
+		os.Getenv("GOOGLEAI_MAX_TOKENS"),
+	)
+	// Flags e chaves relevantes
+	fmt.Printf("- LLM_PROVIDER (ENV): %s\n", os.Getenv("LLM_PROVIDER"))
+	fmt.Printf("- OPENAI_USE_RESPONSES (ENV): %s\n", os.Getenv("OPENAI_USE_RESPONSES"))
+	fmt.Printf("- ENV=%s | LOG_LEVEL=%s | LOG_FILE=%s | LOG_MAX_SIZE=%s\n",
+		os.Getenv("ENV"), os.Getenv("LOG_LEVEL"), os.Getenv("LOG_FILE"), os.Getenv("LOG_MAX_SIZE"))
+	fmt.Printf("- HISTORY_MAX_SIZE=%s\n", os.Getenv("HISTORY_MAX_SIZE"))
+
+	// Presença de chaves sensíveis — apenas presença, nunca valores
+	fmt.Println("- Chaves sensíveis (apenas presença):")
+	fmt.Printf("    OPENAI_API_KEY: %s\n", presence(os.Getenv("OPENAI_API_KEY")))
+	fmt.Printf("    CLAUDEAI_API_KEY: %s\n", presence(os.Getenv("CLAUDEAI_API_KEY")))
+	fmt.Printf("    GOOGLEAI_API_KEY: %s\n", presence(os.Getenv("GOOGLEAI_API_KEY")))
+	fmt.Printf("    CLIENT_SECRET (STACKSPOT): %s\n", presence(os.Getenv("CLIENT_SECRET")))
+
+	// Provider/modelosLLM (se presentes)
+	if strings.ToUpper(cli.provider) == "OPENAI" || strings.ToUpper(cli.provider) == "OPENAI_ASSISTANT" {
+		fmt.Printf("- OPENAI_MODEL=%s | OPENAI_ASSISTANT_MODEL=%s\n", os.Getenv("OPENAI_MODEL"), os.Getenv("OPENAI_ASSISTANT_MODEL"))
+	}
+	if strings.ToUpper(cli.provider) == "CLAUDEAI" {
+		fmt.Printf("- CLAUDEAI_MODEL=%s | CLAUDEAI_API_VERSION=%s\n", os.Getenv("CLAUDEAI_MODEL"), os.Getenv("CLAUDEAI_API_VERSION"))
+	}
+	if strings.ToUpper(cli.provider) == "GOOGLEAI" {
+		fmt.Printf("- GOOGLEAI_MODEL=%s\n", os.Getenv("GOOGLEAI_MODEL"))
+	}
+
+	// StackSpot: slug/tenant do TokenManager (quando disponível)
+	if tm, ok := cli.manager.GetTokenManager(); ok {
+		slug, tenant := tm.GetSlugAndTenantName()
+		fmt.Printf("- STACKSPOT: slugName=%s | tenantName=%s\n", slug, tenant)
+	}
+
+	// Provedores disponíveis
+	providers := cli.manager.GetAvailableProviders()
+	if len(providers) > 0 {
+		fmt.Printf("- Provedores disponíveis: %s\n", strings.Join(providers, ", "))
+	}
+	fmt.Println("==============================")
+	fmt.Println("Dica: use /switch para trocar provider/model em tempo real;")
+	fmt.Println("      e /reload para recarregar variáveis do .env.")
 }
 
 // handleVersionCommand exibe informações detalhadas sobre a versão atual

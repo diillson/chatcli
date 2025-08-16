@@ -8,7 +8,7 @@
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/diillson/chatcli?label=Go%20Version)
 ![GitHub](https://img.shields.io/github/license/diillson/chatcli)
 
-**ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) like StackSpot, OpenAI, and ClaudeAI, making interactive and contextual conversations accessible directly from your terminal. Designed for developers, data scientists, and tech enthusiasts, ChatCLI supercharges productivity by combining contextual data sources and offering a rich, user-friendly experience.
+**ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) like OpenAI, StackSpot, GoogleAI and ClaudeAI, making interactive and contextual conversations accessible directly from your terminal. Designed for developers, data scientists, and tech enthusiasts, ChatCLI supercharges productivity by combining contextual data sources and offering a rich, user-friendly experience.
 
 ---
 
@@ -221,6 +221,18 @@ Once installed and configured, ChatCLI offers a suite of commands for seamless L
     * `/switch --tenantname <tenant>` – Update only the `tenantName`.
     * Combine: `/switch --slugname <slug> --tenantname <tenant>`
     * `/reload` – Reload environment variables in real time.
+    * `/config` or `/status` (or `/settings`) – Display current ChatCLI configuration.
+    - Shows: current provider and model (runtime), client-reported model name, preferred API (catalog), effective MaxTokens (estimated), token overrides from ENV, `.env` path, available providers, and (when applicable) StackSpot `slugName`/`tenantName`.
+    - Security: never prints secret values (e.g., API keys). Instead shows presence as `[SET]`/`[NOT SET]` and sends nothing to the LLM.
+    - Example:
+         ```
+         /config
+         ```
+         Expected summary:
+         - Current provider: OPENAI
+         - Current model: gpt-4o-mini (client: GPT-4o mini)
+         - Preferred API: chat_completions
+         - Effective MaxTokens: 50000
 
   * **Start a New Session**:
       * `/newsession` – Clears the current history and starts a new conversation session.
@@ -242,7 +254,8 @@ Once installed and configured, ChatCLI offers a suite of commands for seamless L
 * `@env` – Adds environment variables to the context.
 * `@file <path>` – Inserts the content of a file or directory.
 * `@command <cmd>` – Runs a terminal command and saves the output.
-* **New:** `@command --ai <cmd> > <context>` – Sends the command output straight to the LLM with extra context.
+* `@command --ai <cmd> > <context>` – Sends the command output straight to the LLM with extra context.
+* * Note: sensitive variables and command outputs are sanitized (tokens/secrets are redacted) before sending to the LLM.
 
 ### Agent Mode
 

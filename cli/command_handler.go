@@ -7,8 +7,9 @@ package cli
 
 import (
 	"fmt"
-	"github.com/diillson/chatcli/models"
 	"strings"
+
+	"github.com/diillson/chatcli/models"
 )
 
 type CommandHandler struct {
@@ -36,6 +37,9 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return false
 	case userInput == "/help":
 		ch.cli.showHelp()
+		return false
+	case userInput == "/config" || userInput == "/status" || userInput == "/settings":
+		ch.cli.showConfig()
 		return false
 	case userInput == "/version" || userInput == "/v":
 		ch.handleVersionCommand()

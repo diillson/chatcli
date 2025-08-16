@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -38,6 +39,91 @@ func CheckAndNotifyEnv(key, defaultValue string, logger *zap.Logger) (string, bo
 func GetEnvVariables() string {
 	envVars := os.Environ()
 	return strings.Join(envVars, "\n")
+}
+
+// GetEnvVariablesSanitized retorna variáveis de ambiente com valores sensíveis redigidos.
+func GetEnvVariablesSanitized() string {
+	env := os.Environ()
+	var b strings.Builder
+	for _, kv := range env {
+		// kv = "KEY=VALUE"
+		parts := strings.SplitN(kv, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		k := parts[0]
+		v := parts[1]
+
+		if isSensitiveEnvKey(k) {
+			b.WriteString(k)
+			b.WriteString("=[REDACTED]\n")
+			continue
+		}
+		// também sanitiza valor por regex (fallback)
+		b.WriteString(k)
+		b.WriteString("=")
+		b.WriteString(maskSensitiveInText(v))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func isSensitiveEnvKey(key string) bool {
+	k := strings.ToUpper(key)
+	// lista de padrões comuns
+	sensitiveSubstr := []string{
+		"KEY", "TOKEN", "SECRET", "PASSWORD", "API_KEY", "ACCESS_TOKEN", "REFRESH_TOKEN", "CLIENT_SECRET", "AUTH",
+	}
+	for _, s := range sensitiveSubstr {
+		if strings.Contains(k, s) {
+			return true
+		}
+	}
+
+	// nomes exatos conhecidos
+	exact := map[string]bool{
+		"OPENAI_API_KEY":   true,
+		"CLAUDEAI_API_KEY": true,
+		"GOOGLEAI_API_KEY": true,
+		"CLIENT_SECRET":    true,
+	}
+	return exact[k]
+}
+
+// SanitizeSensitiveText remove/mascara tokens em qualquer texto antes de ir para histórico/LLM
+func SanitizeSensitiveText(s string) string {
+	return maskSensitiveInText(s)
+}
+
+// maskSensitiveInText aplica regex para esconder padrões comuns de segredos
+func maskSensitiveInText(s string) string {
+	// padrões comuns
+	patterns := []struct {
+		re   *regexp.Regexp
+		repl string
+	}{
+		// OpenAI
+		{regexp.MustCompile(`sk-[A-Za-z0-9]{20,}`), "sk-[REDACTED]"},
+		// Anthropic
+		{regexp.MustCompile(`sk-ant-[A-Za-z0-9]{20,}`), "sk-ant-[REDACTED]"},
+		// Google API key
+		{regexp.MustCompile(`AIza[0-9A-Za-z\-_]{35}`), "[REDACTED_API_KEY]"},
+		// Bearer tokens
+		{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\.\-_]+`), "Bearer [REDACTED]"},
+		// JSON/OAuth fields
+		{regexp.MustCompile(`"access_token"\s*:\s*"[^\"]+"`), `"access_token":"[REDACTED]"`},
+		{regexp.MustCompile(`"refresh_token"\s*:\s*"[^\"]+"`), `"refresh_token":"[REDACTED]"`},
+		{regexp.MustCompile(`"client_secret"\s*:\s*"[^\"]+"`), `"client_secret":"[REDACTED]"`},
+		{regexp.MustCompile(`"api_key"\s*:\s*"[^\"]+"`), `"api_key":"[REDACTED]"`},
+		{regexp.MustCompile(`"password"\s*:\s*"[^\"]+"`), `"password":"[REDACTED]"`},
+		// KEY=VALUE linhas cruas
+		{regexp.MustCompile(`(?i)(API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|CLIENT_SECRET|SECRET|PASSWORD)\s*=\s*[^\s]+`), "$1=[REDACTED]"},
+	}
+	out := s
+	for _, p := range patterns {
+		out = p.re.ReplaceAllString(out, p.repl)
+	}
+	return out
 }
 
 // GenerateUUID gera um UUID (Universally Unique Identifier)
