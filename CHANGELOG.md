@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.15.0](https://github.com/diillson/chatcli/compare/v1.14.1...v1.15.0) (2025-08-16)
+
+
+### Features
+
+* **cli:** add sensitive data sanitization and enhance configuration … ([66ece6a](https://github.com/diillson/chatcli/commit/66ece6a54e1742116cc1e4456cdfefad021ea5c8))
+* **cli:** add sensitive data sanitization and enhance configuration commands ([6b6e9c1](https://github.com/diillson/chatcli/commit/6b6e9c1dbbf031956b117748b10ee7b67c932c58))
+
 ## [1.14.1](https://github.com/diillson/chatcli/compare/v1.14.0...v1.14.1) (2025-08-12)
 
 
