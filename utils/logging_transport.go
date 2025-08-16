@@ -303,12 +303,13 @@ func (t *LoggingTransport) sanitizeBody(contentType string, body []byte) []byte 
 	if strings.Contains(contentType, "application/json") {
 		var data map[string]interface{}
 		if err := json.Unmarshal(body, &data); err == nil {
-			// Exemplo: Mascara campos sensíveis
-			if _, exists := data["api_key"]; exists {
-				data["api_key"] = "[REDACTED]"
-			}
-			if _, exists := data["password"]; exists {
-				data["password"] = "[REDACTED]"
+			// Mascara campos sensíveis conhecidos (shallow)
+			for _, k := range []string{
+				"api_key", "password", "token", "access_token", "refresh_token", "client_secret", "authorization",
+			} {
+				if _, exists := data[k]; exists {
+					data[k] = "[REDACTED]"
+				}
 			}
 			sanitized, _ := json.Marshal(data)
 			return sanitized
