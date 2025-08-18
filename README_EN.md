@@ -271,6 +271,8 @@ echo "Briefly explain this repository." | chatcli
 - stdin + prompt (concatenates the two):
 ```bash
 git diff | chatcli -p "Summarize the changes and list possible impacts."
+or
+echo "Briefly explain this repository." | chatcli -p
 ```
 - With provider/model override:
 ```bash

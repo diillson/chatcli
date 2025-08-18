@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/models"
@@ -32,6 +33,31 @@ func HasStdin() bool {
 	}
 	// Se não for dispositivo de caractere (tty), então veio de pipe/arquivo
 	return (fi.Mode() & os.ModeCharDevice) == 0
+}
+
+// PreprocessArgs normaliza o caso de -p/--prompt sem valor, convertendo para -p= / --prompt=
+// Ex.: echo "msg" | chatcli -p  -> trata como prompt vazio + stdin (não quebra o flag parser)
+func PreprocessArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "-p" || a == "--prompt" {
+			// Se existir próximo arg e não começar com "-", mantém normal (valor presente).
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && args[i+1] != "" {
+				out = append(out, a)
+				continue
+			}
+			// Sem valor explícito: força formato com "=" (string vazia)
+			if a == "-p" {
+				out = append(out, "-p=")
+			} else {
+				out = append(out, "--prompt=")
+			}
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation bool) error {

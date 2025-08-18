@@ -261,6 +261,8 @@ echo "Explique rapidamente este repositório." | chatcli
 - stdin + prompt (concatena os dois):
 ```bash
 git diff | chatcli -p "Resuma as mudanças e liste possíveis impactos."
+ou
+echo "Explique rapidamente este repositório." | chatcli -p
 ```
 - Com provider/model override:
 ```bash
