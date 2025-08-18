@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/diillson/chatcli/models"
@@ -21,6 +22,16 @@ type Options struct {
 	Model    string        // --model
 	Timeout  time.Duration // --timeout
 	NoAnim   bool          // --no-anim
+}
+
+// Detecta se há dados no stdin (pipe/arquivo ao invés de TTY).
+func HasStdin() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	// Se não for dispositivo de caractere (tty), então veio de pipe/arquivo
+	return (fi.Mode() & os.ModeCharDevice) == 0
 }
 
 func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation bool) error {

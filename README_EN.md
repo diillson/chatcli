@@ -261,10 +261,35 @@ chatcli -p "What does this code do?" --no-anim
 chatcli -p "Give a detailed architecture analysis" --timeout=15m
 ```
 
+### Stdin input (pipes)
+In addition to `-p/--prompt`, ChatCLI accepts input via stdin in one-shot mode. This allows you to easily use pipes:
+
+- Stdin only:
+```bash
+echo "Briefly explain this repository." | chatcli
+```
+- stdin + prompt (concatenates the two):
+```bash
+git diff | chatcli -p "Summarize the changes and list possible impacts."
+```
+- With provider/model override:
+```bash
+cat README.md | chatcli \
+  -p "Summarize the README and suggest improvements" \
+  --provider=CLAUDEAI \
+  --model=claude-3-5-sonnet-20241022
+```
+- No animations (CI-friendly):
+```bash
+echo "What does this code do?" | chatcli --no-anim
+```
+
 #### Tips and best practices
 
 - Quoting: quote your prompt (especially if using  `>` for extra context).
 - Pipes: no need to use  echo ... | chatcli  in one-shot mode; prefer  `-p ou -prompt` .
+- Auto-detection: when `stdin` is not a TTY (e.g., via a pipe), ChatCLI runs in one-shot mode even without `-p/--prompt`.
+- Combination: if both `-p/--prompt` and `stdin` are present, ChatCLI concatenates them by default (prompt content first, then `stdin` content).
 - Output: Markdown-rendered output by default; consider  `--no-anim`  for strict parsers.
 - Exit codes:  `0`  on success,  `1`  on runtime error,  `2`  on flag parsing errors.
 - Script integration (Makefile):
