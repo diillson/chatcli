@@ -63,8 +63,8 @@ type ChatCLI struct {
 	Client            client.LLMClient
 	manager           manager.LLMManager
 	logger            *zap.Logger
-	provider          string
-	model             string
+	Provider          string
+	Model             string
 	history           []models.Message
 	line              Liner
 	commandHistory    []string
@@ -103,8 +103,8 @@ func (cli *ChatCLI) reloadConfiguration() {
 	fmt.Println("Recarregando configurações...")
 
 	// Preservar provider/model atuais do runtime
-	prevProvider := cli.provider
-	prevModel := cli.model
+	prevProvider := cli.Provider
+	prevModel := cli.Model
 
 	// Determinar o arquivo .env (mesma lógica do main.go) e expandir caminho se necessário
 	envFilePath := os.Getenv("CHATCLI_DOTENV")
@@ -159,8 +159,8 @@ func (cli *ChatCLI) reloadConfiguration() {
 	if prevProvider != "" && prevModel != "" {
 		if client, err := cli.manager.GetClient(prevProvider, prevModel); err == nil {
 			cli.Client = client
-			cli.provider = prevProvider
-			cli.model = prevModel
+			cli.Provider = prevProvider
+			cli.Model = prevModel
 			fmt.Println("Configurações recarregadas com sucesso! (preservado provider/model atuais)")
 			return
 		}
@@ -170,7 +170,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 	}
 	// Fallback: usar valores do .env
 	cli.configureProviderAndModel()
-	if client, err := cli.manager.GetClient(cli.provider, cli.model); err == nil {
+	if client, err := cli.manager.GetClient(cli.Provider, cli.Model); err == nil {
 		cli.Client = client
 		fmt.Println("Configurações recarregadas com sucesso!")
 	} else {
@@ -180,32 +180,32 @@ func (cli *ChatCLI) reloadConfiguration() {
 }
 
 func (cli *ChatCLI) configureProviderAndModel() {
-	cli.provider = os.Getenv("LLM_PROVIDER")
-	if cli.provider == "" {
-		cli.provider = config.DefaultLLMProvider
+	cli.Provider = os.Getenv("LLM_PROVIDER")
+	if cli.Provider == "" {
+		cli.Provider = config.DefaultLLMProvider
 	}
-	if cli.provider == "OPENAI" {
-		cli.model = os.Getenv("OPENAI_MODEL")
-		if cli.model == "" {
-			cli.model = config.DefaultOpenAIModel
+	if cli.Provider == "OPENAI" {
+		cli.Model = os.Getenv("OPENAI_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultOpenAIModel
 		}
 	}
-	if cli.provider == "OPENAI_ASSISTANT" {
-		cli.model = os.Getenv("OPENAI_ASSISTANT_MODEL")
-		if cli.model == "" {
-			cli.model = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel) // se não houver, usa o mesmo dos completions ou seta default
+	if cli.Provider == "OPENAI_ASSISTANT" {
+		cli.Model = os.Getenv("OPENAI_ASSISTANT_MODEL")
+		if cli.Model == "" {
+			cli.Model = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel) // se não houver, usa o mesmo dos completions ou seta default
 		}
 	}
-	if cli.provider == "CLAUDEAI" {
-		cli.model = os.Getenv("CLAUDEAI_MODEL")
-		if cli.model == "" {
-			cli.model = config.DefaultClaudeAIModel
+	if cli.Provider == "CLAUDEAI" {
+		cli.Model = os.Getenv("CLAUDEAI_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultClaudeAIModel
 		}
 	}
-	if cli.provider == "GOOGLEAI" {
-		cli.model = os.Getenv("GOOGLEAI_MODEL")
-		if cli.model == "" {
-			cli.model = config.DefaultGoogleAIModel
+	if cli.Provider == "GOOGLEAI" {
+		cli.Model = os.Getenv("GOOGLEAI_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultGoogleAIModel
 		}
 	}
 }
@@ -222,7 +222,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 
 	cli.configureProviderAndModel()
 
-	client, err := manager.GetClient(cli.provider, cli.model)
+	client, err := manager.GetClient(cli.Provider, cli.Model)
 	if err != nil {
 		logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
 		return nil, err
@@ -260,7 +260,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	defer cli.cleanup()
 
 	fmt.Println("\n\nBem-vindo ao ChatCLI!")
-	fmt.Printf("Você está conversando com %s (%s)\n", cli.Client.GetModelName(), cli.provider)
+	fmt.Printf("Você está conversando com %s (%s)\n", cli.Client.GetModelName(), cli.Provider)
 	fmt.Println("Digite '/exit', 'exit', '/quit' ou 'quit' para sair.")
 	fmt.Println("Digite '/switch' para trocar de provedor.")
 	fmt.Println("Digite '/switch --slugname <slug>' para trocar o slug.")
@@ -496,9 +496,9 @@ func (cli *ChatCLI) switchProvider() {
 	}
 
 	cli.Client = newClient
-	cli.provider = newProvider
-	cli.model = newModel
-	fmt.Printf("Trocado para %s (%s)\n\n", cli.Client.GetModelName(), cli.provider)
+	cli.Provider = newProvider
+	cli.Model = newModel
+	fmt.Printf("Trocado para %s (%s)\n\n", cli.Client.GetModelName(), cli.Provider)
 }
 
 func (cli *ChatCLI) showHelp() {
@@ -524,6 +524,32 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("/newsession - Inicia uma nova sessão de conversa, limpando o histórico atual")
 	fmt.Println("/version ou /v - Mostra informações sobre a versão instalada e verifica por atualizações")
 	fmt.Printf("\n")
+}
+
+// ApplyOverrides atualiza provider/model e reobtém o client correspondente
+func (cli *ChatCLI) ApplyOverrides(mgr manager.LLMManager, provider, model string) error {
+	if provider == "" && model == "" {
+		return nil
+	}
+	prov := cli.Provider
+	mod := cli.Model
+	if provider != "" {
+		prov = strings.ToUpper(provider)
+	}
+	if model != "" {
+		mod = model
+	}
+	if prov == cli.Provider && mod == cli.Model {
+		return nil
+	}
+	newClient, err := mgr.GetClient(prov, mod)
+	if err != nil {
+		return err
+	}
+	cli.Client = newClient
+	cli.Provider = prov
+	cli.Model = mod
+	return nil
 }
 
 // processSpecialCommands processa comandos especiais como @history, @git, @env, @file
@@ -853,26 +879,26 @@ func (cli *ChatCLI) handleAgentCommand(userInput string) {
 func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 	// Overrides por ENV têm precedência e dão flexibilidade operacional
 	var override int
-	if strings.ToUpper(cli.provider) == "OPENAI" {
+	if strings.ToUpper(cli.Provider) == "OPENAI" {
 		if v := os.Getenv("OPENAI_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				override = n
 			}
 		}
-	} else if strings.ToUpper(cli.provider) == "CLAUDEAI" {
+	} else if strings.ToUpper(cli.Provider) == "CLAUDEAI" {
 		if v := os.Getenv("CLAUDEAI_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				override = n
 			}
 		}
-	} else if strings.ToUpper(cli.provider) == "GOOGLEAI" {
+	} else if strings.ToUpper(cli.Provider) == "GOOGLEAI" {
 		if v := os.Getenv("GOOGLEAI_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				override = n
 			}
 		}
 	}
-	return catalog.GetMaxTokens(cli.provider, cli.model, override)
+	return catalog.GetMaxTokens(cli.Provider, cli.Model, override)
 }
 
 // estimateBytesFromTokens estima a quantidade de bytes baseada em tokens
@@ -1968,12 +1994,12 @@ func (cli *ChatCLI) showConfig() {
 	fmt.Printf("- Arquivo .env: %s\n", envFilePath)
 
 	// Provider/Model atuais (runtime)
-	fmt.Printf("- Provider atual (runtime): %s\n", cli.provider)
-	fmt.Printf("- Modelo atual (runtime): %s\n", cli.model)
+	fmt.Printf("- Provider atual (runtime): %s\n", cli.Provider)
+	fmt.Printf("- Modelo atual (runtime): %s\n", cli.Model)
 	fmt.Printf("- Nome do modelo (client): %s\n", cli.Client.GetModelName())
 
 	// Preferências/Metadados do catálogo de API (quando houver)
-	preferredAPI := catalog.GetPreferredAPI(cli.provider, cli.model)
+	preferredAPI := catalog.GetPreferredAPI(cli.Provider, cli.Model)
 	fmt.Printf("- API preferida (catálogo): %s\n", string(preferredAPI))
 
 	maxTokens := cli.getMaxTokensForCurrentLLM()
@@ -2000,13 +2026,13 @@ func (cli *ChatCLI) showConfig() {
 	fmt.Printf("    CLIENT_SECRET (STACKSPOT): %s\n", presence(os.Getenv("CLIENT_SECRET")))
 
 	// Provider/modelosLLM (se presentes)
-	if strings.ToUpper(cli.provider) == "OPENAI" || strings.ToUpper(cli.provider) == "OPENAI_ASSISTANT" {
+	if strings.ToUpper(cli.Provider) == "OPENAI" || strings.ToUpper(cli.Provider) == "OPENAI_ASSISTANT" {
 		fmt.Printf("- OPENAI_MODEL=%s | OPENAI_ASSISTANT_MODEL=%s\n", os.Getenv("OPENAI_MODEL"), os.Getenv("OPENAI_ASSISTANT_MODEL"))
 	}
-	if strings.ToUpper(cli.provider) == "CLAUDEAI" {
+	if strings.ToUpper(cli.Provider) == "CLAUDEAI" {
 		fmt.Printf("- CLAUDEAI_MODEL=%s | CLAUDEAI_API_VERSION=%s\n", os.Getenv("CLAUDEAI_MODEL"), os.Getenv("CLAUDEAI_API_VERSION"))
 	}
-	if strings.ToUpper(cli.provider) == "GOOGLEAI" {
+	if strings.ToUpper(cli.Provider) == "GOOGLEAI" {
 		fmt.Printf("- GOOGLEAI_MODEL=%s\n", os.Getenv("GOOGLEAI_MODEL"))
 	}
 
