@@ -220,7 +220,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// Adicionar log antes da chamada para SendPrompt
 	a.logger.Debug("Enviando prompt para o LLM",
-		zap.String("provider", a.cli.provider),
+		zap.String("provider", a.cli.Provider),
 		zap.Int("historyLength", len(a.cli.history)),
 		zap.Int("queryLength", len(fullQuery)))
 

@@ -8,27 +8,36 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/diillson/chatcli/config"
-	"github.com/diillson/chatcli/llm/manager"
-	"github.com/diillson/chatcli/version"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/utils"
+	"github.com/diillson/chatcli/version"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
 
 func main() {
-	// Exibir versão se especificado como argumento
-	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+
+	// Parse das flags
+	opts, err := cli.Parse(os.Args[1:])
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(2)
+	}
+
+	// Saída antecipada para --version
+	if opts.Version {
 		versionInfo := version.GetCurrentVersion()
 		fmt.Println(version.FormatVersionInfo(versionInfo, true))
 		return
 	}
 
+	// Mensagem de versão no startup
 	version.PrintStartupVersionInfo()
 
 	// Carregar variáveis de ambiente do arquivo .env
@@ -91,6 +100,21 @@ func main() {
 		logger.Fatal("Erro ao inicializar o ChatCLI", zap.Error(err))
 	}
 
+	// Modo one-shot: se foi passado -p/--prompt, executa uma única iteração e sai
+	if opts.Prompt != "" {
+		if err := chatCLI.ApplyOverrides(llmManager, opts.Provider, opts.Model); err != nil {
+			logger.Fatal("Erro ao aplicar provider/model via flags", zap.Error(err))
+		}
+		ctxOne, cancelOne := context.WithTimeout(ctx, opts.Timeout)
+		defer cancelOne()
+		if err := chatCLI.RunOnce(ctxOne, opts.Prompt, opts.NoAnim); err != nil {
+			logger.Error("Erro no modo one-shot", zap.Error(err))
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Caso não for oneshot, segue no modo interativo
 	chatCLI.Start(ctx)
 }
 

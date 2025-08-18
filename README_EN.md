@@ -20,6 +20,7 @@
 * [Usage and Commands](#usage-and-commands)
 
     * [Starting the Application](#starting-the-application)
+    * [Non-interactive mode (one-shot via flags)](#non-interactive-mode-one-shot-via-flags)
     * [General Commands](#general-commands)
     * [Contextual Commands](#contextual-commands)
 * [Advanced File Processing](#advanced-file-processing)
@@ -204,9 +205,80 @@ Once installed and configured, ChatCLI offers a suite of commands for seamless L
 
 ### Starting the Application
 
+- Interactive mode:
 ```bash
 ./chatcli
 ```
+
+- Non-interactive (one-shot):
+```bash
+./chatcli -p "Your prompt here"
+```
+
+---
+
+### Non-interactive mode (one-shot via flags)
+
+ChatCLI now supports a “one-shot” mode to execute a single prompt on the command line and exit immediately. Perfect for scripts, CI/CD, aliases, and automation.
+
+#### Available flags
+
+- `-p` or `--prompt`: the text to send to the LLM for a one-time run.
+- `--provider`: runtime override of the LLM provider (`OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `OPENAI_ASSISTANT`, `STACKSPOT`).
+- `--model`: choose the model for the selected provider (e.g., `gpt-4o-mini`, `claude-3-5-sonnet-20241022`, `gemini-2.5-flash`).
+- `--timeout`: one-shot call timeout (default: `5m`).
+- `--no-anim`: disable CLI animations (useful in scripts/CI).
+
+Note: the same contextual features can be used inside the `--prompt` text, such as `@file`, `@git`, `@env`, `@command`, and the `>` operator for extra context. Always quote your prompt to avoid shell interpretation issues.
+
+#### Quick examples
+
+- Basic:
+```bash
+chatcli -p "Give a quick explanation of this repository."
+```
+
+- With contextual commands:
+```bash
+chatcli -p "@git @env Please craft a concise release note."
+```
+- Sending files/directories (existing  @file  modes apply):
+```bash
+chatcli -p "@file ./src --mode=summary Provide an architecture overview."
+```
+- Override provider/model at runtime:
+```bash
+chatcli -p "Summarize the CHANGELOG" \
+  --provider=CLAUDEAI \
+  --model=claude-3-5-sonnet-20241022
+```
+- No animations (CI-friendly):
+```bash
+chatcli -p "What does this code do?" --no-anim
+```
+- Custom timeout:
+```bash
+chatcli -p "Give a detailed architecture analysis" --timeout=15m
+```
+
+#### Tips and best practices
+
+- Quoting: quote your prompt (especially if using  `>` for extra context).
+- Pipes: no need to use  echo ... | chatcli  in one-shot mode; prefer  `-p ou -prompt` .
+- Output: Markdown-rendered output by default; consider  `--no-anim`  for strict parsers.
+- Exit codes:  `0`  on success,  `1`  on runtime error,  `2`  on flag parsing errors.
+- Script integration (Makefile):
+```bash
+one-shot:
+    chatcli -p "@file ./ --mode=summary Generate a README overview."
+```
+- Example (GitHub Actions):
+```bash
+- name: ChatCLI one-shot
+  run: |
+    chatcli -p "@file ./ --mode=summary Generate a project overview"
+```
+---
 
 ### General Commands
 
@@ -256,6 +328,8 @@ Once installed and configured, ChatCLI offers a suite of commands for seamless L
 * `@command <cmd>` – Runs a terminal command and saves the output.
 * `@command --ai <cmd> > <context>` – Sends the command output straight to the LLM with extra context.
 * * Note: sensitive variables and command outputs are sanitized (tokens/secrets are redacted) before sending to the LLM.
+
+---
 
 ### Agent Mode
 
