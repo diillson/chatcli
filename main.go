@@ -8,8 +8,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/diillson/chatcli/cli"
@@ -100,18 +102,38 @@ func main() {
 		logger.Fatal("Erro ao inicializar o ChatCLI", zap.Error(err))
 	}
 
-	// Modo one-shot: se foi passado -p/--prompt, executa uma única iteração e sai
-	if opts.Prompt != "" {
+	// Modo one-shot:
+	// - se -p/--prompt foi passado, ou
+	// - se há dados vindos de stdin (ex.: echo "..." | chatcli)
+	// então executa uma única iteração e sai.
+	if opts.Prompt != "" || cli.HasStdin() {
 		if err := chatCLI.ApplyOverrides(llmManager, opts.Provider, opts.Model); err != nil {
 			logger.Fatal("Erro ao aplicar provider/model via flags", zap.Error(err))
 		}
-		ctxOne, cancelOne := context.WithTimeout(ctx, opts.Timeout)
-		defer cancelOne()
-		if err := chatCLI.RunOnce(ctxOne, opts.Prompt, opts.NoAnim); err != nil {
-			logger.Error("Erro no modo one-shot", zap.Error(err))
-			os.Exit(1)
+		// Monta o input a partir de -p e/ou stdin
+		input := strings.TrimSpace(opts.Prompt)
+		if cli.HasStdin() {
+			b, _ := io.ReadAll(os.Stdin)
+			stdinText := strings.TrimSpace(string(b))
+			if input == "" {
+				input = stdinText
+			} else if stdinText != "" {
+				// Estratégia padrão: concatenar prompt + stdin
+				// (Se quiser priorizar -p e ignorar stdin, basta remover este bloco.)
+				input = input + "\n" + stdinText
+			}
 		}
-		return
+		// Se após combinar -p e stdin ainda não houver input,
+		// caímos para o modo interativo (como fallback).
+		if strings.TrimSpace(input) != "" {
+			ctxOne, cancelOne := context.WithTimeout(ctx, opts.Timeout)
+			defer cancelOne()
+			if err := chatCLI.RunOnce(ctxOne, input, opts.NoAnim); err != nil {
+				logger.Error("Erro no modo one-shot", zap.Error(err))
+				os.Exit(1)
+			}
+			return
+		}
 	}
 
 	// Caso não for oneshot, segue no modo interativo
