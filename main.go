@@ -26,7 +26,8 @@ import (
 func main() {
 
 	// Parse das flags
-	opts, err := cli.Parse(os.Args[1:])
+	args := cli.PreprocessArgs(os.Args[1:])
+	opts, err := cli.Parse(args)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(2)
