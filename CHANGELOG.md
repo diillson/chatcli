@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.16.1](https://github.com/diillson/chatcli/compare/v1.16.0...v1.16.1) (2025-08-18)
+
+
+### Bug Fixes
+
+* **modeOneshot:** extend one-shot mode to support stdin input ([999ccdd](https://github.com/diillson/chatcli/commit/999ccdd3d2e36543efb931e81cfca30712e956fb))
+* **modeOneshot:** extend one-shot mode to support stdin input ([22acb64](https://github.com/diillson/chatcli/commit/22acb642b5d5f9b4e8c89696ffdc3bb341154cfd))
+
 ## [1.16.0](https://github.com/diillson/chatcli/compare/v1.15.0...v1.16.0) (2025-08-18)
 
 
