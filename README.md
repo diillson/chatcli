@@ -250,10 +250,36 @@ chatcli -p "O que este código faz?" --no-anim
 ```bash
 chatcli -p "Analise detalhadamente a arquitetura" --timeout=15m
 ```
+
+### Entrada via stdin (pipes)
+Além de `-p/--prompt`, o ChatCLI aceita entrada via stdin em modo one-shot. Isso permite usar pipes com facilidade:
+    
+- Apenas stdin:
+```bash
+echo "Explique rapidamente este repositório." | chatcli
+```
+- stdin + prompt (concatena os dois):
+```bash
+git diff | chatcli -p "Resuma as mudanças e liste possíveis impactos."
+```
+- Com provider/model override:
+```bash
+cat README.md | chatcli \
+  -p "Resuma o README e sugira melhorias" \
+  --provider=CLAUDEAI \
+  --model=claude-3-5-sonnet-20241022
+```
+- Sem animações (CI-friendly):
+```bash
+echo "O que este código faz?" | chatcli --no-anim
+```
+
 #### Dicas e boas práticas
 
 - Quoting: use aspas duplas sempre no prompt em modo one-shot para evitar expanções do shell, especialmente se usar  >  para adicionar contexto.
-- Pipes: não é necessário pipe/echo no modo one-shot; preferível usar  `-p ou -prompt` .
+- Pipes: não é necessário pipe/echo no modo one-shot; preferível usar  `-p ou -prompt` mas é possível caso necessário como nos exemplos.
+- Se  `-p`  estiver presente e houver stdin, por padrão os textos serão concatenados (o prompt de  `-p`  primeiro, seguido do `stdin`).
+- Se desejar priorizar apenas  `-p`  e ignorar `stdin`, ajuste o código conforme a sua preferência (veja comentários no `main.go`).
 - Saída: por padrão, a resposta é renderizada em Markdown. Para pipelines/parsings estritos, considere desativar animações com `--no-anim`após a mensagem.
 - Exit codes: retorno  `0`  em sucesso,  `1`  em erro de execução,  `2`  em erro de parsing de flags (conforme implementação).
 - Integração com scripts (Makefile):
