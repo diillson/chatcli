@@ -4,11 +4,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/models"
+	"go.uber.org/zap"
 )
 
 // Options representa as flags suportadas pelo binário
@@ -18,11 +20,72 @@ type Options struct {
 	Help    bool // --help | -h
 
 	// Modo one-shot
-	Prompt   string        // -p | --prompt
-	Provider string        // --provider
-	Model    string        // --model
-	Timeout  time.Duration // --timeout
-	NoAnim   bool          // --no-anim
+	Prompt         string        // -p | --prompt
+	Provider       string        // --provider
+	Model          string        // --model
+	Timeout        time.Duration // --timeout
+	NoAnim         bool          // --no-anim
+	PromptFlagUsed bool          // indica se -p/--prompt foi passado explicitamente
+}
+
+// HandleOneShotOrFatal executa o modo one-shot se solicitado (flag -p usada ou stdin presente).
+// - Em caso de erro, imprime mensagem em Markdown (stderr) e faz logger.Fatal (sem fallback).
+// - Retorna true se o one-shot foi tratado (com sucesso ou erro fatal). Retorna false se não foi acionado.
+func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) bool {
+	// Condição de acionamento do one-shot
+	if !(opts.PromptFlagUsed || HasStdin()) {
+		return false
+	}
+
+	// Aplica overrides de provider/model
+	if err := cli.ApplyOverrides(cli.manager, opts.Provider, opts.Model); err != nil {
+		fmt.Fprintln(os.Stderr, " ❌ Erro ao aplicar overrides de provider/model\n\nDetalhes:\n```\n"+err.Error()+"\n```")
+		cli.logger.Fatal("Erro ao aplicar provider/model via flags", zap.Error(err))
+	}
+
+	// Monta input a partir de -p e/ou stdin
+	input := strings.TrimSpace(opts.Prompt)
+	if HasStdin() {
+		b, _ := io.ReadAll(os.Stdin)
+		stdinText := strings.TrimSpace(string(b))
+		if input == "" {
+			input = stdinText
+		} else if stdinText != "" {
+			input = input + "\n" + stdinText
+		}
+	}
+
+	// Se o one-shot foi solicitado mas não há conteúdo, não cair no interativo
+	if strings.TrimSpace(input) == "" {
+		const md = `
+     ❌ Erro no modo one-shot
+    
+    O modo one-shot foi acionado (via flag -p/--prompt ou stdin), mas nenhum conteúdo de entrada foi fornecido.
+    
+    - Use a flag -p/--prompt com um texto:
+  
+  chatcli -p "Seu prompt aqui"
+  
+    - Ou envie dados via stdin:
+  
+  echo "Texto" | chatcli -p  ou  echo "Texto" | chatcli
+  
+    `
+		fmt.Fprintln(os.Stderr, md)
+		cli.logger.Fatal("One-shot acionado sem input (prompt vazio e sem stdin)")
+	}
+
+	// Executa o one-shot com timeout próprio
+	ctxOne, cancelOne := context.WithTimeout(ctx, opts.Timeout)
+	defer cancelOne()
+
+	if err := cli.RunOnce(ctxOne, input, opts.NoAnim); err != nil {
+		fmt.Fprintln(os.Stderr, " ❌ Erro ao executar no modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
+		cli.logger.Fatal("Erro no modo one-shot", zap.Error(err))
+	}
+
+	// One-shot concluído com sucesso
+	return true
 }
 
 // Detecta se há dados no stdin (pipe/arquivo ao invés de TTY).
@@ -128,6 +191,15 @@ func Parse(args []string) (*Options, error) {
 	if opts.Timeout <= 0 {
 		return nil, fmt.Errorf("timeout inválido: deve ser > 0")
 	}
+
+	// Detectar se a flag -p/--prompt foi usada explicitamente
+	used := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "p" || f.Name == "prompt" {
+			used = true
+		}
+	})
+	opts.PromptFlagUsed = used
 
 	return opts, nil
 }
