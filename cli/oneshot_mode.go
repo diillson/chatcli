@@ -32,8 +32,7 @@ type Options struct {
 // - Em caso de erro, imprime mensagem em Markdown (stderr) e faz logger.Fatal (sem fallback).
 // - Retorna true se o one-shot foi tratado (com sucesso ou erro fatal). Retorna false se não foi acionado.
 func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) bool {
-	// Condição de acionamento do one-shot
-	if !(opts.PromptFlagUsed || HasStdin()) {
+	if !opts.PromptFlagUsed && !HasStdin() {
 		return false
 	}
 
@@ -55,7 +54,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 		}
 	}
 
-	// Se o one-shot foi solicitado mas não há conteúdo, não cair no interativo
+	// One-shot foi solicitado mas sem conteúdo
 	if strings.TrimSpace(input) == "" {
 		const md = `
      ❌ Erro no modo one-shot
@@ -68,7 +67,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
   
     - Ou envie dados via stdin:
   
-  echo "Texto" | chatcli -p  ou  echo "Texto" | chatcli
+  echo "Texto" | chatcli -p ou echo "Texto" | chatcli
   
     `
 		fmt.Fprintln(os.Stderr, md)
