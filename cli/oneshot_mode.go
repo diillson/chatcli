@@ -67,7 +67,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
   
     - Ou envie dados via stdin:
   
-  echo "Texto" | chatcli
+  echo "Texto" | chatcli -p ou echo "Texto" | chatcli
   
     `
 		fmt.Fprintln(os.Stderr, md)
