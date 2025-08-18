@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.16.2](https://github.com/diillson/chatcli/compare/v1.16.1...v1.16.2) (2025-08-18)
+
+
+### Bug Fixes
+
+* **modeOneShot:** normalize -p/--prompt flags without values in one-s… ([7ae143b](https://github.com/diillson/chatcli/commit/7ae143b767ca59c217477f69545054d84be57f7b))
+* **modeOneShot:** normalize -p/--prompt flags without values in one-shot mode ([10e24da](https://github.com/diillson/chatcli/commit/10e24dafd8a3074f73a07549b1128af1e2e1f745))
+
 ## [1.16.1](https://github.com/diillson/chatcli/compare/v1.16.0...v1.16.1) (2025-08-18)
 
 
