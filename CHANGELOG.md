@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.16.0](https://github.com/diillson/chatcli/compare/v1.15.0...v1.16.0) (2025-08-18)
+
+
+### Features
+
+* **cli:** add one-shot mode with prompt flags, provider, and model o… ([bc5b108](https://github.com/diillson/chatcli/commit/bc5b10819f873973302748134848a28b6a87fbb4))
+* **cli:** add one-shot mode with prompt flags, provider, and model overrides ([8ff908e](https://github.com/diillson/chatcli/commit/8ff908e03557eaa09a414de406901285b6270cdb))
+
 ## [1.15.0](https://github.com/diillson/chatcli/compare/v1.14.1...v1.15.0) (2025-08-16)
 
 
