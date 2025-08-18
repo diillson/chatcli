@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.16.3](https://github.com/diillson/chatcli/compare/v1.16.2...v1.16.3) (2025-08-18)
+
+
+### Bug Fixes
+
+* **modeOneShot:** centralize one-shot handling in `HandleOneShotOrFatal` ([39466e0](https://github.com/diillson/chatcli/commit/39466e0bf16ec5bfb7f9ca2249090a4e35c5f0f0))
+* **modeOneShot:** centralize one-shot handling in `HandleOneShotOrFatal` ([17cde1e](https://github.com/diillson/chatcli/commit/17cde1e3fc8b3ac12910b009f6eff28a1abdb224))
+* **modeOneShot:** correct stdin example syntax in help message ([993b2ae](https://github.com/diillson/chatcli/commit/993b2ae39fc0a180ec6c9c7bcf5f2923ec27593c))
+* **modeOneShot:** streamline input validation and error messaging ([a789298](https://github.com/diillson/chatcli/commit/a789298a36360f7d2bb711613bf4f4f5d07e1136))
+
 ## [1.16.2](https://github.com/diillson/chatcli/compare/v1.16.1...v1.16.2) (2025-08-18)
 
 
