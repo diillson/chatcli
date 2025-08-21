@@ -10,8 +10,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/diillson/chatcli/llm/openai_assistant"
-	"github.com/peterh/liner"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +17,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/llm/openai_assistant"
+	"github.com/peterh/liner"
 
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
@@ -29,6 +30,55 @@ type AgentMode struct {
 	cli    *ChatCLI
 	logger *zap.Logger
 }
+
+// CommandContextInfo contém metadados sobre a origem e natureza de um comando
+type CommandContextInfo struct {
+	SourceType    SourceType
+	FileExtension string
+	IsScript      bool
+	ScriptType    string // shell, python, etc.
+}
+
+type SourceType int
+
+// CommandBlock representa um bloco de comandos executáveis
+type CommandBlock struct {
+	Description string
+	Commands    []string
+	Language    string
+	ContextInfo CommandContextInfo
+}
+
+type CommandOutput struct {
+	CommandBlock CommandBlock
+	Output       string
+	ErrorMsg     string
+}
+
+var dangerousPatterns = []string{
+	`(?i)rm\s+-rf\s+`,             // rm -rf
+	`(?i)rm\s+--no-preserve-root`, // rm --no-preserve-root
+	`(?i)dd\s+if=`,                // dd
+	`(?i)mkfs\w*\s+`,              // mkfs
+	`(?i)shutdown(\s+|$)`,         // shutdown
+	`(?i)reboot(\s+|$)`,           // reboot
+	`(?i)init\s+0`,                // init 0
+	`(?i)curl\s+[^\|;]*\|\s*sh`,   // pipe a shell
+	`(?i)wget\s+[^\|;]*\|\s*sh`,
+	`(?i)curl\s+[^\|;]*\|\s*bash`,
+	`(?i)wget\s+[^\|;]*\|\s*bash`,
+	`(?i)\bsudo\b.*`,          // comando usando sudo
+	`(?i)\bdrop\s+database\b`, // apagar bancos
+	`(?i)\bmkfs\b`,            // formatar partição
+	`(?i)\buserdel\b`,         // deletar usuário
+	`(?i)\bchmod\s+777\s+/.*`, // chmod 777 /
+}
+
+const (
+	SourceTypeUserInput SourceType = iota
+	SourceTypeFile
+	SourceTypeCommandOutput
+)
 
 // NewAgentMode cria uma nova instância do modo agente
 func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
@@ -71,39 +121,6 @@ func (a *AgentMode) getInput(prompt string) string {
 		// Se não houver liner disponível, usar o método fallback
 		return a.fallbackPrompt(prompt)
 	}
-}
-
-// CommandBlock representa um bloco de comandos executáveis
-type CommandBlock struct {
-	Description string
-	Commands    []string
-	Language    string
-	ContextInfo CommandContextInfo
-}
-
-type CommandOutput struct {
-	CommandBlock CommandBlock
-	Output       string
-	ErrorMsg     string
-}
-
-var dangerousPatterns = []string{
-	`(?i)rm\s+-rf\s+`,             // rm -rf
-	`(?i)rm\s+--no-preserve-root`, // rm --no-preserve-root
-	`(?i)dd\s+if=`,                // dd
-	`(?i)mkfs\w*\s+`,              // mkfs
-	`(?i)shutdown(\s+|$)`,         // shutdown
-	`(?i)reboot(\s+|$)`,           // reboot
-	`(?i)init\s+0`,                // init 0
-	`(?i)curl\s+[^\|;]*\|\s*sh`,   // pipe a shell
-	`(?i)wget\s+[^\|;]*\|\s*sh`,
-	`(?i)curl\s+[^\|;]*\|\s*bash`,
-	`(?i)wget\s+[^\|;]*\|\s*bash`,
-	`(?i)\bsudo\b.*`,          // comando usando sudo
-	`(?i)\bdrop\s+database\b`, // apagar bancos
-	`(?i)\bmkfs\b`,            // formatar partição
-	`(?i)\buserdel\b`,         // deletar usuário
-	`(?i)\bchmod\s+777\s+/.*`, // chmod 777 /
 }
 
 func isDangerous(cmd string) bool {
@@ -255,11 +272,10 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// 9. Para cada bloco de comando, pedir confirmação e executar
 	if len(commandBlocks) > 0 {
-		a.handleCommandBlocks(ctx, commandBlocks)
+		a.handleCommandBlocks(context.Background(), commandBlocks)
 	} else {
 		fmt.Println("\nNenhum comando executável encontrado na resposta.")
 	}
-
 	return nil
 }
 
@@ -628,6 +644,7 @@ mainLoop:
 		fmt.Printf("- Um número entre 1 e %d para executar esse comando\n", len(blocks))
 		fmt.Printf("- 'a' para executar todos os comandos\n")
 		fmt.Printf("- 'eN' para editar o comando N antes de rodar (ex: e2)\n")
+		fmt.Printf("- 'pCN' para adicionar contexto ao comando N ANTES de executar (ex: pC1)\n")
 		fmt.Printf("- 'tN' para simular (dry-run) o comando N (ex: t2)\n")
 		fmt.Printf("- 'cN' para pedir continuação à IA usando a saída do comando N (ex: c2)\n")
 		fmt.Printf("- 'aCN' para adicionar contexto à saída do comando N e pedir continuação (ex: aC2)\n")
@@ -865,13 +882,52 @@ mainLoop:
 				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
 			}
 
+		case strings.HasPrefix(answer, "pc"):
+			cmdNumStr := strings.TrimPrefix(answer, "pc")
+			cmdNum, err := strconv.Atoi(cmdNumStr)
+			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+				fmt.Println("Número inválido para adicionar pré-contexto.")
+				continue
+			}
+
+			// Obter o contexto do usuário
+			userContext := a.getMultilineInput("Digite seu contexto ou instrução adicional para o comando:\n")
+			if userContext == "" {
+				fmt.Println("Nenhum contexto fornecido. Operação cancelada.")
+				continue
+			}
+
+			fmt.Println("\nContexto recebido! Solicitando refinamento do comando à IA...")
+
+			// Chamar a nova função para obter comandos refinados
+			newBlocks, err := a.requestLLMWithPreExecutionContext(
+				ctx,
+				strings.Join(blocks[cmdNum-1].Commands, "\n"),
+				userContext,
+			)
+			if err != nil {
+				fmt.Println("Erro ao solicitar refinamento à IA:", err)
+				continue
+			}
+			if len(newBlocks) > 0 {
+				blocks = newBlocks                            // Substitui os comandos antigos pelos novos
+				outputs = make([]*CommandOutput, len(blocks)) // Reseta os outputs
+				continue mainLoop                             // Reinicia o loop com os novos comandos
+			} else {
+				fmt.Println("\nA IA não sugeriu novos comandos. Mantendo os comandos atuais.")
+			}
+
 		default:
 			cmdNum, err := strconv.Atoi(answer)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
 				fmt.Println("Opção inválida.")
 				continue
 			}
-			outStr, errStr := a.executeCommandsWithOutput(ctx, blocks[cmdNum-1])
+
+			execCtx, execCancel := a.refreshContext()
+			outStr, errStr := a.executeCommandsWithOutput(execCtx, blocks[cmdNum-1])
+			execCancel()
+
 			outputs[cmdNum-1] = &CommandOutput{
 				CommandBlock: blocks[cmdNum-1],
 				Output:       outStr,
@@ -1203,22 +1259,6 @@ func isLikelyInteractiveCommand(cmd string) bool {
 	return false
 }
 
-// CommandContextInfo contém metadados sobre a origem e natureza de um comando
-type CommandContextInfo struct {
-	SourceType    SourceType
-	FileExtension string
-	IsScript      bool
-	ScriptType    string // shell, python, etc.
-}
-
-type SourceType int
-
-const (
-	SourceTypeUserInput SourceType = iota
-	SourceTypeFile
-	SourceTypeCommandOutput
-)
-
 // detectHeredocs verifica a presença de heredocs em um script shell
 func detectHeredocs(script string) bool {
 	// Padrão para heredocs: <<EOF, <<'EOF', << EOF, <<-EOF etc.
@@ -1535,4 +1575,45 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// requestLLMWithPreExecutionContext envia o comando sugerido e um contexto adicional do usuário
+// para a LLM, pedindo que ela refine ou gere um novo comando ANTES da execução.
+func (a *AgentMode) requestLLMWithPreExecutionContext(ctx context.Context, originalCommand, userContext string) ([]CommandBlock, error) {
+	// Criar um novo contexto com timeout
+	newCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	var prompt strings.Builder
+	prompt.WriteString("O comando que você sugeriu foi:\n```\n")
+	prompt.WriteString(originalCommand)
+	prompt.WriteString("\n```\n\n")
+	prompt.WriteString("Antes de executá-lo, o usuário forneceu o seguinte contexto ou instrução adicional:\n")
+	prompt.WriteString(userContext)
+	prompt.WriteString("\n\nPor favor, revise o comando sugerido com base neste novo contexto. Se necessário, modifique-o ou sugira um novo conjunto de comandos. Apresente os novos comandos no formato executável apropriado.")
+
+	// Adiciona o prompt como novo turno "user"
+	a.cli.history = append(a.cli.history, models.Message{
+		Role:    "user",
+		Content: prompt.String(),
+	})
+
+	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
+	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt.String(), a.cli.history)
+	a.cli.animation.StopThinkingAnimation()
+	if err != nil {
+		fmt.Println("❌ Erro ao pedir refinamento à IA:", err)
+		return nil, err
+	}
+
+	// Adiciona resposta da IA ao histórico
+	a.cli.history = append(a.cli.history, models.Message{
+		Role:    "assistant",
+		Content: aiResponse,
+	})
+
+	// Processa a resposta para extrair os novos comandos
+	blocks := a.extractCommandBlocks(aiResponse)
+	a.displayResponseWithoutCommands(aiResponse, blocks)
+	return blocks, nil
 }

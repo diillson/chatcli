@@ -316,6 +316,7 @@ one-shot:
 * **Switch Provider or Settings:**
 
     * `/switch` – Interactive LLM provider switcher.
+    * `/switch --model <model-name>`  – Switches the model for the current provider (e.g.,  `gpt-4o-mini` ,  `claude-3-5-sonnet-20241022` ).
     * `/switch --slugname <slug>` – Update only the `slugName`.
     * `/switch --tenantname <tenant>` – Update only the `tenantName`.
     * Combine: `/switch --slugname <slug> --tenantname <tenant>`
@@ -341,6 +342,10 @@ one-shot:
       * `/version` or `/v` – Shows current version, commit hash, and checks for available updates.
       * **Usage**: Useful to confirm which version is installed and if there are new versions available.
       * **Alternative**: Run `chatcli --version` or `chatcli -v` directly from the terminal.
+
+  * Canceling In-Progress Operations:
+      * `Ctrl+C`  (once): Cancels the current operation (e.g., waiting for the AI's response, the "Thinking..." animation) without exiting ChatCLI. You will return to the prompt.
+      * `Ctrl+C`  (twice quickly) or  `Ctrl+D` : Exits the application.
 
 * **Help:**
 
@@ -380,12 +385,24 @@ Agent Mode allows the AI to execute tasks on your system via terminal commands:
 * Agent Mode is designed for safety, respecting system permissions and ensuring only authorized commands are run.
 * You can exit Agent Mode at any time, returning to normal chat.
 
+#### Refining Commands Before Execution
+
+You can now ask the AI to refine a suggested command before you run it by providing additional context.
+
+- `pCN`  (Pre-Context for command N): Use this option to add instructions before execution.
+
+##### Refinement Example:
+
+1. The AI suggests command #1:  `ls -la`
+2. You type:  `pC1`
+3. You add your context:  Actually, I only want to see .go files and count the lines in each.
+4. The AI will process your request and suggest a new, refined command, such as  `find . -name "*.go" -exec wc -l {} +` .
 
 #### Adding Context to Outputs in Agent Mode!!
 
 * You can now add context to outputs of agent-executed commands.
 
-When using the new "aCN" feature, you can:
+When using the new `aCN` feature, you can:
 
 1. Execute a command (e.g., `1` to run command #1)
 2. View the command output

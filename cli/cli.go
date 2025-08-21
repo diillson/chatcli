@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -279,8 +280,8 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 		default:
 			input, err := cli.line.Prompt("Você: ")
 			if err != nil {
-				if err == liner.ErrPromptAborted {
-					fmt.Println("\nEntrada abortada!")
+				if err == liner.ErrPromptAborted { // Ctrl+D no prompt
+					fmt.Println("\nSaindo...")
 					return
 				}
 				cli.logger.Error("Erro ao ler a entrada", zap.Error(err))
@@ -313,51 +314,76 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				continue
 			}
 
-			// Processar comandos especiais
-			userInput, additionalContext := cli.processSpecialCommands(input)
+			// Criar um contexto cancelável para a operação
+			promptCtx, cancelPrompt := context.WithCancel(context.Background())
+			defer cancelPrompt() // Garante que o cancel seja chamado no final do loop
 
-			// Adicionar a mensagem do usuário ao histórico
-			cli.history = append(cli.history, models.Message{
-				Role:    "user",
-				Content: userInput + additionalContext,
-			})
+			// Canal para receber a resposta da IA ou o erro
+			type promptResult struct {
+				Response string
+				Error    error
+			}
+			resultChan := make(chan promptResult, 1)
 
-			// Exibir mensagem "Pensando..." com animação
+			// Iniciar a chamada à LLM em uma goroutine
+			go func() {
+				userInput, additionalContext := cli.processSpecialCommands(input)
+
+				// Adicionar a mensagem do usuário ao histórico DENTRO da goroutine
+				// para que não seja adicionada se a operação for cancelada antes.
+				cli.history = append(cli.history, models.Message{
+					Role:    "user",
+					Content: userInput + additionalContext,
+				})
+
+				aiResponse, err := cli.Client.SendPrompt(promptCtx, userInput+additionalContext, cli.history)
+				resultChan <- promptResult{Response: aiResponse, Error: err}
+			}()
+
+			// Canal para sinais de interrupção (Ctrl+C)
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, os.Interrupt)
+			defer signal.Stop(sigChan) // Limpa o notificador no final do loop
+
+			// Exibir animação "Pensando..."
 			cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
-			// Criar um contexto com timeout
-			responseCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-			defer cancel()
+			// Aguardar a resposta, erro ou sinal de cancelamento
+			select {
+			case result := <-resultChan:
+				// A goroutine terminou (com sucesso ou erro)
+				cli.animation.StopThinkingAnimation()
+				signal.Stop(sigChan) // Parar de ouvir sinais, pois a operação terminou
 
-			// Enviar o prompt para o LLM
-			aiResponse, err := cli.Client.SendPrompt(responseCtx, userInput+additionalContext, cli.history)
-
-			// Parar a animação
-			cli.animation.StopThinkingAnimation()
-
-			if err != nil {
-				cli.logger.Error("Erro do LLM", zap.Error(err))
-
-				// Verifique se o erro contém o código de status 429 explicitamente
-				if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RATE_LIMIT_EXCEEDED") {
-					fmt.Println("Limite de requisições excedido. Por favor, aguarde antes de tentar novamente.")
-				} else {
-					fmt.Println("Ocorreu um erro ao processar a requisição.")
+				if result.Error != nil {
+					cli.logger.Error("Erro do LLM", zap.Error(result.Error))
+					if strings.Contains(result.Error.Error(), "context canceled") {
+						// Não mostrar erro se foi cancelado pelo usuário
+						fmt.Println("Operação cancelada.")
+						// Remover a última mensagem do usuário do histórico, pois a operação não foi concluída
+						if len(cli.history) > 0 && cli.history[len(cli.history)-1].Role == "user" {
+							cli.history = cli.history[:len(cli.history)-1]
+						}
+					} else {
+						fmt.Println("Ocorreu um erro ao processar a requisição.")
+					}
+					continue // Volta para o próximo prompt
 				}
 
-				continue
+				// Sucesso
+				cli.history = append(cli.history, models.Message{
+					Role:    "assistant",
+					Content: result.Response,
+				})
+				renderedResponse := cli.renderMarkdown(result.Response)
+				cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
+
+			case <-sigChan:
+				// Sinal de interrupção (Ctrl+C) recebido
+				cancelPrompt() // Cancela o contexto da chamada à API
+				cli.animation.StopThinkingAnimation()
+				// A goroutine receberá o erro de "context canceled" e o select anterior cuidará de limpar o histórico.
 			}
-
-			// Adicionar a resposta da IA ao histórico
-			cli.history = append(cli.history, models.Message{
-				Role:    "assistant",
-				Content: aiResponse,
-			})
-
-			// Renderizar a resposta da IA
-			renderedResponse := cli.renderMarkdown(aiResponse)
-			// Exibir a resposta da IA com efeito de digitação
-			cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
 		}
 	}
 }
@@ -383,30 +409,40 @@ func (cli *ChatCLI) cleanup() {
 	}
 }
 
+// handleSwitchCommand Processa os comando na entrada para atualizar o slug/tenant, ou mudar o modelo para LLM atual.
 func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 	args := strings.Fields(userInput)
-	var newSlugName, newTenantName string
+	var newSlugName, newTenantName, newModel string
 	shouldUpdateToken := false
+	shouldSwitchModel := false
 
-	// Processar os argumentos de --slugname e --tenantname sem impactar um ao outro
 	for i := 1; i < len(args); i++ {
-		if args[i] == "--slugname" && i+1 < len(args) {
-			newSlugName = args[i+1]
-			shouldUpdateToken = true
-			i++
-		} else if args[i] == "--tenantname" && i+1 < len(args) {
-			newTenantName = args[i+1]
-			shouldUpdateToken = true
-			i++
+		switch args[i] {
+		case "--slugname":
+			if i+1 < len(args) {
+				newSlugName = args[i+1]
+				shouldUpdateToken = true
+				i++ // Pular o valor
+			}
+		case "--tenantname":
+			if i+1 < len(args) {
+				newTenantName = args[i+1]
+				shouldUpdateToken = true
+				i++ // Pular o valor
+			}
+		case "--model":
+			if i+1 < len(args) {
+				newModel = args[i+1]
+				shouldSwitchModel = true
+				i++ // Pular o valor
+			}
 		}
 	}
 
-	// Atualizar o TokenManager se houver mudanças
 	if newSlugName != "" || newTenantName != "" {
 		tokenManager, ok := cli.manager.GetTokenManager()
 		if ok {
 			currentSlugName, currentTenantName := tokenManager.GetSlugAndTenantName()
-
 			if newSlugName != "" {
 				fmt.Printf("Atualizando slugName de '%s' para '%s'\n", currentSlugName, newSlugName)
 				currentSlugName = newSlugName
@@ -415,7 +451,6 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 				fmt.Printf("Atualizando tenantName de '%s' para '%s'\n", currentTenantName, newTenantName)
 				currentTenantName = newTenantName
 			}
-
 			tokenManager.SetSlugAndTenantName(currentSlugName, currentTenantName)
 
 			if shouldUpdateToken {
@@ -430,11 +465,25 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 		} else {
 			fmt.Println("TokenManager não configurado. O provedor STACKSPOT não está disponível.")
 		}
-		return
 	}
 
-	// Se não houver argumentos, processar a troca de provedor
-	cli.switchProvider()
+	if shouldSwitchModel {
+		fmt.Printf("Tentando trocar para o modelo '%s' no provedor '%s'...\n", newModel, cli.Provider)
+		newClient, err := cli.manager.GetClient(cli.Provider, newModel)
+		if err != nil {
+			fmt.Printf("❌ Erro ao trocar para o modelo '%s': %v\n", newModel, err)
+			fmt.Println("   Verifique se o nome do modelo está correto para o provedor atual.")
+		} else {
+			cli.Client = newClient
+			cli.Model = newModel // Atualiza o modelo no estado do CLI
+			fmt.Printf("✅ Modelo trocado com sucesso para %s (%s)\n", cli.Client.GetModelName(), cli.Provider)
+		}
+		return // Finaliza após a tentativa de troca de modelo
+	}
+
+	if !shouldUpdateToken && !shouldSwitchModel && len(args) == 1 {
+		cli.switchProvider()
+	}
 }
 
 func (cli *ChatCLI) switchProvider() {
@@ -512,6 +561,7 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println("@command -i <seu_comando> - para executar um comando interativo")
 	fmt.Println("/exit ou /quit - Sai do ChatCLI")
 	fmt.Println("/switch - Troca o provedor de LLM")
+	fmt.Println("/switch --model <nome-do-modelo> - Troca o modelo do provedor atual")
 	fmt.Println("/switch --slugname <slug> --tenantname <tenant> - Define slug e tenant")
 	fmt.Println("/reload - para recarregar as variáveis e reconfigurar o chatcli.")
 	fmt.Println("/config, /status ou /settings - Mostra as configurações e o estado atual (sem exibir segredos)")

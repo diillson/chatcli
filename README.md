@@ -273,7 +273,7 @@ cat README.md | chatcli \
 ```
 - Sem animações (CI-friendly):
 ```bash
-echo "O que este código faz?" | chatcli --no-anim
+cat main.go | chatcli -p "O que este código faz?" --no-anim
 ```
 
 #### Dicas e boas práticas
@@ -295,6 +295,7 @@ one-shot:
 - name: ChatCLI one-shot
   run: |
     chatcli -p "@file ./ --mode=summary Gere um overview do projeto"
+    $VAR_XPTO | chatcli -p "analise os valores"
 ```
 
 ---
@@ -306,6 +307,7 @@ one-shot:
 
 - **Alternar Provedor ou Configurações**:
     - `/switch` – Troca o provedor de LLM (modo interativo).
+    - `/switch --model <nome-do-modelo>`  – Altera o modelo do provedor atual (ex:  `gpt-4o-mini` ,  `claude-3-5-sonnet-20241022` ).
     - `/switch --slugname <slug>` – Atualiza somente o `slugName`.
     - `/switch --tenantname <tenant>` – Atualiza somente o `tenantName`.
     - Combinações: `/switch --slugname <slug> --tenantname <tenant>`
@@ -331,7 +333,9 @@ one-shot:
     - `/version` ou `/v` – Mostra a versão atual, o hash do commit e verifica se há atualizações disponíveis.
     - **Uso**: Útil para confirmar qual versão está instalada e se há novas versões disponíveis.
     - **Alternativa**: Execute `chatcli --version` ou `chatcli -v` diretamente do terminal.  
-
+- **Cancelando Operações em Andamento**:
+    -  `Ctrl+C`  (uma vez): Cancela a operação atual (ex: a espera pela resposta da IA, o "Pensando...") sem fechar o ChatCLI. Você retornará ao prompt.
+    -  `Ctrl+C`  (duas vezes rápido) ou  `Ctrl+D : Encerra a aplicação.
 - **Ajuda**:
     - `/help`
 
@@ -370,14 +374,27 @@ O Modo Agente permite que a IA execute tarefas no seu sistema através de comand
 - O agente é projetado para ser seguro e respeitar as permissões do sistema, garantindo que apenas comandos autorizados sejam execut
 - O Modo Agente pode ser desativado a qualquer momento, retornando ao modo de conversa normal.
 
+#### Refinando Comandos Antes da Execução
+
+Você pode pedir à IA para refinar um comando sugerido antes de executá-lo, fornecendo contexto adicional.
+
+-  `pCN`  (Pré-Contexto para o comando N): Use esta opção para adicionar instruções antes da execução.
+
+##### Exemplo de Refinamento:
+
+1. A IA sugere o comando #1:  `ls -la
+2. Você digita:  `pC1`
+3. Você adiciona o contexto:  Na verdade, eu só quero ver os arquivos .go e contar as linhas de cada um.
+4. A IA processará seu pedido e sugerirá um novo comando, como  `find . -name "*.go" -exec wc -l {} +` .
+
 #### Adicionando contexto aos outputs no modo Agente !!
 - agora você pode adicionar contexto aos outputs dos comandos executados pelo agente
 
-Quando você usar a nova funcionalidade "aCN" , você poderá:
+Funcionalidade `aCN` , você poderá:
 
-1. Executar um comando (por exemplo,  1  para executar o comando #1)
+1. Executar um comando (por exemplo,  `1`  para executar o comando #1)
 2. Ver o resultado do comando
-3. Digitar  aC1  para adicionar contexto ao comando #1
+3. Digitar  `aC1`  para adicionar contexto ao comando #1
 4. Adicionar suas observações, informações adicionais ou perguntas (terminando com  .  em uma linha vazia)
 5. A IA responderá com base no comando, no resultado e no seu contexto adicional
 
