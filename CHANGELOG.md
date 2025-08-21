@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.17.0](https://github.com/diillson/chatcli/compare/v1.16.3...v1.17.0) (2025-08-21)
+
+
+### Features
+
+* **cli:** enhance cancel operation, model switching, and user contex… ([b44d604](https://github.com/diillson/chatcli/commit/b44d604d0dfe77c09c1980a3a1616205b3c5c236))
+* **cli:** enhance cancel operation, model switching, and user context handling ([745624e](https://github.com/diillson/chatcli/commit/745624e0fa461b6d63ef5e4eb779ebd2f7fac34f))
+* Enhance CLI Control, Agent Mode, and Cancellable Operations ([a6799f5](https://github.com/diillson/chatcli/commit/a6799f5952e2912ed0eaae730f883b54b7bf034c))
+
 ## [1.16.3](https://github.com/diillson/chatcli/compare/v1.16.2...v1.16.3) (2025-08-18)
 
 
