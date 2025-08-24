@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/diillson/chatcli/config"
@@ -718,14 +719,37 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 		tokenEstimator := cli.getTokenEstimatorForCurrentLLM()
 		maxTokens := cli.getMaxTokensForCurrentLLM()
 
-		// Mostrar animação de "pensando" durante o processamento
-		cli.animation.ShowThinkingAnimation("Analisando arquivos")
-
 		// Processar cada caminho encontrado após @file
 		for _, path := range paths {
+			// Configurações de escaneamento
+			scanOptions := utils.DefaultDirectoryScanOptions(cli.logger)
+
+			// 1. Pré-escanear para obter a contagem total de arquivos
+			totalFiles, err := utils.CountMatchingFiles(path, scanOptions)
+			if err != nil {
+				cli.logger.Error("Erro ao contar arquivos", zap.String("path", path), zap.Error(err))
+				additionalContext += fmt.Sprintf("\nErro ao analisar o diretório '%s': %s\n", path, err.Error())
+				continue
+			}
+
+			// 2. Inicializar contador para os arquivos processados
+			var processedFiles int32 = 0
+
+			// 3. Definir o callback para atualizar a animação com progresso rico
+			scanOptions.OnFileProcessed = func(info utils.FileInfo) {
+				// Usar atomic para segurança em concorrência, embora o callback seja chamado em série aqui
+				atomic.AddInt32(&processedFiles, 1)
+				// Atualiza a mensagem da animação com o progresso
+				cli.animation.UpdateMessage(
+					fmt.Sprintf("Analisando... [%d/%d] %s", atomic.LoadInt32(&processedFiles), totalFiles, info.Path),
+				)
+			}
+
 			// Escolher a forma de processar (summary, chunked, smartChunk ou full)
 			switch mode {
 			case config.ModeSummary:
+				// Atualizar a mensagem da animação para o modo summary
+				cli.animation.UpdateMessage(fmt.Sprintf("Gerando resumo para %s...", path))
 				summary, err := cli.processDirectorySummary(path, tokenEstimator, maxTokens)
 				if err != nil {
 					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
@@ -734,13 +758,14 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 				}
 
 			case config.ModeChunked:
+				// Atualizar a mensagem da animação para o modo chunked
+				cli.animation.UpdateMessage(fmt.Sprintf("Dividindo %s em chunks...", path))
 				chunks, err := cli.processDirectoryChunked(path, tokenEstimator, maxTokens)
 				if err != nil {
 					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
 				} else {
 					// Apenas o primeiro chunk é adicionado diretamente ao contexto.
 					if len(chunks) > 0 {
-						// ===== Nova seção de resumo =====
 						totalChunks := len(chunks)
 						var totalFiles int
 						var totalSize int64
@@ -791,6 +816,9 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 				}
 
 			case config.ModeSmartChunk:
+				// Atualizar a mensagem da animação para o modo smart
+				cli.animation.UpdateMessage(fmt.Sprintf("Analisando relevância dos arquivos em %s...", path))
+
 				// Extrair a consulta do usuário (tudo o que vier após o @file + opções)
 				query := extractUserQuery(userInput)
 				relevantContent, err := cli.processDirectorySmart(path, query, tokenEstimator, maxTokens)
@@ -801,11 +829,6 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 				}
 
 			default: // ModeFull - comportamento atual (inclui todo o conteúdo relevante dentro de um limite)
-				scanOptions := utils.DefaultDirectoryScanOptions(cli.logger)
-				scanOptions.OnFileProcessed = func(info utils.FileInfo) {
-					cli.animation.UpdateMessage(fmt.Sprintf("Processando %s", info.Path))
-				}
-
 				// Ajustar limite de tamanho com base em tokens disponíveis
 				scanOptions.MaxTotalSize = estimateBytesFromTokens(maxTokens*3/4, tokenEstimator)
 
@@ -825,9 +848,6 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 				additionalContext += fmt.Sprintf("\n%s\n", formattedContent)
 			}
 		}
-
-		// Parar animação de análise de arquivos
-		cli.animation.StopThinkingAnimation()
 
 		// Remover o comando @file do input original para não poluir o prompt final
 		userInput = removeAllFileCommands(userInput)
