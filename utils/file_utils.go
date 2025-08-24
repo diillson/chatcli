@@ -422,3 +422,57 @@ func ShouldSkipDir(dirName string) bool {
 
 	return skipDirs[dirName] || strings.HasPrefix(dirName, ".")
 }
+
+// CountMatchingFiles faz uma varredura rápida para contar quantos arquivos em um diretório
+// correspondem aos critérios das opções, sem ler seu conteúdo.
+func CountMatchingFiles(dirPath string, options DirectoryScanOptions) (int, error) {
+	dirPath, err := ExpandPath(dirPath)
+	if err != nil {
+		return 0, err
+	}
+
+	// Se for um arquivo único, o total é 1
+	info, err := os.Stat(dirPath)
+	if err != nil {
+		return 0, err
+	}
+	if !info.IsDir() {
+		return 1, nil
+	}
+
+	count := 0
+	err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Ignora erros em arquivos individuais para continuar a contagem
+		}
+
+		// Se for diretório, verifica se deve ser pulado
+		if info.IsDir() {
+			base := filepath.Base(path)
+			if path != dirPath {
+				for _, dir := range options.ExcludeDirs {
+					if base == dir {
+						return filepath.SkipDir
+					}
+				}
+				if !options.IncludeHidden && strings.HasPrefix(base, ".") {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+
+		// Verifica se o arquivo corresponde aos critérios de exclusão e extensão
+		if !matchesAny(path, options.ExcludePatterns) && hasAllowedExtension(path, options.Extensions) {
+			count++
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
