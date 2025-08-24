@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.17.1](https://github.com/diillson/chatcli/compare/v1.17.0...v1.17.1) (2025-08-24)
+
+
+### Bug Fixes
+
+* **fileCommand:** add progress tracking and file count during directo… ([0f7581e](https://github.com/diillson/chatcli/commit/0f7581e6c21869864caedf9aa883601c4fa4e703))
+* **fileCommand:** add progress tracking and file count during directory scanning ([d04ebc2](https://github.com/diillson/chatcli/commit/d04ebc2a3dd8eed47de458d1aa660503e28f76ec))
+
 ## [1.17.0](https://github.com/diillson/chatcli/compare/v1.16.3...v1.17.0) (2025-08-21)
 
 
