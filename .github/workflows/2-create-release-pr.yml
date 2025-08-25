@@ -1,0 +1,27 @@
+name: Create Release PR
+
+on:
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release Please PR
+        id: release-pr
+        uses: googleapis/release-please-action@v4
+        with:
+          # O target-branch é para onde o PR será apontado
+          target-branch: main
+          # O release-type informa ao release-please como interpretar os commits
+          release-type: go
+          # O token para permitir que a action crie um PR
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+          # Importante: agora não pulamos mais o PR
+          skip-github-release: true # Ele só vai criar/atualizar o PR, não a release
