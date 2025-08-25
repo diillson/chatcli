@@ -17,6 +17,7 @@ jobs:
         uses: googleapis/release-please-action@v4
         with:
           target-branch: main
+          default-branch: develop
           release-type: go
           token: ${{ secrets.GH_RELEASE_TOKEN }}
           # Criar apenas PR, não release
