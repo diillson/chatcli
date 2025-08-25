@@ -14,7 +14,7 @@ func GetUserShell() string {
 	return filepath.Base(shell)
 }
 
-// GetHomeDir retorna o diretório home do usuário atual.
+// GetHomeDir retorna o diretório home do usuário atual. - Comentario para forçar Release.
 func GetHomeDir() (string, error) {
 	return os.UserHomeDir()
 }
