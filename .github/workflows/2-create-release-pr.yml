@@ -24,4 +24,4 @@ jobs:
           # O token para permitir que a action crie um PR
           token: ${{ secrets.GH_RELEASE_TOKEN }}
           # Importante: agora não pulamos mais o PR
-          skip-github-release: true # Ele só vai criar/atualizar o PR, não a release
+          skip-github-release: false # Ele só vai criar/atualizar o PR, não a release
