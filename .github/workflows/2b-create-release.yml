@@ -33,8 +33,7 @@ jobs:
       - name: Create GitHub Release
         uses: googleapis/release-please-action@v4
         with:
-          target-branch: main
-          default-branch: develop
+          target-branch: ${{ github.ref_name }}
           release-type: go
           token: ${{ secrets.GH_RELEASE_TOKEN }}
           skip-github-pull-request: true
