@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.17.2](https://github.com/diillson/chatcli/compare/v1.17.1...v1.17.2) (2025-08-25)
+
+
+### Bug Fixes
+
+* **cli:** improve file command regex to handle quoted paths ([08f9ce8](https://github.com/diillson/chatcli/commit/08f9ce86ed6293bc45fb2eb7a0cf0d6cb90472a8))
+* **cli:** improve file command regex to handle quoted paths ([1b5e022](https://github.com/diillson/chatcli/commit/1b5e022941a05a1efd2f5a1f7bcb5a26757f15cb))
+
 ## [1.17.1](https://github.com/diillson/chatcli/compare/v1.17.0...v1.17.1) (2025-08-24)
 
 
