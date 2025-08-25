@@ -38,7 +38,7 @@ func main() {
 		return
 	}
 
-	// Mensagem de versão no startup
+	// versão no startup
 	version.PrintStartupVersionInfo()
 
 	// Carregar variáveis de ambiente do arquivo .env
