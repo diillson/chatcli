@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 jobs:
   release-please:
@@ -19,9 +20,5 @@ jobs:
           target-branch: main
           release-type: go
           token: ${{ secrets.GH_RELEASE_TOKEN }}
-          # Criar apenas PR, não release
-          skip-github-release: true
-          # Configurações adicionais recomendadas
-          bump-minor-pre-major: true
-          bump-patch-for-minor-pre-major: true
-          include-v-in-tag: true
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
