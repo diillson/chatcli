@@ -1,0 +1,39 @@
+name: Handle Release PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    # Auto-merge Release PR se todos os checks passarem
+    if: github.event.action != 'closed' && startsWith(github.event.pull_request.head.ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge
+        run: |
+          gh pr merge ${{ github.event.pull_request.number }} \
+            --auto \
+            --merge \
+            --repo ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+
+  create-release:
+    # Criar release quando PR é mergeado
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub Release
+        uses: googleapis/release-please-action@v4
+        with:
+          target-branch: ${{ github.ref_name }}
+          release-type: go
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+          skip-github-pull-request: true

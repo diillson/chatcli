@@ -1221,7 +1221,7 @@ func (a *AgentMode) getShellConfigPath(shell string) string {
 	}
 }
 
-// isLikelyInteractiveCommand verifica se um comando provavelmente é interativo //comentario apenas para validar workflow
+// isLikelyInteractiveCommand verifica se um comando provavelmente é interativo
 func isLikelyInteractiveCommand(cmd string) bool {
 	// Lista de comandos conhecidos por serem interativos
 	interactiveCommands := []string{
