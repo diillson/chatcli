@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.17.3](https://github.com/diillson/chatcli/compare/v1.17.2...v1.17.3) (2025-08-25)
+
+
+### Bug Fixes
+
+* **agent:** ajustando comentarios da func isLikelyInteractiveCommand. ([7443b3b](https://github.com/diillson/chatcli/commit/7443b3b6da66a54c3c621ceb39924d2850a1d0d0))
+* **main:** releaseplease ([88a73d6](https://github.com/diillson/chatcli/commit/88a73d6603bb8bd6957886560020b34357152faf))
+* **main:** releaseplease ([70b6c40](https://github.com/diillson/chatcli/commit/70b6c404f6ea950c86fe189bfe99aa9a505b3a6b))
+* **main:** simplify version startup comment ([0431ef7](https://github.com/diillson/chatcli/commit/0431ef7c8defe7a9c029a4682a07bba8a9886e5a))
+* **main:** simplify version startup comment ([8498df8](https://github.com/diillson/chatcli/commit/8498df8a5b1bd34b90b880c8c4c887488008cfc4))
+
 ## [1.17.2](https://github.com/diillson/chatcli/compare/v1.17.1...v1.17.2) (2025-08-25)
 
 
