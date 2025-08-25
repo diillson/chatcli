@@ -1,15 +1,14 @@
 name: Go Lint & Test
 
 on:
-  push:
-    branches: ["develop"]
   pull_request:
-    branches: ["main"]
+    branches: ["develop", "main"] # Rodar em PRs para develop e para o Release PR na main
+  push:
+    branches: ["develop"] # Manter a checagem na develop
 
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -18,13 +17,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          cache: true  # Habilitar cache para dependências
+          cache: true
 
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.1
-          args: --timeout=5m  # Mover timeout para args
+          version: 'latest' # Usar latest ou uma versão específica mais recente
+          args: --timeout=5m
 
       - name: Lint
         run: golangci-lint run
