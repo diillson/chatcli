@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.17.4](https://github.com/diillson/chatcli/compare/v1.17.3...v1.17.4) (2025-08-25)
+
+
+### Bug Fixes
+
+* **scope:** fix bug ([7cdc360](https://github.com/diillson/chatcli/commit/7cdc360530e16a6a5e6c4f9fd6ae168c098e449b))
+* **scope:** fix bug workflow releaseplease. ([96f5978](https://github.com/diillson/chatcli/commit/96f59782568219e8639e97874d1943b95e1888e6))
+* **scope:** fix bug workflow releaseplease. ([a759d50](https://github.com/diillson/chatcli/commit/a759d501f384c51d89557c3fbd7fe4bcb9af6032))
+* test release please workflow ([a7a3455](https://github.com/diillson/chatcli/commit/a7a34556dbb5b67d5c708797b3810cdb61dfc80f))
+* test release please workflow ([1125fe5](https://github.com/diillson/chatcli/commit/1125fe58f0c486fe44f29cdf937634c8a51d4b8c))
+* test release please workflow ([7605f02](https://github.com/diillson/chatcli/commit/7605f02772b9b31d574be76427ec554d360cc672))
+
 ## [1.17.3](https://github.com/diillson/chatcli/compare/v1.17.2...v1.17.3) (2025-08-25)
 
 
