@@ -2,9 +2,9 @@ name: Handle Release PR
 
 on:
   pull_request:
-    types: [opened, synchronize, closed]
+    types: [synchronize, closed]
     branches:
-      - main
+      - develop
 
 permissions:
   contents: write
@@ -33,7 +33,7 @@ jobs:
       - name: Create GitHub Release
         uses: googleapis/release-please-action@v4
         with:
-          target-branch: ${{ github.ref_name }}
+          target-branch: develop
           release-type: go
           token: ${{ secrets.GH_RELEASE_TOKEN }}
           skip-github-pull-request: true
