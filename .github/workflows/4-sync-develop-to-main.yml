@@ -25,9 +25,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Merge main into develop
+      - name: Merge develop into main
         run: |
-          git checkout develop
-          git pull origin develop
-          git merge main --no-ff --no-edit -m "chore: merge main back into develop after release"
-          git push origin develop
+          git checkout main
+          git pull origin main
+          git merge develop --no-ff --no-edit -m "chore: merge develop back into main after release"
+          git push origin main
