@@ -863,7 +863,7 @@ func extractFileCommandOptions(input string) ([]string, map[string]string, error
 
 	// Regex para capturar @file com suas opções
 	// Exemplo: @file --mode=summary ~/project
-	re := regexp.MustCompile(`@file\s+((?:--\w+=\w+\s+)*)([\w~/.-]+)`)
+	re := regexp.MustCompile(`@file\s+((?:--\w+=\w+\s+)*)(?:"([^"]+)"|'([^']+)'|([\w~/.-]+))`)
 	matches := re.FindAllStringSubmatch(input, -1)
 
 	for _, match := range matches {
