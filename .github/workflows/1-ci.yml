@@ -1,8 +1,8 @@
 name: CI (Lint, Fmt, Test)
 
 on:
-  pull_request:
-    branches: [develop, main]
+#  pull_request:
+#    branches: [develop, main]
   push:
     branches: [develop]
 
