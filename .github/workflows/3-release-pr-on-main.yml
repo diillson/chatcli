@@ -1,0 +1,26 @@
+name: Release PR on main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-pr-main
+  cancel-in-progress: true
+
+jobs:
+  release_pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release Please (release-pr)
+        uses: googleapis/release-please-action@v4
+        with:
+          command: release-pr
+          release-type: go
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+          target-branch: main
+          changelog-types: '[{"type":"feat","section":"Features","hidden":false},{"type":"fix","section":"Bug Fixes","hidden":false},{"type":"chore","section":"Miscellaneous","hidden":true}]'
