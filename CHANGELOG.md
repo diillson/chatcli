@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.17.3](https://github.com/diillson/chatcli/compare/v1.17.2...v1.17.3) (2025-08-26)
+
+
+### Bug Fixes
+
+* **ci:** comment out pull_request triggers in CI workflow ([ef9b160](https://github.com/diillson/chatcli/commit/ef9b160fdf94dc33d00974ef93afbb421435e75e))
+* **ci:** comment out pull_request triggers in CI workflow ([70e4020](https://github.com/diillson/chatcli/commit/70e402089dfced492174a596dcaa5d2975c043ee))
+
+## [1.17.2](https://github.com/diillson/chatcli/compare/v1.17.1...v1.17.2) (2025-08-26)
+
+
+### Bug Fixes
+
+* **ci:** comment out pull_request triggers in CI workflow ([c078896](https://github.com/diillson/chatcli/commit/c078896ef121d1b422ec328cfc85b3e90fe20d75))
+* **ci:** comment out pull_request triggers in CI workflow ([19d7fb5](https://github.com/diillson/chatcli/commit/19d7fb58c5eb62c9f8f55f1be7ef92231239dc0d))
+* **ci:** comment out pull_request triggers in CI workflow ([5658413](https://github.com/diillson/chatcli/commit/5658413ff2e6ca7a5ce98b283db52d8d5a387ff1))
+* **ci:** comment out pull_request triggers in CI workflow ([bc43e5c](https://github.com/diillson/chatcli/commit/bc43e5cd54058baa258baf01dbffd7c5c17707c7))
+* **ci:** comment out pull_request triggers in CI workflow ([8bd1953](https://github.com/diillson/chatcli/commit/8bd19535059f83493bbdf19b73c05f730f564fb6))
+* **main:** update version comment for testing flow ([a679972](https://github.com/diillson/chatcli/commit/a679972efe02bd1459f627ce33f41f180e2599ca))
+* **main:** update version comment for testing flow ([55b8fe9](https://github.com/diillson/chatcli/commit/55b8fe92ecec1ad4fb70670f9750cdede752cefa))
+* **main:** update version comment for testing flow ([3436a77](https://github.com/diillson/chatcli/commit/3436a777bc3649b5cfd6c5be8226b30c1f153ed1))
+* **main:** update version comment for testing flow ([e92c39c](https://github.com/diillson/chatcli/commit/e92c39cdbc5ccc978baa17804357edf9f66a803f))
+* **workflows:** restructure workflows for improved release management ([726e885](https://github.com/diillson/chatcli/commit/726e885e4aa3afa62bac822bebb6072ff7ab5929))
+* **workflows:** restructure workflows for improved release management ([eedb138](https://github.com/diillson/chatcli/commit/eedb138210b8f8ba33e7eb5940326acd1795a5c4))
+
 ## [1.17.1](https://github.com/diillson/chatcli/compare/v1.17.0...v1.17.1) (2025-08-24)
 
 
