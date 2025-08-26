@@ -1,10 +1,15 @@
-// utils/http_client.go
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: MIT
+ */
 package utils
 
 import (
-	"go.uber.org/zap"
 	"net/http"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // NewHTTPClient cria um cliente HTTP com LoggingTransport e timeout configurado
