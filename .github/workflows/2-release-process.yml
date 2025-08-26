@@ -1,100 +1,45 @@
-name: Release Process
+name: Release from develop and PR to main
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      force_release:
-        description: 'Force new release even without qualifying commits'
-        required: false
-        default: 'false'
+    branches: ["develop"]
 
 permissions:
   contents: write
   pull-requests: write
   id-token: write
 
+concurrency:
+  group: release-develop
+  cancel-in-progress: true
+
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Para garantir que o histórico completo esteja disponível
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-          cache: true
-
-      - name: Build binaries
-        run: |
-          COMMIT_HASH=$(git rev-parse --short HEAD)
-          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
-          LDFLAGS="-X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'"
-          
-          # Build para várias plataformas
-          GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-linux-amd64 ./main.go
-          GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-amd64 ./main.go
-          GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-arm64 ./main.go
-          GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-windows-amd64.exe ./main.go
-          
-          # Verifica a versão do binário
-          ./chatcli-linux-amd64 --version
-  release-please-release:
+  release-please:
+    name: Create tag and GitHub release
     runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       release_created: ${{ steps.release.outputs.release_created }}
-    needs: [build]
     steps:
-      - name: Release Please
+      - name: Release Please (github-release)
         id: release
         uses: googleapis/release-please-action@v4
         with:
-          skip-github-pull-request: true
           release-type: go
-          token: ${{ secrets.GH_RELEASE_TOKEN }}
-#      - uses: actions/checkout@v4
-#      - name: tag major and minor versions
-#        run: |
-#          git config user.name github-actions[bot]
-#          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-#          git remote add gh-token "https://${{ secrets.GITHUB_TOKEN}}@github.com/diillson/chatcli.git"
-#          git tag -d v${{ steps.release.outputs.major }} || true
-#          git tag -d v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} || true
-#          git push origin :v${{ steps.release.outputs.major }} || true
-#          git push origin :v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} || true
-#          git tag -a v${{ steps.release.outputs.major }} -m "Release v${{ steps.release.outputs.major }}"
-#          git tag -a v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} -m "Release v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}"
-#          git push origin v${{ steps.release.outputs.major }}
-#          git push origin v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}
-#        if: ${{ steps.release.outputs.release_created }}
-  release-please-pr:
-    needs:
-      - build
-      - release-please-release
+          skip-github-pull-request: true
+          token: ${{ secrets.GH_RELEASE_TOKEN || github.token }}
+
+  build-and-upload-assets:
+    name: Build and upload binaries to release
+    needs: [release-please]
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     steps:
-      - id: release-pr
-        name: Release Please PR
-        uses: googleapis/release-please-action@v4
-        with:
-          release-type: go
-          token: ${{ secrets.GH_RELEASE_TOKEN }}
-          fork: false
-          skip-github-release: true
-      - name: Checkout code
+      - name: Checkout tag
         uses: actions/checkout@v4
-        if: ${{ needs.release-please-release.outputs.release_created }}
         with:
           fetch-depth: 0
-          ref: ${{ needs.release-please-release.outputs.tag_name }}
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -103,27 +48,25 @@ jobs:
           cache: true
 
       - name: Build binaries
-        if: ${{ needs.release-please-release.outputs.release_created }}
+        env:
+          CGO_ENABLED: 0
         run: |
           COMMIT_HASH=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          VERSION=${{ needs.release-please-release.outputs.tag_name }}
+          VERSION=${{ needs.release-please.outputs.tag_name }}
           LDFLAGS="-X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'"
           
-          # Build para várias plataformas
-          GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-linux-amd64 ./main.go
-          GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-amd64 ./main.go
-          GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-arm64 ./main.go
+          GOOS=linux   GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-linux-amd64     ./main.go
+          GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-amd64    ./main.go
+          GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-arm64    ./main.go
           GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-windows-amd64.exe ./main.go
           
-          # Verifica a versão do binário
-          ./chatcli-linux-amd64 --version
+          ./chatcli-linux-amd64 --version || true
 
       - name: Update Release with Binaries
-        uses: softprops/action-gh-release@v1
-        if: ${{ needs.release-please-release.outputs.tag_name }}
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.release-please-release.outputs.tag_name }}
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: |
             chatcli-linux-amd64
             chatcli-darwin-amd64
@@ -133,4 +76,46 @@ jobs:
           prerelease: false
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN || github.token }}
+
+  open-pr-develop-to-main:
+    name: Open PR develop -> main
+    needs: [release-please]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Open or reuse PR develop -> main
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_RELEASE_TOKEN || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = `${owner}:develop`;
+            const base = 'main';
+            
+            // Verifica se já existe PR aberto develop -> main
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, state: 'open', head, base, per_page: 1
+            });
+            
+            if (prs.length > 0) {
+              core.info(`PR já existe: #${prs[0].number}`);
+              return;
+            }
+            
+            const title = `Merge develop into main (${process.env.TAG_NAME})`;
+            const body  = `PR automático após a release ${process.env.TAG_NAME}.`;
+            
+            const { data: pr } = await github.rest.pulls.create({
+              owner, repo, head: 'develop', base, title, body
+            });
+            
+            core.info(`PR criado: #${pr.number}`);
+          env:
+            TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
