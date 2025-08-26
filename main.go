@@ -38,7 +38,7 @@ func main() {
 		return
 	}
 
-	// Mensagem de versão no startup // comentario para forçar pipe e testar fluxo
+	// Mensagem de versão no startup
 	version.PrintStartupVersionInfo()
 
 	// Carregar variáveis de ambiente do arquivo .env
