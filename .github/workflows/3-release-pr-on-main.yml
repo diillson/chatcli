@@ -119,8 +119,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Merge main into develop
+      - name: Sync release-please commit from main to develop (squash)
         run: |
           git checkout develop
-          git merge origin/main --no-ff --no-edit || true
+          # Pega o último commit da main (que é o do release-please)
+          last_commit=$(git log origin/main -1 --pretty=format:%H)
+          
+          # Aplica esse commit na develop como squash
+          git cherry-pick -n $last_commit || true
+          
+          # Cria um commit único na develop com a mensagem da release
+          msg=$(git log -1 --pretty=%B $last_commit)
+          git commit -m "chore(sync): propagate release-please changes - $msg" || echo "Nada para commitar"
+          
           git push origin develop
