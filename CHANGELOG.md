@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.4](https://github.com/diillson/chatcli/compare/v1.17.3...v1.17.4) (2025-08-26)
+
+
+### Bug Fixes
+
+* **license:** add license headers to all source files ([#192](https://github.com/diillson/chatcli/issues/192)) ([#193](https://github.com/diillson/chatcli/issues/193)) ([2d8242b](https://github.com/diillson/chatcli/commit/2d8242ba58c263ebcb98cef84b6f801428190a09))
+
 ## [1.17.3](https://github.com/diillson/chatcli/compare/v1.17.2...v1.17.3) (2025-08-26)
 
 
