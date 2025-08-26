@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.17.3](https://github.com/diillson/chatcli/compare/v1.17.2...v1.17.3) (2025-08-26)
+
+
+### Bug Fixes
+
+* **ci:** comment out pull_request triggers in CI workflow ([ef9b160](https://github.com/diillson/chatcli/commit/ef9b160fdf94dc33d00974ef93afbb421435e75e))
+* **ci:** comment out pull_request triggers in CI workflow ([70e4020](https://github.com/diillson/chatcli/commit/70e402089dfced492174a596dcaa5d2975c043ee))
+
 ## [1.17.2](https://github.com/diillson/chatcli/compare/v1.17.1...v1.17.2) (2025-08-26)
 
 
