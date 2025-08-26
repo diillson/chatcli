@@ -2,7 +2,7 @@ name: Release from develop and PR to main
 
 on:
   push:
-    branches: ["develop"]
+    branches: [develop]
 
 permissions:
   contents: write
@@ -14,32 +14,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release-please:
+  release:
     name: Create tag and GitHub release
     runs-on: ubuntu-latest
     outputs:
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+      release_created: ${{ steps.rp.outputs.release_created }}
     steps:
       - name: Release Please (github-release)
-        id: release
+        id: rp
         uses: googleapis/release-please-action@v4
         with:
           release-type: go
           skip-github-pull-request: true
           token: ${{ secrets.GH_RELEASE_TOKEN }}
+          # target-branch: develop  # descomente se necessário
 
-  build-and-upload-assets:
+  build_and_upload:
     name: Build and upload binaries to release
-    needs: [release-please]
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: [release]
+    if: needs.release.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.release.outputs.tag_name }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -53,12 +54,12 @@ jobs:
         run: |
           COMMIT_HASH=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          VERSION=${{ needs.release-please.outputs.tag_name }}
+          VERSION="${{ needs.release.outputs.tag_name }}"
           LDFLAGS="-X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'"
           
-          GOOS=linux   GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-linux-amd64     ./main.go
-          GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-amd64    ./main.go
-          GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-arm64    ./main.go
+          GOOS=linux   GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-linux-amd64       ./main.go
+          GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-amd64      ./main.go
+          GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-arm64      ./main.go
           GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-windows-amd64.exe ./main.go
           
           ./chatcli-linux-amd64 --version || true
@@ -66,7 +67,7 @@ jobs:
       - name: Update Release with Binaries
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          tag_name: ${{ needs.release.outputs.tag_name }}
           files: |
             chatcli-linux-amd64
             chatcli-darwin-amd64
@@ -78,10 +79,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
 
-  open-pr-develop-to-main:
+  open_pr_develop_to_main:
     name: Open PR develop -> main
-    needs: [release-please]
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: [release]
+    if: needs.release.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -96,25 +97,23 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const head = `${owner}:develop`;
-            const base = 'main';
             
+            // Verifica PRs abertos de develop -> main
             const { data: prs } = await github.rest.pulls.list({
-              owner, repo, state: 'open', head, base, per_page: 10
+              owner, repo, state: 'open', head: `${owner}:develop`, base: 'main', per_page: 10
             });
             
             if (prs.length > 0) {
-              core.info(`PR já existe: ${prs[0].number}`);
+              core.info(`PR já existe: #${prs[0].number}`);
               return;
             }
             
-            const title = `Merge develop into main (${process.env.TAG_NAME})`;
-            const body  = `PR automático após a release ${process.env.TAG_NAME}.`;
+            const tagName = '${{ needs.release.outputs.tag_name }}';
+            const title = `Merge develop into main (${tagName})`;
+            const body  = `PR automático após a release ${tagName}.`;
             
             const { data: pr } = await github.rest.pulls.create({
-              owner, repo, head: 'develop', base, title, body
+              owner, repo, head: 'develop', base: 'main', title, body
             });
             
-            core.info(`PR criado: ${pr.number}`);
-          env:
-            TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+            core.info(`PR criado: #${pr.number}`);
