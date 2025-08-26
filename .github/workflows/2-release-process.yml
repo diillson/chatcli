@@ -28,7 +28,7 @@ jobs:
           release-type: go
           skip-github-pull-request: true
           token: ${{ secrets.GH_RELEASE_TOKEN }}
-          # target-branch: develop  # descomente se necessário
+          target-branch: develop
 
   build_and_upload:
     name: Build and upload binaries to release
