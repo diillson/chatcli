@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/diillson/chatcli/compare/v1.17.4...v1.18.0) (2025-09-03)
+
+
+### Features
+
+* **welcome/UnitTests:** improve test robustness by adding error check for form parsing ([#200](https://github.com/diillson/chatcli/issues/200)) ([43ec5d5](https://github.com/diillson/chatcli/commit/43ec5d5ab007aed659640321500933590a4e47d5))
+
 ## [1.17.4](https://github.com/diillson/chatcli/compare/v1.17.3...v1.17.4) (2025-08-26)
 
 
