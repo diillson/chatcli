@@ -39,7 +39,7 @@ func main() {
 	}
 
 	// Mensagem de versão no startup
-	version.PrintStartupVersionInfo()
+	//version.PrintStartupVersionInfo()
 
 	// Carregar variáveis de ambiente do arquivo .env
 	envFilePath := os.Getenv("CHATCLI_DOTENV")

@@ -101,6 +101,7 @@ func SanitizeSensitiveText(s string) string {
 }
 
 // maskSensitiveInText aplica regex para esconder padrões comuns de segredos
+
 func maskSensitiveInText(s string) string {
 	// padrões comuns
 	patterns := []struct {
@@ -108,21 +109,21 @@ func maskSensitiveInText(s string) string {
 		repl string
 	}{
 		// OpenAI
-		{regexp.MustCompile(`sk-[A-Za-z0-9]{20,}`), "sk-[REDACTED]"},
+		{regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`), "sk-[REDACTED]"},
 		// Anthropic
-		{regexp.MustCompile(`sk-ant-[A-Za-z0-9]{20,}`), "sk-ant-[REDACTED]"},
-		// Google API key
-		{regexp.MustCompile(`AIza[0-9A-Za-z\-_]{35}`), "[REDACTED_API_KEY]"},
+		{regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{20,}`), "sk-ant-[REDACTED]"},
+		// Google API key (padrão mais genérico para o teste)
+		{regexp.MustCompile(`AIza[0-9A-Za-z\-_.]+`), "[REDACTED_API_KEY]"},
 		// Bearer tokens
 		{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\.\-_]+`), "Bearer [REDACTED]"},
-		// JSON/OAuth fields
-		{regexp.MustCompile(`"access_token"\s*:\s*"[^\"]+"`), `"access_token":"[REDACTED]"`},
-		{regexp.MustCompile(`"refresh_token"\s*:\s*"[^\"]+"`), `"refresh_token":"[REDACTED]"`},
-		{regexp.MustCompile(`"client_secret"\s*:\s*"[^\"]+"`), `"client_secret":"[REDACTED]"`},
-		{regexp.MustCompile(`"api_key"\s*:\s*"[^\"]+"`), `"api_key":"[REDACTED]"`},
-		{regexp.MustCompile(`"password"\s*:\s*"[^\"]+"`), `"password":"[REDACTED]"`},
+		// JSON/OAuth fields (captura a chave para preservar a estrutura do JSON)
+		{regexp.MustCompile(`("access_token"\s*:\s*)"[^"]+"`), `${1}"[REDACTED]"`},
+		{regexp.MustCompile(`("refresh_token"\s*:\s*)"[^"]+"`), `${1}"[REDACTED]"`},
+		{regexp.MustCompile(`("client_secret"\s*:\s*)"[^"]+"`), `${1}"[REDACTED]"`},
+		{regexp.MustCompile(`("api_key"\s*:\s*)"[^"]+"`), `${1}"[REDACTED]"`},
+		{regexp.MustCompile(`("password"\s*:\s*)"[^"]+"`), `${1}"[REDACTED]"`},
 		// KEY=VALUE linhas cruas
-		{regexp.MustCompile(`(?i)(API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|CLIENT_SECRET|SECRET|PASSWORD)\s*=\s*[^\s]+`), "$1=[REDACTED]"},
+		{regexp.MustCompile(`(?im)^(API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|CLIENT_SECRET|SECRET|PASSWORD)\s*=\s*.*$`), "$1=[REDACTED]"},
 	}
 	out := s
 	for _, p := range patterns {
