@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/diillson/chatcli/compare/v1.18.0...v1.18.1) (2025-09-03)
+
+
+### Bug Fixes
+
+* (test_stackspot_client): add and enhance unit tests, refactor for configurability ([#203](https://github.com/diillson/chatcli/issues/203)) ([6f10eee](https://github.com/diillson/chatcli/commit/6f10eeedef497ad441039c9f33983f134cf78a7d))
+
 ## [1.18.0](https://github.com/diillson/chatcli/compare/v1.17.4...v1.18.0) (2025-09-03)
 
 
