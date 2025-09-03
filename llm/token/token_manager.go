@@ -20,6 +20,13 @@ import (
 	"go.uber.org/zap"
 )
 
+type Manager interface {
+	GetAccessToken(ctx context.Context) (string, error)
+	RefreshToken(ctx context.Context) (string, error)
+	GetSlugAndTenantName() (string, string)
+	SetSlugAndTenantName(slug, tenant string)
+}
+
 // TokenManager gerencia a obtenção e renovação de tokens de acesso
 type TokenManager struct {
 	clientID         string
@@ -36,7 +43,7 @@ type TokenManager struct {
 
 // NewTokenManager cria uma nova instância de TokenManager
 // Recebe o clientID, clientSecret, slugName, tenantName e o logger.
-func NewTokenManager(clientID, clientSecret, slugName, tenantName string, logger *zap.Logger) *TokenManager {
+func NewTokenManager(clientID, clientSecret, slugName, tenantName string, logger *zap.Logger) Manager {
 	httpClient := utils.NewHTTPClient(logger, 30*time.Second)
 	return &TokenManager{
 		clientID:     clientID,

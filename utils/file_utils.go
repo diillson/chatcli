@@ -6,6 +6,8 @@
 package utils
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -138,197 +140,141 @@ func hasAllowedExtension(path string, extensions []string) bool {
 	return false
 }
 
-// ProcessDirectory processa um diretório recursivamente, coletando conteúdo de arquivos
-// que correspondam aos critérios definidos nas opções.
+// ProcessDirectory processa um diretório recursivamente de forma concorrente e segura.
 func ProcessDirectory(dirPath string, options DirectoryScanOptions) ([]FileInfo, error) {
 	dirPath, err := ExpandPath(dirPath)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao expandir o caminho: %w", err)
 	}
 
-	// Verificar se o caminho existe e é um diretório
 	fileInfo, err := os.Stat(dirPath)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao acessar o caminho: %w", err)
 	}
 
-	// Se for um arquivo único, processá-lo diretamente
 	if !fileInfo.IsDir() {
 		content, err := ReadFileContent(dirPath, options.MaxTotalSize)
 		if err != nil {
 			return nil, err
 		}
 		fileType := DetectFileType(dirPath)
-		file := FileInfo{
-			Path:    dirPath,
-			Content: content,
-			Size:    fileInfo.Size(),
-			Type:    fileType,
-		}
-
+		file := FileInfo{Path: dirPath, Content: content, Size: fileInfo.Size(), Type: fileType}
 		if options.OnFileProcessed != nil {
 			options.OnFileProcessed(file)
 		}
-
 		return []FileInfo{file}, nil
 	}
 
-	// Estruturas para armazenar resultados e controlar limites
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var (
-		result      []FileInfo
-		totalSize   int64
-		fileCount   int
-		mu          sync.Mutex
-		filesChan   = make(chan string, 100)
-		resultChan  = make(chan FileInfo, 10)
-		errorChan   = make(chan error, 1)
-		doneChan    = make(chan struct{})
-		workerCount = 4 // Número de workers para processamento paralelo
+		result             []FileInfo
+		totalSize          int64
+		fileCount          int
+		filesToProcessChan = make(chan string, 100)
+		resultsChan        = make(chan FileInfo, 100)
+		wgWorkers          sync.WaitGroup
+		workerCount        = 4
 	)
 
-	// Inicia o coletor de resultados
-	var wgCollector sync.WaitGroup
-	wgCollector.Add(1)
-	go func() {
-		defer wgCollector.Done()
-		for file := range resultChan {
-			mu.Lock()
-			result = append(result, file)
-			totalSize += int64(len(file.Content))
-			fileCount++
-			mu.Unlock()
-
-			// Notificar sobre o arquivo processado
-			if options.OnFileProcessed != nil {
-				options.OnFileProcessed(file)
-			}
-		}
-	}()
-
-	// Inicia workers para processar arquivos
-	var wgWorkers sync.WaitGroup
+	// Inicia workers para ler o conteúdo dos arquivos
 	for i := 0; i < workerCount; i++ {
 		wgWorkers.Add(1)
 		go func() {
 			defer wgWorkers.Done()
-			for filePath := range filesChan {
-				// Verifica se já atingimos os limites
-				mu.Lock()
-				if fileCount >= options.MaxFilesToProcess || totalSize >= options.MaxTotalSize {
-					mu.Unlock()
-					continue
-				}
-				mu.Unlock()
-
-				// Tenta ler o arquivo
-				content, err := ReadFileContent(filePath, options.MaxTotalSize-totalSize)
-				if err != nil {
-					if !os.IsNotExist(err) {
-						options.Logger.Warn("Erro ao ler arquivo",
-							zap.String("path", filePath),
-							zap.Error(err))
+			for {
+				select {
+				case path, ok := <-filesToProcessChan:
+					if !ok {
+						return
 					}
-					continue
+					// O worker apenas lê o arquivo e envia o resultado.
+					// Ele não se preocupa com limites.
+					content, err := ReadFileContent(path, options.MaxTotalSize) // Passa um limite grande
+					if err != nil {
+						options.Logger.Warn("Erro ao ler arquivo, pulando", zap.String("path", path), zap.Error(err))
+						continue
+					}
+					info, err := os.Stat(path)
+					if err != nil {
+						continue
+					}
+					resultsChan <- FileInfo{
+						Path:    path,
+						Content: content,
+						Size:    info.Size(),
+						Type:    DetectFileType(path),
+					}
+				case <-ctx.Done():
+					return
 				}
-
-				fileInfo, err := os.Stat(filePath)
-				if err != nil {
-					continue
-				}
-
-				fileType := DetectFileType(filePath)
-				file := FileInfo{
-					Path:    filePath,
-					Content: content,
-					Size:    fileInfo.Size(),
-					Type:    fileType,
-				}
-
-				// Envia o resultado para o coletor
-				resultChan <- file
 			}
 		}()
 	}
 
-	// Função para fechar todos os canais quando terminado
+	// Goroutine para caminhar pelo diretório e encontrar arquivos
+	var walkErr error
+	var wgWalk sync.WaitGroup
+	wgWalk.Add(1)
 	go func() {
-		wgWorkers.Wait()   // Espera todos os workers terminarem
-		close(resultChan)  // Fecha o canal de resultados
-		wgCollector.Wait() // Espera o coletor terminar
-		close(doneChan)    // Sinaliza conclusão
-	}()
+		defer wgWalk.Done()
+		defer close(filesToProcessChan) // Fecha o canal quando terminar de caminhar
 
-	// Função para verificar se um caminho deve ser ignorado
-	shouldSkip := func(path string) bool {
-		// Verifica diretórios excluídos
-		base := filepath.Base(path)
-		for _, dir := range options.ExcludeDirs {
-			if base == dir {
-				return true
-			}
-		}
-
-		// Verifica arquivos/diretórios ocultos
-		if !options.IncludeHidden && strings.HasPrefix(base, ".") {
-			return true
-		}
-
-		return false
-	}
-
-	// Percorre o diretório recursivamente
-	go func() {
-		defer close(filesChan)
-
-		err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		walkErr = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return nil // Continua mesmo com erro em um item específico
+				return nil
 			}
 
-			// Se for diretório, verifica se deve ser pulado
+			// Verifica se o contexto foi cancelado (limite atingido)
+			select {
+			case <-ctx.Done():
+				return errors.New("limite de processamento atingido")
+			default:
+			}
+
 			if info.IsDir() {
-				if path != dirPath && shouldSkip(path) {
+				if path != dirPath && ShouldSkipDir(info.Name()) {
 					return filepath.SkipDir
 				}
 				return nil
 			}
 
-			// Verifica se o arquivo corresponde aos critérios
-			if matchesAny(path, options.ExcludePatterns) {
-				return nil
+			if !matchesAny(path, options.ExcludePatterns) && hasAllowedExtension(path, options.Extensions) {
+				filesToProcessChan <- path
 			}
-
-			if !hasAllowedExtension(path, options.Extensions) {
-				return nil
-			}
-
-			// Verifica limites antes de processar mais um arquivo
-			mu.Lock()
-			reachedLimit := fileCount >= options.MaxFilesToProcess || totalSize >= options.MaxTotalSize
-			mu.Unlock()
-
-			if reachedLimit {
-				return filepath.SkipDir // Para de percorrer se já atingiu limites
-			}
-
-			// Envia o arquivo para processamento pelos workers
-			filesChan <- path
 			return nil
 		})
-
-		if err != nil {
-			errorChan <- err
-		}
 	}()
 
-	// Aguarda conclusão ou erro
-	select {
-	case err := <-errorChan:
-		return nil, err
-	case <-doneChan:
-		// Retornar os arquivos processados
-		return result, nil
+	// Goroutine para fechar o canal de resultados após os workers terminarem
+	go func() {
+		wgWorkers.Wait()
+		close(resultsChan)
+	}()
+
+	for file := range resultsChan {
+		if fileCount >= options.MaxFilesToProcess || totalSize+int64(len(file.Content)) > options.MaxTotalSize {
+			cancel() // Atingiu o limite, sinaliza para todas as goroutines pararem.
+			break    // Para de coletar resultados.
+		}
+
+		result = append(result, file)
+		fileCount++
+		totalSize += int64(len(file.Content))
+
+		if options.OnFileProcessed != nil {
+			options.OnFileProcessed(file)
+		}
 	}
+
+	// Espera a goroutine de caminhada terminar para verificar se houve erro
+	wgWalk.Wait()
+	if walkErr != nil && walkErr.Error() != "limite de processamento atingido" {
+		return nil, walkErr
+	}
+
+	return result, nil
 }
 
 // FormatDirectoryContent formata o conteúdo de vários arquivos em uma única string

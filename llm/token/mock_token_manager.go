@@ -2,27 +2,32 @@ package token
 
 import (
 	"context"
+
+	"github.com/stretchr/testify/mock"
 )
 
-// MockTokenManager é um mock que implementa o TokenManager
+// Garante que o mock implementa a interface em tempo de compilação
+var _ Manager = (*MockTokenManager)(nil)
+
 type MockTokenManager struct {
-	accessToken string
-	err         error
+	mock.Mock
 }
 
 func (m *MockTokenManager) GetAccessToken(ctx context.Context) (string, error) {
-	return m.accessToken, m.err
+	args := m.Called(ctx)
+	return args.String(0), args.Error(1)
 }
 
 func (m *MockTokenManager) RefreshToken(ctx context.Context) (string, error) {
-	// Retorna o mesmo token para simplificar
-	return m.accessToken, m.err
+	args := m.Called(ctx)
+	return args.String(0), args.Error(1)
 }
 
 func (m *MockTokenManager) GetSlugAndTenantName() (string, string) {
-	return "mock_slug", "mock_tenant"
+	args := m.Called()
+	return args.String(0), args.String(1)
 }
 
 func (m *MockTokenManager) SetSlugAndTenantName(slug, tenant string) {
-	// Não faz nada no mock
+	m.Called(slug, tenant)
 }
