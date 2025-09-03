@@ -5,7 +5,6 @@ import (
 	"math/rand"
 	"regexp"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/diillson/chatcli/version"
@@ -95,7 +94,6 @@ func wrapStringWithColor(text string, maxWidth int) []string {
 
 // --- caixa de dica (sem argumentos) ---
 func printTipBox() {
-	rand.Seed(time.Now().UnixNano())
 	tip := tips[rand.Intn(len(tips))]
 
 	width := 80               // largura externa total

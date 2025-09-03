@@ -11,8 +11,6 @@ import (
 	"strings"
 )
 
-var execCommand = exec.Command
-
 // GetGitInfo agora aceita um CommandExecutor.
 func GetGitInfo(executor CommandExecutor) (string, error) {
 	// Verificar se estamos dentro de um repositório Git
