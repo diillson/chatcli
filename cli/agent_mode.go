@@ -711,7 +711,6 @@ mainLoop:
 
 				freshCtx, freshCancel := a.refreshContext()
 
-				// *** ALTERAÇÃO APLICADA AQUI ***
 				outStr, errStr := a.executeCommandsFunc(freshCtx, block)
 
 				freshCancel()
@@ -747,7 +746,6 @@ mainLoop:
 			editedBlock := blocks[cmdNum-1]
 			editedBlock.Commands = edited
 
-			// *** ALTERAÇÃO APLICADA AQUI ***
 			outStr, errStr := a.executeCommandsFunc(freshCtx, editedBlock)
 
 			freshCancel()
@@ -772,7 +770,6 @@ mainLoop:
 			if strings.ToLower(strings.TrimSpace(execNow)) == "s" {
 				freshCtx, freshCancel := a.refreshContext()
 
-				// *** ALTERAÇÃO APLICADA AQUI ***
 				outStr, errStr := a.executeCommandsFunc(freshCtx, blocks[cmdNum-1])
 
 				freshCancel()
@@ -938,7 +935,6 @@ mainLoop:
 
 			execCtx, execCancel := a.refreshContext()
 
-			// *** ALTERAÇÃO APLICADA AQUI ***
 			outStr, errStr := a.executeCommandsFunc(execCtx, blocks[cmdNum-1])
 
 			execCancel()

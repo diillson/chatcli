@@ -37,14 +37,14 @@ func (e *ConfigError) Error() string {
 type LLMManager interface {
 	GetClient(provider string, model string) (client.LLMClient, error)
 	GetAvailableProviders() []string
-	GetTokenManager() (*token.TokenManager, bool)
+	GetTokenManager() (token.Manager, bool)
 }
 
 // LLMManagerImpl gerencia diferentes clientes LLM e o TokenManager
 type LLMManagerImpl struct {
 	clients      map[string]func(string) (client.LLMClient, error)
 	logger       *zap.Logger
-	tokenManager *token.TokenManager
+	tokenManager token.Manager
 }
 
 // NewLLMManager cria uma nova instância de LLMManagerImpl.
@@ -137,7 +137,7 @@ func (m *LLMManagerImpl) configurarOpenAIClient() {
 	}
 }
 
-// configurarStackSpotClient configura o cliente StackSpot se as variáveis de ambiente necessárias estiverem definidas.
+// configurarStackSpotClient configura o cliente StackSpot
 func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string) {
 	clientID := os.Getenv("CLIENT_ID")
 	clientSecret := os.Getenv("CLIENT_SECRET")
@@ -147,10 +147,9 @@ func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string) 
 		return
 	}
 
-	// Inicializar o TokenManager
+	// NewTokenManager já retorna a interface token.Manager
 	m.tokenManager = token.NewTokenManager(clientID, clientSecret, slugName, tenantName, m.logger)
 
-	// Configurar o cliente StackSpot
 	m.clients["STACKSPOT"] = func(model string) (client.LLMClient, error) {
 		return stackspotai.NewStackSpotClient(m.tokenManager, slugName, m.logger, 50, 300), nil
 	}
@@ -203,6 +202,6 @@ func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMCli
 }
 
 // GetTokenManager retorna o TokenManager se ele estiver configurado.
-func (m *LLMManagerImpl) GetTokenManager() (*token.TokenManager, bool) {
+func (m *LLMManagerImpl) GetTokenManager() (token.Manager, bool) {
 	return m.tokenManager, m.tokenManager != nil
 }

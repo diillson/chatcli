@@ -13,9 +13,17 @@ import (
 	"strings"
 )
 
-// GetUserShell retorna o shell do usuário atual com base na variável de ambiente SHELL.
+// Definindo variáveis para as funções que queremos mockar
+var (
+	osGetenv    = os.Getenv
+	userCurrent = user.Current
+	osStat      = os.Stat
+	osReadFile  = os.ReadFile
+)
+
+// GetUserShell retorna o shell do usuário atual.
 func GetUserShell() string {
-	shell := os.Getenv("SHELL")
+	shell := osGetenv("SHELL")
 	return filepath.Base(shell)
 }
 
@@ -44,9 +52,9 @@ func GetShellConfigFilePath(shellName string) string {
 	}
 }
 
-// GetShellHistoryFile retorna o caminho do arquivo de histórico do shell com base no shell do usuário.
+// GetShellHistoryFile retorna o caminho do arquivo de histórico do shell.
 func GetShellHistoryFile() (string, error) {
-	usr, err := user.Current()
+	usr, err := userCurrent()
 	if err != nil {
 		return "", fmt.Errorf("não foi possível obter o usuário atual: %w", err)
 	}
@@ -68,18 +76,18 @@ func GetShellHistoryFile() (string, error) {
 	return historyFile, nil
 }
 
-// GetShellHistory lê o arquivo de histórico do shell e retorna seu conteúdo como string.
+// GetShellHistory lê o arquivo de histórico do shell e retorna seu conteúdo.
 func GetShellHistory() (string, error) {
 	historyFile, err := GetShellHistoryFile()
 	if err != nil {
 		return "", err
 	}
 
-	if _, err := os.Stat(historyFile); os.IsNotExist(err) {
+	if _, err := osStat(historyFile); os.IsNotExist(err) {
 		return "", fmt.Errorf("arquivo de histórico não encontrado: %s", historyFile)
 	}
 
-	data, err := os.ReadFile(historyFile)
+	data, err := osReadFile(historyFile)
 	if err != nil {
 		return "", fmt.Errorf("erro ao ler o arquivo de histórico: %w", err)
 	}

@@ -137,57 +137,66 @@ func extractBaseVersion(version string) string {
 	return version
 }
 
-// needsUpdate verifica semanticamente se a versão atual precisa ser atualizada
-// comparando componente a componente (major.minor.patch)
+// needsUpdate verifica semanticamente se a versão atual precisa ser atualizada.
 func needsUpdate(currentVersion, latestVersion string) bool {
 	// Remove prefixo "v" se houver
 	currentVersion = strings.TrimPrefix(currentVersion, "v")
 	latestVersion = strings.TrimPrefix(latestVersion, "v")
 
-	// Tratar casos de versão vazia ou de desenvolvimento
-	if currentVersion == "" || currentVersion == "dev" || currentVersion == "unknown" {
-		// Não é possível determinar, não force update
+	// Tratar casos de versão de desenvolvimento que não devem ser comparados
+	if currentVersion == "" || currentVersion == "dev" || currentVersion == "unknown" || strings.HasPrefix(currentVersion, "0.0.0-") {
 		return false
 	}
 
-	// Tratar pseudo-version: v0.0.0-yyyymmddhhmmss-abcdef123456
-	if strings.HasPrefix(currentVersion, "0.0.0-") {
-		// Opcional: tente extrair o commit hash e comparar com o da release
-		// Se quiser, pode retornar false aqui para não sugerir update
-		return false
-	}
+	// Separar a versão principal dos sufixos de pré-lançamento
+	currentParts := strings.SplitN(currentVersion, "-", 2)
+	latestParts := strings.SplitN(latestVersion, "-", 2)
 
-	// Extrair componentes semânticos (major.minor.patch)
-	currentParts := strings.Split(currentVersion, ".")
-	latestParts := strings.Split(latestVersion, ".")
+	currentBase := currentParts[0]
+	latestBase := latestParts[0]
 
-	for len(currentParts) < 3 {
-		currentParts = append(currentParts, "0")
+	// Comparar as partes numéricas (major.minor.patch)
+	currentNumeric := strings.Split(currentBase, ".")
+	latestNumeric := strings.Split(latestBase, ".")
+
+	for len(currentNumeric) < 3 {
+		currentNumeric = append(currentNumeric, "0")
 	}
-	for len(latestParts) < 3 {
-		latestParts = append(latestParts, "0")
+	for len(latestNumeric) < 3 {
+		latestNumeric = append(latestNumeric, "0")
 	}
 
 	for i := 0; i < 3; i++ {
-		current, currentErr := strconv.Atoi(currentParts[i])
-		latest, latestErr := strconv.Atoi(latestParts[i])
-		if currentErr != nil {
-			current = 0
-		}
-		if latestErr != nil {
-			latest = 0
-		}
+		current, _ := strconv.Atoi(currentNumeric[i])
+		latest, _ := strconv.Atoi(latestNumeric[i])
 		if latest > current {
-			return true
-		} else if current > latest {
-			return false
+			return true // Versão mais recente é numericamente maior
+		}
+		if current > latest {
+			return false // Versão atual já é maior
 		}
 	}
 
-	if len(latestParts) > 3 && len(currentParts) <= 3 {
-		return true
+	// Se as partes numéricas são iguais, comparar os sufixos de pré-lançamento
+	// Regra SemVer: uma versão sem sufixo é sempre mais nova que uma com sufixo.
+
+	hasCurrentSuffix := len(currentParts) > 1
+	hasLatestSuffix := len(latestParts) > 1
+
+	if hasCurrentSuffix && !hasLatestSuffix {
+		return true // Ex: current é 1.2.3-alpha, latest é 1.2.3 (precisa atualizar)
 	}
 
+	if !hasCurrentSuffix && hasLatestSuffix {
+		return false // Ex: current é 1.2.3, latest é 1.2.3-beta (não precisa "atualizar")
+	}
+
+	if hasCurrentSuffix && hasLatestSuffix {
+		// Compara os sufixos alfabeticamente. "beta" > "alpha"
+		return latestParts[1] > currentParts[1]
+	}
+
+	// Se chegou aqui, as versões são idênticas
 	return false
 }
 
