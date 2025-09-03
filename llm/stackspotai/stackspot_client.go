@@ -9,12 +9,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/diillson/chatcli/config"
-	"github.com/diillson/chatcli/llm/token"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/llm/token"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -23,16 +24,18 @@ import (
 
 // StackSpotClient implementa o cliente para interagir com a API da StackSpot
 type StackSpotClient struct {
-	tokenManager *token.TokenManager
-	slug         string
-	logger       *zap.Logger
-	client       *http.Client
-	maxAttempts  int
-	backoff      time.Duration
+	tokenManager    token.Manager
+	slug            string
+	logger          *zap.Logger
+	client          *http.Client
+	maxAttempts     int
+	backoff         time.Duration
+	baseURL         string
+	responseTimeout time.Duration
 }
 
 // NewStackSpotClient cria uma nova instância de StackSpotClient.
-func NewStackSpotClient(tokenManager *token.TokenManager, slug string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *StackSpotClient {
+func NewStackSpotClient(tokenManager token.Manager, slug string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *StackSpotClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 	if maxAttempts <= 0 {
 		maxAttempts = config.DefaultMaxAttempts
@@ -42,12 +45,14 @@ func NewStackSpotClient(tokenManager *token.TokenManager, slug string, logger *z
 	}
 
 	return &StackSpotClient{
-		tokenManager: tokenManager,
-		slug:         slug,
-		logger:       logger,
-		client:       httpClient,
-		maxAttempts:  maxAttempts,
-		backoff:      backoff,
+		tokenManager:    tokenManager,
+		slug:            slug,
+		logger:          logger,
+		client:          httpClient,
+		maxAttempts:     maxAttempts,
+		backoff:         backoff,
+		baseURL:         config.StackSpotBaseURL,
+		responseTimeout: config.StackSpotResponseTimeout,
 	}
 }
 
@@ -129,7 +134,9 @@ func (c *StackSpotClient) sendRequestToLLMWithRetry(ctx context.Context, prompt 
 func (c *StackSpotClient) sendRequestToLLM(ctx context.Context, prompt, accessToken string) (string, error) {
 	conversationID := utils.GenerateUUID()
 
-	url := fmt.Sprintf("%s/create-execution/%s?conversation_id=%s", config.StackSpotBaseURL, c.tokenManager.SlugName, conversationID)
+	slug, _ := c.tokenManager.GetSlugAndTenantName()
+
+	url := fmt.Sprintf("%s/create-execution/%s?conversation_id=%s", c.baseURL, slug, conversationID)
 	c.logger.Info("Enviando requisição para URL", zap.String("url", url))
 
 	requestBody := map[string]string{
@@ -219,7 +226,7 @@ func (c *StackSpotClient) executeWithTokenRetry(ctx context.Context, requestFunc
 
 // pollLLMResponse faz polling para obter a resposta da LLM
 func (c *StackSpotClient) pollLLMResponse(ctx context.Context, responseID string) (string, error) {
-	ticker := time.NewTicker(config.StackSpotResponseTimeout)
+	ticker := time.NewTicker(c.responseTimeout)
 	defer ticker.Stop()
 
 	for {
@@ -247,7 +254,7 @@ func (c *StackSpotClient) pollLLMResponse(ctx context.Context, responseID string
 
 // getLLMResponse obtém a resposta da LLM usando o responseID
 func (c *StackSpotClient) getLLMResponse(ctx context.Context, responseID, accessToken string) (string, error) {
-	url := fmt.Sprintf("%s/callback/%s", config.StackSpotBaseURL, responseID)
+	url := fmt.Sprintf("%s/callback/%s", c.baseURL, responseID)
 	c.logger.Info("Fazendo GET para URL", zap.String("url", url))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
