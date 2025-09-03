@@ -31,6 +31,7 @@ type ClaudeClient struct {
 	client      *http.Client
 	maxAttempts int
 	backoff     time.Duration
+	apiURL      string
 }
 
 // NewClaudeClient cria um novo cliente ClaudeAI com configurações personalizáveis
@@ -51,6 +52,7 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempt
 		client:      httpClient,
 		maxAttempts: maxAttempts,
 		backoff:     backoff,
+		apiURL:      config.ClaudeAIAPIURL,
 	}
 }
 
@@ -96,7 +98,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 
 	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
 		// Cria uma nova requisição para cada tentativa
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, config.ClaudeAIAPIURL, strings.NewReader(string(jsonValue)))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, strings.NewReader(string(jsonValue)))
 		if err != nil {
 			c.logger.Error("Erro ao criar a requisição de prompt", zap.Error(err))
 			return "", fmt.Errorf("erro ao criar a requisição: %w", err)

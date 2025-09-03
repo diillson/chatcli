@@ -261,25 +261,18 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 func (cli *ChatCLI) Start(ctx context.Context) {
 	defer cli.cleanup()
 
-	fmt.Println("\n\nBem-vindo ao ChatCLI!")
-	fmt.Printf("Você está conversando com %s (%s)\n", cli.Client.GetModelName(), cli.Provider)
-	fmt.Println("Digite '/exit', 'exit', '/quit' ou 'quit' para sair.")
-	fmt.Println("Digite '/switch' para trocar de provedor.")
-	fmt.Println("Digite '/switch --slugname <slug>' para trocar o slug.")
-	fmt.Println("Digite '/switch --tenantname <tenant-id>' para trocar o tenant.")
-	fmt.Println("Digite '/reload' para recarregar as variáveis e reconfigurar o chatcli.")
-	fmt.Println("Use '@history', '@git', '@env', '@file <caminho_do_arquivo>' para adicionar contexto ao prompt.")
-	fmt.Println("Use '@command <seu_comando>' para adicionar contexto ao prompt ou '@command -i <seu_comando>' para interativo.")
-	fmt.Println("Use '@command --ai <seu_comando>' para enviar o ouput para a AI de forma direta e '>' {maior} <seu contexto> para que a AI faça algo.")
-	fmt.Println("Para processamento em chunks, use '/nextchunk', '/retry', '/retryall' e '/skipchunk'.")
-	fmt.Printf("Ainda ficou com dúvidas? use '/help'.\n\n")
+	cli.PrintWelcomeScreen()
+
+	//promptStr := colorize("> ", ColorLime)
+
 	for {
 		select {
 		case <-ctx.Done():
 			fmt.Println("\nAplicação encerrada.")
 			return
 		default:
-			input, err := cli.line.Prompt("Você: ")
+			//fmt.Print(colorize("> ", ColorLime))
+			input, err := cli.line.Prompt("> ")
 			if err != nil {
 				if err == liner.ErrPromptAborted { // Ctrl+D no prompt
 					fmt.Println("\nSaindo...")
@@ -376,8 +369,21 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 					Role:    "assistant",
 					Content: result.Response,
 				})
+
+				// 1. Pega o nome do modelo e colore de roxo
+				modelName := cli.Client.GetModelName()
+				coloredPrefix := colorize(modelName+":", ColorPurple)
+
+				// 2. Renderiza a resposta da IA em Markdown
 				renderedResponse := cli.renderMarkdown(result.Response)
-				cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
+
+				// 3. Imprime o prefixo colorido e depois a resposta com efeito de digitação
+				fmt.Printf("\n%s ", coloredPrefix)                         // Imprime o prefixo com um espaço
+				cli.typewriterEffect(renderedResponse, 2*time.Millisecond) // Imprime o resto
+				fmt.Println()                                              // Adiciona uma nova linha no final
+
+				//renderedResponse := cli.renderMarkdown(result.Response)
+				//cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
 
 			case <-sigChan:
 				// Sinal de interrupção (Ctrl+C) recebido
@@ -673,7 +679,8 @@ func (cli *ChatCLI) processHistoryCommand(userInput string) (string, string) {
 func (cli *ChatCLI) processGitCommand(userInput string) (string, string) {
 	var additionalContext string
 	if strings.Contains(strings.ToLower(userInput), "@git") {
-		gitData, err := utils.GetGitInfo()
+		executor := utils.NewOSCommandExecutor()
+		gitData, err := utils.GetGitInfo(executor)
 		if err != nil {
 			cli.logger.Error("Erro ao obter informações do Git", zap.Error(err))
 		} else {

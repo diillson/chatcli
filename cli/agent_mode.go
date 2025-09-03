@@ -27,8 +27,9 @@ import (
 
 // AgentMode representa a funcionalidade de agente autônomo no ChatCLI
 type AgentMode struct {
-	cli    *ChatCLI
-	logger *zap.Logger
+	cli                 *ChatCLI
+	logger              *zap.Logger
+	executeCommandsFunc func(ctx context.Context, block CommandBlock) (string, string)
 }
 
 // CommandContextInfo contém metadados sobre a origem e natureza de um comando
@@ -82,10 +83,12 @@ const (
 
 // NewAgentMode cria uma nova instância do modo agente
 func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
-	return &AgentMode{
+	a := &AgentMode{
 		cli:    cli,
 		logger: logger,
 	}
+	a.executeCommandsFunc = a.executeCommandsWithOutput
+	return a
 }
 
 // Função de fallback para quando o prompt seguro falhar
@@ -707,10 +710,11 @@ mainLoop:
 				}
 
 				freshCtx, freshCancel := a.refreshContext()
-				defer freshCancel()
 
-				// Executar o bloco e capturar a saída
-				outStr, errStr := a.executeCommandsWithOutput(freshCtx, block)
+				// *** ALTERAÇÃO APLICADA AQUI ***
+				outStr, errStr := a.executeCommandsFunc(freshCtx, block)
+
+				freshCancel()
 
 				// Armazenar os resultados
 				outputs[i] = &CommandOutput{
@@ -739,11 +743,15 @@ mainLoop:
 			}
 
 			freshCtx, freshCancel := a.refreshContext()
-			defer freshCancel()
 
 			editedBlock := blocks[cmdNum-1]
 			editedBlock.Commands = edited
-			outStr, errStr := a.executeCommandsWithOutput(freshCtx, editedBlock)
+
+			// *** ALTERAÇÃO APLICADA AQUI ***
+			outStr, errStr := a.executeCommandsFunc(freshCtx, editedBlock)
+
+			freshCancel()
+
 			outputs[cmdNum-1] = &CommandOutput{
 				CommandBlock: editedBlock,
 				Output:       outStr,
@@ -760,11 +768,15 @@ mainLoop:
 			a.simulateCommandBlock(ctx, blocks[cmdNum-1])
 
 			execNow := a.getInput("Deseja executar este comando agora? (s/N): ")
-			freshCtx, freshCancel := a.refreshContext()
-			defer freshCancel()
 
 			if strings.ToLower(strings.TrimSpace(execNow)) == "s" {
-				outStr, errStr := a.executeCommandsWithOutput(freshCtx, blocks[cmdNum-1])
+				freshCtx, freshCancel := a.refreshContext()
+
+				// *** ALTERAÇÃO APLICADA AQUI ***
+				outStr, errStr := a.executeCommandsFunc(freshCtx, blocks[cmdNum-1])
+
+				freshCancel()
+
 				outputs[cmdNum-1] = &CommandOutput{
 					CommandBlock: blocks[cmdNum-1],
 					Output:       outStr,
@@ -800,7 +812,6 @@ mainLoop:
 				fmt.Println("Continuando sem contexto adicional...")
 
 				freshCtx, freshCancel := a.refreshContext()
-				defer freshCancel()
 
 				// Chamar método para tratar a continuação sem contexto adicional
 				newBlocks, err := a.requestLLMContinuationWithContext(
@@ -810,6 +821,7 @@ mainLoop:
 					outputs[cmdNum-1].ErrorMsg,
 					"", // Contexto vazio
 				)
+				freshCancel()
 				if err != nil {
 					fmt.Println("Erro ao pedir continuação à IA:", err)
 					continue
@@ -825,7 +837,6 @@ mainLoop:
 				fmt.Println("\nContexto recebido! Enviando para a IA...")
 
 				freshCtx, freshCancel := a.refreshContext()
-				defer freshCancel()
 
 				// Chamar método para tratar a continuação com contexto
 				newBlocks, err := a.requestLLMContinuationWithContext(
@@ -835,6 +846,7 @@ mainLoop:
 					outputs[cmdNum-1].ErrorMsg,
 					userContext,
 				)
+				freshCancel()
 				if err != nil {
 					fmt.Println("Erro ao pedir continuação à IA:", err)
 					continue
@@ -861,7 +873,6 @@ mainLoop:
 			}
 
 			freshCtx, freshCancel := a.refreshContext()
-			defer freshCancel()
 
 			newBlocks, err := a.requestLLMContinuation(
 				freshCtx,
@@ -870,6 +881,7 @@ mainLoop:
 				outputs[cmdNum-1].Output,
 				outputs[cmdNum-1].ErrorMsg,
 			)
+			freshCancel()
 			if err != nil {
 				fmt.Println("Erro ao pedir continuação à IA:", err)
 				continue
@@ -925,7 +937,10 @@ mainLoop:
 			}
 
 			execCtx, execCancel := a.refreshContext()
-			outStr, errStr := a.executeCommandsWithOutput(execCtx, blocks[cmdNum-1])
+
+			// *** ALTERAÇÃO APLICADA AQUI ***
+			outStr, errStr := a.executeCommandsFunc(execCtx, blocks[cmdNum-1])
+
 			execCancel()
 
 			outputs[cmdNum-1] = &CommandOutput{
