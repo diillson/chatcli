@@ -41,7 +41,7 @@ func main() {
 	// Mensagem de versão no startup
 	//version.PrintStartupVersionInfo()
 
-	// Carregar variáveis de ambiente do arquivo .env
+	// Carregar variáveis de ambiente do arquivo .env //commit force minor.
 	envFilePath := os.Getenv("CHATCLI_DOTENV")
 	if envFilePath == "" {
 		envFilePath = ".env"
