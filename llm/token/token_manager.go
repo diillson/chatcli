@@ -10,26 +10,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/diillson/chatcli/utils"
-	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/utils"
+	"go.uber.org/zap"
 )
 
 // TokenManager gerencia a obtenção e renovação de tokens de acesso
 type TokenManager struct {
-	clientID     string
-	clientSecret string
-	SlugName     string
-	tenantName   string
-	accessToken  string
-	expiresAt    time.Time
-	mu           sync.RWMutex
-	logger       *zap.Logger
-	client       *http.Client
+	clientID         string
+	clientSecret     string
+	SlugName         string
+	tenantName       string
+	accessToken      string
+	expiresAt        time.Time
+	mu               sync.RWMutex
+	logger           *zap.Logger
+	client           *http.Client
+	tokenURLOverride string
 }
 
 // NewTokenManager cria uma nova instância de TokenManager
@@ -126,6 +128,9 @@ func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 
 	// Monta a URL com os valores atuais de tenantName e slugName
 	tokenURL := fmt.Sprintf("https://idm.stackspot.com/%s/oidc/oauth/token", tm.tenantName)
+	if tm.tokenURLOverride != "" {
+		tokenURL = tm.tokenURLOverride // Usa o override se estiver definido
+	}
 	data := strings.NewReader(fmt.Sprintf(
 		"grant_type=client_credentials&client_id=%s&client_secret=%s",
 		tm.clientID, tm.clientSecret))

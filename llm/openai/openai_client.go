@@ -133,7 +133,9 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 
 // sendRequest envia a requisição para a API da OpenAI
 func (c *OpenAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, config.OpenAIAPIURL, utils.NewJSONReader(jsonValue))
+	apiURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
 	if err != nil {
 		c.logger.Error("Erro ao criar a requisição", zap.Error(err))
 		return nil, fmt.Errorf("erro ao criar a requisição: %w", err)

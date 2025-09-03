@@ -55,7 +55,7 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 				currentMsg := am.currentMessage
 				am.mu.Unlock()
 
-				fmt.Printf("\r%s... %s", currentMsg, spinner[i%len(spinner)])
+				fmt.Printf("\r%s... %s", colorize(currentMsg, ColorPurple), spinner[i%len(spinner)])
 				time.Sleep(100 * time.Millisecond)
 				i++
 			}

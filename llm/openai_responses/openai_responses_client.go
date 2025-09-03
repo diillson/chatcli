@@ -109,7 +109,10 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 }
 
 func (c *OpenAIResponsesClient) sendRequest(ctx context.Context, body []byte) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, config.OpenAIResponsesAPIURL, utils.NewJSONReader(body))
+	// Usar a variável de ambiente se estiver definida, senão usar a constante
+	apiURL := utils.GetEnvOrDefault("OPENAI_RESPONSES_API_URL", config.OpenAIResponsesAPIURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("erro ao criar requisição para Responses API: %w", err)
 	}
