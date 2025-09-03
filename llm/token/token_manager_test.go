@@ -3,11 +3,13 @@ package token
 import (
 	"context"
 	"fmt"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestTokenManager_GetAccessToken_Success(t *testing.T) {
@@ -16,7 +18,8 @@ func TestTokenManager_GetAccessToken_Success(t *testing.T) {
 		// Validar a requisição
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
-		r.ParseForm()
+		err := r.ParseForm()
+		require.NoError(t, err, "Parsing form should not produce an error")
 		assert.Equal(t, "test_client_id", r.Form.Get("client_id"))
 		assert.Equal(t, "test_client_secret", r.Form.Get("client_secret"))
 
