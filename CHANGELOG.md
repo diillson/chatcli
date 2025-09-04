@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/diillson/chatcli/compare/v1.18.1...v1.19.0) (2025-09-04)
+
+
+### Features
+
+* **cli:** add agent one-shot mode with auto-execution support ([#205](https://github.com/diillson/chatcli/issues/205)) ([#206](https://github.com/diillson/chatcli/issues/206)) ([9e90fbf](https://github.com/diillson/chatcli/commit/9e90fbfa0e916c05eed8df72a0467509605ed06b))
+
 ## [1.18.1](https://github.com/diillson/chatcli/compare/v1.18.0...v1.18.1) (2025-09-03)
 
 
