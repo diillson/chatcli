@@ -31,6 +31,7 @@ type Options struct {
 	Timeout        time.Duration // --timeout
 	NoAnim         bool          // --no-anim
 	PromptFlagUsed bool          // indica se -p/--prompt foi passado explicitamente
+	AgentAutoExec  bool          // --agent-auto-exec
 }
 
 // HandleOneShotOrFatal executa o modo one-shot se solicitado (flag -p usada ou stdin presente).
@@ -59,22 +60,23 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 		}
 	}
 
-	// One-shot foi solicitado mas sem conteúdo
+	// Validação de entrada vazia
 	if strings.TrimSpace(input) == "" {
+		// ... (código de erro existente)
 		const md = `
-     ❌ Erro no modo one-shot
-    
-    O modo one-shot foi acionado (via flag -p/--prompt ou stdin), mas nenhum conteúdo de entrada foi fornecido.
-    
-    - Use a flag -p/--prompt com um texto:
-  
-  chatcli -p "Seu prompt aqui"
-  
-    - Ou envie dados via stdin:
-  
-  echo "Texto" | chatcli -p ou echo "Texto" | chatcli
-  
-    `
+         ❌ Erro no modo one-shot
+        
+        O modo one-shot foi acionado (via flag -p/--prompt ou stdin), mas nenhum conteúdo de entrada foi fornecido.
+        
+        - Use a flag -p/--prompt com um texto:
+      
+      chatcli -p "Seu prompt aqui"
+      
+        - Ou envie dados via stdin:
+      
+      echo "Texto" | chatcli -p ou echo "Texto" | chatcli
+      
+        `
 		fmt.Fprintln(os.Stderr, md)
 		cli.logger.Fatal("One-shot acionado sem input (prompt vazio e sem stdin)")
 	}
@@ -83,12 +85,20 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	ctxOne, cancelOne := context.WithTimeout(ctx, opts.Timeout)
 	defer cancelOne()
 
-	if err := cli.RunOnce(ctxOne, input, opts.NoAnim); err != nil {
-		fmt.Fprintln(os.Stderr, " ❌ Erro ao executar no modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
-		cli.logger.Fatal("Erro no modo one-shot", zap.Error(err))
+	// --- LÓGICA DE ROTEAMENTO PARA O AGENTE ---
+	if strings.HasPrefix(input, "/agent ") || strings.HasPrefix(input, "/run ") {
+		if err := cli.RunAgentOnce(ctxOne, input, opts.AgentAutoExec); err != nil {
+			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar o agente em modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
+			cli.logger.Fatal("Erro no modo agente one-shot", zap.Error(err))
+		}
+	} else {
+		// Fluxo one-shot normal
+		if err := cli.RunOnce(ctxOne, input, opts.NoAnim); err != nil {
+			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar no modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
+			cli.logger.Fatal("Erro no modo one-shot", zap.Error(err))
+		}
 	}
 
-	// One-shot concluído com sucesso
 	return true
 }
 
@@ -180,6 +190,8 @@ func NewFlagSet() (*flag.FlagSet, *Options) {
 
 	fs.DurationVar(&opts.Timeout, "timeout", 5*time.Minute, "Timeout da chamada one-shot")
 	fs.BoolVar(&opts.NoAnim, "no-anim", false, "Desabilita animações no modo one-shot")
+
+	fs.BoolVar(&opts.AgentAutoExec, "agent-auto-exec", false, "No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for seguro.")
 
 	return fs, opts
 }
