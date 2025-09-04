@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -279,6 +280,83 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	} else {
 		fmt.Println("\nNenhum comando executável encontrado na resposta.")
 	}
+	return nil
+}
+
+func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool) error {
+	// 1. Preparar a requisição para a LLM com um prompt OTIMIZADO para one-shot.
+	systemInstruction := `Você é um assistente de linha de comando operando em um modo de execução única (one-shot).
+                Sua tarefa é analisar o pedido do usuário e fornecer **um único e conciso bloco de comando** que resolva a tarefa da forma mais eficiente e segura possível.
+    
+    - Responda **apenas** com o melhor bloco de comando no formato ` + "```" + `execute:shell.
+	- **Não** forneça múltiplos blocos de comando ou alternativas.
+	- **Não** adicione explicações longas antes ou depois, apenas o comando necessário para a execução.
+	- Evite comandos destrutivos (como rm -rf) a menos que seja explicitamente solicitado e a intenção seja clara.
+	- O comando deve ser diretamente executável dado que precisamos apenas de um unico comando o melhor e expert possivel.`
+
+	a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: query})
+
+	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
+
+	// 2. Enviar para a LLM
+	aiResponse, err := a.cli.Client.SendPrompt(ctx, query, a.cli.history)
+	a.cli.animation.StopThinkingAnimation()
+	if err != nil {
+		return fmt.Errorf("erro ao obter resposta da IA: %w", err)
+	}
+
+	// 3. Extrair blocos de comando
+	commandBlocks := a.extractCommandBlocks(aiResponse)
+
+	// A IA pode, ocasionalmente, adicionar uma breve explicação. Vamos mostrá-la.
+	a.displayResponseWithoutCommands(aiResponse, commandBlocks)
+
+	if len(commandBlocks) == 0 {
+		fmt.Println("\nNenhum comando executável foi sugerido pela IA.")
+		return nil
+	}
+
+	// 4. Lógica de execução ou "dry-run"
+	if !autoExecute {
+		// MODO DRY-RUN (PADRÃO)
+		fmt.Println("\n🤖 MODO AGENTE (ONE-SHOT): Comando Sugerido")
+		fmt.Println("==============================================")
+		fmt.Println("Para executar automaticamente, use o flag --agent-auto-exec")
+
+		// Como esperamos apenas um bloco, a lógica fica mais simples
+		block := commandBlocks[0]
+		fmt.Printf("\n🔷 Bloco de Comando: %s\n", block.Description)
+		fmt.Printf("  Linguagem: %s\n", block.Language)
+		for _, cmd := range block.Commands {
+			fmt.Printf("    $ %s\n", cmd)
+		}
+
+		return nil
+	}
+
+	// MODO AUTO-EXECUTE
+	fmt.Println("\n🤖 MODO AGENTE (ONE-SHOT): Execução Automática")
+	fmt.Println("===============================================")
+
+	blockToExecute := commandBlocks[0]
+
+	// VERIFICAÇÃO DE SEGURANÇA CRÍTICA
+	for _, cmd := range blockToExecute.Commands {
+		if isDangerous(cmd) {
+			errMsg := fmt.Sprintf("execução automática abortada por segurança. O comando sugerido é potencialmente perigoso: %q", cmd)
+			fmt.Printf("⚠️ %s\n", errMsg)
+			return errors.New(errMsg)
+		}
+	}
+
+	fmt.Printf("✅ Comando seguro detectado. Executando o comando sugerido...\n")
+	_, errorMsg := a.executeCommandsWithOutput(ctx, blockToExecute)
+
+	if errorMsg != "" {
+		return fmt.Errorf("o comando foi executado, mas retornou um erro: %s", errorMsg)
+	}
+
 	return nil
 }
 
