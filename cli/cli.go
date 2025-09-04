@@ -2162,3 +2162,30 @@ func (ch *CommandHandler) handleVersionCommand() {
 		}
 	}()
 }
+
+// RunAgentOnce executa o modo agente de forma não-interativa (one-shot)
+func (cli *ChatCLI) RunAgentOnce(ctx context.Context, input string, autoExecute bool) error {
+	var query string
+	if strings.HasPrefix(input, "/agent ") {
+		query = strings.TrimPrefix(input, "/agent ")
+	} else if strings.HasPrefix(input, "/run ") {
+		query = strings.TrimPrefix(input, "/run ")
+	} else {
+		return fmt.Errorf("entrada inválida para o modo agente one-shot: %s", input)
+	}
+
+	// Processar contextos especiais como @file, @git, etc.
+	query, additionalContext := cli.processSpecialCommands(query)
+	fullQuery := query
+	if additionalContext != "" {
+		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
+	}
+
+	// Assegurar que o modo agente está inicializado
+	if cli.agentMode == nil {
+		cli.agentMode = NewAgentMode(cli, cli.logger)
+	}
+
+	// Chama a nova função não-interativa do AgentMode
+	return cli.agentMode.RunOnce(ctx, fullQuery, autoExecute)
+}

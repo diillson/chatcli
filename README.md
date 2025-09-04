@@ -211,6 +211,8 @@ Após a instalação e configuração, o ChatCLI oferece uma série de comandos 
 ### Modo não-interativo (one-shot via flags)
     
 O ChatCLI agora suporta um modo “one-shot”, no qual você executa um prompt em **uma única linha** e o processo finaliza sem entrar no loop interativo. Esse modo é ideal para scripts, CI/CD, aliases e automações.
+
+Este modo agora também suporta a execução de comandos do **Modo Agente** para automação de tarefas. Veja a seção "Modo Agente One-Shot" para mais detalhes.
     
 #### Flags disponíveis
     
@@ -373,6 +375,50 @@ O Modo Agente permite que a IA execute tarefas no seu sistema através de comand
 - O Modo Agente é uma ferramenta poderosa para aumentar sua produtividade, permitindo que você delegue tarefas ao ChatCLI e obtenha resultados rapidamente.
 - O agente é projetado para ser seguro e respeitar as permissões do sistema, garantindo que apenas comandos autorizados sejam execut
 - O Modo Agente pode ser desativado a qualquer momento, retornando ao modo de conversa normal.
+
+  #### Modo Agente One-Shot (Não-Interativo)
+
+Você pode usar o Modo Agente diretamente da linha de comando, o que é perfeito para scripts e automação.
+
+**1. Modo Padrão (Dry-Run): Apenas Sugestão**
+
+Por padrão, ao chamar o agente no modo one-shot, ele apenas **sugere** o melhor comando para a tarefa e sai, sem executar nada.
+
+# A IA irá analisar o pedido e imprimir o comando `find . -name "*.go"`, depois sairá.
+```bash
+chatcli -p "/agent liste todos os arquivos .go neste diretório"
+```
+
+**2. Modo de Execução Automática**
+
+Para que o  chatcli  execute o comando sugerido, adicione o flag  `--agent-auto-exec` .
+
+- Segurança: Por segurança, o agente executará apenas o primeiro comando sugerido e bloqueará automaticamente a execução de comandos considerados perigosos (como  rm -rf ,  sudo ,  drop database , etc.).
+
+# A IA irá gerar um comando como `touch test_file.txt` e executá-lo imediatamente.
+```bash
+chatcli -p "/agent crie um arquivo chamado test_file.txt" --agent-auto-exec
+```
+
+# Usando stdin
+```bash
+echo "liste todos os arquivos .go e conte suas linhas" | chatcli -p "/agent"
+```
+# Exemplo com contexto:
+```bash
+chatcli -p "/agent @git qual o status do git neste repositório?" --agent-auto-exec
+```
+
+# Exemplo com contexto de arquivo
+```bash
+chatcli -p "/agent @file ./README.md resuma este arquivo em uma frase" --agent-auto-exec
+```
+***3. Comando Perigoso (Será Bloqueado)***
+
+# O chatcli se recusará a executar o comando e sairá com uma mensagem de erro.
+```bash
+chatcli -p "/agent delete todos os arquivos da pasta tmp" --agent-auto-exec
+```
 
 #### Refinando Comandos Antes da Execução
 

@@ -22,18 +22,19 @@ var tips = []string{
 	"Use o modo agente com " + colorize("/agent <tarefa>", ColorGreen) + " para que a IA execute comandos por você.",
 }
 
-// printLogo exibe o novo logo do ChatCLI em ASCII art.
+const screenWidth = 85 // largura global para tudo
+
 // printLogo exibe o novo logo do ChatCLI em ASCII art.
 func printLogo() {
-	// *** LOGO CORRIGIDO E VERIFICADO FINALMENTE ***
 	logo := `
        ██████╗ ██╗  ██╗ █████╗ ████████╗ ██████╗██╗     ██╗
       ██╔════╝ ██║  ██║██╔══██╗╚══██╔══╝██╔════╝██║     ██║
       ██║      ███████║███████║   ██║   ██║     ██║     ██║
       ██║      ██╔══██║██╔══██║   ██║   ██║     ██║     ██║
       ╚██████╗ ██║  ██║██║  ██║   ██║   ╚██████╗███████╗██║
-       ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝╚══════╝╚═╝
+       ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═════╝╚══════╝╚═╝
     `
+
 	coloredLogo := strings.ReplaceAll(logo, "█", colorize("█", ColorLime))
 	coloredLogo = strings.ReplaceAll(coloredLogo, "╗", colorize("╗", ColorGray))
 	coloredLogo = strings.ReplaceAll(coloredLogo, "╔", colorize("╔", ColorGray))
@@ -42,7 +43,20 @@ func printLogo() {
 	coloredLogo = strings.ReplaceAll(coloredLogo, "═", colorize("═", ColorGray))
 	coloredLogo = strings.ReplaceAll(coloredLogo, "║", colorize("║", ColorGray))
 
-	fmt.Println(coloredLogo)
+	width := 80
+	for _, line := range strings.Split(coloredLogo, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		// calcula padding
+		visible := visibleLen(line)
+		if visible < width {
+			left := (width - visible) / 2
+			fmt.Println(strings.Repeat(" ", left) + line)
+		} else {
+			fmt.Println(line)
+		}
+	}
 }
 
 // --- util: ANSI / largura visível (conta runas, ignora cores) ---
@@ -96,81 +110,42 @@ func wrapStringWithColor(text string, maxWidth int) []string {
 func printTipBox() {
 	tip := tips[rand.Intn(len(tips))]
 
-	width := 80               // largura externa total
-	innerTitle := width - 2   // entre as bordas para o título
-	innerContent := width - 4 // "  " + conteúdo + "  "
-
+	width := screenWidth
+	innerContent := width - 4
 	title := "Você Sabia?"
 
-	// topo
-	fmt.Println(colorize("╭"+strings.Repeat("─", width-2)+"╮", ColorGray))
+	titleWithSpaces := " " + title + " "
+	tl := visibleLen(titleWithSpaces)
+	dash := width - 2 - tl
+	left := dash / 2
+	right := dash - left
 
-	// título centralizado (conta runas, ignora ANSI)
-	tl := visibleLen(title)
-	left := (innerTitle - tl) / 2
-	right := innerTitle - tl - left
-	fmt.Println(colorize("│", ColorGray) + strings.Repeat(" ", left) + title + strings.Repeat(" ", right) + colorize("│", ColorGray))
+	fmt.Println(
+		colorize("╭", ColorGray) +
+			strings.Repeat("─", left) +
+			titleWithSpaces +
+			strings.Repeat("─", right) +
+			colorize("╮", ColorGray),
+	)
 
 	// linha em branco
-	fmt.Println(colorize("│", ColorGray) + strings.Repeat(" ", innerTitle) + colorize("│", ColorGray))
+	fmt.Println(colorize("│", ColorGray) + strings.Repeat(" ", width-2) + colorize("│", ColorGray))
 
-	// conteúdo alinhado à esquerda, com padding correto
+	// conteúdo centralizado
 	for _, line := range wrapStringWithColor(tip, innerContent) {
-		pad := innerContent - visibleLen(line)
-		fmt.Println(colorize("│", ColorGray) + " " + line + strings.Repeat(" ", pad) + " " + colorize("│", ColorGray))
+		l := visibleLen(line)
+		left := (innerContent - l) / 2
+		right := innerContent - l - left
+		fmt.Println(
+			colorize("│", ColorGray) +
+				" " + strings.Repeat(" ", left) + line + strings.Repeat(" ", right) + " " +
+				colorize("│", ColorGray),
+		)
 	}
 
-	// linha em branco + rodapé
-	fmt.Println(colorize("│", ColorGray) + strings.Repeat(" ", innerTitle) + colorize("│", ColorGray))
+	fmt.Println(colorize("│", ColorGray) + strings.Repeat(" ", width-2) + colorize("│", ColorGray))
 	fmt.Println(colorize("╰"+strings.Repeat("─", width-2)+"╯", ColorGray))
 }
-
-// wrapStringWithColor quebra uma string que contém códigos de cor.
-//func wrapStringWithColor(text string, maxWidth int) []string {
-//	var lines []string
-//	words := strings.Fields(text)
-//	if len(words) == 0 {
-//		return []string{}
-//	}
-//
-//	var currentLine strings.Builder
-//	currentLength := 0
-//
-//	for _, word := range words {
-//		cleanWordLen := len(removeColorCodes(word))
-//
-//		if cleanWordLen > maxWidth {
-//			if currentLength > 0 {
-//				lines = append(lines, currentLine.String())
-//				currentLine.Reset()
-//				currentLength = 0
-//			}
-//			lines = append(lines, word)
-//			continue
-//		}
-//
-//		// Verifica se a palavra cabe na linha atual
-//		if currentLength+1+cleanWordLen > maxWidth {
-//			lines = append(lines, currentLine.String())
-//			currentLine.Reset()
-//			currentLength = 0
-//		}
-//
-//		if currentLength > 0 {
-//			currentLine.WriteString(" ")
-//			currentLength++
-//		}
-//
-//		currentLine.WriteString(word)
-//		currentLength += cleanWordLen
-//	}
-//
-//	if currentLine.Len() > 0 {
-//		lines = append(lines, currentLine.String())
-//	}
-//
-//	return lines
-//}
 
 // PrintWelcomeScreen exibe a tela de boas-vindas completa.
 func (cli *ChatCLI) PrintWelcomeScreen() {
@@ -179,20 +154,27 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 	v, c, _ := version.GetBuildInfo()
 	if v != "" && v != "dev" && v != "unknown" {
 		versionStr := fmt.Sprintf("Versão: %s (commit: %s)", v, c)
-		padding := (80 - len(versionStr)) / 2
+		padding := (screenWidth - len(versionStr)) / 2
 		fmt.Printf("%s%s\n\n", strings.Repeat(" ", padding), colorize(versionStr, ColorGray))
 	}
 
 	printTipBox()
 
-	footer := colorize("/help", ColorGreen) + " para todos os comandos  •  " + colorize("/exit", ColorGreen) + " para sair"
-	separator := colorize(strings.Repeat("─", 80), ColorGray)
+	footer := colorize("/help", ColorGreen) +
+		colorize(" para todos os comandos  •  ", ColorGray) +
+		colorize("/exit", ColorGreen) +
+		colorize(" para sair  •  ", ColorGray) +
+		colorize("/switch --model", ColorGreen) +
+		colorize(" trocar modelo", ColorGray)
+
+	separator := colorize(strings.Repeat("━", screenWidth), ColorGray)
 
 	fmt.Println()
+	// footer alinhado à esquerda
 	fmt.Println(footer)
 	fmt.Println(separator)
 
-	// Mensagem do modelo com cor verde fluorescente
+	// model info alinhado à esquerda
 	modelInfo := fmt.Sprintf("🤖 Você está conversando com %s (%s)", cli.Client.GetModelName(), cli.Provider)
 	fmt.Println(colorize(modelInfo, ColorLime))
 	fmt.Println()
