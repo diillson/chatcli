@@ -29,6 +29,7 @@ import (
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/version"
 	"github.com/joho/godotenv"
+	"golang.org/x/term"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -226,18 +227,22 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		animation:            NewAnimationManager(),
 	}
 
+	// Define Provider/Model em runtime a partir do ambiente
 	cli.configureProviderAndModel()
 
+	// Obter client do LLM atual
 	client, err := manager.GetClient(cli.Provider, cli.Model)
 	if err != nil {
 		logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
 		return nil, err
 	}
-
 	cli.Client = client
+
+	// Infra da CLI
 	cli.commandHandler = NewCommandHandler(cli)
 	cli.agentMode = NewAgentMode(cli, logger)
 
+	// Carregar histórico persistido para autocompletar e histórico de sessão
 	history, err := cli.historyManager.LoadHistory()
 	if err != nil {
 		cli.logger.Error("Erro ao carregar o histórico", zap.Error(err))
@@ -245,17 +250,26 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		cli.commandHistory = history
 	}
 
-	p := prompt.New(
-		cli.executor,
-		cli.completer,
-		prompt.OptionTitle("chatcli"),
-		prompt.OptionPrefix("> "),
-		prompt.OptionPrefixTextColor(prompt.Green),
-		prompt.OptionHistory(cli.commandHistory),
-		prompt.OptionAddKeyBind(cli.keyBinds()...),
-		prompt.OptionCompletionWordSeparator(" /"),
-	)
-	cli.prompt = p
+	// Inicializar o prompt interativo (go-prompt) somente em TTY
+	hasTTYIn := term.IsTerminal(int(os.Stdin.Fd()))
+	hasTTYOut := term.IsTerminal(int(os.Stdout.Fd()))
+
+	if hasTTYIn && hasTTYOut {
+		p := prompt.New(
+			cli.executor,  // executa quando usuário pressiona Enter
+			cli.completer, // função de autocompletar
+			prompt.OptionTitle("chatcli"),
+			prompt.OptionPrefix("> "),
+			prompt.OptionPrefixTextColor(prompt.Green),
+			prompt.OptionHistory(cli.commandHistory),
+			prompt.OptionAddKeyBind(cli.keyBinds()...),
+			prompt.OptionCompletionWordSeparator(" /"),
+		)
+		cli.prompt = p
+	} else {
+		// Ambiente não interativo (CI/pipes/one-shot): não cria o prompt
+		cli.prompt = nil
+	}
 
 	return cli, nil
 }
@@ -366,6 +380,13 @@ func (cli *ChatCLI) keyBinds() []prompt.KeyBind {
 // Start inicia o loop principal do ChatCLI
 func (cli *ChatCLI) Start(ctx context.Context) {
 	defer cli.cleanup()
+
+	if cli.prompt == nil {
+		// Sem TTY: não há modo interativo. Evita pânico no CI.
+		fmt.Println("Modo interativo indisponível (sem TTY). Use -p/--prompt ou pipe via stdin.")
+		return
+	}
+
 	cli.PrintWelcomeScreen()
 	cli.prompt.Run()
 }
