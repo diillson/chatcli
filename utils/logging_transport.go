@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,131 +24,92 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// InitializeLogger configura e inicializa um logger com base nas variáveis de ambiente.
+// InitializeLogger configura e inicializa um logger robusto com base nas variáveis de ambiente.
+// Em ambiente de desenvolvimento ('dev'), os logs são enviados para o console de forma colorida e legível,
+// e também para um arquivo em formato JSON.
+// Em ambiente de produção ('prod'), os logs são enviados apenas para o arquivo em formato JSON.
+// Suporta rotação de logs com lumberjack.
 func InitializeLogger() (*zap.Logger, error) {
-	// Definir o nível de log via variável de ambiente, default para Info
+	// 1. Definir o nível de log via variável de ambiente (padrão: Info)
 	logLevelEnv := strings.ToLower(os.Getenv("LOG_LEVEL"))
 	var level zapcore.Level
-	switch logLevelEnv {
-	case "debug":
-		level = zap.DebugLevel
-	case "info":
-		level = zap.InfoLevel
-	case "warn":
-		level = zap.WarnLevel
-	case "error":
-		level = zap.ErrorLevel
-	case "dpanic":
-		level = zap.DPanicLevel
-	case "panic":
-		level = zap.PanicLevel
-	case "fatal":
-		level = zap.FatalLevel
-	default:
-		level = zap.InfoLevel
+	if err := level.Set(logLevelEnv); err != nil {
+		level = zap.InfoLevel // Fallback para InfoLevel se a string for inválida
 	}
 
-	// Configuração do encoder
-	encoderConfig := zap.NewProductionEncoderConfig()
-	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder // Formato de tempo legível
-	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
-
-	// Determinar o ambiente (development ou production)
-	env := strings.ToLower(os.Getenv("ENV"))
-	var encoder zapcore.Encoder
-	if env == "prod" {
-		encoder = zapcore.NewJSONEncoder(encoderConfig) // JSON para Produção
+	// 2. Ler configurações de arquivo e rotação do ambiente
+	logFile := GetEnvOrDefault("LOG_FILE", config.DefaultLogFile)
+	if expanded, err := ExpandPath(logFile); err == nil {
+		logFile = expanded
 	} else {
-		encoder = zapcore.NewConsoleEncoder(encoderConfig) // Console para desenvolvimento
+		// Logar um aviso se a expansão do caminho falhar, mas continuar com o caminho original.
+		fmt.Printf("Aviso: não foi possível expandir o caminho do log '%s': %v\n", logFile, err)
 	}
 
-	// Nome do arquivo de log configurável via variável de ambiente
-	logFile := os.Getenv("LOG_FILE")
-	if logFile == "" {
-		logFile = "app.log" // Valor padrão
-	} else {
-		expanded, err := ExpandPath(logFile)
-		if err == nil {
-			logFile = expanded
-		} else {
-			fmt.Printf("Aviso: não foi possível expandir o caminho '%s': %v\n", logFile, err)
+	maxSizeMB := config.DefaultMaxLogSize
+	if envValue := os.Getenv("LOG_MAX_SIZE"); envValue != "" {
+		// Usa a função ParseSize centralizada que retorna bytes
+		sizeBytes, err := ParseSize(envValue)
+		if err == nil && sizeBytes > 0 {
+			// lumberjack.MaxSize é em megabytes (MB)
+			maxSizeMB = int(sizeBytes / (1024 * 1024))
 		}
 	}
 
-	// Tamanho máximo do arquivo de log configurável via variável de ambiente
-	maxLogSize := getMaxLogSizeFromEnv()
-
-	// Configuração do logger com rotação de logs
+	// 3. Configurar lumberjack para rotação de logs
 	lumberjackLogger := &lumberjack.Logger{
 		Filename:   logFile,
-		MaxSize:    maxLogSize, // Tamanho máximo do arquivo de log em MB
-		MaxBackups: 3,          // Número máximo de backups
-		MaxAge:     28,         // Dias
-		Compress:   true,       // Compressão
+		MaxSize:    maxSizeMB, // em MB
+		MaxBackups: 3,
+		MaxAge:     28, // em dias
+		Compress:   true,
 	}
+	fileSyncer := zapcore.AddSync(lumberjackLogger)
 
-	// Configuração do WriteSyncer para Dev console e arquivo de log, para Prod apenas arquivo.
-	var writeSyncer zapcore.WriteSyncer
+	// 4. Configurar o core do logger com base no ambiente (ENV)
+	env := strings.ToLower(GetEnvOrDefault("ENV", "dev"))
+	var core zapcore.Core
+
 	if env == "prod" {
-		// Produção: Apenas no arquivo de log
-		writeSyncer = zapcore.AddSync(lumberjackLogger)
+		// --- Configuração para Produção: JSON para o arquivo ---
+		encoderConfig := zap.NewProductionEncoderConfig()
+		encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+		jsonEncoder := zapcore.NewJSONEncoder(encoderConfig)
+
+		core = zapcore.NewCore(jsonEncoder, fileSyncer, level)
 	} else {
-		// Desenvolvimento: Console e arquivo de log
-		writeSyncer = zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout), zapcore.AddSync(lumberjackLogger))
+		// --- Configuração para Desenvolvimento: Console colorido + JSON no arquivo ---
+
+		// Encoder para o console (legível e colorido)
+		consoleEncoderConfig := zap.NewDevelopmentEncoderConfig()
+		consoleEncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder // Habilita cores!
+		consoleEncoder := zapcore.NewConsoleEncoder(consoleEncoderConfig)
+		consoleSyncer := zapcore.AddSync(os.Stdout)
+		consoleCore := zapcore.NewCore(consoleEncoder, consoleSyncer, level)
+
+		// Encoder para o arquivo (JSON estruturado)
+		fileEncoderConfig := zap.NewProductionEncoderConfig()
+		fileEncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+		fileEncoder := zapcore.NewJSONEncoder(fileEncoderConfig)
+		fileCore := zapcore.NewCore(fileEncoder, fileSyncer, level)
+
+		// Usar NewTee para enviar logs para ambos os destinos (console e arquivo)
+		core = zapcore.NewTee(consoleCore, fileCore)
 	}
 
-	// Configuração do core com nível de log definido
-	core := zapcore.NewCore(encoder, writeSyncer, level)
-
-	// Construir o logger
+	// 5. Construir o logger final
+	// AddCallerSkip(1) é importante para que o logger reporte o local correto da chamada,
+	// e não a linha dentro desta função de inicialização.
 	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
 
+	logger.Info("Logger inicializado com sucesso",
+		zap.String("ambiente", env),
+		zap.String("nivel", level.String()),
+		zap.String("arquivo", logFile),
+		zap.Int("tamanhoMaxMB", maxSizeMB),
+	)
+
 	return logger, nil
-}
-
-// getMaxLogSizeFromEnv lê a variável de ambiente LOG_MAX_SIZE e retorna o valor em MB.
-// Agora aceita valores como "50MB", "100KB", "1GB", etc.
-func getMaxLogSizeFromEnv() int {
-	envValue := os.Getenv("LOG_MAX_SIZE")
-	if envValue != "" {
-		size, err := parseSize(envValue)
-		if err == nil && size > 0 {
-			// Convertemos o valor para MB, pois o lumberjack espera o tamanho em MB
-			return int(size / (1024 * 1024))
-		}
-	}
-	return config.DefaultMaxLogSize
-}
-
-// parseSize converte uma string de tamanho legível (como "50MB", "100KB", "1GB") para bytes.
-func parseSize(sizeStr string) (int64, error) {
-	sizeStr = strings.TrimSpace(sizeStr)
-	unit := "B" // Padrão para bytes
-	var multiplier int64 = 1
-
-	// Verificar se a string termina com uma unidade de medida
-	if strings.HasSuffix(sizeStr, "KB") {
-		unit = "KB"
-		multiplier = 1024
-	} else if strings.HasSuffix(sizeStr, "MB") {
-		unit = "MB"
-		multiplier = 1024 * 1024
-	} else if strings.HasSuffix(sizeStr, "GB") {
-		unit = "GB"
-		multiplier = 1024 * 1024 * 1024
-	}
-
-	// Remover a unidade da string para obter apenas o número
-	sizeStr = strings.TrimSuffix(sizeStr, unit)
-	sizeStr = strings.TrimSpace(sizeStr)
-
-	// Converter o número para int64
-	size, err := strconv.ParseInt(sizeStr, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("tamanho inválido: %s", sizeStr)
-	}
-
-	return size * multiplier, nil
 }
 
 // LoggingTransport é um http.RoundTripper que adiciona logs às requisições e respostas

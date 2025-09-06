@@ -62,22 +62,23 @@ type Liner interface {
 
 // ChatCLI representa a interface de linha de comando do chat
 type ChatCLI struct {
-	Client            client.LLMClient
-	manager           manager.LLMManager
-	logger            *zap.Logger
-	Provider          string
-	Model             string
-	history           []models.Message
-	line              Liner
-	commandHistory    []string
-	historyManager    *HistoryManager
-	animation         *AnimationManager
-	commandHandler    *CommandHandler
-	lastCommandOutput string
-	fileChunks        []FileChunk // Chunks pendentes para processamento
-	failedChunks      []FileChunk // Chunks que falharam no processamento
-	lastFailedChunk   *FileChunk  // Referência ao último chunk que falhou
-	agentMode         *AgentMode  // Modo de agente
+	Client               client.LLMClient
+	manager              manager.LLMManager
+	logger               *zap.Logger
+	Provider             string
+	Model                string
+	history              []models.Message
+	line                 Liner
+	commandHistory       []string
+	newCommandsInSession []string
+	historyManager       *HistoryManager
+	animation            *AnimationManager
+	commandHandler       *CommandHandler
+	lastCommandOutput    string
+	fileChunks           []FileChunk // Chunks pendentes para processamento
+	failedChunks         []FileChunk // Chunks que falharam no processamento
+	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
+	agentMode            *AgentMode  // Modo de agente
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -215,11 +216,12 @@ func (cli *ChatCLI) configureProviderAndModel() {
 // NewChatCLI cria uma nova instância de ChatCLI
 func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	cli := &ChatCLI{
-		manager:        manager,
-		logger:         logger,
-		history:        make([]models.Message, 0),
-		historyManager: NewHistoryManager(logger),
-		animation:      NewAnimationManager(),
+		manager:              manager,
+		logger:               logger,
+		history:              make([]models.Message, 0),
+		newCommandsInSession: make([]string, 0),
+		historyManager:       NewHistoryManager(logger),
+		animation:            NewAnimationManager(),
 	}
 
 	cli.configureProviderAndModel()
@@ -272,13 +274,17 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			return
 		default:
 			//fmt.Print(colorize("> ", ColorLime))
+
+			correlationID := utils.GenerateUUID()
+			ctxLogger := cli.logger.With(zap.String("correlationID", correlationID))
+
 			input, err := cli.line.Prompt("> ")
 			if err != nil {
 				if err == liner.ErrPromptAborted { // Ctrl+D no prompt
 					fmt.Println("\nSaindo...")
 					return
 				}
-				cli.logger.Error("Erro ao ler a entrada", zap.Error(err))
+				ctxLogger.Error("Erro ao ler a entrada", zap.Error(err))
 				continue
 			}
 
@@ -287,6 +293,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			if input != "" {
 				cli.line.AppendHistory(input)
 				cli.commandHistory = append(cli.commandHistory, input)
+				cli.newCommandsInSession = append(cli.newCommandsInSession, input)
 			}
 
 			// Verificar se o input é um comando direto do sistema
@@ -400,7 +407,7 @@ func (cli *ChatCLI) cleanup() {
 	_ = cli.line.Close()
 
 	// Salvar o histórico
-	if err := cli.historyManager.SaveHistory(cli.commandHistory); err != nil {
+	if err := cli.historyManager.AppendAndRotateHistory(cli.newCommandsInSession); err != nil {
 		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
 	}
 
