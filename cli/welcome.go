@@ -17,6 +17,8 @@ var tips = []string{
 	"Precisa executar um comando? Use " + colorize("@command <seu_comando>", ColorCyan) + ".",
 	"Alterne entre provedores de IA a qualquer momento com o comando " + colorize("/switch", ColorGreen) + ".",
 	"Limpe o histórico e comece uma nova conversa com " + colorize("/newsession", ColorGreen) + ".",
+	"Pressione " + colorize("seta para cima", ColorCyan) + " para editar sua última mensagem.",
+	"Pressione " + colorize("Ctrl+J", ColorCyan) + " para inserir uma nova linha de contexto sem enviar a mensagem.",
 	"Verifique sua configuração atual (sem segredos!) com o comando " + colorize("/config", ColorGreen) + ".",
 	"Pressione " + colorize("Ctrl+C", ColorCyan) + " uma vez para cancelar uma resposta da IA sem sair do chat.",
 	"Use o modo agente com " + colorize("/agent <tarefa>", ColorGreen) + " para que a IA execute comandos por você.",

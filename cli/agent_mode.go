@@ -21,18 +21,30 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/llm/openai_assistant"
-	"github.com/diillson/chatcli/utils"
-	"github.com/peterh/liner"
-
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
+
+// CommandExecutor define uma interface para executar comandos do sistema.
+// Isso permite mockar a execução nos testes.
+type CommandExecutor interface {
+	CommandContext(ctx context.Context, name string, arg ...string) *exec.Cmd
+}
+
+// OSCommandExecutor é a implementação real que usa o pacote os/exec.
+type OSCommandExecutor struct{}
+
+func (e *OSCommandExecutor) CommandContext(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, name, arg...)
+}
 
 // AgentMode representa a funcionalidade de agente autônomo no ChatCLI
 type AgentMode struct {
 	cli                 *ChatCLI
 	logger              *zap.Logger
 	executeCommandsFunc func(ctx context.Context, block CommandBlock) (string, string)
+	cmdExecutor         CommandExecutor
 }
 
 // CommandContextInfo contém metadados sobre a origem e natureza de um comando
@@ -87,8 +99,9 @@ const (
 // NewAgentMode cria uma nova instância do modo agente
 func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 	a := &AgentMode{
-		cli:    cli,
-		logger: logger,
+		cli:         cli,
+		logger:      logger,
+		cmdExecutor: &OSCommandExecutor{},
 	}
 	a.executeCommandsFunc = a.executeCommandsWithOutput
 	return a
@@ -102,31 +115,18 @@ func (a *AgentMode) fallbackPrompt(prompt string) string {
 	return strings.TrimSpace(resp)
 }
 
-// getInput obtém entrada do usuário de forma segura
+// getInput obtém entrada do usuário de forma segura e síncrona.
 func (a *AgentMode) getInput(prompt string) string {
-	// Usar o liner da instância principal
-	if a.cli.line != nil {
-		input, err := a.cli.line.Prompt(prompt)
-		if err != nil {
-			if err == liner.ErrPromptAborted {
-				return ""
-			}
-			// Fallback para método simples em caso de erro
-			a.logger.Warn("Erro ao usar liner, usando fallback", zap.Error(err))
-			return a.fallbackPrompt(prompt)
-		}
-
-		// Adicionar ao histórico global se não estiver vazio
-		if input != "" {
-			a.cli.line.AppendHistory(input)
-			a.cli.commandHistory = append(a.cli.commandHistory, input)
-		}
-
-		return input
-	} else {
-		// Se não houver liner disponível, usar o método fallback
-		return a.fallbackPrompt(prompt)
+	restoreTerminalState()
+	fmt.Print(prompt)
+	reader := bufio.NewReader(os.Stdin)
+	resp, err := reader.ReadString('\n')
+	if err != nil {
+		// EOF / Ctrl+D -> encerra o modo agente de forma limpa
+		fmt.Println()
+		return "q"
 	}
+	return strings.TrimSpace(resp)
 }
 
 func isDangerous(cmd string) bool {
@@ -577,77 +577,38 @@ func (a *AgentMode) displayResponseWithoutCommands(response string, blocks []Com
 // - "." sozinho em uma linha para finalizar a entrada
 // - Control+D (EOF) para finalizar a entrada
 func (a *AgentMode) getMultilineInput(prompt string) string {
-	fmt.Print(prompt)
-	fmt.Println("(Digite '.' sozinho em uma linha para finalizar)")
-	fmt.Println("(Pressione ENTER sem digitar texto para continuar sem contexto)")
-	fmt.Println("(Ou use Control+D para finalizar a entrada)")
+	restoreTerminalState() // Libera o terminal
 
-	// Fechar o liner temporariamente
-	if a.cli.line != nil {
-		_ = a.cli.line.Close()
-		a.cli.line = nil
-	}
+	fmt.Print(prompt)
+	fmt.Println("(Digite '.' sozinho em uma linha para finalizar, após ENTER)")
+	fmt.Println("(Pressione ENTER sem digitar texto para continuar sem contexto)")
+	fmt.Println("(Ou use Control+D após o contexto para finalizar a entrada)")
 
 	var lines []string
 	reader := bufio.NewReader(os.Stdin)
 	firstLine := true
 
 	for {
-		// Ler uma linha
 		line, err := reader.ReadString('\n')
-
-		// Tratar EOF (Control+D)
-		if err != nil {
-			if len(lines) > 0 {
-				fmt.Println("Entrada finalizada com Control+D")
-				break
-			} else {
-				fmt.Println("Continuando sem adicionar contexto (Control+D)")
-				lines = nil
-				break
-			}
-		}
-
-		// Remover quebra de linha
-		line = strings.TrimRight(line, "\r\n")
-
-		// Verificar primeira linha vazia (apenas ENTER)
-		if firstLine && line == "" {
-			fmt.Println("Continuando sem adicionar contexto.")
-			lines = nil
+		if err != nil { // Trata EOF (Control+D)
+			fmt.Println()
 			break
 		}
-		firstLine = false
+		line = strings.TrimRight(line, "\r\n")
 
-		// Verificar linha com apenas "."
+		if firstLine && line == "" {
+			fmt.Println("Continuando sem adicionar contexto.")
+			return ""
+		}
+		firstLine = false
 		if line == "." {
 			fmt.Println("Entrada finalizada com '.'")
 			break
 		}
-
-		// Adicionar linha ao buffer
 		lines = append(lines, line)
 	}
 
-	// Restaurar o liner
-	newLiner := liner.NewLiner()
-	newLiner.SetCtrlCAborts(true)
-
-	// Recarregar histórico
-	for _, cmd := range a.cli.commandHistory {
-		newLiner.AppendHistory(cmd)
-	}
-
-	// Restaurar completador
-	newLiner.SetCompleter(a.cli.completer)
-
-	a.cli.line = newLiner
-
-	// Se não tivermos linhas, retornar string vazia
-	if len(lines) == 0 {
-		return ""
-	}
-
+	// O go-prompt restaurará o terminal para o modo raw automaticamente.
 	return strings.Join(lines, "\n")
 }
 
@@ -735,6 +696,11 @@ mainLoop:
 		// Usar o prompt seguro para a entrada
 		answer := a.getInput("Sua escolha: ")
 		answer = strings.ToLower(strings.TrimSpace(answer))
+
+		if answer == "" {
+			fmt.Println("Saindo do modo agente (EOF).")
+			return
+		}
 
 		switch {
 		case answer == "q":
@@ -1114,7 +1080,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 		allOutput.WriteString(header)
 		fmt.Print(header)
 
-		cmd := exec.CommandContext(ctx, shell, scriptPath)
+		cmd := a.cmdExecutor.CommandContext(ctx, shell, scriptPath)
 		output, err := cmd.CombinedOutput()
 
 		outText := "📝 Saída do script:\n" + string(output)
@@ -1232,22 +1198,9 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 
 // executeInteractiveCommand executa um comando interativo passando o controle do terminal
 func (a *AgentMode) executeInteractiveCommand(ctx context.Context, shell string, command string) error {
-	// Fechar o liner para liberar o terminal
-	if a.cli.line != nil {
-		_ = a.cli.line.Close()
-		a.cli.line = nil
-	}
+	restoreTerminalState() // Libera o terminal para o comando externo
 
-	// Restaurar o terminal para o modo "sane"
-	sttyCmd := exec.Command("stty", "sane")
-	sttyCmd.Stdin = os.Stdin
-	sttyCmd.Stdout = os.Stdout
-	_ = sttyCmd.Run() // Ignoramos erros aqui propositalmente
-
-	// Obter o caminho do arquivo de configuração do shell
 	shellConfigPath := a.getShellConfigPath(shell)
-
-	// Construir o comando com shell
 	var shellCommand string
 	if shellConfigPath != "" {
 		shellCommand = fmt.Sprintf("source %s 2>/dev/null || true; %s", shellConfigPath, command)
@@ -1255,39 +1208,15 @@ func (a *AgentMode) executeInteractiveCommand(ctx context.Context, shell string,
 		shellCommand = command
 	}
 
-	// Criar o comando com conexão direta ao terminal
 	cmd := exec.CommandContext(ctx, shell, "-c", shellCommand)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Executar o comando (bloqueante)
 	err := cmd.Run()
 
-	// Após o comando terminar, restaurar o terminal para o modo "sane" novamente
-	sttyCmd = exec.Command("stty", "sane")
-	sttyCmd.Stdin = os.Stdin
-	sttyCmd.Stdout = os.Stdout
-	_ = sttyCmd.Run() // Ignoramos erros aqui propositalmente
-
+	// Após o comando terminar, o go-prompt restaurará o terminal automaticamente.
 	fmt.Println("\nComando interativo finalizado. Retornando ao modo agente...")
-
-	// Reinstanciar o liner
-	if a.cli.line == nil {
-		newLiner := liner.NewLiner()
-		newLiner.SetCtrlCAborts(true)
-
-		// Recarregar histórico
-		for _, cmd := range a.cli.commandHistory {
-			newLiner.AppendHistory(cmd)
-		}
-
-		// Restaurar completador
-		newLiner.SetCompleter(a.cli.completer)
-
-		a.cli.line = newLiner
-	}
-
 	return err
 }
 
@@ -1441,45 +1370,16 @@ func hasCodeStructures(content string) bool {
 
 // getCriticalInput obtém entrada do usuário para decisões críticas
 func (a *AgentMode) getCriticalInput(prompt string) string {
-	// Primeiro, tentar liberar o terminal se estiver usando liner
-	if a.cli.line != nil {
-		_ = a.cli.line.Close()
-		a.cli.line = nil
-	}
+	restoreTerminalState() // Libera o terminal
 
-	// Resetar o estado do terminal
-	cmd := exec.Command("stty", "sane")
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	_ = cmd.Run()
-
-	// Exibir o prompt com formatação clara
 	fmt.Print("\n")
 	fmt.Print(prompt)
 
-	// Ler diretamente do stdin
 	reader := bufio.NewReader(os.Stdin)
 	response, _ := reader.ReadString('\n')
 	response = strings.TrimSpace(response)
 
-	fmt.Println() // Adicionar uma linha em branco após a resposta
-
-	// Reinstanciar o liner se necessário
-	if a.cli.line == nil {
-		newLiner := liner.NewLiner()
-		newLiner.SetCtrlCAborts(true)
-
-		// Recarregar histórico
-		for _, cmd := range a.cli.commandHistory {
-			newLiner.AppendHistory(cmd)
-		}
-
-		// Restaurar completador
-		newLiner.SetCompleter(a.cli.completer)
-
-		a.cli.line = newLiner
-	}
-
+	fmt.Println()
 	return response
 }
 
