@@ -393,8 +393,7 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 		return a.extractCommandBlocksForAssistant(response)
 	}
 
-	// Regex para encontrar blocos de código com o prefixo execute
-	re := regexp.MustCompile("(?s)```execute:([a-zA-Z0-9_-]+)\\s*\n(.*?)\n```")
+	re := regexp.MustCompile("(?s)```execute:([a-zA-Z0-9_-]+)\\s*\n(.*?)```")
 
 	// 1. Encontrar todos os blocos de comando
 	matches := re.FindAllStringSubmatch(response, -1)
@@ -403,7 +402,6 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 	}
 
 	// 2. Dividir a resposta usando os blocos como delimitadores.
-	// As partes entre os blocos serão as descrições.
 	parts := re.Split(response, -1)
 
 	// 3. Iterar sobre os blocos encontrados e associar a descrição correta
@@ -412,14 +410,11 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 			language := strings.TrimSpace(match[1])
 			commandsStr := strings.TrimSpace(match[2])
 
-			// A descrição está na parte de texto que veio ANTES deste bloco.
 			var description string
 			if i < len(parts) {
-				// Usamos a função auxiliar para pegar a última linha significativa
 				description = findLastMeaningfulLine(parts[i])
 			}
 
-			// Lógica para detectar se é um script contínuo ou comandos separados
 			isScript := false
 			if strings.Contains(commandsStr, "<<") ||
 				strings.Contains(commandsStr, "cat >") ||

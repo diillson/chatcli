@@ -113,7 +113,7 @@ func maskSensitiveInText(s string) string {
 		{regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`), "sk-[REDACTED]"},
 		{regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{20,}`), "sk-ant-[REDACTED]"},
 		// Google AI
-		{regexp.MustCompile(`AIza[0-9A-Za-z\-_]{35}`), "[REDACTED_GOOGLE_API_KEY]"},
+		{regexp.MustCompile(`AIza[0-9A-Za-z\-_]{30,}`), "[REDACTED_GOOGLE_API_KEY]"},
 		// Bearer tokens e JWTs (parte do meio)
 		{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\.\-_]+`), "Bearer [REDACTED]"},
 		{regexp.MustCompile(`ey[A-Za-z0-9-_=]+\.ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]+`), "[REDACTED_JWT]"},
