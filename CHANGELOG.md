@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.1](https://github.com/diillson/chatcli/compare/v1.19.0...v1.19.1) (2025-09-06)
+
+
+### Bug Fixes
+
+* **agent:** Improve command parsing and resolve failing utility tests  ([#208](https://github.com/diillson/chatcli/issues/208)) ([#209](https://github.com/diillson/chatcli/issues/209)) ([ebc4a4c](https://github.com/diillson/chatcli/commit/ebc4a4cfe694b301643fe2e86d0a84b02ff88e21))
+
 ## [1.19.0](https://github.com/diillson/chatcli/compare/v1.18.1...v1.19.0) (2025-09-04)
 
 
