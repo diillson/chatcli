@@ -12,6 +12,7 @@ const (
 	DefaultBackoff           = 300 * time.Second
 	StackSpotDefaultModel    = "StackSpotAI"
 	StackSpotResponseTimeout = 2 * time.Second
+	DefaultLogFile           = "$HOME/app.log"
 
 	// Valores padrão para OpenAI
 	DefaultOpenAIModel       = "gpt-4o-mini"

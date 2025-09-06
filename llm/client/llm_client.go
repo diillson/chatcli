@@ -8,6 +8,7 @@ package client
 import (
 	"context"
 	"fmt"
+
 	"github.com/diillson/chatcli/models"
 )
 

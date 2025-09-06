@@ -8,12 +8,13 @@ package cli
 import (
 	"bufio"
 	"fmt"
-	"github.com/diillson/chatcli/config"
-	"go.uber.org/zap"
 	"os"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/utils"
+	"go.uber.org/zap"
 )
 
 type HistoryManager struct {
@@ -35,43 +36,13 @@ func NewHistoryManager(logger *zap.Logger) *HistoryManager {
 func getMaxHistorySizeFromEnv() int64 {
 	envValue := os.Getenv("HISTORY_MAX_SIZE")
 	if envValue != "" {
-		size, err := parseSize(envValue)
+		// Agora chama a função centralizada
+		size, err := utils.ParseSize(envValue)
 		if err == nil && size > 0 {
 			return size
 		}
 	}
 	return config.DefaultMaxHistorySize
-}
-
-// parseSize converte uma string de tamanho legível (como "50MB", "100KB", "1GB") para bytes.
-func parseSize(sizeStr string) (int64, error) {
-	sizeStr = strings.TrimSpace(sizeStr)
-	unit := "B" // Padrão para bytes
-	var multiplier int64 = 1
-
-	// Verificar se a string termina com uma unidade de medida
-	if strings.HasSuffix(sizeStr, "KB") {
-		unit = "KB"
-		multiplier = 1024
-	} else if strings.HasSuffix(sizeStr, "MB") {
-		unit = "MB"
-		multiplier = 1024 * 1024
-	} else if strings.HasSuffix(sizeStr, "GB") {
-		unit = "GB"
-		multiplier = 1024 * 1024 * 1024
-	}
-
-	// Remover a unidade da string para obter apenas o número
-	sizeStr = strings.TrimSuffix(sizeStr, unit)
-	sizeStr = strings.TrimSpace(sizeStr)
-
-	// Converter o número para int64
-	size, err := strconv.ParseInt(sizeStr, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("tamanho inválido: %s", sizeStr)
-	}
-
-	return size * multiplier, nil
 }
 
 // LoadHistory carrega o histórico do arquivo
@@ -101,33 +72,77 @@ func (hm *HistoryManager) LoadHistory() ([]string, error) {
 	return history, nil
 }
 
-// SaveHistory salva o histórico no arquivo e faz backup se o tamanho exceder o limite
-func (hm *HistoryManager) SaveHistory(commandHistory []string) error {
-	// Verificar o tamanho do arquivo de histórico
-	fileInfo, err := os.Stat(hm.historyFile)
-	if err == nil && fileInfo.Size() >= hm.maxHistorySize {
-		// Fazer backup do arquivo de histórico
-		backupFile := fmt.Sprintf("%s.bak-%d", hm.historyFile, time.Now().Unix())
-		err := os.Rename(hm.historyFile, backupFile)
-		if err != nil {
-			hm.logger.Warn("Não foi possível fazer backup do histórico:", zap.Error(err))
-			return err
-		}
-		hm.logger.Info("Backup do histórico criado:", zap.String("backupFile", backupFile))
-	}
-
-	// Abrir o arquivo de histórico para escrita
+// AppendAndRotateHistory salva o histórico no arquivo e faz backup se o tamanho exceder o limite
+func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {
+	// 1. Anexar os novos comandos ao arquivo de histórico
 	f, err := os.OpenFile(hm.historyFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		hm.logger.Warn("Não foi possível salvar o histórico:", zap.Error(err))
+		hm.logger.Warn("Não foi possível abrir o histórico para anexar comandos", zap.Error(err))
 		return err
 	}
-	defer func() { _ = f.Close() }()
 
-	// Escrever o histórico no arquivo
-	for _, cmd := range commandHistory {
-		_, _ = fmt.Fprintln(f, cmd)
+	writer := bufio.NewWriter(f)
+	for _, cmd := range newCommands {
+		if _, err := fmt.Fprintln(writer, cmd); err != nil {
+			// Ignorar erro de escrita individual, mas logar
+			hm.logger.Warn("Erro ao escrever comando no histórico", zap.String("command", cmd), zap.Error(err))
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		_ = f.Close()
+		hm.logger.Error("Erro ao fazer flush no arquivo de histórico", zap.Error(err))
+		return err
+	}
+	_ = f.Close()
+
+	// 2. Verificar o tamanho do arquivo após anexar
+	fileInfo, err := os.Stat(hm.historyFile)
+	if err != nil {
+		// Se não conseguirmos obter o status, não podemos rotacionar.
+		hm.logger.Warn("Não foi possível obter o status do arquivo de histórico para rotação", zap.Error(err))
+		return nil
 	}
 
-	return nil
+	if fileInfo.Size() < hm.maxHistorySize {
+		// O arquivo está dentro do limite, trabalho concluído.
+		return nil
+	}
+
+	// 3. O arquivo excedeu o limite, realizar a rotação e truncamento.
+	hm.logger.Info("Arquivo de histórico excedeu o tamanho máximo, iniciando rotação.",
+		zap.Int64("size", fileInfo.Size()),
+		zap.Int64("max_size", hm.maxHistorySize),
+	)
+
+	// Criar backup
+	backupFile := fmt.Sprintf("%s.bak-%d", hm.historyFile, time.Now().Unix())
+	if err := os.Rename(hm.historyFile, backupFile); err != nil {
+		hm.logger.Error("Falha ao criar backup do histórico", zap.Error(err))
+		return err
+	}
+	hm.logger.Info("Backup do histórico criado", zap.String("backupFile", backupFile))
+
+	// 4. Truncar o histórico: ler as últimas N linhas do backup e escrevê-las no novo arquivo
+	linesToKeep := 5000 // Manter as últimas 5000 linhas como um bom ponto de partida
+
+	// Ler todas as linhas do backup
+	backupData, err := os.ReadFile(backupFile)
+	if err != nil {
+		hm.logger.Error("Falha ao ler o arquivo de backup para truncamento", zap.Error(err))
+		// Recria um arquivo de histórico vazio para não perder o funcionamento
+		return os.WriteFile(hm.historyFile, []byte{}, 0644)
+	}
+
+	lines := strings.Split(string(backupData), "\n")
+
+	// Pegar as últimas `linesToKeep` linhas
+	startIndex := 0
+	if len(lines) > linesToKeep {
+		startIndex = len(lines) - linesToKeep
+	}
+
+	recentHistory := lines[startIndex:]
+
+	// Escrever as linhas recentes de volta no arquivo de histórico principal (agora vazio)
+	return os.WriteFile(hm.historyFile, []byte(strings.Join(recentHistory, "\n")), 0644)
 }
