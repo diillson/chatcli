@@ -289,18 +289,3 @@ func GetBuildInfo() (string, string, string) {
 	}
 	return version, commitHash, buildDate
 }
-
-// Helper para exibir informações de build ao iniciar o aplicativo
-func PrintStartupVersionInfo() {
-	v, c, d := GetBuildInfo()
-	if v == "" || v == "unknown" {
-		v = Version
-		c = CommitHash
-		d = BuildDate
-	}
-	if v != "" && v != "dev" && v != "unknown" {
-		fmt.Printf("ChatCLI %s (commit: %s, built: %s)\n", v, c, d)
-		fmt.Println("Use '/version' para mais detalhes ou 'chatcli --version' na linha de comando")
-		fmt.Println("-----------------------------------------------------------")
-	}
-}

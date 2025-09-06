@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/config"
@@ -103,27 +104,23 @@ func SanitizeSensitiveText(s string) string {
 // maskSensitiveInText aplica regex para esconder padrões comuns de segredos
 
 func maskSensitiveInText(s string) string {
-	// padrões comuns
 	patterns := []struct {
 		re   *regexp.Regexp
 		repl string
 	}{
-		// OpenAI
+		// Chaves de API comuns (OpenAI, Anthropic, Stripe, etc.)
+		{regexp.MustCompile(`(?i)(sk|pk)_(test|live)_[a-zA-Z0-9]{20,}`), "[REDACTED_API_KEY]"},
 		{regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`), "sk-[REDACTED]"},
-		// Anthropic
 		{regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{20,}`), "sk-ant-[REDACTED]"},
-		// Google API key (padrão mais genérico para o teste)
-		{regexp.MustCompile(`AIza[0-9A-Za-z\-_.]+`), "[REDACTED_API_KEY]"},
-		// Bearer tokens
+		// Google AI
+		{regexp.MustCompile(`AIza[0-9A-Za-z\-_]{30,}`), "[REDACTED_GOOGLE_API_KEY]"},
+		// Bearer tokens e JWTs (parte do meio)
 		{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\.\-_]+`), "Bearer [REDACTED]"},
-		// JSON/OAuth fields (captura a chave para preservar a estrutura do JSON)
-		{regexp.MustCompile(`("access_token"\s*:\s*)"[^"]+"`), `${1}"[REDACTED]"`},
-		{regexp.MustCompile(`("refresh_token"\s*:\s*)"[^"]+"`), `${1}"[REDACTED]"`},
-		{regexp.MustCompile(`("client_secret"\s*:\s*)"[^"]+"`), `${1}"[REDACTED]"`},
-		{regexp.MustCompile(`("api_key"\s*:\s*)"[^"]+"`), `${1}"[REDACTED]"`},
-		{regexp.MustCompile(`("password"\s*:\s*)"[^"]+"`), `${1}"[REDACTED]"`},
-		// KEY=VALUE linhas cruas
-		{regexp.MustCompile(`(?im)^(API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|CLIENT_SECRET|SECRET|PASSWORD)\s*=\s*.*$`), "$1=[REDACTED]"},
+		{regexp.MustCompile(`ey[A-Za-z0-9-_=]+\.ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]+`), "[REDACTED_JWT]"},
+		// Campos em JSON
+		{regexp.MustCompile(`("access_token"|"refresh_token"|"client_secret"|"api_key"|"password"|"token")\s*:\s*"[^"]+"`), `${1}:"[REDACTED]"`},
+		// Formato KEY=VALUE
+		{regexp.MustCompile(`(?im)^(API_KEY|ACCESS_TOKEN|CLIENT_SECRET|SECRET|PASSWORD)\s*=\s*.*$`), "$1=[REDACTED]"},
 	}
 	out := s
 	for _, p := range patterns {
@@ -223,4 +220,36 @@ func LogStartupInfo(logger *zap.Logger) {
 		zap.String("os", runtime.GOOS),
 		zap.String("arch", runtime.GOARCH),
 	)
+}
+
+// ParseSize converte uma string de tamanho legível (como "50MB") para bytes.
+func ParseSize(sizeStr string) (int64, error) {
+	sizeStr = strings.TrimSpace(strings.ToUpper(sizeStr))
+	var multiplier int64 = 1
+
+	// Extrai a unidade (KB, MB, GB)
+	unit := ""
+	if strings.HasSuffix(sizeStr, "KB") {
+		unit = "KB"
+		multiplier = 1024
+	} else if strings.HasSuffix(sizeStr, "MB") {
+		unit = "MB"
+		multiplier = 1024 * 1024
+	} else if strings.HasSuffix(sizeStr, "GB") {
+		unit = "GB"
+		multiplier = 1024 * 1024 * 1024
+	}
+
+	// Remove a unidade para obter o número
+	if unit != "" {
+		sizeStr = strings.TrimSuffix(sizeStr, unit)
+	}
+
+	// Converte o número
+	size, err := strconv.ParseInt(strings.TrimSpace(sizeStr), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("tamanho inválido: %s", sizeStr)
+	}
+
+	return size * multiplier, nil
 }
