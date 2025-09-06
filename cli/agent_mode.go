@@ -107,14 +107,6 @@ func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 	return a
 }
 
-// Função de fallback para quando o prompt seguro falhar
-func (a *AgentMode) fallbackPrompt(prompt string) string {
-	fmt.Print(prompt)
-	reader := bufio.NewReader(os.Stdin)
-	resp, _ := reader.ReadString('\n')
-	return strings.TrimSpace(resp)
-}
-
 // getInput obtém entrada do usuário de forma segura e síncrona.
 func (a *AgentMode) getInput(prompt string) string {
 	restoreTerminalState()
