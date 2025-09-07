@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.1](https://github.com/diillson/chatcli/compare/v1.20.0...v1.20.1) (2025-09-07)
+
+
+### Bug Fixes
+
+* **cli:** enhance user input handling with multiline support and sign… ([#214](https://github.com/diillson/chatcli/issues/214)) ([#215](https://github.com/diillson/chatcli/issues/215)) ([eb78c68](https://github.com/diillson/chatcli/commit/eb78c68ea968dc8ec6e1b5276ac5e5901ac06743))
+
 ## [1.20.0](https://github.com/diillson/chatcli/compare/v1.19.1...v1.20.0) (2025-09-06)
 
 
