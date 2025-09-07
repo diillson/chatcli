@@ -91,8 +91,6 @@ type ChatCLI struct {
 	isProcessing         int32
 }
 
-var ctrlCCount uint32
-
 // exitChecker customizado para go-prompt
 func exitChecker(in string, breakline bool) bool {
 	// Sair apenas com Ctrl+D em linha vazia
