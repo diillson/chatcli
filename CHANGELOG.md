@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/diillson/chatcli/compare/v1.20.1...v1.21.0) (2025-09-07)
+
+
+### Features
+
+* **multiline-remove:** rollback to v1.19.1 ([#217](https://github.com/diillson/chatcli/issues/217)) ([#218](https://github.com/diillson/chatcli/issues/218)) ([d1e4650](https://github.com/diillson/chatcli/commit/d1e465017506f55a50b0fc1341023a4204dc34ad))
+
 ## [1.19.1](https://github.com/diillson/chatcli/compare/v1.19.0...v1.19.1) (2025-09-06)
 
 
