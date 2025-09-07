@@ -20,44 +20,65 @@ func NewCommandHandler(cli *ChatCLI) *CommandHandler {
 	return &CommandHandler{cli: cli}
 }
 
-// Atualizar o método HandleCommand no CommandHandler para incluir os novos comandos
+// HandleCommand processa comandos do sistema
 func (ch *CommandHandler) HandleCommand(userInput string) bool {
-	switch {
-	case userInput == "/exit" || userInput == "exit" || userInput == "/quit" || userInput == "quit":
+	userInput = strings.TrimSpace(userInput)
+
+	// Sair
+	switch userInput {
+	case "/exit", "exit", "/quit", "quit":
 		fmt.Println("Até mais!")
 		return true
-	case userInput == "/reload":
-		ch.cli.reloadConfiguration()
-		return false
-	case strings.HasPrefix(userInput, "/agent") || strings.HasPrefix(userInput, "/run"):
-		ch.cli.handleAgentCommand(userInput)
-		return false
-	case strings.HasPrefix(userInput, "/switch"):
-		ch.cli.handleSwitchCommand(userInput)
-		return false
-	case userInput == "/help":
-		ch.cli.showHelp()
-		return false
-	case userInput == "/config" || userInput == "/status" || userInput == "/settings":
-		ch.cli.showConfig()
-		return false
-	case userInput == "/version" || userInput == "/v":
-		ch.handleVersionCommand()
-		return false
-	case userInput == "/nextchunk":
-		return ch.cli.handleNextChunk()
-	case userInput == "/retry":
-		return ch.cli.handleRetryLastChunk()
-	case userInput == "/retryall":
-		return ch.cli.handleRetryAllChunks()
-	case userInput == "/skipchunk":
-		return ch.cli.handleSkipChunk()
-	case userInput == "/newsession":
-		ch.cli.history = []models.Message{}
-		fmt.Println("Iniciada nova sessão de conversa; histórico foi limpo.")
-		return false
-	default:
-		fmt.Println("Comando desconhecido. Use /help para ver os comandos disponíveis.")
+	}
+
+	// Comandos que começam com "/"
+	if strings.HasPrefix(userInput, "/") {
+		// Comando sem argumentos (apenas a palavra após '/')
+		cmd := strings.TrimPrefix(userInput, "/")
+
+		switch cmd {
+		case "reload":
+			ch.cli.reloadConfiguration()
+			return false
+		case "help":
+			ch.cli.showHelp()
+			return false
+		case "config", "status", "settings":
+			ch.cli.showConfig()
+			return false
+		case "version", "v":
+			ch.handleVersionCommand()
+			return false
+		case "nextchunk":
+			return ch.cli.handleNextChunk()
+		case "retry":
+			return ch.cli.handleRetryLastChunk()
+		case "retryall":
+			return ch.cli.handleRetryAllChunks()
+		case "skipchunk":
+			return ch.cli.handleSkipChunk()
+		case "newsession":
+			ch.cli.history = []models.Message{}
+			fmt.Println("Iniciada nova sessão de conversa; histórico foi limpo.")
+			return false
+		}
+
+		// Comandos com argumentos
+		if strings.HasPrefix(userInput, "/switch") {
+			ch.cli.handleSwitchCommand(userInput)
+			return false
+		}
+		if strings.HasPrefix(userInput, "/agent") || strings.HasPrefix(userInput, "/run") {
+			ch.cli.handleAgentCommand(userInput)
+			return false
+		}
+
+		// Desconhecido
+		fmt.Printf("Comando desconhecido: '%s'. Use /help para ver os comandos disponíveis.\n", userInput)
 		return false
 	}
+
+	// Não é comando
+	return false
+
 }

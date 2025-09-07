@@ -14,12 +14,16 @@ import (
 var tips = []string{
 	"Use " + colorize("@file <caminho>", ColorCyan) + " para adicionar o conteúdo de um arquivo ao contexto.",
 	"Use " + colorize("@git", ColorCyan) + " para incluir o status e os commits recentes do seu repositório.",
+	"Use " + colorize("Ctrl+E", ColorCyan) + " para ativar o modo de múltiplas linhas a qualquer momento.",
+	"No modo multilinha, pressione " + colorize("ctrl+D", ColorCyan) + " para enviar.",
 	"Precisa executar um comando? Use " + colorize("@command <seu_comando>", ColorCyan) + ".",
 	"Alterne entre provedores de IA a qualquer momento com o comando " + colorize("/switch", ColorGreen) + ".",
 	"Limpe o histórico e comece uma nova conversa com " + colorize("/newsession", ColorGreen) + ".",
 	"Pressione " + colorize("seta para cima", ColorCyan) + " para editar sua última mensagem.",
-	"Pressione " + colorize("Ctrl+J", ColorCyan) + " para inserir uma nova linha de contexto sem enviar a mensagem.",
-	"Verifique sua configuração atual (sem segredos!) com o comando " + colorize("/config", ColorGreen) + ".",
+	"Digite " + colorize("/m", ColorCyan) + " , " + colorize("/multi ou /multiline", ColorCyan) + " para entrar no modo de múltiplas linhas.",
+	"Use " + colorize("Tab", ColorCyan) + " para autocompletar comandos e caminhos.",
+	"Verifique sua configuração com " + colorize("/config", ColorGreen) + " (sem mostrar segredos!).",
+	"No modo multilinha, pressione " + colorize("ctrl+D", ColorCyan) + " para enviar o texto.",
 	"Pressione " + colorize("Ctrl+C", ColorCyan) + " uma vez para cancelar uma resposta da IA sem sair do chat.",
 	"Use o modo agente com " + colorize("/agent <tarefa>", ColorGreen) + " para que a IA execute comandos por você.",
 }
