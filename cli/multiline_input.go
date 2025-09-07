@@ -80,7 +80,7 @@ func (m *MultilineInputManager) GetMultilineInput() (string, bool) {
 	lineNumber := 1
 
 	for {
-		fmt.Printf(colorize(fmt.Sprintf("[%d] ", lineNumber), ColorGray))
+		fmt.Print(colorize(fmt.Sprintf("[%d] ", lineNumber), ColorGray))
 		_ = os.Stdout.Sync()
 
 		line, err := reader.ReadString('\n')
