@@ -8,23 +8,18 @@ package cli
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
-	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
@@ -32,7 +27,6 @@ import (
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/version"
 	"github.com/joho/godotenv"
-	"golang.org/x/term"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -74,37 +68,17 @@ type ChatCLI struct {
 	Provider             string
 	Model                string
 	history              []models.Message
-	prompt               *prompt.Prompt
+	line                 Liner
 	commandHistory       []string
 	newCommandsInSession []string
 	historyManager       *HistoryManager
 	animation            *AnimationManager
 	commandHandler       *CommandHandler
 	lastCommandOutput    string
-	fileChunks           []FileChunk
-	failedChunks         []FileChunk
-	lastFailedChunk      *FileChunk
-	agentMode            *AgentMode
-	multilineManager     *MultilineInputManager
-	promptCancelFunc     context.CancelFunc
-	cancelMu             sync.Mutex
-	isProcessing         int32
-}
-
-// exitChecker customizado para go-prompt
-func exitChecker(in string, breakline bool) bool {
-	// Sair apenas com Ctrl+D em linha vazia
-	if breakline && in == "" {
-		return true
-	}
-
-	// Sair com comandos explícitos
-	trimmed := strings.TrimSpace(in)
-	if trimmed == "exit" || trimmed == "quit" || trimmed == "/exit" || trimmed == "/quit" {
-		return true
-	}
-
-	return false
+	fileChunks           []FileChunk // Chunks pendentes para processamento
+	failedChunks         []FileChunk // Chunks que falharam no processamento
+	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
+	agentMode            *AgentMode  // Modo de agente
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -239,38 +213,6 @@ func (cli *ChatCLI) configureProviderAndModel() {
 	}
 }
 
-// setupGlobalSignalHandler configura um handler global para Ctrl+C
-func (cli *ChatCLI) setupGlobalSignalHandler() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	var lastCtrlC time.Time
-
-	for sig := range sigChan {
-		if sig == os.Interrupt { // Ctrl+C
-			// Se a IA está processando, cancela imediatamente
-			if atomic.LoadInt32(&cli.isProcessing) == 1 {
-				cli.cancelMu.Lock()
-				if cli.promptCancelFunc != nil {
-					fmt.Println("\n\n🛑 Cancelando operação da IA...")
-					cli.promptCancelFunc()
-					cli.promptCancelFunc = nil
-				}
-				cli.cancelMu.Unlock()
-				lastCtrlC = time.Now()
-			} else {
-				// Se não está processando, verifica duplo Ctrl+C para sair
-				if time.Since(lastCtrlC) < 500*time.Millisecond {
-					fmt.Println("\n👋 Saindo do ChatCLI...")
-					os.Exit(0)
-				}
-				lastCtrlC = time.Now()
-				fmt.Println("\n(Pressione Ctrl+C novamente para sair)")
-			}
-		}
-	}
-}
-
 // NewChatCLI cria uma nova instância de ChatCLI
 func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	cli := &ChatCLI{
@@ -280,439 +222,205 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		newCommandsInSession: make([]string, 0),
 		historyManager:       NewHistoryManager(logger),
 		animation:            NewAnimationManager(),
-		multilineManager:     NewMultilineInputManager(),
-		isProcessing:         0,
 	}
 
-	go cli.setupGlobalSignalHandler()
-
-	// Define Provider/Model em runtime a partir do ambiente
 	cli.configureProviderAndModel()
 
-	// Obter client do LLM atual
 	client, err := manager.GetClient(cli.Provider, cli.Model)
 	if err != nil {
 		logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
 		return nil, err
 	}
+
+	line := liner.NewLiner()
+	line.SetCtrlCAborts(true) // Permite que Ctrl+C aborte o input
+
 	cli.Client = client
-
-	// Infra da CLI
+	cli.line = line
+	cli.history = []models.Message{}
+	cli.commandHistory = []string{}
 	cli.commandHandler = NewCommandHandler(cli)
-	cli.agentMode = NewAgentMode(cli, logger)
+	cli.agentMode = NewAgentMode(cli, logger) // Inicializar o modo agente
 
-	// Carregar histórico persistido para autocompletar e histórico de sessão
+	// Definir a função de autocompletar
+	cli.line.SetCompleter(cli.completer)
+
+	// Carregar o histórico
 	history, err := cli.historyManager.LoadHistory()
 	if err != nil {
 		cli.logger.Error("Erro ao carregar o histórico", zap.Error(err))
 	} else {
 		cli.commandHistory = history
-	}
-
-	// Inicializar o prompt interativo (go-prompt) somente em TTY
-	hasTTYIn := term.IsTerminal(int(os.Stdin.Fd()))
-	hasTTYOut := term.IsTerminal(int(os.Stdout.Fd()))
-
-	if hasTTYIn && hasTTYOut {
-		p := prompt.New(
-			cli.executor,  // executa quando usuário pressiona Enter
-			cli.completer, // função de autocompletar
-			prompt.OptionTitle("chatcli"),
-			prompt.OptionPrefix("> "),
-			prompt.OptionPrefixTextColor(prompt.Green),
-			prompt.OptionHistory(cli.commandHistory),
-			prompt.OptionAddKeyBind(cli.keyBinds()...),
-			prompt.OptionSwitchKeyBindMode(prompt.EmacsKeyBind),
-			prompt.OptionCompletionWordSeparator(" /"),
-
-			prompt.OptionSetExitCheckerOnInput(exitChecker),
-
-			// --- ADICIONE ESTAS OPÇÕES DE COR ---
-			prompt.OptionSuggestionBGColor(prompt.Black),
-			prompt.OptionSuggestionTextColor(prompt.White),
-			prompt.OptionDescriptionBGColor(prompt.Black),
-			prompt.OptionDescriptionTextColor(prompt.Cyan),
-			prompt.OptionSelectedSuggestionBGColor(prompt.Cyan),
-			prompt.OptionSelectedSuggestionTextColor(prompt.Black),
-			prompt.OptionSelectedDescriptionBGColor(prompt.Cyan),
-			prompt.OptionSelectedDescriptionTextColor(prompt.Black),
-			prompt.OptionScrollbarBGColor(prompt.DarkGray),
-			prompt.OptionScrollbarThumbColor(prompt.Cyan),
-			// --- FIM DAS OPÇÕES DE COR ---
-		)
-		cli.prompt = p
-	} else {
-		// Ambiente não interativo (CI/pipes/one-shot): não cria o prompt
-		cli.prompt = nil
+		for _, cmd := range history {
+			cli.line.AppendHistory(cmd) // Adicionar o histórico ao liner
+		}
 	}
 
 	return cli, nil
-}
-
-// shouldEnterMultilineMode verifica se o input indica que devemos entrar em modo multilinha
-func (cli *ChatCLI) shouldEnterMultilineMode(input string) bool {
-	trimmed := strings.TrimSpace(input)
-
-	// Lista EXATA de comandos que ativam multilinha
-	// Não usar Contains ou HasPrefix aqui!
-	multilineCommands := []string{
-		"/multi",
-		"/multiline",
-		"/m",
-	}
-
-	// Verificação EXATA - o comando deve ser EXATAMENTE um desses
-	for _, cmd := range multilineCommands {
-		if trimmed == cmd {
-			return true
-		}
-	}
-
-	return false
-}
-
-// executor é a função principal chamada quando o usuário pressiona Enter.
-func (cli *ChatCLI) executor(input string) {
-	// Normaliza entrada
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return
-	}
-
-	// 1) Comandos com barra: primeiro checa se é multilinha exata; caso não, delega ao handler
-	if strings.HasPrefix(input, "/") {
-		if cli.shouldEnterMultilineMode(input) {
-			cli.multilineManager.StartMultilineMode()
-			content, ok := cli.multilineManager.GetMultilineInput()
-			if ok && strings.TrimSpace(content) != "" {
-				cli.handleMultilineResult(content)
-			}
-			// redesenha o prompt após sair do multilinha
-			fmt.Print("\n> ")
-			return
-		}
-
-		// Demais comandos com barra vão para o handler
-		cli.commandHistory = append(cli.commandHistory, input)
-		cli.newCommandsInSession = append(cli.newCommandsInSession, input)
-
-		if cli.commandHandler.HandleCommand(input) {
-			os.Exit(0)
-		}
-		return
-	}
-
-	// 2) exit/quit sem barra
-	if input == "exit" || input == "quit" {
-		cli.commandHistory = append(cli.commandHistory, input)
-		cli.newCommandsInSession = append(cli.newCommandsInSession, input)
-		if cli.commandHandler.HandleCommand(input) {
-			os.Exit(0)
-		}
-		return
-	}
-
-	// 3) @command direto (não-interativo)
-	if strings.Contains(strings.ToLower(input), "@command ") {
-		cli.commandHistory = append(cli.commandHistory, input)
-		cli.newCommandsInSession = append(cli.newCommandsInSession, input)
-		command := strings.TrimPrefix(input, "@command ")
-		cli.executeDirectCommand(command)
-		return
-	}
-
-	// 4) Prompt normal
-	cli.commandHistory = append(cli.commandHistory, input)
-	cli.newCommandsInSession = append(cli.newCommandsInSession, input)
-
-	// Processar o prompt normalmente
-	promptCtx, cancelPrompt := context.WithCancel(context.Background())
-	defer cancelPrompt()
-
-	type promptResult struct {
-		Response string
-		Error    error
-	}
-	resultChan := make(chan promptResult, 1)
-
-	go func() {
-		userInput, additionalContext := cli.processSpecialCommands(input)
-		cli.history = append(cli.history, models.Message{
-			Role:    "user",
-			Content: userInput + additionalContext,
-		})
-		aiResponse, err := cli.Client.SendPrompt(promptCtx, userInput+additionalContext, cli.history)
-		resultChan <- promptResult{Response: aiResponse, Error: err}
-	}()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
-	defer signal.Stop(sigChan)
-
-	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
-
-	select {
-	case result := <-resultChan:
-		cli.animation.StopThinkingAnimation()
-		signal.Stop(sigChan)
-		if result.Error != nil {
-			cli.logger.Error("Erro do LLM", zap.Error(result.Error))
-			if strings.Contains(result.Error.Error(), "context canceled") {
-				fmt.Println("Operação cancelada.")
-				if len(cli.history) > 0 && cli.history[len(cli.history)-1].Role == "user" {
-					cli.history = cli.history[:len(cli.history)-1]
-				}
-			} else {
-				fmt.Println("Ocorreu um erro ao processar a requisição.")
-			}
-			return
-		}
-		cli.history = append(cli.history, models.Message{
-			Role:    "assistant",
-			Content: result.Response,
-		})
-		modelName := cli.Client.GetModelName()
-		coloredPrefix := colorize(modelName+":", ColorPurple)
-		renderedResponse := cli.renderMarkdown(result.Response)
-		fmt.Printf("\n%s ", coloredPrefix)
-		cli.typewriterEffect(renderedResponse, 2*time.Millisecond)
-		fmt.Println()
-	case <-sigChan:
-		cancelPrompt()
-		cli.animation.StopThinkingAnimation()
-	}
-}
-
-// Função para isolar o processamento de prompt
-func (cli *ChatCLI) processPrompt(input string) {
-	// Marca que estamos processando
-	atomic.StoreInt32(&cli.isProcessing, 1)
-	defer func() {
-		atomic.StoreInt32(&cli.isProcessing, 0)
-		// Pequeno delay para garantir que tudo foi limpo
-		time.Sleep(50 * time.Millisecond)
-	}()
-
-	// Cria um contexto cancelável com timeout de segurança
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-
-	// Armazena a função de cancelamento
-	cli.cancelMu.Lock()
-	cli.promptCancelFunc = cancel
-	cli.cancelMu.Unlock()
-
-	// Limpa ao sair
-	defer func() {
-		cli.cancelMu.Lock()
-		cli.promptCancelFunc = nil
-		cli.cancelMu.Unlock()
-		cancel()
-	}()
-
-	type promptResult struct {
-		Response string
-		Error    error
-	}
-	resultChan := make(chan promptResult, 1)
-
-	// Canal para sinalizar que a goroutine terminou
-	doneChan := make(chan struct{})
-
-	// Goroutine para chamar a IA
-	go func() {
-		defer close(doneChan)
-
-		userInput, additionalContext := cli.processSpecialCommands(input)
-		cli.history = append(cli.history, models.Message{
-			Role:    "user",
-			Content: userInput + additionalContext,
-		})
-
-		// Chama a IA com o contexto cancelável
-		aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, cli.history)
-
-		// Verifica se o contexto foi cancelado antes de enviar o resultado
-		select {
-		case <-ctx.Done():
-			// Contexto cancelado, não envia resultado
-			return
-		default:
-			// Envia o resultado apenas se não foi cancelado
-			select {
-			case resultChan <- promptResult{Response: aiResponse, Error: err}:
-			case <-ctx.Done():
-				// Contexto foi cancelado enquanto tentava enviar
-			}
-		}
-	}()
-
-	// Mostra animação
-	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
-	defer cli.animation.StopThinkingAnimation()
-
-	// Aguarda resultado, cancelamento ou timeout
-	select {
-	case result := <-resultChan:
-		// Processa o resultado da IA
-		if result.Error != nil {
-			if errors.Is(result.Error, context.Canceled) ||
-				errors.Is(result.Error, context.DeadlineExceeded) ||
-				strings.Contains(result.Error.Error(), "context canceled") {
-				fmt.Println("\n✅ Operação cancelada com sucesso.")
-				// Remove última mensagem do histórico
-				if len(cli.history) > 0 && cli.history[len(cli.history)-1].Role == "user" {
-					cli.history = cli.history[:len(cli.history)-1]
-				}
-			} else {
-				cli.logger.Error("Erro do LLM", zap.Error(result.Error))
-				fmt.Println("\n❌ Ocorreu um erro ao processar a requisição.")
-			}
-			return
-		}
-
-		// Adiciona resposta ao histórico
-		cli.history = append(cli.history, models.Message{
-			Role:    "assistant",
-			Content: result.Response,
-		})
-
-		// Exibe a resposta
-		modelName := cli.Client.GetModelName()
-		coloredPrefix := colorize(modelName+":", ColorPurple)
-		renderedResponse := cli.renderMarkdown(result.Response)
-		fmt.Printf("\n%s ", coloredPrefix)
-		cli.typewriterEffect(renderedResponse, 2*time.Millisecond)
-		fmt.Println()
-
-	case <-ctx.Done():
-		// Contexto cancelado (via Ctrl+C ou timeout)
-		fmt.Println("\n✅ Operação cancelada.")
-
-		// Remove última mensagem do histórico
-		if len(cli.history) > 0 && cli.history[len(cli.history)-1].Role == "user" {
-			cli.history = cli.history[:len(cli.history)-1]
-		}
-
-		// Aguarda a goroutine terminar
-		<-doneChan
-	}
-}
-
-// Processa o resultado do modo multilinha, sem reentrar em multilinha
-func (cli *ChatCLI) handleMultilineResult(content string) {
-	if strings.TrimSpace(content) == "" {
-		return
-	}
-
-	// Salva no histórico da CLI (não envia para LLM ainda)
-	cli.commandHistory = append(cli.commandHistory, content)
-	cli.newCommandsInSession = append(cli.newCommandsInSession, content)
-
-	// Se o conteúdo começar com "/", tratar como comando do sistema (apenas a primeira linha)
-	if strings.HasPrefix(content, "/") {
-		firstLine := strings.TrimSpace(strings.Split(content, "\n")[0])
-		// Evita loop: se for um acionador de multilinha, não reabra, apenas ignore como comando
-		if !cli.shouldEnterMultilineMode(firstLine) {
-			if cli.commandHandler.HandleCommand(firstLine) {
-				os.Exit(0)
-			}
-			return
-		}
-		// Se for /m, /multi, /multiline, ignoramos aqui para não reentrar
-		return
-	}
-
-	// Se contiver @command em alguma linha, executa apenas uma vez
-	if strings.Contains(content, "@command ") {
-		lines := strings.Split(content, "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(strings.ToLower(line), "@command ") {
-				command := strings.TrimPrefix(line, "@command ")
-				cli.executeDirectCommand(command)
-				return
-			}
-		}
-	}
-
-	// Caso contrário, processa como prompt normal
-	cli.processPrompt(content)
-
-}
-
-// keyBinds sem goroutines (síncrono) para evitar "duplicidade" e travamentos
-func (cli *ChatCLI) keyBinds() []prompt.KeyBind {
-	return []prompt.KeyBind{
-		// Ctrl+E: Modo Multilinha (alternativo)
-		{
-			Key: prompt.ControlE,
-			Fn: func(buf *prompt.Buffer) {
-				currentText := buf.Text()
-				buf.Delete(len(buf.Text()))
-
-				fmt.Println()
-				if currentText != "" && currentText != "> " {
-					fmt.Println(colorize("📌 Contexto inicial:", ColorGray))
-					fmt.Println(colorize("│ ", ColorGray) + currentText)
-					fmt.Println()
-				}
-
-				cli.multilineManager.StartMultilineMode()
-				content, ok := cli.multilineManager.GetMultilineInput()
-				if ok && strings.TrimSpace(content) != "" {
-					if currentText != "" && currentText != "> " {
-						content = currentText + "\n" + content
-					}
-					cli.handleMultilineResult(content)
-				}
-				fmt.Print("\n> ")
-			},
-		},
-	}
-
 }
 
 // Start inicia o loop principal do ChatCLI
 func (cli *ChatCLI) Start(ctx context.Context) {
 	defer cli.cleanup()
 
-	if cli.prompt == nil {
-		// Sem TTY: não há modo interativo. Evita pânico no CI.
-		fmt.Println("Modo interativo indisponível (sem TTY). Use -p/--prompt ou pipe via stdin.")
-		return
-	}
-
 	cli.PrintWelcomeScreen()
-	cli.prompt.Run()
+
+	//promptStr := colorize("> ", ColorLime)
+
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("\nAplicação encerrada.")
+			return
+		default:
+			//fmt.Print(colorize("> ", ColorLime))
+
+			correlationID := utils.GenerateUUID()
+			ctxLogger := cli.logger.With(zap.String("correlationID", correlationID))
+
+			input, err := cli.line.Prompt("> ")
+			if err != nil {
+				if err == liner.ErrPromptAborted { // Ctrl+D no prompt
+					fmt.Println("\nSaindo...")
+					return
+				}
+				ctxLogger.Error("Erro ao ler a entrada", zap.Error(err))
+				continue
+			}
+
+			input = strings.TrimSpace(input)
+
+			if input != "" {
+				cli.line.AppendHistory(input)
+				cli.commandHistory = append(cli.commandHistory, input)
+				cli.newCommandsInSession = append(cli.newCommandsInSession, input)
+			}
+
+			// Verificar se o input é um comando direto do sistema
+			if strings.Contains(strings.ToLower(input), "@command ") {
+				command := strings.TrimPrefix(input, "@command ")
+				cli.executeDirectCommand(command)
+				continue
+			}
+
+			if input == "" {
+				continue
+			}
+
+			// Verificar por comandos
+			if strings.HasPrefix(input, "/") || input == "exit" || input == "quit" {
+				if cli.commandHandler.HandleCommand(input) {
+					return
+				}
+				continue
+			}
+
+			// Criar um contexto cancelável para a operação
+			promptCtx, cancelPrompt := context.WithCancel(context.Background())
+			defer cancelPrompt() // Garante que o cancel seja chamado no final do loop
+
+			// Canal para receber a resposta da IA ou o erro
+			type promptResult struct {
+				Response string
+				Error    error
+			}
+			resultChan := make(chan promptResult, 1)
+
+			// Iniciar a chamada à LLM em uma goroutine
+			go func() {
+				userInput, additionalContext := cli.processSpecialCommands(input)
+
+				// Adicionar a mensagem do usuário ao histórico DENTRO da goroutine
+				// para que não seja adicionada se a operação for cancelada antes.
+				cli.history = append(cli.history, models.Message{
+					Role:    "user",
+					Content: userInput + additionalContext,
+				})
+
+				aiResponse, err := cli.Client.SendPrompt(promptCtx, userInput+additionalContext, cli.history)
+				resultChan <- promptResult{Response: aiResponse, Error: err}
+			}()
+
+			// Canal para sinais de interrupção (Ctrl+C)
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, os.Interrupt)
+			defer signal.Stop(sigChan) // Limpa o notificador no final do loop
+
+			// Exibir animação "Pensando..."
+			cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
+
+			// Aguardar a resposta, erro ou sinal de cancelamento
+			select {
+			case result := <-resultChan:
+				// A goroutine terminou (com sucesso ou erro)
+				cli.animation.StopThinkingAnimation()
+				signal.Stop(sigChan) // Parar de ouvir sinais, pois a operação terminou
+
+				if result.Error != nil {
+					cli.logger.Error("Erro do LLM", zap.Error(result.Error))
+					if strings.Contains(result.Error.Error(), "context canceled") {
+						// Não mostrar erro se foi cancelado pelo usuário
+						fmt.Println("Operação cancelada.")
+						// Remover a última mensagem do usuário do histórico, pois a operação não foi concluída
+						if len(cli.history) > 0 && cli.history[len(cli.history)-1].Role == "user" {
+							cli.history = cli.history[:len(cli.history)-1]
+						}
+					} else {
+						fmt.Println("Ocorreu um erro ao processar a requisição.")
+					}
+					continue // Volta para o próximo prompt
+				}
+
+				// Sucesso
+				cli.history = append(cli.history, models.Message{
+					Role:    "assistant",
+					Content: result.Response,
+				})
+
+				// 1. Pega o nome do modelo e colore de roxo
+				modelName := cli.Client.GetModelName()
+				coloredPrefix := colorize(modelName+":", ColorPurple)
+
+				// 2. Renderiza a resposta da IA em Markdown
+				renderedResponse := cli.renderMarkdown(result.Response)
+
+				// 3. Imprime o prefixo colorido e depois a resposta com efeito de digitação
+				fmt.Printf("\n%s ", coloredPrefix)                         // Imprime o prefixo com um espaço
+				cli.typewriterEffect(renderedResponse, 2*time.Millisecond) // Imprime o resto
+				fmt.Println()                                              // Adiciona uma nova linha no final
+
+				//renderedResponse := cli.renderMarkdown(result.Response)
+				//cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
+
+			case <-sigChan:
+				// Sinal de interrupção (Ctrl+C) recebido
+				cancelPrompt() // Cancela o contexto da chamada à API
+				cli.animation.StopThinkingAnimation()
+				// A goroutine receberá o erro de "context canceled" e o select anterior cuidará de limpar o histórico.
+			}
+		}
+	}
 }
 
 // cleanup realiza a limpeza de recursos ao encerrar o ChatCLI
 func (cli *ChatCLI) cleanup() {
+	_ = cli.line.Close()
+
+	// Salvar o histórico
 	if err := cli.historyManager.AppendAndRotateHistory(cli.newCommandsInSession); err != nil {
 		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
 	}
+
+	// Se o cliente for um OpenAIAssistantClient, realizar limpeza específica
 	if assistantClient, ok := cli.Client.(*openai_assistant.OpenAIAssistantClient); ok {
 		if err := assistantClient.Cleanup(); err != nil {
 			cli.logger.Error("Erro na limpeza do OpenAI Assistant", zap.Error(err))
 		}
 	}
+
 	if err := cli.logger.Sync(); err != nil {
 		fmt.Printf("Falha ao sincronizar logger: %v\n", err)
 	}
-}
-
-// getRawInput lê uma única linha do stdin de forma síncrona.
-func getRawInput(promptText string) (string, error) {
-	restoreTerminalState()
-	fmt.Print(promptText)
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		// EOF (Ctrl+D) ou erro de leitura
-		fmt.Println() // Nova linha para limpar a tela
-		return "", err
-	}
-	return strings.TrimSpace(input), nil
 }
 
 // handleSwitchCommand Processa os comando na entrada para atualizar o slug/tenant, ou mudar o modelo para LLM atual.
@@ -728,19 +436,19 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 			if i+1 < len(args) {
 				newSlugName = args[i+1]
 				shouldUpdateToken = true
-				i++
+				i++ // Pular o valor
 			}
 		case "--tenantname":
 			if i+1 < len(args) {
 				newTenantName = args[i+1]
 				shouldUpdateToken = true
-				i++
+				i++ // Pular o valor
 			}
 		case "--model":
 			if i+1 < len(args) {
 				newModel = args[i+1]
 				shouldSwitchModel = true
-				i++
+				i++ // Pular o valor
 			}
 		}
 	}
@@ -781,10 +489,10 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 			fmt.Println("   Verifique se o nome do modelo está correto para o provedor atual.")
 		} else {
 			cli.Client = newClient
-			cli.Model = newModel
+			cli.Model = newModel // Atualiza o modelo no estado do CLI
 			fmt.Printf("✅ Modelo trocado com sucesso para %s (%s)\n", cli.Client.GetModelName(), cli.Provider)
 		}
-		return
+		return // Finaliza após a tentativa de troca de modelo
 	}
 
 	if !shouldUpdateToken && !shouldSwitchModel && len(args) == 1 {
@@ -793,34 +501,23 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 }
 
 func (cli *ChatCLI) switchProvider() {
-	fmt.Println("\n🔄 Provedores disponíveis:")
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("Provedores disponíveis:")
 	availableProviders := cli.manager.GetAvailableProviders()
 	for i, provider := range availableProviders {
 		fmt.Printf("%d. %s\n", i+1, provider)
 	}
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-	choiceInput, err := getRawInput("Selecione o provedor pelo número (ou Enter para cancelar): ")
-
-	// =========================================================
-	// CORREÇÃO: Não sair quando o usuário cancela
-	// =========================================================
+	choiceInput, err := cli.line.Prompt("Selecione o provedor pelo número: ")
 	if err != nil {
-		// EOF (Ctrl+D) ou outro erro - apenas cancela a operação
-		fmt.Println("\n❌ Seleção cancelada. Mantendo o provedor atual.")
+		if err == liner.ErrPromptAborted {
+			fmt.Println("\nEntrada abortada!")
+			return
+		}
+		cli.logger.Error("Erro ao ler a escolha", zap.Error(err))
 		return
 	}
-
 	choiceInput = strings.TrimSpace(choiceInput)
 
-	// Se o usuário apenas pressionar Enter, cancela
-	if choiceInput == "" {
-		fmt.Println("❌ Nenhuma seleção feita. Mantendo o provedor atual.")
-		return
-	}
-
-	// Valida a escolha
 	choiceIndex := -1
 	for i := range availableProviders {
 		if fmt.Sprintf("%d", i+1) == choiceInput {
@@ -830,99 +527,67 @@ func (cli *ChatCLI) switchProvider() {
 	}
 
 	if choiceIndex == -1 {
-		fmt.Println("❌ Escolha inválida. Mantendo o provedor atual.")
+		fmt.Println("Escolha inválida.")
 		return
 	}
 
-	// Procede com a troca
 	newProvider := availableProviders[choiceIndex]
 	var newModel string
-
-	// Define o modelo padrão baseado no provider
-	switch newProvider {
-	case "OPENAI":
+	if newProvider == "OPENAI" {
 		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel)
-	case "CLAUDEAI":
+	}
+
+	if newProvider == "CLAUDEAI" {
 		newModel = utils.GetEnvOrDefault("CLAUDEAI_MODEL", config.DefaultClaudeAIModel)
-	case "OPENAI_ASSISTANT":
+	}
+
+	if newProvider == "OPENAI_ASSISTANT" {
 		newModel = utils.GetEnvOrDefault("OPENAI_ASSISTANT_MODEL", "")
 		if newModel == "" {
-			newModel = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel)
+			newModel = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel) // se não houver, usa o mesmo dos completions ou seta default
 		}
-	case "GOOGLEAI":
+	}
+
+	if newProvider == "GOOGLEAI" {
 		newModel = utils.GetEnvOrDefault("GOOGLEAI_MODEL", config.DefaultGoogleAIModel)
 	}
 
-	// Tenta obter o novo cliente
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
 	if err != nil {
 		cli.logger.Error("Erro ao trocar de provedor", zap.Error(err))
-		fmt.Printf("❌ Erro ao trocar para %s. Mantendo o provedor atual.\n", newProvider)
 		return
 	}
 
-	// Atualiza o cliente
 	cli.Client = newClient
 	cli.Provider = newProvider
 	cli.Model = newModel
-	fmt.Printf("✅ Trocado com sucesso para %s (%s)\n\n", cli.Client.GetModelName(), cli.Provider)
-}
-
-func restoreTerminalState() {
-	if runtime.GOOS == "windows" {
-		return
-	}
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return
-	}
-	// Se não for TTY (ex.: pipe em testes), não tente stty
-	if (fi.Mode() & os.ModeCharDevice) == 0 {
-		return
-	}
-	cmd := exec.Command("stty", "sane")
-	cmd.Stdin = os.Stdin
-	_ = cmd.Run() // ignorar erro
+	fmt.Printf("Trocado para %s (%s)\n\n", cli.Client.GetModelName(), cli.Provider)
 }
 
 func (cli *ChatCLI) showHelp() {
-	fmt.Println("\n" + colorize("╔══════════════════════════════════════════╗", ColorCyan))
-	fmt.Println(colorize("║           COMANDOS DISPONÍVEIS           ║", ColorCyan))
-	fmt.Println(colorize("╚══════════════════════════════════════════╝", ColorCyan))
-
-	fmt.Println("\n" + colorize("📝 ENTRADA MULTILINHA:", ColorGreen))
-	fmt.Println("  " + colorize("Ctrl+E", ColorCyan) + "     - Ativa modo multilinha (E = Extended)")
-	fmt.Println("  " + colorize("/m ou /multi", ColorCyan) + "     - Comando para modo multilinha")
-	fmt.Println("  " + colorize("Enter", ColorCyan) + "     - Digite para nova linha")
-	fmt.Println("  " + colorize("Ctrl+D", ColorCyan) + "     - Pressione para enviar (D = Done)")
-	fmt.Println("  " + colorize("/mcancel", ColorCyan) + "        - Digite para cancelar")
-
-	fmt.Println("\n" + colorize("🔧 COMANDOS CONTEXTUAIS:", ColorGreen))
-	fmt.Println("  " + colorize("@history", ColorCyan) + "   - Adiciona histórico do shell")
-	fmt.Println("  " + colorize("@git", ColorCyan) + "       - Adiciona informações do Git")
-	fmt.Println("  " + colorize("@env", ColorCyan) + "       - Adiciona variáveis de ambiente")
-	fmt.Println("  " + colorize("@file", ColorCyan) + "      - Adiciona conteúdo de arquivo/diretório")
-	fmt.Println("  " + colorize("@command <seu_comando>", ColorCyan) + "   - Executa comando no sistema")
-	fmt.Println("  " + colorize("@command -i <seu_comando>", ColorCyan) + "   - Executa comando interativo no sistema sem salvar no histórico")
-	fmt.Println("  " + colorize("@command --ai <seu_comando> > <contexto>", ColorCyan) + "   - Envia o output para a AI")
-
-	fmt.Println("\n" + colorize("⚙️ COMANDOS DO SISTEMA:", ColorGreen))
-	fmt.Println("  " + colorize("/exit ou /quit", ColorCyan) + "      - Sair do ChatCLI")
-	fmt.Println("  " + colorize("/switch", ColorCyan) + "    - Trocar provedor")
-	fmt.Println("  " + colorize("/switch --model", ColorCyan) + "    - Trocar modelo")
-	fmt.Println("  " + colorize("/switch --slugname <slug> --tenantname <tenant>", ColorCyan) + "    - Define slug e tenant")
-	fmt.Println("  " + colorize("/reload", ColorCyan) + "    - Recarregar variáveis e configurações")
-	fmt.Println("  " + colorize("/config, /status ou /settings", ColorCyan) + "    - Mostrar configuração atual")
-	fmt.Println("  " + colorize("/agent ou /run", ColorCyan) + "     - Modo agente para executar tarefas")
-	fmt.Println("  " + colorize("/newsession", ColorCyan) + " - Nova sessão de conversa")
-	fmt.Println("  " + colorize("/version ou /v", ColorCyan) + "   - Informações de versão")
-
-	fmt.Println("\n" + colorize("⌨️ ATALHOS GERAIS:", ColorGreen))
-	fmt.Println("  " + colorize("↑/↓", ColorCyan) + "        - Navegar pelo histórico")
-	fmt.Println("  " + colorize("Tab", ColorCyan) + "        - Autocompletar")
-	fmt.Println("  " + colorize("Ctrl+C", ColorCyan) + "     - Cancelar/Sair")
-	fmt.Println("  " + colorize("Ctrl+D", ColorCyan) + "     - Finalizar entrada/Sair")
-	fmt.Println()
+	fmt.Println("Comandos disponíveis:")
+	fmt.Println("@history - Adiciona o histórico do shell ao contexto")
+	fmt.Println("@git - Adiciona informações do Git ao contexto")
+	fmt.Println("@env - Adiciona variáveis de ambiente ao contexto")
+	fmt.Println("@file <caminho_do_arquivo> - Adiciona o conteúdo de um arquivo ao contexto")
+	fmt.Println("@command <seu_comando> - para executar um comando diretamente no sistema")
+	fmt.Println("@command --ai <seu_comando> para enviar o ouput para a AI de forma direta e '>' {maior} <seu contexto> para que a AI faça algo.")
+	fmt.Println("@command -i <seu_comando> - para executar um comando interativo")
+	fmt.Println("/exit ou /quit - Sai do ChatCLI")
+	fmt.Println("/switch - Troca o provedor de LLM")
+	fmt.Println("/switch --model <nome-do-modelo> - Troca o modelo do provedor atual")
+	fmt.Println("/switch --slugname <slug> --tenantname <tenant> - Define slug e tenant")
+	fmt.Println("/reload - para recarregar as variáveis e reconfigurar o chatcli.")
+	fmt.Println("/config, /status ou /settings - Mostra as configurações e o estado atual (sem exibir segredos)")
+	fmt.Println("/nextchunk - Processa o próximo chunk de código quando usando @file com chunks.")
+	fmt.Println("/retry - Retenta o processamento do último chunk que falhou.")
+	fmt.Println("/retryall - Retenta o processamento de todos os chunks que falharam.")
+	fmt.Println("/skipchunk - Pula explicitamente um chunk, ignorando seu conteúdo.")
+	fmt.Println("/agent <consulta> - Inicia o modo agente que analisa e executa comandos para resolver sua tarefa")
+	fmt.Println("/run <consulta> - Alias para /agent")
+	fmt.Println("/newsession - Inicia uma nova sessão de conversa, limpando o histórico atual")
+	fmt.Println("/version ou /v - Mostra informações sobre a versão instalada e verifica por atualizações")
+	fmt.Printf("\n")
 }
 
 // ApplyOverrides atualiza provider/model e reobtém o client correspondente
@@ -1988,26 +1653,32 @@ func filterEmptyLines(lines []string) []string {
 func (cli *ChatCLI) executeDirectCommand(command string) {
 	fmt.Println("Executando comando:", command)
 
+	// Verificar se o comando é interativo
 	isInteractive := false
 	if strings.HasPrefix(command, "-i ") || strings.HasPrefix(command, "--interactive ") {
 		isInteractive = true
+		// Remover a flag do comando
 		command = strings.TrimPrefix(command, "-i ")
 		command = strings.TrimPrefix(command, "--interactive ")
 	}
 
+	// Verificar se o comando contém a flag --send-ai e pipe |
 	sendToAI := false
 	var aiContext string
 	if strings.Contains(command, "-ai") {
 		sendToAI = true
+		// Remover a flag do comando
 		command = strings.Replace(command, "-ai", "", 1)
 	}
 
+	// Verificar se há um maior > no comando
 	if strings.Contains(command, ">") {
 		parts := strings.Split(command, ">")
 		command = strings.TrimSpace(parts[0])
 		aiContext = strings.TrimSpace(parts[1])
 	}
 
+	// Obter o shell do usuário
 	userShell := utils.GetUserShell()
 	shellPath, err := exec.LookPath(userShell)
 	if err != nil {
@@ -2016,55 +1687,77 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 		return
 	}
 
+	// Obter o caminho do arquivo de configuração do shell
 	shellConfigPath := utils.GetShellConfigFilePath(userShell)
 	if shellConfigPath == "" {
 		fmt.Println("Não foi possível determinar o arquivo de configuração para o shell:", userShell)
 		return
 	}
 
+	// Construir o comando para carregar o arquivo de configuração e executar o comando do usuário
 	shellCommand := fmt.Sprintf("source %s && %s", shellConfigPath, command)
+
 	cmd := exec.Command(shellPath, "-c", shellCommand)
 
 	if isInteractive {
+		// Conectar os streams de entrada, saída e erro do comando ao terminal
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
-		restoreTerminalState()
+		// Fechar o liner para liberar o terminal antes de executar o comando interativo
+		_ = cli.line.Close()
 
+		// Executar o comando
 		err = cmd.Run()
+
+		// Reabrir o liner após a execução do comando
+		cli.line = liner.NewLiner()
+		cli.line.SetCtrlCAborts(true)
+		cli.loadHistory()
+		cli.line.SetCompleter(cli.completer) // Reconfigurar o autocompletar
 
 		if err != nil {
 			fmt.Println("Erro ao executar comando:", err)
 		}
 
-		fmt.Println("\nA saída do comando interativo não foi capturada para o histórico.")
+		// Informar que a saída não foi capturada
+		fmt.Println("A saída do comando não pôde ser capturada para o histórico.")
+
+		// Armazenar apenas o comando no histórico
 		cli.history = append(cli.history, models.Message{
 			Role:    "system",
 			Content: fmt.Sprintf("Comando executado: %s", command),
 		})
 		cli.lastCommandOutput = ""
 	} else {
+		// Capturar a saída do comando
 		outputRaw, err := cmd.CombinedOutput()
 		safeOutput := utils.SanitizeSensitiveText(string(outputRaw))
 		safeCmd := utils.SanitizeSensitiveText(command)
 
+		// Exibir a saída
 		fmt.Println("Saída do comando:\n\n", safeOutput)
 
 		if err != nil {
 			fmt.Println("Erro ao executar comando:", err)
 		}
 
+		// Armazenar a saída no histórico
 		cli.history = append(cli.history, models.Message{
 			Role:    "system",
 			Content: fmt.Sprintf("Comando: %s\nSaída:\n%s", safeCmd, safeOutput),
 		})
 		cli.lastCommandOutput = safeOutput
 
+		// se a flag --ai foi passada enviar o output para a IA
 		if sendToAI {
 			cli.sendOutputToAI(cli.lastCommandOutput, aiContext)
 		}
 	}
+
+	// Adicionar o comando ao histórico do liner para persistir em .chatcli_history
+	//cli.line.AppendHistory(fmt.Sprintf("@command %s", command))
 }
 
 // sendOutputToAI envia o output do comando para a IA com o contexto adicional
@@ -2111,87 +1804,141 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderResponse), 2*time.Millisecond)
 }
 
+// loadHistory carrega o histórico do arquivo
+func (cli *ChatCLI) loadHistory() {
+	historyFile := ".chatcli_history"
+	f, err := os.Open(historyFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return // Nenhum histórico para carregar
+		}
+		cli.logger.Warn("Não foi possível carregar o histórico:", zap.Error(err))
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		cli.commandHistory = append(cli.commandHistory, line)
+		cli.line.AppendHistory(line) // Adicionar ao liner para navegação
+	}
+
+	if err := scanner.Err(); err != nil {
+		cli.logger.Warn("Erro ao ler o histórico:", zap.Error(err))
+	}
+}
+
 // Função de autocompletar
-func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
-	var suggestions []prompt.Suggest
-	line := d.TextBeforeCursor()
-	word := d.GetWordBeforeCursor()
+func (cli *ChatCLI) completer(line string) []string {
+	var completions []string
+	trimmedLine := strings.TrimSpace(line)
 
-	// 1. Sugestões para comandos internos (ex: /switch)
-	if strings.HasPrefix(line, "/") {
-		commands := []prompt.Suggest{
-			{Text: "exit", Description: "Sair do ChatCLI"},
-			{Text: "quit", Description: "Sair do ChatCLI"},
-			{Text: "switch", Description: "Trocar o provedor de LLM"},
-			{Text: "help", Description: "Mostrar ajuda"},
-			{Text: "reload", Description: "Recarregar configurações do .env"},
-			{Text: "config", Description: "Mostrar configuração atual"},
-			{Text: "multi", Description: "Ativar modo de múltiplas linhas"},      // <-- ADICIONE
-			{Text: "multiline", Description: "Ativar modo de múltiplas linhas"},  // <-- ADICIONE
-			{Text: "m", Description: "Ativar modo de múltiplas linhas (atalho)"}, // <-- ADICIONE
-			{Text: "status", Description: "Mostrar configuração atual"},
-			{Text: "settings", Description: "Mostrar configuração atual"},
-			{Text: "version", Description: "Verificar a versão"},
-			{Text: "v", Description: "Verificar a versão"},
-			{Text: "newsession", Description: "Iniciar uma nova sessão"},
-			{Text: "nextchunk", Description: "Carregar o próximo chunk de arquivo"},
-			{Text: "retry", Description: "Tentar novamente o chunk que falhou"},
-			{Text: "retryall", Description: "Tentar novamente todos os chunks que falharam"},
-			{Text: "skipchunk", Description: "Pular o chunk atual"},
-			{Text: "agent", Description: "Iniciar modo agente"},
-			{Text: "run", Description: "Iniciar modo agente"},
-		}
-		return prompt.FilterHasPrefix(commands, line, true)
-	}
+	commands := []string{"/exit", "/quit", "/switch", "/help", "/reload"}
+	specialCommands := []string{"@history", "@git", "@env", "@file", "@command"}
 
-	// 2. Sugestões para comandos especiais (ex: @file)
-	if strings.HasPrefix(word, "@") {
-		specialCommands := []prompt.Suggest{
-			{Text: "history", Description: "Adicionar histórico do shell"},
-			{Text: "git", Description: "Adicionar contexto do Git"},
-			{Text: "env", Description: "Adicionar variáveis de ambiente"},
-			{Text: "file", Description: "Adicionar conteúdo de arquivo/diretório"},
-			{Text: "command", Description: "Executar um comando no sistema"},
-		}
-		return prompt.FilterHasPrefix(specialCommands, word, true)
-	}
-
-	// 3. Autocompletar caminhos de arquivo após "@file "
-	if strings.Contains(line, "@file ") {
-		parts := strings.Split(line, "@file ")
-		if len(parts) > 1 {
-			prefix := parts[len(parts)-1]
-			for _, path := range cli.completeFilePath(prefix) {
-				suggestions = append(suggestions, prompt.Suggest{Text: path})
+	if strings.HasPrefix(trimmedLine, "/") {
+		for _, cmd := range commands {
+			if strings.HasPrefix(cmd, trimmedLine) {
+				completions = append(completions, cmd)
 			}
-			// Não use FilterHasPrefix aqui, pois completeFilePath já faz a filtragem
-			return suggestions
 		}
+		return completions
 	}
 
-	// 4. Default: Histórico, comandos do sistema e caminhos
-	if word == "" {
-		return nil
+	// Verifica comandos especiais
+	if strings.HasPrefix(trimmedLine, "@") {
+		for _, scmd := range specialCommands {
+			if strings.HasPrefix(scmd, trimmedLine) {
+				completions = append(completions, scmd)
+			}
+		}
+
+		// Caso para @file
+		if strings.HasPrefix(trimmedLine, "@file ") {
+			prefix := strings.TrimPrefix(trimmedLine, "@file ")
+			fileCompletions := cli.completeFilePath(prefix)
+			// Reconstruir a linha com @file, mantendo o prefixo já digitado
+			for _, fc := range fileCompletions {
+				completions = append(completions, "@file "+fc)
+			}
+			return completions
+		}
+
+		// Caso para @command
+		if strings.HasPrefix(trimmedLine, "@command ") {
+			commandLine := strings.TrimPrefix(trimmedLine, "@command ")
+			tokens := strings.Fields(commandLine)
+
+			if len(tokens) == 0 {
+				systemCmds := cli.completeSystemCommands("")
+				for _, sc := range systemCmds {
+					completions = append(completions, "@command "+sc)
+				}
+				return completions
+			}
+
+			if len(tokens) == 1 {
+				lastToken := tokens[0]
+				systemCmds := cli.completeSystemCommands(lastToken)
+				for _, sc := range systemCmds {
+					completions = append(completions, "@command "+sc)
+				}
+				return completions
+			}
+
+			// Mais de um token, último é path
+			lastToken := tokens[len(tokens)-1]
+			fileCompletions := cli.completeFilePath(lastToken)
+
+			// Montar prefixo com @command + todos os tokens menos o último
+			prefix := "@command " + strings.Join(tokens[:len(tokens)-1], " ") + " "
+			for _, fc := range fileCompletions {
+				completions = append(completions, prefix+fc)
+			}
+			return completions
+		}
+
+		return completions
 	}
 
-	// Adiciona comandos do histórico
+	// Caso não seja / nem @, tratamos o último token
+	tokens := strings.Fields(line)
+	var lastToken string
+	var prefix string
+	if len(tokens) > 0 {
+		lastToken = tokens[len(tokens)-1]
+		// prefixo é tudo antes do último token
+		prefix = strings.Join(tokens[:len(tokens)-1], " ")
+		if prefix != "" {
+			prefix += " "
+		}
+	} else {
+		lastToken = trimmedLine
+	}
+
+	// Histórico
 	for _, historyCmd := range cli.commandHistory {
-		if strings.HasPrefix(historyCmd, word) {
-			suggestions = append(suggestions, prompt.Suggest{Text: historyCmd})
+		if strings.HasPrefix(historyCmd, lastToken) {
+			// Reconstituir a linha adicionando o completion do histórico
+			completions = append(completions, prefix+historyCmd)
 		}
 	}
 
-	// Adiciona caminhos de arquivo/diretório
-	for _, path := range cli.completeFilePath(word) {
-		suggestions = append(suggestions, prompt.Suggest{Text: path})
+	// Caminhos de arquivos
+	fileCompletions := cli.completeFilePath(lastToken)
+	for _, fc := range fileCompletions {
+		// Agora mantemos o que foi digitado antes do lastToken
+		completions = append(completions, prefix+fc)
 	}
 
-	// Adiciona comandos do sistema
-	for _, cmd := range cli.completeSystemCommands(word) {
-		suggestions = append(suggestions, prompt.Suggest{Text: cmd})
+	// Comandos do sistema
+	commandCompletions := cli.completeSystemCommands(lastToken)
+	for _, cc := range commandCompletions {
+		completions = append(completions, prefix+cc)
 	}
 
-	return prompt.FilterHasPrefix(suggestions, word, true)
+	return completions
 }
 
 // completeFilePath autocompleta caminhos de arquivos

@@ -34,7 +34,6 @@ jobs:
     needs: [release_please]
     if: needs.release_please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
-    environment: production
     steps:
       - name: Checkout tag
         uses: actions/checkout@v4
