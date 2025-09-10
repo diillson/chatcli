@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.0](https://github.com/diillson/chatcli/compare/v1.21.0...v1.22.0) (2025-09-10)
+
+
+### Features
+
+* **cli:** Enhance AgentMode UX and refactor input handling ([9e527ce](https://github.com/diillson/chatcli/commit/9e527ceb37a6ed23884aa7f3bba87668360eb870))
+
 ## [1.21.0](https://github.com/diillson/chatcli/compare/v1.20.1...v1.21.0) (2025-09-07)
 
 
