@@ -8,6 +8,7 @@ package manager
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/diillson/chatcli/config"
@@ -182,6 +183,7 @@ func (m *LLMManagerImpl) GetAvailableProviders() []string {
 	for provider := range m.clients {
 		providers = append(providers, provider)
 	}
+	sort.Strings(providers)
 	return providers
 }
 

@@ -76,7 +76,6 @@ func main() {
 	// Configurar o contexto para o shutdown gracioso
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	handleGracefulShutdown(cancel, logger)
 
 	// Verificar variáveis de ambiente e informar o usuário
 	utils.CheckEnvVariables(logger)
@@ -101,16 +100,35 @@ func main() {
 		logger.Fatal("Erro ao inicializar o ChatCLI", zap.Error(err))
 	}
 
+	// Configurar manipulador de sinais DEPOIS de criar chatCLI
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT)
+
+	go func() {
+		for range sigChan {
+			// Este é o truque: verificamos se está executando
+			if chatCLI.IsExecuting() {
+				logger.Info("Cancelando operação em andamento")
+				chatCLI.CancelOperation()
+				// NÃO sair do programa, apenas cancelar a operação
+			} else {
+				logger.Info("Encerrando aplicação")
+				os.Exit(0)
+			}
+		}
+	}()
+
 	// Modo one-shot: se acionado, tratar e sair
 	if chatCLI.HandleOneShotOrFatal(ctx, opts) {
 		return
 	}
 
+	handleGracefulShutdown(cancel, logger)
+
 	// Caso não for oneshot, segue no modo interativo
 	chatCLI.Start(ctx)
 }
 
-// handleGracefulShutdown configura o tratamento de sinais para um shutdown gracioso
 func handleGracefulShutdown(cancelFunc context.CancelFunc, logger *zap.Logger) {
 	signals := make(chan os.Signal, 1)
 	// Capturar sinais de interrupção e término
