@@ -11,6 +11,7 @@ const (
 	ColorGray   = "\033[90m"
 	ColorPurple = "\033[35m"
 	ColorBold   = "\033[1m"
+	ColorYellow = "\033[33m"
 )
 
 // colorize aplica uma cor a uma string para uso geral com fmt.Print.
