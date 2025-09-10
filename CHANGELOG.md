@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.1](https://github.com/diillson/chatcli/compare/v1.22.0...v1.22.1) (2025-09-10)
+
+
+### Bug Fixes
+
+* **dependencies:** remove unused modules and migrate `syscall` to `x/sys/unix` in `cli/cli.go` ([#225](https://github.com/diillson/chatcli/issues/225)) ([#226](https://github.com/diillson/chatcli/issues/226)) ([de9f6c5](https://github.com/diillson/chatcli/commit/de9f6c5b6832c0331ad65f0c9703bd921b97576a))
+
 ## [1.22.0](https://github.com/diillson/chatcli/compare/v1.21.0...v1.22.0) (2025-09-10)
 
 
