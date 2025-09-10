@@ -1001,7 +1001,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 	var lastError string
 
 	// --- CABEÇALHO DINÂMICO ---
-	titleContent := fmt.Sprintf(" 🚀 EXECUTANDO: ")
+	titleContent := fmt.Sprintf(" 🚀 EXECUTANDO: %s", block.Language)
 	contentWidth := visibleLen(titleContent)
 	topBorder := "╭" + strings.Repeat("─", contentWidth) + "╮"
 	fmt.Println("\n" + colorize(topBorder, ColorGray))
