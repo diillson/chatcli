@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/sys/unix"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,7 +20,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/c-bata/go-prompt"
@@ -547,7 +547,7 @@ func (cli *ChatCLI) forceRefreshPrompt() {
 		return
 	}
 	// Enviar o sinal de redimensionamento de janela
-	if err := p.Signal(syscall.SIGWINCH); err != nil {
+	if err := p.Signal(unix.SIGWINCH); err != nil {
 		cli.logger.Warn("Não foi possível enviar o sinal SIGWINCH para forçar o refresh", zap.Error(err))
 	}
 }
