@@ -40,7 +40,6 @@ type CommandContextInfo struct {
 	FileExtension string
 	IsScript      bool
 	ScriptType    string // shell, python, etc.
-	isScript      bool
 }
 
 type SourceType int

@@ -87,10 +87,6 @@ type ChatCLI struct {
 	operationCancel      context.CancelFunc
 	isExecuting          atomic.Bool
 	processingDone       chan struct{}
-	wasCancelled         bool
-	promptInstance       *prompt.Prompt
-	exitAgentMode        bool
-	shouldEnterAgentMode bool
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -356,7 +352,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			fmt.Println("🛑 Operação cancelada com sucesso!\n")
+			fmt.Println("🛑 Operação cancelada com sucesso!")
 			if len(cli.history) > 0 && cli.history[len(cli.history)-1].Role == "user" {
 				cli.history = cli.history[:len(cli.history)-1]
 			}
@@ -1035,34 +1031,52 @@ func extractFileCommandOptions(input string) ([]string, map[string]string, error
 	var paths []string
 	options := make(map[string]string)
 
-	// Regex para capturar @file com suas opções
-	// Exemplo: @file --mode=summary ~/project
-	re := regexp.MustCompile(`@file\s+((?:--\w+=\w+\s+)*)([\w~/.-]+)`)
+	// Regex atualizada para encontrar blocos @file com opções e caminho
+	// Aceita tanto "--key=value" quanto "--key value"
+	re := regexp.MustCompile(`@file((?:\s+--\w+(?:(?:=|\s+)\S+)?)*\s+[\w~/.-]+/?[\w.-]*)`)
 	matches := re.FindAllStringSubmatch(input, -1)
 
 	for _, match := range matches {
-		if len(match) >= 3 {
-			// Extrair opções
-			optionStr := strings.TrimSpace(match[1])
-			if optionStr != "" {
-				optionParts := strings.Fields(optionStr)
-				for _, part := range optionParts {
-					if strings.HasPrefix(part, "--") {
-						keyVal := strings.SplitN(part[2:], "=", 2)
-						if len(keyVal) == 2 {
-							options[keyVal[0]] = keyVal[1]
-						}
-					}
-				}
-			}
+		if len(match) < 2 {
+			continue
+		}
 
-			// Adicionar caminho
-			paths = append(paths, match[2])
+		// Divide o bloco de comando em tokens
+		tokens := strings.Fields(match[1])
+		var currentPath string
+
+		// Itera sobre os tokens para separar opções do caminho
+		i := 0
+		for i < len(tokens) {
+			token := tokens[i]
+			if strings.HasPrefix(token, "--") {
+				key := strings.TrimPrefix(token, "--")
+				// Formato --key=value
+				if parts := strings.SplitN(key, "=", 2); len(parts) == 2 {
+					options[parts[0]] = parts[1]
+					i++
+					// Formato --key value
+				} else if i+1 < len(tokens) && !strings.HasPrefix(tokens[i+1], "--") {
+					options[key] = tokens[i+1]
+					i += 2 // Pula a chave e o valor
+				} else {
+					// Opção sem valor (flag booleana)
+					options[key] = "true"
+					i++
+				}
+			} else {
+				// O primeiro token que não é opção é o caminho do arquivo
+				currentPath = token
+				break // Para a análise de opções para este comando @file
+			}
+		}
+		if currentPath != "" {
+			paths = append(paths, currentPath)
 		}
 	}
 
-	if len(paths) == 0 {
-		return nil, nil, fmt.Errorf("nenhum caminho válido encontrado após @file")
+	if len(paths) == 0 && len(matches) > 0 {
+		return nil, nil, fmt.Errorf("comando @file encontrado, mas nenhum caminho válido foi especificado")
 	}
 
 	return paths, options, nil
@@ -1074,50 +1088,6 @@ func (cli *ChatCLI) getTokenEstimatorForCurrentLLM() func(string) int {
 	return func(text string) int {
 		// Aproximadamente 4 caracteres por token para a maioria dos modelos
 		return len(text) / 4
-	}
-}
-
-// handleAgentCommand processa o comando /agent para entrar no modo agente
-func (cli *ChatCLI) handleAgentCommand(userInput string) {
-	cli.interactionState = StateAgentMode
-	defer func() {
-		cli.interactionState = StateNormal
-		cli.forceRefreshPrompt() // Força o redesenho do prompt ❯ ao sair
-	}()
-	// Extrair a consulta após o comando /agent ou /run
-	query := ""
-	if strings.HasPrefix(userInput, "/agent") {
-		query = strings.TrimSpace(strings.TrimPrefix(userInput, "/agent"))
-	} else {
-		query = strings.TrimSpace(strings.TrimPrefix(userInput, "/run"))
-	}
-
-	if query == "" {
-		fmt.Println("⚠️ É necessário fornecer uma consulta após o comando.")
-		fmt.Println("Exemplo: /agent Como posso listar todos os arquivos PDF neste diretório?")
-		return
-	}
-
-	fmt.Printf("\n🤖 Entrando no modo agente com a consulta: \"%s\"\n", query)
-	fmt.Println("O agente analisará sua solicitação e sugerirá comandos para resolver.")
-	fmt.Println("Você poderá revisar e aprovar cada comando antes da execução.")
-
-	// Iniciar o modo agente com a consulta
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-
-	// Processar contextos especiais como em comandos normais
-	additionalContext := ""
-	query, additionalContext = cli.processSpecialCommands(query)
-
-	// Assegurar que o modo agente está inicializado
-	if cli.agentMode == nil {
-		cli.agentMode = NewAgentMode(cli, cli.logger)
-	}
-
-	err := cli.agentMode.Run(ctx, query, additionalContext)
-	if err != nil {
-		fmt.Printf("❌ Erro no modo agente: %v\n", err)
 	}
 }
 
@@ -1748,55 +1718,14 @@ func (cli *ChatCLI) processDirectorySmart(path string, query string, tokenEstima
 	return builder.String(), nil
 }
 
-// Função auxiliar para analisar campos, considerando aspas
-func parseFields(input string) ([]string, error) {
-	var fields []string
-	var current strings.Builder
-	inQuotes := false
-
-	for i := 0; i < len(input); i++ {
-		char := input[i]
-		if char == '"' {
-			inQuotes = !inQuotes
-			continue
-		}
-		if char == ' ' && !inQuotes {
-			if current.Len() > 0 {
-				fields = append(fields, current.String())
-				current.Reset()
-			}
-			continue
-		}
-		current.WriteByte(char)
-	}
-	if current.Len() > 0 {
-		fields = append(fields, current.String())
-	}
-
-	if inQuotes {
-		return nil, fmt.Errorf("aspas não fechadas no comando")
-	}
-
-	return fields, nil
-}
-
 // removeAllFileCommands remove todos os comandos @file da entrada do usuário
 func removeAllFileCommands(input string) string {
-	tokens, _ := parseFields(input) // Ignoramos o erro aqui porque já foi tratado
-	var filtered []string
-	skipNext := false
-	for i := 0; i < len(tokens); i++ {
-		if skipNext {
-			skipNext = false
-			continue
-		}
-		if tokens[i] == "@file" {
-			skipNext = true
-			continue
-		}
-		filtered = append(filtered, tokens[i])
-	}
-	return strings.Join(filtered, " ")
+	// Usa uma regex similar à de extração para encontrar e remover todos os blocos @file
+	re := regexp.MustCompile(`@file((?:\s+--\w+(?:(?:=|\s+)\S+)?)*\s+[\w~/.-]+/?[\w.-]*)`)
+	cleaned := re.ReplaceAllString(input, "")
+
+	// Limpa espaços em branco extras que podem ter sido deixados para trás
+	return strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(cleaned, " "))
 }
 
 // filterEmptyLines remove linhas vazias
@@ -1950,31 +1879,6 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 	// Exibir a resposta da IA com efeito de digitação
 	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderResponse), 2*time.Millisecond)
 }
-
-// loadHistory carrega o histórico do arquivo
-//func (cli *ChatCLI) loadHistory() {
-//	historyFile := ".chatcli_history"
-//	f, err := os.Open(historyFile)
-//	if err != nil {
-//		if os.IsNotExist(err) {
-//			return // Nenhum histórico para carregar
-//		}
-//		cli.logger.Warn("Não foi possível carregar o histórico:", zap.Error(err))
-//		return
-//	}
-//	defer func() { _ = f.Close() }()
-//
-//	scanner := bufio.NewScanner(f)
-//	for scanner.Scan() {
-//		line := scanner.Text()
-//		cli.commandHistory = append(cli.commandHistory, line)
-//		cli.line.AppendHistory(line) // Adicionar ao liner para navegação
-//	}
-//
-//	if err := scanner.Err(); err != nil {
-//		cli.logger.Warn("Erro ao ler o histórico:", zap.Error(err))
-//	}
-//}
 
 // completer (versão final, flexível para @comandos, restritiva para /comandos)
 func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
