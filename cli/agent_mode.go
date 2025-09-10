@@ -1001,11 +1001,11 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 	var lastError string
 
 	// --- CABEÇALHO DINÂMICO ---
-	titleContent := fmt.Sprintf(" 🚀 EXECUTANDO: %s ", block.Description)
+	titleContent := fmt.Sprintf(" 🚀 EXECUTANDO: ")
 	contentWidth := visibleLen(titleContent)
 	topBorder := "╭" + strings.Repeat("─", contentWidth) + "╮"
 	fmt.Println("\n" + colorize(topBorder, ColorGray))
-	fmt.Println(colorize("│", ColorGray) + colorize(titleContent, ColorLime+ColorBold) + colorize("│", ColorGray))
+	fmt.Println(colorize(titleContent, ColorLime+ColorBold))
 
 	// Adiciona uma versão simples ao log para a IA
 	allOutput.WriteString(fmt.Sprintf("\nExecutando: %s (tipo: %s)\n", block.Description, block.Language))
@@ -1083,15 +1083,15 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 
 				if confirm != "sim, quero executar conscientemente" {
 					outText := "Execução do comando perigoso ABORTADA.\n"
-					fmt.Println(colorize(" │ ", ColorGray) + colorize(outText, ColorYellow))
+					fmt.Println(colorize(outText, ColorYellow))
 					allOutput.WriteString(outText)
 					continue
 				}
-				fmt.Println(colorize(" │ ", ColorGray) + colorize("⚠️ Confirmação recebida. Executando comando perigoso...", ColorYellow))
+				fmt.Println(colorize("⚠️ Confirmação recebida. Executando comando perigoso...", ColorYellow))
 			}
 
 			header := fmt.Sprintf("⚙️ Comando %d/%d: %s\n", i+1, len(block.Commands), cmd)
-			fmt.Println(colorize(" │ ", ColorGray) + header)
+			fmt.Println(header)
 			allOutput.WriteString(header)
 
 			if !isInteractive && mightBeInteractive(cmd, block.ContextInfo) {
@@ -1100,7 +1100,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 
 			if isInteractive {
 				outText := "🖥️  Executando em modo interativo. O controle será passado para o comando.\n"
-				fmt.Println(colorize(" │ ", ColorGray) + colorize(outText, ColorGray))
+				fmt.Println(colorize(outText, ColorGray))
 				allOutput.WriteString(outText)
 
 				// Pausa para o usuário ler a mensagem antes de entregar o terminal
@@ -1111,12 +1111,12 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 				err := a.executeInteractiveCommand(ctx, shell, cmd)
 				if err != nil {
 					errMsg := fmt.Sprintf("❌ Erro no comando interativo: %v\n", err)
-					fmt.Println(colorize(" │ ", ColorGray) + errMsg) // Tenta imprimir dentro da caixa após o retorno
+					fmt.Println(errMsg) // Tenta imprimir dentro da caixa após o retorno
 					allOutput.WriteString(errMsg)
 					lastError = err.Error()
 				} else {
 					okMsg := "✓ Comando interativo finalizado.\n"
-					fmt.Println(colorize(" │ ", ColorGray) + okMsg)
+					fmt.Println(okMsg)
 					allOutput.WriteString(okMsg)
 				}
 			} else {
@@ -1125,7 +1125,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 
 				// Imprime a saída linha por linha com a borda
 				for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
-					fmt.Println(colorize(" │ ", ColorGray) + "  " + line)
+					fmt.Println("  " + line)
 				}
 				allOutput.WriteString(string(output) + "\n")
 
