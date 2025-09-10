@@ -236,7 +236,7 @@ chatcli -p "@git @env Monte um release note enxuto."
 ```
 - Enviando diretórios/arquivos (com os modos existentes do  @file ):
 ```bash
-    chatcli -p "@file ./src --mode=summary Faça um panorama da arquitetura."
+    chatcli -p "@file ./src --mode summary Faça um panorama da arquitetura."
 ```
 - Sobrescrevendo provedor/modelo em tempo de execução:
 ```bash
@@ -289,14 +289,14 @@ cat main.go | chatcli -p "O que este código faz?" --no-anim
 - Integração com scripts (Makefile):
 ```bash
 one-shot:
-    chatcli -p "@file ./ --mode=summary Gere um resumo para o README."
+    chatcli -p "@file ./ --mode summary Gere um resumo para o README."
 ```
 
 - Exemplo (GitHub Actions):
 ```bash
 - name: ChatCLI one-shot
   run: |
-    chatcli -p "@file ./ --mode=summary Gere um overview do projeto"
+    chatcli -p "@file ./ --mode summary Gere um overview do projeto"
     $VAR_XPTO | chatcli -p "analise os valores"
 ```
 
@@ -523,7 +523,7 @@ O comando `@file` pode operar em diferentes modos para atender às suas necessid
         - Você pode utilizar o comando `/nextchunk` para avançar manualmente entre os chunks.
     - **Exemplo**:
       ```
-      Você: @file --mode=chunked ~/meu-projeto-grande/
+      Você: @file --mode chunked ~/meu-projeto-grande/
       ```
       Após o envio do primeiro chunk, a mensagem exibirá:
       ```
@@ -543,7 +543,7 @@ O comando `@file` pode operar em diferentes modos para atender às suas necessid
         - Retorna informações sobre a estrutura de diretórios, lista de arquivos com tamanhos e tipos e estatísticas gerais.
     - **Exemplo**:
       ```
-      Você: @file --mode=summary ~/meu-projeto/
+      Você: @file --mode summary ~/meu-projeto/
       ```
 
 4. **Modo Inteligente (Smart)**
@@ -552,7 +552,7 @@ O comando `@file` pode operar em diferentes modos para atender às suas necessid
         - O ChatCLI atribui uma pontuação de relevância a cada arquivo com base na pergunta e inclui somente os mais pertinentes.
     - **Exemplo**:
       ```
-      Você: @file --mode=smart ~/meu-projeto/ Como funciona o sistema de login?
+      Você: @file --mode smart ~/meu-projeto/ Como funciona o sistema de login?
       ```
 
 ---
