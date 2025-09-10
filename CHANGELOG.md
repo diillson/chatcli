@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.2](https://github.com/diillson/chatcli/compare/v1.22.1...v1.22.2) (2025-09-10)
+
+
+### Bug Fixes
+
+* **cli:** split `forceRefreshPrompt` by platform to improve compatibility ([#228](https://github.com/diillson/chatcli/issues/228)) ([#229](https://github.com/diillson/chatcli/issues/229)) ([74dd80f](https://github.com/diillson/chatcli/commit/74dd80f43e145bdece3b96487182a4a978df6529))
+
 ## [1.22.1](https://github.com/diillson/chatcli/compare/v1.22.0...v1.22.1) (2025-09-10)
 
 
