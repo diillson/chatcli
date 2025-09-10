@@ -244,7 +244,7 @@ chatcli -p "@git @env Please craft a concise release note."
 ```
 - Sending files/directories (existing  @file  modes apply):
 ```bash
-chatcli -p "@file ./src --mode=summary Provide an architecture overview."
+chatcli -p "@file ./src --mode summary Provide an architecture overview."
 ```
 - Override provider/model at runtime:
 ```bash
@@ -297,13 +297,13 @@ echo "What does this code do?" | chatcli --no-anim
 - Script integration (Makefile):
 ```bash
 one-shot:
-    chatcli -p "@file ./ --mode=summary Generate a README overview."
+    chatcli -p "@file ./ --mode summary Generate a README overview."
 ```
 - Example (GitHub Actions):
 ```bash
 - name: ChatCLI one-shot
   run: |
-    chatcli -p "@file ./ --mode=summary Generate a project overview"
+    chatcli -p "@file ./ --mode summary Generate a project overview"
 ```
 ---
 
@@ -497,7 +497,7 @@ The `@file` command offers multiple modes to fit your needs:
     * **Example:**
 
       ```
-      You: @file --mode=chunked ~/my-large-project/
+      You: @file --mode chunked ~/my-large-project/
       ```
 
       After sending the first chunk, you’ll see:
@@ -522,7 +522,7 @@ The `@file` command offers multiple modes to fit your needs:
     * **Example:**
 
       ```
-      You: @file --mode=summary ~/my-project/
+      You: @file --mode summary ~/my-project/
       ```
 
 4. **Smart Mode**
@@ -534,7 +534,7 @@ The `@file` command offers multiple modes to fit your needs:
     * **Example:**
 
       ```
-      You: @file --mode=smart ~/my-project/ How does the login system work?
+      You: @file --mode smart ~/my-project/ How does the login system work?
       ```
 
 ---
