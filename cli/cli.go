@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -534,21 +533,6 @@ func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 		fmt.Println("\nAté breve!! CTRL + C Duplo...")
 		cli.cleanup()
 		os.Exit(0)
-	}
-}
-
-// forceRefreshPrompt envia um sinal SIGWINCH para o processo atual,
-// forçando a biblioteca go-prompt a redesenhar a interface.
-func (cli *ChatCLI) forceRefreshPrompt() {
-	// Encontrar o processo atual
-	p, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		cli.logger.Warn("Não foi possível encontrar o processo para forçar o refresh", zap.Error(err))
-		return
-	}
-	// Enviar o sinal de redimensionamento de janela
-	if err := p.Signal(unix.SIGWINCH); err != nil {
-		cli.logger.Warn("Não foi possível enviar o sinal SIGWINCH para forçar o refresh", zap.Error(err))
 	}
 }
 
