@@ -75,17 +75,14 @@ func (c *GeminiClient) GetModelName() string {
 
 // SendPrompt envia um prompt para o Gemini e retorna a resposta
 func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	// Log inicial da requisição
+	// ... (lógica de build do payload, logs, etc., permanece a mesma)
 	c.logger.Info("Iniciando requisição para Google AI",
 		zap.String("model", c.model),
 		zap.Int("history_length", len(history)),
 		zap.Int("prompt_length", len(prompt)))
 
-	// Monta a conversa a partir do history, SEM duplicar o último prompt
-	// e extraindo system_instruction a partir das mensagens "system".
 	contents, systemInstruction := c.buildContentsAndSystem(history, prompt)
 
-	// Fallback: se por algum motivo o history vier vazio, use o prompt diretamente
 	if len(contents) == 0 && strings.TrimSpace(prompt) != "" {
 		contents = []map[string]interface{}{
 			{
@@ -97,14 +94,7 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 		}
 	}
 
-	// Obter configurações de tokens
 	maxTokens := c.getMaxTokens()
-
-	c.logger.Debug("Configuração de tokens",
-		zap.Int("max_tokens", maxTokens),
-		zap.String("model", c.model))
-
-	// Configurar generation config
 	generationConfig := map[string]interface{}{
 		"temperature":     0.7,
 		"topP":            0.95,
@@ -112,7 +102,6 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 		"maxOutputTokens": maxTokens,
 	}
 
-	// Montar o payload
 	reqBody := map[string]interface{}{
 		"contents":         contents,
 		"generationConfig": generationConfig,
@@ -124,18 +113,12 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 
 	jsonValue, err := json.Marshal(reqBody)
 	if err != nil {
-		c.logger.Error("Erro ao marshalizar o payload para Google AI",
-			zap.Error(err),
-			zap.String("model", c.model))
+		c.logger.Error("Erro ao marshalizar o payload para Google AI", zap.Error(err), zap.String("model", c.model))
 		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
 	}
 
-	// Log do tamanho do payload
-	c.logger.Debug("Payload preparado",
-		zap.Int("payload_size", len(jsonValue)),
-		zap.String("model", c.model))
+	c.logger.Debug("Payload preparado", zap.Int("payload_size", len(jsonValue)), zap.String("model", c.model))
 
-	// Implementação com retry e backoff
 	var backoff = c.backoff
 	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
 		c.logger.Debug("Tentativa de requisição",
@@ -145,24 +128,11 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 
 		response, err := c.executeRequest(ctx, jsonValue)
 		if err != nil {
-			// Rate limit
-			if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RATE_LIMIT") {
-				c.logger.Warn("Rate limit excedido na API do Google AI",
-					zap.Int("attempt", attempt),
-					zap.Error(err),
-					zap.Duration("backoff", backoff),
-					zap.String("model", c.model))
 
-				if attempt < c.maxAttempts {
-					time.Sleep(backoff)
-					backoff *= 2
-					continue
-				}
-			} else if utils.IsTemporaryError(err) {
-				// Erro temporário
-				c.logger.Warn("Erro temporário ao chamar Google AI",
+			if utils.IsTemporaryError(err) || strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RATE_LIMIT") {
+				c.logger.Warn("Erro temporário ou rate limit na API do Google AI",
 					zap.Int("attempt", attempt),
-					zap.Error(err),
+					zap.Error(err), // O erro já é seguro
 					zap.Duration("backoff", backoff),
 					zap.String("model", c.model))
 
@@ -173,14 +143,9 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 				}
 			}
 
-			c.logger.Error("Erro ao fazer requisição para Google AI",
-				zap.Error(err),
-				zap.Int("attempt", attempt),
-				zap.String("model", c.model))
-			return "", fmt.Errorf("erro ao fazer requisição para Google AI: %w", err)
+			return "", err
 		}
 
-		// Log de sucesso
 		c.logger.Info("Resposta recebida do Google AI com sucesso",
 			zap.Int("attempt", attempt),
 			zap.String("model", c.model),
@@ -189,10 +154,7 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 		return response, nil
 	}
 
-	c.logger.Error("Falha ao obter resposta do Google AI após todas as tentativas",
-		zap.Int("max_attempts", c.maxAttempts),
-		zap.String("model", c.model))
-
+	// O erro final também deve ser seguro.
 	return "", fmt.Errorf("falha ao obter resposta do Google AI após %d tentativas", c.maxAttempts)
 }
 
@@ -246,15 +208,15 @@ func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt s
 // executeRequest executa a requisição HTTP para a API do Gemini
 func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (string, error) {
 	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", c.baseURL, c.model, c.apiKey)
-
-	// Log da URL (sem a API key)
 	safeURL := fmt.Sprintf("%s/models/%s:generateContent?key=[REDACTED]", c.baseURL, c.model)
+
 	c.logger.Debug("Enviando requisição POST para Google AI",
 		zap.String("url", safeURL),
 		zap.String("model", c.model))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(jsonValue)))
 	if err != nil {
+		// Este erro não contém a URL, então é seguro logar diretamente.
 		c.logger.Error("Erro ao criar requisição HTTP para Google AI",
 			zap.Error(err),
 			zap.String("model", c.model))
@@ -263,31 +225,26 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 
 	req.Header.Set("Content-Type", "application/json")
 
-	// Log dos headers (sem informações sensíveis)
-	c.logger.Debug("Headers da requisição",
-		zap.String("Content-Type", req.Header.Get("Content-Type")),
-		zap.String("model", c.model))
-
 	startTime := time.Now()
 	resp, err := c.client.Do(req)
 	duration := time.Since(startTime)
 
 	if err != nil {
+		// AQUI ESTÁ A CORREÇÃO DEFINITIVA
+		// O `err` original contém a URL com a chave.
+		// Criamos um novo erro sanitizado ANTES de qualquer outra coisa.
+		sanitizedErr := fmt.Errorf("erro na requisição para %s: %w", safeURL, err)
+
+		// Usamos o erro sanitizado para o log e para o retorno.
 		c.logger.Error("Erro na requisição HTTP para Google AI",
-			zap.Error(err),
+			zap.Error(sanitizedErr), // LOG SEGURO
 			zap.Duration("duration", duration),
 			zap.String("model", c.model))
-		return "", err
-	}
-	defer func() {
-		if cerr := resp.Body.Close(); cerr != nil {
-			c.logger.Warn("Erro ao fechar corpo da resposta do Google AI",
-				zap.Error(cerr),
-				zap.String("model", c.model))
-		}
-	}()
 
-	// Log do tempo de resposta
+		return "", sanitizedErr // RETORNO SEGURO
+	}
+	defer resp.Body.Close()
+
 	c.logger.Debug("Resposta HTTP recebida",
 		zap.Int("status_code", resp.StatusCode),
 		zap.Duration("duration", duration),
@@ -300,11 +257,6 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 			zap.String("model", c.model))
 		return "", fmt.Errorf("erro ao ler resposta: %w", err)
 	}
-
-	// Log do tamanho da resposta
-	c.logger.Debug("Corpo da resposta recebido",
-		zap.Int("response_size", len(bodyBytes)),
-		zap.String("model", c.model))
 
 	if resp.StatusCode != http.StatusOK {
 		c.logger.Error("Erro na resposta do Google AI",

@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,10 +22,8 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/llm/openai_assistant"
-	"github.com/diillson/chatcli/utils"
-	"github.com/peterh/liner"
-
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -94,39 +93,24 @@ func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 	return a
 }
 
-// Função de fallback para quando o prompt seguro falhar
-func (a *AgentMode) fallbackPrompt(prompt string) string {
-	fmt.Print(prompt)
-	reader := bufio.NewReader(os.Stdin)
-	resp, _ := reader.ReadString('\n')
-	return strings.TrimSpace(resp)
-}
-
 // getInput obtém entrada do usuário de forma segura
 func (a *AgentMode) getInput(prompt string) string {
-	// Usar o liner da instância principal
-	if a.cli.line != nil {
-		input, err := a.cli.line.Prompt(prompt)
-		if err != nil {
-			if err == liner.ErrPromptAborted {
-				return ""
-			}
-			// Fallback para método simples em caso de erro
-			a.logger.Warn("Erro ao usar liner, usando fallback", zap.Error(err))
-			return a.fallbackPrompt(prompt)
-		}
+	// Adicionado: Restaura o terminal para o modo 'sane' antes de ler a entrada
+	cmd := exec.Command("stty", "sane")
+	cmd.Stdin = os.Stdin // Garante que o comando opere no terminal correto
+	_ = cmd.Run()        // Ignoramos erros, pois 'stty' pode não existir no Windows
 
-		// Adicionar ao histórico global se não estiver vazio
-		if input != "" {
-			a.cli.line.AppendHistory(input)
-			a.cli.commandHistory = append(a.cli.commandHistory, input)
+	fmt.Print(prompt)
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		if err == io.EOF { // Ctrl+D
+			return "q" // Trata Ctrl+D como um comando para sair do agente
 		}
-
-		return input
-	} else {
-		// Se não houver liner disponível, usar o método fallback
-		return a.fallbackPrompt(prompt)
+		a.logger.Warn("Erro ao ler entrada no modo agente", zap.Error(err))
+		return ""
 	}
+	return strings.TrimSpace(input)
 }
 
 func isDangerous(cmd string) bool {
@@ -412,7 +396,16 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 
 			var description string
 			if i < len(parts) {
-				description = findLastMeaningfulLine(parts[i])
+				// 1. Tenta extrair a descrição da tag <explanation> (mais robusto)
+				explanationRe := regexp.MustCompile("(?s)<explanation>(.*?)</explanation>")
+				explanationMatch := explanationRe.FindStringSubmatch(parts[i])
+
+				if len(explanationMatch) > 1 {
+					description = strings.TrimSpace(explanationMatch[1])
+				} else {
+					// 2. Se não encontrar a tag, usa o método antigo como fallback
+					description = findLastMeaningfulLine(parts[i])
+				}
 			}
 
 			isScript := false
@@ -578,74 +571,22 @@ func (a *AgentMode) displayResponseWithoutCommands(response string, blocks []Com
 // - Control+D (EOF) para finalizar a entrada
 func (a *AgentMode) getMultilineInput(prompt string) string {
 	fmt.Print(prompt)
-	fmt.Println("(Digite '.' sozinho em uma linha para finalizar)")
-	fmt.Println("(Pressione ENTER sem digitar texto para continuar sem contexto)")
-	fmt.Println("(Ou use Control+D para finalizar a entrada)")
+	fmt.Println("(Digite '.' sozinho em uma linha para finalizar ou Ctrl+D)")
 
-	// Fechar o liner temporariamente
-	if a.cli.line != nil {
-		_ = a.cli.line.Close()
-		a.cli.line = nil
-	}
-
+	// LÓGICA DO LINER REMOVIDA
 	var lines []string
 	reader := bufio.NewReader(os.Stdin)
-	firstLine := true
 
 	for {
-		// Ler uma linha
 		line, err := reader.ReadString('\n')
-
-		// Tratar EOF (Control+D)
-		if err != nil {
-			if len(lines) > 0 {
-				fmt.Println("Entrada finalizada com Control+D")
-				break
-			} else {
-				fmt.Println("Continuando sem adicionar contexto (Control+D)")
-				lines = nil
-				break
-			}
+		if err != nil { // Trata EOF (Ctrl+D)
+			break
 		}
-
-		// Remover quebra de linha
 		line = strings.TrimRight(line, "\r\n")
-
-		// Verificar primeira linha vazia (apenas ENTER)
-		if firstLine && line == "" {
-			fmt.Println("Continuando sem adicionar contexto.")
-			lines = nil
-			break
-		}
-		firstLine = false
-
-		// Verificar linha com apenas "."
 		if line == "." {
-			fmt.Println("Entrada finalizada com '.'")
 			break
 		}
-
-		// Adicionar linha ao buffer
 		lines = append(lines, line)
-	}
-
-	// Restaurar o liner
-	newLiner := liner.NewLiner()
-	newLiner.SetCtrlCAborts(true)
-
-	// Recarregar histórico
-	for _, cmd := range a.cli.commandHistory {
-		newLiner.AppendHistory(cmd)
-	}
-
-	// Restaurar completador
-	newLiner.SetCompleter(a.cli.completer)
-
-	a.cli.line = newLiner
-
-	// Se não tivermos linhas, retornar string vazia
-	if len(lines) == 0 {
-		return ""
 	}
 
 	return strings.Join(lines, "\n")
@@ -705,40 +646,63 @@ func (a *AgentMode) requestLLMContinuationWithContext(ctx context.Context, previ
 
 // handleCommandBlocks processa cada bloco de comando
 func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlock) {
-	fmt.Println("\n🤖 MODO AGENTE: Comandos sugeridos")
-	fmt.Println("===============================")
-
 	outputs := make([]*CommandOutput, len(blocks))
 
 mainLoop:
 	for {
-		// Mostra os comandos disponíveis
+		// --- NOVO CABEÇALHO ---
+		fmt.Println("\n" + colorize(" "+strings.Repeat("━", 58), ColorGray))
+		fmt.Println(colorize(" 🤖 MODO AGENTE: PLANO DE AÇÃO", ColorLime+ColorBold))
+		fmt.Println(colorize(" "+strings.Repeat("━", 58), ColorGray))
+		fmt.Println(colorize(" A IA sugeriu os seguintes comandos para executar sua tarefa.", ColorGray))
+
+		// --- NOVOS CARTÕES DE COMANDO ---
 		for i, block := range blocks {
-			fmt.Printf("\n🔷 Comando #%d: %s\n", i+1, block.Description)
-			fmt.Printf("  Tipo: %s\n", block.Language)
-			fmt.Printf("  Comandos:\n")
+			description := block.Description
+			if description == "" {
+				description = "Executar comandos"
+			}
+			fmt.Printf("\n"+colorize(" 🔷 COMANDO #%d: %s", ColorPurple+ColorBold), i+1, description)
+			fmt.Printf("\n"+colorize("    Tipo: %s", ColorGray), block.Language)
+			fmt.Println(colorize("\n    Código:", ColorGray))
 			for _, cmd := range block.Commands {
-				fmt.Printf("    %s\n", cmd)
+				// Adiciona um prefixo '$' para comandos shell para clareza
+				prefix := ""
+				if block.Language == "shell" {
+					prefix = "$ "
+				}
+				// Imprime cada linha do comando com indentação
+				for _, line := range strings.Split(cmd, "\n") {
+					fmt.Printf(colorize("      %s%s\n", ColorCyan), prefix, line)
+				}
 			}
 		}
 
-		fmt.Printf("\nDigite sua opção:\n")
-		fmt.Printf("- Um número entre 1 e %d para executar esse comando\n", len(blocks))
-		fmt.Printf("- 'a' para executar todos os comandos\n")
-		fmt.Printf("- 'eN' para editar o comando N antes de rodar (ex: e2)\n")
-		fmt.Printf("- 'pCN' para adicionar contexto ao comando N ANTES de executar (ex: pC1)\n")
-		fmt.Printf("- 'tN' para simular (dry-run) o comando N (ex: t2)\n")
-		fmt.Printf("- 'cN' para pedir continuação à IA usando a saída do comando N (ex: c2)\n")
-		fmt.Printf("- 'aCN' para adicionar contexto à saída do comando N e pedir continuação (ex: aC2)\n")
-		fmt.Printf("- 'q' para sair\n")
+		// --- NOVO MENU DE OPÇÕES (COMPLETO E CORRIGIDO) ---
+		fmt.Println("\n" + colorize(strings.Repeat("-", 60), ColorGray))
+		fmt.Println(colorize(" O QUE VOCÊ DESEJA FAZER?", ColorLime+ColorBold))
+		fmt.Println(colorize(strings.Repeat("-", 60), ColorGray))
 
-		// Usar o prompt seguro para a entrada
-		answer := a.getInput("Sua escolha: ")
+		// Usamos fmt.Sprintf para alinhar as descrições perfeitamente
+		fmt.Printf("  %s: Executa um comando específico (ex: 1, 2, ...)\n", colorize(fmt.Sprintf("%-6s", "[1..N]"), ColorYellow))
+		fmt.Printf("  %s: Executa todos os comandos em sequência\n", colorize(fmt.Sprintf("%-6s", "a"), ColorYellow))
+		fmt.Printf("  %s: Edita o comando N antes de executar (ex: e1)\n", colorize(fmt.Sprintf("%-6s", "eN"), ColorYellow))
+		fmt.Printf("  %s: Simula (dry-run) o comando N (ex: t2)\n", colorize(fmt.Sprintf("%-6s", "tN"), ColorYellow))                   // <<< ADICIONADO
+		fmt.Printf("  %s: Pede continuação à IA com a saída do comando N (ex: c2)\n", colorize(fmt.Sprintf("%-6s", "cN"), ColorYellow)) // <<< ADICIONADO
+		fmt.Printf("  %s: Adiciona contexto ao comando N ANTES de executar (ex: pC1)\n", colorize(fmt.Sprintf("%-6s", "pCN"), ColorYellow))
+		fmt.Printf("  %s: Adiciona contexto à SAÍDA do comando N (ex: aC1)\n", colorize(fmt.Sprintf("%-6s", "aCN"), ColorYellow))
+		fmt.Printf("  %s: Sai do Modo Agente\n", colorize(fmt.Sprintf("%-6s", "q"), ColorYellow))
+
+		fmt.Println(colorize(strings.Repeat("-", 60), ColorGray))
+
+		// --- PROMPT DE ENTRADA ESTILIZADO ---
+		prompt := colorize("\n ➤ Sua escolha: ", ColorLime)
+		answer := a.getInput(prompt)
 		answer = strings.ToLower(strings.TrimSpace(answer))
 
 		switch {
 		case answer == "q":
-			fmt.Println("Saindo do modo agente.")
+			fmt.Println(colorize("\n ✅ Saindo do modo agente.", ColorGray))
 			return
 
 		case answer == "a":
@@ -1031,116 +995,77 @@ func (a *AgentMode) refreshContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 10*time.Minute)
 }
 
-// executeCommandsWithOutput executa todos os comandos do bloco (1 a 1), imprime e retorna o output total e último erro.
+// executeCommandsWithOutput executa todos os comandos do bloco com uma UI dinâmica e alinhada.
 func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block CommandBlock) (string, string) {
-	var allOutput strings.Builder
+	var allOutput strings.Builder // Para a IA
 	var lastError string
 
-	// Verificar se este bloco é um script contínuo
-	isScript := block.ContextInfo.IsScript
+	// --- CABEÇALHO DINÂMICO ---
+	titleContent := fmt.Sprintf(" 🚀 EXECUTANDO: %s", block.Language)
+	contentWidth := visibleLen(titleContent)
+	topBorder := "╭" + strings.Repeat("─", contentWidth) + "╮"
+	fmt.Println("\n" + colorize(topBorder, ColorGray))
+	fmt.Println(colorize(titleContent, ColorLime+ColorBold))
 
-	// Adicionar apenas os cabeçalhos iniciais à string de saída
-	allOutput.WriteString(fmt.Sprintf("\n🚀 Executando %s (tipo: %s):\n",
-		func() string {
-			if isScript {
-				return "script"
-			} else {
-				return "comandos"
-			}
-		}(),
-		block.Language))
-	allOutput.WriteString("---------------------------------------\n")
-	allOutput.WriteString(fmt.Sprintf("⌛ Processando: %s\n\n", block.Description))
-
-	// Imprimir os cabeçalhos iniciais para o usuário ver
-	fmt.Printf("\n🚀 Executando %s (tipo: %s):\n",
-		func() string {
-			if isScript {
-				return "script"
-			} else {
-				return "comandos"
-			}
-		}(),
-		block.Language)
-	fmt.Println("---------------------------------------")
-	fmt.Printf("⌛ Processando: %s\n\n", block.Description)
+	// Adiciona uma versão simples ao log para a IA
+	allOutput.WriteString(fmt.Sprintf("\nExecutando: %s (tipo: %s)\n", block.Description, block.Language))
 
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 
-	if isScript {
-		// Tratar todo o bloco como um único script
+	if block.ContextInfo.IsScript {
+		// --- LÓGICA ORIGINAL PARA SCRIPT (BLOCO ÚNICO) INTEGRADA NA NOVA UI ---
 		scriptContent := block.Commands[0]
-
-		// Criar um arquivo temporário para o script
 		tmpFile, err := os.CreateTemp("", "chatcli-script-*.sh")
 		if err != nil {
 			errMsg := fmt.Sprintf("❌ Erro ao criar arquivo temporário para script: %v\n", err)
+			fmt.Println(colorize(" │ ", ColorGray) + errMsg)
 			allOutput.WriteString(errMsg)
-			fmt.Print(errMsg)
-			return allOutput.String(), err.Error()
-		}
-
-		scriptPath := tmpFile.Name()
-		defer func() { _ = os.Remove(scriptPath) }() // Limpar o arquivo temporário depois
-
-		// Escrever o conteúdo do script no arquivo
-		if _, err := tmpFile.WriteString(scriptContent); err != nil {
-			errMsg := fmt.Sprintf("❌ Erro ao escrever script em arquivo: %v\n", err)
-			allOutput.WriteString(errMsg)
-			fmt.Print(errMsg)
-			return allOutput.String(), err.Error()
-		}
-
-		if err := tmpFile.Close(); err != nil {
-			errMsg := fmt.Sprintf("❌ Erro ao fechar arquivo de script: %v\n", err)
-			allOutput.WriteString(errMsg)
-			fmt.Print(errMsg)
-			return allOutput.String(), err.Error()
-		}
-
-		// Tornar o script executável
-		if err := os.Chmod(scriptPath, 0755); err != nil {
-			errMsg := fmt.Sprintf("❌ Erro ao tornar script executável: %v\n", err)
-			allOutput.WriteString(errMsg)
-			fmt.Print(errMsg)
-			return allOutput.String(), err.Error()
-		}
-
-		// Executar o script
-		header := fmt.Sprintf("⚙️ Executando script via %s:\n", shell)
-		allOutput.WriteString(header)
-		fmt.Print(header)
-
-		cmd := exec.CommandContext(ctx, shell, scriptPath)
-		output, err := cmd.CombinedOutput()
-
-		outText := "📝 Saída do script:\n" + string(output)
-		allOutput.WriteString(outText)
-		fmt.Print(outText)
-
-		if err != nil {
-			errMsg := fmt.Sprintf("❌ Erro: %v\n\n", err)
-			allOutput.WriteString(errMsg)
-			fmt.Print(errMsg)
 			lastError = err.Error()
 		} else {
-			okMsg := "✓ Script executado com sucesso\n\n"
-			allOutput.WriteString(okMsg)
-			fmt.Print(okMsg)
+			scriptPath := tmpFile.Name()
+			defer func() { _ = os.Remove(scriptPath) }()
+
+			if _, err := tmpFile.WriteString(scriptContent); err != nil {
+				errMsg := fmt.Sprintf("❌ Erro ao remover arquivo temporário de script: %v\n", err)
+				fmt.Println(colorize(" │ ", ColorGray) + errMsg)
+				allOutput.WriteString(errMsg)
+				lastError = err.Error()
+			}
+			_ = tmpFile.Close()
+			_ = os.Chmod(scriptPath, 0755)
+
+			header := fmt.Sprintf("⚙️ Executando script via %s:\n", shell)
+			fmt.Println(colorize(" │ ", ColorGray) + header)
+			allOutput.WriteString(header)
+
+			cmd := exec.CommandContext(ctx, shell, scriptPath)
+			output, err := cmd.CombinedOutput()
+
+			// Imprime a saída do script linha por linha com a borda
+			for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
+				fmt.Println(colorize(" │ ", ColorGray) + "  " + line)
+			}
+			allOutput.WriteString(string(output) + "\n")
+
+			if err != nil {
+				errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
+				fmt.Println(colorize(" │ ", ColorGray) + errMsg)
+				allOutput.WriteString(errMsg)
+				lastError = err.Error()
+			}
 		}
 	} else {
-		// Comportamento original para comandos individuais
+		// --- LÓGICA ORIGINAL PARA COMANDOS INDIVIDUAIS INTEGRADA NA NOVA UI ---
 		for i, cmd := range block.Commands {
 			if cmd == "" {
 				continue
 			}
 
-			// Verificar se o comando tem a flag de interatividade
 			isInteractive := false
-			if strings.HasSuffix(cmd, " --interactive") {
+			if strings.HasSuffix(cmd, " --interactive") || strings.HasSuffix(cmd, " -i ") {
 				cmd = strings.TrimSuffix(cmd, " --interactive")
 				isInteractive = true
 			} else if strings.Contains(cmd, "#interactive") {
@@ -1148,146 +1073,130 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 				cmd = strings.TrimSpace(cmd)
 				isInteractive = true
 			} else {
-				// Verificar se é um comando provavelmente interativo
 				isInteractive = isLikelyInteractiveCommand(cmd)
 			}
 
-			// Checagem de comando perigoso
 			if isDangerous(cmd) {
-				confirmPrompt := "Este comando é potencialmente perigoso e pode causar danos ao sistema.\nSe tem certeza que deseja executar, digite exatamente: 'sim, quero executar conscientemente' \n Confirma ? (Digite exatamente para confirmar): "
+				// O prompt de confirmação sairá temporariamente da caixa, o que é aceitável para segurança.
+				confirmPrompt := "Este comando é potencialmente perigoso. Para confirmar, digite: 'sim, quero executar conscientemente'\nConfirma?: "
 				confirm := a.getCriticalInput(confirmPrompt)
 
 				if confirm != "sim, quero executar conscientemente" {
-					outText := "Execução do comando perigoso ABORTADA pelo agente.\n"
+					outText := "Execução do comando perigoso ABORTADA.\n"
+					fmt.Println(colorize(outText, ColorYellow))
 					allOutput.WriteString(outText)
-					fmt.Print(outText)
 					continue
 				}
-
-				fmt.Println("⚠️ Confirmação recebida. Executando comando perigoso...")
+				fmt.Println(colorize("⚠️ Confirmação recebida. Executando comando perigoso...", ColorYellow))
 			}
 
 			header := fmt.Sprintf("⚙️ Comando %d/%d: %s\n", i+1, len(block.Commands), cmd)
+			fmt.Println(header)
 			allOutput.WriteString(header)
-			fmt.Print(header)
 
-			// Se o comando não foi explicitamente marcado como interativo
-			// mas pode ser interativo, perguntar ao usuário
-			// Usando a ContextInfo do bloco para todas as chamadas
 			if !isInteractive && mightBeInteractive(cmd, block.ContextInfo) {
 				isInteractive = a.askUserIfInteractive(cmd, block.ContextInfo)
 			}
 
 			if isInteractive {
-				// Para comandos interativos, usamos uma abordagem diferente
-				outText := "🖥️ Executando comando interativo. O controle será passado para o comando.\n"
-				outText += "Quando o comando terminar, você retornará ao modo agente.\n"
-				outText += "Pressione Ctrl+C para interromper o comando se necessário.\n\n"
-
+				outText := "🖥️  Executando em modo interativo. O controle será passado para o comando.\n"
+				fmt.Println(colorize(outText, ColorGray))
 				allOutput.WriteString(outText)
-				fmt.Print(outText)
 
-				// Liberar o terminal e executar o comando interativo
+				// Pausa para o usuário ler a mensagem antes de entregar o terminal
+				time.Sleep(1 * time.Second)
+
+				// A execução interativa assume o controle total, então não podemos prefixar a saída.
+				// A caixa será "quebrada" visualmente, mas isso é esperado para comandos interativos.
 				err := a.executeInteractiveCommand(ctx, shell, cmd)
-
 				if err != nil {
-					errMsg := fmt.Sprintf("❌ Erro ao executar comando interativo: %v\n\n", err)
+					errMsg := fmt.Sprintf("❌ Erro no comando interativo: %v\n", err)
+					fmt.Println(errMsg) // Tenta imprimir dentro da caixa após o retorno
 					allOutput.WriteString(errMsg)
-					fmt.Print(errMsg)
 					lastError = err.Error()
 				} else {
-					okMsg := "✓ Comando interativo executado com sucesso\n\n"
+					okMsg := "✓ Comando interativo finalizado.\n"
+					fmt.Println(okMsg)
 					allOutput.WriteString(okMsg)
-					fmt.Print(okMsg)
 				}
 			} else {
-				// Para comandos não interativos, capturar a saída normalmente
+				// Comandos não interativos
 				output, err := a.captureCommandOutput(ctx, shell, []string{"-c", cmd})
 
-				outText := "📝 Saída do comando (stdout/stderr):\n" + string(output)
-				allOutput.WriteString(outText)
-				fmt.Print(outText)
+				// Imprime a saída linha por linha com a borda
+				for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
+					fmt.Println("  " + line)
+				}
+				allOutput.WriteString(string(output) + "\n")
 
 				if err != nil {
-					errMsg := fmt.Sprintf("❌ Erro: %v\n\n", err)
-					allOutput.WriteString(errMsg)
-					fmt.Print(errMsg)
+					errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
+					// O erro já está na saída capturada, então não precisa imprimir de novo
+					allOutput.WriteString(errMsg) // Apenas garantir que vá para o log da IA
 					lastError = err.Error()
-				} else {
-					okMsg := "✓ Executado com sucesso\n\n"
-					allOutput.WriteString(okMsg)
-					fmt.Print(okMsg)
 				}
 			}
 		}
 	}
 
-	finalMsg := "---------------------------------------\nExecução concluída.\n"
-	allOutput.WriteString(finalMsg)
-	fmt.Print(finalMsg)
+	// --- RODAPÉ DINÂMICO ---
+	footerContent := " ✅ Execução Concluída "
+	if lastError != "" {
+		footerContent = " ⚠️ Execução Concluída com Erros "
+	}
+	footerWidth := visibleLen(footerContent)
 
-	// Retornar a saída acumulada e o último erro
+	paddingWidth := contentWidth - footerWidth
+	if paddingWidth < 0 {
+		paddingWidth = 0
+	}
+	leftPadding := paddingWidth / 2
+	rightPadding := paddingWidth - leftPadding
+
+	finalBorder := "╰" + strings.Repeat("─", leftPadding) + footerContent + strings.Repeat("─", rightPadding) + "╯"
+	fmt.Println(colorize(finalBorder, ColorGray))
+
+	allOutput.WriteString("Execução concluída.\n")
 	return allOutput.String(), lastError
 }
 
 // executeInteractiveCommand executa um comando interativo passando o controle do terminal
 func (a *AgentMode) executeInteractiveCommand(ctx context.Context, shell string, command string) error {
-	// Fechar o liner para liberar o terminal
-	if a.cli.line != nil {
-		_ = a.cli.line.Close()
-		a.cli.line = nil
+	// Passo 1: Informar o usuário e restaurar o terminal para o modo normal.
+	fmt.Println("\n--- Entrando no modo de comando interativo ---")
+	fmt.Println("O controle do terminal será passado para o comando. Para retornar, saia do programa (ex: ':q' no vim, 'exit' no shell).")
+	fmt.Println("----------------------------------------------")
+
+	saneCmd := exec.Command("stty", "sane")
+	saneCmd.Stdin = os.Stdin // Garante que o comando stty opere no terminal correto.
+	if err := saneCmd.Run(); err != nil {
+		a.logger.Warn("Falha ao restaurar o terminal para 'sane'. O comando interativo pode não se comportar como esperado.", zap.Error(err))
 	}
 
-	// Restaurar o terminal para o modo "sane"
-	sttyCmd := exec.Command("stty", "sane")
-	sttyCmd.Stdin = os.Stdin
-	sttyCmd.Stdout = os.Stdout
-	_ = sttyCmd.Run() // Ignoramos erros aqui propositalmente
-
-	// Obter o caminho do arquivo de configuração do shell
+	// Passo 2: Preparar e executar o comando do usuário.
 	shellConfigPath := a.getShellConfigPath(shell)
-
-	// Construir o comando com shell
 	var shellCommand string
 	if shellConfigPath != "" {
+		// Constrói um comando que primeiro carrega o ambiente do shell e depois executa o comando do usuário.
 		shellCommand = fmt.Sprintf("source %s 2>/dev/null || true; %s", shellConfigPath, command)
 	} else {
 		shellCommand = command
 	}
 
-	// Criar o comando com conexão direta ao terminal
+	// Cria o comando a ser executado.
 	cmd := exec.CommandContext(ctx, shell, "-c", shellCommand)
+
+	// Passo 3: Conectar a entrada/saída/erro do comando diretamente ao terminal.
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Executar o comando (bloqueante)
 	err := cmd.Run()
 
-	// Após o comando terminar, restaurar o terminal para o modo "sane" novamente
-	sttyCmd = exec.Command("stty", "sane")
-	sttyCmd.Stdin = os.Stdin
-	sttyCmd.Stdout = os.Stdout
-	_ = sttyCmd.Run() // Ignoramos erros aqui propositalmente
+	// Passo 4: O comando terminou. Informar o usuário e retornar.
+	fmt.Println("\n--- Retornando ao ChatCLI ---")
 
-	fmt.Println("\nComando interativo finalizado. Retornando ao modo agente...")
-
-	// Reinstanciar o liner
-	if a.cli.line == nil {
-		newLiner := liner.NewLiner()
-		newLiner.SetCtrlCAborts(true)
-
-		// Recarregar histórico
-		for _, cmd := range a.cli.commandHistory {
-			newLiner.AppendHistory(cmd)
-		}
-
-		// Restaurar completador
-		newLiner.SetCompleter(a.cli.completer)
-
-		a.cli.line = newLiner
-	}
-
+	// Retorna o erro (se houver) da execução do comando.
 	return err
 }
 
@@ -1441,46 +1350,17 @@ func hasCodeStructures(content string) bool {
 
 // getCriticalInput obtém entrada do usuário para decisões críticas
 func (a *AgentMode) getCriticalInput(prompt string) string {
-	// Primeiro, tentar liberar o terminal se estiver usando liner
-	if a.cli.line != nil {
-		_ = a.cli.line.Close()
-		a.cli.line = nil
-	}
-
-	// Resetar o estado do terminal
+	// LÓGICA DO LINER REMOVIDA
 	cmd := exec.Command("stty", "sane")
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
 	_ = cmd.Run()
 
-	// Exibir o prompt com formatação clara
 	fmt.Print("\n")
 	fmt.Print(prompt)
 
-	// Ler diretamente do stdin
 	reader := bufio.NewReader(os.Stdin)
 	response, _ := reader.ReadString('\n')
-	response = strings.TrimSpace(response)
-
-	fmt.Println() // Adicionar uma linha em branco após a resposta
-
-	// Reinstanciar o liner se necessário
-	if a.cli.line == nil {
-		newLiner := liner.NewLiner()
-		newLiner.SetCtrlCAborts(true)
-
-		// Recarregar histórico
-		for _, cmd := range a.cli.commandHistory {
-			newLiner.AppendHistory(cmd)
-		}
-
-		// Restaurar completador
-		newLiner.SetCompleter(a.cli.completer)
-
-		a.cli.line = newLiner
-	}
-
-	return response
+	return strings.TrimSpace(response)
 }
 
 // askUserIfInteractive pergunta ao usuário se um comando deve ser executado em modo interativo

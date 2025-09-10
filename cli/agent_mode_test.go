@@ -2,31 +2,16 @@ package cli
 
 import (
 	"context"
+	"io"
+	"os"
 	"testing"
 
-	"github.com/peterh/liner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 
 	"github.com/diillson/chatcli/models"
 )
-
-// --- Mocks Avançados usando testify/mock ---
-
-// MockLiner para simular entrada do usuário
-type MockLiner struct {
-	mock.Mock
-}
-
-func (m *MockLiner) Prompt(prompt string) (string, error) {
-	args := m.Called(prompt)
-	return args.String(0), args.Error(1)
-}
-func (m *MockLiner) Close() error                   { return m.Called().Error(0) }
-func (m *MockLiner) SetCtrlCAborts(b bool)          { m.Called(b) }
-func (m *MockLiner) AppendHistory(item string)      { m.Called(item) }
-func (m *MockLiner) SetCompleter(c liner.Completer) { m.Called(c) }
 
 // MockLLMClient para simular respostas da IA
 type MockLLMClient struct {
@@ -43,57 +28,71 @@ func (m *MockLLMClient) SendPrompt(ctx context.Context, prompt string, history [
 	return args.String(0), args.Error(1)
 }
 
-// --- Testes ---
+// Helper para redirecionar Stdin durante o teste
+func withStdin(t *testing.T, input string, f func()) {
+	// Salva o Stdin original
+	oldStdin := os.Stdin
+	defer func() { os.Stdin = oldStdin }()
+
+	// Cria um pipe para simular a entrada do usuário
+	r, w, err := os.Pipe()
+	assert.NoError(t, err)
+
+	os.Stdin = r
+
+	// Escreve a entrada simulada no pipe em uma goroutine
+	go func() {
+		defer w.Close()
+		_, err := io.WriteString(w, input)
+		assert.NoError(t, err)
+	}()
+
+	// Executa a função de teste
+	f()
+}
 
 func TestAgentMode_Run_ExtractsAndHandlesCommands(t *testing.T) {
 	// 1. Setup
 	logger, _ := zap.NewDevelopment()
 	mockLLM := new(MockLLMClient)
-	mockLiner := new(MockLiner)
 
+	// A struct ChatCLI não tem mais o campo 'line'
 	chatCLI := &ChatCLI{
 		Client:    mockLLM,
 		logger:    logger,
-		line:      mockLiner,
 		animation: NewAnimationManager(),
 		history:   []models.Message{},
 	}
 	agentMode := NewAgentMode(chatCLI, logger)
 
-	// Resposta simulada da IA com um comando seguro
+	// Resposta simulada da IA
 	aiResponse := `
-        Claro! Para listar os arquivos, use o seguinte comando:
-        ` + "```" + `execute:shell
-        ls -la
-        ` + "```" + `
-        `
+            ` + "```" + `execute:shell
+            ls -la
+            ` + "```" + `
+            `
 
-	// Configurar as expectativas dos mocks
+	// Configurar mocks
 	mockLLM.On("GetModelName").Return("MockGPT")
 	mockLLM.On("SendPrompt", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]models.Message")).Return(aiResponse, nil)
 
-	// Simular o usuário escolhendo o comando 1 e depois saindo
-	mockLiner.On("Prompt", "Sua escolha: ").Return("1", nil).Once()
-	mockLiner.On("Prompt", "Sua escolha: ").Return("q", nil).Once()
-
-	mockLiner.On("AppendHistory", mock.AnythingOfType("string")).Return()
-
-	// Mock da execução do comando usando o campo de função
+	// Mock da execução do comando
 	var executedBlock CommandBlock
 	agentMode.executeCommandsFunc = func(ctx context.Context, block CommandBlock) (string, string) {
 		executedBlock = block
-		return "total 0\n-rw-r--r-- 1 user group 0 Jan 1 00:00 file.txt", ""
+		return "total 0", ""
 	}
 
-	// 2. Executar
-	err := agentMode.Run(context.Background(), "list files", "")
+	// 2. Executar o teste com Stdin simulado
+	// Simulamos o usuário digitando "1" e depois "q"
+	userInput := "1\nq\n"
+	withStdin(t, userInput, func() {
+		err := agentMode.Run(context.Background(), "list files", "")
+		assert.NoError(t, err)
+	})
 
 	// 3. Asserções
-	assert.NoError(t, err)
 	mockLLM.AssertExpectations(t)
-	mockLiner.AssertExpectations(t)
-
-	// Verificar se o comando correto foi "executado"
 	assert.NotNil(t, executedBlock)
 	assert.Len(t, executedBlock.Commands, 1)
 	assert.Equal(t, "ls -la", executedBlock.Commands[0])

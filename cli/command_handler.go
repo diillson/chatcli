@@ -30,7 +30,7 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		ch.cli.reloadConfiguration()
 		return false
 	case strings.HasPrefix(userInput, "/agent") || strings.HasPrefix(userInput, "/run"):
-		ch.cli.handleAgentCommand(userInput)
+		//ch.cli.handleAgentCommand(userInput)
 		return false
 	case strings.HasPrefix(userInput, "/switch"):
 		ch.cli.handleSwitchCommand(userInput)
