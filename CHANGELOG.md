@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.3](https://github.com/diillson/chatcli/compare/v1.22.2...v1.22.3) (2025-09-11)
+
+
+### Bug Fixes
+
+* **cli:** add build constraints for platform-specific signal files ([#231](https://github.com/diillson/chatcli/issues/231)) ([#232](https://github.com/diillson/chatcli/issues/232)) ([db6e1aa](https://github.com/diillson/chatcli/commit/db6e1aa707a7f518af8b700573858f250a3c6d82))
+
 ## [1.22.2](https://github.com/diillson/chatcli/compare/v1.22.1...v1.22.2) (2025-09-10)
 
 
