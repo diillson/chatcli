@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.4](https://github.com/diillson/chatcli/compare/v1.22.3...v1.22.4) (2025-09-11)
+
+
+### Bug Fixes
+
+* **cli:** simplify dynamic header and footer formatting in AgentMode ([#234](https://github.com/diillson/chatcli/issues/234)) ([#235](https://github.com/diillson/chatcli/issues/235)) ([e5dea76](https://github.com/diillson/chatcli/commit/e5dea76d5ccbb35ef14b1e731beecd2ef0b397d9))
+
 ## [1.22.3](https://github.com/diillson/chatcli/compare/v1.22.2...v1.22.3) (2025-09-11)
 
 
