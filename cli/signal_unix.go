@@ -1,3 +1,5 @@
+//go:build !windows
+
 /*
  * ChatCLI - Command Line Interface for LLM interaction
  * Copyright (c) 2024 Edilson Freitas
