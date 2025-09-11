@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.5](https://github.com/diillson/chatcli/compare/v1.22.4...v1.22.5) (2025-09-11)
+
+
+### Bug Fixes
+
+* **cli:** Ensure command history is saved on graceful exit ([#237](https://github.com/diillson/chatcli/issues/237)) ([#238](https://github.com/diillson/chatcli/issues/238)) ([5931166](https://github.com/diillson/chatcli/commit/5931166369c4f45990abf659c92585777c1b69b2))
+
 ## [1.22.4](https://github.com/diillson/chatcli/compare/v1.22.3...v1.22.4) (2025-09-11)
 
 
