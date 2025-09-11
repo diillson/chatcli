@@ -1003,7 +1003,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 	// --- CABEÇALHO DINÂMICO ---
 	titleContent := fmt.Sprintf(" 🚀 EXECUTANDO: %s", block.Language)
 	contentWidth := visibleLen(titleContent)
-	topBorder := "╭" + strings.Repeat("─", contentWidth) + "╮"
+	topBorder := strings.Repeat("─", contentWidth)
 	fmt.Println("\n" + colorize(topBorder, ColorGray))
 	fmt.Println(colorize(titleContent, ColorLime+ColorBold))
 
@@ -1065,7 +1065,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 			}
 
 			isInteractive := false
-			if strings.HasSuffix(cmd, " --interactive") || strings.HasSuffix(cmd, " -i ") {
+			if strings.HasSuffix(cmd, " --interactive") {
 				cmd = strings.TrimSuffix(cmd, " --interactive")
 				isInteractive = true
 			} else if strings.Contains(cmd, "#interactive") {
@@ -1153,7 +1153,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 	leftPadding := paddingWidth / 2
 	rightPadding := paddingWidth - leftPadding
 
-	finalBorder := "╰" + strings.Repeat("─", leftPadding) + footerContent + strings.Repeat("─", rightPadding) + "╯"
+	finalBorder := strings.Repeat("─", leftPadding) + footerContent + strings.Repeat("─", rightPadding)
 	fmt.Println(colorize(finalBorder, ColorGray))
 
 	allOutput.WriteString("Execução concluída.\n")
