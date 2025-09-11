@@ -62,6 +62,7 @@ const (
 )
 
 var agentModeRequest = errors.New("request to enter agent mode")
+var errExitRequest = errors.New("request to exit")
 
 // ChatCLI representa a interface de linha de comando do chat
 type ChatCLI struct {
@@ -290,7 +291,7 @@ func (cli *ChatCLI) executor(in string) {
 
 	if strings.HasPrefix(in, "/") || in == "exit" || in == "quit" {
 		if cli.commandHandler.HandleCommand(in) {
-			os.Exit(0)
+			panic(errExitRequest)
 		}
 		return
 	}
@@ -421,11 +422,16 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					if r != agentModeRequest {
+					// Verificamos qual tipo de pânico ocorreu
+					if r == agentModeRequest {
+						// Mantém shouldContinue = true para entrar no modo agente
+					} else if r == errExitRequest {
+						// Se for um pedido de saída, definimos shouldContinue como false
+						shouldContinue = false
+					} else {
+						// Se for outro pânico, relançamos
 						panic(r)
 					}
-				} else {
-					shouldContinue = false
 				}
 			}()
 
@@ -451,6 +457,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			)
 
 			p.Run()
+			shouldContinue = false
 		}()
 
 		// Se o loop 'for' deve continuar, é porque o modo agente foi solicitado.
