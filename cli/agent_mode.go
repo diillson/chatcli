@@ -1021,7 +1021,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 		tmpFile, err := os.CreateTemp("", "chatcli-script-*.sh")
 		if err != nil {
 			errMsg := fmt.Sprintf("❌ Erro ao criar arquivo temporário para script: %v\n", err)
-			fmt.Println(colorize(" │ ", ColorGray) + errMsg)
+			fmt.Println(errMsg)
 			allOutput.WriteString(errMsg)
 			lastError = err.Error()
 		} else {
@@ -1030,7 +1030,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 
 			if _, err := tmpFile.WriteString(scriptContent); err != nil {
 				errMsg := fmt.Sprintf("❌ Erro ao remover arquivo temporário de script: %v\n", err)
-				fmt.Println(colorize(" │ ", ColorGray) + errMsg)
+				fmt.Println(errMsg)
 				allOutput.WriteString(errMsg)
 				lastError = err.Error()
 			}
@@ -1038,7 +1038,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 			_ = os.Chmod(scriptPath, 0755)
 
 			header := fmt.Sprintf("⚙️ Executando script via %s:\n", shell)
-			fmt.Println(colorize(" │ ", ColorGray) + header)
+			fmt.Println(header)
 			allOutput.WriteString(header)
 
 			cmd := exec.CommandContext(ctx, shell, scriptPath)
@@ -1046,13 +1046,13 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block Command
 
 			// Imprime a saída do script linha por linha com a borda
 			for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
-				fmt.Println(colorize(" │ ", ColorGray) + "  " + line)
+				fmt.Println("  " + line)
 			}
 			allOutput.WriteString(string(output) + "\n")
 
 			if err != nil {
 				errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
-				fmt.Println(colorize(" │ ", ColorGray) + errMsg)
+				fmt.Println(errMsg)
 				allOutput.WriteString(errMsg)
 				lastError = err.Error()
 			}
