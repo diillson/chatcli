@@ -327,9 +327,12 @@ one-shot:
          - API preferida: chat_completions
          - MaxTokens efetivo: 50000
 
-- **Iniciar uma Nova Sessão**:
-    - `/newsession` – Limpa o histórico atual e inicia uma nova sessão de conversa.
-    - **Uso**: Ideal para começar uma conversa do zero sem o contexto anterior, anteriormente recebia um clean no historico de conversa e contexto ao trocar de provider `LLM`, hoje é possível continuar a sessão em novo provider `LLM` sem perder o histórico anterior, com o comando `/newsession` você pode zerar o histórico e contexto atual e iniciar uma nova sessão de conversa no novo provider se assim desejar.
+  - **Gerenciamento de Sessões**:
+      - `/session save <nome>` – Salva a conversa atual com um nome.
+      - `/session load <nome>` – Carrega uma conversa salva anteriormente.
+      - `/session list` – Mostra todas as sessões salvas.
+      - `/session delete <nome>` – Apaga uma sessão salva.
+      - `/session new` ou `/newsession` – Inicia uma nova sessão de conversa (limpa o histórico).
 
 - **Verificar Versão e Atualizações**:
     - `/version` ou `/v` – Mostra a versão atual, o hash do commit e verifica se há atualizações disponíveis.

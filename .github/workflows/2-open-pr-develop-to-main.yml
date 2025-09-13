@@ -1,4 +1,4 @@
-name: Open PR develop -> main
+name: Open PR develop -> main (AI Assisted)
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
 
 permissions:
   pull-requests: write
-  contents: read
+  contents: write # 'write' é necessário para fazer o checkout e ler o histórico
 
 concurrency:
   group: open-pr-develop-to-main
@@ -15,7 +15,72 @@ concurrency:
 jobs:
   open_pr:
     runs-on: ubuntu-latest
+    env:
+      # Pré-requisito: Adicione o segredo da sua API KEY nas configurações do repositório
+      # Pode ser OPENAI_API_KEY, CLAUDEAI_API_KEY, etc., dependendo do seu provedor padrão.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Garante que o Go instale os binários em um local conhecido
+      GOPATH: ${{ github.workspace }}/go
+
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 é essencial para buscar todo o histórico e poder comparar as branches
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23' # Use a versão do Go do seu projeto
+
+      - name: Install ChatCLI
+        run: go install github.com/diillson/chatcli@latest
+
+      - name: Add Go bin to PATH
+        run: echo "${{ env.GOPATH }}/bin" >> $GITHUB_PATH
+
+      - name: Generate PR Content with ChatCLI
+        id: generate-pr-content
+        run: |
+          # 1. Coletar o contexto: logs e diff de arquivos entre main e develop
+          LOG_DIFF=$(git log main..develop --pretty=format:"- %s (%h) by %an")
+          FILE_DIFF=$(git diff --stat main..develop)
+          
+          # 2. Criar um prompt detalhado para a IA
+          PROMPT=$(cat <<EOF
+          Você é um expert em engenharia de software e sua tarefa é criar um título e corpo para um Pull Request que irá mesclar a branch 'develop' na 'main'. O projeto usa a estratégia de squash merge, então a mensagem do PR será a mensagem final do commit.
+          
+          Sua resposta DEVE ser estritamente no formato:
+          TÍTULO DO PR
+          ---
+          CORPO DO PR
+          
+          **Diretrizes:**
+          1.  **Título:** Deve seguir o padrão Conventional Commits (ex: 'feat: ...', 'fix: ...', 'chore: ...', 'refactor: ...'). Seja conciso e informativo.
+          2.  **Corpo:** Deve ser um resumo claro e bem escrito das mudanças. Organize em seções se necessário (ex: Novas Funcionalidades, Correções, Melhorias). NÃO inclua o diff de código, apenas a explicação.
+          3.  **Linguagem:** Use Português do Brasil.
+          
+          **Contexto fornecido:**
+          
+          **Log de Commits:**
+          ${LOG_DIFF}
+          
+          **Resumo das Alterações nos Arquivos:**
+          ${FILE_DIFF}
+          EOF
+          )
+          
+          # 3. Executar o chatcli em modo one-shot para gerar o conteúdo
+          # Usamos --no-anim para uma saída limpa no log do CI
+          AI_RESPONSE=$(chatcli -p "$PROMPT" --no-anim --provider OPENAI --model gpt-5)
+          
+          # 4. Salvar a resposta completa para o próximo passo
+          # Usamos a sintaxe recomendada para outputs de múltiplas linhas
+          echo "ai_response<<EOF" >> $GITHUB_OUTPUT
+          echo "$AI_RESPONSE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Open or reuse PR develop -> main
         uses: actions/github-script@v7
         with:
@@ -23,23 +88,38 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const head = `${owner}:develop`;
+            const head = 'develop';
             const base = 'main';
             
+            // 1. Verificar se um PR já existe para não criar duplicatas
             const { data: prs } = await github.rest.pulls.list({
-              owner, repo, state: 'open', head, base, per_page: 10
+              owner, repo, state: 'open', head, base, per_page: 1
             });
             
             if (prs.length > 0) {
-              core.info(`PR já existe: #${prs[0].number}`);
+              core.info(`PR já existe: #${prs[0].number}. Nenhuma ação necessária.`);
               return;
             }
             
-            const title = `Merge develop into main`;
-            const body  = `PR automático para promover mudanças da develop à main.`;
+            // 2. Processar a resposta da IA do passo anterior
+            const ai_response = `${{ steps.generate-pr-content.outputs.ai_response }}`;
+            const parts = ai_response.split('\n---\n');
             
+            let title = `chore: Merge develop into main`; // Título de fallback
+            let body = `PR automático para promover mudanças da develop à main.`; // Corpo de fallback
+            
+            if (parts.length >= 2) {
+              title = parts[0].trim();
+              body = parts[1].trim();
+            } else {
+              core.warning("A resposta da IA não estava no formato esperado. Usando título e corpo de fallback.");
+              core.warning(`Resposta recebida: ${ai_response}`);
+            }
+            
+            // 3. Criar o Pull Request com o conteúdo gerado pela IA
             const { data: pr } = await github.rest.pulls.create({
-              owner, repo, head: 'develop', base, title, body
+              owner, repo, head, base, title, body
             });
             
-            core.info(`PR criado: #${pr.number}`);
+            core.info(`PR criado com sucesso: #${pr.number}`);
+            core.info(`Título: ${title}`);

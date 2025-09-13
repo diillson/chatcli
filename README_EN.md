@@ -334,9 +334,12 @@ one-shot:
          - Preferred API: chat_completions
          - Effective MaxTokens: 50000
 
-  * **Start a New Session**:
-      * `/newsession` – Clears the current history and starts a new conversation session.
-      * **Usage**: Ideal for starting a conversation from scratch without previous context. Previously, switching the `LLM` provider would automatically clean the conversation and context history. Now, it's possible to continue the session with a new `LLM` provider without losing the existing history. If desired, you can use the `/newsession` command to reset the current history and context and start a fresh conversation with the new provider.
+  * **Session Management:**
+      * `/session save <name>` – Saves the current conversation with a given name.
+      * `/session load <name>` – Loads a previously saved conversation.
+      * `/session list` – Lists all saved sessions.
+      * `/session delete <name>` – Deletes a saved session.
+      * `/session new` or `/newsession` – Clears the current history and starts a new conversation session.
 
   * **Check Version and Updates:**
       * `/version` or `/v` – Shows current version, commit hash, and checks for available updates.
