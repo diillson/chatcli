@@ -29,6 +29,9 @@ jobs:
           # fetch-depth: 0 é essencial para buscar todo o histórico e poder comparar as branches
           fetch-depth: 0
 
+      - name: Fetch main branch to ensure it exists
+        run: git fetch origin main
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -44,8 +47,8 @@ jobs:
         id: generate-pr-content
         run: |
           # 1. Coletar o contexto: logs e diff de arquivos entre main e develop
-          LOG_DIFF=$(git log main..develop --pretty=format:"- %s (%h) by %an")
-          FILE_DIFF=$(git diff --stat main..develop)
+          LOG_DIFF=$(git log origin/main..develop --pretty=format:"- %s (%h) by %an")
+          FILE_DIFF=$(git diff --stat origin/main..develop)
           
           # 2. Criar um prompt detalhado para a IA
           PROMPT=$(cat <<EOF
