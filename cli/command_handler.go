@@ -54,7 +54,11 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return ch.cli.handleSkipChunk()
 	case userInput == "/newsession":
 		ch.cli.history = []models.Message{}
+		ch.cli.currentSessionName = ""
 		fmt.Println("Iniciada nova sessão de conversa; histórico foi limpo.")
+		return false
+	case strings.HasPrefix(userInput, "/session"):
+		ch.handleSessionCommand(userInput)
 		return false
 	default:
 		fmt.Println("Comando desconhecido. Use /help para ver os comandos disponíveis.")
