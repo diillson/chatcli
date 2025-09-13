@@ -87,6 +87,8 @@ type ChatCLI struct {
 	operationCancel      context.CancelFunc
 	isExecuting          atomic.Bool
 	processingDone       chan struct{}
+	sessionManager       *SessionManager
+	currentSessionName   string
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -240,6 +242,13 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
 		return nil, err
 	}
+
+	sessionMgr, err := NewSessionManager(logger)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao inicializar o SessionManager: %w", err)
+	}
+	cli.sessionManager = sessionMgr
+	cli.currentSessionName = ""
 
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)
@@ -440,7 +449,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				cli.completer,
 				prompt.OptionTitle("ChatCLI - LLM no seu Terminal"),
 				prompt.OptionLivePrefix(cli.changeLivePrefix),
-				prompt.OptionPrefixTextColor(prompt.Cyan),
+				prompt.OptionPrefixTextColor(prompt.Green),
 				prompt.OptionInputTextColor(prompt.White),
 				prompt.OptionSuggestionBGColor(prompt.DarkGray),
 				prompt.OptionDescriptionBGColor(prompt.Black),
@@ -547,9 +556,13 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 	switch cli.interactionState {
 	case StateSwitchingProvider:
 		return "Escolha o provedor (pelo número): ", true
-	case StateProcessing, StateAgentMode: // <<< ADICIONE O NOVO ESTADO AQUI
-		return "", true // Retorna prefixo vazio, mas mantém o prompt ativo
+	case StateProcessing, StateAgentMode:
+		return "", true
 	default:
+		// Mostra o nome da sessão no prompt
+		if cli.currentSessionName != "" {
+			return fmt.Sprintf("%s ❯ ", cli.currentSessionName), true // <--- CORRIGIDO: Retorna texto puro
+		}
 		return "❯ ", true
 	}
 }
@@ -1948,6 +1961,7 @@ func (cli *ChatCLI) getInternalCommands() []prompt.Suggest {
 		{Text: "/retry", Description: "Tentar novamente o último chunk que falhou"},
 		{Text: "/retryall", Description: "Tentar novamente todos os chunks que falharam"},
 		{Text: "/skipchunk", Description: "Pular um chunk de arquivo"},
+		{Text: "/session", Description: "Mostrar detalhes da sessão atual, new, save, list, load, delete"},
 	}
 }
 
@@ -2236,4 +2250,57 @@ func (cli *ChatCLI) RunAgentOnce(ctx context.Context, input string, autoExecute 
 
 	// Chama a nova função não-interativa do AgentMode
 	return cli.agentMode.RunOnce(ctx, fullQuery, autoExecute)
+}
+
+func (cli *ChatCLI) handleSaveSession(name string) {
+	if err := cli.sessionManager.SaveSession(name, cli.history); err != nil {
+		fmt.Printf(" ❌ Erro ao salvar sessão: %v\n", err)
+	} else {
+		cli.currentSessionName = name
+		fmt.Printf(" ✅ Sessão '%s' salva com sucesso.\n", name)
+	}
+}
+
+func (cli *ChatCLI) handleLoadSession(name string) {
+	history, err := cli.sessionManager.LoadSession(name)
+	if err != nil {
+		fmt.Printf(" ❌ Erro ao carregar sessão: %v\n", err)
+	} else {
+		cli.history = history
+		cli.currentSessionName = name
+		fmt.Printf(" ✅ Sessão '%s' carregada. A conversa anterior foi restaurada.\n", name)
+	}
+}
+
+func (cli *ChatCLI) handleListSessions() {
+	sessions, err := cli.sessionManager.ListSessions()
+	if err != nil {
+		fmt.Printf(" ❌ Erro ao listar sessões: %v\n", err)
+		return
+	}
+
+	if len(sessions) == 0 {
+		fmt.Println("Nenhuma sessão salva encontrada.")
+		return
+	}
+
+	fmt.Println("Sessões salvas:")
+	for _, session := range sessions {
+		fmt.Printf("- %s\n", session)
+	}
+}
+
+func (cli *ChatCLI) handleDeleteSession(name string) {
+	if err := cli.sessionManager.DeleteSession(name); err != nil {
+		fmt.Printf(" ❌ Erro ao deletar sessão: %v\n", err)
+	} else {
+		fmt.Printf(" ✅ Sessão '%s' deletada com sucesso do disco.\n", name)
+		// Se a sessão deletada era a que estava ativa...
+		if cli.currentSessionName == name {
+			// ...limpamos o histórico em memória e resetamos o nome.
+			cli.history = []models.Message{}
+			cli.currentSessionName = ""
+			fmt.Println("A sessão atual foi limpa. Você está em uma nova conversa.")
+		}
+	}
 }
