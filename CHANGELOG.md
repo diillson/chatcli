@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.0](https://github.com/diillson/chatcli/compare/v1.22.5...v1.23.0) (2025-09-13)
+
+
+### Features
+
+* **cli:** adiciona gerenciamento de sessões e geração de PR assistida por IA ([#246](https://github.com/diillson/chatcli/issues/246)) ([766e484](https://github.com/diillson/chatcli/commit/766e48421d3dce8ee9ba5e6b4a3c53f24a15440b))
+
 ## [1.22.5](https://github.com/diillson/chatcli/compare/v1.22.4...v1.22.5) (2025-09-11)
 
 
