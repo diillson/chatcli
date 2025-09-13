@@ -64,23 +64,31 @@ jobs:
           
           # 2. Criar um prompt detalhado para a IA
           PROMPT=$(cat <<EOF
-          Você é um expert em engenharia de software e sua tarefa é criar um título e corpo para um Pull Request que irá mesclar a branch 'develop' na 'main'. O projeto usa a estratégia de squash merge, então a mensagem do PR será a mensagem final do commit.
-          
-          Sua resposta DEVE ser estritamente no formato:
-          TÍTULO DO PR
+          Sua única tarefa é gerar um título e um corpo para um Pull Request, mesclando 'develop' em 'main'. O projeto usa squash merge.
+      
+          Sua resposta DEVE SEGUIR ESTRITAMENTE O SEGUINTE FORMATO, sem nenhuma palavra ou texto adicional antes ou depois:
+      
+          <TÍTULO DO PR SEGUINDO CONVENTIONAL COMMITS>
           ---
-          CORPO DO PR
-          
-          **Diretrizes:**
-          1.  **Título:** Deve seguir o padrão Conventional Commits (ex: 'feat: ...', 'fix: ...', 'chore: ...', 'refactor: ...'). Seja conciso e informativo.
-          2.  **Corpo:** Deve ser um resumo claro e bem escrito das mudanças. Organize em seções se necessário (ex: Novas Funcionalidades, Correções, Melhorias). NÃO inclua o diff de código, apenas a explicação.
-          3.  **Linguagem:** Use Português do Brasil.
-          
-          **Contexto fornecido:**
-          
+          <CORPO DO PR EM MARKDOWN>
+      
+          **Exemplo de formato esperado:**
+          feat(sessions): Adiciona gerenciamento de sessões de conversa
+          ---
+          ### Novas Funcionalidades
+          - Adicionado o comando \`/session\` com as sub-ações \`save\`, \`load\`, \`list\`, e \`delete\` para permitir que os usuários persistam e retomem conversas.
+          - As sessões são salvas como arquivos JSON no diretório \`~/.chatcli/sessions/\`.
+      
+          ### Melhorias
+          - O prompt do CLI agora exibe o nome da sessão ativa para melhor contexto do usuário.
+      
+          NÃO inclua explicações, introduções ou qualquer texto fora deste formato.
+      
+          **Use o seguinte contexto para gerar o título e o corpo:**
+      
           **Log de Commits:**
           ${LOG_DIFF}
-          
+      
           **Resumo das Alterações nos Arquivos:**
           ${FILE_DIFF}
           EOF
@@ -106,7 +114,7 @@ jobs:
             const head = 'develop';
             const base = 'main';
             
-            // 1. Verificar se um PR já existe para não criar duplicatas
+            // 1. Verificar se um PR já existe
             const { data: prs } = await github.rest.pulls.list({
               owner, repo, state: 'open', head, base, per_page: 1
             });
@@ -116,22 +124,36 @@ jobs:
               return;
             }
             
-            // 2. Processar a resposta da IA do passo anterior
-            const ai_response = `${{ steps.generate-pr-content.outputs.ai_response }}`;
-            const parts = ai_response.split('\n---\n');
+            // 2. Processar a resposta da IA com lógica de fallback aprimorada
+            const ai_response = `${{ steps.generate-pr-content.outputs.ai_response }}`.trim();
             
             let title = `Merge develop into main`; // Título de fallback
             let body = `PR automático para promover mudanças da develop à main.`; // Corpo de fallback
             
+            // Tentativa 1: Separador ideal "---"
+            let parts = ai_response.split('\n---\n');
+            
             if (parts.length >= 2) {
               title = parts[0].trim();
               body = parts[1].trim();
+              core.info("Resposta da IA parseada com sucesso usando '---'.");
             } else {
-              core.warning("A resposta da IA não estava no formato esperado. Usando título e corpo de fallback.");
-              core.warning(`Resposta recebida: ${ai_response}`);
+              // Tentativa 2: Fallback - Primeira linha como título, resto como corpo
+              const firstNewlineIndex = ai_response.indexOf('\n');
+              if (firstNewlineIndex !== -1) {
+                title = ai_response.substring(0, firstNewlineIndex).trim();
+                body = ai_response.substring(firstNewlineIndex + 1).trim();
+                // Remove caracteres de título markdown do título, se houver
+                title = title.replace(/^#+\s*/, '');
+                core.info("Usando fallback: primeira linha como título.");
+              } else {
+                // Se não houver quebra de linha, usa a resposta inteira como título
+                title = ai_response;
+                core.warning("Resposta da IA não continha quebras de linha. Usando a resposta inteira como título.");
+              }
             }
             
-            // 3. Criar o Pull Request com o conteúdo gerado pela IA
+            // 3. Criar o Pull Request
             const { data: pr } = await github.rest.pulls.create({
               owner, repo, head, base, title, body
             });
