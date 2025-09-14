@@ -64,7 +64,7 @@ jobs:
           
           # 2. Criar um prompt detalhado para a IA
           PROMPT=$(cat <<EOF
-          Sua única tarefa é gerar um título e um corpo para um Pull Request, mesclando 'develop' em 'main'. O projeto usa squash merge.
+          Sua única tarefa é em inglês, gerar um título e um corpo para um Pull Request, mesclando 'develop' em 'main'. O projeto usa squash merge.
       
           Sua resposta DEVE SEGUIR ESTRITAMENTE O SEGUINTE FORMATO, sem nenhuma palavra ou texto adicional antes ou depois:
       

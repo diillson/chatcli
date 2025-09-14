@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/llm/openai_responses"
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/diillson/chatcli/llm/token"
+	"github.com/diillson/chatcli/llm/xai"
 	"go.uber.org/zap"
 )
 
@@ -60,6 +61,7 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager,
 	manager.configurarStackSpotClient(slugName, tenantName)
 	manager.configurarClaudeAIClient()
 	manager.configurarGoogleAIClient()
+	manager.configurarXAIClient()
 
 	return manager, nil
 }
@@ -174,6 +176,28 @@ func (m *LLMManagerImpl) configurarClaudeAIClient() {
 		}
 	} else {
 		m.logger.Warn("CLAUDEAI_API_KEY não definida, o provedor ClaudeAI não estará disponível")
+	}
+}
+
+// configurarXAIClient configura o cliente xAI
+func (m *LLMManagerImpl) configurarXAIClient() {
+	apiKey := os.Getenv("XAI_API_KEY")
+	if apiKey != "" {
+		m.logger.Info("Configurando provedor xAI")
+		m.clients["XAI"] = func(model string) (client.LLMClient, error) {
+			if model == "" {
+				model = config.DefaultXAIModel
+			}
+			return xai.NewXAIClient(
+				apiKey,
+				model,
+				m.logger,
+				config.OpenAIDefaultMaxAttempts,
+				config.OpenAIDefaultBackoff,
+			), nil
+		}
+	} else {
+		m.logger.Warn("XAI_API_KEY não definida, o provedor xAI não estará disponível")
 	}
 }
 

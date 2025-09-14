@@ -39,6 +39,10 @@ const (
 	GoogleAIDefaultMaxTokens   = 8192
 	DefaultGoogleAITimeout     = 5 * time.Minute
 
+	// Valores padrão para xAI
+	DefaultXAIModel = "grok-code-fast-1"
+	XAIAPIURL       = "https://api.x.ai/v1/chat/completions"
+
 	// Provedor padrão
 	DefaultLLMProvider = "OPENAI"
 

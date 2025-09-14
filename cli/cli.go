@@ -221,6 +221,12 @@ func (cli *ChatCLI) configureProviderAndModel() {
 			cli.Model = config.DefaultGoogleAIModel
 		}
 	}
+	if cli.Provider == "XAI" {
+		cli.Model = os.Getenv("XAI_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultXAIModel
+		}
+	}
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
@@ -407,6 +413,9 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	}
 	if newProvider == "GOOGLEAI" {
 		newModel = utils.GetEnvOrDefault("GOOGLEAI_MODEL", config.DefaultGoogleAIModel)
+	}
+	if newProvider == "XAI" {
+		newModel = utils.GetEnvOrDefault("XAI_MODEL", config.DefaultXAIModel)
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)

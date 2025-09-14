@@ -8,7 +8,11 @@
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/diillson/chatcli?label=Go%20Version)
 ![GitHub](https://img.shields.io/github/license/diillson/chatcli)
 
-O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra modelos de Linguagem de Aprendizado (LLMs) poderosos (como OpenAI, StackSpot, GoogleAI e ClaudeAI) para facilitar conversas interativas e contextuais diretamente no seu terminal. Projetado para desenvolvedores, cientistas de dados e entusiastas de tecnologia, o ChatCLI potencializa a produtividade ao agregar diversas fontes de dados contextuais e oferecer uma experiência rica e amigável.
+O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra modelos de Linguagem de Aprendizado (LLMs) poderosos (como OpenAI, StackSpot, GoogleAI, ClaudeAI e xAI) para facilitar conversas interativas e contextuais diretamente no seu terminal. Projetado para desenvolvedores, cientistas de dados e entusiastas de tecnologia, o ChatCLI potencializa a produtividade ao agregar diversas fontes de dados contextuais e oferecer uma experiência rica e amigável.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/diillson/chatcli/main/assets/chatcli.png" alt="ChatCLI" width="500"/>
+</p>
 
 ---
 
@@ -37,7 +41,7 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 
 ## Características Principais
 
-- **Suporte a Múltiplos Provedores**: Alterna entre StackSpot, OpenAI e ClaudeAI conforme a necessidade.
+- **Suporte a Múltiplos Provedores**: Alterna entre StackSpot, OpenAI, ClaudeAI, GoogleAI e xAI conforme a necessidade.
 - **Experiência Interativa na CLI**: Navegação de histórico, auto-completação e feedback animado (ex.: “Pensando…”).
 - **Comandos Contextuais Poderosos**:
     - `@history` – Insere o histórico recente do shell (suporta bash, zsh e fish).
@@ -123,7 +127,7 @@ O ChatCLI utiliza variáveis de ambiente para definir seu comportamento e conect
 - **Geral**:
     - `LOG_LEVEL` – (Opcional) Níveis: `debug`, `info`, `warn`, `error` (padrão: `info`).
     - `ENV` – (Opcional) Ambiente: `prod` para produção ou `dev` para desenvolvimento (padrão: `dev`).
-    - `LLM_PROVIDER` – (Opcional) Provedor padrão: `OPENAI`, `STACKSPOT` ou `CLAUDEAI` (padrão: `OPENAI`).
+    - `LLM_PROVIDER` – (Opcional) Provedor padrão: `OPENAI`, `STACKSPOT`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `OPENAI`).
     - `LOG_FILE` – (Opcional) Nome do arquivo de log (padrão: `app.log`).
     - `LOG_MAX_SIZE` – (Opcional) Tamanho máximo do log antes da rotação (padrão: `50MB`).
     - `HISTORY_MAX_SIZE` – (Opcional) Tamanho do histórico do ChatCLI (padrão: `50MB`).
@@ -151,6 +155,10 @@ O ChatCLI utiliza variáveis de ambiente para definir seu comportamento e conect
     - `GOOGLEAI_API_KEY` – Chave de API do Google AI.
     - `GOOGLEAI_MODEL` – (Opcional) Modelo a ser utilizado (padrão: `gemini-2.0-flash-lite`)
     - `GOOGLEAI_MAX_TOKENS` – (Opcional) Máximo de tokens na resposta (padrão: `8192`).
+
+- **Provedor xAI (Grok)**:
+    - `XAI_API_KEY` – Chave de API da xAI.
+    - `XAI_MODEL` – (Opcional) Modelo a ser utilizado (padrão: `grok-code-fast-1`).
 
 ### Exemplo de Arquivo `.env`
 
@@ -186,6 +194,10 @@ CLAUDEAI_API_VERSION=2023-06-01
 GOOGLEAI_API_KEY=sua-chave-googleai
 GOOGLEAI_MODEL=gemini-2.5-flash
 GOOGLEAI_MAX_TOKENS=20000
+
+# Configurações da xAI
+XAI_API_KEY=sua-chave-xai
+XAI_MODEL=grok-4-latest
 ```
 
 ---
@@ -327,12 +339,12 @@ one-shot:
          - API preferida: chat_completions
          - MaxTokens efetivo: 50000
 
-  - **Gerenciamento de Sessões**:
-      - `/session save <nome>` – Salva a conversa atual com um nome.
-      - `/session load <nome>` – Carrega uma conversa salva anteriormente.
-      - `/session list` – Mostra todas as sessões salvas.
-      - `/session delete <nome>` – Apaga uma sessão salva.
-      - `/session new` ou `/newsession` – Inicia uma nova sessão de conversa (limpa o histórico).
+- **Gerenciamento de Sessões**:
+    - `/session save <nome>` – Salva a conversa atual com um nome.
+    - `/session load <nome>` – Carrega uma conversa salva anteriormente.
+    - `/session list` – Mostra todas as sessões salvas.
+    - `/session delete <nome>` – Apaga uma sessão salva.
+    - `/session new` ou `/newsession` – Inicia uma nova sessão de conversa (limpa o histórico).
 
 - **Verificar Versão e Atualizações**:
     - `/version` ou `/v` – Mostra a versão atual, o hash do commit e verifica se há atualizações disponíveis.
@@ -379,7 +391,7 @@ O Modo Agente permite que a IA execute tarefas no seu sistema através de comand
 - O agente é projetado para ser seguro e respeitar as permissões do sistema, garantindo que apenas comandos autorizados sejam execut
 - O Modo Agente pode ser desativado a qualquer momento, retornando ao modo de conversa normal.
 
-  #### Modo Agente One-Shot (Não-Interativo)
+#### Modo Agente One-Shot (Não-Interativo)
 
 Você pode usar o Modo Agente diretamente da linha de comando, o que é perfeito para scripts e automação.
 
@@ -387,7 +399,7 @@ Você pode usar o Modo Agente diretamente da linha de comando, o que é perfeito
 
 Por padrão, ao chamar o agente no modo one-shot, ele apenas **sugere** o melhor comando para a tarefa e sai, sem executar nada.
 
-# A IA irá analisar o pedido e imprimir o comando `find . -name "*.go"`, depois sairá.
+A IA irá analisar o pedido e imprimir o comando `find . -name "*.go"`, depois sairá.
 ```bash
 chatcli -p "/agent liste todos os arquivos .go neste diretório"
 ```
@@ -398,32 +410,32 @@ Para que o  chatcli  execute o comando sugerido, adicione o flag  `--agent-auto-
 
 - Segurança: Por segurança, o agente executará apenas o primeiro comando sugerido e bloqueará automaticamente a execução de comandos considerados perigosos (como  rm -rf ,  sudo ,  drop database , etc.).
 
-# A IA irá gerar um comando como `touch test_file.txt` e executá-lo imediatamente.
+A IA irá gerar um comando como `touch test_file.txt` e executá-lo imediatamente.
 ```bash
 chatcli -p "/agent crie um arquivo chamado test_file.txt" --agent-auto-exec
 ```
 
-# Usando stdin
+Usando stdin
 ```bash
 echo "liste todos os arquivos .go e conte suas linhas" | chatcli -p "/agent"
 ```
-# Exemplo com contexto:
+Exemplo com contexto:
 ```bash
 chatcli -p "/agent @git qual o status do git neste repositório?" --agent-auto-exec
 ```
 
-# Exemplo com contexto de arquivo
+Exemplo com contexto de arquivo
 ```bash
 chatcli -p "/agent @file ./README.md resuma este arquivo em uma frase" --agent-auto-exec
 ```
 ***3. Comando Perigoso (Será Bloqueado)***
 
-# O chatcli se recusará a executar o comando e sairá com uma mensagem de erro.
+O chatcli se recusará a executar o comando e sairá com uma mensagem de erro.
 ```bash
 chatcli -p "/agent delete todos os arquivos da pasta tmp" --agent-auto-exec
 ```
 
-#### Refinando Comandos Antes da Execução
+#### Refinando Comandos Antes da Execução:
 
 Você pode pedir à IA para refinar um comando sugerido antes de executá-lo, fornecendo contexto adicional.
 
