@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0](https://github.com/diillson/chatcli/compare/v1.23.0...v1.24.0) (2025-09-14)
+
+
+### Features
+
+* **llm:** integrate xAI provider with support for Grok models ([#248](https://github.com/diillson/chatcli/issues/248)) ([#249](https://github.com/diillson/chatcli/issues/249)) ([28b2269](https://github.com/diillson/chatcli/commit/28b2269051ecdd8a4dc09c1adf18afeb3aa42ca8))
+
 ## [1.23.0](https://github.com/diillson/chatcli/compare/v1.22.5...v1.23.0) (2025-09-13)
 
 
