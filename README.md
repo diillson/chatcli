@@ -183,6 +183,15 @@ Execute prompts em uma única linha, ideal para scripts e automações.
   ```bash
   git diff | chatcli -p "Resuma as mudanças e liste possíveis impactos."
   ```
+- **Flags disponiveis no oneshoot**:
+    - `-p` ou `--prompt`: texto a enviar para a LLM em uma única execução.
+    - `--provider`: sobrescreve o provedor de LLM em tempo de execução (`OPENAI`, `OPENAI_ASSISTANT`, `CLAUDEAI`, `GOOGLEAI`, `STACKSPOT`, `XAI`).
+    - `--model`: escolhe o modelo do provedor ativo (ex.: `gpt-4o-mini`, `claude-3-5-sonnet-20241022`, `gemini-2.5-flash`, etc.)
+    - `--timeout` timeout da chamada one-shot (padrão: 5m)
+    - `--no-anim` desabilita animações (útil em scripts/CI).
+    - `--agent-auto-exec` executa automaticamente o primeiro comando sugerido pelo agente (modo agente).
+
+Observação: as mesmas features de contexto funcionam dentro do texto do `--prompt`, como `@file`, `@git`, `@env`, `@command` e o operador `>` para adicionar contexto. Lembre-se de colocar o prompt entre aspas duplas no shell para evitar interpretações indesejadas.  
 
 ### Comandos da CLI
 
@@ -192,6 +201,7 @@ Execute prompts em uma única linha, ideal para scripts e automações.
     - `/switch`, `/reload`, `/config` ou `/status` (exibe configurações de runtime, provedor e modelo em uso).
 - **Geral**:
     - `/help`: Exibe a ajuda.
+    - `/exit`: Para Sair do ChatCLI.
     - `/version` ou `/v`: Mostra a versão, o hash do commit e a data de compilação.
     - `Ctrl+C` (uma vez): Cancela a operação atual.
     - `Ctrl+C` (duas vezes) ou `Ctrl+D`: Encerra a aplicação.

@@ -31,7 +31,7 @@
     - [Non-Interactive Mode (One-Shot)](https://www.google.com/search?q=%23non-interactive-mode-one-shot)
     - [CLI Commands](https://www.google.com/search?q=%23cli-commands)
 - [Advanced File Processing](https://www.google.com/search?q=%23advanced-file-processing)
-    - [Modes of `@file` Usage](https://www.google.com/search?q=%23modes-of-file-usage)
+    - [Modes of `@file` Usage](https://www.google.com/search?q=%5Bhttps://www.google.com/search%3Fq%3D%2523modes-of-file-usage%5D\(https://www.google.com/search%3Fq%3D%2523modes-of-file-usage\))
     - [Chunking System in Detail](https://www.google.com/search?q=%23chunking-system-in-detail)
 - [Agent Mode](https://www.google.com/search?q=%23agent-mode)
     - [Agent Interaction](https://www.google.com/search?q=%23agent-interaction)
@@ -57,7 +57,7 @@
     - `@command --ai <command> > <context>` – Executes a command and sends its output directly to the LLM with additional context.
 - **Recursive Directory Exploration**: Processes entire projects while ignoring irrelevant folders (e.g., `node_modules`, `.git`).
 - **Dynamic Configuration and Persistent History**: Change providers, update configurations in real-time, and maintain history across sessions.
-- **Robustness**: Exponential backoff retry for handling external API errors and instability.
+- **Robustness**: Exponential backoff retry for handling external API errors.
 
 -----
 
@@ -183,6 +183,15 @@ Execute prompts in a single line, ideal for scripting and automation.
   ```bash
   git diff | chatcli -p "Summarize the changes and list potential impacts."
   ```
+- **Available One-Shot Flags**:
+    - `-p` or `--prompt`: The text to send to the LLM for a single execution.
+    - `--provider`: Overrides the LLM provider at runtime (`OPENAI`, `OPENAI_ASSISTANT`, `CLAUDEAI`, `GOOGLEAI`, `STACKSPOT`, `XAI`).
+    - `--model`: Chooses the model for the active provider (e.g., `gpt-4o-mini`, `claude-3-5-sonnet-20241022`, `gemini-2.5-flash`, etc.).
+    - `--timeout`: Sets the timeout for the one-shot call (default: `5m`).
+    - `--no-anim`: Disables animations (useful in scripts/CI).
+    - `--agent-auto-exec`: Automatically executes the first command suggested by the agent (in agent mode).
+
+Note: The same contextual features work within the `--prompt` text, such as `@file`, `@git`, `@env`, `@command`, and the `>` operator to add context. Remember to enclose the prompt in double quotes in the shell to avoid unwanted interpretations.
 
 ### CLI Commands
 
@@ -192,7 +201,8 @@ Execute prompts in a single line, ideal for scripting and automation.
     - `/switch`, `/reload`, `/config` or `/status` (displays runtime settings, current provider, and model).
 - **General**:
     - `/help`: Displays help information.
-    - `/version` or `/v`: Shows the current version, commit hash, and build date.
+    - `/exit`: To exit ChatCLI.
+    - `/version` or `/v`: Shows the version, commit hash, and build date.
     - `Ctrl+C` (once): Cancels the current operation.
     - `Ctrl+C` (twice) or `Ctrl+D`: Exits the application.
 - **Context**:
@@ -202,11 +212,11 @@ Execute prompts in a single line, ideal for scripting and automation.
 
 ## Advanced File Processing
 
-The `@file <path>` command is the main tool for sending files and directories, with support for path expansion (`~`).
+The `@file <path>` command is the primary tool for sending files and directories, with support for path expansion (`~`).
 
 ### Modes of `@file` Usage
 
-- **Default Mode (`full`)**: Processes the entire content of a file or directory, truncating if the token limit is exceeded. Ideal for small to medium-sized projects.
+- **Default Mode (`full`)**: Processes the entire content of a file or directory, truncating it if the token limit is exceeded. Ideal for small to medium-sized projects.
 - **Summary Mode (`summary`)**: Returns only the directory structure, file list with sizes, and general statistics. Useful for getting an overview without the content.
 - **Smart Mode (`smart`)**: ChatCLI assigns a relevance score to each file based on your question and includes only the most pertinent ones.
   ```bash
@@ -216,7 +226,7 @@ The `@file <path>` command is the main tool for sending files and directories, w
 
 ### Chunking System in Detail
 
-After the first chunk is sent, use `/nextchunk` to process the next one. The system provides visual feedback on progress and the number of remaining chunks. To handle failures, use `/retry`, `/retryall`, or `/skipchunk`.
+After the first chunk is sent, use `/nextchunk` to process the next. The system provides visual feedback on progress and the number of remaining chunks. To manage failures, use `/retry`, `/retryall`, or `/skipchunk`.
 
 -----
 
@@ -274,7 +284,7 @@ Contributions are welcome\!
 
 ## License
 
-This project is licensed under the [MIT License](https://www.google.com/search?q=https://github.com/diillson/chatcli/blob/main/LICENSE).
+This project is licensed under the [MIT License](https://www.google.com/search?q=/LICENSE).
 
 -----
 
@@ -284,4 +294,4 @@ For questions or support, please open an [issue](https://www.google.com/search?q
 
 -----
 
-**ChatCLI** combines the power of LLMs with the simplicity of the command line, offering a versatile tool for continuous AI interactions directly in your terminal. Enjoy and transform your productivity experience\! 🗨️✨
+**ChatCLI** combines the power of LLMs with the simplicity of the command line, offering a versatile tool for continuous AI interactions directly in your terminal. Enjoy and transform your productivity experience! 🗨️✨
