@@ -13,6 +13,7 @@ const (
 	ProviderClaudeAI        = "CLAUDEAI"
 	ProviderStackSpot       = "STACKSPOT"
 	ProviderGoogleAI        = "GOOGLEAI"
+	ProviderXAI             = "XAI"
 )
 
 // PreferredAPI define qual API é preferida para o modelo
@@ -217,6 +218,47 @@ var registry = []ModelMeta{
 		PreferredAPI:    "gemini_api",
 		Capabilities:    []string{"vision", "tools", "json_mode", "multimodal_live"},
 	},
+	// xAI (Grok) Models
+	{
+		ID:              "grok-4",
+		Aliases:         []string{"grok-4, grok-4-0709"},
+		DisplayName:     "Grok-4",
+		Provider:        ProviderXAI,
+		ContextWindow:   200000,
+		MaxOutputTokens: 200000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{},
+	},
+	{
+		ID:              "grok-3",
+		Aliases:         []string{"grok-3"},
+		DisplayName:     "Grok-3",
+		Provider:        ProviderXAI,
+		ContextWindow:   128000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"json_mode"},
+	},
+	{
+		ID:              "grok-3-mini",
+		Aliases:         []string{"grok-3-mini"},
+		DisplayName:     "Grok-3 Mini",
+		Provider:        ProviderXAI,
+		ContextWindow:   128000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"json_mode"},
+	},
+	{
+		ID:              "grok-code-fast-1",
+		Aliases:         []string{"grok-code-fast-1"},
+		DisplayName:     "Grok Code Fast 1",
+		Provider:        ProviderXAI,
+		ContextWindow:   200000,
+		MaxOutputTokens: 200000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"json_mode"},
+	},
 }
 
 // Resolve procura metadados por provedor e string de modelo (case-insensitive),
@@ -292,7 +334,9 @@ func GetMaxTokens(provider, model string, override int) int {
 	case ProviderStackSpot:
 		return 50000
 	case ProviderGoogleAI:
-		return 10000
+		return 50000
+	case ProviderXAI:
+		return 50000
 	default:
 		return 50000
 	}
