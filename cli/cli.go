@@ -63,6 +63,32 @@ const (
 
 var agentModeRequest = errors.New("request to enter agent mode")
 var errExitRequest = errors.New("request to exit")
+var commandFlags = map[string]map[string][]prompt.Suggest{
+	"@file": {
+		"--mode": {
+			{Text: "full", Description: "Processa o conteúdo completo (padrão, trunca se necessário)"},
+			{Text: "summary", Description: "Gera resumo estrutural (árvore de arquivos, tamanhos, sem conteúdo)"},
+			{Text: "chunked", Description: "Divide grandes projetos em pedaços gerenciáveis (use /nextchunk para prosseguir)"},
+			{Text: "smart", Description: "Seleciona arquivos relevantes com base no seu prompt (IA decide)"},
+		},
+	},
+	"@command": {
+		"-i":   {},
+		"--ai": {},
+	},
+	"/switch": {
+		"--model":      {},
+		"--slugname":   {},
+		"--tenantname": {},
+	},
+	"/session": {
+		"new":    {},
+		"save":   {},
+		"load":   {},
+		"list":   {},
+		"delete": {},
+	},
+}
 
 // ChatCLI representa a interface de linha de comando do chat
 type ChatCLI struct {
@@ -1976,8 +2002,57 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return prompt.FilterHasPrefix(cli.getContextCommands(), wordBeforeCursor, true)
 	}
 
-	// 5. Se nenhum dos casos acima se aplicar, não sugira nada.
+	// 5. Sugestões de flags e valores
+	if len(args) > 1 {
+		prevWord := args[len(args)-2] // Palavra anterior (ex: "@file")
+		currWord := wordBeforeCursor  // Palavra atual (ex: "--mode" ou "smart")
+
+		if flagsMap, ok := commandFlags[prevWord]; ok {
+			// Sugerir flags se digitando "--" ou "-"
+			if strings.HasPrefix(currWord, "--") || strings.HasPrefix(currWord, "-") {
+				var flagSuggests []prompt.Suggest
+				for flag, values := range flagsMap {
+					desc := fmt.Sprintf("Opção para %s", prevWord)
+					if len(values) > 0 {
+						desc += " (valores: " + strings.Join(extractTexts(values), ", ") + ")"
+					} else if flag == "--model" {
+						desc = "Troque o modelo (Runtime) baseado no provedor atual (grpt-5, grok-4, etc.)"
+					} else if flag == "--slugname" {
+						desc = "Altera o Slug em tempo de execução (Apenas para STACKSPOT)"
+					} else if flag == "--tenantname" {
+						desc = "Altera o Tenant em tempo de execução (Apenas para STACKSPOT)"
+					}
+					flagSuggests = append(flagSuggests, prompt.Suggest{Text: flag, Description: desc})
+				}
+				return prompt.FilterHasPrefix(flagSuggests, currWord, true)
+			}
+
+			// Sugerir valores se após um flag conhecido (ex: "--mode ")
+			for flag, values := range flagsMap {
+				// Detecta se o usuário terminou o flag (ex: "--mode " ou "--mode=s")
+				if strings.HasSuffix(prevWord, flag) || strings.HasPrefix(currWord, flag+"=") {
+					// Se for "--mode=", extrai o prefixo após "="
+					valuePrefix := currWord
+					if strings.Contains(valuePrefix, "=") {
+						valuePrefix = strings.SplitN(valuePrefix, "=", 2)[1]
+					}
+					return prompt.FilterHasPrefix(values, valuePrefix, true) // Aqui as descrições aparecem!
+				}
+			}
+		}
+	}
+
+	// 6. Se nenhum dos casos acima se aplicar, não sugira nada.
 	return []prompt.Suggest{}
+}
+
+// Helper para extrair só os Texts de um []Suggest (para descrições de flags)
+func extractTexts(suggests []prompt.Suggest) []string {
+	texts := make([]string, len(suggests))
+	for i, s := range suggests {
+		texts[i] = s.Text
+	}
+	return texts
 }
 
 func (cli *ChatCLI) getInternalCommands() []prompt.Suggest {
@@ -1997,7 +2072,7 @@ func (cli *ChatCLI) getInternalCommands() []prompt.Suggest {
 		{Text: "/retry", Description: "Tentar novamente o último chunk que falhou"},
 		{Text: "/retryall", Description: "Tentar novamente todos os chunks que falharam"},
 		{Text: "/skipchunk", Description: "Pular um chunk de arquivo"},
-		{Text: "/session", Description: "Mostrar detalhes da sessão atual, new, save, list, load, delete"},
+		{Text: "/session", Description: "Gerencia as sessões, new, save, list, load, delete"},
 	}
 }
 
@@ -2252,86 +2327,6 @@ func (cli *ChatCLI) showConfig() {
 		printItem("Nenhum", "Configure as chaves de API no .env")
 	}
 }
-
-// showConfig exibe as configurações atuais e o estado efetivo do ChatCLI
-//func (cli *ChatCLI) showConfig() {
-//	fmt.Println("===== CONFIGURAÇÃO ATUAL =====")
-//
-//	// Arquivo .env efetivo
-//	envFilePath := os.Getenv("CHATCLI_DOTENV")
-//	if envFilePath == "" {
-//		envFilePath = ".env"
-//	} else {
-//		if expanded, err := utils.ExpandPath(envFilePath); err == nil {
-//			envFilePath = expanded
-//		}
-//	}
-//	fmt.Printf("- Arquivo .env: %s\n", envFilePath)
-//
-//	// Provider/Model atuais (runtime)
-//	fmt.Printf("- Provider atual (runtime): %s\n", cli.Provider)
-//	fmt.Printf("- Modelo atual (runtime): %s\n", cli.Model)
-//	fmt.Printf("- Nome do modelo (client): %s\n", cli.Client.GetModelName())
-//
-//	// Preferências/Metadados do catálogo de API (quando houver)
-//	preferredAPI := catalog.GetPreferredAPI(cli.Provider, cli.Model)
-//	fmt.Printf("- API preferida (catálogo): %s\n", string(preferredAPI))
-//
-//	maxTokens := cli.getMaxTokensForCurrentLLM()
-//	fmt.Printf("- MaxTokens efetivo (estimado): %d\n", maxTokens)
-//
-//	// Overrides de tokens por ENV
-//	fmt.Printf("- Overrides (ENV): OPENAI_MAX_TOKENS=%s | CLAUDEAI_MAX_TOKENS=%s | GOOGLEAI_MAX_TOKENS=%s | XAI_MAX_TOKENS=%s\n",
-//		os.Getenv("OPENAI_MAX_TOKENS"),
-//		os.Getenv("CLAUDEAI_MAX_TOKENS"),
-//		os.Getenv("GOOGLEAI_MAX_TOKENS"),
-//		os.Getenv("XAI_MAX_TOKENS"),
-//	)
-//	// Flags e chaves relevantes
-//	fmt.Printf("- LLM_PROVIDER (ENV): %s\n", os.Getenv("LLM_PROVIDER"))
-//	fmt.Printf("- OPENAI_USE_RESPONSES (ENV): %s\n", os.Getenv("OPENAI_USE_RESPONSES"))
-//	fmt.Printf("- ENV=%s | LOG_LEVEL=%s | LOG_FILE=%s | LOG_MAX_SIZE=%s\n",
-//		os.Getenv("ENV"), os.Getenv("LOG_LEVEL"), os.Getenv("LOG_FILE"), os.Getenv("LOG_MAX_SIZE"))
-//	fmt.Printf("- HISTORY_MAX_SIZE=%s\n", os.Getenv("HISTORY_MAX_SIZE"))
-//
-//	// Presença de chaves sensíveis — apenas presença, nunca valores
-//	fmt.Println("- Chaves sensíveis (apenas presença):")
-//	fmt.Printf("    OPENAI_API_KEY: %s\n", presence(os.Getenv("OPENAI_API_KEY")))
-//	fmt.Printf("    CLAUDEAI_API_KEY: %s\n", presence(os.Getenv("CLAUDEAI_API_KEY")))
-//	fmt.Printf("    GOOGLEAI_API_KEY: %s\n", presence(os.Getenv("GOOGLEAI_API_KEY")))
-//	fmt.Printf("    XAI_API_KEY: %s\n", presence(os.Getenv("XAI_API_KEY")))
-//	fmt.Printf("    CLIENT_ID (STACKSPOT): %s\n", presence(os.Getenv("CLIENT_ID")))
-//	fmt.Printf("    CLIENT_SECRET (STACKSPOT): %s\n", presence(os.Getenv("CLIENT_SECRET")))
-//
-//	// Provider/modelosLLM (se presentes)
-//	if strings.ToUpper(cli.Provider) == "OPENAI" || strings.ToUpper(cli.Provider) == "OPENAI_ASSISTANT" {
-//		fmt.Printf("- OPENAI_MODEL=%s | OPENAI_ASSISTANT_MODEL=%s\n", os.Getenv("OPENAI_MODEL"), os.Getenv("OPENAI_ASSISTANT_MODEL"))
-//	}
-//	if strings.ToUpper(cli.Provider) == "CLAUDEAI" {
-//		fmt.Printf("- CLAUDEAI_MODEL=%s | CLAUDEAI_API_VERSION=%s\n", os.Getenv("CLAUDEAI_MODEL"), os.Getenv("CLAUDEAI_API_VERSION"))
-//	}
-//	if strings.ToUpper(cli.Provider) == "GOOGLEAI" {
-//		fmt.Printf("- GOOGLEAI_MODEL=%s\n", os.Getenv("GOOGLEAI_MODEL"))
-//	}
-//	if strings.ToUpper(cli.Provider) == "XAI" {
-//		fmt.Printf("- XAI_MODEL=%s\n", os.Getenv("XAI_MODEL"))
-//	}
-//
-//	// StackSpot: slug/tenant do TokenManager (quando disponível)
-//	if tm, ok := cli.manager.GetTokenManager(); ok {
-//		slug, tenant := tm.GetSlugAndTenantName()
-//		fmt.Printf("- STACKSPOT: slugName=%s | tenantName=%s\n", slug, tenant)
-//	}
-//
-//	// Provedores disponíveis
-//	providers := cli.manager.GetAvailableProviders()
-//	if len(providers) > 0 {
-//		fmt.Printf("- Provedores disponíveis: %s\n", strings.Join(providers, ", "))
-//	}
-//	fmt.Println("==============================")
-//	fmt.Println("Dica: use /switch para trocar provider/model em tempo real;")
-//	fmt.Println("      e /reload para recarregar variáveis do .env.")
-//}
 
 // handleVersionCommand exibe informações detalhadas sobre a versão atual
 // do ChatCLI e verifica se há atualizações disponíveis no GitHub.

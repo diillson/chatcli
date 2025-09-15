@@ -113,6 +113,9 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     - `CHATCLI_DOTENV` – **(Optional)** Defines the path to your `.env` file.
     - `LOG_LEVEL` (`debug`, `info`, `warn`, `error`)
     - `LLM_PROVIDER` (`OPENAI`, `STACKSPOT`, `CLAUDEAI`, `GOOGLEAI`, `XAI`)
+    - `ENV` - **(Optional)** Defines how the log will be displayed (`dev`, `prod`). Default: `dev`.
+      - `dev` displays the logs directly in the terminal and saves them to the log file.
+      - `prod` only saves them to the log file, keeping the terminal cleaner.
 - **Providers**:
     - `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_ASSISTANT_MODEL`, `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES`
     - `CLAUDEAI_API_KEY`, `CLAUDEAI_MODEL`, `CLAUDEAI_MAX_TOKENS`, `CLAUDEAI_API_VERSION`
