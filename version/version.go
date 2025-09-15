@@ -6,6 +6,7 @@
 package version
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -200,43 +201,54 @@ func needsUpdate(currentVersion, latestVersion string) bool {
 	return false
 }
 
+// ansiColor aplica uma cor ANSI simples (para uso em FormatVersionInfo sem depender de cli)
+func ansiColor(text string, code string) string {
+	return fmt.Sprintf("\033[%sm%s\033[0m", code, text)
+}
+
+// Formatação de cores simples (equivalentes às de cli/colors.go)
+const (
+	ansiLime   = "92" // Verde claro
+	ansiCyan   = "36" // Ciano
+	ansiGray   = "90" // Cinza
+	ansiGreen  = "32" // Verde
+	ansiYellow = "33" // Amarelo
+	ansiBold   = "1"  // Negrito (pode ser combinado: "1;92" para bold+lime)
+)
+
 // FormatVersionInfo retorna uma string formatada com as informações de versão
-func FormatVersionInfo(info VersionInfo, includeLatest bool) string {
+func FormatVersionInfo(info VersionInfo, latest string, hasUpdate bool, checkErr error) string {
 	var result strings.Builder
 
-	// Obter informações de build de forma mais robusta
-	version, commitHash, buildDate := GetBuildInfo()
+	// Cabeçalho
+	result.WriteString("\n" + ansiColor("Informações da Versão do ChatCLI", "1;92") + "\n") // Bold + Lime
+	result.WriteString(ansiColor("Aqui está um resumo da versão atual, build e status de atualizações.", ansiGray) + "\n")
 
-	result.WriteString(fmt.Sprintf("📊 ChatCLI Versão: %s\n", version))
-	result.WriteString(fmt.Sprintf("📌 Commit: %s\n", commitHash))
+	// --- Versão Atual ---
+	result.WriteString("\n  " + ansiColor("Versão Atual", ansiLime) + "\n")
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Versão:", ansiCyan), ansiColor(info.Version, ansiGray)))
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Commit Hash:", ansiCyan), ansiColor(info.CommitHash, ansiGray)))
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Data de Build:", ansiCyan), ansiColor(info.BuildDate, ansiGray)))
 
-	if buildDate == "unknown" {
-		// Se ainda não temos a data de build, usar a data de modificação do executável
-		if execPath, err := os.Executable(); err == nil {
-			if info, err := os.Stat(execPath); err == nil {
-				modTime := info.ModTime()
-				buildDate = fmt.Sprintf("%s (aproximado pela data do binário)",
-					modTime.Format("2006-01-02 15:04:05"))
-			}
-		}
-	}
-
-	result.WriteString(fmt.Sprintf("🕒 Build: %s\n", buildDate))
-
-	if includeLatest {
-		latestVersion, hasUpdate, err := CheckLatestVersion()
-		if err == nil {
-			if hasUpdate {
-				result.WriteString(fmt.Sprintf("\n🔔 Atualização disponível! Versão mais recente: %s\n", latestVersion))
-				result.WriteString(fmt.Sprintf("   Execute 'go install github.com/diillson/chatcli@v%s' para atualizar.\n Pressione ENTER para continuar", latestVersion))
-			} else {
-				result.WriteString("\n✅ Está usando a versão mais recente.\n Pressione ENTER para continuar.")
-			}
+	// --- Atualizações ---
+	result.WriteString("\n  " + ansiColor("Status de Atualizações", ansiLime) + "\n")
+	if checkErr != nil {
+		result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Erro na Verificação:", ansiCyan), ansiColor(fmt.Sprintf("Não foi possível verificar: %v", checkErr), ansiYellow)))
+	} else {
+		result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Versão Mais Recente:", ansiCyan), ansiColor(latest, ansiGray)))
+		if hasUpdate {
+			result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Atualização:", ansiCyan), ansiColor("Disponível! Atualize para a versão mais recente.", ansiGreen)))
 		} else {
-			result.WriteString(fmt.Sprintf("\n⚠️ Não foi possível verificar atualizações: %s\n", err.Error()))
+			result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Atualização:", ansiCyan), ansiColor("Você está na versão mais recente.", ansiGreen)))
 		}
 	}
 
+	// --- Dica de Atualização ---
+	result.WriteString("\n  " + ansiColor("Como Atualizar", ansiLime) + "\n")
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Comando:", ansiCyan), ansiColor("go install github.com/diillson/chatcli@latest", ansiGray)))
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Dica:", ansiCyan), ansiColor("Ou use 'git pull' no repositório clonado.", ansiGray)))
+
+	result.WriteString("\n") // Espaço final
 	return result.String()
 }
 
@@ -288,4 +300,52 @@ func GetBuildInfo() (string, string, string) {
 		}
 	}
 	return version, commitHash, buildDate
+}
+
+// CheckLatestVersionWithContext verifica a versão mais recente com suporte a contexto/timeout
+func CheckLatestVersionWithContext(ctx context.Context) (string, bool, error) {
+	client := &http.Client{
+		Timeout: 5 * time.Second, // Timeout global, mas o ctx pode cancelar antes
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", LatestVersionURL, nil)
+	if err != nil {
+		return "", false, err
+	}
+
+	req.Header.Set("User-Agent", "ChatCLI-Version-Checker")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Erro ao fechar response body: %v\n", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", false, fmt.Errorf("erro ao verificar versão: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", false, err
+	}
+
+	var releaseInfo struct {
+		TagName string `json:"tag_name"`
+	}
+
+	if err := json.Unmarshal(body, &releaseInfo); err != nil {
+		return "", false, err
+	}
+
+	latestVersion := strings.TrimPrefix(releaseInfo.TagName, "v")
+	currentVersionFull, _, _ := GetBuildInfo()
+	currentVersionBase := extractBaseVersion(currentVersionFull)
+	needsUpdate := needsUpdate(currentVersionBase, latestVersion)
+
+	return latestVersion, needsUpdate, nil
 }
