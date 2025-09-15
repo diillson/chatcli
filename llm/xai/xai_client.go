@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,8 +55,21 @@ func (c *XAIClient) GetModelName() string {
 	return catalog.GetDisplayName(catalog.ProviderXAI, c.model)
 }
 
+func (c *XAIClient) getMaxTokens() int {
+	if tokenStr := os.Getenv("XAI_MAX_TOKENS"); tokenStr != "" {
+		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
+			c.logger.Debug("Usando XAI_MAX_TOKENS personalizado", zap.Int("max_tokens", parsedTokens))
+			return parsedTokens
+		}
+	}
+	// Fallback para catálogo
+	return catalog.GetMaxTokens(catalog.ProviderXAI, c.model, 0)
+}
+
 // SendPrompt envia um prompt para o modelo e retorna a resposta.
 func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
+	maxTokens := c.getMaxTokens()
+
 	messages := []map[string]string{}
 	for _, msg := range history {
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
@@ -65,8 +80,9 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 	}
 
 	payload := map[string]interface{}{
-		"model":    c.model,
-		"messages": messages,
+		"model":      c.model,
+		"messages":   messages,
+		"max_tokens": maxTokens,
 	}
 
 	jsonValue, err := json.Marshal(payload)

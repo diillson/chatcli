@@ -117,7 +117,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     - `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_ASSISTANT_MODEL`, `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES`
     - `CLAUDEAI_API_KEY`, `CLAUDEAI_MODEL`, `CLAUDEAI_MAX_TOKENS`, `CLAUDEAI_API_VERSION`
     - `GOOGLEAI_API_KEY`, `GOOGLEAI_MODEL`, `GOOGLEAI_MAX_TOKENS`
-    - `XAI_API_KEY`, `XAI_MODEL`
+    - `XAI_API_KEY`, `XAI_MODEL`, `XAI_MAX_TOKENS`
     - `CLIENT_ID`, `CLIENT_SECRET`, `SLUG_NAME`, `TENANT_NAME` (para StackSpot)
 
 ### Exemplo de `.env`
@@ -154,11 +154,12 @@ CLAUDEAI_API_VERSION=2023-06-01
 # Configurações do Google AI (Gemini)
 GOOGLEAI_API_KEY=sua-chave-googleai
 GOOGLEAI_MODEL=gemini-2.5-flash
-GOOGLEAI_MAX_TOKENS=20000
+GOOGLEAI_MAX_TOKENS=50000
 
 # Configurações da xAI
 XAI_API_KEY=sua-chave-xai
 XAI_MODEL=grok-4-latest
+XAI_MAX_TOKENS=50000
 ```
 
 -----
