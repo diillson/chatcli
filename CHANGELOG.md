@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.2](https://github.com/diillson/chatcli/compare/v1.25.1...v1.25.2) (2025-09-15)
+
+
+### Bug Fixes
+
+* **cli:** add command flag suggestions and improve ENV log configuration ([#261](https://github.com/diillson/chatcli/issues/261)) ([#262](https://github.com/diillson/chatcli/issues/262)) ([d85f46f](https://github.com/diillson/chatcli/commit/d85f46fbffb43a80ed49cd9a169b4c08ed29a1a0))
+
 ## [1.25.1](https://github.com/diillson/chatcli/compare/v1.25.0...v1.25.1) (2025-09-15)
 
 
