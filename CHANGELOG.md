@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.1](https://github.com/diillson/chatcli/compare/v1.25.0...v1.25.1) (2025-09-15)
+
+
+### Bug Fixes
+
+* **version:** correct version output and align CLI/main integration ([#258](https://github.com/diillson/chatcli/issues/258)) ([#259](https://github.com/diillson/chatcli/issues/259)) ([06357d8](https://github.com/diillson/chatcli/commit/06357d8d5f36b4e9d19ce985929666cf8cd1d4fd))
+
 ## [1.25.0](https://github.com/diillson/chatcli/compare/v1.24.0...v1.25.0) (2025-09-15)
 
 
