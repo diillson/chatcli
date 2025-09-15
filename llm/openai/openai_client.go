@@ -12,10 +12,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/llm/catalog"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -57,8 +60,21 @@ func (c *OpenAIClient) GetModelName() string {
 	return c.model
 }
 
+func (c *OpenAIClient) getMaxTokens() int {
+	if tokenStr := os.Getenv("OPENAI_MAX_TOKENS"); tokenStr != "" {
+		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
+			c.logger.Debug("Usando OPENAI_MAX_TOKENS personalizado", zap.Int("max_tokens", parsedTokens))
+			return parsedTokens
+		}
+	}
+	// Fallback para catálogo
+	return catalog.GetMaxTokens(catalog.ProviderOpenAI, c.model, 0)
+}
+
 // SendPrompt envia um prompt para o modelo de linguagem e retorna a resposta.
 func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
+	maxTokens := c.getMaxTokens()
+
 	// Construir o array de mensagens APENAS a partir do history
 	messages := []map[string]string{}
 
@@ -88,8 +104,9 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 	}
 
 	payload := map[string]interface{}{
-		"model":    c.model,
-		"messages": messages,
+		"model":      c.model,
+		"messages":   messages,
+		"max_tokens": maxTokens,
 	}
 
 	jsonValue, err := json.Marshal(payload)
