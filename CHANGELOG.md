@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.0](https://github.com/diillson/chatcli/compare/v1.24.0...v1.25.0) (2025-09-15)
+
+
+### Features
+
+* **cli,llm:** dynamic max_tokens handling and enhanced command guide ([#256](https://github.com/diillson/chatcli/issues/256)) ([2dfe5ae](https://github.com/diillson/chatcli/commit/2dfe5aeb5573c80d587031fbaa3e5d4896faa7d2))
+
 ## [1.24.0](https://github.com/diillson/chatcli/compare/v1.23.0...v1.24.0) (2025-09-14)
 
 
