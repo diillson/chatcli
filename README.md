@@ -113,6 +113,9 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     - `CHATCLI_DOTENV` – **(Opcional)** Define o caminho do seu arquivo `.env`.
     - `LOG_LEVEL` (`debug`, `info`, `warn`, `error`)
     - `LLM_PROVIDER` (`OPENAI`, `STACKSPOT`, `CLAUDEAI`, `GOOGLEAI`, `XAI`)
+    - `ENV` - **(Opcional)** Define como o log será exibido (`dev`, `prod`), Padrão: `dev`.
+      - `dev` ele mostra os logs direto no terminal e salva no arquivo de log. 
+      - `prod` ele apenas salva no arquivo de log mantendo um terminal mais limpo.
 - **Provedores**:
     - `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_ASSISTANT_MODEL`, `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES`
     - `CLAUDEAI_API_KEY`, `CLAUDEAI_MODEL`, `CLAUDEAI_MAX_TOKENS`, `CLAUDEAI_API_VERSION`
