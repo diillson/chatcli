@@ -2341,30 +2341,18 @@ func (cli *ChatCLI) showConfig() {
 // - Hash do commit exato
 // - Data e hora de build
 // - Status de atualização (verificando o GitHub quando possível)
+// handleVersionCommand exibe informações detalhadas sobre a versão atual
+// do ChatCLI e verifica se há atualizações disponíveis no GitHub.
 func (ch *CommandHandler) handleVersionCommand() {
 	versionInfo := version.GetCurrentVersion()
 
-	// Primeiro mostrar a versão atual sem verificar atualização
-	fmt.Println(version.FormatVersionInfo(versionInfo, false))
+	// Checagem com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	latest, hasUpdate, err := version.CheckLatestVersionWithContext(ctx)
 
-	// Depois verificar atualização em background
-	fmt.Println("Verificando atualizações disponíveis...")
-
-	go func() {
-		latestVersion, hasUpdate, err := version.CheckLatestVersion()
-
-		if err != nil {
-			fmt.Printf("\n⚠️ Não foi possível verificar atualizações: %s\n", err.Error())
-			return
-		}
-
-		if hasUpdate {
-			fmt.Printf("\n🔔 Atualização disponível! Versão mais recente: %s\n", latestVersion)
-			fmt.Println("   Execute 'go install github.com/diillson/chatcli@latest' para atualizar.")
-		} else {
-			fmt.Println("\n✅ Está usando a versão mais recente.\n Pressione Enter para continuar.")
-		}
-	}()
+	// Exibir as informações formatadas
+	fmt.Println(version.FormatVersionInfo(versionInfo, latest, hasUpdate, err))
 }
 
 // RunAgentOnce executa o modo agente de forma não-interativa (one-shot)

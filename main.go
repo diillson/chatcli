@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/config"
@@ -34,14 +35,20 @@ func main() {
 	// Saída antecipada para --version
 	if opts.Version {
 		versionInfo := version.GetCurrentVersion()
-		fmt.Println(version.FormatVersionInfo(versionInfo, true))
+
+		// Checagem com timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		latest, hasUpdate, err := version.CheckLatestVersionWithContext(ctx)
+
+		fmt.Println(version.FormatVersionInfo(versionInfo, latest, hasUpdate, err))
 		return
 	}
 
 	// Mensagem de versão no startup
 	//version.PrintStartupVersionInfo()
 
-	// Carregar variáveis de ambiente do arquivo .env //commit force minor.
+	// Carregar variáveis de ambiente do arquivo .env
 	envFilePath := os.Getenv("CHATCLI_DOTENV")
 	if envFilePath == "" {
 		envFilePath = ".env"

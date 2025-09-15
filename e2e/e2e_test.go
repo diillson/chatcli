@@ -18,8 +18,6 @@ var chatcliBinary string
 
 // TestMain é executado uma vez para compilar o binário
 func TestMain(m *testing.M) {
-	// Construir o caminho para o diretório raiz do projeto
-	// Este caminho pode precisar de ajuste dependendo de onde você executa os testes
 	projectRoot, err := filepath.Abs("..")
 	if err != nil {
 		panic("could not find project root: " + err.Error())
@@ -28,8 +26,9 @@ func TestMain(m *testing.M) {
 	binaryName := "chatcli_test_binary"
 	chatcliBinary = filepath.Join(os.TempDir(), binaryName)
 
-	// Compilar o binário
-	cmd := exec.Command("go", "build", "-o", chatcliBinary, projectRoot)
+	// Compilar com ldflags separado em args para evitar erros de quote
+	ldflags := "-ldflags=-X github.com/diillson/chatcli/version.Version=1.25.0"
+	cmd := exec.Command("go", "build", ldflags, "-o", chatcliBinary, projectRoot)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		panic("failed to build chatcli binary: " + err.Error() + "\nOutput:\n" + string(output))
@@ -38,7 +37,6 @@ func TestMain(m *testing.M) {
 	// Executar os testes
 	exitCode := m.Run()
 
-	// Limpar
 	os.Remove(chatcliBinary)
 	os.Exit(exitCode)
 }
@@ -129,4 +127,24 @@ func TestE2E_OneShotMode(t *testing.T) {
 		assert.Contains(t, stderr, "Erro ao aplicar overrides")
 		assert.Contains(t, stderr, "Provedor LLM 'INVALID' não suportado")
 	})
+}
+
+func TestE2E_VersionFlag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"tag_name": "v1.26.0"}`)) // Mock retorna uma versão mais nova
+	}))
+	defer server.Close()
+
+	env := []string{
+		"CHATCLI_LATEST_VERSION_URL=" + server.URL,
+	}
+
+	args := []string{"--version"}
+	// Passamos o ambiente para a execução do comando.
+	stdout, stderr := runChatCLI(t, args, "", env)
+
+	require.Empty(t, stderr, "Stderr should be empty")
+	// Agora o assert deve passar, pois o binário usará o mock e detectará a atualização.
+	assert.Contains(t, stdout, "Disponível! Atualize para a versão mais recente.")
 }
