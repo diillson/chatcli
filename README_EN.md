@@ -45,7 +45,7 @@
 
 ## Key Features
 
-- **Support for Multiple Providers**: Switch between OpenAI, StackSpot, ClaudeAI, GoogleAI, and xAI.
+- **Support for Multiple Providers**: Switch between OpenAI, StackSpot, ClaudeAI, GoogleAI, xAI and Ollama -> `Local models`.
 - **Interactive CLI Experience**: Command history navigation, auto-completion, and visual feedback (`"Thinking..."`).
 - **Powerful Contextual Commands**:
     - `@history` – Inserts the last 10 shell commands (supports bash, zsh, and fish).

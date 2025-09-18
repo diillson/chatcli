@@ -45,7 +45,7 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 
 ## Recursos Principais
 
-- **Suporte a Múltiplos Provedores**: Alterne entre OpenAI, StackSpot, ClaudeAI, GoogleAI e xAI.
+- **Suporte a Múltiplos Provedores**: Alterne entre OpenAI, StackSpot, ClaudeAI, GoogleAI, xAI e Ollama -> `Modelos locais`.
 - **Experiência Interativa na CLI**: Navegação de histórico, auto-completação e feedback visual (`"Pensando..."`).
 - **Comandos Contextuais Poderosos**:
     - `@history` – Insere os últimos 10 comandos do shell (suporta bash, zsh e fish).
