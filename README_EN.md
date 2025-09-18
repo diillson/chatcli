@@ -6,7 +6,7 @@
 
 # Bringing Your Terminal Closer to Artificial Intelligence 🕵️‍♂️✨
 
-**ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) (such as OpenAI, StackSpot, GoogleAI, ClaudeAI, and xAI) to facilitate interactive and contextual conversations directly in your terminal. Designed for developers, data scientists, and tech enthusiasts, it enhances productivity by aggregating various contextual data sources and offering a rich, user-friendly experience.
+**ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) (such as OpenAI, StackSpot, GoogleAI, ClaudeAI, xAI and Ollama -> `Local models`) to facilitate interactive and contextual conversations directly in your terminal. Designed for developers, data scientists, and tech enthusiasts, it enhances productivity by aggregating various contextual data sources and offering a rich, user-friendly experience.
 
 <div align="center">
   <img src="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml/badge.svg"/>
@@ -121,6 +121,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     - `CLAUDEAI_API_KEY`, `CLAUDEAI_MODEL`, `CLAUDEAI_MAX_TOKENS`, `CLAUDEAI_API_VERSION`
     - `GOOGLEAI_API_KEY`, `GOOGLEAI_MODEL`, `GOOGLEAI_MAX_TOKENS`
     - `XAI_API_KEY`, `XAI_MODEL`, `XAI_MAX_TOKENS`
+    - `OLLAMA_ENABLED`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_MAX_TOKENS`
     - `CLIENT_ID`, `CLIENT_SECRET`, `SLUG_NAME`, `TENANT_NAME` (for StackSpot)
 
 ### Example `.env`
@@ -162,6 +163,12 @@ GOOGLEAI_MAX_TOKENS=20000
 # xAI Settings
 XAI_API_KEY=your-xai-key
 XAI_MODEL=grok-4-latest
+
+# Ollama Settings
+OLLAMA_ENABLED=true      #Required for enabled API Ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=gpt-oss:20b
+OLLAMA_MAX_TOKENS=5000
 ```
 
 -----

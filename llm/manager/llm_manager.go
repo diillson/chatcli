@@ -6,22 +6,27 @@
 package manager
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/googleai"
+	"github.com/diillson/chatcli/llm/ollama"
 	"github.com/diillson/chatcli/llm/openai"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/llm/openai_responses"
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/diillson/chatcli/llm/token"
 	"github.com/diillson/chatcli/llm/xai"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -62,6 +67,7 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager,
 	manager.configurarClaudeAIClient()
 	manager.configurarGoogleAIClient()
 	manager.configurarXAIClient()
+	manager.configurarOllamaClient()
 
 	return manager, nil
 }
@@ -198,6 +204,80 @@ func (m *LLMManagerImpl) configurarXAIClient() {
 		}
 	} else {
 		m.logger.Warn("XAI_API_KEY não definida, o provedor xAI não estará disponível")
+	}
+}
+
+func (m *LLMManagerImpl) configurarOllamaClient() {
+	baseURL := utils.GetEnvOrDefault("OLLAMA_BASE_URL", config.OllamaDefaultBaseURL)
+	enable := strings.EqualFold(os.Getenv("OLLAMA_ENABLED"), "true")
+
+	if !enable {
+		m.logger.Info("OLLAMA_ENABLED não está ativo, provider ignorado")
+		return
+	}
+
+	// Cliente HTTP para checar serviço
+	hc := utils.NewHTTPClient(m.logger, 2*time.Second)
+	req, _ := http.NewRequest(http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/tags", nil)
+	resp, err := hc.Do(req)
+	if err != nil {
+		m.logger.Warn("Ollama não detectado; provider não será listado",
+			zap.String("baseURL", baseURL), zap.Error(err))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		m.logger.Warn("Erro ao listar modelos do Ollama",
+			zap.Int("status", resp.StatusCode))
+		return
+	}
+
+	// Validar se tem modelos disponíveis
+	var tags struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
+		m.logger.Warn("Não foi possível decodificar resposta do Ollama", zap.Error(err))
+		return
+	}
+	if len(tags.Models) == 0 {
+		m.logger.Warn("Nenhum modelo encontrado no Ollama")
+		return
+	}
+
+	// Registrar client
+	m.logger.Info("Configurando provedor OLLAMA",
+		zap.String("baseURL", baseURL),
+		zap.Int("model_count", len(tags.Models)),
+	)
+
+	m.clients["OLLAMA"] = func(model string) (client.LLMClient, error) {
+		if model == "" {
+			model = config.DefaultOllamaModel
+		}
+
+		// valida se o modelo existe nos tags
+		found := false
+		for _, m := range tags.Models {
+			if m.Name == model {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("modelo '%s' não encontrado no Ollama", model)
+		}
+
+		return ollama.NewClient(
+			baseURL,
+			model,
+			m.logger,
+			config.OllamaDefaultMaxAttempts,
+			config.OllamaDefaultBackoff,
+		), nil
 	}
 }
 
