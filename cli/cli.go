@@ -253,6 +253,12 @@ func (cli *ChatCLI) configureProviderAndModel() {
 			cli.Model = config.DefaultXAIModel
 		}
 	}
+	if cli.Provider == "OLLAMA" {
+		cli.Model = os.Getenv("OLLAMA_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultOllamaModel
+		}
+	}
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
@@ -442,6 +448,9 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	}
 	if newProvider == "XAI" {
 		newModel = utils.GetEnvOrDefault("XAI_MODEL", config.DefaultXAIModel)
+	}
+	if newProvider == "OLLAMA" {
+		newModel = utils.GetEnvOrDefault("OLLAMA_MODEL", config.DefaultOllamaModel)
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
@@ -1173,6 +1182,18 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 		}
 	} else if strings.ToUpper(cli.Provider) == "GOOGLEAI" {
 		if v := os.Getenv("GOOGLEAI_MAX_TOKENS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				override = n
+			}
+		}
+	} else if strings.ToUpper(cli.Provider) == "XAI" {
+		if v := os.Getenv("XAI_MAX_TOKENS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				override = n
+			}
+		}
+	} else if strings.ToUpper(cli.Provider) == "OLLAMA" {
+		if v := os.Getenv("OLLAMA_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				override = n
 			}
@@ -2283,6 +2304,7 @@ func (cli *ChatCLI) showConfig() {
 	printItem("CLAUDEAI_MAX_TOKENS", os.Getenv("CLAUDEAI_MAX_TOKENS"))
 	printItem("GOOGLEAI_MAX_TOKENS", os.Getenv("GOOGLEAI_MAX_TOKENS"))
 	printItem("XAI_MAX_TOKENS", os.Getenv("XAI_MAX_TOKENS"))
+	printItem("OLLAMA_MAX_TOKENS", os.Getenv("OLLAMA_MAX_TOKENS"))
 
 	// --- Chaves Sensíveis (Presença Apenas) ---
 	fmt.Printf("\n  %s\n", colorize("Chaves Sensíveis (Presença Apenas)", ColorLime))
@@ -2309,6 +2331,8 @@ func (cli *ChatCLI) showConfig() {
 	//}
 	//if strings.ToUpper(cli.Provider) == "XAI" {
 	printItem("XAI_MODEL", os.Getenv("XAI_MODEL"))
+	printItem("OLLAMA_MODEL", os.Getenv("OLLAMA_MODEL"))
+	printItem("OLLAMA_BASE_URL", utils.GetEnvOrDefault("OLLAMA_BASE_URL", config.OllamaDefaultBaseURL))
 	//}
 	if tm, ok := cli.manager.GetTokenManager(); ok {
 		slug, tenant := tm.GetSlugAndTenantName()
