@@ -43,6 +43,13 @@ const (
 	DefaultXAIModel = "grok-code-fast-1"
 	XAIAPIURL       = "https://api.x.ai/v1/chat/completions"
 
+	// Valores padrão para Ollama
+	DefaultOllamaModel       = "gpt-oss:20b"
+	OllamaDefaultBaseURL     = "http://localhost:11434"
+	OllamaDefaultMaxAttempts = 3
+	OllamaDefaultBackoff     = time.Second
+	OllamaDefaultMaxTokens   = 8192
+
 	// Provedor padrão
 	DefaultLLMProvider = "OPENAI"
 

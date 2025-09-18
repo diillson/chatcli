@@ -14,6 +14,7 @@ const (
 	ProviderStackSpot       = "STACKSPOT"
 	ProviderGoogleAI        = "GOOGLEAI"
 	ProviderXAI             = "XAI"
+	ProviderOllama          = "OLLAMA"
 )
 
 // PreferredAPI define qual API é preferida para o modelo
@@ -337,6 +338,8 @@ func GetMaxTokens(provider, model string, override int) int {
 		return 50000
 	case ProviderXAI:
 		return 50000
+	case ProviderOllama:
+		return 8192
 	default:
 		return 50000
 	}
