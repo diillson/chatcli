@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0](https://github.com/diillson/chatcli/compare/v1.25.2...v1.26.0) (2025-09-18)
+
+
+### Features
+
+* **llm:** add Ollama provider with support for local models ([#264](https://github.com/diillson/chatcli/issues/264)) ([#265](https://github.com/diillson/chatcli/issues/265)) ([df4a847](https://github.com/diillson/chatcli/commit/df4a8475da5b8d22bf3597f8df7999937e277386))
+
 ## [1.25.2](https://github.com/diillson/chatcli/compare/v1.25.1...v1.25.2) (2025-09-15)
 
 
