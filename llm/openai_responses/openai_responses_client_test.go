@@ -32,7 +32,7 @@ func TestOpenAIResponsesClient_SendPrompt_Success(t *testing.T) {
 	client := NewOpenAIResponsesClient("test-api-key", "gpt-5", logger, 1, 0)
 
 	history := []models.Message{{Role: "user", Content: "Hi"}}
-	resp, err := client.SendPrompt(context.Background(), "Hi", history)
+	resp, err := client.SendPrompt(context.Background(), "Hi", history, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "Hello from Responses API!", resp)

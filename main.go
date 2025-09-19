@@ -110,7 +110,10 @@ func main() {
 	// Aplicar overrides de provider, model e max-tokens do modo one-shot, se fornecidos
 	chatCLI.UserMaxTokens = opts.MaxTokens
 	if err := chatCLI.ApplyOverrides(llmManager, opts.Provider, opts.Model); err != nil {
-		logger.Fatal("Erro ao aplicar overrides de provider/model via flags", zap.Error(err))
+		// Imprimir no stderr para o usuário e para os testes E2E
+		fmt.Fprintf(os.Stderr, " ❌ Erro ao aplicar overrides: %v\n", err)
+		logger.Error("Erro fatal ao aplicar overrides de provider/model via flags", zap.Error(err))
+		os.Exit(1)
 	}
 
 	// Configurar manipulador de sinais DEPOIS de criar chatCLI

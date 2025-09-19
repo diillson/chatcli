@@ -66,7 +66,7 @@ func (c *Client) getMaxTokens() int {
 func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
-		effectiveMaxTokens = c.getMaxTokens() // Fallback para a lógica antiga se nada for passado
+		effectiveMaxTokens = c.getMaxTokens() // Fallback se nada for passado
 	}
 
 	// Monta mensagens a partir do histórico, sem duplicar o prompt (mesma lógica dos outros clientes)

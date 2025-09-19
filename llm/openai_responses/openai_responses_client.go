@@ -167,6 +167,7 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 	// Estrutura de decodificação mais detalhada para capturar todos os casos
 	var response struct {
 		Status            string `json:"status"`
+		OutputText        string `json:"output_text"`
 		IncompleteDetails *struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
@@ -184,6 +185,11 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 
 	if err := json.Unmarshal(bodyBytes, &response); err != nil {
 		return "", fmt.Errorf("erro ao decodificar resposta da Responses API: %w", err)
+	}
+
+	// Tentar extrair do caminho simples primeiro (comum em mocks e respostas diretas)
+	if response.OutputText != "" {
+		return response.OutputText, nil
 	}
 
 	// 1. Verificar se a API retornou um erro explícito no corpo
@@ -243,37 +249,4 @@ func buildTextFromHistory(history []models.Message, prompt string) string {
 	b.WriteString("User: ")
 	b.WriteString(prompt)
 	return b.String()
-}
-
-// tryExtractText tenta extrair texto de uma estrutura arbitrária (best-effort)
-func tryExtractText(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case []any:
-		var sb strings.Builder
-		for _, it := range t {
-			if s := tryExtractText(it); s != "" {
-				sb.WriteString(s)
-			}
-		}
-		return sb.String()
-	case map[string]any:
-		// procurar chaves prováveis
-		if s, ok := t["text"].(string); ok && strings.TrimSpace(s) != "" {
-			return s
-		}
-		if s, ok := t["output_text"].(string); ok && strings.TrimSpace(s) != "" {
-			return s
-		}
-		// procurar nested
-		for _, val := range t {
-			if s := tryExtractText(val); s != "" {
-				return s
-			}
-		}
-		return ""
-	default:
-		return ""
-	}
 }
