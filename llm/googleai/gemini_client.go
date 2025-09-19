@@ -74,7 +74,12 @@ func (c *GeminiClient) GetModelName() string {
 }
 
 // SendPrompt envia um prompt para o Gemini e retorna a resposta
-func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
+func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	effectiveMaxTokens := maxTokens
+	if effectiveMaxTokens <= 0 {
+		effectiveMaxTokens = c.getMaxTokens() // Fallback para a lógica antiga se nada for passado
+	}
+
 	// ... (lógica de build do payload, logs, etc., permanece a mesma)
 	c.logger.Info("Iniciando requisição para Google AI",
 		zap.String("model", c.model),
@@ -94,12 +99,11 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 		}
 	}
 
-	maxTokens := c.getMaxTokens()
 	generationConfig := map[string]interface{}{
 		"temperature":     0.7,
 		"topP":            0.95,
 		"topK":            40,
-		"maxOutputTokens": maxTokens,
+		"maxOutputTokens": effectiveMaxTokens,
 	}
 
 	reqBody := map[string]interface{}{

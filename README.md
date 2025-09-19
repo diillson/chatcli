@@ -198,6 +198,7 @@ Execute prompts em uma única linha, ideal para scripts e automações.
     - `-p` ou `--prompt`: texto a enviar para a LLM em uma única execução.
     - `--provider`: sobrescreve o provedor de LLM em tempo de execução (`OPENAI`, `OPENAI_ASSISTANT`, `CLAUDEAI`, `GOOGLEAI`, `STACKSPOT`, `XAI`).
     - `--model`: escolhe o modelo do provedor ativo (ex.: `gpt-4o-mini`, `claude-3-5-sonnet-20241022`, `gemini-2.5-flash`, etc.)
+    - `--max-tokens`: Define a quantidade maxima de tokens usada para provedor ativo.
     - `--timeout` timeout da chamada one-shot (padrão: 5m)
     - `--no-anim` desabilita animações (útil em scripts/CI).
     - `--agent-auto-exec` executa automaticamente o primeiro comando sugerido pelo agente (modo agente).

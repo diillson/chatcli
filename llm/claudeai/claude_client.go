@@ -61,24 +61,33 @@ func (c *ClaudeClient) GetModelName() string {
 	return catalog.GetDisplayName(catalog.ProviderClaudeAI, c.model)
 }
 
-// SendPrompt com exponential backoff
-func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	// Constrói mensagens e system a partir do history, sem duplicar o prompt
-	messages, systemStr := c.buildMessagesAndSystem(prompt, history)
-
-	// Obter max_tokens da variável de ambiente ou usar o padrão
-	maxTokens := config.ClaudeAIDefaultMaxTokens
+// getMaxTokens obtém o limite de tokens configurado
+func (c *ClaudeClient) getMaxTokens() int {
 	if tokenStr := os.Getenv("CLAUDEAI_MAX_TOKENS"); tokenStr != "" {
 		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
-			maxTokens = parsedTokens
-			c.logger.Debug("Usando max_tokens personalizado", zap.Int("max_tokens", maxTokens))
+			c.logger.Debug("Usando max_tokens personalizado", zap.Int("max_tokens", parsedTokens))
+			return parsedTokens
 		}
 	}
+
+	// Usar o catálogo para obter limite baseado no modelo
+	return catalog.GetMaxTokens(catalog.ProviderClaudeAI, c.model, 0)
+}
+
+// SendPrompt com exponential backoff
+func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	effectiveMaxTokens := maxTokens
+	if effectiveMaxTokens <= 0 {
+		effectiveMaxTokens = c.getMaxTokens() // Usa o limite do catálogo se não for especificado
+	}
+
+	// Constrói mensagens e system a partir do history, sem duplicar o prompt
+	messages, systemStr := c.buildMessagesAndSystem(prompt, history)
 
 	// Configuração para requisição
 	reqBody := map[string]interface{}{
 		"model":      c.model,
-		"max_tokens": maxTokens,
+		"max_tokens": effectiveMaxTokens,
 		"messages":   messages,
 	}
 

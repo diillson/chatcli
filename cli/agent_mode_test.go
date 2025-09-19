@@ -23,8 +23,8 @@ func (m *MockLLMClient) GetModelName() string {
 	return args.String(0)
 }
 
-func (m *MockLLMClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	args := m.Called(ctx, prompt, history)
+func (m *MockLLMClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	args := m.Called(ctx, prompt, history, maxTokens)
 	return args.String(0), args.Error(1)
 }
 
@@ -74,8 +74,7 @@ func TestAgentMode_Run_ExtractsAndHandlesCommands(t *testing.T) {
 
 	// Configurar mocks
 	mockLLM.On("GetModelName").Return("MockGPT")
-	mockLLM.On("SendPrompt", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]models.Message")).Return(aiResponse, nil)
-
+	mockLLM.On("SendPrompt", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]models.Message"), mock.AnythingOfType("int")).Return(aiResponse, nil)
 	// Mock da execução do comando
 	var executedBlock CommandBlock
 	agentMode.executeCommandsFunc = func(ctx context.Context, block CommandBlock) (string, string) {

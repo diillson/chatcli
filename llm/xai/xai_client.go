@@ -67,8 +67,11 @@ func (c *XAIClient) getMaxTokens() int {
 }
 
 // SendPrompt envia um prompt para o modelo e retorna a resposta.
-func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	maxTokens := c.getMaxTokens()
+func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	effectiveMaxTokens := maxTokens
+	if effectiveMaxTokens <= 0 {
+		effectiveMaxTokens = c.getMaxTokens() // Fallback para a lógica antiga se nada for passado
+	}
 
 	messages := []map[string]string{}
 	for _, msg := range history {
@@ -82,7 +85,7 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 	payload := map[string]interface{}{
 		"model":      c.model,
 		"messages":   messages,
-		"max_tokens": maxTokens,
+		"max_tokens": effectiveMaxTokens,
 	}
 
 	jsonValue, err := json.Marshal(payload)
@@ -130,12 +133,17 @@ func (c *XAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Re
 
 func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 	defer func() { _ = resp.Body.Close() }()
+
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
+		c.logger.Error("Erro ao ler a resposta da xAI", zap.Error(err))
 		return "", fmt.Errorf("erro ao ler a resposta da xAI: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		c.logger.Error("API da xAI retornou erro de status",
+			zap.Int("status", resp.StatusCode),
+			zap.ByteString("body", bodyBytes))
 		return "", fmt.Errorf("erro na requisição à xAI: status %d, resposta: %s", resp.StatusCode, string(bodyBytes))
 	}
 
@@ -144,16 +152,42 @@ func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
+		Error struct { // Também verificamos um possível campo de erro explícito
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		c.logger.Error("Erro ao decodificar a resposta JSON da xAI", zap.Error(err), zap.ByteString("body", bodyBytes))
 		return "", fmt.Errorf("erro ao decodificar a resposta da xAI: %w", err)
 	}
 
-	if len(result.Choices) == 0 {
-		return "", errors.New("nenhuma resposta recebida da xAI")
+	// Verificar se a API retornou um erro explícito no corpo (mesmo com status 200)
+	if result.Error.Message != "" {
+		c.logger.Error("API da xAI retornou um erro no payload", zap.String("error_message", result.Error.Message))
+		return "", fmt.Errorf("erro da API xAI: %s", result.Error.Message)
 	}
 
-	return result.Choices[0].Message.Content, nil
+	// Verificar se não há 'choices'
+	if len(result.Choices) == 0 {
+		c.logger.Warn("Nenhuma 'choice' na resposta da xAI.", zap.ByteString("body", bodyBytes))
+		return "", errors.New("a API da xAI não retornou nenhuma resposta (array 'choices' vazio)")
+	}
+
+	firstChoice := result.Choices[0]
+	if firstChoice.Message.Content == "" {
+		c.logger.Warn("Resposta da xAI com conteúdo vazio.",
+			zap.String("finish_reason", firstChoice.FinishReason),
+			zap.ByteString("body", bodyBytes))
+
+		// Retorna um erro amigável para o usuário
+		if firstChoice.FinishReason == "length" {
+			return "", errors.New("a API da xAI retornou uma resposta vazia, provavelmente porque o valor de 'max_tokens' é muito baixo")
+		}
+		return "", errors.New("a API da xAI retornou uma resposta vazia por um motivo não especificado")
+	}
+
+	return firstChoice.Message.Content, nil
 }

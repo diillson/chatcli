@@ -72,8 +72,11 @@ func (c *OpenAIClient) getMaxTokens() int {
 }
 
 // SendPrompt envia um prompt para o modelo de linguagem e retorna a resposta.
-func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	maxTokens := c.getMaxTokens()
+func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	effectiveMaxTokens := maxTokens
+	if effectiveMaxTokens <= 0 {
+		effectiveMaxTokens = c.getMaxTokens() // valor padrão
+	}
 
 	// Construir o array de mensagens APENAS a partir do history
 	messages := []map[string]string{}
@@ -106,7 +109,7 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 	payload := map[string]interface{}{
 		"model":      c.model,
 		"messages":   messages,
-		"max_tokens": maxTokens,
+		"max_tokens": effectiveMaxTokens,
 	}
 
 	jsonValue, err := json.Marshal(payload)

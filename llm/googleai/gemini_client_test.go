@@ -34,7 +34,7 @@ func TestGeminiClient_SendPrompt_Success(t *testing.T) {
 	client.baseURL = server.URL
 
 	history := []models.Message{{Role: "user", Content: "Hi"}}
-	resp, err := client.SendPrompt(context.Background(), "Hi", history)
+	resp, err := client.SendPrompt(context.Background(), "Hi", history, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "Hello from Gemini!", resp)
