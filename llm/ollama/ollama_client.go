@@ -63,7 +63,12 @@ func (c *Client) getMaxTokens() int {
 	return catalog.GetMaxTokens(catalog.ProviderOllama, c.model, 0)
 }
 
-func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
+func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	effectiveMaxTokens := maxTokens
+	if effectiveMaxTokens <= 0 {
+		effectiveMaxTokens = c.getMaxTokens() // Fallback para a lógica antiga se nada for passado
+	}
+
 	// Monta mensagens a partir do histórico, sem duplicar o prompt (mesma lógica dos outros clientes)
 	var msgs []map[string]string
 	for _, m := range history {
@@ -88,7 +93,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		"messages": msgs,
 		"stream":   false,
 		"options": map[string]interface{}{
-			"num_predict": c.getMaxTokens(),
+			"num_predict": effectiveMaxTokens,
 			// "temperature": 0.7,
 			// "num_ctx": 8192,
 		},

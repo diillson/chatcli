@@ -78,6 +78,7 @@ var commandFlags = map[string]map[string][]prompt.Suggest{
 	},
 	"/switch": {
 		"--model":      {},
+		"--max-tokens": {},
 		"--slugname":   {},
 		"--tenantname": {},
 	},
@@ -115,6 +116,8 @@ type ChatCLI struct {
 	processingDone       chan struct{}
 	sessionManager       *SessionManager
 	currentSessionName   string
+	MaxTokensOverride    int
+	UserMaxTokens        int
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -264,13 +267,14 @@ func (cli *ChatCLI) configureProviderAndModel() {
 // NewChatCLI cria uma nova instância de ChatCLI
 func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	cli := &ChatCLI{
-		manager:          manager,
-		logger:           logger,
-		history:          make([]models.Message, 0),
-		historyManager:   NewHistoryManager(logger),
-		animation:        NewAnimationManager(),
-		interactionState: StateNormal,
-		processingDone:   make(chan struct{}),
+		manager:           manager,
+		logger:            logger,
+		history:           make([]models.Message, 0),
+		historyManager:    NewHistoryManager(logger),
+		animation:         NewAnimationManager(),
+		interactionState:  StateNormal,
+		processingDone:    make(chan struct{}),
+		MaxTokensOverride: 0,
 	}
 
 	cli.configureProviderAndModel()
@@ -393,9 +397,13 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		Content: userInput + additionalContext,
 	})
 
-	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, cli.history)
+	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
+
+	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
 
 	cli.animation.StopThinkingAnimation()
+
+	//resetTerminal(cli.logger)
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -404,11 +412,9 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 				cli.history = cli.history[:len(cli.history)-1]
 			}
 		} else {
-			errMsg := err.Error()
-			if !strings.Contains(errMsg, "[REDACTED]") {
-				errMsg = "Ocorreu um erro ao processar a requisição."
-			}
-			fmt.Println(errMsg)
+			// Simplificado para sempre mostrar o erro real vindo do cliente.
+			// O erro já deve vir sanitizado se necessário.
+			fmt.Printf("❌ Erro: %s\n", err.Error())
 		}
 	} else {
 		cli.history = append(cli.history, models.Message{
@@ -587,6 +593,9 @@ func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 		// Forçar volta ao estado normal
 		cli.interactionState = StateNormal
 
+		// reset
+		//resetTerminal(cli.logger)
+
 		cli.forceRefreshPrompt()
 
 	} else {
@@ -632,6 +641,7 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 	var newSlugName, newTenantName, newModel string
 	shouldUpdateToken := false
 	shouldSwitchModel := false
+	maxTokensOverride := -1
 
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
@@ -653,7 +663,21 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 				shouldSwitchModel = true
 				i++ // Pular o valor
 			}
+		case "--max-tokens":
+			if i+1 < len(args) {
+				val, err := strconv.Atoi(args[i+1])
+				if err == nil && val >= 0 {
+					maxTokensOverride = val
+				} else {
+					fmt.Printf(" ❌ Valor inválido para --max-tokens: '%s'. Deve ser um número >= 0.\n", args[i+1])
+				}
+				i++
+			}
 		}
+	}
+	if maxTokensOverride != -1 {
+		cli.UserMaxTokens = maxTokensOverride
+		fmt.Printf(" ✅ Limite máximo de tokens definido para: %d (0 = usar padrão do provedor)\n", cli.UserMaxTokens)
 	}
 
 	if newSlugName != "" || newTenantName != "" {
@@ -688,17 +712,17 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 		fmt.Printf("Tentando trocar para o modelo '%s' no provedor '%s'...\n", newModel, cli.Provider)
 		newClient, err := cli.manager.GetClient(cli.Provider, newModel)
 		if err != nil {
-			fmt.Printf("❌ Erro ao trocar para o modelo '%s': %v\n", newModel, err)
+			fmt.Printf(" ❌ Erro ao trocar para o modelo '%s': %v\n", newModel, err)
 			fmt.Println("   Verifique se o nome do modelo está correto para o provedor atual.")
 		} else {
 			cli.Client = newClient
 			cli.Model = newModel // Atualiza o modelo no estado do CLI
-			fmt.Printf("✅ Modelo trocado com sucesso para %s (%s)\n", cli.Client.GetModelName(), cli.Provider)
+			fmt.Printf(" ✅ Modelo trocado com sucesso para %s (%s)\n", cli.Client.GetModelName(), cli.Provider)
 		}
 		return // Finaliza após a tentativa de troca de modelo
 	}
 
-	if !shouldUpdateToken && !shouldSwitchModel && len(args) == 1 {
+	if !shouldUpdateToken && !shouldSwitchModel && maxTokensOverride == -1 && len(args) == 1 {
 		cli.switchProvider()
 	}
 }
@@ -741,6 +765,7 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Printf("\n  %s\n", colorize("Configuração e Provedores de IA", ColorLime))
 	printCommand("/switch", "Abre o menu interativo para trocar o provedor de LLM (ex.: OPENAI, CLAUDEAI).")
 	printCommand("/switch --model <nome>", "Muda o modelo do provedor atual (ex.: gpt-4o-mini, grok-4, gpt5... etc).")
+	printCommand("/switch --max-tokens <num>", "Define o máximo de tokens para as próximas respostas (0 para padrão).")
 	printCommand("  Ex: /switch --model gpt-4o-mini", "(Muda para o modelo GPT-4o Mini na OpenAI)")
 	printCommand("/switch --slugname <slug>", "Atualiza o 'slugName' (apenas para StackSpot).")
 	printCommand("/switch --tenantname <tenant>", "Atualiza o 'tenantName' (apenas para StackSpot).")
@@ -806,6 +831,7 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("chatcli --prompt \"<prompt>\"", "Alias de -p.")
 	printCommand("--provider <nome>", "Override do provedor (ex.: --provider OPENAI).")
 	printCommand("--model <nome>", "Override do modelo (ex.: --model gpt-4o-mini).")
+	printCommand("--max-tokens <num>", "Override do máximo de tokens para a resposta.")
 	printCommand("--timeout <duração>", "Timeout da chamada (ex.: --timeout 5m, padrão: 5m).")
 	printCommand("--no-anim", "Desabilita animações (útil em scripts/CI).")
 	printCommand("--agent-auto-exec", "No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for seguro.")
@@ -1166,6 +1192,11 @@ func (cli *ChatCLI) getTokenEstimatorForCurrentLLM() func(string) int {
 }
 
 func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
+	// 1. Prioridade máxima para o override do usuário via flag
+	if cli.UserMaxTokens > 0 {
+		return cli.UserMaxTokens
+	}
+
 	// Overrides por ENV têm precedência e dão flexibilidade operacional
 	var override int
 	if strings.ToUpper(cli.Provider) == "OPENAI" {
@@ -1467,7 +1498,7 @@ func (cli *ChatCLI) handleNextChunk() bool {
 	defer cancel()
 
 	// Enviar o prompt para o LLM
-	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+nextChunk.Content, cli.history)
+	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+nextChunk.Content, cli.history, 0)
 
 	// Parar a animação
 	cli.animation.StopThinkingAnimation()
@@ -1570,7 +1601,7 @@ func (cli *ChatCLI) handleRetryLastChunk() bool {
 	defer cancel()
 
 	// Enviar o prompt para o LLM
-	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+chunk.Content, cli.history)
+	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+chunk.Content, cli.history, 0)
 
 	// Parar a animação
 	cli.animation.StopThinkingAnimation()
@@ -1942,7 +1973,7 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 	defer cancel()
 
 	//Enviar o output e o contexto para a IA
-	aiResponse, err := cli.Client.SendPrompt(ctx, fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", safeOutput, safeContext), cli.history)
+	aiResponse, err := cli.Client.SendPrompt(ctx, fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", safeOutput, safeContext), cli.history, 0)
 
 	//parar a animação
 	cli.animation.StopThinkingAnimation()
@@ -1986,23 +2017,20 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 	// --- Lógica de Autocomplete Contextual ---
 
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
-	// Esta é a lógica mais específica, então a verificamos primeiro.
-	// Verificamos se a palavra ANTERIOR era @file ou @command.
 	if len(args) > 0 {
 		var previousWord string
-		// Se a linha termina com espaço, a última palavra completa é o último argumento.
 		if strings.HasSuffix(lineBeforeCursor, " ") {
 			previousWord = args[len(args)-1]
 		} else if len(args) > 1 {
-			// Se não termina com espaço, estamos no meio de uma palavra, então a anterior é a antepenúltima.
 			previousWord = args[len(args)-2]
 		}
 
-		if previousWord == "@file" {
+		// Apenas autocompletar caminhos se a palavra atual NÃO for uma flag
+		if previousWord == "@file" && !strings.HasPrefix(wordBeforeCursor, "-") {
 			return cli.filePathCompleter(wordBeforeCursor)
 		}
 
-		if previousWord == "@command" {
+		if previousWord == "@command" && !strings.HasPrefix(wordBeforeCursor, "-") {
 			suggestions := cli.systemCommandCompleter(wordBeforeCursor)
 			suggestions = append(suggestions, cli.filePathCompleter(wordBeforeCursor)...)
 			return suggestions
@@ -2010,55 +2038,61 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 	}
 
 	// 4. Autocomplete para iniciar comandos
-
-	// Comandos de controle (/) só devem aparecer no início da linha.
 	if !strings.Contains(lineBeforeCursor, " ") {
 		if strings.HasPrefix(wordBeforeCursor, "/") {
 			return prompt.FilterHasPrefix(cli.getInternalCommands(), wordBeforeCursor, true)
 		}
 	}
 
-	// Comandos de contexto (@) podem aparecer em qualquer lugar, desde que iniciem uma nova palavra.
 	if strings.HasPrefix(wordBeforeCursor, "@") {
 		return prompt.FilterHasPrefix(cli.getContextCommands(), wordBeforeCursor, true)
 	}
 
-	// 5. Sugestões de flags e valores
+	// 5. Sugestões de flags e valores (LÓGICA FINAL CORRIGIDA)
 	if len(args) > 1 {
-		prevWord := args[len(args)-2] // Palavra anterior (ex: "@file")
-		currWord := wordBeforeCursor  // Palavra atual (ex: "--mode" ou "smart")
+		command := args[0]
+		prevWord := args[len(args)-1]
+		if !strings.HasSuffix(lineBeforeCursor, " ") && len(args) > 1 {
+			prevWord = args[len(args)-2]
+		}
+		currWord := d.GetWordBeforeCursor()
 
-		if flagsMap, ok := commandFlags[prevWord]; ok {
-			// Sugerir flags se digitando "--" ou "-"
-			if strings.HasPrefix(currWord, "--") || strings.HasPrefix(currWord, "-") {
+		if flagsForCommand, commandExists := commandFlags[command]; commandExists {
+			// Cenário 1: O usuário digitou uma flag (ex: "--mode ") e agora quer ver os valores.
+			if values, flagHasValues := flagsForCommand[prevWord]; flagHasValues && len(values) > 0 {
+				return prompt.FilterHasPrefix(values, currWord, true)
+			}
+
+			// Cenário 2: O usuário está digitando uma flag (ex: "--m").
+			if strings.HasPrefix(currWord, "-") {
 				var flagSuggests []prompt.Suggest
-				for flag, values := range flagsMap {
-					desc := fmt.Sprintf("Opção para %s", prevWord)
-					if len(values) > 0 {
-						desc += " (valores: " + strings.Join(extractTexts(values), ", ") + ")"
+				for flag, values := range flagsForCommand {
+					var desc string
+					// 1. Primeiro, procurar por descrições personalizadas
+					if flag == "--mode" {
+						desc = "Define o modo de processamento de arquivos (full, summary, chunked, smart)"
 					} else if flag == "--model" {
 						desc = "Troque o modelo (Runtime) baseado no provedor atual (grpt-5, grok-4, etc.)"
+					} else if flag == "--max-tokens" {
+						desc = "Define o máximo de tokens para as próximas respostas (0 para padrão)"
 					} else if flag == "--slugname" {
 						desc = "Altera o Slug em tempo de execução (Apenas para STACKSPOT)"
 					} else if flag == "--tenantname" {
 						desc = "Altera o Tenant em tempo de execução (Apenas para STACKSPOT)"
+					} else if flag == "-i" {
+						desc = "Ideal para comandos interativos evitando sensação de bloqueio do terminal"
+					} else if flag == "--ai" {
+						desc = "Envia a saída do comando direto para a IA analisar, para contexto adicional digite ( @command --ai > <contexto>)"
+					} else {
+						// 2. Se não houver descrição personalizada, criar uma genérica
+						desc = fmt.Sprintf("Opção para %s", command)
+						if len(values) > 0 {
+							desc += " (valores: " + strings.Join(extractTexts(values), ", ") + ")"
+						}
 					}
 					flagSuggests = append(flagSuggests, prompt.Suggest{Text: flag, Description: desc})
 				}
 				return prompt.FilterHasPrefix(flagSuggests, currWord, true)
-			}
-
-			// Sugerir valores se após um flag conhecido (ex: "--mode ")
-			for flag, values := range flagsMap {
-				// Detecta se o usuário terminou o flag (ex: "--mode " ou "--mode=s")
-				if strings.HasSuffix(prevWord, flag) || strings.HasPrefix(currWord, flag+"=") {
-					// Se for "--mode=", extrai o prefixo após "="
-					valuePrefix := currWord
-					if strings.Contains(valuePrefix, "=") {
-						valuePrefix = strings.SplitN(valuePrefix, "=", 2)[1]
-					}
-					return prompt.FilterHasPrefix(values, valuePrefix, true) // Aqui as descrições aparecem!
-				}
 			}
 		}
 	}

@@ -107,6 +107,12 @@ func main() {
 		logger.Fatal("Erro ao inicializar o ChatCLI", zap.Error(err))
 	}
 
+	// Aplicar overrides de provider, model e max-tokens do modo one-shot, se fornecidos
+	chatCLI.UserMaxTokens = opts.MaxTokens
+	if err := chatCLI.ApplyOverrides(llmManager, opts.Provider, opts.Model); err != nil {
+		logger.Fatal("Erro ao aplicar overrides de provider/model via flags", zap.Error(err))
+	}
+
 	// Configurar manipulador de sinais DEPOIS de criar chatCLI
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT)

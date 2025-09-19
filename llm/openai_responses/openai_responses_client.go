@@ -12,10 +12,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -53,9 +56,22 @@ func (c *OpenAIResponsesClient) GetModelName() string {
 	return c.model
 }
 
-func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
-	// Flatten do histórico para um texto coerente, sem duplicar o prompt.
-	// Aqui construímos SOMENTE a partir do history:
+func (c *OpenAIResponsesClient) getMaxTokens() int {
+	if tokenStr := os.Getenv("OPENAI_MAX_TOKENS"); tokenStr != "" {
+		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
+			c.logger.Debug("Usando OPENAI_MAX_TOKENS personalizado", zap.Int("max_tokens", parsedTokens))
+			return parsedTokens
+		}
+	}
+	// Fallback para catálogo
+	return catalog.GetMaxTokens(catalog.ProviderOpenAI, c.model, 0)
+}
+
+func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	effectiveMaxTokens := maxTokens
+	if effectiveMaxTokens <= 0 {
+		effectiveMaxTokens = c.getMaxTokens() // valor padrão
+	}
 	input := buildTextFromHistory(history, "")
 
 	// Fallback: se o history não tem o último turno do user (edge-case),
@@ -70,8 +86,9 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 	}
 
 	reqBody := map[string]interface{}{
-		"model": c.model,
-		"input": input,
+		"model":             c.model,
+		"input":             input,
+		"max_output_tokens": effectiveMaxTokens,
 	}
 
 	jsonValue, err := json.Marshal(reqBody)
@@ -134,6 +151,10 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 		return "", fmt.Errorf("erro ao ler resposta da Responses API: %w", err)
 	}
 
+	// Adicionar log de depuração para sempre vermos o corpo da resposta
+	c.logger.Debug("Corpo da resposta recebido da OpenAI Responses (RAW)",
+		zap.ByteString("body", bodyBytes))
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errMsg := fmt.Sprintf("erro na Responses API: status %d, resposta: %s", resp.StatusCode, string(bodyBytes))
 		c.logger.Error("Resposta de erro da OpenAI Responses",
@@ -143,52 +164,63 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 		return "", errors.New(errMsg)
 	}
 
-	// Estrutura genérica para várias formas de retorno da Responses API
-	var generic struct {
-		// caminho direto mais comum
-		OutputText string `json:"output_text"`
-		// caminho rich
+	// Estrutura de decodificação mais detalhada para capturar todos os casos
+	var response struct {
+		Status            string `json:"status"`
+		IncompleteDetails *struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
 		Output []struct {
-			Type    string `json:"type"` // "message"
-			Role    string `json:"role"` // "assistant"
+			Type    string `json:"type"` // "message" ou "reasoning"
 			Content []struct {
-				Type string `json:"type"` // "output_text", "input_text", etc
+				Type string `json:"type"` // "output_text"
 				Text string `json:"text"`
 			} `json:"content"`
 		} `json:"output"`
-		Content any `json:"content"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 
-	if err := json.Unmarshal(bodyBytes, &generic); err != nil {
+	if err := json.Unmarshal(bodyBytes, &response); err != nil {
 		return "", fmt.Errorf("erro ao decodificar resposta da Responses API: %w", err)
 	}
 
-	// 1) Se existir output_text, é o mais direto
-	if strings.TrimSpace(generic.OutputText) != "" {
-		return generic.OutputText, nil
+	// 1. Verificar se a API retornou um erro explícito no corpo
+	if response.Error != nil && response.Error.Message != "" {
+		c.logger.Error("API da OpenAI Responses retornou um erro no payload", zap.String("error_message", response.Error.Message))
+		return "", fmt.Errorf("erro da API OpenAI: %s", response.Error.Message)
 	}
 
-	// 2) Varredura do array "output"
+	// 2. Verificar o status da resposta - esta é a nova lógica crucial
+	if response.Status == "incomplete" {
+		if response.IncompleteDetails != nil && response.IncompleteDetails.Reason == "max_output_tokens" {
+			c.logger.Warn("Resposta incompleta devido a max_output_tokens baixo.", zap.ByteString("body", bodyBytes))
+			return "", errors.New("a resposta da OpenAI foi incompleta, o valor de 'max_output_tokens' é muito baixo")
+		}
+		return "", fmt.Errorf("a resposta da OpenAI foi incompleta por um motivo desconhecido (status: %s)", response.Status)
+	}
+
+	// 3. Iterar para encontrar o texto apenas se o status for 'completed'
 	var sb strings.Builder
-	for _, item := range generic.Output {
-		for _, c := range item.Content {
-			if strings.TrimSpace(c.Text) != "" {
-				sb.WriteString(c.Text)
+	for _, item := range response.Output {
+		// Procurar especificamente pelo item do tipo 'message'
+		if item.Type == "message" {
+			for _, content := range item.Content {
+				// E dentro dele, pelo conteúdo do tipo 'output_text'
+				if content.Type == "output_text" && strings.TrimSpace(content.Text) != "" {
+					sb.WriteString(content.Text)
+				}
 			}
 		}
 	}
+
 	if sb.Len() > 0 {
 		return sb.String(), nil
 	}
 
-	// 3) fallback: tentar extrair texto credível de "content" genérico se vier em outro formato
-	if generic.Content != nil {
-		if txt := tryExtractText(generic.Content); txt != "" {
-			return txt, nil
-		}
-	}
-
 	// Se chegou aqui, não foi possível extrair
+	c.logger.Warn("Não foi possível extrair texto da resposta, mesmo com status 'completed'.", zap.ByteString("body", bodyBytes))
 	return "", fmt.Errorf("não foi possível extrair o texto da resposta da Responses API")
 }
 
