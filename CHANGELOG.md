@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.0](https://github.com/diillson/chatcli/compare/v1.26.0...v1.27.0) (2025-09-20)
+
+
+### Features
+
+* **cli,llm:** implement override for max_tokens across clients and CLI ([#267](https://github.com/diillson/chatcli/issues/267)) ([#268](https://github.com/diillson/chatcli/issues/268)) ([9236384](https://github.com/diillson/chatcli/commit/9236384cf975bdfd1f3c729312a5e243df90c7fd))
+
 ## [1.26.0](https://github.com/diillson/chatcli/compare/v1.25.2...v1.26.0) (2025-09-18)
 
 
