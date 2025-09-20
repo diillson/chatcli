@@ -50,8 +50,7 @@ func TestClaudeClient_SendPrompt_Success(t *testing.T) {
 
 	// 3. Executar o teste
 	history := []models.Message{{Role: "user", Content: "Hello"}}
-	resp, err := client.SendPrompt(context.Background(), "Hello", history)
-
+	resp, err := client.SendPrompt(context.Background(), "Hello", history, 0)
 	// 4. Verificar os resultados
 	assert.NoError(t, err)
 	assert.Equal(t, "Hi there!", resp)
@@ -79,7 +78,7 @@ func TestClaudeClient_SendPrompt_RetryOnRateLimit(t *testing.T) {
 
 	client.apiURL = server.URL
 
-	resp, err := client.SendPrompt(context.Background(), "Test", []models.Message{{Role: "user", Content: "Test"}})
+	resp, err := client.SendPrompt(context.Background(), "Test", []models.Message{{Role: "user", Content: "Test"}}, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "Success on second try", resp)

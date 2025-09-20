@@ -30,7 +30,7 @@ func TestOllamaClient_SendPrompt_Success(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	c := NewClient(srv.URL, "llama3.1:8b", logger, 1, 0)
 
-	out, err := c.SendPrompt(context.Background(), "Hi", []models.Message{{Role: "user", Content: "Hi"}})
+	out, err := c.SendPrompt(context.Background(), "Hi", []models.Message{{Role: "user", Content: "Hi"}}, 0)
 	require.NoError(t, err)
 	assert.Equal(t, "Hello from Ollama!", out)
 }

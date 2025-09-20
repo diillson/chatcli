@@ -32,6 +32,7 @@ type Options struct {
 	NoAnim         bool          // --no-anim
 	PromptFlagUsed bool          // indica se -p/--prompt foi passado explicitamente
 	AgentAutoExec  bool          // --agent-auto-exec
+	MaxTokens      int           // --max-tokens
 }
 
 // HandleOneShotOrFatal executa o modo one-shot se solicitado (flag -p usada ou stdin presente).
@@ -153,8 +154,8 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 		cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 	}
 
-	// Faz a chamada ao LLM (com timeout vindo do contexto)
-	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, cli.history)
+	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
+	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
 
 	if !disableAnimation {
 		cli.animation.StopThinkingAnimation()
@@ -189,6 +190,7 @@ func NewFlagSet() (*flag.FlagSet, *Options) {
 	fs.StringVar(&opts.Model, "model", "", "Override do modelo(LLM)")
 
 	fs.DurationVar(&opts.Timeout, "timeout", 5*time.Minute, "Timeout da chamada one-shot")
+	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, "Override do máximo de tokens para a resposta")
 	fs.BoolVar(&opts.NoAnim, "no-anim", false, "Desabilita animações no modo one-shot")
 
 	fs.BoolVar(&opts.AgentAutoExec, "agent-auto-exec", false, "No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for seguro.")

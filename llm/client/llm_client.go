@@ -32,7 +32,7 @@ type LLMClient interface {
 	// O contexto (ctx) pode ser usado para controlar o tempo de execução e cancelamento.
 	// O histórico (history) contém as mensagens anteriores da conversa.
 	// Retorna uma string com a resposta do modelo e um erro, caso ocorra.
-	SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error)
+	SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error)
 
 	// (Opcional) Initialize pode ser usado para configurar ou autenticar o cliente LLM.
 	// Caso o cliente precise de configuração ou autenticação, esse método pode ser implementado.

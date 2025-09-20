@@ -240,7 +240,7 @@ Exemplo de bloco de comando (formato mostrado abaixo):`
 		zap.Int("historyLength", len(a.cli.history)),
 		zap.Int("queryLength", len(fullQuery)))
 
-	aiResponse, err := a.cli.Client.SendPrompt(responseCtx, fullQuery, a.cli.history)
+	aiResponse, err := a.cli.Client.SendPrompt(responseCtx, fullQuery, a.cli.history, 0)
 
 	if err != nil {
 		a.logger.Error("Erro ao obter resposta do LLM", zap.Error(err))
@@ -294,7 +294,10 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
 	// 2. Enviar para a LLM
-	aiResponse, err := a.cli.Client.SendPrompt(ctx, query, a.cli.history)
+	aiResponse, err := a.cli.Client.SendPrompt(ctx, query, a.cli.history, 0)
+	if err != nil {
+		return fmt.Errorf("erro ao obter resposta da IA: %w", err)
+	}
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
 		return fmt.Errorf("erro ao obter resposta da IA: %w", err)
@@ -625,7 +628,7 @@ func (a *AgentMode) requestLLMContinuationWithContext(ctx context.Context, previ
 	})
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt.String(), a.cli.history)
+	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt.String(), a.cli.history, 0)
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
 		fmt.Println("❌ Erro ao pedir continuação à IA:", err)
@@ -1520,7 +1523,7 @@ func (a *AgentMode) requestLLMContinuation(ctx context.Context, userQuery, previ
 	})
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-	aiResponse, err := a.cli.Client.SendPrompt(ctx, retryPrompt, a.cli.history)
+	aiResponse, err := a.cli.Client.SendPrompt(ctx, retryPrompt, a.cli.history, 0)
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
 		fmt.Println("❌ Erro ao pedir continuação à IA:", err)
@@ -1569,7 +1572,7 @@ func (a *AgentMode) requestLLMWithPreExecutionContext(ctx context.Context, origi
 	})
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt.String(), a.cli.history)
+	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt.String(), a.cli.history, 0)
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
 		fmt.Println("❌ Erro ao pedir refinamento à IA:", err)

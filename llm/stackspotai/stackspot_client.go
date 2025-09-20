@@ -62,7 +62,7 @@ func (c *StackSpotClient) GetModelName() string {
 }
 
 // SendPrompt envia um prompt para o modelo de linguagem e retorna a resposta.
-func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
+func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	// Formatar o histórico da conversa
 	conversationHistory := formatConversationHistory(history)
 

@@ -110,7 +110,7 @@ func (c *OpenAIAssistantClient) GetModelName() string {
 }
 
 // SendPrompt envia uma mensagem para o thread atual e retorna a resposta
-func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
+func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	c.mu.Lock()
 
 	// Verificar se já temos um thread ativo, se não, criar um novo

@@ -16,12 +16,13 @@ import (
 
 // forceRefreshPrompt envia um sinal SIGWINCH para o processo atual no Unix.
 func (cli *ChatCLI) forceRefreshPrompt() {
+	//resetTerminal(cli.logger)
+
 	p, err := os.FindProcess(os.Getpid())
 	if err != nil {
 		cli.logger.Warn("Não foi possível encontrar o processo para forçar o refresh", zap.Error(err))
 		return
 	}
-	// Usa unix.SIGWINCH, que está definido neste pacote
 	if err := p.Signal(unix.SIGWINCH); err != nil {
 		cli.logger.Warn("Não foi possível enviar o sinal SIGWINCH para forçar o refresh", zap.Error(err))
 	}
