@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.1](https://github.com/diillson/chatcli/compare/v1.27.0...v1.27.1) (2025-09-21)
+
+
+### Bug Fixes
+
+* **llm:** introduce retry logic and customizable backoff for API clients ([#270](https://github.com/diillson/chatcli/issues/270)) ([#271](https://github.com/diillson/chatcli/issues/271)) ([0c1fd67](https://github.com/diillson/chatcli/commit/0c1fd671bb5fc45a08c5c8d592231037713d2b1b))
+
 ## [1.27.0](https://github.com/diillson/chatcli/compare/v1.26.0...v1.27.0) (2025-09-20)
 
 
