@@ -113,9 +113,14 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     - `CHATCLI_DOTENV` – **(Opcional)** Define o caminho do seu arquivo `.env`.
     - `LOG_LEVEL` (`debug`, `info`, `warn`, `error`)
     - `LLM_PROVIDER` (`OPENAI`, `STACKSPOT`, `CLAUDEAI`, `GOOGLEAI`, `XAI`)
+    - `MAX_RETRIES` - **(Opcional)** Número máximo de tentativas para chamadas de API (padrão: `5`).
+    - `INITIAL_BACKOFF` - **(Opcional)** Tempo inicial de espera entre tentativas (padrão: `3` - segundos`).
+    - `LOG_FILE` - **(Opcional)** Caminho do arquivo de log (padrão: `$HOME/app.log`).
+    - `LOG_MAX_SIZE` - **(Opcional)** Tamanho máximo do arquivo de log antes da rotação (padrão: `100MB`).
+    - `HISTORY_MAX_SIZE` - **(Opcional)** Tamanho máximo do arquivo de histórico antes da ro`t`ação (padrão: `100MB`).
     - `ENV` - **(Opcional)** Define como o log será exibido (`dev`, `prod`), Padrão: `dev`.
-      - `dev` ele mostra os logs direto no terminal e salva no arquivo de log. 
-      - `prod` ele apenas salva no arquivo de log mantendo um terminal mais limpo.
+      - `dev` mostra os logs direto no terminal e salva no arquivo de log. 
+      - `prod` apenas salva no arquivo de log mantendo um terminal mais limpo.
 - **Provedores**:
     - `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_ASSISTANT_MODEL`, `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES`
     - `CLAUDEAI_API_KEY`, `CLAUDEAI_MODEL`, `CLAUDEAI_MAX_TOKENS`, `CLAUDEAI_API_VERSION`
@@ -132,6 +137,8 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
 LOG_LEVEL=info
 ENV=prod
 LLM_PROVIDER=CLAUDEAI
+MAX_RETRIES=10
+INITIAL_BACKOFF=2
 LOG_FILE=app.log
 LOG_MAX_SIZE=300MB
 HISTORY_MAX_SIZE=300MB

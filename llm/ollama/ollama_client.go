@@ -1,9 +1,15 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: MIT
+ */
 package ollama
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -26,6 +32,8 @@ type Client struct {
 	backoff     time.Duration
 }
 
+// NewClient cria uma nova instância de Client para Ollama.
+// Agora sem fallback interno: usa apenas os params passados (vindos do manager/ENVs).
 func NewClient(baseURL, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *Client {
 	if baseURL == "" {
 		baseURL = config.OllamaDefaultBaseURL
@@ -33,12 +41,7 @@ func NewClient(baseURL, model string, logger *zap.Logger, maxAttempts int, backo
 	if model == "" {
 		model = config.DefaultOllamaModel
 	}
-	if maxAttempts <= 0 {
-		maxAttempts = config.OllamaDefaultMaxAttempts
-	}
-	if backoff <= 0 {
-		backoff = config.OllamaDefaultBackoff
-	}
+
 	return &Client{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		model:       model,
@@ -104,10 +107,10 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		return "", fmt.Errorf("erro ao preparar payload do Ollama: %w", err)
 	}
 
-	url := c.baseURL + "/api/chat"
-	backoff := c.backoff
+	// Agora use Retry para encapsular a lógica de requisição e parsing
+	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
+		url := c.baseURL + "/api/chat"
 
-	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, utils.NewJSONReader(body))
 		if err != nil {
 			return "", fmt.Errorf("erro criando requisição Ollama: %w", err)
@@ -116,16 +119,18 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			if utils.IsTemporaryError(err) && attempt < c.maxAttempts {
-				c.logger.Warn("Erro temporário ao chamar Ollama",
-					zap.Int("attempt", attempt), zap.Error(err), zap.Duration("backoff", backoff))
-				time.Sleep(backoff)
-				backoff *= 2
-				continue
-			}
-			return "", fmt.Errorf("erro na requisição ao Ollama: %w", err)
+			return "", err
 		}
 		defer resp.Body.Close()
+
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("erro ao ler resposta do Ollama: %w", err)
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
+		}
 
 		var result struct {
 			Message struct {
@@ -136,19 +141,21 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 			Error string `json:"error"`
 		}
 
-		dec := json.NewDecoder(resp.Body)
-		if err := dec.Decode(&result); err != nil {
+		// CORREÇÃO AQUI: Use Unmarshal com bodyBytes
+		if err := json.Unmarshal(bodyBytes, &result); err != nil {
 			return "", fmt.Errorf("erro ao decodificar resposta do Ollama: %w", err)
 		}
 
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return "", fmt.Errorf("erro Ollama (%d): %s", resp.StatusCode, result.Error)
-		}
 		if result.Error != "" {
 			return "", fmt.Errorf("erro Ollama: %s", result.Error)
 		}
 		return result.Message.Content, nil
+	})
+
+	if err != nil {
+		c.logger.Error("Erro ao obter resposta do Ollama após retries", zap.Error(err))
+		return "", err
 	}
 
-	return "", fmt.Errorf("falha ao obter resposta do Ollama após %d tentativas", c.maxAttempts)
+	return response, nil
 }

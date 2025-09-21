@@ -2082,7 +2082,7 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 					} else if flag == "-i" {
 						desc = "Ideal para comandos interativos evitando sensação de bloqueio do terminal"
 					} else if flag == "--ai" {
-						desc = "Envia a saída do comando direto para a IA analisar, para contexto adicional digite ( @command --ai > <contexto>)"
+						desc = "Envia a saída do comando direto para a IA analisar, para contexto adicional digite ( @command --ai <comando> > <contexto>)"
 					} else {
 						// 2. Se não houver descrição personalizada, criar uma genérica
 						desc = fmt.Sprintf("Opção para %s", command)

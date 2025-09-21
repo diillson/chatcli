@@ -113,6 +113,8 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     - `CHATCLI_DOTENV` – **(Optional)** Defines the path to your `.env` file.
     - `LOG_LEVEL` (`debug`, `info`, `warn`, `error`)
     - `LLM_PROVIDER` (`OPENAI`, `STACKSPOT`, `CLAUDEAI`, `GOOGLEAI`, `XAI`)
+    - `MAX_RETRIES` - **(Optional)** Maximum number of attempts for API calls (default: `5`).
+    - `MAX_RETRIES` - **(Optional)** Initial wait time between attempts (default: `3` - seconds`).
     - `ENV` - **(Optional)** Defines how the log will be displayed (`dev`, `prod`). Default: `dev`.
       - `dev` displays the logs directly in the terminal and saves them to the log file.
       - `prod` only saves them to the log file, keeping the terminal cleaner.
@@ -132,6 +134,8 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
 LOG_LEVEL=info
 ENV=prod
 LLM_PROVIDER=CLAUDEAI
+MAX_RETRIES=10
+INITIAL_BACKOFF=2
 LOG_FILE=app.log
 LOG_MAX_SIZE=300MB
 HISTORY_MAX_SIZE=300MB
