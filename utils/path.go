@@ -8,7 +8,6 @@ package utils
 import (
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,15 +106,6 @@ func ReadFileContent(filePath string, maxSize int64) (string, error) {
 	content = strings.ReplaceAll(content, "\x00", "")
 
 	return content, nil
-}
-
-// IsTemporaryError verifica se o erro é temporário e pode ser retryado.
-// Desde o Go 1.18, 'Temporary' é desaconselhado. Normalmente só timeout é considerado seguro para retry.
-func IsTemporaryError(err error) bool {
-	if ne, ok := err.(net.Error); ok {
-		return ne.Timeout()
-	}
-	return false
 }
 
 // ExpandPath expande o caractere ~ no início de um caminho para o diretório home do usuário.

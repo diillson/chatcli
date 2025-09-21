@@ -35,16 +35,11 @@ type GeminiClient struct {
 	baseURL     string
 }
 
-// NewGeminiClient cria uma nova instância de GeminiClient
+// NewGeminiClient cria uma nova instância de GeminiClient.
+// Agora sem fallback interno: usa apenas os params passados (vindos do manager/ENVs).
 func NewGeminiClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *GeminiClient {
 	httpClient := utils.NewHTTPClient(logger, config.DefaultGoogleAITimeout)
 
-	if maxAttempts <= 0 {
-		maxAttempts = config.GoogleAIDefaultMaxAttempts
-	}
-	if backoff <= 0 {
-		backoff = config.GoogleAIDefaultBackoff
-	}
 	if model == "" {
 		model = config.DefaultGoogleAIModel
 	}
@@ -123,43 +118,23 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 
 	c.logger.Debug("Payload preparado", zap.Int("payload_size", len(jsonValue)), zap.String("model", c.model))
 
-	var backoff = c.backoff
-	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
-		c.logger.Debug("Tentativa de requisição",
-			zap.Int("attempt", attempt),
-			zap.Int("max_attempts", c.maxAttempts),
-			zap.String("model", c.model))
-
+	// Agora use Retry para encapsular a lógica de requisição e parsing
+	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		response, err := c.executeRequest(ctx, jsonValue)
 		if err != nil {
-
-			if utils.IsTemporaryError(err) || strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RATE_LIMIT") {
-				c.logger.Warn("Erro temporário ou rate limit na API do Google AI",
-					zap.Int("attempt", attempt),
-					zap.Error(err), // O erro já é seguro
-					zap.Duration("backoff", backoff),
-					zap.String("model", c.model))
-
-				if attempt < c.maxAttempts {
-					time.Sleep(backoff)
-					backoff *= 2
-					continue
-				}
-			}
-
 			return "", err
 		}
-
-		c.logger.Info("Resposta recebida do Google AI com sucesso",
-			zap.Int("attempt", attempt),
-			zap.String("model", c.model),
-			zap.Int("response_length", len(response)))
-
 		return response, nil
+	})
+
+	if err != nil {
+		c.logger.Error("Erro ao obter resposta do Google AI após retries", zap.Error(err))
+		return "", err
 	}
 
-	// O erro final também deve ser seguro.
-	return "", fmt.Errorf("falha ao obter resposta do Google AI após %d tentativas", c.maxAttempts)
+	c.logger.Info("Resposta recebida do Google AI com sucesso",
+		zap.Int("response_length", len(response)))
+	return response, nil
 }
 
 func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt string) ([]map[string]interface{}, map[string]interface{}) {
@@ -188,16 +163,6 @@ func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt s
 			})
 		}
 	}
-
-	// NÃO duplicar o prompt:
-	// O ChatCLI já adiciona a última mensagem do usuário no history antes de chamar SendPrompt().
-	// Só adicionaria aqui se fosse necessário cobrir algum edge-case:
-	// if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
-	//     contents = append(contents, map[string]interface{}{
-	//         "role": "user",
-	//         "parts": []map[string]string{{"text": prompt}},
-	//     })
-	// }
 
 	var systemInstruction map[string]interface{}
 	if len(systemParts) > 0 {
@@ -234,9 +199,6 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 	duration := time.Since(startTime)
 
 	if err != nil {
-		// AQUI ESTÁ A CORREÇÃO DEFINITIVA
-		// O `err` original contém a URL com a chave.
-		// Criamos um novo erro sanitizado ANTES de qualquer outra coisa.
 		sanitizedErr := fmt.Errorf("erro na requisição para %s: %w", safeURL, err)
 
 		// Usamos o erro sanitizado para o log e para o retorno.
@@ -263,12 +225,8 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		c.logger.Error("Erro na resposta do Google AI",
-			zap.Int("status", resp.StatusCode),
-			zap.String("body", string(bodyBytes)),
-			zap.String("model", c.model))
-		return "", fmt.Errorf("erro na API Google AI: status %d, body: %s",
-			resp.StatusCode, string(bodyBytes))
+		// Retorna diretamente APIError
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
 	}
 
 	return c.parseResponse(bodyBytes)

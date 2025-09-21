@@ -8,7 +8,6 @@ package openai
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,12 +37,6 @@ type OpenAIClient struct {
 // NewOpenAIClient cria uma nova instância de OpenAIClient.
 func NewOpenAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenAIClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
-	if maxAttempts <= 0 {
-		maxAttempts = config.OpenAIDefaultMaxAttempts
-	}
-	if backoff <= 0 {
-		backoff = config.OpenAIDefaultBackoff
-	}
 
 	return &OpenAIClient{
 		apiKey:      apiKey,
@@ -118,37 +111,15 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
 	}
 
-	var backoff = c.backoff
-
-	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
+	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		resp, err := c.sendRequest(ctx, jsonValue)
 		if err != nil {
-			if utils.IsTemporaryError(err) {
-				c.logger.Warn("Erro temporário ao chamar OpenAI",
-					zap.Int("attempt", attempt),
-					zap.Error(err),
-					zap.Duration("backoff", backoff),
-				)
-				if attempt < c.maxAttempts {
-					time.Sleep(backoff)
-					backoff *= 2 // Backoff exponencial
-					continue
-				}
-			}
-			c.logger.Error("Erro ao fazer a requisição para OpenAI", zap.Error(err))
-			return "", fmt.Errorf("erro ao fazer a requisição para OpenAI: %w", err)
-		}
-
-		response, err := c.processResponse(resp)
-		if err != nil {
-			c.logger.Error("Erro ao processar a resposta da OpenAI", zap.Error(err))
 			return "", err
 		}
+		return c.processResponse(resp)
+	})
 
-		return response, nil
-	}
-
-	return "", fmt.Errorf("falha ao obter resposta da OpenAI após %d tentativas", c.maxAttempts)
+	return response, err
 }
 
 // sendRequest envia a requisição para a API da OpenAI
@@ -182,15 +153,11 @@ func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		errMsg := fmt.Sprintf("Erro na requisição à OpenAI: status %d, resposta: %s", resp.StatusCode, string(bodyBytes))
-		c.logger.Error("Resposta de erro da OpenAI",
-			zap.Int("status", resp.StatusCode),
-			zap.String("resposta", string(bodyBytes)),
-		)
-		return "", errors.New(errMsg)
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
 	}
 
 	var result map[string]interface{}
+	// CORREÇÃO AQUI: Use Unmarshal com bodyBytes
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		c.logger.Error("Erro ao decodificar a resposta da OpenAI", zap.Error(err))
 		return "", fmt.Errorf("erro ao decodificar a resposta da OpenAI: %w", err)

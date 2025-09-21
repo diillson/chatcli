@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
@@ -23,11 +24,36 @@ func TestXAIClient_SendPrompt_Success(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	client := NewXAIClient("test-xai-key", "grok-4", logger, 1, 0)
-	client.apiURL = server.URL // Injeta a URL do servidor mock
+	client.apiURL = server.URL
 
 	history := []models.Message{{Role: "user", Content: "Hi"}}
 	resp, err := client.SendPrompt(context.Background(), "Hi", history, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "Hello from xAI (Grok)!", resp)
+}
+
+func TestXAIClient_SendPrompt_RetryOnTemporaryError(t *testing.T) {
+	attempt := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt++
+		if attempt == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error": {"message": "Rate limit exceeded"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices": [{"message": {"role": "assistant", "content": "Success on retry"}}]}`))
+	}))
+	defer server.Close()
+
+	logger, _ := zap.NewDevelopment()
+	client := NewXAIClient("test-xai-key", "grok-4", logger, 2, 10*time.Millisecond)
+	client.apiURL = server.URL
+
+	resp, err := client.SendPrompt(context.Background(), "Test", []models.Message{{Role: "user", Content: "Test"}}, 0)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "Success on retry", resp)
+	assert.Equal(t, 2, attempt, "Should have made two attempts")
 }

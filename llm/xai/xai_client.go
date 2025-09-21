@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: MIT
+ */
 package xai
 
 import (
@@ -32,13 +37,6 @@ type XAIClient struct {
 // NewXAIClient cria uma nova instância de XAIClient.
 func NewXAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *XAIClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
-	if maxAttempts <= 0 {
-		maxAttempts = config.OpenAIDefaultMaxAttempts
-	}
-	if backoff <= 0 {
-		backoff = config.OpenAIDefaultBackoff
-	}
-
 	return &XAIClient{
 		apiKey:      apiKey,
 		model:       model,
@@ -94,31 +92,21 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
 	}
 
-	var backoff = c.backoff
-	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
+	// Agora use Retry para encapsular a lógica de requisição e parsing
+	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		resp, err := c.sendRequest(ctx, jsonValue)
 		if err != nil {
-			if utils.IsTemporaryError(err) {
-				c.logger.Warn("Erro temporário ao chamar API da xAI", zap.Int("attempt", attempt), zap.Error(err), zap.Duration("backoff", backoff))
-				if attempt < c.maxAttempts {
-					time.Sleep(backoff)
-					backoff *= 2
-					continue
-				}
-			}
-			c.logger.Error("Erro ao fazer a requisição para xAI", zap.Error(err))
-			return "", fmt.Errorf("erro ao fazer a requisição para xAI: %w", err)
-		}
-
-		response, err := c.processResponse(resp)
-		if err != nil {
-			c.logger.Error("Erro ao processar a resposta da xAI", zap.Error(err))
 			return "", err
 		}
-		return response, nil
+		return c.processResponse(resp)
+	})
+
+	if err != nil {
+		c.logger.Error("Erro ao obter resposta da xAI após retries", zap.Error(err))
+		return "", err
 	}
 
-	return "", fmt.Errorf("falha ao obter resposta da xAI após %d tentativas", c.maxAttempts)
+	return response, nil
 }
 
 func (c *XAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
@@ -141,10 +129,7 @@ func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		c.logger.Error("API da xAI retornou erro de status",
-			zap.Int("status", resp.StatusCode),
-			zap.ByteString("body", bodyBytes))
-		return "", fmt.Errorf("erro na requisição à xAI: status %d, resposta: %s", resp.StatusCode, string(bodyBytes))
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
 	}
 
 	var result struct {

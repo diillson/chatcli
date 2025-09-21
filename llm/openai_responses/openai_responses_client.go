@@ -34,14 +34,10 @@ type OpenAIResponsesClient struct {
 	backoff     time.Duration
 }
 
+// NewOpenAIResponsesClient cria uma nova instância de OpenAIResponsesClient.
+// Agora sem fallback interno: usa apenas os params passados (vindos do manager/ENVs).
 func NewOpenAIResponsesClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenAIResponsesClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
-	if maxAttempts <= 0 {
-		maxAttempts = config.OpenAIDefaultMaxAttempts
-	}
-	if backoff <= 0 {
-		backoff = config.OpenAIDefaultBackoff
-	}
 	return &OpenAIResponsesClient{
 		apiKey:      apiKey,
 		model:       model,
@@ -70,7 +66,7 @@ func (c *OpenAIResponsesClient) getMaxTokens() int {
 func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
-		effectiveMaxTokens = c.getMaxTokens() // valor padrão
+		effectiveMaxTokens = c.getMaxTokens() // Fallback para a lógica antiga se nada for passado
 	}
 	input := buildTextFromHistory(history, "")
 
@@ -96,33 +92,21 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 		return "", fmt.Errorf("erro ao preparar payload para Responses API: %w", err)
 	}
 
-	var backoff = c.backoff
-	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
+	// Retry para encapsular a lógica de requisição e parsing
+	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		resp, err := c.sendRequest(ctx, jsonValue)
-		if err != nil {
-			if utils.IsTemporaryError(err) {
-				c.logger.Warn("Erro temporário ao chamar OpenAI Responses",
-					zap.Int("attempt", attempt),
-					zap.Error(err),
-					zap.Duration("backoff", backoff),
-				)
-				if attempt < c.maxAttempts {
-					time.Sleep(backoff)
-					backoff *= 2
-					continue
-				}
-			}
-			return "", fmt.Errorf("erro na requisição à OpenAI Responses: %w", err)
-		}
-
-		out, err := c.processResponse(resp)
 		if err != nil {
 			return "", err
 		}
-		return out, nil
+		return c.processResponse(resp)
+	})
+
+	if err != nil {
+		c.logger.Error("Erro ao obter resposta da OpenAI Responses após retries", zap.Error(err))
+		return "", err
 	}
 
-	return "", fmt.Errorf("falha ao obter resposta da OpenAI Responses após %d tentativas", c.maxAttempts)
+	return response, nil
 }
 
 func (c *OpenAIResponsesClient) sendRequest(ctx context.Context, body []byte) (*http.Response, error) {
@@ -151,17 +135,8 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 		return "", fmt.Errorf("erro ao ler resposta da Responses API: %w", err)
 	}
 
-	// Adicionar log de depuração para sempre vermos o corpo da resposta
-	c.logger.Debug("Corpo da resposta recebido da OpenAI Responses (RAW)",
-		zap.ByteString("body", bodyBytes))
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errMsg := fmt.Sprintf("erro na Responses API: status %d, resposta: %s", resp.StatusCode, string(bodyBytes))
-		c.logger.Error("Resposta de erro da OpenAI Responses",
-			zap.Int("status", resp.StatusCode),
-			zap.String("resposta", string(bodyBytes)),
-		)
-		return "", errors.New(errMsg)
+	if resp.StatusCode != http.StatusOK {
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
 	}
 
 	// Estrutura de decodificação mais detalhada para capturar todos os casos
@@ -198,7 +173,7 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 		return "", fmt.Errorf("erro da API OpenAI: %s", response.Error.Message)
 	}
 
-	// 2. Verificar o status da resposta - esta é a nova lógica crucial
+	// 2. Verificar o status da resposta
 	if response.Status == "incomplete" {
 		if response.IncompleteDetails != nil && response.IncompleteDetails.Reason == "max_output_tokens" {
 			c.logger.Warn("Resposta incompleta devido a max_output_tokens baixo.", zap.ByteString("body", bodyBytes))

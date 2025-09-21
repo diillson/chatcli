@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,24 +57,41 @@ type LLMManagerImpl struct {
 
 // NewLLMManager cria uma nova instância de LLMManagerImpl.
 func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager, error) {
+	// Ler configs de retry de ENV ou usar defaults
+	maxRetries := config.DefaultMaxRetries
+	if v := os.Getenv("MAX_RETRIES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxRetries = n
+			logger.Info("Usando MAX_RETRIES de ENV", zap.Int("max_retries", maxRetries))
+		}
+	}
+
+	initialBackoff := config.DefaultInitialBackoff
+	if v := os.Getenv("INITIAL_BACKOFF"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			initialBackoff = d
+			logger.Info("Usando INITIAL_BACKOFF de ENV", zap.Duration("initial_backoff", initialBackoff))
+		}
+	}
+
 	manager := &LLMManagerImpl{
 		clients: make(map[string]func(string) (client.LLMClient, error)),
 		logger:  logger,
 	}
 
 	// Configurar os providers
-	manager.configurarOpenAIClient()
-	manager.configurarStackSpotClient(slugName, tenantName)
-	manager.configurarClaudeAIClient()
-	manager.configurarGoogleAIClient()
-	manager.configurarXAIClient()
-	manager.configurarOllamaClient()
+	manager.configurarOpenAIClient(maxRetries, initialBackoff)
+	manager.configurarStackSpotClient(slugName, tenantName, maxRetries, initialBackoff)
+	manager.configurarClaudeAIClient(maxRetries, initialBackoff)
+	manager.configurarGoogleAIClient(maxRetries, initialBackoff)
+	manager.configurarXAIClient(maxRetries, initialBackoff)
+	manager.configurarOllamaClient(maxRetries, initialBackoff)
 
 	return manager, nil
 }
 
 // configurarGoogleAIClient configura o cliente Google AI (Gemini)
-func (m *LLMManagerImpl) configurarGoogleAIClient() {
+func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff time.Duration) {
 	apiKey := os.Getenv("GOOGLEAI_API_KEY")
 	if apiKey != "" {
 		// NÃO logar a API key diretamente
@@ -89,8 +107,8 @@ func (m *LLMManagerImpl) configurarGoogleAIClient() {
 				apiKey,
 				model,
 				m.logger,
-				config.GoogleAIDefaultMaxAttempts,
-				config.GoogleAIDefaultBackoff,
+				maxRetries,
+				initialBackoff,
 			), nil
 		}
 	} else {
@@ -99,7 +117,7 @@ func (m *LLMManagerImpl) configurarGoogleAIClient() {
 }
 
 // configurarOpenAIClient configura o cliente OpenAI se a variável de ambiente OPENAI_API_KEY estiver definida.
-func (m *LLMManagerImpl) configurarOpenAIClient() {
+func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff time.Duration) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey != "" {
 		// Cliente OpenAI padrão (chat completions ou responses)
@@ -125,13 +143,13 @@ func (m *LLMManagerImpl) configurarOpenAIClient() {
 				m.logger.Info("Usando OpenAI Responses API", zap.String("model", model))
 				return openai_responses.NewOpenAIResponsesClient(
 					apiKey, model, m.logger,
-					config.OpenAIDefaultMaxAttempts,
-					config.OpenAIDefaultBackoff,
+					maxRetries,
+					initialBackoff,
 				), nil
 			}
 
 			m.logger.Info("Usando OpenAI Chat Completions API", zap.String("model", model))
-			return openai.NewOpenAIClient(apiKey, model, m.logger, 50, 300), nil
+			return openai.NewOpenAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
 		}
 
 		// Cliente OpenAI Assistente
@@ -147,7 +165,7 @@ func (m *LLMManagerImpl) configurarOpenAIClient() {
 }
 
 // configurarStackSpotClient configura o cliente StackSpot
-func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string) {
+func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string, maxRetries int, initialBackoff time.Duration) {
 	clientID := os.Getenv("CLIENT_ID")
 	clientSecret := os.Getenv("CLIENT_SECRET")
 
@@ -160,12 +178,12 @@ func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string) 
 	m.tokenManager = token.NewTokenManager(clientID, clientSecret, slugName, tenantName, m.logger)
 
 	m.clients["STACKSPOT"] = func(model string) (client.LLMClient, error) {
-		return stackspotai.NewStackSpotClient(m.tokenManager, slugName, m.logger, 50, 300), nil
+		return stackspotai.NewStackSpotClient(m.tokenManager, slugName, m.logger, maxRetries, initialBackoff), nil
 	}
 }
 
 // configurarClaudeAIClient configura o cliente ClaudeAI
-func (m *LLMManagerImpl) configurarClaudeAIClient() {
+func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff time.Duration) {
 	apiKey := os.Getenv("CLAUDEAI_API_KEY")
 	if apiKey != "" {
 		m.clients["CLAUDEAI"] = func(model string) (client.LLMClient, error) {
@@ -176,8 +194,8 @@ func (m *LLMManagerImpl) configurarClaudeAIClient() {
 				apiKey,
 				model,
 				m.logger,
-				config.ClaudeAIDefaultMaxAttempts,
-				config.ClaudeAIDefaultBackoff,
+				maxRetries,
+				initialBackoff,
 			), nil
 		}
 	} else {
@@ -186,7 +204,7 @@ func (m *LLMManagerImpl) configurarClaudeAIClient() {
 }
 
 // configurarXAIClient configura o cliente xAI
-func (m *LLMManagerImpl) configurarXAIClient() {
+func (m *LLMManagerImpl) configurarXAIClient(maxRetries int, initialBackoff time.Duration) {
 	apiKey := os.Getenv("XAI_API_KEY")
 	if apiKey != "" {
 		m.logger.Info("Configurando provedor xAI")
@@ -198,8 +216,8 @@ func (m *LLMManagerImpl) configurarXAIClient() {
 				apiKey,
 				model,
 				m.logger,
-				config.OpenAIDefaultMaxAttempts,
-				config.OpenAIDefaultBackoff,
+				maxRetries,
+				initialBackoff,
 			), nil
 		}
 	} else {
@@ -207,7 +225,7 @@ func (m *LLMManagerImpl) configurarXAIClient() {
 	}
 }
 
-func (m *LLMManagerImpl) configurarOllamaClient() {
+func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff time.Duration) {
 	baseURL := utils.GetEnvOrDefault("OLLAMA_BASE_URL", config.OllamaDefaultBaseURL)
 	enable := strings.EqualFold(os.Getenv("OLLAMA_ENABLED"), "true")
 
@@ -275,8 +293,8 @@ func (m *LLMManagerImpl) configurarOllamaClient() {
 			baseURL,
 			model,
 			m.logger,
-			config.OllamaDefaultMaxAttempts,
-			config.OllamaDefaultBackoff,
+			maxRetries,
+			initialBackoff,
 		), nil
 	}
 }
