@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.2](https://github.com/diillson/chatcli/compare/v1.27.1...v1.27.2) (2025-09-22)
+
+
+### Bug Fixes
+
+* **agent:** enhance security and customization for Agent Mode ([#276](https://github.com/diillson/chatcli/issues/276)) ([e546cae](https://github.com/diillson/chatcli/commit/e546cae274e392c4981256d06d6b7fcd53c817c9))
+
 ## [1.27.1](https://github.com/diillson/chatcli/compare/v1.27.0...v1.27.1) (2025-09-21)
 
 
