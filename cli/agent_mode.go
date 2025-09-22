@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/diillson/chatcli/llm/openai_assistant"
@@ -113,12 +114,42 @@ func (a *AgentMode) getInput(prompt string) string {
 	return strings.TrimSpace(input)
 }
 
+var (
+	extraDangerPatterns []*regexp.Regexp
+	allowSudo           bool
+)
+
+func init() {
+	if s := os.Getenv("CHATCLI_AGENT_DENYLIST"); s != "" {
+		for _, pat := range strings.Split(s, ";") {
+			pat = strings.TrimSpace(pat)
+			if pat == "" {
+				continue
+			}
+			if r, err := regexp.Compile(pat); err == nil {
+				extraDangerPatterns = append(extraDangerPatterns, r)
+			}
+		}
+	}
+	allowSudo = strings.EqualFold(os.Getenv("CHATCLI_AGENT_ALLOW_SUDO"), "true")
+}
+
 func isDangerous(cmd string) bool {
+	// regras existentes
 	for _, pattern := range dangerousPatterns {
-		re := regexp.MustCompile(pattern)
-		if re.MatchString(cmd) {
+		if regexp.MustCompile(pattern).MatchString(cmd) {
 			return true
 		}
+	}
+	// denylist extra
+	for _, r := range extraDangerPatterns {
+		if r.MatchString(cmd) {
+			return true
+		}
+	}
+	// sudo opcionalmente proibido
+	if !allowSudo && regexp.MustCompile(`(?i)\bsudo\b`).MatchString(cmd) {
+		return true
 	}
 	return false
 }
@@ -152,49 +183,49 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 		// Template sem crases/backticks brutos (para evitar fechamento prematuro do raw string)
 		systemInstructionTemplate := `Você é um assistente especialista em linha de comando, operando dentro de um terminal. Seu objetivo é ajudar o usuário a realizar tarefas de forma segura e eficiente, fornecendo os comandos corretos.
-
-**[Contexto Disponível]**
-- Sistema Operacional: %s
-- Shell Padrão: %s
-- Diretório Atual: %s
-
-**[PROCESSO OBRIGATÓRIO]**
-Para cada solicitação do usuário, você DEVE seguir estritamente estas duas etapas:
-
-**Etapa 1: Planejamento**
-Pense passo a passo de forma interna. Se necessário, resuma o raciocínio em uma tag <reasoning> para mostrar ao usuário.
-
-**Etapa 2: Resposta Final Estruturada**
-Após o raciocínio, forneça a resposta final contendo:q
-1. Uma tag <explanation> com uma explicação clara e concisa do que os comandos farão.
-2. Um ou mais blocos de código no formato de exemplo (o bloco de exemplo real é injetado abaixo).
-
-**[DIRETRIZES E RESTRIÇÕES]**
-1. Segurança é Prioridade: NUNCA sugira comandos destrutivos ('rm -rf', 'dd', 'mkfs', etc.) sem um aviso explícito sobre os riscos na tag <explanation>.
-2. Clareza: Prefira comandos que sejam fáceis de entender. Se um comando for complexo (ex: 'awk', 'sed'), explique cada parte dele.
-3. Eficiência: Use pipes ('|') e combine comandos para criar soluções eficientes quando apropriado.
-4. Interatividade: Evite comandos interativos (ex: 'vim', 'nano', 'ssh' sem argumentos). Se for necessário, avise o usuário na explicação.
-5. Ambiguidade: Se o pedido do usuário for ambíguo, em vez de adivinhar, faça uma pergunta para esclarecer. NÃO forneça um bloco execute nesse caso.
-6. Formato: Use blocos de código do tipo execute:<tipo> conforme exemplo injetado abaixo.
-
-**[EXEMPLO COMPLETO]**
-
-**Solicitação do Usuário:** "liste todos os arquivos go neste projeto e conte as linhas de cada um"
-
-**Sua Resposta:**
-<reasoning>
-1. O usuário quer encontrar todos os arquivos com a extensão .go. O comando 'find' é ideal para isso.
-2. O ponto de partida da busca deve ser o diretório atual ('.').
-3. O critério de busca é o nome do arquivo, então usarei: find . -name \"*.go\"
-4. Para cada arquivo encontrado, o usuário quer contar as linhas. O comando 'wc -l' faz isso.
-5. Preciso combinar find com wc -l. A melhor forma de fazer isso para múltiplos arquivos é usando xargs ou a opção -exec do find. A opção -exec com + é eficiente.
-6. O comando final será: find . -name \"*.go\" -exec wc -l {} +
-</reasoning>
-<explanation>
-Vou usar o comando 'find' para procurar recursivamente por todos os arquivos que terminam com .go a partir do diretório atual. Em seguida, para cada arquivo encontrado, vou executar o comando 'wc -l' para contar o número de linhas.
-</explanation>
-
-Exemplo de bloco de comando (formato mostrado abaixo):`
+    
+    **[Contexto Disponível]**
+    - Sistema Operacional: %s
+    - Shell Padrão: %s
+    - Diretório Atual: %s
+    
+    **[PROCESSO OBRIGATÓRIO]**
+    Para cada solicitação do usuário, você DEVE seguir estritamente estas duas etapas:
+    
+    **Etapa 1: Planejamento**
+    Pense passo a passo de forma interna. Se necessário, resuma o raciocínio em uma tag <reasoning> para mostrar ao usuário.
+    
+    **Etapa 2: Resposta Final Estruturada**
+    Após o raciocínio, forneça a resposta final contendo:
+    1. Uma tag <explanation> com uma explicação clara e concisa do que os comandos farão.
+    2. Um ou mais blocos de código no formato de exemplo (o bloco de exemplo real é injetado abaixo).
+    
+    **[DIRETRIZES E RESTRIÇÕES]**
+    1. Segurança é Prioridade: NUNCA sugira comandos destrutivos ('rm -rf', 'dd', 'mkfs', etc.) sem um aviso explícito sobre os riscos na tag <explanation>.
+    2. Clareza: Prefira comandos que sejam fáceis de entender. Se um comando for complexo (ex: 'awk', 'sed'), explique cada parte dele.
+    3. Eficiência: Use pipes ('|') e combine comandos para criar soluções eficientes quando apropriado.
+    4. Interatividade: Evite comandos interativos (ex: 'vim', 'nano', 'ssh' sem argumentos). Se for necessário, avise o usuário na <explanation> e adicione o marcador #interactive ao final do comando (ex.: 'ssh user@host #interactive') para que a CLI trate como interativo.
+    5. Ambiguidade: Se o pedido do usuário for ambíguo, em vez de adivinhar, faça uma pergunta para esclarecer. NÃO forneça um bloco execute nesse caso.
+    6. Formato: Use blocos de código do tipo execute:<tipo> conforme exemplo injetado abaixo.
+    
+    **[EXEMPLO COMPLETO]**
+    
+    **Solicitação do Usuário:** "liste todos os arquivos go neste projeto e conte as linhas de cada um"
+    
+    **Sua Resposta:**
+    <reasoning>
+    1. O usuário quer encontrar todos os arquivos com a extensão .go. O comando 'find' é ideal para isso.
+    2. O ponto de partida da busca deve ser o diretório atual ('.').
+    3. O critério de busca é o nome do arquivo, então usarei: find . -name "*.go"
+    4. Para cada arquivo encontrado, o usuário quer contar as linhas. O comando 'wc -l' faz isso.
+    5. Preciso combinar find com wc -l. A melhor forma de fazer isso para múltiplos arquivos é usando xargs ou a opção -exec do find. A opção -exec com + é eficiente.
+    6. O comando final será: find . -name "*.go" -exec wc -l {} +
+    </reasoning>
+    <explanation>
+    Vou usar o comando 'find' para procurar recursivamente por todos os arquivos que terminam com .go a partir do diretório atual. Em seguida, para cada arquivo encontrado, vou executar o comando 'wc -l' para contar o número de linhas.
+    </explanation>
+    
+    Exemplo de bloco de comando (formato mostrado abaixo):`
 
 		// bloco de exemplo real (aqui incluímos as crases)
 		codeFence := "```execute:shell\nfind . -name \"*.go\" -exec wc -l {} +\n```"
@@ -380,12 +411,23 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 		return a.extractCommandBlocksForAssistant(response)
 	}
 
-	re := regexp.MustCompile("(?s)```execute:([a-zA-Z0-9_-]+)\\s*\n(.*?)```")
+	re := regexp.MustCompile("(?s)```execute:\\s*([a-zA-Z0-9_-]+)\\s*\n(.*?)```")
 
 	// 1. Encontrar todos os blocos de comando
 	matches := re.FindAllStringSubmatch(response, -1)
 	if len(matches) == 0 {
-		return nil
+		// fallback para blocos de shell puros
+		fb := regexp.MustCompile("(?s)```(?:sh|bash|shell)\\s*\\n(.*?)```").FindAllStringSubmatch(response, -1)
+		for _, m := range fb {
+			commandsStr := strings.TrimSpace(m[1])
+			commandBlocks = append(commandBlocks, CommandBlock{
+				Description: "Comandos extraídos de bloco shell",
+				Commands:    splitCommandsByBlankLine(commandsStr),
+				Language:    "shell",
+				ContextInfo: CommandContextInfo{SourceType: SourceTypeUserInput, IsScript: isShellScript(commandsStr), ScriptType: "shell"},
+			})
+		}
+		return commandBlocks
 	}
 
 	// 2. Dividir a resposta usando os blocos como delimitadores.
@@ -605,12 +647,15 @@ func (a *AgentMode) requestLLMContinuationWithContext(ctx context.Context, previ
 
 	prompt.WriteString("O comando sugerido anteriormente foi:\n")
 	prompt.WriteString(previousCommand)
-	prompt.WriteString("\n\nO resultado (stdout) foi:\n")
-	prompt.WriteString(output)
+	outSafe := utils.SanitizeSensitiveText(output)
+	errSafe := utils.SanitizeSensitiveText(stderr)
 
-	if stderr != "" {
+	prompt.WriteString("\n\nO resultado (stdout) foi:\n")
+	prompt.WriteString(outSafe)
+
+	if errSafe != "" {
 		prompt.WriteString("\n\nO erro (stderr) foi:\n")
-		prompt.WriteString(stderr)
+		prompt.WriteString(errSafe)
 	}
 
 	if userContext != "" {
@@ -692,8 +737,8 @@ mainLoop:
 		fmt.Printf("  %s: Edita o comando N antes de executar (ex: e1)\n", colorize(fmt.Sprintf("%-6s", "eN"), ColorYellow))
 		fmt.Printf("  %s: Simula (dry-run) o comando N (ex: t2)\n", colorize(fmt.Sprintf("%-6s", "tN"), ColorYellow))                   // <<< ADICIONADO
 		fmt.Printf("  %s: Pede continuação à IA com a saída do comando N (ex: c2)\n", colorize(fmt.Sprintf("%-6s", "cN"), ColorYellow)) // <<< ADICIONADO
-		fmt.Printf("  %s: Adiciona contexto ao comando N ANTES de executar (ex: pC1)\n", colorize(fmt.Sprintf("%-6s", "pCN"), ColorYellow))
-		fmt.Printf("  %s: Adiciona contexto à SAÍDA do comando N (ex: aC1)\n", colorize(fmt.Sprintf("%-6s", "aCN"), ColorYellow))
+		fmt.Printf("  %s: Adiciona contexto ao comando N ANTES de executar (ex: pc1)\n", colorize(fmt.Sprintf("%-6s", "pcN"), ColorYellow))
+		fmt.Printf("  %s: Adiciona contexto à SAÍDA do comando N (ex: ac1)\n", colorize(fmt.Sprintf("%-6s", "acN"), ColorYellow))
 		fmt.Printf("  %s: Sai do Modo Agente\n", colorize(fmt.Sprintf("%-6s", "q"), ColorYellow))
 
 		fmt.Println(colorize(strings.Repeat("-", 60), ColorGray))
@@ -773,6 +818,14 @@ mainLoop:
 			}
 
 			fmt.Println("\n✅ Todos os comandos foram executados.")
+			fmt.Println("\nResumo:")
+			for i, out := range outputs {
+				status := "OK"
+				if out == nil || strings.TrimSpace(out.ErrorMsg) != "" {
+					status = "ERRO"
+				}
+				fmt.Printf("- #%d: %s\n", i+1, status)
+			}
 
 		case strings.HasPrefix(answer, "e"):
 			cmdNumStr := strings.TrimPrefix(answer, "e")
@@ -995,149 +1048,234 @@ mainLoop:
 }
 
 func (a *AgentMode) refreshContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 10*time.Minute)
+	toStr := utils.GetEnvOrDefault("CHATCLI_AGENT_CMD_TIMEOUT", "10m")
+	d, err := time.ParseDuration(toStr)
+	if err != nil || d <= 0 {
+		d = 10 * time.Minute
+	}
+	return context.WithTimeout(context.Background(), d)
 }
 
-// executeCommandsWithOutput executa todos os comandos do bloco com uma UI dinâmica e alinhada.
+// executeCommandsWithOutput executa todos os comandos do bloco com uma UI dinâmica, segura e alinhada.
 func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block CommandBlock) (string, string) {
-	var allOutput strings.Builder // Para a IA
+	var allOutput strings.Builder // Para enviar à IA (sanitizado)
 	var lastError string
 
+	// Normaliza linguagem para fins de exibição/decisão
+	langNorm := strings.ToLower(block.Language)
+	if langNorm == "git" || langNorm == "docker" || langNorm == "kubectl" {
+		langNorm = "shell"
+	}
+
 	// --- CABEÇALHO DINÂMICO ---
-	titleContent := fmt.Sprintf(" 🚀 EXECUTANDO: %s", block.Language)
+	titleContent := fmt.Sprintf(" 🚀 EXECUTANDO: %s", langNorm)
 	contentWidth := visibleLen(titleContent)
 	topBorder := strings.Repeat("─", contentWidth)
 	fmt.Println("\n" + colorize(topBorder, ColorGray))
 	fmt.Println(colorize(titleContent, ColorLime+ColorBold))
 
 	// Adiciona uma versão simples ao log para a IA
-	allOutput.WriteString(fmt.Sprintf("\nExecutando: %s (tipo: %s)\n", block.Description, block.Language))
+	allOutput.WriteString(fmt.Sprintf("\nExecutando: %s (tipo: %s)\n", block.Description, langNorm))
 
+	// Descobre shell
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 
 	if block.ContextInfo.IsScript {
-		// --- LÓGICA ORIGINAL PARA SCRIPT (BLOCO ÚNICO) INTEGRADA NA NOVA UI ---
+		// --- EXECUÇÃO DE SCRIPT COMPLETO (UM BLOCO) ---
 		scriptContent := block.Commands[0]
 		tmpFile, err := os.CreateTemp("", "chatcli-script-*.sh")
 		if err != nil {
 			errMsg := fmt.Sprintf("❌ Erro ao criar arquivo temporário para script: %v\n", err)
-			fmt.Println(errMsg)
+			fmt.Print(errMsg)
 			allOutput.WriteString(errMsg)
 			lastError = err.Error()
 		} else {
 			scriptPath := tmpFile.Name()
 			defer func() { _ = os.Remove(scriptPath) }()
 
-			if _, err := tmpFile.WriteString(scriptContent); err != nil {
-				errMsg := fmt.Sprintf("❌ Erro ao remover arquivo temporário de script: %v\n", err)
-				fmt.Println(errMsg)
+			if _, werr := tmpFile.WriteString(scriptContent); werr != nil {
+				errMsg := fmt.Sprintf("❌ Erro ao escrever arquivo temporário de script: %v\n", werr)
+				fmt.Print(errMsg)
 				allOutput.WriteString(errMsg)
-				lastError = err.Error()
+				lastError = werr.Error()
 			}
 			_ = tmpFile.Close()
 			_ = os.Chmod(scriptPath, 0755)
 
 			header := fmt.Sprintf("⚙️ Executando script via %s:\n", shell)
-			fmt.Println(header)
+			fmt.Print(header)
 			allOutput.WriteString(header)
 
+			start := time.Now()
 			cmd := exec.CommandContext(ctx, shell, scriptPath)
 			output, err := cmd.CombinedOutput()
+			duration := time.Since(start)
 
-			// Imprime a saída do script linha por linha com a borda
-			for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
+			// Sanitiza antes de imprimir/salvar
+			safe := utils.SanitizeSensitiveText(string(output))
+			for _, line := range strings.Split(strings.TrimRight(safe, "\n"), "\n") {
 				fmt.Println("  " + line)
 			}
-			allOutput.WriteString(string(output) + "\n")
+			allOutput.WriteString(safe + "\n")
 
+			// Exit code (quando disponível)
+			exitCode := 0
 			if err != nil {
+				if ee, ok := err.(*exec.ExitError); ok {
+					if ws, ok := ee.Sys().(syscall.WaitStatus); ok {
+						exitCode = ws.ExitStatus()
+					}
+				}
 				errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
-				fmt.Println(errMsg)
 				allOutput.WriteString(errMsg)
 				lastError = err.Error()
 			}
+			// Metadados
+			meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", exitCode, duration)
+			fmt.Print(meta)
+			allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", exitCode, duration))
 		}
 	} else {
-		// --- LÓGICA ORIGINAL PARA COMANDOS INDIVIDUAIS INTEGRADA NA NOVA UI ---
+		// --- EXECUÇÃO DE COMANDOS INDIVIDUAIS ---
 		for i, cmd := range block.Commands {
 			if cmd == "" {
 				continue
 			}
 
-			isInteractive := false
-			if strings.HasSuffix(cmd, " --interactive") {
-				cmd = strings.TrimSuffix(cmd, " --interactive")
-				isInteractive = true
-			} else if strings.Contains(cmd, "#interactive") {
-				cmd = strings.ReplaceAll(cmd, "#interactive", "")
-				cmd = strings.TrimSpace(cmd)
-				isInteractive = true
-			} else {
-				isInteractive = isLikelyInteractiveCommand(cmd)
+			trimmed := strings.TrimSpace(cmd)
+
+			// Suporte nativo a "cd"
+			if strings.HasPrefix(trimmed, "cd ") || trimmed == "cd" {
+				target := strings.TrimSpace(strings.TrimPrefix(trimmed, "cd"))
+				if target == "" {
+					target = "~"
+				}
+				// Expansão simples de ~
+				if strings.HasPrefix(target, "~") {
+					if home, err := os.UserHomeDir(); err == nil {
+						if target == "~" {
+							target = home
+						} else if strings.HasPrefix(target, "~/") {
+							target = filepath.Join(home, target[2:])
+						}
+					}
+				}
+				if err := os.Chdir(target); err != nil {
+					msg := fmt.Sprintf("❌ Erro ao trocar diretório para '%s': %v\n", target, err)
+					fmt.Print(msg)
+					allOutput.WriteString(msg)
+					lastError = err.Error()
+				} else {
+					wd, _ := os.Getwd()
+					msg := fmt.Sprintf("📂 Diretório alterado para: %s\n", wd)
+					fmt.Print(msg)
+					allOutput.WriteString(msg)
+				}
+				// Continua para o próximo comando do bloco
+				continue
 			}
 
-			if isDangerous(cmd) {
-				// O prompt de confirmação sairá temporariamente da caixa, o que é aceitável para segurança.
+			// Segurança: confirmação para comandos perigosos
+			if isDangerous(trimmed) {
 				confirmPrompt := "Este comando é potencialmente perigoso. Para confirmar, digite: 'sim, quero executar conscientemente'\nConfirma?: "
 				confirm := a.getCriticalInput(confirmPrompt)
-
 				if confirm != "sim, quero executar conscientemente" {
 					outText := "Execução do comando perigoso ABORTADA.\n"
-					fmt.Println(colorize(outText, ColorYellow))
+					fmt.Print(colorize(outText, ColorYellow))
 					allOutput.WriteString(outText)
 					continue
 				}
 				fmt.Println(colorize("⚠️ Confirmação recebida. Executando comando perigoso...", ColorYellow))
 			}
 
-			header := fmt.Sprintf("⚙️ Comando %d/%d: %s\n", i+1, len(block.Commands), cmd)
-			fmt.Println(header)
+			header := fmt.Sprintf("⚙️ Comando %d/%d: %s\n", i+1, len(block.Commands), trimmed)
+			fmt.Print(header)
 			allOutput.WriteString(header)
 
-			if !isInteractive && mightBeInteractive(cmd, block.ContextInfo) {
-				isInteractive = a.askUserIfInteractive(cmd, block.ContextInfo)
+			// Heurística de interatividade
+			isInteractive := false
+			if strings.HasSuffix(trimmed, " --interactive") {
+				trimmed = strings.TrimSuffix(trimmed, " --interactive")
+				isInteractive = true
+			} else if strings.Contains(trimmed, "#interactive") {
+				trimmed = strings.ReplaceAll(trimmed, "#interactive", "")
+				trimmed = strings.TrimSpace(trimmed)
+				isInteractive = true
+			} else {
+				isInteractive = isLikelyInteractiveCommand(trimmed)
 			}
 
+			if !isInteractive && mightBeInteractive(trimmed, block.ContextInfo) {
+				isInteractive = a.askUserIfInteractive(trimmed, block.ContextInfo)
+			}
+
+			// Execução
 			if isInteractive {
 				outText := "🖥️  Executando em modo interativo. O controle será passado para o comando.\n"
-				fmt.Println(colorize(outText, ColorGray))
+				fmt.Print(colorize(outText, ColorGray))
 				allOutput.WriteString(outText)
 
-				// Pausa para o usuário ler a mensagem antes de entregar o terminal
+				// Pausa para leitura
 				time.Sleep(1 * time.Second)
 
-				// A execução interativa assume o controle total, então não podemos prefixar a saída.
-				// A caixa será "quebrada" visualmente, mas isso é esperado para comandos interativos.
-				err := a.executeInteractiveCommand(ctx, shell, cmd)
+				start := time.Now()
+				err := a.executeInteractiveCommand(ctx, shell, trimmed)
+				duration := time.Since(start)
+
+				exitCode := 0
 				if err != nil {
+					if ee, ok := err.(*exec.ExitError); ok {
+						if ws, ok := ee.Sys().(syscall.WaitStatus); ok {
+							exitCode = ws.ExitStatus()
+						}
+					}
 					errMsg := fmt.Sprintf("❌ Erro no comando interativo: %v\n", err)
-					fmt.Println(errMsg) // Tenta imprimir dentro da caixa após o retorno
+					fmt.Print(errMsg)
 					allOutput.WriteString(errMsg)
 					lastError = err.Error()
 				} else {
 					okMsg := "✓ Comando interativo finalizado.\n"
-					fmt.Println(okMsg)
+					fmt.Print(okMsg)
 					allOutput.WriteString(okMsg)
 				}
-			} else {
-				// Comandos não interativos
-				output, err := a.captureCommandOutput(ctx, shell, []string{"-c", cmd})
 
-				// Imprime a saída linha por linha com a borda
-				for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
+				// Metadados
+				meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", exitCode, duration)
+				fmt.Print(meta)
+				allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", exitCode, duration))
+			} else {
+				// Não-interativo: capturar stdout+stderr
+				start := time.Now()
+				output, err := a.captureCommandOutput(ctx, shell, []string{"-c", trimmed})
+				duration := time.Since(start)
+
+				// Sanitiza antes de exibir/salvar
+				safe := utils.SanitizeSensitiveText(string(output))
+				for _, line := range strings.Split(strings.TrimRight(safe, "\n"), "\n") {
 					fmt.Println("  " + line)
 				}
-				allOutput.WriteString(string(output) + "\n")
+				allOutput.WriteString(safe + "\n")
 
+				exitCode := 0
 				if err != nil {
+					if ee, ok := err.(*exec.ExitError); ok {
+						if ws, ok := ee.Sys().(syscall.WaitStatus); ok {
+							exitCode = ws.ExitStatus()
+						}
+					}
+					// O erro já está refletido no output (stderr foi anexado). Registra no buffer também.
 					errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
-					// O erro já está na saída capturada, então não precisa imprimir de novo
-					allOutput.WriteString(errMsg) // Apenas garantir que vá para o log da IA
+					allOutput.WriteString(errMsg)
 					lastError = err.Error()
 				}
+
+				// Metadados
+				meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", exitCode, duration)
+				fmt.Print(meta)
+				allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", exitCode, duration))
 			}
 		}
 	}

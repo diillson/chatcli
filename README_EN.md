@@ -125,6 +125,11 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     - `XAI_API_KEY`, `XAI_MODEL`, `XAI_MAX_TOKENS`
     - `OLLAMA_ENABLED`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_MAX_TOKENS`
     - `CLIENT_ID`, `CLIENT_SECRET`, `SLUG_NAME`, `TENANT_NAME` (for StackSpot)
+- **Agente**:
+    - `CHATCLI_AGENT_CMD_TIMEOUT` – **(Optional)** Default timeout for each command executed by the Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default: `10m`.
+    - `CHATCLI_AGENT_DENYLIST` – **(Optional)** Semicolon-separated list of regular expressions to block extra dangerous commands. Example: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
+    - `CHATCLI_AGENT_ALLOW_SUDO` – **(Optional)** Allow sudo commands without automatic blocking (true/false). Default: `false` (sudo is blocked for safety).
+
 
 ### Example `.env`
 
@@ -139,12 +144,15 @@ INITIAL_BACKOFF=2
 LOG_FILE=app.log
 LOG_MAX_SIZE=300MB
 HISTORY_MAX_SIZE=300MB
+CHATCLI_AGENT_CMD_TIMEOUT=2m   # The command will have 2m to run after that it is locked and finished
+CHATCLI_AGENT_DENYLIST=rm\\s+-rf\\s+.*;curl\\s+[^|;]*\\|\\s*(sh|bash);dd\\s+if=;mkfs\\w*\\s+
+CHATCLI_AGENT_ALLOW_SUDO=false
 
 # OpenAI Settings
 OPENAI_API_KEY=your-openai-key
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_ASSISTANT_MODEL=gpt-4o-mini
-OPENAI_USE_RESPONSES=true # use the Responses API (e.g., for gpt-5)
+OPENAI_USE_RESPONSES=true    # use the Responses API (e.g., for gpt-5)
 OPENAI_MAX_TOKENS=60000
 
 # StackSpot Settings
@@ -248,6 +256,13 @@ After the first chunk is sent, use `/nextchunk` to process the next. The system 
 ## Agent Mode
 
 **Agent Mode** allows the AI to interact with your system, suggesting or executing commands to automate complex or repetitive tasks.
+
+#### Security policy (denylist/allowlist)
+
+You can strengthen the security policy with environment variables:
+- `CHATCLI_AGENT_DENYLIST` to block additional patterns (regex, separated by semicolons "`;`").
+- `CHATCLI_AGENT_ALLOW_SUDO` to allow/deny sudo without automatic blocking (default: `false`).
+Even when allowed, dangerous commands may still require explicit confirmation in the terminal.
 
 ### Agent Interaction
 
