@@ -128,6 +128,10 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     - `OLLAMA_ENABLED`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_MAX_TOKENS`
     - `XAI_API_KEY`, `XAI_MODEL`, `XAI_MAX_TOKENS`
     - `CLIENT_ID`, `CLIENT_SECRET`, `SLUG_NAME`, `TENANT_NAME` (para StackSpot)
+- **Agente**:
+    - `CHATCLI_AGENT_CMD_TIMEOUT` – **(Opcional)** Timeout padrão para cada comando executado no Modo Agente. Aceita durações Go (ex.: 30s, 2m, 10m). Padrão: `10m`.
+    - `CHATCLI_AGENT_DENYLIST` – **(Opcional)** Lista de expressões regulares (separadas por “;”) para bloquear comandos perigosos além do padrão. Ex.: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
+    - `CHATCLI_AGENT_ALLOW_SUDO` – **(Opcional)** Permite comandos com sudo sem bloqueio automático (true/false). Padrão: `false` (bloqueia sudo por segurança).
 
 ### Exemplo de `.env`
 
@@ -142,12 +146,15 @@ INITIAL_BACKOFF=2
 LOG_FILE=app.log
 LOG_MAX_SIZE=300MB
 HISTORY_MAX_SIZE=300MB
+CHATCLI_AGENT_CMD_TIMEOUT=2m    # O comando terá 2m para ser executado após isso é travado e finalizado
+CHATCLI_AGENT_DENYLIST=rm\\s+-rf\\s+.*;curl\\s+[^|;]*\\|\\s*(sh|bash);dd\\s+if=;mkfs\\w*\\s+
+CHATCLI_AGENT_ALLOW_SUDO=false
 
 # Configurações do OpenAI
 OPENAI_API_KEY=sua-chave-openai
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_ASSISTANT_MODEL=gpt-4o-mini
-OPENAI_USE_RESPONSES=true # use a Responses API (ex.: para gpt-5)
+OPENAI_USE_RESPONSES=true    # use a Responses API (ex.: para gpt-5)
 OPENAI_MAX_TOKENS=60000
 
 # Configurações do StackSpot
@@ -252,6 +259,14 @@ Após o envio do primeiro chunk, use `/nextchunk` para processar o próximo. O s
 ## Modo Agente
 
 O **Modo Agente** permite que a IA interaja com seu sistema, sugerindo ou executando comandos para automatizar tarefas complexas ou repetitivas.
+
+
+#### Política de segurança (denylist/allowlist)
+
+Você pode reforçar a política de segurança com variáveis de ambiente:
+- `CHATCLI_AGENT_DENYLIST` para bloquear padrões adicionais (regex separados por “`;`”).
+- `CHATCLI_AGENT_ALLOW_SUDO` para permitir/recusar sudo sem bloqueio automático (por padrão, `false`).
+Ainda que permitido, comandos perigosos podem exigir confirmação explícita no terminal.
 
 ### Interação com o Agente
 
