@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.0](https://github.com/diillson/chatcli/compare/v1.27.2...v1.28.0) (2025-09-22)
+
+
+### Features
+
+* **agent:** implement enhanced UI and commands for Agent Mode ([#278](https://github.com/diillson/chatcli/issues/278)) ([#279](https://github.com/diillson/chatcli/issues/279)) ([8c742ae](https://github.com/diillson/chatcli/commit/8c742ae628163cc64a993040cc256ccfc19b2641))
+
 ## [1.27.2](https://github.com/diillson/chatcli/compare/v1.27.1...v1.27.2) (2025-09-22)
 
 
