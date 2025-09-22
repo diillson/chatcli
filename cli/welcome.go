@@ -20,6 +20,9 @@ var tips = []string{
 	"Verifique sua configuração atual (sem segredos!) com o comando " + colorize("/config", ColorGreen) + ".",
 	"Pressione " + colorize("Ctrl+C", ColorCyan) + " uma vez para cancelar uma resposta da IA sem sair do chat.",
 	"Use o modo agente com " + colorize("/agent <tarefa>", ColorGreen) + " para que a IA execute comandos por você.",
+	"No Modo Agente, use " + colorize("p", ColorCyan) + " para alternar entre Visão COMPACTA e COMPLETA.",
+	"No Modo Agente, use " + colorize("vN", ColorCyan) + " para abrir a saída completa no pager e " + colorize("wN", ColorCyan) + " para salvar em arquivo.",
+	"O 'Último Resultado' do Modo Agente aparece sempre no rodapé, sem precisar rolar a tela.",
 }
 
 const screenWidth = 85 // largura global para tudo

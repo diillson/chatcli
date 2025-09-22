@@ -271,6 +271,17 @@ Start the agent with `/agent <query>` or `/run <query>`. The agent will suggest 
 - **Refining**: Use `pCN` to add context before executing command `N`.
 - **Adding context to the output**: After execution, use `aCN` to add information to the output of command `N` and get a new response from the AI.
 
+### Agent Mode Preview
+
+- Compact Plan: 1 line per command (status + description + first line of code).
+- Full Plan: Cards with description, type, risk, and formatted code block.
+- Last Result: Anchored to the footer (~30-line preview).
+- Quick Actions:
+    - vN: Opens full output in the pager (less -R/more)
+    - wN: Saves output to a temporary file
+    - p: Toggles COMPACT/FULL
+    - r: Redraws the screen
+
 ### Agent One-Shot Mode
 
 Perfect for scripts and automation.

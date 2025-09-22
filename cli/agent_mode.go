@@ -692,67 +692,244 @@ func (a *AgentMode) requestLLMContinuationWithContext(ctx context.Context, previ
 	return blocks, nil
 }
 
-// handleCommandBlocks processa cada bloco de comando
+func clearScreen() {
+	// ANSI clear + home (Unix-like). Em Windows 10+ com ANSI habilitado também funciona.
+	fmt.Print("\033[2J\033[H")
+}
+
+func showInPager(text string) error {
+	pager := "less"
+	args := []string{"-R"} // -R preserva cores
+	if runtime.GOOS == "windows" {
+		pager = "more"
+		args = nil
+	}
+	cmd := exec.Command(pager, args...)
+	cmd.Stdin = strings.NewReader(text)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// printPlanCompact: 1 linha por comando (status + descrição + primeira linha do código)
+func (a *AgentMode) printPlanCompact(blocks []CommandBlock, outputs []*CommandOutput) {
+	fmt.Println(colorize(" 📋 PLANO (visão compacta)", ColorLime+ColorBold))
+	for i, b := range blocks {
+		status := "⏳"
+		if outputs[i] != nil {
+			if strings.TrimSpace(outputs[i].ErrorMsg) == "" {
+				status = "✅"
+			} else {
+				status = "❌"
+			}
+		}
+		title := b.Description
+		if title == "" {
+			title = "Executar comandos"
+		}
+
+		firstLine := ""
+		if len(b.Commands) > 0 {
+			firstLine = strings.Split(b.Commands[0], "\n")[0]
+		}
+		// Ex.:  ✅ #1: Descrição — primeira linha do código
+		fmt.Printf("  %s #%d: %s — %s\n",
+			status, i+1, title, colorize(firstLine, ColorGray))
+	}
+	fmt.Println()
+}
+
+// printPlanFull: cartões por comando (descrição, tipo/risco/status + seção de código)
+func (a *AgentMode) printPlanFull(blocks []CommandBlock, outputs []*CommandOutput) {
+	fmt.Println(colorize(" 📋 PLANO (visão completa)", ColorLime+ColorBold))
+
+	for i, b := range blocks {
+		// Status
+		status := "⏳ Pendente"
+		statusColor := ColorGray
+		if outputs[i] != nil {
+			if strings.TrimSpace(outputs[i].ErrorMsg) == "" {
+				status = "✅ OK"
+				statusColor = ColorGreen
+			} else {
+				status = "❌ ERRO"
+				statusColor = ColorYellow
+			}
+		}
+
+		// Metadados
+		title := b.Description
+		if title == "" {
+			title = "Executar comandos"
+		}
+		danger := ""
+		if isBlockDangerous(b) {
+			danger = colorize("⚠️ Potencialmente perigoso", ColorYellow)
+		} else {
+			danger = colorize("Seguro", ColorGray)
+		}
+
+		// Cabeçalho do cartão
+		fmt.Printf("\n%s\n", colorize(fmt.Sprintf(" 🔷 COMANDO #%d: %s", i+1, title), ColorPurple+ColorBold))
+		fmt.Printf("    %s %s\n", colorize("Tipo:", ColorGray), b.Language)
+		fmt.Printf("    %s %s\n", colorize("Risco:", ColorGray), danger)
+		fmt.Printf("    %s %s\n", colorize("Status:", ColorGray), colorize(status, statusColor))
+
+		// Seção de código
+		fmt.Println(colorize("    Código:", ColorGray))
+		for idx, cmd := range b.Commands {
+			if len(b.Commands) > 1 {
+				fmt.Printf(colorize("      ( %d / %d )\n", ColorGray), idx+1, len(b.Commands))
+			}
+			prefix := ""
+			if b.Language == "shell" || b.Language == "bash" || b.Language == "sh" {
+				prefix = "$ "
+			}
+			for _, ln := range strings.Split(cmd, "\n") {
+				fmt.Printf(colorize("      %s%s\n", ColorCyan), prefix, ln)
+			}
+			if idx < len(b.Commands)-1 {
+				fmt.Println(colorize("      ─────────────────────────────────────────", ColorGray))
+			}
+		}
+	}
+	fmt.Println()
+}
+
+// isBlockDangerous verifica se algum comando do bloco é potencialmente perigoso
+func isBlockDangerous(b CommandBlock) bool {
+	for _, c := range b.Commands {
+		if isDangerous(c) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *AgentMode) printLastResult(outputs []*CommandOutput, lastIdx int) {
+	if lastIdx < 0 || lastIdx >= len(outputs) || outputs[lastIdx] == nil {
+		return
+	}
+	fmt.Println(colorize(" 🧾 ÚLTIMO RESULTADO", ColorLime+ColorBold))
+
+	out := outputs[lastIdx].Output
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	max := 30
+	if len(lines) > max {
+		preview := strings.Join(lines[:max], "\n") + "\n...\n"
+		fmt.Print(preview)
+	} else {
+		fmt.Println(out)
+	}
+
+	fmt.Printf("\nDicas: v%d = ver completo | w%d = salvar em arquivo | Enter = continuar\n", lastIdx+1, lastIdx+1)
+}
+
+// handleCommandBlocks processa os blocos de comandos com a nova UI:
+// - Plano compacto/completo com status
+// - "Último resultado" ancorado no rodapé (preview)
+// - Pager (vN), salvar saída (wN), toggle de plano (p) e refresh (r)
 func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlock) {
 	outputs := make([]*CommandOutput, len(blocks))
+	showFullPlan := false
+	lastExecuted := -1
 
 mainLoop:
 	for {
-		// --- NOVO CABEÇALHO ---
+		// Redesenha a tela (clear + header + plano + último resultado)
+		clearScreen()
 		fmt.Println("\n" + colorize(" "+strings.Repeat("━", 58), ColorGray))
 		fmt.Println(colorize(" 🤖 MODO AGENTE: PLANO DE AÇÃO", ColorLime+ColorBold))
 		fmt.Println(colorize(" "+strings.Repeat("━", 58), ColorGray))
 		fmt.Println(colorize(" A IA sugeriu os seguintes comandos para executar sua tarefa.", ColorGray))
-
-		// --- NOVOS CARTÕES DE COMANDO ---
-		for i, block := range blocks {
-			description := block.Description
-			if description == "" {
-				description = "Executar comandos"
-			}
-			fmt.Printf("\n"+colorize(" 🔷 COMANDO #%d: %s", ColorPurple+ColorBold), i+1, description)
-			fmt.Printf("\n"+colorize("    Tipo: %s", ColorGray), block.Language)
-			fmt.Println(colorize("\n    Código:", ColorGray))
-			for _, cmd := range block.Commands {
-				// Adiciona um prefixo '$' para comandos shell para clareza
-				prefix := ""
-				if block.Language == "shell" {
-					prefix = "$ "
-				}
-				// Imprime cada linha do comando com indentação
-				for _, line := range strings.Split(cmd, "\n") {
-					fmt.Printf(colorize("      %s%s\n", ColorCyan), prefix, line)
-				}
-			}
+		// Plano (compacto por padrão); quando showFullPlan == true, usamos o "completo"
+		if showFullPlan {
+			a.printPlanFull(blocks, outputs)
+		} else {
+			a.printPlanCompact(blocks, outputs)
 		}
+		a.printLastResult(outputs, lastExecuted)
 
-		// --- NOVO MENU DE OPÇÕES (COMPLETO E CORRIGIDO) ---
+		// --- MENU (compacto) ---
 		fmt.Println("\n" + colorize(strings.Repeat("-", 60), ColorGray))
+		//if showFullPlan {
+		//	fmt.Println(colorize(" Modo de plano: Visão COMPLETA (p para alternar)", ColorGray))
+		//} else {
+		//	fmt.Println(colorize(" Modo de plano: Visão COMPACTA (p para alternar)", ColorGray))
+		//}
 		fmt.Println(colorize(" O QUE VOCÊ DESEJA FAZER?", ColorLime+ColorBold))
 		fmt.Println(colorize(strings.Repeat("-", 60), ColorGray))
-
-		// Usamos fmt.Sprintf para alinhar as descrições perfeitamente
 		fmt.Printf("  %s: Executa um comando específico (ex: 1, 2, ...)\n", colorize(fmt.Sprintf("%-6s", "[1..N]"), ColorYellow))
 		fmt.Printf("  %s: Executa todos os comandos em sequência\n", colorize(fmt.Sprintf("%-6s", "a"), ColorYellow))
-		fmt.Printf("  %s: Edita o comando N antes de executar (ex: e1)\n", colorize(fmt.Sprintf("%-6s", "eN"), ColorYellow))
-		fmt.Printf("  %s: Simula (dry-run) o comando N (ex: t2)\n", colorize(fmt.Sprintf("%-6s", "tN"), ColorYellow))                   // <<< ADICIONADO
-		fmt.Printf("  %s: Pede continuação à IA com a saída do comando N (ex: c2)\n", colorize(fmt.Sprintf("%-6s", "cN"), ColorYellow)) // <<< ADICIONADO
-		fmt.Printf("  %s: Adiciona contexto ao comando N ANTES de executar (ex: pc1)\n", colorize(fmt.Sprintf("%-6s", "pcN"), ColorYellow))
-		fmt.Printf("  %s: Adiciona contexto à SAÍDA do comando N (ex: ac1)\n", colorize(fmt.Sprintf("%-6s", "acN"), ColorYellow))
+		fmt.Printf("  %s: Edita o comando N (ex: e1)\n", colorize(fmt.Sprintf("%-6s", "eN"), ColorYellow))
+		fmt.Printf("  %s: Simula (dry-run) o comando N (ex: t2)\n", colorize(fmt.Sprintf("%-6s", "tN"), ColorYellow))
+		fmt.Printf("  %s: Pede continuação à IA com a saída do N (ex: c2)\n", colorize(fmt.Sprintf("%-6s", "cN"), ColorYellow))
+		fmt.Printf("  %s: Adiciona pré-contexto ao N antes de executar (ex: pc1)\n", colorize(fmt.Sprintf("%-6s", "pcN"), ColorYellow))
+		fmt.Printf("  %s: Adiciona contexto à SAÍDA do N (ex: ac1)\n", colorize(fmt.Sprintf("%-6s", "acN"), ColorYellow))
+		fmt.Printf("  %s: Ver saída completa do N no pager\n", colorize(fmt.Sprintf("%-6s", "vN"), ColorYellow))
+		fmt.Printf("  %s: Salvar saída do N em arquivo\n", colorize(fmt.Sprintf("%-6s", "wN"), ColorYellow))
+		fmt.Printf("  %s: Alterna plano completo/compacto\n", colorize(fmt.Sprintf("%-6s", "p"), ColorYellow))
+		fmt.Printf("  %s: Atualiza a tela (clear)\n", colorize(fmt.Sprintf("%-6s", "r"), ColorYellow))
 		fmt.Printf("  %s: Sai do Modo Agente\n", colorize(fmt.Sprintf("%-6s", "q"), ColorYellow))
-
 		fmt.Println(colorize(strings.Repeat("-", 60), ColorGray))
 
-		// --- PROMPT DE ENTRADA ESTILIZADO ---
+		// Prompt
 		prompt := colorize("\n ➤ Sua escolha: ", ColorLime)
 		answer := a.getInput(prompt)
 		answer = strings.ToLower(strings.TrimSpace(answer))
 
 		switch {
+		// Sair
 		case answer == "q":
 			fmt.Println(colorize("\n ✅ Saindo do modo agente.", ColorGray))
 			return
 
+		// Refresh de tela
+		case answer == "r":
+			continue
+
+		// Toggle do plano completo/compacto
+		case answer == "p":
+			showFullPlan = !showFullPlan
+			continue
+
+		// Enter vazio = apenas redesenhar (segue o loop)
+		case answer == "":
+			continue
+
+		// Visualizar saída completa no pager: vN
+		case strings.HasPrefix(answer, "v"):
+			nStr := strings.TrimPrefix(answer, "v")
+			n, err := strconv.Atoi(nStr)
+			if err != nil || n < 1 || n > len(outputs) || outputs[n-1] == nil {
+				fmt.Println("Sem saída para exibir.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
+				continue
+			}
+			_ = showInPager(outputs[n-1].Output)
+			continue
+
+		// Salvar saída em arquivo: wN
+		case strings.HasPrefix(answer, "w"):
+			nStr := strings.TrimPrefix(answer, "w")
+			n, err := strconv.Atoi(nStr)
+			if err != nil || n < 1 || n > len(outputs) || outputs[n-1] == nil {
+				fmt.Println("Sem saída para salvar.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
+				continue
+			}
+			dir := filepath.Join(os.TempDir(), "chatcli-agent-logs")
+			_ = os.MkdirAll(dir, 0755)
+			fpath := filepath.Join(dir, fmt.Sprintf("cmd-%d-%d.log", n, time.Now().Unix()))
+			if writeErr := os.WriteFile(fpath, []byte(outputs[n-1].Output), 0644); writeErr != nil {
+				fmt.Println("Erro ao salvar:", writeErr)
+			} else {
+				fmt.Println("Arquivo salvo em:", fpath)
+			}
+			_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
+			continue
+
+		// Execução em lote: a
 		case answer == "a":
 			hasDanger := false
 			for _, b := range blocks {
@@ -762,37 +939,32 @@ mainLoop:
 						break
 					}
 				}
+				if hasDanger {
+					break
+				}
 			}
 			if hasDanger {
 				fmt.Println("⚠️ AVISO: Um ou mais comandos a executar são potencialmente perigosos (destrutivos ou invasivos).")
 				fmt.Println("Confira comandos individuais antes de aprovar execução em lote!")
 			}
 
-			// Resetar o estado do terminal
+			// Resetar o estado do terminal (stty sane) e pedir confirmação
 			cmd := exec.Command("stty", "sane")
 			cmd.Stdin = os.Stdin
 			cmd.Stdout = os.Stdout
-			_ = cmd.Run() // Ignoramos erros aqui propositalmente
+			_ = cmd.Run()
 
-			// Solicitar confirmação diretamente
 			fmt.Print("\n⚠️ Executar todos os comandos em sequência? (s/N): ")
-
-			// Ler resposta
 			reader := bufio.NewReader(os.Stdin)
 			confirmationInput, _ := reader.ReadString('\n')
 			confirmation := strings.ToLower(strings.TrimSpace(confirmationInput))
-
-			// Verificar resposta explicitamente
 			if confirmation != "s" {
 				fmt.Println("Execução em lote cancelada.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 
-			// Adicionar log explícito para depuração
-			fmt.Println("\n⚠️ Confirmação recebida: '" + confirmation + "'")
-			fmt.Println("⚠️ Executando todos os comandos em sequência...")
-
-			// Executar os comandos um por um, com logs detalhados
+			// Executar os comandos
 			for i, block := range blocks {
 				fmt.Printf("\n🚀 Executando comando #%d:\n", i+1)
 				fmt.Printf("  Tipo: %s\n", block.Language)
@@ -801,20 +973,15 @@ mainLoop:
 				}
 
 				freshCtx, freshCancel := a.refreshContext()
-
 				outStr, errStr := a.executeCommandsFunc(freshCtx, block)
-
 				freshCancel()
 
-				// Armazenar os resultados
 				outputs[i] = &CommandOutput{
 					CommandBlock: block,
 					Output:       outStr,
 					ErrorMsg:     errStr,
 				}
-
-				// Log após execução
-				fmt.Printf("✅ Comando #%d concluído\n", i+1)
+				lastExecuted = i
 			}
 
 			fmt.Println("\n✅ Todos os comandos foram executados.")
@@ -826,17 +993,22 @@ mainLoop:
 				}
 				fmt.Printf("- #%d: %s\n", i+1, status)
 			}
+			_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
+			continue
 
+		// Editar comando: eN
 		case strings.HasPrefix(answer, "e"):
 			cmdNumStr := strings.TrimPrefix(answer, "e")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
 				fmt.Println("Número de comando inválido para editar.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 			edited, err := a.editCommandBlock(blocks[cmdNum-1])
 			if err != nil {
 				fmt.Println("Erro ao editar comando:", err)
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 
@@ -846,7 +1018,6 @@ mainLoop:
 			editedBlock.Commands = edited
 
 			outStr, errStr := a.executeCommandsFunc(freshCtx, editedBlock)
-
 			freshCancel()
 
 			outputs[cmdNum-1] = &CommandOutput{
@@ -854,23 +1025,25 @@ mainLoop:
 				Output:       outStr,
 				ErrorMsg:     errStr,
 			}
+			lastExecuted = cmdNum - 1
+			_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
+			continue
 
+		// Simular (dry-run): tN
 		case strings.HasPrefix(answer, "t"):
 			cmdNumStr := strings.TrimPrefix(answer, "t")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
 				fmt.Println("Número de comando inválido para simular.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 			a.simulateCommandBlock(ctx, blocks[cmdNum-1])
 
 			execNow := a.getInput("Deseja executar este comando agora? (s/N): ")
-
 			if strings.ToLower(strings.TrimSpace(execNow)) == "s" {
 				freshCtx, freshCancel := a.refreshContext()
-
 				outStr, errStr := a.executeCommandsFunc(freshCtx, blocks[cmdNum-1])
-
 				freshCancel()
 
 				outputs[cmdNum-1] = &CommandOutput{
@@ -878,98 +1051,77 @@ mainLoop:
 					Output:       outStr,
 					ErrorMsg:     errStr,
 				}
+				lastExecuted = cmdNum - 1
 			} else {
 				fmt.Println("Simulação concluída, comando NÃO executado.")
 			}
+			_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
+			continue
 
+		// Adicionar contexto à SAÍDA: acN
 		case strings.HasPrefix(answer, "ac"):
 			cmdNumStr := strings.TrimPrefix(answer, "ac")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
 				fmt.Println("Número inválido para adicionar contexto.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 			if outputs[cmdNum-1] == nil {
 				fmt.Println("Este comando ainda não foi executado, portanto não há saída para adicionar contexto.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 
-			// Mostrar o output para o usuário saber o que está contextualizando
+			// Mostrar output e pedir contexto
 			fmt.Println("\n📋 Saída do comando que você está contextualizando:")
 			fmt.Println("---------------------------------------")
 			fmt.Print(outputs[cmdNum-1].Output)
 			fmt.Println("---------------------------------------")
 
-			// Obter o contexto adicional do usuário
 			userContext := a.getMultilineInput("Digite seu contexto adicional:\n")
 
-			// Se o usuário cancelou ou não forneceu contexto
-			if userContext == "" {
-				fmt.Println("Continuando sem contexto adicional...")
-
-				freshCtx, freshCancel := a.refreshContext()
-
-				// Chamar método para tratar a continuação sem contexto adicional
-				newBlocks, err := a.requestLLMContinuationWithContext(
-					freshCtx,
-					strings.Join(blocks[cmdNum-1].Commands, "\n"),
-					outputs[cmdNum-1].Output,
-					outputs[cmdNum-1].ErrorMsg,
-					"", // Contexto vazio
-				)
-				freshCancel()
-				if err != nil {
-					fmt.Println("Erro ao pedir continuação à IA:", err)
-					continue
-				}
-				if len(newBlocks) > 0 {
-					blocks = newBlocks                            // troca para os novos comandos da IA!
-					outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
-					continue mainLoop                             // Sai desse loop for & reinicia com novos comandos
-				} else {
-					fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
-				}
-			} else {
-				fmt.Println("\nContexto recebido! Enviando para a IA...")
-
-				freshCtx, freshCancel := a.refreshContext()
-
-				// Chamar método para tratar a continuação com contexto
-				newBlocks, err := a.requestLLMContinuationWithContext(
-					freshCtx,
-					strings.Join(blocks[cmdNum-1].Commands, "\n"),
-					outputs[cmdNum-1].Output,
-					outputs[cmdNum-1].ErrorMsg,
-					userContext,
-				)
-				freshCancel()
-				if err != nil {
-					fmt.Println("Erro ao pedir continuação à IA:", err)
-					continue
-				}
-				if len(newBlocks) > 0 {
-					blocks = newBlocks                            // troca para os novos comandos da IA!
-					outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
-					continue mainLoop                             // Sai desse loop for & reinicia com novos comandos
-				} else {
-					fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
-				}
+			freshCtx, freshCancel := a.refreshContext()
+			newBlocks, err := a.requestLLMContinuationWithContext(
+				freshCtx,
+				strings.Join(blocks[cmdNum-1].Commands, "\n"),
+				outputs[cmdNum-1].Output,
+				outputs[cmdNum-1].ErrorMsg,
+				userContext,
+			)
+			freshCancel()
+			if err != nil {
+				fmt.Println("Erro ao pedir continuação à IA:", err)
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
+				continue
 			}
+			if len(newBlocks) > 0 {
+				blocks = newBlocks
+				outputs = make([]*CommandOutput, len(blocks))
+				lastExecuted = -1
+				continue mainLoop
+			} else {
+				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
+			}
+			continue
 
+		// Pedir continuação à IA com a saída: cN
 		case strings.HasPrefix(answer, "c"):
 			cmdNumStr := strings.TrimPrefix(answer, "c")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
 				fmt.Println("Número inválido para continuação.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 			if outputs[cmdNum-1] == nil {
 				fmt.Println("Este comando ainda não foi executado, portanto não há saída para enviar à IA.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 
 			freshCtx, freshCancel := a.refreshContext()
-
 			newBlocks, err := a.requestLLMContinuation(
 				freshCtx,
 				strings.Join(blocks[cmdNum-1].Commands, "\n"),
@@ -980,34 +1132,38 @@ mainLoop:
 			freshCancel()
 			if err != nil {
 				fmt.Println("Erro ao pedir continuação à IA:", err)
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 			if len(newBlocks) > 0 {
-				blocks = newBlocks                            // troca para os novos comandos da IA!
-				outputs = make([]*CommandOutput, len(blocks)) // Reset outputs para o novo tamanho
-				continue mainLoop                             // Sai desse loop for & reinicia com novos comandos
+				blocks = newBlocks
+				outputs = make([]*CommandOutput, len(blocks))
+				lastExecuted = -1
+				continue mainLoop
 			} else {
 				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 			}
+			continue
 
+		// Adicionar pré-contexto ao comando N antes de executar: pcN
 		case strings.HasPrefix(answer, "pc"):
 			cmdNumStr := strings.TrimPrefix(answer, "pc")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
 				fmt.Println("Número inválido para adicionar pré-contexto.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 
-			// Obter o contexto do usuário
 			userContext := a.getMultilineInput("Digite seu contexto ou instrução adicional para o comando:\n")
 			if userContext == "" {
 				fmt.Println("Nenhum contexto fornecido. Operação cancelada.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 
 			fmt.Println("\nContexto recebido! Solicitando refinamento do comando à IA...")
-
-			// Chamar a nova função para obter comandos refinados
 			newBlocks, err := a.requestLLMWithPreExecutionContext(
 				ctx,
 				strings.Join(blocks[cmdNum-1].Commands, "\n"),
@@ -1015,27 +1171,31 @@ mainLoop:
 			)
 			if err != nil {
 				fmt.Println("Erro ao solicitar refinamento à IA:", err)
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 			if len(newBlocks) > 0 {
-				blocks = newBlocks                            // Substitui os comandos antigos pelos novos
-				outputs = make([]*CommandOutput, len(blocks)) // Reseta os outputs
-				continue mainLoop                             // Reinicia o loop com os novos comandos
+				blocks = newBlocks
+				outputs = make([]*CommandOutput, len(blocks))
+				lastExecuted = -1
+				continue mainLoop
 			} else {
 				fmt.Println("\nA IA não sugeriu novos comandos. Mantendo os comandos atuais.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 			}
+			continue
 
+		// Executar comando pelo índice: [1..N]
 		default:
 			cmdNum, err := strconv.Atoi(answer)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
 				fmt.Println("Opção inválida.")
+				_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 				continue
 			}
 
 			execCtx, execCancel := a.refreshContext()
-
 			outStr, errStr := a.executeCommandsFunc(execCtx, blocks[cmdNum-1])
-
 			execCancel()
 
 			outputs[cmdNum-1] = &CommandOutput{
@@ -1043,6 +1203,8 @@ mainLoop:
 				Output:       outStr,
 				ErrorMsg:     errStr,
 			}
+			lastExecuted = cmdNum - 1
+			_ = a.getInput(colorize("\nPressione Enter para continuar...", ColorGray))
 		}
 	}
 }
