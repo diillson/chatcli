@@ -812,8 +812,8 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("  eN", "Edita o comando N antes de executar (ex: e1).")
 	printCommand("  tN", "Simula (dry-run) o comando N (ex: t2).")
 	printCommand("  cN", "Pede continuação à IA com a saída do comando N (ex: c2).")
-	printCommand("  pCN", "Adiciona contexto ao comando N ANTES de executar (ex: pC1).")
-	printCommand("  aCN", "Adiciona contexto à SAÍDA do comando N (ex: aC1).")
+	printCommand("  pcN", "Adiciona contexto ao comando N ANTES de executar (ex: pc1).")
+	printCommand("  acN", "Adiciona contexto à SAÍDA do comando N (ex: ac1).")
 	printCommand("  q", "Sai do modo agente.")
 
 	// --- Gerenciamento de Sessões (/session) ---
@@ -918,19 +918,23 @@ func (cli *ChatCLI) processHistoryCommand(userInput string) (string, string) {
 		if err != nil {
 			cli.logger.Error("Erro ao obter o histórico do shell", zap.Error(err))
 		} else {
-			lines := strings.Split(historyData, "\n")
-			lines = filterEmptyLines(lines) // Remove linhas vazias
-			n := 30                         // Número de comandos recentes a incluir
-			if len(lines) > n {
-				lines = lines[len(lines)-n:]
+			allLines := filterEmptyLines(strings.Split(historyData, "\n"))
+			total := len(allLines)
+
+			n := 30
+			var lastLines []string
+			if total > n {
+				lastLines = allLines[total-n:]
+			} else {
+				lastLines = allLines
 			}
-			// Enumerar os comandos a partir do total de comandos menos n
-			startNumber := len(historyData) - len(lines) + 1
-			formattedLines := make([]string, len(lines))
-			for i, cmd := range lines {
-				formattedLines[i] = fmt.Sprintf("%d: %s", startNumber+i, cmd)
+
+			startNumber := total - len(lastLines) + 1
+			formatted := make([]string, len(lastLines))
+			for i, cmd := range lastLines {
+				formatted[i] = fmt.Sprintf("%d: %s", startNumber+i, cmd)
 			}
-			limitedHistoryData := strings.Join(formattedLines, "\n")
+			limitedHistoryData := strings.Join(formatted, "\n")
 			additionalContext += "\nHistórico do Shell (últimos 30 comandos):\n" + limitedHistoryData
 		}
 		userInput = removeCommandAndNormalizeSpaces(userInput, "@history")
