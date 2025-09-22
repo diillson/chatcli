@@ -814,7 +814,15 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("  cN", "Pede continuação à IA com a saída do comando N (ex: c2).")
 	printCommand("  pcN", "Adiciona contexto ao comando N ANTES de executar (ex: pc1).")
 	printCommand("  acN", "Adiciona contexto à SAÍDA do comando N (ex: ac1).")
+	printCommand("  vN", "Abre a saída completa do comando N no pager (less -R/more).")
+	printCommand("  wN", "Salva a saída do comando N em um arquivo temporário.")
+	printCommand("  p", "Alterna a visualização do plano: COMPACTO ↔ COMPLETO.")
+	printCommand("  r", "Atualiza a tela (clear + redraw).")
 	printCommand("  q", "Sai do modo agente.")
+	printCommand("Observações:", "")
+	printCommand("  • Último Resultado", "sempre ancorado ao rodapé da tela (preview).")
+	printCommand("  • Plano COMPACTO", "mostra 1 linha por comando (status + descrição + 1ª linha do código).")
+	printCommand("  • Plano COMPLETO", "mostra cartão com descrição, tipo, risco e bloco de código formatado.")
 
 	// --- Gerenciamento de Sessões (/session) ---
 	fmt.Printf("\n  %s\n", colorize("Gerenciamento de Sessões", ColorLime))
@@ -842,6 +850,10 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("Cancelamento (Ctrl+C)", "Pressione Ctrl+C uma vez durante o 'Pensando...' para cancelar.")
 	printCommand("Saída Rápida (Ctrl+D)", "Pressione Ctrl+D no prompt vazio para sair do ChatCLI.")
 	printCommand("Operador '>'", "Use '>' para adicionar contexto em prompts (ex.: @git > Crie um release note).")
+	printCommand("Modo Agente: p", "Alterna COMPACTO/COMPLETO do plano (útil para focar no fluxo).")
+	printCommand("Modo Agente: vN", "Abre a saída do comando N no pager (leitura longa sem poluir a tela).")
+	printCommand("Modo Agente: wN", "Salva a saída do comando N em arquivo temporário (para compartilhar ou anexar).")
+	printCommand("Modo Agente: r", "Redesenha a tela (clear) mantendo o foco no 'Último Resultado'.")
 
 	fmt.Println()
 }

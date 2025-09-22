@@ -275,6 +275,17 @@ Inicie o agente com `/agent <consulta>` ou `/run <consulta>`. O agente irá suge
 - **Refinamento**: Use `pCN` para adicionar contexto antes de executar o comando `N`.
 - **Adicionando contexto ao output**: Após a execução, use `aCN` para adicionar informações ao output do comando `N` e obter uma nova resposta da IA.
 
+### Visualização no Modo Agente
+
+- Plano Compacto: 1 linha por comando (status + descrição + primeira linha do código).
+- Plano Completo: cartões com descrição, tipo, risco e bloco de código formatado.
+- Último Resultado: fica ancorado ao rodapé (preview de ~30 linhas).
+- Ações rápidas:
+    - vN: abre saída completa no pager (less -R/more)
+    - wN: salva saída em arquivo temporário
+    - p: alterna COMPACTO/COMPLETO
+    - r: redesenha a tela
+
 ### Modo Agente One-Shot
 
 Perfeito para scripts e automação.
