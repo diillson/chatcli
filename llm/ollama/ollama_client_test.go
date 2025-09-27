@@ -58,3 +58,44 @@ func TestOllamaClient_SendPrompt_RetryOnTemporaryError(t *testing.T) {
 	assert.Equal(t, "Success on retry", out)
 	assert.Equal(t, 2, attempt, "Should have made two attempts")
 }
+
+func TestFilterThinking(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Remove <thinking> tag",
+			input:    "<thinking>Some reasoning here</thinking> Final Answer: Yes",
+			expected: "Final Answer: Yes",
+		},
+		{
+			name:     "Remove Thinking step by step",
+			input:    "Thinking step by step: First, analyze... Final Answer: 42",
+			expected: "Final Answer: 42",
+		},
+		{
+			name:     "No change if no pattern",
+			input:    "Direct answer: Hello",
+			expected: "Direct answer: Hello",
+		},
+		{
+			name:     "Case insensitive",
+			input:    "<THINKING>Ignore this</THINKING> Response: OK",
+			expected: "Response: OK",
+		},
+		{
+			name:     "Remove <think> tag from log example",
+			input:    "<think>\nOkay, the user said \"boa noite!\" which is Portuguese for \"good night!\" So they're probably greeting me in Portuguese. I should respond in Portuguese to be polite and show I understand. Let me make sure the response is friendly and offers help. Maybe say \"Boa noite! Como posso ajudar você hoje?\" That means \"Good night! How can I help you today?\" It's a common way to respond and keeps the conversation open. I should check if there's any cultural nuance I'm missing, but I think that's fine. Let's go with that.\n</think>\n\nBoa noite! Como posso ajudar você hoje? 😊",
+			expected: "Boa noite! Como posso ajudar você hoje? 😊",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := filterThinking(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
