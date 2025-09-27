@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.1](https://github.com/diillson/chatcli/compare/v1.28.0...v1.28.1) (2025-09-27)
+
+
+### Bug Fixes
+
+* **ollama:** add "thinking" filter with customizable option ([#281](https://github.com/diillson/chatcli/issues/281)) ([#282](https://github.com/diillson/chatcli/issues/282)) ([b1a649b](https://github.com/diillson/chatcli/commit/b1a649bf4d8ad890b9e9255bb4b49190d2f12774))
+
 ## [1.28.0](https://github.com/diillson/chatcli/compare/v1.27.2...v1.28.0) (2025-09-22)
 
 
