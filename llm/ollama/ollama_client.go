@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -141,7 +142,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 			Error string `json:"error"`
 		}
 
-		// CORREÇÃO AQUI: Use Unmarshal com bodyBytes
+		// Use Unmarshal com bodyBytes
 		if err := json.Unmarshal(bodyBytes, &result); err != nil {
 			return "", fmt.Errorf("erro ao decodificar resposta do Ollama: %w", err)
 		}
@@ -157,5 +158,47 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		return "", err
 	}
 
+	// Aplicar filtro se ENV OLLAMA_FILTER_THINKING = "true"
+	if strings.EqualFold(os.Getenv("OLLAMA_FILTER_THINKING"), config.OllamaFilterThinkingDefault) {
+		filtered := filterThinking(response)
+		if filtered != response {
+			c.logger.Debug("Filtro de 'thinking' aplicado com sucesso",
+				zap.Int("original_length", len(response)),
+				zap.Int("filtered_length", len(filtered)))
+			return filtered, nil
+		}
+		c.logger.Debug("Nenhum 'thinking' detectado, retornando resposta original")
+	}
+
 	return response, nil
+}
+
+// filterThinking remove partes de "pensamento em voz alta" da resposta.
+// Retorna a resposta filtrada ou original se não encontrar padrões.
+func filterThinking(response string) string {
+	// Padrões comuns: tags <thinking>, ou frases como "Thinking:" / "Reasoning:"
+	patterns := []struct {
+		re   *regexp.Regexp
+		repl string
+	}{
+		{regexp.MustCompile(`(?is)<think(ing)?>.*?</think(ing)?>`), ""},             // Captura <think> ou <thinking>
+		{regexp.MustCompile(`(?is)Thinking step by step:.*?(Final Answer:)`), "$1"}, // Mantém só final
+		{regexp.MustCompile(`(?is)Reasoning:.*?(Answer:)`), "$1"},                   // Similar
+		{regexp.MustCompile(`(?is)\\<think\\>.*?</think>`), ""},                     // Captura escapados (\ para <)
+	}
+
+	filtered := response
+	for _, p := range patterns {
+		filtered = p.re.ReplaceAllString(filtered, p.repl)
+	}
+
+	// Trim espaços extras e remove linhas vazias iniciais/finais
+	filtered = strings.TrimSpace(filtered)
+	filtered = regexp.MustCompile(`(?m)^\s*\n`).ReplaceAllString(filtered, "")
+
+	// Se nada mudou, retorna original
+	if filtered == response {
+		return response
+	}
+	return filtered
 }

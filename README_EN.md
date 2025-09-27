@@ -123,7 +123,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     - `CLAUDEAI_API_KEY`, `CLAUDEAI_MODEL`, `CLAUDEAI_MAX_TOKENS`, `CLAUDEAI_API_VERSION`
     - `GOOGLEAI_API_KEY`, `GOOGLEAI_MODEL`, `GOOGLEAI_MAX_TOKENS`
     - `XAI_API_KEY`, `XAI_MODEL`, `XAI_MAX_TOKENS`
-    - `OLLAMA_ENABLED`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_MAX_TOKENS`
+    - `OLLAMA_ENABLED`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_MAX_TOKENS`, `OLLAMA_FILTER_THINKING` – **(Optional)** Filters "thinking aloud" from models like Qwen3 (true/false, default: true)
     - `CLIENT_ID`, `CLIENT_SECRET`, `SLUG_NAME`, `TENANT_NAME` (for StackSpot)
 - **Agente**:
     - `CHATCLI_AGENT_CMD_TIMEOUT` – **(Optional)** Default timeout for each command executed by the Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default: `10m`.
@@ -181,6 +181,7 @@ OLLAMA_ENABLED=true      #Required for enabled API Ollama
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=gpt-oss:20b
 OLLAMA_MAX_TOKENS=5000
+OLLAMA_FILTER_THINKING=true  # Filters intermediate reasoning in responses (e.g. for Qwen3, llama3... - THIS IS REQUIRED TO BE TRUE for Agent mode. Works well with some OLLAMA models that have "out loud" reasoning)
 ```
 
 -----

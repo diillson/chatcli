@@ -33,8 +33,9 @@ const (
 	XAIAPIURL       = "https://api.x.ai/v1/chat/completions"
 
 	// Valores padrão para Ollama
-	DefaultOllamaModel   = "gpt-oss:20b"
-	OllamaDefaultBaseURL = "http://localhost:11434"
+	DefaultOllamaModel          = "gpt-oss:20b"
+	OllamaDefaultBaseURL        = "http://localhost:11434"
+	OllamaFilterThinkingDefault = "true"
 
 	// Provedor padrão
 	DefaultLLMProvider = "OPENAI"
