@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.3](https://github.com/diillson/chatcli/compare/v1.28.2...v1.28.3) (2025-09-28)
+
+
+### Bug Fixes
+
+* **agent:** prevent screen clearing issue in certain terminal providers by refining redraw logic ([#287](https://github.com/diillson/chatcli/issues/287)) ([#288](https://github.com/diillson/chatcli/issues/288)) ([dc575e5](https://github.com/diillson/chatcli/commit/dc575e5a0cb64eccff9ee65af1c08429a32145ca))
+
 ## [1.28.2](https://github.com/diillson/chatcli/compare/v1.28.1...v1.28.2) (2025-09-28)
 
 
