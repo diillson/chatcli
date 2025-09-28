@@ -833,11 +833,19 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 	outputs := make([]*CommandOutput, len(blocks))
 	showFullPlan := false
 	lastExecuted := -1
+	isFirstDraw := true
 
 mainLoop:
 	for {
 		// Redesenha a tela (clear + header + plano + último resultado)
-		clearScreen()
+		//clearScreen() # Comentado para evitar problemas com alguns providers e terminal.
+
+		// Nova logica de limpeza de terminal fix.
+		if !isFirstDraw {
+			clearScreen()
+		}
+		isFirstDraw = false
+
 		fmt.Println("\n" + colorize(" "+strings.Repeat("━", 58), ColorGray))
 		fmt.Println(colorize(" 🤖 MODO AGENTE: PLANO DE AÇÃO", ColorLime+ColorBold))
 		fmt.Println(colorize(" "+strings.Repeat("━", 58), ColorGray))
