@@ -40,16 +40,59 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
-      - name: Run unit tests
-        run: go test -race -coverprofile=coverage.out ./... -v
+      - name: Run unit tests and generate coverage report
+        id: coverage # Adiciona um ID para referenciar a saída deste passo
+        run: |
+          # Gera o perfil de cobertura
+          go test -race -coverprofile=coverage.out ./...
+          # Gera o resumo em texto a partir do perfil
+          go tool cover -func=coverage.out > coverage.txt
+          # Extrai a porcentagem total da última linha e a expõe como uma saída do passo
+          COVERAGE=$(tail -n 1 coverage.txt | awk '{print $3}')
+          echo "total_coverage=${COVERAGE}" >> $GITHUB_OUTPUT
+
+      - name: Post or Update Coverage Comment on PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const coverage = "${{ steps.coverage.outputs.total_coverage }}";
+            const header = "### 📊 Go Test Coverage";
+            const body = `${header}\n\n**Total Coverage:** \`${coverage}\``;
+            
+            // 1. Lista os comentários existentes no PR
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            // 2. Procura por um comentário antigo do bot com o mesmo cabeçalho
+            const botComment = comments.find(comment => 
+              comment.user.login === 'github-actions[bot]' && comment.body.startsWith(header)
+            );
+            
+            // 3. Se encontrar um comentário, atualiza. Se não, cria um novo.
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+              core.info(`Updated coverage comment (ID: ${botComment.id}).`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+              core.info('Created a new coverage comment.');
+            }
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage.out
-
-      - name: Post coverage report as a PR comment
-        uses: robvanderleek/post-go-test-coverage-to-pr@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
