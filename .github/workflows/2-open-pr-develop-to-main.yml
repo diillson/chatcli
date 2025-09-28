@@ -17,20 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Pré-requisito: Adicione o segredo da sua API KEY nas configurações do repositório
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       LOG_LEVEL: info
       ENV: prod
       LLM_PROVIDER: OPENAI
       LOG_FILE: ./app.log
-      SLUG_NAME: default
-      TENANT_NAME: default
-      CLIENT_ID: default
-      CLIENT_SECRET: default
-      CLAUDEAI_API_KEY: default
-      CLAUDEAI_MODEL: default
-      GOOGLEAI_API_KEY: default
-      GOOGLEAI_MODEL: default
       OPENAI_MODEL: gpt-5
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       # Garante que o Go instale os binários em um local conhecido
       GOPATH: ${{ github.workspace }}/go
 
