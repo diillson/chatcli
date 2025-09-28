@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.2](https://github.com/diillson/chatcli/compare/v1.28.1...v1.28.2) (2025-09-28)
+
+
+### Bug Fixes
+
+* **env:** temporarily disable environment variable check and update workflow secrets ([#284](https://github.com/diillson/chatcli/issues/284)) ([#285](https://github.com/diillson/chatcli/issues/285)) ([7303557](https://github.com/diillson/chatcli/commit/730355760baaf21312f31bbb8845f2f49163abe3))
+
 ## [1.28.1](https://github.com/diillson/chatcli/compare/v1.28.0...v1.28.1) (2025-09-27)
 
 
