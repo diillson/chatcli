@@ -85,7 +85,8 @@ func main() {
 	defer cancel()
 
 	// Verificar variáveis de ambiente e informar o usuário
-	utils.CheckEnvVariables(logger)
+	//utils.CheckEnvVariables(logger) // Desabilitado por enquanto apenas mostrando no log
+
 	// Inicializar o LLMManager com as constantes do pacote config
 	slugName := utils.GetEnvOrDefault("SLUG_NAME", config.DefaultSlugName)
 	tenantName := utils.GetEnvOrDefault("TENANT_NAME", config.DefaultTenantName)
