@@ -33,6 +33,7 @@ type AgentMode struct {
 	cli                 *ChatCLI
 	logger              *zap.Logger
 	executeCommandsFunc func(ctx context.Context, block CommandBlock) (string, string)
+	skipClearOnNextDraw bool
 }
 
 // CommandContextInfo contém metadados sobre a origem e natureza de um comando
@@ -833,18 +834,15 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 	outputs := make([]*CommandOutput, len(blocks))
 	showFullPlan := false
 	lastExecuted := -1
-	isFirstDraw := true
+	a.skipClearOnNextDraw = true
 
 mainLoop:
 	for {
 		// Redesenha a tela (clear + header + plano + último resultado)
-		//clearScreen() # Comentado para evitar problemas com alguns providers e terminal.
-
-		// Nova logica de limpeza de terminal fix.
-		if !isFirstDraw {
+		if !a.skipClearOnNextDraw {
 			clearScreen()
 		}
-		isFirstDraw = false
+		a.skipClearOnNextDraw = false
 
 		fmt.Println("\n" + colorize(" "+strings.Repeat("━", 58), ColorGray))
 		fmt.Println(colorize(" 🤖 MODO AGENTE: PLANO DE AÇÃO", ColorLime+ColorBold))
@@ -1107,6 +1105,7 @@ mainLoop:
 				blocks = newBlocks
 				outputs = make([]*CommandOutput, len(blocks))
 				lastExecuted = -1
+				a.skipClearOnNextDraw = true
 				continue mainLoop
 			} else {
 				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
@@ -1147,6 +1146,7 @@ mainLoop:
 				blocks = newBlocks
 				outputs = make([]*CommandOutput, len(blocks))
 				lastExecuted = -1
+				a.skipClearOnNextDraw = true
 				continue mainLoop
 			} else {
 				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
@@ -1186,6 +1186,7 @@ mainLoop:
 				blocks = newBlocks
 				outputs = make([]*CommandOutput, len(blocks))
 				lastExecuted = -1
+				a.skipClearOnNextDraw = true
 				continue mainLoop
 			} else {
 				fmt.Println("\nA IA não sugeriu novos comandos. Mantendo os comandos atuais.")

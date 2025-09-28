@@ -3,15 +3,16 @@ name: CI (Lint, Fmt, Test)
 on:
   pull_request:
     branches: [develop, main]
+#  push:
+#    branches: [develop]
 
 concurrency:
-  group: ci-${{ github.head_ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
-    if: github.actor != 'release-please[bot]' && github.actor != 'github-actions[bot]'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -42,14 +43,3 @@ jobs:
 
       - name: Run unit tests
         run: go test -race -coverprofile=coverage.out ./... -v
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage.out
-
-      - name: Post coverage comment
-        uses: Misha-K/go-coverage-comment@main
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
