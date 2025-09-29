@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.4](https://github.com/diillson/chatcli/compare/v1.28.3...v1.28.4) (2025-09-29)
+
+
+### Bug Fixes
+
+* **workflows:** streamline CI, PR, and release automation ([#293](https://github.com/diillson/chatcli/issues/293)) ([1003413](https://github.com/diillson/chatcli/commit/1003413945fb9d3928678a8cdd405f7bb7b1c25b))
+
 ## [1.28.3](https://github.com/diillson/chatcli/compare/v1.28.2...v1.28.3) (2025-09-28)
 
 
