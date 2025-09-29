@@ -57,30 +57,30 @@ jobs:
           # 2. Criar um prompt detalhado para a IA
           PROMPT=$(cat <<EOF
           Sua única tarefa é em inglês, gerar um título e um corpo para um Pull Request, mesclando 'develop' em 'main'. O projeto usa squash merge.
-      
+          
           Sua resposta DEVE SEGUIR ESTRITAMENTE O SEGUINTE FORMATO, sem nenhuma palavra ou texto adicional antes ou depois:
-      
+          
           <TÍTULO DO PR SEGUINDO CONVENTIONAL COMMITS>
           ---
           <CORPO DO PR EM MARKDOWN>
-      
+          
           **Exemplo de formato esperado:**
           feat(sessions): Adiciona gerenciamento de sessões de conversa
           ---
           ### Novas Funcionalidades
           - Adicionado o comando \`/session\` com as sub-ações \`save\`, \`load\`, \`list\`, e \`delete\` para permitir que os usuários persistam e retomem conversas.
           - As sessões são salvas como arquivos JSON no diretório \`~/.chatcli/sessions/\`.
-      
+          
           ### Melhorias
           - O prompt do CLI agora exibe o nome da sessão ativa para melhor contexto do usuário.
-      
+          
           NÃO inclua explicações, introduções ou qualquer texto fora deste formato.
-      
+          
           **Use o seguinte contexto para gerar o título e o corpo:**
-      
+          
           **Log de Commits:**
           ${LOG_DIFF}
-      
+          
           **Resumo das Alterações nos Arquivos:**
           ${FILE_DIFF}
           EOF
