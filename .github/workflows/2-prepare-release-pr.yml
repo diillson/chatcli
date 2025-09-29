@@ -1,0 +1,154 @@
+name: Open PR develop -> main (AI Assisted)
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  pull-requests: write
+  contents: write # 'write' é necessário para fazer o checkout e ler o histórico
+
+concurrency:
+  group: open-pr-develop-to-main
+  cancel-in-progress: true
+
+jobs:
+  open_pr:
+    runs-on: ubuntu-latest
+    env:
+      # Pré-requisito: Adicione o segredo da sua API KEY nas configurações do repositório
+      LOG_LEVEL: info
+      ENV: prod
+      LLM_PROVIDER: OPENAI
+      LOG_FILE: ./app.log
+      OPENAI_MODEL: gpt-5
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Garante que o Go instale os binários em um local conhecido
+      GOPATH: ${{ github.workspace }}/go
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 é essencial para buscar todo o histórico e poder comparar as branches
+          fetch-depth: 0
+
+      - name: Fetch main branch to ensure it exists
+        run: git fetch origin main
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23' # Use a versão do Go do seu projeto
+
+      - name: Install ChatCLI
+        run: go install github.com/diillson/chatcli@latest
+
+      - name: Add Go bin to PATH
+        run: echo "${{ env.GOPATH }}/bin" >> $GITHUB_PATH
+
+      - name: Generate PR Content with ChatCLI
+        id: generate-pr-content
+        run: |
+          # 1. Coletar o contexto: logs e diff de arquivos entre main e develop
+          LOG_DIFF=$(git log origin/main..develop --pretty=format:"- %s (%h) by %an")
+          FILE_DIFF=$(git diff --stat origin/main..develop)
+          
+          # 2. Criar um prompt detalhado para a IA
+          PROMPT=$(cat <<EOF
+          Sua única tarefa é em inglês, gerar um título e um corpo para um Pull Request, mesclando 'develop' em 'main'. O projeto usa squash merge.
+          
+          Sua resposta DEVE SEGUIR ESTRITAMENTE O SEGUINTE FORMATO, sem nenhuma palavra ou texto adicional antes ou depois:
+          
+          <TÍTULO DO PR SEGUINDO CONVENTIONAL COMMITS>
+          ---
+          <CORPO DO PR EM MARKDOWN>
+          
+          **Exemplo de formato esperado:**
+          feat(sessions): Adiciona gerenciamento de sessões de conversa
+          ---
+          ### Novas Funcionalidades
+          - Adicionado o comando \`/session\` com as sub-ações \`save\`, \`load\`, \`list\`, e \`delete\` para permitir que os usuários persistam e retomem conversas.
+          - As sessões são salvas como arquivos JSON no diretório \`~/.chatcli/sessions/\`.
+          
+          ### Melhorias
+          - O prompt do CLI agora exibe o nome da sessão ativa para melhor contexto do usuário.
+          
+          NÃO inclua explicações, introduções ou qualquer texto fora deste formato.
+          
+          **Use o seguinte contexto para gerar o título e o corpo:**
+          
+          **Log de Commits:**
+          ${LOG_DIFF}
+          
+          **Resumo das Alterações nos Arquivos:**
+          ${FILE_DIFF}
+          EOF
+          )
+          
+          # 3. Executar o chatcli em modo one-shot para gerar o conteúdo
+          # Usamos --no-anim para uma saída limpa no log do CI
+          AI_RESPONSE=$(chatcli -p "$PROMPT" --no-anim --provider OPENAI --model gpt-5)
+          
+          # 4. Salvar a resposta completa para o próximo passo
+          # Usamos a sintaxe recomendada para outputs de múltiplas linhas
+          echo "ai_response<<EOF" >> $GITHUB_OUTPUT
+          echo "$AI_RESPONSE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Open or reuse PR develop -> main
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_RELEASE_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = 'develop';
+            const base = 'main';
+            
+            // 1. Verificar se um PR já existe
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, state: 'open', head, base, per_page: 1
+            });
+            
+            if (prs.length > 0) {
+              core.info(`PR já existe: #${prs[0].number}. Nenhuma ação necessária.`);
+              return;
+            }
+            
+            // 2. Processar a resposta da IA com lógica de fallback aprimorada
+            const ai_response = `${{ steps.generate-pr-content.outputs.ai_response }}`.trim();
+            
+            let title = `Merge develop into main`; // Título de fallback
+            let body = `PR automático para promover mudanças da develop à main.`; // Corpo de fallback
+            
+            // Tentativa 1: Separador ideal "---"
+            let parts = ai_response.split('\n---\n');
+            
+            if (parts.length >= 2) {
+              title = parts[0].trim();
+              body = parts[1].trim();
+              core.info("Resposta da IA parseada com sucesso usando '---'.");
+            } else {
+              // Tentativa 2: Fallback - Primeira linha como título, resto como corpo
+              const firstNewlineIndex = ai_response.indexOf('\n');
+              if (firstNewlineIndex !== -1) {
+                title = ai_response.substring(0, firstNewlineIndex).trim();
+                body = ai_response.substring(firstNewlineIndex + 1).trim();
+                // Remove caracteres de título markdown do título, se houver
+                title = title.replace(/^#+\s*/, '');
+                core.info("Usando fallback: primeira linha como título.");
+              } else {
+                // Se não houver quebra de linha, usa a resposta inteira como título
+                title = ai_response;
+                core.warning("Resposta da IA não continha quebras de linha. Usando a resposta inteira como título.");
+              }
+            }
+            
+            // 3. Criar o Pull Request
+            const { data: pr } = await github.rest.pulls.create({
+              owner, repo, head, base, title, body
+            });
+            
+            core.info(`PR criado com sucesso: #${pr.number}`);
+            core.info(`Título: ${title}`);

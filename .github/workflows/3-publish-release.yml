@@ -1,0 +1,138 @@
+name: Release on main (PR + GitHub Release)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: true
+
+jobs:
+  release_please:
+    name: Release Please (create PR and release)
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+      release_created: ${{ steps.rp.outputs.release_created }}
+    steps:
+      - name: Release Please
+        id: rp
+        uses: googleapis/release-please-action@v4
+        with:
+          release-type: go
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+          target-branch: main
+
+  build_and_upload:
+    name: Build e upload de binários (após release criada)
+    needs: [release_please]
+    if: needs.release_please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release_please.outputs.tag_name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Build binaries
+        env:
+          CGO_ENABLED: 0
+          TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          VERSION="$TAG_NAME"
+          LDFLAGS="-X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'"
+          
+          GOOS=linux   GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-linux-amd64       ./main.go
+          GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-amd64      ./main.go
+          GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-arm64      ./main.go
+          GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-windows-amd64.exe ./main.go
+          
+          ./chatcli-linux-amd64 --version || true
+
+      - name: Wait for release availability
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          for i in {1..18}; do
+            if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+              echo "Release $TAG_NAME disponível."
+              break
+            fi
+            echo "Aguardando release ficar disponível ($i/18)..."
+            sleep 5
+          done
+
+      - name: Upload assets with retry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          files=(
+            chatcli-linux-amd64
+            chatcli-darwin-amd64
+            chatcli-darwin-arm64
+            chatcli-windows-amd64.exe
+          )
+          for f in "${files[@]}"; do
+            for attempt in {1..4}; do
+              if gh release upload "$TAG_NAME" "$f" --clobber; then
+                echo "Enviado: $f"
+                break
+              fi
+              echo "Falha ao enviar $f (tentativa $attempt). Retentando..."
+              sleep $((attempt*5))
+            done
+          done
+
+  # Opcional: sincroniza main -> develop após publicar a release
+  sync_main_to_develop:
+    needs: [release_please]
+    if: needs.release_please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configura usuário git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync release-please from main to develop (rebase)
+        run: |
+          git checkout develop
+          # Pega o último commit da main (que é o do release-please)
+          # last_commit=$(git log origin/main -1 --pretty=format:%H)
+          
+          # Aplica esse commit na develop como squash
+          # git cherry-pick -n $last_commit || true
+          git fetch origin
+
+          # Cria um commit único na develop com a mensagem da release
+          # msg=$(git log -1 --pretty=%B $last_commit)
+          # git commit -m "chore(sync): propagate release-please changes - $msg" || echo "Nada para commitar"
+          git reset --hard origin/main
+
+          git push --force
