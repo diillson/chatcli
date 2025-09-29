@@ -1,18 +1,25 @@
-name: CI (Lint, Fmt, Test)
+name: CI (Lint, Fmt, Test, Coverage)
 
 on:
   pull_request:
     branches: [develop, main]
-#  push:
-#    branches: [develop]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.head_ref }}
   cancel-in-progress: true
 
 jobs:
+  # JOB 1: Executa os testes e gera o relatório de cobertura
   lint-and-test:
+    name: Lint, Test and Generate Coverage
     runs-on: ubuntu-latest
+    # Permissões de leitura são suficientes para este job
+    permissions:
+      contents: read
+
+    # Ignora PRs criados por bots
+    if: github.actor != 'release-please[bot]' && github.actor != 'github-actions[bot]'
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,5 +48,75 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
-      - name: Run unit tests
-        run: go test -race -coverprofile=coverage.out ./... -v
+      - name: Run unit tests and generate coverage report
+        run: |
+          go test -race -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out > coverage.txt
+
+      - name: Upload coverage report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.txt
+          retention-days: 1 # O artefato só precisa existir por 1 dia
+
+  # JOB 2: Baixa o relatório e posta o comentário no PR
+  post-coverage-comment:
+    name: Post Coverage Comment
+    runs-on: ubuntu-latest
+    # Este job precisa do resultado do job anterior
+    needs: lint-and-test
+
+    # Permissões de escrita para poder comentar no PR
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Download coverage report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+
+      - name: Extract coverage percentage
+        id: extract_coverage
+        run: |
+          # Extrai a porcentagem da última linha do arquivo
+          COVERAGE=$(tail -n 1 coverage.txt | awk '{print $3}')
+          echo "total_coverage=${COVERAGE}" >> $GITHUB_OUTPUT
+
+      - name: Post or Update Coverage Comment on PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const coverage = "${{ steps.extract_coverage.outputs.total_coverage }}";
+            const header = "### 📊 Go Test Coverage";
+            const body = `${header}\n\n**Total Coverage:** \`${coverage}\``;
+            
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.login === 'github-actions[bot]' && comment.body.startsWith(header)
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+              core.info(`Updated coverage comment (ID: ${botComment.id}).`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+              core.info('Created a new coverage comment.');
+            }
