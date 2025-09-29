@@ -1,4 +1,4 @@
-name: CI (Lint, Fmt, Test)
+name: CI (Lint, Fmt, Test, Coverage)
 
 on:
   pull_request:
@@ -9,9 +9,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # JOB 1: Executa os testes e gera o relatório de cobertura
   lint-and-test:
+    name: Lint, Test and Generate Coverage
     runs-on: ubuntu-latest
+    # Permissões de leitura são suficientes para este job
+    permissions:
+      contents: read
+
+    # Ignora PRs criados por bots
     if: github.actor != 'release-please[bot]' && github.actor != 'github-actions[bot]'
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,13 +49,38 @@ jobs:
         run: go vet ./...
 
       - name: Run unit tests and generate coverage report
-        id: coverage # Adiciona um ID para referenciar a saída deste passo
         run: |
-          # Gera o perfil de cobertura
           go test -race -coverprofile=coverage.out ./...
-          # Gera o resumo em texto a partir do perfil
           go tool cover -func=coverage.out > coverage.txt
-          # Extrai a porcentagem total da última linha e a expõe como uma saída do passo
+
+      - name: Upload coverage report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.txt
+          retention-days: 1 # O artefato só precisa existir por 1 dia
+
+  # JOB 2: Baixa o relatório e posta o comentário no PR
+  post-coverage-comment:
+    name: Post Coverage Comment
+    runs-on: ubuntu-latest
+    # Este job precisa do resultado do job anterior
+    needs: lint-and-test
+
+    # Permissões de escrita para poder comentar no PR
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Download coverage report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+
+      - name: Extract coverage percentage
+        id: extract_coverage
+        run: |
+          # Extrai a porcentagem da última linha do arquivo
           COVERAGE=$(tail -n 1 coverage.txt | awk '{print $3}')
           echo "total_coverage=${COVERAGE}" >> $GITHUB_OUTPUT
 
@@ -56,23 +89,20 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const coverage = "${{ steps.coverage.outputs.total_coverage }}";
+            const coverage = "${{ steps.extract_coverage.outputs.total_coverage }}";
             const header = "### 📊 Go Test Coverage";
             const body = `${header}\n\n**Total Coverage:** \`${coverage}\``;
             
-            // 1. Lista os comentários existentes no PR
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
             
-            // 2. Procura por um comentário antigo do bot com o mesmo cabeçalho
             const botComment = comments.find(comment => 
               comment.user.login === 'github-actions[bot]' && comment.body.startsWith(header)
             );
             
-            // 3. Se encontrar um comentário, atualiza. Se não, cria um novo.
             if (botComment) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -90,9 +120,3 @@ jobs:
               });
               core.info('Created a new coverage comment.');
             }
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage.out
