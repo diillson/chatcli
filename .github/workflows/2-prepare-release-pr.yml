@@ -20,7 +20,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Usar um token de bot para que o push subsequente acione outros workflows se necessário
           token: ${{ secrets.GH_RELEASE_TOKEN }}
 
       - name: Fetch main branch
@@ -29,7 +28,6 @@ jobs:
       - name: Check for changes between develop and main
         id: check_diff
         run: |
-          # Se não houver diferenças, não há necessidade de criar um PR
           if git diff --quiet origin/main..develop; then
             echo "No changes detected between develop and main. Exiting."
             echo "changed=false" >> $GITHUB_OUTPUT
@@ -49,10 +47,8 @@ jobs:
         env:
           GOPATH: ${{ github.workspace }}/go
         run: |
-          # Instalar ChatCLI
           go install github.com/diillson/chatcli@latest
           echo "${{ env.GOPATH }}/bin" >> $GITHUB_PATH
-          # Configurar Git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
@@ -62,31 +58,19 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          # ... (seu script para gerar título e corpo com a IA, sem alterações)
           LOG_DIFF=$(git log origin/main..develop --pretty=format:"- %s (%h) by %an")
           FILE_DIFF=$(git diff --stat origin/main..develop)
-          
           PROMPT=$(cat <<EOF
           Sua única tarefa é em inglês, gerar um título e um corpo para um Pull Request, mesclando 'develop' em 'main'. O projeto usa squash merge.
           O título DEVE seguir o padrão Conventional Commits (ex: 'feat(api): ...', 'fix(cli): ...').
-          
           Sua resposta DEVE SEGUIR ESTRITAMENTE O SEGUINTE FORMATO:
-          
-          <TÍTULO DO PR SEGUINDO CONVENTIONAL COMMITS>
+          <TÍTULO DO PR>
           ---
-          <CORPO DO PR EM MARKDOWN>
-          
-          NÃO inclua explicações, introduções ou qualquer texto fora deste formato.
-          
-          **Contexto:**
-          **Log de Commits:**
-          ${LOG_DIFF}
-          **Resumo das Alterações:**
-          ${FILE_DIFF}
+          <CORPO DO PR>
           EOF
           )
-          
           AI_RESPONSE=$(chatcli -p "$PROMPT" --no-anim --provider OPENAI --model gpt-4o-mini)
-          
           echo "ai_response<<EOF" >> $GITHUB_OUTPUT
           echo "$AI_RESPONSE" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -97,45 +81,28 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
-          # Processar a resposta da IA
           AI_RESPONSE="${{ steps.generate-pr-content.outputs.ai_response }}"
           TITLE=$(echo "$AI_RESPONSE" | head -n 1)
           BODY=$(echo "$AI_RESPONSE" | tail -n +3)
-
-          # Verificar se já existe um PR aberto
           PR_NUMBER=$(gh pr list --head develop --base main --state open --json number -q '.[0].number')
-
           if [ -n "$PR_NUMBER" ]; then
-            echo "Updating existing PR #$PR_NUMBER..."
             gh pr edit $PR_NUMBER --title "$TITLE" --body "$BODY"
-            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
           else
-            echo "Creating new PR..."
-            PR_URL=$(gh pr create --title "$TITLE" --body "$BODY" --head develop --base main)
-            PR_NUMBER=$(echo "$PR_URL" | awk -F'/' '{print $NF}')
-            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            gh pr create --title "$TITLE" --body "$BODY" --head develop --base main
           fi
-
-      - name: Setup Node.js for release-please
-        if: steps.check_diff.outputs.changed == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
 
       - name: Run release-please to update changelog and version
         if: steps.check_diff.outputs.changed == 'true'
         id: release-please
-        uses: google-github-actions/release-please-main@v4
+        uses: googleapis/release-please-action@v4
         with:
-          # Usar um comando que apenas manifesta as mudanças, sem criar PR
           command: manifest
           token: ${{ secrets.GH_RELEASE_TOKEN }}
           release-type: go
-          # Apontar para a branch develop, onde as mudanças devem ser aplicadas
           target-branch: develop
 
       - name: Push changelog and version updates to PR
-        if: steps.check_diff.outputs.changed == 'true' && steps.release-please.outputs.pr_created == 'true'
+        # A condição agora verifica se o release-please criou/modificou arquivos
+        if: steps.check_diff.outputs.changed == 'true' && steps.release-please.outputs.paths_created == 'true'
         run: |
-          # O passo anterior do release-please já fez o commit, só precisamos fazer o push
           git push origin develop
