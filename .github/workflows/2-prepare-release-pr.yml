@@ -1,4 +1,4 @@
-name: Prepare Release PR (develop -> main)
+name: Open PR develop -> main (AI Assisted)
 
 on:
   push:
@@ -6,136 +6,149 @@ on:
 
 permissions:
   pull-requests: write
-  contents: write
+  contents: write # 'write' é necessário para fazer o checkout e ler o histórico
 
 concurrency:
-  group: prepare-pr-develop-to-main
+  group: open-pr-develop-to-main
   cancel-in-progress: true
 
 jobs:
-  prepare_pr:
+  open_pr:
     runs-on: ubuntu-latest
+    env:
+      # Pré-requisito: Adicione o segredo da sua API KEY nas configurações do repositório
+      LOG_LEVEL: info
+      ENV: prod
+      LLM_PROVIDER: OPENAI
+      LOG_FILE: ./app.log
+      OPENAI_MODEL: gpt-5
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Garante que o Go instale os binários em um local conhecido
+      GOPATH: ${{ github.workspace }}/go
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # fetch-depth: 0 é essencial para buscar todo o histórico e poder comparar as branches
           fetch-depth: 0
-          # Usar um token de bot para que o push subsequente acione outros workflows se necessário
-          token: ${{ secrets.GH_RELEASE_TOKEN }}
 
-      - name: Fetch main branch
+      - name: Fetch main branch to ensure it exists
         run: git fetch origin main
 
-      - name: Check for changes between develop and main
-        id: check_diff
-        run: |
-          # Se não houver diferenças, não há necessidade de criar um PR
-          if git diff --quiet origin/main..develop; then
-            echo "No changes detected between develop and main. Exiting."
-            echo "changed=false" >> $GITHUB_OUTPUT
-          else
-            echo "Changes detected. Proceeding to create PR."
-            echo "changed=true" >> $GITHUB_OUTPUT
-          fi
-
       - name: Set up Go
-        if: steps.check_diff.outputs.changed == 'true'
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.23' # Use a versão do Go do seu projeto
 
-      - name: Install and configure tools
-        if: steps.check_diff.outputs.changed == 'true'
-        env:
-          GOPATH: ${{ github.workspace }}/go
-        run: |
-          # Instalar ChatCLI
-          go install github.com/diillson/chatcli@latest
-          echo "${{ env.GOPATH }}/bin" >> $GITHUB_PATH
-          # Configurar Git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Install ChatCLI
+        run: go install github.com/diillson/chatcli@latest
 
-      - name: Generate PR Content with AI
-        if: steps.check_diff.outputs.changed == 'true'
+      - name: Add Go bin to PATH
+        run: echo "${{ env.GOPATH }}/bin" >> $GITHUB_PATH
+
+      - name: Generate PR Content with ChatCLI
         id: generate-pr-content
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          # 1. Coletar o contexto: logs e diff de arquivos entre main e develop
           LOG_DIFF=$(git log origin/main..develop --pretty=format:"- %s (%h) by %an")
           FILE_DIFF=$(git diff --stat origin/main..develop)
           
+          # 2. Criar um prompt detalhado para a IA
           PROMPT=$(cat <<EOF
           Sua única tarefa é em inglês, gerar um título e um corpo para um Pull Request, mesclando 'develop' em 'main'. O projeto usa squash merge.
-          O título DEVE seguir o padrão Conventional Commits (ex: 'feat(api): ...', 'fix(cli): ...').
           
-          Sua resposta DEVE SEGUIR ESTRITAMENTE O SEGUINTE FORMATO:
+          Sua resposta DEVE SEGUIR ESTRITAMENTE O SEGUINTE FORMATO, sem nenhuma palavra ou texto adicional antes ou depois:
           
           <TÍTULO DO PR SEGUINDO CONVENTIONAL COMMITS>
           ---
           <CORPO DO PR EM MARKDOWN>
           
+          **Exemplo de formato esperado:**
+          feat(sessions): Adiciona gerenciamento de sessões de conversa
+          ---
+          ### Novas Funcionalidades
+          - Adicionado o comando \`/session\` com as sub-ações \`save\`, \`load\`, \`list\`, e \`delete\` para permitir que os usuários persistam e retomem conversas.
+          - As sessões são salvas como arquivos JSON no diretório \`~/.chatcli/sessions/\`.
+          
+          ### Melhorias
+          - O prompt do CLI agora exibe o nome da sessão ativa para melhor contexto do usuário.
+          
           NÃO inclua explicações, introduções ou qualquer texto fora deste formato.
           
-          **Contexto:**
+          **Use o seguinte contexto para gerar o título e o corpo:**
+          
           **Log de Commits:**
           ${LOG_DIFF}
-          **Resumo das Alterações:**
+          
+          **Resumo das Alterações nos Arquivos:**
           ${FILE_DIFF}
           EOF
           )
           
-          AI_RESPONSE=$(chatcli -p "$PROMPT" --no-anim --provider OPENAI --model gpt-4o-mini)
+          # 3. Executar o chatcli em modo one-shot para gerar o conteúdo
+          # Usamos --no-anim para uma saída limpa no log do CI
+          AI_RESPONSE=$(chatcli -p "$PROMPT" --no-anim --provider OPENAI --model gpt-5)
           
+          # 4. Salvar a resposta completa para o próximo passo
+          # Usamos a sintaxe recomendada para outputs de múltiplas linhas
           echo "ai_response<<EOF" >> $GITHUB_OUTPUT
           echo "$AI_RESPONSE" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Create or Update PR
-        if: steps.check_diff.outputs.changed == 'true'
-        id: create_pr
-        env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
-        run: |
-          # Processar a resposta da IA
-          AI_RESPONSE="${{ steps.generate-pr-content.outputs.ai_response }}"
-          TITLE=$(echo "$AI_RESPONSE" | head -n 1)
-          BODY=$(echo "$AI_RESPONSE" | tail -n +3)
-
-          # Verificar se já existe um PR aberto
-          PR_NUMBER=$(gh pr list --head develop --base main --state open --json number -q '.[0].number')
-
-          if [ -n "$PR_NUMBER" ]; then
-            echo "Updating existing PR #$PR_NUMBER..."
-            gh pr edit $PR_NUMBER --title "$TITLE" --body "$BODY"
-            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          else
-            echo "Creating new PR..."
-            PR_URL=$(gh pr create --title "$TITLE" --body "$BODY" --head develop --base main)
-            PR_NUMBER=$(echo "$PR_URL" | awk -F'/' '{print $NF}')
-            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Setup Node.js for release-please
-        if: steps.check_diff.outputs.changed == 'true'
-        uses: actions/setup-node@v4
+      - name: Open or reuse PR develop -> main
+        uses: actions/github-script@v7
         with:
-          node-version: 20
-
-      - name: Run release-please to update changelog and version
-        if: steps.check_diff.outputs.changed == 'true'
-        id: release-please
-        uses: google-github-actions/release-please-main@v4
-        with:
-          # Usar um comando que apenas manifesta as mudanças, sem criar PR
-          command: manifest
-          token: ${{ secrets.GH_RELEASE_TOKEN }}
-          release-type: go
-          # Apontar para a branch develop, onde as mudanças devem ser aplicadas
-          target-branch: develop
-
-      - name: Push changelog and version updates to PR
-        if: steps.check_diff.outputs.changed == 'true' && steps.release-please.outputs.pr_created == 'true'
-        run: |
-          # O passo anterior do release-please já fez o commit, só precisamos fazer o push
-          git push origin develop
+          github-token: ${{ secrets.GH_RELEASE_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = 'develop';
+            const base = 'main';
+            
+            // 1. Verificar se um PR já existe
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, state: 'open', head, base, per_page: 1
+            });
+            
+            if (prs.length > 0) {
+              core.info(`PR já existe: #${prs[0].number}. Nenhuma ação necessária.`);
+              return;
+            }
+            
+            // 2. Processar a resposta da IA com lógica de fallback aprimorada
+            const ai_response = `${{ steps.generate-pr-content.outputs.ai_response }}`.trim();
+            
+            let title = `Merge develop into main`; // Título de fallback
+            let body = `PR automático para promover mudanças da develop à main.`; // Corpo de fallback
+            
+            // Tentativa 1: Separador ideal "---"
+            let parts = ai_response.split('\n---\n');
+            
+            if (parts.length >= 2) {
+              title = parts[0].trim();
+              body = parts[1].trim();
+              core.info("Resposta da IA parseada com sucesso usando '---'.");
+            } else {
+              // Tentativa 2: Fallback - Primeira linha como título, resto como corpo
+              const firstNewlineIndex = ai_response.indexOf('\n');
+              if (firstNewlineIndex !== -1) {
+                title = ai_response.substring(0, firstNewlineIndex).trim();
+                body = ai_response.substring(firstNewlineIndex + 1).trim();
+                // Remove caracteres de título markdown do título, se houver
+                title = title.replace(/^#+\s*/, '');
+                core.info("Usando fallback: primeira linha como título.");
+              } else {
+                // Se não houver quebra de linha, usa a resposta inteira como título
+                title = ai_response;
+                core.warning("Resposta da IA não continha quebras de linha. Usando a resposta inteira como título.");
+              }
+            }
+            
+            // 3. Criar o Pull Request
+            const { data: pr } = await github.rest.pulls.create({
+              owner, repo, head, base, title, body
+            });
+            
+            core.info(`PR criado com sucesso: #${pr.number}`);
+            core.info(`Título: ${title}`);
