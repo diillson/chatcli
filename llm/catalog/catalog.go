@@ -92,11 +92,22 @@ var registry = []ModelMeta{
 	// Claude 4 e 4.1 (sonnet/opus)
 	{
 		ID:              "claude-4-sonnet",
-		Aliases:         []string{"claude-4-sonnet", "sonnet-4", "claude-4-sonnet-"},
+		Aliases:         []string{"claude-4-sonnet", "sonnet-4-20250514", "claude-4-sonnet-"},
 		DisplayName:     "claude sonnet 4",
 		Provider:        ProviderClaudeAI,
 		ContextWindow:   50000,
 		MaxOutputTokens: 50000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities:    []string{"json_mode", "tools"},
+	},
+	{
+		ID:              "claude-sonnet-4-5",
+		Aliases:         []string{"claude-4-5-sonnet", "sonnet-4-5", "claude-4-5-sonnet-", "claude-sonnet-4-5-"},
+		DisplayName:     "claude sonnet 4.5",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
 		Capabilities:    []string{"json_mode", "tools"},
