@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.5](https://github.com/diillson/chatcli/compare/v1.28.4...v1.28.5) (2025-10-01)
+
+
+### Bug Fixes
+
+* **catalog:** add support for Claude Sonnet 4.5 with extended context window and aliases ([#295](https://github.com/diillson/chatcli/issues/295)) ([#296](https://github.com/diillson/chatcli/issues/296)) ([a78fda5](https://github.com/diillson/chatcli/commit/a78fda51d03e864687eec33f5e721eee9b2481e6))
+
 ## [1.28.4](https://github.com/diillson/chatcli/compare/v1.28.3...v1.28.4) (2025-09-29)
 
 
