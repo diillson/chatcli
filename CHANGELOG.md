@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.1](https://github.com/diillson/chatcli/compare/v1.29.0...v1.29.1) (2025-10-08)
+
+
+### Bug Fixes
+
+* **config:** remove init-based global config initialization ([#301](https://github.com/diillson/chatcli/issues/301)) ([#302](https://github.com/diillson/chatcli/issues/302)) ([d547ba6](https://github.com/diillson/chatcli/commit/d547ba64792b6c7b1e95cb111ca8889b922bf588))
+
 ## [1.29.0](https://github.com/diillson/chatcli/compare/v1.28.5...v1.29.0) (2025-10-08)
 
 
