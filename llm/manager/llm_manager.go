@@ -9,9 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -27,7 +25,6 @@ import (
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/diillson/chatcli/llm/token"
 	"github.com/diillson/chatcli/llm/xai"
-	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -57,22 +54,12 @@ type LLMManagerImpl struct {
 
 // NewLLMManager cria uma nova instância de LLMManagerImpl.
 func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager, error) {
-	// Ler configs de retry de ENV ou usar defaults
-	maxRetries := config.DefaultMaxRetries
-	if v := os.Getenv("MAX_RETRIES"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			maxRetries = n
-			logger.Info("Usando MAX_RETRIES de ENV", zap.Int("max_retries", maxRetries))
-		}
-	}
+	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
+	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
 
-	initialBackoff := config.DefaultInitialBackoff
-	if v := os.Getenv("INITIAL_BACKOFF"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			initialBackoff = d
-			logger.Info("Usando INITIAL_BACKOFF de ENV", zap.Duration("initial_backoff", initialBackoff))
-		}
-	}
+	logger.Info("Política de Retry configurada",
+		zap.Int("max_retries", maxRetries),
+		zap.Duration("initial_backoff", initialBackoff))
 
 	manager := &LLMManagerImpl{
 		clients: make(map[string]func(string) (client.LLMClient, error)),
@@ -92,7 +79,7 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager,
 
 // configurarGoogleAIClient configura o cliente Google AI (Gemini)
 func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff time.Duration) {
-	apiKey := os.Getenv("GOOGLEAI_API_KEY")
+	apiKey := config.Global.GetString("GOOGLEAI_API_KEY")
 	if apiKey != "" {
 		// NÃO logar a API key diretamente
 		m.logger.Info("Configurando provedor Google AI",
@@ -118,7 +105,7 @@ func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff
 
 // configurarOpenAIClient configura o cliente OpenAI se a variável de ambiente OPENAI_API_KEY estiver definida.
 func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff time.Duration) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := config.Global.GetString("OPENAI_API_KEY")
 	if apiKey != "" {
 		// Cliente OpenAI padrão (chat completions ou responses)
 		m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
@@ -126,15 +113,8 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 				model = config.DefaultOpenAIModel
 			}
 
-			// Seleção entre Chat Completions e Responses API
-			useResponses := false
+			useResponses := config.Global.GetBool("OPENAI_USE_RESPONSES", false)
 
-			// 1) Flag/env explícita
-			if v := os.Getenv("OPENAI_USE_RESPONSES"); strings.EqualFold(v, "true") {
-				useResponses = true
-			}
-
-			// 2) Preferência do registry (ex.: GPT-5)
 			if !useResponses && catalog.GetPreferredAPI(catalog.ProviderOpenAI, model) == catalog.APIResponses {
 				useResponses = true
 			}
@@ -166,8 +146,8 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 
 // configurarStackSpotClient configura o cliente StackSpot
 func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string, maxRetries int, initialBackoff time.Duration) {
-	clientID := os.Getenv("CLIENT_ID")
-	clientSecret := os.Getenv("CLIENT_SECRET")
+	clientID := config.Global.GetString("CLIENT_ID")
+	clientSecret := config.Global.GetString("CLIENT_SECRET")
 
 	if clientID == "" || clientSecret == "" {
 		m.logger.Warn("CLIENT_ID ou CLIENT_SECRET não definidos, o provedor STACKSPOT não estará disponível")
@@ -184,7 +164,7 @@ func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string, 
 
 // configurarClaudeAIClient configura o cliente ClaudeAI
 func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff time.Duration) {
-	apiKey := os.Getenv("CLAUDEAI_API_KEY")
+	apiKey := config.Global.GetString("CLAUDEAI_API_KEY")
 	if apiKey != "" {
 		m.clients["CLAUDEAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
@@ -205,7 +185,7 @@ func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff
 
 // configurarXAIClient configura o cliente xAI
 func (m *LLMManagerImpl) configurarXAIClient(maxRetries int, initialBackoff time.Duration) {
-	apiKey := os.Getenv("XAI_API_KEY")
+	apiKey := config.Global.GetString("XAI_API_KEY")
 	if apiKey != "" {
 		m.logger.Info("Configurando provedor xAI")
 		m.clients["XAI"] = func(model string) (client.LLMClient, error) {
@@ -226,58 +206,65 @@ func (m *LLMManagerImpl) configurarXAIClient(maxRetries int, initialBackoff time
 }
 
 func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff time.Duration) {
-	baseURL := utils.GetEnvOrDefault("OLLAMA_BASE_URL", config.OllamaDefaultBaseURL)
-	enable := strings.EqualFold(os.Getenv("OLLAMA_ENABLED"), "true")
+	// 1. Obter configurações do ConfigManager
+	baseURL := config.Global.GetString("OLLAMA_BASE_URL")
+	enable := config.Global.GetBool("OLLAMA_ENABLED", false) // Padrão é desativado se não definido
 
+	// 2. Verificar se o provider está explicitamente desativado
 	if !enable {
-		m.logger.Info("OLLAMA_ENABLED não está ativo, provider ignorado")
+		m.logger.Info("OLLAMA_ENABLED não está ativo, provider Ollama ignorado.")
 		return
 	}
 
-	// Cliente HTTP para checar serviço
-	hc := utils.NewHTTPClient(m.logger, 2*time.Second)
-	req, _ := http.NewRequest(http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/tags", nil)
-	resp, err := hc.Do(req)
+	// 3. Verificar a conectividade com o serviço Ollama
+	// Cliente HTTP leve apenas para esta verificação
+	hc := &http.Client{Timeout: 3 * time.Second}
+	checkURL := strings.TrimRight(baseURL, "/") + "/api/tags"
+
+	resp, err := hc.Get(checkURL)
 	if err != nil {
-		m.logger.Warn("Ollama não detectado; provider não será listado",
-			zap.String("baseURL", baseURL), zap.Error(err))
+		m.logger.Warn("Ollama não foi detectado no endereço configurado; o provider não estará disponível.",
+			zap.String("baseURL", baseURL),
+			zap.Error(err))
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		m.logger.Warn("Erro ao listar modelos do Ollama",
-			zap.Int("status", resp.StatusCode))
+		m.logger.Warn("Erro ao se comunicar com o serviço Ollama (verifique se está rodando).",
+			zap.String("baseURL", baseURL),
+			zap.Int("status_code", resp.StatusCode))
 		return
 	}
 
-	// Validar se tem modelos disponíveis
+	// 4. Validar se há modelos disponíveis
 	var tags struct {
 		Models []struct {
 			Name string `json:"name"`
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
-		m.logger.Warn("Não foi possível decodificar resposta do Ollama", zap.Error(err))
+		m.logger.Warn("Não foi possível decodificar a lista de modelos do Ollama.", zap.Error(err))
 		return
 	}
 	if len(tags.Models) == 0 {
-		m.logger.Warn("Nenhum modelo encontrado no Ollama")
+		m.logger.Warn("Nenhum modelo encontrado no serviço Ollama. Baixe um com 'ollama pull <nome_modelo>'.")
 		return
 	}
 
-	// Registrar client
+	// 5. Se tudo estiver OK, registrar o factory do cliente
 	m.logger.Info("Configurando provedor OLLAMA",
 		zap.String("baseURL", baseURL),
-		zap.Int("model_count", len(tags.Models)),
+		zap.Int("modelos_encontrados", len(tags.Models)),
 	)
 
 	m.clients["OLLAMA"] = func(model string) (client.LLMClient, error) {
+		// Obter o modelo padrão do ConfigManager
 		if model == "" {
-			model = config.DefaultOllamaModel
+			model = config.Global.GetString("OLLAMA_MODEL")
 		}
 
-		// valida se o modelo existe nos tags
+		// Validar se o modelo solicitado existe
 		found := false
 		for _, m := range tags.Models {
 			if m.Name == model {
@@ -286,7 +273,12 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("modelo '%s' não encontrado no Ollama", model)
+			// Montar uma mensagem de erro útil
+			var availableModels []string
+			for _, m := range tags.Models {
+				availableModels = append(availableModels, m.Name)
+			}
+			return nil, fmt.Errorf("modelo '%s' não encontrado no Ollama. Modelos disponíveis: %s", model, strings.Join(availableModels, ", "))
 		}
 
 		return ollama.NewClient(
@@ -313,16 +305,22 @@ func (m *LLMManagerImpl) GetAvailableProviders() []string {
 func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMClient, error) {
 	factoryFunc, ok := m.clients[provider]
 	if !ok {
+		m.logger.Warn("Tentativa de obter cliente para provedor não configurado",
+			zap.String("provider", provider))
 		return nil, fmt.Errorf("erro: Provedor LLM '%s' não suportado ou não configurado", provider)
 	}
 
-	client, err := factoryFunc(model)
+	// Agora que sabemos que o factory existe, podemos chamá-lo.
+	clientInstance, err := factoryFunc(model)
 	if err != nil {
-		m.logger.Error("Erro ao criar cliente LLM", zap.String("provider", provider), zap.Error(err))
+		m.logger.Error("Erro ao criar instância do cliente LLM",
+			zap.String("provider", provider),
+			zap.String("model", model),
+			zap.Error(err))
 		return nil, err
 	}
 
-	return client, nil
+	return clientInstance, nil
 }
 
 // GetTokenManager retorna o TokenManager se ele estiver configurado.

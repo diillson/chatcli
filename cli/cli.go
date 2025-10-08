@@ -184,10 +184,9 @@ func (cli *ChatCLI) reloadConfiguration() {
 		cli.logger.Error("Erro ao carregar o arquivo .env", zap.Error(err))
 	}
 
-	cli.reconfigureLogger()
+	config.Global.Reload(cli.logger)
 
-	// Recarregar a configuração do LLMManager
-	utils.CheckEnvVariables(cli.logger)
+	cli.reconfigureLogger()
 
 	manager, err := manager.NewLLMManager(cli.logger, os.Getenv("SLUG_NAME"), os.Getenv("TENANT_NAME"))
 	if err != nil {
