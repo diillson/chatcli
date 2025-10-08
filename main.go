@@ -72,6 +72,8 @@ func main() {
 		os.Exit(1) // Encerrar a aplicação em caso de erro crítico
 	}
 
+	config.Global = config.New(logger)
+	config.Global.Load()
 	utils.LogStartupInfo(logger)
 
 	defer func() {

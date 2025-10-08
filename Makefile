@@ -16,6 +16,10 @@ build:
 install:
 	go install -ldflags "$(LD_FLAGS)"
 
+.PHONY: lint
+lint:
+	golangci-lint run
+
 .PHONY: test
 test:
 	go test ./...
