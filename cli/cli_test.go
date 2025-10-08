@@ -38,22 +38,18 @@ func normalizeSpaces(s string) string {
 
 func TestHandleVersionCommand(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	cliInstance := &ChatCLI{logger: logger} // Instância mínima para o handler
+	cliInstance := &ChatCLI{logger: logger}
 	handler := NewCommandHandler(cliInstance)
 
-	// Salva as implementações originais
 	originalCheckImpl := version.CheckLatestVersionImpl
 	originalBuildImpl := version.GetBuildInfoImpl
 
-	// Cria um mock para a checagem
 	mockChecker := new(mockVersionChecker)
 
-	// Temporariamente override as variáveis exportadas
 	version.CheckLatestVersionImpl = func(ctx context.Context) (string, bool, error) {
 		return mockChecker.Check(ctx)
 	}
 	version.GetBuildInfoImpl = func() (string, string, string) {
-		// Retorna versão mockada para testes consistentes (não "dev")
 		return "1.25.0", "abc1234", "2024-09-15"
 	}
 	defer func() {
@@ -75,10 +71,8 @@ func TestHandleVersionCommand(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Configura o mock para esta iteração
 			mockChecker.On("Check", mock.Anything).Return(tc.mockLatest, tc.mockUpdate, tc.mockErr).Once()
 
-			// Redireciona stdout para capturar saída
 			oldStdout := os.Stdout
 			r, w, _ := os.Pipe()
 			os.Stdout = w
@@ -89,7 +83,6 @@ func TestHandleVersionCommand(t *testing.T) {
 			w.Close()
 			out, _ := io.ReadAll(r)
 
-			// Limpa e normaliza a saída para asserts flexíveis
 			cleanOut := stripANSI(string(out))
 			normalized := normalizeSpaces(cleanOut)
 

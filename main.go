@@ -88,8 +88,8 @@ func main() {
 	//utils.CheckEnvVariables(logger) // Desabilitado por enquanto apenas mostrando no log
 
 	// Inicializar o LLMManager com as constantes do pacote config
-	slugName := utils.GetEnvOrDefault("SLUG_NAME", config.DefaultSlugName)
-	tenantName := utils.GetEnvOrDefault("TENANT_NAME", config.DefaultTenantName)
+	slugName := config.Global.GetString("SLUG_NAME")
+	tenantName := config.Global.GetString("TENANT_NAME")
 	llmManager, err := manager.NewLLMManager(logger, slugName, tenantName)
 	if err != nil {
 		logger.Fatal("Erro ao inicializar o LLMManager", zap.Error(err))
