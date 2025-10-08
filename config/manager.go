@@ -27,15 +27,6 @@ type ConfigManager struct {
 // Global é a instância singleton do ConfigManager.
 var Global *ConfigManager
 
-// init inicializa o gerenciador de configuração global.
-func init() {
-	// Usamos um logger temporário para o bootstrap inicial.
-	// O logger real será injetado depois, se necessário.
-	tempLogger, _ := zap.NewProduction()
-	Global = New(tempLogger)
-	Global.Load()
-}
-
 // New cria uma nova instância do ConfigManager.
 func New(logger *zap.Logger) *ConfigManager {
 	return &ConfigManager{
