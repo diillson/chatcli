@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.0](https://github.com/diillson/chatcli/compare/v1.28.5...v1.29.0) (2025-10-08)
+
+
+### Features
+
+* **agent:** add comprehensive command validation and execution framework ([#298](https://github.com/diillson/chatcli/issues/298)) ([#299](https://github.com/diillson/chatcli/issues/299)) ([7c83e03](https://github.com/diillson/chatcli/commit/7c83e03c7c4b72750d3e48013fcf458262283d81))
+
 ## [1.28.5](https://github.com/diillson/chatcli/compare/v1.28.4...v1.28.5) (2025-10-01)
 
 
