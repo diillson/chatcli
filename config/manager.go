@@ -72,6 +72,8 @@ func (cm *ConfigManager) loadDefaults() {
 	cm.values["LOG_MAX_SIZE"] = "100MB"
 	cm.values["MAX_RETRIES"] = DefaultMaxRetries
 	cm.values["INITIAL_BACKOFF"] = DefaultInitialBackoff
+	cm.values["STACKSPOT_REALM"] = DefaultStackSpotRealm
+	cm.values["STACKSPOT_AGENT_ID"] = DefaultStackSpotAgentID
 }
 
 // loadEnvFile carrega configurações do arquivo .env.

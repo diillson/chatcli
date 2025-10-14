@@ -23,11 +23,7 @@ func (m *MockTokenManager) RefreshToken(ctx context.Context) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockTokenManager) GetSlugAndTenantName() (string, string) {
-	args := m.Called()
-	return args.String(0), args.String(1)
-}
-
-func (m *MockTokenManager) SetSlugAndTenantName(slug, tenant string) {
-	m.Called(slug, tenant)
+// SetRealm é a implementação mockada para o novo método da interface.
+func (m *MockTokenManager) SetRealm(realm string) {
+	m.Called(realm)
 }

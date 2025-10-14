@@ -79,8 +79,8 @@ var commandFlags = map[string]map[string][]prompt.Suggest{
 	"/switch": {
 		"--model":      {},
 		"--max-tokens": {},
-		"--slugname":   {},
-		"--tenantname": {},
+		"--realm":      {},
+		"--agent-id":   {},
 	},
 	"/session": {
 		"new":    {},
@@ -124,12 +124,10 @@ type ChatCLI struct {
 func (cli *ChatCLI) reconfigureLogger() {
 	cli.logger.Info("Reconfigurando o logger...")
 
-	// Sincronizar e fechar o logger atual
 	if err := cli.logger.Sync(); err != nil {
 		cli.logger.Error("Erro ao sincronizar o logger", zap.Error(err))
 	}
 
-	// Recriar o logger com base no novo valor da variável ENV
 	newLogger, err := utils.InitializeLogger()
 	if err != nil {
 		cli.logger.Error("Erro ao reinicializar o logger", zap.Error(err))
@@ -144,11 +142,9 @@ func (cli *ChatCLI) reconfigureLogger() {
 func (cli *ChatCLI) reloadConfiguration() {
 	fmt.Println("Recarregando configurações...")
 
-	// Preservar provider/model atuais do runtime
 	prevProvider := cli.Provider
 	prevModel := cli.Model
 
-	// Determinar o arquivo .env (mesma lógica do main.go) e expandir caminho se necessário
 	envFilePath := os.Getenv("CHATCLI_DOTENV")
 	if envFilePath == "" {
 		envFilePath = ".env"
@@ -159,26 +155,19 @@ func (cli *ChatCLI) reloadConfiguration() {
 			fmt.Printf("Aviso: não foi possível expandir o caminho '%s': %v\n", envFilePath, err)
 		}
 	}
-	// Limpar variáveis de ambiente relevantes para garantir reload consistente
 	variablesToUnset := []string{
-		// Gerais
 		"LOG_LEVEL", "ENV", "LLM_PROVIDER", "LOG_FILE", "LOG_MAX_SIZE", "HISTORY_MAX_SIZE",
-		// OpenAI
 		"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_ASSISTANT_MODEL",
 		"OPENAI_USE_RESPONSES", "OPENAI_MAX_TOKENS",
-		// ClaudeAI
 		"CLAUDEAI_API_KEY", "CLAUDEAI_MODEL", "CLAUDEAI_MAX_TOKENS", "CLAUDEAI_API_VERSION",
-		// Google AI (Gemini)
 		"GOOGLEAI_API_KEY", "GOOGLEAI_MODEL", "GOOGLEAI_MAX_TOKENS",
-		// StackSpot
-		"CLIENT_ID", "CLIENT_SECRET", "SLUG_NAME", "TENANT_NAME",
+		"CLIENT_ID", "CLIENT_KEY", "STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
 	}
 
 	for _, variable := range variablesToUnset {
 		_ = os.Unsetenv(variable)
 	}
 
-	// Recarregar o arquivo .env sobrescrevendo valores (garante atualização mesmo se já havia env setado)
 	err := godotenv.Overload(envFilePath)
 	if err != nil && !os.IsNotExist(err) {
 		cli.logger.Error("Erro ao carregar o arquivo .env", zap.Error(err))
@@ -188,7 +177,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 
 	cli.reconfigureLogger()
 
-	manager, err := manager.NewLLMManager(cli.logger, os.Getenv("SLUG_NAME"), os.Getenv("TENANT_NAME"))
+	manager, err := manager.NewLLMManager(cli.logger)
 	if err != nil {
 		cli.logger.Error("Erro ao reconfigurar o LLMManager", zap.Error(err))
 		return
@@ -196,7 +185,6 @@ func (cli *ChatCLI) reloadConfiguration() {
 
 	cli.manager = manager
 
-	// Tentar reaproveitar o provider/model escolhidos pelo usuário
 	if prevProvider != "" && prevModel != "" {
 		if client, err := cli.manager.GetClient(prevProvider, prevModel); err == nil {
 			cli.Client = client
@@ -205,11 +193,9 @@ func (cli *ChatCLI) reloadConfiguration() {
 			fmt.Println("Configurações recarregadas com sucesso! (preservado provider/model atuais)")
 			return
 		}
-		// Se falhar (ex.: provider indisponível), caímos para o comportamento padrão
 		cli.logger.Warn("Falha ao preservar provider/model após reload; caindo para valores do .env",
 			zap.String("provider", prevProvider), zap.String("model", prevModel))
 	}
-	// Fallback: usar valores do .env
 	cli.configureProviderAndModel()
 	if client, err := cli.manager.GetClient(cli.Provider, cli.Model); err == nil {
 		cli.Client = client
@@ -234,7 +220,7 @@ func (cli *ChatCLI) configureProviderAndModel() {
 	if cli.Provider == "OPENAI_ASSISTANT" {
 		cli.Model = os.Getenv("OPENAI_ASSISTANT_MODEL")
 		if cli.Model == "" {
-			cli.Model = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel) // se não houver, usa o mesmo dos completions ou seta default
+			cli.Model = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel)
 		}
 	}
 	if cli.Provider == "CLAUDEAI" {
@@ -306,33 +292,26 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 }
 
 func (cli *ChatCLI) executor(in string) {
-	// Não resetar a flag aqui. O wrapper controla isso.
-	// cli.shouldEnterAgentMode = false
-
 	in = strings.TrimSpace(in)
 	if in != "" {
 		cli.commandHistory = append(cli.commandHistory, in)
 		cli.newCommandsInSession = append(cli.newCommandsInSession, in)
 	}
 
-	// Se o comando for para o agente, apenas defina a flag e retorne.
 	if strings.HasPrefix(in, "/agent") || strings.HasPrefix(in, "/run") {
 		panic(agentModeRequest)
 	}
 
-	// Se a entrada estiver vazia, não faça nada.
 	if in == "" {
 		return
 	}
 
-	// Lida com a seleção de provedor
 	if cli.interactionState == StateSwitchingProvider {
 		cli.handleProviderSelection(in)
 		cli.interactionState = StateNormal
 		return
 	}
 
-	// Comandos especiais
 	if strings.Contains(strings.ToLower(in), "@command ") {
 		command := strings.TrimPrefix(in, "@command ")
 		cli.executeDirectCommand(command)
@@ -346,7 +325,6 @@ func (cli *ChatCLI) executor(in string) {
 		return
 	}
 
-	// Para prompts LLM, processar de forma assíncrona
 	cli.interactionState = StateProcessing
 	go cli.processLLMRequest(in)
 }
@@ -402,8 +380,6 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	cli.animation.StopThinkingAnimation()
 
-	//resetTerminal(cli.logger)
-
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Println("🛑 Operação cancelada com sucesso!")
@@ -411,8 +387,6 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 				cli.history = cli.history[:len(cli.history)-1]
 			}
 		} else {
-			// Simplificado para sempre mostrar o erro real vindo do cliente.
-			// O erro já deve vir sanitizado se necessário.
 			fmt.Printf("❌ Erro: %s\n", err.Error())
 		}
 	} else {
@@ -480,14 +454,10 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					// Verificamos qual tipo de pânico ocorreu
 					if r == agentModeRequest {
-						// Mantém shouldContinue = true para entrar no modo agente
 					} else if r == errExitRequest {
-						// Se for um pedido de saída, definimos shouldContinue como false
 						shouldContinue = false
 					} else {
-						// Se for outro pânico, relançamos
 						panic(r)
 					}
 				}
@@ -518,7 +488,6 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			shouldContinue = false
 		}()
 
-		// Se o loop 'for' deve continuar, é porque o modo agente foi solicitado.
 		if shouldContinue {
 			cli.restoreTerminal()
 			cli.runAgentLogic()
@@ -526,28 +495,23 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	}
 }
 
-// restoreTerminal executa `stty sane` para restaurar o estado do terminal
-// para o modo normal após o go-prompt deixá-lo em "raw mode".
-// Isso é necessário em sistemas não-Windows.
 func (cli *ChatCLI) restoreTerminal() {
 	if runtime.GOOS == "windows" {
-		return // stty não está disponível no Windows
+		return
 	}
 	cmd := exec.Command("stty", "sane")
-	cmd.Stdin = os.Stdin // Garante que o comando opere no terminal correto
+	cmd.Stdin = os.Stdin
 	if err := cmd.Run(); err != nil {
 		cli.logger.Warn("Falha ao restaurar o terminal com 'stty sane'", zap.Error(err))
 	}
 }
 
 func (cli *ChatCLI) runAgentLogic() {
-	// O último comando no histórico é o que ativou o agente
 	if len(cli.commandHistory) == 0 {
 		return
 	}
 	lastCommand := cli.commandHistory[len(cli.commandHistory)-1]
 
-	// Extrair a consulta
 	query := ""
 	if strings.HasPrefix(lastCommand, "/agent") {
 		query = strings.TrimSpace(strings.TrimPrefix(lastCommand, "/agent"))
@@ -589,11 +553,7 @@ func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 		}
 		cli.mu.Unlock()
 
-		// Forçar volta ao estado normal
 		cli.interactionState = StateNormal
-
-		// reset
-		//resetTerminal(cli.logger)
 
 		cli.forceRefreshPrompt()
 
@@ -611,15 +571,13 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 	case StateProcessing, StateAgentMode:
 		return "", true
 	default:
-		// Mostra o nome da sessão no prompt
 		if cli.currentSessionName != "" {
-			return fmt.Sprintf("%s ❯ ", cli.currentSessionName), true // <--- CORRIGIDO: Retorna texto puro
+			return fmt.Sprintf("%s ❯ ", cli.currentSessionName), true
 		}
 		return "❯ ", true
 	}
 }
 
-// cleanup realiza a limpeza de recursos ao encerrar o ChatCLI
 func (cli *ChatCLI) cleanup() {
 	if err := cli.historyManager.AppendAndRotateHistory(cli.newCommandsInSession); err != nil {
 		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
@@ -634,28 +592,14 @@ func (cli *ChatCLI) cleanup() {
 	}
 }
 
-// handleSwitchCommand Processa os comando na entrada para atualizar o slug/tenant, ou mudar o modelo para LLM atual.
 func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 	args := strings.Fields(userInput)
-	var newSlugName, newTenantName, newModel string
-	shouldUpdateToken := false
-	shouldSwitchModel := false
+	var newModel, newRealm, newAgentID string
+	shouldSwitchModel, shouldUpdateStackSpot := false, false
 	maxTokensOverride := -1
 
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
-		case "--slugname":
-			if i+1 < len(args) {
-				newSlugName = args[i+1]
-				shouldUpdateToken = true
-				i++ // Pular o valor
-			}
-		case "--tenantname":
-			if i+1 < len(args) {
-				newTenantName = args[i+1]
-				shouldUpdateToken = true
-				i++ // Pular o valor
-			}
 		case "--model":
 			if i+1 < len(args) {
 				newModel = args[i+1]
@@ -672,6 +616,18 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 				}
 				i++
 			}
+		case "--realm":
+			if i+1 < len(args) {
+				newRealm = args[i+1]
+				shouldUpdateStackSpot = true
+				i++
+			}
+		case "--agent-id":
+			if i+1 < len(args) {
+				newAgentID = args[i+1]
+				shouldUpdateStackSpot = true
+				i++
+			}
 		}
 	}
 	if maxTokensOverride != -1 {
@@ -679,31 +635,25 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 		fmt.Printf(" ✅ Limite máximo de tokens definido para: %d (0 = usar padrão do provedor)\n", cli.UserMaxTokens)
 	}
 
-	if newSlugName != "" || newTenantName != "" {
-		tokenManager, ok := cli.manager.GetTokenManager()
-		if ok {
-			currentSlugName, currentTenantName := tokenManager.GetSlugAndTenantName()
-			if newSlugName != "" {
-				fmt.Printf("Atualizando slugName de '%s' para '%s'\n", currentSlugName, newSlugName)
-				currentSlugName = newSlugName
+	if shouldUpdateStackSpot {
+		if cli.Provider != "STACKSPOT" {
+			fmt.Println(" ❌ As flags --realm e --agent-id só podem ser usadas com o provedor STACKSPOT.")
+			return
+		}
+		if newRealm != "" {
+			cli.manager.SetStackSpotRealm(newRealm)
+			fmt.Printf(" ✅ Realm/Tenant do StackSpot atualizado para '%s'. O token será renovado na próxima requisição.\n", newRealm)
+		}
+		if newAgentID != "" {
+			cli.manager.SetStackSpotAgentID(newAgentID)
+			// Recria o cliente para usar o novo agentID
+			newClient, err := cli.manager.GetClient("STACKSPOT", "")
+			if err != nil {
+				fmt.Printf(" ❌ Erro ao recriar cliente StackSpot com novo Agent ID: %v\n", err)
+			} else {
+				cli.Client = newClient
+				fmt.Printf(" ✅ Agent ID do StackSpot atualizado para '%s'.\n", newAgentID)
 			}
-			if newTenantName != "" {
-				fmt.Printf("Atualizando tenantName de '%s' para '%s'\n", currentTenantName, newTenantName)
-				currentTenantName = newTenantName
-			}
-			tokenManager.SetSlugAndTenantName(currentSlugName, currentTenantName)
-
-			if shouldUpdateToken {
-				fmt.Println("Atualizando token com os novos valores...")
-				_, err := tokenManager.RefreshToken(context.Background())
-				if err != nil {
-					cli.logger.Error("Erro ao atualizar o token", zap.Error(err))
-				} else {
-					fmt.Println("Token atualizado com sucesso!")
-				}
-			}
-		} else {
-			fmt.Println("TokenManager não configurado. O provedor STACKSPOT não está disponível.")
 		}
 	}
 
@@ -715,13 +665,13 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 			fmt.Println("   Verifique se o nome do modelo está correto para o provedor atual.")
 		} else {
 			cli.Client = newClient
-			cli.Model = newModel // Atualiza o modelo no estado do CLI
+			cli.Model = newModel
 			fmt.Printf(" ✅ Modelo trocado com sucesso para %s (%s)\n", cli.Client.GetModelName(), cli.Provider)
 		}
-		return // Finaliza após a tentativa de troca de modelo
+		return
 	}
 
-	if !shouldUpdateToken && !shouldSwitchModel && maxTokensOverride == -1 && len(args) == 1 {
+	if !shouldSwitchModel && maxTokensOverride == -1 && len(args) == 1 {
 		cli.switchProvider()
 	}
 }
@@ -736,11 +686,9 @@ func (cli *ChatCLI) switchProvider() {
 }
 
 func (cli *ChatCLI) showHelp() {
-	// Helper para formatar linhas com alinhamento
 	printCommand := func(cmd, desc string) {
 		cmdColor := ColorCyan
 		descColor := ColorGray
-		// Deixa a descrição em branco se o comando for um exemplo
 		if strings.HasPrefix(cmd, "  ") {
 			cmdColor = ColorGray
 			descColor = ColorGray
@@ -748,30 +696,26 @@ func (cli *ChatCLI) showHelp() {
 		fmt.Printf("    %s    %s\n", colorize(fmt.Sprintf("%-32s", cmd), cmdColor), colorize(desc, descColor))
 	}
 
-	// Cabeçalho
 	fmt.Println("\n" + colorize(ColorBold, "Guia Completo de Comandos do ChatCLI"))
 	fmt.Println(colorize("Aqui está um mapa exaustivo de todos os comandos, subcomandos, flags e opções disponíveis.", ColorGray))
 	fmt.Println(colorize("Use-os para controlar a aplicação, adicionar contexto ou automatizar tarefas.", ColorGray))
 
-	// --- Controle Geral da Aplicação ---
 	fmt.Printf("\n  %s\n", colorize("Controle Geral", ColorLime))
 	printCommand("/help", "Mostra esta tela de ajuda completa.")
 	printCommand("/exit | /quit", "Encerra a aplicação.")
 	printCommand("/newsession", "Limpa o histórico da conversa atual e inicia uma nova sessão (alias de /session new).")
 	printCommand("/version | /v", "Mostra a versão, commit hash, data de build e verifica atualizações.")
 
-	// --- Configuração e Provedores de IA ---
 	fmt.Printf("\n  %s\n", colorize("Configuração e Provedores de IA", ColorLime))
 	printCommand("/switch", "Abre o menu interativo para trocar o provedor de LLM (ex.: OPENAI, CLAUDEAI).")
 	printCommand("/switch --model <nome>", "Muda o modelo do provedor atual (ex.: gpt-4o-mini, grok-4, gpt5... etc).")
 	printCommand("/switch --max-tokens <num>", "Define o máximo de tokens para as próximas respostas (0 para padrão).")
+	printCommand("/switch --realm <realm>", "Atualiza o 'realm/tenant' (apenas para StackSpot).")
+	printCommand("/switch --agent-id <id>", "Atualiza o 'Agent ID' (apenas para StackSpot).")
 	printCommand("  Ex: /switch --model gpt-4o-mini", "(Muda para o modelo GPT-4o Mini na OpenAI)")
-	printCommand("/switch --slugname <slug>", "Atualiza o 'slugName' (apenas para StackSpot).")
-	printCommand("/switch --tenantname <tenant>", "Atualiza o 'tenantName' (apenas para StackSpot).")
 	printCommand("/config | /status", "Exibe a configuração atual (provedor, modelo, chaves, etc.).")
 	printCommand("/reload", "Recarrega as variáveis ou configurações do seu arquivo .env em tempo real.")
 
-	// --- Comandos de Contexto (usados em prompts) ---
 	fmt.Printf("\n  %s\n", colorize("Adicionando Contexto aos Prompts", ColorLime))
 	printCommand("@file <caminho>", "Adiciona o conteúdo de um arquivo ou diretório ao prompt.")
 	printCommand("  --mode full", "(Padrão) Envia o conteúdo completo, truncando se necessário.")
@@ -783,14 +727,12 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("@history", "Adiciona os últimos comandos do seu histórico de shell (bash/zsh/fish).")
 	printCommand("@env", "Adiciona as variáveis de ambiente (valores sensíveis são ocultados).")
 
-	// --- Gerenciamento de Chunks (para @file --mode chunked) ---
 	fmt.Printf("\n  %s\n", colorize("Gerenciamento de Arquivos Grandes (Chunks)", ColorLime))
 	printCommand("/nextchunk", "Envia o próximo pedaço (chunk) do projeto para a IA.")
 	printCommand("/retry", "Tenta reenviar o último chunk que falhou.")
 	printCommand("/retryall", "Tenta reenviar todos os chunks que falharam.")
 	printCommand("/skipchunk", "Pula um chunk com erro e continua para o próximo.")
 
-	// --- Execução de Comandos (@command) ---
 	fmt.Printf("\n  %s\n", colorize("Execução de Comandos no Terminal", ColorLime))
 	printCommand("@command <cmd>", "Executa um comando e adiciona sua saída ao prompt.")
 	printCommand("  Ex: @command ls -la", "(Executa 'ls -la' e anexa o resultado)")
@@ -800,7 +742,6 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("@command --ai <cmd> > <texto>", "Igual ao anterior, mas adiciona um contexto/pergunta.")
 	printCommand("  Ex: @command --ai cat err.log > resuma este erro", "")
 
-	// --- Modo Agente (Automação de Tarefas) ---
 	fmt.Printf("\n  %s\n", colorize("Modo Agente (Execução de Tarefas)", ColorLime))
 	printCommand("/agent <tarefa>", "Pede à IA para planejar e executar comandos para resolver uma tarefa.")
 	printCommand("/run <tarefa>", "Um atalho (alias) para o comando /agent.")
@@ -823,7 +764,6 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("  • Plano COMPACTO", "mostra 1 linha por comando (status + descrição + 1ª linha do código).")
 	printCommand("  • Plano COMPLETO", "mostra cartão com descrição, tipo, risco e bloco de código formatado.")
 
-	// --- Gerenciamento de Sessões (/session) ---
 	fmt.Printf("\n  %s\n", colorize("Gerenciamento de Sessões", ColorLime))
 	printCommand("/session save <nome>", "Salva a sessão atual com um nome (ex.: /session save minha-conversa).")
 	printCommand("/session load <nome>", "Carrega uma sessão salva (ex.: /session load minha-conversa).")
@@ -831,7 +771,6 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/session delete <nome>", "Deleta uma sessão salva (ex.: /session delete minha-conversa).")
 	printCommand("/session new", "Inicia uma nova sessão limpa (alias de /newsession).")
 
-	// --- Modo Não-Interativo (One-Shot) ---
 	fmt.Printf("\n  %s\n", colorize("Modo Não-Interativo (One-Shot, para scripts e pipes)", ColorLime))
 	printCommand("chatcli -p \"<prompt>\"", "Executa um prompt uma única vez e sai.")
 	printCommand("  Ex: chatcli -p \"Explique este repositório.\"", "")
@@ -844,7 +783,6 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("--agent-auto-exec", "No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for seguro.")
 	printCommand("Uso com pipes (stdin):", "Envia dados via pipe (ex.: git diff | chatcli -p \"Resuma as mudanças.\").")
 
-	// --- Dicas de Uso e Atalhos ---
 	fmt.Printf("\n  %s\n", colorize("Dicas e Atalhos Gerais", ColorLime))
 	printCommand("Cancelamento (Ctrl+C)", "Pressione Ctrl+C uma vez durante o 'Pensando...' para cancelar.")
 	printCommand("Saída Rápida (Ctrl+D)", "Pressione Ctrl+D no prompt vazio para sair do ChatCLI.")
@@ -2090,10 +2028,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 						desc = "Troque o modelo (Runtime) baseado no provedor atual (grpt-5, grok-4, etc.)"
 					} else if flag == "--max-tokens" {
 						desc = "Define o máximo de tokens para as próximas respostas (0 para padrão)"
-					} else if flag == "--slugname" {
-						desc = "Altera o Slug em tempo de execução (Apenas para STACKSPOT)"
-					} else if flag == "--tenantname" {
-						desc = "Altera o Tenant em tempo de execução (Apenas para STACKSPOT)"
+					} else if flag == "--agent-id" {
+						desc = "Altera o agent em tempo de execução (Apenas para STACKSPOT)"
+					} else if flag == "--realm" {
+						desc = "Altera o Realm/Tenant em tempo de execução (Apenas para STACKSPOT)"
 					} else if flag == "-i" {
 						desc = "Ideal para comandos interativos evitando sensação de bloqueio do terminal"
 					} else if flag == "--ai" {
@@ -2314,7 +2252,6 @@ func (cli *ChatCLI) getEnvFilePath() string {
 }
 
 func (cli *ChatCLI) showConfig() {
-	// Helper para formatar linhas com alinhamento e cores (similar ao /help)
 	printItem := func(key, value string) {
 		keyColor := ColorCyan
 		valueColor := ColorGray
@@ -2326,11 +2263,9 @@ func (cli *ChatCLI) showConfig() {
 		fmt.Printf("    %s    %s\n", colorize(fmt.Sprintf("%-25s", key+":"), keyColor), colorize(value, valueColor))
 	}
 
-	// Cabeçalho
 	fmt.Println("\n" + colorize(ColorBold, "Configuração Atual do ChatCLI"))
 	fmt.Println(colorize("Aqui está um resumo das configurações em tempo de execução, provedores e variáveis de ambiente.", ColorGray))
 
-	// --- Geral ---
 	fmt.Printf("\n  %s\n", colorize("Configurações Gerais", ColorLime))
 	printItem("Arquivo .env", cli.getEnvFilePath())
 	printItem("Ambiente (ENV)", os.Getenv("ENV"))
@@ -2339,7 +2274,6 @@ func (cli *ChatCLI) showConfig() {
 	printItem("Tamanho Máx. Log (LOG_MAX_SIZE)", os.Getenv("LOG_MAX_SIZE"))
 	printItem("Tamanho Máx. Histórico (HISTORY_MAX_SIZE)", os.Getenv("HISTORY_MAX_SIZE"))
 
-	// --- Provedor e Modelo Atuais ---
 	fmt.Printf("\n  %s\n", colorize("Provedor e Modelo Atuais", ColorLime))
 	printItem("Provedor (Runtime)", cli.Provider)
 	printItem("Modelo (Runtime)", cli.Model)
@@ -2347,7 +2281,6 @@ func (cli *ChatCLI) showConfig() {
 	printItem("API Preferida (Catálogo)", string(catalog.GetPreferredAPI(cli.Provider, cli.Model)))
 	printItem("MaxTokens Efetivo", fmt.Sprintf("%d", cli.getMaxTokensForCurrentLLM()))
 
-	// --- Overrides por ENV ---
 	fmt.Printf("\n  %s\n", colorize("Overrides de MaxTokens por Provedor (ENV)", ColorLime))
 	printItem("OPENAI_MAX_TOKENS", os.Getenv("OPENAI_MAX_TOKENS"))
 	printItem("CLAUDEAI_MAX_TOKENS", os.Getenv("CLAUDEAI_MAX_TOKENS"))
@@ -2355,41 +2288,38 @@ func (cli *ChatCLI) showConfig() {
 	printItem("XAI_MAX_TOKENS", os.Getenv("XAI_MAX_TOKENS"))
 	printItem("OLLAMA_MAX_TOKENS", os.Getenv("OLLAMA_MAX_TOKENS"))
 
-	// --- Chaves Sensíveis (Presença Apenas) ---
 	fmt.Printf("\n  %s\n", colorize("Chaves Sensíveis (Presença Apenas)", ColorLime))
 	printItem("OPENAI_API_KEY", presence(os.Getenv("OPENAI_API_KEY")))
 	printItem("CLAUDEAI_API_KEY", presence(os.Getenv("CLAUDEAI_API_KEY")))
 	printItem("GOOGLEAI_API_KEY", presence(os.Getenv("GOOGLEAI_API_KEY")))
 	printItem("XAI_API_KEY", presence(os.Getenv("XAI_API_KEY")))
 	printItem("CLIENT_ID (StackSpot)", presence(os.Getenv("CLIENT_ID")))
-	printItem("CLIENT_SECRET (StackSpot)", presence(os.Getenv("CLIENT_SECRET")))
+	printItem("CLIENT_KEY (StackSpot)", presence(os.Getenv("CLIENT_KEY")))
 
-	// --- Configurações por Provedor ---
 	fmt.Printf("\n  %s\n", colorize("Configurações por Provedor", ColorLime))
-	//if strings.ToUpper(cli.Provider) == "OPENAI" || strings.ToUpper(cli.Provider) == "OPENAI_ASSISTANT" {
 	printItem("OPENAI_MODEL", os.Getenv("OPENAI_MODEL"))
 	printItem("OPENAI_ASSISTANT_MODEL", os.Getenv("OPENAI_ASSISTANT_MODEL"))
 	printItem("OPENAI_USE_RESPONSES", os.Getenv("OPENAI_USE_RESPONSES"))
-	//}
-	//if strings.ToUpper(cli.Provider) == "CLAUDEAI" {
 	printItem("CLAUDEAI_MODEL", os.Getenv("CLAUDEAI_MODEL"))
 	printItem("CLAUDEAI_API_VERSION", os.Getenv("CLAUDEAI_API_VERSION"))
-	//}
-	//if strings.ToUpper(cli.Provider) == "GOOGLEAI" {
 	printItem("GOOGLEAI_MODEL", os.Getenv("GOOGLEAI_MODEL"))
-	//}
-	//if strings.ToUpper(cli.Provider) == "XAI" {
 	printItem("XAI_MODEL", os.Getenv("XAI_MODEL"))
 	printItem("OLLAMA_MODEL", os.Getenv("OLLAMA_MODEL"))
 	printItem("OLLAMA_BASE_URL", utils.GetEnvOrDefault("OLLAMA_BASE_URL", config.OllamaDefaultBaseURL))
-	//}
-	if tm, ok := cli.manager.GetTokenManager(); ok {
-		slug, tenant := tm.GetSlugAndTenantName()
-		printItem("STACKSPOT: slugName", slug)
-		printItem("STACKSPOT: tenantName", tenant)
+
+	// Verifica se STACKSPOT está ativo ou configurado para exibir suas informações.
+	isStackSpotAvailable := false
+	for _, p := range cli.manager.GetAvailableProviders() {
+		if p == "STACKSPOT" {
+			isStackSpotAvailable = true
+			break
+		}
+	}
+	if cli.Provider == "STACKSPOT" || isStackSpotAvailable {
+		printItem("STACKSPOT Realm/Tenant (Runtime)", cli.manager.GetStackSpotRealm())
+		printItem("STACKSPOT Agent ID (Runtime)", cli.manager.GetStackSpotAgentID())
 	}
 
-	// --- Provedores Disponíveis ---
 	fmt.Printf("\n  %s\n", colorize("Provedores Disponíveis", ColorLime))
 	providers := cli.manager.GetAvailableProviders()
 	if len(providers) > 0 {

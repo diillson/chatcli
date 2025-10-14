@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diillson/chatcli/config"
@@ -43,17 +44,24 @@ type LLMManager interface {
 	GetClient(provider string, model string) (client.LLMClient, error)
 	GetAvailableProviders() []string
 	GetTokenManager() (token.Manager, bool)
+	SetStackSpotRealm(realm string)
+	SetStackSpotAgentID(agentID string)
+	GetStackSpotRealm() string
+	GetStackSpotAgentID() string
 }
 
 // LLMManagerImpl gerencia diferentes clientes LLM e o TokenManager
 type LLMManagerImpl struct {
-	clients      map[string]func(string) (client.LLMClient, error)
-	logger       *zap.Logger
-	tokenManager token.Manager
+	clients          map[string]func(string) (client.LLMClient, error)
+	logger           *zap.Logger
+	tokenManager     token.Manager
+	mu               sync.RWMutex
+	stackspotRealm   string
+	stackspotAgentID string
 }
 
 // NewLLMManager cria uma nova instância de LLMManagerImpl.
-func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager, error) {
+func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
 	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
 
@@ -62,13 +70,14 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager,
 		zap.Duration("initial_backoff", initialBackoff))
 
 	manager := &LLMManagerImpl{
-		clients: make(map[string]func(string) (client.LLMClient, error)),
-		logger:  logger,
+		clients:          make(map[string]func(string) (client.LLMClient, error)),
+		logger:           logger,
+		stackspotRealm:   config.Global.GetString("STACKSPOT_REALM"),
+		stackspotAgentID: config.Global.GetString("STACKSPOT_AGENT_ID"),
 	}
 
-	// Configurar os providers
 	manager.configurarOpenAIClient(maxRetries, initialBackoff)
-	manager.configurarStackSpotClient(slugName, tenantName, maxRetries, initialBackoff)
+	manager.configurarStackSpotClient(maxRetries, initialBackoff)
 	manager.configurarClaudeAIClient(maxRetries, initialBackoff)
 	manager.configurarGoogleAIClient(maxRetries, initialBackoff)
 	manager.configurarXAIClient(maxRetries, initialBackoff)
@@ -81,10 +90,9 @@ func NewLLMManager(logger *zap.Logger, slugName, tenantName string) (LLMManager,
 func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff time.Duration) {
 	apiKey := config.Global.GetString("GOOGLEAI_API_KEY")
 	if apiKey != "" {
-		// NÃO logar a API key diretamente
 		m.logger.Info("Configurando provedor Google AI",
 			zap.Bool("api_key_present", true),
-			zap.Int("api_key_length", len(apiKey))) // Apenas o tamanho, não o conteúdo
+			zap.Int("api_key_length", len(apiKey)))
 
 		m.clients["GOOGLEAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
@@ -107,7 +115,6 @@ func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff
 func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff time.Duration) {
 	apiKey := config.Global.GetString("OPENAI_API_KEY")
 	if apiKey != "" {
-		// Cliente OpenAI padrão (chat completions ou responses)
 		m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
 				model = config.DefaultOpenAIModel
@@ -132,7 +139,6 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 			return openai.NewOpenAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
 		}
 
-		// Cliente OpenAI Assistente
 		m.clients["OPENAI_ASSISTANT"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
 				model = config.DefaultOpenAiAssistModel
@@ -145,20 +151,36 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 }
 
 // configurarStackSpotClient configura o cliente StackSpot
-func (m *LLMManagerImpl) configurarStackSpotClient(slugName, tenantName string, maxRetries int, initialBackoff time.Duration) {
+func (m *LLMManagerImpl) configurarStackSpotClient(maxRetries int, initialBackoff time.Duration) {
 	clientID := config.Global.GetString("CLIENT_ID")
-	clientSecret := config.Global.GetString("CLIENT_SECRET")
+	clientKey := config.Global.GetString("CLIENT_KEY")
 
-	if clientID == "" || clientSecret == "" {
-		m.logger.Warn("CLIENT_ID ou CLIENT_SECRET não definidos, o provedor STACKSPOT não estará disponível")
+	// Se as credenciais existirem, o provedor será registrado.
+	if clientID == "" || clientKey == "" {
+		m.logger.Warn("CLIENT_ID ou CLIENT_KEY não definidos, o provedor STACKSPOT não estará disponível")
 		return
 	}
 
-	// NewTokenManager já retorna a interface token.Manager
-	m.tokenManager = token.NewTokenManager(clientID, clientSecret, slugName, tenantName, m.logger)
+	m.mu.RLock()
+	realm := m.stackspotRealm
+	m.mu.RUnlock()
 
+	// O TokenManager é criado, mesmo que o realm esteja vazio inicialmente.
+	// Ele será atualizado via SetStackSpotRealm se necessário.
+	m.tokenManager = token.NewTokenManager(clientID, clientKey, realm, m.logger)
+
+	// A função de fábrica (factory) agora contém a verificação final.
 	m.clients["STACKSPOT"] = func(model string) (client.LLMClient, error) {
-		return stackspotai.NewStackSpotClient(m.tokenManager, slugName, m.logger, maxRetries, initialBackoff), nil
+		m.mu.RLock()
+		currentRealm := m.stackspotRealm
+		currentAgentID := m.stackspotAgentID
+		m.mu.RUnlock()
+
+		if currentRealm == "" || currentAgentID == "" {
+			return nil, fmt.Errorf("provedor STACKSPOT requer STACKSPOT_REALM e STACKSPOT_AGENT_ID. Forneça-os no .env ou via flags --realm e --agent-id")
+		}
+
+		return stackspotai.NewStackSpotClient(m.tokenManager, currentAgentID, m.logger, maxRetries, initialBackoff), nil
 	}
 }
 
@@ -206,18 +228,14 @@ func (m *LLMManagerImpl) configurarXAIClient(maxRetries int, initialBackoff time
 }
 
 func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff time.Duration) {
-	// 1. Obter configurações do ConfigManager
 	baseURL := config.Global.GetString("OLLAMA_BASE_URL")
-	enable := config.Global.GetBool("OLLAMA_ENABLED", false) // Padrão é desativado se não definido
+	enable := config.Global.GetBool("OLLAMA_ENABLED", false)
 
-	// 2. Verificar se o provider está explicitamente desativado
 	if !enable {
 		m.logger.Info("OLLAMA_ENABLED não está ativo, provider Ollama ignorado.")
 		return
 	}
 
-	// 3. Verificar a conectividade com o serviço Ollama
-	// Cliente HTTP leve apenas para esta verificação
 	hc := &http.Client{Timeout: 3 * time.Second}
 	checkURL := strings.TrimRight(baseURL, "/") + "/api/tags"
 
@@ -237,7 +255,6 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 		return
 	}
 
-	// 4. Validar se há modelos disponíveis
 	var tags struct {
 		Models []struct {
 			Name string `json:"name"`
@@ -252,19 +269,16 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 		return
 	}
 
-	// 5. Se tudo estiver OK, registrar o factory do cliente
 	m.logger.Info("Configurando provedor OLLAMA",
 		zap.String("baseURL", baseURL),
 		zap.Int("modelos_encontrados", len(tags.Models)),
 	)
 
 	m.clients["OLLAMA"] = func(model string) (client.LLMClient, error) {
-		// Obter o modelo padrão do ConfigManager
 		if model == "" {
 			model = config.Global.GetString("OLLAMA_MODEL")
 		}
 
-		// Validar se o modelo solicitado existe
 		found := false
 		for _, m := range tags.Models {
 			if m.Name == model {
@@ -273,7 +287,6 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 			}
 		}
 		if !found {
-			// Montar uma mensagem de erro útil
 			var availableModels []string
 			for _, m := range tags.Models {
 				availableModels = append(availableModels, m.Name)
@@ -310,7 +323,6 @@ func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMCli
 		return nil, fmt.Errorf("erro: Provedor LLM '%s' não suportado ou não configurado", provider)
 	}
 
-	// Agora que sabemos que o factory existe, podemos chamá-lo.
 	clientInstance, err := factoryFunc(model)
 	if err != nil {
 		m.logger.Error("Erro ao criar instância do cliente LLM",
@@ -326,4 +338,35 @@ func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMCli
 // GetTokenManager retorna o TokenManager se ele estiver configurado.
 func (m *LLMManagerImpl) GetTokenManager() (token.Manager, bool) {
 	return m.tokenManager, m.tokenManager != nil
+}
+
+// SetStackSpotRealm atualiza o realm em tempo de execução.
+func (m *LLMManagerImpl) SetStackSpotRealm(realm string) {
+	m.mu.Lock()
+	m.stackspotRealm = realm
+	m.mu.Unlock()
+	if m.tokenManager != nil {
+		m.tokenManager.SetRealm(realm)
+	}
+}
+
+// SetStackSpotAgentID atualiza o agentID em tempo de execução.
+func (m *LLMManagerImpl) SetStackSpotAgentID(agentID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stackspotAgentID = agentID
+}
+
+// GetStackSpotRealm retorna o realm atual.
+func (m *LLMManagerImpl) GetStackSpotRealm() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.stackspotRealm
+}
+
+// GetStackSpotAgentID retorna o agentID atual.
+func (m *LLMManagerImpl) GetStackSpotAgentID() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.stackspotAgentID
 }

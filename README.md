@@ -127,7 +127,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     - `GOOGLEAI_API_KEY`, `GOOGLEAI_MODEL`, `GOOGLEAI_MAX_TOKENS`
     - `OLLAMA_ENABLED`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_MAX_TOKENS`, `OLLAMA_FILTER_THINKING` – **(Opcional)** Filtra "pensamento em voz alta" de modelos como Qwen3 (true/false, padrão: true).
     - `XAI_API_KEY`, `XAI_MODEL`, `XAI_MAX_TOKENS`
-    - `CLIENT_ID`, `CLIENT_SECRET`, `SLUG_NAME`, `TENANT_NAME` (para StackSpot)
+    - `CLIENT_ID`, `CLIENT_KEY`, `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` (para StackSpot)
 - **Agente**:
     - `CHATCLI_AGENT_CMD_TIMEOUT` – **(Opcional)** Timeout padrão para cada comando executado no Modo Agente. Aceita durações Go (ex.: 30s, 2m, 10m). Padrão: `10m`.
     - `CHATCLI_AGENT_DENYLIST` – **(Opcional)** Lista de expressões regulares (separadas por “;”) para bloquear comandos perigosos além do padrão. Ex.: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
@@ -159,9 +159,9 @@ OPENAI_MAX_TOKENS=60000
 
 # Configurações do StackSpot
 CLIENT_ID=seu-cliente-id
-CLIENT_SECRET=seu-cliente-secreto
-SLUG_NAME=seu-slug-stackspot
-TENANT_NAME=seu-tenant-name
+CLIENT_KEY=seu-cliente-secreto
+STACKSPOT_REALM=seu-tenant-name
+STACKSPOT_AGENT_ID=seu-id-agente
 
 # Configurações do ClaudeAI
 CLAUDEAI_API_KEY=sua-chave-claudeai
@@ -214,6 +214,8 @@ Execute prompts em uma única linha, ideal para scripts e automações.
     - `--provider`: sobrescreve o provedor de LLM em tempo de execução (`OPENAI`, `OPENAI_ASSISTANT`, `CLAUDEAI`, `GOOGLEAI`, `STACKSPOT`, `XAI`).
     - `--model`: escolhe o modelo do provedor ativo (ex.: `gpt-4o-mini`, `claude-3-5-sonnet-20241022`, `gemini-2.5-flash`, etc.)
     - `--max-tokens`: Define a quantidade maxima de tokens usada para provedor ativo.
+    - `--realm`: define o realm/tenant para StackSpot.
+    - `--agent-id`: define o ID do agente a ser utilizado para StackSpot.
     - `--timeout` timeout da chamada one-shot (padrão: 5m)
     - `--no-anim` desabilita animações (útil em scripts/CI).
     - `--agent-auto-exec` executa automaticamente o primeiro comando sugerido pelo agente (modo agente).
