@@ -5,12 +5,12 @@ import "time"
 // Valores padrão para configuração da aplicação
 const (
 	// Valores padrão para StackSpot
-	DefaultSlugName          = "testeai"
-	DefaultTenantName        = "zup"
-	StackSpotBaseURL         = "https://genai-code-buddy-api.stackspot.com/v1/quick-commands"
+	StackSpotBaseURL         = "https://genai-inference-app.stackspot.com/v1" // ATUALIZADO
 	StackSpotDefaultModel    = "StackSpotAI"
 	StackSpotResponseTimeout = 2 * time.Second
 	DefaultLogFile           = "$HOME/app.log"
+	DefaultStackSpotRealm    = "zup"
+	DefaultStackSpotAgentID  = "default"
 
 	// Valores padrão para OpenAI
 	DefaultOpenAIModel       = "gpt-4o-mini"

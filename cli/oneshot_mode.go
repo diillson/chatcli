@@ -33,6 +33,8 @@ type Options struct {
 	PromptFlagUsed bool          // indica se -p/--prompt foi passado explicitamente
 	AgentAutoExec  bool          // --agent-auto-exec
 	MaxTokens      int           // --max-tokens
+	Realm          string        // --realm
+	AgentID        string        // --agent-id
 }
 
 // HandleOneShotOrFatal executa o modo one-shot se solicitado (flag -p usada ou stdin presente).
@@ -61,39 +63,34 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 		}
 	}
 
-	// Validação de entrada vazia
 	if strings.TrimSpace(input) == "" {
-		// ... (código de erro existente)
 		const md = `
-         ❌ Erro no modo one-shot
-        
-        O modo one-shot foi acionado (via flag -p/--prompt ou stdin), mas nenhum conteúdo de entrada foi fornecido.
-        
-        - Use a flag -p/--prompt com um texto:
-      
-      chatcli -p "Seu prompt aqui"
-      
-        - Ou envie dados via stdin:
-      
-      echo "Texto" | chatcli -p ou echo "Texto" | chatcli
-      
-        `
+             ❌ Erro no modo one-shot
+            
+            O modo one-shot foi acionado (via flag -p/--prompt ou stdin), mas nenhum conteúdo de entrada foi fornecido.
+            
+            - Use a flag -p/--prompt com um texto:
+          
+          chatcli -p "Seu prompt aqui"
+          
+            - Ou envie dados via stdin:
+          
+          echo "Texto" | chatcli -p ou echo "Texto" | chatcli
+          
+            `
 		fmt.Fprintln(os.Stderr, md)
 		cli.logger.Fatal("One-shot acionado sem input (prompt vazio e sem stdin)")
 	}
 
-	// Executa o one-shot com timeout próprio
 	ctxOne, cancelOne := context.WithTimeout(ctx, opts.Timeout)
 	defer cancelOne()
 
-	// --- LÓGICA DE ROTEAMENTO PARA O AGENTE ---
 	if strings.HasPrefix(input, "/agent ") || strings.HasPrefix(input, "/run ") {
 		if err := cli.RunAgentOnce(ctxOne, input, opts.AgentAutoExec); err != nil {
 			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar o agente em modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
 			cli.logger.Fatal("Erro no modo agente one-shot", zap.Error(err))
 		}
 	} else {
-		// Fluxo one-shot normal
 		if err := cli.RunOnce(ctxOne, input, opts.NoAnim); err != nil {
 			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar no modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
 			cli.logger.Fatal("Erro no modo one-shot", zap.Error(err))
@@ -139,17 +136,13 @@ func PreprocessArgs(args []string) []string {
 }
 
 func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation bool) error {
-
-	// Processa comandos especiais (@file, @git, @env, @command, > contexto)
 	userInput, additionalContext := cli.processSpecialCommands(input)
 
-	// Adiciona a mensagem do usuário ao histórico
 	cli.history = append(cli.history, models.Message{
 		Role:    "user",
 		Content: userInput + additionalContext,
 	})
 
-	// Exibe animação (opcional)
 	if !disableAnimation {
 		cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 	}
@@ -165,7 +158,6 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 		return err
 	}
 
-	// Renderiza e imprime a resposta
 	rendered := cli.renderMarkdown(aiResponse)
 	fmt.Println(rendered)
 	return nil
@@ -176,24 +168,22 @@ func NewFlagSet() (*flag.FlagSet, *Options) {
 	fs := flag.NewFlagSet("chatcli", flag.ContinueOnError)
 	opts := &Options{}
 
-	// Flags
 	fs.BoolVar(&opts.Version, "version", false, "Mostra versão e sai")
 	fs.BoolVar(&opts.Version, "v", false, "Mostra versão e sai (alias)")
-
 	fs.BoolVar(&opts.Help, "help", false, "Mostra ajuda e sai")
 	fs.BoolVar(&opts.Help, "h", false, "Mostra ajuda e sai (alias)")
 
 	fs.StringVar(&opts.Prompt, "p", "", "Prompt a executar uma única vez (modo não interativo) - (alias)")
 	fs.StringVar(&opts.Prompt, "prompt", "", "Prompt a executar uma única vez (modo não interativo)")
-
 	fs.StringVar(&opts.Provider, "provider", "", "Override do provider (OPENAI, CLAUDEAI, GOOGLEAI, OPENAI_ASSISTANT, STACKSPOT)")
 	fs.StringVar(&opts.Model, "model", "", "Override do modelo(LLM)")
-
 	fs.DurationVar(&opts.Timeout, "timeout", 5*time.Minute, "Timeout da chamada one-shot")
 	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, "Override do máximo de tokens para a resposta")
 	fs.BoolVar(&opts.NoAnim, "no-anim", false, "Desabilita animações no modo one-shot")
-
 	fs.BoolVar(&opts.AgentAutoExec, "agent-auto-exec", false, "No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for seguro.")
+
+	fs.StringVar(&opts.Realm, "realm", "", "Override do realm (apenas para StackSpot)")
+	fs.StringVar(&opts.AgentID, "agent-id", "", "Override do Agent ID (apenas para StackSpot)")
 
 	return fs, opts
 }

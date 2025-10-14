@@ -25,7 +25,6 @@ func TestSanitizeSensitiveText_TableDriven(t *testing.T) {
 			expected: "Authorization: sk-ant-[REDACTED]",
 		},
 		{
-			// CORREÇÃO AQUI: Use uma chave com o formato correto para o teste
 			name:     "Google AI Key in URL",
 			input:    "URL: https://api.google.com/v1?key=AIzaSyABCDE1234567890abcdefghijklmno",
 			expected: "URL: https://api.google.com/v1?key=[REDACTED_GOOGLE_API_KEY]",
@@ -36,13 +35,11 @@ func TestSanitizeSensitiveText_TableDriven(t *testing.T) {
 			expected: "Header: Bearer [REDACTED]",
 		},
 		{
-			// CORREÇÃO AQUI: Remova o espaço extra após os dois pontos
 			name:     "JSON Access Token",
 			input:    `{"access_token": "secret_token_value", "user": "test"}`,
 			expected: `{"access_token":"[REDACTED]", "user": "test"}`,
 		},
 		{
-			// CORREÇÃO AQUI: Remova o espaço extra após os dois pontos
 			name:     "JSON Client Secret",
 			input:    `{"client_id": "123", "client_secret": "very_secret"}`,
 			expected: `{"client_id": "123", "client_secret":"[REDACTED]"}`,
@@ -90,6 +87,8 @@ func TestIsSensitiveEnvKey(t *testing.T) {
 	}{
 		{"OPENAI_API_KEY", true},
 		{"CLIENT_SECRET", true},
+		{"CLIENT_KEY", true},
+		{"MY_APP_TOKEN", true},
 		{"MY_APP_TOKEN", true},
 		{"PASSWORD_VAR", true},
 		{"some_secret_value", true},

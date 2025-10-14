@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,8 +24,6 @@ import (
 )
 
 func main() {
-
-	// Parse das flags
 	args := cli.PreprocessArgs(os.Args[1:])
 	opts, err := cli.Parse(args)
 	if err != nil {
@@ -32,23 +31,15 @@ func main() {
 		os.Exit(2)
 	}
 
-	// Saída antecipada para --version
 	if opts.Version {
 		versionInfo := version.GetCurrentVersion()
-
-		// Checagem com timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		latest, hasUpdate, err := version.CheckLatestVersionWithContext(ctx)
-
 		fmt.Println(version.FormatVersionInfo(versionInfo, latest, hasUpdate, err))
 		return
 	}
 
-	// Mensagem de versão no startup
-	//version.PrintStartupVersionInfo()
-
-	// Carregar variáveis de ambiente do arquivo .env
 	envFilePath := os.Getenv("CHATCLI_DOTENV")
 	if envFilePath == "" {
 		envFilePath = ".env"
@@ -65,11 +56,10 @@ func main() {
 		fmt.Printf("Não foi encontrado o arquivo .env em %s\n", envFilePath)
 	}
 
-	// Inicializar o logger
 	logger, err := utils.InitializeLogger()
 	if err != nil {
 		fmt.Printf("Não foi possível inicializar o logger: %v\n", err)
-		os.Exit(1) // Encerrar a aplicação em caso de erro crítico
+		os.Exit(1)
 	}
 
 	config.Global = config.New(logger)
@@ -82,54 +72,66 @@ func main() {
 		}
 	}()
 
-	// Configurar o contexto para o shutdown gracioso
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Verificar variáveis de ambiente e informar o usuário
-	//utils.CheckEnvVariables(logger) // Desabilitado por enquanto apenas mostrando no log
-
-	// Inicializar o LLMManager com as constantes do pacote config
-	slugName := config.Global.GetString("SLUG_NAME")
-	tenantName := config.Global.GetString("TENANT_NAME")
-	llmManager, err := manager.NewLLMManager(logger, slugName, tenantName)
+	llmManager, err := manager.NewLLMManager(logger)
 	if err != nil {
 		logger.Fatal("Erro ao inicializar o LLMManager", zap.Error(err))
 	}
 
-	// Verificar se há provedores disponíveis
 	availableProviders := llmManager.GetAvailableProviders()
-	if len(availableProviders) == 0 {
+	if len(availableProviders) == 0 && (opts.PromptFlagUsed || cli.HasStdin()) {
+		// Apenas avisa no modo one-shot, pois pode ser configurado via flags
+		logger.Warn("Nenhum provedor LLM configurado via .env, dependendo de flags para funcionar.")
+	} else if len(availableProviders) == 0 {
 		fmt.Println("Nenhum provedor LLM está configurado. Verifique suas variáveis de ambiente.")
 		os.Exit(1)
 	}
 
-	// Inicializar e iniciar o ChatCLI
 	chatCLI, err := cli.NewChatCLI(llmManager, logger)
 	if err != nil {
 		logger.Fatal("Erro ao inicializar o ChatCLI", zap.Error(err))
 	}
 
-	// Aplicar overrides de provider, model e max-tokens do modo one-shot, se fornecidos
 	chatCLI.UserMaxTokens = opts.MaxTokens
+
+	// 1. Determina qual provedor será usado (flag ou padrão)
+	targetProvider := opts.Provider
+	if targetProvider == "" {
+		targetProvider = chatCLI.Provider // Usa o padrão do .env se a flag não for passada
+	}
+
+	// 2. Se o provedor alvo for StackSpot, aplica os overrides de realm e agent-id ANTES.
+	if strings.ToUpper(targetProvider) == "STACKSPOT" {
+		if opts.Realm != "" {
+			llmManager.SetStackSpotRealm(opts.Realm)
+			logger.Info("Realm/Tenant do StackSpot sobrescrito via flag", zap.String("realm", opts.Realm))
+		}
+		if opts.AgentID != "" {
+			llmManager.SetStackSpotAgentID(opts.AgentID)
+			logger.Info("Agent ID do StackSpot sobrescrito via flag", zap.String("agent-id", opts.AgentID))
+		}
+	}
+
+	// 3. Agora, aplica o override do provedor e modelo.
+	// Se o provedor for StackSpot, a chamada a GetClient agora terá as informações de realm/agent-id.
 	if err := chatCLI.ApplyOverrides(llmManager, opts.Provider, opts.Model); err != nil {
-		// Imprimir no stderr para o usuário e para os testes E2E
 		fmt.Fprintf(os.Stderr, " ❌ Erro ao aplicar overrides: %v\n", err)
 		logger.Error("Erro fatal ao aplicar overrides de provider/model via flags", zap.Error(err))
 		os.Exit(1)
 	}
 
-	// Configurar manipulador de sinais DEPOIS de criar chatCLI
+	// ... (restante do main.go permanece o mesmo)
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT)
 
 	go func() {
 		for range sigChan {
-			// Este é o truque: verificamos se está executando
 			if chatCLI.IsExecuting() {
 				logger.Info("Cancelando operação em andamento")
 				chatCLI.CancelOperation()
-				// NÃO sair do programa, apenas cancelar a operação
 			} else {
 				logger.Info("Encerrando aplicação")
 				os.Exit(0)
@@ -137,20 +139,17 @@ func main() {
 		}
 	}()
 
-	// Modo one-shot: se acionado, tratar e sair
 	if chatCLI.HandleOneShotOrFatal(ctx, opts) {
 		return
 	}
 
 	handleGracefulShutdown(cancel, logger)
 
-	// Caso não for oneshot, segue no modo interativo
 	chatCLI.Start(ctx)
 }
 
 func handleGracefulShutdown(cancelFunc context.CancelFunc, logger *zap.Logger) {
 	signals := make(chan os.Signal, 1)
-	// Capturar sinais de interrupção e término
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		sig := <-signals

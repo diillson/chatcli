@@ -23,16 +23,14 @@ import (
 type Manager interface {
 	GetAccessToken(ctx context.Context) (string, error)
 	RefreshToken(ctx context.Context) (string, error)
-	GetSlugAndTenantName() (string, string)
-	SetSlugAndTenantName(slug, tenant string)
+	SetRealm(realm string) // NOVO
 }
 
 // TokenManager gerencia a obtenção e renovação de tokens de acesso
 type TokenManager struct {
 	clientID         string
 	clientSecret     string
-	SlugName         string
-	tenantName       string
+	realm            string
 	accessToken      string
 	expiresAt        time.Time
 	mu               sync.RWMutex
@@ -42,38 +40,29 @@ type TokenManager struct {
 }
 
 // NewTokenManager cria uma nova instância de TokenManager
-// Recebe o clientID, clientSecret, slugName, tenantName e o logger.
-func NewTokenManager(clientID, clientSecret, slugName, tenantName string, logger *zap.Logger) Manager {
+func NewTokenManager(clientID, clientSecret, realm string, logger *zap.Logger) Manager {
 	httpClient := utils.NewHTTPClient(logger, 30*time.Second)
 	return &TokenManager{
 		clientID:     clientID,
 		clientSecret: clientSecret,
-		SlugName:     slugName,
-		tenantName:   tenantName,
+		realm:        realm,
 		logger:       logger,
 		client:       httpClient,
 	}
 }
 
-// GetSlugAndTenantName retorna o slug e o tenantName atuais
-func (tm *TokenManager) GetSlugAndTenantName() (string, string) {
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
-	return tm.SlugName, tm.tenantName
-}
-
-// SetSlugAndTenantName atualiza os valores de slug e tenantName e força uma nova solicitação de token
-func (tm *TokenManager) SetSlugAndTenantName(slugName, tenantName string) {
+// SetRealm atualiza o valor do realm e força uma nova solicitação de token.
+func (tm *TokenManager) SetRealm(realm string) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	tm.SlugName = slugName
-	tm.tenantName = tenantName
-	tm.accessToken = "" // Limpa o token para forçar a solicitação de um novo na próxima vez
-	tm.logger.Info("Valores de slug e tenantName atualizados", zap.String("slugName", slugName), zap.String("tenantName", tenantName))
+	if tm.realm != realm {
+		tm.realm = realm
+		tm.accessToken = "" // Limpa o token para forçar a solicitação de um novo
+		tm.logger.Info("Valor do realm atualizado", zap.String("new_realm", realm))
+	}
 }
 
 // GetAccessToken retorna o token de acesso válido, renovando-o se necessário
-// O contexto (ctx) pode ser usado para controlar o tempo de execução e cancelamento.
 func (tm *TokenManager) GetAccessToken(ctx context.Context) (string, error) {
 	tm.mu.RLock()
 	token := tm.accessToken
@@ -133,10 +122,9 @@ func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 
 	tm.logger.Info("Renovando o access token...")
 
-	// Monta a URL com os valores atuais de tenantName e slugName
-	tokenURL := fmt.Sprintf("https://idm.stackspot.com/%s/oidc/oauth/token", tm.tenantName)
+	tokenURL := fmt.Sprintf("https://idm.stackspot.com/%s/oidc/oauth/token", tm.realm)
 	if tm.tokenURLOverride != "" {
-		tokenURL = tm.tokenURLOverride // Usa o override se estiver definido
+		tokenURL = tm.tokenURLOverride
 	}
 	data := strings.NewReader(fmt.Sprintf(
 		"grant_type=client_credentials&client_id=%s&client_secret=%s",
