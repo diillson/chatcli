@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.0](https://github.com/diillson/chatcli/compare/v1.29.1...v1.30.0) (2025-10-14)
+
+
+### Features
+
+* **llm:** refactor realm handling and update StackSpot client configuration ([#304](https://github.com/diillson/chatcli/issues/304)) ([#305](https://github.com/diillson/chatcli/issues/305)) ([a1e490a](https://github.com/diillson/chatcli/commit/a1e490ab8e07102338f23062e5fb97f1bc9d70e5))
+
 ## [1.29.1](https://github.com/diillson/chatcli/compare/v1.29.0...v1.29.1) (2025-10-08)
 
 
