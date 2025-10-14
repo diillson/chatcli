@@ -5,12 +5,10 @@ go 1.23.2
 require (
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/charmbracelet/glamour v0.9.1
-	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/stretchr/testify v1.8.1
 	go.uber.org/zap v1.27.0
 	golang.org/x/sys v0.34.0
-	golang.org/x/term v0.30.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
@@ -44,6 +42,7 @@ require (
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.37.0 // indirect
+	golang.org/x/term v0.30.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

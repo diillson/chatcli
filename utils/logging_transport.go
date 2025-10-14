@@ -205,6 +205,7 @@ func (t *LoggingTransport) sanitizeURL(urlStr string) string {
 		"access_token",
 		"refresh_token",
 		"client_secret",
+		"client_key",
 		"password",
 		"secret",
 	}
@@ -270,7 +271,7 @@ func (t *LoggingTransport) sanitizeBody(contentType string, body []byte) []byte 
 		if err := json.Unmarshal(body, &data); err == nil {
 			// Mascara campos sensíveis conhecidos (shallow)
 			for _, k := range []string{
-				"api_key", "password", "token", "access_token", "refresh_token", "client_secret", "authorization",
+				"api_key", "password", "token", "access_token", "refresh_token", "client_secret", "client_key", "authorization",
 			} {
 				if _, exists := data[k]; exists {
 					data[k] = "[REDACTED]"

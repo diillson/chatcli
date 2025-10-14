@@ -17,7 +17,8 @@ func TestTokenManager_GetAccessToken_Success(t *testing.T) {
 		err := r.ParseForm()
 		require.NoError(t, err, "Parsing form should not produce an error")
 		assert.Equal(t, "test_client_id", r.Form.Get("client_id"))
-		assert.Equal(t, "test_client_secret", r.Form.Get("client_secret"))
+		// A API espera 'client_secret', então verificamos isso no corpo do post
+		assert.Equal(t, "test_client_key", r.Form.Get("client_secret"))
 
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
@@ -26,14 +27,12 @@ func TestTokenManager_GetAccessToken_Success(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	// NewTokenManager retorna a interface Manager
-	tmInterface := NewTokenManager("test_client_id", "test_client_secret", "slug", "tenant", logger)
+	tmInterface := NewTokenManager("test_client_id", "test_client_key", "test-realm", logger)
 
-	// Fazemos um type assertion para acessar a struct concreta e seus campos.
 	tm, ok := tmInterface.(*TokenManager)
 	require.True(t, ok, "NewTokenManager should return a concrete *TokenManager")
 
-	// Agora podemos acessar o campo não exportado para o teste.
+	// O override substitui a URL inteira, então o mock não precisa verificar o path
 	tm.tokenURLOverride = server.URL
 
 	token, err := tm.GetAccessToken(context.Background())
@@ -53,7 +52,7 @@ func TestTokenManager_RefreshToken_Handles401(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	tmInterface := NewTokenManager("bad_id", "bad_secret", "slug", "tenant", logger)
+	tmInterface := NewTokenManager("bad_id", "bad_key", "test-realm", logger)
 
 	tm, ok := tmInterface.(*TokenManager)
 	require.True(t, ok)

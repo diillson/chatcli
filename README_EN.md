@@ -124,7 +124,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     - `GOOGLEAI_API_KEY`, `GOOGLEAI_MODEL`, `GOOGLEAI_MAX_TOKENS`
     - `XAI_API_KEY`, `XAI_MODEL`, `XAI_MAX_TOKENS`
     - `OLLAMA_ENABLED`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_MAX_TOKENS`, `OLLAMA_FILTER_THINKING` – **(Optional)** Filters "thinking aloud" from models like Qwen3 (true/false, default: true)
-    - `CLIENT_ID`, `CLIENT_SECRET`, `SLUG_NAME`, `TENANT_NAME` (for StackSpot)
+    - `CLIENT_ID`, `CLIENT_KEY`, `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` (for StackSpot)
 - **Agente**:
     - `CHATCLI_AGENT_CMD_TIMEOUT` – **(Optional)** Default timeout for each command executed by the Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default: `10m`.
     - `CHATCLI_AGENT_DENYLIST` – **(Optional)** Semicolon-separated list of regular expressions to block extra dangerous commands. Example: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
@@ -157,9 +157,9 @@ OPENAI_MAX_TOKENS=60000
 
 # StackSpot Settings
 CLIENT_ID=your-client-id
-CLIENT_SECRET=your-client-secret
-SLUG_NAME=your-stackspot-slug
-TENANT_NAME=your-tenant-name
+CLIENT_KEY=your-client-key
+STACKSPOT_REALM=your-realm
+STACKSPOT_AGENT_ID=your-agent-id
 
 # ClaudeAI Settings
 CLAUDEAI_API_KEY=your-claudeai-key
@@ -211,6 +211,8 @@ Execute prompts in a single line, ideal for scripting and automation.
     - `--provider`: Overrides the LLM provider at runtime (`OPENAI`, `OPENAI_ASSISTANT`, `CLAUDEAI`, `GOOGLEAI`, `STACKSPOT`, `XAI`).
     - `--model`: Chooses the model for the active provider (e.g., `gpt-4o-mini`, `claude-3-5-sonnet-20241022`, `gemini-2.5-flash`, etc.).
     - `--max-tokens`: Defines the maximum amount of tokens used for active provider.
+    - `--realm`: Overrides the StackSpot realm at runtime.
+    - `--agent-id`: Overrides the StackSpot agent ID at runtime.
     - `--timeout`: Sets the timeout for the one-shot call (default: `5m`).
     - `--no-anim`: Disables animations (useful in scripts/CI).
     - `--agent-auto-exec`: Automatically executes the first command suggested by the agent (in agent mode).
