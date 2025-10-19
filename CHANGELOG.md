@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.0](https://github.com/diillson/chatcli/compare/v1.30.0...v1.31.0) (2025-10-19)
+
+
+### Features
+
+* **i18n:** implement internationalization support and update error messages. ([#307](https://github.com/diillson/chatcli/issues/307)) ([#308](https://github.com/diillson/chatcli/issues/308)) ([386e213](https://github.com/diillson/chatcli/commit/386e2132d2c6777d6733d7e174d2f113b9351205))
+
 ## [1.30.0](https://github.com/diillson/chatcli/compare/v1.29.1...v1.30.0) (2025-10-14)
 
 
