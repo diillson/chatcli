@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -78,7 +79,7 @@ func (r *UIRenderer) ShowInPager(text string) error {
 
 // PrintPlanCompact imprime plano em formato compacto
 func (r *UIRenderer) PrintPlanCompact(blocks []CommandBlock, outputs []*CommandOutput) {
-	fmt.Println(r.Colorize(" 📋 PLANO (visão compacta)", ColorLime+ColorBold))
+	fmt.Println(r.Colorize(i18n.T("agent.plan.compact_view"), ColorLime+ColorBold))
 	for i, b := range blocks {
 		status := "⏳"
 		if i < len(outputs) && outputs[i] != nil {
@@ -90,7 +91,7 @@ func (r *UIRenderer) PrintPlanCompact(blocks []CommandBlock, outputs []*CommandO
 		}
 		title := b.Description
 		if title == "" {
-			title = "Executar comandos"
+			title = i18n.T("agent.plan.default_description")
 		}
 
 		firstLine := ""
@@ -105,41 +106,41 @@ func (r *UIRenderer) PrintPlanCompact(blocks []CommandBlock, outputs []*CommandO
 
 // PrintPlanFull imprime plano em formato completo
 func (r *UIRenderer) PrintPlanFull(blocks []CommandBlock, outputs []*CommandOutput, validator *CommandValidator) {
-	fmt.Println(r.Colorize(" 📋 PLANO (visão completa)", ColorLime+ColorBold))
+	fmt.Println(r.Colorize(i18n.T("agent.plan.full_view"), ColorLime+ColorBold))
 
 	for i, b := range blocks {
-		status := "⏳ Pendente"
+		status := i18n.T("agent.plan.status.pending")
 		statusColor := ColorGray
 		if i < len(outputs) && outputs[i] != nil {
 			if strings.TrimSpace(outputs[i].ErrorMsg) == "" {
-				status = "✅ OK"
+				status = i18n.T("agent.plan.status.ok")
 				statusColor = ColorGreen
 			} else {
-				status = "❌ ERRO"
+				status = i18n.T("agent.plan.status.error")
 				statusColor = ColorYellow
 			}
 		}
 
 		title := b.Description
 		if title == "" {
-			title = "Executar comandos"
+			title = i18n.T("agent.plan.default_description")
 		}
 		danger := ""
 		if r.isBlockDangerous(b, validator) {
-			danger = r.Colorize("⚠️ Potencialmente perigoso", ColorYellow)
+			danger = r.Colorize(i18n.T("agent.plan.risk.dangerous"), ColorYellow)
 		} else {
-			danger = r.Colorize("Seguro", ColorGray)
+			danger = r.Colorize(i18n.T("agent.plan.risk.safe"), ColorGray)
 		}
 
-		fmt.Printf("\n%s\n", r.Colorize(fmt.Sprintf(" 🔷 COMANDO #%d: %s", i+1, title), ColorPurple+ColorBold))
-		fmt.Printf("    %s %s\n", r.Colorize("Tipo:", ColorGray), b.Language)
-		fmt.Printf("    %s %s\n", r.Colorize("Risco:", ColorGray), danger)
-		fmt.Printf("    %s %s\n", r.Colorize("Status:", ColorGray), r.Colorize(status, statusColor))
+		fmt.Printf("\n%s\n", r.Colorize(fmt.Sprintf(i18n.T("agent.plan.command_header"), i+1, title), ColorPurple+ColorBold))
+		fmt.Printf("    %s %s\n", r.Colorize(i18n.T("agent.plan.field.type"), ColorGray), b.Language)
+		fmt.Printf("    %s %s\n", r.Colorize(i18n.T("agent.plan.field.risk"), ColorGray), danger)
+		fmt.Printf("    %s %s\n", r.Colorize(i18n.T("agent.plan.field.status"), ColorGray), r.Colorize(status, statusColor))
 
-		fmt.Println(r.Colorize("    Código:", ColorGray))
+		fmt.Println(r.Colorize("    "+i18n.T("agent.plan.field.code"), ColorGray))
 		for idx, cmd := range b.Commands {
 			if len(b.Commands) > 1 {
-				fmt.Printf(r.Colorize("      ( %d / %d )\n", ColorGray), idx+1, len(b.Commands))
+				fmt.Printf(r.Colorize(fmt.Sprintf("      "+i18n.T("agent.plan.command_separator")+"\n", idx+1, len(b.Commands)), ColorGray), idx+1, len(b.Commands))
 			}
 			prefix := ""
 			if b.Language == "shell" || b.Language == "bash" || b.Language == "sh" {
@@ -171,7 +172,7 @@ func (r *UIRenderer) PrintLastResult(outputs []*CommandOutput, lastIdx int) {
 	if lastIdx < 0 || lastIdx >= len(outputs) || outputs[lastIdx] == nil {
 		return
 	}
-	fmt.Println(r.Colorize(" 🧾 ÚLTIMO RESULTADO", ColorLime+ColorBold))
+	fmt.Println(r.Colorize(i18n.T("agent.last_result.header"), ColorLime+ColorBold))
 
 	out := outputs[lastIdx].Output
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -183,40 +184,41 @@ func (r *UIRenderer) PrintLastResult(outputs []*CommandOutput, lastIdx int) {
 		fmt.Println(out)
 	}
 
-	fmt.Printf("\nDicas: v%d = ver completo | w%d = salvar em arquivo | Enter = continuar\n", lastIdx+1, lastIdx+1)
+	tipsMessage := i18n.T("agent.last_result.tips", lastIdx+1, lastIdx+1)
+	fmt.Printf("\n%s\n", tipsMessage)
 }
 
 // PrintHeader imprime o cabeçalho do modo agente
 func (r *UIRenderer) PrintHeader() {
 	fmt.Println("\n" + r.Colorize(" "+strings.Repeat("━", 58), ColorGray))
-	fmt.Println(r.Colorize(" 🤖 MODO AGENTE: PLANO DE AÇÃO", ColorLime+ColorBold))
+	fmt.Println(r.Colorize(i18n.T("agent.header.title"), ColorLime+ColorBold))
 	fmt.Println(r.Colorize(" "+strings.Repeat("━", 58), ColorGray))
-	fmt.Println(r.Colorize(" A IA sugeriu os seguintes comandos para executar sua tarefa.", ColorGray))
+	fmt.Println(r.Colorize(i18n.T("agent.header.description"), ColorGray))
 }
 
 // PrintMenu imprime o menu de opções
 func (r *UIRenderer) PrintMenu() {
 	fmt.Println("\n" + r.Colorize(strings.Repeat("-", 60), ColorGray))
-	fmt.Println(r.Colorize(" O QUE VOCÊ DESEJA FAZER?", ColorLime+ColorBold))
+	fmt.Println(r.Colorize(i18n.T("agent.menu.header"), ColorLime+ColorBold))
 	fmt.Println(r.Colorize(strings.Repeat("-", 60), ColorGray))
-	fmt.Printf("  %s: Executa um comando específico (ex: 1, 2, ...)\n", r.Colorize(fmt.Sprintf("%-6s", "[1..N]"), ColorYellow))
-	fmt.Printf("  %s: Executa todos os comandos em sequência\n", r.Colorize(fmt.Sprintf("%-6s", "a"), ColorYellow))
-	fmt.Printf("  %s: Edita o comando N (ex: e1)\n", r.Colorize(fmt.Sprintf("%-6s", "eN"), ColorYellow))
-	fmt.Printf("  %s: Simula (dry-run) o comando N (ex: t2)\n", r.Colorize(fmt.Sprintf("%-6s", "tN"), ColorYellow))
-	fmt.Printf("  %s: Pede continuação à IA com a saída do N (ex: c2)\n", r.Colorize(fmt.Sprintf("%-6s", "cN"), ColorYellow))
-	fmt.Printf("  %s: Adiciona pré-contexto ao N antes de executar (ex: pc1)\n", r.Colorize(fmt.Sprintf("%-6s", "pcN"), ColorYellow))
-	fmt.Printf("  %s: Adiciona contexto à SAÍDA do N (ex: ac1)\n", r.Colorize(fmt.Sprintf("%-6s", "acN"), ColorYellow))
-	fmt.Printf("  %s: Ver saída completa do N no pager\n", r.Colorize(fmt.Sprintf("%-6s", "vN"), ColorYellow))
-	fmt.Printf("  %s: Salvar saída do N em arquivo\n", r.Colorize(fmt.Sprintf("%-6s", "wN"), ColorYellow))
-	fmt.Printf("  %s: Alterna plano completo/compacto\n", r.Colorize(fmt.Sprintf("%-6s", "p"), ColorYellow))
-	fmt.Printf("  %s: Atualiza a tela (clear)\n", r.Colorize(fmt.Sprintf("%-6s", "r"), ColorYellow))
-	fmt.Printf("  %s: Sai do Modo Agente\n", r.Colorize(fmt.Sprintf("%-6s", "q"), ColorYellow))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "[1..N]"), ColorYellow), i18n.T("agent.menu.exec_n"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "a"), ColorYellow), i18n.T("agent.menu.exec_all"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "eN"), ColorYellow), i18n.T("agent.menu.edit"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "tN"), ColorYellow), i18n.T("agent.menu.dry_run"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "cN"), ColorYellow), i18n.T("agent.menu.continue"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "pcN"), ColorYellow), i18n.T("agent.menu.pre_context"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "acN"), ColorYellow), i18n.T("agent.menu.post_context"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "vN"), ColorYellow), i18n.T("agent.menu.view"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "wN"), ColorYellow), i18n.T("agent.menu.save"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "p"), ColorYellow), i18n.T("agent.menu.toggle_plan"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "r"), ColorYellow), i18n.T("agent.menu.redraw"))
+	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "q"), ColorYellow), i18n.T("agent.menu.quit"))
 	fmt.Println(r.Colorize(strings.Repeat("-", 60), ColorGray))
 }
 
 // PrintPrompt imprime o prompt de entrada
 func (r *UIRenderer) PrintPrompt() string {
-	return r.Colorize("\n ➤ Sua escolha: ", ColorLime)
+	return r.Colorize(i18n.T("agent.prompt.choice"), ColorLime)
 }
 
 // VisibleLen calcula comprimento visível (sem ANSI codes) - EXPORTADA

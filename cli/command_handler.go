@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -24,7 +25,7 @@ func NewCommandHandler(cli *ChatCLI) *CommandHandler {
 func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	switch {
 	case userInput == "/exit" || userInput == "exit" || userInput == "/quit" || userInput == "quit":
-		fmt.Println("Até mais!")
+		fmt.Println(i18n.T("status.exiting"))
 		return true
 	case userInput == "/reload":
 		ch.cli.reloadConfiguration()
@@ -55,13 +56,63 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/newsession":
 		ch.cli.history = []models.Message{}
 		ch.cli.currentSessionName = ""
-		fmt.Println("Iniciada nova sessão de conversa; histórico foi limpo.")
+		fmt.Println(i18n.T("session.new_session_started"))
 		return false
 	case strings.HasPrefix(userInput, "/session"):
 		ch.handleSessionCommand(userInput)
 		return false
 	default:
-		fmt.Println("Comando desconhecido. Use /help para ver os comandos disponíveis.")
+		fmt.Println(i18n.T("error.unknown_command"))
 		return false
+	}
+}
+
+// handleSessionCommand foi movido para cá para consolidar a lógica do handler
+func (ch *CommandHandler) handleSessionCommand(userInput string) {
+	args := strings.Fields(userInput)
+	if len(args) < 2 {
+		fmt.Println(i18n.T("session.usage_header"))
+		fmt.Println(i18n.T("session.usage_save"))
+		fmt.Println(i18n.T("session.usage_load"))
+		fmt.Println(i18n.T("session.usage_list"))
+		fmt.Println(i18n.T("session.usage_delete"))
+		fmt.Println(i18n.T("session.usage_new"))
+		return
+	}
+
+	command := args[1]
+	var name string
+	if len(args) > 2 {
+		name = args[2]
+	}
+
+	switch command {
+	case "save":
+		if name == "" {
+			fmt.Println(i18n.T("session.error_name_required_save"))
+			return
+		}
+		ch.cli.handleSaveSession(name)
+	case "load":
+		if name == "" {
+			fmt.Println(i18n.T("session.error_name_required_load"))
+			return
+		}
+		ch.cli.handleLoadSession(name)
+	case "list":
+		ch.cli.handleListSessions()
+	case "delete":
+		if name == "" {
+			fmt.Println(i18n.T("session.error_name_required_delete"))
+			return
+		}
+		ch.cli.handleDeleteSession(name)
+	case "new":
+		ch.cli.history = []models.Message{}
+		ch.cli.currentSessionName = ""
+		fmt.Println(i18n.T("session.new_session_started"))
+	default:
+		// CORREÇÃO: Usar Println com i18n.T
+		fmt.Println(i18n.T("session.unknown_command", command))
 	}
 }

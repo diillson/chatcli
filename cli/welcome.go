@@ -7,36 +7,37 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/diillson/chatcli/i18n" // <-- 1. IMPORTAR PACOTE I18N
 	"github.com/diillson/chatcli/version"
 )
 
-// Dicas para serem exibidas aleatoriamente
-var tips = []string{
-	"Use " + colorize("@file <caminho>", ColorCyan) + " para adicionar o conteúdo de um arquivo ao contexto.",
-	"Use " + colorize("@git", ColorCyan) + " para incluir o status e os commits recentes do seu repositório.",
-	"Precisa executar um comando? Use " + colorize("@command <seu_comando>", ColorCyan) + ".",
-	"Alterne entre provedores de IA a qualquer momento com o comando " + colorize("/switch", ColorGreen) + ".",
-	"Limpe o histórico e comece uma nova conversa com " + colorize("/newsession", ColorGreen) + ".",
-	"Verifique sua configuração atual (sem segredos!) com o comando " + colorize("/config", ColorGreen) + ".",
-	"Pressione " + colorize("Ctrl+C", ColorCyan) + " uma vez para cancelar uma resposta da IA sem sair do chat.",
-	"Use o modo agente com " + colorize("/agent <tarefa>", ColorGreen) + " para que a IA execute comandos por você.",
-	"No Modo Agente, use " + colorize("p", ColorCyan) + " para alternar entre Visão COMPACTA e COMPLETA.",
-	"No Modo Agente, use " + colorize("vN", ColorCyan) + " para abrir a saída completa no pager e " + colorize("wN", ColorCyan) + " para salvar em arquivo.",
-	"O 'Último Resultado' do Modo Agente aparece sempre no rodapé, sem precisar rolar a tela.",
+// Dicas agora contêm as chaves de tradução.
+var tipKeys = []string{ // <-- 2. ALTERADO DE 'tips' PARA 'tipKeys'
+	"tip.add_file",
+	"tip.git_context",
+	"tip.exec_command",
+	"tip.switch_provider",
+	"tip.new_session",
+	"tip.view_config",
+	"tip.cancel_request",
+	"tip.agent_mode",
+	"tip.agent_toggle_view",
+	"tip.agent_output_actions",
+	"tip.agent_last_result",
 }
 
-const screenWidth = 85 // largura global para tudo
+const screenWidth = 87 // largura global para tudo
 
 // printLogo exibe o novo logo do ChatCLI em ASCII art.
 func printLogo() {
 	logo := `
-       ██████╗ ██╗  ██╗ █████╗ ████████╗ ██████╗██╗     ██╗
-      ██╔════╝ ██║  ██║██╔══██╗╚══██╔══╝██╔════╝██║     ██║
-      ██║      ███████║███████║   ██║   ██║     ██║     ██║
-      ██║      ██╔══██║██╔══██║   ██║   ██║     ██║     ██║
-      ╚██████╗ ██║  ██║██║  ██║   ██║   ╚██████╗███████╗██║
-       ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═════╝╚══════╝╚═╝
-    `
+           ██████╗ ██╗  ██╗ █████╗ ████████╗ ██████╗██╗     ██╗
+          ██╔════╝ ██║  ██║██╔══██╗╚══██╔══╝██╔════╝██║     ██║
+          ██║      ███████║███████║   ██║   ██║     ██║     ██║
+          ██║      ██╔══██║██╔══██║   ██║   ██║     ██║     ██║
+          ╚██████╗ ██║  ██║██║  ██║   ██║   ╚██████╗███████╗██║
+           ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝╚══════╝╚═╝
+        `
 
 	coloredLogo := strings.ReplaceAll(logo, "█", colorize("█", ColorLime))
 	coloredLogo = strings.ReplaceAll(coloredLogo, "╗", colorize("╗", ColorGray))
@@ -109,13 +110,15 @@ func wrapStringWithColor(text string, maxWidth int) []string {
 	return lines
 }
 
-// --- caixa de dica (sem argumentos) ---
+// --- caixa de dica (agora traduzida) ---
 func printTipBox() {
-	tip := tips[rand.Intn(len(tips))]
+	// 3. SORTEIA UMA CHAVE E TRADUZ O TEXTO DA DICA E O TÍTULO
+	tipKey := tipKeys[rand.Intn(len(tipKeys))]
+	tip := i18n.T(tipKey) // Traduz a dica sorteada
 
 	width := screenWidth
 	innerContent := width - 4
-	title := "Você Sabia?"
+	title := i18n.T("welcome.tip.title") // Traduz o título da caixa
 
 	titleWithSpaces := " " + title + " "
 	tl := visibleLen(titleWithSpaces)
@@ -150,25 +153,27 @@ func printTipBox() {
 	fmt.Println(colorize("╰"+strings.Repeat("─", width-2)+"╯", ColorGray))
 }
 
-// PrintWelcomeScreen exibe a tela de boas-vindas completa.
+// PrintWelcomeScreen exibe a tela de boas-vindas completa e traduzida.
 func (cli *ChatCLI) PrintWelcomeScreen() {
 	printLogo()
 
 	v, c, _ := version.GetBuildInfo()
 	if v != "" && v != "dev" && v != "unknown" {
-		versionStr := fmt.Sprintf("Versão: %s (commit: %s)", v, c)
+		versionStr := i18n.T("version.label", v, c)
 		padding := (screenWidth - len(versionStr)) / 2
 		fmt.Printf("%s%s\n\n", strings.Repeat(" ", padding), colorize(versionStr, ColorGray))
 	}
 
 	printTipBox()
 
-	footer := colorize("/help", ColorGreen) +
-		colorize(" para todos os comandos  •  ", ColorGray) +
-		colorize("/exit", ColorGreen) +
-		colorize(" para sair  •  ", ColorGray) +
-		colorize("/switch --model", ColorGreen) +
-		colorize(" trocar modelo", ColorGray)
+	footer := colorize(i18n.T("welcome.footer.help.cmd"), ColorGreen) +
+		colorize(" "+i18n.T("welcome.footer.help.desc"), ColorGray) +
+		colorize("  •  ", ColorGray) +
+		colorize(i18n.T("welcome.footer.exit.cmd"), ColorGreen) +
+		colorize(" "+i18n.T("welcome.footer.exit.desc"), ColorGray) +
+		colorize("  •  ", ColorGray) +
+		colorize(i18n.T("welcome.footer.switch_model.cmd"), ColorGreen) +
+		colorize(" "+i18n.T("welcome.footer.switch_model.desc"), ColorGray)
 
 	separator := colorize(strings.Repeat("━", screenWidth), ColorGray)
 
@@ -178,7 +183,7 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 	fmt.Println(separator)
 
 	// model info alinhado à esquerda
-	modelInfo := fmt.Sprintf("🤖 Você está conversando com %s (%s)", cli.Client.GetModelName(), cli.Provider)
+	modelInfo := i18n.T("welcome.current_model", cli.Client.GetModelName(), cli.Provider)
 	fmt.Println(colorize(modelInfo, ColorLime))
 	fmt.Println()
 }

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -95,12 +96,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	var systemInstruction string
 	if isAssistant {
-		systemInstruction = "Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema de forma segura. " +
-			"Sempre explique brevemente o propósito antes dos comandos. Prefira comandos simples e não interativos. " +
-			"Evite comandos potencialmente destrutivos (rm -rf, dd, mkfs, etc.) sem um aviso claro de risco e alternativas seguras. " +
-			"Quando sugerir comandos executáveis, use blocos de código exatamente no formato:\n\n" +
-			"```execute:<tipo>\n<comandos>\n```\n\n" +
-			"Tipos aceitos: shell, git, docker, kubectl. Se houver ambiguidade, faça uma pergunta antes de fornecer comandos."
+		systemInstruction = i18n.T("agent.system_prompt.interactive")
 	} else {
 		osName := runtime.GOOS
 		shellName := utils.GetUserShell()
@@ -110,53 +106,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 			currentDir = "desconhecido"
 		}
 
-		systemInstructionTemplate := `Você é um assistente especialista em linha de comando, operando dentro de um terminal. Seu objetivo é ajudar o usuário a realizar tarefas de forma segura e eficiente, fornecendo os comandos corretos.
-        
-        **[Contexto Disponível]**
-        - Sistema Operacional: %s
-        - Shell Padrão: %s
-        - Diretório Atual: %s
-        
-        **[PROCESSO OBRIGATÓRIO]**
-        Para cada solicitação do usuário, você DEVE seguir estritamente estas duas etapas:
-        
-        **Etapa 1: Planejamento**
-        Pense passo a passo de forma interna. Se necessário, resuma o raciocínio em uma tag <reasoning> para mostrar ao usuário.
-        
-        **Etapa 2: Resposta Final Estruturada**
-        Após o raciocínio, forneça a resposta final contendo:
-        1. Uma tag <explanation> com uma explicação clara e concisa do que os comandos farão.
-        2. Um ou mais blocos de código no formato de exemplo (o bloco de exemplo real é injetado abaixo).
-        
-        **[DIRETRIZES E RESTRIÇÕES]**
-        1. Segurança é Prioridade: NUNCA sugira comandos destrutivos ('rm -rf', 'dd', 'mkfs', etc.) sem um aviso explícito sobre os riscos na tag <explanation>.
-        2. Clareza: Prefira comandos que sejam fáceis de entender. Se um comando for complexo (ex: 'awk', 'sed'), explique cada parte dele.
-        3. Eficiência: Use pipes ('|') e combine comandos para criar soluções eficientes quando apropriado.
-        4. Interatividade: Evite comandos interativos (ex: 'vim', 'nano', 'ssh' sem argumentos). Se for necessário, avise o usuário na <explanation> e adicione o marcador #interactive ao final do comando (ex.: 'ssh user@host #interactive') para que a CLI trate como interativo.
-        5. Ambiguidade: Se o pedido do usuário for ambíguo, em vez de adivinhar, faça uma pergunta para esclarecer. NÃO forneça um bloco execute nesse caso.
-        6. Formato: Use blocos de código do tipo execute:<tipo> conforme exemplo injetado abaixo.
-        
-        **[EXEMPLO COMPLETO]**
-        
-        **Solicitação do Usuário:** "liste todos os arquivos go neste projeto e conte as linhas de cada um"
-        
-        **Sua Resposta:**
-        <reasoning>
-        1. O usuário quer encontrar todos os arquivos com a extensão .go. O comando 'find' é ideal para isso.
-        2. O ponto de partida da busca deve ser o diretório atual ('.').
-        3. O critério de busca é o nome do arquivo, então usarei: find . -name "*.go"
-        4. Para cada arquivo encontrado, o usuário quer contar as linhas. O comando 'wc -l' faz isso.
-        5. Preciso combinar find com wc -l. A melhor forma de fazer isso para múltiplos arquivos é usando xargs ou a opção -exec do find. A opção -exec com + é eficiente.
-        6. O comando final será: find . -name "*.go" -exec wc -l {} +
-        </reasoning>
-        <explanation>
-        Vou usar o comando 'find' para procurar recursivamente por todos os arquivos que terminam com .go a partir do diretório atual. Em seguida, para cada arquivo encontrado, vou executar o comando 'wc -l' para contar o número de linhas.
-        </explanation>
-        
-        Exemplo de bloco de comando (formato mostrado abaixo):`
-
+		systemInstruction = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
 		codeFence := "```execute:shell\nfind . -name \"*.go\" -exec wc -l {} +\n```"
-		systemInstruction = fmt.Sprintf(systemInstructionTemplate, osName, shellName, currentDir) + "\n\n" + codeFence
+		systemInstruction = systemInstruction + "\n\n" + codeFence
 	}
 
 	a.cli.history = append(a.cli.history, models.Message{
@@ -226,14 +178,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 // RunOnce executa modo agente one-shot
 func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool) error {
-	systemInstruction := `Você é um assistente de linha de comando operando em um modo de execução única (one-shot).
-                    Sua tarefa é analisar o pedido do usuário e fornecer **um único e conciso bloco de comando** que resolva a tarefa da forma mais eficiente e segura possível.
-        
-        - Responda **apenas** com o melhor bloco de comando no formato ` + "```" + `execute:shell.
-        - **Não** forneça múltiplos blocos de comando ou alternativas.
-        - **Não** adicione explicações longas antes ou depois, apenas o comando necessário para a execução.
-        - Evite comandos destrutivos (como rm -rf) a menos que seja explicitamente solicitado e a intenção seja clara.
-        - O comando deve ser diretamente executável dado que precisamos apenas de um unico comando o melhor e expert possivel.`
+	systemInstruction := i18n.T("agent.system_prompt.oneshot")
 
 	a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
 	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: query})
@@ -250,18 +195,18 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 	a.displayResponseWithoutCommands(aiResponse, commandBlocks)
 
 	if len(commandBlocks) == 0 {
-		fmt.Println("\nNenhum comando executável foi sugerido pela IA.")
+		fmt.Println(i18n.T("agent.oneshot.no_command"))
 		return nil
 	}
 
 	if !autoExecute {
-		fmt.Println("\n🤖 MODO AGENTE (ONE-SHOT): Comando Sugerido")
+		fmt.Println(i18n.T("agent.oneshot.header"))
 		fmt.Println("==============================================")
-		fmt.Println("Para executar automaticamente, use o flag --agent-auto-exec")
+		fmt.Println(i18n.T("agent.oneshot.auto_exec_tip"))
 
 		block := commandBlocks[0]
-		fmt.Printf("\n🔷 Bloco de Comando: %s\n", block.Description)
-		fmt.Printf("  Linguagem: %s\n", block.Language)
+		fmt.Println(i18n.T("agent.oneshot.block_header", block.Description))
+		fmt.Println(i18n.T("agent.oneshot.language", block.Language))
 		for _, cmd := range block.Commands {
 			fmt.Printf("    $ %s\n", cmd)
 		}
@@ -269,24 +214,25 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 		return nil
 	}
 
-	fmt.Println("\n🤖 MODO AGENTE (ONE-SHOT): Execução Automática")
+	fmt.Println(i18n.T("agent.oneshot.header_auto_exec"))
 	fmt.Println("===============================================")
 
 	blockToExecute := commandBlocks[0]
 
 	for _, cmd := range blockToExecute.Commands {
 		if a.validator.IsDangerous(cmd) {
-			errMsg := fmt.Sprintf("execução automática abortada por segurança. O comando sugerido é potencialmente perigoso: %q", cmd)
+			errMsg := i18n.T("agent.oneshot.auto_exec_aborted", cmd)
 			fmt.Printf("⚠️ %s\n", errMsg)
 			return errors.New(errMsg)
 		}
 	}
 
-	fmt.Printf("✅ Comando seguro detectado. Executando o comando sugerido...\n")
+	fmt.Println(i18n.T("agent.oneshot.auto_exec_running"))
 	_, errorMsg := a.executeCommandsWithOutput(ctx, blockToExecute)
 
 	if errorMsg != "" {
-		return fmt.Errorf("o comando foi executado, mas retornou um erro: %s", errorMsg)
+		finalError := i18n.T("agent.oneshot.error_with_output", errorMsg)
+		return fmt.Errorf("%s", finalError)
 	}
 
 	return nil
@@ -496,7 +442,7 @@ func (a *AgentMode) displayResponseWithoutCommands(response string, blocks []Com
 // getMultilineInput obtém entrada de múltiplas linhas
 func (a *AgentMode) getMultilineInput(prompt string) string {
 	fmt.Print(prompt)
-	fmt.Println("(Digite '.' sozinho em uma linha para finalizar ou Ctrl+D)")
+	fmt.Println(i18n.T("agent.multiline_input_tip"))
 
 	var lines []string
 	reader := bufio.NewReader(os.Stdin)
@@ -521,45 +467,25 @@ func (a *AgentMode) requestLLMContinuation(ctx context.Context, userQuery, previ
 	newCtx, cancel := a.contextManager.CreateExecutionContext()
 	defer cancel()
 
-	// Usar newCtx para evitar warning
-	_ = ctx // ctx original não usado aqui, mas mantemos na assinatura por compatibilidade
-
-	var prompt strings.Builder
-	prompt.WriteString("O comando sugerido anteriormente foi:\n")
-	prompt.WriteString(previousCommand)
+	_ = ctx
 
 	outSafe := utils.SanitizeSensitiveText(output)
 	errSafe := utils.SanitizeSensitiveText(stderr)
 
-	prompt.WriteString("\n\nO resultado (stdout) foi:\n")
-	prompt.WriteString(outSafe)
+	prompt := i18n.T("agent.llm_prompt.continuation", previousCommand, outSafe, errSafe)
 
-	if errSafe != "" {
-		prompt.WriteString("\n\nO erro (stderr) foi:\n")
-		prompt.WriteString(errSafe)
-	}
-
-	prompt.WriteString("\n\nPor favor, sugira uma correção ou próximos passos baseados no resultado. ")
-	prompt.WriteString("Forneça comandos executáveis no formato apropriado.")
-
-	a.cli.history = append(a.cli.history, models.Message{
-		Role:    "user",
-		Content: prompt.String(),
-	})
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt.String(), a.cli.history, 0)
+	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt, a.cli.history, 0)
 	a.cli.animation.StopThinkingAnimation()
 
 	if err != nil {
-		fmt.Println("❌ Erro ao pedir continuação à IA:", err)
+		fmt.Println(i18n.T("agent.error.continuation_failed"), err)
 		return nil, err
 	}
 
-	a.cli.history = append(a.cli.history, models.Message{
-		Role:    "assistant",
-		Content: aiResponse,
-	})
+	a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
 
 	blocks := a.extractCommandBlocks(aiResponse)
 	a.displayResponseWithoutCommands(aiResponse, blocks)
@@ -571,50 +497,25 @@ func (a *AgentMode) requestLLMContinuationWithContext(ctx context.Context, previ
 	newCtx, cancel := a.contextManager.CreateExecutionContext()
 	defer cancel()
 
-	_ = ctx // Mantém compatibilidade
-
-	var prompt strings.Builder
-
-	prompt.WriteString("O comando sugerido anteriormente foi:\n")
-	prompt.WriteString(previousCommand)
+	_ = ctx
 
 	outSafe := utils.SanitizeSensitiveText(output)
 	errSafe := utils.SanitizeSensitiveText(stderr)
 
-	prompt.WriteString("\n\nO resultado (stdout) foi:\n")
-	prompt.WriteString(outSafe)
+	prompt := i18n.T("agent.llm_prompt.continuation_with_context", previousCommand, outSafe, errSafe, userContext)
 
-	if errSafe != "" {
-		prompt.WriteString("\n\nO erro (stderr) foi:\n")
-		prompt.WriteString(errSafe)
-	}
-
-	if userContext != "" {
-		prompt.WriteString("\n\nContexto adicional fornecido pelo usuário:\n")
-		prompt.WriteString(userContext)
-	}
-
-	prompt.WriteString("\n\nPor favor, sugira uma correção ou próximos passos baseados no resultado e no contexto fornecido. ")
-	prompt.WriteString("Forneça comandos executáveis no formato apropriado.")
-
-	a.cli.history = append(a.cli.history, models.Message{
-		Role:    "user",
-		Content: prompt.String(),
-	})
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt.String(), a.cli.history, 0)
+	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt, a.cli.history, 0)
 	a.cli.animation.StopThinkingAnimation()
 
 	if err != nil {
-		fmt.Println("❌ Erro ao pedir continuação à IA:", err)
+		fmt.Println(i18n.T("agent.error.continuation_failed"), err)
 		return nil, err
 	}
 
-	a.cli.history = append(a.cli.history, models.Message{
-		Role:    "assistant",
-		Content: aiResponse,
-	})
+	a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
 
 	blocks := a.extractCommandBlocks(aiResponse)
 	a.displayResponseWithoutCommands(aiResponse, blocks)
@@ -626,34 +527,22 @@ func (a *AgentMode) requestLLMWithPreExecutionContext(ctx context.Context, origi
 	newCtx, cancel := a.contextManager.CreateExecutionContext()
 	defer cancel()
 
-	_ = ctx // Mantém compatibilidade
+	_ = ctx
 
-	var prompt strings.Builder
-	prompt.WriteString("O comando que você sugeriu foi:\n```\n")
-	prompt.WriteString(originalCommand)
-	prompt.WriteString("\n```\n\n")
-	prompt.WriteString("Antes de executá-lo, o usuário forneceu o seguinte contexto ou instrução adicional:\n")
-	prompt.WriteString(userContext)
-	prompt.WriteString("\n\nPor favor, revise o comando sugerido com base neste novo contexto. Se necessário, modifique-o ou sugira um novo conjunto de comandos. Apresente os novos comandos no formato executável apropriado.")
+	prompt := i18n.T("agent.llm_prompt.pre_execution_context", originalCommand, userContext)
 
-	a.cli.history = append(a.cli.history, models.Message{
-		Role:    "user",
-		Content: prompt.String(),
-	})
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt.String(), a.cli.history, 0)
+	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt, a.cli.history, 0)
 	a.cli.animation.StopThinkingAnimation()
 
 	if err != nil {
-		fmt.Println("❌ Erro ao pedir refinamento à IA:", err)
+		fmt.Println(i18n.T("agent.error.refinement_failed"), err)
 		return nil, err
 	}
 
-	a.cli.history = append(a.cli.history, models.Message{
-		Role:    "assistant",
-		Content: aiResponse,
-	})
+	a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
 
 	blocks := a.extractCommandBlocks(aiResponse)
 	a.displayResponseWithoutCommands(aiResponse, blocks)
@@ -715,7 +604,7 @@ mainLoop:
 
 		switch {
 		case answer == "q":
-			fmt.Println(renderer.Colorize("\n ✅ Saindo do modo agente.", agent.ColorGray))
+			fmt.Println(renderer.Colorize(i18n.T("agent.status.exiting"), agent.ColorGray))
 			return
 
 		case answer == "r":
@@ -732,8 +621,8 @@ mainLoop:
 			nStr := strings.TrimPrefix(answer, "v")
 			n, err := strconv.Atoi(nStr)
 			if err != nil || n < 1 || n > len(outputs) || outputs[n-1] == nil {
-				fmt.Println("Sem saída para exibir.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.status.no_output_to_show"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			_ = renderer.ShowInPager(outputs[n-1].Output)
@@ -743,19 +632,19 @@ mainLoop:
 			nStr := strings.TrimPrefix(answer, "w")
 			n, err := strconv.Atoi(nStr)
 			if err != nil || n < 1 || n > len(outputs) || outputs[n-1] == nil {
-				fmt.Println("Sem saída para salvar.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.status.no_output_to_save"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			dir := filepath.Join(os.TempDir(), "chatcli-agent-logs")
 			_ = os.MkdirAll(dir, 0755)
 			fpath := filepath.Join(dir, fmt.Sprintf("cmd-%d-%d.log", n, time.Now().Unix()))
 			if writeErr := os.WriteFile(fpath, []byte(outputs[n-1].Output), 0644); writeErr != nil {
-				fmt.Println("Erro ao salvar:", writeErr)
+				fmt.Println(i18n.T("agent.status.error_saving"), writeErr)
 			} else {
-				fmt.Println("Arquivo salvo em:", fpath)
+				fmt.Println(i18n.T("agent.status.file_saved_at"), fpath)
 			}
-			_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 			continue
 
 		case answer == "a":
@@ -773,8 +662,8 @@ mainLoop:
 			}
 
 			if hasDanger {
-				fmt.Println("⚠️ AVISO: Um ou mais comandos são potencialmente perigosos.")
-				fmt.Println("Confira comandos individuais antes de aprovar execução em lote!")
+				fmt.Println(i18n.T("agent.status.batch_warning"))
+				fmt.Println(i18n.T("agent.status.batch_check_individual"))
 			}
 
 			cmd := exec.Command("stty", "sane")
@@ -782,21 +671,21 @@ mainLoop:
 			cmd.Stdout = os.Stdout
 			_ = cmd.Run()
 
-			fmt.Print("\n⚠️ Executar todos os comandos em sequência? (s/N): ")
+			fmt.Print(i18n.T("agent.status.batch_confirm"))
 			reader := bufio.NewReader(os.Stdin)
 			confirmationInput, _ := reader.ReadString('\n')
 			confirmation := strings.ToLower(strings.TrimSpace(confirmationInput))
-			if confirmation != "s" {
-				fmt.Println("Execução em lote cancelada.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+			if confirmation != "s" && confirmation != "y" {
+				fmt.Println(i18n.T("agent.status.batch_cancelled"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
 			for i, block := range blocks {
-				fmt.Printf("\n🚀 Executando comando #%d:\n", i+1)
-				fmt.Printf("  Tipo: %s\n", block.Language)
+				fmt.Printf(i18n.T("agent.status.executing_command", i+1)+"\n", i+1)
+				fmt.Printf("  %s %s\n", i18n.T("agent.plan.field.type"), block.Language)
 				for j, cmd := range block.Commands {
-					fmt.Printf("  Comando %d/%d: %s\n", j+1, len(block.Commands), cmd)
+					fmt.Printf("  %s %d/%d: %s\n", "Comando", j+1, len(block.Commands), cmd)
 				}
 
 				freshCtx, freshCancel := a.contextManager.CreateExecutionContext()
@@ -811,8 +700,8 @@ mainLoop:
 				lastExecuted = i
 			}
 
-			fmt.Println("\n✅ Todos os comandos foram executados.")
-			fmt.Println("\nResumo:")
+			fmt.Println(i18n.T("agent.status.all_commands_executed"))
+			fmt.Println(i18n.T("agent.status.summary"))
 			for i, out := range outputs {
 				status := "OK"
 				if out == nil || strings.TrimSpace(out.ErrorMsg) != "" {
@@ -820,21 +709,21 @@ mainLoop:
 				}
 				fmt.Printf("- #%d: %s\n", i+1, status)
 			}
-			_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 			continue
 
 		case strings.HasPrefix(answer, "e"):
 			cmdNumStr := strings.TrimPrefix(answer, "e")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println("Número de comando inválido para editar.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.invalid_command_number_edit"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			edited, err := a.editCommandBlock(blocks[cmdNum-1])
 			if err != nil {
-				fmt.Println("Erro ao editar comando:", err)
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.error_editing_command"), err)
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
@@ -851,21 +740,21 @@ mainLoop:
 				ErrorMsg:     errStr,
 			}
 			lastExecuted = cmdNum - 1
-			_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 			continue
 
 		case strings.HasPrefix(answer, "t"):
 			cmdNumStr := strings.TrimPrefix(answer, "t")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println("Número de comando inválido para simular.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.invalid_command_number_simulate"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			a.simulateCommandBlock(ctx, blocks[cmdNum-1])
 
-			execNow := a.getInput("Deseja executar este comando agora? (s/N): ")
-			if strings.ToLower(strings.TrimSpace(execNow)) == "s" {
+			execNow := a.getInput(i18n.T("agent.status.confirm_exec_after_sim"))
+			if strings.ToLower(strings.TrimSpace(execNow)) == "s" || strings.ToLower(strings.TrimSpace(execNow)) == "y" {
 				freshCtx, freshCancel := a.contextManager.CreateExecutionContext()
 				outStr, errStr := a.executeCommandsFunc(freshCtx, blocks[cmdNum-1])
 				freshCancel()
@@ -877,31 +766,31 @@ mainLoop:
 				}
 				lastExecuted = cmdNum - 1
 			} else {
-				fmt.Println("Simulação concluída, comando NÃO executado.")
+				fmt.Println(i18n.T("agent.status.simulation_done"))
 			}
-			_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 			continue
 
 		case strings.HasPrefix(answer, "ac"):
 			cmdNumStr := strings.TrimPrefix(answer, "ac")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println("Número inválido para adicionar contexto.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.invalid_command_number_context"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			if outputs[cmdNum-1] == nil {
-				fmt.Println("Este comando ainda não foi executado.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.status.command_not_executed"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
-			fmt.Println("\n📋 Saída do comando:")
+			fmt.Println(i18n.T("agent.output_header"))
 			fmt.Println("---------------------------------------")
 			fmt.Print(outputs[cmdNum-1].Output)
 			fmt.Println("---------------------------------------")
 
-			userContext := a.getMultilineInput("Digite seu contexto adicional:\n")
+			userContext := a.getMultilineInput(i18n.T("agent.prompt.additional_context"))
 
 			freshCtx, freshCancel := a.contextManager.CreateExecutionContext()
 			newBlocks, err := a.requestLLMContinuationWithContext(
@@ -914,8 +803,8 @@ mainLoop:
 			freshCancel()
 
 			if err != nil {
-				fmt.Println("Erro ao pedir continuação à IA:", err)
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.continuation_failed"), err)
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			if len(newBlocks) > 0 {
@@ -925,8 +814,8 @@ mainLoop:
 				renderer.SetSkipClearOnNextDraw(true)
 				continue mainLoop
 			} else {
-				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.status.no_new_commands"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 			}
 			continue
 
@@ -934,13 +823,13 @@ mainLoop:
 			cmdNumStr := strings.TrimPrefix(answer, "c")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println("Número inválido para continuação.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.invalid_command_number_continue"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			if outputs[cmdNum-1] == nil {
-				fmt.Println("Este comando ainda não foi executado.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.status.command_not_executed"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
@@ -955,8 +844,8 @@ mainLoop:
 			freshCancel()
 
 			if err != nil {
-				fmt.Println("Erro ao pedir continuação à IA:", err)
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.continuation_failed"), err)
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			if len(newBlocks) > 0 {
@@ -966,8 +855,8 @@ mainLoop:
 				renderer.SetSkipClearOnNextDraw(true)
 				continue mainLoop
 			} else {
-				fmt.Println("\nNenhum comando sugerido pela IA na resposta.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.status.no_new_commands"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 			}
 			continue
 
@@ -975,27 +864,27 @@ mainLoop:
 			cmdNumStr := strings.TrimPrefix(answer, "pc")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println("Número inválido para adicionar pré-contexto.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.invalid_command_number_context"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
-			userContext := a.getMultilineInput("Digite seu contexto ou instrução adicional:\n")
+			userContext := a.getMultilineInput(i18n.T("agent.prompt.additional_context"))
 			if userContext == "" {
-				fmt.Println("Nenhum contexto fornecido. Operação cancelada.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.no_context_provided"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
-			fmt.Println("\nContexto recebido! Solicitando refinamento à IA...")
+			fmt.Println(i18n.T("agent.status.context_received"))
 			newBlocks, err := a.requestLLMWithPreExecutionContext(
 				ctx,
 				strings.Join(blocks[cmdNum-1].Commands, "\n"),
 				userContext,
 			)
 			if err != nil {
-				fmt.Println("Erro ao solicitar refinamento à IA:", err)
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.refinement_failed"), err)
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			if len(newBlocks) > 0 {
@@ -1005,16 +894,16 @@ mainLoop:
 				renderer.SetSkipClearOnNextDraw(true)
 				continue mainLoop
 			} else {
-				fmt.Println("\nA IA não sugeriu novos comandos.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.status.no_new_commands"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 			}
 			continue
 
 		default:
 			cmdNum, err := strconv.Atoi(answer)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println("Opção inválida.")
-				_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+				fmt.Println(i18n.T("agent.error.invalid_option"))
+				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
@@ -1028,7 +917,7 @@ mainLoop:
 				ErrorMsg:     errStr,
 			}
 			lastExecuted = cmdNum - 1
-			_ = a.getInput(renderer.Colorize("\nPressione Enter para continuar...", agent.ColorGray))
+			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 		}
 	}
 }
@@ -1044,7 +933,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 	}
 
 	renderer := agent.NewUIRenderer(a.logger)
-	titleContent := fmt.Sprintf(" 🚀 EXECUTANDO: %s", langNorm)
+	titleContent := i18n.T("agent.status.executing", langNorm)
 	contentWidth := agent.VisibleLen(titleContent)
 	topBorder := strings.Repeat("─", contentWidth)
 
@@ -1062,7 +951,8 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 		scriptContent := block.Commands[0]
 		tmpFile, err := os.CreateTemp("", "chatcli-script-*.sh")
 		if err != nil {
-			errMsg := fmt.Sprintf("❌ Erro ao criar arquivo temporário: %v\n", err)
+			errorMsg := i18n.T("agent.error.create_temp_file", err)
+			errMsg := fmt.Sprintf("%s\n", errorMsg)
 			fmt.Print(errMsg)
 			allOutput.WriteString(errMsg)
 			lastError = err.Error()
@@ -1071,7 +961,8 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 			defer func() { _ = os.Remove(scriptPath) }()
 
 			if _, werr := tmpFile.WriteString(scriptContent); werr != nil {
-				errMsg := fmt.Sprintf("❌ Erro ao escrever script: %v\n", werr)
+				errorMsg := i18n.T("agent.error.write_script", werr)
+				errMsg := fmt.Sprintf("%s\n", errorMsg)
 				fmt.Print(errMsg)
 				allOutput.WriteString(errMsg)
 				lastError = werr.Error()
@@ -1079,7 +970,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 			_ = tmpFile.Close()
 			_ = os.Chmod(scriptPath, 0755)
 
-			header := fmt.Sprintf("⚙️ Executando script via %s:\n", shell)
+			header := i18n.T("agent.status.executing_script", shell) + "\n"
 			fmt.Print(header)
 			allOutput.WriteString(header)
 
@@ -1124,13 +1015,14 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 					}
 				}
 				if err := os.Chdir(target); err != nil {
-					msg := fmt.Sprintf("❌ Erro ao trocar diretório para '%s': %v\n", target, err)
+					errorMsg := i18n.T("agent.error.change_dir", target, err)
+					msg := fmt.Sprintf("%s\n", errorMsg)
 					fmt.Print(msg)
 					allOutput.WriteString(msg)
 					lastError = err.Error()
 				} else {
 					wd, _ := os.Getwd()
-					msg := fmt.Sprintf("📂 Diretório alterado para: %s\n", wd)
+					msg := fmt.Sprintf(i18n.T("agent.status.dir_changed", wd)+"\n", wd)
 					fmt.Print(msg)
 					allOutput.WriteString(msg)
 				}
@@ -1138,18 +1030,18 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 			}
 
 			if a.validator.IsDangerous(trimmed) {
-				confirmPrompt := "Este comando é potencialmente perigoso. Para confirmar, digite: 'sim, quero executar conscientemente'\nConfirma?: "
+				confirmPrompt := i18n.T("agent.status.dangerous_command_confirm")
 				confirm := a.getCriticalInput(confirmPrompt)
 				if confirm != "sim, quero executar conscientemente" {
-					outText := "Execução do comando perigoso ABORTADA.\n"
+					outText := i18n.T("agent.status.dangerous_command_aborted") + "\n"
 					fmt.Print(renderer.Colorize(outText, agent.ColorYellow))
 					allOutput.WriteString(outText)
 					continue
 				}
-				fmt.Println(renderer.Colorize("⚠️ Confirmação recebida. Executando...", agent.ColorYellow))
+				fmt.Println(renderer.Colorize(i18n.T("agent.status.dangerous_command_confirmed"), agent.ColorYellow))
 			}
 
-			header := fmt.Sprintf("⚙️ Comando %d/%d: %s\n", i+1, len(block.Commands), trimmed)
+			header := fmt.Sprintf(i18n.T("agent.status.executing_command_n", i+1, len(block.Commands), trimmed)+"\n", i+1, len(block.Commands), trimmed)
 			fmt.Print(header)
 			allOutput.WriteString(header)
 
@@ -1170,7 +1062,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 			}
 
 			if isInteractive {
-				outText := "🖥️  Modo interativo.\n"
+				outText := i18n.T("agent.status.interactive_mode") + "\n"
 				fmt.Print(renderer.Colorize(outText, agent.ColorGray))
 				allOutput.WriteString(outText)
 
@@ -1184,7 +1076,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 					allOutput.WriteString(errMsg)
 					lastError = err.Error()
 				} else {
-					okMsg := "✓ Comando finalizado.\n"
+					okMsg := i18n.T("agent.status.command_finished") + "\n"
 					fmt.Print(okMsg)
 					allOutput.WriteString(okMsg)
 				}
@@ -1214,9 +1106,9 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 		}
 	}
 
-	footerContent := " ✅ Execução Concluída "
+	footerContent := i18n.T("agent.status.execution_complete")
 	if lastError != "" {
-		footerContent = " ⚠️ Execução Concluída com Erros "
+		footerContent = i18n.T("agent.status.execution_complete_with_errors")
 	}
 	footerWidth := agent.VisibleLen(footerContent)
 
@@ -1254,14 +1146,14 @@ func (a *AgentMode) askUserIfInteractive(cmd string, contextInfo agent.CommandCo
 		return false
 	}
 
-	prompt := fmt.Sprintf("O comando '%s' pode ser interativo. Executar em modo interativo? (s/N): ", cmd)
+	prompt := fmt.Sprintf(i18n.T("agent.status.interactive_confirm", cmd), cmd)
 	response := a.getCriticalInput(prompt)
-	return strings.HasPrefix(strings.ToLower(response), "s")
+	return strings.HasPrefix(strings.ToLower(response), "s") || strings.HasPrefix(strings.ToLower(response), "y")
 }
 
 // simulateCommandBlock simula execução (dry-run)
 func (a *AgentMode) simulateCommandBlock(ctx context.Context, block agent.CommandBlock) {
-	fmt.Printf("\n🔎 Simulando comandos (tipo: %s):\n", block.Language)
+	fmt.Printf(i18n.T("agent.status.simulating_commands", block.Language)+"\n", block.Language)
 	fmt.Println("---------------------------------------")
 
 	shell := os.Getenv("SHELL")
@@ -1300,7 +1192,7 @@ func (a *AgentMode) simulateCommandBlock(ctx context.Context, block agent.Comman
 
 // editCommandBlock abre comandos em editor
 func (a *AgentMode) editCommandBlock(block agent.CommandBlock) ([]string, error) {
-	choice := a.getInput("Editar no terminal (t) ou em editor externo (e)? [t/e]: ")
+	choice := a.getInput(i18n.T("agent.status.edit_prompt"))
 	choice = strings.ToLower(strings.TrimSpace(choice))
 
 	if choice == "t" {
@@ -1311,7 +1203,7 @@ func (a *AgentMode) editCommandBlock(block agent.CommandBlock) ([]string, error)
 				continue
 			}
 
-			prompt := fmt.Sprintf("Comando %d/%d (%s): ", i+1, len(block.Commands), block.Language)
+			prompt := fmt.Sprintf(i18n.T("agent.status.edit_command_prompt", i+1, len(block.Commands), block.Language), i+1, len(block.Commands), block.Language)
 			edited := a.getInput(prompt)
 
 			if edited == "" {

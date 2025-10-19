@@ -8,6 +8,11 @@
 
 **ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) (such as OpenAI, StackSpot, GoogleAI, ClaudeAI, xAI and Ollama -> `Local models`) to facilitate interactive and contextual conversations directly in your terminal. Designed for developers, data scientists, and tech enthusiasts, it enhances productivity by aggregating various contextual data sources and offering a rich, user-friendly experience.
 
+<p align="center">
+  <em>See ChatCLI in action, including Agent Mode and provider switching.</em><br>
+  <img src="https://raw.githubusercontent.com/diillson/chatcli/main/assets/chatcli-demo.gif" alt="ChatCLI Demo" width="800">
+</p>
+
 <div align="center">
   <img src="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml/badge.svg"/>
   <a href="https://github.com/diillson/chatcli/releases">
@@ -23,7 +28,9 @@
 
 ### 📝 Table of Contents
 
+- [Why Use ChatCLI?](#why-use-chatcli)
 - [Key Features](#key-features)
+- [Multi-language Support (i18n)](#multi-language-support-i18n)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage and Commands](#usage-and-commands)
@@ -34,12 +41,23 @@
     - [Modes of `@file` Usage](#modes-of-file-usage)
     - [Chunking System in Detail](#chunking-system-in-detail)
 - [Agent Mode](#agent-mode)
+    - [Security Policy](#security-policy)
     - [Agent Interaction](#agent-interaction)
+    - [Enhanced Agent UI](#enhanced-agent-ui)
     - [Agent One-Shot Mode](#agent-one-shot-mode)
 - [Code Structure and Technologies](#code-structure-and-technologies)
 - [Contributing](#contributing)
 - [License](#license)
 - [Contact](#contact)
+
+-----
+
+## Why Use ChatCLI?
+
+- **Unified Interface**: Access the best models on the market (OpenAI, Claude, Gemini, etc.) and local models (Ollama) from a single interface, without needing to switch tools.
+- **Context-Aware**: Commands like `@git`, `@file`, and `@history` inject relevant context directly into your prompt, allowing the AI to understand your work environment and provide more accurate answers.
+- **Automation Powerhouse**: **Agent Mode** transforms the AI into a proactive assistant that can execute commands, create files, and interact with your system to solve complex tasks.
+- **Developer-Centric**: Built for the development workflow, with features like smart code file processing, command execution, and Git integration.
 
 -----
 
@@ -61,281 +79,295 @@
 
 -----
 
+## Multi-language Support (i18n)
+
+ChatCLI is designed to be global. The user interface, including menus, tips, and status messages, is fully internationalized.
+
+- **Automatic Detection**: The language is automatically detected from your system's environment variables (`CHATCLI_LANG`(major priority), `LANG` or `LC_ALL`).
+- **Supported Languages**: Currently, ChatCLI supports **English (en)** and **Portuguese (pt-BR)**.
+- **Fallback**: If your system's language is not supported, the interface will default to English.
+
+-----
+
 ## Installation
 
 ### Prerequisites
 
 - **Go (version 1.23+)**: [Available at golang.org](https://golang.org/dl/).
 
-### Installation Steps
+### 1. From GitHub Releases (Recommended)
 
-1.  **Clone the Repository**:
-    ```bash
-    git clone https://github.com/diillson/chatcli.git
-    cd chatcli
-    ```
-2.  **Install Dependencies and Compile**:
-    ```bash
-    go mod tidy
-    go build -o chatcli
-    ```
-    To compile with version information:
-    ```bash
-    VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
-    COMMIT_HASH=$(git rev-parse --short HEAD)
-    BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+The easiest way to install is to download the appropriate binary for your operating system and architecture from the [GitHub Releases page](https://github.com/diillson/chatcli/releases).
+
+### 2. Installation via `go install`
+
+```bash
+go install github.com/diillson/chatcli@latest
+```
+This will install the binary to your  $GOPATH/bin  folder, allowing you to run  chatcli  directly from your terminal if  $GOPATH/bin  is in your  PATH .
+
+### 3. Build from Source
+
+1. Clone the Repository:
+```bash
+   git clone https://github.com/diillson/chatcli.git
+   cd chatcli
+```
+2. Install Dependencies and Compile:
+```bash
+   go mod tidy
+   go build -o chatcli
+```
+
+3. To compile with version information:
+```bash
+   VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+   COMMIT_HASH=$(git rev-parse --short HEAD)
+   BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
     go build -ldflags "\
       -X github.com/diillson/chatcli/version.Version=${VERSION} \
       -X github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH} \
       -X github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}" \
       -o chatcli main.go
-    ```
-    This injects version data into the binary, accessible via `/version` or `chatcli --version`.
-
-### Installation via `go install` (optional)
-
-```bash
-go install github.com/diillson/chatcli@latest
 ```
+This injects version data into the binary, accessible via  /version  or  chatcli --version .
 
-This will install the binary to your `$GOPATH/bin` folder, allowing you to run `chatcli` directly from your terminal if `$GOPATH/bin` is in your `PATH`.
-
------
+--------
 
 ## Configuration
 
-ChatCLI uses environment variables to define its behavior and connect to LLM providers. The easiest way is to create a `.env` file in the project's root directory.
+ChatCLI uses environment variables to define its behavior and connect to LLM providers. The easiest way is to create a  .env  file in the project's root directory.
 
 ### Essential Environment Variables
 
-- **General**:
-    - `CHATCLI_DOTENV` – **(Optional)** Defines the path to your `.env` file.
-    - `LOG_LEVEL` (`debug`, `info`, `warn`, `error`)
-    - `LLM_PROVIDER` (`OPENAI`, `STACKSPOT`, `CLAUDEAI`, `GOOGLEAI`, `XAI`)
-    - `MAX_RETRIES` - **(Optional)** Maximum number of attempts for API calls (default: `5`).
-    - `MAX_RETRIES` - **(Optional)** Initial wait time between attempts (default: `3` - seconds`).
-    - `ENV` - **(Optional)** Defines how the log will be displayed (`dev`, `prod`). Default: `dev`.
-      - `dev` displays the logs directly in the terminal and saves them to the log file.
-      - `prod` only saves them to the log file, keeping the terminal cleaner.
-- **Providers**:
-    - `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_ASSISTANT_MODEL`, `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES`
-    - `CLAUDEAI_API_KEY`, `CLAUDEAI_MODEL`, `CLAUDEAI_MAX_TOKENS`, `CLAUDEAI_API_VERSION`
-    - `GOOGLEAI_API_KEY`, `GOOGLEAI_MODEL`, `GOOGLEAI_MAX_TOKENS`
-    - `XAI_API_KEY`, `XAI_MODEL`, `XAI_MAX_TOKENS`
-    - `OLLAMA_ENABLED`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_MAX_TOKENS`, `OLLAMA_FILTER_THINKING` – **(Optional)** Filters "thinking aloud" from models like Qwen3 (true/false, default: true)
-    - `CLIENT_ID`, `CLIENT_KEY`, `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` (for StackSpot)
-- **Agente**:
-    - `CHATCLI_AGENT_CMD_TIMEOUT` – **(Optional)** Default timeout for each command executed by the Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default: `10m`.
-    - `CHATCLI_AGENT_DENYLIST` – **(Optional)** Semicolon-separated list of regular expressions to block extra dangerous commands. Example: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
-    - `CHATCLI_AGENT_ALLOW_SUDO` – **(Optional)** Allow sudo commands without automatic blocking (true/false). Default: `false` (sudo is blocked for safety).
+- General:
+  -  `CHATCLI_DOTENV`  – **(Optional)** Defines the path to your  `.env`  file.
+  -  `CHATCLI_LANG`  – **(Optional)** Sets the interface language ( e.g.,  en ,  `pt-BR` ). Default: detects from system.
+  -  `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
+  -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` )
+  -  `MAX_RETRIES`  - **(Optional)** Maximum number of attempts for API calls (default:  `5` ).
+  -  `MAX_RETRIES`  - **(Optional)** Initial wait time between attempts (default:  `3`  - seconds`).
+  -  `ENV`  - **(Optional)** Defines how the log will be displayed ( `dev `,  `prod `). Default:  `dev` .
+      -  dev  displays the logs directly in the terminal and saves them to the log file.
+      -  prod  only saves them to the log file, keeping the terminal cleaner.
+
+- Providers:
+  -  OPENAI_API_KEY ,  OPENAI_MODEL ,  OPENAI_ASSISTANT_MODEL ,  OPENAI_MAX_TOKENS ,  OPENAI_USE_RESPONSES
+  -  CLAUDEAI_API_KEY ,  CLAUDEAI_MODEL ,  CLAUDEAI_MAX_TOKENS ,  CLAUDEAI_API_VERSION
+  -  GOOGLEAI_API_KEY ,  GOOGLEAI_MODEL ,  GOOGLEAI_MAX_TOKENS
+  -  XAI_API_KEY ,  XAI_MODEL ,  XAI_MAX_TOKENS
+  -  OLLAMA_ENABLED ,  OLLAMA_BASE_URL ,  OLLAMA_MODEL ,  OLLAMA_MAX_TOKENS ,  OLLAMA_FILTER_THINKING  – (Optional) Filters "thinking aloud" from models like Qwen3 (true/false, default: true)
+  -  CLIENT_ID ,  CLIENT_KEY ,  STACKSPOT_REALM ,  STACKSPOT_AGENT_ID  (for StackSpot)
+- Agent:
+  -  CHATCLI_AGENT_CMD_TIMEOUT  – (Optional) Default timeout for each command executed by the Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default:  10m .
+  -  CHATCLI_AGENT_DENYLIST  – (Optional) Semicolon-separated list of regular expressions to block extra dangerous commands. Example: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
+  -  CHATCLI_AGENT_ALLOW_SUDO  – (Optional) Allow sudo commands without automatic blocking (true/false). Default:  false  (sudo is blocked for safety).
 
 
-### Example `.env`
+### Example  .env
 
-```env
-# General Settings
+    # General Settings
+    
+    LOG_LEVEL=info
+    CHATCLI_LANG=en_US
+    ENV=prod
+    LLM_PROVIDER=CLAUDEAI
+    MAX_RETRIES=10
+    INITIAL_BACKOFF=2
+    LOG_FILE=app.log
+    LOG_MAX_SIZE=300MB
+    HISTORY_MAX_SIZE=300MB
+    CHATCLI_AGENT_CMD_TIMEOUT=2m   # The command will have 2m to run after that it is locked and finished
+    CHATCLI_AGENT_DENYLIST=rm\\s+-rf\\s+.*;curl\\s+[^|;]*\\|\\s*(sh|bash);dd\\s+if=;mkfs\\w*\\s+
+    CHATCLI_AGENT_ALLOW_SUDO=false
+    
+    # OpenAI Settings
+    OPENAI_API_KEY=your-openai-key
+    OPENAI_MODEL=gpt-4o-mini
+    OPENAI_ASSISTANT_MODEL=gpt-4o-mini
+    OPENAI_USE_RESPONSES=true    # use the Responses API (e.g., for gpt-5)
+    OPENAI_MAX_TOKENS=60000
+    
+    # StackSpot Settings
+    CLIENT_ID=your-client-id
+    CLIENT_KEY=your-client-key
+    STACKSPOT_REALM=your-realm
+    STACKSPOT_AGENT_ID=your-agent-id
+    
+    # ClaudeAI Settings
+    CLAUDEAI_API_KEY=your-claudeai-key
+    CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
+    CLAUDEAI_MAX_TOKENS=20000
+    CLAUDEAI_API_VERSION=2023-06-01
+    
+    # Google AI (Gemini) Settings
+    GOOGLEAI_API_KEY=your-googleai-key
+    GOOGLEAI_MODEL=gemini-2.5-flash
+    GOOGLEAI_MAX_TOKENS=20000
+    
+    # xAI Settings
+    XAI_API_KEY=your-xai-key
+    XAI_MODEL=grok-4-latest
+    
+    # Ollama Settings
+    OLLAMA_ENABLED=true      #Required for enabled API Ollama
+    OLLAMA_BASE_URL=http://localhost:11434
+    OLLAMA_MODEL=gpt-oss:20b
+    OLLAMA_MAX_TOKENS=5000
+    OLLAMA_FILTER_THINKING=true  # Filters intermediate reasoning in responses (e.g. for Qwen3, llama3... - THIS IS REQUIRED TO BE TRUE for Agent mode. Works well with some OLLAMA models that have "out loud" reasoning)
 
-LOG_LEVEL=info
-ENV=prod
-LLM_PROVIDER=CLAUDEAI
-MAX_RETRIES=10
-INITIAL_BACKOFF=2
-LOG_FILE=app.log
-LOG_MAX_SIZE=300MB
-HISTORY_MAX_SIZE=300MB
-CHATCLI_AGENT_CMD_TIMEOUT=2m   # The command will have 2m to run after that it is locked and finished
-CHATCLI_AGENT_DENYLIST=rm\\s+-rf\\s+.*;curl\\s+[^|;]*\\|\\s*(sh|bash);dd\\s+if=;mkfs\\w*\\s+
-CHATCLI_AGENT_ALLOW_SUDO=false
-
-# OpenAI Settings
-OPENAI_API_KEY=your-openai-key
-OPENAI_MODEL=gpt-4o-mini
-OPENAI_ASSISTANT_MODEL=gpt-4o-mini
-OPENAI_USE_RESPONSES=true    # use the Responses API (e.g., for gpt-5)
-OPENAI_MAX_TOKENS=60000
-
-# StackSpot Settings
-CLIENT_ID=your-client-id
-CLIENT_KEY=your-client-key
-STACKSPOT_REALM=your-realm
-STACKSPOT_AGENT_ID=your-agent-id
-
-# ClaudeAI Settings
-CLAUDEAI_API_KEY=your-claudeai-key
-CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
-CLAUDEAI_MAX_TOKENS=20000
-CLAUDEAI_API_VERSION=2023-06-01
-
-# Google AI (Gemini) Settings
-GOOGLEAI_API_KEY=your-googleai-key
-GOOGLEAI_MODEL=gemini-2.5-flash
-GOOGLEAI_MAX_TOKENS=20000
-
-# xAI Settings
-XAI_API_KEY=your-xai-key
-XAI_MODEL=grok-4-latest
-
-# Ollama Settings
-OLLAMA_ENABLED=true      #Required for enabled API Ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=gpt-oss:20b
-OLLAMA_MAX_TOKENS=5000
-OLLAMA_FILTER_THINKING=true  # Filters intermediate reasoning in responses (e.g. for Qwen3, llama3... - THIS IS REQUIRED TO BE TRUE for Agent mode. Works well with some OLLAMA models that have "out loud" reasoning)
-```
-
------
+--------
 
 ## Usage and Commands
 
+│ Pro-Tip: Create a shell alias for quick access! Add  alias c='chatcli'  to your  .bashrc ,  .zshrc , or  config.fish .
+
 ### Interactive Mode
 
-Start the application with `./chatcli` and begin your conversation.
+Start the application with  ./chatcli  and begin your conversation.
 
 ### Non-Interactive Mode (One-Shot)
 
 Execute prompts in a single line, ideal for scripting and automation.
 
-- **Quick examples**:
-  ```bash
-  chatcli -p "Quickly explain this repository."
-  chatcli -p "@git @env Create a concise release note."
-  chatcli -p "@file ./src --mode summary Provide an overview of the architecture."
-  ```
-- **Input via `stdin` (Pipes)**:
-  ```bash
-  git diff | chatcli -p "Summarize the changes and list potential impacts."
-  ```
-- **Available One-Shot Flags**:
-    - `-p` or `--prompt`: The text to send to the LLM for a single execution.
-    - `--provider`: Overrides the LLM provider at runtime (`OPENAI`, `OPENAI_ASSISTANT`, `CLAUDEAI`, `GOOGLEAI`, `STACKSPOT`, `XAI`).
-    - `--model`: Chooses the model for the active provider (e.g., `gpt-4o-mini`, `claude-3-5-sonnet-20241022`, `gemini-2.5-flash`, etc.).
-    - `--max-tokens`: Defines the maximum amount of tokens used for active provider.
-    - `--realm`: Overrides the StackSpot realm at runtime.
-    - `--agent-id`: Overrides the StackSpot agent ID at runtime.
-    - `--timeout`: Sets the timeout for the one-shot call (default: `5m`).
-    - `--no-anim`: Disables animations (useful in scripts/CI).
-    - `--agent-auto-exec`: Automatically executes the first command suggested by the agent (in agent mode).
+- Quick examples:
+  - chatcli -p "Quickly explain this repository."
+  - chatcli -p "@git @env Create a concise release note."
+  - chatcli -p "@file ./src --mode summary Provide an overview of the architecture."
 
-Note: The same contextual features work within the `--prompt` text, such as `@file`, `@git`, `@env`, `@command`, and the `>` operator to add context. Remember to enclose the prompt in double quotes in the shell to avoid unwanted interpretations.
+- Input via  stdin  (Pipes):
+  - git diff | chatcli -p "Summarize the changes and list potential impacts."
+  - cat error.log | chatcli -p "Explain the root cause of this error and suggest a solution."
+
+- Available One-Shot Flags:
+  -  -p  or  --prompt : The text to send to the LLM for a single execution.
+  -  --provider : Overrides the LLM provider at runtime ( OPENAI ,  OPENAI_ASSISTANT ,  CLAUDEAI ,  GOOGLEAI ,  STACKSPOT ,  XAI ).
+  -  --model : Chooses the model for the active provider (e.g.,  gpt-4o-mini ,  claude-3-5-sonnet-20241022 ,  gemini-2.5-flash , etc.).
+  -  --max-tokens : Defines the maximum amount of tokens used for active provider.
+  -  --realm : Overrides the StackSpot realm at runtime.
+  -  --agent-id : Overrides the StackSpot agent ID at runtime.
+  -  --timeout : Sets the timeout for the one-shot call (default:  5m ).
+  -  --no-anim : Disables animations (useful in scripts/CI).
+  -  --agent-auto-exec : Automatically executes the first command suggested by the agent (in agent mode).
+
+
+Note: The same contextual features work within the  --prompt  text, such as  @file ,  @git ,  @env ,  @command , and the  >  operator to add context. Remember to enclose the prompt in double quotes in the shell to avoid unwanted interpretations.
 
 ### CLI Commands
 
-- **Session Management**:
-    - `/session save <name>`, `/session load <name>`, `/session list`, `/session delete <name>`, `/session new`
-- **Configuration and Status**:
-    - `/switch`, `/reload`, `/config` or `/status` (displays runtime settings, current provider, and model).
-- **General**:
-    - `/help`: Displays help information.
-    - `/exit`: To exit ChatCLI.
-    - `/version` or `/v`: Shows the version, commit hash, and build date.
-    - `Ctrl+C` (once): Cancels the current operation.
-    - `Ctrl+C` (twice) or `Ctrl+D`: Exits the application.
-- **Context**:
-    - `@history`, `@git`, `@env`, `@file`, `@command`.
+- Session Management:
+    -  /session save <name> ,  /session load <name> ,  /session list ,  /session delete <name> ,  /session new
+- Configuration and Status:
+  -  /switch ,  /reload ,  /config  or  /status  (displays runtime settings, current provider, and model).
+-General:
+  -  /help : Displays help information.
+  -  /exit : To exit ChatCLI.
+  -  /version  or  /v : Shows the version, commit hash, and build date.
+  -  Ctrl+C  (once): Cancels the current operation.
+  -  Ctrl+C  (twice) or  Ctrl+D : Exits the application.
+  - Context:
+  -  @history ,  @git ,  @env ,  @file ,  @command .
 
------
+--------
 
 ## Advanced File Processing
 
-The `@file <path>` command is the primary tool for sending files and directories, with support for path expansion (`~`).
+The  `@file` <path>  command is the primary tool for sending files and directories, with support for path expansion ( ~ ).
 
-### Modes of `@file` Usage
+### Modes of  @file  Usage
 
-- **Default Mode (`full`)**: Processes the entire content of a file or directory, truncating it if the token limit is exceeded. Ideal for small to medium-sized projects.
-- **Summary Mode (`summary`)**: Returns only the directory structure, file list with sizes, and general statistics. Useful for getting an overview without the content.
-- **Smart Mode (`smart`)**: ChatCLI assigns a relevance score to each file based on your question and includes only the most pertinent ones.
-  ```bash
-  @file --mode smart ~/my-project/ How does the login system work?
-  ```
-- **Chunked Mode (`chunked`)**: For large projects, it splits the content into manageable chunks, sending one at a time.
+- Default Mode ( full ): Processes the entire content of a file or directory, truncating it if the token limit is exceeded. Ideal for small to medium-sized projects.
+- Summary Mode ( summary ): Returns only the directory structure, file list with sizes, and general statistics. Useful for getting an overview without the content.
+- Smart Mode ( smart ): ChatCLI assigns a relevance score to each file based on your question and includes only the most pertinent ones.
+@file --mode smart ~/my-project/ How does the login system work?
+
+- Chunked Mode ( chunked ): For large projects, it splits the content into manageable chunks, sending one at a time.
 
 ### Chunking System in Detail
 
-After the first chunk is sent, use `/nextchunk` to process the next. The system provides visual feedback on progress and the number of remaining chunks. To manage failures, use `/retry`, `/retryall`, or `/skipchunk`.
+After the first chunk is sent, use  /nextchunk  to process the next. The system provides visual feedback on progress and the number of remaining chunks. To manage failures, use  /retry ,  /retryall , or  /skipchunk .
 
------
+--------
 
 ## Agent Mode
 
-**Agent Mode** allows the AI to interact with your system, suggesting or executing commands to automate complex or repetitive tasks.
+Agent Mode allows the AI to interact with your system, suggesting or executing commands to automate complex or repetitive tasks.
 
-#### Security policy (denylist/allowlist)
+#### Security Policy
 
-You can strengthen the security policy with environment variables:
-- `CHATCLI_AGENT_DENYLIST` to block additional patterns (regex, separated by semicolons "`;`").
-- `CHATCLI_AGENT_ALLOW_SUDO` to allow/deny sudo without automatic blocking (default: `false`).
+ChatCLI prioritizes safety by blocking dangerous commands by default. You can strengthen this policy with environment variables:
+
+-  CHATCLI_AGENT_DENYLIST  to block additional patterns (regex, separated by semicolons " ; ").
+-  CHATCLI_AGENT_ALLOW_SUDO  to allow/deny  sudo  without automatic blocking (default:  false ).
 Even when allowed, dangerous commands may still require explicit confirmation in the terminal.
 
 ### Agent Interaction
 
-Start the agent with `/agent <query>` or `/run <query>`. The agent will suggest commands that you can approve or refine.
+Start the agent with  /agent <query>  or  /run <query> . The agent will suggest commands that you can approve or refine.
 
-- **Refining**: Use `pCN` to add context before executing command `N`.
-- **Adding context to the output**: After execution, use `aCN` to add information to the output of command `N` and get a new response from the AI.
+- Refining: Use  pCN  to add context before executing command  N .
+- Adding context to the output: After execution, use  aCN  to add information to the output of command  N  and get a new response from the AI.
 
-### Agent Mode Preview
+### Enhanced Agent UI
 
-- Compact Plan: 1 line per command (status + description + first line of code).
-- Full Plan: Cards with description, type, risk, and formatted code block.
-- Last Result: Anchored to the footer (~30-line preview).
+- Compact vs. Full Plan: Toggle with the  p  key for a summary or detailed view of the execution plan.
+- Anchored Last Result: The output of the last executed command stays fixed at the bottom, making it easy to reference without scrolling.
 - Quick Actions:
-    - vN: Opens full output in the pager (less -R/more)
-    - wN: Saves output to a temporary file
-    - p: Toggles COMPACT/FULL
-    - r: Redraws the screen
+  -  vN : Opens the full output of command  N  in your pager ( less  or  more ), ideal for long logs.
+  -  wN : Saves the output of command  N  to a temporary file for later analysis or sharing.
+  -  r : Redraws the screen, useful for clearing the view.
+
 
 ### Agent One-Shot Mode
 
 Perfect for scripts and automation.
 
-- **Default Mode (Dry-Run)**: Only suggests the command and exits.
-  ```bash
-  chatcli -p "/agent list all .go files in this directory"
-  ```
-- **Automatic Execution Mode**: Use the `--agent-auto-exec` flag to have the agent execute the first suggested command (dangerous commands are automatically blocked).
-  ```bash
-  chatcli -p "/agent create a file named test_file.txt" --agent-auto-exec
-  ```
+- Default Mode (Dry-Run): Only suggests the command and exits.
+    - chatcli -p "/agent list all .go files in this directory"
 
------
+- Automatic Execution Mode: Use the  --agent-auto-exec  flag to have the agent execute the first suggested command (dangerous commands are automatically blocked).
+  - chatcli -p "/agent create a file named test_file.txt" --agent-auto-exec
+
+--------
 
 ## Code Structure and Technologies
 
 The project has a modular structure organized into packages:
 
-- **`cli`**: Manages the interface and agent mode.
-- **`config`**: Handles configuration via constants.
-- **`llm`**: Manages communication and LLM client handling.
-- **`utils`**: Contains auxiliary functions for files, Git, shell, HTTP, etc.
-- **`models`**: Defines data structures.
-- **`version`**: Manages version information.
+-  cli : Manages the interface and agent mode.
+-  config : Handles configuration via constants.
+-  i18n : Centralizes internationalization logic and translation files.
+-  llm : Manages communication and LLM client handling.
+-  utils : Contains auxiliary functions for files, Git, shell, HTTP, etc.
+-  models : Defines data structures.
+-  version : Manages version information.
 
-Key Go libraries used: **Zap**, **go-prompt**, **Glamour**, **Lumberjack**, and **Godotenv**.
+Key Go libraries used: Zap, go-prompt, Glamour, Lumberjack, Godotenv, and golang.org/x/text.
 
------
+--------
 
 ## Contributing
 
-Contributions are welcome\!
+Contributions are welcome!
 
-1.  **Fork the repository.**
-2.  **Create a new branch for your feature:** `git checkout -b feature/my-new-feature`.
-3.  **Commit your changes and push to the remote repository.**
-4.  **Open a Pull Request.**
+1. Fork the repository.
+2. Create a new branch for your feature:  git checkout -b feature/my-new-feature .
+3. Commit your changes and push to the remote repository.
+4. Open a Pull Request.
 
------
+--------
 
 ## License
 
-This project is licensed under the [MIT License](https://www.google.com/search?q=/LICENSE).
+This project is licensed under the MIT License.
 
------
+--------
 
 ## Contact
 
-For questions or support, please open an [issue](https://www.google.com/search?q=https://github.com/diillson/chatcli/issues) on the repository.
+For questions or support, please open an issue https://github.com/diillson/chatcli/issues on the repository.
 
------
+--------
 
-**ChatCLI** combines the power of LLMs with the simplicity of the command line, offering a versatile tool for continuous AI interactions directly in your terminal. Enjoy and transform your productivity experience! 🗨️✨
+ChatCLI combines the power of LLMs with the simplicity of the command line, offering a versatile tool for continuous AI interactions directly in your terminal. Enjoy and transform your productivity experience! 🗨️✨
