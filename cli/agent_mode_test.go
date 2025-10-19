@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/diillson/chatcli/cli/agent" // Importar o novo pacote
+	"github.com/diillson/chatcli/i18n"      // <-- IMPORTAR I18N
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
@@ -49,6 +50,9 @@ func withStdin(t *testing.T, input string, f func()) {
 }
 
 func TestAgentMode_Run_ExtractsAndHandlesCommands(t *testing.T) {
+	// CORREÇÃO: Inicializar o sistema de i18n para o teste.
+	i18n.Init()
+
 	logger, _ := zap.NewDevelopment()
 	mockLLM := new(MockLLMClient)
 
@@ -61,10 +65,10 @@ func TestAgentMode_Run_ExtractsAndHandlesCommands(t *testing.T) {
 	agentMode := NewAgentMode(chatCLI, logger)
 
 	aiResponse := `
-                ` + "```" + `execute:shell
-                ls -la
-                ` + "```" + `
-                `
+                    ` + "```" + `execute:shell
+                    ls -la
+                    ` + "```" + `
+                    `
 
 	mockLLM.On("GetModelName").Return("MockGPT")
 	mockLLM.On("SendPrompt", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]models.Message"), mock.AnythingOfType("int")).Return(aiResponse, nil)

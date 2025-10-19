@@ -6,11 +6,13 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -98,11 +100,14 @@ func (v *CommandValidator) IsDangerous(cmd string) bool {
 // ValidateCommand valida um comando antes da execução
 func (v *CommandValidator) ValidateCommand(cmd string) error {
 	if strings.TrimSpace(cmd) == "" {
-		return fmt.Errorf("comando vazio")
+		// CORREÇÃO: Usar errors.New para strings constantes
+		return errors.New(i18n.T("agent.validator.empty_command"))
 	}
 
 	if v.IsDangerous(cmd) {
-		return fmt.Errorf("comando potencialmente perigoso detectado: %s", cmd)
+		// CORREÇÃO: Construir a string primeiro e passá-la como argumento para fmt.Errorf
+		errorMsg := i18n.T("agent.validator.dangerous_command", cmd)
+		return fmt.Errorf("%s", errorMsg)
 	}
 
 	return nil

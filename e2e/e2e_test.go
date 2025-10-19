@@ -90,9 +90,10 @@ func TestE2E_OneShotMode(t *testing.T) {
 	env := []string{
 		"OPENAI_API_KEY=test-key",
 		"LLM_PROVIDER=OPENAI",
-		// Sobrescrever AMBAS as URLs da API!
 		"OPENAI_API_URL=" + server.URL + "/v1/chat/completions",
 		"OPENAI_RESPONSES_API_URL=" + server.URL + "/v1/responses",
+		// Forçar o idioma inglês para consistência do teste
+		"CHATCLI_LANG=en",
 	}
 
 	t.Run("Prompt via -p flag", func(t *testing.T) {
@@ -100,7 +101,6 @@ func TestE2E_OneShotMode(t *testing.T) {
 		stdout, stderr := runChatCLI(t, args, "", env)
 
 		require.Empty(t, stderr, "Stderr should be empty on success")
-		// Verificar por qualquer uma das respostas possíveis
 		assert.Contains(t, stdout, "Response from mock")
 	})
 
@@ -124,8 +124,8 @@ func TestE2E_OneShotMode(t *testing.T) {
 		args := []string{"-p", "test", "--provider=INVALID"}
 		_, stderr := runChatCLI(t, args, "", env)
 
-		assert.Contains(t, stderr, "Erro ao aplicar overrides")
-		assert.Contains(t, stderr, "Provedor LLM 'INVALID' não suportado")
+		assert.Contains(t, stderr, "Error applying overrides")                                // Parte traduzida de main.go
+		assert.Contains(t, stderr, "Provedor LLM 'INVALID' não suportado ou não configurado") // Parte não traduzida do manager
 	})
 }
 
