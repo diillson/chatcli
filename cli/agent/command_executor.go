@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -112,15 +113,15 @@ func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, command
 	start := time.Now() // A medição de tempo começa aqui
 	result := &ExecutionResult{Command: command}
 
-	fmt.Println("\n--- Entrando no modo de comando interativo ---")
-	fmt.Println("O controle do terminal será passado para o comando.")
-	fmt.Println("Para retornar, saia do programa (ex: ':q' no vim, 'exit' no shell).")
+	fmt.Println(i18n.T("agent.executor.interactive_mode_header"))
+	fmt.Println(i18n.T("agent.executor.interactive_mode_info"))
+	fmt.Println(i18n.T("agent.executor.interactive_mode_exit_tip"))
 	fmt.Println("----------------------------------------------")
 
 	saneCmd := exec.Command("stty", "sane")
 	saneCmd.Stdin = os.Stdin
 	if err := saneCmd.Run(); err != nil {
-		e.logger.Warn("Falha ao restaurar terminal", zap.Error(err))
+		e.logger.Warn(i18n.T("agent.executor.fail_restore_terminal"), zap.Error(err))
 	}
 
 	shellConfigPath := e.getShellConfigPath(shell)
@@ -139,7 +140,7 @@ func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, command
 	err := cmd.Run()
 	result.Duration = time.Since(start) // E termina aqui
 
-	fmt.Println("\n--- Retornando ao ChatCLI ---")
+	fmt.Println("\n" + i18n.T("agent.executor.interactive_mode_footer"))
 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

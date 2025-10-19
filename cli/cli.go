@@ -23,6 +23,7 @@ import (
 
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
@@ -140,7 +141,7 @@ func (cli *ChatCLI) reconfigureLogger() {
 
 // reloadConfiguration recarrega as variáveis de ambiente e reconfigura o LLMManager
 func (cli *ChatCLI) reloadConfiguration() {
-	fmt.Println("Recarregando configurações...")
+	fmt.Println(i18n.T("status.reloading_config"))
 
 	prevProvider := cli.Provider
 	prevModel := cli.Model
@@ -190,7 +191,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 			cli.Client = client
 			cli.Provider = prevProvider
 			cli.Model = prevModel
-			fmt.Println("Configurações recarregadas com sucesso! (preservado provider/model atuais)")
+			fmt.Println(i18n.T("status.reload_success_preserved"))
 			return
 		}
 		cli.logger.Warn("Falha ao preservar provider/model após reload; caindo para valores do .env",
@@ -199,10 +200,10 @@ func (cli *ChatCLI) reloadConfiguration() {
 	cli.configureProviderAndModel()
 	if client, err := cli.manager.GetClient(cli.Provider, cli.Model); err == nil {
 		cli.Client = client
-		fmt.Println("Configurações recarregadas com sucesso!")
+		fmt.Println(i18n.T("status.reload_success"))
 	} else {
 		cli.logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
-		fmt.Println("Falha ao reconfigurar cliente LLM após reload.")
+		fmt.Println(i18n.T("status.reload_fail_client"))
 	}
 }
 
@@ -382,12 +383,12 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			fmt.Println("🛑 Operação cancelada com sucesso!")
+			fmt.Println(i18n.T("status.operation_cancelled"))
 			if len(cli.history) > 0 && cli.history[len(cli.history)-1].Role == "user" {
 				cli.history = cli.history[:len(cli.history)-1]
 			}
 		} else {
-			fmt.Printf("❌ Erro: %s\n", err.Error())
+			fmt.Println(i18n.T("error.generic", err.Error()))
 		}
 	} else {
 		cli.history = append(cli.history, models.Message{
@@ -407,7 +408,7 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	availableProviders := cli.manager.GetAvailableProviders()
 	choiceIndex, err := strconv.Atoi(in)
 	if err != nil || choiceIndex < 1 || choiceIndex > len(availableProviders) {
-		fmt.Println("Escolha inválida. Voltando ao modo normal.")
+		fmt.Println(i18n.T("error.invalid_choice_normal_mode"))
 		return
 	}
 
@@ -442,7 +443,8 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	cli.Client = newClient
 	cli.Provider = newProvider
 	cli.Model = newModel
-	fmt.Printf("Trocado para %s (%s)\n\n", cli.Client.GetModelName(), cli.Provider)
+	fmt.Println(i18n.T("status.provider_switched", cli.Client.GetModelName(), cli.Provider))
+	fmt.Println()
 }
 
 func (cli *ChatCLI) Start(ctx context.Context) {
@@ -518,12 +520,12 @@ func (cli *ChatCLI) runAgentLogic() {
 	} else if strings.HasPrefix(lastCommand, "/run") {
 		query = strings.TrimSpace(strings.TrimPrefix(lastCommand, "/run"))
 	} else {
-		fmt.Println("Erro: não foi possível extrair a consulta do agente.")
+		fmt.Println(i18n.T("error.agent_query_extraction"))
 		return
 	}
 
-	fmt.Printf("\n🤖 Entrando no modo agente com a consulta: \"%s\"\n", query)
-	fmt.Println("O agente analisará sua solicitação e sugerirá comandos para resolver.")
+	fmt.Println(i18n.T("status.agent_mode_enter", query))
+	fmt.Println(i18n.T("status.agent_mode_description"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -536,16 +538,16 @@ func (cli *ChatCLI) runAgentLogic() {
 
 	err := cli.agentMode.Run(ctx, query, additionalContext)
 	if err != nil {
-		fmt.Printf(" ❌ Erro no modo agente: %v\n", err)
+		fmt.Println(i18n.T("error.agent_mode_error", err))
 	}
 
-	fmt.Println("\n ✅ Retornando ao chat...")
+	fmt.Println(i18n.T("status.agent_mode_exit"))
 	time.Sleep(1 * time.Second)
 }
 
 func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 	if cli.isExecuting.Load() {
-		fmt.Println("\n⚠️ Ctrl + C acionado - Cancelando operação...")
+		fmt.Println(i18n.T("prompt.cancel_op"))
 
 		cli.mu.Lock()
 		if cli.operationCancel != nil {
@@ -558,7 +560,7 @@ func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 		cli.forceRefreshPrompt()
 
 	} else {
-		fmt.Println("\nAté breve!! CTRL + C Duplo...")
+		fmt.Println(i18n.T("prompt.confirm_exit"))
 		cli.cleanup()
 		os.Exit(0)
 	}
@@ -567,7 +569,7 @@ func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 	switch cli.interactionState {
 	case StateSwitchingProvider:
-		return "Escolha o provedor (pelo número): ", true
+		return i18n.T("prompt.select_provider"), true
 	case StateProcessing, StateAgentMode:
 		return "", true
 	default:
@@ -612,7 +614,7 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 				if err == nil && val >= 0 {
 					maxTokensOverride = val
 				} else {
-					fmt.Printf(" ❌ Valor inválido para --max-tokens: '%s'. Deve ser um número >= 0.\n", args[i+1])
+					fmt.Println(i18n.T("cli.switch.invalid_max_tokens", args[i+1]))
 				}
 				i++
 			}
@@ -632,41 +634,39 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 	}
 	if maxTokensOverride != -1 {
 		cli.UserMaxTokens = maxTokensOverride
-		fmt.Printf(" ✅ Limite máximo de tokens definido para: %d (0 = usar padrão do provedor)\n", cli.UserMaxTokens)
+		fmt.Println(i18n.T("cli.switch.max_tokens_set", cli.UserMaxTokens))
 	}
 
 	if shouldUpdateStackSpot {
 		if cli.Provider != "STACKSPOT" {
-			fmt.Println(" ❌ As flags --realm e --agent-id só podem ser usadas com o provedor STACKSPOT.")
+			fmt.Println(i18n.T("cli.switch.stackspot_only_flags"))
 			return
 		}
 		if newRealm != "" {
 			cli.manager.SetStackSpotRealm(newRealm)
-			fmt.Printf(" ✅ Realm/Tenant do StackSpot atualizado para '%s'. O token será renovado na próxima requisição.\n", newRealm)
+			fmt.Println(i18n.T("cli.switch.realm_updated", newRealm))
 		}
 		if newAgentID != "" {
 			cli.manager.SetStackSpotAgentID(newAgentID)
-			// Recria o cliente para usar o novo agentID
 			newClient, err := cli.manager.GetClient("STACKSPOT", "")
 			if err != nil {
-				fmt.Printf(" ❌ Erro ao recriar cliente StackSpot com novo Agent ID: %v\n", err)
+				fmt.Println(i18n.T("cli.switch.agent_id_error", err))
 			} else {
 				cli.Client = newClient
-				fmt.Printf(" ✅ Agent ID do StackSpot atualizado para '%s'.\n", newAgentID)
+				fmt.Println(i18n.T("cli.switch.agent_id_updated", newAgentID))
 			}
 		}
 	}
 
 	if shouldSwitchModel {
-		fmt.Printf("Tentando trocar para o modelo '%s' no provedor '%s'...\n", newModel, cli.Provider)
+		fmt.Println(i18n.T("cli.switch.changing_model", newModel, cli.Provider))
 		newClient, err := cli.manager.GetClient(cli.Provider, newModel)
 		if err != nil {
-			fmt.Printf(" ❌ Erro ao trocar para o modelo '%s': %v\n", newModel, err)
-			fmt.Println("   Verifique se o nome do modelo está correto para o provedor atual.")
+			fmt.Println(i18n.T("cli.switch.change_model_error", newModel, err))
 		} else {
 			cli.Client = newClient
 			cli.Model = newModel
-			fmt.Printf(" ✅ Modelo trocado com sucesso para %s (%s)\n", cli.Client.GetModelName(), cli.Provider)
+			fmt.Println(i18n.T("cli.switch.change_model_success", cli.Client.GetModelName(), cli.Provider))
 		}
 		return
 	}
@@ -677,7 +677,7 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 }
 
 func (cli *ChatCLI) switchProvider() {
-	fmt.Println("Provedores disponíveis:")
+	fmt.Println(i18n.T("cli.switch.available_providers"))
 	availableProviders := cli.manager.GetAvailableProviders()
 	for i, provider := range availableProviders {
 		fmt.Printf("%d. %s\n", i+1, provider)
@@ -696,101 +696,101 @@ func (cli *ChatCLI) showHelp() {
 		fmt.Printf("    %s    %s\n", colorize(fmt.Sprintf("%-32s", cmd), cmdColor), colorize(desc, descColor))
 	}
 
-	fmt.Println("\n" + colorize(ColorBold, "Guia Completo de Comandos do ChatCLI"))
-	fmt.Println(colorize("Aqui está um mapa exaustivo de todos os comandos, subcomandos, flags e opções disponíveis.", ColorGray))
-	fmt.Println(colorize("Use-os para controlar a aplicação, adicionar contexto ou automatizar tarefas.", ColorGray))
+	fmt.Println("\n" + colorize(ColorBold, i18n.T("help.header.title")))
+	fmt.Println(colorize(i18n.T("help.header.subtitle1"), ColorGray))
+	fmt.Println(colorize(i18n.T("help.header.subtitle2"), ColorGray))
 
-	fmt.Printf("\n  %s\n", colorize("Controle Geral", ColorLime))
-	printCommand("/help", "Mostra esta tela de ajuda completa.")
-	printCommand("/exit | /quit", "Encerra a aplicação.")
-	printCommand("/newsession", "Limpa o histórico da conversa atual e inicia uma nova sessão (alias de /session new).")
-	printCommand("/version | /v", "Mostra a versão, commit hash, data de build e verifica atualizações.")
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.general"), ColorLime))
+	printCommand("/help", i18n.T("help.command.help"))
+	printCommand("/exit | /quit", i18n.T("help.command.exit"))
+	printCommand("/newsession", i18n.T("help.command.newsession"))
+	printCommand("/version | /v", i18n.T("help.command.version"))
 
-	fmt.Printf("\n  %s\n", colorize("Configuração e Provedores de IA", ColorLime))
-	printCommand("/switch", "Abre o menu interativo para trocar o provedor de LLM (ex.: OPENAI, CLAUDEAI).")
-	printCommand("/switch --model <nome>", "Muda o modelo do provedor atual (ex.: gpt-4o-mini, grok-4, gpt5... etc).")
-	printCommand("/switch --max-tokens <num>", "Define o máximo de tokens para as próximas respostas (0 para padrão).")
-	printCommand("/switch --realm <realm>", "Atualiza o 'realm/tenant' (apenas para StackSpot).")
-	printCommand("/switch --agent-id <id>", "Atualiza o 'Agent ID' (apenas para StackSpot).")
-	printCommand("  Ex: /switch --model gpt-4o-mini", "(Muda para o modelo GPT-4o Mini na OpenAI)")
-	printCommand("/config | /status", "Exibe a configuração atual (provedor, modelo, chaves, etc.).")
-	printCommand("/reload", "Recarrega as variáveis ou configurações do seu arquivo .env em tempo real.")
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.config"), ColorLime))
+	printCommand("/switch", i18n.T("help.command.switch"))
+	printCommand("/switch --model <nome>", i18n.T("help.command.switch_model"))
+	printCommand("  Ex: /switch --model gpt-4o-mini", i18n.T("help.command.switch_model_example"))
+	printCommand("/switch --max-tokens <num>", i18n.T("help.command.switch_max_tokens"))
+	printCommand("/switch --realm <realm>", i18n.T("help.command.switch_realm"))
+	printCommand("/switch --agent-id <id>", i18n.T("help.command.switch_agent_id"))
+	printCommand("/config | /status", i18n.T("help.command.config"))
+	printCommand("/reload", i18n.T("help.command.reload"))
 
-	fmt.Printf("\n  %s\n", colorize("Adicionando Contexto aos Prompts", ColorLime))
-	printCommand("@file <caminho>", "Adiciona o conteúdo de um arquivo ou diretório ao prompt.")
-	printCommand("  --mode full", "(Padrão) Envia o conteúdo completo, truncando se necessário.")
-	printCommand("  --mode chunked", "Para projetos grandes, divide em pedaços (chunks).")
-	printCommand("  --mode summary", "Envia apenas a estrutura de arquivos, sem o conteúdo.")
-	printCommand("  --mode smart", "A IA seleciona os arquivos mais relevantes para sua pergunta.")
-	printCommand("  Ex: @file --mode=smart ./src Como funciona o login?", "")
-	printCommand("@git", "Adiciona status, branch, remotos e commits recentes do Git.")
-	printCommand("@history", "Adiciona os últimos comandos do seu histórico de shell (bash/zsh/fish).")
-	printCommand("@env", "Adiciona as variáveis de ambiente (valores sensíveis são ocultados).")
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.context"), ColorLime))
+	printCommand("@file <caminho>", i18n.T("help.command.file"))
+	printCommand("  --mode full", i18n.T("help.command.file_mode_full"))
+	printCommand("  --mode chunked", i18n.T("help.command.file_mode_chunked"))
+	printCommand("  --mode summary", i18n.T("help.command.file_mode_summary"))
+	printCommand("  --mode smart", i18n.T("help.command.file_mode_smart"))
+	printCommand("  Ex: @file --mode=smart ./src ...", i18n.T("help.command.file_mode_example"))
+	printCommand("@git", i18n.T("help.command.git"))
+	printCommand("@history", i18n.T("help.command.history"))
+	printCommand("@env", i18n.T("help.command.env"))
 
-	fmt.Printf("\n  %s\n", colorize("Gerenciamento de Arquivos Grandes (Chunks)", ColorLime))
-	printCommand("/nextchunk", "Envia o próximo pedaço (chunk) do projeto para a IA.")
-	printCommand("/retry", "Tenta reenviar o último chunk que falhou.")
-	printCommand("/retryall", "Tenta reenviar todos os chunks que falharam.")
-	printCommand("/skipchunk", "Pula um chunk com erro e continua para o próximo.")
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.chunks"), ColorLime))
+	printCommand("/nextchunk", i18n.T("help.command.nextchunk"))
+	printCommand("/retry", i18n.T("help.command.retry"))
+	printCommand("/retryall", i18n.T("help.command.retryall"))
+	printCommand("/skipchunk", i18n.T("help.command.skipchunk"))
 
-	fmt.Printf("\n  %s\n", colorize("Execução de Comandos no Terminal", ColorLime))
-	printCommand("@command <cmd>", "Executa um comando e adiciona sua saída ao prompt.")
-	printCommand("  Ex: @command ls -la", "(Executa 'ls -la' e anexa o resultado)")
-	printCommand("@command -i <cmd>", "Executa um comando interativo (ex.: vim) sem adicionar saída ao prompt.")
-	printCommand("@command --ai <cmd>", "Executa um comando e envia a saída DIRETAMENTE para a IA.")
-	printCommand("  Ex: @command --ai git diff", "(Envia as diferenças do git para análise da IA)")
-	printCommand("@command --ai <cmd> > <texto>", "Igual ao anterior, mas adiciona um contexto/pergunta.")
-	printCommand("  Ex: @command --ai cat err.log > resuma este erro", "")
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.exec"), ColorLime))
+	printCommand("@command <cmd>", i18n.T("help.command.command"))
+	printCommand("  Ex: @command ls -la", i18n.T("help.command.command_example"))
+	printCommand("@command -i <cmd>", i18n.T("help.command.command_i"))
+	printCommand("@command --ai <cmd>", i18n.T("help.command.command_ai"))
+	printCommand("  Ex: @command --ai git diff", i18n.T("help.command.command_ai_example"))
+	printCommand("@command --ai <cmd> > <texto>", i18n.T("help.command.command_ai_context"))
+	printCommand("  Ex: @command --ai cat err.log > ...", i18n.T("help.command.command_ai_context_example"))
 
-	fmt.Printf("\n  %s\n", colorize("Modo Agente (Execução de Tarefas)", ColorLime))
-	printCommand("/agent <tarefa>", "Pede à IA para planejar e executar comandos para resolver uma tarefa.")
-	printCommand("/run <tarefa>", "Um atalho (alias) para o comando /agent.")
-	printCommand("  Ex: /agent liste todos os arquivos .go e conte suas linhas", "")
-	printCommand("Dentro do modo agente:", "")
-	printCommand("  [1..N]", "Executa um comando específico (ex: 1 para o primeiro).")
-	printCommand("  a", "Executa TODOS os comandos sugeridos em sequência.")
-	printCommand("  eN", "Edita o comando N antes de executar (ex: e1).")
-	printCommand("  tN", "Simula (dry-run) o comando N (ex: t2).")
-	printCommand("  cN", "Pede continuação à IA com a saída do comando N (ex: c2).")
-	printCommand("  pcN", "Adiciona contexto ao comando N ANTES de executar (ex: pc1).")
-	printCommand("  acN", "Adiciona contexto à SAÍDA do comando N (ex: ac1).")
-	printCommand("  vN", "Abre a saída completa do comando N no pager (less -R/more).")
-	printCommand("  wN", "Salva a saída do comando N em um arquivo temporário.")
-	printCommand("  p", "Alterna a visualização do plano: COMPACTO ↔ COMPLETO.")
-	printCommand("  r", "Atualiza a tela (clear + redraw).")
-	printCommand("  q", "Sai do modo agente.")
-	printCommand("Observações:", "")
-	printCommand("  • Último Resultado", "sempre ancorado ao rodapé da tela (preview).")
-	printCommand("  • Plano COMPACTO", "mostra 1 linha por comando (status + descrição + 1ª linha do código).")
-	printCommand("  • Plano COMPLETO", "mostra cartão com descrição, tipo, risco e bloco de código formatado.")
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.agent"), ColorLime))
+	printCommand("/agent <tarefa>", i18n.T("help.command.agent"))
+	printCommand("/run <tarefa>", i18n.T("help.command.run"))
+	printCommand("  Ex: /agent ...", i18n.T("help.command.agent_example"))
+	printCommand(i18n.T("help.command.agent_inside"), "")
+	printCommand("  [1..N]", i18n.T("help.command.agent_exec_n"))
+	printCommand("  a", i18n.T("help.command.agent_exec_all"))
+	printCommand("  eN", i18n.T("help.command.agent_edit"))
+	printCommand("  tN", i18n.T("help.command.agent_dry_run"))
+	printCommand("  cN", i18n.T("help.command.agent_continue"))
+	printCommand("  pcN", i18n.T("help.command.agent_pre_context"))
+	printCommand("  acN", i18n.T("help.command.agent_post_context"))
+	printCommand("  vN", i18n.T("help.command.agent_view"))
+	printCommand("  wN", i18n.T("help.command.agent_save"))
+	printCommand("  p", i18n.T("help.command.agent_toggle_plan"))
+	printCommand("  r", i18n.T("help.command.agent_redraw"))
+	printCommand("  q", i18n.T("help.command.agent_quit"))
+	printCommand(i18n.T("help.command.agent_notes"), "")
+	printCommand("  "+i18n.T("help.command.agent_last_result"), "")
+	printCommand("  "+i18n.T("help.command.agent_compact_plan"), "")
+	printCommand("  "+i18n.T("help.command.agent_full_plan"), "")
 
-	fmt.Printf("\n  %s\n", colorize("Gerenciamento de Sessões", ColorLime))
-	printCommand("/session save <nome>", "Salva a sessão atual com um nome (ex.: /session save minha-conversa).")
-	printCommand("/session load <nome>", "Carrega uma sessão salva (ex.: /session load minha-conversa).")
-	printCommand("/session list", "Lista todas as sessões salvas.")
-	printCommand("/session delete <nome>", "Deleta uma sessão salva (ex.: /session delete minha-conversa).")
-	printCommand("/session new", "Inicia uma nova sessão limpa (alias de /newsession).")
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.sessions"), ColorLime))
+	printCommand("/session save <nome>", i18n.T("help.command.session_save"))
+	printCommand("/session load <nome>", i18n.T("help.command.session_load"))
+	printCommand("/session list", i18n.T("help.command.session_list"))
+	printCommand("/session delete <nome>", i18n.T("help.command.session_delete"))
+	printCommand("/session new", i18n.T("help.command.session_new"))
 
-	fmt.Printf("\n  %s\n", colorize("Modo Não-Interativo (One-Shot, para scripts e pipes)", ColorLime))
-	printCommand("chatcli -p \"<prompt>\"", "Executa um prompt uma única vez e sai.")
-	printCommand("  Ex: chatcli -p \"Explique este repositório.\"", "")
-	printCommand("chatcli --prompt \"<prompt>\"", "Alias de -p.")
-	printCommand("--provider <nome>", "Override do provedor (ex.: --provider OPENAI).")
-	printCommand("--model <nome>", "Override do modelo (ex.: --model gpt-4o-mini).")
-	printCommand("--max-tokens <num>", "Override do máximo de tokens para a resposta.")
-	printCommand("--timeout <duração>", "Timeout da chamada (ex.: --timeout 5m, padrão: 5m).")
-	printCommand("--no-anim", "Desabilita animações (útil em scripts/CI).")
-	printCommand("--agent-auto-exec", "No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for seguro.")
-	printCommand("Uso com pipes (stdin):", "Envia dados via pipe (ex.: git diff | chatcli -p \"Resuma as mudanças.\").")
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.oneshot"), ColorLime))
+	printCommand("chatcli -p \"<prompt>\"", i18n.T("help.command.oneshot_p"))
+	printCommand("  Ex: chatcli -p \"...\"", i18n.T("help.command.oneshot_p_example"))
+	printCommand("chatcli --prompt \"<prompt>\"", i18n.T("help.command.oneshot_prompt"))
+	printCommand("--provider <nome>", i18n.T("help.command.oneshot_provider"))
+	printCommand("--model <nome>", i18n.T("help.command.oneshot_model"))
+	printCommand("--max-tokens <num>", i18n.T("help.command.oneshot_max_tokens"))
+	printCommand("--timeout <duração>", i18n.T("help.command.oneshot_timeout"))
+	printCommand("--no-anim", i18n.T("help.command.oneshot_no_anim"))
+	printCommand("--agent-auto-exec", i18n.T("help.command.oneshot_auto_exec"))
+	printCommand(i18n.T("help.command.oneshot_pipes"), "")
 
-	fmt.Printf("\n  %s\n", colorize("Dicas e Atalhos Gerais", ColorLime))
-	printCommand("Cancelamento (Ctrl+C)", "Pressione Ctrl+C uma vez durante o 'Pensando...' para cancelar.")
-	printCommand("Saída Rápida (Ctrl+D)", "Pressione Ctrl+D no prompt vazio para sair do ChatCLI.")
-	printCommand("Operador '>'", "Use '>' para adicionar contexto em prompts (ex.: @git > Crie um release note).")
-	printCommand("Modo Agente: p", "Alterna COMPACTO/COMPLETO do plano (útil para focar no fluxo).")
-	printCommand("Modo Agente: vN", "Abre a saída do comando N no pager (leitura longa sem poluir a tela).")
-	printCommand("Modo Agente: wN", "Salva a saída do comando N em arquivo temporário (para compartilhar ou anexar).")
-	printCommand("Modo Agente: r", "Redesenha a tela (clear) mantendo o foco no 'Último Resultado'.")
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.tips"), ColorLime))
+	printCommand("Cancelamento (Ctrl+C)", i18n.T("help.command.tips_cancel"))
+	printCommand("Saída Rápida (Ctrl+D)", i18n.T("help.command.tips_exit"))
+	printCommand("Operador '>'", i18n.T("help.command.tips_operator"))
+	printCommand("Modo Agente: p", i18n.T("help.command.tips_agent_p"))
+	printCommand("Modo Agente: vN", i18n.T("help.command.tips_agent_v"))
+	printCommand("Modo Agente: wN", i18n.T("help.command.tips_agent_w"))
+	printCommand("Modo Agente: r", i18n.T("help.command.tips_agent_r"))
 
 	fmt.Println()
 }
@@ -1405,253 +1405,157 @@ func (cli *ChatCLI) processDirectoryChunked(path string, tokenEstimator func(str
 func (cli *ChatCLI) handleNextChunk() bool {
 	if len(cli.fileChunks) == 0 {
 		if len(cli.failedChunks) > 0 {
-			fmt.Printf("Não há mais chunks pendentes, mas existem %d chunks com falha. Use /retry para retentar o último chunk com falha ou /retryall para retentar todos.\n", len(cli.failedChunks))
+			fmt.Println(i18n.T("chunk.no_more_pending_but_failed", len(cli.failedChunks)))
 		} else {
-			fmt.Println("Não há mais chunks de arquivos disponíveis.")
+			fmt.Println(i18n.T("chunk.no_more_chunks"))
 		}
 		return false
 	}
 
-	// Obter o próximo chunk
 	nextChunk := cli.fileChunks[0]
-
-	// Não remova o chunk da fila até que tenhamos sucesso
 	totalChunks := nextChunk.Total
 	currentChunk := nextChunk.Index
 	remainingChunks := len(cli.fileChunks) - 1
 
-	fmt.Printf("Enviando chunk %d de %d... (%d restantes após este)\n",
-		currentChunk, totalChunks, remainingChunks)
+	fmt.Println(i18n.T("chunk.sending", currentChunk, totalChunks, remainingChunks))
 
-	// Adicionar resumo de progresso
-	progressInfo := fmt.Sprintf("📊 PROGRESSO: Chunk %d/%d\n"+
+	progressInfo := fmt.Sprintf(i18n.T("chunk.progress_header", currentChunk, totalChunks)+"\n"+
 		"=============================\n"+
-		"▶️ %d chunks já processados\n"+
-		"▶️ %d chunks pendentes\n"+
-		"▶️ %d chunks com falha\n"+
-		"▶️ Use '/nextchunk' para avançar ou '/retry' se ocorrer falha\n\n"+
+		i18n.T("chunk.progress_processed", currentChunk-1)+"\n"+
+		i18n.T("chunk.progress_pending", remainingChunks)+"\n"+
+		i18n.T("chunk.progress_failed", len(cli.failedChunks))+"\n"+
+		i18n.T("chunk.progress_usage")+"\n\n"+
 		"=============================\n\n",
 		currentChunk, totalChunks, currentChunk-1, remainingChunks, len(cli.failedChunks))
 
-	// Preparar a mensagem
-	prompt := fmt.Sprintf("Este é o chunk %d/%d do código que solicitei anteriormente. Por favor continue a análise:",
-		currentChunk, totalChunks)
+	prompt := i18n.T("chunk.prompt", currentChunk, totalChunks)
 
-	// Adicionar a mensagem ao histórico
 	cli.history = append(cli.history, models.Message{
 		Role:    "user",
 		Content: prompt + "\n\n" + progressInfo + nextChunk.Content,
 	})
 
-	// Mostrar animação "Pensando..."
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
-
-	// Criar contexto com timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-
-	// Enviar o prompt para o LLM
 	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+nextChunk.Content, cli.history, 0)
-
-	// Parar a animação
 	cli.animation.StopThinkingAnimation()
 
 	if err != nil {
-		cli.logger.Error("Erro ao processar chunk com a LLM",
-			zap.Int("chunkIndex", nextChunk.Index),
-			zap.Int("totalChunks", nextChunk.Total),
-			zap.Error(err))
-
-		// Armazenar o chunk que falhou
+		cli.logger.Error("Erro ao processar chunk com a LLM", zap.Int("chunkIndex", nextChunk.Index), zap.Int("totalChunks", nextChunk.Total), zap.Error(err))
 		cli.lastFailedChunk = &cli.fileChunks[0]
 		cli.failedChunks = append(cli.failedChunks, cli.fileChunks[0])
-
-		// Remover da fila principal
 		cli.fileChunks = cli.fileChunks[1:]
 
-		// Informar ao usuário
-		fmt.Printf("\n⚠️ Erro ao processar o chunk %d/%d: %s\n",
-			currentChunk, totalChunks, err.Error())
-		fmt.Println("O chunk foi movido para a fila de chunks com falha.")
-		fmt.Println("Use /retry para tentar novamente este chunk ou /nextchunk para continuar com o próximo.")
-
+		fmt.Println(i18n.T("chunk.error_processing", currentChunk, totalChunks, err.Error()))
+		fmt.Println(i18n.T("chunk.moved_to_failed_queue"))
+		fmt.Println(i18n.T("chunk.retry_or_next"))
 		return false
 	}
 
-	// Se chegou aqui, o processamento foi bem-sucedido
-
-	// Adicionar a resposta ao histórico
-	cli.history = append(cli.history, models.Message{
-		Role:    "assistant",
-		Content: aiResponse,
-	})
-
-	// Renderizar e mostrar a resposta
+	cli.history = append(cli.history, models.Message{Role: "assistant", Content: aiResponse})
 	renderedResponse := cli.renderMarkdown(aiResponse)
 	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
-
-	// Remover o chunk da fila apenas após processamento bem-sucedido
 	cli.fileChunks = cli.fileChunks[1:]
 
-	// Informar sobre chunks restantes
 	if len(cli.fileChunks) > 0 || len(cli.failedChunks) > 0 {
-		fmt.Printf("\nStatus dos chunks:\n")
-
-		if len(cli.fileChunks) > 0 {
-			fmt.Printf("- %d chunks pendentes. Use /nextchunk para continuar.\n", len(cli.fileChunks))
-		}
-
-		if len(cli.failedChunks) > 0 {
-			fmt.Printf("- %d chunks com falha. Use /retry ou /retryall para reprocessá-los.\n", len(cli.failedChunks))
-		}
+		cli.printChunkStatus()
 	} else {
-		fmt.Println("\nTodos os chunks foram processados com sucesso.")
+		fmt.Println(i18n.T("chunk.all_processed_success"))
 	}
-
 	return false
 }
 
 // Novo método para reprocessar o último chunk que falhou
 func (cli *ChatCLI) handleRetryLastChunk() bool {
 	if cli.lastFailedChunk == nil || len(cli.failedChunks) == 0 {
-		fmt.Println("Não há chunks com falha para reprocessar.")
+		fmt.Println(i18n.T("chunk.no_failed_to_retry"))
 		return false
 	}
 
-	// Obter o último chunk com falha
 	lastFailedIndex := len(cli.failedChunks) - 1
 	chunk := cli.failedChunks[lastFailedIndex]
-
-	// Remover da lista de falhas
 	cli.failedChunks = cli.failedChunks[:lastFailedIndex]
 
-	fmt.Printf("Retentando chunk %d/%d que falhou anteriormente...\n", chunk.Index, chunk.Total)
+	fmt.Println(i18n.T("chunk.retrying_last_failed", chunk.Index, chunk.Total))
 
-	// Preparar resumo de progresso
-	progressInfo := fmt.Sprintf("📊 NOVA TENTATIVA: Chunk %d/%d\n"+
+	progressInfo := fmt.Sprintf(i18n.T("chunk.retry_header", chunk.Index, chunk.Total)+"\n"+
 		"=============================\n"+
-		"▶️ Retentando chunk que falhou anteriormente\n"+
-		"▶️ %d chunks pendentes\n"+
-		"▶️ %d outros chunks com falha\n"+
+		i18n.T("chunk.retry_status_retrying")+"\n"+
+		i18n.T("chunk.progress_pending", len(cli.fileChunks))+"\n"+
+		i18n.T("chunk.retry_status_other_failed", len(cli.failedChunks))+"\n"+
 		"=============================\n\n",
 		chunk.Index, chunk.Total, len(cli.fileChunks), len(cli.failedChunks))
 
-	// Preparar a mensagem
-	prompt := fmt.Sprintf("Este é o chunk %d/%d do código (nova tentativa após falha). Por favor continue a análise:",
-		chunk.Index, chunk.Total)
+	prompt := i18n.T("chunk.retry_prompt", chunk.Index, chunk.Total)
 
-	// Adicionar a mensagem ao histórico
-	cli.history = append(cli.history, models.Message{
-		Role:    "user",
-		Content: prompt + "\n\n" + progressInfo + chunk.Content,
-	})
-
-	// Mostrar animação "Pensando..."
+	cli.history = append(cli.history, models.Message{Role: "user", Content: prompt + "\n\n" + progressInfo + chunk.Content})
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
-
-	// Criar contexto com timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-
-	// Enviar o prompt para o LLM
 	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+chunk.Content, cli.history, 0)
-
-	// Parar a animação
 	cli.animation.StopThinkingAnimation()
 
 	if err != nil {
-		cli.logger.Error("Erro ao reprocessar chunk com a LLM",
-			zap.Int("chunkIndex", chunk.Index),
-			zap.Int("totalChunks", chunk.Total),
-			zap.Error(err))
-
-		// Devolver o chunk para a lista de falhas
+		cli.logger.Error("Erro ao reprocessar chunk com a LLM", zap.Int("chunkIndex", chunk.Index), zap.Error(err))
 		cli.failedChunks = append(cli.failedChunks, chunk)
-
-		// Informar ao usuário
-		fmt.Printf("\n⚠️ Erro ao reprocessar o chunk %d/%d: %s\n",
-			chunk.Index, chunk.Total, err.Error())
-		fmt.Println("O chunk permanece na fila de chunks com falha.")
-
+		fmt.Println(i18n.T("chunk.retry_error", chunk.Index, chunk.Total, err.Error()))
+		fmt.Println(i18n.T("chunk.retry_remains_failed"))
 		return false
 	}
 
-	// Adicionar a resposta ao histórico
-	cli.history = append(cli.history, models.Message{
-		Role:    "assistant",
-		Content: aiResponse,
-	})
-
-	// Renderizar e mostrar a resposta
+	cli.history = append(cli.history, models.Message{Role: "assistant", Content: aiResponse})
 	renderedResponse := cli.renderMarkdown(aiResponse)
 	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
 
-	// Atualizar o lastFailedChunk
 	if len(cli.failedChunks) > 0 {
-		lastIndex := len(cli.failedChunks) - 1
-		cli.lastFailedChunk = &cli.failedChunks[lastIndex]
+		cli.lastFailedChunk = &cli.failedChunks[len(cli.failedChunks)-1]
 	} else {
 		cli.lastFailedChunk = nil
 	}
-
-	fmt.Println("\nChunk reprocessado com sucesso!")
-
-	// Informar sobre o status dos chunks
+	fmt.Println(i18n.T("chunk.retry_success"))
 	cli.printChunkStatus()
-
 	return false
 }
 
 // Método para reprocessar todos os chunks com falha
 func (cli *ChatCLI) handleRetryAllChunks() bool {
 	if len(cli.failedChunks) == 0 {
-		fmt.Println("Não há chunks com falha para reprocessar.")
+		fmt.Println(i18n.T("chunk.no_failed_to_retry"))
 		return false
 	}
-
-	fmt.Printf("Retentando todos os %d chunks com falha...\n", len(cli.failedChunks))
-
-	// Mover todos os chunks com falha para a fila de chunks pendentes
+	fmt.Println(i18n.T("chunk.retrying_all_failed", len(cli.failedChunks)))
 	cli.fileChunks = append(cli.failedChunks, cli.fileChunks...)
 	cli.failedChunks = []FileChunk{}
 	cli.lastFailedChunk = nil
-
-	// Iniciar o processamento do primeiro chunk
 	return cli.handleNextChunk()
 }
 
 // Método para pular explicitamente um chunk
 func (cli *ChatCLI) handleSkipChunk() bool {
 	if len(cli.fileChunks) == 0 {
-		fmt.Println("Não há chunks pendentes para pular.")
+		fmt.Println(i18n.T("chunk.no_pending_to_skip"))
 		return false
 	}
-
 	skippedChunk := cli.fileChunks[0]
 	cli.fileChunks = cli.fileChunks[1:]
-
-	fmt.Printf("Pulando chunk %d/%d...\n", skippedChunk.Index, skippedChunk.Total)
-
-	// Informar sobre o status dos chunks
+	fmt.Println(i18n.T("chunk.skipping", skippedChunk.Index, skippedChunk.Total))
 	cli.printChunkStatus()
-
 	return false
 }
 
 // Método auxiliar para imprimir o status dos chunks
 func (cli *ChatCLI) printChunkStatus() {
-	fmt.Printf("\nStatus dos chunks:\n")
-
+	fmt.Println(i18n.T("chunk.status_header"))
 	if len(cli.fileChunks) > 0 {
-		fmt.Printf("- %d chunks pendentes. Use /nextchunk para continuar.\n", len(cli.fileChunks))
+		fmt.Println(i18n.T("chunk.status_pending", len(cli.fileChunks)))
 	} else {
-		fmt.Println("- Não há chunks pendentes.")
+		fmt.Println(i18n.T("chunk.status_no_pending"))
 	}
-
 	if len(cli.failedChunks) > 0 {
-		fmt.Printf("- %d chunks com falha. Use /retry ou /retryall para reprocessá-los.\n", len(cli.failedChunks))
+		fmt.Println(i18n.T("chunk.status_failed", len(cli.failedChunks)))
 	} else {
-		fmt.Println("- Não há chunks com falha.")
+		fmt.Println(i18n.T("chunk.status_no_failed"))
 	}
 }
 
@@ -2263,40 +2167,40 @@ func (cli *ChatCLI) showConfig() {
 		fmt.Printf("    %s    %s\n", colorize(fmt.Sprintf("%-25s", key+":"), keyColor), colorize(value, valueColor))
 	}
 
-	fmt.Println("\n" + colorize(ColorBold, "Configuração Atual do ChatCLI"))
-	fmt.Println(colorize("Aqui está um resumo das configurações em tempo de execução, provedores e variáveis de ambiente.", ColorGray))
+	fmt.Println("\n" + colorize(ColorBold, i18n.T("cli.config.header")))
+	fmt.Println(colorize(i18n.T("cli.config.subtitle"), ColorGray))
 
-	fmt.Printf("\n  %s\n", colorize("Configurações Gerais", ColorLime))
-	printItem("Arquivo .env", cli.getEnvFilePath())
-	printItem("Ambiente (ENV)", os.Getenv("ENV"))
-	printItem("Nível de Log (LOG_LEVEL)", os.Getenv("LOG_LEVEL"))
-	printItem("Arquivo de Log (LOG_FILE)", os.Getenv("LOG_FILE"))
-	printItem("Tamanho Máx. Log (LOG_MAX_SIZE)", os.Getenv("LOG_MAX_SIZE"))
-	printItem("Tamanho Máx. Histórico (HISTORY_MAX_SIZE)", os.Getenv("HISTORY_MAX_SIZE"))
+	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_general"), ColorLime))
+	printItem(i18n.T("cli.config.key_dotenv_file"), cli.getEnvFilePath())
+	printItem(i18n.T("cli.config.key_env"), os.Getenv("ENV"))
+	printItem(i18n.T("cli.config.key_log_level"), os.Getenv("LOG_LEVEL"))
+	printItem(i18n.T("cli.config.key_log_file"), os.Getenv("LOG_FILE"))
+	printItem(i18n.T("cli.config.key_log_max_size"), os.Getenv("LOG_MAX_SIZE"))
+	printItem(i18n.T("cli.config.key_history_max_size"), os.Getenv("HISTORY_MAX_SIZE"))
 
-	fmt.Printf("\n  %s\n", colorize("Provedor e Modelo Atuais", ColorLime))
-	printItem("Provedor (Runtime)", cli.Provider)
-	printItem("Modelo (Runtime)", cli.Model)
-	printItem("Nome do Modelo (Client)", cli.Client.GetModelName())
-	printItem("API Preferida (Catálogo)", string(catalog.GetPreferredAPI(cli.Provider, cli.Model)))
-	printItem("MaxTokens Efetivo", fmt.Sprintf("%d", cli.getMaxTokensForCurrentLLM()))
+	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_current_provider"), ColorLime))
+	printItem(i18n.T("cli.config.key_provider_runtime"), cli.Provider)
+	printItem(i18n.T("cli.config.key_model_runtime"), cli.Model)
+	printItem(i18n.T("cli.config.key_model_name_client"), cli.Client.GetModelName())
+	printItem(i18n.T("cli.config.key_preferred_api"), string(catalog.GetPreferredAPI(cli.Provider, cli.Model)))
+	printItem(i18n.T("cli.config.key_effective_max_tokens"), fmt.Sprintf("%d", cli.getMaxTokensForCurrentLLM()))
 
-	fmt.Printf("\n  %s\n", colorize("Overrides de MaxTokens por Provedor (ENV)", ColorLime))
+	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_max_tokens_overrides"), ColorLime))
 	printItem("OPENAI_MAX_TOKENS", os.Getenv("OPENAI_MAX_TOKENS"))
 	printItem("CLAUDEAI_MAX_TOKENS", os.Getenv("CLAUDEAI_MAX_TOKENS"))
 	printItem("GOOGLEAI_MAX_TOKENS", os.Getenv("GOOGLEAI_MAX_TOKENS"))
 	printItem("XAI_MAX_TOKENS", os.Getenv("XAI_MAX_TOKENS"))
 	printItem("OLLAMA_MAX_TOKENS", os.Getenv("OLLAMA_MAX_TOKENS"))
 
-	fmt.Printf("\n  %s\n", colorize("Chaves Sensíveis (Presença Apenas)", ColorLime))
+	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_sensitive_keys"), ColorLime))
 	printItem("OPENAI_API_KEY", presence(os.Getenv("OPENAI_API_KEY")))
 	printItem("CLAUDEAI_API_KEY", presence(os.Getenv("CLAUDEAI_API_KEY")))
 	printItem("GOOGLEAI_API_KEY", presence(os.Getenv("GOOGLEAI_API_KEY")))
 	printItem("XAI_API_KEY", presence(os.Getenv("XAI_API_KEY")))
-	printItem("CLIENT_ID (StackSpot)", presence(os.Getenv("CLIENT_ID")))
-	printItem("CLIENT_KEY (StackSpot)", presence(os.Getenv("CLIENT_KEY")))
+	printItem(i18n.T("cli.config.key_client_id_stackspot"), presence(os.Getenv("CLIENT_ID")))
+	printItem(i18n.T("cli.config.key_client_key_stackspot"), presence(os.Getenv("CLIENT_KEY")))
 
-	fmt.Printf("\n  %s\n", colorize("Configurações por Provedor", ColorLime))
+	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_provider_settings"), ColorLime))
 	printItem("OPENAI_MODEL", os.Getenv("OPENAI_MODEL"))
 	printItem("OPENAI_ASSISTANT_MODEL", os.Getenv("OPENAI_ASSISTANT_MODEL"))
 	printItem("OPENAI_USE_RESPONSES", os.Getenv("OPENAI_USE_RESPONSES"))
@@ -2307,7 +2211,6 @@ func (cli *ChatCLI) showConfig() {
 	printItem("OLLAMA_MODEL", os.Getenv("OLLAMA_MODEL"))
 	printItem("OLLAMA_BASE_URL", utils.GetEnvOrDefault("OLLAMA_BASE_URL", config.OllamaDefaultBaseURL))
 
-	// Verifica se STACKSPOT está ativo ou configurado para exibir suas informações.
 	isStackSpotAvailable := false
 	for _, p := range cli.manager.GetAvailableProviders() {
 		if p == "STACKSPOT" {
@@ -2316,18 +2219,18 @@ func (cli *ChatCLI) showConfig() {
 		}
 	}
 	if cli.Provider == "STACKSPOT" || isStackSpotAvailable {
-		printItem("STACKSPOT Realm/Tenant (Runtime)", cli.manager.GetStackSpotRealm())
-		printItem("STACKSPOT Agent ID (Runtime)", cli.manager.GetStackSpotAgentID())
+		printItem(i18n.T("cli.config.key_stackspot_realm"), cli.manager.GetStackSpotRealm())
+		printItem(i18n.T("cli.config.key_stackspot_agent_id"), cli.manager.GetStackSpotAgentID())
 	}
 
-	fmt.Printf("\n  %s\n", colorize("Provedores Disponíveis", ColorLime))
+	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_available_providers"), ColorLime))
 	providers := cli.manager.GetAvailableProviders()
 	if len(providers) > 0 {
 		for i, p := range providers {
-			printItem(fmt.Sprintf("Provedor %d", i+1), p)
+			printItem(i18n.T("cli.config.key_provider_n", i+1), p)
 		}
 	} else {
-		printItem("Nenhum", "Configure as chaves de API no .env")
+		printItem("Nenhum", i18n.T("cli.config.no_providers_configured"))
 	}
 }
 
@@ -2382,37 +2285,35 @@ func (cli *ChatCLI) RunAgentOnce(ctx context.Context, input string, autoExecute 
 
 func (cli *ChatCLI) handleSaveSession(name string) {
 	if err := cli.sessionManager.SaveSession(name, cli.history); err != nil {
-		fmt.Printf(" ❌ Erro ao salvar sessão: %v\n", err)
+		fmt.Println(i18n.T("session.error_save", err))
 	} else {
 		cli.currentSessionName = name
-		fmt.Printf(" ✅ Sessão '%s' salva com sucesso.\n", name)
+		fmt.Println(i18n.T("session.save_success", name))
 	}
 }
 
 func (cli *ChatCLI) handleLoadSession(name string) {
 	history, err := cli.sessionManager.LoadSession(name)
 	if err != nil {
-		fmt.Printf(" ❌ Erro ao carregar sessão: %v\n", err)
+		fmt.Println(i18n.T("session.error_load", err))
 	} else {
 		cli.history = history
 		cli.currentSessionName = name
-		fmt.Printf(" ✅ Sessão '%s' carregada. A conversa anterior foi restaurada.\n", name)
+		fmt.Println(i18n.T("session.load_success", name))
 	}
 }
 
 func (cli *ChatCLI) handleListSessions() {
 	sessions, err := cli.sessionManager.ListSessions()
 	if err != nil {
-		fmt.Printf(" ❌ Erro ao listar sessões: %v\n", err)
+		fmt.Println(i18n.T("session.error_list", err))
 		return
 	}
-
 	if len(sessions) == 0 {
-		fmt.Println("Nenhuma sessão salva encontrada.")
+		fmt.Println(i18n.T("session.list_empty"))
 		return
 	}
-
-	fmt.Println("Sessões salvas:")
+	fmt.Println(i18n.T("session.list_header"))
 	for _, session := range sessions {
 		fmt.Printf("- %s\n", session)
 	}
@@ -2420,15 +2321,13 @@ func (cli *ChatCLI) handleListSessions() {
 
 func (cli *ChatCLI) handleDeleteSession(name string) {
 	if err := cli.sessionManager.DeleteSession(name); err != nil {
-		fmt.Printf(" ❌ Erro ao deletar sessão: %v\n", err)
+		fmt.Println(i18n.T("session.error_delete", err))
 	} else {
-		fmt.Printf(" ✅ Sessão '%s' deletada com sucesso do disco.\n", name)
-		// Se a sessão deletada era a que estava ativa...
+		fmt.Println(i18n.T("session.delete_success", name))
 		if cli.currentSessionName == name {
-			// ...limpamos o histórico em memória e resetamos o nome.
 			cli.history = []models.Message{}
 			cli.currentSessionName = ""
-			fmt.Println("A sessão atual foi limpa. Você está em uma nova conversa.")
+			fmt.Println(i18n.T("session.delete_active_cleared"))
 		}
 	}
 }
