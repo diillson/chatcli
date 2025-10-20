@@ -235,6 +235,9 @@ Execute prompts in a single line, ideal for scripting and automation.
   - chatcli -p "Quickly explain this repository."
   - chatcli -p "@git @env Create a concise release note."
   - chatcli -p "@file ./src --mode summary Provide an overview of the architecture."
+  - chatcli -p "@file ./myproject Describe the architecture of this project based on the .go files" \
+    --provider STACKSPOT \
+    --agent-id "your-agent-id-here"
 
 - Input via  stdin  (Pipes):
   - git diff | chatcli -p "Summarize the changes and list potential impacts."

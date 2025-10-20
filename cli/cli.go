@@ -777,6 +777,7 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("chatcli --prompt \"<prompt>\"", i18n.T("help.command.oneshot_prompt"))
 	printCommand("--provider <nome>", i18n.T("help.command.oneshot_provider"))
 	printCommand("--model <nome>", i18n.T("help.command.oneshot_model"))
+	printCommand("--agent-id <id>", i18n.T("help.command.oneshot_agent_id"))
 	printCommand("--max-tokens <num>", i18n.T("help.command.oneshot_max_tokens"))
 	printCommand("--timeout <duração>", i18n.T("help.command.oneshot_timeout"))
 	printCommand("--no-anim", i18n.T("help.command.oneshot_no_anim"))
