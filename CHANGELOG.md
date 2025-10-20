@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.1](https://github.com/diillson/chatcli/compare/v1.31.0...v1.31.1) (2025-10-20)
+
+
+### Bug Fixes
+
+* **cli:** add support for `--agent-id` flag and update docs/i18n for StackSpot integration ([#310](https://github.com/diillson/chatcli/issues/310)) ([#311](https://github.com/diillson/chatcli/issues/311)) ([d10c2a9](https://github.com/diillson/chatcli/commit/d10c2a9d9e885e42d72ad9f093f01033781f2514))
+
 ## [1.31.0](https://github.com/diillson/chatcli/compare/v1.30.0...v1.31.0) (2025-10-19)
 
 
