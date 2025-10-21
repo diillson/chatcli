@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.2](https://github.com/diillson/chatcli/compare/v1.31.1...v1.31.2) (2025-10-21)
+
+
+### Bug Fixes
+
+* **assets:** add demo GIF for chat CLI ([#313](https://github.com/diillson/chatcli/issues/313)) ([#314](https://github.com/diillson/chatcli/issues/314)) ([8463955](https://github.com/diillson/chatcli/commit/8463955a2c38733bd8ee2b29bd18c80418cc0eb4))
+
 ## [1.31.1](https://github.com/diillson/chatcli/compare/v1.31.0...v1.31.1) (2025-10-20)
 
 
