@@ -6,6 +6,7 @@
 package utils
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -165,6 +166,11 @@ func ProcessDirectory(dirPath string, options DirectoryScanOptions) ([]FileInfo,
 		return []FileInfo{file}, nil
 	}
 
+	// Carrega padrões de exclusão customizados e os adiciona às opções.
+	customExcludeDirs, customExcludePatterns := loadIgnorePatterns(dirPath, options.Logger)
+	options.ExcludeDirs = append(options.ExcludeDirs, customExcludeDirs...)
+	options.ExcludePatterns = append(options.ExcludePatterns, customExcludePatterns...)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -178,7 +184,6 @@ func ProcessDirectory(dirPath string, options DirectoryScanOptions) ([]FileInfo,
 		workerCount        = 4
 	)
 
-	// Inicia workers para ler o conteúdo dos arquivos
 	for i := 0; i < workerCount; i++ {
 		wgWorkers.Add(1)
 		go func() {
@@ -189,9 +194,7 @@ func ProcessDirectory(dirPath string, options DirectoryScanOptions) ([]FileInfo,
 					if !ok {
 						return
 					}
-					// O worker apenas lê o arquivo e envia o resultado.
-					// Ele não se preocupa com limites.
-					content, err := ReadFileContent(path, options.MaxTotalSize) // Passa um limite grande
+					content, err := ReadFileContent(path, options.MaxTotalSize)
 					if err != nil {
 						options.Logger.Warn("Erro ao ler arquivo, pulando", zap.String("path", path), zap.Error(err))
 						continue
@@ -213,20 +216,18 @@ func ProcessDirectory(dirPath string, options DirectoryScanOptions) ([]FileInfo,
 		}()
 	}
 
-	// Goroutine para caminhar pelo diretório e encontrar arquivos
 	var walkErr error
 	var wgWalk sync.WaitGroup
 	wgWalk.Add(1)
 	go func() {
 		defer wgWalk.Done()
-		defer close(filesToProcessChan) // Fecha o canal quando terminar de caminhar
+		defer close(filesToProcessChan)
 
 		walkErr = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return nil
 			}
 
-			// Verifica se o contexto foi cancelado (limite atingido)
 			select {
 			case <-ctx.Done():
 				return errors.New("limite de processamento atingido")
@@ -234,8 +235,17 @@ func ProcessDirectory(dirPath string, options DirectoryScanOptions) ([]FileInfo,
 			}
 
 			if info.IsDir() {
-				if path != dirPath && ShouldSkipDir(info.Name()) {
-					return filepath.SkipDir
+				baseName := info.Name()
+				if path != dirPath {
+					for _, excludedDir := range options.ExcludeDirs {
+						if baseName == excludedDir {
+							options.Logger.Debug("Pulando diretório ignorado", zap.String("dir", path))
+							return filepath.SkipDir
+						}
+					}
+					if !options.IncludeHidden && strings.HasPrefix(baseName, ".") {
+						return filepath.SkipDir
+					}
 				}
 				return nil
 			}
@@ -247,7 +257,6 @@ func ProcessDirectory(dirPath string, options DirectoryScanOptions) ([]FileInfo,
 		})
 	}()
 
-	// Goroutine para fechar o canal de resultados após os workers terminarem
 	go func() {
 		wgWorkers.Wait()
 		close(resultsChan)
@@ -255,25 +264,21 @@ func ProcessDirectory(dirPath string, options DirectoryScanOptions) ([]FileInfo,
 
 	for file := range resultsChan {
 		if fileCount >= options.MaxFilesToProcess || totalSize+int64(len(file.Content)) > options.MaxTotalSize {
-			cancel() // Atingiu o limite, sinaliza para todas as goroutines pararem.
-			break    // Para de coletar resultados.
+			cancel()
+			break
 		}
-
 		result = append(result, file)
 		fileCount++
 		totalSize += int64(len(file.Content))
-
 		if options.OnFileProcessed != nil {
 			options.OnFileProcessed(file)
 		}
 	}
 
-	// Espera a goroutine de caminhada terminar para verificar se houve erro
 	wgWalk.Wait()
 	if walkErr != nil && walkErr.Error() != "limite de processamento atingido" {
 		return nil, walkErr
 	}
-
 	return result, nil
 }
 
@@ -382,7 +387,6 @@ func CountMatchingFiles(dirPath string, options DirectoryScanOptions) (int, erro
 		return 0, err
 	}
 
-	// Se for um arquivo único, o total é 1
 	info, err := os.Stat(dirPath)
 	if err != nil {
 		return 0, err
@@ -391,13 +395,17 @@ func CountMatchingFiles(dirPath string, options DirectoryScanOptions) (int, erro
 		return 1, nil
 	}
 
+	// Carrega padrões de exclusão customizados e os adiciona às opções.
+	customExcludeDirs, customExcludePatterns := loadIgnorePatterns(dirPath, options.Logger)
+	options.ExcludeDirs = append(options.ExcludeDirs, customExcludeDirs...)
+	options.ExcludePatterns = append(options.ExcludePatterns, customExcludePatterns...)
+
 	count := 0
 	err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Ignora erros em arquivos individuais para continuar a contagem
+			return nil
 		}
 
-		// Se for diretório, verifica se deve ser pulado
 		if info.IsDir() {
 			base := filepath.Base(path)
 			if path != dirPath {
@@ -413,17 +421,82 @@ func CountMatchingFiles(dirPath string, options DirectoryScanOptions) (int, erro
 			return nil
 		}
 
-		// Verifica se o arquivo corresponde aos critérios de exclusão e extensão
 		if !matchesAny(path, options.ExcludePatterns) && hasAllowedExtension(path, options.Extensions) {
 			count++
 		}
-
 		return nil
 	})
 
 	if err != nil {
 		return 0, err
 	}
-
 	return count, nil
+}
+
+// loadIgnorePatterns localiza e carrega o arquivo .chatcliignore apropriado seguindo uma hierarquia de precedência.
+func loadIgnorePatterns(rootDir string, logger *zap.Logger) (excludeDirs []string, excludePatterns []string) {
+	// 1. Prioridade Máxima: Variável de Ambiente CHATCLI_IGNORE_PATH
+	if ignorePathEnv := os.Getenv("CHATCLI_IGNORE"); ignorePathEnv != "" {
+		expandedPath, err := ExpandPath(ignorePathEnv)
+		if err != nil {
+			logger.Warn("Não foi possível expandir o caminho de CHATCLI_IGNORE.", zap.String("path", ignorePathEnv), zap.Error(err))
+			return nil, nil
+		}
+		logger.Info("Usando arquivo de ignore definido pela variável de ambiente.", zap.String("path", expandedPath))
+		return readIgnoreFile(expandedPath, logger)
+	}
+
+	// 2. Prioridade Média: Arquivo .chatcliignore no diretório do projeto
+	projectIgnorePath := filepath.Join(rootDir, ".chatignore")
+	dirs, patterns := readIgnoreFile(projectIgnorePath, logger)
+	if dirs != nil || patterns != nil {
+		logger.Info("Usando arquivo de ignore específico do projeto.", zap.String("path", projectIgnorePath))
+		return dirs, patterns
+	}
+
+	// 3. Prioridade Baixa: Arquivo .chatcliignore global no diretório de configuração do usuário
+	homeDir, err := GetHomeDir()
+	if err == nil {
+		globalIgnorePath := filepath.Join(homeDir, ".chatcli", ".chatignore")
+		dirs, patterns := readIgnoreFile(globalIgnorePath, logger)
+		if dirs != nil || patterns != nil {
+			logger.Info("Usando arquivo de ignore global do usuário.", zap.String("path", globalIgnorePath))
+			return dirs, patterns
+		}
+	}
+
+	// 4. Fallback: Nenhum arquivo de ignore encontrado
+	return nil, nil
+}
+
+// readIgnoreFile lê um único arquivo de ignore e retorna os padrões de exclusão.
+// Retorna slices nulos se o arquivo não existir ou não puder ser lido.
+func readIgnoreFile(filePath string, logger *zap.Logger) (excludeDirs []string, excludePatterns []string) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.Warn("Não foi possível abrir o arquivo de ignore, pulando.", zap.String("path", filePath), zap.Error(err))
+		}
+		return nil, nil
+	}
+	defer file.Close()
+
+	var dirs, patterns []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasSuffix(line, "/") {
+			dirs = append(dirs, strings.TrimSuffix(line, "/"))
+		} else {
+			patterns = append(patterns, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		logger.Warn("Erro ao escanear o arquivo de ignore.", zap.String("path", filePath), zap.Error(err))
+	}
+	return dirs, patterns
 }
