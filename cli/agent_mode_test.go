@@ -50,7 +50,6 @@ func withStdin(t *testing.T, input string, f func()) {
 }
 
 func TestAgentMode_Run_ExtractsAndHandlesCommands(t *testing.T) {
-	// CORREÇÃO: Inicializar o sistema de i18n para o teste.
 	i18n.Init()
 
 	logger, _ := zap.NewDevelopment()
