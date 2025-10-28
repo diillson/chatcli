@@ -143,6 +143,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
 
 - General:
   -  `CHATCLI_DOTENV`  – **(Optional)** Defines the path to your  `.env`  file.
+  -  `CHATCLI_IGNORE` – **(Optional)** Defines a list of files or folders to be ignored by ChatCLI.
   -  `CHATCLI_LANG`  – **(Optional)** Sets the interface language ( e.g.,  en ,  `pt-BR` ). Default: detects from system.
   -  `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
   -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` )
@@ -171,6 +172,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     
     LOG_LEVEL=info
     CHATCLI_LANG=en_US
+    CHATCLI_IGNORE=~/.chatignore
     ENV=prod
     LLM_PROVIDER=CLAUDEAI
     MAX_RETRIES=10
@@ -290,6 +292,64 @@ The  `@file` <path>  command is the primary tool for sending files and directori
 ### Chunking System in Detail
 
 After the first chunk is sent, use  /nextchunk  to process the next. The system provides visual feedback on progress and the number of remaining chunks. To manage failures, use  /retry ,  /retryall , or  /skipchunk .
+
+### Advanced File Filtering with `.chatignore`
+
+To further refine the context sent to the AI, `ChatCLI` supports a file and directory exclusion system inspired by `.gitignore`. This allows you to avoid sending test files, documentation, logs, or any other irrelevant content.
+
+#### Why Filter Files?
+
+*   🎯 **Focus**: Sends only relevant source code to the AI, resulting in more accurate answers.
+*   💰 **Efficiency**: Saves tokens, which can reduce costs on paid APIs.
+*   🚀 **Speed**: Processes large projects faster by ignoring unnecessary files.
+*   🔇 **Noise Reduction**: Avoids polluting the context with compiled files, dependencies, or logs.
+
+#### How it Works: The `.chatignore` File
+
+The syntax is identical to `.gitignore`:
+
+*   Lines starting with `#` are comments.
+*   To ignore a directory and all its contents, add the directory name followed by a `/` (e.g., `docs/`).
+*   Use glob patterns (wildcards) to ignore files (e.g., `*_test.go`, `*.log`).
+
+#### Rule Precedence Hierarchy
+
+`ChatCLI` looks for an ignore file in a specific order. The first one found is used, and the others are ignored.
+
+1.  **Environment Variable (Highest Priority)**: If the `CHATCLI_IGNORE` environment variable is set to a file path, **only** that file will be used.
+    ```bash
+    export CHATCLI_IGNORE_PATH="~/configs/my_global_ignore.txt"
+    ```
+
+2.  **Project-Specific File**: If the environment variable is not set, `ChatCLI` will look for a `.chatignore` file in the **root of the directory** you are analyzing with `@file`. This is ideal for project-specific rules.
+
+3.  **Global User File**: If none of the above are found, it will look for a global ignore file at `~/.chatcli/.chatignore`. This is perfect for rules that apply to all your projects (e.g., `.DS_Store`).
+
+4.  **Built-in Defaults**: If no ignore file is found, `ChatCLI` will use its internal default rules (which already ignore `.git`, `node_modules`, etc.).
+
+> **Important Note:** The rules are not merged. Only the first ignore file found in the hierarchy is used.
+
+#### Practical Example of a `.chatignore` File
+
+You can create this file in your project's root to ignore test files, documentation, and CI configurations.
+
+
+***.chatignore:***
+```
+Ignore all Go test files
+
+*_test.go
+
+Ignore entire directories for documentation and end-to-end tests
+
+docs/
+e2e/
+
+Ignore specific CI and log files
+
+golangci.yml
+*.log
+```
 
 --------
 
