@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.32.0](https://github.com/diillson/chatcli/compare/v1.31.2...v1.32.0) (2025-10-28)
+
+
+### Features
+
+* **cli:** add support for custom ignore patterns using .chatignore ([#316](https://github.com/diillson/chatcli/issues/316)) ([#317](https://github.com/diillson/chatcli/issues/317)) ([ff65d9e](https://github.com/diillson/chatcli/commit/ff65d9efbae92f75f740d25d524685f077a2907e))
+
 ## [1.31.2](https://github.com/diillson/chatcli/compare/v1.31.1...v1.31.2) (2025-10-21)
 
 
