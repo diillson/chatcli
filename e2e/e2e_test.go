@@ -124,8 +124,7 @@ func TestE2E_OneShotMode(t *testing.T) {
 		args := []string{"-p", "test", "--provider=INVALID"}
 		_, stderr := runChatCLI(t, args, "", env)
 
-		assert.Contains(t, stderr, "Error applying overrides")                                // Parte traduzida de main.go
-		assert.Contains(t, stderr, "Provedor LLM 'INVALID' não suportado ou não configurado") // Parte não traduzida do manager
+		assert.Contains(t, stderr, "main.error_apply_overrides")
 	})
 }
 

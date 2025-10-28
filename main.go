@@ -32,6 +32,8 @@ func main() {
 		os.Exit(2)
 	}
 
+	i18n.Init()
+
 	if opts.Version {
 		versionInfo := version.GetCurrentVersion()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -49,7 +51,6 @@ func main() {
 		if err == nil {
 			envFilePath = expanded
 		} else {
-			// CORREÇÃO: Usar Println com i18n.T
 			fmt.Println(i18n.T("main.warn_expand_path", envFilePath, err))
 		}
 	}
@@ -58,8 +59,6 @@ func main() {
 		// CORREÇÃO: Usar Println com i18n.T
 		fmt.Println(i18n.T("main.error_dotenv_not_found", envFilePath))
 	}
-
-	i18n.Init()
 
 	logger, err := utils.InitializeLogger()
 	if err != nil {
