@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/openai"
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/stretchr/testify/assert"
@@ -12,6 +13,7 @@ import (
 )
 
 func setupTestEnv(t *testing.T, envs map[string]string) {
+	i18n.Init()
 	originalEnvs := make(map[string]string)
 
 	keysToClear := []string{
@@ -49,6 +51,7 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 }
 
 func TestLLMManager_GetClient(t *testing.T) {
+	i18n.Init()
 	logger, _ := zap.NewDevelopment()
 
 	t.Run("OpenAI Client Success", func(t *testing.T) {
@@ -64,7 +67,6 @@ func TestLLMManager_GetClient(t *testing.T) {
 	})
 
 	t.Run("StackSpot Client Success", func(t *testing.T) {
-		// CORRIGIDO: Usa CLIENT_KEY
 		setupTestEnv(t, map[string]string{
 			"CLIENT_ID":          "fake-id",
 			"CLIENT_KEY":         "fake-key",
