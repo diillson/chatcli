@@ -88,14 +88,14 @@ func (h *ContextHandler) HandleContextCommand(sessionID, input string) error {
 		return nil
 
 	default:
-		return fmt.Errorf(i18n.T("context.error.unknown_subcommand", subcommand))
+		return fmt.Errorf("%s", i18n.T("context.error.unknown_subcommand", subcommand))
 	}
 }
 
 // handleCreate cria um novo contexto
 func (h *ContextHandler) handleCreate(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf(i18n.T("context.create.usage"))
+		return fmt.Errorf("%s", i18n.T("context.create.usage"))
 	}
 
 	// Parser de argumentos melhorado
@@ -114,7 +114,7 @@ func (h *ContextHandler) handleCreate(args []string) error {
 		switch {
 		case arg == "--mode" || arg == "-m":
 			if i+1 >= len(args) {
-				return fmt.Errorf(i18n.T("context.create.error.mode_required"))
+				return fmt.Errorf("%s", i18n.T("context.create.error.mode_required"))
 			}
 			i++ // Avançar para o valor
 			modeStr = args[i]
@@ -122,7 +122,7 @@ func (h *ContextHandler) handleCreate(args []string) error {
 
 		case arg == "--description" || arg == "--desc" || arg == "-d":
 			if i+1 >= len(args) {
-				return fmt.Errorf(i18n.T("context.create.error.description_required"))
+				return fmt.Errorf("%s", i18n.T("context.create.error.description_required"))
 			}
 			i++ // Avançar para o valor
 			description = args[i]
@@ -130,7 +130,7 @@ func (h *ContextHandler) handleCreate(args []string) error {
 
 		case arg == "--tags" || arg == "-t":
 			if i+1 >= len(args) {
-				return fmt.Errorf(i18n.T("context.create.error.tags_required"))
+				return fmt.Errorf("%s", i18n.T("context.create.error.tags_required"))
 			}
 			i++ // Avançar para o valor
 			tags = strings.Split(args[i], ",")
@@ -148,7 +148,7 @@ func (h *ContextHandler) handleCreate(args []string) error {
 	}
 
 	if len(paths) == 0 {
-		return fmt.Errorf(i18n.T("context.create.error.no_paths"))
+		return fmt.Errorf("%s", i18n.T("context.create.error.no_paths"))
 	}
 
 	// Modo padrão
@@ -190,7 +190,7 @@ func (h *ContextHandler) handleCreate(args []string) error {
 
 	ctx, err := h.manager.CreateContext(name, description, paths, mode, tags)
 	if err != nil {
-		return fmt.Errorf(i18n.T("context.create.error.failed", err))
+		return fmt.Errorf("%s", i18n.T("context.create.error.failed", err))
 	}
 
 	fmt.Println(colorize(i18n.T("context.create.success"), ColorGreen))
@@ -202,7 +202,7 @@ func (h *ContextHandler) handleCreate(args []string) error {
 // handleAttach anexa um contexto à sessão atual
 func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf(i18n.T("context.attach.usage"))
+		return fmt.Errorf("%s", i18n.T("context.attach.usage"))
 	}
 
 	contextName := args[0]
@@ -217,12 +217,12 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 		switch {
 		case arg == "--priority" || arg == "-p":
 			if i+1 >= len(args) {
-				return fmt.Errorf(i18n.T("context.attach.error.invalid_priority"))
+				return fmt.Errorf("%s", i18n.T("context.attach.error.invalid_priority"))
 			}
 			i++
 			p, err := strconv.Atoi(args[i])
 			if err != nil {
-				return fmt.Errorf(i18n.T("context.attach.error.invalid_priority"))
+				return fmt.Errorf("%s", i18n.T("context.attach.error.invalid_priority"))
 			}
 			priority = p
 			i++
@@ -263,7 +263,7 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 	// Buscar contexto por nome
 	ctx, err := h.manager.GetContextByName(contextName)
 	if err != nil {
-		return fmt.Errorf(i18n.T("context.attach.error.not_found", contextName))
+		return fmt.Errorf("%s", i18n.T("context.attach.error.not_found", contextName))
 	}
 
 	// Validar chunks selecionados
@@ -287,11 +287,11 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 	}
 
 	if err := h.manager.AttachContextWithOptions(sessionID, ctx.ID, attachOpts); err != nil {
-		return fmt.Errorf(i18n.T("context.attach.error.failed", err))
+		return fmt.Errorf("%s", i18n.T("context.attach.error.failed", err))
 	}
 
 	// Feedback detalhado
-	fmt.Println(colorize(fmt.Sprintf(" ✅ Contexto '%s' anexado com sucesso!", ctx.Name), ColorGreen))
+	fmt.Println(colorize(fmt.Sprintf("✅ Contexto '%s' anexado com sucesso!", ctx.Name), ColorGreen))
 	fmt.Printf("  %s %d\n", colorize("Prioridade:", ColorCyan), priority)
 
 	if len(selectedChunks) > 0 {
@@ -331,7 +331,7 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 // handleDetach desanexa um contexto da sessão
 func (h *ContextHandler) handleDetach(sessionID string, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf(i18n.T("context.detach.usage"))
+		return fmt.Errorf("%s", i18n.T("context.detach.usage"))
 	}
 
 	contextName := args[0]
@@ -339,12 +339,12 @@ func (h *ContextHandler) handleDetach(sessionID string, args []string) error {
 	// Buscar contexto por nome
 	ctx, err := h.manager.GetContextByName(contextName)
 	if err != nil {
-		return fmt.Errorf(i18n.T("context.detach.error.not_found", contextName))
+		return fmt.Errorf("%s", i18n.T("context.detach.error.not_found", contextName))
 	}
 
 	// Desanexar
 	if err := h.manager.DetachContext(sessionID, ctx.ID); err != nil {
-		return fmt.Errorf(i18n.T("context.detach.error.failed", err))
+		return fmt.Errorf("%s", i18n.T("context.detach.error.failed", err))
 	}
 
 	fmt.Println(colorize(i18n.T("context.detach.success", ctx.Name), ColorGreen))
@@ -355,7 +355,7 @@ func (h *ContextHandler) handleDetach(sessionID string, args []string) error {
 // handleDelete deleta um contexto permanentemente
 func (h *ContextHandler) handleDelete(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf(i18n.T("context.delete.usage"))
+		return fmt.Errorf("%s", i18n.T("context.delete.usage"))
 	}
 
 	contextName := args[0]
@@ -363,11 +363,10 @@ func (h *ContextHandler) handleDelete(args []string) error {
 	// Buscar contexto por nome
 	ctx, err := h.manager.GetContextByName(contextName)
 	if err != nil {
-		return fmt.Errorf(i18n.T("context.delete.error.not_found", contextName))
+		return fmt.Errorf("%s", i18n.T("context.delete.error.not_found", contextName))
 	}
 
-	// Confirmar - CORREÇÃO: usar bufio.Reader ao invés de fmt.Scanln
-	fmt.Printf(i18n.T("context.delete.confirm", ctx.Name))
+	fmt.Printf("%s", i18n.T("context.delete.confirm", ctx.Name))
 
 	// Restaurar terminal antes de ler input
 	if runtime.GOOS != "windows" {
@@ -390,7 +389,7 @@ func (h *ContextHandler) handleDelete(args []string) error {
 
 	// Deletar
 	if err := h.manager.DeleteContext(ctx.ID); err != nil {
-		return fmt.Errorf(i18n.T("context.delete.error.failed", err))
+		return fmt.Errorf("%s", i18n.T("context.delete.error.failed", err))
 	}
 
 	fmt.Println(colorize(i18n.T("context.delete.success", ctx.Name), ColorGreen))
@@ -405,7 +404,7 @@ func (h *ContextHandler) handleList(args []string) error {
 
 	contexts, err := h.manager.ListContexts(filter)
 	if err != nil {
-		return fmt.Errorf(i18n.T("context.list.error.failed", err))
+		return fmt.Errorf("%s", i18n.T("context.list.error.failed", err))
 	}
 
 	if len(contexts) == 0 {
@@ -444,14 +443,14 @@ func (h *ContextHandler) handleList(args []string) error {
 // handleShow mostra detalhes de um contexto
 func (h *ContextHandler) handleShow(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf(i18n.T("context.show.usage"))
+		return fmt.Errorf("%s", i18n.T("context.show.usage"))
 	}
 
 	contextName := args[0]
 
 	ctx, err := h.manager.GetContextByName(contextName)
 	if err != nil {
-		return fmt.Errorf(i18n.T("context.show.error.not_found", contextName))
+		return fmt.Errorf("%s", i18n.T("context.show.error.not_found", contextName))
 	}
 
 	h.printContextInfo(ctx, true)
@@ -462,7 +461,7 @@ func (h *ContextHandler) handleShow(args []string) error {
 // handleMerge mescla contextos
 func (h *ContextHandler) handleMerge(args []string) error {
 	if len(args) < 3 {
-		return fmt.Errorf(i18n.T("context.merge.usage"))
+		return fmt.Errorf("%s", i18n.T("context.merge.usage"))
 	}
 
 	newName := args[0]
@@ -473,7 +472,7 @@ func (h *ContextHandler) handleMerge(args []string) error {
 	for _, name := range contextNames {
 		ctx, err := h.manager.GetContextByName(name)
 		if err != nil {
-			return fmt.Errorf(i18n.T("context.merge.error.context_not_found", name))
+			return fmt.Errorf("%s", i18n.T("context.merge.error.context_not_found", name))
 		}
 		contextIDs = append(contextIDs, ctx.ID)
 	}
@@ -490,7 +489,7 @@ func (h *ContextHandler) handleMerge(args []string) error {
 
 	mergedCtx, err := h.manager.MergeContexts(newName, "", contextIDs, opts)
 	if err != nil {
-		return fmt.Errorf(i18n.T("context.merge.error.failed", err))
+		return fmt.Errorf("%s", i18n.T("context.merge.error.failed", err))
 	}
 
 	fmt.Println(colorize(i18n.T("context.merge.success"), ColorGreen))
@@ -503,7 +502,7 @@ func (h *ContextHandler) handleMerge(args []string) error {
 func (h *ContextHandler) handleShowAttached(sessionID string) error {
 	contexts, err := h.manager.GetAttachedContexts(sessionID)
 	if err != nil {
-		return fmt.Errorf(i18n.T("context.attached.error.failed", err))
+		return fmt.Errorf("%s", i18n.T("context.attached.error.failed", err))
 	}
 
 	if len(contexts) == 0 {
@@ -531,7 +530,7 @@ func (h *ContextHandler) handleShowAttached(sessionID string) error {
 // handleExport exporta um contexto
 func (h *ContextHandler) handleExport(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf(i18n.T("context.export.usage"))
+		return fmt.Errorf("%s", i18n.T("context.export.usage"))
 	}
 
 	contextName := args[0]
@@ -539,11 +538,11 @@ func (h *ContextHandler) handleExport(args []string) error {
 
 	ctx, err := h.manager.GetContextByName(contextName)
 	if err != nil {
-		return fmt.Errorf(i18n.T("context.export.error.not_found", contextName))
+		return fmt.Errorf("%s", i18n.T("context.export.error.not_found", contextName))
 	}
 
 	if err := h.manager.Storage.ExportContext(ctx, targetPath); err != nil {
-		return fmt.Errorf(i18n.T("context.export.error.failed", err))
+		return fmt.Errorf("%s", i18n.T("context.export.error.failed", err))
 	}
 
 	fmt.Println(colorize(i18n.T("context.export.success", targetPath), ColorGreen))
@@ -554,14 +553,14 @@ func (h *ContextHandler) handleExport(args []string) error {
 // handleImport importa um contexto
 func (h *ContextHandler) handleImport(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf(i18n.T("context.import.usage"))
+		return fmt.Errorf("%s", i18n.T("context.import.usage"))
 	}
 
 	sourcePath := args[0]
 
 	ctx, err := h.manager.Storage.ImportContext(sourcePath)
 	if err != nil {
-		return fmt.Errorf(i18n.T("context.import.error.failed", err))
+		return fmt.Errorf("%s", i18n.T("context.import.error.failed", err))
 	}
 
 	fmt.Println(colorize(i18n.T("context.import.success", ctx.Name), ColorGreen))
@@ -668,43 +667,43 @@ func (h *ContextHandler) printContextInfo(ctx *ctxmgr.FileContext, detailed bool
 // showContextHelp mostra ajuda do comando /context
 func (h *ContextHandler) showContextHelp() {
 	help := `
-    ` + colorize("📦 GERENCIAMENTO DE CONTEXTOS", ColorLime+ColorBold) + `
-    ` + colorize(strings.Repeat("─", 80), ColorGray) + `
-    
-    ` + colorize("CRIAR CONTEXTO:", ColorCyan) + `
-      /context create <nome> <caminhos...> [opções]
-        --mode, -m <modo>           Modo: full, summary, chunked, smart
-        --description, -d <texto>   Descrição do contexto
-        --tags, -t <tag1,tag2>      Tags separadas por vírgula
+        ` + colorize("📦 GERENCIAMENTO DE CONTEXTOS", ColorLime+ColorBold) + `
+        ` + colorize(strings.Repeat("─", 80), ColorGray) + `
         
-      Exemplo:
-        /context create projeto-api ./src ./tests --mode smart --tags api,golang
-    
-    ` + colorize("ANEXAR/DESANEXAR:", ColorCyan) + `
-      /context attach <nome> [--priority <n>]   Anexa contexto à sessão atual
-      /context detach <nome>                     Desanexa contexto da sessão
-    
-    ` + colorize("LISTAR E VISUALIZAR:", ColorCyan) + `
-      /context list                  Lista todos os contextos
-      /context show <nome>           Mostra detalhes de um contexto
-      /context attached              Mostra contextos anexados à sessão
-    
-    ` + colorize("GERENCIAR:", ColorCyan) + `
-      /context delete <nome>                      Deleta um contexto
-      /context merge <novo-nome> <ctx1> <ctx2>... Mescla múltiplos contextos
-    
-    ` + colorize("IMPORTAR/EXPORTAR:", ColorCyan) + `
-      /context export <nome> <caminho>   Exporta contexto para arquivo
-      /context import <caminho>          Importa contexto de arquivo
-    
-    ` + colorize("MÉTRICAS:", ColorCyan) + `
-      /context metrics               Mostra estatísticas de uso
-    
-    ` + colorize("NOTAS:", ColorGray) + `
-      • Contextos anexados são automaticamente incluídos nos prompts à LLM
-      • Use prioridade para controlar a ordem (menor = primeiro)
-      • Contextos mesclados removem duplicatas automaticamente
-    `
+        ` + colorize("CRIAR CONTEXTO:", ColorCyan) + `
+          /context create <nome> <caminhos...> [opções]
+            --mode, -m <modo>           Modo: full, summary, chunked, smart
+            --description, -d <texto>   Descrição do contexto
+            --tags, -t <tag1,tag2>      Tags separadas por vírgula
+            
+          Exemplo:
+            /context create projeto-api ./src ./tests --mode smart --tags api,golang
+        
+        ` + colorize("ANEXAR/DESANEXAR:", ColorCyan) + `
+          /context attach <nome> [--priority <n>]   Anexa contexto à sessão atual
+          /context detach <nome>                     Desanexa contexto da sessão
+        
+        ` + colorize("LISTAR E VISUALIZAR:", ColorCyan) + `
+          /context list                  Lista todos os contextos
+          /context show <nome>           Mostra detalhes de um contexto
+          /context attached              Mostra contextos anexados à sessão
+        
+        ` + colorize("GERENCIAR:", ColorCyan) + `
+          /context delete <nome>                      Deleta um contexto
+          /context merge <novo-nome> <ctx1> <ctx2>... Mescla múltiplos contextos
+        
+        ` + colorize("IMPORTAR/EXPORTAR:", ColorCyan) + `
+          /context export <nome> <caminho>   Exporta contexto para arquivo
+          /context import <caminho>          Importa contexto de arquivo
+        
+        ` + colorize("MÉTRICAS:", ColorCyan) + `
+          /context metrics               Mostra estatísticas de uso
+        
+        ` + colorize("NOTAS:", ColorGray) + `
+          • Contextos anexados são automaticamente incluídos nos prompts à LLM
+          • Use prioridade para controlar a ordem (menor = primeiro)
+          • Contextos mesclados removem duplicatas automaticamente
+        `
 	fmt.Println(help)
 }
 
