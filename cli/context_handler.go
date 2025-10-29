@@ -10,13 +10,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -67,6 +69,9 @@ func (h *ContextHandler) HandleContextCommand(sessionID, input string) error {
 
 	case "show", "info", "view":
 		return h.handleShow(parts[2:])
+
+	case "inspect":
+		return h.handleInspect(parts[2:])
 
 	case "merge", "join":
 		return h.handleMerge(parts[2:])
@@ -458,6 +463,161 @@ func (h *ContextHandler) handleShow(args []string) error {
 	return nil
 }
 
+// handleInspect fornece inspeção profunda de um contexto
+func (h *ContextHandler) handleInspect(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("Uso: /context inspect <nome> [--chunk N]")
+	}
+
+	contextName := args[0]
+	chunkNum := -1
+
+	// Parse flags
+	for i := 1; i < len(args); i++ {
+		if args[i] == "--chunk" && i+1 < len(args) {
+			n, err := strconv.Atoi(args[i+1])
+			if err == nil {
+				chunkNum = n
+			}
+			i++
+		}
+	}
+
+	ctx, err := h.manager.GetContextByName(contextName)
+	if err != nil {
+		return fmt.Errorf("Contexto '%s' não encontrado", contextName)
+	}
+
+	// Se chunk específico foi solicitado
+	if chunkNum > 0 && ctx.IsChunked {
+		if chunkNum > len(ctx.Chunks) {
+			return fmt.Errorf("Chunk %d não existe (disponíveis: 1-%d)",
+				chunkNum, len(ctx.Chunks))
+		}
+		h.inspectChunk(ctx, chunkNum-1)
+		return nil
+	}
+
+	// Inspeção geral
+	h.inspectContext(ctx)
+	return nil
+}
+
+// inspectContext mostra análise detalhada do contexto
+func (h *ContextHandler) inspectContext(ctx *ctxmgr.FileContext) {
+	fmt.Println(colorize("\n🔍 INSPEÇÃO DETALHADA", ColorLime+ColorBold))
+	fmt.Println(colorize(strings.Repeat("═", 80), ColorGray))
+
+	// Estatísticas avançadas
+	var totalLines int
+	languageMap := make(map[string]int)
+	sizeDistribution := make(map[string]int) // small, medium, large
+
+	for _, file := range ctx.Files {
+		lines := strings.Count(file.Content, "\n") + 1
+		totalLines += lines
+
+		ext := strings.ToLower(filepath.Ext(file.Path))
+		languageMap[ext]++
+
+		// Classificar por tamanho
+		sizeKB := float64(file.Size) / 1024
+		var sizeClass string
+		switch {
+		case sizeKB < 10:
+			sizeClass = "pequeno (<10KB)"
+		case sizeKB < 100:
+			sizeClass = "médio (10-100KB)"
+		default:
+			sizeClass = "grande (>100KB)"
+		}
+		sizeDistribution[sizeClass]++
+	}
+
+	fmt.Printf("\n%s\n", colorize("📊 ANÁLISE ESTATÍSTICA", ColorCyan+ColorBold))
+	fmt.Printf("  Total de linhas de código: %s\n",
+		colorize(fmt.Sprintf("%d", totalLines), ColorYellow))
+	fmt.Printf("  Média de linhas por arquivo: %s\n",
+		colorize(fmt.Sprintf("%.0f", float64(totalLines)/float64(ctx.FileCount)), ColorYellow))
+
+	fmt.Printf("\n%s\n", colorize("📐 DISTRIBUIÇÃO DE TAMANHO", ColorCyan+ColorBold))
+	for size, count := range sizeDistribution {
+		percentage := float64(count) / float64(ctx.FileCount) * 100
+		fmt.Printf("  %s: %d arquivos (%.1f%%)\n", size, count, percentage)
+	}
+
+	fmt.Printf("\n%s\n", colorize("🗂️ EXTENSÕES ENCONTRADAS", ColorCyan+ColorBold))
+	var exts []string
+	for ext := range languageMap {
+		exts = append(exts, ext)
+	}
+	sort.Slice(exts, func(i, j int) bool {
+		return languageMap[exts[i]] > languageMap[exts[j]]
+	})
+
+	for _, ext := range exts {
+		count := languageMap[ext]
+		if ext == "" {
+			ext = "(sem extensão)"
+		}
+		fmt.Printf("  %s: %d arquivo(s)\n", ext, count)
+	}
+
+	// Análise de chunks se aplicável
+	if ctx.IsChunked {
+		fmt.Printf("\n%s\n", colorize("🧩 ANÁLISE DE CHUNKS", ColorCyan+ColorBold))
+
+		var totalChunkSize int64
+		var minSize, maxSize int64 = ctx.Chunks[0].TotalSize, ctx.Chunks[0].TotalSize
+
+		for _, chunk := range ctx.Chunks {
+			totalChunkSize += chunk.TotalSize
+			if chunk.TotalSize < minSize {
+				minSize = chunk.TotalSize
+			}
+			if chunk.TotalSize > maxSize {
+				maxSize = chunk.TotalSize
+			}
+		}
+
+		avgSize := totalChunkSize / int64(len(ctx.Chunks))
+
+		fmt.Printf("  Tamanho médio por chunk: %.2f KB\n", float64(avgSize)/1024)
+		fmt.Printf("  Menor chunk: %.2f KB\n", float64(minSize)/1024)
+		fmt.Printf("  Maior chunk: %.2f KB\n", float64(maxSize)/1024)
+		fmt.Printf("  Variação: %.1f%%\n",
+			float64(maxSize-minSize)/float64(avgSize)*100)
+	}
+
+	fmt.Println()
+}
+
+// inspectChunk mostra detalhes de um chunk específico
+func (h *ContextHandler) inspectChunk(ctx *ctxmgr.FileContext, index int) {
+	chunk := ctx.Chunks[index]
+
+	fmt.Printf("\n🔍 INSPEÇÃO DO CHUNK %d/%d\n", chunk.Index, chunk.TotalChunks)
+	fmt.Println(colorize(strings.Repeat("═", 80), ColorGray))
+
+	fmt.Printf("\n%s %s\n", colorize("Descrição:", ColorCyan), chunk.Description)
+	fmt.Printf("%s %d arquivos\n", colorize("Arquivos:", ColorCyan), len(chunk.Files))
+	fmt.Printf("%s %.2f KB\n", colorize("Tamanho:", ColorCyan), float64(chunk.TotalSize)/1024)
+	fmt.Printf("%s ~%d tokens\n", colorize("Tokens estimados:", ColorCyan), chunk.EstTokens)
+
+	fmt.Printf("\n%s\n", colorize("📋 LISTA COMPLETA DE ARQUIVOS", ColorCyan+ColorBold))
+
+	for i, file := range chunk.Files {
+		lines := strings.Count(file.Content, "\n") + 1
+		fmt.Printf("  %d. %s\n", i+1, colorize(file.Path, ColorYellow))
+		fmt.Printf("     %s %s | %s %d linhas | %s %.2f KB\n",
+			colorize("Tipo:", ColorGray), file.Type,
+			colorize("Linhas:", ColorGray), lines,
+			colorize("Tamanho:", ColorGray), float64(file.Size)/1024)
+	}
+
+	fmt.Println()
+}
+
 // handleMerge mescla contextos
 func (h *ContextHandler) handleMerge(args []string) error {
 	if len(args) < 3 {
@@ -598,108 +758,269 @@ func (h *ContextHandler) handleMetrics() error {
 // printContextInfo imprime informações detalhadas de um contexto
 func (h *ContextHandler) printContextInfo(ctx *ctxmgr.FileContext, detailed bool) {
 	fmt.Println(colorize(strings.Repeat("─", 80), ColorGray))
-	fmt.Printf("\n%s %s\n", colorize("Nome:", ColorCyan), colorize(ctx.Name, ColorLime+ColorBold))
+	fmt.Printf("\n%s %s\n", colorize("📦 Contexto:", ColorCyan), colorize(ctx.Name, ColorLime+ColorBold))
 	fmt.Printf("%s %s\n", colorize("ID:", ColorGray), ctx.ID)
 
 	if ctx.Description != "" {
 		fmt.Printf("%s %s\n", colorize("Descrição:", ColorCyan), ctx.Description)
 	}
 
-	fmt.Printf("%s %s\n", colorize("Modo:", ColorCyan), ctx.Mode)
-
-	// Mostrar informações de estrutura
-	if ctx.IsChunked && len(ctx.Chunks) > 0 {
-		fmt.Printf("%s %s (%d chunks)\n",
-			colorize("Estrutura:", ColorCyan),
-			colorize("Dividido em Chunks", ColorYellow),
-			len(ctx.Chunks))
-
-		// CORREÇÃO: Mostrar estratégia apenas se realmente houver chunks
-		if ctx.ChunkStrategy != "" {
-			fmt.Printf("%s %s\n", colorize("Estratégia de Chunking:", ColorCyan), ctx.ChunkStrategy)
-		}
-
-		if detailed {
-			fmt.Printf("\n%s\n", colorize("Chunks:", ColorCyan))
-			for _, chunk := range ctx.Chunks {
-				fmt.Printf("  %s Chunk %d/%d - %s\n",
-					colorize("📦", ColorYellow),
-					chunk.Index,
-					chunk.TotalChunks,
-					chunk.Description)
-				fmt.Printf("     %s %d arquivos | %s %.2f KB | %s ~%d tokens\n",
-					colorize("Arquivos:", ColorGray), len(chunk.Files),
-					colorize("Tamanho:", ColorGray), float64(chunk.TotalSize)/1024,
-					colorize("Tokens:", ColorGray), chunk.EstTokens)
-			}
-		}
-	} else {
-		// Modo não-chunked
-		fmt.Printf("%s %d arquivos\n", colorize("Arquivos:", ColorCyan), ctx.FileCount)
-	}
-
-	fmt.Printf("%s %.2f MB (%d bytes)\n", colorize("Tamanho:", ColorCyan),
-		float64(ctx.TotalSize)/1024/1024, ctx.TotalSize)
+	// Informações básicas
+	fmt.Printf("\n%s\n", colorize("📊 INFORMAÇÕES GERAIS", ColorLime+ColorBold))
+	fmt.Printf("%s %s\n", colorize("  Modo:", ColorCyan), ctx.Mode)
+	fmt.Printf("%s %d arquivos | %.2f MB\n",
+		colorize("  Conteúdo:", ColorCyan),
+		ctx.FileCount,
+		float64(ctx.TotalSize)/1024/1024)
 
 	if len(ctx.Tags) > 0 {
-		fmt.Printf("%s %s\n", colorize("Tags:", ColorCyan), strings.Join(ctx.Tags, ", "))
+		fmt.Printf("%s %s\n", colorize("  Tags:", ColorCyan), strings.Join(ctx.Tags, ", "))
 	}
 
-	fmt.Printf("%s %s\n", colorize("Criado em:", ColorGray), ctx.CreatedAt.Format(time.RFC3339))
-	fmt.Printf("%s %s\n", colorize("Atualizado em:", ColorGray), ctx.UpdatedAt.Format(time.RFC3339))
+	fmt.Printf("%s %s\n", colorize("  Criado em:", ColorGray),
+		ctx.CreatedAt.Format("02/01/2006 15:04:05"))
+	fmt.Printf("%s %s\n", colorize("  Atualizado em:", ColorGray),
+		ctx.UpdatedAt.Format("02/01/2006 15:04:05"))
 
-	if detailed && !ctx.IsChunked && len(ctx.Files) > 0 {
-		fmt.Printf("\n%s\n", colorize("Arquivos:", ColorCyan))
-		for i, file := range ctx.Files {
-			if i >= 10 {
-				fmt.Printf("  ... e mais %d arquivos\n", len(ctx.Files)-10)
-				break
-			}
-			fmt.Printf("  %s %s (%s, %.2f KB)\n",
-				colorize(fmt.Sprintf("[%d]", i+1), ColorGray),
-				file.Path, file.Type, float64(file.Size)/1024)
+	// Estatísticas de tipos de arquivo
+	h.printFileTypeStatistics(ctx)
+
+	// Mostrar estrutura baseada no modo
+	if ctx.IsChunked && len(ctx.Chunks) > 0 {
+		h.printChunkedStructure(ctx, detailed)
+	} else {
+		h.printFileStructure(ctx, detailed)
+	}
+
+	// Informações de anexação
+	h.printAttachmentInfo(ctx)
+}
+
+// printFileTypeStatistics exibe estatísticas de tipos de arquivo
+func (h *ContextHandler) printFileTypeStatistics(ctx *ctxmgr.FileContext) {
+	fileTypes := make(map[string]int)
+	typeSizes := make(map[string]int64)
+
+	for _, file := range ctx.Files {
+		fileTypes[file.Type]++
+		typeSizes[file.Type] += file.Size
+	}
+
+	if len(fileTypes) > 0 {
+		fmt.Printf("\n%s\n", colorize("📂 DISTRIBUIÇÃO POR TIPO", ColorLime+ColorBold))
+
+		// Ordenar por quantidade
+		type typeStats struct {
+			name  string
+			count int
+			size  int64
+		}
+		var stats []typeStats
+		for t, c := range fileTypes {
+			stats = append(stats, typeStats{t, c, typeSizes[t]})
+		}
+		sort.Slice(stats, func(i, j int) bool {
+			return stats[i].count > stats[j].count
+		})
+
+		for _, s := range stats {
+			percentage := float64(s.count) / float64(ctx.FileCount) * 100
+			fmt.Printf("  %s %s %d arquivos (%.1f%%) | %.2f KB\n",
+				colorize("●", ColorCyan),
+				colorize(fmt.Sprintf("%-15s", s.name+":"), ColorGray),
+				s.count,
+				percentage,
+				float64(s.size)/1024)
 		}
 	}
+}
 
-	fmt.Println()
+// printChunkedStructure exibe estrutura detalhada para contextos chunked
+func (h *ContextHandler) printChunkedStructure(ctx *ctxmgr.FileContext, detailed bool) {
+	fmt.Printf("\n%s\n", colorize("🧩 ESTRUTURA EM CHUNKS", ColorLime+ColorBold))
+	fmt.Printf("  %s %s\n", colorize("Estratégia:", ColorCyan), ctx.ChunkStrategy)
+	fmt.Printf("  %s %d chunks\n", colorize("Total:", ColorCyan), len(ctx.Chunks))
+
+	if !detailed {
+		fmt.Printf("\n  %s\n\n", colorize("💡 Use '/context show <nome>' para ver detalhes completos dos chunks", ColorGray))
+		return
+	}
+
+	// Mostrar cada chunk em detalhe
+	for i, chunk := range ctx.Chunks {
+		fmt.Printf("\n  %s Chunk %d/%d\n",
+			colorize("📦", ColorYellow),
+			chunk.Index,
+			chunk.TotalChunks)
+
+		if chunk.Description != "" {
+			fmt.Printf("    %s %s\n", colorize("Descrição:", ColorGray), chunk.Description)
+		}
+
+		fmt.Printf("    %s %d arquivos | %.2f KB | ~%d tokens\n",
+			colorize("Conteúdo:", ColorGray),
+			len(chunk.Files),
+			float64(chunk.TotalSize)/1024,
+			chunk.EstTokens)
+
+		// Mostrar árvore de arquivos do chunk
+		if len(chunk.Files) > 0 {
+			fmt.Printf("    %s\n", colorize("Arquivos:", ColorGray))
+			h.printFileTree(chunk.Files, "      ")
+		}
+
+		// Separador entre chunks
+		if i < len(ctx.Chunks)-1 {
+			fmt.Println(colorize("    "+strings.Repeat("─", 70), ColorGray))
+		}
+	}
+}
+
+// printFileStructure exibe estrutura de arquivos para contextos não-chunked
+func (h *ContextHandler) printFileStructure(ctx *ctxmgr.FileContext, detailed bool) {
+	if len(ctx.Files) == 0 {
+		return
+	}
+
+	fmt.Printf("\n%s\n", colorize("📁 ESTRUTURA DE ARQUIVOS", ColorLime+ColorBold))
+
+	if !detailed && len(ctx.Files) > 20 {
+		fmt.Printf("  %s Primeiros 20 de %d arquivos:\n\n",
+			colorize("●", ColorCyan), len(ctx.Files))
+		h.printFileTree(ctx.Files[:20], "  ")
+		fmt.Printf("\n  %s\n", colorize(
+			fmt.Sprintf("... e mais %d arquivos", len(ctx.Files)-20),
+			ColorGray))
+		fmt.Printf("  %s\n\n", colorize(
+			"💡 Use '/context show <nome>' para ver todos os arquivos",
+			ColorGray))
+	} else {
+		h.printFileTree(ctx.Files, "  ")
+	}
+}
+
+// printFileTree imprime uma árvore de arquivos organizada por diretório
+func (h *ContextHandler) printFileTree(files []utils.FileInfo, indent string) {
+	// Organizar arquivos por diretório
+	dirMap := make(map[string][]utils.FileInfo)
+
+	for _, file := range files {
+		dir := filepath.Dir(file.Path)
+		dirMap[dir] = append(dirMap[dir], file)
+	}
+
+	// Ordenar diretórios
+	var dirs []string
+	for dir := range dirMap {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+
+	// Imprimir estrutura
+	for _, dir := range dirs {
+		// Mostrar diretório
+		dirName := dir
+		if dirName == "." {
+			dirName = "(raiz)"
+		}
+		fmt.Printf("%s%s %s/\n",
+			indent,
+			colorize("📂", ColorYellow),
+			colorize(dirName, ColorCyan))
+
+		// Mostrar arquivos do diretório
+		filesInDir := dirMap[dir]
+		sort.Slice(filesInDir, func(i, j int) bool {
+			return filesInDir[i].Path < filesInDir[j].Path
+		})
+
+		for i, file := range filesInDir {
+			isLast := i == len(filesInDir)-1
+			prefix := "├─"
+			if isLast {
+				prefix = "└─"
+			}
+
+			fileName := filepath.Base(file.Path)
+			fmt.Printf("%s  %s %s %s %s (%.2f KB)\n",
+				indent,
+				colorize(prefix, ColorGray),
+				colorize("📄", ColorCyan),
+				fileName,
+				colorize(fmt.Sprintf("[%s]", file.Type), ColorGray),
+				float64(file.Size)/1024)
+		}
+	}
+}
+
+// printAttachmentInfo mostra informações sobre anexações deste contexto
+func (h *ContextHandler) printAttachmentInfo(ctx *ctxmgr.FileContext) {
+	// Verificar se o contexto está anexado em alguma sessão
+	// (isso requer acesso ao storage de attachments, vou adicionar um método helper)
+
+	fmt.Printf("\n%s\n", colorize("📌 STATUS DE ANEXAÇÃO", ColorLime+ColorBold))
+
+	// Por enquanto, mostrar apenas informação básica
+	// Em uma implementação completa, você buscaria nas sessões ativas
+
+	fmt.Printf("  %s Para anexar este contexto à sessão atual:\n",
+		colorize("●", ColorCyan))
+	fmt.Printf("    %s\n\n",
+		colorize(fmt.Sprintf("/context attach %s", ctx.Name), ColorYellow))
+
+	if ctx.IsChunked {
+		fmt.Printf("  %s Este contexto está dividido em chunks. Você pode:\n",
+			colorize("💡", ColorCyan))
+		fmt.Printf("    %s Anexar todos os chunks\n", colorize("•", ColorGray))
+		fmt.Printf("    %s Anexar chunks específicos com: %s\n",
+			colorize("•", ColorGray),
+			colorize(fmt.Sprintf("/context attach %s --chunks 1,2,3", ctx.Name), ColorYellow))
+		fmt.Println()
+	}
 }
 
 // showContextHelp mostra ajuda do comando /context
 func (h *ContextHandler) showContextHelp() {
 	help := `
-        ` + colorize("📦 GERENCIAMENTO DE CONTEXTOS", ColorLime+ColorBold) + `
+        ` + colorize("📦 Gerenciamento de Contextos", ColorLime+ColorBold) + `
         ` + colorize(strings.Repeat("─", 80), ColorGray) + `
         
-        ` + colorize("CRIAR CONTEXTO:", ColorCyan) + `
+        ` + colorize("Criar Ccontexto:", ColorCyan) + `
           /context create <nome> <caminhos...> [opções]
             --mode, -m <modo>           Modo: full, summary, chunked, smart
             --description, -d <texto>   Descrição do contexto
             --tags, -t <tag1,tag2>      Tags separadas por vírgula
             
-          Exemplo:
+          ` + colorize("Exemplo:", ColorGray) + `
             /context create projeto-api ./src ./tests --mode smart --tags api,golang
         
-        ` + colorize("ANEXAR/DESANEXAR:", ColorCyan) + `
+        ` + colorize("Anexar/Desanexar:", ColorCyan) + `
           /context attach <nome> [--priority <n>]   Anexa contexto à sessão atual
           /context detach <nome>                     Desanexa contexto da sessão
         
-        ` + colorize("LISTAR E VISUALIZAR:", ColorCyan) + `
+        ` + colorize("Listar e Visualizar:", ColorCyan) + `
           /context list                  Lista todos os contextos
-          /context show <nome>           Mostra detalhes de um contexto
+          /context show <nome>           Mostra detalhes completos de um contexto
+          /context inspect <nome>        Análise estatística profunda do contexto
+          /context inspect <nome> --chunk N   Inspeciona chunk específico
           /context attached              Mostra contextos anexados à sessão
         
-        ` + colorize("GERENCIAR:", ColorCyan) + `
+        ` + colorize("Exemplo:", ColorGray) + `
+          /context show meu-projeto
+          /context inspect meu-projeto --chunk 1
+        
+        ` + colorize("Gerenciar:", ColorCyan) + `
           /context delete <nome>                      Deleta um contexto
           /context merge <novo-nome> <ctx1> <ctx2>... Mescla múltiplos contextos
         
-        ` + colorize("IMPORTAR/EXPORTAR:", ColorCyan) + `
+        ` + colorize("Importar/Exportar:", ColorCyan) + `
           /context export <nome> <caminho>   Exporta contexto para arquivo
           /context import <caminho>          Importa contexto de arquivo
         
-        ` + colorize("MÉTRICAS:", ColorCyan) + `
+        ` + colorize("Métricas:", ColorCyan) + `
           /context metrics               Mostra estatísticas de uso
         
-        ` + colorize("NOTAS:", ColorGray) + `
+        ` + colorize("Notas:", ColorGray) + `
           • Contextos anexados são automaticamente incluídos nos prompts à LLM
           • Use prioridade para controlar a ordem (menor = primeiro)
           • Contextos mesclados removem duplicatas automaticamente

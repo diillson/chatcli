@@ -37,10 +37,10 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
     - [Modo Interativo](#modo-interativo)
     - [Modo Não-Interativo (One-Shot)](#modo-não-interativo-one-shot)
     - [Comandos da CLI](#comandos-da-cli)
-- [Gerenciamento de Contextos Persistentes](#gerenciamento-de-contextos-persistentes) 
 - [Processamento Avançado de Arquivos](#processamento-avançado-de-arquivos)
     - [Modos de Uso do `@file`](#modos-de-uso-do-file)
     - [Sistema de Chunks em Detalhes](#sistema-de-chunks-em-detalhes)
+    - [Gerenciamento de Contextos Persistentes](#gerenciamento-de-contextos-persistentes)
 - [Modo Agente](#modo-agente)
     - [Política de Segurança](#política-de-segurança)
     - [Interação com o Agente](#interação-com-o-agente)
@@ -300,36 +300,245 @@ O comando  `@file` <caminho>  é a principal ferramenta para enviar arquivos e d
 
 Após o envio do primeiro chunk, use  /nextchunk  para processar o próximo. O sistema fornece feedback visual sobre o progresso e o número de chunks restantes. Para gerenciar falhas, use  /retry ,  /retryall  ou  /skipchunk .
 
-### 🧠 Gerenciamento de Contextos Persistentes
+Claro! Aqui está o conteúdo formatado corretamente em **Markdown completo**, pronto para colar no seu `README.md`:
 
-O ChatCLI permite criar, salvar e reutilizar contextos de projetos inteiros — tornando suas conversas com a IA muito mais contextualizadas.  
-Isso significa que a IA “lembra” do seu código, diretórios e arquivos sem precisar reenviar tudo a cada interação.
 
-### 🔧 Comandos principais
+## Gerenciamento de Contextos Persistentes
+
+O **ChatCLI** permite criar, salvar e reutilizar contextos de projetos inteiros — tornando suas conversas com a IA muito mais contextualizadas.  
+Isso significa que a IA "lembra" do seu código, diretórios e arquivos sem precisar reenviar tudo a cada interação.
+
+
+### 🔧 Comandos Principais
+
+#### 🆕 Criar um novo contexto
 
 ```bash
+/context create <nome> <caminhos...> [opções]
+
+# Exemplo: Criar um contexto "smart" com tags
 /context create meu-api ./src ./docs --mode smart --tags "golang,api"
-/context attach meu-api
-/context show meu-api
-/context delete meu-api
 ````
 
-### 🧩 Funcionalidades
+**Opções disponíveis:**
 
-* **Contextos Reutilizáveis:** salve ambientes inteiros e reanexe quando quiser.
-* **Exploração Inteligente:** use `--mode smart` para enviar apenas arquivos relevantes.
-* **Tagueamento:** adicione tags para organizar contextos (`--tags "infra,k8s,terraform"`).
-* **Chunking Automático:** em projetos grandes, o ChatCLI divide arquivos em partes menores (`--chunked`)
-* **Visualização e Diagnóstico:**
+* `--mode` ou `-m` : Define o modo de processamento
 
-  ```bash
-  /context list       # lista todos os contextos
-  /context show <id>  # exibe detalhes do contexto
-  /context delete <id>  # remove definitivamente
-  ```
+    * `full` : Conteúdo completo dos arquivos
+    * `summary` : Apenas estrutura de diretórios e metadados
+    * `chunked` : Divide em chunks gerenciáveis
+    * `smart` : IA seleciona arquivos relevantes ao prompt
+* `--description` ou `-d` : Adiciona uma descrição textual ao contexto
+* `--tags` ou `-t` : Adiciona tags para organização (separadas por vírgula)
+
+#### 📋 Listar todos os contextos
+
+```bash
+/context list
+```
+
+**Exemplo de saída:**
+
+```
+🧩 meu-projeto   Backend API REST — modo:chunked | 4 chunks | 2.3 MB | tags:api,golang
+📄 docs          Documentação — modo:full | 12 arquivos | 156 KB | tags:docs
+🧩 frontend      Interface React — modo:chunked | 3 chunks | 1.8 MB | tags:react,ui
+```
+
+#### 🔍 Visualizar detalhes de um contexto
+
+```bash
+/context show <nome>
+```
+
+Exibe informações completas e estruturadas sobre o contexto:
+
+##### 📊 Informações Gerais
+
+* Nome, ID e descrição
+* Modo de processamento (`full`, `summary`, `chunked`, `smart`)
+* Quantidade de arquivos e tamanho total
+* Tags associadas
+* Datas de criação e última atualização
+
+##### 📂 Distribuição por Tipo
+
+* Estatísticas de tipos de arquivo presentes
+* Porcentagem e tamanho ocupado por cada tipo
+
+**Exemplo:**
+
+```
+● Go:            98 arquivos (62.8%) | 1847.32 KB
+● JSON:          12 arquivos (7.7%)  | 45.67 KB
+● Markdown:       8 arquivos (5.1%)  | 123.45 KB
+```
+
+##### 🧩 Estrutura em Chunks (para contextos `chunked`)
+
+* Lista todos os chunks com suas respectivas informações
+* Descrição e arquivos contidos em cada chunk (em formato de árvore)
+* Tamanho e estimativa de tokens por chunk
+
+##### 📁 Estrutura de Arquivos (para contextos `full`/`summary`)
+
+* Árvore de diretórios e arquivos
+* Tipo e tamanho de cada arquivo
+* Visualização hierárquica organizada
+
+##### 📌 Status de Anexação
+
+* Dicas de como anexar o contexto
+* Comandos disponíveis para chunks específicos
+
+#### 🧠 Inspecionar um contexto (análise profunda)
+
+```bash
+/context inspect <nome> [--chunk N]
+```
+
+O comando `inspect` fornece uma análise estatística detalhada do contexto:
+
+##### 📊 Análise Estatística
+
+* Total de linhas de código
+* Média de linhas por arquivo
+* Distribuição de tamanho (pequeno, médio, grande)
+
+##### 🗂️ Extensões Encontradas
+
+* Lista de todas as extensões de arquivo
+* Quantidade de arquivos por extensão
+
+##### 🧩 Análise de Chunks (se aplicável)
+
+* Tamanho médio, mínimo e máximo dos chunks
+* Variação percentual entre chunks
+* Distribuição de conteúdo
+
+**Inspecionar chunk específico:**
+
+```bash
+/context inspect meu-projeto --chunk 1
+```
+
+Exibe:
+
+* Descrição do chunk
+* Lista completa de arquivos
+* Linhas de código por arquivo
+* Tamanho individual de cada arquivo
+
+#### 📎 Anexar contexto à sessão atual
+
+```bash
+/context attach <nome> [opções]
+```
+
+**Opções disponíveis:**
+
+* `--priority` ou `-p <número>` : Define a prioridade (menor = enviado primeiro)
+* `--chunk` ou `-c <número>` : Anexa apenas um chunk específico
+* `--chunks` ou `-C <números>` : Anexa múltiplos chunks (ex: `1,2,3`)
+
+**Exemplos:**
+
+```bash
+# Anexar contexto completo
+/context attach meu-api
+
+# Anexar apenas o chunk 1
+/context attach meu-projeto --chunk 1
+
+# Anexar chunks 1, 2 e 3
+/context attach meu-projeto --chunks 1,2,3
+
+# Anexar com prioridade alta
+/context attach docs --priority 1
+```
+
+#### 🔌 Desanexar contexto
+
+```bash
+/context detach <nome>
+```
+
+#### 📚 Ver contextos anexados
+
+```bash
+/context attached
+```
+
+Mostra todos os contextos atualmente anexados à sessão,
+com suas prioridades e chunks selecionados.
+
+#### 🗑️ Deletar um contexto
+
+```bash
+/context delete <nome>
+```
+
+> Pede confirmação antes de deletar permanentemente.
+
+### 🎯 Comandos Adicionais
+
+#### 🔀 Mesclar contextos
+
+```bash
+/context merge <novo-nome> <contexto1> <contexto2> [...]
+```
+
+**Exemplo:**
+
+```bash
+/context merge projeto-completo backend frontend infra
+```
+
+#### 📤 Exportar contexto
+
+```bash
+/context export <nome> <caminho-arquivo.json>
+```
+
+**Exemplo:**
+
+```bash
+/context export meu-api ./backups/api-context.json
+```
+
+#### 📥 Importar contexto
+
+```bash
+/context import <caminho-arquivo.json>
+```
+
+**Exemplo:**
+
+```bash
+/context import ./backups/api-context.json
+```
+
+#### 📈 Métricas de uso
+
+```bash
+/context metrics
+```
+
+Exibe estatísticas sobre:
+
+* Contextos mais utilizados
+* Tamanho total ocupado
+* Frequência de uso
+
+#### 🆘 Ajuda completa
+
+```bash
+/context help
+```
 
 💡 **Dica:** combine contextos com comandos como `@git` e `@file` para que a IA tenha visão completa do seu repositório e histórico de mudanças.
 
+---
 
 ### Filtragem Avançada de Arquivos com `.chatignore`
 

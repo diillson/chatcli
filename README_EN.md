@@ -40,6 +40,7 @@
 - [Advanced File Processing](#advanced-file-processing)
     - [Modes of `@file` Usage](#modes-of-file-usage)
     - [Chunking System in Detail](#chunking-system-in-detail)
+    - [Persistent Context Management](#persistent-context-management)
 - [Agent Mode](#agent-mode)
     - [Security Policy](#security-policy)
     - [Agent Interaction](#agent-interaction)
@@ -293,7 +294,10 @@ The  `@file` <path>  command is the primary tool for sending files and directori
 
 After the first chunk is sent, use  /nextchunk  to process the next. The system provides visual feedback on progress and the number of remaining chunks. To manage failures, use  /retry ,  /retryall , or  /skipchunk .
 
-### 🧠 Persistent Context Management
+Claro! Aqui está o conteúdo **formatado corretamente em Markdown**, perfeito para colocar no seu `README.md` 👇
+
+
+## Persistent Context Management
 
 **ChatCLI** provides a powerful system for creating, saving, and reusing complex contexts across sessions with the `/context` command.
 
@@ -302,61 +306,237 @@ After the first chunk is sent, use  /nextchunk  to process the next. The system 
 - **Reusability:** Define a project's scope once and attach it to any future conversation with a single command.  
 - **Consistency:** Ensure the AI always has the same baseline knowledge about your project.  
 - **Efficiency:** Avoid typing long `@file` commands repeatedly.  
-- **Working with Large Projects:** Create contexts in `chunked` mode and attach only the relevant parts (`--chunk N`) for your current task — saving tokens and focusing the AI's analysis.  
-
----
+- **Working with Large Projects:** Create contexts in `chunked` mode and attach only the relevant parts (`--chunk N`) for your current task — saving tokens and focusing the AI's analysis.
 
 ### ⚙️ Main `/context` Commands
 
-#### Create a new context
+#### 🆕 Create a new context
+
 ```bash
 /context create <name> <paths...> [options]
+
 # Example: Create a "smart" context with tags
 /context create my-api ./src ./docs --mode smart --tags "golang,api"
 ````
 
-#### List all contexts
+**Available options:**
+
+* `--mode` or `-m`: Defines the processing mode
+
+    * `full`: Complete file contents
+    * `summary`: Directory structure and metadata only
+    * `chunked`: Splits into manageable chunks
+    * `smart`: AI selects relevant files based on your prompt
+* `--description` or `-d`: Adds a text description to the context
+* `--tags` or `-t`: Adds tags for organization (comma-separated)
+
+#### 📋 List all contexts
 
 ```bash
 /context list
 ```
 
-#### Show details of a context
+**Example output:**
 
-```bash
-/context show my-api
+```
+🧩 my-project        Backend REST API — mode:chunked | 4 chunks | 2.3 MB | tags:api,golang
+📄 docs              Documentation — mode:full | 12 files | 156 KB | tags:docs
+🧩 frontend          React Interface — mode:chunked | 3 chunks | 1.8 MB | tags:react,ui
 ```
 
-#### Attach a context to the current session
+#### 🔍 Show context details
 
 ```bash
+/context show <name>
+```
+
+Displays complete and structured information about the context:
+
+##### 📊 General Information
+
+* Name, ID, and description
+* Processing mode (`full`, `summary`, `chunked`, `smart`)
+* Number of files and total size
+* Associated tags
+* Creation and last update dates
+
+##### 📂 Distribution by Type
+
+* Statistics of file types present
+* Percentage and size occupied by each type
+
+**Example:**
+
+```
+● Go:            98 files (62.8%) | 1847.32 KB
+● JSON:          12 files (7.7%)  | 45.67 KB
+● Markdown:       8 files (5.1%)  | 123.45 KB
+```
+
+##### 🧩 Chunk Structure (for chunked contexts)
+
+* Lists all chunks with their respective information
+* Description of each chunk
+* Files contained in each chunk organized in a tree
+* Size and token estimate per chunk
+
+##### 📁 File Structure (for full/summary contexts)
+
+* Directory and file tree
+* Type and size of each file
+* Organized hierarchical visualization
+
+##### 📌 Attachment Status
+
+* Tips on how to attach the context
+* Available commands for specific chunks
+
+#### 🧠 Inspect a context (deep analysis)
+
+```bash
+/context inspect <name> [--chunk N]
+```
+
+The `inspect` command provides detailed statistical analysis of the context:
+
+##### 📊 Statistical Analysis
+
+* Total lines of code
+* Average lines per file
+* Size distribution (small, medium, large)
+
+##### 🗂️ Extensions Found
+
+* List of all file extensions
+* Number of files per extension
+
+##### 🧩 Chunk Analysis (if applicable)
+
+* Average, minimum, and maximum chunk sizes
+* Percentage variation between chunks
+* Content distribution
+
+**Inspect a specific chunk:**
+
+```bash
+/context inspect my-project --chunk 1
+```
+
+Displays:
+
+* Chunk description
+* Complete file list
+* Lines of code per file
+* Individual size of each file
+
+#### 📎 Attach context to current session
+
+```bash
+/context attach <name> [options]
+```
+
+**Available options:**
+
+* `--priority` or `-p <number>`: Sets priority (lower = sent first)
+* `--chunk` or `-c <number>`: Attaches only a specific chunk
+* `--chunks` or `-C <numbers>`: Attaches multiple chunks (e.g., `1,2,3`)
+
+**Examples:**
+
+```bash
+# Attach complete context
 /context attach my-api
+
+# Attach only chunk 1
+/context attach my-project --chunk 1
+
+# Attach chunks 1, 2, and 3
+/context attach my-project --chunks 1,2,3
+
+# Attach with high priority (will be sent first)
+/context attach docs --priority 1
 ```
 
-#### Attach a specific chunk from a large context
+#### 🔌 Detach context
 
 ```bash
-# Attaches only the first chunk of the context
-/context attach my-large-project --chunk 1
+/context detach <name>
 ```
 
-#### Detach a context
+#### 📚 View attached contexts
 
 ```bash
-/context detach my-api
+/context attached
 ```
 
-#### Delete a context
+Shows all contexts currently attached to the session
+with their priorities and selected chunks.
+
+#### 🗑️ Delete a context
 
 ```bash
-/context delete my-api
+/context delete <name>
 ```
 
-Use `/context help` to see all available options, including:
+> Asks for confirmation before permanently deleting.
 
-* `merge` — combine multiple contexts
-* `import` — load contexts from external files
-* `export` — save a context for sharing or backup
+### 🎯 Additional Commands
+
+#### 🔀 Merge contexts
+
+```bash
+/context merge <new-name> <context1> <context2> [...]
+```
+
+**Example:**
+
+```bash
+/context merge complete-project backend frontend infra
+```
+
+#### 📤 Export context
+
+```bash
+/context export <name> <file-path.json>
+```
+
+**Example:**
+
+```bash
+/context export my-api ./backups/api-context.json
+```
+
+#### 📥 Import context
+
+```bash
+/context import <file-path.json>
+```
+
+**Example:**
+
+```bash
+/context import ./backups/api-context.json
+```
+
+#### 📈 Usage metrics
+
+```bash
+/context metrics
+```
+
+Displays statistics about:
+
+* Most used contexts
+* Total size occupied
+* Usage frequency
+
+#### 🆘 Complete help
+
+```bash
+/context help
+```
+
+---
 
 ### Advanced File Filtering with `.chatignore`
 

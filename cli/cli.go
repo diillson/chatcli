@@ -1957,7 +1957,7 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 
 	// --- Lógica de Autocomplete Contextual ---
 
-	// 2.5. NOVO: Detectar comandos /context e /session mesmo após espaço
+	// 2.5. Detectar comandos /context e /session mesmo após espaço
 	if strings.HasPrefix(lineBeforeCursor, "/context") {
 		return cli.getContextSuggestions(d)
 	}
@@ -2432,23 +2432,21 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 	args := strings.Fields(line)
 
 	// Se só digitou "/context" (sem espaço ou com espaço mas sem subcomando ainda)
-	// args será ["/context"] se tiver espaço, ou linha será "/context" se ainda não tiver
 	if len(args) == 1 && !strings.HasSuffix(line, " ") {
-		// Ainda está digitando "/context" - retornar o comando completo
 		return []prompt.Suggest{
-			{Text: "/context", Description: "📦 Gerencia contextos persistentes (create, attach, detach, list, show, etc)"},
+			{Text: "/context", Description: "📦 Gerencia contextos persistentes (create, attach, detach, list, show, inspect, etc)"},
 		}
 	}
 
 	// Se digitou "/context " (com espaço) mas ainda não completou o subcomando
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
-		// Mostrar lista de subcomandos
 		suggestions := []prompt.Suggest{
 			{Text: "create", Description: "Criar contexto de arquivos/diretórios (use --mode, --description, --tags)"},
-			{Text: "attach", Description: "Anexar contexto existente à sessão atual (use --priority)"},
+			{Text: "attach", Description: "Anexar contexto existente à sessão atual (use --priority, --chunk, --chunks)"},
 			{Text: "detach", Description: "Desanexar contexto da sessão atual"},
 			{Text: "list", Description: "Listar todos os contextos salvos"},
 			{Text: "show", Description: "Ver detalhes completos de um contexto específico"},
+			{Text: "inspect", Description: "Análise estatística profunda de um contexto (use --chunk N para chunk específico)"},
 			{Text: "delete", Description: "Deletar contexto permanentemente (pede confirmação)"},
 			{Text: "merge", Description: "Mesclar múltiplos contextos em um novo"},
 			{Text: "attached", Description: "Ver quais contextos estão anexados à sessão"},
@@ -2466,7 +2464,7 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 	// Subcomandos que precisam de nome de contexto como próximo argumento
 	needsContextName := map[string]bool{
 		"attach": true, "detach": true, "show": true,
-		"delete": true, "export": true,
+		"delete": true, "export": true, "inspect": true, // ← ADICIONADO inspect
 	}
 
 	if needsContextName[subcommand] {
@@ -2475,29 +2473,57 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 			return cli.getContextNameSuggestions()
 		}
 
+		// ═══════════════════════════════════════════════════════════════
+		// NOVO: Sugestões específicas para /context inspect
+		// ═══════════════════════════════════════════════════════════════
+		if subcommand == "inspect" && len(args) >= 3 {
+			word := d.GetWordBeforeCursor()
+
+			// Se está digitando uma flag
+			if strings.HasPrefix(word, "-") {
+				return []prompt.Suggest{
+					{Text: "--chunk", Description: "Inspecionar chunk específico (ex: --chunk 1)"},
+					{Text: "-c", Description: "Atalho para --chunk"},
+				}
+			}
+
+			// Se o argumento anterior era --chunk ou -c, sugerir números de chunks
+			if len(args) >= 4 {
+				prevArg := args[len(args)-1]
+				if !strings.HasSuffix(line, " ") && len(args) >= 2 {
+					prevArg = args[len(args)-2]
+				}
+
+				if prevArg == "--chunk" || prevArg == "-c" {
+					return cli.getChunkNumberSuggestions(args[2]) // args[2] é o nome do contexto
+				}
+			}
+		}
+
 		// Se já digitou o nome e é attach, sugerir flags
 		if subcommand == "attach" && len(args) >= 3 && strings.HasPrefix(d.GetWordBeforeCursor(), "-") {
 			return []prompt.Suggest{
 				{Text: "--priority", Description: "Define prioridade (menor = primeiro a ser enviado)"},
 				{Text: "-p", Description: "Atalho para --priority"},
+				{Text: "--chunk", Description: "Anexar chunk específico (ex: --chunk 1)"},
+				{Text: "-c", Description: "Atalho para --chunk"},
+				{Text: "--chunks", Description: "Anexar múltiplos chunks (ex: --chunks 1,2,3)"},
+				{Text: "-C", Description: "Atalho para --chunks"},
 			}
 		}
 
-		// Caso contrário, não sugerir nada (já tem tudo que precisa)
 		return []prompt.Suggest{}
 	}
 
 	// Para create, processar argumentos
 	if subcommand == "create" {
-		// Se ainda não tem o nome (args[2])
+		// [... código existente de create ...]
 		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ") && !strings.HasPrefix(args[2], "-")) {
-			// Deixar o usuário digitar o nome livremente, não sugerir nada
 			return []prompt.Suggest{}
 		}
 
 		word := d.GetWordBeforeCursor()
 
-		// Se está digitando uma flag
 		if strings.HasPrefix(word, "-") {
 			return []prompt.Suggest{
 				{Text: "--mode", Description: "Modo de processamento: full, summary, chunked, smart"},
@@ -2510,7 +2536,6 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 			}
 		}
 
-		// Se o argumento anterior era --mode ou -m, sugerir valores
 		if len(args) >= 3 {
 			prevArg := args[len(args)-1]
 			if !strings.HasSuffix(line, " ") && len(args) >= 2 {
@@ -2527,7 +2552,6 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 			}
 		}
 
-		// Se não está digitando flag e já tem nome, sugerir paths
 		if len(args) >= 3 && !strings.HasPrefix(word, "-") {
 			return cli.filePathCompleter(word)
 		}
@@ -2535,18 +2559,14 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 
 	// Para merge, precisa de: novo_nome + contextos existentes
 	if subcommand == "merge" {
-		// Se ainda está no novo nome (args[2])
 		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
 			return []prompt.Suggest{}
 		}
-
-		// A partir do args[3], sugerir contextos existentes
 		return cli.getContextNameSuggestions()
 	}
 
 	// Para export, precisa de: nome_contexto + caminho_arquivo
 	if subcommand == "export" {
-		// Se já tem o nome do contexto, sugerir path para arquivo
 		if len(args) >= 3 {
 			return cli.filePathCompleter(d.GetWordBeforeCursor())
 		}
@@ -2559,8 +2579,40 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 		}
 	}
 
-	// Para outros subcomandos que não precisam de argumentos (list, attached, metrics, help)
 	return []prompt.Suggest{}
+}
+
+// getChunkNumberSuggestions - Sugestões de números de chunks para um contexto
+func (cli *ChatCLI) getChunkNumberSuggestions(contextName string) []prompt.Suggest {
+	// Buscar o contexto pelo nome
+	ctx, err := cli.contextHandler.GetManager().GetContextByName(contextName)
+	if err != nil {
+		return nil
+	}
+
+	// Se não for chunked, retornar vazio
+	if !ctx.IsChunked || len(ctx.Chunks) == 0 {
+		return []prompt.Suggest{
+			{Text: "", Description: "⚠️  Este contexto não está dividido em chunks"},
+		}
+	}
+
+	// Criar sugestões para cada chunk
+	suggestions := make([]prompt.Suggest, 0, len(ctx.Chunks))
+
+	for _, chunk := range ctx.Chunks {
+		suggestions = append(suggestions, prompt.Suggest{
+			Text: fmt.Sprintf("%d", chunk.Index),
+			Description: fmt.Sprintf("Chunk %d/%d: %s (%d arquivos, %.2f KB)",
+				chunk.Index,
+				chunk.TotalChunks,
+				chunk.Description,
+				len(chunk.Files),
+				float64(chunk.TotalSize)/1024),
+		})
+	}
+
+	return suggestions
 }
 
 // getContextNameSuggestions - Sugestões de nomes de contextos existentes com descrições ricas
@@ -2578,7 +2630,7 @@ func (cli *ChatCLI) getContextNameSuggestions() []prompt.Suggest {
 		// Adicionar modo
 		descParts = append(descParts, fmt.Sprintf("modo:%s", ctx.Mode))
 
-		// Adicionar contagem de arquivos
+		// Adicionar contagem de arquivos ou chunks
 		if ctx.IsChunked {
 			descParts = append(descParts, fmt.Sprintf("%d chunks", len(ctx.Chunks)))
 		} else {
@@ -2603,9 +2655,17 @@ func (cli *ChatCLI) getContextNameSuggestions() []prompt.Suggest {
 			desc = ctx.Description + " — " + desc
 		}
 
+		// ═══════════════════════════════════════════════════════════════
+		// Adicionar indicador visual para contextos chunked
+		// ═══════════════════════════════════════════════════════════════
+		icon := "📄"
+		if ctx.IsChunked {
+			icon = "🧩"
+		}
+
 		suggestions = append(suggestions, prompt.Suggest{
 			Text:        ctx.Name,
-			Description: desc,
+			Description: fmt.Sprintf("%s %s", icon, desc),
 		})
 	}
 
