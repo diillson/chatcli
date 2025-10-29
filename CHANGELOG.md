@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.33.0](https://github.com/diillson/chatcli/compare/v1.32.0...v1.33.0) (2025-10-29)
+
+
+### Features
+
+* **cli:** implement context management features and enhance dependencies ([#319](https://github.com/diillson/chatcli/issues/319)) ([#320](https://github.com/diillson/chatcli/issues/320)) ([f4705f3](https://github.com/diillson/chatcli/commit/f4705f318168eb87cc9b95c9c4bedb8c9c5fc413))
+
 ## [1.32.0](https://github.com/diillson/chatcli/compare/v1.31.2...v1.32.0) (2025-10-28)
 
 
