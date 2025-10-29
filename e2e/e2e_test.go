@@ -124,7 +124,7 @@ func TestE2E_OneShotMode(t *testing.T) {
 		args := []string{"-p", "test", "--provider=INVALID"}
 		_, stderr := runChatCLI(t, args, "", env)
 
-		assert.Contains(t, stderr, "main.error_apply_overrides")
+		assert.Contains(t, stderr, "Error applying overrides")
 	})
 }
 

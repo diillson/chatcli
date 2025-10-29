@@ -37,6 +37,7 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
     - [Modo Interativo](#modo-interativo)
     - [Modo Não-Interativo (One-Shot)](#modo-não-interativo-one-shot)
     - [Comandos da CLI](#comandos-da-cli)
+- [Gerenciamento de Contextos Persistentes](#gerenciamento-de-contextos-persistentes) 
 - [Processamento Avançado de Arquivos](#processamento-avançado-de-arquivos)
     - [Modos de Uso do `@file`](#modos-de-uso-do-file)
     - [Sistema de Chunks em Detalhes](#sistema-de-chunks-em-detalhes)
@@ -269,6 +270,8 @@ Observação: as mesmas features de contexto funcionam dentro do texto do  --pro
   -  /session save <nome> ,  /session load <nome> ,  /session list ,  /session delete <nome> ,  /session new
 - Configuração e Status:
   -  /switch ,  /reload ,  /config  ou  /status  (exibe configurações de runtime, provedor e modelo em uso).
+- Gerenciamento de Contexto:
+  - /context create | attach | list | show | delete
 - Geral: 
   - /help : Exibe a ajuda.
   -  /exit : Para Sair do ChatCLI.
@@ -296,6 +299,37 @@ O comando  `@file` <caminho>  é a principal ferramenta para enviar arquivos e d
 ### Sistema de Chunks em Detalhes
 
 Após o envio do primeiro chunk, use  /nextchunk  para processar o próximo. O sistema fornece feedback visual sobre o progresso e o número de chunks restantes. Para gerenciar falhas, use  /retry ,  /retryall  ou  /skipchunk .
+
+### 🧠 Gerenciamento de Contextos Persistentes
+
+O ChatCLI permite criar, salvar e reutilizar contextos de projetos inteiros — tornando suas conversas com a IA muito mais contextualizadas.  
+Isso significa que a IA “lembra” do seu código, diretórios e arquivos sem precisar reenviar tudo a cada interação.
+
+### 🔧 Comandos principais
+
+```bash
+/context create meu-api ./src ./docs --mode smart --tags "golang,api"
+/context attach meu-api
+/context show meu-api
+/context delete meu-api
+````
+
+### 🧩 Funcionalidades
+
+* **Contextos Reutilizáveis:** salve ambientes inteiros e reanexe quando quiser.
+* **Exploração Inteligente:** use `--mode smart` para enviar apenas arquivos relevantes.
+* **Tagueamento:** adicione tags para organizar contextos (`--tags "infra,k8s,terraform"`).
+* **Chunking Automático:** em projetos grandes, o ChatCLI divide arquivos em partes menores (`--chunked`)
+* **Visualização e Diagnóstico:**
+
+  ```bash
+  /context list       # lista todos os contextos
+  /context show <id>  # exibe detalhes do contexto
+  /context delete <id>  # remove definitivamente
+  ```
+
+💡 **Dica:** combine contextos com comandos como `@git` e `@file` para que a IA tenha visão completa do seu repositório e histórico de mudanças.
+
 
 ### Filtragem Avançada de Arquivos com `.chatignore`
 

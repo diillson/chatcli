@@ -347,5 +347,82 @@
   "agent.executor.interactive_mode_info": "O controle do terminal será passado para o comando.",
   "agent.executor.interactive_mode_exit_tip": "Para retornar, saia do programa (ex: ':q' no vim, 'exit' no shell).",
   "agent.executor.interactive_mode_footer": "--- Retornando ao ChatCLI ---",
-  "agent.executor.fail_restore_terminal": "Falha ao restaurar terminal"
+  "agent.executor.fail_restore_terminal": "Falha ao restaurar terminal",
+
+  "help.section.contexts": "Gerenciamento de Contextos",
+  "help.command.context_create": "Cria novo contexto a partir de arquivos/diretórios",
+  "help.command.context_mode": "Modo de processamento (full, summary, chunked, smart)",
+  "help.command.context_description": "Descrição do contexto",
+  "help.command.context_tags": "Tags separadas por vírgula",
+  "help.command.context_attach": "Anexa contexto à sessão atual",
+  "help.command.context_detach": "Desanexa contexto da sessão",
+  "help.command.context_list": "Lista todos os contextos salvos",
+  "help.command.context_show": "Mostra detalhes de um contexto",
+  "help.command.context_delete": "Deleta um contexto permanentemente",
+  "help.command.context_merge": "Mescla múltiplos contextos em um novo",
+  "help.command.context_attached": "Mostra contextos anexados à sessão atual",
+  "help.command.context_export": "Exporta contexto para arquivo JSON",
+  "help.command.context_import": "Importa contexto de arquivo JSON",
+  "help.command.context_metrics": "Mostra métricas e estatísticas de uso",
+
+  "context.error.unknown_subcommand": "Subcomando desconhecido: '%s'. Use /context help para ver comandos disponíveis.",
+
+  "context.create.usage": "Uso: /context create <nome> <caminhos...> [--mode <modo>] [--description <texto>] [--tags <tag1,tag2>]",
+  "context.create.error.mode_required": "Flag --mode requer um valor (full, summary, chunked, smart)",
+  "context.create.error.description_required": "Flag --description requer um valor",
+  "context.create.error.tags_required": "Flag --tags requer valores separados por vírgula",
+  "context.create.error.no_paths": "Nenhum caminho fornecido. É necessário pelo menos um arquivo ou diretório.",
+  "context.create.error.failed": "Erro ao criar contexto: %v",
+  "context.create.processing": " 🔄 Processando arquivos...",
+  "context.create.success": " ✅ Contexto criado com sucesso!",
+
+  "context.attach.usage": "Uso: /context attach <nome> [--priority <número>]",
+  "context.attach.error.invalid_priority": "Prioridade inválida. Deve ser um número inteiro.",
+  "context.attach.error.not_found": "Contexto '%s' não encontrado",
+  "context.attach.error.failed": "Erro ao anexar contexto: %v",
+  "context.attach.success": " ✅ Contexto '%s' anexado à sessão atual",
+  "context.attach.priority": "Prioridade:",
+  "context.attach.files": "Arquivos:",
+  "context.attach.files_label": "arquivos",
+  "context.attach.size": "Tamanho:",
+
+  "context.detach.usage": "Uso: /context detach <nome>",
+  "context.detach.error.not_found": "Contexto '%s' não encontrado",
+  "context.detach.error.failed": "Erro ao desanexar contexto: %v",
+  "context.detach.success": " ✅ Contexto '%s' desanexado da sessão",
+
+  "context.delete.usage": "Uso: /context delete <nome>",
+  "context.delete.error.not_found": "Contexto '%s' não encontrado",
+  "context.delete.error.failed": "Erro ao deletar contexto: %v",
+  "context.delete.confirm": " ⚠️  Tem certeza que deseja deletar o contexto '%s'? (s/N): ",
+  "context.delete.cancelled": "Operação cancelada.",
+  "context.delete.success": " ✅ Contexto '%s' deletado com sucesso",
+
+  "context.list.error.failed": "Erro ao listar contextos: %v",
+  "context.list.empty": "Nenhum contexto encontrado. Use /context create para criar um.",
+  "context.list.header": " 📦 CONTEXTOS DISPONÍVEIS",
+
+  "context.show.usage": "Uso: /context show <nome>",
+  "context.show.error.not_found": "Contexto '%s' não encontrado",
+
+  "context.merge.usage": "Uso: /context merge <novo-nome> <contexto1> <contexto2> [contexto3...]",
+  "context.merge.error.context_not_found": "Contexto '%s' não encontrado",
+  "context.merge.error.failed": "Erro ao mesclar contextos: %v",
+  "context.merge.processing": " 🔄 Mesclando contextos...",
+  "context.merge.success": " ✅ Contextos mesclados com sucesso!",
+
+  "context.attached.error.failed": "Erro ao buscar contextos anexados: %v",
+  "context.attached.empty": "Nenhum contexto anexado a esta sessão. Use /context attach <nome> para anexar.",
+  "context.attached.header": " 📌 CONTEXTOS ANEXADOS À SESSÃO",
+
+  "context.export.usage": "Uso: /context export <nome> <caminho-destino>",
+  "context.export.error.not_found": "Contexto '%s' não encontrado",
+  "context.export.error.failed": "Erro ao exportar contexto: %v",
+  "context.export.success": " ✅ Contexto exportado para: %s",
+
+  "context.import.usage": "Uso: /context import <caminho-arquivo>",
+  "context.import.error.failed": "Erro ao importar contexto: %v",
+  "context.import.success": " ✅ Contexto '%s' importado com sucesso",
+
+  "context.metrics.header": " 📊 MÉTRICAS DE CONTEXTOS"
 }

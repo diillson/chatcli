@@ -293,6 +293,71 @@ The  `@file` <path>  command is the primary tool for sending files and directori
 
 After the first chunk is sent, use  /nextchunk  to process the next. The system provides visual feedback on progress and the number of remaining chunks. To manage failures, use  /retry ,  /retryall , or  /skipchunk .
 
+### 🧠 Persistent Context Management
+
+**ChatCLI** provides a powerful system for creating, saving, and reusing complex contexts across sessions with the `/context` command.
+
+### 💡 Why use persistent contexts?
+
+- **Reusability:** Define a project's scope once and attach it to any future conversation with a single command.  
+- **Consistency:** Ensure the AI always has the same baseline knowledge about your project.  
+- **Efficiency:** Avoid typing long `@file` commands repeatedly.  
+- **Working with Large Projects:** Create contexts in `chunked` mode and attach only the relevant parts (`--chunk N`) for your current task — saving tokens and focusing the AI's analysis.  
+
+---
+
+### ⚙️ Main `/context` Commands
+
+#### Create a new context
+```bash
+/context create <name> <paths...> [options]
+# Example: Create a "smart" context with tags
+/context create my-api ./src ./docs --mode smart --tags "golang,api"
+````
+
+#### List all contexts
+
+```bash
+/context list
+```
+
+#### Show details of a context
+
+```bash
+/context show my-api
+```
+
+#### Attach a context to the current session
+
+```bash
+/context attach my-api
+```
+
+#### Attach a specific chunk from a large context
+
+```bash
+# Attaches only the first chunk of the context
+/context attach my-large-project --chunk 1
+```
+
+#### Detach a context
+
+```bash
+/context detach my-api
+```
+
+#### Delete a context
+
+```bash
+/context delete my-api
+```
+
+Use `/context help` to see all available options, including:
+
+* `merge` — combine multiple contexts
+* `import` — load contexts from external files
+* `export` — save a context for sharing or backup
+
 ### Advanced File Filtering with `.chatignore`
 
 To further refine the context sent to the AI, `ChatCLI` supports a file and directory exclusion system inspired by `.gitignore`. This allows you to avoid sending test files, documentation, logs, or any other irrelevant content.
