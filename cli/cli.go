@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -90,6 +91,20 @@ var commandFlags = map[string]map[string][]prompt.Suggest{
 		"list":   {},
 		"delete": {},
 	},
+	"/context": {
+		"create":   {},
+		"attach":   {},
+		"detach":   {},
+		"list":     {},
+		"delete":   {},
+		"show":     {},
+		"merge":    {},
+		"attached": {},
+		"export":   {},
+		"import":   {},
+		"metrics":  {},
+		"help":     {},
+	},
 }
 
 // ChatCLI representa a interface de linha de comando do chat
@@ -119,6 +134,7 @@ type ChatCLI struct {
 	currentSessionName   string
 	MaxTokensOverride    int
 	UserMaxTokens        int
+	contextHandler       *ContextHandler
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -278,6 +294,12 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	cli.sessionManager = sessionMgr
 	cli.currentSessionName = ""
 
+	contextHandler, err := NewContextHandler(logger)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao inicializar o ContextHandler: %w", err)
+	}
+	cli.contextHandler = contextHandler
+
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)
 	cli.agentMode = NewAgentMode(cli, logger)
@@ -370,31 +392,76 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
 	userInput, additionalContext := cli.processSpecialCommands(in)
-	cli.history = append(cli.history, models.Message{
+
+	//Injetar contextos anexados à sessão
+	sessionID := cli.currentSessionName
+	if sessionID == "" {
+		sessionID = "default" // Sessão padrão se não houver sessão nomeada
+	}
+
+	// Construir mensagens dos contextos anexados
+	contextMessages, err := cli.contextHandler.GetManager().BuildPromptMessages(
+		sessionID,
+		ctxmgr.FormatOptions{
+			IncludeMetadata:  true,
+			IncludeTimestamp: false,
+			Compact:          false,
+		},
+	)
+	if err != nil {
+		cli.logger.Warn("Erro ao construir mensagens de contexto", zap.Error(err))
+	}
+
+	// Inserir mensagens de contexto no início do histórico (ANTES da mensagem do usuário)
+	tempHistory := make([]models.Message, 0, len(cli.history)+len(contextMessages)+1)
+
+	// 1. Copiar mensagens do sistema existentes
+	for _, msg := range cli.history {
+		if msg.Role == "system" {
+			tempHistory = append(tempHistory, msg)
+		}
+	}
+
+	// 2. Adicionar contextos anexados
+	tempHistory = append(tempHistory, contextMessages...)
+
+	// 3. Adicionar restante do histórico (user/assistant)
+	for _, msg := range cli.history {
+		if msg.Role != "system" {
+			tempHistory = append(tempHistory, msg)
+		}
+	}
+
+	// 4. Adicionar mensagem atual do usuário
+	userMessage := models.Message{
 		Role:    "user",
 		Content: userInput + additionalContext,
-	})
+	}
+	tempHistory = append(tempHistory, userMessage)
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
 
-	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
+	// Usar histórico temporário com contextos injetados
+	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 
 	cli.animation.StopThinkingAnimation()
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Println(i18n.T("status.operation_cancelled"))
-			if len(cli.history) > 0 && cli.history[len(cli.history)-1].Role == "user" {
-				cli.history = cli.history[:len(cli.history)-1]
-			}
+			// Não adicionar ao histórico se cancelado
 		} else {
 			fmt.Println(i18n.T("error.generic", err.Error()))
 		}
 	} else {
+		// Adicionar APENAS a mensagem do usuário e resposta ao histórico permanente
+		// (Contextos não são salvos no histórico para não poluir)
+		cli.history = append(cli.history, userMessage)
 		cli.history = append(cli.history, models.Message{
 			Role:    "assistant",
 			Content: aiResponse,
 		})
+
 		modelName := cli.Client.GetModelName()
 		coloredPrefix := colorize(modelName+":", ColorPurple)
 		renderedResponse := cli.renderMarkdown(aiResponse)
@@ -732,6 +799,22 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/retry", i18n.T("help.command.retry"))
 	printCommand("/retryall", i18n.T("help.command.retryall"))
 	printCommand("/skipchunk", i18n.T("help.command.skipchunk"))
+
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.contexts"), ColorLime))
+	printCommand("/context create <nome> <paths...>", i18n.T("help.command.context_create"))
+	printCommand("  --mode <modo>", i18n.T("help.command.context_mode"))
+	printCommand("  --description <texto>", i18n.T("help.command.context_description"))
+	printCommand("  --tags <tag1,tag2>", i18n.T("help.command.context_tags"))
+	printCommand("/context attach <nome>", i18n.T("help.command.context_attach"))
+	printCommand("/context detach <nome>", i18n.T("help.command.context_detach"))
+	printCommand("/context list", i18n.T("help.command.context_list"))
+	printCommand("/context show <nome>", i18n.T("help.command.context_show"))
+	printCommand("/context delete <nome>", i18n.T("help.command.context_delete"))
+	printCommand("/context merge <novo> <ctx1> <ctx2>...", i18n.T("help.command.context_merge"))
+	printCommand("/context attached", i18n.T("help.command.context_attached"))
+	printCommand("/context export <nome> <arquivo>", i18n.T("help.command.context_export"))
+	printCommand("/context import <arquivo>", i18n.T("help.command.context_import"))
+	printCommand("/context metrics", i18n.T("help.command.context_metrics"))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.exec"), ColorLime))
 	printCommand("@command <cmd>", i18n.T("help.command.command"))
@@ -1874,6 +1957,15 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 
 	// --- Lógica de Autocomplete Contextual ---
 
+	// 2.5. NOVO: Detectar comandos /context e /session mesmo após espaço
+	if strings.HasPrefix(lineBeforeCursor, "/context") {
+		return cli.getContextSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/session") {
+		return cli.getSessionSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -1906,7 +1998,7 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return prompt.FilterHasPrefix(cli.getContextCommands(), wordBeforeCursor, true)
 	}
 
-	// 5. Sugestões de flags e valores (LÓGICA FINAL CORRIGIDA)
+	// 5. Sugestões de flags e valores
 	if len(args) > 1 {
 		command := args[0]
 		prevWord := args[len(args)-1]
@@ -1986,6 +2078,7 @@ func (cli *ChatCLI) getInternalCommands() []prompt.Suggest {
 		{Text: "/retryall", Description: "Tentar novamente todos os chunks que falharam"},
 		{Text: "/skipchunk", Description: "Pular um chunk de arquivo"},
 		{Text: "/session", Description: "Gerencia as sessões, new, save, list, load, delete"},
+		{Text: "/context", Description: "Gerencia contextos persistentes (create, attach, detach, list, show, etc)"},
 	}
 }
 
@@ -2331,4 +2424,258 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 			fmt.Println(i18n.T("session.delete_active_cleared"))
 		}
 	}
+}
+
+// getContextSuggestions - Sugestões melhoradas para /context
+func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+
+	// Se só digitou "/context" (sem espaço ou com espaço mas sem subcomando ainda)
+	// args será ["/context"] se tiver espaço, ou linha será "/context" se ainda não tiver
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		// Ainda está digitando "/context" - retornar o comando completo
+		return []prompt.Suggest{
+			{Text: "/context", Description: "📦 Gerencia contextos persistentes (create, attach, detach, list, show, etc)"},
+		}
+	}
+
+	// Se digitou "/context " (com espaço) mas ainda não completou o subcomando
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		// Mostrar lista de subcomandos
+		suggestions := []prompt.Suggest{
+			{Text: "create", Description: "Criar contexto de arquivos/diretórios (use --mode, --description, --tags)"},
+			{Text: "attach", Description: "Anexar contexto existente à sessão atual (use --priority)"},
+			{Text: "detach", Description: "Desanexar contexto da sessão atual"},
+			{Text: "list", Description: "Listar todos os contextos salvos"},
+			{Text: "show", Description: "Ver detalhes completos de um contexto específico"},
+			{Text: "delete", Description: "Deletar contexto permanentemente (pede confirmação)"},
+			{Text: "merge", Description: "Mesclar múltiplos contextos em um novo"},
+			{Text: "attached", Description: "Ver quais contextos estão anexados à sessão"},
+			{Text: "export", Description: "Exportar contexto para arquivo JSON"},
+			{Text: "import", Description: "Importar contexto de arquivo JSON"},
+			{Text: "metrics", Description: "Ver estatísticas de uso de contextos"},
+			{Text: "help", Description: "Ajuda detalhada sobre o sistema de contextos"},
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	// A partir daqui, já temos subcomando definido (len(args) >= 2)
+	subcommand := args[1]
+
+	// Subcomandos que precisam de nome de contexto como próximo argumento
+	needsContextName := map[string]bool{
+		"attach": true, "detach": true, "show": true,
+		"delete": true, "export": true,
+	}
+
+	if needsContextName[subcommand] {
+		// Se ainda não digitou o nome do contexto (ou está digitando)
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return cli.getContextNameSuggestions()
+		}
+
+		// Se já digitou o nome e é attach, sugerir flags
+		if subcommand == "attach" && len(args) >= 3 && strings.HasPrefix(d.GetWordBeforeCursor(), "-") {
+			return []prompt.Suggest{
+				{Text: "--priority", Description: "Define prioridade (menor = primeiro a ser enviado)"},
+				{Text: "-p", Description: "Atalho para --priority"},
+			}
+		}
+
+		// Caso contrário, não sugerir nada (já tem tudo que precisa)
+		return []prompt.Suggest{}
+	}
+
+	// Para create, processar argumentos
+	if subcommand == "create" {
+		// Se ainda não tem o nome (args[2])
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ") && !strings.HasPrefix(args[2], "-")) {
+			// Deixar o usuário digitar o nome livremente, não sugerir nada
+			return []prompt.Suggest{}
+		}
+
+		word := d.GetWordBeforeCursor()
+
+		// Se está digitando uma flag
+		if strings.HasPrefix(word, "-") {
+			return []prompt.Suggest{
+				{Text: "--mode", Description: "Modo de processamento: full, summary, chunked, smart"},
+				{Text: "-m", Description: "Atalho para --mode"},
+				{Text: "--description", Description: "Descrição textual do contexto"},
+				{Text: "--desc", Description: "Atalho para --description"},
+				{Text: "-d", Description: "Atalho para --description"},
+				{Text: "--tags", Description: "Tags separadas por vírgula (ex: api,golang)"},
+				{Text: "-t", Description: "Atalho para --tags"},
+			}
+		}
+
+		// Se o argumento anterior era --mode ou -m, sugerir valores
+		if len(args) >= 3 {
+			prevArg := args[len(args)-1]
+			if !strings.HasSuffix(line, " ") && len(args) >= 2 {
+				prevArg = args[len(args)-2]
+			}
+
+			if prevArg == "--mode" || prevArg == "-m" {
+				return []prompt.Suggest{
+					{Text: "full", Description: "Conteúdo completo dos arquivos"},
+					{Text: "summary", Description: "Apenas estrutura de diretórios e metadados"},
+					{Text: "chunked", Description: "Divide em chunks gerenciáveis"},
+					{Text: "smart", Description: "IA seleciona arquivos relevantes ao prompt"},
+				}
+			}
+		}
+
+		// Se não está digitando flag e já tem nome, sugerir paths
+		if len(args) >= 3 && !strings.HasPrefix(word, "-") {
+			return cli.filePathCompleter(word)
+		}
+	}
+
+	// Para merge, precisa de: novo_nome + contextos existentes
+	if subcommand == "merge" {
+		// Se ainda está no novo nome (args[2])
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return []prompt.Suggest{}
+		}
+
+		// A partir do args[3], sugerir contextos existentes
+		return cli.getContextNameSuggestions()
+	}
+
+	// Para export, precisa de: nome_contexto + caminho_arquivo
+	if subcommand == "export" {
+		// Se já tem o nome do contexto, sugerir path para arquivo
+		if len(args) >= 3 {
+			return cli.filePathCompleter(d.GetWordBeforeCursor())
+		}
+	}
+
+	// Para import, sugerir path de arquivo
+	if subcommand == "import" {
+		if len(args) >= 2 {
+			return cli.filePathCompleter(d.GetWordBeforeCursor())
+		}
+	}
+
+	// Para outros subcomandos que não precisam de argumentos (list, attached, metrics, help)
+	return []prompt.Suggest{}
+}
+
+// getContextNameSuggestions - Sugestões de nomes de contextos existentes com descrições ricas
+func (cli *ChatCLI) getContextNameSuggestions() []prompt.Suggest {
+	contexts, err := cli.contextHandler.GetManager().ListContexts(nil)
+	if err != nil {
+		return nil
+	}
+
+	suggestions := make([]prompt.Suggest, 0, len(contexts))
+	for _, ctx := range contexts {
+		// Criar descrição rica com informações úteis
+		var descParts []string
+
+		// Adicionar modo
+		descParts = append(descParts, fmt.Sprintf("modo:%s", ctx.Mode))
+
+		// Adicionar contagem de arquivos
+		if ctx.IsChunked {
+			descParts = append(descParts, fmt.Sprintf("%d chunks", len(ctx.Chunks)))
+		} else {
+			descParts = append(descParts, fmt.Sprintf("%d arquivos", ctx.FileCount))
+		}
+
+		// Adicionar tamanho
+		sizeMB := float64(ctx.TotalSize) / 1024 / 1024
+		if sizeMB < 1 {
+			descParts = append(descParts, fmt.Sprintf("%.0f KB", float64(ctx.TotalSize)/1024))
+		} else {
+			descParts = append(descParts, fmt.Sprintf("%.1f MB", sizeMB))
+		}
+
+		// Adicionar tags se houver
+		if len(ctx.Tags) > 0 {
+			descParts = append(descParts, fmt.Sprintf("tags:%s", strings.Join(ctx.Tags, ",")))
+		}
+
+		desc := strings.Join(descParts, " | ")
+		if ctx.Description != "" {
+			desc = ctx.Description + " — " + desc
+		}
+
+		suggestions = append(suggestions, prompt.Suggest{
+			Text:        ctx.Name,
+			Description: desc,
+		})
+	}
+
+	return suggestions
+}
+
+// getSessionSuggestions - Sugestões para /session
+func (cli *ChatCLI) getSessionSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+
+	// Se só digitou "/session" (sem espaço ou com espaço mas sem subcomando ainda)
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{
+			{Text: "/session", Description: "Gerencia as sessões (new, save, list, load, delete)"},
+		}
+	}
+
+	// Se digitou "/session " (com espaço) mas ainda não completou o subcomando
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		suggestions := []prompt.Suggest{
+			{Text: "new", Description: "Criar nova sessão (limpa histórico atual)"},
+			{Text: "save", Description: "Salvar sessão atual com um nome"},
+			{Text: "load", Description: "Carregar sessão salva anteriormente"},
+			{Text: "list", Description: "Listar todas as sessões salvas"},
+			{Text: "delete", Description: "Deletar uma sessão salva"},
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	// A partir daqui, já temos subcomando definido
+	subcommand := args[1]
+
+	// Subcomandos que precisam de nome de sessão
+	needsSessionName := map[string]bool{
+		"load": true, "delete": true,
+	}
+
+	if needsSessionName[subcommand] {
+		// Se ainda não digitou o nome (ou está digitando)
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return cli.getSessionNameSuggestions()
+		}
+		// Já tem nome, não sugerir mais nada
+		return []prompt.Suggest{}
+	}
+
+	// Para save, deixar usuário digitar nome livremente
+	if subcommand == "save" {
+		return []prompt.Suggest{}
+	}
+
+	// Para new e list, não precisam de argumentos
+	return []prompt.Suggest{}
+}
+
+// getSessionNameSuggestions - Sugestões de nomes de sessões existentes
+func (cli *ChatCLI) getSessionNameSuggestions() []prompt.Suggest {
+	sessions, err := cli.sessionManager.ListSessions()
+	if err != nil {
+		return nil
+	}
+
+	suggestions := make([]prompt.Suggest, 0, len(sessions))
+	for _, session := range sessions {
+		suggestions = append(suggestions, prompt.Suggest{
+			Text:        session,
+			Description: "Sessão salva",
+		})
+	}
+
+	return suggestions
 }

@@ -61,9 +61,24 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case strings.HasPrefix(userInput, "/session"):
 		ch.handleSessionCommand(userInput)
 		return false
+	case strings.HasPrefix(userInput, "/context"):
+		ch.handleContextCommand(userInput)
+		return false
 	default:
 		fmt.Println(i18n.T("error.unknown_command"))
 		return false
+	}
+}
+
+// handleContextCommand - Nova função para rotear comandos de contexto
+func (ch *CommandHandler) handleContextCommand(userInput string) {
+	sessionID := ch.cli.currentSessionName
+	if sessionID == "" {
+		sessionID = "default"
+	}
+
+	if err := ch.cli.contextHandler.HandleContextCommand(sessionID, userInput); err != nil {
+		fmt.Println(colorize(fmt.Sprintf(" ❌ %s", err.Error()), ColorYellow))
 	}
 }
 
