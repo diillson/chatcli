@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.0](https://github.com/diillson/chatcli/compare/v1.33.0...v1.34.0) (2025-10-29)
+
+
+### Features
+
+* **cli:** add deep inspection support for contexts and enhance CLI suggestions ([#322](https://github.com/diillson/chatcli/issues/322)) ([#323](https://github.com/diillson/chatcli/issues/323)) ([8c522c9](https://github.com/diillson/chatcli/commit/8c522c9949f155b30677dafc92fc3cf2754b1e22))
+
 ## [1.33.0](https://github.com/diillson/chatcli/compare/v1.32.0...v1.33.0) (2025-10-29)
 
 
