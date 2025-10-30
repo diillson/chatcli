@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.35.0](https://github.com/diillson/chatcli/compare/v1.34.0...v1.35.0) (2025-10-30)
+
+
+### Features
+
+* **cli:** add support for updating contexts and enhance context creation ([#325](https://github.com/diillson/chatcli/issues/325)) ([#326](https://github.com/diillson/chatcli/issues/326)) ([39e6100](https://github.com/diillson/chatcli/commit/39e610019a7bde471820a6b8e800abd088ff7028))
+
 ## [1.34.0](https://github.com/diillson/chatcli/compare/v1.33.0...v1.34.0) (2025-10-29)
 
 
