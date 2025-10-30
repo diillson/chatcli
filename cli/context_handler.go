@@ -55,6 +55,9 @@ func (h *ContextHandler) HandleContextCommand(sessionID, input string) error {
 	case "create", "new":
 		return h.handleCreate(parts[2:])
 
+	case "update", "edit":
+		return h.handleUpdate(parts[2:])
+
 	case "attach", "add":
 		return h.handleAttach(sessionID, parts[2:])
 
@@ -111,6 +114,7 @@ func (h *ContextHandler) handleCreate(args []string) error {
 	// Primeiro argumento é o nome
 	name = args[0]
 
+	var force bool
 	// Processar flags e paths
 	i := 1
 	for i < len(args) {
@@ -140,6 +144,10 @@ func (h *ContextHandler) handleCreate(args []string) error {
 			i++ // Avançar para o valor
 			tags = strings.Split(args[i], ",")
 			i++ // Avançar para o próximo argumento
+
+		case arg == "--force" || arg == "-f":
+			force = true
+			i++
 
 		case strings.HasPrefix(arg, "--") || strings.HasPrefix(arg, "-"):
 			// Flag desconhecida
@@ -193,12 +201,95 @@ func (h *ContextHandler) handleCreate(args []string) error {
 	}
 	fmt.Println()
 
-	ctx, err := h.manager.CreateContext(name, description, paths, mode, tags)
+	ctx, err := h.manager.CreateContext(name, description, paths, mode, tags, force)
 	if err != nil {
 		return fmt.Errorf("%s", i18n.T("context.create.error.failed", err))
 	}
 
 	fmt.Println(colorize(i18n.T("context.create.success"), ColorGreen))
+	h.printContextInfo(ctx, false)
+
+	return nil
+}
+
+// handleUpdate atualiza um contexto existente
+func (h *ContextHandler) handleUpdate(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("%s", i18n.T("context.update.usage"))
+	}
+
+	name := args[0]
+	var description, modeStr string
+	var paths []string
+	var tags []string
+
+	// Parser similar ao create
+	i := 1
+	for i < len(args) {
+		arg := args[i]
+
+		switch {
+		case arg == "--mode" || arg == "-m":
+			if i+1 >= len(args) {
+				return fmt.Errorf("flag --mode requer um valor")
+			}
+			i++
+			modeStr = args[i]
+			i++
+
+		case arg == "--description" || arg == "--desc" || arg == "-d":
+			if i+1 >= len(args) {
+				return fmt.Errorf("flag --description requer um valor")
+			}
+			i++
+			description = args[i]
+			i++
+
+		case arg == "--tags" || arg == "-t":
+			if i+1 >= len(args) {
+				return fmt.Errorf("flag --tags requer valores")
+			}
+			i++
+			tags = strings.Split(args[i], ",")
+			i++
+
+		case strings.HasPrefix(arg, "--") || strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("flag desconhecida: %s", arg)
+
+		default:
+			paths = append(paths, arg)
+			i++
+		}
+	}
+
+	// Validar modo se fornecido
+	mode := ctxmgr.ProcessingMode("")
+	if modeStr != "" {
+		mode = ctxmgr.ProcessingMode(strings.ToLower(modeStr))
+		validModes := map[ctxmgr.ProcessingMode]bool{
+			ctxmgr.ModeFull:    true,
+			ctxmgr.ModeSummary: true,
+			ctxmgr.ModeChunked: true,
+			ctxmgr.ModeSmart:   true,
+		}
+		if !validModes[mode] {
+			return fmt.Errorf("modo inválido: %s (use: full, summary, chunked, smart)", modeStr)
+		}
+	}
+
+	// Limpar tags
+	for i := range tags {
+		tags[i] = strings.TrimSpace(tags[i])
+	}
+
+	fmt.Println(i18n.T("context.update.processing"))
+
+	ctx, err := h.manager.UpdateContext(name, paths, mode, tags, description)
+	if err != nil {
+		return fmt.Errorf("%s", i18n.T("context.update.error.failed", err))
+	}
+
+	fmt.Println(colorize(i18n.T("context.update.success"), ColorGreen))
 	h.printContextInfo(ctx, false)
 
 	return nil
@@ -990,9 +1081,21 @@ func (h *ContextHandler) showContextHelp() {
             --mode, -m <modo>           Modo: full, summary, chunked, smart
             --description, -d <texto>   Descrição do contexto
             --tags, -t <tag1,tag2>      Tags separadas por vírgula
-            
+            --force, -f                 Sobrescreve se já existir
+
           ` + colorize("Exemplo:", ColorGray) + `
             /context create projeto-api ./src ./tests --mode smart --tags api,golang
+
+        ` + colorize("Atualizar Contextos:", ColorCyan) + `
+          /context update <nome> [<caminhos...>] [opções]
+            --mode, -m <modo>           Novo modo de processamento
+            --description, -d <texto>   Nova descrição
+            --tags, -t <tag1,tag2>      Novas tags
+
+          ` + colorize("Notas:", ColorGray) + `
+            • Apenas os campos fornecidos serão atualizados
+            • Se não fornecer paths, mantém os arquivos atuais
+            • UpdatedAt é sempre atualizado
         
         ` + colorize("Anexar/Desanexar:", ColorCyan) + `
           /context attach <nome> [--priority <n>]   Anexa contexto à sessão atual
