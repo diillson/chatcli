@@ -400,7 +400,7 @@
 
   "context.list.error.failed": "Erro ao listar contextos: %v",
   "context.list.empty": "Nenhum contexto encontrado. Use /context create para criar um.",
-  "context.list.header": " 📦 CONTEXTOS DISPONÍVEIS",
+  "context.list.header": " 📦 Contextos disponíveis",
 
   "context.show.usage": "Uso: /context show <nome>",
   "context.show.error.not_found": "Contexto '%s' não encontrado",
@@ -413,7 +413,7 @@
 
   "context.attached.error.failed": "Erro ao buscar contextos anexados: %v",
   "context.attached.empty": "Nenhum contexto anexado a esta sessão. Use /context attach <nome> para anexar.",
-  "context.attached.header": " 📌 CONTEXTOS ANEXADOS À SESSÃO",
+  "context.attached.header": " 📌 Contextos anexados à sessão",
 
   "context.export.usage": "Uso: /context export <nome> <caminho-destino>",
   "context.export.error.not_found": "Contexto '%s' não encontrado",
@@ -424,5 +424,11 @@
   "context.import.error.failed": "Erro ao importar contexto: %v",
   "context.import.success": " ✅ Contexto '%s' importado com sucesso",
 
-  "context.metrics.header": " 📊 MÉTRICAS DE CONTEXTOS"
+  "context.metrics.header": " 📊 Métricas de Contextos",
+
+  "context.update.usage": "Uso: /context update <nome> [<caminhos...>] [--mode <modo>] [--description <texto>] [--tags <tag1,tag2>]",
+  "context.update.processing": " 🔄 Atualizando contexto...",
+  "context.update.error.failed": "Erro ao atualizar contexto: %v",
+  "context.update.success": " ✅ Contexto atualizado com sucesso!",
+  "context.create.force_tip": "Dica: Use --force para sobrescrever um contexto existente"
 }

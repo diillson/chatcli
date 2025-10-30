@@ -55,7 +55,7 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 }
 
 // CreateContext cria um novo contexto a partir de caminhos de arquivos/diretórios
-func (m *Manager) CreateContext(name, description string, paths []string, mode ProcessingMode, tags []string) (*FileContext, error) {
+func (m *Manager) CreateContext(name, description string, paths []string, mode ProcessingMode, tags []string, force bool) (*FileContext, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -64,9 +64,22 @@ func (m *Manager) CreateContext(name, description string, paths []string, mode P
 		return nil, err
 	}
 
-	// Verificar se já existe contexto com esse nome
+	// Verificar se já existe
 	if m.contextExistsByName(name) {
-		return nil, fmt.Errorf("já existe um contexto com o nome '%s'", name)
+		if !force {
+			return nil, fmt.Errorf("já existe um contexto com o nome '%s'. Use --force caso queira sobrescrever", name)
+		}
+
+		// Se force=true, deletar o existente primeiro
+		for id, ctx := range m.contexts {
+			if ctx.Name == name {
+				if err := m.Storage.DeleteContext(id); err != nil {
+					return nil, fmt.Errorf("erro ao remover contexto existente: %w", err)
+				}
+				delete(m.contexts, id)
+				break
+			}
+		}
 	}
 
 	// Processar arquivos baseado no modo
@@ -401,6 +414,108 @@ func (m *Manager) GetAttachedContexts(sessionID string) ([]*FileContext, error) 
 	}
 
 	return result, nil
+}
+
+// UpdateContext atualiza um contexto existente
+func (m *Manager) UpdateContext(name string, newPaths []string, newMode ProcessingMode, newTags []string, newDescription string) (*FileContext, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Buscar contexto existente
+	var existingCtx *FileContext
+	for _, ctx := range m.contexts {
+		if ctx.Name == name {
+			existingCtx = ctx
+			break
+		}
+	}
+
+	if existingCtx == nil {
+		return nil, fmt.Errorf("contexto '%s' não encontrado", name)
+	}
+
+	// Processar novos arquivos se paths foram fornecidos
+	var files []utils.FileInfo
+	var scanOpts utils.DirectoryScanOptions
+	var totalSize int64
+
+	if len(newPaths) > 0 {
+		mode := newMode
+		if mode == "" {
+			mode = existingCtx.Mode // Manter modo anterior se não especificado
+		}
+
+		var err error
+		files, scanOpts, err = m.processor.ProcessPaths(newPaths, mode)
+		if err != nil {
+			return nil, fmt.Errorf("erro ao processar arquivos: %w", err)
+		}
+
+		for _, f := range files {
+			totalSize += f.Size
+		}
+
+		if err := m.validator.ValidateTotalSize(totalSize); err != nil {
+			return nil, err
+		}
+
+		existingCtx.Files = files
+		existingCtx.Mode = mode
+		existingCtx.TotalSize = totalSize
+		existingCtx.FileCount = len(files)
+		existingCtx.ScanOptions = scanOpts
+		existingCtx.ScanOptionsMetadata = ScanOptionsMetadata{
+			MaxTotalSize:      scanOpts.MaxTotalSize,
+			MaxFilesToProcess: scanOpts.MaxFilesToProcess,
+			Extensions:        scanOpts.Extensions,
+			ExcludeDirs:       scanOpts.ExcludeDirs,
+			ExcludePatterns:   scanOpts.ExcludePatterns,
+			IncludeHidden:     scanOpts.IncludeHidden,
+		}
+	}
+
+	// Atualizar descrição se fornecida
+	if newDescription != "" {
+		existingCtx.Description = newDescription
+	}
+
+	// Atualizar tags se fornecidas
+	if len(newTags) > 0 {
+		existingCtx.Tags = newTags
+	}
+
+	// IMPORTANTE: Atualizar timestamp
+	existingCtx.UpdatedAt = time.Now()
+
+	// Re-dividir em chunks se necessário
+	if existingCtx.Mode == ModeChunked && len(files) > 0 {
+		m.logger.Info("Re-dividindo arquivos em chunks após atualização",
+			zap.String("context_name", name),
+			zap.Int("total_files", len(files)))
+
+		chunker := NewChunker(m.logger)
+		chunks, err := chunker.DivideIntoChunks(files, ChunkSmart)
+		if err != nil {
+			return nil, fmt.Errorf("erro ao dividir em chunks: %w", err)
+		}
+
+		existingCtx.Chunks = chunks
+		existingCtx.IsChunked = true
+		existingCtx.ChunkStrategy = string(ChunkSmart)
+	}
+
+	// Salvar no disco
+	if err := m.Storage.SaveContext(existingCtx); err != nil {
+		return nil, fmt.Errorf("erro ao salvar contexto atualizado: %w", err)
+	}
+
+	m.logger.Info("Contexto atualizado com sucesso",
+		zap.String("id", existingCtx.ID),
+		zap.String("name", existingCtx.Name),
+		zap.Int("file_count", existingCtx.FileCount),
+		zap.Int64("total_size", existingCtx.TotalSize))
+
+	return existingCtx, nil
 }
 
 // CORREÇÃO 2: Refatorada para usar a estrutura de dados correta e lidar com chunks selecionados.

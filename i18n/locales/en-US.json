@@ -425,5 +425,11 @@
   "context.import.error.failed": "Error importing context: %v",
   "context.import.success": " ✅ Context '%s' imported successfully",
 
-  "context.metrics.header": " 📊 CONTEXT METRICS"
+  "context.metrics.header": " 📊 CONTEXT METRICS",
+
+  "context.update.usage": "Usage: /context update <name> [<paths...>] [--mode <mode>] [--description <text>] [--tags <tag1,tag2>]",
+  "context.update.processing": " 🔄 Updating context...",
+  "context.update.error.failed": "Error updating context: %v",
+  "context.update.success": " ✅ Context updated successfully!",
+  "context.create.force_tip": "Tip: Use --force to overwrite an existing context"
 }
