@@ -2442,6 +2442,7 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		suggestions := []prompt.Suggest{
 			{Text: "create", Description: "Criar contexto de arquivos/diretórios (use --mode, --description, --tags)"},
+			{Text: "update", Description: "Atualizar contexto existente (use --mode, --description, --tags)"},
 			{Text: "attach", Description: "Anexar contexto existente à sessão atual (use --priority, --chunk, --chunks)"},
 			{Text: "detach", Description: "Desanexar contexto da sessão atual"},
 			{Text: "list", Description: "Listar todos os contextos salvos"},
@@ -2513,6 +2514,31 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 		}
 
 		return []prompt.Suggest{}
+	}
+
+	// Para update, sugerir nomes de contextos + flags
+	if subcommand == "update" {
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return cli.getContextNameSuggestions()
+		}
+
+		word := d.GetWordBeforeCursor()
+		if strings.HasPrefix(word, "-") {
+			return []prompt.Suggest{
+				{Text: "--mode", Description: "Novo modo: full, summary, chunked, smart"},
+				{Text: "-m", Description: "Atalho para --mode"},
+				{Text: "--description", Description: "Nova descrição do contexto"},
+				{Text: "--desc", Description: "Atalho para --description"},
+				{Text: "-d", Description: "Atalho para --description"},
+				{Text: "--tags", Description: "Novas tags separadas por vírgula"},
+				{Text: "-t", Description: "Atalho para --tags"},
+			}
+		}
+
+		// Após nome e flags, sugerir paths
+		if len(args) >= 3 && !strings.HasPrefix(word, "-") {
+			return cli.filePathCompleter(word)
+		}
 	}
 
 	// Para create, processar argumentos
