@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+
+
+
+
+
+    
+
+    
+
+    
+
+    
+
+    
+
+<html lang="pt-BR"><head><script src="/chatcli/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=chatcli/livereload" data-no-instant defer></script>
+    <meta charset="utf-8" />
+    <title>Modo Não-Interativo (One-Shot) | ChatCLI - Seu Terminal com IA</title>
+    <meta name="robots" content="noindex">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Aprenda a usar o ChatCLI em scripts, automações e pipelines através das flags de linha de comando e do uso de pipes.">
+    <meta name="keywords" content="Documentation, Hugo, Hugo Theme, Bootstrap" />
+    <meta name="author" content="Colin Wilson - Lotus Labs" />
+    <meta name="email" content="support@aigis.uk" />
+    <meta name="website" content="https://lotusdocs.dev" />
+    <meta name="Version" content="v0.1.0" />
+    
+    <link rel="icon" href="http://localhost:1313/chatcli/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="http://localhost:1313/chatcli/favicon.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="http://localhost:1313/chatcli/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="http://localhost:1313/chatcli/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="http://localhost:1313/chatcli/favicon-16x16.png">
+<link rel="manifest" crossorigin="use-credentials" href="http://localhost:1313/chatcli/site.webmanifest">
+<meta property="og:title" content="Modo Não-Interativo (One-Shot)" />
+<meta property="og:description" content="Aprenda a usar o ChatCLI em scripts, automações e pipelines através das flags de linha de comando e do uso de pipes." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/chatcli/docs/features/non-interactive-mode/" /><meta property="og:image" content="http://localhost:1313/chatcli/opengraph/card-base-2_hu_d23417e4fdb21f1c.png"/><meta property="article:section" content="docs" />
+
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:image" content="http://localhost:1313/chatcli/opengraph/card-base-2_hu_d23417e4fdb21f1c.png"/>
+<meta name="twitter:title" content="Modo Não-Interativo (One-Shot)"/>
+<meta name="twitter:description" content="Aprenda a usar o ChatCLI em scripts, automações e pipelines através das flags de linha de comando e do uso de pipes."/>
+
+    
+        <link rel="alternate" type="application/atom+xml" title="Atom feed for ChatCLI - Seu Terminal com IA" href="/index.xml" />
+    
+    
+    
+            
+                <script type="text/javascript" src="http://localhost:1313/chatcli/docs/js/flexsearch.bundle.js"></script>
+            
+        
+    
+    
+
+    <link rel="stylesheet" href="/chatcli/docs/scss/style.css" crossorigin="anonymous">
+    
+    
+    </head>
+<body>
+        <div class="content">
+            <div class="page-wrapper toggled">
+<nav id="sidebar" class="sidebar-wrapper">
+    <div class="sidebar-brand">
+        <a href='/chatcli/' aria-label="HomePage" alt="HomePage">
+            
+                <?xml version="1.0" encoding="UTF-8"?><svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 250"><path d="m143,39.5c-18,0-18,18-18,18,0,0,0-18-18-18H22c-2.76,0-5,2.24-5,5v143c0,2.76,2.24,5,5,5h76c7.2,0,8.64,11.52,8.93,16.13.07,1.05.95,1.87,2,1.87h32.14c1.06,0,1.94-.82,2-1.87.29-4.61,1.73-16.13,8.93-16.13h76c2.76,0,5-2.24,5-5V44.5c0-2.76-2.24-5-5-5h-85Zm63,123.5c0,1.38-1.12,2.5-2.5,2.5h-60.5c-18,0-18,18-18,18,0,0,0-18-18-18h-60.5c-1.38,0-2.5-1.12-2.5-2.5v-94c0-1.38,1.12-2.5,2.5-2.5h51.5c7.2,0,8.64,11.52,8.93,16.13.07,1.05.95,1.87,2,1.87h32.14c1.06,0,1.94-.82,2-1.87.29-4.61,1.73-16.13,8.93-16.13h51.5c1.38,0,2.5,1.12,2.5,2.5v94Z" style="fill:#06f;"/></svg>
+            
+        </a>
+    </div>
+    <div class="sidebar-content" style="height: calc(100% - 131px);">
+        <ul class="sidebar-menu">
+            
+                
+                
+                    
+                        
+                        <li class="">
+                            <a class="sidebar-root-link" href="http://localhost:1313/chatcli/docs/introduction/">
+                                <i class="material-icons me-2">star</i>
+                                
+                                Introdução ao ChatCLI
+                            </a>
+                        </li>
+                    
+                
+                    
+                    
+                        <li class="sidebar-dropdown  ">
+                            <button class="btn">
+                                <i class="material-icons me-2">rocket_launch</i>
+                                Guia de Início Rápido
+                            </button>
+                            <div class="sidebar-submenu ">
+                                <ul>
+                                    
+                                        
+                                        
+                                            <li class=" "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/getting-started/installation/">Instalação e Configuração</a></li>
+                                        
+                                    
+                                </ul>
+                            </div>
+                        </li>
+                    
+                
+                    
+                    
+                        <li class="sidebar-dropdown  ">
+                            <button class="btn">
+                                <i class="material-icons me-2">psychology</i>
+                                Conceitos Fundamentais
+                            </button>
+                            <div class="sidebar-submenu ">
+                                <ul>
+                                    
+                                        
+                                        
+                                            <li class=" "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/core-concepts/basic-usage/">Uso Básico e Comandos Principais</a></li>
+                                        
+                                    
+                                        
+                                        
+                                            <li class=" "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/core-concepts/context-commands/">Adicionando Contexto (@ Comandos)</a></li>
+                                        
+                                    
+                                        
+                                        
+                                            <li class=" "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/core-concepts/agent-mode/">Modo Agente: Execução de Tarefas</a></li>
+                                        
+                                    
+                                </ul>
+                            </div>
+                        </li>
+                    
+                
+                    
+                    
+                        <li class="sidebar-dropdown  current active">
+                            <button class="btn">
+                                <i class="material-icons me-2">auto_awesome</i>
+                                Recursos Avançados
+                            </button>
+                            <div class="sidebar-submenu d-block">
+                                <ul>
+                                    
+                                        
+                                        
+                                            <li class=" "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/features/session-management/">Gerenciamento de Sessões</a></li>
+                                        
+                                    
+                                        
+                                        
+                                            <li class=" "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/features/persistent-context/">Gerenciamento de Contexto Persistente</a></li>
+                                        
+                                    
+                                        
+                                        
+                                            <li class="current "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/features/non-interactive-mode/">Modo Não-Interativo (One-Shot)</a></li>
+                                        
+                                    
+                                </ul>
+                            </div>
+                        </li>
+                    
+                
+                    
+                    
+                        <li class="sidebar-dropdown  ">
+                            <button class="btn">
+                                <i class="material-icons me-2">source_notes</i>
+                                Referências
+                            </button>
+                            <div class="sidebar-submenu ">
+                                <ul>
+                                    
+                                        
+                                        
+                                            <li class=" "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/reference/configuration/">Referência de Configuração (.env)</a></li>
+                                        
+                                    
+                                        
+                                        
+                                            <li class=" "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/reference/command-reference/">Referência Completa de Comandos</a></li>
+                                        
+                                    
+                                        
+                                        
+                                            <li class=" "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/reference/supported-models/">Modelos de IA Suportados</a></li>
+                                        
+                                    
+                                </ul>
+                            </div>
+                        </li>
+                    
+                
+                    
+                    
+                        <li class="sidebar-dropdown  ">
+                            <button class="btn">
+                                <i class="material-icons me-2">help</i>
+                                Suporte e Comunidade
+                            </button>
+                            <div class="sidebar-submenu ">
+                                <ul>
+                                    
+                                        
+                                        
+                                            <li class=" "><a class="sidebar-nested-link" href="http://localhost:1313/chatcli/docs/support/troubleshooting/">Solução de Problemas (Troubleshooting)</a></li>
+                                        
+                                    
+                                </ul>
+                            </div>
+                        </li>
+                    
+                
+            
+        </ul>
+        
+    </div>
+    
+        <ul class="sidebar-footer list-unstyled mb-0">
+            
+        </ul>
+    
+</nav>
+
+                    <main class="page-content bg-transparent">
+                        
+<div id="top-header" class="top-header d-print-none">
+    <div class="header-bar d-flex justify-content-between">
+        <div class="d-flex align-items-center">
+            <a href='/chatcli/' class="logo-icon me-3" aria-label="HomePage" alt="HomePage">
+                <div class="small">
+                    
+                            <?xml version="1.0" encoding="UTF-8"?><svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 250"><path d="m143,39.5c-18,0-18,18-18,18,0,0,0-18-18-18H22c-2.76,0-5,2.24-5,5v143c0,2.76,2.24,5,5,5h76c7.2,0,8.64,11.52,8.93,16.13.07,1.05.95,1.87,2,1.87h32.14c1.06,0,1.94-.82,2-1.87.29-4.61,1.73-16.13,8.93-16.13h76c2.76,0,5-2.24,5-5V44.5c0-2.76-2.24-5-5-5h-85Zm63,123.5c0,1.38-1.12,2.5-2.5,2.5h-60.5c-18,0-18,18-18,18,0,0,0-18-18-18h-60.5c-1.38,0-2.5-1.12-2.5-2.5v-94c0-1.38,1.12-2.5,2.5-2.5h51.5c7.2,0,8.64,11.52,8.93,16.13.07,1.05.95,1.87,2,1.87h32.14c1.06,0,1.94-.82,2-1.87.29-4.61,1.73-16.13,8.93-16.13h51.5c1.38,0,2.5,1.12,2.5,2.5v94Z" style="fill:#06f;"/></svg>
+                    
+                </div>
+                <div class="big">
+                    
+                            <?xml version="1.0" encoding="UTF-8"?><svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 250"><path d="m143,39.5c-18,0-18,18-18,18,0,0,0-18-18-18H22c-2.76,0-5,2.24-5,5v143c0,2.76,2.24,5,5,5h76c7.2,0,8.64,11.52,8.93,16.13.07,1.05.95,1.87,2,1.87h32.14c1.06,0,1.94-.82,2-1.87.29-4.61,1.73-16.13,8.93-16.13h76c2.76,0,5-2.24,5-5V44.5c0-2.76-2.24-5-5-5h-85Zm63,123.5c0,1.38-1.12,2.5-2.5,2.5h-60.5c-18,0-18,18-18,18,0,0,0-18-18-18h-60.5c-1.38,0-2.5-1.12-2.5-2.5v-94c0-1.38,1.12-2.5,2.5-2.5h51.5c7.2,0,8.64,11.52,8.93,16.13.07,1.05.95,1.87,2,1.87h32.14c1.06,0,1.94-.82,2-1.87.29-4.61,1.73-16.13,8.93-16.13h51.5c1.38,0,2.5,1.12,2.5,2.5v94Z" style="fill:#06f;"/></svg>
+                    
+                </div>
+            </a>
+            <button id="close-sidebar" class="btn btn-icon btn-soft">
+                <span class="material-icons size-20 menu-icon align-middle">menu</span>
+            </button>
+            
+            
+                    
+                    <button id="flexsearch-button" class="ms-3 btn btn-soft" data-bs-toggle="collapse" data-bs-target="#FlexSearchCollapse" aria-expanded="false" aria-controls="FlexSearchCollapse">
+                        <span class="material-icons size-20 menu-icon align-middle">search</span>
+                        <span class="flexsearch-button-placeholder ms-1 me-2 d-none d-sm-block">Search</span>
+                        <div class="d-none d-sm-block">
+                            <span class="flexsearch-button-keys">
+                                <kbd class="flexsearch-button-cmd-key">
+                                    <svg width="44" height="15"><path d="M2.118,11.5A1.519,1.519,0,0,1,1,11.042,1.583,1.583,0,0,1,1,8.815a1.519,1.519,0,0,1,1.113-.458h.715V6.643H2.118A1.519,1.519,0,0,1,1,6.185,1.519,1.519,0,0,1,.547,5.071,1.519,1.519,0,0,1,1,3.958,1.519,1.519,0,0,1,2.118,3.5a1.519,1.519,0,0,1,1.114.458A1.519,1.519,0,0,1,3.69,5.071v.715H5.4V5.071A1.564,1.564,0,0,1,6.976,3.5,1.564,1.564,0,0,1,8.547,5.071,1.564,1.564,0,0,1,6.976,6.643H6.261V8.357h.715a1.575,1.575,0,0,1,1.113,2.685,1.583,1.583,0,0,1-2.227,0A1.519,1.519,0,0,1,5.4,9.929V9.214H3.69v.715a1.519,1.519,0,0,1-.458,1.113A1.519,1.519,0,0,1,2.118,11.5Zm0-.857a.714.714,0,0,0,.715-.714V9.214H2.118a.715.715,0,1,0,0,1.429Zm4.858,0a.715.715,0,1,0,0-1.429H6.261v.715a.714.714,0,0,0,.715.714ZM3.69,8.357H5.4V6.643H3.69ZM2.118,5.786h.715V5.071a.714.714,0,0,0-.715-.714.715.715,0,0,0-.5,1.22A.686.686,0,0,0,2.118,5.786Zm4.143,0h.715a.715.715,0,0,0,.5-1.22.715.715,0,0,0-1.22.5Z" fill="currentColor"></path><path d="M12.4,11.475H11.344l3.879-7.95h1.056Z" fill="currentColor"></path><path d="M25.073,5.384l-.864.576a2.121,2.121,0,0,0-1.786-.923,2.207,2.207,0,0,0-2.266,2.326,2.206,2.206,0,0,0,2.266,2.325,2.1,2.1,0,0,0,1.782-.918l.84.617a3.108,3.108,0,0,1-2.622,1.293,3.217,3.217,0,0,1-3.349-3.317,3.217,3.217,0,0,1,3.349-3.317A3.046,3.046,0,0,1,25.073,5.384Z" fill="currentColor"></path><path d="M30.993,5.142h-2.07v5.419H27.891V5.142h-2.07V4.164h5.172Z" fill="currentColor"></path><path d="M34.67,4.164c1.471,0,2.266.658,2.266,1.851,0,1.087-.832,1.809-2.134,1.855l2.107,2.691h-1.28L33.591,7.87H33.07v2.691H32.038v-6.4Zm-1.6.969v1.8h1.572c.832,0,1.22-.3,1.22-.918s-.411-.882-1.22-.882Z" fill="currentColor"></path><path d="M42.883,10.561H38.31v-6.4h1.033V9.583h3.54Z" fill="currentColor"></path></svg>
+                                </kbd>
+                                <kbd class="flexsearch-button-key">
+                                    <svg width="15" height="15"><path d="M5.926,12.279H4.41L9.073,2.721H10.59Z" fill="currentColor"/></svg>
+                                </kbd>
+                            </span>
+                        </div>
+                    </button>
+                
+            </div>
+
+        <div class="d-flex align-items-center">
+            <ul class="list-unstyled mb-0">
+                
+            </ul>
+            
+        </div>
+    </div>
+    
+    
+            <div class="collapse" id="FlexSearchCollapse">
+                <div class="flexsearch-container">
+                    <div class="flexsearch-keymap">
+                        <li>
+                            <kbd class="flexsearch-button-cmd-key"><svg width="15" height="15" aria-label="Arrow down" role="img"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2"><path d="M7.5 3.5v8M10.5 8.5l-3 3-3-3"></path></g></svg></kbd>
+                            <kbd class="flexsearch-button-cmd-key"><svg width="15" height="15" aria-label="Arrow up" role="img"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2"><path d="M7.5 11.5v-8M10.5 6.5l-3-3-3 3"></path></g></svg></kbd>
+                            <span class="flexsearch-key-label">to navigate</span>
+                        </li>
+                        <li>
+                            <kbd class="flexsearch-button-cmd-key"><svg width="15" height="15" aria-label="Enter key" role="img"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2"><path d="M12 3.53088v3c0 1-1 2-2 2H4M7 11.53088l-3-3 3-3"></path></g></svg></kbd>
+                            <span class="flexsearch-key-label">to select</span>
+                        </li>
+                        <li>
+                            <kbd class="flexsearch-button-cmd-key"><svg width="15" height="15" aria-label="Escape key" role="img"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2"><path d="M13.6167 8.936c-.1065.3583-.6883.962-1.4875.962-.7993 0-1.653-.9165-1.653-2.1258v-.5678c0-1.2548.7896-2.1016 1.653-2.1016.8634 0 1.3601.4778 1.4875 1.0724M9 6c-.1352-.4735-.7506-.9219-1.46-.8972-.7092.0246-1.344.57-1.344 1.2166s.4198.8812 1.3445.9805C8.465 7.3992 8.968 7.9337 9 8.5c.032.5663-.454 1.398-1.4595 1.398C6.6593 9.898 6 9 5.963 8.4851m-1.4748.5368c-.2635.5941-.8099.876-1.5443.876s-1.7073-.6248-1.7073-2.204v-.4603c0-1.0416.721-2.131 1.7073-2.131.9864 0 1.6425 1.031 1.5443 2.2492h-2.956"></path></g></svg></kbd>
+                            <span class="flexsearch-key-label">to close</span>
+                        </li>
+                    </div>
+                    <form class="flexsearch position-relative flex-grow-1 ms-2 me-2">
+                        <div class="d-flex flex-row">
+                            <input id="flexsearch" class="form-control" type="search" placeholder="Search" aria-label="Search" autocomplete="off">
+                            <button id="hideFlexsearch" type="button" class="ms-2 btn btn-soft">
+                                cancel
+                            </button>
+                        </div>
+                        <div id="suggestions" class="shadow rounded-1 d-none"></div>
+                    </form>
+                </div>
+            </div>
+        
+    
+    
+</div>
+
+
+                            <div class="container-fluid">
+                                <div class="layout-spacing">
+                                    
+                                        <div class="d-md-flex justify-content-between align-items-center"><nav aria-label="breadcrumb" class="d-inline-block pb-2 mt-1 mt-sm-0">
+    <ul id="breadcrumbs" class="breadcrumb bg-transparent mb-0" itemscope itemtype="https://schema.org/BreadcrumbList">
+        
+            
+                <li class="breadcrumb-item text-capitalize active" aria-current="page" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+                    <a itemprop="item" href="/chatcli/docs/">
+                        <i class="material-icons size-20 align-text-bottom" itemprop="name">Home</i>
+                    </a>
+                    <meta itemprop="position" content='1' />
+                </li>
+            
+            
+                <li class="breadcrumb-item text-capitalize" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+                    <a itemprop="item" href="/chatcli/docs/features/">
+                        <span itemprop="name">Recursos Avançados</span>
+                    </a>
+                    <meta itemprop="position" content='2' />
+                </li>
+            
+        
+            <li class="breadcrumb-item text-capitalize active" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+                <span itemprop="name">Modo Não-Interativo (One-Shot)</span>
+                <meta itemprop="position" content='3' />
+            </li>
+        
+    </ul>
+</nav></div>
+                                    
+                                    <div class="row flex-xl-nowrap">
+                                        
+                                        <div class="docs-toc col-xl-3    d-xl-block"><toc>
+    <div class="fw-bold text-uppercase mb-2">On this page</div>
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#usando-as-flags--p-ou---prompt">Usando as Flags <code>-p</code> ou <code>--prompt</code></a></li>
+        <li><a href="#integrando-com-pipes---">Integrando com Pipes ( | )</a></li>
+        <li><a href="#flags-disponíveis-no-modo-one-shot">Flags Disponíveis no Modo One-Shot</a></li>
+        <li><a href="#modo-agente-em-one-shot">Modo Agente em One-Shot</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+    </toc></div>
+                                        
+                                        
+                                        <div class="docs-toc-mobile    d-print-none d-xl-none">
+                                            <button id="toc-dropdown-btn" class="btn-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-offset="0,0" aria-expanded="false">
+                                                Table of Contents
+                                            </button>
+<nav id="toc-mobile">
+  <ul class="dropdown-menu">
+    <li>
+      <ul>
+        <li><a href="#usando-as-flags--p-ou---prompt">Usando as Flags <code>-p</code> ou <code>--prompt</code></a></li>
+        <li><a href="#integrando-com-pipes---">Integrando com Pipes ( | )</a></li>
+        <li><a href="#flags-disponíveis-no-modo-one-shot">Flags Disponíveis no Modo One-Shot</a></li>
+        <li><a href="#modo-agente-em-one-shot">Modo Agente em One-Shot</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav></div>
+                                        <div class="docs-content col-12 col-xl-9 mt-0">
+                                            <div class="mb-0 d-flex">
+                                                
+                                                <i class="material-icons title-icon me-2">article</i>
+                                                
+                                                <h1 class="content-title mb-0">
+                                                    Modo Não-Interativo (One-Shot)
+                                                    
+                                                </h1>
+                                            </div>
+                                            
+                                            <div id="content" class="main-content" >
+                                                
+    
+    <div data-prismjs-copy="" data-prismjs-copy-success="" data-prismjs-copy-error="">
+        <p>O <strong>ChatCLI</strong> não foi projetado apenas para conversas interativas. Ele pode ser uma ferramenta poderosa em seus scripts de automação, pipelines de CI/CD e aliases de shell graças ao seu modo &ldquo;one-shot&rdquo;.</p>
+<p>Neste modo, você pode fazer uma única pergunta, obter a resposta e sair, tudo em um único comando, tornando-o perfeito para integração com outras ferramentas.</p>
+<hr>
+<h2 id="usando-as-flags--p-ou---prompt">Usando as Flags <code>-p</code> ou <code>--prompt</code> <a href="#usando-as-flags--p-ou---prompt" class="anchor" aria-hidden="true"><i class="material-icons align-middle">link</i></a></h2><p>A maneira mais direta de usar o modo one-shot é com as flags <code>-p</code> ou <code>--prompt</code>. O ChatCLI executará a pergunta, imprimirá a resposta da IA no <code>stdout</code> e encerrará.</p>
+<p><strong>Exemplo:</strong></p>
+
+
+
+  
+  
+  
+
+  
+  
+  
+  
+
+  
+
+  <div class="prism-codeblock ">
+  <pre id="628fcfd" class="language-bash ">
+  <code>chatcli -p &#34;Qual é o comando para listar todos os processos que consomem mais de 500MB de RAM no Linux?&#34;</code>
+  </pre>
+  </div>
+<p>A saída será apenas a resposta da IA, pronta para ser lida ou processada por outro script.</p>
+<hr>
+<h2 id="integrando-com-pipes---">Integrando com Pipes ( | ) <a href="#integrando-com-pipes---" class="anchor" aria-hidden="true"><i class="material-icons align-middle">link</i></a></h2><p>Uma das formas mais poderosas de usar o modo one-shot é combinando-o com outros comandos de linha de comando através de pipes. O ChatCLI automaticamente detecta se está recebendo dados via  stdin  e os utiliza como contexto.</p>
+<p>Exemplo 1: Resumir um  git diff</p>
+
+
+
+  
+  
+  
+
+  
+  
+  
+  
+
+  
+
+  <div class="prism-codeblock ">
+  <pre id="265815a" class="language-bash ">
+  <code>git diff | chatcli -p &#34;Baseado neste diff, gere uma sugestão de mensagem de commit seguindo o padrão Conventional Commits.&#34;</code>
+  </pre>
+  </div>
+<p>Exemplo 2: Analisar um arquivo de log</p>
+
+
+
+  
+  
+  
+
+  
+  
+  
+  
+
+  
+
+  <div class="prism-codeblock ">
+  <pre id="6645b67" class="language-bash ">
+  <code>cat /var/log/nginx/error.log | chatcli -p &#34;Encontre o erro mais comum neste log e sugira uma possível causa e solução.&#34;</code>
+  </pre>
+  </div>
+<hr>
+<h2 id="flags-disponíveis-no-modo-one-shot">Flags Disponíveis no Modo One-Shot <a href="#flags-dispon%c3%adveis-no-modo-one-shot" class="anchor" aria-hidden="true"><i class="material-icons align-middle">link</i></a></h2><p>Você pode customizar o comportamento do modo one-shot com as seguintes flags:</p>
+
+
+
+  
+  
+  
+
+  
+  
+  
+  
+
+  
+
+  <div class="prism-codeblock ">
+  <pre id="f551774" class="language-bash ">
+  <code>Flag                  │ Descrição                                                                                               
+──────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────
+-p ,  --prompt        │ A pergunta ou instrução principal para a IA.                                                            
+--provider &lt;nome&gt;     │ Sobrescreve o provedor de LLM padrão (ex:  OPENAI ,  CLAUDEAI ).                                        
+--model &lt;nome&gt;        │ Sobrescreve o modelo de IA a ser usado (ex:  gpt-4o ,  claude-3-5-sonnet-20240620 ).                    
+--timeout &lt;duração&gt;   │ Define um tempo limite para a requisição (padrão:  5m ). Ex:  10s ,  1m .                               
+--max-tokens &lt;num&gt;    │ Sobrescreve o número máximo de tokens na resposta.                                                      
+--no-anim             │ Desabilita a animação &#34;Pensando...&#34;, ideal para saídas limpas em scripts.                               
+--agent-auto-exec     │ No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for considerado seguro.
+--realm &lt;nome&gt;        │ (StackSpot) Define o  realm  (tenant) para autenticação.                                                
+--agent-id &lt;id&gt;       │ (StackSpot) Define o  Agent ID  a ser usado.</code>
+  </pre>
+  </div>
+<p>Exemplo com Múltiplas Flags:</p>
+
+
+
+  
+  
+  
+
+  
+  
+  
+  
+
+  
+
+  <div class="prism-codeblock ">
+  <pre id="b8b94f8" class="language-bash ">
+  <code>cat relatorio.csv | chatcli --provider CLAUDEAI --model claude-3-opus-20240229 -p &#34;Analise estes dados e me dê 3 insights principais.&#34;</code>
+  </pre>
+  </div>
+<hr>
+<h2 id="modo-agente-em-one-shot">Modo Agente em One-Shot <a href="#modo-agente-em-one-shot" class="anchor" aria-hidden="true"><i class="material-icons align-middle">link</i></a></h2><p>Você também pode invocar o Modo Agente de forma não-interativa. Isso é extremamente útil para automações complexas.</p>
+<p>Ao usar  <code>/agent</code>  ou  <code>/run</code>  com a flag  <code>-p</code> , o ChatCLI pedirá à IA um plano de ação e o imprimirá. Por padrão, ele não executará os comandos.</p>
+<p>Exemplo:</p>
+
+
+
+  
+  
+  
+
+  
+  
+  
+  
+
+  
+
+  <div class="prism-codeblock ">
+  <pre id="abc0774" class="language-bash ">
+  <code>chatcli -p &#34;/agent encontre todos os arquivos *.tmp no diretório /tmp e os apague.&#34;</code>
+  </pre>
+  </div>
+<p>Isso irá exibir o plano sugerido pela IA (ex:  find /tmp -name &ldquo;*.tmp&rdquo; -delete ).</p>
+<p>Para executar o plano automaticamente, use a flag  <code>--agent-auto-exec</code> . A execução só ocorrerá se o validador de segurança interno não detectar comandos perigosos.</p>
+<p>A IA irá gerar e, se for seguro, executar o comando para limpar os arquivos temporários.</p>
+
+
+
+  
+  
+  
+
+  
+  
+  
+  
+
+  
+
+  <div class="prism-codeblock ">
+  <pre id="e6342cb" class="language-bash ">
+  <code>chatcli -p &#34;/agent encontre e apague os arquivos .tmp&#34; --agent-auto-exec</code>
+  </pre>
+  </div>
+<hr>
+
+    </div>
+
+    
+
+    
+                                            </div>
+                                            <div><hr class="doc-hr">
+<div id="doc-nav" class="d-print-none">
+
+	<div class="row flex-xl-nowrap ">
+	<div class="col-sm-6 pt-2 doc-next">
+		<a href="/chatcli/docs/core-concepts/agent-mode/">
+			<div class="card h-100 my-1">
+				<div class="card-body py-2">
+                    <p class="card-title fs-5 fw-semibold lh-base mb-0"><i class="material-icons align-middle">navigate_before</i> Modo Agente: Execução de Tarefas</p>
+					
+				</div>
+			</div>
+		</a>
+        </div>
+	</div>
+</div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+<footer class="shadow py-3 d-print-none">
+    <div class="container-fluid">
+        <div class="row align-items-center">
+            <div class="col">
+                <div class="text-sm-start text-center mx-md-2">
+                    <p class="mb-0">
+                        
+                        
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</footer>
+</main>
+            </div>
+        </div>
+
+        
+        
+        <button onclick="topFunction()" id="back-to-top" aria-label="Back to Top Button" class="back-to-top fs-5"><svg width="24" height="24"><path d="M12,10.224l-6.3,6.3L4.32,15.152,12,7.472l7.68,7.68L18.3,16.528Z" style="fill:#fff"/></svg></button>
+        
+        
+
+        
+        
+
+
+
+
+    
+    
+    
+
+
+
+
+
+
+    <script src="/chatcli/docs/js/bootstrap.js" defer></script>
+
+
+    <script type="text/javascript" src="http://localhost:1313/chatcli/docs/js/bundle.js" defer></script>
+
+        
+
+        
+        <script type="module">
+    var suggestions = document.getElementById('suggestions');
+    var search = document.getElementById('flexsearch');
+
+    const flexsearchContainer = document.getElementById('FlexSearchCollapse');
+
+    const hideFlexsearchBtn = document.getElementById('hideFlexsearch');
+
+    const configObject = { toggle: false }
+    const flexsearchContainerCollapse = new Collapse(flexsearchContainer, configObject) 
+
+    if (search !== null) {
+        document.addEventListener('keydown', inputFocus);
+        flexsearchContainer.addEventListener('shown.bs.collapse', function () {
+            search.focus();
+        });
+        
+        var topHeader = document.getElementById("top-header");
+        document.addEventListener('click', function(elem) {
+            if (!flexsearchContainer.contains(elem.target) && !topHeader.contains(elem.target))
+                flexsearchContainerCollapse.hide();
+        });
+    }
+
+    hideFlexsearchBtn.addEventListener('click', () =>{
+        flexsearchContainerCollapse.hide()
+    })
+
+    function inputFocus(e) {
+        if (e.ctrlKey && e.key === '/') {
+            e.preventDefault();
+            flexsearchContainerCollapse.toggle();
+        }
+        if (e.key === 'Escape' ) {
+            search.blur();
+            
+            flexsearchContainerCollapse.hide();
+        }
+    };
+
+    document.addEventListener('click', function(event) {
+
+    var isClickInsideElement = suggestions.contains(event.target);
+
+    if (!isClickInsideElement) {
+        suggestions.classList.add('d-none');
+    }
+
+    });
+
+    
+
+
+    document.addEventListener('keydown',suggestionFocus);
+
+    function suggestionFocus(e) {
+    const suggestionsHidden = suggestions.classList.contains('d-none');
+    if (suggestionsHidden) return;
+
+    const focusableSuggestions= [...suggestions.querySelectorAll('a')];
+    if (focusableSuggestions.length === 0) return;
+
+    const index = focusableSuggestions.indexOf(document.activeElement);
+
+    if (e.key === "ArrowUp") {
+        e.preventDefault();
+        const nextIndex = index > 0 ? index - 1 : 0;
+        focusableSuggestions[nextIndex].focus();
+    }
+    else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        const nextIndex= index + 1 < focusableSuggestions.length ? index + 1 : index;
+        focusableSuggestions[nextIndex].focus();
+    }
+
+    }
+
+    
+
+
+    (function(){
+
+    var index = new FlexSearch.Document({
+        
+        tokenize: "forward",
+        minlength:  0 ,
+        cache:  100 ,
+        optimize:  true ,
+        document: {
+        id: 'id',
+        store: [
+            "href", "title", "description"
+        ],
+        index: ["title", "description", "content"]
+        }
+    });
+
+
+    
+
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+
+    
+
+    
+
+    index.add(
+            {
+                id:  0 ,
+                href: "\/chatcli\/docs\/",
+                title: "Documentação",
+                description: "Documentação completa para o ChatCLI, seu terminal com IA.",
+                content: "Bem-vindo à documentação do ChatCLI. Aqui você encontrará tudo o que precisa para instalar, configurar e dominar esta poderosa ferramenta.\nNavegue pelo menu à esquerda para explorar os guias e referências.\n"
+            }
+        );
+    index.add(
+            {
+                id:  1 ,
+                href: "\/chatcli\/docs\/reference\/configuration\/",
+                title: "Referência de Configuração (.env)",
+                description: "Um guia completo de todas as variáveis de ambiente que você pode configurar em seu arquivo .env para personalizar o ChatCLI.",
+                content: "O ChatCLI é amplamente configurável através de variáveis de ambiente. A maneira mais fácil de gerenciá-las é criando um arquivo .env na raiz do seu projeto ou no seu diretório HOME.\nA ordem de prioridade para as configurações é:\nFlags de linha de comando (ex: --provider) Variáveis de Ambiente do Sistema Variáveis no arquivo .env Valores Padrão Configuração Geral link Variável Descrição Padrão ENV Define o ambiente, caso dev os logs são mostrados no terminal e salvo no log da app, caso prod somente no log. Valores válidos: dev, prod dev LLM_PROVIDER Define o provedor de IA padrão a ser usado. Valores válidos: OPENAI, CLAUDEAI, GOOGLEAI, XAI, OLLAMA, STACKSPOT. \"OPENAI\" CHATCLI_LANG Define o idioma da interface. Valores: pt-BR, en-US. Se não definida, tentará detectar o idioma do sistema. en-US LOG_LEVEL Nível dos logs. Opções: debug, info, warn, error. \"info\" LOG_FILE Caminho para o arquivo de log. Padrão: $HOME/app.log \"$HOME/app.log\" LOG_MAX_SIZE Tamanho máximo do arquivo de log antes da rotação. Aceita 100MB, 50KB, etc. \"100MB\" HISTORY_MAX_SIZE Tamanho máximo do arquivo de histórico (.chatcli_history) antes da rotação. \"100MB\" CHATCLI_DOTENV Caminho personalizado para o seu arquivo .env. \".env\" Configuração de Provedores linkOpenAI link Variável Descrição Obrigatório? OPENAI_API_KEY Sua chave de API secreta da OpenAI. Sim OPENAI_MODEL O modelo a ser usado. Ex: gpt-4o, gpt-4o-mini, gpt-4-turbo. Não OPENAI_ASSISTANT_MODEL O modelo a ser usado especificamente para a API de Assistentes. Não OPENAI_USE_RESPONSES Define true para usar a API de v1/responses em vez de v1/chat/completions. Não OPENAI_MAX_TOKENS Define o maximo de tokens a ser utilizados na sessão (depende do modelo) Não Anthropic (Claude) link Variável Descrição Obrigatório? CLAUDEAI_API_KEY Sua chave de API secreta da Anthropic. Sim CLAUDEAI_MODEL O modelo a ser usado. Ex: claude-3-5-sonnet-20240620, claude-3-opus-20240229. Não CLAUDEAI_API_VERSION A versão da API da Anthropic a ser usada nos cabeçalhos. Não CLAUDEAI_MAX_TOKENS Define o maximo de tokens a ser utilizados na sessão (depende do modelo) Não Google (Gemini) link Variável Descrição Obrigatório? GOOGLEAI_API_KEY Sua chave de API do Google AI Studio. Sim GOOGLEAI_MODEL O modelo a ser usado. Ex: gemini-1.5-pro-latest, gemini-1.5-flash-latest. Não GOOGLEAI_MAX_TOKENS Define o maximo de tokens a ser utilizados na sessão (depende do modelo) Não xAI (Grok) link Variável Descrição Obrigatório? XAI_API_KEY Sua chave de API secreta da xAI. Sim XAI_MODEL O modelo a ser usado. Ex: grok-1. Não XAI_MAX_TOKENS Define o maximo de tokens a ser utilizados na sessão (depende do modelo) Não Ollama (Local) link Variável Descrição Obrigatório? OLLAMA_ENABLED Defina como true para habilitar o provedor Ollama. Sim OLLAMA_BASE_URL URL base do seu servidor Ollama local. Não OLLAMA_MODEL O nome do modelo local a ser usado (ex: llama3, codellama). Não StackSpot link Variável Descrição Obrigatório? CLIENT_ID Credencial de ID de cliente da StackSpot. Sim CLIENT_KEY Credencial de chave de cliente da StackSpot. Sim STACKSPOT_REALM O realm (tenant) da sua organização na StackSpot. Sim STACKSPOT_AGENT_ID O ID do agente específico a ser utilizado. Sim Configuração do Modo Agente link Variável Descrição CHATCLI_AGENT_ALLOW_SUDO Defina como \"true\" para permitir que o agente sugira e execute comandos com sudo. Use com extrema cautela. CHATCLI_AGENT_DENYLIST Lista de padrões regex (separados por ;) para bloquear comandos adicionais no modo agente. CHATCLI_AGENT_CMD_TIMEOUT Timeout para a execução de um único comando pelo agente (padrão: 10m). "
+            }
+        );
+    index.add(
+            {
+                id:  2 ,
+                href: "\/chatcli\/docs\/getting-started\/installation\/",
+                title: "Instalação e Configuração",
+                description: "Aprenda a instalar o ChatCLI e a configurar suas chaves de API para começar a usar.",
+                content: "Pré-requisitos linkAntes de começar, certifique-se de que você tem os seguintes requisitos instalados e configurados em seu sistema:\nGo (versão 1.24 ou superior): O ChatCLI é uma aplicação Go. Você precisará do Go para compilar e instalar a ferramenta. Para verificar sua versão, execute: go version Git: O Go utiliza o Git para baixar dependências de repositórios públicos. Chave de API: Você precisará de uma chave de API de pelo menos um provedor de LLM suportado (ex: OpenAI, Anthropic, Google, etc.). 1. Instalação linkA maneira mais recomendada de instalar o chatcli é através do comando go install. Isso irá baixar o código-fonte, compilar o binário e movê-lo para o seu diretório $GOPATH/bin.\nAbra seu terminal e execute o seguinte comando:\ngo install github.com/diillson/chatcli@latest Adicionando ao seu PATH linkPara que o comando chatcli seja acessível de qualquer lugar no seu terminal, certifique-se de que o diretório de binários do Go está no PATH do seu sistema.\nAdicione a seguinte linha ao seu arquivo de configuração de shell (como .bashrc , .zshrc , etc.):\nexport PATH=$PATH:$(go env GOPATH)/bin\nApós adicionar a linha, recarregue seu terminal ou execute source ~/.your_shell_rc_file .\n2. Configuração Inicial linkO ChatCLI é configurado principalmente através de um arquivo .env na raiz do diretório onde você executa o comando.\nCrie o arquivo .env : Na sua pasta de usuário ( HOME ) ou na pasta do seu projeto, crie um arquivo chamado .env .\nAdicione sua Chave de API: Abra o arquivo .env e adicione a configuração para o provedor que você deseja usar. A estrutura é LLM_PROVIDER e a chave _API_KEY correspondente.\nVeja um exemplo para configurar a OpenAI: link Defina o provedor principal que você deseja usar LLM_PROVIDER=OPENAI\nAdicione a chave de API para o provedor escolhido OPENAI_API_KEY=“sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx”\n(Opcional) Você pode definir um modelo específico. Se não, o padrão será usado (ex: gpt-4o-mini). linkOPENAI_MODEL=“gpt-4o” link Nota: Você só precisa configurar as chaves para os provedores que pretende usar. O ChatCLI saberá quais estão disponíveis com base nas chaves que encontrar.\n3. Verificando a Instalação linkPara garantir que tudo foi instalado e configurado corretamente, execute os seguintes comandos:\nVerifique a versão: Este comando confirma que o binário está no seu PATH e é executável. chatcli –version\nFaça sua primeira pergunta: Execute chatcli sem argumentos para entrar no modo interativo e faça uma pergunta simples para testar a conexão com a API.\n❯ O que é a equação de Dirac?\nSe você receber uma resposta da IA, parabéns! O ChatCLI está pronto para ser usado. link Próximos Passos linkAgora que a ferramenta está funcionando, aprenda sobre os recursos essenciais:\n➡️ Próximo: Uso Básico e Comandos Principais\n"
+            }
+        );
+    index.add(
+            {
+                id:  3 ,
+                href: "\/chatcli\/docs\/introduction\/",
+                title: "Introdução ao ChatCLI",
+                description: "Descubra o que é o ChatCLI e como ele pode revolucionar sua interação com o terminal.",
+                content: "O que é o ChatCLI? linkChatCLI é uma interface de linha de comando (CLI) poderosa e extensível projetada para unir o poder dos grandes modelos de linguagem (LLMs) diretamente ao seu ambiente de desenvolvimento. Ele transforma seu terminal em um assistente inteligente, capaz de entender o contexto do seu trabalho, interagir com arquivos locais, executar comandos, analisar logs e até mesmo automatizar tarefas complexas através de um modo “agente”.\nDesenvolvido em Go, o ChatCLI é rápido, portátil e leve, criado para ser a ferramenta definitiva para desenvolvedores, sysadmins e entusiastas de tecnologia que desejam maximizar sua produtividade.\nPrincipais Funcionalidades linkO ChatCLI foi construído com um conjunto robusto de funcionalidades, analisando a estrutura do próprio projeto:\n🧠 Modo Agente Inteligente (/agent): Delegue tarefas complexas. O ChatCLI pode planejar e executar sequências de comandos para atingir um objetivo, como “verificar os logs de erro do serviço X e reiniciar se necessário”. 📚 Consciência de Contexto Total: O ChatCLI não é apenas um chat. Ele entende seu ambiente: @file: Envie o conteúdo de arquivos ou diretórios inteiros para a IA. @git: Adicione automaticamente o status, a branch e os diffs do seu repositório Git ao prompt. @env: Inclua variáveis de ambiente de forma segura (valores sensíveis são redigidos). 🔌 Suporte Multi-Provedor: Configure e alterne facilmente entre os principais provedores de LLM, incluindo OpenAI (GPT-4o, etc.), Anthropic (Claude 3.5), Google (Gemini), xAI (Grok) e até mesmo modelos locais via Ollama. 💾 Gerenciamento Persistente de Contexto (/context): Crie, salve e anexe “contextos” reutilizáveis. Ideal para trabalhar em múltiplos projetos sem precisar reenviar os mesmos arquivos repetidamente. 🗣️ Suporte a Múltiplos Idiomas: A interface é internacionalizada, com suporte nativo para Português (pt-BR) e Inglês (en-US). 🛡️ Segurança Integrada: Comandos perigosos (rm -rf, sudo, etc.) são bloqueados por padrão no modo agente, e valores sensíveis em variáveis de ambiente ou logs são mascarados. ⚙️ Configuração Flexível: Gerencie toda a configuração através de um simples arquivo .env, com a capacidade de recarregar em tempo real com o comando /reload. ⚡ Modo One-Shot: Integre o ChatCLI em seus scripts e pipelines usando flags (-p, --prompt) para execuções não interativas. Para Quem é o ChatCLI? link Desenvolvedores: Para depurar código, entender bases de código desconhecidas, gerar documentação e automatizar tarefas de build. Sysadmins e DevOps: Para analisar logs, gerenciar configurações, automatizar deployments e solucionar problemas em servidores. Entusiastas de Linha de Comando: Para turbinar seu terminal e explorar novas formas de interagir com o sistema operacional. Próximos Passos linkAgora que você sabe o que o ChatCLI pode fazer, vamos começar!\n➡️ Próximo: Guia de Instalação\n"
+            }
+        );
+    index.add(
+            {
+                id:  4 ,
+                href: "\/chatcli\/docs\/features\/session-management\/",
+                title: "Gerenciamento de Sessões",
+                description: "Aprenda a salvar, carregar e gerenciar múltiplas sessões de conversa para organizar seu trabalho e manter o histórico de diferentes tarefas.",
+                content: "Trabalhar em múltiplos projetos ou tarefas pode ser desafiador, especialmente quando cada um possui um contexto de conversa diferente. O ChatCLI resolve isso com um sistema simples e poderoso de gerenciamento de sessões.\nUma sessão é essencialmente um “salvamento” completo do seu histórico de conversa, permitindo que você a retome exatamente de onde parou.\nComandos de Sessão linkTodos os comandos de gerenciamento de sessão começam com /session.\n/session save linkSalva a conversa atual (todo o histórico de prompts e respostas) com um nome de sua escolha.\n# Salva a conversa atual na sessão \"debug-api-pagamentos\" /session save debug-api-pagamentos │ ✅ Sessão 'debug-api-pagamentos' salva com sucesso. │ Dica: Após salvar, o nome da sessão aparecerá no seu prompt (ex: debug-api-pagamentos ❯ ), indicando que você está trabalhando nela. /session load linkCarrega uma sessão salva anteriormente. A conversa atual é substituída pelo histórico da sessão carregada.\nCarrega a sessão para continuar o trabalho no projeto do site link /session load documentacao-site │ ✅ Sessão 'documentacao-site' carregada. A conversa anterior foi restaurada. /session list linkLista todas as sessões que você salvou no disco.\n/session list │ Sessões salvas: │ │ • debug-api-pagamentos │ • documentacao-site │ • refatoracao-legado /session delete linkRemove permanentemente uma sessão salva do disco. Esta ação não pode ser desfeita.\n/session delete refatoracao-legado │ ✅ Sessão 'refatoracao-legado' deletada com sucesso do disco. Se você deletar a sessão que está ativa no momento, seu histórico atual será limpo e você começará uma nova conversa.\n/session new (ou /newsession ) linkLimpa o histórico atual e inicia uma conversa completamente nova. É perfeito para começar uma tarefa do zero sem estar atrelado a nenhuma sessão nomeada.\n/session new │ Nova sessão de conversa iniciada; histórico foi limpo. Próximos Passos linkO gerenciamento de sessões é ótimo para salvar o histórico da conversa, mas e quanto ao contexto dos arquivos? Para isso, o ChatCLI oferece um sistema ainda mais poderoso.\n➡️ Próximo: Gerenciamento de Contexto Persistente /context\n"
+            }
+        );
+    index.add(
+            {
+                id:  5 ,
+                href: "\/chatcli\/docs\/support\/troubleshooting\/",
+                title: "Solução de Problemas (Troubleshooting)",
+                description: "Encontre soluções rápidas para os problemas e erros mais comuns ao usar o ChatCLI.",
+                content: "Encontrou um problema? Sem pânico. Esta página lista os erros mais comuns e como resolvê-los rapidamente.\nProblema: Comando chatcli não encontrado link Sintomas: Ao executar chatcli no terminal, você recebe uma mensagem como bash: chatcli: command not found ou zsh: command not found: chatcli.\nSolução: Isso significa que o diretório de binários do Go não está no PATH do seu sistema.\nAbra seu arquivo de configuração de shell (~/.bashrc, ~/.zshrc, etc.). Adicione a seguinte linha ao final do arquivo: export PATH=$PATH:$(go env GOPATH)/bin Reinicie seu terminal ou execute source ~/.your_shell_rc_file para aplicar as alterações. Problema: Erro “Nenhum provedor LLM está configurado” link Sintomas: O ChatCLI encerra imediatamente após iniciar, exibindo uma mensagem sobre provedores ausentes.\nSolução: Você não configurou nenhuma chave de API no seu arquivo .env.\nCrie ou abra o arquivo .env no diretório onde você executa o chatcli (ou no seu diretório HOME). Adicione as credenciais para pelo menos um provedor. Exemplo para OpenAI: LLM_PROVIDER=OPENAI OPENAI_API_KEY=\"sk-sua-chave-secreta-aqui\" Salve o arquivo e execute chatcli novamente. Problema: Alterações no .env não têm efeito link Sintomas: Você alterou o LLM_PROVIDER ou outro valor no .env, mas o ChatCLI continua usando a configuração antiga.\nSolução: O ChatCLI carrega as configurações durante a inicialização. Se você alterar o arquivo .env enquanto a aplicação está rodando, é preciso recarregar as configurações.\nUse o comando /reload:\n❯ /reload O ChatCLI irá recarregar todas as variáveis do seu arquivo .env instantaneamente.\nProblema: Comando @file não encontra um arquivo/diretório link Sintomas: Você recebe um erro como “o arquivo não existe” ou “caminho não encontrado”.\nSolução: Verifique o caminho que você forneceu.\nCaminhos Relativos: Os caminhos são relativos ao diretório onde você executou o chatcli. Se você estiver em /home/user e o arquivo estiver em /home/user/project/src/main.go, o comando correto é @file ./project/src/main.go. Caminho Home (~): Você pode usar ~ como um atalho para seu diretório HOME. Ex: @file ~/documentos/notas.txt. Permissões: Certifique-se de que você tem permissão de leitura para o arquivo e de execução para os diretórios no caminho. Use ls -l para verificar. Problema: O Modo Agente (/agent) mostra o plano, mas não executa nada link Sintomas: A IA apresenta um plano de ação, mas o programa apenas aguarda sua entrada sem executar os comandos.\nSolução: Isso é o comportamento esperado. O Modo Agente é interativo e exige sua aprovação explícita para executar qualquer comando.\nPara executar um único comando, digite seu número (ex: 1) e pressione Enter. Para executar todos os comandos em sequência, digite a e pressione Enter. Problema: O provedor Ollama não é detectado link Sintomas: Mesmo com OLLAMA_ENABLED=true no seu .env, a aplicação informa que o provedor não está disponível.\nSolução: O chatcli precisa se comunicar com o servidor Ollama, que deve estar rodando localmente.\nServidor Ollama: Certifique-se de que o servidor do Ollama está em execução. Em outro terminal, rode ollama serve. Modelo Local: Verifique se você tem pelo menos um modelo baixado. Rode ollama list para ver os modelos disponíveis. Se não tiver nenhum, baixe um (ex: ollama pull llama3). URL Base: Se o seu servidor Ollama não está rodando no endereço padrão (http://localhost:11434), defina a variável OLLAMA_BASE_URL no seu arquivo .env. "
+            }
+        );
+    index.add(
+            {
+                id:  6 ,
+                href: "\/chatcli\/docs\/core-concepts\/basic-usage\/",
+                title: "Uso Básico e Comandos Principais",
+                description: "Aprenda a interagir com o ChatCLI e a usar os comandos essenciais para navegação, configuração e controle.",
+                content: "Modo Interativo linkO modo padrão do ChatCLI é o interativo. Para iniciá-lo, basta executar o comando no seu terminal sem nenhum argumento:\n./chatcli Você será saudado com uma tela de boas-vindas e um prompt ( ❯ ), pronto para receber suas perguntas ou comandos.\n🤖 Você está conversando com gpt-4o-mini (OPENAI)\n❯ me ajude a listar todos os containers docker ativos\nQualquer texto que não comece com / ou @ será tratado como um prompt para a Inteligência Artificial.\nComandos Essenciais linkOs comandos internos são seu centro de controle para o ChatCLI. Eles sempre começam com uma barra ( / ).\nComando │ Descrição ───────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── /help │ Exibe a tela de ajuda completa com todos os comandos e opções disponíveis. /exit ou /quit │ Encerra a aplicação do ChatCLI de forma segura. /newsession │ Limpa o histórico da conversa atual, permitindo que você inicie um novo diálogo do zero. /config ou /status │ Mostra a configuração atual, incluindo o provedor e modelo de IA ativos, e chaves de ambiente (com valores sensíveis ocultos). /reload │ Recarrega a configuração do arquivo .env sem precisar reiniciar a aplicação. /switch │ Abre um menu interativo para trocar o provedor de LLM ou alterar o modelo atual. Uma Breve Visão dos Comandos Avançados linkAlém dos comandos essenciais, o poder do ChatCLI reside em sua capacidade de entender o contexto e executar ações. Estes são os dois principais tipos de comandos avançados:\nComandos de Contexto ( @ ) linkEstes comandos, que começam com @ , são usados para injetar informações dinâmicas no seu prompt.\n• @file : Anexa o conteúdo de um arquivo ou a estrutura de um diretório. • @git : Fornece à IA o estado atual do seu repositório Git. • @command : Executa um comando no seu terminal e usa a saída como contexto.\nEstes comandos serão detalhados na próxima seção.\nModo Agente ( /agent ) linkEste é o modo mais poderoso do ChatCLI. Em vez de apenas obter respostas, você pode delegar uma tarefa.\n/agent organize meus arquivos .log na pasta ‘~/logs’ em subpastas por data\nA IA irá criar um plano de execução, que consiste em uma série de comandos de shell, e pedir sua aprovação antes de executá-los.\nPróximos Passos linkAgora que você conhece o básico, vamos mergulhar na funcionalidade que torna o ChatCLI tão poderoso: a adição de contexto.\n➡️ Próximo: Adicionando Contexto ( @ Comandos)\n"
+            }
+        );
+    index.add(
+            {
+                id:  7 ,
+                href: "\/chatcli\/docs\/core-concepts\/context-commands\/",
+                title: "Adicionando Contexto (@ Comandos)",
+                description: "Aprenda a usar @file, @git, @command e @env para dar ao ChatCLI consciência total do seu ambiente de trabalho.",
+                content: "A verdadeira força do ChatCLI reside em sua capacidade de ir além de um simples chat e entender o contexto em que você está trabalhando. Isso é feito através dos comandos de contexto, que sempre começam com o símbolo @.\nEsses comandos coletam informações do seu sistema local e as anexam ao seu prompt antes de enviá-lo para a IA.\n@file: Fornecer Arquivos e Diretórios linkEste é, talvez, o comando mais poderoso. Ele permite que você envie o conteúdo de arquivos específicos ou a estrutura e conteúdo de diretórios inteiros.\nSintaxe Básica:\n@file [Sua pergunta...] Exemplos:\nAnalisar um arquivo específico: @file ./src/database/connection.go me explique como a conexão com o banco de dados é feita.\nAnalisar um diretório inteiro: @file ./src/api/ me ajude a encontrar uma possível causa para o bug no endpoint de login.\nModos de Processamento ( –mode ) linkPara lidar com diferentes cenários, o comando @file possui um modificador –mode que altera seu comportamento:\n–mode=full (Padrão): Envia o conteúdo completo de todos os arquivos encontrados, até atingir um limite de tamanho para evitar sobrecarga. Ideal para análises detalhadas de arquivos ou pequenos componentes.\n–mode=summary : Envia apenas a estrutura de arquivos e diretórios, sem o conteúdo do código. Útil para obter uma visão geral de um projeto grande. @file –mode=summary . me dê uma visão geral da arquitetura deste projeto.\n–mode=chunked : Para projetos muito grandes. Ele divide o conteúdo em “chunks” (pedaços) gerenciáveis. Apenas o primeiro é enviado. Use o comando /nextchunk para enviar os pedaços seguintes na conversa. @file –mode=chunked . Vamos analisar este projeto em partes.\n–mode=smart : A IA recebe uma lista de todos os arquivos e, com base na sua pergunta, seleciona os mais relevantes para ler. Perfeito para perguntas específicas em grandes bases de código. @file –mode=smart ./src me explique como o fluxo de autenticação funciona.\n@git : Contexto do Repositório linkSe você está em um repositório Git, este comando é essencial. Ele coleta e anexa informações cruciais sobre o estado atual do projeto.\nO que ele inclui?\nStatus do repositório ( git status -s ) Branch atual e status em relação ao remoto Diferenças nos arquivos modificados ( git diff ) Os 5 commits mais recentes Exemplo de Uso:\n@git me ajude a escrever uma mensagem de commit clara e concisa para estas mudanças.\n@command : Executar e Usar a Saída linkExecute qualquer comando do seu terminal e use a saída dele como contexto para sua pergunta.\nSintaxe Básica:\n@command \u003e [Sua pergunta…]\nOperador \u003e : O símbolo \u003e é usado para separar o comando da sua pergunta para a IA.\nExemplo de Uso:\n@command kubectl get pods -n production \u003e por que o pod de login está reiniciando?\nExecução Interativa e Análise Direta link @command -i : Use a flag -i para comandos que exigem interação do usuário, como vim ou ssh . A saída não será capturada. @command –ai : Envia a saída do comando diretamente para a IA, sem precisar de uma pergunta adicional. É um atalho para análise rápida. @command –ai cat /var/log/nginx/error.log @env : Fornecer Variáveis de Ambiente linkAdiciona as variáveis de ambiente atuais ao contexto.\n🔒 Segurança: O ChatCLI automaticamente detecta e remove valores de variáveis com nomes sensíveis (como API_KEY , TOKEN , PASSWORD ), substituindo-os por [REDACTED] .\nExemplo de Uso:\n@env quais são as configurações de banco de dados disponíveis?\nCombinando Comandos linkA verdadeira magia acontece quando você combina vários comandos de contexto em um único prompt para dar à IA uma visão 360º do seu problema.\nExemplo Combinado:\n@git @file ./src/main.go \u003e baseado nas mudanças recentes, revise este arquivo e sugira melhorias de performance.\nPróximos Passos linkAgora você sabe como dar “olhos e ouvidos” ao ChatCLI. O próximo passo é aprender a dar a ele “mãos” para agir no seu sistema.\n➡️ Próximo: Modo Agente: Execução de Tarefas\n"
+            }
+        );
+    index.add(
+            {
+                id:  8 ,
+                href: "\/chatcli\/docs\/features\/persistent-context\/",
+                title: "Gerenciamento de Contexto Persistente",
+                description: "Domine o gerenciamento de contextos para salvar, anexar e reutilizar snapshots de projetos, tornando sua interação com a IA mais rápida e poderosa.",
+                content: "Enquanto o gerenciamento de sessões (/session) salva o histórico da conversa, o gerenciamento de contextos (/context) salva o conteúdo do seu ambiente de trabalho. É a funcionalidade mais poderosa para quem trabalha em múltiplos projetos ou precisa consultar frequentemente a mesma base de código.\nUm Contexto é um “snapshot” nomeado de um ou mais arquivos e diretórios, processado e salvo em disco para ser reutilizado a qualquer momento.\nO Ciclo de Vida de um Contexto linkA utilização de contextos segue um fluxo simples e poderoso:\n📦 Criar (/context create): Você define um conjunto de arquivos e pastas, processa-os com um modo específico (ex: smart, chunked) e salva o resultado com um nome. 📌 Anexar (/context attach): Você “anexa” um ou mais contextos salvos à sua sessão de conversa atual. 🧠 Usar: Enquanto estiver anexado, o conteúdo do contexto será automaticamente enviado para a IA em todos os seus prompts, fornecendo um conhecimento profundo e contínuo sobre seu projeto. ✂️ Desanexar (/context detach): Quando não precisar mais do contexto, você o desanexa para liberar espaço no prompt da IA. Comandos de Gerenciamento de Contexto linkAqui estão todos os subcomandos disponíveis para gerenciar seus contextos.\ncreate: Criar um Novo Contexto linkCria e salva um novo contexto a partir de arquivos e diretórios.\nSintaxe:\n/context create [caminho_2...] [opções] Opções:\n–mode ou -m : Define como os arquivos serão processados. Os modos são os mesmos do comando @file : full , summary , chunked ou smart . –description ou -d : Adiciona uma descrição textual para ajudar a identificar o contexto. –tags ou -t : Adiciona tags para facilitar a filtragem e organização. –force , -f : Sobrescreve um contexto existente com o mesmo nome. Exemplo:\nCria um contexto ‘api-core’ com o modo smart, descrição e tags link /context create api-core ./src/services ./docs/api \\ --mode smart \\ --description \"Contexto com o núcleo da API e documentação\" \\ --tags golang,api attach e detach : Anexar e Desanexar da Sessão linkEstes comandos controlam quais contextos estão ativos na sua conversa atual.\n/context attach : Anexa um contexto à sessão. /context detach : Remove um contexto da sessão. /context attached : Lista todos os contextos atualmente anexados. Anexação Avançada de Chunks linkSe um contexto foi criado com –mode=chunked , você pode anexar partes específicas dele:\n–chunk : Anexa apenas o chunk de número N . –chunks : Anexa uma lista de chunks específicos. –priority : Define a ordem em que os contextos anexados são enviados (menor número = maior prioridade). Exemplo:\nAnexa apenas os chunks 1 e 3 do contexto ’legado-db’ com alta prioridade\n/context attach legado-db --chunks 1,3 --priority 10 list , show , e inspect : Visualizar Contextos linkEstes comandos ajudam você a entender o que há em seus contextos salvos.\n/context list : Lista todos os contextos disponíveis, com metadados básicos. /context show : Exibe informações detalhadas de um contexto, incluindo a lista completa de arquivos. /context inspect : Fornece uma análise estatística profunda do contexto, como distribuição de tipos de arquivo, contagem de linhas e análise de tamanho dos chunks. Use –chunk N para inspecionar um chunk específico. Outros Comandos de Gerenciamento link /context delete : Deleta um contexto permanentemente. /context merge : Combina múltiplos contextos em um novo, removendo arquivos duplicados. /context export : Exporta um contexto para um arquivo JSON, facilitando o backup e compartilhamento. /context import : Importa um contexto a partir de um arquivo JSON. /context metrics : Mostra estatísticas globais sobre todos os seus contextos (número total, tamanho, etc.). /context help : Exibe uma tela de ajuda específica para os comandos de contexto. Próximos Passos linkVocê agora conhece os recursos mais poderosos de automação e gerenciamento de contexto do ChatCLI. Para finalizar, vamos documentar as funcionalidades que garantem a portabilidade e a integração da ferramenta em scripts.\n➡️ Próximo: Modo Não-Interativo e Casos de Uso\n"
+            }
+        );
+    index.add(
+            {
+                id:  9 ,
+                href: "\/chatcli\/docs\/getting-started\/",
+                title: "Guia de Início Rápido",
+                description: "Siga estes passos para instalar, configurar e começar a usar o ChatCLI em minutos.",
+                content: "Esta seção guiará você pelo processo de instalação e configuração inicial do ChatCLI. Vamos colocar a ferramenta para funcionar no seu sistema.\n"
+            }
+        );
+    index.add(
+            {
+                id:  10 ,
+                href: "\/chatcli\/docs\/reference\/command-reference\/",
+                title: "Referência Completa de Comandos",
+                description: "Uma folha de consulta (cheatsheet) para todos os comandos, flags e opções disponíveis no ChatCLI.",
+                content: "Esta página é uma referência rápida para todos os comandos e flags disponíveis no ChatCLI. Use-a como uma folha de consulta para encontrar rapidamente a sintaxe que você precisa.\nComandos Internos (/) linkEstes comandos controlam a aplicação e o fluxo da conversa.\nComando Descrição /help Mostra a tela de ajuda completa. /exit ou /quit Encerra a aplicação. /newsession Limpa o histórico da conversa e inicia uma nova sessão. /version ou /v Exibe a versão, build e verifica se há atualizações. /config ou /status Mostra todas as configurações ativas (provedor, modelo, chaves, etc.). /reload Recarrega a configuração do arquivo .env em tempo real. /switch [opções] Abre o menu para trocar de provedor de LLM. --model Muda o modelo para o provedor atual, sem trocar de provedor. --max-tokens Define um limite máximo de tokens para a resposta da IA. --realm (StackSpot) Define o realm (tenant) para autenticação. --agent-id (StackSpot) Define o Agent ID a ser usado. /nextchunk Envia o próximo “chunk” de um contexto adicionado com @file --mode=chunked. /retry Reenvia o último chunk que falhou. /retryall Reenvia todos os chunks que falharam. /skipchunk Pula o chunk atual e remove-o da fila de pendentes. Comandos de Contexto (@) linkEstes comandos injetam informações do seu ambiente local no prompt.\nComando Descrição @file [opções] Adiciona o conteúdo de um arquivo ou diretório. --mode=full (Padrão) Envia o conteúdo completo (pode ser truncado). --mode=summary Envia apenas a estrutura de arquivos (árvore de diretórios). --mode=chunked Divide projetos grandes em “chunks” para processamento sequencial. --mode=smart A IA seleciona os arquivos mais relevantes para a sua pergunta. @git Adiciona o status do Git (diff, status, logs recentes) ao contexto. @command Executa um comando e usa sua saída como contexto. -i, --interactive Executa o comando em modo interativo (ex: ssh, vim). --ai Envia a saída do comando diretamente para a IA para análise. @env Adiciona as variáveis de ambiente (valores sensíveis são ocultados). Modo Agente (/agent ou /run) linkDelega tarefas para a IA planejar e executar.\nComando Descrição /agent Inicia o modo agente com uma instrução em linguagem natural. /run Atalho (alias) para /agent. Ações Dentro do Modo Agente link Ação Descrição [N] Executa o comando de número N. a Executa todos os comandos pendentes. eN Edita o comando N antes de executar. tN Simula (dry-run) o comando N. cN Pede continuação para a IA com a saída do comando N. pcN Adiciona contexto pré-execução ao comando N. acN Adiciona contexto pós-execução (à saída) do comando N. vN Visualiza a saída completa do comando N. wN Salva a saída do comando N em um arquivo. p Alterna a visualização do plano (compacta/completa). r Redesenha a tela. q Sai do modo agente. Gerenciamento de Sessões (/session) link Subcomando Descrição /session save Salva a conversa atual com um nome. /session load Carrega uma conversa salva. /session list Lista todas as sessões salvas. /session delete Deleta uma sessão salva. /session new Inicia uma nova sessão limpa. Gerenciamento de Contexto (/context) link Subcomando Descrição /context create ... Cria um “snapshot” persistente de arquivos/diretórios. /context update ... Atualiza um contexto existente com novos arquivos ou metadados. /context attach ... Anexa um contexto salvo à sua sessão atual. /context detach Desanexa um contexto da sua sessão. /context list Lista todos os contextos salvos. /context show Mostra detalhes e arquivos de um contexto. /context inspect ... Mostra estatísticas detalhadas (linhas, tipos de arquivo) de um contexto. /context delete Deleta um contexto permanentemente. /context merge Combina múltiplos contextos em um novo. /context attached Mostra os contextos atualmente anexados. /context export Exporta um contexto para um arquivo JSON. /context import Importa um contexto de um arquivo JSON. /context metrics Exibe estatísticas gerais de uso dos contextos. Flags de Linha de Comando (Modo One-Shot) linkUse estas flags ao executar chatcli diretamente do seu terminal para automações.\nFlag Descrição -p, --prompt \"\" Executa um único prompt e sai. --provider Sobrescreve o provedor de IA (ex: GOOGLEAI). --model Sobrescreve o modelo de IA (ex: gemini-1.5-pro-latest). --timeout Define o tempo limite para a requisição (ex: 10s, 1m). --max-tokens Limita o número de tokens na resposta. --agent-auto-exec No modo agente one-shot, executa o primeiro comando se for seguro. --no-anim Desabilita a animação “Pensando…”, útil para scripts. -v, --version Mostra a informação de versão. -h, --help Mostra a tela de ajuda. "
+            }
+        );
+    index.add(
+            {
+                id:  11 ,
+                href: "\/chatcli\/docs\/core-concepts\/",
+                title: "Conceitos Fundamentais",
+                description: "Entenda os comandos essenciais e os conceitos que formam a base do poder do ChatCLI.",
+                content: "Esta seção detalha os comandos essenciais e os conceitos que formam a base do poder do ChatCLI.\nDomine estes fundamentos para tirar o máximo proveito da ferramenta, desde a adição de contexto dinâmico até a automação de tarefas com o modo agente.\n"
+            }
+        );
+    index.add(
+            {
+                id:  12 ,
+                href: "\/chatcli\/docs\/reference\/supported-models\/",
+                title: "Modelos de IA Suportados",
+                description: "Uma lista de referência para todos os modelos de Inteligência Artificial suportados nativamente pelo ChatCLI em cada provedor.",
+                content: "O ChatCLI foi projetado para ser flexível, suportando uma ampla gama de modelos dos principais provedores de IA. Esta página serve como uma referência rápida para os modelos que são reconhecidos nativamente pelo nosso catálogo interno.\nVocê pode trocar de modelo a qualquer momento usando o comando /switch --model .\nOpenAI linkOs modelos da OpenAI são ideais para uma vasta gama de tarefas, desde a geração de código até o raciocínio complexo.\nNome do Modelo (ID) Nome de Exibição Janela de Contexto gpt-4o GPT-4o 50,000 tokens gpt-4o-mini GPT-4o mini 50,000 tokens gpt-5 GPT-5 50,000 tokens gpt-4 GPT-4 family 50,000 tokens Anthropic (Claude) linkOs modelos da Anthropic são conhecidos por suas grandes janelas de contexto e excelente capacidade de seguir instruções complexas.\nNome do Modelo (ID) Nome de Exibição Janela de Contexto claude-3-5-sonnet-20240620 (ou claude-3.5-sonnet) Claude 3.5 Sonnet 200,000 tokens claude-3-opus-20240229 (ou claude-3-opus) Claude 3 Opus 200,000 tokens claude-3-sonnet-20240229 (ou claude-3-sonnet) Claude 3 Sonnet 200,000 tokens claude-3-haiku-20240307 (ou claude-3-haiku) Claude 3 Haiku 200,000 tokens claude-4 Claude 4 200,000 tokens claude-4-opus Claude 4 Opus 200,000 tokens claude-4-sonnet Claude 4 Sonnet 200,000 tokens claude-4-5-sonnet Claude 4.5 200,000 tokens Google (Gemini) linkOs modelos Gemini do Google oferecem capacidades multimodais avançadas e grandes janelas de contexto.\nNome do Modelo (ID) Nome de Exibição Janela de Contexto gemini-1.5-pro-latest Gemini 1.5 Pro 1,000,000 tokens gemini-1.5-flash-latest Gemini 1.5 Flash 1,000,000 tokens gemini-1.0-pro/flash Gemini 1.0 Pro 32,000 tokens gemini-2.0-pro/flash Gemini 2.0 Pro 2000000 tokens gemini-2.5-pro/flash Gemini 2.5 Pro 2000000 tokens xAI (Grok) linkModelos da xAI, conhecidos por sua integração de informações em tempo real e uma “personalidade” única.\nNome do Modelo (ID) Nome de Exibição Janela de Contexto grok-1 Grok-1 8,192 tokens grok-1.5 Grok-1.5 128,000 tokens grok-1.5-vision-preview Grok 1.5 Vision 128,000 tokens grok-4 Grok-4 200,000 tokens StackSpot (StackSpotAI) linkAceita todos os modelos compativeis na plataforma StackSpotAI, desde que selecionado junto a criação do Agent.\nOllama (Modelos Locais) linkO ChatCLI suporta qualquer modelo que você tenha localmente através do Ollama. Para usar, certifique-se de que o provedor Ollama está habilitado e defina o nome do modelo.\nHabilite no seu arquivo .env: OLLAMA_ENABLED=true Defina o modelo no .env ou via comando: # No .env OLLAMA_MODEL=\"llama3\" Ou no ChatCLI: /switch --model llama3 Você pode usar qualquer modelo que tenha baixado com ollama pull .\n"
+            }
+        );
+    index.add(
+            {
+                id:  13 ,
+                href: "\/chatcli\/docs\/core-concepts\/agent-mode\/",
+                title: "Modo Agente: Execução de Tarefas",
+                description: "Aprenda a delegar tarefas completas para o ChatCLI, que irá planejar e executar comandos para você.",
+                content: "O Modo Agente eleva o ChatCLI de uma simples ferramenta de chat para um verdadeiro assistente autônomo. Em vez de apenas pedir informações, você pode delegar uma tarefa completa, e a IA irá criar, apresentar e, com sua aprovação, executar um plano de ação para concluí-la.\nComo Iniciar o Modo Agente linkPara ativar o Modo Agente, use os comandos /agent ou seu atalho /run, seguido da tarefa que você deseja realizar.\nSintaxe:\n/agent # Ou /run Exemplo Prático: link/agent encontre todos os arquivos de log no meu diretório home que foram modificados nas últimas 24 horas e copie-os para uma pasta chamada ’logs_recentes'.\nApós receber sua instrução, a IA analisará o pedido e responderá com um Plano de Ação, que é uma lista de comandos estruturados para você revisar. link O Ciclo do Agente linkO Modo Agente opera em um ciclo interativo que lhe dá total controle:\nPlanejamento: A IA cria um plano de execução detalhado. Revisão: O ChatCLI exibe o plano para você em uma interface interativa. Ação: Você decide o que fazer: executar um comando, todos os comandos, editar, simular ou pedir uma continuação. Execução e Observação: O ChatCLI executa os comandos aprovados e captura a saída. Reiteração: Com base no resultado, você pode continuar o processo, pedir uma correção ou finalizar a tarefa. A Interface do Plano de Ação linkApós o planejamento, você verá uma tela dedicada com duas visualizações principais que podem ser alternadas com a tecla p .\nVisão Compacta (Padrão) linkMostra uma lista resumida de cada passo, ideal para ter uma visão geral do fluxo.\n📋 PLANO (visão compacta)\n✅ #1: Criar o diretório de destino — mkdir -p logs_recentes ⏳ #2: Encontrar e copiar os arquivos — find ~ -name “*.log” -mtime -1 -exec cp … Visão Completa linkFornece um cartão detalhado para cada comando, incluindo descrição, tipo de linguagem, risco de segurança e o bloco de código completo.\n🔷 COMANDO #1: Criar o diretório de destino Tipo: shell Risco: Seguro Status: OK Código: $ mkdir -p logs_recentes O Menu Interativo de Ações linkEste é o seu centro de controle no Modo Agente. Após cada plano ou execução, você pode escolher uma das seguintes ações:\nComando │ Ação │ Descrição ────────┼───────────────────────┼────────────────────────────────────────────────────────────────────────────────── [N] │ Executar Comando N │ Executa um único comando do plano (ex: 1 para executar o primeiro). a │ Executar Todos (All) │ Executa todos os comandos pendentes na sequência, parando se ocorrer um erro. eN │ Editar Comando N │ Abre o comando N em um editor para que você possa modificá-lo antes de executar. tN │ Testar (Dry-Run) │ Simula a execução do comando N sem realmente fazer alterações no sistema. cN │ Continuar de N │ Usa a saída do comando N para pedir à IA os próximos passos ou uma correção. pcN │ Contexto Pré-Execução │ Adiciona mais informações para a IA refinar o comando N antes de executá-lo. acN │ Contexto Pós-Execução │ Envia a saída do comando N junto com um novo contexto para análise da IA. vN │ Ver Saída de N │ Abre a saída completa e não truncada do comando N em um pager ( less ). wN │ Salvar Saída de N │ Salva a saída completa do comando N em um arquivo de log temporário. p │ Alternar Plano │ Muda a visualização do plano entre COMPACTO e COMPLETO . r │ Redesenhar a Tela │ Limpa e redesenha a tela, útil se a saída de um comando poluir a visualização. q │ Sair (Quit) │ Encerra o Modo Agente e retorna ao chat interativo normal. Segurança em Primeiro Lugar linkPara sua segurança, o ChatCLI possui um validador integrado:\nComandos Perigosos: Comandos como rm -rf , sudo e mkfs são automaticamente bloqueados. O agente pedirá uma confirmação explícita e detalhada antes de prosseguir. Controle Total: Nenhum comando é executado sem sua aprovação explícita. Você sempre tem a palavra final. Próximos Passos linkAgora que você domina a execução de tarefas, que tal aprender a salvar e reutilizar seu trabalho?\n➡️ Próximo: Gerenciamento de Sessões\n"
+            }
+        );
+    index.add(
+            {
+                id:  14 ,
+                href: "\/chatcli\/docs\/features\/non-interactive-mode\/",
+                title: "Modo Não-Interativo (One-Shot)",
+                description: "Aprenda a usar o ChatCLI em scripts, automações e pipelines através das flags de linha de comando e do uso de pipes.",
+                content: "O ChatCLI não foi projetado apenas para conversas interativas. Ele pode ser uma ferramenta poderosa em seus scripts de automação, pipelines de CI/CD e aliases de shell graças ao seu modo “one-shot”.\nNeste modo, você pode fazer uma única pergunta, obter a resposta e sair, tudo em um único comando, tornando-o perfeito para integração com outras ferramentas.\nUsando as Flags -p ou --prompt linkA maneira mais direta de usar o modo one-shot é com as flags -p ou --prompt. O ChatCLI executará a pergunta, imprimirá a resposta da IA no stdout e encerrará.\nExemplo:\nchatcli -p \"Qual é o comando para listar todos os processos que consomem mais de 500MB de RAM no Linux?\" A saída será apenas a resposta da IA, pronta para ser lida ou processada por outro script.\nIntegrando com Pipes ( | ) linkUma das formas mais poderosas de usar o modo one-shot é combinando-o com outros comandos de linha de comando através de pipes. O ChatCLI automaticamente detecta se está recebendo dados via stdin e os utiliza como contexto.\nExemplo 1: Resumir um git diff\ngit diff | chatcli -p \"Baseado neste diff, gere uma sugestão de mensagem de commit seguindo o padrão Conventional Commits.\" Exemplo 2: Analisar um arquivo de log\ncat /var/log/nginx/error.log | chatcli -p \"Encontre o erro mais comum neste log e sugira uma possível causa e solução.\" Flags Disponíveis no Modo One-Shot linkVocê pode customizar o comportamento do modo one-shot com as seguintes flags:\nFlag │ Descrição ──────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────── -p , --prompt │ A pergunta ou instrução principal para a IA. --provider │ Sobrescreve o provedor de LLM padrão (ex: OPENAI , CLAUDEAI ). --model │ Sobrescreve o modelo de IA a ser usado (ex: gpt-4o , claude-3-5-sonnet-20240620 ). --timeout │ Define um tempo limite para a requisição (padrão: 5m ). Ex: 10s , 1m . --max-tokens │ Sobrescreve o número máximo de tokens na resposta. --no-anim │ Desabilita a animação \"Pensando...\", ideal para saídas limpas em scripts. --agent-auto-exec │ No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for considerado seguro. --realm │ (StackSpot) Define o realm (tenant) para autenticação. --agent-id │ (StackSpot) Define o Agent ID a ser usado. Exemplo com Múltiplas Flags:\ncat relatorio.csv | chatcli --provider CLAUDEAI --model claude-3-opus-20240229 -p \"Analise estes dados e me dê 3 insights principais.\" Modo Agente em One-Shot linkVocê também pode invocar o Modo Agente de forma não-interativa. Isso é extremamente útil para automações complexas.\nAo usar /agent ou /run com a flag -p , o ChatCLI pedirá à IA um plano de ação e o imprimirá. Por padrão, ele não executará os comandos.\nExemplo:\nchatcli -p \"/agent encontre todos os arquivos *.tmp no diretório /tmp e os apague.\" Isso irá exibir o plano sugerido pela IA (ex: find /tmp -name “*.tmp” -delete ).\nPara executar o plano automaticamente, use a flag --agent-auto-exec . A execução só ocorrerá se o validador de segurança interno não detectar comandos perigosos.\nA IA irá gerar e, se for seguro, executar o comando para limpar os arquivos temporários.\nchatcli -p \"/agent encontre e apague os arquivos .tmp\" --agent-auto-exec "
+            }
+        );
+    index.add(
+            {
+                id:  15 ,
+                href: "\/chatcli\/docs\/features\/",
+                title: "Recursos Avançados",
+                description: "Explore as funcionalidades avançadas do ChatCLI, como gerenciamento de sessões e contextos persistentes, para maximizar sua produtividade.",
+                content: "Bem-vindo aos recursos avançados do ChatCLI.\nAqui você aprenderá a salvar seu trabalho, criar contextos de projeto reutilizáveis e transformar o ChatCLI em um assistente pessoal persistente, adaptado aos seus fluxos de trabalho.\n"
+            }
+        );
+    index.add(
+            {
+                id:  16 ,
+                href: "\/chatcli\/docs\/reference\/",
+                title: "Referências",
+                description: "Consulta rápida para todas as variáveis de configuração, comandos e detalhes técnicos do ChatCLI.",
+                content: "Esta seção serve como um guia de referência rápida para todos os aspectos técnicos do ChatCLI.\nConsulte estas páginas para encontrar detalhes sobre variáveis de ambiente, a lista completa de comandos, informações sobre a API e outras especificações técnicas.\n"
+            }
+        );
+    index.add(
+            {
+                id:  17 ,
+                href: "\/chatcli\/docs\/support\/",
+                title: "Suporte e Comunidade",
+                description: "Encontre soluções para problemas comuns, guias de contribuição e formas de interagir com a comunidade do ChatCLI.",
+                content: "Esta seção é dedicada a ajudar você a resolver problemas e a se conectar com a comunidade do ChatCLI.\n"
+            }
+        );
+    search.addEventListener('input', show_results, true);
+
+    function show_results(){
+        const maxResult =  5 ;
+        const minlength =  0 ;
+        var searchQuery = sanitizeHTML(this.value);
+        var results = index.search(searchQuery, {limit: maxResult, enrich: true});
+
+        
+        const flatResults = new Map(); 
+        for (const result of results.flatMap(r => r.result)) {
+        if (flatResults.has(result.doc.href)) continue;
+        flatResults.set(result.doc.href, result.doc);
+        }
+
+        suggestions.innerHTML = "";
+        suggestions.classList.remove('d-none');
+
+        
+        if (searchQuery.length < minlength) {
+            const minCharMessage = document.createElement('div')
+            minCharMessage.innerHTML = `Please type at least <strong>${minlength}</strong> characters`
+            minCharMessage.classList.add("suggestion__no-results");
+            suggestions.appendChild(minCharMessage);
+            return;
+        } else {
+            
+            if (flatResults.size === 0 && searchQuery) {
+                const noResultsMessage = document.createElement('div')
+                noResultsMessage.innerHTML = "No results for" + ` "<strong>${searchQuery}</strong>"`
+                noResultsMessage.classList.add("suggestion__no-results");
+                suggestions.appendChild(noResultsMessage);
+                return;
+            }
+        }
+
+        
+        for(const [href, doc] of flatResults) {
+            const entry = document.createElement('div');
+            suggestions.appendChild(entry);
+
+            const a = document.createElement('a');
+            a.href = href;
+            entry.appendChild(a);
+
+            const title = document.createElement('span');
+            title.textContent = doc.title;
+            title.classList.add("suggestion__title");
+            a.appendChild(title);
+
+            const description = document.createElement('span');
+            description.textContent = doc.description;
+            description.classList.add("suggestion__description");
+            a.appendChild(description);
+
+            suggestions.appendChild(entry);
+
+            if(suggestions.childElementCount == maxResult) break;
+        }
+    }
+    }());
+</script>
+        
+    </body>
+</html>

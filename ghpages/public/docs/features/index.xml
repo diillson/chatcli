@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Recursos Avançados on ChatCLI - Seu Terminal com IA</title>
+    <link>http://localhost:1313/chatcli/docs/features/</link>
+    <description>Recent content in Recursos Avançados on ChatCLI - Seu Terminal com IA</description>
+    <generator>Hugo</generator>
+    <language>pt-BR</language>
+    <atom:link href="http://localhost:1313/chatcli/docs/features/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Gerenciamento de Sessões</title>
+      <link>http://localhost:1313/chatcli/docs/features/session-management/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>http://localhost:1313/chatcli/docs/features/session-management/</guid>
+      <description>&lt;p&gt;Trabalhar em múltiplos projetos ou tarefas pode ser desafiador, especialmente quando cada um possui um contexto de conversa diferente. O &lt;strong&gt;ChatCLI&lt;/strong&gt; resolve isso com um sistema simples e poderoso de gerenciamento de sessões.&lt;/p&gt;&#xA;&lt;p&gt;Uma sessão é essencialmente um &amp;ldquo;salvamento&amp;rdquo; completo do seu histórico de conversa, permitindo que você a retome exatamente de onde parou.&lt;/p&gt;&#xA;&lt;hr&gt;&#xA;&lt;h2 id=&#34;comandos-de-sessão&#34;&gt;Comandos de Sessão &lt;a href=&#34;#comandos-de-sess%c3%a3o&#34; class=&#34;anchor&#34; aria-hidden=&#34;true&#34;&gt;&lt;i class=&#34;material-icons align-middle&#34;&gt;link&lt;/i&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Todos os comandos de gerenciamento de sessão começam com &lt;code&gt;/session&lt;/code&gt;.&lt;/p&gt;&#xA;&lt;h4 id=&#34;session-save&#34;&gt;/session save &lt;nome&gt; &lt;a href=&#34;#session-save&#34; class=&#34;anchor&#34; aria-hidden=&#34;true&#34;&gt;&lt;i class=&#34;material-icons align-middle&#34;&gt;link&lt;/i&gt;&lt;/a&gt;&lt;/h4&gt;&lt;p&gt;Salva a conversa atual (todo o histórico de prompts e respostas) com um nome de sua escolha.&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>Gerenciamento de Contexto Persistente</title>
+      <link>http://localhost:1313/chatcli/docs/features/persistent-context/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>http://localhost:1313/chatcli/docs/features/persistent-context/</guid>
+      <description>&lt;p&gt;Enquanto o gerenciamento de sessões (&lt;code&gt;/session&lt;/code&gt;) salva o histórico da &lt;em&gt;conversa&lt;/em&gt;, o gerenciamento de contextos (&lt;code&gt;/context&lt;/code&gt;) salva o &lt;em&gt;conteúdo do seu ambiente de trabalho&lt;/em&gt;. É a funcionalidade mais poderosa para quem trabalha em múltiplos projetos ou precisa consultar frequentemente a mesma base de código.&lt;/p&gt;&#xA;&lt;p&gt;Um &lt;strong&gt;Contexto&lt;/strong&gt; é um &amp;ldquo;snapshot&amp;rdquo; nomeado de um ou mais arquivos e diretórios, processado e salvo em disco para ser reutilizado a qualquer momento.&lt;/p&gt;&#xA;&lt;hr&gt;&#xA;&lt;h2 id=&#34;o-ciclo-de-vida-de-um-contexto&#34;&gt;O Ciclo de Vida de um Contexto &lt;a href=&#34;#o-ciclo-de-vida-de-um-contexto&#34; class=&#34;anchor&#34; aria-hidden=&#34;true&#34;&gt;&lt;i class=&#34;material-icons align-middle&#34;&gt;link&lt;/i&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;A utilização de contextos segue um fluxo simples e poderoso:&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>Modo Não-Interativo (One-Shot)</title>
+      <link>http://localhost:1313/chatcli/docs/features/non-interactive-mode/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>http://localhost:1313/chatcli/docs/features/non-interactive-mode/</guid>
+      <description>&lt;p&gt;O &lt;strong&gt;ChatCLI&lt;/strong&gt; não foi projetado apenas para conversas interativas. Ele pode ser uma ferramenta poderosa em seus scripts de automação, pipelines de CI/CD e aliases de shell graças ao seu modo &amp;ldquo;one-shot&amp;rdquo;.&lt;/p&gt;&#xA;&lt;p&gt;Neste modo, você pode fazer uma única pergunta, obter a resposta e sair, tudo em um único comando, tornando-o perfeito para integração com outras ferramentas.&lt;/p&gt;&#xA;&lt;hr&gt;&#xA;&lt;h2 id=&#34;usando-as-flags--p-ou---prompt&#34;&gt;Usando as Flags &lt;code&gt;-p&lt;/code&gt; ou &lt;code&gt;--prompt&lt;/code&gt; &lt;a href=&#34;#usando-as-flags--p-ou---prompt&#34; class=&#34;anchor&#34; aria-hidden=&#34;true&#34;&gt;&lt;i class=&#34;material-icons align-middle&#34;&gt;link&lt;/i&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;A maneira mais direta de usar o modo one-shot é com as flags &lt;code&gt;-p&lt;/code&gt; ou &lt;code&gt;--prompt&lt;/code&gt;. O ChatCLI executará a pergunta, imprimirá a resposta da IA no &lt;code&gt;stdout&lt;/code&gt; e encerrará.&lt;/p&gt;</description>
+    </item>
+  </channel>
+</rss>

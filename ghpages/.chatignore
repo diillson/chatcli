@@ -1,0 +1,19 @@
+# Ignorar arquivos de teste do Go
+#*_test.go
+
+# Ignorar diretórios de documentação e testes e2e
+docs/
+e2e/
+assets/
+themes/
+
+# Ignorar arquivos de configuração específicos
+CHANGELOG.md
+LICENSE
+README.md
+README_EN.md
+.gitignore
+Makefile
+.chatignore
+.github/
+golangci.yml

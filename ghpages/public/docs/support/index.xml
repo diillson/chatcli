@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Suporte e Comunidade on ChatCLI - Seu Terminal com IA</title>
+    <link>http://localhost:1313/chatcli/docs/support/</link>
+    <description>Recent content in Suporte e Comunidade on ChatCLI - Seu Terminal com IA</description>
+    <generator>Hugo</generator>
+    <language>pt-BR</language>
+    <atom:link href="http://localhost:1313/chatcli/docs/support/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Solução de Problemas (Troubleshooting)</title>
+      <link>http://localhost:1313/chatcli/docs/support/troubleshooting/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>http://localhost:1313/chatcli/docs/support/troubleshooting/</guid>
+      <description>&lt;p&gt;Encontrou um problema? Sem pânico. Esta página lista os erros mais comuns e como resolvê-los rapidamente.&lt;/p&gt;&#xA;&lt;hr&gt;&#xA;&lt;h3 id=&#34;problema-comando&#34;&gt;&lt;strong&gt;Problema: Comando &lt;code&gt;chatcli&lt;/code&gt; não encontrado&lt;/strong&gt; &lt;a href=&#34;#problema-comando&#34; class=&#34;anchor&#34; aria-hidden=&#34;true&#34;&gt;&lt;i class=&#34;material-icons align-middle&#34;&gt;link&lt;/i&gt;&lt;/a&gt;&lt;/h3&gt;&lt;blockquote&gt;&#xA;&lt;p&gt;&lt;strong&gt;Sintomas:&lt;/strong&gt; Ao executar &lt;code&gt;chatcli&lt;/code&gt; no terminal, você recebe uma mensagem como &lt;code&gt;bash: chatcli: command not found&lt;/code&gt; ou &lt;code&gt;zsh: command not found: chatcli&lt;/code&gt;.&lt;/p&gt;&#xA;&lt;/blockquote&gt;&#xA;&lt;blockquote&gt;&#xA;&lt;p&gt;&lt;strong&gt;Solução:&lt;/strong&gt; Isso significa que o diretório de binários do Go não está no &lt;code&gt;PATH&lt;/code&gt; do seu sistema.&lt;/p&gt;&#xA;&lt;ol&gt;&#xA;&lt;li&gt;Abra seu arquivo de configuração de shell (&lt;code&gt;~/.bashrc&lt;/code&gt;, &lt;code&gt;~/.zshrc&lt;/code&gt;, etc.).&lt;/li&gt;&#xA;&lt;li&gt;Adicione a seguinte linha ao final do arquivo:&#xA;&#xA;&#xA;&#xA;  &#xA;  &#xA;  &#xA;&#xA;  &#xA;  &#xA;  &#xA;  &#xA;&#xA;  &#xA;&#xA;  &lt;div class=&#34;prism-codeblock &#34;&gt;&#xA;  &lt;pre id=&#34;59afc23&#34; class=&#34;language-bash &#34;&gt;&#xA;  &lt;code&gt;export PATH=$PATH:$(go env GOPATH)/bin&lt;/code&gt;&#xA;  &lt;/pre&gt;&#xA;  &lt;/div&gt;&#xA;&lt;/li&gt;&#xA;&lt;li&gt;Reinicie seu terminal ou execute &lt;code&gt;source ~/.your_shell_rc_file&lt;/code&gt; para aplicar as alterações.&lt;/li&gt;&#xA;&lt;/ol&gt;&#xA;&lt;/blockquote&gt;&#xA;&lt;hr&gt;&#xA;&lt;h3 id=&#34;problema-erro&#34;&gt;&lt;strong&gt;Problema: Erro &amp;ldquo;Nenhum provedor LLM está configurado&amp;rdquo;&lt;/strong&gt; &lt;a href=&#34;#problema-erro&#34; class=&#34;anchor&#34; aria-hidden=&#34;true&#34;&gt;&lt;i class=&#34;material-icons align-middle&#34;&gt;link&lt;/i&gt;&lt;/a&gt;&lt;/h3&gt;&lt;blockquote&gt;&#xA;&lt;p&gt;&lt;strong&gt;Sintomas:&lt;/strong&gt; O ChatCLI encerra imediatamente após iniciar, exibindo uma mensagem sobre provedores ausentes.&lt;/p&gt;</description>
+    </item>
+  </channel>
+</rss>
