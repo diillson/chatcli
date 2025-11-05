@@ -2,22 +2,22 @@
     other = "Select your language"
 
 [search_title]
-    other = "Search"
+    other = "Pesquisar"
 
 [search_navigate]
-    other = "to navigate"
+    other = "para navegar"
 
 [search_select]
-    other = "to select"
+    other = "para selecionar"
 
 [search_close]
-    other = "to close"
+    other = "para fechar"
 
 [search_cancel]
-    other = "cancel"
+    other = "Sair"
 
 [search_no_results]
-    other = "No results for"
+    other = "Sem resultados para"
 
 [feedback_yes]
     other = "Yes"

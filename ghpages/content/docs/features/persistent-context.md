@@ -31,9 +31,10 @@ Aqui estão todos os subcomandos disponíveis para gerenciar seus contextos.
 Cria e salva um novo contexto a partir de arquivos e diretórios.
 
 **Sintaxe:**
-```bash
+{{< command >}}
 /context create <nome-do-contexto> <caminho_1> [caminho_2...] [opções]
-```
+{{< /command >}}
+
 Opções:
 
 -  --mode <modo>  ou  -m : Define como os arquivos serão processados. Os modos são os mesmos do comando  @file :  full ,  summary ,  chunked  ou  smart .
@@ -44,12 +45,13 @@ Opções:
 Exemplo:
 
 ###### Cria um contexto 'api-core' com o modo smart, descrição e tags
-```bash
+{{< command >}}
 /context create api-core ./src/services ./docs/api \
   --mode smart \
   --description "Contexto com o núcleo da API e documentação" \
   --tags golang,api
-```
+{{< /command >}}
+
 --------
 
 ####  `attach`  e  `detach` : Anexar e Desanexar da Sessão
@@ -71,9 +73,10 @@ Se um contexto foi criado com  --mode=chunked , você pode anexar partes especí
 Exemplo:
 
 Anexa apenas os chunks 1 e 3 do contexto 'legado-db' com alta prioridade
-```bash
+{{< command >}}
 /context attach legado-db --chunks 1,3 --priority 10
-```
+{{< /command >}}
+
 --------
 
 ###  `list` ,  `show` , e  `inspect` : Visualizar Contextos
