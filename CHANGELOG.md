@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.36.2](https://github.com/diillson/chatcli/compare/v1.36.1...v1.36.2) (2025-11-05)
+
+
+### Bug Fixes
+
+* update hero image path and adjust CTA button URL in index.md ([#334](https://github.com/diillson/chatcli/issues/334)) ([#335](https://github.com/diillson/chatcli/issues/335)) ([732c746](https://github.com/diillson/chatcli/commit/732c746f5ce282145182e785e48da1e0ec4fbf04))
+
 ## [1.36.1](https://github.com/diillson/chatcli/compare/v1.36.0...v1.36.1) (2025-11-05)
 
 
