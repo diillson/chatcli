@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.36.1](https://github.com/diillson/chatcli/compare/v1.36.0...v1.36.1) (2025-11-05)
+
+
+### Bug Fixes
+
+* use `npm ci` for consistent installs and add package.json for ghpages dependencies ([#331](https://github.com/diillson/chatcli/issues/331)) ([#332](https://github.com/diillson/chatcli/issues/332)) ([745d3ac](https://github.com/diillson/chatcli/commit/745d3acd9b2a5e36a34fb16505c6193c074ac19c))
+
 ## [1.36.0](https://github.com/diillson/chatcli/compare/v1.35.0...v1.36.0) (2025-11-05)
 
 
