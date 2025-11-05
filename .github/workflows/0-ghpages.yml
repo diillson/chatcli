@@ -1,0 +1,70 @@
+name: Deploy ChatCLI Docs to GitHub Pages
+
+# Dispara o workflow em pushes para a branch 'main' e também manualmente
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Permissões necessárias para que o workflow possa publicar no GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Configurações de concorrência para evitar deploys simultâneos
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      # URL onde a página será publicada. ATENÇÃO: o nome do repositório deve ser 'chatcli'
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Faz o checkout do seu código, incluindo os submódulos (essencial para o tema)
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true  # Inicializa e atualiza os submódulos (como o tema lotusdocs)
+          fetch-depth: 0    # Necessário para o Hugo obter o histórico do Git
+
+      # 2. Configura o ambiente Hugo com a versão estendida
+      - name: Setup Hugo
+        uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: 'latest'
+          extended: true
+
+      # 3. Configura o Node.js, necessário para dependências do tema (Bootstrap SCSS)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'ghpages/package-lock.json' # Caminho correto para o cache
+
+      # 4. Instala as dependências do Node.js, executando dentro da pasta 'ghpages'
+      - name: Instala as dependências do Node.js, executando dentro da pasta 'ghpages'
+        working-directory: ./ghpages
+        run: npm install
+
+      # 5. Constrói o site Hugo, também executando dentro da pasta 'ghpages'
+      - name: Build Hugo Site
+        working-directory: ./ghpages
+        run: hugo --gc --minify --baseURL "https://diillson.github.io/chatcli/" # Garante a baseURL correta no build
+
+      # 6. Faz o upload do artefato (a pasta 'public' gerada) para o GitHub Pages
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./ghpages/public # O Hugo constrói os arquivos dentro desta pasta
+
+      # 7. Faz o deploy do artefato para o GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
