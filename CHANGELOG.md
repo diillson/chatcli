@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.36.0](https://github.com/diillson/chatcli/compare/v1.35.0...v1.36.0) (2025-11-05)
+
+
+### Features
+
+* update create document gihubpages. ([#328](https://github.com/diillson/chatcli/issues/328)) ([#329](https://github.com/diillson/chatcli/issues/329)) ([a1a5807](https://github.com/diillson/chatcli/commit/a1a5807e5a6ce09f79d4293b5f1d14509ad1354d))
+
 ## [1.35.0](https://github.com/diillson/chatcli/compare/v1.34.0...v1.35.0) (2025-10-30)
 
 
