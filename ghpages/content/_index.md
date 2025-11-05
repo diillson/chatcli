@@ -3,13 +3,13 @@ title = "Leve seu Terminal ao Próximo Nível com IA"
 
 # Parâmetros personalizados que o nosso layout 'index.html' irá usar.
 [params]
-  # Caminho para a imagem principal (veja o Passo 3)
-  hero_image = "/images/chatcli-demo.gif"
+  # Caminho para a imagem principal
+  hero_image = "./images/chatcli-demo.gif"
 
   # Botão de Ação Principal (Call to Action)
   [params.cta_button]
     text = "Começar a Usar"
-    url = "/docs/introduction/"
+    url = "/chatcli/docs/introduction/"
 
   # Botão Secundário
   [params.secondary_button]
