@@ -19,14 +19,16 @@ Todos os comandos de gerenciamento de sessão começam com `/session`.
 
 Salva a conversa atual (todo o histórico de prompts e respostas) com um nome de sua escolha.
 
-```bash
+
 # Salva a conversa atual na sessão "debug-api-pagamentos"
+{{< command >}}
 /session save debug-api-pagamentos
 
 │ ✅ Sessão 'debug-api-pagamentos' salva com sucesso.
 
 │ Dica: Após salvar, o nome da sessão aparecerá no seu prompt (ex:  debug-api-pagamentos ❯ ), indicando que você está trabalhando nela.
-```
+{{< /command >}}
+
 --------
 
 ####  /session load <nome>
@@ -34,17 +36,18 @@ Salva a conversa atual (todo o histórico de prompts e respostas) com um nome de
 Carrega uma sessão salva anteriormente. A conversa atual é substituída pelo histórico da sessão carregada.
 
 # Carrega a sessão para continuar o trabalho no projeto do site
-```bash
+{{< command >}}
 /session load documentacao-site
 
 │ ✅ Sessão 'documentacao-site' carregada. A conversa anterior foi restaurada.
-```
+{{< /command >}}
+
 --------
 
 ####  /session list
 
 Lista todas as sessões que você salvou no disco.
-```bash
+{{< command >}}
 /session list
 
 │ Sessões salvas:
@@ -52,17 +55,19 @@ Lista todas as sessões que você salvou no disco.
 │ • debug-api-pagamentos
 │ • documentacao-site
 │ • refatoracao-legado
-```
+{{< /command >}}
+
 --------
 
 ####  /session delete <nome>
 
 Remove permanentemente uma sessão salva do disco. Esta ação não pode ser desfeita.
-```bash
+{{< command >}}
 /session delete refatoracao-legado
 
 │ ✅ Sessão 'refatoracao-legado' deletada com sucesso do disco.
-```
+{{< /command >}}
+
 Se você deletar a sessão que está ativa no momento, seu histórico atual será limpo e você começará uma nova conversa.
 
 --------
@@ -70,11 +75,12 @@ Se você deletar a sessão que está ativa no momento, seu histórico atual ser�
 ####  /session new  (ou  /newsession )
 
 Limpa o histórico atual e inicia uma conversa completamente nova. É perfeito para começar uma tarefa do zero sem estar atrelado a nenhuma sessão nomeada.
-```bash
+{{< command >}}
 /session new
 
 │ Nova sessão de conversa iniciada; histórico foi limpo.
-```
+{{< /command >}}
+
 --------
 
 ## Próximos Passos

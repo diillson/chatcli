@@ -65,7 +65,7 @@ const (
 
 var agentModeRequest = errors.New("request to enter agent mode")
 var errExitRequest = errors.New("request to exit")
-var commandFlags = map[string]map[string][]prompt.Suggest{
+var CommandFlags = map[string]map[string][]prompt.Suggest{
 	"@file": {
 		"--mode": {
 			{Text: "full", Description: "Processa o conteúdo completo (padrão, trunca se necessário)"},
@@ -1990,12 +1990,12 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 	// 4. Autocomplete para iniciar comandos
 	if !strings.Contains(lineBeforeCursor, " ") {
 		if strings.HasPrefix(wordBeforeCursor, "/") {
-			return prompt.FilterHasPrefix(cli.getInternalCommands(), wordBeforeCursor, true)
+			return prompt.FilterHasPrefix(cli.GetInternalCommands(), wordBeforeCursor, true)
 		}
 	}
 
 	if strings.HasPrefix(wordBeforeCursor, "@") {
-		return prompt.FilterHasPrefix(cli.getContextCommands(), wordBeforeCursor, true)
+		return prompt.FilterHasPrefix(cli.GetContextCommands(), wordBeforeCursor, true)
 	}
 
 	// 5. Sugestões de flags e valores
@@ -2007,7 +2007,7 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		}
 		currWord := d.GetWordBeforeCursor()
 
-		if flagsForCommand, commandExists := commandFlags[command]; commandExists {
+		if flagsForCommand, commandExists := CommandFlags[command]; commandExists {
 			// Cenário 1: O usuário digitou uma flag (ex: "--mode ") e agora quer ver os valores.
 			if values, flagHasValues := flagsForCommand[prevWord]; flagHasValues && len(values) > 0 {
 				return prompt.FilterHasPrefix(values, currWord, true)
@@ -2060,7 +2060,7 @@ func extractTexts(suggests []prompt.Suggest) []string {
 	return texts
 }
 
-func (cli *ChatCLI) getInternalCommands() []prompt.Suggest {
+func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 	return []prompt.Suggest{
 		{Text: "/exit", Description: "Sair do ChatCLI"},
 		{Text: "/quit", Description: "Alias de /exit - Sair do ChatCLI"},
@@ -2082,8 +2082,8 @@ func (cli *ChatCLI) getInternalCommands() []prompt.Suggest {
 	}
 }
 
-// getContextCommands retorna a lista de sugestões para comandos com @
-func (cli *ChatCLI) getContextCommands() []prompt.Suggest {
+// GetContextCommands retorna a lista de sugestões para comandos com @
+func (cli *ChatCLI) GetContextCommands() []prompt.Suggest {
 	return []prompt.Suggest{
 		{Text: "@history", Description: "Adicionar histórico do shell ao contexto"},
 		{Text: "@git", Description: "Adicionar informações do Git ao contexto"},

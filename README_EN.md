@@ -24,6 +24,8 @@
     <img src="https://img.shields.io/github/license/diillson/chatcli"/>
 </div>
 
+> 📘 Explore the detailed documentation — including use cases, tutorials, and recipes — at [diillson.github.io/chatcli](https://diillson.github.io/chatcli)
+
 -----
 
 ### 📝 Table of Contents
