@@ -1,0 +1,43 @@
+baseURL = 'https://diillson.github.io/chatcli'
+languageCode = 'pt-BR'
+title = 'ChatCLI - Seu Terminal com IA'
+contentDir = 'content'
+enableEmoji = true
+
+# ==========================================================
+#  Configuração do Módulo (Correta como estava)
+# ==========================================================
+[module]
+replacements = "github.com/colinwilson/lotusdocs -> lotusdocs"
+  [[module.imports]]
+    path = "github.com/colinwilson/lotusdocs"
+    disable = false
+  [[module.imports]]
+    path = "github.com/gohugoio/hugo-mod-bootstrap-scss/v5"
+    disable = false
+
+# ==========================================================
+#  Configuração dos Parâmetros do Tema Lotus Docs
+# ==========================================================
+[params]
+  [params.docs]
+# Esta é a configuração correta para manter o menu sempre aberto
+    alwaysopen = true
+  #  darkMode = true
+  #  themeColor = "green"
+    prism = true
+    sidebarIcons = true
+    titleIcon = true
+    toggle = true
+
+# --- NÃO REMOVA AS CONFIGURAÇÕES ABAIXO ---
+[markup]
+  [markup.tableOfContents]
+    endLevel = 3
+    startLevel = 1
+[markup.goldmark]
+  [markup.goldmark.renderer]
+    unsafe = true # Necessário para renderizar o HTML dos ícones
+  [markup.goldmark.parser]
+    [markup.goldmark.parser.attribute]
+      block = true
