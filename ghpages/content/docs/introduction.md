@@ -8,35 +8,50 @@ icon = "star"
 
 ## O que é o ChatCLI?
 
-**ChatCLI** é uma interface de linha de comando (CLI) poderosa e extensível projetada para unir o poder dos grandes modelos de linguagem (LLMs) diretamente ao seu ambiente de desenvolvimento. Ele transforma seu terminal em um assistente inteligente, capaz de entender o contexto do seu trabalho, interagir com arquivos locais, executar comandos, analisar logs e até mesmo automatizar tarefas complexas através de um modo "agente".
+**ChatCLI** é uma interface de linha de comando (CLI) que integra o poder dos grandes modelos de linguagem (LLMs) diretamente ao seu terminal. Ele transforma seu shell de um simples executor de comandos em um **assistente de desenvolvimento inteligente**, capaz de entender o contexto do seu trabalho, interagir com arquivos, executar comandos e até mesmo automatizar tarefas complexas.
 
-Desenvolvido em Go, o ChatCLI é rápido, portátil e leve, criado para ser a ferramenta definitiva para desenvolvedores, sysadmins e entusiastas de tecnologia que desejam maximizar sua produtividade.
+Desenvolvido em Go, o ChatCLI é rápido e portátil, projetado para ser a ferramenta definitiva para quem vive no terminal e busca maximizar a produtividade.
 
 ---
 
-## Principais Funcionalidades
+## Problemas que o ChatCLI Resolve
 
-O ChatCLI foi construído com um conjunto robusto de funcionalidades, analisando a estrutura do próprio projeto:
+Você se identifica com alguma destas situações?
 
-*   **🧠 Modo Agente Inteligente (`/agent`)**: Delegue tarefas complexas. O ChatCLI pode planejar e executar sequências de comandos para atingir um objetivo, como "verificar os logs de erro do serviço X e reiniciar se necessário".
-*   **📚 Consciência de Contexto Total**: O ChatCLI não é apenas um chat. Ele entende seu ambiente:
-    *   `@file`: Envie o conteúdo de arquivos ou diretórios inteiros para a IA.
-    *   `@git`: Adicione automaticamente o status, a branch e os diffs do seu repositório Git ao prompt.
-    *   `@env`: Inclua variáveis de ambiente de forma segura (valores sensíveis são redigidos).
-*   **🔌 Suporte Multi-Provedor**: Configure e alterne facilmente entre os principais provedores de LLM, incluindo **OpenAI (GPT-4o, etc.)**, **Anthropic (Claude 3.5)**, **Google (Gemini)**, **xAI (Grok)** e até mesmo modelos locais via **Ollama**.
-*   **💾 Gerenciamento Persistente de Contexto (`/context`)**: Crie, salve e anexe "contextos" reutilizáveis. Ideal para trabalhar em múltiplos projetos sem precisar reenviar os mesmos arquivos repetidamente.
-*   **🗣️ Suporte a Múltiplos Idiomas**: A interface é internacionalizada, com suporte nativo para Português (pt-BR) e Inglês (en-US).
-*   **🛡️ Segurança Integrada**: Comandos perigosos (`rm -rf`, `sudo`, etc.) são bloqueados por padrão no modo agente, e valores sensíveis em variáveis de ambiente ou logs são mascarados.
-*   **⚙️ Configuração Flexível**: Gerencie toda a configuração através de um simples arquivo `.env`, com a capacidade de recarregar em tempo real com o comando `/reload`.
-*   **⚡ Modo One-Shot**: Integre o ChatCLI em seus scripts e pipelines usando flags (`-p`, `--prompt`) para execuções não interativas.
+{{< notice "info" >}}
+- **Copiar e Colar Interminável:** `cat arquivo.js`, selecionar, `Ctrl+C`, ir para o navegador, `Ctrl+V`, e então digitar a pergunta.
+- **Mensagens de Commit Genéricas:** Lutar para escrever uma boa mensagem de commit após horas de codificação.
+- **Análise de Logs Intimidante:** Tentar encontrar uma agulha no palheiro em um arquivo de log com milhares de linhas.
+- **Curva de Aprendizagem:** Entrar em um novo projeto e se sentir perdido na base de código.
+{{< /notice >}}
+
+O ChatCLI foi criado para eliminar esses atritos, trazendo a inteligência da IA para o seu fluxo de trabalho, onde você já está.
 
 ---
 
 ## Para Quem é o ChatCLI?
 
-*   **Desenvolvedores**: Para depurar código, entender bases de código desconhecidas, gerar documentação e automatizar tarefas de build.
-*   **Sysadmins e DevOps**: Para analisar logs, gerenciar configurações, automatizar deployments e solucionar problemas em servidores.
-*   **Entusiastas de Linha de Comando**: Para turbinar seu terminal e explorar novas formas de interagir com o sistema operacional.
+-   **Desenvolvedores de Software:** Para depurar código, entender bases de código desconhecidas, gerar testes unitários, refatorar funções e criar documentação a partir do código-fonte.
+-   **Engenheiros de DevOps e SREs:** Para analisar logs de `kubectl`, gerenciar configurações com `awk` e `sed`, automatizar deployments e solucionar problemas em tempo real em servidores.
+-   **Entusiastas de Linha de Comando:** Para turbinar o terminal, criar aliases poderosos e explorar novas formas de interagir com o sistema operacional.
+-   **DB'as e Engenheiros de Dados:** Para automatizar tarefas repetitivas e gerenciar bases de dados.
+
+---
+
+## Principais Funcionalidades em Ação
+
+O ChatCLI foi construído com um conjunto robusto de funcionalidades:
+
+*   **🧠 Modo Agente Inteligente (`/agent`)**: Delegue tarefas. O ChatCLI planeja e executa sequências de comandos para atingir um objetivo, como *"verificar os logs de erro do serviço X e reiniciá-lo se estiver travado"*.
+*   **📚 Consciência de Contexto Total**: Dê "olhos" à IA no seu ambiente:
+    *   `@file`: Envie o conteúdo de arquivos ou a estrutura de diretórios inteiros.
+    *   `@git`: Adicione automaticamente o status, a branch e os `diffs` do seu repositório.
+    *   `@command`: Execute um comando e use sua saída como contexto.
+    * `/session`: Gerenciamento de sessão, salve seu trabalho e sua iteração.
+*   **🔌 Suporte Multi-Provedor**: Alterne facilmente entre **OpenAI**, **Claude**, **Stackspot(Agents)**, **Gemini**, **Grok (xAI)** e modelos locais via **Ollama**.
+*   **💾 Contextos Persistentes (`/context`)**: Crie "snapshots" de projetos para reutilizá-los em diferentes conversas sem precisar reenviar os mesmos arquivos.
+*   **🛡️ Segurança Integrada**: Comandos perigosos (`rm -rf`, `sudo`) são bloqueados por padrão no modo agente, e valores sensíveis são mascarados.
+*   **⚡ Modo One-Shot**: Integre o ChatCLI em seus scripts e pipelines de CI/CD usando a flag `-p`.
 
 ---
 
@@ -45,5 +60,3 @@ O ChatCLI foi construído com um conjunto robusto de funcionalidades, analisando
 Agora que você sabe o que o ChatCLI pode fazer, vamos começar!
 
 ➡️ **Próximo:** [**Guia de Instalação**](/docs/getting-started/installation/)
-
---------

@@ -1,0 +1,38 @@
+<header class="lotus-header">
+    <div class="lotus-brand">
+        <a href="{{ .Site.Home.RelPermalink }}">
+            {{/*
+            TROCA DE ICONE/LOGO:
+            Em vez do ícone padrão do tema, estamos inserindo nossa própria imagem.
+            */}}
+            <div class="logo-container d-flex align-items-center">
+                <img src="{{ "/images/chatcli.png" | relURL }}" alt="{{ .Site.Title }} Logo" class="lotus-logo">
+                <span class="lotus-title">{{ .Site.Title }}</span>
+            </div>
+        </a>
+    </div>
+    <div class="lotus-theme-toggle">
+        <button class="btn-toggle-mode">
+            <i class="material-icons-outlined">brightness_4</i>
+        </button>
+    </div>
+</header>
+
+{{/*
+ESTILOS CSS PARA LOGO:
+Adicionamos este bloco para garantir que a logo se comporte bem.
+*/}}
+<style>
+    .lotus-logo {
+        height: 32px; /* Ajuste a altura conforme necessário */
+        width: auto;
+        margin-right: 0.75rem;
+        /* Adiciona uma transição suave para o modo escuro/claro se a logo tiver cores que mudam */
+        transition: filter 0.3s ease-in-out;
+    }
+
+    /* Opcional: Se a logo SVG for de cor única e você quiser que ela mude no modo escuro */
+    [data-bs-theme="dark"] .lotus-logo {
+        /* filter: invert(1) brightness(1.5); */
+    }
+</style>

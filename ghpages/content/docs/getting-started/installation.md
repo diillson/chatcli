@@ -22,9 +22,9 @@ A maneira mais recomendada de instalar o `chatcli` é através do comando `go in
 
 Abra seu terminal e execute o seguinte comando:
 
-```bash
+{{< command >}}
 go install github.com/diillson/chatcli@latest
-```
+{{< /command >}}
 #### Adicionando ao seu PATH
 
 Para que o comando  chatcli  seja acessível de qualquer lugar no seu terminal, certifique-se de que o diretório de binários do Go está no  PATH  do seu sistema.
@@ -70,15 +70,14 @@ Para garantir que tudo foi instalado e configurado corretamente, execute os segu
 
 1. Verifique a versão:
 Este comando confirma que o binário está no seu  PATH  e é executável.
-chatcli --version
+{{< command >}}chatcli --version{{< /command >}}
 
 2. Faça sua primeira pergunta:
 Execute  chatcli  sem argumentos para entrar no modo interativo e faça uma pergunta simples para testar a conexão com a API.
+{{< command >}}O que é a equação de Dirac?{{< /command >}}
 
-> ❯ O que é a equação de Dirac?
 
-
-###### Se você receber uma resposta da IA, parabéns! O ChatCLI está pronto para ser usado.
+###### Se você receber uma resposta da IA, {{< notice "success">}}parabéns! O ChatCLI está pronto para ser usado.{{< /notice >}}
 
 --------
 

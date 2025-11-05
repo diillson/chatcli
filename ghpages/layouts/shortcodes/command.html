@@ -1,0 +1,39 @@
+{{/*
+Shortcode para exibir um bloco de comando com estilo de terminal.
+Uso: {{< command >}} seu comando aqui {{< /command >}}
+*/}}
+<div class="command-block">
+    <div class="command-prompt">❯</div>
+    <div class="command-text">{{ .Inner | markdownify | chomp }}</div>
+</div>
+
+{{/* Estilos embutidos para este componente. O Hugo irá coletar e otimizar. */}}
+<style>
+    .command-block {
+        background-color: var(--bs-dark);
+        color: #e0e0e0;
+        border-radius: 0.5rem;
+        padding: 1rem 1.25rem;
+        margin: 1.5rem 0;
+        display: flex;
+        align-items: center;
+        font-family: 'SF Mono', 'Consolas', 'Menlo', monospace;
+        font-size: 0.9rem;
+        border: 1px solid var(--bs-border-color);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    .command-prompt {
+        color: var(--bs-primary);
+        font-weight: bold;
+        margin-right: 0.75rem;
+        user-select: none; /* O prompt não pode ser selecionado */
+    }
+    .command-text {
+        flex-grow: 1;
+        white-space: pre-wrap; /* Permite quebra de linha em comandos longos */
+        word-break: break-all;
+    }
+    .command-text p {
+        margin: 0; /* Remove a margem padrão de parágrafos dentro do comando */
+    }
+</style>

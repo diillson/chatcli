@@ -33,6 +33,16 @@ jobs:
           submodules: true  # Inicializa e atualiza os submódulos (como o tema lotusdocs)
           fetch-depth: 0    # Necessário para o Hugo obter o histórico do Git
 
+      #Configura o ambiente Go
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      #Executa a ferramenta docgen para gerar a referência de comandos
+      - name: Generate Command Reference
+        run: go run ./tools/docgen/main.go > ./ghpages/content/docs/reference/command-reference.md
+
       # 2. Configura o ambiente Hugo com a versão estendida
       - name: Setup Hugo
         uses: peaceiris/actions-hugo@v3

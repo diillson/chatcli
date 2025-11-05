@@ -1,0 +1,17 @@
+{{/*
+  Shortcode para criar caixas de notificação estilizadas (alerts).
+  Uso: {{< notice "tipo" "icone" >}} Conteúdo em Markdown aqui. {{< /notice >}}
+
+  Parâmetros:
+  - .Get 0 (tipo): O tipo de alerta do Bootstrap. Padrão: "info".
+    Valores comuns: "success", "warning", "danger", "info".
+  - .Get 1 (icone): O nome do ícone do Material Icons. Padrão: "info".
+    Valores comuns: "check_circle", "warning", "dangerous", "info".
+  - .Inner: O conteúdo dentro do shortcode, que será processado como Markdown.
+*/}}
+<div class="alert alert-{{ .Get 0 | default }} d-flex align-items-center rounded-3 shadow-sm" role="alert">
+  <span class="material-icons-outlined me-3" style="font-size: 2rem;">{{ .Get 1 | default }}</span>
+  <div class="notice-content">
+    {{ .Inner | markdownify }}
+  </div>
+</div>
