@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.37.0](https://github.com/diillson/chatcli/compare/v1.36.2...v1.37.0) (2025-11-05)
+
+
+### Features
+
+* **docs:** expand ChatCLI documentation with recipes, cookbook index, and advanced workflows ([#337](https://github.com/diillson/chatcli/issues/337)) ([#338](https://github.com/diillson/chatcli/issues/338)) ([97ff013](https://github.com/diillson/chatcli/commit/97ff013b9b4e27bc53453eb9e4ff5da0245b0bd5))
+
 ## [1.36.2](https://github.com/diillson/chatcli/compare/v1.36.1...v1.36.2) (2025-11-05)
 
 
