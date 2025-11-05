@@ -24,6 +24,8 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
     <img src="https://img.shields.io/github/license/diillson/chatcli"/>
 </div>
 
+> 📘 Explore a documentação detalhada — incluindo use cases, tutoriais e receitas — em [diillson.github.io/chatcli](https://diillson.github.io/chatcli)
+
 -----
 
 ### 📝 Índice
