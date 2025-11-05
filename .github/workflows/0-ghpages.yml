@@ -51,7 +51,7 @@ jobs:
       # 4. Instala as dependências do Node.js, executando dentro da pasta 'ghpages'
       - name: Instala as dependências do Node.js, executando dentro da pasta 'ghpages'
         working-directory: ./ghpages
-        run: npm install
+        run: npm ci
 
       # 5. Constrói o site Hugo, também executando dentro da pasta 'ghpages'
       - name: Build Hugo Site
