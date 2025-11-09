@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"os"
 	"os/exec"
@@ -25,6 +26,7 @@ import (
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
+	"github.com/google/shlex"
 	"go.uber.org/zap"
 )
 
@@ -86,94 +88,134 @@ func (a *AgentMode) getInput(prompt string) string {
 	return strings.TrimSpace(input)
 }
 
-// Run inicia o modo agente com uma pergunta do usuário
+// Run inicia o modo agente com uma consulta do usuário, utilizando um loop de Raciocínio-Ação (ReAct).
+// O histórico de cada passo do agente é persistido no histórico principal do chat.
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string) error {
-	_, isAssistant := a.cli.Client.(*openai_assistant.OpenAIAssistantClient)
+	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
+	maxTurnsStr := os.Getenv("CHATCLI_AGENT_MAX_TURNS")
+	maxTurns, err := strconv.Atoi(maxTurnsStr)
+	if err != nil || maxTurns <= 0 || maxTurns > 20 {
+		maxTurns = 7
+	}
+	a.logger.Info("Modo Agente iniciado", zap.Int("max_turns_limit", maxTurns))
 
-	if isAssistant {
-		a.logger.Debug("Executando modo agente com OpenAI Assistant")
+	osName := runtime.GOOS
+	shellName := utils.GetUserShell()
+	currentDir, _ := os.Getwd()
+
+	var toolDescriptions []string
+	if a.cli.pluginManager != nil {
+		for _, plugin := range a.cli.pluginManager.GetPlugins() {
+			toolDescriptions = append(toolDescriptions, fmt.Sprintf("- Ferramenta: %s\n  Descrição: %s\n  Uso: %s", plugin.Name(), plugin.Description(), plugin.Usage()))
+		}
 	}
 
-	var systemInstruction string
-	if isAssistant {
-		systemInstruction = i18n.T("agent.system_prompt.interactive")
-	} else {
-		osName := runtime.GOOS
-		shellName := utils.GetUserShell()
-		currentDir, err := os.Getwd()
+	systemInstruction := i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
+	if len(toolDescriptions) > 0 {
+		systemInstruction += "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + strings.Join(toolDescriptions, "\n")
+		systemInstruction += "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
+	}
+
+	if len(a.cli.history) == 0 {
+		a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
+	}
+
+	currentQuery := query
+	if additionalContext != "" {
+		currentQuery += "\n\nContexto Adicional:\n" + additionalContext
+	}
+
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery})
+
+	// --- 2. O LOOP DE RACIOCÍNIO-AÇÃO (ReAct) ---
+	for turn := 0; turn < maxTurns; turn++ {
+		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
+
+		a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery})
+
+		a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
+		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", a.cli.history, 0)
+		a.cli.animation.StopThinkingAnimation()
+
 		if err != nil {
-			a.logger.Warn("Não foi possível obter diretório atual", zap.Error(err))
-			currentDir = "desconhecido"
+			return fmt.Errorf("erro ao obter resposta da IA no turno %d: %w", turn+1, err)
 		}
 
-		systemInstruction = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
-		codeFence := "```execute:shell\nfind . -name \"*.go\" -exec wc -l {} +\n```"
-		systemInstruction = systemInstruction + "\n\n" + codeFence
+		a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
+		formattedResponse := fmt.Sprintf("\n%s\n", a.cli.renderMarkdown(aiResponse))
+		a.cli.typewriterEffect(formattedResponse, 2*time.Millisecond)
+
+		// --- 3. ANÁLISE DA RESPOSTA E EXECUÇÃO DA AÇÃO ---
+		toolCallRegex := regexp.MustCompile(`(?s)<tool_call name="(@\S+)" (?:args="(.*?)"|args='(.*?)') />`)
+		match := toolCallRegex.FindStringSubmatch(aiResponse)
+
+		if len(match) == 4 {
+			toolName := match[1]
+			toolArgsStr := ""
+			if match[2] != "" {
+				// Aspas duplas foram usadas
+				toolArgsStr = match[2]
+			} else {
+				// Aspas simples foram usadas
+				toolArgsStr = match[3]
+			}
+
+			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
+
+			toolArgs, err := shlex.Split(unescapedToolArgsStr)
+			if err != nil {
+				a.logger.Warn("Erro ao analisar os argumentos da ferramenta com shlex", zap.String("args_str", unescapedToolArgsStr), zap.Error(err))
+				currentQuery = i18n.T("agent.error.invalid_tool_args", toolName, err)
+				continue
+			}
+
+			fmt.Printf("\n%s\n", colorize(i18n.T("agent.status.using_tool", toolName, toolArgsStr), ColorYellow))
+
+			plugin, found := a.cli.pluginManager.GetPlugin(toolName)
+			if !found {
+				currentQuery = i18n.T("agent.error.tool_not_found", toolName)
+				continue
+			}
+
+			toolOutput, err := plugin.Execute(ctx, toolArgs)
+			if err != nil {
+				toolOutput = fmt.Sprintf("Erro: %v", err)
+			}
+
+			fmt.Printf("\n%s\n%s\n", colorize(i18n.T("agent.feedback.tool_output_header"), ColorGray), toolOutput)
+
+			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, toolOutput)
+			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
+
+			continue
+		}
+
+		commandBlocks := a.extractCommandBlocks(aiResponse)
+		if len(commandBlocks) > 0 {
+			a.displayResponseWithoutCommands(aiResponse, commandBlocks)
+			a.handleCommandBlocks(ctx, commandBlocks)
+			return nil
+		}
+
+		// Se a IA deu uma resposta final sem comandos, a resposta já foi exibida com o efeito de digitação acima.
+		// Apenas adicionamos uma mensagem de status final.
+		fmt.Println(colorize(i18n.T("agent.status.final_answer_no_commands"), ColorGreen))
+		return nil
 	}
 
-	a.cli.history = append(a.cli.history, models.Message{
-		Role:    "system",
-		Content: systemInstruction,
-	})
+	// --- 4. TRATAMENTO DE FALHA (LIMITE DE TURNOS ATINGIDO) ---
 
-	fullQuery := query
-	if additionalContext != "" {
-		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
+	// Se o loop terminar, o agente não conseguiu encontrar uma solução.
+	fmt.Println(colorize(i18n.T("agent.error.max_turns_reached_context", maxTurns), ColorYellow))
+
+	// Mostra o último pensamento da IA para ajudar o usuário a entender o que aconteceu.
+	if len(a.cli.history) > 0 {
+		lastThought := a.cli.history[len(a.cli.history)-1].Content
+		fmt.Println(i18n.T("agent.feedback.last_thought"))
+		fmt.Println(a.cli.renderMarkdown(lastThought))
 	}
 
-	a.cli.history = append(a.cli.history, models.Message{
-		Role:    "user",
-		Content: fullQuery,
-	})
-
-	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-
-	var responseCtx context.Context
-	var cancel context.CancelFunc
-
-	if isAssistant {
-		a.logger.Debug("Usando timeout estendido para OpenAI Assistant")
-		responseCtx, cancel = context.WithTimeout(ctx, 30*time.Minute)
-	} else {
-		responseCtx, cancel = context.WithTimeout(ctx, 30*time.Minute)
-	}
-	defer cancel()
-
-	a.logger.Debug("Enviando prompt para o LLM",
-		zap.String("provider", a.cli.Provider),
-		zap.Int("historyLength", len(a.cli.history)),
-		zap.Int("queryLength", len(fullQuery)))
-
-	aiResponse, err := a.cli.Client.SendPrompt(responseCtx, fullQuery, a.cli.history, 0)
-
-	if err != nil {
-		a.logger.Error("Erro ao obter resposta do LLM", zap.Error(err))
-	} else {
-		a.logger.Debug("Resposta recebida do LLM",
-			zap.Int("responseLength", len(aiResponse)))
-	}
-
-	a.cli.animation.StopThinkingAnimation()
-
-	if err != nil {
-		a.logger.Error("Erro ao obter resposta do LLM no modo agente", zap.Error(err))
-		return fmt.Errorf("erro ao obter resposta da IA: %w", err)
-	}
-
-	a.cli.history = append(a.cli.history, models.Message{
-		Role:    "assistant",
-		Content: aiResponse,
-	})
-
-	commandBlocks := a.extractCommandBlocks(aiResponse)
-	a.displayResponseWithoutCommands(aiResponse, commandBlocks)
-
-	if len(commandBlocks) > 0 {
-		a.handleCommandBlocks(context.Background(), commandBlocks)
-	} else {
-		fmt.Println("\nNenhum comando executável encontrado na resposta.")
-	}
-	return nil
+	return nil // Retorna nil para não exibir um erro técnico, pois a falha foi tratada.
 }
 
 // RunOnce executa modo agente one-shot
@@ -1041,7 +1083,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 				fmt.Println(renderer.Colorize(i18n.T("agent.status.dangerous_command_confirmed"), agent.ColorYellow))
 			}
 
-			header := fmt.Sprintf(i18n.T("agent.status.executing_command_n", i+1, len(block.Commands), trimmed)+"\n", i+1, len(block.Commands), trimmed)
+			header := i18n.T("agent.status.executing_command_n", i+1, len(block.Commands), trimmed) + "\n"
 			fmt.Print(header)
 			allOutput.WriteString(header)
 

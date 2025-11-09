@@ -24,6 +24,8 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
     <img src="https://img.shields.io/github/license/diillson/chatcli"/>
 </div>
 
+---
+
 > 📘 Explore a documentação detalhada — incluindo use cases, tutoriais e receitas — em [diillson.github.io/chatcli](https://diillson.github.io/chatcli)
 
 -----
@@ -148,7 +150,8 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  `CHATCLI_DOTENV`  – **(Opcional)** Define o caminho do seu arquivo  .env .
   -  `CHATCLI_IGNORE` – **(Opcional)** Define uma lista de arquivos ou pastas a serem ignoradas pelo ChatCLI.
   -  `CHATCLI_LANG` - **(Opcional)** Força a CLI a usar um idioma específico (ex: `pt-BR`, `en`). Tem prioridade sobre a detecção automática do sistema.
-  -  `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
+  -  `CHATCLI_AGENT_MAX_TURNS` - **(Opcional)** Define o máximo de turnos que o agente pode ter. 
+  - `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
   -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` )
   -  `MAX_RETRIES`  - **(Opcional)** Número máximo de tentativas para chamadas de API (padrão:  `5` ).
   -  `INITIAL_BACKOFF`  - **(Opcional)** Tempo inicial de espera entre tentativas (padrão:  3  - segundos`).
