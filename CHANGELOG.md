@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.0](https://github.com/diillson/chatcli/compare/v1.37.0...v1.38.0) (2025-11-09)
+
+
+### Features
+
+* Implement Agentic AI Engine and Extensible Plugin System  ([#340](https://github.com/diillson/chatcli/issues/340)) ([#341](https://github.com/diillson/chatcli/issues/341)) ([cc6cbde](https://github.com/diillson/chatcli/commit/cc6cbde8584ddf2f15f671d28b24d97eef4e4029))
+
 ## [1.37.0](https://github.com/diillson/chatcli/compare/v1.36.2...v1.37.0) (2025-11-05)
 
 
