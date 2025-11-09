@@ -29,7 +29,10 @@ func main() {
 			Usage:       "@wikipedia <termo_de_busca> | @wikipedia --read \"<título_exato>\"",
 			Version:     "1.0.0",
 		}
-		json.NewEncoder(os.Stdout).Encode(meta)
+		if err := json.NewEncoder(os.Stdout).Encode(meta); err != nil {
+			fmt.Fprintf(os.Stderr, "Erro ao gerar metadados JSON: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -67,7 +70,10 @@ func searchArticles(term string) {
 	}
 
 	var searchResult []interface{}
-	json.Unmarshal(body, &searchResult)
+	if err := json.Unmarshal(body, &searchResult); err != nil {
+		fmt.Fprintf(os.Stderr, "Erro ao decodificar a resposta de busca da API: %v", err)
+		os.Exit(1)
+	}
 
 	if len(searchResult) < 2 {
 		fmt.Println("Nenhum resultado encontrado para sua busca.")
@@ -110,7 +116,10 @@ func readArticle(title string) {
 	}
 
 	var result map[string]interface{}
-	json.Unmarshal(body, &result)
+	if err := json.Unmarshal(body, &result); err != nil {
+		fmt.Fprintf(os.Stderr, "Erro ao decodificar a resposta do artigo da API: %v", err)
+		os.Exit(1)
+	}
 
 	pages, ok := result["query"].(map[string]interface{})["pages"].(map[string]interface{})
 	if !ok || len(pages) == 0 {

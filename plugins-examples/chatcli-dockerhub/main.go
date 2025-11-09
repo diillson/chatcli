@@ -33,7 +33,10 @@ func main() {
 			Usage:       "@dockerhub-tags <nome_da_imagem>",
 			Version:     "1.0.0",
 		}
-		json.NewEncoder(os.Stdout).Encode(meta)
+		if err := json.NewEncoder(os.Stdout).Encode(meta); err != nil {
+			fmt.Fprintf(os.Stderr, "Erro ao gerar metadados JSON: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 

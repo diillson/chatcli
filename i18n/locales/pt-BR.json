@@ -414,6 +414,7 @@
   "plugin.install.error.tempdir": " ❌ Erro ao criar diretório temporário: %v",
   "plugin.install.error.clone": " ❌ Erro ao clonar o repositório: %v",
   "plugin.install.error.build": " ❌ Erro ao compilar o plugin: %v\nSaída: %s",
+  "plugin.install.error.chmod": "❌ Erro ao definir a permissão de execução no plugin: %v",
   "plugin.install.success": " ✅ Plugin '%s' instalado com sucesso!",
   "plugin.uninstall.usage": "Uso: /plugin uninstall <nome-do-plugin>",
   "plugin.uninstall.error": " ❌ Erro ao desinstalar o plugin '%s': %v",

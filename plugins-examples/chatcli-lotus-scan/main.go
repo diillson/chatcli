@@ -27,7 +27,10 @@ func main() {
 			Usage:       "@lotus-scan <caminho_para_docs>",
 			Version:     "1.0.0",
 		}
-		json.NewEncoder(os.Stdout).Encode(meta)
+		if err := json.NewEncoder(os.Stdout).Encode(meta); err != nil {
+			fmt.Fprintf(os.Stderr, "Erro ao gerar metadados JSON: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -40,9 +43,11 @@ func main() {
 	var builder strings.Builder
 	builder.WriteString("Estrutura da Documentação Atual:\n")
 
-	filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			// Retorna o erro para parar o Walk, mas loga para o usuário saber onde falhou.
+			fmt.Fprintf(os.Stderr, "Aviso: não foi possível acessar o caminho '%s': %v\n", path, err)
+			return nil // Retorna nil para continuar andando, mas o erro foi logado.
 		}
 
 		// Ignora o próprio diretório raiz
@@ -72,6 +77,11 @@ func main() {
 		}
 		return nil
 	})
+
+	if walkErr != nil {
+		fmt.Fprintf(os.Stderr, "Erro final ao percorrer o diretório: %v", walkErr)
+		os.Exit(1)
+	}
 
 	fmt.Print(builder.String())
 }

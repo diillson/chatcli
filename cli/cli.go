@@ -577,7 +577,9 @@ func (cli *ChatCLI) restoreTerminal() {
 	if runtime.GOOS == "windows" {
 		cmd := exec.Command("cmd", "/c", "cls") // Limpa a tela no Windows
 		cmd.Stdout = os.Stdout
-		cmd.Run()
+		if err := cmd.Run(); err != nil {
+			cli.logger.Warn("Falha ao tentar limpar a tela do terminal no Windows", zap.Error(err))
+		}
 		return
 	}
 	cmd := exec.Command("stty", "sane")

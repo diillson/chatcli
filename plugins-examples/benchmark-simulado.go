@@ -44,5 +44,6 @@ func main() {
 	// A função main não é relevante para o benchmark, mas precisa existir.
 	fmt.Println("Executando main...")
 	MinhaFuncaoCPUIntensiva()
+	_ = result
 	fmt.Println("Concluído.")
 }

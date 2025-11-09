@@ -244,7 +244,10 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 		}
 
 		// Torna o arquivo executável para garantir
-		os.Chmod(filepath.Join(pluginManager.PluginsDir(), pluginName), 0755)
+		if err := os.Chmod(filepath.Join(pluginManager.PluginsDir(), pluginName), 0755); err != nil {
+			fmt.Println(i18n.T("plugin.install.error.chmod", err))
+			return
+		}
 
 		fmt.Println(i18n.T("plugin.reloading"))
 		pluginManager.Reload()

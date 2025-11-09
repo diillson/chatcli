@@ -37,7 +37,10 @@ func main() {
 			Usage:       "@docker-run --image <img> --tag <tag> --port <p:p> --name <nome> [-e VAR=val] [-v /host:/cont]",
 			Version:     "1.2.0", // Versão incrementada para refletir o suporte a volumes
 		}
-		json.NewEncoder(os.Stdout).Encode(meta)
+		if err := json.NewEncoder(os.Stdout).Encode(meta); err != nil {
+			fmt.Fprintf(os.Stderr, "Erro ao gerar metadados JSON: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 

@@ -24,7 +24,10 @@ func main() {
 			Usage:       "@go-bench-run <caminho_do_arquivo_bench_test.go>",
 			Version:     "1.1.0", // Versão incrementada
 		}
-		json.NewEncoder(os.Stdout).Encode(meta)
+		if err := json.NewEncoder(os.Stdout).Encode(meta); err != nil {
+			fmt.Fprintf(os.Stderr, "Erro ao gerar metadados JSON: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 

@@ -414,6 +414,7 @@
   "plugin.install.error.tempdir": " ❌ Error creating temporary directory: %v",
   "plugin.install.error.clone": " ❌ Error cloning repository: %v",
   "plugin.install.error.build": " ❌ Error compiling plugin: %v\nOutput: %s",
+  "plugin.install.error.chmod": "❌ Error setting executable permission on plugin: %v",
   "plugin.install.success": " ✅ Plugin '%s' installed successfully!",
   "plugin.uninstall.usage": "Usage: /plugin uninstall <plugin-name>",
   "plugin.uninstall.error": " ❌ Error uninstalling plugin '%s': %v",
