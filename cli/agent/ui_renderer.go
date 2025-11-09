@@ -140,7 +140,7 @@ func (r *UIRenderer) PrintPlanFull(blocks []CommandBlock, outputs []*CommandOutp
 		fmt.Println(r.Colorize("    "+i18n.T("agent.plan.field.code"), ColorGray))
 		for idx, cmd := range b.Commands {
 			if len(b.Commands) > 1 {
-				fmt.Printf(r.Colorize(fmt.Sprintf("      "+i18n.T("agent.plan.command_separator")+"\n", idx+1, len(b.Commands)), ColorGray), idx+1, len(b.Commands))
+				fmt.Print(r.Colorize(fmt.Sprintf("      "+i18n.T("agent.plan.command_separator")+"\n", idx+1, len(b.Commands)), ColorGray))
 			}
 			prefix := ""
 			if b.Language == "shell" || b.Language == "bash" || b.Language == "sh" {
