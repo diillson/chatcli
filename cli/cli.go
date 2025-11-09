@@ -2122,7 +2122,7 @@ func (cli *ChatCLI) GetContextCommands() []prompt.Suggest {
 	}
 
 	// Adicionar plugins customizados
-	if cli.pluginManager != nil {
+	if cli != nil && cli.pluginManager != nil {
 		for _, plugin := range cli.pluginManager.GetPlugins() {
 			suggestions = append(suggestions, prompt.Suggest{
 				Text:        plugin.Name(),
