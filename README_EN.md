@@ -148,6 +148,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  `CHATCLI_DOTENV`  – **(Optional)** Defines the path to your  `.env`  file.
   -  `CHATCLI_IGNORE` – **(Optional)** Defines a list of files or folders to be ignored by ChatCLI.
   -  `CHATCLI_LANG`  – **(Optional)** Sets the interface language ( e.g.,  en ,  `pt-BR` ). Default: detects from system.
+  -  `CHATCLI_AGENT_MAX_TURNS` - **(Optional)** Defines the maximum number of shifts an agent can have. 
   -  `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
   -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` )
   -  `MAX_RETRIES`  - **(Optional)** Maximum number of attempts for API calls (default:  `5` ).

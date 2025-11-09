@@ -6,6 +6,7 @@ require (
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/fsnotify/fsnotify v1.9.0
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/stretchr/testify v1.11.1

@@ -431,5 +431,9 @@
   "agent.error.tool_not_found": "Erro: a ferramenta '%s' que você tentou usar não foi encontrada. Por favor, escolha uma da lista ou gere um comando de shell.",
   "agent.feedback.tool_output": "A ferramenta '%s' foi executada e retornou o seguinte:\n\n<tool_output>\n%s\n</tool_output>\n\nCom base nisso, qual é o próximo passo?",
   "agent.error.max_turns_reached_context": "⚠️ O agente parou após atingir o limite máximo de %d turnos para evitar loops infinitos. Ele não chegou a uma solução final.",
-  "agent.feedback.last_thought": "Aqui está o último raciocínio do agente:"
+  "agent.feedback.last_thought": "Aqui está o último raciocínio do agente:",
+  "agent.error.invalid_tool_args": "Erro: Os argumentos que você forneceu para a ferramenta '%s' estavam malformados: %v. Por favor, corrija as aspas e tente novamente.",
+  "agent.multiline_input_tip": "(Digite '.' em uma nova linha para finalizar)",
+  "agent.prompt.additional_context": "\n ➤ Forneça contexto ou instruções adicionais: ",
+  "agent.output_header": "\n--- Saída do Comando ---"
 }

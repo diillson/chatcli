@@ -431,5 +431,9 @@
   "agent.error.tool_not_found": "Error: the tool '%s' you tried to use was not found. Please choose one from the list or generate a shell command.",
   "agent.feedback.tool_output": "The tool '%s' was executed and returned the following:\n\n<tool_output>\n%s\n</tool_output>\n\nBased on this, what is the next step?",
   "agent.error.max_turns_reached_context": " ⚠️ The agent stopped after reaching the maximum limit of %d turns to prevent infinite loops. It did not reach a final solution.",
-  "agent.feedback.last_thought": "Here is the agent's last thought process:"
+  "agent.feedback.last_thought": "Here is the agent's last thought process:",
+  "agent.error.invalid_tool_args": "Error: The arguments you provided for the tool '%s' were malformed: %v. Please correct the quoting and try again.",
+  "agent.multiline_input_tip": "(Enter a single '.' on a new line to finish)",
+  "agent.prompt.additional_context": "\n ➤ Provide additional context or instructions: ",
+  "agent.output_header": "\n--- Command Output ---"
 }

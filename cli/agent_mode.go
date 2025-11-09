@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"os"
 	"os/exec"
@@ -25,6 +26,7 @@ import (
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
+	"github.com/google/shlex"
 	"go.uber.org/zap"
 )
 
@@ -114,7 +116,6 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		systemInstruction += "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
 	}
 
-	// Adicionamos o system prompt apenas se for o início de uma nova sessão de agente.
 	if len(a.cli.history) == 0 {
 		a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
 	}
@@ -130,8 +131,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	for turn := 0; turn < maxTurns; turn++ {
 		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
 
+		a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery})
+
 		a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-		// A IA agora recebe o histórico completo da conversa.
 		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", a.cli.history, 0)
 		a.cli.animation.StopThinkingAnimation()
 
@@ -140,24 +142,38 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		}
 
 		a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
-		fmt.Printf("\n%s\n", a.cli.renderMarkdown(aiResponse))
+		formattedResponse := fmt.Sprintf("\n%s\n", a.cli.renderMarkdown(aiResponse))
+		a.cli.typewriterEffect(formattedResponse, 2*time.Millisecond)
 
 		// --- 3. ANÁLISE DA RESPOSTA E EXECUÇÃO DA AÇÃO ---
-		toolCallRegex := regexp.MustCompile(`(?s)<tool_call name="(@\S+)" args="(.*?)" />`)
+		toolCallRegex := regexp.MustCompile(`(?s)<tool_call name="(@\S+)" (?:args="(.*?)"|args='(.*?)') />`)
 		match := toolCallRegex.FindStringSubmatch(aiResponse)
 
-		if len(match) == 3 {
+		if len(match) == 4 {
 			toolName := match[1]
-			toolArgsStr := match[2]
-			toolArgs := strings.Fields(toolArgsStr)
+			toolArgsStr := ""
+			if match[2] != "" {
+				// Aspas duplas foram usadas
+				toolArgsStr = match[2]
+			} else {
+				// Aspas simples foram usadas
+				toolArgsStr = match[3]
+			}
+
+			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
+
+			toolArgs, err := shlex.Split(unescapedToolArgsStr)
+			if err != nil {
+				a.logger.Warn("Erro ao analisar os argumentos da ferramenta com shlex", zap.String("args_str", unescapedToolArgsStr), zap.Error(err))
+				currentQuery = i18n.T("agent.error.invalid_tool_args", toolName, err)
+				continue
+			}
 
 			fmt.Printf("\n%s\n", colorize(i18n.T("agent.status.using_tool", toolName, toolArgsStr), ColorYellow))
 
 			plugin, found := a.cli.pluginManager.GetPlugin(toolName)
 			if !found {
-				feedback := i18n.T("agent.error.tool_not_found", toolName)
-				// Adiciona o erro ao histórico para a IA saber o que aconteceu.
-				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedback})
+				currentQuery = i18n.T("agent.error.tool_not_found", toolName)
 				continue
 			}
 
@@ -166,21 +182,23 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 				toolOutput = fmt.Sprintf("Erro: %v", err)
 			}
 
-			// Exibe o resultado da ferramenta para o usuário (transparência).
 			fmt.Printf("\n%s\n%s\n", colorize(i18n.T("agent.feedback.tool_output_header"), ColorGray), toolOutput)
 
 			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, toolOutput)
 			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
-			continue // Vai para o próximo turno do loop.
+			continue
 		}
 
 		commandBlocks := a.extractCommandBlocks(aiResponse)
 		if len(commandBlocks) > 0 {
+			a.displayResponseWithoutCommands(aiResponse, commandBlocks)
 			a.handleCommandBlocks(ctx, commandBlocks)
 			return nil
 		}
 
+		// Se a IA deu uma resposta final sem comandos, a resposta já foi exibida com o efeito de digitação acima.
+		// Apenas adicionamos uma mensagem de status final.
 		fmt.Println(colorize(i18n.T("agent.status.final_answer_no_commands"), ColorGreen))
 		return nil
 	}
