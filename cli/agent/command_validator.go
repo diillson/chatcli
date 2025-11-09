@@ -100,7 +100,6 @@ func (v *CommandValidator) IsDangerous(cmd string) bool {
 // ValidateCommand valida um comando antes da execução
 func (v *CommandValidator) ValidateCommand(cmd string) error {
 	if strings.TrimSpace(cmd) == "" {
-		// CORREÇÃO: Usar errors.New para strings constantes
 		return errors.New(i18n.T("agent.validator.empty_command"))
 	}
 
