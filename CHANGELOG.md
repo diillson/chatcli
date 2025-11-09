@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.1](https://github.com/diillson/chatcli/compare/v1.38.0...v1.38.1) (2025-11-09)
+
+
+### Bug Fixes
+
+* revise command reference and enhance plugin examples ([#343](https://github.com/diillson/chatcli/issues/343)) ([#344](https://github.com/diillson/chatcli/issues/344)) ([34f6175](https://github.com/diillson/chatcli/commit/34f617561c2ad315b359b98d9f9ff4aa79629221))
+
 ## [1.38.0](https://github.com/diillson/chatcli/compare/v1.37.0...v1.38.0) (2025-11-09)
 
 
