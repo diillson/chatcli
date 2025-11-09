@@ -8,7 +8,6 @@
   "welcome.footer.switch_model.cmd": "/switch --model",
   "welcome.footer.switch_model.desc": "to change model",
   "welcome.current_model": "🤖 You are chatting with %s (%s)",
-
   "tip.add_file": "Use '@file <path>' to add file content to the context.",
   "tip.git_context": "Use '@git' to include status and recent commits from your repository.",
   "tip.exec_command": "Need to run a command? Use '@command <your_command>'.",
@@ -20,19 +19,15 @@
   "tip.agent_toggle_view": "In Agent Mode, use 'p' to toggle between COMPACT and FULL view.",
   "tip.agent_output_actions": "In Agent Mode, use 'vN' to open full output in pager and 'wN' to save to a file.",
   "tip.agent_last_result": "The 'Last Result' in Agent Mode is always anchored to the footer, no need to scroll.",
-
   "version.label": "Version: %s (commit: %s)",
-
   "help.header.title": "Complete Guide to ChatCLI Commands",
   "help.header.subtitle1": "Here is an exhaustive map of all available commands, subcommands, flags, and options.",
   "help.header.subtitle2": "Use them to control the application, add context, or automate tasks.",
-
   "help.section.general": "General Control",
   "help.command.help": "Shows this complete help screen.",
   "help.command.exit": "Exits the application.",
   "help.command.newsession": "Clears the current conversation history and starts a new session (alias for /session new).",
   "help.command.version": "Shows version, commit hash, build date, and checks for updates.",
-
   "help.section.config": "Configuration and AI Providers",
   "help.command.switch": "Opens the interactive menu to change the LLM provider (e.g., OPENAI, CLAUDEAI).",
   "help.command.switch_model": "Changes the model for the current provider (e.g., gpt-4o-mini, grok-4, gpt-5... etc).",
@@ -42,7 +37,6 @@
   "help.command.switch_agent_id": "Updates the 'Agent ID' (StackSpot only).",
   "help.command.config": "Displays the current configuration (provider, model, keys, etc.).",
   "help.command.reload": "Reloads the configuration variables from your .env file in real-time.",
-
   "help.section.context": "Adding Context to Prompts",
   "help.command.file": "Adds the content of a file or directory to the prompt.",
   "help.command.file_mode_full": "(Default) Sends the full content, truncating if necessary.",
@@ -53,13 +47,11 @@
   "help.command.git": "Adds status, branch, remotes, and recent Git commits.",
   "help.command.history": "Adds the last commands from your shell history (bash/zsh/fish).",
   "help.command.env": "Adds environment variables (sensitive values are redacted).",
-
   "help.section.chunks": "Large File Management (Chunks)",
   "help.command.nextchunk": "Sends the next project chunk to the AI.",
   "help.command.retry": "Tries to resend the last failed chunk.",
   "help.command.retryall": "Tries to resend all failed chunks.",
   "help.command.skipchunk": "Skips a chunk with an error and proceeds to the next.",
-
   "help.section.exec": "Executing Terminal Commands",
   "help.command.command": "Executes a command and adds its output to the prompt.",
   "help.command.command_example": "(Executes 'ls -la' and appends the result)",
@@ -68,7 +60,6 @@
   "help.command.command_ai_example": "(Sends git diff for AI analysis)",
   "help.command.command_ai_context": "Same as above, but adds context/question.",
   "help.command.command_ai_context_example": "Ex: @command --ai cat err.log > summarize this error",
-
   "help.section.agent": "Agent Mode (Task Execution)",
   "help.command.agent": "Asks the AI to plan and execute commands to solve a task.",
   "help.command.run": "An alias for the /agent command.",
@@ -90,14 +81,12 @@
   "help.command.agent_last_result": "• Last Result is always anchored to the footer (preview).",
   "help.command.agent_compact_plan": "• COMPACT Plan shows 1 line per command (status + desc + 1st code line).",
   "help.command.agent_full_plan": "• FULL Plan shows a card with description, type, risk, and formatted code block.",
-
   "help.section.sessions": "Session Management",
   "help.command.session_save": "Saves the current session with a name (e.g., /session save my-chat).",
   "help.command.session_load": "Loads a saved session (e.g., /session load my-chat).",
   "help.command.session_list": "Lists all saved sessions.",
   "help.command.session_delete": "Deletes a saved session (e.g., /session delete my-chat).",
   "help.command.session_new": "Starts a new clean session (alias for /newsession).",
-
   "help.section.oneshot": "Non-Interactive Mode (One-Shot, for scripts and pipes)",
   "help.command.oneshot_p": "Executes a prompt once and exits.",
   "help.command.oneshot_p_example": "Ex: chatcli -p \"Explain this repository.\"",
@@ -110,7 +99,6 @@
   "help.command.oneshot_no_anim": "Disables animations (useful in scripts/CI).",
   "help.command.oneshot_auto_exec": "In one-shot agent mode, automatically executes the first suggested command if safe.",
   "help.command.oneshot_pipes": "Piping (stdin): Send data via pipe (e.g., git diff | chatcli -p \"Summarize changes.\").",
-
   "help.section.tips": "General Tips and Shortcuts",
   "help.command.tips_cancel": "Cancel (Ctrl+C): Press Ctrl+C once during 'Thinking...' to cancel.",
   "help.command.tips_exit": "Quick Exit (Ctrl+D): Press Ctrl+D on an empty prompt to exit ChatCLI.",
@@ -119,7 +107,11 @@
   "help.command.tips_agent_v": "Agent Mode: vN - Opens command N's output in pager (for long reads without clutter).",
   "help.command.tips_agent_w": "Agent Mode: wN - Saves command N's output to a temp file (to share or attach).",
   "help.command.tips_agent_r": "Agent Mode: r - Redraws the screen (clear) keeping focus on 'Last Result'.",
-
+  "help.section.plugins": "Plugin Management",
+  "help.command.plugin_list": "Lists all installed plugins.",
+  "help.command.plugin_install": "Installs a plugin from a Git repository.",
+  "help.command.plugin_show": "Shows usage details for a specific plugin.",
+  "help.command.plugin_inspect": "Shows debugging information for a plugin.",
   "status.reloading_config": "Reloading configurations...",
   "status.reload_success_preserved": "Configurations reloaded successfully! (current provider/model preserved)",
   "status.reload_fail_preserve": "Failed to preserve provider/model after reload; falling back to .env values",
@@ -131,17 +123,14 @@
   "status.agent_mode_enter": "\n🤖 Entering agent mode with query: \"%s\"\n",
   "status.agent_mode_description": "The agent will analyze your request and suggest commands to solve it.",
   "status.agent_mode_exit": "\n ✅ Returning to chat...",
-
   "prompt.select_provider": "Choose the provider (by number): ",
   "prompt.confirm_exit": "\nGoodbye!! Double CTRL+C...",
   "prompt.cancel_op": "\n⚠️ Ctrl+C triggered - Canceling operation...",
-
   "error.generic": "❌ Error: %s",
   "error.invalid_choice_normal_mode": "Invalid choice. Returning to normal mode.",
   "error.unknown_command": "Unknown command. Use /help to see available commands.",
   "error.agent_query_extraction": "Error: could not extract agent query.",
   "error.agent_mode_error": " ❌ Error in agent mode: %v",
-
   "session.new_session_started": "New conversation session started; history has been cleared.",
   "session.usage_header": "Usage of /session command:",
   "session.usage_save": "  /session save <name>",
@@ -163,7 +152,6 @@
   "session.error_name_required_load": "Error: a name is required to load the session.",
   "session.error_name_required_delete": "Error: a name is required to delete the session.",
   "session.unknown_command": "Unknown session command: '%s'. Use /session to see options.",
-
   "chunk.no_more_chunks": "There are no more file chunks available.",
   "chunk.no_more_pending_but_failed": "There are no more pending chunks, but there are %d failed chunks. Use /retry to retry the last failed chunk or /retryall to retry all.",
   "chunk.sending": "Sending chunk %d of %d... (%d remaining after this one)",
@@ -194,7 +182,6 @@
   "chunk.skipping": "Skipping chunk %d/%d...",
   "chunk.status_no_pending": "- No pending chunks.",
   "chunk.status_no_failed": "- No failed chunks.",
-
   "agent.header.title": "🤖 AGENT MODE: ACTION PLAN",
   "agent.header.description": "The AI has suggested the following commands to perform your task.",
   "agent.plan.compact_view": "📋 PLAN (compact view)",
@@ -227,7 +214,6 @@
   "agent.menu.redraw": "Refreshes the screen (clear)",
   "agent.menu.quit": "Exits Agent Mode",
   "agent.prompt.choice": "\n ➤ Your choice: ",
-
   "agent.status.exiting": "\n ✅ Exiting agent mode.",
   "agent.status.no_output_to_show": "No output to display.",
   "agent.status.no_output_to_save": "No output to save.",
@@ -261,7 +247,6 @@
   "agent.status.edit_prompt": "Edit in terminal (t) or external editor (e)? [t/e]: ",
   "agent.status.edit_command_prompt": "Command %d/%d (%s): ",
   "agent.status.interactive_confirm": "The command '%s' might be interactive. Run in interactive mode? (y/N): ",
-
   "agent.error.invalid_command_number": "Invalid command number.",
   "agent.error.invalid_command_number_edit": "Invalid command number to edit.",
   "agent.error.invalid_command_number_simulate": "Invalid command number to simulate.",
@@ -275,7 +260,6 @@
   "agent.error.write_script": "❌ Error writing script: %v",
   "agent.error.change_dir": "❌ Error changing directory to '%s': %v",
   "agent.error.invalid_option": "Invalid option.",
-
   "agent.oneshot.no_command": "\nNo executable command was suggested by the AI.",
   "agent.oneshot.header": "\n🤖 AGENT MODE (ONE-SHOT): Suggested Command",
   "agent.oneshot.header_auto_exec": "\n🤖 AGENT MODE (ONE-SHOT): Automatic Execution",
@@ -285,25 +269,19 @@
   "agent.oneshot.auto_exec_aborted": "automatic execution aborted for safety. The suggested command is potentially dangerous: %q",
   "agent.oneshot.auto_exec_running": "✅ Safe command detected. Executing the suggested command...",
   "agent.oneshot.error_with_output": "the command was executed, but returned an error: %s",
-
   "oneshot.error_overrides": "❌ Error applying provider/model overrides",
-
-
   "agent.system_prompt.interactive": "You are a command-line assistant that helps the user perform tasks on the system safely. Always briefly explain the purpose before the commands. Prefer simple, non-interactive commands. Avoid potentially destructive commands (rm -rf, dd, mkfs, etc.) without a clear risk warning and safe alternatives. When suggesting executable commands, use code blocks exactly in the format:\n\n```execute:<type>\n<commands>\n```\n\nAccepted types: shell, git, docker, kubectl. If there is ambiguity, ask a question before providing commands.",
   "agent.system_prompt.default.base": "You are an expert command-line assistant, operating inside a terminal. Your goal is to help the user perform tasks safely and efficiently by providing the correct commands.\n\n**[Available Context]**\n- Operating System: %s\n- Default Shell: %s\n- Current Directory: %s\n\n**[MANDATORY PROCESS]**\nFor each user request, you MUST strictly follow these two steps:\n\n**Step 1: Planning**\nThink step-by-step internally. If necessary, summarize the reasoning in a <reasoning> tag to show the user.\n\n**Step 2: Structured Final Response**\nAfter reasoning, provide the final response containing:\n1. A <explanation> tag with a clear and concise explanation of what the commands will do.\n2. One or more code blocks in the example format (the actual example block is injected below).\n\n**[GUIDELINES AND RESTRICTIONS]**\n1. Safety First: NEVER suggest destructive commands ('rm -rf', 'dd', 'mkfs', etc.) without an explicit warning about the risks in the <explanation> tag.\n2. Clarity: Prefer commands that are easy to understand. If a command is complex (e.g., 'awk', 'sed'), explain each part of it.\n3. Efficiency: Use pipes ('|') and combine commands to create efficient solutions when appropriate.\n4. Interactivity: Avoid interactive commands (e.g., 'vim', 'nano', 'ssh' without arguments). If necessary, warn the user in the <explanation> and add the #interactive marker at the end of the command (e.g., 'ssh user@host #interactive') so the CLI can handle it as interactive.\n5. Ambiguity: If the user's request is ambiguous, ask a clarifying question instead of guessing. DO NOT provide an execute block in that case.\n6. Format: Use execute:<type> code blocks as per the example injected below.\n\n**[COMPLETE EXAMPLE]**\n\n**User Request:** \"list all go files in this project and count the lines of each one\"\n\n**Your Response:**\n<reasoning>\n1. The user wants to find all files with the .go extension. The 'find' command is ideal for this.\n2. The search starting point should be the current directory ('.').\n3. The search criterion is the file name, so I'll use: find . -name \"*.go\"\n4. For each file found, the user wants to count the lines. The 'wc -l' command does this.\n5. I need to combine find with wc -l. The best way to do this for multiple files is using xargs or the -exec option of find. The -exec option with + is efficient.\n6. The final command will be: find . -name \"*.go\" -exec wc -l {} +\n</reasoning>\n<explanation>\nI will use the 'find' command to recursively search for all files ending with .go from the current directory. Then, for each file found, I will execute the 'wc -l' command to count the number of lines.\n</explanation>\n\nExample command block (format shown below):",
   "agent.system_prompt.oneshot": "You are a command-line assistant operating in a single-execution (one-shot) mode. Your task is to analyze the user's request and provide **a single, concise command block** that solves the task as efficiently and safely as possible.\n\n- Respond **only** with the best command block in the ```execute:shell format.\n- **Do not** provide multiple command blocks or alternatives.\n- **Do not** add long explanations before or after, just the command needed for execution.\n- Avoid destructive commands (like rm -rf) unless explicitly requested and the intent is clear.\n- The command must be directly executable, as we only need one, the best and most expert command possible.",
-
   "agent.llm_prompt.continuation": "The previously suggested command was:\n%s\n\nThe result (stdout) was:\n%s\n\nThe error (stderr) was:\n%s\n\nPlease suggest a correction or next steps based on the result. Provide executable commands in the appropriate format.",
   "agent.llm_prompt.continuation_with_context": "The previously suggested command was:\n%s\n\nThe result (stdout) was:\n%s\n\nThe error (stderr) was:\n%s\n\nPlease suggest a correction or next steps based on the result and the provided context. Provide executable commands in the appropriate format.\n\nAdditional context provided by the user:\n%s",
   "agent.llm_prompt.pre_execution_context": "The command you suggested was:\n```\n%s\n```\n\nBefore executing it, the user provided the following additional context or instruction:\n%s\n\nPlease review the suggested command based on this new context. If necessary, modify it or suggest a new set of commands. Present the new commands in the appropriate executable format.",
-
   "main.warn_expand_path": "Warning: could not expand path '%s': %v",
   "main.error_dotenv_not_found": ".env file not found at %s",
   "main.error_logger_init": "Could not initialize logger: %v",
   "main.error_no_provider": "No LLM provider is configured. Check your environment variables.",
   "main.error_apply_overrides": " ❌ Error applying overrides: %v",
   "manager.error_provider_not_supported": "LLM Provider '%s' not supported or not configured",
-
   "cli.switch.invalid_max_tokens": " ❌ Invalid value for --max-tokens: '%s'. Must be a number >= 0.",
   "cli.switch.max_tokens_set": " ✅ Maximum token limit set to: %d (0 = use provider default)",
   "cli.switch.stackspot_only_flags": " ❌ Flags --realm and --agent-id can only be used with the STACKSPOT provider.",
@@ -314,7 +292,6 @@
   "cli.switch.change_model_error": " ❌ Error switching to model '%s': %v\n   Verify that the model name is correct for the current provider.",
   "cli.switch.change_model_success": " ✅ Successfully switched model to %s (%s)",
   "cli.switch.available_providers": "Available providers:",
-
   "cli.config.header": "Current ChatCLI Configuration",
   "cli.config.subtitle": "Here is a summary of runtime settings, providers, and environment variables.",
   "cli.config.section_general": "General Settings",
@@ -340,16 +317,13 @@
   "cli.config.section_available_providers": "Available Providers",
   "cli.config.key_provider_n": "Provider %d",
   "cli.config.no_providers_configured": "None configured. Set API keys in .env",
-
   "agent.validator.empty_command": "empty command",
   "agent.validator.dangerous_command": "potentially dangerous command detected: %s",
-
   "agent.executor.interactive_mode_header": "\n--- Entering interactive command mode ---",
   "agent.executor.interactive_mode_info": "Terminal control will be passed to the command.",
   "agent.executor.interactive_mode_exit_tip": "To return, exit the program (e.g., ':q' in vim, 'exit' in shell).",
   "agent.executor.interactive_mode_footer": "--- Returning to ChatCLI ---",
   "agent.executor.fail_restore_terminal": "Failed to restore terminal",
-
   "help.section.contexts": "Context Management",
   "help.command.context_create": "Create new context from files/directories",
   "help.command.context_mode": "Processing mode (full, summary, chunked, smart)",
@@ -365,9 +339,7 @@
   "help.command.context_export": "Export context to JSON file",
   "help.command.context_import": "Import context from JSON file",
   "help.command.context_metrics": "Show usage metrics and statistics",
-
   "context.error.unknown_subcommand": "Unknown subcommand: '%s'. Use /context help to see available commands.",
-
   "context.create.usage": "Usage: /context create <name> <paths...> [--mode <mode>] [--description <text>] [--tags <tag1,tag2>]",
   "context.create.error.mode_required": "Flag --mode requires a value (full, summary, chunked, smart)",
   "context.create.error.description_required": "Flag --description requires a value",
@@ -376,7 +348,6 @@
   "context.create.error.failed": "Error creating context: %v",
   "context.create.processing": " 🔄 Processing files...",
   "context.create.success": " ✅ Context created successfully!",
-
   "context.attach.usage": "Usage: /context attach <name> [--priority <number>]",
   "context.attach.error.invalid_priority": "Invalid priority. Must be an integer.",
   "context.attach.error.not_found": "Context '%s' not found",
@@ -386,50 +357,79 @@
   "context.attach.files": "Files:",
   "context.attach.files_label": "files",
   "context.attach.size": "Size:",
-
   "context.detach.usage": "Usage: /context detach <name>",
   "context.detach.error.not_found": "Context '%s' not found",
   "context.detach.error.failed": "Error detaching context: %v",
   "context.detach.success": " ✅ Context '%s' detached from session",
-
   "context.delete.usage": "Usage: /context delete <name>",
   "context.delete.error.not_found": "Context '%s' not found",
   "context.delete.error.failed": "Error deleting context: %v",
   "context.delete.confirm": " ⚠️  Are you sure you want to delete context '%s'? (y/N): ",
   "context.delete.cancelled": "Operation cancelled.",
   "context.delete.success": " ✅ Context '%s' deleted successfully",
-
   "context.list.error.failed": "Error listing contexts: %v",
   "context.list.empty": "No contexts found. Use /context create to create one.",
   "context.list.header": " 📦 AVAILABLE CONTEXTS",
-
   "context.show.usage": "Usage: /context show <name>",
   "context.show.error.not_found": "Context '%s' not found",
-
   "context.merge.usage": "Usage: /context merge <new-name> <context1> <context2> [context3...]",
   "context.merge.error.context_not_found": "Context '%s' not found",
   "context.merge.error.failed": "Error merging contexts: %v",
   "context.merge.processing": " 🔄 Merging contexts...",
   "context.merge.success": " ✅ Contexts merged successfully!",
-
   "context.attached.error.failed": "Error fetching attached contexts: %v",
   "context.attached.empty": "No contexts attached to this session. Use /context attach <name> to attach.",
   "context.attached.header": " 📌 CONTEXTS ATTACHED TO SESSION",
-
   "context.export.usage": "Usage: /context export <name> <target-path>",
   "context.export.error.not_found": "Context '%s' not found",
   "context.export.error.failed": "Error exporting context: %v",
   "context.export.success": " ✅ Context exported to: %s",
-
   "context.import.usage": "Usage: /context import <file-path>",
   "context.import.error.failed": "Error importing context: %v",
   "context.import.success": " ✅ Context '%s' imported successfully",
-
   "context.metrics.header": " 📊 CONTEXT METRICS",
-
   "context.update.usage": "Usage: /context update <name> [<paths...>] [--mode <mode>] [--description <text>] [--tags <tag1,tag2>]",
   "context.update.processing": " 🔄 Updating context...",
   "context.update.error.failed": "Error updating context: %v",
   "context.update.success": " ✅ Context updated successfully!",
-  "context.create.force_tip": "Tip: Use --force to overwrite an existing context"
+  "context.create.force_tip": "Tip: Use --force to overwrite an existing context",
+  "plugin.usage_header": "Usage: /plugin <list|install|show|inspect|uninstall> [arguments]",
+  "plugin.list.empty": "No plugins installed. Use '/plugin install <url>' to add one.",
+  "plugin.list.header": " 🔌 INSTALLED PLUGINS:",
+  "plugin.show.usage": "Usage: /plugin show <plugin-name>",
+  "plugin.error.not_found": " ❌ Plugin '%s' not found.",
+  "plugin.show.details_for": " 🧩 PLUGIN DETAILS: %s",
+  "plugin.show.description": "Description",
+  "plugin.show.usage_label": "Usage",
+  "plugin.show.version": "Version",
+  "plugin.inspect.usage": "Usage: /plugin inspect <plugin-name>",
+  "plugin.inspect.details_for": "🛠️ PLUGIN INSPECTION: %s",
+  "plugin.inspect.path": "Executable Path",
+  "plugin.inspect.permissions": "Permissions",
+  "plugin.install.usage": "Usage: /plugin install <git-repository-url>",
+  "plugin.install.security_warning": " ⚠️ WARNING: You are about to clone, compile, and execute code from a third-party repository. Only install from trusted sources.",
+  "plugin.install.confirm": "Do you wish to continue with the installation of '%s'? (y/N): ",
+  "plugin.install.cancelled": "Installation cancelled.",
+  "plugin.install.installing": "Installing plugin from '%s'...",
+  "plugin.install.error.tempdir": " ❌ Error creating temporary directory: %v",
+  "plugin.install.error.clone": " ❌ Error cloning repository: %v",
+  "plugin.install.error.build": " ❌ Error compiling plugin: %v\nOutput: %s",
+  "plugin.install.success": " ✅ Plugin '%s' installed successfully!",
+  "plugin.uninstall.usage": "Usage: /plugin uninstall <plugin-name>",
+  "plugin.uninstall.error": " ❌ Error uninstalling plugin '%s': %v",
+  "plugin.uninstall.success": " ✅ Plugin '%s' uninstalled.",
+  "plugin.error.unknown_subcommand": "Unknown plugin subcommand: '%s'",
+  "plugin.error.manager_disabled": " ❌ Plugin manager is not available. Check logs for initialization errors.",
+  "plugin.reloading": "Reloading plugins...",
+  "plugin.reload_success": " ✅ Plugins reloaded. New plugins are now available!",
+  "agent.feedback.tool_output_header": "--- Tool Output ---",
+  "agent.status.using_tool": " 🤖 Agent is using tool: %s %s",
+  "agent.status.final_answer_no_commands": " ✅ The agent provided a final answer without executable commands.",
+  "agent.error.max_turns_reached": "The agent did not reach a final solution after %d turns.",
+  "agent.system_prompt.tools_header": "**[AVAILABLE TOOLS]**",
+  "agent.system_prompt.tools_instruction": "To use a tool, your response MUST contain a block in the format: `<tool_call name=\"@tool-name\" args=\"argument1 argument2\" />`. After receiving the tool's result, decide the next step. If no tool is suitable, generate the final solution using ```execute:shell``` blocks.",
+  "agent.error.tool_not_found": "Error: the tool '%s' you tried to use was not found. Please choose one from the list or generate a shell command.",
+  "agent.feedback.tool_output": "The tool '%s' was executed and returned the following:\n\n<tool_output>\n%s\n</tool_output>\n\nBased on this, what is the next step?",
+  "agent.error.max_turns_reached_context": "⚠️ The agent stopped after reaching the maximum limit of %d turns to prevent infinite loops. It did not reach a final solution.",
+  "agent.feedback.last_thought": "Here is the agent's last thought process:"
 }

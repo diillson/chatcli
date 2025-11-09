@@ -6,7 +6,11 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
@@ -63,6 +67,14 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return false
 	case strings.HasPrefix(userInput, "/context"):
 		ch.handleContextCommand(userInput)
+		return false
+	case strings.HasPrefix(userInput, "/plugin"):
+		ch.handlePluginCommand(userInput)
+		return false
+	case userInput == "/reset" || userInput == "/redraw" || userInput == "/clear":
+		ch.cli.restoreTerminal()
+		// Força o go-prompt a se redesenhar imediatamente
+		ch.cli.forceRefreshPrompt()
 		return false
 	default:
 		fmt.Println(i18n.T("error.unknown_command"))
@@ -129,5 +141,138 @@ func (ch *CommandHandler) handleSessionCommand(userInput string) {
 	default:
 		// CORREÇÃO: Usar Println com i18n.T
 		fmt.Println(i18n.T("session.unknown_command", command))
+	}
+}
+
+func (ch *CommandHandler) handlePluginCommand(userInput string) {
+	if ch.cli.pluginManager == nil {
+		ch.cli.logger.Error("O gerenciador de plugins não está inicializado. O comando /plugin está desabilitado.")
+		fmt.Println(i18n.T("plugin.error.manager_disabled"))
+		return
+	}
+
+	args := strings.Fields(userInput)
+	if len(args) < 2 {
+		fmt.Println(i18n.T("plugin.usage_header"))
+		return
+	}
+
+	subcommand := args[1]
+	pluginManager := ch.cli.pluginManager
+
+	switch subcommand {
+	case "list":
+		plugins := pluginManager.GetPlugins()
+		if len(plugins) == 0 {
+			fmt.Println(i18n.T("plugin.list.empty"))
+			return
+		}
+		fmt.Println(i18n.T("plugin.list.header"))
+		for _, p := range plugins {
+			fmt.Printf("  %s %s - %s\n", colorize(p.Name(), ColorCyan), colorize(p.Version(), ColorGray), p.Description())
+		}
+
+	case "show":
+		if len(args) < 3 {
+			fmt.Println(i18n.T("plugin.show.usage"))
+			return
+		}
+		p, found := pluginManager.GetPlugin(args[2])
+		if !found {
+			fmt.Println(i18n.T("plugin.error.not_found", args[2]))
+			return
+		}
+		fmt.Println(i18n.T("plugin.show.details_for", p.Name()))
+		fmt.Printf("  %s: %s\n", colorize(i18n.T("plugin.show.description"), ColorCyan), p.Description())
+		fmt.Printf("  %s: %s\n", colorize(i18n.T("plugin.show.usage_label"), ColorCyan), p.Usage())
+		fmt.Printf("  %s: %s\n", colorize(i18n.T("plugin.show.version"), ColorCyan), p.Version())
+
+	case "inspect":
+		if len(args) < 3 {
+			fmt.Println(i18n.T("plugin.inspect.usage"))
+			return
+		}
+		p, found := pluginManager.GetPlugin(args[2])
+		if !found {
+			fmt.Println(i18n.T("plugin.error.not_found", args[2]))
+			return
+		}
+		info, _ := os.Stat(p.Path())
+		fmt.Println(i18n.T("plugin.inspect.details_for", p.Name()))
+		fmt.Printf("  %s: %s\n", colorize(i18n.T("plugin.inspect.path"), ColorCyan), p.Path())
+		fmt.Printf("  %s: %s\n", colorize(i18n.T("plugin.inspect.permissions"), ColorCyan), info.Mode().String())
+
+	case "install":
+		if len(args) < 3 {
+			fmt.Println(i18n.T("plugin.install.usage"))
+			return
+		}
+		repoURL := args[2]
+
+		// AVISO DE SEGURANÇA
+		fmt.Println(colorize(i18n.T("plugin.install.security_warning"), ColorYellow))
+		fmt.Print(i18n.T("plugin.install.confirm", repoURL))
+		reader := bufio.NewReader(os.Stdin)
+		confirm, _ := reader.ReadString('\n')
+		if strings.ToLower(strings.TrimSpace(confirm)) != "s" {
+			fmt.Println(i18n.T("plugin.install.cancelled"))
+			return
+		}
+
+		fmt.Println(i18n.T("plugin.install.installing", repoURL))
+
+		tempDir, err := os.MkdirTemp("", "chatcli-plugin-")
+		if err != nil {
+			fmt.Println(i18n.T("plugin.install.error.tempdir", err))
+			return
+		}
+		defer os.RemoveAll(tempDir)
+
+		if err := exec.Command("git", "clone", "--depth=1", repoURL, tempDir).Run(); err != nil {
+			fmt.Println(i18n.T("plugin.install.error.clone", err))
+			return
+		}
+
+		pluginName := filepath.Base(repoURL)
+		pluginName = strings.TrimSuffix(pluginName, ".git")
+
+		buildCmd := exec.Command("go", "build", "-o", filepath.Join(pluginManager.PluginsDir(), pluginName), ".")
+		buildCmd.Dir = tempDir
+		if output, err := buildCmd.CombinedOutput(); err != nil {
+			fmt.Println(i18n.T("plugin.install.error.build", err, string(output)))
+			return
+		}
+
+		// Torna o arquivo executável para garantir
+		os.Chmod(filepath.Join(pluginManager.PluginsDir(), pluginName), 0755)
+
+		fmt.Println(i18n.T("plugin.reloading"))
+		pluginManager.Reload()
+		fmt.Println(i18n.T("plugin.reload_success"))
+
+	case "uninstall":
+		if len(args) < 3 {
+			fmt.Println(i18n.T("plugin.uninstall.usage"))
+			return
+		}
+		p, found := pluginManager.GetPlugin(args[2])
+		if !found {
+			fmt.Println(i18n.T("plugin.error.not_found", args[2]))
+			return
+		}
+		if err := os.Remove(p.Path()); err != nil {
+			fmt.Println(i18n.T("plugin.uninstall.error", p.Name(), err))
+			return
+		}
+		fmt.Println(i18n.T("plugin.uninstall.success", p.Name()))
+		pluginManager.Reload()
+
+	case "reload":
+		fmt.Println(i18n.T("plugin.reloading"))
+		pluginManager.Reload()
+		fmt.Println(i18n.T("plugin.reload_success"))
+
+	default:
+		fmt.Println(i18n.T("plugin.error.unknown_subcommand", subcommand))
 	}
 }

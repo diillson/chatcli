@@ -8,7 +8,6 @@
   "welcome.footer.switch_model.cmd": "/switch --model",
   "welcome.footer.switch_model.desc": "para trocar modelo",
   "welcome.current_model": "🤖 Você está conversando com %s (%s)",
-
   "tip.add_file": "Use '@file <caminho>' para adicionar o conteúdo de um arquivo ao contexto.",
   "tip.git_context": "Use '@git' para incluir o status e os commits recentes do seu repositório.",
   "tip.exec_command": "Precisa executar um comando? Use '@command <seu_comando>'.",
@@ -20,19 +19,15 @@
   "tip.agent_toggle_view": "No Modo Agente, use 'p' para alternar entre Visão COMPACTA e COMPLETA.",
   "tip.agent_output_actions": "No Modo Agente, use 'vN' para abrir a saída completa no pager e 'wN' para salvar em arquivo.",
   "tip.agent_last_result": "O 'Último Resultado' do Modo Agente aparece sempre no rodapé, sem precisar rolar a tela.",
-
   "version.label": "Versão: %s (commit: %s)",
-
   "help.header.title": "Guia Completo de Comandos do ChatCLI",
   "help.header.subtitle1": "Aqui está um mapa exaustivo de todos os comandos, subcomandos, flags e opções disponíveis.",
   "help.header.subtitle2": "Use-os para controlar a aplicação, adicionar contexto ou automatizar tarefas.",
-
   "help.section.general": "Controle Geral",
   "help.command.help": "Mostra esta tela de ajuda completa.",
   "help.command.exit": "Encerra a aplicação.",
   "help.command.newsession": "Limpa o histórico da conversa atual e inicia uma nova sessão (alias de /session new).",
   "help.command.version": "Mostra a versão, commit hash, data de build e verifica atualizações.",
-
   "help.section.config": "Configuração e Provedores de IA",
   "help.command.switch": "Abre o menu interativo para trocar o provedor de LLM (ex.: OPENAI, CLAUDEAI).",
   "help.command.switch_model": "Muda o modelo do provedor atual (ex.: gpt-4o-mini, grok-4, gpt-5... etc).",
@@ -42,7 +37,6 @@
   "help.command.switch_agent_id": "Atualiza o 'Agent ID' (apenas para StackSpot).",
   "help.command.config": "Exibe a configuração atual (provedor, modelo, chaves, etc.).",
   "help.command.reload": "Recarrega as variáveis ou configurações do seu arquivo .env em tempo real.",
-
   "help.section.context": "Adicionando Contexto aos Prompts",
   "help.command.file": "Adiciona o conteúdo de um arquivo ou diretório ao prompt.",
   "help.command.file_mode_full": "(Padrão) Envia o conteúdo completo, truncando se necessário.",
@@ -53,13 +47,11 @@
   "help.command.git": "Adiciona status, branch, remotos e commits recentes do Git.",
   "help.command.history": "Adiciona os últimos comandos do seu histórico de shell (bash/zsh/fish).",
   "help.command.env": "Adiciona as variáveis de ambiente (valores sensíveis são ocultados).",
-
   "help.section.chunks": "Gerenciamento de Arquivos Grandes (Chunks)",
   "help.command.nextchunk": "Envia o próximo pedaço (chunk) do projeto para a IA.",
   "help.command.retry": "Tenta reenviar o último chunk que falhou.",
   "help.command.retryall": "Tenta reenviar todos os chunks que falharam.",
   "help.command.skipchunk": "Pula um chunk com erro e continua para o próximo.",
-
   "help.section.exec": "Execução de Comandos no Terminal",
   "help.command.command": "Executa um comando e adiciona sua saída ao prompt.",
   "help.command.command_example": "(Executa 'ls -la' e anexa o resultado)",
@@ -68,7 +60,6 @@
   "help.command.command_ai_example": "(Envia as diferenças do git para análise da IA)",
   "help.command.command_ai_context": "Igual ao anterior, mas adiciona um contexto/pergunta.",
   "help.command.command_ai_context_example": "Ex: @command --ai cat err.log > resuma este erro",
-
   "help.section.agent": "Modo Agente (Execução de Tarefas)",
   "help.command.agent": "Pede à IA para planejar e executar comandos para resolver uma tarefa.",
   "help.command.run": "Um atalho (alias) para o comando /agent.",
@@ -90,14 +81,12 @@
   "help.command.agent_last_result": "• Último Resultado sempre ancorado ao rodapé da tela (preview).",
   "help.command.agent_compact_plan": "• Plano COMPACTO mostra 1 linha por comando (status + descrição + 1ª linha do código).",
   "help.command.agent_full_plan": "• Plano COMPLETO mostra cartão com descrição, tipo, risco e bloco de código formatado.",
-
   "help.section.sessions": "Gerenciamento de Sessões",
   "help.command.session_save": "Salva a sessão atual com um nome (ex.: /session save minha-conversa).",
   "help.command.session_load": "Carrega uma sessão salva (ex.: /session load minha-conversa).",
   "help.command.session_list": "Lista todas as sessões salvas.",
   "help.command.session_delete": "Deleta uma sessão salva (ex.: /session delete minha-conversa).",
   "help.command.session_new": "Inicia uma nova sessão limpa (alias de /newsession).",
-
   "help.section.oneshot": "Modo Não-Interativo (One-Shot, para scripts e pipes)",
   "help.command.oneshot_p": "Executa um prompt uma única vez e sai.",
   "help.command.oneshot_p_example": "Ex: chatcli -p \"Explique este repositório.\"",
@@ -110,7 +99,6 @@
   "help.command.oneshot_no_anim": "Desabilita animações (útil em scripts/CI).",
   "help.command.oneshot_auto_exec": "No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for seguro.",
   "help.command.oneshot_pipes": "Uso com pipes (stdin): Envia dados via pipe (ex.: git diff | chatcli -p \"Resuma as mudanças.\").",
-
   "help.section.tips": "Dicas e Atalhos Gerais",
   "help.command.tips_cancel": "Cancelamento (Ctrl+C): Pressione Ctrl+C uma vez durante o 'Pensando...' para cancelar.",
   "help.command.tips_exit": "Saída Rápida (Ctrl+D): Pressione Ctrl+D no prompt vazio para sair do ChatCLI.",
@@ -119,7 +107,11 @@
   "help.command.tips_agent_v": "Modo Agente: vN - Abre a saída do comando N no pager (leitura longa sem poluir a tela).",
   "help.command.tips_agent_w": "Modo Agente: wN - Salva a saída do comando N em arquivo temporário (para compartilhar ou anexar).",
   "help.command.tips_agent_r": "Modo Agente: r - Redesenha a tela (clear) mantendo o foco no 'Último Resultado'.",
-
+  "help.section.plugins": "Gerenciamento de Plugins",
+  "help.command.plugin_list": "Lista todos os plugins instalados.",
+  "help.command.plugin_install": "Instala um plugin a partir de um repositório Git.",
+  "help.command.plugin_show": "Mostra detalhes de uso de um plugin específico.",
+  "help.command.plugin_inspect": "Mostra informações de depuração de um plugin.",
   "status.reloading_config": "Recarregando configurações...",
   "status.reload_success_preserved": "Configurações recarregadas com sucesso! (provedor/modelo atuais preservados)",
   "status.reload_fail_preserve": "Falha ao preservar provedor/modelo após recarregar; usando valores do .env",
@@ -131,17 +123,14 @@
   "status.agent_mode_enter": "\n🤖 Entrando no modo agente com a consulta: \"%s\"\n",
   "status.agent_mode_description": "O agente analisará sua solicitação e sugerirá comandos para resolver.",
   "status.agent_mode_exit": "\n ✅ Retornando ao chat...",
-
   "prompt.select_provider": "Escolha o provedor (pelo número): ",
   "prompt.confirm_exit": "\nAté breve!! CTRL + C Duplo...",
   "prompt.cancel_op": "\n⚠️ Ctrl + C acionado - Cancelando operação...",
-
   "error.generic": "❌ Erro: %s",
   "error.invalid_choice_normal_mode": "Escolha inválida. Voltando ao modo normal.",
   "error.unknown_command": "Comando desconhecido. Use /help para ver os comandos disponíveis.",
   "error.agent_query_extraction": "Erro: não foi possível extrair a consulta do agente.",
   "error.agent_mode_error": " ❌ Erro no modo agente: %v",
-
   "session.new_session_started": "Iniciada nova sessão de conversa; histórico foi limpo.",
   "session.usage_header": "Uso do comando /session:",
   "session.usage_save": "  /session save <nome>",
@@ -163,7 +152,6 @@
   "session.error_name_required_load": "Erro: é necessário fornecer um nome para carregar a sessão.",
   "session.error_name_required_delete": "Erro: é necessário fornecer um nome para deletar a sessão.",
   "session.unknown_command": "Comando de sessão desconhecido: '%s'. Use /session para ver as opções.",
-
   "chunk.no_more_chunks": "Não há mais chunks de arquivos disponíveis.",
   "chunk.no_more_pending_but_failed": "Não há mais chunks pendentes, mas existem %d chunks com falha. Use /retry para retentar o último chunk com falha ou /retryall para retentar todos.",
   "chunk.sending": "Enviando chunk %d de %d... (%d restantes após este)",
@@ -194,7 +182,6 @@
   "chunk.skipping": "Pulando chunk %d/%d...",
   "chunk.status_no_pending": "- Não há chunks pendentes.",
   "chunk.status_no_failed": "- Não há chunks com falha.",
-
   "agent.header.title": "🤖 MODO AGENTE: PLANO DE AÇÃO",
   "agent.header.description": "A IA sugeriu os seguintes comandos para executar sua tarefa.",
   "agent.plan.compact_view": "📋 PLANO (visão compacta)",
@@ -227,7 +214,6 @@
   "agent.menu.redraw": "Atualiza a tela (clear)",
   "agent.menu.quit": "Sai do Modo Agente",
   "agent.prompt.choice": "\n ➤ Sua escolha: ",
-
   "agent.status.exiting": "\n ✅ Saindo do modo agente.",
   "agent.status.no_output_to_show": "Sem saída para exibir.",
   "agent.status.no_output_to_save": "Sem saída para salvar.",
@@ -261,7 +247,6 @@
   "agent.status.edit_prompt": "Editar no terminal (t) ou em editor externo (e)? [t/e]: ",
   "agent.status.edit_command_prompt": "Comando %d/%d (%s): ",
   "agent.status.interactive_confirm": "O comando '%s' pode ser interativo. Executar em modo interativo? (s/N): ",
-
   "agent.error.invalid_command_number": "Número de comando inválido.",
   "agent.error.invalid_command_number_edit": "Número de comando inválido para editar.",
   "agent.error.invalid_command_number_simulate": "Número de comando inválido para simular.",
@@ -275,7 +260,6 @@
   "agent.error.write_script": "❌ Erro ao escrever script: %v",
   "agent.error.change_dir": "❌ Erro ao trocar diretório para '%s': %v",
   "agent.error.invalid_option": "Opção inválida.",
-
   "agent.oneshot.no_command": "\nNenhum comando executável foi sugerido pela IA.",
   "agent.oneshot.header": "\n🤖 MODO AGENTE (ONE-SHOT): Comando Sugerido",
   "agent.oneshot.header_auto_exec": "\n🤖 MODO AGENTE (ONE-SHOT): Execução Automática",
@@ -285,24 +269,19 @@
   "agent.oneshot.auto_exec_aborted": "execução automática abortada por segurança. O comando sugerido é potencialmente perigoso: %q",
   "agent.oneshot.auto_exec_running": "✅ Comando seguro detectado. Executando o comando sugerido...",
   "agent.oneshot.error_with_output": "o comando foi executado, mas retornou um erro: %s",
-
   "oneshot.error_overrides": "❌ Erro ao aplicar overrides de provider/model",
-
   "agent.system_prompt.interactive": "Você é um assistente de linha de comando que ajuda o usuário a executar tarefas no sistema de forma segura. Sempre explique brevemente o propósito antes dos comandos. Prefira comandos simples e não interativos. Evite comandos potencialmente destrutivos (rm -rf, dd, mkfs, etc.) sem um aviso claro de risco e alternativas seguras. Quando sugerir comandos executáveis, use blocos de código exatamente no formato:\n\n```execute:<tipo>\n<comandos>\n```\n\nTipos aceitos: shell, git, docker, kubectl. Se houver ambiguidade, faça uma pergunta antes de fornecer comandos.",
   "agent.system_prompt.default.base": "Você é um assistente especialista em linha de comando, operando dentro de um terminal. Seu objetivo é ajudar o usuário a realizar tarefas de forma segura e eficiente, fornecendo os comandos corretos.\n\n**[Contexto Disponível]**\n- Sistema Operacional: %s\n- Shell Padrão: %s\n- Diretório Atual: %s\n\n**[PROCESSO OBRIGATÓRIO]**\nPara cada solicitação do usuário, você DEVE seguir estritamente estas duas etapas:\n\n**Etapa 1: Planejamento**\nPense passo a passo de forma interna. Se necessário, resuma o raciocínio em uma tag <reasoning> para mostrar ao usuário.\n\n**Etapa 2: Resposta Final Estruturada**\nApós o raciocínio, forneça a resposta final contendo:\n1. Uma tag <explanation> com uma explicação clara e concisa do que os comandos farão.\n2. Um ou mais blocos de código no formato de exemplo (o bloco de exemplo real é injetado abaixo).\n\n**[DIRETRIZES E RESTRIÇÕES]**\n1. Segurança é Prioridade: NUNCA sugira comandos destrutivos ('rm -rf', 'dd', 'mkfs', etc.) sem um aviso explícito sobre os riscos na tag <explanation>.\n2. Clareza: Prefira comandos que sejam fáceis de entender. Se um comando for complexo (ex: 'awk', 'sed'), explique cada parte dele.\n3. Eficiência: Use pipes ('|') e combine comandos para criar soluções eficientes quando apropriado.\n4. Interatividade: Evite comandos interativos (ex: 'vim', 'nano', 'ssh' sem argumentos). Se for necessário, avise o usuário na <explanation> e adicione o marcador #interactive ao final do comando (ex.: 'ssh user@host #interactive') para que a CLI trate como interativo.\n5. Ambiguidade: Se o pedido do usuário for ambíguo, em vez de adivinhar, faça uma pergunta para esclarecer. NÃO forneça um bloco execute nesse caso.\n6. Formato: Use blocos de código do tipo execute:<tipo> conforme exemplo injetado abaixo.\n\n**[EXEMPLO COMPLETO]**\n\n**Solicitação do Usuário:** \"liste todos os arquivos go neste projeto e conte as linhas de cada um\"\n\n**Sua Resposta:**\n<reasoning>\n1. O usuário quer encontrar todos os arquivos com a extensão .go. O comando 'find' é ideal para isso.\n2. O ponto de partida da busca deve ser o diretório atual ('.').\n3. O critério de busca é o nome do arquivo, então usarei: find . -name \"*.go\"\n4. Para cada arquivo encontrado, o usuário quer contar as linhas. O comando 'wc -l' faz isso.\n5. Preciso combinar find com wc -l. A melhor forma de fazer isso para múltiplos arquivos é usando xargs ou a opção -exec do find. A opção -exec com + é eficiente.\n6. O comando final será: find . -name \"*.go\" -exec wc -l {} +\n</reasoning>\n<explanation>\nVou usar o comando 'find' para procurar recursivamente por todos os arquivos que terminam com .go a partir do diretório atual. Em seguida, para cada arquivo encontrado, vou executar o comando 'wc -l' para contar o número de linhas.\n</explanation>\n\nExemplo de bloco de comando (formato mostrado abaixo):",
   "agent.system_prompt.oneshot": "Você é um assistente de linha de comando operando em um modo de execução única (one-shot). Sua tarefa é analisar o pedido do usuário e fornecer **um único e conciso bloco de comando** que resolva a tarefa da forma mais eficiente e segura possível.\n\n- Responda **apenas** com o melhor bloco de comando no formato ```execute:shell.\n- **Não** forneça múltiplos blocos de comando ou alternativas.\n- **Não** adicione explicações longas antes ou depois, apenas o comando necessário para a execução.\n- Evite comandos destrutivos (como rm -rf) a menos que seja explicitamente solicitado e a intenção seja clara.\n- O comando deve ser diretamente executável, pois precisamos apenas de um único comando, o melhor e mais expert possível.",
-
   "agent.llm_prompt.continuation": "O comando sugerido anteriormente foi:\n%s\n\nO resultado (stdout) foi:\n%s\n\nO erro (stderr) foi:\n%s\n\nPor favor, sugira uma correção ou próximos passos baseados no resultado. Forneça comandos executáveis no formato apropriado.",
   "agent.llm_prompt.continuation_with_context": "O comando sugerido anteriormente foi:\n%s\n\nO resultado (stdout) foi:\n%s\n\nO erro (stderr) foi:\n%s\n\nPor favor, sugira uma correção ou próximos passos baseados no resultado e no contexto fornecido. Forneça comandos executáveis no formato apropriado.\n\nContexto adicional fornecido pelo usuário:\n%s",
   "agent.llm_prompt.pre_execution_context": "O comando que você sugeriu foi:\n```\n%s\n```\n\nAntes de executá-lo, o usuário forneceu o seguinte contexto ou instrução adicional:\n%s\n\nPor favor, revise o comando sugerido com base neste novo contexto. Se necessário, modifique-o ou sugira um novo conjunto de comandos. Apresente os novos comandos no formato executável apropriado.",
-
   "main.warn_expand_path": "Aviso: não foi possível expandir o caminho '%s': %v",
   "main.error_dotenv_not_found": "Não foi encontrado o arquivo .env em %s",
   "main.error_logger_init": "Não foi possível inicializar o logger: %v",
   "main.error_no_provider": "Nenhum provedor LLM está configurado. Verifique suas variáveis de ambiente.",
   "main.error_apply_overrides": " ❌ Erro ao aplicar overrides: %v",
   "manager.error_provider_not_supported": "Provedor LLM '%s' não suportado ou não configurado",
-
   "cli.switch.invalid_max_tokens": " ❌ Valor inválido para --max-tokens: '%s'. Deve ser um número >= 0.",
   "cli.switch.max_tokens_set": " ✅ Limite máximo de tokens definido para: %d (0 = usar padrão do provedor)",
   "cli.switch.stackspot_only_flags": " ❌ As flags --realm e --agent-id só podem ser usadas com o provedor STACKSPOT.",
@@ -313,7 +292,6 @@
   "cli.switch.change_model_error": " ❌ Erro ao trocar para o modelo '%s': %v\n   Verifique se o nome do modelo está correto para o provedor atual.",
   "cli.switch.change_model_success": " ✅ Modelo trocado com sucesso para %s (%s)",
   "cli.switch.available_providers": "Provedores disponíveis:",
-
   "cli.config.header": "Configuração Atual do ChatCLI",
   "cli.config.subtitle": "Aqui está um resumo das configurações em tempo de execução, provedores e variáveis de ambiente.",
   "cli.config.section_general": "Configurações Gerais",
@@ -339,16 +317,13 @@
   "cli.config.section_available_providers": "Provedores Disponíveis",
   "cli.config.key_provider_n": "Provedor %d",
   "cli.config.no_providers_configured": "Nenhum configurado. Defina as chaves de API no .env",
-
   "agent.validator.empty_command": "comando vazio",
   "agent.validator.dangerous_command": "comando potencialmente perigoso detectado: %s",
-
   "agent.executor.interactive_mode_header": "\n--- Entrando no modo de comando interativo ---",
   "agent.executor.interactive_mode_info": "O controle do terminal será passado para o comando.",
   "agent.executor.interactive_mode_exit_tip": "Para retornar, saia do programa (ex: ':q' no vim, 'exit' no shell).",
   "agent.executor.interactive_mode_footer": "--- Retornando ao ChatCLI ---",
   "agent.executor.fail_restore_terminal": "Falha ao restaurar terminal",
-
   "help.section.contexts": "Gerenciamento de Contextos",
   "help.command.context_create": "Cria novo contexto a partir de arquivos/diretórios",
   "help.command.context_mode": "Modo de processamento (full, summary, chunked, smart)",
@@ -364,9 +339,7 @@
   "help.command.context_export": "Exporta contexto para arquivo JSON",
   "help.command.context_import": "Importa contexto de arquivo JSON",
   "help.command.context_metrics": "Mostra métricas e estatísticas de uso",
-
   "context.error.unknown_subcommand": "Subcomando desconhecido: '%s'. Use /context help para ver comandos disponíveis.",
-
   "context.create.usage": "Uso: /context create <nome> <caminhos...> [--mode <modo>] [--description <texto>] [--tags <tag1,tag2>]",
   "context.create.error.mode_required": "Flag --mode requer um valor (full, summary, chunked, smart)",
   "context.create.error.description_required": "Flag --description requer um valor",
@@ -375,7 +348,6 @@
   "context.create.error.failed": "Erro ao criar contexto: %v",
   "context.create.processing": " 🔄 Processando arquivos...",
   "context.create.success": " ✅ Contexto criado com sucesso!",
-
   "context.attach.usage": "Uso: /context attach <nome> [--priority <número>]",
   "context.attach.error.invalid_priority": "Prioridade inválida. Deve ser um número inteiro.",
   "context.attach.error.not_found": "Contexto '%s' não encontrado",
@@ -385,50 +357,79 @@
   "context.attach.files": "Arquivos:",
   "context.attach.files_label": "arquivos",
   "context.attach.size": "Tamanho:",
-
   "context.detach.usage": "Uso: /context detach <nome>",
   "context.detach.error.not_found": "Contexto '%s' não encontrado",
   "context.detach.error.failed": "Erro ao desanexar contexto: %v",
   "context.detach.success": " ✅ Contexto '%s' desanexado da sessão",
-
   "context.delete.usage": "Uso: /context delete <nome>",
   "context.delete.error.not_found": "Contexto '%s' não encontrado",
   "context.delete.error.failed": "Erro ao deletar contexto: %v",
   "context.delete.confirm": " ⚠️  Tem certeza que deseja deletar o contexto '%s'? (s/N): ",
   "context.delete.cancelled": "Operação cancelada.",
   "context.delete.success": " ✅ Contexto '%s' deletado com sucesso",
-
   "context.list.error.failed": "Erro ao listar contextos: %v",
   "context.list.empty": "Nenhum contexto encontrado. Use /context create para criar um.",
   "context.list.header": " 📦 Contextos disponíveis",
-
   "context.show.usage": "Uso: /context show <nome>",
   "context.show.error.not_found": "Contexto '%s' não encontrado",
-
   "context.merge.usage": "Uso: /context merge <novo-nome> <contexto1> <contexto2> [contexto3...]",
   "context.merge.error.context_not_found": "Contexto '%s' não encontrado",
   "context.merge.error.failed": "Erro ao mesclar contextos: %v",
   "context.merge.processing": " 🔄 Mesclando contextos...",
   "context.merge.success": " ✅ Contextos mesclados com sucesso!",
-
   "context.attached.error.failed": "Erro ao buscar contextos anexados: %v",
   "context.attached.empty": "Nenhum contexto anexado a esta sessão. Use /context attach <nome> para anexar.",
   "context.attached.header": " 📌 Contextos anexados à sessão",
-
   "context.export.usage": "Uso: /context export <nome> <caminho-destino>",
   "context.export.error.not_found": "Contexto '%s' não encontrado",
   "context.export.error.failed": "Erro ao exportar contexto: %v",
   "context.export.success": " ✅ Contexto exportado para: %s",
-
   "context.import.usage": "Uso: /context import <caminho-arquivo>",
   "context.import.error.failed": "Erro ao importar contexto: %v",
   "context.import.success": " ✅ Contexto '%s' importado com sucesso",
-
   "context.metrics.header": " 📊 Métricas de Contextos",
-
   "context.update.usage": "Uso: /context update <nome> [<caminhos...>] [--mode <modo>] [--description <texto>] [--tags <tag1,tag2>]",
   "context.update.processing": " 🔄 Atualizando contexto...",
   "context.update.error.failed": "Erro ao atualizar contexto: %v",
   "context.update.success": " ✅ Contexto atualizado com sucesso!",
-  "context.create.force_tip": "Dica: Use --force para sobrescrever um contexto existente"
+  "context.create.force_tip": "Dica: Use --force para sobrescrever um contexto existente",
+  "plugin.usage_header": "Uso: /plugin <list|install|show|inspect|uninstall> [argumentos]",
+  "plugin.list.empty": "Nenhum plugin instalado. Use '/plugin install <url>' para adicionar um.",
+  "plugin.list.header": " 🔌 PLUGINS INSTALADOS:",
+  "plugin.show.usage": "Uso: /plugin show <nome-do-plugin>",
+  "plugin.error.not_found": " ❌ Plugin '%s' não encontrado.",
+  "plugin.show.details_for": " 🧩 DETALHES DO PLUGIN: %s",
+  "plugin.show.description": "Descrição",
+  "plugin.show.usage_label": "Uso",
+  "plugin.show.version": "Versão",
+  "plugin.inspect.usage": "Uso: /plugin inspect <nome-do-plugin>",
+  "plugin.inspect.details_for": "🛠️ INSPEÇÃO DO PLUGIN: %s",
+  "plugin.inspect.path": "Caminho do Executável",
+  "plugin.inspect.permissions": "Permissões",
+  "plugin.install.usage": "Uso: /plugin install <url-do-repositorio-git>",
+  "plugin.install.security_warning": " ⚠️ AVISO: Você está prestes a clonar, compilar e executar código de um repositório de terceiros. Instale apenas de fontes confiáveis.",
+  "plugin.install.confirm": "Deseja continuar com a instalação de '%s'? (s/N): ",
+  "plugin.install.cancelled": "Instalação cancelada.",
+  "plugin.install.installing": "Instalando plugin de '%s'...",
+  "plugin.install.error.tempdir": " ❌ Erro ao criar diretório temporário: %v",
+  "plugin.install.error.clone": " ❌ Erro ao clonar o repositório: %v",
+  "plugin.install.error.build": " ❌ Erro ao compilar o plugin: %v\nSaída: %s",
+  "plugin.install.success": " ✅ Plugin '%s' instalado com sucesso!",
+  "plugin.uninstall.usage": "Uso: /plugin uninstall <nome-do-plugin>",
+  "plugin.uninstall.error": " ❌ Erro ao desinstalar o plugin '%s': %v",
+  "plugin.uninstall.success": " ✅ Plugin '%s' desinstalado.",
+  "plugin.error.manager_disabled": " ❌ O gerenciador de plugins não está disponível. Verifique os logs para erros de inicialização.",
+  "plugin.error.unknown_subcommand": "Subcomando de plugin desconhecido: '%s'",
+  "plugin.reloading": "Recarregando plugins...",
+  "plugin.reload_success": " ✅ Plugins recarregados. Novos plugins já estão disponíveis!",
+  "agent.feedback.tool_output_header": "--- Resultado da Ferramenta ---",
+  "agent.status.using_tool": " 🤖 Agente está usando a ferramenta: %s %s",
+  "agent.status.final_answer_no_commands": " ✅ O agente forneceu uma resposta final sem comandos executáveis.",
+  "agent.error.max_turns_reached": "O agente não chegou a uma solução final após %d tentativas.",
+  "agent.system_prompt.tools_header": "**[FERRAMENTAS DISPONÍVEIS]**",
+  "agent.system_prompt.tools_instruction": "Para usar uma ferramenta, sua resposta DEVE conter um bloco no formato: `<tool_call name=\"@nome-da-ferramenta\" args=\"argumento1 argumento2\" />`. Após receber o resultado da ferramenta, decida o próximo passo. Se nenhuma ferramenta for adequada, gere a solução final com blocos ```execute:shell```.",
+  "agent.error.tool_not_found": "Erro: a ferramenta '%s' que você tentou usar não foi encontrada. Por favor, escolha uma da lista ou gere um comando de shell.",
+  "agent.feedback.tool_output": "A ferramenta '%s' foi executada e retornou o seguinte:\n\n<tool_output>\n%s\n</tool_output>\n\nCom base nisso, qual é o próximo passo?",
+  "agent.error.max_turns_reached_context": "⚠️ O agente parou após atingir o limite máximo de %d turnos para evitar loops infinitos. Ele não chegou a uma solução final.",
+  "agent.feedback.last_thought": "Aqui está o último raciocínio do agente:"
 }

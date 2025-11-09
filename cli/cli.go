@@ -23,6 +23,7 @@ import (
 
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/ctxmgr"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -134,6 +135,7 @@ type ChatCLI struct {
 	currentSessionName   string
 	MaxTokensOverride    int
 	UserMaxTokens        int
+	pluginManager        *plugins.Manager
 	contextHandler       *ContextHandler
 }
 
@@ -278,6 +280,13 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		processingDone:    make(chan struct{}),
 		MaxTokensOverride: 0,
 	}
+
+	pluginMgr, err := plugins.NewManager(logger)
+	if err != nil {
+		// Logamos o erro, mas a aplicação continua. O pluginManager será um objeto válido, mas vazio.
+		logger.Error("Falha crítica ao inicializar o gerenciador de plugins, plugins estarão desabilitados", zap.Error(err))
+	}
+	cli.pluginManager = pluginMgr
 
 	cli.configureProviderAndModel()
 
@@ -566,6 +575,9 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 func (cli *ChatCLI) restoreTerminal() {
 	if runtime.GOOS == "windows" {
+		cmd := exec.Command("cmd", "/c", "cls") // Limpa a tela no Windows
+		cmd.Stdout = os.Stdout
+		cmd.Run()
 		return
 	}
 	cmd := exec.Command("stty", "sane")
@@ -573,6 +585,7 @@ func (cli *ChatCLI) restoreTerminal() {
 	if err := cmd.Run(); err != nil {
 		cli.logger.Warn("Falha ao restaurar o terminal com 'stty sane'", zap.Error(err))
 	}
+	fmt.Print("\033[2J\033[H")
 }
 
 func (cli *ChatCLI) runAgentLogic() {
@@ -655,6 +668,9 @@ func (cli *ChatCLI) cleanup() {
 		if err := assistantClient.Cleanup(); err != nil {
 			cli.logger.Error("Erro na limpeza do OpenAI Assistant", zap.Error(err))
 		}
+	}
+	if cli.pluginManager != nil {
+		cli.pluginManager.Close()
 	}
 	if err := cli.logger.Sync(); err != nil {
 		fmt.Printf("Falha ao sincronizar logger: %v\n", err)
@@ -846,6 +862,12 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("  "+i18n.T("help.command.agent_last_result"), "")
 	printCommand("  "+i18n.T("help.command.agent_compact_plan"), "")
 	printCommand("  "+i18n.T("help.command.agent_full_plan"), "")
+
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.plugins"), ColorLime))
+	printCommand("/plugin list", i18n.T("help.command.plugin_list"))
+	printCommand("/plugin install <url>", i18n.T("help.command.plugin_install"))
+	printCommand("/plugin show <nome>", i18n.T("help.command.plugin_show"))
+	printCommand("/plugin inspect <nome>", i18n.T("help.command.plugin_inspect"))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.sessions"), ColorLime))
 	printCommand("/session save <nome>", i18n.T("help.command.session_save"))
@@ -1965,6 +1987,9 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 	if strings.HasPrefix(lineBeforeCursor, "/session") {
 		return cli.getSessionSuggestions(d)
 	}
+	if strings.HasPrefix(lineBeforeCursor, "/plugin ") {
+		return cli.getPluginSuggestions(d)
+	}
 
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
@@ -2079,18 +2104,31 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/skipchunk", Description: "Pular um chunk de arquivo"},
 		{Text: "/session", Description: "Gerencia as sessões, new, save, list, load, delete"},
 		{Text: "/context", Description: "Gerencia contextos persistentes (create, attach, detach, list, show, etc)"},
+		{Text: "/plugin", Description: "Gerencia plugins (install, list, show, etc.)"},
+		{Text: "/clear", Description: "Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais."},
 	}
 }
 
 // GetContextCommands retorna a lista de sugestões para comandos com @
 func (cli *ChatCLI) GetContextCommands() []prompt.Suggest {
-	return []prompt.Suggest{
-		{Text: "@history", Description: "Adicionar histórico do shell ao contexto"},
-		{Text: "@git", Description: "Adicionar informações do Git ao contexto"},
-		{Text: "@env", Description: "Adicionar variáveis de ambiente ao contexto"},
-		{Text: "@file", Description: "Adicionar conteúdo de um arquivo ou diretório"},
-		{Text: "@command", Description: "Executar um comando do sistema e usar a saída"},
+	suggestions := []prompt.Suggest{
+		{Text: "@history", Description: i18n.T("help.command.history")},
+		{Text: "@git", Description: i18n.T("help.command.git")},
+		{Text: "@env", Description: i18n.T("help.command.env")},
+		{Text: "@file", Description: i18n.T("help.command.file")},
+		{Text: "@command", Description: i18n.T("help.command.command")},
 	}
+
+	// Adicionar plugins customizados
+	if cli.pluginManager != nil {
+		for _, plugin := range cli.pluginManager.GetPlugins() {
+			suggestions = append(suggestions, prompt.Suggest{
+				Text:        plugin.Name(),
+				Description: plugin.Description(),
+			})
+		}
+	}
+	return suggestions
 }
 
 // filePathCompleter é uma função dedicada para autocompletar caminhos de arquivo
@@ -2764,4 +2802,49 @@ func (cli *ChatCLI) getSessionNameSuggestions() []prompt.Suggest {
 	}
 
 	return suggestions
+}
+
+func (cli *ChatCLI) getPluginSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+
+	// Sugerir subcomandos
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		suggestions := []prompt.Suggest{
+			{Text: "list", Description: "Lista todos os plugins instalados."},
+			{Text: "install", Description: "Instala um novo plugin a partir de um repositório Git."},
+			{Text: "reload", Description: "Força o recarregamento de todos os plugins instalados."},
+			{Text: "show", Description: "Mostra detalhes de um plugin específico."},
+			{Text: "inspect", Description: "Mostra informações de depuração de um plugin."},
+			{Text: "uninstall", Description: "Remove um plugin instalado."},
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	subcommand := args[1]
+	// Sugerir nomes de plugins para subcomandos que precisam de um nome
+	if subcommand == "show" || subcommand == "inspect" || subcommand == "uninstall" {
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return cli.getPluginNameSuggestions(d.GetWordBeforeCursor())
+		}
+	}
+
+	return []prompt.Suggest{}
+}
+
+func (cli *ChatCLI) getPluginNameSuggestions(prefix string) []prompt.Suggest {
+	if cli.pluginManager == nil {
+		return nil
+	}
+	plugins := cli.pluginManager.GetPlugins()
+	suggestions := make([]prompt.Suggest, 0, len(plugins))
+	for _, p := range plugins {
+		// Remove o '@' para a sugestão, pois é mais fácil de digitar
+		nameWithoutAt := strings.TrimPrefix(p.Name(), "@")
+		suggestions = append(suggestions, prompt.Suggest{
+			Text:        nameWithoutAt,
+			Description: p.Description(),
+		})
+	}
+	return prompt.FilterHasPrefix(suggestions, prefix, true)
 }
