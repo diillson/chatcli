@@ -6,6 +6,7 @@ docs/
 e2e/
 assets/
 ghpages/
+plugins-examples/
 
 # Ignorar arquivos de configuração específicos
 CHANGELOG.md
