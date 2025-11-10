@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.2](https://github.com/diillson/chatcli/compare/v1.38.1...v1.38.2) (2025-11-10)
+
+
+### Bug Fixes
+
+* **plugins:** add new `[@kind](https://github.com/kind)` plugin example for Kubernetes cluster management ([#346](https://github.com/diillson/chatcli/issues/346)) ([#347](https://github.com/diillson/chatcli/issues/347)) ([14ffcd8](https://github.com/diillson/chatcli/commit/14ffcd893ff1c705e3bb00262a1749db7e418194))
+
 ## [1.38.1](https://github.com/diillson/chatcli/compare/v1.38.0...v1.38.1) (2025-11-09)
 
 
