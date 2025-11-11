@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.4](https://github.com/diillson/chatcli/compare/v1.38.3...v1.38.4) (2025-11-11)
+
+
+### Bug Fixes
+
+* **plugins:** introduce `[@docker-clean](https://github.com/docker-clean)` plugin example for managing Docker assets ([#352](https://github.com/diillson/chatcli/issues/352)) ([#353](https://github.com/diillson/chatcli/issues/353)) ([53b5065](https://github.com/diillson/chatcli/commit/53b50653e503f49e8067e41afd855a9ca16f6dc6))
+
 ## [1.38.3](https://github.com/diillson/chatcli/compare/v1.38.2...v1.38.3) (2025-11-11)
 
 
