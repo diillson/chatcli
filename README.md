@@ -150,7 +150,6 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  `CHATCLI_DOTENV`  – **(Opcional)** Define o caminho do seu arquivo  .env .
   -  `CHATCLI_IGNORE` – **(Opcional)** Define uma lista de arquivos ou pastas a serem ignoradas pelo ChatCLI.
   -  `CHATCLI_LANG` - **(Opcional)** Força a CLI a usar um idioma específico (ex: `pt-BR`, `en`). Tem prioridade sobre a detecção automática do sistema.
-  -  `CHATCLI_AGENT_MAX_TURNS` - **(Opcional)** Define o máximo de turnos que o agente pode ter. 
   - `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
   -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` )
   -  `MAX_RETRIES`  - **(Opcional)** Número máximo de tentativas para chamadas de API (padrão:  `5` ).
@@ -170,15 +169,15 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  XAI_API_KEY ,  XAI_MODEL ,  XAI_MAX_TOKENS
   -  CLIENT_ID ,  CLIENT_KEY ,  STACKSPOT_REALM ,  STACKSPOT_AGENT_ID  (para StackSpot)
 - Agente:
-  -  CHATCLI_AGENT_CMD_TIMEOUT  – (Opcional) Timeout padrão para cada comando executado no Modo Agente. Aceita durações Go (ex.: 30s, 2m, 10m). Padrão:  10m .
-  -  CHATCLI_AGENT_DENYLIST  – (Opcional) Lista de expressões regulares (separadas por “;”) para bloquear comandos perigosos além do padrão. Ex.: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
-  -  CHATCLI_AGENT_ALLOW_SUDO  – (Opcional) Permite comandos com sudo sem bloqueio automático (true/false). Padrão:  false  (bloqueia sudo por segurança).
-
+  -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Opcional)** Timeout padrão para cada comando executado no Modo Agente. Aceita durações Go (ex.: 30s, 2m, 10m). Padrão:  10m .
+  -  `CHATCLI_AGENT_DENYLIST`  – **(Opcional)** Lista de expressões regulares (separadas por “;”) para bloquear comandos perigosos além do padrão. Ex.: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
+  -  `CHATCLI_AGENT_ALLOW_SUDO`  – **(Opcional)** Permite comandos com sudo sem bloqueio automático (true/false). Padrão:  false  (bloqueia sudo por segurança).
+  -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Opcional)** Define o máximo de turnos que o agente pode ter. Padrão: 7.
+  -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Opcional)** Define o tempo limite de execução para o plugin do agente. Padrão: 15 (Minutos)
 
 ### Exemplo de  .env
 
     # Configurações Gerais
-    
     LOG_LEVEL=info
     CHATCLI_LANG=pt_BR
     CHATCLI_IGNORE=~/.chatignore
@@ -189,9 +188,13 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     LOG_FILE=app.log
     LOG_MAX_SIZE=300MB
     HISTORY_MAX_SIZE=300MB
+
+    # Agente Configurações
     CHATCLI_AGENT_CMD_TIMEOUT=2m    # O comando terá 2m para ser executado após isso é travado e finalizado
     CHATCLI_AGENT_DENYLIST=rm\\s+-rf\\s+.*;curl\\s+[^|;]*\\|\\s*(sh|bash);dd\\s+if=;mkfs\\w*\\s+
     CHATCLI_AGENT_ALLOW_SUDO=false
+    CHATCLI_AGENT_PLUGIN_MAX_TURNS=10
+    CHATCLI_AGENT_PLUGIN_TIMEOUT=20
     
     # Configurações do OpenAI
     OPENAI_API_KEY=sua-chave-openai
@@ -633,6 +636,153 @@ Inicie o agente com  /agent <consulta>  ou  /run <consulta> . O agente irá suge
   -  wN : Salva a saída do comando  N  em um arquivo temporário para análise posterior ou compartilhamento.
   -  r : Redesenha a tela, útil para limpar a visualização.
 
+## 🔌 Sistema de Plugins
+
+O ChatCLI suporta um sistema de plugins para estender suas funcionalidades e automatizar tarefas complexas. Um plugin é um simples executável que segue um contrato específico, permitindo que o  chatcli  o descubra, execute e interaja com ele de forma segura.
+
+Isso permite criar comandos customizados (como  @kind ) que podem orquestrar ferramentas, interagir com APIs ou realizar qualquer lógica que você possa programar.
+
+### Para Usuários: Gerenciando Plugins
+
+Você pode gerenciar os plugins instalados através do comando  /plugin .
+
+#### Listar Plugins Instalados
+
+Para ver todos os comandos de plugin disponíveis:
+
+/plugin list
+
+#### Instalar um Novo Plugin
+
+Você pode instalar um plugin diretamente de um repositório Git. O  chatcli  irá clonar, compilar (se for Go) e instalar o executável no diretório correto.
+
+/plugin install https://github.com/usuario/meu-plugin-chatcli.git
+
+> ⚠️ Aviso de Segurança: A instalação de um plugin envolve baixar e executar código de terceiros em sua máquina. Instale plugins apenas de fontes que você confia plenamente.
+
+#### Ver Detalhes de um Plugin
+
+Para ver a descrição e como usar um plugin específico:
+
+/plugin show <nome-do-plugin>
+
+#### Desinstalar um Plugin
+
+Para remover um plugin:
+
+/plugin uninstall <nome-do-plugin>
+
+#### Recarregar Plugins
+
+O  chatcli  monitora o diretório de plugins e recarrega automaticamente se houver mudanças. Se precisar forçar um recarregamento manual:
+
+/plugin reload
+
+--------
+
+### Para Desenvolvedores: Criando seu Próprio Plugin
+
+Criar um plugin é simples. Basta criar um programa executável que siga o "contrato" do ChatCLI.
+
+#### O Contrato do Plugin
+
+1. Executável: O plugin deve ser um arquivo executável.
+2. Localização: O arquivo executável deve ser colocado no diretório  ~/.chatcli/plugins/ .
+3. Nome do Comando: O nome do comando será  @  seguido pelo nome do arquivo executável. Ex: um arquivo chamado  kind  será invocado como  @kind .
+4. Metadados ( --metadata ): O executável deve responder à flag  --metadata . Quando chamado com essa flag, ele deve imprimir na saída padrão (stdout) um JSON contendo as seguintes informações:
+```
+  {
+   "name": "@meu-comando",
+   "description": "Uma breve descrição do que o plugin faz.",
+   "usage": "@meu-comando <subcomando> [--flag value]",
+   "version": "1.0.0"
+   }
+```
+5. Comunicação e Feedback (stdout vs stderr): Esta é a parte mais importante para uma boa experiência de usuário.
+   - Saída Padrão ( stdout ): Use a saída padrão apenas para o resultado final que deve ser retornado ao  chatcli  e, potencialmente, enviado para a IA.
+   - Saída de Erro ( stderr ): Use a saída de erro para todos os logs de progresso, status, avisos e mensagens para o usuário. O  chatcli  exibirá o  stderr  em tempo real, evitando a sensação de que o programa travou.
+
+#### Exemplo: Plugin "Hello World" em Go
+
+Este exemplo demonstra como seguir o contrato, incluindo o uso de  stdout  e  stderr .
+
+hello/main.go :
+```
+package main
+
+import (
+    "encoding/json"
+    "flag"
+    "fmt"
+    "os"
+    "time"
+)
+
+// Metadata define a estrutura para a flag --metadata.
+type Metadata struct {
+    Name        string `json:"name"`
+    Description string `json:"description"`
+    Usage       string `json:"usage"`
+    Version     string `json:"version"`
+}
+
+// logf envia mensagens de progresso para o usuário (via stderr).
+func logf(format string, v ...interface{}) {
+    fmt.Fprintf(os.Stderr, format, v...)
+}
+
+func main() {
+    // 1. Lidar com a flag --metadata
+    metadataFlag := flag.Bool("metadata", false, "Exibe os metadados do plugin")
+    flag.Parse()
+
+    if *metadataFlag {
+            meta := Metadata{
+                    Name:        "@hello",
+                    Description: "Um plugin de exemplo que demonstra o fluxo de stdout/stderr.",
+                    Usage:       "@hello [seu-nome]",
+                    Version:     "1.0.0",
+            }
+            jsonMeta, _ := json.Marshal(meta)
+            fmt.Println(string(jsonMeta)) // Metadados vão para stdout
+            return
+    }
+
+    // 2. Lógica principal do plugin
+    logf("🚀 Plugin 'hello' iniciado!\n") // Log de progresso para stderr
+
+    time.Sleep(2 * time.Second) // Simula um trabalho
+    logf("   - Realizando uma tarefa demorada...\n")
+    time.Sleep(2 * time.Second)
+
+    name := "Mundo"
+    if len(flag.Args()) > 0 {
+            name = flag.Args()[0]
+    }
+
+    logf("✅ Tarefa concluída!\n") // Mais progresso para stderr
+
+    // 3. Enviar o resultado final para stdout
+    // Esta é a única string que será retornada para o chatcli como resultado.
+    fmt.Printf("Olá, %s! A hora agora é %s.", name, time.Now().Format(time.RFC1123))
+}
+```
+#### Compilação e Instalação do Exemplo
+
+1. Compile o executável:
+>go build -o hello ./hello/main.go
+
+2. Mova para o diretório de plugins:
+>Crie o diretório se ele não existir:
+mkdir -p ~/.chatcli/plugins/
+
+3. Mova o executável
+>mv hello ~/.chatcli/plugins/
+
+3. Use no ChatCLI: Agora, dentro agent do  chatcli , você pode executar seu novo comando:
+>❯ /agent @hello
+
+Você verá os logs de progresso ( 🚀 Plugin 'hello' iniciado!... ) em tempo real no seu terminal, e no final, a mensagem  Olá, Mundo!...  será tratada como a saída do comando.
 
 ### Modo Agente One-Shot
 
