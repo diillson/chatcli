@@ -18,7 +18,8 @@ Esta não é uma simples funcionalidade. É a fundação para um novo modo de in
 
 ## Váriavel: O Ciclo de Vida do Agente
 
-- `CHATCLI_AGENT_MAX_TURNS` (número inteiro, padrão: `7`): Define o número máximo de iterações (turnos) que o agente pode executar para alcançar seu objetivo. Isso evita loops infinitos e controla o tempo de execução.
+- `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - (número inteiro, padrão: `7`): Define o número máximo de iterações (turnos) que o agente pode executar para alcançar seu objetivo. Isso evita loops infinitos e controla o tempo de execução.
+- `CHATCLI_AGENT_PLUGIN_TIMEOUT` - (número inteiro, padrão: `15`): Define o tempo limite de execução para o plugin do agente. Padrão: 15 (Minutos)
 
 ---
 ## O Coração do Agente: O Ciclo ReAct (Raciocínio e Ação)

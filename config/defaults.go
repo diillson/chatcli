@@ -60,4 +60,5 @@ const (
 	// Configuração de retry
 	DefaultMaxRetries     = 5               // Máximo de tentativas para retry
 	DefaultInitialBackoff = 3 * time.Second // Backoff inicial para retry
+	DefaultPluginTimeout  = 15 * time.Minute
 )

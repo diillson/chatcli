@@ -1,12 +1,18 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/utils"
 )
 
 // Metadata é a estrutura de descoberta que todo plugin DEVE fornecer via --metadata.
@@ -41,15 +47,68 @@ func (p *ExecutablePlugin) Path() string        { return p.path }
 
 // Execute invoca o binário do plugin, captura sua saída e trata erros.
 func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, error) {
-	execCtx, cancel := context.WithTimeout(ctx, 45*time.Second) // Timeout de 45s para plugins.
+	// 1. Obter timeout configurável (da sua implementação anterior)
+	timeoutStr := utils.GetEnvOrDefault("CHATCLI_AGENT_PLUGIN_TIMEOUT", "")
+	timeout := config.DefaultPluginTimeout // Padrão de 15 minutos
+
+	if timeoutStr != "" {
+		if d, err := time.ParseDuration(timeoutStr); err == nil && d > 0 {
+			timeout = d
+		}
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(execCtx, p.path, args...)
-	output, err := cmd.CombinedOutput()
+
+	// 2. Obter os pipes de stdout e stderr em vez de usar CombinedOutput
+	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", fmt.Errorf("plugin '%s' falhou com erro: %s\nSaída (stderr):\n%s", p.Name(), err, string(output))
+		return "", fmt.Errorf("falha ao criar stdout pipe para o plugin: %w", err)
 	}
-	return string(output), nil
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return "", fmt.Errorf("falha ao criar stderr pipe para o plugin: %w", err)
+	}
+
+	// 3. Iniciar o comando de forma não-bloqueante
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("falha ao iniciar o plugin '%s': %w", p.Name(), err)
+	}
+
+	// 4. Capturar stdout (resultado final para a IA) em um buffer
+	var stdoutBuf bytes.Buffer
+
+	// 5. Ler e exibir stderr (logs de progresso) em tempo real em uma goroutine
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Copia o stderr do plugin diretamente para o stderr do chatcli
+		_, _ = io.Copy(os.Stderr, stderrPipe)
+	}()
+
+	_, _ = io.Copy(&stdoutBuf, stdoutPipe)
+
+	// 6. Aguardar a goroutine de stderr terminar
+	wg.Wait()
+
+	// 7. Aguardar o comando do plugin finalizar e capturar seu erro de saída
+	err = cmd.Wait()
+	finalOutput := stdoutBuf.String()
+
+	if err != nil {
+		// Se o erro foi de timeout, a mensagem será mais clara
+		if execCtx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("plugin '%s' falhou: timeout de %v excedido. O progresso foi exibido acima", p.Name(), timeout)
+		}
+		// Para outros erros, inclua a saída final (se houver) para depuração
+		return "", fmt.Errorf("plugin '%s' falhou com erro: %v. Saída final (stdout):\n%s", p.Name(), err, finalOutput)
+	}
+
+	// 8. Retornar o conteúdo capturado de stdout como resultado
+	return finalOutput, nil
 }
 
 // NewPluginFromPath valida um arquivo executável e o carrega como um plugin.

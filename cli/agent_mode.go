@@ -92,7 +92,7 @@ func (a *AgentMode) getInput(prompt string) string {
 // O histórico de cada passo do agente é persistido no histórico principal do chat.
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string) error {
 	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
-	maxTurnsStr := os.Getenv("CHATCLI_AGENT_MAX_TURNS")
+	maxTurnsStr := os.Getenv("CHATCLI_AGENT_PLUGIN_MAX_TURNS")
 	maxTurns, err := strconv.Atoi(maxTurnsStr)
 	if err != nil || maxTurns <= 0 || maxTurns > 20 {
 		maxTurns = 7
