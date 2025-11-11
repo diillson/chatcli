@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.3](https://github.com/diillson/chatcli/compare/v1.38.2...v1.38.3) (2025-11-11)
+
+
+### Bug Fixes
+
+* **plugins:** enhance `[@kind](https://github.com/kind)` plugin with new features and improved logging ([#349](https://github.com/diillson/chatcli/issues/349)) ([#350](https://github.com/diillson/chatcli/issues/350)) ([ba2a97f](https://github.com/diillson/chatcli/commit/ba2a97fdeb01a40ea470a3011a5bc468ad2c58ba))
+
 ## [1.38.2](https://github.com/diillson/chatcli/compare/v1.38.1...v1.38.2) (2025-11-10)
 
 
