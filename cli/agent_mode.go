@@ -666,7 +666,6 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			// Ao retornar do loop, o agente pode ter terminado ou apresentado um novo plano.
 			// Em ambos os casos, saímos do loop do plano de ação atual.
 			return
-			continue
 
 		case strings.HasPrefix(answer, "c"):
 			cmdNumStr := strings.TrimPrefix(answer, "c")
@@ -698,7 +697,6 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 
 			// Sai do loop do plano de ação atual
 			return
-			continue
 
 		case strings.HasPrefix(answer, "pc"):
 			cmdNumStr := strings.TrimPrefix(answer, "pc")
@@ -731,7 +729,6 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 
 			// Sai do loop do plano de ação atual
 			return
-			continue
 
 		default:
 			cmdNum, err := strconv.Atoi(answer)
