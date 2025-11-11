@@ -102,19 +102,8 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	osName := runtime.GOOS
 	shellName := utils.GetUserShell()
 	currentDir, _ := os.Getwd()
-
-	var toolDescriptions []string
-	if a.cli.pluginManager != nil {
-		for _, plugin := range a.cli.pluginManager.GetPlugins() {
-			toolDescriptions = append(toolDescriptions, fmt.Sprintf("- Ferramenta: %s\n  Descrição: %s\n  Uso: %s", plugin.Name(), plugin.Description(), plugin.Usage()))
-		}
-	}
-
 	systemInstruction := i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
-	if len(toolDescriptions) > 0 {
-		systemInstruction += "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + strings.Join(toolDescriptions, "\n")
-		systemInstruction += "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
-	}
+	systemInstruction += a.getToolContextString() // Adiciona contexto de ferramentas
 
 	if len(a.cli.history) == 0 {
 		a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
@@ -128,94 +117,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery})
 
 	// --- 2. O LOOP DE RACIOCÍNIO-AÇÃO (ReAct) ---
-	for turn := 0; turn < maxTurns; turn++ {
-		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
-
-		a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery})
-
-		a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", a.cli.history, 0)
-		a.cli.animation.StopThinkingAnimation()
-
-		if err != nil {
-			return fmt.Errorf("erro ao obter resposta da IA no turno %d: %w", turn+1, err)
-		}
-
-		a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
-		formattedResponse := fmt.Sprintf("\n%s\n", a.cli.renderMarkdown(aiResponse))
-		a.cli.typewriterEffect(formattedResponse, 2*time.Millisecond)
-
-		// --- 3. ANÁLISE DA RESPOSTA E EXECUÇÃO DA AÇÃO ---
-		toolCallRegex := regexp.MustCompile(`(?s)<tool_call name="(@\S+)" (?:args="(.*?)"|args='(.*?)') />`)
-		match := toolCallRegex.FindStringSubmatch(aiResponse)
-
-		if len(match) == 4 {
-			toolName := match[1]
-			toolArgsStr := ""
-			if match[2] != "" {
-				// Aspas duplas foram usadas
-				toolArgsStr = match[2]
-			} else {
-				// Aspas simples foram usadas
-				toolArgsStr = match[3]
-			}
-
-			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
-
-			toolArgs, err := shlex.Split(unescapedToolArgsStr)
-			if err != nil {
-				a.logger.Warn("Erro ao analisar os argumentos da ferramenta com shlex", zap.String("args_str", unescapedToolArgsStr), zap.Error(err))
-				currentQuery = i18n.T("agent.error.invalid_tool_args", toolName, err)
-				continue
-			}
-
-			fmt.Printf("\n%s\n", colorize(i18n.T("agent.status.using_tool", toolName, toolArgsStr), ColorYellow))
-
-			plugin, found := a.cli.pluginManager.GetPlugin(toolName)
-			if !found {
-				currentQuery = i18n.T("agent.error.tool_not_found", toolName)
-				continue
-			}
-
-			toolOutput, err := plugin.Execute(ctx, toolArgs)
-			if err != nil {
-				toolOutput = fmt.Sprintf("Erro: %v", err)
-			}
-
-			fmt.Printf("\n%s\n%s\n", colorize(i18n.T("agent.feedback.tool_output_header"), ColorGray), toolOutput)
-
-			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, toolOutput)
-			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
-
-			continue
-		}
-
-		commandBlocks := a.extractCommandBlocks(aiResponse)
-		if len(commandBlocks) > 0 {
-			a.displayResponseWithoutCommands(aiResponse, commandBlocks)
-			a.handleCommandBlocks(ctx, commandBlocks)
-			return nil
-		}
-
-		// Se a IA deu uma resposta final sem comandos, a resposta já foi exibida com o efeito de digitação acima.
-		// Apenas adicionamos uma mensagem de status final.
-		fmt.Println(colorize(i18n.T("agent.status.final_answer_no_commands"), ColorGreen))
-		return nil
-	}
-
-	// --- 4. TRATAMENTO DE FALHA (LIMITE DE TURNOS ATINGIDO) ---
-
-	// Se o loop terminar, o agente não conseguiu encontrar uma solução.
-	fmt.Println(colorize(i18n.T("agent.error.max_turns_reached_context", maxTurns), ColorYellow))
-
-	// Mostra o último pensamento da IA para ajudar o usuário a entender o que aconteceu.
-	if len(a.cli.history) > 0 {
-		lastThought := a.cli.history[len(a.cli.history)-1].Content
-		fmt.Println(i18n.T("agent.feedback.last_thought"))
-		fmt.Println(a.cli.renderMarkdown(lastThought))
-	}
-
-	return nil // Retorna nil para não exibir um erro técnico, pois a falha foi tratada.
+	return a.processAIResponseAndAct(ctx, maxTurns)
 }
 
 // RunOnce executa modo agente one-shot
@@ -504,93 +406,6 @@ func (a *AgentMode) getMultilineInput(prompt string) string {
 	return strings.Join(lines, "\n")
 }
 
-// requestLLMContinuation solicita continuação à LLM
-func (a *AgentMode) requestLLMContinuation(ctx context.Context, userQuery, previousCommand, output, stderr string) ([]CommandBlock, error) {
-	newCtx, cancel := a.contextManager.CreateExecutionContext()
-	defer cancel()
-
-	_ = ctx
-
-	outSafe := utils.SanitizeSensitiveText(output)
-	errSafe := utils.SanitizeSensitiveText(stderr)
-
-	prompt := i18n.T("agent.llm_prompt.continuation", previousCommand, outSafe, errSafe)
-
-	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
-
-	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt, a.cli.history, 0)
-	a.cli.animation.StopThinkingAnimation()
-
-	if err != nil {
-		fmt.Println(i18n.T("agent.error.continuation_failed"), err)
-		return nil, err
-	}
-
-	a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
-
-	blocks := a.extractCommandBlocks(aiResponse)
-	a.displayResponseWithoutCommands(aiResponse, blocks)
-	return blocks, nil
-}
-
-// requestLLMContinuationWithContext solicita continuação com contexto adicional
-func (a *AgentMode) requestLLMContinuationWithContext(ctx context.Context, previousCommand, output, stderr, userContext string) ([]CommandBlock, error) {
-	newCtx, cancel := a.contextManager.CreateExecutionContext()
-	defer cancel()
-
-	_ = ctx
-
-	outSafe := utils.SanitizeSensitiveText(output)
-	errSafe := utils.SanitizeSensitiveText(stderr)
-
-	prompt := i18n.T("agent.llm_prompt.continuation_with_context", previousCommand, outSafe, errSafe, userContext)
-
-	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
-
-	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt, a.cli.history, 0)
-	a.cli.animation.StopThinkingAnimation()
-
-	if err != nil {
-		fmt.Println(i18n.T("agent.error.continuation_failed"), err)
-		return nil, err
-	}
-
-	a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
-
-	blocks := a.extractCommandBlocks(aiResponse)
-	a.displayResponseWithoutCommands(aiResponse, blocks)
-	return blocks, nil
-}
-
-// requestLLMWithPreExecutionContext solicita refinamento antes da execução
-func (a *AgentMode) requestLLMWithPreExecutionContext(ctx context.Context, originalCommand, userContext string) ([]CommandBlock, error) {
-	newCtx, cancel := a.contextManager.CreateExecutionContext()
-	defer cancel()
-
-	_ = ctx
-
-	prompt := i18n.T("agent.llm_prompt.pre_execution_context", originalCommand, userContext)
-
-	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
-
-	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
-	aiResponse, err := a.cli.Client.SendPrompt(newCtx, prompt, a.cli.history, 0)
-	a.cli.animation.StopThinkingAnimation()
-
-	if err != nil {
-		fmt.Println(i18n.T("agent.error.refinement_failed"), err)
-		return nil, err
-	}
-
-	a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
-
-	blocks := a.extractCommandBlocks(aiResponse)
-	a.displayResponseWithoutCommands(aiResponse, blocks)
-	return blocks, nil
-}
-
 // max retorna o maior entre dois inteiros
 func max(a, b int) int {
 	if a > b {
@@ -626,7 +441,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 	renderer := agent.NewUIRenderer(a.logger)
 	renderer.SetSkipClearOnNextDraw(true)
 
-mainLoop:
+	//mainLoop:
 	for {
 		renderer.ClearScreen()
 		renderer.PrintHeader()
@@ -834,32 +649,23 @@ mainLoop:
 
 			userContext := a.getMultilineInput(i18n.T("agent.prompt.additional_context"))
 
-			freshCtx, freshCancel := a.contextManager.CreateExecutionContext()
-			newBlocks, err := a.requestLLMContinuationWithContext(
-				freshCtx,
+			// Monta o prompt para a IA
+			toolContext := a.getToolContextString()
+			prompt := i18n.T("agent.llm_prompt.continuation_with_context",
 				strings.Join(blocks[cmdNum-1].Commands, "\n"),
 				outputs[cmdNum-1].Output,
 				outputs[cmdNum-1].ErrorMsg,
 				userContext,
-			)
-			freshCancel()
+			) + toolContext
 
-			if err != nil {
-				fmt.Println(i18n.T("agent.error.continuation_failed"), err)
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-			if len(newBlocks) > 0 {
-				blocks = newBlocks
-				outputs = make([]*CommandOutput, len(blocks))
-				lastExecuted = -1
-				renderer.SetSkipClearOnNextDraw(true)
-				continue mainLoop
-			} else {
-				fmt.Println(i18n.T("agent.status.no_new_commands"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-			}
-			continue
+			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
+
+			// Chama o loop de processamento unificado
+			a.continueWithNewAIResponse(ctx)
+
+			// Ao retornar do loop, o agente pode ter terminado ou apresentado um novo plano.
+			// Em ambos os casos, saímos do loop do plano de ação atual.
+			return
 
 		case strings.HasPrefix(answer, "c"):
 			cmdNumStr := strings.TrimPrefix(answer, "c")
@@ -875,32 +681,22 @@ mainLoop:
 				continue
 			}
 
-			freshCtx, freshCancel := a.contextManager.CreateExecutionContext()
-			newBlocks, err := a.requestLLMContinuation(
-				freshCtx,
+			// Monta o prompt para a IA
+			toolContext := a.getToolContextString()
+			prompt := i18n.T("agent.llm_prompt.continuation",
 				strings.Join(blocks[cmdNum-1].Commands, "\n"),
 				strings.Join(blocks[cmdNum-1].Commands, "\n"),
 				outputs[cmdNum-1].Output,
 				outputs[cmdNum-1].ErrorMsg,
-			)
-			freshCancel()
+			) + toolContext
 
-			if err != nil {
-				fmt.Println(i18n.T("agent.error.continuation_failed"), err)
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-			if len(newBlocks) > 0 {
-				blocks = newBlocks
-				outputs = make([]*CommandOutput, len(blocks))
-				lastExecuted = -1
-				renderer.SetSkipClearOnNextDraw(true)
-				continue mainLoop
-			} else {
-				fmt.Println(i18n.T("agent.status.no_new_commands"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-			}
-			continue
+			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
+
+			// Chama o loop de processamento unificado
+			a.continueWithNewAIResponse(ctx)
+
+			// Sai do loop do plano de ação atual
+			return
 
 		case strings.HasPrefix(answer, "pc"):
 			cmdNumStr := strings.TrimPrefix(answer, "pc")
@@ -919,27 +715,20 @@ mainLoop:
 			}
 
 			fmt.Println(i18n.T("agent.status.context_received"))
-			newBlocks, err := a.requestLLMWithPreExecutionContext(
-				ctx,
+			// Monta o prompt para a IA
+			toolContext := a.getToolContextString()
+			prompt := i18n.T("agent.llm_prompt.pre_execution_context",
 				strings.Join(blocks[cmdNum-1].Commands, "\n"),
 				userContext,
-			)
-			if err != nil {
-				fmt.Println(i18n.T("agent.error.refinement_failed"), err)
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-			if len(newBlocks) > 0 {
-				blocks = newBlocks
-				outputs = make([]*CommandOutput, len(blocks))
-				lastExecuted = -1
-				renderer.SetSkipClearOnNextDraw(true)
-				continue mainLoop
-			} else {
-				fmt.Println(i18n.T("agent.status.no_new_commands"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-			}
-			continue
+			) + toolContext
+
+			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
+
+			// Chama o loop de processamento unificado
+			a.continueWithNewAIResponse(ctx)
+
+			// Sai do loop do plano de ação atual
+			return
 
 		default:
 			cmdNum, err := strconv.Atoi(answer)
@@ -1349,4 +1138,127 @@ func hasCodeStructures(content string) bool {
 	closeBraces := strings.Count(content, "}")
 
 	return openBraces > 1 && closeBraces > 1
+}
+
+// getToolContextString centraliza a geração do contexto de ferramentas.
+func (a *AgentMode) getToolContextString() string {
+	if a.cli.pluginManager == nil {
+		return ""
+	}
+	plugins := a.cli.pluginManager.GetPlugins()
+	if len(plugins) == 0 {
+		return ""
+	}
+
+	var toolDescriptions []string
+	for _, plugin := range plugins {
+		toolDescriptions = append(toolDescriptions, fmt.Sprintf("- Ferramenta: %s\n  Descrição: %s\n  Uso: %s", plugin.Name(), plugin.Description(), plugin.Usage()))
+	}
+
+	return "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + strings.Join(toolDescriptions, "\n") + "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
+}
+
+// processAIResponseAndAct é o novo loop de processamento unificado.
+func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
+	for turn := 0; turn < maxTurns; turn++ {
+		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
+
+		// Chama a IA
+		a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
+		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", a.cli.history, 0)
+		a.cli.animation.StopThinkingAnimation()
+
+		if err != nil {
+			return fmt.Errorf("erro ao obter resposta da IA no turno %d: %w", turn+1, err)
+		}
+
+		a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
+		// A resposta será exibida de forma condicional abaixo
+
+		// --- ANÁLISE DA RESPOSTA ---
+
+		// 1. Prioridade 1: Verificar chamada de ferramenta
+		toolCallRegex := regexp.MustCompile(`(?s)<tool_call name="(@\S+)" (?:args="(.*?)"|args='(.*?)') />`)
+		match := toolCallRegex.FindStringSubmatch(aiResponse)
+
+		if len(match) > 0 {
+			// Exibe o pensamento da IA antes de executar a ferramenta
+			formattedResponse := fmt.Sprintf("\n%s\n", a.cli.renderMarkdown(aiResponse))
+			a.cli.typewriterEffect(formattedResponse, 2*time.Millisecond)
+
+			toolName := match[1]
+			toolArgsStr := match[2]
+			if match[3] != "" {
+				toolArgsStr = match[3]
+			}
+
+			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
+			toolArgs, err := shlex.Split(unescapedToolArgsStr)
+			if err != nil {
+				a.logger.Warn("Erro ao analisar os argumentos da ferramenta", zap.String("args_str", unescapedToolArgsStr), zap.Error(err))
+				feedbackForAI := i18n.T("agent.error.invalid_tool_args", toolName, err)
+				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
+				continue // Próximo turno do loop
+			}
+
+			fmt.Printf("\n%s\n", colorize(i18n.T("agent.status.using_tool", toolName, unescapedToolArgsStr), ColorYellow))
+
+			plugin, found := a.cli.pluginManager.GetPlugin(toolName)
+			if !found {
+				feedbackForAI := i18n.T("agent.error.tool_not_found", toolName)
+				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
+				continue // Próximo turno do loop
+			}
+
+			toolOutput, err := plugin.Execute(ctx, toolArgs)
+			if err != nil {
+				toolOutput = fmt.Sprintf("Erro: %v", err)
+			}
+
+			fmt.Printf("\n%s\n%s\n", colorize(i18n.T("agent.feedback.tool_output_header"), ColorGray), toolOutput)
+
+			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, toolOutput)
+			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
+
+			continue // Continua para o próximo turno do loop para que a IA analise o resultado da ferramenta
+		}
+
+		// 2. Prioridade 2: Verificar blocos de execução
+		commandBlocks := a.extractCommandBlocks(aiResponse)
+		if len(commandBlocks) > 0 {
+			// Exibe a parte da resposta que não são os comandos
+			a.displayResponseWithoutCommands(aiResponse, commandBlocks)
+			// Transfere o controle para o manipulador de plano de ação
+			a.handleCommandBlocks(ctx, commandBlocks)
+			return nil // Encerra o loop principal, pois handleCommandBlocks agora gerencia o fluxo
+		}
+
+		// 3. Se não houver ferramenta nem comando, é uma resposta final
+		formattedResponse := fmt.Sprintf("\n%s\n", a.cli.renderMarkdown(aiResponse))
+		a.cli.typewriterEffect(formattedResponse, 2*time.Millisecond)
+		fmt.Println(colorize(i18n.T("agent.status.final_answer_no_commands"), ColorGreen))
+		return nil // Encerra o loop
+	}
+
+	// --- 4. TRATAMENTO DE FALHA (LIMITE DE TURNOS ATINGIDO) ---
+
+	// Se o loop terminar, o agente não conseguiu encontrar uma solução.
+	fmt.Println(colorize(i18n.T("agent.error.max_turns_reached_context", maxTurns), ColorYellow))
+
+	// Mostra o último pensamento da IA para ajudar o usuário a entender o que aconteceu.
+	if len(a.cli.history) > 0 {
+		lastThought := a.cli.history[len(a.cli.history)-1].Content
+		fmt.Println(i18n.T("agent.feedback.last_thought"))
+		fmt.Println(a.cli.renderMarkdown(lastThought))
+	}
+
+	return nil // Retorna nil para não exibir um erro técnico, pois a falha foi tratada.
+}
+
+func (a *AgentMode) continueWithNewAIResponse(ctx context.Context) {
+	// Esta função agora entra no loop principal de processamento
+	err := a.processAIResponseAndAct(ctx, 7) // Usa um novo limite de turnos
+	if err != nil {
+		fmt.Println(colorize(i18n.T("agent.error.continuation_failed", err), ColorYellow))
+	}
 }
