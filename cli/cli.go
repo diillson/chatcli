@@ -2505,7 +2505,7 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 	// Subcomandos que precisam de nome de contexto como próximo argumento
 	needsContextName := map[string]bool{
 		"attach": true, "detach": true, "show": true,
-		"delete": true, "export": true, "inspect": true, // ← ADICIONADO inspect
+		"delete": true, "export": true, "inspect": true,
 	}
 
 	if needsContextName[subcommand] {
@@ -2514,9 +2514,7 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 			return cli.getContextNameSuggestions()
 		}
 
-		// ═══════════════════════════════════════════════════════════════
-		// NOVO: Sugestões específicas para /context inspect
-		// ═══════════════════════════════════════════════════════════════
+		// Sugestões específicas para /context inspect
 		if subcommand == "inspect" && len(args) >= 3 {
 			word := d.GetWordBeforeCursor()
 
@@ -2536,7 +2534,7 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 				}
 
 				if prevArg == "--chunk" || prevArg == "-c" {
-					return cli.getChunkNumberSuggestions(args[2]) // args[2] é o nome do contexto
+					return cli.getChunkNumberSuggestions(args[2])
 				}
 			}
 		}
@@ -2556,40 +2554,13 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 		return []prompt.Suggest{}
 	}
 
-	// Para update, sugerir nomes de contextos + flags
-	if subcommand == "update" {
-		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
-			return cli.getContextNameSuggestions()
-		}
-
-		word := d.GetWordBeforeCursor()
-		if strings.HasPrefix(word, "-") {
-			return []prompt.Suggest{
-				{Text: "--mode", Description: "Novo modo: full, summary, chunked, smart"},
-				{Text: "-m", Description: "Atalho para --mode"},
-				{Text: "--description", Description: "Nova descrição do contexto"},
-				{Text: "--desc", Description: "Atalho para --description"},
-				{Text: "-d", Description: "Atalho para --description"},
-				{Text: "--tags", Description: "Novas tags separadas por vírgula"},
-				{Text: "-t", Description: "Atalho para --tags"},
-			}
-		}
-
-		// Após nome e flags, sugerir paths
-		if len(args) >= 3 && !strings.HasPrefix(word, "-") {
-			return cli.filePathCompleter(word)
-		}
-	}
-
-	// Para create, processar argumentos
-	if subcommand == "create" {
-		// [... código existente de create ...]
-		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ") && !strings.HasPrefix(args[2], "-")) {
-			return []prompt.Suggest{}
-		}
-
+	// ===================================================================
+	// Autocompletar paths para /context create e /context update
+	// ===================================================================
+	if subcommand == "create" || subcommand == "update" {
 		word := d.GetWordBeforeCursor()
 
+		// Se está digitando uma flag, mostrar flags disponíveis
 		if strings.HasPrefix(word, "-") {
 			return []prompt.Suggest{
 				{Text: "--mode", Description: "Modo de processamento: full, summary, chunked, smart"},
@@ -2599,15 +2570,19 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 				{Text: "-d", Description: "Atalho para --description"},
 				{Text: "--tags", Description: "Tags separadas por vírgula (ex: api,golang)"},
 				{Text: "-t", Description: "Atalho para --tags"},
+				{Text: "--force", Description: "Sobrescreve se já existir (apenas create)"},
+				{Text: "-f", Description: "Atalho para --force (apenas create)"},
 			}
 		}
 
-		if len(args) >= 3 {
+		// Detectar se a palavra anterior é uma flag que espera valor
+		if len(args) >= 2 {
 			prevArg := args[len(args)-1]
 			if !strings.HasSuffix(line, " ") && len(args) >= 2 {
 				prevArg = args[len(args)-2]
 			}
 
+			// Se a flag anterior é --mode ou -m, sugerir modos
 			if prevArg == "--mode" || prevArg == "-m" {
 				return []prompt.Suggest{
 					{Text: "full", Description: "Conteúdo completo dos arquivos"},
@@ -2616,23 +2591,58 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 					{Text: "smart", Description: "IA seleciona arquivos relevantes ao prompt"},
 				}
 			}
+
+			// Se a flag anterior espera texto (description, tags), não autocompletar paths
+			if prevArg == "--description" || prevArg == "--desc" || prevArg == "-d" ||
+				prevArg == "--tags" || prevArg == "-t" {
+				return []prompt.Suggest{} // Deixar usuário digitar livremente
+			}
 		}
 
-		if len(args) >= 3 && !strings.HasPrefix(word, "-") {
-			return cli.filePathCompleter(word)
+		// Para create: nome do contexto primeiro (se ainda não foi fornecido)
+		if subcommand == "create" && len(args) == 2 {
+			return []prompt.Suggest{
+				{Text: "", Description: "Digite o nome do contexto (ex: meu-projeto)"},
+			}
 		}
+
+		// Para update: nome do contexto (sugerir existentes)
+		if subcommand == "update" && (len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " "))) {
+			return cli.getContextNameSuggestions()
+		}
+
+		// Agora, autocompletar paths se não for flag e já passou pelos argumentos obrigatórios
+		if !strings.HasPrefix(word, "-") {
+			// Para create: após o nome (args >= 3)
+			// Para update: após o nome e possivelmente flags (args >= 3)
+			minArgsForPath := 3
+			if subcommand == "update" {
+				minArgsForPath = 3 // Nome do contexto é o primeiro argumento após update
+			}
+
+			if len(args) >= minArgsForPath {
+				return cli.filePathCompleter(word)
+			}
+		}
+
+		return []prompt.Suggest{}
 	}
 
 	// Para merge, precisa de: novo_nome + contextos existentes
 	if subcommand == "merge" {
 		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
-			return []prompt.Suggest{}
+			return []prompt.Suggest{
+				{Text: "", Description: "Digite o nome do novo contexto mesclado"},
+			}
 		}
 		return cli.getContextNameSuggestions()
 	}
 
 	// Para export, precisa de: nome_contexto + caminho_arquivo
 	if subcommand == "export" {
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return cli.getContextNameSuggestions()
+		}
 		if len(args) >= 3 {
 			return cli.filePathCompleter(d.GetWordBeforeCursor())
 		}
