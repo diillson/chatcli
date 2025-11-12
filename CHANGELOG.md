@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.5](https://github.com/diillson/chatcli/compare/v1.38.4...v1.38.5) (2025-11-12)
+
+
+### Bug Fixes
+
+* **cli:** improve context subcommand autocompletions and flag handling ([#355](https://github.com/diillson/chatcli/issues/355)) ([#356](https://github.com/diillson/chatcli/issues/356)) ([14b7f36](https://github.com/diillson/chatcli/commit/14b7f36c65d60abfee5c8684dcd86196574df9c0))
+
 ## [1.38.4](https://github.com/diillson/chatcli/compare/v1.38.3...v1.38.4) (2025-11-11)
 
 
