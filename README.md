@@ -175,6 +175,8 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Opcional)** Define o máximo de turnos que o agente pode ter. Padrão: 7.
   -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Opcional)** Define o tempo limite de execução para o plugin do agente. Padrão: 15 (Minutos)
 
+> ⚠️ **Importante:** Plugins que realizam operações demoradas (ex.: deploy de infraestrutura, builds complexos) podem precisar de timeouts maiores.
+
 ### Exemplo de  .env
 
     # Configurações Gerais
@@ -674,9 +676,22 @@ Para remover um plugin:
 
 #### Recarregar Plugins
 
-O  chatcli  monitora o diretório de plugins e recarrega automaticamente se houver mudanças. Se precisar forçar um recarregamento manual:
+O `chatcli` monitora automaticamente o diretório de plugins (`~/.chatcli/plugins/`) e 
+**recarrega automaticamente** quando detecta mudanças (criação, remoção, modificação de arquivos).
 
+- **Debounce Inteligente:** Para evitar recarregamentos múltiplos, o sistema aguarda 500ms 
+  após a última mudança antes de recarregar.
+  
+- **Eventos Monitorados:** Write, Create, Remove e Rename.
+
+Se você precisar forçar um recarregamento manual (por exemplo, após editar um plugin 
+sem salvar o arquivo), use:
+
+```bash
 /plugin reload
+````
+
+> 💡 Dica: Você pode desenvolver plugins iterativamente! Basta editar o código, recompilar e enviar ao diretorio de plugins, logo o ChatCLI detectará automaticamente a mudança.
 
 --------
 
@@ -689,15 +704,39 @@ Criar um plugin é simples. Basta criar um programa executável que siga o "cont
 1. Executável: O plugin deve ser um arquivo executável.
 2. Localização: O arquivo executável deve ser colocado no diretório  ~/.chatcli/plugins/ .
 3. Nome do Comando: O nome do comando será  @  seguido pelo nome do arquivo executável. Ex: um arquivo chamado  kind  será invocado como  @kind .
-4. Metadados ( --metadata ): O executável deve responder à flag  --metadata . Quando chamado com essa flag, ele deve imprimir na saída padrão (stdout) um JSON contendo as seguintes informações:
+4. **Metadados (`--metadata`)**: O executável deve responder à flag `--metadata`.
+   Quando chamado com essa flag, ele deve imprimir na saída padrão (stdout) um JSON contendo:
+
+```json
+{
+ "name": "@meu-comando",
+ "description": "Uma breve descrição do que o plugin faz.",
+ "usage": "@meu-comando <subcomando> [--flag value]",
+ "version": "1.0.0"  // ← OBRIGATÓRIO
+}
+```   
+
+> ⚠️ Importante: Os campos  name ,  description ,  usage  e  version  são obrigatórios.
+
+**Schema Opcional (`--schema`)**: O executável pode opcionalmente responder à flag `--schema`.
+Quando chamado com essa flag, ele deve imprimir na saída padrão (stdout) um JSON válido
+descrevendo os parâmetros e argumentos que o plugin aceita:
+```json
+{
+  "parameters": [
+    {
+      "name": "cluster-name",
+      "type": "string",
+      "required": true,
+      "description": "Nome do cluster Kubernetes"
+    }
+  ]
+}
 ```
-  {
-   "name": "@meu-comando",
-   "description": "Uma breve descrição do que o plugin faz.",
-   "usage": "@meu-comando <subcomando> [--flag value]",
-   "version": "1.0.0"
-   }
-```
+
+> ⚠️ Nota: Se o plugin não implementar  --schema , ele ainda funcionará normalmente.
+
+
 5. Comunicação e Feedback (stdout vs stderr): Esta é a parte mais importante para uma boa experiência de usuário.
    - Saída Padrão ( stdout ): Use a saída padrão apenas para o resultado final que deve ser retornado ao  chatcli  e, potencialmente, enviado para a IA.
    - Saída de Erro ( stderr ): Use a saída de erro para todos os logs de progresso, status, avisos e mensagens para o usuário. O  chatcli  exibirá o  stderr  em tempo real, evitando a sensação de que o programa travou.
@@ -734,6 +773,7 @@ func logf(format string, v ...interface{}) {
 func main() {
     // 1. Lidar com a flag --metadata
     metadataFlag := flag.Bool("metadata", false, "Exibe os metadados do plugin")
+    schemaFlag := flag.Bool("schema", false, "Exibe o schema de parâmetros do plugin")
     flag.Parse()
 
     if *metadataFlag {
@@ -746,6 +786,23 @@ func main() {
             jsonMeta, _ := json.Marshal(meta)
             fmt.Println(string(jsonMeta)) // Metadados vão para stdout
             return
+    }
+    
+    if *schemaFlag {
+        schema := map[string]interface{}{
+            "parameters": []map[string]interface{}{
+                {
+                    "name":        "nome",
+                    "type":        "string",
+                    "required":    false,
+                    "description": "Nome da pessoa a ser cumprimentada",
+                    "default":     "Mundo",
+                },
+            },
+        }
+        jsonSchema, _ := json.Marshal(schema)
+        fmt.Println(string(jsonSchema))
+        return
     }
 
     // 2. Lógica principal do plugin
@@ -772,15 +829,18 @@ func main() {
 1. Compile o executável:
 >go build -o hello ./hello/main.go
 
-2. Mova para o diretório de plugins:
+2. Dê permissão de execução (necessário para que o ChatCLI reconheça o plugin):
+> chmod +x hello
+
+3. Mova para o diretório de plugins:
 >Crie o diretório se ele não existir:
 mkdir -p ~/.chatcli/plugins/
 
-3. Mova o executável
+4. Mova o executável
 >mv hello ~/.chatcli/plugins/
 
-3. Use no ChatCLI: Agora, dentro agent do  chatcli , você pode executar seu novo comando:
->❯ /agent @hello
+5. Use no ChatCLI: Agora, dentro agent do  chatcli , você pode executar seu novo comando:
+>❯ /agent Olá meu nome é Fulano
 
 Você verá os logs de progresso ( 🚀 Plugin 'hello' iniciado!... ) em tempo real no seu terminal, e no final, a mensagem  Olá, Mundo!...  será tratada como a saída do comando.
 

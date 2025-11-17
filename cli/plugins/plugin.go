@@ -30,6 +30,7 @@ type Plugin interface {
 	Usage() string
 	Version() string
 	Path() string // Expõe o caminho do executável para inspeção.
+	Schema() string
 	Execute(ctx context.Context, args []string) (string, error)
 }
 
@@ -37,6 +38,7 @@ type Plugin interface {
 type ExecutablePlugin struct {
 	metadata Metadata
 	path     string
+	schema   string
 }
 
 func (p *ExecutablePlugin) Name() string        { return p.metadata.Name }
@@ -44,6 +46,7 @@ func (p *ExecutablePlugin) Description() string { return p.metadata.Description 
 func (p *ExecutablePlugin) Usage() string       { return p.metadata.Usage }
 func (p *ExecutablePlugin) Version() string     { return p.metadata.Version }
 func (p *ExecutablePlugin) Path() string        { return p.path }
+func (p *ExecutablePlugin) Schema() string      { return p.schema }
 
 // Execute invoca o binário do plugin, captura sua saída e trata erros.
 func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, error) {
@@ -138,8 +141,19 @@ func NewPluginFromPath(path string) (Plugin, error) {
 		return nil, fmt.Errorf("metadados do plugin em '%s' estão incompletos (name, description, usage são obrigatórios)", path)
 	}
 
+	schemaCmd := exec.Command(path, "--schema")
+	schemaOutput, err := schemaCmd.Output()
+	var schemaStr string
+	if err == nil {
+		// Validar se é um JSON válido antes de armazenar
+		if json.Valid(schemaOutput) {
+			schemaStr = string(schemaOutput)
+		}
+	}
+
 	return &ExecutablePlugin{
 		metadata: meta,
 		path:     path,
+		schema:   schemaStr,
 	}, nil
 }
