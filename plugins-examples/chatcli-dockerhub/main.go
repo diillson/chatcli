@@ -97,7 +97,10 @@ func main() {
 			"tags":     tags,
 			"count":    len(tags),
 		}
-		json.NewEncoder(os.Stdout).Encode(output)
+		err := json.NewEncoder(os.Stdout).Encode(output)
+		if err != nil {
+			return
+		}
 		return
 	}
 
