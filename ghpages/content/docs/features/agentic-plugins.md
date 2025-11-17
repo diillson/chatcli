@@ -68,12 +68,16 @@ Configure o comportamento do agente através de variáveis de ambiente:
 
 # Controle de Execução
 `CHATCLI_AGENT_PLUGIN_MAX_TURNS=10`     # Máximo de iterações (padrão: 7)
+
 `CHATCLI_AGENT_PLUGIN_TIMEOUT=20m`       # Timeout por plugin (padrão: 15m)
 
 # Segurança
 `CHATCLI_AGENT_CMD_TIMEOUT=5m`           # Timeout para comandos shell
+
 `CHATCLI_AGENT_DENYLIST="rm.*-rf.*;dd.*"` # Padrões regex bloqueados
+
 `CHATCLI_AGENT_ALLOW_SUDO=false`         # Bloqueia sudo por padrão
+
 ```bash
 Variável                        │ Tipo     │ Padrão  │ Descrição                                                                         
 ────────────────────────────────┼──────────┼─────────┼───────────────────────────────────────────────────────────────────────────────────
@@ -609,8 +613,6 @@ fmt.Fprintln(os.Stderr, "✅ Operação concluída!")
 
 ## Recursos Adicionais
 
-• Repositório de Plugins da Comunidade https://github.com/diillson/chatcli-plugins
-• Template de Plugin Go https://github.com/diillson/chatcli-plugin-template
 • Exemplos de Plugins https://github.com/diillson/chatcli/tree/main/plugins-examples
 
 --------

@@ -1,0 +1,32 @@
+# Binaries
+k8s-cloud
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+*.test
+*.out
+vendor/
+
+# Pulumi
+.pulumi/
+Pulumi.*.yaml
+*.pulumi-*.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Kubeconfig backups
+*.backup-*
