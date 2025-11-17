@@ -42,14 +42,14 @@ O ChatCLI utiliza um **gerenciador de plugins inteligente** que:
 
 O sistema aceita ambas as formas de invocação:
 
-# Com @ (forma canônica)
-/agent @hello mundo
+- Com @ (forma canônica)
+  - /agent @hello mundo
 
-# Sem @ (atalho conveniente)
-/agent hello mundo
+- Sem @ (atalho conveniente)
+  - /agent hello mundo
 
 Internamente, o gerenciador normaliza automaticamente:
-
+```go
 func (m *Manager) GetPlugin(name string) (Plugin, bool) {
     p, ok := m.plugins[name]
     if !ok {
@@ -57,7 +57,7 @@ func (m *Manager) GetPlugin(name string) (Plugin, bool) {
     }
     return p, ok
 }
-
+```
 --------
 
 ## Configuração do Agente
@@ -92,36 +92,36 @@ O AgentMode implementa o framework ReAct (Reasoning and Acting), um loop iterati
 ### 1. Raciocínio (Pensamento)
 
 O agente analisa o objetivo e verbaliza seu plano:
-
+```bash
 <pensamento>
 O objetivo é analisar a performance de uma função Go. 
 Isso requer profiling. Olhando minhas ferramentas, vejo 
 @go-bench-gen e @go-bench-run. O primeiro passo lógico 
 é gerar o arquivo de benchmark.
 </pensamento>
-
+```
 ### 2. Ação (Chamada de Ferramenta)
 
 A IA formaliza sua decisão em uma chamada estruturada:
-
+```bash
 <tool_call name="@go-bench-gen" args="main.go MinhaFuncao" />
-
+```
 ### 3. Execução (Invocação do Plugin)
 
 O ChatCLI intercepta e executa o plugin:
-
+```go
 🤖 Agente está usando a ferramenta: @go-bench-gen main.go MinhaFuncao
    ⏳ Timeout configurado: 15m
    📂 Diretório: /home/user/projeto
-
+```
 ### 4. Observação (Feedback)
 
 O resultado é formatado e retornado para a IA:
-
+```go
 --- Resultado da Ferramenta ---
 ✅ Arquivo gerado: main_bench_test.go
 📊 Benchmark criado: BenchmarkMinhaFuncao
-
+```
 ### 5. Reiteração
 
 O ciclo recomeça até que o objetivo seja alcançado ou o limite de turnos seja atingido.
@@ -144,20 +144,23 @@ Comando                   │ Descrição
 ### Exemplo de Uso
 
 # Listar plugins disponíveis
+```go
 ❯ /plugin list
 📦 Plugins Instalados (3):
   • @go-bench-gen  - Gera arquivos de benchmark Go
   • @go-bench-run  - Executa benchmarks e profiling
   • @dockerhub     - Consulta tags do Docker Hub
-
+```
 # Ver detalhes de um plugin
+```go
 ❯ /plugin show @go-bench-gen
 📋 Plugin: @go-bench-gen
 📝 Descrição: Gera arquivos de benchmark Go a partir de funções existentes
 💡 Uso: @go-bench-gen <arquivo.go> <NomeDaFuncao>
 🏷️  Versão: 1.2.0
-
+```
 # Inspecionar metadados técnicos
+```go
 ❯ /plugin inspect @go-bench-gen
 🔍 Inspeção Detalhada:
    Caminho: /home/user/.chatcli/plugins/go-bench-gen
@@ -171,12 +174,12 @@ Comando                   │ Descrição
      "usage": "@go-bench-gen <arquivo.go> <NomeDaFuncao>",
      "version": "1.2.0"
    }
-
+```
 ### Instalação de Plugins
 
 # Instalar de um repositório Git
-❯ /plugin install https://github.com/usuario/chatcli-plugin-k8s.git
-
+> ❯ /plugin install https://github.com/usuario/chatcli-plugin-k8s.git
+```go
 ⚠️  AVISO DE SEGURANÇA
 Você está prestes a instalar código de terceiros que será executado 
 em sua máquina. Revise o código-fonte antes de prosseguir.
@@ -187,7 +190,7 @@ Confirmar instalação? (s/N): s
 📥 Clonando repositório...
 🔨 Detectado projeto Go, compilando...
 ✅ Plugin @k8s instalado com sucesso!
-
+```
 --------
 
 ## Criando Plugins: O Guia Completo
@@ -198,16 +201,17 @@ Todo plugin deve seguir estas regras:
 
 #### 1. Ser um Executável
 
-• Binário compilado (Go, Rust, C++) ou
-• Script com shebang ( #!/usr/bin/env python3 ,  #!/bin/bash )
-• Localizado em  ~/.chatcli/plugins/
-• Permissão de execução obrigatória ( chmod +x )
+- Binário compilado (Go, Rust, C++) ou
+- Script com shebang ( #!/usr/bin/env python3 ,  #!/bin/bash )
+- Localizado em  ~/.chatcli/plugins/
+- Permissão de execução obrigatória ( chmod +x )
 
 # Verificar permissões
+```bash
 ls -l ~/.chatcli/plugins/
 -rwxr-xr-x  1 user  staff  2.3M  meu-plugin  # ✅ Correto (x = executável)
 -rw-r--r--  1 user  staff  1.8M  outro       # ❌ Sem permissão de execução
-
+```
 #### 2. Responder ao Contrato  --metadata  (Obrigatório)
 
 Quando invocado com  --metadata , o plugin DEVE imprimir um JSON válido para  stdout :
@@ -251,7 +255,7 @@ O schema ajuda a IA a entender os parâmetros do plugin:
 #### 4. Comunicação via I/O Padrão
 ```bash
 Canal  │ Uso              │ Descrição                                   
-────────┼──────────────────┼─────────────────────────────────────────────
+───────┼──────────────────┼─────────────────────────────────────────────
 stdout │ Resultado        │ Saída principal enviada para a IA           
 stderr │ Logs/Progresso   │ Mensagens de status, avisos e erros         
 stdin  │ Entrada de dados │ Blocos grandes de texto (ex: código gerado)
