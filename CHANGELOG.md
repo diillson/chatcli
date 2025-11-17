@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.8](https://github.com/diillson/chatcli/compare/v1.38.7...v1.38.8) (2025-11-17)
+
+
+### Bug Fixes
+
+* **plugins-examples:** introduce extensive Pulumi-based `chatcli-k8s-cloud-refactor` example ([#365](https://github.com/diillson/chatcli/issues/365)) ([d182a45](https://github.com/diillson/chatcli/commit/d182a4529deaaff1ea508879d09c63168470bbfd))
+
 ## [1.38.7](https://github.com/diillson/chatcli/compare/v1.38.6...v1.38.7) (2025-11-17)
 
 
