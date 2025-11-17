@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.7](https://github.com/diillson/chatcli/compare/v1.38.6...v1.38.7) (2025-11-17)
+
+
+### Bug Fixes
+
+* **docs-plugins:** improve formatting and provide code block examples in `agentic-plugins.md` ([#361](https://github.com/diillson/chatcli/issues/361)) ([#362](https://github.com/diillson/chatcli/issues/362)) ([a3f599f](https://github.com/diillson/chatcli/commit/a3f599fca10e66e908d8ec87ce80dad5da4bc7cc))
+
 ## [1.38.6](https://github.com/diillson/chatcli/compare/v1.38.5...v1.38.6) (2025-11-17)
 
 
