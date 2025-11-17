@@ -8,6 +8,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -1152,7 +1153,50 @@ func (a *AgentMode) getToolContextString() string {
 
 	var toolDescriptions []string
 	for _, plugin := range plugins {
-		toolDescriptions = append(toolDescriptions, fmt.Sprintf("- Ferramenta: %s\n  Descrição: %s\n  Uso: %s", plugin.Name(), plugin.Description(), plugin.Usage()))
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("- Ferramenta: %s\n", plugin.Name()))
+		b.WriteString(fmt.Sprintf("  Descrição: %s\n", plugin.Description()))
+
+		if plugin.Schema() != "" {
+			// Decodifica o schema para um formato estruturado
+			var schema struct {
+				Subcommands []struct {
+					Name        string `json:"name"`
+					Description string `json:"description"`
+					Flags       []struct {
+						Name        string `json:"name"`
+						Description string `json:"description"`
+						Type        string `json:"type"`
+						Default     string `json:"default"`
+					} `json:"flags"`
+				} `json:"subcommands"`
+			}
+
+			if err := json.Unmarshal([]byte(plugin.Schema()), &schema); err == nil {
+				b.WriteString("  Subcomandos Disponíveis:\n")
+				for _, sub := range schema.Subcommands {
+					b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
+					if len(sub.Flags) > 0 {
+						b.WriteString("      Flags:\n")
+						for _, flag := range sub.Flags {
+							flagDesc := fmt.Sprintf("        - %s (%s): %s", flag.Name, flag.Type, flag.Description)
+							if flag.Default != "" {
+								flagDesc += fmt.Sprintf(" (padrão: %s)", flag.Default)
+							}
+							b.WriteString(flagDesc + "\n")
+						}
+					}
+				}
+			} else {
+				// Fallback para o uso antigo se o JSON do schema for inválido
+				b.WriteString(fmt.Sprintf("  Uso: %s\n", plugin.Usage()))
+			}
+		} else {
+			// Fallback para plugins que não têm o schema
+			b.WriteString(fmt.Sprintf("  Uso: %s\n", plugin.Usage()))
+		}
+
+		toolDescriptions = append(toolDescriptions, b.String())
 	}
 
 	return "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + strings.Join(toolDescriptions, "\n") + "\n\n" + i18n.T("agent.system_prompt.tools_instruction")

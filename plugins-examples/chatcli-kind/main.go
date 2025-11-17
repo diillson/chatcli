@@ -1,18 +1,17 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
+
+	"github.com/diillson/chatcli/plugins-examples/chatcli-kind/pkg/config"
+	"github.com/diillson/chatcli/plugins-examples/chatcli-kind/pkg/installer"
+	"github.com/diillson/chatcli/plugins-examples/chatcli-kind/pkg/utils"
+	"github.com/diillson/chatcli/plugins-examples/chatcli-kind/pkg/validador"
 )
 
 type Metadata struct {
@@ -22,51 +21,49 @@ type Metadata struct {
 	Version     string `json:"version"`
 }
 
-const defaultIstioVersion = "1.22.1"
-
-// logf escreve mensagens de progresso e log para stderr, mantendo stdout limpo para o resultado.
-func logf(format string, v ...interface{}) {
-	fmt.Fprintf(os.Stderr, format, v...)
-	os.Stderr.Sync() // Força flush imediato
+type FlagDefinition struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type"` // "string", "int", "bool"
+	Default     string `json:"default,omitempty"`
 }
 
-// fatalf escreve uma mensagem de erro para stderr e encerra o programa com status 1.
-func fatalf(format string, v ...interface{}) {
-	fmt.Fprintf(os.Stderr, "❌ Erro: "+format+"\n", v...)
-	os.Exit(1)
+type SubcommandDefinition struct {
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Flags       []FlagDefinition `json:"flags"`
 }
 
-// keepAlive envia sinais periódicos de atividade
-func keepAlive(ctx context.Context, interval time.Duration, message string) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			logf("   ⏳ %s (ainda processando...)\n", message)
-		}
-	}
+type ExtendedMetadata struct {
+	Subcommands []SubcommandDefinition `json:"subcommands"`
 }
+
+const (
+	Version            = "3.0.0"
+	DefaultClusterName = "kind"
+)
 
 func main() {
-	metadataFlag := flag.Bool("metadata", false, "Exibe os metadados do plugin em formato JSON")
+	metadataFlag := flag.Bool("metadata", false, "Display plugin metadata in JSON format")
+	schemaFlag := flag.Bool("schema", false, "Display plugin schema in JSON format") // <-- NOVA FLAG
 	flag.Parse()
 
 	if *metadataFlag {
 		printMetadata()
 		return
 	}
+	if *schemaFlag {
+		printSchema()
+		return
+	}
 
-	if err := ensureDependencies("docker", "curl", "kind"); err != nil {
-		fatalf("Erro de dependência: %v", err)
+	if err := validator.EnsureDependencies("docker", "curl", "kind", "kubectl"); err != nil {
+		utils.Fatalf("Dependency check failed: %v", err)
 	}
 
 	args := flag.Args()
 	if len(args) == 0 {
-		fatalf("Uso: @kind <create|delete|list> [opções]")
+		utils.Fatalf("Usage: @kind <create|delete|list|export|import> [options]")
 	}
 
 	subcommand := args[0]
@@ -74,724 +71,603 @@ func main() {
 
 	switch subcommand {
 	case "create":
-		createCluster(subcommandArgs)
+		handleCreate(subcommandArgs)
 	case "delete":
-		deleteCluster(subcommandArgs)
+		handleDelete(subcommandArgs)
+	case "update":
+		handleUpdate(subcommandArgs)
+	case "remove":
+		handleRemove(subcommandArgs)
 	case "list":
-		listClusters()
+		handleList()
+	case "export":
+		handleExport(subcommandArgs)
+	case "import":
+		handleImport(subcommandArgs)
 	default:
-		fatalf("Subcomando desconhecido: %s. Use create, delete, ou list.", subcommand)
+		utils.Fatalf("Unknown subcommand: %s. Use: create, delete, list, export, import", subcommand)
 	}
 }
 
 func printMetadata() {
 	meta := Metadata{
 		Name:        "@kind",
-		Description: "Gerencia clusters Kubernetes locais com o Kind. Otimizado para macOS. Suporta Istio e Nginx Ingress.",
-		Usage:       "@kind <create|delete|list> [--name <nome>] [--k8s-version <ver>] [--with-istio] [--istio-version <ver>] [--istio-profile <perfil>] [--with-nginx-ingress]",
-		Version:     "2.3.0",
+		Description: "Production-ready Kubernetes cluster manager using Kind. Supports multi-node, HA control plane, Istio, Nginx, MetalLB, Cert-Manager, Cilium, and more.",
+		Usage:       "@kind <create|delete|list|export|import> [options]",
+		Version:     Version,
 	}
-	jsonMeta, _ := json.Marshal(meta)
+	jsonMeta, _ := json.MarshalIndent(meta, "", "  ")
 	fmt.Println(string(jsonMeta))
 }
 
-func createCluster(args []string) {
+func printSchema() {
+	schema := ExtendedMetadata{
+		Subcommands: []SubcommandDefinition{
+			{
+				Name:        "create",
+				Description: "Cria um novo cluster Kind com componentes adicionais.",
+				Flags: []FlagDefinition{
+					{Name: "--name", Type: "string", Default: "kind", Description: "Nome do cluster."},
+					{Name: "--k8s-version", Type: "string", Description: "Versão do Kubernetes a ser usada (ex: 1.30.0)."},
+					{Name: "--control-plane-nodes", Type: "int", Default: "1", Description: "Número de nós de control-plane (1 para normal, 3 para alta disponibilidade)."},
+					{Name: "--worker-nodes", Type: "int", Default: "0", Description: "Número de nós de trabalho (workers)."},
+					{Name: "--disable-default-cni", Type: "bool", Description: "Desabilita o CNI padrão do Kind, necessário para instalar CNIs customizados como o Cilium."},
+					{Name: "--pod-subnet", Type: "string", Default: "10.244.0.0/16", Description: "CIDR da rede de Pods."},
+					{Name: "--service-subnet", Type: "string", Default: "10.96.0.0/12", Description: "CIDR da rede de Serviços."},
+					{Name: "--with-istio", Type: "bool", Description: "Instala o service mesh Istio no cluster."},
+					{Name: "--istio-profile", Type: "string", Default: "demo", Description: "Perfil de instalação do Istio (ex: demo, default, minimal)."},
+					{Name: "--with-nginx-ingress", Type: "bool", Description: "Instala o Nginx Ingress Controller."},
+					{Name: "--with-metallb", Type: "bool", Description: "Instala o MetalLB para serviços do tipo LoadBalancer."},
+					{Name: "--metallb-address-pool", Type: "string", Description: "Faixa de IPs para o MetalLB (ex: 172.18.255.200-172.18.255.250). Obrigatório se --with-metallb for usado."},
+					{Name: "--skip-metallb-warning", Type: "bool", Description: "Pula o aviso interativo do MetalLB no macOS. Essencial para automação."},
+					{Name: "--with-cert-manager", Type: "bool", Description: "Instala o Cert-Manager para gerenciamento de certificados TLS."},
+					{Name: "--with-cilium", Type: "bool", Description: "Instala o CNI Cilium. Requer --disable-default-cni."},
+					{Name: "--cilium-hubble", Type: "bool", Description: "Habilita a UI de observabilidade Hubble para o Cilium."},
+				},
+			},
+			{
+				Name:        "delete",
+				Description: "Deleta um cluster Kind existente.",
+				Flags: []FlagDefinition{
+					{Name: "--name", Type: "string", Default: "kind", Description: "Nome do cluster a ser deletado."},
+				},
+			},
+			{
+				Name:        "list",
+				Description: "Lista todos os clusters Kind existentes na máquina.",
+				Flags:       []FlagDefinition{},
+			},
+			{
+				Name:        "export",
+				Description: "Exporta o kubeconfig de um cluster.",
+				Flags: []FlagDefinition{
+					{Name: "--name", Type: "string", Default: "kind", Description: "Nome do cluster do qual exportar o kubeconfig."},
+					{Name: "--output", Type: "string", Description: "Caminho do arquivo para salvar o kubeconfig. Se omitido, imprime na saída padrão."},
+				},
+			},
+			{
+				Name:        "update",
+				Description: "Instala componentes adicionais em um cluster Kind já existente. Não pode adicionar nós ou mudar configurações de base.",
+				Flags: []FlagDefinition{
+					{Name: "--name", Type: "string", Default: "kind", Description: "Nome do cluster a ser atualizado."},
+					{Name: "--install-istio", Type: "bool", Description: "Instala o service mesh Istio no cluster."},
+					{Name: "--istio-version", Type: "string", Default: "1.22.1", Description: "Versão do Istio a ser instalada."},
+					{Name: "--istio-profile", Type: "string", Default: "demo", Description: "Perfil de instalação do Istio."},
+					{Name: "--install-nginx-ingress", Type: "bool", Description: "Instala o Nginx Ingress Controller."},
+					{Name: "--install-cert-manager", Type: "bool", Description: "Instala o Cert-Manager."},
+					{Name: "--cert-manager-version", Type: "string", Default: "v1.13.0", Description: "Versão do Cert-Manager."},
+				},
+			},
+			{
+				Name:        "remove",
+				Description: "Remove componentes de um cluster Kind existente.",
+				Flags: []FlagDefinition{
+					{Name: "--name", Type: "string", Default: "kind", Description: "Nome do cluster alvo."},
+					{Name: "--istio", Type: "bool", Description: "Remove o Istio do cluster."},
+					{Name: "--nginx-ingress", Type: "bool", Description: "Remove o Nginx Ingress Controller."},
+					{Name: "--cert-manager", Type: "bool", Description: "Remove o Cert-Manager."},
+					{Name: "--metallb", Type: "bool", Description: "Remove o MetalLB."},
+					{Name: "--cilium", Type: "bool", Description: "Remove o Cilium CNI."},
+					{Name: "--yes", Type: "bool", Description: "Confirma a remoção sem prompt interativo (útil para automação)."},
+				},
+			},
+		},
+	}
+	jsonSchema, _ := json.MarshalIndent(schema, "", "  ")
+	fmt.Println(string(jsonSchema))
+}
+
+func handleCreate(args []string) {
 	createCmd := flag.NewFlagSet("create", flag.ExitOnError)
-	clusterName := createCmd.String("name", "kind", "Nome do cluster Kind")
-	k8sVersion := createCmd.String("k8s-version", "", "Versão do Kubernetes a ser usada (ex: 1.28.0)")
-	withIstio := createCmd.Bool("with-istio", false, "Instala o Istio no cluster após a criação")
-	istioVersion := createCmd.String("istio-version", defaultIstioVersion, "Versão do Istio a ser instalada")
-	istioProfile := createCmd.String("istio-profile", "demo", "Perfil de instalação do Istio (ex: demo, default)")
-	withNginxIngress := createCmd.Bool("with-nginx-ingress", false, "Instala o Nginx Ingress Controller (recomendado para macOS)")
+
+	// Flags de configuração do Cluster
+	clusterName := createCmd.String("name", DefaultClusterName, "Cluster name")
+	k8sVersion := createCmd.String("k8s-version", "", "Kubernetes version (e.g., 1.30.0)")
+	controlPlaneNodes := createCmd.Int("control-plane-nodes", 1, "Number of control plane nodes (1 or 3 for HA)")
+	workerNodes := createCmd.Int("worker-nodes", 0, "Number of worker nodes")
+
+	// Flags de Rede
+	disableDefaultCNI := createCmd.Bool("disable-default-cni", false, "Disable default CNI (for custom CNI installation)")
+	podSubnet := createCmd.String("pod-subnet", "10.244.0.0/16", "Pod network CIDR")
+	serviceSubnet := createCmd.String("service-subnet", "10.96.0.0/12", "Service network CIDR")
+	dnsDomain := createCmd.String("dns-domain", "cluster.local", "Kubernetes DNS domain")
+	apiServerPort := createCmd.Int("api-server-port", 6443, "API server port")
+
+	// Flags de Componentes Adicionais
+	withIstio := createCmd.Bool("with-istio", false, "Install Istio service mesh")
+	istioVersion := createCmd.String("istio-version", "1.22.1", "Istio version")
+	istioProfile := createCmd.String("istio-profile", "demo", "Istio installation profile")
+
+	withNginxIngress := createCmd.Bool("with-nginx-ingress", false, "Install Nginx Ingress Controller")
+	// As flags de porta do Nginx foram removidas, pois a lógica agora é automática
+
+	withMetalLB := createCmd.Bool("with-metallb", false, "Install MetalLB load balancer")
+	metalLBAddressPool := createCmd.String("metallb-address-pool", "", "MetalLB IP address pool (e.g., 172.18.255.200-172.18.255.250)")
+	skipMetalLBWarning := createCmd.Bool("skip-metallb-warning", false, "Skip MetalLB macOS warning (for automation)")
+
+	withCertManager := createCmd.Bool("with-cert-manager", false, "Install Cert-Manager")
+	certManagerVersion := createCmd.String("cert-manager-version", "v1.13.0", "Cert-Manager version")
+
+	withCilium := createCmd.Bool("with-cilium", false, "Install Cilium CNI (requires --disable-default-cni)")
+	ciliumVersion := createCmd.String("cilium-version", "1.14.5", "Cilium version")
+	ciliumHubble := createCmd.Bool("cilium-hubble", false, "Enable Hubble observability")
+	ciliumKubeProxyReplacement := createCmd.Bool("cilium-kube-proxy-replacement", false, "Enable kube-proxy replacement")
+
+	// Flags Avançadas
+	featureGates := createCmd.String("feature-gates", "", "Kubernetes feature gates (comma-separated, e.g., 'GracefulNodeShutdown=true')")
+	runtimeConfig := createCmd.String("runtime-config", "", "API runtime config (comma-separated)")
+	registryMirrors := createCmd.String("registry-mirrors", "", "Container registry mirrors (comma-separated)")
+	insecureRegistries := createCmd.String("insecure-registries", "", "Insecure registries (comma-separated)")
+
+	// Flags de Comportamento
+	exportLogs := createCmd.Bool("export-logs", false, "Export cluster logs on failure")
+	retainOnFailure := createCmd.Bool("retain-on-failure", false, "Retain cluster on creation failure")
+
 	if err := createCmd.Parse(args); err != nil {
-		fatalf("Erro ao analisar argumentos: %v", err)
+		utils.Fatalf("Failed to parse arguments: %v", err)
+	}
+
+	// Validações
+	if *controlPlaneNodes != 1 && *controlPlaneNodes != 3 {
+		utils.Fatalf("Control plane nodes must be 1 or 3 (for HA)")
+	}
+	if *withMetalLB && *metalLBAddressPool == "" {
+		utils.Fatalf("MetalLB requires --metallb-address-pool")
+	}
+	if *withCilium && !*disableDefaultCNI {
+		utils.Fatalf("Cilium requires --disable-default-cni")
 	}
 
 	isMacOS := runtime.GOOS == "darwin"
+	networking := config.CustomNetworking(*podSubnet, *serviceSubnet, *dnsDomain)
 
-	// Validar combinação de flags
-	if *withIstio && *withNginxIngress {
-		logf("⚠️  AVISO: Istio e Nginx Ingress solicitados juntos.\n")
-		logf("   Configurando Nginx nas portas 8080/8443 para evitar conflitos.\n")
-		logf("   Istio usará as portas 80/443 (padrão).\n\n")
+	// Monta a struct de configuração com todas as informações necessárias
+	clusterConfig := &config.ClusterConfig{
+		Name:               *clusterName,
+		KubernetesVersion:  *k8sVersion,
+		ControlPlaneNodes:  *controlPlaneNodes,
+		WorkerNodes:        *workerNodes,
+		DisableDefaultCNI:  *disableDefaultCNI,
+		Networking:         networking,
+		APIServerPort:      *apiServerPort,
+		FeatureGates:       parseCommaSeparated(*featureGates),
+		RuntimeConfig:      parseCommaSeparated(*runtimeConfig),
+		RegistryMirrors:    parseCommaSeparated(*registryMirrors),
+		InsecureRegistries: parseCommaSeparated(*insecureRegistries),
+		IsMacOS:            isMacOS,
+		WithNginxIngress:   *withNginxIngress, // Passa a informação para o gerador de config
+		WithIstio:          *withIstio,        // Passa a informação para o gerador de config
 	}
 
-	// No macOS, avisar sobre otimizações
+	utils.Logf("🚀 Creating Kind cluster '%s' with %d control plane node(s) and %d worker node(s)...\n",
+		*clusterName, *controlPlaneNodes, *workerNodes)
+
 	if isMacOS {
-		logf("🍎 macOS detectado! Aplicando otimizações para Docker Desktop...\n")
-		logf("   ✓ Mapeamento de portas otimizado para localhost\n")
-		logf("   ✓ Configuração otimizada para Ingress Controller\n")
-		if *withIstio {
-			logf("   ✓ Istio será configurado com NodePort (compatível com macOS)\n")
-		}
-		logf("\n")
+		utils.Logf("🍎 macOS detected - applying optimizations\n")
+	}
+	if *disableDefaultCNI {
+		utils.Logf("🔌 Default CNI disabled - custom CNI will be required\n")
 	}
 
-	var configPath string
-	var err error
-
-	// Criar configuração otimizada se necessário
-	if isMacOS || *withIstio || *withNginxIngress {
-		configPath, err = createKindConfig(*clusterName, isMacOS, *withIstio, *withNginxIngress)
-		if err != nil {
-			fatalf("Falha ao criar configuração do Kind: %v", err)
-		}
-		defer os.Remove(configPath)
+	// Gera o arquivo de configuração do Kind com base na lógica dinâmica
+	configPath, err := config.GenerateKindConfig(clusterConfig)
+	if err != nil {
+		utils.Fatalf("Failed to generate Kind config: %v", err)
 	}
+	defer os.Remove(configPath)
 
-	cmdArgs := []string{"create", "cluster", "--name", *clusterName}
-
-	if configPath != "" {
-		cmdArgs = append(cmdArgs, "--config", configPath)
+	// Cria o cluster
+	cmdArgs := []string{"create", "cluster", "--name", *clusterName, "--config", configPath}
+	if *retainOnFailure {
+		cmdArgs = append(cmdArgs, "--retain")
 	}
-
 	if *k8sVersion != "" {
 		imageTag := fmt.Sprintf("kindest/node:v%s", *k8sVersion)
 		cmdArgs = append(cmdArgs, "--image", imageTag)
-		logf("🚀 Subindo um novo cluster Kind ('%s') com Kubernetes v%s...\n", *clusterName, *k8sVersion)
+	}
+
+	output, err := utils.RunCommand("kind", utils.DefaultTimeout, cmdArgs...)
+	if err != nil {
+		if *exportLogs {
+			utils.Logf("📋 Exporting cluster logs...\n")
+			logsDir := fmt.Sprintf("/tmp/%s-logs", *clusterName)
+			utils.RunCommand("kind", utils.DefaultTimeout, "export", "logs", logsDir, "--name", *clusterName)
+			utils.Logf("📁 Logs exported to: %s\n", logsDir)
+		}
+		utils.Fatalf("Failed to create cluster:\n%s", output)
+	}
+	utils.Logf("✅ Cluster Kind created successfully\n")
+	utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	utils.Logf("🔍 Validating cluster health...\n")
+	utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+	if err := validator.WaitForClusterReady(*clusterName, *controlPlaneNodes, *workerNodes); err != nil {
+		utils.Logf("⚠️  Warning: Cluster validation issues: %v\n", err)
+		utils.Logf("💡 The cluster may still work, try checking manually:\n")
+		utils.Logf("   kubectl get nodes\n")
+		utils.Logf("   kubectl get pods -A\n\n")
 	} else {
-		logf("🚀 Subindo um novo cluster Kind ('%s') com a versão padrão do Kubernetes...\n", *clusterName)
+		utils.Logf("\n✅ Cluster health check passed!\n\n")
 	}
 
-	output, err := runCommand("kind", 5*time.Minute, cmdArgs...)
-	if err != nil {
-		fatalf("Falha ao criar o cluster Kind:\n%s", output)
-	}
-	logf("✅ Cluster Kind criado com sucesso!\n")
+	isHA := *controlPlaneNodes >= 3
+	needsIngress := *withNginxIngress || *withIstio
+	if isHA && needsIngress && *workerNodes > 0 {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🔧 Configuring HA ingress worker node...\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
-	// Aguardar cluster ficar pronto
-	logf("⏳ Aguardando cluster ficar completamente pronto...\n")
-	if err := waitForClusterReady(*clusterName); err != nil {
-		logf("⚠️  Aviso: %v\n", err)
+		if err := config.ApplyIngressNodeConfiguration(*clusterName, isHA, needsIngress); err != nil {
+			utils.Logf("⚠️  Warning: Failed to configure ingress node: %v\n", err)
+			utils.Logf("💡 You can apply manually later:\n")
+			utils.Logf("   kubectl label node <worker-name> node-role.kubernetes.io/ingress=true\n")
+			utils.Logf("   kubectl taint node <worker-name> node-role.kubernetes.io/ingress=true:NoSchedule\n\n")
+		} else {
+			utils.Logf("\n✅ Ingress node configuration completed!\n\n")
+		}
 	}
-	time.Sleep(5 * time.Second)
 
-	// Instalar Nginx Ingress se solicitado
+	// Instalação dos componentes adicionais
+	if *withCilium {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🐝 Installing Cilium CNI...\n")
+		ciliumOpts := installer.CiliumOptions{
+			Version:              *ciliumVersion,
+			EnableHubble:         *ciliumHubble,
+			KubeProxyReplacement: *ciliumKubeProxyReplacement,
+		}
+		if err := installer.InstallCilium(ciliumOpts); err != nil {
+			utils.Fatalf("Failed to install Cilium: %v", err)
+		}
+		utils.Logf("✅ Cilium installed\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	if *withMetalLB {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("⚖️  Installing MetalLB...\n")
+		if err := installer.InstallMetalLB(*metalLBAddressPool, *skipMetalLBWarning); err != nil {
+			utils.Fatalf("Failed to install MetalLB: %v", err)
+		}
+		utils.Logf("✅ MetalLB installed\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	if *withCertManager {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🔐 Installing Cert-Manager...\n")
+		if err := installer.InstallCertManager(*certManagerVersion); err != nil {
+			utils.Fatalf("Failed to install Cert-Manager: %v", err)
+		}
+		utils.Logf("✅ Cert-Manager installed\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
 	if *withNginxIngress {
-		logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-		logf("🌐 Instalando Nginx Ingress Controller...\n")
-		nginxPort := 80
-		nginxPortTLS := 443
-		if *withIstio {
-			nginxPort = 8080
-			nginxPortTLS = 8443
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🌐 Installing Nginx Ingress Controller...\n")
+		// Chamada simplificada, sem parâmetros de porta
+		if err := installer.InstallNginxIngress(); err != nil {
+			utils.Fatalf("Failed to install Nginx Ingress: %v", err)
 		}
-		if err := installNginxIngress(nginxPort, nginxPortTLS); err != nil {
-			fatalf("Falha ao instalar Nginx Ingress: %v", err)
-		}
-		logf("✅ Nginx Ingress instalado com sucesso!\n")
-		logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("✅ Nginx Ingress installed\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 	}
 
-	// Instalar Istio se solicitado
 	if *withIstio {
-		logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-		logf("✨ Iniciando instalação do Istio...\n")
-		if err := installIstio(*clusterName, *istioVersion, *istioProfile, isMacOS); err != nil {
-			fatalf("Falha ao instalar o Istio: %v", err)
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("✨ Installing Istio...\n")
+		if err := installer.InstallIstio(*clusterName, *istioVersion, *istioProfile, isMacOS, *withNginxIngress); err != nil {
+			utils.Fatalf("Failed to install Istio: %v", err)
 		}
-		logf("✅ Istio instalado e configurado com sucesso!\n")
-		logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("✅ Istio installed\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 	}
 
-	// Mensagem final
-	fmt.Printf("\n✅ Cluster '%s' criado com sucesso!\n\n", *clusterName)
-
-	if isMacOS {
-		fmt.Println("🍎 Acesso no macOS:")
-		if *withNginxIngress && !*withIstio {
-			fmt.Println("   • Nginx Ingress: http://localhost e https://localhost")
-			fmt.Println("   • Crie recursos Ingress para rotear tráfego")
-		}
-		if *withNginxIngress && *withIstio {
-			fmt.Println("   • Nginx Ingress: http://localhost:8080 e https://localhost:8443")
-			fmt.Println("   • Istio Gateway: http://localhost:80 e https://localhost:443")
-			fmt.Println("   • Use Ingress para Nginx ou Gateway/VirtualService para Istio")
-		}
-		if *withIstio && !*withNginxIngress {
-			fmt.Println("   • Istio Gateway: http://localhost:80 e https://localhost:443")
-			fmt.Println("   • Use Gateway e VirtualService para rotear tráfego")
-		}
-		if !*withNginxIngress && !*withIstio {
-			fmt.Println("   💡 Dica: Use --with-nginx-ingress ou --with-istio para acesso fácil via localhost")
-		}
-		fmt.Println()
-	}
-
-	fmt.Println("💡 Comandos úteis:")
-	fmt.Printf("   kubectl config use-context kind-%s\n", *clusterName)
-	fmt.Println("   kubectl cluster-info")
-	fmt.Println("   kubectl get nodes")
-	if *withIstio {
-		fmt.Println("   kubectl get pods -n istio-system")
-		fmt.Println("   istioctl version")
-	}
-	if *withNginxIngress {
-		fmt.Println("   kubectl get pods -n ingress-nginx")
-	}
+	printClusterInfo(*clusterName, *controlPlaneNodes, *workerNodes, *withIstio, *withNginxIngress, *withMetalLB, *withCertManager, *withCilium)
 }
 
-func waitForClusterReady(clusterName string) error {
-	logf("   - Aguardando nodes ficarem prontos...\n")
-
-	maxRetries := 60 // 2 minutos
-	for i := 0; i < maxRetries; i++ {
-		output, err := runCommandWithTimeout("kubectl", 30*time.Second, "get", "nodes", "--no-headers")
-		if err == nil {
-			lines := strings.Split(strings.TrimSpace(output), "\n")
-			allReady := true
-			for _, line := range lines {
-				if line != "" && !strings.Contains(line, " Ready ") {
-					allReady = false
-					break
-				}
-			}
-			if allReady && len(lines) > 0 {
-				logf("   ✓ Nodes prontos\n")
-				return nil
-			}
-		}
-
-		if i > 0 && i%10 == 0 {
-			logf("   ⏳ Ainda aguardando nodes... (%d segundos)\n", i*2)
-		}
-		time.Sleep(2 * time.Second)
-	}
-
-	return fmt.Errorf("timeout aguardando nodes ficarem prontos")
-}
-
-func createKindConfig(clusterName string, isMacOS, withIstio, withNginxIngress bool) (string, error) {
-	tempFile, err := os.CreateTemp("", "kind-config-*.yaml")
-	if err != nil {
-		return "", err
-	}
-	defer tempFile.Close()
-
-	var config strings.Builder
-
-	config.WriteString("kind: Cluster\n")
-	config.WriteString("apiVersion: kind.x-k8s.io/v1alpha4\n")
-	config.WriteString("nodes:\n")
-	config.WriteString("- role: control-plane\n")
-
-	// Adicionar configurações para macOS ou quando Ingress é necessário
-	if isMacOS || withNginxIngress || withIstio {
-		config.WriteString("  kubeadmConfigPatches:\n")
-		config.WriteString("  - |\n")
-		config.WriteString("    kind: InitConfiguration\n")
-		config.WriteString("    nodeRegistration:\n")
-		config.WriteString("      kubeletExtraArgs:\n")
-		config.WriteString("        node-labels: \"ingress-ready=true\"\n")
-
-		config.WriteString("  extraPortMappings:\n")
-
-		// Configurar portas para Nginx (evitar conflito com Istio)
-		if withNginxIngress {
-			if withIstio {
-				config.WriteString("  - containerPort: 80\n")
-				config.WriteString("    hostPort: 8080\n")
-				config.WriteString("    protocol: TCP\n")
-				config.WriteString("  - containerPort: 443\n")
-				config.WriteString("    hostPort: 8443\n")
-				config.WriteString("    protocol: TCP\n")
-			} else {
-				config.WriteString("  - containerPort: 80\n")
-				config.WriteString("    hostPort: 80\n")
-				config.WriteString("    protocol: TCP\n")
-				config.WriteString("  - containerPort: 443\n")
-				config.WriteString("    hostPort: 443\n")
-				config.WriteString("    protocol: TCP\n")
-			}
-		}
-
-		// Configurar portas para Istio
-		if withIstio {
-			if isMacOS {
-				config.WriteString("  - containerPort: 30080\n")
-				config.WriteString("    hostPort: 80\n")
-				config.WriteString("    protocol: TCP\n")
-				config.WriteString("  - containerPort: 30443\n")
-				config.WriteString("    hostPort: 443\n")
-				config.WriteString("    protocol: TCP\n")
-				config.WriteString("  - containerPort: 30021\n")
-				config.WriteString("    hostPort: 15021\n")
-				config.WriteString("    protocol: TCP\n")
-			} else {
-				if !withNginxIngress {
-					config.WriteString("  - containerPort: 80\n")
-					config.WriteString("    hostPort: 80\n")
-					config.WriteString("    protocol: TCP\n")
-					config.WriteString("  - containerPort: 443\n")
-					config.WriteString("    hostPort: 443\n")
-					config.WriteString("    protocol: TCP\n")
-				}
-			}
-		}
-	}
-
-	if _, err := tempFile.WriteString(config.String()); err != nil {
-		return "", err
-	}
-
-	return tempFile.Name(), nil
-}
-
-func installNginxIngress(httpPort, httpsPort int) error {
-	logf("   📦 Aplicando manifesto do Nginx Ingress Controller...\n")
-
-	manifestURL := "https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml"
-
-	if output, err := runCommand("kubectl", 2*time.Minute, "apply", "-f", manifestURL); err != nil {
-		return fmt.Errorf("falha ao aplicar manifesto: %s", output)
-	}
-
-	logf("   ⏳ Aguardando recursos serem criados...\n")
-	time.Sleep(10 * time.Second)
-
-	logf("   ⏳ Aguardando deployment do Nginx Ingress Controller (pode levar até 3 minutos)...\n")
-
-	deploymentReady := waitForResource(
-		"deployment",
-		"ingress-nginx",
-		"ingress-nginx-controller",
-		3*time.Minute,
-		5*time.Second,
-	)
-
-	if !deploymentReady {
-		logf("   ⚠️  Coletando informações de debug...\n")
-		if output, _ := runCommandWithTimeout("kubectl", 30*time.Second, "get", "all", "-n", "ingress-nginx"); output != "" {
-			logf("   Debug - recursos em ingress-nginx:\n%s\n", output)
-		}
-		return fmt.Errorf("timeout aguardando deployment do Nginx Ingress ser criado")
-	}
-
-	logf("   ⏳ Aguardando pods ficarem prontos (pode levar até 3 minutos)...\n")
-
-	podsReady := waitForPodsReady("ingress-nginx", "app.kubernetes.io/component=controller", 3*time.Minute, 5*time.Second)
-
-	if !podsReady {
-		logf("   ⚠️  Coletando informações de debug...\n")
-		if output, _ := runCommandWithTimeout("kubectl", 30*time.Second, "get", "pods", "-n", "ingress-nginx", "-o", "wide"); output != "" {
-			logf("   Pods:\n%s\n", output)
-		}
-		return fmt.Errorf("timeout aguardando pods do Nginx Ingress ficarem prontos")
-	}
-
-	logf("   ✓ Nginx Ingress Controller está pronto!\n")
-
-	if output, err := runCommandWithTimeout("kubectl", 30*time.Second, "get", "svc", "-n", "ingress-nginx", "ingress-nginx-controller"); err == nil {
-		logf("   ✓ Serviço configurado:\n%s\n", output)
-	}
-
-	return nil
-}
-
-func waitForResource(resourceType, namespace, name string, timeout, interval time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	iterations := 0
-	lastLog := time.Now()
-
-	for time.Now().Before(deadline) {
-		iterations++
-		output, err := runCommandWithTimeout("kubectl", 30*time.Second, "get", resourceType, "-n", namespace, name, "--ignore-not-found")
-
-		if err == nil && strings.Contains(output, name) {
-			logf("   ✓ %s/%s criado\n", resourceType, name)
-			return true
-		}
-
-		// Mostrar progresso a cada 15 segundos
-		if time.Since(lastLog) >= 15*time.Second {
-			remaining := time.Until(deadline)
-			logf("   ⏳ Aguardando %s/%s... (%.0f segundos restantes)\n", resourceType, name, remaining.Seconds())
-			lastLog = time.Now()
-		}
-
-		time.Sleep(interval)
-	}
-
-	return false
-}
-
-func waitForPodsReady(namespace, labelSelector string, timeout, interval time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	iterations := 0
-	lastStatus := ""
-	lastLog := time.Now()
-
-	for time.Now().Before(deadline) {
-		iterations++
-
-		output, err := runCommandWithTimeout("kubectl", 30*time.Second, "get", "pods", "-n", namespace, "-l", labelSelector, "-o", "jsonpath={range .items[*]}{.metadata.name}{'|'}{.status.phase}{'|'}{range .status.conditions[?(@.type=='Ready')]}{.status}{end}{'\\n'}{end}")
-
-		if err == nil && output != "" {
-			lines := strings.Split(strings.TrimSpace(output), "\n")
-			allReady := true
-			statusSummary := ""
-
-			for _, line := range lines {
-				if line == "" {
-					continue
-				}
-				parts := strings.Split(line, "|")
-				if len(parts) >= 3 {
-					podName := parts[0]
-					phase := parts[1]
-					ready := parts[2]
-
-					statusSummary += fmt.Sprintf("%s: %s/%s ", podName, phase, ready)
-
-					if phase != "Running" || ready != "True" {
-						allReady = false
-					}
-				}
-			}
-
-			if statusSummary != lastStatus && time.Since(lastLog) >= 15*time.Second {
-				logf("   📊 Status: %s\n", statusSummary)
-				lastStatus = statusSummary
-				lastLog = time.Now()
-			}
-
-			if allReady && len(lines) > 0 {
-				logf("   ✓ Todos os pods estão prontos!\n")
-				return true
-			}
-		}
-
-		// Mostrar progresso a cada 15 segundos
-		if time.Since(lastLog) >= 15*time.Second {
-			remaining := time.Until(deadline)
-			logf("   ⏳ Aguardando pods... (%.0f segundos restantes)\n", remaining.Seconds())
-			lastLog = time.Now()
-		}
-
-		time.Sleep(interval)
-	}
-
-	return false
-}
-
-func ensureIstioctl(version string) (string, error) {
-	if path, err := exec.LookPath("istioctl"); err == nil {
-		logf("   ✓ istioctl encontrado em: %s\n", path)
-		if output, err := runCommandWithTimeout(path, 30*time.Second, "version", "--remote=false"); err == nil {
-			logf("   ✓ Versão instalada: %s", output)
-		}
-		return path, nil
-	}
-
-	logf("   📥 istioctl não encontrado, instalando versão %s...\n", version)
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("não foi possível encontrar o diretório home: %w", err)
-	}
-
-	installDir := filepath.Join(homeDir, ".local", "bin")
-	if _, err := os.Stat(installDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(installDir, 0755); err != nil {
-			return "", fmt.Errorf("não foi possível criar diretório %s: %w", installDir, err)
-		}
-	}
-
-	tempDir, err := os.MkdirTemp("", "istioctl-install-*")
-	if err != nil {
-		return "", fmt.Errorf("falha ao criar diretório temporário: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
-	istioURL := fmt.Sprintf("https://github.com/istio/istio/releases/download/%s/istio-%s-%s-%s.tar.gz",
-		version, version, goos, goarch)
-	tarPath := filepath.Join(tempDir, "istio.tar.gz")
-
-	logf("   📥 Baixando Istio de: %s\n", istioURL)
-	if output, err := runCommand("curl", 5*time.Minute, "-L", "-o", tarPath, istioURL); err != nil {
-		return "", fmt.Errorf("falha ao baixar Istio: %s", output)
-	}
-
-	logf("   📦 Extraindo istioctl...\n")
-	var tarArgs []string
-	if runtime.GOOS == "darwin" {
-		tarArgs = []string{"--no-xattrs", "-xzf", tarPath, "-C", tempDir}
-	} else {
-		tarArgs = []string{"-xzf", tarPath, "-C", tempDir}
-	}
-
-	if output, err := runCommand("tar", 2*time.Minute, tarArgs...); err != nil {
-		return "", fmt.Errorf("falha ao extrair Istio: %s", output)
-	}
-
-	istioctlSource := filepath.Join(tempDir, fmt.Sprintf("istio-%s", version), "bin", "istioctl")
-	istioctlDest := filepath.Join(installDir, "istioctl")
-
-	logf("   📥 Instalando istioctl em: %s\n", istioctlDest)
-
-	data, err := os.ReadFile(istioctlSource)
-	if err != nil {
-		return "", fmt.Errorf("falha ao ler istioctl: %w", err)
-	}
-
-	if err := os.WriteFile(istioctlDest, data, 0755); err != nil {
-		return "", fmt.Errorf("falha ao instalar istioctl: %w", err)
-	}
-
-	logf("   ✅ istioctl instalado com sucesso!\n")
-
-	if _, err := exec.LookPath("istioctl"); err != nil {
-		logf("   ⚠️  AVISO: %s não está no PATH.\n", installDir)
-		logf("   Adicione ao seu ~/.bashrc ou ~/.zshrc:\n")
-		logf("   export PATH=\"%s:$PATH\"\n", installDir)
-		logf("   Ou execute: export PATH=\"%s:$PATH\"\n\n", installDir)
-	}
-
-	return istioctlDest, nil
-}
-
-func installIstio(clusterName, istioVersion, istioProfile string, isMacOS bool) error {
-	istioctlPath, err := ensureIstioctl(istioVersion)
-	if err != nil {
-		return fmt.Errorf("falha ao garantir istioctl: %w", err)
-	}
-
-	logf("   🔧 Instalando o painel de controle do Istio (perfil '%s')...\n", istioProfile)
-
-	installArgs := []string{"install", "--set", "profile=" + istioProfile}
-
-	if isMacOS {
-		logf("   🍎 Configurando Istio Gateway para NodePort (otimizado para macOS)...\n")
-		installArgs = append(installArgs,
-			"--set", "components.ingressGateways[0].name=istio-ingressgateway",
-			"--set", "components.ingressGateways[0].enabled=true",
-			"--set", "components.ingressGateways[0].k8s.service.type=NodePort",
-			"--set", "components.ingressGateways[0].k8s.service.ports[0].name=http2",
-			"--set", "components.ingressGateways[0].k8s.service.ports[0].port=80",
-			"--set", "components.ingressGateways[0].k8s.service.ports[0].targetPort=8080",
-			"--set", "components.ingressGateways[0].k8s.service.ports[0].nodePort=30080",
-			"--set", "components.ingressGateways[0].k8s.service.ports[1].name=https",
-			"--set", "components.ingressGateways[0].k8s.service.ports[1].port=443",
-			"--set", "components.ingressGateways[0].k8s.service.ports[1].targetPort=8443",
-			"--set", "components.ingressGateways[0].k8s.service.ports[1].nodePort=30443",
-			"--set", "components.ingressGateways[0].k8s.service.ports[2].name=status-port",
-			"--set", "components.ingressGateways[0].k8s.service.ports[2].port=15021",
-			"--set", "components.ingressGateways[0].k8s.service.ports[2].targetPort=15021",
-			"--set", "components.ingressGateways[0].k8s.service.ports[2].nodePort=30021",
-		)
-	}
-
-	installArgs = append(installArgs, "-y")
-
-	logf("   ⏳ Executando instalação do Istio (pode levar até 5 minutos)...\n")
-	logf("   💡 Mantenha a paciência, o processo está em andamento...\n")
-
-	// Executar instalação com feedback de progresso
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	// Iniciar keep-alive para mostrar que está processando
-	keepAliveCtx, keepAliveCancel := context.WithCancel(ctx)
-	defer keepAliveCancel()
-	go keepAlive(keepAliveCtx, 15*time.Second, "Instalando Istio")
-
-	cmd := exec.CommandContext(ctx, istioctlPath, installArgs...)
-
-	// Capturar stdout e stderr em tempo real
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
-
-	// Combinar outputs
-	multiReader := io.MultiReader(stdout, stderr)
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("falha ao iniciar instalação do Istio: %w", err)
-	}
-
-	// Ler output em tempo real
-	buf := make([]byte, 1024)
-	var output strings.Builder
-	lastLog := time.Now()
-
-	for {
-		n, err := multiReader.Read(buf)
-		if n > 0 {
-			chunk := string(buf[:n])
-			output.WriteString(chunk)
-
-			// Log progressivo a cada 10 segundos ou quando há linha completa
-			if time.Since(lastLog) >= 10*time.Second || strings.Contains(chunk, "\n") {
-				lines := strings.Split(strings.TrimSpace(chunk), "\n")
-				for _, line := range lines {
-					if line != "" {
-						logf("      %s\n", line)
-					}
-				}
-				lastLog = time.Now()
-			}
-		}
-		if err != nil {
-			break
-		}
-	}
-
-	if err := cmd.Wait(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("timeout na instalação do Istio após 5 minutos")
-		}
-		return fmt.Errorf("falha na instalação do Istio: %s", output.String())
-	}
-
-	keepAliveCancel() // Parar keep-alive
-	logf("   ✓ Instalação concluída\n")
-
-	// Aguardar componentes ficarem prontos
-	logf("   ⏳ Aguardando componentes do Istio ficarem prontos (pode levar até 3 minutos)...\n")
-
-	logf("   ⏳ Aguardando istiod...\n")
-	istiodReady := waitForPodsReady("istio-system", "app=istiod", 3*time.Minute, 5*time.Second)
-
-	if !istiodReady {
-		logf("   ⚠️  Aviso: istiod pode não estar completamente pronto, mas continuando...\n")
-	}
-
-	logf("   ⏳ Aguardando Istio Ingress Gateway...\n")
-	gwReady := waitForPodsReady("istio-system", "app=istio-ingressgateway", 3*time.Minute, 5*time.Second)
-
-	if !gwReady {
-		logf("   ⚠️  Aviso: Istio Gateway pode não estar completamente pronto, mas continuando...\n")
-	}
-
-	time.Sleep(5 * time.Second)
-	logf("   📊 Verificando status dos componentes do Istio...\n")
-	if output, err := runCommandWithTimeout("kubectl", 30*time.Second, "get", "pods", "-n", "istio-system"); err == nil {
-		logf("   Pods do Istio:\n%s\n", output)
-	}
-
-	logf("   🔧 Habilitando injeção de sidecar no namespace 'default'...\n")
-	if output, err := runCommandWithTimeout("kubectl", 30*time.Second, "label", "namespace", "default", "istio-injection=enabled", "--overwrite"); err != nil {
-		return fmt.Errorf("falha ao habilitar injeção de sidecar: %s", output)
-	}
-	logf("   ✓ Injeção de sidecar habilitada\n")
-
-	logf("   📋 Verificando versão do Istio...\n")
-	if output, err := runCommandWithTimeout(istioctlPath, 30*time.Second, "version"); err == nil {
-		logf("   Versão do Istio:\n%s\n", output)
-	}
-
-	return nil
-}
-
-func installKind() error {
-	logf("⚠️  O comando 'kind' não foi encontrado. Tentando instalar automaticamente...\n")
-
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
-	kindVersion := "v0.23.0"
-	downloadURL := fmt.Sprintf("https://kind.sigs.k8s.io/dl/%s/kind-%s-%s", kindVersion, goos, goarch)
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("não foi possível encontrar o diretório home do usuário")
-	}
-
-	installDir := filepath.Join(homeDir, ".local", "bin")
-	if _, err := os.Stat(installDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(installDir, 0755); err != nil {
-			return fmt.Errorf("não foi possível criar o diretório de instalação %s: %w", installDir, err)
-		}
-	}
-	installPath := filepath.Join(installDir, "kind")
-
-	logf("   📥 Baixando Kind de: %s\n", downloadURL)
-	logf("   📥 Instalando em: %s\n", installPath)
-
-	if output, err := runCommand("curl", 2*time.Minute, "-Lo", installPath, downloadURL); err != nil {
-		return fmt.Errorf("falha no download do Kind: %s", output)
-	}
-
-	logf("   🔧 Definindo permissão de execução...\n")
-	if output, err := runCommandWithTimeout("chmod", 10*time.Second, "+x", installPath); err != nil {
-		return fmt.Errorf("falha ao definir permissão de execução: %s", output)
-	}
-
-	logf("✅ Kind instalado com sucesso!\n")
-	logf("   ⚠️  Aviso: O diretório de instalação ('%s') pode não estar no seu PATH.\n", installDir)
-	logf("   Você pode precisar reiniciar seu terminal ou adicionar a seguinte linha ao seu ~/.bashrc ou ~/.zshrc:\n")
-	logf("   export PATH=\"%s:$PATH\"\n", installDir)
-
-	return nil
-}
-
-func ensureDependencies(deps ...string) error {
-	for _, dep := range deps {
-		_, err := exec.LookPath(dep)
-		if err != nil {
-			if dep == "kind" {
-				if err := installKind(); err != nil {
-					return fmt.Errorf("falha ao instalar o Kind: %w", err)
-				}
-				if _, err := exec.LookPath("kind"); err != nil {
-					return fmt.Errorf("kind foi instalado, mas não está no PATH")
-				}
-			} else {
-				return fmt.Errorf("dependência necessária '%s' não encontrada no PATH", dep)
-			}
-		}
-	}
-	return nil
-}
-
-func deleteCluster(args []string) {
+func handleDelete(args []string) {
 	deleteCmd := flag.NewFlagSet("delete", flag.ExitOnError)
-	clusterName := deleteCmd.String("name", "kind", "Nome do cluster a ser deletado")
+	clusterName := deleteCmd.String("name", DefaultClusterName, "Cluster name to delete")
 	if err := deleteCmd.Parse(args); err != nil {
-		fatalf("Erro ao analisar argumentos: %v", err)
+		utils.Fatalf("Failed to parse arguments: %v", err)
 	}
 
-	logf("🔥 Deletando o cluster Kind '%s'...\n", *clusterName)
-	cmdArgs := []string{"delete", "cluster", "--name", *clusterName}
-	output, err := runCommand("kind", 5*time.Minute, cmdArgs...)
+	utils.Logf("🔥 Deleting cluster '%s'...\n", *clusterName)
+	output, err := utils.RunCommand("kind", utils.DefaultTimeout, "delete", "cluster", "--name", *clusterName)
 	if err != nil {
-		fatalf("Falha ao deletar o cluster Kind:\n%s", output)
+		utils.Fatalf("Failed to delete cluster:\n%s", output)
 	}
 
-	fmt.Printf("✅ Cluster Kind '%s' deletado com sucesso!\n", *clusterName)
+	fmt.Printf("✅ Cluster '%s' deleted successfully\n", *clusterName)
 }
 
-func listClusters() {
-	logf("📋 Listando clusters Kind existentes...\n")
-	output, err := runCommand("kind", 30*time.Second, "get", "clusters")
+func handleList() {
+	utils.Logf("📋 Listing Kind clusters...\n")
+	output, err := utils.RunCommand("kind", utils.ShortTimeout, "get", "clusters")
 	if err != nil {
-		fatalf("Falha ao listar clusters:\n%s", output)
+		utils.Fatalf("Failed to list clusters:\n%s", output)
 	}
 	if strings.TrimSpace(output) == "" {
-		logf("Nenhum cluster Kind encontrado.\n")
+		utils.Logf("No clusters found\n")
 	} else {
 		fmt.Print(output)
 	}
 }
 
-func runCommand(name string, timeout time.Duration, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, name, args...)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	err := cmd.Run()
-
-	if ctx.Err() == context.DeadlineExceeded {
-		return out.String(), fmt.Errorf("comando expirou após %v", timeout)
+func handleExport(args []string) {
+	exportCmd := flag.NewFlagSet("export", flag.ExitOnError)
+	clusterName := exportCmd.String("name", DefaultClusterName, "Cluster name")
+	outputPath := exportCmd.String("output", "", "Output path for kubeconfig (default: stdout)")
+	if err := exportCmd.Parse(args); err != nil {
+		utils.Fatalf("Failed to parse arguments: %v", err)
 	}
 
-	return out.String(), err
+	utils.Logf("📤 Exporting kubeconfig for cluster '%s'...\n", *clusterName)
+
+	cmdArgs := []string{"export", "kubeconfig", "--name", *clusterName}
+	if *outputPath != "" {
+		cmdArgs = append(cmdArgs, "--kubeconfig", *outputPath)
+	}
+
+	output, err := utils.RunCommand("kind", utils.ShortTimeout, cmdArgs...)
+	if err != nil {
+		utils.Fatalf("Failed to export kubeconfig:\n%s", output)
+	}
+
+	if *outputPath != "" {
+		fmt.Printf("✅ Kubeconfig exported to: %s\n", *outputPath)
+	} else {
+		fmt.Print(output)
+	}
 }
 
-func runCommandWithTimeout(name string, timeout time.Duration, args ...string) (string, error) {
-	return runCommand(name, timeout, args...)
+func handleImport(args []string) {
+	importCmd := flag.NewFlagSet("import", flag.ExitOnError)
+	clusterName := importCmd.String("name", DefaultClusterName, "Cluster name")
+	imagePath := importCmd.String("image", "", "Docker image tarball path")
+	if err := importCmd.Parse(args); err != nil {
+		utils.Fatalf("Failed to parse arguments: %v", err)
+	}
+
+	if *imagePath == "" {
+		utils.Fatalf("--image is required")
+	}
+
+	utils.Logf("📥 Importing image to cluster '%s'...\n", *clusterName)
+	output, err := utils.RunCommand("kind", utils.ExtendedTimeout, "load", "image-archive", *imagePath, "--name", *clusterName)
+	if err != nil {
+		utils.Fatalf("Failed to import image:\n%s", output)
+	}
+
+	fmt.Printf("✅ Image imported successfully\n")
+}
+
+func handleUpdate(args []string) {
+	updateCmd := flag.NewFlagSet("update", flag.ExitOnError)
+	clusterName := updateCmd.String("name", DefaultClusterName, "Nome do cluster a ser atualizado")
+
+	installIstio := updateCmd.Bool("install-istio", false, "Instala o Istio no cluster existente")
+	istioVersion := updateCmd.String("istio-version", "1.22.1", "Versão do Istio a ser instalada")
+	istioProfile := updateCmd.String("istio-profile", "demo", "Perfil de instalação do Istio")
+
+	installNginx := updateCmd.Bool("install-nginx-ingress", false, "Instala o Nginx Ingress Controller")
+
+	installCertManager := updateCmd.Bool("install-cert-manager", false, "Instala o Cert-Manager")
+	certManagerVersion := updateCmd.String("cert-manager-version", "v1.13.0", "Versão do Cert-Manager")
+
+	if err := updateCmd.Parse(args); err != nil {
+		utils.Fatalf("Failed to parse arguments for update: %v", err)
+	}
+
+	// Verificar se o cluster existe
+	utils.Logf("🔍 Verifying cluster '%s' exists...\n", *clusterName)
+	output, err := utils.RunCommand("kind", utils.ShortTimeout, "get", "clusters")
+	if err != nil || !strings.Contains(output, *clusterName) {
+		utils.Fatalf("Cluster '%s' not found. Cannot perform update.", *clusterName)
+	}
+	utils.Logf("✅ Cluster found. Proceeding with updates.\n")
+
+	isMacOS := runtime.GOOS == "darwin"
+
+	// Lógica de instalação dos componentes
+	if *installNginx {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🌐 Installing Nginx Ingress Controller on existing cluster...\n")
+		// AVISO: A instalação do Nginx em um cluster existente pode não funcionar
+		// se as portas 80/443 não foram mapeadas na criação do cluster.
+		utils.Logf("   ⚠️  Warning: This will only work if ports 80/443 were mapped during cluster creation.\n")
+		if err := installer.InstallNginxIngress(); err != nil {
+			utils.Fatalf("Failed to install Nginx Ingress: %v", err)
+		}
+		utils.Logf("✅ Nginx Ingress installed successfully!\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	if *installCertManager {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🔐 Installing Cert-Manager on existing cluster...\n")
+		if err := installer.InstallCertManager(*certManagerVersion); err != nil {
+			utils.Fatalf("Failed to install Cert-Manager: %v", err)
+		}
+		utils.Logf("✅ Cert-Manager installed successfully!\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	if *installIstio {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("✨ Installing Istio on existing cluster...\n")
+
+		// LÓGICA CORRIGIDA: Verifica se o Nginx está sendo instalado AGORA
+		// ou se ele JÁ EXISTE no cluster.
+		nginxIsPresent := *installNginx || installer.IsNginxIngressInstalled()
+		if nginxIsPresent {
+			utils.Logf("   ℹ️  Nginx Ingress detected. Istio will be configured to avoid port conflicts on macOS.\n")
+		}
+		if err := installer.InstallIstio(*clusterName, *istioVersion, *istioProfile, isMacOS, nginxIsPresent); err != nil {
+			utils.Fatalf("Failed to install Istio: %v", err)
+		}
+		utils.Logf("✅ Istio installed successfully!\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	utils.Logf("\n🎉 Update process completed for cluster '%s'.\n", *clusterName)
+}
+
+func handleRemove(args []string) {
+	removeCmd := flag.NewFlagSet("remove", flag.ExitOnError)
+	clusterName := removeCmd.String("name", DefaultClusterName, "Nome do cluster do qual remover componentes")
+
+	removeIstio := removeCmd.Bool("istio", false, "Remove o Istio do cluster")
+	removeNginx := removeCmd.Bool("nginx-ingress", false, "Remove o Nginx Ingress Controller")
+	removeCertManager := removeCmd.Bool("cert-manager", false, "Remove o Cert-Manager")
+	removeMetalLB := removeCmd.Bool("metallb", false, "Remove o MetalLB")
+	removeCilium := removeCmd.Bool("cilium", false, "Remove o Cilium CNI")
+	// Adicionamos uma flag de confirmação para automação
+	confirm := removeCmd.Bool("yes", false, "Confirma a remoção sem prompt interativo")
+
+	if err := removeCmd.Parse(args); err != nil {
+		utils.Fatalf("Failed to parse arguments for remove: %v", err)
+	}
+
+	// Verificar se o cluster existe
+	utils.Logf("🔍 Verifying cluster '%s' exists...\n", *clusterName)
+	output, err := utils.RunCommand("kind", utils.ShortTimeout, "get", "clusters")
+	if err != nil || !strings.Contains(output, *clusterName) {
+		utils.Fatalf("Cluster '%s' not found. Cannot perform removal.", *clusterName)
+	}
+	utils.Logf("✅ Cluster found. Proceeding with removal.\n")
+
+	// Lógica de remoção dos componentes
+	if *removeIstio {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🗑️  Removing Istio from cluster...\n")
+		if err := installer.RemoveIstio(*confirm); err != nil {
+			utils.Fatalf("Failed to remove Istio: %v", err)
+		}
+		utils.Logf("✅ Istio removed successfully!\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	if *removeNginx {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🗑️  Removing Nginx Ingress Controller...\n")
+		if err := installer.RemoveNginxIngress(); err != nil {
+			utils.Fatalf("Failed to remove Nginx Ingress: %v", err)
+		}
+		utils.Logf("✅ Nginx Ingress removed successfully!\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	if *removeCertManager {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🗑️  Removing Cert-Manager...\n")
+		if err := installer.RemoveCertManager(); err != nil {
+			utils.Fatalf("Failed to remove Cert-Manager: %v", err)
+		}
+		utils.Logf("✅ Cert-Manager removed successfully!\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	if *removeMetalLB {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🗑️  Removing MetalLB...\n")
+		if err := installer.RemoveMetalLB(); err != nil {
+			utils.Fatalf("Failed to remove MetalLB: %v", err)
+		}
+		utils.Logf("✅ MetalLB removed successfully!\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	if *removeCilium {
+		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		utils.Logf("🗑️  Removing Cilium CNI...\n")
+		if err := installer.RemoveCilium(*confirm); err != nil {
+			utils.Fatalf("Failed to remove Cilium: %v", err)
+		}
+		utils.Logf("✅ Cilium removed successfully!\n")
+		utils.Logf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	utils.Logf("\n🎉 Removal process completed for cluster '%s'.\n", *clusterName)
+}
+
+func parseCommaSeparated(input string) []string {
+	if input == "" {
+		return nil
+	}
+	parts := strings.Split(input, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func printClusterInfo(name string, controlPlane, workers int, istio, nginx, metallb, certManager, cilium bool) {
+	fmt.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	fmt.Printf("✅ Cluster '%s' is ready!\n\n", name)
+	fmt.Printf("📊 Cluster Configuration:\n")
+	fmt.Printf("   • Control Plane Nodes: %d\n", controlPlane)
+	fmt.Printf("   • Worker Nodes: %d\n", workers)
+	fmt.Printf("   • Total Nodes: %d\n\n", controlPlane+workers)
+
+	if istio || nginx || metallb || certManager || cilium {
+		fmt.Printf("🔧 Installed Components:\n")
+		if cilium {
+			fmt.Printf("   ✓ Cilium CNI\n")
+		}
+		if istio {
+			fmt.Printf("   ✓ Istio Service Mesh\n")
+		}
+		if nginx {
+			fmt.Printf("   ✓ Nginx Ingress Controller\n")
+		}
+		if metallb {
+			fmt.Printf("   ✓ MetalLB Load Balancer\n")
+		}
+		if certManager {
+			fmt.Printf("   ✓ Cert-Manager\n")
+		}
+		fmt.Println()
+	}
+
+	fmt.Printf("💡 Useful Commands:\n")
+	fmt.Printf("   kubectl config use-context kind-%s\n", name)
+	fmt.Printf("   kubectl cluster-info\n")
+	fmt.Printf("   kubectl get nodes -o wide\n")
+	fmt.Printf("   kubectl get pods -A\n")
+
+	if cilium {
+		fmt.Printf("\n🐝 Cilium Commands:\n")
+		fmt.Printf("   cilium status\n")
+		fmt.Printf("   cilium connectivity test\n")
+		fmt.Printf("   kubectl -n kube-system exec -it ds/cilium -- cilium status --verbose\n")
+	}
+
+	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 }
