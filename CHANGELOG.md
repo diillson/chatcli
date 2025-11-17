@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.6](https://github.com/diillson/chatcli/compare/v1.38.5...v1.38.6) (2025-11-17)
+
+
+### Bug Fixes
+
+* **plugins:** reorganize and extend `chatcli-k8s-cloud` and `chatcli-kind` examples ([#358](https://github.com/diillson/chatcli/issues/358)) ([#359](https://github.com/diillson/chatcli/issues/359)) ([6d6a866](https://github.com/diillson/chatcli/commit/6d6a866f6aae5ffd74e16aa5d4df5ec3310bf51b))
+
 ## [1.38.5](https://github.com/diillson/chatcli/compare/v1.38.4...v1.38.5) (2025-11-12)
 
 
