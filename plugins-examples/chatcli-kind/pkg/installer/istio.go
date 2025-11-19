@@ -14,22 +14,39 @@ import (
 	"github.com/diillson/chatcli/plugins-examples/chatcli-kind/pkg/utils"
 )
 
-func InstallIstio(clusterName, istioVersion, istioProfile string, isMacOS, withNginx bool) error {
-	istioctlPath, err := ensureIstioctl(istioVersion)
+// InstallIstioOptions agrupa as opções de instalação
+type InstallIstioOptions struct {
+	ClusterName string
+	Version     string
+	Profile     string
+	IsMacOS     bool
+	WithNginx   bool
+	ImageHub    string // Novo: Suporte a registry privado (ex: my-registry.corp.com/istio)
+}
+
+// InstallIstio instala o Istio no cluster com suporte a HA e Registry Privado
+func InstallIstio(opts InstallIstioOptions) error {
+	istioctlPath, err := ensureIstioctl(opts.Version)
 	if err != nil {
 		return fmt.Errorf("failed to ensure istioctl: %w", err)
 	}
 
-	utils.Logf("   🔧 Installing Istio control plane (profile '%s')...\n", istioProfile)
+	utils.Logf("   🔧 Installing Istio control plane (profile '%s')...\n", opts.Profile)
 
-	installArgs := []string{"install", "--set", "profile=" + istioProfile}
+	installArgs := []string{"install", "--set", "profile=" + opts.Profile}
 
-	// ✅ LÓGICA CONDICIONAL: Usar NodePorts diferentes se Nginx está presente
+	// Configuração de Registry Privado
+	if opts.ImageHub != "" {
+		utils.Logf("   🏭 Using custom image hub: %s\n", opts.ImageHub)
+		installArgs = append(installArgs, "--set", "hub="+opts.ImageHub)
+	}
+
+	// Lógica de Portas (NodePort) para evitar conflitos com Nginx
 	istioHTTPNodePort := 30080
 	istioHTTPSNodePort := 30443
 	istioStatusNodePort := 30021
 
-	if withNginx {
+	if opts.WithNginx {
 		// Nginx já ocupa 30080/30443, usar portas alternativas
 		istioHTTPNodePort = 30180
 		istioHTTPSNodePort = 30543
@@ -142,7 +159,7 @@ func InstallIstio(clusterName, istioVersion, istioProfile string, isMacOS, withN
 		utils.Logf("   ✓ Istio gateway ready\n")
 	}
 
-	// ✅ ADICIONAR: HA scheduling
+	// Aplicação de HA Scheduling se detectado cluster HA
 	topology, _ := detectIstioClusterTopology()
 	if topology != nil && topology.IsHA {
 		utils.Logf("   🔧 Applying Istio HA scheduling configuration...\n")
@@ -162,7 +179,7 @@ func InstallIstio(clusterName, istioVersion, istioProfile string, isMacOS, withN
 	utils.Logf("   ✓ Sidecar injection enabled\n")
 
 	// Teste de conectividade
-	if withNginx {
+	if opts.WithNginx {
 		utils.Logf("   🧪 Testing Istio connectivity (port 8080)...\n")
 		testOutput, err := utils.RunCommand("curl", 10*time.Second,
 			"-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:8080")
@@ -189,7 +206,7 @@ func InstallIstio(clusterName, istioVersion, istioProfile string, isMacOS, withN
 	// Informações de acesso
 	utils.Logf("\n   💡 ISTIO ACCESS INFORMATION:\n")
 	utils.Logf("   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	if withNginx {
+	if opts.WithNginx {
 		utils.Logf("      • Nginx:  http://localhost       (NodePort 30080)\n")
 		utils.Logf("      • Istio:  http://localhost:8080  (NodePort 30180)\n")
 		utils.Logf("                https://localhost:8443 (NodePort 30543)\n")
@@ -202,6 +219,7 @@ func InstallIstio(clusterName, istioVersion, istioProfile string, isMacOS, withN
 	return nil
 }
 
+// applyIstioHAScheduling configura réplicas e anti-affinity para alta disponibilidade
 func applyIstioHAScheduling() error {
 	// Detectar número de workers
 	topology, err := detectIstioClusterTopology()
@@ -225,47 +243,47 @@ func applyIstioHAScheduling() error {
 
 	utils.Logf("   📊 Configuring %d replicas with minAvailable=%d\n", replicas, minAvailable)
 
-	// ✅ PATCH: Deployment com múltiplas réplicas + anti-affinity
+	// PATCH: Deployment com múltiplas réplicas + anti-affinity
 	deploymentPatch := fmt.Sprintf(`{
-          "spec": {
-            "replicas": %d,
-            "template": {
               "spec": {
-                "nodeSelector": {
-                  "ingress-ready": "true"
-                },
-                "tolerations": [
-                  {
-                    "key": "node-role.kubernetes.io/control-plane",
-                    "operator": "Equal",
-                    "effect": "NoSchedule"
-                  }
-                ],
-                "affinity": {
-                  "podAntiAffinity": {
-                    "preferredDuringSchedulingIgnoredDuringExecution": [
+                "replicas": %d,
+                "template": {
+                  "spec": {
+                    "nodeSelector": {
+                      "ingress-ready": "true"
+                    },
+                    "tolerations": [
                       {
-                        "weight": 100,
-                        "podAffinityTerm": {
-                          "labelSelector": {
-                            "matchExpressions": [
-                              {
-                                "key": "app",
-                                "operator": "In",
-                                "values": ["istio-ingressgateway"]
-                              }
-                            ]
-                          },
-                          "topologyKey": "kubernetes.io/hostname"
-                        }
+                        "key": "node-role.kubernetes.io/control-plane",
+                        "operator": "Equal",
+                        "effect": "NoSchedule"
                       }
-                    ]
+                    ],
+                    "affinity": {
+                      "podAntiAffinity": {
+                        "preferredDuringSchedulingIgnoredDuringExecution": [
+                          {
+                            "weight": 100,
+                            "podAffinityTerm": {
+                              "labelSelector": {
+                                "matchExpressions": [
+                                  {
+                                    "key": "app",
+                                    "operator": "In",
+                                    "values": ["istio-ingressgateway"]
+                                  }
+                                ]
+                              },
+                              "topologyKey": "kubernetes.io/hostname"
+                            }
+                          }
+                        ]
+                      }
+                    }
                   }
                 }
               }
-            }
-          }
-        }`, replicas)
+            }`, replicas)
 
 	patchArgs := []string{
 		"patch", "deployment", "istio-ingressgateway",
@@ -280,7 +298,7 @@ func applyIstioHAScheduling() error {
 	}
 	utils.Logf("   ✓ Deployment configured with %d replicas\n", replicas)
 
-	// ✅ PodDisruptionBudget
+	// PodDisruptionBudget
 	utils.Logf("   🛡️  Creating PodDisruptionBudget...\n")
 
 	pdbYAML := fmt.Sprintf(`apiVersion: policy/v1
@@ -350,6 +368,12 @@ func applyIstioHAScheduling() error {
 	return nil
 }
 
+type IstioClusterTopology struct {
+	ControlPlaneCount int
+	WorkerCount       int
+	IsHA              bool
+}
+
 func detectIstioClusterTopology() (*IstioClusterTopology, error) {
 	topology := &IstioClusterTopology{}
 
@@ -370,12 +394,6 @@ func detectIstioClusterTopology() (*IstioClusterTopology, error) {
 	topology.IsHA = topology.ControlPlaneCount >= 3
 
 	return topology, nil
-}
-
-type IstioClusterTopology struct {
-	ControlPlaneCount int
-	WorkerCount       int
-	IsHA              bool
 }
 
 func countIstioLines(output string) int {
