@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.9](https://github.com/diillson/chatcli/compare/v1.38.8...v1.38.9) (2025-11-19)
+
+
+### Bug Fixes
+
+* **plugins-examples:** enhance chatcli-kind with private registry support and Istio improvements ([#367](https://github.com/diillson/chatcli/issues/367)) ([#368](https://github.com/diillson/chatcli/issues/368)) ([c4d36e3](https://github.com/diillson/chatcli/commit/c4d36e3d2f686da0e5b375226c834894845099a9))
+
 ## [1.38.8](https://github.com/diillson/chatcli/compare/v1.38.7...v1.38.8) (2025-11-17)
 
 
