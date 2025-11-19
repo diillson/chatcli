@@ -37,7 +37,7 @@ func TestMain(m *testing.M) {
 	// Executar os testes
 	exitCode := m.Run()
 
-	os.Remove(chatcliBinary)
+	defer os.Remove(chatcliBinary)
 	os.Exit(exitCode)
 }
 

@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,9 +51,16 @@ func (p *ExecutablePlugin) Version() string     { return p.metadata.Version }
 func (p *ExecutablePlugin) Path() string        { return p.path }
 func (p *ExecutablePlugin) Schema() string      { return p.schema }
 
+// stripANSI remove códigos de escape ANSI de uma string para facilitar a leitura pela IA.
+func stripANSI(str string) string {
+	const ansi = "[\u001B\u009B][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[a-zA-Z\\d]*)*)?\u0007)|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PRZcf-ntqry=><~]))"
+	re := regexp.MustCompile(ansi)
+	return re.ReplaceAllString(str, "")
+}
+
 // Execute invoca o binário do plugin, captura sua saída e trata erros.
 func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, error) {
-	// 1. Obter timeout configurável (da sua implementação anterior)
+	// 1. Obter timeout configurável
 	timeoutStr := utils.GetEnvOrDefault("CHATCLI_AGENT_PLUGIN_TIMEOUT", "")
 	timeout := config.DefaultPluginTimeout // Padrão de 15 minutos
 
@@ -65,7 +75,7 @@ func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, 
 
 	cmd := exec.CommandContext(execCtx, p.path, args...)
 
-	// 2. Obter os pipes de stdout e stderr em vez de usar CombinedOutput
+	// 2. Obter os pipes de stdout e stderr
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("falha ao criar stdout pipe para o plugin: %w", err)
@@ -75,43 +85,71 @@ func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, 
 		return "", fmt.Errorf("falha ao criar stderr pipe para o plugin: %w", err)
 	}
 
-	// 3. Iniciar o comando de forma não-bloqueante
+	// 3. Iniciar o comando
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("falha ao iniciar o plugin '%s': %w", p.Name(), err)
 	}
 
-	// 4. Capturar stdout (resultado final para a IA) em um buffer
-	var stdoutBuf bytes.Buffer
-
-	// 5. Ler e exibir stderr (logs de progresso) em tempo real em uma goroutine
+	// 4. Capturar stdout e stderr em buffers separados
+	var stdoutBuf, stderrBuf bytes.Buffer
 	var wg sync.WaitGroup
+
+	// Captura Stdout
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		// Copia o stderr do plugin diretamente para o stderr do chatcli
-		_, _ = io.Copy(os.Stderr, stderrPipe)
+		_, _ = io.Copy(&stdoutBuf, stdoutPipe)
 	}()
 
-	_, _ = io.Copy(&stdoutBuf, stdoutPipe)
+	// Captura Stderr (e também envia para o console para feedback visual ao usuário)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// MultiWriter envia para o os.Stderr (console) e para o nosso buffer de captura
+		multiWriter := io.MultiWriter(os.Stderr, &stderrBuf)
+		_, _ = io.Copy(multiWriter, stderrPipe)
+	}()
 
-	// 6. Aguardar a goroutine de stderr terminar
+	// 5. Aguardar as goroutines de I/O terminarem
 	wg.Wait()
 
-	// 7. Aguardar o comando do plugin finalizar e capturar seu erro de saída
+	// 6. Aguardar o comando finalizar
 	err = cmd.Wait()
-	finalOutput := stdoutBuf.String()
+
+	// Preparar as saídas limpas (sem ANSI codes)
+	stdoutStr := stripANSI(stdoutBuf.String())
+	stderrStr := stripANSI(stderrBuf.String())
 
 	if err != nil {
-		// Se o erro foi de timeout, a mensagem será mais clara
-		if execCtx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("plugin '%s' falhou: timeout de %v excedido. O progresso foi exibido acima", p.Name(), timeout)
+		// Se houver erro (exit code != 0 ou timeout), construímos uma mensagem rica para a IA
+		var errMsgBuilder strings.Builder
+		errMsgBuilder.WriteString(fmt.Sprintf("O plugin '%s' falhou na execução (Erro: %v).\n", p.Name(), err))
+
+		if strings.TrimSpace(stderrStr) != "" {
+			errMsgBuilder.WriteString("\n--- SAÍDA DE ERRO (STDERR) ---\n")
+			errMsgBuilder.WriteString(stderrStr)
+			errMsgBuilder.WriteString("\n------------------------------\n")
+		} else {
+			errMsgBuilder.WriteString("\n(Nenhuma saída de erro capturada no stderr)\n")
 		}
-		// Para outros erros, inclua a saída final (se houver) para depuração
-		return "", fmt.Errorf("plugin '%s' falhou com erro: %v. Saída final (stdout):\n%s", p.Name(), err, finalOutput)
+
+		// Às vezes ferramentas CLI escrevem erros no stdout, então incluímos também se houver
+		if strings.TrimSpace(stdoutStr) != "" {
+			errMsgBuilder.WriteString("\n--- SAÍDA PADRÃO (STDOUT) ---\n")
+			errMsgBuilder.WriteString(stdoutStr)
+			errMsgBuilder.WriteString("\n-----------------------------\n")
+		}
+
+		// Verificar se foi timeout
+		if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+			errMsgBuilder.WriteString(fmt.Sprintf("\nNota: A execução excedeu o tempo limite de %v.", timeout))
+		}
+
+		return "", fmt.Errorf("%s", errMsgBuilder.String())
 	}
 
-	// 8. Retornar o conteúdo capturado de stdout como resultado
-	return finalOutput, nil
+	// 7. Retornar o conteúdo capturado de stdout como resultado em caso de sucesso
+	return stdoutStr, nil
 }
 
 // NewPluginFromPath valida um arquivo executável e o carrega como um plugin.
@@ -141,10 +179,10 @@ func NewPluginFromPath(path string) (Plugin, error) {
 		return nil, fmt.Errorf("metadados do plugin em '%s' estão incompletos (name, description, usage são obrigatórios)", path)
 	}
 
-	schemaCmd := exec.Command(path, "--schema")
-	schemaOutput, err := schemaCmd.Output()
+	// Tenta obter o schema (opcional)
 	var schemaStr string
-	if err == nil {
+	schemaCmd := exec.Command(path, "--schema")
+	if schemaOutput, err := schemaCmd.Output(); err == nil {
 		// Validar se é um JSON válido antes de armazenar
 		if json.Valid(schemaOutput) {
 			schemaStr = string(schemaOutput)

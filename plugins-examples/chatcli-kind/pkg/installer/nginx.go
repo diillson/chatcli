@@ -2,13 +2,21 @@ package installer
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/plugins-examples/chatcli-kind/pkg/utils"
 )
 
-func InstallNginxIngress() error {
+// NginxOptions define as opções de instalação
+type NginxOptions struct {
+	PrivateRegistry string // Ex: meu-registry.corp.com
+}
+
+// InstallNginxIngress instala o Nginx Ingress Controller com suporte a Registry Privado
+func InstallNginxIngress(opts NginxOptions) error {
 	utils.Logf("   📦 Installing Nginx Ingress Controller (production-ready configuration)...\n")
 
 	topology, err := detectClusterTopology()
@@ -23,43 +31,64 @@ func InstallNginxIngress() error {
 		utils.Logf("   🔧 HA mode detected - configuring for high availability\n")
 	}
 
-	// Aplicar manifesto oficial
+	// URL do manifesto oficial
 	manifestURL := "https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml"
 
-	utils.Logf("   📥 Applying Nginx Ingress manifest...\n")
-	output, err := utils.RunCommand("kubectl", 3*time.Minute, "apply", "-f", manifestURL)
+	// ✅ LÓGICA NOVA: Baixar, Patchar e Aplicar
+	utils.Logf("   📥 Downloading and patching Nginx manifest...\n")
+
+	manifestContent, err := downloadAndPatchManifest(manifestURL, opts.PrivateRegistry)
+	if err != nil {
+		return fmt.Errorf("failed to prepare manifest: %w", err)
+	}
+
+	// Salvar manifesto modificado em arquivo temporário
+	tempManifest, err := utils.CreateTempFile("nginx-deploy-*.yaml", manifestContent)
+	if err != nil {
+		return fmt.Errorf("failed to create temp manifest file: %w", err)
+	}
+	defer func(path string) {
+		err := utils.RemoveFile(path)
+		if err != nil {
+
+		}
+	}(tempManifest)
+
+	// Aplicar o manifesto modificado
+	utils.Logf("   🚀 Applying Nginx Ingress manifest...\n")
+	output, err := utils.RunCommand("kubectl", 3*time.Minute, "apply", "-f", tempManifest)
 	if err != nil {
 		return fmt.Errorf("failed to apply manifest: %s", output)
 	}
-	utils.Logf("   ✓ Manifest applied\n")
+	utils.Logf("   ✓ Manifest applied successfully\n")
 
 	// Aguardar Service ser criado
 	utils.Logf("   ⏳ Waiting for service to be created (5s)...\n")
 	time.Sleep(5 * time.Second)
 
-	// ✅ PATCH CRÍTICO: Forçar NodePort 30080/30443
+	// PATCH CRÍTICO: Forçar NodePort 30080/30443
 	utils.Logf("   🔧 Patching service to use fixed NodePorts (30080/30443)...\n")
 
 	servicePatch := `{
-                "spec": {
-                        "ports": [
-                                {
-                                        "name": "http",
-                                        "port": 80,
-                                        "protocol": "TCP",
-                                        "targetPort": "http",
-                                        "nodePort": 30080
-                                },
-                                {
-                                        "name": "https",
-                                        "port": 443,
-                                        "protocol": "TCP",
-                                        "targetPort": "https",
-                                        "nodePort": 30443
-                                }
-                        ]
-                }
-        }`
+                    "spec": {
+                            "ports": [
+                                    {
+                                            "name": "http",
+                                            "port": 80,
+                                            "protocol": "TCP",
+                                            "targetPort": "http",
+                                            "nodePort": 30080
+                                    },
+                                    {
+                                            "name": "https",
+                                            "port": 443,
+                                            "protocol": "TCP",
+                                            "targetPort": "https",
+                                            "nodePort": 30443
+                                    }
+                            ]
+                    }
+            }`
 
 	patchArgs := []string{
 		"patch", "service", "ingress-nginx-controller",
@@ -99,7 +128,7 @@ func InstallNginxIngress() error {
 	}
 	utils.Logf("   ✓ Initial Nginx Ingress Controller pod ready\n")
 
-	// ✅ PRODUCTION CONFIG: HA scheduling + PodDisruptionBudget
+	// PRODUCTION CONFIG: HA scheduling + PodDisruptionBudget
 	if topology.IsHA {
 		utils.Logf("   🔧 Applying production HA configuration...\n")
 		if err := applyProductionHAConfig(topology.WorkerCount); err != nil {
@@ -133,6 +162,55 @@ func InstallNginxIngress() error {
 	return nil
 }
 
+// downloadAndPatchManifest baixa o YAML e substitui o registro de imagens
+func downloadAndPatchManifest(url, privateRegistry string) (string, error) {
+	// 1. Baixar
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("http get failed: %w", err)
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+
+		}
+	}(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("http error: %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read body: %w", err)
+	}
+
+	content := string(bodyBytes)
+
+	// 2. Patchar (Substituir registry)
+	if privateRegistry != "" {
+		// O manifesto padrão do Kind usa registry.k8s.io
+		// Substituímos todas as ocorrências para cobrir Controller e Webhook Jobs
+		oldRegistry := "registry.k8s.io"
+
+		// Se o usuário passou algo como "my-registry.com", vira "my-registry.com/ingress-nginx/..."
+		// Se o usuário passou "my-registry.com/proxy", vira "my-registry.com/proxy/ingress-nginx/..."
+
+		// Removemos barra final se houver para evitar //
+		cleanRegistry := strings.TrimSuffix(privateRegistry, "/")
+
+		utils.Logf("   🔧 Patching images: %s -> %s\n", oldRegistry, cleanRegistry)
+		content = strings.ReplaceAll(content, oldRegistry, cleanRegistry)
+
+		// Segurança extra: substituir docker.io se houver referências residuais
+		content = strings.ReplaceAll(content, "docker.io", cleanRegistry)
+	}
+
+	return content, nil
+}
+
+// applyProductionHAConfig configura réplicas e HA para o Nginx
 func applyProductionHAConfig(workerCount int) error {
 	// Calcular número de réplicas: mínimo 2, máximo 3 ou número de workers
 	replicas := 3
@@ -150,47 +228,47 @@ func applyProductionHAConfig(workerCount int) error {
 
 	utils.Logf("   📊 Configuring %d replicas with minAvailable=%d\n", replicas, minAvailable)
 
-	// ✅ PATCH 1: Deployment com múltiplas réplicas + anti-affinity + resource limits
+	// PATCH 1: Deployment com múltiplas réplicas + anti-affinity + resource limits
 	deploymentPatch := fmt.Sprintf(`{
-          "spec": {
-            "replicas": %d,
-            "template": {
               "spec": {
-                "nodeSelector": {
-                  "ingress-ready": "true"
-                },
-                "tolerations": [
-                  {
-                    "key": "node-role.kubernetes.io/control-plane",
-                    "operator": "Equal",
-                    "effect": "NoSchedule"
-                  }
-                ],
-                "affinity": {
-                  "podAntiAffinity": {
-                    "preferredDuringSchedulingIgnoredDuringExecution": [
+                "replicas": %d,
+                "template": {
+                  "spec": {
+                    "nodeSelector": {
+                      "ingress-ready": "true"
+                    },
+                    "tolerations": [
                       {
-                        "weight": 100,
-                        "podAffinityTerm": {
-                          "labelSelector": {
-                            "matchExpressions": [
-                              {
-                                "key": "app.kubernetes.io/name",
-                                "operator": "In",
-                                "values": ["ingress-nginx"]
-                              }
-                            ]
-                          },
-                          "topologyKey": "kubernetes.io/hostname"
-                        }
+                        "key": "node-role.kubernetes.io/control-plane",
+                        "operator": "Equal",
+                        "effect": "NoSchedule"
                       }
-                    ]
+                    ],
+                    "affinity": {
+                      "podAntiAffinity": {
+                        "preferredDuringSchedulingIgnoredDuringExecution": [
+                          {
+                            "weight": 100,
+                            "podAffinityTerm": {
+                              "labelSelector": {
+                                "matchExpressions": [
+                                  {
+                                    "key": "app.kubernetes.io/name",
+                                    "operator": "In",
+                                    "values": ["ingress-nginx"]
+                                  }
+                                ]
+                              },
+                              "topologyKey": "kubernetes.io/hostname"
+                            }
+                          }
+                        ]
+                      }
+                    }
                   }
                 }
               }
-            }
-          }
-        }`, replicas)
+            }`, replicas)
 
 	patchArgs := []string{
 		"patch", "deployment", "ingress-nginx-controller",
@@ -205,7 +283,7 @@ func applyProductionHAConfig(workerCount int) error {
 	}
 	utils.Logf("   ✓ Deployment configured with %d replicas and anti-affinity\n", replicas)
 
-	// ✅ PATCH 2: PodDisruptionBudget para garantir disponibilidade mínima
+	// PATCH 2: PodDisruptionBudget para garantir disponibilidade mínima
 	utils.Logf("   🛡️  Creating PodDisruptionBudget...\n")
 
 	pdbYAML := fmt.Sprintf(`apiVersion: policy/v1
@@ -225,7 +303,12 @@ func applyProductionHAConfig(workerCount int) error {
 	if err != nil {
 		return fmt.Errorf("failed to create PDB file: %w", err)
 	}
-	defer utils.RemoveFile(pdbFile)
+	defer func(path string) {
+		err := utils.RemoveFile(path)
+		if err != nil {
+
+		}
+	}(pdbFile)
 
 	output, err = utils.RunCommand("kubectl", 30*time.Second, "apply", "-f", pdbFile)
 	if err != nil {
@@ -277,6 +360,14 @@ func applyProductionHAConfig(workerCount int) error {
 	return nil
 }
 
+// ClusterTopology armazena informações sobre os nós do cluster
+type ClusterTopology struct {
+	ControlPlaneCount int
+	WorkerCount       int
+	IsHA              bool
+}
+
+// detectClusterTopology detecta a topologia do cluster atual
 func detectClusterTopology() (*ClusterTopology, error) {
 	topology := &ClusterTopology{}
 
@@ -299,12 +390,6 @@ func detectClusterTopology() (*ClusterTopology, error) {
 	return topology, nil
 }
 
-type ClusterTopology struct {
-	ControlPlaneCount int
-	WorkerCount       int
-	IsHA              bool
-}
-
 func countLines(output string) int {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	count := 0
@@ -316,12 +401,16 @@ func countLines(output string) int {
 	return count
 }
 
+// RemoveNginxIngress remove o Nginx Ingress Controller
 func RemoveNginxIngress() error {
 	utils.Logf("   🗑️  Removing Nginx Ingress...\n")
 
 	// Remover PDB primeiro
-	utils.RunCommand("kubectl", 30*time.Second, "delete", "pdb",
+	_, err := utils.RunCommand("kubectl", 30*time.Second, "delete", "pdb",
 		"-n", "ingress-nginx", "ingress-nginx-controller", "--ignore-not-found=true")
+	if err != nil {
+		return err
+	}
 
 	// Remover manifesto
 	manifestURL := "https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml"
@@ -333,6 +422,7 @@ func RemoveNginxIngress() error {
 	return nil
 }
 
+// IsNginxIngressInstalled verifica se o Nginx já está instalado
 func IsNginxIngressInstalled() bool {
 	_, err := utils.RunCommand("kubectl", utils.ShortTimeout,
 		"get", "deployment", "-n", "ingress-nginx", "ingress-nginx-controller")
