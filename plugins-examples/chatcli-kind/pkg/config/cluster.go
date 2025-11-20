@@ -30,6 +30,15 @@ type ClusterConfig struct {
 	InsecureSkipVerify bool   // Se true, ignora erros x509 no registry
 }
 
+// normaliza host:port para uso em configs/containerd
+func normalizeRegistryHostPort(raw string) string {
+	host := strings.TrimSpace(raw)
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "http://")
+	host = strings.TrimSuffix(host, "/")
+	return host
+}
+
 func GenerateKindConfig(cfg *ClusterConfig) (string, error) {
 	tempFile, err := os.CreateTemp("", fmt.Sprintf("kind-config-%s-*.yaml", cfg.Name))
 	if err != nil {
@@ -87,7 +96,12 @@ func GenerateKindConfig(cfg *ClusterConfig) (string, error) {
 	}
 
 	// --- Containerd Config Patches (Registry Privado & Certificados) ---
-	hasContainerdPatches := cfg.PrivateRegistryURL != "" || len(cfg.RegistryMirrors) > 0 || len(cfg.InsecureRegistries) > 0
+	registryHostPort := ""
+	if cfg.PrivateRegistryURL != "" {
+		registryHostPort = normalizeRegistryHostPort(cfg.PrivateRegistryURL)
+	}
+
+	hasContainerdPatches := registryHostPort != "" || len(cfg.RegistryMirrors) > 0 || len(cfg.InsecureRegistries) > 0
 
 	if hasContainerdPatches {
 		builder.WriteString("containerdConfigPatches:\n")
@@ -95,13 +109,12 @@ func GenerateKindConfig(cfg *ClusterConfig) (string, error) {
 		builder.WriteString("  [plugins.\"io.containerd.grpc.v1.cri\".registry]\n")
 
 		// Configuração específica para um Registry Privado (com TLS/CA)
-		if cfg.PrivateRegistryURL != "" {
-			builder.WriteString(fmt.Sprintf("    [plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"%s\".tls]\n", cfg.PrivateRegistryURL))
+		if registryHostPort != "" {
+			builder.WriteString(fmt.Sprintf("    [plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"%s\".tls]\n", registryHostPort))
 
 			if cfg.RegistryCAPath != "" {
-				// O arquivo será montado em /etc/containerd/certs.d/ dentro do nó
-				filename := filepath.Base(cfg.RegistryCAPath)
-				containerPath := fmt.Sprintf("/etc/containerd/certs.d/%s", filename)
+				// caminho padrão recomendado: /etc/containerd/certs.d/<host:port>/ca.crt
+				containerPath := fmt.Sprintf("/etc/containerd/certs.d/%s/ca.crt", registryHostPort)
 				builder.WriteString(fmt.Sprintf("      ca_file = \"%s\"\n", containerPath))
 			}
 
@@ -114,7 +127,8 @@ func GenerateKindConfig(cfg *ClusterConfig) (string, error) {
 		if len(cfg.RegistryMirrors) > 0 {
 			builder.WriteString("    [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors]\n")
 			for _, mirror := range cfg.RegistryMirrors {
-				builder.WriteString(fmt.Sprintf("      [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"%s\"]\n", mirror))
+				m := normalizeRegistryHostPort(mirror)
+				builder.WriteString(fmt.Sprintf("      [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"%s\"]\n", m))
 				builder.WriteString(fmt.Sprintf("        endpoint = [\"%s\"]\n", mirror))
 			}
 		}
@@ -123,7 +137,8 @@ func GenerateKindConfig(cfg *ClusterConfig) (string, error) {
 		if len(cfg.InsecureRegistries) > 0 {
 			builder.WriteString("    [plugins.\"io.containerd.grpc.v1.cri\".registry.configs]\n")
 			for _, registry := range cfg.InsecureRegistries {
-				builder.WriteString(fmt.Sprintf("      [plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"%s\".tls]\n", registry))
+				r := normalizeRegistryHostPort(registry)
+				builder.WriteString(fmt.Sprintf("      [plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"%s\".tls]\n", r))
 				builder.WriteString("        insecure_skip_verify = true\n")
 			}
 		}
@@ -145,11 +160,11 @@ func GenerateKindConfig(cfg *ClusterConfig) (string, error) {
 		}
 
 		// Montar CA do Registry Privado (para uso do containerd)
-		if cfg.RegistryCAPath != "" {
-			filename := filepath.Base(cfg.RegistryCAPath)
-			// Kind monta volumes como readOnly por padrão se não especificado, mas vamos ser explícitos
+		if cfg.RegistryCAPath != "" && registryHostPort != "" {
+			// padronizar para /etc/containerd/certs.d/<host:port>/ca.crt
+			filename := "ca.crt"
 			builder.WriteString(fmt.Sprintf("  - hostPath: %s\n", cfg.RegistryCAPath))
-			builder.WriteString(fmt.Sprintf("    containerPath: /etc/containerd/certs.d/%s\n", filename))
+			builder.WriteString(fmt.Sprintf("    containerPath: /etc/containerd/certs.d/%s/%s\n", registryHostPort, filename))
 			builder.WriteString("    readOnly: true\n")
 		}
 

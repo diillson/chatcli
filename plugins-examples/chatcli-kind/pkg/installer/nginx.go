@@ -13,6 +13,7 @@ import (
 // NginxOptions define as opções de instalação
 type NginxOptions struct {
 	PrivateRegistry string // Ex: meu-registry.corp.com
+	CertGenImage    string // Ex: registry.corp.com/ingress-nginx/kube-webhook-certgen:v1.3.0
 }
 
 // InstallNginxIngress instala o Nginx Ingress Controller com suporte a Registry Privado
@@ -34,7 +35,7 @@ func InstallNginxIngress(opts NginxOptions) error {
 	// URL do manifesto oficial
 	manifestURL := "https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml"
 
-	// ✅ LÓGICA NOVA: Baixar, Patchar e Aplicar
+	// Baixar, Patchar e Aplicar
 	utils.Logf("   📥 Downloading and patching Nginx manifest...\n")
 
 	manifestContent, err := downloadAndPatchManifest(manifestURL, opts.PrivateRegistry)
@@ -66,29 +67,90 @@ func InstallNginxIngress(opts NginxOptions) error {
 	utils.Logf("   ⏳ Waiting for service to be created (5s)...\n")
 	time.Sleep(5 * time.Second)
 
+	// Patching explícito dos Jobs de cert-gen, se imagem customizada foi fornecida
+	if opts.CertGenImage != "" {
+		utils.Logf("   🔧 Patching cert-gen jobs to use custom image: %s\n", opts.CertGenImage)
+
+		// Job: ingress-nginx-admission-create
+		patchCreate := fmt.Sprintf(`{
+      "spec": {
+        "template": {
+          "spec": {
+            "containers": [
+              {
+                "name": "create",
+                "image": "%s"
+              }
+            ]
+          }
+        }
+      }
+    }`, opts.CertGenImage)
+
+		argsCreate := []string{
+			"patch", "job", "ingress-nginx-admission-create",
+			"-n", "ingress-nginx",
+			"--type", "merge",
+			"--patch", patchCreate,
+		}
+
+		if output, err := utils.RunCommand("kubectl", 30*time.Second, argsCreate...); err != nil {
+			return fmt.Errorf("failed to patch admission-create job image: %s", output)
+		}
+
+		// Job: ingress-nginx-admission-patch
+		patchPatch := fmt.Sprintf(`{
+      "spec": {
+        "template": {
+          "spec": {
+            "containers": [
+              {
+                "name": "patch",
+                "image": "%s"
+              }
+            ]
+          }
+        }
+      }
+    }`, opts.CertGenImage)
+
+		argsPatch := []string{
+			"patch", "job", "ingress-nginx-admission-patch",
+			"-n", "ingress-nginx",
+			"--type", "merge",
+			"--patch", patchPatch,
+		}
+
+		if output, err := utils.RunCommand("kubectl", 30*time.Second, argsPatch...); err != nil {
+			return fmt.Errorf("failed to patch admission-patch job image: %s", output)
+		}
+
+		utils.Logf("   ✓ Cert-gen jobs patched successfully\n")
+	}
+
 	// PATCH CRÍTICO: Forçar NodePort 30080/30443
 	utils.Logf("   🔧 Patching service to use fixed NodePorts (30080/30443)...\n")
 
 	servicePatch := `{
-                    "spec": {
-                            "ports": [
-                                    {
-                                            "name": "http",
-                                            "port": 80,
-                                            "protocol": "TCP",
-                                            "targetPort": "http",
-                                            "nodePort": 30080
-                                    },
-                                    {
-                                            "name": "https",
-                                            "port": 443,
-                                            "protocol": "TCP",
-                                            "targetPort": "https",
-                                            "nodePort": 30443
-                                    }
-                            ]
-                    }
-            }`
+                        "spec": {
+                                "ports": [
+                                        {
+                                                "name": "http",
+                                                "port": 80,
+                                                "protocol": "TCP",
+                                                "targetPort": "http",
+                                                "nodePort": 30080
+                                        },
+                                        {
+                                                "name": "https",
+                                                "port": 443,
+                                                "protocol": "TCP",
+                                                "targetPort": "https",
+                                                "nodePort": 30443
+                                        }
+                                ]
+                        }
+                }`
 
 	patchArgs := []string{
 		"patch", "service", "ingress-nginx-controller",
@@ -205,6 +267,14 @@ func downloadAndPatchManifest(url, privateRegistry string) (string, error) {
 
 		// Segurança extra: substituir docker.io se houver referências residuais
 		content = strings.ReplaceAll(content, "docker.io", cleanRegistry)
+
+		// Fallback explícito para imagens conhecidas de cert-gen
+		content = strings.ReplaceAll(content,
+			"jettech/kube-webhook-certgen",
+			cleanRegistry+"/jettech/kube-webhook-certgen")
+		content = strings.ReplaceAll(content,
+			"ingress-nginx/kube-webhook-certgen",
+			cleanRegistry+"/ingress-nginx/kube-webhook-certgen")
 	}
 
 	return content, nil
@@ -230,45 +300,45 @@ func applyProductionHAConfig(workerCount int) error {
 
 	// PATCH 1: Deployment com múltiplas réplicas + anti-affinity + resource limits
 	deploymentPatch := fmt.Sprintf(`{
-              "spec": {
-                "replicas": %d,
-                "template": {
                   "spec": {
-                    "nodeSelector": {
-                      "ingress-ready": "true"
-                    },
-                    "tolerations": [
-                      {
-                        "key": "node-role.kubernetes.io/control-plane",
-                        "operator": "Equal",
-                        "effect": "NoSchedule"
-                      }
-                    ],
-                    "affinity": {
-                      "podAntiAffinity": {
-                        "preferredDuringSchedulingIgnoredDuringExecution": [
+                    "replicas": %d,
+                    "template": {
+                      "spec": {
+                        "nodeSelector": {
+                          "ingress-ready": "true"
+                        },
+                        "tolerations": [
                           {
-                            "weight": 100,
-                            "podAffinityTerm": {
-                              "labelSelector": {
-                                "matchExpressions": [
-                                  {
-                                    "key": "app.kubernetes.io/name",
-                                    "operator": "In",
-                                    "values": ["ingress-nginx"]
-                                  }
-                                ]
-                              },
-                              "topologyKey": "kubernetes.io/hostname"
-                            }
+                            "key": "node-role.kubernetes.io/control-plane",
+                            "operator": "Equal",
+                            "effect": "NoSchedule"
                           }
-                        ]
+                        ],
+                        "affinity": {
+                          "podAntiAffinity": {
+                            "preferredDuringSchedulingIgnoredDuringExecution": [
+                              {
+                                "weight": 100,
+                                "podAffinityTerm": {
+                                  "labelSelector": {
+                                    "matchExpressions": [
+                                      {
+                                        "key": "app.kubernetes.io/name",
+                                        "operator": "In",
+                                        "values": ["ingress-nginx"]
+                                      }
+                                    ]
+                                  },
+                                  "topologyKey": "kubernetes.io/hostname"
+                                }
+                              }
+                            ]
+                          }
+                        }
                       }
                     }
                   }
-                }
-              }
-            }`, replicas)
+                }`, replicas)
 
 	patchArgs := []string{
 		"patch", "deployment", "ingress-nginx-controller",
@@ -287,17 +357,17 @@ func applyProductionHAConfig(workerCount int) error {
 	utils.Logf("   🛡️  Creating PodDisruptionBudget...\n")
 
 	pdbYAML := fmt.Sprintf(`apiVersion: policy/v1
-    kind: PodDisruptionBudget
-    metadata:
-      name: ingress-nginx-controller
-      namespace: ingress-nginx
-    spec:
-      minAvailable: %d
-      selector:
-        matchLabels:
-          app.kubernetes.io/name: ingress-nginx
-          app.kubernetes.io/component: controller
-    `, minAvailable)
+        kind: PodDisruptionBudget
+        metadata:
+          name: ingress-nginx-controller
+          namespace: ingress-nginx
+        spec:
+          minAvailable: %d
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+              app.kubernetes.io/component: controller
+        `, minAvailable)
 
 	pdbFile, err := utils.CreateTempFile("nginx-pdb-*.yaml", pdbYAML)
 	if err != nil {
