@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.10](https://github.com/diillson/chatcli/compare/v1.38.9...v1.38.10) (2025-11-20)
+
+
+### Bug Fixes
+
+* **plugins-examples:** enhance `chatcli-kind` with improved registry handling and custom Nginx cert-gen options ([#370](https://github.com/diillson/chatcli/issues/370)) ([#371](https://github.com/diillson/chatcli/issues/371)) ([db4a43e](https://github.com/diillson/chatcli/commit/db4a43e27a99aa27828e6989d340740d7ecb8afd))
+
 ## [1.38.9](https://github.com/diillson/chatcli/compare/v1.38.8...v1.38.9) (2025-11-19)
 
 
