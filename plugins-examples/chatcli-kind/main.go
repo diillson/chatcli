@@ -130,6 +130,8 @@ func printSchema() {
 					{Name: "--istio-hub", Type: "string", Description: "Registry/Hub customizado para imagens do Istio (ex: meu-registry.com/istio)."},
 
 					{Name: "--with-nginx-ingress", Type: "bool", Description: "Instala Nginx Ingress Controller."},
+					{Name: "--nginx-certgen-image", Type: "string", Description: "Imagem customizada para o Job de cert-gen do Nginx (kube-webhook-certgen) em registry privado."},
+
 					{Name: "--with-metallb", Type: "bool", Description: "Instala MetalLB."},
 					{Name: "--metallb-address-pool", Type: "string", Description: "Range de IPs para MetalLB."},
 					{Name: "--skip-metallb-warning", Type: "bool", Description: "Pula aviso do MetalLB no macOS."},
@@ -215,6 +217,8 @@ func handleCreate(args []string) {
 	istioHub := createCmd.String("istio-hub", "", "Custom image hub for Istio (e.g., my-registry.com/istio)")
 
 	withNginxIngress := createCmd.Bool("with-nginx-ingress", false, "Install Nginx Ingress")
+	nginxCertGenImage := createCmd.String("nginx-certgen-image", "",
+		"Custom image for Nginx cert-gen job (e.g., registry.corp.com/ingress-nginx/kube-webhook-certgen:v1.3.0)")
 
 	withMetalLB := createCmd.Bool("with-metallb", false, "Install MetalLB")
 	metalLBAddressPool := createCmd.String("metallb-address-pool", "", "MetalLB IP pool")
@@ -353,8 +357,8 @@ func handleCreate(args []string) {
 
 	// Configuração de nós HA
 	isHA := *controlPlaneNodes >= 3
-	needsIngress := *withNginxIngress || *withIstio
-	if isHA && needsIngress && *workerNodes > 0 {
+	needsIngress := *withNginxIngress && *workerNodes > 0
+	if isHA && needsIngress {
 		err := config.ApplyIngressNodeConfiguration(*clusterName, isHA, needsIngress)
 		if err != nil {
 			return
@@ -391,9 +395,9 @@ func handleCreate(args []string) {
 		utils.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 		utils.Logf("🌐 Installing Nginx Ingress Controller...\n")
 
-		// ✅ NOVA CHAMADA COM OPÇÕES
 		opts := installer.NginxOptions{
-			PrivateRegistry: *privateRegistry, // Passa o registry privado definido na flag
+			PrivateRegistry: *privateRegistry,
+			CertGenImage:    *nginxCertGenImage,
 		}
 
 		if err := installer.InstallNginxIngress(opts); err != nil {
@@ -406,14 +410,13 @@ func handleCreate(args []string) {
 	if *withIstio {
 		nginxIsPresent := *withNginxIngress
 
-		// ✅ Correção: Usando a struct InstallIstioOptions
 		opts := installer.InstallIstioOptions{
 			ClusterName: *clusterName,
 			Version:     *istioVersion,
 			Profile:     *istioProfile,
 			IsMacOS:     isMacOS,
 			WithNginx:   nginxIsPresent,
-			ImageHub:    *istioHub, // Passando a flag --istio-hub
+			ImageHub:    *istioHub,
 		}
 		err := installer.InstallIstio(opts)
 		if err != nil {
@@ -529,6 +532,7 @@ func handleUpdate(args []string) {
 		utils.Logf("   ⚠️  Warning: This will only work if ports 80/443 were mapped during cluster creation.\n")
 		opts := installer.NginxOptions{
 			PrivateRegistry: "",
+			CertGenImage:    "",
 		}
 
 		if err := installer.InstallNginxIngress(opts); err != nil {
@@ -557,7 +561,6 @@ func handleUpdate(args []string) {
 			utils.Logf("   ℹ️  Nginx Ingress detected. Istio will be configured to avoid port conflicts on macOS.\n")
 		}
 
-		// ✅ Correção: Usando a struct InstallIstioOptions
 		opts := installer.InstallIstioOptions{
 			ClusterName: *clusterName,
 			Version:     *istioVersion,
