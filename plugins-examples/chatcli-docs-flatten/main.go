@@ -48,7 +48,7 @@ func (l *logger) Logf(format string, args ...any) {
 		_ = f.Sync()
 	}
 
-	// 2. Guarda no histórico para a IA ver depois
+	// 2. Guarda no histórico para a IA ver depois (se for útil)
 	cleanMsg := strings.TrimRight(msg, "\n")
 	l.history = append(l.history, cleanMsg)
 }
@@ -249,7 +249,7 @@ func processFile(absPath, relPath string, cfg config, log *logger, chunkIndex *i
 	defer func(f *os.File) {
 		err := f.Close()
 		if err != nil {
-			fmt.Println("Erro ao processar o arquivo")
+			fmt.Fprintln(os.Stderr, "Erro ao fechar o arquivo:", err)
 		}
 	}(f)
 
@@ -445,7 +445,7 @@ func printMetadata() {
 	_ = enc.Encode(meta)
 }
 
-// run encapsula a lógica principal para evitar os.Exit e permitir reportar erros no final.
+// run encapsula a lógica principal.
 func run(log *logger) error {
 	cfg, onlyMetadata, err := parseFlags()
 	if err != nil {
@@ -454,7 +454,7 @@ func run(log *logger) error {
 
 	if onlyMetadata {
 		printMetadata()
-		// Sinal especial para main não imprimir logs extras se for só metadados
+		// Sinal especial para o main não imprimir logs extras se for só metadados
 		return errors.New("METADATA_ONLY")
 	}
 
@@ -488,7 +488,7 @@ func run(log *logger) error {
 	duration := time.Since(start).Seconds()
 	log.Infof("Total: %d chunks gerados em %.2fs", len(chunks), duration)
 
-	// Configurar saída
+	// Configurar saída de dados (IA)
 	var out io.Writer = os.Stdout
 	if cfg.OutputPath != "" {
 		if err := os.MkdirAll(filepath.Dir(cfg.OutputPath), 0o755); err != nil {
@@ -501,13 +501,13 @@ func run(log *logger) error {
 		defer func(f *os.File) {
 			err := f.Close()
 			if err != nil {
-				fmt.Println("Erro ao processar o arquivo")
+				fmt.Fprintln(os.Stderr, "Erro ao fechar arquivo de saída:", err)
 			}
 		}(f)
 		out = f
 	}
 
-	// Escrever conteúdo real
+	// Escrever conteúdo real (para IA) – nunca misturar logs aqui
 	switch cfg.Format {
 	case FormatText:
 		if err := outputText(chunks, out); err != nil {
@@ -529,32 +529,28 @@ func run(log *logger) error {
 }
 
 func main() {
-	// Logger escreve no Stderr (para o usuário ver) e guarda buffer (para a IA ver no final)
+	// Logger escreve no Stderr (para o usuário ver) e guarda buffer (se você quiser inspecionar)
 	log := newLogger(os.Stderr)
 
 	err := run(log)
 
-	// Se foi apenas solicitação de metadados, sai limpo sem logs
+	// Se foi apenas solicitação de metadados, sai limpo sem logs extras
 	if err != nil && err.Error() == "METADATA_ONLY" {
 		return
 	}
 
 	if err != nil {
 		log.Errorf("FALHA CRÍTICA: %v", err)
-		// Não saímos com os.Exit(1) imediatamente para garantir que o log chegue à IA
 	}
 
-	// --- REPORTING PARA A IA ---
-	// A IA lê stdout. Se o programa gerou um arquivo (--output), stdout está vazio.
-	// Se gerou texto no stdout, adicionamos o log no final.
-
-	fmt.Println("\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println("📋 RELATÓRIO DE EXECUÇÃO (LOGS)")
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println(log.GetHistory())
+	// Relatório final: SOMENTE em stderr, nunca em stdout
+	fmt.Fprintln(os.Stderr, "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Fprintln(os.Stderr, "📋 RELATÓRIO DE EXECUÇÃO (LOGS)")
+	fmt.Fprintln(os.Stderr, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Fprintln(os.Stderr, log.GetHistory())
 
 	if err != nil {
-		fmt.Println("\n❌ A execução terminou com erros. Verifique os logs acima.")
+		fmt.Fprintln(os.Stderr, "\n❌ A execução terminou com erros. Verifique os logs acima.")
 		os.Exit(1)
 	}
 }
