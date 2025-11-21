@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.12](https://github.com/diillson/chatcli/compare/v1.38.11...v1.38.12) (2025-11-21)
+
+
+### Bug Fixes
+
+* **cli:** ensure terminal state is reset after plugin installation confirmation ([#376](https://github.com/diillson/chatcli/issues/376)) ([#377](https://github.com/diillson/chatcli/issues/377)) ([097fdca](https://github.com/diillson/chatcli/commit/097fdca55770f1ff2cae6d0eb886423961fb6ff1))
+
 ## [1.38.11](https://github.com/diillson/chatcli/compare/v1.38.10...v1.38.11) (2025-11-21)
 
 
