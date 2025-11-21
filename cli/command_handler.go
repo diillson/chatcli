@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
@@ -211,6 +212,13 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 
 		// AVISO DE SEGURANÇA
 		fmt.Println(colorize(i18n.T("plugin.install.security_warning"), ColorYellow))
+
+		if runtime.GOOS != "windows" {
+			cmd := exec.Command("stty", "sane")
+			cmd.Stdin = os.Stdin
+			_ = cmd.Run()
+		}
+
 		fmt.Print(i18n.T("plugin.install.confirm", repoURL))
 		reader := bufio.NewReader(os.Stdin)
 		confirm, _ := reader.ReadString('\n')
