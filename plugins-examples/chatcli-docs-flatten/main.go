@@ -18,7 +18,6 @@ import (
 	"time"
 )
 
-// Metadata define o contrato de descoberta do plugin para o ChatCLI.
 type Metadata struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -26,7 +25,6 @@ type Metadata struct {
 	Version     string `json:"version"`
 }
 
-// logger aprimorado: escreve no stderr (humano) e guarda histórico (IA).
 type logger struct {
 	w       io.Writer
 	history []string
@@ -68,14 +66,12 @@ func (l *logger) Separator() {
 	l.Logf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 }
 
-// GetHistory retorna todo o log acumulado como uma única string.
 func (l *logger) GetHistory() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return strings.Join(l.history, "\n")
 }
 
-// FlattenFormat define o formato de saída.
 type FlattenFormat string
 
 const (
@@ -85,7 +81,6 @@ const (
 	FormatYAML  FlattenFormat = "yaml"
 )
 
-// Chunk representa um pedaço de texto pronto para IA.
 type Chunk struct {
 	ID        string `json:"id"`
 	Source    string `json:"source"`
@@ -98,6 +93,13 @@ type Chunk struct {
 
 type frontMatter struct {
 	Title string
+}
+
+type parsedMarkdown struct {
+	FrontMatter frontMatter
+	Body        string
+	Full        string
+	HasFM       bool
 }
 
 type config struct {
@@ -144,16 +146,19 @@ func shouldProcessFile(relPath string, cfg config) bool {
 	return !globMatch(relPath, cfg.ExcludePatterns)
 }
 
-func parseFrontMatter(r io.Reader) (frontMatter, string, error) {
-	var fm frontMatter
+func parseFrontMatter(r io.Reader) (parsedMarkdown, error) {
+	var pm parsedMarkdown
 	var b bytes.Buffer
 	if _, err := b.ReadFrom(r); err != nil {
-		return fm, "", err
+		return pm, err
 	}
 	data := b.String()
+	pm.Full = data
+
 	lines := strings.Split(data, "\n")
 	if len(lines) == 0 {
-		return fm, data, nil
+		pm.Body = data
+		return pm, nil
 	}
 
 	first := strings.TrimSpace(lines[0])
@@ -164,7 +169,8 @@ func parseFrontMatter(r io.Reader) (frontMatter, string, error) {
 	case yamlFence.MatchString(first):
 		fence = yamlFence
 	default:
-		return fm, data, nil
+		pm.Body = data
+		return pm, nil
 	}
 
 	endIdx := -1
@@ -175,24 +181,27 @@ func parseFrontMatter(r io.Reader) (frontMatter, string, error) {
 		}
 	}
 	if endIdx == -1 {
-		return fm, data, nil
+		pm.Body = data
+		return pm, nil
 	}
 
+	pm.HasFM = true
 	fmLines := lines[1:endIdx]
 	bodyLines := lines[endIdx+1:]
 
 	for _, line := range fmLines {
 		if m := titleTOML.FindStringSubmatch(line); len(m) == 2 {
-			fm.Title = m[1]
+			pm.FrontMatter.Title = m[1]
 			break
 		}
 		if m := titleYAML.FindStringSubmatch(line); len(m) == 2 {
-			fm.Title = m[1]
+			pm.FrontMatter.Title = m[1]
 			break
 		}
 	}
 
-	return fm, strings.Join(bodyLines, "\n"), nil
+	pm.Body = strings.Join(bodyLines, "\n")
+	return pm, nil
 }
 
 func normalizeMarkdown(text string) string {
@@ -254,22 +263,29 @@ func processFile(absPath, relPath string, cfg config, log *logger, chunkIndex *i
 		return nil, err
 	}
 	defer func(f *os.File) {
-		err := f.Close()
-		if err != nil {
+		if err := f.Close(); err != nil {
 			fmt.Fprintln(os.Stderr, "Erro ao fechar o arquivo:", err)
 		}
 	}(f)
 
-	fm, body, err := parseFrontMatter(f)
+	pm, err := parseFrontMatter(f)
 	if err != nil {
 		return nil, fmt.Errorf("parse front matter: %w", err)
 	}
 
-	content := body
-	if !cfg.StripFrontMatter {
-		if fm.Title != "" {
-			content = fmt.Sprintf("# %s\n\n%s", fm.Title, body)
+	var content string
+	var title string
+
+	if cfg.StripFrontMatter {
+		title = pm.FrontMatter.Title
+		if pm.HasFM && title != "" {
+			content = fmt.Sprintf("# %s\n\n%s", title, pm.Body)
+		} else {
+			content = pm.Body
 		}
+	} else {
+		content = pm.Full
+		title = pm.FrontMatter.Title
 	}
 
 	content = normalizeMarkdown(content)
@@ -286,7 +302,7 @@ func processFile(absPath, relPath string, cfg config, log *logger, chunkIndex *i
 		chunks = append(chunks, Chunk{
 			ID:        id,
 			Source:    relPath,
-			Title:     fm.Title,
+			Title:     title,
 			Content:   c,
 			ChunkSize: len(c),
 			RepoURL:   repoURL,
@@ -521,7 +537,7 @@ func printMetadata() {
 		Description: "Varre documentação em Markdown (Hugo, Docusaurus, mkdocs, etc.), " +
 			"extrai o conteúdo e gera texto, JSON, JSONL ou YAML pronto para IA (RAG/contexto).",
 		Usage: `@docs-flatten --root <dir> [--format text|jsonl|json|yaml] [--max-chars N] [--include globs] [--exclude globs] [--strip-front-matter bool] [--output file]
-    @docs-flatten --repo <git-url> [--branch main] [--subdir docs] [--format text|jsonl|json|yaml] [--max-chars N] [--include globs] [--exclude globs] [--strip-front-matter bool] [--output file]`,
+        @docs-flatten --repo <git-url> [--branch main] [--subdir docs] [--format text|jsonl|json|yaml] [--max-chars N] [--include globs] [--exclude globs] [--strip-front-matter bool] [--output file]`,
 		Version: "1.3.0",
 	}
 
@@ -604,7 +620,6 @@ func prepareRootPath(cfg *config, log *logger) (string, string, func(), error) {
 	return absRoot, repoCommit, cleanup, nil
 }
 
-// run encapsula a lógica principal.
 func run(log *logger) error {
 	cfg, onlyMetadata, err := parseFlags()
 	if err != nil {
@@ -640,7 +655,7 @@ func run(log *logger) error {
 	}
 	log.Infof("Config: Format=%s, MaxChars=%d, StripFrontMatter=%t", cfg.Format, cfg.MaxChars, cfg.StripFrontMatter)
 	if cfg.OutputPath != "" {
-		log.Infof("Output file: %s", cfg.OutputPath)
+		log.Infof("Output file: %s (nenhum chunk será enviado para stdout)", cfg.OutputPath)
 	} else {
 		log.Infof("Output: stdout (stream)")
 	}
@@ -665,8 +680,7 @@ func run(log *logger) error {
 			return fmt.Errorf("falha ao criar arquivo de saída: %v", err)
 		}
 		defer func(f *os.File) {
-			err := f.Close()
-			if err != nil {
+			if err := f.Close(); err != nil {
 				fmt.Fprintln(os.Stderr, "Erro ao fechar arquivo de saída:", err)
 			}
 		}(f)
