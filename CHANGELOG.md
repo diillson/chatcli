@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.13](https://github.com/diillson/chatcli/compare/v1.38.12...v1.38.13) (2025-11-21)
+
+
+### Bug Fixes
+
+* **plugins-examples:** extend chatcli-docs-flatten with Git integration and additional output formats ([#379](https://github.com/diillson/chatcli/issues/379)) ([#380](https://github.com/diillson/chatcli/issues/380)) ([de6d5db](https://github.com/diillson/chatcli/commit/de6d5db1285ccb0d6a3b29f97f2fa3f0cfd3da18))
+
 ## [1.38.12](https://github.com/diillson/chatcli/compare/v1.38.11...v1.38.12) (2025-11-21)
 
 
