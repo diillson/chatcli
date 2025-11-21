@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -42,13 +43,11 @@ func (l *logger) Logf(format string, args ...any) {
 
 	msg := fmt.Sprintf(format, args...)
 
-	// 1. Escreve no Output original (ex: Stderr para o usuário ver)
 	_, _ = fmt.Fprint(l.w, msg)
 	if f, ok := l.w.(*os.File); ok {
 		_ = f.Sync()
 	}
 
-	// 2. Guarda no histórico para a IA ver depois (se for útil)
 	cleanMsg := strings.TrimRight(msg, "\n")
 	l.history = append(l.history, cleanMsg)
 }
@@ -82,6 +81,8 @@ type FlattenFormat string
 const (
 	FormatText  FlattenFormat = "text"
 	FormatJSONL FlattenFormat = "jsonl"
+	FormatJSON  FlattenFormat = "json"
+	FormatYAML  FlattenFormat = "yaml"
 )
 
 // Chunk representa um pedaço de texto pronto para IA.
@@ -91,6 +92,8 @@ type Chunk struct {
 	Title     string `json:"title,omitempty"`
 	Content   string `json:"content"`
 	ChunkSize int    `json:"chunkSize"`
+	RepoURL   string `json:"repoUrl,omitempty"`
+	Commit    string `json:"commit,omitempty"`
 }
 
 type frontMatter struct {
@@ -105,6 +108,10 @@ type config struct {
 	ExcludePatterns  []string
 	StripFrontMatter bool
 	OutputPath       string
+	RepoURL          string
+	Branch           string
+	Subdir           string
+	KeepClone        bool
 }
 
 var (
@@ -241,7 +248,7 @@ func chunkText(text string, maxChars int) []string {
 	return chunks
 }
 
-func processFile(absPath, relPath string, cfg config, log *logger, chunkIndex *int) ([]Chunk, error) {
+func processFile(absPath, relPath string, cfg config, log *logger, chunkIndex *int, repoURL, commit string) ([]Chunk, error) {
 	f, err := os.Open(absPath)
 	if err != nil {
 		return nil, err
@@ -282,6 +289,8 @@ func processFile(absPath, relPath string, cfg config, log *logger, chunkIndex *i
 			Title:     fm.Title,
 			Content:   c,
 			ChunkSize: len(c),
+			RepoURL:   repoURL,
+			Commit:    commit,
 		})
 	}
 
@@ -289,7 +298,7 @@ func processFile(absPath, relPath string, cfg config, log *logger, chunkIndex *i
 	return chunks, nil
 }
 
-func walkAndFlatten(cfg config, log *logger) ([]Chunk, error) {
+func walkAndFlatten(cfg config, log *logger, repoURL, commit string) ([]Chunk, error) {
 	var chunks []Chunk
 	chunkIndex := 1
 
@@ -315,7 +324,7 @@ func walkAndFlatten(cfg config, log *logger) ([]Chunk, error) {
 			return nil
 		}
 
-		fileChunks, err := processFile(path, rel, cfg, log, &chunkIndex)
+		fileChunks, err := processFile(path, rel, cfg, log, &chunkIndex, repoURL, commit)
 		if err != nil {
 			log.Warnf("Failed to process %s: %v", rel, err)
 			return nil
@@ -365,6 +374,54 @@ func outputJSONL(chunks []Chunk, w io.Writer) error {
 	return nil
 }
 
+func outputJSON(chunks []Chunk, w io.Writer) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(chunks); err != nil {
+		return err
+	}
+	return nil
+}
+
+func outputYAML(chunks []Chunk, w io.Writer) error {
+	var b bytes.Buffer
+	for i, c := range chunks {
+		if i == 0 {
+			b.WriteString("- ")
+		} else {
+			b.WriteString("\n- ")
+		}
+		id := strings.ReplaceAll(c.ID, "\n", " ")
+		src := strings.ReplaceAll(c.Source, "\n", " ")
+		title := strings.ReplaceAll(c.Title, "\n", " ")
+		repo := strings.ReplaceAll(c.RepoURL, "\n", " ")
+		commit := strings.ReplaceAll(c.Commit, "\n", " ")
+		fmt.Fprintf(&b, "id: %q\n  source: %q\n  chunkSize: %d\n", id, src, c.ChunkSize)
+		if c.Title != "" {
+			fmt.Fprintf(&b, "  title: %q\n", title)
+		}
+		if c.RepoURL != "" {
+			fmt.Fprintf(&b, "  repoUrl: %q\n", repo)
+		}
+		if c.Commit != "" {
+			fmt.Fprintf(&b, "  commit: %q\n", commit)
+		}
+		content := c.Content
+		if strings.Contains(content, "\n") {
+			b.WriteString("  content: |\n")
+			for _, line := range strings.Split(content, "\n") {
+				b.WriteString("    ")
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
+		} else {
+			fmt.Fprintf(&b, "  content: %q\n", content)
+		}
+	}
+	_, err := w.Write(b.Bytes())
+	return err
+}
+
 func parseFlags() (config, bool, error) {
 	var (
 		showMetadata     bool
@@ -375,16 +432,24 @@ func parseFlags() (config, bool, error) {
 		excludeStr       string
 		stripFrontMatter bool
 		outputPath       string
+		repoURL          string
+		branch           string
+		subdir           string
+		keepClone        bool
 	)
 
 	flag.BoolVar(&showMetadata, "metadata", false, "Exibe metadados do plugin em JSON e sai")
-	flag.StringVar(&root, "root", "", "Diretório raiz da documentação (obrigatório)")
-	flag.StringVar(&formatStr, "format", "text", "Formato de saída: text | jsonl")
+	flag.StringVar(&root, "root", "", "Diretório raiz da documentação")
+	flag.StringVar(&formatStr, "format", "text", "Formato de saída: text | jsonl | json | yaml")
 	flag.IntVar(&maxChars, "max-chars", 16000, "Tamanho máximo (em caracteres) por chunk (0 = sem divisão)")
-	flag.StringVar(&includeStr, "include", "", "Padrões glob incluídos (separados por vírgula), ex: 'docs/**.md,content/**.md'")
-	flag.StringVar(&excludeStr, "exclude", "", "Padrões glob excluídos (separados por vírgula), ex: 'node_modules/**,public/**'")
+	flag.StringVar(&includeStr, "include", "", "Padrões glob incluídos (separados por vírgula), ex: docs/**.md,content/**.md")
+	flag.StringVar(&excludeStr, "exclude", "", "Padrões glob excluídos (separados por vírgula), ex: node_modules/**,public/**")
 	flag.BoolVar(&stripFrontMatter, "strip-front-matter", true, "Remove front matter dos arquivos Markdown")
 	flag.StringVar(&outputPath, "output", "", "Arquivo de saída (se vazio, usa stdout)")
+	flag.StringVar(&repoURL, "repo", "", "URL do repositório Git com a documentação")
+	flag.StringVar(&branch, "branch", "main", "Branch a ser usada ao clonar o repositório")
+	flag.StringVar(&subdir, "subdir", "", "Subdiretório dentro do repositório que contém os .md (ex: docs)")
+	flag.BoolVar(&keepClone, "keep-clone", false, "Não apagar o clone temporário após o processamento")
 
 	flag.Parse()
 
@@ -392,15 +457,15 @@ func parseFlags() (config, bool, error) {
 		return config{}, true, nil
 	}
 
-	if root == "" {
-		return config{}, false, errors.New("--root é obrigatório")
+	if root == "" && repoURL == "" {
+		return config{}, false, errors.New("é obrigatório usar --root ou --repo")
 	}
 
 	format := FlattenFormat(strings.ToLower(strings.TrimSpace(formatStr)))
 	switch format {
-	case FormatText, FormatJSONL:
+	case FormatText, FormatJSONL, FormatJSON, FormatYAML:
 	default:
-		return config{}, false, fmt.Errorf("formato inválido: %s (use text ou jsonl)", formatStr)
+		return config{}, false, fmt.Errorf("formato inválido: %s (use text, jsonl, json ou yaml)", formatStr)
 	}
 
 	splitCSV := func(s string) []string {
@@ -412,11 +477,26 @@ func parseFlags() (config, bool, error) {
 		for _, p := range parts {
 			p = strings.TrimSpace(p)
 			if p != "" {
+				p = strings.TrimPrefix(p, "'")
+				p = strings.TrimSuffix(p, "'")
+				p = strings.TrimPrefix(p, "\"")
+				p = strings.TrimSuffix(p, "\"")
 				out = append(out, filepath.ToSlash(p))
 			}
 		}
 		return out
 	}
+
+	if repoURL != "" && includeStr == "" {
+		includeStr = "docs/**.md,content/**.md,**/README.md"
+	}
+	if excludeStr == "" {
+		excludeStr = ".git/**,node_modules/**,public/**,build/**,dist/**"
+	}
+
+	root = strings.TrimSpace(root)
+	repoURL = strings.TrimSpace(repoURL)
+	outputPath = strings.TrimSpace(outputPath)
 
 	cfg := config{
 		RootPath:         root,
@@ -426,6 +506,10 @@ func parseFlags() (config, bool, error) {
 		ExcludePatterns:  splitCSV(excludeStr),
 		StripFrontMatter: stripFrontMatter,
 		OutputPath:       outputPath,
+		RepoURL:          repoURL,
+		Branch:           branch,
+		Subdir:           subdir,
+		KeepClone:        keepClone,
 	}
 
 	return cfg, false, nil
@@ -435,14 +519,89 @@ func printMetadata() {
 	meta := Metadata{
 		Name: "@docs-flatten",
 		Description: "Varre documentação em Markdown (Hugo, Docusaurus, mkdocs, etc.), " +
-			"extrai o conteúdo e gera texto ou JSONL pronto para IA (RAG/contexto).",
-		Usage:   `@docs-flatten --root <dir> [--format text|jsonl] [--max-chars N] [--include globs] [--exclude globs] [--strip-front-matter bool] [--output file]`,
-		Version: "1.2.0",
+			"extrai o conteúdo e gera texto, JSON, JSONL ou YAML pronto para IA (RAG/contexto).",
+		Usage: `@docs-flatten --root <dir> [--format text|jsonl|json|yaml] [--max-chars N] [--include globs] [--exclude globs] [--strip-front-matter bool] [--output file]
+    @docs-flatten --repo <git-url> [--branch main] [--subdir docs] [--format text|jsonl|json|yaml] [--max-chars N] [--include globs] [--exclude globs] [--strip-front-matter bool] [--output file]`,
+		Version: "1.3.0",
 	}
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(meta)
+}
+
+func gitClone(repoURL, branch, dest string, log *logger) error {
+	args := []string{"clone", "--depth", "1", "--branch", branch, repoURL, dest}
+	cmd := exec.Command("git", args...)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("falha ao clonar repositório: %v", err)
+	}
+	return nil
+}
+
+func gitGetCommit(dir string) (string, error) {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("falha ao obter commit HEAD: %v", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func prepareRootPath(cfg *config, log *logger) (string, string, func(), error) {
+	cleanup := func() {}
+	repoCommit := ""
+
+	if cfg.RepoURL == "" {
+		if cfg.RootPath == "" {
+			return "", "", cleanup, errors.New("RootPath vazio e RepoURL vazio")
+		}
+		absRoot, err := filepath.Abs(cfg.RootPath)
+		if err != nil {
+			return "", "", cleanup, fmt.Errorf("falha ao resolver caminho absoluto de %s: %v", cfg.RootPath, err)
+		}
+		return absRoot, repoCommit, cleanup, nil
+	}
+
+	tmpDir, err := os.MkdirTemp("", "docs-flatten-*")
+	if err != nil {
+		return "", "", cleanup, fmt.Errorf("falha ao criar diretório temporário: %v", err)
+	}
+
+	if !cfg.KeepClone {
+		cleanup = func() {
+			_ = os.RemoveAll(tmpDir)
+		}
+	} else {
+		cleanup = func() {}
+	}
+
+	log.Infof("Clonando repositório %s (branch=%s) em %s", cfg.RepoURL, cfg.Branch, tmpDir)
+	if err := gitClone(cfg.RepoURL, cfg.Branch, tmpDir, log); err != nil {
+		cleanup()
+		return "", "", nil, err
+	}
+
+	commit, err := gitGetCommit(tmpDir)
+	if err == nil {
+		repoCommit = commit
+	}
+
+	finalRoot := tmpDir
+	if cfg.Subdir != "" {
+		finalRoot = filepath.Join(tmpDir, cfg.Subdir)
+	}
+
+	absRoot, err := filepath.Abs(finalRoot)
+	if err != nil {
+		cleanup()
+		return "", "", nil, fmt.Errorf("falha ao resolver caminho absoluto de %s: %v", finalRoot, err)
+	}
+
+	return absRoot, repoCommit, cleanup, nil
 }
 
 // run encapsula a lógica principal.
@@ -454,15 +613,18 @@ func run(log *logger) error {
 
 	if onlyMetadata {
 		printMetadata()
-		// Sinal especial para o main não imprimir logs extras se for só metadados
 		return errors.New("METADATA_ONLY")
 	}
 
-	absRoot, err := filepath.Abs(cfg.RootPath)
+	rootPath, repoCommit, cleanup, err := prepareRootPath(&cfg, log)
 	if err != nil {
-		return fmt.Errorf("falha ao resolver caminho absoluto de %s: %v", cfg.RootPath, err)
+		return err
 	}
-	cfg.RootPath = absRoot
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	cfg.RootPath = rootPath
 
 	info, err := os.Stat(cfg.RootPath)
 	if err != nil || !info.IsDir() {
@@ -470,7 +632,12 @@ func run(log *logger) error {
 	}
 
 	log.Separator()
-	log.Infof("📚 Docs Flatten - root: %s", cfg.RootPath)
+	if cfg.RepoURL != "" {
+		log.Infof("📚 Docs Flatten - repo: %s (branch=%s, commit=%s)", cfg.RepoURL, cfg.Branch, repoCommit)
+		log.Infof("Root (clonado): %s", cfg.RootPath)
+	} else {
+		log.Infof("📚 Docs Flatten - root: %s", cfg.RootPath)
+	}
 	log.Infof("Config: Format=%s, MaxChars=%d, StripFrontMatter=%t", cfg.Format, cfg.MaxChars, cfg.StripFrontMatter)
 	if cfg.OutputPath != "" {
 		log.Infof("Output file: %s", cfg.OutputPath)
@@ -480,7 +647,7 @@ func run(log *logger) error {
 	log.Separator()
 
 	start := time.Now()
-	chunks, err := walkAndFlatten(cfg, log)
+	chunks, err := walkAndFlatten(cfg, log, cfg.RepoURL, repoCommit)
 	if err != nil {
 		return fmt.Errorf("falha ao processar documentação: %v", err)
 	}
@@ -488,7 +655,6 @@ func run(log *logger) error {
 	duration := time.Since(start).Seconds()
 	log.Infof("Total: %d chunks gerados em %.2fs", len(chunks), duration)
 
-	// Configurar saída de dados (IA)
 	var out io.Writer = os.Stdout
 	if cfg.OutputPath != "" {
 		if err := os.MkdirAll(filepath.Dir(cfg.OutputPath), 0o755); err != nil {
@@ -507,7 +673,6 @@ func run(log *logger) error {
 		out = f
 	}
 
-	// Escrever conteúdo real (para IA) – nunca misturar logs aqui
 	switch cfg.Format {
 	case FormatText:
 		if err := outputText(chunks, out); err != nil {
@@ -516,6 +681,14 @@ func run(log *logger) error {
 	case FormatJSONL:
 		if err := outputJSONL(chunks, out); err != nil {
 			return fmt.Errorf("falha na saída jsonl: %v", err)
+		}
+	case FormatJSON:
+		if err := outputJSON(chunks, out); err != nil {
+			return fmt.Errorf("falha na saída json: %v", err)
+		}
+	case FormatYAML:
+		if err := outputYAML(chunks, out); err != nil {
+			return fmt.Errorf("falha na saída yaml: %v", err)
 		}
 	default:
 		return fmt.Errorf("formato não suportado: %s", cfg.Format)
@@ -529,12 +702,10 @@ func run(log *logger) error {
 }
 
 func main() {
-	// Logger escreve no Stderr (para o usuário ver) e guarda buffer (se você quiser inspecionar)
 	log := newLogger(os.Stderr)
 
 	err := run(log)
 
-	// Se foi apenas solicitação de metadados, sai limpo sem logs extras
 	if err != nil && err.Error() == "METADATA_ONLY" {
 		return
 	}
@@ -543,7 +714,6 @@ func main() {
 		log.Errorf("FALHA CRÍTICA: %v", err)
 	}
 
-	// Relatório final: SOMENTE em stderr, nunca em stdout
 	fmt.Fprintln(os.Stderr, "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Fprintln(os.Stderr, "📋 RELATÓRIO DE EXECUÇÃO (LOGS)")
 	fmt.Fprintln(os.Stderr, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
