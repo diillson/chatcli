@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.11](https://github.com/diillson/chatcli/compare/v1.38.10...v1.38.11) (2025-11-21)
+
+
+### Bug Fixes
+
+* **plugins-examples:** add `chatcli-docs-flatten` plugin for Markdown processing and chunk generation ([#373](https://github.com/diillson/chatcli/issues/373)) ([#374](https://github.com/diillson/chatcli/issues/374)) ([0e0a780](https://github.com/diillson/chatcli/commit/0e0a780251b454ce711824301748317ff0f8d286))
+
 ## [1.38.10](https://github.com/diillson/chatcli/compare/v1.38.9...v1.38.10) (2025-11-20)
 
 
