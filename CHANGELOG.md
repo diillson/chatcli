@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.14](https://github.com/diillson/chatcli/compare/v1.38.13...v1.38.14) (2025-11-22)
+
+
+### Bug Fixes
+
+* **plugins-examples:** enhance `chatcli-docs-flatten` with schema generation, better glob matching, and improved CLI ([#382](https://github.com/diillson/chatcli/issues/382)) ([#383](https://github.com/diillson/chatcli/issues/383)) ([081b716](https://github.com/diillson/chatcli/commit/081b71624c97296f1a9acaccc79ad8e82dca69bc))
+
 ## [1.38.13](https://github.com/diillson/chatcli/compare/v1.38.12...v1.38.13) (2025-11-21)
 
 
