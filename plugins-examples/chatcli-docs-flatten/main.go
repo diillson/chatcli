@@ -13,16 +13,36 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
+// Metadata básico para descoberta (comando --metadata)
 type Metadata struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Usage       string `json:"usage"`
 	Version     string `json:"version"`
+}
+
+// Estruturas para o Schema rico (comando --schema)
+type SchemaFlag struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+	Default     string `json:"default"`
+}
+
+type SchemaSubcommand struct {
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Flags       []SchemaFlag `json:"flags"`
+}
+
+type PluginSchema struct {
+	Subcommands []SchemaSubcommand `json:"subcommands"`
 }
 
 type logger struct {
@@ -103,17 +123,16 @@ type parsedMarkdown struct {
 }
 
 type config struct {
-	RootPath         string
-	Format           FlattenFormat
-	MaxChars         int
-	IncludePatterns  []string
-	ExcludePatterns  []string
-	StripFrontMatter bool
-	OutputPath       string
-	RepoURL          string
-	Branch           string
-	Subdir           string
-	KeepClone        bool
+	RootPath        string
+	Format          FlattenFormat
+	MaxChars        int
+	IncludePatterns []string
+	ExcludePatterns []string
+	OutputPath      string
+	RepoURL         string
+	Branch          string
+	Subdir          string
+	KeepClone       bool
 }
 
 var (
@@ -123,12 +142,18 @@ var (
 	titleYAML = regexp.MustCompile(`(?i)^\s*title\s*:\s*"(.*)"\s*$`)
 )
 
+// globMatch usa filepath.Match.
 func globMatch(path string, patterns []string) bool {
 	if len(patterns) == 0 {
 		return true
 	}
 	for _, p := range patterns {
-		ok, err := filepath.Match(p, path)
+		matchPath := path
+		if !strings.Contains(p, "/") {
+			matchPath = filepath.Base(path)
+		}
+
+		ok, err := filepath.Match(p, matchPath)
 		if err == nil && ok {
 			return true
 		}
@@ -137,13 +162,17 @@ func globMatch(path string, patterns []string) bool {
 }
 
 func shouldProcessFile(relPath string, cfg config) bool {
-	if !globMatch(relPath, cfg.IncludePatterns) {
-		return false
+	if len(cfg.IncludePatterns) > 0 {
+		if !globMatch(relPath, cfg.IncludePatterns) {
+			return false
+		}
 	}
-	if len(cfg.ExcludePatterns) == 0 {
-		return true
+	if len(cfg.ExcludePatterns) > 0 {
+		if globMatch(relPath, cfg.ExcludePatterns) {
+			return false
+		}
 	}
-	return !globMatch(relPath, cfg.ExcludePatterns)
+	return true
 }
 
 func parseFrontMatter(r io.Reader) (parsedMarkdown, error) {
@@ -276,16 +305,12 @@ func processFile(absPath, relPath string, cfg config, log *logger, chunkIndex *i
 	var content string
 	var title string
 
-	if cfg.StripFrontMatter {
-		title = pm.FrontMatter.Title
-		if pm.HasFM && title != "" {
-			content = fmt.Sprintf("# %s\n\n%s", title, pm.Body)
-		} else {
-			content = pm.Body
-		}
+	// Comportamento padrão: Remove FrontMatter cru e preserva título
+	title = pm.FrontMatter.Title
+	if pm.HasFM && title != "" {
+		content = fmt.Sprintf("# %s\n\n%s", title, pm.Body)
 	} else {
-		content = pm.Full
-		title = pm.FrontMatter.Title
+		content = pm.Body
 	}
 
 	content = normalizeMarkdown(content)
@@ -324,6 +349,9 @@ func walkAndFlatten(cfg config, log *logger, repoURL, commit string) ([]Chunk, e
 			return nil
 		}
 		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") && d.Name() != "." {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
@@ -336,6 +364,7 @@ func walkAndFlatten(cfg config, log *logger, repoURL, commit string) ([]Chunk, e
 		}
 
 		rel = filepath.ToSlash(rel)
+
 		if !shouldProcessFile(rel, cfg) {
 			return nil
 		}
@@ -440,36 +469,42 @@ func outputYAML(chunks []Chunk, w io.Writer) error {
 
 func parseFlags() (config, bool, error) {
 	var (
-		showMetadata     bool
-		root             string
-		formatStr        string
-		maxChars         int
-		includeStr       string
-		excludeStr       string
-		stripFrontMatter bool
-		outputPath       string
-		repoURL          string
-		branch           string
-		subdir           string
-		keepClone        bool
+		showMetadata bool
+		showSchema   bool
+		root         string
+		formatStr    string
+		maxChars     int
+		includeStr   string
+		excludeStr   string
+		keepCloneStr string
+		outputPath   string
+		repoURL      string
+		branch       string
+		subdir       string
 	)
 
 	flag.BoolVar(&showMetadata, "metadata", false, "Exibe metadados do plugin em JSON e sai")
+	flag.BoolVar(&showSchema, "schema", false, "Exibe o schema JSON da ferramenta e sai")
 	flag.StringVar(&root, "root", "", "Diretório raiz da documentação")
 	flag.StringVar(&formatStr, "format", "text", "Formato de saída: text | jsonl | json | yaml")
 	flag.IntVar(&maxChars, "max-chars", 16000, "Tamanho máximo (em caracteres) por chunk (0 = sem divisão)")
 	flag.StringVar(&includeStr, "include", "", "Padrões glob incluídos (separados por vírgula), ex: docs/**.md,content/**.md")
 	flag.StringVar(&excludeStr, "exclude", "", "Padrões glob excluídos (separados por vírgula), ex: node_modules/**,public/**")
-	flag.BoolVar(&stripFrontMatter, "strip-front-matter", true, "Remove front matter dos arquivos Markdown")
+	flag.StringVar(&keepCloneStr, "keep-clone", "false", "Não apagar o clone temporário após o processamento (true/false)")
 	flag.StringVar(&outputPath, "output", "", "Arquivo de saída (se vazio, usa stdout)")
 	flag.StringVar(&repoURL, "repo", "", "URL do repositório Git com a documentação")
 	flag.StringVar(&branch, "branch", "main", "Branch a ser usada ao clonar o repositório")
 	flag.StringVar(&subdir, "subdir", "", "Subdiretório dentro do repositório que contém os .md (ex: docs)")
-	flag.BoolVar(&keepClone, "keep-clone", false, "Não apagar o clone temporário após o processamento")
 
 	flag.Parse()
 
 	if showMetadata {
+		printMetadata()
+		return config{}, true, nil
+	}
+
+	if showSchema {
+		printSchema()
 		return config{}, true, nil
 	}
 
@@ -482,6 +517,11 @@ func parseFlags() (config, bool, error) {
 	case FormatText, FormatJSONL, FormatJSON, FormatYAML:
 	default:
 		return config{}, false, fmt.Errorf("formato inválido: %s (use text, jsonl, json ou yaml)", formatStr)
+	}
+
+	keepClone, err := strconv.ParseBool(keepCloneStr)
+	if err != nil {
+		return config{}, false, fmt.Errorf("valor inválido para --keep-clone: %v (use true ou false)", err)
 	}
 
 	splitCSV := func(s string) []string {
@@ -503,29 +543,21 @@ func parseFlags() (config, bool, error) {
 		return out
 	}
 
-	if repoURL != "" && includeStr == "" {
-		includeStr = "docs/**.md,content/**.md,**/README.md"
-	}
-	if excludeStr == "" {
-		excludeStr = ".git/**,node_modules/**,public/**,build/**,dist/**"
-	}
-
 	root = strings.TrimSpace(root)
 	repoURL = strings.TrimSpace(repoURL)
 	outputPath = strings.TrimSpace(outputPath)
 
 	cfg := config{
-		RootPath:         root,
-		Format:           format,
-		MaxChars:         maxChars,
-		IncludePatterns:  splitCSV(includeStr),
-		ExcludePatterns:  splitCSV(excludeStr),
-		StripFrontMatter: stripFrontMatter,
-		OutputPath:       outputPath,
-		RepoURL:          repoURL,
-		Branch:           branch,
-		Subdir:           subdir,
-		KeepClone:        keepClone,
+		RootPath:        root,
+		Format:          format,
+		MaxChars:        maxChars,
+		IncludePatterns: splitCSV(includeStr),
+		ExcludePatterns: splitCSV(excludeStr),
+		OutputPath:      outputPath,
+		RepoURL:         repoURL,
+		Branch:          branch,
+		Subdir:          subdir,
+		KeepClone:       keepClone,
 	}
 
 	return cfg, false, nil
@@ -535,10 +567,11 @@ func printMetadata() {
 	meta := Metadata{
 		Name: "@docs-flatten",
 		Description: "Varre documentação em Markdown (Hugo, Docusaurus, mkdocs, etc.), " +
-			"extrai o conteúdo e gera texto, JSON, JSONL ou YAML pronto para IA (RAG/contexto).",
-		Usage: `@docs-flatten --root <dir> [--format text|jsonl|json|yaml] [--max-chars N] [--include globs] [--exclude globs] [--strip-front-matter bool] [--output file]
-        @docs-flatten --repo <git-url> [--branch main] [--subdir docs] [--format text|jsonl|json|yaml] [--max-chars N] [--include globs] [--exclude globs] [--strip-front-matter bool] [--output file]`,
-		Version: "1.3.0",
+			"extrai o conteúdo e gera texto, JSON, JSONL ou YAML pronto para IA (RAG/contexto). " +
+			"PREFIRA SEMPRE usar --output para salvar em arquivo em vez de imprimir no chat.",
+		Usage: `@docs-flatten --root <dir> [--format text|jsonl|json|yaml] --output <file>
+            @docs-flatten --repo <git-url> [--subdir docs] [--format text|jsonl|json|yaml] --output <file>`,
+		Version: "1.4.3",
 	}
 
 	enc := json.NewEncoder(os.Stdout)
@@ -546,14 +579,81 @@ func printMetadata() {
 	_ = enc.Encode(meta)
 }
 
+func printSchema() {
+	schema := PluginSchema{
+		Subcommands: []SchemaSubcommand{
+			{
+				Name:        "@docs-flatten",
+				Description: "Ferramenta para processar e 'achatar' documentações em Markdown. ATENÇÃO: Para evitar inundar o chat, você DEVE usar a flag --output para salvar o resultado em um arquivo quando o conteúdo for extenso.",
+				Flags: []SchemaFlag{
+					{
+						Name:        "root",
+						Description: "Caminho do diretório local contendo os arquivos .md. Use ESTE ou --repo (exclusivos).",
+						Type:        "string",
+						Default:     "",
+					},
+					{
+						Name:        "repo",
+						Description: "URL completa do repositório Git (https://...). Use ESTE ou --root (exclusivos).",
+						Type:        "string",
+						Default:     "",
+					},
+					{
+						Name:        "branch",
+						Description: "Branch do repositório Git a ser clonada (apenas se usar --repo).",
+						Type:        "string",
+						Default:     "main",
+					},
+					{
+						Name:        "subdir",
+						Description: "Subdiretório dentro do repositório onde está a documentação (apenas se usar --repo). Ex: 'docs' ou 'content'.",
+						Type:        "string",
+						Default:     "",
+					},
+					{
+						Name:        "format",
+						Description: "Formato de saída dos dados. Opções: text, jsonl, json, yaml.",
+						Type:        "string",
+						Default:     "text",
+					},
+					{
+						Name:        "output",
+						Description: "Caminho absoluto do arquivo para salvar o resultado. OBRIGATÓRIO se o usuário pedir para 'salvar', 'gerar' ou 'exportar'. Ex: '/tmp/docs.json'.",
+						Type:        "string",
+						Default:     "",
+					},
+					{
+						Name:        "max-chars",
+						Description: "Tamanho máximo de caracteres por chunk. Use 0 para não dividir.",
+						Type:        "int",
+						Default:     "16000",
+					},
+					{
+						Name:        "include",
+						Description: "Padrões para incluir arquivos (separados por vírgula). Ex: 'README.md'. Se vazio, inclui todos .md.",
+						Type:        "string",
+						Default:     "",
+					},
+				},
+			},
+		},
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(schema)
+}
+
 func gitClone(repoURL, branch, dest string, log *logger) error {
 	args := []string{"clone", "--depth", "1", "--branch", branch, repoURL, dest}
 	cmd := exec.Command("git", args...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+
+	var errBuf bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &errBuf
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("falha ao clonar repositório: %v", err)
+		return fmt.Errorf("falha ao clonar repositório: %v\nDetalhes: %s", err, errBuf.String())
 	}
 	return nil
 }
@@ -621,13 +721,12 @@ func prepareRootPath(cfg *config, log *logger) (string, string, func(), error) {
 }
 
 func run(log *logger) error {
-	cfg, onlyMetadata, err := parseFlags()
+	cfg, stop, err := parseFlags()
 	if err != nil {
 		return err
 	}
 
-	if onlyMetadata {
-		printMetadata()
+	if stop {
 		return errors.New("METADATA_ONLY")
 	}
 
@@ -643,7 +742,7 @@ func run(log *logger) error {
 
 	info, err := os.Stat(cfg.RootPath)
 	if err != nil || !info.IsDir() {
-		return fmt.Errorf("diretório raiz inválido: %s", cfg.RootPath)
+		return fmt.Errorf("diretório raiz inválido ou não encontrado: %s", cfg.RootPath)
 	}
 
 	log.Separator()
@@ -653,7 +752,7 @@ func run(log *logger) error {
 	} else {
 		log.Infof("📚 Docs Flatten - root: %s", cfg.RootPath)
 	}
-	log.Infof("Config: Format=%s, MaxChars=%d, StripFrontMatter=%t", cfg.Format, cfg.MaxChars, cfg.StripFrontMatter)
+	log.Infof("Config: Format=%s, MaxChars=%d", cfg.Format, cfg.MaxChars)
 	if cfg.OutputPath != "" {
 		log.Infof("Output file: %s (nenhum chunk será enviado para stdout)", cfg.OutputPath)
 	} else {
@@ -669,6 +768,13 @@ func run(log *logger) error {
 
 	duration := time.Since(start).Seconds()
 	log.Infof("Total: %d chunks gerados em %.2fs", len(chunks), duration)
+
+	if len(chunks) == 0 {
+		log.Warnf("Nenhum arquivo Markdown encontrado em: %s", cfg.RootPath)
+		if cfg.Subdir != "" {
+			log.Warnf("Verifique se o subdiretório '%s' existe no repositório.", cfg.Subdir)
+		}
+	}
 
 	var out io.Writer = os.Stdout
 	if cfg.OutputPath != "" {
