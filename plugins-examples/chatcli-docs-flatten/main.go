@@ -123,16 +123,17 @@ type parsedMarkdown struct {
 }
 
 type config struct {
-	RootPath        string
-	Format          FlattenFormat
-	MaxChars        int
-	IncludePatterns []string
-	ExcludePatterns []string
-	OutputPath      string
-	RepoURL         string
-	Branch          string
-	Subdir          string
-	KeepClone       bool
+	RootPath         string
+	Format           FlattenFormat
+	MaxChars         int
+	IncludePatterns  []string
+	ExcludePatterns  []string
+	StripFrontMatter bool
+	OutputPath       string
+	RepoURL          string
+	Branch           string
+	Subdir           string
+	KeepClone        bool
 }
 
 var (
@@ -302,15 +303,17 @@ func processFile(absPath, relPath string, cfg config, log *logger, chunkIndex *i
 		return nil, fmt.Errorf("parse front matter: %w", err)
 	}
 
+	title := pm.FrontMatter.Title
 	var content string
-	var title string
 
-	// Comportamento padrão: Remove FrontMatter cru e preserva título
-	title = pm.FrontMatter.Title
-	if pm.HasFM && title != "" {
-		content = fmt.Sprintf("# %s\n\n%s", title, pm.Body)
+	if cfg.StripFrontMatter {
+		if pm.HasFM && title != "" {
+			content = fmt.Sprintf("# %s\n\n%s", title, pm.Body)
+		} else {
+			content = pm.Body
+		}
 	} else {
-		content = pm.Body
+		content = pm.Full
 	}
 
 	content = normalizeMarkdown(content)
@@ -469,18 +472,19 @@ func outputYAML(chunks []Chunk, w io.Writer) error {
 
 func parseFlags() (config, bool, error) {
 	var (
-		showMetadata bool
-		showSchema   bool
-		root         string
-		formatStr    string
-		maxChars     int
-		includeStr   string
-		excludeStr   string
-		keepCloneStr string
-		outputPath   string
-		repoURL      string
-		branch       string
-		subdir       string
+		showMetadata        bool
+		showSchema          bool
+		root                string
+		formatStr           string
+		maxChars            int
+		includeStr          string
+		excludeStr          string
+		stripFrontMatterStr string
+		keepCloneStr        string
+		outputPath          string
+		repoURL             string
+		branch              string
+		subdir              string
 	)
 
 	flag.BoolVar(&showMetadata, "metadata", false, "Exibe metadados do plugin em JSON e sai")
@@ -490,7 +494,10 @@ func parseFlags() (config, bool, error) {
 	flag.IntVar(&maxChars, "max-chars", 16000, "Tamanho máximo (em caracteres) por chunk (0 = sem divisão)")
 	flag.StringVar(&includeStr, "include", "", "Padrões glob incluídos (separados por vírgula), ex: docs/**.md,content/**.md")
 	flag.StringVar(&excludeStr, "exclude", "", "Padrões glob excluídos (separados por vírgula), ex: node_modules/**,public/**")
+
+	flag.StringVar(&stripFrontMatterStr, "strip-front-matter", "true", "Remove front matter dos arquivos Markdown (true/false)")
 	flag.StringVar(&keepCloneStr, "keep-clone", "false", "Não apagar o clone temporário após o processamento (true/false)")
+
 	flag.StringVar(&outputPath, "output", "", "Arquivo de saída (se vazio, usa stdout)")
 	flag.StringVar(&repoURL, "repo", "", "URL do repositório Git com a documentação")
 	flag.StringVar(&branch, "branch", "main", "Branch a ser usada ao clonar o repositório")
@@ -517,6 +524,11 @@ func parseFlags() (config, bool, error) {
 	case FormatText, FormatJSONL, FormatJSON, FormatYAML:
 	default:
 		return config{}, false, fmt.Errorf("formato inválido: %s (use text, jsonl, json ou yaml)", formatStr)
+	}
+
+	stripFrontMatter, err := strconv.ParseBool(stripFrontMatterStr)
+	if err != nil {
+		return config{}, false, fmt.Errorf("valor inválido para --strip-front-matter: %v (use true ou false)", err)
 	}
 
 	keepClone, err := strconv.ParseBool(keepCloneStr)
@@ -548,16 +560,17 @@ func parseFlags() (config, bool, error) {
 	outputPath = strings.TrimSpace(outputPath)
 
 	cfg := config{
-		RootPath:        root,
-		Format:          format,
-		MaxChars:        maxChars,
-		IncludePatterns: splitCSV(includeStr),
-		ExcludePatterns: splitCSV(excludeStr),
-		OutputPath:      outputPath,
-		RepoURL:         repoURL,
-		Branch:          branch,
-		Subdir:          subdir,
-		KeepClone:       keepClone,
+		RootPath:         root,
+		Format:           format,
+		MaxChars:         maxChars,
+		IncludePatterns:  splitCSV(includeStr),
+		ExcludePatterns:  splitCSV(excludeStr),
+		StripFrontMatter: stripFrontMatter,
+		OutputPath:       outputPath,
+		RepoURL:          repoURL,
+		Branch:           branch,
+		Subdir:           subdir,
+		KeepClone:        keepClone,
 	}
 
 	return cfg, false, nil
@@ -569,9 +582,9 @@ func printMetadata() {
 		Description: "Varre documentação em Markdown (Hugo, Docusaurus, mkdocs, etc.), " +
 			"extrai o conteúdo e gera texto, JSON, JSONL ou YAML pronto para IA (RAG/contexto). " +
 			"PREFIRA SEMPRE usar --output para salvar em arquivo em vez de imprimir no chat.",
-		Usage: `@docs-flatten --root <dir> [--format text|jsonl|json|yaml] --output <file>
-            @docs-flatten --repo <git-url> [--subdir docs] [--format text|jsonl|json|yaml] --output <file>`,
-		Version: "1.4.3",
+		Usage: `@docs-flatten --root <dir> [--format text|jsonl|json|yaml] [--strip-front-matter true|false] [--include globs] [--exclude globs] --output <file>
+            @docs-flatten --repo <git-url> [--subdir docs] [--branch main] [--keep-clone true|false] --output <file>`,
+		Version: "1.4.4",
 	}
 
 	enc := json.NewEncoder(os.Stdout)
@@ -617,6 +630,18 @@ func printSchema() {
 						Default:     "text",
 					},
 					{
+						Name:        "strip-front-matter",
+						Description: "Remove o cabeçalho de metadados (front-matter) dos arquivos Markdown. Valores aceitos: 'true', 'false'.",
+						Type:        "string",
+						Default:     "true",
+					},
+					{
+						Name:        "keep-clone",
+						Description: "Mantém o diretório temporário do git após o processamento. Útil para debug. Valores aceitos: 'true', 'false'.",
+						Type:        "string",
+						Default:     "false",
+					},
+					{
 						Name:        "output",
 						Description: "Caminho absoluto do arquivo para salvar o resultado. OBRIGATÓRIO se o usuário pedir para 'salvar', 'gerar' ou 'exportar'. Ex: '/tmp/docs.json'.",
 						Type:        "string",
@@ -631,6 +656,12 @@ func printSchema() {
 					{
 						Name:        "include",
 						Description: "Padrões para incluir arquivos (separados por vírgula). Ex: 'README.md'. Se vazio, inclui todos .md.",
+						Type:        "string",
+						Default:     "",
+					},
+					{
+						Name:        "exclude",
+						Description: "Padrões para excluir arquivos (separados por vírgula). Ex: 'node_modules'.",
 						Type:        "string",
 						Default:     "",
 					},
@@ -752,7 +783,7 @@ func run(log *logger) error {
 	} else {
 		log.Infof("📚 Docs Flatten - root: %s", cfg.RootPath)
 	}
-	log.Infof("Config: Format=%s, MaxChars=%d", cfg.Format, cfg.MaxChars)
+	log.Infof("Config: Format=%s, MaxChars=%d, StripFrontMatter=%t", cfg.Format, cfg.MaxChars, cfg.StripFrontMatter)
 	if cfg.OutputPath != "" {
 		log.Infof("Output file: %s (nenhum chunk será enviado para stdout)", cfg.OutputPath)
 	} else {
