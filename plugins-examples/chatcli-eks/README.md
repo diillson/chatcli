@@ -110,6 +110,10 @@ aws route53 create-hosted-zone \
   --caller-reference $(date +%s)
 ```
 
+### 4\. Pulumi CLI Instalado
+
+Siga as orientações em [https://www.pulumi.com/docs/get-started/install/](https://www.pulumi.com/docs/get-started/install/).
+
 -----
 
 ## 🛠️ INSTALAÇÃO
