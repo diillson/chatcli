@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.39.0](https://github.com/diillson/chatcli/compare/v1.38.14...v1.39.0) (2025-11-28)
+
+
+### Features
+
+* **plugins-examples:** add `chatcli-eks` plugin for EKS cluster deployment ([#385](https://github.com/diillson/chatcli/issues/385)) ([#386](https://github.com/diillson/chatcli/issues/386)) ([5fec508](https://github.com/diillson/chatcli/commit/5fec5083d7b07a4be3dd9a7756f5b6106b78271a))
+
 ## [1.38.14](https://github.com/diillson/chatcli/compare/v1.38.13...v1.38.14) (2025-11-22)
 
 
