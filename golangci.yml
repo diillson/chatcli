@@ -2,6 +2,15 @@ run:
   timeout: 5m
   tests: false
 
+  skip-dirs:
+    - vendor
+    - pkg/mod
+    - "**/pkg/mod"
+    - "$GOMODCACHE"
+  skip-files:
+    - ".*pkg/mod/.*"
+  modules-download-mode: vendor
+
 linters:
   enable:
     - govet
