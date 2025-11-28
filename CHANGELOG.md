@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.39.1](https://github.com/diillson/chatcli/compare/v1.39.0...v1.39.1) (2025-11-28)
+
+
+### Bug Fixes
+
+* docs(chatcli-eks): add Pulumi CLI installation instructions to README ([#388](https://github.com/diillson/chatcli/issues/388)) ([#389](https://github.com/diillson/chatcli/issues/389)) ([e960e5b](https://github.com/diillson/chatcli/commit/e960e5b531401db4336068a0353f534d9c79982b))
+
 ## [1.39.0](https://github.com/diillson/chatcli/compare/v1.38.14...v1.39.0) (2025-11-28)
 
 
