@@ -90,7 +90,6 @@ Sua conta AWS precisa de permissões para:
 * ✅ **EC2** (VPC, Subnets, Security Groups, NAT Gateways)
 * ✅ **IAM** (Criar roles e policies)
 * ✅ **S3** (Criar/deletar buckets)
-* ✅ **DynamoDB** (Criar/deletar tabelas)
 * ✅ **KMS** (Criar/gerenciar chaves)
 * ✅ **Route53** (Se usar External DNS)
 
@@ -110,10 +109,102 @@ aws route53 create-hosted-zone \
   --caller-reference $(date +%s)
 ```
 
-### 4\. Pulumi CLI Instalado
+### 4. Pulumi CLI Instalado
 
-Siga as orientações em [https://www.pulumi.com/docs/get-started/install/](https://www.pulumi.com/docs/get-started/install/).
+Instale o Pulumi CLI: https://www.pulumi.com/docs/get-started/install/
 
+Opções de uso, gerenciamento de estado:
+- S3 ou backend local: não requer `pulumi login`.
+- Pulumi Cloud (desenvolvimento ou produção): faça login uma vez (token salvo no arquivo):
+  pulumi login
+- Pulumi Cloud (CI/CD): defina `PULUMI_ACCESS_TOKEN` no ambiente, sem login interativo.
+- Desenvolvimento Rápido e Local: state salvo local em `~/.chatcli/pulumi/<stack-name>`.
+
+-----
+
+## 🗄️ Backends de estado (como o plugin decide)
+
+Ordem de decisão do backend de estado:
+
+1. S3 (explícito)
+   - Se você passar --state-bucket-name, o plugin usa:
+     s3://<bucket>?region=<região>
+   - O bucket e a tabela são criados/garantidos automaticamente.
+   - Não exige PULUMI_ACCESS_TOKEN nem pulumi login, pois não usa a cloud para salvar o estado.
+
+2. Backend atual do Pulumi CLI (pulumi login)
+   - Se você NÃO passar --state-bucket-name, o plugin tenta reutilizar o backend já configurado via `pulumi login`:
+     - Pulumi Cloud (https://api.pulumi.com): funciona se houver token salvo no ~/.pulumi/credentials.json (login prévio) ou no ambiente.
+     - S3/file/azblob/gs: funciona direto (não precisa token).
+   - Não exige variável extra; usa o que já está logado no CLI.
+
+3. Fallback automático para backend local (file://)
+   - Se não houver backend válido no CLI, o plugin usa:
+     file://~/.chatcli/pulumi/<stack-name>
+   - Evita o erro “PULUMI_ACCESS_TOKEN must be set …” em ambientes não interativos.
+
+>Nota: quando o backend é S3, o plugin configura a URL com `region` automaticamente, garantindo lock distribuído.
+
+### 🔀 Exemplos rápidos por backend
+
+1) S3 (recomendado para times/CI)
+```bash
+# Create
+@eks create \
+  --name prod-eks \
+  --region us-east-1 \
+  --state-bucket-name meu-state-prod \
+  --secrets-provider=awskms
+
+# Delete
+@eks delete \
+  --name prod-eks \
+  --region us-east-1 \
+  --state-bucket-name meu-state-prod \
+  --secrets-provider=awskms \
+  --kms-key-id alias/pulumi-secrets-prod-eks
+```
+2. Pulumi Cloud reutilizando “pulumi login” (sem token em env)
+```bash
+pulumi login
+pulumi whoami
+
+@eks create \
+  --name cloud-eks \
+  --region us-east-1 \
+  --secrets-provider=awskms
+
+@eks delete \
+  --name cloud-eks \
+  --region us-east-1 \
+  --secrets-provider=awskms \
+  --kms-key-id alias/pulumi-secrets-cloud-eks
+```
+3. Pulumi Cloud em CI (sem login interativo, com token)
+```bash
+export PULUMI_ACCESS_TOKEN="pul-xxxxxxxx"
+
+@eks create \
+  --name ci-eks \
+  --region us-east-1 \
+  --secrets-provider=awskms
+```
+4. Fallback local (file://) para desenvolvimento rápido
+```bash
+# Create
+@eks create \
+  --name dev-eks \
+  --region us-east-1 \
+  --secrets-provider=passphrase \
+  --config-passphrase 'minha-senha-segura'
+
+# Delete
+export PULUMI_CONFIG_PASSPHRASE='minha-senha-segura'
+@eks delete \
+  --name dev-eks \
+  --region us-east-1 \
+  --secrets-provider=passphrase
+```
 -----
 
 ## 🛠️ INSTALAÇÃO
@@ -175,7 +266,6 @@ mv chatcli-eks ~/.chatcli/plugins/
 **O que acontece:**
 
 * ✅ Cria bucket S3 `meu-bucket-state` (se não existir)
-* ✅ Cria tabela DynamoDB `meu-bucket-state-lock-table`
 * ✅ Cria chave KMS `alias/pulumi-secrets-meu-cluster`
 * ✅ Provisiona cluster EKS com 2 nós `t3.medium`
 
@@ -318,7 +408,6 @@ export PULUMI_CONFIG_PASSPHRASE='minha-senha-segura'
 | :--- | :--- | :--- | :--- |
 | `--cluster-name` | string | - | Infere automaticamente nomes de recursos |
 | `--state-bucket-name` | string | - | Bucket S3 específico |
-| `--lock-table-name` | string | - | Tabela DynamoDB específica |
 | `--kms-key-alias` | string | - | Alias da chave KMS |
 | `--preview` | bool | `false` | Mostra o que será deletado (seguro) |
 | `--dry-run` | bool | `false` | Simula deleção (seguro) |
@@ -343,10 +432,6 @@ export PULUMI_CONFIG_PASSPHRASE='minha-senha-segura'
    - Objetos: 15
    - Versões: 3
    - Total a deletar: 18 itens
-
-🔐 Tabela DynamoDB: meu-cluster-state-lock-table
-   - Status: ACTIVE
-   - Itens: 1 (aprox.)
 
 🔑 Chave KMS: alias/pulumi-secrets-meu-cluster
    - Será agendada para deleção em 7 dias
@@ -593,6 +678,17 @@ export PULUMI_CONFIG_PASSPHRASE='senha-antiga'
 
 ## 🐛 TROUBLESHOOTING
 
+### Erro: “PULUMI_ACCESS_TOKEN must be set for login during non-interactive CLI sessions”
+
+Causa: O backend padrão ficou como Pulumi Cloud, mas não há token disponível (em CI) nem login prévio no CLI.
+
+Soluções:
+- Opção A (sem Pulumi Cloud): use S3 ou backend local
+  - Passe `--state-bucket-name` para usar S3 (recomendado em CI).
+  - Ou rode sem bucket e deixe o plugin cair no backend local (file://).
+- Opção B (Pulumi Cloud local): faça `pulumi login` uma vez no host (token ficará salvo).
+- Opção C (Pulumi Cloud em CI): defina `PULUMI_ACCESS_TOKEN` no ambiente.
+
 ### Erro: "Stack incompatível com secrets provider"
 
 **Causa:** Tentou usar secrets provider diferente do usado na criação.
@@ -706,7 +802,6 @@ EOF
 ### Recursos Auxiliares
 
 * **S3 State Bucket:** \~$0.50/mês
-* **DynamoDB Lock Table:** \~$0.25/mês
 * **KMS Key:** \~$1/mês
 * **Total:** \~$1.75/mês
 
