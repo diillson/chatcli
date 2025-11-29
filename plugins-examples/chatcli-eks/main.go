@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -130,12 +131,65 @@ func handleKMSInfo(args []string) {
 	fmt.Fprintln(os.Stderr, strings.Repeat("=", 60))
 }
 
+// getCurrentPulumiBackend tenta descobrir o backend atual do Pulumi CLI e se há token salvo.
+// Retorna:
+//   - current: URL do backend atual (ex: https://api.pulumi.com, s3://..., file://...)
+//   - hasToken: true se for Pulumi Cloud e houver token disponível (no arquivo ou env var)
+func getCurrentPulumiBackend() (current string, hasToken bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	credPath := filepath.Join(home, ".pulumi", "credentials.json")
+	data, err := os.ReadFile(credPath)
+	if err != nil {
+		return "", false
+	}
+
+	var creds struct {
+		Current      string            `json:"current"`
+		AccessTokens map[string]string `json:"accessTokens"`
+	}
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return "", false
+	}
+
+	cur := strings.TrimSpace(creds.Current)
+	if cur == "" {
+		return "", false
+	}
+
+	// Se o backend atual for Pulumi Cloud (http/https), verifique se há token salvo
+	if strings.HasPrefix(cur, "http://") || strings.HasPrefix(cur, "https://") {
+		// 1) Token via env (caso exista)
+		if os.Getenv("PULUMI_ACCESS_TOKEN") != "" {
+			return cur, true
+		}
+		// 2) Token no arquivo credentials.json
+		if creds.AccessTokens != nil {
+			if tok, ok := creds.AccessTokens[cur]; ok && tok != "" {
+				return cur, true
+			}
+			// Tentar equivalência sem barra final
+			curNoSlash := strings.TrimRight(cur, "/")
+			for k, v := range creds.AccessTokens {
+				if strings.TrimRight(k, "/") == curNoSlash && v != "" {
+					return cur, true
+				}
+			}
+		}
+		// Sem token
+		return cur, false
+	}
+
+	// Para outros backends (s3://, file://, azblob://, gs://, etc) não exigimos token
+	return cur, true
+}
+
 func handleCreate(args []string) {
 	createCmd := flag.NewFlagSet("create", flag.ExitOnError)
 
 	stateBucketName := createCmd.String("state-bucket-name", "", "Nome do bucket S3 para o estado (Obrigatório se não usar Pulumi Cloud).")
-	lockTableName := createCmd.String("lock-table-name", "", "Nome da tabela DynamoDB para lock.")
-
 	clusterName := createCmd.String("name", "prod-eks", "Identificador único do Cluster (Stack Name).")
 	awsRegion := createCmd.String("region", "us-east-1", "Região da AWS.")
 	k8sVersion := createCmd.String("k8s-version", "1.31", "Versão do Kubernetes.")
@@ -176,9 +230,11 @@ func handleCreate(args []string) {
 		os.Exit(1)
 	}
 
+	// Escolha do backend
 	var backendURL string
 	if *stateBucketName != "" {
-		fmt.Fprintln(os.Stderr, "\n--- Fase de Bootstrap do Backend de Estado ---")
+		// S3 + Dynamo lock (explícito)
+		fmt.Fprintln(os.Stderr, "\n--- Fase de Bootstrap do Backend de Estado (S3) ---")
 		awsClients, err := aws_bootstrap.NewAWSClients(context.Background(), *awsRegion)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Erro ao inicializar clientes AWS: %v\n", err)
@@ -190,19 +246,42 @@ func handleCreate(args []string) {
 			os.Exit(1)
 		}
 
-		finalLockTable := *lockTableName
-		if finalLockTable == "" {
-			finalLockTable = fmt.Sprintf("%s-lock-table", *stateBucketName)
-		}
-		if err := awsClients.EnsureDynamoDBLockTable(context.Background(), finalLockTable); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Erro DynamoDB: %v\n", err)
-			os.Exit(1)
-		}
-
-		backendURL = fmt.Sprintf("s3://%s", *stateBucketName)
-		fmt.Fprintln(os.Stderr, "--------------------------------------------\n")
+		backendURL = fmt.Sprintf("s3://%s?region=%s", *stateBucketName, *awsRegion)
+		fmt.Fprintln(os.Stderr, "   Backend S3 configurado:", backendURL)
+		fmt.Fprintln(os.Stderr, "----------------------------------------------------\n")
 	} else {
-		fmt.Fprintln(os.Stderr, "⚠️  AVISO: Nenhum bucket de estado fornecido. Usando backend local ou padrão do Pulumi.")
+		// Sem S3: tente reutilizar o backend do 'pulumi login'
+		current, hasToken := getCurrentPulumiBackend()
+		switch {
+		case current == "":
+			// Sem login/credenciais: fallback local file://
+			home, _ := os.UserHomeDir()
+			localDir := filepath.Join(home, ".chatcli", "pulumi", *clusterName)
+			_ = os.MkdirAll(localDir, 0755)
+			backendURL = "file://" + localDir
+			fmt.Fprintln(os.Stderr, "📦 Backend: local (file) [fallback automático]")
+			fmt.Fprintln(os.Stderr, "    ", backendURL)
+
+		case strings.HasPrefix(current, "http://") || strings.HasPrefix(current, "https://"):
+			// Pulumi Cloud via CLI; só use se houver token salvo
+			if hasToken {
+				// Não setamos PULUMI_BACKEND_URL; a Automation API reutiliza o login do CLI
+				fmt.Fprintln(os.Stderr, "☁️  Backend: Pulumi Cloud (via 'pulumi login')")
+			} else {
+				// Sem token armazenado → evitar erro não-interativo, usa local
+				home, _ := os.UserHomeDir()
+				localDir := filepath.Join(home, ".chatcli", "pulumi", *clusterName)
+				_ = os.MkdirAll(localDir, 0755)
+				backendURL = "file://" + localDir
+				fmt.Fprintln(os.Stderr, "⚠️  Sem token do Pulumi Cloud disponível; usando backend local (file) para evitar falhas não interativas")
+				fmt.Fprintln(os.Stderr, "    ", backendURL)
+			}
+
+		default:
+			// Outros backends já logados via CLI (s3://, file://, azblob://, etc)
+			backendURL = current
+			fmt.Fprintln(os.Stderr, "📦 Backend (via 'pulumi login'):", backendURL)
+		}
 	}
 
 	if *withNginx && !*withExternalDNS {
@@ -210,7 +289,6 @@ func handleCreate(args []string) {
 	}
 
 	// ==================== DICA DE EXPOSIÇÃO ARGO ====================
-
 	if *withArgo && *argocdDomain != "" && *baseDomain == "" {
 		fmt.Fprintln(os.Stderr, "💡 DICA: ArgoCD será exposto em:", *argocdDomain)
 		fmt.Fprintln(os.Stderr, "   Se quiser TLS automático via Cert-Manager, adicione:")
@@ -219,8 +297,6 @@ func handleCreate(args []string) {
 	}
 
 	// ==================== VALIDAÇÕES DE CERT-MANAGER ====================
-
-	// Email obrigatório
 	if *withCertManager && *certManagerEmail == "" {
 		fmt.Fprintln(os.Stderr, "❌ ERRO: --cert-manager-email é obrigatório quando usar --with-cert-manager")
 		fmt.Fprintln(os.Stderr, "")
@@ -238,7 +314,6 @@ func handleCreate(args []string) {
 		os.Exit(1)
 	}
 
-	// Base domain obrigatório
 	if *withCertManager && *baseDomain == "" {
 		fmt.Fprintln(os.Stderr, "❌ ERRO: --base-domain é obrigatório quando usar --with-cert-manager")
 		fmt.Fprintln(os.Stderr, "")
@@ -261,15 +336,12 @@ func handleCreate(args []string) {
 		"letsencrypt": true,
 		"google":      true,
 	}
-
 	if !validProviders[*acmeProvider] {
 		fmt.Fprintf(os.Stderr, "❌ ERRO: --acme-provider inválido: '%s'\n", *acmeProvider)
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "   Valores aceitos:")
 		fmt.Fprintln(os.Stderr, "   • letsencrypt  → Let's Encrypt (padrão)")
-		fmt.Fprintln(os.Stderr, "                     Rate limit: 50 certs/domínio/semana")
 		fmt.Fprintln(os.Stderr, "   • google       → Google Trust Services")
-		fmt.Fprintln(os.Stderr, "                     Rate limit: Mais generoso (recomendado para CI/CD)")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "   Exemplo:")
 		fmt.Fprintln(os.Stderr, "   @eks create --with-cert-manager --acme-provider=google ...")
@@ -281,7 +353,6 @@ func handleCreate(args []string) {
 		"production": true,
 		"staging":    true,
 	}
-
 	if !validEnvironments[*acmeServer] {
 		fmt.Fprintf(os.Stderr, "❌ ERRO: --acme-server inválido: '%s'\n", *acmeServer)
 		fmt.Fprintln(os.Stderr, "")
@@ -294,7 +365,6 @@ func handleCreate(args []string) {
 	}
 
 	// ==================== VALIDAÇÕES DE EXTERNAL DNS ====================
-
 	if *withExternalDNS && *baseDomain == "" {
 		fmt.Fprintln(os.Stderr, "❌ ERRO: --base-domain é obrigatório quando usar --with-external-dns")
 		fmt.Fprintln(os.Stderr, "")
@@ -310,8 +380,6 @@ func handleCreate(args []string) {
 	}
 
 	// ==================== AVISOS E DICAS ====================
-
-	// Aviso sobre staging
 	if *withCertManager && *acmeServer == "staging" {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "⚠️  AVISO: Usando ambiente STAGING")
@@ -321,7 +389,6 @@ func handleCreate(args []string) {
 		fmt.Fprintln(os.Stderr, "")
 	}
 
-	// Dica sobre External DNS com Nginx
 	if *withNginx && !*withExternalDNS {
 		fmt.Fprintln(os.Stderr, "💡 DICA: Nginx Ingress detectado sem External DNS")
 		fmt.Fprintln(os.Stderr, "   Considere adicionar --with-external-dns para automação de DNS no Route53")
@@ -329,12 +396,10 @@ func handleCreate(args []string) {
 	}
 
 	// ==================== VALIDAÇÕES DE SECRETS PROVIDER ====================
-
 	validSecretsProviders := map[string]bool{
 		"passphrase": true,
 		"awskms":     true,
 	}
-
 	if !validSecretsProviders[*secretsProvider] {
 		fmt.Fprintf(os.Stderr, "❌ ERRO: --secrets-provider inválido: '%s'\n", *secretsProvider)
 		fmt.Fprintln(os.Stderr, "")
@@ -355,18 +420,14 @@ func handleCreate(args []string) {
 	}
 
 	validKMSActions := map[string]bool{
-		"reuse":  true, // Reutiliza chave existente (padrão)
-		"fail":   true, // Falha se chave já existe
-		"rotate": true, // Cria nova chave com sufixo timestamp
+		"reuse":  true,
+		"fail":   true,
+		"rotate": true,
 	}
-
 	if !validKMSActions[*kmsAction] {
 		fmt.Fprintf(os.Stderr, "❌ ERRO: --kms-action inválido: '%s'\n", *kmsAction)
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "   Valores aceitos:")
-		fmt.Fprintln(os.Stderr, "   • reuse   → Reutiliza chave existente (padrão, seguro)")
-		fmt.Fprintln(os.Stderr, "   • fail    → Falha se chave já existe (segurança máxima)")
-		fmt.Fprintln(os.Stderr, "   • rotate  → Cria nova chave com timestamp (alias/key-YYYYMMDD)")
+		fmt.Fprintln(os.Stderr, "   Valores aceitos: reuse | fail | rotate")
 		os.Exit(1)
 	}
 
@@ -388,7 +449,6 @@ func handleCreate(args []string) {
 			keyDescription,
 			aws_bootstrap.KMSAction(*kmsAction),
 		)
-
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Erro ao criar chave KMS: %v\n", err)
 			os.Exit(1)
@@ -396,7 +456,6 @@ func handleCreate(args []string) {
 
 		finalAlias := fmt.Sprintf("alias/%s", keyAlias)
 		if *kmsAction == "rotate" {
-			// Buscar alias real criado (com timestamp)
 			info, err := awsClients.GetKMSKeyInfo(context.Background(), keyID)
 			if err == nil && info.Alias != "" {
 				finalAlias = info.Alias
@@ -404,7 +463,6 @@ func handleCreate(args []string) {
 		}
 
 		*kmsKeyID = finalAlias
-
 		os.Setenv("PULUMI_CONFIG_PASSPHRASE", finalAlias)
 
 		fmt.Fprintf(os.Stderr, "   ✅ Chave KMS configurada:\n")
@@ -418,29 +476,18 @@ func handleCreate(args []string) {
 	}
 
 	if *secretsProvider == "passphrase" {
-		// Tenta pegar da flag, senão da env var
 		finalPassphrase := *configPassphrase
 		if finalPassphrase == "" {
 			finalPassphrase = os.Getenv("PULUMI_CONFIG_PASSPHRASE")
 		}
-
 		if finalPassphrase == "" {
 			fmt.Fprintln(os.Stderr, "❌ ERRO: Passphrase não definida")
 			fmt.Fprintln(os.Stderr, "")
 			fmt.Fprintln(os.Stderr, "   Quando usar --secrets-provider=passphrase, defina a senha via:")
-			fmt.Fprintln(os.Stderr, "   1. Flag (recomendado para CI/CD):")
-			fmt.Fprintln(os.Stderr, "      --config-passphrase='sua-senha-segura'")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "   2. Variável de ambiente:")
-			fmt.Fprintln(os.Stderr, "      export PULUMI_CONFIG_PASSPHRASE='sua-senha-segura'")
-			fmt.Fprintln(os.Stderr, "      @eks create ...")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "   💡 DICA: Para produção, considere usar --secrets-provider=awskms")
-			fmt.Fprintln(os.Stderr, "            (não precisa de passphrase, gerenciado pela AWS)")
+			fmt.Fprintln(os.Stderr, "   --config-passphrase='sua-senha-segura'")
+			fmt.Fprintln(os.Stderr, "   ou export PULUMI_CONFIG_PASSPHRASE='sua-senha-segura'")
 			os.Exit(1)
 		}
-
-		// Define env var para o Pulumi usar
 		os.Setenv("PULUMI_CONFIG_PASSPHRASE", finalPassphrase)
 	}
 
@@ -452,15 +499,8 @@ func handleCreate(args []string) {
 	}
 
 	if *withCertManager {
-		providerNames := map[string]string{
-			"letsencrypt": "Let's Encrypt",
-			"google":      "Google Trust Services",
-		}
-
-		envNames := map[string]string{
-			"production": "Production",
-			"staging":    "Staging",
-		}
+		providerNames := map[string]string{"letsencrypt": "Let's Encrypt", "google": "Google Trust Services"}
+		envNames := map[string]string{"production": "Production", "staging": "Staging"}
 
 		fmt.Fprintln(os.Stderr, "🔐 CONFIGURAÇÃO DE CERTIFICADOS TLS:")
 		fmt.Fprintf(os.Stderr, "   Provider:       %s\n", providerNames[*acmeProvider])
@@ -546,7 +586,6 @@ func handleDelete(args []string) {
 			fmt.Fprintln(os.Stderr, "❌ ERRO: Você precisa informar --kms-key-id no delete")
 			os.Exit(1)
 		}
-
 		os.Setenv("PULUMI_CONFIG_PASSPHRASE", *kmsKeyID)
 	}
 
@@ -571,7 +610,36 @@ func handleDelete(args []string) {
 
 	var backendURL string
 	if *stateBucketName != "" {
-		backendURL = fmt.Sprintf("s3://%s", *stateBucketName)
+		// Se S3 foi usado na criação, monte a URL com lock Dynamo
+		backendURL = fmt.Sprintf("s3://%s?region=%s", *stateBucketName, *awsRegion)
+		fmt.Fprintln(os.Stderr, "🧹 Usando backend S3:", backendURL)
+	} else {
+		// Tente usar o backend do 'pulumi login'; se não houver, caia para local
+		current, hasToken := getCurrentPulumiBackend()
+		switch {
+		case current == "":
+			home, _ := os.UserHomeDir()
+			localDir := filepath.Join(home, ".chatcli", "pulumi", *clusterName)
+			_ = os.MkdirAll(localDir, 0755)
+			backendURL = "file://" + localDir
+			fmt.Fprintln(os.Stderr, "🧹 Backend local (file) [fallback]:", backendURL)
+
+		case strings.HasPrefix(current, "http://") || strings.HasPrefix(current, "https://"):
+			if hasToken {
+				// Deixe vazio para reutilizar o login do CLI
+				fmt.Fprintln(os.Stderr, "🧹 Backend: Pulumi Cloud (via 'pulumi login')")
+			} else {
+				home, _ := os.UserHomeDir()
+				localDir := filepath.Join(home, ".chatcli", "pulumi", *clusterName)
+				_ = os.MkdirAll(localDir, 0755)
+				backendURL = "file://" + localDir
+				fmt.Fprintln(os.Stderr, "⚠️  Sem token do Pulumi Cloud; usando backend local (file):", backendURL)
+			}
+
+		default:
+			backendURL = current
+			fmt.Fprintln(os.Stderr, "🧹 Backend (via 'pulumi login'):", backendURL)
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "🗑️  Iniciando destruição da stack: %s\n", *clusterName)
@@ -597,7 +665,6 @@ func handleCleanup(args []string) {
 	cleanupCmd := flag.NewFlagSet("cleanup", flag.ExitOnError)
 
 	stateBucketName := cleanupCmd.String("state-bucket-name", "", "Bucket S3 a deletar")
-	lockTableName := cleanupCmd.String("lock-table-name", "", "Tabela DynamoDB a deletar")
 	kmsKeyAlias := cleanupCmd.String("kms-key-alias", "", "Alias da chave KMS a deletar")
 	clusterName := cleanupCmd.String("cluster-name", "", "Nome do cluster (para inferir recursos)")
 	awsRegion := cleanupCmd.String("region", "us-east-1", "Região AWS")
@@ -613,15 +680,12 @@ func handleCleanup(args []string) {
 		if *stateBucketName == "" {
 			*stateBucketName = *clusterName + "-state"
 		}
-		if *lockTableName == "" {
-			*lockTableName = *stateBucketName + "-lock-table"
-		}
 		if *kmsKeyAlias == "" {
 			*kmsKeyAlias = "pulumi-secrets-" + *clusterName
 		}
 	}
 
-	if *stateBucketName == "" && *lockTableName == "" && *kmsKeyAlias == "" {
+	if *stateBucketName == "" && *kmsKeyAlias == "" {
 		fmt.Fprintln(os.Stderr, "❌ Erro: Especifique pelo menos um recurso para deletar")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Uso:")
@@ -638,7 +702,6 @@ func handleCleanup(args []string) {
 
 	opts := aws_bootstrap.CleanupOptions{
 		BucketName:       *stateBucketName,
-		LockTableName:    *lockTableName,
 		KMSKeyAlias:      *kmsKeyAlias,
 		DryRun:           *dryRun,
 		ForceEmptyBucket: *forceEmpty,
@@ -662,9 +725,6 @@ func handleCleanup(args []string) {
 		fmt.Fprintln(os.Stderr, "   Esta operação é IRREVERSÍVEL e deletará:")
 		if *stateBucketName != "" {
 			fmt.Fprintf(os.Stderr, "   - Bucket S3: %s\n", *stateBucketName)
-		}
-		if *lockTableName != "" {
-			fmt.Fprintf(os.Stderr, "   - Tabela DynamoDB: %s\n", *lockTableName)
 		}
 		if *kmsKeyAlias != "" {
 			fmt.Fprintf(os.Stderr, "   - Chave KMS: %s\n", *kmsKeyAlias)
@@ -690,9 +750,6 @@ func handleCleanup(args []string) {
 	if *stateBucketName != "" {
 		fmt.Fprintf(os.Stderr, "   - Bucket S3: %s\n", *stateBucketName)
 	}
-	if *lockTableName != "" {
-		fmt.Fprintf(os.Stderr, "   - Tabela DynamoDB: %s\n", *lockTableName)
-	}
 	if *kmsKeyAlias != "" {
 		fmt.Fprintf(os.Stderr, "   - Chave KMS: %s\n", *kmsKeyAlias)
 	}
@@ -710,9 +767,6 @@ func handleCleanup(args []string) {
 
 	if result.BucketDeleted {
 		fmt.Fprintf(os.Stderr, "✅ Bucket S3 deletado: %s (%d objetos removidos)\n", *stateBucketName, result.BucketObjectsDeleted)
-	}
-	if result.LockTableDeleted {
-		fmt.Fprintf(os.Stderr, "✅ Tabela DynamoDB deletada: %s\n", *lockTableName)
 	}
 	if result.KMSKeyScheduled {
 		fmt.Fprintf(os.Stderr, "⏳ Chave KMS agendada para deleção: %s (efetivo em 7 dias)\n", *kmsKeyAlias)
@@ -763,7 +817,6 @@ func printSchema() {
 
 					// ===== BACKEND DE ESTADO =====
 					{Name: "--state-bucket-name", Type: "string", Description: "Bucket S3 para estado do Pulumi."},
-					{Name: "--lock-table-name", Type: "string", Description: "Tabela DynamoDB para lock de estado."},
 
 					// ===== SECRETS ENCRYPTION =====
 					{Name: "--secrets-provider", Type: "string", Default: "awskms", Description: "Provider de criptografia para pulumi var PULUMI_CONFIG_PASSPHRASE: 'passphrase' (local), 'awskms' (AWS recomendado), Não pode ser alterado posteriormente."},
@@ -863,7 +916,6 @@ func printSchema() {
 				Flags: []FlagDefinition{
 					{Name: "--cluster-name", Type: "string", Description: "Nome do cluster (infere automaticamente nomes dos recursos)"},
 					{Name: "--state-bucket-name", Type: "string", Description: "Bucket S3 a deletar"},
-					{Name: "--lock-table-name", Type: "string", Description: "Tabela DynamoDB a deletar"},
 					{Name: "--kms-key-alias", Type: "string", Description: "Alias da chave KMS a deletar"},
 					{Name: "--region", Type: "string", Default: "us-east-1", Description: "Região AWS"},
 					{Name: "--preview", Type: "bool", Default: "false", Description: "Mostra o que será deletado sem executar (não requer confirmação)"},

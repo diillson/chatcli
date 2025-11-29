@@ -7,16 +7,13 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	dynamodbTypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type AWSBackendClients struct {
-	S3Client       *s3.Client
-	DynamoDBClient *dynamodb.Client
-	Config         aws.Config
+	S3Client *s3.Client
+	Config   aws.Config
 }
 
 func NewAWSClients(ctx context.Context, region string) (*AWSBackendClients, error) {
@@ -25,9 +22,8 @@ func NewAWSClients(ctx context.Context, region string) (*AWSBackendClients, erro
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 	return &AWSBackendClients{
-		S3Client:       s3.NewFromConfig(cfg),
-		DynamoDBClient: dynamodb.NewFromConfig(cfg),
-		Config:         cfg,
+		S3Client: s3.NewFromConfig(cfg),
+		Config:   cfg,
 	}, nil
 }
 
@@ -68,31 +64,5 @@ func (c *AWSBackendClients) EnsureS3Backend(ctx context.Context, bucketName, reg
 		},
 	})
 	fmt.Fprintf(os.Stderr, "   -> ✅ Bucket criado.\n")
-	return nil
-}
-
-func (c *AWSBackendClients) EnsureDynamoDBLockTable(ctx context.Context, tableName string) error {
-	fmt.Fprintf(os.Stderr, "🔐 Verificando tabela de lock: %s\n", tableName)
-	_, err := c.DynamoDBClient.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: aws.String(tableName)})
-	if err == nil {
-		fmt.Fprintf(os.Stderr, "   -> Tabela existe.\n")
-		return nil
-	}
-
-	fmt.Fprintf(os.Stderr, "   -> Criando tabela...\n")
-	_, err = c.DynamoDBClient.CreateTable(ctx, &dynamodb.CreateTableInput{
-		TableName: aws.String(tableName),
-		AttributeDefinitions: []dynamodbTypes.AttributeDefinition{
-			{AttributeName: aws.String("LockID"), AttributeType: dynamodbTypes.ScalarAttributeTypeS},
-		},
-		KeySchema: []dynamodbTypes.KeySchemaElement{
-			{AttributeName: aws.String("LockID"), KeyType: dynamodbTypes.KeyTypeHash},
-		},
-		BillingMode: dynamodbTypes.BillingModePayPerRequest,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create dynamodb table %s: %w", tableName, err)
-	}
-	fmt.Fprintf(os.Stderr, "   -> ✅ Tabela criada.\n")
 	return nil
 }

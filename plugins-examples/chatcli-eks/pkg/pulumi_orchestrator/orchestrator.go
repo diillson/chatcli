@@ -25,6 +25,10 @@ func getStackForCreate(ctx context.Context, backendURL string, cfg *config.EKSCo
 	if backendURL != "" {
 		envVars["PULUMI_BACKEND_URL"] = backendURL
 	}
+	// Permite usar Pulumi Cloud sem login manual (apenas com token no ambiente)
+	if token := os.Getenv("PULUMI_ACCESS_TOKEN"); token != "" {
+		envVars["PULUMI_ACCESS_TOKEN"] = token
+	}
 
 	secretsProviderURL := buildSecretsProviderURL(cfg)
 	if secretsProviderURL == "" && cfg.SecretsProvider == "awskms" {
@@ -132,6 +136,10 @@ func getStackForDelete(ctx context.Context, backendURL, stackName, secretsProvid
 
 	if backendURL != "" {
 		envVars["PULUMI_BACKEND_URL"] = backendURL
+	}
+	// Permite usar Pulumi Cloud sem login manual (apenas com token no ambiente)
+	if token := os.Getenv("PULUMI_ACCESS_TOKEN"); token != "" {
+		envVars["PULUMI_ACCESS_TOKEN"] = token
 	}
 
 	secretsProviderURL := buildSecretsProviderURLFromParams(secretsProvider, kmsKeyID, awsRegion)

@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -50,18 +49,7 @@ func (c *AWSBackendClients) FullCleanup(ctx context.Context, opts CleanupOptions
 		}
 	}
 
-	// 2. Deletar Tabela DynamoDB
-	if opts.LockTableName != "" {
-		fmt.Fprintf(os.Stderr, "🔐 Processando Tabela DynamoDB: %s\n", opts.LockTableName)
-
-		if err := c.cleanupDynamoDBTable(ctx, opts.LockTableName, opts.DryRun); err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("dynamodb: %w", err))
-		} else {
-			result.LockTableDeleted = true
-		}
-	}
-
-	// 3. Deletar Chave KMS
+	// 2. Deletar Chave KMS
 	if opts.KMSKeyAlias != "" {
 		fmt.Fprintf(os.Stderr, "🔑 Processando Chave KMS: %s\n", opts.KMSKeyAlias)
 
@@ -223,32 +211,6 @@ func (c *AWSBackendClients) emptyBucketVersions(ctx context.Context, bucketName 
 	return nil
 }
 
-// cleanupDynamoDBTable deleta tabela de lock
-func (c *AWSBackendClients) cleanupDynamoDBTable(ctx context.Context, tableName string, dryRun bool) error {
-	// Verificar se tabela existe
-	_, err := c.DynamoDBClient.DescribeTable(ctx, &dynamodb.DescribeTableInput{
-		TableName: aws.String(tableName),
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "   ⚠️  Tabela não encontrada (pode já ter sido deletada)\n")
-		return nil
-	}
-
-	if !dryRun {
-		_, err = c.DynamoDBClient.DeleteTable(ctx, &dynamodb.DeleteTableInput{
-			TableName: aws.String(tableName),
-		})
-		if err != nil {
-			return fmt.Errorf("falha ao deletar tabela: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "   ✅ Tabela deletada\n")
-	} else {
-		fmt.Fprintf(os.Stderr, "   [DRY-RUN] Tabela seria deletada\n")
-	}
-
-	return nil
-}
-
 // cleanupKMSKey agenda deleção da chave KMS (mínimo 7 dias AWS)
 func (c *AWSBackendClients) cleanupKMSKey(ctx context.Context, keyAlias string, dryRun bool) error {
 	kmsClient := kms.NewFromConfig(c.Config)
@@ -330,18 +292,6 @@ func (c *AWSBackendClients) GetCleanupEstimate(ctx context.Context, opts Cleanup
 		estimate += fmt.Sprintf("   - Objetos: %d\n", objectCount)
 		estimate += fmt.Sprintf("   - Versões: %d\n", versionCount)
 		estimate += fmt.Sprintf("   - Total a deletar: %d itens\n\n", objectCount+versionCount)
-	}
-
-	// DynamoDB
-	if opts.LockTableName != "" {
-		tableInfo, err := c.DynamoDBClient.DescribeTable(ctx, &dynamodb.DescribeTableInput{
-			TableName: aws.String(opts.LockTableName),
-		})
-		if err == nil {
-			estimate += fmt.Sprintf("🔐 Tabela DynamoDB: %s\n", opts.LockTableName)
-			estimate += fmt.Sprintf("   - Status: %s\n", tableInfo.Table.TableStatus)
-			estimate += fmt.Sprintf("   - Itens: %d (aprox.)\n\n", *tableInfo.Table.ItemCount)
-		}
 	}
 
 	// KMS
