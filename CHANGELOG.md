@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.39.2](https://github.com/diillson/chatcli/compare/v1.39.1...v1.39.2) (2025-11-29)
+
+
+### Bug Fixes
+
+* **chatcli-eks:** remove DynamoDB lock implementation and add Pulumi Cloud token support for non-interactive sessions ([#391](https://github.com/diillson/chatcli/issues/391)) ([#392](https://github.com/diillson/chatcli/issues/392)) ([cdc5c29](https://github.com/diillson/chatcli/commit/cdc5c29b00dc57822264c3971987063e5b234f84))
+
 ## [1.39.1](https://github.com/diillson/chatcli/compare/v1.39.0...v1.39.1) (2025-11-28)
 
 
