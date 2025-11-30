@@ -16,11 +16,13 @@ type EKSConfig struct {
 
 	ExtraIngressRules []string
 
-	WithLBController bool
-	WithNginx        bool
-	WithArgoCD       bool
-	WithIstio        bool
-	WithCertManager  bool
+	WithLBController       bool
+	WithNginx              bool
+	WithArgoCD             bool
+	WithIstio              bool
+	WithIstioObservability bool
+	WithIstioTracing       bool
+	WithCertManager        bool
 
 	ArgocdDomain     string
 	CertManagerEmail string

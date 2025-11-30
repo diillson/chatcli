@@ -208,6 +208,8 @@ func handleCreate(args []string) {
 	withNginx := createCmd.Bool("with-nginx", false, "Instalar Nginx Ingress Controller.")
 	withArgo := createCmd.Bool("with-argocd", false, "Instalar ArgoCD.")
 	withIstio := createCmd.Bool("with-istio", false, "Instalar Istio Service Mesh.")
+	withIstioObservability := createCmd.Bool("with-istio-observability", false, "Instalar pilha de observabilidade do Istio (Kiali, Prometheus, Grafana). Requer --with-istio.")
+	withIstioTracing := createCmd.Bool("with-istio-tracing", false, "Instalar Jaeger para tracing distribuído com Istio. Requer --with-istio-observability.")
 
 	withCertManager := createCmd.Bool("with-cert-manager", false, "Instalar Cert-Manager.")
 	argocdDomain := createCmd.String("argocd-domain", "", "Domínio para ArgoCD (ex: argocd.example.com).")
@@ -379,6 +381,21 @@ func handleCreate(args []string) {
 		os.Exit(1)
 	}
 
+	// ==================== VALIDAÇÕES Stack Observability Istiod ====================
+	if *withIstioObservability && *withIstio == false || *withIstioObservability == true && *withIstioTracing == true && *withIstio == false {
+		fmt.Fprintln(os.Stderr, "❌ ERRO: --with-istio é obrigatório quando usar --with-istio-observability e --with-istio-tracing")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "   Por que é necessário?")
+		fmt.Fprintln(os.Stderr, "   - A stacks de observebilidade Istio exigem o uso do Istio.:")
+		fmt.Fprintln(os.Stderr, "     • Kiali depende do Istio para visualização de malha de serviços")
+		fmt.Fprintln(os.Stderr, "     • Prometheus coleta métricas específicas do Istio")
+		fmt.Fprintln(os.Stderr, "     • Grafana usa dashboards pré-configurados para Istio")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "   Exemplo:")
+		fmt.Fprintln(os.Stderr, "   @eks create --with-istio --with-istio-observability=true ...")
+		os.Exit(1)
+	}
+
 	// ==================== AVISOS E DICAS ====================
 	if *withCertManager && *acmeServer == "staging" {
 		fmt.Fprintln(os.Stderr, "")
@@ -531,33 +548,35 @@ func handleCreate(args []string) {
 	}
 
 	cfg := &config.EKSConfig{
-		ClusterName:       *clusterName,
-		AWSRegion:         *awsRegion,
-		Version:           *k8sVersion,
-		NodeType:          *nodeType,
-		MinNodes:          *minNodes,
-		MaxNodes:          *maxNodes,
-		UseSpot:           *useSpot,
-		VpcID:             *vpcID,
-		PrivateSubnetIDs:  splitFn(*privSubnets),
-		PublicSubnetIDs:   splitFn(*pubSubnets),
-		ExtraIngressRules: splitFn(*extraRules),
-		WithLBController:  *withLB,
-		WithNginx:         *withNginx,
-		WithArgoCD:        *withArgo,
-		WithIstio:         *withIstio,
-		WithCertManager:   *withCertManager,
-		ArgocdDomain:      *argocdDomain,
-		CertManagerEmail:  *certManagerEmail,
-		AcmeServer:        *acmeServer,
-		ACMEProvider:      *acmeProvider,
-		ACMEConfig:        acmeConfig,
-		BaseDomain:        *baseDomain,
-		WithExternalDNS:   *withExternalDNS,
-		RefreshState:      *refreshState,
-		SecretsProvider:   *secretsProvider,
-		KMSKeyID:          *kmsKeyID,
-		ConfigPassphrase:  *configPassphrase,
+		ClusterName:            *clusterName,
+		AWSRegion:              *awsRegion,
+		Version:                *k8sVersion,
+		NodeType:               *nodeType,
+		MinNodes:               *minNodes,
+		MaxNodes:               *maxNodes,
+		UseSpot:                *useSpot,
+		VpcID:                  *vpcID,
+		PrivateSubnetIDs:       splitFn(*privSubnets),
+		PublicSubnetIDs:        splitFn(*pubSubnets),
+		ExtraIngressRules:      splitFn(*extraRules),
+		WithLBController:       *withLB,
+		WithNginx:              *withNginx,
+		WithArgoCD:             *withArgo,
+		WithIstio:              *withIstio,
+		WithIstioObservability: *withIstioObservability,
+		WithIstioTracing:       *withIstioTracing,
+		WithCertManager:        *withCertManager,
+		ArgocdDomain:           *argocdDomain,
+		CertManagerEmail:       *certManagerEmail,
+		AcmeServer:             *acmeServer,
+		ACMEProvider:           *acmeProvider,
+		ACMEConfig:             acmeConfig,
+		BaseDomain:             *baseDomain,
+		WithExternalDNS:        *withExternalDNS,
+		RefreshState:           *refreshState,
+		SecretsProvider:        *secretsProvider,
+		KMSKeyID:               *kmsKeyID,
+		ConfigPassphrase:       *configPassphrase,
 	}
 
 	if err := pulumi_orchestrator.CreateOrUpdateEKS(context.Background(), backendURL, cfg); err != nil {
@@ -791,7 +810,7 @@ func printMetadata() {
 		Name:        "@eks",
 		Description: "Platform Engineering CLI: Cria clusters EKS completos com VPC, Spot Instances, ArgoCD, Istio e Nginx e gestão avançada de KMS",
 		Usage:       "@eks <create|delete|kms-info> [options]",
-		Version:     "3.2.0",
+		Version:     "3.4.3",
 	}
 	_ = json.NewEncoder(os.Stdout).Encode(meta)
 }
@@ -874,7 +893,10 @@ func printSchema() {
 
 					// ===== SERVICE MESH =====
 					{Name: "--with-istio", Type: "bool", Default: "false", Description: "Instalar Istio Service Mesh."},
+					{Name: "--with-istio-observability", Type: "bool", Default: "false", Description: "Instalar pilha de observabilidade do Istio (Kiali, Prometheus, Grafana). Requer --with-istio."},
+					{Name: "--with-istio-tracing", Type: "bool", Default: "false", Description: "Instalar Jaeger para tracing distribuído com Istio. Requer --with-istio-observability."},
 
+					// ===== OUTROS =====
 					{Name: "--refresh", Type: "bool", Default: "true", Description: "Valida estado real dos recursos antes de aplicar mudanças (recomendado). Use --refresh=false para pular validação."},
 				},
 			},
