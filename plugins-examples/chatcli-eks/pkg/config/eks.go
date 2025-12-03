@@ -45,8 +45,16 @@ const (
 )
 
 type ACMEConfig struct {
-	Provider    ACMEProvider
-	Environment string // "production" ou "staging"
+	Provider               ACMEProvider
+	Environment            string
+	ExternalAccountBinding *ACMEExternalAccountBinding
+}
+
+type ACMEExternalAccountBinding struct {
+	KeyID        string
+	HMACKey      string
+	KeyAlgorithm string // "HS256" (padrão), "HS384", "HS512"
+	SecretName   string // nome do Secret no ns cert-manager
 }
 
 func (a *ACMEConfig) GetServerURL() string {
