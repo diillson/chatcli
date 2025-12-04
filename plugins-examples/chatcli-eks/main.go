@@ -35,7 +35,7 @@ type SubcommandDefinition struct {
 	Name        string           `json:"name"`
 	Description string           `json:"description"`
 	Flags       []FlagDefinition `json:"flags"`
-	Examples    []string
+	Examples    []string         `json:"examples"`
 }
 
 type ExtendedMetadata struct {
@@ -208,11 +208,17 @@ func handleCreate(args []string) {
 	withNginx := createCmd.Bool("with-nginx", false, "Instalar Nginx Ingress Controller.")
 	withArgo := createCmd.Bool("with-argocd", false, "Instalar ArgoCD.")
 	withIstio := createCmd.Bool("with-istio", false, "Instalar Istio Service Mesh.")
+	withIstioObservability := createCmd.Bool("with-istio-observability", false, "Instalar pilha de observabilidade do Istio (Kiali, Prometheus, Grafana). Requer --with-istio.")
+	withIstioTracing := createCmd.Bool("with-istio-tracing", false, "Instalar Jaeger para tracing distribuído com Istio. Requer --with-istio-observability.")
 
 	withCertManager := createCmd.Bool("with-cert-manager", false, "Instalar Cert-Manager.")
 	argocdDomain := createCmd.String("argocd-domain", "", "Domínio para ArgoCD (ex: argocd.example.com).")
 	certManagerEmail := createCmd.String("cert-manager-email", "", "Email para Let's Encrypt (obrigatório se usar cert-manager).")
 	acmeServer := createCmd.String("acme-server", "production", "Servidor ACME: 'production' ou 'staging' (aplica-se ao provedor escolhido).")
+	acmeEabKid := createCmd.String("acme-eab-kid", "", "EAB KeyID (obrigatório para --acme-provider=google)")
+	acmeEabHmac := createCmd.String("acme-eab-hmac", "", "EAB HMAC key (obrigatório para --acme-provider=google)")
+	acmeEabAlg := createCmd.String("acme-eab-key-alg", "HS256", "Algoritmo do EAB: HS256|HS384|HS512")
+	acmeEabSecretName := createCmd.String("acme-eab-secret-name", "acme-eab-secret", "Nome do Secret para armazenar o HMAC")
 
 	baseDomain := createCmd.String("base-domain", "", "Domínio base para certificado wildcard.")
 	withExternalDNS := createCmd.Bool("with-external-dns", false, "Instalar External DNS (automação Route53).")
@@ -284,6 +290,13 @@ func handleCreate(args []string) {
 		}
 	}
 
+	if *acmeEabKid == "" {
+		*acmeEabKid = strings.TrimSpace(os.Getenv("ACME_EAB_KID"))
+	}
+	if *acmeEabHmac == "" {
+		*acmeEabHmac = strings.TrimSpace(os.Getenv("ACME_EAB_HMAC"))
+	}
+
 	if *withNginx && !*withExternalDNS {
 		fmt.Fprintln(os.Stderr, "💡 DICA: Use --with-external-dns para automação de DNS no Route53")
 	}
@@ -348,6 +361,14 @@ func handleCreate(args []string) {
 		os.Exit(1)
 	}
 
+	if *withCertManager && *acmeProvider == "google" {
+		if *acmeEabKid == "" || *acmeEabHmac == "" {
+			fmt.Fprintln(os.Stderr, "❌ ERRO: Google Trust Services exige EAB: --acme-eab-kid e --acme-eab-hmac")
+			fmt.Fprintln(os.Stderr, "   Dica: export ACME_EAB_KID=... && export ACME_EAB_HMAC=...")
+			os.Exit(1)
+		}
+	}
+
 	// Validação de Environment
 	validEnvironments := map[string]bool{
 		"production": true,
@@ -376,6 +397,21 @@ func handleCreate(args []string) {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "   Exemplo:")
 		fmt.Fprintln(os.Stderr, "   @eks create --with-external-dns --base-domain=example.com ...")
+		os.Exit(1)
+	}
+
+	// ==================== VALIDAÇÕES Stack Observability Istiod ====================
+	if *withIstioObservability && *withIstio == false || *withIstioObservability == true && *withIstioTracing == true && *withIstio == false {
+		fmt.Fprintln(os.Stderr, "❌ ERRO: --with-istio é obrigatório quando usar --with-istio-observability e --with-istio-tracing")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "   Por que é necessário?")
+		fmt.Fprintln(os.Stderr, "   - A stacks de observebilidade Istio exigem o uso do Istio.:")
+		fmt.Fprintln(os.Stderr, "     • Kiali depende do Istio para visualização de malha de serviços")
+		fmt.Fprintln(os.Stderr, "     • Prometheus coleta métricas específicas do Istio")
+		fmt.Fprintln(os.Stderr, "     • Grafana usa dashboards pré-configurados para Istio")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "   Exemplo:")
+		fmt.Fprintln(os.Stderr, "   @eks create --with-istio --with-istio-observability=true ...")
 		os.Exit(1)
 	}
 
@@ -529,35 +565,45 @@ func handleCreate(args []string) {
 		Provider:    config.ACMEProvider(*acmeProvider),
 		Environment: *acmeServer,
 	}
+	if *acmeProvider == "google" {
+		acmeConfig.ExternalAccountBinding = &config.ACMEExternalAccountBinding{
+			KeyID:        *acmeEabKid,
+			HMACKey:      *acmeEabHmac,
+			KeyAlgorithm: *acmeEabAlg,
+			SecretName:   *acmeEabSecretName,
+		}
+	}
 
 	cfg := &config.EKSConfig{
-		ClusterName:       *clusterName,
-		AWSRegion:         *awsRegion,
-		Version:           *k8sVersion,
-		NodeType:          *nodeType,
-		MinNodes:          *minNodes,
-		MaxNodes:          *maxNodes,
-		UseSpot:           *useSpot,
-		VpcID:             *vpcID,
-		PrivateSubnetIDs:  splitFn(*privSubnets),
-		PublicSubnetIDs:   splitFn(*pubSubnets),
-		ExtraIngressRules: splitFn(*extraRules),
-		WithLBController:  *withLB,
-		WithNginx:         *withNginx,
-		WithArgoCD:        *withArgo,
-		WithIstio:         *withIstio,
-		WithCertManager:   *withCertManager,
-		ArgocdDomain:      *argocdDomain,
-		CertManagerEmail:  *certManagerEmail,
-		AcmeServer:        *acmeServer,
-		ACMEProvider:      *acmeProvider,
-		ACMEConfig:        acmeConfig,
-		BaseDomain:        *baseDomain,
-		WithExternalDNS:   *withExternalDNS,
-		RefreshState:      *refreshState,
-		SecretsProvider:   *secretsProvider,
-		KMSKeyID:          *kmsKeyID,
-		ConfigPassphrase:  *configPassphrase,
+		ClusterName:            *clusterName,
+		AWSRegion:              *awsRegion,
+		Version:                *k8sVersion,
+		NodeType:               *nodeType,
+		MinNodes:               *minNodes,
+		MaxNodes:               *maxNodes,
+		UseSpot:                *useSpot,
+		VpcID:                  *vpcID,
+		PrivateSubnetIDs:       splitFn(*privSubnets),
+		PublicSubnetIDs:        splitFn(*pubSubnets),
+		ExtraIngressRules:      splitFn(*extraRules),
+		WithLBController:       *withLB,
+		WithNginx:              *withNginx,
+		WithArgoCD:             *withArgo,
+		WithIstio:              *withIstio,
+		WithIstioObservability: *withIstioObservability,
+		WithIstioTracing:       *withIstioTracing,
+		WithCertManager:        *withCertManager,
+		ArgocdDomain:           *argocdDomain,
+		CertManagerEmail:       *certManagerEmail,
+		AcmeServer:             *acmeServer,
+		ACMEProvider:           *acmeProvider,
+		ACMEConfig:             acmeConfig,
+		BaseDomain:             *baseDomain,
+		WithExternalDNS:        *withExternalDNS,
+		RefreshState:           *refreshState,
+		SecretsProvider:        *secretsProvider,
+		KMSKeyID:               *kmsKeyID,
+		ConfigPassphrase:       *configPassphrase,
 	}
 
 	if err := pulumi_orchestrator.CreateOrUpdateEKS(context.Background(), backendURL, cfg); err != nil {
@@ -791,7 +837,7 @@ func printMetadata() {
 		Name:        "@eks",
 		Description: "Platform Engineering CLI: Cria clusters EKS completos com VPC, Spot Instances, ArgoCD, Istio e Nginx e gestão avançada de KMS",
 		Usage:       "@eks <create|delete|kms-info> [options]",
-		Version:     "3.2.0",
+		Version:     "3.6.3",
 	}
 	_ = json.NewEncoder(os.Stdout).Encode(meta)
 }
@@ -808,6 +854,10 @@ func printSchema() {
 					"# Google Trust Services Production\n@eks create --with-cert-manager --base-domain=example.com --cert-manager-email=admin@example.com --acme-provider=google",
 
 					"# Testes com Staging (qualquer provider)\n@eks create --with-cert-manager --base-domain=example.com --cert-manager-email=admin@example.com --acme-provider=google --acme-server=staging",
+
+					"# Google Trust (Production) com EAB via flags\n@eks create --with-cert-manager --base-domain=example.com --cert-manager-email=admin@example.com --acme-provider=google --acme-eab-kid=SEU_KID --acme-eab-hmac=SEU_HMAC",
+
+					"# Google Trust (Production) com EAB via env\nexport ACME_EAB_KID=SEU_KID\nexport ACME_EAB_HMAC=SEU_HMAC\n@eks create --with-cert-manager --base-domain=example.com --cert-manager-email=admin@example.com --acme-provider=google",
 				},
 				Flags: []FlagDefinition{
 					// ===== CLUSTER =====
@@ -856,6 +906,38 @@ func printSchema() {
 						Description: "Provedor ACME para certificados TLS: 'letsencrypt' (Let's Encrypt) ou 'google' (Google Trust Services). Google tem rate limits mais generosos.",
 					},
 					{
+						Name:        "--acme-eab-kid",
+						Type:        "string",
+						Description: "EAB KeyID (obrigatório para --acme-provider=google). Pode vir de env ACME_EAB_KID.",
+						RequiredWhen: []string{
+							"--with-cert-manager",
+							"--acme-provider=google",
+						},
+						ValidationError: "Google Trust Services exige EAB: informe --acme-eab-kid (ou ACME_EAB_KID).",
+					},
+					{
+						Name:        "--acme-eab-hmac",
+						Type:        "string",
+						Description: "EAB HMAC key (obrigatório para --acme-provider=google). Pode vir de env ACME_EAB_HMAC.",
+						RequiredWhen: []string{
+							"--with-cert-manager",
+							"--acme-provider=google",
+						},
+						ValidationError: "Google Trust Services exige EAB: informe --acme-eab-hmac (ou ACME_EAB_HMAC).",
+					},
+					{
+						Name:        "--acme-eab-key-alg",
+						Type:        "string",
+						Default:     "HS256",
+						Description: "Algoritmo EAB: HS256|HS384|HS512 (padrão: HS256).",
+					},
+					{
+						Name:        "--acme-eab-secret-name",
+						Type:        "string",
+						Default:     "acme-eab-secret",
+						Description: "Nome do Secret no namespace cert-manager para armazenar o HMAC.",
+					},
+					{
 						Name:        "--base-domain",
 						Type:        "string",
 						Default:     "",
@@ -874,7 +956,10 @@ func printSchema() {
 
 					// ===== SERVICE MESH =====
 					{Name: "--with-istio", Type: "bool", Default: "false", Description: "Instalar Istio Service Mesh."},
+					{Name: "--with-istio-observability", Type: "bool", Default: "false", Description: "Instalar pilha de observabilidade do Istio (Kiali, Prometheus, Grafana). Requer --with-istio."},
+					{Name: "--with-istio-tracing", Type: "bool", Default: "false", Description: "Instalar Jaeger para tracing distribuído com Istio. Requer --with-istio-observability."},
 
+					// ===== OUTROS =====
 					{Name: "--refresh", Type: "bool", Default: "true", Description: "Valida estado real dos recursos antes de aplicar mudanças (recomendado). Use --refresh=false para pular validação."},
 				},
 			},

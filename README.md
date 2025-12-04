@@ -169,11 +169,11 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  XAI_API_KEY ,  XAI_MODEL ,  XAI_MAX_TOKENS
   -  CLIENT_ID ,  CLIENT_KEY ,  STACKSPOT_REALM ,  STACKSPOT_AGENT_ID  (para StackSpot)
 - Agente:
-  -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Opcional)** Timeout padrão para cada comando executado no Modo Agente. Aceita durações Go (ex.: 30s, 2m, 10m). Padrão:  10m .
+  -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Opcional)** Timeout padrão para cada comando executado da lista de ação no Modo Agente. Aceita durações Go (ex.: 30s, 2m, 10m). Padrão:  10m .
   -  `CHATCLI_AGENT_DENYLIST`  – **(Opcional)** Lista de expressões regulares (separadas por “;”) para bloquear comandos perigosos além do padrão. Ex.: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
   -  `CHATCLI_AGENT_ALLOW_SUDO`  – **(Opcional)** Permite comandos com sudo sem bloqueio automático (true/false). Padrão:  false  (bloqueia sudo por segurança).
   -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Opcional)** Define o máximo de turnos que o agente pode ter. Padrão: 7.
-  -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Opcional)** Define o tempo limite de execução para o plugin do agente. Padrão: 15 (Minutos)
+  -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Opcional)** Define o tempo limite de execução para o plugin do agente (ex.: 30s, 2m, 10m). Padrão: 15 (Minutos)
 
 > ⚠️ **Importante:** Plugins que realizam operações demoradas (ex.: deploy de infraestrutura, builds complexos) podem precisar de timeouts maiores.
 
@@ -196,7 +196,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     CHATCLI_AGENT_DENYLIST=rm\\s+-rf\\s+.*;curl\\s+[^|;]*\\|\\s*(sh|bash);dd\\s+if=;mkfs\\w*\\s+
     CHATCLI_AGENT_ALLOW_SUDO=false
     CHATCLI_AGENT_PLUGIN_MAX_TURNS=10
-    CHATCLI_AGENT_PLUGIN_TIMEOUT=20
+    CHATCLI_AGENT_PLUGIN_TIMEOUT=20m
     
     # Configurações do OpenAI
     OPENAI_API_KEY=sua-chave-openai
