@@ -1254,14 +1254,62 @@ spec:
 						Repo: pulumi.String("https://istio-release.storage.googleapis.com/charts"),
 					},
 					Values: pulumi.Map{
+						"name": pulumi.String("ingressgateway"),
+						"labels": pulumi.Map{
+							"istio": pulumi.String("ingressgateway"),
+						},
 						"service": pulumi.Map{
 							"type": pulumi.String("LoadBalancer"),
 							"annotations": pulumi.Map{
-								// ✅ Forçar ALB em vez de NLB
-								"service.beta.kubernetes.io/aws-load-balancer-type":            pulumi.String("external"),
-								"service.beta.kubernetes.io/aws-load-balancer-scheme":          pulumi.String("internet-facing"),
-								"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": pulumi.String("ip"),
+								"service.beta.kubernetes.io/aws-load-balancer-type":                              pulumi.String("external"),
+								"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type":                   pulumi.String("ip"),
+								"service.beta.kubernetes.io/aws-load-balancer-scheme":                            pulumi.String("internet-facing"),
+								"service.beta.kubernetes.io/aws-load-balancer-backend-protocol":                  pulumi.String("tcp"),
+								"service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled": pulumi.String("true"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol":              pulumi.String("HTTP"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-port":                  pulumi.String("15021"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-path":                  pulumi.String("/healthz/ready"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval":              pulumi.String("10"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout":               pulumi.String("5"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-healthy-threshold":     pulumi.String("2"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-unhealthy-threshold":   pulumi.String("2"),
 							},
+							"ports": pulumi.Array{
+								pulumi.Map{
+									"name":       pulumi.String("status-port"),
+									"port":       pulumi.Int(15021),
+									"protocol":   pulumi.String("TCP"),
+									"targetPort": pulumi.Int(15021),
+								},
+								pulumi.Map{
+									"name":       pulumi.String("http2"),
+									"port":       pulumi.Int(80),
+									"protocol":   pulumi.String("TCP"),
+									"targetPort": pulumi.Int(8080),
+								},
+								pulumi.Map{
+									"name":       pulumi.String("https"),
+									"port":       pulumi.Int(443),
+									"protocol":   pulumi.String("TCP"),
+									"targetPort": pulumi.Int(8443),
+								},
+							},
+						},
+						"resources": pulumi.Map{
+							"requests": pulumi.Map{
+								"cpu":    pulumi.String("100m"),
+								"memory": pulumi.String("128Mi"),
+							},
+							"limits": pulumi.Map{
+								"cpu":    pulumi.String("2000m"),
+								"memory": pulumi.String("1024Mi"),
+							},
+						},
+						"autoscaling": pulumi.Map{
+							"enabled":                        pulumi.Bool(true),
+							"minReplicas":                    pulumi.Int(2),
+							"maxReplicas":                    pulumi.Int(5),
+							"targetCPUUtilizationPercentage": pulumi.Int(80),
 						},
 					},
 				}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{istiodRelease}))
@@ -1474,6 +1522,13 @@ metadata:
 							"enabled": pulumi.Bool(false),
 						},
 					},
+					"configs": pulumi.Map{
+						"params": pulumi.Map{
+							"server.insecure":        pulumi.String("true"),
+							"server.x-frame-options": pulumi.String("sameorigin"),
+							"server.proxy-headers":   pulumi.String("X-Forwarded-Proto,X-Forwarded-Host"),
+						},
+					},
 				}
 
 				if cfg.WithIstio {
@@ -1535,16 +1590,18 @@ spec:
   servers:
   - port:
       number: 443
-      name: https-argocd
+      name: https
       protocol: HTTPS
     tls:
       mode: SIMPLE
       credentialName: wildcard-tls
+      minProtocolVersion: TLSV1_2
+      maxProtocolVersion: TLSV1_3
     hosts:
     - "%s"
   - port:
       number: 80
-      name: http-redirect
+      name: http
       protocol: HTTP
     hosts:
     - "%s"
@@ -1590,19 +1647,46 @@ spec:
 					}
 
 					argoPeerAuthYaml := `
+# PeerAuthentication para o ArgoCD Server (PERMISSIVE)
+# Permite que ele receba tanto tráfego mTLS quanto não-mTLS.
 apiVersion: security.istio.io/v1beta1
 kind: PeerAuthentication
 metadata:
-  name: argocd-mtls
+  name: argocd-server-mtls
   namespace: argocd
 spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-server
   mtls:
     mode: PERMISSIVE
-  portLevelMtls:
-    6379: # Redis port
-      mode: DISABLE
-    8080: # ArgoCD Server HTTP
-      mode: PERMISSIVE
+---
+# PeerAuthentication para o Repo Server (PERMISSIVE)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: argocd-repo-server-mtls
+  namespace: argocd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-repo-server
+  mtls:
+    mode: PERMISSIVE
+---
+# PeerAuthentication para o Redis (DISABLE)
+# O Redis não fala mTLS, então desabilitamos completamente.
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: argocd-redis-mtls
+  namespace: argocd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-redis
+  mtls:
+    mode: DISABLE
 `
 					_, err = yamlz.NewConfigGroup(ctx, "argocd-peer-auth", &yamlz.ConfigGroupArgs{
 						YAML: []string{argoPeerAuthYaml},
@@ -1618,8 +1702,10 @@ metadata:
   name: argocd-server
   namespace: argocd
 spec:
-  host: argocd-server
+  host: argocd-server.argocd.svc.cluster.local
   trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
     loadBalancer:
       simple: ROUND_ROBIN
     connectionPool:
@@ -1628,8 +1714,28 @@ spec:
       http:
         http1MaxPendingRequests: 50
         http2MaxRequests: 100
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: argocd-redis
+  namespace: argocd
+spec:
+  host: argocd-redis.argocd.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE
+    loadBalancer:
+      simple: LEAST_CONN
+    connectionPool:
+      tcp:
+        maxConnections: 50
 `
-					_, err = yamlz.NewConfigGroup(ctx, "argocd-destination-rule", &yamlz.ConfigGroupArgs{
+					_, err = yamlz.NewConfigGroup(ctx, "argocd-istio-security", &yamlz.ConfigGroupArgs{
 						YAML: []string{argoDestinationRuleYaml},
 					}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{argoRelease, istiodRelease}))
 					if err != nil {

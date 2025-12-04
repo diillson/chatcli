@@ -837,7 +837,7 @@ func printMetadata() {
 		Name:        "@eks",
 		Description: "Platform Engineering CLI: Cria clusters EKS completos com VPC, Spot Instances, ArgoCD, Istio e Nginx e gestão avançada de KMS",
 		Usage:       "@eks <create|delete|kms-info> [options]",
-		Version:     "3.6.0",
+		Version:     "3.6.3",
 	}
 	_ = json.NewEncoder(os.Stdout).Encode(meta)
 }
