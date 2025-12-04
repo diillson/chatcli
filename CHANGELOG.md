@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.39.3](https://github.com/diillson/chatcli/compare/v1.39.2...v1.39.3) (2025-12-04)
+
+
+### Bug Fixes
+
+* **chatcli-eks:** enhance Istio configuration and update plugin version ([#394](https://github.com/diillson/chatcli/issues/394)) ([#395](https://github.com/diillson/chatcli/issues/395)) ([54b4f23](https://github.com/diillson/chatcli/commit/54b4f231f49f8d8cbc6adbbcc35c82ba215dc68f))
+
 ## [1.39.2](https://github.com/diillson/chatcli/compare/v1.39.1...v1.39.2) (2025-11-29)
 
 
