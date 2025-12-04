@@ -16,11 +16,13 @@ type EKSConfig struct {
 
 	ExtraIngressRules []string
 
-	WithLBController bool
-	WithNginx        bool
-	WithArgoCD       bool
-	WithIstio        bool
-	WithCertManager  bool
+	WithLBController       bool
+	WithNginx              bool
+	WithArgoCD             bool
+	WithIstio              bool
+	WithIstioObservability bool
+	WithIstioTracing       bool
+	WithCertManager        bool
 
 	ArgocdDomain     string
 	CertManagerEmail string
@@ -43,8 +45,16 @@ const (
 )
 
 type ACMEConfig struct {
-	Provider    ACMEProvider
-	Environment string // "production" ou "staging"
+	Provider               ACMEProvider
+	Environment            string
+	ExternalAccountBinding *ACMEExternalAccountBinding
+}
+
+type ACMEExternalAccountBinding struct {
+	KeyID        string
+	HMACKey      string
+	KeyAlgorithm string // "HS256" (padrão), "HS384", "HS512"
+	SecretName   string // nome do Secret no ns cert-manager
 }
 
 func (a *ACMEConfig) GetServerURL() string {

@@ -166,11 +166,11 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  OLLAMA_ENABLED ,  OLLAMA_BASE_URL ,  OLLAMA_MODEL ,  OLLAMA_MAX_TOKENS ,  OLLAMA_FILTER_THINKING  – (Optional) Filters "thinking aloud" from models like Qwen3 (true/false, default: true)
   -  CLIENT_ID ,  CLIENT_KEY ,  STACKSPOT_REALM ,  STACKSPOT_AGENT_ID  (for StackSpot)
 - Agent:
-  -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Optional)** Default timeout for each command executed by the Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default:  10m .
+  -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Optional)** Default timeout for each command executed from the action list by Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default:  10m .
   -  `CHATCLI_AGENT_DENYLIST`  – **(Optional)** Semicolon-separated list of regular expressions to block extra dangerous commands. Example: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
   -  `CHATCLI_AGENT_ALLOW_SUDO`  – **(Optional)** Allow sudo commands without automatic blocking (true/false). Default:  false  (sudo is blocked for safety).
   -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Optional)** Defines the maximum number of turns the agent can have. Default: 7.
-  -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Optional)** Defines the execution timeout for the agent plugin. Default: 15 (Minutes)
+  -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Optional)** Defines the execution timeout for the agent plugin (e.g., 30s, 2m, 10m). Default: 15 (Minutes)
 
 ### Example  .env
 
@@ -191,7 +191,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     CHATCLI_AGENT_DENYLIST=rm\\s+-rf\\s+.*;curl\\s+[^|;]*\\|\\s*(sh|bash);dd\\s+if=;mkfs\\w*\\s+
     CHATCLI_AGENT_ALLOW_SUDO=false
     CHATCLI_AGENT_PLUGIN_MAX_TURNS=10
-    CHATCLI_AGENT_PLUGIN_TIMEOUT=20
+    CHATCLI_AGENT_PLUGIN_TIMEOUT=20m
     
     # OpenAI Settings
     OPENAI_API_KEY=your-openai-key

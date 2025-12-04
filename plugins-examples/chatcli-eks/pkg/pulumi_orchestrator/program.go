@@ -987,12 +987,42 @@ func DefineEKSInfrastructure(cfg *config.EKSConfig) pulumi.RunFunc {
 				return err
 			}
 
-			acmeServerURL := cfg.ACMEConfig.GetServerURL()
-			if acmeServerURL == "" {
-				return fmt.Errorf("INTERNAL ERROR: URL do servidor ACME está vazio")
+			var eabSecretRes pulumi.Resource
+			if cfg.ACMEConfig != nil &&
+				cfg.ACMEConfig.Provider == config.ACMEProviderGoogle &&
+				cfg.ACMEConfig.ExternalAccountBinding != nil {
+				eab := cfg.ACMEConfig.ExternalAccountBinding
+				eabSecretYaml := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: %s
+  namespace: cert-manager
+type: Opaque
+stringData:
+  hmac: %s
+`, eab.SecretName, eab.HMACKey)
+				eabSecretRes, err = yamlz.NewConfigGroup(ctx, "acme-eab-secret", &yamlz.ConfigGroupArgs{
+					YAML: []string{eabSecretYaml},
+				}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{certManagerRelease}))
+				if err != nil {
+					return err
+				}
 			}
 
 			issuerName := cfg.ACMEConfig.GetIssuerName()
+			acmeServerURL := cfg.ACMEConfig.GetServerURL()
+
+			eabBlock := ""
+			if cfg.ACMEConfig.ExternalAccountBinding != nil {
+				eab := cfg.ACMEConfig.ExternalAccountBinding
+				eabBlock = fmt.Sprintf(`    externalAccountBinding:
+      keyID: %s
+      keyAlgorithm: %s
+      keySecretRef:
+        name: %s
+        key: hmac
+`, eab.KeyID, eab.KeyAlgorithm, eab.SecretName)
+			}
 
 			clusterIssuerYaml := fmt.Sprintf(`apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -1007,7 +1037,7 @@ spec:
     email: %s
     privateKeySecretRef:
       name: %s-prod-key
-    solvers:
+%s    solvers:
       - selector:
           dnsZones:
             - "%s"
@@ -1015,23 +1045,25 @@ spec:
           route53:
             region: %s
 `,
-				issuerName,                 // Nome: letsencrypt-prod ou google-trust-prod
-				cfg.ACMEProvider,           // Label para rastreamento
-				cfg.ACMEConfig.Environment, // Label ambiente
-				acmeServerURL,              // URL dinâmica
+				issuerName,
+				cfg.ACMEProvider,
+				cfg.ACMEConfig.Environment,
+				acmeServerURL,
 				cfg.CertManagerEmail,
-				issuerName, // Secret key name
+				issuerName,
+				eabBlock,
 				cfg.BaseDomain,
 				cfg.AWSRegion,
 			)
 
-			issuerResource, err := yamlz.NewConfigGroup(ctx,
-				fmt.Sprintf("%s-cluster-issuer", issuerName),
-				&yamlz.ConfigGroupArgs{
-					YAML: []string{clusterIssuerYaml},
-				},
+			issuerDeps := []pulumi.Resource{certManagerRelease}
+			if eabSecretRes != nil {
+				issuerDeps = append(issuerDeps, eabSecretRes)
+			}
+			issuerResource, err := yamlz.NewConfigGroup(ctx, fmt.Sprintf("%s-cluster-issuer", issuerName),
+				&yamlz.ConfigGroupArgs{YAML: []string{clusterIssuerYaml}},
 				pulumi.Provider(k8sProvider),
-				pulumi.DependsOn([]pulumi.Resource{certManagerRelease}),
+				pulumi.DependsOn(issuerDeps),
 			)
 			if err != nil {
 				return err
@@ -1164,54 +1196,294 @@ spec:
 				}
 			}
 
+			var istiodRelease *helm_v3.Release
+			var istioIngressGateway *helm_v3.Release
+			if cfg.WithIstio {
+				const istioVersion = "1.27.3"
+				istioBase, err := helm_v3.NewRelease(ctx, "istio-base", &helm_v3.ReleaseArgs{
+					Chart:     pulumi.String("base"),
+					Version:   pulumi.String(istioVersion),
+					Namespace: pulumi.String("istio-system"),
+					RepositoryOpts: &helm_v3.RepositoryOptsArgs{
+						Repo: pulumi.String("https://istio-release.storage.googleapis.com/charts"),
+					},
+					Timeout:         pulumi.Int(600),
+					SkipAwait:       pulumi.Bool(true),
+					CreateNamespace: pulumi.Bool(true),
+				}, pulumi.Provider(k8sProvider))
+				if err != nil {
+					return err
+				}
+
+				istiodValues := pulumi.Map{}
+				if cfg.WithIstioTracing {
+					fmt.Println("Configurando istiod para enviar dados de tracing para Jaeger...")
+					istiodValues["meshConfig"] = pulumi.Map{
+						"defaultConfig": pulumi.Map{
+							"tracing": pulumi.Map{
+								"sampling": pulumi.Float64(10), // Em produção, usar um valor menor (ex: 1.0)
+								"zipkin": pulumi.Map{
+									"address": pulumi.String("jaeger-collector.istio-system.svc.cluster.local:9411"),
+								},
+							},
+						},
+					}
+				}
+
+				istiodRelease, err = helm_v3.NewRelease(ctx, "istiod", &helm_v3.ReleaseArgs{
+					Chart:     pulumi.String("istiod"),
+					Version:   pulumi.String(istioVersion),
+					Namespace: pulumi.String("istio-system"),
+					RepositoryOpts: &helm_v3.RepositoryOptsArgs{
+						Repo: pulumi.String("https://istio-release.storage.googleapis.com/charts"),
+					},
+					Values:          istiodValues,
+					Timeout:         pulumi.Int(600),
+					CreateNamespace: pulumi.Bool(false),
+				}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{istioBase}))
+				if err != nil {
+					return err
+				}
+
+				fmt.Println("Instalando o Istio Ingress Gateway...")
+				istioIngressGateway, err = helm_v3.NewRelease(ctx, "istio-ingressgateway", &helm_v3.ReleaseArgs{
+					Chart:     pulumi.String("gateway"),
+					Version:   pulumi.String(istioVersion),
+					Namespace: pulumi.String("istio-system"),
+					RepositoryOpts: &helm_v3.RepositoryOptsArgs{
+						Repo: pulumi.String("https://istio-release.storage.googleapis.com/charts"),
+					},
+					Values: pulumi.Map{
+						"name": pulumi.String("ingressgateway"),
+						"labels": pulumi.Map{
+							"istio": pulumi.String("ingressgateway"),
+						},
+						"service": pulumi.Map{
+							"type": pulumi.String("LoadBalancer"),
+							"annotations": pulumi.Map{
+								"service.beta.kubernetes.io/aws-load-balancer-type":                              pulumi.String("external"),
+								"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type":                   pulumi.String("ip"),
+								"service.beta.kubernetes.io/aws-load-balancer-scheme":                            pulumi.String("internet-facing"),
+								"service.beta.kubernetes.io/aws-load-balancer-backend-protocol":                  pulumi.String("tcp"),
+								"service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled": pulumi.String("true"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol":              pulumi.String("HTTP"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-port":                  pulumi.String("15021"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-path":                  pulumi.String("/healthz/ready"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval":              pulumi.String("10"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout":               pulumi.String("5"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-healthy-threshold":     pulumi.String("2"),
+								"service.beta.kubernetes.io/aws-load-balancer-healthcheck-unhealthy-threshold":   pulumi.String("2"),
+							},
+							"ports": pulumi.Array{
+								pulumi.Map{
+									"name":       pulumi.String("status-port"),
+									"port":       pulumi.Int(15021),
+									"protocol":   pulumi.String("TCP"),
+									"targetPort": pulumi.Int(15021),
+								},
+								pulumi.Map{
+									"name":       pulumi.String("http2"),
+									"port":       pulumi.Int(80),
+									"protocol":   pulumi.String("TCP"),
+									"targetPort": pulumi.Int(8080),
+								},
+								pulumi.Map{
+									"name":       pulumi.String("https"),
+									"port":       pulumi.Int(443),
+									"protocol":   pulumi.String("TCP"),
+									"targetPort": pulumi.Int(8443),
+								},
+							},
+						},
+						"resources": pulumi.Map{
+							"requests": pulumi.Map{
+								"cpu":    pulumi.String("100m"),
+								"memory": pulumi.String("128Mi"),
+							},
+							"limits": pulumi.Map{
+								"cpu":    pulumi.String("2000m"),
+								"memory": pulumi.String("1024Mi"),
+							},
+						},
+						"autoscaling": pulumi.Map{
+							"enabled":                        pulumi.Bool(true),
+							"minReplicas":                    pulumi.Int(2),
+							"maxReplicas":                    pulumi.Int(5),
+							"targetCPUUtilizationPercentage": pulumi.Int(80),
+						},
+					},
+				}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{istiodRelease}))
+
+				if err != nil {
+					return err
+				}
+			}
+
+			if cfg.WithIstioObservability {
+				{
+					fmt.Println("Instalando a pilha de observabilidade do Istio (Prometheus, Grafana, Kiali)...")
+
+					// Prometheus
+					prometheusCrds, err := yamlz.NewConfigFile(ctx, "prometheus-crds", &yamlz.ConfigFileArgs{
+						File: "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/main/example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml",
+					}, pulumi.Provider(k8sProvider))
+
+					//instalar o prometheus
+					prometheusRelease, err := helm_v3.NewRelease(ctx, "prometheus", &helm_v3.ReleaseArgs{
+						Chart:           pulumi.String("kube-prometheus-stack"),
+						Version:         pulumi.String("57.0.1"),
+						Namespace:       pulumi.String("monitoring"),
+						CreateNamespace: pulumi.Bool(true),
+						RepositoryOpts: &helm_v3.RepositoryOptsArgs{
+							Repo: pulumi.String("https://prometheus-community.github.io/helm-charts"),
+						},
+						Values: pulumi.Map{
+							"prometheus": pulumi.Map{
+								"prometheusSpec": pulumi.Map{
+									"scrapeInterval": pulumi.String("15s"),
+								},
+							},
+						},
+					}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{prometheusCrds}))
+					if err != nil {
+						return err
+					}
+
+					var jaegerRelease *helm_v3.Release
+					// Lógica condicional para Tracing
+					if cfg.WithIstioTracing {
+						fmt.Println("Instalando Jaeger para tracing distribuído...")
+
+						jaegerRelease, err = helm_v3.NewRelease(ctx, "jaeger", &helm_v3.ReleaseArgs{
+							Chart:     pulumi.String("jaeger"),
+							Version:   pulumi.String("3.4.1"),
+							Namespace: pulumi.String("istio-system"),
+							RepositoryOpts: &helm_v3.RepositoryOptsArgs{
+								Repo: pulumi.String("https://jaegertracing.github.io/helm-charts"),
+							},
+							Values: pulumi.Map{
+								"allInOne": pulumi.Map{
+									"enabled": pulumi.Bool(true),
+									"storage": pulumi.Map{
+										"type": pulumi.String("memory"),
+									},
+								},
+							},
+							SkipAwait: pulumi.Bool(true),
+						}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{istiodRelease}))
+						if err != nil {
+							return err
+						}
+					}
+
+					kialiValues := pulumi.Map{
+						"auth": pulumi.Map{
+							"strategy": pulumi.String("anonymous"),
+						},
+						"external_services": pulumi.Map{
+							"prometheus": pulumi.Map{
+								"url": pulumi.String("http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"),
+							},
+							"grafana": pulumi.Map{
+								"url": pulumi.String("http://prometheus-grafana.monitoring.svc.cluster.local:3000"),
+							},
+						},
+					}
+
+					if cfg.WithIstioTracing {
+						kialiExtServices := kialiValues["external_services"].(pulumi.Map)
+						kialiExtServices["tracing"] = pulumi.Map{
+							"enabled":  pulumi.Bool(true),
+							"provider": pulumi.String("jaeger"),
+							"jaeger": pulumi.Map{
+								"url": pulumi.String("http://jaeger-query.istio-system.svc.cluster.local:16686"),
+							},
+						}
+					}
+
+					kialiDeps := []pulumi.Resource{prometheusRelease, istiodRelease}
+					if jaegerRelease != nil {
+						kialiDeps = append(kialiDeps, jaegerRelease)
+					}
+
+					// Kiali
+					_, err = helm_v3.NewRelease(ctx, "kiali", &helm_v3.ReleaseArgs{
+						Chart:     pulumi.String("kiali-server"),
+						Version:   pulumi.String("v1.78.0"),
+						Namespace: pulumi.String("istio-system"),
+						RepositoryOpts: &helm_v3.RepositoryOptsArgs{
+							Repo: pulumi.String("https://kiali.org/helm-charts"),
+						},
+						Values: kialiValues,
+					}, pulumi.Provider(k8sProvider), pulumi.DependsOn(kialiDeps))
+					if err != nil {
+						return err
+					}
+				}
+			}
+
 			// EXTERNAL DNS (se habilitado)
 			if cfg.WithExternalDNS {
 
-				externalDNSDeps := []pulumi.Resource{}
-				if nginxRelease != nil {
-					externalDNSDeps = append(externalDNSDeps, nginxRelease)
-				}
+				// --- LÓGICA CONDICIONAL ---
+				var externalDNSSources pulumi.StringArray
+				var externalDNSDeps []pulumi.Resource
 
-				_, err = helm_v3.NewRelease(ctx, "external-dns", &helm_v3.ReleaseArgs{
-					Chart:     pulumi.String("external-dns"),
-					Version:   pulumi.String("1.14.3"),
-					Namespace: pulumi.String("kube-system"),
-					RepositoryOpts: &helm_v3.RepositoryOptsArgs{
-						Repo: pulumi.String("https://kubernetes-sigs.github.io/external-dns"),
-					},
-					Values: pulumi.Map{
-						"provider": pulumi.String("aws"),
-						"sources": pulumi.StringArray{
-							pulumi.String("ingress"),
-							pulumi.String("service"),
+				// Prioriza Istio se ambos estiverem habilitados, ou ajuste conforme sua preferência
+				if cfg.WithIstio {
+					fmt.Println("Configurando External DNS para observar Gateways do Istio.")
+					externalDNSSources = pulumi.StringArray{
+						pulumi.String("istio-gateway"),
+						pulumi.String("istio-virtualservice"),
+					}
+					if istioIngressGateway != nil {
+						externalDNSDeps = append(externalDNSDeps, istioIngressGateway)
+					}
+					// Garante que o Istio esteja pronto antes do External DNS
+					if istiodRelease != nil {
+						externalDNSDeps = append(externalDNSDeps, istiodRelease)
+					}
+				} else if cfg.WithNginx {
+					fmt.Println("Configurando External DNS para observar Ingresses do Nginx.")
+					externalDNSSources = pulumi.StringArray{
+						pulumi.String("ingress"),
+					}
+					// Garante que o Nginx esteja pronto antes do External DNS
+					if nginxRelease != nil {
+						externalDNSDeps = append(externalDNSDeps, nginxRelease)
+					}
+				}
+				// -------------------------
+
+				if externalDNSSources != nil {
+					_, err = helm_v3.NewRelease(ctx, "external-dns", &helm_v3.ReleaseArgs{
+						Chart:     pulumi.String("external-dns"),
+						Version:   pulumi.String("1.14.3"),
+						Namespace: pulumi.String("kube-system"),
+						RepositoryOpts: &helm_v3.RepositoryOptsArgs{
+							Repo: pulumi.String("https://kubernetes-sigs.github.io/external-dns"),
 						},
-						"domainFilters": pulumi.StringArray{
-							pulumi.String(cfg.BaseDomain),
-						},
-						"policy":     pulumi.String("upsert-only"),
-						"registry":   pulumi.String("txt"),
-						"txtOwnerId": pulumi.String(cfg.ClusterName),
-						"txtPrefix":  pulumi.String("external-dns-"),
-						"serviceAccount": pulumi.Map{
-							"create": pulumi.Bool(true),
-							"name":   pulumi.String("external-dns"),
-							"annotations": pulumi.Map{
-								"eks.amazonaws.com/role-arn": externalDNSRole.Arn,
+						Values: pulumi.Map{
+							"provider":      pulumi.String("aws"),
+							"sources":       externalDNSSources, // ✅ USA A FONTE CONDICIONAL
+							"domainFilters": pulumi.StringArray{pulumi.String(cfg.BaseDomain)},
+							"policy":        pulumi.String("sync"),
+							"registry":      pulumi.String("txt"),
+							"txtOwnerId":    pulumi.String(cfg.ClusterName),
+							"serviceAccount": pulumi.Map{
+								"create": pulumi.Bool(true),
+								"name":   pulumi.String("external-dns"),
+								"annotations": pulumi.Map{
+									"eks.amazonaws.com/role-arn": externalDNSRole.Arn,
+								},
 							},
+							"logLevel": pulumi.String("info"),
 						},
-						"logLevel": pulumi.String("info"),
-						"interval": pulumi.String("1m"),
-						"extraArgs": pulumi.StringArray{
-							pulumi.String("--aws-zone-type=public"),
-							pulumi.String("--aws-prefer-cname"),
-						},
-					},
-					Timeout:         pulumi.Int(300),
-					SkipAwait:       pulumi.Bool(false),
-					CreateNamespace: pulumi.Bool(false),
-				}, pulumi.Provider(k8sProvider), pulumi.DependsOn(externalDNSDeps))
-				if err != nil {
-					return err
+						Timeout: pulumi.Int(300),
+					}, pulumi.Provider(k8sProvider), pulumi.DependsOn(externalDNSDeps)) // ✅ USA A DEPENDÊNCIA CONDICIONAL
+					if err != nil {
+						return err
+					}
 				}
 			}
 
@@ -1221,87 +1493,66 @@ spec:
 					return fmt.Errorf("--argocd-domain é obrigatório quando usar --with-argocd com TLS")
 				}
 
-				// Aguarda secret replicado no namespace argocd
-				argoDeps := []pulumi.Resource{certResource, reflectorRelease}
-				if nginxRelease != nil {
-					argoDeps = append(argoDeps, nginxRelease)
+				if cfg.WithIstio {
+					argoNamespaceYaml := `
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    istio-injection: enabled
+    name: argocd
+`
+					_, err = yamlz.NewConfigGroup(ctx, "argocd-namespace", &yamlz.ConfigGroupArgs{
+						YAML: []string{argoNamespaceYaml},
+					}, pulumi.Provider(k8sProvider))
+					if err != nil {
+						return err
+					}
 				}
 
-				// Configuração ArgoCD production-ready
+				// Dependências base para o ArgoCD
+				argoDeps := []pulumi.Resource{certResource, reflectorRelease}
+
+				// Configuração base do ArgoCD (sem ingress)
+				// Desabilitamos o ingress padrão do chart para controlá-lo manualmente.
 				argoValues := pulumi.Map{
-					"global": pulumi.Map{
-						"domain": pulumi.String(cfg.ArgocdDomain),
+					"server": pulumi.Map{
+						"ingress": pulumi.Map{
+							"enabled": pulumi.Bool(false),
+						},
 					},
 					"configs": pulumi.Map{
 						"params": pulumi.Map{
-							"server.insecure": pulumi.String("true"),
-						},
-					},
-					"certificate": pulumi.Map{
-						"enabled": pulumi.Bool(false),
-					},
-					"server": pulumi.Map{
-						"ingress": pulumi.Map{
-							"enabled":          pulumi.Bool(true),
-							"ingressClassName": pulumi.String("nginx"),
-							"annotations": pulumi.Map{
-								"nginx.ingress.kubernetes.io/backend-protocol":   pulumi.String("HTTP"),
-								"nginx.ingress.kubernetes.io/force-ssl-redirect": pulumi.String("true"),
-								"nginx.ingress.kubernetes.io/ssl-passthrough":    pulumi.String("false"),
-								"nginx.ingress.kubernetes.io/websocket-services": pulumi.String("argocd-server"),
-								"nginx.ingress.kubernetes.io/proxy-read-timeout": pulumi.String("600"),
-								"nginx.ingress.kubernetes.io/proxy-send-timeout": pulumi.String("600"),
-								"external-dns.alpha.kubernetes.io/hostname":      pulumi.String(cfg.ArgocdDomain),
-							},
-							"hosts":    pulumi.Array{pulumi.String(cfg.ArgocdDomain)},
-							"paths":    pulumi.Array{pulumi.String("/")},
-							"pathType": pulumi.String("Prefix"),
-							"extraTls": pulumi.Array{
-								pulumi.Map{
-									"hosts":      pulumi.Array{pulumi.String(cfg.ArgocdDomain)},
-									"secretName": pulumi.String("wildcard-tls"),
-								},
-							},
+							"server.insecure":        pulumi.String("true"),
+							"server.x-frame-options": pulumi.String("sameorigin"),
+							"server.proxy-headers":   pulumi.String("X-Forwarded-Proto,X-Forwarded-Host"),
 						},
 					},
 				}
 
-				// Ingress com TLS configurado corretamente
-				//if cfg.WithNginx {
-				//	ingressAnnotations := pulumi.Map{
-				//		"nginx.ingress.kubernetes.io/backend-protocol":   pulumi.String("HTTP"),
-				//		"nginx.ingress.kubernetes.io/force-ssl-redirect": pulumi.String("true"),
-				//		"nginx.ingress.kubernetes.io/ssl-passthrough":    pulumi.String("false"),
-				//		"nginx.ingress.kubernetes.io/websocket-services": pulumi.String("argocd-server"),
-				//		"nginx.ingress.kubernetes.io/proxy-read-timeout": pulumi.String("600"),
-				//		"nginx.ingress.kubernetes.io/proxy-send-timeout": pulumi.String("600"),
-				//	}
-				//
-				//	if cfg.WithExternalDNS {
-				//		ingressAnnotations["external-dns.alpha.kubernetes.io/hostname"] = pulumi.String(cfg.ArgocdDomain)
-				//	}
-				//
-				//	serverMap := argoValues["server"].(pulumi.Map)
-				//	serverMap["ingress"] = pulumi.Map{
-				//		"enabled":          pulumi.Bool(true),
-				//		"ingressClassName": pulumi.String("nginx"),
-				//		"annotations":      ingressAnnotations,
-				//		"hosts": pulumi.Array{
-				//			pulumi.String(cfg.ArgocdDomain),
-				//		},
-				//		"paths":    pulumi.Array{pulumi.String("/")},
-				//		"pathType": pulumi.String("Prefix"),
-				//		"https":    pulumi.Bool(true), // HTTP interno, TLS no Nginx
-				//		"tls": pulumi.Array{
-				//			pulumi.Map{
-				//				"secretName": pulumi.String("wildcard-tls"),
-				//				"hosts": pulumi.Array{
-				//					pulumi.String(cfg.ArgocdDomain),
-				//				},
-				//			},
-				//		},
-				//	}
-				//}
+				if cfg.WithIstio {
+					argoValues["server"].(pulumi.Map)["service"] = pulumi.Map{
+						"annotations": pulumi.Map{
+							"traffic.sidecar.istio.io/includeInboundPorts": pulumi.String("8080"),
+						},
+					}
+
+					// Configurar pods para trabalhar com Istio
+					argoValues["global"] = pulumi.Map{
+						"podAnnotations": pulumi.Map{
+							"sidecar.istio.io/inject":                       pulumi.String("true"),
+							"traffic.sidecar.istio.io/excludeOutboundPorts": pulumi.String("6379"), // Redis
+						},
+					}
+
+					// Redis precisa de configuração especial
+					argoValues["redis"] = pulumi.Map{
+						"podAnnotations": pulumi.Map{
+							"sidecar.istio.io/inject": pulumi.String("false"),
+						},
+					}
+				}
 
 				// Deploy ArgoCD
 				argoRelease, err := helm_v3.NewRelease(ctx, "argocd", &helm_v3.ReleaseArgs{
@@ -1314,11 +1565,224 @@ spec:
 					},
 					Values:          argoValues,
 					Timeout:         pulumi.Int(900),
-					SkipAwait:       pulumi.Bool(false),
-					CreateNamespace: pulumi.Bool(true),
+					CreateNamespace: pulumi.Bool(!cfg.WithIstio),
 				}, pulumi.Provider(k8sProvider), pulumi.DependsOn(argoDeps))
 				if err != nil {
 					return err
+				}
+
+				if cfg.WithIstio {
+					// Se temos Istio, criamos um Gateway e VirtualService
+					fmt.Println("Expondo ArgoCD via Istio Gateway.")
+
+					argoGatewayYaml := fmt.Sprintf(`
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: argocd-gateway
+  namespace: argocd
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: %s
+    external-dns.alpha.kubernetes.io/ttl: "50"
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: wildcard-tls
+      minProtocolVersion: TLSV1_2
+      maxProtocolVersion: TLSV1_3
+    hosts:
+    - "%s"
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "%s"
+    tls:
+      httpsRedirect: true
+`, cfg.ArgocdDomain, cfg.ArgocdDomain, cfg.ArgocdDomain)
+
+					argoVirtualServiceYaml := fmt.Sprintf(`
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: argocd-vs
+  namespace: argocd
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: %s
+    external-dns.alpha.kubernetes.io/ttl: "50"
+spec:
+  hosts:
+  - "%s"
+  gateways:
+  - argocd-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: argocd-server
+        port:
+          number: 80
+    timeout: 300s
+    retries:
+      attempts: 3
+      perTryTimeout: 30s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+`, cfg.ArgocdDomain, cfg.ArgocdDomain)
+
+					_, err = yamlz.NewConfigGroup(ctx, "argocd-istio-exposure", &yamlz.ConfigGroupArgs{
+						YAML: []string{argoGatewayYaml, argoVirtualServiceYaml},
+					}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{argoRelease, istiodRelease})) // Depende do Argo e do Istio
+					if err != nil {
+						return err
+					}
+
+					argoPeerAuthYaml := `
+# PeerAuthentication para o ArgoCD Server (PERMISSIVE)
+# Permite que ele receba tanto tráfego mTLS quanto não-mTLS.
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: argocd-server-mtls
+  namespace: argocd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-server
+  mtls:
+    mode: PERMISSIVE
+---
+# PeerAuthentication para o Repo Server (PERMISSIVE)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: argocd-repo-server-mtls
+  namespace: argocd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-repo-server
+  mtls:
+    mode: PERMISSIVE
+---
+# PeerAuthentication para o Redis (DISABLE)
+# O Redis não fala mTLS, então desabilitamos completamente.
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: argocd-redis-mtls
+  namespace: argocd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-redis
+  mtls:
+    mode: DISABLE
+`
+					_, err = yamlz.NewConfigGroup(ctx, "argocd-peer-auth", &yamlz.ConfigGroupArgs{
+						YAML: []string{argoPeerAuthYaml},
+					}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{argoRelease, istiodRelease}))
+					if err != nil {
+						return err
+					}
+
+					argoDestinationRuleYaml := `
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: argocd-server
+  namespace: argocd
+spec:
+  host: argocd-server.argocd.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 100
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: argocd-redis
+  namespace: argocd
+spec:
+  host: argocd-redis.argocd.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE
+    loadBalancer:
+      simple: LEAST_CONN
+    connectionPool:
+      tcp:
+        maxConnections: 50
+`
+					_, err = yamlz.NewConfigGroup(ctx, "argocd-istio-security", &yamlz.ConfigGroupArgs{
+						YAML: []string{argoDestinationRuleYaml},
+					}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{argoRelease, istiodRelease}))
+					if err != nil {
+						return err
+					}
+
+				} else if cfg.WithNginx {
+					// Se temos Nginx, criamos um Ingress padrão
+					fmt.Println("Expondo ArgoCD via Nginx Ingress.")
+
+					argoIngressYaml := fmt.Sprintf(`
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-server-ingress
+  namespace: argocd
+  annotations:
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    external-dns.alpha.kubernetes.io/alias: "false"
+    external-dns.alpha.kubernetes.io/ttl: "50"
+    external-dns.alpha.kubernetes.io/hostname: %s
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: %s
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: argocd-server
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - %s
+    secretName: wildcard-tls
+`, cfg.ArgocdDomain, cfg.ArgocdDomain, cfg.ArgocdDomain)
+
+					_, err = yamlz.NewConfigGroup(ctx, "argocd-nginx-exposure", &yamlz.ConfigGroupArgs{
+						YAML: []string{argoIngressYaml},
+					}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{argoRelease, nginxRelease})) // Depende do Argo e do Nginx
+					if err != nil {
+						return err
+					}
 				}
 
 				// Exports do ArgoCD
@@ -1334,38 +1798,6 @@ spec:
 				))
 
 				_ = argoRelease // Evita warning de variável não usada
-			}
-		}
-
-		if cfg.WithIstio {
-			istioBase, err := helm_v3.NewRelease(ctx, "istio-base", &helm_v3.ReleaseArgs{
-				Chart:     pulumi.String("base"),
-				Version:   pulumi.String("1.21.0"),
-				Namespace: pulumi.String("istio-system"),
-				RepositoryOpts: &helm_v3.RepositoryOptsArgs{
-					Repo: pulumi.String("https://istio-release.storage.googleapis.com/charts"),
-				},
-				Timeout:         pulumi.Int(600),
-				SkipAwait:       pulumi.Bool(true),
-				CreateNamespace: pulumi.Bool(true),
-			}, pulumi.Provider(k8sProvider))
-			if err != nil {
-				return err
-			}
-
-			_, err = helm_v3.NewRelease(ctx, "istiod", &helm_v3.ReleaseArgs{
-				Chart:     pulumi.String("istiod"),
-				Version:   pulumi.String("1.21.0"),
-				Namespace: pulumi.String("istio-system"),
-				RepositoryOpts: &helm_v3.RepositoryOptsArgs{
-					Repo: pulumi.String("https://istio-release.storage.googleapis.com/charts"),
-				},
-				Timeout:         pulumi.Int(600),
-				SkipAwait:       pulumi.Bool(true),
-				CreateNamespace: pulumi.Bool(false),
-			}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{istioBase}))
-			if err != nil {
-				return err
 			}
 		}
 
