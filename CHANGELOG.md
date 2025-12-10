@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.40.0](https://github.com/diillson/chatcli/compare/v1.39.3...v1.40.0) (2025-12-10)
+
+
+### Features
+
+* **cli:** introduce coder mode and enhance agent UI ([#397](https://github.com/diillson/chatcli/issues/397)) ([#398](https://github.com/diillson/chatcli/issues/398)) ([19706c1](https://github.com/diillson/chatcli/commit/19706c1fdda11721f326e0bc749a1abfb0f90c0d))
+
 ## [1.39.3](https://github.com/diillson/chatcli/compare/v1.39.2...v1.39.3) (2025-12-04)
 
 
