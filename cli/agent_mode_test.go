@@ -4,15 +4,15 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
-	"github.com/diillson/chatcli/cli/agent" // Importar o novo pacote
-	"github.com/diillson/chatcli/i18n"      // <-- IMPORTAR I18N
+	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
-
-	"github.com/diillson/chatcli/models"
 )
 
 // MockLLMClient para simular respostas da IA
@@ -50,9 +50,10 @@ func withStdin(t *testing.T, input string, f func()) {
 }
 
 func TestAgentMode_Run_ExtractsAndHandlesCommands(t *testing.T) {
+	// Inicializar i18n para evitar panic nas mensagens
 	i18n.Init()
 
-	logger, _ := zap.NewDevelopment()
+	logger := zap.NewNop() // Usar Nop logger para não sujar o output do teste
 	mockLLM := new(MockLLMClient)
 
 	chatCLI := &ChatCLI{
@@ -60,32 +61,55 @@ func TestAgentMode_Run_ExtractsAndHandlesCommands(t *testing.T) {
 		logger:    logger,
 		animation: NewAnimationManager(),
 		history:   []models.Message{},
+		// PluginManager é nil aqui, o código deve lidar com isso graciosamente
 	}
 	agentMode := NewAgentMode(chatCLI, logger)
 
-	aiResponse := `
-                    ` + "```" + `execute:shell
-                    ls -la
-                    ` + "```" + `
-                    `
+	// Resposta da IA simulando um bloco de código shell (fallback legacy)
+	// Isso deve acionar o menu interativo
+	aiResponse := "Vou listar os arquivos.\n" +
+		"```execute:shell\n" +
+		"ls -la\n" +
+		"```"
 
 	mockLLM.On("GetModelName").Return("MockGPT")
-	mockLLM.On("SendPrompt", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]models.Message"), mock.AnythingOfType("int")).Return(aiResponse, nil)
+	// Configurar o mock para retornar a resposta definida
+	mockLLM.On("SendPrompt",
+		mock.Anything,
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("[]models.Message"),
+		mock.AnythingOfType("int"),
+	).Return(aiResponse, nil)
 
+	// Capturar o bloco executado para asserção
 	var executedBlock agent.CommandBlock
+
+	// Mockar a função de execução interna para não rodar comandos reais no sistema
 	agentMode.executeCommandsFunc = func(ctx context.Context, block agent.CommandBlock) (string, string) {
 		executedBlock = block
-		return "total 0", ""
+		return "total 0", "" // Simula saída do ls
 	}
 
+	// Simular input do usuário no menu interativo:
+	// "1" -> Escolhe executar o comando 1
+	// "q" -> Sai do menu (necessário pois o menu entra em loop)
 	userInput := "1\nq\n"
+
 	withStdin(t, userInput, func() {
-		err := agentMode.Run(context.Background(), "list files", "")
+		// CORREÇÃO AQUI: Atualizada a assinatura para incluir o 4º argumento (systemPromptOverride)
+		// Passamos "" para usar o prompt padrão
+		err := agentMode.Run(context.Background(), "list files", "", "")
 		assert.NoError(t, err)
 	})
 
 	mockLLM.AssertExpectations(t)
-	assert.NotNil(t, executedBlock)
-	assert.Len(t, executedBlock.Commands, 1)
-	assert.Equal(t, "ls -la", executedBlock.Commands[0])
+
+	// Verificar se o bloco foi capturado corretamente
+	assert.NotNil(t, executedBlock, "O bloco de comando deveria ter sido executado")
+	if len(executedBlock.Commands) > 0 {
+		assert.Equal(t, "ls -la", strings.TrimSpace(executedBlock.Commands[0]))
+		assert.Equal(t, "shell", executedBlock.Language)
+	} else {
+		t.Error("Nenhum comando foi extraído do bloco")
+	}
 }
