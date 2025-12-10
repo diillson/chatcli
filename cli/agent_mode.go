@@ -90,8 +90,8 @@ func (a *AgentMode) getInput(prompt string) string {
 }
 
 // Run inicia o modo agente com uma consulta do usuário, utilizando um loop de Raciocínio-Ação (ReAct).
-// O histórico de cada passo do agente é persistido no histórico principal do chat.
-func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string) error {
+// Agora aceita systemPromptOverride para definir personas específicas (ex: Coder).
+func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string, systemPromptOverride string) error {
 	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
 	maxTurnsStr := os.Getenv("CHATCLI_AGENT_PLUGIN_MAX_TURNS")
 	maxTurns, err := strconv.Atoi(maxTurnsStr)
@@ -100,14 +100,40 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 	a.logger.Info("Modo Agente iniciado", zap.Int("max_turns_limit", maxTurns))
 
-	osName := runtime.GOOS
-	shellName := utils.GetUserShell()
-	currentDir, _ := os.Getwd()
-	systemInstruction := i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
-	systemInstruction += a.getToolContextString() // Adiciona contexto de ferramentas
+	var systemInstruction string
 
+	// Lógica de Seleção de Persona
+	if systemPromptOverride != "" {
+		systemInstruction = systemPromptOverride
+	} else {
+		// Persona Padrão (Admin de Sistema / Shell)
+		osName := runtime.GOOS
+		shellName := utils.GetUserShell()
+		currentDir, _ := os.Getwd()
+		systemInstruction = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
+	}
+
+	// Adiciona contexto de ferramentas (plugins) ao prompt
+	systemInstruction += a.getToolContextString()
+
+	// Inicializa ou atualiza o histórico com o System Prompt correto
 	if len(a.cli.history) == 0 {
 		a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
+	} else {
+		// Se já existe histórico (ex: uma sessão carregada), forçamos a atualização do system prompt
+		// para garantir que a IA mude de comportamento se trocarmos de /agent para /coder
+		foundSystem := false
+		for i, msg := range a.cli.history {
+			if msg.Role == "system" {
+				a.cli.history[i].Content = systemInstruction
+				foundSystem = true
+				break
+			}
+		}
+		if !foundSystem {
+			// Insere no início se não houver
+			a.cli.history = append([]models.Message{{Role: "system", Content: systemInstruction}}, a.cli.history...)
+		}
 	}
 
 	currentQuery := query
@@ -1202,14 +1228,19 @@ func (a *AgentMode) getToolContextString() string {
 	return "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + strings.Join(toolDescriptions, "\n") + "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
 }
 
-// processAIResponseAndAct é o novo loop de processamento unificado.
+// processAIResponseAndAct executa o loop de raciocínio e ação com UI aprimorada (Timeline).
 func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
+	// Instancia o renderizador de UI
+	renderer := agent.NewUIRenderer(a.logger)
+
 	for turn := 0; turn < maxTurns; turn++ {
 		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
 
-		// Chama a IA
+		// 1. Feedback visual de "Pensando..."
 		a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
+
 		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", a.cli.history, 0)
+
 		a.cli.animation.StopThinkingAnimation()
 
 		if err != nil {
@@ -1217,86 +1248,112 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		}
 
 		a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
-		// A resposta será exibida de forma condicional abaixo
 
-		// --- ANÁLISE DA RESPOSTA ---
+		// --- ANÁLISE DA RESPOSTA E RENDERIZAÇÃO ---
 
-		// 1. Prioridade 1: Verificar chamada de ferramenta
+		// Regex para capturar Tool Call (<tool_call ... />)
 		toolCallRegex := regexp.MustCompile(`(?s)<tool_call name="(@\S+)" (?:args="(.*?)"|args='(.*?)') />`)
 		match := toolCallRegex.FindStringSubmatch(aiResponse)
 
+		// Separar o "Pensamento" da "Ação" para exibir na timeline
+		var thoughtText string
 		if len(match) > 0 {
-			// Exibe o pensamento da IA antes de executar a ferramenta
-			formattedResponse := fmt.Sprintf("\n%s\n", a.cli.renderMarkdown(aiResponse))
-			a.cli.typewriterEffect(formattedResponse, 2*time.Millisecond)
+			// Tudo antes da tag <tool_call> é pensamento
+			splitParts := strings.Split(aiResponse, match[0])
+			thoughtText = strings.TrimSpace(splitParts[0])
+		} else {
+			// Se não tem tool call, verifica se tem blocos de comando antigos
+			// Se não tiver nenhum dos dois, é a resposta final
+			thoughtText = strings.TrimSpace(aiResponse)
+		}
 
+		// 2. Renderizar o Pensamento (Timeline Card)
+		if thoughtText != "" {
+			// Remove tags internas se houver (<reasoning>, <explanation>) para ficar limpo na tela
+			cleanThought := removeXMLTags(thoughtText)
+
+			// Só renderiza se sobrou algum texto útil
+			if strings.TrimSpace(cleanThought) != "" {
+				renderer.RenderThinking(cleanThought)
+			}
+		}
+
+		// 3. Prioridade 1: Executar Ferramenta (Plugin)
+		if len(match) > 0 {
 			toolName := match[1]
 			toolArgsStr := match[2]
 			if match[3] != "" {
 				toolArgsStr = match[3]
 			}
 
+			// Renderizar o Card de Ação
+			renderer.RenderToolCall(toolName, toolArgsStr)
+
+			// Preparação da execução
 			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
 			toolArgs, err := shlex.Split(unescapedToolArgsStr)
+
+			var toolOutput string
+			var execErr error
+
 			if err != nil {
-				a.logger.Warn("Erro ao analisar os argumentos da ferramenta", zap.String("args_str", unescapedToolArgsStr), zap.Error(err))
-				feedbackForAI := i18n.T("agent.error.invalid_tool_args", toolName, err)
-				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
-				continue // Próximo turno do loop
+				execErr = err
+				a.logger.Warn("Erro ao analisar argumentos", zap.Error(err))
+				toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", err)
+			} else {
+				plugin, found := a.cli.pluginManager.GetPlugin(toolName)
+				if !found {
+					execErr = fmt.Errorf("plugin não encontrado")
+					toolOutput = fmt.Sprintf("Ferramenta '%s' não existe ou não está instalada.", toolName)
+				} else {
+					// Executa o plugin
+					toolOutput, execErr = plugin.Execute(ctx, toolArgs)
+				}
 			}
 
-			fmt.Printf("\n%s\n", colorize(i18n.T("agent.status.using_tool", toolName, unescapedToolArgsStr), ColorYellow))
+			// 4. Renderizar o Resultado (Timeline Card)
+			renderer.RenderToolResult(toolOutput, execErr != nil)
 
-			plugin, found := a.cli.pluginManager.GetPlugin(toolName)
-			if !found {
-				feedbackForAI := i18n.T("agent.error.tool_not_found", toolName)
-				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
-				continue // Próximo turno do loop
-			}
-
-			toolOutput, err := plugin.Execute(ctx, toolArgs)
-			if err != nil {
-				toolOutput = fmt.Sprintf("Erro: %v", err)
-			}
-
-			fmt.Printf("\n%s\n%s\n", colorize(i18n.T("agent.feedback.tool_output_header"), ColorGray), toolOutput)
-
+			// Feedback para a IA (Histórico)
+			// Usamos a chave de tradução ajustada que pede resumo final se acabou
 			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, toolOutput)
 			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
-			continue // Continua para o próximo turno do loop para que a IA analise o resultado da ferramenta
+			continue // Próximo turno do loop
 		}
 
-		// 2. Prioridade 2: Verificar blocos de execução
+		// 4. Prioridade 2: Verificar blocos de execução antigos (Fallback / Shell interativo)
+		// Isso mantém compatibilidade se a IA decidir usar ```bash``` em vez de tool_call
 		commandBlocks := a.extractCommandBlocks(aiResponse)
 		if len(commandBlocks) > 0 {
-			// Exibe a parte da resposta que não são os comandos
+			// Exibe a parte da resposta que não são os comandos (se ainda não foi exibida)
+			// Nota: O RenderThinking acima pode ter exibido parte disso, mas o displayResponseWithoutCommands
+			// é específico para o modo interativo antigo.
 			a.displayResponseWithoutCommands(aiResponse, commandBlocks)
-			// Transfere o controle para o manipulador de plano de ação
+
+			// Transfere o controle para o manipulador de plano de ação (modo interativo)
 			a.handleCommandBlocks(ctx, commandBlocks)
-			return nil // Encerra o loop principal, pois handleCommandBlocks agora gerencia o fluxo
+			return nil // Encerra o loop principal, pois handleCommandBlocks gerencia o fluxo
 		}
 
-		// 3. Se não houver ferramenta nem comando, é uma resposta final
-		formattedResponse := fmt.Sprintf("\n%s\n", a.cli.renderMarkdown(aiResponse))
-		a.cli.typewriterEffect(formattedResponse, 2*time.Millisecond)
-		fmt.Println(colorize(i18n.T("agent.status.final_answer_no_commands"), ColorGreen))
-		return nil // Encerra o loop
+		// 5. Se chegou aqui, é uma resposta final (sem tool calls, sem blocos de comando)
+		// O RenderThinking já mostrou o texto como "Raciocínio/Resposta".
+		// Adicionamos apenas um indicador visual de conclusão.
+		fmt.Println(renderer.Colorize("\n🏁 TAREFA CONCLUÍDA", agent.ColorGreen+agent.ColorBold))
+		return nil // Encerra o loop com sucesso
 	}
 
-	// --- 4. TRATAMENTO DE FALHA (LIMITE DE TURNOS ATINGIDO) ---
+	// --- TRATAMENTO DE FALHA (LIMITE DE TURNOS ATINGIDO) ---
+	fmt.Println(renderer.Colorize(fmt.Sprintf("\n⚠️ Limite de %d passos atingido. O agente parou para evitar loop infinito.", maxTurns), agent.ColorYellow))
 
-	// Se o loop terminar, o agente não conseguiu encontrar uma solução.
-	fmt.Println(colorize(i18n.T("agent.error.max_turns_reached_context", maxTurns), ColorYellow))
+	return nil
+}
 
-	// Mostra o último pensamento da IA para ajudar o usuário a entender o que aconteceu.
-	if len(a.cli.history) > 0 {
-		lastThought := a.cli.history[len(a.cli.history)-1].Content
-		fmt.Println(i18n.T("agent.feedback.last_thought"))
-		fmt.Println(a.cli.renderMarkdown(lastThought))
-	}
-
-	return nil // Retorna nil para não exibir um erro técnico, pois a falha foi tratada.
+// removeXMLTags remove tags como <reasoning> e <explanation> para limpar a visualização
+func removeXMLTags(text string) string {
+	// Remove tags de abertura e fechamento, mantendo o conteúdo
+	re := regexp.MustCompile(`</?(reasoning|explanation|thought)>`)
+	return re.ReplaceAllString(text, "")
 }
 
 func (a *AgentMode) continueWithNewAIResponse(ctx context.Context) {

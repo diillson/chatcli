@@ -65,6 +65,7 @@ const (
 )
 
 var agentModeRequest = errors.New("request to enter agent mode")
+var coderModeRequest = errors.New("request to enter coder mode")
 var errExitRequest = errors.New("request to exit")
 var CommandFlags = map[string]map[string][]prompt.Suggest{
 	"@file": {
@@ -533,6 +534,8 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			defer func() {
 				if r := recover(); r != nil {
 					if r == agentModeRequest {
+					} else if r == coderModeRequest {
+						cli.restoreTerminal()
 					} else if r == errExitRequest {
 						shouldContinue = false
 					} else {
@@ -568,7 +571,16 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 		if shouldContinue {
 			cli.restoreTerminal()
-			cli.runAgentLogic()
+			lastCmd := ""
+			if len(cli.commandHistory) > 0 {
+				lastCmd = cli.commandHistory[len(cli.commandHistory)-1]
+			}
+
+			if strings.HasPrefix(lastCmd, "/coder") {
+				cli.runCoderLogic()
+			} else if strings.HasPrefix(lastCmd, "/agent") {
+				cli.runAgentLogic()
+			}
 		}
 	}
 }
@@ -618,12 +630,48 @@ func (cli *ChatCLI) runAgentLogic() {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
-	err := cli.agentMode.Run(ctx, query, additionalContext)
+	err := cli.agentMode.Run(ctx, query, additionalContext, "")
 	if err != nil {
 		fmt.Println(i18n.T("error.agent_mode_error", err))
 	}
 
 	fmt.Println(i18n.T("status.agent_mode_exit"))
+	time.Sleep(1 * time.Second)
+}
+
+func (cli *ChatCLI) runCoderLogic() {
+	if len(cli.commandHistory) == 0 {
+		return
+	}
+	lastCommand := cli.commandHistory[len(cli.commandHistory)-1]
+
+	query := strings.TrimSpace(strings.TrimPrefix(lastCommand, "/coder"))
+	if query == "" {
+		fmt.Println(i18n.T("error.agent_query_extraction"))
+		return
+	}
+
+	// UI diferenciada para o modo Coder
+	fmt.Println(colorize("\n👨‍💻 MODO ENGENHEIRO DE SOFTWARE ATIVADO", ColorCyan+ColorBold))
+	fmt.Printf("Objetivo: \"%s\"\n\n", query)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute) // Timeout maior para codificação
+	defer cancel()
+
+	query, additionalContext := cli.processSpecialCommands(query)
+
+	if cli.agentMode == nil {
+		cli.agentMode = NewAgentMode(cli, cli.logger)
+	}
+
+	// Aqui passamos o CoderSystemPrompt definido em prompts.go
+	err := cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)
+
+	if err != nil {
+		fmt.Println(i18n.T("error.agent_mode_error", err))
+	}
+
+	fmt.Println(colorize("\n✅ Sessão de engenharia finalizada.", ColorGreen))
 	time.Sleep(1 * time.Second)
 }
 
@@ -2097,6 +2145,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/config", Description: "Mostrar configuração atual"},
 		{Text: "/status", Description: "Alias de /config - Mostrar configuração atual"},
 		{Text: "/agent", Description: "Iniciar modo agente para executar tarefas"},
+		{Text: "/coder", Description: "Iniciar modo engenheiro (Criação e Edição de Código)"},
 		{Text: "/run", Description: "Alias para /agent - Iniciar modo agente para executar tarefas"},
 		{Text: "/newsession", Description: "Iniciar uma nova sessão de conversa"},
 		{Text: "/version", Description: "Verificar a versão do ChatCLI"},

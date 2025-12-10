@@ -26,7 +26,6 @@ func NewCommandHandler(cli *ChatCLI) *CommandHandler {
 	return &CommandHandler{cli: cli}
 }
 
-// Atualizar o método HandleCommand no CommandHandler para incluir os novos comandos
 func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	switch {
 	case userInput == "/exit" || userInput == "exit" || userInput == "/quit" || userInput == "quit":
@@ -36,7 +35,10 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		ch.cli.reloadConfiguration()
 		return false
 	case strings.HasPrefix(userInput, "/agent") || strings.HasPrefix(userInput, "/run"):
-		//ch.cli.handleAgentCommand(userInput)
+		panic(agentModeRequest)
+		return false
+	case strings.HasPrefix(userInput, "/coder"):
+		panic(coderModeRequest)
 		return false
 	case strings.HasPrefix(userInput, "/switch"):
 		ch.cli.handleSwitchCommand(userInput)
