@@ -430,7 +430,7 @@
   "agent.system_prompt.tools_header": "**[FERRAMENTAS DISPONÍVEIS]**",
   "agent.system_prompt.tools_instruction": "Para usar uma ferramenta, sua resposta DEVE conter um bloco no formato: `<tool_call name=\"@nome-da-ferramenta\" args=\"argumento1 argumento2\" />`. Após receber o resultado da ferramenta, decida o próximo passo. Se nenhuma ferramenta for adequada, gere a solução final com blocos ```execute:shell```.",
   "agent.error.tool_not_found": "Erro: a ferramenta '%s' que você tentou usar não foi encontrada. Por favor, escolha uma da lista ou gere um comando de shell.",
-  "agent.feedback.tool_output": "A ferramenta '%s' foi executada e retornou o seguinte:\n\n<tool_output>\n%s\n</tool_output>\n\nCom base nisso, qual é o próximo passo?",
+  "agent.feedback.tool_output": "A ferramenta '%s' foi executada e retornou o seguinte:\n\n<tool_output>\n%s\n</tool_output>\n\n(Se a tarefa estiver concluída, responda apenas com um resumo final. Se precisar de mais ações, envie a próxima tool_call).",
   "agent.error.max_turns_reached_context": "⚠️ O agente parou após atingir o limite máximo de %d turnos para evitar loops infinitos. Ele não chegou a uma solução final.",
   "agent.feedback.last_thought": "Aqui está o último raciocínio do agente:",
   "agent.error.invalid_tool_args": "Erro: Os argumentos que você forneceu para a ferramenta '%s' estavam malformados: %v. Por favor, corrija as aspas e tente novamente.",

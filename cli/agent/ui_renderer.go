@@ -15,6 +15,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
+	"golang.org/x/term"
 )
 
 // ANSI Color codes exportados
@@ -226,4 +227,139 @@ func VisibleLen(s string) int {
 	ansiRe := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	cleaned := ansiRe.ReplaceAllString(s, "")
 	return len(cleaned)
+}
+
+// RenderTimelineEvent desenha um "card" estilizado ajustado à largura do terminal
+func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
+	// 1. Obter largura do terminal
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || width <= 0 {
+		width = 80 // Fallback seguro
+	}
+
+	// Definir margens
+	// "│  " ocupa 3 colunas visuais
+	const borderPrefixLen = 3
+	// Largura útil para o texto = Largura total - borda esq - borda dir (aprox)
+	textWidth := width - borderPrefixLen - 2
+	if textWidth < 20 {
+		textWidth = 20
+	} // Segurança para telas muito pequenas
+
+	// Limpa formatação anterior
+	fmt.Println()
+
+	// Cabeçalho do Card
+	header := fmt.Sprintf("%s %s", icon, title)
+	fmt.Println(r.Colorize("╭── "+header, color+ColorBold))
+
+	// Prefixo lateral colorido
+	prefix := r.Colorize("│", color) + "  "
+
+	// 2. Quebrar o texto manualmente para caber na caixa
+	wrappedLines := wrapText(content, textWidth)
+
+	// 3. Imprimir cada linha com a borda
+	for _, line := range wrappedLines {
+		fmt.Println(prefix + line)
+	}
+
+	// Rodapé do Card (ajustado à largura se quiser, ou fixo)
+	// Vamos fazer uma linha que vai até o final da tela para ficar bonito
+	footerLen := width - 2 // -2 para compensar a curva
+	if footerLen < 0 {
+		footerLen = 10
+	}
+	footer := "╰" + strings.Repeat("─", footerLen)
+
+	fmt.Println(r.Colorize(footer, color))
+}
+
+// wrapText quebra o texto em linhas que não excedem o limite
+func wrapText(text string, limit int) []string {
+	if limit <= 0 {
+		return []string{text}
+	}
+
+	var finalLines []string
+
+	// Preservar quebras de linha originais (parágrafos)
+	paragraphs := strings.Split(text, "\n")
+
+	for _, p := range paragraphs {
+		// Se a linha for vazia, mantém vazia
+		if strings.TrimSpace(p) == "" {
+			finalLines = append(finalLines, "")
+			continue
+		}
+
+		words := strings.Fields(p)
+		if len(words) == 0 {
+			continue
+		}
+
+		currentLine := words[0]
+		for _, word := range words[1:] {
+			// +1 é o espaço
+			if len(currentLine)+1+len(word) <= limit {
+				currentLine += " " + word
+			} else {
+				finalLines = append(finalLines, currentLine)
+				currentLine = word
+			}
+		}
+		finalLines = append(finalLines, currentLine)
+	}
+
+	return finalLines
+}
+
+// RenderThinking exibe o pensamento da IA
+func (r *UIRenderer) RenderThinking(thought string) {
+	if strings.TrimSpace(thought) == "" {
+		return
+	}
+	// Usa cor cinza/ciano para pensamento
+	r.RenderTimelineEvent("🧠", "RACIOCÍNIO", thought, ColorCyan)
+}
+
+// RenderToolCall exibe a chamada da ferramenta de forma limpa (escondendo Base64)
+func (r *UIRenderer) RenderToolCall(toolName, rawArgs string) {
+	// Limpar argumentos para visualização (esconder base64 gigante)
+	displayArgs := cleanArgsForDisplay(rawArgs)
+
+	content := fmt.Sprintf("Ferramenta: %s\nArgs: %s",
+		r.Colorize(toolName, ColorYellow+ColorBold),
+		displayArgs)
+
+	r.RenderTimelineEvent("🔨", "EXECUTANDO AÇÃO", content, ColorYellow)
+}
+
+// RenderToolResult exibe o resultado da execução
+func (r *UIRenderer) RenderToolResult(output string, isError bool) {
+	icon := "✅"
+	title := "SUCESSO"
+	color := ColorGreen
+
+	if isError {
+		icon = "❌"
+		title = "FALHA NA EXECUÇÃO"
+		color = ColorPurple // Vermelho seria melhor, mas usando Purple da sua lib
+	}
+
+	// Truncar output muito grande para não poluir a timeline visualmente
+	// O agente recebe tudo, mas o humano vê um resumo se for gigante
+	displayOutput := output
+	if len(output) > 2000 {
+		displayOutput = output[:2000] + "\n... [saída truncada visualmente, agente recebeu tudo] ..."
+	}
+
+	r.RenderTimelineEvent(icon, title, displayOutput, color)
+}
+
+// Helper para limpar argumentos visuais
+func cleanArgsForDisplay(args string) string {
+	// Esconder conteúdo base64 longo
+	re := regexp.MustCompile(`(content|search|replace)=['"]?([A-Za-z0-9+/=]{50,})['"]?`)
+	return re.ReplaceAllString(args, "$1=\"[DADOS_BASE64_OCULTOS]\"")
 }

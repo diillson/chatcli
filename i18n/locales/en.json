@@ -430,7 +430,7 @@
   "agent.system_prompt.tools_header": "**[AVAILABLE TOOLS]**",
   "agent.system_prompt.tools_instruction": "To use a tool, your response MUST contain a block in the format: `<tool_call name=\"@tool-name\" args=\"argument1 argument2\" />`. After receiving the tool's result, decide the next step. If no tool is suitable, generate the final solution using ```execute:shell``` blocks.",
   "agent.error.tool_not_found": "Error: the tool '%s' you tried to use was not found. Please choose one from the list or generate a shell command.",
-  "agent.feedback.tool_output": "The tool '%s' was executed and returned the following:\n\n<tool_output>\n%s\n</tool_output>\n\nBased on this, what is the next step?",
+  "agent.feedback.tool_output": "The tool '%s' was executed and returned the following:\n\n<tool_output>\n%s\n</tool_output>\n\n(If the task is done, reply only with a final summary. If more actions are needed, send the next tool_call).",
   "agent.error.max_turns_reached_context": "⚠️ The agent stopped after reaching the maximum limit of %d turns to prevent infinite loops. It did not reach a final solution.",
   "agent.feedback.last_thought": "Here is the agent's last thought process:",
   "agent.error.invalid_tool_args": "Error: The arguments you provided for the tool '%s' were malformed: %v. Please correct the quoting and try again.",
