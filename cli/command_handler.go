@@ -36,10 +36,8 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return false
 	case strings.HasPrefix(userInput, "/agent") || strings.HasPrefix(userInput, "/run"):
 		panic(agentModeRequest)
-		return false
 	case strings.HasPrefix(userInput, "/coder"):
 		panic(coderModeRequest)
-		return false
 	case strings.HasPrefix(userInput, "/switch"):
 		ch.cli.handleSwitchCommand(userInput)
 		return false
