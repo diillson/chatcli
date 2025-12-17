@@ -94,11 +94,8 @@ func (a *AgentMode) getInput(prompt string) string {
 // Agora aceita systemPromptOverride para definir personas específicas (ex: Coder).
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string, systemPromptOverride string) error {
 	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
-	maxTurnsStr := os.Getenv("CHATCLI_AGENT_PLUGIN_MAX_TURNS")
-	maxTurns, err := strconv.Atoi(maxTurnsStr)
-	if err != nil || maxTurns <= 0 || maxTurns > 20 {
-		maxTurns = 7
-	}
+	maxTurns := AgentMaxTurns()
+
 	a.logger.Info("Modo Agente iniciado", zap.Int("max_turns_limit", maxTurns))
 
 	var systemInstruction string
