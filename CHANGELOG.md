@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.41.0](https://github.com/diillson/chatcli/compare/v1.40.0...v1.41.0) (2025-12-17)
+
+
+### Features
+
+* **plugins-examples:** enhance `chatcli-coder` with `exec` command improvements ([#400](https://github.com/diillson/chatcli/issues/400)) ([#401](https://github.com/diillson/chatcli/issues/401)) ([2f5100a](https://github.com/diillson/chatcli/commit/2f5100a04cc8fc756721894883b3becf2b678822))
+
 ## [1.40.0](https://github.com/diillson/chatcli/compare/v1.39.3...v1.40.0) (2025-12-10)
 
 
