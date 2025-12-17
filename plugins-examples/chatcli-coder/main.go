@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -9,7 +11,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Metadata define a estrutura de descoberta do plugin
@@ -60,11 +65,11 @@ func printMetadata() {
 		Name:        "@coder",
 		Description: "Suite de engenharia completa (IO, Search, Exec, Backup, Rollback).",
 		Usage: `@coder read --file <path>
-    @coder write --file <path> --content <base64>
-    @coder patch --file <path> --search <base64> --replace <base64>
+    @coder write --file <path> --content <base64> [--encoding text|base64]
+    @coder patch --file <path> --search <base64> --replace <base64> [--encoding text|base64]
     @coder tree --dir <path>
     @coder search --term "texto" --dir <path>
-    @coder exec --cmd "go test"
+    @coder exec --cmd "<comando>" [--dir <path>] [--timeout <segundos>] [--heartbeat <segundos>] [--non-interactive true|false]
     @coder rollback --file <path>
     @coder clean --dir <path>`,
 		Version: "1.4.0",
@@ -328,25 +333,119 @@ func handleSearch(args []string) {
 // --- COMANDO: EXEC ---
 func handleExec(args []string) {
 	fs := flag.NewFlagSet("exec", flag.ExitOnError)
+
 	cmdStr := fs.String("cmd", "", "Comando")
+	timeoutSec := fs.Int("timeout", 600, "Timeout em segundos (0 = sem timeout)")
+	dir := fs.String("dir", "", "Diretório de trabalho (opcional)")
+	heartbeatSec := fs.Int("heartbeat", 15, "Heartbeat em segundos (0 = desabilita)")
+	nonInteractive := fs.Bool("non-interactive", true, "Configura ambiente para execução não-interativa (genérico)")
+
 	if err := fs.Parse(args); err != nil {
 		fatalf("Erro flags: %v", err)
 	}
-
 	if *cmdStr == "" {
 		fatalf("--cmd obrigatório")
 	}
 
 	fmt.Printf("⚙️ Executando: %s\n----------------\n", *cmdStr)
-	cmd := exec.Command("sh", "-c", *cmdStr)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("\n❌ Falhou: %v\n", err)
-		os.Exit(1)
-	} else {
-		fmt.Printf("\n✅ Sucesso.\n")
+
+	// Context com timeout
+	ctx := context.Background()
+	var cancel context.CancelFunc
+	if *timeoutSec > 0 {
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(*timeoutSec)*time.Second)
+		defer cancel()
 	}
+
+	// Shell cross-platform
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "cmd.exe", "/C", *cmdStr)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", *cmdStr)
+	}
+
+	if *dir != "" {
+		cmd.Dir = *dir
+	}
+
+	// Ambiente não-interativo (genérico)
+	// CI=true e TERM=dumb ajudam diversas CLIs (npm/pip/gradle/mvn/etc).
+	if *nonInteractive {
+		env := os.Environ()
+		env = append(env,
+			"CI=true",
+			"TERM=dumb",
+		)
+		cmd.Env = env
+	}
+
+	// Pipes para streaming confiável (não depende do runner do chatcli)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		fatalf("Erro ao criar stdout pipe: %v", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		fatalf("Erro ao criar stderr pipe: %v", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		fatalf("Erro ao iniciar comando: %v", err)
+	}
+
+	// Heartbeat: evita “silêncio infinito”
+	done := make(chan struct{})
+	if *heartbeatSec > 0 {
+		go func() {
+			ticker := time.NewTicker(time.Duration(*heartbeatSec) * time.Second)
+			defer ticker.Stop()
+			start := time.Now()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					fmt.Fprintf(os.Stderr, "⏳ ainda executando... (%ds)\n", int(time.Since(start).Seconds()))
+					_ = os.Stderr.Sync()
+				}
+			}
+		}()
+	}
+
+	// Stream stdout/stderr em tempo real (scanner com buffer aumentado)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	stream := func(r io.Reader, w *os.File) {
+		defer wg.Done()
+		sc := bufio.NewScanner(r)
+		buf := make([]byte, 0, 64*1024)
+		sc.Buffer(buf, 1024*1024) // 1MB por linha
+		for sc.Scan() {
+			fmt.Fprintln(w, sc.Text())
+			_ = w.Sync()
+		}
+	}
+
+	go stream(stdout, os.Stdout)
+	go stream(stderr, os.Stderr)
+
+	waitErr := cmd.Wait()
+	close(done)
+	wg.Wait()
+
+	if ctx.Err() == context.DeadlineExceeded {
+		fmt.Fprintf(os.Stderr, "\n❌ Timeout após %ds\n", *timeoutSec)
+		os.Exit(1)
+	}
+
+	if waitErr != nil {
+		fmt.Printf("\n❌ Falhou: %v\n", waitErr)
+		os.Exit(1)
+	}
+
+	fmt.Printf("\n✅ Sucesso.\n")
 }
 
 // --- COMANDO: ROLLBACK ---
