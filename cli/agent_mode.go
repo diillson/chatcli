@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/models"
@@ -1357,9 +1358,35 @@ func removeXMLTags(text string) string {
 }
 
 func (a *AgentMode) continueWithNewAIResponse(ctx context.Context) {
-	// Esta função agora entra no loop principal de processamento
-	err := a.processAIResponseAndAct(ctx, 7) // Usa um novo limite de turnos
-	if err != nil {
-		fmt.Println(colorize(i18n.T("agent.error.continuation_failed", err), ColorYellow))
+	turns := AgentMaxTurns()
+
+	if err := a.processAIResponseAndAct(ctx, turns); err != nil {
+		fmt.Println(colorize(
+			i18n.T("agent.error.continuation_failed", err),
+			ColorYellow,
+		))
 	}
+}
+
+// helper max turns
+func AgentMaxTurns() int {
+	value := os.Getenv(config.AgentPluginMaxTurnsEnv)
+	if value == "" {
+		return config.DefaultAgentMaxTurns
+	}
+
+	turns, err := strconv.Atoi(value)
+	if err != nil {
+		return config.DefaultAgentMaxTurns
+	}
+
+	if turns <= 0 {
+		return config.DefaultAgentMaxTurns
+	}
+
+	if turns > config.MaxAgentMaxTurns {
+		return config.MaxAgentMaxTurns
+	}
+
+	return turns
 }
