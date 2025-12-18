@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.41.1](https://github.com/diillson/chatcli/compare/v1.41.0...v1.41.1) (2025-12-18)
+
+
+### Bug Fixes
+
+* **cli:** enforce reasoning step before tool execution in coder mode and improve error rendering ([#403](https://github.com/diillson/chatcli/issues/403)) ([#404](https://github.com/diillson/chatcli/issues/404)) ([7c90c6e](https://github.com/diillson/chatcli/commit/7c90c6e49aeabfee50d2f6fff333667293e1ba2a))
+
 ## [1.41.0](https://github.com/diillson/chatcli/compare/v1.40.0...v1.41.0) (2025-12-17)
 
 
