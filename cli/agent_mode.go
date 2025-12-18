@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/models"
@@ -93,11 +94,8 @@ func (a *AgentMode) getInput(prompt string) string {
 // Agora aceita systemPromptOverride para definir personas específicas (ex: Coder).
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string, systemPromptOverride string) error {
 	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
-	maxTurnsStr := os.Getenv("CHATCLI_AGENT_PLUGIN_MAX_TURNS")
-	maxTurns, err := strconv.Atoi(maxTurnsStr)
-	if err != nil || maxTurns <= 0 || maxTurns > 20 {
-		maxTurns = 7
-	}
+	maxTurns := AgentMaxTurns()
+
 	a.logger.Info("Modo Agente iniciado", zap.Int("max_turns_limit", maxTurns))
 
 	var systemInstruction string
@@ -1267,6 +1265,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			thoughtText = strings.TrimSpace(aiResponse)
 		}
 
+		// Se estamos no modo coder (systemPromptOverride == CoderSystemPrompt)
+		// e a IA tentou chamar ferramenta sem nenhum texto/plano antes:
+		if len(match) > 0 && strings.TrimSpace(thoughtText) == "" {
+			// Força a IA a fornecer um plano antes de usar ferramentas
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: "Antes de usar qualquer ferramenta, escreva um plano curto em <reasoning> (2-6 linhas) e então emita o próximo <tool_call>.",
+			})
+			continue
+		}
+
 		// 2. Renderizar o Pensamento (Timeline Card)
 		if thoughtText != "" {
 			// Remove tags internas se houver (<reasoning>, <explanation>) para ficar limpo na tela
@@ -1312,11 +1321,30 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 
 			// 4. Renderizar o Resultado (Timeline Card)
-			renderer.RenderToolResult(toolOutput, execErr != nil)
+			// Garantir que, em caso de erro, a mensagem completa fique clara no card.
+			displayForHuman := toolOutput
+			if execErr != nil {
+				errText := execErr.Error()
+				if strings.TrimSpace(displayForHuman) == "" {
+					displayForHuman = errText
+				} else {
+					displayForHuman = displayForHuman + "\n\n--- ERRO ---\n" + errText
+				}
+			}
+			renderer.RenderToolResult(displayForHuman, execErr != nil)
 
 			// Feedback para a IA (Histórico)
-			// Usamos a chave de tradução ajustada que pede resumo final se acabou
-			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, toolOutput)
+			payloadForAI := toolOutput
+			if execErr != nil {
+				errText := execErr.Error()
+				if strings.TrimSpace(payloadForAI) == "" {
+					payloadForAI = errText
+				} else {
+					payloadForAI = payloadForAI + "\n\n--- ERROR ---\n" + errText
+				}
+			}
+
+			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, payloadForAI)
 			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
 			continue // Próximo turno do loop
@@ -1357,9 +1385,35 @@ func removeXMLTags(text string) string {
 }
 
 func (a *AgentMode) continueWithNewAIResponse(ctx context.Context) {
-	// Esta função agora entra no loop principal de processamento
-	err := a.processAIResponseAndAct(ctx, 7) // Usa um novo limite de turnos
-	if err != nil {
-		fmt.Println(colorize(i18n.T("agent.error.continuation_failed", err), ColorYellow))
+	turns := AgentMaxTurns()
+
+	if err := a.processAIResponseAndAct(ctx, turns); err != nil {
+		fmt.Println(colorize(
+			i18n.T("agent.error.continuation_failed", err),
+			ColorYellow,
+		))
 	}
+}
+
+// helper max turns
+func AgentMaxTurns() int {
+	value := os.Getenv(config.AgentPluginMaxTurnsEnv)
+	if value == "" {
+		return config.DefaultAgentMaxTurns
+	}
+
+	turns, err := strconv.Atoi(value)
+	if err != nil {
+		return config.DefaultAgentMaxTurns
+	}
+
+	if turns <= 0 {
+		return config.DefaultAgentMaxTurns
+	}
+
+	if turns > config.MaxAgentMaxTurns {
+		return config.MaxAgentMaxTurns
+	}
+
+	return turns
 }
