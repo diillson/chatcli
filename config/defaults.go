@@ -61,4 +61,9 @@ const (
 	DefaultMaxRetries     = 5               // Máximo de tentativas para retry
 	DefaultInitialBackoff = 3 * time.Second // Backoff inicial para retry
 	DefaultPluginTimeout  = 15 * time.Minute
+
+	// Agent plugin max turns
+	AgentPluginMaxTurnsEnv = "CHATCLI_AGENT_PLUGIN_MAX_TURNS"
+	DefaultAgentMaxTurns   = 7
+	MaxAgentMaxTurns       = 70 // limite de segurança
 )

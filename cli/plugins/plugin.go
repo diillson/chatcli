@@ -105,9 +105,7 @@ func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		// MultiWriter envia para o os.Stderr (console) e para o nosso buffer de captura
-		multiWriter := io.MultiWriter(os.Stderr, &stderrBuf)
-		_, _ = io.Copy(multiWriter, stderrPipe)
+		_, _ = io.Copy(&stderrBuf, stderrPipe)
 	}()
 
 	// 5. Aguardar as goroutines de I/O terminarem
