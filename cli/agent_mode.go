@@ -1265,6 +1265,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			thoughtText = strings.TrimSpace(aiResponse)
 		}
 
+		// Se estamos no modo coder (systemPromptOverride == CoderSystemPrompt)
+		// e a IA tentou chamar ferramenta sem nenhum texto/plano antes:
+		if len(match) > 0 && strings.TrimSpace(thoughtText) == "" {
+			// Força a IA a fornecer um plano antes de usar ferramentas
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: "Antes de usar qualquer ferramenta, escreva um plano curto em <reasoning> (2-6 linhas) e então emita o próximo <tool_call>.",
+			})
+			continue
+		}
+
 		// 2. Renderizar o Pensamento (Timeline Card)
 		if thoughtText != "" {
 			// Remove tags internas se houver (<reasoning>, <explanation>) para ficar limpo na tela
@@ -1310,11 +1321,30 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 
 			// 4. Renderizar o Resultado (Timeline Card)
-			renderer.RenderToolResult(toolOutput, execErr != nil)
+			// Garantir que, em caso de erro, a mensagem completa fique clara no card.
+			displayForHuman := toolOutput
+			if execErr != nil {
+				errText := execErr.Error()
+				if strings.TrimSpace(displayForHuman) == "" {
+					displayForHuman = errText
+				} else {
+					displayForHuman = displayForHuman + "\n\n--- ERRO ---\n" + errText
+				}
+			}
+			renderer.RenderToolResult(displayForHuman, execErr != nil)
 
 			// Feedback para a IA (Histórico)
-			// Usamos a chave de tradução ajustada que pede resumo final se acabou
-			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, toolOutput)
+			payloadForAI := toolOutput
+			if execErr != nil {
+				errText := execErr.Error()
+				if strings.TrimSpace(payloadForAI) == "" {
+					payloadForAI = errText
+				} else {
+					payloadForAI = payloadForAI + "\n\n--- ERROR ---\n" + errText
+				}
+			}
+
+			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, payloadForAI)
 			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
 			continue // Próximo turno do loop
