@@ -913,6 +913,14 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("  "+i18n.T("help.command.agent_compact_plan"), "")
 	printCommand("  "+i18n.T("help.command.agent_full_plan"), "")
 
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.coder"), ColorLime))
+	printCommand("/coder <tarefa>", i18n.T("help.command.coder"))
+	printCommand("  Ex: /coder ...", i18n.T("help.command.coder_example"))
+
+	printCommand(i18n.T("help.command.coder_notes"), "")
+	printCommand("  "+i18n.T("help.command.coder_note_plugin"), "")
+	printCommand("  "+i18n.T("help.command.coder_note_auto_tools"), "")
+
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.plugins"), ColorLime))
 	printCommand("/plugin list", i18n.T("help.command.plugin_list"))
 	printCommand("/plugin install <url>", i18n.T("help.command.plugin_install"))
