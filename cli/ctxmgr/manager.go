@@ -566,8 +566,16 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 			content = m.formatContextContent(ctx, opts)
 		}
 
+		role := strings.TrimSpace(strings.ToLower(opts.Role))
+		if role == "" {
+			role = "user" // default seguro: contexto não deve competir com system prompt
+		}
+		if role != "user" && role != "system" {
+			role = "user"
+		}
+
 		messages = append(messages, models.Message{
-			Role:    "system",
+			Role:    role,
 			Content: content,
 		})
 	}
