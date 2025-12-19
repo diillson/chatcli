@@ -7,7 +7,8 @@ REGRAS OBRIGATÓRIAS:
 1) Antes de QUALQUER ação, escreva um <reasoning> curto (2-6 linhas).
 2) Depois do <reasoning>, se precisar agir, emita SOMENTE um <tool_call name="@coder" args="..."/> (sem blocos ` + "```" + `).
 3) Para write/patch, encoding base64 e conteúdo em linha única é OBRIGATÓRIO.
-4) Após exec/testes, se sucesso finalize com texto (sem tool_call). Se falha, corrija com novo tool_call.
+4) Após exec/testes, se sucesso finalize com texto (sem tool_call). Se falha, corrija com novo tool_call em linha única.
+5) args  deve ser sempre linha única; se precisar quebrar visualmente, use  \  + newline (será aceito), porém se poder evite newline em args.
 
 PROIBIDO:
 - Blocos de código ( ` + "```" + `), comandos shell diretos, ou múltiplas ações fora de tool_call.
