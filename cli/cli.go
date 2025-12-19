@@ -57,11 +57,16 @@ type FileChunk struct {
 
 type InteractionState int
 
+type ExecutionProfile int
+
 const (
 	StateNormal InteractionState = iota
 	StateSwitchingProvider
 	StateProcessing
 	StateAgentMode
+	ProfileNormal ExecutionProfile = iota
+	ProfileAgent
+	ProfileCoder
 )
 
 var agentModeRequest = errors.New("request to enter agent mode")
@@ -138,6 +143,7 @@ type ChatCLI struct {
 	UserMaxTokens        int
 	pluginManager        *plugins.Manager
 	contextHandler       *ContextHandler
+	executionProfile     ExecutionProfile
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -269,6 +275,10 @@ func (cli *ChatCLI) configureProviderAndModel() {
 	}
 }
 
+func (cli *ChatCLI) setExecutionProfile(p ExecutionProfile) {
+	cli.executionProfile = p
+}
+
 // NewChatCLI cria uma nova instância de ChatCLI
 func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	cli := &ChatCLI{
@@ -280,6 +290,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		interactionState:  StateNormal,
 		processingDone:    make(chan struct{}),
 		MaxTokensOverride: 0,
+		executionProfile:  ProfileNormal,
 	}
 
 	pluginMgr, err := plugins.NewManager(logger)
@@ -416,6 +427,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 			IncludeMetadata:  true,
 			IncludeTimestamp: false,
 			Compact:          false,
+			Role:             "user",
 		},
 	)
 	if err != nil {
@@ -603,6 +615,9 @@ func (cli *ChatCLI) restoreTerminal() {
 }
 
 func (cli *ChatCLI) runAgentLogic() {
+	cli.setExecutionProfile(ProfileAgent)
+	defer cli.setExecutionProfile(ProfileNormal)
+
 	if len(cli.commandHistory) == 0 {
 		return
 	}
@@ -640,6 +655,9 @@ func (cli *ChatCLI) runAgentLogic() {
 }
 
 func (cli *ChatCLI) runCoderLogic() {
+	cli.setExecutionProfile(ProfileCoder)
+	defer cli.setExecutionProfile(ProfileNormal)
+
 	if len(cli.commandHistory) == 0 {
 		return
 	}
@@ -2449,6 +2467,9 @@ func (ch *CommandHandler) handleVersionCommand() {
 
 // RunAgentOnce executa o modo agente de forma não-interativa (one-shot)
 func (cli *ChatCLI) RunAgentOnce(ctx context.Context, input string, autoExecute bool) error {
+	cli.setExecutionProfile(ProfileAgent)
+	defer cli.setExecutionProfile(ProfileNormal)
+
 	var query string
 	if strings.HasPrefix(input, "/agent ") {
 		query = strings.TrimPrefix(input, "/agent ")
