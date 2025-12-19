@@ -91,6 +91,12 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar o agente em modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
 			cli.logger.Fatal("Erro no modo agente one-shot", zap.Error(err))
 		}
+	} else if strings.HasPrefix(input, "/coder ") {
+		// coder one-shot (mesma experiência do modo /coder interativo)
+		if err := cli.RunCoderOnce(ctxOne, input); err != nil {
+			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar o coder em modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
+			cli.logger.Fatal("Erro no modo coder one-shot", zap.Error(err))
+		}
 	} else {
 		if err := cli.RunOnce(ctxOne, input, opts.NoAnim); err != nil {
 			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar no modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")

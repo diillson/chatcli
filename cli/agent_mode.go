@@ -41,6 +41,8 @@ type AgentMode struct {
 	contextManager      *agent.ContextManager
 	executeCommandsFunc func(ctx context.Context, block agent.CommandBlock) (string, string)
 	//skipClearOnNextDraw bool
+	isCoderMode bool
+	isOneShot   bool
 }
 
 // Aliases de tipos para manter compatibilidade
@@ -111,6 +113,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		systemInstruction = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
 	}
 
+	a.isCoderMode = (systemPromptOverride == CoderSystemPrompt)
+	a.isOneShot = false
+
 	// Adiciona contexto de ferramentas (plugins) ao prompt
 	systemInstruction += a.getToolContextString()
 
@@ -143,6 +148,41 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// --- 2. O LOOP DE RACIOCÍNIO-AÇÃO (ReAct) ---
 	return a.processAIResponseAndAct(ctx, maxTurns)
+}
+
+// RunCoderOnce executa o modo coder de forma não-interativa (one-shot),
+// mas mantendo o loop ReAct do AgentMode (com tool_calls/plugins).
+func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
+	var query string
+	if strings.HasPrefix(input, "/coder ") {
+		query = strings.TrimPrefix(input, "/coder ")
+	} else if input == "/coder" {
+		return fmt.Errorf("entrada inválida para o modo coder one-shot: %s", input)
+	} else {
+		return fmt.Errorf("entrada inválida para o modo coder one-shot: %s", input)
+	}
+
+	// Processar contextos especiais como @file, @git, etc.
+	query, additionalContext := cli.processSpecialCommands(query)
+	fullQuery := query
+	if additionalContext != "" {
+		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
+	}
+
+	// Assegurar que o modo agente está inicializado
+	if cli.agentMode == nil {
+		cli.agentMode = NewAgentMode(cli, cli.logger)
+	}
+
+	cli.agentMode.isCoderMode = true
+	cli.agentMode.isOneShot = true
+
+	// Executa o AgentMode no "perfil coder" (system prompt override)
+	// Isso mantém exatamente o fluxo atual do /coder interativo:
+	// - timeline
+	// - tool_call
+	// - execução automática de plugins
+	return cli.agentMode.Run(ctx, fullQuery, "", CoderSystemPrompt)
 }
 
 // RunOnce executa modo agente one-shot
@@ -1350,18 +1390,25 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			continue // Próximo turno do loop
 		}
 
-		// 4. Prioridade 2: Verificar blocos de execução antigos (Fallback / Shell interativo)
-		// Isso mantém compatibilidade se a IA decidir usar ```bash``` em vez de tool_call
 		commandBlocks := a.extractCommandBlocks(aiResponse)
 		if len(commandBlocks) > 0 {
-			// Exibe a parte da resposta que não são os comandos (se ainda não foi exibida)
-			// Nota: O RenderThinking acima pode ter exibido parte disso, mas o displayResponseWithoutCommands
-			// é específico para o modo interativo antigo.
-			a.displayResponseWithoutCommands(aiResponse, commandBlocks)
 
-			// Transfere o controle para o manipulador de plano de ação (modo interativo)
+			// em coder one-shot, NÃO abrir menu. Forçar tool_call.
+			if a.isCoderMode && a.isOneShot {
+				// Re-prompt para forçar o formato correto (tool_call)
+				a.cli.history = append(a.cli.history, models.Message{
+					Role: "user",
+					Content: "Você respondeu com comandos em bloco (shell). No modo /coder você DEVE usar <tool_call> " +
+						"para executar ferramentas/plugins (especialmente @coder). " +
+						"Reenvie a próxima ação SOMENTE como <tool_call name=\"@coder\" ... /> (sem blocos ```).",
+				})
+				continue
+			}
+
+			// comportamento antigo (interativo) continua igual
+			a.displayResponseWithoutCommands(aiResponse, commandBlocks)
 			a.handleCommandBlocks(ctx, commandBlocks)
-			return nil // Encerra o loop principal, pois handleCommandBlocks gerencia o fluxo
+			return nil
 		}
 
 		// 5. Se chegou aqui, é uma resposta final (sem tool calls, sem blocos de comando)
