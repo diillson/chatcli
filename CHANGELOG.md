@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.0](https://github.com/diillson/chatcli/compare/v1.42.0...v1.43.0) (2025-12-19)
+
+
+### Features
+
+* **cli:** enhance coder mode with role-based context, stricter tool call validation, and execution profile management ([#411](https://github.com/diillson/chatcli/issues/411)) ([#412](https://github.com/diillson/chatcli/issues/412)) ([32de3b6](https://github.com/diillson/chatcli/commit/32de3b6e2b2134e8045d90e0024b43ecfe597ed4))
+
 ## [1.42.0](https://github.com/diillson/chatcli/compare/v1.41.1...v1.42.0) (2025-12-19)
 
 
