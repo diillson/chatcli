@@ -153,6 +153,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 // RunCoderOnce executa o modo coder de forma não-interativa (one-shot),
 // mas mantendo o loop ReAct do AgentMode (com tool_calls/plugins).
 func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
+	cli.setExecutionProfile(ProfileCoder)
+	defer cli.setExecutionProfile(ProfileNormal)
+
 	var query string
 	if strings.HasPrefix(input, "/coder ") {
 		query = strings.TrimPrefix(input, "/coder ")
@@ -1268,16 +1271,45 @@ func (a *AgentMode) getToolContextString() string {
 
 // processAIResponseAndAct executa o loop de raciocínio e ação com UI aprimorada (Timeline).
 func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
-	// Instancia o renderizador de UI
 	renderer := agent.NewUIRenderer(a.logger)
+
+	// Helper: cria um "reminder" curto por turno para evitar drift/esquecimento.
+	// Mantemos como system para dar prioridade, mas é curto para não poluir.
+	buildTurnHistoryWithAnchor := func() []models.Message {
+		h := make([]models.Message, 0, len(a.cli.history)+1)
+		h = append(h, a.cli.history...)
+
+		var anchor string
+		if a.isCoderMode {
+			anchor = "LEMBRETE (MODO /CODER): Você DEVE responder com <reasoning> curto (2-6 linhas) e depois, se precisar agir, " +
+				"enviar SOMENTE um <tool_call name=\"@coder\" args=\"...\" />. " +
+				"NÃO use blocos de código (```), NÃO use ```execute:...```, NÃO envie comandos shell diretamente. " +
+				"Para write/patch: encoding base64 e conteúdo em linha única são OBRIGATÓRIOS."
+		} else {
+			anchor = "LEMBRETE (MODO /AGENT): Você pode usar ferramentas via <tool_call name=\"@tool\" args=\"...\" /> quando fizer sentido. " +
+				"Se for sugerir comandos, use blocos ```execute:<tipo>``` (shell/git/docker/kubectl...). " +
+				"Evite comandos destrutivos sem avisos claros e alternativas."
+		}
+
+		h = append(h, models.Message{Role: "system", Content: anchor})
+		return h
+	}
+
+	// Helper: valida se o "thought" tem um <reasoning> minimamente presente quando exigido.
+	// No modo coder, exigimos reasoning antes de tool_call para manter UX e reduzir loops.
+	hasReasoningTag := func(s string) bool {
+		ls := strings.ToLower(s)
+		return strings.Contains(ls, "<reasoning>") && strings.Contains(ls, "</reasoning>")
+	}
 
 	for turn := 0; turn < maxTurns; turn++ {
 		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
 
-		// 1. Feedback visual de "Pensando..."
+		// Feedback visual de "Pensando..."
 		a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
-		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", a.cli.history, 0)
+		turnHistory := buildTurnHistoryWithAnchor()
+		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
 
 		a.cli.animation.StopThinkingAnimation()
 
@@ -1285,83 +1317,133 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			return fmt.Errorf("erro ao obter resposta da IA no turno %d: %w", turn+1, err)
 		}
 
+		// Persistir a resposta no histórico "real" (sem o anchor temporário).
 		a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
 
-		// --- ANÁLISE DA RESPOSTA E RENDERIZAÇÃO ---
+		// Parse tool calls (robusto) - pode retornar múltiplos
+		toolCalls, parseErr := agent.ParseToolCalls(aiResponse)
+		if parseErr != nil {
+			a.logger.Warn("Falha ao parsear tool_calls", zap.Error(parseErr))
+			// não falha o turno; continua fluxo como "sem tool call"
+			toolCalls = nil
+		}
 
-		// Regex para capturar Tool Call (<tool_call ... />)
-		toolCallRegex := regexp.MustCompile(`(?s)<tool_call name="(@\S+)" (?:args="(.*?)"|args='(.*?)') />`)
-		match := toolCallRegex.FindStringSubmatch(aiResponse)
-
-		// Separar o "Pensamento" da "Ação" para exibir na timeline
+		// Separar "pensamento/texto" de "ação"
 		var thoughtText string
-		if len(match) > 0 {
-			// Tudo antes da tag <tool_call> é pensamento
-			splitParts := strings.Split(aiResponse, match[0])
-			thoughtText = strings.TrimSpace(splitParts[0])
+		if len(toolCalls) > 0 {
+			// pensamento = tudo antes do primeiro tool_call raw
+			firstRaw := toolCalls[0].Raw
+			parts := strings.Split(aiResponse, firstRaw)
+			thoughtText = strings.TrimSpace(parts[0])
 		} else {
-			// Se não tem tool call, verifica se tem blocos de comando antigos
-			// Se não tiver nenhum dos dois, é a resposta final
 			thoughtText = strings.TrimSpace(aiResponse)
 		}
 
-		// Se estamos no modo coder (systemPromptOverride == CoderSystemPrompt)
-		// e a IA tentou chamar ferramenta sem nenhum texto/plano antes:
-		if len(match) > 0 && strings.TrimSpace(thoughtText) == "" {
-			// Força a IA a fornecer um plano antes de usar ferramentas
-			a.cli.history = append(a.cli.history, models.Message{
-				Role:    "user",
-				Content: "Antes de usar qualquer ferramenta, escreva um plano curto em <reasoning> (2-6 linhas) e então emita o próximo <tool_call>.",
-			})
-			continue
-		}
-
-		// 2. Renderizar o Pensamento (Timeline Card)
-		if thoughtText != "" {
-			// Remove tags internas se houver (<reasoning>, <explanation>) para ficar limpo na tela
+		// Renderizar o "pensamento" na timeline (limpo)
+		if strings.TrimSpace(thoughtText) != "" {
 			cleanThought := removeXMLTags(thoughtText)
-
-			// Só renderiza se sobrou algum texto útil
 			if strings.TrimSpace(cleanThought) != "" {
 				renderer.RenderThinking(cleanThought)
 			}
 		}
 
-		// 3. Prioridade 1: Executar Ferramenta (Plugin)
-		if len(match) > 0 {
-			toolName := match[1]
-			toolArgsStr := match[2]
-			if match[3] != "" {
-				toolArgsStr = match[3]
+		// =========================
+		// REGRAS ESTRITAS DO /CODER
+		// =========================
+		if a.isCoderMode {
+			// 1) Se existe tool_call, exigir reasoning antes dele.
+			if len(toolCalls) > 0 {
+				// No coder, exigimos explicitamente <reasoning>…</reasoning> antes da ação.
+				// Se ele escreveu texto mas sem a tag, forçamos correção.
+				if !hasReasoningTag(thoughtText) {
+					a.cli.history = append(a.cli.history, models.Message{
+						Role: "user",
+						Content: "Formato inválido no modo /coder. Antes de qualquer <tool_call>, escreva um <reasoning> curto (2-6 linhas) " +
+							"com as etapas e critério de sucesso, e então envie SOMENTE um <tool_call name=\"@coder\" ... />.",
+					})
+					continue
+				}
+
+				// No coder, a ferramenta deve ser @coder (explícito)
+				if !strings.EqualFold(strings.TrimSpace(toolCalls[0].Name), "@coder") {
+					a.cli.history = append(a.cli.history, models.Message{
+						Role: "user",
+						Content: "No modo /coder, a ferramenta obrigatória é @coder. " +
+							"Reenvie SOMENTE o próximo passo como <tool_call name=\"@coder\" args=\"...\" /> (sem blocos de código).",
+					})
+					continue
+				}
 			}
+
+			// 2) Se NÃO existe tool_call, mas a IA tentou mandar comandos/blocos, corrigir.
+			if len(toolCalls) == 0 {
+				// Heurísticas: presença de fence ``` ou execute blocks ou prompt-like "$ "
+				if strings.Contains(aiResponse, "```") || strings.Contains(aiResponse, "```execute:") || regexp.MustCompile(`(?m)^[$#]\s+`).MatchString(aiResponse) {
+					a.cli.history = append(a.cli.history, models.Message{
+						Role: "user",
+						Content: "Você respondeu com comandos/blocos, o que é proibido no modo /coder. " +
+							"Use <reasoning> e então emita SOMENTE <tool_call name=\"@coder\" args=\"...\" />.",
+					})
+					continue
+				}
+			}
+		}
+
+		// ==================================
+		// PRIORIDADE 1: EXECUTAR TOOL_CALL(s)
+		// ==================================
+		if len(toolCalls) > 0 {
+			// Execução de apenas 1 tool_call por turno (produção: previsibilidade + evita cascata perigosa)
+			tc := toolCalls[0]
+			toolName := tc.Name
+			toolArgsStr := tc.Args
 
 			// Renderizar o Card de Ação
 			renderer.RenderToolCall(toolName, toolArgsStr)
 
-			// Preparação da execução
 			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
-			toolArgs, err := shlex.Split(unescapedToolArgsStr)
+			toolArgs, shlexErr := shlex.Split(unescapedToolArgsStr)
 
 			var toolOutput string
 			var execErr error
 
-			if err != nil {
-				execErr = err
-				a.logger.Warn("Erro ao analisar argumentos", zap.Error(err))
-				toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", err)
+			if shlexErr != nil {
+				execErr = shlexErr
+				toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", shlexErr)
+
+				// No coder, força correção do args e impede seguir.
+				if a.isCoderMode {
+					a.cli.history = append(a.cli.history, models.Message{
+						Role: "user",
+						Content: fmt.Sprintf("Seu <tool_call> veio com args inválido (erro: %v). "+
+							"Reenvie SOMENTE o <tool_call> com args corretamente escapado (aspas balanceadas).", shlexErr),
+					})
+					// Ainda renderizamos o erro para o usuário, mas não fazemos feedback tool_output como se tivesse executado.
+					renderer.RenderToolResult(toolOutput+"\n\n--- ERRO ---\n"+execErr.Error(), true)
+					continue
+				}
 			} else {
 				plugin, found := a.cli.pluginManager.GetPlugin(toolName)
 				if !found {
 					execErr = fmt.Errorf("plugin não encontrado")
 					toolOutput = fmt.Sprintf("Ferramenta '%s' não existe ou não está instalada.", toolName)
+
+					// No coder, ferramenta @coder é obrigatória; repromptar.
+					if a.isCoderMode {
+						a.cli.history = append(a.cli.history, models.Message{
+							Role: "user",
+							Content: "Ferramenta não encontrada. No modo /coder, você deve usar @coder. " +
+								"Reenvie SOMENTE <tool_call name=\"@coder\" args=\"...\" />.",
+						})
+						renderer.RenderToolResult(toolOutput+"\n\n--- ERRO ---\n"+execErr.Error(), true)
+						continue
+					}
 				} else {
-					// Executa o plugin
 					toolOutput, execErr = plugin.Execute(ctx, toolArgs)
 				}
 			}
 
-			// 4. Renderizar o Resultado (Timeline Card)
-			// Garantir que, em caso de erro, a mensagem completa fique clara no card.
+			// Renderizar o Resultado (Timeline Card)
 			displayForHuman := toolOutput
 			if execErr != nil {
 				errText := execErr.Error()
@@ -1387,15 +1469,25 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, payloadForAI)
 			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
-			continue // Próximo turno do loop
+			// Se o modelo enviou múltiplos tool_calls, instruímos a enviar um por turno.
+			if len(toolCalls) > 1 {
+				a.cli.history = append(a.cli.history, models.Message{
+					Role: "user",
+					Content: "Nota: você enviou múltiplos <tool_call> no mesmo turno. " +
+						"Para segurança e previsibilidade, envie apenas 1 <tool_call> por vez no próximo turno.",
+				})
+			}
+
+			continue // Próximo turno
 		}
 
+		// ==============================================
+		// PRIORIDADE 2: EXECUTE BLOCKS (modo agente)
+		// ==============================================
 		commandBlocks := a.extractCommandBlocks(aiResponse)
 		if len(commandBlocks) > 0 {
-
-			// em coder one-shot, NÃO abrir menu. Forçar tool_call.
+			// No coder one-shot, NÃO abrir menu. Forçar tool_call @coder.
 			if a.isCoderMode && a.isOneShot {
-				// Re-prompt para forçar o formato correto (tool_call)
 				a.cli.history = append(a.cli.history, models.Message{
 					Role: "user",
 					Content: "Você respondeu com comandos em bloco (shell). No modo /coder você DEVE usar <tool_call> " +
@@ -1405,22 +1497,35 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				continue
 			}
 
-			// comportamento antigo (interativo) continua igual
+			// Se for coder interativo (não one-shot) e vier bloco, também forçar correção.
+			if a.isCoderMode {
+				a.cli.history = append(a.cli.history, models.Message{
+					Role: "user",
+					Content: "No modo /coder, não use blocos ```execute``` nem comandos shell. " +
+						"Use <reasoning> e então emita SOMENTE <tool_call name=\"@coder\" ... />.",
+				})
+				continue
+			}
+
+			// /agent padrão: mantém comportamento antigo (menu/exec)
 			a.displayResponseWithoutCommands(aiResponse, commandBlocks)
 			a.handleCommandBlocks(ctx, commandBlocks)
 			return nil
 		}
 
-		// 5. Se chegou aqui, é uma resposta final (sem tool calls, sem blocos de comando)
-		// O RenderThinking já mostrou o texto como "Raciocínio/Resposta".
-		// Adicionamos apenas um indicador visual de conclusão.
+		// ==========================================
+		// PRIORIDADE 3: RESPOSTA FINAL (sem ações)
+		// ==========================================
+		// Se chegou aqui, é uma resposta final (sem tool_calls, sem blocos de comando).
 		fmt.Println(renderer.Colorize("\n🏁 TAREFA CONCLUÍDA", agent.ColorGreen+agent.ColorBold))
-		return nil // Encerra o loop com sucesso
+		return nil
 	}
 
-	// --- TRATAMENTO DE FALHA (LIMITE DE TURNOS ATINGIDO) ---
-	fmt.Println(renderer.Colorize(fmt.Sprintf("\n⚠️ Limite de %d passos atingido. O agente parou para evitar loop infinito.", maxTurns), agent.ColorYellow))
-
+	// Limite de turnos atingido
+	fmt.Println(renderer.Colorize(
+		fmt.Sprintf("\n⚠️ Limite de %d passos atingido. O agente parou para evitar loop infinito.", maxTurns),
+		agent.ColorYellow,
+	))
 	return nil
 }
 

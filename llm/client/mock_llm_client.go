@@ -16,6 +16,6 @@ func (m *MockLLMClient) GetModelName() string {
 	return "MockModel"
 }
 
-func (m *MockLLMClient) SendPrompt(ctx context.Context, prompt string, history []models.Message) (string, error) {
+func (m *MockLLMClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	return m.Response, m.Err
 }

@@ -100,9 +100,10 @@ type ValidationResult struct {
 
 // FormatOptions opções para formatar contexto como prompt
 type FormatOptions struct {
-	IncludeMetadata  bool `json:"include_metadata"`  // Incluir metadados no prompt
-	IncludeTimestamp bool `json:"include_timestamp"` // Incluir timestamp
-	Compact          bool `json:"compact"`           // Formato compacto (sem índice)
+	IncludeMetadata  bool   `json:"include_metadata"`  // Incluir metadados no prompt
+	IncludeTimestamp bool   `json:"include_timestamp"` // Incluir timestamp
+	Compact          bool   `json:"compact"`           // Formato compacto (sem índice)
+	Role             string `json:"role"`
 }
 
 // AttachOptions define opções para anexar contextos
