@@ -242,8 +242,8 @@ var registry = []ModelMeta{
 	},
 	// xAI (Grok) Models
 	{
-		ID:              "grok-4",
-		Aliases:         []string{"grok-4, grok-4-0709"},
+		ID:              "grok-4-fast",
+		Aliases:         []string{"grok-4-fast-reasoning-latest, grok-4-fast-reasoning, grok-4-0709"},
 		DisplayName:     "Grok-4",
 		Provider:        ProviderXAI,
 		ContextWindow:   2000000,
