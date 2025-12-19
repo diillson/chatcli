@@ -191,6 +191,16 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution"},
 	},
 	{
+		ID:              "gemini-3",
+		Aliases:         []string{"gemini-3-pro", "gemini-3-pro-preview"},
+		DisplayName:     "Gemini 3 Pro",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   2000000, // 2M tokens context window
+		MaxOutputTokens: 2000000,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution"},
+	},
+	{
 		ID:              "gemini-2.5-flash",
 		Aliases:         []string{"gemini-2.5-flash"},
 		DisplayName:     "Gemini 2.5 Flash",
@@ -232,12 +242,22 @@ var registry = []ModelMeta{
 	},
 	// xAI (Grok) Models
 	{
-		ID:              "grok-4",
-		Aliases:         []string{"grok-4, grok-4-0709"},
+		ID:              "grok-4-fast",
+		Aliases:         []string{"grok-4-fast-reasoning-latest, grok-4-fast-reasoning, grok-4-0709"},
 		DisplayName:     "Grok-4",
 		Provider:        ProviderXAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 200000,
+		ContextWindow:   2000000,
+		MaxOutputTokens: 2000000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{},
+	},
+	{
+		ID:              "grok-4-1",
+		Aliases:         []string{"grok-4-1-fast, grok-4-1-fast-reasoning-latest"},
+		DisplayName:     "Grok-4-1",
+		Provider:        ProviderXAI,
+		ContextWindow:   2000000,
+		MaxOutputTokens: 2000000,
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{},
 	},
