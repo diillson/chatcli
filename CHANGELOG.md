@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.1](https://github.com/diillson/chatcli/compare/v1.43.0...v1.43.1) (2025-12-19)
+
+
+### Bug Fixes
+
+* **cli:** add multiline tool args normalization and stricter validation in coder mode ([#414](https://github.com/diillson/chatcli/issues/414)) ([#415](https://github.com/diillson/chatcli/issues/415)) ([acc0717](https://github.com/diillson/chatcli/commit/acc0717f5a31e8a734b2a6cc5ff7fdb220b0f0b6))
+
 ## [1.43.0](https://github.com/diillson/chatcli/compare/v1.42.0...v1.43.0) (2025-12-19)
 
 
