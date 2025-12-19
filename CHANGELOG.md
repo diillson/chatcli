@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.42.0](https://github.com/diillson/chatcli/compare/v1.41.1...v1.42.0) (2025-12-19)
+
+
+### Features
+
+* **cli:** add one-shot execution for coder mode and improve translations ([#407](https://github.com/diillson/chatcli/issues/407)) ([f335db7](https://github.com/diillson/chatcli/commit/f335db764f7d3ed3181abd658e1730016cf75aa7))
+
 ## [1.41.1](https://github.com/diillson/chatcli/compare/v1.41.0...v1.41.1) (2025-12-18)
 
 
