@@ -1402,7 +1402,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			renderer.RenderToolCall(toolName, toolArgsStr)
 
 			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
-			toolArgs, shlexErr := shlex.Split(unescapedToolArgsStr)
+			normalizedArgsStr := joinBackslashNewlines(unescapedToolArgsStr)
+			toolArgs, shlexErr := shlex.Split(normalizedArgsStr)
 
 			var toolOutput string
 			var execErr error
@@ -1568,4 +1569,41 @@ func AgentMaxTurns() int {
 	}
 
 	return turns
+}
+
+// helper multilinhas
+func joinBackslashNewlines(s string) string {
+	// normaliza quebras
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+
+	lines := strings.Split(s, "\n")
+	if len(lines) == 1 {
+		return strings.TrimSpace(s)
+	}
+
+	var b strings.Builder
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+
+		trimRight := strings.TrimRight(line, " \t")
+		continued := strings.HasSuffix(trimRight, `\`)
+
+		if continued {
+			// remove o "\" final
+			trimRight = strings.TrimRight(trimRight[:len(trimRight)-1], " \t")
+			b.WriteString(trimRight)
+			// ao concatenar com a próxima linha, garante separador
+			b.WriteString(" ")
+			continue
+		}
+
+		b.WriteString(line)
+		if i < len(lines)-1 {
+			b.WriteString(" ")
+		}
+	}
+
+	// colapsa espaços extras
+	out := strings.Join(strings.Fields(b.String()), " ")
+	return strings.TrimSpace(out)
 }
