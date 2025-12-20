@@ -71,7 +71,8 @@ func printMetadata() {
     @coder search --term "texto" --dir <path>
     @coder exec --cmd "<comando>" [--dir <path>] [--timeout <segundos>] [--heartbeat <segundos>] [--non-interactive true|false]
     @coder rollback --file <path>
-    @coder clean --dir <path>`,
+    @coder clean --dir <path>
+    # Explicitamente necessário uso de [--encoding base64] caso contrário haverá falha de escrita com base64 cru em arquivo.`,
 		Version: "1.4.0",
 	}
 	// CORREÇÃO LINT: Verificar erro do Encode
