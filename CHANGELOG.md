@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.2](https://github.com/diillson/chatcli/compare/v1.43.1...v1.43.2) (2025-12-20)
+
+
+### Bug Fixes
+
+* **cli:** improve handling of trailing backslashes in tool arguments ([#418](https://github.com/diillson/chatcli/issues/418)) ([488df78](https://github.com/diillson/chatcli/commit/488df78cee75b4f2167b8eb5110594bfd5aa6037))
+
 ## [1.43.1](https://github.com/diillson/chatcli/compare/v1.43.0...v1.43.1) (2025-12-19)
 
 
