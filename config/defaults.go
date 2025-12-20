@@ -65,5 +65,5 @@ const (
 	// Agent plugin max turns
 	AgentPluginMaxTurnsEnv = "CHATCLI_AGENT_PLUGIN_MAX_TURNS"
 	DefaultAgentMaxTurns   = 7
-	MaxAgentMaxTurns       = 70 // limite de segurança
+	MaxAgentMaxTurns       = 200 // limite de segurança
 )
