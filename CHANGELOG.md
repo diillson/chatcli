@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.3](https://github.com/diillson/chatcli/compare/v1.43.2...v1.43.3) (2025-12-20)
+
+
+### Bug Fixes
+
+* **cli:** clarify `--encoding base64` requirement in coder mode help text ([#421](https://github.com/diillson/chatcli/issues/421)) ([#422](https://github.com/diillson/chatcli/issues/422)) ([d45330c](https://github.com/diillson/chatcli/commit/d45330c7360c56d32f85162fef21ffc7a6c74c37))
+
 ## [1.43.2](https://github.com/diillson/chatcli/compare/v1.43.1...v1.43.2) (2025-12-20)
 
 
