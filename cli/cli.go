@@ -694,7 +694,11 @@ func (cli *ChatCLI) runCoderLogic() {
 }
 
 func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
-	if cli.isExecuting.Load() {
+	cli.mu.Lock()
+	hasCancel := cli.operationCancel != nil
+	cli.mu.Unlock()
+
+	if cli.isExecuting.Load() || hasCancel {
 		fmt.Println(i18n.T("prompt.cancel_op"))
 
 		cli.mu.Lock()
@@ -704,14 +708,13 @@ func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 		cli.mu.Unlock()
 
 		cli.interactionState = StateNormal
-
 		cli.forceRefreshPrompt()
-
-	} else {
-		fmt.Println(i18n.T("prompt.confirm_exit"))
-		cli.cleanup()
-		os.Exit(0)
+		return
 	}
+
+	fmt.Println(i18n.T("prompt.confirm_exit"))
+	cli.cleanup()
+	os.Exit(0)
 }
 
 func (cli *ChatCLI) changeLivePrefix() (string, bool) {

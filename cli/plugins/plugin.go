@@ -58,12 +58,56 @@ func stripANSI(str string) string {
 	return re.ReplaceAllString(str, "")
 }
 
+// extractSentinelJSON tenta extrair JSON de blocos sentinela do @coder.
+// Retorna (jsonString, true) quando encontra; senão ("", false).
+func extractSentinelJSON(output string) (string, bool) {
+	s := stripANSI(output)
+
+	// suportar dois tipos
+	patterns := []struct {
+		start string
+		end   string
+	}{
+		{"<<<CHATCLI_EXEC_RESULT_JSON>>>", "<<<END_CHATCLI_EXEC_RESULT_JSON>>>"},
+		{"<<<CHATCLI_EXECSCRIPT_RESULT_JSON>>>", "<<<END_CHATCLI_EXECSCRIPT_RESULT_JSON>>>"},
+	}
+
+	for _, p := range patterns {
+		startIdx := strings.Index(s, p.start)
+		if startIdx == -1 {
+			continue
+		}
+		endIdx := strings.Index(s, p.end)
+		if endIdx == -1 || endIdx <= startIdx {
+			continue
+		}
+
+		mid := s[startIdx+len(p.start) : endIdx]
+		mid = strings.TrimSpace(mid)
+
+		// valida se é JSON (pode ter \n)
+		if json.Valid([]byte(mid)) {
+			return mid, true
+		}
+
+		// às vezes o json vem com newline extra no final; tenta limpar de novo
+		mid2 := strings.TrimSpace(strings.Trim(mid, "\uFEFF"))
+		if json.Valid([]byte(mid2)) {
+			return mid2, true
+		}
+	}
+	return "", false
+}
+
 // Execute invoca o binário do plugin, captura sua saída e trata erros.
+// Melhorias:
+// - stdin fechado por padrão (evita travas por input)
+// - watchdog de silêncio (avisa usuário)
+// - se houver sentinela JSON (@coder), retorna apenas o JSON (melhor para o loop ReAct)
 func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, error) {
 	// 1. Obter timeout configurável
 	timeoutStr := utils.GetEnvOrDefault("CHATCLI_AGENT_PLUGIN_TIMEOUT", "")
 	timeout := config.DefaultPluginTimeout // Padrão de 15 minutos
-
 	if timeoutStr != "" {
 		if d, err := time.ParseDuration(timeoutStr); err == nil && d > 0 {
 			timeout = d
@@ -74,6 +118,9 @@ func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, 
 	defer cancel()
 
 	cmd := exec.CommandContext(execCtx, p.path, args...)
+
+	// 1.1 stdin FECHADO por padrão (evita travar esperando input)
+	cmd.Stdin = nil
 
 	// 2. Obter os pipes de stdout e stderr
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -90,26 +137,97 @@ func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, 
 		return "", fmt.Errorf("falha ao iniciar o plugin '%s': %w", p.Name(), err)
 	}
 
-	// 4. Capturar stdout e stderr em buffers separados
+	// Watchdog de silêncio (configurável)
+	silenceWarnAfter := 2 * time.Minute
+	if v := utils.GetEnvOrDefault("CHATCLI_AGENT_PLUGIN_SILENCE_WARN", ""); v != "" {
+		if d, derr := time.ParseDuration(v); derr == nil && d > 0 {
+			silenceWarnAfter = d
+		}
+	}
+
 	var stdoutBuf, stderrBuf bytes.Buffer
 	var wg sync.WaitGroup
+
+	// Timestamp do último output (stdout/stderr)
+	var lastMu sync.Mutex
+	lastOutputAt := time.Now()
+	touch := func() {
+		lastMu.Lock()
+		lastOutputAt = time.Now()
+		lastMu.Unlock()
+	}
+	getLast := func() time.Time {
+		lastMu.Lock()
+		defer lastMu.Unlock()
+		return lastOutputAt
+	}
+
+	// Watchdog goroutine
+	watchdogDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		warned := false
+
+		for {
+			select {
+			case <-watchdogDone:
+				return
+			case <-execCtx.Done():
+				return
+			case <-ticker.C:
+				if warned {
+					continue
+				}
+				if time.Since(getLast()) >= silenceWarnAfter {
+					// Aviso humano (vai aparecer na timeline do tool result também)
+					fmt.Fprintf(os.Stderr, "\n⚠️  Plugin '%s' sem saída há %s. Se parecer travado, pressione Ctrl+C para cancelar.\n",
+						p.Name(), silenceWarnAfter)
+					_ = os.Stderr.Sync()
+					warned = true
+				}
+			}
+		}
+	}()
 
 	// Captura Stdout
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(&stdoutBuf, stdoutPipe)
+		// copia e marca atividade
+		tee := io.TeeReader(stdoutPipe, &stdoutBuf)
+		buf := make([]byte, 8192)
+		for {
+			n, rerr := tee.Read(buf)
+			if n > 0 {
+				touch()
+			}
+			if rerr != nil {
+				return
+			}
+		}
 	}()
 
-	// Captura Stderr (e também envia para o console para feedback visual ao usuário)
+	// Captura Stderr
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(&stderrBuf, stderrPipe)
+		tee := io.TeeReader(stderrPipe, &stderrBuf)
+		buf := make([]byte, 8192)
+		for {
+			n, rerr := tee.Read(buf)
+			if n > 0 {
+				touch()
+			}
+			if rerr != nil {
+				return
+			}
+		}
 	}()
 
-	// 5. Aguardar as goroutines de I/O terminarem
+	// 5. Aguardar I/O terminar
 	wg.Wait()
+	close(watchdogDone)
 
 	// 6. Aguardar o comando finalizar
 	err = cmd.Wait()
@@ -117,6 +235,21 @@ func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, 
 	// Preparar as saídas limpas (sem ANSI codes)
 	stdoutStr := stripANSI(stdoutBuf.String())
 	stderrStr := stripANSI(stderrBuf.String())
+
+	// Se o plugin é @coder e emitiu JSON sentinela, priorizar retorno “limpo”
+	if js, ok := extractSentinelJSON(stdoutStr); ok {
+		// Em caso de erro, ainda retornamos JSON + erro? Melhor:
+		// - retornar JSON como output (para IA)
+		// - e erro separado (para o ChatCLI mostrar/registrar)
+		if err != nil {
+			// Se timeout:
+			if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+				return js, fmt.Errorf("plugin '%s' excedeu timeout (%v)", p.Name(), timeout)
+			}
+			return js, fmt.Errorf("plugin '%s' falhou: %v", p.Name(), err)
+		}
+		return js, nil
+	}
 
 	if err != nil {
 		// Se houver erro (exit code != 0 ou timeout), construímos uma mensagem rica para a IA
@@ -131,14 +264,12 @@ func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, 
 			errMsgBuilder.WriteString("\n(Nenhuma saída de erro capturada no stderr)\n")
 		}
 
-		// Às vezes ferramentas CLI escrevem erros no stdout, então incluímos também se houver
 		if strings.TrimSpace(stdoutStr) != "" {
 			errMsgBuilder.WriteString("\n--- SAÍDA PADRÃO (STDOUT) ---\n")
 			errMsgBuilder.WriteString(stdoutStr)
 			errMsgBuilder.WriteString("\n-----------------------------\n")
 		}
 
-		// Verificar se foi timeout
 		if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
 			errMsgBuilder.WriteString(fmt.Sprintf("\nNota: A execução excedeu o tempo limite de %v.", timeout))
 		}
@@ -146,7 +277,7 @@ func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, 
 		return "", fmt.Errorf("%s", errMsgBuilder.String())
 	}
 
-	// 7. Retornar o conteúdo capturado de stdout como resultado em caso de sucesso
+	// sucesso: retorna stdout
 	return stdoutStr, nil
 }
 
@@ -156,12 +287,10 @@ func NewPluginFromPath(path string) (Plugin, error) {
 	if err != nil || info.IsDir() {
 		return nil, fmt.Errorf("caminho '%s' não é um arquivo válido", path)
 	}
-	// Verificação de permissão de execução (cross-platform).
 	if info.Mode().Perm()&0111 == 0 {
 		return nil, fmt.Errorf("plugin '%s' não possui permissão de execução", path)
 	}
 
-	// Valida o contrato: executa com --metadata e espera um JSON válido.
 	cmd := exec.Command(path, "--metadata")
 	output, err := cmd.Output()
 	if err != nil {
@@ -177,11 +306,9 @@ func NewPluginFromPath(path string) (Plugin, error) {
 		return nil, fmt.Errorf("metadados do plugin em '%s' estão incompletos (name, description, usage são obrigatórios)", path)
 	}
 
-	// Tenta obter o schema (opcional)
 	var schemaStr string
 	schemaCmd := exec.Command(path, "--schema")
 	if schemaOutput, err := schemaCmd.Output(); err == nil {
-		// Validar se é um JSON válido antes de armazenar
 		if json.Valid(schemaOutput) {
 			schemaStr = string(schemaOutput)
 		}

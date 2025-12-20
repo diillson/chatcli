@@ -1470,7 +1470,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					execErr = fmt.Errorf("plugin não encontrado")
 					toolOutput = fmt.Sprintf("Ferramenta '%s' não existe ou não está instalada.", toolName)
 
-					// No coder, ferramenta @coder é obrigatória; repromptar.
 					if a.isCoderMode {
 						a.cli.history = append(a.cli.history, models.Message{
 							Role: "user",
@@ -1481,7 +1480,25 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						continue
 					}
 				} else {
-					toolOutput, execErr = plugin.Execute(ctx, toolArgs)
+					// ============================
+					// toolCtx cancelável via Ctrl+C
+					// ============================
+					toolCtx, toolCancel := context.WithCancel(ctx)
+
+					// registra cancel no ChatCLI para Ctrl+C abortar a tool
+					a.cli.mu.Lock()
+					a.cli.operationCancel = toolCancel
+					a.cli.mu.Unlock()
+
+					start := time.Now()
+					toolOutput, execErr = plugin.Execute(toolCtx, toolArgs)
+
+					// limpa cancel
+					a.cli.mu.Lock()
+					a.cli.operationCancel = nil
+					a.cli.mu.Unlock()
+
+					_ = start // se quiser logar duração depois
 				}
 			}
 
