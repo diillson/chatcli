@@ -1302,6 +1302,25 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		return strings.Contains(ls, "<reasoning>") && strings.Contains(ls, "</reasoning>")
 	}
 
+	// Helper: detecta e trata o caso clássico do shlex:
+	// "EOF found after escape character" quando args termina com "\".
+	// Também remove múltiplas barras finais por segurança.
+	trimTrailingBackslashes := func(s string) (string, bool) {
+		orig := s
+		t := strings.TrimRight(s, " \t\r\n")
+		if !strings.HasSuffix(t, `\`) {
+			return orig, false
+		}
+		// remove todas as "\" finais (e re-trim)
+		for strings.HasSuffix(strings.TrimRight(t, " \t\r\n"), `\`) {
+			t = strings.TrimRight(t, " \t\r\n")
+			t = strings.TrimSuffix(t, `\`)
+			t = strings.TrimRight(t, " \t\r\n")
+		}
+		// mantém o resto do conteúdo (sem mexer em espaços internos)
+		return t, true
+	}
+
 	for turn := 0; turn < maxTurns; turn++ {
 		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
 
@@ -1403,21 +1422,43 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
 			normalizedArgsStr := joinBackslashNewlines(unescapedToolArgsStr)
+
+			// Guardrail: se terminar com "\" (escape) vai dar EOF no shlex.
+			// Tentamos auto-fix removendo "\" final e seguimos; se preferir ser estrito,
+			// troque para retornar erro imediatamente.
+			if fixed, changed := trimTrailingBackslashes(normalizedArgsStr); changed {
+				a.logger.Warn("tool_call args terminou com barra invertida; aplicando auto-fix removendo '\\' final",
+					zap.String("tool", toolName),
+					zap.String("args_before", normalizedArgsStr),
+					zap.String("args_after", fixed))
+				normalizedArgsStr = fixed
+			}
+
 			toolArgs, shlexErr := shlex.Split(normalizedArgsStr)
 
 			var toolOutput string
 			var execErr error
 
 			if shlexErr != nil {
-				execErr = shlexErr
-				toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", shlexErr)
+				// Melhora a mensagem para o caso típico de "\" no final.
+				trimmed := strings.TrimRight(normalizedArgsStr, " \t\r\n")
+				if strings.HasSuffix(trimmed, `\`) {
+					execErr = fmt.Errorf("args inválido: terminou com '\\' (escape) sem continuação. " +
+						"Envie o args em uma linha única OU use '\\' + newline seguido de continuação real. " +
+						"Exemplo: exec --cmd 'go test ./...'")
+					toolOutput = execErr.Error()
+				} else {
+					execErr = shlexErr
+					toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", shlexErr)
+				}
 
 				// No coder, força correção do args e impede seguir.
 				if a.isCoderMode {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
 						Content: fmt.Sprintf("Seu <tool_call> veio com args inválido (erro: %v). "+
-							"Reenvie SOMENTE o <tool_call> com args corretamente escapado (aspas balanceadas).", shlexErr),
+							"Reenvie SOMENTE o <tool_call> com args em linha única, sem '\\' no final, "+
+							"e com aspas balanceadas. Ex: <tool_call name=\"@coder\" args=\"exec --cmd 'go test ./...'\" />", execErr),
 					})
 					// Ainda renderizamos o erro para o usuário, mas não fazemos feedback tool_output como se tivesse executado.
 					renderer.RenderToolResult(toolOutput+"\n\n--- ERRO ---\n"+execErr.Error(), true)
