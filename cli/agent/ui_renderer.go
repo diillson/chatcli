@@ -7,6 +7,7 @@ package agent
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"regexp"
@@ -323,10 +324,22 @@ func (r *UIRenderer) RenderThinking(thought string) {
 	r.RenderTimelineEvent("🧠", "RACIOCÍNIO", thought, ColorCyan)
 }
 
-// RenderToolCall exibe a chamada da ferramenta de forma limpa (escondendo Base64)
+// RenderToolCall exibe a chamada da ferramenta de forma limpa (escondendo Base64 e sujeira HTML)
 func (r *UIRenderer) RenderToolCall(toolName, rawArgs string) {
-	// Limpar argumentos para visualização (esconder base64 gigante)
-	displayArgs := cleanArgsForDisplay(rawArgs)
+	// 1. Decodificar HTML entities (&quot; -> ", &#10; -> \n)
+	cleanArgs := html.UnescapeString(rawArgs)
+
+	// 2. Remover quebras de linha com barra invertida (visualização em linha única)
+	// Isso faz o box ficar igual ao comando que será realmente executado
+	re := regexp.MustCompile(`\\\s*[\r\n]+`)
+	cleanArgs = re.ReplaceAllString(cleanArgs, " ")
+
+	// 3. Remove espaços extras gerados pela junção das linhas
+	spaceRe := regexp.MustCompile(`\s+`)
+	cleanArgs = spaceRe.ReplaceAllString(strings.TrimSpace(cleanArgs), " ")
+
+	// 4. Limpar argumentos específicos (esconder base64 gigante) - Função existente
+	displayArgs := cleanArgsForDisplay(cleanArgs)
 
 	content := fmt.Sprintf("Ferramenta: %s\nArgs: %s",
 		r.Colorize(toolName, ColorYellow+ColorBold),
