@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"html"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -73,7 +75,7 @@ func printMetadata() {
     @coder rollback --file <path>
     @coder clean --dir <path>
     # Explicitamente necessário uso de [--encoding base64] caso contrário haverá falha de escrita com base64 cru em arquivo.`,
-		Version: "1.4.0",
+		Version: "1.5.1",
 	}
 	// CORREÇÃO LINT: Verificar erro do Encode
 	if err := json.NewEncoder(os.Stdout).Encode(meta); err != nil {
@@ -348,7 +350,13 @@ func handleExec(args []string) {
 		fatalf("--cmd obrigatório")
 	}
 
-	fmt.Printf("⚙️ Executando: %s\n----------------\n", *cmdStr)
+	decodedCmd := html.UnescapeString(*cmdStr)
+	re := regexp.MustCompile(`\\\s*[\r\n]+`)
+	finalCmd := re.ReplaceAllString(decodedCmd, " ")
+	spaceRe := regexp.MustCompile(`\s+`)
+	finalCmd = spaceRe.ReplaceAllString(strings.TrimSpace(finalCmd), " ")
+
+	fmt.Printf("⚙️ Executando: %s\n----------------\n", finalCmd)
 
 	// Context com timeout
 	ctx := context.Background()
@@ -361,9 +369,9 @@ func handleExec(args []string) {
 	// Shell cross-platform
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd.exe", "/C", *cmdStr)
+		cmd = exec.CommandContext(ctx, "cmd.exe", "/C", finalCmd)
 	} else {
-		cmd = exec.CommandContext(ctx, "sh", "-c", *cmdStr)
+		cmd = exec.CommandContext(ctx, "sh", "-c", finalCmd)
 	}
 
 	if *dir != "" {
