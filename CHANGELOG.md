@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.4](https://github.com/diillson/chatcli/compare/v1.43.3...v1.43.4) (2025-12-23)
+
+
+### Bug Fixes
+
+* **cli:** add HTML decoding and improved multiline command handling ([#424](https://github.com/diillson/chatcli/issues/424)) ([#425](https://github.com/diillson/chatcli/issues/425)) ([4951dbe](https://github.com/diillson/chatcli/commit/4951dbe4e75f29a3702324529affe1f4e7512d96))
+
 ## [1.43.3](https://github.com/diillson/chatcli/compare/v1.43.2...v1.43.3) (2025-12-20)
 
 
