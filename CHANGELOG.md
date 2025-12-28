@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.6](https://github.com/diillson/chatcli/compare/v1.43.5...v1.43.6) (2025-12-28)
+
+
+### Bug Fixes
+
+* **cli:** replace shlex with custom multiline parser for tool args handling ([#430](https://github.com/diillson/chatcli/issues/430)) ([#431](https://github.com/diillson/chatcli/issues/431)) ([144501e](https://github.com/diillson/chatcli/commit/144501eed2a2a7baa9a0a7d5f52fd933c959d3de))
+
 ## [1.43.5](https://github.com/diillson/chatcli/compare/v1.43.4...v1.43.5) (2025-12-28)
 
 
