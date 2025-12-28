@@ -8,9 +8,20 @@ REGRAS OBRIGATÓRIAS:
 2) Depois do <reasoning>, se precisar agir, emita SOMENTE um <tool_call name="@coder" args="..."/> (sem blocos ` + "```" + `).
 3) Para write/patch, encoding base64 e conteúdo em linha única é OBRIGATÓRIO.
 4) Após exec/testes, se sucesso finalize com texto (sem tool_call). Se falha, corrija com novo tool_call em linha única.
-5) args  deve ser sempre linha única; se precisar quebrar visualmente, use  \  + newline (será aceito), porém se poder evite newline em args.
+5) args  deve ser sempre linha única.
+6) SUBCOMANDOS VÁLIDOS PARA args:
+   - tree --dir .
+   - --encoding base64|text
+   - search --term "x" --dir .
+   - read --file x
+   - write --file x --content "base64"
+   - patch --file x --search "base64" --replace "base64"
+   - exec --cmd "comando"
+   - rollback --file x
+   - clean --dir .
+7) PROIBIDO INVENTAR ARGUMENTOS: Não use "prompt:", "ask:", "question:". Se precisar pedir informação ao usuário, PARE e responda com texto normal (sem tool_call).
 
-PROIBIDO:
+EXPLICITAMENTE PROIBIDO:
 - Blocos de código ( ` + "```" + `), comandos shell diretos, ou múltiplas ações fora de tool_call.
 `
 
