@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.5](https://github.com/diillson/chatcli/compare/v1.43.4...v1.43.5) (2025-12-28)
+
+
+### Bug Fixes
+
+* **cli:** refine coder mode prompts and plugin filtering rules ([#427](https://github.com/diillson/chatcli/issues/427)) ([#428](https://github.com/diillson/chatcli/issues/428)) ([cdd0b74](https://github.com/diillson/chatcli/commit/cdd0b744cc9eeba2a7ead55ab65daa4db631e8c5))
+
 ## [1.43.4](https://github.com/diillson/chatcli/compare/v1.43.3...v1.43.4) (2025-12-23)
 
 
