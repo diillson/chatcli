@@ -1220,6 +1220,10 @@ func (a *AgentMode) getToolContextString() string {
 
 	var toolDescriptions []string
 	for _, plugin := range plugins {
+		if a.isCoderMode && !strings.EqualFold(plugin.Name(), "@coder") {
+			continue
+		}
+
 		var b strings.Builder
 		b.WriteString(fmt.Sprintf("- Ferramenta: %s\n", plugin.Name()))
 		b.WriteString(fmt.Sprintf("  Descrição: %s\n", plugin.Description()))

@@ -176,15 +176,20 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 // filterThinking remove partes de "pensamento em voz alta" da resposta.
 // Retorna a resposta filtrada ou original se não encontrar padrões.
 func filterThinking(response string) string {
-	// Padrões comuns: tags <thinking>, ou frases como "Thinking:" / "Reasoning:"
+	// Remove blocos de pensamento comuns em modelos como DeepSeek-R1 e Qwen
 	patterns := []struct {
 		re   *regexp.Regexp
 		repl string
 	}{
-		{regexp.MustCompile(`(?is)<think(ing)?>.*?</think(ing)?>`), ""},             // Captura <think> ou <thinking>
-		{regexp.MustCompile(`(?is)Thinking step by step:.*?(Final Answer:)`), "$1"}, // Mantém só final
-		{regexp.MustCompile(`(?is)Reasoning:.*?(Answer:)`), "$1"},                   // Similar
-		{regexp.MustCompile(`(?is)\\<think\\>.*?</think>`), ""},                     // Captura escapados (\ para <)
+		// Captura <think>...</think> (DeepSeek R1 padrão)
+		{regexp.MustCompile(`(?s)<think>.*?</think>`), ""},
+		// Captura variações como <thinking>
+		{regexp.MustCompile(`(?s)<thinking>.*?</thinking>`), ""},
+		// Captura tags escapadas que às vezes vazam do Ollama
+		{regexp.MustCompile(`(?s)\\<think\\>.*?\\</think\\>`), ""},
+		// Remove raciocínio textual solto comum em modelos mais antigos
+		{regexp.MustCompile(`(?i)^Thinking:.*?(\n|$)`), ""},
+		{regexp.MustCompile(`(?i)^Reasoning:.*?(\n|$)`), ""},
 	}
 
 	filtered := response
@@ -192,13 +197,10 @@ func filterThinking(response string) string {
 		filtered = p.re.ReplaceAllString(filtered, p.repl)
 	}
 
-	// Trim espaços extras e remove linhas vazias iniciais/finais
+	// Limpeza extra: Remove linhas em branco excessivas no início
 	filtered = strings.TrimSpace(filtered)
-	filtered = regexp.MustCompile(`(?m)^\s*\n`).ReplaceAllString(filtered, "")
 
-	// Se nada mudou, retorna original
-	if filtered == response {
-		return response
-	}
+	// Se o modelo removeu tudo (só pensou e não agiu), isso é um problema,
+	// mas retornamos o filtered para o agente tentar lidar.
 	return filtered
 }
