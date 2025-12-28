@@ -176,31 +176,32 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 // filterThinking remove partes de "pensamento em voz alta" da resposta.
 // Retorna a resposta filtrada ou original se não encontrar padrões.
 func filterThinking(response string) string {
-	// Remove blocos de pensamento comuns em modelos como DeepSeek-R1 e Qwen
-	patterns := []struct {
-		re   *regexp.Regexp
-		repl string
-	}{
-		// Captura <think>...</think> (DeepSeek R1 padrão)
-		{regexp.MustCompile(`(?s)<think>.*?</think>`), ""},
-		// Captura variações como <thinking>
-		{regexp.MustCompile(`(?s)<thinking>.*?</thinking>`), ""},
-		// Captura tags escapadas que às vezes vazam do Ollama
-		{regexp.MustCompile(`(?s)\\<think\\>.*?\\</think\\>`), ""},
-		// Remove raciocínio textual solto comum em modelos mais antigos
-		{regexp.MustCompile(`(?i)^Thinking:.*?(\n|$)`), ""},
-		{regexp.MustCompile(`(?i)^Reasoning:.*?(\n|$)`), ""},
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?is)<think(ing)?>.*?</think(ing)?>`),
+		regexp.MustCompile(`(?is)Thinking step by step:.*?(Final Answer:)`),
+		regexp.MustCompile(`(?is)Reasoning:.*?(Answer:)`),
+		regexp.MustCompile(`(?is)\\<think\\>.*?</think>`),
 	}
 
+	changed := false
 	filtered := response
-	for _, p := range patterns {
-		filtered = p.re.ReplaceAllString(filtered, p.repl)
+
+	// aplica padrões e marca se mudou
+	for _, re := range patterns {
+		newText := re.ReplaceAllString(filtered, "")
+		if newText != filtered {
+			changed = true
+			filtered = newText
+		}
 	}
 
-	// Limpeza extra: Remove linhas em branco excessivas no início
-	filtered = strings.TrimSpace(filtered)
+	// se não removeu nada, não mexe em whitespace
+	if !changed {
+		return response
+	}
 
-	// Se o modelo removeu tudo (só pensou e não agiu), isso é um problema,
-	// mas retornamos o filtered para o agente tentar lidar.
+	// limpeza apenas quando houve remoção
+	filtered = strings.TrimSpace(filtered)
+	filtered = regexp.MustCompile(`(?m)^\s*\n`).ReplaceAllString(filtered, "")
 	return filtered
 }
