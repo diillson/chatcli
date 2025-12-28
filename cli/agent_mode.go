@@ -28,7 +28,6 @@ import (
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
-	"github.com/google/shlex"
 	"go.uber.org/zap"
 )
 
@@ -1309,21 +1308,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	// Helper: detecta e trata o caso clássico do shlex:
 	// "EOF found after escape character" quando args termina com "\".
 	// Também remove múltiplas barras finais por segurança.
-	trimTrailingBackslashes := func(s string) (string, bool) {
-		orig := s
-		t := strings.TrimRight(s, " \t\r\n")
-		if !strings.HasSuffix(t, `\`) {
-			return orig, false
-		}
-		// remove todas as "\" finais (e re-trim)
-		for strings.HasSuffix(strings.TrimRight(t, " \t\r\n"), `\`) {
-			t = strings.TrimRight(t, " \t\r\n")
-			t = strings.TrimSuffix(t, `\`)
-			t = strings.TrimRight(t, " \t\r\n")
-		}
-		// mantém o resto do conteúdo (sem mexer em espaços internos)
-		return t, true
-	}
+	//trimTrailingBackslashes := func(s string) (string, bool) {
+	//	orig := s
+	//	t := strings.TrimRight(s, " \t\r\n")
+	//	if !strings.HasSuffix(t, `\`) {
+	//		return orig, false
+	//	}
+	//	// remove todas as "\" finais (e re-trim)
+	//	for strings.HasSuffix(strings.TrimRight(t, " \t\r\n"), `\`) {
+	//		t = strings.TrimRight(t, " \t\r\n")
+	//		t = strings.TrimSuffix(t, `\`)
+	//		t = strings.TrimRight(t, " \t\r\n")
+	//	}
+	//	// mantém o resto do conteúdo (sem mexer em espaços internos)
+	//	return t, true
+	//}
 
 	for turn := 0; turn < maxTurns; turn++ {
 		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
@@ -1425,46 +1424,38 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			renderer.RenderToolCall(toolName, toolArgsStr)
 
 			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
-			normalizedArgsStr := joinBackslashNewlines(unescapedToolArgsStr)
+			normalizedArgsStr := strings.ReplaceAll(unescapedToolArgsStr, "\r\n", "\n")
 
 			// Guardrail: se terminar com "\" (escape) vai dar EOF no shlex.
 			// Tentamos auto-fix removendo "\" final e seguimos; se preferir ser estrito,
 			// troque para retornar erro imediatamente.
-			if fixed, changed := trimTrailingBackslashes(normalizedArgsStr); changed {
-				a.logger.Warn("tool_call args terminou com barra invertida; aplicando auto-fix removendo '\\' final",
+			if fixed, changed := trimTrailingBackslashesOutsideQuotes(normalizedArgsStr); changed {
+				a.logger.Warn("tool_call args terminou com barra invertida fora de aspas; aplicando auto-fix removendo '\\' final",
 					zap.String("tool", toolName),
 					zap.String("args_before", normalizedArgsStr),
 					zap.String("args_after", fixed))
 				normalizedArgsStr = fixed
 			}
 
-			toolArgs, shlexErr := shlex.Split(normalizedArgsStr)
+			toolArgs, parseErr := splitToolArgsMultiline(normalizedArgsStr)
 
 			var toolOutput string
 			var execErr error
 
-			if shlexErr != nil {
-				// Melhora a mensagem para o caso típico de "\" no final.
-				trimmed := strings.TrimRight(normalizedArgsStr, " \t\r\n")
-				if strings.HasSuffix(trimmed, `\`) {
-					execErr = fmt.Errorf("args inválido: terminou com '\\' (escape) sem continuação. " +
-						"Envie o args em uma linha única OU use '\\' + newline seguido de continuação real. " +
-						"Exemplo: exec --cmd 'go test ./...'")
-					toolOutput = execErr.Error()
-				} else {
-					execErr = shlexErr
-					toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", shlexErr)
-				}
+			if parseErr != nil {
+				execErr = parseErr
+				toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", parseErr)
 
 				// No coder, força correção do args e impede seguir.
 				if a.isCoderMode {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
 						Content: fmt.Sprintf("Seu <tool_call> veio com args inválido (erro: %v). "+
-							"Reenvie SOMENTE o <tool_call> com args em linha única, sem '\\' no final, "+
-							"e com aspas balanceadas. Ex: <tool_call name=\"@coder\" args=\"exec --cmd 'go test ./...'\" />", execErr),
+							"Reenvie SOMENTE o <tool_call> com aspas balanceadas. "+
+							"Você pode usar multilinha dentro de aspas, mas evite terminar linhas com '\\' fora de aspas. "+
+							"Exemplo: <tool_call name=\"@coder\" args=\"exec --cmd 'go test ./...'\" />",
+							parseErr),
 					})
-					// Ainda renderizamos o erro para o usuário, mas não fazemos feedback tool_output como se tivesse executado.
 					renderer.RenderToolResult(toolOutput+"\n\n--- ERRO ---\n"+execErr.Error(), true)
 					continue
 				}
@@ -1616,39 +1607,157 @@ func AgentMaxTurns() int {
 	return turns
 }
 
-// helper multilinhas
-func joinBackslashNewlines(s string) string {
-	// normaliza quebras
-	s = strings.ReplaceAll(s, "\r\n", "\n")
+// splitToolArgsMultiline faz split de argv estilo shell, mas com suporte a multilinha.
+// Regras:
+// - separa por whitespace (inclui \n) quando NÃO estiver dentro de aspas
+// - suporta aspas simples e duplas
+// - permite newline dentro de aspas (vira parte do mesmo argumento)
+// - "\" funciona como escape fora de aspas simples (ex: \" ou \n literal etc.)
+// - não interpreta sequências como \n => newline; mantém literal \ + n (quem interpreta é o plugin, se quiser)
+// - retorna erro se aspas não balanceadas ou escape pendente no final
+func splitToolArgsMultiline(s string) ([]string, error) {
+	var args []string
+	var buf strings.Builder
 
-	lines := strings.Split(s, "\n")
-	if len(lines) == 1 {
-		return strings.TrimSpace(s)
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	flush := func() {
+		if buf.Len() > 0 {
+			args = append(args, buf.String())
+			buf.Reset()
+		}
 	}
 
-	var b strings.Builder
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
+	isWS := func(b byte) bool {
+		return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+	}
 
-		trimRight := strings.TrimRight(line, " \t")
-		continued := strings.HasSuffix(trimRight, `\`)
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
 
-		if continued {
-			// remove o "\" final
-			trimRight = strings.TrimRight(trimRight[:len(trimRight)-1], " \t")
-			b.WriteString(trimRight)
-			// ao concatenar com a próxima linha, garante separador
-			b.WriteString(" ")
+		if escaped {
+			// mantém o caractere literalmente (escape "cru")
+			buf.WriteByte(ch)
+			escaped = false
 			continue
 		}
 
-		b.WriteString(line)
-		if i < len(lines)-1 {
-			b.WriteString(" ")
+		// escape só faz sentido fora de aspas simples
+		if ch == '\\' && !inSingle {
+			escaped = true
+			continue
+		}
+
+		switch ch {
+		case '\'':
+			// aspas simples só alterna se não estiver dentro de aspas duplas
+			if !inDouble {
+				inSingle = !inSingle
+				continue
+			}
+		case '"':
+			// aspas duplas só alterna se não estiver dentro de aspas simples
+			if !inSingle {
+				inDouble = !inDouble
+				continue
+			}
+		}
+
+		// separador: whitespace fora de aspas
+		if isWS(ch) && !inSingle && !inDouble {
+			flush()
+			continue
+		}
+
+		buf.WriteByte(ch)
+	}
+
+	if escaped {
+		return nil, fmt.Errorf("args inválido: terminou com '\\' (escape) sem continuação")
+	}
+	if inSingle || inDouble {
+		return nil, fmt.Errorf("args inválido: aspas não balanceadas")
+	}
+
+	flush()
+	return args, nil
+}
+
+// trimTrailingBackslashesOutsideQuotes remove barras invertidas finais (\\) que ficarem
+// NO FINAL DO TEXTO e que estejam fora de aspas.
+// Isso evita o caso clássico em que o modelo termina uma linha com "\" e o parser entende como escape pendente.
+// Retorna (novoTexto, mudou?).
+func trimTrailingBackslashesOutsideQuotes(s string) (string, bool) {
+	orig := s
+
+	// Normaliza finais
+	t := strings.TrimRight(s, " \t\r\n")
+	if t == "" {
+		return orig, false
+	}
+
+	// Para saber se o último "\" está fora de aspas, precisamos fazer um scan simples.
+	// Vamos remover "\" finais repetidos enquanto:
+	// - o texto termina com "\"
+	// - e esse "\" está fora de aspas (single/double)
+	for {
+		t2 := strings.TrimRight(t, " \t\r\n")
+		if !strings.HasSuffix(t2, `\`) {
+			break
+		}
+
+		// Verifica se o "\" final está fora de aspas
+		if !isLastBackslashOutsideQuotes(t2) {
+			// se está dentro de aspas, não mexe (é conteúdo)
+			break
+		}
+
+		// remove a "\" final
+		t2 = strings.TrimSuffix(t2, `\`)
+		t = strings.TrimRight(t2, " \t\r\n")
+	}
+
+	if t == strings.TrimRight(orig, " \t\r\n") {
+		return orig, false
+	}
+
+	// preserva a parte original “antes” (mas retornamos trimmed, pois era um erro estrutural)
+	return t, true
+}
+
+// isLastBackslashOutsideQuotes detecta se o último caractere "\" está fora de aspas.
+// Supõe que s já termina com "\".
+func isLastBackslashOutsideQuotes(s string) bool {
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' && !inSingle {
+			// escape em modo normal/aspas duplas
+			escaped = true
+			continue
+		}
+
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
 		}
 	}
 
-	// colapsa espaços extras
-	out := strings.Join(strings.Fields(b.String()), " ")
-	return strings.TrimSpace(out)
+	// Se termina com "\" e estamos fora de aspas, então é o caso problemático.
+	return !inSingle && !inDouble
 }
