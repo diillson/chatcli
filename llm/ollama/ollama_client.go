@@ -176,29 +176,43 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 // filterThinking remove partes de "pensamento em voz alta" da resposta.
 // Retorna a resposta filtrada ou original se não encontrar padrões.
 func filterThinking(response string) string {
-	// Padrões comuns: tags <thinking>, ou frases como "Thinking:" / "Reasoning:"
+	// Padrões comuns: tags <thinking>/<think>, ou frases como "Thinking step by step:" / "Reasoning:"
 	patterns := []struct {
 		re   *regexp.Regexp
 		repl string
 	}{
-		{regexp.MustCompile(`(?is)<think(ing)?>.*?</think(ing)?>`), ""},             // Captura <think> ou <thinking>
-		{regexp.MustCompile(`(?is)Thinking step by step:.*?(Final Answer:)`), "$1"}, // Mantém só final
-		{regexp.MustCompile(`(?is)Reasoning:.*?(Answer:)`), "$1"},                   // Similar
-		{regexp.MustCompile(`(?is)\\<think\\>.*?</think>`), ""},                     // Captura escapados (\ para <)
+		// Remove blocos <think>...</think> ou <thinking>...</thinking>
+		{regexp.MustCompile(`(?is)<think(ing)?>.*?</think(ing)?>`), ""},
+
+		// Mantém do "Final Answer:" até o fim (corrige o teste que espera "Final Answer: 42")
+		{regexp.MustCompile(`(?is)Thinking step by step:.*?(Final Answer:.*)$`), "$1"},
+
+		// Mantém do "Answer:" até o fim (consistência)
+		{regexp.MustCompile(`(?is)Reasoning:.*?(Answer:.*)$`), "$1"},
+
+		// Remove tags escapadas (\<think\>...\</think\>) que alguns modelos retornam
+		{regexp.MustCompile(`(?is)\\<think\\>.*?</think>`), ""},
 	}
 
 	filtered := response
+	changed := false
+
 	for _, p := range patterns {
-		filtered = p.re.ReplaceAllString(filtered, p.repl)
+		newText := p.re.ReplaceAllString(filtered, p.repl)
+		if newText != filtered {
+			changed = true
+			filtered = newText
+		}
 	}
 
-	// Trim espaços extras e remove linhas vazias iniciais/finais
+	// Se não mudou nada, retorna exatamente o original
+	if !changed {
+		return response
+	}
+
+	// Limpa apenas quando houve remoção/substituição
 	filtered = strings.TrimSpace(filtered)
 	filtered = regexp.MustCompile(`(?m)^\s*\n`).ReplaceAllString(filtered, "")
 
-	// Se nada mudou, retorna original
-	if filtered == response {
-		return response
-	}
 	return filtered
 }
