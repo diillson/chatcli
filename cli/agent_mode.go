@@ -1272,12 +1272,9 @@ func (a *AgentMode) getToolContextString() string {
 	return "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + strings.Join(toolDescriptions, "\n") + "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
 }
 
-// processAIResponseAndAct executa o loop de raciocínio e ação com UI aprimorada (Timeline).
 func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
 	renderer := agent.NewUIRenderer(a.logger)
 
-	// Helper: cria um "reminder" curto por turno para evitar drift/esquecimento.
-	// Mantemos como system para dar prioridade, mas é curto para não poluir.
 	buildTurnHistoryWithAnchor := func() []models.Message {
 		h := make([]models.Message, 0, len(a.cli.history)+1)
 		h = append(h, a.cli.history...)
@@ -1298,36 +1295,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		return h
 	}
 
-	// Helper: valida se o "thought" tem um <reasoning> minimamente presente quando exigido.
-	// No modo coder, exigimos reasoning antes de tool_call para manter UX e reduzir loops.
 	hasReasoningTag := func(s string) bool {
 		ls := strings.ToLower(s)
 		return strings.Contains(ls, "<reasoning>") && strings.Contains(ls, "</reasoning>")
 	}
 
-	// Helper: detecta e trata o caso clássico do shlex:
-	// "EOF found after escape character" quando args termina com "\".
-	// Também remove múltiplas barras finais por segurança.
-	//trimTrailingBackslashes := func(s string) (string, bool) {
-	//	orig := s
-	//	t := strings.TrimRight(s, " \t\r\n")
-	//	if !strings.HasSuffix(t, `\`) {
-	//		return orig, false
-	//	}
-	//	// remove todas as "\" finais (e re-trim)
-	//	for strings.HasSuffix(strings.TrimRight(t, " \t\r\n"), `\`) {
-	//		t = strings.TrimRight(t, " \t\r\n")
-	//		t = strings.TrimSuffix(t, `\`)
-	//		t = strings.TrimRight(t, " \t\r\n")
-	//	}
-	//	// mantém o resto do conteúdo (sem mexer em espaços internos)
-	//	return t, true
-	//}
+	// Helper local: renderizar um card com markdown usando o renderer do cli (glamour).
+	renderMDCard := func(icon, title, md, color string) {
+		md = strings.TrimSpace(md)
+		if md == "" {
+			return
+		}
+		rendered := a.cli.renderMarkdown(md) // retorna ANSI
+		renderer.RenderMarkdownTimelineEvent(icon, title, rendered, color)
+	}
 
 	for turn := 0; turn < maxTurns; turn++ {
 		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
 
-		// Feedback visual de "Pensando..."
 		a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
 		turnHistory := buildTurnHistoryWithAnchor()
@@ -1342,41 +1327,47 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Persistir a resposta no histórico "real" (sem o anchor temporário).
 		a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
 
-		// Parse tool calls (robusto) - pode retornar múltiplos
 		toolCalls, parseErr := agent.ParseToolCalls(aiResponse)
 		if parseErr != nil {
 			a.logger.Warn("Falha ao parsear tool_calls", zap.Error(parseErr))
-			// não falha o turno; continua fluxo como "sem tool call"
 			toolCalls = nil
 		}
 
-		// Separar "pensamento/texto" de "ação"
-		var thoughtText string
+		// Pensamento = tudo antes do primeiro tool_call (se existir)
+		thoughtText := strings.TrimSpace(aiResponse)
 		if len(toolCalls) > 0 {
-			// pensamento = tudo antes do primeiro tool_call raw
 			firstRaw := toolCalls[0].Raw
 			parts := strings.Split(aiResponse, firstRaw)
 			thoughtText = strings.TrimSpace(parts[0])
-		} else {
-			thoughtText = strings.TrimSpace(aiResponse)
 		}
 
-		// Renderizar o "pensamento" na timeline (limpo)
-		if strings.TrimSpace(thoughtText) != "" {
-			cleanThought := removeXMLTags(thoughtText)
-			if strings.TrimSpace(cleanThought) != "" {
-				renderer.RenderThinking(cleanThought)
-			}
+		// ==============
+		// RENDER (agent): sempre timeline, com markdown dentro do card
+		// ==============
+		// Extrai reasoning/explanation sem destruir markdown
+		reasoning, _ := extractXMLTagContent(thoughtText, "reasoning")
+		explanation, _ := extractXMLTagContent(thoughtText, "explanation")
+
+		remaining := thoughtText
+		remaining = stripXMLTagBlock(remaining, "reasoning")
+		remaining = stripXMLTagBlock(remaining, "explanation")
+		remaining = strings.TrimSpace(removeXMLTags(remaining))
+
+		if strings.TrimSpace(reasoning) != "" {
+			renderMDCard("🧠", "RACIOCÍNIO", reasoning, agent.ColorCyan)
+		}
+		if strings.TrimSpace(explanation) != "" {
+			renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
+		}
+		if strings.TrimSpace(remaining) != "" {
+			renderMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
 		}
 
 		// =========================
 		// REGRAS ESTRITAS DO /CODER
 		// =========================
 		if a.isCoderMode {
-			// 1) Se existe tool_call, exigir reasoning antes dele.
 			if len(toolCalls) > 0 {
-				// No coder, exigimos explicitamente <reasoning>…</reasoning> antes da ação.
-				// Se ele escreveu texto mas sem a tag, forçamos correção.
 				if !hasReasoningTag(thoughtText) {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
@@ -1386,7 +1377,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					continue
 				}
 
-				// No coder, a ferramenta deve ser @coder (explícito)
 				if !strings.EqualFold(strings.TrimSpace(toolCalls[0].Name), "@coder") {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
@@ -1397,9 +1387,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 			}
 
-			// 2) Se NÃO existe tool_call, mas a IA tentou mandar comandos/blocos, corrigir.
 			if len(toolCalls) == 0 {
-				// Heurísticas: presença de fence ``` ou execute blocks ou prompt-like "$ "
 				if strings.Contains(aiResponse, "```") || strings.Contains(aiResponse, "```execute:") || regexp.MustCompile(`(?m)^[$#]\s+`).MatchString(aiResponse) {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
@@ -1415,20 +1403,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// PRIORIDADE 1: EXECUTAR TOOL_CALL(s)
 		// ==================================
 		if len(toolCalls) > 0 {
-			// Execução de apenas 1 tool_call por turno (produção: previsibilidade + evita cascata perigosa)
 			tc := toolCalls[0]
 			toolName := tc.Name
 			toolArgsStr := tc.Args
 
-			// Renderizar o Card de Ação
 			renderer.RenderToolCall(toolName, toolArgsStr)
 
 			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
 			normalizedArgsStr := strings.ReplaceAll(unescapedToolArgsStr, "\r\n", "\n")
 
-			// Guardrail: se terminar com "\" (escape) vai dar EOF no shlex.
-			// Tentamos auto-fix removendo "\" final e seguimos; se preferir ser estrito,
-			// troque para retornar erro imediatamente.
 			if fixed, changed := trimTrailingBackslashesOutsideQuotes(normalizedArgsStr); changed {
 				a.logger.Warn("tool_call args terminou com barra invertida fora de aspas; aplicando auto-fix removendo '\\' final",
 					zap.String("tool", toolName),
@@ -1446,7 +1429,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				execErr = parseErr
 				toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", parseErr)
 
-				// No coder, força correção do args e impede seguir.
 				if a.isCoderMode {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
@@ -1465,7 +1447,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					execErr = fmt.Errorf("plugin não encontrado")
 					toolOutput = fmt.Sprintf("Ferramenta '%s' não existe ou não está instalada.", toolName)
 
-					// No coder, ferramenta @coder é obrigatória; repromptar.
 					if a.isCoderMode {
 						a.cli.history = append(a.cli.history, models.Message{
 							Role: "user",
@@ -1480,7 +1461,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 			}
 
-			// Renderizar o Resultado (Timeline Card)
 			displayForHuman := toolOutput
 			if execErr != nil {
 				errText := execErr.Error()
@@ -1492,7 +1472,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 			renderer.RenderToolResult(displayForHuman, execErr != nil)
 
-			// Feedback para a IA (Histórico)
 			payloadForAI := toolOutput
 			if execErr != nil {
 				errText := execErr.Error()
@@ -1506,7 +1485,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, payloadForAI)
 			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
-			// Se o modelo enviou múltiplos tool_calls, instruímos a enviar um por turno.
 			if len(toolCalls) > 1 {
 				a.cli.history = append(a.cli.history, models.Message{
 					Role: "user",
@@ -1515,7 +1493,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				})
 			}
 
-			continue // Próximo turno
+			continue
 		}
 
 		// ==============================================
@@ -1523,7 +1501,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// ==============================================
 		commandBlocks := a.extractCommandBlocks(aiResponse)
 		if len(commandBlocks) > 0 {
-			// No coder one-shot, NÃO abrir menu. Forçar tool_call @coder.
 			if a.isCoderMode && a.isOneShot {
 				a.cli.history = append(a.cli.history, models.Message{
 					Role: "user",
@@ -1534,7 +1511,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				continue
 			}
 
-			// Se for coder interativo (não one-shot) e vier bloco, também forçar correção.
 			if a.isCoderMode {
 				a.cli.history = append(a.cli.history, models.Message{
 					Role: "user",
@@ -1544,8 +1520,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				continue
 			}
 
-			// /agent padrão: mantém comportamento antigo (menu/exec)
-			a.displayResponseWithoutCommands(aiResponse, commandBlocks)
+			// AGORA: não imprime “resposta normal” aqui.
+			// Só entra no fluxo do plano/menu do agente.
+			renderMDCard("🧩", "PLANO GERADO", "A IA gerou um plano de ação com comandos executáveis. Use o menu abaixo para executar.", agent.ColorLime)
 			a.handleCommandBlocks(ctx, commandBlocks)
 			return nil
 		}
@@ -1553,12 +1530,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// ==========================================
 		// PRIORIDADE 3: RESPOSTA FINAL (sem ações)
 		// ==========================================
-		// Se chegou aqui, é uma resposta final (sem tool_calls, sem blocos de comando).
 		fmt.Println(renderer.Colorize("\n🏁 TAREFA CONCLUÍDA", agent.ColorGreen+agent.ColorBold))
 		return nil
 	}
 
-	// Limite de turnos atingido
 	fmt.Println(renderer.Colorize(
 		fmt.Sprintf("\n⚠️ Limite de %d passos atingido. O agente parou para evitar loop infinito.", maxTurns),
 		agent.ColorYellow,
@@ -1566,10 +1541,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	return nil
 }
 
-// removeXMLTags remove tags como <reasoning> e <explanation> para limpar a visualização
+// removeXMLTags remove tags conhecidas, mantendo o conteúdo.
+// Não remove conteúdo e não mexe em markdown dentro do texto.
 func removeXMLTags(text string) string {
-	// Remove tags de abertura e fechamento, mantendo o conteúdo
-	re := regexp.MustCompile(`</?(reasoning|explanation|thought)>`)
+	re := regexp.MustCompile(`(?is)</?\s*(reasoning|explanation|thought)\s*>`)
 	return re.ReplaceAllString(text, "")
 }
 
@@ -1760,4 +1735,23 @@ func isLastBackslashOutsideQuotes(s string) bool {
 
 	// Se termina com "\" e estamos fora de aspas, então é o caso problemático.
 	return !inSingle && !inDouble
+}
+
+// extractXMLTagContent extrai o conteúdo de <tag>...</tag> (case-insensitive).
+// Retorna ("", false) se não existir.
+func extractXMLTagContent(s, tag string) (string, bool) {
+	pat := fmt.Sprintf(`(?is)<%s>\s*(.*?)\s*</%s>`, regexp.QuoteMeta(tag), regexp.QuoteMeta(tag))
+	re := regexp.MustCompile(pat)
+	m := re.FindStringSubmatch(s)
+	if len(m) < 2 {
+		return "", false
+	}
+	return strings.TrimSpace(m[1]), true
+}
+
+// stripXMLTagBlock remove completamente o bloco <tag>...</tag> do texto.
+func stripXMLTagBlock(s, tag string) string {
+	pat := fmt.Sprintf(`(?is)<%s>\s*.*?\s*</%s>`, regexp.QuoteMeta(tag), regexp.QuoteMeta(tag))
+	re := regexp.MustCompile(pat)
+	return re.ReplaceAllString(s, "")
 }
