@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.7](https://github.com/diillson/chatcli/compare/v1.43.6...v1.43.7) (2025-12-30)
+
+
+### Bug Fixes
+
+* **cli:** refactor agent mode to streamline logic and improve markdown handling ([#433](https://github.com/diillson/chatcli/issues/433)) ([#434](https://github.com/diillson/chatcli/issues/434)) ([ab439d6](https://github.com/diillson/chatcli/commit/ab439d6b3dff6198af84c09088c5ed2f67b82c36))
+
 ## [1.43.6](https://github.com/diillson/chatcli/compare/v1.43.5...v1.43.6) (2025-12-28)
 
 
