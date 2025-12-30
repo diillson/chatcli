@@ -276,40 +276,98 @@ func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
 	fmt.Println(r.Colorize(footer, color))
 }
 
-// wrapText quebra o texto em linhas que não excedem o limite
+// RenderMarkdownTimelineEvent renderiza markdown (já convertido para ANSI fora) dentro do card.
+// Ele só delega para RenderTimelineEvent, mas existe para explicitar intenção e padronizar chamadas.
+func (r *UIRenderer) RenderMarkdownTimelineEvent(icon, title, renderedMarkdownANSI, color string) {
+	if strings.TrimSpace(renderedMarkdownANSI) == "" {
+		return
+	}
+	r.RenderTimelineEvent(icon, title, renderedMarkdownANSI, color)
+}
+
+// wrapText quebra o texto em linhas que não excedem o limite.
+// Versão production-ready:
+// - Preserva quebras de linha originais
+// - Faz word-wrap por largura visível (ignora ANSI)
+// - Não destrói formatação do markdown renderizado (ANSI + linhas)
 func wrapText(text string, limit int) []string {
 	if limit <= 0 {
 		return []string{text}
 	}
 
 	var finalLines []string
-
-	// Preservar quebras de linha originais (parágrafos)
 	paragraphs := strings.Split(text, "\n")
 
 	for _, p := range paragraphs {
-		// Se a linha for vazia, mantém vazia
-		if strings.TrimSpace(p) == "" {
+		// Preserva linha vazia
+		if p == "" {
 			finalLines = append(finalLines, "")
 			continue
 		}
 
+		// Word wrap baseado em largura visível
 		words := strings.Fields(p)
 		if len(words) == 0 {
+			finalLines = append(finalLines, "")
 			continue
 		}
 
-		currentLine := words[0]
-		for _, word := range words[1:] {
-			// +1 é o espaço
-			if len(currentLine)+1+len(word) <= limit {
-				currentLine += " " + word
-			} else {
-				finalLines = append(finalLines, currentLine)
-				currentLine = word
-			}
+		var line strings.Builder
+		curLen := 0
+
+		flushLine := func() {
+			finalLines = append(finalLines, line.String())
+			line.Reset()
+			curLen = 0
 		}
-		finalLines = append(finalLines, currentLine)
+
+		for _, w := range words {
+			wLen := VisibleLen(w)
+			if curLen == 0 {
+				line.WriteString(w)
+				curLen = wLen
+				continue
+			}
+
+			// +1 espaço
+			if curLen+1+wLen <= limit {
+				line.WriteByte(' ')
+				line.WriteString(w)
+				curLen += 1 + wLen
+				continue
+			}
+
+			// Se a palavra isolada estoura, quebra "na marra" por runas,
+			// respeitando ANSI (aproximação: fatia por bytes, mas valida pela VisibleLen)
+			flushLine()
+
+			if wLen <= limit {
+				line.WriteString(w)
+				curLen = wLen
+				continue
+			}
+
+			// quebra a palavra grande em pedaços
+			rest := w
+			for VisibleLen(rest) > limit {
+				cut := 1
+				for cut < len(rest) && VisibleLen(rest[:cut]) < limit {
+					cut++
+				}
+				// cut passou, volta 1
+				if cut > 1 {
+					cut--
+				}
+				finalLines = append(finalLines, rest[:cut])
+				rest = rest[cut:]
+			}
+			line.WriteString(rest)
+			curLen = VisibleLen(rest)
+		}
+
+		if line.Len() > 0 {
+			finalLines = append(finalLines, line.String())
+		}
 	}
 
 	return finalLines
