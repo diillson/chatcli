@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.8](https://github.com/diillson/chatcli/compare/v1.43.7...v1.43.8) (2025-12-31)
+
+
+### Bug Fixes
+
+* **cli:** improve context handling, parsing logic, and cancellation support ([#436](https://github.com/diillson/chatcli/issues/436)) ([#437](https://github.com/diillson/chatcli/issues/437)) ([a81a04f](https://github.com/diillson/chatcli/commit/a81a04f62cf68453b6c73865e7890c3b5230f2dc))
+
 ## [1.43.7](https://github.com/diillson/chatcli/compare/v1.43.6...v1.43.7) (2025-12-30)
 
 
