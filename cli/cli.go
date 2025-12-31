@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/c-bata/go-prompt"
@@ -614,6 +616,54 @@ func (cli *ChatCLI) restoreTerminal() {
 	fmt.Print("\033[2J\033[H")
 }
 
+// Helper para executar lógica do agente com cancelamento via Ctrl+C
+func (cli *ChatCLI) runWithCancellation(taskName string, fn func(context.Context) error) {
+	// Cria contexto cancelável
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Registra o cancelamento na struct para acesso global se necessário
+	cli.mu.Lock()
+	cli.operationCancel = cancel
+	cli.isExecuting.Store(true) // Marca que estamos executando algo
+	cli.mu.Unlock()
+
+	// Canal para capturar Ctrl+C
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Goroutine para vigiar o sinal
+	go func() {
+		select {
+		case <-sigChan:
+			fmt.Println(colorize("\n\n🛑 Interrupção solicitada pelo usuário! Parando processos...", ColorRed))
+			cancel() // Cancela o contexto, matando LLM e Plugins
+		case <-ctx.Done():
+			// A tarefa terminou normalmente, paramos de ouvir
+		}
+	}()
+
+	defer func() {
+		signal.Stop(sigChan) // Limpa o hook do sinal
+		cancel()             // Garante limpeza do contexto
+		cli.mu.Lock()
+		cli.operationCancel = nil
+		cli.isExecuting.Store(false)
+		cli.mu.Unlock()
+	}()
+
+	// Executa a função do agente
+	err := fn(ctx)
+
+	// Tratamento de erro específico para cancelamento
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Println(colorize("\n ✅ Operação cancelada. Retornando ao chat...", ColorYellow))
+		} else {
+			fmt.Printf(colorize("\n ❌ Erro na execução: %v\n", ColorRed), err)
+		}
+	}
+}
+
 func (cli *ChatCLI) runAgentLogic() {
 	cli.setExecutionProfile(ProfileAgent)
 	defer cli.setExecutionProfile(ProfileNormal)
@@ -636,22 +686,21 @@ func (cli *ChatCLI) runAgentLogic() {
 	fmt.Println(i18n.T("status.agent_mode_enter", query))
 	fmt.Println(i18n.T("status.agent_mode_description"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-
 	query, additionalContext := cli.processSpecialCommands(query)
 
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
-	err := cli.agentMode.Run(ctx, query, additionalContext, "")
-	if err != nil {
-		fmt.Println(i18n.T("error.agent_mode_error", err))
-	}
+	cli.runWithCancellation("Agent Mode", func(ctx context.Context) error {
+		// Timeout global de segurança (opcional, pode ser removido se quiser infinito)
+		// ctx, cancel := context.WithTimeout(ctx, 45*time.Minute)
+		// defer cancel()
+		return cli.agentMode.Run(ctx, query, additionalContext, "")
+	})
 
 	fmt.Println(i18n.T("status.agent_mode_exit"))
-	time.Sleep(1 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 }
 
 func (cli *ChatCLI) runCoderLogic() {
@@ -669,12 +718,9 @@ func (cli *ChatCLI) runCoderLogic() {
 		return
 	}
 
-	// UI diferenciada para o modo Coder
 	fmt.Println(colorize("\n👨‍💻 MODO ENGENHEIRO DE SOFTWARE ATIVADO", ColorCyan+ColorBold))
 	fmt.Printf("Objetivo: \"%s\"\n\n", query)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute) // Timeout maior para codificação
-	defer cancel()
+	fmt.Println(colorize("💡 Dica: Pressione Ctrl+C a qualquer momento para interromper a execução.", ColorGray))
 
 	query, additionalContext := cli.processSpecialCommands(query)
 
@@ -682,15 +728,13 @@ func (cli *ChatCLI) runCoderLogic() {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
-	// Aqui passamos o CoderSystemPrompt definido em prompts.go
-	err := cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)
+	cli.runWithCancellation("Coder Mode", func(ctx context.Context) error {
+		// Sem timeout fixo no context.WithTimeout aqui, deixamos o usuário cancelar
+		return cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)
+	})
 
-	if err != nil {
-		fmt.Println(i18n.T("error.agent_mode_error", err))
-	}
-
-	fmt.Println(colorize("\n✅ Sessão de engenharia finalizada.", ColorGreen))
-	time.Sleep(1 * time.Second)
+	fmt.Println(colorize("\n ✅ Sessão de engenharia finalizada.", ColorGreen))
+	time.Sleep(500 * time.Millisecond)
 }
 
 func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {

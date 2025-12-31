@@ -118,7 +118,19 @@ func (p *ExecutablePlugin) Execute(ctx context.Context, args []string) (string, 
 	stdoutStr := stripANSI(stdoutBuf.String())
 	stderrStr := stripANSI(stderrBuf.String())
 
+	// VERIFICAÇÃO DE CANCELAMENTO
+	// Se o contexto principal foi cancelado (Ctrl+C), retornamos erro de contexto puro
+	// para que o loop do agente saiba que deve parar completamente.
+	if ctx.Err() == context.Canceled {
+		return "", context.Canceled
+	}
+
 	if err != nil {
+		// Verificar se foi timeout do plugin (não do usuário)
+		if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+			return "", context.DeadlineExceeded
+		}
+
 		// Se houver erro (exit code != 0 ou timeout), construímos uma mensagem rica para a IA
 		var errMsgBuilder strings.Builder
 		errMsgBuilder.WriteString(fmt.Sprintf("O plugin '%s' falhou na execução (Erro: %v).\n", p.Name(), err))
