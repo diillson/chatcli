@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Metadata define a estrutura de descoberta do plugin
@@ -139,7 +140,7 @@ func handleWrite(args []string) {
 	file := fs.String("file", "", "Caminho")
 	content := fs.String("content", "", "Conteúdo")
 	encoding := fs.String("encoding", "text", "Codificação")
-	// CORREÇÃO LINT: Verificar erro do Parse
+
 	if err := fs.Parse(args); err != nil {
 		fatalf("Erro ao analisar flags: %v", err)
 	}
@@ -148,10 +149,7 @@ func handleWrite(args []string) {
 		fatalf("--file é obrigatório")
 	}
 
-	var data []byte
-	var err error
-
-	rawContent := *content
+	var rawContent string = *content
 	if rawContent == "" {
 		stat, _ := os.Stdin.Stat()
 		if (stat.Mode() & os.ModeCharDevice) == 0 {
@@ -164,15 +162,10 @@ func handleWrite(args []string) {
 		fatalf("Conteúdo vazio.")
 	}
 
-	if *encoding == "base64" {
-		cleanBase64 := strings.ReplaceAll(strings.TrimSpace(rawContent), "\n", "")
-		cleanBase64 = strings.ReplaceAll(cleanBase64, " ", "")
-		data, err = base64.StdEncoding.DecodeString(cleanBase64)
-		if err != nil {
-			fatalf("Erro Base64: %v", err)
-		}
-	} else {
-		data = []byte(rawContent)
+	// USANDO A NOVA LÓGICA SMART
+	data, err := smartDecode(rawContent, *encoding)
+	if err != nil {
+		fatalf("Erro no processamento do conteúdo: %v", err)
 	}
 
 	dir := filepath.Dir(*file)
@@ -190,7 +183,7 @@ func handleWrite(args []string) {
 	}
 
 	showDiff(*file, string(oldBytes), string(data))
-	fmt.Printf("✅ Arquivo '%s' escrito.\n", *file)
+	fmt.Printf("✅ Arquivo '%s' escrito (Modo detectado: %s -> %d bytes).\n", *file, *encoding, len(data))
 }
 
 // --- COMANDO: PATCH ---
@@ -200,7 +193,7 @@ func handlePatch(args []string) {
 	search := fs.String("search", "", "Busca")
 	replace := fs.String("replace", "", "Substituição")
 	encoding := fs.String("encoding", "text", "Codificação")
-	// CORREÇÃO LINT: Verificar erro do Parse
+
 	if err := fs.Parse(args); err != nil {
 		fatalf("Erro ao analisar flags: %v", err)
 	}
@@ -215,31 +208,32 @@ func handlePatch(args []string) {
 	}
 	content := string(contentBytes)
 
-	var searchStr, replaceStr string
-	if *encoding == "base64" {
-		sBytes, err := base64.StdEncoding.DecodeString(strings.TrimSpace(*search))
+	// USANDO A NOVA LÓGICA SMART PARA SEARCH E REPLACE
+	sBytes, err := smartDecode(*search, *encoding)
+	if err != nil {
+		fatalf("Erro ao processar search: %v", err)
+	}
+	searchStr := string(sBytes)
+
+	var replaceStr string
+	if *replace != "" {
+		rBytes, err := smartDecode(*replace, *encoding)
 		if err != nil {
-			fatalf("Erro Base64 search: %v", err)
+			fatalf("Erro ao processar replace: %v", err)
 		}
-		searchStr = string(sBytes)
-		if *replace != "" {
-			rBytes, err := base64.StdEncoding.DecodeString(strings.TrimSpace(*replace))
-			if err != nil {
-				fatalf("Erro Base64 replace: %v", err)
-			}
-			replaceStr = string(rBytes)
-		}
-	} else {
-		searchStr = *search
-		replaceStr = *replace
+		replaceStr = string(rBytes)
 	}
 
+	// Normalização de quebras de linha para aumentar a chance de match
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	searchStr = strings.ReplaceAll(searchStr, "\r\n", "\n")
 	replaceStr = strings.ReplaceAll(replaceStr, "\r\n", "\n")
 
 	if strings.Count(content, searchStr) == 0 {
-		fatalf("❌ Texto não encontrado.")
+		// Log de debug para ajudar a IA a se corrigir
+		fmt.Fprintf(os.Stderr, "DEBUG: Trecho não encontrado.\n")
+		fmt.Fprintf(os.Stderr, "Buscado (len=%d):\n%q\n", len(searchStr), searchStr)
+		fatalf("❌ Texto não encontrado no arquivo. Verifique espaços e quebras de linha.")
 	}
 
 	if err := createBackup(*file); err != nil {
@@ -515,4 +509,65 @@ func handleClean(args []string) {
 func fatalf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "ERRO: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// --- FUNÇÃO AUXILIAR: Decodificação Inteligente ---
+func smartDecode(content, encodingFlag string) ([]byte, error) {
+	// Limpeza básica
+	cleanContent := strings.TrimSpace(content)
+
+	if strings.HasPrefix(cleanContent, "\\") && !strings.HasPrefix(cleanContent, "\\\\") {
+		// Verifica se o segundo caractere é uma quebra de linha ou espaço, indicando sobra de formatação
+		if len(cleanContent) > 1 {
+			// Remove a barra inicial se parecer lixo de formatação
+			cleanContent = strings.TrimPrefix(cleanContent, "\\")
+			cleanContent = strings.TrimSpace(cleanContent)
+		}
+	}
+
+	// Remove quebras de linha que possam ter vindo no meio do base64
+	cleanContentNoNewlines := strings.ReplaceAll(cleanContent, "\n", "")
+	cleanContentNoNewlines = strings.ReplaceAll(cleanContentNoNewlines, "\r", "")
+	cleanContentNoNewlines = strings.ReplaceAll(cleanContentNoNewlines, " ", "")
+
+	// 1. Se a flag for explicitamente base64, tenta decodificar estritamente
+	if encodingFlag == "base64" {
+		decoded, err := base64.StdEncoding.DecodeString(cleanContentNoNewlines)
+		if err != nil {
+			return nil, fmt.Errorf("falha ao decodificar base64 explícito: %v", err)
+		}
+		return decoded, nil
+	}
+
+	// 2. Se a flag for "text" (ou padrão), verificamos se PARECE base64
+	// Heurística:
+	// - Tem tamanho múltiplo de 4?
+	// - Só tem caracteres de base64?
+	// - Se decodificar, o resultado parece binário útil ou texto utf8?
+
+	// Se tiver espaços no meio do conteúdo original (não nas pontas), provavelmente é texto normal
+	if strings.Contains(strings.TrimSpace(content), " ") {
+		return []byte(content), nil
+	}
+
+	// Tenta decodificar como teste
+	decoded, err := base64.StdEncoding.DecodeString(cleanContentNoNewlines)
+	if err == nil {
+		// Sucesso na decodificação. É um base64 válido.
+		// Mas cuidado: a palavra "admin" é um base64 válido.
+		// Vamos assumir que se o modelo mandou um bloco contínuo sem espaços e decodifica,
+		// ele provavelmente queria mandar base64, já que o prompt pede isso.
+
+		// Opcional: Verificar se é UTF-8 válido (para arquivos de código)
+		if utf8.Valid(decoded) {
+			// Se for válido e tiver um tamanho razoável, assumimos base64
+			return decoded, nil
+		}
+		// Se decodificou mas virou binário estranho, pode ser um arquivo binário (imagem),
+		// então também retornamos o decoded.
+		return decoded, nil
+	}
+
+	// 3. Fallback: Trata como texto puro
+	return []byte(content), nil
 }

@@ -1311,16 +1311,26 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	}
 
 	for turn := 0; turn < maxTurns; turn++ {
-		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
+		select {
+		case <-ctx.Done():
+			return ctx.Err() // Retorna context.Canceled
+		default:
+		}
 
+		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
 		a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
 		turnHistory := buildTurnHistoryWithAnchor()
+
 		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
 
 		a.cli.animation.StopThinkingAnimation()
 
 		if err != nil {
+			// Se for cancelamento, retorna limpo para o cli.go tratar
+			if errors.Is(err, context.Canceled) {
+				return err
+			}
 			return fmt.Errorf("erro ao obter resposta da IA no turno %d: %w", turn+1, err)
 		}
 
@@ -1411,6 +1421,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
 			normalizedArgsStr := strings.ReplaceAll(unescapedToolArgsStr, "\r\n", "\n")
+			normalizedArgsStr = normalizeShellLineContinuations(normalizedArgsStr)
 
 			if fixed, changed := trimTrailingBackslashesOutsideQuotes(normalizedArgsStr); changed {
 				a.logger.Warn("tool_call args terminou com barra invertida fora de aspas; aplicando auto-fix removendo '\\' final",
@@ -1458,6 +1469,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					}
 				} else {
 					toolOutput, execErr = plugin.Execute(ctx, toolArgs)
+
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
 				}
 			}
 
@@ -1605,43 +1620,30 @@ func splitToolArgsMultiline(s string) ([]string, error) {
 		}
 	}
 
-	isWS := func(b byte) bool {
-		return b == ' ' || b == '\t' || b == '\n' || b == '\r'
-	}
-
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
 
 		if escaped {
-			// mantém o caractere literalmente (escape "cru")
 			buf.WriteByte(ch)
 			escaped = false
 			continue
 		}
 
-		// escape só faz sentido fora de aspas simples
 		if ch == '\\' && !inSingle {
 			escaped = true
 			continue
 		}
 
-		switch ch {
-		case '\'':
-			// aspas simples só alterna se não estiver dentro de aspas duplas
-			if !inDouble {
-				inSingle = !inSingle
-				continue
-			}
-		case '"':
-			// aspas duplas só alterna se não estiver dentro de aspas simples
-			if !inSingle {
-				inDouble = !inDouble
-				continue
-			}
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
 		}
 
-		// separador: whitespace fora de aspas
-		if isWS(ch) && !inSingle && !inDouble {
+		if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') && !inSingle && !inDouble {
 			flush()
 			continue
 		}
@@ -1649,12 +1651,8 @@ func splitToolArgsMultiline(s string) ([]string, error) {
 		buf.WriteByte(ch)
 	}
 
-	if escaped {
-		return nil, fmt.Errorf("args inválido: terminou com '\\' (escape) sem continuação")
-	}
-	if inSingle || inDouble {
-		return nil, fmt.Errorf("args inválido: aspas não balanceadas")
-	}
+	// Se 'escaped' for true aqui (string terminou com \), nós simplesmente
+	// ignoramos essa barra final para não quebrar o parsing, e chamamos flush.
 
 	flush()
 	return args, nil
@@ -1754,4 +1752,69 @@ func stripXMLTagBlock(s, tag string) string {
 	pat := fmt.Sprintf(`(?is)<%s>\s*.*?\s*</%s>`, regexp.QuoteMeta(tag), regexp.QuoteMeta(tag))
 	re := regexp.MustCompile(pat)
 	return re.ReplaceAllString(s, "")
+}
+
+// normalizeShellLineContinuations lida com quebras de linha escapadas (\ + Enter).
+// - Fora de aspas: Substitui por espaço (para separar argumentos).
+// - Dentro de aspas: Remove a sequência (para unir a string, igual ao bash).
+func normalizeShellLineContinuations(input string) string {
+	var result strings.Builder
+	chars := []rune(input)
+	length := len(chars)
+
+	inDoubleQuote := false
+	inSingleQuote := false
+
+	for i := 0; i < length; i++ {
+		char := chars[i]
+
+		if char == '\\' {
+			// Verifica se é continuação de linha (\ seguido de newline)
+			j := i + 1
+			// Pula espaços em branco opcionais entre a barra e o enter
+			for j < length && (chars[j] == ' ' || chars[j] == '\t' || chars[j] == '\r') {
+				j++
+			}
+
+			if j < length && chars[j] == '\n' {
+				// É UMA CONTINUAÇÃO DE LINHA (\ + Enter)
+
+				if !inDoubleQuote && !inSingleQuote {
+					// Caso 1: Fora de aspas (ex: exec --cmd \ \n echo)
+					// Substitui por espaço para não colar os argumentos
+					result.WriteRune(' ')
+				}
+				// Caso 2: Dentro de aspas (ex: --content "\ \n code")
+				// Não fazemos nada (não escrevemos espaço), efetivamente removendo
+				// a barra e o enter, unindo o conteúdo limpo.
+
+				i = j // Avança o índice para pular a barra e o enter
+				continue
+			}
+
+			// Não é quebra de linha: é uma barra literal ou escape
+			result.WriteRune(char)
+
+			// Se for um escape de aspa (ex: \" ou \'), consumimos o próximo char
+			// para não confundir a máquina de estados das aspas.
+			if i+1 < length {
+				nextChar := chars[i+1]
+				if (inDoubleQuote && nextChar == '"') || (inSingleQuote && nextChar == '\'') {
+					result.WriteRune(nextChar)
+					i++
+				}
+			}
+			continue
+		}
+
+		// Alternar estado das aspas
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+		} else if char == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+		}
+
+		result.WriteRune(char)
+	}
+	return result.String()
 }
