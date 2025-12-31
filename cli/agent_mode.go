@@ -1651,12 +1651,8 @@ func splitToolArgsMultiline(s string) ([]string, error) {
 		buf.WriteByte(ch)
 	}
 
-	if escaped {
-		// Opcional: buf.WriteByte('\\') se quiser preservar a barra
-	}
-
-	// Se aspas ficaram abertas, fechamos na marra para não perder o comando
-	// (embora logar um aviso seria bom, para o fluxo não quebrar é melhor aceitar)
+	// Se 'escaped' for true aqui (string terminou com \), nós simplesmente
+	// ignoramos essa barra final para não quebrar o parsing, e chamamos flush.
 
 	flush()
 	return args, nil
