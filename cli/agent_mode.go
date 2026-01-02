@@ -1714,7 +1714,7 @@ func fixDanglingBackslashArgsForCoderTool(argLine string) (string, bool) {
 			out = append(out, next)
 			i++ // consumiu o próximo também
 		} else {
-			// não há próximo; deixa sem valor (vai falhar, mas de forma consistente)
+			return "", false
 		}
 	}
 
