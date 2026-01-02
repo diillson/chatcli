@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -32,7 +34,18 @@ func main() {
 	builder.WriteString(generateSessionContextSection())
 	builder.WriteString(generateOneShotFlagsSection())
 
-	fmt.Println(builder.String())
+	out := builder.String()
+	// Mantém o behavior atual: imprimir no stdout
+	fmt.Println(out)
+
+	// E gravar também na doc do ghpages para manter sempre atualizado
+	outFile := filepath.Join("ghpages", "content", "docs", "reference", "command-reference.md")
+	if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
+		panic(fmt.Errorf("falha ao criar diretório de saída do docgen: %w", err))
+	}
+	if err := os.WriteFile(outFile, []byte(out), 0644); err != nil {
+		panic(fmt.Errorf("falha ao gravar a referência de comandos: %w", err))
+	}
 }
 
 // generateMarkdownTable é uma função utilitária para criar tabelas em Markdown.

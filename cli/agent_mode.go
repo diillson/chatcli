@@ -1419,18 +1419,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			renderer.RenderToolCall(toolName, toolArgsStr)
 
-			unescapedToolArgsStr := html.UnescapeString(toolArgsStr)
-			normalizedArgsStr := strings.ReplaceAll(unescapedToolArgsStr, "\r\n", "\n")
-			normalizedArgsStr = normalizeShellLineContinuations(normalizedArgsStr)
-
-			if fixed, changed := trimTrailingBackslashesOutsideQuotes(normalizedArgsStr); changed {
-				a.logger.Warn("tool_call args terminou com barra invertida fora de aspas; aplicando auto-fix removendo '\\' final",
-					zap.String("tool", toolName),
-					zap.String("args_before", normalizedArgsStr),
-					zap.String("args_after", fixed))
-				normalizedArgsStr = fixed
-			}
-
+			normalizedArgsStr := sanitizeToolCallArgs(toolArgsStr, a.logger, toolName, a.isCoderMode)
 			toolArgs, parseErr := splitToolArgsMultiline(normalizedArgsStr)
 
 			var toolOutput string
@@ -1468,6 +1457,26 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						continue
 					}
 				} else {
+					// ============================
+					// Guard-rail do /coder (@coder)
+					// ============================
+					if a.isCoderMode && strings.EqualFold(strings.TrimSpace(toolName), "@coder") {
+						if missing, which := isCoderArgsMissingRequiredValue(toolArgs); missing {
+							msg := buildCoderToolCallFixPrompt(which)
+
+							// Mostra ao humano e força a IA a reenviar o tool_call correto
+							renderer.RenderToolResult("Args inválido para @coder: falta argumento válido em "+which+"\n\n"+msg, true)
+
+							a.cli.history = append(a.cli.history, models.Message{
+								Role:    "user",
+								Content: msg,
+							})
+
+							// Não executa plugin; próximo turno
+							continue
+						}
+					}
+
 					toolOutput, execErr = plugin.Execute(ctx, toolArgs)
 
 					if ctx.Err() != nil {
@@ -1554,6 +1563,229 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		agent.ColorYellow,
 	))
 	return nil
+}
+
+// sanitizeToolCallArgs normaliza args vindos de <tool_call ... args="..."/> para evitar
+// que "continuação de linha" com "\" e/ou "\" pendurado quebre o parsing argv.
+//
+// Regras:
+// 1) Decodifica entidades HTML (&quot; etc).
+// 2) Normaliza CRLF -> LF.
+// 3) Trata continuations: "\" + (spaces/tabs/\r)* + "\n"
+//   - Fora de aspas: vira espaço
+//   - Dentro de aspas: remove (concatena), igual ao bash
+//     4. Remove "\" final pendurado fora de aspas (erro comum de modelos), preservando
+//     conteúdo se estiver dentro de aspas.
+//     5. (NOVO) Corrige padrões comuns do /coder onde a IA manda --search "\" (ou "\,")
+//     como valor inválido, o que explode no flag parser do plugin.
+//     6. Trim final para reduzir ruído.
+func sanitizeToolCallArgs(rawArgs string, logger *zap.Logger, toolName string, isCoderMode bool) string {
+	unescaped := html.UnescapeString(rawArgs)
+	normalized := strings.ReplaceAll(unescaped, "\r\n", "\n")
+
+	// 3) Normaliza continuations estilo shell (atua em "\<spaces>\n")
+	normalized = normalizeShellLineContinuations(normalized)
+
+	// 4) Remove "\" final fora de aspas (auto-fix)
+	if fixed, changed := trimTrailingBackslashesOutsideQuotes(normalized); changed {
+		if logger != nil {
+			logger.Warn("tool_call args terminou com barra invertida fora de aspas; aplicando auto-fix removendo '\\' final",
+				zap.String("tool", toolName),
+				zap.String("args_before", normalized),
+				zap.String("args_after", fixed))
+		}
+		normalized = fixed
+	}
+
+	// 5) Correção semântica para /coder (quando a IA manda --search \ ou --content \ etc.)
+	if isCoderMode && strings.EqualFold(strings.TrimSpace(toolName), "@coder") {
+		fixed2, changed2 := fixDanglingBackslashArgsForCoderTool(normalized)
+		if changed2 {
+			if logger != nil {
+				logger.Warn("Aplicando correção semântica em args do @coder (valor '\\' inválido em flag de conteúdo)",
+					zap.String("tool", toolName),
+					zap.String("args_before", normalized),
+					zap.String("args_after", fixed2))
+			}
+			normalized = fixed2
+		}
+	}
+
+	return strings.TrimSpace(normalized)
+}
+
+// fixDanglingBackslashArgsForCoderTool corrige casos comuns onde o modelo gera:
+//
+//	patch ... --search \
+//	patch ... --search \,
+//	write ... --content \
+//
+// sem realmente colocar o conteúdo na mesma linha/argumento.
+// Isso quebra o flag parser do plugin (@coder) porque --search/--content exigem argumento.
+//
+// A função tenta:
+// - remover argumento inválido "\" (ou "\" + pontuação) após flags de conteúdo
+// - se houver um próximo token, usar ele como argumento real
+//
+// Retorna (novoTexto, mudou?).
+func fixDanglingBackslashArgsForCoderTool(argLine string) (string, bool) {
+	// Primeiro, tokeniza de forma robusta (respeita aspas), reaproveitando o mesmo
+	// comportamento do splitToolArgsMultiline, mas sem retornar erro aqui.
+	toks, err := splitToolArgsMultilineLenient(argLine)
+	if err != nil || len(toks) == 0 {
+		return argLine, false
+	}
+
+	// Flags do @coder que exigem valor imediato (no seu plugin):
+	// - patch: --search, --replace (replace é opcional, mas quando aparece precisa valor)
+	// - write: --content
+	needsValue := map[string]bool{
+		"--search":   true,
+		"--replace":  true,
+		"--content":  true,
+		"--file":     true,
+		"--cmd":      true,
+		"--dir":      true,
+		"--term":     true,
+		"--encoding": true,
+	}
+
+	isClearlyInvalidValue := func(v string) bool {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return true
+		}
+		// Caso clássico: "\" sozinho
+		if v == `\` {
+			return true
+		}
+		// Casos vistos: "\," "\;" "\." etc (barra + pontuação, sem payload)
+		if strings.HasPrefix(v, `\`) {
+			rest := strings.TrimSpace(strings.TrimPrefix(v, `\`))
+			// Se depois da barra só tiver pontuação (e/ou estiver vazio), é lixo
+			if rest == "" {
+				return true
+			}
+			allPunct := true
+			for _, r := range rest {
+				if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '+' || r == '/' || r == '=' {
+					allPunct = false
+					break
+				}
+			}
+			if allPunct {
+				return true
+			}
+		}
+		return false
+	}
+
+	changed := false
+	out := make([]string, 0, len(toks))
+
+	for i := 0; i < len(toks); i++ {
+		t := toks[i]
+		out = append(out, t)
+
+		if !needsValue[t] {
+			continue
+		}
+
+		// Se é flag que precisa valor, olhe o próximo token
+		if i+1 >= len(toks) {
+			continue
+		}
+
+		val := toks[i+1]
+		if !isClearlyInvalidValue(val) {
+			// ok, mantém
+			continue
+		}
+
+		// Valor inválido detectado: remove-o e tenta usar o próximo como valor real
+		changed = true
+
+		// Descarta o valor inválido
+		i++ // pula o token inválido
+
+		// Se existir um próximo token, ele vira o valor
+		if i+1 < len(toks) {
+			next := toks[i+1]
+			out = append(out, next)
+			i++ // consumiu o próximo também
+		} else {
+			// não há próximo; deixa sem valor (vai falhar, mas de forma consistente)
+		}
+	}
+
+	rebuilt := strings.Join(out, " ")
+	if rebuilt == strings.TrimSpace(argLine) {
+		return argLine, changed
+	}
+	return rebuilt, changed
+}
+
+// splitToolArgsMultilineLenient é um tokenizer leniente para permitir correções.
+// Ele tenta fazer split parecido com splitToolArgsMultiline, mas:
+// - não retorna erro em escape pendente no final: trata "\" final como literal
+// - se aspas não forem balanceadas, retorna erro
+func splitToolArgsMultilineLenient(s string) ([]string, error) {
+	var args []string
+	var buf strings.Builder
+
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	flush := func() {
+		if buf.Len() > 0 {
+			args = append(args, buf.String())
+			buf.Reset()
+		}
+	}
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+
+		if escaped {
+			buf.WriteByte(ch)
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' && !inSingle {
+			escaped = true
+			continue
+		}
+
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+
+		if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') && !inSingle && !inDouble {
+			flush()
+			continue
+		}
+
+		buf.WriteByte(ch)
+	}
+
+	// leniente: se terminou "escaped", consideramos "\" literal
+	if escaped {
+		buf.WriteByte('\\')
+	}
+
+	if inSingle || inDouble {
+		return nil, fmt.Errorf("aspas não balanceadas nos argumentos")
+	}
+
+	flush()
+	return args, nil
 }
 
 // removeXMLTags remove tags conhecidas, mantendo o conteúdo.
@@ -1651,8 +1883,12 @@ func splitToolArgsMultiline(s string) ([]string, error) {
 		buf.WriteByte(ch)
 	}
 
-	// Se 'escaped' for true aqui (string terminou com \), nós simplesmente
-	// ignoramos essa barra final para não quebrar o parsing, e chamamos flush.
+	if escaped {
+		return nil, fmt.Errorf("escape pendente no fim dos argumentos (terminou com '\\')")
+	}
+	if inSingle || inDouble {
+		return nil, fmt.Errorf("aspas não balanceadas nos argumentos")
+	}
 
 	flush()
 	return args, nil
@@ -1817,4 +2053,163 @@ func normalizeShellLineContinuations(input string) string {
 		result.WriteRune(char)
 	}
 	return result.String()
+}
+
+// isCoderArgsMissingRequiredValue verifica se o comando @coder contém flags
+// que exigem valor, mas estão sem argumento efetivo.
+//
+// Isso roda ANTES de executar o plugin, para evitar "flag needs an argument"
+// e loops inúteis.
+func isCoderArgsMissingRequiredValue(args []string) (bool, string) {
+	if len(args) == 0 {
+		return false, ""
+	}
+
+	sub := strings.ToLower(strings.TrimSpace(args[0]))
+
+	// Flags mínimas obrigatórias por subcomando (as que realmente causam quebra no plugin)
+	// OBS: patch: replace é opcional, mas se existir precisa ter valor.
+	required := map[string][]string{
+		"patch":  {"--file", "--search"},
+		"write":  {"--file", "--content"},
+		"search": {"--term"}, // dir tem default
+		"read":   {"--file"},
+		"exec":   {"--cmd"},
+		"tree":   {"--dir"},
+		// rollback/clean podem ficar sem required estrito, mas se quiser:
+		"rollback": {"--file"},
+		"clean":    {"--dir"},
+	}
+
+	reqFlags, ok := required[sub]
+	if !ok || len(reqFlags) == 0 {
+		return false, ""
+	}
+
+	// mapeia flag -> encontrado
+	found := make(map[string]bool, len(reqFlags))
+
+	// percorre args procurando "--flag value"
+	for i := 0; i < len(args); i++ {
+		t := args[i]
+
+		for _, rf := range reqFlags {
+			if t != rf {
+				continue
+			}
+
+			// Precisa ter próximo token
+			if i+1 >= len(args) {
+				return true, rf
+			}
+
+			val := strings.TrimSpace(args[i+1])
+
+			// Se veio vazio, ou parece outra flag, ou é placeholder lixo (\ ou \,)
+			if val == "" || strings.HasPrefix(val, "-") || isClearlyInvalidCoderValue(val) {
+				return true, rf
+			}
+
+			found[rf] = true
+		}
+
+		// Caso especial: flags opcionais mas que, se presentes, exigem valor.
+		// Ex: patch --replace <...>
+		if sub == "patch" && t == "--replace" {
+			if i+1 >= len(args) {
+				return true, "--replace"
+			}
+			val := strings.TrimSpace(args[i+1])
+			if val == "" || strings.HasPrefix(val, "-") || isClearlyInvalidCoderValue(val) {
+				return true, "--replace"
+			}
+		}
+
+		// Caso especial: search --dir exige valor se presente
+		if sub == "search" && t == "--dir" {
+			if i+1 >= len(args) {
+				return true, "--dir"
+			}
+			val := strings.TrimSpace(args[i+1])
+			if val == "" || strings.HasPrefix(val, "-") || isClearlyInvalidCoderValue(val) {
+				return true, "--dir"
+			}
+		}
+	}
+
+	// se alguma obrigatória não apareceu
+	for _, rf := range reqFlags {
+		if !found[rf] {
+			return true, rf
+		}
+	}
+
+	return false, ""
+}
+
+// isClearlyInvalidCoderValue identifica valores "lixo" gerados por continuação de linha,
+// como "\" ou "\," ou "\" seguido apenas de pontuação.
+//
+// OBS: isso NÃO tenta validar base64 nem conteúdo real; apenas detecta placeholders
+// típicos que o modelo usa quando erra a formatação.
+func isClearlyInvalidCoderValue(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return true
+	}
+
+	// Caso clássico: "\" sozinho
+	if v == `\` {
+		return true
+	}
+
+	// Caso recorrente: "\," (ou "\;" "\." etc.)
+	// Aqui consideramos inválido quando começa com "\" e o resto não contém nenhum caractere
+	// "útil" (alfanumérico ou base64 charset).
+	if strings.HasPrefix(v, `\`) {
+		rest := strings.TrimSpace(strings.TrimPrefix(v, `\`))
+		if rest == "" {
+			return true
+		}
+
+		// Se depois da barra só tiver pontuação (e/ou espaços), é lixo.
+		// Permitimos A-Z a-z 0-9 e também + / = (para base64) como "úteis".
+		allPunct := true
+		for _, r := range rest {
+			switch {
+			case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
+				allPunct = false
+			case r == '+' || r == '/' || r == '=':
+				allPunct = false
+			default:
+				// continua (pontuação / espaços / etc.)
+			}
+			if !allPunct {
+				break
+			}
+		}
+		if allPunct {
+			return true
+		}
+	}
+
+	return false
+}
+
+// buildCoderToolCallFixPrompt pede reenvio de um tool_call válido quando algum subcomando
+// do @coder vier com flag obrigatória sem valor (ou valor lixo como "\,").
+func buildCoderToolCallFixPrompt(missingFlag string) string {
+	return fmt.Sprintf(
+		"No modo /coder, seu <tool_call name=\"@coder\" ... /> veio INVÁLIDO: a flag obrigatória %s está sem um valor válido "+
+			"(ex.: você enviou '\\\\' ou '\\\\,' como placeholder). "+
+			"Reenvie SOMENTE um ÚNICO <tool_call name=\"@coder\" args=\"...\" /> em LINHA ÚNICA, com aspas balanceadas.\n\n"+
+			"Exemplos válidos:\n"+
+			"1) Search:\n"+
+			"<tool_call name=\"@coder\" args=\"search --term 'LoginService' --dir .\" />\n"+
+			"2) Patch (base64 em linha única):\n"+
+			"<tool_call name=\"@coder\" args=\"patch --file 'caminho' --encoding base64 --search 'BASE64_OLD' --replace 'BASE64_NEW'\" />\n"+
+			"3) Write (base64 em linha única):\n"+
+			"<tool_call name=\"@coder\" args=\"write --file 'caminho' --encoding base64 --content 'BASE64'\" />",
+		missingFlag,
+	)
 }

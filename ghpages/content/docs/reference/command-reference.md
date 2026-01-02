@@ -14,6 +14,7 @@ Estes comandos controlam a aplicação e o fluxo da conversa.
 | --- | --- |
 | **/agent** | Iniciar modo agente para executar tarefas |
 | **/clear** | Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais. |
+| **/coder** | Iniciar modo engenheiro (Criação e Edição de Código) |
 | **/config** | Mostrar configuração atual |
 | **/context** | Gerencia contextos persistentes (create, attach, detach, list, show, etc) |
 | **/exit** | Sair do ChatCLI |
@@ -129,4 +130,3 @@ Use estas flags ao executar `chatcli` diretamente do seu terminal para automaç�
 | `--no-anim` | Desabilita a animação 'Pensando...', útil para scripts. |
 | `-v`, `--version` | Mostra a informação de versão. |
 | `-h`, `--help` | Mostra a tela de ajuda. |
-
