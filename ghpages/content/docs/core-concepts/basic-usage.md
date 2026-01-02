@@ -60,6 +60,30 @@ A IA irá criar um plano de execução, que consiste em uma série de comandos d
 
 --------
 
+### Modo Coder (/coder)
+
+Além do modo `/agent`, o ChatCLI tem o modo especializado `/coder` para tarefas de engenharia de software (leitura/edição de arquivos, refatoração, rodar testes, etc).
+
+No `/coder`, quem chama as ferramentas é a IA – ela emite chamadas do plugin `@coder` em um formato estrito (`<tool_call>`). Você dá o objetivo ("corrija testes", "refatore X") e a IA faz o resto.
+
+{{< command >}}/coder corrija os testes falhando{{< /command >}}
+
+Veja o guia completo: [Modo Coder (/coder)](/docs/core-concepts/coder-mode/)
+e o detalhe do plugin: [Plugin @coder](/docs/features/coder-plugin/)
+
+### Prática: exemplos de chamadas do @coder (pela IA)
+
+No modo `/coder`, visualize o `<tool_call>` como ordens de ferramenta que a IA emite para o ChatCLI executar. Exemplos (como texto, não código):
+
+- `<tool_call name="@coder" args="tree --dir ."/>`
+- `<tool_call name="@coder" args="search --term 'FAIL' --dir ."/>`
+- `<tool_call name="@coder" args="read --file cli/agent_mode.go"/>`
+- `<tool_call name="@coder" args="exec --cmd 'go test ./...'"/>`
+
+> Observe: em `/coder`, sempre é a LLM quem emite o `@coder` – o usuário somente descreve objetivos.
+
+--------
+
 ## Próximos Passos
 
 Agora que você conhece o básico, vamos mergulhar na funcionalidade que torna o ChatCLI tão poderoso: a adição de contexto.
