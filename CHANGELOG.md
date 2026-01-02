@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.44.0](https://github.com/diillson/chatcli/compare/v1.43.8...v1.44.0) (2026-01-02)
+
+
+### Features
+
+* **cli/docgen:** enhance documentation auto-generation and introduce `/coder` mode support ([#439](https://github.com/diillson/chatcli/issues/439)) ([#440](https://github.com/diillson/chatcli/issues/440)) ([b2961ec](https://github.com/diillson/chatcli/commit/b2961ec9d7abcf422b673d8d54ddea60e049d364))
+
 ## [1.43.8](https://github.com/diillson/chatcli/compare/v1.43.7...v1.43.8) (2025-12-31)
 
 
