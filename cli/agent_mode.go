@@ -1420,6 +1420,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			renderer.RenderToolCall(toolName, toolArgsStr)
 
 			normalizedArgsStr := sanitizeToolCallArgs(toolArgsStr, a.logger, toolName, a.isCoderMode)
+			// HARD RULE (/coder): proibir multiline real em args.
+			// Motivo: alguns modelos usam "\" + newline por organização,
+			// e isso quebra o parser argv antes do plugin rodar.
+			if a.isCoderMode && hasAnyNewline(normalizedArgsStr) {
+				msg := buildCoderSingleLineArgsEnforcementPrompt(toolArgsStr)
+
+				// Mostra e força a IA a reenviar corretamente
+				renderer.RenderToolResult("Args inválido no modo /coder: contém quebra de linha real em args.\n\n"+msg, true)
+
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: msg,
+				})
+
+				// Próximo turno (não executa plugin)
+				continue
+			}
+
 			toolArgs, parseErr := splitToolArgsMultiline(normalizedArgsStr)
 
 			var toolOutput string
@@ -1432,11 +1450,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				if a.isCoderMode {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
-						Content: fmt.Sprintf("Seu <tool_call> veio com args inválido (erro: %v). "+
-							"Reenvie SOMENTE o <tool_call> com aspas balanceadas. "+
-							"Você pode usar multilinha dentro de aspas, mas evite terminar linhas com '\\' fora de aspas. "+
-							"Exemplo: <tool_call name=\"@coder\" args=\"exec --cmd 'go test ./...'\" />",
-							parseErr),
+						Content: fmt.Sprintf(
+							"Seu <tool_call> veio com args inválido (erro: %v). "+
+								"No modo /coder, args deve ser SEMPRE linha única e com aspas balanceadas. "+
+								"Reenvie SOMENTE um <tool_call name=\"@coder\" args=\"...\" /> em linha única. "+
+								"Exemplo: <tool_call name=\"@coder\" args=\"exec --cmd 'go test ./...'\" />",
+							parseErr,
+						),
 					})
 					renderer.RenderToolResult(toolOutput+"\n\n--- ERRO ---\n"+execErr.Error(), true)
 					continue
@@ -2211,5 +2231,39 @@ func buildCoderToolCallFixPrompt(missingFlag string) string {
 			"3) Write (base64 em linha única):\n"+
 			"<tool_call name=\"@coder\" args=\"write --file 'caminho' --encoding base64 --content 'BASE64'\" />",
 		missingFlag,
+	)
+}
+
+// hasAnyNewline retorna true se a string contém qualquer newline real.
+// Isso diferencia newline real de "\n" literal dentro do texto.
+func hasAnyNewline(s string) bool {
+	return strings.Contains(s, "\n") || strings.Contains(s, "\r")
+}
+
+// buildCoderSingleLineArgsEnforcementPrompt cria uma mensagem dura (e repetível)
+// para forçar a IA a reenviar args em linha única no /coder.
+func buildCoderSingleLineArgsEnforcementPrompt(originalArgs string) string {
+	trimmed := strings.TrimSpace(originalArgs)
+
+	// Mostra um preview curto para ajudar debugging sem poluir.
+	preview := trimmed
+	if len(preview) > 200 {
+		preview = preview[:200] + "..."
+	}
+
+	return fmt.Sprintf(
+		"No modo /coder, o atributo args do <tool_call> DEVE ser uma única linha (SEM quebras de linha). "+
+			"Seu args veio com multilinha (muitas vezes causado por uso de '\\\\' para continuação de linha). "+
+			"Isso quebra o parser do ChatCLI antes do plugin executar.\n\n"+
+			"Reenvie SOMENTE um ÚNICO <tool_call name=\"@coder\" args=\"...\" /> com args em LINHA ÚNICA.\n\n"+
+			"Regras rápidas:\n"+
+			"1) Não use '\\\\' para quebrar linha.\n"+
+			"2) Não use newline real dentro de args.\n"+
+			"3) Se precisar organizar, faça tudo em uma linha (use ';' ou '&&').\n\n"+
+			"Preview do args recebido (truncado):\n"+
+			"---\n%s\n---\n\n"+
+			"Exemplo válido:\n"+
+			"<tool_call name=\"@coder\" args=\"exec --cmd 'cd repo && ./script.sh | sed -n \\\"1,10p\\\"'\" />",
+		preview,
 	)
 }
