@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.44.1](https://github.com/diillson/chatcli/compare/v1.44.0...v1.44.1) (2026-01-03)
+
+
+### Bug Fixes
+
+* **cli:** enforce single-line args in `/coder` mode tool calls ([#442](https://github.com/diillson/chatcli/issues/442)) ([#443](https://github.com/diillson/chatcli/issues/443)) ([3e5f3c7](https://github.com/diillson/chatcli/commit/3e5f3c7d3ad5128dfc5977e94ef20376c2fddc98))
+
 ## [1.44.0](https://github.com/diillson/chatcli/compare/v1.43.8...v1.44.0) (2026-01-02)
 
 
