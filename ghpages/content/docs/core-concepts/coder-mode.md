@@ -4,26 +4,24 @@ description: "Um modo especializado em engenharia de software: leitura, edição
 weight: 40
 ---
 
-# Modo Coder (/coder)
-
 O modo `/coder` é um modo especializado para tarefas de engenharia de software com ciclo de leitura → alterações →feedback.
 
-Ele dá mais rigórido que o modo `/agent`, porque o assistente precisa seguir um contrato de saída para que o ChatCLI possa executar as ações com segurança (e semántica de reversão).
+Ele dá mais rigorosidade que o modo `/agent`, porque o assistente precisa seguir um contrato de saída para que o ChatCLI possa executar as ações com segurança (e semântica de reversão).
 
 ## Quando usar
 
-Use `/coder` quando você quisa:
+Use `/coder` quando você quiser:
 1. Fazer alterações reais no repositório (leitura, edição de arquivos);
 2. Rodar testes/lint/build de forma automática;
 3. Aplicar patches pequenos e seguros (com backup/rollback);
 4. Iterar até chegar em um resultado verificável.
 
-Se você quer uma conversa de alto nível (escrita de texto, ideias, planos) sem executar o próprio código, o `/agent`` continua mais adequado.
+Se você quer uma conversa de alto nível (escrita de texto, ideias, planos) sem executar o próprio código, o `/agent` continua mais adequado.
 
 ## Diferença em relação ao /agent
 
-- `/agent``: o assistente propõe comandos de execução em blocos (```execute:shell```), com interação e mais flexibilidade no formato.
-- `/coder`: o assistente opera em um loop de ferramentas (fs, patch, exec) e deve emitir: <a strong>sempre a mesma estrutura</a strong> pra o ChatCLI consumir.
+- `/agent`: o assistente propõe comandos de execução em blocos (```execute:shell```), com interação e mais flexibilidade no formato.
+- `/coder`: o assistente opera em um loop de ferramentas (fs, patch, exec) e deve emitir: <a strong>sempre a mesma estrutura</a> pra o ChatCLI consumir.
 
 ## Contrato de saäda (obrigatório)
 
@@ -31,13 +29,13 @@ O mais importante em `/coder` é que a resposta do assistente sempre segue este 
 
 1) Antes de qualquer ação, escreva um bloco `|reasoning|` curto (2 a 6 linhas).
 2) Em seguida, se precisar agir, emita *apenas* um `|tool_call name="@coder" args="..."/|`.
-3) Nunca use blocos ```` nem comandos shell diretos nesse modo.
+3) Nunca usa blocos ```` nem comandos shell diretos nesse modo.
 
 ## Ferramentas e dependência
-O modo `/coder` depende do plugin [@coder]([[../../features/coder-plugin]]). Sem ele, as chamadas de ferramenta vao falhar.
+O modo `/coder` depende do plugin [@coder]([[../../features/coder-plugin]]). Sem ele, as chamadas de ferramenta vão falhar.
 
 - Verifique plugins instalados: `/plugin list`
-- Instale/habilite o `@roder` conforme a seção [Plugin @coder]([[../../features/coder-plugin]]).
+- Instale/habilite o `@coder` conforme a seção [Plugin @coder]([[../../features/coder-plugin]]).
 
 ## Subcomandos suportados (args)
 

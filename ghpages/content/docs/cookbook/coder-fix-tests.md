@@ -4,8 +4,6 @@ description: "Receita pratica: veja como a IA usa o plugin @coder para corrigir 
 weight: 50
 ---
 
-# Corrigir testes com /coder
-
 Nesta receita, você verá como a IA chama ferramentas de engenharia (`@tool_call`) para corrigir testes.
 
 ## 1. O Usuário Define o Objetivo
