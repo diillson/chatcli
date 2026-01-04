@@ -23,7 +23,7 @@ Se você quer uma conversa de alto nível (escrita de texto, ideias, planos) sem
 - `/agent`: o assistente propõe comandos de execução em blocos (```execute:shell```), com interação e mais flexibilidade no formato.
 - `/coder`: o assistente opera em um loop de ferramentas (fs, patch, exec) e deve emitir: <a strong>sempre a mesma estrutura</a> pra o ChatCLI consumir.
 
-## Contrato de saäda (obrigatório)
+## Contrato de saída (obrigatório)
 
 O mais importante em `/coder` é que a resposta do assistente sempre segue este formato:
 
@@ -62,4 +62,4 @@ No `/coder`, o atributo `args` do `<tool_call>` deve usar somente os subcomandos
 4. Aplicar patch minimal: `patch --file ...`
 5. Rodar testes: `exec --cmd "go test ./..."`
 
-#: Nesse modo, a saída sempre vai via <markup>@coder</markup>. Você não precisa escrever comandos diretamente no shell.
+# {{< notice "success">}} Nesse modo, a saída sempre vai via <markup>@coder</markup>. Você não precisa escrever comandos diretamente no shell.{{< /notice >}}
