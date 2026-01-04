@@ -4,13 +4,11 @@ description: "Ferramenta de engenharia para ler, editar, patchar e executar tare
 weight: 60
 ---
 
-# Plugin @coder
-
 O `@coder` é a suite de engenharia usada pelo [Modo Coder (/coder)]([[../../core-concepts/coder-mode]]). Ele fornece ações para ler/procurar arquivos, aplicar patches com segurança, rodar comandos e reverter alterações.
 
 ## Comandos suportados
 
-@ não invente parametros. Os comandos suportados são (no formato do atributo `args` do `<tool_call>` ou uso direto):
+Os comandos suportados são (no formato do atributo `args` do `<tool_call>` ou uso direto):
 
 - `tree --dir .`
 - `search --term "x" --dir .`
@@ -31,11 +29,11 @@ O `@coder` é a suite de engenharia usada pelo [Modo Coder (/coder)]([[../../cor
 
 ## Exemplo de uso (no /coder)
 
-No modo `/coder`, o assistente deve responder com <a href="../../core-concepts/coder-mode/"><code><reasoning></reasoning></code></a> e em seguida apenas um `<tool_call name="@coder" args="..."/>`. Estes são exemplos válidos:
+No modo `/coder`, o assistente deve responder com `<reasoning> Raciocinio da IA </reasoning>` e em seguida apenas um `<tool_call name="@coder" args="..."/>`. Estes são exemplos válidos:
 
 - Ler UM arquivo: `<tool_call name="@coder" args="read --file README.md"/>`
 - Rodar testes: `<tool_call name="@coder" args="exec --cmd 'go test ./...'"/>`
 
 ## Notas
 
-- O plugin outorga poder de leitura/escrita em arquivos e execução de comandos. Use em repositórios confiaveis.
+- O plugin outorga poder de leitura/escrita em arquivos e execução de comandos tudo passeivel de rollback quando solicitado. Use em repositórios confiaveis.
