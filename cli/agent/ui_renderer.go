@@ -434,3 +434,73 @@ func cleanArgsForDisplay(args string) string {
 	re := regexp.MustCompile(`(content|search|replace)=['"]?([A-Za-z0-9+/=]{50,})['"]?`)
 	return re.ReplaceAllString(args, "$1=\"[DADOS_BASE64_OCULTOS]\"")
 }
+
+// RenderBatchHeader exibe um cabeçalho indicando o início de um lote
+func (r *UIRenderer) RenderBatchHeader(totalActions int) {
+	width, _, _ := term.GetSize(int(os.Stdout.Fd()))
+	if width <= 0 {
+		width = 80
+	}
+
+	msg := fmt.Sprintf(" 📦 INICIANDO EXECUÇÃO EM LOTE: %d AÇÕES ", totalActions)
+	line := strings.Repeat("═", width)
+
+	// Centralizar visualmente
+	padding := (width - VisibleLen(msg)) / 2
+	if padding < 0 {
+		padding = 0
+	}
+
+	fmt.Println()
+	fmt.Println(r.Colorize(line, ColorPurple))
+	fmt.Printf("%s%s\n", strings.Repeat(" ", padding), r.Colorize(msg, ColorPurple+ColorBold))
+	fmt.Println(r.Colorize(line, ColorPurple))
+}
+
+// RenderToolCallWithProgress exibe a chamada da ferramenta em formato de CARD (Box),
+// limpando barras invertidas visuais e mostrando o progresso.
+func (r *UIRenderer) RenderToolCallWithProgress(toolName, rawArgs string, current, total int) {
+	// 1. Limpeza visual (apenas para exibição, não afeta execução)
+
+	// Decodifica HTML (&quot; -> ")
+	displayArgs := html.UnescapeString(rawArgs)
+
+	// Remove a sequência "barra invertida + quebra de linha" que polui o visual
+	// Ex: "echo hello \ \n world" vira "echo hello   world"
+	reBackslashNewline := regexp.MustCompile(`\\\s*[\r\n]+`)
+	displayArgs = reBackslashNewline.ReplaceAllString(displayArgs, " ")
+
+	// Remove espaços extras gerados pela junção
+	spaceRe := regexp.MustCompile(`\s+`)
+	displayArgs = spaceRe.ReplaceAllString(strings.TrimSpace(displayArgs), " ")
+
+	// Aplica a limpeza de segurança (esconder base64 gigante)
+	displayArgs = cleanArgsForDisplay(displayArgs)
+
+	// 2. Monta o conteúdo do Card
+	// Formato:
+	// Ferramenta: @coder
+	// Args: ...
+	content := fmt.Sprintf("Ferramenta: %s\nComando: %s",
+		r.Colorize(toolName, ColorYellow+ColorBold),
+		r.Colorize(displayArgs, ColorCyan))
+
+	// 3. Título com progresso
+	title := fmt.Sprintf("EXECUTANDO AÇÃO (%d/%d)", current, total)
+
+	// 4. Renderiza usando o sistema de cards existente
+	r.RenderTimelineEvent("🔨", title, content, ColorYellow)
+}
+
+// RenderBatchSummary exibe o resultado final do lote
+func (r *UIRenderer) RenderBatchSummary(successCount, total int, hasError bool) {
+	fmt.Println()
+	if hasError {
+		msg := fmt.Sprintf(" ⚠️ LOTE INTERROMPIDO: %d de %d ações executadas com sucesso.", successCount, total)
+		fmt.Println(r.Colorize(msg, ColorYellow))
+	} else {
+		msg := fmt.Sprintf(" ✅ LOTE CONCLUÍDO: Todas as %d ações foram executadas.", total)
+		fmt.Println(r.Colorize(msg, ColorGreen))
+	}
+	fmt.Println(r.Colorize(strings.Repeat("─", 60), ColorGray))
+}
