@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.45.0](https://github.com/diillson/chatcli/compare/v1.44.1...v1.45.0) (2026-01-08)
+
+
+### Features
+
+* **cli:** improve `/coder` mode behavior and enable batch tool execution ([#447](https://github.com/diillson/chatcli/issues/447)) ([#447](https://github.com/diillson/chatcli/issues/447)) ([#448](https://github.com/diillson/chatcli/issues/448)) ([0df3576](https://github.com/diillson/chatcli/commit/0df35761bd32f63a48e5ed4c30f73bd4715d1e77))
+
 ## [1.44.1](https://github.com/diillson/chatcli/compare/v1.44.0...v1.44.1) (2026-01-03)
 
 
