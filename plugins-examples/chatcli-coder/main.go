@@ -108,30 +108,46 @@ func showDiff(filename, oldContent, newContent string) {
 	fmt.Println("----------------------------------------")
 }
 
-// --- COMANDO: READ ---
+// --- COMANDO: READ (Suporta múltiplos arquivos) ---
 func handleRead(args []string) {
 	fs := flag.NewFlagSet("read", flag.ExitOnError)
-	file := fs.String("file", "", "Caminho do arquivo")
-	// CORREÇÃO LINT: Verificar erro do Parse
+	file := fs.String("file", "", "Caminho do arquivo (principal)")
+
+	// Parse ignora o que vem depois das flags definidas, jogando em fs.Args()
 	if err := fs.Parse(args); err != nil {
 		fatalf("Erro ao analisar flags: %v", err)
 	}
 
-	if *file == "" {
-		fatalf("--file é obrigatório")
+	// Coleta todos os arquivos: o da flag --file e os argumentos soltos
+	var filesToRead []string
+	if *file != "" {
+		filesToRead = append(filesToRead, *file)
+	}
+	// Adiciona argumentos extras (ex: read --file a.go b.go c.go)
+	filesToRead = append(filesToRead, fs.Args()...)
+
+	if len(filesToRead) == 0 {
+		fatalf("Nenhum arquivo especificado. Uso: @coder read --file <path> [outros_paths...]")
 	}
 
-	content, err := os.ReadFile(*file)
-	if err != nil {
-		fatalf("Erro ao ler arquivo: %v", err)
-	}
+	// Itera e lê todos
+	for _, f := range filesToRead {
+		// Limpeza básica de aspas que a IA as vezes manda
+		f = strings.Trim(f, "\"'")
 
-	lines := strings.Split(string(content), "\n")
-	fmt.Printf("<<< INÍCIO DO ARQUIVO: %s >>>\n", *file)
-	for i, line := range lines {
-		fmt.Printf("%4d | %s\n", i+1, line)
+		content, err := os.ReadFile(f)
+		if err != nil {
+			fmt.Printf("❌ ERRO AO LER '%s': %v\n", f, err)
+			continue
+		}
+
+		lines := strings.Split(string(content), "\n")
+		fmt.Printf("<<< INÍCIO DO ARQUIVO: %s >>>\n", f)
+		for i, line := range lines {
+			fmt.Printf("%4d | %s\n", i+1, line)
+		}
+		fmt.Printf("<<< FIM DO ARQUIVO: %s >>>\n\n", f)
 	}
-	fmt.Printf("<<< FIM DO ARQUIVO: %s >>>\n", *file)
 }
 
 // --- COMANDO: WRITE ---

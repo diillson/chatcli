@@ -1275,6 +1275,7 @@ func (a *AgentMode) getToolContextString() string {
 func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
 	renderer := agent.NewUIRenderer(a.logger)
 
+	// Helper para construir o histórico com a "âncora" (System Prompt reforçado por turno)
 	buildTurnHistoryWithAnchor := func() []models.Message {
 		h := make([]models.Message, 0, len(a.cli.history)+1)
 		h = append(h, a.cli.history...)
@@ -1282,8 +1283,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		var anchor string
 		if a.isCoderMode {
 			anchor = "LEMBRETE (MODO /CODER): Você DEVE responder com <reasoning> curto (2-6 linhas) e depois, se precisar agir, " +
-				"enviar SOMENTE um <tool_call name=\"@coder\" args=\"...\" />. " +
-				"NÃO use blocos de código (```), NÃO use ```execute:...```, NÃO envie comandos shell diretamente. " +
+				"enviar um ou mais <tool_call name=\"@coder\" args=\"...\" />. " +
+				"Pode agrupar múltiplas ações na mesma resposta (ex: tree + read). " +
+				"NÃO use blocos de código (```), NÃO use ```execute:...```. " +
 				"Para write/patch: encoding base64 e conteúdo em linha única são OBRIGATÓRIOS."
 		} else {
 			anchor = "LEMBRETE (MODO /AGENT): Você pode usar ferramentas via <tool_call name=\"@tool\" args=\"...\" /> quando fizer sentido. " +
@@ -1295,6 +1297,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		return h
 	}
 
+	// Helper para verificar tags de raciocínio
 	hasReasoningTag := func(s string) bool {
 		ls := strings.ToLower(s)
 		return strings.Contains(ls, "<reasoning>") && strings.Contains(ls, "</reasoning>")
@@ -1310,18 +1313,23 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		renderer.RenderMarkdownTimelineEvent(icon, title, rendered, color)
 	}
 
+	// --- LOOP PRINCIPAL DO AGENTE (ReAct) ---
 	for turn := 0; turn < maxTurns; turn++ {
+		// Verificar cancelamento pelo usuário (Ctrl+C)
 		select {
 		case <-ctx.Done():
-			return ctx.Err() // Retorna context.Canceled
+			return ctx.Err()
 		default:
 		}
 
 		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
+
+		// Animação de "Pensando..."
 		a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
 		turnHistory := buildTurnHistoryWithAnchor()
 
+		// Chamada à LLM
 		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
 
 		a.cli.animation.StopThinkingAnimation()
@@ -1334,16 +1342,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			return fmt.Errorf("erro ao obter resposta da IA no turno %d: %w", turn+1, err)
 		}
 
-		// Persistir a resposta no histórico "real" (sem o anchor temporário).
+		// Persistir a resposta no histórico "real"
 		a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
 
+		// Parsear Tool Calls (XML)
 		toolCalls, parseErr := agent.ParseToolCalls(aiResponse)
 		if parseErr != nil {
 			a.logger.Warn("Falha ao parsear tool_calls", zap.Error(parseErr))
 			toolCalls = nil
 		}
 
-		// Pensamento = tudo antes do primeiro tool_call (se existir)
+		// Separar pensamento (texto antes do primeiro tool_call)
 		thoughtText := strings.TrimSpace(aiResponse)
 		if len(toolCalls) > 0 {
 			firstRaw := toolCalls[0].Raw
@@ -1352,9 +1361,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		}
 
 		// ==============
-		// RENDER (agent): sempre timeline, com markdown dentro do card
+		// RENDERIZAÇÃO DE PENSAMENTO (Timeline)
 		// ==============
-		// Extrai reasoning/explanation sem destruir markdown
 		reasoning, _ := extractXMLTagContent(thoughtText, "reasoning")
 		explanation, _ := extractXMLTagContent(thoughtText, "explanation")
 
@@ -1374,19 +1382,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		}
 
 		// =========================
-		// REGRAS ESTRITAS DO /CODER
+		// VALIDAÇÕES ESTRITAS DO /CODER
 		// =========================
 		if a.isCoderMode {
 			if len(toolCalls) > 0 {
+				// Exige <reasoning> antes de agir
 				if !hasReasoningTag(thoughtText) {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
 						Content: "Formato inválido no modo /coder. Antes de qualquer <tool_call>, escreva um <reasoning> curto (2-6 linhas) " +
-							"com as etapas e critério de sucesso, e então envie SOMENTE um <tool_call name=\"@coder\" ... />.",
+							"com as etapas e critério de sucesso, e então envie as <tool_call ... />.",
 					})
 					continue
 				}
 
+				// Exige uso exclusivo de @coder
 				if !strings.EqualFold(strings.TrimSpace(toolCalls[0].Name), "@coder") {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
@@ -1397,152 +1407,182 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 			}
 
+			// Proíbe blocos de código soltos (shell scripts) no modo coder
 			if len(toolCalls) == 0 {
 				if strings.Contains(aiResponse, "```") || strings.Contains(aiResponse, "```execute:") || regexp.MustCompile(`(?m)^[$#]\s+`).MatchString(aiResponse) {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
 						Content: "Você respondeu com comandos/blocos, o que é proibido no modo /coder. " +
-							"Use <reasoning> e então emita SOMENTE <tool_call name=\"@coder\" args=\"...\" />.",
+							"Use <reasoning> e então emita <tool_call name=\"@coder\" args=\"...\" />.",
 					})
 					continue
 				}
 			}
 		}
 
-		// ==================================
-		// PRIORIDADE 1: EXECUTAR TOOL_CALL(s)
-		// ==================================
+		// =========================================================
+		// PRIORIDADE 1: EXECUTAR TOOL_CALL(s) EM LOTE (BATCH)
+		// =========================================================
 		if len(toolCalls) > 0 {
-			tc := toolCalls[0]
-			toolName := tc.Name
-			toolArgsStr := tc.Args
+			var batchOutputBuilder strings.Builder
+			var batchHasError bool
+			successCount := 0
+			totalActions := len(toolCalls)
 
-			renderer.RenderToolCall(toolName, toolArgsStr)
+			// 1. Renderiza cabeçalho do lote se houver mais de 1 ação
+			if totalActions > 1 {
+				renderer.RenderBatchHeader(totalActions)
+			}
 
-			normalizedArgsStr := sanitizeToolCallArgs(toolArgsStr, a.logger, toolName, a.isCoderMode)
-			// HARD RULE (/coder): proibir multiline real em args.
-			// Motivo: alguns modelos usam "\" + newline por organização,
-			// e isso quebra o parser argv antes do plugin rodar.
-			if a.isCoderMode && hasAnyNewline(normalizedArgsStr) {
-				msg := buildCoderSingleLineArgsEnforcementPrompt(toolArgsStr)
+			// Iterar sobre TODAS as chamadas de ferramenta sugeridas
+			for i, tc := range toolCalls {
+				toolName := tc.Name
+				toolArgsStr := tc.Args
 
-				// Mostra e força a IA a reenviar corretamente
-				renderer.RenderToolResult("Args inválido no modo /coder: contém quebra de linha real em args.\n\n"+msg, true)
+				// UX: Pequena pausa para separar visualmente o pensamento da ação
+				time.Sleep(200 * time.Millisecond)
 
-				a.cli.history = append(a.cli.history, models.Message{
-					Role:    "user",
-					Content: msg,
-				})
+				// 2. Renderiza a BOX de ação IMEDIATAMENTE (antes de processar)
+				// Isso dá feedback visual "Real-Time" do que está prestes a acontecer
+				renderer.RenderToolCallWithProgress(toolName, toolArgsStr, i+1, totalActions)
 
-				// Próximo turno (não executa plugin)
+				// UX: Força flush e pausa para leitura
+				os.Stdout.Sync()
+				time.Sleep(300 * time.Millisecond)
+
+				// --- Lógica de Sanitização e Validação ---
+				normalizedArgsStr := sanitizeToolCallArgs(toolArgsStr, a.logger, toolName, a.isCoderMode)
+
+				// HARD RULE (/coder): proibir multiline real em args.
+				if a.isCoderMode && hasAnyNewline(normalizedArgsStr) {
+					msg := buildCoderSingleLineArgsEnforcementPrompt(toolArgsStr)
+					// Feedback visual de erro
+					renderer.RenderToolResult("Erro de formato: Argumentos com quebra de linha real.\n"+msg, true)
+
+					a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
+					batchHasError = true
+					break // Interrompe o lote
+				}
+
+				toolArgs, parseErr := splitToolArgsMultiline(normalizedArgsStr)
+				var toolOutput string
+				var execErr error
+
+				// --- Preparação da Execução ---
+				if parseErr != nil {
+					execErr = parseErr
+					toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", parseErr)
+
+					if a.isCoderMode {
+						fixMsg := fmt.Sprintf("Seu <tool_call> veio com args inválido (erro: %v). No modo /coder, args deve ser SEMPRE linha única.", parseErr)
+						a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: fixMsg})
+						batchHasError = true
+						// Não break aqui, deixa cair no renderToolResult abaixo para feedback
+					}
+				} else {
+					plugin, found := a.cli.pluginManager.GetPlugin(toolName)
+					if !found {
+						execErr = fmt.Errorf("plugin não encontrado")
+						toolOutput = fmt.Sprintf("Ferramenta '%s' não existe ou não está instalada.", toolName)
+
+						if a.isCoderMode {
+							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "Ferramenta não encontrada. Use @coder."})
+							batchHasError = true
+						}
+					} else {
+						// Guard-rail do /coder (@coder) - Argumentos obrigatórios
+						if a.isCoderMode && strings.EqualFold(strings.TrimSpace(toolName), "@coder") {
+							if missing, which := isCoderArgsMissingRequiredValue(toolArgs); missing {
+								msg := buildCoderToolCallFixPrompt(which)
+								// Feedback visual
+								renderer.RenderToolResult("Args inválido para @coder: falta argumento válido em "+which, true)
+
+								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
+								batchHasError = true
+								// Marca erro para parar o loop
+								execErr = fmt.Errorf("argumento obrigatório faltando: %s", which)
+							}
+						}
+
+						// Se não houve erro de validação, EXECUTA
+						if !batchHasError {
+							// UX: Animação durante a execução
+							subCmd := "ação"
+							if len(toolArgs) > 0 {
+								subCmd = toolArgs[0]
+							}
+							a.cli.animation.ShowThinkingAnimation(fmt.Sprintf("Executando %s", subCmd))
+
+							toolOutput, execErr = plugin.Execute(ctx, toolArgs)
+
+							a.cli.animation.StopThinkingAnimation()
+
+							// Se o contexto foi cancelado (Ctrl+C), propaga imediatamente
+							if ctx.Err() != nil {
+								return ctx.Err()
+							}
+						}
+					}
+				}
+
+				// 3. Renderiza resultado individual (após a execução)
+				displayForHuman := toolOutput
+				if execErr != nil {
+					errText := execErr.Error()
+					if strings.TrimSpace(displayForHuman) == "" {
+						displayForHuman = errText
+					} else {
+						displayForHuman = displayForHuman + "\n\n--- ERRO ---\n" + errText
+					}
+				}
+				renderer.RenderToolResult(displayForHuman, execErr != nil)
+
+				// Acumula o resultado para a LLM
+				batchOutputBuilder.WriteString(fmt.Sprintf("--- Resultado da Ação %d (%s) ---\n", i+1, toolName))
+
+				if execErr != nil || batchHasError {
+					batchOutputBuilder.WriteString(fmt.Sprintf("ERRO: %v\nSaída parcial: %s\n", execErr, toolOutput))
+					batchOutputBuilder.WriteString("\n[EXECUÇÃO EM LOTE INTERROMPIDA PREMATURAMENTE DEVIDO A ERRO NA AÇÃO ANTERIOR]\n")
+
+					// Garante flag de erro se veio de execErr
+					batchHasError = true
+					break // Fail-Fast: Para a execução do lote
+				} else {
+					// Truncamento opcional para economizar tokens no contexto da LLM (não na tela)
+					if len(toolOutput) > 30000 {
+						preview := toolOutput[:5000]
+						suffix := toolOutput[len(toolOutput)-1000:]
+						toolOutput = fmt.Sprintf("%s\n\n... [CONTEÚDO CENTRAL OMITIDO (%d chars) PARA ECONOMIZAR TOKENS] ...\n\n%s", preview, len(toolOutput)-6000, suffix)
+					}
+
+					batchOutputBuilder.WriteString(toolOutput)
+					batchOutputBuilder.WriteString("\n\n")
+					successCount++
+				}
+			}
+
+			// 4. Renderiza rodapé do lote
+			if totalActions > 1 {
+				renderer.RenderBatchSummary(successCount, totalActions, batchHasError)
+			}
+
+			// Lógica de Continuação:
+			// Se houve erro de validação (onde já inserimos msg específica no histórico) E nenhuma ação rodou,
+			// apenas damos continue para a IA tentar corrigir.
+			if batchHasError && !strings.Contains(batchOutputBuilder.String(), "Resultado da Ação") {
 				continue
 			}
 
-			toolArgs, parseErr := splitToolArgsMultiline(normalizedArgsStr)
-
-			var toolOutput string
-			var execErr error
-
-			if parseErr != nil {
-				execErr = parseErr
-				toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", parseErr)
-
-				if a.isCoderMode {
-					a.cli.history = append(a.cli.history, models.Message{
-						Role: "user",
-						Content: fmt.Sprintf(
-							"Seu <tool_call> veio com args inválido (erro: %v). "+
-								"No modo /coder, args deve ser SEMPRE linha única e com aspas balanceadas. "+
-								"Reenvie SOMENTE um <tool_call name=\"@coder\" args=\"...\" /> em linha única. "+
-								"Exemplo: <tool_call name=\"@coder\" args=\"exec --cmd 'go test ./...'\" />",
-							parseErr,
-						),
-					})
-					renderer.RenderToolResult(toolOutput+"\n\n--- ERRO ---\n"+execErr.Error(), true)
-					continue
-				}
-			} else {
-				plugin, found := a.cli.pluginManager.GetPlugin(toolName)
-				if !found {
-					execErr = fmt.Errorf("plugin não encontrado")
-					toolOutput = fmt.Sprintf("Ferramenta '%s' não existe ou não está instalada.", toolName)
-
-					if a.isCoderMode {
-						a.cli.history = append(a.cli.history, models.Message{
-							Role: "user",
-							Content: "Ferramenta não encontrada. No modo /coder, você deve usar @coder. " +
-								"Reenvie SOMENTE <tool_call name=\"@coder\" args=\"...\" />.",
-						})
-						renderer.RenderToolResult(toolOutput+"\n\n--- ERRO ---\n"+execErr.Error(), true)
-						continue
-					}
-				} else {
-					// ============================
-					// Guard-rail do /coder (@coder)
-					// ============================
-					if a.isCoderMode && strings.EqualFold(strings.TrimSpace(toolName), "@coder") {
-						if missing, which := isCoderArgsMissingRequiredValue(toolArgs); missing {
-							msg := buildCoderToolCallFixPrompt(which)
-
-							// Mostra ao humano e força a IA a reenviar o tool_call correto
-							renderer.RenderToolResult("Args inválido para @coder: falta argumento válido em "+which+"\n\n"+msg, true)
-
-							a.cli.history = append(a.cli.history, models.Message{
-								Role:    "user",
-								Content: msg,
-							})
-
-							// Não executa plugin; próximo turno
-							continue
-						}
-					}
-
-					toolOutput, execErr = plugin.Execute(ctx, toolArgs)
-
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-				}
-			}
-
-			displayForHuman := toolOutput
-			if execErr != nil {
-				errText := execErr.Error()
-				if strings.TrimSpace(displayForHuman) == "" {
-					displayForHuman = errText
-				} else {
-					displayForHuman = displayForHuman + "\n\n--- ERRO ---\n" + errText
-				}
-			}
-			renderer.RenderToolResult(displayForHuman, execErr != nil)
-
-			payloadForAI := toolOutput
-			if execErr != nil {
-				errText := execErr.Error()
-				if strings.TrimSpace(payloadForAI) == "" {
-					payloadForAI = errText
-				} else {
-					payloadForAI = payloadForAI + "\n\n--- ERROR ---\n" + errText
-				}
-			}
-
-			feedbackForAI := i18n.T("agent.feedback.tool_output", toolName, payloadForAI)
+			// Caso contrário (sucesso ou erro de execução no meio), enviamos o output acumulado.
+			feedbackForAI := i18n.T("agent.feedback.tool_output", "batch_execution", batchOutputBuilder.String())
 			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
-
-			if len(toolCalls) > 1 {
-				a.cli.history = append(a.cli.history, models.Message{
-					Role: "user",
-					Content: "Nota: você enviou múltiplos <tool_call> no mesmo turno. " +
-						"Para segurança e previsibilidade, envie apenas 1 <tool_call> por vez no próximo turno.",
-				})
-			}
 
 			continue
 		}
 
-		// ==============================================
-		// PRIORIDADE 2: EXECUTE BLOCKS (modo agente)
-		// ==============================================
+		// =========================================================
+		// PRIORIDADE 2: EXECUTE BLOCKS (Legado / Modo Agente Padrão)
+		// =========================================================
 		commandBlocks := a.extractCommandBlocks(aiResponse)
 		if len(commandBlocks) > 0 {
 			if a.isCoderMode && a.isOneShot {
@@ -1559,13 +1599,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				a.cli.history = append(a.cli.history, models.Message{
 					Role: "user",
 					Content: "No modo /coder, não use blocos ```execute``` nem comandos shell. " +
-						"Use <reasoning> e então emita SOMENTE <tool_call name=\"@coder\" ... />.",
+						"Use <reasoning> e então emita <tool_call name=\"@coder\" ... />.",
 				})
 				continue
 			}
 
-			// AGORA: não imprime “resposta normal” aqui.
-			// Só entra no fluxo do plano/menu do agente.
 			renderMDCard("🧩", "PLANO GERADO", "A IA gerou um plano de ação com comandos executáveis. Use o menu abaixo para executar.", agent.ColorLime)
 			a.handleCommandBlocks(ctx, commandBlocks)
 			return nil
