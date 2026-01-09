@@ -83,4 +83,4 @@ No `/coder`, o atributo `args` do `<tool_call>` deve usar somente os subcomandos
 4. Aplicar patch minimal: `patch --file ...`
 5. Rodar testes: `exec --cmd "go test ./..."`
 
-# {{< notice "success">}} Nesse modo, a saída sempre vai via <markup>@coder</markup>. Você não precisa escrever comandos diretamente no shell.{{< /notice >}}
+{{< notice "success">}} Nesse modo, a saída sempre vai via <markup>@coder</markup>. Você não precisa escrever comandos diretamente no shell.{{< /notice >}}
