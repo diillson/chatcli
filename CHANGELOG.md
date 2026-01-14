@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.46.1](https://github.com/diillson/chatcli/compare/v1.46.0...v1.46.1) (2026-01-14)
+
+
+### Bug Fixes
+
+* **coderDoc:** update title and description for governance clarification ([#457](https://github.com/diillson/chatcli/issues/457)) ([#458](https://github.com/diillson/chatcli/issues/458)) ([00e1e56](https://github.com/diillson/chatcli/commit/00e1e5612f3eda02dcaf3bd6ff5513a56181f52a))
+
 ## [1.46.0](https://github.com/diillson/chatcli/compare/v1.45.0...v1.46.0) (2026-01-14)
 
 
