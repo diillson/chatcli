@@ -13,7 +13,7 @@ O ChatCLI foi projetado para ser uma ferramenta poderosa, mas o poder exige cont
 
 ## Como Funciona?
 
-Toda vez que a IA sugere uma ação (como criar um arquivo ou rodar um script), o ChatCLI verifica suas regras de segurança locais antes de executar.
+Toda a vez que a IA sugere uma ação (como criar um arquivo ou rodar um script), o ChatCLI verifica as suas regras de segurança locais antes de executar.
 
 ### Os 3 Estados de Permissão
 
@@ -81,5 +81,5 @@ As regras são salvas localmente em `.~/.chatcli/coder_policy.json`. Você pode 
 ## Boas Práticas
 
 1. **Inicie com Cautela:** Mantenha os comandos de escrita (`write`, `patch`, `exec`) como `ask` até sentir confiança no agente.
-2. **Libere Leituras:** Geralmente, é seguro dar `Always` para `coder read`, `coder tree` e `coder search`, pois não alteram seu cadigo.
+2. **Libere Leituras:** Geralmente, é seguro dar `Always` para `coder read`, `coder tree` e `coder search`, pois não alteram o seu código.
 3. **Seja Específico:** O matching é feito por prefixo. Você pode liberar `coder exec --cmd 'ls` mas bloquear `coder exec --cmd 'rm`.
