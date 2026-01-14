@@ -618,7 +618,7 @@ O Modo Agente permite que a IA interaja com seu sistema, sugerindo ou executando
 
 ### Segurança e Governança do Modo Coder
 
-O Modo Coder (`/zcoder`) possui um sistema de governança robusto inspirado no ClaudeCode, garantindo que você tenha controle total sobre as ações da IA.
+O Modo Coder (`/coder`) possui um sistema de governança robusto inspirado no ClaudeCode, GeminiCLI, AntiGravity e outros..., garantindo que você tenha controle total sobre as ações da IA.
 
 1. **Allow (Permitido):** Ações de leitura (`ls`, `read`) são executadas automaticamente.
 2. **Deny (Bloqueado):** Ações perigosas podem ser bloqueadas permanentemente.
