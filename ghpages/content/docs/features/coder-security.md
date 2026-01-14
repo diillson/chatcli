@@ -1,11 +1,9 @@
 +++
-title = "Segurança do Modo Coder"
+title = "Segurança do Modo Coder (Governança)"
 weight = 10
 type = "docs"
 description = "Entenda como funciona o sistema de governança e permissões do Modo Coder."
 +++
-
-# Segurança do Modo Coder (Governança)
 
 O ChatCLI foi projetado para ser uma ferramenta poderosa, mas o poder exige controle. No **Modo Coder ** (`/coder`), a IA tem capacidade de ler, escrever, criar e executar comandos no seu sistema. Para garantir que você esteja sempre no comando, implementamos um sistema de governança inspirado no ClaudeCode.
 
