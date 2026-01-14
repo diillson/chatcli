@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/diillson/chatcli/cli/coder"
 	"html"
 	"io"
 	"os"
@@ -1436,6 +1437,43 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// Iterar sobre TODAS as chamadas de ferramenta sugeridas
 			for i, tc := range toolCalls {
+				// --- SECURITY CHECK START ---
+				if a.isCoderMode {
+					pm, err := coder.NewPolicyManager(a.logger)
+					if err == nil {
+						action := pm.Check(tc.Name, tc.Args)
+						if action == coder.ActionDeny {
+							msg := "🛫 AÇÃO BLOQUEADA PELO USUÁRIO (Regra de Segurança). NÃO TENTE NOVAMENTE."
+							renderer.RenderToolResult(msg, true)
+							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
+							batchHasError = true
+							break
+						}
+						if action == coder.ActionAsk {
+							decision := coder.PromptSecurityCheck(ctx, tc.Name, tc.Args)
+							pattern := coder.GetSuggestedPattern(tc.Name, tc.Args)
+							switch decision {
+							case coder.DecisionAllowAlways:
+								_ = pm.AddRule(pattern, coder.ActionAllow)
+							case coder.DecisionDenyForever:
+								_ = pm.AddRule(pattern, coder.ActionDeny)
+								msg := "🛫 AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
+								renderer.RenderToolResult(msg, true)
+								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
+								batchHasError = true
+							case coder.DecisionDenyOnce:
+								msg := "🛫 AÇÃO NEGADA PELO USUÁRIO. NÃO TENTE O MESMO COMANDO NOVAMENTE. Peça novas instruções ou tente uma alternativa."
+								renderer.RenderToolResult(msg, true)
+								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
+								batchHasError = true
+							}
+							if batchHasError {
+								break
+							}
+						}
+					}
+				}
+				// --- SECURITY CHECK END ---
 				toolName := tc.Name
 				toolArgsStr := tc.Args
 

@@ -610,6 +610,18 @@ golangci.yml
 
 Agent Mode allows the AI to interact with your system, suggesting or executing commands to automate complex or repetitive tasks.
 
+-----
+
+### Coder Mode Security and Governance
+
+Coder Mode (`/coder`) features a robust governance system inspired by ClaudeCode, ensuring you have total control over AI actions.
+
+1. **Allow**: Read actions (`ls`, `read`) are executed automatically.
+2. **Deny**: Dangerous actions can be permanently blocked.
+3. **Ask**: By default, writes and executions require interactive approval.
+
+> 🛵 Learn more about configuring security rules in the [complete documentation](https://diillson.github.io/chatcli/docs/features/coder-security).
+
 #### Security Policy
 
 ChatCLI prioritizes safety by blocking dangerous commands by default. You can strengthen this policy with environment variables:

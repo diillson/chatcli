@@ -614,6 +614,18 @@ golangci.yml
 
 O Modo Agente permite que a IA interaja com seu sistema, sugerindo ou executando comandos para automatizar tarefas complexas ou repetitivas.
 
+-----
+
+### Segurança e Governança do Modo Coder
+
+O Modo Coder (`/zcoder`) possui um sistema de governança robusto inspirado no ClaudeCode, garantindo que você tenha controle total sobre as ações da IA.
+
+1. **Allow (Permitido):** Ações de leitura (`ls`, `read`) são executadas automaticamente.
+2. **Deny (Bloqueado):** Ações perigosas podem ser bloqueadas permanentemente.
+3. **Ask (Perguntar):** Por padrão, escritas e execuções exigem aprovação interativa.
+
+> 🛵 Saiba mais sobre como configurar as regras de segurança na [documentação completa](https://diillson.github.io/chatcli/docs/features/coder-security).
+
 #### Política de Segurança
 
 O ChatCLI prioriza a segurança, bloqueando comandos perigosos por padrão. Você pode reforçar essa política com variáveis de ambiente:
