@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.46.0](https://github.com/diillson/chatcli/compare/v1.45.0...v1.46.0) (2026-01-14)
+
+
+### Features
+
+* **coder:** add robust security and governance system for `/coder` mode ([#453](https://github.com/diillson/chatcli/issues/453)) ([#454](https://github.com/diillson/chatcli/issues/454)) ([a948055](https://github.com/diillson/chatcli/commit/a948055d27422dab55294228b634fde8c32b0e42))
+
 ## [1.45.0](https://github.com/diillson/chatcli/compare/v1.44.1...v1.45.0) (2026-01-08)
 
 
