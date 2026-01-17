@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/diillson/chatcli/cli/coder"
 	"html"
 	"io"
 	"os"
@@ -22,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/cli/coder"
 
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/config"
@@ -39,8 +40,8 @@ type AgentMode struct {
 	executor            *agent.CommandExecutor
 	validator           *agent.CommandValidator
 	contextManager      *agent.ContextManager
+	taskTracker         *agent.TaskTracker
 	executeCommandsFunc func(ctx context.Context, block agent.CommandBlock) (string, string)
-	//skipClearOnNextDraw bool
 	isCoderMode bool
 	isOneShot   bool
 }
@@ -68,6 +69,7 @@ func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 		executor:       agent.NewCommandExecutor(logger),
 		validator:      agent.NewCommandValidator(logger),
 		contextManager: agent.NewContextManager(logger),
+		taskTracker:    agent.NewTaskTracker(logger),
 	}
 	a.executeCommandsFunc = a.executeCommandsWithOutput
 	return a
@@ -1374,9 +1376,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		if strings.TrimSpace(reasoning) != "" {
 			renderMDCard("🧠", "RACIOCÍNIO", reasoning, agent.ColorCyan)
-		}
+			// Integração de Task Tracking (somente no modo /coder)
+			if a.isCoderMode {
+				agent.IntegrateTaskTracking(a.taskTracker, reasoning, a.logger)
+			}
+	}
 		if strings.TrimSpace(explanation) != "" {
 			renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
+		}
+		// Renderizar progresso das tarefas (somente no modo /coder)
+		if a.isCoderMode && a.taskTracker != nil && a.taskTracker.GetPlan() != nil {
+			progress := a.taskTracker.FormatProgress()
+			if progress != "" {
+				fmt.Println(progress)
+			}
 		}
 		if strings.TrimSpace(remaining) != "" {
 			renderMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
@@ -1550,6 +1563,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								subCmd = toolArgs[0]
 							}
 							a.cli.animation.ShowThinkingAnimation(fmt.Sprintf("Executando %s", subCmd))
+							// Marca tarefa como em andamento ANTES de executar
+							agent.MarkTaskInProgress(a.taskTracker)
 
 							toolOutput, execErr = plugin.Execute(ctx, toolArgs)
 
@@ -1574,6 +1589,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					}
 				}
 				renderer.RenderToolResult(displayForHuman, execErr != nil)
+
+				// Atualiza status da tarefa
+				if execErr != nil {
+					agent.MarkTaskFailed(a.taskTracker, execErr.Error())
+				} else {
+					agent.MarkTaskCompleted(a.taskTracker)
+				}
 
 				// Acumula o resultado para a LLM
 				batchOutputBuilder.WriteString(fmt.Sprintf("--- Resultado da Ação %d (%s) ---\n", i+1, toolName))
@@ -1613,6 +1635,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// Caso contrário (sucesso ou erro de execução no meio), enviamos o output acumulado.
 			feedbackForAI := i18n.T("agent.feedback.tool_output", "batch_execution", batchOutputBuilder.String())
+			
+			// Verifica se precisa de replanejamento
+			if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
+				feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores."
+			}
+			
 			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
 			continue
