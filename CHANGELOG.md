@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.47.0](https://github.com/diillson/chatcli/compare/v1.46.1...v1.47.0) (2026-01-17)
+
+
+### Features
+
+* add task tracking system and Claude Sonnet 1M tokens beta support ([#461](https://github.com/diillson/chatcli/issues/461)) ([#462](https://github.com/diillson/chatcli/issues/462)) ([91203a1](https://github.com/diillson/chatcli/commit/91203a1d203f2256d2a0ed329c12f8161dc71137))
+
 ## [1.46.1](https://github.com/diillson/chatcli/compare/v1.46.0...v1.46.1) (2026-01-14)
 
 
