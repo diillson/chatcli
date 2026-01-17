@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-	
+
 	"go.uber.org/zap"
 )
 
@@ -15,7 +15,7 @@ type TaskStatus string
 const (
 	TaskPending    TaskStatus = "pending"
 	TaskInProgress TaskStatus = "in_progress"
-	TaskCompleted   TaskStatus = "completed"
+	TaskCompleted  TaskStatus = "completed"
 	TaskFailed     TaskStatus = "failed"
 )
 
@@ -36,7 +36,6 @@ type TaskPlan struct {
 	UpdatedAt    time.Time
 	NeedsReplan  bool
 	FailureCount int
-	mu           sync.RWMutex
 }
 
 type TaskTracker struct {
@@ -71,11 +70,11 @@ func (t *TaskTracker) ParseReasoning(reasoningText string) error {
 			id++
 			desc := strings.TrimSpace(matches[2])
 			status := TaskPending
-			
+
 			if strings.Contains(line, "[x]") || strings.Contains(line, "[X]") {
 				status = TaskCompleted
 			}
-			
+
 			tasks = append(tasks, &Task{
 				ID:          id,
 				Description: desc,
@@ -194,14 +193,14 @@ func (t *TaskTracker) FormatProgress() string {
 		default:
 			icon = "[ ]"
 		}
-		
+
 		currentMarker := "  "
 		if i == t.plan.CurrentTask {
 			currentMarker = ">"
 		}
-		
+
 		fmt.Fprintf(&b, "%s%s %d. %s\n", currentMarker, icon, i+1, task.Description)
-		
+
 		if task.Status == TaskFailed && task.Error != "" {
 			fmt.Fprintf(&b, "    Error: %s\n", task.Error)
 		}
