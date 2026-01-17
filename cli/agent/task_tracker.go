@@ -213,7 +213,7 @@ func (t *TaskTracker) ResetPlanFromReasoning(reasoningText string, preserveCompl
 			status := TaskPending
 
 			low := strings.ToLower(line)
-			if strings.Contains(low, "[x]") || strings.Contains(low, "[x]") || strings.Contains(low, "[✓]") || strings.Contains(low, "[xC]") {
+			if strings.Contains(low, "[x]") || strings.Contains(low, "[✓]") || strings.Contains(low, "[x#]") {
 				status = TaskCompleted
 			}
 			if preserveCompleted && completed[strings.ToLower(strings.TrimSpace(desc))] {
