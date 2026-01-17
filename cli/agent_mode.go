@@ -42,8 +42,8 @@ type AgentMode struct {
 	contextManager      *agent.ContextManager
 	taskTracker         *agent.TaskTracker
 	executeCommandsFunc func(ctx context.Context, block agent.CommandBlock) (string, string)
-	isCoderMode bool
-	isOneShot   bool
+	isCoderMode         bool
+	isOneShot           bool
 }
 
 // Aliases de tipos para manter compatibilidade
@@ -1380,7 +1380,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if a.isCoderMode {
 				agent.IntegrateTaskTracking(a.taskTracker, reasoning, a.logger)
 			}
-	}
+		}
 		if strings.TrimSpace(explanation) != "" {
 			renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
 		}
@@ -1635,12 +1635,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// Caso contrário (sucesso ou erro de execução no meio), enviamos o output acumulado.
 			feedbackForAI := i18n.T("agent.feedback.tool_output", "batch_execution", batchOutputBuilder.String())
-			
+
 			// Verifica se precisa de replanejamento
 			if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
 				feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores."
 			}
-			
+
 			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
 			continue

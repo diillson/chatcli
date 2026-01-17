@@ -18,7 +18,7 @@ func IntegrateTaskTracking(tracker *TaskTracker, reasoningText string, logger *z
 			logger.Info("Replanejamento detectado, criando novo plano")
 			tracker.ResetPlan()
 		}
-		
+
 		if err := tracker.ParseReasoning(reasoningText); err != nil {
 			logger.Warn("Erro ao parsear reasoning para tarefas", zap.Error(err))
 		}

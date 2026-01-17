@@ -2,7 +2,7 @@ package agent
 
 import (
 	"testing"
-	
+
 	"go.uber.org/zap"
 )
 
@@ -10,8 +10,8 @@ func TestTaskTracker_ParseReasoning(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	tracker := NewTaskTracker(logger)
 	tests := []struct {
-		name        string
-		reasoning    string
+		name          string
+		reasoning     string
 		expectedCount int
 	}{
 		{name: "lista numerada", reasoning: `1. Criar arquivo
