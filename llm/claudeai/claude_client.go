@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -98,6 +99,9 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		req.Header.Add("Content-Type", "application/json")
 		req.Header.Add("x-api-key", c.apiKey)
 		req.Header.Add("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+		if isClaudeSonnet(c.model) {
+			req.Header.Add("anthropic-beta", "context-1m-2025-08-07")
+		}
 
 		resp, err := c.client.Do(req)
 		if err != nil {
@@ -113,6 +117,12 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	}
 
 	return responseText, nil
+}
+
+// helper beta 1m tokens sonnet model
+func isClaudeSonnet(model string) bool {
+	var claudeSonnetRe = regexp.MustCompile(`^claude-.*sonnet.*$`)
+	return claudeSonnetRe.MatchString(model)
 }
 
 func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
