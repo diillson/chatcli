@@ -1387,8 +1387,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Renderizar progresso das tarefas (somente no modo /coder)
 		if a.isCoderMode && a.taskTracker != nil && a.taskTracker.GetPlan() != nil {
 			progress := a.taskTracker.FormatProgress()
-			if progress != "" {
-				fmt.Println(progress)
+			if strings.TrimSpace(progress) != "" {
+				renderMDCard("🧩", "PLANO DE AÇÃO", progress, agent.ColorLime)
 			}
 		}
 		if strings.TrimSpace(remaining) != "" {

@@ -30,12 +30,13 @@ type Task struct {
 }
 
 type TaskPlan struct {
-	Tasks        []*Task
-	CurrentTask  int
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	NeedsReplan  bool
-	FailureCount int
+	Tasks         []*Task
+	CurrentTask   int
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	NeedsReplan   bool
+	FailureCount  int
+	PlanSignature string
 }
 
 type TaskTracker struct {
@@ -71,7 +72,8 @@ func (t *TaskTracker) ParseReasoning(reasoningText string) error {
 			desc := strings.TrimSpace(matches[2])
 			status := TaskPending
 
-			if strings.Contains(line, "[x]") || strings.Contains(line, "[X]") {
+			low := strings.ToLower(line)
+			if strings.Contains(low, "[x]") || strings.Contains(low, "[✓]") || strings.Contains(low, "[x#]") {
 				status = TaskCompleted
 			}
 
@@ -88,11 +90,20 @@ func (t *TaskTracker) ParseReasoning(reasoningText string) error {
 		return nil
 	}
 
+	sig := strings.Join(func() []string {
+		parts := make([]string, 0, len(tasks))
+		for _, tk := range tasks {
+			parts = append(parts, strings.ToLower(strings.TrimSpace(tk.Description)))
+		}
+		return parts
+	}(), "|")
+
 	t.plan = &TaskPlan{
-		Tasks:       tasks,
-		CurrentTask: 0,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		Tasks:         tasks,
+		CurrentTask:   0,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		PlanSignature: sig,
 	}
 
 	t.logger.Info("Plano de tarefas criado", zap.Int("total_tasks", len(tasks)))
@@ -168,6 +179,72 @@ func (t *TaskTracker) ResetPlan() {
 
 	t.plan = nil
 	t.logger.Info("Plano de tarefas resetado para replanejamento")
+}
+
+// ResetPlanFromReasoning recria o plano a partir de um novo reasoning. Se preserveCompleted=true, tenta preservar como concluídas as tarefas ja concluídas do plano anterior.
+func (t *TaskTracker) ResetPlanFromReasoning(reasoningText string, preserveCompleted bool) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	re := regexp.MustCompile(`(?i)^(\d+)\.?\s*(.+)$`)
+	lines := strings.Split(reasoningText, "\n")
+	var tasks []*Task
+	id := 0
+
+	completed := map[string]bool{}
+	if preserveCompleted && t.plan != nil {
+		for _, tk := range t.plan.Tasks {
+			if tk.Status == TaskCompleted {
+				completed[strings.ToLower(strings.TrimSpace(tk.Description))] = true
+			}
+		}
+	}
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		matches := re.FindStringSubmatch(line)
+		if len(matches) >= 3 {
+			id++
+			desc := strings.TrimSpace(matches[2])
+			status := TaskPending
+
+			low := strings.ToLower(line)
+			if strings.Contains(low, "[x]") || strings.Contains(low, "[x]") || strings.Contains(low, "[✓]") || strings.Contains(low, "[xC]") {
+				status = TaskCompleted
+			}
+			if preserveCompleted && completed[strings.ToLower(strings.TrimSpace(desc))] {
+				status = TaskCompleted
+			}
+
+			tasks = append(tasks, &Task{ID: id, Description: desc, Status: status})
+		}
+	}
+
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	sig := strings.Join(func() []string {
+		parts := make([]string, 0, len(tasks))
+		for _, tk := range tasks {
+			parts = append(parts, strings.ToLower(strings.TrimSpace(tk.Description)))
+		}
+		return parts
+	}(), "|")
+
+	t.plan = &TaskPlan{
+		Tasks:         tasks,
+		CurrentTask:   0,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		PlanSignature: sig,
+	}
+
+	return nil
 }
 
 func (t *TaskTracker) FormatProgress() string {
