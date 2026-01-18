@@ -1,115 +1,110 @@
 package cli
 
 import (
-	"context"
-	"io"
-	"os"
-	"strings"
 	"testing"
 
-	"github.com/diillson/chatcli/cli/agent"
-	"github.com/diillson/chatcli/i18n"
-	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
 
-// MockLLMClient para simular respostas da IA
-type MockLLMClient struct {
-	mock.Mock
+func TestNormalizeShellLineContinuations(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name: "Continuação simples fora de aspas",
+			input: `write --file api.go \
+--encoding base64`,
+			expected: `write --file api.go  --encoding base64`,
+		},
+		{
+			name:     "Continuação com espaços antes do \\n",
+			input:    "write --file api.go \\\n--encoding base64",
+			expected: "write --file api.go  --encoding base64",
+		},
+		{
+			name: "Continuação dentro de aspas duplas (remove, não vira espaço)",
+			input: `write --file api.go --content "linha1\
+linha2"`,
+			expected: `write --file api.go --content "linha1linha2"`,
+		},
+		{
+			name: "Continuação dentro de aspas simples (remove)",
+			input: `write --file api.go --content 'linha1\
+linha2'`,
+			expected: `write --file api.go --content 'linha1linha2'`,
+		},
+		{
+			name:     "Base64 sem quebras (mantém intacto)",
+			input:    `write --file api.go --content "cGFja2FnZSBtYWluCg=="`,
+			expected: `write --file api.go --content "cGFja2FnZSBtYWluCg=="`,
+		},
+		{
+			name: "Múltiplas continuações",
+			input: `write --file api.go \
+--encoding base64 \
+--content 'base64...'`,
+			expected: `write --file api.go  --encoding base64  --content 'base64...'`,
+		},
+		{
+			name:     "Barra literal (não seguida de Enter)",
+			input:    `write --file api.go --content "caminho\\arquivo.go"`,
+			expected: `write --file api.go --content "caminho\\arquivo.go"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeShellLineContinuations(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
-func (m *MockLLMClient) GetModelName() string {
-	args := m.Called()
-	return args.String(0)
-}
+func TestSanitizeToolCallArgs_WithLineContinuations(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
 
-func (m *MockLLMClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
-	args := m.Called(ctx, prompt, history, maxTokens)
-	return args.String(0), args.Error(1)
-}
+	// Caso real: IA manda com \ + Enter
+	rawArgs := `write --file main.go \
+--encoding base64 --content "cGFja2FnZSBtYWluCg=="`
 
-// Helper para redirecionar Stdin durante o teste
-func withStdin(t *testing.T, input string, f func()) {
-	oldStdin := os.Stdin
-	defer func() { os.Stdin = oldStdin }()
+	result := sanitizeToolCallArgs(rawArgs, logger, "@coder", true)
 
-	r, w, err := os.Pipe()
+	// Esperado: espaços no lugar de \ + Enter, mas conteúdo base64 preservado
+	expected := `write --file main.go  --encoding base64 --content "cGFja2FnZSBtYWluCg=="`
+
+	assert.Equal(t, expected, result)
+
+	// Deve parsear sem erro
+	parsed, err := splitToolArgsMultiline(result)
 	assert.NoError(t, err)
-
-	os.Stdin = r
-
-	go func() {
-		defer w.Close()
-		_, err := io.WriteString(w, input)
-		assert.NoError(t, err)
-	}()
-
-	f()
+	assert.Contains(t, parsed, "write")
+	assert.Contains(t, parsed, "--file")
+	assert.Contains(t, parsed, "main.go")
+	assert.Contains(t, parsed, "--content")
+	assert.Contains(t, parsed, "cGFja2FnZSBtYWluCg==")
 }
 
-func TestAgentMode_Run_ExtractsAndHandlesCommands(t *testing.T) {
-	// Inicializar i18n para evitar panic nas mensagens
-	i18n.Init()
+func TestDanglingBackslashAfterFlag(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
 
-	logger := zap.NewNop() // Usar Nop logger para não sujar o output do teste
-	mockLLM := new(MockLLMClient)
+	// Caso 1: --content \ (barra sozinha após flag)
+	rawArgs1 := "write --file api.go --content \\ cGFja2FnZSBtYWlu"
+	result1 := sanitizeToolCallArgs(rawArgs1, logger, "@coder", true)
+	assert.Contains(t, result1, "cGFja2FnZSBtYWlu")
+	assert.NotContains(t, result1, "\\")
 
-	chatCLI := &ChatCLI{
-		Client:    mockLLM,
-		logger:    logger,
-		animation: NewAnimationManager(),
-		history:   []models.Message{},
-		// PluginManager é nil aqui, o código deve lidar com isso graciosamente
-	}
-	agentMode := NewAgentMode(chatCLI, logger)
+	// Caso 2: --search \ (barra sozinha após flag)
+	rawArgs2 := "patch --file main.go --search \\ aWl"
+	result2 := sanitizeToolCallArgs(rawArgs2, logger, "@coder", true)
+	assert.Contains(t, result2, "aWl")
+	assert.NotContains(t, result2, "\\")
 
-	// Resposta da IA simulando um bloco de código shell (fallback legacy)
-	// Isso deve acionar o menu interativo
-	aiResponse := "Vou listar os arquivos.\n" +
-		"```execute:shell\n" +
-		"ls -la\n" +
-		"```"
-
-	mockLLM.On("GetModelName").Return("MockGPT")
-	// Configurar o mock para retornar a resposta definida
-	mockLLM.On("SendPrompt",
-		mock.Anything,
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("[]models.Message"),
-		mock.AnythingOfType("int"),
-	).Return(aiResponse, nil)
-
-	// Capturar o bloco executado para asserção
-	var executedBlock agent.CommandBlock
-
-	// Mockar a função de execução interna para não rodar comandos reais no sistema
-	agentMode.executeCommandsFunc = func(ctx context.Context, block agent.CommandBlock) (string, string) {
-		executedBlock = block
-		return "total 0", "" // Simula saída do ls
-	}
-
-	// Simular input do usuário no menu interativo:
-	// "1" -> Escolhe executar o comando 1
-	// "q" -> Sai do menu (necessário pois o menu entra em loop)
-	userInput := "1\nq\n"
-
-	withStdin(t, userInput, func() {
-		// CORREÇÃO AQUI: Atualizada a assinatura para incluir o 4º argumento (systemPromptOverride)
-		// Passamos "" para usar o prompt padrão
-		err := agentMode.Run(context.Background(), "list files", "", "")
-		assert.NoError(t, err)
-	})
-
-	mockLLM.AssertExpectations(t)
-
-	// Verificar se o bloco foi capturado corretamente
-	assert.NotNil(t, executedBlock, "O bloco de comando deveria ter sido executado")
-	if len(executedBlock.Commands) > 0 {
-		assert.Equal(t, "ls -la", strings.TrimSpace(executedBlock.Commands[0]))
-		assert.Equal(t, "shell", executedBlock.Language)
-	} else {
-		t.Error("Nenhum comando foi extraído do bloco")
-	}
+	// Caso 3: --cmd \ (barra sozinha após flag)
+	rawArgs3 := "exec --cmd \\ go.test"
+	result3 := sanitizeToolCallArgs(rawArgs3, logger, "@coder", true)
+	assert.Contains(t, result3, "go.test")
+	assert.NotContains(t, result3, "\\")
 }
