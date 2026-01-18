@@ -361,6 +361,8 @@ func handleExec(args []string) {
 	}
 
 	decodedCmd := html.UnescapeString(*cmdStr)
+	// Remove qualquer espaço em branco no início ou fim que possa ter sobrado do parsing.
+	decodedCmd = strings.TrimSpace(decodedCmd)
 	re := regexp.MustCompile(`\\\s*[\r\n]+`)
 	finalCmd := re.ReplaceAllString(decodedCmd, " ")
 	spaceRe := regexp.MustCompile(`\s+`)
