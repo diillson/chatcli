@@ -1707,6 +1707,10 @@ func sanitizeToolCallArgs(rawArgs string, logger *zap.Logger, toolName string, i
 	unescaped := html.UnescapeString(rawArgs)
 	normalized := strings.ReplaceAll(unescaped, "\r\n", "\n")
 
+	// 2) Remove barra invertida seguida de espaço(s) que NÃO é continuação de linha
+	// Isso evita que o tokenizador escape o espaço e cole tokens
+	normalized = removeDanglingBackslashBeforeSpace(normalized)
+
 	// 3) Normaliza continuations estilo shell (atua em "\<spaces>\n")
 	normalized = normalizeShellLineContinuations(normalized)
 
@@ -2105,6 +2109,47 @@ func extractXMLTagContent(s, tag string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(m[1]), true
+}
+
+func removeDanglingBackslashBeforeSpace(input string) string {
+	var result strings.Builder
+	chars := []rune(input)
+	length := len(chars)
+
+	inDoubleQuote := false
+	inSingleQuote := false
+
+	for i := 0; i < length; i++ {
+		char := chars[i]
+
+		// Detecta \ fora de aspas
+		if char == '\\' && !inSingleQuote && !inDoubleQuote {
+			j := i + 1
+			hasSpace := false
+
+			// Avança por espaços, tabs ou carriage return
+			for j < length && (chars[j] == ' ' || chars[j] == '\t' || chars[j] == '\r') {
+				hasSpace = true
+				j++
+			}
+
+			// Se for "\" + espaços e NÃO for continuação de linha (\n), remove a barra
+			if hasSpace && (j >= length || chars[j] != '\n') {
+				continue // pula a barra
+			}
+		}
+
+		// Controle de aspas
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+		} else if char == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+		}
+
+		result.WriteRune(char)
+	}
+
+	return result.String()
 }
 
 // stripXMLTagBlock remove completamente o bloco <tag>...</tag> do texto.
