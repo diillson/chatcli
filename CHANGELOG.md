@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.47.1](https://github.com/diillson/chatcli/compare/v1.47.0...v1.47.1) (2026-01-18)
+
+
+### Bug Fixes
+
+* **cli:** improve line continuation normalization and sanitize tool arguments ([#464](https://github.com/diillson/chatcli/issues/464)) ([#465](https://github.com/diillson/chatcli/issues/465)) ([4cd89c3](https://github.com/diillson/chatcli/commit/4cd89c3499b749d22c1b66e57532c386287098d9))
+
 ## [1.47.0](https://github.com/diillson/chatcli/compare/v1.46.1...v1.47.0) (2026-01-17)
 
 
