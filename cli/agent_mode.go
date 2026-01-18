@@ -1707,6 +1707,18 @@ func sanitizeToolCallArgs(rawArgs string, logger *zap.Logger, toolName string, i
 	unescaped := html.UnescapeString(rawArgs)
 	normalized := strings.ReplaceAll(unescaped, "\r\n", "\n")
 
+	// >>> NOVA LINHA DE CORREÃÃO <<<
+	// Remove explicitamente a sequència '\ ', que a IA gera erroneamente.
+	// Isso transforma '--cmd \ "echo..."' em '--cmd  "echo..."', que é então normalizado
+	// pelo TrimSpace e pelo parser de argumentos.
+	normalized = strings.ReplaceAll(normalized, "\\ ", " ")
+
+	// >>> NOVA LINHA DE CORREÃÃO <<<
+	// Remove explicitamente a sequència '\ ', que a IA gera erroneamente.
+	// Isso transforma '--cmd \ "echo..."' em '--cmd  "echo..."', que é então normalizado
+	// pelo TrimSpace e pelo parser de argumentos.
+	normalized = strings.ReplaceAll(normalized, "\\ ", " ")
+
 	// 2) Remove barra invertida seguida de espaço(s) que NÃO é continuação de linha
 	// Isso evita que o tokenizador escape o espaço e cole tokens
 	normalized = removeDanglingBackslashBeforeSpace(normalized)
