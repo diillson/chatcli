@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.47.2](https://github.com/diillson/chatcli/compare/v1.47.1...v1.47.2) (2026-01-18)
+
+
+### Bug Fixes
+
+* **cli:** correct escaping and trimming issues in argument parsing ([#467](https://github.com/diillson/chatcli/issues/467)) ([#468](https://github.com/diillson/chatcli/issues/468)) ([d23bf4d](https://github.com/diillson/chatcli/commit/d23bf4d1b6d3957e61d346d6ca720f2675a1a11e))
+
 ## [1.47.1](https://github.com/diillson/chatcli/compare/v1.47.0...v1.47.1) (2026-01-18)
 
 
