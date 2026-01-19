@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -168,9 +170,18 @@ func NewPluginFromPath(path string) (Plugin, error) {
 	if err != nil || info.IsDir() {
 		return nil, fmt.Errorf("caminho '%s' não é um arquivo válido", path)
 	}
-	// Verificação de permissão de execução (cross-platform).
-	if info.Mode().Perm()&0111 == 0 {
-		return nil, fmt.Errorf("plugin '%s' não possui permissão de execução", path)
+
+	// Só verifica bit de execução se NÃO for Windows
+	if runtime.GOOS != "windows" {
+		if info.Mode().Perm()&0111 == 0 {
+			return nil, fmt.Errorf("plugin '%s' não possui permissão de execução", path)
+		}
+	} else {
+		// Opcional para Windows: Verificar extensão
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".exe" && ext != ".bat" && ext != ".cmd" && ext != ".ps1" {
+			return nil, fmt.Errorf("plugin '%s' pode não ser executável no Windows (extensão inválida)", path)
+		}
 	}
 
 	// Valida o contrato: executa com --metadata e espera um JSON válido.
