@@ -70,11 +70,13 @@ A ordem de prioridade para as configurações é:
 
 ### Ollama (Local)
 
-| Variável | Descrição | Obrigatório? |
-| :--- | :--- | :--- |
-| `OLLAMA_ENABLED` | Defina como `true` para habilitar o provedor Ollama. | **Sim** |
-| `OLLAMA_BASE_URL` | URL base do seu servidor Ollama local. | Não |
-| `OLLAMA_MODEL` | O nome do modelo local a ser usado (ex: `llama3`, `codellama`). | Não |
+| Variável | Descrição                                                                                    | Obrigatório? |
+| :--- |:---------------------------------------------------------------------------------------------| :--- |
+| `OLLAMA_ENABLED` | Defina como `true` para habilitar o provedor Ollama.                                         | **Sim** |
+| `OLLAMA_BASE_URL` | URL base do seu servidor Ollama local.                                                       | Não |
+| `OLLAMA_MODEL` | O nome do modelo local a ser usado (ex: `llama3`, `codellama`).                              | Não |
+| `OLLAMA_FILTER_THINKING` | Filtra raciocínio intermediário em respostas (ex.: para `Qwen3`, `llama3` padrão `true`...). | Não |
+
 
 ### StackSpot
 

@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,37 +51,58 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, interacti
 	// Validar comando
 	if err := e.validator.ValidateCommand(command); err != nil {
 		e.logger.Warn("Comando inválido", zap.String("command", command), zap.Error(err))
-		// Retorna um resultado de erro imediatamente
 		return &ExecutionResult{
 			Command: command,
 			Error:   err.Error(),
 		}, err
 	}
 
-	// Obter shell
+	// --- LÓGICA DE SELEÇÃO DE SHELL E FLAG ---
 	shell := os.Getenv("SHELL")
+	shellFlag := "-c" // Padrão Unix (bash, zsh, sh)
+
 	if shell == "" {
-		shell = "/bin/sh"
+		if runtime.GOOS == "windows" {
+			shell = "powershell.exe" // Fallback seguro para Windows
+		} else {
+			shell = "/bin/sh"
+		}
 	}
+
+	// Ajuste da flag baseado no binário do shell
+	if runtime.GOOS == "windows" {
+		lowerShell := strings.ToLower(shell)
+		if strings.Contains(lowerShell, "powershell") || strings.Contains(lowerShell, "pwsh") {
+			shellFlag = "-Command"
+		} else if strings.Contains(lowerShell, "cmd") {
+			shellFlag = "/C"
+		} else if strings.Contains(lowerShell, "bash") {
+			// Git Bash no Windows usa -c
+			shellFlag = "-c"
+		}
+	}
+	// ------------------------------------------
 
 	e.logger.Debug("Executando comando",
 		zap.String("command", command),
 		zap.String("shell", shell),
+		zap.String("flag", shellFlag), // Log da flag
 		zap.Bool("interactive", interactive))
 
+	// Passamos a flag para as funções internas
 	if interactive {
-		return e.executeInteractive(ctx, shell, command)
+		return e.executeInteractive(ctx, shell, shellFlag, command)
 	}
 
-	return e.executeNonInteractive(ctx, shell, command)
+	return e.executeNonInteractive(ctx, shell, shellFlag, command)
 }
 
 // executeNonInteractive executa comando capturando saída
-func (e *CommandExecutor) executeNonInteractive(ctx context.Context, shell, command string) (*ExecutionResult, error) {
-	start := time.Now() // A medição de tempo começa aqui
+func (e *CommandExecutor) executeNonInteractive(ctx context.Context, shell, shellFlag, command string) (*ExecutionResult, error) {
+	start := time.Now()
 	result := &ExecutionResult{Command: command}
 
-	cmd := exec.CommandContext(ctx, shell, "-c", command)
+	cmd := exec.CommandContext(ctx, shell, shellFlag, command)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -87,7 +110,7 @@ func (e *CommandExecutor) executeNonInteractive(ctx context.Context, shell, comm
 	cmd.Stdin = os.Stdin
 
 	err := cmd.Run()
-	result.Duration = time.Since(start) // E termina aqui
+	result.Duration = time.Since(start)
 
 	result.Output = utils.SanitizeSensitiveText(stdout.String())
 	result.Error = utils.SanitizeSensitiveText(stderr.String())
@@ -109,8 +132,8 @@ func (e *CommandExecutor) executeNonInteractive(ctx context.Context, shell, comm
 }
 
 // executeInteractive executa comando interativo
-func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, command string) (*ExecutionResult, error) {
-	start := time.Now() // A medição de tempo começa aqui
+func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, shellFlag, command string) (*ExecutionResult, error) {
+	start := time.Now()
 	result := &ExecutionResult{Command: command}
 
 	fmt.Println(i18n.T("agent.executor.interactive_mode_header"))
@@ -118,27 +141,37 @@ func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, command
 	fmt.Println(i18n.T("agent.executor.interactive_mode_exit_tip"))
 	fmt.Println("----------------------------------------------")
 
-	saneCmd := exec.Command("stty", "sane")
-	saneCmd.Stdin = os.Stdin
-	if err := saneCmd.Run(); err != nil {
-		e.logger.Warn(i18n.T("agent.executor.fail_restore_terminal"), zap.Error(err))
+	if runtime.GOOS != "windows" {
+		saneCmd := exec.Command("stty", "sane")
+		saneCmd.Stdin = os.Stdin
+		if err := saneCmd.Run(); err != nil {
+			e.logger.Warn(i18n.T("agent.executor.fail_restore_terminal"), zap.Error(err))
+		}
 	}
 
+	// Configuração de perfil do shell (bashrc/zshrc)
 	shellConfigPath := e.getShellConfigPath(shell)
 	var shellCommand string
-	if shellConfigPath != "" {
-		shellCommand = fmt.Sprintf("source %s 2>/dev/null || true; %s", shellConfigPath, command)
-	} else {
+
+	// No Windows, a lógica de 'source' não funciona igual. Simplificamos para executar direto.
+	if runtime.GOOS == "windows" {
 		shellCommand = command
+	} else {
+		if shellConfigPath != "" {
+			shellCommand = fmt.Sprintf("source %s 2>/dev/null || true; %s", shellConfigPath, command)
+		} else {
+			shellCommand = command
+		}
 	}
 
-	cmd := exec.CommandContext(ctx, shell, "-c", shellCommand)
+	cmd := exec.CommandContext(ctx, shell, shellFlag, shellCommand)
+
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	err := cmd.Run()
-	result.Duration = time.Since(start) // E termina aqui
+	result.Duration = time.Since(start)
 
 	fmt.Println("\n" + i18n.T("agent.executor.interactive_mode_footer"))
 
