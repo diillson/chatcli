@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.47.4](https://github.com/diillson/chatcli/compare/v1.47.3...v1.47.4) (2026-01-19)
+
+
+### Bug Fixes
+
+* **cli:** add support for customizable history file path and improve default paths ([#473](https://github.com/diillson/chatcli/issues/473)) ([#474](https://github.com/diillson/chatcli/issues/474)) ([1ac404d](https://github.com/diillson/chatcli/commit/1ac404dd386d3f7ac77ba5e2849d7efe9b027414))
+
 ## [1.47.3](https://github.com/diillson/chatcli/compare/v1.47.2...v1.47.3) (2026-01-19)
 
 
