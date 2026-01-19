@@ -150,13 +150,14 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  `CHATCLI_DOTENV`  – **(Opcional)** Define o caminho do seu arquivo  .env .
   -  `CHATCLI_IGNORE` – **(Opcional)** Define uma lista de arquivos ou pastas a serem ignoradas pelo ChatCLI.
   -  `CHATCLI_LANG` - **(Opcional)** Força a CLI a usar um idioma específico (ex: `pt-BR`, `en`). Tem prioridade sobre a detecção automática do sistema.
-  - `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
+  -  `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
   -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` )
   -  `MAX_RETRIES`  - **(Opcional)** Número máximo de tentativas para chamadas de API (padrão:  `5` ).
   -  `INITIAL_BACKOFF`  - **(Opcional)** Tempo inicial de espera entre tentativas (padrão:  3  - segundos`).
-  -  `LOG_FILE`  - **(Opcional)** Caminho do arquivo de log (padrão:  `$HOME/app.log` ).
+  -  `LOG_FILE`  - **(Opcional)** Caminho do arquivo de log (padrão:  `$HOME/.chatcli/app.log` ).
   -  `LOG_MAX_SIZE`  - **(Opcional)** Tamanho máximo do arquivo de log antes da rotação (padrão:  100MB ).
   -  `HISTORY_MAX_SIZE`  - **(Opcional)** Tamanho máximo do arquivo de histórico antes da ro t ação (padrão:  100MB ).
+  -  `HISTORY_FILE`      - **(Opcional)** Caminho para o arquivo de histórico (suporta `~`). Padrão: `.chatcli_history`.  
   -  `ENV`  - **(Opcional)** Define como o log será exibido ( `dev` ,  `prod` ), Padrão:  `dev` .
       -  dev  mostra os logs direto no terminal e salva no arquivo de log.
       -  prod  apenas salva no arquivo de log mantendo um terminal mais limpo.
@@ -190,6 +191,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     LOG_FILE=app.log
     LOG_MAX_SIZE=300MB
     HISTORY_MAX_SIZE=300MB
+    HISTORY_FILE=~/.chatcli_history
 
     # Agente Configurações
     CHATCLI_AGENT_CMD_TIMEOUT=2m    # O comando terá 2m para ser executado após isso é travado e finalizado

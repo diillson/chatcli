@@ -24,11 +24,26 @@ type HistoryManager struct {
 }
 
 func NewHistoryManager(logger *zap.Logger) *HistoryManager {
+	rawPath := utils.GetEnvOrDefault("HISTORY_FILE", config.DefaultHistoryFile)
+
+	finalPath, err := utils.ExpandPath(rawPath)
+	if err != nil {
+		logger.Warn("Falha ao expandir caminho do arquivo de historico",
+			zap.String("path", rawPath),
+			zap.Error(err))
+		finalPath = rawPath
+	}
+
 	return &HistoryManager{
-		historyFile:    ".chatcli_history",
+		historyFile:    finalPath,
 		logger:         logger,
 		maxHistorySize: getMaxHistorySizeFromEnv(),
 	}
+}
+
+// GetHistoryFilePath retorna o caminho atual do arquivo de histórico
+func (hm *HistoryManager) GetHistoryFilePath() string {
+	return hm.historyFile
 }
 
 // getMaxHistorySizeFromEnv lê a variável de ambiente HISTORY_MAX_SIZE e retorna o valor em bytes.

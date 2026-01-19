@@ -2430,6 +2430,7 @@ func (cli *ChatCLI) showConfig() {
 	printItem(i18n.T("cli.config.key_log_file"), os.Getenv("LOG_FILE"))
 	printItem(i18n.T("cli.config.key_log_max_size"), os.Getenv("LOG_MAX_SIZE"))
 	printItem(i18n.T("cli.config.key_history_max_size"), os.Getenv("HISTORY_MAX_SIZE"))
+	printItem(i18n.T("cli.config.key_history_file_directory"), cli.historyManager.GetHistoryFilePath())
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_current_provider"), ColorLime))
 	printItem(i18n.T("cli.config.key_provider_runtime"), cli.Provider)

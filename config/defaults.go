@@ -8,7 +8,7 @@ const (
 	StackSpotBaseURL         = "https://genai-inference-app.stackspot.com/v1" // ATUALIZADO
 	StackSpotDefaultModel    = "StackSpotAI"
 	StackSpotResponseTimeout = 2 * time.Second
-	DefaultLogFile           = "$HOME/app.log"
+	DefaultLogFile           = "$HOME/.chatcli/app.log"
 	DefaultStackSpotRealm    = "zup"
 	DefaultStackSpotAgentID  = "default"
 
@@ -42,6 +42,7 @@ const (
 
 	// Definição do tamanho de historico
 	DefaultMaxHistorySize = 100 * 1024 * 1024 // 100MB
+	DefaultHistoryFile    = ".chatcli_history"
 
 	// Constantes para os possíveis valores do campo Status em ResponseData
 	StatusProcessing = "processing"
