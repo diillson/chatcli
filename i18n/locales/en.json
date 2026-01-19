@@ -307,6 +307,7 @@
   "cli.config.key_log_file": "Log File (LOG_FILE)",
   "cli.config.key_log_max_size": "Log Max Size (LOG_MAX_SIZE)",
   "cli.config.key_history_max_size": "History Max Size (HISTORY_MAX_SIZE)",
+  "cli.config.key_history_file_directory": "Archive History Commands (HISTORY_FILE)",
   "cli.config.section_current_provider": "Current Provider and Model",
   "cli.config.key_provider_runtime": "Provider (Runtime)",
   "cli.config.key_model_runtime": "Model (Runtime)",

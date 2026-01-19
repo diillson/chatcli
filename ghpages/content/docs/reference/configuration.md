@@ -17,16 +17,17 @@ A ordem de prioridade para as configurações é:
 
 ## Configuração Geral
 
-| Variável | Descrição                                                                                                                                         | Padrão            |
-| :--- |:--------------------------------------------------------------------------------------------------------------------------------------------------|:------------------|
-| `ENV` | Define o ambiente, caso `dev` os logs são mostrados no terminal e salvo no log da app, caso `prod` somente no log. Valores válidos: `dev`, `prod` | `dev`             
-| `LLM_PROVIDER` | Define o provedor de IA padrão a ser usado. Valores válidos: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `OLLAMA`, `STACKSPOT`.                      | `"OPENAI"`        |
-| `CHATCLI_LANG` | Define o idioma da interface. Valores: `pt-BR`, `en-US`. Se não definida, tentará detectar o idioma do sistema.                                   | `en-US`           |
-| `LOG_LEVEL` | Nível dos logs. Opções: `debug`, `info`, `warn`, `error`.                                                                                         | `"info"`          |
-| `LOG_FILE` | Caminho para o arquivo de log. Padrão: `$HOME/app.log`                                                                                            | `"$HOME/app.log"` |
-| `LOG_MAX_SIZE` | Tamanho máximo do arquivo de log antes da rotação. Aceita `100MB`, `50KB`, etc.                                                                   | `"100MB"`         |
-| `HISTORY_MAX_SIZE` | Tamanho máximo do arquivo de histórico (`.chatcli_history`) antes da rotação.                                                                     | `"100MB"`         |
-| `CHATCLI_DOTENV`| Caminho personalizado para o seu arquivo `.env`.                                                                                                  | `".env"`          |
+| Variável | Descrição                                                                                                                                         | Padrão                     |
+| :--- |:--------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------|
+| `ENV` | Define o ambiente, caso `dev` os logs são mostrados no terminal e salvo no log da app, caso `prod` somente no log. Valores válidos: `dev`, `prod` | `dev`                      
+| `LLM_PROVIDER` | Define o provedor de IA padrão a ser usado. Valores válidos: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `OLLAMA`, `STACKSPOT`.                      | `"OPENAI"`                 |
+| `CHATCLI_LANG` | Define o idioma da interface. Valores: `pt-BR`, `en-US`. Se não definida, tentará detectar o idioma do sistema.                                   | `en-US`                    |
+| `LOG_LEVEL` | Nível dos logs. Opções: `debug`, `info`, `warn`, `error`.                                                                                         | `"info"`                   |
+| `LOG_FILE` | Caminho para o arquivo de log. Padrão: `$HOME/.chatcli/app.log`                                                                                   | `"$HOME/.chatcli/app.log"` |
+| `LOG_MAX_SIZE` | Tamanho máximo do arquivo de log antes da rotação. Aceita `100MB`, `50KB`, etc.                                                                   | `"100MB"`                  |
+| `HISTORY_MAX_SIZE` | Tamanho máximo do arquivo de histórico (`.chatcli_history`) antes da rotação.                                                                     | `"100MB"`                  |
+| `HISTORY_FILE` | Caminho personalizado para o arquivo de histórico (suporta `~`, hoje ele cria o historico onde executou o chatcli).                               | `".chatcli_history"`       |
+| `CHATCLI_DOTENV`| Caminho personalizado para o seu arquivo `.env`.                                                                                                  | `".env"`                   |
 
 ## Configuração de Provedores
 
