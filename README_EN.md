@@ -153,8 +153,12 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
   -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` )
   -  `MAX_RETRIES`  - **(Optional)** Maximum number of attempts for API calls (default:  `5` ).
-  -  `MAX_RETRIES`  - **(Optional)** Initial wait time between attempts (default:  `3`  - seconds`).
-  -  `ENV`  - **(Optional)** Defines how the log will be displayed ( `dev `,  `prod `). Default:  `dev` .
+  -  `INITIAL_BACKOFF`  - **(Optional)** Initial wait time between attempts (default:  `3`  - seconds`).
+  - `LOG_FILE` - **(Optional)** Path to the log file (default: `$HOME/.chatcli/app.log`).
+  - `LOG_MAX_SIZE` - **(Optional)** Maximum size of the log file before rotation (default: 100MB).
+  - `HISTORY_MAX_SIZE` - **(Optional)** Maximum size of the history file before rotation (default: 100MB).
+  - `HISTORY_FILE` - **(Optional)** Path to the history file (supports `~`). Default: `.chatcli_history`.
+  - `ENV`  - **(Optional)** Defines how the log will be displayed ( `dev `,  `prod `). Default:  `dev` .
       -  dev  displays the logs directly in the terminal and saves them to the log file.
       -  prod  only saves them to the log file, keeping the terminal cleaner.
 
@@ -185,6 +189,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     LOG_FILE=app.log
     LOG_MAX_SIZE=300MB
     HISTORY_MAX_SIZE=300MB
+    HISTORY_FILE=~/.chatcli_history
 
     Agent Settings
     CHATCLI_AGENT_CMD_TIMEOUT=2m   # The command will have 2m to run after that it is locked and finished
