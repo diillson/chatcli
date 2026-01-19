@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.47.3](https://github.com/diillson/chatcli/compare/v1.47.2...v1.47.3) (2026-01-19)
+
+
+### Bug Fixes
+
+* **cli:** improve executable validation and shell logic for cross-platform compatibility ([#470](https://github.com/diillson/chatcli/issues/470)) ([#471](https://github.com/diillson/chatcli/issues/471)) ([a00a581](https://github.com/diillson/chatcli/commit/a00a58104e6339622a9101d415e4152acfa2a08d))
+
 ## [1.47.2](https://github.com/diillson/chatcli/compare/v1.47.1...v1.47.2) (2026-01-18)
 
 
