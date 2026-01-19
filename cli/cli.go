@@ -592,7 +592,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 			if strings.HasPrefix(lastCmd, "/coder") {
 				cli.runCoderLogic()
-			} else if strings.HasPrefix(lastCmd, "/agent") {
+			} else if strings.HasPrefix(lastCmd, "/agent") || strings.HasPrefix(lastCmd, "/run") {
 				cli.runAgentLogic()
 			}
 		}
