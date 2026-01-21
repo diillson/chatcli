@@ -1692,66 +1692,309 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 // sanitizeToolCallArgs normaliza args vindos de <tool_call ... args="..."/> para evitar
 // que "continuação de linha" com "\" e/ou "\" pendurado quebre o parsing argv.
 //
-// Regras:
-// 1) Decodifica entidades HTML (&quot; etc).
-// 2) Normaliza CRLF -> LF.
-// 3) Trata continuations: "\" + (spaces/tabs/\r)* + "\n"
-//   - Fora de aspas: vira espaço
-//   - Dentro de aspas: remove (concatena), igual ao bash
-//     4. Remove "\" final pendurado fora de aspas (erro comum de modelos), preservando
-//     conteúdo se estiver dentro de aspas.
-//     5. (NOVO) Corrige padrões comuns do /coder onde a IA manda --search "\" (ou "\,")
-//     como valor inválido, o que explode no flag parser do plugin.
-//     6. Trim final para reduzir ruído.
+// Regras aplicadas em ordem:
+// 1) Decodifica entidades HTML (&quot; -> ", &#10; -> \n, etc.)
+// 2) Normaliza CRLF -> LF
+// 3) Processa continuações de linha: "\" + espaços opcionais + newline -> espaço
+// 4) Remove "\ " (fora de aspas) que não faz sentido como escape
+// 5) Remove "\" final pendurado fora de aspas
+// 6) Normaliza espaços múltiplos (fora de aspas)
+// 7) Correções semânticas específicas para @coder
 func sanitizeToolCallArgs(rawArgs string, logger *zap.Logger, toolName string, isCoderMode bool) string {
+	// 1) Decodifica entidades HTML (&quot; -> ", &#10; -> \n, etc.)
 	unescaped := html.UnescapeString(rawArgs)
+
+	// 2) Normaliza quebras de linha (CRLF -> LF)
 	normalized := strings.ReplaceAll(unescaped, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 
-	// >>> NOVA LINHA DE CORREÃÃO <<<
-	// Remove explicitamente a sequència '\ ', que a IA gera erroneamente.
-	// Isso transforma '--cmd \ "echo..."' em '--cmd  "echo..."', que é então normalizado
-	// pelo TrimSpace e pelo parser de argumentos.
-	normalized = strings.ReplaceAll(normalized, "\\ ", " ")
+	// 3) Processa continuações de linha estilo shell: "\" + espaços opcionais + newline
+	//    Substitui por um único espaço (para não colar argumentos)
+	normalized = processLineContinuations(normalized)
 
-	// >>> NOVA LINHA DE CORREÃÃO <<<
-	// Remove explicitamente a sequència '\ ', que a IA gera erroneamente.
-	// Isso transforma '--cmd \ "echo..."' em '--cmd  "echo..."', que é então normalizado
-	// pelo TrimSpace e pelo parser de argumentos.
-	normalized = strings.ReplaceAll(normalized, "\\ ", " ")
+	// 4) Remove "\ " (barra + espaço) fora de aspas que não faz sentido como escape
+	//    Comum quando a IA erra a formatação: --search \ "valor"
+	normalized = removeBogusBackslashSpace(normalized)
 
-	// 2) Remove barra invertida seguida de espaço(s) que NÃO é continuação de linha
-	// Isso evita que o tokenizador escape o espaço e cole tokens
-	normalized = removeDanglingBackslashBeforeSpace(normalized)
-
-	// 3) Normaliza continuations estilo shell (atua em "\<spaces>\n")
-	normalized = normalizeShellLineContinuations(normalized)
-
-	// 4) Remove "\" final fora de aspas (auto-fix)
-	if fixed, changed := trimTrailingBackslashesOutsideQuotes(normalized); changed {
+	// 4b) Corrige aspas desbalanceadas com barra final (ex. --search "\)
+	if fixed, changed := fixUnbalancedQuotesWithTrailingBackslash(normalized); changed {
 		if logger != nil {
-			logger.Warn("tool_call args terminou com barra invertida fora de aspas; aplicando auto-fix removendo '\\' final",
-				zap.String("tool", toolName),
-				zap.String("args_before", normalized),
-				zap.String("args_after", fixed))
+			logger.Debug("Corrigidas aspas desbalanceadas com barra final",
+				zap.String("tool", toolName))
 		}
 		normalized = fixed
 	}
 
-	// 5) Correção semântica para /coder (quando a IA manda --search \ ou --content \ etc.)
+	// 5) Remove barras invertidas finais pendentes fora de aspas
+	if fixed, changed := trimTrailingBackslashesOutsideQuotes(normalized); changed {
+		if logger != nil {
+			logger.Debug("Removida barra invertida final pendente",
+				zap.String("tool", toolName))
+		}
+		normalized = fixed
+	}
+
+	// 6) Normaliza espaços múltiplos (mas preserva dentro de aspas)
+	normalized = normalizeSpacesOutsideQuotes(normalized)
+
+	// 7) Correções semânticas específicas para @coder
 	if isCoderMode && strings.EqualFold(strings.TrimSpace(toolName), "@coder") {
-		fixed2, changed2 := fixDanglingBackslashArgsForCoderTool(normalized)
-		if changed2 {
+		if fixed, changed := fixDanglingBackslashArgsForCoderTool(normalized); changed {
 			if logger != nil {
-				logger.Warn("Aplicando correção semântica em args do @coder (valor '\\' inválido em flag de conteúdo)",
-					zap.String("tool", toolName),
-					zap.String("args_before", normalized),
-					zap.String("args_after", fixed2))
+				logger.Debug("Aplicada correção semântica para @coder",
+					zap.String("tool", toolName))
 			}
-			normalized = fixed2
+			normalized = fixed
 		}
 	}
 
 	return strings.TrimSpace(normalized)
+}
+
+// processLineContinuations processa "\" + whitespace + newline de forma robusta
+// Respeita aspas e mantém o conteúdo que vem depois do newline
+func processLineContinuations(input string) string {
+	var result strings.Builder
+	runes := []rune(input)
+	n := len(runes)
+
+	inSingle := false
+	inDouble := false
+	i := 0
+
+	for i < n {
+		ch := runes[i]
+
+		// Controle de aspas (não escapadas)
+		if ch == '\'' && !inDouble && (i == 0 || runes[i-1] != '\\') {
+			inSingle = !inSingle
+			result.WriteRune(ch)
+			i++
+			continue
+		}
+		if ch == '"' && !inSingle && (i == 0 || runes[i-1] != '\\') {
+			inDouble = !inDouble
+			result.WriteRune(ch)
+			i++
+			continue
+		}
+
+		// Detecta barra invertida seguida de newline (continuação de linha)
+		if ch == '\\' {
+			j := i + 1
+
+			// Pula espaços opcionais até o newline
+			for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\r') {
+				j++
+			}
+
+			// Se encontrar newline, é continuação de linha
+			if j < n && runes[j] == '\n' {
+				// Pula o newline
+				j++
+
+				// Pula espaços depois do newline
+				for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\r') {
+					j++
+				}
+
+				// Dentro de aspas: remove a barra e o newline, concatena direto
+				// Fora de aspas: substitui por espaço
+				if !inSingle && !inDouble {
+					result.WriteRune(' ')
+				}
+				// Dentro de aspas: não escreve nada (concatena)
+
+				// Avança o índice para depois do newline e espaços
+				i = j - 1 // -1 porque o loop faz i++
+				i++
+				continue
+			}
+		}
+
+		// Não é continuação de linha, mantém o caractere
+		result.WriteRune(ch)
+		i++
+	}
+
+	return result.String()
+}
+
+// removeBogusBackslashSpace remove "\ " fora de aspas que não faz sentido
+// Exemplo: --search \ "valor" -> --search "valor"
+func removeBogusBackslashSpace(input string) string {
+	var result strings.Builder
+	runes := []rune(input)
+	n := len(runes)
+
+	inSingle := false
+	inDouble := false
+	i := 0
+
+	for i < n {
+		ch := runes[i]
+
+		// Controle de aspas
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			result.WriteRune(ch)
+			i++
+			continue
+		}
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			result.WriteRune(ch)
+			i++
+			continue
+		}
+
+		// Fora de aspas, detecta "\ " ou "\t" que não é escape válido
+		if ch == '\\' && !inSingle && !inDouble {
+			// Olha o próximo caractere
+			if i+1 < n {
+				next := runes[i+1]
+
+				// Se for espaço ou tab, é provavelmente erro da IA
+				if next == ' ' || next == '\t' {
+					// Pula a barra, mas mantém o espaço
+					i++
+					continue
+				}
+
+				// Se for outra barra (\\), é escape válido - mantém ambas
+				if next == '\\' {
+					result.WriteRune(ch)
+					result.WriteRune(next)
+					i += 2
+					continue
+				}
+
+				// Se for aspa (\" ou \'), pode ser erro - remove a barra
+				if next == '"' || next == '\'' {
+					// Mantém só a aspa, remove a barra
+					i++
+					continue
+				}
+			}
+		}
+
+		result.WriteRune(ch)
+		i++
+	}
+
+	return result.String()
+}
+
+// normalizeSpacesOutsideQuotes reduz espaços múltiplos para um só, fora de aspas
+func normalizeSpacesOutsideQuotes(input string) string {
+	var result strings.Builder
+	runes := []rune(input)
+	n := len(runes)
+
+	inSingle := false
+	inDouble := false
+	lastWasSpace := false
+	i := 0
+
+	for i < n {
+		ch := runes[i]
+
+		// Controle de aspas
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			result.WriteRune(ch)
+			lastWasSpace = false
+			i++
+			continue
+		}
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			result.WriteRune(ch)
+			lastWasSpace = false
+			i++
+			continue
+		}
+
+		// Dentro de aspas, preserva tudo
+		if inSingle || inDouble {
+			result.WriteRune(ch)
+			lastWasSpace = false
+			i++
+			continue
+		}
+
+		// Fora de aspas, normaliza espaços
+		if ch == ' ' || ch == '\t' {
+			if !lastWasSpace {
+				result.WriteRune(' ')
+				lastWasSpace = true
+			}
+			// Se já teve espaço, pula este
+			i++
+			continue
+		}
+
+		result.WriteRune(ch)
+		lastWasSpace = false
+		i++
+	}
+
+	return result.String()
+}
+
+// fixUnbalancedQuotesWithTrailingBackslash corrige o caso onde a IA gera aspas desbalanceadas terminando com barra
+// Exemplo: --search "\ -> --search "
+// Exemplo: exec --cmd 'curl ... {\ -> exec --cmd 'curl ... {'
+func fixUnbalancedQuotesWithTrailingBackslash(input string) (string, bool) {
+	trimmed := strings.TrimRight(input, " \t\r\n")
+	if trimmed == "" {
+		return input, false
+	}
+
+	// Verifica se termina com barra
+	if !strings.HasSuffix(trimmed, `\`) {
+		return input, false
+	}
+
+	// Conta aspas para ver se estão balanceadas
+	doubleQuotes := 0
+	singleQuotes := 0
+	inEscape := false
+
+	for _, ch := range trimmed {
+		if inEscape {
+			inEscape = false
+			continue
+		}
+
+		if ch == '\\' {
+			inEscape = true
+			continue
+		}
+
+		if ch == '"' {
+			doubleQuotes++
+		} else if ch == '\'' {
+			singleQuotes++
+		}
+	}
+
+	// Se aspas desbalanceadas E termina com barra, remove a barra e fecha as aspas
+	if doubleQuotes%2 != 0 || singleQuotes%2 != 0 {
+		fixed := strings.TrimSuffix(trimmed, `\`)
+
+		// Fecha as aspas desbalanceadas
+		if doubleQuotes%2 != 0 {
+			fixed += `"`
+		}
+		if singleQuotes%2 != 0 {
+			fixed += `'`
+		}
+
+		return fixed, true
+	}
+
+	return input, false
 }
 
 // fixDanglingBackslashArgsForCoderTool corrige casos comuns onde o modelo gera:
@@ -2121,47 +2364,6 @@ func extractXMLTagContent(s, tag string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(m[1]), true
-}
-
-func removeDanglingBackslashBeforeSpace(input string) string {
-	var result strings.Builder
-	chars := []rune(input)
-	length := len(chars)
-
-	inDoubleQuote := false
-	inSingleQuote := false
-
-	for i := 0; i < length; i++ {
-		char := chars[i]
-
-		// Detecta \ fora de aspas
-		if char == '\\' && !inSingleQuote && !inDoubleQuote {
-			j := i + 1
-			hasSpace := false
-
-			// Avança por espaços, tabs ou carriage return
-			for j < length && (chars[j] == ' ' || chars[j] == '\t' || chars[j] == '\r') {
-				hasSpace = true
-				j++
-			}
-
-			// Se for "\" + espaços e NÃO for continuação de linha (\n), remove a barra
-			if hasSpace && (j >= length || chars[j] != '\n') {
-				continue // pula a barra
-			}
-		}
-
-		// Controle de aspas
-		if char == '"' && !inSingleQuote {
-			inDoubleQuote = !inDoubleQuote
-		} else if char == '\'' && !inDoubleQuote {
-			inSingleQuote = !inSingleQuote
-		}
-
-		result.WriteRune(char)
-	}
-
-	return result.String()
 }
 
 // stripXMLTagBlock remove completamente o bloco <tag>...</tag> do texto.
