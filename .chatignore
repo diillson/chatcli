@@ -7,6 +7,9 @@ e2e/
 assets/
 ghpages/
 plugins-examples/
+i18n/
+tools/
+version/
 
 # Ignorar arquivos de configuração específicos
 CHANGELOG.md
