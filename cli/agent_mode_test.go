@@ -72,8 +72,8 @@ func TestSanitizeToolCallArgs_WithLineContinuations(t *testing.T) {
 
 	result := sanitizeToolCallArgs(rawArgs, logger, "@coder", true)
 
-	// Esperado: espaços no lugar de \ + Enter, mas conteúdo base64 preservado
-	expected := `write --file main.go  --encoding base64 --content "cGFja2FnZSBtYWluCg=="`
+	// Esperado: espaços normalizados (um único espaço) e conteúdo base64 preservado
+	expected := `write --file main.go --encoding base64 --content "cGFja2FnZSBtYWluCg=="`
 
 	assert.Equal(t, expected, result)
 
