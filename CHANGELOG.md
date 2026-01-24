@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.47.7](https://github.com/diillson/chatcli/compare/v1.47.6...v1.47.7) (2026-01-24)
+
+
+### Bug Fixes
+
+* **cli:** toolcall parser and terminal visuals ([#482](https://github.com/diillson/chatcli/issues/482)) ([#483](https://github.com/diillson/chatcli/issues/483)) ([4d67504](https://github.com/diillson/chatcli/commit/4d675047448e340497cedc67fef2012f652d609f))
+
 ## [1.47.6](https://github.com/diillson/chatcli/compare/v1.47.5...v1.47.6) (2026-01-24)
 
 
