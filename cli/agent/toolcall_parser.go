@@ -52,7 +52,8 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 
 func extractAttr(attrText, key string) (string, error) {
 	// key="..." ou key='...'
-	pat := fmt.Sprintf(`(?is)\b%s\s*=\s*("([^"]*)"|'([^']*)')`, regexp.QuoteMeta(key))
+	// Suporta aspas escapadas dentro do valor: "((?:[^"\\]|\\.)*)"
+	pat := fmt.Sprintf(`(?is)\b%s\s*=\s*("((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')`, regexp.QuoteMeta(key))
 	re := regexp.MustCompile(pat)
 
 	sub := re.FindStringSubmatch(attrText)
@@ -61,8 +62,15 @@ func extractAttr(attrText, key string) (string, error) {
 	}
 
 	// sub[2] => aspas duplas, sub[3] => aspas simples
+	val := sub[3]
 	if sub[2] != "" {
-		return sub[2], nil
+		val = sub[2]
 	}
-	return sub[3], nil
+
+	// Normaliza: remove barra invertida seguida de quebra de linha (escape de multilinha)
+	// Ex: "comando P\n        args" -> "comando args"
+	reNorm := regexp.MustCompile(`\\[\s\n]+`)
+	val = reNorm.ReplaceAllString(val, " ")
+
+	return val, nil
 }
