@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.47.6](https://github.com/diillson/chatcli/compare/v1.47.5...v1.47.6) (2026-01-24)
+
+
+### Bug Fixes
+
+* **cli:** improve terminal handling, ANSI reset logic, and add robust unit tests ([#479](https://github.com/diillson/chatcli/issues/479)) ([#480](https://github.com/diillson/chatcli/issues/480)) ([f0b6a19](https://github.com/diillson/chatcli/commit/f0b6a1966ff6c6b5ff75fd9bc407dc6b7990a2c2))
+
 ## [1.47.5](https://github.com/diillson/chatcli/compare/v1.47.4...v1.47.5) (2026-01-21)
 
 
