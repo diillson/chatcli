@@ -265,6 +265,7 @@ func findLastMeaningfulLine(text string) string {
 }
 
 // extractCommandBlocks extrai blocos de comando da resposta da IA
+// extractCommandBlocks extrai blocos de comando da resposta da IA
 func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 	var commandBlocks []CommandBlock
 
@@ -273,19 +274,38 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 		return a.extractCommandBlocksForAssistant(response)
 	}
 
+	// Regex para pegar blocos execute:lang ou blocos genéricos ```bash
 	re := regexp.MustCompile("(?s)```execute:\\s*([a-zA-Z0-9_-]+)\\s*\n(.*?)```")
 	matches := re.FindAllStringSubmatch(response, -1)
 
+	// Fallback para blocos genéricos se não houver execute:
 	if len(matches) == 0 {
 		fb := regexp.MustCompile("(?s)```(?:sh|bash|shell)\\s*\\n(.*?)```").FindAllStringSubmatch(response, -1)
 		for _, m := range fb {
 			commandsStr := strings.TrimSpace(m[1])
-			commandBlocks = append(commandBlocks, CommandBlock{
-				Description: "Comandos extraídos de bloco shell",
-				Commands:    splitCommandsByBlankLine(commandsStr),
-				Language:    "shell",
-				ContextInfo: CommandContextInfo{SourceType: SourceTypeUserInput, IsScript: isShellScript(commandsStr), ScriptType: "shell"},
-			})
+			isScript := isShellScript(commandsStr)
+
+			// LÓGICA CORRIGIDA AQUI:
+			if isScript {
+				// Se é script complexo, mantém junto
+				commandBlocks = append(commandBlocks, CommandBlock{
+					Description: "Script Shell (Bloco Completo)",
+					Commands:    []string{commandsStr}, // Array com 1 elemento string
+					Language:    "shell",
+					ContextInfo: CommandContextInfo{SourceType: SourceTypeUserInput, IsScript: true, ScriptType: "shell"},
+				})
+			} else {
+				// Se são comandos soltos, separa um por um
+				cmds := splitCommandsByBlankLine(commandsStr)
+				for _, cmd := range cmds {
+					commandBlocks = append(commandBlocks, CommandBlock{
+						Description: "Comando Shell",
+						Commands:    []string{cmd},
+						Language:    "shell",
+						ContextInfo: CommandContextInfo{SourceType: SourceTypeUserInput, IsScript: false, ScriptType: "shell"},
+					})
+				}
+			}
 		}
 		return commandBlocks
 	}
@@ -317,23 +337,82 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 				isScript = true
 			}
 
-			var commandsList []string
+			// LÓGICA CORRIGIDA TAMBÉM PARA BLOCOS EXECUTE:
 			if isScript {
-				commandsList = []string{commandsStr}
+				// Script complexo = 1 Bloco
+				commandBlocks = append(commandBlocks, CommandBlock{
+					Description: description,
+					Commands:    []string{commandsStr},
+					Language:    language,
+					ContextInfo: CommandContextInfo{
+						SourceType: SourceTypeUserInput,
+						IsScript:   true,
+						ScriptType: language,
+					},
+				})
 			} else {
-				commandsList = splitCommandsByBlankLine(commandsStr)
-			}
+				// Lista de comandos simples = Múltiplos Blocos
+				commandsList := splitCommandsByBlankLine(commandsStr)
 
-			commandBlocks = append(commandBlocks, CommandBlock{
-				Description: description,
-				Commands:    commandsList,
-				Language:    language,
-				ContextInfo: CommandContextInfo{
-					SourceType: SourceTypeUserInput,
-					IsScript:   isScript,
-					ScriptType: language,
-				},
-			})
+				for _, cmd := range commandsList {
+					cmd = strings.TrimSpace(cmd) // Garante que o comando não tem espaços inúteis nas pontas
+
+					// Descrição padrão: começa com a do bloco
+					specificDesc := description
+
+					// Se temos mais de um comando splitado, DEVEMOS tentar dar um nome específico para cada
+					if len(commandsList) > 1 {
+						lines := strings.Split(cmd, "\n")
+						derivedDesc := ""
+
+						// 1. Tenta achar comentário (#) para usar como título
+						for _, line := range lines {
+							t := strings.TrimSpace(line)
+							if strings.HasPrefix(t, "#") {
+								derivedDesc = strings.TrimSpace(strings.TrimPrefix(t, "#"))
+								break
+							}
+						}
+
+						// 2. Se não achou comentário, usa a PRIMEIRA LINHA NÃO-VAZIA do comando
+						if derivedDesc == "" {
+							for _, line := range lines {
+								t := strings.TrimSpace(line)
+								// Ignora linhas vazias ou que só tenham continuadores de linha
+								if t != "" && t != "\\" {
+									// Limpeza visual
+									cleanLine := strings.ReplaceAll(t, "\\", "")
+									cleanLine = strings.TrimSpace(cleanLine)
+
+									if len(cleanLine) > 60 {
+										derivedDesc = cleanLine[:57] + "..."
+									} else {
+										derivedDesc = cleanLine
+									}
+									break // Achou a primeira linha útil, para.
+								}
+							}
+						}
+
+						// Se conseguimos derivar algo específico, substituímos a descrição geral
+						if derivedDesc != "" {
+							specificDesc = derivedDesc
+						}
+					}
+
+					// Cria o bloco
+					commandBlocks = append(commandBlocks, CommandBlock{
+						Description: specificDesc,
+						Commands:    []string{cmd},
+						Language:    language,
+						ContextInfo: CommandContextInfo{
+							SourceType: SourceTypeUserInput,
+							IsScript:   false,
+							ScriptType: language, // shell, bash, etc
+						},
+					})
+				}
+			}
 		}
 	}
 
@@ -1562,13 +1641,19 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							if len(toolArgs) > 0 {
 								subCmd = toolArgs[0]
 							}
-							a.cli.animation.ShowThinkingAnimation(fmt.Sprintf("Executando %s", subCmd))
+							a.cli.animation.StopThinkingAnimation()
+
+							renderer.RenderStreamBoxStart("🔨", fmt.Sprintf("EXECUTANDO: %s %s", toolName, subCmd), agent.ColorPurple)
+
+							streamCallback := func(line string) {
+								renderer.StreamOutput(line)
+							}
+
 							// Marca tarefa como em andamento ANTES de executar
 							agent.MarkTaskInProgress(a.taskTracker)
+							toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
 
-							toolOutput, execErr = plugin.Execute(ctx, toolArgs)
-
-							a.cli.animation.StopThinkingAnimation()
+							renderer.RenderStreamBoxEnd(agent.ColorPurple)
 
 							// Se o contexto foi cancelado (Ctrl+C), propaga imediatamente
 							if ctx.Err() != nil {
