@@ -17,13 +17,23 @@ import (
 )
 
 // forceRefreshPrompt no Windows usa sequências de escape ANSI para limpar a linha.
-// Isso força o go-prompt a redesenhar o prompt na próxima iteração do loop.
 func (cli *ChatCLI) forceRefreshPrompt() {
-	// No Windows, a melhor abordagem é limpar a linha atual e retornar o cursor.
-	// O go-prompt irá então redesenhar o prefixo.
-	// \r -> Carriage Return (volta ao início da linha)
-	// \033[K -> Clear line from cursor to end
-	fmt.Print("\r\033[K")
+	// Limpar linha e resetar cores
+	fmt.Print("\r\033[K\033[0m")
+	os.Stdout.Sync()
+}
+
+func (cli *ChatCLI) restoreTerminal() {
+	// Reset ANSI
+	fmt.Print("\033[0m")
+	os.Stdout.Sync()
+
+	// Limpar tela no Windows
+	cmd := exec.Command("cmd", "/c", "cls")
+	cmd.Stdout = os.Stdout
+	if err := cmd.Run(); err != nil {
+		cli.logger.Warn("Falha ao limpar a tela no Windows", zap.Error(err))
+	}
 }
 
 func resetTerminal(logger *zap.Logger) {

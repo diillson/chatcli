@@ -396,6 +396,11 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	defer func() {
 		cli.isExecuting.Store(false)
 		cli.interactionState = StateNormal
+
+		// Limpar terminal antes de refresh
+		fmt.Print("\033[0m") // Reset ANSI
+		os.Stdout.Sync()
+
 		cli.forceRefreshPrompt()
 	}()
 
@@ -470,6 +475,9 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	cli.animation.StopThinkingAnimation()
 
+	// Pequena pausa para garantir que o terminal está limpo
+	time.Sleep(50 * time.Millisecond)
+
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Println(i18n.T("status.operation_cancelled"))
@@ -488,9 +496,14 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 		modelName := cli.Client.GetModelName()
 		coloredPrefix := colorize(modelName+":", ColorPurple)
+
+		// Garantir que markdown renderizado termina com reset
 		renderedResponse := cli.renderMarkdown(aiResponse)
+		renderedResponse = ensureANSIReset(renderedResponse)
+
 		fmt.Printf("%s ", coloredPrefix)
 		cli.typewriterEffect(renderedResponse, 2*time.Millisecond)
+		fmt.Print("\033[0m") // Reset final
 		fmt.Println()
 	}
 }
@@ -2345,14 +2358,29 @@ func (cli *ChatCLI) renderMarkdown(input string) string {
 	//	width = 80 // valor padrão
 	//}
 	renderer, _ := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(0),
 	)
 	out, err := renderer.Render(input)
 	if err != nil {
 		return input
 	}
+
+	// Garantir que não há sequências ANSI pendentes
+	out = strings.TrimRight(out, " \n\t")
+	if !strings.HasSuffix(out, "\033[0m") {
+		out += "\033[0m"
+	}
+
 	return out
+}
+
+// ensureANSIReset garante que string termina com reset ANSI
+func ensureANSIReset(s string) string {
+	if !strings.HasSuffix(s, "\033[0m") && !strings.HasSuffix(s, "\033[m") {
+		return s + "\033[0m"
+	}
+	return s
 }
 
 // typewriterEffect exibe o texto com efeito de máquina de escrever
