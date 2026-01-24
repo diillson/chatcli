@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
@@ -73,8 +74,11 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		ch.handlePluginCommand(userInput)
 		return false
 	case userInput == "/reset" || userInput == "/redraw" || userInput == "/clear":
+		// Limpeza completa do terminal
+		fmt.Print("\033[0m")
+		os.Stdout.Sync()
 		ch.cli.restoreTerminal()
-		// Força o go-prompt a se redesenhar imediatamente
+		time.Sleep(50 * time.Millisecond)
 		ch.cli.forceRefreshPrompt()
 		return false
 	default:

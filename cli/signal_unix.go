@@ -8,7 +8,9 @@
 package cli
 
 import (
+	"fmt"
 	"os"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
@@ -16,7 +18,12 @@ import (
 
 // forceRefreshPrompt envia um sinal SIGWINCH para o processo atual no Unix.
 func (cli *ChatCLI) forceRefreshPrompt() {
-	//resetTerminal(cli.logger)
+	// Limpar buffer e resetar terminal antes do refresh
+	fmt.Print("\r\033[K\033[0m") // Carriage return + Clear line + Reset colors
+	os.Stdout.Sync()
+
+	// Pequena pausa para o terminal processar
+	time.Sleep(10 * time.Millisecond)
 
 	p, err := os.FindProcess(os.Getpid())
 	if err != nil {
