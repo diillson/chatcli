@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.47.8](https://github.com/diillson/chatcli/compare/v1.47.7...v1.47.8) (2026-01-24)
+
+
+### Bug Fixes
+
+* **cli:** refactor plugin execution with streaming support and enhance error handling ([#485](https://github.com/diillson/chatcli/issues/485)) ([#487](https://github.com/diillson/chatcli/issues/487)) ([fd8ae1f](https://github.com/diillson/chatcli/commit/fd8ae1f50e989bcff72d78da5dcbff01e1a4d538))
+
 ## [1.47.7](https://github.com/diillson/chatcli/compare/v1.47.6...v1.47.7) (2026-01-24)
 
 
