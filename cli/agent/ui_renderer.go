@@ -45,6 +45,32 @@ func NewUIRenderer(logger *zap.Logger) *UIRenderer {
 	}
 }
 
+// imprime a linha COM A BARRA LATERAL para parecer que está dentro
+func (r *UIRenderer) StreamOutput(line string) {
+	// A borda lateral tem que ter a mesma cor do Header (ColorPurple geralmente)
+	prefix := r.Colorize("│", ColorPurple) + "  "
+
+	// Lógica de ícones (mantive a sua lógica de cores)
+	if strings.HasPrefix(line, "ERR: ") {
+		cleanLine := strings.TrimPrefix(line, "ERR: ")
+		fmt.Println(r.Colorize(prefix+"⚠️  "+cleanLine, ColorYellow))
+	} else {
+		icon := "  " // indentação padrão
+		//lower := strings.ToLower(line)
+		//
+		//if strings.Contains(lower, "sucesso") || strings.Contains(line, "✅") {
+		//	icon = " ✅ "
+		//} else if strings.Contains(lower, "erro") || strings.Contains(lower, "falha") {
+		//	icon = " ❌ "
+		//} else if strings.HasPrefix(strings.TrimSpace(line), "$") {
+		//	icon = "💲 "
+		//}
+
+		// Imprime: │  ICON Texto...
+		fmt.Println(prefix + r.Colorize(icon+line, ColorGray))
+	}
+}
+
 // Colorize aplica cores ANSI (exportada com C maiúsculo)
 func (r *UIRenderer) Colorize(text string, color string) string {
 	return fmt.Sprintf("%s%s%s", color, text, ColorReset)
@@ -91,7 +117,7 @@ func (r *UIRenderer) PrintPlanCompact(blocks []CommandBlock, outputs []*CommandO
 				status = "❌"
 			}
 		}
-		title := b.Description
+		title := strings.TrimSpace(b.Description)
 		if title == "" {
 			title = i18n.T("agent.plan.default_description")
 		}
@@ -99,15 +125,31 @@ func (r *UIRenderer) PrintPlanCompact(blocks []CommandBlock, outputs []*CommandO
 		firstLine := ""
 		if len(b.Commands) > 0 {
 			firstLine = strings.Split(b.Commands[0], "\n")[0]
+			firstLine = strings.TrimSpace(firstLine)
 		}
-		fmt.Printf("  %s #%d: %s — %s\n",
-			status, i+1, title, r.Colorize(firstLine, ColorGray))
+
+		cleanCmd := strings.TrimSpace(strings.TrimPrefix(firstLine, "#"))
+
+		// Compara ignorando case
+		isRedundant := strings.EqualFold(title, cleanCmd) || title == firstLine
+
+		if isRedundant {
+			// Se for redundante, mostra destacado em CIANO e apenas uma vez
+			// Normalmente mostramos o 'firstLine' original (com # se tiver) para fidelidade
+			fmt.Printf("  %s #%d: %s\n",
+				status, i+1, r.Colorize(firstLine, ColorCyan))
+		} else {
+			// Se for diferente, descritivo em BRANCO (padrão) e comando em CINZA
+			fmt.Printf("  %s #%d: %s — %s\n",
+				status, i+1, title, r.Colorize(firstLine, ColorGray))
+		}
 	}
 	fmt.Println()
 }
 
 // PrintPlanFull imprime plano em formato completo
 func (r *UIRenderer) PrintPlanFull(blocks []CommandBlock, outputs []*CommandOutput, validator *CommandValidator) {
+	// Título fixo
 	fmt.Println(r.Colorize(i18n.T("agent.plan.full_view"), ColorLime+ColorBold))
 
 	for i, b := range blocks {
@@ -127,6 +169,7 @@ func (r *UIRenderer) PrintPlanFull(blocks []CommandBlock, outputs []*CommandOutp
 		if title == "" {
 			title = i18n.T("agent.plan.default_description")
 		}
+
 		danger := ""
 		if r.isBlockDangerous(b, validator) {
 			danger = r.Colorize(i18n.T("agent.plan.risk.dangerous"), ColorYellow)
@@ -134,7 +177,13 @@ func (r *UIRenderer) PrintPlanFull(blocks []CommandBlock, outputs []*CommandOutp
 			danger = r.Colorize(i18n.T("agent.plan.risk.safe"), ColorGray)
 		}
 
-		fmt.Printf("\n%s\n", r.Colorize(fmt.Sprintf(i18n.T("agent.plan.command_header"), i+1, title), ColorPurple+ColorBold))
+		// --- CORREÇÃO DO PROBLEMA "MISSING" AQUI ---
+		// Passamos os argumentos (i+1, title) DIRETO para o i18n.T
+		headerText := i18n.T("agent.plan.command_header", i+1, title)
+
+		fmt.Printf("\n%s\n", r.Colorize(headerText, ColorPurple+ColorBold))
+		// ------------------------------------------
+
 		fmt.Printf("    %s %s\n", r.Colorize(i18n.T("agent.plan.field.type"), ColorGray), b.Language)
 		fmt.Printf("    %s %s\n", r.Colorize(i18n.T("agent.plan.field.risk"), ColorGray), danger)
 		fmt.Printf("    %s %s\n", r.Colorize(i18n.T("agent.plan.field.status"), ColorGray), r.Colorize(status, statusColor))
@@ -142,7 +191,9 @@ func (r *UIRenderer) PrintPlanFull(blocks []CommandBlock, outputs []*CommandOutp
 		fmt.Println(r.Colorize("    "+i18n.T("agent.plan.field.code"), ColorGray))
 		for idx, cmd := range b.Commands {
 			if len(b.Commands) > 1 {
-				fmt.Print(r.Colorize(fmt.Sprintf("      "+i18n.T("agent.plan.command_separator")+"\n", idx+1, len(b.Commands)), ColorGray))
+				// Correção aqui também para o separador (ex: 1/3)
+				sepText := i18n.T("agent.plan.command_separator", idx+1, len(b.Commands))
+				fmt.Print(r.Colorize("      "+sepText+"\n", ColorGray))
 			}
 			prefix := ""
 			if b.Language == "shell" || b.Language == "bash" || b.Language == "sh" {
@@ -403,7 +454,7 @@ func (r *UIRenderer) RenderToolCall(toolName, rawArgs string) {
 		r.Colorize(toolName, ColorYellow+ColorBold),
 		displayArgs)
 
-	r.RenderTimelineEvent("🔨", "EXECUTANDO AÇÃO", content, ColorYellow)
+	r.RenderTimelineEvent("🔨", "EXECUTAR AÇÃO", content, ColorYellow)
 }
 
 // RenderToolResult exibe o resultado da execução
@@ -486,7 +537,7 @@ func (r *UIRenderer) RenderToolCallWithProgress(toolName, rawArgs string, curren
 		r.Colorize(displayArgs, ColorCyan))
 
 	// 3. Título com progresso
-	title := fmt.Sprintf("EXECUTANDO AÇÃO (%d/%d)", current, total)
+	title := fmt.Sprintf("EXECUTAR AÇÃO (%d/%d)", current, total)
 
 	// 4. Renderiza usando o sistema de cards existente
 	r.RenderTimelineEvent("🔨", title, content, ColorYellow)
@@ -503,4 +554,31 @@ func (r *UIRenderer) RenderBatchSummary(successCount, total int, hasError bool) 
 		fmt.Println(r.Colorize(msg, ColorGreen))
 	}
 	fmt.Println(r.Colorize(strings.Repeat("─", 60), ColorGray))
+}
+
+// desenha APENAS o cabeçalho do card
+func (r *UIRenderer) RenderStreamBoxStart(icon, title, color string) {
+
+	header := fmt.Sprintf("%s %s", icon, title)
+
+	fmt.Println() // Pula linha inicial
+	// Desenha a curva superior: ╭── ICON TITULO
+	fmt.Println(r.Colorize("╭── "+header, color+ColorBold))
+}
+
+// desenha APENAS o rodapé
+func (r *UIRenderer) RenderStreamBoxEnd(color string) {
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || width <= 0 {
+		width = 80
+	}
+
+	// Calcula tamanho da linha de baixo: ╰──────...
+	footerLen := width - 2
+	if footerLen < 0 {
+		footerLen = 10
+	}
+
+	footer := "╰" + strings.Repeat("─", footerLen)
+	fmt.Println(r.Colorize(footer, color))
 }
