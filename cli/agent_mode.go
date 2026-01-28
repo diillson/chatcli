@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/coder"
+	"github.com/diillson/chatcli/cli/metrics"
 
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/config"
@@ -44,6 +45,9 @@ type AgentMode struct {
 	executeCommandsFunc func(ctx context.Context, block agent.CommandBlock) (string, string)
 	isCoderMode         bool
 	isOneShot           bool
+	// Métricas
+	tokenCounter *metrics.TokenCounter
+	turnTimer    *metrics.Timer
 }
 
 // Aliases de tipos para manter compatibilidade
@@ -63,6 +67,17 @@ const (
 
 // NewAgentMode cria uma nova instância do modo agente
 func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
+	// Obtém o nome do modelo para inicializar o contador de tokens
+	modelName := ""
+	provider := ""
+	override := 0
+	if cli != nil && cli.Client != nil {
+		modelName = cli.Client.GetModelName()
+		provider = cli.Provider
+		effectiveLimit := cli.getMaxTokensForCurrentLLM()
+		override = effectiveLimit
+	}
+
 	a := &AgentMode{
 		cli:            cli,
 		logger:         logger,
@@ -70,6 +85,8 @@ func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 		validator:      agent.NewCommandValidator(logger),
 		contextManager: agent.NewContextManager(logger),
 		taskTracker:    agent.NewTaskTracker(logger),
+		tokenCounter:   metrics.NewTokenCounter(provider, modelName, override),
+		turnTimer:      metrics.NewTimer(),
 	}
 	a.executeCommandsFunc = a.executeCommandsWithOutput
 	return a
@@ -103,19 +120,38 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	a.logger.Info("Modo Agente iniciado", zap.Int("max_turns_limit", maxTurns))
 
 	var systemInstruction string
+	isCoder := (systemPromptOverride == CoderSystemPrompt)
+	hasActivePersona := a.cli.personaHandler != nil && a.cli.personaHandler.GetManager().HasActiveAgent()
 
-	// Lógica de Seleção de Persona
-	if systemPromptOverride != "" {
-		systemInstruction = systemPromptOverride
+	// Lógica de Composição de Prompt:
+	// 1. Se há persona ativa: Persona + Instruções de Formato (Coder ou Agent)
+	// 2. Se não há persona: Prompt completo padrão (Coder ou Agent)
+	if hasActivePersona {
+		// Combina: Persona (quem a IA é) + Instruções de Formato (como responder)
+		personaPrompt := a.cli.personaHandler.GetManager().GetSystemPrompt()
+		activeAgent := a.cli.personaHandler.GetManager().GetActiveAgent()
+
+		if isCoder {
+			// Persona + Instruções do Coder (tool_call, base64, etc.)
+			systemInstruction = personaPrompt + "\n\n" + CoderFormatInstructions
+			a.logger.Info("Usando persona ativa + modo coder", zap.String("agent", activeAgent.Name))
+		} else {
+			// Persona + Instruções do Agent (execute:shell, reasoning, etc.)
+			systemInstruction = personaPrompt + "\n\n" + AgentFormatInstructions
+			a.logger.Info("Usando persona ativa + modo agent", zap.String("agent", activeAgent.Name))
+		}
+	} else if isCoder {
+		// Sem persona: Prompt completo do Coder
+		systemInstruction = CoderSystemPrompt
 	} else {
-		// Persona Padrão (Admin de Sistema / Shell)
+		// Sem persona: Prompt padrão do Agent (Admin de Sistema / Shell)
 		osName := runtime.GOOS
 		shellName := utils.GetUserShell()
 		currentDir, _ := os.Getwd()
 		systemInstruction = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
 	}
 
-	a.isCoderMode = (systemPromptOverride == CoderSystemPrompt)
+	a.isCoderMode = isCoder
 	a.isOneShot = false
 
 	// Adiciona contexto de ferramentas (plugins) ao prompt
@@ -1406,15 +1442,38 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
 
-		// Animação de "Pensando..."
-		a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
+		// Inicia o timer do turno (substitui a animação de "Pensando...")
+		modelName := a.cli.Client.GetModelName()
+		a.turnTimer.Start(ctx, func(d time.Duration) {
+			fmt.Print(metrics.FormatTimerStatus(d, modelName, "Processando..."))
+		})
 
 		turnHistory := buildTurnHistoryWithAnchor()
 
 		// Chamada à LLM
 		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
 
-		a.cli.animation.StopThinkingAnimation()
+		// Para o timer e obtém a duração
+		turnDuration := a.turnTimer.Stop()
+		fmt.Print(metrics.ClearLine()) // Limpa a linha do timer
+
+		// Contabiliza tokens (estimativa)
+		var promptText string
+		for _, msg := range turnHistory {
+			promptText += msg.Content
+		}
+		a.tokenCounter.AddTurn(promptText, aiResponse)
+
+		// Exibe métricas do turno
+		fmt.Println()
+		fmt.Println(metrics.FormatTurnInfo(turn+1, maxTurns, turnDuration, a.tokenCounter))
+
+		// Alerta se estiver próximo do limite
+		if a.tokenCounter.IsCritical() {
+			fmt.Println(metrics.FormatWarning("Atenção: Janela de contexto acima de 90%! Considere iniciar uma nova sessão."))
+		} else if a.tokenCounter.IsNearLimit() {
+			fmt.Println(metrics.FormatWarning("Janela de contexto acima de 70%."))
+		}
 
 		if err != nil {
 			// Se for cancelamento, retorna limpo para o cli.go tratar
