@@ -31,6 +31,7 @@ type Options struct {
 	Model          string        // --model
 	Timeout        time.Duration // --timeout
 	NoAnim         bool          // --no-anim
+	Raw            bool          // --raw
 	PromptFlagUsed bool          // indica se -p/--prompt foi passado explicitamente
 	AgentAutoExec  bool          // --agent-auto-exec
 	MaxTokens      int           // --max-tokens
@@ -98,7 +99,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 			cli.logger.Fatal("Erro no modo coder one-shot", zap.Error(err))
 		}
 	} else {
-		if err := cli.RunOnce(ctxOne, input, opts.NoAnim); err != nil {
+		if err := cli.RunOnce(ctxOne, input, opts.NoAnim, opts.Raw); err != nil {
 			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar no modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
 			cli.logger.Fatal("Erro no modo one-shot", zap.Error(err))
 		}
@@ -142,7 +143,7 @@ func PreprocessArgs(args []string) []string {
 	return out
 }
 
-func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation bool) error {
+func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation bool, rawOutput bool) error {
 	userInput, additionalContext := cli.processSpecialCommands(input)
 
 	cli.history = append(cli.history, models.Message{
@@ -165,8 +166,12 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 		return err
 	}
 
-	rendered := cli.renderMarkdown(aiResponse)
-	fmt.Println(rendered)
+	if rawOutput {
+		fmt.Println(aiResponse) // Imprime texto limpo
+	} else {
+		rendered := cli.renderMarkdown(aiResponse) // Imprime com cores ANSI
+		fmt.Println(rendered)
+	}
 	return nil
 }
 
@@ -187,6 +192,7 @@ func NewFlagSet() (*flag.FlagSet, *Options) {
 	fs.DurationVar(&opts.Timeout, "timeout", 5*time.Minute, "Timeout da chamada one-shot")
 	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, "Override do máximo de tokens para a resposta")
 	fs.BoolVar(&opts.NoAnim, "no-anim", false, "Desabilita animações no modo one-shot")
+	fs.BoolVar(&opts.Raw, "raw", false, "Desabilita formatação markdown/ANSI no output (útil para CI/CD)")
 	fs.BoolVar(&opts.AgentAutoExec, "agent-auto-exec", false, "No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for seguro.")
 
 	fs.StringVar(&opts.Realm, "realm", "", "Override do realm (apenas para StackSpot)")

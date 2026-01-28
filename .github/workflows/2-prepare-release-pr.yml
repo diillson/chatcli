@@ -88,7 +88,7 @@ jobs:
           
           # 3. Executar o chatcli em modo one-shot para gerar o conteúdo
           # Usamos --no-anim para uma saída limpa no log do CI
-          AI_RESPONSE=$(chatcli -p "$PROMPT" --no-anim --provider OPENAI --model gpt-5)
+          AI_RESPONSE=$(chatcli -p "$PROMPT" --no-anim --raw --provider OPENAI --model gpt-5)
           
           # 4. Salvar a resposta completa para o próximo passo
           # Usamos a sintaxe recomendada para outputs de múltiplas linhas
