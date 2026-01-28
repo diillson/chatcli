@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.48.0](https://github.com/diillson/chatcli/compare/v1.47.8...v1.48.0) (2026-01-28)
+
+
+### Features
+
+* **agent:** add Agents customizable feature and frontend-design skill with detailed UX principles and audit script, tokenizer to mode agent and coder ([#489](https://github.com/diillson/chatcli/issues/489)) ([#490](https://github.com/diillson/chatcli/issues/490)) ([71a2c9c](https://github.com/diillson/chatcli/commit/71a2c9c5f6e12f56a3bdb2336081a990ab333fa8))
+
 ## [1.47.8](https://github.com/diillson/chatcli/compare/v1.47.7...v1.47.8) (2026-01-24)
 
 
