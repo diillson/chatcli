@@ -50,6 +50,11 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
     - [Interação com o Agente](#interação-com-o-agente)
     - [UI Aprimorada do Agente](#ui-aprimorada-do-agente)
     - [Modo Agente One-Shot](#modo-agente-one-shot)
+- [Agentes Customizáveis (Personas)](#agentes-customizáveis-personas)
+    - [Conceito](#conceito)
+    - [Estrutura de Arquivos](#estrutura-de-arquivos)
+    - [Comandos de Gerenciamento](#comandos-de-gerenciamento)
+    - [Exemplo Prático](#exemplo-prático)
 - [Estrutura do Código e Tecnologias](#estrutura-do-código-e-tecnologias)
 - [Contribuição](#contribuição)
 - [Licença](#licença)
@@ -867,6 +872,100 @@ Perfeito para scripts e automação.
 
 - Modo de Execução Automática: Use a flag  --agent-auto-exec  para que o agente execute o primeiro comando sugerido (comandos perigosos são bloqueados automaticamente).
   - chatcli -p "/agent crie um arquivo chamado test_file.txt" --agent-auto-exec
+
+--------
+
+## Agentes Customizáveis (Personas)
+
+O ChatCLI permite que você crie **Agentes Customizáveis** (também chamados de Personas) que definem comportamentos específicos para a IA. É um sistema modular onde:
+
+- **Agentes** definem *"quem"* a IA é (personalidade, especialização)
+- **Skills** definem *"o que"* ela deve saber/obedecer (regras, conhecimento)
+
+### Conceito
+
+Um Agente pode importar múltiplas Skills, criando um *"Super System Prompt"** composto. Isso permite:
+
+- Reutilizar conhecimento entre diferentes agentes
+- Centralizar regras de coding style, segurança, etc.
+- Versionar personas no Git
+- Compartilhar entre equipes
+
+### Estrutura de Arquivos
+
+Os arquivos ficam em `~/.chatcli/`:
+
+```
+~/.chatcli/
+├── agents/            # Arquivos de agentes (.md)
+│   ├── go-expert.md
+│   └── devops-senior.md
+└── skills/            # Arquivos de skills (.md)
+    ├── clean-code.md
+    ├── error-handling.md
+    └── docker-master.md
+```
+
+#### Formato do Agente
+
+```yaml
+---
+name: "go-expert"
+description: "Especialista em Go/Golang"
+skills:
+  - clean-code
+  - error-handling
+plugins:
+  - "@coder"
+---
+# Personalidade Base
+
+Você é um Engenheiro de Software Sênior, especialista em Go.
+Sempre priorize simplicidade e legibilidade.
+```
+
+#### Formato da Skill
+
+```yaml
+---
+name: "clean-code"
+description: "Princípios de Clean Code"
+---
+# Regras de Clean Code
+
+1. Use nomes significativos para variáveis e funções
+1. Mantenha funções pequenas (máx 20 linhas)
+3. Evite comentários desnecessários - código deve ser autoexplicativo
+```
+
+### Comandos de Gerenciamento
+
+| Comando | Descrição |
+|---------|------------|
+| `/agent list` | Lista todos os agentes disponíveis |
+| `/agent load <nome>` | Carrega um agente específico |
+| `/agent skills` | Lista todas as skills disponíveis |
+| `/agent show` | Mostra o agente ativo e seu prompt |
+| `/agent off` | Desativa o agente atual |
+
+### Exemplo Prático
+
+```bash
+# 1. Listar agentes disponíveis
+/agent list
+
+# 2. Carregar o agente go-expert
+/agent load go-expert
+
+# 3. Usar no modo agente ou coder
+/agent crie um servidor HTTP com graceful shutdown
+/coder refatore esse código para seguir as best practices
+
+# 4. Desativar quando terminar
+/agent off
+```
+
+Ao carregar um agente, todas as interações com `/agent <tarefa>` ou `/coder <tarefa>` utilizarão automaticamente a persona do agente carregado, aplicando suas regras e conhecimentos especializados.
 
 --------
 

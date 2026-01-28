@@ -443,5 +443,20 @@
   "agent.error.invalid_tool_args": "Erro: Os argumentos que você forneceu para a ferramenta '%s' estavam malformados: %v. Por favor, corrija as aspas e tente novamente.",
   "agent.multiline_input_tip": "(Digite '.' em uma nova linha para finalizar)",
   "agent.prompt.additional_context": "\n ➤ Forneça contexto ou instruções adicionais: ",
-  "agent.output_header": "\n--- Saída do Comando ---"
+  "agent.output_header": "\n--- Saída do Comando ---",
+
+  "agent.persona.list.empty": "⚠ Nenhum agente encontrado. Crie arquivos .md no diretório de agentes.",
+  "agent.persona.skills.empty": "⚠ Nenhuma skill encontrada. Crie arquivos .md no diretório de skills.",
+  "agent.persona.off.no_active": "⚠ Nenhum agente está ativo no momento.",
+  "agent.persona.off.hint": "💡 O ChatCLI voltou ao comportamento padrão (persona default).",
+  "agent.persona.show.no_active": "⚠ Nenhum agente está ativo. Use /agent load <nome> para carregar um.",
+  "agent.persona.load.usage": "⚠ Uso: /agent load <nome-do-agente>",
+  "persona.error.not_initialized": "❌ Sistema de personas não inicializado.",
+
+  "help.section.persona": "Gerenciamento de Agentes (Personas)",
+  "help.command.persona_list": "Lista todos os agentes disponíveis.",
+  "help.command.persona_load": "Carrega um agente específico com suas skills.",
+  "help.command.persona_skills": "Lista todas as skills disponíveis.",
+  "help.command.persona_show": "Mostra detalhes do agente ativo e seu prompt.",
+  "help.command.persona_off": "Desativa o agente atual, voltando ao comportamento padrão."
 }
