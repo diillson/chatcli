@@ -21,7 +21,7 @@ jobs:
       ENV: prod
       LLM_PROVIDER: OPENAI
       LOG_FILE: ./app.log
-      OPENAI_MODEL: gpt-5
+      OPENAI_MODEL: gpt-5.2
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       # Garante que o Go instale os binários em um local conhecido
       GOPATH: ${{ github.workspace }}/go
