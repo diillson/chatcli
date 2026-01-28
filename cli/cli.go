@@ -1438,6 +1438,12 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 				override = n
 			}
 		}
+	} else if strings.ToUpper(cli.Provider) == "STACKSPOT" {
+		if v := os.Getenv("STACKSPOT_MAX_TOKENS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				override = n
+			}
+		}
 	}
 	return catalog.GetMaxTokens(cli.Provider, cli.Model, override)
 }
@@ -2494,6 +2500,7 @@ func (cli *ChatCLI) showConfig() {
 	printItem("GOOGLEAI_MAX_TOKENS", os.Getenv("GOOGLEAI_MAX_TOKENS"))
 	printItem("XAI_MAX_TOKENS", os.Getenv("XAI_MAX_TOKENS"))
 	printItem("OLLAMA_MAX_TOKENS", os.Getenv("OLLAMA_MAX_TOKENS"))
+	printItem("STACKSPOT_MAX_TOKENS", os.Getenv("STACKSPOT_MAX_TOKENS"))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_sensitive_keys"), ColorLime))
 	printItem("OPENAI_API_KEY", presence(os.Getenv("OPENAI_API_KEY")))
