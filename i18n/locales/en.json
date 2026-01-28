@@ -443,5 +443,20 @@
   "agent.error.invalid_tool_args": "Error: The arguments you provided for the tool '%s' were malformed: %v. Please correct the quoting and try again.",
   "agent.multiline_input_tip": "(Enter a single '.' on a new line to finish)",
   "agent.prompt.additional_context": "\n ➤ Provide additional context or instructions: ",
-  "agent.output_header": "\n--- Command Output ---"
+  "agent.output_header": "\n--- Command Output ---",
+
+  "agent.persona.list.empty": "⚠ No agents found. Create .md files in the agents directory.",
+  "agent.persona.skills.empty": "⚠ No skills found. Create .md files in the skills directory.",
+  "agent.persona.off.no_active": "⚠ No agent is currently active.",
+  "agent.persona.off.hint": "💡 ChatCLI returned to default behavior (default persona).",
+  "agent.persona.show.no_active": "⚠ No agent is active. Use /agent load <name> to load one.",
+  "agent.persona.load.usage": "⚠ Usage: /agent load <agent-name>",
+  "persona.error.not_initialized": "❌ Persona system not initialized.",
+
+  "help.section.persona": "Agent Management (Personas)",
+  "help.command.persona_list": "Lists all available agents.",
+  "help.command.persona_load": "Loads a specific agent with its skills.",
+  "help.command.persona_skills": "Lists all available skills.",
+  "help.command.persona_show": "Shows details of the active agent and its prompt.",
+  "help.command.persona_off": "Deactivates the current agent, returning to default behavior."
 }

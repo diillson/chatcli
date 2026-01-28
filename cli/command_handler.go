@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -35,7 +36,15 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/reload":
 		ch.cli.reloadConfiguration()
 		return false
-	case strings.HasPrefix(userInput, "/agent") || strings.HasPrefix(userInput, "/run"):
+	case strings.HasPrefix(userInput, "/agent"):
+		// /agent pode ser gerenciamento de personas OU iniciar modo agente
+		if !ch.handleAgentPersonaSubcommand(userInput) {
+			// Não é um subcomando, inicia modo agente
+			panic(agentModeRequest)
+		}
+		return false
+	case strings.HasPrefix(userInput, "/run"):
+		// /run inicia o modo agente (com ou sem persona ativa)
 		panic(agentModeRequest)
 	case strings.HasPrefix(userInput, "/coder"):
 		panic(coderModeRequest)
@@ -74,7 +83,6 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		ch.handlePluginCommand(userInput)
 		return false
 	case userInput == "/reset" || userInput == "/redraw" || userInput == "/clear":
-		// Limpeza completa do terminal
 		fmt.Print("\033[0m")
 		os.Stdout.Sync()
 		ch.cli.restoreTerminal()
@@ -214,7 +222,7 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 		}
 		repoURL := args[2]
 
-		// AVISO DE SEGURANÇA
+		// AVISO DE SEGURANÆA
 		fmt.Println(colorize(i18n.T("plugin.install.security_warning"), ColorYellow))
 
 		if runtime.GOOS != "windows" {
@@ -289,5 +297,50 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 
 	default:
 		fmt.Println(i18n.T("plugin.error.unknown_subcommand", subcommand))
+	}
+}
+
+// handleAgentPersonaSubcommand verifica se o comando /agent contém um subcomando de persona
+// Retorna true se foi tratado como subcomando, false se deve entrar no modo agente
+func (ch *CommandHandler) handleAgentPersonaSubcommand(userInput string) bool {
+	if ch.cli.personaHandler == nil {
+		return false
+	}
+
+	args := strings.Fields(userInput)
+	if len(args) < 2 {
+		// Apenas "/agent" sem argumentos - inicia modo agente (igual /run)
+		return false
+	}
+
+	subcommand := strings.ToLower(args[1])
+
+	// Subcomandos de gerenciamento de personas
+	switch subcommand {
+	case "list":
+		ch.cli.personaHandler.ListAgents()
+		return true
+	case "load":
+		if len(args) < 3 {
+			fmt.Println(colorize(i18n.T("agent.persona.load.usage"), ColorYellow))
+			return true
+		}
+		ch.cli.personaHandler.LoadAgent(args[2])
+		return true
+	case "show":
+		ch.cli.personaHandler.ShowActive()
+		return true
+	case "off", "unload", "reset":
+		ch.cli.personaHandler.UnloadAgent()
+		return true
+	case "skills":
+		ch.cli.personaHandler.ListSkills()
+		return true
+	case "help":
+		ch.cli.personaHandler.ShowHelp()
+		return true
+	default:
+		// Não é um subcomando de persona, deve ser uma tarefa para o modo agente
+		return false
 	}
 }

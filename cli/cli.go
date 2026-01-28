@@ -114,6 +114,14 @@ var CommandFlags = map[string]map[string][]prompt.Suggest{
 		"metrics":  {},
 		"help":     {},
 	},
+	"/agent": {
+		"list":   {},
+		"load":   {},
+		"skills": {},
+		"show":   {},
+		"off":    {},
+		"help":   {},
+	},
 }
 
 // ChatCLI representa a interface de linha de comando do chat
@@ -141,10 +149,10 @@ type ChatCLI struct {
 	processingDone       chan struct{}
 	sessionManager       *SessionManager
 	currentSessionName   string
-	MaxTokensOverride    int
 	UserMaxTokens        int
 	pluginManager        *plugins.Manager
 	contextHandler       *ContextHandler
+	personaHandler       *PersonaHandler
 	executionProfile     ExecutionProfile
 }
 
@@ -284,15 +292,14 @@ func (cli *ChatCLI) setExecutionProfile(p ExecutionProfile) {
 // NewChatCLI cria uma nova instância de ChatCLI
 func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	cli := &ChatCLI{
-		manager:           manager,
-		logger:            logger,
-		history:           make([]models.Message, 0),
-		historyManager:    NewHistoryManager(logger),
-		animation:         NewAnimationManager(),
-		interactionState:  StateNormal,
-		processingDone:    make(chan struct{}),
-		MaxTokensOverride: 0,
-		executionProfile:  ProfileNormal,
+		manager:          manager,
+		logger:           logger,
+		history:          make([]models.Message, 0),
+		historyManager:   NewHistoryManager(logger),
+		animation:        NewAnimationManager(),
+		interactionState: StateNormal,
+		processingDone:   make(chan struct{}),
+		executionProfile: ProfileNormal,
 	}
 
 	pluginMgr, err := plugins.NewManager(logger)
@@ -323,6 +330,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	}
 	cli.contextHandler = contextHandler
 
+	// Initialize persona handler
+	cli.personaHandler = NewPersonaHandler(logger)
+
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)
 	cli.agentMode = NewAgentMode(cli, logger)
@@ -344,7 +354,7 @@ func (cli *ChatCLI) executor(in string) {
 		cli.newCommandsInSession = append(cli.newCommandsInSession, in)
 	}
 
-	if strings.HasPrefix(in, "/agent") || strings.HasPrefix(in, "/run") {
+	if strings.HasPrefix(in, "/run") {
 		panic(agentModeRequest)
 	}
 
@@ -605,7 +615,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 			if strings.HasPrefix(lastCmd, "/coder") {
 				cli.runCoderLogic()
-			} else if strings.HasPrefix(lastCmd, "/agent") || strings.HasPrefix(lastCmd, "/run") {
+			} else if strings.HasPrefix(lastCmd, "/run") || strings.HasPrefix(lastCmd, "/agent") {
 				cli.runAgentLogic()
 			}
 		}
@@ -1001,6 +1011,13 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/plugin install <url>", i18n.T("help.command.plugin_install"))
 	printCommand("/plugin show <nome>", i18n.T("help.command.plugin_show"))
 	printCommand("/plugin inspect <nome>", i18n.T("help.command.plugin_inspect"))
+
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.persona"), ColorLime))
+	printCommand("/agent list", i18n.T("help.command.persona_list"))
+	printCommand("/agent load <nome>", i18n.T("help.command.persona_load"))
+	printCommand("/agent skills", i18n.T("help.command.persona_skills"))
+	printCommand("/agent show", i18n.T("help.command.persona_show"))
+	printCommand("/agent off", i18n.T("help.command.persona_off"))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.sessions"), ColorLime))
 	printCommand("/session save <nome>", i18n.T("help.command.session_save"))
@@ -2124,6 +2141,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getPluginSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/agent") {
+		return cli.getAgentSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -3010,4 +3031,63 @@ func (cli *ChatCLI) getPluginNameSuggestions(prefix string) []prompt.Suggest {
 		})
 	}
 	return prompt.FilterHasPrefix(suggestions, prefix, true)
+}
+
+func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+
+	// Se estamos apenas digitando /agent, sugerir subcomandos
+	if len(args) <= 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{}
+	}
+
+	// Se já temos /agent e um espaço, sugerir subcomandos
+	if len(args) == 1 && strings.HasSuffix(line, " ") {
+		suggestions := []prompt.Suggest{
+			{Text: "list", Description: "Lista agentes disponíveis"},
+			{Text: "load", Description: "Carrega um agente específico"},
+			{Text: "skills", Description: "Lista skills disponíveis"},
+			{Text: "show", Description: "Mostra o agente ativo"},
+			{Text: "off", Description: "Desativa o agente atual"},
+			{Text: "help", Description: "Ajuda do comando /agent"},
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	// Se estamos digitando o subcomando
+	if len(args) == 2 && !strings.HasSuffix(line, " ") {
+		suggestions := []prompt.Suggest{
+			{Text: "list", Description: "Lista agentes disponíveis"},
+			{Text: "load", Description: "Carrega um agente específico"},
+			{Text: "skills", Description: "Lista skills disponíveis"},
+			{Text: "show", Description: "Mostra o agente ativo"},
+			{Text: "off", Description: "Desativa o agente atual"},
+			{Text: "help", Description: "Ajuda do comando /agent"},
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	// Se o subcomando é 'load', sugerir nomes de agentes
+	if len(args) >= 2 && args[1] == "load" {
+		if cli.personaHandler == nil {
+			return []prompt.Suggest{}
+		}
+
+		agents, err := cli.personaHandler.GetManager().ListAgents()
+		if err != nil {
+			return []prompt.Suggest{}
+		}
+
+		suggestions := make([]prompt.Suggest, 0, len(agents))
+		for _, a := range agents {
+			suggestions = append(suggestions, prompt.Suggest{
+				Text:        a.Name,
+				Description: a.Description,
+			})
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	return []prompt.Suggest{}
 }

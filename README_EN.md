@@ -50,6 +50,11 @@
     - [Agent Interaction](#agent-interaction)
     - [Enhanced Agent UI](#enhanced-agent-ui)
     - [Agent One-Shot Mode](#agent-one-shot-mode)
+- [Customizable Agents (Personas)](#customizable-agents-personas)
+    - [Concept](#concept)
+    - [File Structure](#file-structure)
+    - [Management Commands](#management-commands)
+    - [Practical Example](#practical-example)
 - [Code Structure and Technologies](#code-structure-and-technologies)
 - [Contributing](#contributing)
 - [License](#license)
@@ -814,6 +819,100 @@ Perfect for scripts and automation.
 
 - Automatic Execution Mode: Use the  --agent-auto-exec  flag to have the agent execute the first suggested command (dangerous commands are automatically blocked).
   - chatcli -p "/agent create a file named test_file.txt" --agent-auto-exec
+
+--------
+
+## Customizable Agents (Personas)
+
+ChatCLI allows you to create **Customizable Agents** (also called Personas) that define specific behaviors for the AI. It's a modular system where:
+
+- **Agents** define *"who"* the AI is (personality, specialization)
+- **Skills** define *"what"* it should know/obey (rules, knowledge)
+
+### Concept
+
+An Agent can import multiple Skills, creating a composed **"Super System Prompt"**. This allows:
+
+- Reusing knowledge across different agents
+- Centralizing coding style rules, security, etc.
+- Versioning personas in Git
+- Sharing across teams
+
+### File Structure
+
+Files are stored in `~/.chatcli/`:
+
+```
+~/.chatcli/
+├── agents/            # Agent files (.md)
+│   ├── go-expert.md
+│   └── devops-senior.md
+└── skills/            # Skill files (.md)
+    ├── clean-code.md
+    ├── error-handling.md
+    └── docker-master.md
+```
+
+#### Agent Format
+
+```yaml
+---
+name: "go-expert"
+description: "Go/Golang Specialist"
+skills:
+  - clean-code
+  - error-handling
+plugins:
+  - "@coder"
+---
+# Base Personality
+
+You are a Senior Software Engineer, specializing in Go.
+Always prioritize simplicity and readability.
+```
+
+#### Skill Format
+
+```yaml
+---
+name: "clean-code"
+description: "Clean Code Principles"
+---
+# Clean Code Rules
+
+1. Use meaningful names for variables and functions
+2. Keep functions small (max 20 lines)
+3. Avoid unnecessary comments - code should be self-explanatory
+```
+
+### Management Commands
+
+| Command | Description |
+|---------|-------------|
+| `/agent list` | Lists all available agents |
+| `/agent load <name>` | Loads a specific agent |
+| `/agent skills` | Lists all available skills |
+| `/agent show` | Shows the active agent and its prompt |
+| `/agent off` | Deactivates the current agent |
+
+### Practical Example
+
+```bash
+# 1. List available agents
+/agent list
+
+# 2. Load the go-expert agent
+/agent load go-expert
+
+# 3. Use in agent or coder mode
+/agent create an HTTP server with graceful shutdown
+/coder refactor this code to follow best practices
+
+# 4. Deactivate when done
+/agent off
+```
+
+When an agent is loaded, all interactions with `/agent <task>` or `/coder <task>` will automatically use the loaded agent's persona, applying its rules and specialized knowledge.
 
 --------
 
