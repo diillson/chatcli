@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.48.2](https://github.com/diillson/chatcli/compare/v1.48.1...v1.48.2) (2026-01-28)
+
+
+### Bug Fixes
+
+* **workflow:** add --raw flag to release prep workflow and bump model ([#502](https://github.com/diillson/chatcli/issues/502)) ([7c4ba2c](https://github.com/diillson/chatcli/commit/7c4ba2ce50ea9dac50735a4c6b70bf88be57dcec))
+
 ## [1.48.1](https://github.com/diillson/chatcli/compare/v1.48.0...v1.48.1) (2026-01-28)
 
 
