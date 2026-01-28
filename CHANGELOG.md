@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.48.1](https://github.com/diillson/chatcli/compare/v1.48.0...v1.48.1) (2026-01-28)
+
+
+### Bug Fixes
+
+* **cli,workflow:** add --raw flag, enforce tool-call syntax, and update release workflow togpt-5.2 ([#498](https://github.com/diillson/chatcli/issues/498)) ([000c61b](https://github.com/diillson/chatcli/commit/000c61b39acb32ff97456114745c9abb5763fc97))
+
 ## [1.48.0](https://github.com/diillson/chatcli/compare/v1.47.8...v1.48.0) (2026-01-28)
 
 
