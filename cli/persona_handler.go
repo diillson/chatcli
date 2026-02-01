@@ -7,6 +7,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
@@ -77,9 +79,13 @@ func (h *PersonaHandler) HandleCommand(userInput string) {
 	case "skills":
 		h.ListSkills()
 	case "show":
-		h.ShowActive()
-	case "off", "unload", "reset":
-		h.UnloadAllAgents()
+		full := false
+		if len(args) > 2 && args[2] == "--full" {
+			full = true
+		}
+		h.ShowActive(full)
+	case "status", "attached", "list-attached":
+		h.ShowAttachedAgents()
 	case "help":
 		h.ShowHelp()
 	default:
@@ -223,7 +229,7 @@ func (h *PersonaHandler) UnloadAgent() {
 }
 
 // ShowActive shows details of the currently active agent
-func (h *PersonaHandler) ShowActive() {
+func (h *PersonaHandler) ShowActive(full bool) {
 	active := h.manager.GetActiveAgent()
 	prompt := h.manager.GetActivePrompt()
 
@@ -252,12 +258,24 @@ func (h *PersonaHandler) ShowActive() {
 
 		fmt.Println(colorize("\n   [Preview do Prompt Composto]", ColorCyan))
 		fmt.Println(strings.Repeat("-", 60))
-		// Show first 800 chars of prompt
+		// Show first 800 chars of prompt or full if requested
 		preview := prompt.FullPrompt
-		if len(preview) > 800 {
+		if !full && len(preview) > 800 {
 			preview = preview[:800] + "\n... (truncado, use /agent show --full para ver completo)"
 		}
-		fmt.Println(preview)
+		if full {
+			// Use less for pagination when --full is used
+			cmd := exec.Command("less", "-R")
+			cmd.Stdin = strings.NewReader(preview)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				// Fallback to print if less fails
+				fmt.Println(preview)
+			}
+		} else {
+			fmt.Println(preview)
+		}
 		fmt.Println(strings.Repeat("-", 60))
 		fmt.Printf("   Tamanho total: %d caracteres\n", len(prompt.FullPrompt))
 	}
@@ -295,7 +313,8 @@ func (h *PersonaHandler) ShowHelp() {
 	fmt.Printf("   %s               - Lista agentes disponíveis\n", colorize("/agent list", ColorCyan))
 	fmt.Printf("   %s        - Carrega um agente específico\n", colorize("/agent load <nome>", ColorCyan))
 	fmt.Printf("   %s             - Lista skills disponíveis\n", colorize("/agent skills", ColorCyan))
-	fmt.Printf("   %s               - Mostra agente ativo e seu prompt\n", colorize("/agent show", ColorCyan))
+	fmt.Printf("   %s               - Mostra agente ativo e seu prompt (use --full para exibir tudo)\n", colorize("/agent show [--full]", ColorCyan))
+	fmt.Printf("   %s           - Lista apenas os agentes anexados\n", colorize("/agent status", ColorCyan))
 	fmt.Printf("   %s                - Desativa o agente atual\n", colorize("/agent off", ColorCyan))
 
 	fmt.Println()
@@ -327,6 +346,24 @@ func (h *PersonaHandler) DetachAgent(name string) {
 		return
 	}
 	fmt.Printf(" ✂️ Agente '%s' removido da sessão.\n", colorize(name, ColorYellow))
+}
+
+// ShowAttachedAgents shows only the list of attached agents without prompt details
+func (h *PersonaHandler) ShowAttachedAgents() {
+	active := h.manager.GetActiveAgents()
+	if len(active) == 0 {
+		fmt.Println(colorize(i18n.T("agent.persona.show.no_active"), ColorYellow))
+		return
+	}
+	fmt.Println(colorize("\n 🦾 Agentes Anexados:", ColorCyan))
+	fmt.Println(strings.Repeat("─", 50))
+	for i, a := range active {
+		fmt.Printf("  %d. %s - %s\n", i+1, colorize(a.Name, ColorGreen), a.Description)
+		if len(a.Skills) > 0 {
+			fmt.Printf("     Skills: %s\n", strings.Join(a.Skills, ", "))
+		}
+	}
+	fmt.Println()
 }
 
 // UnloadAllAgents deactivates all agents

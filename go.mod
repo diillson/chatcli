@@ -1,6 +1,6 @@
 module github.com/diillson/chatcli
 
-go 1.25.6
+go 1.24.72
 
 require (
 	github.com/c-bata/go-prompt v0.2.6
@@ -8,6 +8,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
+	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.0
 	golang.org/x/sys v0.37.0

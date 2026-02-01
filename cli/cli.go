@@ -120,7 +120,10 @@ var CommandFlags = map[string]map[string][]prompt.Suggest{
 		"attach": {},
 		"detach": {},
 		"skills": {},
-		"show":   {},
+		"show": {
+			{Text: "--full", Description: "Mostra detalhes completos do agente"},
+		},
+		"status": {},
 		"off":    {},
 		"help":   {},
 	},
@@ -1019,6 +1022,7 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/agent load <nome>", i18n.T("help.command.persona_load"))
 	printCommand("/agent skills", i18n.T("help.command.persona_skills"))
 	printCommand("/agent show", i18n.T("help.command.persona_show"))
+	printCommand("/agent status", i18n.T("help.command.persona_status"))
 	printCommand("/agent off", i18n.T("help.command.persona_off"))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.sessions"), ColorLime))
@@ -3060,6 +3064,7 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "detach", Description: "Desanexar agente da sessão atual"},
 			{Text: "skills", Description: "Lista skills disponíveis"},
 			{Text: "show", Description: "Mostra o agente ativo"},
+			{Text: "status", Description: "Mostra os agente anexados, Alias{attached ou list-attached}"},
 			{Text: "off", Description: "Desativa o agente atual"},
 			{Text: "help", Description: "Ajuda do comando /agent"},
 		}
@@ -3075,6 +3080,7 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "detach", Description: "Desanexar agente da sessão atual"},
 			{Text: "skills", Description: "Lista skills disponíveis"},
 			{Text: "show", Description: "Mostra o agente ativo"},
+			{Text: "status", Description: "Mostra os agente anexados, Alias{attached ou list-attached}"},
 			{Text: "off", Description: "Desativa o agente atual"},
 			{Text: "help", Description: "Ajuda do comando /agent"},
 		}
@@ -3100,6 +3106,12 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 			})
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	if len(args) >= 2 && (args[1] == "show") {
+		return []prompt.Suggest{
+			{Text: "--full", Description: "Mostra detalhes completos do agente"},
+		}
 	}
 
 	return []prompt.Suggest{}

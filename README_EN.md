@@ -890,9 +890,12 @@ description: "Clean Code Principles"
 | Command | Description |
 |---------|-------------|
 | `/agent list` | Lists all available agents |
+| `/agent status` | Lists only attached agents (summary) |
 | `/agent load <name>` | Loads a specific agent |
+| `/agent attach <name>` | Attaches an additional agent to the session (combines skills) |
+| `/agent detach <name>` | Removes an attached agent |
 | `/agent skills` | Lists all available skills |
-| `/agent show` | Shows the active agent and its prompt |
+| `/agent show [--full]` | Shows the active agent (use --full for complete prompt) |
 | `/agent off` | Deactivates the current agent |
 
 ### Practical Example
