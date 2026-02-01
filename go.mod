@@ -1,6 +1,6 @@
 module github.com/diillson/chatcli
 
-go 1.24.72
+go 1.24.12
 
 require (
 	github.com/c-bata/go-prompt v0.2.6
