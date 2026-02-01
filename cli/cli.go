@@ -117,6 +117,8 @@ var CommandFlags = map[string]map[string][]prompt.Suggest{
 	"/agent": {
 		"list":   {},
 		"load":   {},
+		"attach": {},
+		"detach": {},
 		"skills": {},
 		"show":   {},
 		"off":    {},
@@ -3054,6 +3056,8 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 		suggestions := []prompt.Suggest{
 			{Text: "list", Description: "Lista agentes disponíveis"},
 			{Text: "load", Description: "Carrega um agente específico"},
+			{Text: "attach", Description: "Adicionar múltiplo agente a sessão existente"},
+			{Text: "detach", Description: "Desanexar agente da sessão atual"},
 			{Text: "skills", Description: "Lista skills disponíveis"},
 			{Text: "show", Description: "Mostra o agente ativo"},
 			{Text: "off", Description: "Desativa o agente atual"},
@@ -3067,6 +3071,8 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 		suggestions := []prompt.Suggest{
 			{Text: "list", Description: "Lista agentes disponíveis"},
 			{Text: "load", Description: "Carrega um agente específico"},
+			{Text: "attach", Description: "Adicionar múltiplo agente a sessão existente"},
+			{Text: "detach", Description: "Desanexar agente da sessão atual"},
 			{Text: "skills", Description: "Lista skills disponíveis"},
 			{Text: "show", Description: "Mostra o agente ativo"},
 			{Text: "off", Description: "Desativa o agente atual"},
@@ -3075,8 +3081,8 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
 
-	// Se o subcomando é 'load', sugerir nomes de agentes
-	if len(args) >= 2 && args[1] == "load" {
+	// Se o subcomando é 'load', 'attach' ou 'detach', sugerir nomes de agentes
+	if len(args) >= 2 && (args[1] == "load" || args[1] == "attach" || args[1] == "detach") {
 		if cli.personaHandler == nil {
 			return []prompt.Suggest{}
 		}

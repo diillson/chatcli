@@ -9,7 +9,7 @@ description = "Aprenda a instalar o ChatCLI e a configurar suas chaves de API pa
 
 Antes de começar, certifique-se de que você tem os seguintes requisitos instalados e configurados em seu sistema:
 
-1.  **Go (versão 1.24 ou superior)**: O ChatCLI é uma aplicação Go. Você precisará do Go para compilar e instalar a ferramenta.
+1.  **Go (versão 1.25 ou superior)**: O ChatCLI é uma aplicação Go. Você precisará do Go para compilar e instalar a ferramenta.
     *   Para verificar sua versão, execute: `go version`
 2.  **Git**: O Go utiliza o Git para baixar dependências de repositórios públicos.
 3.  **Chave de API**: Você precisará de uma chave de API de pelo menos um provedor de LLM suportado (ex: OpenAI, Anthropic, Google, etc.).

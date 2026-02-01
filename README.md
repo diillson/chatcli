@@ -103,7 +103,7 @@ O ChatCLI foi projetado para ser global. A interface do usuário, incluindo menu
 
 ### Pré-requisitos
 
-- **Go (versão 1.23+)**: [Disponível em golang.org](https://golang.org/dl/).
+- **Go (versão 1.25+)**: [Disponível em golang.org](https://golang.org/dl/).
 
 ### 1. Binários Pré-compilados (Recomendado)
 

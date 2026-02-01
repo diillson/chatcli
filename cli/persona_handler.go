@@ -54,6 +54,24 @@ func (h *PersonaHandler) HandleCommand(userInput string) {
 	subcommand := strings.ToLower(args[1])
 
 	switch subcommand {
+	case "load":
+		if len(args) < 3 {
+			fmt.Println(colorize("Uso: /agent load <nome>", ColorYellow))
+			return
+		}
+		h.LoadAgent(args[2])
+	case "attach", "add":
+		if len(args) < 3 {
+			fmt.Println(colorize("Uso: /agent attach <nome>", ColorYellow))
+			return
+		}
+		h.AttachAgent(args[2])
+	case "detach", "remove", "rm":
+		if len(args) < 3 {
+			fmt.Println(colorize("Uso: /agent detach <nome>", ColorYellow))
+			return
+		}
+		h.DetachAgent(args[2])
 	case "list":
 		h.ListAgents()
 	case "skills":
@@ -61,7 +79,7 @@ func (h *PersonaHandler) HandleCommand(userInput string) {
 	case "show":
 		h.ShowActive()
 	case "off", "unload", "reset":
-		h.UnloadAgent()
+		h.UnloadAllAgents()
 	case "help":
 		h.ShowHelp()
 	default:
@@ -289,4 +307,36 @@ func (h *PersonaHandler) ShowHelp() {
 	fmt.Println()
 	fmt.Printf("   📂 Agentes: %s\n", colorize(h.manager.GetAgentsDir(), ColorGray))
 	fmt.Printf("   📂 Skills:  %s\n", colorize(h.manager.GetSkillsDir(), ColorGray))
+}
+
+// AttachAgent adds an agent to active pool
+func (h *PersonaHandler) AttachAgent(name string) {
+	result, err := h.manager.AttachAgent(name)
+	if err != nil {
+		fmt.Println(colorize(fmt.Sprintf(" ❌ Erro ao anexar: %s", err.Error()), ColorRed))
+		return
+	}
+	fmt.Printf(" 📓 Agente '%s' anexado! Skills adicionadas: %d\n", colorize(result.Agent.Name, ColorGreen), len(result.LoadedSkills))
+}
+
+// DetachAgent removes an agent from active pool
+func (h *PersonaHandler) DetachAgent(name string) {
+	err := h.manager.DetachAgent(name)
+	if err != nil {
+		fmt.Println(colorize(fmt.Sprintf(" ❌ Erro ao desanexar: %s", err.Error()), ColorRed))
+		return
+	}
+	fmt.Printf(" ✂️ Agente '%s' removido da sessão.\n", colorize(name, ColorYellow))
+}
+
+// UnloadAllAgents deactivates all agents
+func (h *PersonaHandler) UnloadAllAgents() {
+	active := h.manager.GetActiveAgents()
+	if len(active) == 0 {
+		fmt.Println(colorize(i18n.T("agent.persona.off.no_active"), ColorYellow))
+		return
+	}
+	h.manager.UnloadAllAgents()
+	fmt.Println(colorize("✇ Todos os agentes foram desativados.", ColorGreen))
+	fmt.Println(i18n.T("agent.persona.off.hint"))
 }
