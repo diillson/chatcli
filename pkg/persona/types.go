@@ -101,7 +101,7 @@ type LoadResult struct {
 
 // ComposedPrompt represents the final assembled system prompt
 type ComposedPrompt struct {
-	AgentName     string
+	ActiveAgents  []string // List of active agent names
 	SkillsLoaded  []string
 	SkillsMissing []string
 	FullPrompt    string

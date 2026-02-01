@@ -7,7 +7,6 @@ package metrics
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 )
@@ -82,7 +81,7 @@ func (t *Timer) Stop() time.Duration {
 	return t.stopTime.Sub(t.startTime)
 }
 
-// Elapsed retorna o tempo decorrido (funciona mesmo com timer rodando)
+// Elapsed retorna o tempo decorrido (funciona mesmo com timer rúdando)
 func (t *Timer) Elapsed() time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -101,25 +100,4 @@ func (t *Timer) IsRunning() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.running
-}
-
-// FormatDuration formata uma duração para exibição amigável
-func FormatDuration(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
-	}
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	return fmt.Sprintf("%d min %d seg", minutes, seconds)
-}
-
-// FormatDurationShort formata duração em formato curto (M:SS)
-func FormatDurationShort(d time.Duration) string {
-	totalSeconds := int(d.Seconds())
-	minutes := totalSeconds / 60
-	seconds := totalSeconds % 60
-	return fmt.Sprintf("%d:%02d", minutes, seconds)
 }

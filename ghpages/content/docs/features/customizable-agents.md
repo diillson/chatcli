@@ -100,9 +100,14 @@ Todos os comandos de gerenciamento estão integrados ao `/agent`:
 |---------|------------|
 | `/agent` | Mostra status do agente ativo e ajuda |
 | `/agent list` | Lista todos os agentes disponíveis |
+| `/agent status` | Lista apenas os agentes anexados (resumido) |
 | `/agent load <nome>` | Carrega um agente específico |
+| `/agent attach <nome>` | Anexa um agente adicional à sessão |
+| `/agent detach <nome>` | Remove um agente anexado |
+| `/agent attach <nome>` | Anexa um agente adicional à sessão |
+| `/agent detach <nome>` | Remove um agente anexado |
 | `/agent skills` | Lista todas as skills disponíveis |
-| `/agent show` | Mostra o agente ativo e preview do prompt |
+| `/agent show [--full]` | Mostra o agente ativo (use --full para exibir tudo) |
 | `/agent off` | Desativa o agente atual |
 | `/agent <tarefa>` | Executa uma tarefa no modo agente |
 

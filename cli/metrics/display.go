@@ -1,8 +1,4 @@
-/*
- * ChatCLI - Metrics Display
- * Copyright (c) 2024 Edilson Freitas
- * License: MIT
- */
+// Go Multi-Agent - Metrics Display
 package metrics
 
 import (
@@ -11,7 +7,6 @@ import (
 	"time"
 )
 
-// Cores ANSI
 const (
 	ColorReset  = "\033[0m"
 	ColorGreen  = "\033[32m"
@@ -22,7 +17,7 @@ const (
 	ColorBold   = "\033[1m"
 )
 
-// ProgressBar gera uma barra de progresso visual
+// ProgressBar gera barra de progresso com caracteres seguros
 func ProgressBar(percent float64, width int) string {
 	if percent > 100 {
 		percent = 100
@@ -30,141 +25,69 @@ func ProgressBar(percent float64, width int) string {
 	if percent < 0 {
 		percent = 0
 	}
-
 	filled := int(percent / 100 * float64(width))
 	empty := width - filled
-
-	// Escolhe a cor baseada na porcentagem
-	var color string
-	switch {
-	case percent >= 90:
+	color := ColorGreen
+	if percent >= 90 {
 		color = ColorRed
-	case percent >= 70:
+	} else if percent >= 70 {
 		color = ColorYellow
-	default:
-		color = ColorGreen
 	}
-
-	bar := color + strings.Repeat("▬", filled) + ColorGray + strings.Repeat("░", empty) + ColorReset
-	return bar
+	return color + strings.Repeat("=", filled) + ColorGray + strings.Repeat("-", empty) + ColorReset
 }
 
-// FormatTokenStatus formata o status de tokens para exibição
+func FormatDurationShort(d time.Duration) string { return d.Round(time.Second).String() }
+func FormatDuration(d time.Duration) string      { return d.Round(time.Second).String() }
+
 func FormatTokenStatus(tc *TokenCounter) string {
 	total := tc.GetTotalTokens()
 	limit := tc.GetModelLimit()
-	percent := tc.GetUsagePercent()
-
-	bar := ProgressBar(percent, 20)
-
-	// Escolhe emoji baseado no estado
-	var emoji string
-	switch {
-	case percent >= 90:
-		emoji = "🔴" // Vermelho
-	case percent >= 70:
-		emoji = "🟡" // Amarelo
-	default:
-		emoji = "🟢" // Verde
+	perc := tc.GetUsagePercent()
+	bar := ProgressBar(perc, 20)
+	mark := "OK"
+	if perc >= 90 {
+		mark = "CRIT"
+	} else if perc >= 70 {
+		mark = "WARN"
 	}
-
-	return fmt.Sprintf("%s Contexto: %s / %s (%.1f%%) %s",
-		emoji,
-		FormatTokens(total),
-		FormatTokens(limit),
-		percent,
-		bar,
-	)
+	return fmt.Sprintf("[%s%s%s] Mem: %s/%s (%.1f%%) %s", mark, ColorCyan, ColorReset, FormatTokens(total), FormatTokens(limit), perc, bar)
 }
 
-// FormatTokenStatusCompact formata o status de forma compacta
 func FormatTokenStatusCompact(tc *TokenCounter) string {
 	total := tc.GetTotalTokens()
 	limit := tc.GetModelLimit()
-	percent := tc.GetUsagePercent()
-
-	// Escolhe cor baseada no estado
-	var color string
-	switch {
-	case percent >= 90:
+	perc := tc.GetUsagePercent()
+	color := ColorGreen
+	if perc >= 90 {
 		color = ColorRed
-	case percent >= 70:
+	} else if perc >= 70 {
 		color = ColorYellow
-	default:
-		color = ColorGreen
 	}
-
-	return fmt.Sprintf("%s[%s/%s]%s",
-		color,
-		FormatTokens(total),
-		FormatTokens(limit),
-		ColorReset,
-	)
+	return fmt.Sprintf("%s%s/%s%s", color, FormatTokens(total), FormatTokens(limit), ColorReset)
 }
 
-// Spinner frames
-var SpinnerFrames = []string{"‖", "―", "‖", "‗", "‘", "’", "‚", "‛", "“"}
-
-// FormatTimerStatus formata o status do timer durante execução
-func FormatTimerStatus(d time.Duration, modelName string, message string) string {
-	// Calcula o frame do spinner baseado no tempo (muda a ms 100ms)
-	frameIndex := int(d.Milliseconds()/100) % len(SpinnerFrames)
-	spinner := SpinnerFrames[frameIndex]
-
-	return fmt.Sprintf("\r%s%s [%s%s%s] %s%s | %s%s",
-		ColorCyan, spinner,
-		ColorBold, modelName, ColorReset+ColorCyan,
-		FormatDurationShort(d),
-		ColorReset,
-		message,
-		strings.Repeat(" ", 10), // Limpa resíduos
-	)
+func FormatTimerStatus(d time.Duration, model, msg string) string {
+	spinner := GetSpinnerFrame()
+	dots := GetDotsAnimation()
+	return fmt.Sprintf("\r%s%s%s [%s%s%s%s] %s[%s]%s %s|%s %s%s%s%s", ColorCyan, spinner, ColorReset, ColorBold, ColorCyan, model, ColorReset, ColorGray, FormatDurationShort(d), ColorReset, ColorGray, ColorReset, ColorGray, msg, dots, ColorReset)
 }
-
-// FormatTimerComplete formata o tempo final de execução
 func FormatTimerComplete(d time.Duration) string {
-	return fmt.Sprintf("%s%s %s%s",
-		ColorGray, "✑", // Check mark
-		FormatDuration(d),
-		ColorReset,
-	)
+	return fmt.Sprintf("%s%s %s", ColorGray, FormatDuration(d), ColorReset)
 }
 
-// FormatTurnInfo formata informações do turno com barra de progresso
-func FormatTurnInfo(turn int, maxTurns int, duration time.Duration, tc *TokenCounter) string {
-	var parts []string
-
-	// Turno
-	parts = append(parts, fmt.Sprintf("%sTurno %d/%d%s",
-		ColorCyan, turn, maxTurns, ColorReset))
-
-	// Tempo
-	if duration > 0 {
-		parts = append(parts, FormatTimerComplete(duration))
+func FormatTurnInfo(t, m int, d time.Duration, tc *TokenCounter) string {
+	p := []string{fmt.Sprintf("%sTurn %d/%d%s", ColorCyan, t, m, ColorReset)}
+	if d > 0 {
+		p = append(p, FormatTimerComplete(d))
 	}
-
-	// Tokens com barra de progresso
 	if tc != nil {
-		percent := tc.GetUsagePercent()
-		bar := ProgressBar(percent, 15) // Barra de 15 caracteres
-		parts = append(parts, FormatTokenStatusCompact(tc))
-		parts = append(parts, bar)
+		p = append(p, "["+FormatTokenStatusCompact(tc)+"]")
 	}
-
-	return strings.Join(parts, " ")
+	return strings.Join(p, " ")
 }
 
-// FormatWarning formata um aviso de tokens
-func FormatWarning(message string) string {
-	return fmt.Sprintf("%s%s⚠️  %s%s", ColorYellow, ColorBold, message, ColorReset)
+func FormatWarning(msg string) string {
+	return fmt.Sprintf("%s%s%s: %s%s", ColorYellow, ColorBold, "WARN", msg, ColorReset)
 }
 
-// FormatError formata um erro
-func FormatError(message string) string {
-	return fmt.Sprintf("%s%s❌ %s%s", ColorRed, ColorBold, message, ColorReset)
-}
-
-// ClearLine limpa a linha atual do terminal
-func ClearLine() string {
-	return "\r\033[K"
-}
+func ClearLine() string { return "\r\033[K" }

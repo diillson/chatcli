@@ -327,8 +327,29 @@ func (ch *CommandHandler) handleAgentPersonaSubcommand(userInput string) bool {
 		}
 		ch.cli.personaHandler.LoadAgent(args[2])
 		return true
+	case "attach", "add":
+		if len(args) < 3 {
+			fmt.Println(colorize("Uso: /agent attach <nome>", ColorYellow))
+			return true
+		}
+		ch.cli.personaHandler.AttachAgent(args[2])
+		return true
+	case "detach", "remove", "rm":
+		if len(args) < 3 {
+			fmt.Println(colorize("Uso: /agent detach <nome>", ColorYellow))
+			return true
+		}
+		ch.cli.personaHandler.DetachAgent(args[2])
+		return true
 	case "show":
-		ch.cli.personaHandler.ShowActive()
+		full := false
+		if len(args) > 2 && args[2] == "--full" || args[2] == "-f" {
+			full = true
+		}
+		ch.cli.personaHandler.ShowActive(full)
+		return true
+	case "status", "attached", "list-attached":
+		ch.cli.personaHandler.ShowAttachedAgents()
 		return true
 	case "off", "unload", "reset":
 		ch.cli.personaHandler.UnloadAgent()

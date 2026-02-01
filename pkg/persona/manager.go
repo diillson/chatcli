@@ -6,6 +6,8 @@
 package persona
 
 import (
+	"fmt"
+	"sort"
 	"sync"
 
 	"go.uber.org/zap"
@@ -13,10 +15,12 @@ import (
 
 // Manager handles the active persona state
 type Manager struct {
-	logger       *zap.Logger
-	loader       *Loader
-	builder      *Builder
-	activeAgent  *Agent
+	logger  *zap.Logger
+	loader  *Loader
+	builder *Builder
+
+	// Changed from single activeAgent to activeAgents map
+	activeAgents map[string]*Agent
 	activePrompt *ComposedPrompt
 	mu           sync.RWMutex
 }
@@ -25,9 +29,10 @@ type Manager struct {
 func NewManager(logger *zap.Logger) *Manager {
 	loader := NewLoader(logger)
 	return &Manager{
-		logger:  logger,
-		loader:  loader,
-		builder: NewBuilder(logger, loader),
+		logger:       logger,
+		loader:       loader,
+		builder:      NewBuilder(logger, loader),
+		activeAgents: make(map[string]*Agent),
 	}
 }
 
@@ -41,59 +46,128 @@ func (m *Manager) SetProjectDir(dir string) {
 	m.loader.SetProjectDir(dir)
 }
 
-// LoadAgent loads and activates an agent by name
+// LoadAgent (Legacy/Reset Mode): Clears all agents and loads specific one
 func (m *Manager) LoadAgent(name string) (*LoadResult, error) {
+	m.UnloadAllAgents() // Clear all first
+	return m.AttachAgent(name)
+}
+
+// AttachAgent adds an agent to the active pool without removing others
+func (m *Manager) AttachAgent(name string) (*LoadResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Build the composed prompt
-	composed, err := m.builder.BuildSystemPrompt(name)
-	if err != nil {
-		return nil, err
+	// 1. Check if already attached
+	if _, exists := m.activeAgents[name]; exists {
+		return nil, fmt.Errorf("agent '%s' is already attached", name)
 	}
 
-	// Get the agent for metadata
+	// 2. Load agent from disk
 	agent, err := m.loader.GetAgent(name)
 	if err != nil {
 		return nil, err
 	}
 
-	// Set as active
-	m.activeAgent = agent
+	// 3. Temporarily add to map to build prompt
+	m.activeAgents[name] = agent
+
+	// 4. Rebuild the composite prompt with all agents
+	composed, err := m.rebuildPromptInternal()
+	if err != nil {
+		delete(m.activeAgents, name) // Rollback
+		return nil, err
+	}
+
 	m.activePrompt = composed
 
-	m.logger.Info("Agent loaded",
-		zap.String("name", agent.Name),
-		zap.Int("skills_loaded", len(composed.SkillsLoaded)),
-		zap.Int("skills_missing", len(composed.SkillsMissing)))
+	m.logger.Info("Agent attached", zap.String("name", name), zap.Int("total_active", len(m.activeAgents)))
 
-	result := &LoadResult{
+	return &LoadResult{
 		Agent:         agent,
 		LoadedSkills:  composed.SkillsLoaded,
 		MissingSkills: composed.SkillsMissing,
-	}
-
-	return result, nil
+	}, nil
 }
 
-// UnloadAgent deactivates the current agent
-func (m *Manager) UnloadAgent() {
+// DetachAgent removes a specific agent
+func (m *Manager) DetachAgent(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.activeAgent != nil {
-		m.logger.Info("Agent unloaded", zap.String("name", m.activeAgent.Name))
+	if _, exists := m.activeAgents[name]; !exists {
+		return fmt.Errorf("agent '%s' is not active", name)
 	}
 
-	m.activeAgent = nil
-	m.activePrompt = nil
+	delete(m.activeAgents, name)
+
+	// If no agents left, clean prompt
+	if len(m.activeAgents) == 0 {
+		m.activePrompt = nil
+		return nil
+	}
+
+	// Rebuild prompt with remaining agents
+	composed, err := m.rebuildPromptInternal()
+	if err != nil {
+		return fmt.Errorf("error rebuilding prompt after detach: %w", err)
+	}
+	m.activePrompt = composed
+
+	m.logger.Info("Agent detached", zap.String("name", name))
+	return nil
 }
 
-// GetActiveAgent returns the currently active agent (nil if none)
+// UnloadAllAgents (antigo UnloadAgent) clears everything
+func (m *Manager) UnloadAllAgents() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.activeAgents = make(map[string]*Agent)
+	m.activePrompt = nil
+	m.logger.Info("All agents unloaded")
+}
+
+// UnloadAgent (legacy) - alias for backward compatibility
+func (m *Manager) UnloadAgent() {
+	m.UnloadAllAgents()
+}
+
+// Helper internal (chame SEMPRE dentro de um Lock)
+// Pega todos os agentes em m.activeAgents e chama o Builder
+func (m *Manager) rebuildPromptInternal() (*ComposedPrompt, error) {
+	// Convert map to slice for the builder
+	var agents []*Agent
+	for _, a := range m.activeAgents {
+		agents = append(agents, a)
+	}
+
+	// Sort by name for deterministic prompts
+	sort.Slice(agents, func(i, j int) bool {
+		return agents[i].Name < agents[j].Name
+	})
+
+	return m.builder.BuildMultiAgentPrompt(agents)
+}
+
+// GetActiveAgents returns list of active agents
+func (m *Manager) GetActiveAgents() []*Agent {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var list []*Agent
+	for _, a := range m.activeAgents {
+		list = append(list, a)
+	}
+	return list
+}
+
+// GetActiveAgent returns the first active agent (legacy compatibility)
 func (m *Manager) GetActiveAgent() *Agent {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.activeAgent
+	for _, a := range m.activeAgents {
+		return a
+	}
+	return nil
 }
 
 // GetActivePrompt returns the composed prompt for the active agent
@@ -104,7 +178,6 @@ func (m *Manager) GetActivePrompt() *ComposedPrompt {
 }
 
 // GetSystemPrompt returns the full system prompt string for the active agent
-// Returns empty string if no agent is active
 func (m *Manager) GetSystemPrompt() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -119,7 +192,7 @@ func (m *Manager) GetSystemPrompt() string {
 func (m *Manager) HasActiveAgent() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.activeAgent != nil
+	return len(m.activeAgents) > 0
 }
 
 // ListAgents returns all available agents

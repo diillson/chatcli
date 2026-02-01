@@ -28,56 +28,70 @@ func NewBuilder(logger *zap.Logger, loader *Loader) *Builder {
 	}
 }
 
-// BuildSystemPrompt creates a composed system prompt from an agent and its skills.
-// Uses a robust construction order: Role > Personality > Deep Skills Knowledge > Plugins.
-func (b *Builder) BuildSystemPrompt(agentName string) (*ComposedPrompt, error) {
-	// Load the agent
-	agent, err := b.loader.GetAgent(agentName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load agent '%s': %w", agentName, err)
-	}
-
+// BuildMultiAgentPrompt assembles a prompt for multiple agents simultaneously
+func (b *Builder) BuildMultiAgentPrompt(agents []*Agent) (*ComposedPrompt, error) {
 	result := &ComposedPrompt{
-		AgentName:     agent.Name,
+		ActiveAgents:  []string{},
 		SkillsLoaded:  []string{},
 		SkillsMissing: []string{},
 	}
 
 	var promptParts []string
 
-	// =======================================================
-	// PART 1: [ROLE] - Agent Identity & Context
-	// =======================================================
-	promptParts = append(promptParts, "====================================================")
-	promptParts = append(promptParts, fmt.Sprintf(">>> [ROLE DEFINITION] AGENTE: %s", strings.ToUpper(agent.Name)))
-
-	if agent.Description != "" {
-		promptParts = append(promptParts, fmt.Sprintf("DESCRIPTION: %s", agent.Description))
+	// 1. Collective Role Definition
+	agentNames := []string{}
+	for _, a := range agents {
+		agentNames = append(agentNames, strings.ToUpper(a.Name))
+		result.ActiveAgents = append(result.ActiveAgents, a.Name)
 	}
 
-	promptParts = append(promptParts, "====================================================")
+	promptParts = append(promptParts, "============================================================")
+	promptParts = append(promptParts, ">>> [MULTI-AGENT SYSTEM ACTIVATED]")
+	promptParts = append(promptParts, fmt.Sprintf("ACTIVE EXPERTS: %s", strings.Join(agentNames, ", ")))
+	promptParts = append(promptParts, "You must act as a unified intelligence incorporating the expertise of all active agents.")
+	promptParts = append(promptParts, "============================================================")
 	promptParts = append(promptParts, "")
 
-	// =======================================================
-	// PART 2: [PERSONALITY] - Base Knowledge found in Agent File
-	// =======================================================
-	if agent.Content != "" {
-		promptParts = append(promptParts, "### CORE PERSONALITY & DIRECTIVES ###")
-		promptParts = append(promptParts, agent.Content)
+	// 2. Individual Directives (Merge content/descriptions)
+	promptParts = append(promptParts, "### AGENT DIRECTIVES ###")
+	for _, agent := range agents {
+		promptParts = append(promptParts, fmt.Sprintf("--- DIRECTIVES FOR: %s ---", strings.ToUpper(agent.Name)))
+		if agent.Description != "" {
+			promptParts = append(promptParts, fmt.Sprintf("ROLE: %s", agent.Description))
+		}
+		if agent.Content != "" {
+			promptParts = append(promptParts, agent.Content)
+		}
 		promptParts = append(promptParts, "")
 	}
 
-	// =======================================================
-	// PART 3: [SKILLS] - Structured Specialized Knowledge
-	// =======================================================
-	if len(agent.Skills) > 0 {
-		promptParts = append(promptParts, "#####################################################")
-		promptParts = append(promptParts, "### INSTALLED SKILLS & CAPABILITIES ###")
-		promptParts = append(promptParts, "#####################################################")
-		promptParts = append(promptParts, "You have been equipped with the following specialized skills. Apply their rules rigorously.")
-		promptParts = append(promptParts, "")
+	// 3. Consolidated Skills (Deduplication Logic)
+	uniqueSkills := make(map[string]bool)
+	uniquePlugins := make(map[string]bool)
 
-		for idx, skillName := range agent.Skills {
+	// Collect distinct skill names
+	for _, agent := range agents {
+		for _, s := range agent.Skills {
+			uniqueSkills[s] = true
+		}
+		for _, p := range agent.Plugins {
+			uniquePlugins[p] = true
+		}
+	}
+
+	if len(uniqueSkills) > 0 {
+		promptParts = append(promptParts, "########################################################")
+		promptParts = append(promptParts, "### CONSOLIDATED KNOWLEDGE SKILLS ###")
+		promptParts = append(promptParts, "#########################################################")
+
+		// Sort for deterministic order
+		var sortedSkills []string
+		for k := range uniqueSkills {
+			sortedSkills = append(sortedSkills, k)
+		}
+		sort.Strings(sortedSkills)
+
+		for idx, skillName := range sortedSkills {
 			skillName = strings.TrimSpace(skillName)
 			if skillName == "" {
 				continue
@@ -85,106 +99,94 @@ func (b *Builder) BuildSystemPrompt(agentName string) (*ComposedPrompt, error) {
 
 			skill, err := b.loader.GetSkill(skillName)
 			if err != nil {
-				b.logger.Warn("Skill definition not found, skipping",
-					zap.String("agent", agent.Name),
-					zap.String("missing_skill", skillName),
-					zap.Error(err))
+				b.logger.Warn("Skill not found", zap.String("skill", skillName))
 				result.SkillsMissing = append(result.SkillsMissing, skillName)
 				continue
 			}
 
-			// Add Skill Header
-			promptParts = append(promptParts, strings.Repeat("=", 60))
-			promptParts = append(promptParts, fmt.Sprintf("SKILL #%d: %s", idx+1, strings.ToUpper(skill.Name)))
-			if skill.Description != "" {
-				promptParts = append(promptParts, fmt.Sprintf("PURPOSE: %s", skill.Description))
-			}
-			promptParts = append(promptParts, strings.Repeat("=", 60))
-
-			// Add Skill Main Content (Directives)
+			// Add Skill Content
+			promptParts = append(promptParts, fmt.Sprintf("\n>>> SKILL Module #%d: %s", idx+1, strings.ToUpper(skill.Name)))
 			promptParts = append(promptParts, skill.Content)
 
-			// -----------------------------------------------------
-			// POWER FEATURE: Injection of Subskills/Scripts Paths
-			// -----------------------------------------------------
-			hasSubskills := len(skill.Subskills) > 0
-			hasScripts := len(skill.Scripts) > 0
+			// Handle Subskills/Scripts paths
+			b.appendSkillResources(&promptParts, skill)
 
-			if hasSubskills || hasScripts {
-				promptParts = append(promptParts, "")
-				promptParts = append(promptParts, "--- 🛠️ SKILL RESOURCES (AVAILABLE ON DISK) ---")
-				promptParts = append(promptParts, "You have access to the following resources within this skill package.")
-				promptParts = append(promptParts, "DO NOT HALLUCINATE CONTENT. If you need details from these files, use your 'read' or 'exec' tools on the PATHS provided below.")
-
-				if hasSubskills {
-					promptParts = append(promptParts, "\n[KNOWLEDGE BASE (Markdown Documents)]:")
-
-					// Sort for deterministic prompt
-					var keys []string
-					for k := range skill.Subskills {
-						keys = append(keys, k)
-					}
-					sort.Strings(keys)
-
-					for _, name := range keys {
-						absPath := skill.Subskills[name]
-						promptParts = append(promptParts, fmt.Sprintf("- File: \"%s\"", name))
-						promptParts = append(promptParts, fmt.Sprintf("  Path: \"%s\"", absPath))
-					}
-				}
-
-				if hasScripts {
-					promptParts = append(promptParts, "\n[EXECUTABLE SCRIPTS]:")
-					promptParts = append(promptParts, "Use the command provided below to run these specialized scripts when needed.")
-
-					// Sort keys
-					var keys []string
-					for k := range skill.Scripts {
-						keys = append(keys, k)
-					}
-					sort.Strings(keys)
-
-					for _, name := range keys {
-						absPath := skill.Scripts[name]
-						cmd := inferExecutionCommand(name, absPath)
-						promptParts = append(promptParts, fmt.Sprintf("- Script: \"%s\"", name))
-						promptParts = append(promptParts, fmt.Sprintf("  Exec: `%s`", cmd))
-					}
-				}
-				promptParts = append(promptParts, "--- END RESOURCES ---")
-			}
-
-			promptParts = append(promptParts, "") // Spacing between skills
 			result.SkillsLoaded = append(result.SkillsLoaded, skill.Name)
 		}
 	}
 
-	// =======================================================
-	// PART 4: [PLUGINS] - Tool Hints
-	// =======================================================
-	if len(agent.Plugins) > 0 {
-		promptParts = append(promptParts, "### ACTIVATED PLUGINS (CLI TOOLS) ###")
-		promptParts = append(promptParts, "You have access to these external plugins. Invoke them using <tool_call> if in Coder mode, or execute blocks in Agent mode.")
-		for _, plugin := range agent.Plugins {
-			promptParts = append(promptParts, fmt.Sprintf("- %s", plugin))
+	// 4. Consolidated Plugins
+	if len(uniquePlugins) > 0 {
+		promptParts = append(promptParts, "\n### AVAILABLE TOOLS (PLUGINS) ###")
+		for p := range uniquePlugins {
+			promptParts = append(promptParts, fmt.Sprintf("- %s", p))
 		}
-		promptParts = append(promptParts, "")
 	}
 
-	// =======================================================
-	// PART 5: SYSTEM ANCHOR
-	// =======================================================
-	promptParts = append(promptParts, "### FINAL REMINDER ###")
-	promptParts = append(promptParts, fmt.Sprintf("You are %s. Act accordingly.", agent.Name))
-
-	if len(result.SkillsLoaded) > 0 {
-		promptParts = append(promptParts, "Integrate the guidelines from all loaded skills into your reasoning.")
-	}
-
-	promptParts = append(promptParts, "If a user request requires specific knowledge listed in 'SKILL RESOURCES', use your tools to read those files FIRST.")
+	promptParts = append(promptParts, "\n### SYSTEM INSTRUCTION ###")
+	promptParts = append(promptParts, "Synthesize the perspectives of all active agents to answer the user.")
 
 	result.FullPrompt = strings.Join(promptParts, "\n")
 	return result, nil
+}
+
+// BuildSystemPrompt legacy wrapper for single agent
+func (b *Builder) BuildSystemPrompt(agentName string) (*ComposedPrompt, error) {
+	agent, err := b.loader.GetAgent(agentName)
+	if err != nil {
+		return nil, err
+	}
+	return b.BuildMultiAgentPrompt([]*Agent{agent})
+}
+
+// Helper to reuse resource appending logic
+func (b *Builder) appendSkillResources(parts *[]string, skill *Skill) {
+	hasSubskills := len(skill.Subskills) > 0
+	hasScripts := len(skill.Scripts) > 0
+
+	if hasSubskills || hasScripts {
+		*parts = append(*parts, "")
+		*parts = append(*parts, "--- 🛠️ SKILL RESOURCES (AVAILABLE ON DISK) ---")
+		*parts = append(*parts, "You have access to the following resources within this skill package.")
+		*parts = append(*parts, "DO NOT HALLUCINATE CONTENT. If you need details from these files, use your 'read' or 'exec' tools on the PATHS provided below.")
+
+		if hasSubskills {
+			*parts = append(*parts, "\n[KNOWLEDGE BASE (Markdown Documents)]:")
+
+			// Sort for deterministic prompt
+			var keys []string
+			for k := range skill.Subskills {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+
+			for _, name := range keys {
+				absPath := skill.Subskills[name]
+				*parts = append(*parts, fmt.Sprintf("- File: \"%s\"", name))
+				*parts = append(*parts, fmt.Sprintf("  Path: \"%s\"", absPath))
+			}
+		}
+
+		if hasScripts {
+			*parts = append(*parts, "\n[EXECUTABLE SCRIPTS]:")
+			*parts = append(*parts, "Use the command provided below to run these specialized scripts when needed.")
+
+			// Sort keys
+			var keys []string
+			for k := range skill.Scripts {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+
+			for _, name := range keys {
+				absPath := skill.Scripts[name]
+				cmd := inferExecutionCommand(name, absPath)
+				*parts = append(*parts, fmt.Sprintf("- Script: \"%s\"", name))
+				*parts = append(*parts, fmt.Sprintf("  Exec: `%s`", cmd))
+			}
+		}
+		*parts = append(*parts, "--- END RESOURCES ---")
+	}
 }
 
 // ValidateAgent checks if an agent and its linked skills are valid/exist
