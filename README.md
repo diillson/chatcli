@@ -103,7 +103,7 @@ O ChatCLI foi projetado para ser global. A interface do usuário, incluindo menu
 
 ### Pré-requisitos
 
-- **Go (versão 1.23+)**: [Disponível em golang.org](https://golang.org/dl/).
+- **Go (versão 1.25+)**: [Disponível em golang.org](https://golang.org/dl/).
 
 ### 1. Binários Pré-compilados (Recomendado)
 
@@ -943,9 +943,12 @@ description: "Princípios de Clean Code"
 | Comando | Descrição |
 |---------|------------|
 | `/agent list` | Lista todos os agentes disponíveis |
+| `/agent status` | Lista apenas os agentes anexados (resumido) |
 | `/agent load <nome>` | Carrega um agente específico |
+| `/agent attach <nome>` | Anexa um agente adicional à sessão |
+| `/agent detach <nome>` | Remove um agente anexado |
 | `/agent skills` | Lista todas as skills disponíveis |
-| `/agent show` | Mostra o agente ativo e seu prompt |
+| `/agent show [--full]` | Mostra o agente ativo (use --full para exibir tudo) |
 | `/agent off` | Desativa o agente atual |
 
 ### Exemplo Prático
