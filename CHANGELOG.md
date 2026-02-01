@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.49.0](https://github.com/diillson/chatcli/compare/v1.48.2...v1.49.0) (2026-02-01)
+
+
+### Features
+
+* **cli:** remove outdated architecture and feature documentation ([#504](https://github.com/diillson/chatcli/issues/504)) ([#505](https://github.com/diillson/chatcli/issues/505)) ([8359aec](https://github.com/diillson/chatcli/commit/8359aecc52f03213a39c54aab409cee321995716))
+
 ## [1.48.2](https://github.com/diillson/chatcli/compare/v1.48.1...v1.48.2) (2026-01-28)
 
 
