@@ -6,6 +6,7 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/claudeai"
@@ -113,7 +115,12 @@ func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff
 
 // configurarOpenAIClient configura o cliente OpenAI se a variável de ambiente OPENAI_API_KEY estiver definida.
 func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff time.Duration) {
-	apiKey := config.Global.GetString("OPENAI_API_KEY")
+	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderOpenAI, m.logger)
+	if err != nil {
+		m.logger.Warn("OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível", zap.Error(err))
+		return
+	}
+	apiKey := resolved.APIKey
 	if apiKey != "" {
 		m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
@@ -186,7 +193,12 @@ func (m *LLMManagerImpl) configurarStackSpotClient(maxRetries int, initialBackof
 
 // configurarClaudeAIClient configura o cliente ClaudeAI
 func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff time.Duration) {
-	apiKey := config.Global.GetString("CLAUDEAI_API_KEY")
+	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderAnthropic, m.logger)
+	if err != nil {
+		m.logger.Warn("CLAUDEAI_API_KEY não definida, o provedor CLAUDEAI não estará disponível", zap.Error(err))
+		return
+	}
+	apiKey := resolved.APIKey
 	if apiKey != "" {
 		m.clients["CLAUDEAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {

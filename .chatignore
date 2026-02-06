@@ -1,4 +1,4 @@
-# Ignorar arquivos de teste do Go
+# Ignorar arquivos de teste do G
 *_test.go
 
 # Ignorar diretórios de documentação e testes e2e
@@ -10,12 +10,13 @@ plugins-examples/
 i18n/
 tools/
 version/
+.agent/
+utils/
+pkg/
 
 # Ignorar arquivos de configuração específicos
-CHANGELOG.md
+*.md
 LICENSE
-README.md
-README_EN.md
 .gitignore
 Makefile
 .chatignore

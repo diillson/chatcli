@@ -74,10 +74,26 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 
 	messages, systemStr := c.buildMessagesAndSystem(prompt, history)
 
+	if strings.HasPrefix(c.apiKey, "oauth:") {
+		systemStr = "You are Claude Code, Anthropic's official CLI for Claude.\n" + systemStr
+	}
+
 	reqBody := map[string]interface{}{
 		"model":      c.model,
 		"max_tokens": effectiveMaxTokens,
 		"messages":   messages,
+	}
+
+	if strings.HasPrefix(c.apiKey, "oauth:") {
+		systemStr = "You are Claude Code, Anthropic's official CLI for Claude.\n" + systemStr
+	}
+
+	if strings.HasPrefix(c.apiKey, "oauth:") {
+		systemStr = "You are Claude Code, Anthropic's official CLI for Claude.\n" + systemStr
+	}
+
+	if strings.HasPrefix(c.apiKey, "oauth:") {
+		systemStr = "You are Claude Code, Anthropic's official CLI for Claude.\n" + systemStr
 	}
 
 	if strings.TrimSpace(systemStr) != "" {
@@ -99,7 +115,18 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		enable1mtokens := os.Getenv("CLAUDEAI_1MTOKENS_SONNET") == "true"
 
 		req.Header.Add("Content-Type", "application/json")
-		req.Header.Add("x-api-key", c.apiKey)
+		if strings.HasPrefix(c.apiKey, "oauth:") {
+			req.Header.Add("Authorization", "Bearer "+strings.TrimPrefix(c.apiKey, "oauth:"))
+			req.Header.Add("anthropic-beta", "oauth-2025-04-20")
+			req.Header.Set("User-Agent", "claude-code")
+			req.Header.Add("anthropic-client", "claude-code")
+		} else if strings.HasPrefix(c.apiKey, "token:") {
+			req.Header.Add("Authorization", "Bearer "+strings.TrimPrefix(c.apiKey, "token:"))
+		} else if strings.HasPrefix(c.apiKey, "apikey:") {
+			req.Header.Add("x-api-key", strings.TrimPrefix(c.apiKey, "apikey:"))
+		} else {
+			req.Header.Add("x-api-key", c.apiKey)
+		}
 		req.Header.Add("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
 		if enable1mtokens && isClaudeSonnet(c.model) {
 			req.Header.Add("anthropic-beta", "context-1m-2025-08-07")
