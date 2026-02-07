@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.51.1](https://github.com/diillson/chatcli/compare/v1.51.0...v1.51.1) (2026-02-07)
+
+
+### Bug Fixes
+
+* **coder:** clean JSON examples ([#523](https://github.com/diillson/chatcli/issues/523)) ([#524](https://github.com/diillson/chatcli/issues/524)) ([c78bd23](https://github.com/diillson/chatcli/commit/c78bd23e240804944e9e2dcca59946b0edf34782))
+
 ## [1.51.0](https://github.com/diillson/chatcli/compare/v1.50.3...v1.51.0) (2026-02-07)
 
 
