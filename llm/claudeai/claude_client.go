@@ -42,6 +42,7 @@ type ClaudeClient struct {
 const (
 	oauthUserAgent         = "claude-cli/2.1.2 (external, cli)"
 	oauthAnthropicBeta     = "oauth-2025-04-20,interleaved-thinking-2025-05-14,claude-code-20250219,fine-grained-tool-streaming-2025-05-14"
+	oauthSonnet1MBeta      = "context-1m-2025-08-07"
 	oauthBaseSystemPrompt  = "You are Claude Code, Anthropic's official CLI for Claude."
 	oauthTitleModel        = "claude-haiku-4-5"
 	oauthTitleMaxTokens    = 32000
@@ -183,6 +184,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		if err != nil {
 			return "", fmt.Errorf("erro ao criar a requisição: %w", err)
 		}
+		req = req.WithContext(context.WithValue(req.Context(), oauthModelKey{}, c.model))
 
 		req.Header.Add("Content-Type", oauthContentType)
 
@@ -224,12 +226,6 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	return responseText, nil
 }
 
-// helper beta 1m tokens sonnet model
-func isClaudeSonnet(model string) bool {
-	var claudeSonnetRe = regexp.MustCompile(`^claude-.*sonnet.*$`)
-	return claudeSonnetRe.MatchString(model)
-}
-
 func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 	defer func() { _ = resp.Body.Close() }()
 
@@ -268,6 +264,12 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	return responseText, nil
+}
+
+// helper beta 1m tokens sonnet model
+func isClaudeSonnet(model string) bool {
+	var claudeSonnetRe = regexp.MustCompile(`^claude-.*sonnet.*$`)
+	return claudeSonnetRe.MatchString(model)
 }
 
 func (c *ClaudeClient) processStreamResponse(resp *http.Response) (string, error) {
@@ -440,6 +442,7 @@ func (c *ClaudeClient) sendOAuthTitleRequest(ctx context.Context, userText strin
 	if err != nil {
 		return err
 	}
+	req = req.WithContext(context.WithValue(req.Context(), oauthModelKey{}, oauthTitleModel))
 	req.Header.Add("Content-Type", oauthContentType)
 	applyOAuthHeaders(req, c.apiKey)
 
@@ -466,10 +469,18 @@ func applyOAuthHeaders(req *http.Request, apiKey string) {
 	req.Header.Set("Accept-Encoding", oauthAcceptEncoding)
 	req.Header.Set("Connection", oauthConnectionHeader)
 	req.Header.Set("User-Agent", oauthUserAgent)
-	req.Header.Set("anthropic-beta", oauthAnthropicBeta)
+	betas := oauthAnthropicBeta
+	if os.Getenv("ANTHROPIC_1MTOKENS_SONNET") == "true" {
+		if m, ok := req.Context().Value(oauthModelKey{}).(string); ok && isClaudeSonnet(m) {
+			betas = betas + "," + oauthSonnet1MBeta
+		}
+	}
+	req.Header.Set("anthropic-beta", betas)
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("Authorization", "Bearer "+strings.TrimPrefix(apiKey, "oauth:"))
 }
+
+type oauthModelKey struct{}
 
 func withBetaQuery(baseURL string) string {
 	if strings.Contains(baseURL, "?") {
