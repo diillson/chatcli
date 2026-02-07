@@ -42,6 +42,10 @@ func LoadStore(logger *zap.Logger) *AuthProfileStore {
 }
 
 func loadStoreUnlocked(logger *zap.Logger) *AuthProfileStore {
+	if cachedStore != nil {
+		return cachedStore
+	}
+
 	storePath := DefaultStorePath()
 
 	data, err := os.ReadFile(storePath)
