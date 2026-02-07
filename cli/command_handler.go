@@ -7,6 +7,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 )
@@ -78,6 +80,9 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return false
 	case strings.HasPrefix(userInput, "/context"):
 		ch.handleContextCommand(userInput)
+		return false
+	case strings.HasPrefix(userInput, "/auth"):
+		ch.handleAuthCommand(userInput)
 		return false
 	case strings.HasPrefix(userInput, "/plugin"):
 		ch.handlePluginCommand(userInput)
@@ -154,6 +159,76 @@ func (ch *CommandHandler) handleSessionCommand(userInput string) {
 	default:
 		// CORREÇÃO: Usar Println com i18n.T
 		fmt.Println(i18n.T("session.unknown_command", command))
+	}
+}
+
+func (ch *CommandHandler) handleAuthCommand(userInput string) {
+	args := strings.Fields(userInput)
+	if len(args) < 2 {
+		fmt.Println("Usage: /auth status | login <anthropic|openai-codex> | logout <anthropic|openai-codex>")
+		return
+	}
+	sub := strings.ToLower(args[1])
+	switch sub {
+	case "status":
+		fmt.Println(auth.FormatAuthStatus(ch.cli.logger))
+	case "login":
+		if len(args) < 3 {
+			fmt.Println("Use: /auth login anthropic | openai-codex")
+			return
+		}
+		prov := strings.ToLower(args[2])
+		ctx := context.Background()
+		switch prov {
+		case "anthropic", "claude", "claudeai":
+			id, err := auth.LoginAnthropicOAuth(ctx, ch.cli.logger)
+			if err != nil {
+				fmt.Println("Login failed:", err)
+				return
+			}
+			fmt.Println("Logged in (Anthropic) profile:", id)
+			ch.cli.manager.RefreshProviders()
+			return
+		case "openai-codex", "codex":
+			id, err := auth.LoginOpenAICodexOAuth(ctx, ch.cli.logger)
+			if err != nil {
+				fmt.Println("Login failed:", err)
+				return
+			}
+			fmt.Println("Logged in (OpenAI Codex) profile:", id)
+			ch.cli.manager.RefreshProviders()
+			return
+		default:
+			fmt.Println("Unknown provider. Use: anthropic | openai-codex")
+			return
+		}
+	case "logout":
+		if len(args) < 3 {
+			fmt.Println("Use: /auth logout anthropic | openai-codex")
+			return
+		}
+		prov := strings.ToLower(args[2])
+		ctx := context.Background()
+		_ = ctx // keep for symmetry
+		var pid auth.ProviderID
+		switch prov {
+		case "anthropic", "claude", "claudeai":
+			pid = auth.ProviderAnthropic
+		case "openai-codex", "codex":
+			pid = auth.ProviderOpenAICodex
+		default:
+			fmt.Println("Unknown provider. Use: anthropic | openai-codex")
+			return
+		}
+		if err := auth.Logout(pid, ch.cli.logger); err != nil {
+			fmt.Println("Logout failed:", err)
+			return
+		}
+		fmt.Println("Logout ok")
+		return
+	default:
+		fmt.Println("Unknown subcommand. Use: status | login | logout")
+		return
 	}
 }
 

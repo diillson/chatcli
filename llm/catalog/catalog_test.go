@@ -15,8 +15,8 @@ func TestResolve(t *testing.T) {
 		shouldFind bool
 	}{
 		{"Exact Match OpenAI", ProviderOpenAI, "gpt-4o-mini", "gpt-4o-mini", true},
-		{"Alias Match ClaudeAI", ProviderClaudeAI, "claude-3-5-sonnet", "claude-3-5-sonnet-20241022", true},
-		{"Prefix Match ClaudeAI", ProviderClaudeAI, "claude-3-5-sonnet-20241022-preview", "claude-3-5-sonnet-20241022", true},
+		{"Alias Match ClaudeAI", ProviderClaudeAI, "claude-3-5-sonnet", "claude-sonnet-3-5-20241022", true},
+		{"Prefix Match ClaudeAI", ProviderClaudeAI, "claude-3-5-sonnet-20241022-preview", "claude-sonnet-3-5-20241022", true},
 		{"Case Insensitive", ProviderOpenAI, "GPT-4O", "gpt-4o", true},
 		{"Gemini Flash Lite", ProviderGoogleAI, "gemini-2.0-flash-lite", "gemini-2.0-flash-lite", true},
 		{"GPT-5 Alias", ProviderOpenAI, "gpt-5-mini", "gpt-5", true},

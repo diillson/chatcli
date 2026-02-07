@@ -18,8 +18,11 @@ const (
 	OpenAIAPIURL             = "https://api.openai.com/v1/chat/completions"
 	OpenAIResponsesAPIURL    = "https://api.openai.com/v1/responses"
 
+	// OAuth (ChatGPT plan) endpoint — used when authenticated via OAuth instead of API key
+	OpenAIOAuthResponsesURL = "https://chatgpt.com/backend-api/codex/responses"
+
 	// Valores padrão para ClaudeAI
-	DefaultClaudeAIModel      = "claude-3-5-sonnet-20241022"
+	DefaultClaudeAIModel      = "claude-sonnet-4-5"
 	ClaudeAIAPIURL            = "https://api.anthropic.com/v1/messages"
 	ClaudeAIAPIVersionDefault = "2023-06-01" // Versão padrão da APIClaudeAI
 
