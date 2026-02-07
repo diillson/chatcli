@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.51.0](https://github.com/diillson/chatcli/compare/v1.50.3...v1.51.0) (2026-02-07)
+
+
+### Features
+
+* **coder:** production-ready [@coder](https://github.com/coder) and docs ([#520](https://github.com/diillson/chatcli/issues/520)) ([#521](https://github.com/diillson/chatcli/issues/521)) ([a5e7b69](https://github.com/diillson/chatcli/commit/a5e7b69e1db37ca462ac505e1791d4f9b4e2f1f6))
+
 ## [1.50.3](https://github.com/diillson/chatcli/compare/v1.50.2...v1.50.3) (2026-02-07)
 
 
