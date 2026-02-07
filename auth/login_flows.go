@@ -4,10 +4,14 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -21,12 +25,12 @@ const (
 	AnthropicScopes        = "org:create_api_key user:profile user:inference"
 
 	// OpenAI Codex OAuth
-	OpenAICodexClientID = "013696bc-5381-4baa-809e-70df20e4974e"
+	OpenAICodexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	OpenAIAuthURL       = "https://auth.openai.com/oauth/authorize"
 	OpenAITokenURL      = "https://auth.openai.com/oauth/token"
-	OpenAIRedirectURI   = "http://127.0.0.1:1455/auth/callback"
+	OpenAIRedirectURI   = "http://localhost:1455/auth/callback"
 	OpenAIScopes        = "openid profile email offline_access"
-	OpenAIAudience      = "https://api.openai.com/v1"
+	OpenAICallbackPort  = "1455"
 )
 
 func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID string, err error) {
@@ -104,35 +108,77 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 	q.Set("response_type", "code")
 	q.Set("redirect_uri", OpenAIRedirectURI)
 	q.Set("scope", OpenAIScopes)
-	q.Set("audience", OpenAIAudience)
 	q.Set("code_challenge", pkce.Challenge)
 	q.Set("code_challenge_method", "S256")
 	q.Set("state", state)
+	q.Set("id_token_add_organizations", "true")
+	q.Set("codex_cli_simplified_flow", "true")
 	authURL := OpenAIAuthURL + "?" + q.Encode()
 
-	fmt.Println("\nAUTH [OpenAI Codex] Open this URL in your browser, then paste the redirect url here:")
-	fmt.Println(authURL)
+	// Start local HTTP server to capture the OAuth callback
+	codeCh := make(chan string, 1)
+	errCh := make(chan error, 1)
 
-	cmd := exec.Command("stty", "sane")
-	cmd.Stdin = os.Stdin
-	_ = cmd.Run()
-
-	var redirect string
-	fmt.Print("> redirect url: ")
-	//_, _ = fmt.Scan(&redirect)
-	reader := bufio.NewReader(os.Stdin)
-	redirect, _ = reader.ReadString('\n')
-	redirect = strings.TrimSpace(redirect)
-	if redirect == "" {
-		return "", fmt.Errorf("redirect url is required")
-	}
-	u, err := url.Parse(redirect)
+	listener, err := net.Listen("tcp", "localhost:"+OpenAICallbackPort)
 	if err != nil {
-		return "", fmt.Errorf("bad redirect url: %w", err)
+		return "", fmt.Errorf("failed to start local callback server on port %s: %w", OpenAICallbackPort, err)
 	}
-	code := u.Query().Get("code")
-	if strings.TrimSpace(code) == "" {
-		return "", fmt.Errorf("code not found in redirect url")
+
+	srv := &http.Server{
+		ReadHeaderTimeout: 30 * time.Second,
+	}
+	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth/callback" {
+			http.NotFound(w, r)
+			return
+		}
+		code := r.URL.Query().Get("code")
+		if code == "" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, "<html><body><h2>Authentication failed</h2><p>No authorization code received. You can close this tab.</p></body></html>")
+			errCh <- fmt.Errorf("no code in callback")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, "<html><body><h2>Authentication successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>")
+		codeCh <- code
+	})
+
+	go func() {
+		if serveErr := srv.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
+			errCh <- serveErr
+		}
+	}()
+
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+
+	// Open browser automatically
+	fmt.Println("\nAUTH [OpenAI Codex] Opening browser for authentication...")
+	if openErr := openBrowser(authURL); openErr != nil {
+		fmt.Println("Could not open browser automatically. Open this URL manually:")
+		fmt.Println(authURL)
+	} else {
+		fmt.Println("Browser opened. Waiting for authentication callback...")
+		fmt.Println("If the browser did not open, copy and paste this URL:")
+		fmt.Println(authURL)
+	}
+
+	fmt.Println("\nWaiting for callback (press Ctrl+C to cancel)...")
+
+	// Wait for callback or context cancellation
+	var code string
+	select {
+	case code = <-codeCh:
+		// got it
+	case cbErr := <-errCh:
+		return "", fmt.Errorf("callback error: %w", cbErr)
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
 
 	tr, err := exchangeOAuthToken(ctx, logger, OpenAITokenURL, map[string]any{
@@ -160,6 +206,20 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 		return "", err
 	}
 	return profileID, nil
+}
+
+// openBrowser opens a URL in the default browser.
+func openBrowser(rawURL string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", rawURL).Start()
+	case "linux":
+		return exec.Command("xdg-open", rawURL).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL).Start()
+	default:
+		return fmt.Errorf("unsupported platform")
+	}
 }
 
 func FormatAuthStatus(logger *zap.Logger) string {

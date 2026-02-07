@@ -90,7 +90,7 @@ func main() {
 		logger.Warn("Nenhum provedor LLM configurado via .env, dependendo de flags para funcionar.")
 	} else if len(availableProviders) == 0 {
 		fmt.Println(i18n.T("main.error_no_provider"))
-		os.Exit(1)
+		fmt.Println("Tip: use /auth login anthropic | openai-codex to authenticate via OAuth.")
 	}
 
 	chatCLI, err := cli.NewChatCLI(llmManager, logger)

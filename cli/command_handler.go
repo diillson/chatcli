@@ -187,6 +187,7 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 				return
 			}
 			fmt.Println("Logged in (Anthropic) profile:", id)
+			ch.cli.manager.RefreshProviders()
 			return
 		case "openai-codex", "codex":
 			id, err := auth.LoginOpenAICodexOAuth(ctx, ch.cli.logger)
@@ -195,6 +196,7 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 				return
 			}
 			fmt.Println("Logged in (OpenAI Codex) profile:", id)
+			ch.cli.manager.RefreshProviders()
 			return
 		default:
 			fmt.Println("Unknown provider. Use: anthropic | openai-codex")

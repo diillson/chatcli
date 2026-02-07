@@ -9,14 +9,27 @@ import (
 	"go.uber.org/zap"
 )
 
-// ResolveAuth resolves a chave a usar (um a.pikey OU access token) para um provedor.
+// isProviderMatch returns true if the credential's provider is a valid match
+// for the requested provider. This handles the case where OpenAI OAuth tokens
+// are stored under ProviderOpenAICodex but should be found when resolving ProviderOpenAI.
+func isProviderMatch(credProvider, requestedProvider ProviderID) bool {
+	if credProvider == requestedProvider {
+		return true
+	}
+	if requestedProvider == ProviderOpenAI && credProvider == ProviderOpenAICodex {
+		return true
+	}
+	return false
+}
+
+// ResolveAuth resolves a chave a usar (um apikey OU access token) para um provedor.
 // Ordem:
 // 1) auth-profiles store (first match for provider)
 // 2) env vars
 //
 // Nota: para manter backward compatibility com seus clients atuais,
 // retornamos uma string "oauth:eaxxxx" quando for token OAuth,
-// e uma string "api_key:exxxxx" quando for API key.
+// e uma string "apikey:exxxxx" quando for API key.
 func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (*ResolvedAuth, error) {
 	// Best-effort sync external CLI creds on load
 	// (sync disabled: cli_sync.go fix pending)
@@ -26,7 +39,7 @@ func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (
 		if c == nil {
 			continue
 		}
-		if c.Provider != provider {
+		if !isProviderMatch(c.Provider, provider) {
 			continue
 		}
 		if c.CredType == CredentialOAuth {
@@ -77,20 +90,14 @@ func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (
 	// env fallback
 	switch provider {
 	case ProviderAnthropic:
-		// OAuth token (compat: ANTHROPIC_OAUTH_TOKEN, ANTHROPIC_OAUTH_TOKEN)
 		if v := strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_TOKEN")); v != "" {
 			return &ResolvedAuth{APIKey: "oauth:" + v, Source: "env:ANTHROPIC_OAUTH_TOKEN", Mode: AuthModeOAuth, Provider: provider}, nil
 		}
-		if v := strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_TOKEN")); v != "" {
-			return &ResolvedAuth{APIKey: "oauth:" + v, Source: "env:ANTHROPIC_OAUTH_TOKEN", Mode: AuthModeOAuth, Provider: provider}, nil
-		}
-
-		// API key (compat: ANTHROPIC_API_KEY, ANTHROPIC_API_KEY)
 		if v := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); v != "" {
-			return &ResolvedAuth{APIKey: "apikey:" + v, Source: "ANTHROPIC_API_KEY", Mode: AuthModeAPIKey, Provider: provider}, nil
+			return &ResolvedAuth{APIKey: "apikey:" + v, Source: "env:ANTHROPIC_API_KEY", Mode: AuthModeAPIKey, Provider: provider}, nil
 		}
 
-	case ProviderOpenAI:
+	case ProviderOpenAI, ProviderOpenAICodex:
 		if v := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); v != "" {
 			return &ResolvedAuth{APIKey: "apikey:" + v, Source: "env:OPENAI_API_KEY", Mode: AuthModeAPIKey, Provider: provider}, nil
 		}

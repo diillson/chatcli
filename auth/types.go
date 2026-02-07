@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -144,6 +145,17 @@ func FormatExpiry(expiresMs int64) string {
 		return "expires in 1h"
 	}
 	return fmt.Sprintf("expires in %dm", int(remaining.Minutes()))
+}
+
+// StripAuthPrefix removes the "oauth:", "token:", or "apikey:" prefix from a
+// resolved API key, returning the raw credential suitable for HTTP headers.
+func StripAuthPrefix(key string) string {
+	for _, prefix := range []string{"oauth:", "token:", "apikey:"} {
+		if strings.HasPrefix(key, prefix) {
+			return strings.TrimPrefix(key, prefix)
+		}
+	}
+	return key
 }
 
 // Stringer para debug.

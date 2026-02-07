@@ -318,8 +318,18 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 
 	client, err := manager.GetClient(cli.Provider, cli.Model)
 	if err != nil {
-		logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
-		return nil, err
+		// If the configured provider is not available, try to pick any available one
+		available := manager.GetAvailableProviders()
+		if len(available) > 0 {
+			cli.Provider = available[0]
+			cli.Model = ""
+			client, err = manager.GetClient(cli.Provider, cli.Model)
+		}
+		if err != nil {
+			// No provider available at all — start in auth-only mode
+			logger.Warn("Nenhum provedor LLM disponível. Use /auth login para autenticar.", zap.Error(err))
+			client = nil
+		}
 	}
 
 	sessionMgr, err := NewSessionManager(logger)
@@ -383,6 +393,11 @@ func (cli *ChatCLI) executor(in string) {
 		if cli.commandHandler.HandleCommand(in) {
 			panic(errExitRequest)
 		}
+		return
+	}
+
+	if cli.Client == nil {
+		fmt.Println("No LLM provider configured. Use /auth login anthropic | openai-codex to authenticate, then /switch to select a provider.")
 		return
 	}
 
@@ -804,9 +819,11 @@ func (cli *ChatCLI) cleanup() {
 	if err := cli.historyManager.AppendAndRotateHistory(cli.newCommandsInSession); err != nil {
 		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
 	}
-	if assistantClient, ok := cli.Client.(*openai_assistant.OpenAIAssistantClient); ok {
-		if err := assistantClient.Cleanup(); err != nil {
-			cli.logger.Error("Erro na limpeza do OpenAI Assistant", zap.Error(err))
+	if cli.Client != nil {
+		if assistantClient, ok := cli.Client.(*openai_assistant.OpenAIAssistantClient); ok {
+			if err := assistantClient.Cleanup(); err != nil {
+				cli.logger.Error("Erro na limpeza do OpenAI Assistant", zap.Error(err))
+			}
 		}
 	}
 	if cli.pluginManager != nil {
@@ -2157,6 +2174,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getAgentSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/auth") {
+		return cli.getAuthSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -2273,6 +2294,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/context", Description: "Gerencia contextos persistentes (create, attach, detach, list, show, etc)"},
 		{Text: "/plugin", Description: "Gerencia plugins (install, list, show, etc.)"},
 		{Text: "/clear", Description: "Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais."},
+		{Text: "/auth", Description: "Gerencia credenciais OAuth (status, login, logout)"},
 	}
 }
 
@@ -2496,7 +2518,11 @@ func (cli *ChatCLI) showConfig() {
 	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_current_provider"), ColorLime))
 	printItem(i18n.T("cli.config.key_provider_runtime"), cli.Provider)
 	printItem(i18n.T("cli.config.key_model_runtime"), cli.Model)
-	printItem(i18n.T("cli.config.key_model_name_client"), cli.Client.GetModelName())
+	if cli.Client != nil {
+		printItem(i18n.T("cli.config.key_model_name_client"), cli.Client.GetModelName())
+	} else {
+		printItem(i18n.T("cli.config.key_model_name_client"), "(no provider)")
+	}
 	printItem(i18n.T("cli.config.key_preferred_api"), string(catalog.GetPreferredAPI(cli.Provider, cli.Model)))
 	printItem(i18n.T("cli.config.key_effective_max_tokens"), fmt.Sprintf("%d", cli.getMaxTokensForCurrentLLM()))
 
@@ -3111,6 +3137,44 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) >= 2 && (args[1] == "show") {
 		return []prompt.Suggest{
 			{Text: "--full", Description: "Mostra detalhes completos do agente"},
+		}
+	}
+
+	return []prompt.Suggest{}
+}
+
+func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+
+	// Just typed "/auth" without space
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{
+			{Text: "/auth", Description: "Gerencia credenciais OAuth (status, login, logout)"},
+		}
+	}
+
+	// "/auth " — suggest subcommands
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		suggestions := []prompt.Suggest{
+			{Text: "status", Description: "Exibir status de autenticação de todos os provedores"},
+			{Text: "login", Description: "Autenticar com um provedor (anthropic ou openai-codex)"},
+			{Text: "logout", Description: "Remover credenciais de um provedor (anthropic ou openai-codex)"},
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	// "/auth login " or "/auth logout " — suggest providers
+	if len(args) >= 2 {
+		sub := strings.ToLower(args[1])
+		if sub == "login" || sub == "logout" {
+			if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+				suggestions := []prompt.Suggest{
+					{Text: "anthropic", Description: "Anthropic (Claude)"},
+					{Text: "openai-codex", Description: "OpenAI (GPT Plus / Codex)"},
+				}
+				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+			}
 		}
 	}
 

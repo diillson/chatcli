@@ -32,16 +32,16 @@ func RefreshOAuth(ctx context.Context, cred *AuthProfileCredential, logger *zap.
 	var clientID string
 	switch cred.Provider {
 	case ProviderAnthropic:
-		tokenURL = "https://console.anthropic.com/v1/oauth/token"
+		tokenURL = AnthropicTokenURL
 		clientID = cred.ClientID
 		if clientID == "" {
-			clientID = "AnthropicClientID" // best-effort default marker
+			clientID = AnthropicOAuthClientID
 		}
 	case ProviderOpenAICodex:
-		tokenURL = "https://auth.openai.com/oauth/token"
+		tokenURL = OpenAITokenURL
 		clientID = cred.ClientID
 		if clientID == "" {
-			clientID = "OpenAICodexClientID" // best-effort default marker
+			clientID = OpenAICodexClientID
 		}
 	default:
 		return nil, fmt.Errorf("unsupported oauth provider: %s", cred.Provider)

@@ -50,6 +50,7 @@ type LLMManager interface {
 	SetStackSpotAgentID(agentID string)
 	GetStackSpotRealm() string
 	GetStackSpotAgentID() string
+	RefreshProviders()
 }
 
 // LLMManagerImpl gerencia diferentes clientes LLM e o TokenManager
@@ -127,14 +128,17 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 				model = config.DefaultOpenAIModel
 			}
 
-			useResponses := config.Global.GetBool("OPENAI_USE_RESPONSES", false)
+			// OAuth tokens always use the Responses API (ChatGPT backend only speaks Responses format)
+			isOAuth := strings.HasPrefix(apiKey, "oauth:")
+
+			useResponses := isOAuth || config.Global.GetBool("OPENAI_USE_RESPONSES", false)
 
 			if !useResponses && catalog.GetPreferredAPI(catalog.ProviderOpenAI, model) == catalog.APIResponses {
 				useResponses = true
 			}
 
 			if useResponses {
-				m.logger.Info("Usando OpenAI Responses API", zap.String("model", model))
+				m.logger.Info("Usando OpenAI Responses API", zap.String("model", model), zap.Bool("oauth", isOAuth))
 				return openai_responses.NewOpenAIResponsesClient(
 					apiKey, model, m.logger,
 					maxRetries,
@@ -381,4 +385,20 @@ func (m *LLMManagerImpl) GetStackSpotAgentID() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.stackspotAgentID
+}
+
+// RefreshProviders re-checks auth credentials and registers any providers
+// that became available (e.g. after an OAuth login at runtime).
+func (m *LLMManagerImpl) RefreshProviders() {
+	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
+	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
+
+	auth.InvalidateCache()
+
+	if _, ok := m.clients["OPENAI"]; !ok {
+		m.configurarOpenAIClient(maxRetries, initialBackoff)
+	}
+	if _, ok := m.clients["CLAUDEAI"]; !ok {
+		m.configurarClaudeAIClient(maxRetries, initialBackoff)
+	}
 }

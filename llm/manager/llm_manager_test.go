@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/openai"
@@ -18,9 +19,11 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 
 	keysToClear := []string{
 		"OPENAI_API_KEY", "CLIENT_ID", "CLIENT_KEY",
-		"ANTHROPIC_API_KEY", "GOOGLEAI_API_KEY", "XAI_API_KEY",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN",
+		"GOOGLEAI_API_KEY", "XAI_API_KEY",
 		"OLLAMA_ENABLED", "OLLAMA_BASE_URL",
 		"STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
+		"CHATCLI_AUTH_DIR",
 	}
 
 	for _, key := range keysToClear {
@@ -29,6 +32,11 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 		}
 		os.Unsetenv(key)
 	}
+
+	// Isolate auth store: point to empty temp dir so disk credentials don't leak
+	tmpDir := t.TempDir()
+	os.Setenv("CHATCLI_AUTH_DIR", tmpDir)
+	auth.InvalidateCache()
 
 	for key, value := range envs {
 		os.Setenv(key, value)
@@ -45,6 +53,7 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 		for key, value := range originalEnvs {
 			os.Setenv(key, value)
 		}
+		auth.InvalidateCache()
 		config.Global = config.New(logger)
 		config.Global.Load()
 	})
