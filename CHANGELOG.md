@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.50.0](https://github.com/diillson/chatcli/compare/v1.49.0...v1.50.0) (2026-02-07)
+
+
+### Features
+
+* **auth:** implement OAuth2 login flow for OpenAI Codex/GPT Plus with ChatGPT backend support ([#508](https://github.com/diillson/chatcli/issues/508)) ([#509](https://github.com/diillson/chatcli/issues/509)) ([599aee5](https://github.com/diillson/chatcli/commit/599aee5285f29f674e193c2f3e57edbd6fad5edb))
+
 ## [1.49.0](https://github.com/diillson/chatcli/compare/v1.48.2...v1.49.0) (2026-02-01)
 
 
