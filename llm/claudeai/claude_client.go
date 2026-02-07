@@ -458,9 +458,9 @@ func oauthTextBlock(text string) map[string]interface{} {
 	return map[string]interface{}{
 		"type": "text",
 		"text": text,
-		"cache_control": map[string]string{
-			"type": "ephemeral",
-		},
+		//"cache_control": map[string]string{
+		//	"type": "ephemeral",
+		//},
 	}
 }
 
