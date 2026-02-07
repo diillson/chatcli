@@ -108,3 +108,15 @@ func TestDanglingBackslashAfterFlag(t *testing.T) {
 	assert.Contains(t, result3, "go.test")
 	assert.NotContains(t, result3, "\\")
 }
+
+func TestParseToolArgsWithJSON_Object(t *testing.T) {
+	args, err := parseToolArgsWithJSON(`{"cmd":"read","args":{"file":"main.go"}}`)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"read", "--file", "main.go"}, args)
+}
+
+func TestParseToolArgsWithJSON_Array(t *testing.T) {
+	args, err := parseToolArgsWithJSON(`["read","--file","main.go"]`)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"read", "--file", "main.go"}, args)
+}
