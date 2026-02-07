@@ -29,13 +29,25 @@ A ordem de prioridade para as configurações é:
 | `HISTORY_FILE` | Caminho personalizado para o arquivo de histórico (suporta `~`, hoje ele cria o historico onde executou o chatcli).                               | `".chatcli_history"`       |
 | `CHATCLI_DOTENV`| Caminho personalizado para o seu arquivo `.env`.                                                                                                  | `".env"`                   |
 
+## Autenticação OAuth
+
+Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAuth** para OpenAI e Anthropic. Com o OAuth, você pode usar seu plano existente (ChatGPT Plus, Codex, Claude Pro) sem gerar API keys.
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_AUTH_DIR` | Diretório onde as credenciais OAuth são armazenadas. | `~/.chatcli/` |
+
+> Use `/auth login openai-codex` ou `/auth login anthropic` no modo interativo para iniciar o fluxo OAuth. Consulte a [documentação completa de OAuth](/docs/features/oauth-authentication/) para mais detalhes.
+
+---
+
 ## Configuração de Provedores
 
 ### OpenAI
 
 | Variável | Descrição                                                                        | Obrigatório? |
 | :--- |:---------------------------------------------------------------------------------| :--- |
-| `OPENAI_API_KEY` | Sua chave de API secreta da OpenAI.                                              | **Sim** |
+| `OPENAI_API_KEY` | Sua chave de API secreta da OpenAI. Alternativa: use `/auth login openai-codex` para OAuth. | **Sim*** |
 | `OPENAI_MODEL` | O modelo a ser usado. Ex: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`.                | Não |
 | `OPENAI_ASSISTANT_MODEL` | O modelo a ser usado especificamente para a API de Assistentes.                  | Não |
 | `OPENAI_USE_RESPONSES` | Define `true` para usar a API de `v1/responses` em vez de `v1/chat/completions`. | Não |
@@ -45,7 +57,7 @@ A ordem de prioridade para as configurações é:
 
 | Variável               | Descrição | Obrigatório? |
 |:-----------------------| :--- | :--- |
-| `ANTHROPIC_API_KEY`     | Sua chave de API secreta da Anthropic. | **Sim** |
+| `ANTHROPIC_API_KEY`     | Sua chave de API secreta da Anthropic. Alternativa: use `/auth login anthropic` para OAuth. | **Sim*** |
 | `ANTHROPIC_MODEL`       | O modelo a ser usado. Ex: `claude-3-5-sonnet-20240620`, `claude-3-opus-20240229`. | Não |
 | `ANTHROPIC_API_VERSION` | A versão da API da Anthropic a ser usada nos cabeçalhos. | Não |
 | `ANTHROPIC_MAX_TOKENS`  | Define o maximo de tokens a ser utilizados na sessão (depende do modelo)         | Não
@@ -87,6 +99,8 @@ A ordem de prioridade para as configurações é:
 | `CLIENT_KEY` | Credencial de chave de cliente da StackSpot. | **Sim** |
 | `STACKSPOT_REALM` | O `realm` (tenant) da sua organização na StackSpot. | **Sim** |
 | `STACKSPOT_AGENT_ID` | O ID do agente específico a ser utilizado. | **Sim** |
+
+> **\*** Para OpenAI e Anthropic, a chave de API é obrigatória apenas se você **não** utilizar autenticação OAuth (`/auth login`). Ambos os métodos podem coexistir.
 
 ---
 

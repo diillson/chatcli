@@ -12,6 +12,10 @@ Estes comandos controlam a aplicação e o fluxo da conversa.
 
 | Comando | Descrição |
 | --- | --- |
+| **/auth** | Gerencia autenticação OAuth com provedores de IA |
+| &nbsp; `status` | Mostra o status de autenticação de todos os provedores. |
+| &nbsp; `login <provedor>` | Inicia o fluxo OAuth (abre o navegador). Provedores: `openai-codex`, `anthropic`. |
+| &nbsp; `logout <provedor>` | Remove as credenciais OAuth do provedor especificado. |
 | **/agent** | Iniciar modo agente para executar tarefas |
 | **/clear** | Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais. |
 | **/coder** | Iniciar modo engenheiro (Criação e Edição de Código) |

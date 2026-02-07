@@ -12,7 +12,7 @@ Antes de começar, certifique-se de que você tem os seguintes requisitos instal
 1.  **Go (versão 1.25 ou superior)**: O ChatCLI é uma aplicação Go. Você precisará do Go para compilar e instalar a ferramenta.
     *   Para verificar sua versão, execute: `go version`
 2.  **Git**: O Go utiliza o Git para baixar dependências de repositórios públicos.
-3.  **Chave de API**: Você precisará de uma chave de API de pelo menos um provedor de LLM suportado (ex: OpenAI, Anthropic, Google, etc.).
+3.  **Chave de API ou conta OAuth**: Você precisará de uma chave de API de pelo menos um provedor de LLM suportado (ex: OpenAI, Anthropic, Google, etc.), **ou** uma conta com plano ativo (ChatGPT Plus/Codex, Claude Pro) para autenticação via OAuth.
 
 ---
 
@@ -61,6 +61,21 @@ OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ###### OPENAI_MODEL="gpt-4o"
 
 > **Nota:** Você só precisa configurar as chaves para os provedores que pretende usar. O ChatCLI saberá quais estão disponíveis com base nas chaves que encontrar.
+
+#### Alternativa: Autenticação via OAuth
+
+Se você possui um plano **ChatGPT Plus/Codex** ou **Claude Pro**, pode autenticar diretamente pelo terminal sem precisar de API keys:
+
+```bash
+# Inicie o ChatCLI (funciona sem credenciais)
+chatcli
+
+# Faça login via OAuth
+/auth login openai-codex    # Para OpenAI
+/auth login anthropic       # Para Anthropic
+```
+
+O navegador abrirá automaticamente. Após autorizar, o provedor estará disponível no `/switch`. Consulte a [documentação de OAuth](/docs/features/oauth-authentication/) para mais detalhes.
 
 --------
 
