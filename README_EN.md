@@ -37,6 +37,7 @@
 - [Multi-language Support (i18n)](#multi-language-support-i18n)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Authentication (OAuth)](#authentication-oauth)
 - [Usage and Commands](#usage-and-commands)
     - [Interactive Mode](#interactive-mode)
     - [Non-Interactive Mode (One-Shot)](#non-interactive-mode-one-shot)
@@ -240,6 +241,47 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
 
 --------
 
+## Authentication (OAuth)
+
+ChatCLI supports **two authentication methods** for providers that offer OAuth:
+
+1. **API Key (traditional)**: Set the environment variable (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) in your `.env` file.
+2. **OAuth (interactive login)**: Authenticate directly from the terminal using `/auth login`, no need to manually generate or paste keys.
+
+> OAuth is ideal for users on **ChatGPT Plus / Codex** (OpenAI) or **Claude Pro** (Anthropic) plans who don't want to manage API keys.
+
+### `/auth` Commands
+
+| Command | Description |
+|---------|-------------|
+| `/auth status` | Shows authentication status for all providers |
+| `/auth login openai-codex` | Starts the OAuth flow with OpenAI (opens browser automatically) |
+| `/auth login anthropic` | Starts the OAuth flow with Anthropic |
+| `/auth logout openai-codex` | Removes OpenAI OAuth credentials |
+| `/auth logout anthropic` | Removes Anthropic OAuth credentials |
+
+### How it Works
+
+1. Run `/auth login openai-codex` (or `anthropic`)
+2. Your browser opens automatically to the provider's login page
+3. After authorizing, the token is captured automatically via a local callback (port 1455)
+4. The provider appears immediately in `/switch` — no restart needed
+
+### Which Endpoint is Used (OpenAI)
+
+| Authentication Method | Endpoint Used |
+|-----------------------|---------------|
+| `OPENAI_API_KEY` (manual key) | `api.openai.com/v1/responses` or `/v1/chat/completions` |
+| `/auth login openai-codex` (OAuth) | `chatgpt.com/backend-api/codex/responses` |
+
+> ChatCLI automatically detects the credential type and routes to the correct endpoint.
+
+### Starting Without Credentials
+
+ChatCLI can be started **without any API keys or OAuth login** configured. In this case, the app opens normally and you can use `/auth login` to authenticate. After login, use `/switch` to select the provider.
+
+--------
+
 ## Usage and Commands
 
 │ Pro-Tip: Create a shell alias for quick access! Add  alias c='chatcli'  to your  .bashrc ,  .zshrc , or  config.fish .
@@ -284,13 +326,15 @@ Note: The same contextual features work within the  --prompt  text, such as  @fi
     -  /session save <name> ,  /session load <name> ,  /session list ,  /session delete <name> ,  /session new
 - Configuration and Status:
   -  /switch ,  /reload ,  /config  or  /status  (displays runtime settings, current provider, and model).
--General:
+- Authentication:
+  -  `/auth status` ,  `/auth login <provider>` ,  `/auth logout <provider>`
+- General:
   -  /help : Displays help information.
   -  /exit : To exit ChatCLI.
   -  /version  or  /v : Shows the version, commit hash, and build date.
   -  Ctrl+C  (once): Cancels the current operation.
   -  Ctrl+C  (twice) or  Ctrl+D : Exits the application.
-  - Context:
+- Context:
   -  @history ,  @git ,  @env ,  @file ,  @command .
 
 --------
