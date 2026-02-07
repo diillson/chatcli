@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.50.1](https://github.com/diillson/chatcli/compare/v1.50.0...v1.50.1) (2026-02-07)
+
+
+### Bug Fixes
+
+* docs(auth): update documentation for OAuth authentication support ([#511](https://github.com/diillson/chatcli/issues/511)) ([#512](https://github.com/diillson/chatcli/issues/512)) ([7a2e3d6](https://github.com/diillson/chatcli/commit/7a2e3d6090f3641c420d3c54aa76acc21a1fd476))
+
 ## [1.50.0](https://github.com/diillson/chatcli/compare/v1.49.0...v1.50.0) (2026-02-07)
 
 
