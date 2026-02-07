@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1653,7 +1654,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					break // Interrompe o lote
 				}
 
-				toolArgs, parseErr := splitToolArgsMultiline(normalizedArgsStr)
+				toolArgs, parseErr := parseToolArgsWithJSON(normalizedArgsStr)
 				var toolOutput string
 				var execErr error
 
@@ -2167,14 +2168,28 @@ func fixDanglingBackslashArgsForCoderTool(argLine string) (string, bool) {
 	// - patch: --search, --replace (replace é opcional, mas quando aparece precisa valor)
 	// - write: --content
 	needsValue := map[string]bool{
-		"--search":   true,
-		"--replace":  true,
-		"--content":  true,
-		"--file":     true,
-		"--cmd":      true,
-		"--dir":      true,
-		"--term":     true,
-		"--encoding": true,
+		"--search":        true,
+		"--replace":       true,
+		"--content":       true,
+		"--file":          true,
+		"--cmd":           true,
+		"--dir":           true,
+		"--term":          true,
+		"--encoding":      true,
+		"--diff":          true,
+		"--diff-encoding": true,
+		"--start":         true,
+		"--end":           true,
+		"--head":          true,
+		"--tail":          true,
+		"--max-bytes":     true,
+		"--context":       true,
+		"--max-results":   true,
+		"--glob":          true,
+		"--timeout":       true,
+		"--path":          true,
+		"--limit":         true,
+		"--pattern":       true,
 	}
 
 	isClearlyInvalidValue := func(v string) bool {
@@ -2313,6 +2328,188 @@ func splitToolArgsMultilineLenient(s string) ([]string, error) {
 
 	flush()
 	return args, nil
+}
+
+// parseToolArgsWithJSON aceita args no formato JSON (object/array) e
+// faz fallback para splitToolArgsMultiline no formato CLI tradicional.
+func parseToolArgsWithJSON(argLine string) ([]string, error) {
+	if args, ok, err := parseToolArgsMaybeJSON(argLine); ok {
+		return args, err
+	}
+	return splitToolArgsMultiline(argLine)
+}
+
+// parseToolArgsMaybeJSON tenta interpretar os args como JSON.
+// Retorna (args, true, nil) se parseou como JSON válido.
+// Retorna (nil, true, err) se parecia JSON mas falhou.
+// Retorna (nil, false, nil) se não parecia JSON.
+func parseToolArgsMaybeJSON(argLine string) ([]string, bool, error) {
+	trimmed := strings.TrimSpace(argLine)
+	if trimmed == "" {
+		return nil, false, nil
+	}
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return nil, false, nil
+	}
+
+	var payload any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return nil, true, err
+	}
+
+	switch v := payload.(type) {
+	case []any:
+		argv := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, true, fmt.Errorf("argv JSON deve conter apenas strings")
+			}
+			argv = append(argv, s)
+		}
+		return argv, true, nil
+	case map[string]any:
+		return buildArgvFromJSONMap(v)
+	default:
+		return nil, true, fmt.Errorf("JSON inválido para args")
+	}
+}
+
+func buildArgvFromJSONMap(m map[string]any) ([]string, bool, error) {
+	getString := func(key string) string {
+		if v, ok := m[key]; ok {
+			if s, ok := v.(string); ok {
+				return s
+			}
+		}
+		return ""
+	}
+
+	cmd := getString("cmd")
+	if cmd == "" {
+		if argvRaw, ok := m["argv"]; ok {
+			if argvSlice, ok := argvRaw.([]any); ok && len(argvSlice) > 0 {
+				if first, ok := argvSlice[0].(string); ok {
+					cmd = first
+				}
+			}
+		}
+	}
+
+	if argvRaw, ok := m["argv"]; ok {
+		if argvSlice, ok := argvRaw.([]any); ok && len(argvSlice) > 0 {
+			argv := make([]string, 0, len(argvSlice))
+			for _, item := range argvSlice {
+				s, ok := item.(string)
+				if !ok {
+					return nil, true, fmt.Errorf("argv JSON deve conter apenas strings")
+				}
+				argv = append(argv, s)
+			}
+			if cmd != "" && (len(argv) == 0 || argv[0] != cmd) {
+				argv = append([]string{cmd}, argv...)
+			}
+			return argv, true, nil
+		}
+	}
+
+	if cmd == "" {
+		return nil, true, fmt.Errorf("JSON args requer campo 'cmd' ou 'argv'")
+	}
+
+	argv := []string{cmd}
+	argsMap := map[string]any{}
+
+	if raw, ok := m["args"]; ok {
+		if mm, ok := raw.(map[string]any); ok {
+			for k, v := range mm {
+				argsMap[k] = v
+			}
+		}
+	}
+	if raw, ok := m["flags"]; ok {
+		if mm, ok := raw.(map[string]any); ok {
+			for k, v := range mm {
+				argsMap[k] = v
+			}
+		}
+	}
+
+	keys := make([]string, 0, len(argsMap))
+	for k := range argsMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		appendFlagValue(&argv, k, argsMap[k])
+	}
+
+	if posRaw, ok := m["positional"]; ok {
+		appendPositionals(&argv, posRaw)
+	}
+	if posRaw, ok := m["_"]; ok {
+		appendPositionals(&argv, posRaw)
+	}
+
+	return argv, true, nil
+}
+
+func normalizeFlagName(name string) string {
+	if strings.HasPrefix(name, "-") {
+		return name
+	}
+	return "--" + name
+}
+
+func appendPositionals(argv *[]string, raw any) {
+	if raw == nil {
+		return
+	}
+	switch v := raw.(type) {
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				*argv = append(*argv, s)
+			}
+		}
+	case []string:
+		*argv = append(*argv, v...)
+	case string:
+		*argv = append(*argv, v)
+	}
+}
+
+func appendFlagValue(argv *[]string, key string, value any) {
+	if value == nil {
+		return
+	}
+	flag := normalizeFlagName(key)
+	switch v := value.(type) {
+	case bool:
+		if v {
+			*argv = append(*argv, flag)
+		}
+	case string:
+		*argv = append(*argv, flag, v)
+	case float64, float32, int, int64, int32, uint, uint64, uint32:
+		*argv = append(*argv, flag, fmt.Sprint(v))
+	case []any:
+		for _, item := range v {
+			appendFlagValue(argv, key, item)
+		}
+	case []string:
+		for _, item := range v {
+			*argv = append(*argv, flag, item)
+		}
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			*argv = append(*argv, flag, fmt.Sprint(v))
+		} else {
+			*argv = append(*argv, flag, string(b))
+		}
+	}
 }
 
 // removeXMLTags remove tags conhecidas, mantendo o conteúdo.
@@ -2597,15 +2794,20 @@ func isCoderArgsMissingRequiredValue(args []string) (bool, string) {
 	// Flags mínimas obrigatórias por subcomando (as que realmente causam quebra no plugin)
 	// OBS: patch: replace é opcional, mas se existir precisa ter valor.
 	required := map[string][]string{
-		"patch":  {"--file", "--search"},
 		"write":  {"--file", "--content"},
-		"search": {"--term"}, // dir tem default
+		"search": {"--term"},
 		"read":   {"--file"},
 		"exec":   {"--cmd"},
-		"tree":   {"--dir"},
 		// rollback/clean podem ficar sem required estrito, mas se quiser:
 		"rollback": {"--file"},
-		"clean":    {"--dir"},
+	}
+
+	if sub == "patch" {
+		if hasFlag(args, "--diff") {
+			required["patch"] = nil
+		} else {
+			required["patch"] = []string{"--file", "--search"}
+		}
 	}
 
 	reqFlags, ok := required[sub]
@@ -2674,6 +2876,15 @@ func isCoderArgsMissingRequiredValue(args []string) (bool, string) {
 	return false, ""
 }
 
+func hasFlag(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
 // isClearlyInvalidCoderValue identifica valores "lixo" gerados por continuação de linha,
 // como "\" ou "\," ou "\" seguido apenas de pontuação.
 //
@@ -2736,7 +2947,9 @@ func buildCoderToolCallFixPrompt(missingFlag string) string {
 			"2) Patch (base64 em linha única):\n"+
 			"<tool_call name=\"@coder\" args=\"patch --file 'caminho' --encoding base64 --search 'BASE64_OLD' --replace 'BASE64_NEW'\" />\n"+
 			"3) Write (base64 em linha única):\n"+
-			"<tool_call name=\"@coder\" args=\"write --file 'caminho' --encoding base64 --content 'BASE64'\" />",
+			"<tool_call name=\"@coder\" args=\"write --file 'caminho' --encoding base64 --content 'BASE64'\" />\n"+
+			"4) JSON args (recomendado):\n"+
+			"<tool_call name=\"@coder\" args=\"{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;main.go&quot;}}\" />",
 		missingFlag,
 	)
 }

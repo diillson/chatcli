@@ -676,6 +676,21 @@ Coder Mode (`/coder`) features a robust governance system inspired by ClaudeCode
 
 > 🛵 Learn more about configuring security rules in the [complete documentation](https://diillson.github.io/chatcli/docs/features/coder-security).
 
+#### Coder Mode Tools (@coder)
+
+The `@coder` contract supports **JSON args** (recommended) while keeping single-line CLI compatibility. Examples:
+
+- JSON (recommended): `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;main.go&quot;}}"/>`
+- CLI (legacy): `<tool_call name="@coder" args="read --file main.go"/>`
+
+Key new subcommands:
+
+- `git-status`, `git-diff`, `git-log`, `git-changed`, `git-branch`
+- `test` (auto stack detection)
+- `patch --diff` (unified diff, text/base64)
+
+Full details in the plugin guide: https://diillson.github.io/chatcli/docs/features/coder-plugin/
+
 #### Security Policy
 
 ChatCLI prioritizes safety by blocking dangerous commands by default. You can strengthen this policy with environment variables:
