@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.50.2](https://github.com/diillson/chatcli/compare/v1.50.1...v1.50.2) (2026-02-07)
+
+
+### Bug Fixes
+
+* **llm:** update OAuth support for ClaudeAI client with streaming response handling ([#514](https://github.com/diillson/chatcli/issues/514)) ([#515](https://github.com/diillson/chatcli/issues/515)) ([0f66e4a](https://github.com/diillson/chatcli/commit/0f66e4a2c987d7a2493bce21a07f7878fb384c22))
+
 ## [1.50.1](https://github.com/diillson/chatcli/compare/v1.50.0...v1.50.1) (2026-02-07)
 
 
