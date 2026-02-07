@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -69,7 +70,7 @@ func NewOpenAIAssistantClient(apiKey, model string, logger *zap.Logger) (*OpenAI
 		logger,
 		AssistantAPIBaseURL,
 		map[string]string{
-			"Authorization": "Bearer " + apiKey,
+			"Authorization": "Bearer " + auth.StripAuthPrefix(apiKey),
 			"Content-Type":  "application/json",
 			"OpenAI-Beta":   "assistants=v2",
 		},

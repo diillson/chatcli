@@ -6,6 +6,7 @@
 package openai_responses
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/models"
@@ -66,25 +68,40 @@ func (c *OpenAIResponsesClient) getMaxTokens() int {
 func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
-		effectiveMaxTokens = c.getMaxTokens() // Fallback para a lógica antiga se nada for passado
+		effectiveMaxTokens = c.getMaxTokens()
 	}
-	input := buildTextFromHistory(history, "")
 
-	// Fallback: se o history não tem o último turno do user (edge-case),
-	// anexa o prompt no final do input.
-	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
-		if strings.TrimSpace(prompt) != "" {
-			if strings.TrimSpace(input) != "" {
-				input += "\n"
-			}
-			input += "User: " + prompt
+	isOAuth := strings.HasPrefix(c.apiKey, "oauth:")
+
+	var reqBody map[string]interface{}
+
+	if isOAuth {
+		// ChatGPT backend requires "instructions" and structured input
+		instructions, conversationInput := buildOAuthPayload(history, prompt)
+		reqBody = map[string]interface{}{
+			"model":        c.model,
+			"instructions": instructions,
+			"input":        conversationInput,
+			"store":        false,
+			"stream":       true,
 		}
-	}
-
-	reqBody := map[string]interface{}{
-		"model":             c.model,
-		"input":             input,
-		"max_output_tokens": effectiveMaxTokens,
+	} else {
+		input := buildTextFromHistory(history, "")
+		// Fallback: se o history não tem o último turno do user (edge-case),
+		// anexa o prompt no final do input.
+		if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+			if strings.TrimSpace(prompt) != "" {
+				if strings.TrimSpace(input) != "" {
+					input += "\n"
+				}
+				input += "User: " + prompt
+			}
+		}
+		reqBody = map[string]interface{}{
+			"model":             c.model,
+			"input":             input,
+			"max_output_tokens": effectiveMaxTokens,
+		}
 	}
 
 	jsonValue, err := json.Marshal(reqBody)
@@ -98,6 +115,9 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 		if err != nil {
 			return "", err
 		}
+		if isOAuth {
+			return c.processStreamResponse(resp)
+		}
 		return c.processResponse(resp)
 	})
 
@@ -110,15 +130,20 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 }
 
 func (c *OpenAIResponsesClient) sendRequest(ctx context.Context, body []byte) (*http.Response, error) {
-	// Usar a variável de ambiente se estiver definida, senão usar a constante
-	apiURL := utils.GetEnvOrDefault("OPENAI_RESPONSES_API_URL", config.OpenAIResponsesAPIURL)
+	// OAuth tokens use the ChatGPT backend; API keys use the platform API
+	var apiURL string
+	if strings.HasPrefix(c.apiKey, "oauth:") {
+		apiURL = utils.GetEnvOrDefault("OPENAI_RESPONSES_API_URL", config.OpenAIOAuthResponsesURL)
+	} else {
+		apiURL = utils.GetEnvOrDefault("OPENAI_RESPONSES_API_URL", config.OpenAIResponsesAPIURL)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("erro ao criar requisição para Responses API: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -203,6 +228,91 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 	// Se chegou aqui, não foi possível extrair
 	c.logger.Warn("Não foi possível extrair texto da resposta, mesmo com status 'completed'.", zap.ByteString("body", bodyBytes))
 	return "", fmt.Errorf("não foi possível extrair o texto da resposta da Responses API")
+}
+
+// processStreamResponse handles SSE streaming responses from the ChatGPT backend.
+func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (string, error) {
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
+	}
+
+	var sb strings.Builder
+	scanner := bufio.NewScanner(resp.Body)
+	// Increase buffer for potentially large SSE lines
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+
+		var event struct {
+			Type  string `json:"type"`
+			Delta string `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+
+		if event.Type == "response.output_text.delta" && event.Delta != "" {
+			sb.WriteString(event.Delta)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("erro ao ler stream SSE: %w", err)
+	}
+
+	if sb.Len() == 0 {
+		return "", fmt.Errorf("nenhum texto extraído do stream SSE da Responses API")
+	}
+
+	return sb.String(), nil
+}
+
+// buildOAuthPayload extracts system messages as instructions and builds
+// structured conversation items for the ChatGPT backend Responses API.
+func buildOAuthPayload(history []models.Message, prompt string) (string, []map[string]string) {
+	var instructions strings.Builder
+	var input []map[string]string
+
+	for _, m := range history {
+		role := strings.ToLower(strings.TrimSpace(m.Role))
+		switch role {
+		case "system":
+			if instructions.Len() > 0 {
+				instructions.WriteString("\n")
+			}
+			instructions.WriteString(m.Content)
+		case "assistant":
+			input = append(input, map[string]string{"role": "assistant", "content": m.Content})
+		default:
+			input = append(input, map[string]string{"role": "user", "content": m.Content})
+		}
+	}
+
+	// Append current prompt if not already the last user message
+	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+		if strings.TrimSpace(prompt) != "" {
+			input = append(input, map[string]string{"role": "user", "content": prompt})
+		}
+	}
+
+	inst := instructions.String()
+	if inst == "" {
+		inst = "You are a helpful assistant."
+	}
+
+	return inst, input
 }
 
 func buildTextFromHistory(history []models.Message, prompt string) string {

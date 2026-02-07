@@ -200,7 +200,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 		"LOG_LEVEL", "ENV", "LLM_PROVIDER", "LOG_FILE", "LOG_MAX_SIZE", "HISTORY_MAX_SIZE",
 		"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_ASSISTANT_MODEL",
 		"OPENAI_USE_RESPONSES", "OPENAI_MAX_TOKENS",
-		"CLAUDEAI_API_KEY", "CLAUDEAI_MODEL", "CLAUDEAI_MAX_TOKENS", "CLAUDEAI_API_VERSION",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_MAX_TOKENS", "ANTHROPIC_API_VERSION",
 		"GOOGLEAI_API_KEY", "GOOGLEAI_MODEL", "GOOGLEAI_MAX_TOKENS",
 		"CLIENT_ID", "CLIENT_KEY", "STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
 	}
@@ -265,7 +265,7 @@ func (cli *ChatCLI) configureProviderAndModel() {
 		}
 	}
 	if cli.Provider == "CLAUDEAI" {
-		cli.Model = os.Getenv("CLAUDEAI_MODEL")
+		cli.Model = os.Getenv("ANTHROPIC_MODEL")
 		if cli.Model == "" {
 			cli.Model = config.DefaultClaudeAIModel
 		}
@@ -318,8 +318,18 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 
 	client, err := manager.GetClient(cli.Provider, cli.Model)
 	if err != nil {
-		logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
-		return nil, err
+		// If the configured provider is not available, try to pick any available one
+		available := manager.GetAvailableProviders()
+		if len(available) > 0 {
+			cli.Provider = available[0]
+			cli.Model = ""
+			client, err = manager.GetClient(cli.Provider, cli.Model)
+		}
+		if err != nil {
+			// No provider available at all — start in auth-only mode
+			logger.Warn("Nenhum provedor LLM disponível. Use /auth login para autenticar.", zap.Error(err))
+			client = nil
+		}
 	}
 
 	sessionMgr, err := NewSessionManager(logger)
@@ -383,6 +393,11 @@ func (cli *ChatCLI) executor(in string) {
 		if cli.commandHandler.HandleCommand(in) {
 			panic(errExitRequest)
 		}
+		return
+	}
+
+	if cli.Client == nil {
+		fmt.Println("No LLM provider configured. Use /auth login anthropic | openai-codex to authenticate, then /switch to select a provider.")
 		return
 	}
 
@@ -537,7 +552,7 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel)
 	}
 	if newProvider == "CLAUDEAI" {
-		newModel = utils.GetEnvOrDefault("CLAUDEAI_MODEL", config.DefaultClaudeAIModel)
+		newModel = utils.GetEnvOrDefault("ANTHROPIC_MODEL", config.DefaultClaudeAIModel)
 	}
 	if newProvider == "OPENAI_ASSISTANT" {
 		newModel = utils.GetEnvOrDefault("OPENAI_ASSISTANT_MODEL", utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel))
@@ -804,9 +819,11 @@ func (cli *ChatCLI) cleanup() {
 	if err := cli.historyManager.AppendAndRotateHistory(cli.newCommandsInSession); err != nil {
 		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
 	}
-	if assistantClient, ok := cli.Client.(*openai_assistant.OpenAIAssistantClient); ok {
-		if err := assistantClient.Cleanup(); err != nil {
-			cli.logger.Error("Erro na limpeza do OpenAI Assistant", zap.Error(err))
+	if cli.Client != nil {
+		if assistantClient, ok := cli.Client.(*openai_assistant.OpenAIAssistantClient); ok {
+			if err := assistantClient.Cleanup(); err != nil {
+				cli.logger.Error("Erro na limpeza do OpenAI Assistant", zap.Error(err))
+			}
 		}
 	}
 	if cli.pluginManager != nil {
@@ -1421,7 +1438,7 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 			}
 		}
 	} else if strings.ToUpper(cli.Provider) == "CLAUDEAI" {
-		if v := os.Getenv("CLAUDEAI_MAX_TOKENS"); v != "" {
+		if v := os.Getenv("ANTHROPIC_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				override = n
 			}
@@ -2157,6 +2174,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getAgentSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/auth") {
+		return cli.getAuthSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -2273,6 +2294,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/context", Description: "Gerencia contextos persistentes (create, attach, detach, list, show, etc)"},
 		{Text: "/plugin", Description: "Gerencia plugins (install, list, show, etc.)"},
 		{Text: "/clear", Description: "Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais."},
+		{Text: "/auth", Description: "Gerencia credenciais OAuth (status, login, logout)"},
 	}
 }
 
@@ -2496,13 +2518,17 @@ func (cli *ChatCLI) showConfig() {
 	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_current_provider"), ColorLime))
 	printItem(i18n.T("cli.config.key_provider_runtime"), cli.Provider)
 	printItem(i18n.T("cli.config.key_model_runtime"), cli.Model)
-	printItem(i18n.T("cli.config.key_model_name_client"), cli.Client.GetModelName())
+	if cli.Client != nil {
+		printItem(i18n.T("cli.config.key_model_name_client"), cli.Client.GetModelName())
+	} else {
+		printItem(i18n.T("cli.config.key_model_name_client"), "(no provider)")
+	}
 	printItem(i18n.T("cli.config.key_preferred_api"), string(catalog.GetPreferredAPI(cli.Provider, cli.Model)))
 	printItem(i18n.T("cli.config.key_effective_max_tokens"), fmt.Sprintf("%d", cli.getMaxTokensForCurrentLLM()))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_max_tokens_overrides"), ColorLime))
 	printItem("OPENAI_MAX_TOKENS", os.Getenv("OPENAI_MAX_TOKENS"))
-	printItem("CLAUDEAI_MAX_TOKENS", os.Getenv("CLAUDEAI_MAX_TOKENS"))
+	printItem("ANTHROPIC_MAX_TOKENS", os.Getenv("ANTHROPIC_MAX_TOKENS"))
 	printItem("GOOGLEAI_MAX_TOKENS", os.Getenv("GOOGLEAI_MAX_TOKENS"))
 	printItem("XAI_MAX_TOKENS", os.Getenv("XAI_MAX_TOKENS"))
 	printItem("OLLAMA_MAX_TOKENS", os.Getenv("OLLAMA_MAX_TOKENS"))
@@ -2510,7 +2536,7 @@ func (cli *ChatCLI) showConfig() {
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_sensitive_keys"), ColorLime))
 	printItem("OPENAI_API_KEY", presence(os.Getenv("OPENAI_API_KEY")))
-	printItem("CLAUDEAI_API_KEY", presence(os.Getenv("CLAUDEAI_API_KEY")))
+	printItem("ANTHROPIC_API_KEY", presence(os.Getenv("ANTHROPIC_API_KEY")))
 	printItem("GOOGLEAI_API_KEY", presence(os.Getenv("GOOGLEAI_API_KEY")))
 	printItem("XAI_API_KEY", presence(os.Getenv("XAI_API_KEY")))
 	printItem(i18n.T("cli.config.key_client_id_stackspot"), presence(os.Getenv("CLIENT_ID")))
@@ -2520,8 +2546,8 @@ func (cli *ChatCLI) showConfig() {
 	printItem("OPENAI_MODEL", os.Getenv("OPENAI_MODEL"))
 	printItem("OPENAI_ASSISTANT_MODEL", os.Getenv("OPENAI_ASSISTANT_MODEL"))
 	printItem("OPENAI_USE_RESPONSES", os.Getenv("OPENAI_USE_RESPONSES"))
-	printItem("CLAUDEAI_MODEL", os.Getenv("CLAUDEAI_MODEL"))
-	printItem("CLAUDEAI_API_VERSION", os.Getenv("CLAUDEAI_API_VERSION"))
+	printItem("ANTHROPIC_MODEL", os.Getenv("ANTHROPIC_MODEL"))
+	printItem("ANTHROPIC_API_VERSION", os.Getenv("ANTHROPIC_API_VERSION"))
 	printItem("GOOGLEAI_MODEL", os.Getenv("GOOGLEAI_MODEL"))
 	printItem("XAI_MODEL", os.Getenv("XAI_MODEL"))
 	printItem("OLLAMA_MODEL", os.Getenv("OLLAMA_MODEL"))
@@ -3111,6 +3137,44 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) >= 2 && (args[1] == "show") {
 		return []prompt.Suggest{
 			{Text: "--full", Description: "Mostra detalhes completos do agente"},
+		}
+	}
+
+	return []prompt.Suggest{}
+}
+
+func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+
+	// Just typed "/auth" without space
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{
+			{Text: "/auth", Description: "Gerencia credenciais OAuth (status, login, logout)"},
+		}
+	}
+
+	// "/auth " — suggest subcommands
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		suggestions := []prompt.Suggest{
+			{Text: "status", Description: "Exibir status de autenticação de todos os provedores"},
+			{Text: "login", Description: "Autenticar com um provedor (anthropic ou openai-codex)"},
+			{Text: "logout", Description: "Remover credenciais de um provedor (anthropic ou openai-codex)"},
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	// "/auth login " or "/auth logout " — suggest providers
+	if len(args) >= 2 {
+		sub := strings.ToLower(args[1])
+		if sub == "login" || sub == "logout" {
+			if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+				suggestions := []prompt.Suggest{
+					{Text: "anthropic", Description: "Anthropic (Claude)"},
+					{Text: "openai-codex", Description: "OpenAI (GPT Plus / Codex)"},
+				}
+				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+			}
 		}
 	}
 

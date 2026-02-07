@@ -69,11 +69,11 @@ func isSensitiveEnvKey(key string) bool {
 
 	// nomes exatos conhecidos
 	exact := map[string]bool{
-		"OPENAI_API_KEY":   true,
-		"CLAUDEAI_API_KEY": true,
-		"GOOGLEAI_API_KEY": true,
-		"CLIENT_SECRET":    true,
-		"CLIENT_KEY":       true,
+		"OPENAI_API_KEY":    true,
+		"ANTHROPIC_API_KEY": true,
+		"GOOGLEAI_API_KEY":  true,
+		"CLIENT_SECRET":     true,
+		"CLIENT_KEY":        true,
 	}
 	return exact[k]
 }

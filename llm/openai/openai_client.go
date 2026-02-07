@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
 
@@ -132,7 +133,7 @@ func (c *OpenAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http
 		return nil, fmt.Errorf("erro ao criar a requisição: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
 
 	resp, err := c.client.Do(req)
 	if err != nil {
