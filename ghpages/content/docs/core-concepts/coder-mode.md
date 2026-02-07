@@ -98,7 +98,7 @@ No `/coder`, o atributo `args` do `<tool_call>` deve usar somente os subcomandos
 
 **1) Posso usar JSON em `args`?**  
 Sim. É o formato recomendado. Exemplo:  
-`<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;main.go&quot;}}"/>`
+`<tool_call name="@coder" args="{\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}"/>`
 
 **2) Quando usar `patch --diff`?**  
 Quando a alteração envolve múltiplos trechos ou precisa de mais precisão. Você pode enviar um unified diff em `text` ou `base64`.

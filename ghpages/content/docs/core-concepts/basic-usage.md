@@ -75,11 +75,11 @@ e o detalhe do plugin: [Plugin @coder](/docs/features/coder-plugin/)
 
 No modo `/coder`, visualize o `<tool_call>` como ordens de ferramenta que a IA emite para o ChatCLI executar. O formato **JSON em args** é recomendado. Exemplos (como texto, não código):
 
-- `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;tree&quot;,&quot;args&quot;:{&quot;dir&quot;:&quot;.&quot;}}"/>`
-- `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;search&quot;,&quot;args&quot;:{&quot;term&quot;:&quot;FAIL&quot;,&quot;dir&quot;:&quot;.&quot;}}"/>`
-- `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;cli/agent_mode.go&quot;}}"/>`
-- `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;test&quot;,&quot;args&quot;:{&quot;dir&quot;:&quot;.&quot;}}"/>`
-- `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;git-diff&quot;,&quot;args&quot;:{&quot;dir&quot;:&quot;.&quot;,&quot;stat&quot;:true}}"/>`
+- `<tool_call name="@coder" args="{\"cmd\":\"tree\",\"args\":{\"dir\":\".\"}}"/>`
+- `<tool_call name="@coder" args="{\"cmd\":\"search\",\"args\":{\"term\":\"FAIL\",\"dir\":\".\"}}"/>`
+- `<tool_call name="@coder" args="{\"cmd\":\"read\",\"args\":{\"file\":\"cli/agent_mode.go\"}}"/>`
+- `<tool_call name="@coder" args="{\"cmd\":\"test\",\"args\":{\"dir\":\".\"}}"/>`
+- `<tool_call name="@coder" args="{\"cmd\":\"git-diff\",\"args\":{\"dir\":\".\",\"stat\":true}}"/>`
 
 > Observe: em `/coder`, sempre é a LLM quem emite o `@coder` – o usuário somente descreve objetivos.
 
