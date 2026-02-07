@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.50.3](https://github.com/diillson/chatcli/compare/v1.50.2...v1.50.3) (2026-02-07)
+
+
+### Bug Fixes
+
+* **llm:** comment out cache control for text response in ClaudeAI client ([#517](https://github.com/diillson/chatcli/issues/517)) ([#518](https://github.com/diillson/chatcli/issues/518)) ([d2e4c97](https://github.com/diillson/chatcli/commit/d2e4c97c7856bf943917b5efda6c9432dcffee49))
+
 ## [1.50.2](https://github.com/diillson/chatcli/compare/v1.50.1...v1.50.2) (2026-02-07)
 
 
