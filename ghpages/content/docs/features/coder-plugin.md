@@ -39,9 +39,9 @@ JSON em `args` é recomendado, por exemplo: `args="{\"cmd\":\"read\",\"args\":{\
 
 No modo `/coder`, o assistente deve responder com `<reasoning> Raciocinio da IA </reasoning>` e em seguida apenas um `<tool_call name="@coder" args="..."/>`. Estes são exemplos válidos:
 
-- Ler UM arquivo (JSON): `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;README.md&quot;}}"/>`
-- Rodar testes (auto): `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;test&quot;,&quot;args&quot;:{&quot;dir&quot;:&quot;.&quot;}}"/>`
-- Ver diff: `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;git-diff&quot;,&quot;args&quot;:{&quot;dir&quot;:&quot;.&quot;,&quot;stat&quot;:true}}"/>`
+- Ler UM arquivo (JSON): `<tool_call name="@coder" args="{\"cmd\":\"read\",\"args\":{\"file\":\"README.md\"}}"/>`
+- Rodar testes (auto): `<tool_call name="@coder" args="{\"cmd\":\"test\",\"args\":{\"dir\":\".\"}}"/>`
+- Ver diff: `<tool_call name="@coder" args="{\"cmd\":\"git-diff\",\"args\":{\"dir\":\".\",\"stat\":true}}"/>`
 
 ## Notas
 
@@ -53,7 +53,7 @@ No modo `/coder`, o assistente deve responder com `<reasoning> Raciocinio da IA 
 
 **1) O `@coder` aceita JSON em `args`?**  
 Sim. O formato recomendado é JSON. Exemplo:  
-`<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;README.md&quot;}}"/>`
+`<tool_call name="@coder" args="{\"cmd\":\"read\",\"args\":{\"file\":\"README.md\"}}"/>`
 
 **2) Quando usar `patch --diff`?**  
 Use quando precisar aplicar múltiplos trechos ou quando o search/replace simples não for suficiente. O diff pode ser `text` ou `base64`.

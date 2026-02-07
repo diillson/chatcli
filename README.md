@@ -681,7 +681,7 @@ O Modo Coder (`/coder`) possui um sistema de governança robusto inspirado no Cl
 
 O contrato do `@coder` suporta **args em JSON** (recomendado) e mantém compatibilidade com a sintaxe de linha única. Exemplos:
 
-- JSON (recomendado): `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;main.go&quot;}}"/>`
+- JSON (recomendado): `<tool_call name="@coder" args="{\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}"/>`
 - CLI (legado): `<tool_call name="@coder" args="read --file main.go"/>`
 
 Novos subcomandos principais:

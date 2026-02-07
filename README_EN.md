@@ -680,7 +680,7 @@ Coder Mode (`/coder`) features a robust governance system inspired by ClaudeCode
 
 The `@coder` contract supports **JSON args** (recommended) while keeping single-line CLI compatibility. Examples:
 
-- JSON (recommended): `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;main.go&quot;}}"/>`
+- JSON (recommended): `<tool_call name="@coder" args="{\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}"/>`
 - CLI (legacy): `<tool_call name="@coder" args="read --file main.go"/>`
 
 Key new subcommands:

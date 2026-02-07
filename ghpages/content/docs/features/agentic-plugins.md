@@ -614,9 +614,9 @@ No `/coder`, a IA emite chamadas de ferramenta em um formato estrito:
 
 Exemplos de chamadas reais (que a IA emite no /coder):
 
-- `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;tree&quot;,&quot;args&quot;:{&quot;dir&quot;:&quot;.&quot;}}"/>`
-- `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;cli/agent_mode.go&quot;}}"/>`
-- `<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;test&quot;,&quot;args&quot;:{&quot;dir&quot;:&quot;.&quot;}}"/>`
+- `<tool_call name="@coder" args="{\"cmd\":\"tree\",\"args\":{\"dir\":\".\"}}"/>`
+- `<tool_call name="@coder" args="{\"cmd\":\"read\",\"args\":{\"file\":\"cli/agent_mode.go\"}}"/>`
+- `<tool_call name="@coder" args="{\"cmd\":\"test\",\"args\":{\"dir\":\".\"}}"/>`
 
 Veja mais em [Modo Coder](/docs/core-concepts/coder-mode/) e [Plugin @coder](/docs/features/coder-plugin/).
 
