@@ -169,7 +169,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
 
 - Providers:
   -  OPENAI_API_KEY ,  OPENAI_MODEL ,  OPENAI_ASSISTANT_MODEL ,  OPENAI_MAX_TOKENS ,  OPENAI_USE_RESPONSES
-  -  CLAUDEAI_API_KEY ,  CLAUDEAI_MODEL ,  CLAUDEAI_MAX_TOKENS ,  CLAUDEAI_API_VERSION
+  -  ANTHROPIC_API_KEY ,  ANTHROPIC_MODEL ,  ANTHROPIC_MAX_TOKENS ,  ANTHROPIC_API_VERSION
   -  GOOGLEAI_API_KEY ,  GOOGLEAI_MODEL ,  GOOGLEAI_MAX_TOKENS
   -  XAI_API_KEY ,  XAI_MODEL ,  XAI_MAX_TOKENS
   -  OLLAMA_ENABLED ,  OLLAMA_BASE_URL ,  OLLAMA_MODEL ,  OLLAMA_MAX_TOKENS ,  OLLAMA_FILTER_THINKING  – (Optional) Filters "thinking aloud" from models like Qwen3 (true/false, default: true)
@@ -217,10 +217,10 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     STACKSPOT_AGENT_ID=your-agent-id
     
     # ClaudeAI Settings
-    CLAUDEAI_API_KEY=your-claudeai-key
-    CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
-    CLAUDEAI_MAX_TOKENS=20000
-    CLAUDEAI_API_VERSION=2023-06-01
+    ANTHROPIC_API_KEY=your-claudeai-key
+    ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+    ANTHROPIC_MAX_TOKENS=20000
+    ANTHROPIC_API_VERSION=2023-06-01
     
     # Google AI (Gemini) Settings
     GOOGLEAI_API_KEY=your-googleai-key

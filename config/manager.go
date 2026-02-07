@@ -63,7 +63,7 @@ func (cm *ConfigManager) loadDefaults() {
 	cm.values["LLM_PROVIDER"] = DefaultLLMProvider
 	cm.values["OPENAI_MODEL"] = DefaultOpenAIModel
 	cm.values["OPENAI_ASSISTANT_MODEL"] = DefaultOpenAiAssistModel
-	cm.values["CLAUDEAI_MODEL"] = DefaultClaudeAIModel
+	cm.values["ANTHROPIC_MODEL"] = DefaultClaudeAIModel
 	cm.values["GOOGLEAI_MODEL"] = DefaultGoogleAIModel
 	cm.values["XAI_MODEL"] = DefaultXAIModel
 	cm.values["OLLAMA_MODEL"] = DefaultOllamaModel

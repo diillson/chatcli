@@ -195,7 +195,7 @@ func (m *LLMManagerImpl) configurarStackSpotClient(maxRetries int, initialBackof
 func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff time.Duration) {
 	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderAnthropic, m.logger)
 	if err != nil {
-		m.logger.Warn("CLAUDEAI_API_KEY não definida, o provedor CLAUDEAI não estará disponível", zap.Error(err))
+		m.logger.Warn("ANTHROPIC_API_KEY não definida, o provedor CLAUDEAI não estará disponível", zap.Error(err))
 		return
 	}
 	apiKey := resolved.APIKey
@@ -213,7 +213,7 @@ func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff
 			), nil
 		}
 	} else {
-		m.logger.Warn("CLAUDEAI_API_KEY não definida, o provedor ClaudeAI não estará disponível")
+		m.logger.Warn("ANTHROPIC_API_KEY não definida, o provedor ClaudeAI não estará disponível")
 	}
 }
 

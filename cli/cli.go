@@ -200,7 +200,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 		"LOG_LEVEL", "ENV", "LLM_PROVIDER", "LOG_FILE", "LOG_MAX_SIZE", "HISTORY_MAX_SIZE",
 		"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_ASSISTANT_MODEL",
 		"OPENAI_USE_RESPONSES", "OPENAI_MAX_TOKENS",
-		"CLAUDEAI_API_KEY", "CLAUDEAI_MODEL", "CLAUDEAI_MAX_TOKENS", "CLAUDEAI_API_VERSION",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_MAX_TOKENS", "ANTHROPIC_API_VERSION",
 		"GOOGLEAI_API_KEY", "GOOGLEAI_MODEL", "GOOGLEAI_MAX_TOKENS",
 		"CLIENT_ID", "CLIENT_KEY", "STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
 	}
@@ -265,7 +265,7 @@ func (cli *ChatCLI) configureProviderAndModel() {
 		}
 	}
 	if cli.Provider == "CLAUDEAI" {
-		cli.Model = os.Getenv("CLAUDEAI_MODEL")
+		cli.Model = os.Getenv("ANTHROPIC_MODEL")
 		if cli.Model == "" {
 			cli.Model = config.DefaultClaudeAIModel
 		}
@@ -537,7 +537,7 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel)
 	}
 	if newProvider == "CLAUDEAI" {
-		newModel = utils.GetEnvOrDefault("CLAUDEAI_MODEL", config.DefaultClaudeAIModel)
+		newModel = utils.GetEnvOrDefault("ANTHROPIC_MODEL", config.DefaultClaudeAIModel)
 	}
 	if newProvider == "OPENAI_ASSISTANT" {
 		newModel = utils.GetEnvOrDefault("OPENAI_ASSISTANT_MODEL", utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel))
@@ -1421,7 +1421,7 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 			}
 		}
 	} else if strings.ToUpper(cli.Provider) == "CLAUDEAI" {
-		if v := os.Getenv("CLAUDEAI_MAX_TOKENS"); v != "" {
+		if v := os.Getenv("ANTHROPIC_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				override = n
 			}
@@ -2502,7 +2502,7 @@ func (cli *ChatCLI) showConfig() {
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_max_tokens_overrides"), ColorLime))
 	printItem("OPENAI_MAX_TOKENS", os.Getenv("OPENAI_MAX_TOKENS"))
-	printItem("CLAUDEAI_MAX_TOKENS", os.Getenv("CLAUDEAI_MAX_TOKENS"))
+	printItem("ANTHROPIC_MAX_TOKENS", os.Getenv("ANTHROPIC_MAX_TOKENS"))
 	printItem("GOOGLEAI_MAX_TOKENS", os.Getenv("GOOGLEAI_MAX_TOKENS"))
 	printItem("XAI_MAX_TOKENS", os.Getenv("XAI_MAX_TOKENS"))
 	printItem("OLLAMA_MAX_TOKENS", os.Getenv("OLLAMA_MAX_TOKENS"))
@@ -2510,7 +2510,7 @@ func (cli *ChatCLI) showConfig() {
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_sensitive_keys"), ColorLime))
 	printItem("OPENAI_API_KEY", presence(os.Getenv("OPENAI_API_KEY")))
-	printItem("CLAUDEAI_API_KEY", presence(os.Getenv("CLAUDEAI_API_KEY")))
+	printItem("ANTHROPIC_API_KEY", presence(os.Getenv("ANTHROPIC_API_KEY")))
 	printItem("GOOGLEAI_API_KEY", presence(os.Getenv("GOOGLEAI_API_KEY")))
 	printItem("XAI_API_KEY", presence(os.Getenv("XAI_API_KEY")))
 	printItem(i18n.T("cli.config.key_client_id_stackspot"), presence(os.Getenv("CLIENT_ID")))
@@ -2520,8 +2520,8 @@ func (cli *ChatCLI) showConfig() {
 	printItem("OPENAI_MODEL", os.Getenv("OPENAI_MODEL"))
 	printItem("OPENAI_ASSISTANT_MODEL", os.Getenv("OPENAI_ASSISTANT_MODEL"))
 	printItem("OPENAI_USE_RESPONSES", os.Getenv("OPENAI_USE_RESPONSES"))
-	printItem("CLAUDEAI_MODEL", os.Getenv("CLAUDEAI_MODEL"))
-	printItem("CLAUDEAI_API_VERSION", os.Getenv("CLAUDEAI_API_VERSION"))
+	printItem("ANTHROPIC_MODEL", os.Getenv("ANTHROPIC_MODEL"))
+	printItem("ANTHROPIC_API_VERSION", os.Getenv("ANTHROPIC_API_VERSION"))
 	printItem("GOOGLEAI_MODEL", os.Getenv("GOOGLEAI_MODEL"))
 	printItem("XAI_MODEL", os.Getenv("XAI_MODEL"))
 	printItem("OLLAMA_MODEL", os.Getenv("OLLAMA_MODEL"))

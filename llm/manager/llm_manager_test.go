@@ -18,7 +18,7 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 
 	keysToClear := []string{
 		"OPENAI_API_KEY", "CLIENT_ID", "CLIENT_KEY",
-		"CLAUDEAI_API_KEY", "GOOGLEAI_API_KEY", "XAI_API_KEY",
+		"ANTHROPIC_API_KEY", "GOOGLEAI_API_KEY", "XAI_API_KEY",
 		"OLLAMA_ENABLED", "OLLAMA_BASE_URL",
 		"STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
 	}

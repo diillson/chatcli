@@ -77,20 +77,17 @@ func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (
 	// env fallback
 	switch provider {
 	case ProviderAnthropic:
-		// OAuth token (compat: CLAUDEAI_OAUTH_TOKEN, ANTHROPIC_OAUTH_TOKEN)
-		if v := strings.TrimSpace(os.Getenv("CLAUDEAI_OAUTH_TOKEN")); v != "" {
-			return &ResolvedAuth{APIKey: "oauth:" + v, Source: "env:CLAUDEAI_OAUTH_TOKEN", Mode: AuthModeOAuth, Provider: provider}, nil
+		// OAuth token (compat: ANTHROPIC_OAUTH_TOKEN, ANTHROPIC_OAUTH_TOKEN)
+		if v := strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_TOKEN")); v != "" {
+			return &ResolvedAuth{APIKey: "oauth:" + v, Source: "env:ANTHROPIC_OAUTH_TOKEN", Mode: AuthModeOAuth, Provider: provider}, nil
 		}
 		if v := strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_TOKEN")); v != "" {
 			return &ResolvedAuth{APIKey: "oauth:" + v, Source: "env:ANTHROPIC_OAUTH_TOKEN", Mode: AuthModeOAuth, Provider: provider}, nil
 		}
 
-		// API key (compat: CLAUDEAI_API_KEY, ANTHROPIC_API_KEY)
-		if v := strings.TrimSpace(os.Getenv("CLAUDEAI_API_KEY")); v != "" {
-			return &ResolvedAuth{APIKey: "apikey:" + v, Source: "env:CLAUDDAI_API_KEY", Mode: AuthModeAPIKey, Provider: provider}, nil
-		}
+		// API key (compat: ANTHROPIC_API_KEY, ANTHROPIC_API_KEY)
 		if v := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); v != "" {
-			return &ResolvedAuth{APIKey: "apikey:" + v, Source: "env:ANTHROPIC_API_KEY", Mode: AuthModeAPIKey, Provider: provider}, nil
+			return &ResolvedAuth{APIKey: "apikey:" + v, Source: "ANTHROPIC_API_KEY", Mode: AuthModeAPIKey, Provider: provider}, nil
 		}
 
 	case ProviderOpenAI:

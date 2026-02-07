@@ -169,7 +169,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
 
 - Provedores:
   -  OPENAI_API_KEY ,  OPENAI_MODEL ,  OPENAI_ASSISTANT_MODEL ,  OPENAI_MAX_TOKENS ,  OPENAI_USE_RESPONSES
-  -  CLAUDEAI_API_KEY ,  CLAUDEAI_MODEL ,  CLAUDEAI_MAX_TOKENS ,  CLAUDEAI_API_VERSION
+  -  ANTHROPIC_API_KEY ,  ANTHROPIC_MODEL ,  ANTHROPIC_MAX_TOKENS ,  ANTHROPIC_API_VERSION
   -  GOOGLEAI_API_KEY ,  GOOGLEAI_MODEL ,  GOOGLEAI_MAX_TOKENS
   -  OLLAMA_ENABLED ,  OLLAMA_BASE_URL ,  OLLAMA_MODEL ,  OLLAMA_MAX_TOKENS ,  OLLAMA_FILTER_THINKING  – (Opcional) Filtra "pensamento em voz alta" de modelos como Qwen3 (true/false, padrão: true).
   -  XAI_API_KEY ,  XAI_MODEL ,  XAI_MAX_TOKENS
@@ -219,10 +219,10 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     STACKSPOT_AGENT_ID=seu-id-agente
     
     # Configurações do ClaudeAI
-    CLAUDEAI_API_KEY=sua-chave-claudeai
-    CLAUDEAI_MODEL=claude-3-5-sonnet-20241022
-    CLAUDEAI_MAX_TOKENS=20000
-    CLAUDEAI_API_VERSION=2023-06-01
+    ANTHROPIC_API_KEY=sua-chave-claudeai
+    ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+    ANTHROPIC_MAX_TOKENS=20000
+    ANTHROPIC_API_VERSION=2023-06-01
     
     # Configurações do Google AI (Gemini)
     GOOGLEAI_API_KEY=sua-chave-googleai

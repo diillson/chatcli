@@ -45,10 +45,10 @@ A ordem de prioridade para as configurações é:
 
 | Variável               | Descrição | Obrigatório? |
 |:-----------------------| :--- | :--- |
-| `CLAUDEAI_API_KEY`     | Sua chave de API secreta da Anthropic. | **Sim** |
-| `CLAUDEAI_MODEL`       | O modelo a ser usado. Ex: `claude-3-5-sonnet-20240620`, `claude-3-opus-20240229`. | Não |
-| `CLAUDEAI_API_VERSION` | A versão da API da Anthropic a ser usada nos cabeçalhos. | Não |
-| `CLAUDEAI_MAX_TOKENS`  | Define o maximo de tokens a ser utilizados na sessão (depende do modelo)         | Não
+| `ANTHROPIC_API_KEY`     | Sua chave de API secreta da Anthropic. | **Sim** |
+| `ANTHROPIC_MODEL`       | O modelo a ser usado. Ex: `claude-3-5-sonnet-20240620`, `claude-3-opus-20240229`. | Não |
+| `ANTHROPIC_API_VERSION` | A versão da API da Anthropic a ser usada nos cabeçalhos. | Não |
+| `ANTHROPIC_MAX_TOKENS`  | Define o maximo de tokens a ser utilizados na sessão (depende do modelo)         | Não
 
 
 ### Google (Gemini)
