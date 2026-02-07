@@ -5,7 +5,7 @@ type = "docs"
 description = "Entenda como funciona o sistema de governança e permissões do Modo Coder."
 +++
 
-O ChatCLI foi projetado para ser uma ferramenta poderosa, mas o poder exige controle. No **Modo Coder ** (`/coder`), a IA tem capacidade de ler, escrever, criar e executar comandos no seu sistema. Para garantir que você esteja sempre no comando, implementamos um sistema de governança inspirado no ClaudeCode.
+O ChatCLI foi projetado para ser uma ferramenta poderosa, mas o poder exige controle. No **Modo Coder** (`/coder`), a IA tem capacidade de ler, escrever, criar e executar comandos no seu sistema. Para garantir que você esteja sempre no comando, implementamos um sistema de governança inspirado no ClaudeCode.
 
 ---
 
@@ -15,7 +15,7 @@ Toda a vez que a IA sugere uma ação (como criar um arquivo ou rodar um script)
 
 ### Os 3 Estados de Permissão
 
-1. **Allow (Permitido):** A ação é executada automaticamente, sem interrupção. Ideal para comandos de leitura (`ls`, `read`, `tree`).
+1. **Allow (Permitido):** A ação é executada automaticamente, sem interrupção. Ideal para comandos de leitura (`read`, `tree`, `search`) e Git read-only (`git-status`, `git-diff`, `git-log`, `git-changed`, `git-branch`).
 2. **Deny (Bloqueado):** A ação é bloqueada silenciosamente (ou com erro para a IA). Ideal para proteger arquivos sensíveis ou comandos destrutivos.
 3. **Ask (Perguntar - Padrão):** O ChatCLI pausa e exibe um menu interativo para você decidir.
 
@@ -52,7 +52,8 @@ Escolha:
 
 ## Gerenciamento de Regras
 
-As regras são salvas localmente em `.~/.chatcli/coder_policy.json`. Você pode editar esse arquivo manualmente se desejar, mas o menu interativo é a forma mais fácil de configurar.
+As regras são salvas localmente em `~/.chatcli/coder_policy.json`. Você pode editar esse arquivo manualmente se desejar, mas o menu interativo é a forma mais fácil de configurar.
+O matching usa o subcomando efetivo do `@coder` mesmo quando `args` é JSON (ex.: `{"cmd":"read"}` vira `@coder read`).
 
 ### Exemplo de Política (coder_policy.json):
 
@@ -61,6 +62,10 @@ As regras são salvas localmente em `.~/.chatcli/coder_policy.json`. Você pode 
   "rules": [
     {
       "pattern": "@coder read",
+      "action": "allow"
+    },
+    {
+      "pattern": "@coder git-status",
       "action": "allow"
     },
     {
@@ -79,5 +84,6 @@ As regras são salvas localmente em `.~/.chatcli/coder_policy.json`. Você pode 
 ## Boas Práticas
 
 1. **Inicie com Cautela:** Mantenha os comandos de escrita (`write`, `patch`, `exec`) como `ask` até sentir confiança no agente.
-2. **Libere Leituras:** Geralmente, é seguro dar `Always` para `coder read`, `coder tree` e `coder search`, pois não alteram o seu código.
+2. **Libere Leituras:** Geralmente, é seguro dar `Always` para `coder read`, `coder tree`, `coder search` e Git read-only (`git-status`, `git-diff`, `git-log`).
 3. **Seja Específico:** O matching é feito por prefixo. Você pode liberar `coder exec --cmd 'ls` mas bloquear `coder exec --cmd 'rm`.
+4. **Exec Seguro:** O `@coder exec` bloqueia padrões perigosos por padrão. Use `--allow-unsafe` apenas quando necessário.

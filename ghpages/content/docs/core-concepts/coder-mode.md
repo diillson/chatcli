@@ -50,6 +50,7 @@ O mais importante em `/coder` é que a resposta do assistente sempre segue este 
 
 1) Antes de qualquer ação, escreva um bloco `|reasoning|` curto (2 a 6 linhas).
 2) Em seguida, se precisar agir, emita *apenas* um `|tool_call name="@coder" args="..."/|`.
+   - JSON em `args` é recomendado: `args="{\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}"`
 3) Nunca usa blocos ```` nem comandos shell diretos nesse modo.
 
 ## Ferramentas e dependência
@@ -67,8 +68,14 @@ No `/coder`, o atributo `args` do `<tool_call>` deve usar somente os subcomandos
 - `search --term "x" --dir .`
 - `read --file x`
 - `write --file x --content "base64" --encoding base64`
-- `patch --file x --search "base64" --replace "base64" --encoding base64`
+- `patch --file x --search "base64" --replace "base64" --encoding base64` (ou `patch --diff "base64" --diff-encoding base64`)
 - `exec --cmd "comando"`
+- `git-status --dir .`
+- `git-diff --dir .`
+- `git-log --dir .`
+- `git-changed --dir .`
+- `git-branch --dir .`
+- `test --dir .` (ou `--cmd "comando"`)
 - `rollback --file x`
 - `clean --dir .`
 
@@ -84,3 +91,23 @@ No `/coder`, o atributo `args` do `<tool_call>` deve usar somente os subcomandos
 5. Rodar testes: `exec --cmd "go test ./..."`
 
 {{< notice "success">}} Nesse modo, a saída sempre vai via <markup>@coder</markup>. Você não precisa escrever comandos diretamente no shell.{{< /notice >}}
+
+---
+
+## FAQ do /coder
+
+**1) Posso usar JSON em `args`?**  
+Sim. É o formato recomendado. Exemplo:  
+`<tool_call name="@coder" args="{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;main.go&quot;}}"/>`
+
+**2) Quando usar `patch --diff`?**  
+Quando a alteração envolve múltiplos trechos ou precisa de mais precisão. Você pode enviar um unified diff em `text` ou `base64`.
+
+**3) O que acontece se o `@coder` não estiver instalado?**  
+O `/coder` depende do plugin `@coder`. Sem ele, as chamadas de ferramenta falharão. Instale via `/plugin install` ou use o plugin fornecido.
+
+**4) `exec` é seguro?**  
+O `@coder exec` bloqueia padrões perigosos por padrão. Para comandos sensíveis, prefira usar os subcomandos Git e `test`.
+
+**5) Existe limite de leitura?**  
+Sim. Use `read --max-bytes`, `--head` ou `--tail` para controlar o tamanho da saída.
