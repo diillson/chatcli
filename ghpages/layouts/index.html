@@ -22,13 +22,6 @@
         color: var(--bs-primary);
     }
 
-    [data-bs-theme="dark"] .section-hero {
-        background-color: #2b3035;
-    }
-
-    [data-bs-theme="dark"] .lead {
-        color: var(--bs-secondary-color) !important;
-    }
 </style>
 
 <section class="py-5 section-hero">
@@ -84,4 +77,10 @@
         </div>
     </div>
 </section>
+
+<script>
+    // Force light mode on the landing page
+    document.documentElement.setAttribute('data-bs-theme', 'light');
+    document.documentElement.removeAttribute('data-dark-mode');
+</script>
 {{ end }}

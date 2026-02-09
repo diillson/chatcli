@@ -1,0 +1,38 @@
+/* Template Name: LotusLabs Docs
+   Author: Colin Wilson
+   File Description: Main CSS file of the Landing Page template
+*/
+
+// Custom Font Variables
+$font-family-secondary:  {{ .Site.Params.secondary_font | default "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Ubuntu'" }};
+$font-family-sans-serif: {{ .Site.Params.sans_serif_font | default "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Ubuntu'" }};
+$font-family-monospace:  {{ .Site.Params.mono_font | default "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace" }};
+
+// Core files
+@import "bootstrap/functions";
+@import "bootstrap/variables";
+@import "variables";
+@import "bootstrap/mixins";
+@import "bootstrap/bootstrap";
+
+// Plugins
+@import "custom/plugins/icons/google-material";
+
+// Structure
+@import "custom/structure/general";
+@import "custom/structure/topbar";
+@import "custom/structure/footer";
+
+// Components
+@import "custom/components/buttons";
+@import "custom/components/badge";
+@import "custom/components/backgrounds";
+
+// Pages
+@import "custom/pages/features";
+@import "custom/pages/helper";
+@import "custom/pages/hero";
+{{ if ($.Scratch.Get "image_compare_enabled") }}@import "custom/pages/image-compare-viewer";{{ end }}
+
+// Local overrides (keep light theme friendly)
+@import "custom/overrides";

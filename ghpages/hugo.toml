@@ -31,11 +31,19 @@ enableEmoji = true
   [params.social]
     github = "diillson/chatcli"
 
+  google_fonts = [
+    "Space+Grotesk:wght@400;500;600;700",
+    "IBM+Plex+Mono:wght@400;500"
+  ]
+  sans_serif_font = "Space Grotesk"
+  secondary_font  = "Space Grotesk"
+  mono_font       = "IBM Plex Mono"
+
 [params.docs]
   # Mantém os menus da barra lateral sempre expandidos para facilitar a navegação.
   alwaysopen = true
   # Habilita o modo escuro por padrão, mas permite que o usuário alterne.
-  darkMode = false
+  darkMode = true
   # Muda a cor do tema para azul, mais alinhado com a identidade de "terminal".
   themeColor = "blue"
   # Habilita o syntax highlighting do PrismJS para blocos de código.

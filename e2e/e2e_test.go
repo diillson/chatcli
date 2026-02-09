@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -66,6 +67,9 @@ func runChatCLI(t *testing.T, args []string, stdin string, env []string) (string
 }
 
 func TestE2E_OneShotMode(t *testing.T) {
+	auth.InvalidateCache()
+	authDir := t.TempDir()
+
 	// 1. Criar um servidor mock da OpenAI que responde a múltiplos endpoints
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -92,6 +96,9 @@ func TestE2E_OneShotMode(t *testing.T) {
 		"LLM_PROVIDER=OPENAI",
 		"OPENAI_API_URL=" + server.URL + "/v1/chat/completions",
 		"OPENAI_RESPONSES_API_URL=" + server.URL + "/v1/responses",
+		"OPENAI_MODEL=gpt-4o-mini",
+		"OPENAI_USE_RESPONSES=false",
+		"CHATCLI_AUTH_DIR=" + authDir,
 		// Forçar o idioma inglês para consistência do teste
 		"CHATCLI_LANG=en",
 	}

@@ -120,3 +120,18 @@ func TestParseToolArgsWithJSON_Array(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"read", "--file", "main.go"}, args)
 }
+
+func TestParseToolArgsWithJSON_EscapedObject(t *testing.T) {
+	args, err := parseToolArgsWithJSON(`{\"cmd\":\"write\",\"args\":{\"file\":\"main.go\",\"encoding\":\"base64\"}}`)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"write", "--encoding", "base64", "--file", "main.go"}, args)
+}
+
+func TestSanitizeAndParse_EscapedExecCommand(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	raw := `{\"cmd\":\"exec\",\"args\":{\"command\":\"mkdir -p testeapi\"}}`
+	sanitized := sanitizeToolCallArgs(raw, logger, "@coder", true)
+	args, err := parseToolArgsWithJSON(sanitized)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"exec", "--cmd", "mkdir -p testeapi"}, args)
+}

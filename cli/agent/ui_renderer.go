@@ -479,6 +479,49 @@ func (r *UIRenderer) RenderToolResult(output string, isError bool) {
 	r.RenderTimelineEvent(icon, title, displayOutput, color)
 }
 
+// RenderToolCallMinimal exibe a chamada de ferramenta em modo compacto
+func (r *UIRenderer) RenderToolCallMinimal(toolName, rawArgs string, current, total int) {
+	displayArgs := html.UnescapeString(rawArgs)
+	reBackslashNewline := regexp.MustCompile(`\\\s*[\r\n]+`)
+	displayArgs = reBackslashNewline.ReplaceAllString(displayArgs, " ")
+	spaceRe := regexp.MustCompile(`\s+`)
+	displayArgs = spaceRe.ReplaceAllString(strings.TrimSpace(displayArgs), " ")
+	displayArgs = cleanArgsForDisplay(displayArgs)
+
+	title := fmt.Sprintf("AÇÃO %d/%d", current, total)
+	content := fmt.Sprintf("%s %s",
+		r.Colorize(toolName, ColorYellow+ColorBold),
+		r.Colorize(displayArgs, ColorCyan))
+
+	r.RenderTimelineEvent("⚙️", title, content, ColorYellow)
+}
+
+// RenderToolResultMinimal exibe o resultado em modo compacto
+func (r *UIRenderer) RenderToolResultMinimal(output string, isError bool) {
+	icon := "✅"
+	title := "OK"
+	color := ColorGreen
+
+	if isError {
+		icon = "❌"
+		title = "ERRO"
+		color = ColorPurple
+	}
+
+	display := strings.TrimSpace(output)
+	if idx := strings.Index(display, "\n"); idx >= 0 {
+		display = display[:idx]
+	}
+	if len(display) > 240 {
+		display = display[:240] + "..."
+	}
+	if display == "" {
+		display = "-"
+	}
+
+	r.RenderTimelineEvent(icon, title, display, color)
+}
+
 // Helper para limpar argumentos visuais
 func cleanArgsForDisplay(args string) string {
 	// Esconder conteúdo base64 longo

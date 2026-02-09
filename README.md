@@ -700,6 +700,42 @@ O ChatCLI prioriza a segurança, bloqueando comandos perigosos por padrão. Voc�
 -  CHATCLI_AGENT_ALLOW_SUDO  para permitir/recusar  sudo  sem bloqueio automático (por padrão,  false ).
 Mesmo quando permitido, comandos perigosos podem exigir confirmação explícita no terminal.
 
+#### Arquivos de Policy do Modo Coder (Local vs Global)
+
+Por padrão, as policies ficam em `~/.chatcli/coder_policy.json`. Você também pode adicionar uma **policy local por projeto**:
+
+- Arquivo local: `./coder_policy.json` (raiz do projeto)
+- Arquivo global: `~/.chatcli/coder_policy.json`
+
+Comportamento da policy local:
+
+- Se `merge` for **true**, mescla com a global (local sobrescreve padrões iguais).
+- Se `merge` for **false** ou omitido, **somente** a local é usada.
+
+Exemplo (local com merge):
+```json
+{
+  "merge": true,
+  "rules": [
+    { "pattern": "@coder write", "action": "ask" },
+    { "pattern": "@coder exec --cmd 'rm -rf'", "action": "deny" }
+  ]
+}
+```
+
+#### Configurações de UI do Modo Coder
+
+Você pode controlar o estilo da UI e o banner de dicas do `/coder` com env vars:
+
+- `CHATCLI_CODER_UI`:
+  - `full` (padrão)
+  - `minimal`
+- `CHATCLI_CODER_BANNER`:
+  - `true` (padrão, mostra o cheat sheet)
+  - `false`
+
+Esses valores aparecem em `/status` e `/config`.
+
 ### Interação com o Agente
 
 Inicie o agente com  /agent <consulta>  ou  /run <consulta> . O agente irá sugerir comandos que você pode aprovar ou refinar.

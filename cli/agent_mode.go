@@ -46,6 +46,8 @@ type AgentMode struct {
 	executeCommandsFunc func(ctx context.Context, block agent.CommandBlock) (string, string)
 	isCoderMode         bool
 	isOneShot           bool
+	coderBannerShown    bool
+	lastPolicyMatch     *coder.Rule
 	// Métricas
 	tokenCounter *metrics.TokenCounter
 	turnTimer    *metrics.Timer
@@ -91,6 +93,48 @@ func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 	}
 	a.executeCommandsFunc = a.executeCommandsWithOutput
 	return a
+}
+
+func isCoderMinimalUI() bool {
+	val := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_UI")))
+	if val == "" || val == "full" || val == "false" || val == "0" {
+		return false
+	}
+	if val == "minimal" || val == "min" || val == "true" || val == "1" {
+		return true
+	}
+	return false
+}
+
+func isCoderBannerEnabled() bool {
+	val := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_BANNER")))
+	if val == "" || val == "true" || val == "1" || val == "yes" {
+		return true
+	}
+	if val == "false" || val == "0" || val == "no" {
+		return false
+	}
+	return true
+}
+
+func compactText(input string, maxLines int, maxLen int) string {
+	lines := strings.Split(input, "\n")
+	out := make([]string, 0, maxLines)
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		out = append(out, l)
+		if len(out) >= maxLines {
+			break
+		}
+	}
+	joined := strings.Join(out, " · ")
+	if maxLen > 0 && len(joined) > maxLen {
+		joined = joined[:maxLen] + "..."
+	}
+	return joined
 }
 
 // getInput obtém entrada do usuário de forma segura
@@ -157,6 +201,18 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// Adiciona contexto de ferramentas (plugins) ao prompt
 	systemInstruction += a.getToolContextString()
+
+	// Banner curto com cheat sheet no modo /coder (apenas para o usuário humano)
+	if isCoder && !a.coderBannerShown && isCoderBannerEnabled() {
+		fmt.Println()
+		fmt.Println("💡 Dica rápida (/coder):")
+		fmt.Println("  - read: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}")
+		fmt.Println("  - search: {\"cmd\":\"search\",\"args\":{\"term\":\"Login\",\"dir\":\".\"}}")
+		fmt.Println("  - write: {\"cmd\":\"write\",\"args\":{\"file\":\"x.go\",\"encoding\":\"base64\",\"content\":\"...\"}}")
+		fmt.Println("  - exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"mkdir -p testeapi\"}}")
+		fmt.Println()
+		a.coderBannerShown = true
+	}
 
 	// Inicializa ou atualiza o histórico com o System Prompt correto
 	if len(a.cli.history) == 0 {
@@ -1337,6 +1393,7 @@ func (a *AgentMode) getToolContextString() string {
 	}
 
 	var toolDescriptions []string
+	coderCheatSheet := ""
 	for _, plugin := range plugins {
 		if a.isCoderMode && !strings.EqualFold(plugin.Name(), "@coder") {
 			continue
@@ -1349,30 +1406,74 @@ func (a *AgentMode) getToolContextString() string {
 		if plugin.Schema() != "" {
 			// Decodifica o schema para um formato estruturado
 			var schema struct {
+				ArgsFormat  string `json:"argsFormat"`
 				Subcommands []struct {
-					Name        string `json:"name"`
-					Description string `json:"description"`
+					Name        string   `json:"name"`
+					Description string   `json:"description"`
+					Examples    []string `json:"examples"`
 					Flags       []struct {
 						Name        string `json:"name"`
 						Description string `json:"description"`
 						Type        string `json:"type"`
 						Default     string `json:"default"`
+						Required    bool   `json:"required"`
 					} `json:"flags"`
 				} `json:"subcommands"`
 			}
 
 			if err := json.Unmarshal([]byte(plugin.Schema()), &schema); err == nil {
-				b.WriteString("  Subcomandos Disponíveis:\n")
-				for _, sub := range schema.Subcommands {
-					b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
-					if len(sub.Flags) > 0 {
-						b.WriteString("      Flags:\n")
+				if a.isCoderMode {
+					// Modo /coder: contexto compacto para reduzir ruído
+					if schema.ArgsFormat != "" {
+						b.WriteString(fmt.Sprintf("  Formato args: %s\n", schema.ArgsFormat))
+					}
+					b.WriteString("  Subcomandos:\n")
+					for _, sub := range schema.Subcommands {
+						b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
+						var requiredFlags []string
 						for _, flag := range sub.Flags {
-							flagDesc := fmt.Sprintf("        - %s (%s): %s", flag.Name, flag.Type, flag.Description)
-							if flag.Default != "" {
-								flagDesc += fmt.Sprintf(" (padrão: %s)", flag.Default)
+							if flag.Required {
+								requiredFlags = append(requiredFlags, fmt.Sprintf("%s (%s)", flag.Name, flag.Type))
 							}
-							b.WriteString(flagDesc + "\n")
+						}
+						if len(requiredFlags) > 0 {
+							b.WriteString("      Obrigatórios: " + strings.Join(requiredFlags, ", ") + "\n")
+						}
+						if len(sub.Examples) > 0 {
+							b.WriteString(fmt.Sprintf("      Ex: %s\n", sub.Examples[0]))
+						}
+					}
+				} else {
+					// Modo /agent: contexto completo
+					if schema.ArgsFormat != "" {
+						b.WriteString(fmt.Sprintf("  Formato args: %s\n", schema.ArgsFormat))
+					}
+					b.WriteString("  Subcomandos Disponíveis:\n")
+					for _, sub := range schema.Subcommands {
+						b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
+						if len(sub.Flags) > 0 {
+							b.WriteString("      Flags:\n")
+							for _, flag := range sub.Flags {
+								req := ""
+								if flag.Required {
+									req = " [obrigatório]"
+								}
+								flagDesc := fmt.Sprintf("        - %s (%s)%s: %s", flag.Name, flag.Type, req, flag.Description)
+								if flag.Default != "" {
+									flagDesc += fmt.Sprintf(" (padrão: %s)", flag.Default)
+								}
+								b.WriteString(flagDesc + "\n")
+							}
+						}
+						if len(sub.Examples) > 0 {
+							limit := 2
+							if len(sub.Examples) < limit {
+								limit = len(sub.Examples)
+							}
+							b.WriteString("      Exemplos:\n")
+							for i := 0; i < limit; i++ {
+								b.WriteString(fmt.Sprintf("        - %s\n", sub.Examples[i]))
+							}
 						}
 					}
 				}
@@ -1388,7 +1489,22 @@ func (a *AgentMode) getToolContextString() string {
 		toolDescriptions = append(toolDescriptions, b.String())
 	}
 
-	return "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + strings.Join(toolDescriptions, "\n") + "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
+	if a.isCoderMode {
+		coderCheatSheet = "Cheat sheet (@coder):\n" +
+			"- read: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}\n" +
+			"- search: {\"cmd\":\"search\",\"args\":{\"term\":\"Login\",\"dir\":\".\"}}\n" +
+			"- write: {\"cmd\":\"write\",\"args\":{\"file\":\"x.go\",\"encoding\":\"base64\",\"content\":\"...\"}}\n" +
+			"- exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"mkdir -p testeapi\"}}\n\n"
+	}
+
+	toolContext := "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + coderCheatSheet + strings.Join(toolDescriptions, "\n") + "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
+	if a.isCoderMode {
+		toolContext += "\nDicas rápidas (@coder):\n" +
+			"- Use args JSON sempre que possível: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}\n" +
+			"- Subcomando obrigatório: use \"cmd\" ou \"argv\".\n" +
+			"- Para exec, use \"cmd\" (ou \"command\") dentro de args.\n"
+	}
+	return toolContext
 }
 
 func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
@@ -1513,25 +1629,43 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		remaining = stripXMLTagBlock(remaining, "explanation")
 		remaining = strings.TrimSpace(removeXMLTags(remaining))
 
+		coderMinimal := a.isCoderMode && isCoderMinimalUI()
+
 		if strings.TrimSpace(reasoning) != "" {
-			renderMDCard("🧠", "RACIOCÍNIO", reasoning, agent.ColorCyan)
+			if coderMinimal {
+				renderer.RenderTimelineEvent("🧭", "PLANO", compactText(reasoning, 3, 260), agent.ColorCyan)
+			} else {
+				renderMDCard("🧠", "RACIOCÍNIO", reasoning, agent.ColorCyan)
+			}
 			// Integração de Task Tracking (somente no modo /coder)
 			if a.isCoderMode {
 				agent.IntegrateTaskTracking(a.taskTracker, reasoning, a.logger)
 			}
 		}
 		if strings.TrimSpace(explanation) != "" {
-			renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
+			if coderMinimal {
+				renderer.RenderTimelineEvent("📝", "NOTA", compactText(explanation, 2, 220), agent.ColorLime)
+			} else {
+				renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
+			}
 		}
 		// Renderizar progresso das tarefas (somente no modo /coder)
 		if a.isCoderMode && a.taskTracker != nil && a.taskTracker.GetPlan() != nil {
 			progress := a.taskTracker.FormatProgress()
 			if strings.TrimSpace(progress) != "" {
-				renderMDCard("🧩", "PLANO DE AÇÃO", progress, agent.ColorLime)
+				if coderMinimal {
+					renderer.RenderTimelineEvent("🧩", "STATUS", compactText(progress, 2, 220), agent.ColorLime)
+				} else {
+					renderMDCard("🧩", "PLANO DE AÇÃO", progress, agent.ColorLime)
+				}
 			}
 		}
 		if strings.TrimSpace(remaining) != "" {
-			renderMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
+			if coderMinimal {
+				renderer.RenderTimelineEvent("💬", "RESUMO", compactText(remaining, 2, 220), agent.ColorGray)
+			} else {
+				renderMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
+			}
 		}
 
 		// =========================
@@ -1577,6 +1711,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// PRIORIDADE 1: EXECUTAR TOOL_CALL(s) EM LOTE (BATCH)
 		// =========================================================
 		if len(toolCalls) > 0 {
+			coderMinimal := a.isCoderMode && isCoderMinimalUI()
 			var batchOutputBuilder strings.Builder
 			var batchHasError bool
 			successCount := 0
@@ -1584,7 +1719,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// 1. Renderiza cabeçalho do lote se houver mais de 1 ação
 			if totalActions > 1 {
-				renderer.RenderBatchHeader(totalActions)
+				if coderMinimal {
+					renderer.RenderTimelineEvent("📦", "LOTE", fmt.Sprintf("%d ações", totalActions), agent.ColorPurple)
+				} else {
+					renderer.RenderBatchHeader(totalActions)
+				}
 			}
 
 			// Iterar sobre TODAS as chamadas de ferramenta sugeridas
@@ -1594,9 +1733,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					pm, err := coder.NewPolicyManager(a.logger)
 					if err == nil {
 						action := pm.Check(tc.Name, tc.Args)
+						if rule, ok := pm.LastMatchedRule(); ok {
+							a.lastPolicyMatch = &rule
+						} else {
+							a.lastPolicyMatch = nil
+						}
 						if action == coder.ActionDeny {
 							msg := "🛫 AÇÃO BLOQUEADA PELO USUÁRIO (Regra de Segurança). NÃO TENTE NOVAMENTE."
-							renderer.RenderToolResult(msg, true)
+							if coderMinimal {
+								renderer.RenderToolResultMinimal(msg, true)
+							} else {
+								renderer.RenderToolResult(msg, true)
+							}
 							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 							batchHasError = true
 							break
@@ -1610,12 +1758,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							case coder.DecisionDenyForever:
 								_ = pm.AddRule(pattern, coder.ActionDeny)
 								msg := "🛫 AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
-								renderer.RenderToolResult(msg, true)
+								if coderMinimal {
+									renderer.RenderToolResultMinimal(msg, true)
+								} else {
+									renderer.RenderToolResult(msg, true)
+								}
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 								batchHasError = true
 							case coder.DecisionDenyOnce:
 								msg := "🛫 AÇÃO NEGADA PELO USUÁRIO. NÃO TENTE O MESMO COMANDO NOVAMENTE. Peça novas instruções ou tente uma alternativa."
-								renderer.RenderToolResult(msg, true)
+								if coderMinimal {
+									renderer.RenderToolResultMinimal(msg, true)
+								} else {
+									renderer.RenderToolResult(msg, true)
+								}
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 								batchHasError = true
 							}
@@ -1634,7 +1790,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 				// 2. Renderiza a BOX de ação IMEDIATAMENTE (antes de processar)
 				// Isso dá feedback visual "Real-Time" do que está prestes a acontecer
-				renderer.RenderToolCallWithProgress(toolName, toolArgsStr, i+1, totalActions)
+				if coderMinimal {
+					renderer.RenderToolCallMinimal(toolName, toolArgsStr, i+1, totalActions)
+				} else {
+					renderer.RenderToolCallWithProgress(toolName, toolArgsStr, i+1, totalActions)
+				}
 
 				// UX: Força flush e pausa para leitura
 				os.Stdout.Sync()
@@ -1647,7 +1807,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				if a.isCoderMode && hasAnyNewline(normalizedArgsStr) {
 					msg := buildCoderSingleLineArgsEnforcementPrompt(toolArgsStr)
 					// Feedback visual de erro
-					renderer.RenderToolResult("Erro de formato: Argumentos com quebra de linha real.\n"+msg, true)
+					if coderMinimal {
+						renderer.RenderToolResultMinimal("Erro de formato: Argumentos com quebra de linha real.\n"+msg, true)
+					} else {
+						renderer.RenderToolResult("Erro de formato: Argumentos com quebra de linha real.\n"+msg, true)
+					}
 
 					a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
 					batchHasError = true
@@ -1665,6 +1829,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 					if a.isCoderMode {
 						fixMsg := fmt.Sprintf("Seu <tool_call> veio com args inválido (erro: %v). No modo /coder, args deve ser SEMPRE linha única.", parseErr)
+						fixMsg += "\n\nDica rápida (@coder):\n" +
+							"- Use JSON válido em linha única: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}\n" +
+							"- Subcomando obrigatório: \"cmd\" ou \"argv\".\n" +
+							"- Para exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"<comando>\"}}"
 						a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: fixMsg})
 						batchHasError = true
 						// Não break aqui, deixa cair no renderToolResult abaixo para feedback
@@ -1685,7 +1853,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							if missing, which := isCoderArgsMissingRequiredValue(toolArgs); missing {
 								msg := buildCoderToolCallFixPrompt(which)
 								// Feedback visual
-								renderer.RenderToolResult("Args inválido para @coder: falta argumento válido em "+which, true)
+								if coderMinimal {
+									renderer.RenderToolResultMinimal("Args inválido para @coder: falta argumento válido em "+which, true)
+								} else {
+									renderer.RenderToolResult("Args inválido para @coder: falta argumento válido em "+which, true)
+								}
 
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
 								batchHasError = true
@@ -1733,7 +1905,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						displayForHuman = displayForHuman + "\n\n--- ERRO ---\n" + errText
 					}
 				}
-				renderer.RenderToolResult(displayForHuman, execErr != nil)
+				if coderMinimal {
+					renderer.RenderToolResultMinimal(displayForHuman, execErr != nil)
+				} else {
+					renderer.RenderToolResult(displayForHuman, execErr != nil)
+				}
 
 				// Atualiza status da tarefa
 				if execErr != nil {
@@ -1856,6 +2032,11 @@ func sanitizeToolCallArgs(rawArgs string, logger *zap.Logger, toolName string, i
 	// 3) Processa continuações de linha estilo shell: "\" + espaços opcionais + newline
 	//    Substitui por um único espaço (para não colar argumentos)
 	normalized = processLineContinuations(normalized)
+
+	// 3b) Se parecer JSON escapado, faz unescape antes de correções de aspas
+	if unescaped, ok := utils.MaybeUnescapeJSONishArgs(normalized); ok {
+		normalized = unescaped
+	}
 
 	// 4) Remove "\ " (barra + espaço) fora de aspas que não faz sentido como escape
 	//    Comum quando a IA erra a formatação: --search \ "valor"
@@ -2348,6 +2529,9 @@ func parseToolArgsMaybeJSON(argLine string) ([]string, bool, error) {
 	if trimmed == "" {
 		return nil, false, nil
 	}
+	if unescaped, ok := utils.MaybeUnescapeJSONishArgs(trimmed); ok {
+		trimmed = unescaped
+	}
 	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
 		return nil, false, nil
 	}
@@ -2423,6 +2607,10 @@ func buildArgvFromJSONMap(m map[string]any) ([]string, bool, error) {
 	if raw, ok := m["args"]; ok {
 		if mm, ok := raw.(map[string]any); ok {
 			for k, v := range mm {
+				if k == "command" {
+					argsMap["cmd"] = v
+					continue
+				}
 				argsMap[k] = v
 			}
 		}
@@ -2430,6 +2618,10 @@ func buildArgvFromJSONMap(m map[string]any) ([]string, bool, error) {
 	if raw, ok := m["flags"]; ok {
 		if mm, ok := raw.(map[string]any); ok {
 			for k, v := range mm {
+				if k == "command" {
+					argsMap["cmd"] = v
+					continue
+				}
 				argsMap[k] = v
 			}
 		}
