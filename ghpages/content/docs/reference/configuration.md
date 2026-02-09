@@ -28,6 +28,9 @@ A ordem de prioridade para as configurações é:
 | `HISTORY_MAX_SIZE` | Tamanho máximo do arquivo de histórico (`.chatcli_history`) antes da rotação.                                                                     | `"100MB"`                  |
 | `HISTORY_FILE` | Caminho personalizado para o arquivo de histórico (suporta `~`, hoje ele cria o historico onde executou o chatcli).                               | `".chatcli_history"`       |
 | `CHATCLI_DOTENV`| Caminho personalizado para o seu arquivo `.env`.                                                                                                  | `".env"`                   |
+| `CHATCLI_IGNORE` | Caminho para arquivo de ignore (ex.: `.chatignore`). Quando definido, ele tem prioridade sobre o ignore do projeto/global.                        | `""`                       |
+| `CHATCLI_CODER_UI` | Estilo da UI do modo `/coder`: `full` (padrão) ou `minimal`.                                                                                    | `"full"`                   |
+| `CHATCLI_CODER_BANNER` | Exibe o cheat sheet rápido do `/coder` na entrada da sessão (`true`/`false`).                                                            | `"true"`                   |
 
 ## Autenticação OAuth
 
@@ -89,6 +92,7 @@ Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAu
 | `OLLAMA_BASE_URL` | URL base do seu servidor Ollama local.                                                       | Não |
 | `OLLAMA_MODEL` | O nome do modelo local a ser usado (ex: `llama3`, `codellama`).                              | Não |
 | `OLLAMA_FILTER_THINKING` | Filtra raciocínio intermediário em respostas (ex.: para `Qwen3`, `llama3` padrão `true`...). | Não |
+| `OLLAMA_MAX_TOKENS` | Define o máximo de tokens para o provedor Ollama. | Não |
 
 
 ### StackSpot
@@ -111,6 +115,8 @@ Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAu
 | `CHATCLI_AGENT_ALLOW_SUDO` | Defina como `"true"` para permitir que o agente sugira e execute comandos com `sudo`. **Use com extrema cautela.** |
 | `CHATCLI_AGENT_DENYLIST` | Lista de padrões regex (separados por `;`) para bloquear comandos adicionais no modo agente. |
 | `CHATCLI_AGENT_CMD_TIMEOUT` | Timeout para a execução de um único comando pelo agente (padrão: `10m`). |
+| `CHATCLI_AGENT_PLUGIN_MAX_TURNS` | Limite máximo de turnos do agente no modo `/agent`/`/coder` (padrão: `7`). |
+| `CHATCLI_AGENT_PLUGIN_TIMEOUT` | Timeout total do plugin do agente (padrão: `15m`). |
 
 
 --------

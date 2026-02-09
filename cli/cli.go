@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/config"
@@ -2514,6 +2515,46 @@ func (cli *ChatCLI) showConfig() {
 	printItem(i18n.T("cli.config.key_log_max_size"), os.Getenv("LOG_MAX_SIZE"))
 	printItem(i18n.T("cli.config.key_history_max_size"), os.Getenv("HISTORY_MAX_SIZE"))
 	printItem(i18n.T("cli.config.key_history_file_directory"), cli.historyManager.GetHistoryFilePath())
+
+	fmt.Printf("\n  %s\n", colorize("Coder Mode", ColorLime))
+	coderUIRaw := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_UI")))
+	coderUIEffective := "full"
+	if coderUIRaw == "minimal" || coderUIRaw == "min" || coderUIRaw == "true" || coderUIRaw == "1" {
+		coderUIEffective = "minimal"
+	}
+	coderBannerRaw := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_BANNER")))
+	coderBannerEffective := "on"
+	if coderBannerRaw == "false" || coderBannerRaw == "0" || coderBannerRaw == "no" {
+		coderBannerEffective = "off"
+	}
+	printItem("CHATCLI_CODER_UI", os.Getenv("CHATCLI_CODER_UI"))
+	printItem("CHATCLI_CODER_UI (effective)", coderUIEffective)
+	printItem("CHATCLI_CODER_BANNER", os.Getenv("CHATCLI_CODER_BANNER"))
+	printItem("CHATCLI_CODER_BANNER (effective)", coderBannerEffective)
+
+	policyPath := "[unknown]"
+	localPath := "[none]"
+	localMerge := "off"
+	rulesCount := "0"
+	lastRule := "[none]"
+	if pm, err := coder.NewPolicyManager(cli.logger); err == nil {
+		policyPath = pm.ActivePolicyPath()
+		if lp := pm.LocalPolicyPath(); strings.TrimSpace(lp) != "" {
+			localPath = lp
+			if pm.LocalMergeEnabled() {
+				localMerge = "on"
+			}
+		}
+		rulesCount = fmt.Sprintf("%d", pm.RulesCount())
+	}
+	printItem("CODER_POLICY (active)", policyPath)
+	printItem("CODER_POLICY (local)", localPath)
+	printItem("CODER_POLICY (local merge)", localMerge)
+	printItem("CODER_POLICY (rules)", rulesCount)
+	if cli.agentMode != nil && cli.agentMode.lastPolicyMatch != nil {
+		lastRule = fmt.Sprintf("%s => %s", cli.agentMode.lastPolicyMatch.Pattern, cli.agentMode.lastPolicyMatch.Action)
+	}
+	printItem("CODER_POLICY (last match)", lastRule)
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_current_provider"), ColorLime))
 	printItem(i18n.T("cli.config.key_provider_runtime"), cli.Provider)

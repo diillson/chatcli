@@ -32,6 +32,7 @@ func TestTaskTracker_ParseReasoning(t *testing.T) {
 			}
 			if plan == nil {
 				t.Fatal("Expected plan, got nil")
+				return
 			}
 			if len(plan.Tasks) != tt.expectedCount {
 				t.Errorf("Expected %d tasks, got %d", tt.expectedCount, len(plan.Tasks))
@@ -50,6 +51,7 @@ func TestTaskTracker_MarkCurrentAs(t *testing.T) {
 	plan := tracker.GetPlan()
 	if plan == nil {
 		t.Fatal("Expected plan, got nil")
+		return
 	}
 	tracker.MarkCurrentAs(TaskInProgress, "")
 	if plan.Tasks[0].Status != TaskInProgress {
@@ -71,6 +73,10 @@ func TestTaskTracker_FailureHandling(t *testing.T) {
 2. Rodar teste`
 	_ = tracker.ParseReasoning(reasoning)
 	plan := tracker.GetPlan()
+	if plan == nil {
+		t.Fatal("Expected plan, got nil")
+		return
+	}
 	for i := 0; i < 3; i++ {
 		tracker.MarkCurrentAs(TaskFailed, "erro de teste")
 	}
