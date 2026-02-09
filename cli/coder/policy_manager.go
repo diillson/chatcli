@@ -3,6 +3,7 @@ package coder
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,8 +29,16 @@ type Rule struct {
 type PolicyManager struct {
 	Rules      []Rule `json:"rules"`
 	configPath string
+	localPath  string
+	mergeLocal bool
+	lastRule   *Rule
 	logger     *zap.Logger
 	mu         sync.RWMutex
+}
+
+type policyFile struct {
+	Rules []Rule `json:"rules"`
+	Merge bool   `json:"merge"`
 }
 
 func NewPolicyManager(logger *zap.Logger) (*PolicyManager, error) {
@@ -74,9 +83,11 @@ func (pm *PolicyManager) Check(toolName, args string) Action {
 	}
 
 	if matched {
+		pm.lastRule = &bestMatch
 		return bestMatch.Action
 	}
 
+	pm.lastRule = nil
 	return ActionAsk
 }
 
@@ -101,24 +112,67 @@ func (pm *PolicyManager) AddRule(pattern string, action Action) error {
 		pm.Rules = append(pm.Rules, Rule{Pattern: pattern, Action: action})
 	}
 
+	pm.lastRule = nil
 	return pm.save()
 }
 
 func (pm *PolicyManager) load() {
-	if _, err := os.Stat(pm.configPath); os.IsNotExist(err) {
+	globalPath := pm.configPath
+	globalRules := []Rule{}
+
+	if _, err := os.Stat(globalPath); os.IsNotExist(err) {
 		pm.defaultRules()
+		globalRules = pm.Rules
+	} else {
+		data, err := os.ReadFile(globalPath)
+		if err != nil {
+			pm.logger.Warn("Failed to read security policy", zap.Error(err))
+		} else {
+			var pf policyFile
+			if err := json.Unmarshal(data, &pf); err != nil {
+				pm.logger.Warn("Failed to parse security policy", zap.Error(err))
+			} else {
+				globalRules = pf.Rules
+			}
+		}
+	}
+
+	localPath := findLocalPolicyPath()
+	if localPath == "" {
+		pm.Rules = globalRules
+		pm.localPath = ""
+		pm.mergeLocal = false
 		return
 	}
 
-	data, err := os.ReadFile(pm.configPath)
+	localData, err := os.ReadFile(localPath)
 	if err != nil {
-		pm.logger.Warn("Failed to read security policy", zap.Error(err))
+		pm.logger.Warn("Failed to read local security policy", zap.Error(err))
+		pm.Rules = globalRules
+		pm.localPath = ""
+		pm.mergeLocal = false
 		return
 	}
 
-	if err := json.Unmarshal(data, &pm); err != nil {
-		pm.logger.Warn("Failed to parse security policy", zap.Error(err))
+	var local policyFile
+	if err := json.Unmarshal(localData, &local); err != nil {
+		pm.logger.Warn("Failed to parse local security policy", zap.Error(err))
+		pm.Rules = globalRules
+		pm.localPath = ""
+		pm.mergeLocal = false
+		return
 	}
+
+	if local.Merge {
+		pm.Rules = mergeRules(globalRules, local.Rules)
+	} else {
+		pm.Rules = local.Rules
+	}
+
+	// Se existe policy local, persistir alterações nela.
+	pm.configPath = localPath
+	pm.localPath = localPath
+	pm.mergeLocal = local.Merge
 }
 
 func (pm *PolicyManager) save() error {
@@ -149,6 +203,46 @@ func (pm *PolicyManager) defaultRules() {
 	_ = pm.save()
 }
 
+func findLocalPolicyPath() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(wd, "coder_policy.json")
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	return ""
+}
+
+// mergeRules combina regras globais e locais, onde a regra local com mesmo pattern
+// substitui a global. Regras locais novas são adicionadas ao final.
+func mergeRules(globalRules, localRules []Rule) []Rule {
+	localMap := make(map[string]Action, len(localRules))
+	for _, r := range localRules {
+		localMap[r.Pattern] = r.Action
+	}
+
+	merged := make([]Rule, 0, len(globalRules)+len(localRules))
+	for _, r := range globalRules {
+		if action, ok := localMap[r.Pattern]; ok {
+			merged = append(merged, Rule{Pattern: r.Pattern, Action: action})
+			delete(localMap, r.Pattern)
+		} else {
+			merged = append(merged, r)
+		}
+	}
+
+	for _, r := range localRules {
+		if action, ok := localMap[r.Pattern]; ok {
+			merged = append(merged, Rule{Pattern: r.Pattern, Action: action})
+			delete(localMap, r.Pattern)
+		}
+	}
+
+	return merged
+}
+
 func GetSuggestedPattern(toolName, args string) string {
 	sub := extractCoderSubcommand(args)
 	if sub != "" {
@@ -157,10 +251,47 @@ func GetSuggestedPattern(toolName, args string) string {
 	return toolName
 }
 
+func (pm *PolicyManager) ActivePolicyPath() string {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.configPath
+}
+
+func (pm *PolicyManager) LocalPolicyPath() string {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.localPath
+}
+
+func (pm *PolicyManager) LocalMergeEnabled() bool {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.mergeLocal
+}
+
+func (pm *PolicyManager) RulesCount() int {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return len(pm.Rules)
+}
+
+func (pm *PolicyManager) LastMatchedRule() (Rule, bool) {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	if pm.lastRule == nil {
+		return Rule{}, false
+	}
+	return *pm.lastRule, true
+}
+
 func extractCoderSubcommand(args string) string {
-	trimmed := strings.TrimSpace(args)
+	trimmed := strings.TrimSpace(html.UnescapeString(args))
 	if trimmed == "" {
 		return ""
+	}
+
+	if unescaped, ok := utils.MaybeUnescapeJSONishArgs(trimmed); ok {
+		trimmed = unescaped
 	}
 
 	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {

@@ -55,6 +55,29 @@ Escolha:
 As regras são salvas localmente em `~/.chatcli/coder_policy.json`. Você pode editar esse arquivo manualmente se desejar, mas o menu interativo é a forma mais fácil de configurar.
 O matching usa o subcomando efetivo do `@coder` mesmo quando `args` é JSON (ex.: `{"cmd":"read"}` vira `@coder read`).
 
+### Policy Local (Por Projeto)
+
+Você pode adicionar uma policy local no diretório do projeto:
+
+- Local: `./coder_policy.json`
+- Global: `~/.chatcli/coder_policy.json`
+
+Comportamento:
+
+- Se `merge: true`, as regras locais **mesclam** com a global (local sobrescreve padrões iguais).
+- Se `merge: false` ou ausente, **somente** a policy local é usada.
+
+**Exemplo (local com merge):**
+```json
+{
+  "merge": true,
+  "rules": [
+    { "pattern": "@coder write", "action": "ask" },
+    { "pattern": "@coder exec --cmd 'rm -rf'", "action": "deny" }
+  ]
+}
+```
+
 ### Exemplo de Política (coder_policy.json):
 
 ```json
@@ -87,3 +110,18 @@ O matching usa o subcomando efetivo do `@coder` mesmo quando `args` é JSON (ex.
 2. **Libere Leituras:** Geralmente, é seguro dar `Always` para `coder read`, `coder tree`, `coder search` e Git read-only (`git-status`, `git-diff`, `git-log`).
 3. **Seja Específico:** O matching é feito por prefixo. Você pode liberar `coder exec --cmd 'ls` mas bloquear `coder exec --cmd 'rm`.
 4. **Exec Seguro:** O `@coder exec` bloqueia padrões perigosos por padrão. Use `--allow-unsafe` apenas quando necessário.
+
+---
+
+## UI do Modo Coder
+
+Você pode controlar o estilo e o banner do `/coder` via variáveis de ambiente:
+
+- `CHATCLI_CODER_UI`:
+  - `full` (padrão)
+  - `minimal`
+- `CHATCLI_CODER_BANNER`:
+  - `true` (padrão, mostra o cheat sheet)
+  - `false`
+
+Essas configurações aparecem em `/status` e `/config`.

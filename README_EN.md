@@ -699,6 +699,42 @@ ChatCLI prioritizes safety by blocking dangerous commands by default. You can st
 -  CHATCLI_AGENT_ALLOW_SUDO  to allow/deny  sudo  without automatic blocking (default:  false ).
 Even when allowed, dangerous commands may still require explicit confirmation in the terminal.
 
+#### Coder Mode Policy Files (Local vs Global)
+
+By default, policies are stored in `~/.chatcli/coder_policy.json`. You can also add a **project-local** policy file:
+
+- Local file: `./coder_policy.json` (project root)
+- Global file: `~/.chatcli/coder_policy.json`
+
+Local policy behavior:
+
+- If `merge` is **true**, local rules merge with global (local overrides same pattern).
+- If `merge` is **false** or omitted, **only** the local rules are used.
+
+Example (local with merge):
+```json
+{
+  "merge": true,
+  "rules": [
+    { "pattern": "@coder write", "action": "ask" },
+    { "pattern": "@coder exec --cmd 'rm -rf'", "action": "deny" }
+  ]
+}
+```
+
+#### Coder Mode UI Settings
+
+You can control the `/coder` UI style and the tips banner with env vars:
+
+- `CHATCLI_CODER_UI`:
+  - `full` (default)
+  - `minimal`
+- `CHATCLI_CODER_BANNER`:
+  - `true` (default, shows the quick cheat sheet)
+  - `false`
+
+These values are visible in `/status` and `/config`.
+
 ### Agent Interaction
 
 Start the agent with  /agent <query>  or  /run <query> . The agent will suggest commands that you can approve or refine.
