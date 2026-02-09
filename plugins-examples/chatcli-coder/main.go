@@ -281,7 +281,7 @@ func createBackup(path string) error {
 }
 
 func handleRead(args []string) {
-	fs := flag.NewFlagSet("read", flag.ExitOnError)
+	fs := flag.NewFlagSet("read", flag.ContinueOnError)
 	file := fs.String("file", "", "Arquivo")
 	start := fs.Int("start", 0, "Linha inicial (1-based)")
 	end := fs.Int("end", 0, "Linha final (1-based)")
@@ -289,7 +289,7 @@ func handleRead(args []string) {
 	tail := fs.Int("tail", 0, "Últimas N linhas")
 	maxBytes := fs.Int("max-bytes", defaultMaxBytes, "Limite de bytes")
 	encoding := fs.String("encoding", "text", "text|base64")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	files := collectFiles(*file, fs.Args())
 	if len(files) == 0 {
@@ -333,12 +333,12 @@ func handleRead(args []string) {
 }
 
 func handleWrite(args []string) {
-	fs := flag.NewFlagSet("write", flag.ExitOnError)
+	fs := flag.NewFlagSet("write", flag.ContinueOnError)
 	file := fs.String("file", "", "")
 	content := fs.String("content", "", "")
 	encoding := fs.String("encoding", "text", "")
 	appendMode := fs.Bool("append", false, "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	if *file == "" {
 		fatalf("--file requerido")
@@ -374,14 +374,14 @@ func handleWrite(args []string) {
 }
 
 func handlePatch(args []string) {
-	fs := flag.NewFlagSet("patch", flag.ExitOnError)
+	fs := flag.NewFlagSet("patch", flag.ContinueOnError)
 	file := fs.String("file", "", "")
 	search := fs.String("search", "", "")
 	replace := fs.String("replace", "", "")
 	encoding := fs.String("encoding", "text", "")
 	diff := fs.String("diff", "", "")
 	diffEncoding := fs.String("diff-encoding", "text", "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	if *diff != "" {
 		applyUnifiedDiff(*file, *diff, *diffEncoding)
@@ -425,13 +425,13 @@ func handlePatch(args []string) {
 }
 
 func handleTree(args []string) {
-	fs := flag.NewFlagSet("tree", flag.ExitOnError)
+	fs := flag.NewFlagSet("tree", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
 	maxDepth := fs.Int("max-depth", 6, "")
 	maxEntries := fs.Int("max-entries", defaultMaxEntries, "")
 	includeHidden := fs.Bool("include-hidden", false, "")
 	ignore := fs.String("ignore", "", "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	ignoreSet := parseCSVSet(*ignore)
 	defaultIgnore := map[string]bool{".git": true, "node_modules": true, "vendor": true}
@@ -484,7 +484,7 @@ func handleTree(args []string) {
 }
 
 func handleSearch(args []string) {
-	fs := flag.NewFlagSet("search", flag.ExitOnError)
+	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	term := fs.String("term", "", "")
 	dir := fs.String("dir", ".", "")
 	useRegex := fs.Bool("regex", false, "")
@@ -493,7 +493,7 @@ func handleSearch(args []string) {
 	maxResults := fs.Int("max-results", 0, "")
 	glob := fs.String("glob", "", "")
 	maxBytes := fs.Int("max-bytes", 1_048_576, "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	if *term == "" {
 		fatalf("--term requerido")
@@ -508,13 +508,13 @@ func handleSearch(args []string) {
 }
 
 func handleExec(args []string) {
-	fs := flag.NewFlagSet("exec", flag.ExitOnError)
+	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
 	cmdStr := fs.String("cmd", "", "")
 	dir := fs.String("dir", "", "")
 	timeout := fs.Int("timeout", 600, "")
 	allowUnsafe := fs.Bool("allow-unsafe", false, "")
 	allowSudo := fs.Bool("allow-sudo", false, "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 	if *cmdStr == "" {
 		fatalf("--cmd requerido")
 	}
@@ -571,9 +571,9 @@ func handleExec(args []string) {
 }
 
 func handleRollback(args []string) {
-	fs := flag.NewFlagSet("rb", flag.ExitOnError)
+	fs := flag.NewFlagSet("rb", flag.ContinueOnError)
 	file := fs.String("file", "", "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 	if *file == "" {
 		fatalf("--file requerido")
 	}
@@ -586,11 +586,11 @@ func handleRollback(args []string) {
 }
 
 func handleClean(args []string) {
-	fs := flag.NewFlagSet("clean", flag.ExitOnError)
+	fs := flag.NewFlagSet("clean", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
 	force := fs.Bool("force", false, "")
 	pattern := fs.String("pattern", "*.bak", "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	var matches []string
 	_ = filepath.Walk(*dir, func(p string, info os.FileInfo, err error) error {
@@ -625,23 +625,23 @@ func handleClean(args []string) {
 }
 
 func handleGitStatus(args []string) {
-	fs := flag.NewFlagSet("git-status", flag.ExitOnError)
+	fs := flag.NewFlagSet("git-status", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	out, err := runCommand(*dir, "git", "status", "-sb")
 	printCommandOutput(out, err)
 }
 
 func handleGitDiff(args []string) {
-	fs := flag.NewFlagSet("git-diff", flag.ExitOnError)
+	fs := flag.NewFlagSet("git-diff", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
 	staged := fs.Bool("staged", false, "")
 	nameOnly := fs.Bool("name-only", false, "")
 	stat := fs.Bool("stat", false, "")
 	path := fs.String("path", "", "")
 	context := fs.Int("context", 3, "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	cmdArgs := []string{"diff", fmt.Sprintf("--unified=%d", *context)}
 	if *staged {
@@ -662,11 +662,11 @@ func handleGitDiff(args []string) {
 }
 
 func handleGitLog(args []string) {
-	fs := flag.NewFlagSet("git-log", flag.ExitOnError)
+	fs := flag.NewFlagSet("git-log", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
 	limit := fs.Int("limit", 20, "")
 	path := fs.String("path", "", "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	cmdArgs := []string{"log", "--oneline", fmt.Sprintf("-n%d", *limit)}
 	if *path != "" {
@@ -678,9 +678,9 @@ func handleGitLog(args []string) {
 }
 
 func handleGitChanged(args []string) {
-	fs := flag.NewFlagSet("git-changed", flag.ExitOnError)
+	fs := flag.NewFlagSet("git-changed", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	out, err := runCommand(*dir, "git", "status", "--porcelain")
 	if err != nil {
@@ -706,20 +706,20 @@ func handleGitChanged(args []string) {
 }
 
 func handleGitBranch(args []string) {
-	fs := flag.NewFlagSet("git-branch", flag.ExitOnError)
+	fs := flag.NewFlagSet("git-branch", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	out, err := runCommand(*dir, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	printCommandOutput(out, err)
 }
 
 func handleTest(args []string) {
-	fs := flag.NewFlagSet("test", flag.ExitOnError)
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
 	cmd := fs.String("cmd", "", "")
 	timeout := fs.Int("timeout", 1800, "")
-	_ = fs.Parse(args)
+	parseFlagsOrDie(fs, args)
 
 	finalCmd := strings.TrimSpace(*cmd)
 	if finalCmd == "" {
@@ -738,24 +738,56 @@ func handleTest(args []string) {
 }
 
 func fatalf(msg string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "ERRO: "+msg+"\n", args...)
+	fmt.Fprintf(os.Stderr, "ERROR: "+msg+"\n", args...)
 	os.Exit(1)
 }
 
+// parseFlagsOrDie parses flags with ContinueOnError and provides helpful error messages
+// including the available flags for the subcommand.
+func parseFlagsOrDie(fs *flag.FlagSet, args []string) {
+	// Redirect default error output to discard (we handle errors ourselves)
+	fs.SetOutput(io.Discard)
+	if err := fs.Parse(args); err != nil {
+		// Collect available flags for help message
+		var flags []string
+		fs.VisitAll(func(f *flag.Flag) {
+			flags = append(flags, fmt.Sprintf("--%s (%s, default: %q)", f.Name, f.Usage, f.DefValue))
+		})
+		fatalf("Flag parse error in '%s': %v\nAvailable flags:\n  %s",
+			fs.Name(), err, strings.Join(flags, "\n  "))
+	}
+}
+
 func smartDecode(content, enc string) ([]byte, error) {
-	if enc == "base64" {
+	switch strings.ToLower(strings.TrimSpace(enc)) {
+	case "base64":
+		// Explicit base64: clean non-base64 chars and decode
 		reg := regexp.MustCompile("[^a-zA-Z0-9+/=]")
 		clean := reg.ReplaceAllString(content, "")
-		return base64.StdEncoding.DecodeString(clean)
-	}
-	if !strings.Contains(content, " ") && len(content)%4 == 0 {
-		reg := regexp.MustCompile("[^a-zA-Z0-9+/=]")
-		clean := reg.ReplaceAllString(content, "")
-		if d, err := base64.StdEncoding.DecodeString(clean); err == nil && utf8.Valid(d) {
-			return d, nil
+		decoded, err := base64.StdEncoding.DecodeString(clean)
+		if err != nil {
+			// Try URL-safe base64 as fallback
+			decoded, err = base64.URLEncoding.DecodeString(clean)
 		}
+		if err != nil {
+			// Try without padding
+			decoded, err = base64.RawStdEncoding.DecodeString(strings.TrimRight(clean, "="))
+		}
+		return decoded, err
+	case "auto":
+		// Explicit auto-detect mode: try base64 only if it really looks like it
+		if !strings.Contains(content, " ") && !strings.Contains(content, "\n") && len(content) >= 4 && len(content)%4 == 0 {
+			reg := regexp.MustCompile("[^a-zA-Z0-9+/=]")
+			clean := reg.ReplaceAllString(content, "")
+			if d, err := base64.StdEncoding.DecodeString(clean); err == nil && utf8.Valid(d) {
+				return d, nil
+			}
+		}
+		return []byte(content), nil
+	default:
+		// "text" or anything else: return as-is, never auto-detect
+		return []byte(content), nil
 	}
-	return []byte(content), nil
 }
 
 func collectFiles(primary string, extras []string) []string {

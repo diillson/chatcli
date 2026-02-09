@@ -7,6 +7,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1673,34 +1674,34 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// =========================
 		if a.isCoderMode {
 			if len(toolCalls) > 0 {
-				// Exige <reasoning> antes de agir
+				// Require <reasoning> before acting
 				if !hasReasoningTag(thoughtText) {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
-						Content: "Formato inválido no modo /coder. Antes de qualquer <tool_call>, escreva um <reasoning> curto (2-6 linhas) " +
-							"com as etapas e critério de sucesso, e então envie as <tool_call ... />.",
+						Content: "FORMAT ERROR: In /coder mode, you MUST write a <reasoning> block (2-6 lines with task list) BEFORE any <tool_call>. " +
+							"Rewrite your response starting with <reasoning>...</reasoning> then your <tool_call> tags.",
 					})
 					continue
 				}
 
-				// Exige uso exclusivo de @coder
+				// Require exclusive use of @coder
 				if !strings.EqualFold(strings.TrimSpace(toolCalls[0].Name), "@coder") {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
-						Content: "No modo /coder, a ferramenta obrigatória é @coder. " +
-							"Reenvie SOMENTE o próximo passo como <tool_call name=\"@coder\" args=\"...\" /> (sem blocos de código).",
+						Content: "FORMAT ERROR: In /coder mode, the ONLY allowed tool is @coder. " +
+							"Resend using: <tool_call name=\"@coder\" args='{\"cmd\":\"...\",\"args\":{...}}' />",
 					})
 					continue
 				}
 			}
 
-			// Proíbe blocos de código soltos (shell scripts) no modo coder
+			// Prohibit loose code blocks in coder mode
 			if len(toolCalls) == 0 {
 				if strings.Contains(aiResponse, "```") || strings.Contains(aiResponse, "```execute:") || regexp.MustCompile(`(?m)^[$#]\s+`).MatchString(aiResponse) {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
-						Content: "Você respondeu com comandos/blocos, o que é proibido no modo /coder. " +
-							"Use <reasoning> e então emita <tool_call name=\"@coder\" args=\"...\" />.",
+						Content: "FORMAT ERROR: Code blocks and shell commands are NOT allowed in /coder mode. " +
+							"You MUST use <reasoning> followed by <tool_call name=\"@coder\" args='{\"cmd\":\"exec\",\"args\":{\"cmd\":\"your command\"}}' />",
 					})
 					continue
 				}
@@ -1803,19 +1804,30 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// --- Lógica de Sanitização e Validação ---
 				normalizedArgsStr := sanitizeToolCallArgs(toolArgsStr, a.logger, toolName, a.isCoderMode)
 
-				// HARD RULE (/coder): proibir multiline real em args.
+				// /coder mode: if args have newlines, try compacting JSON before failing.
+				// Many AI models send pretty-printed JSON which is perfectly valid but multiline.
 				if a.isCoderMode && hasAnyNewline(normalizedArgsStr) {
-					msg := buildCoderSingleLineArgsEnforcementPrompt(toolArgsStr)
-					// Feedback visual de erro
-					if coderMinimal {
-						renderer.RenderToolResultMinimal("Erro de formato: Argumentos com quebra de linha real.\n"+msg, true)
+					compacted := tryCompactJSON(normalizedArgsStr)
+					if compacted != "" && !hasAnyNewline(compacted) {
+						// Successfully compacted multiline JSON into single line
+						if a.logger != nil {
+							a.logger.Debug("Compacted multiline JSON args to single line",
+								zap.String("tool", toolName))
+						}
+						normalizedArgsStr = compacted
 					} else {
-						renderer.RenderToolResult("Erro de formato: Argumentos com quebra de linha real.\n"+msg, true)
-					}
+						// Could not compact - enforce single line as before
+						msg := buildCoderSingleLineArgsEnforcementPrompt(toolArgsStr)
+						if coderMinimal {
+							renderer.RenderToolResultMinimal("Format error: args contain line breaks.\n"+msg, true)
+						} else {
+							renderer.RenderToolResult("Format error: args contain line breaks.\n"+msg, true)
+						}
 
-					a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
-					batchHasError = true
-					break // Interrompe o lote
+						a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
+						batchHasError = true
+						break
+					}
 				}
 
 				toolArgs, parseErr := parseToolArgsWithJSON(normalizedArgsStr)
@@ -1825,17 +1837,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// --- Preparação da Execução ---
 				if parseErr != nil {
 					execErr = parseErr
-					toolOutput = fmt.Sprintf("Erro de parsing nos argumentos: %v", parseErr)
+					toolOutput = fmt.Sprintf("Args parsing error: %v", parseErr)
 
 					if a.isCoderMode {
-						fixMsg := fmt.Sprintf("Seu <tool_call> veio com args inválido (erro: %v). No modo /coder, args deve ser SEMPRE linha única.", parseErr)
-						fixMsg += "\n\nDica rápida (@coder):\n" +
-							"- Use JSON válido em linha única: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}\n" +
-							"- Subcomando obrigatório: \"cmd\" ou \"argv\".\n" +
-							"- Para exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"<comando>\"}}"
+						fixMsg := fmt.Sprintf("ERROR: Your <tool_call> has invalid args (error: %v). In /coder mode, args MUST be valid single-line JSON.", parseErr)
+						fixMsg += "\n\nQuick fix - use one of these formats:\n" +
+							`<tool_call name="@coder" args='{"cmd":"read","args":{"file":"main.go"}}' />` + "\n" +
+							`<tool_call name="@coder" args='{"cmd":"exec","args":{"cmd":"go test ./..."}}' />` + "\n" +
+							`<tool_call name="@coder" args='{"cmd":"write","args":{"file":"out.go","content":"BASE64","encoding":"base64"}}' />` + "\n" +
+							`<tool_call name="@coder" args="read --file main.go" />`
 						a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: fixMsg})
 						batchHasError = true
-						// Não break aqui, deixa cair no renderToolResult abaixo para feedback
 					}
 				} else {
 					plugin, found := a.cli.pluginManager.GetPlugin(toolName)
@@ -2075,6 +2087,32 @@ func sanitizeToolCallArgs(rawArgs string, logger *zap.Logger, toolName string, i
 	}
 
 	return strings.TrimSpace(normalized)
+}
+
+// tryCompactJSON attempts to compact a multiline string that contains valid JSON.
+// This handles the common case where AI models send pretty-printed JSON args.
+// Returns the compacted single-line JSON string, or empty string if not valid JSON.
+func tryCompactJSON(input string) string {
+	trimmed := strings.TrimSpace(input)
+	if len(trimmed) == 0 {
+		return ""
+	}
+
+	// If it starts with { or [ it might be JSON - try to compact it
+	if trimmed[0] == '{' || trimmed[0] == '[' {
+		var buf bytes.Buffer
+		if err := json.Compact(&buf, []byte(trimmed)); err == nil {
+			return buf.String()
+		}
+	}
+
+	// Not valid JSON - try collapsing newlines to spaces for CLI-style args
+	collapsed := strings.Join(strings.Fields(trimmed), " ")
+	if !hasAnyNewline(collapsed) {
+		return collapsed
+	}
+
+	return ""
 }
 
 // processLineContinuations processa "\" + whitespace + newline de forma robusta
@@ -3126,22 +3164,16 @@ func isClearlyInvalidCoderValue(v string) bool {
 	return false
 }
 
-// buildCoderToolCallFixPrompt pede reenvio de um tool_call válido quando algum subcomando
-// do @coder vier com flag obrigatória sem valor (ou valor lixo como "\,").
+// buildCoderToolCallFixPrompt requests a valid tool_call when a required flag is missing.
 func buildCoderToolCallFixPrompt(missingFlag string) string {
 	return fmt.Sprintf(
-		"No modo /coder, seu <tool_call name=\"@coder\" ... /> veio INVÁLIDO: a flag obrigatória %s está sem um valor válido "+
-			"(ex.: você enviou '\\\\' ou '\\\\,' como placeholder). "+
-			"Reenvie SOMENTE um ÚNICO <tool_call name=\"@coder\" args=\"...\" /> em LINHA ÚNICA, com aspas balanceadas.\n\n"+
-			"Exemplos válidos:\n"+
-			"1) Search:\n"+
-			"<tool_call name=\"@coder\" args=\"search --term 'LoginService' --dir .\" />\n"+
-			"2) Patch (base64 em linha única):\n"+
-			"<tool_call name=\"@coder\" args=\"patch --file 'caminho' --encoding base64 --search 'BASE64_OLD' --replace 'BASE64_NEW'\" />\n"+
-			"3) Write (base64 em linha única):\n"+
-			"<tool_call name=\"@coder\" args=\"write --file 'caminho' --encoding base64 --content 'BASE64'\" />\n"+
-			"4) JSON args (recomendado):\n"+
-			"<tool_call name=\"@coder\" args=\"{&quot;cmd&quot;:&quot;read&quot;,&quot;args&quot;:{&quot;file&quot;:&quot;main.go&quot;}}\" />",
+		"ERROR: Your @coder tool_call is missing required flag %s (or its value is invalid/empty).\n\n"+
+			"Resend a SINGLE <tool_call> with valid args. Use JSON format (recommended):\n\n"+
+			`<tool_call name="@coder" args='{"cmd":"read","args":{"file":"main.go"}}' />`+"\n"+
+			`<tool_call name="@coder" args='{"cmd":"search","args":{"term":"LoginService","dir":"."}}' />`+"\n"+
+			`<tool_call name="@coder" args='{"cmd":"write","args":{"file":"out.go","content":"BASE64","encoding":"base64"}}' />`+"\n"+
+			`<tool_call name="@coder" args='{"cmd":"exec","args":{"cmd":"go test ./..."}}' />`+"\n"+
+			`<tool_call name="@coder" args='{"cmd":"patch","args":{"file":"f.go","search":"old","replace":"new"}}' />`,
 		missingFlag,
 	)
 }
@@ -3152,30 +3184,26 @@ func hasAnyNewline(s string) bool {
 	return strings.Contains(s, "\n") || strings.Contains(s, "\r")
 }
 
-// buildCoderSingleLineArgsEnforcementPrompt cria uma mensagem dura (e repetível)
-// para forçar a IA a reenviar args em linha única no /coder.
+// buildCoderSingleLineArgsEnforcementPrompt enforces single-line args requirement.
 func buildCoderSingleLineArgsEnforcementPrompt(originalArgs string) string {
 	trimmed := strings.TrimSpace(originalArgs)
 
-	// Mostra um preview curto para ajudar debugging sem poluir.
 	preview := trimmed
 	if len(preview) > 200 {
 		preview = preview[:200] + "..."
 	}
 
 	return fmt.Sprintf(
-		"No modo /coder, o atributo args do <tool_call> DEVE ser uma única linha (SEM quebras de linha). "+
-			"Seu args veio com multilinha (muitas vezes causado por uso de '\\\\' para continuação de linha). "+
-			"Isso quebra o parser do ChatCLI antes do plugin executar.\n\n"+
-			"Reenvie SOMENTE um ÚNICO <tool_call name=\"@coder\" args=\"...\" /> com args em LINHA ÚNICA.\n\n"+
-			"Regras rápidas:\n"+
-			"1) Não use '\\\\' para quebrar linha.\n"+
-			"2) Não use newline real dentro de args.\n"+
-			"3) Se precisar organizar, faça tudo em uma linha (use ';' ou '&&').\n\n"+
-			"Preview do args recebido (truncado):\n"+
-			"---\n%s\n---\n\n"+
-			"Exemplo válido:\n"+
-			"<tool_call name=\"@coder\" args=\"exec --cmd 'cd repo && ./script.sh | sed -n \\\"1,10p\\\"'\" />",
+		"ERROR: Your tool_call args contain line breaks, which is NOT allowed.\n\n"+
+			"The args attribute MUST be a SINGLE LINE. Use JSON format with single quotes around it:\n\n"+
+			`<tool_call name="@coder" args='{"cmd":"read","args":{"file":"main.go"}}' />`+"\n"+
+			`<tool_call name="@coder" args='{"cmd":"exec","args":{"cmd":"go build && go test ./..."}}' />`+"\n\n"+
+			"Rules:\n"+
+			"1. NEVER use backslash (\\) for line continuation\n"+
+			"2. NEVER put real newlines inside args\n"+
+			"3. For multiline file content, use base64 encoding\n"+
+			"4. Use single quotes around JSON args to avoid escaping issues\n\n"+
+			"Your args (truncated):\n---\n%s\n---",
 		preview,
 	)
 }
