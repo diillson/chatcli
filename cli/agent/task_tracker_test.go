@@ -32,6 +32,7 @@ func TestTaskTracker_ParseReasoning(t *testing.T) {
 			}
 			if plan == nil {
 				t.Fatal("Expected plan, got nil")
+				return
 			}
 			if len(plan.Tasks) != tt.expectedCount {
 				t.Errorf("Expected %d tasks, got %d", tt.expectedCount, len(plan.Tasks))
