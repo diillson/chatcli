@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.52.0](https://github.com/diillson/chatcli/compare/v1.51.1...v1.52.0) (2026-02-09)
+
+
+### Features
+
+* **coder:** add project-specific policy files and enhanced coder mode customizations ([#526](https://github.com/diillson/chatcli/issues/526)) ([#527](https://github.com/diillson/chatcli/issues/527)) ([558af57](https://github.com/diillson/chatcli/commit/558af570e9799eb31a6db0eb1929658981c606d8))
+
 ## [1.51.1](https://github.com/diillson/chatcli/compare/v1.51.0...v1.51.1) (2026-02-07)
 
 
