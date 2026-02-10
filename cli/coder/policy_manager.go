@@ -3,7 +3,6 @@ package coder
 import (
 	"encoding/json"
 	"fmt"
-	"html"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,12 +61,16 @@ func (pm *PolicyManager) Check(toolName, args string) Action {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
-	sub := extractCoderSubcommand(args)
+	sub, normalized := NormalizeCoderArgs(args)
 	var fullCommand string
-	if sub != "" {
+	if normalized != "" {
+		fullCommand = strings.TrimSpace(fmt.Sprintf("%s %s", toolName, normalized))
+	} else if sub != "" {
 		fullCommand = strings.TrimSpace(fmt.Sprintf("%s %s", toolName, sub))
 	} else {
-		fullCommand = strings.TrimSpace(fmt.Sprintf("%s %s", toolName, args))
+		// Cannot determine subcommand — use just toolName so no allow rule
+		// like "@coder read" matches. Falls through to ActionAsk (safe default).
+		fullCommand = strings.TrimSpace(toolName)
 	}
 
 	var bestMatch Rule
@@ -244,7 +247,7 @@ func mergeRules(globalRules, localRules []Rule) []Rule {
 }
 
 func GetSuggestedPattern(toolName, args string) string {
-	sub := extractCoderSubcommand(args)
+	sub, _ := NormalizeCoderArgs(args)
 	if sub != "" {
 		return fmt.Sprintf("%s %s", toolName, sub)
 	}
@@ -282,44 +285,4 @@ func (pm *PolicyManager) LastMatchedRule() (Rule, bool) {
 		return Rule{}, false
 	}
 	return *pm.lastRule, true
-}
-
-func extractCoderSubcommand(args string) string {
-	trimmed := strings.TrimSpace(html.UnescapeString(args))
-	if trimmed == "" {
-		return ""
-	}
-
-	if unescaped, ok := utils.MaybeUnescapeJSONishArgs(trimmed); ok {
-		trimmed = unescaped
-	}
-
-	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
-		var payload any
-		if err := json.Unmarshal([]byte(trimmed), &payload); err == nil {
-			switch v := payload.(type) {
-			case map[string]any:
-				if cmd, ok := v["cmd"].(string); ok && cmd != "" {
-					return cmd
-				}
-				if argv, ok := v["argv"].([]any); ok && len(argv) > 0 {
-					if first, ok := argv[0].(string); ok {
-						return first
-					}
-				}
-			case []any:
-				if len(v) > 0 {
-					if first, ok := v[0].(string); ok {
-						return first
-					}
-				}
-			}
-		}
-	}
-
-	argsParts := strings.Fields(trimmed)
-	if len(argsParts) > 0 {
-		return argsParts[0]
-	}
-	return ""
 }
