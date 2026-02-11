@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.53.1](https://github.com/diillson/chatcli/compare/v1.53.0...v1.53.1) (2026-02-11)
+
+
+### Bug Fixes
+
+* **coder:** improve error handling, JSON compacting, and parsing logic in /coder mode ([#532](https://github.com/diillson/chatcli/issues/532)) ([#533](https://github.com/diillson/chatcli/issues/533)) ([e08451f](https://github.com/diillson/chatcli/commit/e08451f23f6d74c85a85fa8677f937763e6ea1cb))
+
 ## [1.53.0](https://github.com/diillson/chatcli/compare/v1.52.0...v1.53.0) (2026-02-09)
 
 
