@@ -621,6 +621,60 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 					Key: prompt.ControlC,
 					Fn:  cli.handleCtrlC,
 				}),
+				// Ctrl+Arrow: word navigation (for terminals that send xterm sequences)
+				prompt.OptionAddKeyBind(prompt.KeyBind{
+					Key: prompt.ControlRight,
+					Fn:  prompt.GoRightWord,
+				}),
+				prompt.OptionAddKeyBind(prompt.KeyBind{
+					Key: prompt.ControlLeft,
+					Fn:  prompt.GoLeftWord,
+				}),
+				// Shift+Arrow: character navigation (no selection in go-prompt)
+				prompt.OptionAddKeyBind(prompt.KeyBind{
+					Key: prompt.ShiftRight,
+					Fn:  prompt.GoRightChar,
+				}),
+				prompt.OptionAddKeyBind(prompt.KeyBind{
+					Key: prompt.ShiftLeft,
+					Fn:  prompt.GoLeftChar,
+				}),
+				// macOS Terminal.app sends different escape sequences for
+				// Ctrl+Arrow that go-prompt doesn't recognize, causing raw
+				// escape bytes to be inserted as text. Register them via
+				// ASCIICodeBind to intercept before InsertText fallback.
+				prompt.OptionAddASCIICodeBind(
+					// macOS Terminal: Ctrl+Right = ESC ESC [ C
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x1b, 0x5b, 0x43},
+						Fn:        prompt.GoRightWord,
+					},
+					// macOS Terminal: Ctrl+Left = ESC ESC [ D
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x1b, 0x5b, 0x44},
+						Fn:        prompt.GoLeftWord,
+					},
+					// macOS Terminal: Shift+Right = ESC [ 1 ; 2 C (some terminals)
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x43},
+						Fn:        prompt.GoRightChar,
+					},
+					// macOS Terminal: Shift+Left = ESC [ 1 ; 2 D (some terminals)
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x44},
+						Fn:        prompt.GoLeftChar,
+					},
+					// rxvt: Ctrl+Right = ESC O c
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x4f, 0x63},
+						Fn:        prompt.GoRightWord,
+					},
+					// rxvt: Ctrl+Left = ESC O d
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x4f, 0x64},
+						Fn:        prompt.GoLeftWord,
+					},
+				),
 			)
 
 			p.Run()
