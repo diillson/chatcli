@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -93,24 +94,57 @@ func (p *ExecutablePlugin) ExecuteWithStream(ctx context.Context, args []string,
 	// Helper para ler streams em paralelo
 	readStream := func(reader io.Reader, isError bool) {
 		defer wg.Done()
-		scanner := bufio.NewScanner(reader)
-		buf := make([]byte, 0, 1024*1024)
-		scanner.Buffer(buf, 5*1024*1024)
+		readerBuf := bufio.NewReader(reader)
+		buf := make([]byte, 4096)
+		pending := make([]byte, 0, 4096)
 
-		for scanner.Scan() {
-			line := scanner.Text()
-
-			// Envia para o callback se existir (UI)
+		emit := func(line []byte, hasDelimiter bool) {
+			if len(line) == 0 && !hasDelimiter {
+				return
+			}
+			text := string(line)
 			if onOutput != nil {
 				prefix := ""
 				if isError {
 					prefix = "ERR: "
 				}
-				onOutput(prefix + line)
+				onOutput(prefix + text)
 			}
+			fullOutput.WriteString(text)
+			if hasDelimiter {
+				fullOutput.WriteString("\n")
+			}
+		}
 
-			// Acumula para o histórico da LLM
-			fullOutput.WriteString(line + "\n")
+		for {
+			n, err := readerBuf.Read(buf)
+			if n > 0 {
+				pending = append(pending, buf[:n]...)
+
+				for {
+					idx := bytes.IndexAny(pending, "\r\n")
+					if idx < 0 {
+						break
+					}
+					emit(pending[:idx], true)
+					skip := 1
+					if pending[idx] == '\r' && len(pending) > idx+1 && pending[idx+1] == '\n' {
+						skip = 2
+					}
+					pending = pending[idx+skip:]
+				}
+
+				if len(pending) > 4096 {
+					emit(pending, false)
+					pending = pending[:0]
+				}
+			}
+			if err != nil {
+				if err == io.EOF && len(pending) > 0 {
+					emit(pending, false)
+				}
+				break
+			}
 		}
 	}
 
