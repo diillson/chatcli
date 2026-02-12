@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -549,14 +548,20 @@ func handleExec(args []string) {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	stream := func(r io.Reader, w io.Writer) {
+	stream := func(r io.Reader, w *os.File) {
 		defer wg.Done()
-		s := bufio.NewScanner(r)
-		s.Buffer(make([]byte, 1024*1024), 5*1024*1024)
-		for s.Scan() {
-			fmt.Fprintln(w, s.Text())
-			if f, ok := w.(*os.File); ok {
-				_ = f.Sync()
+		buf := make([]byte, 4096)
+		for {
+			n, err := r.Read(buf)
+			if n > 0 {
+				_, _ = w.Write(buf[:n])
+				_ = w.Sync()
+			}
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				return
 			}
 		}
 	}
