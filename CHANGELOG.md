@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.53.2](https://github.com/diillson/chatcli/compare/v1.53.1...v1.53.2) (2026-02-12)
+
+
+### Bug Fixes
+
+* **cli:** replace `bufio.Scanner` with buffered reader for improved stream handling ([#535](https://github.com/diillson/chatcli/issues/535)) ([a675e85](https://github.com/diillson/chatcli/commit/a675e8569f265df0c016ef7b4fcb2631207e04b4))
+
 ## [1.53.1](https://github.com/diillson/chatcli/compare/v1.53.0...v1.53.1) (2026-02-11)
 
 
