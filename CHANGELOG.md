@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.53.3](https://github.com/diillson/chatcli/compare/v1.53.2...v1.53.3) (2026-02-12)
+
+
+### Bug Fixes
+
+* **cli/windows:** improve logger error handling and synchronous processing ([#537](https://github.com/diillson/chatcli/issues/537)) ([c65195d](https://github.com/diillson/chatcli/commit/c65195daefbb3e298ca86eb2070327e865b2a74d))
+
 ## [1.53.2](https://github.com/diillson/chatcli/compare/v1.53.1...v1.53.2) (2026-02-12)
 
 
