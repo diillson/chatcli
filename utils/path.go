@@ -125,8 +125,10 @@ func ExpandPath(path string) (string, error) {
 			return home, nil
 		}
 
-		// Verifica se o segundo caractere é um separador de diretório
-		if path[1] == filepath.Separator {
+		// Verifica se o segundo caractere é um separador de diretório.
+		// Accept both '/' and '\' so that paths like "~/.chatcli" work on Windows
+		// where filepath.Separator is '\'.
+		if path[1] == '/' || path[1] == filepath.Separator {
 			// Constrói o caminho completo a partir do diretório home
 			path = filepath.Join(home, path[2:])
 		} else {

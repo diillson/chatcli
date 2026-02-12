@@ -73,7 +73,15 @@ func main() {
 
 	defer func() {
 		if err := logger.Sync(); err != nil {
-			fmt.Printf("Erro ao fechar logger: %v\n", err)
+			// On Windows, syncing stdout/stderr returns "invalid handle" error.
+			// This is a known zap issue; ignore it safely.
+			msg := err.Error()
+			if !strings.Contains(msg, "/dev/stdout") &&
+				!strings.Contains(msg, "/dev/stderr") &&
+				!strings.Contains(msg, "invalid argument") &&
+				!strings.Contains(msg, "inappropriate ioctl") {
+				fmt.Fprintf(os.Stderr, "Erro ao fechar logger: %v\n", err)
+			}
 		}
 	}()
 

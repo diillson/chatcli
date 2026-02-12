@@ -42,13 +42,16 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		// /agent pode ser gerenciamento de personas OU iniciar modo agente
 		if !ch.handleAgentPersonaSubcommand(userInput) {
 			// Não é um subcomando, inicia modo agente
+			ch.cli.pendingAction = "agent"
 			panic(agentModeRequest)
 		}
 		return false
 	case strings.HasPrefix(userInput, "/run"):
 		// /run inicia o modo agente (com ou sem persona ativa)
+		ch.cli.pendingAction = "agent"
 		panic(agentModeRequest)
 	case strings.HasPrefix(userInput, "/coder"):
+		ch.cli.pendingAction = "coder"
 		panic(coderModeRequest)
 	case strings.HasPrefix(userInput, "/switch"):
 		ch.cli.handleSwitchCommand(userInput)

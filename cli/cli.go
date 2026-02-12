@@ -160,6 +160,7 @@ type ChatCLI struct {
 	contextHandler       *ContextHandler
 	personaHandler       *PersonaHandler
 	executionProfile     ExecutionProfile
+	pendingAction        string // stores intended action before panic (for Windows go-prompt tearDown workaround)
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -371,6 +372,7 @@ func (cli *ChatCLI) executor(in string) {
 	}
 
 	if strings.HasPrefix(in, "/run") {
+		cli.pendingAction = "agent"
 		panic(agentModeRequest)
 	}
 
@@ -392,6 +394,7 @@ func (cli *ChatCLI) executor(in string) {
 
 	if strings.HasPrefix(in, "/") || in == "exit" || in == "quit" {
 		if cli.commandHandler.HandleCommand(in) {
+			cli.pendingAction = "exit"
 			panic(errExitRequest)
 		}
 		return
@@ -403,7 +406,15 @@ func (cli *ChatCLI) executor(in string) {
 	}
 
 	cli.interactionState = StateProcessing
-	go cli.processLLMRequest(in)
+	if runtime.GOOS == "windows" {
+		// On Windows, run synchronously so go-prompt naturally redraws the prompt
+		// after the response completes. SIGWINCH doesn't exist on Windows, so the
+		// async approach leaves go-prompt waiting for a keypress before redrawing.
+		// Ctrl+C still works via the OS signal handler (SIGINT) in a separate goroutine.
+		cli.processLLMRequest(in)
+	} else {
+		go cli.processLLMRequest(in)
+	}
 }
 
 // IsExecuting retorna true se uma operação está em andamento
@@ -591,10 +602,14 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					if r == agentModeRequest {
-					} else if r == coderModeRequest {
+					// On Windows, go-prompt tearDown may panic with "close of closed channel"
+					// which replaces our original panic value. Use pendingAction as fallback.
+					action := cli.pendingAction
+					cli.pendingAction = ""
+					if r == agentModeRequest || action == "agent" {
+					} else if r == coderModeRequest || action == "coder" {
 						cli.restoreTerminal()
-					} else if r == errExitRequest {
+					} else if r == errExitRequest || action == "exit" {
 						shouldContinue = false
 					} else {
 						panic(r)
@@ -885,7 +900,13 @@ func (cli *ChatCLI) cleanup() {
 		cli.pluginManager.Close()
 	}
 	if err := cli.logger.Sync(); err != nil {
-		fmt.Printf("Falha ao sincronizar logger: %v\n", err)
+		msg := err.Error()
+		if !strings.Contains(msg, "/dev/stdout") &&
+			!strings.Contains(msg, "/dev/stderr") &&
+			!strings.Contains(msg, "invalid argument") &&
+			!strings.Contains(msg, "inappropriate ioctl") {
+			fmt.Fprintf(os.Stderr, "Falha ao sincronizar logger: %v\n", err)
+		}
 	}
 }
 
