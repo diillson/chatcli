@@ -8,7 +8,7 @@ const (
 	StackSpotBaseURL         = "https://genai-inference-app.stackspot.com/v1" // ATUALIZADO
 	StackSpotDefaultModel    = "StackSpotAI"
 	StackSpotResponseTimeout = 2 * time.Second
-	DefaultLogFile           = "$HOME/.chatcli/app.log"
+	DefaultLogFile           = "~/.chatcli/app.log"
 	DefaultStackSpotRealm    = "zup"
 	DefaultStackSpotAgentID  = "default"
 

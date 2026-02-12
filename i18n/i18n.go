@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"golang.org/x/text/language"
@@ -69,7 +68,7 @@ func Init() {
 
 		registeredTags = append(registeredTags, tag)
 
-		content, err := localesFS.ReadFile(filepath.Join("locales", fileName))
+		content, err := localesFS.ReadFile("locales/" + fileName)
 		if err != nil {
 			continue
 		}
