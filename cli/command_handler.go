@@ -298,7 +298,10 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 			fmt.Println(i18n.T("plugin.install.usage"))
 			return
 		}
-		repoURL := args[2]
+		rawURL := args[2]
+
+		// Parse the URL: detect GitHub/GitLab tree URLs and extract repo, branch, subdir.
+		cloneURL, branch, subDir := parseGitURL(rawURL)
 
 		// AVISO DE SEGURANÆA
 		fmt.Println(colorize(i18n.T("plugin.install.security_warning"), ColorYellow))
@@ -309,7 +312,7 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 			_ = cmd.Run()
 		}
 
-		fmt.Print(i18n.T("plugin.install.confirm", repoURL))
+		fmt.Print(i18n.T("plugin.install.confirm", rawURL))
 		reader := bufio.NewReader(os.Stdin)
 		confirm, _ := reader.ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(confirm)) != "s" {
@@ -317,7 +320,7 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 			return
 		}
 
-		fmt.Println(i18n.T("plugin.install.installing", repoURL))
+		fmt.Println(i18n.T("plugin.install.installing", rawURL))
 
 		tempDir, err := os.MkdirTemp("", "chatcli-plugin-")
 		if err != nil {
@@ -326,16 +329,40 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 		}
 		defer os.RemoveAll(tempDir)
 
-		if err := exec.Command("git", "clone", "--depth=1", repoURL, tempDir).Run(); err != nil {
+		// Build git clone args: use --branch if we parsed one from the URL.
+		cloneArgs := []string{"clone", "--depth=1"}
+		if branch != "" {
+			cloneArgs = append(cloneArgs, "--branch", branch)
+		}
+		cloneArgs = append(cloneArgs, cloneURL, tempDir)
+
+		cloneCmd := exec.Command("git", cloneArgs...)
+		if output, err := cloneCmd.CombinedOutput(); err != nil {
 			fmt.Println(i18n.T("plugin.install.error.clone", err))
+			fmt.Println(string(output))
 			return
 		}
 
-		pluginName := filepath.Base(repoURL)
+		// Determine the build directory (repo root or subdirectory).
+		buildDir := tempDir
+		if subDir != "" {
+			buildDir = filepath.Join(tempDir, subDir)
+			if info, err := os.Stat(buildDir); err != nil || !info.IsDir() {
+				fmt.Println(i18n.T("plugin.install.error.build",
+					fmt.Errorf("subdirectory '%s' not found in repository", subDir), ""))
+				return
+			}
+		}
+
+		// Plugin name comes from the subdirectory (if present) or the repo name.
+		pluginName := filepath.Base(buildDir)
 		pluginName = strings.TrimSuffix(pluginName, ".git")
+		if runtime.GOOS == "windows" {
+			pluginName += ".exe"
+		}
 
 		buildCmd := exec.Command("go", "build", "-o", filepath.Join(pluginManager.PluginsDir(), pluginName), ".")
-		buildCmd.Dir = tempDir
+		buildCmd.Dir = buildDir
 		if output, err := buildCmd.CombinedOutput(); err != nil {
 			fmt.Println(i18n.T("plugin.install.error.build", err, string(output)))
 			return
@@ -442,4 +469,48 @@ func (ch *CommandHandler) handleAgentPersonaSubcommand(userInput string) bool {
 		// Não é um subcomando de persona, deve ser uma tarefa para o modo agente
 		return false
 	}
+}
+
+// parseGitURL parses a git URL that may contain a subdirectory path.
+// It supports GitHub and GitLab "tree" URLs like:
+//
+//	https://github.com/owner/repo/tree/branch/path/to/plugin
+//	https://gitlab.com/owner/repo/-/tree/branch/path/to/plugin
+//
+// Returns (cloneURL, branch, subDir). For plain repo URLs, branch and subDir are empty.
+func parseGitURL(rawURL string) (cloneURL, branch, subDir string) {
+	// GitHub: https://github.com/{owner}/{repo}/tree/{branch}/{path...}
+	if idx := strings.Index(rawURL, "/tree/"); idx != -1 {
+		repoBase := rawURL[:idx]
+		rest := rawURL[idx+len("/tree/"):]
+
+		// rest = "branch/path/to/plugin" or just "branch"
+		if slashIdx := strings.IndexByte(rest, '/'); slashIdx != -1 {
+			branch = rest[:slashIdx]
+			subDir = rest[slashIdx+1:]
+		} else {
+			branch = rest
+		}
+		// Remove trailing slashes from subDir
+		subDir = strings.TrimRight(subDir, "/")
+		return repoBase + ".git", branch, subDir
+	}
+
+	// GitLab: https://gitlab.com/{owner}/{repo}/-/tree/{branch}/{path...}
+	if idx := strings.Index(rawURL, "/-/tree/"); idx != -1 {
+		repoBase := rawURL[:idx]
+		rest := rawURL[idx+len("/-/tree/"):]
+
+		if slashIdx := strings.IndexByte(rest, '/'); slashIdx != -1 {
+			branch = rest[:slashIdx]
+			subDir = rest[slashIdx+1:]
+		} else {
+			branch = rest
+		}
+		subDir = strings.TrimRight(subDir, "/")
+		return repoBase + ".git", branch, subDir
+	}
+
+	// Plain URL — return as-is.
+	return rawURL, "", ""
 }
