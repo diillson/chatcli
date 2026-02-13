@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.53.4](https://github.com/diillson/chatcli/compare/v1.53.3...v1.53.4) (2026-02-13)
+
+
+### Bug Fixes
+
+* **cli:** improve plugin installation handling for GitHub/GitLab URLs ([#539](https://github.com/diillson/chatcli/issues/539)) ([ea5e4fa](https://github.com/diillson/chatcli/commit/ea5e4fa882b2caf63a8a417cc4f7f90bdce95a4a))
+
 ## [1.53.3](https://github.com/diillson/chatcli/compare/v1.53.2...v1.53.3) (2026-02-12)
 
 
