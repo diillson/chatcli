@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.54.1](https://github.com/diillson/chatcli/compare/v1.54.0...v1.54.1) (2026-02-14)
+
+
+### Bug Fixes
+
+* **auth:** update Anthropic OAuth flow with PKCE and scope adjustments ([#543](https://github.com/diillson/chatcli/issues/543)) ([b3b3e8f](https://github.com/diillson/chatcli/commit/b3b3e8f1ef1a7f66f5f37634b67935e35b685067))
+
 ## [1.54.0](https://github.com/diillson/chatcli/compare/v1.53.4...v1.54.0) (2026-02-14)
 
 
