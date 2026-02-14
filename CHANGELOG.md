@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.54.0](https://github.com/diillson/chatcli/compare/v1.53.4...v1.54.0) (2026-02-14)
+
+
+### Features
+
+* **security:** enforce stricter file and directory permissions across CLI components ([#541](https://github.com/diillson/chatcli/issues/541)) ([4683b07](https://github.com/diillson/chatcli/commit/4683b0729ecb33b0af7e6252934ae516aa441ac9))
+
 ## [1.53.4](https://github.com/diillson/chatcli/compare/v1.53.3...v1.53.4) (2026-02-13)
 
 
