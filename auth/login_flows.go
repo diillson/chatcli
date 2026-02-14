@@ -24,7 +24,7 @@ const (
 	AnthropicAuthURL       = "https://claude.ai/oauth/authorize"
 	AnthropicTokenURL      = "https://console.anthropic.com/v1/oauth/token"
 	AnthropicRedirectURI   = "https://console.anthropic.com/oauth/code/callback"
-	AnthropicScopes        = "user:profile user:inference" // L6: removed overly broad org:create_api_key
+	AnthropicScopes        = "org:create_api_key user:profile user:inference"
 
 	// OpenAI Codex OAuth
 	defaultOpenAICodexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -54,10 +54,6 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 	if err != nil {
 		return "", err
 	}
-	state, err := GenerateState()
-	if err != nil {
-		return "", fmt.Errorf("failed to generate OAuth state: %w", err)
-	}
 
 	q := url.Values{}
 	q.Set("code", "true")
@@ -67,7 +63,7 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 	q.Set("scope", AnthropicScopes)
 	q.Set("code_challenge", pkce.Challenge)
 	q.Set("code_challenge_method", "S256")
-	q.Set("state", state)
+	q.Set("state", pkce.Verifier)
 	authURL := AnthropicAuthURL + "?" + q.Encode()
 
 	// Try to open browser automatically for convenience
@@ -105,7 +101,7 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 		"code":          code,
 		"redirect_uri":  AnthropicRedirectURI,
 		"code_verifier": pkce.Verifier,
-		"state":         state,
+		"state":         pkce.Verifier,
 	})
 	if err != nil {
 		return "", err
