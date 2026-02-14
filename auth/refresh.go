@@ -41,7 +41,7 @@ func RefreshOAuth(ctx context.Context, cred *AuthProfileCredential, logger *zap.
 		tokenURL = OpenAITokenURL
 		clientID = cred.ClientID
 		if clientID == "" {
-			clientID = OpenAICodexClientID
+			clientID = OpenAICodexClientID()
 		}
 	default:
 		return nil, fmt.Errorf("unsupported oauth provider: %s", cred.Provider)
@@ -72,7 +72,9 @@ func RefreshOAuth(ctx context.Context, cred *AuthProfileCredential, logger *zap.
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("oauth refresh failed (%s): %s", resp.Status, string(raw))
+		// Sanitize response body to prevent leaking tokens in error messages
+		sanitized := utils.SanitizeSensitiveText(string(raw))
+		return nil, fmt.Errorf("oauth refresh failed (%s): %s", resp.Status, sanitized)
 	}
 
 	var tr OAuthTokenResponse
@@ -86,7 +88,8 @@ func RefreshOAuth(ctx context.Context, cred *AuthProfileCredential, logger *zap.
 		cred.Refresh = tr.RefreshToken
 	}
 	if tr.ExpiresIn > 0 {
-		cred.Expires = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second).UnixMilli()
+		// M6: Use calcExpiresAtMilli for consistent 5-minute safety margin
+		cred.Expires = calcExpiresAtMilli(tr.ExpiresIn)
 	}
 	return cred, nil
 }

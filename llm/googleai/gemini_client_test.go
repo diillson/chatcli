@@ -14,7 +14,7 @@ import (
 
 func TestGeminiClient_SendPrompt_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Contains(t, r.URL.RawQuery, "key=test-api-key")
+		assert.Equal(t, "test-api-key", r.Header.Get("x-goog-api-key"))
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
 		resp := `{"candidates": [{"content": {"parts": [{"text": "Hello from Gemini!"}]}}]}`

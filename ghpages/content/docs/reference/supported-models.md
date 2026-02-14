@@ -15,12 +15,12 @@ Você pode trocar de modelo a qualquer momento usando o comando `/switch --model
 
 Os modelos da OpenAI são ideais para uma vasta gama de tarefas, desde a geração de código até o raciocínio complexo.
 
-| Nome do Modelo (ID) | Nome de Exibição | Janela de Contexto |
-| :------------------ | :--------------- | :----------------- |
-| `gpt-4o`            | GPT-4o           | 50,000 tokens      |
-| `gpt-4o-mini`       | GPT-4o mini      | 50,000 tokens      |
-| `gpt-5`             | GPT-5            | 50,000 tokens      |
-| `gpt-4`             | GPT-4 family     | 50,000 tokens      |
+| Nome do Modelo (ID) | Aliases | Nome de Exibição | Janela de Contexto |
+| :------------------ | :------ | :--------------- | :----------------- |
+| `gpt-5`             | `gpt-5-mini`, `gpt-5-nano` | GPT-5            | 50,000 tokens      |
+| `gpt-4o`            | — | GPT-4o           | 50,000 tokens      |
+| `gpt-4o-mini`       | — | GPT-4o mini      | 50,000 tokens      |
+| `gpt-4`             | `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano` | GPT-4 family     | 50,000 tokens      |
 
 ---
 
@@ -28,16 +28,18 @@ Os modelos da OpenAI são ideais para uma vasta gama de tarefas, desde a geraç�
 
 Os modelos da Anthropic são conhecidos por suas grandes janelas de contexto e excelente capacidade de seguir instruções complexas.
 
-| Nome do Modelo (ID)                                   | Nome de Exibição   | Janela de Contexto |
-|:------------------------------------------------------| :----------------- | :----------------- |
-| `claude-3-5-sonnet-20240620` (ou `claude-3.5-sonnet`) | Claude 3.5 Sonnet | 200,000 tokens     |
-| `claude-3-opus-20240229` (ou `claude-3-opus`)         | Claude 3 Opus     | 200,000 tokens     |
-| `claude-3-sonnet-20240229` (ou `claude-3-sonnet`)     | Claude 3 Sonnet   | 200,000 tokens     |
-| `claude-3-haiku-20240307` (ou `claude-3-haiku`)       | Claude 3 Haiku    | 200,000 tokens     |
-| `claude-4`                                            | Claude 4| 200,000 tokens|
-| `claude-4-opus`                                       | Claude 4 Opus| 200,000 tokens|
-| `claude-4-sonnet`                                     | Claude 4 Sonnet| 200,000 tokens|
-| `claude-4-5-sonnet`                                   | Claude 4.5 | 200,000 tokens|
+| Nome do Modelo (ID) | Aliases | Nome de Exibição | Janela de Contexto |
+|:---------------------|:--------|:-----------------|:-------------------|
+| `claude-sonnet-4-5` | `claude-4-5-sonnet`, `sonnet-4-5` | Claude Sonnet 4.5 | 200,000 tokens |
+| `claude-opus-4-6` | `opus-4-6` | Claude Opus 4.6 | 400,000 tokens |
+| `claude-opus-4-5` | `opus-4-5` | Claude Opus 4.5 | 200,000 tokens |
+| `claude-opus-4-1-20250805` | `claude-opus-4-1`, `opus-4-1` | Claude Opus 4.1 | 20,000 tokens |
+| `claude-opus-4-20250514` | `opus-4` | Claude Opus 4 | 20,000 tokens |
+| `claude-sonnet-4` | `claude-4-sonnet`, `sonnet-4-20250514` | Claude Sonnet 4 | 50,000 tokens |
+| `claude-sonnet-3-7-20250219` | `claude-3-7-sonnet` | Claude Sonnet 3.7 | 50,000 tokens |
+| `claude-sonnet-3-5-20241022` | `claude-3-5-sonnet` | Claude Sonnet 3.5 | 50,000 tokens |
+| `claude-opus-3` | `claude-3-opus` | Claude Opus 3 | 32,000 tokens |
+| `claude-haiku-3` | `claude-3-haiku` | Claude Haiku 3 | 42,000 tokens |
 
 ---
 
@@ -45,13 +47,14 @@ Os modelos da Anthropic são conhecidos por suas grandes janelas de contexto e e
 
 Os modelos Gemini do Google oferecem capacidades multimodais avançadas e grandes janelas de contexto.
 
-| Nome do Modelo (ID)       | Nome de Exibição | Janela de Contexto |
-|:--------------------------|:-----------------|:-------------------|
-| `gemini-1.5-pro-latest`   | Gemini 1.5 Pro   | 1,000,000 tokens   |
-| `gemini-1.5-flash-latest` | Gemini 1.5 Flash | 1,000,000 tokens   |
-| `gemini-1.0-pro`/`flash`  | Gemini 1.0 Pro   | 32,000 tokens      |
-| `gemini-2.0-pro`/`flash`  | Gemini 2.0 Pro   | 2000000 tokens     |
-| `gemini-2.5-pro`/`flash`  | Gemini 2.5 Pro   | 2000000 tokens     |
+| Nome do Modelo (ID) | Aliases | Nome de Exibição | Janela de Contexto |
+|:---------------------|:--------|:-----------------|:-------------------|
+| `gemini-3` | `gemini-3-pro`, `gemini-3-pro-preview` | Gemini 3 Pro | 2,000,000 tokens |
+| `gemini-2.5-pro` | `gemini-2.5-pro-latest` | Gemini 2.5 Pro | 2,000,000 tokens |
+| `gemini-2.5-flash` | — | Gemini 2.5 Flash | 1,000,000 tokens |
+| `gemini-2.5-flash-lite` | — | Gemini 2.5 Flash Lite | 1,000,000 tokens |
+| `gemini-2.0-flash` | — | Gemini 2.0 Flash | 1,000,000 tokens |
+| `gemini-2.0-flash-lite` | — | Gemini 2.0 Flash Lite | 1,000,000 tokens |
 
 ---
 
@@ -59,12 +62,13 @@ Os modelos Gemini do Google oferecem capacidades multimodais avançadas e grande
 
 Modelos da xAI, conhecidos por sua integração de informações em tempo real e uma "personalidade" única.
 
-| Nome do Modelo (ID)     | Nome de Exibição | Janela de Contexto |
-| :---------------------- | :--------------- |:-------------------|
-| `grok-1`                | Grok-1           | 8,192 tokens       |
-| `grok-1.5`              | Grok-1.5         | 128,000 tokens     |
-| `grok-1.5-vision-preview` | Grok 1.5 Vision  | 128,000 tokens     |
-| `grok-4` | Grok-4 | 200,000 tokens     |
+| Nome do Modelo (ID) | Aliases | Nome de Exibição | Janela de Contexto |
+| :------------------- | :------ | :--------------- |:-------------------|
+| `grok-4-1` | `grok-4-1-fast` | Grok-4-1 | 2,000,000 tokens |
+| `grok-4-fast` | `grok-4-fast-reasoning-latest`, `grok-4-0709` | Grok-4 | 2,000,000 tokens |
+| `grok-3` | — | Grok-3 | 128,000 tokens |
+| `grok-3-mini` | — | Grok-3 Mini | 128,000 tokens |
+| `grok-code-fast-1` | — | Grok Code Fast 1 | 200,000 tokens |
 ---
 
 ## StackSpot (StackSpotAI)

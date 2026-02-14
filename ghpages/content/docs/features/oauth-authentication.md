@@ -42,10 +42,12 @@ Exibe o status de autenticação de todos os provedores configurados, incluindo 
 
 Inicia o fluxo de autenticação OAuth:
 
-1. Um servidor HTTP local é iniciado na **porta 1455** para capturar o callback
+1. Um servidor HTTP local é iniciado para capturar o callback (OpenAI: **porta 1455**, Anthropic: **porta 1456**)
 2. O navegador abre automaticamente na página de login do provedor
 3. Após autorizar, o token é capturado e salvo automaticamente
 4. O provedor aparece imediatamente no `/switch` — **sem reiniciar o app**
+
+> **Nota:** Para Anthropic, se o callback automático não funcionar, defina `CHATCLI_ANTHROPIC_MANUAL_AUTH=true` para usar o fluxo manual de colar o código.
 
 #### Provedores Suportados
 
@@ -103,11 +105,13 @@ O ChatCLI detecta automaticamente o tipo de credencial e roteia as requisições
 
 ## Armazenamento de Credenciais
 
-As credenciais OAuth são salvas em:
+As credenciais OAuth são salvas com **criptografia AES-256-GCM** em:
 
 ```
 ~/.chatcli/auth-profiles.json
 ```
+
+A chave de criptografia é gerada automaticamente e armazenada em `~/.chatcli/.auth-key` (permissão 0600). Dados não-criptografados de versões anteriores são migrados transparentemente na primeira leitura.
 
 O arquivo contém tokens de acesso, tokens de refresh e metadados de cada provedor. Os tokens são renovados automaticamente quando expiram.
 
@@ -123,7 +127,14 @@ export CHATCLI_AUTH_DIR="~/.config/chatcli/auth"
 
 ### "Erro de autenticação" ao clicar no link OAuth
 
-Verifique se a porta **1455** não está em uso por outra aplicação. O servidor de callback precisa dessa porta para capturar o retorno do provedor.
+Verifique se a porta de callback não está em uso por outra aplicação. O servidor de callback precisa dessa porta para capturar o retorno do provedor:
+- **OpenAI**: porta **1455**
+- **Anthropic**: porta **1456**
+
+Para Anthropic, se o callback automático falhar, use o fluxo manual:
+```bash
+export CHATCLI_ANTHROPIC_MANUAL_AUTH=true
+```
 
 ### Provedor não aparece no `/switch` após login
 

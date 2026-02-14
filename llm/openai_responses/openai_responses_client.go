@@ -161,7 +161,7 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
 	}
 
 	// Estrutura de decodificação mais detalhada para capturar todos os casos
@@ -201,7 +201,7 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 	// 2. Verificar o status da resposta
 	if response.Status == "incomplete" {
 		if response.IncompleteDetails != nil && response.IncompleteDetails.Reason == "max_output_tokens" {
-			c.logger.Warn("Resposta incompleta devido a max_output_tokens baixo.", zap.ByteString("body", bodyBytes))
+			c.logger.Warn("Resposta incompleta devido a max_output_tokens baixo.", zap.Int("body_size", len(bodyBytes)))
 			return "", errors.New("a resposta da OpenAI foi incompleta, o valor de 'max_output_tokens' é muito baixo")
 		}
 		return "", fmt.Errorf("a resposta da OpenAI foi incompleta por um motivo desconhecido (status: %s)", response.Status)
@@ -226,7 +226,7 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 	}
 
 	// Se chegou aqui, não foi possível extrair
-	c.logger.Warn("Não foi possível extrair texto da resposta, mesmo com status 'completed'.", zap.ByteString("body", bodyBytes))
+	c.logger.Warn("Não foi possível extrair texto da resposta, mesmo com status 'completed'.", zap.Int("body_size", len(bodyBytes)))
 	return "", fmt.Errorf("não foi possível extrair o texto da resposta da Responses API")
 }
 
@@ -236,7 +236,7 @@ func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (stri
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
 	}
 
 	var sb strings.Builder

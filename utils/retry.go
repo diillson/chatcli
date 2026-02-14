@@ -20,6 +20,9 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("API error: status %d - %s", e.StatusCode, e.Message)
 }
 
+// maxBackoff is the maximum backoff duration between retry attempts.
+const maxBackoff = 30 * time.Second
+
 // Retry executa uma função com retry exponencial para erros temporários.
 // - maxAttempts: Número máximo de tentativas (lido de ENV ou default).
 // - initialBackoff: Tempo inicial de espera entre tentativas (lido de ENV ou default).
@@ -46,6 +49,9 @@ func Retry[T any](ctx context.Context, logger *zap.Logger, maxAttempts int, init
 			if attempt < maxAttempts {
 				time.Sleep(backoff)
 				backoff *= 2 // Backoff exponencial
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
 				continue
 			}
 		}

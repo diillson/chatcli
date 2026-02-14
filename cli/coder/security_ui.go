@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -19,7 +20,10 @@ const (
 )
 
 func PromptSecurityCheck(ctx context.Context, toolName, args string) SecurityDecision {
-	_ = exec.Command("stty", "sane").Run()
+	// L5: Only run stty on Unix systems
+	if runtime.GOOS != "windows" {
+		_ = exec.Command("stty", "sane").Run()
+	}
 
 	purple := "\u001b[35m"
 	cyan := "\u001b[36m"

@@ -737,9 +737,9 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				continue
 			}
 			dir := filepath.Join(os.TempDir(), "chatcli-agent-logs")
-			_ = os.MkdirAll(dir, 0755)
+			_ = os.MkdirAll(dir, 0o700)
 			fpath := filepath.Join(dir, fmt.Sprintf("cmd-%d-%d.log", n, time.Now().Unix()))
-			if writeErr := os.WriteFile(fpath, []byte(outputs[n-1].Output), 0644); writeErr != nil {
+			if writeErr := os.WriteFile(fpath, []byte(outputs[n-1].Output), 0o600); writeErr != nil {
 				fmt.Println(i18n.T("agent.status.error_saving"), writeErr)
 			} else {
 				fmt.Println(i18n.T("agent.status.file_saved_at"), fpath)

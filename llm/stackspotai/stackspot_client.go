@@ -104,7 +104,7 @@ func (c *StackSpotClient) sendChatRequest(ctx context.Context, prompt, accessTok
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
 	}
 
 	// **BLOCO CORRIGIDO COM BASE NA DOCUMENTAÇÃO**

@@ -130,7 +130,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
+			return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
 		}
 
 		var result struct {

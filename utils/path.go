@@ -10,8 +10,46 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
+
+// sensitivePaths contains paths that should not be read by automated tools (LLM, coder mode).
+var sensitivePaths = []string{
+	".ssh",
+	".gnupg",
+	".gpg",
+	".aws/credentials",
+	".azure",
+	".config/gcloud",
+	".kube/config",
+	".docker/config.json",
+	".npmrc",
+	".pypirc",
+	".netrc",
+	".env",
+	"id_rsa",
+	"id_ed25519",
+	"id_ecdsa",
+	"id_dsa",
+}
+
+// IsSensitivePath checks whether a file path points to a known sensitive location.
+func IsSensitivePath(absPath string) bool {
+	normalizedPath := filepath.ToSlash(absPath)
+	if runtime.GOOS != "windows" {
+		normalizedPath = strings.ToLower(normalizedPath)
+	}
+	for _, sensitive := range sensitivePaths {
+		sensitive = strings.ToLower(sensitive)
+		if strings.Contains(normalizedPath, "/"+sensitive+"/") ||
+			strings.HasSuffix(normalizedPath, "/"+sensitive) ||
+			strings.Contains(normalizedPath, "/"+sensitive) {
+			return true
+		}
+	}
+	return false
+}
 
 // ReadFileContent lê o conteúdo de um arquivo, expandindo ~ para o diretório home,
 // mostrando um indicador de progresso para arquivos grandes.
@@ -45,6 +83,11 @@ func ReadFileContent(filePath string, maxSize int64) (string, error) {
 	// Verificar se é um arquivo regular
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("o caminho não aponta para um arquivo regular: %s", absPath)
+	}
+
+	// L1: Block access to known sensitive paths
+	if IsSensitivePath(absPath) {
+		return "", fmt.Errorf("access denied: %s is a sensitive path", absPath)
 	}
 
 	// Verificar o tamanho do arquivo

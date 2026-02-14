@@ -46,7 +46,7 @@ Flag                  │ Descrição
 ──────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────
 -p ,  --prompt        │ A pergunta ou instrução principal para a IA.                                                            
 --provider <nome>     │ Sobrescreve o provedor de LLM padrão (ex:  OPENAI ,  CLAUDEAI ).                                        
---model <nome>        │ Sobrescreve o modelo de IA a ser usado (ex:  gpt-4o ,  claude-3-5-sonnet-20240620 ).                    
+--model <nome>        │ Sobrescreve o modelo de IA a ser usado (ex:  gpt-4o ,  claude-sonnet-4-5 ).                    
 --timeout <duração>   │ Define um tempo limite para a requisição (padrão:  5m ). Ex:  10s ,  1m .                               
 --max-tokens <num>    │ Sobrescreve o número máximo de tokens na resposta.                                                      
 --no-anim             │ Desabilita a animação "Pensando...", ideal para saídas limpas em scripts.                               
@@ -56,7 +56,7 @@ Flag                  │ Descrição
 ```
 Exemplo com Múltiplas Flags:
 {{< command >}}
-cat relatorio.csv | chatcli --provider CLAUDEAI --model claude-3-opus-20240229 -p "Analise estes dados e me dê 3 insights principais."
+cat relatorio.csv | chatcli --provider CLAUDEAI --model claude-sonnet-4-5 -p "Analise estes dados e me dê 3 insights principais."
 {{< /command >}}
 
 --------

@@ -66,8 +66,19 @@ func loadStoreUnlocked(logger *zap.Logger) *AuthProfileStore {
 		return store
 	}
 
+	// H3: Decrypt data (transparently handles unencrypted legacy stores)
+	plaintext, err := decryptData(data)
+	if err != nil {
+		if logger != nil {
+			logger.Error("Failed to decrypt auth store", zap.Error(err))
+		}
+		s := NewAuthProfileStore()
+		cachedStore = s
+		return s
+	}
+
 	var store AuthProfileStore
-	if err := json.Unmarshal(data, &store); err != nil {
+	if err := json.Unmarshal(plaintext, &store); err != nil {
 		if logger != nil {
 			logger.Error("Failed to parse auth store", zap.Error(err))
 		}
@@ -110,14 +121,20 @@ func saveStoreUnlocked(store *AuthProfileStore, logger *zap.Logger) error {
 		return fmt.Errorf("failed to marshal auth store: %w", err)
 	}
 
-	if err := os.WriteFile(storePath, data, 0o600); err != nil {
+	// H3: Encrypt data before writing to disk
+	encrypted, err := encryptData(data)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt auth store: %w", err)
+	}
+
+	if err := os.WriteFile(storePath, encrypted, 0o600); err != nil {
 		return fmt.Errorf("failed to write auth store: %w", err)
 	}
 
 	cachedStore = store
 
 	if logger != nil {
-		logger.Debug("Auth store saved", zap.String("path", storePath), zap.Int("profiles", len(store.Profiles)))
+		logger.Debug("Auth store saved (encrypted)", zap.String("path", storePath), zap.Int("profiles", len(store.Profiles)))
 	}
 
 	return nil

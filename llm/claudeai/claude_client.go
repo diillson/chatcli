@@ -236,7 +236,7 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
 	}
 
 	var result struct {
@@ -282,7 +282,7 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response) (string, error
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(decodedBody)
-		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(raw)}
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(raw))}
 	}
 
 	var out strings.Builder

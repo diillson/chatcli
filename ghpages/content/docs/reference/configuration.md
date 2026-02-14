@@ -39,6 +39,10 @@ Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAu
 | Variável | Descrição | Padrão |
 | :--- | :--- | :--- |
 | `CHATCLI_AUTH_DIR` | Diretório onde as credenciais OAuth são armazenadas. | `~/.chatcli/` |
+| `CHATCLI_OPENAI_CLIENT_ID` | Permite sobrescrever o client ID do OAuth da OpenAI. | (interno) |
+| `CHATCLI_ANTHROPIC_MANUAL_AUTH` | Defina como `true` para usar o fluxo manual de colar código no login OAuth da Anthropic, em vez do callback automático. | `false` |
+
+As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/auth-profiles.json`. A chave de criptografia é gerada automaticamente e salva em `~/.chatcli/.auth-key` (permissão 0600).
 
 > Use `/auth login openai-codex` ou `/auth login anthropic` no modo interativo para iniciar o fluxo OAuth. Consulte a [documentação completa de OAuth](/docs/features/oauth-authentication/) para mais detalhes.
 
@@ -61,7 +65,7 @@ Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAu
 | Variável               | Descrição | Obrigatório? |
 |:-----------------------| :--- | :--- |
 | `ANTHROPIC_API_KEY`     | Sua chave de API secreta da Anthropic. Alternativa: use `/auth login anthropic` para OAuth. | **Sim*** |
-| `ANTHROPIC_MODEL`       | O modelo a ser usado. Ex: `claude-3-5-sonnet-20240620`, `claude-3-opus-20240229`. | Não |
+| `ANTHROPIC_MODEL`       | O modelo a ser usado. Ex: `claude-sonnet-4-5`, `claude-opus-4-6`, `claude-sonnet-4`. | Não |
 | `ANTHROPIC_API_VERSION` | A versão da API da Anthropic a ser usada nos cabeçalhos. | Não |
 | `ANTHROPIC_MAX_TOKENS`  | Define o maximo de tokens a ser utilizados na sessão (depende do modelo)         | Não
 
@@ -71,7 +75,7 @@ Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAu
 | Variável              | Descrição | Obrigatório? |
 |:----------------------| :--- | :--- |
 | `GOOGLEAI_API_KEY`    | Sua chave de API do Google AI Studio. | **Sim** |
-| `GOOGLEAI_MODEL`      | O modelo a ser usado. Ex: `gemini-1.5-pro-latest`, `gemini-1.5-flash-latest`. | Não |
+| `GOOGLEAI_MODEL`      | O modelo a ser usado. Ex: `gemini-2.5-pro`, `gemini-2.5-flash`. | Não |
 | `GOOGLEAI_MAX_TOKENS` | Define o maximo de tokens a ser utilizados na sessão (depende do modelo)         | Não
 
 
@@ -80,7 +84,7 @@ Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAu
 | Variável         | Descrição | Obrigatório? |
 |:-----------------| :--- | :--- |
 | `XAI_API_KEY`    | Sua chave de API secreta da xAI. | **Sim** |
-| `XAI_MODEL`      | O modelo a ser usado. Ex: `grok-1`. | Não |
+| `XAI_MODEL`      | O modelo a ser usado. Ex: `grok-4-fast`, `grok-3`. | Não |
 | `XAI_MAX_TOKENS` | Define o maximo de tokens a ser utilizados na sessão (depende do modelo)         | Não
 
 
@@ -114,8 +118,8 @@ Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAu
 | :--- | :--- |
 | `CHATCLI_AGENT_ALLOW_SUDO` | Defina como `"true"` para permitir que o agente sugira e execute comandos com `sudo`. **Use com extrema cautela.** |
 | `CHATCLI_AGENT_DENYLIST` | Lista de padrões regex (separados por `;`) para bloquear comandos adicionais no modo agente. |
-| `CHATCLI_AGENT_CMD_TIMEOUT` | Timeout para a execução de um único comando pelo agente (padrão: `10m`). |
-| `CHATCLI_AGENT_PLUGIN_MAX_TURNS` | Limite máximo de turnos do agente no modo `/agent`/`/coder` (padrão: `7`). |
+| `CHATCLI_AGENT_CMD_TIMEOUT` | Timeout para a execução de um único comando pelo agente (padrão: `10m`, máximo: `1h`). |
+| `CHATCLI_AGENT_PLUGIN_MAX_TURNS` | Limite máximo de turnos do agente no modo `/agent`/`/coder` (padrão: `50`, máximo: `200`). |
 | `CHATCLI_AGENT_PLUGIN_TIMEOUT` | Timeout total do plugin do agente (padrão: `15m`). |
 
 

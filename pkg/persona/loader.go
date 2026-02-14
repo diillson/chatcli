@@ -397,10 +397,10 @@ func (l *Loader) parseMarkdownFile(path string) (string, string, error) {
 
 // EnsureDirectories creates the agents and skills directories if they don't exist
 func (l *Loader) EnsureDirectories() error {
-	if err := os.MkdirAll(l.agentsDir, 0755); err != nil {
+	if err := os.MkdirAll(l.agentsDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create agents directory: %w", err)
 	}
-	if err := os.MkdirAll(l.skillsDir, 0755); err != nil {
+	if err := os.MkdirAll(l.skillsDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create skills directory: %w", err)
 	}
 	return nil

@@ -33,7 +33,9 @@ func exchangeOAuthToken(ctx context.Context, logger *zap.Logger, tokenURL string
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("token exchange failed (%s): %s", resp.Status, string(raw))
+		// Sanitize response body to prevent leaking tokens in error messages
+		sanitized := utils.SanitizeSensitiveText(string(raw))
+		return nil, fmt.Errorf("token exchange failed (%s): %s", resp.Status, sanitized)
 	}
 	var tr OAuthTokenResponse
 
