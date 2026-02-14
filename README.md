@@ -176,11 +176,14 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  XAI_API_KEY ,  XAI_MODEL ,  XAI_MAX_TOKENS
   -  CLIENT_ID ,  CLIENT_KEY ,  STACKSPOT_REALM ,  STACKSPOT_AGENT_ID  (para StackSpot)
 - Agente:
-  -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Opcional)** Timeout padrão para cada comando executado da lista de ação no Modo Agente. Aceita durações Go (ex.: 30s, 2m, 10m). Padrão:  10m .
-  -  `CHATCLI_AGENT_DENYLIST`  – **(Opcional)** Lista de expressões regulares (separadas por “;”) para bloquear comandos perigosos além do padrão. Ex.: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
+  -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Opcional)** Timeout padrão para cada comando executado da lista de ação no Modo Agente. Aceita durações Go (ex.: 30s, 2m, 10m). Padrão:  10m . Máximo: 1h.
+  -  `CHATCLI_AGENT_DENYLIST`  – **(Opcional)** Lista de expressões regulares (separadas por ";") para bloquear comandos perigosos além do padrão. Ex.: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
   -  `CHATCLI_AGENT_ALLOW_SUDO`  – **(Opcional)** Permite comandos com sudo sem bloqueio automático (true/false). Padrão:  false  (bloqueia sudo por segurança).
-  -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Opcional)** Define o máximo de turnos que o agente pode ter. Padrão: 7.
+  -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Opcional)** Define o máximo de turnos que o agente pode ter. Padrão: 50. Máximo: 200.
   -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Opcional)** Define o tempo limite de execução para o plugin do agente (ex.: 30s, 2m, 10m). Padrão: 15 (Minutos)
+- OAuth:
+  -  `CHATCLI_OPENAI_CLIENT_ID`  – **(Opcional)** Permite sobrescrever o client ID do OAuth da OpenAI.
+
 
 > ⚠️ **Importante:** Plugins que realizam operações demoradas (ex.: deploy de infraestrutura, builds complexos) podem precisar de timeouts maiores.
 
@@ -200,11 +203,14 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     HISTORY_FILE=~/.chatcli_history
 
     # Agente Configurações
-    CHATCLI_AGENT_CMD_TIMEOUT=2m    # O comando terá 2m para ser executado após isso é travado e finalizado
+    CHATCLI_AGENT_CMD_TIMEOUT=2m    # O comando terá 2m para ser executado após isso é travado e finalizado (máx: 1h)
     CHATCLI_AGENT_DENYLIST=rm\\s+-rf\\s+.*;curl\\s+[^|;]*\\|\\s*(sh|bash);dd\\s+if=;mkfs\\w*\\s+
     CHATCLI_AGENT_ALLOW_SUDO=false
-    CHATCLI_AGENT_PLUGIN_MAX_TURNS=10
+    CHATCLI_AGENT_PLUGIN_MAX_TURNS=50
     CHATCLI_AGENT_PLUGIN_TIMEOUT=20m
+
+    # OAuth Configurações (opcional)
+    # CHATCLI_OPENAI_CLIENT_ID=custom-client-id    # Sobrescreve o client ID do OAuth da OpenAI
     
     # Configurações do OpenAI
     OPENAI_API_KEY=sua-chave-openai
@@ -221,7 +227,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     
     # Configurações do ClaudeAI
     ANTHROPIC_API_KEY=sua-chave-claudeai
-    ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+    ANTHROPIC_MODEL=claude-sonnet-4-5
     ANTHROPIC_MAX_TOKENS=20000
     ANTHROPIC_API_VERSION=2023-06-01
     
@@ -267,8 +273,10 @@ O ChatCLI suporta **dois métodos de autenticação** para provedores que oferec
 
 1. Execute `/auth login openai-codex` (ou `anthropic`)
 2. O navegador abre automaticamente na página de login do provedor
-3. Após autorizar, o token é capturado automaticamente via callback local (porta 1455)
-4. O provedor aparece imediatamente no `/switch` — sem precisar reiniciar
+3. **OpenAI:** o token é capturado automaticamente via callback local (porta 1455)
+4. **Anthropic:** após autorizar, copie o código exibido na página e cole no terminal
+5. O provedor aparece imediatamente no `/switch` — sem precisar reiniciar
+6. As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/auth-profiles.json`
 
 ### Quando usar qual endpoint (OpenAI)
 
@@ -312,7 +320,7 @@ Execute prompts em uma única linha, ideal para scripts e automações.
 - Flags disponiveis no oneshoot:
   -  -p  ou  --prompt : texto a enviar para a LLM em uma única execução.
   -  --provider : sobrescreve o provedor de LLM em tempo de execução ( OPENAI ,  OPENAI_ASSISTANT ,  CLAUDEAI ,  GOOGLEAI ,  STACKSPOT ,  XAI ).
-  -  --model : escolhe o modelo do provedor ativo (ex.:  gpt-4o-mini ,  claude-3-5-sonnet-20241022 ,  gemini-2.5-flash , etc.)
+  -  --model : escolhe o modelo do provedor ativo (ex.:  gpt-4o-mini ,  claude-sonnet-4-5 ,  gemini-2.5-flash , etc.)
   -  --max-tokens : Define a quantidade maxima de tokens usada para provedor ativo.
   -  --realm : define o realm/tenant para StackSpot.
   -  --agent-id : define o ID do agente a ser utilizado para StackSpot.

@@ -260,6 +260,44 @@ func headersToString(headers http.Header) string {
 	return buf.String()
 }
 
+// sensitiveKeys is the set of JSON keys whose values should be redacted.
+var sensitiveKeys = map[string]bool{
+	"api_key":       true,
+	"password":      true,
+	"token":         true,
+	"access_token":  true,
+	"refresh_token": true,
+	"client_secret": true,
+	"client_key":    true,
+	"authorization": true,
+	"secret":        true,
+	"key":           true,
+}
+
+// sanitizeJSON recursively sanitizes sensitive fields in any JSON value.
+func sanitizeJSON(v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		for k, child := range val {
+			if sensitiveKeys[strings.ToLower(k)] {
+				if s, ok := child.(string); ok && s != "" {
+					val[k] = "[REDACTED]"
+				}
+			} else {
+				val[k] = sanitizeJSON(child)
+			}
+		}
+		return val
+	case []interface{}:
+		for i, item := range val {
+			val[i] = sanitizeJSON(item)
+		}
+		return val
+	default:
+		return v
+	}
+}
+
 // sanitizeBody remove ou mascara dados sensíveis do corpo da requisição/resposta
 func (t *LoggingTransport) sanitizeBody(contentType string, body []byte) []byte {
 	if len(body) > t.MaxBodySize {
@@ -267,29 +305,22 @@ func (t *LoggingTransport) sanitizeBody(contentType string, body []byte) []byte 
 	}
 
 	if strings.Contains(contentType, "application/json") {
-		var data map[string]interface{}
+		var data interface{}
 		if err := json.Unmarshal(body, &data); err == nil {
-			// Mascara campos sensíveis conhecidos (shallow)
-			for _, k := range []string{
-				"api_key", "password", "token", "access_token", "refresh_token", "client_secret", "client_key", "authorization",
-			} {
-				if _, exists := data[k]; exists {
-					data[k] = "[REDACTED]"
-				}
-			}
-			sanitized, _ := json.Marshal(data)
-			return sanitized
+			// M4: Recursive sanitization of nested JSON structures
+			sanitized := sanitizeJSON(data)
+			out, _ := json.Marshal(sanitized)
+			return out
 		}
 	}
 
 	if strings.Contains(contentType, "application/x-www-form-urlencoded") {
 		values, err := url.ParseQuery(string(body))
 		if err == nil {
-			if _, exists := values["password"]; exists {
-				values.Set("password", "[REDACTED]")
-			}
-			if _, exists := values["api_key"]; exists {
-				values.Set("api_key", "[REDACTED]")
+			for param := range values {
+				if sensitiveKeys[strings.ToLower(param)] {
+					values.Set(param, "[REDACTED]")
+				}
 			}
 			return []byte(values.Encode())
 		}

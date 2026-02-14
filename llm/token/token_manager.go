@@ -146,7 +146,9 @@ func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		errMsg := fmt.Sprintf("falha ao obter o token: status %d, resposta: %s", resp.StatusCode, string(bodyBytes))
+		// Sanitize response body to prevent leaking tokens in error messages
+		sanitized := utils.SanitizeSensitiveText(string(bodyBytes))
+		errMsg := fmt.Sprintf("falha ao obter o token: status %d, resposta: %s", resp.StatusCode, sanitized)
 		tm.logger.Error("Falha na requisição de token", zap.String("response", errMsg))
 		return "", errors.New(errMsg)
 	}
@@ -159,13 +161,14 @@ func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 
 	accessToken, ok := result["access_token"].(string)
 	if !ok {
-		tm.logger.Error("access_token não encontrado na resposta de token", zap.Any("resultado", result))
+		// Don't log the full result as it may contain partial credentials
+		tm.logger.Error("access_token não encontrado na resposta de token")
 		return "", fmt.Errorf("não foi possível obter o access_token")
 	}
 
 	expiresIn, ok := result["expires_in"].(float64)
 	if !ok {
-		tm.logger.Error("expires_in não encontrado na resposta de token", zap.Any("resultado", result))
+		tm.logger.Error("expires_in não encontrado na resposta de token")
 		return "", fmt.Errorf("não foi possível obter expires_in")
 	}
 

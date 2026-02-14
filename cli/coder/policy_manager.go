@@ -185,11 +185,12 @@ func (pm *PolicyManager) save() error {
 	}
 
 	dir := filepath.Dir(pm.configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 
-	return os.WriteFile(pm.configPath, data, 0644)
+	// M1: Use restrictive permissions so only the owner can read security rules
+	return os.WriteFile(pm.configPath, data, 0o600)
 }
 
 func (pm *PolicyManager) defaultRules() {

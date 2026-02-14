@@ -67,7 +67,7 @@ func (m *Manager) GetPlugin(name string) (Plugin, bool) {
 Configure o comportamento do agente através de variáveis de ambiente:
 
 # Controle de Execução
-`CHATCLI_AGENT_PLUGIN_MAX_TURNS=10`     # Máximo de iterações (padrão: 7)
+`CHATCLI_AGENT_PLUGIN_MAX_TURNS=50`     # Máximo de iterações (padrão: 50, máximo: 200)
 
 `CHATCLI_AGENT_PLUGIN_TIMEOUT=20m`       # Timeout por plugin (padrão: 15m)
 
@@ -81,9 +81,9 @@ Configure o comportamento do agente através de variáveis de ambiente:
 ```bash
 Variável                        │ Tipo     │ Padrão  │ Descrição                                                                         
 ────────────────────────────────┼──────────┼─────────┼───────────────────────────────────────────────────────────────────────────────────
-CHATCLI_AGENT_PLUGIN_MAX_TURNS  │ inteiro  │  7      │ Número máximo de iterações do ciclo ReAct. Evita loops infinitos.                 
+CHATCLI_AGENT_PLUGIN_MAX_TURNS  │ inteiro  │  50     │ Número máximo de iterações do ciclo ReAct. Evita loops infinitos (máx: 200).
 CHATCLI_AGENT_PLUGIN_TIMEOUT    │ duração  │  15m    │ Tempo limite para execução de cada plugin. Aceita formato Go ( 30s ,  5m ,  1h ).
-CHATCLI_AGENT_CMD_TIMEOUT       │ duração  │  10m    │ Timeout para comandos shell executados via  @command .                            
+CHATCLI_AGENT_CMD_TIMEOUT       │ duração  │  10m    │ Timeout para comandos shell executados via  @command  (máx: 1h).                            
 CHATCLI_AGENT_DENYLIST          │ string   │ -       │ Expressões regulares separadas por  ;  para bloquear comandos perigosos.          
 CHATCLI_AGENT_ALLOW_SUDO        │ booleano │  false  │ Permite comandos  sudo  sem bloqueio automático (use com cautela).
 ```

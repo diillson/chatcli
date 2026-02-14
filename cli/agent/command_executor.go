@@ -69,6 +69,20 @@ func (e *CommandExecutor) Execute(ctx context.Context, command string, interacti
 		}
 	}
 
+	// Validate $SHELL against known shell binaries to prevent env manipulation
+	if runtime.GOOS != "windows" {
+		shellBase := filepath.Base(shell)
+		allowedShells := map[string]bool{
+			"sh": true, "bash": true, "zsh": true, "dash": true,
+			"fish": true, "ksh": true, "csh": true, "tcsh": true,
+		}
+		if !allowedShells[shellBase] {
+			e.logger.Warn("Unrecognized shell, falling back to /bin/sh",
+				zap.String("shell", shell))
+			shell = "/bin/sh"
+		}
+	}
+
 	// Ajuste da flag baseado no binário do shell
 	if runtime.GOOS == "windows" {
 		lowerShell := strings.ToLower(shell)

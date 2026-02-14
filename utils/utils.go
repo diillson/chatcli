@@ -92,10 +92,25 @@ func maskSensitiveInText(s string) string {
 	}{
 		// Chaves de API comuns (OpenAI, Anthropic, Stripe, etc.)
 		{regexp.MustCompile(`(?i)(sk|pk)_(test|live)_[a-zA-Z0-9]{20,}`), "[REDACTED_API_KEY]"},
-		{regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`), "sk-[REDACTED]"},
 		{regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{20,}`), "sk-ant-[REDACTED]"},
+		{regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`), "sk-[REDACTED]"},
+		// L3: xAI / Grok API keys
+		{regexp.MustCompile(`xai-[a-zA-Z0-9]{20,}`), "xai-[REDACTED]"},
+		// L3: StackSpot tokens (stk_ prefix)
+		{regexp.MustCompile(`stk_[a-zA-Z0-9]{20,}`), "stk_[REDACTED]"},
+		// L3: Mistral API keys
+		{regexp.MustCompile(`(?i)mistral[_-]?[a-zA-Z0-9]{20,}`), "[REDACTED_MISTRAL_KEY]"},
+		// L3: Cohere API keys
+		{regexp.MustCompile(`(?i)cohere[_-]?[a-zA-Z0-9]{20,}`), "[REDACTED_COHERE_KEY]"},
+		// L3: HuggingFace tokens
+		{regexp.MustCompile(`hf_[a-zA-Z0-9]{20,}`), "hf_[REDACTED]"},
+		// L3: GitHub tokens
+		{regexp.MustCompile(`gh[ps]_[a-zA-Z0-9]{20,}`), "[REDACTED_GH_TOKEN]"},
+		{regexp.MustCompile(`github_pat_[a-zA-Z0-9_]{20,}`), "[REDACTED_GH_PAT]"},
 		// Google AI
 		{regexp.MustCompile(`AIza[0-9A-Za-z\-_]{30,}`), "[REDACTED_GOOGLE_API_KEY]"},
+		// AWS keys
+		{regexp.MustCompile(`AKIA[0-9A-Z]{16}`), "[REDACTED_AWS_KEY]"},
 		// Bearer tokens e JWTs (parte do meio)
 		{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\.\-_]+`), "Bearer [REDACTED]"},
 		{regexp.MustCompile(`ey[A-Za-z0-9-_=]+\.ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]+`), "[REDACTED_JWT]"},

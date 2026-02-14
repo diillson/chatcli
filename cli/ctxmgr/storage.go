@@ -29,7 +29,7 @@ func NewStorage(logger *zap.Logger) (*Storage, error) {
 	}
 
 	basePath := filepath.Join(homeDir, ".chatcli", "contexts")
-	if err := os.MkdirAll(basePath, 0755); err != nil {
+	if err := os.MkdirAll(basePath, 0o700); err != nil {
 		return nil, fmt.Errorf("erro ao criar diretório de contextos: %w", err)
 	}
 
@@ -48,7 +48,7 @@ func (s *Storage) SaveContext(ctx *FileContext) error {
 		return fmt.Errorf("erro ao serializar contexto: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := os.WriteFile(filePath, data, 0o600); err != nil {
 		return fmt.Errorf("erro ao salvar contexto: %w", err)
 	}
 
@@ -144,7 +144,7 @@ func (s *Storage) ExportContext(ctx *FileContext, targetPath string) error {
 		return fmt.Errorf("erro ao serializar contexto para exportação: %w", err)
 	}
 
-	if err := os.WriteFile(targetPath, data, 0644); err != nil {
+	if err := os.WriteFile(targetPath, data, 0o600); err != nil {
 		return fmt.Errorf("erro ao exportar contexto: %w", err)
 	}
 
@@ -179,7 +179,10 @@ func (s *Storage) ImportContext(sourcePath string) (*FileContext, error) {
 	return &ctx, nil
 }
 
-// getContextPath retorna o caminho completo do arquivo de contexto
+// getContextPath retorna o caminho completo do arquivo de contexto.
+// Validates the contextID to prevent path traversal attacks.
 func (s *Storage) getContextPath(contextID string) string {
-	return filepath.Join(s.basePath, contextID+".json")
+	// Sanitize: use only the base name to prevent directory traversal
+	safe := filepath.Base(contextID)
+	return filepath.Join(s.basePath, safe+".json")
 }

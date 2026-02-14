@@ -13,7 +13,7 @@ const (
 	DefaultStackSpotAgentID  = "default"
 
 	// Valores padrão para OpenAI
-	DefaultOpenAIModel       = "gpt-4o-mini"
+	DefaultOpenAIModel       = "gpt-5.2"
 	DefaultOpenAiAssistModel = "gpt-4o-mini"
 	OpenAIAPIURL             = "https://api.openai.com/v1/chat/completions"
 	OpenAIResponsesAPIURL    = "https://api.openai.com/v1/responses"
@@ -68,6 +68,6 @@ const (
 
 	// Agent plugin max turns
 	AgentPluginMaxTurnsEnv = "CHATCLI_AGENT_PLUGIN_MAX_TURNS"
-	DefaultAgentMaxTurns   = 7
+	DefaultAgentMaxTurns   = 50
 	MaxAgentMaxTurns       = 200 // limite de segurança
 )

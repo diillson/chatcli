@@ -78,7 +78,7 @@ func NewOpenAIAssistantClient(apiKey, model string, logger *zap.Logger) (*OpenAI
 
 	// Criar o diretório de cache se não existir
 	cacheDir := filepath.Join(os.TempDir(), "chatcli-openai-cache")
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return nil, fmt.Errorf("erro ao criar diretório de cache: %w", err)
 	}
 
@@ -342,7 +342,7 @@ func (c *OpenAIAssistantClient) loadAssistantIDFromCache() (string, error) {
 // saveAssistantIDToCache salva o ID do assistente no cache
 func (c *OpenAIAssistantClient) saveAssistantIDToCache(assistantID string) error {
 	cacheDir := filepath.Join(os.TempDir(), "chatcli-openai-cache")
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return err
 	}
 
@@ -360,7 +360,7 @@ func (c *OpenAIAssistantClient) saveAssistantIDToCache(assistantID string) error
 		return err
 	}
 
-	return os.WriteFile(cacheFile, data, 0644)
+	return os.WriteFile(cacheFile, data, 0o600)
 }
 
 // newFileRegistry cria um novo registro de arquivos
@@ -460,7 +460,7 @@ func (r *FileRegistry) saveCache() {
 
 	// Criar o diretório do cache se não existir
 	cacheDir := filepath.Dir(r.cachePath)
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		r.logger.Warn("Erro ao criar diretório de cache",
 			zap.String("dir", cacheDir),
 			zap.Error(err))
@@ -488,7 +488,7 @@ func (r *FileRegistry) saveCache() {
 	}
 
 	// Salvar no arquivo
-	if err := os.WriteFile(r.cachePath, data, 0644); err != nil {
+	if err := os.WriteFile(r.cachePath, data, 0o600); err != nil {
 		r.logger.Warn("Erro ao salvar cache", zap.Error(err))
 		return
 	}

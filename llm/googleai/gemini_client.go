@@ -176,16 +176,14 @@ func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt s
 
 // executeRequest executa a requisição HTTP para a API do Gemini
 func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (string, error) {
-	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", c.baseURL, c.model, c.apiKey)
-	safeURL := fmt.Sprintf("%s/models/%s:generateContent?key=[REDACTED]", c.baseURL, c.model)
+	url := fmt.Sprintf("%s/models/%s:generateContent", c.baseURL, c.model)
 
 	c.logger.Debug("Enviando requisição POST para Google AI",
-		zap.String("url", safeURL),
+		zap.String("url", url),
 		zap.String("model", c.model))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(jsonValue)))
 	if err != nil {
-		// Este erro não contém a URL, então é seguro logar diretamente.
 		c.logger.Error("Erro ao criar requisição HTTP para Google AI",
 			zap.Error(err),
 			zap.String("model", c.model))
@@ -193,21 +191,19 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", c.apiKey)
 
 	startTime := time.Now()
 	resp, err := c.client.Do(req)
 	duration := time.Since(startTime)
 
 	if err != nil {
-		sanitizedErr := fmt.Errorf("erro na requisição para %s: %w", safeURL, err)
-
-		// Usamos o erro sanitizado para o log e para o retorno.
 		c.logger.Error("Erro na requisição HTTP para Google AI",
-			zap.Error(sanitizedErr), // LOG SEGURO
+			zap.Error(err),
 			zap.Duration("duration", duration),
 			zap.String("model", c.model))
 
-		return "", sanitizedErr // RETORNO SEGURO
+		return "", fmt.Errorf("erro na requisição para Google AI: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -225,8 +221,7 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		// Retorna diretamente APIError
-		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
 	}
 
 	return c.parseResponse(bodyBytes)

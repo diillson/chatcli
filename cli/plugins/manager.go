@@ -31,7 +31,7 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 	pluginsDir := filepath.Join(home, ".chatcli", "plugins")
 
 	// Garante que o diretório de plugins exista
-	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+	if err := os.MkdirAll(pluginsDir, 0o700); err != nil {
 		return nil, fmt.Errorf("não foi possível criar o diretório de plugins: %w", err)
 	}
 
@@ -113,7 +113,7 @@ func (m *Manager) Reload() {
 
 	m.plugins = make(map[string]Plugin)
 
-	if err := os.MkdirAll(m.pluginsDir, 0755); err != nil {
+	if err := os.MkdirAll(m.pluginsDir, 0o700); err != nil {
 		m.logger.Error("Não foi possível criar o diretório de plugins", zap.String("path", m.pluginsDir), zap.Error(err))
 		return
 	}

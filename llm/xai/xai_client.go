@@ -129,7 +129,7 @@ func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
 	}
 
 	var result struct {
@@ -145,7 +145,7 @@ func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		c.logger.Error("Erro ao decodificar a resposta JSON da xAI", zap.Error(err), zap.ByteString("body", bodyBytes))
+		c.logger.Error("Erro ao decodificar a resposta JSON da xAI", zap.Error(err), zap.Int("body_size", len(bodyBytes)))
 		return "", fmt.Errorf("erro ao decodificar a resposta da xAI: %w", err)
 	}
 
@@ -157,7 +157,7 @@ func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 
 	// Verificar se não há 'choices'
 	if len(result.Choices) == 0 {
-		c.logger.Warn("Nenhuma 'choice' na resposta da xAI.", zap.ByteString("body", bodyBytes))
+		c.logger.Warn("Nenhuma 'choice' na resposta da xAI.", zap.Int("body_size", len(bodyBytes)))
 		return "", errors.New("a API da xAI não retornou nenhuma resposta (array 'choices' vazio)")
 	}
 
@@ -165,7 +165,7 @@ func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 	if firstChoice.Message.Content == "" {
 		c.logger.Warn("Resposta da xAI com conteúdo vazio.",
 			zap.String("finish_reason", firstChoice.FinishReason),
-			zap.ByteString("body", bodyBytes))
+			zap.Int("body_size", len(bodyBytes)))
 
 		// Retorna um erro amigável para o usuário
 		if firstChoice.FinishReason == "length" {

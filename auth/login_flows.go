@@ -18,27 +18,47 @@ import (
 
 const (
 	// Anthropic (Claude)
+	// NOTE: Anthropic's OAuth does not support localhost redirect URIs.
+	// The only registered redirect is console.anthropic.com which displays the code for the user to copy.
 	AnthropicOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	AnthropicAuthURL       = "https://claude.ai/oauth/authorize"
 	AnthropicTokenURL      = "https://console.anthropic.com/v1/oauth/token"
 	AnthropicRedirectURI   = "https://console.anthropic.com/oauth/code/callback"
-	AnthropicScopes        = "org:create_api_key user:profile user:inference"
+	AnthropicScopes        = "user:profile user:inference" // L6: removed overly broad org:create_api_key
 
 	// OpenAI Codex OAuth
-	OpenAICodexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
-	OpenAIAuthURL       = "https://auth.openai.com/oauth/authorize"
-	OpenAITokenURL      = "https://auth.openai.com/oauth/token"
-	OpenAIRedirectURI   = "http://localhost:1455/auth/callback"
-	OpenAIScopes        = "openid profile email offline_access"
-	OpenAICallbackPort  = "1455"
+	defaultOpenAICodexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+	OpenAIAuthURL              = "https://auth.openai.com/oauth/authorize"
+	OpenAITokenURL             = "https://auth.openai.com/oauth/token"
+	OpenAIRedirectURI          = "http://localhost:1455/auth/callback"
+	OpenAIScopes               = "openid profile email offline_access"
+	OpenAICallbackPort         = "1455"
+
+	// oauthCallbackTimeout is the maximum time to wait for an OAuth callback.
+	oauthCallbackTimeout = 5 * time.Minute
 )
 
-func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID string, err error) {
+// OpenAICodexClientID returns the OpenAI Codex client ID, allowing override via env var.
+func OpenAICodexClientID() string {
+	if id := os.Getenv("CHATCLI_OPENAI_CLIENT_ID"); id != "" {
+		return id
+	}
+	return defaultOpenAICodexClientID
+}
 
+// LoginAnthropicOAuth authenticates via OAuth with Anthropic.
+// Anthropic's OAuth does not support localhost redirect URIs, so the flow opens the browser
+// and the user copies the authorization code displayed on the Anthropic console page.
+func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID string, err error) {
 	pkce, err := GeneratePKCE()
 	if err != nil {
 		return "", err
 	}
+	state, err := GenerateState()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate OAuth state: %w", err)
+	}
+
 	q := url.Values{}
 	q.Set("code", "true")
 	q.Set("client_id", AnthropicOAuthClientID)
@@ -47,18 +67,28 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 	q.Set("scope", AnthropicScopes)
 	q.Set("code_challenge", pkce.Challenge)
 	q.Set("code_challenge_method", "S256")
-	q.Set("state", pkce.Verifier)
+	q.Set("state", state)
 	authURL := AnthropicAuthURL + "?" + q.Encode()
 
-	fmt.Println("\nAUTH [Anthropic] Open this URL in your browser, then paste the code: ")
+	// Try to open browser automatically for convenience
+	fmt.Println("\nAUTH [Anthropic] Opening browser for authentication...")
+	if openErr := openBrowser(authURL); openErr != nil {
+		fmt.Println("Could not open browser automatically. Open this URL manually:")
+	} else {
+		fmt.Println("Browser opened. After authorizing, copy the code shown on the page and paste it below.")
+		fmt.Println("If the browser did not open, copy and paste this URL:")
+	}
 	fmt.Println(authURL)
 
-	cmd := exec.Command("stty", "sane")
-	cmd.Stdin = os.Stdin
-	_ = cmd.Run()
+	// L5: Only run stty on Unix systems
+	if runtime.GOOS != "windows" {
+		cmd := exec.Command("stty", "sane")
+		cmd.Stdin = os.Stdin
+		_ = cmd.Run()
+	}
 
 	var code string
-	fmt.Print("> code: ")
+	fmt.Print("\n> Paste the code here: ")
 	reader := bufio.NewReader(os.Stdin)
 	code, _ = reader.ReadString('\n')
 	code = strings.TrimSpace(code)
@@ -75,7 +105,7 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 		"code":          code,
 		"redirect_uri":  AnthropicRedirectURI,
 		"code_verifier": pkce.Verifier,
-		"state":         pkce.Verifier,
+		"state":         state,
 	})
 	if err != nil {
 		return "", err
@@ -101,10 +131,15 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 	if err != nil {
 		return "", err
 	}
-	state, _ := GenerateState()
+	state, err := GenerateState()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate OAuth state: %w", err)
+	}
+
+	clientID := OpenAICodexClientID() // M5: supports env override
 
 	q := url.Values{}
-	q.Set("client_id", OpenAICodexClientID)
+	q.Set("client_id", clientID)
 	q.Set("response_type", "code")
 	q.Set("redirect_uri", OpenAIRedirectURI)
 	q.Set("scope", OpenAIScopes)
@@ -126,10 +161,26 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 
 	srv := &http.Server{
 		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       oauthCallbackTimeout, // M2: idle timeout
 	}
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Security headers for all responses
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'")
+		w.Header().Set("Cache-Control", "no-store")
+
 		if r.URL.Path != "/auth/callback" {
 			http.NotFound(w, r)
+			return
+		}
+		// H2: Validate state parameter to prevent CSRF
+		receivedState := r.URL.Query().Get("state")
+		if receivedState != state {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, "<html><body><h2>Authentication failed</h2><p>Invalid state parameter (possible CSRF attack). You can close this tab.</p></body></html>")
+			errCh <- fmt.Errorf("OAuth state mismatch: possible CSRF attack")
 			return
 		}
 		code := r.URL.Query().Get("code")
@@ -168,22 +219,28 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 		fmt.Println(authURL)
 	}
 
-	fmt.Println("\nWaiting for callback (press Ctrl+C to cancel)...")
+	fmt.Println("\nWaiting for callback (press Ctrl+C to cancel, auto-timeout in 5 minutes)...")
 
-	// Wait for callback or context cancellation
+	// M2: Add global timeout so port doesn't stay open indefinitely
+	timeoutTimer := time.NewTimer(oauthCallbackTimeout)
+	defer timeoutTimer.Stop()
+
+	// Wait for callback, context cancellation, or timeout
 	var code string
 	select {
 	case code = <-codeCh:
 		// got it
 	case cbErr := <-errCh:
 		return "", fmt.Errorf("callback error: %w", cbErr)
+	case <-timeoutTimer.C:
+		return "", fmt.Errorf("OAuth callback timed out after %s", oauthCallbackTimeout)
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
 
 	tr, err := exchangeOAuthToken(ctx, logger, OpenAITokenURL, map[string]any{
 		"grant_type":    "authorization_code",
-		"client_id":     OpenAICodexClientID,
+		"client_id":     clientID,
 		"code":          code,
 		"redirect_uri":  OpenAIRedirectURI,
 		"code_verifier": pkce.Verifier,
@@ -199,7 +256,7 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 		Access:   tr.AccessToken,
 		Refresh:  tr.RefreshToken,
 		Expires:  calcExpiresAtMilli(tr.ExpiresIn),
-		ClientID: OpenAICodexClientID,
+		ClientID: clientID,
 		Email:    "",
 	}
 	if err := UpsertProfile(profileID, cred, logger); err != nil {

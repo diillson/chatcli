@@ -127,7 +127,7 @@ Use estas flags ao executar `chatcli` diretamente do seu terminal para automaç�
 | --- | --- |
 | `-p`, `--prompt "<texto>` | Executa um único prompt e sai. |
 | `--provider <nome>` | Sobrescreve o provedor de IA (ex: `GOOGLEAI`). |
-| `--model <nome>` | Sobrescreve o modelo de IA (ex: `gemini-1.5-pro-latest`). |
+| `--model <nome>` | Sobrescreve o modelo de IA (ex: `gemini-2.5-pro`). |
 | `--timeout <duração>` | Define o tempo limite para a requisição (ex: `10s`, `1m`). |
 | `--max-tokens <num>` | Limita o número de tokens na resposta. |
 | `--agent-auto-exec` | No modo agente one-shot, executa o primeiro comando se for seguro. |

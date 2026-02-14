@@ -49,6 +49,38 @@ func NewCommandValidator(logger *zap.Logger) *CommandValidator {
 		`(?i)\bmkfs\b`,
 		`(?i)\buserdel\b`,
 		`(?i)\bchmod\s+777\s+/.*`,
+		// M3: Additional bypass detection patterns
+		`(?i)\bbase64\b.*\|\s*(sh|bash|zsh|dash)`, // base64 decode piped to shell
+		`(?i)\bpython[23]?\s+-c\b`,                // python inline execution
+		`(?i)\bperl\s+-e\b`,                       // perl inline execution
+		`(?i)\bruby\s+-e\b`,                       // ruby inline execution
+		`(?i)\bnode\s+-e\b`,                       // node inline execution
+		`(?i)\bphp\s+-r\b`,                        // php inline execution
+		`(?i)\beval\s+`,                           // shell eval
+		`(?i)\$\(\s*curl`,                         // command substitution with curl
+		`(?i)\$\(\s*wget`,                         // command substitution with wget
+		"(?i)`\\s*curl",                           // backtick substitution with curl
+		"(?i)`\\s*wget",                           // backtick substitution with wget
+		`(?i)\bchown\s+-R\s+.*\s+/`,               // recursive chown on root paths
+		`(?i)>\s*/etc/`,                           // writing to /etc
+		`(?i)>\s*/dev/[sh]d`,                      // writing to block devices
+		`(?i)\bsource\s+/dev/tcp`,                 // bash reverse shell via /dev/tcp
+		`(?i)/dev/tcp/`,                           // /dev/tcp access
+		`(?i)\bexport\s+.*PATH\s*=`,               // PATH manipulation
+		`(?i)\bnc\b.*-[el]`,                       // netcat listen/exec
+		`(?i)\bncat\b.*-[el]`,                     // ncat listen/exec
+		`(?i)\bxargs\b.*\b(rm|del|shutdown|reboot|mkfs)\b`,  // xargs with dangerous commands
+		`(?i)\bfind\b.*-exec\b.*(rm|del|shutdown|reboot)\b`, // find -exec with dangerous commands
+		`(?i)\bcrontab\s+-r\b`,                              // remove crontab
+		`(?i)\biptables\s+-F\b`,                             // flush firewall rules
+		`(?i)\bsysctl\s+-w\b`,                               // kernel parameter modification
+		`(?i)\bkillall\b`,                                   // kill all processes by name
+		`(?i)\bpkill\s+-9\b`,                                // force kill by pattern
+		`(?i)\bexec\s+\d*[<>]`,                              // exec with redirection
+		`(?i)>\s*/proc/`,                                    // writing to /proc
+		`(?i)\btee\s+/etc/`,                                 // tee to /etc files
+		`(?i)\bsource\s+/dev/`,                              // source from /dev
+		`(?i)\benv\b.*\|\s*(sh|bash)`,                       // env piped to shell
 	}
 
 	for _, pattern := range defaultPatterns {

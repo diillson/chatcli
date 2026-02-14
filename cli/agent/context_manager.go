@@ -26,9 +26,13 @@ type ContextManager struct {
 func NewContextManager(logger *zap.Logger) *ContextManager {
 	// Ler timeout de ENV ou usar padrão
 	timeout := 10 * time.Minute
+	const maxTimeout = 1 * time.Hour
 	if envTimeout := os.Getenv("CHATCLI_AGENT_CMD_TIMEOUT"); envTimeout != "" {
 		if d, err := time.ParseDuration(envTimeout); err == nil && d > 0 {
 			timeout = d
+			if timeout > maxTimeout {
+				timeout = maxTimeout
+			}
 		}
 	}
 

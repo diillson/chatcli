@@ -49,7 +49,7 @@ var registry = []ModelMeta{
 	// OpenAI GPT-5 e variantes
 	{
 		ID:              "gpt-5",
-		Aliases:         []string{"gpt-5", "gpt-5-mini", "gpt-5-nano"},
+		Aliases:         []string{"gpt-5", "gpt-5.2", "gpt-5-mini", "gpt-5-nano"},
 		DisplayName:     "GPT-5",
 		Provider:        ProviderOpenAI,
 		ContextWindow:   50000,

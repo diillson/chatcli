@@ -42,9 +42,9 @@ Exibe o status de autenticação de todos os provedores configurados, incluindo 
 
 Inicia o fluxo de autenticação OAuth:
 
-1. Um servidor HTTP local é iniciado na **porta 1455** para capturar o callback
-2. O navegador abre automaticamente na página de login do provedor
-3. Após autorizar, o token é capturado e salvo automaticamente
+1. O navegador abre automaticamente na página de login do provedor
+2. **OpenAI:** um servidor HTTP local captura o callback automaticamente (porta **1455**)
+3. **Anthropic:** após autorizar, copie o código exibido na página e cole no terminal
 4. O provedor aparece imediatamente no `/switch` — **sem reiniciar o app**
 
 #### Provedores Suportados
@@ -103,11 +103,13 @@ O ChatCLI detecta automaticamente o tipo de credencial e roteia as requisições
 
 ## Armazenamento de Credenciais
 
-As credenciais OAuth são salvas em:
+As credenciais OAuth são salvas com **criptografia AES-256-GCM** em:
 
 ```
 ~/.chatcli/auth-profiles.json
 ```
+
+A chave de criptografia é gerada automaticamente e armazenada em `~/.chatcli/.auth-key` (permissão 0600). Dados não-criptografados de versões anteriores são migrados transparentemente na primeira leitura.
 
 O arquivo contém tokens de acesso, tokens de refresh e metadados de cada provedor. Os tokens são renovados automaticamente quando expiram.
 
@@ -121,9 +123,13 @@ export CHATCLI_AUTH_DIR="~/.config/chatcli/auth"
 
 ## Solução de Problemas
 
-### "Erro de autenticação" ao clicar no link OAuth
+### "Erro de autenticação" ao clicar no link OAuth (OpenAI)
 
-Verifique se a porta **1455** não está em uso por outra aplicação. O servidor de callback precisa dessa porta para capturar o retorno do provedor.
+Verifique se a porta de callback não está em uso por outra aplicação. O servidor de callback da OpenAI precisa da porta **1455** para capturar o retorno.
+
+### Código não aparece após autorizar (Anthropic)
+
+O fluxo da Anthropic redireciona para a página do console que exibe o código de autorização. Copie o código exibido e cole no terminal quando solicitado.
 
 ### Provedor não aparece no `/switch` após login
 

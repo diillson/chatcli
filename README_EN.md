@@ -176,11 +176,14 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  OLLAMA_ENABLED ,  OLLAMA_BASE_URL ,  OLLAMA_MODEL ,  OLLAMA_MAX_TOKENS ,  OLLAMA_FILTER_THINKING  – (Optional) Filters "thinking aloud" from models like Qwen3 (true/false, default: true)
   -  CLIENT_ID ,  CLIENT_KEY ,  STACKSPOT_REALM ,  STACKSPOT_AGENT_ID  (for StackSpot)
 - Agent:
-  -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Optional)** Default timeout for each command executed from the action list by Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default:  10m .
+  -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Optional)** Default timeout for each command executed from the action list by Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default:  10m . Maximum: 1h.
   -  `CHATCLI_AGENT_DENYLIST`  – **(Optional)** Semicolon-separated list of regular expressions to block extra dangerous commands. Example: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
   -  `CHATCLI_AGENT_ALLOW_SUDO`  – **(Optional)** Allow sudo commands without automatic blocking (true/false). Default:  false  (sudo is blocked for safety).
-  -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Optional)** Defines the maximum number of turns the agent can have. Default: 7.
+  -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Optional)** Defines the maximum number of turns the agent can have. Default: 50. Maximum: 200.
   -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Optional)** Defines the execution timeout for the agent plugin (e.g., 30s, 2m, 10m). Default: 15 (Minutes)
+- OAuth:
+  -  `CHATCLI_OPENAI_CLIENT_ID`  – **(Optional)** Override the OpenAI OAuth client ID.
+
 
 ### Example  .env
 
@@ -197,12 +200,15 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     HISTORY_MAX_SIZE=300MB
     HISTORY_FILE=~/.chatcli_history
 
-    Agent Settings
-    CHATCLI_AGENT_CMD_TIMEOUT=2m   # The command will have 2m to run after that it is locked and finished
+    # Agent Settings
+    CHATCLI_AGENT_CMD_TIMEOUT=2m   # The command will have 2m to run after that it is locked and finished (max: 1h)
     CHATCLI_AGENT_DENYLIST=rm\\s+-rf\\s+.*;curl\\s+[^|;]*\\|\\s*(sh|bash);dd\\s+if=;mkfs\\w*\\s+
     CHATCLI_AGENT_ALLOW_SUDO=false
-    CHATCLI_AGENT_PLUGIN_MAX_TURNS=10
+    CHATCLI_AGENT_PLUGIN_MAX_TURNS=50
     CHATCLI_AGENT_PLUGIN_TIMEOUT=20m
+
+    # OAuth Settings (optional)
+    # CHATCLI_OPENAI_CLIENT_ID=custom-client-id    # Override the OpenAI OAuth client ID
     
     # OpenAI Settings
     OPENAI_API_KEY=your-openai-key
@@ -219,7 +225,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     
     # ClaudeAI Settings
     ANTHROPIC_API_KEY=your-claudeai-key
-    ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+    ANTHROPIC_MODEL=claude-sonnet-4-5
     ANTHROPIC_MAX_TOKENS=20000
     ANTHROPIC_API_VERSION=2023-06-01
     
@@ -264,8 +270,10 @@ ChatCLI supports **two authentication methods** for providers that offer OAuth:
 
 1. Run `/auth login openai-codex` (or `anthropic`)
 2. Your browser opens automatically to the provider's login page
-3. After authorizing, the token is captured automatically via a local callback (port 1455)
-4. The provider appears immediately in `/switch` — no restart needed
+3. **OpenAI:** the token is captured automatically via local callback (port 1455)
+4. **Anthropic:** after authorizing, copy the code shown on the page and paste it in the terminal
+5. The provider appears immediately in `/switch` — no restart needed
+6. Credentials are stored with **AES-256-GCM encryption** at `~/.chatcli/auth-profiles.json`
 
 ### Which Endpoint is Used (OpenAI)
 
@@ -309,7 +317,7 @@ Execute prompts in a single line, ideal for scripting and automation.
 - Available One-Shot Flags:
   -  -p  or  --prompt : The text to send to the LLM for a single execution.
   -  --provider : Overrides the LLM provider at runtime ( OPENAI ,  OPENAI_ASSISTANT ,  CLAUDEAI ,  GOOGLEAI ,  STACKSPOT ,  XAI ).
-  -  --model : Chooses the model for the active provider (e.g.,  gpt-4o-mini ,  claude-3-5-sonnet-20241022 ,  gemini-2.5-flash , etc.).
+  -  --model : Chooses the model for the active provider (e.g.,  gpt-4o-mini ,  claude-sonnet-4-5 ,  gemini-2.5-flash , etc.).
   -  --max-tokens : Defines the maximum amount of tokens used for active provider.
   -  --realm : Overrides the StackSpot realm at runtime.
   -  --agent-id : Overrides the StackSpot agent ID at runtime.

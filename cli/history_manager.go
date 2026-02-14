@@ -90,7 +90,7 @@ func (hm *HistoryManager) LoadHistory() ([]string, error) {
 // AppendAndRotateHistory salva o histórico no arquivo e faz backup se o tamanho exceder o limite
 func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {
 	// 1. Anexar os novos comandos ao arquivo de histórico
-	f, err := os.OpenFile(hm.historyFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(hm.historyFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		hm.logger.Warn("Não foi possível abrir o histórico para anexar comandos", zap.Error(err))
 		return err
@@ -145,7 +145,7 @@ func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {
 	if err != nil {
 		hm.logger.Error("Falha ao ler o arquivo de backup para truncamento", zap.Error(err))
 		// Recria um arquivo de histórico vazio para não perder o funcionamento
-		return os.WriteFile(hm.historyFile, []byte{}, 0644)
+		return os.WriteFile(hm.historyFile, []byte{}, 0o600)
 	}
 
 	lines := strings.Split(string(backupData), "\n")
@@ -159,5 +159,5 @@ func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {
 	recentHistory := lines[startIndex:]
 
 	// Escrever as linhas recentes de volta no arquivo de histórico principal (agora vazio)
-	return os.WriteFile(hm.historyFile, []byte(strings.Join(recentHistory, "\n")), 0644)
+	return os.WriteFile(hm.historyFile, []byte(strings.Join(recentHistory, "\n")), 0o600)
 }

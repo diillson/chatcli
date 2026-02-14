@@ -18,8 +18,11 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/utils"
+	"go.uber.org/zap"
 )
 
 type CommandHandler struct {
@@ -165,6 +168,21 @@ func (ch *CommandHandler) handleSessionCommand(userInput string) {
 	}
 }
 
+// autoSwitchProvider switches the active provider and model after a successful OAuth login.
+func (ch *CommandHandler) autoSwitchProvider(provider, model string) {
+	newClient, err := ch.cli.manager.GetClient(provider, model)
+	if err != nil {
+		ch.cli.logger.Warn("Auto-switch after OAuth login failed, use /switch manually",
+			zap.String("provider", provider), zap.Error(err))
+		fmt.Println(i18n.T("cli.switch.change_model_error", model, err))
+		return
+	}
+	ch.cli.Client = newClient
+	ch.cli.Provider = provider
+	ch.cli.Model = model
+	fmt.Println(i18n.T("status.provider_switched", ch.cli.Client.GetModelName(), ch.cli.Provider))
+}
+
 func (ch *CommandHandler) handleAuthCommand(userInput string) {
 	args := strings.Fields(userInput)
 	if len(args) < 2 {
@@ -191,6 +209,8 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			}
 			fmt.Println("Logged in (Anthropic) profile:", id)
 			ch.cli.manager.RefreshProviders()
+			ch.autoSwitchProvider("CLAUDEAI",
+				utils.GetEnvOrDefault("ANTHROPIC_MODEL", config.DefaultClaudeAIModel))
 			return
 		case "openai-codex", "codex":
 			id, err := auth.LoginOpenAICodexOAuth(ctx, ch.cli.logger)
@@ -200,6 +220,8 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			}
 			fmt.Println("Logged in (OpenAI Codex) profile:", id)
 			ch.cli.manager.RefreshProviders()
+			ch.autoSwitchProvider("OPENAI",
+				utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel))
 			return
 		default:
 			fmt.Println("Unknown provider. Use: anthropic | openai-codex")

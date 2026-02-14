@@ -158,8 +158,21 @@ func StripAuthPrefix(key string) string {
 	return key
 }
 
-// Stringer para debug.
+// String returns a redacted representation safe for logging/debugging.
 func (c *AuthProfileCredential) String() string {
-	data, _ := json.MarshalIndent(c, "", "  ")
+	redacted := *c
+	if redacted.Access != "" {
+		redacted.Access = "[REDACTED]"
+	}
+	if redacted.Refresh != "" {
+		redacted.Refresh = "[REDACTED]"
+	}
+	if redacted.Key != "" {
+		redacted.Key = "[REDACTED]"
+	}
+	if redacted.Token != "" {
+		redacted.Token = "[REDACTED]"
+	}
+	data, _ := json.MarshalIndent(&redacted, "", "  ")
 	return string(data)
 }

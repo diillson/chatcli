@@ -26,7 +26,7 @@ func NewSessionManager(logger *zap.Logger) (*SessionManager, error) {
 	}
 
 	sessionsDir := filepath.Join(homeDir, ".chatcli", "sessions")
-	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+	if err := os.MkdirAll(sessionsDir, 0o700); err != nil {
 		return nil, fmt.Errorf("não foi possível criar o diretório de sessões: %w", err)
 	}
 
@@ -57,7 +57,7 @@ func (sm *SessionManager) SaveSession(name string, history []models.Message) err
 		return fmt.Errorf("erro ao serializar a sessão: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := os.WriteFile(filePath, data, 0o600); err != nil {
 		sm.logger.Error("Erro ao salvar o arquivo da sessão", zap.String("path", filePath), zap.Error(err))
 		return fmt.Errorf("erro ao salvar o arquivo da sessão: %w", err)
 	}
