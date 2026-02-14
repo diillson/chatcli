@@ -40,7 +40,6 @@ Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAu
 | :--- | :--- | :--- |
 | `CHATCLI_AUTH_DIR` | Diretório onde as credenciais OAuth são armazenadas. | `~/.chatcli/` |
 | `CHATCLI_OPENAI_CLIENT_ID` | Permite sobrescrever o client ID do OAuth da OpenAI. | (interno) |
-| `CHATCLI_ANTHROPIC_MANUAL_AUTH` | Defina como `true` para usar o fluxo manual de colar código no login OAuth da Anthropic, em vez do callback automático. | `false` |
 
 As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/auth-profiles.json`. A chave de criptografia é gerada automaticamente e salva em `~/.chatcli/.auth-key` (permissão 0600).
 

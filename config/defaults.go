@@ -13,7 +13,7 @@ const (
 	DefaultStackSpotAgentID  = "default"
 
 	// Valores padrão para OpenAI
-	DefaultOpenAIModel       = "gpt-4o-mini"
+	DefaultOpenAIModel       = "gpt-5.2"
 	DefaultOpenAiAssistModel = "gpt-4o-mini"
 	OpenAIAPIURL             = "https://api.openai.com/v1/chat/completions"
 	OpenAIResponsesAPIURL    = "https://api.openai.com/v1/responses"

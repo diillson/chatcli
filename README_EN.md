@@ -183,7 +183,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Optional)** Defines the execution timeout for the agent plugin (e.g., 30s, 2m, 10m). Default: 15 (Minutes)
 - OAuth:
   -  `CHATCLI_OPENAI_CLIENT_ID`  – **(Optional)** Override the OpenAI OAuth client ID.
-  -  `CHATCLI_ANTHROPIC_MANUAL_AUTH`  – **(Optional)** Set to `true` to use manual code paste flow for Anthropic OAuth login instead of the automatic local callback server.
+
 
 ### Example  .env
 
@@ -209,7 +209,6 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
 
     # OAuth Settings (optional)
     # CHATCLI_OPENAI_CLIENT_ID=custom-client-id    # Override the OpenAI OAuth client ID
-    # CHATCLI_ANTHROPIC_MANUAL_AUTH=true            # Use manual code paste for Anthropic OAuth login
     
     # OpenAI Settings
     OPENAI_API_KEY=your-openai-key
@@ -271,11 +270,10 @@ ChatCLI supports **two authentication methods** for providers that offer OAuth:
 
 1. Run `/auth login openai-codex` (or `anthropic`)
 2. Your browser opens automatically to the provider's login page
-3. After authorizing, the token is captured automatically via a local callback (OpenAI: port 1455, Anthropic: port 1456)
-4. The provider appears immediately in `/switch` — no restart needed
-5. Credentials are stored with **AES-256-GCM encryption** at `~/.chatcli/auth-profiles.json`
-
-> **Note:** If Anthropic's automatic callback doesn't work, set `CHATCLI_ANTHROPIC_MANUAL_AUTH=true` to use the manual code paste flow.
+3. **OpenAI:** the token is captured automatically via local callback (port 1455)
+4. **Anthropic:** after authorizing, copy the code shown on the page and paste it in the terminal
+5. The provider appears immediately in `/switch` — no restart needed
+6. Credentials are stored with **AES-256-GCM encryption** at `~/.chatcli/auth-profiles.json`
 
 ### Which Endpoint is Used (OpenAI)
 

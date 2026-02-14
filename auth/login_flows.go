@@ -18,13 +18,13 @@ import (
 
 const (
 	// Anthropic (Claude)
-	AnthropicOAuthClientID       = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	AnthropicAuthURL             = "https://claude.ai/oauth/authorize"
-	AnthropicTokenURL            = "https://console.anthropic.com/v1/oauth/token"
-	AnthropicCallbackPort        = "1456"
-	AnthropicLocalRedirectURI    = "http://localhost:1456/auth/callback"
-	AnthropicFallbackRedirectURI = "https://console.anthropic.com/oauth/code/callback"
-	AnthropicScopes              = "user:profile user:inference" // L6: removed overly broad org:create_api_key
+	// NOTE: Anthropic's OAuth does not support localhost redirect URIs.
+	// The only registered redirect is console.anthropic.com which displays the code for the user to copy.
+	AnthropicOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	AnthropicAuthURL       = "https://claude.ai/oauth/authorize"
+	AnthropicTokenURL      = "https://console.anthropic.com/v1/oauth/token"
+	AnthropicRedirectURI   = "https://console.anthropic.com/oauth/code/callback"
+	AnthropicScopes        = "user:profile user:inference" // L6: removed overly broad org:create_api_key
 
 	// OpenAI Codex OAuth
 	defaultOpenAICodexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -46,153 +46,10 @@ func OpenAICodexClientID() string {
 	return defaultOpenAICodexClientID
 }
 
+// LoginAnthropicOAuth authenticates via OAuth with Anthropic.
+// Anthropic's OAuth does not support localhost redirect URIs, so the flow opens the browser
+// and the user copies the authorization code displayed on the Anthropic console page.
 func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID string, err error) {
-	// CHATCLI_ANTHROPIC_MANUAL_AUTH=true falls back to manual code paste
-	if strings.EqualFold(os.Getenv("CHATCLI_ANTHROPIC_MANUAL_AUTH"), "true") {
-		return loginAnthropicManual(ctx, logger)
-	}
-	return loginAnthropicCallback(ctx, logger)
-}
-
-// loginAnthropicCallback uses a local HTTP server to capture the OAuth callback automatically.
-func loginAnthropicCallback(ctx context.Context, logger *zap.Logger) (string, error) {
-	pkce, err := GeneratePKCE()
-	if err != nil {
-		return "", err
-	}
-	state, err := GenerateState()
-	if err != nil {
-		return "", fmt.Errorf("failed to generate OAuth state: %w", err)
-	}
-
-	redirectURI := AnthropicLocalRedirectURI
-
-	q := url.Values{}
-	q.Set("client_id", AnthropicOAuthClientID)
-	q.Set("response_type", "code")
-	q.Set("redirect_uri", redirectURI)
-	q.Set("scope", AnthropicScopes)
-	q.Set("code_challenge", pkce.Challenge)
-	q.Set("code_challenge_method", "S256")
-	q.Set("state", state)
-	authURL := AnthropicAuthURL + "?" + q.Encode()
-
-	// Start local HTTP server to capture the OAuth callback
-	codeCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-
-	listener, err := net.Listen("tcp", "localhost:"+AnthropicCallbackPort)
-	if err != nil {
-		logger.Warn("Failed to start local callback server, falling back to manual auth",
-			zap.String("port", AnthropicCallbackPort), zap.Error(err))
-		return loginAnthropicManual(ctx, logger)
-	}
-
-	srv := &http.Server{
-		ReadHeaderTimeout: 30 * time.Second,
-		IdleTimeout:       oauthCallbackTimeout,
-	}
-	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'")
-		w.Header().Set("Cache-Control", "no-store")
-
-		if r.URL.Path != "/auth/callback" {
-			http.NotFound(w, r)
-			return
-		}
-		receivedState := r.URL.Query().Get("state")
-		if receivedState != state {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprint(w, "<html><body><h2>Authentication failed</h2><p>Invalid state parameter (possible CSRF attack). You can close this tab.</p></body></html>")
-			errCh <- fmt.Errorf("OAuth state mismatch: possible CSRF attack")
-			return
-		}
-		code := r.URL.Query().Get("code")
-		if code == "" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, "<html><body><h2>Authentication failed</h2><p>No authorization code received. You can close this tab.</p></body></html>")
-			errCh <- fmt.Errorf("no code in callback")
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, "<html><body><h2>Authentication successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>")
-		codeCh <- code
-	})
-
-	go func() {
-		if serveErr := srv.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
-			errCh <- serveErr
-		}
-	}()
-
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
-	}()
-
-	// Open browser automatically
-	fmt.Println("\nAUTH [Anthropic] Opening browser for authentication...")
-	if openErr := openBrowser(authURL); openErr != nil {
-		fmt.Println("Could not open browser automatically. Open this URL manually:")
-		fmt.Println(authURL)
-	} else {
-		fmt.Println("Browser opened. Waiting for authentication callback...")
-		fmt.Println("If the browser did not open, copy and paste this URL:")
-		fmt.Println(authURL)
-	}
-
-	fmt.Println("\nWaiting for callback (press Ctrl+C to cancel, auto-timeout in 5 minutes)...")
-	fmt.Println("TIP: If callback fails, set CHATCLI_ANTHROPIC_MANUAL_AUTH=true to use manual code paste.")
-
-	timeoutTimer := time.NewTimer(oauthCallbackTimeout)
-	defer timeoutTimer.Stop()
-
-	var code string
-	select {
-	case code = <-codeCh:
-		// got it
-	case cbErr := <-errCh:
-		return "", fmt.Errorf("callback error: %w", cbErr)
-	case <-timeoutTimer.C:
-		return "", fmt.Errorf("OAuth callback timed out after %s", oauthCallbackTimeout)
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
-
-	tr, err := exchangeOAuthToken(ctx, logger, AnthropicTokenURL, map[string]any{
-		"grant_type":    "authorization_code",
-		"client_id":     AnthropicOAuthClientID,
-		"code":          code,
-		"redirect_uri":  redirectURI,
-		"code_verifier": pkce.Verifier,
-		"state":         state,
-	})
-	if err != nil {
-		return "", err
-	}
-	profileID := "anthropic:default"
-	cred := &AuthProfileCredential{
-		CredType: CredentialOAuth,
-		Provider: ProviderAnthropic,
-		Access:   tr.AccessToken,
-		Refresh:  tr.RefreshToken,
-		Expires:  calcExpiresAtMilli(tr.ExpiresIn),
-		ClientID: AnthropicOAuthClientID,
-		Email:    "",
-	}
-	if err := UpsertProfile(profileID, cred, logger); err != nil {
-		return "", err
-	}
-	return profileID, nil
-}
-
-// loginAnthropicManual is the fallback flow where the user manually copies the code from the browser.
-func loginAnthropicManual(ctx context.Context, logger *zap.Logger) (string, error) {
 	pkce, err := GeneratePKCE()
 	if err != nil {
 		return "", err
@@ -206,14 +63,21 @@ func loginAnthropicManual(ctx context.Context, logger *zap.Logger) (string, erro
 	q.Set("code", "true")
 	q.Set("client_id", AnthropicOAuthClientID)
 	q.Set("response_type", "code")
-	q.Set("redirect_uri", AnthropicFallbackRedirectURI)
+	q.Set("redirect_uri", AnthropicRedirectURI)
 	q.Set("scope", AnthropicScopes)
 	q.Set("code_challenge", pkce.Challenge)
 	q.Set("code_challenge_method", "S256")
 	q.Set("state", state)
 	authURL := AnthropicAuthURL + "?" + q.Encode()
 
-	fmt.Println("\nAUTH [Anthropic] Open this URL in your browser, then paste the code: ")
+	// Try to open browser automatically for convenience
+	fmt.Println("\nAUTH [Anthropic] Opening browser for authentication...")
+	if openErr := openBrowser(authURL); openErr != nil {
+		fmt.Println("Could not open browser automatically. Open this URL manually:")
+	} else {
+		fmt.Println("Browser opened. After authorizing, copy the code shown on the page and paste it below.")
+		fmt.Println("If the browser did not open, copy and paste this URL:")
+	}
 	fmt.Println(authURL)
 
 	// L5: Only run stty on Unix systems
@@ -224,7 +88,7 @@ func loginAnthropicManual(ctx context.Context, logger *zap.Logger) (string, erro
 	}
 
 	var code string
-	fmt.Print("> code: ")
+	fmt.Print("\n> Paste the code here: ")
 	reader := bufio.NewReader(os.Stdin)
 	code, _ = reader.ReadString('\n')
 	code = strings.TrimSpace(code)
@@ -239,14 +103,14 @@ func loginAnthropicManual(ctx context.Context, logger *zap.Logger) (string, erro
 		"grant_type":    "authorization_code",
 		"client_id":     AnthropicOAuthClientID,
 		"code":          code,
-		"redirect_uri":  AnthropicFallbackRedirectURI,
+		"redirect_uri":  AnthropicRedirectURI,
 		"code_verifier": pkce.Verifier,
 		"state":         state,
 	})
 	if err != nil {
 		return "", err
 	}
-	profileID := "anthropic:default"
+	profileID = "anthropic:default"
 	cred := &AuthProfileCredential{
 		CredType: CredentialOAuth,
 		Provider: ProviderAnthropic,

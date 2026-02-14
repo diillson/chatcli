@@ -183,7 +183,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Opcional)** Define o tempo limite de execução para o plugin do agente (ex.: 30s, 2m, 10m). Padrão: 15 (Minutos)
 - OAuth:
   -  `CHATCLI_OPENAI_CLIENT_ID`  – **(Opcional)** Permite sobrescrever o client ID do OAuth da OpenAI.
-  -  `CHATCLI_ANTHROPIC_MANUAL_AUTH`  – **(Opcional)** Defina como `true` para usar o fluxo manual de colar código no login OAuth da Anthropic, em vez do callback automático via servidor local.
+
 
 > ⚠️ **Importante:** Plugins que realizam operações demoradas (ex.: deploy de infraestrutura, builds complexos) podem precisar de timeouts maiores.
 
@@ -211,7 +211,6 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
 
     # OAuth Configurações (opcional)
     # CHATCLI_OPENAI_CLIENT_ID=custom-client-id    # Sobrescreve o client ID do OAuth da OpenAI
-    # CHATCLI_ANTHROPIC_MANUAL_AUTH=true            # Usa fluxo manual de colar código no login Anthropic
     
     # Configurações do OpenAI
     OPENAI_API_KEY=sua-chave-openai
@@ -274,11 +273,10 @@ O ChatCLI suporta **dois métodos de autenticação** para provedores que oferec
 
 1. Execute `/auth login openai-codex` (ou `anthropic`)
 2. O navegador abre automaticamente na página de login do provedor
-3. Após autorizar, o token é capturado automaticamente via callback local (OpenAI: porta 1455, Anthropic: porta 1456)
-4. O provedor aparece imediatamente no `/switch` — sem precisar reiniciar
-5. As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/auth-profiles.json`
-
-> **Nota:** Se o callback automático da Anthropic não funcionar, defina `CHATCLI_ANTHROPIC_MANUAL_AUTH=true` para usar o fluxo manual de colar o código.
+3. **OpenAI:** o token é capturado automaticamente via callback local (porta 1455)
+4. **Anthropic:** após autorizar, copie o código exibido na página e cole no terminal
+5. O provedor aparece imediatamente no `/switch` — sem precisar reiniciar
+6. As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/auth-profiles.json`
 
 ### Quando usar qual endpoint (OpenAI)
 
