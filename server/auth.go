@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"strings"
 
 	"go.uber.org/zap"
@@ -78,7 +79,7 @@ func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) err
 	}
 
 	token = strings.TrimPrefix(token, "Bearer ")
-	if token != a.token {
+	if subtle.ConstantTimeCompare([]byte(token), []byte(a.token)) != 1 {
 		a.logger.Warn("Invalid token", zap.String("method", method))
 		return status.Error(codes.PermissionDenied, "invalid token")
 	}

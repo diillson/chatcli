@@ -81,6 +81,15 @@ func NewCommandValidator(logger *zap.Logger) *CommandValidator {
 		`(?i)\btee\s+/etc/`,                                 // tee to /etc files
 		`(?i)\bsource\s+/dev/`,                              // source from /dev
 		`(?i)\benv\b.*\|\s*(sh|bash)`,                       // env piped to shell
+		`\$\{[^}]*[;|&][^}]*\}`,                             // dangerous variable expansion with commands
+		`(?i)\$\(\s*(bash|sh|zsh|dash)\b`,                   // subprocess shell via command substitution
+		`<\(`,                                                // process substitution (input)
+		`>\(`,                                                // process substitution (output)
+		`(?i)\binsmod\b`,                                    // kernel module insertion
+		`(?i)\bmodprobe\b`,                                  // kernel module loading
+		`(?i)\brmmod\b`,                                     // kernel module removal
+		`(?i)\bumount\s+-[lf]`,                              // forced/lazy unmount
+		`(?i)\b[A-Z_]+=.*;\s*(sh|bash|zsh)\b`,              // var assignment hiding shell invocation
 	}
 
 	for _, pattern := range defaultPatterns {

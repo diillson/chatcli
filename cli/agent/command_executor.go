@@ -172,7 +172,7 @@ func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, shellFl
 		shellCommand = command
 	} else {
 		if shellConfigPath != "" {
-			shellCommand = fmt.Sprintf("source %s 2>/dev/null || true; %s", shellConfigPath, command)
+			shellCommand = fmt.Sprintf("source %s 2>/dev/null || true; %s", utils.ShellQuote(shellConfigPath), command)
 		} else {
 			shellCommand = command
 		}

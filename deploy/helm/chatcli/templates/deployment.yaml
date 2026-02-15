@@ -19,10 +19,18 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "chatcli.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command: ["chatcli", "serve"]
           args:
             - "--port={{ .Values.server.port }}"
@@ -63,6 +71,9 @@ spec:
           {{- if .Values.tls.existingSecret }}
           {{- $mounts = append $mounts (dict "name" "tls-certs" "mountPath" "/etc/chatcli/tls" "readOnly" true) }}
           {{- end }}
+          {{- if and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem }}
+          {{- $mounts = append $mounts (dict "name" "tmp" "mountPath" "/tmp") }}
+          {{- end }}
           {{- if $mounts }}
           volumeMounts:
             {{- toYaml $mounts | nindent 12 }}
@@ -79,7 +90,7 @@ spec:
               command: ["pidof", "chatcli"]
             initialDelaySeconds: 3
             periodSeconds: 10
-      {{- if or .Values.persistence.enabled .Values.tls.existingSecret }}
+      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: sessions
@@ -90,6 +101,11 @@ spec:
         - name: tls-certs
           secret:
             secretName: {{ .Values.tls.existingSecret }}
+        {{- end }}
+        {{- if and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}

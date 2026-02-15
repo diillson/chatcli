@@ -69,6 +69,44 @@ const (
 	SourceTypeCommandOutput = agent.SourceTypeCommandOutput
 )
 
+// sttyPath is the resolved absolute path to the stty binary (resolved once at
+// init time via exec.LookPath to avoid PATH-based injection).
+var sttyPath = func() string {
+	if p, err := exec.LookPath("stty"); err == nil {
+		return p
+	}
+	return "stty" // fallback for systems where LookPath fails
+}()
+
+// allowedEditors is the set of known safe editors for the EDITOR env var.
+var allowedEditors = map[string]bool{
+	"vim": true, "vi": true, "nvim": true, "nano": true, "emacs": true,
+	"code": true, "subl": true, "micro": true, "helix": true, "hx": true,
+	"ed": true, "pico": true, "joe": true, "ne": true, "kate": true,
+	"gedit": true, "kwrite": true, "notepad++": true, "atom": true,
+}
+
+// resolveEditor validates and resolves the EDITOR environment variable.
+// It returns the resolved absolute path, or an error if the editor is
+// unknown or cannot be found in PATH.
+func resolveEditor() (string, error) {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vim"
+	}
+
+	base := filepath.Base(editor)
+	if !allowedEditors[base] {
+		return "", fmt.Errorf("editor %q is not in the allowed list; set EDITOR to one of: vim, nvim, nano, emacs, code, subl, micro, helix", base)
+	}
+
+	resolved, err := exec.LookPath(editor)
+	if err != nil {
+		return "", fmt.Errorf("editor %q not found in PATH: %w", editor, err)
+	}
+	return resolved, nil
+}
+
 // NewAgentMode cria uma nova instância do modo agente
 func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 	// Obtém o nome do modelo para inicializar o contador de tokens
@@ -140,7 +178,7 @@ func compactText(input string, maxLines int, maxLen int) string {
 
 // getInput obtém entrada do usuário de forma segura
 func (a *AgentMode) getInput(prompt string) string {
-	cmd := exec.Command("stty", "sane")
+	cmd := exec.Command(sttyPath, "sane")
 	cmd.Stdin = os.Stdin
 	_ = cmd.Run()
 
@@ -781,7 +819,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				fmt.Println(i18n.T("agent.status.batch_check_individual"))
 			}
 
-			cmd := exec.Command("stty", "sane")
+			cmd := exec.Command(sttyPath, "sane")
 			cmd.Stdin = os.Stdin
 			cmd.Stdout = os.Stdout
 			_ = cmd.Run()
@@ -1217,7 +1255,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 
 // getCriticalInput obtém entrada para decisões críticas
 func (a *AgentMode) getCriticalInput(prompt string) string {
-	cmd := exec.Command("stty", "sane")
+	cmd := exec.Command(sttyPath, "sane")
 	cmd.Stdin = os.Stdin
 	_ = cmd.Run()
 
@@ -1256,7 +1294,7 @@ func (a *AgentMode) simulateCommandBlock(ctx context.Context, block agent.Comman
 		}
 		fmt.Printf("🔸 Dry-run %d/%d: %s\n", i+1, len(block.Commands), cmd)
 
-		simCmd := fmt.Sprintf("echo '[dry-run] Vai executar: %s'", cmd)
+		simCmd := "echo " + utils.ShellQuote("[dry-run] Vai executar: "+cmd)
 
 		if block.Language == "shell" {
 			out, err := a.executor.CaptureOutput(ctx, shell, []string{"-c", simCmd})
@@ -1272,7 +1310,7 @@ func (a *AgentMode) simulateCommandBlock(ctx context.Context, block agent.Comman
 				fmt.Printf("❗ Dry-run falhou: %v\n", err)
 			}
 		} else {
-			out, _ := a.executor.CaptureOutput(ctx, shell, []string{"-c", "echo '[dry-run] " + cmd + "'"})
+			out, _ := a.executor.CaptureOutput(ctx, shell, []string{"-c", "echo " + utils.ShellQuote("[dry-run] "+cmd)})
 			fmt.Println(string(out))
 		}
 	}
@@ -1305,9 +1343,9 @@ func (a *AgentMode) editCommandBlock(block agent.CommandBlock) ([]string, error)
 		return editedCommands, nil
 	}
 
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vim"
+	editor, err := resolveEditor()
+	if err != nil {
+		return nil, fmt.Errorf("invalid editor configuration: %w", err)
 	}
 	tmpfile, err := os.CreateTemp("", "agent-edit-*.sh")
 	if err != nil {

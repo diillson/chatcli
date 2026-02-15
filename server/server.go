@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/diillson/chatcli/llm/manager"
@@ -23,12 +24,13 @@ import (
 
 // Config holds server configuration.
 type Config struct {
-	Port        int
-	Token       string // auth token (empty = no auth)
-	TLSCertFile string
-	TLSKeyFile  string
-	Provider    string
-	Model       string
+	Port             int
+	Token            string // auth token (empty = no auth)
+	TLSCertFile      string
+	TLSKeyFile       string
+	Provider         string
+	Model            string
+	EnableReflection bool // enable gRPC reflection (default: false, check CHATCLI_GRPC_REFLECTION env)
 }
 
 // Server wraps the gRPC server and its dependencies.
@@ -74,7 +76,14 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 	handler := NewHandler(llmMgr, sessionStore, logger, cfg.Provider, cfg.Model)
 
 	pb.RegisterChatCLIServiceServer(grpcServer, handler)
-	reflection.Register(grpcServer) // enable grpc reflection for debugging
+
+	// gRPC reflection is gated behind config or env var to avoid exposing the
+	// full service schema in production. Enable via Config.EnableReflection
+	// or CHATCLI_GRPC_REFLECTION=true.
+	if cfg.EnableReflection || strings.EqualFold(os.Getenv("CHATCLI_GRPC_REFLECTION"), "true") {
+		reflection.Register(grpcServer)
+		logger.Info("gRPC reflection enabled")
+	}
 
 	return &Server{
 		config:     cfg,

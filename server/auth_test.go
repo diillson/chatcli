@@ -96,3 +96,37 @@ func TestTokenAuthInterceptor_ValidToken(t *testing.T) {
 
 	assert.NoError(t, err)
 }
+
+func TestTokenAuthInterceptor_ConstantTimeComparison(t *testing.T) {
+	logger := zap.NewNop()
+	auth := NewTokenAuthInterceptor("secret123", logger)
+
+	// All of these must be rejected with PermissionDenied (not Unauthenticated),
+	// confirming the constant-time comparison path is reached.
+	testCases := []struct {
+		name  string
+		token string
+	}{
+		{"partial prefix match", "secret"},
+		{"partial with extra", "secret1234"},
+		{"different length shorter", "sec"},
+		{"different length longer", "secret123secret123secret123"},
+		{"completely different", "totallyWrongToken"},
+		{"empty token", ""},
+		{"case mismatch", "Secret123"},
+		{"null byte injection", "secret\x00123"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := metadata.New(map[string]string{"authorization": "Bearer " + tc.token})
+			ctx := metadata.NewIncomingContext(context.Background(), md)
+			err := auth.authorize(ctx, "/chatcli.v1.ChatCLIService/SendPrompt")
+
+			assert.Error(t, err)
+			s, ok := status.FromError(err)
+			assert.True(t, ok)
+			assert.Equal(t, codes.PermissionDenied, s.Code())
+		})
+	}
+}

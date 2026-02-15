@@ -59,6 +59,7 @@ func NewClient(cfg Config, logger *zap.Logger) (*Client, error) {
 			dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(nil)))
 		}
 	} else {
+		logger.Warn("TLS is disabled; connection is unencrypted. Enable TLS for production use.")
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
