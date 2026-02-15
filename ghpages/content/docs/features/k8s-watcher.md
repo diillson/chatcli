@@ -283,7 +283,9 @@ Aqui estao exemplos de perguntas que voce pode fazer com o K8s Watcher ativo:
 
 ### RBAC Minimo
 
-Se estiver rodando dentro do cluster (via Helm), o chart ja cria as permissoes necessarias. Para uso local:
+Se estiver rodando dentro do cluster (via Helm), o chart ja cria as permissoes necessarias automaticamente. **Por padrao, o chart usa Role (namespace-scoped)** em vez de ClusterRole, seguindo o principio de menor privilegio. Para monitorar multiplos namespaces, habilite `rbac.clusterWide: true` no Helm values.
+
+Para uso local:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1

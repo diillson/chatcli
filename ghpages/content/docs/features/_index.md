@@ -2,12 +2,12 @@
 title = "Recursos Avançados"
 linkTitle = "Recursos Avançados"
 weight = 40
-description = "Explore as funcionalidades avançadas do ChatCLI, como modo servidor remoto, monitoramento Kubernetes, gerenciamento de sessões e contextos persistentes."
+description = "Explore as funcionalidades avançadas do ChatCLI, como segurança e hardening, modo servidor remoto, monitoramento Kubernetes, gerenciamento de sessões e contextos persistentes."
 icon = "auto_awesome"
 +++
 
 Bem-vindo aos recursos avançados do **ChatCLI**.
 
-Aqui você aprenderá a usar o modo servidor para acesso remoto via gRPC, monitorar deployments Kubernetes com IA, salvar seu trabalho com sessões e contextos persistentes, e transformar o ChatCLI em um assistente completo para o seu fluxo de trabalho.
+Aqui você aprenderá sobre as medidas de segurança e hardening, como usar o modo servidor para acesso remoto via gRPC, monitorar deployments Kubernetes com IA, salvar seu trabalho com sessões e contextos persistentes, e transformar o ChatCLI em um assistente completo para o seu fluxo de trabalho.
 
 --------

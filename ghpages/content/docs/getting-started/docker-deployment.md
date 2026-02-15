@@ -68,6 +68,7 @@ O Docker Compose configura:
 - Volumes persistentes para sessoes e plugins
 - Restart automatico (`unless-stopped`)
 - Todas as variaveis de LLM via environment
+- **Hardening de seguranca**: filesystem read-only, `no-new-privileges`, limites de CPU/memoria, tmpfs para `/tmp`
 
 #### Arquivo `docker-compose.yml`
 
@@ -96,11 +97,23 @@ services:
       - chatcli-sessions:/home/chatcli/.chatcli/sessions
       - chatcli-plugins:/home/chatcli/.chatcli/plugins
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
 
 volumes:
   chatcli-sessions:
   chatcli-plugins:
 ```
+
+> O container roda com filesystem **read-only** e `no-new-privileges` por padrao. O diretorio `/tmp` usa tmpfs em memoria (limitado a 100MB). Os volumes nomeados (`chatcli-sessions`, `chatcli-plugins`) sao os unicos pontos graváveis. Veja a [documentacao de seguranca](/docs/features/security/) para detalhes.
 
 ---
 
@@ -213,6 +226,20 @@ O chart automaticamente:
 | `persistence.enabled` | Persistir sessoes em PVC | `true` |
 | `persistence.storageClass` | Storage class | `""` |
 | `persistence.size` | Tamanho do volume | `1Gi` |
+
+#### Seguranca
+
+| Valor | Descricao | Padrao |
+|-------|-----------|--------|
+| `podSecurityContext.runAsNonRoot` | Obriga execucao como nao-root | `true` |
+| `podSecurityContext.runAsUser` | UID do processo | `1000` |
+| `podSecurityContext.seccompProfile.type` | Perfil seccomp | `RuntimeDefault` |
+| `securityContext.allowPrivilegeEscalation` | Permite escalacao de privilegios | `false` |
+| `securityContext.readOnlyRootFilesystem` | Filesystem somente-leitura | `true` |
+| `securityContext.capabilities.drop` | Capabilities removidas | `ALL` |
+| `rbac.clusterWide` | Usa ClusterRole em vez de Role namespace-scoped | `false` |
+
+> Quando `readOnlyRootFilesystem` esta `true`, o chart monta automaticamente um tmpfs em `/tmp`. Para monitorar multiplos namespaces, habilite `rbac.clusterWide: true`. Veja a [documentacao de seguranca](/docs/features/security/) para detalhes.
 
 #### Rede
 
