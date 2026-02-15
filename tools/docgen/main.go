@@ -33,6 +33,8 @@ func main() {
 	builder.WriteString(generateAgentModeSection())
 	builder.WriteString(generateSessionContextSection())
 	builder.WriteString(generateOneShotFlagsSection())
+	builder.WriteString(generateSubcommandsSection())
+	builder.WriteString(generateWatchInteractiveSection())
 
 	out := builder.String()
 	// Mantém o behavior atual: imprimir no stdout
@@ -241,5 +243,94 @@ func generateOneShotFlagsSection() string {
 	builder.WriteString("## Flags de Linha de Comando (Modo One-Shot)\n\n")
 	builder.WriteString("Use estas flags ao executar `chatcli` diretamente do seu terminal para automações.\n\n")
 	builder.WriteString(generateMarkdownTable([]string{"Flag", "Descrição"}, flags))
+	builder.WriteString("\n---\n\n")
+	return builder.String()
+}
+
+// generateSubcommandsSection gera as tabelas de flags para os subcomandos serve, connect e watch.
+func generateSubcommandsSection() string {
+	var builder strings.Builder
+	builder.WriteString("## Subcomandos\n\n")
+	builder.WriteString("O ChatCLI suporta subcomandos para funcionalidades avançadas de servidor e monitoramento.\n\n")
+
+	// --- chatcli serve ---
+	builder.WriteString("### `chatcli serve` — Modo Servidor gRPC\n\n")
+	builder.WriteString("Inicia o ChatCLI como servidor gRPC para acesso remoto.\n\n")
+
+	serveFlags := [][]string{
+		{"`--port <int>`", "Porta do servidor gRPC", "`50051`"},
+		{"`--token <string>`", "Token de autenticação (vazio = sem auth)", "`\"\"`"},
+		{"`--tls-cert <path>`", "Arquivo de certificado TLS", "`\"\"`"},
+		{"`--tls-key <path>`", "Arquivo de chave TLS", "`\"\"`"},
+		{"`--provider <nome>`", "Provedor de LLM padrão", "Auto-detectado"},
+		{"`--model <nome>`", "Modelo de LLM padrão", "Auto-detectado"},
+		{"`--watch-deployment <nome>`", "Deployment K8s a monitorar (habilita watcher)", "`\"\"`"},
+		{"`--watch-namespace <ns>`", "Namespace do deployment", "`\"default\"`"},
+		{"`--watch-interval <dur>`", "Intervalo de coleta do watcher", "`30s`"},
+		{"`--watch-window <dur>`", "Janela de observação do watcher", "`2h`"},
+		{"`--watch-max-log-lines <n>`", "Max linhas de log por pod", "`100`"},
+		{"`--watch-kubeconfig <path>`", "Caminho do kubeconfig", "Auto-detectado"},
+	}
+	builder.WriteString(generateMarkdownTable([]string{"Flag", "Descrição", "Padrão"}, serveFlags))
+
+	// --- chatcli connect ---
+	builder.WriteString("\n### `chatcli connect` — Conexão Remota\n\n")
+	builder.WriteString("Conecta a um servidor ChatCLI remoto via gRPC.\n\n")
+
+	connectFlags := [][]string{
+		{"`<address>`", "Endereço do servidor (posicional)", ""},
+		{"`--addr <host:port>`", "Endereço do servidor (flag)", "`\"\"`"},
+		{"`--token <string>`", "Token de autenticação", "`\"\"`"},
+		{"`--provider <nome>`", "Sobrescreve o provedor LLM do servidor", "`\"\"`"},
+		{"`--model <nome>`", "Sobrescreve o modelo LLM do servidor", "`\"\"`"},
+		{"`--llm-key <string>`", "Sua própria API key (enviada ao servidor)", "`\"\"`"},
+		{"`--use-local-auth`", "Usa credenciais OAuth do auth store local", "`false`"},
+		{"`--tls`", "Habilita conexão TLS", "`false`"},
+		{"`--ca-cert <path>`", "Certificado CA para TLS", "`\"\"`"},
+		{"`-p <prompt>`", "One-shot: envia prompt e sai", "`\"\"`"},
+		{"`--raw`", "Saída crua (sem formatação)", "`false`"},
+		{"`--max-tokens <int>`", "Máximo de tokens na resposta", "`0`"},
+		{"`--client-id <string>`", "StackSpot Client ID", "`\"\"`"},
+		{"`--client-key <string>`", "StackSpot Client Key", "`\"\"`"},
+		{"`--realm <string>`", "StackSpot Realm/Tenant", "`\"\"`"},
+		{"`--agent-id <string>`", "StackSpot Agent ID", "`\"\"`"},
+		{"`--ollama-url <url>`", "URL base do Ollama", "`\"\"`"},
+	}
+	builder.WriteString(generateMarkdownTable([]string{"Flag", "Descrição", "Padrão"}, connectFlags))
+
+	// --- chatcli watch ---
+	builder.WriteString("\n### `chatcli watch` — Monitoramento Kubernetes\n\n")
+	builder.WriteString("Monitora um deployment Kubernetes e injeta contexto K8s nas conversas com a IA.\n\n")
+
+	watchFlags := [][]string{
+		{"`--deployment <nome>`", "Deployment a monitorar (obrigatório)", "`\"\"`"},
+		{"`--namespace <ns>`", "Namespace do deployment", "`\"default\"`"},
+		{"`--interval <dur>`", "Intervalo de coleta", "`30s`"},
+		{"`--window <dur>`", "Janela de observação", "`2h`"},
+		{"`--max-log-lines <n>`", "Max linhas de log por pod", "`100`"},
+		{"`--kubeconfig <path>`", "Caminho do kubeconfig", "Auto-detectado"},
+		{"`--provider <nome>`", "Provedor de LLM", "`.env`"},
+		{"`--model <nome>`", "Modelo de LLM", "`.env`"},
+		{"`-p <prompt>`", "One-shot: envia prompt com contexto K8s e sai", "`\"\"`"},
+		{"`--max-tokens <int>`", "Máximo de tokens na resposta", "`0`"},
+	}
+	builder.WriteString(generateMarkdownTable([]string{"Flag", "Descrição", "Padrão"}, watchFlags))
+
+	builder.WriteString("\n---\n\n")
+	return builder.String()
+}
+
+// generateWatchInteractiveSection gera a tabela do comando /watch no modo interativo.
+func generateWatchInteractiveSection() string {
+	var builder strings.Builder
+	builder.WriteString("## Comando `/watch` (Modo Interativo)\n\n")
+	builder.WriteString("Disponível dentro do ChatCLI interativo (local ou remoto):\n\n")
+
+	watchCmds := [][]string{
+		{"`/watch status`", "Mostra o status do K8s Watcher (local ou remoto)"},
+		{"`/watch`", "Mostra ajuda do comando watch"},
+	}
+	builder.WriteString(generateMarkdownTable([]string{"Comando", "Descrição"}, watchCmds))
+
 	return builder.String()
 }

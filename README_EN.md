@@ -247,6 +247,25 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     OLLAMA_MAX_TOKENS=5000
     OLLAMA_FILTER_THINKING=true  # Filters intermediate reasoning in responses (e.g. for Qwen3, llama3... - THIS IS REQUIRED TO BE TRUE for Agent mode. Works well with some OLLAMA models that have "out loud" reasoning)
 
+    # Remote Server Settings (chatcli serve)
+    CHATCLI_SERVER_PORT=50051
+    CHATCLI_SERVER_TOKEN=my-secret-token
+    # CHATCLI_SERVER_TLS_CERT=/path/to/cert.pem
+    # CHATCLI_SERVER_TLS_KEY=/path/to/key.pem
+
+    # Remote Client Settings (chatcli connect)
+    # CHATCLI_REMOTE_ADDR=myserver:50051
+    # CHATCLI_REMOTE_TOKEN=my-secret-token
+    # CHATCLI_CLIENT_API_KEY=sk-xxx    # Your own API key (forwarded to server)
+
+    # K8s Watcher Settings (chatcli watch / chatcli serve --watch-*)
+    # CHATCLI_WATCH_DEPLOYMENT=myapp
+    # CHATCLI_WATCH_NAMESPACE=production
+    # CHATCLI_WATCH_INTERVAL=30s
+    # CHATCLI_WATCH_WINDOW=2h
+    # CHATCLI_WATCH_MAX_LOG_LINES=100
+    # CHATCLI_KUBECONFIG=~/.kube/config
+
 --------
 
 ## Authentication (OAuth)

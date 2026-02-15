@@ -12,15 +12,14 @@ Estes comandos controlam a aplicação e o fluxo da conversa.
 
 | Comando | Descrição |
 | --- | --- |
-| **/auth** | Gerencia autenticação OAuth com provedores de IA |
-| &nbsp; `status` | Mostra o status de autenticação de todos os provedores. |
-| &nbsp; `login <provedor>` | Inicia o fluxo OAuth (abre o navegador). Provedores: `openai-codex`, `anthropic`. |
-| &nbsp; `logout <provedor>` | Remove as credenciais OAuth do provedor especificado. |
 | **/agent** | Iniciar modo agente para executar tarefas |
+| **/auth** | Gerencia credenciais OAuth (status, login, logout) |
 | **/clear** | Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais. |
 | **/coder** | Iniciar modo engenheiro (Criação e Edição de Código) |
 | **/config** | Mostrar configuração atual |
+| **/connect** | Conectar a um servidor ChatCLI remoto (gRPC) |
 | **/context** | Gerencia contextos persistentes (create, attach, detach, list, show, etc) |
+| **/disconnect** | Desconectar do servidor remoto e voltar ao modo local |
 | **/exit** | Sair do ChatCLI |
 | **/help** | Mostrar ajuda |
 | **/newsession** | Iniciar uma nova sessão de conversa |
@@ -40,6 +39,7 @@ Estes comandos controlam a aplicação e o fluxo da conversa.
 | &nbsp; `--realm <nome>` | **(StackSpot)** Define o `realm` (tenant). |
 | &nbsp; `--agent-id <id>` | **(StackSpot)** Define o `Agent ID` a ser usado. |
 | **/version** | Verificar a versão do ChatCLI |
+| **/watch** | Exibe o status do K8s watcher (quando ativo) |
 
 ---
 
@@ -127,7 +127,7 @@ Use estas flags ao executar `chatcli` diretamente do seu terminal para automaç�
 | --- | --- |
 | `-p`, `--prompt "<texto>` | Executa um único prompt e sai. |
 | `--provider <nome>` | Sobrescreve o provedor de IA (ex: `GOOGLEAI`). |
-| `--model <nome>` | Sobrescreve o modelo de IA (ex: `gemini-2.5-pro`). |
+| `--model <nome>` | Sobrescreve o modelo de IA (ex: `gemini-1.5-pro-latest`). |
 | `--timeout <duração>` | Define o tempo limite para a requisição (ex: `10s`, `1m`). |
 | `--max-tokens <num>` | Limita o número de tokens na resposta. |
 | `--agent-auto-exec` | No modo agente one-shot, executa o primeiro comando se for seguro. |
@@ -166,7 +166,7 @@ Conecta a um servidor ChatCLI remoto via gRPC.
 
 | Flag | Descrição | Padrão |
 | --- | --- | --- |
-| `<address>` | Endereço do servidor (posicional) | |
+| `<address>` | Endereço do servidor (posicional) |  |
 | `--addr <host:port>` | Endereço do servidor (flag) | `""` |
 | `--token <string>` | Token de autenticação | `""` |
 | `--provider <nome>` | Sobrescreve o provedor LLM do servidor | `""` |
@@ -199,6 +199,7 @@ Monitora um deployment Kubernetes e injeta contexto K8s nas conversas com a IA.
 | `--provider <nome>` | Provedor de LLM | `.env` |
 | `--model <nome>` | Modelo de LLM | `.env` |
 | `-p <prompt>` | One-shot: envia prompt com contexto K8s e sai | `""` |
+| `--max-tokens <int>` | Máximo de tokens na resposta | `0` |
 
 ---
 
