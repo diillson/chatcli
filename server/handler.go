@@ -41,11 +41,11 @@ type Handler struct {
 	defaultModel    string
 
 	// K8s watcher context injection (optional, set when watcher is active)
-	watcherContextFunc  func() string
-	watcherStatusFunc   func() string // compact status summary
-	watcherStatsFunc    func() (alertCount, snapshotCount, podCount int)
-	watcherDeployment   string
-	watcherNamespace    string
+	watcherContextFunc func() string
+	watcherStatusFunc  func() string // compact status summary
+	watcherStatsFunc   func() (alertCount, snapshotCount, podCount int)
+	watcherDeployment  string
+	watcherNamespace   string
 }
 
 // SessionStore abstracts session persistence for testability.
@@ -69,8 +69,8 @@ func NewHandler(llmMgr manager.LLMManager, sessionStore SessionStore, logger *za
 
 // WatcherConfig holds the functions and metadata for K8s watcher integration.
 type WatcherConfig struct {
-	ContextFunc func() string                              // full context for LLM
-	StatusFunc  func() string                              // compact status summary
+	ContextFunc func() string                                    // full context for LLM
+	StatusFunc  func() string                                    // compact status summary
 	StatsFunc   func() (alertCount, snapshotCount, podCount int) // numeric stats
 	Deployment  string
 	Namespace   string

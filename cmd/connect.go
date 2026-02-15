@@ -13,8 +13,8 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/auth"
-	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/llm/manager"
 	"go.uber.org/zap"
 )

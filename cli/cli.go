@@ -177,11 +177,11 @@ type ChatCLI struct {
 	pendingAction        string // stores intended action before panic (for Windows go-prompt tearDown workaround)
 
 	// Remote connection state (for /connect and /disconnect)
-	localClient   client.LLMClient // saved local client when connected to remote
-	localProvider string           // saved local provider name
-	localModel    string           // saved local model name
+	localClient   client.LLMClient           // saved local client when connected to remote
+	localProvider string                     // saved local provider name
+	localModel    string                     // saved local model name
 	remoteConn    interface{ Close() error } // remote connection (for cleanup on disconnect)
-	isRemote      bool             // true when connected to a remote server
+	isRemote      bool                       // true when connected to a remote server
 
 	// K8s watcher context injection
 	WatcherContextFunc func() string // returns K8s context to prepend to LLM prompts

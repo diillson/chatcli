@@ -23,12 +23,12 @@ import (
 
 // Config holds server configuration.
 type Config struct {
-	Port         int
-	Token        string // auth token (empty = no auth)
-	TLSCertFile  string
-	TLSKeyFile   string
-	Provider     string
-	Model        string
+	Port        int
+	Token       string // auth token (empty = no auth)
+	TLSCertFile string
+	TLSKeyFile  string
+	Provider    string
+	Model       string
 }
 
 // Server wraps the gRPC server and its dependencies.
