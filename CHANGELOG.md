@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.56.1](https://github.com/diillson/chatcli/compare/v1.56.0...v1.56.1) (2026-02-15)
+
+
+### Bug Fixes
+
+* **security:** harden against shell injection, timing attacks, and infra misconfigs          ([#549](https://github.com/diillson/chatcli/issues/549)) ([f3c6566](https://github.com/diillson/chatcli/commit/f3c65669c4411012d16576a7b8b0739a78bfb821))
+
 ## [1.56.0](https://github.com/diillson/chatcli/compare/v1.55.0...v1.56.0) (2026-02-15)
 
 
