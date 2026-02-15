@@ -14,6 +14,7 @@ import (
 
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/k8s"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -100,8 +102,8 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/disconnect":
 		ch.handleDisconnectCommand()
 		return false
-	case userInput == "/watch" || userInput == "/watch status":
-		ch.handleWatchStatusCommand()
+	case strings.HasPrefix(userInput, "/watch"):
+		ch.handleWatchCommand(userInput)
 		return false
 	case userInput == "/reset" || userInput == "/redraw" || userInput == "/clear":
 		fmt.Print("\033[0m")
@@ -327,6 +329,127 @@ func (ch *CommandHandler) handleDisconnectCommand() {
 	}
 }
 
+// handleWatchCommand routes /watch subcommands: start, stop, status.
+func (ch *CommandHandler) handleWatchCommand(userInput string) {
+	args := strings.Fields(userInput)
+
+	// /watch alone or /watch status
+	if len(args) < 2 || args[1] == "status" {
+		ch.handleWatchStatusCommand()
+		return
+	}
+
+	switch args[1] {
+	case "start":
+		ch.handleWatchStartCommand(args[2:])
+	case "stop":
+		ch.handleWatchStopCommand()
+	default:
+		fmt.Println(colorize(" Usage:", ColorYellow))
+		fmt.Println(colorize("   /watch start --deployment <name> [--namespace <ns>] [--interval <dur>] [--window <dur>] [--max-log-lines <n>] [--kubeconfig <path>]", ColorYellow))
+		fmt.Println(colorize("   /watch stop", ColorYellow))
+		fmt.Println(colorize("   /watch status", ColorYellow))
+	}
+}
+
+// handleWatchStartCommand starts a K8s watcher in background from interactive mode.
+func (ch *CommandHandler) handleWatchStartCommand(args []string) {
+	if ch.cli.isWatching {
+		fmt.Println(colorize(" K8s watcher already running. Use /watch stop first.", ColorYellow))
+		return
+	}
+
+	// Parse flags (same manual pattern as /connect)
+	cfg := k8s.WatchConfig{
+		Namespace:   "default",
+		Interval:    30 * time.Second,
+		Window:      2 * time.Hour,
+		MaxLogLines: 100,
+	}
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--deployment":
+			if i+1 < len(args) {
+				i++
+				cfg.Deployment = args[i]
+			}
+		case "--namespace":
+			if i+1 < len(args) {
+				i++
+				cfg.Namespace = args[i]
+			}
+		case "--interval":
+			if i+1 < len(args) {
+				i++
+				d, err := time.ParseDuration(args[i])
+				if err != nil {
+					fmt.Println(colorize(" Invalid --interval: "+err.Error(), ColorYellow))
+					return
+				}
+				cfg.Interval = d
+			}
+		case "--window":
+			if i+1 < len(args) {
+				i++
+				d, err := time.ParseDuration(args[i])
+				if err != nil {
+					fmt.Println(colorize(" Invalid --window: "+err.Error(), ColorYellow))
+					return
+				}
+				cfg.Window = d
+			}
+		case "--max-log-lines":
+			if i+1 < len(args) {
+				i++
+				n, err := strconv.Atoi(args[i])
+				if err != nil {
+					fmt.Println(colorize(" Invalid --max-log-lines: "+err.Error(), ColorYellow))
+					return
+				}
+				cfg.MaxLogLines = n
+			}
+		case "--kubeconfig":
+			if i+1 < len(args) {
+				i++
+				cfg.Kubeconfig = args[i]
+			}
+		default:
+			fmt.Println(colorize(" Unknown flag: "+args[i], ColorYellow))
+			fmt.Println(colorize(" Usage: /watch start --deployment <name> [--namespace <ns>] [--interval <dur>] [--window <dur>]", ColorYellow))
+			return
+		}
+	}
+
+	if cfg.Deployment == "" {
+		fmt.Println(colorize(" --deployment is required.", ColorYellow))
+		fmt.Println(colorize(" Usage: /watch start --deployment <name> [--namespace <ns>] [--interval <dur>] [--window <dur>]", ColorYellow))
+		return
+	}
+
+	fmt.Println(colorize(fmt.Sprintf(" Starting K8s watcher for deployment/%s in namespace/%s ...", cfg.Deployment, cfg.Namespace), ColorCyan))
+	fmt.Println(colorize(fmt.Sprintf("   Interval: %s | Window: %s | Max log lines: %d", cfg.Interval, cfg.Window, cfg.MaxLogLines), ColorCyan))
+
+	if err := ch.cli.StartWatcher(cfg); err != nil {
+		fmt.Println(colorize(" Failed to start watcher: "+err.Error(), ColorYellow))
+		return
+	}
+
+	fmt.Println(colorize(" K8s watcher started. Context will be injected into all prompts.", ColorGreen))
+	fmt.Println(colorize(" Use /watch status to check, /watch stop to stop.", ColorGreen))
+}
+
+// handleWatchStopCommand stops the running K8s watcher.
+func (ch *CommandHandler) handleWatchStopCommand() {
+	if !ch.cli.isWatching {
+		fmt.Println(colorize(" No K8s watcher is running.", ColorYellow))
+		return
+	}
+
+	ch.cli.StopWatcher()
+	fmt.Println(colorize(" K8s watcher stopped.", ColorGreen))
+}
+
 // handleWatchStatusCommand displays the current K8s watcher status.
 func (ch *CommandHandler) handleWatchStatusCommand() {
 	// Check local watcher first
@@ -361,7 +484,7 @@ func (ch *CommandHandler) handleWatchStatusCommand() {
 		}
 	}
 
-	fmt.Println(colorize(" No K8s watcher active. Start with: chatcli watch --deployment <name> --namespace <ns>", ColorYellow))
+	fmt.Println(colorize(" No K8s watcher active. Start with: /watch start --deployment <name>", ColorYellow))
 }
 
 // resolveLocalAuth reads the local auth store and returns the API key/OAuth token.

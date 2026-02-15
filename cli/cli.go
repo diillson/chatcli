@@ -29,6 +29,7 @@ import (
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/k8s"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
@@ -184,9 +185,10 @@ type ChatCLI struct {
 	isRemote      bool                       // true when connected to a remote server
 
 	// K8s watcher context injection
-	WatcherContextFunc func() string // returns K8s context to prepend to LLM prompts
-	isWatching         bool          // true when K8s watcher is active
-	watchStatusFunc    func() string // returns compact status for prompt prefix
+	WatcherContextFunc func() string      // returns K8s context to prepend to LLM prompts
+	isWatching         bool               // true when K8s watcher is active
+	watchStatusFunc    func() string      // returns compact status for prompt prefix
+	watcherCancel      context.CancelFunc // cancels the background watcher goroutine
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -1224,6 +1226,73 @@ func (cli *ChatCLI) ApplyOverrides(mgr manager.LLMManager, provider, model strin
 func (cli *ChatCLI) SetWatching(active bool, statusFunc func() string) {
 	cli.isWatching = active
 	cli.watchStatusFunc = statusFunc
+}
+
+// StartWatcher creates and starts a K8s watcher in background from interactive mode.
+func (cli *ChatCLI) StartWatcher(cfg k8s.WatchConfig) error {
+	if cli.isWatching {
+		return fmt.Errorf("watcher already running, use /watch stop first")
+	}
+
+	watcher, err := k8s.NewResourceWatcher(cfg, cli.logger)
+	if err != nil {
+		return fmt.Errorf("failed to create K8s watcher: %w", err)
+	}
+
+	store := watcher.GetStore()
+	summarizer := k8s.NewSummarizer(store)
+
+	watchCtx, watchCancel := context.WithCancel(context.Background())
+	cli.watcherCancel = watchCancel
+
+	watcherReady := make(chan struct{}, 1)
+	go func() {
+		go func() {
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+			timeout := time.After(15 * time.Second)
+			for {
+				select {
+				case <-ticker.C:
+					if _, ok := store.LatestSnapshot(); ok {
+						watcherReady <- struct{}{}
+						return
+					}
+				case <-timeout:
+					watcherReady <- struct{}{}
+					return
+				}
+			}
+		}()
+
+		if err := watcher.Start(watchCtx); err != nil && err != context.Canceled {
+			cli.logger.Error("K8s watcher stopped with error", zap.Error(err))
+		}
+	}()
+
+	// Wait for first collection
+	<-watcherReady
+
+	cli.WatcherContextFunc = summarizer.GenerateContext
+	cli.SetWatching(true, summarizer.GenerateStatusSummary)
+
+	if _, ok := store.LatestSnapshot(); ok {
+		cli.logger.Info("K8s watcher started with initial data",
+			zap.String("deployment", cfg.Deployment),
+			zap.String("namespace", cfg.Namespace))
+	}
+
+	return nil
+}
+
+// StopWatcher stops the running K8s watcher if any.
+func (cli *ChatCLI) StopWatcher() {
+	if cli.watcherCancel != nil {
+		cli.watcherCancel()
+		cli.watcherCancel = nil
+	}
+	cli.WatcherContextFunc = nil
+	cli.SetWatching(false, nil)
 }
 
 // processSpecialCommands processa comandos especiais como @history, @git, @env, @file
@@ -2308,6 +2377,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getConnectSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/watch") {
+		return cli.getWatchSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -2454,6 +2527,33 @@ func (cli *ChatCLI) getConnectSuggestions(d prompt.Document) []prompt.Suggest {
 	}
 
 	return []prompt.Suggest{}
+}
+
+// getWatchSuggestions returns autocomplete suggestions for /watch subcommands and flags.
+func (cli *ChatCLI) getWatchSuggestions(d prompt.Document) []prompt.Suggest {
+	wordBeforeCursor := d.GetWordBeforeCursor()
+	lineBeforeCursor := d.TextBeforeCursor()
+
+	// Suggest flags after /watch start
+	if strings.Contains(lineBeforeCursor, "/watch start") && strings.HasPrefix(wordBeforeCursor, "-") {
+		flags := []prompt.Suggest{
+			{Text: "--deployment", Description: "Deployment K8s a monitorar (obrigatório)"},
+			{Text: "--namespace", Description: "Namespace do deployment (padrão: default)"},
+			{Text: "--interval", Description: "Intervalo de coleta (ex: 10s, 1m)"},
+			{Text: "--window", Description: "Janela de observação (ex: 1h, 4h)"},
+			{Text: "--max-log-lines", Description: "Máximo de linhas de log por pod"},
+			{Text: "--kubeconfig", Description: "Caminho do kubeconfig"},
+		}
+		return prompt.FilterHasPrefix(flags, wordBeforeCursor, true)
+	}
+
+	// Suggest subcommands
+	subcommands := []prompt.Suggest{
+		{Text: "start", Description: "Iniciar monitoramento K8s (ex: /watch start --deployment myapp)"},
+		{Text: "stop", Description: "Parar o monitoramento K8s"},
+		{Text: "status", Description: "Exibir status do watcher ativo"},
+	}
+	return prompt.FilterHasPrefix(subcommands, wordBeforeCursor, true)
 }
 
 // GetContextCommands retorna a lista de sugestões para comandos com @
