@@ -51,6 +51,13 @@ type LLMManager interface {
 	GetStackSpotRealm() string
 	GetStackSpotAgentID() string
 	RefreshProviders()
+	// CreateClientWithKey creates an LLM client using a caller-provided API key
+	// instead of the server's default credentials. Used for client-forwarded tokens.
+	CreateClientWithKey(provider, model, apiKey string) (client.LLMClient, error)
+	// CreateClientWithConfig creates an LLM client using caller-provided credentials
+	// plus provider-specific configuration. Supports all providers including StackSpot
+	// (needs client_id, client_key, realm, agent_id) and Ollama (needs base_url).
+	CreateClientWithConfig(provider, model, apiKey string, providerConfig map[string]string) (client.LLMClient, error)
 }
 
 // LLMManagerImpl gerencia diferentes clientes LLM e o TokenManager
@@ -400,5 +407,100 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	}
 	if _, ok := m.clients["CLAUDEAI"]; !ok {
 		m.configurarClaudeAIClient(maxRetries, initialBackoff)
+	}
+}
+
+// CreateClientWithKey creates an LLM client using a caller-provided API key
+// instead of the server's default credentials. Supports OPENAI, CLAUDEAI,
+// GOOGLEAI, and XAI providers. Returns an error for unsupported providers.
+func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (client.LLMClient, error) {
+	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
+	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
+
+	provider = strings.ToUpper(provider)
+
+	switch provider {
+	case "OPENAI":
+		if model == "" {
+			model = config.DefaultOpenAIModel
+		}
+		isOAuth := strings.HasPrefix(apiKey, "oauth:")
+		useResponses := isOAuth || config.Global.GetBool("OPENAI_USE_RESPONSES", false)
+		if !useResponses && catalog.GetPreferredAPI(catalog.ProviderOpenAI, model) == catalog.APIResponses {
+			useResponses = true
+		}
+		if useResponses {
+			return openai_responses.NewOpenAIResponsesClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		}
+		return openai.NewOpenAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "CLAUDEAI":
+		if model == "" {
+			model = config.DefaultClaudeAIModel
+		}
+		return claudeai.NewClaudeClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "GOOGLEAI":
+		if model == "" {
+			model = config.DefaultGoogleAIModel
+		}
+		return googleai.NewGeminiClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "XAI":
+		if model == "" {
+			model = config.DefaultXAIModel
+		}
+		return xai.NewXAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	default:
+		return nil, fmt.Errorf("CreateClientWithKey: provider '%s' does not support client-provided API keys", provider)
+	}
+}
+
+// CreateClientWithConfig creates an LLM client using caller-provided credentials
+// plus provider-specific configuration from the providerConfig map.
+// Supports all providers including StackSpot and Ollama.
+//
+// StackSpot config keys: "client_id", "client_key", "realm", "agent_id"
+// Ollama config keys: "base_url"
+func (m *LLMManagerImpl) CreateClientWithConfig(provider, model, apiKey string, providerConfig map[string]string) (client.LLMClient, error) {
+	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
+	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
+
+	provider = strings.ToUpper(provider)
+
+	switch provider {
+	case "STACKSPOT":
+		clientID := providerConfig["client_id"]
+		clientKey := providerConfig["client_key"]
+		realm := providerConfig["realm"]
+		agentID := providerConfig["agent_id"]
+
+		if clientID == "" || clientKey == "" {
+			return nil, fmt.Errorf("STACKSPOT requires 'client_id' and 'client_key' in provider_config")
+		}
+		if realm == "" {
+			return nil, fmt.Errorf("STACKSPOT requires 'realm' in provider_config")
+		}
+		if agentID == "" {
+			return nil, fmt.Errorf("STACKSPOT requires 'agent_id' in provider_config")
+		}
+
+		tm := token.NewTokenManager(clientID, clientKey, realm, m.logger)
+		return stackspotai.NewStackSpotClient(tm, agentID, m.logger, maxRetries, initialBackoff), nil
+
+	case "OLLAMA":
+		baseURL := providerConfig["base_url"]
+		if baseURL == "" {
+			baseURL = config.OllamaDefaultBaseURL
+		}
+		if model == "" {
+			model = config.DefaultOllamaModel
+		}
+		return ollama.NewClient(baseURL, model, m.logger, maxRetries, initialBackoff), nil
+
+	default:
+		// For simple API-key providers, delegate to CreateClientWithKey
+		return m.CreateClientWithKey(provider, model, apiKey)
 	}
 }

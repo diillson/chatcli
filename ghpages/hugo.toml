@@ -39,6 +39,12 @@ enableEmoji = true
   secondary_font  = "Space Grotesk"
   mono_font       = "IBM Plex Mono"
 
+[params.flexsearch]
+  tokenize = "full"
+  maxResult = 10
+  optimize = true
+  searchSectionsIndex = "ALL"
+
 [params.docs]
   # Mantém os menus da barra lateral sempre expandidos para facilitar a navegação.
   alwaysopen = true

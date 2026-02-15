@@ -1,0 +1,40 @@
+# ChatCLI Server - Docker Compose for development
+# Usage: docker compose up
+version: "3.9"
+
+services:
+  chatcli-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chatcli-server
+    ports:
+      - "50051:50051"
+    environment:
+      # Server config
+      CHATCLI_SERVER_PORT: "50051"
+      CHATCLI_SERVER_TOKEN: "${CHATCLI_SERVER_TOKEN:-}"  # Set for auth, leave empty for no auth
+
+      # LLM Provider (configure at least one)
+      LLM_PROVIDER: "${LLM_PROVIDER:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      ANTHROPIC_MODEL: "${ANTHROPIC_MODEL:-}"
+      GOOGLEAI_API_KEY: "${GOOGLEAI_API_KEY:-}"
+      OLLAMA_ENABLED: "${OLLAMA_ENABLED:-}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-}"
+
+      # Logging
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    volumes:
+      # Persist sessions across restarts
+      - chatcli-sessions:/home/chatcli/.chatcli/sessions
+      # Mount plugins directory (optional)
+      - chatcli-plugins:/home/chatcli/.chatcli/plugins
+    restart: unless-stopped
+
+volumes:
+  chatcli-sessions:
+  chatcli-plugins:

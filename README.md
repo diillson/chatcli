@@ -56,6 +56,8 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
     - [Estrutura de Arquivos](#estrutura-de-arquivos)
     - [Comandos de Gerenciamento](#comandos-de-gerenciamento)
     - [Exemplo Prático](#exemplo-prático)
+- [Modo Servidor Remoto (gRPC)](#modo-servidor-remoto-grpc)
+- [Monitoramento Kubernetes (K8s Watcher)](#monitoramento-kubernetes-k8s-watcher)
 - [Estrutura do Código e Tecnologias](#estrutura-do-código-e-tecnologias)
 - [Contribuição](#contribuição)
 - [Licença](#licença)
@@ -1075,6 +1077,90 @@ Ao carregar um agente, todas as interações com `/agent <tarefa>` ou `/coder <t
 
 --------
 
+## Modo Servidor Remoto (gRPC)
+
+O ChatCLI pode rodar como servidor gRPC, permitindo acesso remoto de qualquer terminal, Docker ou Kubernetes.
+
+### `chatcli serve` — Iniciar Servidor
+
+```bash
+chatcli serve                                    # porta 50051, sem auth
+chatcli serve --port 8080 --token meu-token      # com porta e auth customizados
+chatcli serve --tls-cert cert.pem --tls-key key.pem  # com TLS
+```
+
+### `chatcli connect` — Conectar ao Servidor
+
+```bash
+chatcli connect meuservidor:50051                          # basico
+chatcli connect meuservidor:50051 --token meu-token        # com auth
+chatcli connect meuservidor:50051 --use-local-auth         # usa OAuth local
+chatcli connect meuservidor:50051 --provider OPENAI --llm-key sk-xxx  # suas credenciais
+chatcli connect meuservidor:50051 -p "Explique K8s pods"   # one-shot remoto
+```
+
+O modo interativo completo funciona transparentemente sobre a conexao remota: sessoes, agente, coder, contextos — tudo disponivel.
+
+### Docker
+
+```bash
+docker build -t chatcli .
+docker run -p 50051:50051 -e LLM_PROVIDER=OPENAI -e OPENAI_API_KEY=sk-xxx chatcli
+```
+
+### Kubernetes (Helm)
+
+```bash
+helm install chatcli deploy/helm/chatcli \
+  --set llm.provider=OPENAI \
+  --set secrets.openaiApiKey=sk-xxx \
+  --set server.token=meu-token
+```
+
+> Documentacao completa em [diillson.github.io/chatcli/docs/features/server-mode](https://diillson.github.io/chatcli/docs/features/server-mode/)
+
+--------
+
+## Monitoramento Kubernetes (K8s Watcher)
+
+O ChatCLI pode monitorar deployments Kubernetes em tempo real, coletando metricas, logs, eventos e status de pods. Use IA para diagnosticar problemas com perguntas em linguagem natural.
+
+### `chatcli watch` — Monitoramento Local
+
+```bash
+chatcli watch --deployment myapp --namespace production
+chatcli watch --deployment nginx --interval 10s
+chatcli watch --deployment myapp -p "O deployment esta saudavel?"  # one-shot
+```
+
+### Integrado ao Servidor
+
+```bash
+# Servidor com watcher (contexto K8s injetado automaticamente em todos os prompts)
+chatcli serve --watch-deployment myapp --watch-namespace production
+
+# Clientes remotos recebem o contexto automaticamente
+chatcli connect meuservidor:50051
+> Por que os pods estao reiniciando?
+```
+
+### O que e Coletado
+
+- Status de pods (restarts, OOMKills, CrashLoopBackOff)
+- Eventos do Kubernetes (Warning, Normal)
+- Logs recentes de cada container
+- Metricas de CPU/memoria (via metrics-server)
+- Rollout status do deployment
+- HPA e Ingress (se existirem)
+
+### Deteccao de Anomalias
+
+O watcher detecta automaticamente: CrashLoopBackOff (>5 restarts), OOMKilled, PodNotReady e DeploymentFailing, gerando alertas incluidos no contexto do LLM.
+
+> Documentacao completa em [diillson.github.io/chatcli/docs/features/k8s-watcher](https://diillson.github.io/chatcli/docs/features/k8s-watcher/)
+
+--------
+
 ## Estrutura do Código e Tecnologias
 
 O projeto é modular e organizado em pacotes:
@@ -1083,11 +1169,14 @@ O projeto é modular e organizado em pacotes:
 -  config : Lida com a configuração via constantes.
 -  i18n : Centraliza a lógica de internacionalização e os arquivos de tradução.
 -  llm : Lida com a comunicação e gerência dos clientes LLM.
+-  server : Servidor gRPC para acesso remoto.
+-  client/remote : Cliente gRPC que implementa a interface LLMClient.
+-  k8s : Kubernetes Watcher (collectors, store, summarizer).
 -  utils : Contém funções auxiliares para arquivos, Git, shell, HTTP, etc.
 -  models : Define as estruturas de dados.
 -  version : Gerencia informações de versão.
 
-Principais bibliotecas Go utilizadas: Zap, go-prompt, Glamour, Lumberjack, Godotenv e golang.org/x/text.
+Principais bibliotecas Go utilizadas: Zap, go-prompt, Glamour, Lumberjack, Godotenv, golang.org/x/text, google.golang.org/grpc, k8s.io/client-go.
 
 --------
 

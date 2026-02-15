@@ -56,6 +56,8 @@
     - [File Structure](#file-structure)
     - [Management Commands](#management-commands)
     - [Practical Example](#practical-example)
+- [Remote Server Mode (gRPC)](#remote-server-mode-grpc)
+- [Kubernetes Monitoring (K8s Watcher)](#kubernetes-monitoring-k8s-watcher)
 - [Code Structure and Technologies](#code-structure-and-technologies)
 - [Contributing](#contributing)
 - [License](#license)
@@ -1022,6 +1024,90 @@ When an agent is loaded, all interactions with `/agent <task>` or `/coder <task>
 
 --------
 
+## Remote Server Mode (gRPC)
+
+ChatCLI can run as a gRPC server, allowing remote access from any terminal, Docker, or Kubernetes.
+
+### `chatcli serve` — Start Server
+
+```bash
+chatcli serve                                    # port 50051, no auth
+chatcli serve --port 8080 --token my-token       # custom port and auth
+chatcli serve --tls-cert cert.pem --tls-key key.pem  # with TLS
+```
+
+### `chatcli connect` — Connect to Server
+
+```bash
+chatcli connect myserver:50051                          # basic
+chatcli connect myserver:50051 --token my-token         # with auth
+chatcli connect myserver:50051 --use-local-auth         # use local OAuth
+chatcli connect myserver:50051 --provider OPENAI --llm-key sk-xxx  # your credentials
+chatcli connect myserver:50051 -p "Explain K8s pods"    # remote one-shot
+```
+
+The full interactive mode works transparently over the remote connection: sessions, agent, coder, contexts — everything available.
+
+### Docker
+
+```bash
+docker build -t chatcli .
+docker run -p 50051:50051 -e LLM_PROVIDER=OPENAI -e OPENAI_API_KEY=sk-xxx chatcli
+```
+
+### Kubernetes (Helm)
+
+```bash
+helm install chatcli deploy/helm/chatcli \
+  --set llm.provider=OPENAI \
+  --set secrets.openaiApiKey=sk-xxx \
+  --set server.token=my-token
+```
+
+> Full documentation at [diillson.github.io/chatcli/docs/features/server-mode](https://diillson.github.io/chatcli/docs/features/server-mode/)
+
+--------
+
+## Kubernetes Monitoring (K8s Watcher)
+
+ChatCLI can monitor Kubernetes deployments in real time, collecting metrics, logs, events, and pod status. Use AI to diagnose issues with natural language questions.
+
+### `chatcli watch` — Local Monitoring
+
+```bash
+chatcli watch --deployment myapp --namespace production
+chatcli watch --deployment nginx --interval 10s
+chatcli watch --deployment myapp -p "Is the deployment healthy?"  # one-shot
+```
+
+### Integrated with Server
+
+```bash
+# Server with watcher (K8s context automatically injected into all prompts)
+chatcli serve --watch-deployment myapp --watch-namespace production
+
+# Remote clients get the context automatically
+chatcli connect myserver:50051
+> Why are the pods restarting?
+```
+
+### What is Collected
+
+- Pod status (restarts, OOMKills, CrashLoopBackOff)
+- Kubernetes events (Warning, Normal)
+- Recent logs from each container
+- CPU/memory metrics (via metrics-server)
+- Deployment rollout status
+- HPA and Ingress (if they exist)
+
+### Anomaly Detection
+
+The watcher automatically detects: CrashLoopBackOff (>5 restarts), OOMKilled, PodNotReady, and DeploymentFailing, generating alerts included in the LLM context.
+
+> Full documentation at [diillson.github.io/chatcli/docs/features/k8s-watcher](https://diillson.github.io/chatcli/docs/features/k8s-watcher/)
+
+--------
+
 ## Code Structure and Technologies
 
 The project has a modular structure organized into packages:
@@ -1030,11 +1116,14 @@ The project has a modular structure organized into packages:
 -  config : Handles configuration via constants.
 -  i18n : Centralizes internationalization logic and translation files.
 -  llm : Manages communication and LLM client handling.
+-  server : gRPC server for remote access.
+-  client/remote : gRPC client implementing the LLMClient interface.
+-  k8s : Kubernetes Watcher (collectors, store, summarizer).
 -  utils : Contains auxiliary functions for files, Git, shell, HTTP, etc.
 -  models : Defines data structures.
 -  version : Manages version information.
 
-Key Go libraries used: Zap, go-prompt, Glamour, Lumberjack, Godotenv, and golang.org/x/text.
+Key Go libraries used: Zap, go-prompt, Glamour, Lumberjack, Godotenv, golang.org/x/text, google.golang.org/grpc, k8s.io/client-go.
 
 --------
 
