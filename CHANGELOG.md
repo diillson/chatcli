@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.56.0](https://github.com/diillson/chatcli/compare/v1.55.0...v1.56.0) (2026-02-15)
+
+
+### Features
+
+* inject K8s watcher context into agent/coder modes and add interactive /watch start/stop ([#547](https://github.com/diillson/chatcli/issues/547)) ([8d92615](https://github.com/diillson/chatcli/commit/8d926157d3b54aea8a2dbcaa4cf894cc65776543))
+
 ## [1.55.0](https://github.com/diillson/chatcli/compare/v1.54.1...v1.55.0) (2026-02-15)
 
 
