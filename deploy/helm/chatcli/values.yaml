@@ -71,6 +71,9 @@ serviceAccount:
 # RBAC for K8s watcher mode
 rbac:
   create: true
+  # Set to true to use ClusterRole/ClusterRoleBinding instead of namespace-scoped Role/RoleBinding.
+  # Default false (least-privilege: namespace-scoped).
+  clusterWide: false
   # Additional rules beyond the defaults
   additionalRules: []
 
@@ -96,6 +99,23 @@ resources:
   limits:
     memory: "512Mi"
     cpu: "500m"
+
+# Pod-level security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
 
 nodeSelector: {}
 tolerations: []

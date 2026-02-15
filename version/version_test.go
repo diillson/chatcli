@@ -151,6 +151,33 @@ func TestCheckLatestVersionWithContext_Success(t *testing.T) {
 	assert.True(t, hasUpdate)
 }
 
+func TestCheckLatestVersion_DisabledViaEnv(t *testing.T) {
+	t.Setenv("CHATCLI_DISABLE_VERSION_CHECK", "true")
+
+	originalImpl := CheckLatestVersionImpl
+	defer func() { CheckLatestVersionImpl = originalImpl }()
+
+	// Re-assign the default impl to pick up the env var check we just added
+	// (the closure captures os.Getenv at call time, not at init time)
+	ctx := context.Background()
+	latest, needsUpdate, err := CheckLatestVersionWithContext(ctx)
+
+	assert.NoError(t, err)
+	assert.Empty(t, latest)
+	assert.False(t, needsUpdate)
+}
+
+func TestCheckLatestVersion_DisabledCaseInsensitive(t *testing.T) {
+	t.Setenv("CHATCLI_DISABLE_VERSION_CHECK", "TRUE")
+
+	ctx := context.Background()
+	latest, needsUpdate, err := CheckLatestVersionWithContext(ctx)
+
+	assert.NoError(t, err)
+	assert.Empty(t, latest)
+	assert.False(t, needsUpdate)
+}
+
 func TestCheckLatestVersionWithContext_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second) // Simula delay

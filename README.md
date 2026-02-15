@@ -89,6 +89,7 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 - **Exploração Recursiva de Diretórios**: Processa projetos inteiros ignorando pastas irrelevantes (ex.: `node_modules`, `.git`).
 - **Configuração Dinâmica e Histórico Persistente**: Troque provedores, atualize configurações em tempo real e mantenha o histórico entre sessões.
 - **Robustez**: Retry com backoff exponencial para lidar com falhas de API.
+- **Segurança Reforçada**: Comparação de tokens em tempo constante, proteção contra injeção em shell, validação de editores, gRPC reflection desabilitado por padrão, e containers hardened (read-only, no-new-privileges, drop ALL capabilities). Veja a [documentação de segurança](https://diillson.github.io/chatcli/docs/features/security/).
 
 -----
 
@@ -725,9 +726,14 @@ Detalhes completos no guia do plugin: https://diillson.github.io/chatcli/docs/fe
 
 O ChatCLI prioriza a segurança, bloqueando comandos perigosos por padrão. Você pode reforçar essa política com variáveis de ambiente:
 
--  CHATCLI_AGENT_DENYLIST  para bloquear padrões adicionais (regex separados por “ ; ”).
--  CHATCLI_AGENT_ALLOW_SUDO  para permitir/recusar  sudo  sem bloqueio automático (por padrão,  false ).
+-  `CHATCLI_AGENT_DENYLIST`  para bloquear padrões adicionais (regex separados por `;`).
+-  `CHATCLI_AGENT_ALLOW_SUDO`  para permitir/recusar  sudo  sem bloqueio automático (por padrão,  `false`).
+-  `CHATCLI_GRPC_REFLECTION`  para habilitar gRPC reflection no servidor (por padrão, `false` — desabilitado em produção).
+-  `CHATCLI_DISABLE_VERSION_CHECK`  para desabilitar a verificação automática de versão (`true`/`false`).
+
 Mesmo quando permitido, comandos perigosos podem exigir confirmação explícita no terminal.
+
+> Para detalhes completos sobre todas as medidas de segurança do ChatCLI, consulte a [documentação de segurança](https://diillson.github.io/chatcli/docs/features/security/).
 
 #### Arquivos de Policy do Modo Coder (Local vs Global)
 

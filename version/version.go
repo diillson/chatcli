@@ -30,6 +30,10 @@ var (
 
 // CheckLatestVersionImpl é a implementação injetável para checagem de versão (pode ser mocked)
 var CheckLatestVersionImpl = func(ctx context.Context) (string, bool, error) {
+	if strings.EqualFold(os.Getenv("CHATCLI_DISABLE_VERSION_CHECK"), "true") {
+		return "", false, nil
+	}
+
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}

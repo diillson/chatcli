@@ -51,6 +51,15 @@ chatcli serve --watch-deployment myapp --watch-namespace production
 | `--provider` | Provedor de LLM padrao | Auto-detectado | `LLM_PROVIDER` |
 | `--model` | Modelo de LLM padrao | Auto-detectado | |
 
+### Variaveis de Seguranca
+
+| Env Var | Descricao | Padrao |
+|---------|-----------|--------|
+| `CHATCLI_GRPC_REFLECTION` | Habilita gRPC reflection para debugging. **Mantenha desabilitado em producao.** | `false` |
+| `CHATCLI_DISABLE_VERSION_CHECK` | Desabilita verificacao automatica de versao no startup. | `false` |
+
+> O gRPC reflection esta **desabilitado por padrao** para nao expor o schema do servico em producao. Habilite apenas para debugging local. Veja a [documentacao de seguranca](/docs/features/security/) para todas as medidas de hardening.
+
 ### Flags do K8s Watcher (opcionais)
 
 | Flag | Descricao | Padrao | Env Var |
@@ -216,6 +225,10 @@ CHATCLI_SERVER_PORT=50051
 CHATCLI_SERVER_TOKEN=meu-token
 CHATCLI_SERVER_TLS_CERT=/path/to/cert.pem
 CHATCLI_SERVER_TLS_KEY=/path/to/key.pem
+
+# Seguranca
+CHATCLI_GRPC_REFLECTION=false          # true apenas para debug local
+CHATCLI_DISABLE_VERSION_CHECK=false    # true para ambientes air-gapped
 
 # LLM (o servidor usa estas para processar requests)
 LLM_PROVIDER=CLAUDEAI

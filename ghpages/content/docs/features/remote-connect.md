@@ -205,6 +205,8 @@ chatcli connect
 chatcli connect localhost:50051
 ```
 
+> Quando TLS esta desabilitado, um **warning e logado** pelo cliente para lembrar que a conexao nao esta encriptada. Isso e perfeitamente aceitavel para desenvolvimento local, mas em producao recomendamos habilitar TLS.
+
 ### Conexao com TLS
 
 ```bash
@@ -219,6 +221,8 @@ chatcli connect meuservidor:50051 --tls --ca-cert /path/to/ca.pem
 ```bash
 chatcli connect meuservidor:50051 --tls --token meu-token-secreto
 ```
+
+> Para um guia completo de seguranca (autenticacao, hardening de containers, RBAC, etc.), veja a [documentacao de seguranca](/docs/features/security/).
 
 ---
 

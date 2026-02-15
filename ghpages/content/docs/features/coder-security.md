@@ -104,12 +104,47 @@ Comportamento:
 
 ---
 
+## Matching com Word Boundary
+
+O sistema de policies usa **matching com word boundary**, garantindo que regras nao casem parcialmente com subcomandos diferentes:
+
+| Regra | Comando | Resultado |
+|-------|---------|-----------|
+| `@coder read` = allow | `@coder read file.txt` | Permitido |
+| `@coder read` = allow | `@coder readlink /tmp` | **Nao casa** (vai para Ask) |
+| `@coder read --file /etc` = deny | `@coder read --file /etc/passwd` | Deny (path-prefix match) |
+
+Isso significa que `@coder read` **nunca** vai liberar `@coder readlink` ou `@coder readwrite` acidentalmente.
+
+---
+
+## Validacao de Comandos (50+ Padroes)
+
+Alem da governanca de policies, o `@coder exec` valida cada comando contra **50+ padroes regex** que detectam:
+
+- Destruicao de dados (`rm -rf`, `dd if=`, `mkfs`, `drop database`)
+- Execucao remota (`curl | bash`, `base64 | sh`)
+- Injecao de codigo (`python -c`, `eval`, `$(curl ...)`)
+- Substituicao de processos (`<(cmd)`, `>(cmd)`)
+- Manipulacao de kernel (`insmod`, `modprobe`, `rmmod`)
+- Evasao (`${IFS;cmd}`, `VAR=x; bash`)
+
+Voce pode adicionar padroes customizados via `CHATCLI_AGENT_DENYLIST`:
+
+```bash
+export CHATCLI_AGENT_DENYLIST="terraform destroy;kubectl delete namespace"
+```
+
+> Para a lista completa de protecoes de seguranca do ChatCLI, veja a [documentacao de Seguranca e Hardening](/docs/features/security/).
+
+---
+
 ## Boas Práticas
 
 1. **Inicie com Cautela:** Mantenha os comandos de escrita (`write`, `patch`, `exec`) como `ask` até sentir confiança no agente.
 2. **Libere Leituras:** Geralmente, é seguro dar `Always` para `coder read`, `coder tree`, `coder search` e Git read-only (`git-status`, `git-diff`, `git-log`).
-3. **Seja Específico:** O matching é feito por prefixo. Você pode liberar `coder exec --cmd 'ls` mas bloquear `coder exec --cmd 'rm`.
-4. **Exec Seguro:** O `@coder exec` bloqueia padrões perigosos por padrão. Use `--allow-unsafe` apenas quando necessário.
+3. **Seja Específico:** O matching usa word boundary para prefixos de subcomando e path-prefix para argumentos. Você pode liberar `coder exec --cmd 'ls` mas bloquear `coder exec --cmd 'rm`.
+4. **Exec Seguro:** O `@coder exec` bloqueia padrões perigosos por padrão (50+ regras). Use `--allow-unsafe` apenas quando necessário.
 
 ---
 

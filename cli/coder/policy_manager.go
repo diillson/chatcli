@@ -77,7 +77,7 @@ func (pm *PolicyManager) Check(toolName, args string) Action {
 	matched := false
 
 	for _, rule := range pm.Rules {
-		if strings.HasPrefix(fullCommand, rule.Pattern) {
+		if matchesWithBoundary(fullCommand, rule.Pattern) {
 			if !matched || len(rule.Pattern) > len(bestMatch.Pattern) {
 				bestMatch = rule
 				matched = true
@@ -217,6 +217,35 @@ func findLocalPolicyPath() string {
 		return path
 	}
 	return ""
+}
+
+// matchesWithBoundary checks if fullCommand starts with pattern, applying a
+// word-boundary check only when the pattern ends with a word character (letter,
+// digit, hyphen, underscore). This prevents "@coder read" from matching
+// "@coder readlink" while still allowing path-prefix patterns like
+// "@coder read --file /etc" to match "@coder read --file /etc/passwd".
+func matchesWithBoundary(fullCommand, pattern string) bool {
+	if !strings.HasPrefix(fullCommand, pattern) {
+		return false
+	}
+	if len(fullCommand) == len(pattern) || len(pattern) == 0 {
+		return true
+	}
+	// Only enforce word boundary when the pattern ends with a word character.
+	// If it ends with '/', ' ', '=', etc., standard prefix matching applies.
+	last := pattern[len(pattern)-1]
+	isWordChar := (last >= 'a' && last <= 'z') || (last >= 'A' && last <= 'Z') ||
+		(last >= '0' && last <= '9') || last == '_' || last == '-'
+	if !isWordChar {
+		return true
+	}
+	// When pattern ends with a word char, the next char must NOT be a word
+	// char to avoid partial-word matches (e.g., "read" vs "readlink").
+	// We allow space, '/', '=', and other non-word separators.
+	next := fullCommand[len(pattern)]
+	nextIsWord := (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') ||
+		(next >= '0' && next <= '9') || next == '_' || next == '-'
+	return !nextIsWord
 }
 
 // mergeRules combina regras globais e locais, onde a regra local com mesmo pattern

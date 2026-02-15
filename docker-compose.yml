@@ -34,6 +34,16 @@ services:
       # Mount plugins directory (optional)
       - chatcli-plugins:/home/chatcli/.chatcli/plugins
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
 
 volumes:
   chatcli-sessions:

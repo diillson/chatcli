@@ -131,6 +131,18 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 | `CHATCLI_SERVER_TOKEN` | Token de autenticação para o servidor. Vazio = sem autenticação. | `""` |
 | `CHATCLI_SERVER_TLS_CERT` | Caminho para o certificado TLS do servidor. | `""` |
 | `CHATCLI_SERVER_TLS_KEY` | Caminho para a chave TLS do servidor. | `""` |
+| `CHATCLI_GRPC_REFLECTION` | Habilita gRPC reflection para debugging. **Mantenha desabilitado em produção.** | `false` |
+
+---
+
+## Segurança e Controle
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_DISABLE_VERSION_CHECK` | Desabilita a verificação automática de versão no startup. Útil para ambientes air-gapped ou CI/CD. | `false` |
+| `CHATCLI_GRPC_REFLECTION` | Habilita gRPC server reflection (expõe schema do serviço). | `false` |
+
+> Para detalhes completos sobre segurança, consulte a [documentação de Segurança e Hardening](/docs/features/security/).
 
 ---
 

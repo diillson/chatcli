@@ -89,6 +89,7 @@
 - **Recursive Directory Exploration**: Processes entire projects while ignoring irrelevant folders (e.g., `node_modules`, `.git`).
 - **Dynamic Configuration and Persistent History**: Change providers, update configurations in real-time, and maintain history across sessions.
 - **Robustness**: Exponential backoff retry for handling external API errors.
+- **Hardened Security**: Constant-time token comparison, shell injection prevention, editor validation, gRPC reflection disabled by default, and hardened containers (read-only, no-new-privileges, drop ALL capabilities). See the [security documentation](https://diillson.github.io/chatcli/docs/features/security/).
 
 -----
 
@@ -724,9 +725,14 @@ Full details in the plugin guide: https://diillson.github.io/chatcli/docs/featur
 
 ChatCLI prioritizes safety by blocking dangerous commands by default. You can strengthen this policy with environment variables:
 
--  CHATCLI_AGENT_DENYLIST  to block additional patterns (regex, separated by semicolons " ; ").
--  CHATCLI_AGENT_ALLOW_SUDO  to allow/deny  sudo  without automatic blocking (default:  false ).
+-  `CHATCLI_AGENT_DENYLIST`  to block additional patterns (regex, separated by semicolons `;`).
+-  `CHATCLI_AGENT_ALLOW_SUDO`  to allow/deny  sudo  without automatic blocking (default:  `false`).
+-  `CHATCLI_GRPC_REFLECTION`  to enable gRPC reflection on the server (default: `false` — disabled in production).
+-  `CHATCLI_DISABLE_VERSION_CHECK`  to disable automatic version checking (`true`/`false`).
+
 Even when allowed, dangerous commands may still require explicit confirmation in the terminal.
+
+> For complete details on all ChatCLI security measures, see the [security documentation](https://diillson.github.io/chatcli/docs/features/security/).
 
 #### Coder Mode Policy Files (Local vs Global)
 
