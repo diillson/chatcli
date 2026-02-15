@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chatcli.fullname" . }}
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+data:
+  CHATCLI_SERVER_PORT: {{ .Values.server.port | quote }}
+  {{- if .Values.llm.provider }}
+  LLM_PROVIDER: {{ .Values.llm.provider | quote }}
+  {{- end }}
+  {{- if .Values.llm.model }}
+  LLM_MODEL: {{ .Values.llm.model | quote }}
+  {{- end }}
+  {{- if .Values.ollama.enabled }}
+  OLLAMA_ENABLED: "true"
+  OLLAMA_BASE_URL: {{ .Values.ollama.baseUrl | quote }}
+  {{- if .Values.ollama.model }}
+  OLLAMA_MODEL: {{ .Values.ollama.model | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if .Values.watcher.enabled }}
+  CHATCLI_WATCH_DEPLOYMENT: {{ .Values.watcher.deployment | quote }}
+  {{- if .Values.watcher.namespace }}
+  CHATCLI_WATCH_NAMESPACE: {{ .Values.watcher.namespace | quote }}
+  {{- end }}
+  CHATCLI_WATCH_INTERVAL: {{ .Values.watcher.interval | quote }}
+  CHATCLI_WATCH_WINDOW: {{ .Values.watcher.window | quote }}
+  CHATCLI_WATCH_MAX_LOG_LINES: {{ .Values.watcher.maxLogLines | quote }}
+  {{- end }}

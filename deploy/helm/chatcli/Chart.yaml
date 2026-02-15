@@ -1,0 +1,13 @@
+apiVersion: v2
+name: chatcli
+description: ChatCLI - CLI for LLM interaction with gRPC server mode
+type: application
+version: 0.1.0
+appVersion: "1.54.1"
+keywords:
+  - chatcli
+  - llm
+  - grpc
+  - ai
+maintainers:
+  - name: Edilson Freitas
