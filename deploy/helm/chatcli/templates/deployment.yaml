@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "chatcli.fullname" . }}
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "chatcli.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "chatcli.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "chatcli.serviceAccountName" . }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["chatcli", "serve"]
+          args:
+            - "--port={{ .Values.server.port }}"
+            {{- if .Values.llm.provider }}
+            - "--provider={{ .Values.llm.provider }}"
+            {{- end }}
+            {{- if .Values.llm.model }}
+            - "--model={{ .Values.llm.model }}"
+            {{- end }}
+            {{- if .Values.tls.enabled }}
+            - "--tls-cert={{ .Values.tls.certFile }}"
+            - "--tls-key={{ .Values.tls.keyFile }}"
+            {{- end }}
+            {{- if .Values.watcher.enabled }}
+            - "--watch-deployment={{ .Values.watcher.deployment }}"
+            - "--watch-namespace={{ .Values.watcher.namespace }}"
+            - "--watch-interval={{ .Values.watcher.interval }}"
+            - "--watch-window={{ .Values.watcher.window }}"
+            - "--watch-max-log-lines={{ .Values.watcher.maxLogLines }}"
+            {{- end }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "chatcli.fullname" . }}
+            - secretRef:
+                name: {{ include "chatcli.secretName" . }}
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- $mounts := list }}
+          {{- if .Values.persistence.enabled }}
+          {{- $mounts = append $mounts (dict "name" "sessions" "mountPath" "/home/chatcli/.chatcli/sessions") }}
+          {{- end }}
+          {{- if .Values.tls.existingSecret }}
+          {{- $mounts = append $mounts (dict "name" "tls-certs" "mountPath" "/etc/chatcli/tls" "readOnly" true) }}
+          {{- end }}
+          {{- if $mounts }}
+          volumeMounts:
+            {{- toYaml $mounts | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command: ["pidof", "chatcli"]
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["pidof", "chatcli"]
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      {{- if or .Values.persistence.enabled .Values.tls.existingSecret }}
+      volumes:
+        {{- if .Values.persistence.enabled }}
+        - name: sessions
+          persistentVolumeClaim:
+            claimName: {{ include "chatcli.fullname" . }}-sessions
+        {{- end }}
+        {{- if .Values.tls.existingSecret }}
+        - name: tls-certs
+          secret:
+            secretName: {{ .Values.tls.existingSecret }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

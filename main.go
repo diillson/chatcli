@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/cmd"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/manager"
@@ -25,6 +26,16 @@ import (
 )
 
 func main() {
+	// Check for subcommands (serve, connect) before processing standard flags.
+	// These subcommands have their own flag sets and should not go through cli.Parse().
+	if len(os.Args) > 1 {
+		subcmd := os.Args[1]
+		if subcmd == "serve" || subcmd == "connect" || subcmd == "watch" {
+			runSubcommand(subcmd, os.Args[2:])
+			return
+		}
+	}
+
 	args := cli.PreprocessArgs(os.Args[1:])
 	opts, err := cli.Parse(args)
 	if err != nil {
@@ -163,4 +174,68 @@ func handleGracefulShutdown(cancelFunc context.CancelFunc, logger *zap.Logger) {
 		logger.Info("Recebido sinal para finalizar a aplicação", zap.String("sinal", sig.String()))
 		cancelFunc()
 	}()
+}
+
+// runSubcommand handles the 'serve' and 'connect' subcommands.
+// These have their own initialization flow separate from the standard CLI.
+func runSubcommand(subcmd string, args []string) {
+	i18n.Init()
+
+	// Load .env
+	envFilePath := os.Getenv("CHATCLI_DOTENV")
+	if envFilePath == "" {
+		envFilePath = ".env"
+	} else {
+		expanded, err := utils.ExpandPath(envFilePath)
+		if err == nil {
+			envFilePath = expanded
+		}
+	}
+	_ = godotenv.Load(envFilePath)
+
+	logger, err := utils.InitializeLogger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	config.Global = config.New(logger)
+	config.Global.Load()
+
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			msg := err.Error()
+			if !strings.Contains(msg, "/dev/stdout") &&
+				!strings.Contains(msg, "/dev/stderr") &&
+				!strings.Contains(msg, "invalid argument") &&
+				!strings.Contains(msg, "inappropriate ioctl") {
+				fmt.Fprintf(os.Stderr, "Error closing logger: %v\n", err)
+			}
+		}
+	}()
+
+	llmMgr, err := manager.NewLLMManager(logger)
+	if err != nil {
+		logger.Fatal("Failed to initialize LLMManager", zap.Error(err))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	switch subcmd {
+	case "serve":
+		if err := cmd.RunServe(args, llmMgr, logger); err != nil {
+			logger.Fatal("Server failed", zap.Error(err))
+		}
+	case "connect":
+		if err := cmd.RunConnect(ctx, args, llmMgr, logger); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "watch":
+		if err := cmd.RunWatch(ctx, args, llmMgr, logger); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
 }

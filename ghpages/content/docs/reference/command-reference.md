@@ -12,15 +12,14 @@ Estes comandos controlam a aplicação e o fluxo da conversa.
 
 | Comando | Descrição |
 | --- | --- |
-| **/auth** | Gerencia autenticação OAuth com provedores de IA |
-| &nbsp; `status` | Mostra o status de autenticação de todos os provedores. |
-| &nbsp; `login <provedor>` | Inicia o fluxo OAuth (abre o navegador). Provedores: `openai-codex`, `anthropic`. |
-| &nbsp; `logout <provedor>` | Remove as credenciais OAuth do provedor especificado. |
 | **/agent** | Iniciar modo agente para executar tarefas |
+| **/auth** | Gerencia credenciais OAuth (status, login, logout) |
 | **/clear** | Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais. |
 | **/coder** | Iniciar modo engenheiro (Criação e Edição de Código) |
 | **/config** | Mostrar configuração atual |
+| **/connect** | Conectar a um servidor ChatCLI remoto (gRPC) |
 | **/context** | Gerencia contextos persistentes (create, attach, detach, list, show, etc) |
+| **/disconnect** | Desconectar do servidor remoto e voltar ao modo local |
 | **/exit** | Sair do ChatCLI |
 | **/help** | Mostrar ajuda |
 | **/newsession** | Iniciar uma nova sessão de conversa |
@@ -40,6 +39,7 @@ Estes comandos controlam a aplicação e o fluxo da conversa.
 | &nbsp; `--realm <nome>` | **(StackSpot)** Define o `realm` (tenant). |
 | &nbsp; `--agent-id <id>` | **(StackSpot)** Define o `Agent ID` a ser usado. |
 | **/version** | Verificar a versão do ChatCLI |
+| **/watch** | Exibe o status do K8s watcher (quando ativo) |
 
 ---
 
@@ -127,10 +127,87 @@ Use estas flags ao executar `chatcli` diretamente do seu terminal para automaç�
 | --- | --- |
 | `-p`, `--prompt "<texto>` | Executa um único prompt e sai. |
 | `--provider <nome>` | Sobrescreve o provedor de IA (ex: `GOOGLEAI`). |
-| `--model <nome>` | Sobrescreve o modelo de IA (ex: `gemini-2.5-pro`). |
+| `--model <nome>` | Sobrescreve o modelo de IA (ex: `gemini-1.5-pro-latest`). |
 | `--timeout <duração>` | Define o tempo limite para a requisição (ex: `10s`, `1m`). |
 | `--max-tokens <num>` | Limita o número de tokens na resposta. |
 | `--agent-auto-exec` | No modo agente one-shot, executa o primeiro comando se for seguro. |
 | `--no-anim` | Desabilita a animação 'Pensando...', útil para scripts. |
 | `-v`, `--version` | Mostra a informação de versão. |
 | `-h`, `--help` | Mostra a tela de ajuda. |
+
+---
+
+## Subcomandos
+
+O ChatCLI suporta subcomandos para funcionalidades avançadas de servidor e monitoramento.
+
+### `chatcli serve` — Modo Servidor gRPC
+
+Inicia o ChatCLI como servidor gRPC para acesso remoto.
+
+| Flag | Descrição | Padrão |
+| --- | --- | --- |
+| `--port <int>` | Porta do servidor gRPC | `50051` |
+| `--token <string>` | Token de autenticação (vazio = sem auth) | `""` |
+| `--tls-cert <path>` | Arquivo de certificado TLS | `""` |
+| `--tls-key <path>` | Arquivo de chave TLS | `""` |
+| `--provider <nome>` | Provedor de LLM padrão | Auto-detectado |
+| `--model <nome>` | Modelo de LLM padrão | Auto-detectado |
+| `--watch-deployment <nome>` | Deployment K8s a monitorar (habilita watcher) | `""` |
+| `--watch-namespace <ns>` | Namespace do deployment | `"default"` |
+| `--watch-interval <dur>` | Intervalo de coleta do watcher | `30s` |
+| `--watch-window <dur>` | Janela de observação do watcher | `2h` |
+| `--watch-max-log-lines <n>` | Max linhas de log por pod | `100` |
+| `--watch-kubeconfig <path>` | Caminho do kubeconfig | Auto-detectado |
+
+### `chatcli connect` — Conexão Remota
+
+Conecta a um servidor ChatCLI remoto via gRPC.
+
+| Flag | Descrição | Padrão |
+| --- | --- | --- |
+| `<address>` | Endereço do servidor (posicional) |  |
+| `--addr <host:port>` | Endereço do servidor (flag) | `""` |
+| `--token <string>` | Token de autenticação | `""` |
+| `--provider <nome>` | Sobrescreve o provedor LLM do servidor | `""` |
+| `--model <nome>` | Sobrescreve o modelo LLM do servidor | `""` |
+| `--llm-key <string>` | Sua própria API key (enviada ao servidor) | `""` |
+| `--use-local-auth` | Usa credenciais OAuth do auth store local | `false` |
+| `--tls` | Habilita conexão TLS | `false` |
+| `--ca-cert <path>` | Certificado CA para TLS | `""` |
+| `-p <prompt>` | One-shot: envia prompt e sai | `""` |
+| `--raw` | Saída crua (sem formatação) | `false` |
+| `--max-tokens <int>` | Máximo de tokens na resposta | `0` |
+| `--client-id <string>` | StackSpot Client ID | `""` |
+| `--client-key <string>` | StackSpot Client Key | `""` |
+| `--realm <string>` | StackSpot Realm/Tenant | `""` |
+| `--agent-id <string>` | StackSpot Agent ID | `""` |
+| `--ollama-url <url>` | URL base do Ollama | `""` |
+
+### `chatcli watch` — Monitoramento Kubernetes
+
+Monitora um deployment Kubernetes e injeta contexto K8s nas conversas com a IA.
+
+| Flag | Descrição | Padrão |
+| --- | --- | --- |
+| `--deployment <nome>` | Deployment a monitorar (obrigatório) | `""` |
+| `--namespace <ns>` | Namespace do deployment | `"default"` |
+| `--interval <dur>` | Intervalo de coleta | `30s` |
+| `--window <dur>` | Janela de observação | `2h` |
+| `--max-log-lines <n>` | Max linhas de log por pod | `100` |
+| `--kubeconfig <path>` | Caminho do kubeconfig | Auto-detectado |
+| `--provider <nome>` | Provedor de LLM | `.env` |
+| `--model <nome>` | Modelo de LLM | `.env` |
+| `-p <prompt>` | One-shot: envia prompt com contexto K8s e sai | `""` |
+| `--max-tokens <int>` | Máximo de tokens na resposta | `0` |
+
+---
+
+## Comando `/watch` (Modo Interativo)
+
+Disponível dentro do ChatCLI interativo (local ou remoto):
+
+| Comando | Descrição |
+| --- | --- |
+| `/watch status` | Mostra o status do K8s Watcher (local ou remoto) |
+| `/watch` | Mostra ajuda do comando watch |

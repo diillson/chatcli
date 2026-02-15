@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
@@ -93,6 +94,15 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case strings.HasPrefix(userInput, "/plugin"):
 		ch.handlePluginCommand(userInput)
 		return false
+	case strings.HasPrefix(userInput, "/connect"):
+		ch.handleConnectCommand(userInput)
+		return false
+	case userInput == "/disconnect":
+		ch.handleDisconnectCommand()
+		return false
+	case userInput == "/watch" || userInput == "/watch status":
+		ch.handleWatchStatusCommand()
+		return false
 	case userInput == "/reset" || userInput == "/redraw" || userInput == "/clear":
 		fmt.Print("\033[0m")
 		os.Stdout.Sync()
@@ -103,6 +113,309 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	default:
 		fmt.Println(i18n.T("error.unknown_command"))
 		return false
+	}
+}
+
+// handleConnectCommand handles the /connect <address> [flags] command.
+// It connects to a remote ChatCLI gRPC server and swaps the LLM client.
+func (ch *CommandHandler) handleConnectCommand(userInput string) {
+	args := strings.Fields(userInput)
+
+	if len(args) < 2 {
+		fmt.Println(colorize(" Usage: /connect <host:port> [--token <t>] [--use-local-auth] [--provider <p>] [--model <m>] [--llm-key <k>]", ColorYellow))
+		fmt.Println(colorize("   StackSpot: --client-id <id> --client-key <key> --realm <r> --agent-id <a>", ColorYellow))
+		fmt.Println(colorize("   Ollama:    --ollama-url <url>", ColorYellow))
+		fmt.Println(colorize("   TLS:       --tls [--ca-cert <path>]", ColorYellow))
+		return
+	}
+
+	if ch.cli.isRemote {
+		fmt.Println(colorize(" Already connected to a remote server. Use /disconnect first.", ColorYellow))
+		return
+	}
+
+	// Parse arguments manually (same pattern as /switch)
+	address := args[1]
+	var token, provider, model, llmKey, caCert string
+	var clientID, clientKey, realm, agentID, ollamaURL string
+	var useLocalAuth, useTLS bool
+
+	for i := 2; i < len(args); i++ {
+		switch args[i] {
+		case "--token":
+			if i+1 < len(args) {
+				token = args[i+1]
+				i++
+			}
+		case "--provider":
+			if i+1 < len(args) {
+				provider = args[i+1]
+				i++
+			}
+		case "--model":
+			if i+1 < len(args) {
+				model = args[i+1]
+				i++
+			}
+		case "--llm-key":
+			if i+1 < len(args) {
+				llmKey = args[i+1]
+				i++
+			}
+		case "--ca-cert":
+			if i+1 < len(args) {
+				caCert = args[i+1]
+				i++
+			}
+		case "--client-id":
+			if i+1 < len(args) {
+				clientID = args[i+1]
+				i++
+			}
+		case "--client-key":
+			if i+1 < len(args) {
+				clientKey = args[i+1]
+				i++
+			}
+		case "--realm":
+			if i+1 < len(args) {
+				realm = args[i+1]
+				i++
+			}
+		case "--agent-id":
+			if i+1 < len(args) {
+				agentID = args[i+1]
+				i++
+			}
+		case "--ollama-url":
+			if i+1 < len(args) {
+				ollamaURL = args[i+1]
+				i++
+			}
+		case "--use-local-auth":
+			useLocalAuth = true
+		case "--tls":
+			useTLS = true
+		}
+	}
+
+	// Resolve local auth if requested
+	if useLocalAuth && llmKey == "" {
+		resolvedKey, resolvedProvider, err := ch.resolveLocalAuth(provider)
+		if err != nil {
+			fmt.Println(colorize(fmt.Sprintf(" Failed to resolve local auth: %v", err), ColorRed))
+			return
+		}
+		llmKey = resolvedKey
+		if provider == "" {
+			provider = resolvedProvider
+		}
+	}
+
+	// Build provider-specific config
+	providerConfig := make(map[string]string)
+	if clientID != "" {
+		providerConfig["client_id"] = clientID
+	}
+	if clientKey != "" {
+		providerConfig["client_key"] = clientKey
+	}
+	if realm != "" {
+		providerConfig["realm"] = realm
+	}
+	if agentID != "" {
+		providerConfig["agent_id"] = agentID
+	}
+	if ollamaURL != "" {
+		providerConfig["base_url"] = ollamaURL
+	}
+
+	fmt.Println(colorize(fmt.Sprintf(" Connecting to %s...", address), ColorCyan))
+
+	// Create remote client
+	cfg := remote.Config{
+		Address:        address,
+		Token:          token,
+		TLS:            useTLS,
+		CertFile:       caCert,
+		ClientAPIKey:   llmKey,
+		Provider:       provider,
+		Model:          model,
+		ProviderConfig: providerConfig,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	remoteClient, err := remote.NewClient(cfg, ch.cli.logger)
+	if err != nil {
+		fmt.Println(colorize(fmt.Sprintf(" Connection failed: %v", err), ColorRed))
+		return
+	}
+
+	// Health check
+	healthy, ver, err := remoteClient.Health(ctx)
+	if err != nil {
+		remoteClient.Close()
+		fmt.Println(colorize(fmt.Sprintf(" Health check failed: %v", err), ColorRed))
+		return
+	}
+	if !healthy {
+		remoteClient.Close()
+		fmt.Println(colorize(" Server is not healthy", ColorRed))
+		return
+	}
+
+	// Save current local state
+	ch.cli.localClient = ch.cli.Client
+	ch.cli.localProvider = ch.cli.Provider
+	ch.cli.localModel = ch.cli.Model
+
+	// Swap to remote
+	ch.cli.Client = remoteClient
+	ch.cli.Provider = remoteClient.GetProvider()
+	ch.cli.Model = remoteClient.GetModelName()
+	ch.cli.remoteConn = remoteClient
+	ch.cli.isRemote = true
+
+	connInfo := fmt.Sprintf("version: %s, provider: %s, model: %s", ver, ch.cli.Provider, ch.cli.Model)
+	if useLocalAuth {
+		connInfo += ", using local OAuth credentials"
+	} else if llmKey != "" {
+		connInfo += ", using your API key"
+	}
+	fmt.Println(colorize(fmt.Sprintf(" Connected to remote server (%s)", connInfo), ColorGreen))
+
+	// Show watcher status if server has one
+	infoCtx, infoCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer infoCancel()
+	if info, err := remoteClient.GetServerInfo(infoCtx); err == nil && info.WatcherActive {
+		fmt.Println(colorize(fmt.Sprintf(" K8s watcher active: %s (context injected into prompts)", info.WatcherTarget), ColorCyan))
+	}
+
+	fmt.Println(colorize(" Use /disconnect to return to local mode.", ColorCyan))
+}
+
+// handleDisconnectCommand handles the /disconnect command.
+// It closes the remote connection and restores the local LLM client.
+func (ch *CommandHandler) handleDisconnectCommand() {
+	if !ch.cli.isRemote {
+		fmt.Println(colorize(" Not connected to a remote server.", ColorYellow))
+		return
+	}
+
+	// Close remote connection
+	if ch.cli.remoteConn != nil {
+		ch.cli.remoteConn.Close()
+	}
+
+	// Restore local state
+	ch.cli.Client = ch.cli.localClient
+	ch.cli.Provider = ch.cli.localProvider
+	ch.cli.Model = ch.cli.localModel
+	ch.cli.remoteConn = nil
+	ch.cli.isRemote = false
+	ch.cli.localClient = nil
+	ch.cli.localProvider = ""
+	ch.cli.localModel = ""
+
+	fmt.Println(colorize(" Disconnected from remote server.", ColorGreen))
+	if ch.cli.Client != nil {
+		fmt.Println(colorize(fmt.Sprintf(" Back to local mode: %s (%s)", ch.cli.Model, ch.cli.Provider), ColorCyan))
+	} else {
+		fmt.Println(colorize(" Back to local mode (no LLM provider configured).", ColorYellow))
+	}
+}
+
+// handleWatchStatusCommand displays the current K8s watcher status.
+func (ch *CommandHandler) handleWatchStatusCommand() {
+	// Check local watcher first
+	if ch.cli.isWatching {
+		if ch.cli.watchStatusFunc != nil {
+			status := ch.cli.watchStatusFunc()
+			fmt.Println(colorize(" K8s Watcher: "+status, ColorCyan))
+		} else {
+			fmt.Println(colorize(" K8s Watcher: active (no status available)", ColorCyan))
+		}
+		return
+	}
+
+	// If connected to remote, query server's watcher status
+	if ch.cli.isRemote {
+		if rc, ok := ch.cli.Client.(*remote.Client); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			ws, err := rc.GetWatcherStatus(ctx)
+			if err != nil {
+				fmt.Println(colorize(" Failed to query remote watcher status: "+err.Error(), ColorYellow))
+				return
+			}
+			if !ws.Active {
+				fmt.Println(colorize(" Server has no K8s watcher active.", ColorYellow))
+				return
+			}
+			fmt.Println(colorize(fmt.Sprintf(" K8s Watcher (remote): %s", ws.StatusSummary), ColorCyan))
+			fmt.Println(colorize(fmt.Sprintf("   Target: %s/%s | Pods: %d | Alerts: %d | Snapshots: %d",
+				ws.Namespace, ws.Deployment, ws.PodCount, ws.AlertCount, ws.SnapshotCount), ColorCyan))
+			return
+		}
+	}
+
+	fmt.Println(colorize(" No K8s watcher active. Start with: chatcli watch --deployment <name> --namespace <ns>", ColorYellow))
+}
+
+// resolveLocalAuth reads the local auth store and returns the API key/OAuth token.
+func (ch *CommandHandler) resolveLocalAuth(provider string) (apiKey string, resolvedProvider string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if provider != "" {
+		authProvider, ok := llmProviderToAuthProvider(provider)
+		if !ok {
+			return "", "", fmt.Errorf(
+				"--use-local-auth only supports OAuth providers (CLAUDEAI, OPENAI). "+
+					"Provider '%s' requires --llm-key with an API key instead", provider)
+		}
+
+		resolved, err := auth.ResolveAuth(ctx, authProvider, ch.cli.logger)
+		if err != nil {
+			return "", "", fmt.Errorf("no local credentials found for %s: %w\n"+
+				"Run '/auth login %s' first", provider, err, string(authProvider))
+		}
+		return resolved.APIKey, provider, nil
+	}
+
+	// No provider specified: try each OAuth provider in order
+	for _, candidate := range []struct {
+		authProvider auth.ProviderID
+		llmProvider  string
+	}{
+		{auth.ProviderAnthropic, "CLAUDEAI"},
+		{auth.ProviderOpenAI, "OPENAI"},
+	} {
+		resolved, err := auth.ResolveAuth(ctx, candidate.authProvider, ch.cli.logger)
+		if err == nil && resolved.APIKey != "" {
+			ch.cli.logger.Info("Auto-resolved local auth",
+				zap.String("provider", candidate.llmProvider),
+				zap.String("source", resolved.Source),
+				zap.String("mode", string(resolved.Mode)),
+			)
+			return resolved.APIKey, candidate.llmProvider, nil
+		}
+	}
+
+	return "", "", fmt.Errorf("no local OAuth credentials found. Run '/auth login anthropic' or '/auth login openai-codex' first")
+}
+
+// llmProviderToAuthProvider maps LLMManager provider names to auth.ProviderID.
+func llmProviderToAuthProvider(provider string) (auth.ProviderID, bool) {
+	switch strings.ToUpper(provider) {
+	case "CLAUDEAI":
+		return auth.ProviderAnthropic, true
+	case "OPENAI":
+		return auth.ProviderOpenAI, true
+	default:
+		return "", false
 	}
 }
 

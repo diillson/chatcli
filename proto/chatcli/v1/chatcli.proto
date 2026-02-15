@@ -1,0 +1,175 @@
+// ChatCLI gRPC Service Definition
+// Copyright (c) 2024 Edilson Freitas
+// License: MIT
+
+syntax = "proto3";
+
+package chatcli.v1;
+
+option go_package = "github.com/diillson/chatcli/proto/chatcli/v1;chatcliv1";
+
+// ChatCLIService exposes ChatCLI functionality over gRPC.
+service ChatCLIService {
+  // SendPrompt sends a single prompt and returns the LLM response (one-shot mode).
+  rpc SendPrompt(SendPromptRequest) returns (SendPromptResponse);
+
+  // StreamPrompt sends a prompt and streams back the response chunks.
+  rpc StreamPrompt(StreamPromptRequest) returns (stream StreamPromptResponse);
+
+  // InteractiveSession opens a bidirectional stream for interactive/agent mode.
+  rpc InteractiveSession(stream SessionMessage) returns (stream SessionMessage);
+
+  // ListSessions returns all saved session names.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+
+  // LoadSession loads a previously saved session's message history.
+  rpc LoadSession(LoadSessionRequest) returns (LoadSessionResponse);
+
+  // SaveSession saves the current conversation history.
+  rpc SaveSession(SaveSessionRequest) returns (SaveSessionResponse);
+
+  // DeleteSession removes a saved session.
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+
+  // GetServerInfo returns server metadata (provider, model, version).
+  rpc GetServerInfo(GetServerInfoRequest) returns (GetServerInfoResponse);
+
+  // GetWatcherStatus returns the K8s watcher status (if active).
+  rpc GetWatcherStatus(GetWatcherStatusRequest) returns (GetWatcherStatusResponse);
+
+  // Health check for load balancers and k8s probes.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// --- SendPrompt ---
+
+message SendPromptRequest {
+  string prompt = 1;
+  repeated ChatMessage history = 2;
+  int32 max_tokens = 3;
+  string provider = 4;  // optional: override server's default provider
+  string model = 5;     // optional: override server's default model
+  string client_api_key = 6; // optional: client's own API key/OAuth token (overrides server credentials)
+  map<string, string> provider_config = 7; // optional: provider-specific config (StackSpot realm/agent_id/client_id/client_key, Ollama base_url, etc.)
+}
+
+message SendPromptResponse {
+  string response = 1;
+  string model = 2;
+  string provider = 3;
+}
+
+// --- StreamPrompt ---
+
+message StreamPromptRequest {
+  string prompt = 1;
+  repeated ChatMessage history = 2;
+  int32 max_tokens = 3;
+  string provider = 4;
+  string model = 5;
+  string client_api_key = 6; // optional: client's own API key/OAuth token
+  map<string, string> provider_config = 7; // optional: provider-specific config
+}
+
+message StreamPromptResponse {
+  string chunk = 1;       // partial response text
+  bool done = 2;          // true when stream is complete
+  string model = 3;
+  string provider = 4;
+}
+
+// --- InteractiveSession ---
+
+message SessionMessage {
+  enum Type {
+    USER_INPUT = 0;
+    ASSISTANT_RESPONSE = 1;
+    SYSTEM_MESSAGE = 2;
+    ERROR = 3;
+    COMMAND = 4;          // CLI commands like /agent, /coder, /switch
+    COMMAND_RESULT = 5;
+  }
+  Type type = 1;
+  string content = 2;
+  map<string, string> metadata = 3;  // extra info (e.g., provider, model, mode)
+}
+
+// --- ChatMessage (shared) ---
+
+message ChatMessage {
+  string role = 1;     // "user" or "assistant"
+  string content = 2;
+}
+
+// --- Session Management ---
+
+message ListSessionsRequest {}
+
+message ListSessionsResponse {
+  repeated string sessions = 1;
+}
+
+message LoadSessionRequest {
+  string name = 1;
+}
+
+message LoadSessionResponse {
+  repeated ChatMessage messages = 1;
+}
+
+message SaveSessionRequest {
+  string name = 1;
+  repeated ChatMessage messages = 2;
+}
+
+message SaveSessionResponse {
+  bool success = 1;
+}
+
+message DeleteSessionRequest {
+  string name = 1;
+}
+
+message DeleteSessionResponse {
+  bool success = 1;
+}
+
+// --- Server Info ---
+
+message GetServerInfoRequest {}
+
+message GetServerInfoResponse {
+  string version = 1;
+  string provider = 2;
+  string model = 3;
+  repeated string available_providers = 4;
+  bool watcher_active = 5;     // true if K8s watcher is running
+  string watcher_target = 6;   // e.g., "namespace/deployment"
+}
+
+// --- Watcher Status ---
+
+message GetWatcherStatusRequest {}
+
+message GetWatcherStatusResponse {
+  bool active = 1;
+  string deployment = 2;
+  string namespace = 3;
+  string status_summary = 4;    // compact one-line status
+  int32 alert_count = 5;
+  int32 snapshot_count = 6;
+  int32 pod_count = 7;
+}
+
+// --- Health ---
+
+message HealthRequest {}
+
+message HealthResponse {
+  enum Status {
+    SERVING = 0;
+    NOT_SERVING = 1;
+  }
+  Status status = 1;
+  string version = 2;
+}

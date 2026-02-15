@@ -115,6 +115,20 @@ var CommandFlags = map[string]map[string][]prompt.Suggest{
 		"metrics":  {},
 		"help":     {},
 	},
+	"/connect": {
+		"--token":          {},
+		"--provider":       {},
+		"--model":          {},
+		"--llm-key":        {},
+		"--use-local-auth": {},
+		"--tls":            {},
+		"--ca-cert":        {},
+		"--client-id":      {},
+		"--client-key":     {},
+		"--realm":          {},
+		"--agent-id":       {},
+		"--ollama-url":     {},
+	},
 	"/agent": {
 		"list":   {},
 		"load":   {},
@@ -161,6 +175,18 @@ type ChatCLI struct {
 	personaHandler       *PersonaHandler
 	executionProfile     ExecutionProfile
 	pendingAction        string // stores intended action before panic (for Windows go-prompt tearDown workaround)
+
+	// Remote connection state (for /connect and /disconnect)
+	localClient   client.LLMClient           // saved local client when connected to remote
+	localProvider string                     // saved local provider name
+	localModel    string                     // saved local model name
+	remoteConn    interface{ Close() error } // remote connection (for cleanup on disconnect)
+	isRemote      bool                       // true when connected to a remote server
+
+	// K8s watcher context injection
+	WatcherContextFunc func() string // returns K8s context to prepend to LLM prompts
+	isWatching         bool          // true when K8s watcher is active
+	watchStatusFunc    func() string // returns compact status for prompt prefix
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -481,6 +507,17 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	)
 	if err != nil {
 		cli.logger.Warn("Erro ao construir mensagens de contexto", zap.Error(err))
+	}
+
+	// Inject K8s watcher context if active
+	if cli.WatcherContextFunc != nil {
+		k8sCtx := cli.WatcherContextFunc()
+		if k8sCtx != "" {
+			contextMessages = append(contextMessages, models.Message{
+				Role:    "user",
+				Content: k8sCtx,
+			})
+		}
 	}
 
 	// Inserir mensagens de contexto no início do histórico (ANTES da mensagem do usuário)
@@ -878,10 +915,17 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 	case StateProcessing, StateAgentMode:
 		return "", true
 	default:
+		prefix := "❯ "
 		if cli.currentSessionName != "" {
-			return fmt.Sprintf("%s ❯ ", cli.currentSessionName), true
+			prefix = fmt.Sprintf("%s ❯ ", cli.currentSessionName)
 		}
-		return "❯ ", true
+		if cli.isRemote {
+			prefix = "[remote] " + prefix
+		}
+		if cli.isWatching {
+			prefix = "[watch] " + prefix
+		}
+		return prefix, true
 	}
 }
 
@@ -1174,6 +1218,12 @@ func (cli *ChatCLI) ApplyOverrides(mgr manager.LLMManager, provider, model strin
 	cli.Provider = prov
 	cli.Model = mod
 	return nil
+}
+
+// SetWatching configures the K8s watcher state for the CLI.
+func (cli *ChatCLI) SetWatching(active bool, statusFunc func() string) {
+	cli.isWatching = active
+	cli.watchStatusFunc = statusFunc
 }
 
 // processSpecialCommands processa comandos especiais como @history, @git, @env, @file
@@ -2254,6 +2304,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getAuthSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/connect ") {
+		return cli.getConnectSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -2371,7 +2425,35 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/plugin", Description: "Gerencia plugins (install, list, show, etc.)"},
 		{Text: "/clear", Description: "Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais."},
 		{Text: "/auth", Description: "Gerencia credenciais OAuth (status, login, logout)"},
+		{Text: "/connect", Description: "Conectar a um servidor ChatCLI remoto (gRPC)"},
+		{Text: "/disconnect", Description: "Desconectar do servidor remoto e voltar ao modo local"},
+		{Text: "/watch", Description: "Exibe o status do K8s watcher (quando ativo)"},
 	}
+}
+
+// getConnectSuggestions returns autocomplete suggestions for /connect flags.
+func (cli *ChatCLI) getConnectSuggestions(d prompt.Document) []prompt.Suggest {
+	wordBeforeCursor := d.GetWordBeforeCursor()
+
+	if strings.HasPrefix(wordBeforeCursor, "-") {
+		flags := []prompt.Suggest{
+			{Text: "--token", Description: "Token de autenticação do servidor"},
+			{Text: "--provider", Description: "Provedor LLM (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA)"},
+			{Text: "--model", Description: "Modelo LLM (gpt-4, claude-3, etc.)"},
+			{Text: "--llm-key", Description: "API key/OAuth token para enviar ao servidor"},
+			{Text: "--use-local-auth", Description: "Usar credenciais OAuth locais (de /auth login)"},
+			{Text: "--tls", Description: "Habilitar conexão TLS"},
+			{Text: "--ca-cert", Description: "Arquivo de certificado CA para TLS"},
+			{Text: "--client-id", Description: "StackSpot: Client ID para autenticação"},
+			{Text: "--client-key", Description: "StackSpot: Client Key para autenticação"},
+			{Text: "--realm", Description: "StackSpot: Realm/Tenant"},
+			{Text: "--agent-id", Description: "StackSpot: Agent ID"},
+			{Text: "--ollama-url", Description: "Ollama: Base URL do servidor (ex: http://localhost:11434)"},
+		}
+		return prompt.FilterHasPrefix(flags, wordBeforeCursor, true)
+	}
+
+	return []prompt.Suggest{}
 }
 
 // GetContextCommands retorna a lista de sugestões para comandos com @

@@ -1,0 +1,47 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "chatcli.fullname" . }}
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+rules:
+  # Core resources for watcher mode
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "services", "endpoints", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  # Apps resources
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  # Autoscaling
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  # Networking
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  # Metrics (for resource usage)
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  {{- with .Values.rbac.additionalRules }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "chatcli.fullname" . }}
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "chatcli.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "chatcli.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

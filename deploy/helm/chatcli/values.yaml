@@ -1,0 +1,115 @@
+# ChatCLI Helm Chart - Default Values
+
+replicaCount: 1
+
+image:
+  repository: chatcli
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# gRPC server configuration
+server:
+  port: 50051
+  # Authentication token for gRPC server (leave empty to disable auth)
+  token: ""
+
+# TLS configuration
+tls:
+  enabled: false
+  # certFile and keyFile are paths inside the container
+  certFile: ""
+  keyFile: ""
+  # Use existing secret for TLS certificates
+  existingSecret: ""
+
+# LLM Provider configuration
+llm:
+  # Default provider: OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA
+  provider: ""
+  model: ""
+
+# Provider API keys (stored in a Secret)
+# Set these values or use existingSecret
+secrets:
+  # Use an existing secret instead of creating one
+  existingSecret: ""
+  openaiApiKey: ""
+  anthropicApiKey: ""
+  googleaiApiKey: ""
+  xaiApiKey: ""
+  # StackSpot
+  stackspotClientId: ""
+  stackspotClientKey: ""
+  stackspotRealm: ""
+  stackspotAgentId: ""
+
+# Ollama configuration (if using Ollama provider)
+ollama:
+  enabled: false
+  baseUrl: "http://ollama:11434"
+  model: ""
+
+# Kubernetes Watcher mode (Phase 3)
+watcher:
+  enabled: false
+  # Target deployment to monitor
+  deployment: ""
+  namespace: ""
+  interval: "30s"
+  window: "2h"
+  maxLogLines: 100
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# RBAC for K8s watcher mode
+rbac:
+  create: true
+  # Additional rules beyond the defaults
+  additionalRules: []
+
+service:
+  type: ClusterIP
+  port: 50051
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: chatcli.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Extra environment variables
+extraEnv: []
+# - name: LOG_LEVEL
+#   value: "debug"
+
+# Persistence for sessions
+persistence:
+  enabled: true
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi

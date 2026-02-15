@@ -121,5 +121,36 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 | `CHATCLI_AGENT_PLUGIN_MAX_TURNS` | Limite máximo de turnos do agente no modo `/agent`/`/coder` (padrão: `50`, máximo: `200`). |
 | `CHATCLI_AGENT_PLUGIN_TIMEOUT` | Timeout total do plugin do agente (padrão: `15m`). |
 
+---
 
---------
+## Configuração do Modo Servidor (`chatcli serve`)
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_SERVER_PORT` | Porta do servidor gRPC. | `50051` |
+| `CHATCLI_SERVER_TOKEN` | Token de autenticação para o servidor. Vazio = sem autenticação. | `""` |
+| `CHATCLI_SERVER_TLS_CERT` | Caminho para o certificado TLS do servidor. | `""` |
+| `CHATCLI_SERVER_TLS_KEY` | Caminho para a chave TLS do servidor. | `""` |
+
+---
+
+## Configuração do Cliente Remoto (`chatcli connect`)
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_REMOTE_ADDR` | Endereço do servidor remoto (`host:port`). | `""` |
+| `CHATCLI_REMOTE_TOKEN` | Token de autenticação para conectar ao servidor. | `""` |
+| `CHATCLI_CLIENT_API_KEY` | Sua própria API key/OAuth token, enviada ao servidor. | `""` |
+
+---
+
+## Configuração do K8s Watcher (`chatcli watch` / `chatcli serve --watch-*`)
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_WATCH_DEPLOYMENT` | Nome do deployment Kubernetes a monitorar. | `""` |
+| `CHATCLI_WATCH_NAMESPACE` | Namespace do deployment. | `"default"` |
+| `CHATCLI_WATCH_INTERVAL` | Intervalo entre coletas de dados. Aceita durações Go (ex: `10s`, `1m`). | `"30s"` |
+| `CHATCLI_WATCH_WINDOW` | Janela temporal de dados mantidos em memória. | `"2h"` |
+| `CHATCLI_WATCH_MAX_LOG_LINES` | Número máximo de linhas de log coletadas por pod. | `100` |
+| `CHATCLI_KUBECONFIG` | Caminho para o kubeconfig (opcional, usa default se não definido). | Auto-detectado |
