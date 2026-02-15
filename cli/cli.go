@@ -2377,6 +2377,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getConnectSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/watch") {
+		return cli.getWatchSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -2523,6 +2527,33 @@ func (cli *ChatCLI) getConnectSuggestions(d prompt.Document) []prompt.Suggest {
 	}
 
 	return []prompt.Suggest{}
+}
+
+// getWatchSuggestions returns autocomplete suggestions for /watch subcommands and flags.
+func (cli *ChatCLI) getWatchSuggestions(d prompt.Document) []prompt.Suggest {
+	wordBeforeCursor := d.GetWordBeforeCursor()
+	lineBeforeCursor := d.TextBeforeCursor()
+
+	// Suggest flags after /watch start
+	if strings.Contains(lineBeforeCursor, "/watch start") && strings.HasPrefix(wordBeforeCursor, "-") {
+		flags := []prompt.Suggest{
+			{Text: "--deployment", Description: "Deployment K8s a monitorar (obrigatório)"},
+			{Text: "--namespace", Description: "Namespace do deployment (padrão: default)"},
+			{Text: "--interval", Description: "Intervalo de coleta (ex: 10s, 1m)"},
+			{Text: "--window", Description: "Janela de observação (ex: 1h, 4h)"},
+			{Text: "--max-log-lines", Description: "Máximo de linhas de log por pod"},
+			{Text: "--kubeconfig", Description: "Caminho do kubeconfig"},
+		}
+		return prompt.FilterHasPrefix(flags, wordBeforeCursor, true)
+	}
+
+	// Suggest subcommands
+	subcommands := []prompt.Suggest{
+		{Text: "start", Description: "Iniciar monitoramento K8s (ex: /watch start --deployment myapp)"},
+		{Text: "stop", Description: "Parar o monitoramento K8s"},
+		{Text: "status", Description: "Exibir status do watcher ativo"},
+	}
+	return prompt.FilterHasPrefix(subcommands, wordBeforeCursor, true)
 }
 
 // GetContextCommands retorna a lista de sugestões para comandos com @
