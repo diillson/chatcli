@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.55.0](https://github.com/diillson/chatcli/compare/v1.54.1...v1.55.0) (2026-02-15)
+
+
+### Features
+
+* add gRPC server mode, K8s watcher, and comprehensive documentation  ([#545](https://github.com/diillson/chatcli/issues/545)) ([76bc0b1](https://github.com/diillson/chatcli/commit/76bc0b11c564f0b8d98adc574a4b5f95f11a27ff))
+
 ## [1.54.1](https://github.com/diillson/chatcli/compare/v1.54.0...v1.54.1) (2026-02-14)
 
 
