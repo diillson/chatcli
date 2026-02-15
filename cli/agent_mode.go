@@ -240,6 +240,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		currentQuery += "\n\nContexto Adicional:\n" + additionalContext
 	}
 
+	// Inject K8s watcher context if active
+	if a.cli.WatcherContextFunc != nil {
+		if k8sCtx := a.cli.WatcherContextFunc(); k8sCtx != "" {
+			currentQuery = k8sCtx + "\n\n" + currentQuery
+		}
+	}
+
 	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery})
 
 	// --- 2. O LOOP DE RACIOCÍNIO-AÇÃO (ReAct) ---
@@ -288,12 +295,20 @@ func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
 func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool) error {
 	systemInstruction := i18n.T("agent.system_prompt.oneshot")
 
+	// Inject K8s watcher context if active
+	enrichedQuery := query
+	if a.cli.WatcherContextFunc != nil {
+		if k8sCtx := a.cli.WatcherContextFunc(); k8sCtx != "" {
+			enrichedQuery = k8sCtx + "\n\n" + query
+		}
+	}
+
 	a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
-	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: query})
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: enrichedQuery})
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
-	aiResponse, err := a.cli.Client.SendPrompt(ctx, query, a.cli.history, 0)
+	aiResponse, err := a.cli.Client.SendPrompt(ctx, enrichedQuery, a.cli.history, 0)
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
 		return fmt.Errorf("erro ao obter resposta da IA: %w", err)
