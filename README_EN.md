@@ -260,11 +260,12 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     # CHATCLI_CLIENT_API_KEY=sk-xxx    # Your own API key (forwarded to server)
 
     # K8s Watcher Settings (chatcli watch / chatcli serve --watch-*)
-    # CHATCLI_WATCH_DEPLOYMENT=myapp
+    # CHATCLI_WATCH_DEPLOYMENT=myapp          # Single deployment (legacy)
     # CHATCLI_WATCH_NAMESPACE=production
     # CHATCLI_WATCH_INTERVAL=30s
     # CHATCLI_WATCH_WINDOW=2h
     # CHATCLI_WATCH_MAX_LOG_LINES=100
+    # CHATCLI_WATCH_CONFIG=/path/targets.yaml  # Multi-target (via config YAML)
     # CHATCLI_KUBECONFIG=~/.kube/config
 
 --------
@@ -1083,37 +1084,69 @@ docker run -p 50051:50051 -e LLM_PROVIDER=OPENAI -e OPENAI_API_KEY=sk-xxx chatcl
 ### Kubernetes (Helm)
 
 ```bash
+# Basic
 helm install chatcli deploy/helm/chatcli \
   --set llm.provider=OPENAI \
   --set secrets.openaiApiKey=sk-xxx \
   --set server.token=my-token
+
+# With multi-target watcher + Prometheus
+helm install chatcli deploy/helm/chatcli \
+  --set llm.provider=OPENAI \
+  --set secrets.openaiApiKey=sk-xxx \
+  --set watcher.enabled=true \
+  -f values-targets.yaml
 ```
 
-> Full documentation at [diillson.github.io/chatcli/docs/features/server-mode](https://diillson.github.io/chatcli/docs/features/server-mode/)
+The Helm chart supports `watcher.targets[]` for multi-target, Prometheus scraping, and auto-detects ClusterRole when targets span different namespaces.
+
+> Full documentation at [diillson.github.io/chatcli/docs/getting-started/docker-deployment](https://diillson.github.io/chatcli/docs/getting-started/docker-deployment/)
 
 --------
 
 ## Kubernetes Monitoring (K8s Watcher)
 
-ChatCLI can monitor Kubernetes deployments in real time, collecting metrics, logs, events, and pod status. Use AI to diagnose issues with natural language questions.
+ChatCLI monitors **multiple deployments simultaneously**, collecting metrics, logs, events, pod status, and **Prometheus application metrics**. Use AI to diagnose issues with natural language questions.
 
 ### `chatcli watch` — Local Monitoring
 
 ```bash
+# Single deployment (legacy)
 chatcli watch --deployment myapp --namespace production
-chatcli watch --deployment nginx --interval 10s
-chatcli watch --deployment myapp -p "Is the deployment healthy?"  # one-shot
+
+# Multiple deployments via config YAML
+chatcli watch --config targets.yaml
+
+# One-shot with multiple targets
+chatcli watch --config targets.yaml -p "Which deployments need attention?"
+```
+
+### Config YAML (Multi-Target)
+
+```yaml
+interval: "30s"
+window: "2h"
+maxLogLines: 100
+maxContextChars: 8000
+targets:
+  - deployment: api-gateway
+    namespace: production
+    metricsPort: 9090
+    metricsFilter: ["http_requests_total", "http_request_duration_*"]
+  - deployment: auth-service
+    namespace: production
+  - deployment: worker
+    namespace: batch
 ```
 
 ### Integrated with Server
 
 ```bash
-# Server with watcher (K8s context automatically injected into all prompts)
-chatcli serve --watch-deployment myapp --watch-namespace production
+# Multi-target server (all clients receive context automatically)
+chatcli serve --watch-config targets.yaml
 
-# Remote clients get the context automatically
-chatcli connect myserver:50051
-> Why are the pods restarting?
+# Or legacy single-target
+chatcli serve --watch-deployment myapp --watch-namespace production
 ```
 
 ### What is Collected
@@ -1122,12 +1155,16 @@ chatcli connect myserver:50051
 - Kubernetes events (Warning, Normal)
 - Recent logs from each container
 - CPU/memory metrics (via metrics-server)
-- Deployment rollout status
-- HPA and Ingress (if they exist)
+- **Prometheus application metrics** (from pod `/metrics` endpoints)
+- Deployment rollout status, HPA and Ingress
 
-### Anomaly Detection
+### Context Budget Management
 
-The watcher automatically detects: CrashLoopBackOff (>5 restarts), OOMKilled, PodNotReady, and DeploymentFailing, generating alerts included in the LLM context.
+With multiple targets, the **MultiSummarizer** manages LLM context automatically: unhealthy targets get detailed context, healthy targets get compact one-liners, respecting the `maxContextChars` limit.
+
+### K8s Operator
+
+For Kubernetes environments, the **ChatCLI Operator** manages instances via CRD (`ChatCLIInstance`), supporting multi-target, Prometheus metrics, and automatic RBAC.
 
 > Full documentation at [diillson.github.io/chatcli/docs/features/k8s-watcher](https://diillson.github.io/chatcli/docs/features/k8s-watcher/)
 

@@ -103,7 +103,9 @@ Recomendacoes:
 
 Use esta opcao para que toda a equipe tenha acesso ao monitoramento via servidor centralizado.
 
-### Passo 1: Deploy no Kubernetes com Helm
+### Passo 1: Deploy no Kubernetes
+
+**Via Helm (single-target):**
 
 ```bash
 helm install chatcli deploy/helm/chatcli \
@@ -116,6 +118,37 @@ helm install chatcli deploy/helm/chatcli \
   --set watcher.namespace=production \
   --set watcher.interval=15s
 ```
+
+**Via Operator (multi-target com Prometheus):**
+
+```yaml
+apiVersion: chatcli.diillson.com/v1alpha1
+kind: ChatCLIInstance
+metadata:
+  name: chatcli-prod
+spec:
+  provider: CLAUDEAI
+  apiKeys:
+    name: chatcli-api-keys
+  server:
+    port: 50051
+  watcher:
+    enabled: true
+    interval: "15s"
+    maxContextChars: 8000
+    targets:
+      - deployment: frontend
+        namespace: production
+        metricsPort: 3000
+      - deployment: backend
+        namespace: production
+        metricsPort: 9090
+        metricsFilter: ["http_*", "db_*"]
+      - deployment: worker
+        namespace: batch
+```
+
+Veja [K8s Operator](/docs/features/k8s-operator/) para documentacao completa do CRD.
 
 ### Passo 2: Equipe Conecta
 
@@ -274,20 +307,47 @@ chatcli connect prod-server:50051 --token ops-token \
 
 ### Multiplos Deployments
 
-Rode multiplos watchers em terminais separados:
+Use o modo multi-target para monitorar tudo em uma unica instancia:
 
-```bash
-# Terminal 1
-chatcli watch --deployment frontend --namespace production
-
-# Terminal 2
-chatcli watch --deployment backend --namespace production
-
-# Terminal 3
-chatcli watch --deployment database --namespace production
+```yaml
+# targets.yaml
+interval: "15s"
+window: "2h"
+maxContextChars: 8000
+targets:
+  - deployment: frontend
+    namespace: production
+    metricsPort: 3000
+    metricsFilter: ["next_*", "http_*"]
+  - deployment: backend
+    namespace: production
+    metricsPort: 9090
+    metricsFilter: ["http_requests_*", "db_*", "cache_*"]
+  - deployment: database
+    namespace: production
 ```
 
-Ou use o servidor com watcher para o deployment principal e faca perguntas sobre os demais via contexto.
+```bash
+# Local
+chatcli watch --config targets.yaml
+
+# Ou via servidor (toda a equipe tem acesso)
+chatcli serve --watch-config targets.yaml
+```
+
+A IA recebe contexto detalhado dos targets com problemas e resumos compactos dos saudaveis, respeitando o budget de `maxContextChars`.
+
+### Metricas Prometheus
+
+Quando `metricsPort` esta configurado, o watcher scrapa automaticamente o endpoint `/metrics` dos pods e inclui as metricas na analise. Use `metricsFilter` com **glob patterns** para selecionar apenas metricas relevantes:
+
+```yaml
+metricsFilter:
+  - "http_requests_total"        # Metrica exata
+  - "http_request_duration_*"    # Todas de duracao HTTP
+  - "process_*"                  # Metricas de processo
+  - "*_errors_total"             # Qualquer contador de erros
+```
 
 ---
 
@@ -295,8 +355,11 @@ Ou use o servidor com watcher para o deployment principal e faca perguntas sobre
 
 - [ ] Verificar acesso ao cluster (`kubectl get pods`)
 - [ ] Verificar permissoes RBAC para pods, logs, eventos
-- [ ] Escolher modo: local (`chatcli watch`) ou servidor (`chatcli serve --watch-deployment`)
+- [ ] Escolher modo: local (`chatcli watch`) ou servidor (`chatcli serve`)
+- [ ] Definir targets: single (`--deployment`) ou multi (`--config targets.yaml`)
+- [ ] (Opcional) Configurar `metricsPort` para Prometheus scraping
 - [ ] Configurar intervalo e janela adequados ao cenario
+- [ ] Ajustar `maxContextChars` se necessario (padrao: 8000)
 - [ ] Testar com pergunta simples: "O deployment esta saudavel?"
 - [ ] (Opcional) Integrar com alertas para analise automatica
 - [ ] (Opcional) Distribuir acesso para a equipe via token

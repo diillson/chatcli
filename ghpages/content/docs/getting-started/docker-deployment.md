@@ -142,7 +142,7 @@ helm install chatcli deploy/helm/chatcli \
   --set server.token=meu-token-secreto
 ```
 
-### Instalacao com K8s Watcher
+### Instalacao com K8s Watcher (Single-Target)
 
 ```bash
 helm install chatcli deploy/helm/chatcli \
@@ -153,10 +153,41 @@ helm install chatcli deploy/helm/chatcli \
   --set watcher.namespace=production
 ```
 
+### Instalacao com Multi-Target + Prometheus
+
+Para monitorar multiplos deployments com metricas Prometheus, use um `values.yaml`:
+
+```yaml
+# values-multi.yaml
+llm:
+  provider: CLAUDEAI
+secrets:
+  anthropicApiKey: sk-ant-xxx
+watcher:
+  enabled: true
+  interval: "15s"
+  maxContextChars: 8000
+  targets:
+    - deployment: api-gateway
+      namespace: production
+      metricsPort: 9090
+      metricsFilter: ["http_requests_*", "http_request_duration_*"]
+    - deployment: auth-service
+      namespace: production
+      metricsPort: 9090
+    - deployment: worker
+      namespace: batch
+```
+
+```bash
+helm install chatcli deploy/helm/chatcli -f values-multi.yaml
+```
+
 O chart automaticamente:
 - Cria ServiceAccount com RBAC para o watcher ler pods, eventos, logs
-- Adiciona flags `--watch-deployment` e `--watch-namespace` ao container
-- Configura as variaveis de ambiente necessarias
+- **Auto-detecta multi-namespace**: se targets estao em namespaces diferentes, usa `ClusterRole` em vez de `Role`
+- Gera ConfigMap `<name>-watch-config` com o YAML multi-target
+- Monta o config como volume e passa `--watch-config` ao container
 
 ### Valores do Helm Chart
 
@@ -213,11 +244,23 @@ O chart automaticamente:
 | Valor | Descricao | Padrao |
 |-------|-----------|--------|
 | `watcher.enabled` | Habilitar o watcher | `false` |
-| `watcher.deployment` | Deployment a monitorar | `""` |
-| `watcher.namespace` | Namespace do deployment | `""` |
+| `watcher.targets` | Lista de targets multi-deployment (ver abaixo) | `[]` |
+| `watcher.deployment` | Deployment unico - legado | `""` |
+| `watcher.namespace` | Namespace do deployment - legado | `""` |
 | `watcher.interval` | Intervalo de coleta | `30s` |
 | `watcher.window` | Janela de observacao | `2h` |
 | `watcher.maxLogLines` | Linhas de log por pod | `100` |
+| `watcher.maxContextChars` | Budget de contexto LLM | `8000` |
+
+**Campos de cada target** (`watcher.targets[].`):
+
+| Campo | Descricao | Obrigatorio |
+|-------|-----------|:-----------:|
+| `deployment` | Nome do deployment | Sim |
+| `namespace` | Namespace (padrao: `default`) | Nao |
+| `metricsPort` | Porta Prometheus (0 = desabilitado) | Nao |
+| `metricsPath` | Path HTTP das metricas | Nao (`/metrics`) |
+| `metricsFilter` | Filtros glob para metricas | Nao |
 
 #### Persistencia
 
@@ -338,6 +381,8 @@ helm rollback chatcli 1
 
 ## Exemplo Completo: Producao
 
+### Single-Target (Legado)
+
 ```bash
 helm install chatcli deploy/helm/chatcli \
   --namespace chatcli --create-namespace \
@@ -354,6 +399,55 @@ helm install chatcli deploy/helm/chatcli \
   --set resources.requests.memory=256Mi \
   --set resources.limits.memory=1Gi
 ```
+
+### Multi-Target com Prometheus (Recomendado)
+
+```yaml
+# values-prod.yaml
+llm:
+  provider: CLAUDEAI
+secrets:
+  existingSecret: chatcli-llm-keys
+server:
+  token: super-secret-token
+tls:
+  enabled: true
+  existingSecret: chatcli-tls-certs
+watcher:
+  enabled: true
+  interval: "15s"
+  maxContextChars: 10000
+  targets:
+    - deployment: api-gateway
+      namespace: production
+      metricsPort: 9090
+      metricsFilter: ["http_requests_*", "http_request_duration_*"]
+    - deployment: auth-service
+      namespace: production
+      metricsPort: 9090
+    - deployment: payment-service
+      namespace: production
+      metricsPort: 9090
+      metricsFilter: ["payment_*", "stripe_*"]
+    - deployment: worker
+      namespace: batch
+persistence:
+  enabled: true
+  size: 5Gi
+resources:
+  requests:
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+```
+
+```bash
+helm install chatcli deploy/helm/chatcli \
+  --namespace chatcli --create-namespace \
+  -f values-prod.yaml
+```
+
+> Quando targets estao em namespaces diferentes (ex: `production` e `batch`), o chart cria automaticamente um `ClusterRole` em vez de `Role` namespace-scoped.
 
 ---
 
