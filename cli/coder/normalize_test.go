@@ -356,7 +356,8 @@ func TestGetSuggestedPattern(t *testing.T) {
 		want     string
 	}{
 		{"json read", "@coder", `{"cmd":"read","args":{"file":"x"}}`, "@coder read"},
-		{"cli exec", "@coder", `exec --cmd ls`, "@coder exec"},
+		{"cli exec returns empty to prevent blanket allow", "@coder", `exec --cmd ls`, ""},
+		{"json exec returns empty", "@coder", `{"cmd":"exec","args":{"cmd":"ls -la"}}`, ""},
 		{"empty args", "@coder", "", "@coder"},
 		{"bypass attempt", "@coder", `{"args":{"file":"x"}}`, "@coder"},
 	}

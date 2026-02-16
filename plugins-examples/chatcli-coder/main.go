@@ -276,7 +276,7 @@ func createBackup(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path+".bak", input, 0644)
+	return os.WriteFile(path+".bak", input, 0600)
 }
 
 func handleRead(args []string) {
@@ -351,11 +351,11 @@ func handleWrite(args []string) {
 		fatalf("Erro decode: %v", err)
 	}
 
-	_ = os.MkdirAll(filepath.Dir(*file), 0755)
+	_ = os.MkdirAll(filepath.Dir(*file), 0700)
 	_ = createBackup(*file)
 
 	if *appendMode {
-		f, err := os.OpenFile(*file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		f, err := os.OpenFile(*file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
 			fatalf("Erro escrita: %v", err)
 		}
@@ -364,7 +364,7 @@ func handleWrite(args []string) {
 			fatalf("Erro escrita: %v", err)
 		}
 	} else {
-		if err := os.WriteFile(*file, data, 0644); err != nil {
+		if err := os.WriteFile(*file, data, 0600); err != nil {
 			fatalf("Erro escrita: %v", err)
 		}
 	}
@@ -417,7 +417,7 @@ func handlePatch(args []string) {
 	}
 	_ = createBackup(*file)
 	newContent := strings.Replace(content, searchStr, replaceStr, 1)
-	if err := os.WriteFile(*file, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(*file, []byte(newContent), 0600); err != nil {
 		fatalf("Erro escrita: %v", err)
 	}
 	fmt.Printf("✅ Patch aplicado em '%s'.\n", *file)
@@ -586,7 +586,7 @@ func handleRollback(args []string) {
 	if err != nil {
 		fatalf("Backup error: %v", err)
 	}
-	_ = os.WriteFile(*file, c, 0644)
+	_ = os.WriteFile(*file, c, 0600)
 	fmt.Println("✅ Rollback ok.")
 }
 
@@ -993,27 +993,92 @@ func splitCSV(input string) []string {
 	return out
 }
 
+// isUnsafeCommand checks if a shell command matches known dangerous patterns.
+// This mirrors the comprehensive pattern list from cli/agent/command_validator.go
+// to provide defense-in-depth at the plugin level.
 func isUnsafeCommand(cmd string, allowSudo bool) (bool, string) {
-	lower := strings.ToLower(cmd)
 	dangerPatterns := []string{
-		`\brm\s+-rf\s+/`,
-		`\brm\s+-rf\s+~`,
-		`\bmkfs\b`,
-		`\bdd\b`,
-		`\bshutdown\b`,
-		`\breboot\b`,
-		`\bpoweroff\b`,
+		// Destructive filesystem operations
+		`(?i)rm\s+-rf\s+`,
+		`(?i)rm\s+--no-preserve-root`,
+		`(?i)dd\s+if=`,
+		`(?i)mkfs\w*\s+`,
+		`(?i)shutdown(\s+|$)`,
+		`(?i)reboot(\s+|$)`,
+		`(?i)init\s+0`,
+		`(?i)\bpoweroff\b`,
+		// Remote code execution / download-and-exec
+		`(?i)curl\s+[^\|;]*\|\s*sh`,
+		`(?i)wget\s+[^\|;]*\|\s*sh`,
+		`(?i)curl\s+[^\|;]*\|\s*bash`,
+		`(?i)wget\s+[^\|;]*\|\s*bash`,
+		// Privilege escalation
+		`(?i)\bdrop\s+database\b`,
+		`(?i)\buserdel\b`,
+		`(?i)\bchmod\s+777\s+/.*`,
+		`(?i)\bchown\s+-R\s+.*\s+/`,
+		// Inline code execution
+		`(?i)\bbase64\b.*\|\s*(sh|bash|zsh|dash)`,
+		`(?i)\bpython[23]?\s+-c\b`,
+		`(?i)\bperl\s+-e\b`,
+		`(?i)\bruby\s+-e\b`,
+		`(?i)\bnode\s+-e\b`,
+		`(?i)\bphp\s+-r\b`,
+		`(?i)\beval\s+`,
+		// Command substitution with downloaders
+		`(?i)\$\(\s*curl`,
+		`(?i)\$\(\s*wget`,
+		"(?i)`\\s*curl",
+		"(?i)`\\s*wget",
+		// Writing to system paths
+		`(?i)>\s*/etc/`,
+		`(?i)>\s*/dev/[sh]d`,
+		`(?i)>\s*/proc/`,
+		`(?i)\btee\s+/etc/`,
+		// Reverse shells / network abuse
+		`(?i)\bsource\s+/dev/tcp`,
+		`(?i)/dev/tcp/`,
+		`(?i)\bexport\s+.*PATH\s*=`,
+		`(?i)\bnc\b.*-[el]`,
+		`(?i)\bncat\b.*-[el]`,
+		// Dangerous find/xargs
+		`(?i)\bxargs\b.*\b(rm|del|shutdown|reboot|mkfs)\b`,
+		`(?i)\bfind\b.*-exec\b.*(rm|del|shutdown|reboot)\b`,
+		// System administration
+		`(?i)\bcrontab\s+-r\b`,
+		`(?i)\biptables\s+-F\b`,
+		`(?i)\bsysctl\s+-w\b`,
+		`(?i)\bkillall\b`,
+		`(?i)\bpkill\s+-9\b`,
+		`(?i)\bexec\s+\d*[<>]`,
+		// Kernel modules
+		`(?i)\binsmod\b`,
+		`(?i)\bmodprobe\b`,
+		`(?i)\brmmod\b`,
+		`(?i)\bumount\s+-[lf]`,
+		// Shell evasion techniques
+		`(?i)\bsource\s+/dev/`,
+		`(?i)\benv\b.*\|\s*(sh|bash)`,
+		`\$\{[^}]*[;|&][^}]*\}`,
+		`(?i)\$\(\s*(bash|sh|zsh|dash)\b`,
+		`<\(`,
+		`>\(`,
+		`(?i)\b[A-Z_]+=.*;\s*(sh|bash|zsh)\b`,
+		// Kill init
 		`\bkill\s+-9\s+1\b`,
 		`\b:>\s*/`,
 	}
 	for _, p := range dangerPatterns {
-		re := regexp.MustCompile(p)
-		if re.MatchString(lower) {
-			return true, fmt.Sprintf("Padrão perigoso detectado (%s)", p)
+		re, err := regexp.Compile(p)
+		if err != nil {
+			continue
+		}
+		if re.MatchString(cmd) {
+			return true, fmt.Sprintf("Dangerous pattern detected (%s)", p)
 		}
 	}
-	if strings.Contains(lower, "sudo ") && !allowSudo {
-		return true, "Uso de sudo bloqueado (use --allow-sudo)"
+	if !allowSudo && regexp.MustCompile(`(?i)\bsudo\b`).MatchString(cmd) {
+		return true, "sudo usage blocked (use --allow-sudo)"
 	}
 	return false, ""
 }
@@ -1258,7 +1323,7 @@ func applyHunksToFile(path string, hunks []diffHunk) {
 	}
 
 	_ = createBackup(path)
-	if err := os.WriteFile(path, []byte(newText), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(newText), 0600); err != nil {
 		fatalf("Erro escrita: %v", err)
 	}
 	fmt.Printf("✅ Diff aplicado em '%s'.\n", path)

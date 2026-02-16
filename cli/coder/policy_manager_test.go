@@ -1,6 +1,7 @@
 package coder
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,6 +32,67 @@ func TestMatchesWithBoundary(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
+}
+
+func TestGetSuggestedPattern_ExecReturnsEmpty(t *testing.T) {
+	tests := []struct {
+		name     string
+		toolName string
+		args     string
+		want     string
+	}{
+		{"cli exec returns empty", "@coder", "exec --cmd ls", ""},
+		{"json exec returns empty", "@coder", `{"cmd":"exec","args":{"cmd":"ls -la"}}`, ""},
+		{"EXEC uppercase returns empty", "@coder", "EXEC --cmd pwd", ""},
+		{"read still works", "@coder", `{"cmd":"read","args":{"file":"x"}}`, "@coder read"},
+		{"write still works", "@coder", "write --file test.go", "@coder write"},
+		{"empty args returns toolName", "@coder", "", "@coder"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := GetSuggestedPattern(tc.toolName, tc.args)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPolicyManager_ExecAlwaysAsks(t *testing.T) {
+	pm := &PolicyManager{
+		Rules: []Rule{
+			{Pattern: "@coder exec", Action: ActionAsk},
+			{Pattern: "@coder read", Action: ActionAllow},
+		},
+		logger: zap.NewNop(),
+	}
+
+	// exec should ask regardless
+	result := pm.Check("@coder", `{"cmd":"exec","args":{"cmd":"ls -la"}}`)
+	assert.Equal(t, ActionAsk, result)
+
+	// read should still allow
+	result = pm.Check("@coder", `{"cmd":"read","args":{"file":"main.go"}}`)
+	assert.Equal(t, ActionAllow, result)
+}
+
+func TestAddRule_RejectsEmptyPattern(t *testing.T) {
+	pm := &PolicyManager{
+		Rules:  []Rule{},
+		logger: zap.NewNop(),
+	}
+	err := pm.AddRule("", ActionAllow)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty")
+}
+
+func TestAddRule_RejectsLongPattern(t *testing.T) {
+	pm := &PolicyManager{
+		Rules:  []Rule{},
+		logger: zap.NewNop(),
+	}
+	longPattern := strings.Repeat("x", 501)
+	err := pm.AddRule(longPattern, ActionAllow)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "too long")
 }
 
 func TestPolicyManager_Check_BoundaryMatching(t *testing.T) {

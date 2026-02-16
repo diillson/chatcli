@@ -98,9 +98,17 @@ func (pm *PolicyManager) AddRule(pattern string, action Action) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	pm.logger.Info("Updating security policy", zap.String("pattern", pattern), zap.String("action", string(action)))
-
 	pattern = strings.TrimSpace(pattern)
+
+	// Reject empty or excessively long patterns
+	if pattern == "" {
+		return fmt.Errorf("empty policy pattern rejected")
+	}
+	if len(pattern) > 500 {
+		return fmt.Errorf("policy pattern too long (%d chars)", len(pattern))
+	}
+
+	pm.logger.Info("Updating security policy", zap.String("pattern", pattern), zap.String("action", string(action)))
 
 	updated := false
 	for i, rule := range pm.Rules {
@@ -203,6 +211,8 @@ func (pm *PolicyManager) defaultRules() {
 		{Pattern: "@coder git-log", Action: ActionAllow},
 		{Pattern: "@coder git-changed", Action: ActionAllow},
 		{Pattern: "@coder git-branch", Action: ActionAllow},
+		// exec always requires per-command approval (never auto-allow)
+		{Pattern: "@coder exec", Action: ActionAsk},
 	}
 	_ = pm.save()
 }
@@ -276,12 +286,20 @@ func mergeRules(globalRules, localRules []Rule) []Rule {
 	return merged
 }
 
+// GetSuggestedPattern returns a suggested policy pattern for the given tool
+// invocation. For exec commands, it returns empty string to prevent
+// "Allow Always" from being offered -- exec should always require per-command
+// approval since any shell command could be destructive.
 func GetSuggestedPattern(toolName, args string) string {
 	sub, _ := NormalizeCoderArgs(args)
-	if sub != "" {
-		return fmt.Sprintf("%s %s", toolName, sub)
+	if sub == "" {
+		return toolName
 	}
-	return toolName
+	// exec commands must NEVER get a blanket "Allow Always" pattern
+	if strings.EqualFold(sub, "exec") {
+		return ""
+	}
+	return fmt.Sprintf("%s %s", toolName, sub)
 }
 
 func (pm *PolicyManager) ActivePolicyPath() string {
