@@ -1,0 +1,68 @@
+apiVersion: chatcli.diillson.com/v1alpha1
+kind: ChatCLIInstance
+metadata:
+  name: chatcli-sample
+  namespace: default
+spec:
+  replicas: 1
+  provider: CLAUDEAI
+  model: claude-sonnet-4-5
+  image:
+    repository: ghcr.io/diillson/chatcli
+    tag: latest
+    pullPolicy: IfNotPresent
+  server:
+    port: 50051
+    # tls:
+    #   enabled: true
+    #   secretName: chatcli-tls
+  # Single-target watcher (legacy):
+  # watcher:
+  #   enabled: true
+  #   deployment: my-app
+  #   namespace: production
+  #   interval: "30s"
+  #   window: "2h"
+  #   maxLogLines: 100
+  #
+  # Multi-target watcher:
+  # watcher:
+  #   enabled: true
+  #   interval: "30s"
+  #   window: "2h"
+  #   maxLogLines: 100
+  #   maxContextChars: 8000
+  #   targets:
+  #     - deployment: api-gateway
+  #       namespace: production
+  #       metricsPort: 9090
+  #       metricsFilter: ["http_requests_total", "http_request_duration_*"]
+  #     - deployment: auth-service
+  #       namespace: production
+  #       metricsPort: 9090
+  #     - deployment: worker
+  #       namespace: batch
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # persistence:
+  #   enabled: true
+  #   size: 1Gi
+  apiKeys:
+    name: chatcli-api-keys
+---
+# Secret with API keys (create before applying the ChatCLIInstance)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: chatcli-api-keys
+  namespace: default
+type: Opaque
+stringData:
+  ANTHROPIC_API_KEY: "<your-anthropic-api-key>"
+  # OPENAI_API_KEY: "<your-openai-api-key>"
+  # GOOGLE_AI_API_KEY: "<your-google-api-key>"
