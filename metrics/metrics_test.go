@@ -103,11 +103,7 @@ func TestLLMMetricsRegistered(t *testing.T) {
 
 func TestMetricsServerStartStop(t *testing.T) {
 	logger := zap.NewNop()
-	srv := NewServer(0, logger) // port 0 to pick a random free port
-
-	// We can't easily test port 0 with our current implementation since
-	// we format it as ":0", so let's use a high random port
-	srv = NewServer(19876, logger)
+	srv := NewServer(19876, logger)
 	srv.Start()
 
 	// Give it time to start
