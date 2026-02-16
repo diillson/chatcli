@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.57.2](https://github.com/diillson/chatcli/compare/v1.57.1...v1.57.2) (2026-02-16)
+
+
+### Bug Fixes
+
+* update Dockerfiles to Go 1.25 matching go.mod requirement ([#555](https://github.com/diillson/chatcli/issues/555)) ([27d621f](https://github.com/diillson/chatcli/commit/27d621fe6b7c7e3df9f24ccae4ab1bfaddba8723))
+
 ## [1.57.1](https://github.com/diillson/chatcli/compare/v1.57.0...v1.57.1) (2026-02-16)
 
 
