@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.57.1](https://github.com/diillson/chatcli/compare/v1.57.0...v1.57.1) (2026-02-16)
+
+
+### Bug Fixes
+
+* add GHCR Docker image publishing and update image defaults ([#553](https://github.com/diillson/chatcli/issues/553)) ([f33f33e](https://github.com/diillson/chatcli/commit/f33f33eca981faaf3ab6666151434525519d0592))
+
 ## [1.57.0](https://github.com/diillson/chatcli/compare/v1.56.1...v1.57.0) (2026-02-16)
 
 
