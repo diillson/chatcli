@@ -36,6 +36,7 @@ type ServeOptions struct {
 	WatchWindow     time.Duration
 	WatchMaxLogs    int
 	WatchKubeconfig string
+	WatchConfig     string // path to multi-target watch config YAML
 }
 
 // RunServe executes the 'chatcli serve' subcommand.
@@ -57,6 +58,7 @@ func RunServe(args []string, llmMgr manager.LLMManager, logger *zap.Logger) erro
 	fs.DurationVar(&opts.WatchWindow, "watch-window", getEnvDuration("CHATCLI_WATCH_WINDOW", 2*time.Hour), "Watcher observation window")
 	fs.IntVar(&opts.WatchMaxLogs, "watch-max-log-lines", getEnvInt("CHATCLI_WATCH_MAX_LOG_LINES", 100), "Max log lines per pod")
 	fs.StringVar(&opts.WatchKubeconfig, "watch-kubeconfig", os.Getenv("CHATCLI_KUBECONFIG"), "Path to kubeconfig for watcher")
+	fs.StringVar(&opts.WatchConfig, "watch-config", os.Getenv("CHATCLI_WATCH_CONFIG"), "Path to multi-target watch config YAML")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -94,56 +96,74 @@ func RunServe(args []string, llmMgr manager.LLMManager, logger *zap.Logger) erro
 
 	srv := server.New(cfg, llmMgr, sessionMgr, logger)
 
-	// Start K8s watcher if configured
-	if opts.WatchDeployment != "" {
-		watchCfg := k8s.WatchConfig{
-			Deployment:  opts.WatchDeployment,
-			Namespace:   opts.WatchNamespace,
-			Interval:    opts.WatchInterval,
-			Window:      opts.WatchWindow,
-			MaxLogLines: opts.WatchMaxLogs,
-			Kubeconfig:  opts.WatchKubeconfig,
+	// Start K8s watcher(s) if configured
+	if opts.WatchConfig != "" || opts.WatchDeployment != "" {
+		var multiCfg k8s.MultiWatchConfig
+
+		if opts.WatchConfig != "" {
+			mcfg, err := k8s.LoadMultiWatchConfig(opts.WatchConfig)
+			if err != nil {
+				return fmt.Errorf("failed to load watch config: %w", err)
+			}
+			if opts.WatchKubeconfig != "" {
+				mcfg.Kubeconfig = opts.WatchKubeconfig
+			}
+			multiCfg = *mcfg
+		} else {
+			// Legacy single-target mode (backwards compatible)
+			watchCfg := k8s.WatchConfig{
+				Deployment:  opts.WatchDeployment,
+				Namespace:   opts.WatchNamespace,
+				Interval:    opts.WatchInterval,
+				Window:      opts.WatchWindow,
+				MaxLogLines: opts.WatchMaxLogs,
+				Kubeconfig:  opts.WatchKubeconfig,
+			}
+			multiCfg = k8s.SingleTargetToMulti(watchCfg)
 		}
 
-		watcher, err := k8s.NewResourceWatcher(watchCfg, logger)
+		mw, err := k8s.NewMultiWatcher(multiCfg, logger)
 		if err != nil {
 			return fmt.Errorf("failed to create K8s watcher: %w", err)
 		}
 
-		store := watcher.GetStore()
-		summarizer := k8s.NewSummarizer(store)
+		stores := mw.GetStores()
+		multiSum := k8s.NewMultiSummarizer(stores, multiCfg.MaxContextChars)
+
 		srv.SetWatcher(server.WatcherConfig{
-			ContextFunc: summarizer.GenerateContext,
-			StatusFunc:  summarizer.GenerateStatusSummary,
+			ContextFunc: multiSum.GenerateContext,
+			StatusFunc:  multiSum.GenerateStatusSummary,
 			StatsFunc: func() (int, int, int) {
-				stats := store.Stats()
-				snap, ok := store.LatestSnapshot()
-				podCount := 0
-				if ok {
-					podCount = len(snap.Pods)
+				totalAlerts, totalSnapshots, totalPods := 0, 0, 0
+				for _, store := range stores {
+					stats := store.Stats()
+					totalAlerts += stats.AlertCount
+					totalSnapshots += stats.SnapshotCount
+					if snap, ok := store.LatestSnapshot(); ok {
+						totalPods += len(snap.Pods)
+					}
 				}
-				return stats.AlertCount, stats.SnapshotCount, podCount
+				return totalAlerts, totalSnapshots, totalPods
 			},
-			Deployment: opts.WatchDeployment,
-			Namespace:  opts.WatchNamespace,
+			Deployment: fmt.Sprintf("%d targets", mw.TargetCount()),
+			Namespace:  "multi",
 		})
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
 		go func() {
-			logger.Info("Starting K8s watcher alongside gRPC server",
-				zap.String("deployment", opts.WatchDeployment),
-				zap.String("namespace", opts.WatchNamespace),
-				zap.Duration("interval", opts.WatchInterval),
+			logger.Info("Starting K8s multi-watcher",
+				zap.Int("targets", mw.TargetCount()),
+				zap.Duration("interval", multiCfg.Interval),
 			)
-			if err := watcher.Start(ctx); err != nil && err != context.Canceled {
-				logger.Error("K8s watcher stopped with error", zap.Error(err))
+			if err := mw.Start(ctx); err != nil && err != context.Canceled {
+				logger.Error("K8s multi-watcher stopped with error", zap.Error(err))
 			}
 		}()
 
-		fmt.Printf("K8s watcher active: deployment/%s in namespace/%s (interval: %s)\n",
-			opts.WatchDeployment, opts.WatchNamespace, opts.WatchInterval)
+		fmt.Printf("K8s watcher active: %d targets (interval: %s)\n",
+			mw.TargetCount(), multiCfg.Interval)
 	}
 
 	return srv.Start()
@@ -173,7 +193,8 @@ Flags:
   --model <name>      Default LLM model
 
   K8s Watcher (optional, enables K8s context injection for all remote clients):
-  --watch-deployment <name>   Deployment to monitor (env: CHATCLI_WATCH_DEPLOYMENT)
+  --watch-config <path>       Multi-target watch config YAML (env: CHATCLI_WATCH_CONFIG)
+  --watch-deployment <name>   Single deployment to monitor (env: CHATCLI_WATCH_DEPLOYMENT)
   --watch-namespace <ns>      Namespace (default: "default", env: CHATCLI_WATCH_NAMESPACE)
   --watch-interval <dur>      Collection interval (default: 30s, env: CHATCLI_WATCH_INTERVAL)
   --watch-window <dur>        Observation window (default: 2h, env: CHATCLI_WATCH_WINDOW)
@@ -185,7 +206,9 @@ Examples:
   chatcli serve --port 8080 --token mysecret
   chatcli serve --tls-cert cert.pem --tls-key key.pem
 
-  # Server with K8s watcher (injects K8s context into all remote client prompts)
+  # Server with single-target K8s watcher
   chatcli serve --watch-deployment myapp --watch-namespace production
-  chatcli serve --token secret --watch-deployment nginx --watch-interval 10s`)
+
+  # Server with multi-target K8s watcher (config file)
+  chatcli serve --watch-config targets.yaml`)
 }
