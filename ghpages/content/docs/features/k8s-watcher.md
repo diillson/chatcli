@@ -67,7 +67,7 @@ Clientes conectados via `chatcli connect` recebem o contexto K8s automaticamente
 interval: "30s"           # Intervalo de coleta
 window: "2h"              # Janela temporal de dados mantidos
 maxLogLines: 100          # Linhas de log por pod por ciclo
-maxContextChars: 8000     # Budget maximo de caracteres para contexto LLM
+maxContextChars: 32000     # Budget maximo de caracteres para contexto LLM
 
 targets:
   - deployment: api-gateway

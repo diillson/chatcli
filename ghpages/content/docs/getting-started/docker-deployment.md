@@ -166,7 +166,7 @@ secrets:
 watcher:
   enabled: true
   interval: "15s"
-  maxContextChars: 8000
+  maxContextChars: 32000
   targets:
     - deployment: api-gateway
       namespace: production
@@ -250,7 +250,7 @@ O chart automaticamente:
 | `watcher.interval` | Intervalo de coleta | `30s` |
 | `watcher.window` | Janela de observacao | `2h` |
 | `watcher.maxLogLines` | Linhas de log por pod | `100` |
-| `watcher.maxContextChars` | Budget de contexto LLM | `8000` |
+| `watcher.maxContextChars` | Budget de contexto LLM | `32000` |
 
 **Campos de cada target** (`watcher.targets[].`):
 

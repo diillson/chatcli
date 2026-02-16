@@ -135,7 +135,7 @@ spec:
   watcher:
     enabled: true
     interval: "15s"
-    maxContextChars: 8000
+    maxContextChars: 32000
     targets:
       - deployment: frontend
         namespace: production
@@ -313,7 +313,7 @@ Use o modo multi-target para monitorar tudo em uma unica instancia:
 # targets.yaml
 interval: "15s"
 window: "2h"
-maxContextChars: 8000
+maxContextChars: 32000
 targets:
   - deployment: frontend
     namespace: production
@@ -359,7 +359,7 @@ metricsFilter:
 - [ ] Definir targets: single (`--deployment`) ou multi (`--config targets.yaml`)
 - [ ] (Opcional) Configurar `metricsPort` para Prometheus scraping
 - [ ] Configurar intervalo e janela adequados ao cenario
-- [ ] Ajustar `maxContextChars` se necessario (padrao: 8000)
+- [ ] Ajustar `maxContextChars` se necessario (padrao: 32000)
 - [ ] Testar com pergunta simples: "O deployment esta saudavel?"
 - [ ] (Opcional) Integrar com alertas para analise automatica
 - [ ] (Opcional) Distribuir acesso para a equipe via token

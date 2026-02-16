@@ -1092,7 +1092,7 @@ func TestDeepCopy_WatcherWithTargets(t *testing.T) {
 		Interval:        "30s",
 		Window:          "1h",
 		MaxLogLines:     100,
-		MaxContextChars: 8000,
+		MaxContextChars: 32000,
 		Targets: []chatcliv1alpha1.WatchTargetSpec{
 			{
 				Deployment:    "api",

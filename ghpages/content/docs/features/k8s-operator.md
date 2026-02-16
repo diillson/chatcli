@@ -73,7 +73,7 @@ spec:
     interval: "30s"
     window: "2h"
     maxLogLines: 100
-    maxContextChars: 8000
+    maxContextChars: 32000
 
     # Multi-target (recomendado)
     targets:
@@ -153,7 +153,7 @@ spec:
 | `interval` | string | Nao | `"30s"` | Intervalo de coleta |
 | `window` | string | Nao | `"2h"` | Janela de observacao |
 | `maxLogLines` | int32 | Nao | `100` | Max linhas de log por pod |
-| `maxContextChars` | int32 | Nao | `8000` | Budget de contexto LLM |
+| `maxContextChars` | int32 | Nao | `32000` | Budget de contexto LLM |
 
 ### WatchTargetSpec
 
@@ -243,7 +243,7 @@ spec:
     enabled: true
     interval: "30s"
     window: "2h"
-    maxContextChars: 8000
+    maxContextChars: 32000
     targets:
       - deployment: api-gateway
         namespace: production

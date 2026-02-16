@@ -68,7 +68,7 @@ func LoadMultiWatchConfig(path string) (*MultiWatchConfig, error) {
 		cfg.MaxLogLines = 100
 	}
 	if cfg.MaxContextChars <= 0 {
-		cfg.MaxContextChars = 8000
+		cfg.MaxContextChars = 32000
 	}
 
 	for i, t := range cfg.Targets {
@@ -99,6 +99,6 @@ func SingleTargetToMulti(cfg WatchConfig) MultiWatchConfig {
 		Window:          cfg.Window,
 		MaxLogLines:     cfg.MaxLogLines,
 		Kubeconfig:      cfg.Kubeconfig,
-		MaxContextChars: 8000,
+		MaxContextChars: 32000,
 	}
 }

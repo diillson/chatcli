@@ -179,7 +179,7 @@ type MultiSummarizer struct {
 // NewMultiSummarizer creates a summarizer for multi-deployment watching.
 func NewMultiSummarizer(stores map[string]*ObservabilityStore, maxChars int) *MultiSummarizer {
 	if maxChars <= 0 {
-		maxChars = 8000
+		maxChars = 32000
 	}
 	return &MultiSummarizer{
 		stores:   stores,

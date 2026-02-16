@@ -33,7 +33,7 @@ func NewMultiWatcher(cfg MultiWatchConfig, logger *zap.Logger) (*MultiWatcher, e
 		return nil, fmt.Errorf("no watch targets configured")
 	}
 	if cfg.MaxContextChars <= 0 {
-		cfg.MaxContextChars = 8000
+		cfg.MaxContextChars = 32000
 	}
 
 	restConfig, err := buildKubeConfig(cfg.Kubeconfig)

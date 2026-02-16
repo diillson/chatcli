@@ -134,7 +134,7 @@ type WatcherSpec struct {
 	MaxLogLines int32 `json:"maxLogLines,omitempty"`
 
 	// MaxContextChars is the maximum characters for LLM context budget.
-	// +kubebuilder:default=8000
+	// +kubebuilder:default=32000
 	MaxContextChars int32 `json:"maxContextChars,omitempty"`
 }
 

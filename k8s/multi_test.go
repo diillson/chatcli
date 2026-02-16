@@ -500,12 +500,12 @@ func TestMultiSummarizerGenerateContext_NoDataCollected(t *testing.T) {
 }
 
 func TestMultiSummarizerGenerateContext_DefaultMaxChars(t *testing.T) {
-	// maxChars <= 0 should default to 8000
+	// maxChars <= 0 should default to 32000
 	ms := NewMultiSummarizer(map[string]*ObservabilityStore{}, 0)
-	assert.Equal(t, 8000, ms.maxChars)
+	assert.Equal(t, 32000, ms.maxChars)
 
 	ms2 := NewMultiSummarizer(map[string]*ObservabilityStore{}, -100)
-	assert.Equal(t, 8000, ms2.maxChars)
+	assert.Equal(t, 32000, ms2.maxChars)
 }
 
 // --- GenerateStatusSummary ---
@@ -815,7 +815,7 @@ targets:
 	assert.Equal(t, 30*time.Second, cfg.Interval)
 	assert.Equal(t, 2*time.Hour, cfg.Window)
 	assert.Equal(t, 100, cfg.MaxLogLines)
-	assert.Equal(t, 8000, cfg.MaxContextChars)
+	assert.Equal(t, 32000, cfg.MaxContextChars)
 	assert.Equal(t, "default", cfg.Targets[0].Namespace)
 }
 
@@ -896,7 +896,7 @@ func TestMultiSingleTargetToMulti(t *testing.T) {
 	assert.Equal(t, 1*time.Hour, multi.Window)
 	assert.Equal(t, 200, multi.MaxLogLines)
 	assert.Equal(t, "/home/user/.kube/config", multi.Kubeconfig)
-	assert.Equal(t, 8000, multi.MaxContextChars)
+	assert.Equal(t, 32000, multi.MaxContextChars)
 }
 
 func TestMultiSingleTargetToMulti_EmptyNamespace(t *testing.T) {

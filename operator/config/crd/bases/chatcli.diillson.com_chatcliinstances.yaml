@@ -175,7 +175,7 @@ spec:
                       description: MaxContextChars is the maximum characters for LLM context budget.
                       type: integer
                       format: int32
-                      default: 8000
+                      default: 32000
                 resources:
                   description: Resources defines resource requests/limits for the ChatCLI container.
                   type: object

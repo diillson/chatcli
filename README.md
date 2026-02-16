@@ -1180,7 +1180,7 @@ chatcli watch --config targets.yaml -p "Quais deployments precisam de atencao?"
 interval: "30s"
 window: "2h"
 maxLogLines: 100
-maxContextChars: 8000
+maxContextChars: 32000
 targets:
   - deployment: api-gateway
     namespace: production

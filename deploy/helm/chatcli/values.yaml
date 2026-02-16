@@ -79,7 +79,7 @@ watcher:
   window: "2h"
   maxLogLines: 100
   # Budget maximo de caracteres para contexto LLM (multi-target)
-  maxContextChars: 8000
+  maxContextChars: 32000
 
 serviceAccount:
   create: true

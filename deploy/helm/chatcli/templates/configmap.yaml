@@ -41,7 +41,7 @@ data:
     interval: {{ .Values.watcher.interval | quote }}
     window: {{ .Values.watcher.window | quote }}
     maxLogLines: {{ .Values.watcher.maxLogLines }}
-    maxContextChars: {{ .Values.watcher.maxContextChars | default 8000 }}
+    maxContextChars: {{ .Values.watcher.maxContextChars | default 32000 }}
     targets:
     {{- range .Values.watcher.targets }}
       - deployment: {{ .deployment | quote }}

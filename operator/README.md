@@ -43,7 +43,7 @@ spec:
   watcher:
     enabled: true
     interval: "30s"
-    maxContextChars: 8000
+    maxContextChars: 32000
     targets:
       - deployment: api-gateway
         namespace: production
