@@ -30,6 +30,7 @@ type WatchOptions struct {
 	Model       string
 	Prompt      string // one-shot mode
 	MaxTokens   int
+	ConfigFile  string // path to multi-target watch config YAML
 }
 
 // RunWatch executes the 'chatcli watch' subcommand.
@@ -47,33 +48,48 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 	fs.StringVar(&opts.Model, "model", "", "LLM model override")
 	fs.StringVar(&opts.Prompt, "p", "", "One-shot prompt with K8s context (sends and exits)")
 	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, "Max tokens for response")
+	fs.StringVar(&opts.ConfigFile, "config", "", "Path to multi-target watch config YAML")
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	if opts.Deployment == "" {
+	if opts.Deployment == "" && opts.ConfigFile == "" {
 		PrintWatchUsage()
-		return fmt.Errorf("deployment name is required (use --deployment)")
+		return fmt.Errorf("deployment name or config file required (use --deployment or --config)")
 	}
 
-	// Create the K8s watcher
-	watchCfg := k8s.WatchConfig{
-		Deployment:  opts.Deployment,
-		Namespace:   opts.Namespace,
-		Interval:    opts.Interval,
-		Window:      opts.Window,
-		MaxLogLines: opts.MaxLogLines,
-		Kubeconfig:  opts.Kubeconfig,
+	// Build multi-watch config (single-target or multi-target)
+	var multiCfg k8s.MultiWatchConfig
+
+	if opts.ConfigFile != "" {
+		mcfg, err := k8s.LoadMultiWatchConfig(opts.ConfigFile)
+		if err != nil {
+			return fmt.Errorf("failed to load watch config: %w", err)
+		}
+		if opts.Kubeconfig != "" {
+			mcfg.Kubeconfig = opts.Kubeconfig
+		}
+		multiCfg = *mcfg
+	} else {
+		watchCfg := k8s.WatchConfig{
+			Deployment:  opts.Deployment,
+			Namespace:   opts.Namespace,
+			Interval:    opts.Interval,
+			Window:      opts.Window,
+			MaxLogLines: opts.MaxLogLines,
+			Kubeconfig:  opts.Kubeconfig,
+		}
+		multiCfg = k8s.SingleTargetToMulti(watchCfg)
 	}
 
-	watcher, err := k8s.NewResourceWatcher(watchCfg, logger)
+	mw, err := k8s.NewMultiWatcher(multiCfg, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create K8s watcher: %w", err)
 	}
 
-	store := watcher.GetStore()
-	summarizer := k8s.NewSummarizer(store)
+	stores := mw.GetStores()
+	multiSum := k8s.NewMultiSummarizer(stores, multiCfg.MaxContextChars)
 
 	// Start the watcher in background
 	watchCtx, watchCancel := context.WithCancel(ctx)
@@ -81,7 +97,6 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 
 	watcherReady := make(chan struct{}, 1)
 	go func() {
-		// Signal ready after first collection (or timeout)
 		go func() {
 			ticker := time.NewTicker(500 * time.Millisecond)
 			defer ticker.Stop()
@@ -89,9 +104,11 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 			for {
 				select {
 				case <-ticker.C:
-					if _, ok := store.LatestSnapshot(); ok {
-						watcherReady <- struct{}{}
-						return
+					for _, store := range stores {
+						if _, ok := store.LatestSnapshot(); ok {
+							watcherReady <- struct{}{}
+							return
+						}
 					}
 				case <-timeout:
 					watcherReady <- struct{}{}
@@ -100,55 +117,54 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 			}
 		}()
 
-		if err := watcher.Start(watchCtx); err != nil && err != context.Canceled {
+		if err := mw.Start(watchCtx); err != nil && err != context.Canceled {
 			logger.Error("K8s watcher stopped with error", zap.Error(err))
 		}
 	}()
 
-	fmt.Printf("Starting K8s watcher for deployment/%s in namespace/%s ...\n", opts.Deployment, opts.Namespace)
-	fmt.Printf("Collection interval: %s, observation window: %s\n", opts.Interval, opts.Window)
+	fmt.Printf("Starting K8s watcher: %d targets (interval: %s, window: %s)\n",
+		mw.TargetCount(), multiCfg.Interval, multiCfg.Window)
 
 	// Wait for first data collection
 	select {
 	case <-watcherReady:
-		if _, ok := store.LatestSnapshot(); ok {
-			fmt.Println("Initial data collected. K8s context will be injected into all prompts.")
-		} else {
-			fmt.Println("Watcher started (initial collection pending).")
-		}
+		fmt.Println("Initial data collected. K8s context will be injected into all prompts.")
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 
-	// One-shot mode: send prompt with K8s context and exit
+	// One-shot mode
 	if opts.Prompt != "" {
-		return runWatchOneShot(ctx, opts, summarizer, llmMgr, logger)
+		return runWatchOneShot(ctx, opts, multiSum, llmMgr, logger)
 	}
 
-	// Interactive mode: start ChatCLI with K8s context injection
+	// Interactive mode
 	chatCLI, err := cli.NewChatCLI(llmMgr, logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize ChatCLI: %w", err)
 	}
 
-	// Apply provider/model overrides
 	if err := chatCLI.ApplyOverrides(llmMgr, opts.Provider, opts.Model); err != nil {
 		return fmt.Errorf("failed to apply provider/model overrides: %w", err)
 	}
 
-	// Wire up K8s context injection
-	chatCLI.WatcherContextFunc = summarizer.GenerateContext
-	chatCLI.SetWatching(true, summarizer.GenerateStatusSummary)
+	chatCLI.WatcherContextFunc = multiSum.GenerateContext
+	chatCLI.SetWatching(true, multiSum.GenerateStatusSummary)
 
-	fmt.Println("Type your questions about the deployment. K8s context is automatically included.")
+	fmt.Println("Type your questions about the deployments. K8s context is automatically included.")
 	fmt.Printf("Use /watch to see current status.\n\n")
 
 	chatCLI.Start(ctx)
 	return nil
 }
 
+// contextGenerator provides a common interface for generating LLM context.
+type contextGenerator interface {
+	GenerateContext() string
+}
+
 // runWatchOneShot sends a single prompt with K8s context and prints the response.
-func runWatchOneShot(ctx context.Context, opts *WatchOptions, summarizer *k8s.Summarizer, llmMgr manager.LLMManager, logger *zap.Logger) error {
+func runWatchOneShot(ctx context.Context, opts *WatchOptions, cg contextGenerator, llmMgr manager.LLMManager, logger *zap.Logger) error {
 	provider := opts.Provider
 	if provider == "" {
 		available := llmMgr.GetAvailableProviders()
@@ -163,8 +179,7 @@ func runWatchOneShot(ctx context.Context, opts *WatchOptions, summarizer *k8s.Su
 		return fmt.Errorf("failed to create LLM client: %w", err)
 	}
 
-	// Build prompt with K8s context
-	k8sContext := summarizer.GenerateContext()
+	k8sContext := cg.GenerateContext()
 	fullPrompt := k8sContext + "\n\nUser Question: " + opts.Prompt
 
 	response, err := llmClient.SendPrompt(ctx, fullPrompt, nil, opts.MaxTokens)
@@ -194,16 +209,17 @@ func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
 
 // PrintWatchUsage prints help for the watch subcommand.
 func PrintWatchUsage() {
-	fmt.Println(`Usage: chatcli watch --deployment <name> [flags]
+	fmt.Println(`Usage: chatcli watch [--deployment <name> | --config <file>] [flags]
 
-Monitor a Kubernetes deployment and use AI to analyze its health.
+Monitor Kubernetes deployments and use AI to analyze their health.
 
 The watcher continuously collects deployment status, pod metrics, events,
-logs, and HPA data. This context is automatically injected into LLM prompts,
-enabling AI-assisted Kubernetes troubleshooting.
+logs, HPA data, and application metrics (Prometheus). This context is
+automatically injected into LLM prompts for AI-assisted troubleshooting.
 
-Required:
-  --deployment <name>     Deployment name to monitor
+Required (one of):
+  --deployment <name>     Single deployment to monitor
+  --config <file>         Multi-target watch config YAML
 
 Flags:
   --namespace <ns>        Kubernetes namespace (default: "default", env: CHATCLI_WATCH_NAMESPACE)
@@ -224,12 +240,33 @@ Environment Variables:
   CHATCLI_WATCH_MAX_LOG_LINES Max log lines per pod (default: 100)
   CHATCLI_KUBECONFIG          Path to kubeconfig
 
+Config File Format (YAML):
+  interval: "30s"
+  window: "2h"
+  maxLogLines: 100
+  maxContextChars: 32000
+  targets:
+    - deployment: api-gateway
+      namespace: production
+      metricsPort: 9090
+      metricsFilter: ["http_requests_total", "http_request_duration_*"]
+    - deployment: auth-service
+      namespace: production
+    - deployment: worker
+      namespace: batch
+
 Examples:
-  # Interactive monitoring
+  # Interactive monitoring (single deployment)
   chatcli watch --deployment myapp --namespace production
+
+  # Interactive monitoring (multiple deployments)
+  chatcli watch --config targets.yaml
 
   # One-shot question
   chatcli watch --deployment myapp -p "Is the deployment healthy?"
+
+  # Multi-target one-shot
+  chatcli watch --config targets.yaml -p "Which deployments need attention?"
 
   # Custom collection settings
   chatcli watch --deployment myapp --interval 10s --window 30m

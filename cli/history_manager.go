@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diillson/chatcli/config"
@@ -21,6 +22,7 @@ type HistoryManager struct {
 	historyFile    string
 	logger         *zap.Logger
 	maxHistorySize int64
+	mu             sync.Mutex
 }
 
 func NewHistoryManager(logger *zap.Logger) *HistoryManager {
@@ -62,6 +64,8 @@ func getMaxHistorySizeFromEnv() int64 {
 
 // LoadHistory carrega o histórico do arquivo
 func (hm *HistoryManager) LoadHistory() ([]string, error) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
 	f, err := os.Open(hm.historyFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -89,6 +93,8 @@ func (hm *HistoryManager) LoadHistory() ([]string, error) {
 
 // AppendAndRotateHistory salva o histórico no arquivo e faz backup se o tamanho exceder o limite
 func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
 	// 1. Anexar os novos comandos ao arquivo de histórico
 	f, err := os.OpenFile(hm.historyFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {

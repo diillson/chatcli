@@ -1095,7 +1095,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 				lastError = werr.Error()
 			}
 			_ = tmpFile.Close()
-			_ = os.Chmod(scriptPath, 0755)
+			_ = os.Chmod(scriptPath, 0700)
 
 			header := i18n.T("agent.status.executing_script", shell) + "\n"
 			fmt.Print(header)
@@ -1808,9 +1808,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							pattern := coder.GetSuggestedPattern(tc.Name, tc.Args)
 							switch decision {
 							case coder.DecisionAllowAlways:
-								_ = pm.AddRule(pattern, coder.ActionAllow)
+								// Only persist rule if pattern is non-empty.
+								// Exec commands return "" to prevent blanket allow.
+								if pattern != "" {
+									_ = pm.AddRule(pattern, coder.ActionAllow)
+								}
 							case coder.DecisionDenyForever:
-								_ = pm.AddRule(pattern, coder.ActionDeny)
+								if pattern != "" {
+									_ = pm.AddRule(pattern, coder.ActionDeny)
+								}
 								msg := "🛫 AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
 								if coderMinimal {
 									renderer.RenderToolResultMinimal(msg, true)
@@ -1930,6 +1936,29 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								execErr = fmt.Errorf("argumento obrigatório faltando: %s", which)
 							}
 						}
+
+						// --- DANGEROUS EXEC GUARD ---
+						// Even if policy says "allow", NEVER auto-execute dangerous commands.
+						// This catches cases where user clicked "Allow Always" for @coder exec.
+						if a.isCoderMode && !batchHasError {
+							if dangerous, shellCmd := a.isCoderExecDangerous(toolArgs); dangerous {
+								msg := fmt.Sprintf(
+									"BLOCKED: Dangerous command detected in @coder exec: %q. "+
+										"This command is forbidden regardless of policy rules. "+
+										"DO NOT retry this command.", shellCmd)
+								if coderMinimal {
+									renderer.RenderToolResultMinimal(msg, true)
+								} else {
+									renderer.RenderToolResult(msg, true)
+								}
+								a.cli.history = append(a.cli.history, models.Message{
+									Role: "user", Content: "SECURITY BLOCK: " + msg,
+								})
+								batchHasError = true
+								execErr = fmt.Errorf("dangerous command blocked: %s", shellCmd)
+							}
+						}
+						// --- END DANGEROUS EXEC GUARD ---
 
 						// Se não houve erro de validação, EXECUTA
 						if !batchHasError {
@@ -3060,6 +3089,32 @@ func normalizeShellLineContinuations(input string) string {
 		result.WriteRune(char)
 	}
 	return result.String()
+}
+
+// isCoderExecDangerous checks if a @coder exec command contains a dangerous
+// shell command. It extracts the actual shell command from the parsed args
+// and validates it against the agent's CommandValidator.IsDangerous().
+// This is the critical security guard that prevents destructive commands
+// from executing through @coder exec even when the policy says "allow".
+func (a *AgentMode) isCoderExecDangerous(toolArgs []string) (bool, string) {
+	if len(toolArgs) == 0 {
+		return false, ""
+	}
+	sub := strings.ToLower(strings.TrimSpace(toolArgs[0]))
+	if sub != "exec" {
+		return false, ""
+	}
+	// Extract the --cmd value from parsed args
+	for i, arg := range toolArgs {
+		if (arg == "--cmd" || arg == "-cmd" || arg == "--command") && i+1 < len(toolArgs) {
+			shellCmd := toolArgs[i+1]
+			if shellCmd != "" && a.validator.IsDangerous(shellCmd) {
+				return true, shellCmd
+			}
+			return false, shellCmd
+		}
+	}
+	return false, ""
 }
 
 // isCoderArgsMissingRequiredValue verifica se o comando @coder contém flags

@@ -34,8 +34,11 @@ chatcli serve --port 8080 --token meu-token-secreto
 # Com TLS habilitado
 chatcli serve --tls-cert cert.pem --tls-key key.pem
 
-# Com K8s Watcher integrado
+# Com K8s Watcher integrado (single-target)
 chatcli serve --watch-deployment myapp --watch-namespace production
+
+# Com K8s Watcher multi-target + Prometheus metrics
+chatcli serve --watch-config targets.yaml
 ```
 
 ---
@@ -64,12 +67,15 @@ chatcli serve --watch-deployment myapp --watch-namespace production
 
 | Flag | Descricao | Padrao | Env Var |
 |------|-----------|--------|---------|
-| `--watch-deployment` | Deployment a monitorar | `""` | `CHATCLI_WATCH_DEPLOYMENT` |
+| `--watch-config` | Arquivo YAML multi-target | `""` | `CHATCLI_WATCH_CONFIG` |
+| `--watch-deployment` | Deployment unico (legado) | `""` | `CHATCLI_WATCH_DEPLOYMENT` |
 | `--watch-namespace` | Namespace do deployment | `"default"` | `CHATCLI_WATCH_NAMESPACE` |
 | `--watch-interval` | Intervalo de coleta | `30s` | `CHATCLI_WATCH_INTERVAL` |
 | `--watch-window` | Janela de observacao | `2h` | `CHATCLI_WATCH_WINDOW` |
 | `--watch-max-log-lines` | Max linhas de log por pod | `100` | `CHATCLI_WATCH_MAX_LOG_LINES` |
 | `--watch-kubeconfig` | Caminho do kubeconfig | Auto-detectado | `CHATCLI_KUBECONFIG` |
+
+> Use `--watch-config` para monitorar **multiplos deployments** simultaneamente com metricas Prometheus. Veja [K8s Watcher](/docs/features/k8s-watcher/) para o formato do arquivo YAML.
 
 ---
 
@@ -198,20 +204,35 @@ O RPC `StreamPrompt` divide a resposta em chunks de ~200 caracteres em fronteira
 
 ## Integracao com K8s Watcher
 
-Quando o servidor e iniciado com `--watch-deployment`, o K8s Watcher monitora continuamente o deployment especificado e **injeta automaticamente o contexto Kubernetes em todos os prompts** dos clientes remotos.
+Quando o servidor e iniciado com `--watch-config` ou `--watch-deployment`, o K8s Watcher monitora continuamente os deployments e **injeta automaticamente o contexto Kubernetes em todos os prompts** dos clientes remotos.
 
-Isso significa que qualquer usuario conectado pode fazer perguntas sobre o deployment sem configuracao adicional:
+### Single-Target (legado)
+
+```bash
+chatcli serve --watch-deployment myapp --watch-namespace production
+```
+
+### Multi-Target (recomendado)
+
+```bash
+chatcli serve --watch-config targets.yaml
+```
+
+O arquivo `targets.yaml` define multiplos deployments, metricas Prometheus e budget de contexto. Veja [K8s Watcher](/docs/features/k8s-watcher/#arquivo-de-configuracao-multi-target) para o formato completo.
+
+Qualquer usuario conectado pode fazer perguntas sobre os deployments sem configuracao adicional:
 
 ```
 Conectado ao ChatCLI server (version: 1.0.0, provider: OPENAI, model: gpt-4o)
-K8s watcher active: deployment/myapp in namespace/production
+K8s watcher active: 5 targets (interval: 30s)
 
-> Por que os pods estao reiniciando?
+> Quais deployments precisam de atencao?
+> Analise as metricas HTTP do api-gateway
 ```
 
-O servidor injeta automaticamente informacoes de pods, eventos, logs e metricas no prompt antes de enviar ao LLM.
+O servidor injeta automaticamente informacoes de pods, eventos, logs, metricas de infra e **metricas Prometheus de aplicacao** no prompt antes de enviar ao LLM. O **MultiSummarizer** gerencia o budget de contexto, priorizando targets com problemas.
 
-Para verificar o status do watcher remotamente, use `/watch status` no cliente conectado.
+Para verificar o status do watcher remotamente, use `/watch` no cliente conectado.
 
 ---
 
@@ -248,5 +269,6 @@ CHATCLI_WATCH_MAX_LOG_LINES=100
 ## Proximo Passo
 
 - [Conectar ao servidor remotamente](/docs/features/remote-connect/)
+- [K8s Watcher (multi-target + Prometheus)](/docs/features/k8s-watcher/)
+- [K8s Operator (CRD)](/docs/features/k8s-operator/)
 - [Deploy com Docker e Helm](/docs/getting-started/docker-deployment/)
-- [Monitorar Kubernetes com ChatCLI](/docs/features/k8s-watcher/)

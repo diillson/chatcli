@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 type SecurityDecision int
@@ -19,10 +20,20 @@ const (
 	DecisionDenyForever
 )
 
+// sttyPath is resolved once at init to avoid PATH manipulation attacks.
+var sttyPath = func() string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	if p, err := exec.LookPath("stty"); err == nil {
+		return p
+	}
+	return ""
+}()
+
 func PromptSecurityCheck(ctx context.Context, toolName, args string) SecurityDecision {
-	// L5: Only run stty on Unix systems
-	if runtime.GOOS != "windows" {
-		_ = exec.Command("stty", "sane").Run()
+	if runtime.GOOS != "windows" && sttyPath != "" {
+		_ = exec.Command(sttyPath, "sane").Run()
 	}
 
 	purple := "\u001b[35m"
@@ -47,18 +58,30 @@ func PromptSecurityCheck(ctx context.Context, toolName, args string) SecurityDec
 	fmt.Printf(" %s %s\n", cyan+"Params:", displayArgs+reset)
 
 	pattern := GetSuggestedPattern(toolName, args)
-	fmt.Printf(" %s %s '%s'\n", gray+"Regra:", "Nenhuma regra encontrada para", pattern+reset)
+	// exec commands return empty pattern to prevent blanket allow
+	isExecCmd := pattern == ""
+
+	if isExecCmd {
+		sub, _ := NormalizeCoderArgs(args)
+		fmt.Printf(" %s %s\n", gray+"Regra:", "exec requer aprovacao individual (sem regra persistente)"+reset)
+		_ = sub
+	} else {
+		fmt.Printf(" %s %s '%s'\n", gray+"Regra:", "Nenhuma regra encontrada para", pattern+reset)
+	}
 	fmt.Println(gray + strings.Repeat("-", 60) + reset)
 
 	fmt.Println(bold + "Escolha:" + reset)
 	fmt.Printf("  [%s] %s\n", green+"y"+reset, "Sim (uma vez)")
-	fmt.Printf("  [%s] %s\n", green+"a"+reset, "ALLOW ALWAYS (Permitir '"+pattern+"' sempre)")
+	if !isExecCmd {
+		fmt.Printf("  [%s] %s\n", green+"a"+reset, "ALLOW ALWAYS (Permitir '"+pattern+"' sempre)")
+	}
 	fmt.Printf("  [%s] %s\n", red+"n"+reset, "Nao (pular)")
-	fmt.Printf("  [%s] %s\n", red+"d"+reset, "DENY FOREVER (Bloquear '"+pattern+"' sempre)")
+	if !isExecCmd {
+		fmt.Printf("  [%s] %s\n", red+"d"+reset, "DENY FOREVER (Bloquear '"+pattern+"' sempre)")
+	}
 
 	fmt.Print("\n" + purple + "> " + reset)
 
-	// Usa goroutine para leitura não-bloqueante do ponto de vista do contexto
 	resultChan := make(chan string, 1)
 
 	go func() {
@@ -72,10 +95,21 @@ func PromptSecurityCheck(ctx context.Context, toolName, args string) SecurityDec
 
 	select {
 	case <-ctx.Done():
-		// Contexto cancelado (ex: Ctrl+C)
+		// Unblock the stdin reader on supported platforms.
+		// os.Stdin is *os.File, SetReadDeadline works on Unix (not Windows).
+		_ = os.Stdin.SetReadDeadline(time.Now())
 		fmt.Println("\n" + red + "[Cancelado]" + reset)
 		return DecisionDenyOnce
 	case input := <-resultChan:
+		if isExecCmd {
+			// For exec commands, only allow y/n (no persistent rules)
+			switch input {
+			case "n", "no":
+				return DecisionDenyOnce
+			default:
+				return DecisionRunOnce
+			}
+		}
 		switch input {
 		case "a", "always":
 			return DecisionAllowAlways
