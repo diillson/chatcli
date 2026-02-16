@@ -33,6 +33,7 @@ type ResourceWatcher struct {
 	logCollector     *LogCollector
 	hpaCollector     *HPACollector
 	metricsCollector *MetricsCollector
+	promCollector    *PrometheusCollector // optional: app-level Prometheus metrics
 }
 
 // NewResourceWatcher creates a new watcher for the given deployment.
@@ -141,6 +142,11 @@ func (w *ResourceWatcher) collect(ctx context.Context) error {
 		w.logger.Debug("HPA collection failed", zap.Error(err))
 	}
 	snap.HPA = hpa
+
+	// 4.5 Collect application metrics from Prometheus endpoint
+	if w.promCollector != nil {
+		snap.AppMetrics = w.promCollector.Collect(ctx)
+	}
 
 	// 5. Store snapshot
 	w.store.AddSnapshot(*snap)

@@ -14,6 +14,7 @@ type ResourceSnapshot struct {
 	Pods       []PodStatus
 	Events     []K8sEvent
 	HPA        *HPAStatus
+	AppMetrics *AppMetrics // application-level Prometheus metrics (nil if not configured)
 }
 
 // DeploymentStatus holds deployment-level information.
@@ -118,4 +119,41 @@ type LogEntry struct {
 	Container string
 	Line      string
 	IsError   bool
+}
+
+// WatchTarget defines a single deployment to watch with optional Prometheus scraping.
+type WatchTarget struct {
+	Deployment    string   `yaml:"deployment" json:"deployment"`
+	Namespace     string   `yaml:"namespace" json:"namespace"`
+	MetricsPort   int      `yaml:"metricsPort,omitempty" json:"metricsPort,omitempty"`
+	MetricsPath   string   `yaml:"metricsPath,omitempty" json:"metricsPath,omitempty"`
+	MetricsFilter []string `yaml:"metricsFilter,omitempty" json:"metricsFilter,omitempty"`
+}
+
+// Key returns a unique identifier for this target: "namespace/deployment".
+func (t WatchTarget) Key() string {
+	return t.Namespace + "/" + t.Deployment
+}
+
+// MultiWatchConfig holds configuration for multi-deployment watching.
+type MultiWatchConfig struct {
+	Targets         []WatchTarget `yaml:"targets" json:"targets"`
+	Interval        time.Duration `yaml:"interval" json:"interval"`
+	Window          time.Duration `yaml:"window" json:"window"`
+	MaxLogLines     int           `yaml:"maxLogLines" json:"maxLogLines"`
+	Kubeconfig      string        `yaml:"kubeconfig,omitempty" json:"kubeconfig,omitempty"`
+	MaxContextChars int           `yaml:"maxContextChars,omitempty" json:"maxContextChars,omitempty"`
+}
+
+// AppMetrics holds application-level metrics scraped from Prometheus endpoints.
+type AppMetrics struct {
+	Timestamp time.Time
+	Metrics   map[string]float64 // metric_name -> value
+}
+
+// TargetHealthScore represents the health status of a watch target for budget allocation.
+type TargetHealthScore struct {
+	Key        string
+	Score      int // 0 = healthy, 1 = warning, 2 = critical
+	AlertCount int
 }

@@ -7,6 +7,7 @@ package k8s
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -113,6 +114,19 @@ func (s *Summarizer) GenerateContext() string {
 		b.WriteString("\n## Alerts: None active\n")
 	}
 
+	// Application Metrics (Prometheus)
+	if snap.AppMetrics != nil && len(snap.AppMetrics.Metrics) > 0 {
+		b.WriteString(fmt.Sprintf("\n## Application Metrics (%d)\n", len(snap.AppMetrics.Metrics)))
+		names := make([]string, 0, len(snap.AppMetrics.Metrics))
+		for k := range snap.AppMetrics.Metrics {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			b.WriteString(fmt.Sprintf("  %s: %.4g\n", name, snap.AppMetrics.Metrics[name]))
+		}
+	}
+
 	// Error Logs
 	errorLogs := s.store.GetErrorLogs(10)
 	if len(errorLogs) > 0 {
@@ -154,4 +168,214 @@ func (s *Summarizer) GenerateStatusSummary() string {
 
 	return fmt.Sprintf("%s/%s: %d/%d pods ready | %s | %d alerts | %d snapshots collected",
 		d.Namespace, d.Name, d.ReadyReplicas, d.Replicas, healthIcon, len(alerts), stats.SnapshotCount)
+}
+
+// MultiSummarizer generates budget-constrained context from multiple watch targets.
+type MultiSummarizer struct {
+	stores   map[string]*ObservabilityStore
+	maxChars int
+}
+
+// NewMultiSummarizer creates a summarizer for multi-deployment watching.
+func NewMultiSummarizer(stores map[string]*ObservabilityStore, maxChars int) *MultiSummarizer {
+	if maxChars <= 0 {
+		maxChars = 8000
+	}
+	return &MultiSummarizer{
+		stores:   stores,
+		maxChars: maxChars,
+	}
+}
+
+// GenerateContext produces a budget-constrained context block for all targets.
+// Unhealthy targets get detailed context, healthy targets get compact one-liners.
+// If total exceeds maxChars, progressively compresses from the healthiest targets.
+func (ms *MultiSummarizer) GenerateContext() string {
+	if len(ms.stores) == 0 {
+		return "[K8s Watcher: No targets configured]"
+	}
+
+	// Single target: delegate to standard Summarizer (no budget overhead)
+	if len(ms.stores) == 1 {
+		for _, store := range ms.stores {
+			return NewSummarizer(store).GenerateContext()
+		}
+	}
+
+	scores := ms.scoreTargets()
+	if len(scores) == 0 {
+		return "[K8s Watcher: No data collected yet]"
+	}
+
+	sort.Slice(scores, func(i, j int) bool {
+		if scores[i].Score != scores[j].Score {
+			return scores[i].Score > scores[j].Score
+		}
+		return scores[i].AlertCount > scores[j].AlertCount
+	})
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("[K8s Multi-Watcher: %d targets monitored]\n\n", len(scores)))
+
+	remaining := ms.maxChars - b.Len()
+
+	type targetContext struct {
+		key     string
+		score   int
+		text    string
+		compact string
+	}
+
+	targets := make([]targetContext, 0, len(scores))
+	for _, s := range scores {
+		store := ms.stores[s.Key]
+		sum := NewSummarizer(store)
+
+		tc := targetContext{
+			key:     s.Key,
+			score:   s.Score,
+			compact: "- " + sum.GenerateStatusSummary() + "\n",
+		}
+
+		if s.Score >= 1 {
+			tc.text = sum.GenerateContext() + "\n"
+		} else {
+			tc.text = tc.compact
+		}
+
+		targets = append(targets, tc)
+	}
+
+	total := 0
+	for _, tc := range targets {
+		total += len(tc.text)
+	}
+
+	// If over budget, compress from the bottom (healthiest first)
+	if total > remaining {
+		for i := len(targets) - 1; i >= 0 && total > remaining; i-- {
+			if targets[i].text != targets[i].compact {
+				total -= len(targets[i].text)
+				targets[i].text = targets[i].compact
+				total += len(targets[i].text)
+			}
+		}
+	}
+
+	// If still over, omit healthiest targets entirely
+	if total > remaining {
+		for i := len(targets) - 1; i >= 0 && total > remaining; i-- {
+			total -= len(targets[i].text)
+			targets[i].text = ""
+		}
+	}
+
+	// Build output: detailed targets first
+	hasDetailed := false
+	for _, tc := range targets {
+		if tc.text != "" && tc.text != tc.compact {
+			if !hasDetailed {
+				b.WriteString("--- Targets Requiring Attention ---\n\n")
+				hasDetailed = true
+			}
+			b.WriteString(tc.text)
+		}
+	}
+
+	// Then compact targets
+	hasCompact := false
+	for _, tc := range targets {
+		if tc.text != "" && tc.text == tc.compact {
+			if !hasCompact {
+				b.WriteString("--- Healthy Targets ---\n")
+				hasCompact = true
+			}
+			b.WriteString(tc.text)
+		}
+	}
+
+	return b.String()
+}
+
+// GenerateStatusSummary produces a multi-target compact status line.
+func (ms *MultiSummarizer) GenerateStatusSummary() string {
+	totalTargets := len(ms.stores)
+	healthy, warning, critical := 0, 0, 0
+
+	for _, store := range ms.stores {
+		snap, ok := store.LatestSnapshot()
+		if !ok {
+			continue
+		}
+		alerts := store.GetAlerts()
+		d := snap.Deployment
+
+		isCritical, isWarning := false, false
+		for _, a := range alerts {
+			if a.Severity == SeverityCritical {
+				isCritical = true
+			}
+			if a.Severity == SeverityWarning {
+				isWarning = true
+			}
+		}
+		if d.ReadyReplicas < d.Replicas {
+			isWarning = true
+		}
+
+		switch {
+		case isCritical:
+			critical++
+		case isWarning:
+			warning++
+		default:
+			healthy++
+		}
+	}
+
+	return fmt.Sprintf("Watching %d targets: %d healthy, %d warning, %d critical",
+		totalTargets, healthy, warning, critical)
+}
+
+// scoreTargets evaluates the health of each target.
+func (ms *MultiSummarizer) scoreTargets() []TargetHealthScore {
+	var scores []TargetHealthScore
+	for key, store := range ms.stores {
+		snap, ok := store.LatestSnapshot()
+		if !ok {
+			continue
+		}
+		alerts := store.GetAlerts()
+		errorLogs := store.GetErrorLogs(1)
+
+		score := 0
+		d := snap.Deployment
+
+		for _, a := range alerts {
+			if a.Severity == SeverityCritical {
+				score = 2
+				break
+			}
+		}
+		if score < 2 {
+			if d.ReadyReplicas < d.Replicas {
+				score = 1
+			}
+			for _, a := range alerts {
+				if a.Severity == SeverityWarning && score < 1 {
+					score = 1
+				}
+			}
+			if len(errorLogs) > 0 && score < 1 {
+				score = 1
+			}
+		}
+
+		scores = append(scores, TargetHealthScore{
+			Key:        key,
+			Score:      score,
+			AlertCount: len(alerts),
+		})
+	}
+	return scores
 }
