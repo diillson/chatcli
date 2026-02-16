@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 
+	uberzap "go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -12,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	chatcliv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 	"github.com/diillson/chatcli/operator/controllers"
 )
 
@@ -23,7 +24,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(chatcliv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(platformv1alpha1.AddToScheme(scheme))
 }
 
 func main() {
@@ -57,11 +58,57 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.ChatCLIInstanceReconciler{
+	if err = (&controllers.InstanceReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ChatCLIInstance")
+		setupLog.Error(err, "unable to create controller", "controller", "Instance")
+		os.Exit(1)
+	}
+
+	if err = (&controllers.IssueReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Issue")
+		os.Exit(1)
+	}
+
+	if err = (&controllers.RemediationReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Remediation")
+		os.Exit(1)
+	}
+
+	if err = (&controllers.AnomalyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Anomaly")
+		os.Exit(1)
+	}
+
+	// Shared gRPC client for server communication
+	zapLogger, _ := uberzap.NewProduction()
+	serverClient := controllers.NewServerClient(zapLogger)
+	defer serverClient.Close()
+
+	// WatcherBridge — polls server alerts and creates Anomaly CRs
+	watcherBridge := controllers.NewWatcherBridge(mgr.GetClient(), mgr.GetScheme(), serverClient, zapLogger)
+	if err := mgr.Add(watcherBridge); err != nil {
+		setupLog.Error(err, "unable to add WatcherBridge")
+		os.Exit(1)
+	}
+
+	// AIInsightReconciler — calls server AnalyzeIssue RPC to fill analysis
+	if err = (&controllers.AIInsightReconciler{
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		ServerClient: serverClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "AIInsight")
 		os.Exit(1)
 	}
 

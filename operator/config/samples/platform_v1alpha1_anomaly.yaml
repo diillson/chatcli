@@ -1,0 +1,15 @@
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Anomaly
+metadata:
+  name: payments-api-error-rate-spike
+  namespace: default
+spec:
+  source: prometheus
+  signalType: error_rate
+  resource:
+    kind: Deployment
+    name: payments-api
+    namespace: production
+  value: "15.4%"
+  threshold: "5%"
+  description: "HTTP 5xx error rate for payments-api spiked to 15.4%, exceeding the 5% threshold."

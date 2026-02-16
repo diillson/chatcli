@@ -1,0 +1,161 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: issues.platform.chatcli.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+spec:
+  group: platform.chatcli.io
+  names:
+    kind: Issue
+    listKind: IssueList
+    plural: issues
+    singular: issue
+    shortNames:
+      - iss
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Severity
+          type: string
+          jsonPath: .spec.severity
+        - name: State
+          type: string
+          jsonPath: .status.state
+        - name: Risk
+          type: integer
+          jsonPath: .spec.riskScore
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: Issue is the Schema for the issues API.
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: IssueSpec defines the desired state of an Issue.
+              type: object
+              required:
+                - severity
+                - source
+                - resource
+                - description
+              properties:
+                severity:
+                  description: Severity of the issue.
+                  type: string
+                  enum:
+                    - critical
+                    - high
+                    - medium
+                    - low
+                source:
+                  description: Source that originated the issue.
+                  type: string
+                  enum:
+                    - prometheus
+                    - events
+                    - logs
+                    - webhook
+                resource:
+                  description: Reference to the Kubernetes resource affected.
+                  type: object
+                  required:
+                    - kind
+                    - name
+                    - namespace
+                  properties:
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                description:
+                  description: Human-readable description of the issue.
+                  type: string
+                correlationId:
+                  description: Optional correlation identifier for grouping related anomalies.
+                  type: string
+                riskScore:
+                  description: Risk score from 0 to 100.
+                  type: integer
+                  format: int32
+                  minimum: 0
+                  maximum: 100
+            status:
+              description: IssueStatus defines the observed state of an Issue.
+              type: object
+              properties:
+                state:
+                  description: Current state of the issue lifecycle.
+                  type: string
+                  enum:
+                    - Detected
+                    - Analyzing
+                    - Remediating
+                    - Resolved
+                    - Escalated
+                    - Failed
+                detectedAt:
+                  description: Timestamp when the issue was first detected.
+                  type: string
+                  format: date-time
+                resolution:
+                  description: Description of how the issue was resolved.
+                  type: string
+                resolvedAt:
+                  description: Timestamp when the issue was resolved.
+                  type: string
+                  format: date-time
+                remediationAttempts:
+                  description: Number of remediation attempts made so far.
+                  type: integer
+                  format: int32
+                maxRemediationAttempts:
+                  description: Maximum number of remediation attempts allowed.
+                  type: integer
+                  format: int32
+                  default: 3
+                conditions:
+                  description: Standard Kubernetes conditions.
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string

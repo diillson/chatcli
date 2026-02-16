@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"time"
 
+	"strings"
+
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/k8s"
 	"github.com/diillson/chatcli/llm/manager"
@@ -155,6 +157,29 @@ func RunServe(args []string, llmMgr manager.LLMManager, logger *zap.Logger) erro
 					}
 				}
 				return totalAlerts, totalSnapshots, totalPods
+			},
+			AlertsFunc: func() []server.AlertInfo {
+				var all []server.AlertInfo
+				for key, store := range stores {
+					parts := strings.SplitN(key, "/", 2)
+					ns, deploy := "", ""
+					if len(parts) == 2 {
+						ns = parts[0]
+						deploy = parts[1]
+					}
+					for _, a := range store.GetAlerts() {
+						all = append(all, server.AlertInfo{
+							Type:       string(a.Type),
+							Severity:   string(a.Severity),
+							Message:    a.Message,
+							Object:     a.Object,
+							Namespace:  ns,
+							Deployment: deploy,
+							Timestamp:  a.Timestamp,
+						})
+					}
+				}
+				return all
 			},
 			Deployment: fmt.Sprintf("%d targets", mw.TargetCount()),
 			Namespace:  "multi",

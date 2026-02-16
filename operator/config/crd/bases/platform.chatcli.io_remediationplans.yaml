@@ -1,0 +1,141 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: remediationplans.platform.chatcli.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+spec:
+  group: platform.chatcli.io
+  names:
+    kind: RemediationPlan
+    listKind: RemediationPlanList
+    plural: remediationplans
+    singular: remediationplan
+    shortNames:
+      - rp
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Issue
+          type: string
+          jsonPath: .spec.issueRef.name
+        - name: Attempt
+          type: integer
+          jsonPath: .spec.attempt
+        - name: State
+          type: string
+          jsonPath: .status.state
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: RemediationPlan is the Schema for the remediationplans API.
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: RemediationPlanSpec defines the desired remediation actions.
+              type: object
+              required:
+                - issueRef
+                - attempt
+                - strategy
+                - actions
+              properties:
+                issueRef:
+                  description: Reference to the Issue being remediated.
+                  type: object
+                  required:
+                    - name
+                  properties:
+                    name:
+                      type: string
+                attempt:
+                  description: The attempt number for this remediation.
+                  type: integer
+                  format: int32
+                strategy:
+                  description: High-level strategy description for the remediation.
+                  type: string
+                actions:
+                  description: Ordered list of actions to execute.
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                    properties:
+                      type:
+                        description: Type of remediation action.
+                        type: string
+                        enum:
+                          - ScaleDeployment
+                          - RollbackDeployment
+                          - RestartDeployment
+                          - PatchConfig
+                          - Custom
+                      params:
+                        description: Key-value parameters for the action.
+                        type: object
+                        additionalProperties:
+                          type: string
+                safetyConstraints:
+                  description: Safety constraints that must hold during remediation.
+                  type: array
+                  items:
+                    type: string
+            status:
+              description: RemediationPlanStatus defines the observed state of a RemediationPlan.
+              type: object
+              properties:
+                state:
+                  description: Current state of the remediation plan execution.
+                  type: string
+                  enum:
+                    - Pending
+                    - Executing
+                    - Completed
+                    - Failed
+                    - RolledBack
+                startedAt:
+                  description: Timestamp when execution started.
+                  type: string
+                  format: date-time
+                completedAt:
+                  description: Timestamp when execution completed.
+                  type: string
+                  format: date-time
+                result:
+                  description: Human-readable result summary.
+                  type: string
+                evidence:
+                  description: Evidence collected during remediation.
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - data
+                      - timestamp
+                    properties:
+                      type:
+                        description: Type of evidence (e.g. metric, log, event).
+                        type: string
+                      data:
+                        description: Evidence payload.
+                        type: string
+                      timestamp:
+                        description: When the evidence was collected.
+                        type: string
+                        format: date-time

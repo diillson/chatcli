@@ -1,0 +1,15 @@
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Issue
+metadata:
+  name: payments-api-high-error-rate
+  namespace: default
+spec:
+  severity: high
+  source: prometheus
+  resource:
+    kind: Deployment
+    name: payments-api
+    namespace: production
+  description: "Error rate for payments-api exceeded 15% over the last 5 minutes, impacting payment processing for end users."
+  correlationId: "corr-payments-20260216-001"
+  riskScore: 78

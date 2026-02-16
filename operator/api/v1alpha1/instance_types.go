@@ -5,8 +5,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ChatCLIInstanceSpec defines the desired state of a ChatCLI deployment.
-type ChatCLIInstanceSpec struct {
+// InstanceSpec defines the desired state of a ChatCLI deployment.
+type InstanceSpec struct {
 	// Replicas is the number of ChatCLI server pods.
 	// +kubebuilder:default=1
 	// +kubebuilder:validation:Minimum=0
@@ -178,8 +178,8 @@ type PersistenceSpec struct {
 	StorageClassName *string `json:"storageClassName,omitempty"`
 }
 
-// ChatCLIInstanceStatus defines the observed state of ChatCLIInstance.
-type ChatCLIInstanceStatus struct {
+// InstanceStatus defines the observed state of Instance.
+type InstanceStatus struct {
 	// Ready indicates whether all replicas are available.
 	Ready bool `json:"ready"`
 
@@ -199,29 +199,30 @@ type ChatCLIInstanceStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=inst
 // +kubebuilder:printcolumn:name="Ready",type="boolean",JSONPath=".status.ready"
 // +kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".status.replicas"
 // +kubebuilder:printcolumn:name="Provider",type="string",JSONPath=".spec.provider"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// ChatCLIInstance is the Schema for the chatcliinstances API.
-type ChatCLIInstance struct {
+// Instance is the Schema for the instances API.
+type Instance struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ChatCLIInstanceSpec   `json:"spec,omitempty"`
-	Status ChatCLIInstanceStatus `json:"status,omitempty"`
+	Spec   InstanceSpec   `json:"spec,omitempty"`
+	Status InstanceStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// ChatCLIInstanceList contains a list of ChatCLIInstance.
-type ChatCLIInstanceList struct {
+// InstanceList contains a list of Instance.
+type InstanceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ChatCLIInstance `json:"items"`
+	Items           []Instance `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&ChatCLIInstance{}, &ChatCLIInstanceList{})
+	SchemeBuilder.Register(&Instance{}, &InstanceList{})
 }

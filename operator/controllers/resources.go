@@ -16,10 +16,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	chatcliv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
 
-func labels(instance *chatcliv1alpha1.ChatCLIInstance) map[string]string {
+func labels(instance *platformv1alpha1.Instance) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       "chatcli",
 		"app.kubernetes.io/instance":   instance.Name,
@@ -28,7 +28,7 @@ func labels(instance *chatcliv1alpha1.ChatCLIInstance) map[string]string {
 }
 
 // reconcileDeployment creates or updates the ChatCLI Deployment.
-func (r *ChatCLIInstanceReconciler) reconcileDeployment(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) reconcileDeployment(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name,
@@ -65,7 +65,7 @@ func (r *ChatCLIInstanceReconciler) reconcileDeployment(ctx context.Context, ins
 	return err
 }
 
-func (r *ChatCLIInstanceReconciler) buildPodSpec(instance *chatcliv1alpha1.ChatCLIInstance) corev1.PodSpec {
+func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) corev1.PodSpec {
 	// Build container args
 	args := r.buildContainerArgs(instance)
 
@@ -231,7 +231,7 @@ func (r *ChatCLIInstanceReconciler) buildPodSpec(instance *chatcliv1alpha1.ChatC
 	return podSpec
 }
 
-func (r *ChatCLIInstanceReconciler) buildContainerArgs(instance *chatcliv1alpha1.ChatCLIInstance) []string {
+func (r *InstanceReconciler) buildContainerArgs(instance *platformv1alpha1.Instance) []string {
 	var args []string
 
 	port := int32(50051)
@@ -287,7 +287,7 @@ func (r *ChatCLIInstanceReconciler) buildContainerArgs(instance *chatcliv1alpha1
 }
 
 // reconcileService creates or updates the ClusterIP Service for gRPC.
-func (r *ChatCLIInstanceReconciler) reconcileService(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) reconcileService(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name,
@@ -335,7 +335,7 @@ func (r *ChatCLIInstanceReconciler) reconcileService(ctx context.Context, instan
 }
 
 // reconcileConfigMap creates or updates the ConfigMap with LLM/watcher env vars.
-func (r *ChatCLIInstanceReconciler) reconcileConfigMap(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) reconcileConfigMap(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name,
@@ -377,7 +377,7 @@ func (r *ChatCLIInstanceReconciler) reconcileConfigMap(ctx context.Context, inst
 }
 
 // reconcileWatchConfigMap creates the ConfigMap with multi-target watch config YAML.
-func (r *ChatCLIInstanceReconciler) reconcileWatchConfigMap(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) reconcileWatchConfigMap(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name + "-watch-config",
@@ -400,7 +400,7 @@ func (r *ChatCLIInstanceReconciler) reconcileWatchConfigMap(ctx context.Context,
 }
 
 // buildWatchConfigYAML generates the multi-target watch config YAML from the CRD spec.
-func buildWatchConfigYAML(watcher *chatcliv1alpha1.WatcherSpec) string {
+func buildWatchConfigYAML(watcher *platformv1alpha1.WatcherSpec) string {
 	var b strings.Builder
 
 	if watcher.Interval != "" {
@@ -442,7 +442,7 @@ func buildWatchConfigYAML(watcher *chatcliv1alpha1.WatcherSpec) string {
 }
 
 // reconcileServiceAccount creates or updates the ServiceAccount.
-func (r *ChatCLIInstanceReconciler) reconcileServiceAccount(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) reconcileServiceAccount(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name,
@@ -492,7 +492,7 @@ func watcherPolicyRules() []rbacv1.PolicyRule {
 }
 
 // needsClusterRBAC returns true if multi-target watches span multiple namespaces.
-func needsClusterRBAC(instance *chatcliv1alpha1.ChatCLIInstance) bool {
+func needsClusterRBAC(instance *platformv1alpha1.Instance) bool {
 	if instance.Spec.Watcher == nil || len(instance.Spec.Watcher.Targets) <= 1 {
 		return false
 	}
@@ -508,7 +508,7 @@ func needsClusterRBAC(instance *chatcliv1alpha1.ChatCLIInstance) bool {
 }
 
 // reconcileRBAC creates Role + RoleBinding (or ClusterRole + ClusterRoleBinding for multi-namespace).
-func (r *ChatCLIInstanceReconciler) reconcileRBAC(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) reconcileRBAC(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	if needsClusterRBAC(instance) {
 		return r.reconcileClusterRBAC(ctx, instance)
 	}
@@ -516,7 +516,7 @@ func (r *ChatCLIInstanceReconciler) reconcileRBAC(ctx context.Context, instance 
 }
 
 // reconcileNamespacedRBAC creates Role + RoleBinding for single-namespace watcher access.
-func (r *ChatCLIInstanceReconciler) reconcileNamespacedRBAC(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) reconcileNamespacedRBAC(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	role := &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name + "-watcher",
@@ -566,7 +566,7 @@ func (r *ChatCLIInstanceReconciler) reconcileNamespacedRBAC(ctx context.Context,
 }
 
 // reconcileClusterRBAC creates ClusterRole + ClusterRoleBinding for multi-namespace watcher access.
-func (r *ChatCLIInstanceReconciler) reconcileClusterRBAC(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) reconcileClusterRBAC(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	clusterRole := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: instance.Namespace + "-" + instance.Name + "-watcher",
@@ -608,7 +608,7 @@ func (r *ChatCLIInstanceReconciler) reconcileClusterRBAC(ctx context.Context, in
 }
 
 // reconcilePVC creates the PersistentVolumeClaim for session persistence.
-func (r *ChatCLIInstanceReconciler) reconcilePVC(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) reconcilePVC(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	pvcName := instance.Name + "-sessions"
 
 	// Check if PVC already exists (PVCs are immutable after creation)

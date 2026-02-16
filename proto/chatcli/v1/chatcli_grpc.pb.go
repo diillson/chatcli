@@ -33,6 +33,8 @@ const (
 	ChatCLIService_GetServerInfo_FullMethodName      = "/chatcli.v1.ChatCLIService/GetServerInfo"
 	ChatCLIService_GetWatcherStatus_FullMethodName   = "/chatcli.v1.ChatCLIService/GetWatcherStatus"
 	ChatCLIService_Health_FullMethodName             = "/chatcli.v1.ChatCLIService/Health"
+	ChatCLIService_GetAlerts_FullMethodName          = "/chatcli.v1.ChatCLIService/GetAlerts"
+	ChatCLIService_AnalyzeIssue_FullMethodName       = "/chatcli.v1.ChatCLIService/AnalyzeIssue"
 )
 
 // ChatCLIServiceClient is the client API for ChatCLIService service.
@@ -61,6 +63,10 @@ type ChatCLIServiceClient interface {
 	GetWatcherStatus(ctx context.Context, in *GetWatcherStatusRequest, opts ...grpc.CallOption) (*GetWatcherStatusResponse, error)
 	// Health check for load balancers and k8s probes.
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
+	// GetAlerts returns current watcher alerts (anomalies detected by the K8s watcher).
+	GetAlerts(ctx context.Context, in *GetAlertsRequest, opts ...grpc.CallOption) (*GetAlertsResponse, error)
+	// AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
+	AnalyzeIssue(ctx context.Context, in *AnalyzeIssueRequest, opts ...grpc.CallOption) (*AnalyzeIssueResponse, error)
 }
 
 type chatCLIServiceClient struct {
@@ -183,6 +189,26 @@ func (c *chatCLIServiceClient) Health(ctx context.Context, in *HealthRequest, op
 	return out, nil
 }
 
+func (c *chatCLIServiceClient) GetAlerts(ctx context.Context, in *GetAlertsRequest, opts ...grpc.CallOption) (*GetAlertsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAlertsResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_GetAlerts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) AnalyzeIssue(ctx context.Context, in *AnalyzeIssueRequest, opts ...grpc.CallOption) (*AnalyzeIssueResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AnalyzeIssueResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_AnalyzeIssue_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChatCLIServiceServer is the server API for ChatCLIService service.
 // All implementations must embed UnimplementedChatCLIServiceServer
 // for forward compatibility.
@@ -209,6 +235,10 @@ type ChatCLIServiceServer interface {
 	GetWatcherStatus(context.Context, *GetWatcherStatusRequest) (*GetWatcherStatusResponse, error)
 	// Health check for load balancers and k8s probes.
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
+	// GetAlerts returns current watcher alerts (anomalies detected by the K8s watcher).
+	GetAlerts(context.Context, *GetAlertsRequest) (*GetAlertsResponse, error)
+	// AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
+	AnalyzeIssue(context.Context, *AnalyzeIssueRequest) (*AnalyzeIssueResponse, error)
 	mustEmbedUnimplementedChatCLIServiceServer()
 }
 
@@ -248,6 +278,12 @@ func (UnimplementedChatCLIServiceServer) GetWatcherStatus(context.Context, *GetW
 }
 func (UnimplementedChatCLIServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Health not implemented")
+}
+func (UnimplementedChatCLIServiceServer) GetAlerts(context.Context, *GetAlertsRequest) (*GetAlertsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAlerts not implemented")
+}
+func (UnimplementedChatCLIServiceServer) AnalyzeIssue(context.Context, *AnalyzeIssueRequest) (*AnalyzeIssueResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AnalyzeIssue not implemented")
 }
 func (UnimplementedChatCLIServiceServer) mustEmbedUnimplementedChatCLIServiceServer() {}
 func (UnimplementedChatCLIServiceServer) testEmbeddedByValue()                        {}
@@ -432,6 +468,42 @@ func _ChatCLIService_Health_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatCLIService_GetAlerts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAlertsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).GetAlerts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_GetAlerts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).GetAlerts(ctx, req.(*GetAlertsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_AnalyzeIssue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AnalyzeIssueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).AnalyzeIssue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_AnalyzeIssue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).AnalyzeIssue(ctx, req.(*AnalyzeIssueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChatCLIService_ServiceDesc is the grpc.ServiceDesc for ChatCLIService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -470,6 +542,14 @@ var ChatCLIService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Health",
 			Handler:    _ChatCLIService_Health_Handler,
+		},
+		{
+			MethodName: "GetAlerts",
+			Handler:    _ChatCLIService_GetAlerts_Handler,
+		},
+		{
+			MethodName: "AnalyzeIssue",
+			Handler:    _ChatCLIService_AnalyzeIssue_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
