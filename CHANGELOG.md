@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.57.0](https://github.com/diillson/chatcli/compare/v1.56.1...v1.57.0) (2026-02-16)
+
+
+### Features
+
+* multi-target K8s watcher with Prometheus scraping, Operator CRD, and Helm support ([#551](https://github.com/diillson/chatcli/issues/551)) ([60e2722](https://github.com/diillson/chatcli/commit/60e27228dbb66d073a38627ca1654c686fc80c3b))
+
 ## [1.56.1](https://github.com/diillson/chatcli/compare/v1.56.0...v1.56.1) (2026-02-15)
 
 
