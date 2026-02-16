@@ -13,9 +13,12 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/metrics"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
+	"github.com/diillson/chatcli/version"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -31,31 +34,60 @@ type Config struct {
 	Provider         string
 	Model            string
 	EnableReflection bool // enable gRPC reflection (default: false, check CHATCLI_GRPC_REFLECTION env)
+	MetricsPort      int  // Prometheus metrics HTTP port (0 = disabled, default: 9090)
 }
 
 // Server wraps the gRPC server and its dependencies.
 type Server struct {
-	config     Config
-	grpcServer *grpc.Server
-	handler    *Handler
-	logger     *zap.Logger
+	config        Config
+	grpcServer    *grpc.Server
+	handler       *Handler
+	logger        *zap.Logger
+	metricsServer *metrics.Server
 }
 
 // New creates a new ChatCLI gRPC server.
 func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logger *zap.Logger) *Server {
 	authInterceptor := NewTokenAuthInterceptor(cfg.Token, logger)
 
+	// Build interceptor chains — metrics first (outermost), then recovery, logging, auth
+	unaryChain := []grpc.UnaryServerInterceptor{
+		recoveryUnaryInterceptor(logger),
+		loggingUnaryInterceptor(logger),
+		authInterceptor.Unary(),
+	}
+	streamChain := []grpc.StreamServerInterceptor{
+		recoveryStreamInterceptor(logger),
+		loggingStreamInterceptor(logger),
+		authInterceptor.Stream(),
+	}
+
+	// Metrics setup (gRPC interceptors + LLM/session/server metrics)
+	var (
+		grpcMetrics    *metrics.GRPCMetrics
+		llmMetrics     *metrics.LLMMetrics
+		sessionMetrics *metrics.SessionMetrics
+		metricsServer  *metrics.Server
+	)
+
+	if cfg.MetricsPort > 0 {
+		grpcMetrics = metrics.NewGRPCMetrics()
+		llmMetrics = metrics.NewLLMMetrics()
+		sessionMetrics = metrics.NewSessionMetrics()
+
+		vi := version.GetCurrentVersion()
+		metrics.NewServerMetrics(vi.Version, cfg.Provider, cfg.Model, time.Now())
+
+		// Prepend metrics interceptors (outermost in chain)
+		unaryChain = append([]grpc.UnaryServerInterceptor{grpcMetrics.UnaryInterceptor()}, unaryChain...)
+		streamChain = append([]grpc.StreamServerInterceptor{grpcMetrics.StreamInterceptor()}, streamChain...)
+
+		metricsServer = metrics.NewServer(cfg.MetricsPort, logger)
+	}
+
 	opts := []grpc.ServerOption{
-		grpc.ChainUnaryInterceptor(
-			recoveryUnaryInterceptor(logger),
-			loggingUnaryInterceptor(logger),
-			authInterceptor.Unary(),
-		),
-		grpc.ChainStreamInterceptor(
-			recoveryStreamInterceptor(logger),
-			loggingStreamInterceptor(logger),
-			authInterceptor.Stream(),
-		),
+		grpc.ChainUnaryInterceptor(unaryChain...),
+		grpc.ChainStreamInterceptor(streamChain...),
 	}
 
 	// TLS configuration
@@ -75,6 +107,14 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 	grpcServer := grpc.NewServer(opts...)
 	handler := NewHandler(llmMgr, sessionStore, logger, cfg.Provider, cfg.Model)
 
+	// Inject optional metrics recorders into handler
+	if llmMetrics != nil {
+		handler.llmMetrics = llmMetrics
+	}
+	if sessionMetrics != nil {
+		handler.sessionMetrics = sessionMetrics
+	}
+
 	pb.RegisterChatCLIServiceServer(grpcServer, handler)
 
 	// gRPC reflection is gated behind config or env var to avoid exposing the
@@ -86,16 +126,22 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 	}
 
 	return &Server{
-		config:     cfg,
-		grpcServer: grpcServer,
-		handler:    handler,
-		logger:     logger,
+		config:        cfg,
+		grpcServer:    grpcServer,
+		handler:       handler,
+		logger:        logger,
+		metricsServer: metricsServer,
 	}
 }
 
 // Start begins listening and serving gRPC requests.
 // It blocks until the server is stopped via signal or Stop().
 func (s *Server) Start() error {
+	// Start metrics HTTP server before gRPC (non-blocking)
+	if s.metricsServer != nil {
+		s.metricsServer.Start()
+	}
+
 	addr := fmt.Sprintf(":%d", s.config.Port)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -108,6 +154,9 @@ func (s *Server) Start() error {
 	go func() {
 		sig := <-sigChan
 		s.logger.Info("Received shutdown signal", zap.String("signal", sig.String()))
+		if s.metricsServer != nil {
+			s.metricsServer.Stop()
+		}
 		s.grpcServer.GracefulStop()
 	}()
 
@@ -117,11 +166,15 @@ func (s *Server) Start() error {
 		zap.String("model", s.config.Model),
 		zap.Bool("auth_enabled", s.config.Token != ""),
 		zap.Bool("tls_enabled", s.config.TLSCertFile != ""),
+		zap.Int("metrics_port", s.config.MetricsPort),
 	)
 
 	fmt.Printf("🚀 ChatCLI server listening on %s\n", addr)
 	if s.config.Token != "" {
 		fmt.Println("🔒 Authentication enabled (Bearer token required)")
+	}
+	if s.config.MetricsPort > 0 {
+		fmt.Printf("📊 Prometheus metrics on :%d/metrics\n", s.config.MetricsPort)
 	}
 
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -134,6 +187,9 @@ func (s *Server) Start() error {
 
 // Stop gracefully stops the server.
 func (s *Server) Stop() {
+	if s.metricsServer != nil {
+		s.metricsServer.Stop()
+	}
 	s.grpcServer.GracefulStop()
 }
 

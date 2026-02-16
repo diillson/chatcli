@@ -11,5 +11,11 @@ spec:
       targetPort: grpc
       protocol: TCP
       name: grpc
+    {{- if .Values.server.metricsPort }}
+    - port: {{ .Values.server.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
   selector:
     {{- include "chatcli.selectorLabels" . | nindent 4 }}

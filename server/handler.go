@@ -12,8 +12,11 @@ import (
 	"strings"
 	"sync"
 
+	"time"
+
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/metrics"
 	"github.com/diillson/chatcli/models"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"github.com/diillson/chatcli/version"
@@ -46,6 +49,10 @@ type Handler struct {
 	watcherStatsFunc   func() (alertCount, snapshotCount, podCount int)
 	watcherDeployment  string
 	watcherNamespace   string
+
+	// Prometheus metrics (optional, nil when metrics are disabled)
+	llmMetrics     *metrics.LLMMetrics
+	sessionMetrics *metrics.SessionMetrics
 }
 
 // SessionStore abstracts session persistence for testability.
@@ -106,6 +113,7 @@ func (h *Handler) enrichPrompt(prompt string) string {
 // getClient resolves the LLM client to use, optionally overriding provider/model.
 // If clientAPIKey is non-empty or providerConfig has entries, creates a new client
 // using the caller's credentials instead of the server's default ones.
+// When metrics are enabled, the returned client is wrapped with instrumentation.
 func (h *Handler) getClient(provider, model, clientAPIKey string, providerConfig map[string]string) (client.LLMClient, error) {
 	if provider == "" {
 		provider = h.defaultProvider
@@ -114,24 +122,52 @@ func (h *Handler) getClient(provider, model, clientAPIKey string, providerConfig
 		model = h.defaultModel
 	}
 
+	var (
+		c   client.LLMClient
+		err error
+	)
+
 	// Client-forwarded credentials with provider-specific config (StackSpot, Ollama, etc.)
 	if len(providerConfig) > 0 {
 		h.logger.Info("Using client-provided config",
 			zap.String("provider", provider),
 			zap.Int("config_keys", len(providerConfig)),
 		)
-		return h.llmManager.CreateClientWithConfig(provider, model, clientAPIKey, providerConfig)
-	}
-
-	// Client-forwarded API key only (OpenAI, Claude, Google, xAI)
-	if clientAPIKey != "" {
+		c, err = h.llmManager.CreateClientWithConfig(provider, model, clientAPIKey, providerConfig)
+	} else if clientAPIKey != "" {
+		// Client-forwarded API key only (OpenAI, Claude, Google, xAI)
 		h.logger.Info("Using client-provided API key",
 			zap.String("provider", provider),
 		)
-		return h.llmManager.CreateClientWithKey(provider, model, clientAPIKey)
+		c, err = h.llmManager.CreateClientWithKey(provider, model, clientAPIKey)
+	} else {
+		c, err = h.llmManager.GetClient(provider, model)
 	}
 
-	return h.llmManager.GetClient(provider, model)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wrap with metrics instrumentation if enabled
+	if h.llmMetrics != nil {
+		return client.NewInstrumentedClient(c, &llmMetricsAdapter{m: h.llmMetrics}, provider), nil
+	}
+
+	return c, nil
+}
+
+// llmMetricsAdapter bridges metrics.LLMMetrics to client.MetricsRecorder interface.
+type llmMetricsAdapter struct {
+	m *metrics.LLMMetrics
+}
+
+func (a *llmMetricsAdapter) RecordRequest(provider, model, status string, duration time.Duration) {
+	a.m.RequestsTotal.WithLabelValues(provider, model, status).Inc()
+	a.m.RequestDuration.WithLabelValues(provider, model).Observe(duration.Seconds())
+}
+
+func (a *llmMetricsAdapter) RecordError(provider, model, errorType string) {
+	a.m.ErrorsTotal.WithLabelValues(provider, model, errorType).Inc()
 }
 
 func protoToHistory(msgs []*pb.ChatMessage) []models.Message {
@@ -241,6 +277,10 @@ func (h *Handler) StreamPrompt(req *pb.StreamPromptRequest, stream pb.ChatCLISer
 // InteractiveSession handles bidirectional streaming for interactive mode.
 func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSessionServer) error {
 	h.logger.Info("Interactive session started")
+	if h.sessionMetrics != nil {
+		h.sessionMetrics.ActiveSessions.Inc()
+		defer h.sessionMetrics.ActiveSessions.Dec()
+	}
 
 	var (
 		history []models.Message
@@ -331,6 +371,9 @@ func (h *Handler) ListSessions(ctx context.Context, req *pb.ListSessionsRequest)
 		return nil, status.Errorf(codes.Internal, "failed to list sessions: %v", err)
 	}
 
+	if h.sessionMetrics != nil {
+		h.sessionMetrics.OperationsTotal.WithLabelValues("list").Inc()
+	}
 	return &pb.ListSessionsResponse{Sessions: sessions}, nil
 }
 
@@ -349,6 +392,9 @@ func (h *Handler) LoadSession(ctx context.Context, req *pb.LoadSessionRequest) (
 		return nil, status.Errorf(codes.NotFound, "session not found: %v", err)
 	}
 
+	if h.sessionMetrics != nil {
+		h.sessionMetrics.OperationsTotal.WithLabelValues("load").Inc()
+	}
 	return &pb.LoadSessionResponse{Messages: historyToProto(msgs)}, nil
 }
 
@@ -367,6 +413,9 @@ func (h *Handler) SaveSession(ctx context.Context, req *pb.SaveSessionRequest) (
 		return nil, status.Errorf(codes.Internal, "failed to save session: %v", err)
 	}
 
+	if h.sessionMetrics != nil {
+		h.sessionMetrics.OperationsTotal.WithLabelValues("save").Inc()
+	}
 	return &pb.SaveSessionResponse{Success: true}, nil
 }
 
@@ -384,6 +433,9 @@ func (h *Handler) DeleteSession(ctx context.Context, req *pb.DeleteSessionReques
 		return nil, status.Errorf(codes.Internal, "failed to delete session: %v", err)
 	}
 
+	if h.sessionMetrics != nil {
+		h.sessionMetrics.OperationsTotal.WithLabelValues("delete").Inc()
+	}
 	return &pb.DeleteSessionResponse{Success: true}, nil
 }
 

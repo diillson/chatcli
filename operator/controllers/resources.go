@@ -88,6 +88,11 @@ func (r *ChatCLIInstanceReconciler) buildPodSpec(instance *chatcliv1alpha1.ChatC
 		port = instance.Spec.Server.Port
 	}
 
+	metricsPort := int32(9090)
+	if instance.Spec.Server.MetricsPort > 0 {
+		metricsPort = instance.Spec.Server.MetricsPort
+	}
+
 	container := corev1.Container{
 		Name:            "chatcli",
 		Image:           fmt.Sprintf("%s:%s", repo, tag),
@@ -98,6 +103,11 @@ func (r *ChatCLIInstanceReconciler) buildPodSpec(instance *chatcliv1alpha1.ChatC
 			{
 				Name:          "grpc",
 				ContainerPort: port,
+				Protocol:      corev1.ProtocolTCP,
+			},
+			{
+				Name:          "metrics",
+				ContainerPort: metricsPort,
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
@@ -230,6 +240,13 @@ func (r *ChatCLIInstanceReconciler) buildContainerArgs(instance *chatcliv1alpha1
 	}
 	args = append(args, "--port", strconv.Itoa(int(port)))
 
+	// Metrics port (default 9090, enables Prometheus endpoint)
+	metricsPort := int32(9090)
+	if instance.Spec.Server.MetricsPort > 0 {
+		metricsPort = instance.Spec.Server.MetricsPort
+	}
+	args = append(args, "--metrics-port", strconv.Itoa(int(metricsPort)))
+
 	if instance.Spec.Provider != "" {
 		args = append(args, "--provider", instance.Spec.Provider)
 	}
@@ -288,6 +305,11 @@ func (r *ChatCLIInstanceReconciler) reconcileService(ctx context.Context, instan
 			port = instance.Spec.Server.Port
 		}
 
+		metricsPort := int32(9090)
+		if instance.Spec.Server.MetricsPort > 0 {
+			metricsPort = instance.Spec.Server.MetricsPort
+		}
+
 		svc.Labels = labels(instance)
 		svc.Spec = corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeClusterIP,
@@ -297,6 +319,12 @@ func (r *ChatCLIInstanceReconciler) reconcileService(ctx context.Context, instan
 					Name:       "grpc",
 					Port:       port,
 					TargetPort: intstr.FromString("grpc"),
+					Protocol:   corev1.ProtocolTCP,
+				},
+				{
+					Name:       "metrics",
+					Port:       metricsPort,
+					TargetPort: intstr.FromString("metrics"),
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},

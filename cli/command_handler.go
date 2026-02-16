@@ -105,6 +105,9 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case strings.HasPrefix(userInput, "/watch"):
 		ch.handleWatchCommand(userInput)
 		return false
+	case userInput == "/metrics":
+		ch.handleMetricsCommand()
+		return false
 	case userInput == "/reset" || userInput == "/redraw" || userInput == "/clear":
 		fmt.Print("\033[0m")
 		os.Stdout.Sync()
@@ -971,4 +974,100 @@ func parseGitURL(rawURL string) (cloneURL, branch, subDir string) {
 
 	// Plain URL — return as-is.
 	return rawURL, "", ""
+}
+
+// handleMetricsCommand displays runtime telemetry in the terminal.
+func (ch *CommandHandler) handleMetricsCommand() {
+	c := ch.cli
+
+	fmt.Println()
+	fmt.Println(colorize("  ChatCLI Runtime Metrics", ColorLime))
+	fmt.Println()
+
+	// Provider & Model
+	model := ""
+	if c.Client != nil {
+		model = c.Client.GetModelName()
+	}
+	fmt.Printf("    %s    %s\n", colorize("Provider:", ColorCyan), colorize(c.Provider, ColorGray))
+	fmt.Printf("    %s    %s\n", colorize("Model:", ColorCyan), colorize(model, ColorGray))
+
+	// Session info
+	sessionName := c.currentSessionName
+	if sessionName == "" {
+		sessionName = "(unsaved)"
+	}
+	fmt.Printf("    %s    %s\n", colorize("Session:", ColorCyan), colorize(sessionName, ColorGray))
+	fmt.Printf("    %s    %s\n", colorize("History msgs:", ColorCyan), colorize(strconv.Itoa(len(c.history)), ColorGray))
+
+	// Token usage estimate
+	tokenLimit := c.UserMaxTokens
+	if tokenLimit <= 0 {
+		tokenLimit = c.getMaxTokensForCurrentLLM()
+	}
+	tokenUsed := 0
+	for _, msg := range c.history {
+		tokenUsed += len(msg.Content) / 4 // rough estimate: ~4 chars per token
+	}
+	tokenPct := 0.0
+	if tokenLimit > 0 {
+		tokenPct = float64(tokenUsed) / float64(tokenLimit) * 100
+	}
+	fmt.Printf("    %s    %s\n", colorize("Tokens (est.):", ColorCyan),
+		colorize(fmt.Sprintf("%d / %d (%.1f%%)", tokenUsed, tokenLimit, tokenPct), ColorGray))
+
+	// Turn count
+	turns := 0
+	for _, msg := range c.history {
+		if msg.Role == "user" {
+			turns++
+		}
+	}
+	fmt.Printf("    %s    %s\n", colorize("Turns:", ColorCyan), colorize(strconv.Itoa(turns), ColorGray))
+
+	// Go runtime
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	fmt.Println()
+	fmt.Println(colorize("  Go Runtime", ColorLime))
+	fmt.Println()
+	fmt.Printf("    %s    %s\n", colorize("Goroutines:", ColorCyan), colorize(strconv.Itoa(runtime.NumGoroutine()), ColorGray))
+	fmt.Printf("    %s    %s\n", colorize("Alloc:", ColorCyan), colorize(formatBytes(m.Alloc), ColorGray))
+	fmt.Printf("    %s    %s\n", colorize("Sys:", ColorCyan), colorize(formatBytes(m.Sys), ColorGray))
+	fmt.Printf("    %s    %s\n", colorize("GC cycles:", ColorCyan), colorize(strconv.FormatUint(uint64(m.NumGC), 10), ColorGray))
+
+	// Remote connection
+	fmt.Println()
+	fmt.Println(colorize("  Connection", ColorLime))
+	fmt.Println()
+	if c.isRemote {
+		fmt.Printf("    %s    %s\n", colorize("Remote:", ColorCyan), colorize("connected", ColorGreen))
+	} else {
+		fmt.Printf("    %s    %s\n", colorize("Remote:", ColorCyan), colorize("local", ColorGray))
+	}
+
+	// Watcher
+	if c.watchStatusFunc != nil {
+		status := c.watchStatusFunc()
+		if status != "" {
+			fmt.Printf("    %s    %s\n", colorize("Watcher:", ColorCyan), colorize(status, ColorGray))
+		}
+	} else {
+		fmt.Printf("    %s    %s\n", colorize("Watcher:", ColorCyan), colorize("inactive", ColorGray))
+	}
+
+	fmt.Println()
+}
+
+func formatBytes(b uint64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := uint64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }

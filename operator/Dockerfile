@@ -11,8 +11,9 @@ COPY main.go main.go
 COPY api/ api/
 COPY controllers/ controllers/
 
-# Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager main.go
+# Build (TARGETARCH is injected by docker buildx for multi-arch)
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -a -o manager main.go
 
 # Runtime
 FROM gcr.io/distroless/static:nonroot

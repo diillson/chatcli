@@ -10,9 +10,33 @@ O ChatCLI pode ser empacotado como container Docker e deployado no Kubernetes us
 
 ---
 
+## Imagens Oficiais (GHCR)
+
+As imagens Docker oficiais sao publicadas automaticamente no GitHub Container Registry a cada release:
+
+| Imagem | Descricao |
+|--------|-----------|
+| `ghcr.io/diillson/chatcli:latest` | Servidor ChatCLI (gRPC) |
+| `ghcr.io/diillson/chatcli-operator:latest` | Kubernetes Operator |
+
+```bash
+# Puxar a imagem do servidor
+docker pull ghcr.io/diillson/chatcli:latest
+
+# Ou uma versao especifica
+docker pull ghcr.io/diillson/chatcli:v1.57.0
+
+# Puxar a imagem do operator
+docker pull ghcr.io/diillson/chatcli-operator:latest
+```
+
+As imagens suportam **multi-arch** (`linux/amd64` e `linux/arm64`).
+
+---
+
 ## Docker
 
-### Build da Imagem
+### Build da Imagem (Local)
 
 ```bash
 # Na raiz do projeto
@@ -196,10 +220,13 @@ O chart automaticamente:
 | Valor | Descricao | Padrao |
 |-------|-----------|--------|
 | `replicaCount` | Numero de replicas | `1` |
-| `image.repository` | Repositorio da imagem | `chatcli` |
+| `image.repository` | Repositorio da imagem | `ghcr.io/diillson/chatcli` |
 | `image.tag` | Tag da imagem | `latest` |
 | `server.port` | Porta gRPC | `50051` |
+| `server.metricsPort` | Porta HTTP para Prometheus metrics (0 = desabilitado) | `9090` |
 | `server.token` | Token de autenticacao | `""` |
+| `serviceMonitor.enabled` | Criar ServiceMonitor (requer Prometheus Operator) | `false` |
+| `serviceMonitor.interval` | Intervalo de scrape do Prometheus | `30s` |
 
 #### TLS
 
