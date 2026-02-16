@@ -1215,11 +1215,25 @@ chatcli serve --watch-deployment myapp --watch-namespace production
 
 Com multiplos targets, o **MultiSummarizer** gerencia o contexto LLM automaticamente: targets com problemas recebem contexto detalhado, targets saudaveis recebem one-liners compactos, respeitando o limite de `maxContextChars`.
 
-### K8s Operator
+### K8s Operator — AIOps Platform
 
-Para ambientes Kubernetes, o **ChatCLI Operator** gerencia instancias via CRD (`ChatCLIInstance`), suportando multi-target, Prometheus metrics e RBAC automatico.
+O **ChatCLI Operator** vai alem do gerenciamento de instancias. Ele implementa uma **plataforma AIOps autonoma** com 6 CRDs (`platform.chatcli.io/v1alpha1`):
 
-> Documentacao completa em [diillson.github.io/chatcli/docs/features/k8s-watcher](https://diillson.github.io/chatcli/docs/features/k8s-watcher/)
+| CRD | Descricao |
+|-----|-----------|
+| **Instance** | Gerencia instancias do servidor ChatCLI (Deployment, Service, RBAC, PVC) |
+| **Anomaly** | Sinal bruto detectado pelo K8s Watcher (restarts, OOM, falhas de deploy) |
+| **Issue** | Incidente correlacionado agrupando multiplas anomalias |
+| **AIInsight** | Analise de causa raiz gerada por IA com acoes sugeridas |
+| **RemediationPlan** | Acoes concretas para resolver o problema (scale, restart, rollback) |
+| **Runbook** | Procedimentos operacionais manuais (opcional — IA gera acoes automaticamente) |
+
+**Pipeline autonomo**: Deteccao → Correlacao → Analise IA → Remediacao → Resolucao
+
+A IA analisa o problema e retorna acoes estruturadas (`ScaleDeployment`, `RestartDeployment`, `RollbackDeployment`, `PatchConfig`) que sao executadas automaticamente. Nenhuma dependencia externa alem do provedor LLM.
+
+> Documentacao completa em [diillson.github.io/chatcli/docs/features/k8s-operator](https://diillson.github.io/chatcli/docs/features/k8s-operator/)
+> Deep-dive AIOps em [diillson.github.io/chatcli/docs/features/aiops-platform](https://diillson.github.io/chatcli/docs/features/aiops-platform/)
 
 --------
 
@@ -1231,14 +1245,18 @@ O projeto é modular e organizado em pacotes:
 -  config : Lida com a configuração via constantes.
 -  i18n : Centraliza a lógica de internacionalização e os arquivos de tradução.
 -  llm : Lida com a comunicação e gerência dos clientes LLM.
--  server : Servidor gRPC para acesso remoto.
+-  server : Servidor gRPC para acesso remoto (inclui RPCs `GetAlerts` e `AnalyzeIssue`).
 -  client/remote : Cliente gRPC que implementa a interface LLMClient.
 -  k8s : Kubernetes Watcher (collectors, store, summarizer).
+-  proto : Definicoes protobuf do servico gRPC (`chatcli.proto`).
+-  operator : Kubernetes Operator — plataforma AIOps com 6 CRDs e pipeline autonomo.
+    -  operator/api/v1alpha1 : Tipos dos CRDs (Instance, Anomaly, Issue, AIInsight, RemediationPlan, Runbook).
+    -  operator/controllers : Reconcilers, correlation engine, WatcherBridge, gRPC client.
 -  utils : Contém funções auxiliares para arquivos, Git, shell, HTTP, etc.
 -  models : Define as estruturas de dados.
 -  version : Gerencia informações de versão.
 
-Principais bibliotecas Go utilizadas: Zap, go-prompt, Glamour, Lumberjack, Godotenv, golang.org/x/text, google.golang.org/grpc, k8s.io/client-go.
+Principais bibliotecas Go utilizadas: Zap, go-prompt, Glamour, Lumberjack, Godotenv, golang.org/x/text, google.golang.org/grpc, k8s.io/client-go, controller-runtime.
 
 --------
 

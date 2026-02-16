@@ -209,10 +209,79 @@ O servidor implementa um servico gRPC com os seguintes RPCs:
 | `Health` | Health check do servidor |
 | `GetServerInfo` | Informacoes do servidor (versao, provider, modelo, watcher) |
 | `GetWatcherStatus` | Status do K8s Watcher (se ativo) |
+| `GetAlerts` | Retorna alertas ativos do K8s Watcher (usado pelo Operator) |
+| `AnalyzeIssue` | Envia contexto de um Issue ao LLM e retorna analise + acoes sugeridas |
 
 ### Streaming Progressivo
 
 O RPC `StreamPrompt` divide a resposta em chunks de ~200 caracteres em fronteiras naturais (paragrafos, linhas, frases), proporcionando uma experiencia de resposta progressiva no cliente.
+
+### RPCs da Plataforma AIOps
+
+Os RPCs `GetAlerts` e `AnalyzeIssue` sao usados pelo [Operator AIOps](/docs/features/k8s-operator/) para alimentar o pipeline autonomo de remediacao.
+
+#### GetAlerts
+
+Retorna os alertas ativos detectados pelo K8s Watcher:
+
+```protobuf
+rpc GetAlerts(GetAlertsRequest) returns (GetAlertsResponse);
+
+message GetAlertsRequest {
+  string namespace = 1;     // Filtrar por namespace (vazio = todos)
+  string deployment = 2;    // Filtrar por deployment (vazio = todos)
+}
+
+message AlertInfo {
+  string alert_type = 1;    // HighRestartCount, OOMKilled, PodNotReady, DeploymentFailing
+  string deployment = 2;
+  string namespace = 3;
+  string message = 4;
+  string severity = 5;      // critical, warning
+  int64 timestamp = 6;
+}
+```
+
+O handler itera sobre os `ObservabilityStore` de cada target do MultiWatcher e retorna alertas ativos. Suporta filtragem por namespace e deployment.
+
+#### AnalyzeIssue
+
+Envia o contexto de um Issue ao LLM e retorna analise estruturada com acoes sugeridas:
+
+```protobuf
+rpc AnalyzeIssue(AnalyzeIssueRequest) returns (AnalyzeIssueResponse);
+
+message AnalyzeIssueRequest {
+  string issue_name = 1;
+  string namespace = 2;
+  string resource_kind = 3;
+  string resource_name = 4;
+  string signal_type = 5;
+  string severity = 6;
+  string description = 7;
+  int32 risk_score = 8;
+  string provider = 9;
+  string model = 10;
+}
+
+message SuggestedAction {
+  string name = 1;          // "Restart deployment"
+  string action = 2;        // "RestartDeployment"
+  string description = 3;   // "Restart pods to reclaim leaked memory"
+  map<string, string> params = 4;
+}
+
+message AnalyzeIssueResponse {
+  string analysis = 1;
+  float confidence = 2;     // 0.0-1.0
+  repeated string recommendations = 3;
+  string provider = 4;
+  string model = 5;
+  repeated SuggestedAction suggested_actions = 6;
+}
+```
+
+O handler constroi um prompt estruturado que inclui a lista de acoes validas (`ScaleDeployment`, `RestartDeployment`, `RollbackDeployment`, `PatchConfig`) e solicita resposta em JSON. O parsing suporta remocao de markdown codeblocks, clamp de confidence e fallback em caso de erro.
 
 ---
 
@@ -284,5 +353,6 @@ CHATCLI_WATCH_MAX_LOG_LINES=100
 
 - [Conectar ao servidor remotamente](/docs/features/remote-connect/)
 - [K8s Watcher (multi-target + Prometheus)](/docs/features/k8s-watcher/)
-- [K8s Operator (CRD)](/docs/features/k8s-operator/)
+- [K8s Operator (AIOps)](/docs/features/k8s-operator/)
+- [AIOps Platform (deep-dive)](/docs/features/aiops-platform/)
 - [Deploy com Docker e Helm](/docs/getting-started/docker-deployment/)
