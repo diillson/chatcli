@@ -53,15 +53,33 @@ ollama:
   baseUrl: "http://ollama:11434"
   model: ""
 
-# Kubernetes Watcher mode (Phase 3)
+# Kubernetes Watcher mode
 watcher:
   enabled: false
-  # Target deployment to monitor
+
+  # Single-target mode (legacy) — use "deployment" + "namespace"
   deployment: ""
   namespace: ""
+
+  # Multi-target mode — use "targets" list (takes precedence over deployment/namespace)
+  # targets:
+  #   - deployment: api-gateway
+  #     namespace: production
+  #     metricsPort: 9090
+  #     metricsPath: "/metrics"
+  #     metricsFilter: ["http_requests_*", "http_request_duration_*"]
+  #   - deployment: auth-service
+  #     namespace: production
+  #     metricsPort: 9090
+  #   - deployment: worker
+  #     namespace: batch
+  targets: []
+
   interval: "30s"
   window: "2h"
   maxLogLines: 100
+  # Budget maximo de caracteres para contexto LLM (multi-target)
+  maxContextChars: 8000
 
 serviceAccount:
   create: true

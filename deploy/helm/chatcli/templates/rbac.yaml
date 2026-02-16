@@ -1,5 +1,21 @@
 {{- if .Values.rbac.create -}}
-{{- if .Values.rbac.clusterWide }}
+{{- /*
+  Auto-detect if ClusterRole is needed:
+  1. Explicitly set via rbac.clusterWide: true
+  2. Multi-target watcher with targets in different namespaces
+*/ -}}
+{{- $needsClusterWide := .Values.rbac.clusterWide -}}
+{{- if and (not $needsClusterWide) .Values.watcher.enabled .Values.watcher.targets -}}
+  {{- $namespaces := dict -}}
+  {{- range .Values.watcher.targets -}}
+    {{- $ns := .namespace | default "default" -}}
+    {{- $_ := set $namespaces $ns true -}}
+  {{- end -}}
+  {{- if gt (len $namespaces) 1 -}}
+    {{- $needsClusterWide = true -}}
+  {{- end -}}
+{{- end -}}
+{{- if $needsClusterWide }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

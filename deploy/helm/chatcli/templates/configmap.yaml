@@ -19,7 +19,7 @@ data:
   OLLAMA_MODEL: {{ .Values.ollama.model | quote }}
   {{- end }}
   {{- end }}
-  {{- if .Values.watcher.enabled }}
+  {{- if and .Values.watcher.enabled (not .Values.watcher.targets) .Values.watcher.deployment }}
   CHATCLI_WATCH_DEPLOYMENT: {{ .Values.watcher.deployment | quote }}
   {{- if .Values.watcher.namespace }}
   CHATCLI_WATCH_NAMESPACE: {{ .Values.watcher.namespace | quote }}
@@ -28,3 +28,35 @@ data:
   CHATCLI_WATCH_WINDOW: {{ .Values.watcher.window | quote }}
   CHATCLI_WATCH_MAX_LOG_LINES: {{ .Values.watcher.maxLogLines | quote }}
   {{- end }}
+---
+{{- if and .Values.watcher.enabled .Values.watcher.targets }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chatcli.fullname" . }}-watch-config
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+data:
+  watch-config.yaml: |
+    interval: {{ .Values.watcher.interval | quote }}
+    window: {{ .Values.watcher.window | quote }}
+    maxLogLines: {{ .Values.watcher.maxLogLines }}
+    maxContextChars: {{ .Values.watcher.maxContextChars | default 8000 }}
+    targets:
+    {{- range .Values.watcher.targets }}
+      - deployment: {{ .deployment | quote }}
+        namespace: {{ .namespace | default "default" | quote }}
+        {{- if .metricsPort }}
+        metricsPort: {{ .metricsPort }}
+        {{- end }}
+        {{- if .metricsPath }}
+        metricsPath: {{ .metricsPath | quote }}
+        {{- end }}
+        {{- if .metricsFilter }}
+        metricsFilter:
+        {{- range .metricsFilter }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- end }}
+    {{- end }}
+{{- end }}

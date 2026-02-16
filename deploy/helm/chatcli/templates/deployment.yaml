@@ -44,7 +44,9 @@ spec:
             - "--tls-cert={{ .Values.tls.certFile }}"
             - "--tls-key={{ .Values.tls.keyFile }}"
             {{- end }}
-            {{- if .Values.watcher.enabled }}
+            {{- if and .Values.watcher.enabled .Values.watcher.targets }}
+            - "--watch-config=/etc/chatcli/watch/watch-config.yaml"
+            {{- else if and .Values.watcher.enabled .Values.watcher.deployment }}
             - "--watch-deployment={{ .Values.watcher.deployment }}"
             - "--watch-namespace={{ .Values.watcher.namespace }}"
             - "--watch-interval={{ .Values.watcher.interval }}"
@@ -71,6 +73,9 @@ spec:
           {{- if .Values.tls.existingSecret }}
           {{- $mounts = append $mounts (dict "name" "tls-certs" "mountPath" "/etc/chatcli/tls" "readOnly" true) }}
           {{- end }}
+          {{- if and .Values.watcher.enabled .Values.watcher.targets }}
+          {{- $mounts = append $mounts (dict "name" "watch-config" "mountPath" "/etc/chatcli/watch" "readOnly" true) }}
+          {{- end }}
           {{- if and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem }}
           {{- $mounts = append $mounts (dict "name" "tmp" "mountPath" "/tmp") }}
           {{- end }}
@@ -90,7 +95,7 @@ spec:
               command: ["pidof", "chatcli"]
             initialDelaySeconds: 3
             periodSeconds: 10
-      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) }}
+      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.watcher.enabled .Values.watcher.targets) (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: sessions
@@ -101,6 +106,11 @@ spec:
         - name: tls-certs
           secret:
             secretName: {{ .Values.tls.existingSecret }}
+        {{- end }}
+        {{- if and .Values.watcher.enabled .Values.watcher.targets }}
+        - name: watch-config
+          configMap:
+            name: {{ include "chatcli.fullname" . }}-watch-config
         {{- end }}
         {{- if and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem }}
         - name: tmp
