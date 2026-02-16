@@ -34,6 +34,9 @@ type ResourceWatcher struct {
 	hpaCollector     *HPACollector
 	metricsCollector *MetricsCollector
 	promCollector    *PrometheusCollector // optional: app-level Prometheus metrics
+
+	// Prometheus metrics recorder (optional)
+	metricsRecorder WatcherMetricsRecorder
 }
 
 // NewResourceWatcher creates a new watcher for the given deployment.
@@ -118,10 +121,15 @@ func (w *ResourceWatcher) Start(ctx context.Context) error {
 // collect runs one full collection cycle.
 func (w *ResourceWatcher) collect(ctx context.Context) error {
 	w.logger.Debug("Running collection cycle")
+	start := time.Now()
+	target := w.config.Namespace + "/" + w.config.Deployment
 
 	// 1. Collect deployment + pod status
 	snap, err := w.deployCollector.Collect(ctx)
 	if err != nil {
+		if w.metricsRecorder != nil {
+			w.metricsRecorder.IncrementCollectionErrors(target)
+		}
 		return fmt.Errorf("deployment collection failed: %w", err)
 	}
 
@@ -162,6 +170,20 @@ func (w *ResourceWatcher) collect(ctx context.Context) error {
 	// 7. Detect anomalies
 	w.detectAnomalies(snap)
 
+	// 8. Update Prometheus metrics
+	if w.metricsRecorder != nil {
+		w.metricsRecorder.ObserveCollectionDuration(target, time.Since(start).Seconds())
+		w.metricsRecorder.SetPodsReady(w.config.Namespace, w.config.Deployment, float64(snap.Deployment.ReadyReplicas))
+		w.metricsRecorder.SetPodsDesired(w.config.Namespace, w.config.Deployment, float64(snap.Deployment.Replicas))
+		stats := w.store.Stats()
+		w.metricsRecorder.SetSnapshotsStored(target, float64(stats.SnapshotCount))
+		var totalRestarts int32
+		for _, pod := range snap.Pods {
+			totalRestarts += pod.RestartCount
+		}
+		w.metricsRecorder.SetPodRestarts(target, float64(totalRestarts))
+	}
+
 	w.logger.Debug("Collection cycle complete",
 		zap.Int("pods", len(snap.Pods)),
 		zap.Int("events", len(snap.Events)),
@@ -174,6 +196,7 @@ func (w *ResourceWatcher) collect(ctx context.Context) error {
 // detectAnomalies checks the snapshot for common problems and creates alerts.
 func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 	now := time.Now()
+	target := w.config.Namespace + "/" + w.config.Deployment
 
 	for _, pod := range snap.Pods {
 		// CrashLoopBackOff / High restarts
@@ -185,6 +208,9 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Message:   fmt.Sprintf("Pod %s has %d restarts", pod.Name, pod.RestartCount),
 				Object:    pod.Name,
 			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertHighRestarts))
+			}
 		}
 
 		// OOMKilled
@@ -196,6 +222,9 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Message:   fmt.Sprintf("Pod %s was OOMKilled (exit code %d)", pod.Name, pod.LastTerminated.ExitCode),
 				Object:    pod.Name,
 			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertPodOOMKilled))
+			}
 		}
 
 		// Pod not ready
@@ -207,6 +236,9 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Message:   fmt.Sprintf("Pod %s is running but not ready (%d/%d containers)", pod.Name, pod.ReadyCount, pod.ContainerCount),
 				Object:    pod.Name,
 			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertPodNotReady))
+			}
 		}
 	}
 
@@ -220,6 +252,9 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 			Message:   fmt.Sprintf("Deployment %s has %d/%d replicas ready", d.Name, d.ReadyReplicas, d.Replicas),
 			Object:    d.Name,
 		})
+		if w.metricsRecorder != nil {
+			w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertDeployFailing))
+		}
 	}
 }
 

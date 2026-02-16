@@ -71,6 +71,11 @@ type ServerSpec struct {
 	// +kubebuilder:default=50051
 	Port int32 `json:"port,omitempty"`
 
+	// MetricsPort is the Prometheus metrics HTTP port (0 = disabled).
+	// +kubebuilder:default=9090
+	// +optional
+	MetricsPort int32 `json:"metricsPort,omitempty"`
+
 	// TLS configures TLS for the gRPC server.
 	// +optional
 	TLS *TLSSpec `json:"tls,omitempty"`

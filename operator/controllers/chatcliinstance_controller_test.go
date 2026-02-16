@@ -248,8 +248,11 @@ func TestBuildPodSpec_Container(t *testing.T) {
 	if c.Image != "my-registry/chatcli:v1.0.0" {
 		t.Errorf("expected image 'my-registry/chatcli:v1.0.0', got %q", c.Image)
 	}
-	if len(c.Ports) != 1 || c.Ports[0].ContainerPort != 8080 {
-		t.Errorf("expected port 8080, got %v", c.Ports)
+	if len(c.Ports) != 2 || c.Ports[0].ContainerPort != 8080 {
+		t.Errorf("expected grpc port 8080, got %v", c.Ports)
+	}
+	if c.Ports[1].Name != "metrics" || c.Ports[1].ContainerPort != 9090 {
+		t.Errorf("expected metrics port 9090, got %v", c.Ports[1])
 	}
 	if c.SecurityContext == nil || c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation {
 		t.Error("expected AllowPrivilegeEscalation=false")
@@ -355,8 +358,11 @@ func TestReconcile_CreatesResources(t *testing.T) {
 	if err := c.Get(ctx, types.NamespacedName{Name: "test-chatcli", Namespace: "default"}, &svc); err != nil {
 		t.Errorf("expected Service to be created: %v", err)
 	} else {
-		if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Port != 50051 {
-			t.Errorf("expected port 50051, got %v", svc.Spec.Ports)
+		if len(svc.Spec.Ports) != 2 || svc.Spec.Ports[0].Port != 50051 {
+			t.Errorf("expected grpc port 50051, got %v", svc.Spec.Ports)
+		}
+		if svc.Spec.Ports[1].Name != "metrics" || svc.Spec.Ports[1].Port != 9090 {
+			t.Errorf("expected metrics port 9090, got %v", svc.Spec.Ports[1])
 		}
 	}
 

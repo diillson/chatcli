@@ -151,3 +151,12 @@ func (mw *MultiWatcher) GetStores() map[string]*ObservabilityStore {
 func (mw *MultiWatcher) TargetCount() int {
 	return len(mw.watchers)
 }
+
+// SetMetrics sets the metrics recorder on all managed watchers.
+func (mw *MultiWatcher) SetMetrics(recorder WatcherMetricsRecorder) {
+	mw.mu.Lock()
+	defer mw.mu.Unlock()
+	for _, w := range mw.watchers {
+		w.metricsRecorder = recorder
+	}
+}

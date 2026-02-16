@@ -223,7 +223,10 @@ O chart automaticamente:
 | `image.repository` | Repositorio da imagem | `ghcr.io/diillson/chatcli` |
 | `image.tag` | Tag da imagem | `latest` |
 | `server.port` | Porta gRPC | `50051` |
+| `server.metricsPort` | Porta HTTP para Prometheus metrics (0 = desabilitado) | `9090` |
 | `server.token` | Token de autenticacao | `""` |
+| `serviceMonitor.enabled` | Criar ServiceMonitor (requer Prometheus Operator) | `false` |
+| `serviceMonitor.interval` | Intervalo de scrape do Prometheus | `30s` |
 
 #### TLS
 

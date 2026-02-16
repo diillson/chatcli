@@ -16,18 +16,20 @@ import (
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/k8s"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/metrics"
 	"github.com/diillson/chatcli/server"
 	"go.uber.org/zap"
 )
 
 // ServeOptions holds the flags for the 'serve' subcommand.
 type ServeOptions struct {
-	Port     int
-	Token    string
-	CertFile string
-	KeyFile  string
-	Provider string
-	Model    string
+	Port        int
+	Token       string
+	CertFile    string
+	KeyFile     string
+	Provider    string
+	Model       string
+	MetricsPort int
 
 	// K8s watcher integration (optional)
 	WatchDeployment string
@@ -50,6 +52,7 @@ func RunServe(args []string, llmMgr manager.LLMManager, logger *zap.Logger) erro
 	fs.StringVar(&opts.KeyFile, "tls-key", os.Getenv("CHATCLI_SERVER_TLS_KEY"), "TLS key file path")
 	fs.StringVar(&opts.Provider, "provider", os.Getenv("LLM_PROVIDER"), "Default LLM provider")
 	fs.StringVar(&opts.Model, "model", "", "Default LLM model")
+	fs.IntVar(&opts.MetricsPort, "metrics-port", getEnvInt("CHATCLI_METRICS_PORT", 9090), "Prometheus metrics HTTP port (0 = disabled)")
 
 	// K8s watcher flags
 	fs.StringVar(&opts.WatchDeployment, "watch-deployment", os.Getenv("CHATCLI_WATCH_DEPLOYMENT"), "K8s deployment to monitor (enables watcher)")
@@ -92,6 +95,7 @@ func RunServe(args []string, llmMgr manager.LLMManager, logger *zap.Logger) erro
 		TLSKeyFile:  opts.KeyFile,
 		Provider:    opts.Provider,
 		Model:       opts.Model,
+		MetricsPort: opts.MetricsPort,
 	}
 
 	srv := server.New(cfg, llmMgr, sessionMgr, logger)
@@ -125,6 +129,13 @@ func RunServe(args []string, llmMgr manager.LLMManager, logger *zap.Logger) erro
 		mw, err := k8s.NewMultiWatcher(multiCfg, logger)
 		if err != nil {
 			return fmt.Errorf("failed to create K8s watcher: %w", err)
+		}
+
+		// Wire watcher Prometheus metrics if metrics are enabled
+		if opts.MetricsPort > 0 {
+			wm := metrics.NewWatcherMetrics()
+			wm.TargetsMonitored.Set(float64(mw.TargetCount()))
+			mw.SetMetrics(wm.Recorder())
 		}
 
 		stores := mw.GetStores()
@@ -191,6 +202,7 @@ Flags:
   --tls-key <path>    TLS key file (env: CHATCLI_SERVER_TLS_KEY)
   --provider <name>   Default LLM provider (env: LLM_PROVIDER)
   --model <name>      Default LLM model
+  --metrics-port <n>  Prometheus metrics HTTP port (default: 9090, 0=disabled, env: CHATCLI_METRICS_PORT)
 
   K8s Watcher (optional, enables K8s context injection for all remote clients):
   --watch-config <path>       Multi-target watch config YAML (env: CHATCLI_WATCH_CONFIG)

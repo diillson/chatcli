@@ -14,6 +14,8 @@ fullnameOverride: ""
 # gRPC server configuration
 server:
   port: 50051
+  # Prometheus metrics HTTP port (0 = disabled)
+  metricsPort: 9090
   # Authentication token for gRPC server (leave empty to disable auth)
   token: ""
 
@@ -138,6 +140,13 @@ securityContext:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Prometheus ServiceMonitor (requires Prometheus Operator)
+serviceMonitor:
+  enabled: false
+  interval: "30s"
+  scrapeTimeout: ""
+  labels: {}
 
 # Extra environment variables
 extraEnv: []

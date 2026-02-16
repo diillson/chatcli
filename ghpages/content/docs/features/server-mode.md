@@ -53,6 +53,20 @@ chatcli serve --watch-config targets.yaml
 | `--tls-key` | Arquivo de chave TLS | `""` | `CHATCLI_SERVER_TLS_KEY` |
 | `--provider` | Provedor de LLM padrao | Auto-detectado | `LLM_PROVIDER` |
 | `--model` | Modelo de LLM padrao | Auto-detectado | |
+| `--metrics-port` | Porta HTTP para metricas Prometheus (0 = desabilita) | `9090` | `CHATCLI_METRICS_PORT` |
+
+### Prometheus Metrics
+
+O servidor expoe metricas Prometheus em `http://localhost:9090/metrics` por padrao. As metricas incluem:
+
+- **gRPC**: `chatcli_grpc_requests_total`, `chatcli_grpc_request_duration_seconds`, `chatcli_grpc_in_flight_requests`
+- **LLM**: `chatcli_llm_requests_total`, `chatcli_llm_request_duration_seconds`, `chatcli_llm_errors_total`
+- **Watcher**: `chatcli_watcher_collection_duration_seconds`, `chatcli_watcher_alerts_total`, `chatcli_watcher_pods_ready`
+- **Session**: `chatcli_session_active_total`, `chatcli_session_operations_total`
+- **Server**: `chatcli_server_uptime_seconds`, `chatcli_server_info`
+- **Go runtime**: goroutines, memoria, GC (via GoCollector/ProcessCollector)
+
+Para desabilitar, use `--metrics-port 0`.
 
 ### Variaveis de Seguranca
 

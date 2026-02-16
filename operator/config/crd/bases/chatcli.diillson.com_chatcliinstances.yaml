@@ -95,6 +95,11 @@ spec:
                       type: integer
                       format: int32
                       default: 50051
+                    metricsPort:
+                      description: MetricsPort is the Prometheus metrics HTTP port (0 = disabled).
+                      type: integer
+                      format: int32
+                      default: 9090
                     tls:
                       description: TLS configures TLS for the gRPC server.
                       type: object

@@ -157,3 +157,15 @@ type TargetHealthScore struct {
 	Score      int // 0 = healthy, 1 = warning, 2 = critical
 	AlertCount int
 }
+
+// WatcherMetricsRecorder is the interface for recording watcher metrics.
+// Implemented by metrics.WatcherMetrics to avoid circular imports.
+type WatcherMetricsRecorder interface {
+	ObserveCollectionDuration(target string, seconds float64)
+	IncrementCollectionErrors(target string)
+	IncrementAlert(target, severity, alertType string)
+	SetPodsReady(namespace, deployment string, count float64)
+	SetPodsDesired(namespace, deployment string, count float64)
+	SetSnapshotsStored(target string, count float64)
+	SetPodRestarts(target string, count float64)
+}

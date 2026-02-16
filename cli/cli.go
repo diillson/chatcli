@@ -2501,6 +2501,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/connect", Description: "Conectar a um servidor ChatCLI remoto (gRPC)"},
 		{Text: "/disconnect", Description: "Desconectar do servidor remoto e voltar ao modo local"},
 		{Text: "/watch", Description: "Exibe o status do K8s watcher (quando ativo)"},
+		{Text: "/metrics", Description: "Exibe métricas de runtime (provider, sessão, tokens, memória)"},
 	}
 }
 
