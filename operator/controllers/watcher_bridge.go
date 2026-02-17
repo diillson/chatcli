@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -120,7 +121,17 @@ func (wb *WatcherBridge) discoverAndConnect(ctx context.Context) error {
 			port = 50051
 		}
 		address := fmt.Sprintf("%s.%s.svc.cluster.local:%d", inst.Name, inst.Namespace, port)
-		if err := wb.serverClient.Connect(address); err != nil {
+
+		// Build connection options from Instance spec
+		opts, err := wb.buildConnectionOpts(ctx, &inst)
+		if err != nil {
+			wb.logger.Warn("Failed to build connection opts",
+				zap.String("instance", inst.Name),
+				zap.Error(err))
+			continue
+		}
+
+		if err := wb.serverClient.Connect(address, opts); err != nil {
 			wb.logger.Warn("Failed to connect to Instance",
 				zap.String("instance", inst.Name),
 				zap.String("address", address),
@@ -132,6 +143,48 @@ func (wb *WatcherBridge) discoverAndConnect(ctx context.Context) error {
 	}
 
 	return fmt.Errorf("no ready Instance found")
+}
+
+// buildConnectionOpts reads TLS and token configuration from the Instance CR and its referenced Secrets.
+func (wb *WatcherBridge) buildConnectionOpts(ctx context.Context, inst *platformv1alpha1.Instance) (ConnectionOpts, error) {
+	var opts ConnectionOpts
+
+	// TLS configuration
+	if inst.Spec.Server.TLS != nil && inst.Spec.Server.TLS.Enabled {
+		opts.TLSEnabled = true
+
+		if inst.Spec.Server.TLS.SecretName != "" {
+			var tlsSecret corev1.Secret
+			key := types.NamespacedName{Name: inst.Spec.Server.TLS.SecretName, Namespace: inst.Namespace}
+			if err := wb.client.Get(ctx, key, &tlsSecret); err != nil {
+				wb.logger.Warn("Failed to read TLS secret, using system CAs",
+					zap.String("secret", inst.Spec.Server.TLS.SecretName),
+					zap.Error(err))
+			} else if caCert, ok := tlsSecret.Data["ca.crt"]; ok {
+				opts.CACert = caCert
+			}
+		}
+	}
+
+	// Token authentication
+	if inst.Spec.Server.Token != nil && inst.Spec.Server.Token.Name != "" {
+		var tokenSecret corev1.Secret
+		key := types.NamespacedName{Name: inst.Spec.Server.Token.Name, Namespace: inst.Namespace}
+		if err := wb.client.Get(ctx, key, &tokenSecret); err != nil {
+			return opts, fmt.Errorf("reading token secret %q: %w", inst.Spec.Server.Token.Name, err)
+		}
+		tokenKey := inst.Spec.Server.Token.Key
+		if tokenKey == "" {
+			tokenKey = "token"
+		}
+		tokenValue, ok := tokenSecret.Data[tokenKey]
+		if !ok {
+			return opts, fmt.Errorf("key %q not found in secret %q", tokenKey, inst.Spec.Server.Token.Name)
+		}
+		opts.Token = string(tokenValue)
+	}
+
+	return opts, nil
 }
 
 func (wb *WatcherBridge) createAnomaly(ctx context.Context, alert *pb.WatcherAlert) error {
@@ -261,7 +314,7 @@ func (wb *WatcherBridge) GetSeenCount() int {
 // SetServerAddress is a convenience method to directly set the server address.
 // Used primarily in testing or local development.
 func (wb *WatcherBridge) SetServerAddress(address string) error {
-	return wb.serverClient.Connect(address)
+	return wb.serverClient.Connect(address, ConnectionOpts{})
 }
 
 // NeedLeaderElection implements manager.LeaderElectionRunnable.

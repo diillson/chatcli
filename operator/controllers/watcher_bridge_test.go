@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -280,5 +281,383 @@ func TestWatcherBridge_NeedLeaderElection(t *testing.T) {
 	wb := setupFakeWatcherBridge()
 	if !wb.NeedLeaderElection() {
 		t.Error("WatcherBridge should require leader election")
+	}
+}
+
+func TestBuildConnectionOpts_NoTLSNoToken(t *testing.T) {
+	inst := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli",
+			Namespace: "default",
+			UID:       types.UID("inst-plain"),
+		},
+		Spec: platformv1alpha1.InstanceSpec{
+			Provider: "OPENAI",
+			Server:   platformv1alpha1.ServerSpec{Port: 50051},
+		},
+	}
+
+	wb := setupFakeWatcherBridge(inst)
+	ctx := context.Background()
+
+	opts, err := wb.buildConnectionOpts(ctx, inst)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.TLSEnabled {
+		t.Error("TLSEnabled should be false when no TLS config")
+	}
+	if opts.Token != "" {
+		t.Error("Token should be empty when no token config")
+	}
+	if len(opts.CACert) != 0 {
+		t.Error("CACert should be empty when no TLS config")
+	}
+}
+
+func TestBuildConnectionOpts_WithTLS(t *testing.T) {
+	tlsSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli-tls",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"tls.crt": []byte("fake-cert"),
+			"tls.key": []byte("fake-key"),
+			"ca.crt":  []byte("fake-ca-cert"),
+		},
+	}
+
+	inst := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli",
+			Namespace: "default",
+			UID:       types.UID("inst-tls"),
+		},
+		Spec: platformv1alpha1.InstanceSpec{
+			Provider: "CLAUDEAI",
+			Server: platformv1alpha1.ServerSpec{
+				Port: 50051,
+				TLS: &platformv1alpha1.TLSSpec{
+					Enabled:    true,
+					SecretName: "chatcli-tls",
+				},
+			},
+		},
+	}
+
+	wb := setupFakeWatcherBridge(inst, tlsSecret)
+	ctx := context.Background()
+
+	opts, err := wb.buildConnectionOpts(ctx, inst)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.TLSEnabled {
+		t.Error("TLSEnabled should be true")
+	}
+	if string(opts.CACert) != "fake-ca-cert" {
+		t.Errorf("expected CACert 'fake-ca-cert', got %q", string(opts.CACert))
+	}
+	if opts.Token != "" {
+		t.Error("Token should be empty when no token config")
+	}
+}
+
+func TestBuildConnectionOpts_WithTLSNoCACert(t *testing.T) {
+	// TLS secret exists but has no ca.crt key — should still enable TLS (system CAs)
+	tlsSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli-tls",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"tls.crt": []byte("fake-cert"),
+			"tls.key": []byte("fake-key"),
+		},
+	}
+
+	inst := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli",
+			Namespace: "default",
+			UID:       types.UID("inst-tls-noca"),
+		},
+		Spec: platformv1alpha1.InstanceSpec{
+			Provider: "CLAUDEAI",
+			Server: platformv1alpha1.ServerSpec{
+				Port: 50051,
+				TLS: &platformv1alpha1.TLSSpec{
+					Enabled:    true,
+					SecretName: "chatcli-tls",
+				},
+			},
+		},
+	}
+
+	wb := setupFakeWatcherBridge(inst, tlsSecret)
+	ctx := context.Background()
+
+	opts, err := wb.buildConnectionOpts(ctx, inst)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.TLSEnabled {
+		t.Error("TLSEnabled should be true even without ca.crt")
+	}
+	if len(opts.CACert) != 0 {
+		t.Error("CACert should be empty when secret lacks ca.crt key")
+	}
+}
+
+func TestBuildConnectionOpts_WithTLSMissingSecret(t *testing.T) {
+	// TLS enabled but secret doesn't exist — should still enable TLS (system CAs), warn only
+	inst := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli",
+			Namespace: "default",
+			UID:       types.UID("inst-tls-nosecret"),
+		},
+		Spec: platformv1alpha1.InstanceSpec{
+			Provider: "CLAUDEAI",
+			Server: platformv1alpha1.ServerSpec{
+				Port: 50051,
+				TLS: &platformv1alpha1.TLSSpec{
+					Enabled:    true,
+					SecretName: "nonexistent-tls-secret",
+				},
+			},
+		},
+	}
+
+	wb := setupFakeWatcherBridge(inst)
+	ctx := context.Background()
+
+	opts, err := wb.buildConnectionOpts(ctx, inst)
+	if err != nil {
+		t.Fatalf("unexpected error: %v (missing TLS secret should warn, not error)", err)
+	}
+	if !opts.TLSEnabled {
+		t.Error("TLSEnabled should be true even when secret is missing")
+	}
+	if len(opts.CACert) != 0 {
+		t.Error("CACert should be empty when secret is missing")
+	}
+}
+
+func TestBuildConnectionOpts_WithToken(t *testing.T) {
+	tokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli-auth",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"token": []byte("super-secret-token"),
+		},
+	}
+
+	inst := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli",
+			Namespace: "default",
+			UID:       types.UID("inst-token"),
+		},
+		Spec: platformv1alpha1.InstanceSpec{
+			Provider: "CLAUDEAI",
+			Server: platformv1alpha1.ServerSpec{
+				Port: 50051,
+				Token: &platformv1alpha1.SecretKeyRefSpec{
+					Name: "chatcli-auth",
+					Key:  "token",
+				},
+			},
+		},
+	}
+
+	wb := setupFakeWatcherBridge(inst, tokenSecret)
+	ctx := context.Background()
+
+	opts, err := wb.buildConnectionOpts(ctx, inst)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.TLSEnabled {
+		t.Error("TLSEnabled should be false when no TLS config")
+	}
+	if opts.Token != "super-secret-token" {
+		t.Errorf("expected token 'super-secret-token', got %q", opts.Token)
+	}
+}
+
+func TestBuildConnectionOpts_WithTokenDefaultKey(t *testing.T) {
+	// Token spec with empty Key should default to "token"
+	tokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli-auth",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"token": []byte("default-key-token"),
+		},
+	}
+
+	inst := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli",
+			Namespace: "default",
+			UID:       types.UID("inst-token-default"),
+		},
+		Spec: platformv1alpha1.InstanceSpec{
+			Provider: "CLAUDEAI",
+			Server: platformv1alpha1.ServerSpec{
+				Port: 50051,
+				Token: &platformv1alpha1.SecretKeyRefSpec{
+					Name: "chatcli-auth",
+					// Key intentionally empty — should default to "token"
+				},
+			},
+		},
+	}
+
+	wb := setupFakeWatcherBridge(inst, tokenSecret)
+	ctx := context.Background()
+
+	opts, err := wb.buildConnectionOpts(ctx, inst)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.Token != "default-key-token" {
+		t.Errorf("expected token 'default-key-token', got %q", opts.Token)
+	}
+}
+
+func TestBuildConnectionOpts_TokenSecretMissing(t *testing.T) {
+	// Token configured but secret doesn't exist — should error (token is required for auth)
+	inst := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli",
+			Namespace: "default",
+			UID:       types.UID("inst-token-nosecret"),
+		},
+		Spec: platformv1alpha1.InstanceSpec{
+			Provider: "CLAUDEAI",
+			Server: platformv1alpha1.ServerSpec{
+				Port: 50051,
+				Token: &platformv1alpha1.SecretKeyRefSpec{
+					Name: "nonexistent-secret",
+					Key:  "token",
+				},
+			},
+		},
+	}
+
+	wb := setupFakeWatcherBridge(inst)
+	ctx := context.Background()
+
+	_, err := wb.buildConnectionOpts(ctx, inst)
+	if err == nil {
+		t.Error("expected error when token secret is missing")
+	}
+}
+
+func TestBuildConnectionOpts_TokenKeyMissing(t *testing.T) {
+	// Token secret exists but the specified key is not present
+	tokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli-auth",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"other-key": []byte("some-value"),
+		},
+	}
+
+	inst := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli",
+			Namespace: "default",
+			UID:       types.UID("inst-token-badkey"),
+		},
+		Spec: platformv1alpha1.InstanceSpec{
+			Provider: "CLAUDEAI",
+			Server: platformv1alpha1.ServerSpec{
+				Port: 50051,
+				Token: &platformv1alpha1.SecretKeyRefSpec{
+					Name: "chatcli-auth",
+					Key:  "token",
+				},
+			},
+		},
+	}
+
+	wb := setupFakeWatcherBridge(inst, tokenSecret)
+	ctx := context.Background()
+
+	_, err := wb.buildConnectionOpts(ctx, inst)
+	if err == nil {
+		t.Error("expected error when token key is missing from secret")
+	}
+}
+
+func TestBuildConnectionOpts_TLSAndToken(t *testing.T) {
+	tlsSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli-tls",
+			Namespace: "production",
+		},
+		Data: map[string][]byte{
+			"tls.crt": []byte("prod-cert"),
+			"tls.key": []byte("prod-key"),
+			"ca.crt":  []byte("prod-ca"),
+		},
+	}
+
+	tokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli-token",
+			Namespace: "production",
+		},
+		Data: map[string][]byte{
+			"api-token": []byte("prod-token-value"),
+		},
+	}
+
+	inst := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli-prod",
+			Namespace: "production",
+			UID:       types.UID("inst-full"),
+		},
+		Spec: platformv1alpha1.InstanceSpec{
+			Provider: "CLAUDEAI",
+			Server: platformv1alpha1.ServerSpec{
+				Port: 50051,
+				TLS: &platformv1alpha1.TLSSpec{
+					Enabled:    true,
+					SecretName: "chatcli-tls",
+				},
+				Token: &platformv1alpha1.SecretKeyRefSpec{
+					Name: "chatcli-token",
+					Key:  "api-token",
+				},
+			},
+		},
+	}
+
+	wb := setupFakeWatcherBridge(inst, tlsSecret, tokenSecret)
+	ctx := context.Background()
+
+	opts, err := wb.buildConnectionOpts(ctx, inst)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.TLSEnabled {
+		t.Error("TLSEnabled should be true")
+	}
+	if string(opts.CACert) != "prod-ca" {
+		t.Errorf("expected CACert 'prod-ca', got %q", string(opts.CACert))
+	}
+	if opts.Token != "prod-token-value" {
+		t.Errorf("expected token 'prod-token-value', got %q", opts.Token)
 	}
 }

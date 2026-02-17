@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Documentation and site
+ghpages/
+docs/
+
+# CI/CD
+.github/
+
+# Build artifacts
+bin/
+dist/
+*.exe
+cover.out
+coverage.html
+
+# Deploy manifests (not needed in image)
+deploy/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# OS files
+.DS_Store
+Thumbs.db

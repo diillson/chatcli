@@ -7,6 +7,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"google.golang.org/grpc/metadata"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -279,5 +280,51 @@ func TestNewServerClient(t *testing.T) {
 	sc := &ServerClient{}
 	if sc.IsConnected() {
 		t.Error("new client should not be connected")
+	}
+}
+
+func TestWithAuth_NoToken(t *testing.T) {
+	sc := &ServerClient{}
+	ctx := context.Background()
+
+	result := sc.withAuth(ctx)
+	if result != ctx {
+		t.Error("withAuth with no token should return the original context unchanged")
+	}
+}
+
+func TestWithAuth_WithToken(t *testing.T) {
+	sc := &ServerClient{token: "my-secret-token"}
+	ctx := context.Background()
+
+	result := sc.withAuth(ctx)
+	if result == ctx {
+		t.Error("withAuth with token should return a new context")
+	}
+
+	// Verify metadata was injected
+	md, ok := metadata.FromOutgoingContext(result)
+	if !ok {
+		t.Fatal("expected outgoing metadata in context")
+	}
+	authValues := md.Get("authorization")
+	if len(authValues) != 1 {
+		t.Fatalf("expected 1 authorization value, got %d", len(authValues))
+	}
+	if authValues[0] != "Bearer my-secret-token" {
+		t.Errorf("expected 'Bearer my-secret-token', got %q", authValues[0])
+	}
+}
+
+func TestConnectionOpts_Default(t *testing.T) {
+	opts := ConnectionOpts{}
+	if opts.TLSEnabled {
+		t.Error("default TLSEnabled should be false")
+	}
+	if opts.Token != "" {
+		t.Error("default Token should be empty")
+	}
+	if len(opts.CACert) != 0 {
+		t.Error("default CACert should be empty")
 	}
 }
