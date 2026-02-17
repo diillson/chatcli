@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.58.0](https://github.com/diillson/chatcli/compare/v1.57.2...v1.58.0) (2026-02-17)
+
+
+### Features
+
+* **operator:** AIOps platform with autonomous remediation ([#557](https://github.com/diillson/chatcli/issues/557)) ([ec9d4ab](https://github.com/diillson/chatcli/commit/ec9d4ab50d1b809c1fbb309b0a9ead36ee1e3172))
+
 ## [1.57.2](https://github.com/diillson/chatcli/compare/v1.57.1...v1.57.2) (2026-02-16)
 
 
