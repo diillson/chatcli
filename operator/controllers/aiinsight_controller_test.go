@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,12 +16,9 @@ import (
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
 
-// mockServerClient implements the methods AIInsightReconciler needs for testing.
+// mockServerClient holds test configuration for AIInsightReconciler tests.
 type mockServerClient struct {
-	connected    bool
-	analyzeResp  *pb.AnalyzeIssueResponse
-	analyzeErr   error
-	analyzeCalls int
+	connected bool
 }
 
 func setupFakeAIInsightReconciler(mock *mockServerClient, objs ...client.Object) (*AIInsightReconciler, client.Client) {
@@ -36,12 +32,7 @@ func setupFakeAIInsightReconciler(mock *mockServerClient, objs ...client.Object)
 	}
 	c := cb.Build()
 
-	// Create a real ServerClient but we'll control its state
 	sc := &ServerClient{}
-	if mock.connected {
-		// We can't easily mock gRPC, so we'll use a wrapper pattern
-		// For tests, we use a test-specific reconciler
-	}
 
 	return &AIInsightReconciler{
 		Client:       c,
@@ -65,29 +56,6 @@ func newTestAIInsight(name, ns, issueName string) *platformv1alpha1.AIInsight {
 	}
 }
 
-func newTestIssue(name, ns string) *platformv1alpha1.Issue {
-	return &platformv1alpha1.Issue{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: ns,
-			UID:       types.UID("issue-" + name),
-			Labels: map[string]string{
-				"platform.chatcli.io/signal-type": "error_rate",
-			},
-		},
-		Spec: platformv1alpha1.IssueSpec{
-			Severity:    platformv1alpha1.IssueSeverityHigh,
-			Source:      platformv1alpha1.IssueSourceWatcher,
-			Resource:    platformv1alpha1.ResourceRef{Kind: "Deployment", Name: "web", Namespace: ns},
-			Description: "High error rate detected",
-			RiskScore:   70,
-		},
-		Status: platformv1alpha1.IssueStatus{
-			State: platformv1alpha1.IssueStateAnalyzing,
-		},
-	}
-}
-
 func TestAIInsightReconcile_NotFound(t *testing.T) {
 	r, _ := setupFakeAIInsightReconciler(&mockServerClient{})
 	ctx := context.Background()
@@ -98,7 +66,7 @@ func TestAIInsightReconcile_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if result.Requeue {
+	if result.RequeueAfter > 0 {
 		t.Error("expected no requeue")
 	}
 }
@@ -117,7 +85,7 @@ func TestAIInsightReconcile_AlreadyAnalyzed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if result.Requeue || result.RequeueAfter > 0 {
+	if result.RequeueAfter > 0 {
 		t.Error("expected no requeue for already analyzed insight")
 	}
 }
@@ -275,8 +243,6 @@ func TestServerClient_Close(t *testing.T) {
 }
 
 func TestNewServerClient(t *testing.T) {
-	_ = fmt.Sprintf("test") // use fmt import
-
 	sc := &ServerClient{}
 	if sc.IsConnected() {
 		t.Error("new client should not be connected")

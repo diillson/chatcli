@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"sync"
-	"time"
 
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"go.uber.org/zap"
@@ -52,9 +51,6 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 		sc.conn.Close()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	var dialOpts []grpc.DialOption
 
 	if opts.TLSEnabled {
@@ -73,9 +69,7 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
-	dialOpts = append(dialOpts, grpc.WithBlock())
-
-	conn, err := grpc.DialContext(ctx, address, dialOpts...)
+	conn, err := grpc.NewClient(address, dialOpts...)
 	if err != nil {
 		return fmt.Errorf("connecting to %s: %w", address, err)
 	}
