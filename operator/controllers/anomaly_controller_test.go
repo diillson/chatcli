@@ -141,11 +141,11 @@ func TestAnomalyReconcile_CorrelatesWithExistingIssue(t *testing.T) {
 			UID:       "existing-issue-uid",
 		},
 		Spec: platformv1alpha1.IssueSpec{
-			Severity:  platformv1alpha1.IssueSeverityHigh,
-			Source:    platformv1alpha1.IssueSourcePrometheus,
-			Resource:  resource,
+			Severity:    platformv1alpha1.IssueSeverityHigh,
+			Source:      platformv1alpha1.IssueSourcePrometheus,
+			Resource:    resource,
 			Description: "Existing issue",
-			RiskScore: 30,
+			RiskScore:   30,
 		},
 		Status: platformv1alpha1.IssueStatus{
 			State: platformv1alpha1.IssueStateAnalyzing,

@@ -7,7 +7,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 type AnomalySignalType string
 
 const (
-	SignalErrorRate    AnomalySignalType = "error_rate"
+	SignalErrorRate   AnomalySignalType = "error_rate"
 	SignalLatency     AnomalySignalType = "latency"
 	SignalPodRestart  AnomalySignalType = "pod_restart"
 	SignalCPUHigh     AnomalySignalType = "cpu_high"

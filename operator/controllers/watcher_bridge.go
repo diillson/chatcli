@@ -37,7 +37,7 @@ type WatcherBridge struct {
 	logger       *zap.Logger
 
 	mu                sync.Mutex
-	seen              map[string]time.Time // hash → first-seen timestamp for dedup
+	seen              map[string]time.Time       // hash → first-seen timestamp for dedup
 	connectedInstance *platformv1alpha1.Instance // Instance we're connected to (for OwnerRef)
 }
 
@@ -207,7 +207,7 @@ func (wb *WatcherBridge) createAnomaly(ctx context.Context, alert *pb.WatcherAle
 	}
 	// Link to the Instance that produced this anomaly (cross-namespace, so labels not OwnerRef)
 	if wb.connectedInstance != nil {
-		labels["platform.chatcli.io/instance"]           = wb.connectedInstance.Name
+		labels["platform.chatcli.io/instance"] = wb.connectedInstance.Name
 		labels["platform.chatcli.io/instance-namespace"] = wb.connectedInstance.Namespace
 	}
 

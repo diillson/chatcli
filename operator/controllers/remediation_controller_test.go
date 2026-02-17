@@ -354,9 +354,9 @@ func TestRemediationReconcile_PatchConfig(t *testing.T) {
 				{
 					Type: platformv1alpha1.ActionPatchConfig,
 					Params: map[string]string{
-						"configmap":   "app-config",
-						"log_level":   "debug",
-						"rate_limit":  "1000",
+						"configmap":  "app-config",
+						"log_level":  "debug",
+						"rate_limit": "1000",
 					},
 				},
 			},

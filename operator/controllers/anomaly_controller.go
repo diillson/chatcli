@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -129,9 +129,9 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Name:      issueName,
 			Namespace: anomaly.Namespace,
 			Labels: map[string]string{
-				"platform.chatcli.io/inc-id":    incID,
-				"platform.chatcli.io/resource":  resource.Name,
-				"platform.chatcli.io/signal":    string(anomaly.Spec.SignalType),
+				"platform.chatcli.io/inc-id":   incID,
+				"platform.chatcli.io/resource": resource.Name,
+				"platform.chatcli.io/signal":   string(anomaly.Spec.SignalType),
 			},
 		},
 		Spec: platformv1alpha1.IssueSpec{
