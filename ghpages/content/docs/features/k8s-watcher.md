@@ -357,9 +357,20 @@ rules:
 
 ---
 
+## Integracao com AIOps
+
+Os alertas do K8s Watcher alimentam automaticamente o **pipeline AIOps** do Operator. Quando o Operator detecta alertas via `GetAlerts` RPC, ele cria Anomaly CRs que sao correlacionados em Issues, analisados por IA e remediados automaticamente.
+
+Alertas detectados pelo Watcher → Anomaly → Issue → AIInsight → RemediationPlan → Resolucao
+
+Veja [AIOps Platform](/docs/features/aiops-platform/) para o fluxo completo.
+
+---
+
 ## Proximo Passo
 
 - [Configurar o servidor com watcher](/docs/features/server-mode/)
-- [K8s Operator (CRD)](/docs/features/k8s-operator/)
+- [K8s Operator (AIOps)](/docs/features/k8s-operator/)
+- [AIOps Platform (deep-dive)](/docs/features/aiops-platform/)
 - [Deploy no Kubernetes](/docs/getting-started/docker-deployment/)
 - [Receita: Monitoramento K8s na pratica](/docs/cookbook/k8s-monitoring/)

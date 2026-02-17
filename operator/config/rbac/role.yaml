@@ -11,11 +11,11 @@ kind: ClusterRole
 metadata:
   name: chatcli-operator-manager
 rules:
-  # ChatCLIInstance CRD
+  # Instance CRD
   - apiGroups:
-      - chatcli.diillson.com
+      - platform.chatcli.io
     resources:
-      - chatcliinstances
+      - instances
     verbs:
       - get
       - list
@@ -25,20 +25,109 @@ rules:
       - patch
       - delete
   - apiGroups:
-      - chatcli.diillson.com
+      - platform.chatcli.io
     resources:
-      - chatcliinstances/status
+      - instances/status
+      - instances/finalizers
     verbs:
       - get
       - update
       - patch
+  # Issue CRD
   - apiGroups:
-      - chatcli.diillson.com
+      - platform.chatcli.io
     resources:
-      - chatcliinstances/finalizers
+      - issues
     verbs:
+      - get
+      - list
+      - watch
+      - create
       - update
-  # Owned resources
+      - patch
+      - delete
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - issues/status
+      - issues/finalizers
+    verbs:
+      - get
+      - update
+      - patch
+  # RemediationPlan CRD
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - remediationplans
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - remediationplans/status
+    verbs:
+      - get
+      - update
+      - patch
+  # Anomaly CRD
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - anomalies
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - anomalies/status
+    verbs:
+      - get
+      - update
+      - patch
+  # Runbook CRD (read-only for controllers, no status)
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - runbooks
+    verbs:
+      - get
+      - list
+      - watch
+  # AIInsight CRD
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - aiinsights
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - aiinsights/status
+    verbs:
+      - get
+      - update
+      - patch
+  # Owned resources (Instance controller)
   - apiGroups:
       - apps
     resources:
@@ -51,11 +140,19 @@ rules:
       - update
       - patch
       - delete
+  # ReplicaSets (for rollback inspection)
+  - apiGroups:
+      - apps
+    resources:
+      - replicasets
+    verbs:
+      - get
+      - list
+      - watch
   - apiGroups:
       - ""
     resources:
       - services
-      - configmaps
       - serviceaccounts
       - persistentvolumeclaims
     verbs:
@@ -66,6 +163,37 @@ rules:
       - update
       - patch
       - delete
+  # Secrets (API keys, TLS certs, auth tokens)
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  # Pods and logs (watcher, remediation restart)
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+    verbs:
+      - get
+      - list
+      - watch
+  # ConfigMaps — no delete for remediation safety
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
   - apiGroups:
       - rbac.authorization.k8s.io
     resources:
@@ -81,12 +209,15 @@ rules:
       - update
       - patch
       - delete
-  # Events
+  # Events (emit + read for watcher)
   - apiGroups:
       - ""
     resources:
       - events
     verbs:
+      - get
+      - list
+      - watch
       - create
       - patch
   # Leader election

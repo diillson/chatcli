@@ -20,10 +20,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
-	chatcliv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
 
-const finalizerName = "chatcli.diillson.com/finalizer"
+const finalizerName = "platform.chatcli.io/finalizer"
 
 var (
 	reconciliationsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -45,14 +45,14 @@ var (
 		Namespace: "chatcli",
 		Subsystem: "operator",
 		Name:      "managed_instances",
-		Help:      "Number of ChatCLIInstance resources currently managed.",
+		Help:      "Number of Instance resources currently managed.",
 	})
 
 	instanceReady = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "chatcli",
 		Subsystem: "operator",
 		Name:      "instance_ready",
-		Help:      "Whether a ChatCLIInstance is ready (1) or not (0).",
+		Help:      "Whether an Instance is ready (1) or not (0).",
 	}, []string{"name", "namespace"})
 )
 
@@ -65,25 +65,25 @@ func init() {
 	)
 }
 
-// ChatCLIInstanceReconciler reconciles a ChatCLIInstance object.
-type ChatCLIInstanceReconciler struct {
+// InstanceReconciler reconciles an Instance object.
+type InstanceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=chatcli.diillson.com,resources=chatcliinstances,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=chatcli.diillson.com,resources=chatcliinstances/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=chatcli.diillson.com,resources=chatcliinstances/finalizers,verbs=update
+// +kubebuilder:rbac:groups=platform.chatcli.io,resources=instances,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=platform.chatcli.io,resources=instances/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=platform.chatcli.io,resources=instances/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services;configmaps;serviceaccounts;persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 
-func (r *ChatCLIInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	start := time.Now()
 
-	// 1. Fetch the ChatCLIInstance
-	var instance chatcliv1alpha1.ChatCLIInstance
+	// 1. Fetch the Instance
+	var instance platformv1alpha1.Instance
 	if err := r.Get(ctx, req.NamespacedName, &instance); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -192,7 +192,7 @@ func (r *ChatCLIInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	reconcileDuration.Observe(time.Since(start).Seconds())
 
 	// Update managed instances gauge
-	var list chatcliv1alpha1.ChatCLIInstanceList
+	var list platformv1alpha1.InstanceList
 	if err := r.List(ctx, &list); err == nil {
 		managedInstances.Set(float64(len(list.Items)))
 		for _, item := range list.Items {
@@ -207,7 +207,7 @@ func (r *ChatCLIInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{}, nil
 }
 
-func (r *ChatCLIInstanceReconciler) updateStatus(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) updateStatus(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	var deploy appsv1.Deployment
 	nn := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
 	if err := r.Get(ctx, nn, &deploy); err != nil {
@@ -252,11 +252,11 @@ func (r *ChatCLIInstanceReconciler) updateStatus(ctx context.Context, instance *
 	return r.Status().Update(ctx, instance)
 }
 
-func (r *ChatCLIInstanceReconciler) cleanupResources(ctx context.Context, instance *chatcliv1alpha1.ChatCLIInstance) error {
+func (r *InstanceReconciler) cleanupResources(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	// Owned namespaced resources are garbage-collected via OwnerReferences.
 	// Cluster-scoped resources (ClusterRole/ClusterRoleBinding) need manual cleanup.
 	log := log.FromContext(ctx)
-	log.Info("Cleaning up resources for ChatCLIInstance", "name", instance.Name)
+	log.Info("Cleaning up resources for Instance", "name", instance.Name)
 
 	clusterRoleName := instance.Namespace + "-" + instance.Name + "-watcher"
 
@@ -278,9 +278,9 @@ func (r *ChatCLIInstanceReconciler) cleanupResources(ctx context.Context, instan
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *ChatCLIInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *InstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&chatcliv1alpha1.ChatCLIInstance{}).
+		For(&platformv1alpha1.Instance{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).

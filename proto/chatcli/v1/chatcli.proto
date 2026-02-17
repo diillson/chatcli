@@ -39,6 +39,12 @@ service ChatCLIService {
 
   // Health check for load balancers and k8s probes.
   rpc Health(HealthRequest) returns (HealthResponse);
+
+  // GetAlerts returns current watcher alerts (anomalies detected by the K8s watcher).
+  rpc GetAlerts(GetAlertsRequest) returns (GetAlertsResponse);
+
+  // AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
+  rpc AnalyzeIssue(AnalyzeIssueRequest) returns (AnalyzeIssueResponse);
 }
 
 // --- SendPrompt ---
@@ -172,4 +178,56 @@ message HealthResponse {
   }
   Status status = 1;
   string version = 2;
+}
+
+// --- Watcher Alerts (AIOps) ---
+
+message WatcherAlert {
+  string type = 1;            // e.g., "HighRestartCount", "OOMKilled", "PodNotReady", "DeploymentFailing"
+  string severity = 2;        // "info", "warning", "critical"
+  string message = 3;
+  string object = 4;          // e.g., pod name
+  string namespace = 5;
+  string deployment = 6;
+  int64 timestamp_unix = 7;
+}
+
+message GetAlertsRequest {
+  string namespace = 1;       // optional: filter by namespace
+  string deployment = 2;      // optional: filter by deployment
+}
+
+message GetAlertsResponse {
+  repeated WatcherAlert alerts = 1;
+}
+
+// --- AI Issue Analysis (AIOps) ---
+
+message AnalyzeIssueRequest {
+  string issue_name = 1;
+  string namespace = 2;
+  string resource_kind = 3;
+  string resource_name = 4;
+  string signal_type = 5;     // e.g., "error_rate", "oom_kill", "pod_restart"
+  string severity = 6;        // "low", "medium", "high", "critical"
+  string description = 7;
+  int32 risk_score = 8;
+  string provider = 9;        // optional: override LLM provider
+  string model = 10;          // optional: override LLM model
+}
+
+message AnalyzeIssueResponse {
+  string analysis = 1;
+  float confidence = 2;       // 0.0 to 1.0
+  repeated string recommendations = 3;
+  string model = 4;
+  string provider = 5;
+  repeated SuggestedAction suggested_actions = 6;
+}
+
+message SuggestedAction {
+  string name = 1;                    // human-readable step name, e.g., "Restart pods"
+  string action = 2;                  // action type: "ScaleDeployment", "RollbackDeployment", "RestartDeployment", "PatchConfig"
+  string description = 3;            // explanation of why this action is recommended
+  map<string, string> params = 4;    // action-specific params, e.g., {"replicas": "3"}
 }

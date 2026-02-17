@@ -1,0 +1,88 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: aiinsights.platform.chatcli.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+spec:
+  group: platform.chatcli.io
+  names:
+    kind: AIInsight
+    listKind: AIInsightList
+    plural: aiinsights
+    singular: aiinsight
+    shortNames:
+      - ai
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Issue
+          type: string
+          jsonPath: .spec.issueRef.name
+        - name: Provider
+          type: string
+          jsonPath: .spec.provider
+        - name: Confidence
+          type: number
+          jsonPath: .status.confidence
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: AIInsight is the Schema for the aiinsights API.
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: AIInsightSpec defines the input for an AI analysis request.
+              type: object
+              required:
+                - issueRef
+                - provider
+                - model
+              properties:
+                issueRef:
+                  description: Reference to the Issue to analyze.
+                  type: object
+                  required:
+                    - name
+                  properties:
+                    name:
+                      type: string
+                provider:
+                  description: AI provider to use for the analysis.
+                  type: string
+                model:
+                  description: AI model identifier.
+                  type: string
+            status:
+              description: AIInsightStatus defines the observed state of an AIInsight.
+              type: object
+              properties:
+                analysis:
+                  description: AI-generated analysis text.
+                  type: string
+                confidence:
+                  description: Confidence score from 0.0 to 1.0.
+                  type: number
+                  format: double
+                recommendations:
+                  description: List of AI-generated recommendations.
+                  type: array
+                  items:
+                    type: string
+                generatedAt:
+                  description: Timestamp when the insight was generated.
+                  type: string
+                  format: date-time

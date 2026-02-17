@@ -35,7 +35,7 @@ manifests:
 ## Docker
 
 docker-build:
-	docker build -t ${IMG} .
+	docker build -t ${IMG} -f Dockerfile ..
 
 docker-push:
 	docker push ${IMG}

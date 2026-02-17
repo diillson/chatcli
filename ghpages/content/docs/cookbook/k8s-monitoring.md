@@ -119,11 +119,11 @@ helm install chatcli deploy/helm/chatcli \
   --set watcher.interval=15s
 ```
 
-**Via Operator (multi-target com Prometheus):**
+**Via Operator (AIOps com remediacao autonoma):**
 
 ```yaml
-apiVersion: chatcli.diillson.com/v1alpha1
-kind: ChatCLIInstance
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Instance
 metadata:
   name: chatcli-prod
 spec:
@@ -148,7 +148,7 @@ spec:
         namespace: batch
 ```
 
-Veja [K8s Operator](/docs/features/k8s-operator/) para documentacao completa do CRD.
+Com o Operator, alem do monitoramento via watcher, voce ganha o **pipeline AIOps completo**: deteccao automatica de anomalias, correlacao em incidentes, analise de causa raiz por IA e remediacao autonoma (scale, restart, rollback). Veja [K8s Operator](/docs/features/k8s-operator/) e [AIOps Platform](/docs/features/aiops-platform/) para documentacao completa.
 
 ### Passo 2: Equipe Conecta
 
@@ -351,7 +351,117 @@ metricsFilter:
 
 ---
 
+## Opcao 3: AIOps Autonomo (Operator)
+
+Use esta opcao para remediacao automatica de problemas sem intervencao humana.
+
+### Passo 1: Instalar o Operator
+
+```bash
+# Instalar CRDs
+kubectl apply -f operator/config/crd/bases/
+
+# Instalar RBAC e Manager
+kubectl apply -f operator/config/rbac/role.yaml
+kubectl apply -f operator/config/manager/manager.yaml
+```
+
+### Passo 2: Criar Instance com Watcher
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Instance
+metadata:
+  name: chatcli-aiops
+  namespace: monitoring
+spec:
+  provider: CLAUDEAI
+  apiKeys:
+    name: chatcli-api-keys
+  server:
+    port: 50051
+  watcher:
+    enabled: true
+    interval: "15s"
+    targets:
+      - deployment: api-gateway
+        namespace: production
+        metricsPort: 9090
+      - deployment: backend
+        namespace: production
+        metricsPort: 9090
+      - deployment: worker
+        namespace: batch
+```
+
+### Passo 3: Monitorar o Pipeline
+
+```bash
+# Verificar anomalias detectadas
+kubectl get anomalies -A --watch
+
+# Verificar issues criados
+kubectl get issues -A --watch
+
+# Verificar analises da IA
+kubectl get aiinsights -A
+
+# Verificar remediacoes
+kubectl get remediationplans -A
+```
+
+### Passo 4: Fluxo Autonomo em Acao
+
+Quando um pod comeca a crashar:
+
+```
+1. WatcherBridge detecta HighRestartCount → cria Anomaly
+2. AnomalyReconciler correlaciona → cria Issue (risk: 20, severity: Low)
+3. Se OOMKilled tambem → Issue atualizado (risk: 50, severity: Medium)
+4. IssueReconciler cria AIInsight
+5. AIInsightReconciler chama LLM → retorna: "restart + scale to 4"
+6. IssueReconciler cria RemediationPlan com 2 acoes
+7. RemediationReconciler executa: restart + scale
+8. Issue → Resolved
+```
+
+Tudo acontece automaticamente sem intervencao humana.
+
+### Passo 5: (Opcional) Adicionar Runbooks
+
+Para cenarios especificos onde voce quer controlar exatamente o que fazer:
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Runbook
+metadata:
+  name: oom-standard-procedure
+  namespace: production
+spec:
+  description: "Standard OOMKill recovery for production"
+  trigger:
+    signalType: oom_kill
+    severity: critical
+    resourceKind: Deployment
+  steps:
+    - name: Restart pods
+      action: RestartDeployment
+      description: "Restart to reclaim leaked memory"
+    - name: Scale up
+      action: ScaleDeployment
+      description: "Add replicas for redundancy"
+      params:
+        replicas: "5"
+  maxAttempts: 2
+```
+
+Runbooks tem prioridade sobre acoes da IA. Quando nao ha Runbook, a IA decide automaticamente.
+
+---
+
 ## Checklist de Implantacao
+
+### Monitoramento (Watch + Servidor)
 
 - [ ] Verificar acesso ao cluster (`kubectl get pods`)
 - [ ] Verificar permissoes RBAC para pods, logs, eventos
@@ -363,3 +473,16 @@ metricsFilter:
 - [ ] Testar com pergunta simples: "O deployment esta saudavel?"
 - [ ] (Opcional) Integrar com alertas para analise automatica
 - [ ] (Opcional) Distribuir acesso para a equipe via token
+
+### AIOps Autonomo (Operator)
+
+- [ ] Instalar CRDs: `kubectl apply -f operator/config/crd/bases/`
+- [ ] Instalar RBAC e Manager do operator
+- [ ] Criar Secret com API keys do provedor LLM
+- [ ] Criar Instance CR com `watcher.enabled: true`
+- [ ] Verificar anomalias sendo criadas: `kubectl get anomalies -A`
+- [ ] Verificar issues sendo correlacionados: `kubectl get issues -A`
+- [ ] Verificar IA analisando: `kubectl get aiinsights -A`
+- [ ] Verificar remediacoes executando: `kubectl get remediationplans -A`
+- [ ] (Opcional) Criar Runbooks para cenarios especificos
+- [ ] Monitorar metricas do operator via Prometheus

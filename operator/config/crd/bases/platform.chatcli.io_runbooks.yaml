@@ -1,0 +1,93 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: runbooks.platform.chatcli.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+spec:
+  group: platform.chatcli.io
+  names:
+    kind: Runbook
+    listKind: RunbookList
+    plural: runbooks
+    singular: runbook
+    shortNames:
+      - rb
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Signal
+          type: string
+          jsonPath: .spec.trigger.signalType
+        - name: Severity
+          type: string
+          jsonPath: .spec.trigger.severity
+        - name: ResourceKind
+          type: string
+          jsonPath: .spec.trigger.resourceKind
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: Runbook is the Schema for the runbooks API. Declarative only, no status subresource.
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: RunbookSpec defines a reusable remediation runbook.
+              type: object
+              required:
+                - trigger
+                - steps
+              properties:
+                trigger:
+                  description: Conditions that activate this runbook.
+                  type: object
+                  required:
+                    - signalType
+                    - severity
+                    - resourceKind
+                  properties:
+                    signalType:
+                      description: The anomaly signal type that triggers this runbook.
+                      type: string
+                    severity:
+                      description: Minimum severity level to trigger.
+                      type: string
+                    resourceKind:
+                      description: The Kubernetes resource kind this runbook applies to.
+                      type: string
+                steps:
+                  description: Ordered list of remediation steps.
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - action
+                    properties:
+                      name:
+                        description: Human-readable step name.
+                        type: string
+                      action:
+                        description: Action type to execute.
+                        type: string
+                      params:
+                        description: Key-value parameters for the action.
+                        type: object
+                        additionalProperties:
+                          type: string
+                maxAttempts:
+                  description: Maximum number of remediation attempts.
+                  type: integer
+                  format: int32
+                  default: 3

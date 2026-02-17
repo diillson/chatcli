@@ -1,0 +1,26 @@
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Runbook
+metadata:
+  name: high-error-rate-deployment
+  namespace: default
+spec:
+  trigger:
+    signalType: error_rate
+    severity: high
+    resourceKind: Deployment
+  steps:
+    - name: "Scale up to absorb traffic"
+      action: ScaleDeployment
+      params:
+        replicaIncrease: "2"
+    - name: "Rollback to previous revision"
+      action: RollbackDeployment
+      params:
+        revisionOffset: "1"
+    - name: "Verify error rate returns to normal"
+      action: Custom
+      params:
+        script: "check_error_rate.sh"
+        timeout: "120s"
+        threshold: "5%"
+  maxAttempts: 3

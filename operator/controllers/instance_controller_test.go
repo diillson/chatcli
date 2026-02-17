@@ -19,25 +19,25 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	chatcliv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
 
 func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(s)
-	_ = chatcliv1alpha1.AddToScheme(s)
+	_ = platformv1alpha1.AddToScheme(s)
 	return s
 }
 
-func newInstance(name, ns string) *chatcliv1alpha1.ChatCLIInstance {
-	return &chatcliv1alpha1.ChatCLIInstance{
+func newInstance(name, ns string) *platformv1alpha1.Instance {
+	return &platformv1alpha1.Instance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       name,
 			Namespace:  ns,
 			UID:        "test-uid",
 			Generation: 1,
 		},
-		Spec: chatcliv1alpha1.ChatCLIInstanceSpec{
+		Spec: platformv1alpha1.InstanceSpec{
 			Provider: "CLAUDEAI",
 			Model:    "claude-sonnet-4-5",
 		},
@@ -64,7 +64,7 @@ func TestLabels(t *testing.T) {
 
 func TestBuildContainerArgs_Basic(t *testing.T) {
 	s := newScheme()
-	r := &ChatCLIInstanceReconciler{Scheme: s}
+	r := &InstanceReconciler{Scheme: s}
 	instance := newInstance("test", "default")
 
 	args := r.buildContainerArgs(instance)
@@ -91,9 +91,9 @@ func TestBuildContainerArgs_Basic(t *testing.T) {
 
 func TestBuildContainerArgs_WithTLS(t *testing.T) {
 	s := newScheme()
-	r := &ChatCLIInstanceReconciler{Scheme: s}
+	r := &InstanceReconciler{Scheme: s}
 	instance := newInstance("test", "default")
-	instance.Spec.Server.TLS = &chatcliv1alpha1.TLSSpec{
+	instance.Spec.Server.TLS = &platformv1alpha1.TLSSpec{
 		Enabled:    true,
 		SecretName: "my-tls",
 	}
@@ -123,9 +123,9 @@ func TestBuildContainerArgs_WithTLS(t *testing.T) {
 
 func TestBuildContainerArgs_WithWatcher(t *testing.T) {
 	s := newScheme()
-	r := &ChatCLIInstanceReconciler{Scheme: s}
+	r := &InstanceReconciler{Scheme: s}
 	instance := newInstance("test", "default")
-	instance.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+	instance.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 		Enabled:     true,
 		Deployment:  "my-app",
 		Namespace:   "production",
@@ -159,7 +159,7 @@ func TestBuildContainerArgs_WithWatcher(t *testing.T) {
 
 func TestBuildPodSpec_DefaultSecurityContext(t *testing.T) {
 	s := newScheme()
-	r := &ChatCLIInstanceReconciler{Scheme: s}
+	r := &InstanceReconciler{Scheme: s}
 	instance := newInstance("test", "default")
 
 	podSpec := r.buildPodSpec(instance)
@@ -180,7 +180,7 @@ func TestBuildPodSpec_DefaultSecurityContext(t *testing.T) {
 
 func TestBuildPodSpec_CustomSecurityContext(t *testing.T) {
 	s := newScheme()
-	r := &ChatCLIInstanceReconciler{Scheme: s}
+	r := &InstanceReconciler{Scheme: s}
 	instance := newInstance("test", "default")
 	instance.Spec.SecurityContext = &corev1.PodSecurityContext{
 		RunAsUser: int64Ptr(2000),
@@ -195,13 +195,13 @@ func TestBuildPodSpec_CustomSecurityContext(t *testing.T) {
 
 func TestBuildPodSpec_Volumes(t *testing.T) {
 	s := newScheme()
-	r := &ChatCLIInstanceReconciler{Scheme: s}
+	r := &InstanceReconciler{Scheme: s}
 	instance := newInstance("test", "default")
-	instance.Spec.Persistence = &chatcliv1alpha1.PersistenceSpec{
+	instance.Spec.Persistence = &platformv1alpha1.PersistenceSpec{
 		Enabled: true,
 		Size:    "5Gi",
 	}
-	instance.Spec.Server.TLS = &chatcliv1alpha1.TLSSpec{
+	instance.Spec.Server.TLS = &platformv1alpha1.TLSSpec{
 		Enabled:    true,
 		SecretName: "tls-secret",
 	}
@@ -232,12 +232,12 @@ func TestBuildPodSpec_Volumes(t *testing.T) {
 
 func TestBuildPodSpec_Container(t *testing.T) {
 	s := newScheme()
-	r := &ChatCLIInstanceReconciler{Scheme: s}
+	r := &InstanceReconciler{Scheme: s}
 	instance := newInstance("test", "default")
 	instance.Spec.Image.Repository = "my-registry/chatcli"
 	instance.Spec.Image.Tag = "v1.0.0"
 	instance.Spec.Server.Port = 8080
-	instance.Spec.APIKeys = &chatcliv1alpha1.SecretRefSpec{Name: "api-keys"}
+	instance.Spec.APIKeys = &platformv1alpha1.SecretRefSpec{Name: "api-keys"}
 
 	podSpec := r.buildPodSpec(instance)
 
@@ -272,14 +272,14 @@ func TestBuildPodSpec_Container(t *testing.T) {
 
 // Tests using fake client for reconciliation
 
-func setupFakeReconciler(objs ...client.Object) (*ChatCLIInstanceReconciler, client.Client) {
+func setupFakeReconciler(objs ...client.Object) (*InstanceReconciler, client.Client) {
 	s := newScheme()
-	cb := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&chatcliv1alpha1.ChatCLIInstance{})
+	cb := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&platformv1alpha1.Instance{})
 	if len(objs) > 0 {
 		cb = cb.WithObjects(objs...)
 	}
 	c := cb.Build()
-	return &ChatCLIInstanceReconciler{Client: c, Scheme: s}, c
+	return &InstanceReconciler{Client: c, Scheme: s}, c
 }
 
 func TestReconcile_NotFound(t *testing.T) {
@@ -311,7 +311,7 @@ func TestReconcile_CreatesResources(t *testing.T) {
 	}
 
 	// Check finalizer was added
-	var updated chatcliv1alpha1.ChatCLIInstance
+	var updated platformv1alpha1.Instance
 	if err := c.Get(ctx, types.NamespacedName{Name: "test-chatcli", Namespace: "default"}, &updated); err != nil {
 		t.Fatalf("failed to get updated instance: %v", err)
 	}
@@ -391,7 +391,7 @@ func TestReconcile_CreatesResources(t *testing.T) {
 
 func TestReconcile_WithWatcher(t *testing.T) {
 	instance := newInstance("test-watcher", "default")
-	instance.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+	instance.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 		Enabled:    true,
 		Deployment: "my-app",
 		Namespace:  "production",
@@ -444,7 +444,7 @@ func TestReconcile_WithWatcher(t *testing.T) {
 
 func TestReconcile_WithPersistence(t *testing.T) {
 	instance := newInstance("test-persist", "default")
-	instance.Spec.Persistence = &chatcliv1alpha1.PersistenceSpec{
+	instance.Spec.Persistence = &platformv1alpha1.PersistenceSpec{
 		Enabled:          true,
 		Size:             "5Gi",
 		StorageClassName: strPtr("fast-ssd"),
@@ -523,7 +523,7 @@ func TestReconcile_Deletion(t *testing.T) {
 
 	// The fake client garbage-collects objects with DeletionTimestamp and no finalizers,
 	// so the object should be gone after the finalizer is removed.
-	var updated chatcliv1alpha1.ChatCLIInstance
+	var updated platformv1alpha1.Instance
 	err = c.Get(ctx, types.NamespacedName{Name: "test-delete", Namespace: "default"}, &updated)
 	if err == nil {
 		// Object still exists - verify finalizer was removed
@@ -594,12 +594,12 @@ func TestHelpers(t *testing.T) {
 func TestDeepCopy(t *testing.T) {
 	instance := newInstance("test-dc", "default")
 	instance.Spec.Replicas = int32Ptr(3)
-	instance.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+	instance.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 		Enabled:    true,
 		Deployment: "app",
 		Namespace:  "prod",
 	}
-	instance.Spec.Persistence = &chatcliv1alpha1.PersistenceSpec{
+	instance.Spec.Persistence = &platformv1alpha1.PersistenceSpec{
 		Enabled:          true,
 		Size:             "2Gi",
 		StorageClassName: strPtr("standard"),
@@ -607,12 +607,12 @@ func TestDeepCopy(t *testing.T) {
 	instance.Spec.SecurityContext = &corev1.PodSecurityContext{
 		RunAsUser: int64Ptr(1000),
 	}
-	instance.Spec.APIKeys = &chatcliv1alpha1.SecretRefSpec{Name: "keys"}
-	instance.Spec.Server.TLS = &chatcliv1alpha1.TLSSpec{
+	instance.Spec.APIKeys = &platformv1alpha1.SecretRefSpec{Name: "keys"}
+	instance.Spec.Server.TLS = &platformv1alpha1.TLSSpec{
 		Enabled:    true,
 		SecretName: "tls",
 	}
-	instance.Spec.Server.Token = &chatcliv1alpha1.SecretKeyRefSpec{
+	instance.Spec.Server.Token = &platformv1alpha1.SecretKeyRefSpec{
 		Name: "auth",
 		Key:  "token",
 	}
@@ -622,21 +622,21 @@ func TestDeepCopy(t *testing.T) {
 	}
 
 	// DeepCopy should not panic and should produce independent copy
-	copy := instance.DeepCopy()
-	if copy == nil {
+	cp := instance.DeepCopy()
+	if cp == nil {
 		t.Fatal("DeepCopy returned nil")
 	}
-	if copy.Name != instance.Name {
+	if cp.Name != instance.Name {
 		t.Error("DeepCopy name mismatch")
 	}
 
 	// Mutate copy, ensure original unchanged
-	*copy.Spec.Replicas = 10
+	*cp.Spec.Replicas = 10
 	if *instance.Spec.Replicas == 10 {
 		t.Error("DeepCopy did not produce independent copy for Replicas")
 	}
 
-	copy.Spec.Watcher.Deployment = "changed"
+	cp.Spec.Watcher.Deployment = "changed"
 	if instance.Spec.Watcher.Deployment == "changed" {
 		t.Error("DeepCopy did not produce independent copy for Watcher")
 	}
@@ -648,8 +648,8 @@ func TestDeepCopy(t *testing.T) {
 	}
 
 	// List deep copy
-	list := &chatcliv1alpha1.ChatCLIInstanceList{
-		Items: []chatcliv1alpha1.ChatCLIInstance{*instance},
+	list := &platformv1alpha1.InstanceList{
+		Items: []platformv1alpha1.Instance{*instance},
 	}
 	listCopy := list.DeepCopy()
 	if listCopy == nil || len(listCopy.Items) != 1 {
@@ -661,11 +661,11 @@ func TestDeepCopy(t *testing.T) {
 	}
 
 	// Nil deep copies
-	var nilInstance *chatcliv1alpha1.ChatCLIInstance
+	var nilInstance *platformv1alpha1.Instance
 	if nilInstance.DeepCopy() != nil {
 		t.Error("nil DeepCopy should return nil")
 	}
-	var nilSpec *chatcliv1alpha1.ChatCLIInstanceSpec
+	var nilSpec *platformv1alpha1.InstanceSpec
 	if nilSpec.DeepCopy() != nil {
 		t.Error("nil spec DeepCopy should return nil")
 	}
@@ -675,13 +675,13 @@ func TestDeepCopy(t *testing.T) {
 
 func TestBuildContainerArgs_WithMultiTargetWatcher(t *testing.T) {
 	s := newScheme()
-	r := &ChatCLIInstanceReconciler{Scheme: s}
+	r := &InstanceReconciler{Scheme: s}
 	instance := newInstance("test", "default")
-	instance.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+	instance.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 		Enabled:  true,
 		Interval: "1m",
 		Window:   "30m",
-		Targets: []chatcliv1alpha1.WatchTargetSpec{
+		Targets: []platformv1alpha1.WatchTargetSpec{
 			{Deployment: "app-a", Namespace: "ns-a"},
 			{Deployment: "app-b", Namespace: "ns-b"},
 		},
@@ -719,11 +719,11 @@ func TestBuildContainerArgs_WithMultiTargetWatcher(t *testing.T) {
 
 func TestBuildPodSpec_WatchConfigVolume(t *testing.T) {
 	s := newScheme()
-	r := &ChatCLIInstanceReconciler{Scheme: s}
+	r := &InstanceReconciler{Scheme: s}
 	instance := newInstance("my-watcher", "default")
-	instance.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+	instance.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 		Enabled: true,
-		Targets: []chatcliv1alpha1.WatchTargetSpec{
+		Targets: []platformv1alpha1.WatchTargetSpec{
 			{Deployment: "frontend", Namespace: "prod"},
 		},
 	}
@@ -768,13 +768,13 @@ func TestBuildPodSpec_WatchConfigVolume(t *testing.T) {
 }
 
 func TestBuildWatchConfigYAML(t *testing.T) {
-	watcher := &chatcliv1alpha1.WatcherSpec{
+	watcher := &platformv1alpha1.WatcherSpec{
 		Enabled:         true,
 		Interval:        "45s",
 		Window:          "1h",
 		MaxLogLines:     500,
 		MaxContextChars: 12000,
-		Targets: []chatcliv1alpha1.WatchTargetSpec{
+		Targets: []platformv1alpha1.WatchTargetSpec{
 			{
 				Deployment:    "api-server",
 				Namespace:     "production",
@@ -873,16 +873,16 @@ func TestBuildWatchConfigYAML(t *testing.T) {
 func TestNeedsClusterRBAC(t *testing.T) {
 	tests := []struct {
 		name     string
-		instance *chatcliv1alpha1.ChatCLIInstance
+		instance *platformv1alpha1.Instance
 		want     bool
 	}{
 		{
 			name: "single target",
-			instance: func() *chatcliv1alpha1.ChatCLIInstance {
+			instance: func() *platformv1alpha1.Instance {
 				inst := newInstance("test", "default")
-				inst.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 					Enabled: true,
-					Targets: []chatcliv1alpha1.WatchTargetSpec{
+					Targets: []platformv1alpha1.WatchTargetSpec{
 						{Deployment: "app", Namespace: "prod"},
 					},
 				}
@@ -892,11 +892,11 @@ func TestNeedsClusterRBAC(t *testing.T) {
 		},
 		{
 			name: "multiple targets same namespace",
-			instance: func() *chatcliv1alpha1.ChatCLIInstance {
+			instance: func() *platformv1alpha1.Instance {
 				inst := newInstance("test", "default")
-				inst.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 					Enabled: true,
-					Targets: []chatcliv1alpha1.WatchTargetSpec{
+					Targets: []platformv1alpha1.WatchTargetSpec{
 						{Deployment: "app-a", Namespace: "prod"},
 						{Deployment: "app-b", Namespace: "prod"},
 						{Deployment: "app-c", Namespace: "prod"},
@@ -908,11 +908,11 @@ func TestNeedsClusterRBAC(t *testing.T) {
 		},
 		{
 			name: "multiple targets different namespaces",
-			instance: func() *chatcliv1alpha1.ChatCLIInstance {
+			instance: func() *platformv1alpha1.Instance {
 				inst := newInstance("test", "default")
-				inst.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 					Enabled: true,
-					Targets: []chatcliv1alpha1.WatchTargetSpec{
+					Targets: []platformv1alpha1.WatchTargetSpec{
 						{Deployment: "app-a", Namespace: "prod"},
 						{Deployment: "app-b", Namespace: "staging"},
 					},
@@ -923,16 +923,16 @@ func TestNeedsClusterRBAC(t *testing.T) {
 		},
 		{
 			name: "no watcher",
-			instance: func() *chatcliv1alpha1.ChatCLIInstance {
+			instance: func() *platformv1alpha1.Instance {
 				return newInstance("test", "default")
 			}(),
 			want: false,
 		},
 		{
 			name: "no targets",
-			instance: func() *chatcliv1alpha1.ChatCLIInstance {
+			instance: func() *platformv1alpha1.Instance {
 				inst := newInstance("test", "default")
-				inst.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 					Enabled:    true,
 					Deployment: "legacy-app",
 					Namespace:  "prod",
@@ -943,11 +943,11 @@ func TestNeedsClusterRBAC(t *testing.T) {
 		},
 		{
 			name: "multiple targets with empty namespace defaults to same",
-			instance: func() *chatcliv1alpha1.ChatCLIInstance {
+			instance: func() *platformv1alpha1.Instance {
 				inst := newInstance("test", "default")
-				inst.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 					Enabled: true,
-					Targets: []chatcliv1alpha1.WatchTargetSpec{
+					Targets: []platformv1alpha1.WatchTargetSpec{
 						{Deployment: "app-a", Namespace: ""},
 						{Deployment: "app-b", Namespace: "default"},
 					},
@@ -970,13 +970,13 @@ func TestNeedsClusterRBAC(t *testing.T) {
 
 func TestReconcile_WithMultiTargetWatcher(t *testing.T) {
 	instance := newInstance("multi-watch", "default")
-	instance.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+	instance.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 		Enabled:         true,
 		Interval:        "30s",
 		Window:          "2h",
 		MaxLogLines:     200,
 		MaxContextChars: 10000,
-		Targets: []chatcliv1alpha1.WatchTargetSpec{
+		Targets: []platformv1alpha1.WatchTargetSpec{
 			{
 				Deployment:    "api",
 				Namespace:     "production",
@@ -1093,13 +1093,13 @@ func TestReconcile_WithMultiTargetWatcher(t *testing.T) {
 
 func TestDeepCopy_WatcherWithTargets(t *testing.T) {
 	instance := newInstance("test-dc-multi", "default")
-	instance.Spec.Watcher = &chatcliv1alpha1.WatcherSpec{
+	instance.Spec.Watcher = &platformv1alpha1.WatcherSpec{
 		Enabled:         true,
 		Interval:        "30s",
 		Window:          "1h",
 		MaxLogLines:     100,
 		MaxContextChars: 32000,
-		Targets: []chatcliv1alpha1.WatchTargetSpec{
+		Targets: []platformv1alpha1.WatchTargetSpec{
 			{
 				Deployment:    "api",
 				Namespace:     "prod",
@@ -1157,7 +1157,7 @@ func TestDeepCopy_WatcherWithTargets(t *testing.T) {
 	}
 
 	// Append to the copy's Targets slice - should not affect original
-	cp.Spec.Watcher.Targets = append(cp.Spec.Watcher.Targets, chatcliv1alpha1.WatchTargetSpec{
+	cp.Spec.Watcher.Targets = append(cp.Spec.Watcher.Targets, platformv1alpha1.WatchTargetSpec{
 		Deployment: "extra",
 		Namespace:  "extra-ns",
 	})

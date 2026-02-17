@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -47,6 +48,7 @@ type Handler struct {
 	watcherContextFunc func() string
 	watcherStatusFunc  func() string // compact status summary
 	watcherStatsFunc   func() (alertCount, snapshotCount, podCount int)
+	watcherAlertsFunc  func() []AlertInfo // raw alerts for AIOps operator
 	watcherDeployment  string
 	watcherNamespace   string
 
@@ -61,6 +63,17 @@ type SessionStore interface {
 	LoadSession(name string) ([]models.Message, error)
 	ListSessions() ([]string, error)
 	DeleteSession(name string) error
+}
+
+// AlertInfo represents a watcher alert exposed to the AIOps operator.
+type AlertInfo struct {
+	Type       string
+	Severity   string
+	Message    string
+	Object     string
+	Namespace  string
+	Deployment string
+	Timestamp  time.Time
 }
 
 // NewHandler creates a new gRPC handler.
@@ -79,6 +92,7 @@ type WatcherConfig struct {
 	ContextFunc func() string                                    // full context for LLM
 	StatusFunc  func() string                                    // compact status summary
 	StatsFunc   func() (alertCount, snapshotCount, podCount int) // numeric stats
+	AlertsFunc  func() []AlertInfo                               // raw alerts for AIOps operator
 	Deployment  string
 	Namespace   string
 }
@@ -94,6 +108,7 @@ func (h *Handler) SetWatcher(cfg WatcherConfig) {
 	h.watcherContextFunc = cfg.ContextFunc
 	h.watcherStatusFunc = cfg.StatusFunc
 	h.watcherStatsFunc = cfg.StatsFunc
+	h.watcherAlertsFunc = cfg.AlertsFunc
 	h.watcherDeployment = cfg.Deployment
 	h.watcherNamespace = cfg.Namespace
 }
@@ -483,6 +498,176 @@ func (h *Handler) Health(ctx context.Context, req *pb.HealthRequest) (*pb.Health
 		Status:  pb.HealthResponse_SERVING,
 		Version: vi.Version,
 	}, nil
+}
+
+// GetAlerts returns current watcher alerts for the AIOps operator.
+func (h *Handler) GetAlerts(ctx context.Context, req *pb.GetAlertsRequest) (*pb.GetAlertsResponse, error) {
+	if h.watcherAlertsFunc == nil {
+		return &pb.GetAlertsResponse{}, nil
+	}
+
+	alerts := h.watcherAlertsFunc()
+	var result []*pb.WatcherAlert
+	for _, a := range alerts {
+		if req.Namespace != "" && a.Namespace != req.Namespace {
+			continue
+		}
+		if req.Deployment != "" && a.Deployment != req.Deployment {
+			continue
+		}
+		result = append(result, &pb.WatcherAlert{
+			Type:          a.Type,
+			Severity:      a.Severity,
+			Message:       a.Message,
+			Object:        a.Object,
+			Namespace:     a.Namespace,
+			Deployment:    a.Deployment,
+			TimestampUnix: a.Timestamp.Unix(),
+		})
+	}
+
+	return &pb.GetAlertsResponse{Alerts: result}, nil
+}
+
+// AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
+func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest) (*pb.AnalyzeIssueResponse, error) {
+	if req.IssueName == "" {
+		return nil, status.Error(codes.InvalidArgument, "issue_name is required")
+	}
+
+	llmClient, err := h.getClient(req.Provider, req.Model, "", nil)
+	if err != nil {
+		h.logger.Error("Failed to get LLM client for analysis", zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "failed to get LLM client: %v", err)
+	}
+
+	prompt := buildAnalysisPrompt(req)
+
+	// Enrich with K8s context if available
+	enrichedPrompt := h.enrichPrompt(prompt)
+
+	response, err := llmClient.SendPrompt(ctx, enrichedPrompt, nil, 0)
+	if err != nil {
+		h.logger.Error("LLM analysis failed", zap.Error(err), zap.String("issue", req.IssueName))
+		return nil, status.Errorf(codes.Internal, "LLM analysis failed: %v", err)
+	}
+
+	analysis := parseAnalysisResponse(response)
+
+	provider := req.Provider
+	if provider == "" {
+		provider = h.defaultProvider
+	}
+
+	// Map parsed actions to proto SuggestedAction
+	var suggestedActions []*pb.SuggestedAction
+	for _, a := range analysis.Actions {
+		suggestedActions = append(suggestedActions, &pb.SuggestedAction{
+			Name:        a.Name,
+			Action:      a.Action,
+			Description: a.Description,
+			Params:      a.Params,
+		})
+	}
+
+	return &pb.AnalyzeIssueResponse{
+		Analysis:         analysis.Analysis,
+		Confidence:       analysis.Confidence,
+		Recommendations:  analysis.Recommendations,
+		Model:            llmClient.GetModelName(),
+		Provider:         provider,
+		SuggestedActions: suggestedActions,
+	}, nil
+}
+
+func buildAnalysisPrompt(req *pb.AnalyzeIssueRequest) string {
+	return fmt.Sprintf(`You are a Kubernetes SRE expert. Analyze the following issue and provide a structured assessment with concrete remediation actions.
+
+Issue Details:
+- Name: %s
+- Namespace: %s
+- Resource: %s/%s
+- Signal Type: %s
+- Severity: %s
+- Description: %s
+- Risk Score: %d/100
+
+Available remediation actions (use ONLY these):
+- RestartDeployment: triggers a rolling restart (no params needed)
+- ScaleDeployment: scales the deployment (params: {"replicas": "N"})
+- RollbackDeployment: rolls back to the previous revision (no params needed)
+- PatchConfig: updates a ConfigMap (params: {"configmap": "name", "key": "value"})
+
+Respond ONLY with a JSON object (no markdown, no code blocks):
+{
+  "analysis": "Detailed root cause analysis and impact assessment",
+  "confidence": 0.85,
+  "recommendations": ["First recommendation", "Second recommendation"],
+  "actions": [
+    {"name": "Restart pods", "action": "RestartDeployment", "description": "Rolling restart to clear stale state", "params": {}},
+    {"name": "Scale up", "action": "ScaleDeployment", "description": "Add replicas to handle load", "params": {"replicas": "3"}}
+  ]
+}
+
+Rules:
+- confidence: float between 0.0 and 1.0
+- recommendations: human-readable text advice
+- actions: concrete remediation steps using ONLY the available actions listed above
+- Each action must have a description explaining WHY it is recommended`,
+		req.IssueName, req.Namespace, req.ResourceKind, req.ResourceName,
+		req.SignalType, req.Severity, req.Description, req.RiskScore)
+}
+
+type actionEntry struct {
+	Name        string            `json:"name"`
+	Action      string            `json:"action"`
+	Description string            `json:"description"`
+	Params      map[string]string `json:"params,omitempty"`
+}
+
+type analysisResult struct {
+	Analysis        string        `json:"analysis"`
+	Confidence      float32       `json:"confidence"`
+	Recommendations []string      `json:"recommendations"`
+	Actions         []actionEntry `json:"actions"`
+}
+
+func parseAnalysisResponse(response string) analysisResult {
+	// Strip markdown code blocks if present
+	cleaned := response
+	cleaned = strings.TrimSpace(cleaned)
+	if strings.HasPrefix(cleaned, "```json") {
+		cleaned = strings.TrimPrefix(cleaned, "```json")
+		if idx := strings.LastIndex(cleaned, "```"); idx >= 0 {
+			cleaned = cleaned[:idx]
+		}
+	} else if strings.HasPrefix(cleaned, "```") {
+		cleaned = strings.TrimPrefix(cleaned, "```")
+		if idx := strings.LastIndex(cleaned, "```"); idx >= 0 {
+			cleaned = cleaned[:idx]
+		}
+	}
+	cleaned = strings.TrimSpace(cleaned)
+
+	var result analysisResult
+	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
+		// Fallback: treat entire response as analysis text
+		return analysisResult{
+			Analysis:        response,
+			Confidence:      0.5,
+			Recommendations: []string{"Review the issue manually — AI response could not be parsed"},
+		}
+	}
+
+	// Clamp confidence
+	if result.Confidence < 0 {
+		result.Confidence = 0
+	}
+	if result.Confidence > 1 {
+		result.Confidence = 1
+	}
+
+	return result
 }
 
 // chunkResponse splits a response into chunks at natural boundaries (newlines,

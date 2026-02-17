@@ -1,0 +1,25 @@
+apiVersion: platform.chatcli.io/v1alpha1
+kind: RemediationPlan
+metadata:
+  name: payments-api-remediation-001
+  namespace: default
+spec:
+  issueRef:
+    name: payments-api-high-error-rate
+  attempt: 1
+  strategy: "Rollback to last known good revision after scaling up to absorb traffic."
+  actions:
+    - type: ScaleDeployment
+      params:
+        deployment: payments-api
+        namespace: production
+        replicas: "5"
+    - type: RollbackDeployment
+      params:
+        deployment: payments-api
+        namespace: production
+        toRevision: "12"
+  safetyConstraints:
+    - "Do not scale below 2 replicas"
+    - "Abort if error rate exceeds 50%"
+    - "Maximum rollback window is 3 revisions"

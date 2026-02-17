@@ -1,0 +1,10 @@
+apiVersion: platform.chatcli.io/v1alpha1
+kind: AIInsight
+metadata:
+  name: payments-api-insight-001
+  namespace: default
+spec:
+  issueRef:
+    name: payments-api-high-error-rate
+  provider: CLAUDEAI
+  model: claude-sonnet-4-5

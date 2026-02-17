@@ -1,5 +1,5 @@
-apiVersion: chatcli.diillson.com/v1alpha1
-kind: ChatCLIInstance
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Instance
 metadata:
   name: chatcli-sample
   namespace: default
@@ -55,7 +55,7 @@ spec:
   apiKeys:
     name: chatcli-api-keys
 ---
-# Secret with API keys (create before applying the ChatCLIInstance)
+# Secret with API keys (create before applying the Instance)
 apiVersion: v1
 kind: Secret
 metadata:
