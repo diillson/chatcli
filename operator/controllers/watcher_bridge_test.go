@@ -147,6 +147,14 @@ func TestWatcherBridge_CreateAnomaly(t *testing.T) {
 	wb := setupFakeWatcherBridge()
 	ctx := context.Background()
 
+	// Simulate a connected Instance for label tracking
+	wb.connectedInstance = &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chatcli-prod",
+			Namespace: "chatcli-system",
+		},
+	}
+
 	alert := &pb.WatcherAlert{
 		Type:          "HighRestartCount",
 		Severity:      "CRITICAL",
@@ -185,6 +193,13 @@ func TestWatcherBridge_CreateAnomaly(t *testing.T) {
 	}
 	if anom.Labels["platform.chatcli.io/deployment"] != "web" {
 		t.Error("expected deployment label to be web")
+	}
+	// Verify Instance tracking labels (cross-namespace link)
+	if anom.Labels["platform.chatcli.io/instance"] != "chatcli-prod" {
+		t.Errorf("expected instance label 'chatcli-prod', got %q", anom.Labels["platform.chatcli.io/instance"])
+	}
+	if anom.Labels["platform.chatcli.io/instance-namespace"] != "chatcli-system" {
+		t.Errorf("expected instance-namespace label 'chatcli-system', got %q", anom.Labels["platform.chatcli.io/instance-namespace"])
 	}
 }
 

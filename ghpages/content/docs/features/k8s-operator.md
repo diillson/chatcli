@@ -672,11 +672,11 @@ cd operator
 # Build
 go build ./...
 
-# Testes (80 testes)
+# Testes (86 funcoes, 115 com subtests)
 go test ./... -v
 
-# Docker
-make docker-build IMG=myregistry/chatcli-operator:dev
+# Docker (deve ser construido a partir do root do repositorio)
+docker build -f operator/Dockerfile -t myregistry/chatcli-operator:dev .
 
 # Instalar CRDs no cluster
 kubectl apply -f config/crd/bases/

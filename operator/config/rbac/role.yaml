@@ -163,6 +163,25 @@ rules:
       - update
       - patch
       - delete
+  # Secrets (API keys, TLS certs, auth tokens)
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  # Pods and logs (watcher, remediation restart)
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+    verbs:
+      - get
+      - list
+      - watch
   # ConfigMaps — no delete for remediation safety
   - apiGroups:
       - ""
@@ -190,12 +209,15 @@ rules:
       - update
       - patch
       - delete
-  # Events
+  # Events (emit + read for watcher)
   - apiGroups:
       - ""
     resources:
       - events
     verbs:
+      - get
+      - list
+      - watch
       - create
       - patch
   # Leader election

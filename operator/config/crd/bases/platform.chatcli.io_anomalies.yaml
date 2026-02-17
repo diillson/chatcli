@@ -62,6 +62,7 @@ spec:
                     - events
                     - logs
                     - webhook
+                    - watcher
                 signalType:
                   description: Type of anomaly signal detected.
                   type: string
@@ -72,6 +73,8 @@ spec:
                     - cpu_high
                     - memory_high
                     - oom_kill
+                    - pod_not_ready
+                    - deploy_failing
                 resource:
                   description: Reference to the Kubernetes resource affected.
                   type: object

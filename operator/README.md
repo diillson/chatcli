@@ -132,6 +132,12 @@ spec:
     name: chatcli-api-keys
   server:
     port: 50051
+    tls:
+      enabled: true
+      secretName: chatcli-tls       # Secret with tls.crt, tls.key, ca.crt (optional)
+    token:
+      name: chatcli-server-token    # Secret containing the auth token
+      key: token                    # Key within the Secret (default: "token")
   watcher:
     enabled: true
     interval: "30s"
@@ -314,11 +320,11 @@ cd operator
 # Build
 go build ./...
 
-# Test (80 tests)
+# Test (86 test functions, 115 with subtests)
 go test ./... -v
 
-# Docker
-make docker-build IMG=ghcr.io/diillson/chatcli-operator:latest
+# Docker (must be built from repo root due to go.mod replace directive)
+docker build -f operator/Dockerfile -t ghcr.io/diillson/chatcli-operator:latest .
 
 # Install CRDs
 kubectl apply -f config/crd/bases/
@@ -335,8 +341,8 @@ make deploy IMG=ghcr.io/diillson/chatcli-operator:latest
 | AnomalyReconciler | 4 | Creation, correlation, existing issue attachment |
 | IssueReconciler | 10 | State machine (Detected→Analyzing→Remediating→Resolved/Escalated), AI fallback, retry |
 | RemediationReconciler | 10 | All action types, safety checks, custom action blocking |
-| AIInsightReconciler | 9 | Server connectivity, RPC mock, analysis parsing |
-| WatcherBridge | 12 | Alert mapping, dedup, hash, pruning, anomaly creation |
+| AIInsightReconciler | 12 | Server connectivity, RPC mock, analysis parsing, withAuth, ConnectionOpts |
+| WatcherBridge | 22 | Alert mapping, dedup, hash, pruning, anomaly creation, TLS/token buildConnectionOpts |
 | CorrelationEngine | 4 | Risk scoring, severity, incident ID, related anomalies |
 | Pipeline (E2E) | 3 | Full flow: Anomaly→Issue→Insight→Plan→Resolved, escalation, correlation |
 | MapActionType | 6 | All action type string→enum mappings |

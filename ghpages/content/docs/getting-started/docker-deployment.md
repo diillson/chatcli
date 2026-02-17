@@ -44,8 +44,20 @@ docker build -t chatcli .
 ```
 
 O Dockerfile usa multi-stage build para produzir uma imagem minima (~20MB):
-- **Build stage**: `golang:1.24-alpine` compila o binario
+- **Build stage**: `golang:1.25-alpine` compila o binario
 - **Runtime stage**: `alpine:3.21` com usuario nao-root, health check integrado
+
+### Build da Imagem do Operator (Local)
+
+```bash
+# IMPORTANTE: deve ser construido a partir da raiz do repositorio
+# (go.mod do operator usa replace directive apontando para ../)
+docker build -f operator/Dockerfile -t ghcr.io/diillson/chatcli-operator:latest .
+```
+
+O Dockerfile do operator usa:
+- **Build stage**: `golang:1.25` com suporte multi-arch (`TARGETARCH`)
+- **Runtime stage**: `gcr.io/distroless/static:nonroot` (seguranca maxima, sem shell)
 
 ### Rodar com Docker
 

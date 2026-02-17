@@ -380,7 +380,7 @@ O operator expoe metricas Prometheus para observabilidade:
 
 ## Testes
 
-O operator possui 80 testes cobrindo todos os componentes:
+O operator possui 86 testes (115 com subtests) cobrindo todos os componentes:
 
 | Componente | Testes | Cobertura |
 |-----------|--------|-----------|
@@ -388,8 +388,8 @@ O operator possui 80 testes cobrindo todos os componentes:
 | AnomalyReconciler | 4 | Criacao, correlacao, attachment a Issue existente |
 | IssueReconciler | 10 | Maquina de estados completa, fallback AI, retry, escalonamento |
 | RemediationReconciler | 10 | Todos os tipos de acao, safety checks, bloqueio de Custom |
-| AIInsightReconciler | 9 | Conectividade, mock RPC, parsing de analise |
-| WatcherBridge | 12 | Mapeamento de alertas, dedup SHA256, hash, pruning, criacao de Anomaly |
+| AIInsightReconciler | 12 | Conectividade, mock RPC, parsing de analise, withAuth, TLS/token |
+| WatcherBridge | 22 | Mapeamento de alertas, dedup SHA256, hash, pruning, criacao de Anomaly, buildConnectionOpts (TLS, token, ambos) |
 | CorrelationEngine | 4 | Risk scoring, severidade, incident ID, anomalias relacionadas |
 | Pipeline (E2E) | 3 | Fluxo completo: Anomaly→Issue→Insight→Plan→Resolved, escalonamento, correlacao |
 | MapActionType | 6 | Todos os mapeamentos string→enum |

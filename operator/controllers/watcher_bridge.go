@@ -36,8 +36,9 @@ type WatcherBridge struct {
 	serverClient *ServerClient
 	logger       *zap.Logger
 
-	mu     sync.Mutex
-	seen   map[string]time.Time // hash → first-seen timestamp for dedup
+	mu                sync.Mutex
+	seen              map[string]time.Time // hash → first-seen timestamp for dedup
+	connectedInstance *platformv1alpha1.Instance // Instance we're connected to (for OwnerRef)
 }
 
 // NewWatcherBridge creates a new WatcherBridge.
@@ -139,6 +140,8 @@ func (wb *WatcherBridge) discoverAndConnect(ctx context.Context) error {
 			continue
 		}
 		wb.logger.Info("Connected to Instance", zap.String("instance", inst.Name), zap.String("address", address))
+		instCopy := inst
+		wb.connectedInstance = &instCopy
 		return nil
 	}
 
@@ -198,14 +201,21 @@ func (wb *WatcherBridge) createAnomaly(ctx context.Context, alert *pb.WatcherAle
 	// Sanitize name for K8s (lowercase, max 63 chars, no invalid chars)
 	name = sanitizeK8sName(name)
 
+	labels := map[string]string{
+		"platform.chatcli.io/source":     "watcher",
+		"platform.chatcli.io/deployment": alert.Deployment,
+	}
+	// Link to the Instance that produced this anomaly (cross-namespace, so labels not OwnerRef)
+	if wb.connectedInstance != nil {
+		labels["platform.chatcli.io/instance"]           = wb.connectedInstance.Name
+		labels["platform.chatcli.io/instance-namespace"] = wb.connectedInstance.Namespace
+	}
+
 	anomaly := &platformv1alpha1.Anomaly{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
-			Labels: map[string]string{
-				"platform.chatcli.io/source":     "watcher",
-				"platform.chatcli.io/deployment": alert.Deployment,
-			},
+			Labels:    labels,
 		},
 		Spec: platformv1alpha1.AnomalySpec{
 			Source:     platformv1alpha1.AnomalySourceWatcher,
