@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.59.1](https://github.com/diillson/chatcli/compare/v1.59.0...v1.59.1) (2026-02-18)
+
+
+### Bug Fixes
+
+* **operator:** resolve RBAC escalation, readonly fs, gRPC keepalive, CRD schema and naming bugs    ([#561](https://github.com/diillson/chatcli/issues/561)) ([f27c319](https://github.com/diillson/chatcli/commit/f27c319096e72978862c5778f45b786a1adc564e))
+
 ## [1.59.0](https://github.com/diillson/chatcli/compare/v1.58.0...v1.59.0) (2026-02-18)
 
 
