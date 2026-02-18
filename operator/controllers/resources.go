@@ -286,8 +286,22 @@ func (r *InstanceReconciler) buildContainerArgs(instance *platformv1alpha1.Insta
 	return args
 }
 
-// reconcileService creates or updates the ClusterIP Service for gRPC.
+// reconcileService creates or updates the Service for gRPC.
+// When replicas > 1, a headless Service is created to enable gRPC client-side load balancing.
 func (r *InstanceReconciler) reconcileService(ctx context.Context, instance *platformv1alpha1.Instance) error {
+	wantHeadless := instance.Spec.Replicas != nil && *instance.Spec.Replicas > 1
+
+	// ClusterIP is immutable — if switching between regular ↔ headless, delete and recreate.
+	existing := &corev1.Service{}
+	if err := r.Get(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, existing); err == nil {
+		isHeadless := existing.Spec.ClusterIP == corev1.ClusterIPNone
+		if wantHeadless != isHeadless {
+			if err := r.Delete(ctx, existing); err != nil && !errors.IsNotFound(err) {
+				return fmt.Errorf("deleting Service for ClusterIP transition: %w", err)
+			}
+		}
+	}
+
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name,
@@ -328,6 +342,9 @@ func (r *InstanceReconciler) reconcileService(ctx context.Context, instance *pla
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},
+		}
+		if wantHeadless {
+			svc.Spec.ClusterIP = corev1.ClusterIPNone
 		}
 		return nil
 	})

@@ -8,6 +8,8 @@ package remote
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/models"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
@@ -15,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -63,7 +66,23 @@ func NewClient(cfg Config, logger *zap.Logger) (*Client, error) {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
-	conn, err := grpc.NewClient(cfg.Address, dialOpts...)
+	// Keepalive: detect dead connections quickly for resilience
+	dialOpts = append(dialOpts, grpc.WithKeepaliveParams(keepalive.ClientParameters{
+		Time:                10 * time.Second, // ping every 10s if no activity
+		Timeout:             3 * time.Second,  // wait 3s for pong before considering dead
+		PermitWithoutStream: true,             // ping even without active RPCs
+	}))
+
+	// Client-side round-robin load balancing for headless Services with multiple replicas
+	dialOpts = append(dialOpts, grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`))
+
+	// Use dns:/// resolver to enable address re-resolution and round-robin
+	address := cfg.Address
+	if !strings.Contains(address, "://") {
+		address = "dns:///" + address
+	}
+
+	conn, err := grpc.NewClient(address, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to %s: %w", cfg.Address, err)
 	}

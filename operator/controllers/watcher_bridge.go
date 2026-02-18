@@ -121,7 +121,7 @@ func (wb *WatcherBridge) discoverAndConnect(ctx context.Context) error {
 		if port == 0 {
 			port = 50051
 		}
-		address := fmt.Sprintf("%s.%s.svc.cluster.local:%d", inst.Name, inst.Namespace, port)
+		address := fmt.Sprintf("dns:///%s.%s.svc.cluster.local:%d", inst.Name, inst.Namespace, port)
 
 		// Build connection options from Instance spec
 		opts, err := wb.buildConnectionOpts(ctx, &inst)
@@ -347,7 +347,7 @@ func (wb *WatcherBridge) ResolveServerAddress(ctx context.Context) (string, erro
 		if port == 0 {
 			port = 50051
 		}
-		return fmt.Sprintf("%s.%s.svc.cluster.local:%d", inst.Name, inst.Namespace, port), nil
+		return fmt.Sprintf("dns:///%s.%s.svc.cluster.local:%d", inst.Name, inst.Namespace, port), nil
 	}
 
 	return "", fmt.Errorf("no ready Instance found")

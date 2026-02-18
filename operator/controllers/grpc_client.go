@@ -6,12 +6,14 @@ import (
 	"crypto/x509"
 	"fmt"
 	"sync"
+	"time"
 
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -68,6 +70,16 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 	} else {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
+
+	// Keepalive: detect dead connections quickly
+	dialOpts = append(dialOpts, grpc.WithKeepaliveParams(keepalive.ClientParameters{
+		Time:                10 * time.Second, // ping every 10s if no activity
+		Timeout:             3 * time.Second,  // wait 3s for pong before considering dead
+		PermitWithoutStream: true,             // ping even without active RPCs
+	}))
+
+	// Client-side round-robin load balancing across resolved pod addresses
+	dialOpts = append(dialOpts, grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`))
 
 	conn, err := grpc.NewClient(address, dialOpts...)
 	if err != nil {
