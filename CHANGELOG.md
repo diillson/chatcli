@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.59.0](https://github.com/diillson/chatcli/compare/v1.58.0...v1.59.0) (2026-02-18)
+
+
+### Features
+
+* **grpc:** add keepalive, round-robin LB and headless Service for multi-replica support ([#559](https://github.com/diillson/chatcli/issues/559)) ([b829871](https://github.com/diillson/chatcli/commit/b829871c8dbb7b31561f9f3ab9bd004bf9f9907b))
+
 ## [1.58.0](https://github.com/diillson/chatcli/compare/v1.57.2...v1.58.0) (2026-02-17)
 
 
