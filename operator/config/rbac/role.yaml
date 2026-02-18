@@ -1,4 +1,12 @@
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: chatcli-system
+  labels:
+    app.kubernetes.io/name: chatcli-operator
+    app.kubernetes.io/managed-by: kustomize
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: chatcli-operator
