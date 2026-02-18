@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strconv"
 	"strings"
@@ -48,6 +49,16 @@ func (r *InstanceReconciler) reconcileDeployment(ctx context.Context, instance *
 		}
 
 		deploy.Labels = labels(instance)
+
+		// Compute a hash of the watch config so that changes to targets
+		// trigger a rolling update (the pod reads the config only at startup).
+		podAnnotations := map[string]string{}
+		if instance.Spec.Watcher != nil && instance.Spec.Watcher.Enabled && len(instance.Spec.Watcher.Targets) > 0 {
+			yaml := buildWatchConfigYAML(instance.Spec.Watcher)
+			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(yaml)))
+			podAnnotations["chatcli.io/watch-config-hash"] = hash[:16]
+		}
+
 		deploy.Spec = appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
@@ -55,7 +66,8 @@ func (r *InstanceReconciler) reconcileDeployment(ctx context.Context, instance *
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels(instance),
+					Labels:      labels(instance),
+					Annotations: podAnnotations,
 				},
 				Spec: r.buildPodSpec(instance),
 			},
@@ -121,6 +133,14 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		},
 	}
 
+	// HOME must be set explicitly: the container runs as UID 1000 which may not
+	// have a passwd entry, so os.UserHomeDir() would fall back to "/" and the
+	// read-only root filesystem would prevent log/session directory creation.
+	container.Env = append(container.Env, corev1.EnvVar{
+		Name:  "HOME",
+		Value: "/home/chatcli",
+	})
+
 	// EnvFrom: ConfigMap
 	container.EnvFrom = append(container.EnvFrom, corev1.EnvFromSource{
 		ConfigMapRef: &corev1.ConfigMapEnvSource{
@@ -151,6 +171,20 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		VolumeSource: corev1.VolumeSource{
 			EmptyDir: &corev1.EmptyDirVolumeSource{
 				SizeLimit: resourceQuantity("100Mi"),
+			},
+		},
+	})
+
+	// Writable data dir for logs and plugins (readOnlyRootFilesystem blocks writes to image layers)
+	volumeMounts = append(volumeMounts, corev1.VolumeMount{
+		Name:      "data",
+		MountPath: "/home/chatcli/.chatcli",
+	})
+	volumes = append(volumes, corev1.Volume{
+		Name: "data",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{
+				SizeLimit: resourceQuantity("200Mi"),
 			},
 		},
 	})

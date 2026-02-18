@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -122,7 +123,9 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, fmt.Errorf("generating incident ID: %w", err)
 	}
 
-	issueName := fmt.Sprintf("%s-%s-%d", resource.Name, anomaly.Spec.SignalType, time.Now().Unix())
+	// Replace underscores with hyphens to comply with RFC 1123 subdomain naming.
+	sanitizedSignal := strings.ReplaceAll(string(anomaly.Spec.SignalType), "_", "-")
+	issueName := fmt.Sprintf("%s-%s-%d", resource.Name, sanitizedSignal, time.Now().Unix())
 
 	newIssue := &platformv1alpha1.Issue{
 		ObjectMeta: metav1.ObjectMeta{

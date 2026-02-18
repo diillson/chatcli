@@ -22,6 +22,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -88,6 +89,17 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 	opts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(unaryChain...),
 		grpc.ChainStreamInterceptor(streamChain...),
+		// Allow operator and remote clients to send keepalive pings frequently.
+		// Without this the default MinTime is 5min, causing ENHANCE_YOUR_CALM
+		// disconnects for clients pinging every 30s.
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             20 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    60 * time.Second,
+			Timeout: 10 * time.Second,
+		}),
 	}
 
 	// TLS configuration
