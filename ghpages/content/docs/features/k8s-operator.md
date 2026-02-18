@@ -108,7 +108,7 @@ stateDiagram-v2
 
 ## CRD: Instance
 
-O `Instance` gerencia instâncias do servidor ChatCLI no cluster. Substitui o antigo `ChatCLIInstance` (`chatcli.diillson.com`).
+O `Instance` gerencia instâncias do servidor ChatCLI no cluster.
 
 ### Especificação Completa
 
