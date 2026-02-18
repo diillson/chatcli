@@ -6,7 +6,7 @@ description = "Autentique-se com provedores de IA via OAuth, sem precisar gerenc
 icon = "login"
 +++
 
-O ChatCLI suporta autenticação via **OAuth 2.0 com PKCE** para provedores que oferecem essa opção. Isso permite que você use seu plano existente (como **ChatGPT Plus**, **Codex** ou **Claude Pro**) diretamente no terminal, sem precisar gerar ou colar chaves de API.
+O ChatCLI suporta autenticação via **OAuth 2.0 com PKCE** para provedores que oferecém essa opção. Isso permite que você use seu plano existente (como **ChatGPT Plus**, **Codex** ou **Claude Pro**) diretamente no terminal, sem precisar gerar ou colar chaves de API.
 
 ---
 
@@ -61,7 +61,7 @@ Inicia o fluxo de autenticação OAuth:
 /auth logout anthropic
 ```
 
-Remove as credenciais OAuth armazenadas para o provedor especificado.
+Remove as credenciais OAuth armazenadas para o provedor específicado.
 
 ---
 

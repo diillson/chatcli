@@ -1,6 +1,6 @@
 ---
 title: "Corrigir testes com /coder"
-description: "Receita prática: veja como a IA usa o plugin @coder para corrigir testes autonomamente."
+description: "Receita prática: veja como a IA usa o plugin @coder para corrigir testes autônomamente."
 weight: 50
 ---
 
@@ -45,4 +45,4 @@ Aplicar patch para corrigir lógica.
 <tool_call name="@coder" args="{\"cmd\":\"patch\",\"args\":{\"file\":\"main.go\",\"encoding\":\"base64\",\"search\":\"base64_old\",\"replace\":\"base64_new\"}}"/>
 ```
 
-> Nota: Todo esse fluxo acontece autonomamente dentro do modo `/coder`.
+> Nota: Todo esse fluxo acontece autônomamente dentro do modo `/coder`.

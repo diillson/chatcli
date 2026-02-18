@@ -100,6 +100,11 @@ rbac:
 service:
   type: ClusterIP
   port: 50051
+  # Enable headless Service for gRPC client-side load balancing with multiple replicas.
+  # When true, DNS returns individual pod IPs instead of a virtual IP,
+  # allowing gRPC round-robin distribution across all pods.
+  # Recommended when replicaCount > 1.
+  headless: false
 
 ingress:
   enabled: false

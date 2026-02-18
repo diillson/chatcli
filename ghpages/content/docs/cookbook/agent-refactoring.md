@@ -95,7 +95,7 @@ O agente executará a substituição. Após a conclusão, você pode verificar a
 > A refatoração foi concluída com sucesso. Agora, por favor, crie um comando para encontrar e remover todos os arquivos .bak no projeto.
 
 {{< notice "success" >}}
-Resultado: Você realizou uma refatoração em toda a base de código de forma interativa e segura. O Modo Agente atuou como um par programador, permitindo que você validasse cada etapa crítica antes da execução.
+Resultado: Você realizou uma refatoração em toda a base de código de forma interativa e segura. O Modo Agente atuou como um par programador, permitindo que você válidasse cada etapa crítica antes da execução.
 {{< /notice >}}
 
 

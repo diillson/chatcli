@@ -64,7 +64,7 @@ Você é um Engenheiro de Software Sênior, especialista em Go/Golang.
 
 1. **Simplicidade**: Prefira código simples e legível.
 2. **Composição**: Use interfaces pequenas e composição ao invés de herança.
-3. **Erros**: Trate erros explicitamente, nunca ignore.
+3. **Erros**: Trate erros explícitamente, nunca ignore.
 4. **Testes**: Escreva testes com table-driven tests.
 ```
 
@@ -170,7 +170,7 @@ Você é um Cientista de Dados Sênior, especialista em Python.
     • clean-code ✓
 
 # Usar no modo agente
-/agent analise este dataset e crie visualizações
+/agent análise este dataset e crie visualizações
 
 # Ou no modo coder
 /coder crie um pipeline de ML para classificação

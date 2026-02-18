@@ -37,9 +37,9 @@ Carrega uma sessão salva anteriormente. A conversa atual é substituída pelo h
 
 # Carrega a sessão para continuar o trabalho no projeto do site
 {{< command >}}
-/session load documentacao-site
+/session load documentação-site
 
-│ ✅ Sessão 'documentacao-site' carregada. A conversa anterior foi restaurada.
+│ ✅ Sessão 'documentação-site' carregada. A conversa anterior foi restaurada.
 {{< /command >}}
 
 --------
@@ -53,8 +53,8 @@ Lista todas as sessões que você salvou no disco.
 │ Sessões salvas:
 │
 │ • debug-api-pagamentos
-│ • documentacao-site
-│ • refatoracao-legado
+│ • documentação-site
+│ • refatoração-legado
 {{< /command >}}
 
 --------
@@ -63,9 +63,9 @@ Lista todas as sessões que você salvou no disco.
 
 Remove permanentemente uma sessão salva do disco. Esta ação não pode ser desfeita.
 {{< command >}}
-/session delete refatoracao-legado
+/session delete refatoração-legado
 
-│ ✅ Sessão 'refatoracao-legado' deletada com sucesso do disco.
+│ ✅ Sessão 'refatoração-legado' deletada com sucesso do disco.
 {{< /command >}}
 
 Se você deletar a sessão que está ativa no momento, seu histórico atual será limpo e você começará uma nova conversa.

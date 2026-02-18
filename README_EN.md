@@ -1100,6 +1100,8 @@ helm install chatcli deploy/helm/chatcli \
 
 The Helm chart supports `watcher.targets[]` for multi-target, Prometheus scraping, and auto-detects ClusterRole when targets span different namespaces.
 
+> **gRPC and multiple replicas**: gRPC uses persistent HTTP/2 connections that pin to a single pod. For `replicaCount > 1`, enable `service.headless: true` in the Helm chart to activate round-robin load balancing via DNS. The Operator enables headless **automatically** when `spec.replicas > 1`. The client already has built-in keepalive and round-robin support.
+
 > Full documentation at [diillson.github.io/chatcli/docs/getting-started/docker-deployment](https://diillson.github.io/chatcli/docs/getting-started/docker-deployment/)
 
 --------

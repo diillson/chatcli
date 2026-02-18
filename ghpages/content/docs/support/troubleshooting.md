@@ -81,7 +81,7 @@ Encontrou um problema? Sem pânico. Esta página lista os erros mais comuns e co
 
 > **Sintomas:** Mesmo com `OLLAMA_ENABLED=true` no seu `.env`, a aplicação informa que o provedor não está disponível.
 
-> **Solução:** O `chatcli` precisa se comunicar com o servidor Ollama, que deve estar rodando localmente.
+> **Solução:** O `chatcli` precisa se comúnicar com o servidor Ollama, que deve estar rodando localmente.
 >
 > 1.  **Servidor Ollama**: Certifique-se de que o servidor do Ollama está em execução. Em outro terminal, rode `ollama serve`.
 > 2.  **Modelo Local**: Verifique se você tem pelo menos um modelo baixado. Rode `ollama list` para ver os modelos disponíveis. Se não tiver nenhum, baixe um (ex: `ollama pull llama3`).

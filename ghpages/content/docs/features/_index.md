@@ -8,6 +8,6 @@ icon = "auto_awesome"
 
 Bem-vindo aos recursos avançados do **ChatCLI**.
 
-Aqui voce aprendera sobre as medidas de seguranca e hardening, como usar o modo servidor para acesso remoto via gRPC, monitorar deployments Kubernetes com IA, a **plataforma AIOps autonoma** com deteccao de anomalias, analise por IA e remediacao automatica, salvar seu trabalho com sessoes e contextos persistentes, e transformar o ChatCLI em um assistente completo para o seu fluxo de trabalho.
+Aqui você aprendera sobre as medidas de segurança e hardening, como usar o modo servidor para acesso remoto via gRPC, monitorar deployments Kubernetes com IA, a **plataforma AIOps autônoma** com detecção de anomalias, análise por IA e remediação automática, salvar seu trabalho com sessões e contextos persistentes, e transformar o ChatCLI em um assistente completo para o seu fluxo de trabalho.
 
 --------

@@ -236,7 +236,7 @@ func TestWatcherBridge_ResolveServerAddress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := "chatcli-prod.chatcli-system.svc.cluster.local:50051"
+	expected := "dns:///chatcli-prod.chatcli-system.svc.cluster.local:50051"
 	if addr != expected {
 		t.Errorf("expected %q, got %q", expected, addr)
 	}
@@ -263,7 +263,7 @@ func TestWatcherBridge_ResolveServerAddress_DefaultPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := "chatcli.default.svc.cluster.local:50051"
+	expected := "dns:///chatcli.default.svc.cluster.local:50051"
 	if addr != expected {
 		t.Errorf("expected %q, got %q", expected, addr)
 	}
