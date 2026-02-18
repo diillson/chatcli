@@ -17,8 +17,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
@@ -293,5 +295,38 @@ func (r *InstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
+		// Watch user-managed Secrets (API keys) so that creating or updating
+		// a Secret triggers a reconcile → hash change → rolling update.
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.secretToInstance)).
 		Complete(r)
+}
+
+// secretToInstance maps a Secret event to the Instance(s) that reference it
+// via spec.apiKeys.name or spec.server.tls.secretName.
+func (r *InstanceReconciler) secretToInstance(ctx context.Context, obj client.Object) []reconcile.Request {
+	var instances platformv1alpha1.InstanceList
+	if err := r.List(ctx, &instances, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+
+	secretName := obj.GetName()
+	var requests []reconcile.Request
+	for _, inst := range instances.Items {
+		match := false
+		if inst.Spec.APIKeys != nil && inst.Spec.APIKeys.Name == secretName {
+			match = true
+		}
+		if inst.Spec.Server.TLS != nil && inst.Spec.Server.TLS.SecretName == secretName {
+			match = true
+		}
+		if match {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      inst.Name,
+					Namespace: inst.Namespace,
+				},
+			})
+		}
+	}
+	return requests
 }

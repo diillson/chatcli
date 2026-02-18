@@ -50,13 +50,46 @@ func (r *InstanceReconciler) reconcileDeployment(ctx context.Context, instance *
 
 		deploy.Labels = labels(instance)
 
-		// Compute a hash of the watch config so that changes to targets
-		// trigger a rolling update (the pod reads the config only at startup).
+		// Compute hashes of config inputs so that changes trigger a rolling
+		// update (the pod reads envFrom and config files only at startup).
 		podAnnotations := map[string]string{}
 		if instance.Spec.Watcher != nil && instance.Spec.Watcher.Enabled && len(instance.Spec.Watcher.Targets) > 0 {
 			yaml := buildWatchConfigYAML(instance.Spec.Watcher)
 			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(yaml)))
 			podAnnotations["chatcli.io/watch-config-hash"] = hash[:16]
+		}
+
+		// Hash the main ConfigMap so env var changes trigger a rollout.
+		{
+			var cm corev1.ConfigMap
+			key := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
+			if err := r.Get(ctx, key, &cm); err == nil {
+				raw := fmt.Sprintf("%v", cm.Data)
+				hash := fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))
+				podAnnotations["chatcli.io/configmap-hash"] = hash[:16]
+			}
+		}
+
+		// Hash the API keys Secret so creating/updating it triggers a rollout.
+		if instance.Spec.APIKeys != nil {
+			var secret corev1.Secret
+			key := types.NamespacedName{Name: instance.Spec.APIKeys.Name, Namespace: instance.Namespace}
+			if err := r.Get(ctx, key, &secret); err == nil {
+				raw := fmt.Sprintf("%v", secret.Data)
+				hash := fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))
+				podAnnotations["chatcli.io/secret-hash"] = hash[:16]
+			}
+		}
+
+		// Hash the TLS Secret so certificate rotation triggers a rollout.
+		if instance.Spec.Server.TLS != nil && instance.Spec.Server.TLS.Enabled && instance.Spec.Server.TLS.SecretName != "" {
+			var secret corev1.Secret
+			key := types.NamespacedName{Name: instance.Spec.Server.TLS.SecretName, Namespace: instance.Namespace}
+			if err := r.Get(ctx, key, &secret); err == nil {
+				raw := fmt.Sprintf("%v", secret.Data)
+				hash := fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))
+				podAnnotations["chatcli.io/tls-hash"] = hash[:16]
+			}
 		}
 
 		deploy.Spec = appsv1.DeploymentSpec{
@@ -141,18 +174,20 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		Value: "/home/chatcli",
 	})
 
-	// EnvFrom: ConfigMap
+	// EnvFrom: ConfigMap (optional so the pod starts even if the ConfigMap is not yet created)
 	container.EnvFrom = append(container.EnvFrom, corev1.EnvFromSource{
 		ConfigMapRef: &corev1.ConfigMapEnvSource{
 			LocalObjectReference: corev1.LocalObjectReference{Name: instance.Name},
+			Optional:             boolPtr(true),
 		},
 	})
 
-	// EnvFrom: API Keys Secret
+	// EnvFrom: API Keys Secret (optional so the pod starts before the Secret exists)
 	if instance.Spec.APIKeys != nil {
 		container.EnvFrom = append(container.EnvFrom, corev1.EnvFromSource{
 			SecretRef: &corev1.SecretEnvSource{
 				LocalObjectReference: corev1.LocalObjectReference{Name: instance.Spec.APIKeys.Name},
+				Optional:             boolPtr(true),
 			},
 		})
 	}
