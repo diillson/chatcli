@@ -321,7 +321,9 @@ O chart automaticamente:
 | `securityContext.capabilities.drop` | Capabilities removidas | `ALL` |
 | `rbac.clusterWide` | Usa ClusterRole em vez de Role namespace-scoped | `false` |
 
-> Quando `readOnlyRootFilesystem` está `true`, o chart monta automaticamente um tmpfs em `/tmp`. Para monitorar múltiplos namespaces, habilite `rbac.clusterWide: true`. Veja a [documentação de segurança](/docs/features/security/) para detalhes.
+> Quando `readOnlyRootFilesystem` está `true`, o chart monta automaticamente um tmpfs em `/tmp` e um emptyDir em `/home/chatcli/.chatcli` (200Mi) para dados de runtime. A variável `HOME=/home/chatcli` é definida automaticamente. Para monitorar múltiplos namespaces, habilite `rbac.clusterWide: true`. Veja a [documentação de segurança](/docs/features/security/) para detalhes.
+>
+> **Nota**: O ConfigMap e o Secret referenciados via `envFrom` são marcados como `optional: true`, permitindo criar o Instance/Deployment antes dos recursos dependentes. O operator observa Secrets automaticamente e dispara rolling updates quando são criados ou atualizados.
 
 #### Rede
 
