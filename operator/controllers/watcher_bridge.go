@@ -260,11 +260,12 @@ func MapAlertTypeToSignal(alertType string) platformv1alpha1.AnomalySignalType {
 	}
 }
 
-// alertHash generates a dedup hash for an alert using type|object|deployment|namespace|minute-bucket.
+// alertHash generates a dedup hash for an alert using type|deployment|namespace.
+// Time is intentionally excluded: the same ongoing problem (e.g. CrashLoopBackOff)
+// produces one Anomaly, not one per poll cycle. The DedupTTL (2h) ensures that
+// if the problem resolves and recurs later, a fresh Anomaly is created.
 func alertHash(alert *pb.WatcherAlert) string {
-	ts := time.Unix(alert.TimestampUnix, 0)
-	minuteBucket := ts.Truncate(time.Minute).Unix()
-	data := fmt.Sprintf("%s|%s|%s|%s|%d", alert.Type, alert.Object, alert.Deployment, alert.Namespace, minuteBucket)
+	data := fmt.Sprintf("%s|%s|%s", alert.Type, alert.Deployment, alert.Namespace)
 	h := sha256.Sum256([]byte(data))
 	return fmt.Sprintf("%x", h[:8])
 }
