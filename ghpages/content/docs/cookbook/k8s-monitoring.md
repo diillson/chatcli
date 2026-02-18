@@ -2,26 +2,26 @@
 title = "Receita: Monitoramento K8s com IA"
 linkTitle = "Monitoramento K8s"
 weight = 71
-description = "Guia passo a passo para monitorar deployments Kubernetes com IA, diagnosticar problemas e automatizar analises usando o K8s Watcher."
+description = "Guia passo a passo para monitorar deployments Kubernetes com IA, diagnosticar problemas e automatizar análises usando o K8s Watcher."
 icon = "troubleshoot"
 +++
 
-Nesta receita, voce vai configurar o ChatCLI para monitorar um deployment Kubernetes e usar IA para diagnosticar problemas em tempo real.
+Nesta receita, você vai configurar o ChatCLI para monitorar um deployment Kubernetes e usar IA para diagnosticar problemas em tempo real.
 
 ---
 
-## Cenario
+## Cenário
 
-- Aplicacao "myapp" em producao no Kubernetes
+- Aplicação "myapp" em produção no Kubernetes
 - Equipe precisa diagnosticar problemas rapidamente
-- Deseja usar IA para analisar logs, eventos e metricas
-- Quer contexto K8s automatico em todas as perguntas
+- Deseja usar IA para analisar logs, eventos e métricas
+- Quer contexto K8s automático em todas as perguntas
 
 ---
 
-## Opcao 1: Monitoramento Local
+## Opção 1: Monitoramento Local
 
-Use esta opcao quando voce tem acesso direto ao cluster via `kubectl`.
+Use esta opção quando você tem acesso direto ao cluster via `kubectl`.
 
 ### Passo 1: Verificar Acesso ao Cluster
 
@@ -41,7 +41,7 @@ kubectl auth can-i list events -n production
 chatcli watch --deployment myapp --namespace production
 ```
 
-Voce vera:
+Você verá:
 
 ```
 K8s Watcher starting...
@@ -58,14 +58,14 @@ Initial data collected. Starting interactive mode.
 ### Passo 3: Fazer Perguntas
 
 ```
-[watch] chatcli> O deployment esta saudavel?
+[watch] chatcli> O deployment está saudável?
 
 Com base nos dados coletados do Kubernetes:
-- O deployment myapp tem 3/3 replicas disponiveis
-- Todos os pods estao no estado Running e Ready
-- Nao ha alertas ativos
-- CPU media em 35%, memoria em 120Mi
-O deployment esta saudavel e operando normalmente.
+- O deployment myapp tem 3/3 replicas disponíveis
+- Todos os pods estão no estado Running e Ready
+- Não há alertas ativos
+- CPU média em 35%, memória em 120Mi
+O deployment está saudável e operando normalmente.
 
 [watch] chatcli> /watch status
 
@@ -82,26 +82,26 @@ K8s Watcher Active
 Quando algo da errado:
 
 ```
-[watch] chatcli> Por que o pod myapp-abc12 esta reiniciando?
+[watch] chatcli> Por que o pod myapp-abc12 está reiniciando?
 
 Analisando os dados do pod myapp-abc12:
-- O pod teve 5 restarts na ultima hora
-- Motivo do ultimo restart: OOMKilled
+- O pod teve 5 restarts na última hora
+- Motivo do último restart: OOMKilled
 - Container estava usando 490Mi de 512Mi de limite
 - Logs mostram: "java.lang.OutOfMemoryError: Java heap space"
 
-Diagnostico: O container esta excedendo o limite de memoria.
-Recomendacoes:
+Diagnóstico: O container está excedendo o limite de memória.
+Recomendações:
 1. Aumente resources.limits.memory para 1Gi
 2. Ajuste a JVM: -Xmx384m para caber no limite
-3. Investigue possivel memory leak nos logs anteriores
+3. Investigue possível memory leak nos logs anteriores
 ```
 
 ---
 
-## Opcao 2: Servidor com Watcher (Equipe)
+## Opção 2: Servidor com Watcher (Equipe)
 
-Use esta opcao para que toda a equipe tenha acesso ao monitoramento via servidor centralizado.
+Use esta opção para que toda a equipe tenha acesso ao monitoramento via servidor centralizado.
 
 ### Passo 1: Deploy no Kubernetes
 
@@ -119,7 +119,7 @@ helm install chatcli deploy/helm/chatcli \
   --set watcher.interval=15s
 ```
 
-**Via Operator (AIOps com remediacao autonoma):**
+**Via Operator (AIOps com remediação autônoma):**
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -148,7 +148,7 @@ spec:
         namespace: batch
 ```
 
-Com o Operator, alem do monitoramento via watcher, voce ganha o **pipeline AIOps completo**: deteccao automatica de anomalias, correlacao em incidentes, analise de causa raiz por IA e remediacao autonoma (scale, restart, rollback). Veja [K8s Operator](/docs/features/k8s-operator/) e [AIOps Platform](/docs/features/aiops-platform/) para documentacao completa.
+Com o Operator, além do monitoramento via watcher, você ganha o **pipeline AIOps completo**: detecção automática de anomalias, correlação em incidentes, análise de causa raiz por IA e remediação autônoma (scale, restart, rollback). Veja [K8s Operator](/docs/features/k8s-operator/) e [AIOps Platform](/docs/features/aiops-platform/) para documentação completa.
 
 ### Passo 2: Equipe Conecta
 
@@ -167,18 +167,18 @@ chatcli connect localhost:50051 --token equipe-token
 Qualquer pergunta feita por qualquer dev ja inclui automaticamente o contexto K8s:
 
 ```
-> O que esta acontecendo com o deployment?
+> O que está acontecendo com o deployment?
 
 [O servidor injeta automaticamente os dados do K8s Watcher]
 ```
 
 ---
 
-## Fluxo de Trabalho: Incidente em Producao
+## Fluxo de Trabalho: Incidente em Produção
 
 ### 1. Alerta Disparado
 
-Voce recebe um alerta do Grafana/PagerDuty/Slack sobre problemas no deployment.
+Você recebe um alerta do Grafana/PagerDuty/Slack sobre problemas no deployment.
 
 ### 2. Conectar ao ChatCLI
 
@@ -186,7 +186,7 @@ Voce recebe um alerta do Grafana/PagerDuty/Slack sobre problemas no deployment.
 chatcli connect prod-chatcli:50051 --token ops-token
 ```
 
-### 3. Obter Visao Geral
+### 3. Obter Visão Geral
 
 ```
 > Resuma o estado atual do deployment para um post-mortem
@@ -195,23 +195,23 @@ chatcli connect prod-chatcli:50051 --token ops-token
 ### 4. Investigar Causa Raiz
 
 ```
-> Quais eventos de Warning ocorreram nos ultimos 30 minutos?
+> Quais eventos de Warning ocorreram nos últimos 30 minutos?
 > Mostre os logs de erro mais recentes
-> O que mudou desde o ultimo deploy?
+> O que mudou desde o último deploy?
 ```
 
-### 5. Receber Recomendacoes
+### 5. Receber Recomendações
 
 ```
-> Baseado nos dados, qual a causa raiz mais provavel e o que
+> Baseado nos dados, qual a causa raiz mais provável e o que
   devo fazer para resolver?
 ```
 
-### 6. Validar Resolucao
+### 6. Validar Resolução
 
 ```
-> Apos aplicar o fix, os pods estao voltando ao normal?
-> Compare o estado atual com 10 minutos atras
+> Após aplicar o fix, os pods estão voltando ao normal?
+> Compare o estado atual com 10 minutos atrás
 ```
 
 ---
@@ -220,10 +220,10 @@ chatcli connect prod-chatcli:50051 --token ops-token
 
 ### Intervalo de Coleta
 
-| Cenario | Intervalo Recomendado |
+| Cenário | Intervalo Recomendado |
 |---------|----------------------|
-| Producao estavel | `30s` (padrao) |
-| Investigacao ativa | `10s` |
+| Produção estável | `30s` (padrão) |
+| Investigação ativa | `10s` |
 | Desenvolvimento | `60s` |
 | CI/CD monitoring | `15s` |
 
@@ -231,14 +231,14 @@ chatcli connect prod-chatcli:50051 --token ops-token
 chatcli watch --deployment myapp --interval 10s
 ```
 
-### Janela de Observacao
+### Janela de Observação
 
-| Cenario | Janela Recomendada |
+| Cenário | Janela Recomendada |
 |---------|-------------------|
-| Debugging rapido | `30m` |
-| Analise normal | `2h` (padrao) |
+| Debugging rápido | `30m` |
+| Análise normal | `2h` (padrão) |
 | Post-mortem | `6h` |
-| Analise historica | `24h` |
+| Analise histórica | `24h` |
 
 ```bash
 chatcli watch --deployment myapp --window 6h
@@ -246,10 +246,10 @@ chatcli watch --deployment myapp --window 6h
 
 ### Linhas de Log
 
-| Cenario | Linhas Recomendadas |
+| Cenário | Linhas Recomendadas |
 |---------|---------------------|
 | Apps verbosas | `50` |
-| Normal | `100` (padrao) |
+| Normal | `100` (padrão) |
 | Debugging profundo | `500` |
 
 ```bash
@@ -269,7 +269,7 @@ Integre o ChatCLI com seu sistema de alertas:
 DEPLOYMENT=$1
 NAMESPACE=$2
 
-# Gerar analise automatica
+# Gerar análise automática
 ANALYSIS=$(chatcli watch \
   --deployment "$DEPLOYMENT" \
   --namespace "$NAMESPACE" \
@@ -285,24 +285,24 @@ Ou via servidor remoto:
 
 ```bash
 chatcli connect prod-server:50051 --token ops-token \
-  -p "O deployment myapp esta com problemas. Analise e sugira solucao." --raw
+  -p "O deployment myapp está com problemas. Analise e sugira solução." --raw
 ```
 
 ---
 
-## Dicas Avancadas
+## Dicas Avançadas
 
 ### Combinar com Contextos Persistentes
 
 ```bash
-# Salvar documentacao do projeto como contexto
+# Salvar documentação do projeto como contexto
 /context create myapp-docs ./docs --mode full --tags "k8s,ops"
 
 # Anexar ao usar com o watcher
 /context attach myapp-docs
 
-# Agora a IA tem contexto do K8s + documentacao do projeto
-> Com base na documentacao e no estado do cluster, o que pode estar errado?
+# Agora a IA tem contexto do K8s + documentação do projeto
+> Com base na documentação e no estado do cluster, o que pode estar errado?
 ```
 
 ### Multiplos Deployments
@@ -335,25 +335,25 @@ chatcli watch --config targets.yaml
 chatcli serve --watch-config targets.yaml
 ```
 
-A IA recebe contexto detalhado dos targets com problemas e resumos compactos dos saudaveis, respeitando o budget de `maxContextChars`.
+A IA recebe contexto detalhado dos targets com problemas e resumos compactos dos saudáveis, respeitando o budget de `maxContextChars`.
 
-### Metricas Prometheus
+### Métricas Prometheus
 
-Quando `metricsPort` esta configurado, o watcher scrapa automaticamente o endpoint `/metrics` dos pods e inclui as metricas na analise. Use `metricsFilter` com **glob patterns** para selecionar apenas metricas relevantes:
+Quando `metricsPort` está configurado, o watcher scrapa automaticamente o endpoint `/metrics` dos pods e inclui as métricas na analise. Use `metricsFilter` com **glob patterns** para selecionar apenas métricas relevantes:
 
 ```yaml
 metricsFilter:
-  - "http_requests_total"        # Metrica exata
-  - "http_request_duration_*"    # Todas de duracao HTTP
-  - "process_*"                  # Metricas de processo
+  - "http_requests_total"        # Métrica exata
+  - "http_request_duration_*"    # Todas de duração HTTP
+  - "process_*"                  # Métricas de processo
   - "*_errors_total"             # Qualquer contador de erros
 ```
 
 ---
 
-## Opcao 3: AIOps Autonomo (Operator)
+## Opção 3: AIOps Autônomo (Operator)
 
-Use esta opcao para remediacao automatica de problemas sem intervencao humana.
+Use esta opção para remediação automática de problemas sem intervenção humana.
 
 ### Passo 1: Instalar o Operator
 
@@ -403,33 +403,33 @@ kubectl get anomalies -A --watch
 # Verificar issues criados
 kubectl get issues -A --watch
 
-# Verificar analises da IA
+# Verificar análises da IA
 kubectl get aiinsights -A
 
-# Verificar remediacoes
+# Verificar remediações
 kubectl get remediationplans -A
 ```
 
-### Passo 4: Fluxo Autonomo em Acao
+### Passo 4: Fluxo Autônomo em Acao
 
 Quando um pod comeca a crashar:
 
 ```
 1. WatcherBridge detecta HighRestartCount → cria Anomaly
 2. AnomalyReconciler correlaciona → cria Issue (risk: 20, severity: Low)
-3. Se OOMKilled tambem → Issue atualizado (risk: 50, severity: Medium)
+3. Se OOMKilled também → Issue atualizado (risk: 50, severity: Medium)
 4. IssueReconciler cria AIInsight
 5. AIInsightReconciler chama LLM → retorna: "restart + scale to 4"
-6. IssueReconciler cria RemediationPlan com 2 acoes
+6. IssueReconciler cria RemediationPlan com 2 ações
 7. RemediationReconciler executa: restart + scale
 8. Issue → Resolved
 ```
 
-Tudo acontece automaticamente sem intervencao humana.
+Tudo acontece automaticamente sem intervenção humana.
 
 ### Passo 5: (Opcional) Adicionar Runbooks
 
-Para cenarios especificos onde voce quer controlar exatamente o que fazer:
+Para cenários específicos onde você quer controlar exatamente o que fazer:
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -455,7 +455,7 @@ spec:
   maxAttempts: 2
 ```
 
-Runbooks tem prioridade sobre acoes da IA. Quando nao ha Runbook, a IA decide automaticamente.
+Runbooks têm prioridade sobre ações da IA. Quando não há Runbook, a IA decide automaticamente.
 
 ---
 
@@ -468,13 +468,13 @@ Runbooks tem prioridade sobre acoes da IA. Quando nao ha Runbook, a IA decide au
 - [ ] Escolher modo: local (`chatcli watch`) ou servidor (`chatcli serve`)
 - [ ] Definir targets: single (`--deployment`) ou multi (`--config targets.yaml`)
 - [ ] (Opcional) Configurar `metricsPort` para Prometheus scraping
-- [ ] Configurar intervalo e janela adequados ao cenario
-- [ ] Ajustar `maxContextChars` se necessario (padrao: 32000)
-- [ ] Testar com pergunta simples: "O deployment esta saudavel?"
-- [ ] (Opcional) Integrar com alertas para analise automatica
+- [ ] Configurar intervalo e janela adequados ao cenário
+- [ ] Ajustar `maxContextChars` se necessario (padrão: 32000)
+- [ ] Testar com pergunta simples: "O deployment está saudável?"
+- [ ] (Opcional) Integrar com alertas para análise automática
 - [ ] (Opcional) Distribuir acesso para a equipe via token
 
-### AIOps Autonomo (Operator)
+### AIOps Autônomo (Operator)
 
 - [ ] Instalar CRDs: `kubectl apply -f operator/config/crd/bases/`
 - [ ] Instalar RBAC e Manager do operator
@@ -483,6 +483,6 @@ Runbooks tem prioridade sobre acoes da IA. Quando nao ha Runbook, a IA decide au
 - [ ] Verificar anomalias sendo criadas: `kubectl get anomalies -A`
 - [ ] Verificar issues sendo correlacionados: `kubectl get issues -A`
 - [ ] Verificar IA analisando: `kubectl get aiinsights -A`
-- [ ] Verificar remediacoes executando: `kubectl get remediationplans -A`
-- [ ] (Opcional) Criar Runbooks para cenarios especificos
-- [ ] Monitorar metricas do operator via Prometheus
+- [ ] Verificar remediações executando: `kubectl get remediationplans -A`
+- [ ] (Opcional) Criar Runbooks para cenários específicos
+- [ ] Monitorar métricas do operator via Prometheus

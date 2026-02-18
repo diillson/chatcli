@@ -6,15 +6,15 @@ description = "Como fazer deploy do ChatCLI como servidor usando Docker, Docker 
 icon = "deployed_code"
 +++
 
-O ChatCLI pode ser empacotado como container Docker e deployado no Kubernetes usando o Helm chart oficial. Esta pagina cobre todos os cenarios de deployment.
+O ChatCLI pode ser empacotado como container Docker e deployado no Kubernetes usando o Helm chart oficial. Esta página cobre todos os cenários de deployment.
 
 ---
 
 ## Imagens Oficiais (GHCR)
 
-As imagens Docker oficiais sao publicadas automaticamente no GitHub Container Registry a cada release:
+As imagens Docker oficiais são publicadas automaticamente no GitHub Container Registry a cada release:
 
-| Imagem | Descricao |
+| Imagem | Descrição |
 |--------|-----------|
 | `ghcr.io/diillson/chatcli:latest` | Servidor ChatCLI (gRPC) |
 | `ghcr.io/diillson/chatcli-operator:latest` | Kubernetes Operator |
@@ -23,7 +23,7 @@ As imagens Docker oficiais sao publicadas automaticamente no GitHub Container Re
 # Puxar a imagem do servidor
 docker pull ghcr.io/diillson/chatcli:latest
 
-# Ou uma versao especifica
+# Ou uma versão específica
 docker pull ghcr.io/diillson/chatcli:v1.57.0
 
 # Puxar a imagem do operator
@@ -43,21 +43,21 @@ As imagens suportam **multi-arch** (`linux/amd64` e `linux/arm64`).
 docker build -t chatcli .
 ```
 
-O Dockerfile usa multi-stage build para produzir uma imagem minima (~20MB):
-- **Build stage**: `golang:1.25-alpine` compila o binario
-- **Runtime stage**: `alpine:3.21` com usuario nao-root, health check integrado
+O Dockerfile usa multi-stage build para produzir uma imagem mínima (~20MB):
+- **Build stage**: `golang:1.25-alpine` compila o binário
+- **Runtime stage**: `alpine:3.21` com usuário não-root, health check integrado
 
 ### Build da Imagem do Operator (Local)
 
 ```bash
-# IMPORTANTE: deve ser construido a partir da raiz do repositorio
+# IMPORTANTE: deve ser construído a partir da raiz do repositório
 # (go.mod do operator usa replace directive apontando para ../)
 docker build -f operator/Dockerfile -t ghcr.io/diillson/chatcli-operator:latest .
 ```
 
 O Dockerfile do operator usa:
 - **Build stage**: `golang:1.25` com suporte multi-arch (`TARGETARCH`)
-- **Runtime stage**: `gcr.io/distroless/static:nonroot` (seguranca maxima, sem shell)
+- **Runtime stage**: `gcr.io/distroless/static:nonroot` (segurança máxima, sem shell)
 
 ### Rodar com Docker
 
@@ -68,14 +68,14 @@ docker run -p 50051:50051 \
   -e OPENAI_API_KEY=sk-xxx \
   chatcli
 
-# Com autenticacao
+# Com autenticação
 docker run -p 50051:50051 \
   -e CHATCLI_SERVER_TOKEN=meu-token \
   -e LLM_PROVIDER=CLAUDEAI \
   -e ANTHROPIC_API_KEY=sk-ant-xxx \
   chatcli
 
-# Com volume para persistir sessoes
+# Com volume para persistir sessões
 docker run -p 50051:50051 \
   -v chatcli-sessions:/home/chatcli/.chatcli/sessions \
   -e LLM_PROVIDER=OPENAI \
@@ -88,7 +88,7 @@ docker run -p 50051:50051 \
 O projeto inclui um `docker-compose.yml` pronto para desenvolvimento:
 
 ```bash
-# Defina as variaveis de ambiente
+# Defina as variáveis de ambiente
 export LLM_PROVIDER=OPENAI
 export OPENAI_API_KEY=sk-xxx
 
@@ -101,10 +101,10 @@ chatcli connect localhost:50051
 
 O Docker Compose configura:
 - Porta 50051 exposta
-- Volumes persistentes para sessoes e plugins
-- Restart automatico (`unless-stopped`)
-- Todas as variaveis de LLM via environment
-- **Hardening de seguranca**: filesystem read-only, `no-new-privileges`, limites de CPU/memoria, tmpfs para `/tmp`
+- Volumes persistentes para sessões e plugins
+- Restart automático (`unless-stopped`)
+- Todas as variáveis de LLM via environment
+- **Hardening de segurança**: filesystem read-only, `no-new-privileges`, limites de CPU/memória, tmpfs para `/tmp`
 
 #### Arquivo `docker-compose.yml`
 
@@ -149,7 +149,7 @@ volumes:
   chatcli-plugins:
 ```
 
-> O container roda com filesystem **read-only** e `no-new-privileges` por padrao. O diretorio `/tmp` usa tmpfs em memoria (limitado a 100MB). Os volumes nomeados (`chatcli-sessions`, `chatcli-plugins`) sao os unicos pontos graváveis. Veja a [documentacao de seguranca](/docs/features/security/) para detalhes.
+> O container roda com filesystem **read-only** e `no-new-privileges` por padrão. O diretório `/tmp` usa tmpfs em memória (limitado a 100MB). Os volumes nomeados (`chatcli-sessions`, `chatcli-plugins`) são os únicos pontos graváveis. Veja a [documentação de segurança](/docs/features/security/) para detalhes.
 
 ---
 
@@ -157,28 +157,28 @@ volumes:
 
 O ChatCLI inclui um Helm chart completo em `deploy/helm/chatcli/`.
 
-### Pre-requisitos
+### Pré-requisitos
 
 - Cluster Kubernetes (kind, minikube, EKS, GKE, AKS, etc.)
 - Helm 3.x instalado
 - `kubectl` configurado para o cluster
 
-### Instalacao Basica
+### Instalação Básica
 
 ```bash
-# Instalacao minima
+# Instalação mínima
 helm install chatcli deploy/helm/chatcli \
   --set llm.provider=OPENAI \
   --set secrets.openaiApiKey=sk-xxx
 
-# Com autenticacao
+# Com autenticação
 helm install chatcli deploy/helm/chatcli \
   --set llm.provider=CLAUDEAI \
   --set secrets.anthropicApiKey=sk-ant-xxx \
   --set server.token=meu-token-secreto
 ```
 
-### Instalacao com K8s Watcher (Single-Target)
+### Instalação com K8s Watcher (Single-Target)
 
 ```bash
 helm install chatcli deploy/helm/chatcli \
@@ -189,9 +189,9 @@ helm install chatcli deploy/helm/chatcli \
   --set watcher.namespace=production
 ```
 
-### Instalacao com Multi-Target + Prometheus
+### Instalação com Multi-Target + Prometheus
 
-Para monitorar multiplos deployments com metricas Prometheus, use um `values.yaml`:
+Para monitorar múltiplos deployments com métricas Prometheus, use um `values.yaml`:
 
 ```yaml
 # values-multi.yaml
@@ -221,7 +221,7 @@ helm install chatcli deploy/helm/chatcli -f values-multi.yaml
 
 O chart automaticamente:
 - Cria ServiceAccount com RBAC para o watcher ler pods, eventos, logs
-- **Auto-detecta multi-namespace**: se targets estao em namespaces diferentes, usa `ClusterRole` em vez de `Role`
+- **Auto-detecta multi-namespace**: se targets estão em namespaces diferentes, usa `ClusterRole` em vez de `Role`
 - Gera ConfigMap `<name>-watch-config` com o YAML multi-target
 - Monta o config como volume e passa `--watch-config` ao container
 
@@ -229,20 +229,20 @@ O chart automaticamente:
 
 #### Servidor
 
-| Valor | Descricao | Padrao |
+| Valor | Descrição | Padrão |
 |-------|-----------|--------|
-| `replicaCount` | Numero de replicas | `1` |
-| `image.repository` | Repositorio da imagem | `ghcr.io/diillson/chatcli` |
+| `replicaCount` | Número de réplicas | `1` |
+| `image.repository` | Repositório da imagem | `ghcr.io/diillson/chatcli` |
 | `image.tag` | Tag da imagem | `latest` |
 | `server.port` | Porta gRPC | `50051` |
 | `server.metricsPort` | Porta HTTP para Prometheus metrics (0 = desabilitado) | `9090` |
-| `server.token` | Token de autenticacao | `""` |
+| `server.token` | Token de autenticação | `""` |
 | `serviceMonitor.enabled` | Criar ServiceMonitor (requer Prometheus Operator) | `false` |
 | `serviceMonitor.interval` | Intervalo de scrape do Prometheus | `30s` |
 
 #### TLS
 
-| Valor | Descricao | Padrao |
+| Valor | Descrição | Padrão |
 |-------|-----------|--------|
 | `tls.enabled` | Habilitar TLS | `false` |
 | `tls.certFile` | Caminho do certificado | `""` |
@@ -251,14 +251,14 @@ O chart automaticamente:
 
 #### LLM
 
-| Valor | Descricao | Padrao |
+| Valor | Descrição | Padrão |
 |-------|-----------|--------|
-| `llm.provider` | Provedor padrao | `""` |
-| `llm.model` | Modelo padrao | `""` |
+| `llm.provider` | Provedor padrão | `""` |
+| `llm.model` | Modelo padrão | `""` |
 
 #### Secrets (API Keys)
 
-| Valor | Descricao |
+| Valor | Descrição |
 |-------|-----------|
 | `secrets.existingSecret` | Secret existente (em vez de criar um novo) |
 | `secrets.openaiApiKey` | Chave da OpenAI |
@@ -272,7 +272,7 @@ O chart automaticamente:
 
 #### Ollama
 
-| Valor | Descricao | Padrao |
+| Valor | Descrição | Padrão |
 |-------|-----------|--------|
 | `ollama.enabled` | Habilitar Ollama | `false` |
 | `ollama.baseUrl` | URL base do Ollama | `http://ollama:11434` |
@@ -280,60 +280,63 @@ O chart automaticamente:
 
 #### K8s Watcher
 
-| Valor | Descricao | Padrao |
+| Valor | Descrição | Padrão |
 |-------|-----------|--------|
 | `watcher.enabled` | Habilitar o watcher | `false` |
 | `watcher.targets` | Lista de targets multi-deployment (ver abaixo) | `[]` |
-| `watcher.deployment` | Deployment unico - legado | `""` |
+| `watcher.deployment` | Deployment único - legado | `""` |
 | `watcher.namespace` | Namespace do deployment - legado | `""` |
 | `watcher.interval` | Intervalo de coleta | `30s` |
-| `watcher.window` | Janela de observacao | `2h` |
+| `watcher.window` | Janela de observação | `2h` |
 | `watcher.maxLogLines` | Linhas de log por pod | `100` |
 | `watcher.maxContextChars` | Budget de contexto LLM | `32000` |
 
 **Campos de cada target** (`watcher.targets[].`):
 
-| Campo | Descricao | Obrigatorio |
+| Campo | Descrição | Obrigatório |
 |-------|-----------|:-----------:|
 | `deployment` | Nome do deployment | Sim |
-| `namespace` | Namespace (padrao: `default`) | Nao |
-| `metricsPort` | Porta Prometheus (0 = desabilitado) | Nao |
-| `metricsPath` | Path HTTP das metricas | Nao (`/metrics`) |
-| `metricsFilter` | Filtros glob para metricas | Nao |
+| `namespace` | Namespace (padrão: `default`) | Não |
+| `metricsPort` | Porta Prometheus (0 = desabilitado) | Não |
+| `metricsPath` | Path HTTP das métricas | Não (`/metrics`) |
+| `metricsFilter` | Filtros glob para métricas | Não |
 
-#### Persistencia
+#### Persistência
 
-| Valor | Descricao | Padrao |
+| Valor | Descrição | Padrão |
 |-------|-----------|--------|
-| `persistence.enabled` | Persistir sessoes em PVC | `true` |
+| `persistence.enabled` | Persistir sessões em PVC | `true` |
 | `persistence.storageClass` | Storage class | `""` |
 | `persistence.size` | Tamanho do volume | `1Gi` |
 
-#### Seguranca
+#### Segurança
 
-| Valor | Descricao | Padrao |
+| Valor | Descrição | Padrão |
 |-------|-----------|--------|
-| `podSecurityContext.runAsNonRoot` | Obriga execucao como nao-root | `true` |
+| `podSecurityContext.runAsNonRoot` | Obriga execução como não-root | `true` |
 | `podSecurityContext.runAsUser` | UID do processo | `1000` |
 | `podSecurityContext.seccompProfile.type` | Perfil seccomp | `RuntimeDefault` |
-| `securityContext.allowPrivilegeEscalation` | Permite escalacao de privilegios | `false` |
+| `securityContext.allowPrivilegeEscalation` | Permite escalação de privilégios | `false` |
 | `securityContext.readOnlyRootFilesystem` | Filesystem somente-leitura | `true` |
 | `securityContext.capabilities.drop` | Capabilities removidas | `ALL` |
 | `rbac.clusterWide` | Usa ClusterRole em vez de Role namespace-scoped | `false` |
 
-> Quando `readOnlyRootFilesystem` esta `true`, o chart monta automaticamente um tmpfs em `/tmp`. Para monitorar multiplos namespaces, habilite `rbac.clusterWide: true`. Veja a [documentacao de seguranca](/docs/features/security/) para detalhes.
+> Quando `readOnlyRootFilesystem` está `true`, o chart monta automaticamente um tmpfs em `/tmp`. Para monitorar múltiplos namespaces, habilite `rbac.clusterWide: true`. Veja a [documentação de segurança](/docs/features/security/) para detalhes.
 
 #### Rede
 
-| Valor | Descricao | Padrao |
+| Valor | Descrição | Padrão |
 |-------|-----------|--------|
 | `service.type` | Tipo do Service | `ClusterIP` |
 | `service.port` | Porta do Service | `50051` |
+| `service.headless` | Habilita Service headless para balanceamento gRPC client-side (recomendado quando `replicaCount > 1`) | `false` |
 | `ingress.enabled` | Habilitar Ingress | `false` |
+
+> **gRPC e múltiplas réplicas**: O gRPC usa conexões HTTP/2 persistentes que fixam em um único pod. Para `replicaCount > 1`, habilite `service.headless: true` para ativar balanceamento round-robin via DNS. O client já possui keepalive e round-robin integrados.
 
 ### Usando Secret Existente
 
-Se voce ja tem um Secret com as API keys:
+Se você já tem um Secret com as API keys:
 
 ```bash
 helm install chatcli deploy/helm/chatcli \
@@ -418,7 +421,7 @@ helm rollback chatcli 1
 
 ---
 
-## Exemplo Completo: Producao
+## Exemplo Completo: Produção
 
 ### Single-Target (Legado)
 
@@ -486,11 +489,11 @@ helm install chatcli deploy/helm/chatcli \
   -f values-prod.yaml
 ```
 
-> Quando targets estao em namespaces diferentes (ex: `production` e `batch`), o chart cria automaticamente um `ClusterRole` em vez de `Role` namespace-scoped.
+> Quando targets estão em namespaces diferentes (ex: `production` e `batch`), o chart cria automaticamente um `ClusterRole` em vez de `Role` namespace-scoped.
 
 ---
 
-## Proximo Passo
+## Próximo Passo
 
 - [Configurar o servidor](/docs/features/server-mode/)
 - [Conectar ao servidor](/docs/features/remote-connect/)

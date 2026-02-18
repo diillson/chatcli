@@ -6,17 +6,17 @@ description = "Transforme o ChatCLI em um servidor gRPC para acesso remoto de qu
 icon = "dns"
 +++
 
-O **Modo Servidor** transforma o ChatCLI em um servico gRPC de alta performance que pode ser acessado remotamente por qualquer terminal. Isso permite centralizar o acesso a IA em um servidor (bare-metal, VM, Docker ou Kubernetes) e conectar de qualquer lugar.
+O **Modo Servidor** transforma o ChatCLI em um serviço gRPC de alta performance que pode ser acessado remotamente por qualquer terminal. Isso permite centralizar o acesso a IA em um servidor (bare-metal, VM, Docker ou Kubernetes) e conectar de qualquer lugar.
 
 ---
 
 ## Por que usar o Modo Servidor?
 
-- **Centralizacao**: Um unico servidor com API keys configuradas atende multiplos clientes
-- **Seguranca**: As chaves de API ficam no servidor, nunca expostas nos terminais clientes
-- **Flexibilidade**: Clientes podem usar suas **proprias credenciais** (API key ou OAuth) se desejarem
-- **Performance**: Comunicacao via gRPC com suporte a TLS e streaming progressivo
-- **Kubernetes-Ready**: Integracao nativa com o K8s Watcher para monitoramento de deployments
+- **Centralização**: Um único servidor com API keys configuradas atende múltiplos clientes
+- **Segurança**: As chaves de API ficam no servidor, nunca expostas nos terminais clientes
+- **Flexibilidade**: Clientes podem usar suas **próprias credenciais** (API key ou OAuth) se desejarem
+- **Performance**: Comunicação via gRPC com suporte a TLS e streaming progressivo
+- **Kubernetes-Ready**: Integração nativa com o K8s Watcher para monitoramento de deployments
 
 ---
 
@@ -25,10 +25,10 @@ O **Modo Servidor** transforma o ChatCLI em um servico gRPC de alta performance 
 O comando `chatcli serve` inicia o servidor gRPC:
 
 ```bash
-# Modo mais simples: servidor na porta padrao (50051)
+# Modo mais simples: servidor na porta padrão (50051)
 chatcli serve
 
-# Com porta e autenticacao customizados
+# Com porta e autenticação customizados
 chatcli serve --port 8080 --token meu-token-secreto
 
 # Com TLS habilitado
@@ -43,61 +43,61 @@ chatcli serve --watch-config targets.yaml
 
 ---
 
-## Flags Disponiveis
+## Flags Disponíveis
 
-| Flag | Descricao | Padrao | Env Var |
+| Flag | Descrição | Padrão | Env Var |
 |------|-----------|--------|---------|
 | `--port` | Porta do servidor gRPC | `50051` | `CHATCLI_SERVER_PORT` |
-| `--token` | Token de autenticacao (vazio = sem auth) | `""` | `CHATCLI_SERVER_TOKEN` |
+| `--token` | Token de autenticação (vazio = sem auth) | `""` | `CHATCLI_SERVER_TOKEN` |
 | `--tls-cert` | Arquivo de certificado TLS | `""` | `CHATCLI_SERVER_TLS_CERT` |
 | `--tls-key` | Arquivo de chave TLS | `""` | `CHATCLI_SERVER_TLS_KEY` |
-| `--provider` | Provedor de LLM padrao | Auto-detectado | `LLM_PROVIDER` |
-| `--model` | Modelo de LLM padrao | Auto-detectado | |
-| `--metrics-port` | Porta HTTP para metricas Prometheus (0 = desabilita) | `9090` | `CHATCLI_METRICS_PORT` |
+| `--provider` | Provedor de LLM padrão | Auto-detectado | `LLM_PROVIDER` |
+| `--model` | Modelo de LLM padrão | Auto-detectado | |
+| `--metrics-port` | Porta HTTP para métricas Prometheus (0 = desabilita) | `9090` | `CHATCLI_METRICS_PORT` |
 
 ### Prometheus Metrics
 
-O servidor expoe metricas Prometheus em `http://localhost:9090/metrics` por padrao. As metricas incluem:
+O servidor expoe métricas Prometheus em `http://localhost:9090/metrics` por padrão. As métricas incluem:
 
 - **gRPC**: `chatcli_grpc_requests_total`, `chatcli_grpc_request_duration_seconds`, `chatcli_grpc_in_flight_requests`
 - **LLM**: `chatcli_llm_requests_total`, `chatcli_llm_request_duration_seconds`, `chatcli_llm_errors_total`
 - **Watcher**: `chatcli_watcher_collection_duration_seconds`, `chatcli_watcher_alerts_total`, `chatcli_watcher_pods_ready`
 - **Session**: `chatcli_session_active_total`, `chatcli_session_operations_total`
 - **Server**: `chatcli_server_uptime_seconds`, `chatcli_server_info`
-- **Go runtime**: goroutines, memoria, GC (via GoCollector/ProcessCollector)
+- **Go runtime**: goroutines, memória, GC (via GoCollector/ProcessCollector)
 
 Para desabilitar, use `--metrics-port 0`.
 
-### Variaveis de Seguranca
+### Variáveis de Segurança
 
-| Env Var | Descricao | Padrao |
+| Env Var | Descrição | Padrão |
 |---------|-----------|--------|
-| `CHATCLI_GRPC_REFLECTION` | Habilita gRPC reflection para debugging. **Mantenha desabilitado em producao.** | `false` |
-| `CHATCLI_DISABLE_VERSION_CHECK` | Desabilita verificacao automatica de versao no startup. | `false` |
+| `CHATCLI_GRPC_REFLECTION` | Habilita gRPC reflection para debugging. **Mantenha desabilitado em produção.** | `false` |
+| `CHATCLI_DISABLE_VERSION_CHECK` | Desabilita verificação automática de versão no startup. | `false` |
 
-> O gRPC reflection esta **desabilitado por padrao** para nao expor o schema do servico em producao. Habilite apenas para debugging local. Veja a [documentacao de seguranca](/docs/features/security/) para todas as medidas de hardening.
+> O gRPC reflection esta **desabilitado por padrão** para não expor o schema do serviço em produção. Habilite apenas para debugging local. Veja a [documentação de segurança](/docs/features/security/) para todas as medidas de hardening.
 
 ### Flags do K8s Watcher (opcionais)
 
-| Flag | Descricao | Padrao | Env Var |
+| Flag | Descrição | Padrão | Env Var |
 |------|-----------|--------|---------|
 | `--watch-config` | Arquivo YAML multi-target | `""` | `CHATCLI_WATCH_CONFIG` |
-| `--watch-deployment` | Deployment unico (legado) | `""` | `CHATCLI_WATCH_DEPLOYMENT` |
+| `--watch-deployment` | Deployment único (legado) | `""` | `CHATCLI_WATCH_DEPLOYMENT` |
 | `--watch-namespace` | Namespace do deployment | `"default"` | `CHATCLI_WATCH_NAMESPACE` |
 | `--watch-interval` | Intervalo de coleta | `30s` | `CHATCLI_WATCH_INTERVAL` |
-| `--watch-window` | Janela de observacao | `2h` | `CHATCLI_WATCH_WINDOW` |
+| `--watch-window` | Janela de observação | `2h` | `CHATCLI_WATCH_WINDOW` |
 | `--watch-max-log-lines` | Max linhas de log por pod | `100` | `CHATCLI_WATCH_MAX_LOG_LINES` |
 | `--watch-kubeconfig` | Caminho do kubeconfig | Auto-detectado | `CHATCLI_KUBECONFIG` |
 
-> Use `--watch-config` para monitorar **multiplos deployments** simultaneamente com metricas Prometheus. Veja [K8s Watcher](/docs/features/k8s-watcher/) para o formato do arquivo YAML.
+> Use `--watch-config` para monitorar **múltiplos deployments** simultaneamente com métricas Prometheus. Veja [K8s Watcher](/docs/features/k8s-watcher/) para o formato do arquivo YAML.
 
 ---
 
-## Autenticacao do Servidor
+## Autenticação do Servidor
 
-### Sem Autenticacao
+### Sem Autenticação
 
-Por padrao, o servidor nao exige autenticacao. Qualquer cliente pode conectar:
+Por padrão, o servidor não exige autenticação. Qualquer cliente pode conectar:
 
 ```bash
 chatcli serve  # sem --token = acesso livre
@@ -111,7 +111,7 @@ Defina um token para proteger o servidor:
 # Via flag
 chatcli serve --token meu-token-secreto
 
-# Via variavel de ambiente
+# Via variável de ambiente
 export CHATCLI_SERVER_TOKEN=meu-token-secreto
 chatcli serve
 ```
@@ -124,7 +124,7 @@ chatcli connect servidor:50051 --token meu-token-secreto
 
 ### TLS (HTTPS)
 
-Para conexoes encriptadas, forneca certificado e chave TLS:
+Para conexões encriptadas, forneca certificado e chave TLS:
 
 ```bash
 chatcli serve --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
@@ -140,11 +140,11 @@ chatcli connect servidor:50051 --tls --ca-cert /path/to/ca.pem
 
 ## Modos de Credencial
 
-O servidor suporta multiplos modos de credencial LLM, dando flexibilidade total:
+O servidor suporta múltiplos modos de credencial LLM, dando flexibilidade total:
 
-### 1. Credenciais do Servidor (Padrao)
+### 1. Credenciais do Servidor (Padrão)
 
-O servidor usa suas proprias API keys configuradas via variaveis de ambiente:
+O servidor usa suas próprias API keys configuradas via variáveis de ambiente:
 
 ```bash
 export OPENAI_API_KEY=sk-xxx
@@ -152,14 +152,14 @@ export LLM_PROVIDER=OPENAI
 chatcli serve
 ```
 
-Nenhuma configuracao adicional necessaria no cliente.
+Nenhuma configuração adicional necessária no cliente.
 
 ### 2. Credenciais do Cliente (API Key)
 
-O cliente pode enviar sua propria API key, que o servidor usa em vez das suas:
+O cliente pode enviar sua própria API key, que o servidor usa em vez das suas:
 
 ```bash
-# Cliente envia sua propria chave
+# Cliente envia sua própria chave
 chatcli connect servidor:50051 --llm-key sk-minha-chave --provider OPENAI
 ```
 
@@ -196,29 +196,41 @@ chatcli connect servidor:50051 --provider OLLAMA --ollama-url http://gpu-server:
 
 ## Arquitetura gRPC
 
-O servidor implementa um servico gRPC com os seguintes RPCs:
+O servidor implementa um serviço gRPC com os seguintes RPCs:
 
-| RPC | Descricao |
+| RPC | Descrição |
 |-----|-----------|
 | `SendPrompt` | Envia um prompt e recebe a resposta completa |
 | `StreamPrompt` | Envia um prompt e recebe a resposta em chunks progressivos |
-| `InteractiveSession` | Streaming bidirecional para sessoes interativas |
-| `ListSessions` | Lista sessoes salvas no servidor |
-| `LoadSession` | Carrega uma sessao salva |
-| `SaveSession` | Salva a sessao atual |
+| `InteractiveSession` | Streaming bidirecional para sessões interativas |
+| `ListSessions` | Lista sessões salvas no servidor |
+| `LoadSession` | Carrega uma sessão salva |
+| `SaveSession` | Salva a sessão atual |
 | `Health` | Health check do servidor |
-| `GetServerInfo` | Informacoes do servidor (versao, provider, modelo, watcher) |
+| `GetServerInfo` | Informações do servidor (versão, provider, modelo, watcher) |
 | `GetWatcherStatus` | Status do K8s Watcher (se ativo) |
 | `GetAlerts` | Retorna alertas ativos do K8s Watcher (usado pelo Operator) |
-| `AnalyzeIssue` | Envia contexto de um Issue ao LLM e retorna analise + acoes sugeridas |
+| `AnalyzeIssue` | Envia contexto de um Issue ao LLM e retorna análise + ações sugeridas |
+
+### gRPC com Múltiplas Réplicas
+
+O gRPC usa conexões HTTP/2 persistentes que, por padrão, fixam em um único pod via kube-proxy. Para cenários com múltiplas réplicas no Kubernetes:
+
+- **1 réplica**: Service ClusterIP padrão — sem configuração extra necessária
+- **Múltiplas réplicas**: Use um Service headless (`ClusterIP: None`) para que o DNS retorne os IPs individuais dos pods, habilitando balanceamento round-robin client-side via resolver `dns:///` do gRPC
+- O client do ChatCLI já possui **keepalive** (ping a cada 10s) e suporte a **round-robin** integrados
+- No Helm chart, habilite `service.headless: true` quando `replicaCount > 1`
+- No Operator, o headless é ativado **automaticamente** quando `spec.réplicas > 1`
+
+> Para mais detalhes, veja a [documentação do K8s Operator](/docs/features/k8s-operator/) e o [deploy com Helm](/docs/getting-started/docker-deployment/).
 
 ### Streaming Progressivo
 
-O RPC `StreamPrompt` divide a resposta em chunks de ~200 caracteres em fronteiras naturais (paragrafos, linhas, frases), proporcionando uma experiencia de resposta progressiva no cliente.
+O RPC `StreamPrompt` divide a resposta em chunks de ~200 caracteres em fronteiras naturais (parágrafos, linhas, frases), proporcionando uma experiência de resposta progressiva no cliente.
 
 ### RPCs da Plataforma AIOps
 
-Os RPCs `GetAlerts` e `AnalyzeIssue` sao usados pelo [Operator AIOps](/docs/features/k8s-operator/) para alimentar o pipeline autonomo de remediacao.
+Os RPCs `GetAlerts` e `AnalyzeIssue` são usados pelo [Operator AIOps](/docs/features/k8s-operator/) para alimentar o pipeline autônomo de remediação.
 
 #### GetAlerts
 
@@ -246,7 +258,7 @@ O handler itera sobre os `ObservabilityStore` de cada target do MultiWatcher e r
 
 #### AnalyzeIssue
 
-Envia o contexto de um Issue ao LLM e retorna analise estruturada com acoes sugeridas:
+Envia o contexto de um Issue ao LLM e retorna análise estruturada com ações sugeridas:
 
 ```protobuf
 rpc AnalyzeIssue(AnalyzeIssueRequest) returns (AnalyzeIssueResponse);
@@ -281,11 +293,11 @@ message AnalyzeIssueResponse {
 }
 ```
 
-O handler constroi um prompt estruturado que inclui a lista de acoes validas (`ScaleDeployment`, `RestartDeployment`, `RollbackDeployment`, `PatchConfig`) e solicita resposta em JSON. O parsing suporta remocao de markdown codeblocks, clamp de confidence e fallback em caso de erro.
+O handler constroi um prompt estruturado que inclui a lista de ações válidas (`ScaleDeployment`, `RestartDeployment`, `RollbackDeployment`, `PatchConfig`) e solicita resposta em JSON. O parsing suporta remoção de markdown codeblocks, clamp de confidence e fallback em caso de erro.
 
 ---
 
-## Integracao com K8s Watcher
+## Integração com K8s Watcher
 
 Quando o servidor e iniciado com `--watch-config` ou `--watch-deployment`, o K8s Watcher monitora continuamente os deployments e **injeta automaticamente o contexto Kubernetes em todos os prompts** dos clientes remotos.
 
@@ -301,27 +313,27 @@ chatcli serve --watch-deployment myapp --watch-namespace production
 chatcli serve --watch-config targets.yaml
 ```
 
-O arquivo `targets.yaml` define multiplos deployments, metricas Prometheus e budget de contexto. Veja [K8s Watcher](/docs/features/k8s-watcher/#arquivo-de-configuracao-multi-target) para o formato completo.
+O arquivo `targets.yaml` define múltiplos deployments, métricas Prometheus e budget de contexto. Veja [K8s Watcher](/docs/features/k8s-watcher/#arquivo-de-configuração-multi-target) para o formato completo.
 
-Qualquer usuario conectado pode fazer perguntas sobre os deployments sem configuracao adicional:
+Qualquer usuário conectado pode fazer perguntas sobre os deployments sem configuração adicional:
 
 ```
 Conectado ao ChatCLI server (version: 1.0.0, provider: OPENAI, model: gpt-4o)
 K8s watcher active: 5 targets (interval: 30s)
 
-> Quais deployments precisam de atencao?
-> Analise as metricas HTTP do api-gateway
+> Quais deployments precisam de atenção?
+> Analise as métricas HTTP do api-gateway
 ```
 
-O servidor injeta automaticamente informacoes de pods, eventos, logs, metricas de infra e **metricas Prometheus de aplicacao** no prompt antes de enviar ao LLM. O **MultiSummarizer** gerencia o budget de contexto, priorizando targets com problemas.
+O servidor injeta automaticamente informações de pods, eventos, logs, métricas de infra e **métricas Prometheus de aplicação** no prompt antes de enviar ao LLM. O **MultiSummarizer** gerencia o budget de contexto, priorizando targets com problemas.
 
 Para verificar o status do watcher remotamente, use `/watch` no cliente conectado.
 
 ---
 
-## Variaveis de Ambiente
+## Variáveis de Ambiente
 
-Todas as variaveis de ambiente usadas pelo ChatCLI local tambem funcionam no servidor:
+Todas as variáveis de ambiente usadas pelo ChatCLI local também funcionam no servidor:
 
 ```bash
 # Servidor
@@ -330,7 +342,7 @@ CHATCLI_SERVER_TOKEN=meu-token
 CHATCLI_SERVER_TLS_CERT=/path/to/cert.pem
 CHATCLI_SERVER_TLS_KEY=/path/to/key.pem
 
-# Seguranca
+# Segurança
 CHATCLI_GRPC_REFLECTION=false          # true apenas para debug local
 CHATCLI_DISABLE_VERSION_CHECK=false    # true para ambientes air-gapped
 
@@ -349,7 +361,7 @@ CHATCLI_WATCH_MAX_LOG_LINES=100
 
 ---
 
-## Proximo Passo
+## Próximo Passo
 
 - [Conectar ao servidor remotamente](/docs/features/remote-connect/)
 - [K8s Watcher (multi-target + Prometheus)](/docs/features/k8s-watcher/)

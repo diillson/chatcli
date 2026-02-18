@@ -1,32 +1,32 @@
 +++
-title = "Conexao Remota (chatcli connect)"
-linkTitle = "Conexao Remota"
+title = "Conexão Remota (chatcli connect)"
+linkTitle = "Conexão Remota"
 weight = 61
 description = "Conecte seu terminal local a um servidor ChatCLI remoto via gRPC para acessar a IA de qualquer lugar."
 icon = "cloud"
 +++
 
-O comando `chatcli connect` transforma seu terminal local em um cliente que se conecta a um servidor ChatCLI remoto. Toda a experiencia interativa (sessoes, contextos, agente, coder) funciona transparentemente, como se o LLM estivesse rodando localmente.
+O comando `chatcli connect` transforma seu terminal local em um cliente que se conecta a um servidor ChatCLI remoto. Toda a experiência interativa (sessões, contextos, agente, coder) funciona transparentemente, como se o LLM estivesse rodando localmente.
 
 ---
 
-## Conexao Basica
+## Conexão Básica
 
 ```bash
-# Conectar usando endereco posicional
+# Conectar usando endereço posicional
 chatcli connect meuservidor:50051
 
-# Conectar com flag explicita
+# Conectar com flag explícita
 chatcli connect --addr meuservidor:50051
 ```
 
-Ao conectar, o ChatCLI exibe informacoes do servidor:
+Ao conectar, o ChatCLI exibe informações do servidor:
 
 ```
 Connected to ChatCLI server (version: 1.2.0, provider: CLAUDEAI, model: claude-sonnet-4-5)
 ```
 
-Se o servidor tiver um K8s Watcher ativo, tambem aparece:
+Se o servidor tiver um K8s Watcher ativo, também aparece:
 
 ```
 K8s watcher active: deployment/myapp in namespace/production (context injected into all prompts)
@@ -36,23 +36,23 @@ K8s watcher active: deployment/myapp in namespace/production (context injected i
 
 ## Todas as Flags
 
-| Flag | Descricao | Env Var |
+| Flag | Descrição | Env Var |
 |------|-----------|---------|
-| `--addr <host:port>` | Endereco do servidor | `CHATCLI_REMOTE_ADDR` |
-| `--token <string>` | Token de autenticacao | `CHATCLI_REMOTE_TOKEN` |
+| `--addr <host:port>` | Endereço do servidor | `CHATCLI_REMOTE_ADDR` |
+| `--token <string>` | Token de autenticação | `CHATCLI_REMOTE_TOKEN` |
 | `--provider <nome>` | Sobrescreve o provedor LLM do servidor | |
 | `--model <nome>` | Sobrescreve o modelo LLM do servidor | |
-| `--llm-key <string>` | Sua propria API key (enviada ao servidor) | `CHATCLI_CLIENT_API_KEY` |
+| `--llm-key <string>` | Sua própria API key (enviada ao servidor) | `CHATCLI_CLIENT_API_KEY` |
 | `--use-local-auth` | Usa credenciais OAuth do auth store local | |
-| `--tls` | Habilita conexao TLS | |
-| `--ca-cert <path>` | Certificado CA para verificacao TLS | |
+| `--tls` | Habilita conexão TLS | |
+| `--ca-cert <path>` | Certificado CA para verificação TLS | |
 | `-p <prompt>` | Modo one-shot: envia prompt e sai | |
-| `--raw` | Saida crua (sem formatacao Markdown/ANSI) | |
-| `--max-tokens <int>` | Maximo de tokens na resposta | |
+| `--raw` | Saída crua (sem formatação Markdown/ANSI) | |
+| `--max-tokens <int>` | Máximo de tokens na resposta | |
 
 ### Flags StackSpot
 
-| Flag | Descricao |
+| Flag | Descrição |
 |------|-----------|
 | `--client-id` | StackSpot Client ID |
 | `--client-key` | StackSpot Client Key |
@@ -61,7 +61,7 @@ K8s watcher active: deployment/myapp in namespace/production (context injected i
 
 ### Flags Ollama
 
-| Flag | Descricao |
+| Flag | Descrição |
 |------|-----------|
 | `--ollama-url` | URL base do Ollama (ex: `http://gpu:11434`) |
 
@@ -69,17 +69,17 @@ K8s watcher active: deployment/myapp in namespace/production (context injected i
 
 ## Modos de Credencial
 
-Voce pode escolher como autenticar com o provedor de LLM:
+Você pode escolher como autenticar com o provedor de LLM:
 
-### 1. Credenciais do Servidor (Padrao)
+### 1. Credenciais do Servidor (Padrão)
 
-Nao envie nenhuma flag de credencial. O servidor usa suas proprias API keys:
+Não envie nenhuma flag de credencial. O servidor usa suas próprias API keys:
 
 ```bash
 chatcli connect meuservidor:50051
 ```
 
-### 2. Sua Propria API Key
+### 2. Sua Própria API Key
 
 Envie sua chave diretamente. O servidor a usa para fazer a chamada ao LLM:
 
@@ -89,7 +89,7 @@ chatcli connect meuservidor:50051 --provider OPENAI --llm-key sk-minha-chave
 
 ### 3. OAuth Local (--use-local-auth)
 
-Use credenciais OAuth ja salvas localmente (de `/auth login`):
+Use credenciais OAuth já salvas localmente (de `/auth login`):
 
 ```bash
 # Pre-requisito: ter feito login OAuth
@@ -98,11 +98,11 @@ Use credenciais OAuth ja salvas localmente (de `/auth login`):
 # Conectar usando essas credenciais
 chatcli connect meuservidor:50051 --use-local-auth
 
-# Com provedor especifico
+# Com provedor específico
 chatcli connect meuservidor:50051 --use-local-auth --provider CLAUDEAI
 ```
 
-A flag `--use-local-auth` le o token OAuth de `~/.chatcli/auth-profiles.json` e o envia ao servidor. Se voce nao especificar `--provider`, o ChatCLI tenta Anthropic primeiro, depois OpenAI.
+A flag `--use-local-auth` lê o token OAuth de `~/.chatcli/auth-profiles.json` e o envia ao servidor. Se você não especificar `--provider`, o ChatCLI tenta Anthropic primeiro, depois OpenAI.
 
 ### 4. StackSpot (Credenciais Completas)
 
@@ -121,7 +121,7 @@ chatcli connect meuservidor:50051 --provider OLLAMA --ollama-url http://gpu-serv
 
 ## Modo One-Shot via Connect
 
-Envie um unico prompt ao servidor remoto e receba a resposta:
+Envie um único prompt ao servidor remoto e receba a resposta:
 
 ```bash
 # Prompt simples
@@ -130,7 +130,7 @@ chatcli connect meuservidor:50051 -p "Explique K8s pods"
 # Com suas credenciais
 chatcli connect meuservidor:50051 --use-local-auth -p "Resuma o status do cluster"
 
-# Saida crua (sem markdown) para uso em scripts
+# Saída crua (sem markdown) para uso em scripts
 chatcli connect meuservidor:50051 -p "Liste os pods com problemas" --raw
 ```
 
@@ -144,13 +144,13 @@ Sem a flag `-p`, o ChatCLI inicia o modo interativo completo:
 chatcli connect meuservidor:50051
 ```
 
-Voce tem acesso a **todas** as funcionalidades do ChatCLI:
+Você tem acesso a **todas** as funcionalidades do ChatCLI:
 
-- **Sessoes**: `/session save`, `/session load`, `/session list`
+- **Sessões**: `/session save`, `/session load`, `/session list`
 - **Agente**: `/agent <tarefa>` ou `/run <tarefa>`
 - **Coder**: `/coder <tarefa>`
 - **Contexto**: `@file`, `@git`, `@command`, `@env`, `@history`
-- **Persistencia**: `/context create`, `/context attach`
+- **Persistência**: `/context create`, `/context attach`
 - **Switch**: `/switch` para trocar provedor/modelo
 - **Watcher**: `/watch status` para ver status do K8s Watcher
 
@@ -158,14 +158,14 @@ Voce tem acesso a **todas** as funcionalidades do ChatCLI:
 
 ## Verificar Status do K8s Watcher
 
-Se o servidor tem um K8s Watcher ativo, voce pode consultar o status remotamente:
+Se o servidor tem um K8s Watcher ativo, você pode consultar o status remotamente:
 
 ```bash
 # No modo interativo
 /watch status
 ```
 
-Saida de exemplo:
+Saída de exemplo:
 
 ```
 K8s Watcher Status (Remote Server)
@@ -182,9 +182,9 @@ Status Summary:
 
 ---
 
-## Variaveis de Ambiente
+## Variáveis de Ambiente
 
-Configure valores padrao via variaveis de ambiente para evitar digitar flags toda vez:
+Configure valores padrão via variáveis de ambiente para evitar digitar flags toda vez:
 
 ```bash
 # No seu .bashrc ou .zshrc
@@ -197,17 +197,17 @@ chatcli connect
 
 ---
 
-## TLS e Seguranca
+## TLS e Segurança
 
-### Conexao Insegura (Desenvolvimento)
+### Conexão Insegura (Desenvolvimento)
 
 ```bash
 chatcli connect localhost:50051
 ```
 
-> Quando TLS esta desabilitado, um **warning e logado** pelo cliente para lembrar que a conexao nao esta encriptada. Isso e perfeitamente aceitavel para desenvolvimento local, mas em producao recomendamos habilitar TLS.
+> Quando TLS está desabilitado, um **warning é logado** pelo cliente para lembrar que a conexão não está encriptada. Isso é perfeitamente aceitável para desenvolvimento local, mas em produção recomendamos habilitar TLS.
 
-### Conexao com TLS
+### Conexão com TLS
 
 ```bash
 chatcli connect meuservidor:50051 --tls
@@ -216,26 +216,40 @@ chatcli connect meuservidor:50051 --tls
 chatcli connect meuservidor:50051 --tls --ca-cert /path/to/ca.pem
 ```
 
-### Token + TLS (Producao)
+### Token + TLS (Produção)
 
 ```bash
 chatcli connect meuservidor:50051 --tls --token meu-token-secreto
 ```
 
-> Para um guia completo de seguranca (autenticacao, hardening de containers, RBAC, etc.), veja a [documentacao de seguranca](/docs/features/security/).
+> Para um guia completo de segurança (autenticação, hardening de containers, RBAC, etc.), veja a [documentação de segurança](/docs/features/security/).
 
 ---
 
-## Exemplos Praticos
+## Balanceamento com Múltiplas Réplicas
+
+Quando o servidor ChatCLI roda com múltiplas réplicas no Kubernetes, o client distribui automaticamente as conexões entre os pods disponíveis:
+
+- O client usa **round-robin client-side** via resolver `dns:///` do gRPC
+- Requer um Service **headless** (`ClusterIP: None`) no Kubernetes para que o DNS retorne os IPs individuais dos pods
+- **Keepalive** integrado (ping a cada 10s) detecta pods inativos e reconecta rapidamente
+- No Helm chart, habilite `service.headless: true` quando `replicaCount > 1`
+- No Operator, o headless é ativado automaticamente quando `spec.réplicas > 1`
+
+> Sem o Service headless, o gRPC fixa a conexão HTTP/2 em um único pod, deixando as demais réplicas ociosas.
+
+---
+
+## Exemplos Práticos
 
 ```bash
 # Desenvolvimento local: servidor sem auth
 chatcli connect localhost:50051
 
-# Producao: TLS + auth + suas credenciais
+# Produção: TLS + auth + suas credenciais
 chatcli connect prod-server:50051 --tls --token secret --use-local-auth
 
-# CI/CD: one-shot com provedor especifico
+# CI/CD: one-shot com provedor específico
 chatcli connect ci-server:50051 --provider GOOGLEAI --llm-key AIzaSy-xxx \
   -p "Analise este diff: $(git diff HEAD~1)" --raw
 
@@ -249,7 +263,7 @@ chatcli connect corp-server:50051 --provider STACKSPOT \
 
 ---
 
-## Proximo Passo
+## Próximo Passo
 
 - [Configurar o servidor](/docs/features/server-mode/)
 - [Deploy com Docker e Helm](/docs/getting-started/docker-deployment/)

@@ -2,7 +2,7 @@
 title = "IA Agentiva e Sistema de Plugins"
 linkTitle = "IA Agentiva e Plugins"
 weight = 40
-description = "Transforme o ChatCLI em uma plataforma de automação extensível. Crie ferramentas customizadas que a IA pode usar autonomamente para executar fluxos de trabalho complexos de ponta a ponta."
+description = "Transforme o ChatCLI em uma plataforma de automação extensível. Crie ferramentas customizadas que a IA pode usar autônomamente para executar fluxos de trabalho complexos de ponta a ponta."
 icon = "smart_toy"
 +++
 
@@ -182,13 +182,13 @@ Comando                   │ Descrição
 ### Instalação de Plugins
 
 # Instalar de um repositório Git
-> ❯ /plugin install https://github.com/usuario/chatcli-plugin-k8s.git
+> ❯ /plugin install https://github.com/usuário/chatcli-plugin-k8s.git
 ```go
 ⚠️  AVISO DE SEGURANÇA
 Você está prestes a instalar código de terceiros que será executado 
 em sua máquina. Revise o código-fonte antes de prosseguir.
 
-Repositório: https://github.com/usuario/chatcli-plugin-k8s.git
+Repositório: https://github.com/usuário/chatcli-plugin-k8s.git
 Confirmar instalação? (s/N): s
 
 📥 Clonando repositório...

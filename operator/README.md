@@ -281,12 +281,21 @@ spec:
 | Resource | Name | Description |
 |----------|------|-------------|
 | Deployment | `<name>` | ChatCLI server pods |
-| Service | `<name>` | ClusterIP for gRPC |
+| Service | `<name>` | gRPC Service (auto-headless when replicas > 1 for client-side LB) |
 | ConfigMap | `<name>` | Environment variables |
 | ConfigMap | `<name>-watch-config` | Multi-target watch YAML |
 | ServiceAccount | `<name>` | Pod identity |
 | Role/ClusterRole | `<name>-watcher` | K8s watcher permissions |
 | PVC | `<name>-sessions` | Session persistence (optional) |
+
+### gRPC Load Balancing
+
+gRPC uses persistent HTTP/2 connections that pin to a single pod via kube-proxy, leaving extra replicas idle.
+
+- **1 replica** (default): Standard ClusterIP Service
+- **Multiple replicas**: Headless Service (`ClusterIP: None`) is created automatically, enabling client-side round-robin via gRPC `dns:///` resolver
+- **Keepalive**: WatcherBridge pings every 10s (3s timeout) to detect dead pods quickly
+- **Transition**: When scaling from 1 to 2+ replicas (or back), the operator deletes and recreates the Service automatically (ClusterIP is immutable in Kubernetes)
 
 ## Correlation Engine
 

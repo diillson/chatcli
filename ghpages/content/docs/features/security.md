@@ -1,128 +1,128 @@
 +++
-title = "Seguranca e Hardening"
-linkTitle = "Seguranca"
+title = "Segurança e Hardening"
+linkTitle = "Segurança"
 weight = 11
-description = "Visao completa das medidas de seguranca do ChatCLI: protecao contra injecao, autenticacao, infraestrutura hardened e boas praticas para producao."
+description = "Visão completa das medidas de segurança do ChatCLI: proteção contra injeção, autenticação, infraestrutura hardened e boas práticas para produção."
 icon = "shield"
 +++
 
-O ChatCLI foi projetado com **seguranca em profundidade** (defense-in-depth). Esta pagina documenta todas as medidas de protecao implementadas, como configura-las e as boas praticas para ambientes de producao.
+O ChatCLI foi projetado com **segurança em profundidade** (defense-in-depth). Esta página documenta todas as medidas de proteção implementadas, como configurá-las e as boas práticas para ambientes de produção.
 
 ---
 
-## Resumo das Protecoes
+## Resumo das Proteções
 
-| Camada | Protecao | Status |
+| Camada | Proteção | Status |
 |--------|----------|--------|
-| **Autenticacao** | Comparacao de tokens em tempo constante (crypto/subtle) | Ativo |
-| **Shell** | Quoting POSIX para prevenir injecao em argumentos de shell | Ativo |
-| **Editores** | Validacao de EDITOR contra allowlist de editores conhecidos | Ativo |
-| **Comandos** | 50+ padroes regex para deteccao de comandos perigosos | Ativo |
-| **Policies** | Matching com word-boundary para evitar escalacao de permissoes | Ativo |
-| **gRPC** | Reflection desabilitado por padrão (oculta schema do servico) | Ativo |
-| **Binarios** | Resolucao de stty via exec.LookPath (evita injecao via PATH) | Ativo |
+| **Autenticação** | Comparação de tokens em tempo constante (crypto/subtle) | Ativo |
+| **Shell** | Quoting POSIX para prevenir injeção em argumentos de shell | Ativo |
+| **Editores** | Validação de EDITOR contra allowlist de editores conhecidos | Ativo |
+| **Comandos** | 50+ padrões regex para detecção de comandos perigosos | Ativo |
+| **Policies** | Matching com word-boundary para evitar escalação de permissões | Ativo |
+| **gRPC** | Reflection desabilitado por padrão (oculta schema do serviço) | Ativo |
+| **Binários** | Resolução de stty via exec.LookPath (evita injeção via PATH) | Ativo |
 | **Containers** | read-only filesystem, no-new-privileges, drop ALL capabilities | Ativo |
-| **Kubernetes** | RBAC namespace-scoped por padrao, SecurityContext restritivo | Ativo |
+| **Kubernetes** | RBAC namespace-scoped por padrão, SecurityContext restritivo | Ativo |
 | **Rede** | TLS opcional com warning quando desabilitado | Ativo |
 
 ---
 
-## Autenticacao do Servidor gRPC
+## Autenticação do Servidor gRPC
 
-### Token Bearer com Comparacao em Tempo Constante
+### Token Bearer com Comparação em Tempo Constante
 
-O servidor gRPC usa autenticacao via Bearer token no header `authorization` de cada request. A comparacao do token utiliza `crypto/subtle.ConstantTimeCompare`, que **previne ataques de timing** — um atacante nao consegue inferir caracteres corretos medindo o tempo de resposta.
+O servidor gRPC usa autenticação via Bearer token no header `authorization` de cada request. A comparação do token utiliza `crypto/subtle.ConstantTimeCompare`, que **previne ataques de timing** — um atacante não consegue inferir caracteres corretos medindo o tempo de resposta.
 
 ```bash
 # Definir token via flag
 chatcli serve --token meu-token-secreto
 
-# Ou via variavel de ambiente
+# Ou via variável de ambiente
 export CHATCLI_SERVER_TOKEN=meu-token-secreto
 chatcli serve
 ```
 
-O endpoint `/Health` e sempre acessivel sem autenticacao para permitir health checks de load balancers e orquestradores.
+O endpoint `/Health` é sempre acessível sem autenticação para permitir health checks de load balancers e orquestradores.
 
 ### TLS (Opcional)
 
-O TLS e **totalmente opcional**. Em ambiente de desenvolvimento local, voce pode rodar sem TLS sem problemas. Para producao, recomendamos fortemente habilitar TLS:
+O TLS é **totalmente opcional**. Em ambiente de desenvolvimento local, você pode rodar sem TLS sem problemas. Para produção, recomendamos fortemente habilitar TLS:
 
 ```bash
-# Producao: com TLS
+# Produção: com TLS
 chatcli serve --tls-cert cert.pem --tls-key key.pem --token meu-token
 
-# Desenvolvimento: sem TLS (um warning sera logado)
+# Desenvolvimento: sem TLS (um warning será logado)
 chatcli serve
 ```
 
-Quando o cliente se conecta sem TLS, um log de warning e emitido para lembrar sobre o uso em producao. O comportamento funcional nao muda — a conexao continua funcionando normalmente.
+Quando o cliente se conecta sem TLS, um log de warning é emitido para lembrar sobre o uso em produção. O comportamento funcional não muda — a conexão continua funcionando normalmente.
 
 ---
 
-## Protecao contra Injecao de Shell
+## Proteção contra Injeção de Shell
 
 ### ShellQuote — Quoting POSIX Seguro
 
-Todos os pontos do codigo onde valores dinamicos sao interpolados em comandos shell utilizam a funcao `utils.ShellQuote()`, que aplica quoting POSIX com aspas simples:
+Todos os pontos do código onde valores dinâmicos são interpolados em comandos shell utilizam a função `utils.ShellQuote()`, que aplica quoting POSIX com aspas simples:
 
 ```go
 // Entrada: it's a "test" $(whoami)
-// Saida:   'it'\''s a "test" $(whoami)'
+// Saída:   'it'\''s a "test" $(whoami)'
 ```
 
 Isso protege contra:
-- **Injecao via aspas**: `'; rm -rf /; echo '`
-- **Substituicao de comandos**: `$(malicious)` ou `` `malicious` ``
-- **Expansao de variaveis**: `$HOME`, `${PATH}`
+- **Injeção via aspas**: `'; rm -rf /; echo '`
+- **Substituição de comandos**: `$(malicious)` ou `` `malicious` ``
+- **Expansão de variáveis**: `$HOME`, `${PATH}`
 - **Pipe/redirecionamento**: `| cat /etc/passwd`, `> /etc/crontab`
 
 #### Pontos Protegidos
 
 | Arquivo | Contexto |
 |---------|----------|
-| `cli/agent_mode.go` | Dry-run echo de comandos (simulacao) |
-| `cli/cli.go` | Source do arquivo de configuracao do shell (`~/.bashrc`, etc.) |
-| `cli/agent/command_executor.go` | Source do arquivo de configuracao do shell (execucao interativa) |
+| `cli/agent_mode.go` | Dry-run echo de comandos (simulação) |
+| `cli/cli.go` | Source do arquivo de configuração do shell (`~/.bashrc`, etc.) |
+| `cli/agent/command_executor.go` | Source do arquivo de configuração do shell (execução interativa) |
 
-### Resolucao de Binarios via LookPath
+### Resolução de Binários via LookPath
 
-O binario `stty` (usado para restaurar o terminal) e resolvido **uma unica vez** no startup via `exec.LookPath("stty")`, retornando o caminho absoluto. Isso evita que um atacante coloque um `stty` malicioso no PATH.
+O binário `stty` (usado para restaurar o terminal) é resolvido **uma única vez** no startup via `exec.LookPath("stty")`, retornando o caminho absoluto. Isso evita que um atacante coloque um `stty` malicioso no PATH.
 
-### Validacao do EDITOR
+### Validação do EDITOR
 
-Quando o usuario edita comandos no modo agente, a variavel `EDITOR` e validada contra uma **allowlist de editores conhecidos**:
+Quando o usuário edita comandos no modo agente, a variável `EDITOR` é validada contra uma **allowlist de editores conhecidos**:
 
 ```
 vim, vi, nvim, nano, emacs, code, subl, micro, helix, hx,
 ed, pico, joe, ne, kate, gedit, kwrite, notepad++, atom
 ```
 
-Se `EDITOR` contiver um valor desconhecido (ex: `EDITOR="/tmp/exploit.sh"`), a operacao e recusada com erro. O editor validado e entao resolvido via `exec.LookPath` para obter o caminho absoluto.
+Se `EDITOR` contiver um valor desconhecido (ex: `EDITOR="/tmp/exploit.sh"`), a operação é recusada com erro. O editor validado é então resolvido via `exec.LookPath` para obter o caminho absoluto.
 
 ---
 
-## Validacao de Comandos
+## Validação de Comandos
 
-### 50+ Padroes de Deteccao
+### 50+ Padrões de Detecção
 
-O `CommandValidator` analisa cada comando sugerido pela IA antes da execucao, verificando contra mais de 50 padroes regex que cobrem:
+O `CommandValidator` analisa cada comando sugerido pela IA antes da execução, verificando contra mais de 50 padrões regex que cobrem:
 
 | Categoria | Exemplos |
 |-----------|----------|
-| **Destruicao de dados** | `rm -rf /`, `dd if=`, `mkfs`, `drop database` |
-| **Execucao remota** | `curl \| bash`, `wget \| sh`, `base64 \| bash` |
-| **Injecao de codigo** | `python -c`, `perl -e`, `ruby -e`, `node -e`, `php -r`, `eval` |
-| **Substituicao de comandos** | `$(curl ...)`, `` `wget ...` `` |
-| **Substituicao de processos** | `<(cmd)`, `>(cmd)` |
-| **Escalacao de privilegios** | `sudo`, `chmod 777 /`, `chown -R / ` |
-| **Manipulacao de rede** | `nc -l`, `iptables -F`, `/dev/tcp/` |
+| **Destruição de dados** | `rm -rf /`, `dd if=`, `mkfs`, `drop database` |
+| **Execução remota** | `curl \| bash`, `wget \| sh`, `base64 \| bash` |
+| **Injeção de código** | `python -c`, `perl -e`, `ruby -e`, `node -e`, `php -r`, `eval` |
+| **Substituição de comandos** | `$(curl ...)`, `` `wget ...` `` |
+| **Substituição de processos** | `<(cmd)`, `>(cmd)` |
+| **Escalação de privilégios** | `sudo`, `chmod 777 /`, `chown -R / ` |
+| **Manipulação de rede** | `nc -l`, `iptables -F`, `/dev/tcp/` |
 | **Kernel** | `insmod`, `modprobe`, `rmmod`, `sysctl -w` |
-| **Evasao** | `${IFS;cmd}`, `VAR=x; bash`, `export PATH=` |
+| **Evasão** | `${IFS;cmd}`, `VAR=x; bash`, `export PATH=` |
 
 ### Denylist Customizada
 
-Adicione seus proprios padroes via variavel de ambiente:
+Adicione seus próprios padrões via variável de ambiente:
 
 ```bash
 # Bloquear terraform destroy e kubectl delete namespace
@@ -138,11 +138,11 @@ export CHATCLI_AGENT_ALLOW_SUDO=true
 
 ---
 
-## Governanca do Modo Coder (Policy Manager)
+## Governança do Modo Coder (Policy Manager)
 
 ### Matching com Word Boundary
 
-O sistema de policies usa **matching com word boundary** para prevenir escalacao de permissoes por prefixo. Exemplo:
+O sistema de policies usa **matching com word boundary** para prevenir escalação de permissões por prefixo. Exemplo:
 
 | Regra | Comando | Resultado |
 |-------|---------|-----------|
@@ -150,11 +150,11 @@ O sistema de policies usa **matching com word boundary** para prevenir escalacao
 | `@coder read` = allow | `@coder readlink /tmp` | **Bloqueado** (ask) |
 | `@coder read --file /etc` = deny | `@coder read --file /etc/passwd` | **Bloqueado** (deny) |
 
-A logica verifica se o proximo caractere apos o match e um separador (espaco, `/`, `=`, etc.) e nao a continuacao de uma palavra (letra, digito, `-`, `_`). Isso garante que `read` nao case com `readlink`.
+A lógica verifica se o próximo caractere após o match é um separador (espaço, `/`, `=`, etc.) e não a continuação de uma palavra (letra, dígito, `-`, `_`). Isso garante que `read` não case com `readlink`.
 
-### Regras Padrao
+### Regras Padrão
 
-Os comandos de leitura sao permitidos por padrao:
+Os comandos de leitura são permitidos por padrão:
 
 ```json
 {
@@ -171,55 +171,55 @@ Os comandos de leitura sao permitidos por padrao:
 }
 ```
 
-Para mais detalhes sobre o sistema de governanca, veja a [documentacao do Modo Coder](/docs/features/coder-security/).
+Para mais detalhes sobre o sistema de governança, veja a [documentação do Modo Coder](/docs/features/coder-security/).
 
 ---
 
-## Seguranca do Servidor gRPC
+## Segurança do Servidor gRPC
 
-### gRPC Reflection (Desabilitado por Padrao)
+### gRPC Reflection (Desabilitado por Padrão)
 
-O gRPC reflection expoe o schema completo do servico, permitindo que ferramentas como `grpcurl` e `grpcui` descubram e chamem todos os RPCs. Em producao, isso pode facilitar reconhecimento por atacantes.
+O gRPC reflection expoe o schema completo do serviço, permitindo que ferramentas como `grpcurl` e `grpcui` descubram e chamem todos os RPCs. Em produção, isso pode facilitar reconhecimento por atacantes.
 
-**Por padrao, o reflection esta desabilitado.** Para habilitar (desenvolvimento/debug):
+**Por padrão, o reflection está desabilitado.** Para habilitar (desenvolvimento/debug):
 
 ```bash
-# Via variavel de ambiente
+# Via variável de ambiente
 export CHATCLI_GRPC_REFLECTION=true
 chatcli serve
 
 # Ou via campo EnableReflection no Config (programatico)
 ```
 
-| Variavel | Descricao | Padrao |
+| Variável | Descrição | Padrão |
 |----------|-----------|--------|
 | `CHATCLI_GRPC_REFLECTION` | Habilita gRPC reflection (`true`/`false`) | `false` |
 
-### Interceptors de Seguranca
+### Interceptors de Segurança
 
 Todas as requests passam por uma cadeia de interceptors:
 
 1. **Recovery**: Captura panics e retorna erro gRPC em vez de derrubar o servidor
-2. **Logging**: Registra metodo, duracao e status de cada request
+2. **Logging**: Registra metodo, duração e status de cada request
 3. **Auth**: Valida Bearer token (quando configurado)
 
 ---
 
-## Verificacao de Versao
+## Verificação de Versão
 
-O ChatCLI verifica automaticamente se ha uma versao mais recente no GitHub. Para desabilitar (ex: ambientes air-gapped ou CI/CD):
+O ChatCLI verifica automaticamente se há uma versão mais recente no GitHub. Para desabilitar (ex: ambientes air-gapped ou CI/CD):
 
 ```bash
 export CHATCLI_DISABLE_VERSION_CHECK=true
 ```
 
-| Variavel | Descricao | Padrao |
+| Variável | Descrição | Padrão |
 |----------|-----------|--------|
-| `CHATCLI_DISABLE_VERSION_CHECK` | Desabilita a verificacao automatica de versao (`true`/`false`) | `false` |
+| `CHATCLI_DISABLE_VERSION_CHECK` | Desabilita a verificação automática de versão (`true`/`false`) | `false` |
 
 ---
 
-## Seguranca de Containers (Docker)
+## Segurança de Containers (Docker)
 
 O `docker-compose.yml` do projeto inclui as seguintes medidas de hardening:
 
@@ -228,37 +228,37 @@ services:
   chatcli-server:
     read_only: true           # Filesystem somente-leitura
     tmpfs:
-      - /tmp:size=100M        # Diretorio temporario em memoria
+      - /tmp:size=100M        # Diretório temporário em memória
     security_opt:
-      - no-new-privileges:true  # Impede escalacao de privilegios
+      - no-new-privileges:true  # Impede escalação de privilégios
     deploy:
       resources:
         limits:
           cpus: "2.0"         # Limite de CPU
-          memory: 1G          # Limite de memoria
+          memory: 1G          # Limite de memória
 ```
 
 ### O que cada medida faz
 
-| Medida | Protecao |
+| Medida | Proteção |
 |--------|----------|
 | `read_only: true` | Impede que malware grave arquivos no filesystem do container |
-| `tmpfs` | Fornece diretorio `/tmp` em memoria com tamanho limitado |
-| `no-new-privileges` | Impede que processos filhos ganhem mais privilegios que o pai |
-| Resource limits | Previne consumo excessivo de CPU/memoria (DoS) |
+| `tmpfs` | Fornece diretório `/tmp` em memória com tamanho limitado |
+| `no-new-privileges` | Impede que processos filhos ganhem mais privilégios que o pai |
+| Resource limits | Previne consumo excessivo de CPU/memória (DoS) |
 
 ---
 
-## Seguranca no Kubernetes (Helm)
+## Segurança no Kubernetes (Helm)
 
 ### Pod SecurityContext
 
-O Helm chart define um SecurityContext restritivo por padrao:
+O Helm chart define um SecurityContext restritivo por padrão:
 
 ```yaml
 # values.yaml
 podSecurityContext:
-  runAsNonRoot: true          # Obriga execucao como usuario nao-root
+  runAsNonRoot: true          # Obriga execução como usuário não-root
   runAsUser: 1000
   runAsGroup: 1000
   fsGroup: 1000
@@ -266,26 +266,26 @@ podSecurityContext:
     type: RuntimeDefault       # Filtro de syscalls do kernel
 
 securityContext:
-  allowPrivilegeEscalation: false  # Sem escalacao de privilegios
+  allowPrivilegeEscalation: false  # Sem escalação de privilégios
   readOnlyRootFilesystem: true     # Filesystem somente-leitura
   capabilities:
     drop:
       - ALL                        # Remove TODAS as capabilities Linux
 ```
 
-### RBAC Namespace-Scoped (Padrao)
+### RBAC Namespace-Scoped (Padrão)
 
-Por padrao, o chart cria **Role** e **RoleBinding** (namespace-scoped) em vez de ClusterRole. Isso garante que o ChatCLI so tenha acesso ao namespace onde esta deployado.
+Por padrão, o chart cria **Role** e **RoleBinding** (namespace-scoped) em vez de ClusterRole. Isso garante que o ChatCLI só tenha acesso ao namespace onde está deployado.
 
 ```yaml
 # values.yaml
 rbac:
   create: true
-  clusterWide: false   # false = Role (namespace-scoped, padrao)
+  clusterWide: false   # false = Role (namespace-scoped, padrão)
                        # true  = ClusterRole (cluster-wide)
 ```
 
-Para monitorar deployments em **multiplos namespaces**, habilite `clusterWide`:
+Para monitorar deployments em **múltiplos namespaces**, habilite `clusterWide`:
 
 ```bash
 helm install chatcli deploy/helm/chatcli \
@@ -293,34 +293,34 @@ helm install chatcli deploy/helm/chatcli \
   --set watcher.enabled=true
 ```
 
-### tmpfs Automatico
+### tmpfs Automático
 
-Quando `securityContext.readOnlyRootFilesystem` esta `true`, o chart automaticamente monta um volume `emptyDir` em `/tmp` (limitado a 100Mi) para que a aplicacao possa gravar arquivos temporarios.
+Quando `securityContext.readOnlyRootFilesystem` está `true`, o chart automaticamente monta um volume `emptyDir` em `/tmp` (limitado a 100Mi) para que a aplicação possa gravar arquivos temporários.
 
 ---
 
-## Variaveis de Ambiente de Seguranca
+## Variáveis de Ambiente de Segurança
 
-Resumo de todas as variaveis relacionadas a seguranca:
+Resumo de todas as variáveis relacionadas a segurança:
 
-| Variavel | Descricao | Padrao |
+| Variável | Descrição | Padrão |
 |----------|-----------|--------|
-| `CHATCLI_SERVER_TOKEN` | Token de autenticacao do servidor gRPC | `""` (sem auth) |
+| `CHATCLI_SERVER_TOKEN` | Token de autenticação do servidor gRPC | `""` (sem auth) |
 | `CHATCLI_SERVER_TLS_CERT` | Certificado TLS do servidor | `""` |
 | `CHATCLI_SERVER_TLS_KEY` | Chave TLS do servidor | `""` |
 | `CHATCLI_GRPC_REFLECTION` | Habilita gRPC reflection | `false` |
-| `CHATCLI_DISABLE_VERSION_CHECK` | Desabilita verificacao de versao | `false` |
+| `CHATCLI_DISABLE_VERSION_CHECK` | Desabilita verificação de versão | `false` |
 | `CHATCLI_AGENT_ALLOW_SUDO` | Permite sudo no modo agente | `false` |
-| `CHATCLI_AGENT_DENYLIST` | Padroes regex adicionais para bloquear (`;` separados) | `""` |
-| `CHATCLI_AGENT_CMD_TIMEOUT` | Timeout de execucao por comando | `10m` |
+| `CHATCLI_AGENT_DENYLIST` | Padrões regex adicionais para bloquear (`;` separados) | `""` |
+| `CHATCLI_AGENT_CMD_TIMEOUT` | Timeout de execução por comando | `10m` |
 
 ---
 
 ## Criptografia de Credenciais
 
-As credenciais OAuth sao armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/auth-profiles.json`. A chave de criptografia e gerada automaticamente e salva em `~/.chatcli/.auth-key` com permissao `0600` (somente o dono pode ler).
+As credenciais OAuth são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/auth-profiles.json`. A chave de criptografia é gerada automaticamente e salva em `~/.chatcli/.auth-key` com permissão `0600` (somente o dono pode ler).
 
-| Arquivo | Permissao | Conteudo |
+| Arquivo | Permissão | Conteúdo |
 |---------|-----------|----------|
 | `~/.chatcli/auth-profiles.json` | `0600` | Credenciais OAuth criptografadas |
 | `~/.chatcli/.auth-key` | `0600` | Chave AES-256-GCM |
@@ -328,16 +328,16 @@ As credenciais OAuth sao armazenadas com **criptografia AES-256-GCM** em `~/.cha
 
 ---
 
-## Boas Praticas para Producao
+## Boas Práticas para Produção
 
-### 1. Sempre use token de autenticacao
+### 1. Sempre use token de autenticação
 
 ```bash
 export CHATCLI_SERVER_TOKEN=$(openssl rand -hex 32)
 chatcli serve --token $CHATCLI_SERVER_TOKEN
 ```
 
-### 2. Habilite TLS em producao
+### 2. Habilite TLS em produção
 
 ```bash
 chatcli serve --tls-cert cert.pem --tls-key key.pem
@@ -345,11 +345,11 @@ chatcli serve --tls-cert cert.pem --tls-key key.pem
 
 ### 3. Mantenha gRPC reflection desabilitado
 
-Nao defina `CHATCLI_GRPC_REFLECTION=true` em producao. Use apenas para debugging local.
+Não defina `CHATCLI_GRPC_REFLECTION=true` em produção. Use apenas para debugging local.
 
 ### 4. Use RBAC namespace-scoped
 
-Mantenha `rbac.clusterWide: false` (padrao) a menos que precise monitorar multiplos namespaces.
+Mantenha `rbac.clusterWide: false` (padrão) a menos que precise monitorar múltiplos namespaces.
 
 ### 5. Revise as policies do Coder regularmente
 
@@ -359,7 +359,7 @@ cat ~/.chatcli/coder_policy.json
 
 ### 6. Configure resource limits
 
-Sempre defina limites de CPU e memoria para evitar consumo excessivo:
+Sempre defina limites de CPU e memória para evitar consumo excessivo:
 
 ```yaml
 resources:
@@ -373,7 +373,7 @@ resources:
 
 ### 7. Mantenha o ChatCLI atualizado
 
-A verificacao de versao e habilitada por padrao. Se voce desabilitou com `CHATCLI_DISABLE_VERSION_CHECK`, verifique periodicamente:
+A verificação de versão é habilitada por padrão. Se você desabilitou com `CHATCLI_DISABLE_VERSION_CHECK`, verifique periodicamente:
 
 ```bash
 chatcli --version
@@ -381,9 +381,9 @@ chatcli --version
 
 ---
 
-## Proximo Passo
+## Próximo Passo
 
-- [Governanca do Modo Coder](/docs/features/coder-security/)
+- [Governança do Modo Coder](/docs/features/coder-security/)
 - [Configurar o servidor](/docs/features/server-mode/)
 - [Deploy com Docker e Helm](/docs/getting-started/docker-deployment/)
-- [Referencia de configuracao (.env)](/docs/reference/configuration/)
+- [Referencia de configuração (.env)](/docs/reference/configuration/)

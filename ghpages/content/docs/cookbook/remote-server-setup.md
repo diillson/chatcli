@@ -2,27 +2,27 @@
 title = "Receita: Servidor Remoto para Equipe"
 linkTitle = "Servidor para Equipe"
 weight = 70
-description = "Guia passo a passo para configurar um servidor ChatCLI centralizado para toda a equipe, com autenticacao, TLS e multiplos provedores."
+description = "Guia passo a passo para configurar um servidor ChatCLI centralizado para toda a equipe, com autenticação, TLS e múltiplos provedores."
 icon = "groups"
 +++
 
-Nesta receita, voce vai configurar um servidor ChatCLI centralizado que atende toda a equipe de desenvolvimento. Cada membro pode conectar do seu terminal e usar a IA sem precisar gerenciar API keys individuais.
+Nesta receita, você vai configurar um servidor ChatCLI centralizado que atende toda a equipe de desenvolvimento. Cada membro pode conectar do seu terminal e usar a IA sem precisar gerenciar API keys individuais.
 
 ---
 
-## Cenario
+## Cenário
 
 - Equipe de 5-10 desenvolvedores
 - Servidor central com API keys corporativas
 - Cada dev conecta do seu terminal local
-- Autenticacao via token compartilhado
-- Opcao de usar credenciais proprias
+- Autenticação via token compartilhado
+- Opção de usar credenciais próprias
 
 ---
 
 ## Passo 1: Configurar o Servidor
 
-### Opcao A: Docker Compose (Simples)
+### Opção A: Docker Compose (Simples)
 
 Crie um arquivo `.env` no servidor:
 
@@ -41,7 +41,7 @@ Inicie com Docker Compose:
 docker compose up -d
 ```
 
-### Opcao B: Binario Direto
+### Opção B: Binario Direto
 
 ```bash
 export CHATCLI_SERVER_TOKEN=equipe-token-2024
@@ -50,7 +50,7 @@ export ANTHROPIC_API_KEY=sk-ant-xxx
 chatcli serve --port 50051
 ```
 
-### Opcao C: Kubernetes (Helm)
+### Opção C: Kubernetes (Helm)
 
 ```bash
 helm install chatcli deploy/helm/chatcli \
@@ -85,14 +85,14 @@ alias cia='chatcli connect'
 chatcli connect
 
 # One-shot rapido
-chatcli connect -p "Explique o padrao Repository em Go"
+chatcli connect -p "Explique o padrão Repository em Go"
 ```
 
 ---
 
-## Passo 4: Permitir Credenciais Proprias (Opcional)
+## Passo 4: Permitir Credenciais Próprias (Opcional)
 
-Devs que preferem usar suas proprias credenciais podem faze-lo:
+Devs que preferem usar suas próprias credenciais podem faze-lo:
 
 ```bash
 # Dev que tem assinatura Claude Pro
@@ -106,9 +106,9 @@ O servidor aceita ambos os modos simultaneamente.
 
 ---
 
-## Passo 5: Adicionar TLS (Producao)
+## Passo 5: Adicionar TLS (Produção)
 
-Para ambientes de producao, adicione TLS:
+Para ambientes de produção, adicione TLS:
 
 ```bash
 # Gerar certificados (ex: com Let's Encrypt ou certbot)
@@ -131,14 +131,14 @@ chatcli connect servidor:50051 --tls --token equipe-token-2024
 
 ## Passo 6: Multiplos Provedores
 
-Configure o servidor com multiplas API keys. Devs podem escolher o provedor:
+Configure o servidor com múltiplas API keys. Devs podem escolher o provedor:
 
 ```bash
 # Servidor com OpenAI, Claude e Google AI
 export OPENAI_API_KEY=sk-xxx
 export ANTHROPIC_API_KEY=sk-ant-xxx
 export GOOGLEAI_API_KEY=AIzaSy-xxx
-export LLM_PROVIDER=CLAUDEAI  # padrao
+export LLM_PROVIDER=CLAUDEAI  # padrão
 chatcli serve
 ```
 
@@ -146,12 +146,12 @@ chatcli serve
 # Dev escolhe o provedor
 chatcli connect --provider OPENAI
 chatcli connect --provider GOOGLEAI
-chatcli connect  # usa o padrao (CLAUDEAI)
+chatcli connect  # usa o padrão (CLAUDEAI)
 ```
 
 ---
 
-## Dicas de Operacao
+## Dicas de Operação
 
 ### Logs do Servidor
 
@@ -174,23 +174,23 @@ docker inspect chatcli-server --format='{{.State.Health.Status}}'
 
 Configure `LOG_LEVEL=info` no servidor para registrar cada request com provider e modelo utilizado.
 
-### Backup de Sessoes
+### Backup de Sessões
 
 ```bash
 # Docker: volumes persistentes
 docker cp chatcli-server:/home/chatcli/.chatcli/sessions ./backup/
 
-# Kubernetes: PVC ja configurado no Helm chart
+# Kubernetes: PVCjá configurado no Helm chart
 ```
 
 ---
 
 ## Resumo
 
-| Componente | Configuracao |
+| Componente | Configuração |
 |------------|-------------|
 | Servidor | `chatcli serve --token X` |
 | Cliente | `chatcli connect --token X` |
 | Env Vars | `CHATCLI_REMOTE_ADDR`, `CHATCLI_REMOTE_TOKEN` |
 | TLS | `--tls-cert`, `--tls-key` (servidor) / `--tls` (cliente) |
-| Credenciais | Servidor (padrao) ou cliente (`--llm-key` / `--use-local-auth`) |
+| Credenciais | Servidor (padrão) ou cliente (`--llm-key` / `--use-local-auth`) |

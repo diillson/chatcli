@@ -87,7 +87,7 @@ No `/coder`, o atributo `args` do `<tool_call>` deve usar somente os subcomandos
 1. Listar a árvore: `tree --dir .`
 2. Procurar ocorrências: `search --term "FAIL"...`
 3. Ler arquivos: `read --file ...`
-4. Aplicar patch minimal: `patch --file ...`
+4. Aplicar patch mínimal: `patch --file ...`
 5. Rodar testes: `exec --cmd "go test ./..."`
 
 {{< notice "success">}} Nesse modo, a saída sempre vai via <markup>@coder</markup>. Você não precisa escrever comandos diretamente no shell.{{< /notice >}}

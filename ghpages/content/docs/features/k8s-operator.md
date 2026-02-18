@@ -2,11 +2,11 @@
 title = "Kubernetes Operator (AIOps)"
 linkTitle = "K8s Operator"
 weight = 63
-description = "Gerencie instancias ChatCLI e uma plataforma AIOps autonoma no Kubernetes com 6 CRDs, correlacao de anomalias, analise por IA e remediacao automatica."
+description = "Gerencie instâncias ChatCLI e uma plataforma AIOps autônoma no Kubernetes com 6 CRDs, correlação de anomalias, análise por IA e remediação automática."
 icon = "deployed_code"
 +++
 
-O **ChatCLI Operator** vai alem do gerenciamento de instancias. Ele implementa uma **plataforma AIOps completa** que detecta anomalias autonomamente, correlaciona sinais, solicita analise de IA e executa remediacao — tudo sem dependencias externas alem do provedor LLM.
+O **ChatCLI Operator** vai além do gerenciamento de instâncias. Ele implementa uma **plataforma AIOps completa** que detecta anomalias autônomamente, correlaciona sinais, solicita análise de IA e executa remediação — tudo sem dependências externas além do provedor LLM.
 
 ---
 
@@ -14,18 +14,18 @@ O **ChatCLI Operator** vai alem do gerenciamento de instancias. Ele implementa u
 
 O operator usa o API group `platform.chatcli.io/v1alpha1` com 6 Custom Resource Definitions:
 
-| CRD | Short Name | Descricao |
+| CRD | Short Name | Descrição |
 |-----|-----------|-----------|
 | **Instance** | `inst` | Instancia do servidor ChatCLI (Deployment, Service, RBAC, PVC) |
 | **Anomaly** | `anom` | Sinal bruto do K8s Watcher (restarts, OOM, falhas de deploy) |
-| **Issue** | `iss` | Incidente correlacionado agrupando multiplas anomalias |
-| **AIInsight** | `ai` | Analise de causa raiz gerada por IA com acoes sugeridas |
-| **RemediationPlan** | `rp` | Acoes concretas para resolver o problema |
+| **Issue** | `iss` | Incidente correlacionado agrupando múltiplas anomalias |
+| **AIInsight** | `ai` | Análise de causa raiz gerada por IA com ações sugeridas |
+| **RemediationPlan** | `rp` | Ações concretas para resolver o problema |
 | **Runbook** | `rb` | Procedimentos operacionais manuais (opcional) |
 
 ---
 
-## Instalacao do Operator
+## Instalação do Operator
 
 ### Via Manifests
 
@@ -60,10 +60,10 @@ graph TD
     subgraph "Operator"
         WB[WatcherBridge<br/>polls cada 30s] -->|gRPC| GA
         WB -->|cria| ANOM[Anomaly CR]
-        ANOM -->|AnomalyReconciler<br/>correlacao| ISS[Issue CR]
+        ANOM -->|AnomalyReconciler<br/>correlação| ISS[Issue CR]
         ISS -->|IssueReconciler<br/>cria| INSIGHT[AIInsight CR]
         INSIGHT -->|AIInsightReconciler<br/>gRPC| AI_RPC
-        AI_RPC -->|analise + acoes| INSIGHT
+        AI_RPC -->|análise + ações| INSIGHT
         ISS -->|cria| PLAN[RemediationPlan CR]
         PLAN -->|RemediationReconciler<br/>executa| ACTIONS[Scale / Restart<br/>Rollback / Patch]
         ACTIONS -->|sucesso| RESOLVED[Issue Resolved]
@@ -78,26 +78,26 @@ graph TD
     style RETRY fill:#f38ba8,color:#000
 ```
 
-### Pipeline Autonomo
+### Pipeline Autônomo
 
 | Fase | Componente | O que Faz |
 |------|-----------|-----------|
-| **1. Deteccao** | WatcherBridge | Consulta `GetAlerts` do servidor a cada 30s. Cria Anomaly CRs para cada alerta novo (dedup via SHA256 com bucket de minuto). |
-| **2. Correlacao** | AnomalyReconciler + CorrelationEngine | Agrupa anomalias por recurso + janela temporal. Calcula risk score e severidade. Cria/atualiza Issue CRs. |
-| **3. Analise** | IssueReconciler + AIInsightReconciler | Cria AIInsight CR. Chama `AnalyzeIssue` RPC que envia contexto ao LLM. Retorna: analise, confianca, recomendacoes e acoes sugeridas. |
-| **4. Remediacao** | IssueReconciler | Cria RemediationPlan a partir de: **(a)** Runbook existente, **(b)** acoes sugeridas pela IA (fallback automatico), ou **(c)** escalona se nenhum disponivel. |
-| **5. Execucao** | RemediationReconciler | Executa acoes no cluster: ScaleDeployment, RestartDeployment, RollbackDeployment, PatchConfig. |
-| **6. Resolucao** | IssueReconciler | Sucesso → Issue resolvido. Falha → retry (ate maxAttempts) → escalona. |
+| **1. Detecção** | WatcherBridge | Consulta `GetAlerts` do servidor a cada 30s. Cria Anomaly CRs para cada alerta novo (dedup via SHA256 com bucket de minuto). |
+| **2. Correlação** | AnomalyReconciler + CorrelationEngine | Agrupa anomalias por recurso + janela temporal. Calcula risk score e severidade. Cria/atualiza Issue CRs. |
+| **3. Analise** | IssueReconciler + AIInsightReconciler | Cria AIInsight CR. Chama `AnalyzeIssue` RPC que envia contexto ao LLM. Retorna: análise, confiança, recomendações e ações sugeridas. |
+| **4. Remediação** | IssueReconciler | Cria RemediationPlan a partir de: **(a)** Runbook existente, **(b)** ações sugeridas pela IA (fallback automático), ou **(c)** escalona se nenhum disponível. |
+| **5. Execução** | RemediationReconciler | Executa ações no cluster: ScaleDeployment, RestartDeployment, RollbackDeployment, PatchConfig. |
+| **6. Resolução** | IssueReconciler | Sucesso → Issue resolvido. Falha → retry (até maxAttempts) → escalona. |
 
-### Maquina de Estados do Issue
+### Máquina de Estados do Issue
 
 ```mermaid
 stateDiagram-v2
     [*] --> Detected
     Detected --> Analyzing : AIInsight criado
     Analyzing --> Remediating : RemediationPlan criado
-    Analyzing --> Escalated : Sem Runbook e sem acoes AI
-    Remediating --> Resolved : Remediacao bem-sucedida
+    Analyzing --> Escalated : Sem Runbook e sem ações AI
+    Remediating --> Resolved : Remediação bem-sucedida
     Remediating --> Remediating : Retry (attempt < max)
     Remediating --> Escalated : Max tentativas ou sem plano de retry
     Resolved --> [*]
@@ -108,9 +108,9 @@ stateDiagram-v2
 
 ## CRD: Instance
 
-O `Instance` gerencia instancias do servidor ChatCLI no cluster. Substitui o antigo `ChatCLIInstance` (`chatcli.diillson.com`).
+O `Instance` gerencia instâncias do servidor ChatCLI no cluster. Substitui o antigo `ChatCLIInstance` (`chatcli.diillson.com`).
 
-### Especificacao Completa
+### Especificação Completa
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -181,60 +181,69 @@ spec:
 
 #### Raiz
 
-| Campo | Tipo | Obrigatorio | Padrao | Descricao |
+| Campo | Tipo | Obrigatório | Padrão | Descrição |
 |-------|------|:-----------:|--------|-----------|
-| `replicas` | int32 | Nao | `1` | Numero de replicas do servidor |
+| `replicas` | int32 | Não | `1` | Número de réplicas do servidor |
 | `provider` | string | **Sim** | | Provedor LLM |
-| `model` | string | Nao | | Modelo LLM |
-| `image` | ImageSpec | Nao | | Configuracao da imagem |
-| `server` | ServerSpec | Nao | | Configuracao do servidor gRPC |
-| `watcher` | WatcherSpec | Nao | | Configuracao do K8s Watcher |
-| `resources` | ResourceRequirements | Nao | | Requests/limits de CPU e memoria |
-| `persistence` | PersistenceSpec | Nao | | Persistencia de sessoes |
-| `securityContext` | PodSecurityContext | Nao | nonroot/1000 | Security context do pod |
-| `apiKeys` | SecretRefSpec | Nao | | Secret com API keys |
+| `model` | string | Não | | Modelo LLM |
+| `image` | ImageSpec | Não | | Configuração da imagem |
+| `server` | ServerSpec | Não | | Configuração do servidor gRPC |
+| `watcher` | WatcherSpec | Não | | Configuração do K8s Watcher |
+| `resources` | ResourceRequirements | Não | | Requests/limits de CPU e memória |
+| `persistence` | PersistenceSpec | Não | | Persistência de sessões |
+| `securityContext` | PodSecurityContext | Não | nonroot/1000 | Security context do pod |
+| `apiKeys` | SecretRefSpec | Não | | Secret com API keys |
 
 #### WatcherSpec
 
-| Campo | Tipo | Obrigatorio | Padrao | Descricao |
+| Campo | Tipo | Obrigatório | Padrão | Descrição |
 |-------|------|:-----------:|--------|-----------|
-| `enabled` | bool | Nao | `false` | Ativa o watcher |
-| `targets` | []WatchTargetSpec | Nao | | Lista de deployments (multi-target) |
-| `deployment` | string | Nao | | Deployment unico (legado) |
-| `namespace` | string | Nao | | Namespace do deployment (legado) |
-| `interval` | string | Nao | `"30s"` | Intervalo de coleta |
-| `window` | string | Nao | `"2h"` | Janela de observacao |
-| `maxLogLines` | int32 | Nao | `100` | Max linhas de log por pod |
-| `maxContextChars` | int32 | Nao | `32000` | Budget de contexto LLM |
+| `enabled` | bool | Não | `false` | Ativa o watcher |
+| `targets` | []WatchTargetSpec | Não | | Lista de deployments (multi-target) |
+| `deployment` | string | Não | | Deployment único (legado) |
+| `namespace` | string | Não | | Namespace do deployment (legado) |
+| `interval` | string | Não | `"30s"` | Intervalo de coleta |
+| `window` | string | Não | `"2h"` | Janela de observação |
+| `maxLogLines` | int32 | Não | `100` | Max linhas de log por pod |
+| `maxContextChars` | int32 | Não | `32000` | Budget de contexto LLM |
 
 #### WatchTargetSpec
 
-| Campo | Tipo | Obrigatorio | Padrao | Descricao |
+| Campo | Tipo | Obrigatório | Padrão | Descrição |
 |-------|------|:-----------:|--------|-----------|
 | `deployment` | string | **Sim** | | Nome do deployment |
 | `namespace` | string | **Sim** | | Namespace do deployment |
-| `metricsPort` | int32 | Nao | `0` | Porta Prometheus (0 = desabilitado) |
-| `metricsPath` | string | Nao | `/metrics` | Path do endpoint Prometheus |
-| `metricsFilter` | []string | Nao | | Filtros glob para metricas |
+| `metricsPort` | int32 | Não | `0` | Porta Prometheus (0 = desabilitado) |
+| `metricsPath` | string | Não | `/metrics` | Path do endpoint Prometheus |
+| `metricsFilter` | []string | Não | | Filtros glob para métricas |
 
 ### Recursos Criados pelo Instance
 
-| Recurso | Nome | Descricao |
+| Recurso | Nome | Descrição |
 |---------|------|-----------|
 | **Deployment** | `<name>` | Pods do servidor ChatCLI |
-| **Service** | `<name>` | ClusterIP para acesso gRPC |
-| **ConfigMap** | `<name>` | Variaveis de ambiente (provider, model, etc.) |
+| **Service** | `<name>` | Service gRPC (headless automático quando réplicas > 1 para LB client-side) |
+| **ConfigMap** | `<name>` | Variáveis de ambiente (provider, model, etc.) |
 | **ConfigMap** | `<name>-watch-config` | YAML multi-target (se `targets` definido) |
 | **ServiceAccount** | `<name>` | Identity para RBAC |
-| **Role/ClusterRole** | `<name>-watcher` | Permissoes K8s do watcher |
+| **Role/ClusterRole** | `<name>-watcher` | Permissões K8s do watcher |
 | **RoleBinding/CRB** | `<name>-watcher` | Binding da SA ao Role |
-| **PVC** | `<name>-sessions` | Persistencia (se habilitada) |
+| **PVC** | `<name>-sessions` | Persistência (se habilitada) |
 
-### RBAC Automatico
+### Balanceamento gRPC
+
+O gRPC usa conexões HTTP/2 persistentes que fixam em um único pod via kube-proxy, deixando réplicas extras ociosas.
+
+- **1 réplica** (padrão): Service ClusterIP padrão
+- **Múltiplas réplicas**: Service headless (`ClusterIP: None`) é criado automaticamente, habilitando round-robin client-side via resolver `dns:///` do gRPC
+- **Keepalive**: WatcherBridge faz ping a cada 10s (timeout de 3s) para detectar pods inativos rapidamente
+- **Transição**: Ao escalar de 1 para 2+ réplicas (ou voltar), o operator deleta e recria o Service automaticamente (ClusterIP é imutável no Kubernetes)
+
+### RBAC Automático
 
 - **Single-namespace** (todos os targets no mesmo namespace): Cria `Role` + `RoleBinding`
 - **Multi-namespace** (targets em namespaces diferentes): Cria `ClusterRole` + `ClusterRoleBinding` automaticamente
-- Na delecao do CR, cluster-scoped resources sao limpos pelo finalizer
+- Na deleção do CR, cluster-scoped resources são limpos pelo finalizer
 
 ---
 
@@ -268,27 +277,27 @@ status:
 
 #### Campos do Anomaly Spec
 
-| Campo | Tipo | Descricao |
+| Campo | Tipo | Descrição |
 |-------|------|-----------|
 | `signalType` | AnomalySignalType | Tipo do sinal detectado |
-| `source` | AnomalySource | Origem da deteccao (watcher, prometheus, manual) |
+| `source` | AnomalySource | Origem da detecção (watcher, prometheus, manual) |
 | `severity` | IssueSeverity | Severidade do sinal |
 | `resource` | ResourceRef | Recurso K8s afetado (kind, name, namespace) |
-| `description` | string | Descricao legivel do problema |
-| `detectedAt` | Time | Timestamp da deteccao |
+| `description` | string | Descrição legível do problema |
+| `detectedAt` | Time | Timestamp da detecção |
 
 #### Sinais Detectados pelo Watcher
 
-| AlertType (Server) | SignalType (Anomaly) | Descricao |
+| AlertType (Server) | SignalType (Anomaly) | Descrição |
 |--------------------|---------------------|-----------|
 | `HighRestartCount` | `pod_restart` | Pod com muitos restarts (CrashLoopBackOff) |
-| `OOMKilled` | `oom_kill` | Container terminado por falta de memoria |
-| `PodNotReady` | `pod_not_ready` | Pod nao esta no estado Ready |
+| `OOMKilled` | `oom_kill` | Container terminado por falta de memória |
+| `PodNotReady` | `pod_not_ready` | Pod não está no estado Ready |
 | `DeploymentFailing` | `deploy_failing` | Deployment com Available=False |
 
 ### Issue
 
-Incidente correlacionado que agrupa anomalias e gerencia o ciclo de vida da remediacao.
+Incidente correlacionado que agrupa anomalias e gerencia o ciclo de vida da remediação.
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -321,18 +330,18 @@ status:
 
 #### Estados do Issue
 
-| Estado | Descricao |
+| Estado | Descrição |
 |--------|-----------|
-| `Detected` | Issue recem-criado, aguardando analise |
+| `Detected` | Issue recém-criado, aguardando análise |
 | `Analyzing` | AIInsight criado, aguardando resposta da IA |
-| `Remediating` | RemediationPlan em execucao |
-| `Resolved` | Remediacao bem-sucedida |
-| `Escalated` | Max tentativas atingido ou sem acoes disponiveis |
+| `Remediating` | RemediationPlan em execução |
+| `Resolved` | Remediação bem-sucedida |
+| `Escalated` | Max tentativas atingido ou sem ações disponíveis |
 | `Failed` | Falha terminal |
 
 ### AIInsight
 
-Analise de causa raiz gerada por IA com acoes sugeridas para remediacao automatica.
+Análise de causa raiz gerada por IA com ações sugeridas para remediação automática.
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -366,26 +375,26 @@ status:
 
 #### Campos do AIInsight Status
 
-| Campo | Tipo | Descricao |
+| Campo | Tipo | Descrição |
 |-------|------|-----------|
-| `analysis` | string | Analise de causa raiz gerada pela IA |
-| `confidence` | float64 | Nivel de confianca da analise (0.0-1.0) |
-| `recommendations` | []string | Recomendacoes legiveis para humanos |
-| `suggestedActions` | []SuggestedAction | Acoes estruturadas para remediacao automatica |
-| `generatedAt` | Time | Quando a analise foi gerada |
+| `analysis` | string | Análise de causa raiz gerada pela IA |
+| `confidence` | float64 | Nível de confiança da análise (0.0-1.0) |
+| `recommendations` | []string | Recomendações legiveis para humanos |
+| `suggestedActions` | []SuggestedAction | Ações estruturadas para remediação automática |
+| `generatedAt` | Time | Quando a análise foi gerada |
 
 #### SuggestedAction
 
-| Campo | Tipo | Descricao |
+| Campo | Tipo | Descrição |
 |-------|------|-----------|
-| `name` | string | Nome legivel da acao |
-| `action` | string | Tipo da acao: `ScaleDeployment`, `RestartDeployment`, `RollbackDeployment`, `PatchConfig` |
-| `description` | string | Explicacao do motivo desta acao |
-| `params` | map[string]string | Parametros da acao (ex: `replicas: "4"`) |
+| `name` | string | Nome legível da ação |
+| `action` | string | Tipo da ação: `ScaleDeployment`, `RestartDeployment`, `RollbackDeployment`, `PatchConfig` |
+| `description` | string | Explicação do motivo desta ação |
+| `params` | map[string]string | Parâmetros da ação (ex: `replicas: "4"`) |
 
 ### RemediationPlan
 
-Plano concreto de remediacao gerado automaticamente a partir de Runbook ou acoes da IA.
+Plano concreto de remediação gerado automaticamente a partir de Runbook ou ações da IA.
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -414,19 +423,19 @@ status:
   completedAt: "2026-02-16T10:32:15Z"
 ```
 
-#### Tipos de Acao
+#### Tipos de Ação
 
-| Tipo | Descricao | Parametros |
+| Tipo | Descrição | Parâmetros |
 |------|-----------|-----------|
-| `ScaleDeployment` | Ajusta o numero de replicas | `replicas` |
+| `ScaleDeployment` | Ajusta o número de réplicas | `replicas` |
 | `RestartDeployment` | Rollout restart do deployment | — |
-| `RollbackDeployment` | Desfaz o ultimo rollout | — |
+| `RollbackDeployment` | Desfaz o último rollout | — |
 | `PatchConfig` | Atualiza chaves de um ConfigMap | `configmap`, `key=value` |
-| `Custom` | Acao personalizada (bloqueada por safety checks) | — |
+| `Custom` | Ação personalizada (bloqueada por safety checks) | — |
 
 ### Runbook (Opcional)
 
-Procedimentos operacionais manuais. Quando um Runbook corresponde ao issue, ele tem prioridade sobre as acoes da IA.
+Procedimentos operacionais manuais. Quando um Runbook corresponde ao issue, ele tem prioridade sobre as ações da IA.
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -452,19 +461,19 @@ spec:
   maxAttempts: 3
 ```
 
-#### Prioridade de Remediacao
+#### Prioridade de Remediação
 
 ```
 1. Runbook existente que corresponde (signalType + severity + resourceKind)
-2. Acoes sugeridas pela IA (suggestedActions do AIInsight)
-3. Escalonamento (se nenhum dos dois disponiveis)
+2. Ações sugeridas pela IA (suggestedActions do AIInsight)
+3. Escalonamento (se nenhum dos dois disponíveis)
 ```
 
 ---
 
 ## Correlation Engine
 
-O motor de correlacao agrupa anomalias em issues usando:
+O motor de correlação agrupa anomalias em issues usando:
 
 ### Risk Scoring
 
@@ -479,9 +488,9 @@ Cada tipo de sinal tem um peso:
 | `pod_restart` | 20 |
 | `pod_not_ready` | 20 |
 
-O risk score e a soma dos pesos das anomalias correlacionadas (maximo 100).
+O risk score é a soma dos pesos das anomalias correlacionadas (maximo 100).
 
-### Classificacao de Severidade
+### Classificação de Severidade
 
 | Risk Score | Severidade |
 |-----------|-----------|
@@ -492,7 +501,7 @@ O risk score e a soma dos pesos das anomalias correlacionadas (maximo 100).
 
 ### Agrupamento
 
-- Anomalias no **mesmo recurso** (deployment + namespace) dentro da **mesma janela temporal** sao agrupadas no mesmo Issue
+- Anomalias no **mesmo recurso** (deployment + namespace) dentro da **mesma janela temporal** são agrupadas no mesmo Issue
 - **Incident ID** deterministico: hash do recurso + tipo de sinal (evita duplicatas)
 
 ---
@@ -505,7 +514,7 @@ O `WatcherBridge` e o componente que conecta o servidor ChatCLI ao operator:
 - **Descoberta**: Localiza o servidor via Instance CRs (primeiro Instance com endpoint gRPC pronto)
 - **Dedup**: Hash SHA256 com bucket de minuto + TTL de 2 horas
 - **Poda**: Remove hashes expirados automaticamente (> 2h)
-- **Criacao**: Converte alertas em Anomaly CRs com nomes K8s validos
+- **Criação**: Converte alertas em Anomaly CRs com nomes K8s válidos
 
 ---
 
@@ -610,7 +619,7 @@ stringData:
 
 ## Status e Monitoramento
 
-### Verificar Instancias
+### Verificar Instâncias
 
 ```bash
 kubectl get instances
@@ -641,7 +650,7 @@ NAME                                           ISSUE                            
 api-gateway-pod-restart-1771276354-insight      api-gateway-pod-restart-1771276354      CLAUDEAI   0.87         1m
 ```
 
-### Verificar Planos de Remediacao
+### Verificar Planos de Remediação
 
 ```bash
 kubectl get remediationplans -A
@@ -672,10 +681,10 @@ cd operator
 # Build
 go build ./...
 
-# Testes (86 funcoes, 115 com subtests)
+# Testes (86 funções, 115 com subtests)
 go test ./... -v
 
-# Docker (deve ser construido a partir do root do repositorio)
+# Docker (deve ser construído a partir do root do repositório)
 docker build -f operator/Dockerfile -t myregistry/chatcli-operator:dev .
 
 # Instalar CRDs no cluster
@@ -687,7 +696,7 @@ make deploy IMG=myregistry/chatcli-operator:dev
 
 ---
 
-## Proximo Passo
+## Próximo Passo
 
 - [AIOps Platform (deep-dive arquitetura)](/docs/features/aiops-platform/)
 - [K8s Watcher (detalhes de coleta e budget)](/docs/features/k8s-watcher/)

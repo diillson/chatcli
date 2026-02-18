@@ -26,7 +26,7 @@ Este fluxo de trabalho usa uma abordagem "de cima para baixo": primeiro obtemos 
 O primeiro passo é obter um mapa do território. O modo `summary` é perfeito para isso, pois ele lista a estrutura de arquivos e diretórios sem enviar o conteúdo do código.
 
 {{< command >}}
-@file --mode=summary . > Descreva a arquitetura geral deste projeto com base na estrutura de arquivos. Quais parecem ser os componentes mais importantes?
+@file --mode=summary . > Descreva a arquitetura geral deste projeto com base na estrutura de arquivos. Quais parecém ser os componentes mais importantes?
 {{< /command >}}
 
 **O que esperar da IA:**

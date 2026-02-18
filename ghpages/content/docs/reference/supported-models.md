@@ -45,7 +45,7 @@ Os modelos da Anthropic são conhecidos por suas grandes janelas de contexto e e
 
 ## Google (Gemini)
 
-Os modelos Gemini do Google oferecem capacidades multimodais avançadas e grandes janelas de contexto.
+Os modelos Gemini do Google oferecém capacidades múltimodais avançadas e grandes janelas de contexto.
 
 | Nome do Modelo (ID) | Aliases | Nome de Exibição | Janela de Contexto |
 |:---------------------|:--------|:-----------------|:-------------------|

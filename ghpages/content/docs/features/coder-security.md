@@ -28,14 +28,14 @@ Quando uma ação cai no estado "Ask", você verá uma caixa de segurança:
 ```text
 [SECURITY CHECK]
 ------------------------------------------------------------
- [!] Acao requer aprovacao: @coder write
+ [!] Ação requer aprovação: @coder write
  Params: --file main.go --content ...
  Regra: Nenhuma regra encontrada para '@coder write'
 -------------------------------------------------------------
 Escolha:
   [y] Sim (uma vez)
   [a] ALLOW ALWAYS (Permitir '@coder write' sempre)
-  [n] Nao (pular)
+  [n] Não (pular)
   [d] DENY FOREVER (Bloquear '@coder write' sempre)
 
 > _
@@ -106,36 +106,36 @@ Comportamento:
 
 ## Matching com Word Boundary
 
-O sistema de policies usa **matching com word boundary**, garantindo que regras nao casem parcialmente com subcomandos diferentes:
+O sistema de policies usa **matching com word boundary**, garantindo que regras não casem parcialmente com subcomandos diferentes:
 
 | Regra | Comando | Resultado |
 |-------|---------|-----------|
 | `@coder read` = allow | `@coder read file.txt` | Permitido |
-| `@coder read` = allow | `@coder readlink /tmp` | **Nao casa** (vai para Ask) |
+| `@coder read` = allow | `@coder readlink /tmp` | **Não casa** (vai para Ask) |
 | `@coder read --file /etc` = deny | `@coder read --file /etc/passwd` | Deny (path-prefix match) |
 
 Isso significa que `@coder read` **nunca** vai liberar `@coder readlink` ou `@coder readwrite` acidentalmente.
 
 ---
 
-## Validacao de Comandos (50+ Padroes)
+## Validação de Comandos (50+ Padrões)
 
-Alem da governanca de policies, o `@coder exec` valida cada comando contra **50+ padroes regex** que detectam:
+Além da governança de policies, o `@coder exec` valida cada comando contra **50+ padrões regex** que detectam:
 
-- Destruicao de dados (`rm -rf`, `dd if=`, `mkfs`, `drop database`)
-- Execucao remota (`curl | bash`, `base64 | sh`)
-- Injecao de codigo (`python -c`, `eval`, `$(curl ...)`)
-- Substituicao de processos (`<(cmd)`, `>(cmd)`)
-- Manipulacao de kernel (`insmod`, `modprobe`, `rmmod`)
-- Evasao (`${IFS;cmd}`, `VAR=x; bash`)
+- Destruição de dados (`rm -rf`, `dd if=`, `mkfs`, `drop database`)
+- Execução remota (`curl | bash`, `base64 | sh`)
+- Injeção de código (`python -c`, `eval`, `$(curl ...)`)
+- Substituição de processos (`<(cmd)`, `>(cmd)`)
+- Manipulação de kernel (`insmod`, `modprobe`, `rmmod`)
+- Evasão (`${IFS;cmd}`, `VAR=x; bash`)
 
-Voce pode adicionar padroes customizados via `CHATCLI_AGENT_DENYLIST`:
+Você pode adicionar padrões customizados via `CHATCLI_AGENT_DENYLIST`:
 
 ```bash
 export CHATCLI_AGENT_DENYLIST="terraform destroy;kubectl delete namespace"
 ```
 
-> Para a lista completa de protecoes de seguranca do ChatCLI, veja a [documentacao de Seguranca e Hardening](/docs/features/security/).
+> Para a lista completa de proteções de segurança do ChatCLI, veja a [documentação de Segurança e Hardening](/docs/features/security/).
 
 ---
 
@@ -154,9 +154,9 @@ Você pode controlar o estilo e o banner do `/coder` via variáveis de ambiente:
 
 - `CHATCLI_CODER_UI`:
   - `full` (padrão)
-  - `minimal`
+  - `mínimal`
 - `CHATCLI_CODER_BANNER`:
   - `true` (padrão, mostra o cheat sheet)
   - `false`
 
-Essas configurações aparecem em `/status` e `/config`.
+Essas configurações aparecém em `/status` e `/config`.

@@ -26,10 +26,10 @@ A ordem de prioridade para as configurações é:
 | `LOG_FILE` | Caminho para o arquivo de log. Padrão: `$HOME/.chatcli/app.log`                                                                                   | `"$HOME/.chatcli/app.log"` |
 | `LOG_MAX_SIZE` | Tamanho máximo do arquivo de log antes da rotação. Aceita `100MB`, `50KB`, etc.                                                                   | `"100MB"`                  |
 | `HISTORY_MAX_SIZE` | Tamanho máximo do arquivo de histórico (`.chatcli_history`) antes da rotação.                                                                     | `"100MB"`                  |
-| `HISTORY_FILE` | Caminho personalizado para o arquivo de histórico (suporta `~`, hoje ele cria o historico onde executou o chatcli).                               | `".chatcli_history"`       |
+| `HISTORY_FILE` | Caminho personalizado para o arquivo de histórico (suporta `~`, hoje ele cria o histórico onde executou o chatcli).                               | `".chatcli_history"`       |
 | `CHATCLI_DOTENV`| Caminho personalizado para o seu arquivo `.env`.                                                                                                  | `".env"`                   |
 | `CHATCLI_IGNORE` | Caminho para arquivo de ignore (ex.: `.chatignore`). Quando definido, ele tem prioridade sobre o ignore do projeto/global.                        | `""`                       |
-| `CHATCLI_CODER_UI` | Estilo da UI do modo `/coder`: `full` (padrão) ou `minimal`.                                                                                    | `"full"`                   |
+| `CHATCLI_CODER_UI` | Estilo da UI do modo `/coder`: `full` (padrão) ou `mínimal`.                                                                                    | `"full"`                   |
 | `CHATCLI_CODER_BANNER` | Exibe o cheat sheet rápido do `/coder` na entrada da sessão (`true`/`false`).                                                            | `"true"`                   |
 
 ## Autenticação OAuth
@@ -55,7 +55,7 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 | :--- |:---------------------------------------------------------------------------------| :--- |
 | `OPENAI_API_KEY` | Sua chave de API secreta da OpenAI. Alternativa: use `/auth login openai-codex` para OAuth. | **Sim*** |
 | `OPENAI_MODEL` | O modelo a ser usado. Ex: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`.                | Não |
-| `OPENAI_ASSISTANT_MODEL` | O modelo a ser usado especificamente para a API de Assistentes.                  | Não |
+| `OPENAI_ASSISTANT_MODEL` | O modelo a ser usado específicamente para a API de Assistentes.                  | Não |
 | `OPENAI_USE_RESPONSES` | Define `true` para usar a API de `v1/responses` em vez de `v1/chat/completions`. | Não |
 | `OPENAI_MAX_TOKENS` | Define o maximo de tokens a ser utilizados na sessão (depende do modelo)         | Não
 
