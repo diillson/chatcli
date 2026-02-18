@@ -1,8 +1,27 @@
+# Namespace must exist before the Instance CR is applied.
+# Include it here so a single `kubectl apply -f` works on a fresh cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chatcli
+---
+# Secret with API keys (must exist before the Instance references it)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: chatcli-api-keys
+  namespace: chatcli
+type: Opaque
+stringData:
+  ANTHROPIC_API_KEY: "<your-anthropic-api-key>"
+  # OPENAI_API_KEY: "<your-openai-api-key>"
+  # GOOGLE_AI_API_KEY: "<your-google-api-key>"
+---
 apiVersion: platform.chatcli.io/v1alpha1
 kind: Instance
 metadata:
   name: chatcli-sample
-  namespace: default
+  namespace: chatcli
 spec:
   replicas: 1
   provider: CLAUDEAI
@@ -54,15 +73,3 @@ spec:
   #   size: 1Gi
   apiKeys:
     name: chatcli-api-keys
----
-# Secret with API keys (create before applying the Instance)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: chatcli-api-keys
-  namespace: default
-type: Opaque
-stringData:
-  ANTHROPIC_API_KEY: "<your-anthropic-api-key>"
-  # OPENAI_API_KEY: "<your-openai-api-key>"
-  # GOOGLE_AI_API_KEY: "<your-google-api-key>"

@@ -294,7 +294,7 @@ gRPC uses persistent HTTP/2 connections that pin to a single pod via kube-proxy,
 
 - **1 replica** (default): Standard ClusterIP Service
 - **Multiple replicas**: Headless Service (`ClusterIP: None`) is created automatically, enabling client-side round-robin via gRPC `dns:///` resolver
-- **Keepalive**: WatcherBridge pings every 10s (3s timeout) to detect dead pods quickly
+- **Keepalive**: WatcherBridge pings every 30s (5s timeout) to detect dead pods quickly. Server accepts pings with minimum interval of 20s (`EnforcementPolicy.MinTime`)
 - **Transition**: When scaling from 1 to 2+ replicas (or back), the operator deletes and recreates the Service automatically (ClusterIP is immutable in Kubernetes)
 
 ## Correlation Engine

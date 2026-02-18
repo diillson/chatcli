@@ -11,6 +11,9 @@ spec:
       {{- include "chatcli.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels:
         {{- include "chatcli.selectorLabels" . | nindent 8 }}
     spec:
@@ -68,10 +71,14 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "chatcli.fullname" . }}
+                optional: true
             - secretRef:
                 name: {{ include "chatcli.secretName" . }}
-          {{- with .Values.extraEnv }}
+                optional: true
           env:
+            - name: HOME
+              value: /home/chatcli
+          {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- $mounts := list }}
@@ -86,6 +93,7 @@ spec:
           {{- end }}
           {{- if and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem }}
           {{- $mounts = append $mounts (dict "name" "tmp" "mountPath" "/tmp") }}
+          {{- $mounts = append $mounts (dict "name" "data" "mountPath" "/home/chatcli/.chatcli") }}
           {{- end }}
           {{- if $mounts }}
           volumeMounts:
@@ -124,6 +132,9 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 100Mi
+        - name: data
+          emptyDir:
+            sizeLimit: 200Mi
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}

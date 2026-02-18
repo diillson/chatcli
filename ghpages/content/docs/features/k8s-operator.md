@@ -82,7 +82,7 @@ graph TD
 
 | Fase | Componente | O que Faz |
 |------|-----------|-----------|
-| **1. Detecção** | WatcherBridge | Consulta `GetAlerts` do servidor a cada 30s. Cria Anomaly CRs para cada alerta novo (dedup via SHA256 com bucket de minuto). |
+| **1. Detecção** | WatcherBridge | Consulta `GetAlerts` do servidor a cada 30s. Cria Anomaly CRs para cada alerta novo (dedup via SHA256 do tipo+recurso). |
 | **2. Correlação** | AnomalyReconciler + CorrelationEngine | Agrupa anomalias por recurso + janela temporal. Calcula risk score e severidade. Cria/atualiza Issue CRs. |
 | **3. Analise** | IssueReconciler + AIInsightReconciler | Cria AIInsight CR. Chama `AnalyzeIssue` RPC que envia contexto ao LLM. Retorna: análise, confiança, recomendações e ações sugeridas. |
 | **4. Remediação** | IssueReconciler | Cria RemediationPlan a partir de: **(a)** Runbook existente, **(b)** ações sugeridas pela IA (fallback automático), ou **(c)** escalona se nenhum disponível. |
@@ -108,7 +108,7 @@ stateDiagram-v2
 
 ## CRD: Instance
 
-O `Instance` gerencia instâncias do servidor ChatCLI no cluster. Substitui o antigo `ChatCLIInstance` (`chatcli.diillson.com`).
+O `Instance` gerencia instâncias do servidor ChatCLI no cluster.
 
 ### Especificação Completa
 
@@ -117,7 +117,7 @@ apiVersion: platform.chatcli.io/v1alpha1
 kind: Instance
 metadata:
   name: chatcli-prod
-  namespace: default
+  namespace: chatcli          # O namespace deve existir antes de criar o Instance
 spec:
   replicas: 1
   provider: CLAUDEAI       # OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA
@@ -236,7 +236,7 @@ O gRPC usa conexões HTTP/2 persistentes que fixam em um único pod via kube-pro
 
 - **1 réplica** (padrão): Service ClusterIP padrão
 - **Múltiplas réplicas**: Service headless (`ClusterIP: None`) é criado automaticamente, habilitando round-robin client-side via resolver `dns:///` do gRPC
-- **Keepalive**: WatcherBridge faz ping a cada 10s (timeout de 3s) para detectar pods inativos rapidamente
+- **Keepalive**: WatcherBridge faz ping a cada 30s (timeout de 5s) para detectar pods inativos rapidamente. O servidor aceita pings com intervalo mínimo de 20s (`EnforcementPolicy.MinTime`)
 - **Transição**: Ao escalar de 1 para 2+ réplicas (ou voltar), o operator deleta e recria o Service automaticamente (ClusterIP é imutável no Kubernetes)
 
 ### RBAC Automático
@@ -244,6 +244,29 @@ O gRPC usa conexões HTTP/2 persistentes que fixam em um único pod via kube-pro
 - **Single-namespace** (todos os targets no mesmo namespace): Cria `Role` + `RoleBinding`
 - **Multi-namespace** (targets em namespaces diferentes): Cria `ClusterRole` + `ClusterRoleBinding` automaticamente
 - Na deleção do CR, cluster-scoped resources são limpos pelo finalizer
+
+### Auto-Rollout em Mudanças de Configuração
+
+O operator monitora mudanças em ConfigMaps e Secrets referenciados pelo Instance e dispara rolling updates automaticamente via hash annotations no PodTemplate:
+
+| Annotation | Fonte | Quando Muda |
+|------------|-------|-------------|
+| `chatcli.io/watch-config-hash` | ConfigMap `<name>-watch-config` | Targets do watcher alterados |
+| `chatcli.io/configmap-hash` | ConfigMap `<name>` | Variáveis de ambiente atualizadas |
+| `chatcli.io/secret-hash` | Secret referenciado em `apiKeys.name` | API keys criadas ou atualizadas |
+| `chatcli.io/tls-hash` | Secret referenciado em `server.tls.secretName` | Certificados TLS renovados |
+
+Isso significa que:
+- Adicionar/remover targets no `watcher.targets` e aplicar o Instance causa rollout automático
+- Criar ou atualizar o Secret de API keys após o Instance já estar rodando causa rollout automático
+- Renovar certificados TLS causa rollout automático
+
+### Observação de Secrets e ConfigMaps
+
+O operator observa (`Watches`) Secrets no namespace do Instance. Quando um Secret referenciado em `apiKeys.name` ou `server.tls.secretName` é criado ou atualizado, o reconciler é acionado automaticamente — mesmo que o Secret não existisse quando o Instance foi criado.
+
+- **ConfigMap e Secret `envFrom`**: Marcados como `optional: true`, permitindo criar o Instance antes do Secret/ConfigMap
+- **Ordem flexível de deploy**: Namespace → Instance → Secret/ConfigMap (qualquer ordem após o namespace)
 
 ---
 
@@ -512,7 +535,7 @@ O `WatcherBridge` e o componente que conecta o servidor ChatCLI ao operator:
 
 - **Polling**: Consulta `GetAlerts` do servidor a cada 30 segundos
 - **Descoberta**: Localiza o servidor via Instance CRs (primeiro Instance com endpoint gRPC pronto)
-- **Dedup**: Hash SHA256 com bucket de minuto + TTL de 2 horas
+- **Dedup**: Hash SHA256 do tipo+deployment+namespace (sem componente temporal — um problema contínuo gera apenas uma Anomaly). TTL de 2 horas
 - **Poda**: Remove hashes expirados automaticamente (> 2h)
 - **Criação**: Converte alertas em Anomaly CRs com nomes K8s válidos
 

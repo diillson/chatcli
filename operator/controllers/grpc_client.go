@@ -71,10 +71,11 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
-	// Keepalive: detect dead connections quickly
+	// Keepalive: detect dead connections without flooding the server.
+	// Server EnforcementPolicy.MinTime is 20s, so Time must be >= 20s.
 	dialOpts = append(dialOpts, grpc.WithKeepaliveParams(keepalive.ClientParameters{
-		Time:                10 * time.Second, // ping every 10s if no activity
-		Timeout:             3 * time.Second,  // wait 3s for pong before considering dead
+		Time:                30 * time.Second, // ping every 30s if no activity
+		Timeout:             5 * time.Second,  // wait 5s for pong before considering dead
 		PermitWithoutStream: true,             // ping even without active RPCs
 	}))
 

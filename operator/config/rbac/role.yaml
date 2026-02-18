@@ -1,4 +1,12 @@
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: chatcli-system
+  labels:
+    app.kubernetes.io/name: chatcli-operator
+    app.kubernetes.io/managed-by: kustomize
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: chatcli-operator
@@ -149,6 +157,47 @@ rules:
       - get
       - list
       - watch
+  # Watcher read-only resources (needed to grant via ClusterRole)
+  - apiGroups:
+      - ""
+    resources:
+      - endpoints
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - statefulsets
+      - daemonsets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - metrics.k8s.io
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
   - apiGroups:
       - ""
     resources:

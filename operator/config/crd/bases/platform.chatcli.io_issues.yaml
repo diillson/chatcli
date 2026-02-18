@@ -69,6 +69,7 @@ spec:
                     - events
                     - logs
                     - webhook
+                    - watcher
                 resource:
                   description: Reference to the Kubernetes resource affected.
                   type: object

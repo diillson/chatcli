@@ -82,6 +82,29 @@ spec:
                   type: array
                   items:
                     type: string
+                suggestedActions:
+                  description: Concrete remediation actions suggested by the AI.
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - action
+                    properties:
+                      name:
+                        description: Human-readable step name.
+                        type: string
+                      action:
+                        description: Remediation action type.
+                        type: string
+                      description:
+                        description: Why this action is recommended.
+                        type: string
+                      params:
+                        description: Action-specific parameters.
+                        type: object
+                        additionalProperties:
+                          type: string
                 generatedAt:
                   description: Timestamp when the insight was generated.
                   type: string
