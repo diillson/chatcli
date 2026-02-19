@@ -65,8 +65,8 @@ type DedupInvalidator interface {
 // IssueReconciler reconciles Issue objects.
 type IssueReconciler struct {
 	client.Client
-	Scheme            *runtime.Scheme
-	DedupInvalidator  DedupInvalidator // optional: watcher bridge for dedup invalidation
+	Scheme           *runtime.Scheme
+	DedupInvalidator DedupInvalidator // optional: watcher bridge for dedup invalidation
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=issues,verbs=get;list;watch;create;update;patch;delete

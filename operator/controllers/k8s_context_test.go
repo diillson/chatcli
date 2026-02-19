@@ -155,7 +155,7 @@ func TestBuildContext_RecentEvents(t *testing.T) {
 		Reason:         "FailedScheduling",
 		Message:        "0/3 nodes available",
 		Count:          4,
-		LastTimestamp:   metav1.Now(),
+		LastTimestamp:  metav1.Now(),
 	}
 
 	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(deploy, event).Build()
@@ -291,7 +291,7 @@ func TestBuildContext_Truncation(t *testing.T) {
 			Reason:         "SomeReason",
 			Message:        strings.Repeat("very long message ", 20),
 			Count:          1,
-			LastTimestamp:   metav1.Now(),
+			LastTimestamp:  metav1.Now(),
 		})
 	}
 
