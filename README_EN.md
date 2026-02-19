@@ -1166,7 +1166,7 @@ With multiple targets, the **MultiSummarizer** manages LLM context automatically
 
 ### K8s Operator — AIOps Platform
 
-The **ChatCLI Operator** goes beyond instance management. It implements a **full autonomous AIOps platform** with 6 CRDs (`platform.chatcli.io/v1alpha1`):
+The **ChatCLI Operator** goes beyond instance management. It implements a **full autonomous AIOps platform** with 7 CRDs (`platform.chatcli.io/v1alpha1`):
 
 | CRD | Description |
 |-----|-------------|
@@ -1174,12 +1174,13 @@ The **ChatCLI Operator** goes beyond instance management. It implements a **full
 | **Anomaly** | Raw signal detected by K8s Watcher (restarts, OOM, deploy failures) |
 | **Issue** | Correlated incident grouping multiple anomalies |
 | **AIInsight** | AI-generated root cause analysis with enriched K8s context |
-| **RemediationPlan** | Concrete actions to fix the issue (scale, restart, rollback) |
+| **RemediationPlan** | Concrete actions to fix the issue (runbook-based or agentic AI-driven) |
 | **Runbook** | Operational procedures (manual or AI auto-generated) |
+| **PostMortem** | Auto-generated incident report after agentic resolution |
 
-**Autonomous pipeline**: Detection → Correlation → AI Analysis (with K8s context) → Runbook-first → Remediation → Resolution
+**Autonomous pipeline**: Detection → Correlation → AI Analysis (with K8s context) → Runbook-first → Remediation (including agentic mode) → Resolution → PostMortem
 
-The AI receives full cluster context (deployment status, pods, events, revision history) and returns structured actions materialized as **reusable Runbooks**. Manual Runbooks take precedence; when absent, the AI auto-generates Runbooks. Retries trigger re-analysis with previous failure context for strategy escalation.
+The AI receives full cluster context (deployment status, pods, events, revision history) and returns structured actions. In **agentic mode**, the AI acts as an agent with K8s skills — observing, deciding, and acting iteratively (observe-decide-act loop), saving history at each step. On resolution, it auto-generates a **PostMortem** (root cause, timeline, lessons learned) and a **reusable Runbook** for future incidents.
 
 > Full documentation at [diillson.github.io/chatcli/docs/features/k8s-operator](https://diillson.github.io/chatcli/docs/features/k8s-operator/)
 > AIOps deep-dive at [diillson.github.io/chatcli/docs/features/aiops-platform](https://diillson.github.io/chatcli/docs/features/aiops-platform/)
@@ -1198,8 +1199,8 @@ The project has a modular structure organized into packages:
 -  client/remote : gRPC client implementing the LLMClient interface.
 -  k8s : Kubernetes Watcher (collectors, store, summarizer).
 -  proto : Protobuf service definitions (`chatcli.proto`).
--  operator : Kubernetes Operator — AIOps platform with 6 CRDs and autonomous pipeline.
-    -  operator/api/v1alpha1 : CRD types (Instance, Anomaly, Issue, AIInsight, RemediationPlan, Runbook).
+-  operator : Kubernetes Operator — AIOps platform with 7 CRDs and autonomous pipeline.
+    -  operator/api/v1alpha1 : CRD types (Instance, Anomaly, Issue, AIInsight, RemediationPlan, Runbook, PostMortem).
     -  operator/controllers : Reconcilers, correlation engine, WatcherBridge, gRPC client.
 -  utils : Contains auxiliary functions for files, Git, shell, HTTP, etc.
 -  models : Defines data structures.

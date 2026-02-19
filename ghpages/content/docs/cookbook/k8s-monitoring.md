@@ -408,6 +408,12 @@ kubectl get aiinsights -A
 
 # Verificar remediações
 kubectl get remediationplans -A
+
+# Verificar runbooks (manuais e auto-gerados)
+kubectl get runbooks -A
+
+# Verificar post-mortems (gerados após resolução agêntica)
+kubectl get postmortems -A
 ```
 
 ### Passo 4: Fluxo Autônomo em Acao
@@ -423,13 +429,21 @@ Quando um pod comeca a crashar:
    → chama LLM com contexto enriquecido → retorna: "restart + scale to 4"
 6. IssueReconciler busca Runbook manual (tiered matching)
    → se não encontra, gera Runbook auto da IA (reutilizável)
-   → cria RemediationPlan com 2 ações
-7. RemediationReconciler executa: restart + scale
+   → se nenhum Runbook e nenhuma ação IA → modo Agêntico
+   → cria RemediationPlan com ações
+7. RemediationReconciler executa:
+   → Modo normal: executa ações do plano (restart, scale, etc.)
+   → Modo agêntico: loop observe-decide-act (IA decide cada passo)
+     - Cada reconcile = 1 step (max 10 steps, timeout 10min)
+     - IA observa estado K8s → decide ação → executa → próximo step
+     - Ações: Scale, Restart, Rollback, PatchConfig, AdjustResources, DeletePod
 8. Issue → Resolved (dedup invalidado para detecção de recorrência)
+   → Se modo agêntico: PostMortem CR auto-gerado (timeline, root cause, lições)
+   → Runbook gerado automaticamente dos steps agênticos bem-sucedidos
    Se falhar → re-análise com contexto de falha → estratégia diferente
 ```
 
-Tudo acontece automaticamente sem intervenção humana. Runbooks auto-gerados são reutilizados para futuras ocorrências do mesmo tipo.
+Tudo acontece automaticamente sem intervenção humana. Runbooks auto-gerados são reutilizados para futuras ocorrências do mesmo tipo. No modo agêntico, a IA atua como agente autônomo com "skills" K8s, e ao resolver o problema gera um PostMortem CR com timeline completa e um Runbook reutilizável para futuras ocorrências.
 
 ### Passo 5: (Opcional) Adicionar Runbooks
 
@@ -459,7 +473,7 @@ spec:
   maxAttempts: 2
 ```
 
-Runbooks manuais têm prioridade. Quando não há Runbook manual, a IA gera automaticamente um Runbook CR reutilizável e cria o plano de remediação a partir dele.
+**Prioridade de remediação:** Runbook manual > Runbook auto-gerado > **Remediação agêntica** > Escalação. Quando não há Runbook manual, a IA gera automaticamente um Runbook CR reutilizável. Se nem Runbook nem ações de IA estão disponíveis, o operator entra em **modo agêntico**: a IA atua como agente autônomo num loop observe-decide-act, e ao resolver gera um PostMortem CR e um Runbook reutilizável.
 
 ---
 
@@ -488,5 +502,6 @@ Runbooks manuais têm prioridade. Quando não há Runbook manual, a IA gera auto
 - [ ] Verificar issues sendo correlacionados: `kubectl get issues -A`
 - [ ] Verificar IA analisando: `kubectl get aiinsights -A`
 - [ ] Verificar remediações executando: `kubectl get remediationplans -A`
+- [ ] Verificar post-mortems gerados: `kubectl get postmortems -A`
 - [ ] (Opcional) Criar Runbooks para cenários específicos
 - [ ] Monitorar métricas do operator via Prometheus

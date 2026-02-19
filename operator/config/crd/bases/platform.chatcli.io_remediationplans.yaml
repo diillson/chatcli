@@ -51,7 +51,6 @@ spec:
                 - issueRef
                 - attempt
                 - strategy
-                - actions
               properties:
                 issueRef:
                   description: Reference to the Issue being remediated.
@@ -84,6 +83,8 @@ spec:
                           - RollbackDeployment
                           - RestartDeployment
                           - PatchConfig
+                          - AdjustResources
+                          - DeletePod
                           - Custom
                       params:
                         description: Key-value parameters for the action.
@@ -95,6 +96,51 @@ spec:
                   type: array
                   items:
                     type: string
+                agenticMode:
+                  description: Enables AI-driven step-by-step remediation.
+                  type: boolean
+                agenticMaxSteps:
+                  description: Maximum number of agentic steps before forced failure.
+                  type: integer
+                  format: int32
+                  default: 10
+                agenticHistory:
+                  description: Conversation history for agentic remediation.
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - stepNumber
+                      - aiMessage
+                      - timestamp
+                    properties:
+                      stepNumber:
+                        type: integer
+                        format: int32
+                      aiMessage:
+                        type: string
+                      action:
+                        type: object
+                        properties:
+                          type:
+                            type: string
+                            enum:
+                              - ScaleDeployment
+                              - RollbackDeployment
+                              - RestartDeployment
+                              - PatchConfig
+                              - AdjustResources
+                              - DeletePod
+                              - Custom
+                          params:
+                            type: object
+                            additionalProperties:
+                              type: string
+                      observation:
+                        type: string
+                      timestamp:
+                        type: string
+                        format: date-time
             status:
               description: RemediationPlanStatus defines the observed state of a RemediationPlan.
               type: object
@@ -124,6 +170,14 @@ spec:
                 result:
                   description: Human-readable result summary.
                   type: string
+                agenticStepCount:
+                  description: Number of agentic steps completed.
+                  type: integer
+                  format: int32
+                agenticStartedAt:
+                  description: When the agentic loop first started.
+                  type: string
+                  format: date-time
                 evidence:
                   description: Evidence collected during remediation.
                   type: array

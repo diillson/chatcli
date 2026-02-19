@@ -138,6 +138,27 @@ rules:
       - get
       - update
       - patch
+  # PostMortem CRD
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - postmortems
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - postmortems/status
+    verbs:
+      - get
+      - update
+      - patch
   # Owned resources (Instance controller)
   - apiGroups:
       - apps
@@ -224,7 +245,7 @@ rules:
       - get
       - list
       - watch
-  # Pods and logs (watcher, remediation restart)
+  # Pods and logs (watcher, remediation restart, pod deletion)
   - apiGroups:
       - ""
     resources:
@@ -234,6 +255,7 @@ rules:
       - get
       - list
       - watch
+      - delete
   # ConfigMaps — no delete for remediation safety
   - apiGroups:
       - ""

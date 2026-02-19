@@ -10,41 +10,46 @@ The ChatCLI Operator goes beyond simple instance management. It implements a **f
 
 ```
                          K8s Cluster
-  ┌──────────────────────────────────────────────────────────────┐
-  │                                                              │
-  │   ChatCLI Server (gRPC)          Operator                   │
-  │   ┌──────────────┐         ┌────────────────────────┐       │
-  │   │ K8s Watcher  │◄──gRPC──│ WatcherBridge          │       │
-  │   │ (collectors) │         │ (polls GetAlerts)       │       │
-  │   │              │         └────────┬───────────────┘       │
-  │   │ AnalyzeIssue │                  │ creates               │
-  │   │ (LLM call)   │                  ▼                       │
-  │   └──────┬───────┘         ┌────────────────┐               │
-  │          │                 │ Anomaly CR     │               │
-  │          │                 └───────┬────────┘               │
-  │          │                         │ AnomalyReconciler      │
-  │          │                         ▼                        │
-  │          │                 ┌────────────────┐               │
-  │          │                 │ Issue CR       │               │
-  │          │                 │ (correlation)  │               │
-  │          │                 └───────┬────────┘               │
-  │          │                         │ IssueReconciler        │
-  │          │                         ▼                        │
-  │          │                 ┌────────────────┐               │
-  │          ◄────── gRPC ─────│ AIInsight CR   │               │
-  │          │   AnalyzeIssue  │ (AI analysis)  │               │
-  │          │                 └───────┬────────┘               │
-  │          │                         │                        │
-  │          │                         ▼                        │
-  │          │                 ┌────────────────────┐           │
-  │          │                 │ RemediationPlan CR │           │
-  │          │                 │ (auto-generated)   │           │
-  │          │                 └────────────────────┘           │
-  │          │                         │ RemediationReconciler  │
-  │          │                         ▼                        │
-  │          │                  Scale / Restart / Rollback      │
-  │          │                  / PatchConfig                   │
-  └──────────┴──────────────────────────────────────────────────┘
+  ┌───────────────────────────────────────────────────────────────────┐
+  │                                                                   │
+  │   ChatCLI Server (gRPC)            Operator                      │
+  │   ┌────────────────┐         ┌────────────────────────┐          │
+  │   │ K8s Watcher    │◄──gRPC──│ WatcherBridge          │          │
+  │   │ (collectors)   │         │ (polls GetAlerts)       │          │
+  │   │                │         └────────┬───────────────┘          │
+  │   │ AnalyzeIssue   │                  │ creates                  │
+  │   │ (LLM call)     │                  ▼                          │
+  │   │                │         ┌────────────────┐                  │
+  │   │ AgenticStep    │         │ Anomaly CR     │                  │
+  │   │ (agentic loop) │         └───────┬────────┘                  │
+  │   └──────┬─────────┘                 │ AnomalyReconciler         │
+  │          │                           ▼                           │
+  │          │                   ┌────────────────┐                  │
+  │          │                   │ Issue CR       │                  │
+  │          │                   │ (correlation)  │                  │
+  │          │                   └───────┬────────┘                  │
+  │          │                           │ IssueReconciler           │
+  │          │                           ▼                           │
+  │          │                   ┌────────────────┐                  │
+  │          ◄─── AnalyzeIssue ──│ AIInsight CR   │                  │
+  │          │                   └───────┬────────┘                  │
+  │          │                           │                           │
+  │          │                           ▼                           │
+  │          │                   ┌────────────────────┐              │
+  │          ◄─── AgenticStep ───│ RemediationPlan CR │              │
+  │          │    (loop)         │ (runbook or agentic)│              │
+  │          │                   └────────┬───────────┘              │
+  │          │                            │ RemediationReconciler    │
+  │          │                            ▼                          │
+  │          │            Scale / Restart / Rollback / PatchConfig   │
+  │          │            / AdjustResources / DeletePod              │
+  │          │                            │                          │
+  │          │                            ▼ (on agentic resolution)  │
+  │          │                   ┌────────────────┐                  │
+  │          │                   │ PostMortem CR  │                  │
+  │          │                   │ (auto-generated)│                  │
+  │          │                   └────────────────┘                  │
+  └──────────┴───────────────────────────────────────────────────────┘
 ```
 
 ## CRDs (API Group: `platform.chatcli.io/v1alpha1`)
@@ -55,8 +60,9 @@ The ChatCLI Operator goes beyond simple instance management. It implements a **f
 | **Anomaly** | `anom` | Raw signal from K8s watcher (pod restarts, OOM, deploy failures) |
 | **Issue** | `iss` | Correlated incident grouping multiple anomalies |
 | **AIInsight** | `ai` | AI-generated root cause analysis and suggested actions |
-| **RemediationPlan** | `rp` | Concrete actions to fix the issue (scale, restart, rollback) |
+| **RemediationPlan** | `rp` | Concrete actions to fix the issue (runbook-based or agentic AI-driven) |
 | **Runbook** | `rb` | Optional manual operational procedures (AI actions used as fallback) |
+| **PostMortem** | `pm` | Auto-generated incident report after agentic resolution |
 
 ## Quick Start
 
@@ -96,28 +102,44 @@ The operator implements a fully autonomous pipeline:
 4. REMEDIATION   Runbook-first flow:
                    a) Matching manual Runbook (tiered: SignalType+Severity+Kind,
                       then Severity+Kind) — takes precedence
-                   b) Auto-generate Runbook from AI actions (reusable for future) — OR
-                   c) Escalates if neither available
+                   b) Auto-generate Runbook from AI actions (reusable for future)
+                   c) Agentic AI remediation (no runbook/AI actions available):
+                      AI drives remediation step-by-step via observe-decide-act loop
 
 5. EXECUTION     RemediationReconciler executes actions:
+                   Standard mode: all actions executed sequentially
+                   Agentic mode:  AI decides each action, observes result, decides next
+                   Supported actions:
                    - ScaleDeployment (adjust replicas)
                    - RestartDeployment (rollout restart)
-                   - RollbackDeployment (undo rollout)
+                   - RollbackDeployment (undo rollout — previous/healthy/specific rev)
                    - PatchConfig (update ConfigMap)
+                   - AdjustResources (change CPU/memory requests/limits)
+                   - DeletePod (remove most-unhealthy pod)
 
 6. RESOLUTION    On success → Issue resolved, dedup entries invalidated
                  On failure → Re-analysis with failure context (different strategy)
                    → up to maxAttempts → Escalate
+
+7. POSTMORTEM    On agentic resolution → PostMortem CR auto-generated:
+                   Timeline, root cause, impact, actions executed,
+                   lessons learned, prevention actions
+                 Reusable Runbook also generated from successful agentic steps
 ```
 
 ### Issue State Machine
 
 ```
 Detected → Analyzing → Remediating → Resolved
-                │  ↑         │
-                │  └─────────┘ Retry (re-analysis with failure context)
+                │  ↑         │             │
+                │  └─────────┘ Retry       └──→ PostMortem (agentic)
                 │            │
-                └──→ Escalated ←──┘ (max attempts or no actions)
+                └──→ Escalated ←──┘ (max attempts exhausted)
+
+Analyzing → Remediating via:
+  - Manual Runbook match
+  - AI-generated Runbook
+  - Agentic AI mode (no runbook/AI actions → AI drives step-by-step)
 ```
 
 ## CRD Examples
@@ -281,6 +303,103 @@ spec:
   maxAttempts: 3
 ```
 
+### RemediationPlan (Agentic Mode)
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: RemediationPlan
+metadata:
+  name: api-gateway-pod-restart-plan-1
+  namespace: production
+spec:
+  issueRef:
+    name: api-gateway-pod-restart-1771276354
+  attempt: 1
+  strategy: "Agentic AI remediation"
+  agenticMode: true
+  agenticMaxSteps: 10
+  agenticHistory:
+    - stepNumber: 1
+      aiMessage: "High restart count with OOMKilled. Scaling up to reduce memory pressure."
+      action:
+        type: ScaleDeployment
+        params:
+          replicas: "5"
+      observation: "SUCCESS: ScaleDeployment executed successfully"
+      timestamp: "2026-02-16T10:31:00Z"
+    - stepNumber: 2
+      aiMessage: "Pods still restarting. Adjusting memory limits to 1Gi."
+      action:
+        type: AdjustResources
+        params:
+          memory_limit: "1Gi"
+          memory_request: "512Mi"
+      observation: "SUCCESS: AdjustResources executed successfully"
+      timestamp: "2026-02-16T10:31:35Z"
+    - stepNumber: 3
+      aiMessage: "All pods running stable. Issue resolved."
+      timestamp: "2026-02-16T10:32:10Z"
+status:
+  state: Completed
+  agenticStepCount: 3
+```
+
+### PostMortem (Auto-generated)
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: PostMortem
+metadata:
+  name: pm-api-gateway-pod-restart-1771276354
+  namespace: production
+spec:
+  issueRef:
+    name: api-gateway-pod-restart-1771276354
+  resource:
+    kind: Deployment
+    name: api-gateway
+    namespace: production
+  severity: high
+status:
+  state: Open
+  summary: "OOMKilled containers caused cascading restarts on api-gateway"
+  rootCause: "Memory limit (512Mi) insufficient for current workload pattern"
+  impact: "Service degradation for 5 minutes, 30% error rate increase"
+  timeline:
+    - timestamp: "2026-02-16T10:30:00Z"
+      type: detected
+      detail: "Issue detected: pod_restart on api-gateway"
+    - timestamp: "2026-02-16T10:31:00Z"
+      type: action_executed
+      detail: "ScaleDeployment to 5 replicas"
+    - timestamp: "2026-02-16T10:31:35Z"
+      type: action_executed
+      detail: "AdjustResources memory_limit=1Gi"
+    - timestamp: "2026-02-16T10:32:10Z"
+      type: resolved
+      detail: "All pods stable, issue resolved"
+  actionsExecuted:
+    - action: ScaleDeployment
+      params:
+        replicas: "5"
+      result: success
+      timestamp: "2026-02-16T10:31:00Z"
+    - action: AdjustResources
+      params:
+        memory_limit: "1Gi"
+        memory_request: "512Mi"
+      result: success
+      timestamp: "2026-02-16T10:31:35Z"
+  lessonsLearned:
+    - "Memory limits should account for peak workload patterns"
+    - "Set up HPA to auto-scale on memory pressure"
+  preventionActions:
+    - "Configure HPA with min 3 replicas for api-gateway"
+    - "Set memory limit to 1Gi across all environments"
+  duration: "2m10s"
+  generatedAt: "2026-02-16T10:32:10Z"
+```
+
 ## Resources Created per Instance
 
 | Resource | Name | Description |
@@ -311,14 +430,16 @@ The operator correlates anomalies into issues using:
 - **Severity classification**: Based on risk score (Critical >= 80, High >= 60, Medium >= 40, Low < 40)
 - **Incident ID**: Deterministic hash from resource + signal type for dedup
 
-## Runbook-First Remediation
+## Remediation Strategy
 
-The operator uses a Runbook-first approach where all remediation goes through Runbook CRs:
+The operator uses a tiered remediation approach:
 
 1. **Manual Runbook match**: Tiered matching — first by `SignalType + Severity + ResourceKind`, then by `Severity + ResourceKind`
 2. **Auto-generated Runbook**: If no manual Runbook exists, AI suggested actions are materialized as a reusable Runbook CR (labeled `platform.chatcli.io/auto-generated=true`)
-3. **RemediationPlan**: Always created from a Runbook (manual or auto-generated)
-4. **Reuse**: Auto-generated Runbooks are reused for future issues matching the same trigger
+3. **Agentic AI Remediation**: If neither Runbook nor AI actions are available, the operator creates an **agentic plan** — the AI drives remediation step-by-step in an observe-decide-act loop (each reconcile = 1 step, max 10 steps, 10min timeout)
+4. **Escalation**: Only when agentic mode also fails after max attempts
+
+**On agentic resolution**: The operator auto-generates a **PostMortem CR** (timeline, root cause, impact, lessons learned) and a **reusable Runbook** from the successful agentic steps.
 
 **K8s Context Enrichment**: The AI receives full cluster context via `KubernetesContextBuilder`:
 - Deployment status (replicas, conditions, images)
@@ -328,9 +449,9 @@ The operator uses a Runbook-first approach where all remediation goes through Ru
 
 **Retry with Strategy Escalation**: When remediation fails, the operator triggers AI re-analysis with failure evidence from previous attempts. The AI is instructed to suggest a fundamentally different strategy.
 
-**Supported actions**: `ScaleDeployment`, `RestartDeployment`, `RollbackDeployment`, `PatchConfig`, `Custom` (blocked by safety checks)
+**Supported actions**: `ScaleDeployment`, `RestartDeployment`, `RollbackDeployment` (previous/healthy/specific revision), `PatchConfig`, `AdjustResources` (CPU/memory), `DeletePod` (most-unhealthy), `Custom` (blocked by safety checks)
 
-Priority: **Manual Runbook > Auto-generated Runbook > Escalation**
+Priority: **Manual Runbook > Auto-generated Runbook > Agentic AI > Escalation**
 
 ## Development
 
@@ -340,7 +461,7 @@ cd operator
 # Build
 go build ./...
 
-# Test (86 test functions, 115 with subtests)
+# Test (96 test functions, 125 with subtests)
 go test ./... -v
 
 # Docker (must be built from repo root due to go.mod replace directive)
@@ -359,9 +480,10 @@ make deploy IMG=ghcr.io/diillson/chatcli-operator:latest
 |-----------|-------|----------------|
 | InstanceReconciler | 15 | CRUD, watcher, persistence, replicas, RBAC, deletion |
 | AnomalyReconciler | 4 | Creation, correlation, existing issue attachment |
-| IssueReconciler | 10 | State machine (Detected→Analyzing→Remediating→Resolved/Escalated), AI fallback, retry |
-| RemediationReconciler | 10 | All action types, safety checks, custom action blocking |
+| IssueReconciler | 12 | State machine, AI fallback, retry, agentic plan creation, PostMortem generation |
+| RemediationReconciler | 16 | All action types, safety checks, agentic loop (first step, resolved, max steps, timeout, action failed, observation) |
 | AIInsightReconciler | 12 | Server connectivity, RPC mock, analysis parsing, withAuth, ConnectionOpts |
+| PostMortemReconciler | 2 | State initialization, terminal state |
 | WatcherBridge | 22 | Alert mapping, dedup, hash, pruning, anomaly creation, TLS/token buildConnectionOpts |
 | CorrelationEngine | 4 | Risk scoring, severity, incident ID, related anomalies |
 | Pipeline (E2E) | 3 | Full flow: Anomaly→Issue→Insight→Plan→Resolved, escalation, correlation |

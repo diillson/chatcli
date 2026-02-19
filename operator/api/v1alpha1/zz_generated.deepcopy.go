@@ -430,6 +430,25 @@ func (in *EvidenceItem) DeepCopy() *EvidenceItem {
 	return out
 }
 
+func (in *AgenticStep) DeepCopyInto(out *AgenticStep) {
+	*out = *in
+	if in.Action != nil {
+		in, out := &in.Action, &out.Action
+		*out = new(RemediationAction)
+		(*in).DeepCopyInto(*out)
+	}
+	in.Timestamp.DeepCopyInto(&out.Timestamp)
+}
+
+func (in *AgenticStep) DeepCopy() *AgenticStep {
+	if in == nil {
+		return nil
+	}
+	out := new(AgenticStep)
+	in.DeepCopyInto(out)
+	return out
+}
+
 func (in *RemediationPlanSpec) DeepCopyInto(out *RemediationPlanSpec) {
 	*out = *in
 	out.IssueRef = in.IssueRef
@@ -444,6 +463,13 @@ func (in *RemediationPlanSpec) DeepCopyInto(out *RemediationPlanSpec) {
 		in, out := &in.SafetyConstraints, &out.SafetyConstraints
 		*out = make([]string, len(*in))
 		copy(*out, *in)
+	}
+	if in.AgenticHistory != nil {
+		in, out := &in.AgenticHistory, &out.AgenticHistory
+		*out = make([]AgenticStep, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 }
 
@@ -462,6 +488,10 @@ func (in *RemediationPlanStatus) DeepCopyInto(out *RemediationPlanStatus) {
 		in, out := &in.StartedAt, &out.StartedAt
 		*out = (*in).DeepCopy()
 	}
+	if in.ActionsCompletedAt != nil {
+		in, out := &in.ActionsCompletedAt, &out.ActionsCompletedAt
+		*out = (*in).DeepCopy()
+	}
 	if in.CompletedAt != nil {
 		in, out := &in.CompletedAt, &out.CompletedAt
 		*out = (*in).DeepCopy()
@@ -472,6 +502,10 @@ func (in *RemediationPlanStatus) DeepCopyInto(out *RemediationPlanStatus) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.AgenticStartedAt != nil {
+		in, out := &in.AgenticStartedAt, &out.AgenticStartedAt
+		*out = (*in).DeepCopy()
 	}
 }
 
@@ -817,6 +851,156 @@ func (in *AIInsightList) DeepCopy() *AIInsightList {
 }
 
 func (in *AIInsightList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// --- PostMortem DeepCopy ---
+
+func (in *TimelineEvent) DeepCopyInto(out *TimelineEvent) {
+	*out = *in
+	in.Timestamp.DeepCopyInto(&out.Timestamp)
+}
+
+func (in *TimelineEvent) DeepCopy() *TimelineEvent {
+	if in == nil {
+		return nil
+	}
+	out := new(TimelineEvent)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ActionRecord) DeepCopyInto(out *ActionRecord) {
+	*out = *in
+	if in.Params != nil {
+		in, out := &in.Params, &out.Params
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+	in.Timestamp.DeepCopyInto(&out.Timestamp)
+}
+
+func (in *ActionRecord) DeepCopy() *ActionRecord {
+	if in == nil {
+		return nil
+	}
+	out := new(ActionRecord)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *PostMortemSpec) DeepCopyInto(out *PostMortemSpec) {
+	*out = *in
+	out.IssueRef = in.IssueRef
+	out.Resource = in.Resource
+}
+
+func (in *PostMortemSpec) DeepCopy() *PostMortemSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(PostMortemSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *PostMortemStatus) DeepCopyInto(out *PostMortemStatus) {
+	*out = *in
+	if in.Timeline != nil {
+		in, out := &in.Timeline, &out.Timeline
+		*out = make([]TimelineEvent, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.ActionsExecuted != nil {
+		in, out := &in.ActionsExecuted, &out.ActionsExecuted
+		*out = make([]ActionRecord, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.LessonsLearned != nil {
+		in, out := &in.LessonsLearned, &out.LessonsLearned
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.PreventionActions != nil {
+		in, out := &in.PreventionActions, &out.PreventionActions
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.GeneratedAt != nil {
+		in, out := &in.GeneratedAt, &out.GeneratedAt
+		*out = (*in).DeepCopy()
+	}
+	if in.ReviewedAt != nil {
+		in, out := &in.ReviewedAt, &out.ReviewedAt
+		*out = (*in).DeepCopy()
+	}
+}
+
+func (in *PostMortemStatus) DeepCopy() *PostMortemStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(PostMortemStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *PostMortem) DeepCopyInto(out *PostMortem) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *PostMortem) DeepCopy() *PostMortem {
+	if in == nil {
+		return nil
+	}
+	out := new(PostMortem)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *PostMortem) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *PostMortemList) DeepCopyInto(out *PostMortemList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]PostMortem, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *PostMortemList) DeepCopy() *PostMortemList {
+	if in == nil {
+		return nil
+	}
+	out := new(PostMortemList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *PostMortemList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}

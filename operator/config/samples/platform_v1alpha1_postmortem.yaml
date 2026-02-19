@@ -1,0 +1,35 @@
+apiVersion: platform.chatcli.io/v1alpha1
+kind: PostMortem
+metadata:
+  name: issue-oom-backend-pm
+  namespace: default
+  labels:
+    platform.chatcli.io/issue: issue-oom-backend
+spec:
+  issueRef: issue-oom-backend
+  summary: "Backend pods hit OOM due to memory leak in cache layer. Agentic remediation adjusted memory limits and restarted affected pods."
+  rootCause: "Unbounded in-memory cache growth in backend service caused containers to exceed memory limits under sustained traffic."
+  impact: "2 of 3 backend pods were OOMKilled, causing degraded API response times for ~8 minutes."
+  timeline:
+    - timestamp: "2026-02-19T10:00:00Z"
+      event: "Anomaly detected: HighRestartCount on backend pods"
+    - timestamp: "2026-02-19T10:00:15Z"
+      event: "Issue created with severity Medium, risk score 50"
+    - timestamp: "2026-02-19T10:00:30Z"
+      event: "AI analysis: OOMKilled due to memory pressure"
+    - timestamp: "2026-02-19T10:01:00Z"
+      event: "Agentic step 1: AdjustResources — memory limit 512Mi→1Gi"
+    - timestamp: "2026-02-19T10:01:30Z"
+      event: "Agentic step 2: RestartDeployment — rolling restart"
+    - timestamp: "2026-02-19T10:02:00Z"
+      event: "Agentic step 3: Observation — all pods Running, no OOMKill"
+    - timestamp: "2026-02-19T10:02:00Z"
+      event: "Issue resolved"
+  lessonsLearned:
+    - "Set memory requests closer to observed usage to catch leaks earlier"
+    - "Add cache eviction policy with max-size bounds"
+    - "Configure HPA memory-based scaling as secondary safety net"
+  preventionActions:
+    - "Add cache size metrics and alerts for > 80% of memory limit"
+    - "Implement LRU eviction in cache layer"
+    - "Review memory limits quarterly against actual usage"

@@ -131,6 +131,24 @@ func (sc *ServerClient) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRe
 	return sc.client.AnalyzeIssue(sc.withAuth(ctx), req)
 }
 
+// AgenticStepCaller abstracts the AgenticStep RPC for testing.
+type AgenticStepCaller interface {
+	AgenticStep(ctx context.Context, req *pb.AgenticStepRequest) (*pb.AgenticStepResponse, error)
+	IsConnected() bool
+}
+
+// AgenticStep calls the AgenticStep RPC for one turn of the agentic remediation loop.
+func (sc *ServerClient) AgenticStep(ctx context.Context, req *pb.AgenticStepRequest) (*pb.AgenticStepResponse, error) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+
+	if sc.client == nil {
+		return nil, fmt.Errorf("not connected to server")
+	}
+
+	return sc.client.AgenticStep(sc.withAuth(ctx), req)
+}
+
 // IsConnected returns true if the client has an active connection.
 func (sc *ServerClient) IsConnected() bool {
 	sc.mu.RLock()

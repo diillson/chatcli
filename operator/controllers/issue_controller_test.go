@@ -20,6 +20,7 @@ func setupFakeIssueReconciler(objs ...client.Object) (*IssueReconciler, client.C
 		&platformv1alpha1.Issue{},
 		&platformv1alpha1.AIInsight{},
 		&platformv1alpha1.RemediationPlan{},
+		&platformv1alpha1.PostMortem{},
 	)
 	if len(objs) > 0 {
 		cb = cb.WithObjects(objs...)
@@ -206,7 +207,7 @@ func TestIssueReconcile_AnalyzingToRemediating(t *testing.T) {
 	}
 }
 
-func TestIssueReconcile_AnalyzingToEscalated(t *testing.T) {
+func TestIssueReconcile_AnalyzingToAgenticRemediation(t *testing.T) {
 	issue := newIssue("no-runbook-issue", "default")
 	issue.Finalizers = []string{issueFinalizerName}
 	issue.Status.State = platformv1alpha1.IssueStateAnalyzing
@@ -214,7 +215,7 @@ func TestIssueReconcile_AnalyzingToEscalated(t *testing.T) {
 	now := metav1.Now()
 	issue.Status.DetectedAt = &now
 
-	// AIInsight with analysis but no matching runbook
+	// AIInsight with analysis but no suggested actions and no matching runbook
 	insight := &platformv1alpha1.AIInsight{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "no-runbook-issue-insight",
@@ -242,12 +243,25 @@ func TestIssueReconcile_AnalyzingToEscalated(t *testing.T) {
 		t.Fatalf("reconcile failed: %v", err)
 	}
 
+	// Issue should go to Remediating (agentic mode) instead of Escalated
 	var updated platformv1alpha1.Issue
 	if err := c.Get(ctx, types.NamespacedName{Name: "no-runbook-issue", Namespace: "default"}, &updated); err != nil {
 		t.Fatalf("failed to get updated issue: %v", err)
 	}
-	if updated.Status.State != platformv1alpha1.IssueStateEscalated {
-		t.Errorf("expected state Escalated, got %q", updated.Status.State)
+	if updated.Status.State != platformv1alpha1.IssueStateRemediating {
+		t.Errorf("expected state Remediating (agentic), got %q", updated.Status.State)
+	}
+
+	// Verify agentic RemediationPlan was created
+	var plan platformv1alpha1.RemediationPlan
+	if err := c.Get(ctx, types.NamespacedName{Name: "no-runbook-issue-plan-1", Namespace: "default"}, &plan); err != nil {
+		t.Fatalf("failed to get agentic plan: %v", err)
+	}
+	if !plan.Spec.AgenticMode {
+		t.Error("expected plan.Spec.AgenticMode to be true")
+	}
+	if plan.Spec.AgenticMaxSteps != 10 {
+		t.Errorf("expected AgenticMaxSteps=10, got %d", plan.Spec.AgenticMaxSteps)
 	}
 }
 

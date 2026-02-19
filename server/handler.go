@@ -614,10 +614,36 @@ IMPORTANT: The previous remediation attempts listed above have FAILED. Do NOT re
 	sb.WriteString(`
 
 Available remediation actions (use ONLY these):
-- RestartDeployment: triggers a rolling restart (no params needed)
-- ScaleDeployment: scales the deployment (params: {"replicas": "N"})
-- RollbackDeployment: rolls back to the previous revision (no params needed)
-- PatchConfig: updates a ConfigMap (params: {"configmap": "name", "key": "value"})
+
+1. RestartDeployment — triggers a rolling restart of all pods. No params needed.
+   Best for: stale state, memory leaks, transient errors.
+
+2. ScaleDeployment — scales the deployment up or down. Params: {"replicas": "N"} (N >= 1).
+   Best for: load-related issues, insufficient capacity.
+
+3. RollbackDeployment — rolls back to a previous deployment revision.
+   Params (optional): {"toRevision": "<number|previous|healthy>"}
+     "previous" (default): rolls back to revision N-1.
+     "healthy": automatically finds the most recent revision with running pods.
+     "<number>": rolls back to that specific revision number.
+   Best for: bad deployments, image bugs, config regressions.
+   IMPORTANT: Use the Revision History in the context to pick the right revision.
+   If a specific revision was healthy (readyReplicas > 0), prefer toRevision with that number.
+
+4. AdjustResources — changes CPU/memory requests and limits on a container.
+   Params: {"container": "name" (optional, defaults to first), "memory_limit": "1Gi", "memory_request": "512Mi", "cpu_limit": "1000m", "cpu_request": "500m"}
+   Provide only the values you want to change. Uses standard K8s notation (Mi, Gi, m for millicores).
+   Best for: OOMKilled pods, CPU throttling, resource quota issues.
+   Safety: limits cannot be set lower than requests.
+
+5. DeletePod — deletes a single unhealthy pod (the deployment controller recreates it).
+   Params (optional): {"pod": "specific-pod-name"}
+   If omitted, automatically selects the most-unhealthy pod (CrashLoopBackOff > highest restarts).
+   Best for: stuck pods, pods in CrashLoopBackOff that won't recover with restart.
+   Safety: refuses if only 1 pod exists, max 1 deletion per action.
+
+6. PatchConfig — updates a ConfigMap. Params: {"configmap": "name", "key1": "value1", "key2": "value2"}.
+   Best for: configuration errors, feature flag toggles.
 
 Respond ONLY with a JSON object (no markdown, no code blocks):
 {
@@ -625,8 +651,8 @@ Respond ONLY with a JSON object (no markdown, no code blocks):
   "confidence": 0.85,
   "recommendations": ["First recommendation", "Second recommendation"],
   "actions": [
-    {"name": "Restart pods", "action": "RestartDeployment", "description": "Rolling restart to clear stale state", "params": {}},
-    {"name": "Scale up", "action": "ScaleDeployment", "description": "Add replicas to handle load", "params": {"replicas": "3"}}
+    {"name": "Increase memory", "action": "AdjustResources", "description": "Pod is OOMKilled, increase memory limit", "params": {"memory_limit": "1Gi", "memory_request": "512Mi"}},
+    {"name": "Rollback to healthy", "action": "RollbackDeployment", "description": "Current image is crashing, roll back", "params": {"toRevision": "healthy"}}
   ]
 }
 
@@ -634,7 +660,10 @@ Rules:
 - confidence: float between 0.0 and 1.0
 - recommendations: human-readable text advice
 - actions: concrete remediation steps using ONLY the available actions listed above
-- Each action must have a description explaining WHY it is recommended`)
+- Each action must have a description explaining WHY it is recommended
+- For OOMKilled issues, ALWAYS consider AdjustResources before restart/rollback
+- For CrashLoopBackOff after a recent deploy, prefer RollbackDeployment with toRevision
+- Prefer targeted fixes (AdjustResources, specific rollback) over broad actions (restart)`)
 
 	return sb.String()
 }
@@ -689,6 +718,201 @@ func parseAnalysisResponse(response string) analysisResult {
 	}
 
 	return result
+}
+
+// --- Agentic Remediation ---
+
+// AgenticStep runs one step of the AI-driven remediation loop.
+func (h *Handler) AgenticStep(ctx context.Context, req *pb.AgenticStepRequest) (*pb.AgenticStepResponse, error) {
+	if req.IssueName == "" {
+		return nil, status.Error(codes.InvalidArgument, "issue_name is required")
+	}
+
+	llmClient, err := h.getClient(req.Provider, req.Model, "", nil)
+	if err != nil {
+		h.logger.Error("Failed to get LLM client for agentic step", zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "failed to get LLM client: %v", err)
+	}
+
+	prompt := buildAgenticStepPrompt(req)
+	response, err := llmClient.SendPrompt(ctx, prompt, nil, 0)
+	if err != nil {
+		h.logger.Error("LLM agentic step failed", zap.Error(err), zap.String("issue", req.IssueName), zap.Int32("step", req.CurrentStep))
+		return nil, status.Errorf(codes.Internal, "LLM agentic step failed: %v", err)
+	}
+
+	return parseAgenticStepResponse(response), nil
+}
+
+func buildAgenticStepPrompt(req *pb.AgenticStepRequest) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf(`You are a Kubernetes SRE agent. You are autonomously remediating an active incident by executing actions one at a time. After each action, you observe the result and decide the next step.
+
+Incident Details:
+- Issue: %s
+- Namespace: %s
+- Resource: %s/%s
+- Signal Type: %s
+- Severity: %s
+- Description: %s
+- Risk Score: %d/100`,
+		req.IssueName, req.Namespace, req.ResourceKind, req.ResourceName,
+		req.SignalType, req.Severity, req.Description, req.RiskScore))
+
+	if req.KubernetesContext != "" {
+		sb.WriteString(fmt.Sprintf(`
+
+Current Kubernetes Cluster State (LIVE — refreshed before each step):
+%s`, req.KubernetesContext))
+	}
+
+	sb.WriteString(`
+
+Available Actions (you can execute ONE per step):
+
+MUTATING (changes the cluster):
+1. RestartDeployment — rolling restart of all pods. No params.
+2. ScaleDeployment — scale replicas. Params: {"replicas": "N"} (N >= 1).
+3. RollbackDeployment — rollback to a previous revision.
+   Params: {"toRevision": "previous|healthy|<number>"}
+4. AdjustResources — change CPU/memory requests/limits.
+   Params: {"container": "name", "memory_limit": "1Gi", "cpu_limit": "500m", ...}
+5. DeletePod — delete a single unhealthy pod.
+   Params: {"pod": "name"} (optional; auto-selects most-unhealthy if omitted).
+6. PatchConfig — update a ConfigMap.
+   Params: {"configmap": "name", "key1": "value1", ...}
+
+OBSERVATION (no action, wait for next context refresh):
+7. Observe — set next_action to null and resolved to false. Use this when you need to wait and see the effect of a previous action before deciding what to do next.`)
+
+	// Append conversation history
+	if len(req.History) > 0 {
+		sb.WriteString("\n\nRemediation History:")
+		for _, h := range req.History {
+			sb.WriteString(fmt.Sprintf("\n\nStep %d:", h.StepNumber))
+			sb.WriteString(fmt.Sprintf("\n  AI Reasoning: %s", h.AiMessage))
+			if h.Action != "" {
+				sb.WriteString(fmt.Sprintf("\n  Action: %s", h.Action))
+				if len(h.Params) > 0 {
+					sb.WriteString(fmt.Sprintf(" %v", h.Params))
+				}
+			} else {
+				sb.WriteString("\n  Action: (observation only)")
+			}
+			if h.Observation != "" {
+				sb.WriteString(fmt.Sprintf("\n  Observation: %s", h.Observation))
+			}
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf(`
+
+You are on step %d of %d maximum steps.`, req.CurrentStep, req.MaxSteps))
+
+	sb.WriteString(`
+
+Respond ONLY with a JSON object (no markdown, no code blocks):
+
+If the problem is NOT yet resolved:
+{
+  "reasoning": "Your analysis of the current state and why you choose this action",
+  "resolved": false,
+  "next_action": {
+    "name": "Step description",
+    "action": "ActionType",
+    "description": "Why this action helps",
+    "params": {"key": "value"}
+  }
+}
+
+If you need to observe (wait for effect of previous action):
+{
+  "reasoning": "Waiting to observe the effect of the previous action",
+  "resolved": false,
+  "next_action": null
+}
+
+If the problem IS resolved (cluster is healthy):
+{
+  "reasoning": "Final assessment of what happened and how it was fixed",
+  "resolved": true,
+  "next_action": null,
+  "postmortem_summary": "Brief incident summary for the PostMortem report",
+  "root_cause": "The determined root cause of the incident",
+  "impact": "What services/users were affected and for how long",
+  "lessons_learned": ["Lesson 1", "Lesson 2"],
+  "prevention_actions": ["Prevention step 1", "Prevention step 2"]
+}
+
+Rules:
+- Execute ONE action per step. Observe the result before deciding the next.
+- If a previous action FAILED, try a DIFFERENT approach — do not repeat it.
+- Only set resolved=true after confirming the cluster state shows healthy pods.
+- For OOMKilled, prefer AdjustResources before restart/rollback.
+- For CrashLoopBackOff after a recent deploy, prefer RollbackDeployment with toRevision.
+- Prefer targeted fixes over broad actions.
+- If you cannot determine what to do, set next_action to null (will escalate).
+- When resolved, provide thorough postmortem data — you have the full context.`)
+
+	return sb.String()
+}
+
+type agenticStepResult struct {
+	Reasoning         string       `json:"reasoning"`
+	Resolved          bool         `json:"resolved"`
+	NextAction        *actionEntry `json:"next_action"`
+	PostmortemSummary string       `json:"postmortem_summary"`
+	RootCause         string       `json:"root_cause"`
+	Impact            string       `json:"impact"`
+	LessonsLearned    []string     `json:"lessons_learned"`
+	PreventionActions []string     `json:"prevention_actions"`
+}
+
+func parseAgenticStepResponse(response string) *pb.AgenticStepResponse {
+	cleaned := strings.TrimSpace(response)
+	if strings.HasPrefix(cleaned, "```json") {
+		cleaned = strings.TrimPrefix(cleaned, "```json")
+		if idx := strings.LastIndex(cleaned, "```"); idx >= 0 {
+			cleaned = cleaned[:idx]
+		}
+	} else if strings.HasPrefix(cleaned, "```") {
+		cleaned = strings.TrimPrefix(cleaned, "```")
+		if idx := strings.LastIndex(cleaned, "```"); idx >= 0 {
+			cleaned = cleaned[:idx]
+		}
+	}
+	cleaned = strings.TrimSpace(cleaned)
+
+	var result agenticStepResult
+	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
+		// Parse failure — return safe default (will trigger escalation)
+		return &pb.AgenticStepResponse{
+			Reasoning: fmt.Sprintf("Failed to parse AI response: %v. Raw: %s", err, response),
+			Resolved:  false,
+		}
+	}
+
+	resp := &pb.AgenticStepResponse{
+		Reasoning:         result.Reasoning,
+		Resolved:          result.Resolved,
+		PostmortemSummary: result.PostmortemSummary,
+		RootCause:         result.RootCause,
+		Impact:            result.Impact,
+		LessonsLearned:    result.LessonsLearned,
+		PreventionActions: result.PreventionActions,
+	}
+
+	if result.NextAction != nil {
+		resp.NextAction = &pb.SuggestedAction{
+			Name:        result.NextAction.Name,
+			Action:      result.NextAction.Action,
+			Description: result.NextAction.Description,
+			Params:      result.NextAction.Params,
+		}
+	}
+
+	return resp
 }
 
 // chunkResponse splits a response into chunks at natural boundaries (newlines,

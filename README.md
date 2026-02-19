@@ -1219,7 +1219,7 @@ Com multiplos targets, o **MultiSummarizer** gerencia o contexto LLM automaticam
 
 ### K8s Operator — AIOps Platform
 
-O **ChatCLI Operator** vai alem do gerenciamento de instancias. Ele implementa uma **plataforma AIOps autonoma** com 6 CRDs (`platform.chatcli.io/v1alpha1`):
+O **ChatCLI Operator** vai alem do gerenciamento de instancias. Ele implementa uma **plataforma AIOps autonoma** com 7 CRDs (`platform.chatcli.io/v1alpha1`):
 
 | CRD | Descricao |
 |-----|-----------|
@@ -1227,12 +1227,13 @@ O **ChatCLI Operator** vai alem do gerenciamento de instancias. Ele implementa u
 | **Anomaly** | Sinal bruto detectado pelo K8s Watcher (restarts, OOM, falhas de deploy) |
 | **Issue** | Incidente correlacionado agrupando multiplas anomalias |
 | **AIInsight** | Analise de causa raiz gerada por IA com contexto K8s enriquecido |
-| **RemediationPlan** | Acoes concretas para resolver o problema (scale, restart, rollback) |
+| **RemediationPlan** | Acoes concretas para resolver o problema (runbook ou IA agentica) |
 | **Runbook** | Procedimentos operacionais (manuais ou auto-gerados pela IA) |
+| **PostMortem** | Relatorio de incidente auto-gerado apos resolucao agentica |
 
-**Pipeline autonomo**: Deteccao → Correlacao → Analise IA (com contexto K8s) → Runbook-first → Remediacao → Resolucao
+**Pipeline autonomo**: Deteccao → Correlacao → Analise IA (com contexto K8s) → Runbook-first → Remediacao (incluindo modo agentico) → Resolucao → PostMortem
 
-A IA recebe contexto completo do cluster (status do deployment, pods, eventos, historico de revisoes) e retorna acoes estruturadas que sao materializadas como **Runbooks reutilizaveis**. Runbooks manuais tem precedencia; na ausencia, a IA gera Runbooks automaticamente. Retries disparam re-analise com contexto de falhas anteriores.
+A IA recebe contexto completo do cluster (status do deployment, pods, eventos, historico de revisoes) e retorna acoes estruturadas. No **modo agentico**, a IA atua como um agente com skills K8s — observa, decide e age iterativamente (loop observe-decide-act), salvando historico a cada passo. Na resolucao, gera automaticamente um **PostMortem** (causa raiz, timeline, licoes aprendidas) e um **Runbook reutilizavel** para incidentes futuros.
 
 > Documentacao completa em [diillson.github.io/chatcli/docs/features/k8s-operator](https://diillson.github.io/chatcli/docs/features/k8s-operator/)
 > Deep-dive AIOps em [diillson.github.io/chatcli/docs/features/aiops-platform](https://diillson.github.io/chatcli/docs/features/aiops-platform/)
@@ -1251,8 +1252,8 @@ O projeto é modular e organizado em pacotes:
 -  client/remote : Cliente gRPC que implementa a interface LLMClient.
 -  k8s : Kubernetes Watcher (collectors, store, summarizer).
 -  proto : Definicoes protobuf do servico gRPC (`chatcli.proto`).
--  operator : Kubernetes Operator — plataforma AIOps com 6 CRDs e pipeline autonomo.
-    -  operator/api/v1alpha1 : Tipos dos CRDs (Instance, Anomaly, Issue, AIInsight, RemediationPlan, Runbook).
+-  operator : Kubernetes Operator — plataforma AIOps com 7 CRDs e pipeline autonomo.
+    -  operator/api/v1alpha1 : Tipos dos CRDs (Instance, Anomaly, Issue, AIInsight, RemediationPlan, Runbook, PostMortem).
     -  operator/controllers : Reconcilers, correlation engine, WatcherBridge, gRPC client.
 -  utils : Contém funções auxiliares para arquivos, Git, shell, HTTP, etc.
 -  models : Define as estruturas de dados.
