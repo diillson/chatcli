@@ -376,6 +376,9 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 		history = append(history, entry)
 	}
 
+	// Resolve provider/model from the connected Instance CR
+	provider, model := resolveInstanceProvider(ctx, r.Client)
+
 	// Call AgenticStep RPC
 	resp, err := r.ServerClient.AgenticStep(ctx, &pb.AgenticStepRequest{
 		IssueName:         issue.Name,
@@ -386,8 +389,8 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 		Severity:          string(issue.Spec.Severity),
 		Description:       issue.Spec.Description,
 		RiskScore:         issue.Spec.RiskScore,
-		Provider:          "CLAUDEAI",
-		Model:             "claude-sonnet-4-5",
+		Provider:          provider,
+		Model:             model,
 		KubernetesContext: kubeCtx,
 		History:           history,
 		MaxSteps:          maxSteps,

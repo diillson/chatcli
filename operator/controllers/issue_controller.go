@@ -25,6 +25,21 @@ import (
 
 const issueFinalizerName = "platform.chatcli.io/issue-finalizer"
 
+// resolveInstanceProvider looks up the first ready Instance CR and returns its provider and model.
+// Falls back to empty strings if no ready Instance is found (the server will use its own defaults).
+func resolveInstanceProvider(ctx context.Context, c client.Client) (provider, model string) {
+	var instances platformv1alpha1.InstanceList
+	if err := c.List(ctx, &instances); err != nil {
+		return "", ""
+	}
+	for _, inst := range instances.Items {
+		if inst.Status.Ready {
+			return inst.Spec.Provider, inst.Spec.Model
+		}
+	}
+	return "", ""
+}
+
 var (
 	issuesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "chatcli",
@@ -152,14 +167,16 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 		},
 	}
 
+	provider, model := resolveInstanceProvider(ctx, r.Client)
+
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, insight, func() error {
 		if err := controllerutil.SetControllerReference(issue, insight, r.Scheme); err != nil {
 			return err
 		}
 		insight.Spec = platformv1alpha1.AIInsightSpec{
 			IssueRef: platformv1alpha1.IssueRef{Name: issue.Name},
-			Provider: "CLAUDEAI",
-			Model:    "claude-sonnet-4-5",
+			Provider: provider,
+			Model:    model,
 		}
 		return nil
 	})
