@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.59.3](https://github.com/diillson/chatcli/compare/v1.59.2...v1.59.3) (2026-02-19)
+
+
+### Bug Fixes
+
+* **rbac:** grant Runbook CRD create/update/patch permissions to operator ([#565](https://github.com/diillson/chatcli/issues/565)) ([1eb6d04](https://github.com/diillson/chatcli/commit/1eb6d04dac20d364c5bbeaec4050637ced3a876d))
+
 ## [1.59.2](https://github.com/diillson/chatcli/compare/v1.59.1...v1.59.2) (2026-02-19)
 
 
