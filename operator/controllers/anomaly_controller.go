@@ -140,6 +140,7 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		Spec: platformv1alpha1.IssueSpec{
 			Severity:    severity,
 			Source:      source,
+			SignalType:  string(anomaly.Spec.SignalType),
 			Resource:    resource,
 			Description: fmt.Sprintf("Auto-detected %s anomaly: %s (value=%s, threshold=%s)", anomaly.Spec.SignalType, anomaly.Spec.Description, anomaly.Spec.Value, anomaly.Spec.Threshold),
 			RiskScore:   riskScore,

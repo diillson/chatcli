@@ -208,16 +208,16 @@ func TestBuildPodSpec_Volumes(t *testing.T) {
 
 	podSpec := r.buildPodSpec(instance)
 
-	// Expect 3 volumes: tmp, sessions, tls
-	if len(podSpec.Volumes) != 3 {
-		t.Fatalf("expected 3 volumes, got %d", len(podSpec.Volumes))
+	// Expect 4 volumes: tmp, data, sessions, tls
+	if len(podSpec.Volumes) != 4 {
+		t.Fatalf("expected 4 volumes, got %d", len(podSpec.Volumes))
 	}
 
 	volumeNames := map[string]bool{}
 	for _, v := range podSpec.Volumes {
 		volumeNames[v.Name] = true
 	}
-	for _, name := range []string{"tmp", "sessions", "tls"} {
+	for _, name := range []string{"tmp", "data", "sessions", "tls"} {
 		if !volumeNames[name] {
 			t.Errorf("missing expected volume %q", name)
 		}
@@ -225,8 +225,8 @@ func TestBuildPodSpec_Volumes(t *testing.T) {
 
 	// Check container volume mounts
 	container := podSpec.Containers[0]
-	if len(container.VolumeMounts) != 3 {
-		t.Fatalf("expected 3 volume mounts, got %d", len(container.VolumeMounts))
+	if len(container.VolumeMounts) != 4 {
+		t.Fatalf("expected 4 volume mounts, got %d", len(container.VolumeMounts))
 	}
 }
 

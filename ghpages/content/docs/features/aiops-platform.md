@@ -35,23 +35,25 @@ sequenceDiagram
     AR->>K8s: Watch Anomaly CRs
     AR->>CE: Correlaciona anomalias
     CE-->>AR: risk score + severity + incident ID
-    AR->>K8s: Cria/atualiza Issue CR
+    AR->>K8s: Cria/atualiza Issue CR (com signalType)
 
     IR->>K8s: Watch Issue CRs
     IR->>K8s: Cria AIInsight CR (estado: Analyzing)
 
     AIR->>K8s: Watch AIInsight CRs
-    AIR->>Server: AnalyzeIssue(context)
-    Server->>LLM: Prompt estruturado
+    AIR->>K8s: Coleta contexto K8s (pods, eventos, revisões)
+    AIR->>Server: AnalyzeIssue(context + k8s_context)
+    Server->>LLM: Prompt estruturado com contexto K8s
     LLM-->>Server: JSON (analysis + actions)
     Server-->>AIR: AnalyzeIssueResponse
     AIR->>K8s: Atualiza AIInsight.Status
 
     IR->>K8s: Verifica AIInsight pronto
-    alt Runbook existe
-        IR->>K8s: Cria RemediationPlan (do Runbook)
+    alt Runbook manual existe
+        IR->>K8s: Cria RemediationPlan (do Runbook manual)
     else AI tem ações sugeridas
-        IR->>K8s: Cria RemediationPlan (da IA)
+        IR->>K8s: Gera Runbook auto (reutilizável)
+        IR->>K8s: Cria RemediationPlan (do Runbook auto-gerado)
     else Nenhum disponível
         IR->>K8s: Escalona Issue
     end
@@ -62,11 +64,13 @@ sequenceDiagram
 
     IR->>K8s: Verifica resultado
     alt Sucesso
-        IR->>K8s: Issue → Resolved
+        IR->>K8s: Issue → Resolved + invalida dedup
     else Falha + tentativas restantes
-        IR->>K8s: Retry (nova RemediationPlan)
+        IR->>K8s: Issue → Analyzing (re-análise com contexto de falha)
+        AIR->>Server: Re-análise com failure_context
+        Note over AIR,Server: AI sugere estratégia diferente
     else Max tentativas
-        IR->>K8s: Issue → Escalated
+        IR->>K8s: Issue → Escalated + invalida dedup
     end
 ```
 
@@ -85,19 +89,21 @@ O WatcherBridge e o ponto de entrada do pipeline. Implementa a interface `manage
 | `Start()` | Inicia o loop de polling (30s) com context cancelavel |
 | `poll()` | Consulta GetAlerts e cria Anomaly CRs |
 | `discoverAndConnect()` | Descobre servidor via Instance CRs no cluster |
-| `createAnomaly()` | Converte alert → Anomaly CR com owner references |
-| `alertHash()` | SHA256 com bucket de minuto para dedup |
+| `createAnomaly()` | Converte alert → Anomaly CR com labels de referência |
+| `alertHash()` | SHA256(type\|deployment\|namespace) para dedup |
+| `InvalidateDedupForResource()` | Remove entradas de dedup para um deployment+namespace |
 | `sanitizeK8sName()` | Garante nomes válidos para objetos K8s (63 chars, lowercase, sem caracteres especiais) |
 
 **Dedup por SHA256:**
 
 ```
-hash = SHA256(alertType + deployment + namespace + message + minuteBucket)
+hash = SHA256(alertType | deployment | namespace)
 ```
 
-- **Bucket de minuto**: `timestamp / 60` — alertas dentro do mesmo minuto geram o mesmo hash
+- **Sem componente temporal**: Um problema contínuo (e.g. CrashLoopBackOff) gera apenas uma Anomaly
 - **TTL**: 2 horas — hashes expirados são podados automaticamente
-- **Resultado**: Mesmo alerta repetido no mesmo minuto não gera duplicatas
+- **Invalidação**: Quando um Issue atinge estado terminal (Resolved/Escalated), as entradas de dedup para o recurso afetado são invalidadas, permitindo detecção imediata de recorrências
+- **Resultado**: Evita duplicatas durante problema ativo; detecta recorrência após resolução
 
 **Descoberta do Servidor:**
 
@@ -186,13 +192,13 @@ stateDiagram-v2
 
     state "Analyzing" as A {
         state "Aguarda Analysis" as A1
-        state "Busca Runbook" as A2
-        state "Verifica AI Actions" as A3
+        state "Busca Runbook manual" as A2
+        state "Gera Runbook da IA" as A3
         A1 --> A2 : Analysis preenchida
-        A2 --> A3 : Sem Runbook
+        A2 --> A3 : Sem Runbook manual
     }
 
-    A --> Remediating : RemediationPlan criado
+    A --> Remediating : RemediationPlan criado (via Runbook)
     A --> Escalated : Sem Runbook e sem AI actions
 
     state "Remediating" as R {
@@ -201,9 +207,9 @@ stateDiagram-v2
         R1 --> R2
     }
 
-    R --> Resolved : RemediationPlan completed
-    R --> R : Retry (attempt < max)
-    R --> Escalated : Max attempts ou sem plano
+    R --> Resolved : RemediationPlan completed (invalida dedup)
+    R --> A : Retry (re-análise com failure context)
+    R --> Escalated : Max attempts ou sem plano (invalida dedup)
 
     Resolved --> [*]
     Escalated --> [*]
@@ -217,23 +223,41 @@ stateDiagram-v2
 
 **handleAnalyzing():**
 1. Verifica se AIInsight tem `Analysis` preenchida
-2. Busca Runbook correspondente (`findMatchingRunbook`)
-3. Se encontrou Runbook → `createRemediationPlan()`
-4. Se não encontrou Runbook mas AIInsight tem `SuggestedActions` → `createRemediationPlanFromAI()`
+2. Busca Runbook manual correspondente (`findMatchingRunbook` — tiered matching)
+3. Se encontrou Runbook manual → `createRemediationPlan()` (manual tem precedência)
+4. Se não encontrou Runbook manual mas AIInsight tem `SuggestedActions` → `generateRunbookFromAI()` → `createRemediationPlan()` usando o Runbook auto-gerado
 5. Se nenhum → escalona com razão `NoRunbookOrAIActions`
 6. Transiciona para `Remediating`
 
+**`findMatchingRunbook()` — Matching em camadas:**
+- **Tier 1**: SignalType + Severity + ResourceKind (match exato, preferido)
+- **Tier 2**: Severity + ResourceKind (fallback quando signal não bate)
+- `SignalType` resolvido de: `issue.Spec.SignalType` → fallback `issue.Labels["platform.chatcli.io/signal"]`
+
+**`generateRunbookFromAI()`:**
+- Materializa `SuggestedActions` do AI como Runbook CR reutilizável
+- Nome: `auto-{signal}-{severity}-{kind}` (sanitizado)
+- Labels: `platform.chatcli.io/auto-generated=true`
+- Trigger: SignalType + Severity + ResourceKind (para reutilização futura)
+- Usa `CreateOrUpdate` para idempotência
+
 **handleRemediating():**
 1. Busca RemediationPlan mais recente (`findLatestRemediationPlan`)
-2. Se `Completed` → Issue `Resolved`
-3. Se `Failed` e tentativas restantes → cria novo RemediationPlan (retry)
-4. Se `Failed` e max tentativas → `Escalated`
+2. Se `Completed` → Issue `Resolved` + invalida dedup do recurso
+3. Se `Failed` e tentativas restantes → **re-análise**: coleta evidência de falha (`collectFailureEvidence`), limpa análise do AIInsight, volta para estado `Analyzing` com failure context
+4. Se `Failed` e max tentativas → `Escalated` + invalida dedup do recurso
 
-**Prioridade de Remediação (handleAnalyzing e retry):**
+**Retry com Escalação de Estratégia:**
+- Cada retry dispara re-análise do AI com contexto de falhas anteriores
+- O AI recebe `previous_failure_context` com evidência das tentativas que falharam
+- O prompt instrui: "Não repita as mesmas ações. Analise por que falharam e sugira uma abordagem fundamentalmente diferente"
+- Gera novo Runbook auto-gerado com estratégia diferente (nome inclui attempt)
+
+**Prioridade de Remediação:**
 
 ```
-1. Runbook existente (match por signalType + severity + resourceKind)
-2. AI SuggestedActions (fallback automático)
+1. Runbook manual existente (match tiered: SignalType+Severity+Kind → Severity+Kind)
+2. Runbook auto-gerado pela IA (materializado como CR reutilizável)
 3. Escalonamento (último recurso)
 ```
 
@@ -246,9 +270,20 @@ Observa AIInsight CRs e chama o `AnalyzeIssue` RPC para preencher a análise.
 1. Verifica se `Status.Analysis` já está preenchida (skip se sim)
 2. Verifica se servidor está conectado (requeue 15s se não)
 3. Busca Issue pai para contexto
-4. Monta `AnalyzeIssueRequest` com todos os dados do Issue
-5. Chama `AnalyzeIssue` RPC via `ServerClient`
-6. Preenche `Status.Analysis`, `Confidence`, `Recommendations`, `SuggestedActions`
+4. Coleta contexto K8s via `KubernetesContextBuilder` (deployment, pods, eventos, revisões)
+5. Lê failure context de annotation `platform.chatcli.io/failure-context` (se re-análise)
+6. Monta `AnalyzeIssueRequest` com dados do Issue + contexto K8s + failure context
+7. Chama `AnalyzeIssue` RPC via `ServerClient`
+8. Preenche `Status.Analysis`, `Confidence`, `Recommendations`, `SuggestedActions`
+9. Limpa annotation `failure-context` após re-análise concluída
+
+**KubernetesContextBuilder (`k8s_context.go`):**
+
+Coleta 4 seções de contexto real do cluster (max 8000 chars):
+- **Deployment Status**: replicas (desired/ready/updated/unavailable), conditions, container images + resources
+- **Pod Details** (até 5 pods, unhealthy primeiro): phase, restart count, container states (Waiting/Terminated com reason + exit code)
+- **Recent Events** (últimos 15): tipo, reason, message, count
+- **Revision History**: Últimas 5 revisões (ReplicaSets) com diff de imagens entre revisões
 
 **AnalyzeIssueRequest:**
 
@@ -258,12 +293,14 @@ Observa AIInsight CRs e chama o `AnalyzeIssue` RPC para preencher a análise.
 | `namespace` | Issue.Namespace | Namespace |
 | `resource_kind` | Issue.Spec.Resource.Kind | Tipo do recurso (Deployment) |
 | `resource_name` | Issue.Spec.Resource.Name | Nome do deployment |
-| `signal_type` | Issue labels | Tipo do sinal |
+| `signal_type` | Issue.Spec.SignalType / labels | Tipo do sinal |
 | `severity` | Issue.Spec.Severity | Severidade |
 | `description` | Issue.Spec.Description | Descrição do problema |
 | `risk_score` | Issue.Spec.RiskScore | Score de risco |
 | `provider` | AIInsight.Spec.Provider | Provedor LLM |
 | `model` | AIInsight.Spec.Model | Modelo LLM |
+| `kubernetes_context` | KubernetesContextBuilder | Status do deployment, pods, eventos, revisões |
+| `previous_failure_context` | Annotation no AIInsight | Evidência de tentativas anteriores (retries) |
 
 ### 6. RemediationReconciler (`remediation_controller.go`)
 

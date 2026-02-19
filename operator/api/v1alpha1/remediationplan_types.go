@@ -3,12 +3,13 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // RemediationState represents the execution state of a remediation plan.
-// +kubebuilder:validation:Enum=Pending;Executing;Completed;Failed;RolledBack
+// +kubebuilder:validation:Enum=Pending;Executing;Verifying;Completed;Failed;RolledBack
 type RemediationState string
 
 const (
 	RemediationStatePending    RemediationState = "Pending"
 	RemediationStateExecuting  RemediationState = "Executing"
+	RemediationStateVerifying  RemediationState = "Verifying"
 	RemediationStateCompleted  RemediationState = "Completed"
 	RemediationStateFailed     RemediationState = "Failed"
 	RemediationStateRolledBack RemediationState = "RolledBack"
@@ -76,7 +77,11 @@ type RemediationPlanStatus struct {
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
 
-	// CompletedAt is when execution finished.
+	// ActionsCompletedAt is when all actions finished executing and verification began.
+	// +optional
+	ActionsCompletedAt *metav1.Time `json:"actionsCompletedAt,omitempty"`
+
+	// CompletedAt is when execution finished (after verification).
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 

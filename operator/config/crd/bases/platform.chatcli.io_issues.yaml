@@ -70,6 +70,9 @@ spec:
                     - logs
                     - webhook
                     - watcher
+                signalType:
+                  description: Type of signal that triggered the issue (e.g., pod_restart, oom_kill, error_rate).
+                  type: string
                 resource:
                   description: Reference to the Kubernetes resource affected.
                   type: object

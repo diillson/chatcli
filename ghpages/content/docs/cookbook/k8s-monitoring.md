@@ -416,16 +416,20 @@ Quando um pod comeca a crashar:
 
 ```
 1. WatcherBridge detecta HighRestartCount → cria Anomaly
-2. AnomalyReconciler correlaciona → cria Issue (risk: 20, severity: Low)
+2. AnomalyReconciler correlaciona → cria Issue (risk: 20, severity: Low, signalType: pod_restart)
 3. Se OOMKilled também → Issue atualizado (risk: 50, severity: Medium)
 4. IssueReconciler cria AIInsight
-5. AIInsightReconciler chama LLM → retorna: "restart + scale to 4"
-6. IssueReconciler cria RemediationPlan com 2 ações
+5. AIInsightReconciler coleta contexto K8s (pods, eventos, revisões)
+   → chama LLM com contexto enriquecido → retorna: "restart + scale to 4"
+6. IssueReconciler busca Runbook manual (tiered matching)
+   → se não encontra, gera Runbook auto da IA (reutilizável)
+   → cria RemediationPlan com 2 ações
 7. RemediationReconciler executa: restart + scale
-8. Issue → Resolved
+8. Issue → Resolved (dedup invalidado para detecção de recorrência)
+   Se falhar → re-análise com contexto de falha → estratégia diferente
 ```
 
-Tudo acontece automaticamente sem intervenção humana.
+Tudo acontece automaticamente sem intervenção humana. Runbooks auto-gerados são reutilizados para futuras ocorrências do mesmo tipo.
 
 ### Passo 5: (Opcional) Adicionar Runbooks
 
@@ -455,7 +459,7 @@ spec:
   maxAttempts: 2
 ```
 
-Runbooks têm prioridade sobre ações da IA. Quando não há Runbook, a IA decide automaticamente.
+Runbooks manuais têm prioridade. Quando não há Runbook manual, a IA gera automaticamente um Runbook CR reutilizável e cria o plano de remediação a partir dele.
 
 ---
 

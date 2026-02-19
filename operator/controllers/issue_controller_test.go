@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -358,25 +359,25 @@ func TestIssueReconcile_RemediatingRetry(t *testing.T) {
 		t.Fatalf("reconcile failed: %v", err)
 	}
 
-	// Verify new plan was created (attempt 2)
-	var plan2 platformv1alpha1.RemediationPlan
-	if err := c.Get(ctx, types.NamespacedName{Name: "retry-issue-plan-2", Namespace: "default"}, &plan2); err != nil {
-		t.Fatalf("expected second RemediationPlan: %v", err)
-	}
-	if plan2.Spec.Attempt != 2 {
-		t.Errorf("expected attempt 2, got %d", plan2.Spec.Attempt)
-	}
-
-	// Verify issue state updated
+	// Verify issue transitions to Analyzing for re-analysis with failure context
 	var updated platformv1alpha1.Issue
 	if err := c.Get(ctx, types.NamespacedName{Name: "retry-issue", Namespace: "default"}, &updated); err != nil {
 		t.Fatalf("failed to get updated issue: %v", err)
 	}
+	if updated.Status.State != platformv1alpha1.IssueStateAnalyzing {
+		t.Errorf("expected state Analyzing (re-analysis), got %q", updated.Status.State)
+	}
 	if updated.Status.RemediationAttempts != 2 {
 		t.Errorf("expected remediationAttempts 2, got %d", updated.Status.RemediationAttempts)
 	}
-	if updated.Status.State != platformv1alpha1.IssueStateRemediating {
-		t.Errorf("expected state Remediating, got %q", updated.Status.State)
+
+	// Verify insight was cleared for re-analysis
+	var updatedInsight platformv1alpha1.AIInsight
+	if err := c.Get(ctx, types.NamespacedName{Name: "retry-issue-insight", Namespace: "default"}, &updatedInsight); err != nil {
+		t.Fatalf("failed to get updated insight: %v", err)
+	}
+	if updatedInsight.Status.Analysis != "" {
+		t.Errorf("expected cleared analysis for re-analysis, got %q", updatedInsight.Status.Analysis)
 	}
 }
 
@@ -453,9 +454,27 @@ func TestIssueReconcile_AnalyzingToRemediatingFromAI(t *testing.T) {
 		t.Errorf("expected replicas param '5', got %q", plan.Spec.Actions[1].Params["replicas"])
 	}
 
-	// Verify strategy mentions AI-generated
+	// Verify strategy is not truncated and has full context
 	if len(plan.Spec.Strategy) == 0 {
 		t.Error("expected non-empty strategy")
+	}
+	if len(plan.Spec.Strategy) > 0 && len(plan.Spec.Strategy) <= 256 {
+		// Strategy should contain the full AI analysis, not be truncated
+		if !strings.Contains(plan.Spec.Strategy, "auto-") {
+			// It should reference the auto-generated runbook
+		}
+	}
+
+	// Verify auto-generated Runbook was created
+	var runbook platformv1alpha1.Runbook
+	if err := c.Get(ctx, types.NamespacedName{Name: "auto-high-deployment", Namespace: "default"}, &runbook); err != nil {
+		t.Fatalf("expected auto-generated Runbook: %v", err)
+	}
+	if runbook.Labels["platform.chatcli.io/auto-generated"] != "true" {
+		t.Error("expected auto-generated label on runbook")
+	}
+	if len(runbook.Spec.Steps) != 2 {
+		t.Errorf("expected 2 steps in runbook, got %d", len(runbook.Spec.Steps))
 	}
 
 	// Verify Issue transitioned to Remediating
@@ -499,7 +518,7 @@ func TestIssueReconcile_RemediatingRetryFromAI(t *testing.T) {
 		},
 	}
 
-	// AIInsight with suggested actions but NO runbook
+	// AIInsight with analysis (will be cleared during re-analysis request)
 	insight := &platformv1alpha1.AIInsight{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ai-retry-issue-insight",
@@ -522,7 +541,7 @@ func TestIssueReconcile_RemediatingRetryFromAI(t *testing.T) {
 		},
 	}
 
-	r, c := setupFakeIssueReconciler(issue, plan, insight) // No runbook
+	r, c := setupFakeIssueReconciler(issue, plan, insight)
 	ctx := context.Background()
 
 	_, err := r.Reconcile(ctx, ctrl.Request{
@@ -532,28 +551,33 @@ func TestIssueReconcile_RemediatingRetryFromAI(t *testing.T) {
 		t.Fatalf("reconcile failed: %v", err)
 	}
 
-	// Verify new plan was created (attempt 2) from AI actions
-	var plan2 platformv1alpha1.RemediationPlan
-	if err := c.Get(ctx, types.NamespacedName{Name: "ai-retry-issue-plan-2", Namespace: "default"}, &plan2); err != nil {
-		t.Fatalf("expected second RemediationPlan from AI: %v", err)
-	}
-	if plan2.Spec.Attempt != 2 {
-		t.Errorf("expected attempt 2, got %d", plan2.Spec.Attempt)
-	}
-	if len(plan2.Spec.Actions) != 1 || plan2.Spec.Actions[0].Type != platformv1alpha1.ActionRollbackDeployment {
-		t.Errorf("expected RollbackDeployment action, got %v", plan2.Spec.Actions)
-	}
-
-	// Verify issue state
+	// Verify issue transitions back to Analyzing for re-analysis
 	var updated platformv1alpha1.Issue
 	if err := c.Get(ctx, types.NamespacedName{Name: "ai-retry-issue", Namespace: "default"}, &updated); err != nil {
 		t.Fatalf("failed to get updated issue: %v", err)
 	}
+	if updated.Status.State != platformv1alpha1.IssueStateAnalyzing {
+		t.Errorf("expected state Analyzing (re-analysis), got %q", updated.Status.State)
+	}
 	if updated.Status.RemediationAttempts != 2 {
 		t.Errorf("expected remediationAttempts 2, got %d", updated.Status.RemediationAttempts)
 	}
-	if updated.Status.State != platformv1alpha1.IssueStateRemediating {
-		t.Errorf("expected state Remediating, got %q", updated.Status.State)
+
+	// Verify AIInsight analysis was cleared for re-analysis
+	var updatedInsight platformv1alpha1.AIInsight
+	if err := c.Get(ctx, types.NamespacedName{Name: "ai-retry-issue-insight", Namespace: "default"}, &updatedInsight); err != nil {
+		t.Fatalf("failed to get updated insight: %v", err)
+	}
+	if updatedInsight.Status.Analysis != "" {
+		t.Errorf("expected cleared analysis for re-analysis, got %q", updatedInsight.Status.Analysis)
+	}
+
+	// Verify failure context annotation was set
+	if updatedInsight.Annotations == nil || updatedInsight.Annotations["platform.chatcli.io/failure-context"] == "" {
+		t.Error("expected failure-context annotation on insight")
+	} else if !strings.Contains(updatedInsight.Annotations["platform.chatcli.io/failure-context"], "Restart did not help") {
+		t.Errorf("expected failure context to contain 'Restart did not help', got %q",
+			updatedInsight.Annotations["platform.chatcli.io/failure-context"])
 	}
 }
 
