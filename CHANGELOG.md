@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.59.2](https://github.com/diillson/chatcli/compare/v1.59.1...v1.59.2) (2026-02-19)
+
+
+### Bug Fixes
+
+* **operator:** add remediation intelligence with runbook-first flow, K8s context enrichment and retry re-analysis ([#563](https://github.com/diillson/chatcli/issues/563)) ([a7403a8](https://github.com/diillson/chatcli/commit/a7403a84c7f4042d2f43c0ddb82915b57b204348))
+
 ## [1.59.1](https://github.com/diillson/chatcli/compare/v1.59.0...v1.59.1) (2026-02-18)
 
 
