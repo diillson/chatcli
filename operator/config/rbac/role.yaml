@@ -105,7 +105,7 @@ rules:
       - get
       - update
       - patch
-  # Runbook CRD (read-only for controllers, no status)
+  # Runbook CRD (controller creates auto-generated runbooks)
   - apiGroups:
       - platform.chatcli.io
     resources:
@@ -114,6 +114,9 @@ rules:
       - get
       - list
       - watch
+      - create
+      - update
+      - patch
   # AIInsight CRD
   - apiGroups:
       - platform.chatcli.io
