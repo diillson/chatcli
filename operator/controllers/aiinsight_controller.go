@@ -22,13 +22,18 @@ import (
 // AnalyzeIssue RPC to fill the analysis, confidence, and recommendations.
 type AIInsightReconciler struct {
 	client.Client
-	Scheme       *runtime.Scheme
-	ServerClient *ServerClient
+	Scheme         *runtime.Scheme
+	ServerClient   *ServerClient
+	ContextBuilder *KubernetesContextBuilder
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=aiinsights,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=aiinsights/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=issues,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=replicasets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch
 
 func (r *AIInsightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -68,24 +73,44 @@ func (r *AIInsightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// Determine signal type from Issue labels or description
-	signalType := ""
-	if labels := issue.Labels; labels != nil {
-		signalType = labels["platform.chatcli.io/signal-type"]
+	// Determine signal type: prefer IssueSpec.SignalType, fallback to label
+	signalType := issue.Spec.SignalType
+	if signalType == "" {
+		if labels := issue.Labels; labels != nil {
+			signalType = labels["platform.chatcli.io/signal"]
+		}
+	}
+
+	// Build Kubernetes context for AI enrichment
+	var kubeCtx string
+	if r.ContextBuilder != nil {
+		var ctxErr error
+		kubeCtx, ctxErr = r.ContextBuilder.BuildContext(ctx, issue.Spec.Resource)
+		if ctxErr != nil {
+			logger.Info("Failed to build K8s context, continuing without it", "error", ctxErr)
+		}
+	}
+
+	// Read failure context from annotation (set by retry re-analysis flow)
+	var failureCtx string
+	if insight.Annotations != nil {
+		failureCtx = insight.Annotations["platform.chatcli.io/failure-context"]
 	}
 
 	// Call AnalyzeIssue RPC
 	analyzeReq := &pb.AnalyzeIssueRequest{
-		IssueName:    issue.Name,
-		Namespace:    issue.Namespace,
-		ResourceKind: issue.Spec.Resource.Kind,
-		ResourceName: issue.Spec.Resource.Name,
-		SignalType:   signalType,
-		Severity:     string(issue.Spec.Severity),
-		Description:  issue.Spec.Description,
-		RiskScore:    issue.Spec.RiskScore,
-		Provider:     insight.Spec.Provider,
-		Model:        insight.Spec.Model,
+		IssueName:              issue.Name,
+		Namespace:              issue.Namespace,
+		ResourceKind:           issue.Spec.Resource.Kind,
+		ResourceName:           issue.Spec.Resource.Name,
+		SignalType:             signalType,
+		Severity:               string(issue.Spec.Severity),
+		Description:            issue.Spec.Description,
+		RiskScore:              issue.Spec.RiskScore,
+		Provider:               insight.Spec.Provider,
+		Model:                  insight.Spec.Model,
+		KubernetesContext:      kubeCtx,
+		PreviousFailureContext: failureCtx,
 	}
 
 	resp, err := r.ServerClient.AnalyzeIssue(ctx, analyzeReq)
@@ -113,6 +138,14 @@ func (r *AIInsightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if err := r.Status().Update(ctx, &insight); err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating AIInsight status: %w", err)
+	}
+
+	// Clear failure-context annotation after re-analysis
+	if failureCtx != "" {
+		delete(insight.Annotations, "platform.chatcli.io/failure-context")
+		if err := r.Update(ctx, &insight); err != nil {
+			logger.Info("Failed to clear failure-context annotation", "error", err)
+		}
 	}
 
 	logger.Info("AIInsight analysis complete",

@@ -1226,13 +1226,13 @@ O **ChatCLI Operator** vai alem do gerenciamento de instancias. Ele implementa u
 | **Instance** | Gerencia instancias do servidor ChatCLI (Deployment, Service, RBAC, PVC) |
 | **Anomaly** | Sinal bruto detectado pelo K8s Watcher (restarts, OOM, falhas de deploy) |
 | **Issue** | Incidente correlacionado agrupando multiplas anomalias |
-| **AIInsight** | Analise de causa raiz gerada por IA com acoes sugeridas |
+| **AIInsight** | Analise de causa raiz gerada por IA com contexto K8s enriquecido |
 | **RemediationPlan** | Acoes concretas para resolver o problema (scale, restart, rollback) |
-| **Runbook** | Procedimentos operacionais manuais (opcional — IA gera acoes automaticamente) |
+| **Runbook** | Procedimentos operacionais (manuais ou auto-gerados pela IA) |
 
-**Pipeline autonomo**: Deteccao → Correlacao → Analise IA → Remediacao → Resolucao
+**Pipeline autonomo**: Deteccao → Correlacao → Analise IA (com contexto K8s) → Runbook-first → Remediacao → Resolucao
 
-A IA analisa o problema e retorna acoes estruturadas (`ScaleDeployment`, `RestartDeployment`, `RollbackDeployment`, `PatchConfig`) que sao executadas automaticamente. Nenhuma dependencia externa alem do provedor LLM.
+A IA recebe contexto completo do cluster (status do deployment, pods, eventos, historico de revisoes) e retorna acoes estruturadas que sao materializadas como **Runbooks reutilizaveis**. Runbooks manuais tem precedencia; na ausencia, a IA gera Runbooks automaticamente. Retries disparam re-analise com contexto de falhas anteriores.
 
 > Documentacao completa em [diillson.github.io/chatcli/docs/features/k8s-operator](https://diillson.github.io/chatcli/docs/features/k8s-operator/)
 > Deep-dive AIOps em [diillson.github.io/chatcli/docs/features/aiops-platform](https://diillson.github.io/chatcli/docs/features/aiops-platform/)

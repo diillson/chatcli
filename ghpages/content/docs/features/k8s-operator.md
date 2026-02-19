@@ -82,12 +82,12 @@ graph TD
 
 | Fase | Componente | O que Faz |
 |------|-----------|-----------|
-| **1. Detecção** | WatcherBridge | Consulta `GetAlerts` do servidor a cada 30s. Cria Anomaly CRs para cada alerta novo (dedup via SHA256 do tipo+recurso). |
-| **2. Correlação** | AnomalyReconciler + CorrelationEngine | Agrupa anomalias por recurso + janela temporal. Calcula risk score e severidade. Cria/atualiza Issue CRs. |
-| **3. Analise** | IssueReconciler + AIInsightReconciler | Cria AIInsight CR. Chama `AnalyzeIssue` RPC que envia contexto ao LLM. Retorna: análise, confiança, recomendações e ações sugeridas. |
-| **4. Remediação** | IssueReconciler | Cria RemediationPlan a partir de: **(a)** Runbook existente, **(b)** ações sugeridas pela IA (fallback automático), ou **(c)** escalona se nenhum disponível. |
+| **1. Detecção** | WatcherBridge | Consulta `GetAlerts` do servidor a cada 30s. Cria Anomaly CRs (dedup SHA256). Invalida dedup quando Issue atinge estado terminal. |
+| **2. Correlação** | AnomalyReconciler + CorrelationEngine | Agrupa anomalias por recurso + janela temporal. Calcula risk score e severidade. Cria/atualiza Issue CRs com `signalType`. |
+| **3. Analise** | AIInsightReconciler + KubernetesContextBuilder | Coleta contexto K8s real (deployment, pods, eventos, revisões). Chama `AnalyzeIssue` RPC com contexto enriquecido. |
+| **4. Remediação** | IssueReconciler | Runbook-first: **(a)** Runbook manual (tiered matching por SignalType+Severity+Kind), **(b)** gera Runbook auto da IA (reutilizável), ou **(c)** escalona. |
 | **5. Execução** | RemediationReconciler | Executa ações no cluster: ScaleDeployment, RestartDeployment, RollbackDeployment, PatchConfig. |
-| **6. Resolução** | IssueReconciler | Sucesso → Issue resolvido. Falha → retry (até maxAttempts) → escalona. |
+| **6. Resolução** | IssueReconciler | Sucesso → Resolved (invalida dedup). Falha → re-análise com contexto de falha (estratégia diferente) → até maxAttempts → Escalated. |
 
 ### Máquina de Estados do Issue
 
@@ -95,11 +95,11 @@ graph TD
 stateDiagram-v2
     [*] --> Detected
     Detected --> Analyzing : AIInsight criado
-    Analyzing --> Remediating : RemediationPlan criado
+    Analyzing --> Remediating : RemediationPlan criado (via Runbook)
     Analyzing --> Escalated : Sem Runbook e sem ações AI
-    Remediating --> Resolved : Remediação bem-sucedida
-    Remediating --> Remediating : Retry (attempt < max)
-    Remediating --> Escalated : Max tentativas ou sem plano de retry
+    Remediating --> Resolved : Remediação bem-sucedida (invalida dedup)
+    Remediating --> Analyzing : Retry (re-análise com failure context)
+    Remediating --> Escalated : Max tentativas (invalida dedup)
     Resolved --> [*]
     Escalated --> [*]
 ```
@@ -331,6 +331,7 @@ metadata:
 spec:
   severity: high
   source: watcher
+  signalType: pod_restart        # Propagated from Anomaly for tiered Runbook matching
   description: "Correlated incident: pod_restart on api-gateway"
   resource:
     kind: Deployment
@@ -356,10 +357,10 @@ status:
 | Estado | Descrição |
 |--------|-----------|
 | `Detected` | Issue recém-criado, aguardando análise |
-| `Analyzing` | AIInsight criado, aguardando resposta da IA |
+| `Analyzing` | AIInsight criado, aguardando resposta da IA (ou re-análise com failure context) |
 | `Remediating` | RemediationPlan em execução |
-| `Resolved` | Remediação bem-sucedida |
-| `Escalated` | Max tentativas atingido ou sem ações disponíveis |
+| `Resolved` | Remediação bem-sucedida (dedup invalidado para detecção de recorrência) |
+| `Escalated` | Max tentativas atingido ou sem ações disponíveis (dedup invalidado) |
 | `Failed` | Falha terminal |
 
 ### AIInsight
@@ -456,9 +457,11 @@ status:
 | `PatchConfig` | Atualiza chaves de um ConfigMap | `configmap`, `key=value` |
 | `Custom` | Ação personalizada (bloqueada por safety checks) | — |
 
-### Runbook (Opcional)
+### Runbook (Manual ou Auto-gerado)
 
-Procedimentos operacionais manuais. Quando um Runbook corresponde ao issue, ele tem prioridade sobre as ações da IA.
+Procedimentos operacionais. Runbooks **manuais** têm prioridade sobre tudo. Quando não há Runbook manual, a IA **gera automaticamente** um Runbook CR reutilizável a partir das ações sugeridas.
+
+**Runbook manual:**
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -484,11 +487,46 @@ spec:
   maxAttempts: 3
 ```
 
+**Runbook auto-gerado pela IA** (criado automaticamente quando não há manual):
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Runbook
+metadata:
+  name: auto-pod-restart-high-deployment
+  labels:
+    platform.chatcli.io/auto-generated: "true"
+    platform.chatcli.io/source-issue: "api-gateway-pod-restart-1771276354"
+spec:
+  description: "Auto-generated: High restart count caused by OOMKilled..."
+  trigger:
+    signalType: pod_restart
+    severity: high
+    resourceKind: Deployment
+  steps:
+    - name: Restart deployment
+      action: RestartDeployment
+    - name: Scale up replicas
+      action: ScaleDeployment
+      params:
+        replicas: "4"
+  maxAttempts: 3
+```
+
+Auto-generated Runbooks são **reutilizados** para futuras Issues com o mesmo trigger, evitando chamadas desnecessárias ao LLM.
+
+#### Matching de Runbooks (Tiered)
+
+```
+Tier 1: SignalType + Severity + ResourceKind (match exato, preferido)
+Tier 2: Severity + ResourceKind (fallback quando signal não bate)
+```
+
 #### Prioridade de Remediação
 
 ```
-1. Runbook existente que corresponde (signalType + severity + resourceKind)
-2. Ações sugeridas pela IA (suggestedActions do AIInsight)
+1. Runbook manual existente (match tiered)
+2. Runbook auto-gerado pela IA (materializado como CR reutilizável)
 3. Escalonamento (se nenhum dos dois disponíveis)
 ```
 
@@ -536,6 +574,7 @@ O `WatcherBridge` e o componente que conecta o servidor ChatCLI ao operator:
 - **Polling**: Consulta `GetAlerts` do servidor a cada 30 segundos
 - **Descoberta**: Localiza o servidor via Instance CRs (primeiro Instance com endpoint gRPC pronto)
 - **Dedup**: Hash SHA256 do tipo+deployment+namespace (sem componente temporal — um problema contínuo gera apenas uma Anomaly). TTL de 2 horas
+- **Invalidação de dedup**: Quando Issue atinge estado terminal (Resolved/Escalated), entradas de dedup para o recurso são removidas, permitindo detecção imediata de recorrência
 - **Poda**: Remove hashes expirados automaticamente (> 2h)
 - **Criação**: Converte alertas em Anomaly CRs com nomes K8s válidos
 

@@ -218,19 +218,49 @@ func TestRemediationReconcile_ScaleDeployment(t *testing.T) {
 		t.Errorf("expected 5 replicas, got %d", *updated.Spec.Replicas)
 	}
 
-	// Verify plan completed
+	// After executing, plan should be in Verifying state
 	var updatedPlan platformv1alpha1.RemediationPlan
 	if err := c.Get(ctx, types.NamespacedName{Name: "scale-plan", Namespace: "default"}, &updatedPlan); err != nil {
 		t.Fatalf("failed to get plan: %v", err)
 	}
-	if updatedPlan.Status.State != platformv1alpha1.RemediationStateCompleted {
-		t.Errorf("expected state Completed, got %q", updatedPlan.Status.State)
+	if updatedPlan.Status.State != platformv1alpha1.RemediationStateVerifying {
+		t.Errorf("expected state Verifying, got %q", updatedPlan.Status.State)
 	}
-	if updatedPlan.Status.CompletedAt == nil {
-		t.Error("expected completedAt to be set")
+	if updatedPlan.Status.ActionsCompletedAt == nil {
+		t.Error("expected actionsCompletedAt to be set")
 	}
 	if len(updatedPlan.Status.Evidence) != 1 {
 		t.Errorf("expected 1 evidence item, got %d", len(updatedPlan.Status.Evidence))
+	}
+
+	// Simulate healthy deployment status for verification
+	if err := c.Get(ctx, types.NamespacedName{Name: "payments-api", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get deployment: %v", err)
+	}
+	updated.Status.ReadyReplicas = 5
+	updated.Status.UpdatedReplicas = 5
+	updated.Status.Replicas = 5
+	updated.Status.UnavailableReplicas = 0
+	if err := c.Status().Update(ctx, &updated); err != nil {
+		t.Fatalf("failed to update deployment status: %v", err)
+	}
+
+	// Reconcile again: Verifying → Completed
+	_, err = r.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "scale-plan", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("verification reconcile failed: %v", err)
+	}
+
+	if err := c.Get(ctx, types.NamespacedName{Name: "scale-plan", Namespace: "default"}, &updatedPlan); err != nil {
+		t.Fatalf("failed to get plan: %v", err)
+	}
+	if updatedPlan.Status.State != platformv1alpha1.RemediationStateCompleted {
+		t.Errorf("expected state Completed after verification, got %q", updatedPlan.Status.State)
+	}
+	if updatedPlan.Status.CompletedAt == nil {
+		t.Error("expected completedAt to be set")
 	}
 }
 
@@ -280,13 +310,40 @@ func TestRemediationReconcile_RestartDeployment(t *testing.T) {
 		t.Error("expected restartedAt annotation to be set")
 	}
 
-	// Verify plan completed
+	// After executing, plan should be in Verifying state
 	var updatedPlan platformv1alpha1.RemediationPlan
 	if err := c.Get(ctx, types.NamespacedName{Name: "restart-plan", Namespace: "default"}, &updatedPlan); err != nil {
 		t.Fatalf("failed to get plan: %v", err)
 	}
+	if updatedPlan.Status.State != platformv1alpha1.RemediationStateVerifying {
+		t.Errorf("expected state Verifying, got %q", updatedPlan.Status.State)
+	}
+
+	// Simulate healthy deployment status for verification
+	if err := c.Get(ctx, types.NamespacedName{Name: "web-app", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get deployment: %v", err)
+	}
+	updated.Status.ReadyReplicas = 3
+	updated.Status.UpdatedReplicas = 3
+	updated.Status.Replicas = 3
+	updated.Status.UnavailableReplicas = 0
+	if err := c.Status().Update(ctx, &updated); err != nil {
+		t.Fatalf("failed to update deployment status: %v", err)
+	}
+
+	// Reconcile again: Verifying → Completed
+	_, err = r.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "restart-plan", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("verification reconcile failed: %v", err)
+	}
+
+	if err := c.Get(ctx, types.NamespacedName{Name: "restart-plan", Namespace: "default"}, &updatedPlan); err != nil {
+		t.Fatalf("failed to get plan: %v", err)
+	}
 	if updatedPlan.Status.State != platformv1alpha1.RemediationStateCompleted {
-		t.Errorf("expected state Completed, got %q", updatedPlan.Status.State)
+		t.Errorf("expected state Completed after verification, got %q", updatedPlan.Status.State)
 	}
 }
 

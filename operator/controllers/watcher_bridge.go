@@ -294,6 +294,30 @@ func (wb *WatcherBridge) pruneDedup() {
 	}
 }
 
+// InvalidateDedupForResource removes dedup entries matching a specific deployment+namespace,
+// allowing new alerts to generate fresh Anomalies. Called when an Issue reaches a terminal
+// state (Resolved/Escalated/Failed) so that recurrence is detected immediately.
+func (wb *WatcherBridge) InvalidateDedupForResource(deployment, namespace string) {
+	wb.mu.Lock()
+	defer wb.mu.Unlock()
+
+	for hash := range wb.seen {
+		// We can't reverse the hash, so instead compute all known alert type hashes
+		// and remove matches. Since we only have a few alert types, this is efficient.
+		for _, alertType := range knownAlertTypes {
+			candidate := fmt.Sprintf("%s|%s|%s", alertType, deployment, namespace)
+			h := sha256.Sum256([]byte(candidate))
+			if hash == fmt.Sprintf("%x", h[:8]) {
+				delete(wb.seen, hash)
+			}
+		}
+	}
+}
+
+var knownAlertTypes = []string{
+	"HighRestartCount", "OOMKilled", "PodNotReady", "DeploymentFailing", "CrashLoopBackOff",
+}
+
 func sanitizeK8sName(name string) string {
 	// Replace invalid characters with dashes
 	var b strings.Builder

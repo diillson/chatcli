@@ -581,7 +581,8 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 }
 
 func buildAnalysisPrompt(req *pb.AnalyzeIssueRequest) string {
-	return fmt.Sprintf(`You are a Kubernetes SRE expert. Analyze the following issue and provide a structured assessment with concrete remediation actions.
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf(`You are a Kubernetes SRE expert. Analyze the following issue and provide a structured assessment with concrete remediation actions.
 
 Issue Details:
 - Name: %s
@@ -590,7 +591,27 @@ Issue Details:
 - Signal Type: %s
 - Severity: %s
 - Description: %s
-- Risk Score: %d/100
+- Risk Score: %d/100`,
+		req.IssueName, req.Namespace, req.ResourceKind, req.ResourceName,
+		req.SignalType, req.Severity, req.Description, req.RiskScore))
+
+	if req.KubernetesContext != "" {
+		sb.WriteString(fmt.Sprintf(`
+
+Kubernetes Cluster Context:
+%s`, req.KubernetesContext))
+	}
+
+	if req.PreviousFailureContext != "" {
+		sb.WriteString(fmt.Sprintf(`
+
+Previous Remediation Attempts (FAILED — you MUST suggest a DIFFERENT strategy):
+%s
+
+IMPORTANT: The previous remediation attempts listed above have FAILED. Do NOT repeat the same actions. Analyze why they failed and suggest a fundamentally different approach.`, req.PreviousFailureContext))
+	}
+
+	sb.WriteString(`
 
 Available remediation actions (use ONLY these):
 - RestartDeployment: triggers a rolling restart (no params needed)
@@ -613,9 +634,9 @@ Rules:
 - confidence: float between 0.0 and 1.0
 - recommendations: human-readable text advice
 - actions: concrete remediation steps using ONLY the available actions listed above
-- Each action must have a description explaining WHY it is recommended`,
-		req.IssueName, req.Namespace, req.ResourceKind, req.ResourceName,
-		req.SignalType, req.Severity, req.Description, req.RiskScore)
+- Each action must have a description explaining WHY it is recommended`)
+
+	return sb.String()
 }
 
 type actionEntry struct {

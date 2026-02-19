@@ -105,11 +105,16 @@ spec:
                   enum:
                     - Pending
                     - Executing
+                    - Verifying
                     - Completed
                     - Failed
                     - RolledBack
                 startedAt:
                   description: Timestamp when execution started.
+                  type: string
+                  format: date-time
+                actionsCompletedAt:
+                  description: Timestamp when all actions finished and verification began.
                   type: string
                   format: date-time
                 completedAt:

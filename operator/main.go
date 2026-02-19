@@ -58,6 +58,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Shared gRPC client for server communication
+	zapLogger, _ := uberzap.NewProduction()
+	serverClient := controllers.NewServerClient(zapLogger)
+	defer serverClient.Close()
+
+	// WatcherBridge — polls server alerts and creates Anomaly CRs
+	watcherBridge := controllers.NewWatcherBridge(mgr.GetClient(), mgr.GetScheme(), serverClient, zapLogger)
+	if err := mgr.Add(watcherBridge); err != nil {
+		setupLog.Error(err, "unable to add WatcherBridge")
+		os.Exit(1)
+	}
+
 	if err = (&controllers.InstanceReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -67,8 +79,9 @@ func main() {
 	}
 
 	if err = (&controllers.IssueReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		DedupInvalidator: watcherBridge,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Issue")
 		os.Exit(1)
@@ -90,23 +103,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Shared gRPC client for server communication
-	zapLogger, _ := uberzap.NewProduction()
-	serverClient := controllers.NewServerClient(zapLogger)
-	defer serverClient.Close()
-
-	// WatcherBridge — polls server alerts and creates Anomaly CRs
-	watcherBridge := controllers.NewWatcherBridge(mgr.GetClient(), mgr.GetScheme(), serverClient, zapLogger)
-	if err := mgr.Add(watcherBridge); err != nil {
-		setupLog.Error(err, "unable to add WatcherBridge")
-		os.Exit(1)
-	}
-
 	// AIInsightReconciler — calls server AnalyzeIssue RPC to fill analysis
 	if err = (&controllers.AIInsightReconciler{
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
-		ServerClient: serverClient,
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		ServerClient:   serverClient,
+		ContextBuilder: controllers.NewKubernetesContextBuilder(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AIInsight")
 		os.Exit(1)

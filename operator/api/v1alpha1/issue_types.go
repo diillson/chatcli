@@ -58,6 +58,10 @@ type IssueSpec struct {
 	// Source that detected the issue.
 	Source IssueSource `json:"source"`
 
+	// SignalType is the type of signal that triggered the issue (e.g., "pod_restart", "oom_kill", "error_rate").
+	// +optional
+	SignalType string `json:"signalType,omitempty"`
+
 	// Resource affected by the issue.
 	Resource ResourceRef `json:"resource"`
 

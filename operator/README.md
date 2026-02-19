@@ -83,17 +83,20 @@ The operator implements a fully autonomous pipeline:
 ```
 1. DETECTION     WatcherBridge polls GetAlerts from ChatCLI Server every 30s
                  Creates Anomaly CRs for each new alert (dedup via SHA256)
+                 Dedup entries invalidated when Issue reaches terminal state
 
 2. CORRELATION   AnomalyReconciler correlates anomalies by resource+timewindow
-                 Creates/updates Issue CRs with risk scores and severity
+                 Creates/updates Issue CRs with risk scores, severity, and signalType
 
 3. ANALYSIS      IssueReconciler creates AIInsight CR
-                 AIInsightReconciler calls AnalyzeIssue RPC (LLM analysis)
+                 AIInsightReconciler collects K8s context (deployment status, pods,
+                   events, revision history) and calls AnalyzeIssue RPC
                  Returns: root cause, confidence, recommendations, suggested actions
 
-4. REMEDIATION   IssueReconciler creates RemediationPlan from:
-                   a) Matching Runbook (if exists) — OR
-                   b) AI-suggested actions (automatic fallback) — OR
+4. REMEDIATION   Runbook-first flow:
+                   a) Matching manual Runbook (tiered: SignalType+Severity+Kind,
+                      then Severity+Kind) — takes precedence
+                   b) Auto-generate Runbook from AI actions (reusable for future) — OR
                    c) Escalates if neither available
 
 5. EXECUTION     RemediationReconciler executes actions:
@@ -102,18 +105,19 @@ The operator implements a fully autonomous pipeline:
                    - RollbackDeployment (undo rollout)
                    - PatchConfig (update ConfigMap)
 
-6. RESOLUTION    On success → Issue resolved
-                 On failure → Retry (up to maxAttempts) → Escalate
+6. RESOLUTION    On success → Issue resolved, dedup entries invalidated
+                 On failure → Re-analysis with failure context (different strategy)
+                   → up to maxAttempts → Escalate
 ```
 
 ### Issue State Machine
 
 ```
 Detected → Analyzing → Remediating → Resolved
+                │  ↑         │
+                │  └─────────┘ Retry (re-analysis with failure context)
                 │            │
-                │            └──→ Retry (up to N attempts)
-                │            │
-                └──→ Escalated ←──┘
+                └──→ Escalated ←──┘ (max attempts or no actions)
 ```
 
 ## CRD Examples
@@ -180,6 +184,7 @@ metadata:
 spec:
   severity: high
   source: watcher
+  signalType: pod_restart       # Propagated from Anomaly for tiered Runbook matching
   description: "Correlated incident: pod_restart on api-gateway"
   resource:
     kind: Deployment
@@ -223,7 +228,7 @@ status:
   generatedAt: "2026-02-16T10:31:00Z"
 ```
 
-### RemediationPlan (Auto-created from AI or Runbook)
+### RemediationPlan (Auto-created from Runbook)
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -235,7 +240,7 @@ spec:
   issueRef:
     name: api-gateway-pod-restart-1771276354
   attempt: 1
-  strategy: "Attempt 1 (AI-generated): High restart count caused by OOMKilled"
+  strategy: "Attempt 1 via runbook 'auto-pod-restart-high-deployment'. AI analysis: High restart count caused by OOMKilled..."
   actions:
     - type: RestartDeployment
     - type: ScaleDeployment
@@ -306,20 +311,26 @@ The operator correlates anomalies into issues using:
 - **Severity classification**: Based on risk score (Critical >= 80, High >= 60, Medium >= 40, Low < 40)
 - **Incident ID**: Deterministic hash from resource + signal type for dedup
 
-## AI-Generated Remediation (No Runbooks Required)
+## Runbook-First Remediation
 
-When no manual Runbook matches an issue, the operator uses AI-suggested actions:
+The operator uses a Runbook-first approach where all remediation goes through Runbook CRs:
 
-1. `AnalyzeIssue` RPC sends issue context to the LLM
-2. LLM returns structured JSON with `actions` array
-3. Each action maps to a `RemediationActionType`:
-   - `ScaleDeployment` — adjust replica count
-   - `RestartDeployment` — rollout restart
-   - `RollbackDeployment` — undo last rollout
-   - `PatchConfig` — update ConfigMap keys
-   - `Custom` — unknown action (blocked by safety checks)
+1. **Manual Runbook match**: Tiered matching — first by `SignalType + Severity + ResourceKind`, then by `Severity + ResourceKind`
+2. **Auto-generated Runbook**: If no manual Runbook exists, AI suggested actions are materialized as a reusable Runbook CR (labeled `platform.chatcli.io/auto-generated=true`)
+3. **RemediationPlan**: Always created from a Runbook (manual or auto-generated)
+4. **Reuse**: Auto-generated Runbooks are reused for future issues matching the same trigger
 
-Priority: **Runbook > AI Actions > Escalation**
+**K8s Context Enrichment**: The AI receives full cluster context via `KubernetesContextBuilder`:
+- Deployment status (replicas, conditions, images)
+- Pod details (up to 5 pods: phase, restarts, container states)
+- Recent events (last 15 Warning/Normal events)
+- Revision history (last 5 ReplicaSet revisions with image diffs)
+
+**Retry with Strategy Escalation**: When remediation fails, the operator triggers AI re-analysis with failure evidence from previous attempts. The AI is instructed to suggest a fundamentally different strategy.
+
+**Supported actions**: `ScaleDeployment`, `RestartDeployment`, `RollbackDeployment`, `PatchConfig`, `Custom` (blocked by safety checks)
+
+Priority: **Manual Runbook > Auto-generated Runbook > Escalation**
 
 ## Development
 

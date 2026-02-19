@@ -45,6 +45,8 @@ func init() {
 	)
 }
 
+const verificationTimeout = 90 * time.Second
+
 // RemediationReconciler reconciles RemediationPlan objects.
 type RemediationReconciler struct {
 	client.Client
@@ -73,6 +75,8 @@ func (r *RemediationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.handlePending(ctx, &plan)
 	case platformv1alpha1.RemediationStateExecuting:
 		return r.handleExecuting(ctx, &plan)
+	case platformv1alpha1.RemediationStateVerifying:
+		return r.handleVerifying(ctx, &plan)
 	case platformv1alpha1.RemediationStateCompleted, platformv1alpha1.RemediationStateFailed, platformv1alpha1.RemediationStateRolledBack:
 		// Terminal states
 		return ctrl.Result{}, nil
@@ -168,18 +172,105 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 		remediationsTotal.WithLabelValues(string(action.Type), "success").Inc()
 	}
 
-	// All actions completed successfully
+	// All actions executed — transition to Verifying to confirm deployment health.
 	now := metav1.Now()
-	plan.Status.State = platformv1alpha1.RemediationStateCompleted
-	plan.Status.CompletedAt = &now
-	plan.Status.Result = "All remediation actions completed successfully"
+	plan.Status.State = platformv1alpha1.RemediationStateVerifying
+	plan.Status.ActionsCompletedAt = &now
 	plan.Status.Evidence = evidence
 
-	if plan.Status.StartedAt != nil {
-		remediationDuration.Observe(now.Sub(plan.Status.StartedAt.Time).Seconds())
+	log.Info("Actions executed, verifying deployment health", "plan", plan.Name)
+
+	if err := r.Status().Update(ctx, plan); err != nil {
+		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, r.Status().Update(ctx, plan)
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+func (r *RemediationReconciler) handleVerifying(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	// Get the parent Issue to find target resource.
+	var issue platformv1alpha1.Issue
+	if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &issue); err != nil {
+		if errors.IsNotFound(err) {
+			plan.Status.State = platformv1alpha1.RemediationStateFailed
+			plan.Status.Result = "Parent issue not found during verification"
+			return ctrl.Result{}, r.Status().Update(ctx, plan)
+		}
+		return ctrl.Result{}, err
+	}
+
+	resource := issue.Spec.Resource
+
+	// Check deployment health.
+	var deploy appsv1.Deployment
+	if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &deploy); err != nil {
+		if errors.IsNotFound(err) {
+			plan.Status.State = platformv1alpha1.RemediationStateFailed
+			plan.Status.Result = fmt.Sprintf("Deployment %s/%s not found during verification", resource.Namespace, resource.Name)
+			return ctrl.Result{}, r.Status().Update(ctx, plan)
+		}
+		return ctrl.Result{}, err
+	}
+
+	desired := int32(1)
+	if deploy.Spec.Replicas != nil {
+		desired = *deploy.Spec.Replicas
+	}
+
+	healthy := deploy.Status.ReadyReplicas >= desired &&
+		deploy.Status.UpdatedReplicas >= desired &&
+		deploy.Status.UnavailableReplicas == 0
+
+	if healthy {
+		now := metav1.Now()
+		plan.Status.State = platformv1alpha1.RemediationStateCompleted
+		plan.Status.CompletedAt = &now
+		plan.Status.Result = fmt.Sprintf("Remediation verified: %d/%d replicas ready, deployment healthy",
+			deploy.Status.ReadyReplicas, desired)
+		plan.Status.Evidence = append(plan.Status.Evidence, platformv1alpha1.EvidenceItem{
+			Type:      "verification_passed",
+			Data:      fmt.Sprintf("ReadyReplicas=%d UpdatedReplicas=%d UnavailableReplicas=%d", deploy.Status.ReadyReplicas, deploy.Status.UpdatedReplicas, deploy.Status.UnavailableReplicas),
+			Timestamp: now,
+		})
+
+		if plan.Status.StartedAt != nil {
+			remediationDuration.Observe(now.Sub(plan.Status.StartedAt.Time).Seconds())
+		}
+
+		log.Info("Verification passed, deployment healthy", "plan", plan.Name, "readyReplicas", deploy.Status.ReadyReplicas)
+		return ctrl.Result{}, r.Status().Update(ctx, plan)
+	}
+
+	// Check if verification timeout exceeded.
+	if plan.Status.ActionsCompletedAt != nil && time.Since(plan.Status.ActionsCompletedAt.Time) > verificationTimeout {
+		now := metav1.Now()
+		plan.Status.State = platformv1alpha1.RemediationStateFailed
+		plan.Status.CompletedAt = &now
+		plan.Status.Result = fmt.Sprintf("Verification failed: deployment unhealthy after %s (ready=%d/%d, unavailable=%d)",
+			verificationTimeout, deploy.Status.ReadyReplicas, desired, deploy.Status.UnavailableReplicas)
+		plan.Status.Evidence = append(plan.Status.Evidence, platformv1alpha1.EvidenceItem{
+			Type:      "verification_failed",
+			Data:      fmt.Sprintf("ReadyReplicas=%d UpdatedReplicas=%d UnavailableReplicas=%d desired=%d", deploy.Status.ReadyReplicas, deploy.Status.UpdatedReplicas, deploy.Status.UnavailableReplicas, desired),
+			Timestamp: now,
+		})
+
+		if plan.Status.StartedAt != nil {
+			remediationDuration.Observe(now.Sub(plan.Status.StartedAt.Time).Seconds())
+		}
+		remediationsTotal.WithLabelValues("verification", "failed").Inc()
+
+		log.Info("Verification failed, deployment still unhealthy", "plan", plan.Name,
+			"readyReplicas", deploy.Status.ReadyReplicas, "unavailable", deploy.Status.UnavailableReplicas)
+		return ctrl.Result{}, r.Status().Update(ctx, plan)
+	}
+
+	// Still waiting — requeue.
+	log.Info("Verifying deployment health", "plan", plan.Name,
+		"readyReplicas", deploy.Status.ReadyReplicas, "desired", desired,
+		"elapsed", time.Since(plan.Status.ActionsCompletedAt.Time).Round(time.Second))
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
 // executeScaleDeployment patches the target deployment's replicas.

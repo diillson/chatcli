@@ -70,7 +70,8 @@ func TestAlertHash_Deterministic(t *testing.T) {
 		t.Errorf("hash should be deterministic: %q != %q", h1, h2)
 	}
 
-	// Different timestamp in different minute bucket should produce different hash
+	// Hash is based on type|deployment|namespace only (not timestamp),
+	// so different timestamps for the same resource produce the same hash.
 	alert2 := &pb.WatcherAlert{
 		Type:          "HighRestartCount",
 		Object:        "pod-abc",
@@ -79,8 +80,21 @@ func TestAlertHash_Deterministic(t *testing.T) {
 		TimestampUnix: 1700000000 + 120, // 2 minutes later
 	}
 	h3 := alertHash(alert2)
-	if h1 == h3 {
-		t.Error("different minute buckets should produce different hashes")
+	if h1 != h3 {
+		t.Error("same type/deployment/namespace should produce same hash regardless of timestamp")
+	}
+
+	// Different deployment should produce different hash
+	alert3 := &pb.WatcherAlert{
+		Type:          "HighRestartCount",
+		Object:        "pod-abc",
+		Deployment:    "api",
+		Namespace:     "default",
+		TimestampUnix: 1700000000,
+	}
+	h4 := alertHash(alert3)
+	if h1 == h4 {
+		t.Error("different deployments should produce different hashes")
 	}
 }
 

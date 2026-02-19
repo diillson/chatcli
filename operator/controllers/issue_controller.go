@@ -3,7 +3,9 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -55,10 +57,16 @@ func init() {
 	)
 }
 
+// DedupInvalidator allows clearing dedup entries when issues reach terminal states.
+type DedupInvalidator interface {
+	InvalidateDedupForResource(deployment, namespace string)
+}
+
 // IssueReconciler reconciles Issue objects.
 type IssueReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme            *runtime.Scheme
+	DedupInvalidator  DedupInvalidator // optional: watcher bridge for dedup invalidation
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=issues,verbs=get;list;watch;create;update;patch;delete
@@ -68,7 +76,7 @@ type IssueReconciler struct {
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=remediationplans/status,verbs=get
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=aiinsights,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=aiinsights/status,verbs=get
-// +kubebuilder:rbac:groups=platform.chatcli.io,resources=runbooks,verbs=get;list;watch
+// +kubebuilder:rbac:groups=platform.chatcli.io,resources=runbooks,verbs=get;list;watch;create;update;patch
 
 func (r *IssueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
@@ -179,7 +187,8 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 }
 
 // handleAnalyzing processes an issue in the Analyzing state.
-// Checks if AIInsight is ready, finds matching Runbook, creates RemediationPlan.
+// Runbook-first flow: manual runbook has precedence, otherwise generates runbook from AI.
+// All remediation plans are created from a Runbook (manual or auto-generated).
 func (r *IssueReconciler) handleAnalyzing(ctx context.Context, issue *platformv1alpha1.Issue) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.Info("Handling Analyzing issue", "name", issue.Name)
@@ -199,50 +208,59 @@ func (r *IssueReconciler) handleAnalyzing(ctx context.Context, issue *platformv1
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	// Find matching Runbook
+	// 1. Find manual runbook (has precedence)
 	runbook, err := r.findMatchingRunbook(ctx, issue)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if runbook == nil {
-		// No Runbook — try AI-suggested actions as fallback
-		if len(insight.Status.SuggestedActions) > 0 {
-			log.Info("No runbook found, using AI-suggested actions", "issue", issue.Name, "actions", len(insight.Status.SuggestedActions))
-			if err := r.createRemediationPlanFromAI(ctx, issue, &insight, 1); err != nil {
-				return ctrl.Result{}, err
-			}
-		} else {
-			// No Runbook and no AI actions — escalate
-			log.Info("No runbook or AI actions found, escalating", "issue", issue.Name)
-			issue.Status.State = platformv1alpha1.IssueStateEscalated
-			meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
-				Type:               "Escalated",
-				Status:             metav1.ConditionTrue,
-				Reason:             "NoRunbookOrAIActions",
-				Message:            "No matching runbook and no AI-suggested actions for automatic remediation",
-				LastTransitionTime: metav1.Now(),
-			})
-			return ctrl.Result{}, r.Status().Update(ctx, issue)
-		}
-	} else {
-		// Create RemediationPlan from Runbook
-		if err := r.createRemediationPlan(ctx, issue, runbook, &insight, 1); err != nil {
-			return ctrl.Result{}, err
-		}
+	if runbook != nil {
+		// Manual runbook found — use it
+		log.Info("Using manual runbook", "issue", issue.Name, "runbook", runbook.Name)
 		if runbook.Spec.MaxAttempts > 0 {
 			issue.Status.MaxRemediationAttempts = runbook.Spec.MaxAttempts
 		}
+	} else if len(insight.Status.SuggestedActions) > 0 {
+		// 2. No manual runbook — generate one from AI
+		log.Info("No manual runbook found, generating from AI", "issue", issue.Name, "actions", len(insight.Status.SuggestedActions))
+		runbook, err = r.generateRunbookFromAI(ctx, issue, &insight)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("generating runbook from AI: %w", err)
+		}
+		log.Info("Auto-generated runbook", "runbook", runbook.Name)
+	} else {
+		// 3. No runbook and no AI actions — escalate
+		log.Info("No runbook or AI actions found, escalating", "issue", issue.Name)
+		issue.Status.State = platformv1alpha1.IssueStateEscalated
+		meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
+			Type:               "Escalated",
+			Status:             metav1.ConditionTrue,
+			Reason:             "NoRunbookOrAIActions",
+			Message:            "No matching runbook and no AI-suggested actions for automatic remediation",
+			LastTransitionTime: metav1.Now(),
+		})
+		return ctrl.Result{}, r.Status().Update(ctx, issue)
+	}
+
+	// Determine attempt number: use existing if this is a re-analysis, otherwise start at 1
+	attempt := issue.Status.RemediationAttempts
+	if attempt == 0 {
+		attempt = 1
+	}
+
+	// Create RemediationPlan from Runbook (manual or auto-generated)
+	if err := r.createRemediationPlan(ctx, issue, runbook, &insight, attempt); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Transition to Remediating
 	issue.Status.State = platformv1alpha1.IssueStateRemediating
-	issue.Status.RemediationAttempts = 1
+	issue.Status.RemediationAttempts = attempt
 	meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
 		Type:               "Remediating",
 		Status:             metav1.ConditionTrue,
 		Reason:             "RemediationPlanCreated",
-		Message:            fmt.Sprintf("Remediation attempt 1/%d started", issue.Status.MaxRemediationAttempts),
+		Message:            fmt.Sprintf("Remediation attempt %d/%d started (runbook: %s)", attempt, issue.Status.MaxRemediationAttempts, runbook.Name),
 		LastTransitionTime: metav1.Now(),
 	})
 
@@ -291,61 +309,43 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 			issueResolutionDuration.Observe(now.Sub(issue.Status.DetectedAt.Time).Seconds())
 		}
 
+		// Invalidate dedup so new alerts for same resource are not silently dropped
+		r.invalidateDedup(issue)
+
 		return ctrl.Result{}, r.Status().Update(ctx, issue)
 
 	case platformv1alpha1.RemediationStateFailed, platformv1alpha1.RemediationStateRolledBack:
 		// Check if we can retry
 		if issue.Status.RemediationAttempts < issue.Status.MaxRemediationAttempts {
 			nextAttempt := issue.Status.RemediationAttempts + 1
-			log.Info("Remediation failed, retrying", "attempt", nextAttempt, "max", issue.Status.MaxRemediationAttempts)
+			log.Info("Remediation failed, requesting re-analysis with failure context",
+				"attempt", nextAttempt, "max", issue.Status.MaxRemediationAttempts)
 
-			// Get existing insight
-			var insight platformv1alpha1.AIInsight
-			insightName := issue.Name + "-insight"
-			if err := r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: issue.Namespace}, &insight); err != nil {
-				return ctrl.Result{}, err
+			// Collect failure evidence from all failed plans
+			failureCtx := r.collectFailureEvidence(ctx, issue)
+
+			// Request re-analysis: clears insight so AIInsightReconciler re-runs
+			if err := r.requestReanalysis(ctx, issue, failureCtx); err != nil {
+				log.Error(err, "Failed to request re-analysis, falling back to existing runbook")
+				// Fallback: use existing runbook without re-analysis
+				return r.retryWithExistingRunbook(ctx, issue, nextAttempt)
 			}
 
-			// Find matching runbook for next attempt
-			runbook, err := r.findMatchingRunbook(ctx, issue)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-
-			if runbook != nil {
-				if err := r.createRemediationPlan(ctx, issue, runbook, &insight, nextAttempt); err != nil {
-					return ctrl.Result{}, err
-				}
-			} else if len(insight.Status.SuggestedActions) > 0 {
-				// Fallback to AI-suggested actions for retry
-				if err := r.createRemediationPlanFromAI(ctx, issue, &insight, nextAttempt); err != nil {
-					return ctrl.Result{}, err
-				}
-			} else {
-				issue.Status.State = platformv1alpha1.IssueStateEscalated
-				meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
-					Type:               "Escalated",
-					Status:             metav1.ConditionTrue,
-					Reason:             "NoRunbookOrAIActionsForRetry",
-					Message:            "No runbook or AI actions found for retry attempt",
-					LastTransitionTime: metav1.Now(),
-				})
-				return ctrl.Result{}, r.Status().Update(ctx, issue)
-			}
-
+			// Transition back to Analyzing for re-analysis
+			issue.Status.State = platformv1alpha1.IssueStateAnalyzing
 			issue.Status.RemediationAttempts = nextAttempt
 			meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
-				Type:               "Remediating",
+				Type:               "Analyzing",
 				Status:             metav1.ConditionTrue,
-				Reason:             "RetryingRemediation",
-				Message:            fmt.Sprintf("Remediation attempt %d/%d", nextAttempt, issue.Status.MaxRemediationAttempts),
+				Reason:             "ReanalysisRequested",
+				Message:            fmt.Sprintf("Re-analyzing with failure context from attempt %d", nextAttempt-1),
 				LastTransitionTime: metav1.Now(),
 			})
 
 			if err := r.Status().Update(ctx, issue); err != nil {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 
 		// Max attempts reached - escalate
@@ -361,6 +361,9 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 
 		issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateEscalated)).Inc()
 
+		// Invalidate dedup so new alerts for same resource are not silently dropped
+		r.invalidateDedup(issue)
+
 		return ctrl.Result{}, r.Status().Update(ctx, issue)
 
 	default:
@@ -369,7 +372,9 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 	}
 }
 
-// findMatchingRunbook finds a Runbook matching the issue's signal type, severity, and resource kind.
+// findMatchingRunbook finds a Runbook matching the issue using tiered matching:
+// Tier 1 (preferred): SignalType + Severity + ResourceKind (exact match)
+// Tier 2 (fallback):  Severity + ResourceKind (without signal match)
 func (r *IssueReconciler) findMatchingRunbook(ctx context.Context, issue *platformv1alpha1.Issue) (*platformv1alpha1.Runbook, error) {
 	var runbooks platformv1alpha1.RunbookList
 	if err := r.List(ctx, &runbooks, client.InNamespace(issue.Namespace)); err != nil {
@@ -384,15 +389,32 @@ func (r *IssueReconciler) findMatchingRunbook(ctx context.Context, issue *platfo
 
 	candidates := append(runbooks.Items, allRunbooks.Items...)
 
+	// Resolve signal type: prefer Spec.SignalType, fallback to label
+	signalType := issue.Spec.SignalType
+	if signalType == "" && issue.Labels != nil {
+		signalType = issue.Labels["platform.chatcli.io/signal"]
+	}
+
+	// Tier 1: SignalType + Severity + ResourceKind
+	var tier2Match *platformv1alpha1.Runbook
 	for i := range candidates {
 		rb := &candidates[i]
-		if rb.Spec.Trigger.Severity == issue.Spec.Severity &&
-			rb.Spec.Trigger.ResourceKind == issue.Spec.Resource.Kind {
+		if rb.Spec.Trigger.Severity != issue.Spec.Severity ||
+			rb.Spec.Trigger.ResourceKind != issue.Spec.Resource.Kind {
+			continue
+		}
+		// Severity + ResourceKind match
+		if signalType != "" && string(rb.Spec.Trigger.SignalType) == signalType {
+			// Tier 1 exact match — return immediately
 			return rb, nil
+		}
+		// Tier 2 match — save as fallback
+		if tier2Match == nil {
+			tier2Match = rb
 		}
 	}
 
-	return nil, nil
+	return tier2Match, nil
 }
 
 // createRemediationPlan creates a RemediationPlan from a Runbook.
@@ -419,10 +441,10 @@ func (r *IssueReconciler) createRemediationPlan(ctx context.Context, issue *plat
 		})
 	}
 
-	// Build strategy from AI insight
-	strategy := fmt.Sprintf("Attempt %d: %s", attempt, runbook.Spec.Steps[0].Name)
+	// Build strategy with full context (no truncation)
+	strategy := fmt.Sprintf("Attempt %d via runbook '%s': %s", attempt, runbook.Name, runbook.Spec.Description)
 	if insight.Status.Analysis != "" {
-		strategy = fmt.Sprintf("Attempt %d based on AI analysis: %s", attempt, insight.Status.Recommendations)
+		strategy = fmt.Sprintf("Attempt %d via runbook '%s'. AI analysis: %s", attempt, runbook.Name, insight.Status.Analysis)
 	}
 
 	plan := &platformv1alpha1.RemediationPlan{
@@ -453,50 +475,89 @@ func (r *IssueReconciler) createRemediationPlan(ctx context.Context, issue *plat
 	return err
 }
 
-// createRemediationPlanFromAI creates a RemediationPlan from AI-suggested actions (when no Runbook exists).
-func (r *IssueReconciler) createRemediationPlanFromAI(ctx context.Context, issue *platformv1alpha1.Issue, insight *platformv1alpha1.AIInsight, attempt int32) error {
-	planName := fmt.Sprintf("%s-plan-%d", issue.Name, attempt)
+// generateRunbookFromAI materializes AI-suggested actions as a reusable Runbook.
+// The runbook can be matched by findMatchingRunbook on future occurrences of the same issue type.
+func (r *IssueReconciler) generateRunbookFromAI(ctx context.Context, issue *platformv1alpha1.Issue, insight *platformv1alpha1.AIInsight) (*platformv1alpha1.Runbook, error) {
+	// Resolve signal type
+	signalType := issue.Spec.SignalType
+	if signalType == "" && issue.Labels != nil {
+		signalType = issue.Labels["platform.chatcli.io/signal"]
+	}
 
-	var actions []platformv1alpha1.RemediationAction
+	// Build a deterministic name: auto-{signal}-{severity}-{kind}
+	rbName := sanitizeRunbookName(fmt.Sprintf("auto-%s-%s-%s",
+		signalType, issue.Spec.Severity, strings.ToLower(issue.Spec.Resource.Kind)))
+
+	// Convert AI suggested actions to runbook steps
+	var steps []platformv1alpha1.RunbookStep
 	for _, sa := range insight.Status.SuggestedActions {
-		actionType := mapActionType(sa.Action)
-		actions = append(actions, platformv1alpha1.RemediationAction{
-			Type:   actionType,
-			Params: sa.Params,
+		steps = append(steps, platformv1alpha1.RunbookStep{
+			Name:        sa.Name,
+			Action:      sa.Action,
+			Description: sa.Description,
+			Params:      sa.Params,
 		})
 	}
 
-	strategy := fmt.Sprintf("Attempt %d (AI-generated): %s", attempt, insight.Status.Analysis)
-	if len(strategy) > 256 {
-		strategy = strategy[:253] + "..."
+	// Build full description from AI analysis (no truncation)
+	description := insight.Status.Analysis
+	if len(insight.Status.Recommendations) > 0 {
+		description += "\n\nRecommendations:\n- " + strings.Join(insight.Status.Recommendations, "\n- ")
 	}
 
-	plan := &platformv1alpha1.RemediationPlan{
+	runbook := &platformv1alpha1.Runbook{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      planName,
+			Name:      rbName,
 			Namespace: issue.Namespace,
 		},
 	}
 
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, plan, func() error {
-		if err := controllerutil.SetControllerReference(issue, plan, r.Scheme); err != nil {
-			return err
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, runbook, func() error {
+		// Set labels for identification
+		if runbook.Labels == nil {
+			runbook.Labels = make(map[string]string)
 		}
-		plan.Spec = platformv1alpha1.RemediationPlanSpec{
-			IssueRef: platformv1alpha1.IssueRef{Name: issue.Name},
-			Attempt:  attempt,
-			Strategy: strategy,
-			Actions:  actions,
-			SafetyConstraints: []string{
-				"No delete operations",
-				"No destructive changes",
-				"Rollback on failure",
+		runbook.Labels["platform.chatcli.io/auto-generated"] = "true"
+		runbook.Labels["platform.chatcli.io/source-issue"] = issue.Name
+
+		runbook.Spec = platformv1alpha1.RunbookSpec{
+			Description: description,
+			Trigger: platformv1alpha1.RunbookTrigger{
+				SignalType:   platformv1alpha1.AnomalySignalType(signalType),
+				Severity:     issue.Spec.Severity,
+				ResourceKind: issue.Spec.Resource.Kind,
 			},
+			Steps:       steps,
+			MaxAttempts: 3,
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
-	return err
+	return runbook, nil
+}
+
+// sanitizeRunbookName produces a Kubernetes-compliant name (lowercase, max 63 chars).
+var k8sNameRegex = regexp.MustCompile(`[^a-z0-9-]`)
+
+func sanitizeRunbookName(name string) string {
+	name = strings.ToLower(name)
+	name = strings.ReplaceAll(name, "_", "-")
+	name = k8sNameRegex.ReplaceAllString(name, "")
+	// Remove consecutive dashes
+	for strings.Contains(name, "--") {
+		name = strings.ReplaceAll(name, "--", "-")
+	}
+	name = strings.Trim(name, "-")
+	if len(name) > 63 {
+		name = name[:63]
+	}
+	if name == "" {
+		name = "auto-runbook"
+	}
+	return name
 }
 
 // mapActionType converts a string action name to RemediationActionType.
@@ -539,6 +600,121 @@ func (r *IssueReconciler) findLatestRemediationPlan(ctx context.Context, issue *
 	})
 
 	return &matching[0], nil
+}
+
+// collectFailureEvidence builds a text summary of all failed remediation plans for an issue.
+func (r *IssueReconciler) collectFailureEvidence(ctx context.Context, issue *platformv1alpha1.Issue) string {
+	var plans platformv1alpha1.RemediationPlanList
+	if err := r.List(ctx, &plans, client.InNamespace(issue.Namespace)); err != nil {
+		return fmt.Sprintf("Error listing plans: %v", err)
+	}
+
+	var sb strings.Builder
+	for _, p := range plans.Items {
+		if p.Spec.IssueRef.Name != issue.Name {
+			continue
+		}
+		if p.Status.State != platformv1alpha1.RemediationStateFailed &&
+			p.Status.State != platformv1alpha1.RemediationStateRolledBack {
+			continue
+		}
+
+		sb.WriteString(fmt.Sprintf("Attempt %d (state=%s):\n", p.Spec.Attempt, p.Status.State))
+		sb.WriteString(fmt.Sprintf("  Strategy: %s\n", p.Spec.Strategy))
+		sb.WriteString(fmt.Sprintf("  Result: %s\n", p.Status.Result))
+		for _, a := range p.Spec.Actions {
+			sb.WriteString(fmt.Sprintf("  Action: %s params=%v\n", a.Type, a.Params))
+		}
+		for _, ev := range p.Status.Evidence {
+			sb.WriteString(fmt.Sprintf("  Evidence: [%s] %s\n", ev.Type, ev.Data))
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// requestReanalysis clears the AIInsight analysis and sets failure context annotation,
+// triggering the AIInsightReconciler to re-analyze with failure context.
+func (r *IssueReconciler) requestReanalysis(ctx context.Context, issue *platformv1alpha1.Issue, failureContext string) error {
+	insightName := issue.Name + "-insight"
+	var insight platformv1alpha1.AIInsight
+	if err := r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: issue.Namespace}, &insight); err != nil {
+		return fmt.Errorf("getting AIInsight for re-analysis: %w", err)
+	}
+
+	// Set failure context annotation
+	if insight.Annotations == nil {
+		insight.Annotations = make(map[string]string)
+	}
+	insight.Annotations["platform.chatcli.io/failure-context"] = failureContext
+
+	if err := r.Update(ctx, &insight); err != nil {
+		return fmt.Errorf("updating AIInsight annotations: %w", err)
+	}
+
+	// Clear analysis to trigger re-analysis
+	insight.Status.Analysis = ""
+	insight.Status.SuggestedActions = nil
+	insight.Status.Recommendations = nil
+	insight.Status.Confidence = 0
+
+	return r.Status().Update(ctx, &insight)
+}
+
+// retryWithExistingRunbook is a fallback that retries with the current runbook
+// when re-analysis fails.
+func (r *IssueReconciler) retryWithExistingRunbook(ctx context.Context, issue *platformv1alpha1.Issue, nextAttempt int32) (ctrl.Result, error) {
+	var insight platformv1alpha1.AIInsight
+	insightName := issue.Name + "-insight"
+	if err := r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: issue.Namespace}, &insight); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	runbook, err := r.findMatchingRunbook(ctx, issue)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if runbook == nil {
+		issue.Status.State = platformv1alpha1.IssueStateEscalated
+		meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
+			Type:               "Escalated",
+			Status:             metav1.ConditionTrue,
+			Reason:             "NoRunbookForRetry",
+			Message:            "No runbook found for retry attempt",
+			LastTransitionTime: metav1.Now(),
+		})
+		return ctrl.Result{}, r.Status().Update(ctx, issue)
+	}
+
+	if err := r.createRemediationPlan(ctx, issue, runbook, &insight, nextAttempt); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	issue.Status.RemediationAttempts = nextAttempt
+	meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
+		Type:               "Remediating",
+		Status:             metav1.ConditionTrue,
+		Reason:             "RetryingRemediation",
+		Message:            fmt.Sprintf("Remediation attempt %d/%d (runbook: %s, fallback)", nextAttempt, issue.Status.MaxRemediationAttempts, runbook.Name),
+		LastTransitionTime: metav1.Now(),
+	})
+
+	if err := r.Status().Update(ctx, issue); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+}
+
+// invalidateDedup clears dedup entries for the issue's resource so new alerts are not dropped.
+func (r *IssueReconciler) invalidateDedup(issue *platformv1alpha1.Issue) {
+	if r.DedupInvalidator != nil {
+		r.DedupInvalidator.InvalidateDedupForResource(
+			issue.Spec.Resource.Name,
+			issue.Spec.Resource.Namespace,
+		)
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

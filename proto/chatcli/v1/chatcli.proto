@@ -214,6 +214,8 @@ message AnalyzeIssueRequest {
   int32 risk_score = 8;
   string provider = 9;        // optional: override LLM provider
   string model = 10;          // optional: override LLM model
+  string kubernetes_context = 11;         // deployment status, pods, events, revision history
+  string previous_failure_context = 12;   // results from previous remediation attempts (for retries)
 }
 
 message AnalyzeIssueResponse {

@@ -163,19 +163,19 @@ func TestFullPipeline_AnomalyToResolution(t *testing.T) {
 		t.Fatalf("remediation reconcile (pending→executing) failed: %v", err)
 	}
 
-	// Step 6: RemediationReconciler: Executing → Completed (executes actions)
+	// Step 6: RemediationReconciler: Executing → Verifying (executes actions, waits for health)
 	_, err = remediationR.Reconcile(ctx, ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: planName, Namespace: "default"},
 	})
 	if err != nil {
-		t.Fatalf("remediation reconcile (executing→completed) failed: %v", err)
+		t.Fatalf("remediation reconcile (executing→verifying) failed: %v", err)
 	}
 
 	if err := c.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &plan); err != nil {
 		t.Fatalf("failed to get plan: %v", err)
 	}
-	if plan.Status.State != platformv1alpha1.RemediationStateCompleted {
-		t.Fatalf("expected plan Completed, got %s", plan.Status.State)
+	if plan.Status.State != platformv1alpha1.RemediationStateVerifying {
+		t.Fatalf("expected plan Verifying, got %s", plan.Status.State)
 	}
 
 	// Verify deployment was scaled
@@ -185,6 +185,30 @@ func TestFullPipeline_AnomalyToResolution(t *testing.T) {
 	}
 	if *updatedDeploy.Spec.Replicas != 4 {
 		t.Errorf("expected deployment scaled to 4, got %d", *updatedDeploy.Spec.Replicas)
+	}
+
+	// Simulate healthy deployment status for verification
+	updatedDeploy.Status.ReadyReplicas = 4
+	updatedDeploy.Status.UpdatedReplicas = 4
+	updatedDeploy.Status.Replicas = 4
+	updatedDeploy.Status.UnavailableReplicas = 0
+	if err := c.Status().Update(ctx, &updatedDeploy); err != nil {
+		t.Fatalf("failed to update deployment status: %v", err)
+	}
+
+	// Step 6b: RemediationReconciler: Verifying → Completed (deployment healthy)
+	_, err = remediationR.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: planName, Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("remediation reconcile (verifying→completed) failed: %v", err)
+	}
+
+	if err := c.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &plan); err != nil {
+		t.Fatalf("failed to get plan: %v", err)
+	}
+	if plan.Status.State != platformv1alpha1.RemediationStateCompleted {
+		t.Fatalf("expected plan Completed, got %s", plan.Status.State)
 	}
 
 	// Step 7: IssueReconciler: Remediating → Resolved
@@ -284,7 +308,7 @@ func TestFullPipeline_AnomalyToEscalation(t *testing.T) {
 		t.Fatalf("issue reconcile (analyzing→remediating) failed: %v", err)
 	}
 
-	// Simulate 3 failed remediation attempts
+	// Simulate 3 failed remediation attempts with re-analysis cycle
 	for attempt := 1; attempt <= 3; attempt++ {
 		planName := fmt.Sprintf("%s-plan-%d", issueName, attempt)
 		var plan platformv1alpha1.RemediationPlan
@@ -294,14 +318,14 @@ func TestFullPipeline_AnomalyToEscalation(t *testing.T) {
 
 		// Mark plan as failed
 		plan.Status.State = platformv1alpha1.RemediationStateFailed
-		plan.Status.Result = "Action did not resolve the issue"
+		plan.Status.Result = fmt.Sprintf("Action did not resolve the issue (attempt %d)", attempt)
 		now := metav1.Now()
 		plan.Status.CompletedAt = &now
 		if err := c.Status().Update(ctx, &plan); err != nil {
 			t.Fatalf("failed to update plan status: %v", err)
 		}
 
-		// Reconcile issue
+		// Reconcile issue: Remediating → Analyzing (re-analysis) or Escalated (final attempt)
 		_, err = issueR.Reconcile(ctx, ctrl.Request{
 			NamespacedName: types.NamespacedName{Name: issueName, Namespace: "default"},
 		})
@@ -315,11 +339,30 @@ func TestFullPipeline_AnomalyToEscalation(t *testing.T) {
 		}
 
 		if attempt < 3 {
-			if issue.Status.State != platformv1alpha1.IssueStateRemediating {
-				t.Fatalf("attempt %d: expected Remediating, got %s", attempt, issue.Status.State)
+			// Should transition to Analyzing for re-analysis
+			if issue.Status.State != platformv1alpha1.IssueStateAnalyzing {
+				t.Fatalf("attempt %d: expected Analyzing (re-analysis), got %s", attempt, issue.Status.State)
 			}
 			if issue.Status.RemediationAttempts != int32(attempt+1) {
 				t.Fatalf("attempt %d: expected %d attempts, got %d", attempt, attempt+1, issue.Status.RemediationAttempts)
+			}
+
+			// Simulate AI re-analysis: fill insight with new analysis
+			if err := c.Get(ctx, types.NamespacedName{Name: insightName, Namespace: "default"}, &insight); err != nil {
+				t.Fatalf("failed to get insight for re-analysis: %v", err)
+			}
+			insight.Status.Analysis = fmt.Sprintf("Re-analysis after attempt %d: try different approach", attempt)
+			insight.Status.Confidence = 0.5
+			if err := c.Status().Update(ctx, &insight); err != nil {
+				t.Fatalf("failed to update insight for re-analysis: %v", err)
+			}
+
+			// Reconcile issue: Analyzing → Remediating (creates next plan)
+			_, err = issueR.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: issueName, Namespace: "default"},
+			})
+			if err != nil {
+				t.Fatalf("issue reconcile (re-analysis → remediating) attempt %d failed: %v", attempt, err)
 			}
 		} else {
 			// On attempt 3 failure, should escalate
@@ -329,7 +372,7 @@ func TestFullPipeline_AnomalyToEscalation(t *testing.T) {
 		}
 	}
 
-	t.Log("Pipeline completed: Anomaly → Issue → 3 failed attempts → Escalated")
+	t.Log("Pipeline completed: Anomaly → Issue → 3 failed attempts (with re-analysis) → Escalated")
 }
 
 // TestFullPipeline_CorrelatedAnomalies tests that multiple anomalies for the same resource
