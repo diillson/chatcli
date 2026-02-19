@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.59.5](https://github.com/diillson/chatcli/compare/v1.59.4...v1.59.5) (2026-02-19)
+
+
+### Bug Fixes
+
+* **operator:** resolve LLM provider from Instance CR instead of hardcoding ([#569](https://github.com/diillson/chatcli/issues/569)) ([f103f05](https://github.com/diillson/chatcli/commit/f103f059a1111f38beef98414013c0166785f73b))
+
 ## [1.59.4](https://github.com/diillson/chatcli/compare/v1.59.3...v1.59.4) (2026-02-19)
 
 
