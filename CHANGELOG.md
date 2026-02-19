@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.59.4](https://github.com/diillson/chatcli/compare/v1.59.3...v1.59.4) (2026-02-19)
+
+
+### Bug Fixes
+
+* **operator:** add agentic AI remediation and PostMortem CRD ([#567](https://github.com/diillson/chatcli/issues/567)) ([b091220](https://github.com/diillson/chatcli/commit/b09122010363e555860d4a10afd7dacc79b2533f))
+
 ## [1.59.3](https://github.com/diillson/chatcli/compare/v1.59.2...v1.59.3) (2026-02-19)
 
 
