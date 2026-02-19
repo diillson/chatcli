@@ -27,6 +27,10 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "services", "endpoints", "namespaces"]
     verbs: ["get", "list", "watch"]
+  # Runbook CRD (controller creates auto-generated runbooks)
+  - apiGroups: [ "platform.chatcli.io" ]
+    resources: [ "runbooks" ]
+    verbs: [ "get", "list", "watch", "create", "update", "patch" ]
   # Apps resources
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
@@ -73,6 +77,10 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "services", "endpoints"]
     verbs: ["get", "list", "watch"]
+  # Runbook CRD (controller creates auto-generated runbooks)
+  - apiGroups: [ "platform.chatcli.io" ]
+    resources: [ "runbooks" ]
+    verbs: [ "get", "list", "watch", "create", "update", "patch" ]
   # Apps resources
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
