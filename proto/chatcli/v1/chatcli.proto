@@ -45,6 +45,9 @@ service ChatCLIService {
 
   // AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
   rpc AnalyzeIssue(AnalyzeIssueRequest) returns (AnalyzeIssueResponse);
+
+  // AgenticStep runs one turn of the AI-driven remediation agent loop.
+  rpc AgenticStep(AgenticStepRequest) returns (AgenticStepResponse);
 }
 
 // --- SendPrompt ---
@@ -232,4 +235,43 @@ message SuggestedAction {
   string action = 2;                  // action type: "ScaleDeployment", "RollbackDeployment", "RestartDeployment", "PatchConfig"
   string description = 3;            // explanation of why this action is recommended
   map<string, string> params = 4;    // action-specific params, e.g., {"replicas": "3"}
+}
+
+// --- Agentic Remediation ---
+
+message AgenticHistoryEntry {
+  int32 step_number = 1;
+  string ai_message = 2;
+  string action = 3;                  // action type executed (e.g., "RestartDeployment")
+  map<string, string> params = 4;     // action params
+  string observation = 5;             // result of executing the action
+}
+
+message AgenticStepRequest {
+  string issue_name = 1;
+  string namespace = 2;
+  string resource_kind = 3;
+  string resource_name = 4;
+  string signal_type = 5;
+  string severity = 6;
+  string description = 7;
+  int32 risk_score = 8;
+  string provider = 9;
+  string model = 10;
+  string kubernetes_context = 11;              // fresh K8s snapshot (refreshed each step)
+  repeated AgenticHistoryEntry history = 12;   // full conversation history
+  int32 max_steps = 13;                        // step budget
+  int32 current_step = 14;                     // step number being computed now
+}
+
+message AgenticStepResponse {
+  string reasoning = 1;                        // AI's current reasoning (recorded in history)
+  bool resolved = 2;                           // true = AI considers problem fixed
+  SuggestedAction next_action = 3;             // null/empty when resolved=true
+  // Fields below only populated when resolved=true:
+  string postmortem_summary = 4;
+  string root_cause = 5;
+  string impact = 6;
+  repeated string lessons_learned = 7;
+  repeated string prevention_actions = 8;
 }

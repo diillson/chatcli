@@ -12,7 +12,7 @@ O **ChatCLI Operator** vai além do gerenciamento de instâncias. Ele implementa
 
 ## API Group e CRDs
 
-O operator usa o API group `platform.chatcli.io/v1alpha1` com 6 Custom Resource Definitions:
+O operator usa o API group `platform.chatcli.io/v1alpha1` com 7 Custom Resource Definitions:
 
 | CRD | Short Name | Descrição |
 |-----|-----------|-----------|
@@ -20,8 +20,9 @@ O operator usa o API group `platform.chatcli.io/v1alpha1` com 6 Custom Resource 
 | **Anomaly** | `anom` | Sinal bruto do K8s Watcher (restarts, OOM, falhas de deploy) |
 | **Issue** | `iss` | Incidente correlacionado agrupando múltiplas anomalias |
 | **AIInsight** | `ai` | Análise de causa raiz gerada por IA com ações sugeridas |
-| **RemediationPlan** | `rp` | Ações concretas para resolver o problema |
+| **RemediationPlan** | `rp` | Ações concretas para resolver o problema (runbook ou IA agêntica) |
 | **Runbook** | `rb` | Procedimentos operacionais manuais (opcional) |
+| **PostMortem** | `pm` | Relatório de incidente auto-gerado após resolução agêntica |
 
 ---
 
@@ -55,6 +56,7 @@ graph TD
     subgraph "ChatCLI Server"
         W[K8s Watcher<br/>collectors] --> GA[GetAlerts RPC]
         AI_RPC[AnalyzeIssue RPC<br/>LLM call]
+        AG_RPC[AgenticStep RPC<br/>observe-decide-act]
     end
 
     subgraph "Operator"
@@ -65,9 +67,12 @@ graph TD
         INSIGHT -->|AIInsightReconciler<br/>gRPC| AI_RPC
         AI_RPC -->|análise + ações| INSIGHT
         ISS -->|cria| PLAN[RemediationPlan CR]
-        PLAN -->|RemediationReconciler<br/>executa| ACTIONS[Scale / Restart<br/>Rollback / Patch]
+        PLAN -->|RemediationReconciler<br/>executa| ACTIONS[Scale / Restart / Rollback<br/>Patch / AdjustResources / DeletePod]
+        PLAN -->|modo agêntico<br/>gRPC loop| AG_RPC
+        AG_RPC -->|next action| PLAN
         ACTIONS -->|sucesso| RESOLVED[Issue Resolved]
         ACTIONS -->|falha| RETRY[Retry ou Escalate]
+        RESOLVED -->|agêntico| PM[PostMortem CR]
     end
 
     style ANOM fill:#f9e2af,color:#000
@@ -76,6 +81,7 @@ graph TD
     style PLAN fill:#a6e3a1,color:#000
     style RESOLVED fill:#a6e3a1,color:#000
     style RETRY fill:#f38ba8,color:#000
+    style PM fill:#cba6f7,color:#000
 ```
 
 ### Pipeline Autônomo
@@ -85,9 +91,10 @@ graph TD
 | **1. Detecção** | WatcherBridge | Consulta `GetAlerts` do servidor a cada 30s. Cria Anomaly CRs (dedup SHA256). Invalida dedup quando Issue atinge estado terminal. |
 | **2. Correlação** | AnomalyReconciler + CorrelationEngine | Agrupa anomalias por recurso + janela temporal. Calcula risk score e severidade. Cria/atualiza Issue CRs com `signalType`. |
 | **3. Analise** | AIInsightReconciler + KubernetesContextBuilder | Coleta contexto K8s real (deployment, pods, eventos, revisões). Chama `AnalyzeIssue` RPC com contexto enriquecido. |
-| **4. Remediação** | IssueReconciler | Runbook-first: **(a)** Runbook manual (tiered matching por SignalType+Severity+Kind), **(b)** gera Runbook auto da IA (reutilizável), ou **(c)** escalona. |
-| **5. Execução** | RemediationReconciler | Executa ações no cluster: ScaleDeployment, RestartDeployment, RollbackDeployment, PatchConfig. |
+| **4. Remediação** | IssueReconciler | Runbook-first: **(a)** Runbook manual (tiered matching), **(b)** gera Runbook auto da IA, ou **(c)** remediação agêntica (IA atua step-by-step). |
+| **5. Execução** | RemediationReconciler | Executa ações no cluster: ScaleDeployment, RestartDeployment, RollbackDeployment, PatchConfig, AdjustResources, DeletePod. Modo agêntico: IA decide cada ação via loop observe-decide-act. |
 | **6. Resolução** | IssueReconciler | Sucesso → Resolved (invalida dedup). Falha → re-análise com contexto de falha (estratégia diferente) → até maxAttempts → Escalated. |
+| **7. PostMortem** | IssueReconciler | Resolução agêntica → PostMortem CR auto-gerado (timeline, causa raiz, lições aprendidas) + Runbook reutilizável dos passos bem-sucedidos. |
 
 ### Máquina de Estados do Issue
 
@@ -95,13 +102,15 @@ graph TD
 stateDiagram-v2
     [*] --> Detected
     Detected --> Analyzing : AIInsight criado
-    Analyzing --> Remediating : RemediationPlan criado (via Runbook)
-    Analyzing --> Escalated : Sem Runbook e sem ações AI
+    Analyzing --> Remediating : Via Runbook (manual ou auto-gerado)
+    Analyzing --> Remediating : Via modo agêntico (sem Runbook/AI actions)
     Remediating --> Resolved : Remediação bem-sucedida (invalida dedup)
     Remediating --> Analyzing : Retry (re-análise com failure context)
     Remediating --> Escalated : Max tentativas (invalida dedup)
     Resolved --> [*]
     Escalated --> [*]
+
+    note right of Resolved : Resolução agêntica gera\nPostMortem CR + Runbook
 ```
 
 ---
@@ -453,8 +462,10 @@ status:
 |------|-----------|-----------|
 | `ScaleDeployment` | Ajusta o número de réplicas | `replicas` |
 | `RestartDeployment` | Rollout restart do deployment | — |
-| `RollbackDeployment` | Desfaz o último rollout | — |
+| `RollbackDeployment` | Desfaz rollout (anterior, saudável ou revisão específica) | `toRevision` (optional: `previous`, `healthy`, ou número) |
 | `PatchConfig` | Atualiza chaves de um ConfigMap | `configmap`, `key=value` |
+| `AdjustResources` | Ajusta CPU/memória requests/limits de containers | `memory_limit`, `memory_request`, `cpu_limit`, `cpu_request`, `container` |
+| `DeletePod` | Remove pod mais doente (CrashLoop > restarts) | `pod` (optional — auto-seleciona o mais doente) |
 | `Custom` | Ação personalizada (bloqueada por safety checks) | — |
 
 ### Runbook (Manual ou Auto-gerado)
@@ -515,6 +526,117 @@ spec:
 
 Auto-generated Runbooks são **reutilizados** para futuras Issues com o mesmo trigger, evitando chamadas desnecessárias ao LLM.
 
+### RemediationPlan (Agentic Mode)
+
+Quando não há Runbook manual nem ações sugeridas pela IA, o operator cria um **plano agêntico**. A IA atua como um agente com skills Kubernetes em um loop observe-decide-act:
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: RemediationPlan
+metadata:
+  name: api-gateway-pod-restart-plan-1
+  namespace: production
+spec:
+  issueRef:
+    name: api-gateway-pod-restart-1771276354
+  attempt: 1
+  strategy: "Agentic AI remediation"
+  agenticMode: true
+  agenticMaxSteps: 10
+  agenticHistory:
+    - stepNumber: 1
+      aiMessage: "High restart count with OOMKilled. Scaling up to reduce memory pressure."
+      action:
+        type: ScaleDeployment
+        params:
+          replicas: "5"
+      observation: "SUCCESS: ScaleDeployment executed successfully"
+    - stepNumber: 2
+      aiMessage: "Pods still restarting. Adjusting memory limits."
+      action:
+        type: AdjustResources
+        params:
+          memory_limit: "1Gi"
+          memory_request: "512Mi"
+      observation: "SUCCESS: AdjustResources executed successfully"
+    - stepNumber: 3
+      aiMessage: "All pods running stable. Issue resolved."
+status:
+  state: Completed
+  agenticStepCount: 3
+  agenticStartedAt: "2026-02-16T10:31:00Z"
+```
+
+**Safety Guards:**
+- Máximo de 10 steps (configurável via `agenticMaxSteps`)
+- Timeout de 10 minutos
+- Se ação falha, a observação é "FAILED: error" e o loop continua — a IA recebe o feedback e adapta
+
+**Na resolução agêntica:** O operator gera automaticamente:
+1. **PostMortem CR** com timeline, causa raiz, impacto, lições aprendidas
+2. **Runbook CR** reutilizável com os passos bem-sucedidos (label `source=agentic`)
+
+### PostMortem (Auto-generated)
+
+Relatório de incidente gerado automaticamente após resolução por remediação agêntica. Contém o histórico completo do incidente: detecção, análise, ações executadas e resolução.
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: PostMortem
+metadata:
+  name: pm-api-gateway-pod-restart-1771276354
+  namespace: production
+spec:
+  issueRef:
+    name: api-gateway-pod-restart-1771276354
+  resource:
+    kind: Deployment
+    name: api-gateway
+    namespace: production
+  severity: high
+status:
+  state: Open              # Open | InReview | Closed
+  summary: "OOMKilled containers caused cascading restarts on api-gateway"
+  rootCause: "Memory limit (512Mi) insufficient for current workload pattern"
+  impact: "Service degradation for 5 minutes, 30% error rate increase"
+  timeline:
+    - timestamp: "2026-02-16T10:30:00Z"
+      type: detected
+      detail: "Issue detected: pod_restart on api-gateway"
+    - timestamp: "2026-02-16T10:31:00Z"
+      type: action_executed
+      detail: "ScaleDeployment to 5 replicas"
+    - timestamp: "2026-02-16T10:31:35Z"
+      type: action_executed
+      detail: "AdjustResources memory_limit=1Gi"
+    - timestamp: "2026-02-16T10:32:10Z"
+      type: resolved
+      detail: "All pods stable, issue resolved"
+  lessonsLearned:
+    - "Memory limits should account for peak workload patterns"
+    - "Set up HPA to auto-scale on memory pressure"
+  preventionActions:
+    - "Configure HPA with min 3 replicas for api-gateway"
+    - "Set memory limit to 1Gi across all environments"
+  duration: "2m10s"
+  generatedAt: "2026-02-16T10:32:10Z"
+```
+
+#### Campos do PostMortem Status
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `state` | PostMortemState | Estado: Open, InReview, Closed |
+| `summary` | string | Resumo do incidente gerado pela IA |
+| `rootCause` | string | Causa raiz determinada pela IA |
+| `impact` | string | Impacto do incidente |
+| `timeline` | []TimelineEvent | Linha do tempo (detected, analyzed, action_executed, resolved) |
+| `actionsExecuted` | []ActionRecord | Ações executadas com resultado |
+| `lessonsLearned` | []string | Lições aprendidas |
+| `preventionActions` | []string | Ações preventivas sugeridas |
+| `duration` | string | Duração total do incidente |
+| `generatedAt` | Time | Quando o PostMortem foi gerado |
+
 #### Matching de Runbooks (Tiered)
 
 ```
@@ -527,7 +649,8 @@ Tier 2: Severity + ResourceKind (fallback quando signal não bate)
 ```
 1. Runbook manual existente (match tiered)
 2. Runbook auto-gerado pela IA (materializado como CR reutilizável)
-3. Escalonamento (se nenhum dos dois disponíveis)
+3. Remediação agêntica por IA (loop observe-decide-act, gera PostMortem + Runbook)
+4. Escalonamento (apenas quando agêntico falha após max tentativas)
 ```
 
 ---
@@ -722,6 +845,16 @@ NAME                                          ISSUE                             
 api-gateway-pod-restart-1771276354-plan-1      api-gateway-pod-restart-1771276354      1         Completed   1m
 ```
 
+### Verificar PostMortems
+
+```bash
+kubectl get postmortems -A
+```
+```
+NAME                                          ISSUE                                   SEVERITY   STATE   AGE
+pm-api-gateway-pod-restart-1771276354         api-gateway-pod-restart-1771276354      high       Open    30s
+```
+
 ### Verificar Anomalias
 
 ```bash
@@ -743,7 +876,7 @@ cd operator
 # Build
 go build ./...
 
-# Testes (86 funções, 115 com subtests)
+# Testes (96 funções, 125 com subtests)
 go test ./... -v
 
 # Docker (deve ser construído a partir do root do repositório)

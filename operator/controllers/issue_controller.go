@@ -229,17 +229,28 @@ func (r *IssueReconciler) handleAnalyzing(ctx context.Context, issue *platformv1
 		}
 		log.Info("Auto-generated runbook", "runbook", runbook.Name)
 	} else {
-		// 3. No runbook and no AI actions — escalate
-		log.Info("No runbook or AI actions found, escalating", "issue", issue.Name)
-		issue.Status.State = platformv1alpha1.IssueStateEscalated
+		// 3. No runbook and no AI actions — use agentic mode
+		log.Info("No runbook or AI actions found, using agentic remediation", "issue", issue.Name)
+
+		attempt := issue.Status.RemediationAttempts
+		if attempt == 0 {
+			attempt = 1
+		}
+
+		if err := r.createAgenticRemediationPlan(ctx, issue, attempt); err != nil {
+			return ctrl.Result{}, fmt.Errorf("creating agentic remediation plan: %w", err)
+		}
+
+		issue.Status.State = platformv1alpha1.IssueStateRemediating
+		issue.Status.RemediationAttempts = attempt
 		meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
-			Type:               "Escalated",
+			Type:               "Remediating",
 			Status:             metav1.ConditionTrue,
-			Reason:             "NoRunbookOrAIActions",
-			Message:            "No matching runbook and no AI-suggested actions for automatic remediation",
+			Reason:             "AgenticRemediationStarted",
+			Message:            "AI-driven agentic remediation in progress",
 			LastTransitionTime: metav1.Now(),
 		})
-		return ctrl.Result{}, r.Status().Update(ctx, issue)
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.Status().Update(ctx, issue)
 	}
 
 	// Determine attempt number: use existing if this is a re-analysis, otherwise start at 1
@@ -307,6 +318,16 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 		issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateResolved)).Inc()
 		if issue.Status.DetectedAt != nil {
 			issueResolutionDuration.Observe(now.Sub(issue.Status.DetectedAt.Time).Seconds())
+		}
+
+		// If this was an agentic plan, generate PostMortem and Runbook
+		if plan.Spec.AgenticMode && len(plan.Spec.AgenticHistory) > 0 {
+			if err := r.generatePostMortem(ctx, issue, plan); err != nil {
+				log.Error(err, "Failed to generate PostMortem, continuing")
+			}
+			if err := r.generateAgenticRunbook(ctx, issue, plan); err != nil {
+				log.Error(err, "Failed to generate agentic Runbook, continuing")
+			}
 		}
 
 		// Invalidate dedup so new alerts for same resource are not silently dropped
@@ -434,6 +455,10 @@ func (r *IssueReconciler) createRemediationPlan(ctx context.Context, issue *plat
 			actionType = platformv1alpha1.ActionRestartDeployment
 		case "PatchConfig":
 			actionType = platformv1alpha1.ActionPatchConfig
+		case "AdjustResources":
+			actionType = platformv1alpha1.ActionAdjustResources
+		case "DeletePod":
+			actionType = platformv1alpha1.ActionDeletePod
 		}
 		actions = append(actions, platformv1alpha1.RemediationAction{
 			Type:   actionType,
@@ -571,6 +596,10 @@ func mapActionType(action string) platformv1alpha1.RemediationActionType {
 		return platformv1alpha1.ActionRestartDeployment
 	case "PatchConfig":
 		return platformv1alpha1.ActionPatchConfig
+	case "AdjustResources":
+		return platformv1alpha1.ActionAdjustResources
+	case "DeletePod":
+		return platformv1alpha1.ActionDeletePod
 	default:
 		return platformv1alpha1.ActionCustom
 	}
@@ -717,11 +746,217 @@ func (r *IssueReconciler) invalidateDedup(issue *platformv1alpha1.Issue) {
 	}
 }
 
+// createAgenticRemediationPlan creates a RemediationPlan in agentic mode (AI-driven step-by-step).
+func (r *IssueReconciler) createAgenticRemediationPlan(ctx context.Context, issue *platformv1alpha1.Issue, attempt int32) error {
+	planName := fmt.Sprintf("%s-plan-%d", issue.Name, attempt)
+
+	plan := &platformv1alpha1.RemediationPlan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      planName,
+			Namespace: issue.Namespace,
+		},
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, plan, func() error {
+		if err := controllerutil.SetControllerReference(issue, plan, r.Scheme); err != nil {
+			return err
+		}
+		plan.Spec = platformv1alpha1.RemediationPlanSpec{
+			IssueRef:        platformv1alpha1.IssueRef{Name: issue.Name},
+			Attempt:         attempt,
+			Strategy:        "Agentic AI-driven remediation",
+			AgenticMode:     true,
+			AgenticMaxSteps: 10,
+			SafetyConstraints: []string{
+				"No scaling to 0 replicas",
+				"No delete operations without pod count check",
+			},
+		}
+		return nil
+	})
+	return err
+}
+
+// generatePostMortem creates a PostMortem CR from an agentic remediation plan.
+func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platformv1alpha1.Issue, plan *platformv1alpha1.RemediationPlan) error {
+	pmName := "pm-" + issue.Name
+	if len(pmName) > 63 {
+		pmName = pmName[:63]
+	}
+	now := metav1.Now()
+
+	// Build timeline
+	var timeline []platformv1alpha1.TimelineEvent
+	if issue.Status.DetectedAt != nil {
+		timeline = append(timeline, platformv1alpha1.TimelineEvent{
+			Timestamp: *issue.Status.DetectedAt,
+			Type:      "detected",
+			Detail:    issue.Spec.Description,
+		})
+	}
+	for _, step := range plan.Spec.AgenticHistory {
+		evType := "action_executed"
+		if strings.HasPrefix(step.Observation, "FAILED:") {
+			evType = "action_failed"
+		}
+		actionStr := "(observation)"
+		if step.Action != nil {
+			actionStr = string(step.Action.Type)
+		}
+		timeline = append(timeline, platformv1alpha1.TimelineEvent{
+			Timestamp: step.Timestamp,
+			Type:      evType,
+			Detail:    fmt.Sprintf("Step %d: %s — %s", step.StepNumber, actionStr, step.Observation),
+		})
+	}
+	timeline = append(timeline, platformv1alpha1.TimelineEvent{
+		Timestamp: now,
+		Type:      "resolved",
+		Detail:    plan.Status.Result,
+	})
+
+	// Build action records
+	var actions []platformv1alpha1.ActionRecord
+	for _, step := range plan.Spec.AgenticHistory {
+		if step.Action == nil {
+			continue
+		}
+		result := "success"
+		if strings.HasPrefix(step.Observation, "FAILED:") {
+			result = "failed"
+		}
+		actions = append(actions, platformv1alpha1.ActionRecord{
+			Action:    string(step.Action.Type),
+			Params:    step.Action.Params,
+			Result:    result,
+			Detail:    step.Observation,
+			Timestamp: step.Timestamp,
+		})
+	}
+
+	// Duration
+	duration := ""
+	if issue.Status.DetectedAt != nil {
+		duration = now.Sub(issue.Status.DetectedAt.Time).Round(time.Second).String()
+	}
+
+	// Read postmortem data from plan annotations
+	summary := plan.Annotations["platform.chatcli.io/postmortem-summary"]
+	rootCause := plan.Annotations["platform.chatcli.io/root-cause"]
+	impact := plan.Annotations["platform.chatcli.io/impact"]
+
+	var lessonsLearned []string
+	if raw := plan.Annotations["platform.chatcli.io/lessons-learned"]; raw != "" {
+		lessonsLearned = strings.Split(raw, "\n---\n")
+	}
+
+	var preventionActions []string
+	if raw := plan.Annotations["platform.chatcli.io/prevention-actions"]; raw != "" {
+		preventionActions = strings.Split(raw, "\n---\n")
+	}
+
+	pm := &platformv1alpha1.PostMortem{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pmName,
+			Namespace: issue.Namespace,
+		},
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, pm, func() error {
+		if err := controllerutil.SetControllerReference(issue, pm, r.Scheme); err != nil {
+			return err
+		}
+		if pm.Labels == nil {
+			pm.Labels = make(map[string]string)
+		}
+		pm.Labels["platform.chatcli.io/issue"] = issue.Name
+		pm.Labels["platform.chatcli.io/severity"] = string(issue.Spec.Severity)
+		pm.Spec = platformv1alpha1.PostMortemSpec{
+			IssueRef: platformv1alpha1.IssueRef{Name: issue.Name},
+			Resource: issue.Spec.Resource,
+			Severity: issue.Spec.Severity,
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// Update status
+	pm.Status = platformv1alpha1.PostMortemStatus{
+		State:             platformv1alpha1.PostMortemStateOpen,
+		Summary:           summary,
+		RootCause:         rootCause,
+		Impact:            impact,
+		Timeline:          timeline,
+		ActionsExecuted:   actions,
+		LessonsLearned:    lessonsLearned,
+		PreventionActions: preventionActions,
+		Duration:          duration,
+		GeneratedAt:       &now,
+	}
+	return r.Status().Update(ctx, pm)
+}
+
+// generateAgenticRunbook creates a Runbook from the successful actions of an agentic session.
+func (r *IssueReconciler) generateAgenticRunbook(ctx context.Context, issue *platformv1alpha1.Issue, plan *platformv1alpha1.RemediationPlan) error {
+	signalType := issue.Spec.SignalType
+	rbName := sanitizeRunbookName(fmt.Sprintf("agentic-%s-%s-%s",
+		signalType, issue.Spec.Severity, strings.ToLower(issue.Spec.Resource.Kind)))
+
+	var steps []platformv1alpha1.RunbookStep
+	for _, step := range plan.Spec.AgenticHistory {
+		if step.Action == nil || strings.HasPrefix(step.Observation, "FAILED:") {
+			continue
+		}
+		steps = append(steps, platformv1alpha1.RunbookStep{
+			Name:        fmt.Sprintf("Step %d: %s", step.StepNumber, step.Action.Type),
+			Action:      string(step.Action.Type),
+			Description: step.AIMessage,
+			Params:      step.Action.Params,
+		})
+	}
+
+	if len(steps) == 0 {
+		return nil
+	}
+
+	runbook := &platformv1alpha1.Runbook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rbName,
+			Namespace: issue.Namespace,
+		},
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, runbook, func() error {
+		if runbook.Labels == nil {
+			runbook.Labels = make(map[string]string)
+		}
+		runbook.Labels["platform.chatcli.io/auto-generated"] = "true"
+		runbook.Labels["platform.chatcli.io/source"] = "agentic"
+		runbook.Labels["platform.chatcli.io/source-issue"] = issue.Name
+
+		runbook.Spec = platformv1alpha1.RunbookSpec{
+			Description: fmt.Sprintf("Auto-generated from agentic remediation of issue %s", issue.Name),
+			Trigger: platformv1alpha1.RunbookTrigger{
+				SignalType:   platformv1alpha1.AnomalySignalType(signalType),
+				Severity:     issue.Spec.Severity,
+				ResourceKind: issue.Spec.Resource.Kind,
+			},
+			Steps:       steps,
+			MaxAttempts: 3,
+		}
+		return nil
+	})
+	return err
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *IssueReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1alpha1.Issue{}).
 		Owns(&platformv1alpha1.RemediationPlan{}).
 		Owns(&platformv1alpha1.AIInsight{}).
+		Owns(&platformv1alpha1.PostMortem{}).
 		Complete(r)
 }

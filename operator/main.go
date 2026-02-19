@@ -88,8 +88,10 @@ func main() {
 	}
 
 	if err = (&controllers.RemediationReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		ServerClient:   serverClient,
+		ContextBuilder: controllers.NewKubernetesContextBuilder(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Remediation")
 		os.Exit(1)
@@ -111,6 +113,14 @@ func main() {
 		ContextBuilder: controllers.NewKubernetesContextBuilder(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AIInsight")
+		os.Exit(1)
+	}
+
+	if err = (&controllers.PostMortemReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PostMortem")
 		os.Exit(1)
 	}
 

@@ -55,16 +55,31 @@ sequenceDiagram
         IR->>K8s: Gera Runbook auto (reutilizável)
         IR->>K8s: Cria RemediationPlan (do Runbook auto-gerado)
     else Nenhum disponível
-        IR->>K8s: Escalona Issue
+        IR->>K8s: Cria RemediationPlan agêntico (AgenticMode=true)
+        Note over IR,K8s: IA decide cada ação step-by-step
     end
 
     RR->>K8s: Watch RemediationPlan CRs
-    RR->>K8s: Executa ações (Scale/Restart/Rollback/Patch)
+
+    alt Modo standard (Runbook)
+        RR->>K8s: Executa ações sequencialmente (Scale/Restart/Rollback/Patch/AdjustResources/DeletePod)
+    else Modo agêntico
+        loop Cada step (max 10, timeout 10min)
+            RR->>Server: AgenticStep(context + history)
+            Server->>LLM: Prompt com contexto K8s + histórico
+            LLM-->>Server: JSON (reasoning + next_action ou resolved)
+            Server-->>RR: AgenticStepResponse
+            RR->>K8s: Executa ação sugerida
+            RR->>K8s: Registra observação no AgenticHistory
+        end
+    end
     RR->>K8s: Atualiza RemediationPlan.Status
 
     IR->>K8s: Verifica resultado
     alt Sucesso
         IR->>K8s: Issue → Resolved + invalida dedup
+    else Sucesso agêntico
+        IR->>K8s: Issue → Resolved + PostMortem CR + Runbook auto
     else Falha + tentativas restantes
         IR->>K8s: Issue → Analyzing (re-análise com contexto de falha)
         AIR->>Server: Re-análise com failure_context
@@ -194,12 +209,13 @@ stateDiagram-v2
         state "Aguarda Analysis" as A1
         state "Busca Runbook manual" as A2
         state "Gera Runbook da IA" as A3
+        state "Cria plano agêntico" as A4
         A1 --> A2 : Analysis preenchida
         A2 --> A3 : Sem Runbook manual
+        A3 --> A4 : Sem AI actions
     }
 
-    A --> Remediating : RemediationPlan criado (via Runbook)
-    A --> Escalated : Sem Runbook e sem AI actions
+    A --> Remediating : RemediationPlan criado (via Runbook ou agêntico)
 
     state "Remediating" as R {
         state "Aguarda execução" as R1
@@ -209,7 +225,9 @@ stateDiagram-v2
 
     R --> Resolved : RemediationPlan completed (invalida dedup)
     R --> A : Retry (re-análise com failure context)
-    R --> Escalated : Max attempts ou sem plano (invalida dedup)
+    R --> Escalated : Max attempts (invalida dedup)
+
+    note right of Resolved : Resolução agêntica gera\nPostMortem CR + Runbook
 
     Resolved --> [*]
     Escalated --> [*]
@@ -226,7 +244,7 @@ stateDiagram-v2
 2. Busca Runbook manual correspondente (`findMatchingRunbook` — tiered matching)
 3. Se encontrou Runbook manual → `createRemediationPlan()` (manual tem precedência)
 4. Se não encontrou Runbook manual mas AIInsight tem `SuggestedActions` → `generateRunbookFromAI()` → `createRemediationPlan()` usando o Runbook auto-gerado
-5. Se nenhum → escalona com razão `NoRunbookOrAIActions`
+5. Se nenhum → `createAgenticRemediationPlan()` (AgenticMode=true, sem ações pré-definidas — a IA decide cada passo)
 6. Transiciona para `Remediating`
 
 **`findMatchingRunbook()` — Matching em camadas:**
@@ -244,6 +262,7 @@ stateDiagram-v2
 **handleRemediating():**
 1. Busca RemediationPlan mais recente (`findLatestRemediationPlan`)
 2. Se `Completed` → Issue `Resolved` + invalida dedup do recurso
+   - Se plano agêntico: gera **PostMortem CR** (timeline, causa raiz, impacto, lições) + **Runbook reutilizável** dos passos bem-sucedidos
 3. Se `Failed` e tentativas restantes → **re-análise**: coleta evidência de falha (`collectFailureEvidence`), limpa análise do AIInsight, volta para estado `Analyzing` com failure context
 4. Se `Failed` e max tentativas → `Escalated` + invalida dedup do recurso
 
@@ -310,20 +329,41 @@ Executa as ações definidas em um RemediationPlan.
 
 | Tipo | O que Faz | Parâmetros |
 |------|-----------|-----------|
-| `ScaleDeployment` | `kubectl scale deployment/<name> --réplicas=N` | `replicas` (obrigatório) |
+| `ScaleDeployment` | `kubectl scale deployment/<name> --replicas=N` | `replicas` (obrigatório) |
 | `RestartDeployment` | `kubectl rollout restart deployment/<name>` | — |
-| `RollbackDeployment` | `kubectl rollout undo deployment/<name>` | — |
+| `RollbackDeployment` | Rollback para revisão anterior, saudável ou específica | `toRevision` (optional: `previous`, `healthy`, número) |
 | `PatchConfig` | Atualiza chave(s) em um ConfigMap | `configmap`, `key=value` |
+| `AdjustResources` | Ajusta CPU/memória requests/limits | `memory_limit`, `memory_request`, `cpu_limit`, `cpu_request`, `container` |
+| `DeletePod` | Remove o pod mais doente (CrashLoop > restarts) | `pod` (optional — auto-seleciona) |
 | `Custom` | **Bloqueado** — requer aprovação manual | — |
 
 **Safety Checks:**
-- Ações `Custom` são bloqueadas e o plan é marcado como `Failed`
-- Safety constraints são registradas no spec mas não executadas programaticamente (futuro: OPA/Gatekeeper integration)
+- Scale to 0 replicas é bloqueado
+- AdjustResources: limit não pode ser menor que request
+- DeletePod: recusa deletar se só existe 1 pod (evita outage total)
+- Custom actions são bloqueadas
+- Pre-flight snapshot registra estado anterior para referência
 
-**Fluxo de Execução:**
+**Fluxo de Execução (Standard):**
 
 ```
-Pending → Executing → (executa todas as ações sequencialmente) → Completed | Failed
+Pending → Executing → (executa ações sequencialmente) → Verifying → Completed | Failed
+```
+
+**Fluxo de Execução (Agentic):**
+
+```
+Pending → Executing → (loop agêntico: AI decide → executa → observa → repeat)
+  → Verifying → Completed | Failed
+
+Cada reconcile = 1 step do loop agêntico:
+  1. Refresh contexto K8s (KubernetesContextBuilder)
+  2. Envia histórico + contexto → AgenticStep RPC
+  3. AI responde: {reasoning, resolved, next_action}
+  4. Se resolved=true → Verifying (+ annotations com dados do PostMortem)
+  5. Se next_action → executa → registra observação → requeue 5s
+  6. Se observation-only → registra → requeue 10s
+  Safety: max 10 steps, timeout 10 minutos
 ```
 
 ### 7. ServerClient (`grpc_client.go`)
@@ -336,6 +376,7 @@ Cliente gRPC compartilhado entre WatcherBridge e AIInsightReconciler.
 | `Connect(addr)` | Conecta via gRPC insecure (10s timeout) |
 | `GetAlerts(namespace)` | Busca alertas do watcher |
 | `AnalyzeIssue(req)` | Envia issue para análise por IA |
+| `AgenticStep(req)` | Executa um passo do loop agêntico (context + history → next action) |
 | `IsConnected()` | Verifica se conexão está ativa |
 | `Close()` | Fecha conexão gRPC |
 
@@ -401,6 +442,87 @@ O servidor constroi um prompt que inclui:
 3. Clamp confidence entre 0.0 e 1.0
 4. Se parsing falhar → usa resposta raw como analysis com confidence 0.5
 
+### AgenticStep RPC
+
+O servidor recebe o contexto do Issue, histórico de passos anteriores e contexto K8s atualizado, e decide a próxima ação:
+
+```protobuf
+rpc AgenticStep(AgenticStepRequest) returns (AgenticStepResponse);
+
+message AgenticStepRequest {
+  string issue_name = 1;
+  string namespace = 2;
+  string resource_kind = 3;
+  string resource_name = 4;
+  string signal_type = 5;
+  string severity = 6;
+  string description = 7;
+  int32 risk_score = 8;
+  string provider = 9;
+  string model = 10;
+  string kubernetes_context = 11;   // refreshado a cada step
+  repeated AgenticHistoryEntry history = 12;
+  int32 max_steps = 13;
+  int32 current_step = 14;
+}
+
+message AgenticStepResponse {
+  string reasoning = 1;              // raciocínio da IA (registrado no histórico)
+  bool resolved = 2;                 // true = problema resolvido
+  SuggestedAction next_action = 3;   // null quando resolved=true
+  // Campos abaixo só populados quando resolved=true:
+  string postmortem_summary = 4;
+  string root_cause = 5;
+  string impact = 6;
+  repeated string lessons_learned = 7;
+  repeated string prevention_actions = 8;
+}
+```
+
+**Prompt do AgenticStep:**
+
+O servidor constrói um prompt estruturado com:
+
+1. **Role + Issue details**: contexto do incidente (tipo, severidade, recurso)
+2. **Kubernetes context**: estado real do cluster (refreshado a cada step via KubernetesContextBuilder)
+3. **Tool definitions**: 6 ações mutantes disponíveis + "Observe" (sem ação, espera próximo contexto)
+4. **Conversation history**: cada step anterior formatado com reasoning → action → observation
+5. **Instructions**: respond JSON, budget (step N of M), regras de segurança
+
+Quando `resolved=true`, a resposta inclui dados para geração do PostMortem (summary, root_cause, impact, lessons_learned, prevention_actions).
+
+---
+
+## PostMortem Generation
+
+Quando uma remediação agêntica resolve um Issue, o `IssueReconciler` gera automaticamente:
+
+### PostMortem CR
+
+Criado via `generatePostMortem()`:
+
+| Campo | Origem |
+|-------|--------|
+| `timeline` | Issue.DetectedAt + cada step do AgenticHistory + resolved |
+| `actionsExecuted` | Steps com Action != nil (inclui resultado) |
+| `summary` | Annotation `platform.chatcli.io/postmortem-summary` (gerado pela IA) |
+| `rootCause` | Annotation `platform.chatcli.io/root-cause` |
+| `impact` | Annotation `platform.chatcli.io/impact` |
+| `lessonsLearned` | Annotation `platform.chatcli.io/lessons-learned` |
+| `preventionActions` | Annotation `platform.chatcli.io/prevention-actions` |
+| `duration` | Calculado: resolvedAt - detectedAt |
+
+O PostMortem CR é owned pelo Issue (cascade delete).
+
+### Runbook Auto-gerado (Agentic)
+
+Criado via `generateAgenticRunbook()`:
+
+- **Nome**: `agentic-{signal}-{severity}-{kind}` (sanitizado)
+- **Steps**: apenas os passos com ação bem-sucedida
+- **Labels**: `auto-generated=true`, `source=agentic`
+- Usa `CreateOrUpdate` (reutilizado para incidentes futuros do mesmo tipo)
+
 ---
 
 ## Prometheus Metrics do Operator
@@ -417,15 +539,16 @@ O operator expoe métricas Prometheus para observabilidade:
 
 ## Testes
 
-O operator possui 86 testes (115 com subtests) cobrindo todos os componentes:
+O operator possui 96 testes (125 com subtests) cobrindo todos os componentes:
 
 | Componente | Testes | Cobertura |
 |-----------|--------|-----------|
 | InstanceReconciler | 15 | CRUD, watcher, persistence, réplicas, RBAC, deletion, deepcopy |
 | AnomalyReconciler | 4 | Criação, correlação, attachment a Issue existente |
-| IssueReconciler | 10 | Máquina de estados completa, fallback AI, retry, escalonamento |
-| RemediationReconciler | 10 | Todos os tipos de ação, safety checks, bloqueio de Custom |
+| IssueReconciler | 12 | Máquina de estados, fallback AI, retry, plano agêntico, geração PostMortem |
+| RemediationReconciler | 16 | Todos os tipos de ação, safety checks, loop agêntico (first step, resolved, max steps, timeout, action failed, observation) |
 | AIInsightReconciler | 12 | Conectividade, mock RPC, parsing de análise, withAuth, TLS/token |
+| PostMortemReconciler | 2 | Inicialização de estado, estado terminal |
 | WatcherBridge | 22 | Mapeamento de alertas, dedup SHA256, hash, pruning, criação de Anomaly, buildConnectionOpts (TLS, token, ambos) |
 | CorrelationEngine | 4 | Risk scoring, severidade, incident ID, anomalias relacionadas |
 | Pipeline (E2E) | 3 | Fluxo completo: Anomaly→Issue→Insight→Plan→Resolved, escalonamento, correlação |
@@ -452,15 +575,17 @@ graph TD
 
     ISS[Issue CR] -->|owns| INSIGHT[AIInsight CR]
     ISS -->|owns| PLAN[RemediationPlan CR]
+    ISS -->|owns| PM[PostMortem CR]
 
     style INST fill:#89b4fa,color:#000
     style ISS fill:#fab387,color:#000
     style INSIGHT fill:#89b4fa,color:#000
     style PLAN fill:#a6e3a1,color:#000
+    style PM fill:#cba6f7,color:#000
 ```
 
 - **Instance** e owner de todos os recursos Kubernetes que cria (Deployment, Service, ConfigMap, SA, PVC)
-- **Issue** e owner de AIInsight e RemediationPlan (cascade delete)
+- **Issue** e owner de AIInsight, RemediationPlan e PostMortem (cascade delete)
 - Anomalies são independentes (não tem owner) para preservar histórico
 
 ---
@@ -485,5 +610,5 @@ graph TD
 
 - [K8s Operator (configuração e exemplos)](/docs/features/k8s-operator/)
 - [K8s Watcher (detalhes de coleta e budget)](/docs/features/k8s-watcher/)
-- [Modo Servidor (RPCs GetAlerts e AnalyzeIssue)](/docs/features/server-mode/)
+- [Modo Servidor (RPCs GetAlerts, AnalyzeIssue e AgenticStep)](/docs/features/server-mode/)
 - [Receita: Monitoramento K8s com IA](/docs/cookbook/k8s-monitoring/)

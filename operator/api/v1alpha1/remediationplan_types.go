@@ -16,7 +16,7 @@ const (
 )
 
 // RemediationActionType defines the type of remediation action.
-// +kubebuilder:validation:Enum=ScaleDeployment;RollbackDeployment;RestartDeployment;PatchConfig;Custom
+// +kubebuilder:validation:Enum=ScaleDeployment;RollbackDeployment;RestartDeployment;PatchConfig;AdjustResources;DeletePod;Custom
 type RemediationActionType string
 
 const (
@@ -24,6 +24,8 @@ const (
 	ActionRollbackDeployment RemediationActionType = "RollbackDeployment"
 	ActionRestartDeployment  RemediationActionType = "RestartDeployment"
 	ActionPatchConfig        RemediationActionType = "PatchConfig"
+	ActionAdjustResources    RemediationActionType = "AdjustResources"
+	ActionDeletePod          RemediationActionType = "DeletePod"
 	ActionCustom             RemediationActionType = "Custom"
 )
 
@@ -37,6 +39,26 @@ type RemediationAction struct {
 	Params map[string]string `json:"params,omitempty"`
 }
 
+// AgenticStep records one turn of the AI-driven remediation loop.
+type AgenticStep struct {
+	// StepNumber is 1-based, incremented each reconcile cycle.
+	StepNumber int32 `json:"stepNumber"`
+
+	// AIMessage is the AI's reasoning for this step.
+	AIMessage string `json:"aiMessage"`
+
+	// Action is the action the AI decided to take (nil if observation-only or resolved).
+	// +optional
+	Action *RemediationAction `json:"action,omitempty"`
+
+	// Observation is the result of executing the action.
+	// +optional
+	Observation string `json:"observation,omitempty"`
+
+	// Timestamp is when this step was recorded.
+	Timestamp metav1.Time `json:"timestamp"`
+}
+
 // RemediationPlanSpec defines the desired state of a RemediationPlan.
 type RemediationPlanSpec struct {
 	// IssueRef references the parent Issue.
@@ -48,12 +70,29 @@ type RemediationPlanSpec struct {
 	// Strategy describes the remediation approach.
 	Strategy string `json:"strategy"`
 
-	// Actions to execute.
-	Actions []RemediationAction `json:"actions"`
+	// Actions to execute (ignored when AgenticMode is true).
+	// +optional
+	Actions []RemediationAction `json:"actions,omitempty"`
 
 	// SafetyConstraints that must be respected.
 	// +optional
 	SafetyConstraints []string `json:"safetyConstraints,omitempty"`
+
+	// AgenticMode enables AI-driven step-by-step remediation.
+	// When true, Actions is ignored and the AI decides each step.
+	// +optional
+	AgenticMode bool `json:"agenticMode,omitempty"`
+
+	// AgenticHistory records all steps of the agentic loop.
+	// Stored in spec (not status) because it is the authoritative
+	// conversation history sent to the AI on every step.
+	// +optional
+	AgenticHistory []AgenticStep `json:"agenticHistory,omitempty"`
+
+	// AgenticMaxSteps is the maximum number of agentic steps before forced failure.
+	// +kubebuilder:default=10
+	// +optional
+	AgenticMaxSteps int32 `json:"agenticMaxSteps,omitempty"`
 }
 
 // EvidenceItem is a piece of evidence collected during remediation.
@@ -92,6 +131,14 @@ type RemediationPlanStatus struct {
 	// Evidence collected during execution.
 	// +optional
 	Evidence []EvidenceItem `json:"evidence,omitempty"`
+
+	// AgenticStepCount is the number of agentic steps completed.
+	// +optional
+	AgenticStepCount int32 `json:"agenticStepCount,omitempty"`
+
+	// AgenticStartedAt is when the agentic loop first started.
+	// +optional
+	AgenticStartedAt *metav1.Time `json:"agenticStartedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true

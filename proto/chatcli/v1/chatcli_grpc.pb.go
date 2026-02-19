@@ -35,6 +35,7 @@ const (
 	ChatCLIService_Health_FullMethodName             = "/chatcli.v1.ChatCLIService/Health"
 	ChatCLIService_GetAlerts_FullMethodName          = "/chatcli.v1.ChatCLIService/GetAlerts"
 	ChatCLIService_AnalyzeIssue_FullMethodName       = "/chatcli.v1.ChatCLIService/AnalyzeIssue"
+	ChatCLIService_AgenticStep_FullMethodName        = "/chatcli.v1.ChatCLIService/AgenticStep"
 )
 
 // ChatCLIServiceClient is the client API for ChatCLIService service.
@@ -67,6 +68,8 @@ type ChatCLIServiceClient interface {
 	GetAlerts(ctx context.Context, in *GetAlertsRequest, opts ...grpc.CallOption) (*GetAlertsResponse, error)
 	// AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
 	AnalyzeIssue(ctx context.Context, in *AnalyzeIssueRequest, opts ...grpc.CallOption) (*AnalyzeIssueResponse, error)
+	// AgenticStep runs one turn of the AI-driven remediation agent loop.
+	AgenticStep(ctx context.Context, in *AgenticStepRequest, opts ...grpc.CallOption) (*AgenticStepResponse, error)
 }
 
 type chatCLIServiceClient struct {
@@ -209,6 +212,16 @@ func (c *chatCLIServiceClient) AnalyzeIssue(ctx context.Context, in *AnalyzeIssu
 	return out, nil
 }
 
+func (c *chatCLIServiceClient) AgenticStep(ctx context.Context, in *AgenticStepRequest, opts ...grpc.CallOption) (*AgenticStepResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AgenticStepResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_AgenticStep_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChatCLIServiceServer is the server API for ChatCLIService service.
 // All implementations must embed UnimplementedChatCLIServiceServer
 // for forward compatibility.
@@ -239,6 +252,8 @@ type ChatCLIServiceServer interface {
 	GetAlerts(context.Context, *GetAlertsRequest) (*GetAlertsResponse, error)
 	// AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
 	AnalyzeIssue(context.Context, *AnalyzeIssueRequest) (*AnalyzeIssueResponse, error)
+	// AgenticStep runs one turn of the AI-driven remediation agent loop.
+	AgenticStep(context.Context, *AgenticStepRequest) (*AgenticStepResponse, error)
 	mustEmbedUnimplementedChatCLIServiceServer()
 }
 
@@ -284,6 +299,9 @@ func (UnimplementedChatCLIServiceServer) GetAlerts(context.Context, *GetAlertsRe
 }
 func (UnimplementedChatCLIServiceServer) AnalyzeIssue(context.Context, *AnalyzeIssueRequest) (*AnalyzeIssueResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AnalyzeIssue not implemented")
+}
+func (UnimplementedChatCLIServiceServer) AgenticStep(context.Context, *AgenticStepRequest) (*AgenticStepResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AgenticStep not implemented")
 }
 func (UnimplementedChatCLIServiceServer) mustEmbedUnimplementedChatCLIServiceServer() {}
 func (UnimplementedChatCLIServiceServer) testEmbeddedByValue()                        {}
@@ -504,6 +522,24 @@ func _ChatCLIService_AnalyzeIssue_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatCLIService_AgenticStep_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AgenticStepRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).AgenticStep(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_AgenticStep_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).AgenticStep(ctx, req.(*AgenticStepRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChatCLIService_ServiceDesc is the grpc.ServiceDesc for ChatCLIService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -550,6 +586,10 @@ var ChatCLIService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AnalyzeIssue",
 			Handler:    _ChatCLIService_AnalyzeIssue_Handler,
+		},
+		{
+			MethodName: "AgenticStep",
+			Handler:    _ChatCLIService_AgenticStep_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
