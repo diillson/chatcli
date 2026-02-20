@@ -3,30 +3,37 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
 
-const maxContextChars = 8000
+const maxContextChars = 12000
 
 // KubernetesContextBuilder collects real cluster data for AI analysis enrichment.
 type KubernetesContextBuilder struct {
-	client client.Client
+	client    client.Client
+	clientset kubernetes.Interface // for pod logs subresource
 }
 
 // NewKubernetesContextBuilder creates a new context builder.
-func NewKubernetesContextBuilder(c client.Client) *KubernetesContextBuilder {
-	return &KubernetesContextBuilder{client: c}
+func NewKubernetesContextBuilder(c client.Client, clientset ...kubernetes.Interface) *KubernetesContextBuilder {
+	b := &KubernetesContextBuilder{client: c}
+	if len(clientset) > 0 && clientset[0] != nil {
+		b.clientset = clientset[0]
+	}
+	return b
 }
 
-// BuildContext collects deployment status, pod details, events, and revision history
+// BuildContext collects deployment status, pod details, pod logs, events, and revision history
 // for the given resource reference. Returns a formatted text suitable for inclusion in
 // AI analysis prompts.
 func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource platformv1alpha1.ResourceRef) (string, error) {
@@ -52,7 +59,17 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 		sb.WriteString(podCtx)
 	}
 
-	// 3. Recent Events
+	// 3. Pod Logs (unhealthy pods only)
+	if b.clientset != nil {
+		logCtx, err := b.buildPodLogs(ctx, resource)
+		if err != nil {
+			sb.WriteString(fmt.Sprintf("## Pod Logs\nError fetching logs: %v\n\n", err))
+		} else if logCtx != "" {
+			sb.WriteString(logCtx)
+		}
+	}
+
+	// 4. Recent Events
 	eventCtx, err := b.buildRecentEvents(ctx, resource)
 	if err != nil {
 		sb.WriteString(fmt.Sprintf("## Recent Events\nError fetching events: %v\n\n", err))
@@ -60,7 +77,7 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 		sb.WriteString(eventCtx)
 	}
 
-	// 4. Revision History
+	// 5. Revision History
 	revCtx, err := b.buildRevisionHistory(ctx, resource)
 	if err != nil {
 		sb.WriteString(fmt.Sprintf("## Revision History\nError fetching replicasets: %v\n\n", err))
@@ -97,6 +114,12 @@ func (b *KubernetesContextBuilder) buildDeploymentStatus(ctx context.Context, re
 	// Containers info
 	for _, c := range deploy.Spec.Template.Spec.Containers {
 		sb.WriteString(fmt.Sprintf("Container: %s image=%s", c.Name, c.Image))
+		if len(c.Command) > 0 {
+			sb.WriteString(fmt.Sprintf(" command=%v", c.Command))
+		}
+		if len(c.Args) > 0 {
+			sb.WriteString(fmt.Sprintf(" args=%v", c.Args))
+		}
 		if c.Resources.Requests != nil {
 			sb.WriteString(fmt.Sprintf(" requests=[cpu=%s mem=%s]",
 				c.Resources.Requests.Cpu().String(),
@@ -178,6 +201,85 @@ func (b *KubernetesContextBuilder) buildPodDetails(ctx context.Context, resource
 	sb.WriteString("\n")
 
 	return sb.String(), nil
+}
+
+// buildPodLogs fetches recent logs from unhealthy pods for root cause analysis.
+func (b *KubernetesContextBuilder) buildPodLogs(ctx context.Context, resource platformv1alpha1.ResourceRef) (string, error) {
+	var podList corev1.PodList
+	if err := b.client.List(ctx, &podList, client.InNamespace(resource.Namespace)); err != nil {
+		return "", err
+	}
+
+	// Filter unhealthy pods owned by this deployment
+	var unhealthy []corev1.Pod
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if !isPodOwnedByDeployment(pod, resource.Name) {
+			continue
+		}
+		if !isPodReady(pod) || podRestartCount(pod) > 0 {
+			unhealthy = append(unhealthy, *pod)
+		}
+	}
+
+	if len(unhealthy) == 0 {
+		return "", nil
+	}
+
+	// Sort by restart count descending, limit to 3
+	sort.Slice(unhealthy, func(i, j int) bool {
+		return podRestartCount(&unhealthy[i]) > podRestartCount(&unhealthy[j])
+	})
+	if len(unhealthy) > 3 {
+		unhealthy = unhealthy[:3]
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Pod Logs (unhealthy pods)\n")
+
+	tailLines := int64(50)
+	for _, pod := range unhealthy {
+		for _, cs := range pod.Status.ContainerStatuses {
+			// Fetch current container logs
+			logs := b.fetchContainerLogs(ctx, pod.Name, cs.Name, resource.Namespace, tailLines, false)
+			if logs != "" {
+				sb.WriteString(fmt.Sprintf("### %s/%s (restarts=%d)\n%s\n", pod.Name, cs.Name, cs.RestartCount, logs))
+			}
+
+			// Fetch previous container logs if there were restarts
+			if cs.RestartCount > 0 {
+				prevLogs := b.fetchContainerLogs(ctx, pod.Name, cs.Name, resource.Namespace, tailLines, true)
+				if prevLogs != "" {
+					sb.WriteString(fmt.Sprintf("### %s/%s (previous terminated instance)\n%s\n", pod.Name, cs.Name, prevLogs))
+				}
+			}
+		}
+	}
+
+	if sb.Len() == len("## Pod Logs (unhealthy pods)\n") {
+		return "", nil
+	}
+	sb.WriteString("\n")
+	return sb.String(), nil
+}
+
+func (b *KubernetesContextBuilder) fetchContainerLogs(ctx context.Context, podName, containerName, namespace string, tailLines int64, previous bool) string {
+	req := b.clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+		Container: containerName,
+		TailLines: &tailLines,
+		Previous:  previous,
+	})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return ""
+	}
+	defer stream.Close()
+
+	data, err := io.ReadAll(io.LimitReader(stream, 8192))
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func (b *KubernetesContextBuilder) buildRecentEvents(ctx context.Context, resource platformv1alpha1.ResourceRef) (string, error) {
@@ -285,9 +387,9 @@ func (b *KubernetesContextBuilder) buildRevisionHistory(ctx context.Context, res
 		}
 		sb.WriteString("\n")
 
-		// Show image diff with previous revision
+		// Show spec diff with previous revision
 		if i < len(owned)-1 {
-			diffs := diffContainerImages(
+			diffs := diffContainerSpecs(
 				info.rs.Spec.Template.Spec.Containers,
 				owned[i+1].rs.Spec.Template.Spec.Containers,
 			)
@@ -329,21 +431,65 @@ func podRestartCount(pod *corev1.Pod) int32 {
 	return total
 }
 
-// diffContainerImages compares two container specs and returns descriptions of image changes.
-func diffContainerImages(current, previous []corev1.Container) []string {
-	prevMap := make(map[string]string, len(previous))
+// diffContainerSpecs compares two container specs and returns descriptions of changes
+// in images, commands, args, and resources between revisions.
+func diffContainerSpecs(current, previous []corev1.Container) []string {
+	type containerInfo struct {
+		Image    string
+		Command  []string
+		Args     []string
+		CPUReq   string
+		MemReq   string
+		CPULimit string
+		MemLimit string
+	}
+
+	extractInfo := func(c corev1.Container) containerInfo {
+		info := containerInfo{
+			Image:   c.Image,
+			Command: c.Command,
+			Args:    c.Args,
+		}
+		if c.Resources.Requests != nil {
+			info.CPUReq = c.Resources.Requests.Cpu().String()
+			info.MemReq = c.Resources.Requests.Memory().String()
+		}
+		if c.Resources.Limits != nil {
+			info.CPULimit = c.Resources.Limits.Cpu().String()
+			info.MemLimit = c.Resources.Limits.Memory().String()
+		}
+		return info
+	}
+
+	prevMap := make(map[string]containerInfo, len(previous))
 	for _, c := range previous {
-		prevMap[c.Name] = c.Image
+		prevMap[c.Name] = extractInfo(c)
 	}
 
 	var diffs []string
 	for _, c := range current {
-		if prevImg, ok := prevMap[c.Name]; ok {
-			if prevImg != c.Image {
-				diffs = append(diffs, fmt.Sprintf("%s: %s → %s", c.Name, prevImg, c.Image))
-			}
-		} else {
-			diffs = append(diffs, fmt.Sprintf("%s: (new container) %s", c.Name, c.Image))
+		cur := extractInfo(c)
+		prev, ok := prevMap[c.Name]
+		if !ok {
+			diffs = append(diffs, fmt.Sprintf("%s: (new container) image=%s", c.Name, cur.Image))
+			continue
+		}
+		if prev.Image != cur.Image {
+			diffs = append(diffs, fmt.Sprintf("%s image: %s → %s", c.Name, prev.Image, cur.Image))
+		}
+		if fmt.Sprint(prev.Command) != fmt.Sprint(cur.Command) {
+			diffs = append(diffs, fmt.Sprintf("%s command: %v → %v", c.Name, prev.Command, cur.Command))
+		}
+		if fmt.Sprint(prev.Args) != fmt.Sprint(cur.Args) {
+			diffs = append(diffs, fmt.Sprintf("%s args: %v → %v", c.Name, prev.Args, cur.Args))
+		}
+		if prev.CPUReq != cur.CPUReq || prev.MemReq != cur.MemReq {
+			diffs = append(diffs, fmt.Sprintf("%s requests: [cpu=%s mem=%s] → [cpu=%s mem=%s]",
+				c.Name, prev.CPUReq, prev.MemReq, cur.CPUReq, cur.MemReq))
+		}
+		if prev.CPULimit != cur.CPULimit || prev.MemLimit != cur.MemLimit {
+			diffs = append(diffs, fmt.Sprintf("%s limits: [cpu=%s mem=%s] → [cpu=%s mem=%s]",
+				c.Name, prev.CPULimit, prev.MemLimit, cur.CPULimit, cur.MemLimit))
 		}
 	}
 	for _, c := range previous {

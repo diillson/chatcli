@@ -72,9 +72,9 @@ func init() {
 	)
 }
 
-// DedupInvalidator allows clearing dedup entries when issues reach terminal states.
+// DedupInvalidator allows refreshing dedup entries when issues reach terminal states.
 type DedupInvalidator interface {
-	InvalidateDedupForResource(deployment, namespace string)
+	RefreshDedupForResource(deployment, namespace string)
 }
 
 // IssueReconciler reconciles Issue objects.
@@ -347,8 +347,8 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 			}
 		}
 
-		// Invalidate dedup so new alerts for same resource are not silently dropped
-		r.invalidateDedup(issue)
+		// Refresh dedup cooldown so stale alerts don't immediately re-trigger
+		r.refreshDedup(issue)
 
 		return ctrl.Result{}, r.Status().Update(ctx, issue)
 
@@ -399,8 +399,8 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 
 		issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateEscalated)).Inc()
 
-		// Invalidate dedup so new alerts for same resource are not silently dropped
-		r.invalidateDedup(issue)
+		// Refresh dedup cooldown so stale alerts don't immediately re-trigger
+		r.refreshDedup(issue)
 
 		return ctrl.Result{}, r.Status().Update(ctx, issue)
 
@@ -753,10 +753,10 @@ func (r *IssueReconciler) retryWithExistingRunbook(ctx context.Context, issue *p
 	return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 }
 
-// invalidateDedup clears dedup entries for the issue's resource so new alerts are not dropped.
-func (r *IssueReconciler) invalidateDedup(issue *platformv1alpha1.Issue) {
+// refreshDedup resets dedup cooldown for the issue's resource, extending suppression.
+func (r *IssueReconciler) refreshDedup(issue *platformv1alpha1.Issue) {
 	if r.DedupInvalidator != nil {
-		r.DedupInvalidator.InvalidateDedupForResource(
+		r.DedupInvalidator.RefreshDedupForResource(
 			issue.Spec.Resource.Name,
 			issue.Spec.Resource.Namespace,
 		)

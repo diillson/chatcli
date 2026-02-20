@@ -244,7 +244,7 @@ func TestBuildContext_RevisionHistory(t *testing.T) {
 		"Revision 1",
 		"api:v2",
 		"api:v1",
-		"app: api:v1 → api:v2",
+		"app image: api:v1 → api:v2",
 	} {
 		if !strings.Contains(result, want) {
 			t.Errorf("expected context to contain %q, got:\n%s", want, result)
@@ -310,28 +310,32 @@ func TestBuildContext_Truncation(t *testing.T) {
 	}
 }
 
-func TestDiffContainerImages(t *testing.T) {
+func TestDiffContainerSpecs(t *testing.T) {
 	current := []corev1.Container{
-		{Name: "app", Image: "api:v2"},
+		{Name: "app", Image: "api:v2", Command: []string{"/bin/bash"}},
 		{Name: "sidecar", Image: "proxy:v1"},
 	}
 	previous := []corev1.Container{
-		{Name: "app", Image: "api:v1"},
+		{Name: "app", Image: "api:v1", Command: []string{"/bin/sh"}},
 		{Name: "sidecar", Image: "proxy:v1"},
 		{Name: "init", Image: "init:v1"},
 	}
 
-	diffs := diffContainerImages(current, previous)
+	diffs := diffContainerSpecs(current, previous)
 
-	if len(diffs) != 2 {
-		t.Fatalf("expected 2 diffs, got %d: %v", len(diffs), diffs)
+	if len(diffs) != 3 {
+		t.Fatalf("expected 3 diffs, got %d: %v", len(diffs), diffs)
 	}
 
 	foundImageChange := false
+	foundCommandChange := false
 	foundRemoved := false
 	for _, d := range diffs {
 		if strings.Contains(d, "api:v1 → api:v2") {
 			foundImageChange = true
+		}
+		if strings.Contains(d, "command") && strings.Contains(d, "/bin/sh") && strings.Contains(d, "/bin/bash") {
+			foundCommandChange = true
 		}
 		if strings.Contains(d, "init") && strings.Contains(d, "removed") {
 			foundRemoved = true
@@ -341,8 +345,48 @@ func TestDiffContainerImages(t *testing.T) {
 	if !foundImageChange {
 		t.Error("expected image change diff for 'app'")
 	}
+	if !foundCommandChange {
+		t.Error("expected command change diff for 'app' (/bin/sh → /bin/bash)")
+	}
 	if !foundRemoved {
 		t.Error("expected removed diff for 'init'")
+	}
+}
+
+func TestBuildContext_CommandArgs(t *testing.T) {
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: ptr.To(int32(1)),
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "worker"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "worker"}},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "app", Image: "worker:v1", Command: []string{"/bin/sh"}, Args: []string{"-c", "start.sh"}},
+					},
+				},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(deploy).Build()
+	builder := NewKubernetesContextBuilder(c)
+
+	result, err := builder.BuildContext(context.Background(), platformv1alpha1.ResourceRef{
+		Kind: "Deployment", Name: "worker", Namespace: "default",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, want := range []string{
+		"command=[/bin/sh]",
+		"args=[-c start.sh]",
+	} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected context to contain %q, got:\n%s", want, result)
+		}
 	}
 }
 

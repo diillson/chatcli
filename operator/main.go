@@ -7,6 +7,7 @@ import (
 	uberzap "go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -58,6 +59,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Kubernetes clientset for pod logs
+	kubeClientset, err := kubernetes.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "unable to create kubernetes clientset")
+		os.Exit(1)
+	}
+
 	// Shared gRPC client for server communication
 	zapLogger, _ := uberzap.NewProduction()
 	serverClient := controllers.NewServerClient(zapLogger)
@@ -91,7 +99,7 @@ func main() {
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		ServerClient:   serverClient,
-		ContextBuilder: controllers.NewKubernetesContextBuilder(mgr.GetClient()),
+		ContextBuilder: controllers.NewKubernetesContextBuilder(mgr.GetClient(), kubeClientset),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Remediation")
 		os.Exit(1)
@@ -110,7 +118,7 @@ func main() {
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		ServerClient:   serverClient,
-		ContextBuilder: controllers.NewKubernetesContextBuilder(mgr.GetClient()),
+		ContextBuilder: controllers.NewKubernetesContextBuilder(mgr.GetClient(), kubeClientset),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AIInsight")
 		os.Exit(1)

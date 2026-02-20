@@ -55,10 +55,18 @@ func (s *ObservabilityStore) AddLogs(entries []LogEntry) {
 	}
 }
 
-// AddAlert adds an alert to the store.
+// AddAlert adds an alert to the store. Duplicates (same Type+Object) are skipped
+// to prevent alert accumulation from repeated poll cycles detecting the same condition.
 func (s *ObservabilityStore) AddAlert(alert Alert) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Dedup: skip if same Type+Object already exists in window
+	for _, existing := range s.alerts {
+		if existing.Type == alert.Type && existing.Object == alert.Object {
+			return
+		}
+	}
 
 	s.alerts = append(s.alerts, alert)
 	// Keep only alerts within the window
