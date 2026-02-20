@@ -194,6 +194,29 @@ func signalWeight(signalType platformv1alpha1.AnomalySignalType) float64 {
 	}
 }
 
+// FindRecentlyResolvedIssue returns a resolved Issue for the given resource if it was
+// resolved within the cooldown window. This prevents re-triggering on stale alerts.
+func (ce *CorrelationEngine) FindRecentlyResolvedIssue(ctx context.Context, resource platformv1alpha1.ResourceRef, cooldown time.Duration) (*platformv1alpha1.Issue, error) {
+	var list platformv1alpha1.IssueList
+	if err := ce.client.List(ctx, &list, client.InNamespace(resource.Namespace)); err != nil {
+		return nil, fmt.Errorf("listing issues: %w", err)
+	}
+
+	cutoff := time.Now().Add(-cooldown)
+	for i := range list.Items {
+		issue := &list.Items[i]
+		if issue.Spec.Resource.Kind == resource.Kind &&
+			issue.Spec.Resource.Name == resource.Name &&
+			issue.Spec.Resource.Namespace == resource.Namespace &&
+			issue.Status.State == platformv1alpha1.IssueStateResolved &&
+			issue.Status.ResolvedAt != nil &&
+			issue.Status.ResolvedAt.Time.After(cutoff) {
+			return issue, nil
+		}
+	}
+	return nil, nil
+}
+
 func isTerminalIssueState(state platformv1alpha1.IssueState) bool {
 	switch state {
 	case platformv1alpha1.IssueStateResolved, platformv1alpha1.IssueStateEscalated, platformv1alpha1.IssueStateFailed:

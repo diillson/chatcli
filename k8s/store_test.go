@@ -189,11 +189,29 @@ func TestGetAlerts_WindowFiltering(t *testing.T) {
 	store := NewObservabilityStore(10, 100, 1*time.Minute)
 
 	now := time.Now()
-	store.AddAlert(Alert{Timestamp: now, Message: "recent"})
-	store.AddAlert(Alert{Timestamp: now.Add(-30 * time.Second), Message: "still fresh"})
+	store.AddAlert(Alert{Timestamp: now, Type: AlertHighRestarts, Object: "pod-1", Message: "recent"})
+	store.AddAlert(Alert{Timestamp: now.Add(-30 * time.Second), Type: AlertPodOOMKilled, Object: "pod-2", Message: "still fresh"})
 
 	alerts := store.GetAlerts()
 	assert.Len(t, alerts, 2)
+}
+
+func TestAddAlert_Dedup(t *testing.T) {
+	store := NewObservabilityStore(10, 100, 1*time.Minute)
+
+	now := time.Now()
+	store.AddAlert(Alert{Timestamp: now, Type: AlertHighRestarts, Object: "pod-1", Message: "first"})
+	store.AddAlert(Alert{Timestamp: now.Add(10 * time.Second), Type: AlertHighRestarts, Object: "pod-1", Message: "duplicate"})
+
+	alerts := store.GetAlerts()
+	assert.Len(t, alerts, 1, "duplicate alert should be skipped")
+	assert.Equal(t, "first", alerts[0].Message)
+
+	// Different Type or Object should NOT be deduped
+	store.AddAlert(Alert{Timestamp: now, Type: AlertPodOOMKilled, Object: "pod-1", Message: "different type"})
+	store.AddAlert(Alert{Timestamp: now, Type: AlertHighRestarts, Object: "pod-2", Message: "different object"})
+	alerts = store.GetAlerts()
+	assert.Len(t, alerts, 3, "alerts with different Type or Object should be kept")
 }
 
 func TestGetRestartTrend(t *testing.T) {

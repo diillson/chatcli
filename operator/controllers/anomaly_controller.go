@@ -108,6 +108,22 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
+	// Cooldown: check if same resource was recently resolved (suppress stale re-triggers)
+	const resolutionCooldown = 30 * time.Minute
+	recentlyResolved, err := r.CorrelationEngine.FindRecentlyResolvedIssue(ctx, resource, resolutionCooldown)
+	if err != nil {
+		log.Error(err, "Failed to check recently resolved issues")
+	}
+	if recentlyResolved != nil {
+		log.Info("Suppressing anomaly: same resource recently resolved",
+			"anomaly", anomaly.Name, "resolvedIssue", recentlyResolved.Name)
+		if err := r.CorrelationEngine.MarkAnomalyCorrelated(ctx, &anomaly, recentlyResolved.Name); err != nil {
+			return ctrl.Result{}, fmt.Errorf("marking anomaly as suppressed: %w", err)
+		}
+		anomaliesProcessed.WithLabelValues("suppressed_cooldown").Inc()
+		return ctrl.Result{}, nil
+	}
+
 	// No existing issue — find related anomalies and create a new Issue
 	related, err := r.CorrelationEngine.FindRelatedAnomalies(ctx, resource, CorrelationTimeWindow)
 	if err != nil {

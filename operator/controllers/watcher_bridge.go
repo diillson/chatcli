@@ -294,21 +294,21 @@ func (wb *WatcherBridge) pruneDedup() {
 	}
 }
 
-// InvalidateDedupForResource removes dedup entries matching a specific deployment+namespace,
-// allowing new alerts to generate fresh Anomalies. Called when an Issue reaches a terminal
-// state (Resolved/Escalated/Failed) so that recurrence is detected immediately.
-func (wb *WatcherBridge) InvalidateDedupForResource(deployment, namespace string) {
+// RefreshDedupForResource resets dedup entry timestamps for a specific deployment+namespace,
+// extending suppression for another DedupTTL period. Called when an Issue reaches a terminal
+// state (Resolved/Escalated/Failed) so that stale alerts don't immediately re-trigger.
+// If the problem truly recurs after DedupTTL, a fresh Anomaly will be created.
+func (wb *WatcherBridge) RefreshDedupForResource(deployment, namespace string) {
 	wb.mu.Lock()
 	defer wb.mu.Unlock()
 
+	now := time.Now()
 	for hash := range wb.seen {
-		// We can't reverse the hash, so instead compute all known alert type hashes
-		// and remove matches. Since we only have a few alert types, this is efficient.
 		for _, alertType := range knownAlertTypes {
 			candidate := fmt.Sprintf("%s|%s|%s", alertType, deployment, namespace)
 			h := sha256.Sum256([]byte(candidate))
 			if hash == fmt.Sprintf("%x", h[:8]) {
-				delete(wb.seen, hash)
+				wb.seen[hash] = now // refresh timestamp instead of delete
 			}
 		}
 	}
