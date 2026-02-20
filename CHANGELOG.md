@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.59.6](https://github.com/diillson/chatcli/compare/v1.59.5...v1.59.6) (2026-02-20)
+
+
+### Bug Fixes
+
+* **operator:** stop false-positive remediation loop and enrich AI context ([#571](https://github.com/diillson/chatcli/issues/571)) ([a78030d](https://github.com/diillson/chatcli/commit/a78030db9be69bd8ab9a1b17bec097f3bc9097b9))
+
 ## [1.59.5](https://github.com/diillson/chatcli/compare/v1.59.4...v1.59.5) (2026-02-19)
 
 
