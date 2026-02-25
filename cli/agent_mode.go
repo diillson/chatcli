@@ -179,9 +179,11 @@ func compactText(input string, maxLines int, maxLen int) string {
 
 // getInput obtém entrada do usuário de forma segura
 func (a *AgentMode) getInput(promptStr string) string {
-	cmd := exec.Command(sttyPath, "sane")
-	cmd.Stdin = os.Stdin
-	_ = cmd.Run()
+	if runtime.GOOS != "windows" {
+		cmd := exec.Command(sttyPath, "sane")
+		cmd.Stdin = os.Stdin
+		_ = cmd.Run()
+	}
 
 	// Enable bracketed paste mode for paste detection
 	if runtime.GOOS != "windows" || os.Getenv("WT_SESSION") != "" {
@@ -864,10 +866,12 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				fmt.Println(i18n.T("agent.status.batch_check_individual"))
 			}
 
-			cmd := exec.Command(sttyPath, "sane")
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			_ = cmd.Run()
+			if runtime.GOOS != "windows" {
+				cmd := exec.Command(sttyPath, "sane")
+				cmd.Stdin = os.Stdin
+				cmd.Stdout = os.Stdout
+				_ = cmd.Run()
+			}
 
 			fmt.Print(i18n.T("agent.status.batch_confirm"))
 			reader := bufio.NewReader(os.Stdin)
@@ -1300,9 +1304,11 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 
 // getCriticalInput obtém entrada para decisões críticas
 func (a *AgentMode) getCriticalInput(prompt string) string {
-	cmd := exec.Command(sttyPath, "sane")
-	cmd.Stdin = os.Stdin
-	_ = cmd.Run()
+	if runtime.GOOS != "windows" {
+		cmd := exec.Command(sttyPath, "sane")
+		cmd.Stdin = os.Stdin
+		_ = cmd.Run()
+	}
 
 	fmt.Print("\n")
 	fmt.Print(prompt)

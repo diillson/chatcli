@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 )
@@ -255,7 +256,7 @@ func (c *Client) DownloadPlugin(ctx context.Context, pluginName, targetDir strin
 		filename = pluginName
 	}
 
-	targetPath := targetDir + "/" + filename
+	targetPath := filepath.Join(targetDir, filename)
 	if err := writePluginFile(targetPath, data); err != nil {
 		return "", fmt.Errorf("failed to write plugin file: %w", err)
 	}
