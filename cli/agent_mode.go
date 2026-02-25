@@ -55,10 +55,10 @@ type AgentMode struct {
 	tokenCounter *metrics.TokenCounter
 	turnTimer    *metrics.Timer
 	// Multi-Agent Orchestration
-	agentDispatcher  *workers.Dispatcher
-	agentRegistry    *workers.Registry
-	fileLockMgr      *workers.FileLockManager
-	parallelMode     bool
+	agentDispatcher *workers.Dispatcher
+	agentRegistry   *workers.Registry
+	fileLockMgr     *workers.FileLockManager
+	parallelMode    bool
 }
 
 // Aliases de tipos para manter compatibilidade

@@ -24,9 +24,9 @@ func NewFileAgent() *FileAgent {
 	return a
 }
 
-func (a *FileAgent) Type() AgentType       { return AgentTypeFile }
-func (a *FileAgent) Name() string           { return "FileAgent" }
-func (a *FileAgent) IsReadOnly() bool       { return true }
+func (a *FileAgent) Type() AgentType  { return AgentTypeFile }
+func (a *FileAgent) Name() string     { return "FileAgent" }
+func (a *FileAgent) IsReadOnly() bool { return true }
 func (a *FileAgent) AllowedCommands() []string {
 	return []string{"read", "tree", "search"}
 }

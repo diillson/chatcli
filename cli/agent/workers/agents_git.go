@@ -21,9 +21,9 @@ func NewGitAgent() *GitAgent {
 	return a
 }
 
-func (a *GitAgent) Type() AgentType       { return AgentTypeGit }
-func (a *GitAgent) Name() string           { return "GitAgent" }
-func (a *GitAgent) IsReadOnly() bool       { return false }
+func (a *GitAgent) Type() AgentType  { return AgentTypeGit }
+func (a *GitAgent) Name() string     { return "GitAgent" }
+func (a *GitAgent) IsReadOnly() bool { return false }
 func (a *GitAgent) AllowedCommands() []string {
 	return []string{"git-status", "git-diff", "git-log", "git-changed", "git-branch", "exec"}
 }

@@ -37,13 +37,13 @@ type mockLLMManager struct {
 func (m *mockLLMManager) GetClient(_, _ string) (client.LLMClient, error) {
 	return &mockLLMClient{responses: m.client.responses}, nil
 }
-func (m *mockLLMManager) GetAvailableProviders() []string          { return []string{"mock"} }
-func (m *mockLLMManager) GetTokenManager() (token.Manager, bool)   { return nil, false }
-func (m *mockLLMManager) SetStackSpotRealm(_ string)               {}
-func (m *mockLLMManager) SetStackSpotAgentID(_ string)             {}
-func (m *mockLLMManager) GetStackSpotRealm() string                { return "" }
-func (m *mockLLMManager) GetStackSpotAgentID() string              { return "" }
-func (m *mockLLMManager) RefreshProviders()                        {}
+func (m *mockLLMManager) GetAvailableProviders() []string        { return []string{"mock"} }
+func (m *mockLLMManager) GetTokenManager() (token.Manager, bool) { return nil, false }
+func (m *mockLLMManager) SetStackSpotRealm(_ string)             {}
+func (m *mockLLMManager) SetStackSpotAgentID(_ string)           {}
+func (m *mockLLMManager) GetStackSpotRealm() string              { return "" }
+func (m *mockLLMManager) GetStackSpotAgentID() string            { return "" }
+func (m *mockLLMManager) RefreshProviders()                      {}
 func (m *mockLLMManager) CreateClientWithKey(_, _, _ string) (client.LLMClient, error) {
 	return m.GetClient("", "")
 }
@@ -53,17 +53,17 @@ func (m *mockLLMManager) CreateClientWithConfig(_, _, _ string, _ map[string]str
 
 // mockAgent is a simple agent that counts executions.
 type mockAgent struct {
-	agentType  AgentType
-	execCount  int64
-	sleepTime  time.Duration
-	returnErr  error
+	agentType AgentType
+	execCount int64
+	sleepTime time.Duration
+	returnErr error
 }
 
-func (a *mockAgent) Type() AgentType         { return a.agentType }
-func (a *mockAgent) Name() string             { return string(a.agentType) + "-mock" }
-func (a *mockAgent) Description() string      { return "Mock agent for testing" }
-func (a *mockAgent) SystemPrompt() string     { return "You are a mock agent." }
-func (a *mockAgent) Skills() *SkillSet        { return NewSkillSet() }
+func (a *mockAgent) Type() AgentType           { return a.agentType }
+func (a *mockAgent) Name() string              { return string(a.agentType) + "-mock" }
+func (a *mockAgent) Description() string       { return "Mock agent for testing" }
+func (a *mockAgent) SystemPrompt() string      { return "You are a mock agent." }
+func (a *mockAgent) Skills() *SkillSet         { return NewSkillSet() }
 func (a *mockAgent) AllowedCommands() []string { return []string{"read"} }
 func (a *mockAgent) IsReadOnly() bool          { return true }
 func (a *mockAgent) Execute(ctx context.Context, task string, deps *WorkerDeps) (*AgentResult, error) {
@@ -218,10 +218,10 @@ func TestDispatcher_MaxWorkersSemaphore(t *testing.T) {
 	countingAgent := &mockAgent{agentType: AgentTypeFile}
 	// Override Execute to track concurrency
 	registry.Register(&concurrencyTracker{
-		agentType:      AgentTypeFile,
-		current:        &current,
-		maxConcurrent:  &maxConcurrent,
-		sleepTime:      50 * time.Millisecond,
+		agentType:     AgentTypeFile,
+		current:       &current,
+		maxConcurrent: &maxConcurrent,
+		sleepTime:     50 * time.Millisecond,
 	})
 
 	mgr := &mockLLMManager{client: &mockLLMClient{responses: []string{"done"}}}
@@ -254,11 +254,11 @@ type concurrencyTracker struct {
 	sleepTime     time.Duration
 }
 
-func (a *concurrencyTracker) Type() AgentType         { return a.agentType }
-func (a *concurrencyTracker) Name() string             { return "tracker" }
-func (a *concurrencyTracker) Description() string      { return "Tracks concurrency" }
-func (a *concurrencyTracker) SystemPrompt() string     { return "" }
-func (a *concurrencyTracker) Skills() *SkillSet        { return NewSkillSet() }
+func (a *concurrencyTracker) Type() AgentType           { return a.agentType }
+func (a *concurrencyTracker) Name() string              { return "tracker" }
+func (a *concurrencyTracker) Description() string       { return "Tracks concurrency" }
+func (a *concurrencyTracker) SystemPrompt() string      { return "" }
+func (a *concurrencyTracker) Skills() *SkillSet         { return NewSkillSet() }
 func (a *concurrencyTracker) AllowedCommands() []string { return nil }
 func (a *concurrencyTracker) IsReadOnly() bool          { return true }
 func (a *concurrencyTracker) Execute(ctx context.Context, task string, deps *WorkerDeps) (*AgentResult, error) {

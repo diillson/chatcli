@@ -21,9 +21,9 @@ func NewShellAgent() *ShellAgent {
 	return a
 }
 
-func (a *ShellAgent) Type() AgentType       { return AgentTypeShell }
-func (a *ShellAgent) Name() string           { return "ShellAgent" }
-func (a *ShellAgent) IsReadOnly() bool       { return false }
+func (a *ShellAgent) Type() AgentType  { return AgentTypeShell }
+func (a *ShellAgent) Name() string     { return "ShellAgent" }
+func (a *ShellAgent) IsReadOnly() bool { return false }
 func (a *ShellAgent) AllowedCommands() []string {
 	return []string{"exec", "test"}
 }

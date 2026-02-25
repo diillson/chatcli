@@ -22,9 +22,9 @@ func NewSearchAgent() *SearchAgent {
 	return a
 }
 
-func (a *SearchAgent) Type() AgentType       { return AgentTypeSearch }
-func (a *SearchAgent) Name() string           { return "SearchAgent" }
-func (a *SearchAgent) IsReadOnly() bool       { return true }
+func (a *SearchAgent) Type() AgentType  { return AgentTypeSearch }
+func (a *SearchAgent) Name() string     { return "SearchAgent" }
+func (a *SearchAgent) IsReadOnly() bool { return true }
 func (a *SearchAgent) AllowedCommands() []string {
 	return []string{"search", "tree", "read"}
 }

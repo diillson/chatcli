@@ -21,9 +21,9 @@ func NewPlannerAgent() *PlannerAgent {
 	return a
 }
 
-func (a *PlannerAgent) Type() AgentType       { return AgentTypePlanner }
-func (a *PlannerAgent) Name() string           { return "PlannerAgent" }
-func (a *PlannerAgent) IsReadOnly() bool       { return true }
+func (a *PlannerAgent) Type() AgentType  { return AgentTypePlanner }
+func (a *PlannerAgent) Name() string     { return "PlannerAgent" }
+func (a *PlannerAgent) IsReadOnly() bool { return true }
 func (a *PlannerAgent) AllowedCommands() []string {
 	return []string{} // no tool access
 }

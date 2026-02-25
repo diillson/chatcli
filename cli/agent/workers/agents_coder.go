@@ -16,9 +16,9 @@ func NewCoderAgent() *CoderAgent {
 	return a
 }
 
-func (a *CoderAgent) Type() AgentType       { return AgentTypeCoder }
-func (a *CoderAgent) Name() string           { return "CoderAgent" }
-func (a *CoderAgent) IsReadOnly() bool       { return false }
+func (a *CoderAgent) Type() AgentType  { return AgentTypeCoder }
+func (a *CoderAgent) Name() string     { return "CoderAgent" }
+func (a *CoderAgent) IsReadOnly() bool { return false }
 func (a *CoderAgent) AllowedCommands() []string {
 	return []string{"write", "patch", "read", "tree"}
 }
