@@ -102,7 +102,7 @@ func (a *ShellAgent) registerSkills() {
 }
 
 // runTestsScript executes go test and returns structured output.
-func runTestsScript(ctx context.Context, input map[string]string, eng *engine.Engine) (string, error) {
+func runTestsScript(ctx context.Context, input map[string]string, _ *engine.Engine) (string, error) {
 	dir := input["dir"]
 	if dir == "" {
 		dir = "."
@@ -119,7 +119,7 @@ func runTestsScript(ctx context.Context, input map[string]string, eng *engine.En
 		buf.WriteString("\n")
 	})
 
-	eng = engine.NewEngine(outWriter, errWriter)
+	eng := engine.NewEngine(outWriter, errWriter)
 	err := eng.Execute(ctx, "test", []string{"--dir", dir})
 	outWriter.Flush()
 	errWriter.Flush()
@@ -141,7 +141,7 @@ func runTestsScript(ctx context.Context, input map[string]string, eng *engine.En
 }
 
 // buildCheckScript runs go build and go vet.
-func buildCheckScript(ctx context.Context, input map[string]string, eng *engine.Engine) (string, error) {
+func buildCheckScript(ctx context.Context, input map[string]string, _ *engine.Engine) (string, error) {
 	dir := input["dir"]
 	if dir == "" {
 		dir = "."
@@ -169,7 +169,7 @@ func buildCheckScript(ctx context.Context, input map[string]string, eng *engine.
 			buf.WriteString("\n")
 		})
 
-		eng = engine.NewEngine(outWriter, errWriter)
+		eng := engine.NewEngine(outWriter, errWriter)
 		err := eng.Execute(ctx, "exec", []string{"--cmd", c.cmd})
 		outWriter.Flush()
 		errWriter.Flush()

@@ -140,7 +140,7 @@ func mapProjectScript(ctx context.Context, input map[string]string, _ *engine.En
 			buf.WriteString("\n")
 		})
 		eng := engine.NewEngine(outWriter, engine.NewStreamWriter(func(string) {}))
-		eng.Execute(ctx, "tree", []string{"--dir", dir, "--max-depth", "3"})
+		_ = eng.Execute(ctx, "tree", []string{"--dir", dir, "--max-depth", "3"})
 		outWriter.Flush()
 		results[0] = searchResult{label: "Project Tree", output: buf.String()}
 	}()
@@ -156,7 +156,7 @@ func mapProjectScript(ctx context.Context, input map[string]string, _ *engine.En
 				buf.WriteString("\n")
 			})
 			eng := engine.NewEngine(outWriter, engine.NewStreamWriter(func(string) {}))
-			eng.Execute(ctx, "search", []string{"--term", term, "--dir", dir, "--glob", "*.go"})
+			_ = eng.Execute(ctx, "search", []string{"--term", term, "--dir", dir, "--glob", "*.go"})
 			outWriter.Flush()
 			results[idx+1] = searchResult{label: label, output: buf.String()}
 		}(i, s.label, s.term)
