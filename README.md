@@ -186,6 +186,11 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  `CHATCLI_AGENT_ALLOW_SUDO`  – **(Opcional)** Permite comandos com sudo sem bloqueio automático (true/false). Padrão:  false  (bloqueia sudo por segurança).
   -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Opcional)** Define o máximo de turnos que o agente pode ter. Padrão: 50. Máximo: 200.
   -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Opcional)** Define o tempo limite de execução para o plugin do agente (ex.: 30s, 2m, 10m). Padrão: 15 (Minutos)
+- Multi-Agent (Orquestração Paralela):
+  -  `CHATCLI_AGENT_PARALLEL_MODE`  – **(Opcional)** Ativa o modo multi-agent com orquestração paralela. Quando `true`, o LLM orquestrador pode despachar agents especialistas em paralelo para tarefas complexas. Padrão: `false`.
+  -  `CHATCLI_AGENT_MAX_WORKERS`  – **(Opcional)** Número máximo de workers (goroutines) executando agents simultaneamente. Padrão: `4`.
+  -  `CHATCLI_AGENT_WORKER_MAX_TURNS`  – **(Opcional)** Máximo de turnos do mini ReAct loop de cada worker agent. Padrão: `10`.
+  -  `CHATCLI_AGENT_WORKER_TIMEOUT`  – **(Opcional)** Timeout por worker agent individual. Aceita durações Go (ex.: 30s, 2m, 10m). Padrão: `5m`.
 - OAuth:
   -  `CHATCLI_OPENAI_CLIENT_ID`  – **(Opcional)** Permite sobrescrever o client ID do OAuth da OpenAI.
 
@@ -213,6 +218,12 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     CHATCLI_AGENT_ALLOW_SUDO=false
     CHATCLI_AGENT_PLUGIN_MAX_TURNS=50
     CHATCLI_AGENT_PLUGIN_TIMEOUT=20m
+
+    # Multi-Agent (Orquestração Paralela)
+    CHATCLI_AGENT_PARALLEL_MODE=false       # Ativa modo multi-agent com agents paralelos
+    CHATCLI_AGENT_MAX_WORKERS=4             # Máximo de agents executando em paralelo
+    CHATCLI_AGENT_WORKER_MAX_TURNS=10       # Máximo de turnos por worker agent
+    CHATCLI_AGENT_WORKER_TIMEOUT=5m         # Timeout por worker agent
 
     # OAuth Configurações (opcional)
     # CHATCLI_OPENAI_CLIENT_ID=custom-client-id    # Sobrescreve o client ID do OAuth da OpenAI
@@ -776,6 +787,27 @@ Você pode controlar o estilo da UI e o banner de dicas do `/coder` com env vars
 
 Esses valores aparecem em `/status` e `/config`.
 
+#### Orquestração Multi-Agent (Modo Paralelo)
+
+Quando ativado via `CHATCLI_AGENT_PARALLEL_MODE=true`, o ChatCLI transforma o modo `/coder` em um sistema multi-agent onde o LLM orquestrador despacha **agents especialistas em paralelo** para tarefas complexas.
+
+**6 Agents Especialistas Embarcados:**
+
+| Agent | Expertise | Acesso |
+|-------|-----------|--------|
+| **FileAgent** | Leitura e análise de código | Somente leitura |
+| **CoderAgent** | Escrita e modificação de código | Leitura/Escrita |
+| **ShellAgent** | Execução de comandos e testes | Execução |
+| **GitAgent** | Controle de versão | Git ops |
+| **SearchAgent** | Busca no codebase | Somente leitura |
+| **PlannerAgent** | Raciocínio e decomposição de tarefas | Sem tools (puro LLM) |
+
+Cada agent possui **skills** próprias — algumas são scripts aceleradores (executam sem LLM), outras são descritivas (o agent resolve via seu mini ReAct loop). Exemplo: `batch-read` lê N arquivos em paralelo sem chamar o LLM; `run-tests` executa `go test` e parseia o resultado automaticamente.
+
+**Extensibilidade:** O sistema de Registry permite registrar e substituir agents via `Register()`/`Unregister()`, possibilitando agents customizados pelo usuário.
+
+> Documentação completa em [diillson.github.io/chatcli/docs/features/multi-agent-orchestration](https://diillson.github.io/chatcli/docs/features/multi-agent-orchestration/)
+
 ### Interação com o Agente
 
 Inicie o agente com  /agent <consulta>  ou  /run <consulta> . O agente irá sugerir comandos que você pode aprovar ou refinar.
@@ -1283,6 +1315,7 @@ A IA recebe contexto completo do cluster (status do deployment, pods, eventos, h
 O projeto é modular e organizado em pacotes:
 
 -  cli : Gerencia a interface e o modo agente.
+    -  cli/agent/workers : Sistema multi-agent com 6 agents especialistas, dispatcher assíncrono, skills com scripts aceleradores e orquestração paralela.
 -  config : Lida com a configuração via constantes.
 -  i18n : Centraliza a lógica de internacionalização e os arquivos de tradução.
 -  llm : Lida com a comunicação e gerência dos clientes LLM.

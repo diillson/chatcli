@@ -44,6 +44,23 @@ sequenceDiagram
     CLI-->>User: Exibe Resultado
 ```
 
+## Orquestração Multi-Agent (Modo Paralelo)
+
+Com `CHATCLI_AGENT_PARALLEL_MODE=true`, o `/coder` ganha capacidade de **orquestração multi-agent**. O LLM orquestrador pode despachar agents especialistas em paralelo usando tags `<agent_call>`:
+
+- **FileAgent** — leitura e análise de código (read-only)
+- **CoderAgent** — escrita e modificação de código
+- **ShellAgent** — execução de comandos e testes
+- **GitAgent** — operações de controle de versão
+- **SearchAgent** — busca no codebase (read-only)
+- **PlannerAgent** — raciocínio e decomposição de tarefas (sem tools)
+
+Cada agent possui skills próprias (scripts aceleradores e capacidades descritivas) e executa em seu próprio mini ReAct loop isolado. Múltiplos agents rodam simultaneamente via goroutines com semáforo configurável (`CHATCLI_AGENT_MAX_WORKERS`).
+
+> Quando desativado (padrão), o `/coder` funciona exatamente como antes — sem nenhum impacto. Veja a [documentação completa](/docs/features/multi-agent-orchestration/).
+
+---
+
 ## Contrato de saída (obrigatório)
 
 O mais importante em `/coder` é que a resposta do assistente sempre segue este formato:

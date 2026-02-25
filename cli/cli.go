@@ -883,6 +883,14 @@ func (cli *ChatCLI) runAgentLogic() {
 		return cli.agentMode.Run(ctx, query, additionalContext, "")
 	})
 
+	// Inject mode-reset message so the LLM knows we left agent mode
+	cli.history = append(cli.history, models.Message{
+		Role: "system",
+		Content: "The /agent session has ended. You are now back in normal chat mode. " +
+			"Respond conversationally in plain text. Do NOT use command blocks, execution plans, or structured action formats. " +
+			"Just answer the user's questions naturally.",
+	})
+
 	fmt.Println(i18n.T("status.agent_mode_exit"))
 	time.Sleep(500 * time.Millisecond)
 }
@@ -915,6 +923,14 @@ func (cli *ChatCLI) runCoderLogic() {
 	cli.runWithCancellation("Coder Mode", func(ctx context.Context) error {
 		// Sem timeout fixo no context.WithTimeout aqui, deixamos o usuário cancelar
 		return cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)
+	})
+
+	// Inject mode-reset message so the LLM knows we left coder mode
+	cli.history = append(cli.history, models.Message{
+		Role: "system",
+		Content: "The /coder engineering session has ended. You are now back in normal chat mode. " +
+			"Respond conversationally in plain text. Do NOT use <tool_call>, <reasoning>, <agent_call>, or any structured XML tags. " +
+			"Just answer the user's questions naturally.",
 	})
 
 	fmt.Println(colorize("\n ✅ Sessão de engenharia finalizada.", ColorGreen))

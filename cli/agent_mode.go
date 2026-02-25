@@ -28,6 +28,7 @@ import (
 	"github.com/diillson/chatcli/cli/metrics"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
@@ -53,6 +54,11 @@ type AgentMode struct {
 	// Métricas
 	tokenCounter *metrics.TokenCounter
 	turnTimer    *metrics.Timer
+	// Multi-Agent Orchestration
+	agentDispatcher *workers.Dispatcher
+	agentRegistry   *workers.Registry
+	fileLockMgr     *workers.FileLockManager
+	parallelMode    bool
 }
 
 // Aliases de tipos para manter compatibilidade
@@ -262,6 +268,11 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// Adiciona contexto de ferramentas (plugins) ao prompt
 	systemInstruction += a.getToolContextString()
 
+	// Multi-Agent Orchestration: initialize if parallel mode is enabled
+	if a.initMultiAgentIfEnabled() {
+		systemInstruction += workers.OrchestratorSystemPrompt(a.agentRegistry.CatalogString())
+	}
+
 	// Banner curto com cheat sheet no modo /coder (apenas para o usuário humano)
 	if isCoder && !a.coderBannerShown && isCoderBannerEnabled() {
 		fmt.Println()
@@ -278,6 +289,24 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if len(a.cli.history) == 0 {
 		a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
 	} else {
+		// Remove any mode-reset system messages injected when leaving previous sessions.
+		// These are mid-history system messages that would confuse the LLM on re-entry.
+		cleaned := make([]models.Message, 0, len(a.cli.history))
+		firstSystem := true
+		for _, msg := range a.cli.history {
+			if msg.Role == "system" {
+				if firstSystem {
+					// Keep the first system message (will be updated below)
+					cleaned = append(cleaned, msg)
+					firstSystem = false
+				}
+				// Drop any additional system messages (mode-reset markers)
+				continue
+			}
+			cleaned = append(cleaned, msg)
+		}
+		a.cli.history = cleaned
+
 		// Se já existe histórico (ex: uma sessão carregada), forçamos a atualização do system prompt
 		// para garantir que a IA mude de comportamento se trocarmos de /agent para /coder
 		foundSystem := false
@@ -1732,6 +1761,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		remaining := thoughtText
 		remaining = stripXMLTagBlock(remaining, "reasoning")
 		remaining = stripXMLTagBlock(remaining, "explanation")
+		remaining = stripXMLTagBlock(remaining, "final_summary")
 		remaining = strings.TrimSpace(removeXMLTags(remaining))
 
 		coderMinimal := a.isCoderMode && isCoderMinimalUI()
@@ -1809,6 +1839,49 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					})
 					continue
 				}
+			}
+		}
+
+		// =========================================================
+		// PRIORIDADE 0: DISPATCH AGENT_CALL(s) (MULTI-AGENT MODE)
+		// =========================================================
+		if a.parallelMode && a.agentDispatcher != nil {
+			agentCalls, _ := workers.ParseAgentCalls(aiResponse)
+			if len(agentCalls) > 0 {
+				coderMinUI := a.isCoderMode && isCoderMinimalUI()
+				if coderMinUI {
+					renderer.RenderTimelineEvent("🚀", "AGENTS", fmt.Sprintf("%d agents dispatched", len(agentCalls)), agent.ColorPurple)
+				} else {
+					renderer.RenderTimelineEvent("🚀", "MULTI-AGENT DISPATCH", fmt.Sprintf("Dispatching %d specialized agents in parallel", len(agentCalls)), agent.ColorPurple)
+				}
+
+				for i, ac := range agentCalls {
+					renderer.RenderTimelineEvent("🤖", fmt.Sprintf("[%s] #%d", ac.Agent, i+1), truncateForUI(ac.Task, 120), agent.ColorCyan)
+				}
+
+				// Dispatch and collect results
+				agentResults := a.agentDispatcher.Dispatch(ctx, agentCalls)
+
+				// Render results
+				for _, ar := range agentResults {
+					if ar.Error != nil {
+						renderer.RenderTimelineEvent("❌", fmt.Sprintf("[%s] FAILED", ar.Agent), ar.Error.Error(), agent.ColorYellow)
+					} else {
+						summary := truncateForUI(ar.Output, 200)
+						renderer.RenderTimelineEvent("✅", fmt.Sprintf("[%s] OK (%s)", ar.Agent, ar.Duration.Round(time.Millisecond)), summary, agent.ColorGreen)
+					}
+				}
+
+				// Inject results as feedback for the orchestrator
+				feedback := workers.FormatResults(agentResults)
+				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedback})
+
+				// If there are also tool_calls in the same response, skip them —
+				// the orchestrator should use agent_calls OR tool_calls, not both in the same turn.
+				if len(toolCalls) > 0 {
+					a.logger.Info("Skipping tool_calls because agent_calls were dispatched in this turn")
+				}
+				continue
 			}
 		}
 
@@ -3365,4 +3438,82 @@ func buildCoderSingleLineArgsEnforcementPrompt(originalArgs string) string {
 			"Your args (truncated):\n---\n%s\n---",
 		preview,
 	)
+}
+
+// =========================================================
+// MULTI-AGENT ORCHESTRATION HELPERS
+// =========================================================
+
+// initMultiAgentIfEnabled initializes the multi-agent system if
+// CHATCLI_AGENT_PARALLEL_MODE=true. Returns true if enabled.
+func (a *AgentMode) initMultiAgentIfEnabled() bool {
+	modeStr := os.Getenv("CHATCLI_AGENT_PARALLEL_MODE")
+	if modeStr != "true" && modeStr != "1" {
+		a.parallelMode = false
+		return false
+	}
+
+	// Only initialize once
+	if a.agentRegistry != nil {
+		a.parallelMode = true
+		return true
+	}
+
+	a.agentRegistry = workers.SetupDefaultRegistry()
+	a.fileLockMgr = workers.NewFileLockManager()
+
+	maxWorkersStr := os.Getenv("CHATCLI_AGENT_MAX_WORKERS")
+	maxWorkers := workers.DefaultMaxWorkers
+	if maxWorkersStr != "" {
+		if v, err := strconv.Atoi(maxWorkersStr); err == nil && v > 0 {
+			maxWorkers = v
+		}
+	}
+
+	workerTimeout := workers.DefaultWorkerTimeout
+	if ts := os.Getenv("CHATCLI_AGENT_WORKER_TIMEOUT"); ts != "" {
+		if d, err := time.ParseDuration(ts); err == nil && d > 0 {
+			workerTimeout = d
+		}
+	}
+
+	// Determine provider/model from current client
+	provider := os.Getenv("LLM_PROVIDER")
+	if provider == "" {
+		provider = config.Global.GetString("LLM_PROVIDER")
+	}
+	model := ""
+	if a.cli.Client != nil {
+		model = a.cli.Client.GetModelName()
+	}
+
+	cfg := workers.DispatcherConfig{
+		MaxWorkers:    maxWorkers,
+		ParallelMode:  true,
+		Provider:      provider,
+		Model:         model,
+		WorkerTimeout: workerTimeout,
+	}
+
+	a.agentDispatcher = workers.NewDispatcher(a.agentRegistry, a.cli.manager, cfg, a.logger)
+	a.parallelMode = true
+
+	a.logger.Info("Multi-agent orchestration enabled",
+		zap.Int("maxWorkers", maxWorkers),
+		zap.Duration("workerTimeout", workerTimeout),
+		zap.String("provider", provider),
+		zap.String("model", model),
+	)
+
+	return true
+}
+
+// truncateForUI truncates a string for UI display.
+func truncateForUI(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

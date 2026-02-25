@@ -121,6 +121,17 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 | `CHATCLI_AGENT_PLUGIN_MAX_TURNS` | Limite máximo de turnos do agente no modo `/agent`/`/coder` (padrão: `50`, máximo: `200`). |
 | `CHATCLI_AGENT_PLUGIN_TIMEOUT` | Timeout total do plugin do agente (padrão: `15m`). |
 
+### Multi-Agent (Orquestração Paralela)
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_AGENT_PARALLEL_MODE` | Ativa o modo multi-agent com orquestração paralela. O LLM orquestrador despacha agents especialistas em paralelo. | `false` |
+| `CHATCLI_AGENT_MAX_WORKERS` | Número máximo de workers (goroutines) executando agents simultaneamente. | `4` |
+| `CHATCLI_AGENT_WORKER_MAX_TURNS` | Máximo de turnos do mini ReAct loop de cada worker agent. | `10` |
+| `CHATCLI_AGENT_WORKER_TIMEOUT` | Timeout por worker agent individual. Aceita durações Go (ex: `30s`, `2m`, `10m`). | `5m` |
+
+> Para detalhes completos sobre o sistema multi-agent, consulte a [documentação de Orquestração Multi-Agent](/docs/features/multi-agent-orchestration/).
+
 ---
 
 ## Configuração do Modo Servidor (`chatcli serve`)
