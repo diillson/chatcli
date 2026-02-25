@@ -109,6 +109,7 @@ func RunServe(args []string, llmMgr manager.LLMManager, logger *zap.Logger) erro
 	if pluginErr != nil {
 		logger.Warn("Failed to initialize plugin manager, remote plugins will be unavailable", zap.Error(pluginErr))
 	} else {
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCoderPlugin())
 		srv.SetPluginManager(pluginMgr)
 		defer pluginMgr.Close()
 		logger.Info("Plugin manager initialized for remote discovery",

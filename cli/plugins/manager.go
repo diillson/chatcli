@@ -16,6 +16,7 @@ import (
 // Manager descobre, carrega e gerencia o ciclo de vida dos plugins.
 type Manager struct {
 	plugins    map[string]Plugin
+	builtins   map[string]Plugin
 	pluginsDir string
 	logger     *zap.Logger
 	mu         sync.RWMutex
@@ -42,6 +43,7 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 
 	m := &Manager{
 		plugins:    make(map[string]Plugin),
+		builtins:   make(map[string]Plugin),
 		pluginsDir: pluginsDir,
 		logger:     logger,
 		watcher:    watcher,
@@ -133,6 +135,14 @@ func (m *Manager) Reload() {
 		}
 		m.plugins[plugin.Name()] = plugin
 	}
+
+	// Re-inject builtins that were not overridden by external plugins
+	for name, bp := range m.builtins {
+		if _, exists := m.plugins[name]; !exists {
+			m.plugins[name] = bp
+		}
+	}
+
 	m.logger.Info("Plugins recarregados.", zap.Int("count", len(m.plugins)))
 }
 
@@ -160,6 +170,18 @@ func (m *Manager) GetPlugins() []Plugin {
 		return list[i].Name() < list[j].Name()
 	})
 	return list
+}
+
+// RegisterBuiltinPlugin registers a builtin plugin. It is stored in a separate
+// map so that Reload() can re-inject it when no external override exists.
+func (m *Manager) RegisterBuiltinPlugin(plugin Plugin) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.builtins[plugin.Name()] = plugin
+	// Only inject if no external plugin already loaded with the same name
+	if _, exists := m.plugins[plugin.Name()]; !exists {
+		m.plugins[plugin.Name()] = plugin
+	}
 }
 
 // RegisterRemotePlugin registers a remote plugin in the manager without saving to disk.

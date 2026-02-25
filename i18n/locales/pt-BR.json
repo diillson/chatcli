@@ -426,6 +426,7 @@
   "plugin.uninstall.usage": "Uso: /plugin uninstall <nome-do-plugin>",
   "plugin.uninstall.error": " ❌ Erro ao desinstalar o plugin '%s': %v",
   "plugin.uninstall.success": " ✅ Plugin '%s' desinstalado.",
+  "plugin.uninstall.error.not_local": " ❌ Não é possível desinstalar um plugin builtin ou remoto.",
   "plugin.error.manager_disabled": " ❌ O gerenciador de plugins não está disponível. Verifique os logs para erros de inicialização.",
   "plugin.error.unknown_subcommand": "Subcomando de plugin desconhecido: '%s'",
   "plugin.reloading": "Recarregando plugins...",

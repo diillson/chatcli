@@ -352,6 +352,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		logger.Error("Falha crítica ao inicializar o gerenciador de plugins, plugins estarão desabilitados", zap.Error(err))
 	}
 	cli.pluginManager = pluginMgr
+	if pluginMgr != nil {
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCoderPlugin())
+	}
 
 	cli.configureProviderAndModel()
 

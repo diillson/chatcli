@@ -887,6 +887,10 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 			fmt.Println(i18n.T("plugin.error.not_found", args[2]))
 			return
 		}
+		if p.Path() == "[builtin]" || p.Path() == "[remote]" {
+			fmt.Println(i18n.T("plugin.uninstall.error.not_local"))
+			return
+		}
 		if err := os.Remove(p.Path()); err != nil {
 			fmt.Println(i18n.T("plugin.uninstall.error", p.Name(), err))
 			return
