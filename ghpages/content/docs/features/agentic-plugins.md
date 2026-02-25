@@ -105,7 +105,14 @@ CHATCLI_AGENT_PLUGIN_TIMEOUT    │ duração  │  15m    │ Tempo limite para
 CHATCLI_AGENT_CMD_TIMEOUT       │ duração  │  10m    │ Timeout para comandos shell executados via  @command  (máx: 1h).                            
 CHATCLI_AGENT_DENYLIST          │ string   │ -       │ Expressões regulares separadas por  ;  para bloquear comandos perigosos.          
 CHATCLI_AGENT_ALLOW_SUDO        │ booleano │  false  │ Permite comandos  sudo  sem bloqueio automático (use com cautela).
+CHATCLI_AGENT_PARALLEL_MODE     │ booleano │  false  │ Ativa orquestração multi-agent com agents paralelos.
+CHATCLI_AGENT_MAX_WORKERS       │ inteiro  │  4      │ Máximo de workers (goroutines) executando agents em paralelo.
+CHATCLI_AGENT_WORKER_MAX_TURNS  │ inteiro  │  10     │ Máximo de turnos do mini ReAct loop de cada worker agent.
+CHATCLI_AGENT_WORKER_TIMEOUT    │ duração  │  5m     │ Timeout por worker agent individual.
 ```
+
+> Quando `CHATCLI_AGENT_PARALLEL_MODE=true`, o LLM orquestrador pode despachar 6 agents especialistas (FileAgent, CoderAgent, ShellAgent, GitAgent, SearchAgent, PlannerAgent) em paralelo. Veja a [documentação completa](/docs/features/multi-agent-orchestration/).
+
 --------
 
 ## O Ciclo ReAct: Raciocínio e Ação

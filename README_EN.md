@@ -186,6 +186,11 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  `CHATCLI_AGENT_ALLOW_SUDO`  – **(Optional)** Allow sudo commands without automatic blocking (true/false). Default:  false  (sudo is blocked for safety).
   -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Optional)** Defines the maximum number of turns the agent can have. Default: 50. Maximum: 200.
   -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Optional)** Defines the execution timeout for the agent plugin (e.g., 30s, 2m, 10m). Default: 15 (Minutes)
+- Multi-Agent (Parallel Orchestration):
+  -  `CHATCLI_AGENT_PARALLEL_MODE`  – **(Optional)** Enables multi-agent mode with parallel orchestration. When `true`, the orchestrator LLM can dispatch specialized agents in parallel for complex tasks. Default: `false`.
+  -  `CHATCLI_AGENT_MAX_WORKERS`  – **(Optional)** Maximum number of workers (goroutines) running agents simultaneously. Default: `4`.
+  -  `CHATCLI_AGENT_WORKER_MAX_TURNS`  – **(Optional)** Maximum turns for each worker agent's mini ReAct loop. Default: `10`.
+  -  `CHATCLI_AGENT_WORKER_TIMEOUT`  – **(Optional)** Timeout per individual worker agent. Accepts Go durations (e.g., 30s, 2m, 10m). Default: `5m`.
 - OAuth:
   -  `CHATCLI_OPENAI_CLIENT_ID`  – **(Optional)** Override the OpenAI OAuth client ID.
 
@@ -211,6 +216,12 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     CHATCLI_AGENT_ALLOW_SUDO=false
     CHATCLI_AGENT_PLUGIN_MAX_TURNS=50
     CHATCLI_AGENT_PLUGIN_TIMEOUT=20m
+
+    # Multi-Agent (Parallel Orchestration)
+    CHATCLI_AGENT_PARALLEL_MODE=false       # Enable multi-agent mode with parallel agents
+    CHATCLI_AGENT_MAX_WORKERS=4             # Maximum agents running in parallel
+    CHATCLI_AGENT_WORKER_MAX_TURNS=10       # Maximum turns per worker agent
+    CHATCLI_AGENT_WORKER_TIMEOUT=5m         # Timeout per worker agent
 
     # OAuth Settings (optional)
     # CHATCLI_OPENAI_CLIENT_ID=custom-client-id    # Override the OpenAI OAuth client ID
@@ -775,6 +786,27 @@ You can control the `/coder` UI style and the tips banner with env vars:
 
 These values are visible in `/status` and `/config`.
 
+#### Multi-Agent Orchestration (Parallel Mode)
+
+When enabled via `CHATCLI_AGENT_PARALLEL_MODE=true`, ChatCLI transforms `/coder` mode into a multi-agent system where the orchestrator LLM dispatches **specialized agents in parallel** for complex tasks.
+
+**6 Built-in Specialized Agents:**
+
+| Agent | Expertise | Access |
+|-------|-----------|--------|
+| **FileAgent** | Code reading and analysis | Read-only |
+| **CoderAgent** | Code writing and modification | Read/Write |
+| **ShellAgent** | Command execution and testing | Execution |
+| **GitAgent** | Version control | Git ops |
+| **SearchAgent** | Codebase search | Read-only |
+| **PlannerAgent** | Reasoning and task decomposition | No tools (pure LLM) |
+
+Each agent has its own **skills** — some are accelerator scripts (execute without LLM calls), others are descriptive (the agent resolves them via its mini ReAct loop). Example: `batch-read` reads N files in parallel without calling the LLM; `run-tests` executes `go test` and parses the result automatically.
+
+**Extensibility:** The Registry system allows registering and replacing agents via `Register()`/`Unregister()`, enabling user-defined custom agents.
+
+> Full documentation at [diillson.github.io/chatcli/docs/features/multi-agent-orchestration](https://diillson.github.io/chatcli/docs/features/multi-agent-orchestration/)
+
 ### Agent Interaction
 
 Start the agent with  /agent <query>  or  /run <query> . The agent will suggest commands that you can approve or refine.
@@ -1230,6 +1262,7 @@ The AI receives full cluster context (deployment status, pods, events, revision 
 The project has a modular structure organized into packages:
 
 -  cli : Manages the interface and agent mode.
+    -  cli/agent/workers : Multi-agent system with 6 specialized agents, async dispatcher, skills with accelerator scripts, and parallel orchestration.
 -  config : Handles configuration via constants.
 -  i18n : Centralizes internationalization logic and translation files.
 -  llm : Manages communication and LLM client handling.

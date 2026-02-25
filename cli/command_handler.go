@@ -787,10 +787,13 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 			fmt.Println(i18n.T("plugin.error.not_found", args[2]))
 			return
 		}
-		info, _ := os.Stat(p.Path())
 		fmt.Println(i18n.T("plugin.inspect.details_for", p.Name()))
 		fmt.Printf("  %s: %s\n", colorize(i18n.T("plugin.inspect.path"), ColorCyan), p.Path())
-		fmt.Printf("  %s: %s\n", colorize(i18n.T("plugin.inspect.permissions"), ColorCyan), info.Mode().String())
+		if info, err := os.Stat(p.Path()); err == nil {
+			fmt.Printf("  %s: %s\n", colorize(i18n.T("plugin.inspect.permissions"), ColorCyan), info.Mode().String())
+		} else {
+			fmt.Printf("  %s: %s\n", colorize(i18n.T("plugin.inspect.permissions"), ColorCyan), "N/A (builtin)")
+		}
 
 	case "install":
 		if len(args) < 3 {
