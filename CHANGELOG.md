@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.60.0](https://github.com/diillson/chatcli/compare/v1.59.6...v1.60.0) (2026-02-25)
+
+
+### Features
+
+* remote resource discovery, builtin [@coder](https://github.com/coder) plugin, paste detection & Windows fixes ([#573](https://github.com/diillson/chatcli/issues/573)) ([cd979c7](https://github.com/diillson/chatcli/commit/cd979c7f9ca38c73b00fd904fe1dbd1fc6a7699b))
+
 ## [1.59.6](https://github.com/diillson/chatcli/compare/v1.59.5...v1.59.6) (2026-02-20)
 
 
