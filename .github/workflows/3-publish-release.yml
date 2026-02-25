@@ -2,7 +2,10 @@ name: Release on main (PR + GitHub Release)
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - beta
+      - alpha
 
 permissions:
   contents: write
@@ -28,7 +31,8 @@ jobs:
         with:
           release-type: go
           token: ${{ secrets.GH_RELEASE_TOKEN }}
-          target-branch: main
+          target-branch: ${{ github.ref_name }}
+          prerelease: true
 
   build_and_upload:
     name: Build e upload de binários (após release criada)
