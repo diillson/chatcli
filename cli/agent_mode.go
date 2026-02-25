@@ -289,6 +289,24 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if len(a.cli.history) == 0 {
 		a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
 	} else {
+		// Remove any mode-reset system messages injected when leaving previous sessions.
+		// These are mid-history system messages that would confuse the LLM on re-entry.
+		cleaned := make([]models.Message, 0, len(a.cli.history))
+		firstSystem := true
+		for _, msg := range a.cli.history {
+			if msg.Role == "system" {
+				if firstSystem {
+					// Keep the first system message (will be updated below)
+					cleaned = append(cleaned, msg)
+					firstSystem = false
+				}
+				// Drop any additional system messages (mode-reset markers)
+				continue
+			}
+			cleaned = append(cleaned, msg)
+		}
+		a.cli.history = cleaned
+
 		// Se já existe histórico (ex: uma sessão carregada), forçamos a atualização do system prompt
 		// para garantir que a IA mude de comportamento se trocarmos de /agent para /coder
 		foundSystem := false
