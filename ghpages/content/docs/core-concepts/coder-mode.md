@@ -54,10 +54,10 @@ O mais importante em `/coder` é que a resposta do assistente sempre segue este 
 3) Nunca usa blocos ```` nem comandos shell diretos nesse modo.
 
 ## Ferramentas e dependência
-O modo `/coder` depende do plugin [@coder]([[../../features/coder-plugin]]). Sem ele, as chamadas de ferramenta vão falhar.
+O modo `/coder` utiliza o [@coder]([[../../features/coder-plugin]]), que já vem **embutido no ChatCLI** — nenhuma instalação adicional é necessária.
 
-- Verifique plugins instalados: `/plugin list`
-- Instale/habilite o `@coder` conforme a seção [Plugin @coder]([[../../features/coder-plugin]]).
+- Verifique com `/plugin list`: o `@coder` aparece com a tag `[builtin]`.
+- Detalhes dos subcomandos na seção [Plugin @coder]([[../../features/coder-plugin]]).
 
 ## Subcomandos suportados (args)
 
@@ -103,8 +103,8 @@ Sim. É o formato recomendado. Exemplo:
 **2) Quando usar `patch --diff`?**  
 Quando a alteração envolve múltiplos trechos ou precisa de mais precisão. Você pode enviar um unified diff em `text` ou `base64`.
 
-**3) O que acontece se o `@coder` não estiver instalado?**  
-O `/coder` depende do plugin `@coder`. Sem ele, as chamadas de ferramenta falharão. Instale via `/plugin install` ou use o plugin fornecido.
+**3) Preciso instalar o `@coder` separadamente?**
+Não. O `@coder` é um plugin **builtin** — já vem embutido no binário do ChatCLI e está disponível imediatamente. Se você instalar uma versão customizada em `~/.chatcli/plugins/`, ela prevalece sobre o builtin.
 
 **4) `exec` é seguro?**  
 O `@coder exec` bloqueia padrões perigosos por padrão. Para comandos sensíveis, prefira usar os subcomandos Git e `test`.

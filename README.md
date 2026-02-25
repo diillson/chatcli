@@ -712,6 +712,8 @@ O Modo Coder (`/coder`) possui um sistema de governança robusto inspirado no Cl
 
 #### Ferramentas do Modo Coder (@coder)
 
+O `@coder` é um **plugin builtin** — já vem embutido no ChatCLI e funciona imediatamente, sem instalação separada.
+
 O contrato do `@coder` suporta **args em JSON** (recomendado) e mantém compatibilidade com a sintaxe de linha única. Exemplos:
 
 - JSON (recomendado): `<tool_call name="@coder" args="{\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}"/>`
@@ -723,7 +725,7 @@ Novos subcomandos principais:
 - `test` (com detecção automática de stack)
 - `patch --diff` (unified diff, text/base64)
 
-Detalhes completos no guia do plugin: https://diillson.github.io/chatcli/docs/features/coder-plugin/
+Detalhes completos no guia: https://diillson.github.io/chatcli/docs/features/coder-plugin/
 
 #### Política de Segurança
 

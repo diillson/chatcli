@@ -1,10 +1,14 @@
 ---
 title: "Plugin @coder"
-description: "Ferramenta de engenharia para ler, editar, patchar e executar tarefas com rollback."
+description: "Ferramenta de engenharia builtin para ler, editar, patchar e executar tarefas com rollback."
 weight: 60
 ---
 
 O `@coder` é a suite de engenharia usada pelo [Modo Coder (/coder)]([[../../core-concepts/coder-mode]]). Ele fornece ações para ler/procurar arquivos, aplicar patches com segurança, rodar comandos e reverter alterações.
+
+{{< notice "info" >}}
+O `@coder` é um **plugin builtin** — já vem embutido no binário do ChatCLI e funciona imediatamente, sem instalação. Se precisar de uma versão customizada, basta colocar o binário em `~/.chatcli/plugins/` e ele prevalece sobre o builtin. Ao removê-lo, o builtin volta automaticamente no próximo `/plugin reload`.
+{{< /notice >}}
 
 ## Comandos suportados
 
@@ -45,7 +49,8 @@ No modo `/coder`, o assistente deve responder com `<reasoning> Raciocinio da IA 
 
 ## Notas
 
-- O plugin outorga poder de leitura/escrita em arquivos e execução de comandos tudo passeivel de rollback quando solicitado. Use em repositórios confiaveis.
+- O `@coder` outorga poder de leitura/escrita em arquivos e execução de comandos, tudo passível de rollback quando solicitado. Use em repositórios confiáveis.
+- Por ser builtin, o `@coder` aparece em `/plugin list` com a tag `[builtin]`. Não é possível desinstalá-lo via `/plugin uninstall`.
 
 ---
 
