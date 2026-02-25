@@ -1743,6 +1743,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		remaining := thoughtText
 		remaining = stripXMLTagBlock(remaining, "reasoning")
 		remaining = stripXMLTagBlock(remaining, "explanation")
+		remaining = stripXMLTagBlock(remaining, "final_summary")
 		remaining = strings.TrimSpace(removeXMLTags(remaining))
 
 		coderMinimal := a.isCoderMode && isCoderMinimalUI()
