@@ -24,6 +24,7 @@ Um Agente pode importar múltiplas Skills, criando um **"Super System Prompt"** 
 | **Colaboração** | Equipes podem compartilhar agentes e skills |
 | **Consistência** | Regras de coding style aplicadas automaticamente |
 | **Especialização** | Crie agentes para Go, Python, DevOps, etc. |
+| **Servidor Remoto** | Ao conectar a um servidor, agents e skills remotos são descobertos automaticamente e mesclados com os locais |
 
 ## Estrutura de Diretórios
 
@@ -211,3 +212,51 @@ Isso permite que você tenha um agente especialista em Go usando as ferramentas 
 - **clean-scripts** - Padrões para scripts Bash seguros
 - **aws-security** - Regras de segurança para AWS
 - **team-conventions** - Convenções específicas da equipe
+
+## Agents e Skills Remotos
+
+Quando conectado a um servidor ChatCLI via `chatcli connect`, o client descobre automaticamente os agents e skills disponíveis no servidor. Eles são transferidos ao client e compostos localmente, permitindo merge com resources locais.
+
+```bash
+# Ao conectar, o client mostra os recursos disponíveis
+Connected to ChatCLI server (version: 1.3.0, provider: CLAUDEAI, model: claude-sonnet-4-5)
+ Server has 3 plugins, 2 agents, 4 skills available
+
+# Agents remotos aparecem na listagem
+/agent list
+
+🤖 Available Agents:
+  • go-expert       - Especialista em Go/Golang            [local]
+  • devops-senior   - DevOps Senior com foco em K8s        [remote]
+
+# Carregar um agent remoto funciona da mesma forma
+/agent load devops-senior
+```
+
+### Provisionamento via Kubernetes
+
+No Helm chart ou no Operator, agents e skills podem ser provisionados via ConfigMaps:
+
+```bash
+# Helm: agents e skills inline
+helm install chatcli deploy/helm/chatcli \
+  --set agents.enabled=true \
+  --set-file agents.definitions.devops-senior\\.md=agents/devops-senior.md \
+  --set skills.enabled=true \
+  --set-file skills.definitions.k8s-best-practices\\.md=skills/k8s-best-practices.md
+```
+
+```yaml
+# Operator: referência a ConfigMaps existentes
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Instance
+metadata:
+  name: chatcli-prod
+spec:
+  provider: CLAUDEAI
+  agents:
+    configMapRef: chatcli-agents
+    skillsConfigMapRef: chatcli-skills
+```
+
+Os ConfigMaps são montados em `/home/chatcli/.chatcli/agents/` e `/home/chatcli/.chatcli/skills/`, e ficam disponíveis para descoberta remota automaticamente.

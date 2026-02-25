@@ -38,6 +38,20 @@ O ChatCLI utiliza um **gerenciador de plugins inteligente** que:
 // - Remove: Plugin deletado
 // - Rename: Plugin renomeado
 ```
+### Plugins Remotos (Server-Side)
+
+Quando conectado a um servidor via `chatcli connect`, o client descobre automaticamente os plugins disponíveis no servidor. Esses plugins aparecem em `/plugin list` com a tag `[remote]` e são executados no servidor via gRPC — sem necessidade de instalar nada localmente.
+
+```bash
+❯ /plugin list
+📦 Plugins Instalados (3):
+  • @hello          - Plugin de exemplo                    [local]
+  • @k8s-diagnose   - Diagnóstico de clusters K8s          [remote]
+  • @dockerhub      - Consulta tags do Docker Hub           [remote]
+```
+
+O agente pode usar plugins remotos da mesma forma que plugins locais — a execução é transparente. Ao desconectar, plugins remotos são removidos automaticamente da listagem.
+
 ### Busca Flexível de Plugins
 
 O sistema aceita ambas as formas de invocação:

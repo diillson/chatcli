@@ -458,5 +458,10 @@
   "help.command.persona_load": "Carrega um agente específico com suas skills.",
   "help.command.persona_skills": "Lista todas as skills disponíveis.",
   "help.command.persona_show": "Mostra detalhes do agente ativo e seu prompt.",
-  "help.command.persona_off": "Desativa o agente atual, voltando ao comportamento padrão."
+  "help.command.persona_off": "Desativa o agente atual, voltando ao comportamento padrão.",
+
+  "remote.resources.available": "Servidor possui %d plugins, %d agentes, %d skills disponíveis",
+
+  "paste.detected": "📋 Colado (%d caracteres, %d linhas)",
+  "paste.detected.short": "📋 Colado (%d caracteres)"
 }

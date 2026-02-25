@@ -156,6 +156,54 @@ Você tem acesso a **todas** as funcionalidades do ChatCLI:
 
 ---
 
+## Descoberta de Recursos Remotos
+
+Ao conectar, o client descobre automaticamente plugins, agents e skills disponíveis no servidor:
+
+```
+Connected to ChatCLI server (version: 1.3.0, provider: CLAUDEAI, model: claude-sonnet-4-5)
+ Server has 3 plugins, 2 agents, 4 skills available
+```
+
+### Plugins Remotos
+
+Plugins do servidor aparecem em `/plugin list` com a tag `[remote]`. Eles são executados no servidor — o client envia o comando via gRPC e recebe o resultado:
+
+```bash
+# Listar plugins (locais + remotos)
+/plugin list
+
+📦 Plugins Instalados (2):
+  • @hello          - Plugin de exemplo                    [local]
+  • @k8s-diagnose   - Diagnóstico de clusters K8s          [remote]
+```
+
+### Agents e Skills Remotos
+
+Agents e skills do servidor são transferidos ao client e compostos localmente, permitindo merge com resources locais:
+
+```bash
+# Listar agents (locais + remotos)
+/agent list
+
+🤖 Available Agents:
+  • go-expert       - Especialista em Go/Golang            [local]
+  • devops-senior   - DevOps Senior com foco em K8s        [remote]
+
+# Carregar um agent remoto
+/agent load devops-senior
+```
+
+Quando um agent remoto é carregado, suas skills são buscadas do servidor e compostas no prompt local — exatamente como agents locais.
+
+### Modo Híbrido
+
+- Plugins locais e remotos coexistem; o prefixo `[remote]` indica a origem
+- Agents locais e remotos são listados juntos; ao carregar, a resolução é transparente
+- Ao desconectar (`/disconnect`), recursos remotos são removidos automaticamente
+
+---
+
 ## Verificar Status do K8s Watcher
 
 Se o servidor tem um K8s Watcher ativo, você pode consultar o status remotamente:

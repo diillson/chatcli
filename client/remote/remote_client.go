@@ -253,6 +253,9 @@ type ServerInfo struct {
 	AvailableProviders []string
 	WatcherActive      bool
 	WatcherTarget      string
+	PluginCount        int32
+	AgentCount         int32
+	SkillCount         int32
 }
 
 // GetServerInfo fetches server metadata including watcher status.
@@ -269,6 +272,9 @@ func (c *Client) GetServerInfo(ctx context.Context) (*ServerInfo, error) {
 		AvailableProviders: resp.AvailableProviders,
 		WatcherActive:      resp.WatcherActive,
 		WatcherTarget:      resp.WatcherTarget,
+		PluginCount:        resp.PluginCount,
+		AgentCount:         resp.AgentCount,
+		SkillCount:         resp.SkillCount,
 	}, nil
 }
 

@@ -291,14 +291,45 @@ func (ch *CommandHandler) handleConnectCommand(userInput string) {
 	}
 	fmt.Println(colorize(fmt.Sprintf(" Connected to remote server (%s)", connInfo), ColorGreen))
 
-	// Show watcher status if server has one
+	// Show watcher status and remote resources if server has them
 	infoCtx, infoCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer infoCancel()
-	if info, err := remoteClient.GetServerInfo(infoCtx); err == nil && info.WatcherActive {
-		fmt.Println(colorize(fmt.Sprintf(" K8s watcher active: %s (context injected into prompts)", info.WatcherTarget), ColorCyan))
+	if info, err := remoteClient.GetServerInfo(infoCtx); err == nil {
+		if info.WatcherActive {
+			fmt.Println(colorize(fmt.Sprintf(" K8s watcher active: %s (context injected into prompts)", info.WatcherTarget), ColorCyan))
+		}
+		if info.PluginCount > 0 || info.AgentCount > 0 || info.SkillCount > 0 {
+			fmt.Println(colorize(fmt.Sprintf(" %s", i18n.T("remote.resources.available", info.PluginCount, info.AgentCount, info.SkillCount)), ColorCyan))
+		}
 	}
 
+	// Discover and register remote plugins
+	ch.discoverRemoteResources(remoteClient)
+
 	fmt.Println(colorize(" Use /disconnect to return to local mode.", ColorCyan))
+}
+
+// discoverRemoteResources fetches remote plugins/agents/skills and registers them.
+func (ch *CommandHandler) discoverRemoteResources(remoteClient *remote.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Register remote plugins
+	if remotePlugins, err := remoteClient.ListRemotePlugins(ctx); err == nil && len(remotePlugins) > 0 {
+		for _, p := range remotePlugins {
+			rp := remote.NewRemotePluginFromInfo(p, remoteClient)
+			ch.cli.pluginManager.RegisterRemotePlugin(rp)
+		}
+		ch.cli.logger.Info("Remote plugins registered", zap.Int("count", len(remotePlugins)))
+	}
+
+	// Cache remote agents and skills info for listing
+	if agents, err := remoteClient.ListRemoteAgents(ctx); err == nil {
+		ch.cli.remoteAgents = agents
+	}
+	if skills, err := remoteClient.ListRemoteSkills(ctx); err == nil {
+		ch.cli.remoteSkills = skills
+	}
 }
 
 // handleDisconnectCommand handles the /disconnect command.
@@ -308,6 +339,13 @@ func (ch *CommandHandler) handleDisconnectCommand() {
 		fmt.Println(colorize(" Not connected to a remote server.", ColorYellow))
 		return
 	}
+
+	// Clean up remote resources
+	if ch.cli.pluginManager != nil {
+		ch.cli.pluginManager.ClearRemotePlugins()
+	}
+	ch.cli.remoteAgents = nil
+	ch.cli.remoteSkills = nil
 
 	// Close remote connection
 	if ch.cli.remoteConn != nil {

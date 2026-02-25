@@ -23,19 +23,26 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChatCLIService_SendPrompt_FullMethodName         = "/chatcli.v1.ChatCLIService/SendPrompt"
-	ChatCLIService_StreamPrompt_FullMethodName       = "/chatcli.v1.ChatCLIService/StreamPrompt"
-	ChatCLIService_InteractiveSession_FullMethodName = "/chatcli.v1.ChatCLIService/InteractiveSession"
-	ChatCLIService_ListSessions_FullMethodName       = "/chatcli.v1.ChatCLIService/ListSessions"
-	ChatCLIService_LoadSession_FullMethodName        = "/chatcli.v1.ChatCLIService/LoadSession"
-	ChatCLIService_SaveSession_FullMethodName        = "/chatcli.v1.ChatCLIService/SaveSession"
-	ChatCLIService_DeleteSession_FullMethodName      = "/chatcli.v1.ChatCLIService/DeleteSession"
-	ChatCLIService_GetServerInfo_FullMethodName      = "/chatcli.v1.ChatCLIService/GetServerInfo"
-	ChatCLIService_GetWatcherStatus_FullMethodName   = "/chatcli.v1.ChatCLIService/GetWatcherStatus"
-	ChatCLIService_Health_FullMethodName             = "/chatcli.v1.ChatCLIService/Health"
-	ChatCLIService_GetAlerts_FullMethodName          = "/chatcli.v1.ChatCLIService/GetAlerts"
-	ChatCLIService_AnalyzeIssue_FullMethodName       = "/chatcli.v1.ChatCLIService/AnalyzeIssue"
-	ChatCLIService_AgenticStep_FullMethodName        = "/chatcli.v1.ChatCLIService/AgenticStep"
+	ChatCLIService_SendPrompt_FullMethodName          = "/chatcli.v1.ChatCLIService/SendPrompt"
+	ChatCLIService_StreamPrompt_FullMethodName        = "/chatcli.v1.ChatCLIService/StreamPrompt"
+	ChatCLIService_InteractiveSession_FullMethodName  = "/chatcli.v1.ChatCLIService/InteractiveSession"
+	ChatCLIService_ListSessions_FullMethodName        = "/chatcli.v1.ChatCLIService/ListSessions"
+	ChatCLIService_LoadSession_FullMethodName         = "/chatcli.v1.ChatCLIService/LoadSession"
+	ChatCLIService_SaveSession_FullMethodName         = "/chatcli.v1.ChatCLIService/SaveSession"
+	ChatCLIService_DeleteSession_FullMethodName       = "/chatcli.v1.ChatCLIService/DeleteSession"
+	ChatCLIService_GetServerInfo_FullMethodName       = "/chatcli.v1.ChatCLIService/GetServerInfo"
+	ChatCLIService_GetWatcherStatus_FullMethodName    = "/chatcli.v1.ChatCLIService/GetWatcherStatus"
+	ChatCLIService_Health_FullMethodName              = "/chatcli.v1.ChatCLIService/Health"
+	ChatCLIService_GetAlerts_FullMethodName           = "/chatcli.v1.ChatCLIService/GetAlerts"
+	ChatCLIService_AnalyzeIssue_FullMethodName        = "/chatcli.v1.ChatCLIService/AnalyzeIssue"
+	ChatCLIService_AgenticStep_FullMethodName         = "/chatcli.v1.ChatCLIService/AgenticStep"
+	ChatCLIService_ListRemotePlugins_FullMethodName   = "/chatcli.v1.ChatCLIService/ListRemotePlugins"
+	ChatCLIService_ListRemoteAgents_FullMethodName    = "/chatcli.v1.ChatCLIService/ListRemoteAgents"
+	ChatCLIService_ListRemoteSkills_FullMethodName    = "/chatcli.v1.ChatCLIService/ListRemoteSkills"
+	ChatCLIService_GetAgentDefinition_FullMethodName  = "/chatcli.v1.ChatCLIService/GetAgentDefinition"
+	ChatCLIService_GetSkillContent_FullMethodName     = "/chatcli.v1.ChatCLIService/GetSkillContent"
+	ChatCLIService_ExecuteRemotePlugin_FullMethodName = "/chatcli.v1.ChatCLIService/ExecuteRemotePlugin"
+	ChatCLIService_DownloadPlugin_FullMethodName      = "/chatcli.v1.ChatCLIService/DownloadPlugin"
 )
 
 // ChatCLIServiceClient is the client API for ChatCLIService service.
@@ -70,6 +77,20 @@ type ChatCLIServiceClient interface {
 	AnalyzeIssue(ctx context.Context, in *AnalyzeIssueRequest, opts ...grpc.CallOption) (*AnalyzeIssueResponse, error)
 	// AgenticStep runs one turn of the AI-driven remediation agent loop.
 	AgenticStep(ctx context.Context, in *AgenticStepRequest, opts ...grpc.CallOption) (*AgenticStepResponse, error)
+	// ListRemotePlugins returns all plugins installed on the server.
+	ListRemotePlugins(ctx context.Context, in *ListRemotePluginsRequest, opts ...grpc.CallOption) (*ListRemotePluginsResponse, error)
+	// ListRemoteAgents returns all agents available on the server.
+	ListRemoteAgents(ctx context.Context, in *ListRemoteAgentsRequest, opts ...grpc.CallOption) (*ListRemoteAgentsResponse, error)
+	// ListRemoteSkills returns all skills available on the server.
+	ListRemoteSkills(ctx context.Context, in *ListRemoteSkillsRequest, opts ...grpc.CallOption) (*ListRemoteSkillsResponse, error)
+	// GetAgentDefinition returns the full definition of a server-side agent.
+	GetAgentDefinition(ctx context.Context, in *GetAgentDefinitionRequest, opts ...grpc.CallOption) (*GetAgentDefinitionResponse, error)
+	// GetSkillContent returns the full content of a server-side skill.
+	GetSkillContent(ctx context.Context, in *GetSkillContentRequest, opts ...grpc.CallOption) (*GetSkillContentResponse, error)
+	// ExecuteRemotePlugin executes a plugin on the server and returns the output.
+	ExecuteRemotePlugin(ctx context.Context, in *ExecuteRemotePluginRequest, opts ...grpc.CallOption) (*ExecuteRemotePluginResponse, error)
+	// DownloadPlugin streams the plugin binary to the client for offline use.
+	DownloadPlugin(ctx context.Context, in *DownloadPluginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadPluginResponse], error)
 }
 
 type chatCLIServiceClient struct {
@@ -222,6 +243,85 @@ func (c *chatCLIServiceClient) AgenticStep(ctx context.Context, in *AgenticStepR
 	return out, nil
 }
 
+func (c *chatCLIServiceClient) ListRemotePlugins(ctx context.Context, in *ListRemotePluginsRequest, opts ...grpc.CallOption) (*ListRemotePluginsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRemotePluginsResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_ListRemotePlugins_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) ListRemoteAgents(ctx context.Context, in *ListRemoteAgentsRequest, opts ...grpc.CallOption) (*ListRemoteAgentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRemoteAgentsResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_ListRemoteAgents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) ListRemoteSkills(ctx context.Context, in *ListRemoteSkillsRequest, opts ...grpc.CallOption) (*ListRemoteSkillsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRemoteSkillsResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_ListRemoteSkills_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) GetAgentDefinition(ctx context.Context, in *GetAgentDefinitionRequest, opts ...grpc.CallOption) (*GetAgentDefinitionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAgentDefinitionResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_GetAgentDefinition_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) GetSkillContent(ctx context.Context, in *GetSkillContentRequest, opts ...grpc.CallOption) (*GetSkillContentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSkillContentResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_GetSkillContent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) ExecuteRemotePlugin(ctx context.Context, in *ExecuteRemotePluginRequest, opts ...grpc.CallOption) (*ExecuteRemotePluginResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExecuteRemotePluginResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_ExecuteRemotePlugin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) DownloadPlugin(ctx context.Context, in *DownloadPluginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadPluginResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[2], ChatCLIService_DownloadPlugin_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[DownloadPluginRequest, DownloadPluginResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatCLIService_DownloadPluginClient = grpc.ServerStreamingClient[DownloadPluginResponse]
+
 // ChatCLIServiceServer is the server API for ChatCLIService service.
 // All implementations must embed UnimplementedChatCLIServiceServer
 // for forward compatibility.
@@ -254,6 +354,20 @@ type ChatCLIServiceServer interface {
 	AnalyzeIssue(context.Context, *AnalyzeIssueRequest) (*AnalyzeIssueResponse, error)
 	// AgenticStep runs one turn of the AI-driven remediation agent loop.
 	AgenticStep(context.Context, *AgenticStepRequest) (*AgenticStepResponse, error)
+	// ListRemotePlugins returns all plugins installed on the server.
+	ListRemotePlugins(context.Context, *ListRemotePluginsRequest) (*ListRemotePluginsResponse, error)
+	// ListRemoteAgents returns all agents available on the server.
+	ListRemoteAgents(context.Context, *ListRemoteAgentsRequest) (*ListRemoteAgentsResponse, error)
+	// ListRemoteSkills returns all skills available on the server.
+	ListRemoteSkills(context.Context, *ListRemoteSkillsRequest) (*ListRemoteSkillsResponse, error)
+	// GetAgentDefinition returns the full definition of a server-side agent.
+	GetAgentDefinition(context.Context, *GetAgentDefinitionRequest) (*GetAgentDefinitionResponse, error)
+	// GetSkillContent returns the full content of a server-side skill.
+	GetSkillContent(context.Context, *GetSkillContentRequest) (*GetSkillContentResponse, error)
+	// ExecuteRemotePlugin executes a plugin on the server and returns the output.
+	ExecuteRemotePlugin(context.Context, *ExecuteRemotePluginRequest) (*ExecuteRemotePluginResponse, error)
+	// DownloadPlugin streams the plugin binary to the client for offline use.
+	DownloadPlugin(*DownloadPluginRequest, grpc.ServerStreamingServer[DownloadPluginResponse]) error
 	mustEmbedUnimplementedChatCLIServiceServer()
 }
 
@@ -302,6 +416,27 @@ func (UnimplementedChatCLIServiceServer) AnalyzeIssue(context.Context, *AnalyzeI
 }
 func (UnimplementedChatCLIServiceServer) AgenticStep(context.Context, *AgenticStepRequest) (*AgenticStepResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AgenticStep not implemented")
+}
+func (UnimplementedChatCLIServiceServer) ListRemotePlugins(context.Context, *ListRemotePluginsRequest) (*ListRemotePluginsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRemotePlugins not implemented")
+}
+func (UnimplementedChatCLIServiceServer) ListRemoteAgents(context.Context, *ListRemoteAgentsRequest) (*ListRemoteAgentsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRemoteAgents not implemented")
+}
+func (UnimplementedChatCLIServiceServer) ListRemoteSkills(context.Context, *ListRemoteSkillsRequest) (*ListRemoteSkillsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRemoteSkills not implemented")
+}
+func (UnimplementedChatCLIServiceServer) GetAgentDefinition(context.Context, *GetAgentDefinitionRequest) (*GetAgentDefinitionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAgentDefinition not implemented")
+}
+func (UnimplementedChatCLIServiceServer) GetSkillContent(context.Context, *GetSkillContentRequest) (*GetSkillContentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSkillContent not implemented")
+}
+func (UnimplementedChatCLIServiceServer) ExecuteRemotePlugin(context.Context, *ExecuteRemotePluginRequest) (*ExecuteRemotePluginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ExecuteRemotePlugin not implemented")
+}
+func (UnimplementedChatCLIServiceServer) DownloadPlugin(*DownloadPluginRequest, grpc.ServerStreamingServer[DownloadPluginResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method DownloadPlugin not implemented")
 }
 func (UnimplementedChatCLIServiceServer) mustEmbedUnimplementedChatCLIServiceServer() {}
 func (UnimplementedChatCLIServiceServer) testEmbeddedByValue()                        {}
@@ -540,6 +675,125 @@ func _ChatCLIService_AgenticStep_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatCLIService_ListRemotePlugins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRemotePluginsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).ListRemotePlugins(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_ListRemotePlugins_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).ListRemotePlugins(ctx, req.(*ListRemotePluginsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_ListRemoteAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRemoteAgentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).ListRemoteAgents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_ListRemoteAgents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).ListRemoteAgents(ctx, req.(*ListRemoteAgentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_ListRemoteSkills_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRemoteSkillsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).ListRemoteSkills(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_ListRemoteSkills_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).ListRemoteSkills(ctx, req.(*ListRemoteSkillsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_GetAgentDefinition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAgentDefinitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).GetAgentDefinition(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_GetAgentDefinition_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).GetAgentDefinition(ctx, req.(*GetAgentDefinitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_GetSkillContent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSkillContentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).GetSkillContent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_GetSkillContent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).GetSkillContent(ctx, req.(*GetSkillContentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_ExecuteRemotePlugin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExecuteRemotePluginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).ExecuteRemotePlugin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_ExecuteRemotePlugin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).ExecuteRemotePlugin(ctx, req.(*ExecuteRemotePluginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_DownloadPlugin_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(DownloadPluginRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ChatCLIServiceServer).DownloadPlugin(m, &grpc.GenericServerStream[DownloadPluginRequest, DownloadPluginResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatCLIService_DownloadPluginServer = grpc.ServerStreamingServer[DownloadPluginResponse]
+
 // ChatCLIService_ServiceDesc is the grpc.ServiceDesc for ChatCLIService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -591,6 +845,30 @@ var ChatCLIService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "AgenticStep",
 			Handler:    _ChatCLIService_AgenticStep_Handler,
 		},
+		{
+			MethodName: "ListRemotePlugins",
+			Handler:    _ChatCLIService_ListRemotePlugins_Handler,
+		},
+		{
+			MethodName: "ListRemoteAgents",
+			Handler:    _ChatCLIService_ListRemoteAgents_Handler,
+		},
+		{
+			MethodName: "ListRemoteSkills",
+			Handler:    _ChatCLIService_ListRemoteSkills_Handler,
+		},
+		{
+			MethodName: "GetAgentDefinition",
+			Handler:    _ChatCLIService_GetAgentDefinition_Handler,
+		},
+		{
+			MethodName: "GetSkillContent",
+			Handler:    _ChatCLIService_GetSkillContent_Handler,
+		},
+		{
+			MethodName: "ExecuteRemotePlugin",
+			Handler:    _ChatCLIService_ExecuteRemotePlugin_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -603,6 +881,11 @@ var ChatCLIService_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _ChatCLIService_InteractiveSession_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "DownloadPlugin",
+			Handler:       _ChatCLIService_DownloadPlugin_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "proto/chatcli/v1/chatcli.proto",

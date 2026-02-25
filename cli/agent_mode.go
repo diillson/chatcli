@@ -28,6 +28,7 @@ import (
 	"github.com/diillson/chatcli/cli/metrics"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/openai_assistant"
@@ -177,12 +178,18 @@ func compactText(input string, maxLines int, maxLen int) string {
 }
 
 // getInput obtém entrada do usuário de forma segura
-func (a *AgentMode) getInput(prompt string) string {
+func (a *AgentMode) getInput(promptStr string) string {
 	cmd := exec.Command(sttyPath, "sane")
 	cmd.Stdin = os.Stdin
 	_ = cmd.Run()
 
-	fmt.Print(prompt)
+	// Enable bracketed paste mode for paste detection
+	if runtime.GOOS != "windows" || os.Getenv("WT_SESSION") != "" {
+		_, _ = os.Stdout.WriteString("\x1b[?2004h")
+		defer func() { _, _ = os.Stdout.WriteString("\x1b[?2004l") }()
+	}
+
+	fmt.Print(promptStr)
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
 	if err != nil {
@@ -192,6 +199,18 @@ func (a *AgentMode) getInput(prompt string) string {
 		a.logger.Warn("Erro ao ler entrada no modo agente", zap.Error(err))
 		return ""
 	}
+
+	// Detect and report paste
+	cleaned, pasteInfo := paste.DetectInLine(input)
+	if pasteInfo != nil {
+		if pasteInfo.LineCount > 1 {
+			fmt.Printf("  %s\n", i18n.T("paste.detected", pasteInfo.CharCount, pasteInfo.LineCount))
+		} else {
+			fmt.Printf("  %s\n", i18n.T("paste.detected.short", pasteInfo.CharCount))
+		}
+		return strings.TrimSpace(cleaned)
+	}
+
 	return strings.TrimSpace(input)
 }
 
@@ -680,26 +699,52 @@ func (a *AgentMode) displayResponseWithoutCommands(response string, blocks []Com
 }
 
 // getMultilineInput obtém entrada de múltiplas linhas
-func (a *AgentMode) getMultilineInput(prompt string) string {
-	fmt.Print(prompt)
+func (a *AgentMode) getMultilineInput(promptStr string) string {
+	fmt.Print(promptStr)
 	fmt.Println(i18n.T("agent.multiline_input_tip"))
+
+	// Enable bracketed paste mode for paste detection
+	if runtime.GOOS != "windows" || os.Getenv("WT_SESSION") != "" {
+		_, _ = os.Stdout.WriteString("\x1b[?2004h")
+		defer func() { _, _ = os.Stdout.WriteString("\x1b[?2004l") }()
+	}
 
 	var lines []string
 	reader := bufio.NewReader(os.Stdin)
+	pastedChars := 0
 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			break
 		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "." {
+
+		// Detect paste markers
+		cleaned, pasteInfo := paste.DetectInLine(line)
+		if pasteInfo != nil {
+			pastedChars += pasteInfo.CharCount
+		}
+
+		cleaned = strings.TrimRight(cleaned, "\r\n")
+		if cleaned == "." {
 			break
 		}
-		lines = append(lines, line)
+		lines = append(lines, cleaned)
 	}
 
-	return strings.Join(lines, "\n")
+	result := strings.Join(lines, "\n")
+
+	// Show paste summary at the end if content was pasted
+	if pastedChars > 0 {
+		lineCount := len(lines)
+		if lineCount > 1 {
+			fmt.Printf("  %s\n", i18n.T("paste.detected", pastedChars, lineCount))
+		} else {
+			fmt.Printf("  %s\n", i18n.T("paste.detected.short", pastedChars))
+		}
+	}
+
+	return result
 }
 
 // max retorna o maior entre dois inteiros

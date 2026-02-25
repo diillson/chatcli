@@ -161,3 +161,22 @@ func (m *Manager) GetPlugins() []Plugin {
 	})
 	return list
 }
+
+// RegisterRemotePlugin registers a remote plugin in the manager without saving to disk.
+// This allows remote plugins to be discoverable via GetPlugin/GetPlugins.
+func (m *Manager) RegisterRemotePlugin(plugin Plugin) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.plugins[plugin.Name()] = plugin
+}
+
+// ClearRemotePlugins removes all remote plugins (identified by Path() == "[remote]").
+func (m *Manager) ClearRemotePlugins() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for name, p := range m.plugins {
+		if p.Path() == "[remote]" {
+			delete(m.plugins, name)
+		}
+	}
+}

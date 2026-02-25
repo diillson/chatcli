@@ -1,0 +1,13 @@
+{{- if and .Values.agents.enabled .Values.agents.definitions (not .Values.agents.existingConfigMap) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chatcli.fullname" . }}-agents
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+data:
+  {{- range $filename, $content := .Values.agents.definitions }}
+  {{ $filename }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}
+{{- end }}
