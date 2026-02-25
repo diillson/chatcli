@@ -18,8 +18,8 @@ type mockParser struct {
 	readIdx int
 }
 
-func (m *mockParser) Setup() error              { return nil }
-func (m *mockParser) TearDown() error            { return nil }
+func (m *mockParser) Setup() error                { return nil }
+func (m *mockParser) TearDown() error             { return nil }
 func (m *mockParser) GetWinSize() *prompt.WinSize { return &prompt.WinSize{Row: 24, Col: 80} }
 func (m *mockParser) Read() ([]byte, error) {
 	if m.readIdx >= len(m.reads) {
