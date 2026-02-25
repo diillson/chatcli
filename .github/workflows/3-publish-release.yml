@@ -228,5 +228,4 @@ jobs:
           # msg=$(git log -1 --pretty=%B $last_commit)
           # git commit -m "chore(sync): propagate release-please changes - $msg" || echo "Nada para commitar"
           git reset --hard origin/main
-
           git push --force
