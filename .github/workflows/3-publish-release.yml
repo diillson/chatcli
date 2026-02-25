@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      - beta
-      - alpha
 
 permissions:
   contents: write
@@ -32,7 +30,6 @@ jobs:
           release-type: go
           token: ${{ secrets.GH_RELEASE_TOKEN }}
           target-branch: ${{ github.ref_name }}
-          prerelease: true
 
   build_and_upload:
     name: Build e upload de binários (após release criada)
