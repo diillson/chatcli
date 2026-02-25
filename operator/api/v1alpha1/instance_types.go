@@ -48,6 +48,14 @@ type InstanceSpec struct {
 	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, etc.
 	// +optional
 	APIKeys *SecretRefSpec `json:"apiKeys,omitempty"`
+
+	// Agents configures agent/skill provisioning for the instance.
+	// +optional
+	Agents *AgentProvisionSpec `json:"agents,omitempty"`
+
+	// Plugins configures plugin provisioning for the instance.
+	// +optional
+	Plugins *PluginProvisionSpec `json:"plugins,omitempty"`
 }
 
 // ImageSpec defines the container image configuration.
@@ -162,6 +170,28 @@ type WatchTargetSpec struct {
 	// MetricsFilter is a list of glob patterns to filter Prometheus metrics.
 	// +optional
 	MetricsFilter []string `json:"metricsFilter,omitempty"`
+}
+
+// AgentProvisionSpec configures agent/skill provisioning for the instance.
+type AgentProvisionSpec struct {
+	// ConfigMapRef references a ConfigMap containing agent .md files as keys.
+	// +optional
+	ConfigMapRef *string `json:"configMapRef,omitempty"`
+
+	// SkillsConfigMapRef references a ConfigMap containing skill .md files.
+	// +optional
+	SkillsConfigMapRef *string `json:"skillsConfigMapRef,omitempty"`
+}
+
+// PluginProvisionSpec configures plugin provisioning for the instance.
+type PluginProvisionSpec struct {
+	// Image is an init container image containing plugin binaries in /plugins/.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// PVCName references a PVC with pre-installed plugin binaries.
+	// +optional
+	PVCName string `json:"pvcName,omitempty"`
 }
 
 // PersistenceSpec configures persistent storage.

@@ -15,8 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/metrics"
+	"github.com/diillson/chatcli/pkg/persona"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"github.com/diillson/chatcli/version"
 	"go.uber.org/zap"
@@ -213,4 +215,14 @@ func (s *Server) SetWatcherContext(fn func() string) {
 // SetWatcher configures full K8s watcher integration with context, status, and stats.
 func (s *Server) SetWatcher(cfg WatcherConfig) {
 	s.handler.SetWatcher(cfg)
+}
+
+// SetPluginManager configures plugin management for remote discovery and execution.
+func (s *Server) SetPluginManager(pm *plugins.Manager) {
+	s.handler.SetPluginManager(pm)
+}
+
+// SetPersonaLoader configures the persona loader for remote agent/skill discovery.
+func (s *Server) SetPersonaLoader(pl *persona.Loader) {
+	s.handler.SetPersonaLoader(pl)
 }

@@ -16,9 +16,11 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/k8s"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/metrics"
+	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/server"
 	"go.uber.org/zap"
 )
@@ -101,6 +103,29 @@ func RunServe(args []string, llmMgr manager.LLMManager, logger *zap.Logger) erro
 	}
 
 	srv := server.New(cfg, llmMgr, sessionMgr, logger)
+
+	// Initialize plugin manager for remote discovery and execution
+	pluginMgr, pluginErr := plugins.NewManager(logger)
+	if pluginErr != nil {
+		logger.Warn("Failed to initialize plugin manager, remote plugins will be unavailable", zap.Error(pluginErr))
+	} else {
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCoderPlugin())
+		srv.SetPluginManager(pluginMgr)
+		defer pluginMgr.Close()
+		logger.Info("Plugin manager initialized for remote discovery",
+			zap.Int("plugins", len(pluginMgr.GetPlugins())),
+			zap.String("dir", pluginMgr.PluginsDir()),
+		)
+	}
+
+	// Initialize persona loader for remote agent/skill discovery
+	personaLoader := persona.NewLoader(logger)
+	srv.SetPersonaLoader(personaLoader)
+	if agents, err := personaLoader.ListAgents(); err == nil {
+		logger.Info("Persona loader initialized for remote discovery",
+			zap.Int("agents", len(agents)),
+		)
+	}
 
 	// Start K8s watcher(s) if configured
 	if opts.WatchConfig != "" || opts.WatchDeployment != "" {

@@ -426,6 +426,7 @@
   "plugin.uninstall.usage": "Usage: /plugin uninstall <plugin-name>",
   "plugin.uninstall.error": " ❌ Error uninstalling plugin '%s': %v",
   "plugin.uninstall.success": " ✅ Plugin '%s' uninstalled.",
+  "plugin.uninstall.error.not_local": " ❌ Cannot uninstall a builtin or remote plugin.",
   "plugin.error.unknown_subcommand": "Unknown plugin subcommand: '%s'",
   "plugin.error.manager_disabled": " ❌ Plugin manager is not available. Check logs for initialization errors.",
   "plugin.reloading": "Reloading plugins...",
@@ -458,5 +459,10 @@
   "help.command.persona_load": "Loads a specific agent with its skills.",
   "help.command.persona_skills": "Lists all available skills.",
   "help.command.persona_show": "Shows details of the active agent and its prompt.",
-  "help.command.persona_off": "Deactivates the current agent, returning to default behavior."
+  "help.command.persona_off": "Deactivates the current agent, returning to default behavior.",
+
+  "remote.resources.available": "Server has %d plugins, %d agents, %d skills available",
+
+  "paste.detected": "📋 Pasted (%d chars, %d lines)",
+  "paste.detected.short": "📋 Pasted (%d chars)"
 }

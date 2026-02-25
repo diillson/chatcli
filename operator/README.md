@@ -173,7 +173,15 @@ spec:
         metricsPort: 9090
       - deployment: worker
         namespace: batch
+  agents:
+    configMapRef: chatcli-agents         # ConfigMap with agent .md files
+    skillsConfigMapRef: chatcli-skills   # ConfigMap with skill .md files
+  plugins:
+    image: myregistry/chatcli-plugins:latest  # Init container with plugin binaries
+    # pvcName: chatcli-plugins-pvc           # Or use an existing PVC
 ```
+
+> **Remote Resource Discovery**: When `agents` or `plugins` are configured, connected clients automatically discover and use these resources via gRPC. Agents/skills are transferred to the client for local prompt composition; plugins can be executed remotely or downloaded.
 
 ### Anomaly (Auto-created by WatcherBridge)
 
@@ -411,6 +419,9 @@ status:
 | ServiceAccount | `<name>` | Pod identity |
 | Role/ClusterRole | `<name>-watcher` | K8s watcher permissions |
 | PVC | `<name>-sessions` | Session persistence (optional) |
+| Volume (ConfigMap) | `agents.configMapRef` | Agent .md files mounted at `/home/chatcli/.chatcli/agents/` (optional) |
+| Volume (ConfigMap) | `agents.skillsConfigMapRef` | Skill .md files mounted at `/home/chatcli/.chatcli/skills/` (optional) |
+| Volume (PVC/EmptyDir) | `plugins` | Plugin binaries at `/home/chatcli/.chatcli/plugins/` via init container or PVC (optional) |
 
 ### gRPC Load Balancing
 

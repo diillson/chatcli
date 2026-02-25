@@ -165,3 +165,42 @@ persistence:
   accessModes:
     - ReadWriteOnce
   size: 1Gi
+
+# Agent/Skill provisioning (remote resource discovery)
+agents:
+  enabled: false
+  # Inline agent definitions (creates ConfigMap automatically)
+  # Each key is the filename (e.g., coder.md), value is the full markdown content
+  definitions: {}
+  #   coder.md: |
+  #     ---
+  #     name: coder
+  #     description: Expert coder agent
+  #     model: gpt-4
+  #     skills: [golang, docker]
+  #     ---
+  #     You are an expert coder...
+  # Or reference an existing ConfigMap containing agent .md files
+  existingConfigMap: ""
+
+skills:
+  enabled: false
+  # Inline skill definitions (creates ConfigMap automatically)
+  definitions: {}
+  #   golang.md: |
+  #     ---
+  #     name: golang
+  #     description: Go programming skill
+  #     ---
+  #     You are a Go expert...
+  # Or reference an existing ConfigMap containing skill .md files
+  existingConfigMap: ""
+
+# Plugin provisioning (remote resource discovery)
+plugins:
+  enabled: false
+  # Init container image containing plugin binaries in /plugins/
+  # The init container copies binaries to the chatcli plugins directory
+  initImage: ""
+  # Or reference an existing PVC with pre-installed plugin binaries
+  existingPVC: ""

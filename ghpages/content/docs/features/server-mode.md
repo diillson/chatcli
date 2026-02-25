@@ -209,6 +209,13 @@ O servidor implementa um serviço gRPC com os seguintes RPCs:
 | `Health` | Health check do servidor |
 | `GetServerInfo` | Informações do servidor (versão, provider, modelo, watcher) |
 | `GetWatcherStatus` | Status do K8s Watcher (se ativo) |
+| `ListRemotePlugins` | Lista plugins disponíveis no servidor |
+| `ListRemoteAgents` | Lista agents disponíveis no servidor |
+| `ListRemoteSkills` | Lista skills disponíveis no servidor |
+| `GetAgentDefinition` | Retorna o conteúdo completo de um agent (markdown + frontmatter) |
+| `GetSkillContent` | Retorna o conteúdo completo de uma skill |
+| `ExecuteRemotePlugin` | Executa um plugin no servidor e retorna o resultado |
+| `DownloadPlugin` | Streaming de download do binário de um plugin |
 | `GetAlerts` | Retorna alertas ativos do K8s Watcher (usado pelo Operator) |
 | `AnalyzeIssue` | Envia contexto de um Issue ao LLM e retorna análise + ações sugeridas |
 
@@ -227,6 +234,13 @@ O gRPC usa conexões HTTP/2 persistentes que, por padrão, fixam em um único po
 ### Streaming Progressivo
 
 O RPC `StreamPrompt` divide a resposta em chunks de ~200 caracteres em fronteiras naturais (parágrafos, linhas, frases), proporcionando uma experiência de resposta progressiva no cliente.
+
+### RPCs de Descoberta de Recursos
+
+Os RPCs `ListRemotePlugins`, `ListRemoteAgents`, `ListRemoteSkills`, `GetAgentDefinition`, `GetSkillContent`, `ExecuteRemotePlugin` e `DownloadPlugin` permitem que clientes conectados descubram e usem recursos instalados no servidor. Quando o servidor tem plugins em `~/.chatcli/plugins/`, agents em `~/.chatcli/agents/` ou skills em `~/.chatcli/skills/` (via ConfigMap, PVC ou cópia direta), os clientes os veem automaticamente ao conectar.
+
+- **Plugins**: Executados no servidor via `ExecuteRemotePlugin` ou baixados via `DownloadPlugin` (streaming binário)
+- **Agents/Skills**: Conteúdo markdown transferido ao client via `GetAgentDefinition`/`GetSkillContent` para composição local de prompts
 
 ### RPCs da Plataforma AIOps
 

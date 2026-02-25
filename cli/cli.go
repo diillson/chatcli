@@ -26,7 +26,9 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/ctxmgr"
+	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/k8s"
@@ -189,6 +191,13 @@ type ChatCLI struct {
 	isWatching         bool               // true when K8s watcher is active
 	watchStatusFunc    func() string      // returns compact status for prompt prefix
 	watcherCancel      context.CancelFunc // cancels the background watcher goroutine
+
+	// Paste detection
+	lastPasteInfo *paste.Info // set by BracketedPasteParser callback when paste is detected
+
+	// Remote resource cache (populated on /connect, cleared on /disconnect)
+	remoteAgents []remote.RemoteAgentInfo
+	remoteSkills []remote.RemoteSkillInfo
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -343,6 +352,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		logger.Error("Falha crítica ao inicializar o gerenciador de plugins, plugins estarão desabilitados", zap.Error(err))
 	}
 	cli.pluginManager = pluginMgr
+	if pluginMgr != nil {
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCoderPlugin())
+	}
 
 	cli.configureProviderAndModel()
 
@@ -394,6 +406,18 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 
 func (cli *ChatCLI) executor(in string) {
 	in = strings.TrimSpace(in)
+
+	// Show paste notification if paste was detected
+	if cli.lastPasteInfo != nil {
+		info := cli.lastPasteInfo
+		cli.lastPasteInfo = nil
+		if info.LineCount > 1 {
+			fmt.Printf("  %s\n", i18n.T("paste.detected", info.CharCount, info.LineCount))
+		} else {
+			fmt.Printf("  %s\n", i18n.T("paste.detected.short", info.CharCount))
+		}
+	}
+
 	if in != "" {
 		cli.commandHistory = append(cli.commandHistory, in)
 		cli.newCommandsInSession = append(cli.newCommandsInSession, in)
@@ -656,9 +680,17 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				}
 			}()
 
+			pasteParser := paste.NewBracketedPasteParser(
+				prompt.NewStandardInputParser(),
+				func(info paste.Info) {
+					cli.lastPasteInfo = &info
+				},
+			)
+
 			p := prompt.New(
 				cli.executor,
 				cli.completer,
+				prompt.OptionParser(pasteParser),
 				prompt.OptionTitle("ChatCLI - LLM no seu Terminal"),
 				prompt.OptionLivePrefix(cli.changeLivePrefix),
 				prompt.OptionPrefixTextColor(prompt.Green),

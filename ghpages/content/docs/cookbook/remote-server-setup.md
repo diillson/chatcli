@@ -151,6 +151,50 @@ chatcli connect  # usa o padrão (CLAUDEAI)
 
 ---
 
+## Passo 7: Compartilhar Agents, Skills e Plugins (Opcional)
+
+Provisione agents, skills e plugins no servidor para que toda a equipe tenha acesso aos mesmos recursos:
+
+### Via Helm
+
+```bash
+helm install chatcli deploy/helm/chatcli \
+  --namespace tools --create-namespace \
+  --set llm.provider=CLAUDEAI \
+  --set secrets.anthropicApiKey=sk-ant-xxx \
+  --set server.token=equipe-token-2024 \
+  --set agents.enabled=true \
+  --set-file agents.definitions.devops-senior\\.md=agents/devops-senior.md \
+  --set skills.enabled=true \
+  --set-file skills.definitions.k8s-best-practices\\.md=skills/k8s-best-practices.md \
+  --set plugins.enabled=true \
+  --set plugins.initImage=myregistry/chatcli-plugins:latest
+```
+
+### Via ConfigMaps Existentes
+
+```bash
+# Criar ConfigMap com agents
+kubectl create configmap chatcli-agents \
+  --from-file=devops-senior.md=agents/devops-senior.md \
+  --from-file=go-expert.md=agents/go-expert.md \
+  -n tools
+
+# Referenciar no Helm
+helm install chatcli deploy/helm/chatcli \
+  --set agents.enabled=true \
+  --set agents.existingConfigMap=chatcli-agents
+```
+
+Quando os devs conectam, eles veem automaticamente os recursos do servidor:
+
+```
+Connected to ChatCLI server (version: 1.3.0, provider: CLAUDEAI, model: claude-sonnet-4-5)
+ Server has 2 plugins, 2 agents, 3 skills available
+```
+
+---
+
 ## Dicas de Operação
 
 ### Logs do Servidor
@@ -194,3 +238,5 @@ docker cp chatcli-server:/home/chatcli/.chatcli/sessions ./backup/
 | Env Vars | `CHATCLI_REMOTE_ADDR`, `CHATCLI_REMOTE_TOKEN` |
 | TLS | `--tls-cert`, `--tls-key` (servidor) / `--tls` (cliente) |
 | Credenciais | Servidor (padrão) ou cliente (`--llm-key` / `--use-local-auth`) |
+| Agents/Skills | `agents.enabled=true` + ConfigMap (Helm) ou `agents.configMapRef` (Operator) |
+| Plugins | `plugins.enabled=true` + init container ou PVC (Helm) ou `plugins.image` (Operator) |

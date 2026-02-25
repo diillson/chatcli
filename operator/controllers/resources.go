@@ -276,10 +276,96 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		})
 	}
 
+	// Agents ConfigMap volume
+	if instance.Spec.Agents != nil && instance.Spec.Agents.ConfigMapRef != nil {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "agents",
+			MountPath: "/home/chatcli/.chatcli/agents",
+			ReadOnly:  true,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "agents",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: *instance.Spec.Agents.ConfigMapRef,
+					},
+				},
+			},
+		})
+	}
+
+	// Skills ConfigMap volume
+	if instance.Spec.Agents != nil && instance.Spec.Agents.SkillsConfigMapRef != nil {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "skills",
+			MountPath: "/home/chatcli/.chatcli/skills",
+			ReadOnly:  true,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "skills",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: *instance.Spec.Agents.SkillsConfigMapRef,
+					},
+				},
+			},
+		})
+	}
+
+	// Plugins volume (PVC or emptyDir for init container)
+	var initContainers []corev1.Container
+	if instance.Spec.Plugins != nil {
+		if instance.Spec.Plugins.PVCName != "" {
+			// Mount existing PVC with plugin binaries
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{
+				Name:      "plugins",
+				MountPath: "/home/chatcli/.chatcli/plugins",
+			})
+			volumes = append(volumes, corev1.Volume{
+				Name: "plugins",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: instance.Spec.Plugins.PVCName,
+					},
+				},
+			})
+		} else if instance.Spec.Plugins.Image != "" {
+			// Init container copies plugins from image to emptyDir
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{
+				Name:      "plugins",
+				MountPath: "/home/chatcli/.chatcli/plugins",
+			})
+			pluginsVolume := corev1.Volume{
+				Name: "plugins",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						SizeLimit: resourceQuantity("500Mi"),
+					},
+				},
+			}
+			volumes = append(volumes, pluginsVolume)
+
+			initContainers = append(initContainers, corev1.Container{
+				Name:    "plugin-loader",
+				Image:   instance.Spec.Plugins.Image,
+				Command: []string{"sh", "-c", "cp -a /plugins/* /target-plugins/ 2>/dev/null || true"},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "plugins",
+						MountPath: "/target-plugins",
+					},
+				},
+			})
+		}
+	}
+
 	container.VolumeMounts = volumeMounts
 
 	podSpec := corev1.PodSpec{
 		ServiceAccountName: instance.Name,
+		InitContainers:     initContainers,
 		Containers:         []corev1.Container{container},
 		Volumes:            volumes,
 	}

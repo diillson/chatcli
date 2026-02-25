@@ -89,6 +89,8 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 - **Exploração Recursiva de Diretórios**: Processa projetos inteiros ignorando pastas irrelevantes (ex.: `node_modules`, `.git`).
 - **Configuração Dinâmica e Histórico Persistente**: Troque provedores, atualize configurações em tempo real e mantenha o histórico entre sessões.
 - **Robustez**: Retry com backoff exponencial para lidar com falhas de API.
+- **Detecção de Paste**: Detecta automaticamente texto colado no terminal via *Bracketed Paste Mode* e exibe notificação visual (`📋 Pasted (X chars, Y lines)`), evitando confusão com textos longos.
+- **Descoberta de Recursos Remotos**: Ao conectar a um servidor, o client descobre automaticamente plugins, agents e skills disponíveis no servidor. Plugins remotos podem ser executados no servidor ou baixados localmente; agents e skills remotos são transferidos e compostos localmente com os recursos locais.
 - **Segurança Reforçada**: Comparação de tokens em tempo constante, proteção contra injeção em shell, validação de editores, gRPC reflection desabilitado por padrão, e containers hardened (read-only, no-new-privileges, drop ALL capabilities). Veja a [documentação de segurança](https://diillson.github.io/chatcli/docs/features/security/).
 
 -----
@@ -710,6 +712,8 @@ O Modo Coder (`/coder`) possui um sistema de governança robusto inspirado no Cl
 
 #### Ferramentas do Modo Coder (@coder)
 
+O `@coder` é um **plugin builtin** — já vem embutido no ChatCLI e funciona imediatamente, sem instalação separada.
+
 O contrato do `@coder` suporta **args em JSON** (recomendado) e mantém compatibilidade com a sintaxe de linha única. Exemplos:
 
 - JSON (recomendado): `<tool_call name="@coder" args="{\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}"/>`
@@ -721,7 +725,7 @@ Novos subcomandos principais:
 - `test` (com detecção automática de stack)
 - `patch --diff` (unified diff, text/base64)
 
-Detalhes completos no guia do plugin: https://diillson.github.io/chatcli/docs/features/coder-plugin/
+Detalhes completos no guia: https://diillson.github.io/chatcli/docs/features/coder-plugin/
 
 #### Política de Segurança
 
@@ -1021,6 +1025,7 @@ Um Agente pode importar múltiplas Skills, criando um *"Super System Prompt"** c
 - Centralizar regras de coding style, segurança, etc.
 - Versionar personas no Git
 - Compartilhar entre equipes
+- **Sincronizar com o servidor**: Ao conectar a um servidor remoto, agents e skills do servidor são descobertos automaticamente e mesclados com os locais
 
 ### Estrutura de Arquivos
 
@@ -1127,6 +1132,19 @@ chatcli connect meuservidor:50051 -p "Explique K8s pods"   # one-shot remoto
 
 O modo interativo completo funciona transparentemente sobre a conexao remota: sessoes, agente, coder, contextos — tudo disponivel.
 
+#### Descoberta de Recursos Remotos
+
+Ao conectar, o client descobre automaticamente os recursos do servidor:
+
+```
+Connected to ChatCLI server (version: 1.3.0, provider: CLAUDEAI, model: claude-sonnet-4-5)
+ Server has 3 plugins, 2 agents, 4 skills available
+```
+
+- **Plugins remotos**: Executados no servidor (`/plugin list` mostra `[remote]`), com opção de download local
+- **Agents/Skills remotos**: Transferidos ao client para composição local de prompts, permitindo merge com resources locais
+- **Híbrido**: Plugins locais e remotos coexistem; agents locais e remotos são mesclados automaticamente
+
 ### Docker
 
 ```bash
@@ -1152,6 +1170,26 @@ helm install chatcli deploy/helm/chatcli \
 ```
 
 O Helm chart suporta `watcher.targets[]` para multi-target, scraping Prometheus e auto-detecção de ClusterRole quando targets estão em namespaces diferentes.
+
+#### Provisionamento de Agents, Skills e Plugins via Helm
+
+```bash
+# Com agents e skills inline
+helm install chatcli deploy/helm/chatcli \
+  --set llm.provider=CLAUDEAI \
+  --set secrets.anthropicApiKey=sk-ant-xxx \
+  --set agents.enabled=true \
+  --set-file agents.definitions.go-expert\\.md=agents/go-expert.md \
+  --set skills.enabled=true \
+  --set-file skills.definitions.clean-code\\.md=skills/clean-code.md
+
+# Com plugins via init container
+helm install chatcli deploy/helm/chatcli \
+  --set plugins.enabled=true \
+  --set plugins.initImage=myregistry/chatcli-plugins:latest
+```
+
+Agents e skills são montados como ConfigMaps em `/home/chatcli/.chatcli/agents/` e `/home/chatcli/.chatcli/skills/`. Plugins podem vir de um init container ou PVC existente. Clientes conectados descobrem esses recursos automaticamente via gRPC.
 
 > **gRPC e múltiplas réplicas**: O gRPC usa conexões HTTP/2 persistentes que fixam em um único pod. Para `replicaCount > 1`, habilite `service.headless: true` no Helm chart para ativar balanceamento round-robin via DNS. No Operator, o headless é ativado **automaticamente** quando `spec.replicas > 1`. O client já possui keepalive e round-robin integrados.
 
@@ -1248,8 +1286,8 @@ O projeto é modular e organizado em pacotes:
 -  config : Lida com a configuração via constantes.
 -  i18n : Centraliza a lógica de internacionalização e os arquivos de tradução.
 -  llm : Lida com a comunicação e gerência dos clientes LLM.
--  server : Servidor gRPC para acesso remoto (inclui RPCs `GetAlerts` e `AnalyzeIssue`).
--  client/remote : Cliente gRPC que implementa a interface LLMClient.
+-  server : Servidor gRPC para acesso remoto (inclui RPCs `GetAlerts`, `AnalyzeIssue` e discovery de plugins/agents/skills).
+-  client/remote : Cliente gRPC que implementa a interface LLMClient, com suporte a descoberta e uso de recursos remotos (plugins, agents, skills).
 -  k8s : Kubernetes Watcher (collectors, store, summarizer).
 -  proto : Definicoes protobuf do servico gRPC (`chatcli.proto`).
 -  operator : Kubernetes Operator — plataforma AIOps com 7 CRDs e pipeline autonomo.

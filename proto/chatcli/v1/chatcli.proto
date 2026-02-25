@@ -48,6 +48,29 @@ service ChatCLIService {
 
   // AgenticStep runs one turn of the AI-driven remediation agent loop.
   rpc AgenticStep(AgenticStepRequest) returns (AgenticStepResponse);
+
+  // --- Remote Resource Discovery ---
+
+  // ListRemotePlugins returns all plugins installed on the server.
+  rpc ListRemotePlugins(ListRemotePluginsRequest) returns (ListRemotePluginsResponse);
+
+  // ListRemoteAgents returns all agents available on the server.
+  rpc ListRemoteAgents(ListRemoteAgentsRequest) returns (ListRemoteAgentsResponse);
+
+  // ListRemoteSkills returns all skills available on the server.
+  rpc ListRemoteSkills(ListRemoteSkillsRequest) returns (ListRemoteSkillsResponse);
+
+  // GetAgentDefinition returns the full definition of a server-side agent.
+  rpc GetAgentDefinition(GetAgentDefinitionRequest) returns (GetAgentDefinitionResponse);
+
+  // GetSkillContent returns the full content of a server-side skill.
+  rpc GetSkillContent(GetSkillContentRequest) returns (GetSkillContentResponse);
+
+  // ExecuteRemotePlugin executes a plugin on the server and returns the output.
+  rpc ExecuteRemotePlugin(ExecuteRemotePluginRequest) returns (ExecuteRemotePluginResponse);
+
+  // DownloadPlugin streams the plugin binary to the client for offline use.
+  rpc DownloadPlugin(DownloadPluginRequest) returns (stream DownloadPluginResponse);
 }
 
 // --- SendPrompt ---
@@ -154,6 +177,9 @@ message GetServerInfoResponse {
   repeated string available_providers = 4;
   bool watcher_active = 5;     // true if K8s watcher is running
   string watcher_target = 6;   // e.g., "namespace/deployment"
+  int32 plugin_count = 7;      // number of plugins available on server
+  int32 agent_count = 8;       // number of agents available on server
+  int32 skill_count = 9;       // number of skills available on server
 }
 
 // --- Watcher Status ---
@@ -274,4 +300,106 @@ message AgenticStepResponse {
   string impact = 6;
   repeated string lessons_learned = 7;
   repeated string prevention_actions = 8;
+}
+
+// =============================================================================
+// Remote Resource Discovery
+// =============================================================================
+
+// --- Plugin Discovery ---
+
+message PluginInfo {
+  string name = 1;
+  string description = 2;
+  string usage = 3;
+  string version = 4;
+  string schema = 5;            // JSON schema describing plugin arguments/subcommands
+}
+
+message ListRemotePluginsRequest {}
+
+message ListRemotePluginsResponse {
+  repeated PluginInfo plugins = 1;
+}
+
+// --- Agent Discovery ---
+
+message AgentInfo {
+  string name = 1;
+  string description = 2;
+  repeated string skills = 3;   // skill names required by this agent
+  repeated string plugins = 4;  // plugin names required by this agent
+  string model = 5;             // preferred model for this agent
+  string content = 6;           // markdown body (system prompt content)
+  string frontmatter = 7;       // raw YAML frontmatter for client-side parsing
+}
+
+message ListRemoteAgentsRequest {}
+
+message ListRemoteAgentsResponse {
+  repeated AgentInfo agents = 1;
+}
+
+// --- Skill Discovery ---
+
+message SkillInfo {
+  string name = 1;
+  string description = 2;
+  string content = 3;                       // markdown body
+  repeated string allowed_tools = 4;
+  map<string, string> subskills = 5;        // name -> markdown content
+  map<string, string> scripts = 6;          // name -> server-side absolute path
+}
+
+message ListRemoteSkillsRequest {}
+
+message ListRemoteSkillsResponse {
+  repeated SkillInfo skills = 1;
+}
+
+// --- Get Specific Agent/Skill ---
+
+message GetAgentDefinitionRequest {
+  string name = 1;
+}
+
+message GetAgentDefinitionResponse {
+  AgentInfo agent = 1;
+}
+
+message GetSkillContentRequest {
+  string name = 1;
+}
+
+message GetSkillContentResponse {
+  SkillInfo skill = 1;
+}
+
+// --- Remote Plugin Execution ---
+
+message ExecuteRemotePluginRequest {
+  string plugin_name = 1;
+  repeated string args = 2;
+  bool stream = 3;              // if true, server streams output progressively
+}
+
+message ExecuteRemotePluginResponse {
+  string output = 1;
+  string error = 2;
+  bool done = 3;                // true when execution is complete
+}
+
+// --- Plugin Download (Hybrid Mode) ---
+
+message DownloadPluginRequest {
+  string plugin_name = 1;
+  string target_os = 2;         // client's runtime.GOOS
+  string target_arch = 3;       // client's runtime.GOARCH
+}
+
+message DownloadPluginResponse {
+  bytes chunk = 1;              // binary chunk
+  string filename = 2;          // plugin filename (set in first chunk)
+  int64 total_size = 3;         // total file size in bytes (set in first chunk)
+  bool done = 4;                // true when download is complete
 }

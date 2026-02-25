@@ -26,6 +26,15 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if and .Values.plugins.enabled .Values.plugins.initImage }}
+      initContainers:
+        - name: plugin-loader
+          image: {{ .Values.plugins.initImage }}
+          command: ["sh", "-c", "cp -a /plugins/* /target-plugins/ 2>/dev/null || true"]
+          volumeMounts:
+            - name: plugins
+              mountPath: /target-plugins
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -95,6 +104,17 @@ spec:
           {{- $mounts = append $mounts (dict "name" "tmp" "mountPath" "/tmp") }}
           {{- $mounts = append $mounts (dict "name" "data" "mountPath" "/home/chatcli/.chatcli") }}
           {{- end }}
+          {{- if .Values.agents.enabled }}
+          {{- $agentsCM := .Values.agents.existingConfigMap | default (printf "%s-agents" (include "chatcli.fullname" .)) }}
+          {{- $mounts = append $mounts (dict "name" "agents" "mountPath" "/home/chatcli/.chatcli/agents" "readOnly" true) }}
+          {{- end }}
+          {{- if .Values.skills.enabled }}
+          {{- $skillsCM := .Values.skills.existingConfigMap | default (printf "%s-skills" (include "chatcli.fullname" .)) }}
+          {{- $mounts = append $mounts (dict "name" "skills" "mountPath" "/home/chatcli/.chatcli/skills" "readOnly" true) }}
+          {{- end }}
+          {{- if .Values.plugins.enabled }}
+          {{- $mounts = append $mounts (dict "name" "plugins" "mountPath" "/home/chatcli/.chatcli/plugins") }}
+          {{- end }}
           {{- if $mounts }}
           volumeMounts:
             {{- toYaml $mounts | nindent 12 }}
@@ -111,7 +131,7 @@ spec:
               command: ["pidof", "chatcli"]
             initialDelaySeconds: 3
             periodSeconds: 10
-      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.watcher.enabled .Values.watcher.targets) (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) }}
+      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.watcher.enabled .Values.watcher.targets) (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) .Values.agents.enabled .Values.skills.enabled .Values.plugins.enabled }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: sessions
@@ -135,6 +155,26 @@ spec:
         - name: data
           emptyDir:
             sizeLimit: 200Mi
+        {{- end }}
+        {{- if .Values.agents.enabled }}
+        - name: agents
+          configMap:
+            name: {{ .Values.agents.existingConfigMap | default (printf "%s-agents" (include "chatcli.fullname" .)) }}
+        {{- end }}
+        {{- if .Values.skills.enabled }}
+        - name: skills
+          configMap:
+            name: {{ .Values.skills.existingConfigMap | default (printf "%s-skills" (include "chatcli.fullname" .)) }}
+        {{- end }}
+        {{- if .Values.plugins.enabled }}
+        - name: plugins
+          {{- if .Values.plugins.existingPVC }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.plugins.existingPVC }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: 500Mi
+          {{- end }}
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
