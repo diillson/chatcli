@@ -7,7 +7,6 @@ import (
 	"html"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -209,14 +208,4 @@ func runCommandWithContext(ctx context.Context, dir, cmdLine string) (string, er
 	}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
-}
-
-func detectTestCommandFromDir(dir string) string {
-	if fileExists(filepath.Join(dir, "go.mod")) {
-		return "go test ./..."
-	}
-	if fileExists(filepath.Join(dir, "package.json")) {
-		return "npm test"
-	}
-	return ""
 }

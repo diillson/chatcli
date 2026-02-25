@@ -13,7 +13,10 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--metadata":
-			json.NewEncoder(os.Stdout).Encode(engine.GetMetadata())
+			if err := json.NewEncoder(os.Stdout).Encode(engine.GetMetadata()); err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+				os.Exit(1)
+			}
 			return
 		case "--schema":
 			fmt.Println(engine.GetSchema())

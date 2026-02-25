@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
@@ -95,18 +96,24 @@ func TestStreamWriter(t *testing.T) {
 		lines = append(lines, line)
 	})
 
-	sw.Write([]byte("hello\nworld\n"))
+	if _, err := sw.Write([]byte("hello\nworld\n")); err != nil {
+		t.Fatal(err)
+	}
 	if len(lines) != 2 || lines[0] != "hello" || lines[1] != "world" {
 		t.Errorf("expected [hello, world], got %v", lines)
 	}
 
 	lines = nil
-	sw.Write([]byte("partial"))
+	if _, err := sw.Write([]byte("partial")); err != nil {
+		t.Fatal(err)
+	}
 	if len(lines) != 0 {
 		t.Errorf("expected no lines for partial, got %v", lines)
 	}
 
-	sw.Write([]byte(" data\n"))
+	if _, err := sw.Write([]byte(" data\n")); err != nil {
+		t.Fatal(err)
+	}
 	if len(lines) != 1 || lines[0] != "partial data" {
 		t.Errorf("expected [partial data], got %v", lines)
 	}
@@ -125,7 +132,9 @@ func TestStreamWriterCRLF(t *testing.T) {
 		lines = append(lines, line)
 	})
 
-	sw.Write([]byte("hello\r\nworld\r\n"))
+	if _, err := sw.Write([]byte("hello\r\nworld\r\n")); err != nil {
+		t.Fatal(err)
+	}
 	if len(lines) != 2 || lines[0] != "hello" || lines[1] != "world" {
 		t.Errorf("expected [hello, world], got %v", lines)
 	}
@@ -134,7 +143,7 @@ func TestStreamWriterCRLF(t *testing.T) {
 func TestEngineExecuteUnknown(t *testing.T) {
 	var buf bytes.Buffer
 	eng := NewEngine(&buf, &buf)
-	err := eng.Execute(nil, "unknown-cmd", nil)
+	err := eng.Execute(context.TODO(), "unknown-cmd", nil)
 	if err == nil || !strings.Contains(err.Error(), "desconhecido") {
 		t.Errorf("expected unknown command error, got %v", err)
 	}
