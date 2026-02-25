@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.61.0](https://github.com/diillson/chatcli/compare/v1.60.0...v1.61.0) (2026-02-25)
+
+
+### Features
+
+* **agent:** add multi-agent orchestration system with parallel workers ([3be604e](https://github.com/diillson/chatcli/commit/3be604e86cf929a4c113b77c28f071422c018e4a))
+* **ci:** support multiple branches and prerelease in release workflow ([db072ac](https://github.com/diillson/chatcli/commit/db072ac3f51a455d9c34b4e570a0dd21e065d87c))
+
+
+### Bug Fixes
+
+* **citest:** remove unnecessary blank line from publish-release workflow ([9cf6d93](https://github.com/diillson/chatcli/commit/9cf6d938c08355ce6be64365403f4dd86fd56ce4))
+
 ## [1.60.0](https://github.com/diillson/chatcli/compare/v1.59.6...v1.60.0) (2026-02-25)
 
 
