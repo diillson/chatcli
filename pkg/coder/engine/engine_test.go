@@ -119,7 +119,9 @@ func TestStreamWriter(t *testing.T) {
 	}
 
 	lines = nil
-	sw.Write([]byte("final"))
+	if _, err := sw.Write([]byte("final")); err != nil {
+		t.Fatal(err)
+	}
 	sw.Flush()
 	if len(lines) != 1 || lines[0] != "final" {
 		t.Errorf("expected [final] after flush, got %v", lines)
