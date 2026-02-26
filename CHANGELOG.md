@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.61.0](https://github.com/diillson/chatcli/compare/v1.60.0...v1.61.0) (2026-02-25)
+
+
+### Features
+
+* **agent:** add multi-agent orchestration system with parallel workers ([#576](https://github.com/diillson/chatcli/issues/576)) ([68fcb62](https://github.com/diillson/chatcli/commit/68fcb62494d2b371f690928501c517766490c26a))
+
 ## [1.60.0](https://github.com/diillson/chatcli/compare/v1.59.6...v1.60.0) (2026-02-25)
 
 
