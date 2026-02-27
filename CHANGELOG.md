@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.62.1](https://github.com/diillson/chatcli/compare/v1.62.0...v1.62.1) (2026-02-27)
+
+
+### Bug Fixes
+
+* **persona:** add project-level agent/skill precedence and activate SetProjectDir ([#580](https://github.com/diillson/chatcli/issues/580)) ([e4d5f10](https://github.com/diillson/chatcli/commit/e4d5f10ae9e69e3ee7db9f4ac9d002e9ae1baba5))
+
 ## [1.62.0](https://github.com/diillson/chatcli/compare/v1.61.0...v1.62.0) (2026-02-27)
 
 
