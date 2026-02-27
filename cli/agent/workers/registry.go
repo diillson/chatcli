@@ -5,6 +5,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/diillson/chatcli/pkg/persona"
+	"go.uber.org/zap"
 )
 
 // Registry holds all registered specialized agents.
@@ -103,4 +106,71 @@ func SetupDefaultRegistry() *Registry {
 	r.Register(NewSearchAgent())
 	r.Register(NewPlannerAgent())
 	return r
+}
+
+// LoadCustomAgents scans the persona system for custom agents and registers them
+// as CustomAgent workers in the registry. Built-in agent types are protected from
+// override — if a custom agent name collides, it is skipped with a warning.
+// Returns the number of agents successfully loaded.
+func LoadCustomAgents(registry *Registry, mgr *persona.Manager, logger *zap.Logger) int {
+	agents, err := mgr.ListAgents()
+	if err != nil {
+		logger.Warn("Failed to list persona agents for worker registration", zap.Error(err))
+		return 0
+	}
+
+	loaded := 0
+	for _, pa := range agents {
+		agentType := AgentType(strings.ToLower(pa.Name))
+
+		// Protect built-in agent types from override
+		if builtinAgentTypes[agentType] {
+			logger.Warn("Custom agent name conflicts with built-in agent, skipping",
+				zap.String("agent", pa.Name),
+				zap.String("type", string(agentType)),
+			)
+			continue
+		}
+
+		// Skip duplicates
+		if _, exists := registry.Get(agentType); exists {
+			logger.Warn("Duplicate custom agent name, skipping",
+				zap.String("agent", pa.Name),
+			)
+			continue
+		}
+
+		// Load persona skills for this agent
+		var personaSkills []*persona.Skill
+		for _, skillName := range pa.Skills {
+			skillName = strings.TrimSpace(skillName)
+			if skillName == "" {
+				continue
+			}
+			skill, err := mgr.GetSkill(skillName)
+			if err != nil {
+				logger.Warn("Skill not found for custom agent, skipping skill",
+					zap.String("agent", pa.Name),
+					zap.String("skill", skillName),
+					zap.Error(err),
+				)
+				continue
+			}
+			personaSkills = append(personaSkills, skill)
+		}
+
+		customAgent := NewCustomAgent(pa, personaSkills)
+		registry.Register(customAgent)
+		loaded++
+
+		logger.Info("Registered custom persona agent as worker",
+			zap.String("agent", pa.Name),
+			zap.String("type", string(agentType)),
+			zap.Int("commands", len(customAgent.AllowedCommands())),
+			zap.Int("skills", len(personaSkills)),
+			zap.Bool("readOnly", customAgent.IsReadOnly()),
+		)
+	}
+
+	return loaded
 }

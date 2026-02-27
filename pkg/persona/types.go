@@ -59,6 +59,7 @@ type Agent struct {
 	Description string     `json:"description" yaml:"description"`
 	Skills      StringList `json:"skills" yaml:"skills"`   // Usando StringList para robustez
 	Plugins     StringList `json:"plugins" yaml:"plugins"` // Usando StringList para robustez
+	Tools       StringList `json:"tools" yaml:"tools"`     // Allowed tools for worker mode (Read, Grep, Glob, Bash, Write, Edit)
 	Model       string     `json:"model" yaml:"model"`
 
 	// Content is the markdown body (without frontmatter)

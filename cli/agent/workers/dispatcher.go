@@ -57,6 +57,11 @@ func NewDispatcher(
 	}
 }
 
+// MaxWorkers returns the maximum number of concurrent worker goroutines.
+func (d *Dispatcher) MaxWorkers() int {
+	return d.config.MaxWorkers
+}
+
 // Dispatch executes a batch of agent calls, respecting parallelism settings.
 // Independent calls run concurrently (up to MaxWorkers), dependent calls run sequentially.
 // Returns results in the same order as the input calls.

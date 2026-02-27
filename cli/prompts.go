@@ -66,8 +66,8 @@ For simple text patches:
 
 ## CRITICAL RULES
 
-1. ONLY use the @coder tool. No other tools exist.
-2. NEVER use code blocks (` + "```" + `). ONLY use <tool_call> tags.
+1. Use the @coder tool via <tool_call> for direct operations. When multi-agent orchestration is available, you may also use <agent_call> to delegate complex subtasks to specialized agents.
+2. NEVER use code blocks (` + "```" + `). ONLY use <tool_call> or <agent_call> tags.
 3. Args MUST be a single line. NEVER break args across multiple lines.
 4. For multiline file content in write/patch, ALWAYS use base64 encoding.
 5. Use single quotes around the JSON args value: args='{"cmd":...}'
@@ -98,7 +98,8 @@ You are operating in ChatCLI /coder mode. Follow these mandatory rules:
 2. Emit tool calls: <tool_call name="@coder" args='{"cmd":"SUBCOMMAND","args":{...}}' />
 
 **RULES**
-- ONLY use @coder tool. No code blocks allowed.
+- Use @coder tool via <tool_call> for direct operations. Use <agent_call> for parallel delegation when available.
+- No code blocks allowed.
 - JSON args on a SINGLE LINE. Use single quotes around JSON: args='{...}'
 - For multiline content in write/patch, use base64 encoding.
 - BATCH multiple calls when possible. Execution stops on first error.

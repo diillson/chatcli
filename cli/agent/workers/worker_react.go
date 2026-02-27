@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
@@ -56,6 +57,7 @@ func RunWorkerReAct(
 
 	var allToolCalls []ToolCallRecord
 	var finalOutput strings.Builder
+	maxParallel := 0
 
 	allowed := make(map[string]bool, len(config.AllowedCommands))
 	for _, cmd := range config.AllowedCommands {
@@ -99,53 +101,73 @@ func RunWorkerReAct(
 			break
 		}
 
-		// Execute each tool call
-		var turnOutput strings.Builder
-		for _, tc := range toolCalls {
+		// Pre-validate and classify tool calls
+		type validatedTC struct {
+			index   int
+			tc      agent.ToolCall
+			subcmd  string
+			args    []string
+			blocked bool
+			msg     string
+		}
+		validated := make([]validatedTC, 0, len(toolCalls))
+		allReadOnly := true
+		for i, tc := range toolCalls {
 			subcmd, args, parseErr := parseCoderToolCall(tc)
 			if parseErr != nil {
-				record := ToolCallRecord{
-					Name:  tc.Name,
-					Args:  tc.Args,
-					Error: parseErr,
-				}
-				allToolCalls = append(allToolCalls, record)
-				fmt.Fprintf(&turnOutput, "[ERROR] Failed to parse tool call: %v\n", parseErr)
+				allToolCalls = append(allToolCalls, ToolCallRecord{Name: tc.Name, Args: tc.Args, Error: parseErr})
+				validated = append(validated, validatedTC{index: i, tc: tc, blocked: true, msg: fmt.Sprintf("[ERROR] Failed to parse tool call: %v", parseErr)})
 				continue
 			}
-
-			// Validate against allowed commands
 			if !allowed[subcmd] {
-				record := ToolCallRecord{
-					Name:  subcmd,
-					Args:  tc.Args,
-					Error: fmt.Errorf("command %q not allowed for this agent", subcmd),
-				}
-				allToolCalls = append(allToolCalls, record)
-				fmt.Fprintf(&turnOutput, "[BLOCKED] Command %q is not allowed for this agent. Allowed: %v\n",
-					subcmd, config.AllowedCommands)
+				allToolCalls = append(allToolCalls, ToolCallRecord{Name: subcmd, Args: tc.Args, Error: fmt.Errorf("command %q not allowed for this agent", subcmd)})
+				validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, blocked: true, msg: fmt.Sprintf("[BLOCKED] Command %q is not allowed for this agent. Allowed: %v", subcmd, config.AllowedCommands)})
 				continue
 			}
-
-			// Check write permission for read-only agents
 			if config.ReadOnly && isWriteCommand(subcmd) {
-				record := ToolCallRecord{
-					Name:  subcmd,
-					Args:  tc.Args,
-					Error: fmt.Errorf("write command %q blocked for read-only agent", subcmd),
-				}
-				allToolCalls = append(allToolCalls, record)
-				fmt.Fprintf(&turnOutput, "[BLOCKED] This agent is read-only and cannot execute %q\n", subcmd)
+				allToolCalls = append(allToolCalls, ToolCallRecord{Name: subcmd, Args: tc.Args, Error: fmt.Errorf("write command %q blocked for read-only agent", subcmd)})
+				validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, blocked: true, msg: fmt.Sprintf("[BLOCKED] This agent is read-only and cannot execute %q", subcmd)})
 				continue
 			}
+			if isWriteCommand(subcmd) {
+				allReadOnly = false
+			}
+			validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, args: args})
+		}
 
-			// Acquire file lock for write operations
-			filePath := extractFilePathFromArgs(tc.Args)
-			if isWriteCommand(subcmd) && filePath != "" && lockMgr != nil {
+		// Count runnable (non-blocked) tool calls
+		var runnable []validatedTC
+		for _, v := range validated {
+			if !v.blocked {
+				runnable = append(runnable, v)
+			}
+		}
+
+		// Execute tool calls: parallel for read-only batches, sequential otherwise
+		type execResult struct {
+			index  int
+			record ToolCallRecord
+			output string
+		}
+		results := make([]execResult, len(validated))
+
+		canParallelize := allReadOnly && len(runnable) > 1
+		if canParallelize {
+			logger.Info("Executing tool calls in parallel",
+				zap.Int("count", len(runnable)),
+				zap.String("callID", callID))
+		}
+
+		executeOne := func(v validatedTC) execResult {
+			if v.blocked {
+				return execResult{index: v.index, output: v.msg + "\n"}
+			}
+
+			filePath := extractFilePathFromArgs(v.tc.Args)
+			if isWriteCommand(v.subcmd) && filePath != "" && lockMgr != nil {
 				lockMgr.Lock(filePath)
 			}
 
-			// Execute via fresh Engine
 			var outBuf, errBuf strings.Builder
 			outWriter := engine.NewStreamWriter(func(line string) {
 				outBuf.WriteString(line)
@@ -158,35 +180,63 @@ func RunWorkerReAct(
 			})
 
 			eng := engine.NewEngine(outWriter, errWriter)
-			execErr := eng.Execute(ctx, subcmd, args)
+			execErr := eng.Execute(ctx, v.subcmd, v.args)
 			outWriter.Flush()
 			errWriter.Flush()
 
-			// Release file lock
-			if isWriteCommand(subcmd) && filePath != "" && lockMgr != nil {
+			if isWriteCommand(v.subcmd) && filePath != "" && lockMgr != nil {
 				lockMgr.Unlock(filePath)
 			}
 
 			output := outBuf.String() + errBuf.String()
-			// Truncate large output
 			if len(output) > MaxWorkerOutputBytes {
 				output = output[:MaxWorkerOutputBytes] + "\n... [output truncated]"
 			}
 
-			record := ToolCallRecord{
-				Name:   subcmd,
-				Args:   tc.Args,
-				Output: output,
-			}
+			record := ToolCallRecord{Name: v.subcmd, Args: v.tc.Args, Output: output}
 			if execErr != nil {
 				record.Error = execErr
 			}
-			allToolCalls = append(allToolCalls, record)
 
-			fmt.Fprintf(&turnOutput, "[%s] %s\n", subcmd, output)
+			out := fmt.Sprintf("[%s] %s\n", v.subcmd, output)
 			if execErr != nil {
-				fmt.Fprintf(&turnOutput, "[ERROR] %v\n", execErr)
+				out += fmt.Sprintf("[ERROR] %v\n", execErr)
 			}
+			return execResult{index: v.index, record: record, output: out}
+		}
+
+		if canParallelize {
+			maxParallel = max(maxParallel, len(runnable))
+			var wg sync.WaitGroup
+			var mu sync.Mutex
+			for i, v := range validated {
+				if v.blocked {
+					results[i] = execResult{index: v.index, output: v.msg + "\n"}
+					continue
+				}
+				wg.Add(1)
+				go func(idx int, vtc validatedTC) {
+					defer wg.Done()
+					r := executeOne(vtc)
+					mu.Lock()
+					results[idx] = r
+					mu.Unlock()
+				}(i, v)
+			}
+			wg.Wait()
+		} else {
+			for i, v := range validated {
+				results[i] = executeOne(v)
+			}
+		}
+
+		// Aggregate results in original order
+		var turnOutput strings.Builder
+		for _, r := range results {
+			if r.record.Name != "" {
+				allToolCalls = append(allToolCalls, r.record)
+			}
+			turnOutput.WriteString(r.output)
 		}
 
 		// Feed results back to LLM
@@ -204,10 +254,11 @@ func RunWorkerReAct(
 	}
 
 	return &AgentResult{
-		CallID:    callID,
-		Output:    output,
-		Duration:  time.Since(startTime),
-		ToolCalls: allToolCalls,
+		CallID:        callID,
+		Output:        output,
+		Duration:      time.Since(startTime),
+		ToolCalls:     allToolCalls,
+		ParallelCalls: maxParallel,
 	}, nil
 }
 
@@ -225,6 +276,8 @@ func parseCoderToolCall(tc agent.ToolCall) (string, []string, error) {
 	if err := json.Unmarshal([]byte(argsStr), &jsonArgs); err == nil && jsonArgs.Cmd != "" {
 		var argsMap map[string]interface{}
 		if err := json.Unmarshal(jsonArgs.Args, &argsMap); err == nil {
+			// Normaliza aliases comuns que LLMs confundem
+			argsMap = normalizeArgAliases(jsonArgs.Cmd, argsMap)
 			var cliArgs []string
 			for k, v := range argsMap {
 				cliArgs = append(cliArgs, fmt.Sprintf("--%s", k), fmt.Sprintf("%v", v))
@@ -241,6 +294,75 @@ func parseCoderToolCall(tc agent.ToolCall) (string, []string, error) {
 		return "", nil, fmt.Errorf("empty tool call args")
 	}
 	return parts[0], parts[1:], nil
+}
+
+// normalizeArgAliases maps common LLM arg mistakes to the correct flag names.
+func normalizeArgAliases(cmd string, args map[string]interface{}) map[string]interface{} {
+	// Alias table: wrong_key → correct_key (per command or global)
+	type alias struct {
+		from string
+		to   string
+		cmds []string // nil = all commands
+	}
+	aliases := []alias{
+		{from: "path", to: "file", cmds: []string{"read", "write", "patch"}},
+		{from: "filepath", to: "file", cmds: []string{"read", "write", "patch"}},
+		{from: "filename", to: "file", cmds: []string{"read", "write", "patch"}},
+		{from: "pattern", to: "term", cmds: []string{"search"}},
+		{from: "query", to: "term", cmds: []string{"search"}},
+		{from: "regex", to: "term", cmds: []string{"search"}},
+		{from: "directory", to: "dir"},
+		{from: "cwd", to: "dir"},
+		{from: "workdir", to: "dir"},
+		{from: "command", to: "cmd", cmds: []string{"exec"}},
+		{from: "content_b64", to: "content", cmds: []string{"write", "patch"}},
+		{from: "body", to: "content", cmds: []string{"write"}},
+		{from: "data", to: "content", cmds: []string{"write"}},
+		{from: "begin", to: "start", cmds: []string{"read"}},
+		{from: "from", to: "start", cmds: []string{"read"}},
+		{from: "to", to: "end", cmds: []string{"read"}},
+		{from: "depth", to: "max-depth", cmds: []string{"tree"}},
+		{from: "max_depth", to: "max-depth", cmds: []string{"tree"}},
+		{from: "maxdepth", to: "max-depth", cmds: []string{"tree"}},
+	}
+
+	for _, a := range aliases {
+		val, exists := args[a.from]
+		if !exists {
+			continue
+		}
+		if _, hasDest := args[a.to]; hasDest {
+			continue // don't overwrite if correct key already present
+		}
+		match := a.cmds == nil
+		if !match {
+			for _, c := range a.cmds {
+				if c == cmd {
+					match = true
+					break
+				}
+			}
+		}
+		if match {
+			args[a.to] = val
+			delete(args, a.from)
+		}
+	}
+
+	// Se content_b64 foi mapeado para content, garantir encoding=base64
+	if _, ok := args["content"]; ok {
+		if enc, hasEnc := args["encoding"]; !hasEnc || enc == "" {
+			// Se veio de content_b64, é base64
+			if cmd == "write" || cmd == "patch" {
+				// Detectar se o valor parece base64 (sem espaços/newlines e longo)
+				if s, ok := args["content"].(string); ok && len(s) > 50 && !strings.ContainsAny(s, " \n\t{}<>") {
+					args["encoding"] = "base64"
+				}
+			}
+		}
+	}
+
+	return args
 }
 
 // isWriteCommand returns true if the subcommand modifies files.

@@ -215,6 +215,16 @@ func (m *Manager) GetSkillsDir() string {
 	return m.loader.GetSkillsDir()
 }
 
+// GetLoader returns the underlying loader for advanced callers (e.g., the worker system).
+func (m *Manager) GetLoader() *Loader {
+	return m.loader
+}
+
+// GetSkill loads a skill by name, delegating to the loader.
+func (m *Manager) GetSkill(name string) (*Skill, error) {
+	return m.loader.GetSkill(name)
+}
+
 // ValidateAgent checks if an agent configuration is valid
 func (m *Manager) ValidateAgent(name string) ([]string, []string, error) {
 	return m.builder.ValidateAgent(name)

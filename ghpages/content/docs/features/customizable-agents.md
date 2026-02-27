@@ -1,6 +1,6 @@
 ---
 title: "Agentes Customizáveis (Personas)"
-description: "Sistema modular para criar personalidades e conhecimentos especializados para a IA."
+description: "Sistema modular para criar personalidades e conhecimentos especializados para a IA, com suporte a despacho automático como workers no sistema multi-agent."
 weight: 70
 ---
 
@@ -24,6 +24,7 @@ Um Agente pode importar múltiplas Skills, criando um **"Super System Prompt"** 
 | **Colaboração** | Equipes podem compartilhar agentes e skills |
 | **Consistência** | Regras de coding style aplicadas automaticamente |
 | **Especialização** | Crie agentes para Go, Python, DevOps, etc. |
+| **Despacho como Worker** | Agents customizados são automaticamente registrados no sistema multi-agent e podem ser despachados via `<agent_call>` pelo LLM |
 | **Servidor Remoto** | Ao conectar a um servidor, agents e skills remotos são descobertos automaticamente e mesclados com os locais |
 
 ## Estrutura de Diretórios
@@ -35,10 +36,15 @@ Os arquivos ficam no diretório ```~/.chatcli/```:
 ├── agents/            # Arquivos de agentes
 │   ├── go-expert.md
 │   ├── devops-senior.md
+│   ├── security-auditor.md
 │   └── python-data-scientist.md
-└── skills/            # Arquivos de skills
-    ├── clean-code.md
-    ├── error-handling.md
+└── skills/            # Arquivos de skills (.md ou diretórios V2)
+    ├── clean-code/    # Skill V2 (pacote com subskills + scripts)
+    │   ├── SKILL.md
+    │   ├── naming-rules.md
+    │   └── scripts/
+    │       └── lint_check.py
+    ├── error-handling.md  # Skill V1 (arquivo único)
     ├── docker-master.md
     └── clean-scripts.md
 ```
@@ -49,12 +55,51 @@ Os agentes são arquivos Markdown com frontmatter YAML:
 
 ```yaml
 ---
-name: "go-expert"
-description: "Especialista em Go/Golang com foco em código limpo"
+name: "devops-senior"
+description: "DevOps Senior com foco em CI/CD e infraestrutura"
+tools: Read, Grep, Glob, Bash, Write, Edit   # Define quais ferramentas o agent pode usar como worker
 skills:                    # Lista de skills a importar
   - clean-code
-  - error-handling
+  - bash-linux
+  - architecture
 plugins:                   # Plugins habilitados (opcional)
+  - "@coder"
+---
+# Personalidade Base
+
+Você é um Engenheiro DevOps Sênior, especialista em CI/CD,
+containers, infraestrutura como código e observabilidade.
+```
+
+### Campo `tools` — Integração com Multi-Agent
+
+O campo `tools` no frontmatter YAML é a chave para a integração com o sistema de [orquestração multi-agent](/docs/features/multi-agent-orchestration/). Ele define quais comandos o agent pode usar quando despachado como **worker** pelo LLM orquestrador.
+
+| Tool no YAML | Comando(s) @coder | Descrição |
+|--------------|-------------------|-----------|
+| `Read` | `read` | Ler conteúdo de arquivos |
+| `Grep` | `search` | Buscar padrões em arquivos |
+| `Glob` | `tree` | Listar diretórios |
+| `Bash` | `exec`, `test`, `git-status`, `git-diff`, `git-log`, `git-changed`, `git-branch` | Execução de comandos e operações git |
+| `Write` | `write` | Criar/sobrescrever arquivos |
+| `Edit` | `patch` | Edição precisa (search/replace) |
+
+**Regras:**
+- Agents **sem** campo `tools` recebem automaticamente `read`, `search`, `tree` e são marcados como **read-only**
+- Agents com apenas `Read`, `Grep`, `Glob` são **read-only** (não podem modificar arquivos)
+- Agents com `Write`, `Edit` ou `Bash` têm **acesso de escrita/execução**
+- Nomes de agents embarcados (`file`, `coder`, `shell`, `git`, `search`, `planner`) são **protegidos** e não podem ser sobrescritos
+
+### Exemplo sem o campo `tools`
+
+```yaml
+---
+name: "go-expert"
+description: "Especialista em Go/Golang com foco em código limpo"
+skills:
+  - clean-code
+  - error-handling
+plugins:
   - "@coder"
 ---
 # Personalidade Base
@@ -68,6 +113,8 @@ Você é um Engenheiro de Software Sênior, especialista em Go/Golang.
 3. **Erros**: Trate erros explícitamente, nunca ignore.
 4. **Testes**: Escreva testes com table-driven tests.
 ```
+
+> Este agent será registrado como **read-only** no sistema multi-agent (apenas `read`, `search`, `tree`).
 
 ## Formato do Arquivo de Skill
 
@@ -92,6 +139,79 @@ description: "Princípios de Clean Code e boas práticas"
 2. **Poucos argumentos**: Idealmente 0-2 argumentos, máximo 3.
 3. **Sem efeitos colaterais**: Funções devem fazer somente o que prometem.
 ```
+
+## Skills V2 — Pacotes com Subskills e Scripts
+
+Além das skills V1 (arquivo único `.md`), o ChatCLI suporta **Skills V2**: diretórios contendo múltiplos documentos e scripts executáveis.
+
+### Estrutura de uma Skill V2
+
+```text
+skills/
+└── clean-code/
+    ├── SKILL.md            # Conteúdo principal (frontmatter + body)
+    ├── naming-rules.md     # Subskill: regras de nomenclatura
+    ├── formatting.md       # Subskill: regras de formatação
+    └── scripts/
+        └── lint_check.py   # Script executável
+```
+
+### Subskills
+
+Arquivos `.md` dentro do diretório da skill (exceto `SKILL.md`) são registrados como **subskills**. Quando o agent é despachado como worker, os caminhos dos subskills aparecem no system prompt do worker, que pode lê-los com o comando `read` conforme necessário.
+
+### Scripts
+
+Arquivos em `scripts/` são registrados como **skills executáveis** no worker. O sistema infere automaticamente o comando de execução com base na extensão:
+
+| Extensão | Comando Inferido |
+|----------|-----------------|
+| `.sh` | `bash script.sh` |
+| `.py` | `python3 script.py` |
+| `.js` | `node script.js` |
+| `.ts` | `npx ts-node script.ts` |
+| `.rb` | `ruby script.rb` |
+| Outros | `./script` (execução direta) |
+
+Os scripts são executados via o comando `exec` do @coder e seus resultados retornam ao worker para processamento.
+
+---
+
+## Despacho como Worker (Multi-Agent)
+
+Ao iniciar o `/coder` ou `/agent`, **todos os agents customizados** são automaticamente registrados no sistema de [orquestração multi-agent](/docs/features/multi-agent-orchestration/). O LLM orquestrador pode então despachá-los via `<agent_call>`:
+
+```xml
+<agent_call agent="devops-senior" task="Configure CI/CD pipeline with GitHub Actions" />
+<agent_call agent="security-auditor" task="Audit the authentication module for OWASP" />
+```
+
+### O que o worker recebe
+
+Quando despachado, o CustomAgent executa com:
+
+1. **System prompt personalizado** — Inclui o conteúdo do agent (markdown body), skills carregadas, caminhos de subskills, comandos de scripts, e instruções de tool_call
+2. **Mini ReAct loop** — O mesmo loop ReAct dos agents embarcados, com raciocínio → ação → observação
+3. **Comandos permitidos** — Baseados no campo `tools` do frontmatter
+4. **Leitura paralela** — Tool calls read-only executam em goroutines paralelas
+5. **File locks** — Escrita com mutex per-filepath para segurança anti-race
+6. **Recuperação de erros** — O orquestrador pode usar `tool_call` direto para diagnosticar e corrigir falhas
+
+### Exemplo End-to-End
+
+```bash
+# 1. Crie o agent em ~/.chatcli/agents/devops-senior.md
+# 2. Inicie o coder mode
+/coder configure the deployment pipeline and monitoring
+
+# O LLM orquestrador pode despachar:
+# <agent_call agent="devops-senior" task="Set up CI/CD with GitHub Actions" />
+# <agent_call agent="file" task="Read current Dockerfile and docker-compose.yml" />
+#
+# Ambos rodam em paralelo com seus próprios ReAct loops
+```
+
+---
 
 ## Comandos de Gerenciamento
 

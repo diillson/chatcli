@@ -30,8 +30,8 @@ func TestOrchestratorSystemPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "DECISION GUIDE") {
 		t.Error("expected 'DECISION GUIDE' in prompt")
 	}
-	if !strings.Contains(prompt, "IMPORTANT RULES") {
-		t.Error("expected 'IMPORTANT RULES' in prompt")
+	if !strings.Contains(prompt, "RULES") {
+		t.Error("expected 'RULES' in prompt")
 	}
 	if !strings.Contains(prompt, catalog) {
 		t.Error("expected catalog to be embedded in prompt")
@@ -43,8 +43,8 @@ func TestOrchestratorSystemPrompt_EmptyCatalog(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("expected non-empty prompt even with empty catalog")
 	}
-	if !strings.Contains(prompt, "ORCHESTRATOR") {
-		t.Error("expected ORCHESTRATOR in prompt")
+	if !strings.Contains(prompt, "ORCHESTRATION") {
+		t.Error("expected ORCHESTRATION in prompt")
 	}
 }
 

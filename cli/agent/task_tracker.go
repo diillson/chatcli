@@ -51,6 +51,13 @@ func NewTaskTracker(logger *zap.Logger) *TaskTracker {
 	}
 }
 
+// stripCheckbox removes leading checkbox markers like [x], [ ], [✓], [✔] from a string.
+var checkboxRe = regexp.MustCompile(`^\s*\[[\sx✓✔!>]*\]\s*`)
+
+func stripCheckbox(s string) string {
+	return strings.TrimSpace(checkboxRe.ReplaceAllString(s, ""))
+}
+
 func (t *TaskTracker) ParseReasoning(reasoningText string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -69,7 +76,7 @@ func (t *TaskTracker) ParseReasoning(reasoningText string) error {
 		matches := re.FindStringSubmatch(line)
 		if len(matches) >= 3 {
 			id++
-			desc := strings.TrimSpace(matches[2])
+			desc := stripCheckbox(matches[2])
 			status := TaskPending
 
 			low := strings.ToLower(line)
@@ -209,7 +216,7 @@ func (t *TaskTracker) ResetPlanFromReasoning(reasoningText string, preserveCompl
 		matches := re.FindStringSubmatch(line)
 		if len(matches) >= 3 {
 			id++
-			desc := strings.TrimSpace(matches[2])
+			desc := stripCheckbox(matches[2])
 			status := TaskPending
 
 			low := strings.ToLower(line)
