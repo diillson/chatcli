@@ -390,6 +390,12 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	// Initialize persona handler
 	cli.personaHandler = NewPersonaHandler(logger)
 
+	// Set project directory for local agents/skills precedence
+	if projectDir := detectProjectDir(); projectDir != "" {
+		cli.personaHandler.GetManager().SetProjectDir(projectDir)
+		logger.Debug("Project directory set for persona", zap.String("dir", projectDir))
+	}
+
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)
 	cli.agentMode = NewAgentMode(cli, logger)
@@ -402,6 +408,30 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	}
 
 	return cli, nil
+}
+
+// detectProjectDir walks up from the current working directory looking for
+// project root markers. Returns the project root path, or "" if none found.
+// Priority: .agent (explicit ChatCLI marker) > .git (common convention).
+func detectProjectDir() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if info, err := os.Stat(filepath.Join(dir, ".agent")); err == nil && info.IsDir() {
+			return dir
+		}
+		if info, err := os.Stat(filepath.Join(dir, ".git")); err == nil && info.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 func (cli *ChatCLI) executor(in string) {

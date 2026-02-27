@@ -297,14 +297,33 @@ Você é um Cientista de Dados Sênior, especialista em Python.
 /coder crie um pipeline de ML para classificação
 ```
 
-## Precedência de Skills
+## Precedência de Agents e Skills (Projeto > Global)
 
-Quando uma skill é referenciada, o sistema busca na seguinte ordem:
+Tanto agents quanto skills suportam **diretórios por projeto** com precedência sobre os globais. O ChatCLI detecta a raiz do projeto automaticamente buscando um diretório `.agent/` ou `.git/` a partir do diretório atual.
 
-1. **Diretório do Projeto** - `./.chatcli/skills/` (se existir)
-2. **Diretório Global** - `~/.chatcli/skills/`
+### Ordem de Busca
 
-Isso permite que projetos tenham skills específicas que sobrescrevem as globais.
+| Recurso | 1. Projeto (prioridade) | 2. Global (fallback) |
+|---------|------------------------|---------------------|
+| **Agents** | `./.agent/agents/*.md` | `~/.chatcli/agents/*.md` |
+| **Skills** | `./.agent/skills/` | `~/.chatcli/skills/` |
+
+Se um agent ou skill com o mesmo nome existir em ambos os diretórios, a versão do projeto prevalece.
+
+### Estrutura do Projeto
+
+```text
+meu-projeto/
+├── .agent/                  # Marca a raiz do projeto para o ChatCLI
+│   ├── agents/              # Agents específicos do projeto
+│   │   └── backend.md       # Sobrescreve ~/.chatcli/agents/backend.md
+│   └── skills/              # Skills específicas do projeto
+│       └── team-rules.md    # Regras específicas da equipe
+├── src/
+└── ...
+```
+
+> **Dica**: Se seu projeto já tem `.git/`, o ChatCLI usa esse diretório como raiz do projeto automaticamente. O `.agent/` é opcional — use-o quando quiser agents/skills por projeto sem depender do Git.
 
 ## Integração com /coder
 
