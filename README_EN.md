@@ -187,7 +187,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Optional)** Defines the maximum number of turns the agent can have. Default: 50. Maximum: 200.
   -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Optional)** Defines the execution timeout for the agent plugin (e.g., 30s, 2m, 10m). Default: 15 (Minutes)
 - Multi-Agent (Parallel Orchestration):
-  -  `CHATCLI_AGENT_PARALLEL_MODE`  – **(Optional)** Enables multi-agent mode with parallel orchestration. When `true`, the orchestrator LLM can dispatch specialized agents in parallel for complex tasks. Default: `false`.
+  -  `CHATCLI_AGENT_PARALLEL_MODE`  – **(Optional)** Controls multi-agent mode with parallel orchestration. **Enabled by default.** Set to `false` to disable. Default: `true`.
   -  `CHATCLI_AGENT_MAX_WORKERS`  – **(Optional)** Maximum number of workers (goroutines) running agents simultaneously. Default: `4`.
   -  `CHATCLI_AGENT_WORKER_MAX_TURNS`  – **(Optional)** Maximum turns for each worker agent's mini ReAct loop. Default: `10`.
   -  `CHATCLI_AGENT_WORKER_TIMEOUT`  – **(Optional)** Timeout per individual worker agent. Accepts Go durations (e.g., 30s, 2m, 10m). Default: `5m`.
@@ -218,7 +218,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     CHATCLI_AGENT_PLUGIN_TIMEOUT=20m
 
     # Multi-Agent (Parallel Orchestration)
-    CHATCLI_AGENT_PARALLEL_MODE=false       # Enable multi-agent mode with parallel agents
+    CHATCLI_AGENT_PARALLEL_MODE=true        # Disable with false if needed
     CHATCLI_AGENT_MAX_WORKERS=4             # Maximum agents running in parallel
     CHATCLI_AGENT_WORKER_MAX_TURNS=10       # Maximum turns per worker agent
     CHATCLI_AGENT_WORKER_TIMEOUT=5m         # Timeout per worker agent
@@ -786,9 +786,9 @@ You can control the `/coder` UI style and the tips banner with env vars:
 
 These values are visible in `/status` and `/config`.
 
-#### Multi-Agent Orchestration (Parallel Mode)
+#### Multi-Agent Orchestration
 
-When enabled via `CHATCLI_AGENT_PARALLEL_MODE=true`, ChatCLI transforms `/coder` mode into a multi-agent system where the orchestrator LLM dispatches **specialized agents in parallel** for complex tasks.
+ChatCLI includes a multi-agent orchestration system **enabled by default** in `/coder` and `/agent` modes. The orchestrator LLM automatically decides when to dispatch specialized agents in parallel for complex tasks.
 
 **6 Built-in Specialized Agents:**
 
@@ -801,11 +801,13 @@ When enabled via `CHATCLI_AGENT_PARALLEL_MODE=true`, ChatCLI transforms `/coder`
 | **SearchAgent** | Codebase search | Read-only |
 | **PlannerAgent** | Reasoning and task decomposition | No tools (pure LLM) |
 
-Each agent has its own **skills** — some are accelerator scripts (execute without LLM calls), others are descriptive (the agent resolves them via its mini ReAct loop). Example: `batch-read` reads N files in parallel without calling the LLM; `run-tests` executes `go test` and parses the result automatically.
+Each agent has its own **skills** — some are accelerator scripts (execute without LLM calls), others are descriptive (the agent resolves them via its mini ReAct loop).
 
-**Extensibility:** The Registry system allows registering and replacing agents via `Register()`/`Unregister()`, enabling user-defined custom agents.
+**Custom Agents as Workers:** Persona agents defined in `~/.chatcli/agents/` are automatically loaded as workers in the orchestration system. The LLM can dispatch them via `<agent_call agent="devops" task="..." />` with the same ReAct loop, parallel reads, and error recovery as built-in agents. The `tools` field in the YAML frontmatter defines which commands the agent can use (Read→read, Grep→search, Bash→exec/test/git-*, Write→write, Edit→patch).
 
-> Full documentation at [diillson.github.io/chatcli/docs/features/multi-agent-orchestration](https://diillson.github.io/chatcli/docs/features/multi-agent-orchestration/)
+**Error Recovery Strategy:** When an agent fails, the orchestrator switches to direct `tool_call` to diagnose and fix (it already has the error context). After the fix, it resumes `agent_call` for the next work phase.
+
+> Disable with `CHATCLI_AGENT_PARALLEL_MODE=false` if needed. Full documentation at [diillson.github.io/chatcli/docs/features/multi-agent-orchestration](https://diillson.github.io/chatcli/docs/features/multi-agent-orchestration/)
 
 ### Agent Interaction
 
@@ -1005,6 +1007,7 @@ An Agent can import multiple Skills, creating a composed **"Super System Prompt"
 - Versioning personas in Git
 - Sharing across teams
 - **Syncing with the server**: When connecting to a remote server, server-side agents and skills are automatically discovered and merged with local ones
+- **Dispatch as workers**: Custom agents are automatically registered in the multi-agent orchestration system and can be dispatched via `<agent_call>` by the LLM
 
 ### File Structure
 
@@ -1014,10 +1017,15 @@ Files are stored in `~/.chatcli/`:
 ~/.chatcli/
 ├── agents/            # Agent files (.md)
 │   ├── go-expert.md
-│   └── devops-senior.md
-└── skills/            # Skill files (.md)
-    ├── clean-code.md
-    ├── error-handling.md
+│   ├── devops-senior.md
+│   └── security-auditor.md
+└── skills/            # Skill files (.md or V2 directories)
+    ├── clean-code/    # V2 Skill (package with subskills + scripts)
+    │   ├── SKILL.md
+    │   ├── naming-rules.md
+    │   └── scripts/
+    │       └── lint_check.py
+    ├── error-handling.md  # V1 Skill (single file)
     └── docker-master.md
 ```
 
@@ -1025,19 +1033,34 @@ Files are stored in `~/.chatcli/`:
 
 ```yaml
 ---
-name: "go-expert"
-description: "Go/Golang Specialist"
+name: "devops-senior"
+description: "Senior DevOps with CI/CD and infrastructure focus"
+tools: Read, Grep, Glob, Bash, Write, Edit   # Defines which tools the agent can use as a worker
 skills:
   - clean-code
-  - error-handling
+  - bash-linux
+  - architecture
 plugins:
   - "@coder"
 ---
 # Base Personality
 
-You are a Senior Software Engineer, specializing in Go.
-Always prioritize simplicity and readability.
+You are a Senior DevOps Engineer, specializing in CI/CD,
+containers, infrastructure as code, and observability.
 ```
+
+The `tools` field defines which commands the agent can use when dispatched as a worker in the multi-agent system:
+
+| YAML Tool | @coder Command |
+|-----------|----------------|
+| `Read` | `read` |
+| `Grep` | `search` |
+| `Glob` | `tree` |
+| `Bash` | `exec`, `test`, `git-*` |
+| `Write` | `write` |
+| `Edit` | `patch` |
+
+Agents without `tools` defined are automatically read-only (`read`, `search`, `tree`).
 
 #### Skill Format
 
@@ -1052,6 +1075,8 @@ description: "Clean Code Principles"
 2. Keep functions small (max 20 lines)
 3. Avoid unnecessary comments - code should be self-explanatory
 ```
+
+V2 Skills (directories) can include subskills (.md) and executable scripts in `scripts/`. Scripts are automatically registered as executable skills in the worker and can be invoked during orchestration.
 
 ### Management Commands
 
@@ -1072,18 +1097,21 @@ description: "Clean Code Principles"
 # 1. List available agents
 /agent list
 
-# 2. Load the go-expert agent
-/agent load go-expert
+# 2. Load the devops-senior agent
+/agent load devops-senior
 
 # 3. Use in agent or coder mode
-/agent create an HTTP server with graceful shutdown
-/coder refactor this code to follow best practices
+/agent configure the CI/CD pipeline with GitHub Actions
+/coder create the multi-stage Dockerfile for production
 
-# 4. Deactivate when done
+# 4. The LLM can dispatch the agent as a worker automatically:
+#    <agent_call agent="devops-senior" task="Set up CI/CD pipeline" />
+
+# 5. Deactivate when done
 /agent off
 ```
 
-When an agent is loaded, all interactions with `/agent <task>` or `/coder <task>` will automatically use the loaded agent's persona, applying its rules and specialized knowledge.
+When an agent is loaded, all interactions with `/agent <task>` or `/coder <task>` will automatically use the loaded agent's persona. Additionally, **all custom agents are registered as workers** in the orchestration system — the LLM can dispatch them via `<agent_call>` with the same ReAct loop, parallel reads, and error recovery as built-in agents.
 
 --------
 

@@ -187,7 +187,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  `CHATCLI_AGENT_PLUGIN_MAX_TURNS` - **(Opcional)** Define o máximo de turnos que o agente pode ter. Padrão: 50. Máximo: 200.
   -  `CHATCLI_AGENT_PLUGIN_TIMEOUT` - **(Opcional)** Define o tempo limite de execução para o plugin do agente (ex.: 30s, 2m, 10m). Padrão: 15 (Minutos)
 - Multi-Agent (Orquestração Paralela):
-  -  `CHATCLI_AGENT_PARALLEL_MODE`  – **(Opcional)** Ativa o modo multi-agent com orquestração paralela. Quando `true`, o LLM orquestrador pode despachar agents especialistas em paralelo para tarefas complexas. Padrão: `false`.
+  -  `CHATCLI_AGENT_PARALLEL_MODE`  – **(Opcional)** Controla o modo multi-agent com orquestração paralela. **Ativado por padrão.** Defina como `false` para desativar. Padrão: `true`.
   -  `CHATCLI_AGENT_MAX_WORKERS`  – **(Opcional)** Número máximo de workers (goroutines) executando agents simultaneamente. Padrão: `4`.
   -  `CHATCLI_AGENT_WORKER_MAX_TURNS`  – **(Opcional)** Máximo de turnos do mini ReAct loop de cada worker agent. Padrão: `10`.
   -  `CHATCLI_AGENT_WORKER_TIMEOUT`  – **(Opcional)** Timeout por worker agent individual. Aceita durações Go (ex.: 30s, 2m, 10m). Padrão: `5m`.
@@ -219,8 +219,8 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     CHATCLI_AGENT_PLUGIN_MAX_TURNS=50
     CHATCLI_AGENT_PLUGIN_TIMEOUT=20m
 
-    # Multi-Agent (Orquestração Paralela)
-    CHATCLI_AGENT_PARALLEL_MODE=false       # Ativa modo multi-agent com agents paralelos
+    # Multi-Agent (Orquestração Paralela) — ativado por padrão
+    CHATCLI_AGENT_PARALLEL_MODE=true        # Desative com false se necessário
     CHATCLI_AGENT_MAX_WORKERS=4             # Máximo de agents executando em paralelo
     CHATCLI_AGENT_WORKER_MAX_TURNS=10       # Máximo de turnos por worker agent
     CHATCLI_AGENT_WORKER_TIMEOUT=5m         # Timeout por worker agent
@@ -787,9 +787,9 @@ Você pode controlar o estilo da UI e o banner de dicas do `/coder` com env vars
 
 Esses valores aparecem em `/status` e `/config`.
 
-#### Orquestração Multi-Agent (Modo Paralelo)
+#### Orquestração Multi-Agent
 
-Quando ativado via `CHATCLI_AGENT_PARALLEL_MODE=true`, o ChatCLI transforma o modo `/coder` em um sistema multi-agent onde o LLM orquestrador despacha **agents especialistas em paralelo** para tarefas complexas.
+O ChatCLI inclui um sistema de orquestração multi-agent **ativado por padrão** nos modos `/coder` e `/agent`. O LLM orquestrador decide automaticamente quando despachar agents especialistas em paralelo para tarefas complexas.
 
 **6 Agents Especialistas Embarcados:**
 
@@ -802,11 +802,13 @@ Quando ativado via `CHATCLI_AGENT_PARALLEL_MODE=true`, o ChatCLI transforma o mo
 | **SearchAgent** | Busca no codebase | Somente leitura |
 | **PlannerAgent** | Raciocínio e decomposição de tarefas | Sem tools (puro LLM) |
 
-Cada agent possui **skills** próprias — algumas são scripts aceleradores (executam sem LLM), outras são descritivas (o agent resolve via seu mini ReAct loop). Exemplo: `batch-read` lê N arquivos em paralelo sem chamar o LLM; `run-tests` executa `go test` e parseia o resultado automaticamente.
+Cada agent possui **skills** próprias — algumas são scripts aceleradores (executam sem LLM), outras são descritivas (o agent resolve via seu mini ReAct loop).
 
-**Extensibilidade:** O sistema de Registry permite registrar e substituir agents via `Register()`/`Unregister()`, possibilitando agents customizados pelo usuário.
+**Agents Customizados como Workers:** Agents personas definidos em `~/.chatcli/agents/` são automaticamente carregados como workers no sistema de orquestração. O LLM pode despachá-los via `<agent_call agent="devops" task="..." />` com o mesmo ReAct loop, leitura paralela e recuperação de erros dos agents embarcados. O campo `tools` do frontmatter YAML define quais comandos o agent pode usar (Read→read, Grep→search, Bash→exec/test/git-*, Write→write, Edit→patch).
 
-> Documentação completa em [diillson.github.io/chatcli/docs/features/multi-agent-orchestration](https://diillson.github.io/chatcli/docs/features/multi-agent-orchestration/)
+**Estratégia de Recuperação de Erros:** Quando um agent falha, o orquestrador usa `tool_call` direto para diagnosticar e corrigir (ele já tem o contexto do erro). Após o fix, retoma `agent_call` para a próxima fase de trabalho.
+
+> Desative com `CHATCLI_AGENT_PARALLEL_MODE=false` se necessário. Documentação completa em [diillson.github.io/chatcli/docs/features/multi-agent-orchestration](https://diillson.github.io/chatcli/docs/features/multi-agent-orchestration/)
 
 ### Interação com o Agente
 
@@ -1058,6 +1060,7 @@ Um Agente pode importar múltiplas Skills, criando um *"Super System Prompt"** c
 - Versionar personas no Git
 - Compartilhar entre equipes
 - **Sincronizar com o servidor**: Ao conectar a um servidor remoto, agents e skills do servidor são descobertos automaticamente e mesclados com os locais
+- **Despachar como workers**: Agents customizados são automaticamente registrados no sistema de orquestração multi-agent e podem ser despachados via `<agent_call>` pelo LLM
 
 ### Estrutura de Arquivos
 
@@ -1067,10 +1070,15 @@ Os arquivos ficam em `~/.chatcli/`:
 ~/.chatcli/
 ├── agents/            # Arquivos de agentes (.md)
 │   ├── go-expert.md
-│   └── devops-senior.md
-└── skills/            # Arquivos de skills (.md)
-    ├── clean-code.md
-    ├── error-handling.md
+│   ├── devops-senior.md
+│   └── security-auditor.md
+└── skills/            # Arquivos de skills (.md ou diretórios V2)
+    ├── clean-code/    # Skill V2 (pacote com subskills + scripts)
+    │   ├── SKILL.md
+    │   ├── naming-rules.md
+    │   └── scripts/
+    │       └── lint_check.py
+    ├── error-handling.md  # Skill V1 (arquivo único)
     └── docker-master.md
 ```
 
@@ -1078,19 +1086,34 @@ Os arquivos ficam em `~/.chatcli/`:
 
 ```yaml
 ---
-name: "go-expert"
-description: "Especialista em Go/Golang"
+name: "devops-senior"
+description: "DevOps Senior com foco em CI/CD e infraestrutura"
+tools: Read, Grep, Glob, Bash, Write, Edit   # Define quais ferramentas o agent pode usar como worker
 skills:
   - clean-code
-  - error-handling
+  - bash-linux
+  - architecture
 plugins:
   - "@coder"
 ---
 # Personalidade Base
 
-Você é um Engenheiro de Software Sênior, especialista em Go.
-Sempre priorize simplicidade e legibilidade.
+Você é um Engenheiro DevOps Sênior, especialista em CI/CD,
+containers, infraestrutura como código e observabilidade.
 ```
+
+O campo `tools` define quais comandos o agent pode usar quando despachado como worker no sistema multi-agent:
+
+| Tool no YAML | Comando @coder |
+|--------------|----------------|
+| `Read` | `read` |
+| `Grep` | `search` |
+| `Glob` | `tree` |
+| `Bash` | `exec`, `test`, `git-*` |
+| `Write` | `write` |
+| `Edit` | `patch` |
+
+Agents sem `tools` definido são automaticamente read-only (`read`, `search`, `tree`).
 
 #### Formato da Skill
 
@@ -1102,9 +1125,11 @@ description: "Princípios de Clean Code"
 # Regras de Clean Code
 
 1. Use nomes significativos para variáveis e funções
-1. Mantenha funções pequenas (máx 20 linhas)
+2. Mantenha funções pequenas (máx 20 linhas)
 3. Evite comentários desnecessários - código deve ser autoexplicativo
 ```
+
+Skills V2 (diretórios) podem incluir subskills (.md) e scripts executáveis em `scripts/`. Os scripts são automaticamente registrados como skills executáveis no worker e podem ser invocados durante a orquestração.
 
 ### Comandos de Gerenciamento
 
@@ -1125,18 +1150,21 @@ description: "Princípios de Clean Code"
 # 1. Listar agentes disponíveis
 /agent list
 
-# 2. Carregar o agente go-expert
-/agent load go-expert
+# 2. Carregar o agente devops-senior
+/agent load devops-senior
 
 # 3. Usar no modo agente ou coder
-/agent crie um servidor HTTP com graceful shutdown
-/coder refatore esse código para seguir as best practices
+/agent configure o pipeline CI/CD com GitHub Actions
+/coder crie o Dockerfile multi-stage para produção
 
-# 4. Desativar quando terminar
+# 4. O LLM pode despachar o agent como worker automaticamente:
+#    <agent_call agent="devops-senior" task="Set up CI/CD pipeline" />
+
+# 5. Desativar quando terminar
 /agent off
 ```
 
-Ao carregar um agente, todas as interações com `/agent <tarefa>` ou `/coder <tarefa>` utilizarão automaticamente a persona do agente carregado, aplicando suas regras e conhecimentos especializados.
+Ao carregar um agente, todas as interações com `/agent <tarefa>` ou `/coder <tarefa>` utilizarão automaticamente a persona do agente carregado. Além disso, **todos os agents customizados são registrados como workers** no sistema de orquestração — o LLM pode despachá-los via `<agent_call>` com o mesmo ReAct loop, leitura paralela e recuperação de erros dos agents embarcados.
 
 --------
 

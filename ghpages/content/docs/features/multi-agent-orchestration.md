@@ -2,21 +2,21 @@
 title = "Orquestração Multi-Agent"
 linkTitle = "Multi-Agent"
 weight = 42
-description = "Sistema multi-agent com 6 agents especialistas que trabalham em paralelo, cada um com skills próprias e scripts aceleradores, orquestrados automaticamente pelo LLM."
+description = "Sistema multi-agent com agents especialistas embarcados + agents customizados que trabalham em paralelo, cada um com skills próprias e scripts aceleradores, orquestrados automaticamente pelo LLM."
 icon = "hub"
 +++
 
-O **modo Multi-Agent** transforma o `/coder` em um sistema de orquestração onde o LLM despacha **agents especialistas em paralelo** para resolver tarefas complexas de forma mais rápida e eficiente.
+O **modo Multi-Agent** transforma o `/coder` e o `/agent` em um sistema de orquestração onde o LLM despacha **agents especialistas em paralelo** para resolver tarefas complexas de forma mais rápida e eficiente.
 
 ## Ativação
 
-O modo multi-agent é **desativado por padrão** — quando desativado, o `/coder` funciona exatamente como antes, sem nenhum impacto.
-
-Para ativar, defina a variável de ambiente:
+O modo multi-agent é **ativado por padrão**. Para desativá-lo, defina:
 
 ```bash
-CHATCLI_AGENT_PARALLEL_MODE=true
+CHATCLI_AGENT_PARALLEL_MODE=false
 ```
+
+Quando desativado, o `/coder` e o `/agent` funcionam exatamente como antes — sem nenhum impacto.
 
 ---
 
@@ -28,11 +28,12 @@ User Query
     ▼
 AgentMode (ReAct loop existente)
     │
-    ▼  (LLM responde com <agent_call> tags)
+    ▼  (LLM responde com <agent_call> ou <tool_call> tags)
 Dispatcher (fan-out via semaphore)
     │
     ├── FileAgent      ├── CoderAgent     ├── ShellAgent
-    ├── GitAgent       ├── SearchAgent    └── PlannerAgent
+    ├── GitAgent       ├── SearchAgent    ├── PlannerAgent
+    └── CustomAgent(s)  (devops, security-auditor, etc.)
     │
     ▼
 Results Aggregator → Feedback para o LLM orquestrador
@@ -43,13 +44,36 @@ O LLM orquestrador recebe um **catálogo de agents** no system prompt e aprende 
 ```xml
 <agent_call agent="file" task="Read all .go files in pkg/coder/engine/" />
 <agent_call agent="coder" task="Add Close method to Engine struct" />
+<agent_call agent="devops" task="Configure CI/CD pipeline with GitHub Actions" />
 ```
 
 Múltiplas tags `<agent_call>` na mesma resposta = **execução paralela**.
 
 ---
 
-## Os 6 Agents Especialistas
+## Dois Modos de Execução
+
+O orquestrador possui dois mecanismos de execução, escolhendo o mais adequado por contexto:
+
+| Modo | Sintaxe | Quando Usar |
+|------|---------|-------------|
+| **agent_call** | `<agent_call agent="..." task="..." />` | Novas fases de trabalho, tarefas paralelas, leitura exploratória, refatoração multi-arquivo |
+| **tool_call** | `<tool_call name="@coder" args="..." />` | Fixes rápidos, diagnóstico de erros, patches pontuais, validação pós-agent |
+
+### Guia de Decisão
+
+| Situação | Modo |
+|----------|------|
+| Ler múltiplos arquivos + buscar referências | `agent_call` (file + search em paralelo) |
+| Corrigir um erro de compilação | `tool_call` (patch direto) |
+| Escrever novo módulo + testes | `agent_call` (coder + shell) |
+| Verificar resultado de um agent | `tool_call` (read/exec rápido) |
+| Fix após falha de agent | `tool_call` (diagnóstico preciso) |
+| Retomar após fix aplicado | `agent_call` (próxima fase) |
+
+---
+
+## Agents Especialistas Embarcados
 
 ### FileAgent (Leitura e Análise)
 - **Acesso:** Somente leitura (`read`, `tree`, `search`)
@@ -98,6 +122,62 @@ Múltiplas tags `<agent_call>` na mesma resposta = **execução paralela**.
 
 ---
 
+## Agents Customizados como Workers
+
+Agents personas definidos em `~/.chatcli/agents/` são **automaticamente carregados** como workers no sistema de orquestração ao iniciar o `/coder` ou `/agent`. O LLM pode despachá-los via `<agent_call>` com o **mesmo ReAct loop**, leitura paralela e recuperação de erros dos agents embarcados.
+
+### Como Funciona
+
+1. Ao iniciar o modo multi-agent, o sistema escaneia `~/.chatcli/agents/`
+2. Para cada agent encontrado, cria um `CustomAgent` que implementa a interface `WorkerAgent`
+3. O campo `tools` do frontmatter YAML define quais comandos o agent pode usar
+4. Skills associadas são carregadas e incluídas no system prompt do worker
+5. O agent aparece no catálogo do orquestrador e pode ser despachado
+
+### Mapeamento de Tools
+
+O campo `tools` do YAML frontmatter mapeia ferramentas estilo Claude Code para subcomandos do @coder:
+
+| Tool no YAML | Comando(s) @coder | Descrição |
+|--------------|-------------------|-----------|
+| `Read` | `read` | Ler conteúdo de arquivos |
+| `Grep` | `search` | Buscar padrões em arquivos |
+| `Glob` | `tree` | Listar diretórios |
+| `Bash` | `exec`, `test`, `git-status`, `git-diff`, `git-log`, `git-changed`, `git-branch` | Execução e operações git |
+| `Write` | `write` | Criar/sobrescrever arquivos |
+| `Edit` | `patch` | Edição precisa (search/replace) |
+
+### Exemplo de Agent Customizado
+
+```yaml
+---
+name: "security-auditor"
+description: "Especialista em segurança com foco em OWASP Top 10"
+tools: Read, Grep, Glob
+skills:
+  - owasp-rules
+  - compliance
+---
+# Personalidade Base
+
+Você é um Security Auditor especialista. Analise código buscando
+vulnerabilidades OWASP Top 10, injection, XSS, e más práticas.
+```
+
+Este agent será **somente leitura** (apenas Read/Grep/Glob) e o LLM poderá despachá-lo assim:
+
+```xml
+<agent_call agent="security-auditor" task="Audit the authentication module for OWASP vulnerabilities" />
+```
+
+### Regras de Proteção
+
+- **Names reservados**: Os 6 nomes de agents embarcados (file, coder, shell, git, search, planner) são protegidos e não podem ser sobrescritos por agents customizados
+- **Sem tools = read-only**: Agents sem campo `tools` recebem automaticamente `read`, `search`, `tree` e são marcados como read-only
+- **Duplicatas ignoradas**: Se dois agents tiverem o mesmo nome, apenas o primeiro é registrado
+
+---
+
 ## Skills: Scripts vs Descritivas
 
 Cada agent possui dois tipos de skills:
@@ -122,13 +202,60 @@ find-dead-code → Análise de código não utilizado
 create-plan    → Plano estruturado de execução
 ```
 
+### Skills V2 (Pacotes)
+
+Skills V2 são diretórios contendo:
+- `SKILL.md` — Conteúdo principal com frontmatter
+- Subskills (`.md`) — Documentos de conhecimento adicional
+- `scripts/` — Scripts executáveis registrados automaticamente no worker
+
+```
+skills/
+└── clean-code/
+    ├── SKILL.md            # Conteúdo principal
+    ├── naming-rules.md     # Subskill: regras de nomenclatura
+    ├── formatting.md       # Subskill: regras de formatação
+    └── scripts/
+        └── lint_check.py   # Script executável (registrado como skill)
+```
+
+O worker pode ler subskills com o comando `read` e executar scripts com `exec` durante sua operação autônoma.
+
+---
+
+## Estratégia de Recuperação de Erros
+
+Quando um `agent_call` **falha**, o orquestrador segue um protocolo de recuperação inteligente:
+
+1. **Diagnóstico via tool_call**: Usa `tool_call` direto para ler arquivos relevantes e entender o erro (já tem o contexto)
+2. **Fix via tool_call**: Patches, correções de arquivo e retentativas são mais rápidos e seguros via `tool_call`
+3. **Retoma via agent_call**: Após fix aplicado e verificado, retoma usando `agent_call` para a próxima fase
+
+**Regra chave**: Recuperação de erros = `tool_call` (rápido, preciso). Novas fases de trabalho = `agent_call` (paralelo, escalável).
+
+```
+agent_call → FALHA
+    │
+    ▼
+tool_call: read (diagnosticar o erro)
+    │
+    ▼
+tool_call: patch (aplicar fix)
+    │
+    ▼
+tool_call: exec (verificar fix)
+    │
+    ▼
+agent_call → PRÓXIMA FASE (sucesso)
+```
+
 ---
 
 ## Configuração
 
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
-| `CHATCLI_AGENT_PARALLEL_MODE` | `false` | Ativa o modo multi-agent |
+| `CHATCLI_AGENT_PARALLEL_MODE` | `true` | Ativa/desativa o modo multi-agent |
 | `CHATCLI_AGENT_MAX_WORKERS` | `4` | Máximo de goroutines simultâneas |
 | `CHATCLI_AGENT_WORKER_MAX_TURNS` | `10` | Máximo de turnos por worker |
 | `CHATCLI_AGENT_WORKER_TIMEOUT` | `5m` | Timeout por worker |
@@ -137,7 +264,7 @@ create-plan    → Plano estruturado de execução
 
 ```bash
 # Multi-Agent (Orquestração Paralela)
-CHATCLI_AGENT_PARALLEL_MODE=true
+CHATCLI_AGENT_PARALLEL_MODE=true    # Desative com false se necessário
 CHATCLI_AGENT_MAX_WORKERS=4
 CHATCLI_AGENT_WORKER_MAX_TURNS=10
 CHATCLI_AGENT_WORKER_TIMEOUT=5m
@@ -158,12 +285,12 @@ O sistema implementa múltiplas camadas de proteção contra condições de corr
 
 ---
 
-## Extensibilidade (Agents Customizados)
+## Extensibilidade Programática
 
-O sistema de Registry permite que usuários registrem seus próprios agents:
+Além dos agents customizados via persona (carregados automaticamente), o sistema de Registry permite extensão programática:
 
 ```go
-// Registrar um agent customizado
+// Registrar um agent customizado via código
 registry.Register(myCustomAgent)
 
 // Substituir um agent builtin
@@ -208,14 +335,16 @@ type WorkerAgent interface {
 
 6. Após escrita, despacha ShellAgent para rodar testes
 
-7. Orquestrador valida resultado final e reporta ao usuário
+7. Se testes falharem → tool_call para diagnóstico e fix rápido
+
+8. Orquestrador valida resultado final e reporta ao usuário
 ```
 
 ---
 
 ## Compatibilidade
 
-- `CHATCLI_AGENT_PARALLEL_MODE=false` (padrão): **tudo funciona exatamente como antes**
+- `CHATCLI_AGENT_PARALLEL_MODE=false`: **tudo funciona exatamente como antes**
 - Tags `<tool_call>` continuam funcionando mesmo com parallel mode ativo
 - Nenhuma assinatura de função existente foi alterada
 - O package `cli/agent/workers/` é completamente isolado e não impacta funcionalidades existentes
