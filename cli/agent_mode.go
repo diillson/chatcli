@@ -50,10 +50,11 @@ type AgentMode struct {
 	isCoderMode         bool
 	isOneShot           bool
 	coderBannerShown    bool
-	lastPolicyMatch     *coder.Rule
+	lastPolicyMatch *coder.Rule
 	// Métricas
-	tokenCounter *metrics.TokenCounter
-	turnTimer    *metrics.Timer
+	turnTimer        *metrics.Timer
+	agentsLaunched   int // total de sub-agents lançados na sessão
+	toolCallsExecd   int // total de tool calls executadas na sessão
 	// Multi-Agent Orchestration
 	agentDispatcher *workers.Dispatcher
 	agentRegistry   *workers.Registry
@@ -116,17 +117,6 @@ func resolveEditor() (string, error) {
 
 // NewAgentMode cria uma nova instância do modo agente
 func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
-	// Obtém o nome do modelo para inicializar o contador de tokens
-	modelName := ""
-	provider := ""
-	override := 0
-	if cli != nil && cli.Client != nil {
-		modelName = cli.Client.GetModelName()
-		provider = cli.Provider
-		effectiveLimit := cli.getMaxTokensForCurrentLLM()
-		override = effectiveLimit
-	}
-
 	a := &AgentMode{
 		cli:            cli,
 		logger:         logger,
@@ -134,7 +124,6 @@ func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 		validator:      agent.NewCommandValidator(logger),
 		contextManager: agent.NewContextManager(logger),
 		taskTracker:    agent.NewTaskTracker(logger),
-		tokenCounter:   metrics.NewTokenCounter(provider, modelName, override),
 		turnTimer:      metrics.NewTimer(),
 	}
 	a.executeCommandsFunc = a.executeCommandsWithOutput
@@ -268,8 +257,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// Adiciona contexto de ferramentas (plugins) ao prompt
 	systemInstruction += a.getToolContextString()
 
-	// Multi-Agent Orchestration: initialize if parallel mode is enabled
-	if a.initMultiAgentIfEnabled() {
+	// Multi-Agent Orchestration: sempre ativo nos modos /agent e /coder.
+	// A env CHATCLI_AGENT_PARALLEL_MODE pode desativar explicitamente (=false ou =0).
+	if a.initMultiAgent() {
 		systemInstruction += workers.OrchestratorSystemPrompt(a.agentRegistry.CatalogString())
 	}
 
@@ -1707,23 +1697,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Para o timer e obtém a duração
 		turnDuration := a.turnTimer.Stop()
 		fmt.Print(metrics.ClearLine()) // Limpa a linha do timer
-
-		// Contabiliza tokens (estimativa)
-		var promptText string
-		for _, msg := range turnHistory {
-			promptText += msg.Content
-		}
-		a.tokenCounter.AddTurn(promptText, aiResponse)
-
-		// Exibe métricas do turno
 		fmt.Println()
-		fmt.Println(metrics.FormatTurnInfo(turn+1, maxTurns, turnDuration, a.tokenCounter))
 
-		// Alerta se estiver próximo do limite
-		if a.tokenCounter.IsCritical() {
-			fmt.Println(metrics.FormatWarning("Atenção: Janela de contexto acima de 90%! Considere iniciar uma nova sessão."))
-		} else if a.tokenCounter.IsNearLimit() {
-			fmt.Println(metrics.FormatWarning("Janela de contexto acima de 70%."))
+		// Helper para exibir métricas ao final do turno (após execução)
+		showTurnStats := func() {
+			fmt.Println(metrics.FormatTurnInfo(turn+1, maxTurns, turnDuration, &metrics.TurnStats{
+				AgentsLaunched: a.agentsLaunched,
+				ToolCallsExecd: a.toolCallsExecd,
+			}))
 		}
 
 		if err != nil {
@@ -1762,6 +1743,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		remaining = stripXMLTagBlock(remaining, "reasoning")
 		remaining = stripXMLTagBlock(remaining, "explanation")
 		remaining = stripXMLTagBlock(remaining, "final_summary")
+		remaining = stripAgentCallTags(remaining)
 		remaining = strings.TrimSpace(removeXMLTags(remaining))
 
 		coderMinimal := a.isCoderMode && isCoderMinimalUI()
@@ -1784,17 +1766,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
 			}
 		}
-		// Renderizar progresso das tarefas (somente no modo /coder)
-		if a.isCoderMode && a.taskTracker != nil && a.taskTracker.GetPlan() != nil {
+		// Helper para renderizar progresso atualizado do plano
+		renderPlanProgress := func() {
+			if !a.isCoderMode || a.taskTracker == nil || a.taskTracker.GetPlan() == nil {
+				return
+			}
 			progress := a.taskTracker.FormatProgress()
-			if strings.TrimSpace(progress) != "" {
-				if coderMinimal {
-					renderer.RenderTimelineEvent("🧩", "STATUS", compactText(progress, 2, 220), agent.ColorLime)
-				} else {
-					renderMDCard("🧩", "PLANO DE AÇÃO", progress, agent.ColorLime)
-				}
+			if strings.TrimSpace(progress) == "" {
+				return
+			}
+			if coderMinimal {
+				renderer.RenderTimelineEvent("🧩", "STATUS", compactText(progress, 2, 220), agent.ColorLime)
+			} else {
+				renderMDCard("🧩", "PLANO DE AÇÃO", progress, agent.ColorLime)
 			}
 		}
+
+		// Renderizar progresso inicial das tarefas (somente no modo /coder)
+		renderPlanProgress()
 		if strings.TrimSpace(remaining) != "" {
 			if coderMinimal {
 				renderer.RenderTimelineEvent("💬", "RESUMO", compactText(remaining, 2, 220), agent.ColorGray)
@@ -1849,28 +1838,75 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			agentCalls, _ := workers.ParseAgentCalls(aiResponse)
 			if len(agentCalls) > 0 {
 				coderMinUI := a.isCoderMode && isCoderMinimalUI()
+				n := len(agentCalls)
+				agentWord := "agent"
+				if n > 1 {
+					agentWord = "agents"
+				}
 				if coderMinUI {
-					renderer.RenderTimelineEvent("🚀", "AGENTS", fmt.Sprintf("%d agents dispatched", len(agentCalls)), agent.ColorPurple)
+					renderer.RenderTimelineEvent("🚀", "AGENTS", fmt.Sprintf("%d %s dispatched", n, agentWord), agent.ColorPurple)
 				} else {
-					renderer.RenderTimelineEvent("🚀", "MULTI-AGENT DISPATCH", fmt.Sprintf("Dispatching %d specialized agents in parallel", len(agentCalls)), agent.ColorPurple)
+					renderer.RenderTimelineEvent("🚀", "MULTI-AGENT DISPATCH", fmt.Sprintf("Dispatching %d %s", n, agentWord), agent.ColorPurple)
 				}
 
 				for i, ac := range agentCalls {
 					renderer.RenderTimelineEvent("🤖", fmt.Sprintf("[%s] #%d", ac.Agent, i+1), truncateForUI(ac.Task, 120), agent.ColorCyan)
 				}
 
-				// Dispatch and collect results
+				// Dispatch with spinner feedback
+				a.agentsLaunched += len(agentCalls)
+				agentLabel := fmt.Sprintf("Aguardando %d %s...", n, agentWord)
+				a.turnTimer.Start(ctx, func(d time.Duration) {
+					fmt.Print(metrics.FormatTimerStatus(d, modelName, agentLabel))
+				})
 				agentResults := a.agentDispatcher.Dispatch(ctx, agentCalls)
+				a.turnTimer.Stop()
+				fmt.Print(metrics.ClearLine())
 
-				// Render results
+				// Render results and count internal tool calls
+				totalAgentToolCalls := 0
+				totalParallelCalls := 0
+				successCount := 0
+				var totalDuration time.Duration
 				for _, ar := range agentResults {
+					tcCount := len(ar.ToolCalls)
+					totalAgentToolCalls += tcCount
+					totalParallelCalls += ar.ParallelCalls
+					totalDuration += ar.Duration
 					if ar.Error != nil {
 						renderer.RenderTimelineEvent("❌", fmt.Sprintf("[%s] FAILED", ar.Agent), ar.Error.Error(), agent.ColorYellow)
 					} else {
+						successCount++
 						summary := truncateForUI(ar.Output, 200)
-						renderer.RenderTimelineEvent("✅", fmt.Sprintf("[%s] OK (%s)", ar.Agent, ar.Duration.Round(time.Millisecond)), summary, agent.ColorGreen)
+						// Mostra info de paralelismo quando houver
+						parallelInfo := ""
+						if ar.ParallelCalls > 1 {
+							parallelInfo = fmt.Sprintf(", %d em paralelo", ar.ParallelCalls)
+						}
+						tcLabel := "tool call"
+						if tcCount != 1 {
+							tcLabel = "tool calls"
+						}
+						title := fmt.Sprintf("[%s] OK (%s, %d %s%s)", ar.Agent, ar.Duration.Round(time.Millisecond), tcCount, tcLabel, parallelInfo)
+						renderer.RenderTimelineEvent("✅", title, summary, agent.ColorGreen)
 					}
 				}
+				a.toolCallsExecd += totalAgentToolCalls
+
+				// Resumo compacto do dispatch
+				tcWord := "tool calls"
+				if totalAgentToolCalls == 1 {
+					tcWord = "tool call"
+				}
+				parallelSuffix := ""
+				if totalParallelCalls > 1 {
+					parallelSuffix = fmt.Sprintf(" | %d goroutines paralelas", totalParallelCalls)
+				}
+				renderer.RenderTimelineEvent("📊", "RESUMO",
+					fmt.Sprintf("%d/%d %s concluidos | %d %s executadas%s | %s total",
+						successCount, n, agentWord, totalAgentToolCalls, tcWord,
+						parallelSuffix, totalDuration.Round(time.Millisecond)),
+					agent.ColorGray)
 
 				// Inject results as feedback for the orchestrator
 				feedback := workers.FormatResults(agentResults)
@@ -1881,6 +1917,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				if len(toolCalls) > 0 {
 					a.logger.Info("Skipping tool_calls because agent_calls were dispatched in this turn")
 				}
+				showTurnStats()
 				continue
 			}
 		}
@@ -2129,12 +2166,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					renderer.RenderToolResult(displayForHuman, execErr != nil)
 				}
 
-				// Atualiza status da tarefa
+				// Atualiza status da tarefa e re-renderiza plano
 				if execErr != nil {
 					agent.MarkTaskFailed(a.taskTracker, execErr.Error())
 				} else {
 					agent.MarkTaskCompleted(a.taskTracker)
 				}
+				renderPlanProgress()
 
 				// Acumula o resultado para a LLM
 				batchOutputBuilder.WriteString(fmt.Sprintf("--- Resultado da Ação %d (%s) ---\n", i+1, toolName))
@@ -2157,6 +2195,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					batchOutputBuilder.WriteString(toolOutput)
 					batchOutputBuilder.WriteString("\n\n")
 					successCount++
+					a.toolCallsExecd++
 				}
 			}
 
@@ -2182,6 +2221,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
+			showTurnStats()
 			continue
 		}
 
@@ -2217,6 +2257,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// ==========================================
 		// PRIORIDADE 3: RESPOSTA FINAL (sem ações)
 		// ==========================================
+		showTurnStats()
 		fmt.Println(renderer.Colorize("\n🏁 TAREFA CONCLUÍDA", agent.ColorGreen+agent.ColorBold))
 		return nil
 	}
@@ -3143,6 +3184,13 @@ func extractXMLTagContent(s, tag string) (string, bool) {
 	return strings.TrimSpace(m[1]), true
 }
 
+// stripAgentCallTags remove tags <agent_call .../> e <agent_call ...>...</agent_call> do texto.
+var agentCallTagRe = regexp.MustCompile(`(?is)<agent_call\b[^>]*/\s*>|<agent_call\b[^>]*>.*?</agent_call>`)
+
+func stripAgentCallTags(s string) string {
+	return agentCallTagRe.ReplaceAllString(s, "")
+}
+
 // stripXMLTagBlock remove completamente o bloco <tag>...</tag> do texto.
 func stripXMLTagBlock(s, tag string) string {
 	pat := fmt.Sprintf(`(?is)<%s>\s*.*?\s*</%s>`, regexp.QuoteMeta(tag), regexp.QuoteMeta(tag))
@@ -3444,11 +3492,11 @@ func buildCoderSingleLineArgsEnforcementPrompt(originalArgs string) string {
 // MULTI-AGENT ORCHESTRATION HELPERS
 // =========================================================
 
-// initMultiAgentIfEnabled initializes the multi-agent system if
-// CHATCLI_AGENT_PARALLEL_MODE=true. Returns true if enabled.
-func (a *AgentMode) initMultiAgentIfEnabled() bool {
-	modeStr := os.Getenv("CHATCLI_AGENT_PARALLEL_MODE")
-	if modeStr != "true" && modeStr != "1" {
+// initMultiAgent initializes the multi-agent orchestration system.
+// Enabled by default; set CHATCLI_AGENT_PARALLEL_MODE=false or =0 to disable.
+func (a *AgentMode) initMultiAgent() bool {
+	modeStr := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_AGENT_PARALLEL_MODE")))
+	if modeStr == "false" || modeStr == "0" {
 		a.parallelMode = false
 		return false
 	}
@@ -3460,6 +3508,17 @@ func (a *AgentMode) initMultiAgentIfEnabled() bool {
 	}
 
 	a.agentRegistry = workers.SetupDefaultRegistry()
+
+	// Load custom persona agents into the worker registry
+	if a.cli.personaHandler != nil {
+		mgr := a.cli.personaHandler.GetManager()
+		if customCount := workers.LoadCustomAgents(a.agentRegistry, mgr, a.logger); customCount > 0 {
+			a.logger.Info("Custom persona agents loaded as workers",
+				zap.Int("count", customCount),
+			)
+		}
+	}
+
 	a.fileLockMgr = workers.NewFileLockManager()
 
 	maxWorkersStr := os.Getenv("CHATCLI_AGENT_MAX_WORKERS")

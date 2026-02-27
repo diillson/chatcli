@@ -180,7 +180,7 @@ func (b *Builder) appendSkillResources(parts *[]string, skill *Skill) {
 
 			for _, name := range keys {
 				absPath := skill.Scripts[name]
-				cmd := inferExecutionCommand(name, absPath)
+				cmd := InferExecutionCommand(name, absPath)
 				*parts = append(*parts, fmt.Sprintf("- Script: \"%s\"", name))
 				*parts = append(*parts, fmt.Sprintf("  Exec: `%s`", cmd))
 			}
@@ -220,7 +220,7 @@ func (b *Builder) ValidateAgent(agentName string) ([]string, []string, error) {
 }
 
 // inferExecutionCommand guesses the best command to run a script based on extension
-func inferExecutionCommand(scriptName, absPath string) string {
+func InferExecutionCommand(scriptName, absPath string) string {
 	lower := strings.ToLower(scriptName)
 
 	// Escape path just in case it has spaces (though simplified here)

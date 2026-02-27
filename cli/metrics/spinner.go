@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - CLI metrics
+ * Copyright (c) 2024 Edilson Freitas
+ * License: MIT
+ */
 package metrics
 
 import (
