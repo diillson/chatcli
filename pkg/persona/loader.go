@@ -55,35 +55,55 @@ func (l *Loader) SetProjectDir(dir string) {
 	}
 }
 
-// ListAgents returns all available agents scanning global directory
+// ListAgents returns all available agents scanning both project-local and global directories.
+// Priority: Project Local (.agent/agents/) > Global (~/.chatcli/agents/)
 func (l *Loader) ListAgents() ([]*Agent, error) {
 	var agents []*Agent
+	seen := make(map[string]bool)
 
-	// Ensure directory exists
-	if _, err := os.Stat(l.agentsDir); os.IsNotExist(err) {
-		return agents, nil // No agents yet
-	}
-
-	entries, err := os.ReadDir(l.agentsDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read agents directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
+	scanDir := func(basePath string) {
+		if _, err := os.Stat(basePath); os.IsNotExist(err) {
+			return
 		}
 
-		path := filepath.Join(l.agentsDir, entry.Name())
-		agent, err := l.loadAgentFile(path)
+		entries, err := os.ReadDir(basePath)
 		if err != nil {
-			l.logger.Warn("Failed to load agent file, skipping",
-				zap.String("path", path),
-				zap.Error(err))
-			continue
+			l.logger.Warn("Failed to read agents directory", zap.String("path", basePath), zap.Error(err))
+			return
 		}
-		agents = append(agents, agent)
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+
+			path := filepath.Join(basePath, entry.Name())
+			agent, err := l.loadAgentFile(path)
+			if err != nil {
+				l.logger.Warn("Failed to load agent file, skipping",
+					zap.String("path", path),
+					zap.Error(err))
+				continue
+			}
+
+			// Skip if already loaded (Project overrides Global)
+			if seen[agent.Name] {
+				continue
+			}
+
+			agents = append(agents, agent)
+			seen[agent.Name] = true
+		}
 	}
+
+	// 1. Load from project directory first (higher priority)
+	if l.projectDir != "" {
+		projectAgentsDir := filepath.Join(l.projectDir, ".agent", "agents")
+		scanDir(projectAgentsDir)
+	}
+
+	// 2. Load from global directory
+	scanDir(l.agentsDir)
 
 	return agents, nil
 }
@@ -148,28 +168,57 @@ func (l *Loader) ListSkills() ([]*Skill, error) {
 	return skills, nil
 }
 
-// GetAgent returns an agent by name
+// GetAgent returns an agent by name.
+// It prioritizes:
+// 1. Project-local agent file (.agent/agents/{name}.md)
+// 2. Project-local agent by metadata search
+// 3. Global agent file (~/.chatcli/agents/{name}.md)
+// 4. Global agent by metadata search
 func (l *Loader) GetAgent(name string) (*Agent, error) {
-	// Try exact filename first at global path
-	path := filepath.Join(l.agentsDir, name+".md")
-	if _, err := os.Stat(path); err == nil {
-		return l.loadAgentFile(path)
+	checkLocation := func(basePath string) (*Agent, error) {
+		// Try exact filename first
+		path := filepath.Join(basePath, name+".md")
+		if _, err := os.Stat(path); err == nil {
+			return l.loadAgentFile(path)
+		}
+
+		// Fallback: scan directory for matching metadata name
+		if _, err := os.Stat(basePath); os.IsNotExist(err) {
+			return nil, os.ErrNotExist
+		}
+		entries, err := os.ReadDir(basePath)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+			agent, err := l.loadAgentFile(filepath.Join(basePath, entry.Name()))
+			if err != nil {
+				continue
+			}
+			if strings.EqualFold(agent.Name, name) {
+				return agent, nil
+			}
+		}
+		return nil, os.ErrNotExist
 	}
 
-	// Fallback: Search by "name" metadata inside files
-	// This is slower but useful if filename != agent name
-	agents, err := l.ListAgents()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, a := range agents {
-		if strings.EqualFold(a.Name, name) {
-			return a, nil
+	// 1. Check project directory
+	if l.projectDir != "" {
+		projectAgentsDir := filepath.Join(l.projectDir, ".agent", "agents")
+		if agent, err := checkLocation(projectAgentsDir); err == nil {
+			return agent, nil
 		}
 	}
 
-	return nil, fmt.Errorf("agent not found: %s", name)
+	// 2. Check global directory
+	if agent, err := checkLocation(l.agentsDir); err == nil {
+		return agent, nil
+	}
+
+	return nil, fmt.Errorf("agent not found: %s (checked local and global)", name)
 }
 
 // GetSkill locates and loads a skill by name.

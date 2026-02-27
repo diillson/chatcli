@@ -1064,23 +1064,31 @@ Um Agente pode importar múltiplas Skills, criando um *"Super System Prompt"** c
 
 ### Estrutura de Arquivos
 
-Os arquivos ficam em `~/.chatcli/`:
+Agents e skills são buscados em dois níveis com **precedência do projeto sobre o global**:
 
 ```
-~/.chatcli/
-├── agents/            # Arquivos de agentes (.md)
+~/.chatcli/                    # Global (fallback)
+├── agents/
 │   ├── go-expert.md
-│   ├── devops-senior.md
-│   └── security-auditor.md
-└── skills/            # Arquivos de skills (.md ou diretórios V2)
-    ├── clean-code/    # Skill V2 (pacote com subskills + scripts)
+│   └── devops-senior.md
+└── skills/
+    ├── clean-code/            # Skill V2 (pacote)
     │   ├── SKILL.md
-    │   ├── naming-rules.md
     │   └── scripts/
     │       └── lint_check.py
-    ├── error-handling.md  # Skill V1 (arquivo único)
+    ├── error-handling.md      # Skill V1
     └── docker-master.md
+
+meu-projeto/                   # Projeto (prioridade)
+├── .agent/
+│   ├── agents/
+│   │   └── backend.md         # Sobrescreve global se mesmo nome
+│   └── skills/
+│       └── team-rules.md
+└── ...
 ```
+
+O ChatCLI detecta a raiz do projeto buscando `.agent/` ou `.git/` a partir do diretório atual.
 
 #### Formato do Agente
 
