@@ -30,14 +30,14 @@ type AgentCall struct {
 
 // AgentResult is the output of a single agent execution.
 type AgentResult struct {
-	CallID         string
-	Agent          AgentType
-	Task           string
-	Output         string
-	Error          error
-	Duration       time.Duration
-	ToolCalls      []ToolCallRecord
-	ParallelCalls  int // number of tool calls that ran in parallel (0 = sequential)
+	CallID        string
+	Agent         AgentType
+	Task          string
+	Output        string
+	Error         error
+	Duration      time.Duration
+	ToolCalls     []ToolCallRecord
+	ParallelCalls int // number of tool calls that ran in parallel (0 = sequential)
 }
 
 // ToolCallRecord logs a tool call executed by a worker.

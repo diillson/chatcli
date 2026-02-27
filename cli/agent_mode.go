@@ -50,11 +50,11 @@ type AgentMode struct {
 	isCoderMode         bool
 	isOneShot           bool
 	coderBannerShown    bool
-	lastPolicyMatch *coder.Rule
+	lastPolicyMatch     *coder.Rule
 	// Métricas
-	turnTimer        *metrics.Timer
-	agentsLaunched   int // total de sub-agents lançados na sessão
-	toolCallsExecd   int // total de tool calls executadas na sessão
+	turnTimer      *metrics.Timer
+	agentsLaunched int // total de sub-agents lançados na sessão
+	toolCallsExecd int // total de tool calls executadas na sessão
 	// Multi-Agent Orchestration
 	agentDispatcher *workers.Dispatcher
 	agentRegistry   *workers.Registry
