@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.62.0](https://github.com/diillson/chatcli/compare/v1.61.0...v1.62.0) (2026-02-27)
+
+
+### Features
+
+* **agent:** custom persona agents as dispatchable workers + orchestration improvements ([#578](https://github.com/diillson/chatcli/issues/578)) ([a2cc35a](https://github.com/diillson/chatcli/commit/a2cc35a4ab48d85bf09154fe3641074c4da2a58d))
+
 ## [1.61.0](https://github.com/diillson/chatcli/compare/v1.60.0...v1.61.0) (2026-02-25)
 
 
