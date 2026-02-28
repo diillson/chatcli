@@ -77,7 +77,7 @@ func (a *CustomAgent) Execute(ctx context.Context, task string, deps *WorkerDeps
 		AllowedCommands: a.commands,
 		ReadOnly:        a.readOnly,
 	}
-	result, err := RunWorkerReAct(ctx, config, task, deps.LLMClient, deps.LockMgr, a.skills, deps.Logger)
+	result, err := RunWorkerReAct(ctx, config, task, deps.LLMClient, deps.LockMgr, a.skills, deps.PolicyChecker, deps.Logger)
 	if result != nil {
 		result.Agent = a.agentType
 		result.Task = task

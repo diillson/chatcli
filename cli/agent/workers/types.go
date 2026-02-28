@@ -74,9 +74,32 @@ type WorkerAgent interface {
 	Execute(ctx context.Context, task string, deps *WorkerDeps) (*AgentResult, error)
 }
 
+// PolicyChecker abstracts security policy enforcement for worker tool calls.
+// Implementations must be safe for concurrent use from multiple goroutines.
+// When a policy action is "ask", the implementation serializes interactive
+// prompts so only one worker blocks on stdin at a time.
+type PolicyChecker interface {
+	// CheckAndPrompt checks the policy for a tool call. If the policy requires
+	// user confirmation ("ask"), it prompts the user interactively (serialized
+	// across goroutines). Returns (true, "") if allowed, or (false, message)
+	// if denied/blocked.
+	CheckAndPrompt(ctx context.Context, toolName, args string) (allowed bool, message string)
+}
+
+// Context keys for passing agent metadata through context.Context.
+type ctxKey string
+
+const (
+	// CtxKeyAgentName carries the agent type name (e.g., "shell", "coder").
+	CtxKeyAgentName ctxKey = "agent_name"
+	// CtxKeyAgentTask carries the natural language task description.
+	CtxKeyAgentTask ctxKey = "agent_task"
+)
+
 // WorkerDeps holds dependencies injected into each worker at execution time.
 type WorkerDeps struct {
-	LLMClient client.LLMClient
-	LockMgr   *FileLockManager
-	Logger    *zap.Logger
+	LLMClient     client.LLMClient
+	LockMgr       *FileLockManager
+	PolicyChecker PolicyChecker // nil = no policy enforcement (all commands allowed)
+	Logger        *zap.Logger
 }

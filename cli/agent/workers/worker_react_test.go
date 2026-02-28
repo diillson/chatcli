@@ -22,7 +22,7 @@ func TestRunWorkerReAct_SingleTurnNoTools(t *testing.T) {
 		ReadOnly:        true,
 	}
 
-	result, err := RunWorkerReAct(context.Background(), config, "do something", client, nil, NewSkillSet(), logger)
+	result, err := RunWorkerReAct(context.Background(), config, "do something", client, nil, NewSkillSet(), nil, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestRunWorkerReAct_DefaultMaxTurns(t *testing.T) {
 		SystemPrompt: "test",
 	}
 
-	result, err := RunWorkerReAct(context.Background(), config, "task", client, nil, NewSkillSet(), logger)
+	result, err := RunWorkerReAct(context.Background(), config, "task", client, nil, NewSkillSet(), nil, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestRunWorkerReAct_LLMError(t *testing.T) {
 		SystemPrompt: "test",
 	}
 
-	result, err := RunWorkerReAct(context.Background(), config, "task", client, nil, NewSkillSet(), logger)
+	result, err := RunWorkerReAct(context.Background(), config, "task", client, nil, NewSkillSet(), nil, logger)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -88,7 +88,7 @@ func TestRunWorkerReAct_ContextCancellation(t *testing.T) {
 		SystemPrompt: "test",
 	}
 
-	result, err := RunWorkerReAct(ctx, config, "task", client, nil, NewSkillSet(), logger)
+	result, err := RunWorkerReAct(ctx, config, "task", client, nil, NewSkillSet(), nil, logger)
 	if err == nil {
 		t.Fatal("expected context error")
 	}
@@ -108,7 +108,7 @@ func TestRunWorkerReAct_BlockedCommand(t *testing.T) {
 		ReadOnly:        false,
 	}
 
-	result, err := RunWorkerReAct(context.Background(), config, "run ls", client, nil, NewSkillSet(), logger)
+	result, err := RunWorkerReAct(context.Background(), config, "run ls", client, nil, NewSkillSet(), nil, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestRunWorkerReAct_ReadOnlyBlocksWrite(t *testing.T) {
 		ReadOnly:        true,
 	}
 
-	result, err := RunWorkerReAct(context.Background(), config, "write file", client, nil, NewSkillSet(), logger)
+	result, err := RunWorkerReAct(context.Background(), config, "write file", client, nil, NewSkillSet(), nil, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestRunWorkerReAct_WithToolExecution(t *testing.T) {
 		ReadOnly:        true,
 	}
 
-	result, err := RunWorkerReAct(context.Background(), config, "read a file", client, lockMgr, NewSkillSet(), logger)
+	result, err := RunWorkerReAct(context.Background(), config, "read a file", client, lockMgr, NewSkillSet(), nil, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestRunWorkerReAct_WriteLockAcquired(t *testing.T) {
 		ReadOnly:        false,
 	}
 
-	result, err := RunWorkerReAct(context.Background(), config, "write file", client, lockMgr, NewSkillSet(), logger)
+	result, err := RunWorkerReAct(context.Background(), config, "write file", client, lockMgr, NewSkillSet(), nil, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestRunWorkerReAct_MaxTurnsReached(t *testing.T) {
 		ReadOnly:        true,
 	}
 
-	result, err := RunWorkerReAct(context.Background(), config, "infinite task", client, nil, NewSkillSet(), logger)
+	result, err := RunWorkerReAct(context.Background(), config, "infinite task", client, nil, NewSkillSet(), nil, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
