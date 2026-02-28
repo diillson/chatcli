@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.63.0](https://github.com/diillson/chatcli/compare/v1.62.1...v1.63.0) (2026-02-28)
+
+
+### Features
+
+* **agent:** add 6 specialized built-in agents and fix worker LLM client resolution ([#582](https://github.com/diillson/chatcli/issues/582)) ([4171930](https://github.com/diillson/chatcli/commit/4171930ef51d6302b83bd501928cf71dd0f56ddf))
+
 ## [1.62.1](https://github.com/diillson/chatcli/compare/v1.62.0...v1.62.1) (2026-02-27)
 
 
