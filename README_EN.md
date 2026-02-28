@@ -790,7 +790,7 @@ These values are visible in `/status` and `/config`.
 
 ChatCLI includes a multi-agent orchestration system **enabled by default** in `/coder` and `/agent` modes. The orchestrator LLM automatically decides when to dispatch specialized agents in parallel for complex tasks.
 
-**6 Built-in Specialized Agents:**
+**12 Built-in Specialized Agents:**
 
 | Agent | Expertise | Access |
 |-------|-----------|--------|
@@ -800,6 +800,12 @@ ChatCLI includes a multi-agent orchestration system **enabled by default** in `/
 | **GitAgent** | Version control | Git ops |
 | **SearchAgent** | Codebase search | Read-only |
 | **PlannerAgent** | Reasoning and task decomposition | No tools (pure LLM) |
+| **ReviewerAgent** | Code review and quality analysis | Read-only |
+| **TesterAgent** | Test generation and coverage analysis | Read/Write/Execution |
+| **RefactorAgent** | Safe structural code transformations | Read/Write |
+| **DiagnosticsAgent** | Troubleshooting and root cause analysis | Read/Execution |
+| **FormatterAgent** | Code formatting and style normalization | Write/Execution |
+| **DepsAgent** | Dependency management and auditing | Read/Execution |
 
 Each agent has its own **skills** — some are accelerator scripts (execute without LLM calls), others are descriptive (the agent resolves them via its mini ReAct loop).
 
@@ -1298,7 +1304,7 @@ The AI receives full cluster context (deployment status, pods, events, revision 
 The project has a modular structure organized into packages:
 
 -  cli : Manages the interface and agent mode.
-    -  cli/agent/workers : Multi-agent system with 6 specialized agents, async dispatcher, skills with accelerator scripts, and parallel orchestration.
+    -  cli/agent/workers : Multi-agent system with 12 specialized agents, async dispatcher, skills with accelerator scripts, and parallel orchestration.
 -  config : Handles configuration via constants.
 -  i18n : Centralizes internationalization logic and translation files.
 -  llm : Manages communication and LLM client handling.
