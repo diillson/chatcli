@@ -195,11 +195,6 @@ func findUntestedScript(ctx context.Context, input map[string]string, _ *engine.
 	methodPattern := regexp.MustCompile(`^func\s+\(\w+\s+\*?\w+\)\s+([A-Z]\w*)\s*\(`)
 	testPattern := regexp.MustCompile(`^func\s+Test(\w+)`)
 
-	type fileResult struct {
-		path  string
-		funcs []string
-	}
-
 	var sourceFiles, testFiles []string
 
 	// Walk directory to find .go files
