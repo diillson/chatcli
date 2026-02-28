@@ -51,7 +51,7 @@ func NewOpenAIResponsesClient(apiKey, model string, logger *zap.Logger, maxAttem
 }
 
 func (c *OpenAIResponsesClient) GetModelName() string {
-	return c.model
+	return catalog.GetDisplayName(catalog.ProviderOpenAI, c.model)
 }
 
 func (c *OpenAIResponsesClient) getMaxTokens() int {
