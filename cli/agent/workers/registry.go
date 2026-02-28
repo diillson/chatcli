@@ -105,6 +105,12 @@ func SetupDefaultRegistry() *Registry {
 	r.Register(NewGitAgent())
 	r.Register(NewSearchAgent())
 	r.Register(NewPlannerAgent())
+	r.Register(NewReviewerAgent())
+	r.Register(NewTesterAgent())
+	r.Register(NewRefactorAgent())
+	r.Register(NewDiagnosticsAgent())
+	r.Register(NewFormatterAgent())
+	r.Register(NewDepsAgent())
 	return r
 }
 

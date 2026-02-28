@@ -113,6 +113,17 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"json_mode", "tools"},
 	},
 	{
+		ID:              "claude-sonnet-4-6",
+		Aliases:         []string{"claude-4-6-sonnet", "sonnet-4-6", "claude-4-6-sonnet-", "claude-sonnet-4-6-"},
+		DisplayName:     "Claude sonnet 4.6",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   200000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities:    []string{"json_mode", "tools"},
+	},
+	{
 		ID:              "claude-opus-4-20250514",
 		Aliases:         []string{"opus-4", "claude-opus-4-20250514"},
 		DisplayName:     "Claude opus 4",

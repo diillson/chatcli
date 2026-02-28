@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// --- Test all 6 agents' interface methods ---
+// --- Test all 12 agents' interface methods ---
 
 func TestFileAgent_Interface(t *testing.T) {
 	a := NewFileAgent()
@@ -344,6 +344,350 @@ func TestPlannerAgent_ExecuteError(t *testing.T) {
 	}
 }
 
+// --- Test new built-in agents' interface methods ---
+
+func TestReviewerAgent_Interface(t *testing.T) {
+	a := NewReviewerAgent()
+	if a.Type() != AgentTypeReviewer {
+		t.Errorf("expected type %s, got %s", AgentTypeReviewer, a.Type())
+	}
+	if a.Name() != "ReviewerAgent" {
+		t.Errorf("expected name 'ReviewerAgent', got '%s'", a.Name())
+	}
+	if !a.IsReadOnly() {
+		t.Error("ReviewerAgent should be read-only")
+	}
+	cmds := a.AllowedCommands()
+	if len(cmds) != 3 {
+		t.Errorf("expected 3 allowed commands, got %d", len(cmds))
+	}
+	if a.Description() == "" {
+		t.Error("expected non-empty description")
+	}
+	if a.SystemPrompt() == "" {
+		t.Error("expected non-empty system prompt")
+	}
+	skills := a.Skills().List()
+	if len(skills) < 3 {
+		t.Errorf("expected at least 3 skills, got %d", len(skills))
+	}
+	sk, ok := a.Skills().Get("diff-review")
+	if !ok {
+		t.Fatal("expected diff-review skill")
+	}
+	if sk.Type != SkillExecutable {
+		t.Error("expected diff-review to be executable")
+	}
+	sk2, ok := a.Skills().Get("scan-lint")
+	if !ok {
+		t.Fatal("expected scan-lint skill")
+	}
+	if sk2.Type != SkillExecutable {
+		t.Error("expected scan-lint to be executable")
+	}
+}
+
+func TestTesterAgent_Interface(t *testing.T) {
+	a := NewTesterAgent()
+	if a.Type() != AgentTypeTester {
+		t.Errorf("expected type %s, got %s", AgentTypeTester, a.Type())
+	}
+	if a.Name() != "TesterAgent" {
+		t.Errorf("expected name 'TesterAgent', got '%s'", a.Name())
+	}
+	if a.IsReadOnly() {
+		t.Error("TesterAgent should NOT be read-only")
+	}
+	cmds := a.AllowedCommands()
+	if len(cmds) != 7 {
+		t.Errorf("expected 7 allowed commands, got %d", len(cmds))
+	}
+	if a.Description() == "" {
+		t.Error("expected non-empty description")
+	}
+	if a.SystemPrompt() == "" {
+		t.Error("expected non-empty system prompt")
+	}
+	skills := a.Skills().List()
+	if len(skills) < 4 {
+		t.Errorf("expected at least 4 skills, got %d", len(skills))
+	}
+	sk, ok := a.Skills().Get("run-coverage")
+	if !ok {
+		t.Fatal("expected run-coverage skill")
+	}
+	if sk.Type != SkillExecutable {
+		t.Error("expected run-coverage to be executable")
+	}
+	sk2, ok := a.Skills().Get("find-untested")
+	if !ok {
+		t.Fatal("expected find-untested skill")
+	}
+	if sk2.Type != SkillExecutable {
+		t.Error("expected find-untested to be executable")
+	}
+}
+
+func TestRefactorAgent_Interface(t *testing.T) {
+	a := NewRefactorAgent()
+	if a.Type() != AgentTypeRefactor {
+		t.Errorf("expected type %s, got %s", AgentTypeRefactor, a.Type())
+	}
+	if a.Name() != "RefactorAgent" {
+		t.Errorf("expected name 'RefactorAgent', got '%s'", a.Name())
+	}
+	if a.IsReadOnly() {
+		t.Error("RefactorAgent should NOT be read-only")
+	}
+	cmds := a.AllowedCommands()
+	if len(cmds) != 5 {
+		t.Errorf("expected 5 allowed commands, got %d", len(cmds))
+	}
+	if a.Description() == "" {
+		t.Error("expected non-empty description")
+	}
+	if a.SystemPrompt() == "" {
+		t.Error("expected non-empty system prompt")
+	}
+	skills := a.Skills().List()
+	if len(skills) < 4 {
+		t.Errorf("expected at least 4 skills, got %d", len(skills))
+	}
+	sk, ok := a.Skills().Get("rename-symbol")
+	if !ok {
+		t.Fatal("expected rename-symbol skill")
+	}
+	if sk.Type != SkillExecutable {
+		t.Error("expected rename-symbol to be executable")
+	}
+}
+
+func TestDiagnosticsAgent_Interface(t *testing.T) {
+	a := NewDiagnosticsAgent()
+	if a.Type() != AgentTypeDiagnostics {
+		t.Errorf("expected type %s, got %s", AgentTypeDiagnostics, a.Type())
+	}
+	if a.Name() != "DiagnosticsAgent" {
+		t.Errorf("expected name 'DiagnosticsAgent', got '%s'", a.Name())
+	}
+	if a.IsReadOnly() {
+		t.Error("DiagnosticsAgent should NOT be read-only")
+	}
+	cmds := a.AllowedCommands()
+	if len(cmds) != 4 {
+		t.Errorf("expected 4 allowed commands, got %d", len(cmds))
+	}
+	if a.Description() == "" {
+		t.Error("expected non-empty description")
+	}
+	if a.SystemPrompt() == "" {
+		t.Error("expected non-empty system prompt")
+	}
+	skills := a.Skills().List()
+	if len(skills) < 4 {
+		t.Errorf("expected at least 4 skills, got %d", len(skills))
+	}
+	sk, ok := a.Skills().Get("check-deps")
+	if !ok {
+		t.Fatal("expected check-deps skill")
+	}
+	if sk.Type != SkillExecutable {
+		t.Error("expected check-deps to be executable")
+	}
+}
+
+func TestFormatterAgent_Interface(t *testing.T) {
+	a := NewFormatterAgent()
+	if a.Type() != AgentTypeFormatter {
+		t.Errorf("expected type %s, got %s", AgentTypeFormatter, a.Type())
+	}
+	if a.Name() != "FormatterAgent" {
+		t.Errorf("expected name 'FormatterAgent', got '%s'", a.Name())
+	}
+	if a.IsReadOnly() {
+		t.Error("FormatterAgent should NOT be read-only")
+	}
+	cmds := a.AllowedCommands()
+	if len(cmds) != 4 {
+		t.Errorf("expected 4 allowed commands, got %d", len(cmds))
+	}
+	if a.Description() == "" {
+		t.Error("expected non-empty description")
+	}
+	if a.SystemPrompt() == "" {
+		t.Error("expected non-empty system prompt")
+	}
+	skills := a.Skills().List()
+	if len(skills) < 3 {
+		t.Errorf("expected at least 3 skills, got %d", len(skills))
+	}
+	sk, ok := a.Skills().Get("format-code")
+	if !ok {
+		t.Fatal("expected format-code skill")
+	}
+	if sk.Type != SkillExecutable {
+		t.Error("expected format-code to be executable")
+	}
+	sk2, ok := a.Skills().Get("fix-imports")
+	if !ok {
+		t.Fatal("expected fix-imports skill")
+	}
+	if sk2.Type != SkillExecutable {
+		t.Error("expected fix-imports to be executable")
+	}
+}
+
+func TestDepsAgent_Interface(t *testing.T) {
+	a := NewDepsAgent()
+	if a.Type() != AgentTypeDeps {
+		t.Errorf("expected type %s, got %s", AgentTypeDeps, a.Type())
+	}
+	if a.Name() != "DepsAgent" {
+		t.Errorf("expected name 'DepsAgent', got '%s'", a.Name())
+	}
+	if a.IsReadOnly() {
+		t.Error("DepsAgent should NOT be read-only")
+	}
+	cmds := a.AllowedCommands()
+	if len(cmds) != 4 {
+		t.Errorf("expected 4 allowed commands, got %d", len(cmds))
+	}
+	if a.Description() == "" {
+		t.Error("expected non-empty description")
+	}
+	if a.SystemPrompt() == "" {
+		t.Error("expected non-empty system prompt")
+	}
+	skills := a.Skills().List()
+	if len(skills) < 4 {
+		t.Errorf("expected at least 4 skills, got %d", len(skills))
+	}
+	sk, ok := a.Skills().Get("audit-deps")
+	if !ok {
+		t.Fatal("expected audit-deps skill")
+	}
+	if sk.Type != SkillExecutable {
+		t.Error("expected audit-deps to be executable")
+	}
+	sk2, ok := a.Skills().Get("why-dep")
+	if !ok {
+		t.Fatal("expected why-dep skill")
+	}
+	if sk2.Type != SkillExecutable {
+		t.Error("expected why-dep to be executable")
+	}
+}
+
+// --- Test Execute for new agents ---
+
+func TestReviewerAgent_Execute(t *testing.T) {
+	a := NewReviewerAgent()
+	client := &mockLLMClient{responses: []string{"Code looks clean, no critical issues."}}
+	deps := &WorkerDeps{
+		LLMClient: client,
+		LockMgr:   NewFileLockManager(),
+		Logger:    zap.NewNop(),
+	}
+
+	result, err := a.Execute(context.Background(), "review main.go", deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Agent != AgentTypeReviewer {
+		t.Errorf("expected agent type %s, got %s", AgentTypeReviewer, result.Agent)
+	}
+}
+
+func TestTesterAgent_Execute(t *testing.T) {
+	a := NewTesterAgent()
+	client := &mockLLMClient{responses: []string{"Generated 5 test cases."}}
+	deps := &WorkerDeps{
+		LLMClient: client,
+		LockMgr:   NewFileLockManager(),
+		Logger:    zap.NewNop(),
+	}
+
+	result, err := a.Execute(context.Background(), "generate tests for utils.go", deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Agent != AgentTypeTester {
+		t.Errorf("expected agent type %s, got %s", AgentTypeTester, result.Agent)
+	}
+}
+
+func TestRefactorAgent_Execute(t *testing.T) {
+	a := NewRefactorAgent()
+	client := &mockLLMClient{responses: []string{"Renamed FooBar to FooBaz in 3 files."}}
+	deps := &WorkerDeps{
+		LLMClient: client,
+		LockMgr:   NewFileLockManager(),
+		Logger:    zap.NewNop(),
+	}
+
+	result, err := a.Execute(context.Background(), "rename FooBar to FooBaz", deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Agent != AgentTypeRefactor {
+		t.Errorf("expected agent type %s, got %s", AgentTypeRefactor, result.Agent)
+	}
+}
+
+func TestDiagnosticsAgent_Execute(t *testing.T) {
+	a := NewDiagnosticsAgent()
+	client := &mockLLMClient{responses: []string{"Root cause: nil pointer in handler.go:42."}}
+	deps := &WorkerDeps{
+		LLMClient: client,
+		LockMgr:   NewFileLockManager(),
+		Logger:    zap.NewNop(),
+	}
+
+	result, err := a.Execute(context.Background(), "investigate panic in handler", deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Agent != AgentTypeDiagnostics {
+		t.Errorf("expected agent type %s, got %s", AgentTypeDiagnostics, result.Agent)
+	}
+}
+
+func TestFormatterAgent_Execute(t *testing.T) {
+	a := NewFormatterAgent()
+	client := &mockLLMClient{responses: []string{"Formatted 12 files."}}
+	deps := &WorkerDeps{
+		LLMClient: client,
+		LockMgr:   NewFileLockManager(),
+		Logger:    zap.NewNop(),
+	}
+
+	result, err := a.Execute(context.Background(), "format all go files", deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Agent != AgentTypeFormatter {
+		t.Errorf("expected agent type %s, got %s", AgentTypeFormatter, result.Agent)
+	}
+}
+
+func TestDepsAgent_Execute(t *testing.T) {
+	a := NewDepsAgent()
+	client := &mockLLMClient{responses: []string{"All dependencies verified."}}
+	deps := &WorkerDeps{
+		LLMClient: client,
+		LockMgr:   NewFileLockManager(),
+		Logger:    zap.NewNop(),
+	}
+
+	result, err := a.Execute(context.Background(), "audit dependencies", deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Agent != AgentTypeDeps {
+		t.Errorf("expected agent type %s, got %s", AgentTypeDeps, result.Agent)
+	}
+}
+
 // --- Test that all agents conform to WorkerAgent interface ---
 
 func TestAllAgents_ImplementWorkerAgent(t *testing.T) {
@@ -354,6 +698,12 @@ func TestAllAgents_ImplementWorkerAgent(t *testing.T) {
 		NewGitAgent(),
 		NewSearchAgent(),
 		NewPlannerAgent(),
+		NewReviewerAgent(),
+		NewTesterAgent(),
+		NewRefactorAgent(),
+		NewDiagnosticsAgent(),
+		NewFormatterAgent(),
+		NewDepsAgent(),
 	}
 
 	for _, a := range agents {

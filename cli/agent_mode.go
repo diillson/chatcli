@@ -3536,15 +3536,19 @@ func (a *AgentMode) initMultiAgent() bool {
 		}
 	}
 
-	// Determine provider/model from current client
-	provider := os.Getenv("LLM_PROVIDER")
+	// Determine provider/model from current active client (not defaults).
+	// a.cli.Provider is the runtime-resolved provider (from -provider flag, env, or config).
+	// Falling back to env/config only if cli.Provider is somehow empty.
+	provider := a.cli.Provider
+	if provider == "" {
+		provider = os.Getenv("LLM_PROVIDER")
+	}
 	if provider == "" {
 		provider = config.Global.GetString("LLM_PROVIDER")
 	}
-	model := ""
-	if a.cli.Client != nil {
-		model = a.cli.Client.GetModelName()
-	}
+	// Use a.cli.Model (the actual API model ID, e.g. "claude-sonnet-4-6-20250514")
+	// NOT a.cli.Client.GetModelName() which returns a display name (e.g. "Claude sonnet 4.6").
+	model := a.cli.Model
 
 	cfg := workers.DispatcherConfig{
 		MaxWorkers:    maxWorkers,

@@ -54,7 +54,7 @@ func TestOrchestratorSystemPrompt_WithFullCatalog(t *testing.T) {
 	prompt := OrchestratorSystemPrompt(catalog)
 
 	// Should contain all agent types from catalog
-	for _, at := range []string{"file", "coder", "shell", "git", "search", "planner"} {
+	for _, at := range []string{"file", "coder", "shell", "git", "search", "planner", "reviewer", "tester", "refactor", "diagnostics", "formatter", "deps"} {
 		if !strings.Contains(prompt, at) {
 			t.Errorf("expected agent type %q in prompt with full catalog", at)
 		}
