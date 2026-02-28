@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.65.0](https://github.com/diillson/chatcli/compare/v1.64.0...v1.65.0) (2026-02-28)
+
+
+### Features
+
+* **session:** add interactive local/remote session routing when connected to server ([#587](https://github.com/diillson/chatcli/issues/587)) ([#588](https://github.com/diillson/chatcli/issues/588)) ([7d797f9](https://github.com/diillson/chatcli/commit/7d797f9696a610a77a4047285b9e003b0a3d5659))
+
 ## [1.64.0](https://github.com/diillson/chatcli/compare/v1.63.0...v1.64.0) (2026-02-28)
 
 
