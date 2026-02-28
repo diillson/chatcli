@@ -111,7 +111,7 @@ CHATCLI_AGENT_WORKER_MAX_TURNS  │ inteiro  │  10     │ Máximo de turnos d
 CHATCLI_AGENT_WORKER_TIMEOUT    │ duração  │  5m     │ Timeout por worker agent individual.
 ```
 
-> Quando `CHATCLI_AGENT_PARALLEL_MODE=true`, o LLM orquestrador pode despachar 6 agents especialistas (FileAgent, CoderAgent, ShellAgent, GitAgent, SearchAgent, PlannerAgent) em paralelo. Veja a [documentação completa](/docs/features/multi-agent-orchestration/).
+> Quando `CHATCLI_AGENT_PARALLEL_MODE=true`, o LLM orquestrador pode despachar 12 agents especialistas (FileAgent, CoderAgent, ShellAgent, GitAgent, SearchAgent, PlannerAgent, ReviewerAgent, TesterAgent, RefactorAgent, DiagnosticsAgent, FormatterAgent, DepsAgent) em paralelo. Veja a [documentação completa](/docs/features/multi-agent-orchestration/).
 
 --------
 

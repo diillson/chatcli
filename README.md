@@ -791,7 +791,7 @@ Esses valores aparecem em `/status` e `/config`.
 
 O ChatCLI inclui um sistema de orquestração multi-agent **ativado por padrão** nos modos `/coder` e `/agent`. O LLM orquestrador decide automaticamente quando despachar agents especialistas em paralelo para tarefas complexas.
 
-**6 Agents Especialistas Embarcados:**
+**12 Agents Especialistas Embarcados:**
 
 | Agent | Expertise | Acesso |
 |-------|-----------|--------|
@@ -801,6 +801,12 @@ O ChatCLI inclui um sistema de orquestração multi-agent **ativado por padrão*
 | **GitAgent** | Controle de versão | Git ops |
 | **SearchAgent** | Busca no codebase | Somente leitura |
 | **PlannerAgent** | Raciocínio e decomposição de tarefas | Sem tools (puro LLM) |
+| **ReviewerAgent** | Revisão de código e análise de qualidade | Somente leitura |
+| **TesterAgent** | Geração de testes e análise de cobertura | Leitura/Escrita/Execução |
+| **RefactorAgent** | Transformações estruturais seguras | Leitura/Escrita |
+| **DiagnosticsAgent** | Troubleshooting e análise de causa raiz | Leitura/Execução |
+| **FormatterAgent** | Formatação de código e normalização | Escrita/Execução |
+| **DepsAgent** | Gerenciamento e auditoria de dependências | Leitura/Execução |
 
 Cada agent possui **skills** próprias — algumas são scripts aceleradores (executam sem LLM), outras são descritivas (o agent resolve via seu mini ReAct loop).
 
@@ -1351,7 +1357,7 @@ A IA recebe contexto completo do cluster (status do deployment, pods, eventos, h
 O projeto é modular e organizado em pacotes:
 
 -  cli : Gerencia a interface e o modo agente.
-    -  cli/agent/workers : Sistema multi-agent com 6 agents especialistas, dispatcher assíncrono, skills com scripts aceleradores e orquestração paralela.
+    -  cli/agent/workers : Sistema multi-agent com 12 agents especialistas, dispatcher assíncrono, skills com scripts aceleradores e orquestração paralela.
 -  config : Lida com a configuração via constantes.
 -  i18n : Centraliza a lógica de internacionalização e os arquivos de tradução.
 -  llm : Lida com a comunicação e gerência dos clientes LLM.

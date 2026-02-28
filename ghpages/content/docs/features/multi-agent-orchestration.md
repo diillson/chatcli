@@ -31,8 +31,10 @@ AgentMode (ReAct loop existente)
     ▼  (LLM responde com <agent_call> ou <tool_call> tags)
 Dispatcher (fan-out via semaphore)
     │
-    ├── FileAgent      ├── CoderAgent     ├── ShellAgent
-    ├── GitAgent       ├── SearchAgent    ├── PlannerAgent
+    ├── FileAgent       ├── CoderAgent      ├── ShellAgent
+    ├── GitAgent        ├── SearchAgent     ├── PlannerAgent
+    ├── ReviewerAgent   ├── TesterAgent     ├── RefactorAgent
+    ├── DiagnosticsAgent├── FormatterAgent  ├── DepsAgent
     └── CustomAgent(s)  (devops, security-auditor, etc.)
     │
     ▼
@@ -120,6 +122,52 @@ O orquestrador possui dois mecanismos de execução, escolhendo o mais adequado 
   - `create-plan` — Criação de plano de execução
   - `decompose` — Decomposição de tarefas complexas
 
+### ReviewerAgent (Revisão de Código e Qualidade)
+- **Acesso:** Somente leitura (`read`, `search`, `tree`)
+- **Skills:**
+  - `review-file` — Analisa arquivo para bugs, code smells, violações SOLID e issues de segurança
+  - `diff-review` — *Script acelerador:* revisa alterações staged via git-diff e git-changed
+  - `scan-lint` — *Script acelerador:* executa `go vet` e `staticcheck` e categoriza issues
+
+### TesterAgent (Testes e Cobertura)
+- **Acesso:** Leitura/Escrita/Execução (`read`, `write`, `patch`, `exec`, `test`, `search`, `tree`)
+- **Skills:**
+  - `generate-tests` — Geração de testes abrangentes para funções e pacotes (LLM-driven)
+  - `run-coverage` — *Script acelerador:* executa `go test -coverprofile` e parseia cobertura por função
+  - `find-untested` — *Script acelerador:* encontra funções exportadas sem testes correspondentes
+  - `generate-table-test` — Geração de table-driven tests idiomáticos em Go
+
+### RefactorAgent (Transformações Estruturais)
+- **Acesso:** Leitura/Escrita (`read`, `write`, `patch`, `search`, `tree`)
+- **Skills:**
+  - `rename-symbol` — *Script acelerador:* renomeia símbolo em todos os `.go`, ignorando strings e comentários
+  - `extract-interface` — Extrai interface a partir dos métodos de um tipo concreto
+  - `move-function` — Move função entre pacotes ajustando imports
+  - `inline-variable` — Substitui variável pelo seu valor em todos os pontos de uso
+
+### DiagnosticsAgent (Troubleshooting e Investigação)
+- **Acesso:** Leitura/Execução (`read`, `search`, `tree`, `exec`)
+- **Skills:**
+  - `analyze-error` — Parseia mensagens de erro e stack traces mapeando para localizações no código
+  - `check-deps` — *Script acelerador:* executa `go mod tidy`, `go mod verify` e verifica saúde das dependências
+  - `bisect-bug` — Guia investigação para encontrar o commit que introduziu um bug
+  - `profile-bottleneck` — Executa benchmarks ou pprof e analisa hotspots de performance
+
+### FormatterAgent (Formatação e Estilo)
+- **Acesso:** Escrita/Execução (`read`, `patch`, `exec`, `tree`)
+- **Skills:**
+  - `format-code` — *Script acelerador:* executa `gofmt -w` (ou `goimports -w`) nos arquivos Go
+  - `fix-imports` — *Script acelerador:* executa `goimports` para organizar imports
+  - `normalize-style` — Aplica convenções de naming e estilo consistentes (LLM-driven)
+
+### DepsAgent (Gerenciamento de Dependências)
+- **Acesso:** Leitura/Execução (`read`, `exec`, `search`, `tree`)
+- **Skills:**
+  - `audit-deps` — *Script acelerador:* executa `go mod verify` e `govulncheck` para auditoria
+  - `update-deps` — *Script acelerador:* lista dependências desatualizadas com atualizações disponíveis (dry-run)
+  - `why-dep` — *Script acelerador:* explica por que uma dependência existe via `go mod why` e `go mod graph`
+  - `find-outdated` — Encontra todas as dependências com versões mais novas disponíveis
+
 ---
 
 ## Agents Customizados como Workers
@@ -172,7 +220,7 @@ Este agent será **somente leitura** (apenas Read/Grep/Glob) e o LLM poderá des
 
 ### Regras de Proteção
 
-- **Names reservados**: Os 6 nomes de agents embarcados (file, coder, shell, git, search, planner) são protegidos e não podem ser sobrescritos por agents customizados
+- **Names reservados**: Os 12 nomes de agents embarcados (file, coder, shell, git, search, planner, reviewer, tester, refactor, diagnostics, formatter, deps) são protegidos e não podem ser sobrescritos por agents customizados
 - **Sem tools = read-only**: Agents sem campo `tools` recebem automaticamente `read`, `search`, `tree` e são marcados como read-only
 - **Duplicatas ignoradas**: Se dois agents tiverem o mesmo nome, apenas o primeiro é registrado
 
