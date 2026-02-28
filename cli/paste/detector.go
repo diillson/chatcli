@@ -8,6 +8,7 @@ package paste
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -23,11 +24,36 @@ var (
 	disableBP     = "\x1b[?2004l"
 )
 
+// PasteDisplayThreshold is the maximum number of characters that will be
+// rendered directly in the go-prompt input line. Pastes larger than this
+// are replaced by a compact placeholder to avoid terminal corruption.
+const PasteDisplayThreshold = 150
+
+// PlaceholderPrefix is the sentinel used to identify paste placeholders
+// in the go-prompt buffer so the executor can swap them for real content.
+const PlaceholderPrefix = "\u00ab" // «
+const PlaceholderSuffix = "\u00bb" // »
+
+// MakePlaceholder builds the placeholder string shown in the prompt input
+// line for large pastes (e.g., «1234 chars | 5 lines»).
+func MakePlaceholder(charCount, lineCount int) string {
+	if lineCount > 1 {
+		return fmt.Sprintf("%s%d chars | %d lines%s", PlaceholderPrefix, charCount, lineCount, PlaceholderSuffix)
+	}
+	return fmt.Sprintf("%s%d chars%s", PlaceholderPrefix, charCount, PlaceholderSuffix)
+}
+
+// IsPlaceholder checks if a string contains a paste placeholder.
+func IsPlaceholder(s string) bool {
+	return strings.Contains(s, PlaceholderPrefix) && strings.Contains(s, PlaceholderSuffix)
+}
+
 // Info holds metadata about a detected paste operation.
 type Info struct {
-	Content   string
-	CharCount int
-	LineCount int
+	Content     string
+	CharCount   int
+	LineCount   int
+	Placeholder string // non-empty when a placeholder was injected into go-prompt
 }
 
 // BracketedPasteParser wraps a ConsoleParser to detect bracketed paste sequences.
@@ -108,6 +134,34 @@ func (p *BracketedPasteParser) Read() ([]byte, error) {
 	return p.processData(data), nil
 }
 
+// finishPaste handles the end of a paste operation: notifies the callback,
+// and returns either the raw content (small pastes) or a placeholder (large pastes).
+func (p *BracketedPasteParser) finishPaste(content string) []byte {
+	charCount := len([]rune(content))
+	lineCount := strings.Count(content, "\n") + 1
+
+	// For large pastes, use a placeholder to avoid terminal corruption
+	usePlaceholder := charCount > PasteDisplayThreshold
+	var placeholder string
+	if usePlaceholder {
+		placeholder = MakePlaceholder(charCount, lineCount)
+	}
+
+	if p.onPaste != nil {
+		p.onPaste(Info{
+			Content:     content,
+			CharCount:   charCount,
+			LineCount:   lineCount,
+			Placeholder: placeholder,
+		})
+	}
+
+	if usePlaceholder {
+		return []byte(placeholder)
+	}
+	return []byte(content)
+}
+
 // processData handles bracketed paste detection in the raw byte stream.
 func (p *BracketedPasteParser) processData(data []byte) []byte {
 	p.mu.Lock()
@@ -121,20 +175,8 @@ func (p *BracketedPasteParser) processData(data []byte) []byte {
 			p.pasteBuf.Write(data[:endIdx])
 			p.pasting = false
 
-			// Extract the full pasted content
 			content := p.pasteBuf.String()
 			p.pasteBuf.Reset()
-
-			// Notify about the paste
-			if p.onPaste != nil {
-				charCount := len([]rune(content))
-				lineCount := strings.Count(content, "\n") + 1
-				p.onPaste(Info{
-					Content:   content,
-					CharCount: charCount,
-					LineCount: lineCount,
-				})
-			}
 
 			// Remaining data after the end sequence goes to pending
 			after := data[endIdx+len(pasteEndSeq):]
@@ -142,13 +184,12 @@ func (p *BracketedPasteParser) processData(data []byte) []byte {
 				p.pending = append(p.pending, after...)
 			}
 
-			// Return the pasted content as regular input for go-prompt
-			return []byte(content)
+			return p.finishPaste(content)
 		}
 
 		// No end sequence yet — buffer everything
 		p.pasteBuf.Write(data)
-		// Return empty to suppress display while pasting
+		// Return nil to suppress display while pasting
 		return nil
 	}
 
@@ -171,26 +212,18 @@ func (p *BracketedPasteParser) processData(data []byte) []byte {
 			content := string(afterStart[:endIdx])
 			p.pasting = false
 
-			if p.onPaste != nil {
-				charCount := len([]rune(content))
-				lineCount := strings.Count(content, "\n") + 1
-				p.onPaste(Info{
-					Content:   content,
-					CharCount: charCount,
-					LineCount: lineCount,
-				})
-			}
-
 			// Data after end sequence
 			afterEnd := afterStart[endIdx+len(pasteEndSeq):]
 			if len(afterEnd) > 0 {
 				p.pending = append(p.pending, afterEnd...)
 			}
 
-			// Return before + pasted content
-			result := make([]byte, 0, len(before)+len(content))
+			pasteBytes := p.finishPaste(content)
+
+			// Return before + paste result
+			result := make([]byte, 0, len(before)+len(pasteBytes))
 			result = append(result, before...)
-			result = append(result, []byte(content)...)
+			result = append(result, pasteBytes...)
 			return result
 		}
 

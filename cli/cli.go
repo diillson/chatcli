@@ -437,10 +437,14 @@ func detectProjectDir() string {
 func (cli *ChatCLI) executor(in string) {
 	in = strings.TrimSpace(in)
 
-	// Show paste notification if paste was detected
+	// Handle paste: replace placeholder with real content and show notification
 	if cli.lastPasteInfo != nil {
 		info := cli.lastPasteInfo
 		cli.lastPasteInfo = nil
+		// If a placeholder was used (large paste), swap it for the real content
+		if info.Placeholder != "" && strings.Contains(in, info.Placeholder) {
+			in = strings.Replace(in, info.Placeholder, info.Content, 1)
+		}
 		if info.LineCount > 1 {
 			fmt.Printf("  %s\n", i18n.T("paste.detected", info.CharCount, info.LineCount))
 		} else {
@@ -755,40 +759,110 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 					Key: prompt.ShiftLeft,
 					Fn:  prompt.GoLeftChar,
 				}),
-				// macOS Terminal.app sends different escape sequences for
-				// Ctrl+Arrow that go-prompt doesn't recognize, causing raw
-				// escape bytes to be inserted as text. Register them via
-				// ASCIICodeBind to intercept before InsertText fallback.
+				// Terminal escape sequences for modifier+arrow combinations.
+				// Many terminals send non-standard CSI sequences that go-prompt
+				// doesn't recognize, causing raw escape bytes to appear as text.
+				// We register all known variants via ASCIICodeBind.
 				prompt.OptionAddASCIICodeBind(
-					// macOS Terminal: Ctrl+Right = ESC ESC [ C
+					// ── Alt/Option + Arrow (word navigation) ──────────────
+					// CSI: ESC [ 1 ; 3 C / D (macOS Terminal, iTerm2, most xterm-like)
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x3b, 0x33, 0x43},
+						Fn:        prompt.GoRightWord,
+					},
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x3b, 0x33, 0x44},
+						Fn:        prompt.GoLeftWord,
+					},
+					// Meta: ESC f / ESC b (iTerm2 "Natural Text Editing", readline convention)
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x66},
+						Fn:        prompt.GoRightWord,
+					},
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x62},
+						Fn:        prompt.GoLeftWord,
+					},
+
+					// ── Ctrl + Arrow (word navigation) ────────────────────
+					// CSI: ESC [ 1 ; 5 C / D (xterm, most modern terminals)
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x3b, 0x35, 0x43},
+						Fn:        prompt.GoRightWord,
+					},
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x3b, 0x35, 0x44},
+						Fn:        prompt.GoLeftWord,
+					},
+					// macOS Terminal: ESC ESC [ C / D (double-ESC variant)
 					prompt.ASCIICodeBind{
 						ASCIICode: []byte{0x1b, 0x1b, 0x5b, 0x43},
 						Fn:        prompt.GoRightWord,
 					},
-					// macOS Terminal: Ctrl+Left = ESC ESC [ D
 					prompt.ASCIICodeBind{
 						ASCIICode: []byte{0x1b, 0x1b, 0x5b, 0x44},
 						Fn:        prompt.GoLeftWord,
 					},
-					// macOS Terminal: Shift+Right = ESC [ 1 ; 2 C (some terminals)
-					prompt.ASCIICodeBind{
-						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x43},
-						Fn:        prompt.GoRightChar,
-					},
-					// macOS Terminal: Shift+Left = ESC [ 1 ; 2 D (some terminals)
-					prompt.ASCIICodeBind{
-						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x44},
-						Fn:        prompt.GoLeftChar,
-					},
-					// rxvt: Ctrl+Right = ESC O c
+					// rxvt: ESC O c / d
 					prompt.ASCIICodeBind{
 						ASCIICode: []byte{0x1b, 0x4f, 0x63},
 						Fn:        prompt.GoRightWord,
 					},
-					// rxvt: Ctrl+Left = ESC O d
 					prompt.ASCIICodeBind{
 						ASCIICode: []byte{0x1b, 0x4f, 0x64},
 						Fn:        prompt.GoLeftWord,
+					},
+
+					// ── Cmd + Arrow (line beginning/end — macOS) ──────────
+					// ESC [ H (Home) / ESC [ F (End) — xterm
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x48},
+						Fn:        prompt.GoLineBeginning,
+					},
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x46},
+						Fn:        prompt.GoLineEnd,
+					},
+					// ESC O H (Home) / ESC O F (End) — application mode
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x4f, 0x48},
+						Fn:        prompt.GoLineBeginning,
+					},
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x4f, 0x46},
+						Fn:        prompt.GoLineEnd,
+					},
+					// ESC [ 1 ~ (Home) / ESC [ 4 ~ (End) — vt100/linux console
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x7e},
+						Fn:        prompt.GoLineBeginning,
+					},
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x34, 0x7e},
+						Fn:        prompt.GoLineEnd,
+					},
+
+					// ── Shift + Arrow (character navigation) ──────────────
+					// CSI: ESC [ 1 ; 2 C / D
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x43},
+						Fn:        prompt.GoRightChar,
+					},
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x44},
+						Fn:        prompt.GoLeftChar,
+					},
+
+					// ── Alt + Backspace (delete word backward) ────────────
+					// ESC + DEL (0x7f) — most terminals
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x7f},
+						Fn:        prompt.DeleteWord,
+					},
+					// ESC + BS (0x08) — some terminals
+					prompt.ASCIICodeBind{
+						ASCIICode: []byte{0x1b, 0x08},
+						Fn:        prompt.DeleteWord,
 					},
 				),
 			)
