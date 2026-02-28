@@ -101,3 +101,22 @@ func (t *Timer) IsRunning() bool {
 	defer t.mu.Unlock()
 	return t.running
 }
+
+// Pause temporarily suppresses the display output without stopping the timer.
+// The elapsed time continues accumulating. Call Resume to restore display.
+func (t *Timer) Pause() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.running {
+		t.running = false
+	}
+}
+
+// Resume restores the display output after a Pause.
+func (t *Timer) Resume() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.running && t.cancel != nil {
+		t.running = true
+	}
+}
