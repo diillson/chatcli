@@ -49,8 +49,30 @@ var registry = []ModelMeta{
 	// OpenAI GPT-5 e variantes
 	{
 		ID:              "gpt-5",
-		Aliases:         []string{"gpt-5", "gpt-5.2", "gpt-5-mini", "gpt-5-nano"},
+		Aliases:         []string{"gpt-5", "gpt-5.1", "gpt-5-mini", "gpt-5-nano"},
 		DisplayName:     "GPT-5",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   50000,
+		MaxOutputTokens: 50000,
+		//PreferredAPI:    APIChatCompletions, // Possivel Roolback para APIResponses
+		PreferredAPI: APIResponses,
+		Capabilities: []string{"json_mode", "tools"},
+	},
+	{
+		ID:              "gpt-5.2",
+		Aliases:         []string{"gpt-5.2", "gpt-5.2-mini", "gpt-5.2-nano"},
+		DisplayName:     "GPT-5.2",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   50000,
+		MaxOutputTokens: 50000,
+		//PreferredAPI:    APIChatCompletions, // Possivel Roolback para APIResponses
+		PreferredAPI: APIResponses,
+		Capabilities: []string{"json_mode", "tools"},
+	},
+	{
+		ID:              "gpt-5.3-codex",
+		Aliases:         []string{"gpt-5.3", "gpt-5.3-mini", "gpt-5.3-nano"},
+		DisplayName:     "GPT-5.3",
 		Provider:        ProviderOpenAI,
 		ContextWindow:   50000,
 		MaxOutputTokens: 50000,

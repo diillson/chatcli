@@ -90,7 +90,7 @@ func (a *DiagnosticsAgent) Execute(ctx context.Context, task string, deps *Worke
 		AllowedCommands: a.AllowedCommands(),
 		ReadOnly:        false,
 	}
-	result, err := RunWorkerReAct(ctx, config, task, deps.LLMClient, deps.LockMgr, a.skills, deps.Logger)
+	result, err := RunWorkerReAct(ctx, config, task, deps.LLMClient, deps.LockMgr, a.skills, deps.PolicyChecker, deps.Logger)
 	if result != nil {
 		result.Agent = a.Type()
 		result.Task = task

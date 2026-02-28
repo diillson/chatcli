@@ -89,7 +89,9 @@
 - **Recursive Directory Exploration**: Processes entire projects while ignoring irrelevant folders (e.g., `node_modules`, `.git`).
 - **Dynamic Configuration and Persistent History**: Change providers, update configurations in real-time, and maintain history across sessions.
 - **Robustness**: Exponential backoff retry for handling external API errors.
-- **Paste Detection**: Automatically detects pasted text in the terminal via *Bracketed Paste Mode* and shows a visual notification (`📋 Pasted (X chars, Y lines)`), preventing confusion with long texts.
+- **Smart Paste Detection**: Automatically detects pasted text in the terminal via *Bracketed Paste Mode*. Large pastes (> 150 chars) are replaced by a compact placeholder (`«N chars | M lines»`) to prevent terminal corruption, with the real content preserved and sent on Enter.
+- **Advanced Prompt Navigation**: Keyboard shortcuts with Alt/Ctrl/Cmd + arrow keys for word and line navigation, compatible with major macOS terminals (Terminal.app, iTerm2, Alacritty, Kitty, WezTerm).
+- **Parallel Mode Security**: Multi-agent workers fully respect `coder_policy.json`, with serialized, contextual security prompts showing which agent is requesting each action.
 - **Remote Resource Discovery**: When connecting to a server, the client automatically discovers available plugins, agents, and skills on the server. Remote plugins can be executed on the server or downloaded locally; remote agents and skills are transferred and composed locally, merging with local resources.
 - **Hardened Security**: Constant-time token comparison, shell injection prevention, editor validation, gRPC reflection disabled by default, and hardened containers (read-only, no-new-privileges, drop ALL capabilities). See the [security documentation](https://diillson.github.io/chatcli/docs/features/security/).
 
@@ -261,7 +263,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     OLLAMA_MAX_TOKENS=5000
     OLLAMA_FILTER_THINKING=true  # Filters intermediate reasoning in responses (e.g. for Qwen3, llama3... - THIS IS REQUIRED TO BE TRUE for Agent mode. Works well with some OLLAMA models that have "out loud" reasoning)
 
-    # Remote Server Settings (chatcli serve)
+    # Remote Server Settings (chatcli server)
     CHATCLI_SERVER_PORT=50051
     CHATCLI_SERVER_TOKEN=my-secret-token
     # CHATCLI_SERVER_TLS_CERT=/path/to/cert.pem
@@ -272,7 +274,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     # CHATCLI_REMOTE_TOKEN=my-secret-token
     # CHATCLI_CLIENT_API_KEY=sk-xxx    # Your own API key (forwarded to server)
 
-    # K8s Watcher Settings (chatcli watch / chatcli serve --watch-*)
+    # K8s Watcher Settings (chatcli watch / chatcli server --watch-*)
     # CHATCLI_WATCH_DEPLOYMENT=myapp          # Single deployment (legacy)
     # CHATCLI_WATCH_NAMESPACE=production
     # CHATCLI_WATCH_INTERVAL=30s
@@ -1133,12 +1135,12 @@ When an agent is loaded, all interactions with `/agent <task>` or `/coder <task>
 
 ChatCLI can run as a gRPC server, allowing remote access from any terminal, Docker, or Kubernetes.
 
-### `chatcli serve` — Start Server
+### `chatcli server` — Start Server
 
 ```bash
-chatcli serve                                    # port 50051, no auth
-chatcli serve --port 8080 --token my-token       # custom port and auth
-chatcli serve --tls-cert cert.pem --tls-key key.pem  # with TLS
+chatcli server                                    # port 50051, no auth
+chatcli server --port 8080 --token my-token       # custom port and auth
+chatcli server --tls-cert cert.pem --tls-key key.pem  # with TLS
 ```
 
 ### `chatcli connect` — Connect to Server
@@ -1257,10 +1259,10 @@ targets:
 
 ```bash
 # Multi-target server (all clients receive context automatically)
-chatcli serve --watch-config targets.yaml
+chatcli server --watch-config targets.yaml
 
 # Or legacy single-target
-chatcli serve --watch-deployment myapp --watch-namespace production
+chatcli server --watch-deployment myapp --watch-namespace production
 ```
 
 ### What is Collected

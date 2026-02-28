@@ -85,6 +85,33 @@ No modo `/coder`, visualize o `<tool_call>` como ordens de ferramenta que a IA e
 
 --------
 
+--------
+
+## Navegação Avançada no Prompt
+
+O ChatCLI suporta **atalhos de teclado** para navegação eficiente no prompt, compatíveis com os principais terminais macOS:
+
+- **Alt/Option + ← →**: Mover cursor por palavra
+- **Ctrl + ← →**: Mover cursor por palavra
+- **Cmd + ← →** / **Home/End**: Mover para início/fim da linha
+- **Alt + Backspace**: Deletar palavra à esquerda
+
+Para a lista completa de atalhos, veja a [Referência de Comandos](/docs/reference/command-reference/#atalhos-de-teclado-modo-interativo).
+
+--------
+
+## Detecção Inteligente de Paste
+
+O ChatCLI detecta automaticamente texto colado via *Bracketed Paste Mode*. Para pastes grandes (mais de 150 caracteres), o conteúdo é substituído por um **placeholder compacto** no prompt:
+
+```
+«1234 chars | 5 lines»
+```
+
+Isso evita corrupção visual do terminal com textos extensos. O conteúdo real é preservado internamente e enviado integralmente ao pressionar Enter. Pastes pequenos (≤ 150 caracteres) continuam sendo renderizados normalmente.
+
+--------
+
 ## Próximos Passos
 
 Agora que você conhece o básico, vamos mergulhar na funcionalidade que torna o ChatCLI tão poderoso: a adição de contexto.

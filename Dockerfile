@@ -41,4 +41,4 @@ EXPOSE 50051
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD pidof chatcli > /dev/null || exit 1
 
-ENTRYPOINT ["chatcli", "serve"]
+ENTRYPOINT ["chatcli", "server"]

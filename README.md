@@ -89,7 +89,9 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 - **Exploração Recursiva de Diretórios**: Processa projetos inteiros ignorando pastas irrelevantes (ex.: `node_modules`, `.git`).
 - **Configuração Dinâmica e Histórico Persistente**: Troque provedores, atualize configurações em tempo real e mantenha o histórico entre sessões.
 - **Robustez**: Retry com backoff exponencial para lidar com falhas de API.
-- **Detecção de Paste**: Detecta automaticamente texto colado no terminal via *Bracketed Paste Mode* e exibe notificação visual (`📋 Pasted (X chars, Y lines)`), evitando confusão com textos longos.
+- **Detecção Inteligente de Paste**: Detecta automaticamente texto colado no terminal via *Bracketed Paste Mode*. Pastes grandes (> 150 chars) são substituídos por um placeholder compacto (`«N chars | M lines»`) para evitar corrupção visual, com o conteúdo real preservado e enviado ao pressionar Enter.
+- **Navegação Avançada no Prompt**: Suporte a atalhos de teclado com Alt/Ctrl/Cmd + setas para navegação por palavra e linha, compatível com os principais terminais macOS (Terminal.app, iTerm2, Alacritty, Kitty, WezTerm).
+- **Segurança no Modo Paralelo**: Workers do modo multi-agent respeitam integralmente o `coder_policy.json`, com prompts de segurança serializados e contextuais que exibem qual agent está solicitando cada ação.
 - **Descoberta de Recursos Remotos**: Ao conectar a um servidor, o client descobre automaticamente plugins, agents e skills disponíveis no servidor. Plugins remotos podem ser executados no servidor ou baixados localmente; agents e skills remotos são transferidos e compostos localmente com os recursos locais.
 - **Segurança Reforçada**: Comparação de tokens em tempo constante, proteção contra injeção em shell, validação de editores, gRPC reflection desabilitado por padrão, e containers hardened (read-only, no-new-privileges, drop ALL capabilities). Veja a [documentação de segurança](https://diillson.github.io/chatcli/docs/features/security/).
 
@@ -264,7 +266,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     OLLAMA_MAX_TOKENS=5000
     OLLAMA_FILTER_THINKING=false  # Filtra raciocínio intermediário em respostas (ex.: para Qwen3, llama3... - ISSO É NECESSÁRIO TRUE para o modo Agent Funcionar bem com alguns modelos OLLAMA que tem raciocínio em "voz alta")
 
-    # Configurações do Servidor Remoto (chatcli serve)
+    # Configurações do Servidor Remoto (chatcli server)
     CHATCLI_SERVER_PORT=50051
     CHATCLI_SERVER_TOKEN=meu-token-secreto
     # CHATCLI_SERVER_TLS_CERT=/path/to/cert.pem
@@ -275,7 +277,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     # CHATCLI_REMOTE_TOKEN=meu-token-secreto
     # CHATCLI_CLIENT_API_KEY=sk-xxx    # Sua própria API key (enviada ao servidor)
 
-    # Configurações do K8s Watcher (chatcli watch / chatcli serve --watch-*)
+    # Configurações do K8s Watcher (chatcli watch / chatcli server --watch-*)
     # CHATCLI_WATCH_DEPLOYMENT=myapp          # Deployment unico (legado)
     # CHATCLI_WATCH_NAMESPACE=production
     # CHATCLI_WATCH_INTERVAL=30s
@@ -1186,12 +1188,12 @@ Ao carregar um agente, todas as interações com `/agent <tarefa>` ou `/coder <t
 
 O ChatCLI pode rodar como servidor gRPC, permitindo acesso remoto de qualquer terminal, Docker ou Kubernetes.
 
-### `chatcli serve` — Iniciar Servidor
+### `chatcli server` — Iniciar Servidor
 
 ```bash
-chatcli serve                                    # porta 50051, sem auth
-chatcli serve --port 8080 --token meu-token      # com porta e auth customizados
-chatcli serve --tls-cert cert.pem --tls-key key.pem  # com TLS
+chatcli server                                    # porta 50051, sem auth
+chatcli server --port 8080 --token meu-token      # com porta e auth customizados
+chatcli server --tls-cert cert.pem --tls-key key.pem  # com TLS
 ```
 
 ### `chatcli connect` — Conectar ao Servidor
@@ -1310,10 +1312,10 @@ targets:
 
 ```bash
 # Servidor multi-target (todos os clientes recebem contexto automaticamente)
-chatcli serve --watch-config targets.yaml
+chatcli server --watch-config targets.yaml
 
 # Ou legado single-target
-chatcli serve --watch-deployment myapp --watch-namespace production
+chatcli server --watch-deployment myapp --watch-namespace production
 ```
 
 ### O que e Coletado

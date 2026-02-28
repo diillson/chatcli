@@ -332,7 +332,7 @@ targets:
 chatcli watch --config targets.yaml
 
 # Ou via servidor (toda a equipe tem acesso)
-chatcli serve --watch-config targets.yaml
+chatcli server --watch-config targets.yaml
 ```
 
 A IA recebe contexto detalhado dos targets com problemas e resumos compactos dos saudáveis, respeitando o budget de `maxContextChars`.
@@ -483,7 +483,7 @@ spec:
 
 - [ ] Verificar acesso ao cluster (`kubectl get pods`)
 - [ ] Verificar permissoes RBAC para pods, logs, eventos
-- [ ] Escolher modo: local (`chatcli watch`) ou servidor (`chatcli serve`)
+- [ ] Escolher modo: local (`chatcli watch`) ou servidor (`chatcli server`)
 - [ ] Definir targets: single (`--deployment`) ou multi (`--config targets.yaml`)
 - [ ] (Opcional) Configurar `metricsPort` para Prometheus scraping
 - [ ] Configurar intervalo e janela adequados ao cenário

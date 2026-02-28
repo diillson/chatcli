@@ -40,6 +40,7 @@ func RunWorkerReAct(
 	llmClient client.LLMClient,
 	lockMgr *FileLockManager,
 	skills *SkillSet,
+	policyChecker PolicyChecker,
 	logger *zap.Logger,
 ) (*AgentResult, error) {
 	startTime := time.Now()
@@ -161,6 +162,24 @@ func RunWorkerReAct(
 		executeOne := func(v validatedTC) execResult {
 			if v.blocked {
 				return execResult{index: v.index, output: v.msg + "\n"}
+			}
+
+			// --- POLICY CHECK ---
+			if policyChecker != nil {
+				allowed, msg := policyChecker.CheckAndPrompt(ctx, v.tc.Name, v.tc.Args)
+				if !allowed {
+					blockedMsg := fmt.Sprintf("[BLOCKED BY POLICY] %s", msg)
+					record := ToolCallRecord{
+						Name:  v.subcmd,
+						Args:  v.tc.Args,
+						Error: fmt.Errorf("blocked by security policy"),
+					}
+					logger.Warn("Tool call blocked by policy",
+						zap.String("subcmd", v.subcmd),
+						zap.String("message", msg),
+					)
+					return execResult{index: v.index, record: record, output: blockedMsg + "\n"}
+				}
 			}
 
 			filePath := extractFilePathFromArgs(v.tc.Args)

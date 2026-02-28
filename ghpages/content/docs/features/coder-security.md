@@ -23,23 +23,57 @@ Toda a vez que a IA sugere uma ação (como criar um arquivo ou rodar um script)
 
 ## Menu de Aprovação Interativo
 
-Quando uma ação cai no estado "Ask", você verá uma caixa de segurança:
+Quando uma ação cai no estado "Ask", você verá uma caixa de segurança com informações contextuais sobre a ação:
 
 ```text
-[SECURITY CHECK]
-------------------------------------------------------------
- [!] Ação requer aprovação: @coder write
- Params: --file main.go --content ...
- Regra: Nenhuma regra encontrada para '@coder write'
--------------------------------------------------------------
-Escolha:
-  [y] Sim (uma vez)
-  [a] ALLOW ALWAYS (Permitir '@coder write' sempre)
-  [n] Não (pular)
-  [d] DENY FOREVER (Bloquear '@coder write' sempre)
+╔══════════════════════════════════════════════════════════╗
+║              🔒 SECURITY CHECK                            ║
+╚══════════════════════════════════════════════════════════╝
+ ⚡ Ação:   Escrever arquivo
+           arquivo: main.go
+ 📜 Regra:  nenhuma regra para '@coder write'
+ ──────────────────────────────────────────────────────────
+ Escolha:
+   [y] Sim, executar (uma vez)
+   [a] Permitir sempre (@coder write)
+   [n] Não, pular
+   [d] Bloquear sempre (@coder write)
 
-> _
+ > _
 ```
+
+O prompt exibe a **ação em linguagem humana** (ex.: "Escrever arquivo", "Executar comando no shell", "Modificar arquivo (patch)") e os **detalhes parseados** dos argumentos JSON, em vez de mostrar JSON bruto.
+
+#### Tipos de Ação Reconhecidos
+
+| Subcomando | Label no Prompt | Detalhes Exibidos |
+|------------|----------------|-------------------|
+| `exec` | Executar comando no shell | `$ <comando>`, `dir: <cwd>` |
+| `test` | Executar testes | `$ <comando>`, `dir: <cwd>` |
+| `write` | Escrever arquivo | `arquivo: <path>` |
+| `patch` | Modificar arquivo (patch) | `arquivo: <path>` |
+| `read` | Ler arquivo | `arquivo: <path>` |
+| `search` | Pesquisar no código | `termo: <pattern>`, `dir: <path>` |
+| `tree` | Listar estrutura de diretórios | `dir: <path>` |
+
+### Prompt com Contexto no Modo Paralelo
+
+Quando a ação é solicitada por um **worker do modo multi-agent**, o prompt inclui informações adicionais sobre qual agent está requisitando:
+
+```text
+╔══════════════════════════════════════════════════════════╗
+║              🔒 SECURITY CHECK                            ║
+╚══════════════════════════════════════════════════════════╝
+ 🤖 Agent:  shell
+ 📋 Tarefa: Executar testes do módulo auth
+ ──────────────────────────────────────────────────────────
+ ⚡ Ação:   Executar comando no shell
+           $ go test ./pkg/auth/...
+ 📜 Regra:  nenhuma regra para '@coder exec'
+ ──────────────────────────────────────────────────────────
+```
+
+Isso permite que você saiba **exatamente** qual agent está solicitando a ação e por que, facilitando decisões de segurança informadas.
 
 ### Opções:
 
@@ -47,6 +81,8 @@ Escolha:
 * **a (Always):** Cria uma regra permanente de **ALLOW** para esse comando (ex: libera todas as escritas com `@coder write`).
 * **n (No)** Pula a execução. A IA recebe um erro informando que o usuário negou.
 * **d (Deny):** Cria uma regra permanente de **DENY**. A ação será bloqueada automaticamente no futuro.
+
+> **Nota:** Para comandos `exec`, as opções "Always" e "Deny Forever" não são disponibilizadas, pois cada execução é única e requer aprovação individual.
 
 ---
 
@@ -145,6 +181,20 @@ export CHATCLI_AGENT_DENYLIST="terraform destroy;kubectl delete namespace"
 2. **Libere Leituras:** Geralmente, é seguro dar `Always` para `coder read`, `coder tree`, `coder search` e Git read-only (`git-status`, `git-diff`, `git-log`).
 3. **Seja Específico:** O matching usa word boundary para prefixos de subcomando e path-prefix para argumentos. Você pode liberar `coder exec --cmd 'ls` mas bloquear `coder exec --cmd 'rm`.
 4. **Exec Seguro:** O `@coder exec` bloqueia padrões perigosos por padrão (50+ regras). Use `--allow-unsafe` apenas quando necessário.
+
+---
+
+## Governança no Modo Multi-Agent (Paralelo)
+
+As policies de segurança são **totalmente respeitadas** pelos workers do modo multi-agent. Quando o `/coder` ou `/agent` opera em modo paralelo, cada worker verifica as regras do `coder_policy.json` antes de executar qualquer ação.
+
+### Comportamento
+
+- **allow**: Ação executada automaticamente pelo worker
+- **deny**: Ação bloqueada; o worker recebe `[BLOCKED BY POLICY]` e continua seu fluxo
+- **ask**: O worker **pausa**, o spinner de progresso é suspenso, e o prompt de segurança é exibido
+
+Os prompts de segurança de múltiplos workers são **serializados** — apenas um prompt por vez é exibido, evitando sobreposição visual. Regras criadas durante a sessão (via "Always" ou "Deny") são imediatamente visíveis para todos os workers subsequentes.
 
 ---
 

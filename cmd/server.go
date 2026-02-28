@@ -25,8 +25,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// ServeOptions holds the flags for the 'serve' subcommand.
-type ServeOptions struct {
+// ServerOptions holds the flags for the 'server' subcommand.
+type ServerOptions struct {
 	Port        int
 	Token       string
 	CertFile    string
@@ -45,11 +45,11 @@ type ServeOptions struct {
 	WatchConfig     string // path to multi-target watch config YAML
 }
 
-// RunServe executes the 'chatcli serve' subcommand.
-func RunServe(args []string, llmMgr manager.LLMManager, logger *zap.Logger) error {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+// RunServer executes the 'chatcli server' subcommand.
+func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) error {
+	fs := flag.NewFlagSet("server", flag.ContinueOnError)
 
-	opts := &ServeOptions{}
+	opts := &ServerOptions{}
 	fs.IntVar(&opts.Port, "port", getEnvInt("CHATCLI_SERVER_PORT", 50051), "gRPC server port")
 	fs.StringVar(&opts.Token, "token", os.Getenv("CHATCLI_SERVER_TOKEN"), "Authentication token (empty = no auth)")
 	fs.StringVar(&opts.CertFile, "tls-cert", os.Getenv("CHATCLI_SERVER_TLS_CERT"), "TLS certificate file path")
@@ -239,9 +239,9 @@ func getEnvInt(key string, defaultVal int) int {
 	return defaultVal
 }
 
-// PrintServeUsage prints help for the serve subcommand.
-func PrintServeUsage() {
-	fmt.Println(`Usage: chatcli serve [flags]
+// PrintServerUsage prints help for the server subcommand.
+func PrintServerUsage() {
+	fmt.Println(`Usage: chatcli server [flags]
 
 Start the ChatCLI gRPC server for remote access.
 
@@ -264,13 +264,13 @@ Flags:
   --watch-kubeconfig <path>   Path to kubeconfig (env: CHATCLI_KUBECONFIG)
 
 Examples:
-  chatcli serve
-  chatcli serve --port 8080 --token mysecret
-  chatcli serve --tls-cert cert.pem --tls-key key.pem
+  chatcli server
+  chatcli server --port 8080 --token mysecret
+  chatcli server --tls-cert cert.pem --tls-key key.pem
 
   # Server with single-target K8s watcher
-  chatcli serve --watch-deployment myapp --watch-namespace production
+  chatcli server --watch-deployment myapp --watch-namespace production
 
   # Server with multi-target K8s watcher (config file)
-  chatcli serve --watch-config targets.yaml`)
+  chatcli server --watch-config targets.yaml`)
 }

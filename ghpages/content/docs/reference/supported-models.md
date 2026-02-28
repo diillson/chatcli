@@ -17,6 +17,8 @@ Os modelos da OpenAI são ideais para uma vasta gama de tarefas, desde a geraç�
 
 | Nome do Modelo (ID) | Aliases | Nome de Exibição | Janela de Contexto |
 | :------------------ | :------ | :--------------- | :----------------- |
+| `gpt-5.3-codex`     | — | GPT-5.3 Codex    | 200,000 tokens     |
+| `gpt-5.2`           | — | GPT-5.2          | 100,000 tokens     |
 | `gpt-5`             | `gpt-5-mini`, `gpt-5-nano` | GPT-5            | 50,000 tokens      |
 | `gpt-4o`            | — | GPT-4o           | 50,000 tokens      |
 | `gpt-4o-mini`       | — | GPT-4o mini      | 50,000 tokens      |

@@ -59,6 +59,7 @@ type AgentMode struct {
 	agentDispatcher *workers.Dispatcher
 	agentRegistry   *workers.Registry
 	fileLockMgr     *workers.FileLockManager
+	policyAdapter   *workerPolicyAdapter
 	parallelMode    bool
 }
 
@@ -1859,6 +1860,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				a.turnTimer.Start(ctx, func(d time.Duration) {
 					fmt.Print(metrics.FormatTimerStatus(d, modelName, agentLabel))
 				})
+				// Give the policy adapter access to the spinner so it can
+				// pause/resume around interactive security prompts.
+				if a.policyAdapter != nil {
+					a.policyAdapter.setSpinner(a.turnTimer)
+				}
 				agentResults := a.agentDispatcher.Dispatch(ctx, agentCalls)
 				a.turnTimer.Stop()
 				fmt.Print(metrics.ClearLine())
@@ -3501,9 +3507,25 @@ func (a *AgentMode) initMultiAgent() bool {
 		return false
 	}
 
-	// Only initialize once
+	// Registry already initialized — just update provider/model in case
+	// the user switched providers at runtime.
 	if a.agentRegistry != nil {
 		a.parallelMode = true
+		if a.agentDispatcher != nil {
+			provider := a.cli.Provider
+			if provider == "" {
+				provider = os.Getenv("LLM_PROVIDER")
+			}
+			if provider == "" {
+				provider = config.Global.GetString("LLM_PROVIDER")
+			}
+			model := a.cli.Model
+			a.agentDispatcher.UpdateProviderModel(provider, model)
+			a.logger.Info("Dispatcher provider/model updated for parallel agents",
+				zap.String("provider", provider),
+				zap.String("model", model),
+			)
+		}
 		return true
 	}
 
@@ -3559,6 +3581,16 @@ func (a *AgentMode) initMultiAgent() bool {
 	}
 
 	a.agentDispatcher = workers.NewDispatcher(a.agentRegistry, a.cli.manager, cfg, a.logger)
+
+	// Attach policy enforcement so parallel workers respect security rules
+	if pa, err := newWorkerPolicyAdapter(a.logger); err == nil {
+		a.policyAdapter = pa
+		a.agentDispatcher.SetPolicyChecker(pa)
+		a.logger.Info("Policy enforcement enabled for parallel workers")
+	} else {
+		a.logger.Warn("Failed to initialize policy checker for parallel workers", zap.Error(err))
+	}
+
 	a.parallelMode = true
 
 	a.logger.Info("Multi-agent orchestration enabled",

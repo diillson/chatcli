@@ -28,11 +28,12 @@ const DefaultWorkerTimeout = 5 * time.Minute
 
 // Dispatcher orchestrates parallel agent execution.
 type Dispatcher struct {
-	registry *Registry
-	lockMgr  *FileLockManager
-	llmMgr   manager.LLMManager
-	config   DispatcherConfig
-	logger   *zap.Logger
+	registry      *Registry
+	lockMgr       *FileLockManager
+	llmMgr        manager.LLMManager
+	config        DispatcherConfig
+	policyChecker PolicyChecker
+	logger        *zap.Logger
 }
 
 // NewDispatcher creates a Dispatcher with the given dependencies.
@@ -60,6 +61,19 @@ func NewDispatcher(
 // MaxWorkers returns the maximum number of concurrent worker goroutines.
 func (d *Dispatcher) MaxWorkers() int {
 	return d.config.MaxWorkers
+}
+
+// UpdateProviderModel updates the provider and model used by worker instances.
+// This ensures that runtime provider/model changes are respected by parallel agents.
+func (d *Dispatcher) UpdateProviderModel(provider, model string) {
+	d.config.Provider = provider
+	d.config.Model = model
+}
+
+// SetPolicyChecker sets the policy checker for enforcing security policies
+// on tool calls executed by parallel workers.
+func (d *Dispatcher) SetPolicyChecker(pc PolicyChecker) {
+	d.policyChecker = pc
 }
 
 // Dispatch executes a batch of agent calls, respecting parallelism settings.
@@ -176,14 +190,20 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 		}
 	}
 
+	// Embed agent metadata in context so the policy checker can show
+	// meaningful context (agent name, task description) in security prompts.
+	agentCtx := context.WithValue(ctx, CtxKeyAgentName, string(call.Agent))
+	agentCtx = context.WithValue(agentCtx, CtxKeyAgentTask, call.Task)
+
 	// Create worker context with timeout
-	workerCtx, cancel := context.WithTimeout(ctx, d.config.WorkerTimeout)
+	workerCtx, cancel := context.WithTimeout(agentCtx, d.config.WorkerTimeout)
 	defer cancel()
 
 	deps := &WorkerDeps{
-		LLMClient: llmClient,
-		LockMgr:   d.lockMgr,
-		Logger:    d.logger.With(zap.String("agent", string(call.Agent)), zap.String("callID", call.ID)),
+		LLMClient:     llmClient,
+		LockMgr:       d.lockMgr,
+		PolicyChecker: d.policyChecker,
+		Logger:        d.logger.With(zap.String("agent", string(call.Agent)), zap.String("callID", call.ID)),
 	}
 
 	// Execute the agent

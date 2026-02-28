@@ -1,5 +1,5 @@
 +++
-title = "Modo Servidor (chatcli serve)"
+title = "Modo Servidor (chatcli server)"
 linkTitle = "Modo Servidor"
 weight = 60
 description = "Transforme o ChatCLI em um servidor gRPC para acesso remoto de qualquer terminal, Docker ou Kubernetes."
@@ -22,23 +22,23 @@ O **Modo Servidor** transforma o ChatCLI em um serviço gRPC de alta performance
 
 ## Iniciando o Servidor
 
-O comando `chatcli serve` inicia o servidor gRPC:
+O comando `chatcli server` inicia o servidor gRPC:
 
 ```bash
 # Modo mais simples: servidor na porta padrão (50051)
-chatcli serve
+chatcli server
 
 # Com porta e autenticação customizados
-chatcli serve --port 8080 --token meu-token-secreto
+chatcli server --port 8080 --token meu-token-secreto
 
 # Com TLS habilitado
-chatcli serve --tls-cert cert.pem --tls-key key.pem
+chatcli server --tls-cert cert.pem --tls-key key.pem
 
 # Com K8s Watcher integrado (single-target)
-chatcli serve --watch-deployment myapp --watch-namespace production
+chatcli server --watch-deployment myapp --watch-namespace production
 
 # Com K8s Watcher multi-target + Prometheus metrics
-chatcli serve --watch-config targets.yaml
+chatcli server --watch-config targets.yaml
 ```
 
 ---
@@ -100,7 +100,7 @@ Para desabilitar, use `--metrics-port 0`.
 Por padrão, o servidor não exige autenticação. Qualquer cliente pode conectar:
 
 ```bash
-chatcli serve  # sem --token = acesso livre
+chatcli server  # sem --token = acesso livre
 ```
 
 ### Com Token
@@ -109,11 +109,11 @@ Defina um token para proteger o servidor:
 
 ```bash
 # Via flag
-chatcli serve --token meu-token-secreto
+chatcli server --token meu-token-secreto
 
 # Via variável de ambiente
 export CHATCLI_SERVER_TOKEN=meu-token-secreto
-chatcli serve
+chatcli server
 ```
 
 O cliente precisa fornecer o mesmo token ao conectar:
@@ -127,7 +127,7 @@ chatcli connect servidor:50051 --token meu-token-secreto
 Para conexões encriptadas, forneca certificado e chave TLS:
 
 ```bash
-chatcli serve --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+chatcli server --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
 ```
 
 O cliente usa a flag `--tls` e opcionalmente `--ca-cert`:
@@ -149,7 +149,7 @@ O servidor usa suas próprias API keys configuradas via variáveis de ambiente:
 ```bash
 export OPENAI_API_KEY=sk-xxx
 export LLM_PROVIDER=OPENAI
-chatcli serve
+chatcli server
 ```
 
 Nenhuma configuração adicional necessária no cliente.
@@ -318,13 +318,13 @@ Quando o servidor e iniciado com `--watch-config` ou `--watch-deployment`, o K8s
 ### Single-Target (legado)
 
 ```bash
-chatcli serve --watch-deployment myapp --watch-namespace production
+chatcli server --watch-deployment myapp --watch-namespace production
 ```
 
 ### Multi-Target (recomendado)
 
 ```bash
-chatcli serve --watch-config targets.yaml
+chatcli server --watch-config targets.yaml
 ```
 
 O arquivo `targets.yaml` define múltiplos deployments, métricas Prometheus e budget de contexto. Veja [K8s Watcher](/docs/features/k8s-watcher/#arquivo-de-configuração-multi-target) para o formato completo.

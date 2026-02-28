@@ -49,9 +49,9 @@ func NewOpenAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, 
 	}
 }
 
-// GetModelName retorna o nome do modelo de linguagem utilizado pelo cliente.
+// GetModelName retorna o nome amigável do modelo OpenAI via catálogo.
 func (c *OpenAIClient) GetModelName() string {
-	return c.model
+	return catalog.GetDisplayName(catalog.ProviderOpenAI, c.model)
 }
 
 func (c *OpenAIClient) getMaxTokens() int {

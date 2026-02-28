@@ -141,7 +141,7 @@ Use estas flags ao executar `chatcli` diretamente do seu terminal para automaç�
 
 O ChatCLI suporta subcomandos para funcionalidades avançadas de servidor e monitoramento.
 
-### `chatcli serve` — Modo Servidor gRPC
+### `chatcli server` — Modo Servidor gRPC
 
 Inicia o ChatCLI como servidor gRPC para acesso remoto.
 
@@ -200,6 +200,43 @@ Monitora um deployment Kubernetes e injeta contexto K8s nas conversas com a IA.
 | `--model <nome>` | Modelo de LLM | `.env` |
 | `-p <prompt>` | One-shot: envia prompt com contexto K8s e sai | `""` |
 | `--max-tokens <int>` | Máximo de tokens na resposta | `0` |
+
+---
+
+## Atalhos de Teclado (Modo Interativo)
+
+O ChatCLI suporta atalhos de teclado avançados para navegação no prompt, compatíveis com macOS (Terminal.app, iTerm2, Alacritty, Kitty, WezTerm).
+
+### Navegação por Palavra
+
+| Atalho | Ação |
+| --- | --- |
+| **Alt/Option + ←** | Mover cursor uma palavra à esquerda |
+| **Alt/Option + →** | Mover cursor uma palavra à direita |
+| **Ctrl + ←** | Mover cursor uma palavra à esquerda |
+| **Ctrl + →** | Mover cursor uma palavra à direita |
+
+### Navegação por Linha
+
+| Atalho | Ação |
+| --- | --- |
+| **Cmd + ←** / **Home** | Mover cursor para o início da linha |
+| **Cmd + →** / **End** | Mover cursor para o final da linha |
+
+### Edição
+
+| Atalho | Ação |
+| --- | --- |
+| **Alt/Option + Backspace** | Deletar palavra à esquerda |
+| **Ctrl + W** | Deletar palavra à esquerda |
+| **Ctrl + K** | Deletar do cursor até o final da linha |
+
+### Detecção de Paste
+
+O ChatCLI detecta automaticamente texto colado via *Bracketed Paste Mode*:
+
+- **Pastes pequenos** (≤ 150 caracteres): renderizados normalmente no prompt
+- **Pastes grandes** (> 150 caracteres): substituídos por um placeholder compacto `«N chars | M lines»` para evitar corrupção visual do terminal. O conteúdo real é preservado e enviado integralmente ao pressionar Enter.
 
 ---
 
