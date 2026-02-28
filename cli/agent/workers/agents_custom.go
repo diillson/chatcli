@@ -13,12 +13,18 @@ import (
 
 // builtinAgentTypes lists the reserved agent type names that cannot be overridden by custom agents.
 var builtinAgentTypes = map[AgentType]bool{
-	AgentTypeFile:    true,
-	AgentTypeCoder:   true,
-	AgentTypeShell:   true,
-	AgentTypeGit:     true,
-	AgentTypeSearch:  true,
-	AgentTypePlanner: true,
+	AgentTypeFile:        true,
+	AgentTypeCoder:       true,
+	AgentTypeShell:       true,
+	AgentTypeGit:         true,
+	AgentTypeSearch:      true,
+	AgentTypePlanner:     true,
+	AgentTypeReviewer:    true,
+	AgentTypeTester:      true,
+	AgentTypeRefactor:    true,
+	AgentTypeDiagnostics: true,
+	AgentTypeFormatter:   true,
+	AgentTypeDeps:        true,
 }
 
 // CustomAgent adapts a persona.Agent into a WorkerAgent for multi-agent orchestration.

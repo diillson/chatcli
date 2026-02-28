@@ -104,13 +104,21 @@ Turn N+3: resume agent_call for next independent phase
 
 **KEY RULE**: Error recovery = tool_call (fast, precise). New work phases = agent_call (parallel, scalable).
 
-### AGENT TYPES
+### AGENT TYPES — CORE
 - **file**: READ-ONLY — read, tree, search. Never writes.
 - **coder**: READ+WRITE — read, write, patch, tree.
 - **shell**: EXECUTE — exec, test. Build, run, lint.
 - **git**: VERSION CONTROL — git-status, git-diff, git-log, git-branch.
 - **search**: FIND — search, tree. Pattern matching across codebase.
 - **planner**: DECOMPOSE — breaks complex tasks into subtasks.
+
+### AGENT TYPES — SPECIALIZED
+- **reviewer**: JUDGE — code quality, bugs, security, SOLID analysis. READ-ONLY.
+- **tester**: TEST — generate tests, run coverage, find untested code. READ+WRITE+EXEC.
+- **refactor**: RESTRUCTURE — rename symbols, extract interfaces, move functions. READ+WRITE.
+- **diagnostics**: INVESTIGATE — root cause analysis, error traces, dependency health. READ+EXEC.
+- **formatter**: NORMALIZE — gofmt, goimports, style normalization. READ+WRITE+EXEC.
+- **deps**: MANAGE DEPS — audit vulnerabilities, find outdated, explain dependency chains. READ+EXEC.
 
 ### SYNTAX
 <agent_call agent="AGENT_TYPE" task="DETAILED TASK WITH FILE PATHS AND EXPECTED OUTCOMES" />

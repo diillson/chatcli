@@ -12,12 +12,18 @@ import (
 type AgentType string
 
 const (
-	AgentTypeFile    AgentType = "file"
-	AgentTypeCoder   AgentType = "coder"
-	AgentTypeShell   AgentType = "shell"
-	AgentTypeGit     AgentType = "git"
-	AgentTypeSearch  AgentType = "search"
-	AgentTypePlanner AgentType = "planner"
+	AgentTypeFile        AgentType = "file"
+	AgentTypeCoder       AgentType = "coder"
+	AgentTypeShell       AgentType = "shell"
+	AgentTypeGit         AgentType = "git"
+	AgentTypeSearch      AgentType = "search"
+	AgentTypePlanner     AgentType = "planner"
+	AgentTypeReviewer    AgentType = "reviewer"
+	AgentTypeTester      AgentType = "tester"
+	AgentTypeRefactor    AgentType = "refactor"
+	AgentTypeDiagnostics AgentType = "diagnostics"
+	AgentTypeFormatter   AgentType = "formatter"
+	AgentTypeDeps        AgentType = "deps"
 )
 
 // AgentCall represents a parsed <agent_call> directive from the orchestrator.

@@ -83,7 +83,7 @@ func TestRegistry_CatalogString_Empty(t *testing.T) {
 func TestSetupDefaultRegistry(t *testing.T) {
 	r := SetupDefaultRegistry()
 	all := r.All()
-	if len(all) != 6 {
+	if len(all) != 12 {
 		t.Fatalf("expected 6 default agents, got %d", len(all))
 	}
 
