@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.64.0](https://github.com/diillson/chatcli/compare/v1.63.0...v1.64.0) (2026-02-28)
+
+
+### Features
+
+* parallel security policies, enhanced prompt UI, smart paste & keyboard navigation ([#585](https://github.com/diillson/chatcli/issues/585)) ([27bd66f](https://github.com/diillson/chatcli/commit/27bd66f7887212029c0646d51674fd44503fde03))
+
 ## [1.63.0](https://github.com/diillson/chatcli/compare/v1.62.1...v1.63.0) (2026-02-28)
 
 
