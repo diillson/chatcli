@@ -227,6 +227,17 @@ docker cp chatcli-server:/home/chatcli/.chatcli/sessions ./backup/
 # Kubernetes: PVCjá configurado no Helm chart
 ```
 
+### Sessões Remotas
+
+Quando conectado a um servidor, os comandos `/session` interagem com **ambos** local e remoto:
+
+- **`/session save`** pergunta onde salvar: local, remoto ou ambos
+- **`/session list`** exibe sessões de ambos em seções separadas
+- **`/session load`** busca em ambos; se encontrada nos dois, pergunta de qual carregar
+- **`/session delete`** verifica ambos; se encontrada nos dois, pergunta de qual remover
+
+Isso permite que devs salvem sessões no servidor para compartilhar com a equipe, ou localmente para uso offline.
+
 ---
 
 ## Resumo
