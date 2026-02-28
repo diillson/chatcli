@@ -142,7 +142,7 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		Name:            "chatcli",
 		Image:           fmt.Sprintf("%s:%s", repo, tag),
 		ImagePullPolicy: pullPolicy,
-		Command:         []string{"chatcli", "serve"},
+		Command:         []string{"chatcli", "server"},
 		Args:            args,
 		Ports: []corev1.ContainerPort{
 			{

@@ -26,11 +26,11 @@ import (
 )
 
 func main() {
-	// Check for subcommands (serve, connect) before processing standard flags.
+	// Check for subcommands (server, connect) before processing standard flags.
 	// These subcommands have their own flag sets and should not go through cli.Parse().
 	if len(os.Args) > 1 {
 		subcmd := os.Args[1]
-		if subcmd == "serve" || subcmd == "connect" || subcmd == "watch" {
+		if subcmd == "server" || subcmd == "serve" || subcmd == "connect" || subcmd == "watch" {
 			runSubcommand(subcmd, os.Args[2:])
 			return
 		}
@@ -176,7 +176,7 @@ func handleGracefulShutdown(cancelFunc context.CancelFunc, logger *zap.Logger) {
 	}()
 }
 
-// runSubcommand handles the 'serve' and 'connect' subcommands.
+// runSubcommand handles the 'server' and 'connect' subcommands.
 // These have their own initialization flow separate from the standard CLI.
 func runSubcommand(subcmd string, args []string) {
 	i18n.Init()
@@ -223,8 +223,8 @@ func runSubcommand(subcmd string, args []string) {
 	defer cancel()
 
 	switch subcmd {
-	case "serve":
-		if err := cmd.RunServe(args, llmMgr, logger); err != nil {
+	case "server", "serve":
+		if err := cmd.RunServer(args, llmMgr, logger); err != nil {
 			logger.Fatal("Server failed", zap.Error(err))
 		}
 	case "connect":

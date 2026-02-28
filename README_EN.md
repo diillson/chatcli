@@ -263,7 +263,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     OLLAMA_MAX_TOKENS=5000
     OLLAMA_FILTER_THINKING=true  # Filters intermediate reasoning in responses (e.g. for Qwen3, llama3... - THIS IS REQUIRED TO BE TRUE for Agent mode. Works well with some OLLAMA models that have "out loud" reasoning)
 
-    # Remote Server Settings (chatcli serve)
+    # Remote Server Settings (chatcli server)
     CHATCLI_SERVER_PORT=50051
     CHATCLI_SERVER_TOKEN=my-secret-token
     # CHATCLI_SERVER_TLS_CERT=/path/to/cert.pem
@@ -274,7 +274,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
     # CHATCLI_REMOTE_TOKEN=my-secret-token
     # CHATCLI_CLIENT_API_KEY=sk-xxx    # Your own API key (forwarded to server)
 
-    # K8s Watcher Settings (chatcli watch / chatcli serve --watch-*)
+    # K8s Watcher Settings (chatcli watch / chatcli server --watch-*)
     # CHATCLI_WATCH_DEPLOYMENT=myapp          # Single deployment (legacy)
     # CHATCLI_WATCH_NAMESPACE=production
     # CHATCLI_WATCH_INTERVAL=30s
@@ -1135,12 +1135,12 @@ When an agent is loaded, all interactions with `/agent <task>` or `/coder <task>
 
 ChatCLI can run as a gRPC server, allowing remote access from any terminal, Docker, or Kubernetes.
 
-### `chatcli serve` — Start Server
+### `chatcli server` — Start Server
 
 ```bash
-chatcli serve                                    # port 50051, no auth
-chatcli serve --port 8080 --token my-token       # custom port and auth
-chatcli serve --tls-cert cert.pem --tls-key key.pem  # with TLS
+chatcli server                                    # port 50051, no auth
+chatcli server --port 8080 --token my-token       # custom port and auth
+chatcli server --tls-cert cert.pem --tls-key key.pem  # with TLS
 ```
 
 ### `chatcli connect` — Connect to Server
@@ -1259,10 +1259,10 @@ targets:
 
 ```bash
 # Multi-target server (all clients receive context automatically)
-chatcli serve --watch-config targets.yaml
+chatcli server --watch-config targets.yaml
 
 # Or legacy single-target
-chatcli serve --watch-deployment myapp --watch-namespace production
+chatcli server --watch-deployment myapp --watch-namespace production
 ```
 
 ### What is Collected

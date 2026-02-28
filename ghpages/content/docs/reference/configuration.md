@@ -134,7 +134,7 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 
 ---
 
-## Configuração do Modo Servidor (`chatcli serve`)
+## Configuração do Modo Servidor (`chatcli server`)
 
 | Variável | Descrição | Padrão |
 | :--- | :--- | :--- |
@@ -167,7 +167,7 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 
 ---
 
-## Configuração do K8s Watcher (`chatcli watch` / `chatcli serve --watch-*`)
+## Configuração do K8s Watcher (`chatcli watch` / `chatcli server --watch-*`)
 
 | Variável | Descrição | Padrão |
 | :--- | :--- | :--- |

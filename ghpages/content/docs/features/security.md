@@ -35,11 +35,11 @@ O servidor gRPC usa autenticação via Bearer token no header `authorization` de
 
 ```bash
 # Definir token via flag
-chatcli serve --token meu-token-secreto
+chatcli server --token meu-token-secreto
 
 # Ou via variável de ambiente
 export CHATCLI_SERVER_TOKEN=meu-token-secreto
-chatcli serve
+chatcli server
 ```
 
 O endpoint `/Health` é sempre acessível sem autenticação para permitir health checks de load balancers e orquestradores.
@@ -50,10 +50,10 @@ O TLS é **totalmente opcional**. Em ambiente de desenvolvimento local, você po
 
 ```bash
 # Produção: com TLS
-chatcli serve --tls-cert cert.pem --tls-key key.pem --token meu-token
+chatcli server --tls-cert cert.pem --tls-key key.pem --token meu-token
 
 # Desenvolvimento: sem TLS (um warning será logado)
-chatcli serve
+chatcli server
 ```
 
 Quando o cliente se conecta sem TLS, um log de warning é emitido para lembrar sobre o uso em produção. O comportamento funcional não muda — a conexão continua funcionando normalmente.
@@ -186,7 +186,7 @@ O gRPC reflection expoe o schema completo do serviço, permitindo que ferramenta
 ```bash
 # Via variável de ambiente
 export CHATCLI_GRPC_REFLECTION=true
-chatcli serve
+chatcli server
 
 # Ou via campo EnableReflection no Config (programatico)
 ```
@@ -334,13 +334,13 @@ As credenciais OAuth são armazenadas com **criptografia AES-256-GCM** em `~/.ch
 
 ```bash
 export CHATCLI_SERVER_TOKEN=$(openssl rand -hex 32)
-chatcli serve --token $CHATCLI_SERVER_TOKEN
+chatcli server --token $CHATCLI_SERVER_TOKEN
 ```
 
 ### 2. Habilite TLS em produção
 
 ```bash
-chatcli serve --tls-cert cert.pem --tls-key key.pem
+chatcli server --tls-cert cert.pem --tls-key key.pem
 ```
 
 ### 3. Mantenha gRPC reflection desabilitado

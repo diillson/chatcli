@@ -266,7 +266,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     OLLAMA_MAX_TOKENS=5000
     OLLAMA_FILTER_THINKING=false  # Filtra raciocínio intermediário em respostas (ex.: para Qwen3, llama3... - ISSO É NECESSÁRIO TRUE para o modo Agent Funcionar bem com alguns modelos OLLAMA que tem raciocínio em "voz alta")
 
-    # Configurações do Servidor Remoto (chatcli serve)
+    # Configurações do Servidor Remoto (chatcli server)
     CHATCLI_SERVER_PORT=50051
     CHATCLI_SERVER_TOKEN=meu-token-secreto
     # CHATCLI_SERVER_TLS_CERT=/path/to/cert.pem
@@ -277,7 +277,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
     # CHATCLI_REMOTE_TOKEN=meu-token-secreto
     # CHATCLI_CLIENT_API_KEY=sk-xxx    # Sua própria API key (enviada ao servidor)
 
-    # Configurações do K8s Watcher (chatcli watch / chatcli serve --watch-*)
+    # Configurações do K8s Watcher (chatcli watch / chatcli server --watch-*)
     # CHATCLI_WATCH_DEPLOYMENT=myapp          # Deployment unico (legado)
     # CHATCLI_WATCH_NAMESPACE=production
     # CHATCLI_WATCH_INTERVAL=30s
@@ -1188,12 +1188,12 @@ Ao carregar um agente, todas as interações com `/agent <tarefa>` ou `/coder <t
 
 O ChatCLI pode rodar como servidor gRPC, permitindo acesso remoto de qualquer terminal, Docker ou Kubernetes.
 
-### `chatcli serve` — Iniciar Servidor
+### `chatcli server` — Iniciar Servidor
 
 ```bash
-chatcli serve                                    # porta 50051, sem auth
-chatcli serve --port 8080 --token meu-token      # com porta e auth customizados
-chatcli serve --tls-cert cert.pem --tls-key key.pem  # com TLS
+chatcli server                                    # porta 50051, sem auth
+chatcli server --port 8080 --token meu-token      # com porta e auth customizados
+chatcli server --tls-cert cert.pem --tls-key key.pem  # com TLS
 ```
 
 ### `chatcli connect` — Conectar ao Servidor
@@ -1312,10 +1312,10 @@ targets:
 
 ```bash
 # Servidor multi-target (todos os clientes recebem contexto automaticamente)
-chatcli serve --watch-config targets.yaml
+chatcli server --watch-config targets.yaml
 
 # Ou legado single-target
-chatcli serve --watch-deployment myapp --watch-namespace production
+chatcli server --watch-deployment myapp --watch-namespace production
 ```
 
 ### O que e Coletado

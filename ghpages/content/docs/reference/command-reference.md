@@ -141,7 +141,7 @@ Use estas flags ao executar `chatcli` diretamente do seu terminal para automaç�
 
 O ChatCLI suporta subcomandos para funcionalidades avançadas de servidor e monitoramento.
 
-### `chatcli serve` — Modo Servidor gRPC
+### `chatcli server` — Modo Servidor gRPC
 
 Inicia o ChatCLI como servidor gRPC para acesso remoto.
 

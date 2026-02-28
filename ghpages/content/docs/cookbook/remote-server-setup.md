@@ -47,7 +47,7 @@ docker compose up -d
 export CHATCLI_SERVER_TOKEN=equipe-token-2024
 export LLM_PROVIDER=CLAUDEAI
 export ANTHROPIC_API_KEY=sk-ant-xxx
-chatcli serve --port 50051
+chatcli server --port 50051
 ```
 
 ### Opção C: Kubernetes (Helm)
@@ -115,7 +115,7 @@ Para ambientes de produção, adicione TLS:
 # Ou usar mkcert para desenvolvimento
 
 # Iniciar com TLS
-chatcli serve \
+chatcli server \
   --tls-cert /etc/chatcli/cert.pem \
   --tls-key /etc/chatcli/key.pem \
   --token equipe-token-2024
@@ -139,7 +139,7 @@ export OPENAI_API_KEY=sk-xxx
 export ANTHROPIC_API_KEY=sk-ant-xxx
 export GOOGLEAI_API_KEY=AIzaSy-xxx
 export LLM_PROVIDER=CLAUDEAI  # padrão
-chatcli serve
+chatcli server
 ```
 
 ```bash
@@ -233,7 +233,7 @@ docker cp chatcli-server:/home/chatcli/.chatcli/sessions ./backup/
 
 | Componente | Configuração |
 |------------|-------------|
-| Servidor | `chatcli serve --token X` |
+| Servidor | `chatcli server --token X` |
 | Cliente | `chatcli connect --token X` |
 | Env Vars | `CHATCLI_REMOTE_ADDR`, `CHATCLI_REMOTE_TOKEN` |
 | TLS | `--tls-cert`, `--tls-key` (servidor) / `--tls` (cliente) |

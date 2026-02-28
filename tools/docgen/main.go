@@ -253,8 +253,8 @@ func generateSubcommandsSection() string {
 	builder.WriteString("## Subcomandos\n\n")
 	builder.WriteString("O ChatCLI suporta subcomandos para funcionalidades avançadas de servidor e monitoramento.\n\n")
 
-	// --- chatcli serve ---
-	builder.WriteString("### `chatcli serve` — Modo Servidor gRPC\n\n")
+	// --- chatcli server ---
+	builder.WriteString("### `chatcli server` — Modo Servidor gRPC\n\n")
 	builder.WriteString("Inicia o ChatCLI como servidor gRPC para acesso remoto.\n\n")
 
 	serveFlags := [][]string{

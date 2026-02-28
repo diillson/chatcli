@@ -50,10 +50,10 @@ chatcli watch --config targets.yaml -p "Quais deployments precisam de atenção?
 
 ```bash
 # Multi-target
-chatcli serve --watch-config targets.yaml
+chatcli server --watch-config targets.yaml
 
 # Single-target (legado)
-chatcli serve --watch-deployment myapp --watch-namespace production
+chatcli server --watch-deployment myapp --watch-namespace production
 ```
 
 Clientes conectados via `chatcli connect` recebem o contexto K8s automaticamente.
@@ -120,7 +120,7 @@ targets:
 | `-p <prompt>` | One-shot: envia e sai | | |
 | `--max-tokens` | Limite de tokens na resposta | | |
 
-### `chatcli serve` (flags do watcher)
+### `chatcli server` (flags do watcher)
 
 | Flag | Descrição | Padrão | Env Var |
 |------|-----------|--------|---------|
