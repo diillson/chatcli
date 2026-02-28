@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.64.0](https://github.com/diillson/chatcli/compare/v1.63.0...v1.64.0) (2026-02-28)
+
+
+### Features
+
+* **catalog:** add GPT-5.2 and GPT-5.3-codex model entries with display names and token limits
+* **parallel:** enforce coder_policy.json (allow/deny/ask) in multi-agent parallel workers with serialized security prompts
+* **security:** enhanced security prompt UI with agent context, parsed command details, and human-readable action labels
+* **metrics:** add Pause/Resume to timer for clean security prompt rendering without spinner overlap
+
+
+### Bug Fixes
+
+* **parallel:** fix parallel workers always using Anthropic provider regardless of runtime model switch
+* **openai:** use catalog display name for OAuth-authenticated models instead of raw model ID
+* **input:** smart paste placeholder for large pastes (> 150 chars) to prevent terminal corruption
+* **input:** add keyboard navigation bindings for Alt/Ctrl/Cmd + arrows on macOS terminals
+
 ## [1.63.0](https://github.com/diillson/chatcli/compare/v1.62.1...v1.63.0) (2026-02-28)
 
 

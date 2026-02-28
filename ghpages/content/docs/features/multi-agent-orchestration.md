@@ -329,7 +329,57 @@ O sistema implementa múltiplas camadas de proteção contra condições de corr
 3. **LLM clients independentes** — Cada worker cria sua própria instância de LLM client via factory pattern.
 4. **Engine stateless** — Cada worker instancia seu próprio `engine.Engine` fresh.
 5. **Context tree** — O contexto pai pode cancelar todos os workers via `context.WithCancel`.
-6. **Policy "Ask"** — Workers nunca auto-permitem ações sensíveis; escalam para o orquestrador.
+6. **Policy enforcement** — Workers respeitam integralmente o `coder_policy.json` (allow/deny/ask). Ações com policy "ask" pausam o spinner e exibem um prompt de segurança serializado para o usuário.
+
+---
+
+## Governança de Segurança no Modo Paralelo
+
+Os workers paralelos respeitam **todas as regras** do arquivo `coder_policy.json` (global e local). Isso significa que ações como `write`, `patch`, `exec` passam pela mesma verificação de policies que o modo sequencial.
+
+### Comportamento por Tipo de Regra
+
+| Regra | Comportamento no Worker |
+|-------|------------------------|
+| **allow** | Ação executada automaticamente, sem interrupção |
+| **deny** | Ação bloqueada silenciosamente; worker recebe erro `[BLOCKED BY POLICY]` |
+| **ask** | Worker **pausa**, spinner é suspenso, e um prompt de segurança é exibido ao usuário |
+
+### Serialização de Prompts
+
+Quando múltiplos workers precisam de aprovação simultaneamente, os prompts são **serializados via mutex** — apenas um prompt é exibido por vez. Após a resposta do usuário, o próximo worker na fila recebe seu prompt. Isso evita:
+
+- Sobreposição visual de prompts no terminal
+- Conflito de leitura no stdin
+- Spinner renderizando sobre o prompt de segurança
+
+### Prompt com Contexto do Agent
+
+O prompt de segurança no modo paralelo exibe **informações contextuais** sobre qual agent está solicitando a ação:
+
+```text
+╔══════════════════════════════════════════════════════════╗
+║              🔒 SECURITY CHECK                            ║
+╚══════════════════════════════════════════════════════════╝
+ 🤖 Agent:  coder
+ 📋 Tarefa: Refatorar módulo de autenticação
+ ──────────────────────────────────────────────────────────
+ ⚡ Ação:   Escrever arquivo
+           arquivo: pkg/auth/handler.go
+ 📜 Regra:  nenhuma regra para '@coder write'
+ ──────────────────────────────────────────────────────────
+ Escolha:
+   [y] Sim, executar (uma vez)
+   [a] Permitir sempre (@coder write)
+   [n] Não, pular
+   [d] Bloquear sempre (@coder write)
+```
+
+Isso permite que o usuário tome decisões informadas sobre cada ação, sabendo exatamente **qual agent** está pedindo e **por que**.
+
+### Respeito ao Provedor/Modelo em Runtime
+
+Os workers paralelos utilizam **sempre o provedor e modelo ativos** no momento do despacho. Se o usuário trocar de provedor (ex.: de Anthropic para Google AI) via `/switch`, os próximos despachos de agents usarão o novo provedor corretamente.
 
 ---
 

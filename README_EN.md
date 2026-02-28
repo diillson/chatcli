@@ -89,7 +89,9 @@
 - **Recursive Directory Exploration**: Processes entire projects while ignoring irrelevant folders (e.g., `node_modules`, `.git`).
 - **Dynamic Configuration and Persistent History**: Change providers, update configurations in real-time, and maintain history across sessions.
 - **Robustness**: Exponential backoff retry for handling external API errors.
-- **Paste Detection**: Automatically detects pasted text in the terminal via *Bracketed Paste Mode* and shows a visual notification (`📋 Pasted (X chars, Y lines)`), preventing confusion with long texts.
+- **Smart Paste Detection**: Automatically detects pasted text in the terminal via *Bracketed Paste Mode*. Large pastes (> 150 chars) are replaced by a compact placeholder (`«N chars | M lines»`) to prevent terminal corruption, with the real content preserved and sent on Enter.
+- **Advanced Prompt Navigation**: Keyboard shortcuts with Alt/Ctrl/Cmd + arrow keys for word and line navigation, compatible with major macOS terminals (Terminal.app, iTerm2, Alacritty, Kitty, WezTerm).
+- **Parallel Mode Security**: Multi-agent workers fully respect `coder_policy.json`, with serialized, contextual security prompts showing which agent is requesting each action.
 - **Remote Resource Discovery**: When connecting to a server, the client automatically discovers available plugins, agents, and skills on the server. Remote plugins can be executed on the server or downloaded locally; remote agents and skills are transferred and composed locally, merging with local resources.
 - **Hardened Security**: Constant-time token comparison, shell injection prevention, editor validation, gRPC reflection disabled by default, and hardened containers (read-only, no-new-privileges, drop ALL capabilities). See the [security documentation](https://diillson.github.io/chatcli/docs/features/security/).
 
