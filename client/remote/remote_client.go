@@ -235,6 +235,16 @@ func (c *Client) SaveSession(ctx context.Context, name string, history []models.
 	return nil
 }
 
+// DeleteSession deletes a session from the remote server.
+func (c *Client) DeleteSession(ctx context.Context, name string) error {
+	ctx = c.withAuth(ctx)
+	_, err := c.grpcClient.DeleteSession(ctx, &pb.DeleteSessionRequest{Name: name})
+	if err != nil {
+		return fmt.Errorf("remote DeleteSession failed: %w", err)
+	}
+	return nil
+}
+
 // Health checks if the remote server is healthy.
 func (c *Client) Health(ctx context.Context) (bool, string, error) {
 	ctx = c.withAuth(ctx)

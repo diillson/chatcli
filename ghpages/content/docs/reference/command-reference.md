@@ -93,10 +93,10 @@ Delega tarefas para a IA planejar e executar. O comando principal é `/agent <ta
 
 | Comando | Descrição |
 | --- | --- |
-| `/session save <nome>` | Salva a conversa atual com um nome. |
-| `/session load <nome>` | Carrega uma conversa salva. |
-| `/session list` | Lista todas as sessões salvas. |
-| `/session delete <nome>` | Deleta uma sessão salva. |
+| `/session save <nome>` | Salva a conversa atual com um nome. Quando conectado a um servidor remoto, pergunta onde salvar: **local**, **remoto** ou **ambos**. |
+| `/session load <nome>` | Carrega uma conversa salva. Quando conectado, busca em ambos local e remoto; se encontrada nos dois, pergunta de qual carregar. |
+| `/session list` | Lista todas as sessões salvas. Quando conectado, exibe sessões locais e remotas em seções separadas. |
+| `/session delete <nome>` | Deleta uma sessão salva. Quando conectado, verifica ambos e pergunta de qual remover se encontrada nos dois. |
 | `/session new` | Inicia uma nova sessão limpa. |
 
 #### Comandos de Contexto (`/context`)
