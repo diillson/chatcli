@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.65.1](https://github.com/diillson/chatcli/compare/v1.65.0...v1.65.1) (2026-03-01)
+
+
+### Bug Fixes
+
+* **coder:** fix truncated command in security check and raw XML tags in response card ([#590](https://github.com/diillson/chatcli/issues/590)) ([#591](https://github.com/diillson/chatcli/issues/591)) ([6e0e692](https://github.com/diillson/chatcli/commit/6e0e6920a780e5d3f61747d189e7af275550b0b3))
+
 ## [1.65.0](https://github.com/diillson/chatcli/compare/v1.64.0...v1.65.0) (2026-02-28)
 
 
