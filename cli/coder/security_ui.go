@@ -264,14 +264,21 @@ func extractField(argsMap map[string]interface{}, rawArgs string, keys ...string
 		}
 	}
 
-	// Try CLI-style: --key value
+	// Try CLI-style: --key value (join all remaining tokens after the flag)
 	if rawArgs != "" {
 		fields := strings.Fields(rawArgs)
 		for _, k := range keys {
 			flag := "--" + k
 			for i, f := range fields {
 				if f == flag && i+1 < len(fields) {
-					return fields[i+1]
+					val := strings.Join(fields[i+1:], " ")
+					// Strip surrounding quotes (shell artifacts from CLI-style args)
+					if len(val) >= 2 {
+						if (val[0] == '\'' && val[len(val)-1] == '\'') || (val[0] == '"' && val[len(val)-1] == '"') {
+							val = val[1 : len(val)-1]
+						}
+					}
+					return val
 				}
 			}
 		}
