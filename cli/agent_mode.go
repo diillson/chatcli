@@ -1744,7 +1744,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		remaining = stripXMLTagBlock(remaining, "reasoning")
 		remaining = stripXMLTagBlock(remaining, "explanation")
 		remaining = stripXMLTagBlock(remaining, "final_summary")
+		remaining = stripXMLTagBlock(remaining, "plan")
+		remaining = stripXMLTagBlock(remaining, "summary")
+		remaining = stripXMLTagBlock(remaining, "action")
+		remaining = stripXMLTagBlock(remaining, "action_type")
+		remaining = stripXMLTagBlock(remaining, "command")
+		remaining = stripXMLTagBlock(remaining, "step")
 		remaining = stripAgentCallTags(remaining)
+		remaining = stripToolCallTags(remaining)
 		remaining = strings.TrimSpace(removeXMLTags(remaining))
 
 		coderMinimal := a.isCoderMode && isCoderMinimalUI()
@@ -2995,11 +3002,16 @@ func appendFlagValue(argv *[]string, key string, value any) {
 	}
 }
 
-// removeXMLTags remove tags conhecidas, mantendo o conteúdo.
-// Não remove conteúdo e não mexe em markdown dentro do texto.
+// removeXMLTags remove tags conhecidas do texto, mantendo o conteúdo.
+// Não mexe em markdown nem em conteúdo legítimo.
+// Nota: Go regexp (RE2) não suporta backreferences (\1), então usamos stripXMLTagBlock
+// para tags paired e aqui removemos apenas self-closing e orphan tags.
 func removeXMLTags(text string) string {
-	re := regexp.MustCompile(`(?is)</?\s*(reasoning|explanation|thought)\s*>`)
-	return re.ReplaceAllString(text, "")
+	// Remove self-closing tool_call/agent_call tags (e.g. <tool_call ... />)
+	text = regexp.MustCompile(`(?i)<(?:tool_call|agent_call)\b[^>]*/\s*>`).ReplaceAllString(text, "")
+	// Remove any remaining orphan opening/closing tags
+	text = regexp.MustCompile(`(?i)</?\s*(reasoning|explanation|thought|plan|summary|final_summary|action|action_type|command|step)\s*>`).ReplaceAllString(text, "")
+	return text
 }
 
 func (a *AgentMode) continueWithNewAIResponse(ctx context.Context) {
@@ -3195,6 +3207,13 @@ var agentCallTagRe = regexp.MustCompile(`(?is)<agent_call\b[^>]*/\s*>|<agent_cal
 
 func stripAgentCallTags(s string) string {
 	return agentCallTagRe.ReplaceAllString(s, "")
+}
+
+// stripToolCallTags remove tags <tool_call .../> e <tool_call ...>...</tool_call> do texto.
+var toolCallTagRe = regexp.MustCompile(`(?is)<tool_call\b[^>]*/\s*>|<tool_call\b[^>]*>.*?</tool_call>`)
+
+func stripToolCallTags(s string) string {
+	return toolCallTagRe.ReplaceAllString(s, "")
 }
 
 // stripXMLTagBlock remove completamente o bloco <tag>...</tag> do texto.
