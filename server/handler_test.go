@@ -102,6 +102,25 @@ func (m *mockSessionStore) DeleteSession(name string) error {
 	return args.Error(0)
 }
 
+// --- Mock SessionStoreV2 (extends mockSessionStore with v2 methods) ---
+
+type mockSessionStoreV2 struct {
+	mockSessionStore
+}
+
+func (m *mockSessionStoreV2) SaveSessionV2(name string, sd *models.SessionData) error {
+	args := m.Called(name, sd)
+	return args.Error(0)
+}
+
+func (m *mockSessionStoreV2) LoadSessionV2(name string) (*models.SessionData, error) {
+	args := m.Called(name)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.SessionData), args.Error(1)
+}
+
 // --- Tests ---
 
 func TestHandler_Health(t *testing.T) {
@@ -441,4 +460,183 @@ func TestChunkResponse_LargeChunks(t *testing.T) {
 	// Verify no data lost
 	reassembled := strings.Join(chunks, "")
 	assert.Equal(t, text, reassembled)
+}
+
+// --- V2 Session Tests ---
+
+func TestHandler_SaveSession_V2(t *testing.T) {
+	logger := zap.NewNop()
+	store := &mockSessionStoreV2{}
+
+	sd := &models.SessionData{
+		Version: 2,
+		ChatHistory: []models.Message{
+			{Role: "user", Content: "hello"},
+		},
+		AgentHistory: []models.Message{
+			{Role: "user", Content: "agent task"},
+		},
+		CoderHistory: []models.Message{
+			{Role: "user", Content: "coder task"},
+		},
+		SharedMemory: []models.Message{
+			{Role: "system", Content: "summary", Meta: &models.MessageMeta{IsSummary: true, SummaryOf: 5, Mode: "agent"}},
+		},
+	}
+
+	store.On("SaveSessionV2", "test-v2", mock.MatchedBy(func(got *models.SessionData) bool {
+		return got.Version == 2 &&
+			len(got.ChatHistory) == 1 &&
+			len(got.AgentHistory) == 1 &&
+			len(got.CoderHistory) == 1 &&
+			len(got.SharedMemory) == 1 &&
+			got.SharedMemory[0].Meta != nil &&
+			got.SharedMemory[0].Meta.IsSummary
+	})).Return(nil)
+
+	handler := &Handler{
+		sessionManager: store,
+		logger:         logger,
+	}
+
+	protoSD := modelsSessionDataToProto(sd)
+	resp, err := handler.SaveSession(context.Background(), &pb.SaveSessionRequest{
+		Name:        "test-v2",
+		Messages:    []*pb.ChatMessage{{Role: "user", Content: "hello"}}, // v1 compat
+		SessionData: protoSD,
+	})
+	assert.NoError(t, err)
+	assert.True(t, resp.Success)
+	store.AssertCalled(t, "SaveSessionV2", "test-v2", mock.Anything)
+}
+
+func TestHandler_LoadSession_V2(t *testing.T) {
+	logger := zap.NewNop()
+	store := &mockSessionStoreV2{}
+
+	sd := &models.SessionData{
+		Version: 2,
+		ChatHistory: []models.Message{
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "hi"},
+		},
+		AgentHistory: []models.Message{
+			{Role: "user", Content: "agent task"},
+		},
+		CoderHistory: []models.Message{
+			{Role: "user", Content: "coder task"},
+		},
+	}
+
+	store.On("LoadSessionV2", "test-v2").Return(sd, nil)
+
+	handler := &Handler{
+		sessionManager: store,
+		logger:         logger,
+	}
+
+	resp, err := handler.LoadSession(context.Background(), &pb.LoadSessionRequest{Name: "test-v2"})
+	assert.NoError(t, err)
+
+	// V1 compat: messages field should contain chat history
+	assert.Len(t, resp.Messages, 2)
+	assert.Equal(t, "user", resp.Messages[0].Role)
+
+	// V2: session_data should contain all scoped histories
+	assert.NotNil(t, resp.SessionData)
+	assert.Equal(t, int32(2), resp.SessionData.Version)
+	assert.Len(t, resp.SessionData.ChatHistory, 2)
+	assert.Len(t, resp.SessionData.AgentHistory, 1)
+	assert.Len(t, resp.SessionData.CoderHistory, 1)
+}
+
+func TestHandler_SaveSession_V1Fallback(t *testing.T) {
+	// Store does NOT implement SessionStoreV2 — should fall back to v1
+	logger := zap.NewNop()
+	store := &mockSessionStore{}
+
+	history := []models.Message{
+		{Role: "user", Content: "hello"},
+	}
+	store.On("SaveSession", "test-v1", history).Return(nil)
+
+	handler := &Handler{
+		sessionManager: store,
+		logger:         logger,
+	}
+
+	// Even with session_data present, v1 store should use messages field
+	resp, err := handler.SaveSession(context.Background(), &pb.SaveSessionRequest{
+		Name:     "test-v1",
+		Messages: []*pb.ChatMessage{{Role: "user", Content: "hello"}},
+		SessionData: &pb.SessionDataV2{
+			Version:      2,
+			ChatHistory:  []*pb.ChatMessage{{Role: "user", Content: "hello"}},
+			AgentHistory: []*pb.ChatMessage{{Role: "user", Content: "agent"}},
+		},
+	})
+	assert.NoError(t, err)
+	assert.True(t, resp.Success)
+	store.AssertCalled(t, "SaveSession", "test-v1", history)
+}
+
+func TestHandler_LoadSession_V1Fallback(t *testing.T) {
+	// Store does NOT implement SessionStoreV2 — should fall back to v1
+	logger := zap.NewNop()
+	store := &mockSessionStore{}
+
+	history := []models.Message{
+		{Role: "user", Content: "hello"},
+	}
+	store.On("LoadSession", "test-v1").Return(history, nil)
+
+	handler := &Handler{
+		sessionManager: store,
+		logger:         logger,
+	}
+
+	resp, err := handler.LoadSession(context.Background(), &pb.LoadSessionRequest{Name: "test-v1"})
+	assert.NoError(t, err)
+	assert.Len(t, resp.Messages, 1)
+	assert.Nil(t, resp.SessionData) // No v2 data from v1 store
+}
+
+func TestProtoModelV2Roundtrip(t *testing.T) {
+	// Test that converting models → proto → models preserves all data including Meta
+	sd := &models.SessionData{
+		Version: 2,
+		ChatHistory: []models.Message{
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "hi", Meta: &models.MessageMeta{Mode: "chat"}},
+		},
+		AgentHistory: []models.Message{
+			{Role: "system", Content: "summary", Meta: &models.MessageMeta{IsSummary: true, SummaryOf: 10, Mode: "agent"}},
+		},
+		CoderHistory: []models.Message{},
+		SharedMemory: []models.Message{
+			{Role: "system", Content: "shared note"},
+		},
+	}
+
+	// Round-trip through proto
+	protoSD := modelsSessionDataToProto(sd)
+	restored := protoSessionDataToModels(protoSD)
+
+	assert.Equal(t, sd.Version, restored.Version)
+	assert.Equal(t, len(sd.ChatHistory), len(restored.ChatHistory))
+	assert.Equal(t, len(sd.AgentHistory), len(restored.AgentHistory))
+	assert.Equal(t, len(sd.SharedMemory), len(restored.SharedMemory))
+
+	// Check Meta preservation
+	assert.NotNil(t, restored.ChatHistory[1].Meta)
+	assert.Equal(t, "chat", restored.ChatHistory[1].Meta.Mode)
+
+	assert.NotNil(t, restored.AgentHistory[0].Meta)
+	assert.True(t, restored.AgentHistory[0].Meta.IsSummary)
+	assert.Equal(t, 10, restored.AgentHistory[0].Meta.SummaryOf)
+	assert.Equal(t, "agent", restored.AgentHistory[0].Meta.Mode)
+
+	// Nil meta stays nil
+	assert.Nil(t, restored.ChatHistory[0].Meta)
+	assert.Nil(t, restored.SharedMemory[0].Meta)
 }

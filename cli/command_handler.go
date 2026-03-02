@@ -23,7 +23,6 @@ import (
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/k8s"
-	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -80,7 +79,7 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/skipchunk":
 		return ch.cli.handleSkipChunk()
 	case userInput == "/newsession":
-		ch.cli.history = []models.Message{}
+		ch.cli.clearAllHistories()
 		ch.cli.currentSessionName = ""
 		fmt.Println(i18n.T("session.new_session_started"))
 		return false
@@ -636,7 +635,7 @@ func (ch *CommandHandler) handleSessionCommand(userInput string) {
 		}
 		ch.cli.handleDeleteSession(name)
 	case "new":
-		ch.cli.history = []models.Message{}
+		ch.cli.clearAllHistories()
 		ch.cli.currentSessionName = ""
 		fmt.Println(i18n.T("session.new_session_started"))
 	default:

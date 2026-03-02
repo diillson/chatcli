@@ -431,6 +431,28 @@ func GetMaxTokens(provider, model string, override int) int {
 	}
 }
 
+// GetContextWindow returns the context window size (in tokens) for the given
+// provider+model. Falls back to a conservative default if not found.
+func GetContextWindow(provider, model string) int {
+	if meta, ok := Resolve(provider, model); ok && meta.ContextWindow > 0 {
+		return meta.ContextWindow
+	}
+	switch strings.ToUpper(provider) {
+	case ProviderGoogleAI:
+		return 1000000
+	case ProviderClaudeAI:
+		return 200000
+	case ProviderOpenAI:
+		return 128000
+	case ProviderXAI:
+		return 128000
+	case ProviderOllama:
+		return 8192
+	default:
+		return 50000
+	}
+}
+
 // GetAnthropicAPIVersion retorna a versão da API para Anthropic (Claude),
 // priorizando meta.APIVersion; se não houver, retorna o default configurado.
 func GetAnthropicAPIVersion(model string) string {
