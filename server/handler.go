@@ -72,6 +72,13 @@ type SessionStore interface {
 	DeleteSession(name string) error
 }
 
+// SessionStoreV2 extends SessionStore with v2 scoped-history support.
+// Implementations that support v2 are detected via type assertion.
+type SessionStoreV2 interface {
+	SaveSessionV2(name string, sd *models.SessionData) error
+	LoadSessionV2(name string) (*models.SessionData, error)
+}
+
 // AlertInfo represents a watcher alert exposed to the AIOps operator.
 type AlertInfo struct {
 	Type       string
@@ -212,6 +219,74 @@ func historyToProto(msgs []models.Message) []*pb.ChatMessage {
 		})
 	}
 	return out
+}
+
+// --- V2 session proto ↔ models converters ---
+
+func modelMessageToProto(m models.Message) *pb.ChatMessage {
+	cm := &pb.ChatMessage{
+		Role:    m.Role,
+		Content: m.Content,
+	}
+	if m.Meta != nil {
+		cm.Meta = &pb.MessageMeta{
+			IsSummary: m.Meta.IsSummary,
+			SummaryOf: int32(m.Meta.SummaryOf),
+			Mode:      m.Meta.Mode,
+		}
+	}
+	return cm
+}
+
+func protoMessageToModel(cm *pb.ChatMessage) models.Message {
+	msg := models.Message{
+		Role:    cm.Role,
+		Content: cm.Content,
+	}
+	if cm.Meta != nil {
+		msg.Meta = &models.MessageMeta{
+			IsSummary: cm.Meta.IsSummary,
+			SummaryOf: int(cm.Meta.SummaryOf),
+			Mode:      cm.Meta.Mode,
+		}
+	}
+	return msg
+}
+
+func modelsToProtoV2(msgs []models.Message) []*pb.ChatMessage {
+	out := make([]*pb.ChatMessage, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, modelMessageToProto(m))
+	}
+	return out
+}
+
+func protoToModelsV2(msgs []*pb.ChatMessage) []models.Message {
+	out := make([]models.Message, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, protoMessageToModel(m))
+	}
+	return out
+}
+
+func modelsSessionDataToProto(sd *models.SessionData) *pb.SessionDataV2 {
+	return &pb.SessionDataV2{
+		Version:      int32(sd.Version),
+		ChatHistory:  modelsToProtoV2(sd.ChatHistory),
+		AgentHistory: modelsToProtoV2(sd.AgentHistory),
+		CoderHistory: modelsToProtoV2(sd.CoderHistory),
+		SharedMemory: modelsToProtoV2(sd.SharedMemory),
+	}
+}
+
+func protoSessionDataToModels(psd *pb.SessionDataV2) *models.SessionData {
+	return &models.SessionData{
+		Version:      int(psd.Version),
+		ChatHistory:  protoToModelsV2(psd.ChatHistory),
+		AgentHistory: protoToModelsV2(psd.AgentHistory),
+		CoderHistory: protoToModelsV2(psd.CoderHistory),
+		SharedMemory: protoToModelsV2(psd.SharedMemory),
+	}
 }
 
 // SendPrompt handles a single prompt request.
@@ -409,6 +484,22 @@ func (h *Handler) LoadSession(ctx context.Context, req *pb.LoadSessionRequest) (
 		return nil, status.Error(codes.InvalidArgument, "session name cannot be empty")
 	}
 
+	// Try v2 first if store supports it
+	if v2Store, ok := h.sessionManager.(SessionStoreV2); ok {
+		sd, err := v2Store.LoadSessionV2(req.Name)
+		if err != nil {
+			return nil, status.Errorf(codes.NotFound, "session not found: %v", err)
+		}
+		if h.sessionMetrics != nil {
+			h.sessionMetrics.OperationsTotal.WithLabelValues("load").Inc()
+		}
+		return &pb.LoadSessionResponse{
+			Messages:    historyToProto(sd.ChatHistory), // v1 compat
+			SessionData: modelsSessionDataToProto(sd),   // v2 full data
+		}, nil
+	}
+
+	// Fallback to v1
 	msgs, err := h.sessionManager.LoadSession(req.Name)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "session not found: %v", err)
@@ -430,6 +521,21 @@ func (h *Handler) SaveSession(ctx context.Context, req *pb.SaveSessionRequest) (
 		return nil, status.Error(codes.InvalidArgument, "session name cannot be empty")
 	}
 
+	// Prefer v2 if client sent session_data AND store supports v2
+	if req.SessionData != nil {
+		if v2Store, ok := h.sessionManager.(SessionStoreV2); ok {
+			sd := protoSessionDataToModels(req.SessionData)
+			if err := v2Store.SaveSessionV2(req.Name, sd); err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to save session: %v", err)
+			}
+			if h.sessionMetrics != nil {
+				h.sessionMetrics.OperationsTotal.WithLabelValues("save").Inc()
+			}
+			return &pb.SaveSessionResponse{Success: true}, nil
+		}
+	}
+
+	// Fallback to v1
 	history := protoToHistory(req.Messages)
 	if err := h.sessionManager.SaveSession(req.Name, history); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to save session: %v", err)

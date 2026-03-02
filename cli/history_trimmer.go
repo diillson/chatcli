@@ -22,16 +22,14 @@ func NewMessageTrimmer(logger *zap.Logger) *MessageTrimmer {
 
 // Regex patterns for extracting/stripping content.
 var (
-	reasoningBlockRe  = regexp.MustCompile(`(?s)<reasoning>.*?</reasoning>`)
+	reasoningBlockRe   = regexp.MustCompile(`(?s)<reasoning>.*?</reasoning>`)
 	explanationBlockRe = regexp.MustCompile(`(?s)<explanation>.*?</explanation>`)
-	toolCallRe        = regexp.MustCompile(`(?s)<tool_call\s+name="([^"]*?)"\s+args='([^']*?)'\s*/>`)
-	toolCallAltRe     = regexp.MustCompile(`(?s)<tool_call\s+name="([^"]*?)"\s+args="([^"]*?)"\s*/>`)
-	toolOutputBlockRe = regexp.MustCompile(`(?s)<tool_output>\n?(.*?)\n?</tool_output>`)
+	toolCallRe         = regexp.MustCompile(`(?s)<tool_call\s+name="([^"]*?)"\s+args='([^']*?)'\s*/>`)
+	toolCallAltRe      = regexp.MustCompile(`(?s)<tool_call\s+name="([^"]*?)"\s+args="([^"]*?)"\s*/>`)
+	toolOutputBlockRe  = regexp.MustCompile(`(?s)<tool_output>\n?(.*?)\n?</tool_output>`)
 	// Pattern to detect tool feedback messages (from agent_mode.go format)
 	toolFeedbackPrefixRe = regexp.MustCompile(`^(?:The tool '|A ferramenta '|--- Resultado da Ação)`)
 	formatErrorPrefixRe  = regexp.MustCompile(`^FORMAT ERROR:`)
-	// Detect file-read-like content: lines starting with line numbers (e.g. "  1\t" from cat -n output)
-	fileReadLineRe = regexp.MustCompile(`(?m)^\s*\d+\t`)
 )
 
 // TrimHistory performs near-lossless trimming on all messages in the history.

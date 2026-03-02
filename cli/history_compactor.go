@@ -13,9 +13,10 @@ import (
 )
 
 // HistoryCompactor manages conversation history size through a 3-level pipeline:
-//   Level 1: Near-lossless trimming (strip reasoning, compact XML, dedup)
-//   Level 2: Structured summarization (extract facts, not prose)
-//   Level 3: Emergency truncation (last resort)
+//
+//	Level 1: Near-lossless trimming (strip reasoning, compact XML, dedup)
+//	Level 2: Structured summarization (extract facts, not prose)
+//	Level 3: Emergency truncation (last resort)
 type HistoryCompactor struct {
 	logger  *zap.Logger
 	trimmer *MessageTrimmer
