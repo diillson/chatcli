@@ -1682,6 +1682,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		default:
 		}
 
+		// Compact history if over budget (before building turn history)
+		cfg := DefaultCompactConfig(a.cli.Provider, a.cli.Model)
+		cfg.BudgetRatio = 0.60   // tighter budget — tool outputs are large
+		cfg.MinKeepRecent = 8    // ~4 tool call cycles
+		if a.cli.historyCompactor.NeedsCompaction(a.cli.history, cfg) {
+			if compacted, compactErr := a.cli.historyCompactor.Compact(ctx, a.cli.history, a.cli.Client, cfg); compactErr == nil {
+				a.cli.history = compacted
+			}
+		}
+
 		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
 
 		// Inicia o timer do turno (substitui a animação de "Pensando...")

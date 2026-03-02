@@ -156,6 +156,14 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 		Content: userInput + additionalContext,
 	})
 
+	// Compact history if over budget
+	cfg := DefaultCompactConfig(cli.Provider, cli.Model)
+	if cli.historyCompactor.NeedsCompaction(cli.history, cfg) {
+		if compacted, compactErr := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg); compactErr == nil {
+			cli.history = compacted
+		}
+	}
+
 	if !disableAnimation {
 		cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 	}
