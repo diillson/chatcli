@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.65.2](https://github.com/diillson/chatcli/compare/v1.65.1...v1.65.2) (2026-03-02)
+
+
+### Bug Fixes
+
+* **history:** add scoped history management with cross-mode context a… ([#593](https://github.com/diillson/chatcli/issues/593)) ([#594](https://github.com/diillson/chatcli/issues/594)) ([4d3b435](https://github.com/diillson/chatcli/commit/4d3b435d6c1da49d4a1d935bc98376e072ca3788))
+
 ## [1.65.1](https://github.com/diillson/chatcli/compare/v1.65.0...v1.65.1) (2026-03-01)
 
 
