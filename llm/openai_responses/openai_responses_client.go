@@ -39,7 +39,13 @@ type OpenAIResponsesClient struct {
 // NewOpenAIResponsesClient cria uma nova instância de OpenAIResponsesClient.
 // Agora sem fallback interno: usa apenas os params passados (vindos do manager/ENVs).
 func NewOpenAIResponsesClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenAIResponsesClient {
-	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
+	var httpClient *http.Client
+	if strings.HasPrefix(apiKey, "oauth:") {
+		// OAuth requests go to chatgpt.com which requires a browser-like TLS fingerprint
+		httpClient = utils.NewHTTPClientWithTransport(logger, 900*time.Second, utils.NewChromeTLSTransport())
+	} else {
+		httpClient = utils.NewHTTPClient(logger, 900*time.Second)
+	}
 	return &OpenAIResponsesClient{
 		apiKey:      apiKey,
 		model:       model,

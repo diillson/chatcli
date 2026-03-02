@@ -18,10 +18,16 @@ const maxRedirects = 10
 
 // NewHTTPClient cria um cliente HTTP com LoggingTransport e timeout configurado
 func NewHTTPClient(logger *zap.Logger, timeout time.Duration) *http.Client {
+	return NewHTTPClientWithTransport(logger, timeout, http.DefaultTransport)
+}
+
+// NewHTTPClientWithTransport cria um cliente HTTP com um transport customizado
+// envolvido pelo LoggingTransport. Use para injetar transports com TLS customizado.
+func NewHTTPClientWithTransport(logger *zap.Logger, timeout time.Duration, inner http.RoundTripper) *http.Client {
 	return &http.Client{
 		Transport: &LoggingTransport{
 			Logger:      logger,
-			Transport:   http.DefaultTransport,
+			Transport:   inner,
 			MaxBodySize: 2048,
 		},
 		Timeout: timeout,
