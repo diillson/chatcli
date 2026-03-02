@@ -12,15 +12,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// SessionData is the v2 session format that supports scoped histories.
-// It is backward-compatible with the legacy format (plain []models.Message).
-type SessionData struct {
-	Version      int              `json:"version"`                  // 2 for the new format
-	ChatHistory  []models.Message `json:"chat_history"`
-	AgentHistory []models.Message `json:"agent_history,omitempty"`
-	CoderHistory []models.Message `json:"coder_history,omitempty"`
-	SharedMemory []models.Message `json:"shared_memory,omitempty"`
-}
+// SessionData is an alias for the shared models.SessionData type.
+// Kept for local convenience within the cli package.
+type SessionData = models.SessionData
 
 // SessionManager gerencia o salvamento e carregamento de sessões de conversa.
 type SessionManager struct {

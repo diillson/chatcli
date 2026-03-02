@@ -235,6 +235,108 @@ func (c *Client) SaveSession(ctx context.Context, name string, history []models.
 	return nil
 }
 
+// SaveSessionV2 saves a full v2 session (with scoped histories) to the remote server.
+// It also populates the v1 messages field for backward compatibility with older servers.
+func (c *Client) SaveSessionV2(ctx context.Context, name string, sd *models.SessionData) error {
+	ctx = c.withAuth(ctx)
+	_, err := c.grpcClient.SaveSession(ctx, &pb.SaveSessionRequest{
+		Name:        name,
+		Messages:    modelsToProtoV2(sd.ChatHistory), // v1 compat
+		SessionData: modelsSessionDataToProto(sd),    // v2 full data
+	})
+	if err != nil {
+		return fmt.Errorf("remote SaveSessionV2 failed: %w", err)
+	}
+	return nil
+}
+
+// LoadSessionV2 loads a full v2 session from the remote server.
+// Falls back to v1 (chat history only) if the server doesn't support v2.
+func (c *Client) LoadSessionV2(ctx context.Context, name string) (*models.SessionData, error) {
+	ctx = c.withAuth(ctx)
+	resp, err := c.grpcClient.LoadSession(ctx, &pb.LoadSessionRequest{Name: name})
+	if err != nil {
+		return nil, fmt.Errorf("remote LoadSessionV2 failed: %w", err)
+	}
+
+	// Prefer v2 if server returned session_data
+	if resp.SessionData != nil {
+		return protoSessionDataToModels(resp.SessionData), nil
+	}
+
+	// Fallback to v1
+	messages := protoToModelsV2(resp.Messages)
+	return &models.SessionData{Version: 2, ChatHistory: messages}, nil
+}
+
+// --- V2 session proto ↔ models converters ---
+
+func modelMessageToProto(m models.Message) *pb.ChatMessage {
+	cm := &pb.ChatMessage{
+		Role:    m.Role,
+		Content: m.Content,
+	}
+	if m.Meta != nil {
+		cm.Meta = &pb.MessageMeta{
+			IsSummary: m.Meta.IsSummary,
+			SummaryOf: int32(m.Meta.SummaryOf),
+			Mode:      m.Meta.Mode,
+		}
+	}
+	return cm
+}
+
+func protoMessageToModel(cm *pb.ChatMessage) models.Message {
+	msg := models.Message{
+		Role:    cm.Role,
+		Content: cm.Content,
+	}
+	if cm.Meta != nil {
+		msg.Meta = &models.MessageMeta{
+			IsSummary: cm.Meta.IsSummary,
+			SummaryOf: int(cm.Meta.SummaryOf),
+			Mode:      cm.Meta.Mode,
+		}
+	}
+	return msg
+}
+
+func modelsToProtoV2(msgs []models.Message) []*pb.ChatMessage {
+	out := make([]*pb.ChatMessage, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, modelMessageToProto(m))
+	}
+	return out
+}
+
+func protoToModelsV2(msgs []*pb.ChatMessage) []models.Message {
+	out := make([]models.Message, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, protoMessageToModel(m))
+	}
+	return out
+}
+
+func modelsSessionDataToProto(sd *models.SessionData) *pb.SessionDataV2 {
+	return &pb.SessionDataV2{
+		Version:      int32(sd.Version),
+		ChatHistory:  modelsToProtoV2(sd.ChatHistory),
+		AgentHistory: modelsToProtoV2(sd.AgentHistory),
+		CoderHistory: modelsToProtoV2(sd.CoderHistory),
+		SharedMemory: modelsToProtoV2(sd.SharedMemory),
+	}
+}
+
+func protoSessionDataToModels(psd *pb.SessionDataV2) *models.SessionData {
+	return &models.SessionData{
+		Version:      int(psd.Version),
+		ChatHistory:  protoToModelsV2(psd.ChatHistory),
+		AgentHistory: protoToModelsV2(psd.AgentHistory),
+		CoderHistory: protoToModelsV2(psd.CoderHistory),
+		SharedMemory: protoToModelsV2(psd.SharedMemory),
+	}
+}
+
 // DeleteSession deletes a session from the remote server.
 func (c *Client) DeleteSession(ctx context.Context, name string) error {
 	ctx = c.withAuth(ctx)

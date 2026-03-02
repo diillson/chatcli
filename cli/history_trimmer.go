@@ -30,8 +30,6 @@ var (
 	// Pattern to detect tool feedback messages (from agent_mode.go format)
 	toolFeedbackPrefixRe = regexp.MustCompile(`^(?:The tool '|A ferramenta '|--- Resultado da Ação)`)
 	formatErrorPrefixRe  = regexp.MustCompile(`^FORMAT ERROR:`)
-	// Detect file-read-like content: lines starting with line numbers (e.g. "  1\t" from cat -n output)
-	fileReadLineRe = regexp.MustCompile(`(?m)^\s*\d+\t`)
 )
 
 // TrimHistory performs near-lossless trimming on all messages in the history.

@@ -3300,7 +3300,7 @@ func (cli *ChatCLI) handleSaveSession(name string) {
 		case "remote":
 			ctx, cancel := remoteSessionCtx()
 			defer cancel()
-			if err := rc.SaveSession(ctx, name, sd.ChatHistory); err != nil {
+			if err := rc.SaveSessionV2(ctx, name, sd); err != nil {
 				fmt.Println(i18n.T("session.error_save", err))
 			} else {
 				cli.currentSessionName = name
@@ -3311,7 +3311,7 @@ func (cli *ChatCLI) handleSaveSession(name string) {
 			localErr = cli.sessionManager.SaveSessionV2(name, sd)
 			ctx, cancel := remoteSessionCtx()
 			defer cancel()
-			remoteErr = rc.SaveSession(ctx, name, sd.ChatHistory)
+			remoteErr = rc.SaveSessionV2(ctx, name, sd)
 
 			if localErr != nil {
 				fmt.Println(i18n.T("session.error_save", fmt.Errorf("local: %w", localErr)))
@@ -3356,7 +3356,7 @@ func (cli *ChatCLI) handleLoadSession(name string) {
 		localSD, localErr := cli.sessionManager.LoadSessionV2(name)
 		ctx, cancel := remoteSessionCtx()
 		defer cancel()
-		remoteHistory, remoteErr := rc.LoadSession(ctx, name)
+		remoteSD, remoteErr := rc.LoadSessionV2(ctx, name)
 
 		foundLocal := localErr == nil
 		foundRemote := remoteErr == nil
@@ -3371,7 +3371,7 @@ func (cli *ChatCLI) handleLoadSession(name string) {
 				"local",
 			)
 			if choice == "remote" {
-				cli.restoreSessionFromHistory(remoteHistory)
+				cli.restoreSessionData(remoteSD)
 				cli.currentSessionName = name
 				fmt.Println(i18n.T("session.load_success_remote", name))
 			} else {
@@ -3384,7 +3384,7 @@ func (cli *ChatCLI) handleLoadSession(name string) {
 			cli.currentSessionName = name
 			fmt.Println(i18n.T("session.load_success", name))
 		case foundRemote:
-			cli.restoreSessionFromHistory(remoteHistory)
+			cli.restoreSessionData(remoteSD)
 			cli.currentSessionName = name
 			fmt.Println(i18n.T("session.load_success_remote", name))
 		default:
@@ -3442,14 +3442,6 @@ func (cli *ChatCLI) restoreSessionData(sd *SessionData) {
 	}
 }
 
-// restoreSessionFromHistory restores from a plain history (legacy/remote format).
-func (cli *ChatCLI) restoreSessionFromHistory(history []models.Message) {
-	cli.history = history
-	cli.chatHistory = history
-	cli.agentHistory = make([]models.Message, 0)
-	cli.coderHistory = make([]models.Message, 0)
-	cli.sharedMemory = make([]models.Message, 0)
-}
 
 func (cli *ChatCLI) handleListSessions() {
 	if cli.isRemote {

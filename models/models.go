@@ -42,6 +42,16 @@ func (r *ResponseData) IsValid() bool {
 	return validStatuses[r.Status]
 }
 
+// SessionData is the v2 session format that supports scoped histories.
+// It is backward-compatible with the legacy format (plain []Message).
+type SessionData struct {
+	Version      int       `json:"version"`                  // 2 for the new format
+	ChatHistory  []Message `json:"chat_history"`
+	AgentHistory []Message `json:"agent_history,omitempty"`
+	CoderHistory []Message `json:"coder_history,omitempty"`
+	SharedMemory []Message `json:"shared_memory,omitempty"`
+}
+
 // UsageInfo representa informações de uso de tokens retornadas pelas APIs
 type UsageInfo struct {
 	PromptTokens     int // Tokens usados no prompt
