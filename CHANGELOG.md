@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.65.4](https://github.com/diillson/chatcli/compare/v1.65.3...v1.65.4) (2026-03-02)
+
+
+### Bug Fixes
+
+* **tls:** resolve handshake failure when switching from OpenAI to ClaudeAI ([#598](https://github.com/diillson/chatcli/issues/598)) ([20f96bc](https://github.com/diillson/chatcli/commit/20f96bce5ce7e8726c7925b69ae7047d2adada42))
+
 ## [1.65.3](https://github.com/diillson/chatcli/compare/v1.65.2...v1.65.3) (2026-03-02)
 
 
