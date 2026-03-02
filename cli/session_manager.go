@@ -12,6 +12,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// SessionData is an alias for the shared models.SessionData type.
+// Kept for local convenience within the cli package.
+type SessionData = models.SessionData
+
 // SessionManager gerencia o salvamento e carregamento de sessões de conversa.
 type SessionManager struct {
 	sessionsDir string
@@ -45,13 +49,23 @@ func (sm *SessionManager) getSessionPath(name string) string {
 }
 
 // SaveSession salva o histórico da conversa em um arquivo JSON.
+// Mantém assinatura original para compatibilidade com remote client.
 func (sm *SessionManager) SaveSession(name string, history []models.Message) error {
+	return sm.SaveSessionV2(name, &SessionData{
+		Version:     2,
+		ChatHistory: history,
+	})
+}
+
+// SaveSessionV2 salva uma sessão completa com históricos escopados.
+func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 	if name == "" {
 		return fmt.Errorf("o nome da sessão não pode ser vazio")
 	}
 
+	sd.Version = 2
 	filePath := sm.getSessionPath(name)
-	data, err := json.MarshalIndent(history, "", "  ")
+	data, err := json.MarshalIndent(sd, "", "  ")
 	if err != nil {
 		sm.logger.Error("Erro ao serializar a sessão para JSON", zap.String("session", name), zap.Error(err))
 		return fmt.Errorf("erro ao serializar a sessão: %w", err)
@@ -67,7 +81,18 @@ func (sm *SessionManager) SaveSession(name string, history []models.Message) err
 }
 
 // LoadSession carrega o histórico de uma conversa de um arquivo JSON.
+// Mantém assinatura original para compatibilidade com remote client.
+// Retorna apenas o chatHistory para uso legado.
 func (sm *SessionManager) LoadSession(name string) ([]models.Message, error) {
+	sd, err := sm.LoadSessionV2(name)
+	if err != nil {
+		return nil, err
+	}
+	return sd.ChatHistory, nil
+}
+
+// LoadSessionV2 carrega uma sessão completa com suporte a formato v2 e legacy.
+func (sm *SessionManager) LoadSessionV2(name string) (*SessionData, error) {
 	filePath := sm.getSessionPath(name)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("sessão '%s' não encontrada", name)
@@ -79,14 +104,25 @@ func (sm *SessionManager) LoadSession(name string) ([]models.Message, error) {
 		return nil, fmt.Errorf("erro ao ler o arquivo da sessão: %w", err)
 	}
 
-	var history []models.Message
-	if err := json.Unmarshal(data, &history); err != nil {
+	// Try v2 format first
+	var sd SessionData
+	if err := json.Unmarshal(data, &sd); err == nil && sd.Version >= 2 {
+		sm.logger.Info("Sessão v2 carregada com sucesso", zap.String("session", name))
+		return &sd, nil
+	}
+
+	// Fallback: legacy format (plain []models.Message)
+	var legacy []models.Message
+	if err := json.Unmarshal(data, &legacy); err != nil {
 		sm.logger.Error("Erro ao desserializar a sessão", zap.String("session", name), zap.Error(err))
 		return nil, fmt.Errorf("arquivo de sessão corrompido: %w", err)
 	}
 
-	sm.logger.Info("Sessão carregada com sucesso", zap.String("session", name))
-	return history, nil
+	sm.logger.Info("Sessão legacy carregada com sucesso (migrada para v2)", zap.String("session", name))
+	return &SessionData{
+		Version:     2,
+		ChatHistory: legacy,
+	}, nil
 }
 
 // ListSessions lista todas as sessões salvas.

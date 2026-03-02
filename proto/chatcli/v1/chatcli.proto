@@ -128,9 +128,26 @@ message SessionMessage {
 
 // --- ChatMessage (shared) ---
 
+message MessageMeta {
+  bool is_summary = 1;
+  int32 summary_of = 2;
+  string mode = 3;       // "chat", "agent", "coder"
+}
+
 message ChatMessage {
   string role = 1;     // "user" or "assistant"
   string content = 2;
+  MessageMeta meta = 3;  // optional metadata for history compaction
+}
+
+// --- Session Data V2 (scoped histories) ---
+
+message SessionDataV2 {
+  int32 version = 1;
+  repeated ChatMessage chat_history = 2;
+  repeated ChatMessage agent_history = 3;
+  repeated ChatMessage coder_history = 4;
+  repeated ChatMessage shared_memory = 5;
 }
 
 // --- Session Management ---
@@ -146,12 +163,14 @@ message LoadSessionRequest {
 }
 
 message LoadSessionResponse {
-  repeated ChatMessage messages = 1;
+  repeated ChatMessage messages = 1;       // v1 compat (always populated with chat_history)
+  SessionDataV2 session_data = 2;          // v2: full scoped histories (takes priority when present)
 }
 
 message SaveSessionRequest {
   string name = 1;
-  repeated ChatMessage messages = 2;
+  repeated ChatMessage messages = 2;       // v1 compat (always populated with chat_history)
+  SessionDataV2 session_data = 3;          // v2: full scoped histories (takes priority when present)
 }
 
 message SaveSessionResponse {

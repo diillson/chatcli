@@ -155,7 +155,12 @@ type ChatCLI struct {
 	logger               *zap.Logger
 	Provider             string
 	Model                string
-	history              []models.Message
+	history              []models.Message  // active history (points to current mode's history)
+	chatHistory          []models.Message  // chat mode history
+	agentHistory         []models.Message  // persistent across /agent invocations
+	coderHistory         []models.Message  // persistent across /coder invocations
+	sharedMemory         []models.Message  // structured summaries from agent/coder sessions
+	historyCompactor     *HistoryCompactor // manages history compaction
 	commandHistory       []string
 	newCommandsInSession []string
 	historyManager       *HistoryManager
@@ -340,6 +345,11 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		manager:          manager,
 		logger:           logger,
 		history:          make([]models.Message, 0),
+		chatHistory:      make([]models.Message, 0),
+		agentHistory:     make([]models.Message, 0),
+		coderHistory:     make([]models.Message, 0),
+		sharedMemory:     make([]models.Message, 0),
+		historyCompactor: NewHistoryCompactor(logger),
 		historyManager:   NewHistoryManager(logger),
 		animation:        NewAnimationManager(),
 		interactionState: StateNormal,
@@ -549,6 +559,14 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
 	userInput, additionalContext := cli.processSpecialCommands(in)
+
+	// Compact history if over budget (before building tempHistory)
+	cfg := DefaultCompactConfig(cli.Provider, cli.Model)
+	if cli.historyCompactor.NeedsCompaction(cli.history, cfg) {
+		if compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg); err == nil {
+			cli.history = compacted
+		}
+	}
 
 	//Injetar contextos anexados à sessão
 	sessionID := cli.currentSessionName
@@ -981,20 +999,27 @@ func (cli *ChatCLI) runAgentLogic() {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
+	// Scoped history: save chat history, activate agent history
+	cli.chatHistory = cli.history
+	cli.history = cli.agentHistory
+
+	// Inject cross-mode context so the agent knows what was discussed in chat/coder
+	crossCtx := cli.buildCrossModeContext("agent")
+	if crossCtx != "" {
+		if additionalContext != "" {
+			additionalContext = crossCtx + "\n\n" + additionalContext
+		} else {
+			additionalContext = crossCtx
+		}
+	}
+
 	cli.runWithCancellation("Agent Mode", func(ctx context.Context) error {
-		// Timeout global de segurança (opcional, pode ser removido se quiser infinito)
-		// ctx, cancel := context.WithTimeout(ctx, 45*time.Minute)
-		// defer cancel()
 		return cli.agentMode.Run(ctx, query, additionalContext, "")
 	})
 
-	// Inject mode-reset message so the LLM knows we left agent mode
-	cli.history = append(cli.history, models.Message{
-		Role: "system",
-		Content: "The /agent session has ended. You are now back in normal chat mode. " +
-			"Respond conversationally in plain text. Do NOT use command blocks, execution plans, or structured action formats. " +
-			"Just answer the user's questions naturally.",
-	})
+	// Persist agent history and generate structured summary for chat mode
+	cli.agentHistory = cli.history
+	cli.exitModeWithStructuredSummary(context.Background(), "agent")
 
 	fmt.Println(i18n.T("status.agent_mode_exit"))
 	time.Sleep(500 * time.Millisecond)
@@ -1025,21 +1050,164 @@ func (cli *ChatCLI) runCoderLogic() {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
+	// Scoped history: save chat history, activate coder history
+	cli.chatHistory = cli.history
+	cli.history = cli.coderHistory
+
+	// Inject cross-mode context so the coder knows what was discussed in chat/agent
+	crossCtx := cli.buildCrossModeContext("coder")
+	if crossCtx != "" {
+		if additionalContext != "" {
+			additionalContext = crossCtx + "\n\n" + additionalContext
+		} else {
+			additionalContext = crossCtx
+		}
+	}
+
 	cli.runWithCancellation("Coder Mode", func(ctx context.Context) error {
-		// Sem timeout fixo no context.WithTimeout aqui, deixamos o usuário cancelar
 		return cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)
 	})
 
-	// Inject mode-reset message so the LLM knows we left coder mode
-	cli.history = append(cli.history, models.Message{
-		Role: "system",
-		Content: "The /coder engineering session has ended. You are now back in normal chat mode. " +
-			"Respond conversationally in plain text. Do NOT use <tool_call>, <reasoning>, <agent_call>, or any structured XML tags. " +
-			"Just answer the user's questions naturally.",
-	})
+	// Persist coder history and generate structured summary for chat mode
+	cli.coderHistory = cli.history
+	cli.exitModeWithStructuredSummary(context.Background(), "coder")
 
 	fmt.Println(colorize("\n ✅ Sessão de engenharia finalizada.", ColorGreen))
 	time.Sleep(500 * time.Millisecond)
+}
+
+// buildCrossModeContext creates a context bridge with recent messages from other modes
+// so that each mode knows what was being discussed across the application.
+// This enables natural workflows like: chat (discuss) → coder (implement) → agent (research) → coder (continue).
+func (cli *ChatCLI) buildCrossModeContext(targetMode string) string {
+	var sb strings.Builder
+	hasContent := false
+
+	// 1. Recent chat messages — generous window since the compactor handles overflow.
+	// 20 messages ≈ 10 user+assistant pairs, enough to carry full discussion context.
+	recentChat := getRecentNonSystemMessages(cli.chatHistory, 20)
+	if len(recentChat) > 0 {
+		sb.WriteString("=== Recent conversation context (from chat mode) ===\n")
+		for _, msg := range recentChat {
+			content := msg.Content
+			if len(content) > 1500 {
+				content = content[:1200] + "\n...[truncated]...\n" + content[len(content)-200:]
+			}
+			sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
+		}
+		hasContent = true
+	}
+
+	// 2. Recent messages from the OTHER mode (coder ↔ agent cross-pollination).
+	// 16 messages ≈ 8 agentic turns (each turn = assistant response + tool feedback).
+	// This covers a meaningful chunk of work: file reads, modifications, exec results.
+	var otherHistory []models.Message
+	var otherModeName string
+	switch targetMode {
+	case "agent":
+		otherHistory = cli.coderHistory
+		otherModeName = "coder"
+	case "coder":
+		otherHistory = cli.agentHistory
+		otherModeName = "agent"
+	}
+	recentOther := getRecentNonSystemMessages(otherHistory, 16)
+	if len(recentOther) > 0 {
+		sb.WriteString(fmt.Sprintf("=== Recent activity (from /%s mode) ===\n", otherModeName))
+		for _, msg := range recentOther {
+			content := msg.Content
+			if len(content) > 1500 {
+				content = content[:1200] + "\n...[truncated]...\n" + content[len(content)-200:]
+			}
+			sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
+		}
+		hasContent = true
+	}
+
+	// 3. Shared memory (structured summaries from previous sessions of any mode)
+	if len(cli.sharedMemory) > 0 {
+		sb.WriteString("=== Previous session summaries ===\n")
+		for _, mem := range cli.sharedMemory {
+			sb.WriteString(mem.Content)
+			sb.WriteString("\n\n")
+		}
+		hasContent = true
+	}
+
+	if !hasContent {
+		return ""
+	}
+
+	return sb.String()
+}
+
+// getRecentNonSystemMessages returns the last N non-system messages from a history slice.
+func getRecentNonSystemMessages(history []models.Message, n int) []models.Message {
+	var nonSystem []models.Message
+	for _, msg := range history {
+		if msg.Role != "system" {
+			nonSystem = append(nonSystem, msg)
+		}
+	}
+	if len(nonSystem) <= n {
+		return nonSystem
+	}
+	return nonSystem[len(nonSystem)-n:]
+}
+
+// exitModeWithStructuredSummary generates a structured summary of the mode session,
+// stores it as shared memory, and restores chat history as the active history.
+func (cli *ChatCLI) exitModeWithStructuredSummary(ctx context.Context, modeName string) {
+	// Generate structured summary of what was done in the mode session
+	summary := cli.historyCompactor.GenerateModeSummary(ctx, cli.history, cli.Client, modeName)
+
+	if summary != "" {
+		cli.sharedMemory = append(cli.sharedMemory, models.Message{
+			Role:    "assistant",
+			Content: summary,
+			Meta: &models.MessageMeta{
+				IsSummary: true,
+				Mode:      modeName,
+			},
+		})
+	}
+
+	// Restore chat history as the active history
+	cli.history = cli.chatHistory
+
+	// Build mode-reset message with shared memory context
+	resetContent := "The /" + modeName + " session has ended. You are now back in normal chat mode. " +
+		"Respond conversationally in plain text. Do NOT use command blocks, execution plans, or structured XML tags. " +
+		"Just answer the user's questions naturally."
+
+	if len(cli.sharedMemory) > 0 {
+		var memSb strings.Builder
+		memSb.WriteString("\n\nSummary of actions from previous agent/coder sessions:\n\n")
+		for _, mem := range cli.sharedMemory {
+			memSb.WriteString(mem.Content)
+			memSb.WriteString("\n\n---\n\n")
+		}
+		resetContent += memSb.String()
+	}
+
+	// Remove previous mode-reset messages to avoid accumulation
+	cleaned := make([]models.Message, 0, len(cli.history)+1)
+	for _, msg := range cli.history {
+		if msg.Meta != nil && msg.Meta.IsSummary && msg.Meta.Mode != "" {
+			continue
+		}
+		cleaned = append(cleaned, msg)
+	}
+	cli.history = cleaned
+
+	cli.history = append(cli.history, models.Message{
+		Role:    "system",
+		Content: resetContent,
+		Meta: &models.MessageMeta{
+			IsSummary: true,
+			Mode:      modeName,
+		},
+	})
 }
 
 func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
@@ -3126,11 +3294,13 @@ func (cli *ChatCLI) handleSaveSession(name string) {
 			"local",
 		)
 
+		sd := cli.buildSessionData()
+
 		switch choice {
 		case "remote":
 			ctx, cancel := remoteSessionCtx()
 			defer cancel()
-			if err := rc.SaveSession(ctx, name, cli.history); err != nil {
+			if err := rc.SaveSessionV2(ctx, name, sd); err != nil {
 				fmt.Println(i18n.T("session.error_save", err))
 			} else {
 				cli.currentSessionName = name
@@ -3138,10 +3308,10 @@ func (cli *ChatCLI) handleSaveSession(name string) {
 			}
 		case "both":
 			var localErr, remoteErr error
-			localErr = cli.sessionManager.SaveSession(name, cli.history)
+			localErr = cli.sessionManager.SaveSessionV2(name, sd)
 			ctx, cancel := remoteSessionCtx()
 			defer cancel()
-			remoteErr = rc.SaveSession(ctx, name, cli.history)
+			remoteErr = rc.SaveSessionV2(ctx, name, sd)
 
 			if localErr != nil {
 				fmt.Println(i18n.T("session.error_save", fmt.Errorf("local: %w", localErr)))
@@ -3154,7 +3324,7 @@ func (cli *ChatCLI) handleSaveSession(name string) {
 				fmt.Println(i18n.T("session.save_success_both", name))
 			}
 		default: // "local"
-			if err := cli.sessionManager.SaveSession(name, cli.history); err != nil {
+			if err := cli.sessionManager.SaveSessionV2(name, sd); err != nil {
 				fmt.Println(i18n.T("session.error_save", err))
 			} else {
 				cli.currentSessionName = name
@@ -3165,7 +3335,8 @@ func (cli *ChatCLI) handleSaveSession(name string) {
 	}
 
 	// Local only (not connected)
-	if err := cli.sessionManager.SaveSession(name, cli.history); err != nil {
+	sd := cli.buildSessionData()
+	if err := cli.sessionManager.SaveSessionV2(name, sd); err != nil {
 		fmt.Println(i18n.T("session.error_save", err))
 	} else {
 		cli.currentSessionName = name
@@ -3182,10 +3353,10 @@ func (cli *ChatCLI) handleLoadSession(name string) {
 		}
 
 		// Check both sources
-		localHistory, localErr := cli.sessionManager.LoadSession(name)
+		localSD, localErr := cli.sessionManager.LoadSessionV2(name)
 		ctx, cancel := remoteSessionCtx()
 		defer cancel()
-		remoteHistory, remoteErr := rc.LoadSession(ctx, name)
+		remoteSD, remoteErr := rc.LoadSessionV2(ctx, name)
 
 		foundLocal := localErr == nil
 		foundRemote := remoteErr == nil
@@ -3200,20 +3371,20 @@ func (cli *ChatCLI) handleLoadSession(name string) {
 				"local",
 			)
 			if choice == "remote" {
-				cli.history = remoteHistory
+				cli.restoreSessionData(remoteSD)
 				cli.currentSessionName = name
 				fmt.Println(i18n.T("session.load_success_remote", name))
 			} else {
-				cli.history = localHistory
+				cli.restoreSessionData(localSD)
 				cli.currentSessionName = name
 				fmt.Println(i18n.T("session.load_success", name))
 			}
 		case foundLocal:
-			cli.history = localHistory
+			cli.restoreSessionData(localSD)
 			cli.currentSessionName = name
 			fmt.Println(i18n.T("session.load_success", name))
 		case foundRemote:
-			cli.history = remoteHistory
+			cli.restoreSessionData(remoteSD)
 			cli.currentSessionName = name
 			fmt.Println(i18n.T("session.load_success_remote", name))
 		default:
@@ -3223,13 +3394,51 @@ func (cli *ChatCLI) handleLoadSession(name string) {
 	}
 
 	// Local only
-	history, err := cli.sessionManager.LoadSession(name)
+	sd, err := cli.sessionManager.LoadSessionV2(name)
 	if err != nil {
 		fmt.Println(i18n.T("session.error_load", err))
 	} else {
-		cli.history = history
+		cli.restoreSessionData(sd)
 		cli.currentSessionName = name
 		fmt.Println(i18n.T("session.load_success", name))
+	}
+}
+
+// clearAllHistories resets all scoped histories to empty.
+func (cli *ChatCLI) clearAllHistories() {
+	cli.history = make([]models.Message, 0)
+	cli.chatHistory = make([]models.Message, 0)
+	cli.agentHistory = make([]models.Message, 0)
+	cli.coderHistory = make([]models.Message, 0)
+	cli.sharedMemory = make([]models.Message, 0)
+}
+
+// buildSessionData builds a SessionData from the current CLI state.
+func (cli *ChatCLI) buildSessionData() *SessionData {
+	return &SessionData{
+		Version:      2,
+		ChatHistory:  cli.history,
+		AgentHistory: cli.agentHistory,
+		CoderHistory: cli.coderHistory,
+		SharedMemory: cli.sharedMemory,
+	}
+}
+
+// restoreSessionData restores all scoped histories from a SessionData.
+func (cli *ChatCLI) restoreSessionData(sd *SessionData) {
+	cli.history = sd.ChatHistory
+	cli.chatHistory = sd.ChatHistory
+	cli.agentHistory = sd.AgentHistory
+	cli.coderHistory = sd.CoderHistory
+	cli.sharedMemory = sd.SharedMemory
+	if cli.agentHistory == nil {
+		cli.agentHistory = make([]models.Message, 0)
+	}
+	if cli.coderHistory == nil {
+		cli.coderHistory = make([]models.Message, 0)
+	}
+	if cli.sharedMemory == nil {
+		cli.sharedMemory = make([]models.Message, 0)
 	}
 }
 
@@ -3345,7 +3554,7 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 				if localDelErr == nil && remoteDelErr == nil {
 					fmt.Println(i18n.T("session.delete_success_both", name))
 					if cli.currentSessionName == name {
-						cli.history = []models.Message{}
+						cli.clearAllHistories()
 						cli.currentSessionName = ""
 						fmt.Println(i18n.T("session.delete_active_cleared"))
 					}
@@ -3356,7 +3565,7 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 				} else {
 					fmt.Println(i18n.T("session.delete_success", name))
 					if cli.currentSessionName == name {
-						cli.history = []models.Message{}
+						cli.clearAllHistories()
 						cli.currentSessionName = ""
 						fmt.Println(i18n.T("session.delete_active_cleared"))
 					}
@@ -3368,7 +3577,7 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 			} else {
 				fmt.Println(i18n.T("session.delete_success", name))
 				if cli.currentSessionName == name {
-					cli.history = []models.Message{}
+					cli.clearAllHistories()
 					cli.currentSessionName = ""
 					fmt.Println(i18n.T("session.delete_active_cleared"))
 				}
@@ -3381,7 +3590,7 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 			} else {
 				fmt.Println(i18n.T("session.delete_success_remote", name))
 				if cli.currentSessionName == name {
-					cli.history = []models.Message{}
+					cli.clearAllHistories()
 					cli.currentSessionName = ""
 					fmt.Println(i18n.T("session.delete_active_cleared"))
 				}
@@ -3398,7 +3607,7 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 	} else {
 		fmt.Println(i18n.T("session.delete_success", name))
 		if cli.currentSessionName == name {
-			cli.history = []models.Message{}
+			cli.clearAllHistories()
 			cli.currentSessionName = ""
 			fmt.Println(i18n.T("session.delete_active_cleared"))
 		}
