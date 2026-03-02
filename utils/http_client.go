@@ -7,6 +7,7 @@ package utils
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -16,9 +17,23 @@ import (
 // maxRedirects is the maximum number of HTTP redirects to follow.
 const maxRedirects = 10
 
-// NewHTTPClient cria um cliente HTTP com LoggingTransport e timeout configurado
+// NewHTTPClient cria um cliente HTTP com LoggingTransport e timeout configurado.
+// Cada chamada cria um http.Transport dedicado para evitar compartilhamento
+// de pool de conexões e cache TLS entre providers diferentes.
 func NewHTTPClient(logger *zap.Logger, timeout time.Duration) *http.Client {
-	return NewHTTPClientWithTransport(logger, timeout, http.DefaultTransport)
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	return NewHTTPClientWithTransport(logger, timeout, transport)
 }
 
 // NewHTTPClientWithTransport cria um cliente HTTP com um transport customizado
