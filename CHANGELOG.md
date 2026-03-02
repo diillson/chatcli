@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.65.3](https://github.com/diillson/chatcli/compare/v1.65.2...v1.65.3) (2026-03-02)
+
+
+### Bug Fixes
+
+* **http:** add HTTP/2 support to uTLS Chrome transport ([#596](https://github.com/diillson/chatcli/issues/596)) ([ef13739](https://github.com/diillson/chatcli/commit/ef1373975c6d70d1151096f3cded2a2b88384a39))
+
 ## [1.65.2](https://github.com/diillson/chatcli/compare/v1.65.1...v1.65.2) (2026-03-02)
 
 
