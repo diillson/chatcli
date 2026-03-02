@@ -106,7 +106,14 @@ Your output must be:
 
 // NewClaudeClient cria um novo cliente ClaudeAI com configurações personalizáveis.
 func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ClaudeClient {
-	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
+	var httpClient *http.Client
+	if strings.HasPrefix(apiKey, "oauth:") {
+		// OAuth requests may be rejected by Cloudflare when using Go's standard TLS fingerprint.
+		// Use Chrome-like TLS fingerprint via uTLS, matching the approach in openai_responses.
+		httpClient = utils.NewHTTPClientWithTransport(logger, 900*time.Second, utils.NewChromeTLSTransport())
+	} else {
+		httpClient = utils.NewHTTPClient(logger, 900*time.Second)
+	}
 	return &ClaudeClient{
 		apiKey:      apiKey,
 		model:       model,
