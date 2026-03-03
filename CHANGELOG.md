@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.65.6](https://github.com/diillson/chatcli/compare/v1.65.5...v1.65.6) (2026-03-03)
+
+
+### Bug Fixes
+
+* **chat:** improve mode context sharing, response spacing and stdin handling ([#602](https://github.com/diillson/chatcli/issues/602)) ([99e5314](https://github.com/diillson/chatcli/commit/99e5314bf2058b322f90a5bd61aea336572f2490))
+
 ## [1.65.5](https://github.com/diillson/chatcli/compare/v1.65.4...v1.65.5) (2026-03-03)
 
 
