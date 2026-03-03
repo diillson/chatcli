@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diillson/chatcli/cli/coder"
@@ -61,6 +61,142 @@ type AgentMode struct {
 	fileLockMgr     *workers.FileLockManager
 	policyAdapter   *workerPolicyAdapter
 	parallelMode    bool
+	// Centralized stdin reader for type-ahead queue support
+	stdinLines chan string   // all stdin lines flow through here
+	stdinDone  chan struct{} // signals reader goroutine to stop
+	stdinWg    sync.WaitGroup
+}
+
+// startStdinReader starts a goroutine that reads lines from stdin and sends
+// them to the stdinLines channel. This centralizes all stdin reads in agent
+// mode, enabling type-ahead queue support.
+//
+// Uses stdinPollReady (poll(2) on Unix, WaitForSingleObject on Windows) to
+// check for available input before calling os.Stdin.Read. This ensures the
+// goroutine never blocks for more than ~50ms, so it can check stdinDone and
+// exit cleanly when agent mode ends — without requiring the user to press Enter.
+func (a *AgentMode) startStdinReader() {
+	a.stdinLines = make(chan string, 10)
+	a.stdinDone = make(chan struct{})
+	a.stdinWg.Add(1)
+
+	go func() {
+		defer a.stdinWg.Done()
+		var lineBuf strings.Builder
+		buf := make([]byte, 512)
+		for {
+			select {
+			case <-a.stdinDone:
+				return
+			default:
+			}
+
+			// Poll stdin with 50ms timeout. On Unix (Linux/macOS) this uses
+			// poll(2) which correctly handles TTY fds. On Windows this uses
+			// WaitForSingleObject on the console input handle.
+			if !stdinPollReady(50 * time.Millisecond) {
+				continue // timeout — loop back and check stdinDone
+			}
+
+			// Data available — read won't block (on Unix).
+			n, err := os.Stdin.Read(buf)
+			if err != nil {
+				return
+			}
+
+			for i := 0; i < n; i++ {
+				if buf[i] == '\n' {
+					rawLine := lineBuf.String() + "\n"
+					lineBuf.Reset()
+
+					// Detect and clean paste content
+					cleaned, pasteInfo := paste.DetectInLine(rawLine)
+					if pasteInfo != nil {
+						if pasteInfo.LineCount > 1 {
+							fmt.Printf("  %s\n", i18n.T("paste.detected", pasteInfo.CharCount, pasteInfo.LineCount))
+						} else {
+							fmt.Printf("  %s\n", i18n.T("paste.detected.short", pasteInfo.CharCount))
+						}
+						rawLine = cleaned
+					}
+
+					line := strings.TrimSpace(rawLine)
+					if line == "" {
+						continue
+					}
+
+					select {
+					case <-a.stdinDone:
+						return
+					case a.stdinLines <- line:
+					}
+				} else {
+					lineBuf.WriteByte(buf[i])
+				}
+			}
+		}
+	}()
+}
+
+// stopStdinReader signals the stdin reader goroutine to stop and waits for it
+// to exit. On Unix (Linux/macOS), the goroutine exits within ~50ms (one poll
+// cycle). On Windows, it may be blocked in os.Stdin.Read after a
+// WaitForSingleObject false positive; a safety timeout prevents indefinite
+// blocking.
+func (a *AgentMode) stopStdinReader() {
+	if a.stdinDone != nil {
+		close(a.stdinDone)
+
+		// Wait with safety timeout. On Unix the goroutine exits in ~50ms.
+		// On Windows it might be stuck in a blocking Read; don't wait forever.
+		done := make(chan struct{})
+		go func() {
+			a.stdinWg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+			// Clean exit
+		case <-time.After(500 * time.Millisecond):
+			// Goroutine stuck on blocking read (Windows edge case).
+			// It will discard any data and exit on the next stdin input.
+		}
+
+		a.stdinLines = nil
+		a.stdinDone = nil
+	}
+}
+
+// readLine reads a single line from the centralized stdin reader.
+// Falls back to direct stdin read if the reader is not active.
+func (a *AgentMode) readLine() string {
+	if a.stdinLines != nil {
+		return <-a.stdinLines
+	}
+	// Fallback: direct stdin read
+	reader := bufio.NewReader(os.Stdin)
+	line, _ := reader.ReadString('\n')
+	return strings.TrimSpace(line)
+}
+
+// drainStdinToQueue moves any pending stdin lines into the message queue.
+// Returns the first message if any, for immediate injection into conversation.
+func (a *AgentMode) drainStdinToQueue() string {
+	var first string
+	for {
+		select {
+		case line := <-a.stdinLines:
+			if first == "" {
+				first = line
+			} else {
+				a.cli.messageQueueMu.Lock()
+				a.cli.messageQueue = append(a.cli.messageQueue, line)
+				a.cli.messageQueueMu.Unlock()
+			}
+		default:
+			return first
+		}
+	}
 }
 
 // Aliases de tipos para manter compatibilidade
@@ -173,7 +309,8 @@ func compactText(input string, maxLines int, maxLen int) string {
 	return joined
 }
 
-// getInput obtém entrada do usuário de forma segura
+// getInput obtém entrada do usuário de forma segura.
+// Uses the centralized stdin reader when active, falls back to direct read.
 func (a *AgentMode) getInput(promptStr string) string {
 	if runtime.GOOS != "windows" {
 		cmd := exec.Command(sttyPath, "sane")
@@ -188,28 +325,9 @@ func (a *AgentMode) getInput(promptStr string) string {
 	}
 
 	fmt.Print(promptStr)
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		if err == io.EOF {
-			return "q"
-		}
-		a.logger.Warn("Erro ao ler entrada no modo agente", zap.Error(err))
-		return ""
-	}
 
-	// Detect and report paste
-	cleaned, pasteInfo := paste.DetectInLine(input)
-	if pasteInfo != nil {
-		if pasteInfo.LineCount > 1 {
-			fmt.Printf("  %s\n", i18n.T("paste.detected", pasteInfo.CharCount, pasteInfo.LineCount))
-		} else {
-			fmt.Printf("  %s\n", i18n.T("paste.detected.short", pasteInfo.CharCount))
-		}
-		return strings.TrimSpace(cleaned)
-	}
-
-	return strings.TrimSpace(input)
+	// Use centralized stdin reader (paste detection already handled there)
+	return a.readLine()
 }
 
 // Run inicia o modo agente com uma consulta do usuário, utilizando um loop de Raciocínio-Ação (ReAct).
@@ -720,7 +838,8 @@ func (a *AgentMode) displayResponseWithoutCommands(response string, blocks []Com
 	a.cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", a.cli.Client.GetModelName(), renderedResponse), 2*time.Millisecond)
 }
 
-// getMultilineInput obtém entrada de múltiplas linhas
+// getMultilineInput obtém entrada de múltiplas linhas.
+// Uses the centralized stdin reader when active.
 func (a *AgentMode) getMultilineInput(promptStr string) string {
 	fmt.Print(promptStr)
 	fmt.Println(i18n.T("agent.multiline_input_tip"))
@@ -732,41 +851,15 @@ func (a *AgentMode) getMultilineInput(promptStr string) string {
 	}
 
 	var lines []string
-	reader := bufio.NewReader(os.Stdin)
-	pastedChars := 0
-
 	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
+		line := a.readLine()
+		if line == "." {
 			break
 		}
-
-		// Detect paste markers
-		cleaned, pasteInfo := paste.DetectInLine(line)
-		if pasteInfo != nil {
-			pastedChars += pasteInfo.CharCount
-		}
-
-		cleaned = strings.TrimRight(cleaned, "\r\n")
-		if cleaned == "." {
-			break
-		}
-		lines = append(lines, cleaned)
+		lines = append(lines, line)
 	}
 
-	result := strings.Join(lines, "\n")
-
-	// Show paste summary at the end if content was pasted
-	if pastedChars > 0 {
-		lineCount := len(lines)
-		if lineCount > 1 {
-			fmt.Printf("  %s\n", i18n.T("paste.detected", pastedChars, lineCount))
-		} else {
-			fmt.Printf("  %s\n", i18n.T("paste.detected.short", pastedChars))
-		}
-	}
-
-	return result
+	return strings.Join(lines, "\n")
 }
 
 // max retorna o maior entre dois inteiros
@@ -894,9 +987,8 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			}
 
 			fmt.Print(i18n.T("agent.status.batch_confirm"))
-			reader := bufio.NewReader(os.Stdin)
-			confirmationInput, _ := reader.ReadString('\n')
-			confirmation := strings.ToLower(strings.TrimSpace(confirmationInput))
+			confirmationInput := a.readLine()
+			confirmation := strings.ToLower(confirmationInput)
 			if confirmation != "s" && confirmation != "y" {
 				fmt.Println(i18n.T("agent.status.batch_cancelled"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
@@ -1333,9 +1425,7 @@ func (a *AgentMode) getCriticalInput(prompt string) string {
 	fmt.Print("\n")
 	fmt.Print(prompt)
 
-	reader := bufio.NewReader(os.Stdin)
-	response, _ := reader.ReadString('\n')
-	return strings.TrimSpace(response)
+	return a.readLine()
 }
 
 // askUserIfInteractive pergunta se comando deve ser interativo
@@ -1633,6 +1723,10 @@ func (a *AgentMode) getToolContextString() string {
 }
 
 func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
+	// Start centralized stdin reader for type-ahead queue support
+	a.startStdinReader()
+	defer a.stopStdinReader()
+
 	renderer := agent.NewUIRenderer(a.logger)
 
 	// Helper para construir o histórico com a "âncora" (System Prompt reforçado por turno)
@@ -1680,6 +1774,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+
+		// Check for type-ahead messages queued by the user during processing
+		if userMsg := a.drainStdinToQueue(); userMsg != "" {
+			fmt.Printf("\n  %s\n\n",
+				renderer.Colorize("📨 Nova instrução do usuário recebida", agent.ColorCyan))
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: userMsg,
+			})
 		}
 
 		// Compact history if over budget (before building turn history)
@@ -1877,10 +1981,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				a.turnTimer.Start(ctx, func(d time.Duration) {
 					fmt.Print(metrics.FormatTimerStatus(d, modelName, agentLabel))
 				})
-				// Give the policy adapter access to the spinner so it can
-				// pause/resume around interactive security prompts.
+				// Give the policy adapter access to the spinner and stdin
+				// channel so it can pause/resume around interactive
+				// security prompts and read input without orphaning goroutines.
 				if a.policyAdapter != nil {
 					a.policyAdapter.setSpinner(a.turnTimer)
+					a.policyAdapter.setStdinCh(a.stdinLines)
 				}
 				agentResults := a.agentDispatcher.Dispatch(ctx, agentCalls)
 				a.turnTimer.Stop()
@@ -1988,7 +2094,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							break
 						}
 						if action == coder.ActionAsk {
-							decision := coder.PromptSecurityCheck(ctx, tc.Name, tc.Args)
+							decision := coder.PromptSecurityCheck(ctx, tc.Name, tc.Args, a.stdinLines)
 							pattern := coder.GetSuggestedPattern(tc.Name, tc.Args)
 							switch decision {
 							case coder.DecisionAllowAlways:
@@ -2010,13 +2116,22 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 								batchHasError = true
 							case coder.DecisionDenyOnce:
-								msg := "🛫 AÇÃO NEGADA PELO USUÁRIO. NÃO TENTE O MESMO COMANDO NOVAMENTE. Peça novas instruções ou tente uma alternativa."
+								msg := "🛫 AÇÃO NEGADA PELO USUÁRIO DESTA VEZ. Tente uma abordagem diferente ou pergunte ao usuário."
 								if coderMinimal {
 									renderer.RenderToolResultMinimal(msg, true)
 								} else {
 									renderer.RenderToolResult(msg, true)
 								}
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
+								batchHasError = true
+							case coder.DecisionCancelled:
+								msg := "⏹ OPERAÇÃO CANCELADA PELO USUÁRIO (Ctrl+C). Pode tentar a mesma ação novamente se necessário."
+								if coderMinimal {
+									renderer.RenderToolResultMinimal(msg, true)
+								} else {
+									renderer.RenderToolResult(msg, true)
+								}
+								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
 								batchHasError = true
 							}
 							if batchHasError {

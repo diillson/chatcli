@@ -27,6 +27,11 @@ type workerPolicyAdapter struct {
 
 	// spinner control — set after creation via setSpinner
 	timer *metrics.Timer
+
+	// stdinCh is the centralized stdin channel from AgentMode.
+	// When set, security prompts read from this channel instead of spawning
+	// a goroutine on os.Stdin, avoiding orphaned readers after Ctrl+C.
+	stdinCh <-chan string
 }
 
 // newWorkerPolicyAdapter creates a PolicyChecker backed by coder.PolicyManager.
@@ -42,6 +47,11 @@ func newWorkerPolicyAdapter(logger *zap.Logger) (*workerPolicyAdapter, error) {
 // around interactive prompts.
 func (a *workerPolicyAdapter) setSpinner(t *metrics.Timer) {
 	a.timer = t
+}
+
+// setStdinCh sets the centralized stdin channel for security prompts.
+func (a *workerPolicyAdapter) setStdinCh(ch <-chan string) {
+	a.stdinCh = ch
 }
 
 // pauseSpinner stops the spinner output and clears the line.
@@ -114,7 +124,7 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		secCtx := buildSecurityContext(ctx)
 
 		// Prompt the user with full context
-		decision := coder.PromptSecurityCheckWithContext(ctx, toolName, args, secCtx)
+		decision := coder.PromptSecurityCheckWithContext(ctx, toolName, args, secCtx, a.stdinCh)
 		pattern := coder.GetSuggestedPattern(toolName, args)
 
 		// Clear the prompt area and resume spinner
@@ -135,7 +145,10 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 			return false, "AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
 
 		case coder.DecisionDenyOnce:
-			return false, "AÇÃO NEGADA PELO USUÁRIO. NÃO TENTE O MESMO COMANDO NOVAMENTE."
+			return false, "AÇÃO NEGADA PELO USUÁRIO DESTA VEZ. Tente uma abordagem diferente ou pergunte ao usuário."
+
+		case coder.DecisionCancelled:
+			return false, "OPERAÇÃO CANCELADA PELO USUÁRIO (Ctrl+C). Pode tentar a mesma ação novamente se necessário."
 
 		default: // DecisionRunOnce
 			return true, ""
