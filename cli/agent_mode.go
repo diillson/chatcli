@@ -171,10 +171,7 @@ func (a *AgentMode) stopStdinReader() {
 // Falls back to direct stdin read if the reader is not active.
 func (a *AgentMode) readLine() string {
 	if a.stdinLines != nil {
-		select {
-		case line := <-a.stdinLines:
-			return line
-		}
+		return <-a.stdinLines
 	}
 	// Fallback: direct stdin read
 	reader := bufio.NewReader(os.Stdin)
