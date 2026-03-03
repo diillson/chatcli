@@ -19,6 +19,7 @@ const (
 	DecisionAllowAlways
 	DecisionDenyOnce
 	DecisionDenyForever
+	DecisionCancelled // user pressed Ctrl+C; action can be retried later
 )
 
 // SecurityContext provides optional metadata for richer security prompts.
@@ -40,13 +41,16 @@ var sttyPath = func() string {
 }()
 
 // PromptSecurityCheck prompts the user for a security decision (no agent context).
-func PromptSecurityCheck(ctx context.Context, toolName, args string) SecurityDecision {
-	return PromptSecurityCheckWithContext(ctx, toolName, args, nil)
+func PromptSecurityCheck(ctx context.Context, toolName, args string, inputCh <-chan string) SecurityDecision {
+	return PromptSecurityCheckWithContext(ctx, toolName, args, nil, inputCh)
 }
 
 // PromptSecurityCheckWithContext prompts the user with full context about what
 // is being attempted, which agent is requesting it, and the parsed command details.
-func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, secCtx *SecurityContext) SecurityDecision {
+// When inputCh is provided, input is read from the channel instead of spawning a
+// goroutine with bufio.Scanner on stdin. This avoids orphaned goroutines that steal
+// stdin from go-prompt after agent mode exits (e.g., on Ctrl+C).
+func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, secCtx *SecurityContext, inputCh <-chan string) SecurityDecision {
 	if runtime.GOOS != "windows" && sttyPath != "" {
 		_ = exec.Command(sttyPath, "sane").Run()
 	}
@@ -113,41 +117,54 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 
 	fmt.Print("\n" + purple + " > " + reset)
 
-	resultChan := make(chan string, 1)
-
-	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
-		if scanner.Scan() {
-			resultChan <- strings.TrimSpace(strings.ToLower(scanner.Text()))
-		} else {
-			resultChan <- ""
+	// Read user input either from the centralized stdin channel (if provided)
+	// or via a fallback goroutine. Using inputCh avoids orphaned goroutines
+	// that steal stdin after Ctrl+C cancels the context.
+	var input string
+	if inputCh != nil {
+		select {
+		case <-ctx.Done():
+			fmt.Println("\n" + red + " [Cancelado]" + reset)
+			return DecisionCancelled
+		case line := <-inputCh:
+			input = strings.TrimSpace(strings.ToLower(line))
 		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		_ = os.Stdin.SetReadDeadline(time.Now())
-		fmt.Println("\n" + red + " [Cancelado]" + reset)
-		return DecisionDenyOnce
-	case input := <-resultChan:
-		if isExecCmd {
-			switch input {
-			case "n", "no":
-				return DecisionDenyOnce
-			default:
-				return DecisionRunOnce
+	} else {
+		resultChan := make(chan string, 1)
+		go func() {
+			scanner := bufio.NewScanner(os.Stdin)
+			if scanner.Scan() {
+				resultChan <- strings.TrimSpace(strings.ToLower(scanner.Text()))
+			} else {
+				resultChan <- ""
 			}
+		}()
+		select {
+		case <-ctx.Done():
+			_ = os.Stdin.SetReadDeadline(time.Now())
+			fmt.Println("\n" + red + " [Cancelado]" + reset)
+			return DecisionCancelled
+		case input = <-resultChan:
 		}
+	}
+
+	if isExecCmd {
 		switch input {
-		case "a", "always":
-			return DecisionAllowAlways
 		case "n", "no":
 			return DecisionDenyOnce
-		case "d", "deny":
-			return DecisionDenyForever
 		default:
 			return DecisionRunOnce
 		}
+	}
+	switch input {
+	case "a", "always":
+		return DecisionAllowAlways
+	case "n", "no":
+		return DecisionDenyOnce
+	case "d", "deny":
+		return DecisionDenyForever
+	default:
+		return DecisionRunOnce
 	}
 }
 

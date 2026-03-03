@@ -14,12 +14,22 @@ type AnimationManager struct {
 	stopRequested  bool           // Flag para rastrear se já solicitamos parada
 	currentMessage string         // Mensagem atual sendo exibida
 	isRunning      bool           // Estado da animação
+	suppressed     bool           // When true, ShowThinkingAnimation won't start the goroutine
 }
 
 func NewAnimationManager() *AnimationManager {
 	return &AnimationManager{
 		done: make(chan struct{}),
 	}
+}
+
+// SetSuppressed enables or disables animation suppression. When suppressed,
+// ShowThinkingAnimation stores the message but does not start the spinner goroutine.
+// This prevents the animation from conflicting with go-prompt's rendering.
+func (am *AnimationManager) SetSuppressed(v bool) {
+	am.mu.Lock()
+	am.suppressed = v
+	am.mu.Unlock()
 }
 
 // ShowThinkingAnimation inicia ou atualiza a animação "pensando"
@@ -29,6 +39,11 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 
 	// Atualiza a mensagem
 	am.currentMessage = message
+
+	// If suppressed, store message but don't start the goroutine
+	if am.suppressed {
+		return
+	}
 
 	// Se a animação já está rodando, apenas atualize a mensagem e retorne
 	if am.isRunning {

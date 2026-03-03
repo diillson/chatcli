@@ -176,6 +176,10 @@ type ChatCLI struct {
 	operationCancel      context.CancelFunc
 	isExecuting          atomic.Bool
 	processingDone       chan struct{}
+	bgSummaryWg          sync.WaitGroup // tracks background summary goroutines
+	messageQueue         []string       // FIFO queue of user messages typed during processing
+	messageQueueMu       sync.Mutex     // protects messageQueue
+	prefixSpinnerIdx     int32          // atomic counter for animated prefix spinner
 	sessionManager       *SessionManager
 	currentSessionName   string
 	UserMaxTokens        int
@@ -502,6 +506,21 @@ func (cli *ChatCLI) executor(in string) {
 		return
 	}
 
+	// If already processing, queue the message for later (type-ahead)
+	if cli.isExecuting.Load() {
+		cli.messageQueueMu.Lock()
+		if len(cli.messageQueue) < 10 {
+			cli.messageQueue = append(cli.messageQueue, in)
+			queueLen := len(cli.messageQueue)
+			cli.messageQueueMu.Unlock()
+			fmt.Printf("\n  %s\n", colorize(fmt.Sprintf("📥 Mensagem na fila (#%d)", queueLen), ColorGray))
+		} else {
+			cli.messageQueueMu.Unlock()
+			fmt.Printf("\n  %s\n", colorize("⚠ Fila cheia (máx 10). Aguarde.", ColorYellow))
+		}
+		return
+	}
+
 	cli.interactionState = StateProcessing
 	if runtime.GOOS == "windows" {
 		// On Windows, run synchronously so go-prompt naturally redraws the prompt
@@ -529,10 +548,83 @@ func (cli *ChatCLI) CancelOperation() {
 	}
 }
 
+// dequeueMessage removes and returns the first message from the queue.
+// Returns "" if the queue is empty.
+func (cli *ChatCLI) dequeueMessage() string {
+	cli.messageQueueMu.Lock()
+	defer cli.messageQueueMu.Unlock()
+
+	if len(cli.messageQueue) == 0 {
+		return ""
+	}
+
+	msg := cli.messageQueue[0]
+	cli.messageQueue = cli.messageQueue[1:]
+	return msg
+}
+
 func (cli *ChatCLI) processLLMRequest(in string) {
+	// Suppress animation so the spinner goroutine doesn't conflict with
+	// go-prompt's rendering. The go-prompt prefix (changeLivePrefix) shows
+	// processing status instead.
+	cli.animation.SetSuppressed(true)
+	defer cli.animation.SetSuppressed(false)
+
+	// Animate the go-prompt prefix: a goroutine increments the spinner index
+	// and sends SIGWINCH so go-prompt redraws with the updated prefix.
+	// stopSpinner is safe to call multiple times.
+	spinnerDone := make(chan struct{})
+	var spinnerStopped atomic.Bool
+	stopSpinner := func() {
+		if spinnerStopped.CompareAndSwap(false, true) {
+			close(spinnerDone)
+			atomic.StoreInt32(&cli.prefixSpinnerIdx, 0)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		go func() {
+			ticker := time.NewTicker(250 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-spinnerDone:
+					return
+				case <-ticker.C:
+					atomic.AddInt32(&cli.prefixSpinnerIdx, 1)
+					cli.forceRefreshPrompt()
+				}
+			}
+		}()
+	}
+
 	cli.isExecuting.Store(true)
 
 	defer func() {
+		// Stop prefix spinner (idempotent — may already be stopped before response)
+		stopSpinner()
+
+		// Check queue before going idle: process next queued message if any
+		if nextMsg := cli.dequeueMessage(); nextMsg != "" {
+			cli.messageQueueMu.Lock()
+			remaining := len(cli.messageQueue)
+			cli.messageQueueMu.Unlock()
+
+			// Re-enter processing state for the queued message
+			cli.interactionState = StateProcessing
+
+			fmt.Print("\033[0m")
+			os.Stdout.Sync()
+			if remaining > 0 {
+				fmt.Printf("\n  %s\n", colorize(fmt.Sprintf("📤 Processando da fila (%d restante(s))...", remaining), ColorGray))
+			} else {
+				fmt.Printf("\n  %s\n", colorize("📤 Processando da fila...", ColorGray))
+			}
+
+			// Recursive call: isExecuting stays true, bounded by queue cap (10)
+			cli.processLLMRequest(nextMsg)
+			return
+		}
+
 		cli.isExecuting.Store(false)
 		cli.interactionState = StateNormal
 
@@ -632,6 +724,13 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 
 	cli.animation.StopThinkingAnimation()
+
+	// Stop the prefix spinner before printing the response.
+	// Without this, the SIGWINCH signals cause go-prompt to redraw the
+	// [ModelName ⠹] prefix in the middle of the response text.
+	stopSpinner()
+	cli.interactionState = StateNormal
+	cli.forceRefreshPrompt()
 
 	// Pequena pausa para garantir que o terminal está limpo
 	time.Sleep(50 * time.Millisecond)
@@ -1022,7 +1121,6 @@ func (cli *ChatCLI) runAgentLogic() {
 	cli.exitModeWithStructuredSummary(context.Background(), "agent")
 
 	fmt.Println(i18n.T("status.agent_mode_exit"))
-	time.Sleep(500 * time.Millisecond)
 }
 
 func (cli *ChatCLI) runCoderLogic() {
@@ -1073,7 +1171,6 @@ func (cli *ChatCLI) runCoderLogic() {
 	cli.exitModeWithStructuredSummary(context.Background(), "coder")
 
 	fmt.Println(colorize("\n ✅ Sessão de engenharia finalizada.", ColorGreen))
-	time.Sleep(500 * time.Millisecond)
 }
 
 // buildCrossModeContext creates a context bridge with recent messages from other modes
@@ -1125,9 +1222,14 @@ func (cli *ChatCLI) buildCrossModeContext(targetMode string) string {
 	}
 
 	// 3. Shared memory (structured summaries from previous sessions of any mode)
-	if len(cli.sharedMemory) > 0 {
+	cli.mu.Lock()
+	sharedMemCopy := make([]models.Message, len(cli.sharedMemory))
+	copy(sharedMemCopy, cli.sharedMemory)
+	cli.mu.Unlock()
+
+	if len(sharedMemCopy) > 0 {
 		sb.WriteString("=== Previous session summaries ===\n")
-		for _, mem := range cli.sharedMemory {
+		for _, mem := range sharedMemCopy {
 			sb.WriteString(mem.Content)
 			sb.WriteString("\n\n")
 		}
@@ -1155,31 +1257,21 @@ func getRecentNonSystemMessages(history []models.Message, n int) []models.Messag
 	return nonSystem[len(nonSystem)-n:]
 }
 
-// exitModeWithStructuredSummary generates a structured summary of the mode session,
-// stores it as shared memory, and restores chat history as the active history.
+// exitModeWithStructuredSummary restores chat history synchronously and
+// kicks off background summary generation so the terminal is released instantly.
 func (cli *ChatCLI) exitModeWithStructuredSummary(ctx context.Context, modeName string) {
-	// Generate structured summary of what was done in the mode session
-	summary := cli.historyCompactor.GenerateModeSummary(ctx, cli.history, cli.Client, modeName)
+	// Capture mode history before restoring chat history (goroutine needs its own copy)
+	modeHistory := make([]models.Message, len(cli.history))
+	copy(modeHistory, cli.history)
 
-	if summary != "" {
-		cli.sharedMemory = append(cli.sharedMemory, models.Message{
-			Role:    "assistant",
-			Content: summary,
-			Meta: &models.MessageMeta{
-				IsSummary: true,
-				Mode:      modeName,
-			},
-		})
-	}
-
-	// Restore chat history as the active history
+	// --- SYNC: restore chat history and build reset message ---
 	cli.history = cli.chatHistory
 
-	// Build mode-reset message with shared memory context
 	resetContent := "The /" + modeName + " session has ended. You are now back in normal chat mode. " +
 		"Respond conversationally in plain text. Do NOT use command blocks, execution plans, or structured XML tags. " +
 		"Just answer the user's questions naturally."
 
+	cli.mu.Lock()
 	if len(cli.sharedMemory) > 0 {
 		var memSb strings.Builder
 		memSb.WriteString("\n\nSummary of actions from previous agent/coder sessions:\n\n")
@@ -1189,6 +1281,7 @@ func (cli *ChatCLI) exitModeWithStructuredSummary(ctx context.Context, modeName 
 		}
 		resetContent += memSb.String()
 	}
+	cli.mu.Unlock()
 
 	// Remove previous mode-reset messages to avoid accumulation
 	cleaned := make([]models.Message, 0, len(cli.history)+1)
@@ -1208,10 +1301,40 @@ func (cli *ChatCLI) exitModeWithStructuredSummary(ctx context.Context, modeName 
 			Mode:      modeName,
 		},
 	})
+
+	// --- ASYNC: generate summary in background ---
+	llmClient := cli.Client
+	cli.bgSummaryWg.Add(1)
+	go func() {
+		defer cli.bgSummaryWg.Done()
+		summary := cli.historyCompactor.GenerateModeSummary(ctx, modeHistory, llmClient, modeName)
+		if summary != "" {
+			cli.mu.Lock()
+			cli.sharedMemory = append(cli.sharedMemory, models.Message{
+				Role:    "assistant",
+				Content: summary,
+				Meta: &models.MessageMeta{
+					IsSummary: true,
+					Mode:      modeName,
+				},
+			})
+			cli.mu.Unlock()
+		}
+	}()
 }
 
 func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 	if cli.isExecuting.Load() {
+		// Clear queued messages first
+		cli.messageQueueMu.Lock()
+		queueLen := len(cli.messageQueue)
+		cli.messageQueue = cli.messageQueue[:0]
+		cli.messageQueueMu.Unlock()
+
+		if queueLen > 0 {
+			fmt.Printf("\n  %s", colorize(fmt.Sprintf("🗑 %d mensagem(ns) removida(s) da fila.", queueLen), ColorYellow))
+		}
+
 		fmt.Println(i18n.T("prompt.cancel_op"))
 
 		cli.mu.Lock()
@@ -1235,7 +1358,22 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 	switch cli.interactionState {
 	case StateSwitchingProvider:
 		return i18n.T("prompt.select_provider"), true
-	case StateProcessing, StateAgentMode:
+	case StateProcessing:
+		spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		idx := atomic.LoadInt32(&cli.prefixSpinnerIdx)
+		s := spinner[int(idx)%len(spinner)]
+		if cli.Client != nil {
+			modelName := cli.Client.GetModelName()
+			cli.messageQueueMu.Lock()
+			queueLen := len(cli.messageQueue)
+			cli.messageQueueMu.Unlock()
+			if queueLen > 0 {
+				return fmt.Sprintf("[%s %s • %d na fila] ❯ ", modelName, s, queueLen), true
+			}
+			return fmt.Sprintf("[%s %s] ❯ ", modelName, s), true
+		}
+		return fmt.Sprintf("[processando %s] ❯ ", s), true
+	case StateAgentMode:
 		return "", true
 	default:
 		prefix := "❯ "
@@ -1253,6 +1391,9 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 }
 
 func (cli *ChatCLI) cleanup() {
+	// Wait for any background summary goroutines to finish so summaries aren't lost
+	cli.bgSummaryWg.Wait()
+
 	if err := cli.historyManager.AppendAndRotateHistory(cli.newCommandsInSession); err != nil {
 		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
 	}
