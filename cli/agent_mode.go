@@ -121,9 +121,6 @@ func (a *AgentMode) startStdinReader() {
 					}
 
 					line := strings.TrimSpace(rawLine)
-					if line == "" {
-						continue
-					}
 
 					select {
 					case <-a.stdinDone:
@@ -186,6 +183,9 @@ func (a *AgentMode) drainStdinToQueue() string {
 	for {
 		select {
 		case line := <-a.stdinLines:
+			if line == "" {
+				continue // skip empty lines (bare Enter presses)
+			}
 			if first == "" {
 				first = line
 			} else {
@@ -1776,14 +1776,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		default:
 		}
 
-		// Check for type-ahead messages queued by the user during processing
-		if userMsg := a.drainStdinToQueue(); userMsg != "" {
-			fmt.Printf("\n  %s\n\n",
-				renderer.Colorize("📨 Nova instrução do usuário recebida", agent.ColorCyan))
-			a.cli.history = append(a.cli.history, models.Message{
-				Role:    "user",
-				Content: userMsg,
-			})
+		// In agent mode (not coder), check for type-ahead messages from user
+		if !a.isCoderMode {
+			if userMsg := a.drainStdinToQueue(); userMsg != "" {
+				fmt.Printf("\n  %s\n\n",
+					renderer.Colorize("📨 Nova instrução do usuário recebida", agent.ColorCyan))
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: userMsg,
+				})
+			}
 		}
 
 		// Compact history if over budget (before building turn history)
