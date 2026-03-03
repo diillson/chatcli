@@ -176,10 +176,9 @@ type ChatCLI struct {
 	operationCancel      context.CancelFunc
 	isExecuting          atomic.Bool
 	processingDone       chan struct{}
-	bgSummaryWg          sync.WaitGroup // tracks background summary goroutines
-	messageQueue         []string       // FIFO queue of user messages typed during processing
-	messageQueueMu       sync.Mutex     // protects messageQueue
-	prefixSpinnerIdx     int32          // atomic counter for animated prefix spinner
+	messageQueue         []string   // FIFO queue of user messages typed during processing
+	messageQueueMu       sync.Mutex // protects messageQueue
+	prefixSpinnerIdx     int32      // atomic counter for animated prefix spinner
 	sessionManager       *SessionManager
 	currentSessionName   string
 	UserMaxTokens        int
@@ -647,7 +646,6 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		cancel()
 	}()
 
-	fmt.Println()
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
 	userInput, additionalContext := cli.processSpecialCommands(in)
@@ -751,17 +749,18 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 			Content: aiResponse,
 		})
 
+		// Exibir nome do modelo como label na linha do prompt
 		modelName := cli.Client.GetModelName()
-		coloredPrefix := colorize(modelName+":", ColorPurple)
+		fmt.Printf("%s\n", colorize(modelName+":", ColorPurple))
 
 		// Garantir que markdown renderizado termina com reset
 		renderedResponse := cli.renderMarkdown(aiResponse)
 		renderedResponse = ensureANSIReset(renderedResponse)
 
-		fmt.Printf("%s ", coloredPrefix)
 		cli.typewriterEffect(renderedResponse, 2*time.Millisecond)
 		fmt.Print("\033[0m") // Reset final
 		fmt.Println()
+		fmt.Println() // Linha extra para separar visualmente as mensagens
 	}
 }
 
@@ -1257,24 +1256,39 @@ func getRecentNonSystemMessages(history []models.Message, n int) []models.Messag
 	return nonSystem[len(nonSystem)-n:]
 }
 
-// exitModeWithStructuredSummary restores chat history synchronously and
-// kicks off background summary generation so the terminal is released instantly.
-func (cli *ChatCLI) exitModeWithStructuredSummary(ctx context.Context, modeName string) {
-	// Capture mode history before restoring chat history (goroutine needs its own copy)
+// exitModeWithStructuredSummary restores chat history and injects recent
+// messages from the agent/coder session so the chat model has full context.
+func (cli *ChatCLI) exitModeWithStructuredSummary(_ context.Context, modeName string) {
 	modeHistory := make([]models.Message, len(cli.history))
 	copy(modeHistory, cli.history)
 
-	// --- SYNC: restore chat history and build reset message ---
+	// Restore chat history
 	cli.history = cli.chatHistory
+
+	// Build context from actual recent messages (more reliable than LLM summary)
+	recentMsgs := getRecentNonSystemMessages(modeHistory, 20)
+	var sessionContext strings.Builder
+	for _, msg := range recentMsgs {
+		content := msg.Content
+		if len(content) > 2000 {
+			content = content[:1500] + "\n...[truncated]...\n" + content[len(content)-300:]
+		}
+		sessionContext.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
+	}
 
 	resetContent := "The /" + modeName + " session has ended. You are now back in normal chat mode. " +
 		"Respond conversationally in plain text. Do NOT use command blocks, execution plans, or structured XML tags. " +
 		"Just answer the user's questions naturally."
 
+	if sessionContext.Len() > 0 {
+		resetContent += fmt.Sprintf("\n\nHere is what happened in the /%s session (use this to answer follow-up questions):\n\n%s", modeName, sessionContext.String())
+	}
+
+	// Also append previous shared memory summaries if any
 	cli.mu.Lock()
 	if len(cli.sharedMemory) > 0 {
 		var memSb strings.Builder
-		memSb.WriteString("\n\nSummary of actions from previous agent/coder sessions:\n\n")
+		memSb.WriteString("\n\nContext from earlier sessions:\n\n")
 		for _, mem := range cli.sharedMemory {
 			memSb.WriteString(mem.Content)
 			memSb.WriteString("\n\n---\n\n")
@@ -1301,26 +1315,6 @@ func (cli *ChatCLI) exitModeWithStructuredSummary(ctx context.Context, modeName 
 			Mode:      modeName,
 		},
 	})
-
-	// --- ASYNC: generate summary in background ---
-	llmClient := cli.Client
-	cli.bgSummaryWg.Add(1)
-	go func() {
-		defer cli.bgSummaryWg.Done()
-		summary := cli.historyCompactor.GenerateModeSummary(ctx, modeHistory, llmClient, modeName)
-		if summary != "" {
-			cli.mu.Lock()
-			cli.sharedMemory = append(cli.sharedMemory, models.Message{
-				Role:    "assistant",
-				Content: summary,
-				Meta: &models.MessageMeta{
-					IsSummary: true,
-					Mode:      modeName,
-				},
-			})
-			cli.mu.Unlock()
-		}
-	}()
 }
 
 func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
@@ -1391,9 +1385,6 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 }
 
 func (cli *ChatCLI) cleanup() {
-	// Wait for any background summary goroutines to finish so summaries aren't lost
-	cli.bgSummaryWg.Wait()
-
 	if err := cli.historyManager.AppendAndRotateHistory(cli.newCommandsInSession); err != nil {
 		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
 	}
