@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.65.5](https://github.com/diillson/chatcli/compare/v1.65.4...v1.65.5) (2026-03-03)
+
+
+### Bug Fixes
+
+* **agent:** replace SetReadDeadline with cross-platform stdin polling ([#600](https://github.com/diillson/chatcli/issues/600)) ([65aea94](https://github.com/diillson/chatcli/commit/65aea94c48d4886ad09fddca8e33a74a323ac2a8))
+
 ## [1.65.4](https://github.com/diillson/chatcli/compare/v1.65.3...v1.65.4) (2026-03-02)
 
 
