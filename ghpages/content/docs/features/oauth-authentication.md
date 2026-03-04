@@ -123,6 +123,14 @@ Para personalizar o diretório de armazenamento, defina a variável de ambiente:
 export CHATCLI_AUTH_DIR="~/.config/chatcli/auth"
 ```
 
+### Configuração Avançada
+
+| Variável | Descrição |
+|----------|-----------|
+| `CHATCLI_OPENAI_CLIENT_ID` | Permite sobrescrever o client ID do OAuth da OpenAI |
+| `CHATCLI_COPILOT_CLIENT_ID` | Permite sobrescrever o client ID do Device Flow do GitHub Copilot (padrão: `Ov23lifEydOk2Non90tJ`) |
+| `COPILOT_API_BASE_URL` | URL base da API do Copilot para ambientes enterprise (padrão: `https://api.githubcopilot.com`) |
+
 ---
 
 ## Solução de Problemas

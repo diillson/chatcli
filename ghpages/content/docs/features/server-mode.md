@@ -398,6 +398,11 @@ LLM_PROVIDER=CLAUDEAI
 ANTHROPIC_API_KEY=sk-ant-xxx
 ANTHROPIC_MODEL=claude-sonnet-4-5
 
+# GitHub Copilot (alternativa — ou use /auth login github-copilot)
+# GITHUB_COPILOT_TOKEN=ghu_xxx
+# COPILOT_MODEL=gpt-4o
+# COPILOT_MAX_TOKENS=16384
+
 # K8s Watcher (opcional)
 CHATCLI_WATCH_DEPLOYMENT=myapp
 CHATCLI_WATCH_NAMESPACE=production

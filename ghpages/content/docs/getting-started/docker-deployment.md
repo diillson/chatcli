@@ -271,6 +271,17 @@ O chart automaticamente:
 | `secrets.stackspotClientKey` | StackSpot Client Key |
 | `secrets.stackspotRealm` | StackSpot Realm |
 | `secrets.stackspotAgentId` | StackSpot Agent ID |
+| `secrets.githubCopilotToken` | Token OAuth do GitHub Copilot |
+
+#### GitHub Copilot
+
+| Valor | Descrição | Padrão |
+|-------|-----------|--------|
+| `COPILOT_MODEL` | Modelo padrão do Copilot (ex: `gpt-4o`, `claude-sonnet-4`) | `gpt-4o` |
+| `COPILOT_MAX_TOKENS` | Máximo de tokens para resposta | `""` |
+| `COPILOT_API_BASE_URL` | URL base da API (para ambientes enterprise) | `https://api.githubcopilot.com` |
+
+> Para autenticação, use `secrets.githubCopilotToken` com um token obtido via `/auth login github-copilot`, ou defina `GITHUB_COPILOT_TOKEN` como variável de ambiente.
 
 #### Ollama
 

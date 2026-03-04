@@ -195,7 +195,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  XAI_API_KEY ,  XAI_MODEL ,  XAI_MAX_TOKENS
   -  OLLAMA_ENABLED ,  OLLAMA_BASE_URL ,  OLLAMA_MODEL ,  OLLAMA_MAX_TOKENS ,  OLLAMA_FILTER_THINKING  – (Optional) Filters "thinking aloud" from models like Qwen3 (true/false, default: true)
   -  CLIENT_ID ,  CLIENT_KEY ,  STACKSPOT_REALM ,  STACKSPOT_AGENT_ID  (for StackSpot)
-  -  GITHUB_COPILOT_TOKEN ,  COPILOT_MODEL ,  COPILOT_MAX_TOKENS  (for GitHub Copilot — or use `/auth login github-copilot`)
+  -  GITHUB_COPILOT_TOKEN ,  COPILOT_MODEL ,  COPILOT_MAX_TOKENS ,  COPILOT_API_BASE_URL ,  CHATCLI_COPILOT_CLIENT_ID  (for GitHub Copilot — or use `/auth login github-copilot`)
 - Agent:
   -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Optional)** Default timeout for each command executed from the action list by Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default:  10m . Maximum: 1h.
   -  `CHATCLI_AGENT_DENYLIST`  – **(Optional)** Semicolon-separated list of regular expressions to block extra dangerous commands. Example: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
@@ -318,10 +318,10 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
 
 ChatCLI supports **two authentication methods** for providers that offer OAuth:
 
-1. **API Key (traditional)**: Set the environment variable (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) in your `.env` file.
+1. **API Key (traditional)**: Set the environment variable (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GITHUB_COPILOT_TOKEN`) in your `.env` file.
 2. **OAuth (interactive login)**: Authenticate directly from the terminal using `/auth login`, no need to manually generate or paste keys.
 
-> OAuth is ideal for users on **ChatGPT Plus / Codex** (OpenAI) or **Claude Pro** (Anthropic) plans who don't want to manage API keys.
+> OAuth is ideal for users on **ChatGPT Plus / Codex** (OpenAI), **Claude Pro** (Anthropic) or **GitHub Copilot** (Individual, Business, Enterprise) plans who don't want to manage API keys.
 
 ### `/auth` Commands
 
@@ -330,17 +330,22 @@ ChatCLI supports **two authentication methods** for providers that offer OAuth:
 | `/auth status` | Shows authentication status for all providers |
 | `/auth login openai-codex` | Starts the OAuth flow with OpenAI (opens browser automatically) |
 | `/auth login anthropic` | Starts the OAuth flow with Anthropic |
+| `/auth login github-copilot` | Starts the Device Flow OAuth with GitHub Copilot |
 | `/auth logout openai-codex` | Removes OpenAI OAuth credentials |
 | `/auth logout anthropic` | Removes Anthropic OAuth credentials |
+| `/auth logout github-copilot` | Removes GitHub Copilot OAuth credentials |
 
 ### How it Works
 
-1. Run `/auth login openai-codex` (or `anthropic`)
+1. Run `/auth login openai-codex` (or `anthropic` or `github-copilot`)
 2. Your browser opens automatically to the provider's login page
 3. **OpenAI:** the token is captured automatically via local callback (port 1455)
 4. **Anthropic:** after authorizing, copy the code shown on the page and paste it in the terminal
-5. The provider appears immediately in `/switch` — no restart needed
-6. Credentials are stored with **AES-256-GCM encryption** at `~/.chatcli/auth-profiles.json`
+5. **GitHub Copilot:** enter the device code displayed in the terminal at https://github.com/login/device
+6. The provider appears immediately in `/switch` — no restart needed
+7. Credentials are stored with **AES-256-GCM encryption** at `~/.chatcli/auth-profiles.json`
+
+> **Note:** GitHub Copilot tokens (Device Flow RFC 8628) are persistent and do not expire — unlike OAuth tokens with refresh from OpenAI and Anthropic.
 
 ### Which Endpoint is Used (OpenAI)
 
@@ -383,7 +388,7 @@ Execute prompts in a single line, ideal for scripting and automation.
 
 - Available One-Shot Flags:
   -  -p  or  --prompt : The text to send to the LLM for a single execution.
-  -  --provider : Overrides the LLM provider at runtime ( OPENAI ,  OPENAI_ASSISTANT ,  CLAUDEAI ,  GOOGLEAI ,  STACKSPOT ,  XAI ).
+  -  --provider : Overrides the LLM provider at runtime ( OPENAI ,  OPENAI_ASSISTANT ,  CLAUDEAI ,  GOOGLEAI ,  STACKSPOT ,  XAI ,  COPILOT ,  OLLAMA ).
   -  --model : Chooses the model for the active provider (e.g.,  gpt-4o-mini ,  claude-sonnet-4-5 ,  gemini-2.5-flash , etc.).
   -  --max-tokens : Defines the maximum amount of tokens used for active provider.
   -  --realm : Overrides the StackSpot realm at runtime.

@@ -87,6 +87,14 @@ secrets:
   # GitHub Copilot
   githubCopilotToken: ""
 
+# GitHub Copilot configuration (if using COPILOT provider)
+# Authenticate via /auth login github-copilot (Device Flow OAuth)
+# or set secrets.githubCopilotToken above
+copilot:
+  model: ""           # e.g., gpt-4o, gpt-4o-mini, claude-sonnet-4, gemini-2.0-flash
+  maxTokens: ""       # max tokens for response (default: provider limit)
+  apiBaseUrl: ""      # override for enterprise (default: https://api.githubcopilot.com)
+
 # Ollama configuration (if using Ollama provider)
 ollama:
   enabled: false
