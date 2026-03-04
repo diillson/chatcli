@@ -16,8 +16,10 @@ import (
 
 	"time"
 
+	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/fallback"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/metrics"
 	"github.com/diillson/chatcli/models"
@@ -62,6 +64,12 @@ type Handler struct {
 	// Remote resource discovery (optional, nil when not configured)
 	pluginManager *plugins.Manager
 	personaLoader *persona.Loader
+
+	// Provider fallback chain (optional, nil when not configured)
+	fallbackChain *fallback.Chain
+
+	// MCP manager (optional, nil when not configured)
+	mcpManager *mcp.Manager
 }
 
 // SessionStore abstracts session persistence for testability.
@@ -575,6 +583,16 @@ func (h *Handler) SetPluginManager(pm *plugins.Manager) {
 // SetPersonaLoader sets the persona loader for remote agent/skill discovery.
 func (h *Handler) SetPersonaLoader(pl *persona.Loader) {
 	h.personaLoader = pl
+}
+
+// SetFallbackChain sets the provider fallback chain for automatic failover.
+func (h *Handler) SetFallbackChain(chain *fallback.Chain) {
+	h.fallbackChain = chain
+}
+
+// SetMCPManager sets the MCP manager for tool interoperability.
+func (h *Handler) SetMCPManager(mgr *mcp.Manager) {
+	h.mcpManager = mgr
 }
 
 // GetServerInfo returns server metadata.

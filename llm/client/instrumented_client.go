@@ -8,6 +8,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -59,6 +60,39 @@ func (c *InstrumentedClient) SendPrompt(ctx context.Context, prompt string, hist
 
 	c.recorder.RecordRequest(c.provider, model, "success", duration)
 	return response, nil
+}
+
+// SendPromptWithTools delegates to the inner client if it supports native tools.
+func (c *InstrumentedClient) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
+	tac, ok := c.inner.(ToolAwareClient)
+	if !ok {
+		return nil, fmt.Errorf("inner client %T does not support native tools", c.inner)
+	}
+
+	model := c.inner.GetModelName()
+	start := time.Now()
+
+	response, err := tac.SendPromptWithTools(ctx, prompt, history, tools, maxTokens)
+	duration := time.Since(start)
+
+	if err != nil {
+		errType := classifyError(err)
+		c.recorder.RecordRequest(c.provider, model, "error", duration)
+		c.recorder.RecordError(c.provider, model, errType)
+		return response, err
+	}
+
+	c.recorder.RecordRequest(c.provider, model, "success", duration)
+	return response, nil
+}
+
+// SupportsNativeTools returns true if the inner client supports native tool calling.
+func (c *InstrumentedClient) SupportsNativeTools() bool {
+	tac, ok := c.inner.(ToolAwareClient)
+	if !ok {
+		return false
+	}
+	return tac.SupportsNativeTools()
 }
 
 // classifyError extracts an error type from the error for metrics labeling.

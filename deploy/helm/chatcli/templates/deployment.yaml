@@ -115,6 +115,15 @@ spec:
           {{- if .Values.plugins.enabled }}
           {{- $mounts = append $mounts (dict "name" "plugins" "mountPath" "/home/chatcli/.chatcli/plugins") }}
           {{- end }}
+          {{- if and .Values.mcp.enabled .Values.mcp.servers }}
+          {{- $mounts = append $mounts (dict "name" "mcp-config" "mountPath" "/etc/chatcli/mcp" "readOnly" true) }}
+          {{- end }}
+          {{- if .Values.bootstrap.enabled }}
+          {{- $mounts = append $mounts (dict "name" "bootstrap" "mountPath" "/home/chatcli/.chatcli/bootstrap" "readOnly" true) }}
+          {{- end }}
+          {{- if .Values.memory.enabled }}
+          {{- $mounts = append $mounts (dict "name" "memory" "mountPath" "/home/chatcli/.chatcli/memory") }}
+          {{- end }}
           {{- if $mounts }}
           volumeMounts:
             {{- toYaml $mounts | nindent 12 }}
@@ -131,7 +140,7 @@ spec:
               command: ["pidof", "chatcli"]
             initialDelaySeconds: 3
             periodSeconds: 10
-      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.watcher.enabled .Values.watcher.targets) (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) .Values.agents.enabled .Values.skills.enabled .Values.plugins.enabled }}
+      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.watcher.enabled .Values.watcher.targets) (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) .Values.agents.enabled .Values.skills.enabled .Values.plugins.enabled (and .Values.mcp.enabled .Values.mcp.servers) .Values.bootstrap.enabled .Values.memory.enabled }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: sessions
@@ -174,6 +183,26 @@ spec:
           {{- else }}
           emptyDir:
             sizeLimit: 500Mi
+          {{- end }}
+        {{- end }}
+        {{- if and .Values.mcp.enabled .Values.mcp.servers }}
+        - name: mcp-config
+          configMap:
+            name: {{ .Values.mcp.existingConfigMap | default (printf "%s-mcp" (include "chatcli.fullname" .)) }}
+        {{- end }}
+        {{- if .Values.bootstrap.enabled }}
+        - name: bootstrap
+          configMap:
+            name: {{ .Values.bootstrap.existingConfigMap | default (printf "%s-bootstrap" (include "chatcli.fullname" .)) }}
+        {{- end }}
+        {{- if .Values.memory.enabled }}
+        - name: memory
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "chatcli.fullname" . }}-sessions
+          {{- else }}
+          emptyDir:
+            sizeLimit: 200Mi
           {{- end }}
         {{- end }}
       {{- end }}

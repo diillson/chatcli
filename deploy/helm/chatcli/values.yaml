@@ -34,6 +34,42 @@ llm:
   provider: ""
   model: ""
 
+# Provider fallback chain — automatic failover between LLM providers
+# When the primary provider fails (rate limit, timeout, server error),
+# the system automatically tries the next provider in the chain.
+fallback:
+  enabled: false
+  # Ordered list of providers to try (first = highest priority)
+  # Each entry needs a corresponding API key in secrets section.
+  providers: []
+  #   - name: OPENAI
+  #     model: gpt-4o
+  #   - name: CLAUDEAI
+  #     model: claude-sonnet-4-20250514
+  #   - name: GOOGLEAI
+  #     model: gemini-2.0-flash
+  maxRetries: 2
+  cooldownBase: "30s"
+  cooldownMax: "5m"
+
+# MCP (Model Context Protocol) server configuration
+mcp:
+  enabled: false
+  # Inline MCP server config (creates ConfigMap automatically)
+  # servers:
+  #   - name: filesystem
+  #     transport: stdio
+  #     command: npx
+  #     args: ["-y", "@anthropic/mcp-server-filesystem", "/workspace"]
+  #     enabled: true
+  #   - name: web-search
+  #     transport: sse
+  #     url: "http://mcp-search:8080/sse"
+  #     enabled: true
+  servers: []
+  # Or reference an existing ConfigMap with mcp_servers.json
+  existingConfigMap: ""
+
 # Provider API keys (stored in a Secret)
 # Set these values or use existingSecret
 secrets:
@@ -194,6 +230,39 @@ skills:
   #     ---
   #     You are a Go expert...
   # Or reference an existing ConfigMap containing skill .md files
+  existingConfigMap: ""
+
+# Bootstrap files (SOUL.md, USER.md, IDENTITY.md, RULES.md, AGENTS.md)
+# Loaded into system prompt for agent personality and behavior
+bootstrap:
+  enabled: false
+  # Inline bootstrap file definitions (creates ConfigMap automatically)
+  definitions: {}
+  #   SOUL.md: |
+  #     You are a helpful DevOps assistant...
+  #   USER.md: |
+  #     The user prefers Go and Kubernetes...
+  # Or reference an existing ConfigMap containing bootstrap .md files
+  existingConfigMap: ""
+
+# Memory persistence (long-term MEMORY.md + daily notes)
+memory:
+  enabled: false
+  # Uses the persistence PVC by default.
+  # Memory files are stored under /home/chatcli/.chatcli/memory/
+
+# Shell safety configuration
+safety:
+  enabled: false
+  # Inline safety config (creates ConfigMap automatically)
+  config: {}
+  #   denyPatterns:
+  #     - pattern: "rm -rf /"
+  #       severity: critical
+  #   allowPatterns:
+  #     - pattern: "go test"
+  #   workspaceBoundary: "/workspace"
+  # Or reference an existing ConfigMap with safety_config.json
   existingConfigMap: ""
 
 # Plugin provisioning (remote resource discovery)

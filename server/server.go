@@ -15,7 +15,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/llm/fallback"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/metrics"
 	"github.com/diillson/chatcli/pkg/persona"
@@ -225,4 +227,14 @@ func (s *Server) SetPluginManager(pm *plugins.Manager) {
 // SetPersonaLoader configures the persona loader for remote agent/skill discovery.
 func (s *Server) SetPersonaLoader(pl *persona.Loader) {
 	s.handler.SetPersonaLoader(pl)
+}
+
+// SetFallbackChain configures the provider fallback chain for automatic failover.
+func (s *Server) SetFallbackChain(chain *fallback.Chain) {
+	s.handler.SetFallbackChain(chain)
+}
+
+// SetMCPManager configures the MCP manager for tool interoperability.
+func (s *Server) SetMCPManager(mgr *mcp.Manager) {
+	s.handler.SetMCPManager(mgr)
 }

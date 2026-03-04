@@ -26,6 +26,19 @@ services:
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-}"
 
+      # Provider fallback chain (comma-separated, e.g. "OPENAI,CLAUDEAI,GOOGLEAI")
+      CHATCLI_FALLBACK_ENABLED: "${CHATCLI_FALLBACK_ENABLED:-}"
+      CHATCLI_FALLBACK_PROVIDERS: "${CHATCLI_FALLBACK_PROVIDERS:-}"
+      CHATCLI_FALLBACK_MAX_RETRIES: "${CHATCLI_FALLBACK_MAX_RETRIES:-2}"
+
+      # MCP (Model Context Protocol)
+      CHATCLI_MCP_ENABLED: "${CHATCLI_MCP_ENABLED:-}"
+      CHATCLI_MCP_CONFIG: "${CHATCLI_MCP_CONFIG:-}"
+
+      # Memory and bootstrap
+      CHATCLI_MEMORY_ENABLED: "${CHATCLI_MEMORY_ENABLED:-}"
+      CHATCLI_BOOTSTRAP_ENABLED: "${CHATCLI_BOOTSTRAP_ENABLED:-}"
+
       # Logging
       LOG_LEVEL: "${LOG_LEVEL:-info}"
     volumes:
@@ -33,6 +46,8 @@ services:
       - chatcli-sessions:/home/chatcli/.chatcli/sessions
       # Mount plugins directory (optional)
       - chatcli-plugins:/home/chatcli/.chatcli/plugins
+      # Persist memory across restarts
+      - chatcli-memory:/home/chatcli/.chatcli/memory
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -48,3 +63,4 @@ services:
 volumes:
   chatcli-sessions:
   chatcli-plugins:
+  chatcli-memory:
