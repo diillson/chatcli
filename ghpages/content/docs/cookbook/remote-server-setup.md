@@ -100,6 +100,9 @@ chatcli connect --use-local-auth
 
 # Dev que prefere OpenAI
 chatcli connect --provider OPENAI --llm-key sk-minha-chave-pessoal
+
+# Dev que usa GitHub Copilot
+chatcli connect --use-local-auth --provider COPILOT
 ```
 
 O servidor aceita ambos os modos simultaneamente.
@@ -134,10 +137,11 @@ chatcli connect servidor:50051 --tls --token equipe-token-2024
 Configure o servidor com múltiplas API keys. Devs podem escolher o provedor:
 
 ```bash
-# Servidor com OpenAI, Claude e Google AI
+# Servidor com OpenAI, Claude, Google AI e Copilot
 export OPENAI_API_KEY=sk-xxx
 export ANTHROPIC_API_KEY=sk-ant-xxx
 export GOOGLEAI_API_KEY=AIzaSy-xxx
+export GITHUB_COPILOT_TOKEN=ghu_xxx  # ou use /auth login github-copilot
 export LLM_PROVIDER=CLAUDEAI  # padrão
 chatcli server
 ```
@@ -146,6 +150,7 @@ chatcli server
 # Dev escolhe o provedor
 chatcli connect --provider OPENAI
 chatcli connect --provider GOOGLEAI
+chatcli connect --provider COPILOT --use-local-auth
 chatcli connect  # usa o padrão (CLAUDEAI)
 ```
 

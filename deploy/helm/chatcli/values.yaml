@@ -30,7 +30,7 @@ tls:
 
 # LLM Provider configuration
 llm:
-  # Default provider: OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA
+  # Default provider: OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT
   provider: ""
   model: ""
 
@@ -84,6 +84,8 @@ secrets:
   stackspotClientKey: ""
   stackspotRealm: ""
   stackspotAgentId: ""
+  # GitHub Copilot
+  githubCopilotToken: ""
 
 # Ollama configuration (if using Ollama provider)
 ollama:

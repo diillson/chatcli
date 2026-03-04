@@ -20,8 +20,8 @@ const (
 	// GitHub Copilot OAuth Device Flow (RFC 8628)
 	defaultCopilotOAuthClientID = "Ov23lifEydOk2Non90tJ"
 	CopilotDeviceCodeURL        = "https://github.com/login/device/code"
-	CopilotTokenURL      = "https://github.com/login/oauth/access_token"
-	CopilotScope         = "read:user"
+	CopilotTokenURL             = "https://github.com/login/oauth/access_token"
+	CopilotScope                = "read:user"
 
 	// Polling defaults per GitHub docs
 	copilotDefaultInterval = 5 * time.Second

@@ -41,7 +41,7 @@ chatcli server --watch-deployment myapp --watch-namespace production
 chatcli server --watch-config targets.yaml
 
 # Com fallback de provedores (failover automatico)
-chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI
+chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI,COPILOT
 
 # Com MCP (ferramentas externas)
 chatcli server --mcp-config ~/.chatcli/mcp_servers.json
@@ -205,7 +205,19 @@ chatcli connect servidor:50051 --provider STACKSPOT \
   --client-id <id> --client-key <key> --realm <realm> --agent-id <agent>
 ```
 
-### 5. Ollama (Sem Credenciais)
+### 5. GitHub Copilot (OAuth Local)
+
+Para usar GitHub Copilot, faça login via Device Flow e conecte com `--use-local-auth`:
+
+```bash
+# Primeiro, faça login no GitHub Copilot
+/auth login github-copilot
+
+# Conecte usando as credenciais locais
+chatcli connect servidor:50051 --use-local-auth --provider COPILOT
+```
+
+### 6. Ollama (Sem Credenciais)
 
 Para modelos locais via Ollama, basta informar a URL:
 

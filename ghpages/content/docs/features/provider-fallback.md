@@ -32,12 +32,13 @@ Request → OpenAI (primario)
 
 ```bash
 # Lista ordenada de provedores (primeiro = maior prioridade)
-export CHATCLI_FALLBACK_PROVIDERS="OPENAI,CLAUDEAI,GOOGLEAI"
+export CHATCLI_FALLBACK_PROVIDERS="OPENAI,CLAUDEAI,GOOGLEAI,COPILOT"
 
 # Modelo especifico por provedor (opcional)
 export CHATCLI_FALLBACK_MODEL_OPENAI="gpt-4o"
 export CHATCLI_FALLBACK_MODEL_CLAUDEAI="claude-sonnet-4-20250514"
 export CHATCLI_FALLBACK_MODEL_GOOGLEAI="gemini-2.0-flash"
+export CHATCLI_FALLBACK_MODEL_COPILOT="gpt-4o"
 
 # Controle de retentativas e cooldown
 export CHATCLI_FALLBACK_MAX_RETRIES="2"       # tentativas por provedor
@@ -49,7 +50,7 @@ export CHATCLI_FALLBACK_COOLDOWN_MAX="5m"      # cooldown maximo
 
 ```bash
 chatcli server \
-  --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI \
+  --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI,COPILOT \
   --fallback-max-retries 2 \
   --fallback-cooldown-base 30s \
   --fallback-cooldown-max 5m
@@ -68,6 +69,8 @@ fallback:
       model: claude-sonnet-4-20250514
     - name: GOOGLEAI
       model: gemini-2.0-flash
+    - name: COPILOT
+      model: gpt-4o
   maxRetries: 2
   cooldownBase: "30s"
   cooldownMax: "5m"

@@ -370,7 +370,7 @@ Examples:
   chatcli server --tls-cert cert.pem --tls-key key.pem
 
   # Server with provider fallback chain
-  chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI
+  chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI,COPILOT
 
   # Server with MCP tools
   chatcli server --mcp-config ~/.chatcli/mcp_servers.json

@@ -6,7 +6,7 @@
 
 # Bringing Your Terminal Closer to Artificial Intelligence 🕵️‍♂️✨
 
-**ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) (such as OpenAI, StackSpot, GoogleAI, ClaudeAI, xAI and Ollama -> `Local models`) to facilitate interactive and contextual conversations directly in your terminal. Designed for developers, data scientists, and tech enthusiasts, it enhances productivity by aggregating various contextual data sources and offering a rich, user-friendly experience.
+**ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) (such as OpenAI, StackSpot, GoogleAI, ClaudeAI, xAI, GitHub Copilot and Ollama -> `Local models`) to facilitate interactive and contextual conversations directly in your terminal. Designed for developers, data scientists, and tech enthusiasts, it enhances productivity by aggregating various contextual data sources and offering a rich, user-friendly experience.
 
 <p align="center">
   <em>See ChatCLI in action, including Agent Mode and provider switching.</em><br>
@@ -81,7 +81,7 @@
 
 ## Key Features
 
-- **Support for Multiple Providers**: Switch between OpenAI, StackSpot, ClaudeAI, GoogleAI, xAI and Ollama -> `Local models`.
+- **Support for Multiple Providers**: Switch between OpenAI, StackSpot, ClaudeAI, GoogleAI, xAI, GitHub Copilot and Ollama -> `Local models`.
 - **Interactive CLI Experience**: Command history navigation, auto-completion, and visual feedback (`"Thinking..."`).
 - **Powerful Contextual Commands**:
     - `@history` – Inserts the last 10 shell commands (supports bash, zsh, and fish).
@@ -177,7 +177,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  `CHATCLI_IGNORE` – **(Optional)** Defines a list of files or folders to be ignored by ChatCLI.
   -  `CHATCLI_LANG`  – **(Optional)** Sets the interface language ( e.g.,  en ,  `pt-BR` ). Default: detects from system.
   -  `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
-  -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` )
+  -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` ,  `COPILOT` )
   -  `MAX_RETRIES`  - **(Optional)** Maximum number of attempts for API calls (default:  `5` ).
   -  `INITIAL_BACKOFF`  - **(Optional)** Initial wait time between attempts (default:  `3`  - seconds`).
   - `LOG_FILE` - **(Optional)** Path to the log file (default: `$HOME/.chatcli/app.log`).
@@ -195,6 +195,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  XAI_API_KEY ,  XAI_MODEL ,  XAI_MAX_TOKENS
   -  OLLAMA_ENABLED ,  OLLAMA_BASE_URL ,  OLLAMA_MODEL ,  OLLAMA_MAX_TOKENS ,  OLLAMA_FILTER_THINKING  – (Optional) Filters "thinking aloud" from models like Qwen3 (true/false, default: true)
   -  CLIENT_ID ,  CLIENT_KEY ,  STACKSPOT_REALM ,  STACKSPOT_AGENT_ID  (for StackSpot)
+  -  GITHUB_COPILOT_TOKEN ,  COPILOT_MODEL ,  COPILOT_MAX_TOKENS  (for GitHub Copilot — or use `/auth login github-copilot`)
 - Agent:
   -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Optional)** Default timeout for each command executed from the action list by Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default:  10m . Maximum: 1h.
   -  `CHATCLI_AGENT_DENYLIST`  – **(Optional)** Semicolon-separated list of regular expressions to block extra dangerous commands. Example: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).

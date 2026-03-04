@@ -6,7 +6,7 @@ description = "Autentique-se com provedores de IA via OAuth, sem precisar gerenc
 icon = "login"
 +++
 
-O ChatCLI suporta autenticação via **OAuth 2.0 com PKCE** para provedores que oferecém essa opção. Isso permite que você use seu plano existente (como **ChatGPT Plus**, **Codex** ou **Claude Pro**) diretamente no terminal, sem precisar gerar ou colar chaves de API.
+O ChatCLI suporta autenticação via **OAuth 2.0 com PKCE** e **Device Flow (RFC 8628)** para provedores que oferecem essas opções. Isso permite que você use seu plano existente (como **ChatGPT Plus**, **Codex**, **Claude Pro** ou **GitHub Copilot**) diretamente no terminal, sem precisar gerar ou colar chaves de API.
 
 ---
 
@@ -38,6 +38,7 @@ Exibe o status de autenticação de todos os provedores configurados, incluindo 
 ```bash
 /auth login openai-codex
 /auth login anthropic
+/auth login github-copilot
 ```
 
 Inicia o fluxo de autenticação OAuth:
@@ -45,7 +46,8 @@ Inicia o fluxo de autenticação OAuth:
 1. O navegador abre automaticamente na página de login do provedor
 2. **OpenAI:** um servidor HTTP local captura o callback automaticamente (porta **1455**)
 3. **Anthropic:** após autorizar, copie o código exibido na página e cole no terminal
-4. O provedor aparece imediatamente no `/switch` — **sem reiniciar o app**
+4. **GitHub Copilot:** insira o código do dispositivo exibido no terminal na página do GitHub
+5. O provedor aparece imediatamente no `/switch` — **sem reiniciar o app**
 
 #### Provedores Suportados
 
@@ -53,12 +55,14 @@ Inicia o fluxo de autenticação OAuth:
 |----------|---------|-------------------|
 | OpenAI | `/auth login openai-codex` | ChatGPT Plus, Codex, Team, Enterprise |
 | Anthropic | `/auth login anthropic` | Claude Pro, Team |
+| GitHub Copilot | `/auth login github-copilot` | Copilot Individual, Business, Enterprise |
 
 ### Logout
 
 ```bash
 /auth logout openai-codex
 /auth logout anthropic
+/auth logout github-copilot
 ```
 
 Remove as credenciais OAuth armazenadas para o provedor específicado.
@@ -135,9 +139,15 @@ O fluxo da Anthropic redireciona para a página do console que exibe o código d
 
 Execute `/auth status` para verificar se o token foi salvo corretamente. Se necessário, tente `/auth logout <provedor>` seguido de `/auth login <provedor>`.
 
+### GitHub Copilot: "authorization denied by user"
+
+Certifique-se de que sua conta GitHub possui uma assinatura ativa do Copilot (Individual, Business ou Enterprise). Verifique em https://github.com/settings/copilot se o Copilot está habilitado.
+
 ### Token expirado
 
 Os tokens OAuth são renovados automaticamente usando o refresh token. Se o refresh falhar, faça login novamente com `/auth login`.
+
+> **Nota:** Tokens do GitHub Copilot (Device Flow) não expiram e não possuem refresh token — são persistentes até revogação manual.
 
 ---
 

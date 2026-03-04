@@ -20,7 +20,7 @@ A ordem de prioridade para as configurações é:
 | Variável | Descrição                                                                                                                                         | Padrão                     |
 | :--- |:--------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------|
 | `ENV` | Define o ambiente, caso `dev` os logs são mostrados no terminal e salvo no log da app, caso `prod` somente no log. Valores válidos: `dev`, `prod` | `dev`                      
-| `LLM_PROVIDER` | Define o provedor de IA padrão a ser usado. Valores válidos: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `OLLAMA`, `STACKSPOT`.                      | `"OPENAI"`                 |
+| `LLM_PROVIDER` | Define o provedor de IA padrão a ser usado. Valores válidos: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `OLLAMA`, `STACKSPOT`, `COPILOT`.             | `"OPENAI"`                 |
 | `CHATCLI_LANG` | Define o idioma da interface. Valores: `pt-BR`, `en-US`. Se não definida, tentará detectar o idioma do sistema.                                   | `en-US`                    |
 | `LOG_LEVEL` | Nível dos logs. Opções: `debug`, `info`, `warn`, `error`.                                                                                         | `"info"`                   |
 | `LOG_FILE` | Caminho para o arquivo de log. Padrão: `$HOME/.chatcli/app.log`                                                                                   | `"$HOME/.chatcli/app.log"` |
@@ -34,16 +34,17 @@ A ordem de prioridade para as configurações é:
 
 ## Autenticação OAuth
 
-Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAuth** para OpenAI e Anthropic. Com o OAuth, você pode usar seu plano existente (ChatGPT Plus, Codex, Claude Pro) sem gerar API keys.
+Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAuth** para OpenAI, Anthropic e GitHub Copilot. Com o OAuth, você pode usar seu plano existente (ChatGPT Plus, Codex, Claude Pro, GitHub Copilot) sem gerar API keys.
 
 | Variável | Descrição | Padrão |
 | :--- | :--- | :--- |
 | `CHATCLI_AUTH_DIR` | Diretório onde as credenciais OAuth são armazenadas. | `~/.chatcli/` |
 | `CHATCLI_OPENAI_CLIENT_ID` | Permite sobrescrever o client ID do OAuth da OpenAI. | (interno) |
+| `CHATCLI_COPILOT_CLIENT_ID` | Permite sobrescrever o client ID do OAuth do GitHub Copilot. | (interno) |
 
 As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/auth-profiles.json`. A chave de criptografia é gerada automaticamente e salva em `~/.chatcli/.auth-key` (permissão 0600).
 
-> Use `/auth login openai-codex` ou `/auth login anthropic` no modo interativo para iniciar o fluxo OAuth. Consulte a [documentação completa de OAuth](/docs/features/oauth-authentication/) para mais detalhes.
+> Use `/auth login openai-codex`, `/auth login anthropic` ou `/auth login github-copilot` no modo interativo para iniciar o fluxo OAuth. Consulte a [documentação completa de OAuth](/docs/features/oauth-authentication/) para mais detalhes.
 
 ---
 
@@ -107,7 +108,16 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 | `STACKSPOT_REALM` | O `realm` (tenant) da sua organização na StackSpot. | **Sim** |
 | `STACKSPOT_AGENT_ID` | O ID do agente específico a ser utilizado. | **Sim** |
 
-> **\*** Para OpenAI e Anthropic, a chave de API é obrigatória apenas se você **não** utilizar autenticação OAuth (`/auth login`). Ambos os métodos podem coexistir.
+### GitHub Copilot
+
+| Variável | Descrição | Obrigatório? |
+| :--- | :--- | :--- |
+| `GITHUB_COPILOT_TOKEN` | Token OAuth do GitHub Copilot. Alternativa: use `/auth login github-copilot` para Device Flow. | **Sim*** |
+| `COPILOT_MODEL` | O modelo a ser usado. Ex: `gpt-4o`, `claude-sonnet-4`, `gemini-2.0-flash`. | Não |
+| `COPILOT_MAX_TOKENS` | Define o máximo de tokens para a resposta. | Não |
+| `COPILOT_API_BASE_URL` | URL base da API do Copilot (para ambientes enterprise). | Não |
+
+> **\*** Para OpenAI, Anthropic e GitHub Copilot, a chave de API é obrigatória apenas se você **não** utilizar autenticação OAuth (`/auth login`). Ambos os métodos podem coexistir.
 
 ---
 

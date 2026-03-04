@@ -128,6 +128,8 @@ services:
       GOOGLEAI_API_KEY: "${GOOGLEAI_API_KEY:-}"
       OLLAMA_ENABLED: "${OLLAMA_ENABLED:-}"
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
+      GITHUB_COPILOT_TOKEN: "${GITHUB_COPILOT_TOKEN:-}"
+      COPILOT_MODEL: "${COPILOT_MODEL:-}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
     volumes:
       - chatcli-sessions:/home/chatcli/.chatcli/sessions
@@ -385,6 +387,7 @@ type: Opaque
 stringData:
   OPENAI_API_KEY: "sk-xxx"
   ANTHROPIC_API_KEY: "sk-ant-xxx"
+  GITHUB_COPILOT_TOKEN: "ghu_xxx"  # opcional
 ```
 
 ### Acessar o Servidor

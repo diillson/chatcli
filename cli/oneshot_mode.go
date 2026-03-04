@@ -200,7 +200,7 @@ func NewFlagSet() (*flag.FlagSet, *Options) {
 
 	fs.StringVar(&opts.Prompt, "p", "", "Prompt a executar uma única vez (modo não interativo) - (alias)")
 	fs.StringVar(&opts.Prompt, "prompt", "", "Prompt a executar uma única vez (modo não interativo)")
-	fs.StringVar(&opts.Provider, "provider", "", "Override do provider (OPENAI, CLAUDEAI, GOOGLEAI, OPENAI_ASSISTANT, STACKSPOT)")
+	fs.StringVar(&opts.Provider, "provider", "", "Override do provider (OPENAI, CLAUDEAI, GOOGLEAI, OPENAI_ASSISTANT, STACKSPOT, XAI, OLLAMA, COPILOT)")
 	fs.StringVar(&opts.Model, "model", "", "Override do modelo(LLM)")
 	fs.DurationVar(&opts.Timeout, "timeout", 5*time.Minute, "Timeout da chamada one-shot")
 	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, "Override do máximo de tokens para a resposta")

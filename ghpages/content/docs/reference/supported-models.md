@@ -78,6 +78,21 @@ Modelos da xAI, conhecidos por sua integração de informações em tempo real e
 Aceita todos os modelos compativeis na plataforma StackSpotAI, desde que selecionado junto a criação do Agent.
 
 ---
+
+## GitHub Copilot
+
+O GitHub Copilot permite usar os modelos disponíveis na plataforma Copilot com sua assinatura existente (Individual, Business ou Enterprise). Autentique via `/auth login github-copilot` (Device Flow OAuth).
+
+| Nome do Modelo (ID) | Aliases | Nome de Exibição | Janela de Contexto |
+| :------------------ | :------ | :--------------- | :----------------- |
+| `gpt-4o` | — | GPT-4o (Copilot) | 128,000 tokens |
+| `gpt-4o-mini` | — | GPT-4o mini (Copilot) | 128,000 tokens |
+| `claude-sonnet-4` | — | Claude Sonnet 4 (Copilot) | 128,000 tokens |
+| `gemini-2.0-flash` | — | Gemini 2.0 Flash (Copilot) | 128,000 tokens |
+
+> Os modelos disponíveis podem variar conforme o plano do Copilot e a região.
+
+---
 ## Ollama (Modelos Locais)
 
 O ChatCLI suporta qualquer modelo que você tenha localmente através do Ollama. Para usar, certifique-se de que o provedor Ollama está habilitado e defina o nome do modelo.
