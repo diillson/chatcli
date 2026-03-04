@@ -279,13 +279,17 @@ func FormatAuthStatus(logger *zap.Logger) string {
 	store := LoadStore(logger)
 	a := store.Profiles["anthropic:default"]
 	o := store.Profiles["openai-codex:default"]
+	g := store.Profiles["github-copilot:default"]
 	fmtAuth := func(c *AuthProfileCredential) string {
 		if c == nil {
 			return "not connected"
 		}
+		if c.Expires == 0 {
+			return fmt.Sprintf("type=%s expiry=no expiry (persistent)", c.CredType)
+		}
 		return fmt.Sprintf("type=%s expiry=%s", c.CredType, FormatExpiry(c.Expires))
 	}
-	return fmt.Sprintf("Anthropic: %s\nOpenAI Codex: %s", fmtAuth(a), fmtAuth(o))
+	return fmt.Sprintf("Anthropic: %s\nOpenAI Codex: %s\nGitHub Copilot: %s", fmtAuth(a), fmtAuth(o), fmtAuth(g))
 }
 
 func Logout(provider ProviderID, logger *zap.Logger) error {

@@ -555,6 +555,7 @@ func (ch *CommandHandler) resolveLocalAuth(provider string) (apiKey string, reso
 	}{
 		{auth.ProviderAnthropic, "CLAUDEAI"},
 		{auth.ProviderOpenAI, "OPENAI"},
+		{auth.ProviderGitHubCopilot, "COPILOT"},
 	} {
 		resolved, err := auth.ResolveAuth(ctx, candidate.authProvider, ch.cli.logger)
 		if err == nil && resolved.APIKey != "" {
@@ -567,7 +568,7 @@ func (ch *CommandHandler) resolveLocalAuth(provider string) (apiKey string, reso
 		}
 	}
 
-	return "", "", fmt.Errorf("no local OAuth credentials found. Run '/auth login anthropic' or '/auth login openai-codex' first")
+	return "", "", fmt.Errorf("no local OAuth credentials found. Run '/auth login anthropic' or '/auth login openai-codex' or '/auth login github-copilot' first")
 }
 
 // llmProviderToAuthProvider maps LLMManager provider names to auth.ProviderID.
@@ -577,6 +578,8 @@ func llmProviderToAuthProvider(provider string) (auth.ProviderID, bool) {
 		return auth.ProviderAnthropic, true
 	case "OPENAI":
 		return auth.ProviderOpenAI, true
+	case "COPILOT":
+		return auth.ProviderGitHubCopilot, true
 	default:
 		return "", false
 	}
@@ -662,7 +665,7 @@ func (ch *CommandHandler) autoSwitchProvider(provider, model string) {
 func (ch *CommandHandler) handleAuthCommand(userInput string) {
 	args := strings.Fields(userInput)
 	if len(args) < 2 {
-		fmt.Println("Usage: /auth status | login <anthropic|openai-codex> | logout <anthropic|openai-codex>")
+		fmt.Println("Usage: /auth status | login <anthropic|openai-codex|github-copilot> | logout <anthropic|openai-codex|github-copilot>")
 		return
 	}
 	sub := strings.ToLower(args[1])
@@ -671,7 +674,7 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 		fmt.Println(auth.FormatAuthStatus(ch.cli.logger))
 	case "login":
 		if len(args) < 3 {
-			fmt.Println("Use: /auth login anthropic | openai-codex")
+			fmt.Println("Use: /auth login anthropic | openai-codex | github-copilot")
 			return
 		}
 		prov := strings.ToLower(args[2])
@@ -699,13 +702,24 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			ch.autoSwitchProvider("OPENAI",
 				utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel))
 			return
+		case "github-copilot", "copilot", "gh-copilot":
+			id, err := auth.LoginGitHubCopilotOAuth(ctx, ch.cli.logger)
+			if err != nil {
+				fmt.Println("Login failed:", err)
+				return
+			}
+			fmt.Println("Logged in (GitHub Copilot) profile:", id)
+			ch.cli.manager.RefreshProviders()
+			ch.autoSwitchProvider("COPILOT",
+				utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel))
+			return
 		default:
-			fmt.Println("Unknown provider. Use: anthropic | openai-codex")
+			fmt.Println("Unknown provider. Use: anthropic | openai-codex | github-copilot")
 			return
 		}
 	case "logout":
 		if len(args) < 3 {
-			fmt.Println("Use: /auth logout anthropic | openai-codex")
+			fmt.Println("Use: /auth logout anthropic | openai-codex | github-copilot")
 			return
 		}
 		prov := strings.ToLower(args[2])
@@ -717,8 +731,10 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			pid = auth.ProviderAnthropic
 		case "openai-codex", "codex":
 			pid = auth.ProviderOpenAICodex
+		case "github-copilot", "copilot", "gh-copilot":
+			pid = auth.ProviderGitHubCopilot
 		default:
-			fmt.Println("Unknown provider. Use: anthropic | openai-codex")
+			fmt.Println("Unknown provider. Use: anthropic | openai-codex | github-copilot")
 			return
 		}
 		if err := auth.Logout(pid, ch.cli.logger); err != nil {

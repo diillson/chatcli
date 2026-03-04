@@ -35,6 +35,10 @@ const (
 	DefaultXAIModel = "grok-code-fast-1"
 	XAIAPIURL       = "https://api.x.ai/v1/chat/completions"
 
+	// Valores padrão para GitHub Copilot
+	DefaultCopilotModel = "gpt-4o"
+	CopilotAPIURL       = "https://api.githubcopilot.com/chat/completions"
+
 	// Valores padrão para Ollama
 	DefaultOllamaModel          = "gpt-oss:20b"
 	OllamaDefaultBaseURL        = "http://localhost:11434"

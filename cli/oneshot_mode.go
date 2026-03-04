@@ -66,7 +66,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	}
 
 	if cli.Client == nil {
-		fmt.Fprintln(os.Stderr, "❌ No LLM provider configured. Use /auth login anthropic | openai-codex to authenticate first.")
+		fmt.Fprintln(os.Stderr, "❌ No LLM provider configured. Use /auth login anthropic | openai-codex | github-copilot to authenticate first.")
 		cli.logger.Fatal("One-shot acionado sem provedor LLM configurado")
 	}
 

@@ -251,6 +251,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 		"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_MAX_TOKENS", "ANTHROPIC_API_VERSION",
 		"GOOGLEAI_API_KEY", "GOOGLEAI_MODEL", "GOOGLEAI_MAX_TOKENS",
 		"CLIENT_ID", "CLIENT_KEY", "STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
+		"COPILOT_MODEL", "COPILOT_MAX_TOKENS", "GITHUB_COPILOT_TOKEN",
 	}
 
 	for _, variable := range variablesToUnset {
@@ -334,6 +335,12 @@ func (cli *ChatCLI) configureProviderAndModel() {
 		cli.Model = os.Getenv("OLLAMA_MODEL")
 		if cli.Model == "" {
 			cli.Model = config.DefaultOllamaModel
+		}
+	}
+	if cli.Provider == "COPILOT" {
+		cli.Model = os.Getenv("COPILOT_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultCopilotModel
 		}
 	}
 }
@@ -501,7 +508,7 @@ func (cli *ChatCLI) executor(in string) {
 	}
 
 	if cli.Client == nil {
-		fmt.Println("No LLM provider configured. Use /auth login anthropic | openai-codex to authenticate, then /switch to select a provider.")
+		fmt.Println("No LLM provider configured. Use /auth login anthropic | openai-codex | github-copilot to authenticate, then /switch to select a provider.")
 		return
 	}
 
@@ -791,6 +798,9 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	}
 	if newProvider == "OLLAMA" {
 		newModel = utils.GetEnvOrDefault("OLLAMA_MODEL", config.DefaultOllamaModel)
+	}
+	if newProvider == "COPILOT" {
+		newModel = utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel)
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
@@ -2965,7 +2975,7 @@ func (cli *ChatCLI) getConnectSuggestions(d prompt.Document) []prompt.Suggest {
 	if strings.HasPrefix(wordBeforeCursor, "-") {
 		flags := []prompt.Suggest{
 			{Text: "--token", Description: "Token de autenticação do servidor"},
-			{Text: "--provider", Description: "Provedor LLM (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA)"},
+			{Text: "--provider", Description: "Provedor LLM (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT)"},
 			{Text: "--model", Description: "Modelo LLM (gpt-4, claude-3, etc.)"},
 			{Text: "--llm-key", Description: "API key/OAuth token para enviar ao servidor"},
 			{Text: "--use-local-auth", Description: "Usar credenciais OAuth locais (de /auth login)"},
@@ -4227,8 +4237,8 @@ func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		suggestions := []prompt.Suggest{
 			{Text: "status", Description: "Exibir status de autenticação de todos os provedores"},
-			{Text: "login", Description: "Autenticar com um provedor (anthropic ou openai-codex)"},
-			{Text: "logout", Description: "Remover credenciais de um provedor (anthropic ou openai-codex)"},
+			{Text: "login", Description: "Autenticar com um provedor (anthropic, openai-codex ou github-copilot)"},
+			{Text: "logout", Description: "Remover credenciais de um provedor (anthropic, openai-codex ou github-copilot)"},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -4241,6 +4251,7 @@ func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
 				suggestions := []prompt.Suggest{
 					{Text: "anthropic", Description: "Anthropic (Claude)"},
 					{Text: "openai-codex", Description: "OpenAI (GPT Plus / Codex)"},
+					{Text: "github-copilot", Description: "GitHub Copilot"},
 				}
 				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 			}

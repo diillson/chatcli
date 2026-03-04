@@ -188,7 +188,7 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 		fmt.Println(colorize(modelInfo, ColorLime))
 	} else {
 		fmt.Println(colorize(i18n.T("welcome.current_model", "(none)", "No provider"), ColorYellow))
-		fmt.Println(colorize("  Use /auth login anthropic | openai-codex to authenticate.", ColorGray))
+		fmt.Println(colorize("  Use /auth login anthropic | openai-codex | github-copilot to authenticate.", ColorGray))
 	}
 	fmt.Println()
 }
