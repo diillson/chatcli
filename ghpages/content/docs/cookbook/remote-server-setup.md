@@ -191,6 +191,24 @@ helm install chatcli deploy/helm/chatcli \
   --set agents.existingConfigMap=chatcli-agents
 ```
 
+### Via Skill Registry
+
+Além de provisionar skills via ConfigMaps, você pode habilitar o **Skill Registry** para buscar e instalar skills de registries remotos diretamente no servidor:
+
+```bash
+helm install chatcli deploy/helm/chatcli \
+  --set skillRegistry.enabled=true \
+  --set skillRegistry.registryUrls="https://skills.mycompany.com/api/v1"
+```
+
+Depois de conectar ao servidor, use os comandos `/skill` para gerenciar skills:
+
+```bash
+/skill search kubernetes     # Busca em todos os registries
+/skill install k8s-ops       # Instala no servidor
+/agent skills                # Verifica que a skill está disponível
+```
+
 Quando os devs conectam, eles veem automaticamente os recursos do servidor:
 
 ```

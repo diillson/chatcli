@@ -342,6 +342,17 @@ O chart automaticamente:
 | `memory.enabled` | Habilitar memória persistente | `false` |
 | `safety.enabled` | Habilitar regras de segurança configuráveis | `false` |
 
+#### Skill Registry
+
+| Valor | Descrição | Padrão |
+|-------|-----------|--------|
+| `skillRegistry.enabled` | Habilitar variáveis de ambiente para skill registry | `false` |
+| `skillRegistry.registryUrls` | URLs adicionais de registries (separadas por vírgula) | `""` |
+| `skillRegistry.registryDisable` | Nomes de registries a desabilitar (separados por vírgula) | `""` |
+| `skillRegistry.installDir` | Diretório de instalação de skills dentro do container | `""` |
+
+> Quando habilitado, os valores são passados como variáveis `CHATCLI_REGISTRY_*` no ConfigMap. O container ChatCLI cria automaticamente `~/.chatcli/registries.yaml` com os registries padrão (chatcli, clawhub). Use `/skill search` e `/skill install` para gerenciar skills via registries.
+
 #### Persistência
 
 | Valor | Descrição | Padrão |

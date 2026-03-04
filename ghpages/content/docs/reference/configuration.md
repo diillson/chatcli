@@ -194,6 +194,20 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 
 ---
 
+## Skill Registry (Multi-Registry)
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_REGISTRY_URLS` | URLs adicionais de registries separadas por vírgula. Cada URL é adicionada como registry customizado habilitado. | `""` |
+| `CHATCLI_REGISTRY_DISABLE` | Nomes de registries a desabilitar, separados por vírgula. Ex.: `clawhub,chatcli`. | `""` |
+| `CHATCLI_SKILL_INSTALL_DIR` | Diretório onde skills instaladas via registry são salvas. | `~/.chatcli/skills` |
+
+O sistema de registries é configurado via arquivo `~/.chatcli/registries.yaml` (criado automaticamente com registries padrão: `chatcli` e `clawhub`). As variáveis acima servem como overrides.
+
+> Para detalhes completos, consulte a [documentação do Skill Registry](/docs/features/skill-registry/).
+
+---
+
 ## Segurança e Controle
 
 | Variável | Descrição | Padrão |

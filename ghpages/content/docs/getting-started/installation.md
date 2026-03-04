@@ -103,5 +103,7 @@ Agora que a ferramenta está funcionando, aprenda sobre os recursos essenciais:
 
 ➡️ Próximo: [**Uso Básico e Comandos Principais**](/docs/core-concepts/basic-usage/)
 
+💡 **Dica:** Use `/skill search <query>` para buscar e instalar skills de registries remotos. Veja [Skill Registry](/docs/features/skill-registry/) para mais detalhes.
+
 
 ---
