@@ -126,14 +126,12 @@ func (sh *SkillHandler) Search(query string) {
 	merged, results := sh.registryMgr.SearchAll(ctx, query)
 
 	// Show errors from individual registries
-	if results != nil {
-		for _, r := range results {
-			if r.Error != nil {
-				fmt.Printf("  %s %s: %s\n",
-					colorize("!", ColorYellow),
-					r.RegistryName,
-					colorize(r.Error.Error(), ColorGray))
-			}
+	for _, r := range results {
+		if r.Error != nil {
+			fmt.Printf("  %s %s: %s\n",
+				colorize("!", ColorYellow),
+				r.RegistryName,
+				colorize(r.Error.Error(), ColorGray))
 		}
 	}
 
@@ -268,7 +266,7 @@ func (sh *SkillHandler) showInstallResult(result *registry.InstallResult) {
 
 	// Refresh persona loader to pick up new skill
 	if sh.personaMgr != nil {
-		sh.personaMgr.RefreshSkills()
+		_, _ = sh.personaMgr.RefreshSkills()
 	}
 }
 
@@ -291,7 +289,7 @@ func (sh *SkillHandler) Uninstall(name string) {
 
 	// Refresh persona loader
 	if sh.personaMgr != nil {
-		sh.personaMgr.RefreshSkills()
+		_, _ = sh.personaMgr.RefreshSkills()
 	}
 }
 

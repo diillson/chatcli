@@ -28,11 +28,7 @@ func (m *mockRegistry) Search(ctx context.Context, query string) ([]SkillMeta, e
 	if m.err != nil {
 		return nil, m.err
 	}
-	// Filter by query (simple substring match)
-	var results []SkillMeta
-	for _, s := range m.skills {
-		results = append(results, s)
-	}
+	results := append([]SkillMeta{}, m.skills...)
 	return results, nil
 }
 
