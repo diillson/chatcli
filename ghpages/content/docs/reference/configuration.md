@@ -146,6 +146,44 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 
 ---
 
+## Fallback de Provedores
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_FALLBACK_PROVIDERS` | Lista de provedores separados por vírgula para failover automático. Ex.: `OPENAI,CLAUDEAI,GOOGLEAI`. | `""` |
+| `CHATCLI_FALLBACK_MODEL_<PROVIDER>` | Modelo específico por provedor na cadeia. Ex.: `CHATCLI_FALLBACK_MODEL_CLAUDEAI=claude-sonnet-4-20250514`. | (modelo padrão) |
+| `CHATCLI_FALLBACK_MAX_RETRIES` | Tentativas por provedor antes de avançar para o próximo na cadeia. | `2` |
+| `CHATCLI_FALLBACK_COOLDOWN_BASE` | Duração base do cooldown após falha de um provedor. | `30s` |
+| `CHATCLI_FALLBACK_COOLDOWN_MAX` | Duração máxima do cooldown (backoff exponencial). | `5m` |
+
+> Para detalhes completos, consulte a [documentação de Fallback de Provedores](/docs/features/provider-fallback/).
+
+---
+
+## MCP (Model Context Protocol)
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_MCP_ENABLED` | Ativa o gerenciador de servidores MCP. | `false` |
+| `CHATCLI_MCP_CONFIG` | Caminho para o arquivo JSON de configuração dos servidores MCP. | `~/.chatcli/mcp_servers.json` |
+
+> Para detalhes completos, consulte a [documentação de MCP](/docs/features/mcp-integration/).
+
+---
+
+## Bootstrap e Memória
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_BOOTSTRAP_ENABLED` | Ativa o carregamento de arquivos bootstrap (SOUL.md, USER.md, etc.) no system prompt. | `false` |
+| `CHATCLI_BOOTSTRAP_DIR` | Diretório contendo os arquivos bootstrap. | `~/.chatcli/bootstrap/` |
+| `CHATCLI_MEMORY_ENABLED` | Ativa o sistema de memória persistente (MEMORY.md + notas diárias). | `false` |
+| `CHATCLI_SAFETY_ENABLED` | Ativa regras de segurança configuráveis no shell do agente. | `false` |
+
+> Para detalhes completos, consulte a [documentação de Bootstrap e Memória](/docs/features/bootstrap-memory/).
+
+---
+
 ## Segurança e Controle
 
 | Variável | Descrição | Padrão |

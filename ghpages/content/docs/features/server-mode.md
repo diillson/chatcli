@@ -39,6 +39,12 @@ chatcli server --watch-deployment myapp --watch-namespace production
 
 # Com K8s Watcher multi-target + Prometheus metrics
 chatcli server --watch-config targets.yaml
+
+# Com fallback de provedores (failover automatico)
+chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI
+
+# Com MCP (ferramentas externas)
+chatcli server --mcp-config ~/.chatcli/mcp_servers.json
 ```
 
 ---
@@ -54,6 +60,21 @@ chatcli server --watch-config targets.yaml
 | `--provider` | Provedor de LLM padrão | Auto-detectado | `LLM_PROVIDER` |
 | `--model` | Modelo de LLM padrão | Auto-detectado | |
 | `--metrics-port` | Porta HTTP para métricas Prometheus (0 = desabilita) | `9090` | `CHATCLI_METRICS_PORT` |
+
+### Flags de Fallback (opcionais)
+
+| Flag | Descrição | Padrão | Env Var |
+|------|-----------|--------|---------|
+| `--fallback-providers` | Lista de provedores separados por vírgula para failover | `""` | `CHATCLI_FALLBACK_PROVIDERS` |
+| `--fallback-max-retries` | Tentativas por provedor antes de avançar | `2` | `CHATCLI_FALLBACK_MAX_RETRIES` |
+| `--fallback-cooldown-base` | Cooldown base após falha | `30s` | `CHATCLI_FALLBACK_COOLDOWN_BASE` |
+| `--fallback-cooldown-max` | Cooldown máximo (backoff exponencial) | `5m` | `CHATCLI_FALLBACK_COOLDOWN_MAX` |
+
+### Flag MCP (opcional)
+
+| Flag | Descrição | Padrão | Env Var |
+|------|-----------|--------|---------|
+| `--mcp-config` | Arquivo JSON de configuração MCP | `""` | `CHATCLI_MCP_CONFIG` |
 
 ### Prometheus Metrics
 

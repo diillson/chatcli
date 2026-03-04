@@ -301,6 +301,34 @@ O chart automaticamente:
 | `metricsPath` | Path HTTP das métricas | Não (`/metrics`) |
 | `metricsFilter` | Filtros glob para métricas | Não |
 
+#### Fallback de Provedores
+
+| Valor | Descrição | Padrão |
+|-------|-----------|--------|
+| `fallback.enabled` | Habilitar cadeia de failover automático | `false` |
+| `fallback.providers` | Lista ordenada de provedores `[{name, model}]` | `[]` |
+| `fallback.maxRetries` | Tentativas por provedor antes de avançar | `2` |
+| `fallback.cooldownBase` | Cooldown base após falha | `30s` |
+| `fallback.cooldownMax` | Cooldown máximo (backoff exponencial) | `5m` |
+
+#### MCP (Model Context Protocol)
+
+| Valor | Descrição | Padrão |
+|-------|-----------|--------|
+| `mcp.enabled` | Habilitar integração MCP | `false` |
+| `mcp.servers` | Lista de servidores MCP `[{name, transport, command, args, url, enabled}]` | `[]` |
+| `mcp.existingConfigMap` | ConfigMap existente com `mcp_servers.json` | `""` |
+
+#### Bootstrap e Memória
+
+| Valor | Descrição | Padrão |
+|-------|-----------|--------|
+| `bootstrap.enabled` | Carregar arquivos bootstrap (SOUL.md, USER.md, etc.) | `false` |
+| `bootstrap.definitions` | Definições inline de arquivos bootstrap | `{}` |
+| `bootstrap.existingConfigMap` | ConfigMap existente com arquivos bootstrap | `""` |
+| `memory.enabled` | Habilitar memória persistente | `false` |
+| `safety.enabled` | Habilitar regras de segurança configuráveis | `false` |
+
 #### Persistência
 
 | Valor | Descrição | Padrão |
