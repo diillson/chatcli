@@ -185,6 +185,7 @@ type ChatCLI struct {
 	pluginManager        *plugins.Manager
 	contextHandler       *ContextHandler
 	personaHandler       *PersonaHandler
+	skillHandler         *SkillHandler
 	executionProfile     ExecutionProfile
 	pendingAction        string // stores intended action before panic (for Windows go-prompt tearDown workaround)
 
@@ -416,6 +417,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		cli.personaHandler.GetManager().SetProjectDir(projectDir)
 		logger.Debug("Project directory set for persona", zap.String("dir", projectDir))
 	}
+
+	// Initialize skill registry handler
+	cli.skillHandler = NewSkillHandler(logger, cli.personaHandler.GetManager())
 
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)
@@ -2828,6 +2832,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getPluginSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/skill") {
+		return cli.getSkillSuggestions(d)
+	}
+
 	if strings.HasPrefix(lineBeforeCursor, "/agent") {
 		return cli.getAgentSuggestions(d)
 	}
@@ -2959,6 +2967,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/session", Description: "Gerencia as sessões, new, save, list, load, delete"},
 		{Text: "/context", Description: "Gerencia contextos persistentes (create, attach, detach, list, show, etc)"},
 		{Text: "/plugin", Description: "Gerencia plugins (install, list, show, etc.)"},
+		{Text: "/skill", Description: "Gerencia skills de registries (search, install, uninstall, list)"},
 		{Text: "/clear", Description: "Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais."},
 		{Text: "/auth", Description: "Gerencia credenciais OAuth (status, login, logout)"},
 		{Text: "/connect", Description: "Conectar a um servidor ChatCLI remoto (gRPC)"},
@@ -4216,6 +4225,53 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) >= 2 && (args[1] == "show") {
 		return []prompt.Suggest{
 			{Text: "--full", Description: "Mostra detalhes completos do agente"},
+		}
+	}
+
+	return []prompt.Suggest{}
+}
+
+func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+
+	// Just typed "/skill" without space
+	if len(args) <= 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{}
+	}
+
+	// Suggest subcommands
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		suggestions := []prompt.Suggest{
+			{Text: "search", Description: "Search for skills across registries"},
+			{Text: "install", Description: "Install a skill from a registry"},
+			{Text: "uninstall", Description: "Remove an installed skill"},
+			{Text: "list", Description: "List installed skills"},
+			{Text: "info", Description: "Show skill metadata from registry"},
+			{Text: "registries", Description: "Show configured registries"},
+			{Text: "help", Description: "Show skill command help"},
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	// For "uninstall", suggest installed skill names
+	if len(args) >= 2 && (args[1] == "uninstall" || args[1] == "remove") {
+		if cli.skillHandler != nil && cli.skillHandler.registryMgr != nil {
+			installed, err := cli.skillHandler.registryMgr.ListInstalled()
+			if err == nil {
+				suggestions := make([]prompt.Suggest, 0, len(installed))
+				for _, s := range installed {
+					desc := s.Description
+					if desc == "" {
+						desc = s.Source
+					}
+					suggestions = append(suggestions, prompt.Suggest{
+						Text:        s.Name,
+						Description: desc,
+					})
+				}
+				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+			}
 		}
 	}
 

@@ -177,6 +177,27 @@ Os scripts são executados via o comando `exec` do @coder e seus resultados reto
 
 ---
 
+## Skills de Registries Remotos
+
+Além de criar skills manualmente, você pode **buscar e instalar** skills de registries remotos com o comando `/skill`:
+
+```bash
+# Buscar skills de kubernetes
+/skill search kubernetes
+
+# Instalar uma skill
+/skill install k8s-ops
+
+# Verificar que aparece nas skills disponíveis
+/agent skills
+```
+
+Skills instaladas via registry são salvas em `~/.chatcli/skills/<name>/SKILL.md` como pacotes V2 e ficam imediatamente disponíveis para uso com agentes.
+
+O ChatCLI suporta múltiplos registries simultaneamente (ChatCLI.dev, ClawHub, registries corporativos) com busca paralela fan-out. Veja [Skill Registry](/docs/features/skill-registry/) para detalhes completos.
+
+---
+
 ## Despacho como Worker (Multi-Agent)
 
 Ao iniciar o `/coder` ou `/agent`, **todos os agents customizados** são automaticamente registrados no sistema de [orquestração multi-agent](/docs/features/multi-agent-orchestration/). O LLM orquestrador pode então despachá-los via `<agent_call>`:

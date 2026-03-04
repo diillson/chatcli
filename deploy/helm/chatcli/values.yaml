@@ -275,6 +275,16 @@ safety:
   # Or reference an existing ConfigMap with safety_config.json
   existingConfigMap: ""
 
+# Skill Registry configuration (multi-registry support)
+skillRegistry:
+  enabled: false
+  # Comma-separated list of additional registry URLs
+  registryUrls: ""
+  # Comma-separated list of registry names to disable
+  registryDisable: ""
+  # Override the skill install directory inside the container
+  installDir: ""
+
 # Plugin provisioning (remote resource discovery)
 plugins:
   enabled: false

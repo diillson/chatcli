@@ -95,6 +95,9 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case strings.HasPrefix(userInput, "/plugin"):
 		ch.handlePluginCommand(userInput)
 		return false
+	case strings.HasPrefix(userInput, "/skill"):
+		ch.handleSkillCommand(userInput)
+		return false
 	case strings.HasPrefix(userInput, "/connect"):
 		ch.handleConnectCommand(userInput)
 		return false
@@ -747,6 +750,14 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 		fmt.Println("Unknown subcommand. Use: status | login | logout")
 		return
 	}
+}
+
+func (ch *CommandHandler) handleSkillCommand(userInput string) {
+	if ch.cli.skillHandler == nil {
+		fmt.Println(colorize(" Skill registry not initialized.", ColorYellow))
+		return
+	}
+	ch.cli.skillHandler.HandleCommand(userInput)
 }
 
 func (ch *CommandHandler) handlePluginCommand(userInput string) {
