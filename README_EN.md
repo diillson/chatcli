@@ -26,7 +26,7 @@
 
 ---
 
-> 📘 Explore the detailed documentation — including use cases, tutorials, and recipes — at [diillson.github.io/chatcli](https://diillson.github.io/chatcli)
+> 📘 Explore the detailed documentation — including use cases, tutorials, and recipes — at [chatcli.edilsonfreitas.com](https://chatcli.edilsonfreitas.com)
 
 -----
 
@@ -99,7 +99,7 @@
 - **Parallel Mode Security**: Multi-agent workers fully respect `coder_policy.json`, with serialized, contextual security prompts showing which agent is requesting each action.
 - **Skill Registry (Multi-Registry)**: Search, install, and manage skills from multiple remote registries (ChatCLI.dev, ClawHub, custom registries) with parallel fan-out search, trigram fuzzy cache, moderation flags (malware/suspicious), and atomic installation. Commands: `/skill search`, `/skill install`, `/skill uninstall`.
 - **Remote Resource Discovery**: When connecting to a server, the client automatically discovers available plugins, agents, and skills on the server. Remote plugins can be executed on the server or downloaded locally; remote agents and skills are transferred and composed locally, merging with local resources.
-- **Hardened Security**: Constant-time token comparison, shell injection prevention, editor validation, gRPC reflection disabled by default, and hardened containers (read-only, no-new-privileges, drop ALL capabilities). See the [security documentation](https://diillson.github.io/chatcli/docs/features/security/).
+- **Hardened Security**: Constant-time token comparison, shell injection prevention, editor validation, gRPC reflection disabled by default, and hardened containers (read-only, no-new-privileges, drop ALL capabilities). See the [security documentation](https://chatcli.edilsonfreitas.com/features/security/).
 - **Provider Fallback Chain**: Automatic failover between LLM providers. When the primary provider fails (rate limit, timeout, server error), the system automatically tries the next one, with error classification, exponential backoff, and per-provider cooldown.
 - **Native Tool Use (Structured API)**: Tool calls via OpenAI and Anthropic's structured `tool_use` API instead of XML in the prompt. Supports `cache_control:ephemeral` for Anthropic KV cache optimization.
 - **MCP (Model Context Protocol)**: Integration with MCP servers via stdio and SSE transport for external tool interoperability. Configurable via `~/.chatcli/mcp_servers.json`.
@@ -755,7 +755,7 @@ Coder Mode (`/coder`) features a robust governance system inspired by ClaudeCode
 2. **Deny**: Dangerous actions can be permanently blocked.
 3. **Ask**: By default, writes and executions require interactive approval.
 
-> 🛵 Learn more about configuring security rules in the [complete documentation](https://diillson.github.io/chatcli/docs/features/coder-security).
+> 🛵 Learn more about configuring security rules in the [complete documentation](https://chatcli.edilsonfreitas.com/features/coder-security).
 
 #### Coder Mode Tools (@coder)
 
@@ -772,7 +772,7 @@ Key new subcommands:
 - `test` (auto stack detection)
 - `patch --diff` (unified diff, text/base64)
 
-Full details in the guide: https://diillson.github.io/chatcli/docs/features/coder-plugin/
+Full details in the guide: https://chatcli.edilsonfreitas.com/features/coder-plugin/
 
 #### Security Policy
 
@@ -785,7 +785,7 @@ ChatCLI prioritizes safety by blocking dangerous commands by default. You can st
 
 Even when allowed, dangerous commands may still require explicit confirmation in the terminal.
 
-> For complete details on all ChatCLI security measures, see the [security documentation](https://diillson.github.io/chatcli/docs/features/security/).
+> For complete details on all ChatCLI security measures, see the [security documentation](https://chatcli.edilsonfreitas.com/features/security/).
 
 #### Coder Mode Policy Files (Local vs Global)
 
@@ -850,7 +850,7 @@ Each agent has its own **skills** — some are accelerator scripts (execute with
 
 **Error Recovery Strategy:** When an agent fails, the orchestrator switches to direct `tool_call` to diagnose and fix (it already has the error context). After the fix, it resumes `agent_call` for the next work phase.
 
-> Disable with `CHATCLI_AGENT_PARALLEL_MODE=false` if needed. Full documentation at [diillson.github.io/chatcli/docs/features/multi-agent-orchestration](https://diillson.github.io/chatcli/docs/features/multi-agent-orchestration/)
+> Disable with `CHATCLI_AGENT_PARALLEL_MODE=false` if needed. Full documentation at [chatcli.edilsonfreitas.com/features/multi-agent-orchestration](https://chatcli.edilsonfreitas.com/features/multi-agent-orchestration/)
 
 ### Agent Interaction
 
@@ -1281,7 +1281,7 @@ helm install chatcli deploy/helm/chatcli \
 
 > **gRPC and multiple replicas**: gRPC uses persistent HTTP/2 connections that pin to a single pod. For `replicaCount > 1`, enable `service.headless: true` in the Helm chart to activate round-robin load balancing via DNS. The Operator enables headless **automatically** when `spec.replicas > 1`. The client already has built-in keepalive and round-robin support.
 
-> Full documentation at [diillson.github.io/chatcli/docs/getting-started/docker-deployment](https://diillson.github.io/chatcli/docs/getting-started/docker-deployment/)
+> Full documentation at [chatcli.edilsonfreitas.com/getting-started/docker-deployment](https://chatcli.edilsonfreitas.com/getting-started/docker-deployment/)
 
 --------
 
@@ -1361,8 +1361,8 @@ The **ChatCLI Operator** goes beyond instance management. It implements a **full
 
 The AI receives full cluster context (deployment status, pods, events, revision history) and returns structured actions. In **agentic mode**, the AI acts as an agent with K8s skills — observing, deciding, and acting iteratively (observe-decide-act loop), saving history at each step. On resolution, it auto-generates a **PostMortem** (root cause, timeline, lessons learned) and a **reusable Runbook** for future incidents.
 
-> Full documentation at [diillson.github.io/chatcli/docs/features/k8s-operator](https://diillson.github.io/chatcli/docs/features/k8s-operator/)
-> AIOps deep-dive at [diillson.github.io/chatcli/docs/features/aiops-platform](https://diillson.github.io/chatcli/docs/features/aiops-platform/)
+> Full documentation at [chatcli.edilsonfreitas.com/features/k8s-operator](https://chatcli.edilsonfreitas.com/features/k8s-operator/)
+> AIOps deep-dive at [chatcli.edilsonfreitas.com/features/aiops-platform](https://chatcli.edilsonfreitas.com/features/aiops-platform/)
 
 --------
 
