@@ -4,7 +4,10 @@
  * License: MIT
  *
  * Implements SkillRegistry for clawhub.ai — a public skill marketplace.
- * Inspired by PicoClaw's ClawHub integration.
+ * Based on the ClawHub HTTP API v1:
+ *   - GET /api/v1/search?q=<query>&limit=<n>
+ *   - GET /api/v1/skills/<slug>
+ *   - GET /api/v1/download?slug=<s>&version=<v>
  */
 package registry
 
@@ -46,24 +49,62 @@ type clawhubCacheEntry struct {
 	cachedAt time.Time
 }
 
-// ClawHub API response types
+// ClawHub API response types — matching actual clawhub.ai JSON shapes.
+
 type clawhubSearchResponse struct {
-	Results []clawhubSkillEntry `json:"results"`
-	Total   int                 `json:"total"`
+	Results []clawhubSearchEntry `json:"results"`
 }
 
-type clawhubSkillEntry struct {
-	Name              string   `json:"name"`
-	Slug              string   `json:"slug"`
-	Description       string   `json:"description"`
-	Version           string   `json:"version"`
-	Author            string   `json:"author"`
-	Tags              []string `json:"tags"`
-	Downloads         int      `json:"downloads"`
-	DownloadURL       string   `json:"download_url"`
-	MalwareDetected   bool     `json:"malware_detected"`
-	SuspiciousContent bool     `json:"suspicious_content"`
-	ModerationNote    string   `json:"moderation_note"`
+type clawhubSearchEntry struct {
+	Score       float64 `json:"score"`
+	Slug        string  `json:"slug"`
+	DisplayName string  `json:"displayName"`
+	Summary     string  `json:"summary"`
+	Version     *string `json:"version"` // nullable
+	UpdatedAt   int64   `json:"updatedAt"`
+}
+
+type clawhubSkillDetailResponse struct {
+	Skill         clawhubSkillDetail  `json:"skill"`
+	LatestVersion *clawhubVersionInfo `json:"latestVersion"`
+	Owner         *clawhubOwnerInfo   `json:"owner"`
+	Moderation    *clawhubModeration  `json:"moderation"`
+}
+
+type clawhubSkillDetail struct {
+	Slug        string            `json:"slug"`
+	DisplayName string            `json:"displayName"`
+	Summary     string            `json:"summary"`
+	Tags        map[string]string `json:"tags"`
+	Stats       clawhubStats      `json:"stats"`
+	CreatedAt   int64             `json:"createdAt"`
+	UpdatedAt   int64             `json:"updatedAt"`
+}
+
+type clawhubStats struct {
+	Comments        int `json:"comments"`
+	Downloads       int `json:"downloads"`
+	InstallsAllTime int `json:"installsAllTime"`
+	InstallsCurrent int `json:"installsCurrent"`
+	Stars           int `json:"stars"`
+	Versions        int `json:"versions"`
+}
+
+type clawhubVersionInfo struct {
+	Version   string `json:"version"`
+	CreatedAt int64  `json:"createdAt"`
+	Changelog string `json:"changelog"`
+}
+
+type clawhubOwnerInfo struct {
+	Handle      string `json:"handle"`
+	DisplayName string `json:"displayName"`
+	Image       string `json:"image"`
+}
+
+type clawhubModeration struct {
+	Flagged bool   `json:"flagged"`
+	Reason  string `json:"reason"`
 }
 
 // NewClawHubRegistry creates a new ClawHub registry adapter.
@@ -125,25 +166,25 @@ func (r *ClawHubRegistry) Search(ctx context.Context, query string) ([]SkillMeta
 
 	skills := make([]SkillMeta, 0, len(searchResp.Results))
 	for _, e := range searchResp.Results {
-		slug := e.Slug
-		if slug == "" {
-			slug = e.Name
+		name := e.DisplayName
+		if name == "" || name == "Skill" {
+			name = e.Slug // fallback: some skills have generic "Skill" as displayName
 		}
+		if name == "" {
+			continue
+		}
+
+		version := ""
+		if e.Version != nil {
+			version = *e.Version
+		}
+
 		skills = append(skills, SkillMeta{
-			Name:         e.Name,
-			Slug:         slug,
-			Description:  e.Description,
-			Version:      e.Version,
-			Author:       e.Author,
-			Tags:         e.Tags,
-			Downloads:    e.Downloads,
-			DownloadURL:  e.DownloadURL,
+			Name:         name,
+			Slug:         e.Slug,
+			Description:  e.Summary,
+			Version:      version,
 			RegistryName: r.name,
-			Moderation: ModerationFlags{
-				MalwareDetected:   e.MalwareDetected,
-				SuspiciousContent: e.SuspiciousContent,
-				Reason:            e.ModerationNote,
-			},
 		})
 	}
 
@@ -178,40 +219,68 @@ func (r *ClawHubRegistry) GetSkillMeta(ctx context.Context, nameOrSlug string) (
 		return nil, fmt.Errorf("%s returned %d: %s", r.name, resp.StatusCode, string(body))
 	}
 
-	var entry clawhubSkillEntry
-	if err := json.NewDecoder(io.LimitReader(resp.Body, clawhubMaxBody)).Decode(&entry); err != nil {
+	var detail clawhubSkillDetailResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, clawhubMaxBody)).Decode(&detail); err != nil {
 		return nil, fmt.Errorf("decoding skill meta: %w", err)
 	}
 
-	slug := entry.Slug
-	if slug == "" {
-		slug = entry.Name
+	skill := detail.Skill
+	name := skill.DisplayName
+	if name == "" || name == "Skill" {
+		name = skill.Slug
+	}
+	if name == "" {
+		return nil, fmt.Errorf("skill '%s' returned empty name from %s", nameOrSlug, r.name)
+	}
+
+	version := ""
+	if detail.LatestVersion != nil {
+		version = detail.LatestVersion.Version
+	} else if v, ok := skill.Tags["latest"]; ok {
+		version = v
+	}
+
+	author := ""
+	if detail.Owner != nil {
+		author = detail.Owner.DisplayName
+		if author == "" {
+			author = detail.Owner.Handle
+		}
+	}
+
+	// Map moderation
+	var modFlags ModerationFlags
+	if detail.Moderation != nil && detail.Moderation.Flagged {
+		modFlags.SuspiciousContent = true
+		modFlags.Reason = detail.Moderation.Reason
+	}
+
+	downloadURL := fmt.Sprintf("%s/download?slug=%s", r.baseURL, url.QueryEscape(skill.Slug))
+	if version != "" {
+		downloadURL += "&version=" + url.QueryEscape(version)
 	}
 
 	return &SkillMeta{
-		Name:         entry.Name,
-		Slug:         slug,
-		Description:  entry.Description,
-		Version:      entry.Version,
-		Author:       entry.Author,
-		Tags:         entry.Tags,
-		Downloads:    entry.Downloads,
-		DownloadURL:  entry.DownloadURL,
+		Name:         name,
+		Slug:         skill.Slug,
+		Description:  skill.Summary,
+		Version:      version,
+		Author:       author,
+		Downloads:    skill.Stats.Downloads,
+		DownloadURL:  downloadURL,
 		RegistryName: r.name,
-		Moderation: ModerationFlags{
-			MalwareDetected:   entry.MalwareDetected,
-			SuspiciousContent: entry.SuspiciousContent,
-			Reason:            entry.ModerationNote,
-		},
+		Moderation:   modFlags,
 	}, nil
 }
 
-// DownloadSkill downloads the skill content.
+// DownloadSkill downloads the skill content as a zip.
 func (r *ClawHubRegistry) DownloadSkill(ctx context.Context, meta *SkillMeta) ([]byte, error) {
 	downloadURL := meta.DownloadURL
 	if downloadURL == "" {
-		downloadURL = fmt.Sprintf("%s/download?slug=%s&version=%s",
-			r.baseURL, url.QueryEscape(meta.Slug), url.QueryEscape(meta.Version))
+		downloadURL = fmt.Sprintf("%s/download?slug=%s", r.baseURL, url.QueryEscape(meta.Slug))
+		if meta.Version != "" {
+			downloadURL += "&version=" + url.QueryEscape(meta.Version)
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)

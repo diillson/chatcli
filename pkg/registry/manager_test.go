@@ -71,6 +71,9 @@ func TestManagerSearchAllFanOut(t *testing.T) {
 		installer:     NewInstaller(t.TempDir(), logger),
 		searchCache:   NewTrigramCache(10, 5*time.Minute),
 		maxConcurrent: 3,
+		maxFailures:   defaultMaxFailures,
+		failureCounts: make(map[string]int),
+		disabledUntil: make(map[string]time.Time),
 		logger:        logger,
 	}
 
@@ -113,6 +116,9 @@ func TestManagerSearchAllWithError(t *testing.T) {
 		installer:     NewInstaller(t.TempDir(), logger),
 		searchCache:   NewTrigramCache(10, 5*time.Minute),
 		maxConcurrent: 3,
+		maxFailures:   defaultMaxFailures,
+		failureCounts: make(map[string]int),
+		disabledUntil: make(map[string]time.Time),
 		logger:        logger,
 	}
 
@@ -152,6 +158,9 @@ func TestManagerSearchAllDisabledRegistry(t *testing.T) {
 		installer:     NewInstaller(t.TempDir(), logger),
 		searchCache:   NewTrigramCache(10, 5*time.Minute),
 		maxConcurrent: 3,
+		maxFailures:   defaultMaxFailures,
+		failureCounts: make(map[string]int),
+		disabledUntil: make(map[string]time.Time),
 		logger:        logger,
 	}
 
@@ -179,6 +188,9 @@ func TestManagerSearchCaching(t *testing.T) {
 		installer:     NewInstaller(t.TempDir(), logger),
 		searchCache:   NewTrigramCache(10, 5*time.Minute),
 		maxConcurrent: 3,
+		maxFailures:   defaultMaxFailures,
+		failureCounts: make(map[string]int),
+		disabledUntil: make(map[string]time.Time),
 		logger:        logger,
 	}
 
@@ -227,6 +239,9 @@ func TestManagerInstallAndUninstall(t *testing.T) {
 		searchCache:   NewTrigramCache(10, 5*time.Minute),
 		config:        cfg,
 		maxConcurrent: 3,
+		maxFailures:   defaultMaxFailures,
+		failureCounts: make(map[string]int),
+		disabledUntil: make(map[string]time.Time),
 		logger:        logger,
 	}
 
@@ -253,6 +268,61 @@ func TestManagerInstallAndUninstall(t *testing.T) {
 	}
 }
 
+func TestManagerAutoDisableAfterFailures(t *testing.T) {
+	logger := zap.NewNop()
+
+	reg1 := &mockRegistry{
+		name:    "stable",
+		enabled: true,
+		skills:  []SkillMeta{{Name: "skill-ok", Slug: "skill-ok", RegistryName: "stable"}},
+	}
+
+	reg2 := &mockRegistry{
+		name:    "flaky",
+		enabled: true,
+		err:     fmt.Errorf("connection refused"),
+	}
+
+	rm := &RegistryManager{
+		registries:       []SkillRegistry{reg1, reg2},
+		installer:        NewInstaller(t.TempDir(), logger),
+		searchCache:      NewTrigramCache(10, 5*time.Minute),
+		maxConcurrent:    3,
+		maxFailures:      3,
+		cooldownDuration: 1 * time.Second,
+		failureCounts:    make(map[string]int),
+		disabledUntil:    make(map[string]time.Time),
+		logger:           logger,
+	}
+
+	// First 3 searches: flaky registry should fail but still be tried
+	for i := 0; i < 3; i++ {
+		rm.searchCache.Clear()
+		_, results := rm.SearchAll(context.Background(), fmt.Sprintf("query-%d", i))
+		if len(results) != 2 {
+			t.Fatalf("search %d: expected 2 results, got %d", i, len(results))
+		}
+	}
+
+	// After 3 failures, flaky should be auto-disabled
+	rm.searchCache.Clear()
+	_, results := rm.SearchAll(context.Background(), "query-after-disable")
+	if len(results) != 1 {
+		t.Fatalf("expected only 1 registry (flaky disabled), got %d", len(results))
+	}
+	if results[0].RegistryName != "stable" {
+		t.Errorf("expected 'stable', got %s", results[0].RegistryName)
+	}
+
+	// After cooldown expires, flaky should be retried
+	time.Sleep(1100 * time.Millisecond)
+	rm.searchCache.Clear()
+	_, results = rm.SearchAll(context.Background(), "query-after-cooldown")
+	if len(results) != 2 {
+		t.Fatalf("expected 2 registries after cooldown, got %d", len(results))
+	}
+}
+
 func TestManagerGetRegistries(t *testing.T) {
 	cfg := RegistriesConfig{
 		Registries: []RegistryEntry{
@@ -262,8 +332,10 @@ func TestManagerGetRegistries(t *testing.T) {
 	}
 
 	rm := &RegistryManager{
-		config: cfg,
-		logger: zap.NewNop(),
+		config:        cfg,
+		failureCounts: make(map[string]int),
+		disabledUntil: make(map[string]time.Time),
+		logger:        zap.NewNop(),
 	}
 
 	infos := rm.GetRegistries()

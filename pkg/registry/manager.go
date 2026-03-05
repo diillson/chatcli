@@ -4,6 +4,7 @@
  * License: MIT
  *
  * Coordinates fan-out parallel search across multiple skill registries.
+ * Auto-disables registries after consecutive failures with cooldown.
  */
 package registry
 
@@ -11,21 +12,31 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
 
+const (
+	defaultMaxFailures      = 3
+	defaultCooldownDuration = 5 * time.Minute
+)
+
 // RegistryManager coordinates multiple registries for fan-out search.
 type RegistryManager struct {
-	registries    []SkillRegistry
-	installer     *Installer
-	searchCache   *TrigramCache
-	config        RegistriesConfig
-	maxConcurrent int
-	logger        *zap.Logger
-	mu            sync.RWMutex
+	registries       []SkillRegistry
+	installer        *Installer
+	searchCache      *TrigramCache
+	config           RegistriesConfig
+	maxConcurrent    int
+	maxFailures      int
+	cooldownDuration time.Duration
+	failureCounts    map[string]int
+	disabledUntil    map[string]time.Time
+	logger           *zap.Logger
+	mu               sync.RWMutex
 }
 
 // NewRegistryManager creates a new registry manager from configuration.
@@ -34,11 +45,15 @@ func NewRegistryManager(cfg RegistriesConfig, logger *zap.Logger) (*RegistryMana
 
 	cacheTTL := 5 * time.Minute
 	rm := &RegistryManager{
-		installer:     installer,
-		searchCache:   NewTrigramCache(cfg.SearchCacheSize, cacheTTL),
-		config:        cfg,
-		maxConcurrent: cfg.MaxConcurrent,
-		logger:        logger,
+		installer:        installer,
+		searchCache:      NewTrigramCache(cfg.SearchCacheSize, cacheTTL),
+		config:           cfg,
+		maxConcurrent:    cfg.MaxConcurrent,
+		maxFailures:      defaultMaxFailures,
+		cooldownDuration: defaultCooldownDuration,
+		failureCounts:    make(map[string]int),
+		disabledUntil:    make(map[string]time.Time),
+		logger:           logger,
 	}
 
 	if rm.maxConcurrent <= 0 {
@@ -108,21 +123,19 @@ func (rm *RegistryManager) SearchAll(ctx context.Context, query string) ([]Skill
 				Skills:       skills,
 				Error:        err,
 			}
-
-			if err != nil {
-				rm.logger.Warn("registry search failed",
-					zap.String("registry", r.Name()),
-					zap.Error(err),
-				)
-			}
 		}(i, reg)
 	}
 	wg.Wait()
 
-	// 3. Merge + deduplicate
+	// 3. Track failures/successes for auto-disable
+	for _, result := range results {
+		rm.trackResult(result.RegistryName, result.Error)
+	}
+
+	// 4. Merge + deduplicate
 	merged := rm.mergeResults(results)
 
-	// 4. Cache the merged results
+	// 5. Cache the merged results
 	if len(merged) > 0 {
 		rm.searchCache.Put(query, merged)
 	}
@@ -152,7 +165,12 @@ func (rm *RegistryManager) Install(ctx context.Context, nameOrSlug string) (*Ins
 
 		for _, reg := range regs {
 			m, err := reg.GetSkillMeta(ctx, nameOrSlug)
-			if err == nil && m != nil {
+			if err != nil {
+				rm.trackResult(reg.Name(), err)
+				continue
+			}
+			if m != nil && m.Name != "" {
+				rm.trackResult(reg.Name(), nil)
 				meta = m
 				break
 			}
@@ -164,12 +182,12 @@ func (rm *RegistryManager) Install(ctx context.Context, nameOrSlug string) (*Ins
 		var tried []string
 		for _, r := range results {
 			if r.Error != nil {
-				tried = append(tried, fmt.Sprintf("%s (error: %v)", r.RegistryName, r.Error))
+				tried = append(tried, fmt.Sprintf("%s (%s)", r.RegistryName, shortenError(r.Error)))
 			} else {
 				tried = append(tried, r.RegistryName)
 			}
 		}
-		return nil, fmt.Errorf("skill '%s' not found in any registry. Searched: %v", nameOrSlug, tried)
+		return nil, fmt.Errorf("skill '%s' not found. Searched: %s", nameOrSlug, strings.Join(tried, ", "))
 	}
 
 	// Check moderation
@@ -188,8 +206,10 @@ func (rm *RegistryManager) Install(ctx context.Context, nameOrSlug string) (*Ins
 		if reg.Name() == meta.RegistryName {
 			content, downloadErr = reg.DownloadSkill(ctx, meta)
 			if downloadErr == nil {
+				rm.trackResult(reg.Name(), nil)
 				break
 			}
+			rm.trackResult(reg.Name(), downloadErr)
 		}
 	}
 	if content == nil && downloadErr != nil {
@@ -226,6 +246,11 @@ func (rm *RegistryManager) IsInstalled(name string) bool {
 	return rm.installer.IsInstalled(name)
 }
 
+// GetInstalledInfo returns metadata for a specific installed skill.
+func (rm *RegistryManager) GetInstalledInfo(name string) *InstalledSkillInfo {
+	return rm.installer.GetInstalledInfo(name)
+}
+
 // ListInstalled returns all locally installed skills.
 func (rm *RegistryManager) ListInstalled() ([]InstalledSkillInfo, error) {
 	return rm.installer.ListInstalled()
@@ -236,13 +261,21 @@ func (rm *RegistryManager) GetRegistries() []RegistryInfo {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 
+	now := time.Now()
 	var infos []RegistryInfo
 	for _, entry := range rm.config.Registries {
-		infos = append(infos, RegistryInfo{
+		info := RegistryInfo{
 			Name:    entry.Name,
 			URL:     entry.URL,
 			Enabled: entry.IsActive,
-		})
+		}
+		// Check temporary disable status
+		if until, ok := rm.disabledUntil[entry.Name]; ok && now.Before(until) {
+			info.TempDisabled = true
+			info.DisabledUntil = &until
+			info.FailureCount = rm.failureCounts[entry.Name]
+		}
+		infos = append(infos, info)
 	}
 	return infos
 }
@@ -263,6 +296,7 @@ func (rm *RegistryManager) ClearCache() {
 }
 
 // GetSkillMeta retrieves metadata for a skill (returns first found across registries).
+// Skips results with empty names.
 func (rm *RegistryManager) GetSkillMeta(ctx context.Context, nameOrSlug string) (*SkillMeta, error) {
 	rm.mu.RLock()
 	regs := rm.enabledRegistries()
@@ -270,26 +304,62 @@ func (rm *RegistryManager) GetSkillMeta(ctx context.Context, nameOrSlug string) 
 
 	for _, reg := range regs {
 		meta, err := reg.GetSkillMeta(ctx, nameOrSlug)
-		if err == nil && meta != nil {
+		if err != nil {
+			rm.trackResult(reg.Name(), err)
+			continue
+		}
+		if meta != nil && meta.Name != "" {
+			rm.trackResult(reg.Name(), nil)
 			return meta, nil
 		}
 	}
 	return nil, fmt.Errorf("skill '%s' not found in any registry", nameOrSlug)
 }
 
-// enabledRegistries returns only enabled registries.
+// trackResult updates the failure counter for a registry.
+// After maxFailures consecutive errors, the registry is auto-disabled for cooldownDuration.
+func (rm *RegistryManager) trackResult(registryName string, err error) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if err != nil {
+		rm.failureCounts[registryName]++
+		count := rm.failureCounts[registryName]
+		if count >= rm.maxFailures {
+			until := time.Now().Add(rm.cooldownDuration)
+			rm.disabledUntil[registryName] = until
+			rm.logger.Warn("registry temporarily disabled after repeated failures",
+				zap.String("registry", registryName),
+				zap.Int("failures", count),
+				zap.Duration("cooldown", rm.cooldownDuration),
+			)
+		}
+	} else {
+		// Success resets the failure counter and re-enables
+		delete(rm.failureCounts, registryName)
+		delete(rm.disabledUntil, registryName)
+	}
+}
+
+// enabledRegistries returns only enabled registries that are not in cooldown.
 func (rm *RegistryManager) enabledRegistries() []SkillRegistry {
 	var enabled []SkillRegistry
+	now := time.Now()
 	for _, r := range rm.registries {
-		if r.Enabled() {
-			enabled = append(enabled, r)
+		if !r.Enabled() {
+			continue
 		}
+		// Skip registries in auto-disable cooldown
+		if until, ok := rm.disabledUntil[r.Name()]; ok && now.Before(until) {
+			continue
+		}
+		enabled = append(enabled, r)
 	}
 	return enabled
 }
 
 // mergeResults merges and deduplicates results from multiple registries.
-// First registry wins for skills with the same name.
+// First registry wins for skills with the same name. Skips entries with empty names.
 func (rm *RegistryManager) mergeResults(results []SearchResult) []SkillMeta {
 	seen := make(map[string]bool)
 	var merged []SkillMeta
@@ -299,6 +369,13 @@ func (rm *RegistryManager) mergeResults(results []SearchResult) []SkillMeta {
 			continue
 		}
 		for _, skill := range result.Skills {
+			// Normalize: use Slug as fallback for empty Name
+			if skill.Name == "" {
+				skill.Name = skill.Slug
+			}
+			if skill.Name == "" {
+				continue // skip skills with no identifiable name
+			}
 			key := skill.Name
 			if !seen[key] {
 				seen[key] = true
@@ -313,4 +390,25 @@ func (rm *RegistryManager) mergeResults(results []SearchResult) []SkillMeta {
 	})
 
 	return merged
+}
+
+// shortenError returns a concise version of a registry error message.
+func shortenError(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "no such host") {
+		return "DNS lookup failed"
+	}
+	if strings.Contains(msg, "connection refused") {
+		return "connection refused"
+	}
+	if strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "timeout") {
+		return "timeout"
+	}
+	if strings.Contains(msg, "certificate") {
+		return "TLS error"
+	}
+	if len(msg) > 60 {
+		return msg[:57] + "..."
+	}
+	return msg
 }

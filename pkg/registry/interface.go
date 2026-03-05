@@ -5,7 +5,10 @@
  */
 package registry
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ModerationFlags represents safety signals from a registry about a skill.
 type ModerationFlags struct {
@@ -57,9 +60,12 @@ type InstalledSkillInfo struct {
 
 // RegistryInfo describes a configured registry.
 type RegistryInfo struct {
-	Name    string
-	URL     string
-	Enabled bool
+	Name          string
+	URL           string
+	Enabled       bool
+	TempDisabled  bool       // auto-disabled due to consecutive failures
+	DisabledUntil *time.Time // when the cooldown expires
+	FailureCount  int
 }
 
 // SkillRegistry is the interface each registry adapter must implement.

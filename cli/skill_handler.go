@@ -3,7 +3,7 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: MIT
  *
- * Handles /skill commands: search, install, uninstall, list, registries, help.
+ * Handles /skill commands: search, install, uninstall, list, info, registries, help.
  */
 package cli
 
@@ -117,7 +117,7 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 
 // Search performs a fan-out search across all registries.
 func (sh *SkillHandler) Search(query string) {
-	fmt.Printf("\n  Searching across registries for %s...\n\n",
+	fmt.Printf("\n  Searching registries for %s...\n",
 		colorize(fmt.Sprintf("%q", query), ColorCyan))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -125,71 +125,88 @@ func (sh *SkillHandler) Search(query string) {
 
 	merged, results := sh.registryMgr.SearchAll(ctx, query)
 
-	// Show errors from individual registries
+	// Show concise errors from individual registries (only first-time errors, auto-disable handles the rest)
+	hasErrors := false
 	for _, r := range results {
 		if r.Error != nil {
+			if !hasErrors {
+				fmt.Println()
+				hasErrors = true
+			}
 			fmt.Printf("  %s %s: %s\n",
 				colorize("!", ColorYellow),
 				r.RegistryName,
-				colorize(r.Error.Error(), ColorGray))
+				colorize(shortenRegistryError(r.Error), ColorGray))
 		}
 	}
 
 	if len(merged) == 0 {
-		fmt.Println(colorize("  No skills found.", ColorYellow))
-		fmt.Println()
+		fmt.Printf("\n  %s\n\n", colorize("No skills found.", ColorYellow))
 		return
 	}
 
-	fmt.Printf("  Results (%d found):\n\n", len(merged))
+	fmt.Printf("\n  Results (%d found):\n\n", len(merged))
+
+	// Compute max name length for alignment
+	maxNameLen := 0
+	for _, skill := range merged {
+		if len(skill.Name) > maxNameLen {
+			maxNameLen = len(skill.Name)
+		}
+	}
 
 	for i, skill := range merged {
-		// Name and version
-		nameStr := colorize(skill.Name, ColorCyan)
+		// Padded name (pad raw string, then colorize)
+		paddedName := fmt.Sprintf("%-*s", maxNameLen, skill.Name)
+
+		// Version
 		versionStr := ""
 		if skill.Version != "" {
-			versionStr = colorize(fmt.Sprintf("(v%s)", skill.Version), ColorGray)
-		}
-
-		// Author
-		authorStr := ""
-		if skill.Author != "" {
-			authorStr = fmt.Sprintf("by %s", skill.Author)
+			versionStr = fmt.Sprintf("v%s", skill.Version)
 		}
 
 		// Registry tag
-		regTag := colorize(fmt.Sprintf("[%s]", skill.RegistryName), ColorGray)
+		regTag := fmt.Sprintf("[%s]", skill.RegistryName)
 
 		// Moderation tag
 		modTag := ""
 		modStr := registry.FormatModerationTag(skill.Moderation)
-		if modStr == "BLOCKED" {
-			modTag = colorize(" BLOCKED", ColorRed)
-		} else if modStr == "SUSPICIOUS" {
-			modTag = colorize(" SUSPICIOUS", ColorYellow)
-		} else if modStr == "QUARANTINED" {
-			modTag = colorize(" QUARANTINED", ColorRed)
+		if modStr != "" {
+			modTag = " " + modStr
 		}
 
 		// Installed marker
 		installed := ""
 		if sh.registryMgr.IsInstalled(skill.Name) {
-			installed = colorize(" [installed]", ColorGreen)
+			installed = " " + colorize("[installed]", ColorGreen)
 		}
 
-		fmt.Printf("    %d. %s %s %s  %s%s%s\n",
-			i+1, nameStr, versionStr, authorStr, regTag, modTag, installed)
+		// Build the line
+		line := fmt.Sprintf("    %d. %s", i+1, colorize(paddedName, ColorCyan))
+		if versionStr != "" {
+			line += "  " + colorize(versionStr, ColorGray)
+		}
+		if skill.Author != "" {
+			line += "  by " + skill.Author
+		}
+		line += "  " + colorize(regTag, ColorGray)
+		if modTag != "" {
+			switch modStr {
+			case "BLOCKED", "QUARANTINED":
+				line += colorize(modTag, ColorRed)
+			default:
+				line += colorize(modTag, ColorYellow)
+			}
+		}
+		line += installed
+		fmt.Println(line)
 
 		if skill.Description != "" {
-			fmt.Printf("       %s\n", skill.Description)
+			fmt.Printf("       %s\n", colorize(skill.Description, ColorGray))
 		}
-		if len(skill.Tags) > 0 {
-			fmt.Printf("       Tags: %s\n", colorize(strings.Join(skill.Tags, ", "), ColorGray))
-		}
-		fmt.Println()
 	}
 
-	fmt.Printf("  Use %s to install a skill.\n\n",
+	fmt.Printf("\n  Use %s to install a skill.\n\n",
 		colorize("/skill install <name>", ColorCyan))
 }
 
@@ -234,10 +251,11 @@ func (sh *SkillHandler) Install(name string) {
 		}
 	}
 
-	fmt.Printf("\n  Installing %s v%s from %s...\n",
-		colorize(meta.Name, ColorCyan),
-		meta.Version,
-		colorize(meta.RegistryName, ColorGray))
+	fmt.Printf("\n  Installing %s", colorize(meta.Name, ColorCyan))
+	if meta.Version != "" {
+		fmt.Printf(" v%s", meta.Version)
+	}
+	fmt.Printf(" from %s...\n", colorize(meta.RegistryName, ColorGray))
 
 	result, err := sh.registryMgr.Install(ctx, name)
 	if err != nil {
@@ -254,14 +272,13 @@ func (sh *SkillHandler) showInstallResult(result *registry.InstallResult) {
 		action = "Updated"
 	}
 
-	fmt.Printf("  %s %s v%s from %s\n",
-		colorize(action, ColorGreen),
-		colorize(result.Name, ColorCyan),
-		result.Version,
-		colorize(result.Source, ColorGray))
+	fmt.Printf("  %s %s", colorize(action, ColorGreen), colorize(result.Name, ColorCyan))
+	if result.Version != "" {
+		fmt.Printf(" v%s", result.Version)
+	}
+	fmt.Printf(" from %s\n", colorize(result.Source, ColorGray))
 	fmt.Printf("  Path: %s\n", colorize(result.InstallPath, ColorGray))
-	fmt.Println()
-	fmt.Printf("  Skill '%s' is now available.\n", result.Name)
+	fmt.Printf("\n  Skill '%s' is now available.\n", result.Name)
 	fmt.Printf("  Verify with: %s\n\n", colorize("/agent skills", ColorCyan))
 
 	// Refresh persona loader to pick up new skill
@@ -312,79 +329,166 @@ func (sh *SkillHandler) List() {
 	fmt.Printf("  %s (%d):\n\n",
 		colorize("Installed Skills", ColorCyan), len(installed))
 
+	// Compute column widths
+	maxNameLen := 0
+	maxVerLen := 0
+	maxSourceLen := 0
 	for _, s := range installed {
-		nameStr := colorize(s.Name, ColorCyan)
-		versionStr := ""
-		if s.Version != "" {
-			versionStr = colorize(fmt.Sprintf("v%s", s.Version), ColorGray)
+		if len(s.Name) > maxNameLen {
+			maxNameLen = len(s.Name)
 		}
-		sourceStr := colorize(fmt.Sprintf("[%s]", s.Source), ColorGray)
-		pathStr := colorize(s.Path, ColorGray)
+		ver := ""
+		if s.Version != "" {
+			ver = "v" + s.Version
+		}
+		if len(ver) > maxVerLen {
+			maxVerLen = len(ver)
+		}
+		src := s.Source
+		if src == "" {
+			src = "local"
+		}
+		if len(src) > maxSourceLen {
+			maxSourceLen = len(src)
+		}
+	}
 
-		fmt.Printf("    %-20s  %-8s  %-12s  %s\n", nameStr, versionStr, sourceStr, pathStr)
+	for _, s := range installed {
+		// Pad raw strings first, then colorize
+		paddedName := fmt.Sprintf("%-*s", maxNameLen, s.Name)
+
+		ver := ""
+		if s.Version != "" {
+			ver = "v" + s.Version
+		}
+		paddedVer := fmt.Sprintf("%-*s", maxVerLen, ver)
+
+		src := s.Source
+		if src == "" {
+			src = "local"
+		}
+		srcTag := fmt.Sprintf("[%s]", src)
+
+		fmt.Printf("    %s  %s  %s\n",
+			colorize(paddedName, ColorCyan),
+			colorize(paddedVer, ColorGray),
+			colorize(srcTag, ColorGray))
 	}
 
 	// Show registries summary
 	regs := sh.registryMgr.GetRegistries()
-	enabledCount := 0
-	for _, r := range regs {
-		if r.Enabled {
-			enabledCount++
-		}
-	}
-	fmt.Printf("\n  Registries (%d):\n", enabledCount)
+	fmt.Printf("\n  Registries (%d):\n", len(regs))
 	for _, r := range regs {
 		status := colorize("[enabled]", ColorGreen)
-		if !r.Enabled {
+		if r.TempDisabled {
+			status = colorize("[paused]", ColorYellow)
+		} else if !r.Enabled {
 			status = colorize("[disabled]", ColorGray)
 		}
-		fmt.Printf("    %-12s  %s  %s\n", r.Name, r.URL, status)
+		fmt.Printf("    %-12s  %s  %s\n", r.Name, colorize(r.URL, ColorGray), status)
 	}
 	fmt.Println()
 }
 
-// Info shows metadata about a skill from registries.
+// Info shows metadata about a skill, checking local installed first, then registries.
 func (sh *SkillHandler) Info(name string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	// 1. Check local installed
+	local := sh.registryMgr.GetInstalledInfo(name)
 
+	// 2. Try registry (short timeout)
+	var remote *registry.SkillMeta
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	meta, err := sh.registryMgr.GetSkillMeta(ctx, name)
-	if err != nil {
-		fmt.Printf("\n  Skill '%s' not found in any registry.\n\n", name)
+	if err == nil && meta != nil && meta.Name != "" {
+		remote = meta
+	}
+
+	// Nothing found anywhere
+	if local == nil && remote == nil {
+		fmt.Printf("\n  Skill '%s' not found.\n\n", name)
 		return
 	}
 
 	fmt.Println()
-	fmt.Printf("  %s %s\n", colorize("Name:", ColorCyan), meta.Name)
-	if meta.Description != "" {
-		fmt.Printf("  %s %s\n", colorize("Description:", ColorCyan), meta.Description)
+
+	// Name
+	displayName := name
+	if remote != nil && remote.Name != "" {
+		displayName = remote.Name
+	} else if local != nil && local.Name != "" {
+		displayName = local.Name
 	}
-	if meta.Version != "" {
-		fmt.Printf("  %s %s\n", colorize("Version:", ColorCyan), meta.Version)
+	fmt.Printf("  %s  %s\n", colorize("Name:", ColorCyan), displayName)
+
+	// Description
+	desc := ""
+	if remote != nil && remote.Description != "" {
+		desc = remote.Description
+	} else if local != nil && local.Description != "" {
+		desc = local.Description
 	}
-	if meta.Author != "" {
-		fmt.Printf("  %s %s\n", colorize("Author:", ColorCyan), meta.Author)
+	if desc != "" {
+		fmt.Printf("  %s  %s\n", colorize("Desc:", ColorCyan), desc)
 	}
-	fmt.Printf("  %s %s\n", colorize("Registry:", ColorCyan), meta.RegistryName)
-	if len(meta.Tags) > 0 {
-		fmt.Printf("  %s %s\n", colorize("Tags:", ColorCyan), strings.Join(meta.Tags, ", "))
+
+	// Version
+	ver := ""
+	if remote != nil && remote.Version != "" {
+		ver = remote.Version
+	} else if local != nil && local.Version != "" {
+		ver = local.Version
 	}
-	if meta.Downloads > 0 {
-		fmt.Printf("  %s %d\n", colorize("Downloads:", ColorCyan), meta.Downloads)
+	if ver != "" {
+		fmt.Printf("  %s  %s\n", colorize("Version:", ColorCyan), ver)
+	}
+
+	// Author
+	if remote != nil && remote.Author != "" {
+		fmt.Printf("  %s  %s\n", colorize("Author:", ColorCyan), remote.Author)
+	}
+
+	// Source / Registry
+	source := ""
+	if remote != nil && remote.RegistryName != "" {
+		source = remote.RegistryName
+	} else if local != nil && local.Source != "" {
+		source = local.Source
+	}
+	if source != "" {
+		fmt.Printf("  %s  %s\n", colorize("Source:", ColorCyan), source)
+	}
+
+	// Tags
+	if remote != nil && len(remote.Tags) > 0 {
+		fmt.Printf("  %s  %s\n", colorize("Tags:", ColorCyan),
+			colorize(strings.Join(remote.Tags, ", "), ColorGray))
+	}
+
+	// Downloads
+	if remote != nil && remote.Downloads > 0 {
+		fmt.Printf("  %s  %d\n", colorize("Downloads:", ColorCyan), remote.Downloads)
 	}
 
 	// Moderation
-	modTag := registry.FormatModerationTag(meta.Moderation)
-	if modTag != "" {
-		fmt.Printf("  %s %s\n", colorize("Moderation:", ColorCyan),
-			colorize(modTag, ColorYellow))
+	if remote != nil {
+		modTag := registry.FormatModerationTag(remote.Moderation)
+		if modTag != "" {
+			fmt.Printf("  %s  %s\n", colorize("Moderation:", ColorCyan),
+				colorize(modTag, ColorYellow))
+		}
 	}
 
-	// Installed status
-	if sh.registryMgr.IsInstalled(meta.Name) {
-		fmt.Printf("  %s %s\n", colorize("Status:", ColorCyan),
+	// Install status and path
+	if local != nil {
+		fmt.Printf("  %s  %s\n", colorize("Status:", ColorCyan),
 			colorize("installed", ColorGreen))
+		fmt.Printf("  %s  %s\n", colorize("Path:", ColorCyan),
+			colorize(local.Path, ColorGray))
+	} else {
+		fmt.Printf("  %s  not installed\n", colorize("Status:", ColorCyan))
 	}
+
 	fmt.Println()
 }
 
@@ -396,10 +500,16 @@ func (sh *SkillHandler) ShowRegistries() {
 
 	for i, r := range regs {
 		status := colorize("[enabled]", ColorGreen)
-		if !r.Enabled {
+		if r.TempDisabled {
+			remaining := ""
+			if r.DisabledUntil != nil {
+				remaining = fmt.Sprintf(" ~%ds", int(time.Until(*r.DisabledUntil).Seconds()))
+			}
+			status = colorize(fmt.Sprintf("[paused: %d failures%s]", r.FailureCount, remaining), ColorYellow)
+		} else if !r.Enabled {
 			status = colorize("[disabled]", ColorGray)
 		}
-		fmt.Printf("    %d. %-12s  %s  %s\n", i+1, r.Name, r.URL, status)
+		fmt.Printf("    %d. %-12s  %s  %s\n", i+1, r.Name, colorize(r.URL, ColorGray), status)
 	}
 
 	fmt.Printf("\n  Config: %s\n", colorize(sh.registryMgr.GetConfigPath(), ColorGray))
@@ -410,26 +520,61 @@ func (sh *SkillHandler) ShowRegistries() {
 // ShowHelp displays usage information.
 func (sh *SkillHandler) ShowHelp() {
 	fmt.Println()
-	fmt.Println(colorize("  Skill Registry Commands:", ColorCyan))
-	fmt.Println(strings.Repeat("  "+string(rune(0x2500)), 25))
-	fmt.Println()
-	fmt.Printf("    %s           Search for skills across registries\n",
-		colorize("/skill search <query>", ColorCyan))
-	fmt.Printf("    %s          Install a skill from a registry\n",
-		colorize("/skill install <name>", ColorCyan))
-	fmt.Printf("    %s        Remove an installed skill\n",
-		colorize("/skill uninstall <name>", ColorCyan))
-	fmt.Printf("    %s                    List installed skills\n",
-		colorize("/skill list", ColorCyan))
-	fmt.Printf("    %s             Show skill metadata from registry\n",
-		colorize("/skill info <name>", ColorCyan))
-	fmt.Printf("    %s              Show configured registries\n",
-		colorize("/skill registries", ColorCyan))
-	fmt.Printf("    %s                    Show this help\n",
-		colorize("/skill help", ColorCyan))
-	fmt.Println()
-	fmt.Printf("  Skills are installed to: %s\n",
+	fmt.Printf("  %s\n", colorize("Skill Registry Commands:", ColorCyan))
+	fmt.Printf("  %s\n\n", colorize(strings.Repeat("─", 50), ColorGray))
+
+	commands := []struct {
+		cmd  string
+		desc string
+	}{
+		{"/skill search <query>", "Search for skills across registries"},
+		{"/skill install <name>", "Install a skill from a registry"},
+		{"/skill uninstall <name>", "Remove an installed skill"},
+		{"/skill list", "List installed skills"},
+		{"/skill info <name>", "Show skill details (local + registry)"},
+		{"/skill registries", "Show configured registries"},
+		{"/skill help", "Show this help"},
+	}
+
+	// Find max command length for alignment
+	maxLen := 0
+	for _, c := range commands {
+		if len(c.cmd) > maxLen {
+			maxLen = len(c.cmd)
+		}
+	}
+
+	for _, c := range commands {
+		padded := fmt.Sprintf("%-*s", maxLen, c.cmd)
+		fmt.Printf("    %s   %s\n", colorize(padded, ColorCyan), c.desc)
+	}
+
+	fmt.Printf("\n  Skills dir: %s\n",
 		colorize(sh.registryMgr.GetInstallDir(), ColorGray))
-	fmt.Printf("  Config: %s\n\n",
+	fmt.Printf("  Config:     %s\n\n",
 		colorize(sh.registryMgr.GetConfigPath(), ColorGray))
+}
+
+// shortenRegistryError returns a concise error description for display.
+func shortenRegistryError(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "no such host") {
+		return "unavailable (DNS lookup failed)"
+	}
+	if strings.Contains(msg, "connection refused") {
+		return "unavailable (connection refused)"
+	}
+	if strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "timeout") {
+		return "unavailable (timeout)"
+	}
+	if strings.Contains(msg, "certificate") {
+		return "TLS certificate error"
+	}
+	if strings.Contains(msg, "not_found_error") || strings.Contains(msg, "Not Found") {
+		return "API endpoint not found"
+	}
+	if len(msg) > 60 {
+		return msg[:57] + "..."
+	}
+	return msg
 }

@@ -111,8 +111,11 @@ func (inst *Installer) Uninstall(name string) error {
 // IsInstalled checks if a skill exists locally.
 func (inst *Installer) IsInstalled(name string) bool {
 	skillName := sanitizeName(name)
+	if skillName == "" {
+		return false
+	}
 	skillDir := filepath.Join(inst.installDir, skillName)
-	if _, err := os.Stat(skillDir); err == nil {
+	if fi, err := os.Stat(skillDir); err == nil && fi.IsDir() {
 		return true
 	}
 	// Check single-file
@@ -158,6 +161,43 @@ func (inst *Installer) ListInstalled() ([]InstalledSkillInfo, error) {
 	}
 
 	return skills, nil
+}
+
+// GetInstalledInfo returns metadata for a specific installed skill, or nil if not found.
+func (inst *Installer) GetInstalledInfo(name string) *InstalledSkillInfo {
+	skillName := sanitizeName(name)
+	if skillName == "" {
+		return nil
+	}
+
+	// Check directory-based skill
+	skillDir := filepath.Join(inst.installDir, skillName)
+	if fi, err := os.Stat(skillDir); err == nil && fi.IsDir() {
+		info := InstalledSkillInfo{
+			Name: skillName,
+			Path: skillDir,
+		}
+		if data, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md")); err == nil {
+			parseInstalledMeta(&info, string(data))
+		}
+		if info.Source == "" {
+			info.Source = "local"
+		}
+		return &info
+	}
+
+	// Check single-file skill
+	skillFile := filepath.Join(inst.installDir, skillName+".md")
+	if _, err := os.Stat(skillFile); err == nil {
+		info := InstalledSkillInfo{
+			Name:   skillName,
+			Source: "local",
+			Path:   skillFile,
+		}
+		return &info
+	}
+
+	return nil
 }
 
 // GetInstallDir returns the install directory path.
