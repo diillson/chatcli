@@ -26,7 +26,7 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 
 ---
 
-> 📘 Explore a documentação detalhada — incluindo use cases, tutoriais e receitas — em [diillson.github.io/chatcli](https://diillson.github.io/chatcli)
+> 📘 Explore a documentação detalhada — incluindo use cases, tutoriais e receitas — em [chatcli.edilsonfreitas.com](https://chatcli.edilsonfreitas.com)
 
 -----
 
@@ -99,7 +99,7 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 - **Segurança no Modo Paralelo**: Workers do modo multi-agent respeitam integralmente o `coder_policy.json`, com prompts de segurança serializados e contextuais que exibem qual agent está solicitando cada ação.
 - **Skill Registry Multi-Registry**: Busca, instala e gerencia skills de múltiplos registries remotos (ChatCLI.dev, ClawHub, registries customizados) com busca paralela fan-out, cache fuzzy por trigramas, flags de moderação (malware/suspicious) e instalação atômica. Comandos: `/skill search`, `/skill install`, `/skill uninstall`.
 - **Descoberta de Recursos Remotos**: Ao conectar a um servidor, o client descobre automaticamente plugins, agents e skills disponíveis no servidor. Plugins remotos podem ser executados no servidor ou baixados localmente; agents e skills remotos são transferidos e compostos localmente com os recursos locais.
-- **Segurança Reforçada**: Comparação de tokens em tempo constante, proteção contra injeção em shell, validação de editores, gRPC reflection desabilitado por padrão, e containers hardened (read-only, no-new-privileges, drop ALL capabilities). Veja a [documentação de segurança](https://diillson.github.io/chatcli/docs/features/security/).
+- **Segurança Reforçada**: Comparação de tokens em tempo constante, proteção contra injeção em shell, validação de editores, gRPC reflection desabilitado por padrão, e containers hardened (read-only, no-new-privileges, drop ALL capabilities). Veja a [documentação de segurança](https://chatcli.edilsonfreitas.com/features/security/).
 - **Fallback de Provedores**: Cadeia de failover automático entre provedores LLM. Se o provedor primário falhar (rate limit, timeout, erro de servidor), o sistema tenta automaticamente o próximo, com classificação de erros, backoff exponencial e cooldown por provedor.
 - **Tool Use Nativo (API Estruturada)**: Chamadas de ferramentas via API estruturada `tool_use` da OpenAI e Anthropic, em vez de XML no prompt. Suporte a `cache_control:ephemeral` para otimização de KV cache na Anthropic.
 - **MCP (Model Context Protocol)**: Integração com servidores MCP via transporte stdio e SSE para interoperabilidade de ferramentas externas. Configurável via `~/.chatcli/mcp_servers.json`.
@@ -756,7 +756,7 @@ O Modo Coder (`/coder`) possui um sistema de governança robusto inspirado no Cl
 2. **Deny (Bloqueado):** Ações perigosas podem ser bloqueadas permanentemente.
 3. **Ask (Perguntar):** Por padrão, escritas e execuções exigem aprovação interativa.
 
-> 🛵 Saiba mais sobre como configurar as regras de segurança na [documentação completa](https://diillson.github.io/chatcli/docs/features/coder-security).
+> 🛵 Saiba mais sobre como configurar as regras de segurança na [documentação completa](https://chatcli.edilsonfreitas.com/features/coder-security).
 
 #### Ferramentas do Modo Coder (@coder)
 
@@ -773,7 +773,7 @@ Novos subcomandos principais:
 - `test` (com detecção automática de stack)
 - `patch --diff` (unified diff, text/base64)
 
-Detalhes completos no guia: https://diillson.github.io/chatcli/docs/features/coder-plugin/
+Detalhes completos no guia: https://chatcli.edilsonfreitas.com/features/coder-plugin/
 
 #### Política de Segurança
 
@@ -786,7 +786,7 @@ O ChatCLI prioriza a segurança, bloqueando comandos perigosos por padrão. Voc�
 
 Mesmo quando permitido, comandos perigosos podem exigir confirmação explícita no terminal.
 
-> Para detalhes completos sobre todas as medidas de segurança do ChatCLI, consulte a [documentação de segurança](https://diillson.github.io/chatcli/docs/features/security/).
+> Para detalhes completos sobre todas as medidas de segurança do ChatCLI, consulte a [documentação de segurança](https://chatcli.edilsonfreitas.com/features/security/).
 
 #### Arquivos de Policy do Modo Coder (Local vs Global)
 
@@ -851,7 +851,7 @@ Cada agent possui **skills** próprias — algumas são scripts aceleradores (ex
 
 **Estratégia de Recuperação de Erros:** Quando um agent falha, o orquestrador usa `tool_call` direto para diagnosticar e corrigir (ele já tem o contexto do erro). Após o fix, retoma `agent_call` para a próxima fase de trabalho.
 
-> Desative com `CHATCLI_AGENT_PARALLEL_MODE=false` se necessário. Documentação completa em [diillson.github.io/chatcli/docs/features/multi-agent-orchestration](https://diillson.github.io/chatcli/docs/features/multi-agent-orchestration/)
+> Desative com `CHATCLI_AGENT_PARALLEL_MODE=false` se necessário. Documentação completa em [chatcli.edilsonfreitas.com/features/multi-agent-orchestration](https://chatcli.edilsonfreitas.com/features/multi-agent-orchestration/)
 
 ### Interação com o Agente
 
@@ -1335,7 +1335,7 @@ helm install chatcli deploy/helm/chatcli \
 
 > **gRPC e múltiplas réplicas**: O gRPC usa conexões HTTP/2 persistentes que fixam em um único pod. Para `replicaCount > 1`, habilite `service.headless: true` no Helm chart para ativar balanceamento round-robin via DNS. No Operator, o headless é ativado **automaticamente** quando `spec.replicas > 1`. O client já possui keepalive e round-robin integrados.
 
-> Documentação completa em [diillson.github.io/chatcli/docs/getting-started/docker-deployment](https://diillson.github.io/chatcli/docs/getting-started/docker-deployment/)
+> Documentação completa em [chatcli.edilsonfreitas.com/getting-started/docker-deployment](https://chatcli.edilsonfreitas.com/getting-started/docker-deployment/)
 
 --------
 
@@ -1415,8 +1415,8 @@ O **ChatCLI Operator** vai alem do gerenciamento de instancias. Ele implementa u
 
 A IA recebe contexto completo do cluster (status do deployment, pods, eventos, historico de revisoes) e retorna acoes estruturadas. No **modo agentico**, a IA atua como um agente com skills K8s — observa, decide e age iterativamente (loop observe-decide-act), salvando historico a cada passo. Na resolucao, gera automaticamente um **PostMortem** (causa raiz, timeline, licoes aprendidas) e um **Runbook reutilizavel** para incidentes futuros.
 
-> Documentacao completa em [diillson.github.io/chatcli/docs/features/k8s-operator](https://diillson.github.io/chatcli/docs/features/k8s-operator/)
-> Deep-dive AIOps em [diillson.github.io/chatcli/docs/features/aiops-platform](https://diillson.github.io/chatcli/docs/features/aiops-platform/)
+> Documentacao completa em [chatcli.edilsonfreitas.com/features/k8s-operator](https://chatcli.edilsonfreitas.com/features/k8s-operator/)
+> Deep-dive AIOps em [chatcli.edilsonfreitas.com/features/aiops-platform](https://chatcli.edilsonfreitas.com/features/aiops-platform/)
 
 --------
 
