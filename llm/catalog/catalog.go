@@ -15,6 +15,7 @@ const (
 	ProviderGoogleAI        = "GOOGLEAI"
 	ProviderXAI             = "XAI"
 	ProviderOllama          = "OLLAMA"
+	ProviderCopilot         = "COPILOT"
 )
 
 // PreferredAPI define qual API é preferida para o modelo
@@ -295,6 +296,47 @@ var registry = []ModelMeta{
 		PreferredAPI:    "gemini_api",
 		Capabilities:    []string{"vision", "tools", "json_mode", "multimodal_live"},
 	},
+	// GitHub Copilot Models (accessible via Copilot subscription)
+	{
+		ID:              "gpt-4o",
+		Aliases:         []string{"copilot-gpt-4o"},
+		DisplayName:     "GPT-4o (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gpt-4o-mini",
+		Aliases:         []string{"copilot-gpt-4o-mini"},
+		DisplayName:     "GPT-4o mini (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "claude-sonnet-4",
+		Aliases:         []string{"copilot-claude-sonnet-4"},
+		DisplayName:     "Claude Sonnet 4 (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools"},
+	},
+	{
+		ID:              "gemini-2.0-flash",
+		Aliases:         []string{"copilot-gemini-2.0-flash"},
+		DisplayName:     "Gemini 2.0 Flash (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 8192,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools"},
+	},
 	// xAI (Grok) Models
 	{
 		ID:              "grok-4-fast",
@@ -426,6 +468,8 @@ func GetMaxTokens(provider, model string, override int) int {
 		return 50000
 	case ProviderOllama:
 		return 8192
+	case ProviderCopilot:
+		return 16384
 	default:
 		return 50000
 	}
@@ -448,6 +492,8 @@ func GetContextWindow(provider, model string) int {
 		return 128000
 	case ProviderOllama:
 		return 8192
+	case ProviderCopilot:
+		return 128000
 	default:
 		return 50000
 	}

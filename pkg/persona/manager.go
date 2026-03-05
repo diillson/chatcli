@@ -220,6 +220,11 @@ func (m *Manager) GetLoader() *Loader {
 	return m.loader
 }
 
+// RefreshSkills re-scans skill directories to pick up newly installed or removed skills.
+func (m *Manager) RefreshSkills() ([]*Skill, error) {
+	return m.loader.ListSkills()
+}
+
 // GetSkill loads a skill by name, delegating to the loader.
 func (m *Manager) GetSkill(name string) (*Skill, error) {
 	return m.loader.GetSkill(name)

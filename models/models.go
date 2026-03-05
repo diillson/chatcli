@@ -11,9 +11,12 @@ type MessageMeta struct {
 
 // Message representa uma mensagem trocada com o modelo de linguagem.
 type Message struct {
-	Role    string       `json:"role"`           // O papel da mensagem, como "user" ou "assistant".
-	Content string       `json:"content"`        // O conteúdo da mensagem.
-	Meta    *MessageMeta `json:"meta,omitempty"` // Optional metadata for history compaction.
+	Role        string         `json:"role"`                   // O papel da mensagem: "user", "assistant", "system", "tool".
+	Content     string         `json:"content"`                // O conteúdo da mensagem.
+	Meta        *MessageMeta   `json:"meta,omitempty"`         // Optional metadata for history compaction.
+	ToolCalls   []ToolCall     `json:"tool_calls,omitempty"`   // Tool calls from assistant (native API).
+	ToolCallID  string         `json:"tool_call_id,omitempty"` // ID when this message is a tool result.
+	SystemParts []ContentBlock `json:"system_parts,omitempty"` // Structured system prompt parts (for cache control).
 }
 
 // IsValid valida se a mensagem tem um papel e conteúdo válidos.
@@ -21,6 +24,16 @@ func (m *Message) IsValid() bool {
 	validRoles := map[string]bool{
 		"user":      true,
 		"assistant": true,
+		"system":    true,
+		"tool":      true,
+	}
+	// Tool result messages may have empty content if they carry errors
+	if m.Role == "tool" {
+		return m.ToolCallID != ""
+	}
+	// Assistant messages with tool calls may have empty content
+	if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+		return true
 	}
 	return validRoles[m.Role] && m.Content != ""
 }

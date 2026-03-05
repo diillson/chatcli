@@ -185,6 +185,7 @@ type ChatCLI struct {
 	pluginManager        *plugins.Manager
 	contextHandler       *ContextHandler
 	personaHandler       *PersonaHandler
+	skillHandler         *SkillHandler
 	executionProfile     ExecutionProfile
 	pendingAction        string // stores intended action before panic (for Windows go-prompt tearDown workaround)
 
@@ -251,6 +252,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 		"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_MAX_TOKENS", "ANTHROPIC_API_VERSION",
 		"GOOGLEAI_API_KEY", "GOOGLEAI_MODEL", "GOOGLEAI_MAX_TOKENS",
 		"CLIENT_ID", "CLIENT_KEY", "STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
+		"COPILOT_MODEL", "COPILOT_MAX_TOKENS", "GITHUB_COPILOT_TOKEN",
 	}
 
 	for _, variable := range variablesToUnset {
@@ -336,6 +338,12 @@ func (cli *ChatCLI) configureProviderAndModel() {
 			cli.Model = config.DefaultOllamaModel
 		}
 	}
+	if cli.Provider == "COPILOT" {
+		cli.Model = os.Getenv("COPILOT_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultCopilotModel
+		}
+	}
 }
 
 func (cli *ChatCLI) setExecutionProfile(p ExecutionProfile) {
@@ -409,6 +417,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		cli.personaHandler.GetManager().SetProjectDir(projectDir)
 		logger.Debug("Project directory set for persona", zap.String("dir", projectDir))
 	}
+
+	// Initialize skill registry handler
+	cli.skillHandler = NewSkillHandler(logger, cli.personaHandler.GetManager())
 
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)
@@ -501,7 +512,7 @@ func (cli *ChatCLI) executor(in string) {
 	}
 
 	if cli.Client == nil {
-		fmt.Println("No LLM provider configured. Use /auth login anthropic | openai-codex to authenticate, then /switch to select a provider.")
+		fmt.Println("No LLM provider configured. Use /auth login anthropic | openai-codex | github-copilot to authenticate, then /switch to select a provider.")
 		return
 	}
 
@@ -791,6 +802,9 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	}
 	if newProvider == "OLLAMA" {
 		newModel = utils.GetEnvOrDefault("OLLAMA_MODEL", config.DefaultOllamaModel)
+	}
+	if newProvider == "COPILOT" {
+		newModel = utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel)
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
@@ -2818,6 +2832,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getPluginSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/skill") {
+		return cli.getSkillSuggestions(d)
+	}
+
 	if strings.HasPrefix(lineBeforeCursor, "/agent") {
 		return cli.getAgentSuggestions(d)
 	}
@@ -2949,6 +2967,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/session", Description: "Gerencia as sessões, new, save, list, load, delete"},
 		{Text: "/context", Description: "Gerencia contextos persistentes (create, attach, detach, list, show, etc)"},
 		{Text: "/plugin", Description: "Gerencia plugins (install, list, show, etc.)"},
+		{Text: "/skill", Description: "Gerencia skills de registries (search, install, uninstall, list)"},
 		{Text: "/clear", Description: "Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais."},
 		{Text: "/auth", Description: "Gerencia credenciais OAuth (status, login, logout)"},
 		{Text: "/connect", Description: "Conectar a um servidor ChatCLI remoto (gRPC)"},
@@ -2965,7 +2984,7 @@ func (cli *ChatCLI) getConnectSuggestions(d prompt.Document) []prompt.Suggest {
 	if strings.HasPrefix(wordBeforeCursor, "-") {
 		flags := []prompt.Suggest{
 			{Text: "--token", Description: "Token de autenticação do servidor"},
-			{Text: "--provider", Description: "Provedor LLM (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA)"},
+			{Text: "--provider", Description: "Provedor LLM (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT)"},
 			{Text: "--model", Description: "Modelo LLM (gpt-4, claude-3, etc.)"},
 			{Text: "--llm-key", Description: "API key/OAuth token para enviar ao servidor"},
 			{Text: "--use-local-auth", Description: "Usar credenciais OAuth locais (de /auth login)"},
@@ -4212,6 +4231,53 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 	return []prompt.Suggest{}
 }
 
+func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+
+	// Just typed "/skill" without space
+	if len(args) <= 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{}
+	}
+
+	// Suggest subcommands
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		suggestions := []prompt.Suggest{
+			{Text: "search", Description: "Search for skills across registries"},
+			{Text: "install", Description: "Install a skill from a registry"},
+			{Text: "uninstall", Description: "Remove an installed skill"},
+			{Text: "list", Description: "List installed skills"},
+			{Text: "info", Description: "Show skill metadata from registry"},
+			{Text: "registries", Description: "Show configured registries"},
+			{Text: "help", Description: "Show skill command help"},
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	// For "uninstall", suggest installed skill names
+	if len(args) >= 2 && (args[1] == "uninstall" || args[1] == "remove") {
+		if cli.skillHandler != nil && cli.skillHandler.registryMgr != nil {
+			installed, err := cli.skillHandler.registryMgr.ListInstalled()
+			if err == nil {
+				suggestions := make([]prompt.Suggest, 0, len(installed))
+				for _, s := range installed {
+					desc := s.Description
+					if desc == "" {
+						desc = s.Source
+					}
+					suggestions = append(suggestions, prompt.Suggest{
+						Text:        s.Name,
+						Description: desc,
+					})
+				}
+				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+			}
+		}
+	}
+
+	return []prompt.Suggest{}
+}
+
 func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
 	line := d.TextBeforeCursor()
 	args := strings.Fields(line)
@@ -4227,8 +4293,8 @@ func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		suggestions := []prompt.Suggest{
 			{Text: "status", Description: "Exibir status de autenticação de todos os provedores"},
-			{Text: "login", Description: "Autenticar com um provedor (anthropic ou openai-codex)"},
-			{Text: "logout", Description: "Remover credenciais de um provedor (anthropic ou openai-codex)"},
+			{Text: "login", Description: "Autenticar com um provedor (anthropic, openai-codex ou github-copilot)"},
+			{Text: "logout", Description: "Remover credenciais de um provedor (anthropic, openai-codex ou github-copilot)"},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -4241,6 +4307,7 @@ func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
 				suggestions := []prompt.Suggest{
 					{Text: "anthropic", Description: "Anthropic (Claude)"},
 					{Text: "openai-codex", Description: "OpenAI (GPT Plus / Codex)"},
+					{Text: "github-copilot", Description: "GitHub Copilot"},
 				}
 				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 			}

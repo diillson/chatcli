@@ -26,8 +26,12 @@ RUN apk add --no-cache ca-certificates tzdata
 # Create non-root user
 RUN addgroup -S chatcli && adduser -S chatcli -G chatcli
 
-# Create directories for sessions and plugins
-RUN mkdir -p /home/chatcli/.chatcli/sessions /home/chatcli/.chatcli/plugins && \
+# Create directories for sessions, plugins, memory, skills, and bootstrap
+RUN mkdir -p /home/chatcli/.chatcli/sessions \
+             /home/chatcli/.chatcli/plugins \
+             /home/chatcli/.chatcli/memory \
+             /home/chatcli/.chatcli/skills \
+             /home/chatcli/.chatcli/bootstrap && \
     chown -R chatcli:chatcli /home/chatcli/.chatcli
 
 COPY --from=builder /app/chatcli /usr/local/bin/chatcli

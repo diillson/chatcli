@@ -20,6 +20,7 @@ import (
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/copilot"
 	"github.com/diillson/chatcli/llm/googleai"
 	"github.com/diillson/chatcli/llm/ollama"
 	"github.com/diillson/chatcli/llm/openai"
@@ -92,6 +93,7 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarGoogleAIClient(maxRetries, initialBackoff)
 	manager.configurarXAIClient(maxRetries, initialBackoff)
 	manager.configurarOllamaClient(maxRetries, initialBackoff)
+	manager.configurarCopilotClient(maxRetries, initialBackoff)
 
 	return manager, nil
 }
@@ -327,6 +329,25 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 	}
 }
 
+// configurarCopilotClient configura o cliente GitHub Copilot
+func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff time.Duration) {
+	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubCopilot, m.logger)
+	if err != nil {
+		m.logger.Info("GitHub Copilot not configured, provider COPILOT will not be available", zap.Error(err))
+		return
+	}
+	apiKey := resolved.APIKey
+	if apiKey != "" {
+		m.logger.Info("Configurando provedor GitHub Copilot")
+		m.clients["COPILOT"] = func(model string) (client.LLMClient, error) {
+			if model == "" {
+				model = config.DefaultCopilotModel
+			}
+			return copilot.NewClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		}
+	}
+}
+
 // GetAvailableProviders retorna uma lista de provedores disponíveis configurados
 func (m *LLMManagerImpl) GetAvailableProviders() []string {
 	var providers []string
@@ -408,6 +429,9 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	if _, ok := m.clients["CLAUDEAI"]; !ok {
 		m.configurarClaudeAIClient(maxRetries, initialBackoff)
 	}
+	if _, ok := m.clients["COPILOT"]; !ok {
+		m.configurarCopilotClient(maxRetries, initialBackoff)
+	}
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key
@@ -451,6 +475,12 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 			model = config.DefaultXAIModel
 		}
 		return xai.NewXAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "COPILOT":
+		if model == "" {
+			model = config.DefaultCopilotModel
+		}
+		return copilot.NewClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
 
 	default:
 		return nil, fmt.Errorf("CreateClientWithKey: provider '%s' does not support client-provided API keys", provider)

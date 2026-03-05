@@ -39,6 +39,12 @@ chatcli server --watch-deployment myapp --watch-namespace production
 
 # Com K8s Watcher multi-target + Prometheus metrics
 chatcli server --watch-config targets.yaml
+
+# Com fallback de provedores (failover automatico)
+chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI,COPILOT
+
+# Com MCP (ferramentas externas)
+chatcli server --mcp-config ~/.chatcli/mcp_servers.json
 ```
 
 ---
@@ -54,6 +60,21 @@ chatcli server --watch-config targets.yaml
 | `--provider` | Provedor de LLM padrão | Auto-detectado | `LLM_PROVIDER` |
 | `--model` | Modelo de LLM padrão | Auto-detectado | |
 | `--metrics-port` | Porta HTTP para métricas Prometheus (0 = desabilita) | `9090` | `CHATCLI_METRICS_PORT` |
+
+### Flags de Fallback (opcionais)
+
+| Flag | Descrição | Padrão | Env Var |
+|------|-----------|--------|---------|
+| `--fallback-providers` | Lista de provedores separados por vírgula para failover | `""` | `CHATCLI_FALLBACK_PROVIDERS` |
+| `--fallback-max-retries` | Tentativas por provedor antes de avançar | `2` | `CHATCLI_FALLBACK_MAX_RETRIES` |
+| `--fallback-cooldown-base` | Cooldown base após falha | `30s` | `CHATCLI_FALLBACK_COOLDOWN_BASE` |
+| `--fallback-cooldown-max` | Cooldown máximo (backoff exponencial) | `5m` | `CHATCLI_FALLBACK_COOLDOWN_MAX` |
+
+### Flag MCP (opcional)
+
+| Flag | Descrição | Padrão | Env Var |
+|------|-----------|--------|---------|
+| `--mcp-config` | Arquivo JSON de configuração MCP | `""` | `CHATCLI_MCP_CONFIG` |
 
 ### Prometheus Metrics
 
@@ -184,7 +205,19 @@ chatcli connect servidor:50051 --provider STACKSPOT \
   --client-id <id> --client-key <key> --realm <realm> --agent-id <agent>
 ```
 
-### 5. Ollama (Sem Credenciais)
+### 5. GitHub Copilot (OAuth Local)
+
+Para usar GitHub Copilot, faça login via Device Flow e conecte com `--use-local-auth`:
+
+```bash
+# Primeiro, faça login no GitHub Copilot
+/auth login github-copilot
+
+# Conecte usando as credenciais locais
+chatcli connect servidor:50051 --use-local-auth --provider COPILOT
+```
+
+### 6. Ollama (Sem Credenciais)
 
 Para modelos locais via Ollama, basta informar a URL:
 
@@ -364,6 +397,11 @@ CHATCLI_DISABLE_VERSION_CHECK=false    # true para ambientes air-gapped
 LLM_PROVIDER=CLAUDEAI
 ANTHROPIC_API_KEY=sk-ant-xxx
 ANTHROPIC_MODEL=claude-sonnet-4-5
+
+# GitHub Copilot (alternativa — ou use /auth login github-copilot)
+# GITHUB_COPILOT_TOKEN=ghu_xxx
+# COPILOT_MODEL=gpt-4o
+# COPILOT_MAX_TOKENS=16384
 
 # K8s Watcher (opcional)
 CHATCLI_WATCH_DEPLOYMENT=myapp

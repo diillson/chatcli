@@ -20,7 +20,7 @@ A ordem de prioridade para as configurações é:
 | Variável | Descrição                                                                                                                                         | Padrão                     |
 | :--- |:--------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------|
 | `ENV` | Define o ambiente, caso `dev` os logs são mostrados no terminal e salvo no log da app, caso `prod` somente no log. Valores válidos: `dev`, `prod` | `dev`                      
-| `LLM_PROVIDER` | Define o provedor de IA padrão a ser usado. Valores válidos: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `OLLAMA`, `STACKSPOT`.                      | `"OPENAI"`                 |
+| `LLM_PROVIDER` | Define o provedor de IA padrão a ser usado. Valores válidos: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `OLLAMA`, `STACKSPOT`, `COPILOT`.             | `"OPENAI"`                 |
 | `CHATCLI_LANG` | Define o idioma da interface. Valores: `pt-BR`, `en-US`. Se não definida, tentará detectar o idioma do sistema.                                   | `en-US`                    |
 | `LOG_LEVEL` | Nível dos logs. Opções: `debug`, `info`, `warn`, `error`.                                                                                         | `"info"`                   |
 | `LOG_FILE` | Caminho para o arquivo de log. Padrão: `$HOME/.chatcli/app.log`                                                                                   | `"$HOME/.chatcli/app.log"` |
@@ -34,16 +34,17 @@ A ordem de prioridade para as configurações é:
 
 ## Autenticação OAuth
 
-Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAuth** para OpenAI e Anthropic. Com o OAuth, você pode usar seu plano existente (ChatGPT Plus, Codex, Claude Pro) sem gerar API keys.
+Além das chaves de API tradicionais, o ChatCLI suporta **autenticação via OAuth** para OpenAI, Anthropic e GitHub Copilot. Com o OAuth, você pode usar seu plano existente (ChatGPT Plus, Codex, Claude Pro, GitHub Copilot) sem gerar API keys.
 
 | Variável | Descrição | Padrão |
 | :--- | :--- | :--- |
 | `CHATCLI_AUTH_DIR` | Diretório onde as credenciais OAuth são armazenadas. | `~/.chatcli/` |
 | `CHATCLI_OPENAI_CLIENT_ID` | Permite sobrescrever o client ID do OAuth da OpenAI. | (interno) |
+| `CHATCLI_COPILOT_CLIENT_ID` | Permite sobrescrever o client ID do OAuth do GitHub Copilot. | (interno) |
 
 As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/auth-profiles.json`. A chave de criptografia é gerada automaticamente e salva em `~/.chatcli/.auth-key` (permissão 0600).
 
-> Use `/auth login openai-codex` ou `/auth login anthropic` no modo interativo para iniciar o fluxo OAuth. Consulte a [documentação completa de OAuth](/docs/features/oauth-authentication/) para mais detalhes.
+> Use `/auth login openai-codex`, `/auth login anthropic` ou `/auth login github-copilot` no modo interativo para iniciar o fluxo OAuth. Consulte a [documentação completa de OAuth](/docs/features/oauth-authentication/) para mais detalhes.
 
 ---
 
@@ -107,7 +108,16 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 | `STACKSPOT_REALM` | O `realm` (tenant) da sua organização na StackSpot. | **Sim** |
 | `STACKSPOT_AGENT_ID` | O ID do agente específico a ser utilizado. | **Sim** |
 
-> **\*** Para OpenAI e Anthropic, a chave de API é obrigatória apenas se você **não** utilizar autenticação OAuth (`/auth login`). Ambos os métodos podem coexistir.
+### GitHub Copilot
+
+| Variável | Descrição | Obrigatório? |
+| :--- | :--- | :--- |
+| `GITHUB_COPILOT_TOKEN` | Token OAuth do GitHub Copilot. Alternativa: use `/auth login github-copilot` para Device Flow. | **Sim*** |
+| `COPILOT_MODEL` | O modelo a ser usado. Ex: `gpt-4o`, `claude-sonnet-4`, `gemini-2.0-flash`. | Não |
+| `COPILOT_MAX_TOKENS` | Define o máximo de tokens para a resposta. | Não |
+| `COPILOT_API_BASE_URL` | URL base da API do Copilot (para ambientes enterprise). | Não |
+
+> **\*** Para OpenAI, Anthropic e GitHub Copilot, a chave de API é obrigatória apenas se você **não** utilizar autenticação OAuth (`/auth login`). Ambos os métodos podem coexistir.
 
 ---
 
@@ -143,6 +153,58 @@ As credenciais são armazenadas com **criptografia AES-256-GCM** em `~/.chatcli/
 | `CHATCLI_SERVER_TLS_CERT` | Caminho para o certificado TLS do servidor. | `""` |
 | `CHATCLI_SERVER_TLS_KEY` | Caminho para a chave TLS do servidor. | `""` |
 | `CHATCLI_GRPC_REFLECTION` | Habilita gRPC reflection para debugging. **Mantenha desabilitado em produção.** | `false` |
+
+---
+
+## Fallback de Provedores
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_FALLBACK_PROVIDERS` | Lista de provedores separados por vírgula para failover automático. Ex.: `OPENAI,CLAUDEAI,GOOGLEAI`. | `""` |
+| `CHATCLI_FALLBACK_MODEL_<PROVIDER>` | Modelo específico por provedor na cadeia. Ex.: `CHATCLI_FALLBACK_MODEL_CLAUDEAI=claude-sonnet-4-20250514`. | (modelo padrão) |
+| `CHATCLI_FALLBACK_MAX_RETRIES` | Tentativas por provedor antes de avançar para o próximo na cadeia. | `2` |
+| `CHATCLI_FALLBACK_COOLDOWN_BASE` | Duração base do cooldown após falha de um provedor. | `30s` |
+| `CHATCLI_FALLBACK_COOLDOWN_MAX` | Duração máxima do cooldown (backoff exponencial). | `5m` |
+
+> Para detalhes completos, consulte a [documentação de Fallback de Provedores](/docs/features/provider-fallback/).
+
+---
+
+## MCP (Model Context Protocol)
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_MCP_ENABLED` | Ativa o gerenciador de servidores MCP. | `false` |
+| `CHATCLI_MCP_CONFIG` | Caminho para o arquivo JSON de configuração dos servidores MCP. | `~/.chatcli/mcp_servers.json` |
+
+> Para detalhes completos, consulte a [documentação de MCP](/docs/features/mcp-integration/).
+
+---
+
+## Bootstrap e Memória
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_BOOTSTRAP_ENABLED` | Ativa o carregamento de arquivos bootstrap (SOUL.md, USER.md, etc.) no system prompt. | `false` |
+| `CHATCLI_BOOTSTRAP_DIR` | Diretório contendo os arquivos bootstrap. | `~/.chatcli/bootstrap/` |
+| `CHATCLI_MEMORY_ENABLED` | Ativa o sistema de memória persistente (MEMORY.md + notas diárias). | `false` |
+| `CHATCLI_SAFETY_ENABLED` | Ativa regras de segurança configuráveis no shell do agente. | `false` |
+
+> Para detalhes completos, consulte a [documentação de Bootstrap e Memória](/docs/features/bootstrap-memory/).
+
+---
+
+## Skill Registry (Multi-Registry)
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `CHATCLI_REGISTRY_URLS` | URLs adicionais de registries separadas por vírgula. Cada URL é adicionada como registry customizado habilitado. | `""` |
+| `CHATCLI_REGISTRY_DISABLE` | Nomes de registries a desabilitar, separados por vírgula. Ex.: `clawhub,chatcli`. | `""` |
+| `CHATCLI_SKILL_INSTALL_DIR` | Diretório onde skills instaladas via registry são salvas. | `~/.chatcli/skills` |
+
+O sistema de registries é configurado via arquivo `~/.chatcli/registries.yaml` (criado automaticamente com registries padrão: `chatcli` e `clawhub`). As variáveis acima servem como overrides.
+
+> Para detalhes completos, consulte a [documentação do Skill Registry](/docs/features/skill-registry/).
 
 ---
 

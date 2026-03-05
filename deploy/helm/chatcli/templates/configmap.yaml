@@ -19,6 +19,49 @@ data:
   OLLAMA_MODEL: {{ .Values.ollama.model | quote }}
   {{- end }}
   {{- end }}
+  {{- if .Values.fallback.enabled }}
+  CHATCLI_FALLBACK_ENABLED: "true"
+  {{- $providers := list }}
+  {{- range .Values.fallback.providers }}
+  {{- $providers = append $providers .name }}
+  {{- end }}
+  CHATCLI_FALLBACK_PROVIDERS: {{ join "," $providers | quote }}
+  {{- range .Values.fallback.providers }}
+  {{- if .model }}
+  CHATCLI_FALLBACK_MODEL_{{ .name }}: {{ .model | quote }}
+  {{- end }}
+  {{- end }}
+  CHATCLI_FALLBACK_MAX_RETRIES: {{ .Values.fallback.maxRetries | default 2 | quote }}
+  CHATCLI_FALLBACK_COOLDOWN_BASE: {{ .Values.fallback.cooldownBase | default "30s" | quote }}
+  CHATCLI_FALLBACK_COOLDOWN_MAX: {{ .Values.fallback.cooldownMax | default "5m" | quote }}
+  {{- end }}
+  {{- if .Values.mcp.enabled }}
+  CHATCLI_MCP_ENABLED: "true"
+  {{- if .Values.mcp.servers }}
+  CHATCLI_MCP_CONFIG: "/etc/chatcli/mcp/mcp_servers.json"
+  {{- end }}
+  {{- end }}
+  {{- if .Values.memory.enabled }}
+  CHATCLI_MEMORY_ENABLED: "true"
+  {{- end }}
+  {{- if .Values.bootstrap.enabled }}
+  CHATCLI_BOOTSTRAP_ENABLED: "true"
+  CHATCLI_BOOTSTRAP_DIR: "/home/chatcli/.chatcli/bootstrap"
+  {{- end }}
+  {{- if .Values.safety.enabled }}
+  CHATCLI_SAFETY_ENABLED: "true"
+  {{- end }}
+  {{- if .Values.skillRegistry.enabled }}
+  {{- if .Values.skillRegistry.registryUrls }}
+  CHATCLI_REGISTRY_URLS: {{ .Values.skillRegistry.registryUrls | quote }}
+  {{- end }}
+  {{- if .Values.skillRegistry.registryDisable }}
+  CHATCLI_REGISTRY_DISABLE: {{ .Values.skillRegistry.registryDisable | quote }}
+  {{- end }}
+  {{- if .Values.skillRegistry.installDir }}
+  CHATCLI_SKILL_INSTALL_DIR: {{ .Values.skillRegistry.installDir | quote }}
+  {{- end }}
+  {{- end }}
   {{- if and .Values.watcher.enabled (not .Values.watcher.targets) .Values.watcher.deployment }}
   CHATCLI_WATCH_DEPLOYMENT: {{ .Values.watcher.deployment | quote }}
   {{- if .Values.watcher.namespace }}

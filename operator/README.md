@@ -183,6 +183,39 @@ spec:
 
 > **Remote Resource Discovery**: When `agents` or `plugins` are configured, connected clients automatically discover and use these resources via gRPC. Agents/skills are transferred to the client for local prompt composition; plugins can be executed remotely or downloaded.
 
+#### Instance with GitHub Copilot
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Instance
+metadata:
+  name: chatcli-copilot
+spec:
+  provider: COPILOT
+  model: gpt-4o          # or gpt-4o-mini, claude-sonnet-4, gemini-2.0-flash
+  replicas: 1
+  apiKeys:
+    name: chatcli-copilot-keys   # Secret with GITHUB_COPILOT_TOKEN
+  server:
+    port: 50051
+```
+
+The referenced Secret should contain:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: chatcli-copilot-keys
+type: Opaque
+stringData:
+  GITHUB_COPILOT_TOKEN: "ghu_xxxxxxxxxxxx"   # From /auth login github-copilot
+  # COPILOT_MODEL: "gpt-4o"                   # Optional model override
+  # COPILOT_API_BASE_URL: "https://..."        # Optional enterprise URL
+```
+
+> **Note:** GitHub Copilot tokens obtained via Device Flow (`/auth login github-copilot`) are persistent and do not expire. For server/operator usage, extract the token from `~/.chatcli/auth-profiles.json` after local authentication.
+
 ### Anomaly (Auto-created by WatcherBridge)
 
 ```yaml

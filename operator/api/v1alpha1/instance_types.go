@@ -13,7 +13,7 @@ type InstanceSpec struct {
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Provider is the LLM provider (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA).
+	// Provider is the LLM provider (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT).
 	Provider string `json:"provider"`
 
 	// Model is the LLM model name.
@@ -45,7 +45,7 @@ type InstanceSpec struct {
 	SecurityContext *corev1.PodSecurityContext `json:"securityContext,omitempty"`
 
 	// APIKeys references a Secret containing provider API keys.
-	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, etc.
+	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, GITHUB_COPILOT_TOKEN, etc.
 	// +optional
 	APIKeys *SecretRefSpec `json:"apiKeys,omitempty"`
 

@@ -16,8 +16,10 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/k8s"
+	"github.com/diillson/chatcli/llm/fallback"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/metrics"
 	"github.com/diillson/chatcli/pkg/persona"
@@ -34,6 +36,15 @@ type ServerOptions struct {
 	Provider    string
 	Model       string
 	MetricsPort int
+
+	// Fallback chain (optional)
+	FallbackProviders    string
+	FallbackMaxRetries   int
+	FallbackCooldownBase time.Duration
+	FallbackCooldownMax  time.Duration
+
+	// MCP (optional)
+	MCPConfigPath string
 
 	// K8s watcher integration (optional)
 	WatchDeployment string
@@ -57,6 +68,15 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	fs.StringVar(&opts.Provider, "provider", os.Getenv("LLM_PROVIDER"), "Default LLM provider")
 	fs.StringVar(&opts.Model, "model", "", "Default LLM model")
 	fs.IntVar(&opts.MetricsPort, "metrics-port", getEnvInt("CHATCLI_METRICS_PORT", 9090), "Prometheus metrics HTTP port (0 = disabled)")
+
+	// Fallback chain flags
+	fs.StringVar(&opts.FallbackProviders, "fallback-providers", os.Getenv("CHATCLI_FALLBACK_PROVIDERS"), "Comma-separated fallback providers (e.g. OPENAI,CLAUDEAI,GOOGLEAI)")
+	fs.IntVar(&opts.FallbackMaxRetries, "fallback-max-retries", getEnvInt("CHATCLI_FALLBACK_MAX_RETRIES", 2), "Max retries per provider before fallback")
+	fs.DurationVar(&opts.FallbackCooldownBase, "fallback-cooldown-base", getEnvDuration("CHATCLI_FALLBACK_COOLDOWN_BASE", 30*time.Second), "Base cooldown duration after provider failure")
+	fs.DurationVar(&opts.FallbackCooldownMax, "fallback-cooldown-max", getEnvDuration("CHATCLI_FALLBACK_COOLDOWN_MAX", 5*time.Minute), "Maximum cooldown duration")
+
+	// MCP flags
+	fs.StringVar(&opts.MCPConfigPath, "mcp-config", os.Getenv("CHATCLI_MCP_CONFIG"), "Path to MCP servers config JSON")
 
 	// K8s watcher flags
 	fs.StringVar(&opts.WatchDeployment, "watch-deployment", os.Getenv("CHATCLI_WATCH_DEPLOYMENT"), "K8s deployment to monitor (enables watcher)")
@@ -125,6 +145,78 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		logger.Info("Persona loader initialized for remote discovery",
 			zap.Int("agents", len(agents)),
 		)
+	}
+
+	// Initialize fallback chain if configured
+	if opts.FallbackProviders != "" {
+		providers := strings.Split(opts.FallbackProviders, ",")
+		var entries []fallback.FallbackEntry
+		for i, p := range providers {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			// Resolve model from env (CHATCLI_FALLBACK_MODEL_<PROVIDER>) or use default
+			model := os.Getenv("CHATCLI_FALLBACK_MODEL_" + strings.ToUpper(p))
+			if model == "" {
+				model = opts.Model
+			}
+			c, err := llmMgr.GetClient(p, model)
+			if err != nil {
+				logger.Warn("fallback provider unavailable, skipping",
+					zap.String("provider", p), zap.Error(err))
+				continue
+			}
+			entries = append(entries, fallback.FallbackEntry{
+				Provider: p,
+				Model:    model,
+				Client:   c,
+				Priority: i,
+			})
+		}
+		if len(entries) > 1 {
+			chain := fallback.NewChain(logger, entries,
+				fallback.WithMaxRetries(opts.FallbackMaxRetries),
+				fallback.WithCooldown(opts.FallbackCooldownBase, opts.FallbackCooldownMax, 2.0),
+			)
+			srv.SetFallbackChain(chain)
+			logger.Info("Fallback chain initialized",
+				zap.Int("providers", len(entries)),
+				zap.Strings("chain", func() []string {
+					names := make([]string, len(entries))
+					for i, e := range entries {
+						names[i] = e.Provider
+					}
+					return names
+				}()),
+			)
+		}
+	}
+
+	// Initialize MCP manager if configured
+	if opts.MCPConfigPath != "" || os.Getenv("CHATCLI_MCP_ENABLED") == "true" {
+		mcpMgr := mcp.NewManager(logger)
+		configPath := opts.MCPConfigPath
+		if configPath == "" {
+			configPath = mcp.DefaultConfigPath()
+		}
+		if err := mcpMgr.LoadConfig(configPath); err != nil {
+			logger.Warn("Failed to load MCP config, MCP tools will be unavailable",
+				zap.String("config", configPath), zap.Error(err))
+		} else {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if err := mcpMgr.StartAll(ctx); err != nil {
+				logger.Warn("Failed to start MCP servers", zap.Error(err))
+			} else {
+				srv.SetMCPManager(mcpMgr)
+				defer mcpMgr.StopAll()
+				logger.Info("MCP manager initialized",
+					zap.Int("servers", len(mcpMgr.GetServerStatus())),
+					zap.Int("tools", len(mcpMgr.GetTools())),
+				)
+			}
+		}
 	}
 
 	// Start K8s watcher(s) if configured
@@ -263,10 +355,25 @@ Flags:
   --watch-max-log-lines <n>   Max log lines per pod (default: 100, env: CHATCLI_WATCH_MAX_LOG_LINES)
   --watch-kubeconfig <path>   Path to kubeconfig (env: CHATCLI_KUBECONFIG)
 
+  Provider Fallback Chain (optional, automatic failover between providers):
+  --fallback-providers <list>   Comma-separated providers (env: CHATCLI_FALLBACK_PROVIDERS)
+  --fallback-max-retries <n>    Max retries per provider (default: 2, env: CHATCLI_FALLBACK_MAX_RETRIES)
+  --fallback-cooldown-base <d>  Base cooldown after failure (default: 30s, env: CHATCLI_FALLBACK_COOLDOWN_BASE)
+  --fallback-cooldown-max <d>   Max cooldown duration (default: 5m, env: CHATCLI_FALLBACK_COOLDOWN_MAX)
+
+  MCP (Model Context Protocol, optional):
+  --mcp-config <path>           MCP servers config JSON (env: CHATCLI_MCP_CONFIG)
+
 Examples:
   chatcli server
   chatcli server --port 8080 --token mysecret
   chatcli server --tls-cert cert.pem --tls-key key.pem
+
+  # Server with provider fallback chain
+  chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI,COPILOT
+
+  # Server with MCP tools
+  chatcli server --mcp-config ~/.chatcli/mcp_servers.json
 
   # Server with single-target K8s watcher
   chatcli server --watch-deployment myapp --watch-namespace production

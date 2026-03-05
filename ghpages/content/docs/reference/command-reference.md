@@ -31,6 +31,14 @@ Estes comandos controlam a aplicação e o fluxo da conversa.
 | **/retryall** | Tentar novamente todos os chunks que falharam |
 | **/run** | Alias para /agent - Iniciar modo agente para executar tarefas |
 | **/session** | Gerencia as sessões, new, save, list, load, delete |
+| **/skill** | Gerencia skills de registries (search, install, uninstall, list) |
+| &nbsp; `search <query>` | Busca skills em todos os registries habilitados (fan-out paralelo). |
+| &nbsp; `install <name>` | Instala uma skill de um registry em `~/.chatcli/skills/`. |
+| &nbsp; `uninstall <name>` | Remove uma skill instalada. |
+| &nbsp; `list` | Lista todas as skills instaladas com versão e origem. |
+| &nbsp; `info <name>` | Exibe metadados de uma skill do registry. |
+| &nbsp; `registries` | Mostra os registries configurados e seus status. |
+| &nbsp; `help` | Exibe ajuda do comando /skill. |
 | **/skipchunk** | Pular um chunk de arquivo |
 | **/status** | Alias de /config - Mostrar configuração atual |
 | **/switch** | Trocar o provedor de LLM, seguido por --model troca o modelo |
@@ -126,7 +134,7 @@ Use estas flags ao executar `chatcli` diretamente do seu terminal para automaç�
 | Flag | Descrição |
 | --- | --- |
 | `-p`, `--prompt "<texto>` | Executa um único prompt e sai. |
-| `--provider <nome>` | Sobrescreve o provedor de IA (ex: `GOOGLEAI`). |
+| `--provider <nome>` | Sobrescreve o provedor de IA (ex: `GOOGLEAI`, `COPILOT`, `CLAUDEAI`). |
 | `--model <nome>` | Sobrescreve o modelo de IA (ex: `gemini-1.5-pro-latest`). |
 | `--timeout <duração>` | Define o tempo limite para a requisição (ex: `10s`, `1m`). |
 | `--max-tokens <num>` | Limita o número de tokens na resposta. |

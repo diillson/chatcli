@@ -6,7 +6,7 @@
 
 # Bringing Your Terminal Closer to Artificial Intelligence 🕵️‍♂️✨
 
-**ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) (such as OpenAI, StackSpot, GoogleAI, ClaudeAI, xAI and Ollama -> `Local models`) to facilitate interactive and contextual conversations directly in your terminal. Designed for developers, data scientists, and tech enthusiasts, it enhances productivity by aggregating various contextual data sources and offering a rich, user-friendly experience.
+**ChatCLI** is an advanced command-line application (CLI) that integrates powerful Large Language Models (LLMs) (such as OpenAI, StackSpot, GoogleAI, ClaudeAI, xAI, GitHub Copilot and Ollama -> `Local models`) to facilitate interactive and contextual conversations directly in your terminal. Designed for developers, data scientists, and tech enthusiasts, it enhances productivity by aggregating various contextual data sources and offering a rich, user-friendly experience.
 
 <p align="center">
   <em>See ChatCLI in action, including Agent Mode and provider switching.</em><br>
@@ -57,6 +57,11 @@
     - [Management Commands](#management-commands)
     - [Practical Example](#practical-example)
 - [Remote Server Mode (gRPC)](#remote-server-mode-grpc)
+- [Provider Fallback Chain](#provider-fallback-chain)
+- [Native Tool Use (Structured API)](#native-tool-use-structured-api)
+- [MCP (Model Context Protocol)](#mcp-model-context-protocol)
+- [Bootstrap and Memory](#bootstrap-and-memory)
+- [Configuration Migration](#configuration-migration)
 - [Kubernetes Monitoring (K8s Watcher)](#kubernetes-monitoring-k8s-watcher)
 - [Code Structure and Technologies](#code-structure-and-technologies)
 - [Contributing](#contributing)
@@ -76,7 +81,7 @@
 
 ## Key Features
 
-- **Support for Multiple Providers**: Switch between OpenAI, StackSpot, ClaudeAI, GoogleAI, xAI and Ollama -> `Local models`.
+- **Support for Multiple Providers**: Switch between OpenAI, StackSpot, ClaudeAI, GoogleAI, xAI, GitHub Copilot and Ollama -> `Local models`.
 - **Interactive CLI Experience**: Command history navigation, auto-completion, and visual feedback (`"Thinking..."`).
 - **Powerful Contextual Commands**:
     - `@history` – Inserts the last 10 shell commands (supports bash, zsh, and fish).
@@ -92,8 +97,17 @@
 - **Smart Paste Detection**: Automatically detects pasted text in the terminal via *Bracketed Paste Mode*. Large pastes (> 150 chars) are replaced by a compact placeholder (`«N chars | M lines»`) to prevent terminal corruption, with the real content preserved and sent on Enter.
 - **Advanced Prompt Navigation**: Keyboard shortcuts with Alt/Ctrl/Cmd + arrow keys for word and line navigation, compatible with major macOS terminals (Terminal.app, iTerm2, Alacritty, Kitty, WezTerm).
 - **Parallel Mode Security**: Multi-agent workers fully respect `coder_policy.json`, with serialized, contextual security prompts showing which agent is requesting each action.
+- **Skill Registry (Multi-Registry)**: Search, install, and manage skills from multiple remote registries (ChatCLI.dev, ClawHub, custom registries) with parallel fan-out search, trigram fuzzy cache, moderation flags (malware/suspicious), and atomic installation. Commands: `/skill search`, `/skill install`, `/skill uninstall`.
 - **Remote Resource Discovery**: When connecting to a server, the client automatically discovers available plugins, agents, and skills on the server. Remote plugins can be executed on the server or downloaded locally; remote agents and skills are transferred and composed locally, merging with local resources.
 - **Hardened Security**: Constant-time token comparison, shell injection prevention, editor validation, gRPC reflection disabled by default, and hardened containers (read-only, no-new-privileges, drop ALL capabilities). See the [security documentation](https://diillson.github.io/chatcli/docs/features/security/).
+- **Provider Fallback Chain**: Automatic failover between LLM providers. When the primary provider fails (rate limit, timeout, server error), the system automatically tries the next one, with error classification, exponential backoff, and per-provider cooldown.
+- **Native Tool Use (Structured API)**: Tool calls via OpenAI and Anthropic's structured `tool_use` API instead of XML in the prompt. Supports `cache_control:ephemeral` for Anthropic KV cache optimization.
+- **MCP (Model Context Protocol)**: Integration with MCP servers via stdio and SSE transport for external tool interoperability. Configurable via `~/.chatcli/mcp_servers.json`.
+- **Internal Message Bus**: Typed message bus with pub/sub, channel and type filters, request-reply with correlation IDs, and atomic metrics.
+- **Bootstrap and Persistent Memory**: Bootstrap files (`SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md`) for agent personality + long-term memory (`MEMORY.md`) and daily notes (`YYYYMM/YYYYMMDD.md`).
+- **Configuration Migration**: Versioned config schema migration system with automatic backup and rollback, ensuring safe upgrades between versions.
+- **Provider Registry with Auto-registration**: Each LLM provider self-registers via Go's `init()`, eliminating `switch/case` blocks and making it easy to add new providers.
+- **Configurable Shell Safety**: Configurable deny/allow patterns with severity levels, path traversal detection, workspace boundaries, and graceful process termination (SIGTERM/SIGKILL).
 
 -----
 
@@ -164,7 +178,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  `CHATCLI_IGNORE` – **(Optional)** Defines a list of files or folders to be ignored by ChatCLI.
   -  `CHATCLI_LANG`  – **(Optional)** Sets the interface language ( e.g.,  en ,  `pt-BR` ). Default: detects from system.
   -  `LOG_LEVEL`  ( `debug` ,  `info` ,  `warn` ,  `error` )
-  -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` )
+  -  `LLM_PROVIDER`  ( `OPENAI` ,  `STACKSPOT` ,  `CLAUDEAI` ,  `GOOGLEAI` ,  `XAI` ,  `COPILOT` )
   -  `MAX_RETRIES`  - **(Optional)** Maximum number of attempts for API calls (default:  `5` ).
   -  `INITIAL_BACKOFF`  - **(Optional)** Initial wait time between attempts (default:  `3`  - seconds`).
   - `LOG_FILE` - **(Optional)** Path to the log file (default: `$HOME/.chatcli/app.log`).
@@ -182,6 +196,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  XAI_API_KEY ,  XAI_MODEL ,  XAI_MAX_TOKENS
   -  OLLAMA_ENABLED ,  OLLAMA_BASE_URL ,  OLLAMA_MODEL ,  OLLAMA_MAX_TOKENS ,  OLLAMA_FILTER_THINKING  – (Optional) Filters "thinking aloud" from models like Qwen3 (true/false, default: true)
   -  CLIENT_ID ,  CLIENT_KEY ,  STACKSPOT_REALM ,  STACKSPOT_AGENT_ID  (for StackSpot)
+  -  GITHUB_COPILOT_TOKEN ,  COPILOT_MODEL ,  COPILOT_MAX_TOKENS ,  COPILOT_API_BASE_URL ,  CHATCLI_COPILOT_CLIENT_ID  (for GitHub Copilot — or use `/auth login github-copilot`)
 - Agent:
   -  `CHATCLI_AGENT_CMD_TIMEOUT`  – **(Optional)** Default timeout for each command executed from the action list by Agent Mode. Accepts Go durations (e.g., 30s, 2m, 10m). Default:  10m . Maximum: 1h.
   -  `CHATCLI_AGENT_DENYLIST`  – **(Optional)** Semicolon-separated list of regular expressions to block extra dangerous commands. Example: rm\s+-rf\s+.;curl\s+[^|;]|\s*(sh|bash).
@@ -193,6 +208,21 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  `CHATCLI_AGENT_MAX_WORKERS`  – **(Optional)** Maximum number of workers (goroutines) running agents simultaneously. Default: `4`.
   -  `CHATCLI_AGENT_WORKER_MAX_TURNS`  – **(Optional)** Maximum turns for each worker agent's mini ReAct loop. Default: `10`.
   -  `CHATCLI_AGENT_WORKER_TIMEOUT`  – **(Optional)** Timeout per individual worker agent. Accepts Go durations (e.g., 30s, 2m, 10m). Default: `5m`.
+- Provider Fallback:
+  -  `CHATCLI_FALLBACK_PROVIDERS`  – **(Optional)** Comma-separated list of providers for automatic failover. E.g.: `OPENAI,CLAUDEAI,GOOGLEAI`.
+  -  `CHATCLI_FALLBACK_MODEL_<PROVIDER>`  – **(Optional)** Per-provider model in the chain. E.g.: `CHATCLI_FALLBACK_MODEL_CLAUDEAI=claude-sonnet-4-20250514`.
+  -  `CHATCLI_FALLBACK_MAX_RETRIES`  – **(Optional)** Retries per provider before moving to next. Default: `2`.
+  -  `CHATCLI_FALLBACK_COOLDOWN_BASE`  – **(Optional)** Base cooldown after failure. Default: `30s`.
+  -  `CHATCLI_FALLBACK_COOLDOWN_MAX`  – **(Optional)** Maximum cooldown (exponential backoff). Default: `5m`.
+- MCP (Model Context Protocol):
+  -  `CHATCLI_MCP_ENABLED`  – **(Optional)** Enable the MCP manager. Default: `false`.
+  -  `CHATCLI_MCP_CONFIG`  – **(Optional)** Path to MCP servers JSON config file. Default: `~/.chatcli/mcp_servers.json`.
+- Bootstrap and Memory:
+  -  `CHATCLI_BOOTSTRAP_ENABLED`  – **(Optional)** Enable bootstrap file loading (SOUL.md, USER.md, etc.). Default: `false`.
+  -  `CHATCLI_BOOTSTRAP_DIR`  – **(Optional)** Directory containing bootstrap files.
+  -  `CHATCLI_MEMORY_ENABLED`  – **(Optional)** Enable persistent memory system. Default: `false`.
+- Safety:
+  -  `CHATCLI_SAFETY_ENABLED`  – **(Optional)** Enable configurable shell safety rules. Default: `false`.
 - OAuth:
   -  `CHATCLI_OPENAI_CLIENT_ID`  – **(Optional)** Override the OpenAI OAuth client ID.
 
@@ -289,10 +319,10 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
 
 ChatCLI supports **two authentication methods** for providers that offer OAuth:
 
-1. **API Key (traditional)**: Set the environment variable (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) in your `.env` file.
+1. **API Key (traditional)**: Set the environment variable (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GITHUB_COPILOT_TOKEN`) in your `.env` file.
 2. **OAuth (interactive login)**: Authenticate directly from the terminal using `/auth login`, no need to manually generate or paste keys.
 
-> OAuth is ideal for users on **ChatGPT Plus / Codex** (OpenAI) or **Claude Pro** (Anthropic) plans who don't want to manage API keys.
+> OAuth is ideal for users on **ChatGPT Plus / Codex** (OpenAI), **Claude Pro** (Anthropic) or **GitHub Copilot** (Individual, Business, Enterprise) plans who don't want to manage API keys.
 
 ### `/auth` Commands
 
@@ -301,17 +331,22 @@ ChatCLI supports **two authentication methods** for providers that offer OAuth:
 | `/auth status` | Shows authentication status for all providers |
 | `/auth login openai-codex` | Starts the OAuth flow with OpenAI (opens browser automatically) |
 | `/auth login anthropic` | Starts the OAuth flow with Anthropic |
+| `/auth login github-copilot` | Starts the Device Flow OAuth with GitHub Copilot |
 | `/auth logout openai-codex` | Removes OpenAI OAuth credentials |
 | `/auth logout anthropic` | Removes Anthropic OAuth credentials |
+| `/auth logout github-copilot` | Removes GitHub Copilot OAuth credentials |
 
 ### How it Works
 
-1. Run `/auth login openai-codex` (or `anthropic`)
+1. Run `/auth login openai-codex` (or `anthropic` or `github-copilot`)
 2. Your browser opens automatically to the provider's login page
 3. **OpenAI:** the token is captured automatically via local callback (port 1455)
 4. **Anthropic:** after authorizing, copy the code shown on the page and paste it in the terminal
-5. The provider appears immediately in `/switch` — no restart needed
-6. Credentials are stored with **AES-256-GCM encryption** at `~/.chatcli/auth-profiles.json`
+5. **GitHub Copilot:** enter the device code displayed in the terminal at https://github.com/login/device
+6. The provider appears immediately in `/switch` — no restart needed
+7. Credentials are stored with **AES-256-GCM encryption** at `~/.chatcli/auth-profiles.json`
+
+> **Note:** GitHub Copilot tokens (Device Flow RFC 8628) are persistent and do not expire — unlike OAuth tokens with refresh from OpenAI and Anthropic.
 
 ### Which Endpoint is Used (OpenAI)
 
@@ -354,7 +389,7 @@ Execute prompts in a single line, ideal for scripting and automation.
 
 - Available One-Shot Flags:
   -  -p  or  --prompt : The text to send to the LLM for a single execution.
-  -  --provider : Overrides the LLM provider at runtime ( OPENAI ,  OPENAI_ASSISTANT ,  CLAUDEAI ,  GOOGLEAI ,  STACKSPOT ,  XAI ).
+  -  --provider : Overrides the LLM provider at runtime ( OPENAI ,  OPENAI_ASSISTANT ,  CLAUDEAI ,  GOOGLEAI ,  STACKSPOT ,  XAI ,  COPILOT ,  OLLAMA ).
   -  --model : Chooses the model for the active provider (e.g.,  gpt-4o-mini ,  claude-sonnet-4-5 ,  gemini-2.5-flash , etc.).
   -  --max-tokens : Defines the maximum amount of tokens used for active provider.
   -  --realm : Overrides the StackSpot realm at runtime.
@@ -1214,6 +1249,36 @@ helm install chatcli deploy/helm/chatcli \
 
 Agents and skills are mounted as ConfigMaps at `/home/chatcli/.chatcli/agents/` and `/home/chatcli/.chatcli/skills/`. Plugins can come from an init container image or an existing PVC. Connected clients discover these resources automatically via gRPC.
 
+#### Provider Fallback via Helm
+
+```bash
+helm install chatcli deploy/helm/chatcli \
+  --set llm.provider=OPENAI \
+  --set secrets.openaiApiKey=sk-xxx \
+  --set secrets.anthropicApiKey=sk-ant-xxx \
+  --set fallback.enabled=true \
+  --set "fallback.providers[0].name=OPENAI" \
+  --set "fallback.providers[0].model=gpt-4o" \
+  --set "fallback.providers[1].name=CLAUDEAI" \
+  --set "fallback.providers[1].model=claude-sonnet-4-20250514"
+```
+
+#### MCP and Bootstrap via Helm
+
+```bash
+helm install chatcli deploy/helm/chatcli \
+  --set llm.provider=CLAUDEAI \
+  --set secrets.anthropicApiKey=sk-ant-xxx \
+  --set mcp.enabled=true \
+  --set "mcp.servers[0].name=filesystem" \
+  --set "mcp.servers[0].transport=stdio" \
+  --set "mcp.servers[0].command=npx" \
+  --set "mcp.servers[0].args={-y,@anthropic/mcp-server-filesystem,/workspace}" \
+  --set bootstrap.enabled=true \
+  --set-file bootstrap.definitions.SOUL\\.md=bootstrap/SOUL.md \
+  --set memory.enabled=true
+```
+
 > **gRPC and multiple replicas**: gRPC uses persistent HTTP/2 connections that pin to a single pod. For `replicaCount > 1`, enable `service.headless: true` in the Helm chart to activate round-robin load balancing via DNS. The Operator enables headless **automatically** when `spec.replicas > 1`. The client already has built-in keepalive and round-robin support.
 
 > Full documentation at [diillson.github.io/chatcli/docs/getting-started/docker-deployment](https://diillson.github.io/chatcli/docs/getting-started/docker-deployment/)
@@ -1301,16 +1366,145 @@ The AI receives full cluster context (deployment status, pods, events, revision 
 
 --------
 
+## Provider Fallback Chain
+
+ChatCLI supports an **automatic failover chain** between LLM providers. When the primary provider fails, the system automatically tries the next one in the chain, transparently to the user.
+
+```bash
+# Via environment variables
+export CHATCLI_FALLBACK_PROVIDERS="OPENAI,CLAUDEAI,GOOGLEAI"
+export CHATCLI_FALLBACK_MODEL_CLAUDEAI="claude-sonnet-4-20250514"
+
+# Via server flags
+chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI
+```
+
+**Intelligent error classification**: The system categorizes failures as `rate_limit`, `timeout`, `auth_error`, `server_error`, `model_not_found`, and `context_too_long`. Auth and model-not-found errors are not retried — the chain advances immediately. Rate limits wait with backoff before retrying.
+
+**Exponential backoff cooldown**: After consecutive failures, the provider enters cooldown (30s base, up to 5m max). Auth errors receive maximum cooldown immediately. Cooldown is cleared automatically after a successful request.
+
+**Health monitoring**: The chain tracks `ConsecutiveFails`, `LastErrorClass`, `CooldownUntil`, and `Available` for each provider. Use `GetHealth()` to inspect real-time status.
+
+--------
+
+## Native Tool Use (Structured API)
+
+ChatCLI supports **native tool calling via structured API** for both OpenAI and Anthropic, instead of XML embedded in the prompt. This improves accuracy, reduces tokens, and enables cache optimizations.
+
+- **OpenAI**: Uses the `tools` field in the Chat Completions API with `tool_choice: "auto"`
+- **Anthropic (Claude)**: Uses the `tools` field in the Messages API with `cache_control: { type: "ephemeral" }` for system prompt KV cache reuse
+
+The `ToolAwareClient` interface extends `LLMClient`:
+
+```go
+type ToolAwareClient interface {
+    LLMClient
+    SendPromptWithTools(ctx, prompt, history, tools, maxTokens) (*LLMResponse, error)
+    SupportsNativeTools() bool
+}
+```
+
+Providers that don't implement `ToolAwareClient` continue working normally with `SendPrompt`. Detection is automatic via `client.IsToolAware(c)`.
+
+--------
+
+## MCP (Model Context Protocol)
+
+ChatCLI integrates with **MCP (Model Context Protocol)** servers for external tool interoperability. MCP servers expose tools that the AI can call directly.
+
+### Configuration
+
+Create `~/.chatcli/mcp_servers.json`:
+
+```json
+{
+  "mcpServers": [
+    {
+      "name": "filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-filesystem", "/workspace"],
+      "enabled": true
+    },
+    {
+      "name": "web-search",
+      "transport": "sse",
+      "url": "http://localhost:8080/sse",
+      "enabled": true
+    }
+  ]
+}
+```
+
+### Supported Transports
+
+| Transport | Description | Use Case |
+|:----------|:-----------|:---------|
+| `stdio`   | Communication via process stdin/stdout | Local servers (npx, binaries) |
+| `sse`     | Server-Sent Events via HTTP | Remote servers |
+
+MCP tools are automatically prefixed with `mcp_` and exposed to the AI with the description `[MCP:<server>]`.
+
+--------
+
+## Bootstrap and Memory
+
+### Bootstrap Files
+
+The bootstrap system loads Markdown files that define agent personality and rules in the system prompt:
+
+| File | Purpose |
+|:-----|:--------|
+| `SOUL.md` | Assistant personality and tone |
+| `USER.md` | User preferences and context |
+| `IDENTITY.md` | Agent identity and capabilities |
+| `RULES.md` | Rules and restrictions |
+| `AGENTS.md` | Sub-agent definitions |
+
+Files are searched first in the workspace directory, then in the global directory (`~/.chatcli/`). Cache is automatically invalidated when the file is modified (via mtime).
+
+### Persistent Memory
+
+The memory system maintains context across sessions:
+
+- **MEMORY.md** — Long-term facts, architectural decisions, project patterns
+- **Daily notes** — Organized as `memory/YYYYMM/YYYYMMDD.md` for journaling and temporal tracking
+
+`GetMemoryContext()` automatically assembles the memory section in the system prompt, including MEMORY.md content and recent daily notes.
+
+--------
+
+## Configuration Migration
+
+ChatCLI includes a **versioned configuration migration** system that ensures safe upgrades between versions:
+
+- **Incremental versioning**: Each schema version has a number (`CurrentConfigVersion = 1`)
+- **Sequential migrations**: The system runs migrations in order (v0→v1, v1→v2, ...)
+- **Automatic backup**: Before migrating, a full backup is saved to `~/.chatcli/backups/`
+- **Rollback**: On failure, original values are preserved and the backup can be restored
+- **Built-in v0→v1 migration**: Normalizes provider names to uppercase, renames deprecated variables (`CHATCLI_API_KEY` → `OPENAI_API_KEY`), sets defaults for new features
+
+--------
+
 ## Code Structure and Technologies
 
 The project has a modular structure organized into packages:
 
 -  cli : Manages the interface and agent mode.
     -  cli/agent/workers : Multi-agent system with 12 specialized agents, async dispatcher, skills with accelerator scripts, and parallel orchestration.
--  config : Handles configuration via constants.
+    -  cli/bus : Internal message bus with typed pub/sub, channel filters, request-reply, and metrics.
+    -  cli/workspace : Bootstrap file loader (SOUL.md, USER.md), persistent memory (MEMORY.md, daily notes), and context builder.
+    -  cli/skills : Skills system with YAML frontmatter, lazy loading, and remote registry.
+    -  cli/mcp : MCP (Model Context Protocol) manager with stdio/SSE transport and tool discovery.
+-  config : Handles configuration via constants and versioned schema migration.
 -  i18n : Centralizes internationalization logic and translation files.
 -  llm : Manages communication and LLM client handling.
--  server : gRPC server for remote access (includes `GetAlerts`, `AnalyzeIssue`, and plugin/agent/skill discovery RPCs).
+    -  llm/registry : Provider registry with `init()` auto-registration and client creation.
+    -  llm/fallback : Fallback chain with error classification, exponential cooldown, and health tracking.
+    -  llm/client : Base LLMClient interface + `ToolAwareClient` for native tool use.
+    -  llm/openai , llm/claudeai : Native tool use implementations for OpenAI and Anthropic.
+-  models : Defines data structures, including `ToolDefinition`, `ToolCall`, `ContentBlock`, and `LLMResponse`.
+-  server : gRPC server for remote access (includes `GetAlerts`, `AnalyzeIssue`, and plugin/agent/skill discovery RPCs, with fallback chain and MCP support).
 -  client/remote : gRPC client implementing the LLMClient interface, with remote resource discovery and usage support (plugins, agents, skills).
 -  k8s : Kubernetes Watcher (collectors, store, summarizer).
 -  proto : Protobuf service definitions (`chatcli.proto`).
@@ -1318,7 +1512,6 @@ The project has a modular structure organized into packages:
     -  operator/api/v1alpha1 : CRD types (Instance, Anomaly, Issue, AIInsight, RemediationPlan, Runbook, PostMortem).
     -  operator/controllers : Reconcilers, correlation engine, WatcherBridge, gRPC client.
 -  utils : Contains auxiliary functions for files, Git, shell, HTTP, etc.
--  models : Defines data structures.
 -  version : Manages version information.
 
 Key Go libraries used: Zap, go-prompt, Glamour, Lumberjack, Godotenv, golang.org/x/text, google.golang.org/grpc, k8s.io/client-go, controller-runtime.

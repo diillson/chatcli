@@ -45,7 +45,7 @@ Você pode customizar o comportamento do modo one-shot com as seguintes flags:
 Flag                  │ Descrição                                                                                               
 ──────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────
 -p ,  --prompt        │ A pergunta ou instrução principal para a IA.                                                            
---provider <nome>     │ Sobrescreve o provedor de LLM padrão (ex:  OPENAI ,  CLAUDEAI ).                                        
+--provider <nome>     │ Sobrescreve o provedor de LLM padrão (ex:  OPENAI ,  CLAUDEAI ,  COPILOT ).                                        
 --model <nome>        │ Sobrescreve o modelo de IA a ser usado (ex:  gpt-4o ,  claude-sonnet-4-5 ).                    
 --timeout <duração>   │ Define um tempo limite para a requisição (padrão:  5m ). Ex:  10s ,  1m .                               
 --max-tokens <num>    │ Sobrescreve o número máximo de tokens na resposta.                                                      

@@ -20,9 +20,10 @@ const (
 type ProviderID string
 
 const (
-	ProviderAnthropic   ProviderID = "anthropic"
-	ProviderOpenAI      ProviderID = "openai"
-	ProviderOpenAICodex ProviderID = "openai-codex"
+	ProviderAnthropic     ProviderID = "anthropic"
+	ProviderOpenAI        ProviderID = "openai"
+	ProviderOpenAICodex   ProviderID = "openai-codex"
+	ProviderGitHubCopilot ProviderID = "github-copilot"
 )
 
 // AuthMode indica como a autenticação foi resolvida.

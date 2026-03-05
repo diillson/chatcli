@@ -129,7 +129,7 @@ metadata:
   namespace: chatcli          # O namespace deve existir antes de criar o Instance
 spec:
   replicas: 1
-  provider: CLAUDEAI       # OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA
+  provider: CLAUDEAI       # OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT
   model: claude-sonnet-4-5
 
   image:

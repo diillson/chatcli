@@ -1,0 +1,35 @@
+{{- if and .Values.mcp.enabled .Values.mcp.servers }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chatcli.fullname" . }}-mcp
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+data:
+  mcp_servers.json: |
+    {
+      "mcpServers": [
+        {{- $servers := .Values.mcp.servers }}
+        {{- range $i, $srv := $servers }}
+        {{- if $i }},{{ end }}
+        {
+          "name": {{ $srv.name | quote }},
+          "transport": {{ $srv.transport | default "stdio" | quote }},
+          {{- if $srv.command }}
+          "command": {{ $srv.command | quote }},
+          {{- end }}
+          {{- if $srv.args }}
+          "args": {{ $srv.args | toJson }},
+          {{- end }}
+          {{- if $srv.url }}
+          "url": {{ $srv.url | quote }},
+          {{- end }}
+          {{- if $srv.env }}
+          "env": {{ $srv.env | toJson }},
+          {{- end }}
+          "enabled": {{ $srv.enabled | default true }}
+        }
+        {{- end }}
+      ]
+    }
+{{- end }}

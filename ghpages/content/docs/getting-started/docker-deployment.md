@@ -128,6 +128,8 @@ services:
       GOOGLEAI_API_KEY: "${GOOGLEAI_API_KEY:-}"
       OLLAMA_ENABLED: "${OLLAMA_ENABLED:-}"
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
+      GITHUB_COPILOT_TOKEN: "${GITHUB_COPILOT_TOKEN:-}"
+      COPILOT_MODEL: "${COPILOT_MODEL:-}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
     volumes:
       - chatcli-sessions:/home/chatcli/.chatcli/sessions
@@ -269,6 +271,17 @@ O chart automaticamente:
 | `secrets.stackspotClientKey` | StackSpot Client Key |
 | `secrets.stackspotRealm` | StackSpot Realm |
 | `secrets.stackspotAgentId` | StackSpot Agent ID |
+| `secrets.githubCopilotToken` | Token OAuth do GitHub Copilot |
+
+#### GitHub Copilot
+
+| Valor | Descrição | Padrão |
+|-------|-----------|--------|
+| `COPILOT_MODEL` | Modelo padrão do Copilot (ex: `gpt-4o`, `claude-sonnet-4`) | `gpt-4o` |
+| `COPILOT_MAX_TOKENS` | Máximo de tokens para resposta | `""` |
+| `COPILOT_API_BASE_URL` | URL base da API (para ambientes enterprise) | `https://api.githubcopilot.com` |
+
+> Para autenticação, use `secrets.githubCopilotToken` com um token obtido via `/auth login github-copilot`, ou defina `GITHUB_COPILOT_TOKEN` como variável de ambiente.
 
 #### Ollama
 
@@ -300,6 +313,45 @@ O chart automaticamente:
 | `metricsPort` | Porta Prometheus (0 = desabilitado) | Não |
 | `metricsPath` | Path HTTP das métricas | Não (`/metrics`) |
 | `metricsFilter` | Filtros glob para métricas | Não |
+
+#### Fallback de Provedores
+
+| Valor | Descrição | Padrão |
+|-------|-----------|--------|
+| `fallback.enabled` | Habilitar cadeia de failover automático | `false` |
+| `fallback.providers` | Lista ordenada de provedores `[{name, model}]` | `[]` |
+| `fallback.maxRetries` | Tentativas por provedor antes de avançar | `2` |
+| `fallback.cooldownBase` | Cooldown base após falha | `30s` |
+| `fallback.cooldownMax` | Cooldown máximo (backoff exponencial) | `5m` |
+
+#### MCP (Model Context Protocol)
+
+| Valor | Descrição | Padrão |
+|-------|-----------|--------|
+| `mcp.enabled` | Habilitar integração MCP | `false` |
+| `mcp.servers` | Lista de servidores MCP `[{name, transport, command, args, url, enabled}]` | `[]` |
+| `mcp.existingConfigMap` | ConfigMap existente com `mcp_servers.json` | `""` |
+
+#### Bootstrap e Memória
+
+| Valor | Descrição | Padrão |
+|-------|-----------|--------|
+| `bootstrap.enabled` | Carregar arquivos bootstrap (SOUL.md, USER.md, etc.) | `false` |
+| `bootstrap.definitions` | Definições inline de arquivos bootstrap | `{}` |
+| `bootstrap.existingConfigMap` | ConfigMap existente com arquivos bootstrap | `""` |
+| `memory.enabled` | Habilitar memória persistente | `false` |
+| `safety.enabled` | Habilitar regras de segurança configuráveis | `false` |
+
+#### Skill Registry
+
+| Valor | Descrição | Padrão |
+|-------|-----------|--------|
+| `skillRegistry.enabled` | Habilitar variáveis de ambiente para skill registry | `false` |
+| `skillRegistry.registryUrls` | URLs adicionais de registries (separadas por vírgula) | `""` |
+| `skillRegistry.registryDisable` | Nomes de registries a desabilitar (separados por vírgula) | `""` |
+| `skillRegistry.installDir` | Diretório de instalação de skills dentro do container | `""` |
+
+> Quando habilitado, os valores são passados como variáveis `CHATCLI_REGISTRY_*` no ConfigMap. O container ChatCLI cria automaticamente `~/.chatcli/registries.yaml` com os registries padrão (chatcli, clawhub). Use `/skill search` e `/skill install` para gerenciar skills via registries.
 
 #### Persistência
 
@@ -357,6 +409,7 @@ type: Opaque
 stringData:
   OPENAI_API_KEY: "sk-xxx"
   ANTHROPIC_API_KEY: "sk-ant-xxx"
+  GITHUB_COPILOT_TOKEN: "ghu_xxx"  # opcional
 ```
 
 ### Acessar o Servidor
