@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.66.0](https://github.com/diillson/chatcli/compare/v1.65.6...v1.66.0) (2026-03-05)
+
+
+### Features
+
+* **core:** add provider fallback chain, native tool use, MCP, message bus, and deployment wiring ([#604](https://github.com/diillson/chatcli/issues/604)) ([6776394](https://github.com/diillson/chatcli/commit/67763943886e7f6fdf6dad0e6cb28ee7f76156b8))
+
 ## [1.65.6](https://github.com/diillson/chatcli/compare/v1.65.5...v1.65.6) (2026-03-03)
 
 
