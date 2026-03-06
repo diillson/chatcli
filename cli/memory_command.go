@@ -61,12 +61,10 @@ func (cli *ChatCLI) handleMemoryCommand(input string) {
 
 func (cli *ChatCLI) showDayNotes(date time.Time) {
 	dateStr := date.Format("2006-01-02")
-	path := filepath.Join(cli.memoryStore.TodayNotePath()+"/..", date.Format("20060102")+".md")
 	// Build correct path using the memory dir
 	dir := filepath.Dir(cli.memoryStore.TodayNotePath())
-	// For non-today dates, need to use the correct month dir
 	memDir := filepath.Dir(dir) // go up from YYYYMM to memory/
-	path = filepath.Join(memDir, date.Format("200601"), date.Format("20060102")+".md")
+	path := filepath.Join(memDir, date.Format("200601"), date.Format("20060102")+".md")
 
 	data, err := os.ReadFile(path)
 	if err != nil {

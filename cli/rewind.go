@@ -88,7 +88,7 @@ func (cli *ChatCLI) showRewindMenu() bool {
 
 	// Read selection via stdin
 	var input string
-	fmt.Scanln(&input)
+	_, _ = fmt.Scanln(&input)
 	input = strings.TrimSpace(input)
 
 	if input == "q" || input == "" {
