@@ -336,6 +336,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
 	maxTurns := AgentMaxTurns()
 
+	// Save checkpoint before agent starts (for rewind support)
+	a.cli.saveCheckpoint()
+
 	a.logger.Info("Modo Agente iniciado", zap.Int("max_turns_limit", maxTurns))
 
 	var systemInstruction string
@@ -372,6 +375,16 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	a.isCoderMode = isCoder
 	a.isOneShot = false
+
+	// Prepend workspace context (SOUL.md, USER.md, IDENTITY.md, RULES.md, MEMORY.md)
+	if a.cli.contextBuilder != nil {
+		if wsCtx := a.cli.contextBuilder.BuildSystemPromptPrefix(); wsCtx != "" {
+			systemInstruction = wsCtx + "\n\n---\n\n" + systemInstruction
+		}
+		if dynCtx := a.cli.contextBuilder.BuildDynamicContext(); dynCtx != "" {
+			systemInstruction += "\n\n" + dynCtx
+		}
+	}
 
 	// Adiciona contexto de ferramentas (plugins) ao prompt
 	systemInstruction += a.getToolContextString()
@@ -1736,15 +1749,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		var anchor string
 		if a.isCoderMode {
-			anchor = "LEMBRETE (MODO /CODER): Você DEVE responder com <reasoning> curto (2-6 linhas) e depois, se precisar agir, " +
-				"enviar um ou mais <tool_call name=\"@coder\" args=\"...\" />. " +
-				"Pode agrupar múltiplas ações na mesma resposta (ex: tree + read). " +
-				"NÃO use blocos de código (```), NÃO use ```execute:...```. " +
-				"Para write/patch: encoding base64 e conteúdo em linha única são OBRIGATÓRIOS."
+			anchor = "REMINDER (/CODER MODE): You MUST respond with a short <reasoning> (2-6 lines) then emit one or more <tool_call name=\"@coder\" args=\"...\" />. " +
+				"CRITICAL: Emit ALL independent tool_calls in a SINGLE response. Do NOT split independent reads/searches/writes into separate turns. " +
+				"If you need to read 3 files, emit 3 tool_calls NOW, not one per turn. Use <agent_call> for 3+ independent tasks when available. " +
+				"Do NOT use code blocks (```). For write/patch: base64 encoding and single-line args are MANDATORY."
 		} else {
-			anchor = "LEMBRETE (MODO /AGENT): Você pode usar ferramentas via <tool_call name=\"@tool\" args=\"...\" /> quando fizer sentido. " +
-				"Se for sugerir comandos, use blocos ```execute:<tipo>``` (shell/git/docker/kubectl...). " +
-				"Evite comandos destrutivos sem avisos claros e alternativas."
+			anchor = "REMINDER (/AGENT MODE): You can use tools via <tool_call name=\"@tool\" args=\"...\" /> when appropriate. " +
+				"CRITICAL: Emit ALL independent operations in a SINGLE response. Do NOT waste turns on things that could run in parallel. " +
+				"For shell commands, use ```execute:<type>``` blocks (shell/git/docker/kubectl...). " +
+				"Avoid destructive commands without clear warnings and alternatives."
 		}
 
 		h = append(h, models.Message{Role: "system", Content: anchor})

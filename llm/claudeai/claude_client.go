@@ -351,14 +351,31 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response) (string, error
 
 func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Message) ([]map[string]string, interface{}) {
 	var messages []map[string]string
-	var systemParts []string
+	var systemBlocks []map[string]interface{}
+	var plainSystemParts []string
 
 	for _, msg := range history {
 		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
 		case "assistant":
 			messages = append(messages, map[string]string{"role": "assistant", "content": msg.Content})
 		case "system":
-			systemParts = append(systemParts, msg.Content)
+			// If structured SystemParts are available, use them for cache_control
+			if len(msg.SystemParts) > 0 {
+				for _, part := range msg.SystemParts {
+					block := map[string]interface{}{
+						"type": "text",
+						"text": part.Text,
+					}
+					if part.CacheControl != nil {
+						block["cache_control"] = map[string]string{
+							"type": part.CacheControl.Type,
+						}
+					}
+					systemBlocks = append(systemBlocks, block)
+				}
+			} else if msg.Content != "" {
+				plainSystemParts = append(plainSystemParts, msg.Content)
+			}
 		default:
 			messages = append(messages, map[string]string{"role": "user", "content": msg.Content})
 		}
@@ -370,8 +387,20 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 		}
 	}
 
-	if len(systemParts) > 0 {
-		return messages, strings.Join(systemParts, "\n\n")
+	// Prefer structured blocks (with cache_control) over plain string
+	if len(systemBlocks) > 0 {
+		// Also add any plain system parts as blocks (without cache hint)
+		for _, part := range plainSystemParts {
+			systemBlocks = append(systemBlocks, map[string]interface{}{
+				"type": "text",
+				"text": part,
+			})
+		}
+		return messages, systemBlocks
+	}
+
+	if len(plainSystemParts) > 0 {
+		return messages, strings.Join(plainSystemParts, "\n\n")
 	}
 
 	return messages, nil
@@ -380,6 +409,7 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []models.Message) ([]map[string]interface{}, []interface{}) {
 	var messages []map[string]interface{}
 	var systemParts []string
+	var structuredParts []interface{}
 
 	for _, msg := range history {
 		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
@@ -389,7 +419,23 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 				"content": []interface{}{oauthTextBlock(msg.Content)},
 			})
 		case "system":
-			systemParts = append(systemParts, msg.Content)
+			// If structured SystemParts are available, use them for cache_control
+			if len(msg.SystemParts) > 0 {
+				for _, part := range msg.SystemParts {
+					block := map[string]interface{}{
+						"type": "text",
+						"text": part.Text,
+					}
+					if part.CacheControl != nil {
+						block["cache_control"] = map[string]string{
+							"type": part.CacheControl.Type,
+						}
+					}
+					structuredParts = append(structuredParts, block)
+				}
+			} else if msg.Content != "" {
+				systemParts = append(systemParts, msg.Content)
+			}
 		default:
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
@@ -409,6 +455,10 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 
 	systemObjs := []interface{}{
 		oauthTextBlock(oauthBaseSystemPrompt),
+	}
+	// Prefer structured blocks with cache_control
+	if len(structuredParts) > 0 {
+		systemObjs = append(systemObjs, structuredParts...)
 	}
 	if len(systemParts) > 0 {
 		joined := strings.Join(systemParts, "\n\n")

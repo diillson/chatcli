@@ -107,6 +107,15 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case strings.HasPrefix(userInput, "/watch"):
 		ch.handleWatchCommand(userInput)
 		return false
+	case strings.HasPrefix(userInput, "/compact"):
+		ch.cli.handleCompactCommand(userInput)
+		return false
+	case userInput == "/rewind":
+		ch.cli.showRewindMenu()
+		return false
+	case strings.HasPrefix(userInput, "/memory"):
+		ch.cli.handleMemoryCommand(userInput)
+		return false
 	case userInput == "/metrics":
 		ch.handleMetricsCommand()
 		return false

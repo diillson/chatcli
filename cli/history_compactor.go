@@ -240,51 +240,6 @@ func (hc *HistoryCompactor) emergencyTruncate(history []models.Message, cfg Comp
 	return result
 }
 
-// GenerateModeSummary creates a structured summary of a mode session (agent/coder)
-// to be stored as shared memory when transitioning back to chat mode.
-func (hc *HistoryCompactor) GenerateModeSummary(
-	ctx context.Context,
-	history []models.Message,
-	llmClient client.LLMClient,
-	modeName string,
-) string {
-	if len(history) <= 2 || llmClient == nil {
-		return ""
-	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Summarize this %s session using the structured format below. ", modeName))
-	sb.WriteString("Include ONLY facts from the conversation. Under 300 words.\n\n")
-	sb.WriteString(structuredSummaryPrompt)
-	sb.WriteString("\n\nSESSION TO SUMMARIZE:\n\n")
-
-	for _, msg := range history {
-		if msg.Role == "system" {
-			continue
-		}
-		content := msg.Content
-		if len(content) > 1000 {
-			content = content[:600] + "\n...[truncated]...\n" + content[len(content)-200:]
-		}
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
-	}
-
-	summaryHistory := []models.Message{
-		{Role: "user", Content: sb.String()},
-	}
-
-	summarizeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	response, err := llmClient.SendPrompt(summarizeCtx, sb.String(), summaryHistory, 0)
-	if err != nil {
-		hc.logger.Warn("Failed to generate mode summary", zap.String("mode", modeName), zap.Error(err))
-		return ""
-	}
-
-	return fmt.Sprintf("[/%s session summary]\n\n%s", modeName, response)
-}
-
 // structuredSummaryPrompt is the prompt template for fact extraction.
 // Written in English for best model performance across all providers.
 const structuredSummaryPrompt = `You are a precise technical note-taker. Extract ONLY factual information from this conversation segment.
