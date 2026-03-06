@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.67.0](https://github.com/diillson/chatcli/compare/v1.66.0...v1.67.0) (2026-03-06)
+
+
+### Features
+
+* **core:** add memory system, conversation control, and context injection optimization ([#607](https://github.com/diillson/chatcli/issues/607)) ([c114fdc](https://github.com/diillson/chatcli/commit/c114fdc62eaf8b1572182d9fd476ca5c5b1590f2))
+
 ## [1.66.0](https://github.com/diillson/chatcli/compare/v1.65.6...v1.66.0) (2026-03-05)
 
 
