@@ -31,7 +31,7 @@ var (
 	toolFeedbackPrefixRe = regexp.MustCompile(`^(?:The tool '|A ferramenta '|--- Resultado da Ação)`)
 	formatErrorPrefixRe  = regexp.MustCompile(`^FORMAT ERROR:`)
 	// Patterns to detect injected context/memory messages
-	memoryContextMarkerRe  = regexp.MustCompile(`^\[MEMORY CONTEXT — loaded from \d{4}-\d{2}-\d{2}\]`)
+	memoryContextMarkerRe   = regexp.MustCompile(`^\[MEMORY CONTEXT — loaded from \d{4}-\d{2}-\d{2}\]`)
 	attachedContextMarkerRe = regexp.MustCompile(`(?m)^📦 CONTEX?TO?:`)
 )
 

@@ -226,10 +226,10 @@ func parseMemoryResponse(response string) (daily string, longTerm string) {
 	switch {
 	case dailyIdx >= 0 && longTermIdx >= 0:
 		if dailyIdx < longTermIdx {
-			daily = strings.TrimSpace(response[dailyIdx+len("## DAILY"):longTermIdx])
+			daily = strings.TrimSpace(response[dailyIdx+len("## DAILY") : longTermIdx])
 			longTerm = strings.TrimSpace(response[longTermIdx+len("## LONGTERM"):])
 		} else {
-			longTerm = strings.TrimSpace(response[longTermIdx+len("## LONGTERM"):dailyIdx])
+			longTerm = strings.TrimSpace(response[longTermIdx+len("## LONGTERM") : dailyIdx])
 			daily = strings.TrimSpace(response[dailyIdx+len("## DAILY"):])
 		}
 	case dailyIdx >= 0:

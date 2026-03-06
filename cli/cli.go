@@ -708,8 +708,8 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 				wsContent += "\n\n" + dynCtx
 			}
 			systemParts = append(systemParts, models.ContentBlock{
-				Type: "text",
-				Text: wsContent,
+				Type:         "text",
+				Text:         wsContent,
 				CacheControl: &models.CacheControl{Type: "ephemeral"},
 			})
 		}
@@ -730,8 +730,8 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	}
 	for _, msg := range contextMessages {
 		systemParts = append(systemParts, models.ContentBlock{
-			Type: "text",
-			Text: msg.Content,
+			Type:         "text",
+			Text:         msg.Content,
 			CacheControl: &models.CacheControl{Type: "ephemeral"},
 		})
 	}
