@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +26,7 @@ type WorkerReActConfig struct {
 }
 
 // DefaultWorkerMaxTurns is the default maximum number of ReAct turns per worker.
+// Can be overridden via CHATCLI_AGENT_WORKER_MAX_TURNS env var.
 const DefaultWorkerMaxTurns = 10
 
 // MaxWorkerOutputBytes is the maximum size of worker output to prevent token overflow.
@@ -49,6 +52,12 @@ func RunWorkerReAct(
 	maxTurns := config.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = DefaultWorkerMaxTurns
+		// Allow env override for worker max turns
+		if envVal := os.Getenv("CHATCLI_AGENT_WORKER_MAX_TURNS"); envVal != "" {
+			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+				maxTurns = v
+			}
+		}
 	}
 
 	history := []models.Message{
