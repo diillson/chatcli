@@ -417,14 +417,38 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	homeDir, _ := os.UserHomeDir()
 	globalDir := filepath.Join(homeDir, ".chatcli")
 	workspaceDir, _ := os.Getwd()
-	bootstrapLoader := workspace.NewBootstrapLoader(workspaceDir, globalDir, logger)
-	memStore := workspace.NewMemoryStore(globalDir, logger)
+
+	// CHATCLI_BOOTSTRAP_DIR overrides the global bootstrap directory
+	if envDir := os.Getenv("CHATCLI_BOOTSTRAP_DIR"); envDir != "" {
+		globalDir = envDir
+	}
+
+	bootstrapEnabled := os.Getenv("CHATCLI_BOOTSTRAP_ENABLED") != "false"
+	memoryEnabled := os.Getenv("CHATCLI_MEMORY_ENABLED") != "false"
+
+	var bootstrapLoader *workspace.BootstrapLoader
+	if bootstrapEnabled {
+		bootstrapLoader = workspace.NewBootstrapLoader(workspaceDir, globalDir, logger)
+	} else {
+		bootstrapLoader = workspace.NewBootstrapLoader("", "", logger) // noop
+		logger.Info("Bootstrap disabled via CHATCLI_BOOTSTRAP_ENABLED=false")
+	}
+
+	var memStore *workspace.MemoryStore
+	if memoryEnabled {
+		memDir := filepath.Join(homeDir, ".chatcli")
+		memStore = workspace.NewMemoryStore(memDir, logger)
+	} else {
+		logger.Info("Memory disabled via CHATCLI_MEMORY_ENABLED=false")
+	}
 	cli.memoryStore = memStore
 	cli.contextBuilder = workspace.NewContextBuilder(bootstrapLoader, memStore)
 
 	// Start background memory annotation worker
-	cli.memWorker = newMemoryWorker(cli)
-	cli.memWorker.start()
+	if memoryEnabled {
+		cli.memWorker = newMemoryWorker(cli)
+		cli.memWorker.start()
+	}
 
 	// Initialize persona handler
 	cli.personaHandler = NewPersonaHandler(logger)
