@@ -29,6 +29,7 @@ import (
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/cli/workspace"
 	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
@@ -155,11 +156,7 @@ type ChatCLI struct {
 	logger               *zap.Logger
 	Provider             string
 	Model                string
-	history              []models.Message  // active history (points to current mode's history)
-	chatHistory          []models.Message  // chat mode history
-	agentHistory         []models.Message  // persistent across /agent invocations
-	coderHistory         []models.Message  // persistent across /coder invocations
-	sharedMemory         []models.Message  // structured summaries from agent/coder sessions
+	history              []models.Message  // unified conversation history (all modes)
 	historyCompactor     *HistoryCompactor // manages history compaction
 	commandHistory       []string
 	newCommandsInSession []string
@@ -208,6 +205,17 @@ type ChatCLI struct {
 	// Remote resource cache (populated on /connect, cleared on /disconnect)
 	remoteAgents []remote.RemoteAgentInfo
 	remoteSkills []remote.RemoteSkillInfo
+
+	// Workspace context (bootstrap files + memory)
+	contextBuilder *workspace.ContextBuilder
+	memoryStore    *workspace.MemoryStore
+
+	// Conversation checkpoints for rewind
+	checkpoints []conversationCheckpoint
+	lastEscTime time.Time // for Esc+Esc double-press detection
+
+	// Background memory annotation worker
+	memWorker *memoryWorker
 }
 
 // reconfigureLogger reconfigura o logger após o reload das variáveis de ambiente
@@ -356,10 +364,6 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		manager:          manager,
 		logger:           logger,
 		history:          make([]models.Message, 0),
-		chatHistory:      make([]models.Message, 0),
-		agentHistory:     make([]models.Message, 0),
-		coderHistory:     make([]models.Message, 0),
-		sharedMemory:     make([]models.Message, 0),
 		historyCompactor: NewHistoryCompactor(logger),
 		historyManager:   NewHistoryManager(logger),
 		animation:        NewAnimationManager(),
@@ -408,6 +412,19 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		return nil, fmt.Errorf("erro ao inicializar o ContextHandler: %w", err)
 	}
 	cli.contextHandler = contextHandler
+
+	// Initialize workspace context (bootstrap files + memory)
+	homeDir, _ := os.UserHomeDir()
+	globalDir := filepath.Join(homeDir, ".chatcli")
+	workspaceDir, _ := os.Getwd()
+	bootstrapLoader := workspace.NewBootstrapLoader(workspaceDir, globalDir, logger)
+	memStore := workspace.NewMemoryStore(globalDir, logger)
+	cli.memoryStore = memStore
+	cli.contextBuilder = workspace.NewContextBuilder(bootstrapLoader, memStore)
+
+	// Start background memory annotation worker
+	cli.memWorker = newMemoryWorker(cli)
+	cli.memWorker.start()
 
 	// Initialize persona handler
 	cli.personaHandler = NewPersonaHandler(logger)
@@ -657,6 +674,9 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		cancel()
 	}()
 
+	// Save checkpoint before processing (for rewind support)
+	cli.saveCheckpoint()
+
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
 	userInput, additionalContext := cli.processSpecialCommands(in)
@@ -669,58 +689,98 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		}
 	}
 
-	//Injetar contextos anexados à sessão
+	// Build unified system prompt: bootstrap + memory + attached contexts + K8s watcher
+	// All stable context goes into a single system message for provider-level prompt caching
+	// (Anthropic cache_control:ephemeral, OpenAI automatic prompt caching).
 	sessionID := cli.currentSessionName
 	if sessionID == "" {
-		sessionID = "default" // Sessão padrão se não houver sessão nomeada
+		sessionID = "default"
 	}
 
-	// Construir mensagens dos contextos anexados
+	var systemParts []models.ContentBlock
+
+	// Part 1: Workspace context (SOUL.md, USER.md, IDENTITY.md, RULES.md, MEMORY.md)
+	if cli.contextBuilder != nil {
+		if wsCtx := cli.contextBuilder.BuildSystemPromptPrefix(); wsCtx != "" {
+			dynCtx := cli.contextBuilder.BuildDynamicContext()
+			wsContent := wsCtx
+			if dynCtx != "" {
+				wsContent += "\n\n" + dynCtx
+			}
+			systemParts = append(systemParts, models.ContentBlock{
+				Type:         "text",
+				Text:         wsContent,
+				CacheControl: &models.CacheControl{Type: "ephemeral"},
+			})
+		}
+	}
+
+	// Part 2: Attached contexts → system prompt (cacheable, not user messages)
 	contextMessages, err := cli.contextHandler.GetManager().BuildPromptMessages(
 		sessionID,
 		ctxmgr.FormatOptions{
 			IncludeMetadata:  true,
 			IncludeTimestamp: false,
 			Compact:          false,
-			Role:             "user",
+			Role:             "system",
 		},
 	)
 	if err != nil {
 		cli.logger.Warn("Erro ao construir mensagens de contexto", zap.Error(err))
 	}
+	for _, msg := range contextMessages {
+		systemParts = append(systemParts, models.ContentBlock{
+			Type:         "text",
+			Text:         msg.Content,
+			CacheControl: &models.CacheControl{Type: "ephemeral"},
+		})
+	}
 
-	// Inject K8s watcher context if active
+	// Part 3: K8s watcher context (small, changes often — no cache hint)
 	if cli.WatcherContextFunc != nil {
-		k8sCtx := cli.WatcherContextFunc()
-		if k8sCtx != "" {
-			contextMessages = append(contextMessages, models.Message{
-				Role:    "user",
-				Content: k8sCtx,
+		if k8sCtx := cli.WatcherContextFunc(); k8sCtx != "" {
+			systemParts = append(systemParts, models.ContentBlock{
+				Type: "text",
+				Text: k8sCtx,
 			})
 		}
 	}
 
-	// Inserir mensagens de contexto no início do histórico (ANTES da mensagem do usuário)
-	tempHistory := make([]models.Message, 0, len(cli.history)+len(contextMessages)+1)
+	// Build tempHistory with unified system message.
+	// SystemParts carries structured blocks with cache hints (used by Anthropic tool_use).
+	// Content carries the same text concatenated (used by all other providers/flows).
+	tempHistory := make([]models.Message, 0, len(cli.history)+4)
 
-	// 1. Copiar mensagens do sistema existentes
+	if len(systemParts) > 0 {
+		var combined strings.Builder
+		for i, part := range systemParts {
+			if i > 0 {
+				combined.WriteString("\n\n---\n\n")
+			}
+			combined.WriteString(part.Text)
+		}
+		tempHistory = append(tempHistory, models.Message{
+			Role:        "system",
+			Content:     combined.String(),
+			SystemParts: systemParts,
+		})
+	}
+
+	// 1. Copiar mensagens do sistema existentes do histórico
 	for _, msg := range cli.history {
 		if msg.Role == "system" {
 			tempHistory = append(tempHistory, msg)
 		}
 	}
 
-	// 2. Adicionar contextos anexados
-	tempHistory = append(tempHistory, contextMessages...)
-
-	// 3. Adicionar restante do histórico (user/assistant)
+	// 2. Adicionar restante do histórico (user/assistant)
 	for _, msg := range cli.history {
 		if msg.Role != "system" {
 			tempHistory = append(tempHistory, msg)
 		}
 	}
 
-	// 4. Adicionar mensagem atual do usuário
+	// 3. Adicionar mensagem atual do usuário
 	userMessage := models.Message{
 		Role:    "user",
 		Content: userInput + additionalContext,
@@ -772,6 +832,11 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		fmt.Print("\033[0m") // Reset final
 		fmt.Println()
 		fmt.Println() // Linha extra para separar visualmente as mensagens
+
+		// Nudge background memory worker to check if annotations are needed
+		if cli.memWorker != nil {
+			cli.memWorker.nudge()
+		}
 	}
 }
 
@@ -871,6 +936,11 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				prompt.OptionAddKeyBind(prompt.KeyBind{
 					Key: prompt.ControlC,
 					Fn:  cli.handleCtrlC,
+				}),
+				// Esc: double-press detection for rewind
+				prompt.OptionAddKeyBind(prompt.KeyBind{
+					Key: prompt.Escape,
+					Fn:  cli.handleEscape,
 				}),
 				// Ctrl+Arrow: word navigation (for terminals that send xterm sequences)
 				prompt.OptionAddKeyBind(prompt.KeyBind{
@@ -1111,27 +1181,14 @@ func (cli *ChatCLI) runAgentLogic() {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
-	// Scoped history: save chat history, activate agent history
-	cli.chatHistory = cli.history
-	cli.history = cli.agentHistory
-
-	// Inject cross-mode context so the agent knows what was discussed in chat/coder
-	crossCtx := cli.buildCrossModeContext("agent")
-	if crossCtx != "" {
-		if additionalContext != "" {
-			additionalContext = crossCtx + "\n\n" + additionalContext
-		} else {
-			additionalContext = crossCtx
-		}
-	}
-
 	cli.runWithCancellation("Agent Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, "")
 	})
 
-	// Persist agent history and generate structured summary for chat mode
-	cli.agentHistory = cli.history
-	cli.exitModeWithStructuredSummary(context.Background(), "agent")
+	// Nudge memory worker after agent run
+	if cli.memWorker != nil {
+		cli.memWorker.nudge()
+	}
 
 	fmt.Println(i18n.T("status.agent_mode_exit"))
 }
@@ -1161,174 +1218,16 @@ func (cli *ChatCLI) runCoderLogic() {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
-	// Scoped history: save chat history, activate coder history
-	cli.chatHistory = cli.history
-	cli.history = cli.coderHistory
-
-	// Inject cross-mode context so the coder knows what was discussed in chat/agent
-	crossCtx := cli.buildCrossModeContext("coder")
-	if crossCtx != "" {
-		if additionalContext != "" {
-			additionalContext = crossCtx + "\n\n" + additionalContext
-		} else {
-			additionalContext = crossCtx
-		}
-	}
-
 	cli.runWithCancellation("Coder Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)
 	})
 
-	// Persist coder history and generate structured summary for chat mode
-	cli.coderHistory = cli.history
-	cli.exitModeWithStructuredSummary(context.Background(), "coder")
+	// Nudge memory worker after coder run
+	if cli.memWorker != nil {
+		cli.memWorker.nudge()
+	}
 
 	fmt.Println(colorize("\n ✅ Sessão de engenharia finalizada.", ColorGreen))
-}
-
-// buildCrossModeContext creates a context bridge with recent messages from other modes
-// so that each mode knows what was being discussed across the application.
-// This enables natural workflows like: chat (discuss) → coder (implement) → agent (research) → coder (continue).
-func (cli *ChatCLI) buildCrossModeContext(targetMode string) string {
-	var sb strings.Builder
-	hasContent := false
-
-	// 1. Recent chat messages — generous window since the compactor handles overflow.
-	// 20 messages ≈ 10 user+assistant pairs, enough to carry full discussion context.
-	recentChat := getRecentNonSystemMessages(cli.chatHistory, 20)
-	if len(recentChat) > 0 {
-		sb.WriteString("=== Recent conversation context (from chat mode) ===\n")
-		for _, msg := range recentChat {
-			content := msg.Content
-			if len(content) > 1500 {
-				content = content[:1200] + "\n...[truncated]...\n" + content[len(content)-200:]
-			}
-			sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
-		}
-		hasContent = true
-	}
-
-	// 2. Recent messages from the OTHER mode (coder ↔ agent cross-pollination).
-	// 16 messages ≈ 8 agentic turns (each turn = assistant response + tool feedback).
-	// This covers a meaningful chunk of work: file reads, modifications, exec results.
-	var otherHistory []models.Message
-	var otherModeName string
-	switch targetMode {
-	case "agent":
-		otherHistory = cli.coderHistory
-		otherModeName = "coder"
-	case "coder":
-		otherHistory = cli.agentHistory
-		otherModeName = "agent"
-	}
-	recentOther := getRecentNonSystemMessages(otherHistory, 16)
-	if len(recentOther) > 0 {
-		sb.WriteString(fmt.Sprintf("=== Recent activity (from /%s mode) ===\n", otherModeName))
-		for _, msg := range recentOther {
-			content := msg.Content
-			if len(content) > 1500 {
-				content = content[:1200] + "\n...[truncated]...\n" + content[len(content)-200:]
-			}
-			sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
-		}
-		hasContent = true
-	}
-
-	// 3. Shared memory (structured summaries from previous sessions of any mode)
-	cli.mu.Lock()
-	sharedMemCopy := make([]models.Message, len(cli.sharedMemory))
-	copy(sharedMemCopy, cli.sharedMemory)
-	cli.mu.Unlock()
-
-	if len(sharedMemCopy) > 0 {
-		sb.WriteString("=== Previous session summaries ===\n")
-		for _, mem := range sharedMemCopy {
-			sb.WriteString(mem.Content)
-			sb.WriteString("\n\n")
-		}
-		hasContent = true
-	}
-
-	if !hasContent {
-		return ""
-	}
-
-	return sb.String()
-}
-
-// getRecentNonSystemMessages returns the last N non-system messages from a history slice.
-func getRecentNonSystemMessages(history []models.Message, n int) []models.Message {
-	var nonSystem []models.Message
-	for _, msg := range history {
-		if msg.Role != "system" {
-			nonSystem = append(nonSystem, msg)
-		}
-	}
-	if len(nonSystem) <= n {
-		return nonSystem
-	}
-	return nonSystem[len(nonSystem)-n:]
-}
-
-// exitModeWithStructuredSummary restores chat history and injects recent
-// messages from the agent/coder session so the chat model has full context.
-func (cli *ChatCLI) exitModeWithStructuredSummary(_ context.Context, modeName string) {
-	modeHistory := make([]models.Message, len(cli.history))
-	copy(modeHistory, cli.history)
-
-	// Restore chat history
-	cli.history = cli.chatHistory
-
-	// Build context from actual recent messages (more reliable than LLM summary)
-	recentMsgs := getRecentNonSystemMessages(modeHistory, 20)
-	var sessionContext strings.Builder
-	for _, msg := range recentMsgs {
-		content := msg.Content
-		if len(content) > 2000 {
-			content = content[:1500] + "\n...[truncated]...\n" + content[len(content)-300:]
-		}
-		sessionContext.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
-	}
-
-	resetContent := "The /" + modeName + " session has ended. You are now back in normal chat mode. " +
-		"Respond conversationally in plain text. Do NOT use command blocks, execution plans, or structured XML tags. " +
-		"Just answer the user's questions naturally."
-
-	if sessionContext.Len() > 0 {
-		resetContent += fmt.Sprintf("\n\nHere is what happened in the /%s session (use this to answer follow-up questions):\n\n%s", modeName, sessionContext.String())
-	}
-
-	// Also append previous shared memory summaries if any
-	cli.mu.Lock()
-	if len(cli.sharedMemory) > 0 {
-		var memSb strings.Builder
-		memSb.WriteString("\n\nContext from earlier sessions:\n\n")
-		for _, mem := range cli.sharedMemory {
-			memSb.WriteString(mem.Content)
-			memSb.WriteString("\n\n---\n\n")
-		}
-		resetContent += memSb.String()
-	}
-	cli.mu.Unlock()
-
-	// Remove previous mode-reset messages to avoid accumulation
-	cleaned := make([]models.Message, 0, len(cli.history)+1)
-	for _, msg := range cli.history {
-		if msg.Meta != nil && msg.Meta.IsSummary && msg.Meta.Mode != "" {
-			continue
-		}
-		cleaned = append(cleaned, msg)
-	}
-	cli.history = cleaned
-
-	cli.history = append(cli.history, models.Message{
-		Role:    "system",
-		Content: resetContent,
-		Meta: &models.MessageMeta{
-			IsSummary: true,
-			Mode:      modeName,
-		},
-	})
 }
 
 func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
@@ -1360,6 +1259,25 @@ func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 		cli.cleanup()
 		os.Exit(0)
 	}
+}
+
+// handleEscape detects Esc+Esc double-press for rewind.
+// Only triggers when the input buffer is empty.
+func (cli *ChatCLI) handleEscape(buf *prompt.Buffer) {
+	// Only trigger on empty input
+	if buf.Text() != "" {
+		return
+	}
+
+	now := time.Now()
+	if now.Sub(cli.lastEscTime) < 500*time.Millisecond {
+		// Double Esc detected
+		cli.lastEscTime = time.Time{}
+		cli.showRewindMenu()
+		cli.forceRefreshPrompt()
+		return
+	}
+	cli.lastEscTime = now
 }
 
 func (cli *ChatCLI) changeLivePrefix() (string, bool) {
@@ -1399,6 +1317,11 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 }
 
 func (cli *ChatCLI) cleanup() {
+	// Stop background memory worker
+	if cli.memWorker != nil {
+		cli.memWorker.stop()
+	}
+
 	if err := cli.historyManager.AppendAndRotateHistory(cli.newCommandsInSession); err != nil {
 		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
 	}
@@ -1534,6 +1457,10 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/exit | /quit", i18n.T("help.command.exit"))
 	printCommand("/newsession", i18n.T("help.command.newsession"))
 	printCommand("/version | /v", i18n.T("help.command.version"))
+	printCommand("/compact [instruction]", "Compact history (guided: /compact keep only API patterns)")
+	printCommand("/rewind", "Rewind to a previous conversation checkpoint")
+	printCommand("Esc+Esc", "Quick rewind (when input is empty)")
+	printCommand("/memory [subcommand]", "View/load memory notes (today, yesterday, week, longterm, list, load <date>)")
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.config"), ColorLime))
 	printCommand("/switch", i18n.T("help.command.switch"))
@@ -2974,6 +2901,9 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/disconnect", Description: "Desconectar do servidor remoto e voltar ao modo local"},
 		{Text: "/watch", Description: "Exibe o status do K8s watcher (quando ativo)"},
 		{Text: "/metrics", Description: "Exibe métricas de runtime (provider, sessão, tokens, memória)"},
+		{Text: "/compact", Description: "Compacta o histórico (use /compact <instrução> para guiar o que preservar)"},
+		{Text: "/rewind", Description: "Volta a um checkpoint anterior da conversa"},
+		{Text: "/memory", Description: "Ver/carregar anotações de memória (today, yesterday, week, load <data>, longterm, list)"},
 	}
 }
 
@@ -3555,42 +3485,45 @@ func (cli *ChatCLI) handleLoadSession(name string) {
 	}
 }
 
-// clearAllHistories resets all scoped histories to empty.
+// clearAllHistories resets the unified history.
 func (cli *ChatCLI) clearAllHistories() {
 	cli.history = make([]models.Message, 0)
-	cli.chatHistory = make([]models.Message, 0)
-	cli.agentHistory = make([]models.Message, 0)
-	cli.coderHistory = make([]models.Message, 0)
-	cli.sharedMemory = make([]models.Message, 0)
+	cli.checkpoints = nil
 }
 
 // buildSessionData builds a SessionData from the current CLI state.
+// Uses ChatHistory field to store the unified history for backwards compatibility.
 func (cli *ChatCLI) buildSessionData() *SessionData {
 	return &SessionData{
-		Version:      2,
-		ChatHistory:  cli.history,
-		AgentHistory: cli.agentHistory,
-		CoderHistory: cli.coderHistory,
-		SharedMemory: cli.sharedMemory,
+		Version:     2,
+		ChatHistory: cli.history,
 	}
 }
 
-// restoreSessionData restores all scoped histories from a SessionData.
+// restoreSessionData restores history from a SessionData.
+// Merges legacy separate histories into the unified history for backwards compatibility.
 func (cli *ChatCLI) restoreSessionData(sd *SessionData) {
 	cli.history = sd.ChatHistory
-	cli.chatHistory = sd.ChatHistory
-	cli.agentHistory = sd.AgentHistory
-	cli.coderHistory = sd.CoderHistory
-	cli.sharedMemory = sd.SharedMemory
-	if cli.agentHistory == nil {
-		cli.agentHistory = make([]models.Message, 0)
+	if cli.history == nil {
+		cli.history = make([]models.Message, 0)
 	}
-	if cli.coderHistory == nil {
-		cli.coderHistory = make([]models.Message, 0)
+
+	// Backwards compatibility: merge legacy separate histories if present
+	if len(sd.AgentHistory) > 0 || len(sd.CoderHistory) > 0 {
+		// Append non-system messages from legacy agent/coder histories
+		for _, msg := range sd.AgentHistory {
+			if msg.Role != "system" {
+				cli.history = append(cli.history, msg)
+			}
+		}
+		for _, msg := range sd.CoderHistory {
+			if msg.Role != "system" {
+				cli.history = append(cli.history, msg)
+			}
+		}
 	}
-	if cli.sharedMemory == nil {
-		cli.sharedMemory = make([]models.Message, 0)
-	}
+
+	cli.checkpoints = nil
 }
 
 func (cli *ChatCLI) handleListSessions() {

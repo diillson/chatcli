@@ -30,6 +30,9 @@ var (
 	// Pattern to detect tool feedback messages (from agent_mode.go format)
 	toolFeedbackPrefixRe = regexp.MustCompile(`^(?:The tool '|A ferramenta '|--- Resultado da Ação)`)
 	formatErrorPrefixRe  = regexp.MustCompile(`^FORMAT ERROR:`)
+	// Patterns to detect injected context/memory messages
+	memoryContextMarkerRe   = regexp.MustCompile(`^\[MEMORY CONTEXT — loaded from \d{4}-\d{2}-\d{2}\]`)
+	attachedContextMarkerRe = regexp.MustCompile(`(?m)^📦 CONTEX?TO?:`)
 )
 
 // TrimHistory performs near-lossless trimming on all messages in the history.
@@ -68,7 +71,9 @@ func (t *MessageTrimmer) trimMessage(msg models.Message, history []models.Messag
 	case "assistant":
 		trimmed.Content = t.trimAssistantMessage(msg.Content)
 	case "user":
-		if isToolFeedbackMessage(msg.Content) {
+		if isInjectedContextMessage(msg.Content) {
+			trimmed.Content = t.trimInjectedContext(msg.Content)
+		} else if isToolFeedbackMessage(msg.Content) {
 			trimmed.Content = t.trimToolFeedback(msg.Content)
 		}
 		// Real user messages are never trimmed
@@ -218,6 +223,35 @@ func (t *MessageTrimmer) deduplicateFormatErrors(history []models.Message) []mod
 	}
 
 	return result
+}
+
+// isInjectedContextMessage detects messages that were injected as context
+// (/memory load, /context attach summaries, etc.).
+func isInjectedContextMessage(content string) bool {
+	return memoryContextMarkerRe.MatchString(content) ||
+		attachedContextMarkerRe.MatchString(content)
+}
+
+// trimInjectedContext aggressively truncates injected context messages.
+// These are not real conversation — they are reference material that can be summarized.
+func (t *MessageTrimmer) trimInjectedContext(content string) string {
+	if len(content) <= 3000 {
+		return content
+	}
+
+	// Extract the marker/header line(s) and keep a truncated version
+	lines := strings.SplitN(content, "\n", 4)
+	header := strings.Join(lines[:min(3, len(lines))], "\n")
+
+	truncated := header + "\n\n" +
+		content[len(header)+1:min(len(header)+2000, len(content))] +
+		fmt.Sprintf("\n\n... [%d chars of context omitted during compaction] ...", len(content)-2000)
+
+	t.logger.Debug("Trimmed injected context message",
+		zap.Int("before", len(content)),
+		zap.Int("after", len(truncated)),
+	)
+	return truncated
 }
 
 // isToolFeedbackMessage detects messages that are tool output feedback (not real user input).

@@ -421,6 +421,16 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 		}
 	}
 
+	// Token cost feedback
+	estimatedTokens := ctx.TotalSize / 4
+	fmt.Printf("  %s ~%s tokens/turno (cacheado via system prompt)\n",
+		colorize("💡 Custo estimado:", ColorGray),
+		formatTokenCount(estimatedTokens))
+	if estimatedTokens > 20000 {
+		fmt.Printf("  %s Contexto grande — considere usar chunks para reduzir custo\n",
+			colorize("⚠", ColorYellow))
+	}
+
 	return nil
 }
 
@@ -749,7 +759,7 @@ func (h *ContextHandler) handleMerge(args []string) error {
 	return nil
 }
 
-// handleShowAttached mostra contextos anexados à sessão
+// handleShowAttached mostra contextos anexados à sessão com estimativa de tokens
 func (h *ContextHandler) handleShowAttached(sessionID string) error {
 	contexts, err := h.manager.GetAttachedContexts(sessionID)
 	if err != nil {
@@ -764,18 +774,53 @@ func (h *ContextHandler) handleShowAttached(sessionID string) error {
 	fmt.Println(colorize(i18n.T("context.attached.header"), ColorLime+ColorBold))
 	fmt.Println(colorize(strings.Repeat("─", 80), ColorGray))
 
+	var totalTokens int64
 	for i, ctx := range contexts {
+		// Estimate tokens: ~4 chars per token (conservative)
+		estimatedTokens := ctx.TotalSize / 4
+		totalTokens += estimatedTokens
+
 		fmt.Printf("\n%s %s\n",
 			colorize(fmt.Sprintf("[%d]", i+1), ColorCyan),
 			colorize(ctx.Name, ColorLime))
 
-		fmt.Printf("    %s %d | %s %.2f MB\n",
+		fmt.Printf("    %s %d | %s %.2f MB | %s ~%s tokens\n",
 			colorize("Arquivos:", ColorGray), ctx.FileCount,
-			colorize("Tamanho:", ColorGray), float64(ctx.TotalSize)/1024/1024)
+			colorize("Tamanho:", ColorGray), float64(ctx.TotalSize)/1024/1024,
+			colorize("Tokens:", ColorGray), formatTokenCount(estimatedTokens))
+	}
+
+	fmt.Println()
+	fmt.Println(colorize(strings.Repeat("─", 60), ColorGray))
+	fmt.Printf("  %s ~%s tokens/turno\n",
+		colorize("Total injetado:", ColorCyan+ColorBold),
+		colorize(formatTokenCount(totalTokens), ColorYellow))
+	fmt.Printf("  %s Contextos são injetados como system prompt e cacheados\n",
+		colorize("💡", ""))
+	fmt.Printf("     %s Anthropic: cache_control ephemeral (~90%% de desconto)\n",
+		colorize("•", ColorGray))
+	fmt.Printf("     %s OpenAI: prompt caching automático (~50%% de desconto)\n",
+		colorize("•", ColorGray))
+
+	if totalTokens > 10000 {
+		fmt.Printf("\n  %s Contexto grande! Considere usar chunks (/context attach %s --chunks 1,2)\n",
+			colorize("⚠", ColorYellow),
+			contexts[0].Name)
 	}
 
 	fmt.Println()
 	return nil
+}
+
+// formatTokenCount formats a token count with K/M suffixes for readability.
+func formatTokenCount(tokens int64) string {
+	if tokens >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(tokens)/1_000_000)
+	}
+	if tokens >= 1_000 {
+		return fmt.Sprintf("%.1fK", float64(tokens)/1_000)
+	}
+	return fmt.Sprintf("%d", tokens)
 }
 
 // handleExport exporta um contexto
