@@ -54,6 +54,30 @@ type ToolCallRecord struct {
 	Error  error
 }
 
+// AgentEventType identifies the kind of progress event emitted by the dispatcher.
+type AgentEventType int
+
+const (
+	// AgentEventStarted is emitted when an agent begins execution.
+	AgentEventStarted AgentEventType = iota
+	// AgentEventCompleted is emitted when an agent finishes successfully.
+	AgentEventCompleted
+	// AgentEventFailed is emitted when an agent finishes with an error.
+	AgentEventFailed
+)
+
+// AgentEvent represents a real-time progress event from the dispatcher.
+type AgentEvent struct {
+	Type     AgentEventType
+	CallID   string
+	Agent    AgentType
+	Task     string
+	Duration time.Duration // only set for Completed/Failed
+	Error    error         // only set for Failed
+	Index    int           // 0-based index of this agent in the batch
+	Total    int           // total agents in the batch
+}
+
 // WorkerAgent is the interface every specialized agent must implement.
 type WorkerAgent interface {
 	// Type returns the agent's type identifier.

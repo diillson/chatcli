@@ -80,18 +80,42 @@ func (d *Dispatcher) SetPolicyChecker(pc PolicyChecker) {
 // Independent calls run concurrently (up to MaxWorkers), dependent calls run sequentially.
 // Returns results in the same order as the input calls.
 func (d *Dispatcher) Dispatch(ctx context.Context, calls []AgentCall) []AgentResult {
+	return d.DispatchWithProgress(ctx, calls, nil)
+}
+
+// DispatchWithProgress executes a batch of agent calls and sends real-time
+// AgentEvent notifications to the provided channel. The channel is closed
+// when all agents finish. If progressCh is nil, behaves like Dispatch.
+func (d *Dispatcher) DispatchWithProgress(ctx context.Context, calls []AgentCall, progressCh chan<- AgentEvent) []AgentResult {
 	if len(calls) == 0 {
+		if progressCh != nil {
+			close(progressCh)
+		}
 		return nil
 	}
 	if !d.config.ParallelMode || len(calls) == 1 {
-		return d.dispatchSequential(ctx, calls)
+		results := d.dispatchSequentialWithProgress(ctx, calls, progressCh)
+		if progressCh != nil {
+			close(progressCh)
+		}
+		return results
 	}
-	return d.dispatchParallel(ctx, calls)
+	results := d.dispatchParallelWithProgress(ctx, calls, progressCh)
+	if progressCh != nil {
+		close(progressCh)
+	}
+	return results
 }
 
 // dispatchSequential executes agent calls one by one.
 func (d *Dispatcher) dispatchSequential(ctx context.Context, calls []AgentCall) []AgentResult {
+	return d.dispatchSequentialWithProgress(ctx, calls, nil)
+}
+
+// dispatchSequentialWithProgress executes agent calls one by one, emitting progress events.
+func (d *Dispatcher) dispatchSequentialWithProgress(ctx context.Context, calls []AgentCall, progressCh chan<- AgentEvent) []AgentResult {
 	results := make([]AgentResult, len(calls))
+	total := len(calls)
 
 	for i, call := range calls {
 		d.logger.Info("Dispatching agent (sequential)",
@@ -99,6 +123,17 @@ func (d *Dispatcher) dispatchSequential(ctx context.Context, calls []AgentCall) 
 			zap.String("task", truncateStr(call.Task, 80)),
 			zap.String("callID", call.ID),
 		)
+
+		if progressCh != nil {
+			progressCh <- AgentEvent{
+				Type:   AgentEventStarted,
+				CallID: call.ID,
+				Agent:  call.Agent,
+				Task:   call.Task,
+				Index:  i,
+				Total:  total,
+			}
+		}
 
 		result := d.executeAgent(ctx, call)
 		results[i] = result
@@ -109,6 +144,23 @@ func (d *Dispatcher) dispatchSequential(ctx context.Context, calls []AgentCall) 
 			zap.Duration("duration", result.Duration),
 			zap.Bool("hasError", result.Error != nil),
 		)
+
+		if progressCh != nil {
+			evtType := AgentEventCompleted
+			if result.Error != nil {
+				evtType = AgentEventFailed
+			}
+			progressCh <- AgentEvent{
+				Type:     evtType,
+				CallID:   result.CallID,
+				Agent:    result.Agent,
+				Task:     result.Task,
+				Duration: result.Duration,
+				Error:    result.Error,
+				Index:    i,
+				Total:    total,
+			}
+		}
 	}
 
 	return results
@@ -116,9 +168,15 @@ func (d *Dispatcher) dispatchSequential(ctx context.Context, calls []AgentCall) 
 
 // dispatchParallel executes agent calls concurrently with a semaphore.
 func (d *Dispatcher) dispatchParallel(ctx context.Context, calls []AgentCall) []AgentResult {
+	return d.dispatchParallelWithProgress(ctx, calls, nil)
+}
+
+// dispatchParallelWithProgress executes agent calls concurrently, emitting progress events.
+func (d *Dispatcher) dispatchParallelWithProgress(ctx context.Context, calls []AgentCall, progressCh chan<- AgentEvent) []AgentResult {
 	results := make([]AgentResult, len(calls))
 	sem := make(chan struct{}, d.config.MaxWorkers) // semaphore
 	var wg sync.WaitGroup
+	total := len(calls)
 
 	for i, call := range calls {
 		wg.Add(1)
@@ -130,11 +188,23 @@ func (d *Dispatcher) dispatchParallel(ctx context.Context, calls []AgentCall) []
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
 			case <-ctx.Done():
-				results[idx] = AgentResult{
+				result := AgentResult{
 					CallID: ac.ID,
 					Agent:  ac.Agent,
 					Task:   ac.Task,
 					Error:  ctx.Err(),
+				}
+				results[idx] = result
+				if progressCh != nil {
+					progressCh <- AgentEvent{
+						Type:   AgentEventFailed,
+						CallID: ac.ID,
+						Agent:  ac.Agent,
+						Task:   ac.Task,
+						Error:  ctx.Err(),
+						Index:  idx,
+						Total:  total,
+					}
 				}
 				return
 			}
@@ -146,6 +216,17 @@ func (d *Dispatcher) dispatchParallel(ctx context.Context, calls []AgentCall) []
 				zap.Int("workerSlot", idx),
 			)
 
+			if progressCh != nil {
+				progressCh <- AgentEvent{
+					Type:   AgentEventStarted,
+					CallID: ac.ID,
+					Agent:  ac.Agent,
+					Task:   ac.Task,
+					Index:  idx,
+					Total:  total,
+				}
+			}
+
 			result := d.executeAgent(ctx, ac)
 			results[idx] = result
 
@@ -155,6 +236,23 @@ func (d *Dispatcher) dispatchParallel(ctx context.Context, calls []AgentCall) []
 				zap.Duration("duration", result.Duration),
 				zap.Bool("hasError", result.Error != nil),
 			)
+
+			if progressCh != nil {
+				evtType := AgentEventCompleted
+				if result.Error != nil {
+					evtType = AgentEventFailed
+				}
+				progressCh <- AgentEvent{
+					Type:     evtType,
+					CallID:   result.CallID,
+					Agent:    result.Agent,
+					Task:     result.Task,
+					Duration: result.Duration,
+					Error:    result.Error,
+					Index:    idx,
+					Total:    total,
+				}
+			}
 		}(i, call)
 	}
 
