@@ -50,9 +50,11 @@ func (cb *ContextBuilder) BuildSystemPromptPrefix() string {
 	}
 
 	// Memory context (MEMORY.md + daily notes)
-	memoryContent := cb.memory.GetMemoryContext()
-	if memoryContent != "" {
-		parts = append(parts, "# Memory\n\n"+memoryContent)
+	if cb.memory != nil {
+		memoryContent := cb.memory.GetMemoryContext()
+		if memoryContent != "" {
+			parts = append(parts, "# Memory\n\n"+memoryContent)
+		}
 	}
 
 	content := ""
