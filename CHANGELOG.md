@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.68.0](https://github.com/diillson/chatcli/compare/v1.67.0...v1.68.0) (2026-03-07)
+
+
+### Features
+
+* **config:** implement documented env vars for bootstrap, memory, and worker config ([#609](https://github.com/diillson/chatcli/issues/609)) ([1791aa0](https://github.com/diillson/chatcli/commit/1791aa015c0c6c2cf717ea2c4fc1416fc541f90f))
+
 ## [1.67.0](https://github.com/diillson/chatcli/compare/v1.66.0...v1.67.0) (2026-03-06)
 
 
