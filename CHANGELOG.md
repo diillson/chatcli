@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.68.2](https://github.com/diillson/chatcli/compare/v1.68.1...v1.68.2) (2026-03-07)
+
+
+### Bug Fixes
+
+* **ui:** add live progress display for multi-agent parallel dispatch ([#613](https://github.com/diillson/chatcli/issues/613)) ([87ceab4](https://github.com/diillson/chatcli/commit/87ceab4fd64d3458c1ba37514367325701c0faf6))
+
 ## [1.68.1](https://github.com/diillson/chatcli/compare/v1.68.0...v1.68.1) (2026-03-07)
 
 
