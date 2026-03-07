@@ -2787,6 +2787,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getSkillSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/memory") {
+		return cli.getMemorySuggestions(d)
+	}
+
 	if strings.HasPrefix(lineBeforeCursor, "/agent") {
 		return cli.getAgentSuggestions(d)
 	}

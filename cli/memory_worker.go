@@ -30,7 +30,7 @@ const (
 	// Minimum time between memory extraction runs.
 	memoryCooldown = 2 * time.Minute
 	// Timeout for the LLM call that extracts memory.
-	memoryExtractTimeout = 30 * time.Second
+	memoryExtractTimeout = 60 * time.Second
 )
 
 func newMemoryWorker(cli *ChatCLI) *memoryWorker {
@@ -120,15 +120,19 @@ func (mw *memoryWorker) maybeExtract() {
 
 	err := mw.extractAndSave(messagesToProcess)
 
-	mw.mu.Lock()
-	mw.lastProcessedIdx = historyLen
-	mw.lastRunTime = time.Now()
-	mw.mu.Unlock()
-
 	if err != nil {
 		mw.logger.Warn("Memory worker: extraction failed", zap.Error(err))
+		// On failure, only update lastRunTime (cooldown) but NOT lastProcessedIdx,
+		// so these messages will be retried on the next run.
+		mw.mu.Lock()
+		mw.lastRunTime = time.Now()
+		mw.mu.Unlock()
 	} else {
 		mw.logger.Debug("Memory worker: annotations saved successfully")
+		mw.mu.Lock()
+		mw.lastProcessedIdx = historyLen
+		mw.lastRunTime = time.Now()
+		mw.mu.Unlock()
 		// Invalidate context builder cache so next prompt picks up new memory
 		if mw.cli.contextBuilder != nil {
 			mw.cli.contextBuilder.InvalidateCache()
@@ -157,36 +161,62 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 	// Read existing long-term memory for context
 	existingMemory := mw.cli.memoryStore.ReadLongTerm()
 
-	extractPrompt := memoryExtractionPrompt
+	// Build a single user prompt that combines instructions + context + conversation.
+	// All providers use the `prompt` param as the user message fallback,
+	// so we put everything in ONE user message to avoid duplication issues.
+	var fullPrompt strings.Builder
+	fullPrompt.WriteString(memoryExtractionPrompt)
+	fullPrompt.WriteString("\n\n---\n\n")
 	if existingMemory != "" {
-		extractPrompt += "\n\nEXISTING LONG-TERM MEMORY (do NOT duplicate these facts):\n\n" + existingMemory
+		fullPrompt.WriteString("EXISTING LONG-TERM MEMORY (do NOT duplicate these facts):\n\n")
+		fullPrompt.WriteString(existingMemory)
+		fullPrompt.WriteString("\n\n---\n\n")
 	}
-	extractPrompt += "\n\nCONVERSATION SEGMENT TO ANALYZE:\n\n" + sb.String()
+	fullPrompt.WriteString("CONVERSATION SEGMENT TO ANALYZE:\n\n")
+	fullPrompt.WriteString(sb.String())
 
 	ctx, cancel := context.WithTimeout(context.Background(), memoryExtractTimeout)
 	defer cancel()
 
+	prompt := fullPrompt.String()
+
+	// Pass prompt as both the prompt param and the last user message in history.
+	// This ensures all providers handle it correctly:
+	// - Providers that use history: see system + user messages
+	// - Providers that use prompt param: see the full prompt
+	// - The fallback check (prompt == history[last].Content) prevents duplication
 	history := []models.Message{
-		{Role: "user", Content: extractPrompt},
+		{Role: "system", Content: memoryExtractionPrompt},
+		{Role: "user", Content: prompt},
 	}
 
-	response, err := mw.cli.Client.SendPrompt(ctx, extractPrompt, history, 0)
+	response, err := mw.cli.Client.SendPrompt(ctx, prompt, history, 0)
 	if err != nil {
 		return fmt.Errorf("memory extraction LLM call failed: %w", err)
 	}
 
 	response = strings.TrimSpace(response)
-	if response == "" || response == "NOTHING_NEW" {
+	if response == "" || isNothingNew(response) {
+		mw.logger.Debug("Memory worker: LLM returned nothing new")
 		return nil
 	}
+
+	mw.logger.Debug("Memory worker: LLM response received",
+		zap.Int("response_len", len(response)),
+		zap.String("response_preview", truncateForLog(response, 200)),
+	)
 
 	// Parse response: split into DAILY and LONGTERM sections
 	dailyContent, longTermContent := parseMemoryResponse(response)
 
+	saved := false
 	// Write daily note
 	if dailyContent != "" {
 		if err := mw.cli.memoryStore.WriteDailyNote(dailyContent); err != nil {
 			mw.logger.Warn("Failed to write daily note", zap.Error(err))
+		} else {
+			saved = true
+			mw.logger.Debug("Memory worker: daily note written")
 		}
 	}
 
@@ -194,54 +224,131 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 	if longTermContent != "" {
 		if err := mw.cli.memoryStore.AppendLongTerm("\n" + longTermContent); err != nil {
 			mw.logger.Warn("Failed to append long-term memory", zap.Error(err))
+		} else {
+			saved = true
+			mw.logger.Debug("Memory worker: long-term memory updated")
 		}
+	}
+
+	if !saved && dailyContent == "" && longTermContent == "" {
+		mw.logger.Debug("Memory worker: parser returned empty sections",
+			zap.String("response_preview", truncateForLog(response, 300)),
+		)
 	}
 
 	return nil
 }
 
-// showStatus shows a subtle gray message (non-blocking, no newline disruption).
-func (mw *memoryWorker) showStatus(msg string) {
-	// Only show if user is idle (not mid-execution)
-	if mw.cli.isExecuting.Load() {
-		return
+func truncateForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
 	}
-	fmt.Printf("\r  %s", colorize("⟳ "+msg, ColorGray))
+	return s[:maxLen] + "..."
+}
+
+// showStatus logs the memory worker status. Writing directly to the terminal
+// from a background goroutine corrupts go-prompt's display on all platforms
+// (the user would need to press Enter to get the prompt back), so we only log.
+func (mw *memoryWorker) showStatus(msg string) {
+	mw.logger.Debug("Memory worker: " + msg)
 }
 
 func (mw *memoryWorker) clearStatus() {
-	if mw.cli.isExecuting.Load() {
-		return
-	}
-	// Clear the status line
-	fmt.Print("\r\033[K")
+	// no-op: status is only logged, not written to terminal
 }
 
 // parseMemoryResponse splits the LLM response into daily notes and long-term facts.
+// Handles variations LLMs may produce: "## DAILY", "## Daily", "##DAILY", "# DAILY", etc.
 func parseMemoryResponse(response string) (daily string, longTerm string) {
-	// Look for section markers
-	dailyIdx := strings.Index(response, "## DAILY")
-	longTermIdx := strings.Index(response, "## LONGTERM")
+	upper := strings.ToUpper(response)
+
+	// Find section markers (case-insensitive, tolerant of spacing)
+	dailyIdx := findSectionIndex(upper, "DAILY")
+	longTermIdx := findSectionIndex(upper, "LONGTERM")
+	if longTermIdx < 0 {
+		longTermIdx = findSectionIndex(upper, "LONG-TERM")
+	}
+	if longTermIdx < 0 {
+		longTermIdx = findSectionIndex(upper, "LONG_TERM")
+	}
+
+	// Extract content after the header line
+	extractAfter := func(idx int) string {
+		// Find the end of the header line
+		nlIdx := strings.Index(response[idx:], "\n")
+		if nlIdx < 0 {
+			return ""
+		}
+		return strings.TrimSpace(response[idx+nlIdx+1:])
+	}
 
 	switch {
 	case dailyIdx >= 0 && longTermIdx >= 0:
 		if dailyIdx < longTermIdx {
-			daily = strings.TrimSpace(response[dailyIdx+len("## DAILY") : longTermIdx])
-			longTerm = strings.TrimSpace(response[longTermIdx+len("## LONGTERM"):])
+			// DAILY comes first: content between DAILY header and LONGTERM marker
+			nlIdx := strings.Index(response[dailyIdx:], "\n")
+			if nlIdx >= 0 {
+				daily = strings.TrimSpace(response[dailyIdx+nlIdx+1 : longTermIdx])
+			}
+			longTerm = extractAfter(longTermIdx)
 		} else {
-			longTerm = strings.TrimSpace(response[longTermIdx+len("## LONGTERM") : dailyIdx])
-			daily = strings.TrimSpace(response[dailyIdx+len("## DAILY"):])
+			nlIdx := strings.Index(response[longTermIdx:], "\n")
+			if nlIdx >= 0 {
+				longTerm = strings.TrimSpace(response[longTermIdx+nlIdx+1 : dailyIdx])
+			}
+			daily = extractAfter(dailyIdx)
 		}
 	case dailyIdx >= 0:
-		daily = strings.TrimSpace(response[dailyIdx+len("## DAILY"):])
+		daily = extractAfter(dailyIdx)
 	case longTermIdx >= 0:
-		longTerm = strings.TrimSpace(response[longTermIdx+len("## LONGTERM"):])
+		longTerm = extractAfter(longTermIdx)
 	default:
 		// No markers — treat everything as daily note
 		daily = response
 	}
 
+	// Filter out NOTHING_NEW from both sections
+	if isNothingNew(daily) {
+		daily = ""
+	}
+	if isNothingNew(longTerm) {
+		longTerm = ""
+	}
+
 	return daily, longTerm
+}
+
+// isNothingNew checks if content is a variation of "NOTHING_NEW" that the LLM
+// may produce (with extra whitespace, different casing, underscores, hyphens, dots, etc).
+func isNothingNew(s string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(s))
+	// Strip trailing punctuation the LLM sometimes adds
+	normalized = strings.TrimRight(normalized, ".!,;:")
+	normalized = strings.TrimSpace(normalized)
+	switch normalized {
+	case "NOTHING_NEW", "NOTHING NEW", "NOTHING-NEW", "N/A", "NONE", "NA":
+		return true
+	}
+	return false
+}
+
+// findSectionIndex finds a markdown section header like "## KEYWORD" (case-insensitive).
+// Tolerates "# KEYWORD", "## KEYWORD", "##KEYWORD", "**KEYWORD**".
+func findSectionIndex(upperResponse string, keyword string) int {
+	patterns := []string{
+		"## " + keyword,
+		"##" + keyword,
+		"# " + keyword,
+		"**" + keyword + "**",
+	}
+	best := -1
+	for _, p := range patterns {
+		idx := strings.Index(upperResponse, p)
+		if idx >= 0 && (best < 0 || idx < best) {
+			best = idx
+		}
+	}
+	return best
 }
 
 const memoryExtractionPrompt = `You are a memory annotation system. Analyze this conversation segment and extract annotations.
@@ -262,6 +369,7 @@ Write ONLY genuinely new facts that should be remembered permanently. These are:
 - User preferences expressed
 - Important file paths or project structure insights
 - Technical constraints or gotchas learned
+- User data with name, age, location, etc.
 
 RULES:
 - If nothing new was learned for LONGTERM, write "NOTHING_NEW" in that section

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	prompt "github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -229,6 +230,56 @@ func (cli *ChatCLI) listMemoryNotes() {
 		}
 	}
 	fmt.Println()
+}
+
+// getMemorySuggestions provides autocomplete suggestions for /memory subcommands.
+func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+
+	// "/memory" typed but no space yet — suggest the command itself
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{
+			{Text: "/memory", Description: "Ver/carregar anotações de memória"},
+		}
+	}
+
+	// "/memory " — suggest subcommands
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		suggestions := []prompt.Suggest{
+			{Text: "today", Description: "Notas de hoje"},
+			{Text: "yesterday", Description: "Notas de ontem"},
+			{Text: "week", Description: "Notas dos últimos 7 dias"},
+			{Text: "longterm", Description: "Memória de longo prazo (MEMORY.md)"},
+			{Text: "list", Description: "Listar todos os arquivos de memória"},
+			{Text: "load", Description: "Carregar notas de uma data no contexto (ex: load yesterday)"},
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	// "/memory load " — suggest date options
+	if len(args) >= 2 && args[1] == "load" {
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			suggestions := []prompt.Suggest{
+				{Text: "today", Description: "Carregar notas de hoje"},
+				{Text: "yesterday", Description: "Carregar notas de ontem"},
+			}
+			// Add recent dates from existing notes
+			if cli.memoryStore != nil {
+				notes := cli.memoryStore.GetRecentDailyNotes(7)
+				for _, note := range notes {
+					dateStr := note.Date.Format("2006-01-02")
+					suggestions = append(suggestions, prompt.Suggest{
+						Text:        dateStr,
+						Description: fmt.Sprintf("Notas de %s", note.Date.Format("02/Jan")),
+					})
+				}
+			}
+			return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+		}
+	}
+
+	return nil
 }
 
 func parseFlexibleDate(s string) (time.Time, error) {

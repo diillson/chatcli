@@ -1,7 +1,11 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -86,10 +90,17 @@ func (cli *ChatCLI) showRewindMenu() bool {
 	fmt.Println()
 	fmt.Printf("  %s ", colorize("Select [1-"+fmt.Sprintf("%d", len(cli.checkpoints))+"] or (q)uit:", ColorGray))
 
-	// Read selection via stdin
-	var input string
-	_, _ = fmt.Scanln(&input)
-	input = strings.TrimSpace(input)
+	// Restore terminal from raw mode so stdin reads work (go-prompt uses raw mode).
+	// On Windows, stty is not available but the terminal is already in a usable state.
+	if runtime.GOOS != "windows" {
+		cmd := exec.Command("stty", "sane")
+		cmd.Stdin = os.Stdin
+		_ = cmd.Run()
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	rawInput, _ := reader.ReadString('\n')
+	input := strings.TrimSpace(rawInput)
 
 	if input == "q" || input == "" {
 		fmt.Println(colorize("  Rewind cancelled.", ColorGray))
