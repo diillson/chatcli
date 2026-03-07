@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.68.1](https://github.com/diillson/chatcli/compare/v1.68.0...v1.68.1) (2026-03-07)
+
+
+### Bug Fixes
+
+* **cli:** memory worker saving, rewind input, memory autocomplete, NOTHING_NEW filtering ([#611](https://github.com/diillson/chatcli/issues/611)) ([4b3ee3e](https://github.com/diillson/chatcli/commit/4b3ee3ef509fc44243686c29646db8cf9097fa25))
+
 ## [1.68.0](https://github.com/diillson/chatcli/compare/v1.67.0...v1.68.0) (2026-03-07)
 
 
