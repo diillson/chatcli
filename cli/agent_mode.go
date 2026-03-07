@@ -1990,12 +1990,46 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					renderer.RenderTimelineEvent("🤖", fmt.Sprintf("[%s] #%d", ac.Agent, i+1), truncateForUI(ac.Task, 120), agent.ColorCyan)
 				}
 
-				// Dispatch with spinner feedback
+				// Dispatch with live progress feedback
 				a.agentsLaunched += len(agentCalls)
-				agentLabel := fmt.Sprintf("Aguardando %d %s...", n, agentWord)
+
+				// Build progress state for live display
+				agentSlots := make([]struct{ CallID, Agent, Task string }, n)
+				for idx, ac := range agentCalls {
+					agentSlots[idx] = struct{ CallID, Agent, Task string }{ac.ID, string(ac.Agent), ac.Task}
+				}
+				progressState := metrics.NewAgentProgressState(n, agentSlots)
+
+				// Progress event channel - consumed by a goroutine that updates state
+				progressCh := make(chan workers.AgentEvent, n*2)
+				go func() {
+					for evt := range progressCh {
+						switch evt.Type {
+						case workers.AgentEventStarted:
+							progressState.MarkStarted(evt.CallID)
+						case workers.AgentEventCompleted:
+							progressState.MarkCompleted(evt.CallID, evt.Duration)
+						case workers.AgentEventFailed:
+							errMsg := ""
+							if evt.Error != nil {
+								errMsg = evt.Error.Error()
+							}
+							progressState.MarkFailed(evt.CallID, evt.Duration, errMsg)
+						}
+					}
+				}()
+
+				// Track how many lines the progress display uses for clearing
+				prevLines := 0
 				a.turnTimer.Start(ctx, func(d time.Duration) {
-					fmt.Print(metrics.FormatTimerStatus(d, modelName, agentLabel))
+					if prevLines > 0 {
+						fmt.Print(metrics.ClearLines(prevLines))
+					}
+					output := metrics.FormatDispatchProgress(progressState, modelName)
+					fmt.Print(output)
+					prevLines = progressState.LineCount()
 				})
+
 				// Give the policy adapter access to the spinner and stdin
 				// channel so it can pause/resume around interactive
 				// security prompts and read input without orphaning goroutines.
@@ -2003,8 +2037,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					a.policyAdapter.setSpinner(a.turnTimer)
 					a.policyAdapter.setStdinCh(a.stdinLines)
 				}
-				agentResults := a.agentDispatcher.Dispatch(ctx, agentCalls)
+				agentResults := a.agentDispatcher.DispatchWithProgress(ctx, agentCalls, progressCh)
 				a.turnTimer.Stop()
+				// Clear the live progress display
+				if prevLines > 0 {
+					fmt.Print(metrics.ClearLines(prevLines))
+				}
 				fmt.Print(metrics.ClearLine())
 
 				// Render results and count internal tool calls
