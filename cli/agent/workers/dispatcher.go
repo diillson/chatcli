@@ -107,11 +107,6 @@ func (d *Dispatcher) DispatchWithProgress(ctx context.Context, calls []AgentCall
 	return results
 }
 
-// dispatchSequential executes agent calls one by one.
-func (d *Dispatcher) dispatchSequential(ctx context.Context, calls []AgentCall) []AgentResult {
-	return d.dispatchSequentialWithProgress(ctx, calls, nil)
-}
-
 // dispatchSequentialWithProgress executes agent calls one by one, emitting progress events.
 func (d *Dispatcher) dispatchSequentialWithProgress(ctx context.Context, calls []AgentCall, progressCh chan<- AgentEvent) []AgentResult {
 	results := make([]AgentResult, len(calls))
@@ -164,11 +159,6 @@ func (d *Dispatcher) dispatchSequentialWithProgress(ctx context.Context, calls [
 	}
 
 	return results
-}
-
-// dispatchParallel executes agent calls concurrently with a semaphore.
-func (d *Dispatcher) dispatchParallel(ctx context.Context, calls []AgentCall) []AgentResult {
-	return d.dispatchParallelWithProgress(ctx, calls, nil)
 }
 
 // dispatchParallelWithProgress executes agent calls concurrently, emitting progress events.
