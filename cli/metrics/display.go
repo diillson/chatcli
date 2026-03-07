@@ -106,7 +106,7 @@ type AgentSlot struct {
 type AgentSlotStatus int
 
 const (
-	SlotPending    AgentSlotStatus = iota
+	SlotPending AgentSlotStatus = iota
 	SlotRunning
 	SlotCompleted
 	SlotFailed
