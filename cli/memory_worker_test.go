@@ -47,12 +47,50 @@ func TestParseMemoryResponse_NothingNew(t *testing.T) {
 
 	daily, longTerm := parseMemoryResponse(response)
 
-	// Should be treated as daily (no markers)
-	if daily != "NOTHING_NEW" {
-		t.Errorf("unexpected daily: %q", daily)
+	// NOTHING_NEW without markers should be filtered from daily too
+	if daily != "" {
+		t.Errorf("expected empty daily (NOTHING_NEW filtered), got: %q", daily)
 	}
 	if longTerm != "" {
 		t.Errorf("expected empty longterm, got: %q", longTerm)
+	}
+}
+
+func TestParseMemoryResponse_NothingNewVariations(t *testing.T) {
+	variations := []string{
+		"NOTHING_NEW",
+		"nothing_new",
+		"Nothing_New",
+		"  NOTHING_NEW  ",
+		"NOTHING_NEW.",
+		"Nothing new",
+		"N/A",
+		"None",
+	}
+	for _, v := range variations {
+		daily, longTerm := parseMemoryResponse(v)
+		if daily != "" {
+			t.Errorf("parseMemoryResponse(%q): expected empty daily, got: %q", v, daily)
+		}
+		if longTerm != "" {
+			t.Errorf("parseMemoryResponse(%q): expected empty longterm, got: %q", v, longTerm)
+		}
+	}
+}
+
+func TestIsNothingNew(t *testing.T) {
+	positives := []string{"NOTHING_NEW", "nothing_new", "Nothing New", "NOTHING-NEW", "N/A", "None", "NA", "NOTHING_NEW.", " none "}
+	for _, s := range positives {
+		if !isNothingNew(s) {
+			t.Errorf("isNothingNew(%q) should be true", s)
+		}
+	}
+
+	negatives := []string{"- Read main.go", "Some actual content", "NOTHING_NEW\n- but also this", ""}
+	for _, s := range negatives {
+		if isNothingNew(s) {
+			t.Errorf("isNothingNew(%q) should be false", s)
+		}
 	}
 }
 
@@ -68,8 +106,43 @@ NOTHING_NEW`
 	if daily == "" {
 		t.Error("expected daily content")
 	}
-	if longTerm != "NOTHING_NEW" {
-		t.Errorf("unexpected longterm: %q", longTerm)
+	// NOTHING_NEW in longterm should be filtered out
+	if longTerm != "" {
+		t.Errorf("expected empty longterm (NOTHING_NEW filtered), got: %q", longTerm)
+	}
+}
+
+func TestParseMemoryResponse_CaseInsensitive(t *testing.T) {
+	response := `## Daily
+- Read config files
+
+## Longterm
+- Uses PostgreSQL 16`
+
+	daily, longTerm := parseMemoryResponse(response)
+
+	if daily == "" {
+		t.Error("expected daily content with mixed-case header")
+	}
+	if longTerm == "" {
+		t.Error("expected longterm content with mixed-case header")
+	}
+}
+
+func TestParseMemoryResponse_NoSpaceAfterHash(t *testing.T) {
+	response := `##DAILY
+- Fixed the bug
+
+##LONGTERM
+- Pattern: always use context.WithTimeout`
+
+	daily, longTerm := parseMemoryResponse(response)
+
+	if daily == "" {
+		t.Error("expected daily content with ##DAILY (no space)")
+	}
+	if longTerm == "" {
+		t.Error("expected longterm content with ##LONGTERM (no space)")
 	}
 }
 
