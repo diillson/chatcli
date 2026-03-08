@@ -27,7 +27,7 @@ type WorkerReActConfig struct {
 
 // DefaultWorkerMaxTurns is the default maximum number of ReAct turns per worker.
 // Can be overridden via CHATCLI_AGENT_WORKER_MAX_TURNS env var.
-const DefaultWorkerMaxTurns = 10
+const DefaultWorkerMaxTurns = 30
 
 // MaxWorkerOutputBytes is the maximum size of worker output to prevent token overflow.
 const MaxWorkerOutputBytes = 30 * 1024
@@ -73,6 +73,10 @@ func RunWorkerReAct(
 	for _, cmd := range config.AllowedCommands {
 		allowed[cmd] = true
 	}
+
+	// --- Failure tracking for reflection ---
+	consecutiveFailures := 0
+	blockedCmds := make(map[string]int) // cmd → count of times blocked/failed
 
 	for turn := 0; turn < maxTurns; turn++ {
 		// Check cancellation
@@ -129,14 +133,24 @@ func RunWorkerReAct(
 				validated = append(validated, validatedTC{index: i, tc: tc, blocked: true, msg: fmt.Sprintf("[ERROR] Failed to parse tool call: %v", parseErr)})
 				continue
 			}
+
+			// Check if this command has been blocked too many times
+			if blockedCmds[subcmd] >= maxBlockedRetries {
+				allToolCalls = append(allToolCalls, ToolCallRecord{Name: subcmd, Args: tc.Args, Error: fmt.Errorf("command %q permanently blocked after %d failed attempts", subcmd, maxBlockedRetries)})
+				validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, blocked: true, msg: fmt.Sprintf("[PERMANENTLY BLOCKED] Command %q has failed %d times. You MUST use a completely different approach. Do NOT retry this command.", subcmd, maxBlockedRetries)})
+				continue
+			}
+
 			if !allowed[subcmd] {
 				allToolCalls = append(allToolCalls, ToolCallRecord{Name: subcmd, Args: tc.Args, Error: fmt.Errorf("command %q not allowed for this agent", subcmd)})
 				validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, blocked: true, msg: fmt.Sprintf("[BLOCKED] Command %q is not allowed for this agent. Allowed: %v", subcmd, config.AllowedCommands)})
+				blockedCmds[subcmd]++
 				continue
 			}
 			if config.ReadOnly && isWriteCommand(subcmd) {
 				allToolCalls = append(allToolCalls, ToolCallRecord{Name: subcmd, Args: tc.Args, Error: fmt.Errorf("write command %q blocked for read-only agent", subcmd)})
 				validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, blocked: true, msg: fmt.Sprintf("[BLOCKED] This agent is read-only and cannot execute %q", subcmd)})
+				blockedCmds[subcmd]++
 				continue
 			}
 			if isWriteCommand(subcmd) {
@@ -158,6 +172,7 @@ func RunWorkerReAct(
 			index  int
 			record ToolCallRecord
 			output string
+			failed bool
 		}
 		results := make([]execResult, len(validated))
 
@@ -170,7 +185,7 @@ func RunWorkerReAct(
 
 		executeOne := func(v validatedTC) execResult {
 			if v.blocked {
-				return execResult{index: v.index, output: v.msg + "\n"}
+				return execResult{index: v.index, output: v.msg + "\n", failed: true}
 			}
 
 			// --- POLICY CHECK ---
@@ -187,7 +202,7 @@ func RunWorkerReAct(
 						zap.String("subcmd", v.subcmd),
 						zap.String("message", msg),
 					)
-					return execResult{index: v.index, record: record, output: blockedMsg + "\n"}
+					return execResult{index: v.index, record: record, output: blockedMsg + "\n", failed: true}
 				}
 			}
 
@@ -222,15 +237,17 @@ func RunWorkerReAct(
 			}
 
 			record := ToolCallRecord{Name: v.subcmd, Args: v.tc.Args, Output: output}
+			hasFailed := false
 			if execErr != nil {
 				record.Error = execErr
+				hasFailed = true
 			}
 
 			out := fmt.Sprintf("[%s] %s\n", v.subcmd, output)
 			if execErr != nil {
 				out += fmt.Sprintf("[ERROR] %v\n", execErr)
 			}
-			return execResult{index: v.index, record: record, output: out}
+			return execResult{index: v.index, record: record, output: out, failed: hasFailed}
 		}
 
 		if canParallelize {
@@ -239,7 +256,7 @@ func RunWorkerReAct(
 			var mu sync.Mutex
 			for i, v := range validated {
 				if v.blocked {
-					results[i] = execResult{index: v.index, output: v.msg + "\n"}
+					results[i] = execResult{index: v.index, output: v.msg + "\n", failed: true}
 					continue
 				}
 				wg.Add(1)
@@ -258,20 +275,83 @@ func RunWorkerReAct(
 			}
 		}
 
-		// Aggregate results in original order
+		// Aggregate results in original order and count failures
 		var turnOutput strings.Builder
+		turnFailures := 0
+		turnBlocked := 0
+		var failedCmds []string
 		for _, r := range results {
 			if r.record.Name != "" {
 				allToolCalls = append(allToolCalls, r.record)
 			}
 			turnOutput.WriteString(r.output)
+			if r.failed {
+				turnFailures++
+				if r.record.Name != "" {
+					failedCmds = append(failedCmds, r.record.Name)
+					// Track blocked/failed commands for repeat detection
+					if r.record.Error != nil {
+						blockedCmds[r.record.Name]++
+					}
+				}
+			}
 		}
 
-		// Feed results back to LLM
+		// Count blocked-only results (no runnable succeeded)
+		for _, v := range validated {
+			if v.blocked {
+				turnBlocked++
+			}
+		}
+
+		// Build feedback with optional reflection prompt
 		feedback := turnOutput.String()
 		if len(feedback) > MaxWorkerOutputBytes {
 			feedback = feedback[:MaxWorkerOutputBytes] + "\n... [feedback truncated]"
 		}
+
+		// --- REFLECTION MECHANISM ---
+		if turnFailures > 0 {
+			consecutiveFailures++
+
+			// Build reflection prompt based on failure severity
+			var reflection strings.Builder
+			reflection.WriteString("\n\n")
+
+			if turnBlocked == len(validated) {
+				// ALL tool calls in this turn were blocked/failed
+				reflection.WriteString(reflectionAllBlockedPrompt)
+			} else if consecutiveFailures >= 3 {
+				// Multiple consecutive turns with failures — escalate
+				reflection.WriteString(fmt.Sprintf(reflectionEscalatePrompt, consecutiveFailures))
+			} else {
+				// Some failures — standard reflection
+				reflection.WriteString(reflectionStandardPrompt)
+			}
+
+			// Add blacklist of commands that have failed too many times
+			var blacklisted []string
+			for cmd, count := range blockedCmds {
+				if count >= maxBlockedRetries {
+					blacklisted = append(blacklisted, cmd)
+				}
+			}
+			if len(blacklisted) > 0 {
+				reflection.WriteString(fmt.Sprintf("\n\nBLACKLISTED COMMANDS (do NOT use): %s", strings.Join(blacklisted, ", ")))
+			}
+
+			feedback += reflection.String()
+
+			logger.Debug("Reflection prompt injected",
+				zap.Int("consecutive_failures", consecutiveFailures),
+				zap.Strings("failed_cmds", failedCmds),
+				zap.Int("turn", turn+1),
+			)
+		} else {
+			// Successful turn — reset consecutive failure counter
+			consecutiveFailures = 0
+		}
+
 		history = append(history, models.Message{Role: "user", Content: feedback})
 		finalOutput.WriteString(feedback)
 	}
@@ -392,6 +472,40 @@ func normalizeArgAliases(cmd string, args map[string]interface{}) map[string]int
 
 	return args
 }
+
+// maxBlockedRetries is the number of times a command can fail/be blocked
+// before the reflection system permanently blacklists it for this worker.
+const maxBlockedRetries = 3
+
+// Reflection prompts injected after failures to force the LLM to replan.
+
+const reflectionStandardPrompt = `[REFLECTION REQUIRED]
+One or more actions in this turn FAILED. Before proceeding, you MUST:
+1. Analyze WHY each action failed (permission denied? wrong arguments? file not found?)
+2. Decide if retrying the same approach makes sense or if you need a different strategy
+3. If a command was blocked by policy, do NOT retry the exact same command — try an alternative
+
+Think step by step about what went wrong and what to do differently.`
+
+const reflectionAllBlockedPrompt = `[CRITICAL — ALL ACTIONS BLOCKED]
+EVERY action you attempted in this turn was blocked or failed. You are stuck in a loop.
+
+You MUST change your approach entirely:
+- If commands are blocked by policy, you cannot bypass this — find an alternative way to accomplish the task
+- If commands are not allowed for this agent type, work within your allowed commands
+- If you have exhausted all viable approaches, output your findings so far and finish (do NOT emit any more tool_calls)
+
+Do NOT retry the same actions. Think about what you CAN do instead.`
+
+const reflectionEscalatePrompt = `[CRITICAL — %d CONSECUTIVE TURNS WITH FAILURES]
+You have had multiple consecutive turns with failures. You are likely stuck in a retry loop.
+
+STOP and reconsider your entire approach:
+1. List what you have tried so far and why it failed
+2. Identify what constraints are blocking you (permissions, missing files, wrong commands)
+3. Either try a fundamentally different approach OR finish with a partial result
+
+If you cannot complete the task with your available tools, say so clearly — do NOT keep retrying the same failing actions.`
 
 // isWriteCommand returns true if the subcommand modifies files.
 func isWriteCommand(cmd string) bool {

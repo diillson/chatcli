@@ -35,10 +35,14 @@ func FormatTimerComplete(d time.Duration) string {
 	return fmt.Sprintf("%s%s %s", ColorGray, FormatDuration(d), ColorReset)
 }
 
-// TurnStats holds accumulated session counters displayed alongside turn info.
+// TurnStats holds per-turn and accumulated session counters.
 type TurnStats struct {
-	AgentsLaunched int
-	ToolCallsExecd int
+	// Per-turn counters (reset each turn)
+	TurnAgents    int
+	TurnToolCalls int
+	// Session totals (accumulated across all turns)
+	SessionAgents    int
+	SessionToolCalls int
 }
 
 func FormatTurnInfo(t, m int, d time.Duration, stats *TurnStats) string {
@@ -47,23 +51,37 @@ func FormatTurnInfo(t, m int, d time.Duration, stats *TurnStats) string {
 		p = append(p, FormatTimerComplete(d))
 	}
 	if stats != nil {
-		var parts []string
-		if stats.AgentsLaunched > 0 {
+		var turnParts []string
+		if stats.TurnAgents > 0 {
 			label := "agent"
-			if stats.AgentsLaunched > 1 {
+			if stats.TurnAgents > 1 {
 				label = "agents"
 			}
-			parts = append(parts, fmt.Sprintf("%d %s", stats.AgentsLaunched, label))
+			turnParts = append(turnParts, fmt.Sprintf("%d %s", stats.TurnAgents, label))
 		}
-		if stats.ToolCallsExecd > 0 {
+		if stats.TurnToolCalls > 0 {
 			label := "tool call"
-			if stats.ToolCallsExecd > 1 {
+			if stats.TurnToolCalls > 1 {
 				label = "tool calls"
 			}
-			parts = append(parts, fmt.Sprintf("%d %s", stats.ToolCallsExecd, label))
+			turnParts = append(turnParts, fmt.Sprintf("%d %s", stats.TurnToolCalls, label))
 		}
-		if len(parts) > 0 {
-			p = append(p, fmt.Sprintf("%s[%s]%s", ColorGray, strings.Join(parts, ", "), ColorReset))
+		if len(turnParts) > 0 {
+			p = append(p, fmt.Sprintf("%s[%s]%s", ColorGray, strings.Join(turnParts, ", "), ColorReset))
+		}
+
+		// Show session totals when they differ from the turn (i.e., not the first turn with activity)
+		if stats.SessionAgents > stats.TurnAgents || stats.SessionToolCalls > stats.TurnToolCalls {
+			var sessParts []string
+			if stats.SessionAgents > 0 {
+				sessParts = append(sessParts, fmt.Sprintf("%d agents", stats.SessionAgents))
+			}
+			if stats.SessionToolCalls > 0 {
+				sessParts = append(sessParts, fmt.Sprintf("%d tool calls", stats.SessionToolCalls))
+			}
+			if len(sessParts) > 0 {
+				p = append(p, fmt.Sprintf("%s(session: %s)%s", ColorGray, strings.Join(sessParts, ", "), ColorReset))
+			}
 		}
 	}
 	return strings.Join(p, " ")

@@ -54,11 +54,11 @@ func (a *workerPolicyAdapter) setStdinCh(ch <-chan string) {
 	a.stdinCh = ch
 }
 
-// pauseSpinner stops the spinner output and clears the line.
+// pauseSpinner stops the spinner output. The Timer.onPause callback
+// (registered in agent_mode.go) clears the multi-line progress display.
 func (a *workerPolicyAdapter) pauseSpinner() {
 	if a.timer != nil {
 		a.timer.Pause()
-		fmt.Print(metrics.ClearLine())
 	}
 }
 

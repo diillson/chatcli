@@ -1813,6 +1813,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		a.logger.Debug("Iniciando turno do agente", zap.Int("turn", turn+1), zap.Int("max_turns", maxTurns))
 
+		// Reset per-turn counters
+		turnAgents := 0
+		turnToolCalls := 0
+
 		// Inicia o timer do turno (substitui a animação de "Pensando...")
 		modelName := a.cli.Client.GetModelName()
 		a.turnTimer.Start(ctx, func(d time.Duration) {
@@ -1832,8 +1836,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Helper para exibir métricas ao final do turno (após execução)
 		showTurnStats := func() {
 			fmt.Println(metrics.FormatTurnInfo(turn+1, maxTurns, turnDuration, &metrics.TurnStats{
-				AgentsLaunched: a.agentsLaunched,
-				ToolCallsExecd: a.toolCallsExecd,
+				TurnAgents:       turnAgents,
+				TurnToolCalls:    turnToolCalls,
+				SessionAgents:    a.agentsLaunched,
+				SessionToolCalls: a.toolCallsExecd,
 			}))
 		}
 
@@ -1992,6 +1998,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 				// Dispatch with live progress feedback
 				a.agentsLaunched += len(agentCalls)
+				turnAgents += len(agentCalls)
 
 				// Build progress state for live display
 				agentSlots := make([]struct{ CallID, Agent, Task string }, n)
@@ -2019,8 +2026,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					}
 				}()
 
-				// Track how many lines the progress display uses for clearing
+				// Track how many lines the progress display uses for clearing.
+				// Both displayFunc and onPause closures share prevLines — safe
+				// because both execute under Timer.mu.
 				prevLines := 0
+				a.turnTimer.SetOnPause(func() {
+					// Clear the entire multi-line progress display before a
+					// security prompt takes over. Reset prevLines so Resume
+					// starts fresh and won't try to clear prompt lines.
+					if prevLines > 0 {
+						fmt.Print(metrics.ClearLines(prevLines))
+						fmt.Print(metrics.ClearLine())
+						prevLines = 0
+					}
+				})
 				a.turnTimer.Start(ctx, func(d time.Duration) {
 					if prevLines > 0 {
 						fmt.Print(metrics.ClearLines(prevLines))
@@ -2074,6 +2093,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					}
 				}
 				a.toolCallsExecd += totalAgentToolCalls
+				turnToolCalls += totalAgentToolCalls
 
 				// Resumo compacto do dispatch
 				tcWord := "tool calls"
@@ -2387,6 +2407,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					batchOutputBuilder.WriteString("\n\n")
 					successCount++
 					a.toolCallsExecd++
+					turnToolCalls++
 				}
 			}
 

@@ -150,21 +150,31 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 
 	if isExecCmd {
 		switch input {
-		case "n", "no":
+		case "", "y", "yes", "s", "sim":
+			return DecisionRunOnce
+		case "n", "no", "nao", "não":
 			return DecisionDenyOnce
 		default:
-			return DecisionRunOnce
+			// Unknown input (garbled terminal, paste artifacts, etc.)
+			// Deny once to avoid unintended execution.
+			fmt.Println(yellow + " [Entrada inválida — ação negada por segurança]" + reset)
+			return DecisionDenyOnce
 		}
 	}
 	switch input {
+	case "", "y", "yes", "s", "sim":
+		return DecisionRunOnce
 	case "a", "always":
 		return DecisionAllowAlways
-	case "n", "no":
+	case "n", "no", "nao", "não":
 		return DecisionDenyOnce
 	case "d", "deny":
 		return DecisionDenyForever
 	default:
-		return DecisionRunOnce
+		// Unknown input (garbled terminal, paste artifacts, etc.)
+		// Deny once to avoid unintended execution.
+		fmt.Println(yellow + " [Entrada inválida — ação negada por segurança]" + reset)
+		return DecisionDenyOnce
 	}
 }
 

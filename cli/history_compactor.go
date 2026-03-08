@@ -177,8 +177,11 @@ func (hc *HistoryCompactor) structuredSummarize(
 		{Role: "user", Content: prompt},
 	}
 
-	// Use a timeout to avoid blocking too long
-	summarizeCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	// Use an independent context so that cancellation of the parent
+	// (e.g. user sends a new message, turn timeout) does not abort the
+	// summarization call. The compactor runs inline and its result is
+	// needed before the next turn, so we give it a generous timeout.
+	summarizeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	response, err := llmClient.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
