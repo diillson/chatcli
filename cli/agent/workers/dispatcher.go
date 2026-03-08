@@ -24,7 +24,7 @@ type DispatcherConfig struct {
 const DefaultMaxWorkers = 4
 
 // DefaultWorkerTimeout is the default timeout for a single worker.
-const DefaultWorkerTimeout = 5 * time.Minute
+const DefaultWorkerTimeout = 10 * time.Minute
 
 // Dispatcher orchestrates parallel agent execution.
 type Dispatcher struct {
