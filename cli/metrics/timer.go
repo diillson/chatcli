@@ -20,6 +20,7 @@ type Timer struct {
 	cancel       context.CancelFunc
 	mu           sync.Mutex
 	updateTicker *time.Ticker
+	onPause      func() // called under mu when Pause() is invoked
 }
 
 // NewTimer cria um novo timer
@@ -102,13 +103,28 @@ func (t *Timer) IsRunning() bool {
 	return t.running
 }
 
+// SetOnPause registers a callback that runs (under mu) when Pause is called.
+// Use this to clear multi-line displays before a security prompt takes over.
+// The callback runs under the same mutex as displayFunc, so sharing closure
+// variables (like a line counter) between them is safe without extra locking.
+func (t *Timer) SetOnPause(f func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onPause = f
+}
+
 // Pause temporarily suppresses the display output without stopping the timer.
 // The elapsed time continues accumulating. Call Resume to restore display.
+// If an onPause callback was registered, it runs under the mutex before
+// pausing, allowing multi-line displays to be properly cleared.
 func (t *Timer) Pause() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.running {
 		t.running = false
+		if t.onPause != nil {
+			t.onPause()
+		}
 	}
 }
 

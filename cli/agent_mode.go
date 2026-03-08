@@ -2019,8 +2019,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					}
 				}()
 
-				// Track how many lines the progress display uses for clearing
+				// Track how many lines the progress display uses for clearing.
+				// Both displayFunc and onPause closures share prevLines — safe
+				// because both execute under Timer.mu.
 				prevLines := 0
+				a.turnTimer.SetOnPause(func() {
+					// Clear the entire multi-line progress display before a
+					// security prompt takes over. Reset prevLines so Resume
+					// starts fresh and won't try to clear prompt lines.
+					if prevLines > 0 {
+						fmt.Print(metrics.ClearLines(prevLines))
+						fmt.Print(metrics.ClearLine())
+						prevLines = 0
+					}
+				})
 				a.turnTimer.Start(ctx, func(d time.Duration) {
 					if prevLines > 0 {
 						fmt.Print(metrics.ClearLines(prevLines))
