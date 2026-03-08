@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.68.3](https://github.com/diillson/chatcli/compare/v1.68.2...v1.68.3) (2026-03-08)
+
+
+### Bug Fixes
+
+* **security:** prevent parallel progress display from corrupting security prompts ([#615](https://github.com/diillson/chatcli/issues/615)) ([9ed2cd3](https://github.com/diillson/chatcli/commit/9ed2cd3ab8fbc1033e4600798b211465fd01f1a4))
+
 ## [1.68.2](https://github.com/diillson/chatcli/compare/v1.68.1...v1.68.2) (2026-03-07)
 
 
