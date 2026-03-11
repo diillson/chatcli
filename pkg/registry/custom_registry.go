@@ -1,7 +1,7 @@
 /*
  * ChatCLI - Custom/Generic Registry Adapter
  * Copyright (c) 2024 Edilson Freitas
- * License: MIT
+ * License: Apache-2.0
  *
  * Implements SkillRegistry for user-configured registries.
  * Assumes the same API contract as ChatCLI.dev (standard REST endpoints).

@@ -1,7 +1,7 @@
 /*
  * ChatCLI - Registry Manager
  * Copyright (c) 2024 Edilson Freitas
- * License: MIT
+ * License: Apache-2.0
  *
  * Coordinates fan-out parallel search across multiple skill registries.
  * Auto-disables registries after consecutive failures with cooldown.

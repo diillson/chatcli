@@ -1,7 +1,7 @@
 /*
  * ChatCLI - Command Line Interface for LLM interaction
  * Copyright (c) 2024 Edilson Freitas
- * License: MIT
+ * License: Apache-2.0
  */
 package openai_responses
 

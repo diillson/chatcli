@@ -2,7 +2,7 @@
  * ChatCLI - Paste Detection Tests
  * cli/paste/detector_test.go
  * Copyright (c) 2024 Edilson Freitas
- * License: MIT
+ * License: Apache-2.0
  */
 package paste
 
