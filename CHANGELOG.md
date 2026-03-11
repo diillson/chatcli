@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.68.4](https://github.com/diillson/chatcli/compare/v1.68.3...v1.68.4) (2026-03-11)
+
+
+### Bug Fixes
+
+* **auth:** resolve Anthropic OAuth token exchange failures ([#618](https://github.com/diillson/chatcli/issues/618)) ([412cd44](https://github.com/diillson/chatcli/commit/412cd44aa23037334fd41340410c8f4d0388f50c))
+
 ## [1.68.3](https://github.com/diillson/chatcli/compare/v1.68.2...v1.68.3) (2026-03-08)
 
 
