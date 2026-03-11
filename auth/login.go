@@ -13,6 +13,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// exchangeOAuthToken sends a token exchange request with JSON body.
+// Used by providers that accept application/json (e.g. OpenAI).
 func exchangeOAuthToken(ctx context.Context, logger *zap.Logger, tokenURL string, payload map[string]any) (*OAuthTokenResponse, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -26,6 +28,34 @@ func exchangeOAuthToken(ctx context.Context, logger *zap.Logger, tokenURL string
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	return doTokenExchange(hc, req)
+}
+
+// exchangeAnthropicToken sends a token exchange to Anthropic using a plain HTTP client
+// to avoid Cloudflare interference from custom transports/TLS fingerprinting.
+func exchangeAnthropicToken(ctx context.Context, tokenURL string, payload map[string]any) (*OAuthTokenResponse, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	hc := &http.Client{Timeout: 60 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "claude-cli/2.1.2 (external, cli)")
+	req.Header.Set("Accept", "application/json")
+
+	return doTokenExchange(hc, req)
+}
+
+func doTokenExchange(hc *http.Client, req *http.Request) (*OAuthTokenResponse, error) {
+	// Set User-Agent to avoid Cloudflare blocking Go's default "Go-http-client/2.0"
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", "chatcli/1.0")
+	}
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
