@@ -83,25 +83,30 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 		_ = cmd.Run()
 	}
 
-	var code string
+	var rawCode string
 	fmt.Print("\n> Paste the code here: ")
 	reader := bufio.NewReader(os.Stdin)
-	code, _ = reader.ReadString('\n')
-	code = strings.TrimSpace(code)
-	if idx := strings.Index(code, "#"); idx != -1 {
-		code = code[:idx]
+	rawCode, _ = reader.ReadString('\n')
+	rawCode = strings.TrimSpace(rawCode)
+
+	var code, state string
+	if idx := strings.Index(rawCode, "#"); idx != -1 {
+		code = rawCode[:idx]
+		state = rawCode[idx+1:]
+	} else {
+		code = rawCode
 	}
 	if code == "" {
 		return "", fmt.Errorf("code is required")
 	}
 
-	tr, err := exchangeOAuthToken(ctx, logger, AnthropicTokenURL, map[string]any{
+	tr, err := exchangeAnthropicToken(ctx, AnthropicTokenURL, map[string]any{
 		"grant_type":    "authorization_code",
 		"client_id":     AnthropicOAuthClientID,
 		"code":          code,
+		"state":         state,
 		"redirect_uri":  AnthropicRedirectURI,
 		"code_verifier": pkce.Verifier,
-		"state":         pkce.Verifier,
 	})
 	if err != nil {
 		return "", err

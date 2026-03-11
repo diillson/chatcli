@@ -1,16 +1,10 @@
 package auth
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
-	"time"
 
-	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -47,40 +41,27 @@ func RefreshOAuth(ctx context.Context, cred *AuthProfileCredential, logger *zap.
 		return nil, fmt.Errorf("unsupported oauth provider: %s", cred.Provider)
 	}
 
-	payload := map[string]interface{}{
-		"grant_type":    "refresh_token",
-		"client_id":     clientID,
-		"refresh_token": refresh,
+	var tr *OAuthTokenResponse
+	var err error
+
+	if cred.Provider == ProviderAnthropic {
+		// Use plain HTTP client for Anthropic to avoid Cloudflare issues
+		tr, err = exchangeAnthropicToken(ctx, tokenURL, map[string]any{
+			"grant_type":    "refresh_token",
+			"client_id":     clientID,
+			"refresh_token": refresh,
+		})
+	} else {
+		tr, err = exchangeOAuthToken(ctx, logger, tokenURL, map[string]any{
+			"grant_type":    "refresh_token",
+			"client_id":     clientID,
+			"refresh_token": refresh,
+		})
 	}
-	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("oauth refresh failed: %w", err)
 	}
 
-	hc := utils.NewHTTPClient(logger, 30*time.Second)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := hc.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Sanitize response body to prevent leaking tokens in error messages
-		sanitized := utils.SanitizeSensitiveText(string(raw))
-		return nil, fmt.Errorf("oauth refresh failed (%s): %s", resp.Status, sanitized)
-	}
-
-	var tr OAuthTokenResponse
-	if err := json.Unmarshal(raw, &tr); err != nil {
-		return nil, fmt.Errorf("bad oauth refresh response: %w", err)
-	}
 	if tr.AccessToken != "" {
 		cred.Access = tr.AccessToken
 	}
