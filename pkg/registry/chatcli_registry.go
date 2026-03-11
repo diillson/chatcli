@@ -1,7 +1,7 @@
 /*
  * ChatCLI - ChatCLI.dev Registry Adapter
  * Copyright (c) 2024 Edilson Freitas
- * License: MIT
+ * License: Apache-2.0
  *
  * Implements SkillRegistry for the official ChatCLI skill registry.
  * Migrated and enhanced from cli/skills/registry.go.

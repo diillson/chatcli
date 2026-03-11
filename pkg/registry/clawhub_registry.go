@@ -1,7 +1,7 @@
 /*
  * ChatCLI - ClawHub Registry Adapter
  * Copyright (c) 2024 Edilson Freitas
- * License: MIT
+ * License: Apache-2.0
  *
  * Implements SkillRegistry for clawhub.ai — a public skill marketplace.
  * Based on the ClawHub HTTP API v1:

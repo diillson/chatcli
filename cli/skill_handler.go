@@ -1,7 +1,7 @@
 /*
  * ChatCLI - Skill Registry Command Handler
  * Copyright (c) 2024 Edilson Freitas
- * License: MIT
+ * License: Apache-2.0
  *
  * Handles /skill commands: search, install, uninstall, list, info, registries, help.
  */
