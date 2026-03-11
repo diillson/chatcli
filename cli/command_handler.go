@@ -44,20 +44,18 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		ch.cli.reloadConfiguration()
 		return false
 	case strings.HasPrefix(userInput, "/agent"):
-		// /agent pode ser gerenciamento de personas OU iniciar modo agente
 		if !ch.handleAgentPersonaSubcommand(userInput) {
-			// Não é um subcomando, inicia modo agente
-			ch.cli.pendingAction = "agent"
-			panic(agentModeRequest)
+			// In TUI mode, /agent <query> is handled by the adapter as a hint.
+			// If we reach here, just inform the user.
+			fmt.Println("Use /agent <query> to start agent mode, or /agent list|load|attach|detach|show|status|off for agent management.")
 		}
 		return false
 	case strings.HasPrefix(userInput, "/run"):
-		// /run inicia o modo agente (com ou sem persona ativa)
-		ch.cli.pendingAction = "agent"
-		panic(agentModeRequest)
+		fmt.Println("Use /run <query> to start agent mode.")
+		return false
 	case strings.HasPrefix(userInput, "/coder"):
-		ch.cli.pendingAction = "coder"
-		panic(coderModeRequest)
+		fmt.Println("Use /coder <query> to start coder mode.")
+		return false
 	case strings.HasPrefix(userInput, "/switch"):
 		ch.cli.handleSwitchCommand(userInput)
 		return false
@@ -122,9 +120,6 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/reset" || userInput == "/redraw" || userInput == "/clear":
 		fmt.Print("\033[0m")
 		os.Stdout.Sync()
-		ch.cli.restoreTerminal()
-		time.Sleep(50 * time.Millisecond)
-		ch.cli.forceRefreshPrompt()
 		return false
 	default:
 		fmt.Println(i18n.T("error.unknown_command"))

@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -340,4 +341,96 @@ func buildTextFromHistory(history []models.Message, prompt string) string {
 	b.WriteString("User: ")
 	b.WriteString(prompt)
 	return b.String()
+}
+
+// SendPromptStream sends a prompt and returns a channel of streaming chunks.
+// Implements client.StreamingClient interface.
+func (c *OpenAIResponsesClient) SendPromptStream(ctx context.Context, prompt string, history []models.Message, maxTokens int) (<-chan client.StreamChunk, error) {
+	effectiveMaxTokens := maxTokens
+	if effectiveMaxTokens <= 0 {
+		effectiveMaxTokens = c.getMaxTokens()
+	}
+
+	isOAuth := strings.HasPrefix(c.apiKey, "oauth:")
+
+	var reqBody map[string]interface{}
+	if isOAuth {
+		instructions, conversationInput := buildOAuthPayload(history, prompt)
+		reqBody = map[string]interface{}{
+			"model":        c.model,
+			"instructions": instructions,
+			"input":        conversationInput,
+			"store":        false,
+			"stream":       true,
+		}
+	} else {
+		input := buildTextFromHistory(history, "")
+		if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+			if strings.TrimSpace(prompt) != "" {
+				if strings.TrimSpace(input) != "" {
+					input += "\n"
+				}
+				input += "User: " + prompt
+			}
+		}
+		reqBody = map[string]interface{}{
+			"model":             c.model,
+			"input":             input,
+			"max_output_tokens": effectiveMaxTokens,
+			"stream":            true,
+		}
+	}
+
+	jsonValue, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao preparar payload para Responses API: %w", err)
+	}
+
+	resp, err := c.sendRequest(ctx, jsonValue)
+	if err != nil {
+		return nil, err
+	}
+
+	ch := make(chan client.StreamChunk, 16)
+	go func() {
+		defer close(ch)
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			ch <- client.StreamChunk{Error: &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}}
+			return
+		}
+
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				ch <- client.StreamChunk{Done: true}
+				break
+			}
+
+			var event struct {
+				Type  string `json:"type"`
+				Delta string `json:"delta"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				continue
+			}
+			if event.Type == "response.output_text.delta" && event.Delta != "" {
+				ch <- client.StreamChunk{Text: event.Delta}
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			ch <- client.StreamChunk{Error: fmt.Errorf("erro ao ler stream SSE: %w", err)}
+		}
+	}()
+
+	return ch, nil
 }

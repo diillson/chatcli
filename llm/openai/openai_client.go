@@ -16,9 +16,12 @@ import (
 	"strings"
 	"time"
 
+	"bufio"
+
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -189,4 +192,93 @@ func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	return content, nil
+}
+
+// SendPromptStream sends a prompt and returns a channel of streaming chunks.
+// Implements client.StreamingClient interface.
+func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, history []models.Message, maxTokens int) (<-chan client.StreamChunk, error) {
+	effectiveMaxTokens := maxTokens
+	if effectiveMaxTokens <= 0 {
+		effectiveMaxTokens = c.getMaxTokens()
+	}
+
+	messages := []map[string]string{}
+	for _, msg := range history {
+		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		switch role {
+		case "system", "user", "assistant":
+		default:
+			role = "user"
+		}
+		messages = append(messages, map[string]string{"role": role, "content": msg.Content})
+	}
+	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+		if strings.TrimSpace(prompt) != "" {
+			messages = append(messages, map[string]string{"role": "user", "content": prompt})
+		}
+	}
+
+	payload := map[string]interface{}{
+		"model":      c.model,
+		"messages":   messages,
+		"max_tokens": effectiveMaxTokens,
+		"stream":     true,
+	}
+
+	jsonValue, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao preparar a requisição: %w", err)
+	}
+
+	resp, err := c.sendRequest(ctx, jsonValue)
+	if err != nil {
+		return nil, err
+	}
+
+	ch := make(chan client.StreamChunk, 16)
+	go func() {
+		defer close(ch)
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			ch <- client.StreamChunk{Error: &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}}
+			return
+		}
+
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				ch <- client.StreamChunk{Done: true}
+				break
+			}
+
+			var event struct {
+				Choices []struct {
+					Delta struct {
+						Content string `json:"content"`
+					} `json:"delta"`
+					FinishReason *string `json:"finish_reason"`
+				} `json:"choices"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				continue
+			}
+			if len(event.Choices) > 0 && event.Choices[0].Delta.Content != "" {
+				ch <- client.StreamChunk{Text: event.Choices[0].Delta.Content}
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			ch <- client.StreamChunk{Error: fmt.Errorf("erro ao ler stream SSE: %w", err)}
+		}
+	}()
+
+	return ch, nil
 }

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/diillson/chatcli/cli" // Importando o pacote da nossa aplicação
+	// No longer depends on cli package — command data is maintained inline.
 )
 
 // main é o ponto de entrada da nossa ferramenta de geração de documentação.
@@ -67,20 +67,46 @@ func generateInternalCommandsSection() string {
 	builder.WriteString("## Comandos Internos (`/`)\n\n")
 	builder.WriteString("Estes comandos controlam a aplicação e o fluxo da conversa.\n\n")
 
-	var mockCLI *cli.ChatCLI
-	commands := mockCLI.GetInternalCommands()
+	commands := []struct{ Text, Description string }{
+		{"/agent", "Iniciar modo agente para executar tarefas"},
+		{"/auth", "Gerencia credenciais OAuth (status, login, logout)"},
+		{"/clear", "Força redesenho/limpeza da tela"},
+		{"/coder", "Iniciar modo engenheiro (Criação e Edição de Código)"},
+		{"/compact", "Compacta o histórico"},
+		{"/config", "Mostrar configuração atual"},
+		{"/connect", "Conectar a um servidor ChatCLI remoto (gRPC)"},
+		{"/context", "Gerencia contextos persistentes"},
+		{"/disconnect", "Desconectar do servidor remoto"},
+		{"/exit", "Sair do ChatCLI"},
+		{"/help", "Mostrar ajuda"},
+		{"/memory", "Ver/carregar anotações de memória"},
+		{"/metrics", "Exibe métricas de runtime"},
+		{"/newsession", "Iniciar uma nova sessão de conversa"},
+		{"/nextchunk", "Carregar o próximo chunk de arquivo"},
+		{"/plugin", "Gerencia plugins"},
+		{"/quit", "Alias de /exit"},
+		{"/reload", "Recarregar configurações do .env"},
+		{"/retry", "Tentar novamente o último chunk que falhou"},
+		{"/retryall", "Tentar novamente todos os chunks que falharam"},
+		{"/rewind", "Volta a um checkpoint anterior da conversa"},
+		{"/run", "Alias para /agent"},
+		{"/session", "Gerencia as sessões"},
+		{"/skill", "Gerencia skills de registries"},
+		{"/skipchunk", "Pular um chunk de arquivo"},
+		{"/status", "Alias de /config"},
+		{"/switch", "Trocar o provedor de LLM"},
+		{"/version", "Verificar a versão do ChatCLI"},
+		{"/watch", "Exibe o status do K8s watcher"},
+	}
 
-	// CORREÇÃO: Ordenar os comandos principais antes de processar para garantir uma ordem consistente.
 	sort.Slice(commands, func(i, j int) bool {
 		return commands[i].Text < commands[j].Text
 	})
 
 	var rows [][]string
 	for _, cmd := range commands {
-		name := strings.ReplaceAll(cmd.Text, " ou ", ", ")
-		rows = append(rows, []string{fmt.Sprintf("**%s**", name), cmd.Description})
+		rows = append(rows, []string{fmt.Sprintf("**%s**", cmd.Text), cmd.Description})
 
-		// CORREÇÃO: Agrupar as flags diretamente sob o comando a que pertencem.
 		if cmd.Text == "/switch" {
 			rows = append(rows, []string{"&nbsp; `--model <nome>`", "Muda o modelo para o provedor atual."})
 			rows = append(rows, []string{"&nbsp; `--max-tokens <num>`", "Define um limite máximo de tokens para a resposta."})
@@ -100,54 +126,19 @@ func generateContextCommandsSection() string {
 	builder.WriteString("## Comandos de Contexto (`@`)\n\n")
 	builder.WriteString("Estes comandos injetam informações do seu ambiente local no prompt.\n\n")
 
-	var mockCLI *cli.ChatCLI
-	commands := mockCLI.GetContextCommands()
-	sort.Slice(commands, func(i, j int) bool { return commands[i].Text < commands[j].Text })
-
 	var rows [][]string
-	for _, cmd := range commands {
-		rows = append(rows, []string{fmt.Sprintf("**%s** `<...>`", cmd.Text), cmd.Description})
-
-		if flags, ok := cli.CommandFlags[cmd.Text]; ok {
-			var flagNames []string
-			for flag := range flags {
-				flagNames = append(flagNames, flag)
-			}
-			sort.Strings(flagNames)
-			processedFlags := make(map[string]bool)
-
-			for _, flag := range flagNames {
-				if processedFlags[flag] {
-					continue
-				}
-
-				var desc, flagNameToDisplay string
-				values := flags[flag]
-
-				if flag == "-i" || flag == "--interactive" {
-					flagNameToDisplay = "`-i`, `--interactive`"
-					desc = "Executa o comando em modo interativo (ex: `ssh`, `vim`)."
-					processedFlags["-i"] = true
-					processedFlags["--interactive"] = true
-				} else if flag == "--mode" {
-					flagNameToDisplay = "`--mode`"
-					desc = "Define o modo de processamento: `full`, `summary`, `chunked`, `smart`."
-				} else if flag == "--ai" {
-					flagNameToDisplay = "`--ai`"
-					desc = "Envia a saída do comando diretamente para a IA para análise."
-				} else {
-					flagNameToDisplay = fmt.Sprintf("`%s`", flag)
-					desc = "Opção para " + cmd.Text
-				}
-
-				rows = append(rows, []string{fmt.Sprintf("&nbsp; %s", flagNameToDisplay), desc})
-
-				for _, val := range values {
-					rows = append(rows, []string{fmt.Sprintf("&nbsp;&nbsp;&nbsp;`%s`", val.Text), val.Description})
-				}
-			}
-		}
-	}
+	rows = append(rows, []string{"**@command** `<...>`", "Executa um comando do sistema e injeta a saída"})
+	rows = append(rows, []string{"&nbsp; `-i`", "Executa o comando em modo interativo (ex: `ssh`, `vim`)."})
+	rows = append(rows, []string{"&nbsp; `--ai`", "Envia a saída do comando diretamente para a IA para análise."})
+	rows = append(rows, []string{"**@env** `<...>`", "Injeta variáveis de ambiente no contexto"})
+	rows = append(rows, []string{"**@file** `<...>`", "Injeta conteúdo de arquivos/diretórios no prompt"})
+	rows = append(rows, []string{"&nbsp; `--mode`", "Define o modo de processamento: `full`, `summary`, `chunked`, `smart`."})
+	rows = append(rows, []string{"&nbsp;&nbsp;&nbsp;`full`", "Processa o conteúdo completo (padrão, trunca se necessário)"})
+	rows = append(rows, []string{"&nbsp;&nbsp;&nbsp;`summary`", "Gera resumo estrutural (árvore de arquivos, tamanhos, sem conteúdo)"})
+	rows = append(rows, []string{"&nbsp;&nbsp;&nbsp;`chunked`", "Divide grandes projetos em pedaços gerenciáveis (use /nextchunk para prosseguir)"})
+	rows = append(rows, []string{"&nbsp;&nbsp;&nbsp;`smart`", "Seleciona arquivos relevantes com base no seu prompt (IA decide)"})
+	rows = append(rows, []string{"**@git** `<...>`", "Injeta informações do repositório git"})
+	rows = append(rows, []string{"**@history** `<...>`", "Injeta o histórico de comandos"})
 
 	builder.WriteString(generateMarkdownTable([]string{"Comando", "Descrição"}, rows))
 	builder.WriteString("\n---\n\n")

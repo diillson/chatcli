@@ -70,7 +70,7 @@ func TestSanitizeToolCallArgs_WithLineContinuations(t *testing.T) {
 	rawArgs := `write --file main.go \
 --encoding base64 --content "cGFja2FnZSBtYWluCg=="`
 
-	result := sanitizeToolCallArgs(rawArgs, logger, "@coder", true)
+	result := sanitizeToolCallArgs(rawArgs, logger, "@coder")
 
 	// Esperado: espaços normalizados (um único espaço) e conteúdo base64 preservado
 	expected := `write --file main.go --encoding base64 --content "cGFja2FnZSBtYWluCg=="`
@@ -92,19 +92,19 @@ func TestDanglingBackslashAfterFlag(t *testing.T) {
 
 	// Caso 1: --content \ (barra sozinha após flag)
 	rawArgs1 := "write --file api.go --content \\ cGFja2FnZSBtYWlu"
-	result1 := sanitizeToolCallArgs(rawArgs1, logger, "@coder", true)
+	result1 := sanitizeToolCallArgs(rawArgs1, logger, "@coder")
 	assert.Contains(t, result1, "cGFja2FnZSBtYWlu")
 	assert.NotContains(t, result1, "\\")
 
 	// Caso 2: --search \ (barra sozinha após flag)
 	rawArgs2 := "patch --file main.go --search \\ aWl"
-	result2 := sanitizeToolCallArgs(rawArgs2, logger, "@coder", true)
+	result2 := sanitizeToolCallArgs(rawArgs2, logger, "@coder")
 	assert.Contains(t, result2, "aWl")
 	assert.NotContains(t, result2, "\\")
 
 	// Caso 3: --cmd \ (barra sozinha após flag)
 	rawArgs3 := "exec --cmd \\ go.test"
-	result3 := sanitizeToolCallArgs(rawArgs3, logger, "@coder", true)
+	result3 := sanitizeToolCallArgs(rawArgs3, logger, "@coder")
 	assert.Contains(t, result3, "go.test")
 	assert.NotContains(t, result3, "\\")
 }
@@ -130,7 +130,7 @@ func TestParseToolArgsWithJSON_EscapedObject(t *testing.T) {
 func TestSanitizeAndParse_EscapedExecCommand(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	raw := `{\"cmd\":\"exec\",\"args\":{\"command\":\"mkdir -p testeapi\"}}`
-	sanitized := sanitizeToolCallArgs(raw, logger, "@coder", true)
+	sanitized := sanitizeToolCallArgs(raw, logger, "@coder")
 	args, err := parseToolArgsWithJSON(sanitized)
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"exec", "--cmd", "mkdir -p testeapi"}, args)

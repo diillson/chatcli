@@ -23,6 +23,7 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -553,6 +554,158 @@ type multiCloser struct {
 
 func (m *multiCloser) Read(p []byte) (int, error) { return m.reader.Read(p) }
 func (m *multiCloser) Close() error               { return m.close() }
+
+// SendPromptStream sends a prompt and returns a channel of streaming chunks.
+// Implements client.StreamingClient interface.
+func (c *ClaudeClient) SendPromptStream(ctx context.Context, prompt string, history []models.Message, maxTokens int) (<-chan client.StreamChunk, error) {
+	effectiveMaxTokens := maxTokens
+	if effectiveMaxTokens <= 0 {
+		effectiveMaxTokens = c.getMaxTokens()
+	}
+
+	isOAuth := strings.HasPrefix(c.apiKey, "oauth:")
+	var messages interface{}
+	var systemObj interface{}
+	if isOAuth {
+		messages, systemObj = c.buildOAuthMessagesAndSystem(prompt, history)
+	} else {
+		messages, systemObj = c.buildMessagesAndSystem(prompt, history)
+	}
+
+	reqBody := map[string]interface{}{
+		"model":      c.model,
+		"max_tokens": effectiveMaxTokens,
+		"messages":   messages,
+		"stream":     true,
+	}
+	if systemObj != nil {
+		reqBody["system"] = systemObj
+	}
+
+	jsonValue, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao preparar a requisição: %w", err)
+	}
+
+	reqURL := c.apiURL
+	if isOAuth {
+		reqURL = withBetaQuery(reqURL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
+	if err != nil {
+		return nil, fmt.Errorf("erro ao criar a requisição: %w", err)
+	}
+	req = req.WithContext(context.WithValue(req.Context(), oauthModelKey{}, c.model))
+	req.Header.Add("Content-Type", oauthContentType)
+
+	if isOAuth {
+		applyOAuthHeaders(req, c.apiKey)
+	} else if strings.HasPrefix(c.apiKey, "token:") {
+		req.Header.Add("Authorization", "Bearer "+strings.TrimPrefix(c.apiKey, "token:"))
+		req.Header.Add("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+	} else if strings.HasPrefix(c.apiKey, "apikey:") {
+		req.Header.Add("x-api-key", strings.TrimPrefix(c.apiKey, "apikey:"))
+		req.Header.Add("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+	} else {
+		req.Header.Add("x-api-key", c.apiKey)
+		req.Header.Add("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	ch := make(chan client.StreamChunk, 16)
+	go func() {
+		defer close(ch)
+		c.streamSSEToChannel(resp, ch)
+	}()
+
+	return ch, nil
+}
+
+// streamSSEToChannel reads SSE events from the HTTP response and sends chunks to the channel.
+func (c *ClaudeClient) streamSSEToChannel(resp *http.Response, ch chan<- client.StreamChunk) {
+	decodedBody, err := decodeResponseBody(resp)
+	if err != nil {
+		_ = resp.Body.Close()
+		ch <- client.StreamChunk{Error: err}
+		return
+	}
+	defer func() { _ = decodedBody.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(decodedBody)
+		ch <- client.StreamChunk{Error: &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(raw))}}
+		return
+	}
+
+	reader := bufio.NewReader(decodedBody)
+	var usage *client.UsageInfo
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil && readErr != io.EOF {
+			ch <- client.StreamChunk{Error: fmt.Errorf("erro ao ler stream: %w", readErr)}
+			return
+		}
+		if len(line) == 0 && readErr == io.EOF {
+			break
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			if readErr == io.EOF {
+				break
+			}
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" {
+			if readErr == io.EOF {
+				break
+			}
+			continue
+		}
+
+		var evt struct {
+			Type  string `json:"type"`
+			Delta *struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"delta"`
+			Usage *struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
+		}
+		if jsonErr := json.Unmarshal([]byte(data), &evt); jsonErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			continue
+		}
+
+		if evt.Type == "content_block_delta" && evt.Delta != nil && evt.Delta.Type == "text_delta" {
+			ch <- client.StreamChunk{Text: evt.Delta.Text}
+		}
+		if evt.Type == "message_delta" && evt.Usage != nil {
+			usage = &client.UsageInfo{
+				InputTokens:  evt.Usage.InputTokens,
+				OutputTokens: evt.Usage.OutputTokens,
+			}
+		}
+		if evt.Type == "message_stop" {
+			ch <- client.StreamChunk{Done: true, Usage: usage}
+			if readErr == io.EOF {
+				break
+			}
+			continue
+		}
+		if readErr == io.EOF {
+			break
+		}
+	}
+}
 
 func decodeResponseBody(resp *http.Response) (io.ReadCloser, error) {
 	encoding := strings.TrimSpace(strings.ToLower(resp.Header.Get("Content-Encoding")))

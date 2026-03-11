@@ -62,6 +62,18 @@ func (c *InstrumentedClient) SendPrompt(ctx context.Context, prompt string, hist
 	return response, nil
 }
 
+// SendPromptStream delegates to the inner client's streaming method if available,
+// otherwise wraps SendPrompt with StreamFromSync.
+func (c *InstrumentedClient) SendPromptStream(ctx context.Context, prompt string, history []models.Message, maxTokens int) (<-chan StreamChunk, error) {
+	if sc, ok := c.inner.(StreamingClient); ok {
+		return sc.SendPromptStream(ctx, prompt, history, maxTokens)
+	}
+	ch := StreamFromSync(ctx, func(ctx context.Context) (string, error) {
+		return c.inner.SendPrompt(ctx, prompt, history, maxTokens)
+	})
+	return ch, nil
+}
+
 // SendPromptWithTools delegates to the inner client if it supports native tools.
 func (c *InstrumentedClient) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
 	tac, ok := c.inner.(ToolAwareClient)

@@ -47,7 +47,6 @@ type AgentMode struct {
 	contextManager      *agent.ContextManager
 	taskTracker         *agent.TaskTracker
 	executeCommandsFunc func(ctx context.Context, block agent.CommandBlock) (string, string)
-	isCoderMode         bool
 	isOneShot           bool
 	coderBannerShown    bool
 	lastPolicyMatch     *coder.Rule
@@ -65,6 +64,8 @@ type AgentMode struct {
 	stdinLines chan string   // all stdin lines flow through here
 	stdinDone  chan struct{} // signals reader goroutine to stop
 	stdinWg    sync.WaitGroup
+	// Output emitter for TUI integration
+	emitter OutputEmitter
 }
 
 // startStdinReader starts a goroutine that reads lines from stdin and sends
@@ -188,11 +189,8 @@ func (a *AgentMode) drainStdinToQueue() string {
 			}
 			if first == "" {
 				first = line
-			} else {
-				a.cli.messageQueueMu.Lock()
-				a.cli.messageQueue = append(a.cli.messageQueue, line)
-				a.cli.messageQueueMu.Unlock()
 			}
+			// Additional lines are discarded (queue removed with go-prompt)
 		default:
 			return first
 		}
@@ -262,20 +260,17 @@ func NewAgentMode(cli *ChatCLI, logger *zap.Logger) *AgentMode {
 		contextManager: agent.NewContextManager(logger),
 		taskTracker:    agent.NewTaskTracker(logger),
 		turnTimer:      metrics.NewTimer(),
+		emitter:        NewTerminalEmitter(),
 	}
 	a.executeCommandsFunc = a.executeCommandsWithOutput
 	return a
 }
 
-func isCoderMinimalUI() bool {
-	val := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_UI")))
-	if val == "" || val == "full" || val == "false" || val == "0" {
-		return false
+// SetEmitter replaces the default terminal emitter with a custom one (e.g., TUI).
+func (a *AgentMode) SetEmitter(e OutputEmitter) {
+	if e != nil {
+		a.emitter = e
 	}
-	if val == "minimal" || val == "min" || val == "true" || val == "1" {
-		return true
-	}
-	return false
 }
 
 func isCoderBannerEnabled() bool {
@@ -373,7 +368,6 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		systemInstruction = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
 	}
 
-	a.isCoderMode = isCoder
 	a.isOneShot = false
 
 	// Prepend workspace context (SOUL.md, USER.md, IDENTITY.md, RULES.md, MEMORY.md)
@@ -397,13 +391,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// Banner curto com cheat sheet no modo /coder (apenas para o usuário humano)
 	if isCoder && !a.coderBannerShown && isCoderBannerEnabled() {
-		fmt.Println()
-		fmt.Println("💡 Dica rápida (/coder):")
-		fmt.Println("  - read: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}")
-		fmt.Println("  - search: {\"cmd\":\"search\",\"args\":{\"term\":\"Login\",\"dir\":\".\"}}")
-		fmt.Println("  - write: {\"cmd\":\"write\",\"args\":{\"file\":\"x.go\",\"encoding\":\"base64\",\"content\":\"...\"}}")
-		fmt.Println("  - exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"mkdir -p testeapi\"}}")
-		fmt.Println()
+		a.emitter.EmitLine("")
+		a.emitter.EmitLine("💡 Dica rápida (/coder):")
+		a.emitter.EmitLine("  - read: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}")
+		a.emitter.EmitLine("  - search: {\"cmd\":\"search\",\"args\":{\"term\":\"Login\",\"dir\":\".\"}}")
+		a.emitter.EmitLine("  - write: {\"cmd\":\"write\",\"args\":{\"file\":\"x.go\",\"encoding\":\"base64\",\"content\":\"...\"}}")
+		a.emitter.EmitLine("  - exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"mkdir -p testeapi\"}}")
+		a.emitter.EmitLine("")
 		a.coderBannerShown = true
 	}
 
@@ -466,8 +460,6 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 // RunCoderOnce executa o modo coder de forma não-interativa (one-shot),
 // mas mantendo o loop ReAct do AgentMode (com tool_calls/plugins).
 func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
-	cli.setExecutionProfile(ProfileCoder)
-	defer cli.setExecutionProfile(ProfileNormal)
 
 	var query string
 	if strings.HasPrefix(input, "/coder ") {
@@ -490,7 +482,6 @@ func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
-	cli.agentMode.isCoderMode = true
 	cli.agentMode.isOneShot = true
 
 	// Executa o AgentMode no "perfil coder" (system prompt override)
@@ -907,30 +898,178 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 	showFullPlan := false
 	lastExecuted := -1
 
+	// renderer is kept only for Colorize (pure string helper, no stdout)
 	renderer := agent.NewUIRenderer(a.logger)
-	renderer.SetSkipClearOnNextDraw(true)
 
-	//mainLoop:
-	for {
-		renderer.ClearScreen()
-		renderer.PrintHeader()
+	// emitHeader prints the action plan header via emitter
+	emitHeader := func() {
+		a.emitter.EmitLine("\n" + renderer.Colorize(" "+strings.Repeat("━", 58), agent.ColorGray))
+		a.emitter.EmitLine(renderer.Colorize(i18n.T("agent.header.title"), agent.ColorLime+agent.ColorBold))
+		a.emitter.EmitLine(renderer.Colorize(" "+strings.Repeat("━", 58), agent.ColorGray))
+		a.emitter.EmitLine(renderer.Colorize(i18n.T("agent.header.description"), agent.ColorGray))
+	}
 
-		if showFullPlan {
-			renderer.PrintPlanFull(blocks, outputs, a.validator)
+	// emitPlanCompact prints the compact plan view via emitter
+	emitPlanCompact := func() {
+		a.emitter.EmitLine(renderer.Colorize(i18n.T("agent.plan.compact_view"), agent.ColorLime+agent.ColorBold))
+		for i, b := range blocks {
+			status := "⏳"
+			if i < len(outputs) && outputs[i] != nil {
+				if strings.TrimSpace(outputs[i].ErrorMsg) == "" {
+					status = "✅"
+				} else {
+					status = "❌"
+				}
+			}
+			title := strings.TrimSpace(b.Description)
+			if title == "" {
+				title = i18n.T("agent.plan.default_description")
+			}
+
+			firstLine := ""
+			if len(b.Commands) > 0 {
+				firstLine = strings.Split(b.Commands[0], "\n")[0]
+				firstLine = strings.TrimSpace(firstLine)
+			}
+
+			cleanCmd := strings.TrimSpace(strings.TrimPrefix(firstLine, "#"))
+			isRedundant := strings.EqualFold(title, cleanCmd) || title == firstLine
+
+			if isRedundant {
+				a.emitter.EmitLinef("  %s #%d: %s",
+					status, i+1, renderer.Colorize(firstLine, agent.ColorCyan))
+			} else {
+				a.emitter.EmitLinef("  %s #%d: %s — %s",
+					status, i+1, title, renderer.Colorize(firstLine, agent.ColorGray))
+			}
+		}
+		a.emitter.EmitLine("")
+	}
+
+	// emitPlanFull prints the full plan view via emitter
+	emitPlanFull := func() {
+		a.emitter.EmitLine(renderer.Colorize(i18n.T("agent.plan.full_view"), agent.ColorLime+agent.ColorBold))
+
+		for i, b := range blocks {
+			status := i18n.T("agent.plan.status.pending")
+			statusColor := agent.ColorGray
+			if i < len(outputs) && outputs[i] != nil {
+				if strings.TrimSpace(outputs[i].ErrorMsg) == "" {
+					status = i18n.T("agent.plan.status.ok")
+					statusColor = agent.ColorGreen
+				} else {
+					status = i18n.T("agent.plan.status.error")
+					statusColor = agent.ColorYellow
+				}
+			}
+
+			title := b.Description
+			if title == "" {
+				title = i18n.T("agent.plan.default_description")
+			}
+
+			danger := ""
+			isDangerous := false
+			for _, c := range b.Commands {
+				if a.validator.IsDangerous(c) {
+					isDangerous = true
+					break
+				}
+			}
+			if isDangerous {
+				danger = renderer.Colorize(i18n.T("agent.plan.risk.dangerous"), agent.ColorYellow)
+			} else {
+				danger = renderer.Colorize(i18n.T("agent.plan.risk.safe"), agent.ColorGray)
+			}
+
+			headerText := i18n.T("agent.plan.command_header", i+1, title)
+			a.emitter.EmitLinef("\n%s", renderer.Colorize(headerText, agent.ColorPurple+agent.ColorBold))
+			a.emitter.EmitLinef("    %s %s", renderer.Colorize(i18n.T("agent.plan.field.type"), agent.ColorGray), b.Language)
+			a.emitter.EmitLinef("    %s %s", renderer.Colorize(i18n.T("agent.plan.field.risk"), agent.ColorGray), danger)
+			a.emitter.EmitLinef("    %s %s", renderer.Colorize(i18n.T("agent.plan.field.status"), agent.ColorGray), renderer.Colorize(status, statusColor))
+
+			a.emitter.EmitLine(renderer.Colorize("    "+i18n.T("agent.plan.field.code"), agent.ColorGray))
+			for idx, cmd := range b.Commands {
+				if len(b.Commands) > 1 {
+					sepText := i18n.T("agent.plan.command_separator", idx+1, len(b.Commands))
+					a.emitter.EmitLine(renderer.Colorize("      "+sepText, agent.ColorGray))
+				}
+				prefix := ""
+				if b.Language == "shell" || b.Language == "bash" || b.Language == "sh" {
+					prefix = "$ "
+				}
+				for _, ln := range strings.Split(cmd, "\n") {
+					a.emitter.EmitLinef(renderer.Colorize("      %s%s", agent.ColorCyan), prefix, ln)
+				}
+				if idx < len(b.Commands)-1 {
+					a.emitter.EmitLine(renderer.Colorize("      ─────────────────────────────────────────", agent.ColorGray))
+				}
+			}
+		}
+		a.emitter.EmitLine("")
+	}
+
+	// emitLastResult prints the last command result via emitter
+	emitLastResult := func() {
+		if lastExecuted < 0 || lastExecuted >= len(outputs) || outputs[lastExecuted] == nil {
+			return
+		}
+		a.emitter.EmitLine(renderer.Colorize(i18n.T("agent.last_result.header"), agent.ColorLime+agent.ColorBold))
+
+		out := outputs[lastExecuted].Output
+		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+		max := 30
+		if len(lines) > max {
+			preview := strings.Join(lines[:max], "\n") + "\n...\n"
+			a.emitter.EmitText(preview)
 		} else {
-			renderer.PrintPlanCompact(blocks, outputs)
+			a.emitter.EmitLine(out)
 		}
 
-		renderer.PrintLastResult(outputs, lastExecuted)
-		renderer.PrintMenu()
+		tipsMessage := i18n.T("agent.last_result.tips", lastExecuted+1, lastExecuted+1)
+		a.emitter.EmitLinef("\n%s", tipsMessage)
+	}
 
-		prompt := renderer.PrintPrompt()
+	// emitMenu prints the interactive menu via emitter
+	emitMenu := func() {
+		a.emitter.EmitLine("\n" + renderer.Colorize(strings.Repeat("-", 60), agent.ColorGray))
+		a.emitter.EmitLine(renderer.Colorize(i18n.T("agent.menu.header"), agent.ColorLime+agent.ColorBold))
+		a.emitter.EmitLine(renderer.Colorize(strings.Repeat("-", 60), agent.ColorGray))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "[1..N]"), agent.ColorYellow), i18n.T("agent.menu.exec_n"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "a"), agent.ColorYellow), i18n.T("agent.menu.exec_all"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "eN"), agent.ColorYellow), i18n.T("agent.menu.edit"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "tN"), agent.ColorYellow), i18n.T("agent.menu.dry_run"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "cN"), agent.ColorYellow), i18n.T("agent.menu.continue"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "pcN"), agent.ColorYellow), i18n.T("agent.menu.pre_context"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "acN"), agent.ColorYellow), i18n.T("agent.menu.post_context"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "vN"), agent.ColorYellow), i18n.T("agent.menu.view"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "wN"), agent.ColorYellow), i18n.T("agent.menu.save"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "p"), agent.ColorYellow), i18n.T("agent.menu.toggle_plan"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "r"), agent.ColorYellow), i18n.T("agent.menu.redraw"))
+		a.emitter.EmitLinef("  %s: %s", renderer.Colorize(fmt.Sprintf("%-6s", "q"), agent.ColorYellow), i18n.T("agent.menu.quit"))
+		a.emitter.EmitLine(renderer.Colorize(strings.Repeat("-", 60), agent.ColorGray))
+	}
+
+	for {
+		// ClearScreen is a no-op when output goes through the emitter
+		emitHeader()
+
+		if showFullPlan {
+			emitPlanFull()
+		} else {
+			emitPlanCompact()
+		}
+
+		emitLastResult()
+		emitMenu()
+
+		prompt := renderer.Colorize(i18n.T("agent.prompt.choice"), agent.ColorLime)
 		answer := a.getInput(prompt)
 		answer = strings.ToLower(strings.TrimSpace(answer))
 
 		switch {
 		case answer == "q":
-			fmt.Println(renderer.Colorize(i18n.T("agent.status.exiting"), agent.ColorGray))
+			a.emitter.EmitLine(renderer.Colorize(i18n.T("agent.status.exiting"), agent.ColorGray))
 			return
 
 		case answer == "r":
@@ -947,18 +1086,19 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			nStr := strings.TrimPrefix(answer, "v")
 			n, err := strconv.Atoi(nStr)
 			if err != nil || n < 1 || n > len(outputs) || outputs[n-1] == nil {
-				fmt.Println(i18n.T("agent.status.no_output_to_show"))
+				a.emitter.EmitLine(i18n.T("agent.status.no_output_to_show"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
-			_ = renderer.ShowInPager(outputs[n-1].Output)
+			// ShowInPager doesn't work in TUI; emit content directly
+			a.emitter.EmitText(outputs[n-1].Output)
 			continue
 
 		case strings.HasPrefix(answer, "w"):
 			nStr := strings.TrimPrefix(answer, "w")
 			n, err := strconv.Atoi(nStr)
 			if err != nil || n < 1 || n > len(outputs) || outputs[n-1] == nil {
-				fmt.Println(i18n.T("agent.status.no_output_to_save"))
+				a.emitter.EmitLine(i18n.T("agent.status.no_output_to_save"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
@@ -966,9 +1106,9 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			_ = os.MkdirAll(dir, 0o700)
 			fpath := filepath.Join(dir, fmt.Sprintf("cmd-%d-%d.log", n, time.Now().Unix()))
 			if writeErr := os.WriteFile(fpath, []byte(outputs[n-1].Output), 0o600); writeErr != nil {
-				fmt.Println(i18n.T("agent.status.error_saving"), writeErr)
+				a.emitter.EmitLinef("%s %v", i18n.T("agent.status.error_saving"), writeErr)
 			} else {
-				fmt.Println(i18n.T("agent.status.file_saved_at"), fpath)
+				a.emitter.EmitLinef("%s %s", i18n.T("agent.status.file_saved_at"), fpath)
 			}
 			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 			continue
@@ -988,8 +1128,8 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			}
 
 			if hasDanger {
-				fmt.Println(i18n.T("agent.status.batch_warning"))
-				fmt.Println(i18n.T("agent.status.batch_check_individual"))
+				a.emitter.EmitLine(i18n.T("agent.status.batch_warning"))
+				a.emitter.EmitLine(i18n.T("agent.status.batch_check_individual"))
 			}
 
 			if runtime.GOOS != "windows" {
@@ -999,20 +1139,20 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				_ = cmd.Run()
 			}
 
-			fmt.Print(i18n.T("agent.status.batch_confirm"))
+			a.emitter.EmitText(i18n.T("agent.status.batch_confirm"))
 			confirmationInput := a.readLine()
 			confirmation := strings.ToLower(confirmationInput)
 			if confirmation != "s" && confirmation != "y" {
-				fmt.Println(i18n.T("agent.status.batch_cancelled"))
+				a.emitter.EmitLine(i18n.T("agent.status.batch_cancelled"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
 			for i, block := range blocks {
-				fmt.Printf(i18n.T("agent.status.executing_command", i+1)+"\n", i+1)
-				fmt.Printf("  %s %s\n", i18n.T("agent.plan.field.type"), block.Language)
+				a.emitter.EmitLinef(i18n.T("agent.status.executing_command", i+1), i+1)
+				a.emitter.EmitLinef("  %s %s", i18n.T("agent.plan.field.type"), block.Language)
 				for j, cmd := range block.Commands {
-					fmt.Printf("  %s %d/%d: %s\n", "Comando", j+1, len(block.Commands), cmd)
+					a.emitter.EmitLinef("  %s %d/%d: %s", "Comando", j+1, len(block.Commands), cmd)
 				}
 
 				freshCtx, freshCancel := a.contextManager.CreateExecutionContext()
@@ -1027,14 +1167,14 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				lastExecuted = i
 			}
 
-			fmt.Println(i18n.T("agent.status.all_commands_executed"))
-			fmt.Println(i18n.T("agent.status.summary"))
+			a.emitter.EmitLine(i18n.T("agent.status.all_commands_executed"))
+			a.emitter.EmitLine(i18n.T("agent.status.summary"))
 			for i, out := range outputs {
 				status := "OK"
 				if out == nil || strings.TrimSpace(out.ErrorMsg) != "" {
 					status = "ERRO"
 				}
-				fmt.Printf("- #%d: %s\n", i+1, status)
+				a.emitter.EmitLinef("- #%d: %s", i+1, status)
 			}
 			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 			continue
@@ -1043,13 +1183,13 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			cmdNumStr := strings.TrimPrefix(answer, "e")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_command_number_edit"))
+				a.emitter.EmitLine(i18n.T("agent.error.invalid_command_number_edit"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			edited, err := a.editCommandBlock(blocks[cmdNum-1])
 			if err != nil {
-				fmt.Println(i18n.T("agent.error.error_editing_command"), err)
+				a.emitter.EmitLinef("%s %v", i18n.T("agent.error.error_editing_command"), err)
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
@@ -1074,7 +1214,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			cmdNumStr := strings.TrimPrefix(answer, "t")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_command_number_simulate"))
+				a.emitter.EmitLine(i18n.T("agent.error.invalid_command_number_simulate"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
@@ -1093,7 +1233,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 				}
 				lastExecuted = cmdNum - 1
 			} else {
-				fmt.Println(i18n.T("agent.status.simulation_done"))
+				a.emitter.EmitLine(i18n.T("agent.status.simulation_done"))
 			}
 			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 			continue
@@ -1102,20 +1242,20 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			cmdNumStr := strings.TrimPrefix(answer, "ac")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_command_number_context"))
+				a.emitter.EmitLine(i18n.T("agent.error.invalid_command_number_context"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			if outputs[cmdNum-1] == nil {
-				fmt.Println(i18n.T("agent.status.command_not_executed"))
+				a.emitter.EmitLine(i18n.T("agent.status.command_not_executed"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
-			fmt.Println(i18n.T("agent.output_header"))
-			fmt.Println("---------------------------------------")
-			fmt.Print(outputs[cmdNum-1].Output)
-			fmt.Println("---------------------------------------")
+			a.emitter.EmitLine(i18n.T("agent.output_header"))
+			a.emitter.EmitLine("---------------------------------------")
+			a.emitter.EmitText(outputs[cmdNum-1].Output)
+			a.emitter.EmitLine("---------------------------------------")
 
 			userContext := a.getMultilineInput(i18n.T("agent.prompt.additional_context"))
 
@@ -1141,12 +1281,12 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			cmdNumStr := strings.TrimPrefix(answer, "c")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_command_number_continue"))
+				a.emitter.EmitLine(i18n.T("agent.error.invalid_command_number_continue"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 			if outputs[cmdNum-1] == nil {
-				fmt.Println(i18n.T("agent.status.command_not_executed"))
+				a.emitter.EmitLine(i18n.T("agent.status.command_not_executed"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
@@ -1172,19 +1312,19 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			cmdNumStr := strings.TrimPrefix(answer, "pc")
 			cmdNum, err := strconv.Atoi(cmdNumStr)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_command_number_context"))
+				a.emitter.EmitLine(i18n.T("agent.error.invalid_command_number_context"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
 			userContext := a.getMultilineInput(i18n.T("agent.prompt.additional_context"))
 			if userContext == "" {
-				fmt.Println(i18n.T("agent.error.no_context_provided"))
+				a.emitter.EmitLine(i18n.T("agent.error.no_context_provided"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
 
-			fmt.Println(i18n.T("agent.status.context_received"))
+			a.emitter.EmitLine(i18n.T("agent.status.context_received"))
 			// Monta o prompt para a IA
 			toolContext := a.getToolContextString()
 			prompt := i18n.T("agent.llm_prompt.pre_execution_context",
@@ -1203,7 +1343,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 		default:
 			cmdNum, err := strconv.Atoi(answer)
 			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_option"))
+				a.emitter.EmitLine(i18n.T("agent.error.invalid_option"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}
@@ -1238,8 +1378,9 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 	contentWidth := agent.VisibleLen(titleContent)
 	topBorder := strings.Repeat("─", contentWidth)
 
-	fmt.Println("\n" + renderer.Colorize(topBorder, agent.ColorGray))
-	fmt.Println(renderer.Colorize(titleContent, agent.ColorLime+agent.ColorBold))
+	a.emitter.EmitToolStart(langNorm, block.Description)
+	a.emitter.EmitLine("\n" + renderer.Colorize(topBorder, agent.ColorGray))
+	a.emitter.EmitLine(renderer.Colorize(titleContent, agent.ColorLime+agent.ColorBold))
 
 	allOutput.WriteString(fmt.Sprintf("\nExecutando: %s (tipo: %s)\n", block.Description, langNorm))
 
@@ -1254,7 +1395,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 		if err != nil {
 			errorMsg := i18n.T("agent.error.create_temp_file", err)
 			errMsg := fmt.Sprintf("%s\n", errorMsg)
-			fmt.Print(errMsg)
+			a.emitter.EmitText(errMsg)
 			allOutput.WriteString(errMsg)
 			lastError = err.Error()
 		} else {
@@ -1264,7 +1405,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 			if _, werr := tmpFile.WriteString(scriptContent); werr != nil {
 				errorMsg := i18n.T("agent.error.write_script", werr)
 				errMsg := fmt.Sprintf("%s\n", errorMsg)
-				fmt.Print(errMsg)
+				a.emitter.EmitText(errMsg)
 				allOutput.WriteString(errMsg)
 				lastError = werr.Error()
 			}
@@ -1272,14 +1413,14 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 			_ = os.Chmod(scriptPath, 0700)
 
 			header := i18n.T("agent.status.executing_script", shell) + "\n"
-			fmt.Print(header)
+			a.emitter.EmitText(header)
 			allOutput.WriteString(header)
 
 			result, err := a.executor.Execute(ctx, scriptPath, false)
 
 			safe := utils.SanitizeSensitiveText(result.Output)
 			for _, line := range strings.Split(strings.TrimRight(safe, "\n"), "\n") {
-				fmt.Println("  " + line)
+				a.emitter.EmitLine("  " + line)
 			}
 			allOutput.WriteString(safe + "\n")
 
@@ -1290,7 +1431,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 			}
 
 			meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
-			fmt.Print(meta)
+			a.emitter.EmitText(meta)
 			allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
 		}
 	} else {
@@ -1318,32 +1459,30 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 				if err := os.Chdir(target); err != nil {
 					errorMsg := i18n.T("agent.error.change_dir", target, err)
 					msg := fmt.Sprintf("%s\n", errorMsg)
-					fmt.Print(msg)
+					a.emitter.EmitText(msg)
 					allOutput.WriteString(msg)
 					lastError = err.Error()
 				} else {
 					wd, _ := os.Getwd()
 					msg := fmt.Sprintf(i18n.T("agent.status.dir_changed", wd)+"\n", wd)
-					fmt.Print(msg)
+					a.emitter.EmitText(msg)
 					allOutput.WriteString(msg)
 				}
 				continue
 			}
 
 			if a.validator.IsDangerous(trimmed) {
-				confirmPrompt := i18n.T("agent.status.dangerous_command_confirm")
-				confirm := a.getCriticalInput(confirmPrompt)
-				if confirm != "sim, quero executar conscientemente" {
+				if !a.emitter.RequestApproval(trimmed, block.Description, "high") {
 					outText := i18n.T("agent.status.dangerous_command_aborted") + "\n"
-					fmt.Print(renderer.Colorize(outText, agent.ColorYellow))
+					a.emitter.EmitText(renderer.Colorize(outText, agent.ColorYellow))
 					allOutput.WriteString(outText)
 					continue
 				}
-				fmt.Println(renderer.Colorize(i18n.T("agent.status.dangerous_command_confirmed"), agent.ColorYellow))
+				a.emitter.EmitLine(renderer.Colorize(i18n.T("agent.status.dangerous_command_confirmed"), agent.ColorYellow))
 			}
 
 			header := i18n.T("agent.status.executing_command_n", i+1, len(block.Commands), trimmed) + "\n"
-			fmt.Print(header)
+			a.emitter.EmitText(header)
 			allOutput.WriteString(header)
 
 			isInteractive := false
@@ -1364,7 +1503,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 
 			if isInteractive {
 				outText := i18n.T("agent.status.interactive_mode") + "\n"
-				fmt.Print(renderer.Colorize(outText, agent.ColorGray))
+				a.emitter.EmitText(renderer.Colorize(outText, agent.ColorGray))
 				allOutput.WriteString(outText)
 
 				time.Sleep(1 * time.Second)
@@ -1373,24 +1512,24 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 
 				if err != nil {
 					errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
-					fmt.Print(errMsg)
+					a.emitter.EmitText(errMsg)
 					allOutput.WriteString(errMsg)
 					lastError = err.Error()
 				} else {
 					okMsg := i18n.T("agent.status.command_finished") + "\n"
-					fmt.Print(okMsg)
+					a.emitter.EmitText(okMsg)
 					allOutput.WriteString(okMsg)
 				}
 
 				meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
-				fmt.Print(meta)
+				a.emitter.EmitText(meta)
 				allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
 			} else {
 				result, err := a.executor.Execute(ctx, trimmed, false)
 
 				safe := utils.SanitizeSensitiveText(result.Output)
 				for _, line := range strings.Split(strings.TrimRight(safe, "\n"), "\n") {
-					fmt.Println("  " + line)
+					a.emitter.EmitLine("  " + line)
 				}
 				allOutput.WriteString(safe + "\n")
 
@@ -1401,7 +1540,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 				}
 
 				meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
-				fmt.Print(meta)
+				a.emitter.EmitText(meta)
 				allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
 			}
 		}
@@ -1421,9 +1560,10 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 	rightPadding := paddingWidth - leftPadding
 
 	finalBorder := strings.Repeat("─", leftPadding) + footerContent + strings.Repeat("─", rightPadding)
-	fmt.Println(renderer.Colorize(finalBorder, agent.ColorGray))
+	a.emitter.EmitLine(renderer.Colorize(finalBorder, agent.ColorGray))
 
 	allOutput.WriteString("Execução concluída.\n")
+	a.emitter.EmitToolResult(langNorm, 0, truncateForUI(allOutput.String(), 500), 0)
 	return allOutput.String(), lastError
 }
 
@@ -1623,10 +1763,6 @@ func (a *AgentMode) getToolContextString() string {
 	var toolDescriptions []string
 	coderCheatSheet := ""
 	for _, plugin := range plugins {
-		if a.isCoderMode && !strings.EqualFold(plugin.Name(), "@coder") {
-			continue
-		}
-
 		var b strings.Builder
 		b.WriteString(fmt.Sprintf("- Ferramenta: %s\n", plugin.Name()))
 		b.WriteString(fmt.Sprintf("  Descrição: %s\n", plugin.Description()))
@@ -1650,58 +1786,34 @@ func (a *AgentMode) getToolContextString() string {
 			}
 
 			if err := json.Unmarshal([]byte(plugin.Schema()), &schema); err == nil {
-				if a.isCoderMode {
-					// Modo /coder: contexto compacto para reduzir ruído
-					if schema.ArgsFormat != "" {
-						b.WriteString(fmt.Sprintf("  Formato args: %s\n", schema.ArgsFormat))
-					}
-					b.WriteString("  Subcomandos:\n")
-					for _, sub := range schema.Subcommands {
-						b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
-						var requiredFlags []string
+				if schema.ArgsFormat != "" {
+					b.WriteString(fmt.Sprintf("  Formato args: %s\n", schema.ArgsFormat))
+				}
+				b.WriteString("  Subcomandos Disponíveis:\n")
+				for _, sub := range schema.Subcommands {
+					b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
+					if len(sub.Flags) > 0 {
+						b.WriteString("      Flags:\n")
 						for _, flag := range sub.Flags {
+							req := ""
 							if flag.Required {
-								requiredFlags = append(requiredFlags, fmt.Sprintf("%s (%s)", flag.Name, flag.Type))
+								req = " [obrigatório]"
 							}
-						}
-						if len(requiredFlags) > 0 {
-							b.WriteString("      Obrigatórios: " + strings.Join(requiredFlags, ", ") + "\n")
-						}
-						if len(sub.Examples) > 0 {
-							b.WriteString(fmt.Sprintf("      Ex: %s\n", sub.Examples[0]))
+							flagDesc := fmt.Sprintf("        - %s (%s)%s: %s", flag.Name, flag.Type, req, flag.Description)
+							if flag.Default != "" {
+								flagDesc += fmt.Sprintf(" (padrão: %s)", flag.Default)
+							}
+							b.WriteString(flagDesc + "\n")
 						}
 					}
-				} else {
-					// Modo /agent: contexto completo
-					if schema.ArgsFormat != "" {
-						b.WriteString(fmt.Sprintf("  Formato args: %s\n", schema.ArgsFormat))
-					}
-					b.WriteString("  Subcomandos Disponíveis:\n")
-					for _, sub := range schema.Subcommands {
-						b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
-						if len(sub.Flags) > 0 {
-							b.WriteString("      Flags:\n")
-							for _, flag := range sub.Flags {
-								req := ""
-								if flag.Required {
-									req = " [obrigatório]"
-								}
-								flagDesc := fmt.Sprintf("        - %s (%s)%s: %s", flag.Name, flag.Type, req, flag.Description)
-								if flag.Default != "" {
-									flagDesc += fmt.Sprintf(" (padrão: %s)", flag.Default)
-								}
-								b.WriteString(flagDesc + "\n")
-							}
+					if len(sub.Examples) > 0 {
+						limit := 2
+						if len(sub.Examples) < limit {
+							limit = len(sub.Examples)
 						}
-						if len(sub.Examples) > 0 {
-							limit := 2
-							if len(sub.Examples) < limit {
-								limit = len(sub.Examples)
-							}
-							b.WriteString("      Exemplos:\n")
-							for i := 0; i < limit; i++ {
-								b.WriteString(fmt.Sprintf("        - %s\n", sub.Examples[i]))
-							}
+						b.WriteString("      Exemplos:\n")
+						for i := 0; i < limit; i++ {
+							b.WriteString(fmt.Sprintf("        - %s\n", sub.Examples[i]))
 						}
 					}
 				}
@@ -1717,21 +1829,17 @@ func (a *AgentMode) getToolContextString() string {
 		toolDescriptions = append(toolDescriptions, b.String())
 	}
 
-	if a.isCoderMode {
-		coderCheatSheet = "Cheat sheet (@coder):\n" +
-			"- read: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}\n" +
-			"- search: {\"cmd\":\"search\",\"args\":{\"term\":\"Login\",\"dir\":\".\"}}\n" +
-			"- write: {\"cmd\":\"write\",\"args\":{\"file\":\"x.go\",\"encoding\":\"base64\",\"content\":\"...\"}}\n" +
-			"- exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"mkdir -p testeapi\"}}\n\n"
-	}
+	coderCheatSheet = "Cheat sheet (@coder):\n" +
+		"- read: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}\n" +
+		"- search: {\"cmd\":\"search\",\"args\":{\"term\":\"Login\",\"dir\":\".\"}}\n" +
+		"- write: {\"cmd\":\"write\",\"args\":{\"file\":\"x.go\",\"encoding\":\"base64\",\"content\":\"...\"}}\n" +
+		"- exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"mkdir -p testeapi\"}}\n\n"
 
 	toolContext := "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + coderCheatSheet + strings.Join(toolDescriptions, "\n") + "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
-	if a.isCoderMode {
-		toolContext += "\nDicas rápidas (@coder):\n" +
-			"- Use args JSON sempre que possível: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}\n" +
-			"- Subcomando obrigatório: use \"cmd\" ou \"argv\".\n" +
-			"- Para exec, use \"cmd\" (ou \"command\") dentro de args.\n"
-	}
+	toolContext += "\nDicas rápidas (@coder):\n" +
+		"- Use args JSON sempre que possível: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}\n" +
+		"- Subcomando obrigatório: use \"cmd\" ou \"argv\".\n" +
+		"- Para exec, use \"cmd\" (ou \"command\") dentro de args.\n"
 	return toolContext
 }
 
@@ -1747,37 +1855,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		h := make([]models.Message, 0, len(a.cli.history)+1)
 		h = append(h, a.cli.history...)
 
-		var anchor string
-		if a.isCoderMode {
-			anchor = "REMINDER (/CODER MODE): You MUST respond with a short <reasoning> (2-6 lines) then emit one or more <tool_call name=\"@coder\" args=\"...\" />. " +
-				"CRITICAL: Emit ALL independent tool_calls in a SINGLE response. Do NOT split independent reads/searches/writes into separate turns. " +
-				"If you need to read 3 files, emit 3 tool_calls NOW, not one per turn. Use <agent_call> for 3+ independent tasks when available. " +
-				"Do NOT use code blocks (```). For write/patch: base64 encoding and single-line args are MANDATORY."
-		} else {
-			anchor = "REMINDER (/AGENT MODE): You can use tools via <tool_call name=\"@tool\" args=\"...\" /> when appropriate. " +
-				"CRITICAL: Emit ALL independent operations in a SINGLE response. Do NOT waste turns on things that could run in parallel. " +
-				"For shell commands, use ```execute:<type>``` blocks (shell/git/docker/kubectl...). " +
-				"Avoid destructive commands without clear warnings and alternatives."
-		}
+		anchor := "REMINDER: You can use tools via <tool_call name=\"@tool\" args=\"...\" /> or shell commands via ```execute:<type>``` blocks. " +
+			"CRITICAL: Emit ALL independent operations in a SINGLE response. Do NOT waste turns on things that could run in parallel. " +
+			"When using @coder, use JSON args on a single line. For multiline content, use base64 encoding."
 
 		h = append(h, models.Message{Role: "system", Content: anchor})
 		return h
 	}
 
-	// Helper para verificar tags de raciocínio
-	hasReasoningTag := func(s string) bool {
-		ls := strings.ToLower(s)
-		return strings.Contains(ls, "<reasoning>") && strings.Contains(ls, "</reasoning>")
-	}
-
-	// Helper local: renderizar um card com markdown usando o renderer do cli (glamour).
+	// Helper local: renderizar um card com markdown usando o emitter.
 	renderMDCard := func(icon, title, md, color string) {
 		md = strings.TrimSpace(md)
 		if md == "" {
 			return
 		}
-		rendered := a.cli.renderMarkdown(md) // retorna ANSI
-		renderer.RenderMarkdownTimelineEvent(icon, title, rendered, color)
+		a.emitter.EmitMarkdown(icon, title, md, color)
 	}
 
 	// --- LOOP PRINCIPAL DO AGENTE (ReAct) ---
@@ -1789,16 +1881,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		default:
 		}
 
-		// In agent mode (not coder), check for type-ahead messages from user
-		if !a.isCoderMode {
-			if userMsg := a.drainStdinToQueue(); userMsg != "" {
-				fmt.Printf("\n  %s\n\n",
-					renderer.Colorize("📨 Nova instrução do usuário recebida", agent.ColorCyan))
-				a.cli.history = append(a.cli.history, models.Message{
-					Role:    "user",
-					Content: userMsg,
-				})
-			}
+		// Check for type-ahead messages from user
+		if userMsg := a.drainStdinToQueue(); userMsg != "" {
+			a.emitter.EmitLinef("\n  %s\n",
+				renderer.Colorize("📨 Nova instrução do usuário recebida", agent.ColorCyan))
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: userMsg,
+			})
 		}
 
 		// Compact history if over budget (before building turn history)
@@ -1820,7 +1910,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Inicia o timer do turno (substitui a animação de "Pensando...")
 		modelName := a.cli.Client.GetModelName()
 		a.turnTimer.Start(ctx, func(d time.Duration) {
-			fmt.Print(metrics.FormatTimerStatus(d, modelName, "Processando..."))
+			a.emitter.EmitThinking(modelName, d)
+			a.emitter.EmitText(metrics.FormatTimerStatus(d, modelName, "Processando..."))
 		})
 
 		turnHistory := buildTurnHistoryWithAnchor()
@@ -1830,12 +1921,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		// Para o timer e obtém a duração
 		turnDuration := a.turnTimer.Stop()
-		fmt.Print(metrics.ClearLine()) // Limpa a linha do timer
-		fmt.Println()
+		a.emitter.EmitThinkingDone()
+		a.emitter.ClearLine()
+		a.emitter.EmitLine("")
 
 		// Helper para exibir métricas ao final do turno (após execução)
 		showTurnStats := func() {
-			fmt.Println(metrics.FormatTurnInfo(turn+1, maxTurns, turnDuration, &metrics.TurnStats{
+			a.emitter.EmitTurnEnd(turn+1, maxTurns, turnDuration, turnToolCalls, turnAgents)
+			a.emitter.EmitLine(metrics.FormatTurnInfo(turn+1, maxTurns, turnDuration, &metrics.TurnStats{
 				TurnAgents:       turnAgents,
 				TurnToolCalls:    turnToolCalls,
 				SessionAgents:    a.agentsLaunched,
@@ -1889,89 +1982,30 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		remaining = stripToolCallTags(remaining)
 		remaining = strings.TrimSpace(removeXMLTags(remaining))
 
-		coderMinimal := a.isCoderMode && isCoderMinimalUI()
-
 		if strings.TrimSpace(reasoning) != "" {
-			if coderMinimal {
-				renderer.RenderTimelineEvent("🧭", "PLANO", compactText(reasoning, 3, 260), agent.ColorCyan)
-			} else {
-				renderMDCard("🧠", "RACIOCÍNIO", reasoning, agent.ColorCyan)
-			}
-			// Integração de Task Tracking (somente no modo /coder)
-			if a.isCoderMode {
-				agent.IntegrateTaskTracking(a.taskTracker, reasoning, a.logger)
-			}
+			renderMDCard("🧠", "RACIOCÍNIO", reasoning, agent.ColorCyan)
+			// Integração de Task Tracking
+			agent.IntegrateTaskTracking(a.taskTracker, reasoning, a.logger)
 		}
 		if strings.TrimSpace(explanation) != "" {
-			if coderMinimal {
-				renderer.RenderTimelineEvent("📝", "NOTA", compactText(explanation, 2, 220), agent.ColorLime)
-			} else {
-				renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
-			}
+			renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
 		}
 		// Helper para renderizar progresso atualizado do plano
 		renderPlanProgress := func() {
-			if !a.isCoderMode || a.taskTracker == nil || a.taskTracker.GetPlan() == nil {
+			if a.taskTracker == nil || a.taskTracker.GetPlan() == nil {
 				return
 			}
 			progress := a.taskTracker.FormatProgress()
 			if strings.TrimSpace(progress) == "" {
 				return
 			}
-			if coderMinimal {
-				renderer.RenderTimelineEvent("🧩", "STATUS", compactText(progress, 2, 220), agent.ColorLime)
-			} else {
-				renderMDCard("🧩", "PLANO DE AÇÃO", progress, agent.ColorLime)
-			}
+			renderMDCard("🧩", "PLANO DE AÇÃO", progress, agent.ColorLime)
 		}
 
-		// Renderizar progresso inicial das tarefas (somente no modo /coder)
+		// Renderizar progresso inicial das tarefas
 		renderPlanProgress()
 		if strings.TrimSpace(remaining) != "" {
-			if coderMinimal {
-				renderer.RenderTimelineEvent("💬", "RESUMO", compactText(remaining, 2, 220), agent.ColorGray)
-			} else {
-				renderMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
-			}
-		}
-
-		// =========================
-		// VALIDAÇÕES ESTRITAS DO /CODER
-		// =========================
-		if a.isCoderMode {
-			if len(toolCalls) > 0 {
-				// Require <reasoning> before acting
-				if !hasReasoningTag(thoughtText) {
-					a.cli.history = append(a.cli.history, models.Message{
-						Role: "user",
-						Content: "FORMAT ERROR: In /coder mode, you MUST write a <reasoning> block (2-6 lines with task list) BEFORE any <tool_call>. " +
-							"Rewrite your response starting with <reasoning>...</reasoning> then your <tool_call> tags.",
-					})
-					continue
-				}
-
-				// Require exclusive use of @coder
-				if !strings.EqualFold(strings.TrimSpace(toolCalls[0].Name), "@coder") {
-					a.cli.history = append(a.cli.history, models.Message{
-						Role: "user",
-						Content: "FORMAT ERROR: In /coder mode, the ONLY allowed tool is @coder. " +
-							"Resend using: <tool_call name=\"@coder\" args='{\"cmd\":\"...\",\"args\":{...}}' />",
-					})
-					continue
-				}
-			}
-
-			// Prohibit loose code blocks in coder mode
-			if len(toolCalls) == 0 {
-				if strings.Contains(aiResponse, "```") || strings.Contains(aiResponse, "```execute:") || regexp.MustCompile(`(?m)^[$#]\s+`).MatchString(aiResponse) {
-					a.cli.history = append(a.cli.history, models.Message{
-						Role: "user",
-						Content: "FORMAT ERROR: Code blocks and shell commands are NOT allowed in /coder mode. " +
-							"You MUST use <reasoning> followed by <tool_call name=\"@coder\" args='{\"cmd\":\"exec\",\"args\":{\"cmd\":\"your command\"}}' />",
-					})
-					continue
-				}
-			}
+			renderMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
 		}
 
 		// =========================================================
@@ -1980,20 +2014,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		if a.parallelMode && a.agentDispatcher != nil {
 			agentCalls, _ := workers.ParseAgentCalls(aiResponse)
 			if len(agentCalls) > 0 {
-				coderMinUI := a.isCoderMode && isCoderMinimalUI()
 				n := len(agentCalls)
 				agentWord := "agent"
 				if n > 1 {
 					agentWord = "agents"
 				}
-				if coderMinUI {
-					renderer.RenderTimelineEvent("🚀", "AGENTS", fmt.Sprintf("%d %s dispatched", n, agentWord), agent.ColorPurple)
-				} else {
-					renderer.RenderTimelineEvent("🚀", "MULTI-AGENT DISPATCH", fmt.Sprintf("Dispatching %d %s", n, agentWord), agent.ColorPurple)
-				}
+				a.emitter.EmitMarkdown("🚀", "MULTI-AGENT DISPATCH", fmt.Sprintf("Dispatching %d %s", n, agentWord), agent.ColorPurple)
 
 				for i, ac := range agentCalls {
-					renderer.RenderTimelineEvent("🤖", fmt.Sprintf("[%s] #%d", ac.Agent, i+1), truncateForUI(ac.Task, 120), agent.ColorCyan)
+					a.emitter.EmitMarkdown("🤖", fmt.Sprintf("[%s] #%d", ac.Agent, i+1), truncateForUI(ac.Task, 120), agent.ColorCyan)
 				}
 
 				// Dispatch with live progress feedback
@@ -2035,17 +2064,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					// security prompt takes over. Reset prevLines so Resume
 					// starts fresh and won't try to clear prompt lines.
 					if prevLines > 0 {
-						fmt.Print(metrics.ClearLines(prevLines))
-						fmt.Print(metrics.ClearLine())
+						a.emitter.ClearLines(prevLines)
+						a.emitter.ClearLine()
 						prevLines = 0
 					}
 				})
 				a.turnTimer.Start(ctx, func(d time.Duration) {
 					if prevLines > 0 {
-						fmt.Print(metrics.ClearLines(prevLines))
+						a.emitter.ClearLines(prevLines)
 					}
 					output := metrics.FormatDispatchProgress(progressState, modelName)
-					fmt.Print(output)
+					a.emitter.EmitText(output)
 					prevLines = progressState.LineCount()
 				})
 
@@ -2060,9 +2089,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				a.turnTimer.Stop()
 				// Clear the live progress display
 				if prevLines > 0 {
-					fmt.Print(metrics.ClearLines(prevLines))
+					a.emitter.ClearLines(prevLines)
 				}
-				fmt.Print(metrics.ClearLine())
+				a.emitter.ClearLine()
 
 				// Render results and count internal tool calls
 				totalAgentToolCalls := 0
@@ -2075,7 +2104,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					totalParallelCalls += ar.ParallelCalls
 					totalDuration += ar.Duration
 					if ar.Error != nil {
-						renderer.RenderTimelineEvent("❌", fmt.Sprintf("[%s] FAILED", ar.Agent), ar.Error.Error(), agent.ColorYellow)
+						a.emitter.EmitMarkdown("❌", fmt.Sprintf("[%s] FAILED", ar.Agent), ar.Error.Error(), agent.ColorYellow)
 					} else {
 						successCount++
 						summary := truncateForUI(ar.Output, 200)
@@ -2089,7 +2118,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							tcLabel = "tool calls"
 						}
 						title := fmt.Sprintf("[%s] OK (%s, %d %s%s)", ar.Agent, ar.Duration.Round(time.Millisecond), tcCount, tcLabel, parallelInfo)
-						renderer.RenderTimelineEvent("✅", title, summary, agent.ColorGreen)
+						a.emitter.EmitMarkdown("✅", title, summary, agent.ColorGreen)
 					}
 				}
 				a.toolCallsExecd += totalAgentToolCalls
@@ -2104,7 +2133,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				if totalParallelCalls > 1 {
 					parallelSuffix = fmt.Sprintf(" | %d goroutines paralelas", totalParallelCalls)
 				}
-				renderer.RenderTimelineEvent("📊", "RESUMO",
+				a.emitter.EmitMarkdown("📊", "RESUMO",
 					fmt.Sprintf("%d/%d %s concluidos | %d %s executadas%s | %s total",
 						successCount, n, agentWord, totalAgentToolCalls, tcWord,
 						parallelSuffix, totalDuration.Round(time.Millisecond)),
@@ -2128,7 +2157,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// PRIORIDADE 1: EXECUTAR TOOL_CALL(s) EM LOTE (BATCH)
 		// =========================================================
 		if len(toolCalls) > 0 {
-			coderMinimal := a.isCoderMode && isCoderMinimalUI()
 			var batchOutputBuilder strings.Builder
 			var batchHasError bool
 			successCount := 0
@@ -2136,80 +2164,59 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// 1. Renderiza cabeçalho do lote se houver mais de 1 ação
 			if totalActions > 1 {
-				if coderMinimal {
-					renderer.RenderTimelineEvent("📦", "LOTE", fmt.Sprintf("%d ações", totalActions), agent.ColorPurple)
-				} else {
-					renderer.RenderBatchHeader(totalActions)
-				}
+				a.emitter.EmitMarkdown("📦", "BATCH EXECUTION", fmt.Sprintf("Starting %d actions", totalActions), agent.ColorPurple)
 			}
 
 			// Iterar sobre TODAS as chamadas de ferramenta sugeridas
 			for i, tc := range toolCalls {
 				// --- SECURITY CHECK START ---
-				if a.isCoderMode {
-					pm, err := coder.NewPolicyManager(a.logger)
-					if err == nil {
-						action := pm.Check(tc.Name, tc.Args)
-						if rule, ok := pm.LastMatchedRule(); ok {
-							a.lastPolicyMatch = &rule
-						} else {
-							a.lastPolicyMatch = nil
-						}
-						if action == coder.ActionDeny {
-							msg := "🛫 AÇÃO BLOQUEADA PELO USUÁRIO (Regra de Segurança). NÃO TENTE NOVAMENTE."
-							if coderMinimal {
-								renderer.RenderToolResultMinimal(msg, true)
-							} else {
-								renderer.RenderToolResult(msg, true)
+				// Security policy check for @coder tool calls
+				pm, err := coder.NewPolicyManager(a.logger)
+				if err == nil {
+					action := pm.Check(tc.Name, tc.Args)
+					if rule, ok := pm.LastMatchedRule(); ok {
+						a.lastPolicyMatch = &rule
+					} else {
+						a.lastPolicyMatch = nil
+					}
+					if action == coder.ActionDeny {
+						msg := "🛫 AÇÃO BLOQUEADA PELO USUÁRIO (Regra de Segurança). NÃO TENTE NOVAMENTE."
+						a.emitter.EmitMarkdown("❌", "BLOCKED", msg, agent.ColorYellow)
+						a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
+						batchHasError = true
+						break
+					}
+					if action == coder.ActionAsk {
+						decision := coder.PromptSecurityCheck(ctx, tc.Name, tc.Args, a.stdinLines)
+						pattern := coder.GetSuggestedPattern(tc.Name, tc.Args)
+						switch decision {
+						case coder.DecisionAllowAlways:
+							// Only persist rule if pattern is non-empty.
+							// Exec commands return "" to prevent blanket allow.
+							if pattern != "" {
+								_ = pm.AddRule(pattern, coder.ActionAllow)
 							}
+						case coder.DecisionDenyForever:
+							if pattern != "" {
+								_ = pm.AddRule(pattern, coder.ActionDeny)
+							}
+							msg := "🛫 AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
+							a.emitter.EmitMarkdown("❌", "BLOCKED", msg, agent.ColorYellow)
 							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 							batchHasError = true
-							break
+						case coder.DecisionDenyOnce:
+							msg := "🛫 AÇÃO NEGADA PELO USUÁRIO DESTA VEZ. Tente uma abordagem diferente ou pergunte ao usuário."
+							a.emitter.EmitMarkdown("❌", "BLOCKED", msg, agent.ColorYellow)
+							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
+							batchHasError = true
+						case coder.DecisionCancelled:
+							msg := "⏹ OPERAÇÃO CANCELADA PELO USUÁRIO (Ctrl+C). Pode tentar a mesma ação novamente se necessário."
+							a.emitter.EmitMarkdown("❌", "BLOCKED", msg, agent.ColorYellow)
+							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
+							batchHasError = true
 						}
-						if action == coder.ActionAsk {
-							decision := coder.PromptSecurityCheck(ctx, tc.Name, tc.Args, a.stdinLines)
-							pattern := coder.GetSuggestedPattern(tc.Name, tc.Args)
-							switch decision {
-							case coder.DecisionAllowAlways:
-								// Only persist rule if pattern is non-empty.
-								// Exec commands return "" to prevent blanket allow.
-								if pattern != "" {
-									_ = pm.AddRule(pattern, coder.ActionAllow)
-								}
-							case coder.DecisionDenyForever:
-								if pattern != "" {
-									_ = pm.AddRule(pattern, coder.ActionDeny)
-								}
-								msg := "🛫 AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
-								if coderMinimal {
-									renderer.RenderToolResultMinimal(msg, true)
-								} else {
-									renderer.RenderToolResult(msg, true)
-								}
-								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
-								batchHasError = true
-							case coder.DecisionDenyOnce:
-								msg := "🛫 AÇÃO NEGADA PELO USUÁRIO DESTA VEZ. Tente uma abordagem diferente ou pergunte ao usuário."
-								if coderMinimal {
-									renderer.RenderToolResultMinimal(msg, true)
-								} else {
-									renderer.RenderToolResult(msg, true)
-								}
-								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
-								batchHasError = true
-							case coder.DecisionCancelled:
-								msg := "⏹ OPERAÇÃO CANCELADA PELO USUÁRIO (Ctrl+C). Pode tentar a mesma ação novamente se necessário."
-								if coderMinimal {
-									renderer.RenderToolResultMinimal(msg, true)
-								} else {
-									renderer.RenderToolResult(msg, true)
-								}
-								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
-								batchHasError = true
-							}
-							if batchHasError {
-								break
-							}
+						if batchHasError {
+							break
 						}
 					}
 				}
@@ -2222,22 +2229,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 				// 2. Renderiza a BOX de ação IMEDIATAMENTE (antes de processar)
 				// Isso dá feedback visual "Real-Time" do que está prestes a acontecer
-				if coderMinimal {
-					renderer.RenderToolCallMinimal(toolName, toolArgsStr, i+1, totalActions)
-				} else {
-					renderer.RenderToolCallWithProgress(toolName, toolArgsStr, i+1, totalActions)
-				}
+				a.emitter.EmitToolStart(toolName, fmt.Sprintf("Action %d/%d: %s", i+1, totalActions, toolArgsStr))
 
 				// UX: Força flush e pausa para leitura
 				os.Stdout.Sync()
 				time.Sleep(300 * time.Millisecond)
 
 				// --- Lógica de Sanitização e Validação ---
-				normalizedArgsStr := sanitizeToolCallArgs(toolArgsStr, a.logger, toolName, a.isCoderMode)
+				normalizedArgsStr := sanitizeToolCallArgs(toolArgsStr, a.logger, toolName)
 
-				// /coder mode: if args have newlines, try compacting JSON before failing.
+				// If args have newlines, try compacting JSON before failing.
 				// Many AI models send pretty-printed JSON which is perfectly valid but multiline.
-				if a.isCoderMode && hasAnyNewline(normalizedArgsStr) {
+				if hasAnyNewline(normalizedArgsStr) {
 					compacted := tryCompactJSON(normalizedArgsStr)
 					if compacted != "" && !hasAnyNewline(compacted) {
 						// Successfully compacted multiline JSON into single line
@@ -2249,11 +2252,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					} else {
 						// Could not compact - enforce single line as before
 						msg := buildCoderSingleLineArgsEnforcementPrompt(toolArgsStr)
-						if coderMinimal {
-							renderer.RenderToolResultMinimal("Format error: args contain line breaks.\n"+msg, true)
-						} else {
-							renderer.RenderToolResult("Format error: args contain line breaks.\n"+msg, true)
-						}
+						a.emitter.EmitMarkdown("❌", "FORMAT ERROR", "Args contain line breaks.\n"+msg, agent.ColorYellow)
 
 						a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
 						batchHasError = true
@@ -2270,37 +2269,26 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					execErr = parseErr
 					toolOutput = fmt.Sprintf("Args parsing error: %v", parseErr)
 
-					if a.isCoderMode {
-						fixMsg := fmt.Sprintf("ERROR: Your <tool_call> has invalid args (error: %v). In /coder mode, args MUST be valid single-line JSON.", parseErr)
-						fixMsg += "\n\nQuick fix - use one of these formats:\n" +
-							`<tool_call name="@coder" args='{"cmd":"read","args":{"file":"main.go"}}' />` + "\n" +
-							`<tool_call name="@coder" args='{"cmd":"exec","args":{"cmd":"go test ./..."}}' />` + "\n" +
-							`<tool_call name="@coder" args='{"cmd":"write","args":{"file":"out.go","content":"BASE64","encoding":"base64"}}' />` + "\n" +
-							`<tool_call name="@coder" args="read --file main.go" />`
-						a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: fixMsg})
-						batchHasError = true
-					}
+					fixMsg := fmt.Sprintf("ERROR: Your <tool_call> has invalid args (error: %v). Args MUST be valid single-line JSON.", parseErr)
+					fixMsg += "\n\nQuick fix - use one of these formats:\n" +
+						`<tool_call name="@coder" args='{"cmd":"read","args":{"file":"main.go"}}' />` + "\n" +
+						`<tool_call name="@coder" args='{"cmd":"exec","args":{"cmd":"go test ./..."}}' />` + "\n" +
+						`<tool_call name="@coder" args='{"cmd":"write","args":{"file":"out.go","content":"BASE64","encoding":"base64"}}' />` + "\n" +
+						`<tool_call name="@coder" args="read --file main.go" />`
+					a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: fixMsg})
+					batchHasError = true
 				} else {
 					plugin, found := a.cli.pluginManager.GetPlugin(toolName)
 					if !found {
 						execErr = fmt.Errorf("plugin não encontrado")
 						toolOutput = fmt.Sprintf("Ferramenta '%s' não existe ou não está instalada.", toolName)
-
-						if a.isCoderMode {
-							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "Ferramenta não encontrada. Use @coder."})
-							batchHasError = true
-						}
 					} else {
-						// Guard-rail do /coder (@coder) - Argumentos obrigatórios
-						if a.isCoderMode && strings.EqualFold(strings.TrimSpace(toolName), "@coder") {
+						// Guard-rail do @coder - Argumentos obrigatórios
+						if strings.EqualFold(strings.TrimSpace(toolName), "@coder") {
 							if missing, which := isCoderArgsMissingRequiredValue(toolArgs); missing {
 								msg := buildCoderToolCallFixPrompt(which)
 								// Feedback visual
-								if coderMinimal {
-									renderer.RenderToolResultMinimal("Args inválido para @coder: falta argumento válido em "+which, true)
-								} else {
-									renderer.RenderToolResult("Args inválido para @coder: falta argumento válido em "+which, true)
-								}
+								a.emitter.EmitMarkdown("❌", "INVALID ARGS", "Args inválido para @coder: falta argumento válido em "+which, agent.ColorYellow)
 
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
 								batchHasError = true
@@ -2312,17 +2300,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						// --- DANGEROUS EXEC GUARD ---
 						// Even if policy says "allow", NEVER auto-execute dangerous commands.
 						// This catches cases where user clicked "Allow Always" for @coder exec.
-						if a.isCoderMode && !batchHasError {
+						if !batchHasError {
 							if dangerous, shellCmd := a.isCoderExecDangerous(toolArgs); dangerous {
 								msg := fmt.Sprintf(
 									"BLOCKED: Dangerous command detected in @coder exec: %q. "+
 										"This command is forbidden regardless of policy rules. "+
 										"DO NOT retry this command.", shellCmd)
-								if coderMinimal {
-									renderer.RenderToolResultMinimal(msg, true)
-								} else {
-									renderer.RenderToolResult(msg, true)
-								}
+								a.emitter.EmitMarkdown("❌", "BLOCKED", msg, agent.ColorYellow)
 								a.cli.history = append(a.cli.history, models.Message{
 									Role: "user", Content: "SECURITY BLOCK: " + msg,
 								})
@@ -2341,17 +2325,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							}
 							a.cli.animation.StopThinkingAnimation()
 
-							renderer.RenderStreamBoxStart("🔨", fmt.Sprintf("EXECUTANDO: %s %s", toolName, subCmd), agent.ColorPurple)
+							a.emitter.EmitLine(fmt.Sprintf("\n🔨 EXECUTANDO: %s %s", toolName, subCmd))
 
 							streamCallback := func(line string) {
-								renderer.StreamOutput(line)
+								a.emitter.EmitLine("  " + line)
 							}
 
 							// Marca tarefa como em andamento ANTES de executar
 							agent.MarkTaskInProgress(a.taskTracker)
 							toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
-
-							renderer.RenderStreamBoxEnd(agent.ColorPurple)
 
 							// Se o contexto foi cancelado (Ctrl+C), propaga imediatamente
 							if ctx.Err() != nil {
@@ -2371,11 +2353,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						displayForHuman = displayForHuman + "\n\n--- ERRO ---\n" + errText
 					}
 				}
-				if coderMinimal {
-					renderer.RenderToolResultMinimal(displayForHuman, execErr != nil)
-				} else {
-					renderer.RenderToolResult(displayForHuman, execErr != nil)
+				exitCode := 0
+				if execErr != nil {
+					exitCode = 1
 				}
+				a.emitter.EmitToolResult(toolName, exitCode, displayForHuman, 0)
 
 				// Atualiza status da tarefa e re-renderiza plano
 				if execErr != nil {
@@ -2413,7 +2395,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// 4. Renderiza rodapé do lote
 			if totalActions > 1 {
-				renderer.RenderBatchSummary(successCount, totalActions, batchHasError)
+				if batchHasError {
+					a.emitter.EmitMarkdown("⚠️", "BATCH INTERRUPTED", fmt.Sprintf("%d of %d actions succeeded", successCount, totalActions), agent.ColorYellow)
+				} else {
+					a.emitter.EmitMarkdown("✅", "BATCH COMPLETED", fmt.Sprintf("All %d actions executed", totalActions), agent.ColorGreen)
+				}
 			}
 
 			// Lógica de Continuação:
@@ -2442,25 +2428,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// =========================================================
 		commandBlocks := a.extractCommandBlocks(aiResponse)
 		if len(commandBlocks) > 0 {
-			if a.isCoderMode && a.isOneShot {
-				a.cli.history = append(a.cli.history, models.Message{
-					Role: "user",
-					Content: "Você respondeu com comandos em bloco (shell). No modo /coder você DEVE usar <tool_call> " +
-						"para executar ferramentas/plugins (especialmente @coder). " +
-						"Reenvie a próxima ação SOMENTE como <tool_call name=\"@coder\" ... /> (sem blocos ```).",
-				})
-				continue
-			}
-
-			if a.isCoderMode {
-				a.cli.history = append(a.cli.history, models.Message{
-					Role: "user",
-					Content: "No modo /coder, não use blocos ```execute``` nem comandos shell. " +
-						"Use <reasoning> e então emita <tool_call name=\"@coder\" ... />.",
-				})
-				continue
-			}
-
 			renderMDCard("🧩", "PLANO GERADO", "A IA gerou um plano de ação com comandos executáveis. Use o menu abaixo para executar.", agent.ColorLime)
 			a.handleCommandBlocks(ctx, commandBlocks)
 			return nil
@@ -2470,11 +2437,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// PRIORIDADE 3: RESPOSTA FINAL (sem ações)
 		// ==========================================
 		showTurnStats()
-		fmt.Println(renderer.Colorize("\n🏁 TAREFA CONCLUÍDA", agent.ColorGreen+agent.ColorBold))
+		a.emitter.EmitStatus(renderer.Colorize("\n🏁 TAREFA CONCLUÍDA", agent.ColorGreen+agent.ColorBold))
 		return nil
 	}
 
-	fmt.Println(renderer.Colorize(
+	a.emitter.EmitStatus(renderer.Colorize(
 		fmt.Sprintf("\n⚠️ Limite de %d passos atingido. O agente parou para evitar loop infinito.", maxTurns),
 		agent.ColorYellow,
 	))
@@ -2492,7 +2459,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 // 5) Remove "\" final pendurado fora de aspas
 // 6) Normaliza espaços múltiplos (fora de aspas)
 // 7) Correções semânticas específicas para @coder
-func sanitizeToolCallArgs(rawArgs string, logger *zap.Logger, toolName string, isCoderMode bool) string {
+func sanitizeToolCallArgs(rawArgs string, logger *zap.Logger, toolName string) string {
 	// 1) Decodifica entidades HTML (&quot; -> ", &#10; -> \n, etc.)
 	unescaped := html.UnescapeString(rawArgs)
 
@@ -2535,7 +2502,7 @@ func sanitizeToolCallArgs(rawArgs string, logger *zap.Logger, toolName string, i
 	normalized = normalizeSpacesOutsideQuotes(normalized)
 
 	// 7) Correções semânticas específicas para @coder
-	if isCoderMode && strings.EqualFold(strings.TrimSpace(toolName), "@coder") {
+	if strings.EqualFold(strings.TrimSpace(toolName), "@coder") {
 		if fixed, changed := fixDanglingBackslashArgsForCoderTool(normalized); changed {
 			if logger != nil {
 				logger.Debug("Aplicada correção semântica para @coder",
@@ -3217,7 +3184,7 @@ func (a *AgentMode) continueWithNewAIResponse(ctx context.Context) {
 	turns := AgentMaxTurns()
 
 	if err := a.processAIResponseAndAct(ctx, turns); err != nil {
-		fmt.Println(colorize(
+		a.emitter.EmitError(colorize(
 			i18n.T("agent.error.continuation_failed", err),
 			ColorYellow,
 		))
