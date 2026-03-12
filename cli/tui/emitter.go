@@ -8,24 +8,28 @@ import (
 // TUIEmitter implements cli.OutputEmitter and sends events to a TUI event channel.
 // It is used when agent_mode runs inside the Bubble Tea TUI.
 type TUIEmitter struct {
-	ch chan<- Event
+	ch    chan<- Event
+	width int // content width for markdown rendering
 }
 
 // NewTUIEmitter creates an emitter that forwards output to the given event channel.
-func NewTUIEmitter(ch chan<- Event) *TUIEmitter {
-	return &TUIEmitter{ch: ch}
+func NewTUIEmitter(ch chan<- Event, width int) *TUIEmitter {
+	if width <= 0 {
+		width = 80
+	}
+	return &TUIEmitter{ch: ch, width: width}
 }
 
 func (e *TUIEmitter) EmitText(text string) {
-	e.ch <- Event{Type: EventTextDelta, Text: text}
+	e.ch <- Event{Type: EventPreStyledText, Text: text}
 }
 
 func (e *TUIEmitter) EmitLine(text string) {
-	e.ch <- Event{Type: EventTextDelta, Text: text + "\n"}
+	e.ch <- Event{Type: EventPreStyledText, Text: text}
 }
 
 func (e *TUIEmitter) EmitLinef(format string, args ...interface{}) {
-	e.ch <- Event{Type: EventTextDelta, Text: fmt.Sprintf(format+"\n", args...)}
+	e.ch <- Event{Type: EventPreStyledText, Text: fmt.Sprintf(format, args...)}
 }
 
 func (e *TUIEmitter) EmitTurnStart(turn, maxTurns int) {
@@ -36,10 +40,9 @@ func (e *TUIEmitter) EmitTurnStart(turn, maxTurns int) {
 }
 
 func (e *TUIEmitter) EmitTurnEnd(turn, maxTurns int, duration time.Duration, toolCalls, agents int) {
-	// Send as a status text event for the TUI viewport
 	e.ch <- Event{
-		Type: EventTextDelta,
-		Text: fmt.Sprintf("\n[Turn %d/%d completed in %s — %d tool calls, %d agents]\n",
+		Type: EventPreStyledText,
+		Text: fmt.Sprintf("[Turn %d/%d completed in %s — %d tool calls, %d agents]",
 			turn, maxTurns, duration.Round(time.Millisecond), toolCalls, agents),
 	}
 }
@@ -64,7 +67,7 @@ func (e *TUIEmitter) EmitToolResult(toolName string, exitCode int, output string
 }
 
 func (e *TUIEmitter) EmitThinking(model string, duration time.Duration) {
-	e.ch <- Event{Type: EventThinking, Text: fmt.Sprintf("Thinking... (%s, %s)", model, duration.Round(time.Second))}
+	e.ch <- Event{Type: EventStatusUpdate, Text: fmt.Sprintf("Thinking... (%s, %s)", model, duration.Round(time.Second))}
 }
 
 func (e *TUIEmitter) EmitThinkingDone() {
@@ -72,12 +75,12 @@ func (e *TUIEmitter) EmitThinkingDone() {
 }
 
 func (e *TUIEmitter) EmitMarkdown(icon, title, content, color string) {
-	rendered := RenderMarkdown(content)
-	e.ch <- Event{Type: EventTextDelta, Text: fmt.Sprintf("\n%s %s\n%s\n", icon, title, rendered)}
+	rendered := RenderMarkdown(content, e.width)
+	e.ch <- Event{Type: EventPreStyledText, Text: fmt.Sprintf("\n%s %s\n%s\n", icon, title, rendered)}
 }
 
 func (e *TUIEmitter) EmitStatus(text string) {
-	e.ch <- Event{Type: EventTextDelta, Text: text + "\n"}
+	e.ch <- Event{Type: EventStatusUpdate, Text: text}
 }
 
 func (e *TUIEmitter) EmitError(text string) {

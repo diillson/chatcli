@@ -2,21 +2,30 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Theme colors inspired by OpenCode's dark terminal aesthetic.
+// Cyberpunk / Vercel-inspired dark theme with neon accents.
 var (
-	colorPrimary   = lipgloss.Color("#7C3AED") // violet
-	colorSecondary = lipgloss.Color("#6366F1") // indigo
-	colorAccent    = lipgloss.Color("#22D3EE") // cyan
-	colorSuccess   = lipgloss.Color("#22C55E") // green
-	colorWarning   = lipgloss.Color("#F59E0B") // amber
-	colorError     = lipgloss.Color("#EF4444") // red
-	colorMuted     = lipgloss.Color("#6B7280") // gray
-	colorText      = lipgloss.Color("#E5E7EB") // light gray
-	colorBg        = lipgloss.Color("#111827") // dark bg
-	colorBorder    = lipgloss.Color("#374151") // border gray
-	colorUserBg    = lipgloss.Color("#1E1B4B") // dark indigo
-	colorAssistBg  = lipgloss.Color("#111827") // same as bg
-	colorToolBg    = lipgloss.Color("#1A2332") // dark blue-gray
+	// Core palette
+	colorPrimary   = lipgloss.Color("#A855F7") // purple-400 (neon violet)
+	colorSecondary = lipgloss.Color("#818CF8") // indigo-400
+	colorAccent    = lipgloss.Color("#22D3EE") // cyan-400 (neon cyan)
+	colorSuccess   = lipgloss.Color("#34D399") // emerald-400
+	colorWarning   = lipgloss.Color("#FBBF24") // amber-400
+	colorError     = lipgloss.Color("#F87171") // red-400
+	colorMuted     = lipgloss.Color("#4B5563") // gray-600
+	colorSubtle    = lipgloss.Color("#6B7280") // gray-500
+	colorText      = lipgloss.Color("#F3F4F6") // gray-100
+	colorDim       = lipgloss.Color("#9CA3AF") // gray-400
+
+	// Backgrounds
+	colorBg       = lipgloss.Color("#0A0A0A") // near-black (Vercel)
+	colorSurface  = lipgloss.Color("#171717") // neutral-900
+	colorSurface2 = lipgloss.Color("#1C1C1C") // slightly lighter
+	colorBorder   = lipgloss.Color("#262626") // neutral-800
+
+	// Semantic backgrounds
+	colorUserBg   = lipgloss.Color("#1E1B4B") // indigo-950
+	colorAssistBg = lipgloss.Color("#0A0A0A") // same as bg
+	colorToolBg   = lipgloss.Color("#0C1222") // dark blue-black
 )
 
 // Styles holds all lipgloss styles used across the TUI.
@@ -41,9 +50,9 @@ var Styles = struct {
 	ToolLabel      lipgloss.Style
 
 	// Sidebar sections
-	SidebarTitle   lipgloss.Style
-	SidebarItem    lipgloss.Style
-	SidebarMuted   lipgloss.Style
+	SidebarTitle lipgloss.Style
+	SidebarItem  lipgloss.Style
+	SidebarMuted lipgloss.Style
 
 	// Misc
 	Spinner  lipgloss.Style
@@ -52,16 +61,16 @@ var Styles = struct {
 	Bold     lipgloss.Style
 	Approval lipgloss.Style
 }{
-	// Layout
+	// Layout — clean Vercel-style bars
 	Header: lipgloss.NewStyle().
 		Foreground(colorText).
-		Background(lipgloss.Color("#1F2937")).
+		Background(colorSurface).
 		Padding(0, 1).
 		Bold(true),
 
 	Footer: lipgloss.NewStyle().
 		Foreground(colorMuted).
-		Background(lipgloss.Color("#1F2937")).
+		Background(colorSurface).
 		Padding(0, 1),
 
 	Sidebar: lipgloss.NewStyle().
@@ -78,39 +87,39 @@ var Styles = struct {
 		BorderForeground(colorBorder).
 		Padding(0, 1),
 
-	// Messages
+	// Messages — thin borders, dark backgrounds
 	UserMsg: lipgloss.NewStyle().
 		Foreground(colorText).
 		Background(colorUserBg).
 		Padding(0, 1).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSecondary),
+		BorderForeground(lipgloss.Color("#3730A3")), // indigo-800
 
 	AssistantMsg: lipgloss.NewStyle().
 		Foreground(colorText).
 		Padding(0, 1).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary),
+		BorderForeground(colorBorder),
 
 	ToolMsg: lipgloss.NewStyle().
-		Foreground(colorText).
+		Foreground(colorDim).
 		Background(colorToolBg).
 		Padding(0, 1).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorAccent),
+		BorderForeground(lipgloss.Color("#1E3A5F")), // dark cyan-blue
 
 	ErrorMsg: lipgloss.NewStyle().
 		Foreground(colorError).
 		Padding(0, 1).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorError),
+		BorderForeground(lipgloss.Color("#7F1D1D")), // red-900
 
 	SystemMsg: lipgloss.NewStyle().
 		Foreground(colorMuted).
 		Italic(true).
 		Padding(0, 1),
 
-	// Message labels
+	// Message labels — neon tags
 	UserLabel: lipgloss.NewStyle().
 		Foreground(colorSecondary).
 		Bold(true),
@@ -125,7 +134,7 @@ var Styles = struct {
 
 	// Sidebar
 	SidebarTitle: lipgloss.NewStyle().
-		Foreground(colorText).
+		Foreground(colorDim).
 		Bold(true).
 		Underline(true),
 
@@ -137,16 +146,17 @@ var Styles = struct {
 
 	// Misc
 	Spinner: lipgloss.NewStyle().
-		Foreground(colorPrimary),
+		Foreground(colorAccent),
 
 	Border: lipgloss.NewStyle().
 		BorderForeground(colorBorder),
 
 	Muted: lipgloss.NewStyle().
-		Foreground(colorMuted),
+		Foreground(colorSubtle),
 
 	Bold: lipgloss.NewStyle().
-		Bold(true),
+		Bold(true).
+		Foreground(colorText),
 
 	Approval: lipgloss.NewStyle().
 		Foreground(colorWarning).

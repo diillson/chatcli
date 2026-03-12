@@ -48,6 +48,13 @@ type CLIBridge interface {
 	// MCP servers
 	GetMCPServers() []MCPServerInfo
 
+	// Attached contexts
+	GetAttachedContexts() []ContextInfo
+
+	// Checkpoints (rewind)
+	GetCheckpoints() []CheckpointInfo
+	RestoreCheckpoint(index int) bool
+
 	// RunAgentLoop runs the ReAct loop for the given query.
 	// Returns nil if no agent mode is available (fallback to streaming chat).
 	RunAgentLoop(ctx context.Context, query string) error
@@ -59,10 +66,20 @@ type Adapter struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 
+	// Content width for markdown rendering (updated by TUI on resize)
+	contentWidth int
+
 	// Cumulative token usage tracking
 	totalInputTokens  int
 	totalOutputTokens int
 	totalCost         float64
+}
+
+// SetContentWidth updates the content width used for markdown rendering.
+func (a *Adapter) SetContentWidth(w int) {
+	a.mu.Lock()
+	a.contentWidth = w
+	a.mu.Unlock()
 }
 
 // NewAdapter creates a new TUI adapter.
@@ -72,7 +89,7 @@ func NewAdapter(bridge CLIBridge) *Adapter {
 
 // SendMessage implements Backend.SendMessage.
 func (a *Adapter) SendMessage(ctx context.Context, input string) (<-chan Event, error) {
-	ch := make(chan Event, 32)
+	ch := make(chan Event, 256)
 
 	go func() {
 		defer close(ch)
@@ -98,10 +115,9 @@ func (a *Adapter) SendMessage(ctx context.Context, input string) (<-chan Event, 
 			return
 		}
 
-		// Handle /rewind locally — remove last exchange from viewport
-		if input == "/rewind" {
-			ch <- Event{Type: EventRewind}
-			ch <- Event{Type: EventDone}
+		// Handle /rewind — show checkpoint list or restore specific checkpoint
+		if input == "/rewind" || strings.HasPrefix(input, "/rewind ") {
+			a.handleRewind(input, ch)
 			return
 		}
 
@@ -120,7 +136,7 @@ func (a *Adapter) SendMessage(ctx context.Context, input string) (<-chan Event, 
 
 func (a *Adapter) runAgentLoop(ctx context.Context, query string, ch chan<- Event) {
 	// Set TUI emitter so agent output renders in the viewport
-	a.bridge.SetAgentEmitter(NewTUIEmitter(ch))
+	a.bridge.SetAgentEmitter(NewTUIEmitter(ch, a.contentWidth))
 
 	// Create cancellable context
 	agentCtx, cancel := context.WithCancel(ctx)
@@ -148,6 +164,46 @@ func (a *Adapter) runAgentLoop(ctx context.Context, query string, ch chan<- Even
 	ch <- Event{Type: EventDone}
 }
 
+func (a *Adapter) handleRewind(input string, ch chan<- Event) {
+	arg := strings.TrimSpace(strings.TrimPrefix(input, "/rewind"))
+	checkpoints := a.bridge.GetCheckpoints()
+
+	if arg == "" {
+		// Show checkpoint list
+		if len(checkpoints) == 0 {
+			ch <- Event{Type: EventCommandOutput, Text: "No checkpoints available yet."}
+			ch <- Event{Type: EventDone}
+			return
+		}
+		var sb strings.Builder
+		sb.WriteString("REWIND — Select a checkpoint:\n")
+		sb.WriteString("─────────────────────────────────────\n")
+		for i := len(checkpoints) - 1; i >= 0; i-- {
+			cp := checkpoints[i]
+			sb.WriteString(fmt.Sprintf("  [%d]  %s  %d msgs  %s\n", cp.Index, cp.Time, cp.MsgCount, cp.Label))
+		}
+		sb.WriteString("\nUse /rewind N to restore checkpoint N")
+		ch <- Event{Type: EventCommandOutput, Text: sb.String()}
+		ch <- Event{Type: EventDone}
+		return
+	}
+
+	// Parse checkpoint number
+	var idx int
+	if _, err := fmt.Sscanf(arg, "%d", &idx); err != nil {
+		ch <- Event{Type: EventCommandOutput, Text: "Usage: /rewind [N]  — N is checkpoint number from list"}
+		ch <- Event{Type: EventDone}
+		return
+	}
+
+	if a.bridge.RestoreCheckpoint(idx) {
+		ch <- Event{Type: EventCommandOutput, Text: fmt.Sprintf("Rewound to checkpoint [%d]", idx)}
+	} else {
+		ch <- Event{Type: EventCommandOutput, Text: fmt.Sprintf("Invalid checkpoint [%d]", idx)}
+	}
+	ch <- Event{Type: EventDone}
+}
+
 func (a *Adapter) handleCommand(input string, ch chan<- Event) {
 	// Capture stdout during command execution
 	var shouldExit bool
@@ -156,7 +212,7 @@ func (a *Adapter) handleCommand(input string, ch chan<- Event) {
 	})
 
 	if output != "" {
-		ch <- Event{Type: EventTextDelta, Text: output}
+		ch <- Event{Type: EventCommandOutput, Text: output}
 	}
 	if shouldExit {
 		ch <- Event{Type: EventExit}
@@ -168,7 +224,7 @@ func (a *Adapter) sendToLLM(ctx context.Context, input string, ch chan<- Event) 
 	a.bridge.SaveCheckpoint()
 
 	// Set TUI emitter on agent mode so tool output renders in the viewport
-	a.bridge.SetAgentEmitter(NewTUIEmitter(ch))
+	a.bridge.SetAgentEmitter(NewTUIEmitter(ch, a.contentWidth))
 
 	// Process @file, !command, etc. in the input
 	cleanInput, additionalContext := a.bridge.ProcessSpecialCommands(input)
@@ -306,9 +362,9 @@ func (a *Adapter) accumulateUsage(usage *client.UsageInfo) {
 	a.totalOutputTokens += usage.OutputTokens
 	// Rough cost estimate (Sonnet pricing as default)
 	a.totalCost += float64(usage.InputTokens) * 3.0 / 1_000_000   // $3/M input
-	a.totalCost += float64(usage.OutputTokens) * 15.0 / 1_000_000  // $15/M output
+	a.totalCost += float64(usage.OutputTokens) * 15.0 / 1_000_000 // $15/M output
 	if usage.CacheRead > 0 {
-		a.totalCost += float64(usage.CacheRead) * 0.3 / 1_000_000  // $0.30/M cache read
+		a.totalCost += float64(usage.CacheRead) * 0.3 / 1_000_000 // $0.30/M cache read
 	}
 }
 
@@ -334,6 +390,11 @@ func (a *Adapter) GetMCPServers() []MCPServer {
 		}
 	}
 	return servers
+}
+
+// GetAttachedContexts implements Backend.GetAttachedContexts.
+func (a *Adapter) GetAttachedContexts() []ContextInfo {
+	return a.bridge.GetAttachedContexts()
 }
 
 // GetTasks implements Backend.GetTasks.

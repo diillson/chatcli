@@ -10,30 +10,33 @@ import (
 type EventType int
 
 const (
-	EventTextDelta    EventType = iota // partial token from LLM (streaming)
-	EventToolStart                     // tool call started
-	EventToolResult                    // tool call finished
-	EventNeedApproval                  // dangerous command, needs approval
-	EventThinking                      // LLM reasoning block
-	EventTurnStart                     // start of a ReAct turn
-	EventPlanUpdate                    // task/plan update
-	EventDone                          // response complete
-	EventError                         // error
-	EventExit                          // exit the application
-	EventClear                         // clear viewport messages
-	EventRewind                        // remove last user+assistant pair
+	EventTextDelta     EventType = iota // partial token from LLM (streaming)
+	EventToolStart                      // tool call started
+	EventToolResult                     // tool call finished
+	EventNeedApproval                   // dangerous command, needs approval
+	EventThinking                       // LLM reasoning block
+	EventTurnStart                      // start of a ReAct turn
+	EventPlanUpdate                     // task/plan update
+	EventDone                           // response complete
+	EventError                          // error
+	EventExit                           // exit the application
+	EventClear                          // clear viewport messages
+	EventRewind                         // remove last user+assistant pair
+	EventCommandOutput                  // plain text output from slash commands (no markdown)
+	EventPreStyledText                  // pre-rendered ANSI text (already styled, skip markdown)
+	EventStatusUpdate                   // replaces last status line (for thinking/timer — no accumulation)
 )
 
 // Event is the unified unit of communication from backend to TUI.
 type Event struct {
 	Type     EventType
-	Text     string             // for TextDelta, CommandOutput
-	Tool     *ToolEvent         // for ToolStart, ToolResult
-	Approval *ApprovalRequest   // for NeedApproval
-	Turn     *TurnInfo          // for TurnStart
-	Tasks    []Task             // for PlanUpdate
-	Usage    *client.UsageInfo  // for Done
-	Error    error              // for Error
+	Text     string            // for TextDelta, CommandOutput
+	Tool     *ToolEvent        // for ToolStart, ToolResult
+	Approval *ApprovalRequest  // for NeedApproval
+	Turn     *TurnInfo         // for TurnStart
+	Tasks    []Task            // for PlanUpdate
+	Usage    *client.UsageInfo // for Done
+	Error    error             // for Error
 }
 
 // ToolEvent carries tool call information.

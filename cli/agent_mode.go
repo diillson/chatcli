@@ -1910,8 +1910,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Inicia o timer do turno (substitui a animação de "Pensando...")
 		modelName := a.cli.Client.GetModelName()
 		a.turnTimer.Start(ctx, func(d time.Duration) {
-			a.emitter.EmitThinking(modelName, d)
-			a.emitter.EmitText(metrics.FormatTimerStatus(d, modelName, "Processando..."))
+			a.emitter.EmitStatus(metrics.FormatTimerStatus(d, modelName, "Processando..."))
 		})
 
 		turnHistory := buildTurnHistoryWithAnchor()

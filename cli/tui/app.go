@@ -52,6 +52,21 @@ type MCPServerInfo struct {
 	ToolCount int
 }
 
+// ContextInfo represents an attached context for display.
+type ContextInfo struct {
+	Name      string
+	FileCount int
+	SizeBytes int64
+}
+
+// CheckpointInfo represents a conversation checkpoint for rewind.
+type CheckpointInfo struct {
+	Index    int
+	Label    string
+	Time     string
+	MsgCount int
+}
+
 // Backend is the interface that decouples the TUI from ChatCLI internals.
 // The TUI never knows about "agent mode" or "coder mode" — it just renders events.
 type Backend interface {
@@ -74,11 +89,15 @@ type Backend interface {
 	// GetCompletions returns autocomplete suggestions for the given prefix.
 	GetCompletions(prefix string) []Completion
 
+	// Layout
+	SetContentWidth(w int)
+
 	// Sidebar data
 	GetTokenUsage() TokenUsage
 	GetModifiedFiles() []FileChange
 	GetTasks() []Task
 	GetMCPServers() []MCPServer
+	GetAttachedContexts() []ContextInfo
 }
 
 // New creates the root Bubble Tea model wired to the given backend.

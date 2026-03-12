@@ -25,62 +25,63 @@ func NewHeaderModel() HeaderModel {
 func (h *HeaderModel) SetWidth(w int) { h.width = w }
 
 var (
-	headerBgStyle = lipgloss.NewStyle().
-		Background(lipgloss.Color("#1F2937")).
-		Width(0) // will be set dynamically
+	hdrBg = lipgloss.Color("#171717")
 
-	headerBrandStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#7C3AED")).
-		Background(lipgloss.Color("#1F2937")).
-		Bold(true)
+	hdrBrand = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#A855F7")).
+			Background(hdrBg).
+			Bold(true)
 
-	headerInfoStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#D1D5DB")).
-		Background(lipgloss.Color("#1F2937"))
+	hdrSep = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#262626")).
+		Background(hdrBg)
 
-	headerTokenStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#22D3EE")).
-		Background(lipgloss.Color("#1F2937"))
+	hdrInfo = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#9CA3AF")).
+		Background(hdrBg)
 
-	headerCostStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B")).
-		Background(lipgloss.Color("#1F2937"))
+	hdrAccent = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#22D3EE")).
+			Background(hdrBg)
 
-	headerDotStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
-		Background(lipgloss.Color("#1F2937"))
+	hdrCost = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FBBF24")).
+		Background(hdrBg)
+
+	hdrMuted = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#4B5563")).
+			Background(hdrBg)
 )
 
 func (h HeaderModel) View(provider, model, session string, usage TokenUsage) string {
-	dot := headerDotStyle.Render(" · ")
+	sep := hdrSep.Render(" │ ")
 
-	// Left side: brand + model + provider
-	left := " " + headerBrandStyle.Render("ChatCLI") + dot +
-		headerInfoStyle.Render(model) + dot +
-		headerInfoStyle.Render(provider)
+	// Left: brand + model + provider
+	left := " " + hdrBrand.Render("▲ ChatCLI") + sep +
+		hdrInfo.Render(model) + hdrMuted.Render("@") + hdrInfo.Render(provider)
 
 	if session != "" {
-		left += dot + headerInfoStyle.Render(session)
+		left += sep + hdrAccent.Render(session)
 	}
 
-	// Right side: tokens + cost
+	// Right: tokens + cost
 	var rightParts []string
 	if usage.Used > 0 {
 		tokenStr := formatTokens(usage.Used)
 		if usage.Limit > 0 {
 			pct := usage.Used * 100 / usage.Limit
-			tokenStr += fmt.Sprintf(" (%d%%)", pct)
+			tokenStr += fmt.Sprintf(" %d%%", pct)
 		}
-		rightParts = append(rightParts, headerTokenStyle.Render(tokenStr+" tokens"))
+		rightParts = append(rightParts, hdrAccent.Render(tokenStr))
 	}
 	if usage.Cost > 0 {
-		rightParts = append(rightParts, headerCostStyle.Render(fmt.Sprintf("$%.4f", usage.Cost)))
+		rightParts = append(rightParts, hdrCost.Render(fmt.Sprintf("$%.4f", usage.Cost)))
 	}
 
 	right := ""
 	for i, p := range rightParts {
 		if i > 0 {
-			right += dot
+			right += sep
 		}
 		right += p
 	}
@@ -92,7 +93,7 @@ func (h HeaderModel) View(provider, model, session string, usage TokenUsage) str
 	}
 
 	bgStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#1F2937")).
+		Background(hdrBg).
 		Width(h.width)
 
 	return bgStyle.Render(left + spaces(gap) + right)

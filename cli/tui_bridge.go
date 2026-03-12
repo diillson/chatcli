@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
-	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/cli/tui"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
@@ -436,6 +436,61 @@ func (b *tuiBridge) GetMCPServers() []tui.MCPServerInfo {
 			Name:      s.Name,
 			Connected: s.Connected,
 			ToolCount: s.ToolCount,
+		}
+	}
+	return infos
+}
+
+func (b *tuiBridge) GetCheckpoints() []tui.CheckpointInfo {
+	if len(b.cli.checkpoints) == 0 {
+		return nil
+	}
+	infos := make([]tui.CheckpointInfo, len(b.cli.checkpoints))
+	for i, cp := range b.cli.checkpoints {
+		infos[i] = tui.CheckpointInfo{
+			Index:    i + 1,
+			Label:    cp.Label,
+			Time:     cp.Timestamp.Format("15:04:05"),
+			MsgCount: cp.MsgCount,
+		}
+	}
+	return infos
+}
+
+func (b *tuiBridge) RestoreCheckpoint(index int) bool {
+	if index < 1 || index > len(b.cli.checkpoints) {
+		return false
+	}
+	cpIdx := index - 1
+	cp := b.cli.checkpoints[cpIdx]
+	b.cli.history = make([]models.Message, len(cp.History))
+	copy(b.cli.history, cp.History)
+	b.cli.checkpoints = b.cli.checkpoints[:cpIdx+1]
+	return true
+}
+
+func (b *tuiBridge) GetAttachedContexts() []tui.ContextInfo {
+	if b.cli.contextHandler == nil {
+		return nil
+	}
+	sessionID := b.cli.currentSessionName
+	if sessionID == "" {
+		sessionID = "default"
+	}
+	mgr := b.cli.contextHandler.GetManager()
+	if mgr == nil {
+		return nil
+	}
+	contexts, err := mgr.GetAttachedContexts(sessionID)
+	if err != nil || len(contexts) == 0 {
+		return nil
+	}
+	infos := make([]tui.ContextInfo, len(contexts))
+	for i, c := range contexts {
+		infos[i] = tui.ContextInfo{
+			Name:      c.Name,
+			FileCount: c.FileCount,
+			SizeBytes: c.TotalSize,
 		}
 	}
 	return infos

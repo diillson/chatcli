@@ -2,29 +2,48 @@ package tui
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/glamour"
 )
 
-var mdRenderer *glamour.TermRenderer
+var (
+	mdRenderer      *glamour.TermRenderer
+	mdRendererWidth int
+	mdMu            sync.Mutex
+)
 
-func init() {
+// getMarkdownRenderer returns a glamour renderer configured for the given width.
+// It reuses the existing renderer if the width hasn't changed.
+func getMarkdownRenderer(width int) *glamour.TermRenderer {
+	if width <= 0 {
+		width = 80
+	}
+	mdMu.Lock()
+	defer mdMu.Unlock()
+	if mdRenderer != nil && mdRendererWidth == width {
+		return mdRenderer
+	}
 	r, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(0),
+		glamour.WithWordWrap(width),
 	)
-	if err == nil {
-		mdRenderer = r
+	if err != nil {
+		return nil
 	}
+	mdRenderer = r
+	mdRendererWidth = width
+	return mdRenderer
 }
 
 // RenderMarkdown renders a markdown string to styled terminal output.
 // Falls back to the raw text if rendering fails.
-func RenderMarkdown(text string) string {
-	if mdRenderer == nil || strings.TrimSpace(text) == "" {
+func RenderMarkdown(text string, width int) string {
+	r := getMarkdownRenderer(width)
+	if r == nil || strings.TrimSpace(text) == "" {
 		return text
 	}
-	out, err := mdRenderer.Render(text)
+	out, err := r.Render(text)
 	if err != nil {
 		return text
 	}

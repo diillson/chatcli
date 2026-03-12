@@ -28,15 +28,22 @@ type MCPServer struct {
 	ToolCount int
 }
 
+// ContextInfo mirrors tui.ContextInfo to avoid import cycle.
+type ContextInfo struct {
+	Name      string
+	FileCount int
+	SizeBytes int64
+}
+
 // SidebarModel renders the right panel.
 type SidebarModel struct {
 	width  int
 	height int
 
 	// Section collapse state
-	TasksCollapsed    bool
-	FilesCollapsed    bool
-	MCPCollapsed      bool
+	TasksCollapsed bool
+	FilesCollapsed bool
+	MCPCollapsed   bool
 }
 
 func NewSidebarModel() SidebarModel {
@@ -50,36 +57,36 @@ func (s *SidebarModel) SetSize(w, h int) {
 
 var (
 	sidebarTitleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#E5E7EB")).
-		MarginBottom(0)
+				Bold(true).
+				Foreground(lipgloss.Color("#9CA3AF")).
+				MarginBottom(0)
 
 	sidebarMutedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280"))
+				Foreground(lipgloss.Color("#4B5563"))
 
 	sidebarItemStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#D1D5DB"))
+				Foreground(lipgloss.Color("#D1D5DB"))
 
 	sidebarValueStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#22D3EE"))
+				Foreground(lipgloss.Color("#22D3EE"))
 
 	sidebarAddStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#22C55E"))
+			Foreground(lipgloss.Color("#34D399"))
 
 	sidebarDelStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#EF4444"))
+			Foreground(lipgloss.Color("#F87171"))
 
 	sidebarConnStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#22C55E"))
+				Foreground(lipgloss.Color("#34D399"))
 
 	sidebarDiscStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#EF4444"))
+				Foreground(lipgloss.Color("#EF4444"))
 
 	sidebarSectionSep = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#374151"))
+				Foreground(lipgloss.Color("#374151"))
 )
 
-func (s SidebarModel) View(usage TokenUsage, tasks []Task, files []FileChange, mcpServers []MCPServer, session string) string {
+func (s SidebarModel) View(usage TokenUsage, tasks []Task, files []FileChange, mcpServers []MCPServer, session string, contexts []ContextInfo) string {
 	style := lipgloss.NewStyle().
 		Width(s.width).
 		Height(s.height).
@@ -106,8 +113,34 @@ func (s SidebarModel) View(usage TokenUsage, tasks []Task, files []FileChange, m
 	sb.WriteString(sidebarSectionSep.Render(strings.Repeat("─", contentWidth)))
 	sb.WriteString("\n")
 
+	// ── Attached Contexts ──
+	if len(contexts) > 0 {
+		header := fmt.Sprintf("Attached (%d)", len(contexts))
+		sb.WriteString(sidebarTitleStyle.Render(header))
+		sb.WriteString("\n")
+		maxShow := len(contexts)
+		if maxShow > 5 {
+			maxShow = 5
+		}
+		for i := 0; i < maxShow; i++ {
+			c := contexts[i]
+			name := truncate(c.Name, contentWidth-12)
+			size := formatSize(c.SizeBytes)
+			sb.WriteString(fmt.Sprintf("  %s %s %s\n",
+				sidebarValueStyle.Render(name),
+				sidebarMutedStyle.Render(fmt.Sprintf("(%d files)", c.FileCount)),
+				sidebarMutedStyle.Render(size)))
+		}
+		if len(contexts) > maxShow {
+			sb.WriteString(sidebarMutedStyle.Render(fmt.Sprintf("  +%d more", len(contexts)-maxShow)))
+			sb.WriteString("\n")
+		}
+		sb.WriteString(sidebarSectionSep.Render(strings.Repeat("─", contentWidth)))
+		sb.WriteString("\n")
+	}
+
 	// ── Context / Tokens ──
-	sb.WriteString(sidebarTitleStyle.Render("Context"))
+	sb.WriteString(sidebarTitleStyle.Render("Tokens"))
 	sb.WriteString("\n")
 	total := usage.Used
 	if usage.Limit > 0 {
@@ -258,6 +291,16 @@ func renderBar(pct, width int) string {
 
 	pctStr := sidebarMutedStyle.Render(fmt.Sprintf(" %d%%", pct))
 	return bar + pctStr
+}
+
+func formatSize(bytes int64) string {
+	if bytes >= 1_000_000 {
+		return fmt.Sprintf("%.1fMB", float64(bytes)/1_000_000)
+	}
+	if bytes >= 1_000 {
+		return fmt.Sprintf("%.1fKB", float64(bytes)/1_000)
+	}
+	return fmt.Sprintf("%dB", bytes)
 }
 
 func truncate(s string, max int) string {

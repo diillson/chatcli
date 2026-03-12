@@ -23,8 +23,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/mcp"
-	"github.com/diillson/chatcli/cli/tui"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/cli/tui"
 	"github.com/diillson/chatcli/cli/workspace"
 	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/config"
@@ -429,7 +429,6 @@ func (cli *ChatCLI) CancelOperation() {
 	}
 }
 
-
 func (cli *ChatCLI) Start(ctx context.Context) {
 	defer cli.cleanup()
 	cli.startBubbleTea(ctx)
@@ -558,18 +557,56 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 		return
 	}
 
-	if !shouldSwitchModel && maxTokensOverride == -1 && len(args) == 1 {
-		cli.switchProvider()
+	if shouldSwitchModel || shouldUpdateStackSpot || maxTokensOverride != -1 {
+		return
 	}
-}
 
-func (cli *ChatCLI) switchProvider() {
-	fmt.Println(i18n.T("cli.switch.available_providers"))
-	availableProviders := cli.manager.GetAvailableProviders()
-	for i, provider := range availableProviders {
-		fmt.Printf("%d. %s\n", i+1, provider)
+	// No flags used — treat remaining args as provider name
+	// /switch PROVIDER or /switch PROVIDER MODEL
+	if len(args) >= 2 {
+		provider := strings.ToUpper(args[1])
+		availableProviders := cli.manager.GetAvailableProviders()
+		found := false
+		for _, p := range availableProviders {
+			if strings.EqualFold(p, provider) {
+				provider = p // use canonical casing
+				found = true
+				break
+			}
+		}
+		if !found {
+			fmt.Printf("Provider '%s' not found. Available: %s\n", args[1], strings.Join(availableProviders, ", "))
+			return
+		}
+
+		model := ""
+		if len(args) >= 3 {
+			model = args[2]
+		}
+
+		newClient, err := cli.manager.GetClient(provider, model)
+		if err != nil {
+			fmt.Printf("Error switching to %s: %v\n", provider, err)
+			return
+		}
+		cli.Client = newClient
+		cli.Provider = provider
+		if model != "" {
+			cli.Model = model
+		} else {
+			cli.Model = newClient.GetModelName()
+		}
+		fmt.Printf("Switched to %s (%s)\n", cli.Provider, cli.Client.GetModelName())
+		return
 	}
-	cli.interactionState = StateSwitchingProvider
+
+	// /switch alone — show available providers as hint
+	fmt.Println("Usage: /switch <provider> [model]")
+	fmt.Println("Available providers:")
+	availableProviders := cli.manager.GetAvailableProviders()
+	for _, provider := range availableProviders {
+		fmt.Printf("  %s\n", provider)
+	}
 }
 
 func (cli *ChatCLI) showHelp() {
@@ -1862,6 +1899,7 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 	// Exibir a resposta da IA com efeito de digitação
 	cli.typewriterEffect(fmt.Sprintf("\n%s:\n%s\n", cli.Client.GetModelName(), renderResponse), 2*time.Millisecond)
 }
+
 // renderMarkdown renderiza o texto em Markdown
 func (cli *ChatCLI) renderMarkdown(input string) string {
 	// Ajustar a largura para o tamanho do terminal
