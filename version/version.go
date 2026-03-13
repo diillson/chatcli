@@ -286,6 +286,18 @@ const (
 	ansiBold   = "1"  // Negrito (pode ser combinado: "1;92" para bold+lime)
 )
 
+// displayValue retorna um texto amigável para campos de versão não disponíveis
+func displayValue(value string) string {
+	switch value {
+	case "unknown", "":
+		return "N/A (build sem ldflags)"
+	case "dev":
+		return "desenvolvimento local"
+	default:
+		return value
+	}
+}
+
 // FormatVersionInfo retorna uma string formatada com as informações de versão
 func FormatVersionInfo(info VersionInfo, latest string, hasUpdate bool, checkErr error) string {
 	var result strings.Builder
@@ -296,9 +308,9 @@ func FormatVersionInfo(info VersionInfo, latest string, hasUpdate bool, checkErr
 
 	// --- Versão Atual ---
 	result.WriteString("\n  " + ansiColor("Versão Atual", ansiLime) + "\n")
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Versão:", ansiCyan), ansiColor(info.Version, ansiGray)))
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Commit Hash:", ansiCyan), ansiColor(info.CommitHash, ansiGray)))
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Data de Build:", ansiCyan), ansiColor(info.BuildDate, ansiGray)))
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Versão:", ansiCyan), ansiColor(displayValue(info.Version), ansiGray)))
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Commit Hash:", ansiCyan), ansiColor(displayValue(info.CommitHash), ansiGray)))
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Data de Build:", ansiCyan), ansiColor(displayValue(info.BuildDate), ansiGray)))
 
 	// --- Atualizações ---
 	result.WriteString("\n  " + ansiColor("Status de Atualizações", ansiLime) + "\n")
