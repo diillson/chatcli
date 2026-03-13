@@ -428,7 +428,7 @@ func TestGetModelName_SkipsCooldownProviders(t *testing.T) {
 	}, WithMaxRetries(0), WithCooldown(1*time.Hour, 2*time.Hour, 2.0))
 
 	// Trigger failure on primary to put it in cooldown
-	chain.SendPrompt(context.Background(), "hi", nil, 1000)
+	_, _ = chain.SendPrompt(context.Background(), "hi", nil, 1000)
 
 	name := chain.GetModelName()
 	if name != "claude-3" {
@@ -477,7 +477,7 @@ func TestResetCooldowns(t *testing.T) {
 	}, WithMaxRetries(0), WithCooldown(1*time.Hour, 2*time.Hour, 2.0))
 
 	// Trigger failure to put primary on cooldown
-	chain.SendPrompt(context.Background(), "hi", nil, 1000)
+	_, _ = chain.SendPrompt(context.Background(), "hi", nil, 1000)
 
 	// Verify primary is on cooldown
 	if chain.isAvailable("openai") {
@@ -590,7 +590,7 @@ func TestCooldownExponentialBackoff(t *testing.T) {
 	}, WithMaxRetries(0), WithCooldown(1*time.Second, 1*time.Hour, 2.0))
 
 	// Trigger first failure
-	chain.SendPrompt(context.Background(), "hi", nil, 1000)
+	_, _ = chain.SendPrompt(context.Background(), "hi", nil, 1000)
 
 	chain.mu.RLock()
 	h := chain.health["openai"]

@@ -373,7 +373,7 @@ func (h *Handler) cmdWatcherStatus() string {
 
 	var b strings.Builder
 	b.WriteString("=== K8s Watcher Status ===\n")
-	b.WriteString(fmt.Sprintf("Status:     active\n"))
+	b.WriteString("Status:     active\n")
 	if h.watcherDeployment != "" {
 		b.WriteString(fmt.Sprintf("Deployment: %s\n", h.watcherDeployment))
 		b.WriteString(fmt.Sprintf("Namespace:  %s\n", h.watcherNamespace))
