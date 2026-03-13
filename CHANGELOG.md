@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.68.5](https://github.com/diillson/chatcli/compare/v1.68.4...v1.68.5) (2026-03-13)
+
+
+### Bug Fixes
+
+* **auth:** add automatic OAuth token refresh and retry on 401 errors ([#620](https://github.com/diillson/chatcli/issues/620)) ([43ebbe9](https://github.com/diillson/chatcli/commit/43ebbe9686ac1461878dfcf71a99dcb2403af79e))
+
 ## [1.68.4](https://github.com/diillson/chatcli/compare/v1.68.3...v1.68.4) (2026-03-11)
 
 
