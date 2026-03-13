@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.69.0](https://github.com/diillson/chatcli/compare/v1.68.5...v1.69.0) (2026-03-13)
+
+
+### Features
+
+* refactor/audit remediation complete ([#622](https://github.com/diillson/chatcli/issues/622)) ([c506d54](https://github.com/diillson/chatcli/commit/c506d543ab64ff37f8e9bb45500823a9f223a4f5))
+
 ## [1.68.5](https://github.com/diillson/chatcli/compare/v1.68.4...v1.68.5) (2026-03-13)
 
 
