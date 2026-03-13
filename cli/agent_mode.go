@@ -519,6 +519,10 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
 	aiResponse, err := a.cli.Client.SendPrompt(ctx, enrichedQuery, a.cli.history, 0)
+	// Auto-retry on OAuth token expiration (401)
+	if a.cli.refreshClientOnAuthError(err) {
+		aiResponse, err = a.cli.Client.SendPrompt(ctx, enrichedQuery, a.cli.history, 0)
+	}
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
 		return fmt.Errorf("erro ao obter resposta da IA: %w", err)
@@ -1827,6 +1831,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		// Chamada à LLM
 		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
+		// Auto-retry on OAuth token expiration (401)
+		if a.cli.refreshClientOnAuthError(err) {
+			aiResponse, err = a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
+		}
 
 		// Para o timer e obtém a duração
 		turnDuration := a.turnTimer.Stop()

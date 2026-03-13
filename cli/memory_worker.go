@@ -143,7 +143,8 @@ func (mw *memoryWorker) maybeExtract() {
 }
 
 func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
-	if mw.cli.Client == nil || mw.cli.memoryStore == nil {
+	llmClient := mw.cli.getClient()
+	if llmClient == nil || mw.cli.memoryStore == nil {
 		return fmt.Errorf("client or memory store not available")
 	}
 
@@ -190,7 +191,12 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 		{Role: "user", Content: prompt},
 	}
 
-	response, err := mw.cli.Client.SendPrompt(ctx, prompt, history, 0)
+	response, err := llmClient.SendPrompt(ctx, prompt, history, 0)
+	// Auto-retry on OAuth token expiration (401)
+	if mw.cli.refreshClientOnAuthError(err) {
+		llmClient = mw.cli.getClient()
+		response, err = llmClient.SendPrompt(ctx, prompt, history, 0)
+	}
 	if err != nil {
 		return fmt.Errorf("memory extraction LLM call failed: %w", err)
 	}

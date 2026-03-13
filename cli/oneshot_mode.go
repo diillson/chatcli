@@ -170,6 +170,10 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
 	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
+	// Auto-retry on OAuth token expiration (401)
+	if cli.refreshClientOnAuthError(err) {
+		aiResponse, err = cli.Client.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
+	}
 
 	if !disableAnimation {
 		cli.animation.StopThinkingAnimation()
