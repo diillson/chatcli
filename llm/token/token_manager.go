@@ -145,9 +145,12 @@ func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
 		// Sanitize response body to prevent leaking tokens in error messages
-		sanitized := utils.SanitizeSensitiveText(string(bodyBytes))
+		sanitized := "(unable to read response body)"
+		if readErr == nil {
+			sanitized = utils.SanitizeSensitiveText(string(bodyBytes))
+		}
 		errMsg := fmt.Sprintf("falha ao obter o token: status %d, resposta: %s", resp.StatusCode, sanitized)
 		tm.logger.Error("Falha na requisição de token", zap.String("response", errMsg))
 		return "", errors.New(errMsg)

@@ -43,7 +43,7 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 	}
 
 	logger, _ := zap.NewDevelopment()
-	config.Global = config.New(logger)
+	config.ResetGlobalForTest(logger)
 	config.Global.Load()
 
 	t.Cleanup(func() {
@@ -54,7 +54,7 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 			os.Setenv(key, value)
 		}
 		auth.InvalidateCache()
-		config.Global = config.New(logger)
+		config.ResetGlobalForTest(logger)
 		config.Global.Load()
 	})
 }

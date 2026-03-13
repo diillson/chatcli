@@ -51,7 +51,11 @@ func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (
 							zap.Error(err))
 					}
 				} else {
-					_ = SaveStore(store, logger)
+					if saveErr := SaveStore(store, logger); saveErr != nil && logger != nil {
+						logger.Warn("Failed to persist refreshed OAuth token",
+							zap.String("provider", string(c.Provider)),
+							zap.Error(saveErr))
+					}
 				}
 			}
 			key := strings.TrimSpace(c.Access)

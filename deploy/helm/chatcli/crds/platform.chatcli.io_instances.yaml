@@ -1,0 +1,212 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: instances.platform.chatcli.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+spec:
+  group: platform.chatcli.io
+  names:
+    kind: Instance
+    listKind: InstanceList
+    plural: instances
+    singular: instance
+    shortNames:
+      - inst
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Replicas
+          type: integer
+          jsonPath: .status.replicas
+        - name: Provider
+          type: string
+          jsonPath: .spec.provider
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: Instance is the Schema for the instances API.
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: InstanceSpec defines the desired state of a ChatCLI deployment.
+              type: object
+              required:
+                - provider
+              properties:
+                replicas:
+                  type: integer
+                  format: int32
+                  default: 1
+                  minimum: 0
+                provider:
+                  type: string
+                model:
+                  type: string
+                image:
+                  type: object
+                  properties:
+                    repository:
+                      type: string
+                      default: "ghcr.io/diillson/chatcli"
+                    tag:
+                      type: string
+                      default: "latest"
+                    pullPolicy:
+                      type: string
+                      default: "IfNotPresent"
+                server:
+                  type: object
+                  properties:
+                    port:
+                      type: integer
+                      format: int32
+                      default: 50051
+                    metricsPort:
+                      type: integer
+                      format: int32
+                      default: 9090
+                    tls:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                        secretName:
+                          type: string
+                    token:
+                      type: object
+                      required:
+                        - name
+                        - key
+                      properties:
+                        name:
+                          type: string
+                        key:
+                          type: string
+                watcher:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                    deployment:
+                      type: string
+                    namespace:
+                      type: string
+                    targets:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - deployment
+                          - namespace
+                        properties:
+                          deployment:
+                            type: string
+                          namespace:
+                            type: string
+                          metricsPort:
+                            type: integer
+                            format: int32
+                          metricsPath:
+                            type: string
+                          metricsFilter:
+                            type: array
+                            items:
+                              type: string
+                    interval:
+                      type: string
+                      default: "30s"
+                    window:
+                      type: string
+                      default: "2h"
+                    maxLogLines:
+                      type: integer
+                      format: int32
+                      default: 100
+                    maxContextChars:
+                      type: integer
+                      format: int32
+                      default: 32000
+                resources:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                persistence:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                    size:
+                      type: string
+                      default: "1Gi"
+                    storageClassName:
+                      type: string
+                securityContext:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                apiKeys:
+                  type: object
+                  required:
+                    - name
+                  properties:
+                    name:
+                      type: string
+            status:
+              description: InstanceStatus defines the observed state of Instance.
+              type: object
+              properties:
+                ready:
+                  type: boolean
+                replicas:
+                  type: integer
+                  format: int32
+                readyReplicas:
+                  type: integer
+                  format: int32
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                observedGeneration:
+                  type: integer
+                  format: int64

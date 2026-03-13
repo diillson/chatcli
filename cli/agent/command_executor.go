@@ -172,6 +172,12 @@ func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, shellFl
 		shellCommand = command
 	} else {
 		if shellConfigPath != "" {
+			if err := e.validateShellConfig(shellConfigPath); err != nil {
+				e.logger.Warn("Skipping shell config sourcing", zap.Error(err))
+				shellConfigPath = ""
+			}
+		}
+		if shellConfigPath != "" {
 			shellCommand = fmt.Sprintf("source %s 2>/dev/null || true; %s", utils.ShellQuote(shellConfigPath), command)
 		} else {
 			shellCommand = command
@@ -224,6 +230,30 @@ func (e *CommandExecutor) getShellConfigPath(shell string) string {
 	default:
 		return ""
 	}
+}
+
+// validateShellConfig checks that a shell config file is safe to source.
+// It rejects symlinks (which could point to malicious files) and
+// world-writable files (which could be tampered with).
+func (e *CommandExecutor) validateShellConfig(path string) error {
+	if path == "" {
+		return nil
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("shell config %q is a symlink — refusing to source", path)
+	}
+
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0002 != 0 {
+		return fmt.Errorf("shell config %q is world-writable — refusing to source", path)
+	}
+
+	return nil
 }
 
 // CaptureOutput executa comando e captura apenas a saída (para uso interno)

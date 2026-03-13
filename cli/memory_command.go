@@ -9,6 +9,7 @@ import (
 	"time"
 
 	prompt "github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -23,7 +24,7 @@ import (
 //	/memory longterm     — show MEMORY.md content
 func (cli *ChatCLI) handleMemoryCommand(input string) {
 	if cli.memoryStore == nil {
-		fmt.Println(colorize("  Memory system not available.", ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("memory.error.not_available"), ColorYellow))
 		return
 	}
 
@@ -53,7 +54,7 @@ func (cli *ChatCLI) handleMemoryCommand(input string) {
 		// Try to parse as a date
 		date, err := parseFlexibleDate(args)
 		if err != nil {
-			fmt.Println(colorize("  Usage: /memory [today|yesterday|week|longterm|list|load <date>|<YYYY-MM-DD>]", ColorGray))
+			fmt.Println(colorize("  "+i18n.T("memory.usage"), ColorGray))
 			return
 		}
 		cli.showDayNotes(date)
@@ -69,18 +70,18 @@ func (cli *ChatCLI) showDayNotes(date time.Time) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Printf("  %s %s\n", colorize("No notes found for", ColorGray), colorize(dateStr, ColorCyan))
+		fmt.Printf("  %s %s\n", colorize(i18n.T("memory.no_notes_for"), ColorGray), colorize(dateStr, ColorCyan))
 		return
 	}
 
 	content := strings.TrimSpace(string(data))
 	if content == "" {
-		fmt.Printf("  %s %s\n", colorize("No notes found for", ColorGray), colorize(dateStr, ColorCyan))
+		fmt.Printf("  %s %s\n", colorize(i18n.T("memory.no_notes_for"), ColorGray), colorize(dateStr, ColorCyan))
 		return
 	}
 
 	fmt.Println()
-	fmt.Printf("  %s %s\n", colorize("Memory notes for", ColorCyan+ColorBold), colorize(dateStr, ColorYellow))
+	fmt.Printf("  %s %s\n", colorize(i18n.T("memory.notes_for"), ColorCyan+ColorBold), colorize(dateStr, ColorYellow))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 	for _, line := range strings.Split(content, "\n") {
 		fmt.Printf("  %s\n", line)
@@ -91,12 +92,12 @@ func (cli *ChatCLI) showDayNotes(date time.Time) {
 func (cli *ChatCLI) showWeekNotes() {
 	notes := cli.memoryStore.GetRecentDailyNotes(7)
 	if len(notes) == 0 {
-		fmt.Println(colorize("  No notes in the last 7 days.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("memory.no_notes_week"), ColorGray))
 		return
 	}
 
 	fmt.Println()
-	fmt.Println(colorize("  Memory notes — last 7 days", ColorCyan+ColorBold))
+	fmt.Println(colorize("  "+i18n.T("memory.header.week"), ColorCyan+ColorBold))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
 	for _, note := range notes {
@@ -112,12 +113,12 @@ func (cli *ChatCLI) showWeekNotes() {
 func (cli *ChatCLI) showLongTermMemory() {
 	content := cli.memoryStore.ReadLongTerm()
 	if content == "" {
-		fmt.Println(colorize("  No long-term memory stored yet.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("memory.no_longterm"), ColorGray))
 		return
 	}
 
 	fmt.Println()
-	fmt.Println(colorize("  Long-term Memory (MEMORY.md)", ColorCyan+ColorBold))
+	fmt.Println(colorize("  "+i18n.T("memory.header.longterm"), ColorCyan+ColorBold))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 	for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
 		fmt.Printf("  %s\n", line)
@@ -128,7 +129,7 @@ func (cli *ChatCLI) showLongTermMemory() {
 func (cli *ChatCLI) loadMemoryIntoContext(dateStr string) {
 	date, err := parseFlexibleDate(dateStr)
 	if err != nil {
-		fmt.Printf("  %s Use format YYYY-MM-DD or 'yesterday'\n", colorize("Invalid date.", ColorYellow))
+		fmt.Printf("  %s %s\n", colorize(i18n.T("memory.error.invalid_date"), ColorYellow), i18n.T("memory.error.date_format_hint"))
 		return
 	}
 
@@ -136,9 +137,9 @@ func (cli *ChatCLI) loadMemoryIntoContext(dateStr string) {
 	marker := fmt.Sprintf("[MEMORY CONTEXT — loaded from %s]", date.Format("2006-01-02"))
 	for _, msg := range cli.history {
 		if strings.Contains(msg.Content, marker) {
-			fmt.Printf("  %s Notes from %s already loaded in this conversation.\n",
+			fmt.Printf("  %s %s\n",
 				colorize("⚠", ColorYellow),
-				colorize(date.Format("2006-01-02"), ColorCyan))
+				i18n.T("memory.already_loaded", date.Format("2006-01-02")))
 			return
 		}
 	}
@@ -172,10 +173,9 @@ func (cli *ChatCLI) loadMemoryIntoContext(dateStr string) {
 		Content: contextContent,
 	})
 
-	fmt.Printf("  %s Loaded memory from %s into conversation context (%d chars)\n",
+	fmt.Printf("  %s %s\n",
 		colorize("✓", ColorGreen),
-		colorize(date.Format("2006-01-02"), ColorCyan),
-		len(contextContent),
+		i18n.T("memory.loaded_into_context", date.Format("2006-01-02"), len(contextContent)),
 	)
 }
 
@@ -205,7 +205,7 @@ func (cli *ChatCLI) listMemoryNotes() {
 	longTerm := cli.memoryStore.ReadLongTerm()
 
 	fmt.Println()
-	fmt.Println(colorize("  Memory files", ColorCyan+ColorBold))
+	fmt.Println(colorize("  "+i18n.T("memory.header.files"), ColorCyan+ColorBold))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
 	if longTerm != "" {
@@ -216,9 +216,9 @@ func (cli *ChatCLI) listMemoryNotes() {
 	}
 
 	if len(files) == 0 {
-		fmt.Printf("  %s  No daily notes yet\n", colorize("○", ColorGray))
+		fmt.Printf("  %s  %s\n", colorize("○", ColorGray), i18n.T("memory.no_daily_notes"))
 	} else {
-		fmt.Printf("  %s  %d daily notes:\n", colorize("●", ColorGreen), len(files))
+		fmt.Printf("  %s  %s\n", colorize("●", ColorGreen), i18n.T("memory.daily_notes_count", len(files)))
 		// Show last 10
 		start := 0
 		if len(files) > 10 {

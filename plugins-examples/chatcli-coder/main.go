@@ -29,7 +29,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	eng := engine.NewEngine(os.Stdout, os.Stderr)
+	eng := engine.NewEngine(os.Stdout, os.Stderr, "")
 	if err := eng.Execute(context.Background(), os.Args[1], os.Args[2:]); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)

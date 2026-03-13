@@ -144,7 +144,7 @@ func TestStreamWriterCRLF(t *testing.T) {
 
 func TestEngineExecuteUnknown(t *testing.T) {
 	var buf bytes.Buffer
-	eng := NewEngine(&buf, &buf)
+	eng := NewEngine(&buf, &buf, "")
 	err := eng.Execute(context.TODO(), "unknown-cmd", nil)
 	if err == nil || !strings.Contains(err.Error(), "desconhecido") {
 		t.Errorf("expected unknown command error, got %v", err)

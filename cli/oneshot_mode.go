@@ -49,7 +49,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 
 	// Aplica overrides de provider/model
 	if err := cli.ApplyOverrides(cli.manager, opts.Provider, opts.Model); err != nil {
-		fmt.Fprintln(os.Stderr, i18n.T("manager.error_provider_not_supported")+"\n\nDetalhes:\n```\n"+err.Error()+"\n```")
+		fmt.Fprintln(os.Stderr, i18n.T("manager.error_provider_not_supported")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
 		cli.logger.Fatal("Erro ao aplicar provider/model via flags", zap.Error(err))
 	}
 
@@ -66,26 +66,12 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	}
 
 	if cli.Client == nil {
-		fmt.Fprintln(os.Stderr, "❌ No LLM provider configured. Use /auth login anthropic | openai-codex | github-copilot to authenticate first.")
+		fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.no_provider"))
 		cli.logger.Fatal("One-shot acionado sem provedor LLM configurado")
 	}
 
 	if strings.TrimSpace(input) == "" {
-		const md = `
-             ❌ Erro no modo one-shot
-            
-            O modo one-shot foi acionado (via flag -p/--prompt ou stdin), mas nenhum conteúdo de entrada foi fornecido.
-            
-            - Use a flag -p/--prompt com um texto:
-          
-          chatcli -p "Seu prompt aqui"
-          
-            - Ou envie dados via stdin:
-          
-          echo "Texto" | chatcli -p ou echo "Texto" | chatcli
-          
-            `
-		fmt.Fprintln(os.Stderr, md)
+		fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.empty_input"))
 		cli.logger.Fatal("One-shot acionado sem input (prompt vazio e sem stdin)")
 	}
 
@@ -94,18 +80,18 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 
 	if strings.HasPrefix(input, "/agent ") || strings.HasPrefix(input, "/run ") {
 		if err := cli.RunAgentOnce(ctxOne, input, opts.AgentAutoExec); err != nil {
-			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar o agente em modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
+			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.agent_failed")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
 			cli.logger.Fatal("Erro no modo agente one-shot", zap.Error(err))
 		}
 	} else if strings.HasPrefix(input, "/coder ") {
 		// coder one-shot (mesma experiência do modo /coder interativo)
 		if err := cli.RunCoderOnce(ctxOne, input); err != nil {
-			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar o coder em modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
+			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.coder_failed")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
 			cli.logger.Fatal("Erro no modo coder one-shot", zap.Error(err))
 		}
 	} else {
 		if err := cli.RunOnce(ctxOne, input, opts.NoAnim, opts.Raw); err != nil {
-			fmt.Fprintln(os.Stderr, " ❌ Erro ao executar no modo one-shot\n\nDetalhes:\n```\n"+err.Error()+"\n```")
+			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.run_failed")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
 			cli.logger.Fatal("Erro no modo one-shot", zap.Error(err))
 		}
 	}

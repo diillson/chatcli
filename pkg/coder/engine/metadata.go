@@ -50,7 +50,10 @@ func GetMetadata() Metadata {
 
 // GetMetadataJSON returns the metadata as a JSON string.
 func GetMetadataJSON() string {
-	data, _ := json.Marshal(GetMetadata())
+	data, err := json.Marshal(GetMetadata())
+	if err != nil {
+		return "{}"
+	}
 	return string(data)
 }
 
@@ -204,6 +207,9 @@ func GetSchema() string {
 			},
 		},
 	}
-	data, _ := json.Marshal(schema)
+	data, err := json.Marshal(schema)
+	if err != nil {
+		return "{}"
+	}
 	return string(data)
 }

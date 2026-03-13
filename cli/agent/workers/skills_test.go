@@ -59,7 +59,7 @@ func TestSkillSet_ExecuteScript(t *testing.T) {
 		},
 	})
 
-	eng := engine.NewEngine(nil, nil)
+	eng := engine.NewEngine(nil, nil, "")
 	result, err := ss.Execute(context.Background(), "echo", map[string]string{"name": "world"}, eng)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -78,7 +78,7 @@ func TestSkillSet_ExecuteDescriptiveFails(t *testing.T) {
 		Type:        SkillDescriptive,
 	})
 
-	eng := engine.NewEngine(nil, nil)
+	eng := engine.NewEngine(nil, nil, "")
 	_, err := ss.Execute(context.Background(), "desc-only", nil, eng)
 	if err == nil {
 		t.Fatal("expected error when executing descriptive skill")
@@ -88,7 +88,7 @@ func TestSkillSet_ExecuteDescriptiveFails(t *testing.T) {
 func TestSkillSet_ExecuteNotFound(t *testing.T) {
 	ss := NewSkillSet()
 
-	eng := engine.NewEngine(nil, nil)
+	eng := engine.NewEngine(nil, nil, "")
 	_, err := ss.Execute(context.Background(), "missing", nil, eng)
 	if err == nil {
 		t.Fatal("expected error for missing skill")

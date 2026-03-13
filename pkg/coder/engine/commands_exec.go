@@ -47,6 +47,9 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 		cmd = exec.CommandContext(execCtx, "sh", "-c", finalCmd)
 	}
 	if *dir != "" {
+		if err := e.validatePath(*dir); err != nil {
+			return err
+		}
 		cmd.Dir = *dir
 	}
 
@@ -89,6 +92,10 @@ func (e *Engine) handleTest(ctx context.Context, args []string) error {
 	cmd := fs.String("cmd", "", "")
 	timeout := fs.Int("timeout", 1800, "")
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+
+	if err := e.validatePath(*dir); err != nil {
 		return err
 	}
 

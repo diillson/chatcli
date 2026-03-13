@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -65,12 +66,12 @@ func (cli *ChatCLI) saveCheckpoint() {
 // Returns true if a rewind was performed.
 func (cli *ChatCLI) showRewindMenu() bool {
 	if len(cli.checkpoints) == 0 {
-		fmt.Println(colorize("  No checkpoints available yet.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("rewind.no_checkpoints"), ColorGray))
 		return false
 	}
 
 	fmt.Println()
-	fmt.Println(colorize("  REWIND — Select a checkpoint to restore", ColorCyan+ColorBold))
+	fmt.Println(colorize("  "+i18n.T("rewind.header"), ColorCyan+ColorBold))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
 	for i := len(cli.checkpoints) - 1; i >= 0; i-- {
@@ -88,7 +89,7 @@ func (cli *ChatCLI) showRewindMenu() bool {
 	}
 
 	fmt.Println()
-	fmt.Printf("  %s ", colorize("Select [1-"+fmt.Sprintf("%d", len(cli.checkpoints))+"] or (q)uit:", ColorGray))
+	fmt.Printf("  %s ", colorize(i18n.T("rewind.select_prompt", len(cli.checkpoints)), ColorGray))
 
 	// Restore terminal from raw mode so stdin reads work (go-prompt uses raw mode).
 	// On Windows, stty is not available but the terminal is already in a usable state.
@@ -103,13 +104,13 @@ func (cli *ChatCLI) showRewindMenu() bool {
 	input := strings.TrimSpace(rawInput)
 
 	if input == "q" || input == "" {
-		fmt.Println(colorize("  Rewind cancelled.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("rewind.cancelled"), ColorGray))
 		return false
 	}
 
 	var idx int
 	if _, err := fmt.Sscanf(input, "%d", &idx); err != nil || idx < 1 || idx > len(cli.checkpoints) {
-		fmt.Println(colorize("  Invalid selection.", ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("rewind.invalid_selection"), ColorYellow))
 		return false
 	}
 
@@ -124,11 +125,9 @@ func (cli *ChatCLI) showRewindMenu() bool {
 	// Trim checkpoints to the restored point
 	cli.checkpoints = cli.checkpoints[:cpIdx+1]
 
-	fmt.Printf("  %s Rewound to checkpoint [%d] (%s, %d messages)\n",
+	fmt.Printf("  %s %s\n",
 		colorize("↩", ColorGreen),
-		idx,
-		cp.Timestamp.Format("15:04:05"),
-		cp.MsgCount,
+		i18n.T("rewind.success", idx, cp.Timestamp.Format("15:04:05"), cp.MsgCount),
 	)
 
 	return true

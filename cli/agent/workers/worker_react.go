@@ -222,7 +222,7 @@ func RunWorkerReAct(
 				errBuf.WriteString("\n")
 			})
 
-			eng := engine.NewEngine(outWriter, errWriter)
+			eng := engine.NewEngine(outWriter, errWriter, "")
 			execErr := eng.Execute(ctx, v.subcmd, v.args)
 			outWriter.Flush()
 			errWriter.Flush()

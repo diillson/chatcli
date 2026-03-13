@@ -195,6 +195,112 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # Atualiza a formula do Homebrew tap após upload dos binários
+  update_homebrew:
+    name: Update Homebrew Formula
+    needs: [release_please, build_and_upload]
+    if: needs.release_please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: diillson/homebrew-chatcli
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+
+      - name: Download release assets and compute SHA256
+        env:
+          TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          VER="${TAG_NAME#v}"
+
+          echo "Downloading binaries for v${VER}..."
+
+          for attempt in {1..6}; do
+            if curl -sfL -o chatcli-darwin-arm64 \
+              "https://github.com/diillson/chatcli/releases/download/v${VER}/chatcli-darwin-arm64"; then
+              break
+            fi
+            echo "Waiting for assets to be available (attempt $attempt/6)..."
+            sleep 10
+          done
+
+          curl -sfL -o chatcli-darwin-amd64 \
+            "https://github.com/diillson/chatcli/releases/download/v${VER}/chatcli-darwin-amd64"
+          curl -sfL -o chatcli-linux-amd64 \
+            "https://github.com/diillson/chatcli/releases/download/v${VER}/chatcli-linux-amd64"
+
+          echo "SHA_DARWIN_ARM64=$(sha256sum chatcli-darwin-arm64 | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "SHA_DARWIN_AMD64=$(sha256sum chatcli-darwin-amd64 | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "SHA_LINUX_AMD64=$(sha256sum chatcli-linux-amd64 | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "VER=${VER}" >> "$GITHUB_ENV"
+
+      - name: Generate formula
+        run: |
+          cat > Formula/chatcli.rb << 'ENDOFFORMULA'
+          # typed: false
+          # frozen_string_literal: true
+
+          # Homebrew formula for ChatCLI
+          # Repository: https://github.com/diillson/chatcli
+          class Chatcli < Formula
+            desc "Command-line interface for interacting with multiple LLM providers"
+            homepage "https://chatcli.edilsonfreitas.com"
+            license "Apache-2.0"
+          ENDOFFORMULA
+
+          # Append version and platform blocks with shell variable expansion
+          cat >> Formula/chatcli.rb << ENDOFFORMULA
+            version "${VER}"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/diillson/chatcli/releases/download/v#{version}/chatcli-darwin-arm64"
+                sha256 "${SHA_DARWIN_ARM64}"
+
+                def install
+                  bin.install "chatcli-darwin-arm64" => "chatcli"
+                end
+              elsif Hardware::CPU.intel?
+                url "https://github.com/diillson/chatcli/releases/download/v#{version}/chatcli-darwin-amd64"
+                sha256 "${SHA_DARWIN_AMD64}"
+
+                def install
+                  bin.install "chatcli-darwin-amd64" => "chatcli"
+                end
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.intel?
+                url "https://github.com/diillson/chatcli/releases/download/v#{version}/chatcli-linux-amd64"
+                sha256 "${SHA_LINUX_AMD64}"
+
+                def install
+                  bin.install "chatcli-linux-amd64" => "chatcli"
+                end
+              end
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/chatcli --version 2>&1", 0)
+            end
+          end
+          ENDOFFORMULA
+
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' Formula/chatcli.rb
+
+      - name: Commit and push formula update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/chatcli.rb
+          git diff --cached --quiet && echo "Formula already up to date" && exit 0
+          git commit -m "chore: update chatcli formula to v${VER}"
+          git push
+
   # Opcional: sincroniza main -> develop após publicar a release
   sync_main_to_develop:
     needs: [release_please]

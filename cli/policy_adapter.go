@@ -108,7 +108,12 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		// Re-check after acquiring the lock — another worker's prompt may
 		// have created an "allow always" or "deny forever" rule for this
 		// same pattern while we were waiting.
-		a.pm, _ = coder.NewPolicyManager(a.logger) // reload rules
+		newPM, pmErr := coder.NewPolicyManager(a.logger) // reload rules
+		if pmErr != nil {
+			a.logger.Error("failed to reload policy manager", zap.Error(pmErr))
+			return false, "AÇÃO BLOQUEADA (erro ao recarregar políticas de segurança)."
+		}
+		a.pm = newPM
 		recheck := a.pm.Check(toolName, args)
 		if recheck == coder.ActionAllow {
 			return true, ""
@@ -134,13 +139,17 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		switch decision {
 		case coder.DecisionAllowAlways:
 			if pattern != "" {
-				_ = a.pm.AddRule(pattern, coder.ActionAllow)
+				if err := a.pm.AddRule(pattern, coder.ActionAllow); err != nil {
+					a.logger.Warn("failed to persist allow rule", zap.String("pattern", pattern), zap.Error(err))
+				}
 			}
 			return true, ""
 
 		case coder.DecisionDenyForever:
 			if pattern != "" {
-				_ = a.pm.AddRule(pattern, coder.ActionDeny)
+				if err := a.pm.AddRule(pattern, coder.ActionDeny); err != nil {
+					a.logger.Warn("failed to persist deny rule", zap.String("pattern", pattern), zap.Error(err))
+				}
 			}
 			return false, "AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
 

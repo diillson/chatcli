@@ -31,6 +31,10 @@ func (e *Engine) handleRead(args []string) error {
 	}
 
 	for _, f := range files {
+		if err := e.validatePath(f); err != nil {
+			e.printf("❌ BLOQUEADO %s: %v\n", f, err)
+			continue
+		}
 		content, truncated, err := readFileWithLimit(f, *maxBytes)
 		if err != nil {
 			e.printf("❌ ERRO AO LER '%s': %v\n", f, err)
@@ -80,14 +84,21 @@ func (e *Engine) handleWrite(args []string) error {
 	if *content == "" {
 		return fmt.Errorf("--content vazio")
 	}
+	if err := e.validatePath(*file); err != nil {
+		return err
+	}
 
 	data, err := smartDecode(*content, *encoding)
 	if err != nil {
 		return fmt.Errorf("erro decode: %v", err)
 	}
 
-	_ = os.MkdirAll(filepath.Dir(*file), 0700)
-	_ = createBackup(*file)
+	if err := os.MkdirAll(filepath.Dir(*file), 0700); err != nil {
+		return fmt.Errorf("erro ao criar diretório: %v", err)
+	}
+	if err := createBackup(*file); err != nil {
+		e.errorf("WARN: backup falhou para %s: %v\n", *file, err)
+	}
 
 	if *appendMode {
 		f, err := os.OpenFile(*file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
@@ -127,6 +138,9 @@ func (e *Engine) handlePatch(args []string) error {
 	if *file == "" || *search == "" {
 		return fmt.Errorf("--file e --search requeridos")
 	}
+	if err := e.validatePath(*file); err != nil {
+		return err
+	}
 
 	c, err := os.ReadFile(*file)
 	if err != nil {
@@ -152,7 +166,9 @@ func (e *Engine) handlePatch(args []string) error {
 		e.errorf("DEBUG: Trecho não encontrado.\nBuscado (len=%d):\n%q\n", len(searchStr), searchStr)
 		return fmt.Errorf("❌ Texto não encontrado")
 	}
-	_ = createBackup(*file)
+	if err := createBackup(*file); err != nil {
+		e.errorf("WARN: backup falhou para %s: %v\n", *file, err)
+	}
 	newContent := strings.Replace(content, searchStr, replaceStr, 1)
 	if err := os.WriteFile(*file, []byte(newContent), 0600); err != nil {
 		return fmt.Errorf("erro escrita: %v", err)
@@ -170,11 +186,16 @@ func (e *Engine) handleRollback(args []string) error {
 	if *file == "" {
 		return fmt.Errorf("--file requerido")
 	}
+	if err := e.validatePath(*file); err != nil {
+		return err
+	}
 	c, err := os.ReadFile(*file + ".bak")
 	if err != nil {
 		return fmt.Errorf("backup error: %v", err)
 	}
-	_ = os.WriteFile(*file, c, 0600)
+	if err := os.WriteFile(*file, c, 0600); err != nil {
+		return fmt.Errorf("erro ao restaurar arquivo: %v", err)
+	}
 	e.println("✅ Rollback ok.")
 	return nil
 }
@@ -185,6 +206,9 @@ func (e *Engine) handleClean(args []string) error {
 	force := fs.Bool("force", false, "")
 	pattern := fs.String("pattern", "*.bak", "")
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := e.validatePath(*dir); err != nil {
 		return err
 	}
 

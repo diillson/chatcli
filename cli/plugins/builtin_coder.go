@@ -72,7 +72,7 @@ func (p *BuiltinCoderPlugin) ExecuteWithStream(ctx context.Context, args []strin
 		emit(line, true)
 	})
 
-	eng := engine.NewEngine(outWriter, errWriter)
+	eng := engine.NewEngine(outWriter, errWriter, "")
 	err := eng.Execute(ctx, subcmd, subArgs)
 
 	outWriter.Flush()
