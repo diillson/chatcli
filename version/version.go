@@ -272,8 +272,9 @@ func FormatVersionInfo(info VersionInfo, latest string, hasUpdate bool, checkErr
 
 	// --- Dica de Atualização ---
 	result.WriteString("\n  " + ansiColor("Como Atualizar", ansiLime) + "\n")
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Comando:", ansiCyan), ansiColor("go install github.com/diillson/chatcli@latest", ansiGray)))
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Dica:", ansiCyan), ansiColor("Ou use 'git pull' no repositório clonado.", ansiGray)))
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Homebrew:", ansiCyan), ansiColor("brew upgrade chatcli", ansiGray)))
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Go Install:", ansiCyan), ansiColor("go install github.com/diillson/chatcli@latest", ansiGray)))
+	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Dica:", ansiCyan), ansiColor("Instale via Homebrew: brew tap diillson/chatcli && brew install chatcli", ansiGray)))
 
 	result.WriteString("\n") // Espaço final
 	return result.String()
