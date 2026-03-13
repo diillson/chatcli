@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/cli/paste"
@@ -815,6 +816,10 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	// Usar histórico temporário com contextos injetados
 	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
+	// Auto-retry on OAuth token expiration (401)
+	if cli.refreshClientOnAuthError(err) {
+		aiResponse, err = cli.Client.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
+	}
 
 	cli.animation.StopThinkingAnimation()
 
@@ -2034,6 +2039,40 @@ func (cli *ChatCLI) getTokenEstimatorForCurrentLLM() func(string) int {
 		// Aproximadamente 4 caracteres por token para a maioria dos modelos
 		return len(text) / 4
 	}
+}
+
+// refreshClientOnAuthError checks if the error is a 401/auth error from an OAuth provider.
+// If so, it invalidates the auth cache, refreshes credentials, and recreates the client.
+// Returns true if the client was refreshed and the caller should retry.
+func (cli *ChatCLI) refreshClientOnAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *utils.APIError
+	if errors.As(err, &apiErr) && (apiErr.StatusCode == 401 || apiErr.StatusCode == 403) {
+		cli.logger.Info("Auth error detected, refreshing OAuth credentials",
+			zap.Int("status", apiErr.StatusCode),
+			zap.String("provider", cli.Provider))
+		auth.InvalidateCache()
+		cli.manager.RefreshProviders()
+		if newClient, cerr := cli.manager.GetClient(cli.Provider, cli.Model); cerr == nil {
+			cli.mu.Lock()
+			cli.Client = newClient
+			cli.mu.Unlock()
+			return true
+		}
+		cli.logger.Warn("Failed to recreate client after auth refresh",
+			zap.String("provider", cli.Provider))
+	}
+	return false
+}
+
+// getClient returns the current LLM client, safe for use from background goroutines.
+func (cli *ChatCLI) getClient() client.LLMClient {
+	cli.mu.Lock()
+	c := cli.Client
+	cli.mu.Unlock()
+	return c
 }
 
 func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {

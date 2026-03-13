@@ -44,8 +44,15 @@ func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (
 		}
 		if c.CredType == CredentialOAuth {
 			if c.IsExpired() {
-				_, _ = RefreshOAuth(ctx, c, logger)
-				_ = SaveStore(store, logger)
+				if _, err := RefreshOAuth(ctx, c, logger); err != nil {
+					if logger != nil {
+						logger.Warn("OAuth token refresh failed",
+							zap.String("provider", string(c.Provider)),
+							zap.Error(err))
+					}
+				} else {
+					_ = SaveStore(store, logger)
+				}
 			}
 			key := strings.TrimSpace(c.Access)
 			if key != "" {

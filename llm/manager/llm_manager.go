@@ -130,43 +130,52 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 		m.logger.Warn("OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível", zap.Error(err))
 		return
 	}
-	apiKey := resolved.APIKey
-	if apiKey != "" {
-		m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
-			if model == "" {
-				model = config.DefaultOpenAIModel
-			}
-
-			// OAuth tokens always use the Responses API (ChatGPT backend only speaks Responses format)
-			isOAuth := strings.HasPrefix(apiKey, "oauth:")
-
-			useResponses := isOAuth || config.Global.GetBool("OPENAI_USE_RESPONSES", false)
-
-			if !useResponses && catalog.GetPreferredAPI(catalog.ProviderOpenAI, model) == catalog.APIResponses {
-				useResponses = true
-			}
-
-			if useResponses {
-				m.logger.Info("Usando OpenAI Responses API", zap.String("model", model), zap.Bool("oauth", isOAuth))
-				return openai_responses.NewOpenAIResponsesClient(
-					apiKey, model, m.logger,
-					maxRetries,
-					initialBackoff,
-				), nil
-			}
-
-			m.logger.Info("Usando OpenAI Chat Completions API", zap.String("model", model))
-			return openai.NewOpenAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
-		}
-
-		m.clients["OPENAI_ASSISTANT"] = func(model string) (client.LLMClient, error) {
-			if model == "" {
-				model = config.DefaultOpenAiAssistModel
-			}
-			return openai_assistant.NewOpenAIAssistantClient(apiKey, model, m.logger)
-		}
-	} else {
+	if resolved.APIKey == "" {
 		m.logger.Warn("OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível")
+		return
+	}
+	m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
+		// Re-resolve auth on each client creation to pick up refreshed tokens
+		res, err := auth.ResolveAuth(context.Background(), auth.ProviderOpenAI, m.logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve OpenAI auth: %w", err)
+		}
+		apiKey := res.APIKey
+		if model == "" {
+			model = config.DefaultOpenAIModel
+		}
+
+		// OAuth tokens always use the Responses API (ChatGPT backend only speaks Responses format)
+		isOAuth := strings.HasPrefix(apiKey, "oauth:")
+
+		useResponses := isOAuth || config.Global.GetBool("OPENAI_USE_RESPONSES", false)
+
+		if !useResponses && catalog.GetPreferredAPI(catalog.ProviderOpenAI, model) == catalog.APIResponses {
+			useResponses = true
+		}
+
+		if useResponses {
+			m.logger.Info("Usando OpenAI Responses API", zap.String("model", model), zap.Bool("oauth", isOAuth))
+			return openai_responses.NewOpenAIResponsesClient(
+				apiKey, model, m.logger,
+				maxRetries,
+				initialBackoff,
+			), nil
+		}
+
+		m.logger.Info("Usando OpenAI Chat Completions API", zap.String("model", model))
+		return openai.NewOpenAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+	}
+
+	m.clients["OPENAI_ASSISTANT"] = func(model string) (client.LLMClient, error) {
+		res, err := auth.ResolveAuth(context.Background(), auth.ProviderOpenAI, m.logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve OpenAI auth: %w", err)
+		}
+		if model == "" {
+			model = config.DefaultOpenAiAssistModel
+		}
+		return openai_assistant.NewOpenAIAssistantClient(res.APIKey, model, m.logger)
 	}
 }
 
@@ -211,22 +220,26 @@ func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff
 		m.logger.Warn("ANTHROPIC_API_KEY não definida, o provedor CLAUDEAI não estará disponível", zap.Error(err))
 		return
 	}
-	apiKey := resolved.APIKey
-	if apiKey != "" {
-		m.clients["CLAUDEAI"] = func(model string) (client.LLMClient, error) {
-			if model == "" {
-				model = config.DefaultClaudeAIModel
-			}
-			return claudeai.NewClaudeClient(
-				apiKey,
-				model,
-				m.logger,
-				maxRetries,
-				initialBackoff,
-			), nil
-		}
-	} else {
+	if resolved.APIKey == "" {
 		m.logger.Warn("ANTHROPIC_API_KEY não definida, o provedor ClaudeAI não estará disponível")
+		return
+	}
+	m.clients["CLAUDEAI"] = func(model string) (client.LLMClient, error) {
+		// Re-resolve auth on each client creation to pick up refreshed tokens
+		res, err := auth.ResolveAuth(context.Background(), auth.ProviderAnthropic, m.logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve Anthropic auth: %w", err)
+		}
+		if model == "" {
+			model = config.DefaultClaudeAIModel
+		}
+		return claudeai.NewClaudeClient(
+			res.APIKey,
+			model,
+			m.logger,
+			maxRetries,
+			initialBackoff,
+		), nil
 	}
 }
 
@@ -336,15 +349,20 @@ func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff 
 		m.logger.Info("GitHub Copilot not configured, provider COPILOT will not be available", zap.Error(err))
 		return
 	}
-	apiKey := resolved.APIKey
-	if apiKey != "" {
-		m.logger.Info("Configurando provedor GitHub Copilot")
-		m.clients["COPILOT"] = func(model string) (client.LLMClient, error) {
-			if model == "" {
-				model = config.DefaultCopilotModel
-			}
-			return copilot.NewClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+	if resolved.APIKey == "" {
+		return
+	}
+	m.logger.Info("Configurando provedor GitHub Copilot")
+	m.clients["COPILOT"] = func(model string) (client.LLMClient, error) {
+		// Re-resolve auth on each client creation to pick up refreshed tokens
+		res, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubCopilot, m.logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve GitHub Copilot auth: %w", err)
 		}
+		if model == "" {
+			model = config.DefaultCopilotModel
+		}
+		return copilot.NewClient(res.APIKey, model, m.logger, maxRetries, initialBackoff), nil
 	}
 }
 
@@ -415,23 +433,21 @@ func (m *LLMManagerImpl) GetStackSpotAgentID() string {
 	return m.stackspotAgentID
 }
 
-// RefreshProviders re-checks auth credentials and registers any providers
-// that became available (e.g. after an OAuth login at runtime).
+// RefreshProviders re-checks auth credentials and registers/updates providers.
+// Called after an OAuth login or token refresh at runtime.
+// Safe to call multiple times — only overwrites a factory if new credentials are available.
 func (m *LLMManagerImpl) RefreshProviders() {
 	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
 	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
 
 	auth.InvalidateCache()
 
-	if _, ok := m.clients["OPENAI"]; !ok {
-		m.configurarOpenAIClient(maxRetries, initialBackoff)
-	}
-	if _, ok := m.clients["CLAUDEAI"]; !ok {
-		m.configurarClaudeAIClient(maxRetries, initialBackoff)
-	}
-	if _, ok := m.clients["COPILOT"]; !ok {
-		m.configurarCopilotClient(maxRetries, initialBackoff)
-	}
+	// Re-configure OAuth providers. configurar* only registers the factory
+	// if ResolveAuth succeeds, so an existing working factory is preserved
+	// when the new resolve fails (e.g. refresh token also expired).
+	m.configurarOpenAIClient(maxRetries, initialBackoff)
+	m.configurarClaudeAIClient(maxRetries, initialBackoff)
+	m.configurarCopilotClient(maxRetries, initialBackoff)
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key

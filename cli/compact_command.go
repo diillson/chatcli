@@ -114,6 +114,10 @@ CONVERSATION TO COMPACT:
 	)
 
 	response, err := cli.Client.SendPrompt(ctx, prompt, summaryHistory, 0)
+	// Auto-retry on OAuth token expiration (401)
+	if cli.refreshClientOnAuthError(err) {
+		response, err = cli.Client.SendPrompt(ctx, prompt, summaryHistory, 0)
+	}
 	if err != nil {
 		cli.logger.Warn("Guided compaction failed", zap.Error(err))
 		fmt.Println(colorize(fmt.Sprintf("  Compaction failed: %s", err), ColorYellow))
