@@ -1495,4 +1495,3 @@ func (a *AgentMode) initMultiAgent() bool {
 
 	return true
 }
-

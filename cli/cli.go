@@ -920,4 +920,3 @@ func (cli *ChatCLI) cleanup() {
 		}
 	}
 }
-

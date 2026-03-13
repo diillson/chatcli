@@ -180,4 +180,3 @@ func (ch *CommandHandler) handleSessionCommand(userInput string) {
 		fmt.Println(i18n.T("session.unknown_command", command))
 	}
 }
-
