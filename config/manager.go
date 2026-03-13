@@ -27,6 +27,25 @@ type ConfigManager struct {
 // Global é a instância singleton do ConfigManager.
 var Global *ConfigManager
 
+var globalOnce sync.Once
+
+// InitGlobal initializes the global ConfigManager singleton (thread-safe).
+// Subsequent calls are no-ops — use Global.Reload() to refresh configuration.
+func InitGlobal(logger *zap.Logger) *ConfigManager {
+	globalOnce.Do(func() {
+		Global = New(logger)
+	})
+	return Global
+}
+
+// ResetGlobalForTest resets the singleton for test isolation.
+// Must NOT be used in production code.
+func ResetGlobalForTest(logger *zap.Logger) *ConfigManager {
+	globalOnce = sync.Once{}
+	Global = nil
+	return InitGlobal(logger)
+}
+
 // New cria uma nova instância do ConfigManager.
 func New(logger *zap.Logger) *ConfigManager {
 	return &ConfigManager{

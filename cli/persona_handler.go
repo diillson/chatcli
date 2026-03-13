@@ -58,19 +58,19 @@ func (h *PersonaHandler) HandleCommand(userInput string) {
 	switch subcommand {
 	case "load":
 		if len(args) < 3 {
-			fmt.Println(colorize("Uso: /agent load <nome>", ColorYellow))
+			fmt.Println(colorize(i18n.T("agent.persona.usage.load"), ColorYellow))
 			return
 		}
 		h.LoadAgent(args[2])
 	case "attach", "add":
 		if len(args) < 3 {
-			fmt.Println(colorize("Uso: /agent attach <nome>", ColorYellow))
+			fmt.Println(colorize(i18n.T("agent.persona.usage.attach"), ColorYellow))
 			return
 		}
 		h.AttachAgent(args[2])
 	case "detach", "remove", "rm":
 		if len(args) < 3 {
-			fmt.Println(colorize("Uso: /agent detach <nome>", ColorYellow))
+			fmt.Println(colorize(i18n.T("agent.persona.usage.detach"), ColorYellow))
 			return
 		}
 		h.DetachAgent(args[2])
@@ -104,14 +104,14 @@ func (h *PersonaHandler) ListAgents() {
 
 	if len(agents) == 0 {
 		fmt.Println(colorize(i18n.T("agent.persona.list.empty"), ColorYellow))
-		fmt.Printf("\n    📂 Diretório: %s\n", h.manager.GetAgentsDir())
-		fmt.Println("\n    Crie um arquivo .md com frontmatter YAML para definir um agente.")
+		fmt.Printf("\n    📂 %s: %s\n", i18n.T("agent.persona.directory"), h.manager.GetAgentsDir())
+		fmt.Println("\n    " + i18n.T("agent.persona.list.create_hint"))
 		return
 	}
 
 	active := h.manager.GetActiveAgent()
 
-	fmt.Println(colorize("\n 🤖 Agentes Disponíveis:", ColorCyan))
+	fmt.Println(colorize("\n 🤖 "+i18n.T("agent.persona.list.header"), ColorCyan))
 	fmt.Println(strings.Repeat("─", 50))
 
 	for _, a := range agents {
@@ -124,7 +124,7 @@ func (h *PersonaHandler) ListAgents() {
 
 		desc := a.Description
 		if desc == "" {
-			desc = colorize("(sem descrição)", ColorGray)
+			desc = colorize(i18n.T("agent.persona.no_description"), ColorGray)
 		}
 
 		skillCount := ""
@@ -136,7 +136,7 @@ func (h *PersonaHandler) ListAgents() {
 	}
 
 	fmt.Println()
-	fmt.Printf(" 💡 Use %s para carregar um agente\n", colorize("/agent load <nome>", ColorCyan))
+	fmt.Printf(" 💡 %s\n", i18n.T("agent.persona.list.load_hint", colorize("/agent load <nome>", ColorCyan)))
 }
 
 // ListSkills shows all available skills
@@ -149,11 +149,11 @@ func (h *PersonaHandler) ListSkills() {
 
 	if len(skills) == 0 {
 		fmt.Println(colorize(i18n.T("agent.persona.skills.empty"), ColorYellow))
-		fmt.Printf("\n    📂 Diretório: %s\n", h.manager.GetSkillsDir())
+		fmt.Printf("\n    📂 %s: %s\n", i18n.T("agent.persona.directory"), h.manager.GetSkillsDir())
 		return
 	}
 
-	fmt.Println(colorize("\n 🛠 Skills Disponíveis:", ColorCyan))
+	fmt.Println(colorize("\n 🛠 "+i18n.T("agent.persona.skills.header"), ColorCyan))
 	fmt.Println(strings.Repeat("─", 50))
 
 	for _, s := range skills {
@@ -161,7 +161,7 @@ func (h *PersonaHandler) ListSkills() {
 
 		desc := s.Description
 		if desc == "" {
-			desc = colorize("(sem descrição)", ColorGray)
+			desc = colorize(i18n.T("agent.persona.no_description"), ColorGray)
 		}
 
 		fmt.Printf("    • %s - %s\n", name, desc)
@@ -173,12 +173,12 @@ func (h *PersonaHandler) ListSkills() {
 func (h *PersonaHandler) LoadAgent(name string) {
 	result, err := h.manager.LoadAgent(name)
 	if err != nil {
-		fmt.Println(colorize(fmt.Sprintf(" ❌ Erro ao carregar agente: %s", err.Error()), ColorRed))
+		fmt.Println(colorize(fmt.Sprintf(" ❌ %s: %s", i18n.T("agent.persona.load.error"), err.Error()), ColorRed))
 		return
 	}
 
 	fmt.Println()
-	fmt.Println(colorize(fmt.Sprintf("✓ Agente '%s' carregado com sucesso!", result.Agent.Name), ColorGreen))
+	fmt.Println(colorize(i18n.T("agent.persona.load.success", result.Agent.Name), ColorGreen))
 
 	if result.Agent.Description != "" {
 		fmt.Printf("   %s\n", colorize(result.Agent.Description, ColorGray))
@@ -186,7 +186,7 @@ func (h *PersonaHandler) LoadAgent(name string) {
 
 	// Show loaded skills
 	if len(result.LoadedSkills) > 0 {
-		fmt.Println(colorize("\n   Skills anexadas:", ColorCyan))
+		fmt.Println(colorize("\n   "+i18n.T("agent.persona.load.skills_attached"), ColorCyan))
 		for _, s := range result.LoadedSkills {
 			fmt.Printf("    • %s %s\n", s, colorize("✓", ColorGreen))
 		}
@@ -194,7 +194,7 @@ func (h *PersonaHandler) LoadAgent(name string) {
 
 	// Show missing skills
 	if len(result.MissingSkills) > 0 {
-		fmt.Println(colorize("\n   ⚠️ Skills não encontradas (ignoradas):", ColorYellow))
+		fmt.Println(colorize("\n   ⚠️ "+i18n.T("agent.persona.load.skills_missing"), ColorYellow))
 		for _, s := range result.MissingSkills {
 			fmt.Printf("    • %s\n", s)
 		}
@@ -202,16 +202,18 @@ func (h *PersonaHandler) LoadAgent(name string) {
 
 	// Show plugins
 	if len(result.Agent.Plugins) > 0 {
-		fmt.Println(colorize("\n   🔤 Plugins habilitados:", ColorCyan))
+		fmt.Println(colorize("\n   🔤 "+i18n.T("agent.persona.load.plugins_enabled"), ColorCyan))
 		for _, p := range result.Agent.Plugins {
 			fmt.Printf("    • %s\n", p)
 		}
 	}
 
 	fmt.Println()
-	fmt.Println(colorize("   Pronto para uso! A persona será aplicada automaticamente no próximo comando.", ColorGray))
-	fmt.Printf("   Exemplo: %s ou %s\n",
+	fmt.Println(colorize("   "+i18n.T("agent.persona.load.ready"), ColorGray))
+	fmt.Printf("   %s: %s %s %s\n",
+		i18n.T("agent.persona.load.example"),
 		colorize("/agent crie um servidor HTTP", ColorCyan),
+		i18n.T("agent.persona.load.or"),
 		colorize("/coder refatore o código", ColorCyan))
 }
 
@@ -224,7 +226,7 @@ func (h *PersonaHandler) UnloadAgent() {
 	}
 
 	h.manager.UnloadAgent()
-	fmt.Println(colorize(fmt.Sprintf("✓ Agente '%s' desativado.", active.Name), ColorGreen))
+	fmt.Println(colorize(i18n.T("agent.persona.unload.success", active.Name), ColorGreen))
 	fmt.Println(i18n.T("agent.persona.off.hint"))
 }
 
@@ -238,30 +240,30 @@ func (h *PersonaHandler) ShowActive(full bool) {
 		return
 	}
 
-	fmt.Println(colorize("\n 🎭 Agente Ativo:", ColorCyan))
+	fmt.Println(colorize("\n 🎭 "+i18n.T("agent.persona.show.active_header"), ColorCyan))
 	fmt.Println(strings.Repeat("─", 50))
-	fmt.Printf("   Nome: %s\n", colorize(active.Name, ColorGreen))
+	fmt.Printf("   %s: %s\n", i18n.T("agent.persona.show.name"), colorize(active.Name, ColorGreen))
 
 	if active.Description != "" {
-		fmt.Printf("   Descrição: %s\n", active.Description)
+		fmt.Printf("   %s: %s\n", i18n.T("agent.persona.show.description"), active.Description)
 	}
 
-	fmt.Printf("   Arquivo: %s\n", colorize(active.Path, ColorGray))
+	fmt.Printf("   %s: %s\n", i18n.T("agent.persona.show.file"), colorize(active.Path, ColorGray))
 
 	if prompt != nil {
 		if len(prompt.SkillsLoaded) > 0 {
-			fmt.Printf("   Skills carregadas: %s\n", colorize(strings.Join(prompt.SkillsLoaded, ", "), ColorGreen))
+			fmt.Printf("   %s: %s\n", i18n.T("agent.persona.show.skills_loaded"), colorize(strings.Join(prompt.SkillsLoaded, ", "), ColorGreen))
 		}
 		if len(prompt.SkillsMissing) > 0 {
-			fmt.Printf("   Skills faltando: %s\n", colorize(strings.Join(prompt.SkillsMissing, ", "), ColorYellow))
+			fmt.Printf("   %s: %s\n", i18n.T("agent.persona.show.skills_missing"), colorize(strings.Join(prompt.SkillsMissing, ", "), ColorYellow))
 		}
 
-		fmt.Println(colorize("\n   [Preview do Prompt Composto]", ColorCyan))
+		fmt.Println(colorize("\n   ["+i18n.T("agent.persona.show.prompt_preview")+"]", ColorCyan))
 		fmt.Println(strings.Repeat("-", 60))
 		// Show first 800 chars of prompt or full if requested
 		preview := prompt.FullPrompt
 		if !full && len(preview) > 800 {
-			preview = preview[:800] + "\n... (truncado, use /agent show --full para ver completo)"
+			preview = preview[:800] + "\n... " + i18n.T("agent.persona.show.truncated")
 		}
 		if full {
 			// Use less for pagination when --full is used
@@ -277,7 +279,7 @@ func (h *PersonaHandler) ShowActive(full bool) {
 			fmt.Println(preview)
 		}
 		fmt.Println(strings.Repeat("-", 60))
-		fmt.Printf("   Tamanho total: %d caracteres\n", len(prompt.FullPrompt))
+		fmt.Printf("   %s: %d %s\n", i18n.T("agent.persona.show.total_size"), len(prompt.FullPrompt), i18n.T("agent.persona.show.characters"))
 	}
 
 	fmt.Println()
@@ -287,11 +289,11 @@ func (h *PersonaHandler) ShowActive(full bool) {
 func (h *PersonaHandler) ShowAgentStatus() {
 	active := h.manager.GetActiveAgent()
 
-	fmt.Println(colorize("\n 🤖 Gerenciamento de Agentes (Personas)", ColorCyan+ColorBold))
+	fmt.Println(colorize("\n 🤖 "+i18n.T("agent.persona.status.header"), ColorCyan+ColorBold))
 	fmt.Println(strings.Repeat("─", 50))
 
 	if active != nil {
-		fmt.Printf(" 🟢 Agente ativo: %s\n", colorize(active.Name, ColorGreen))
+		fmt.Printf(" 🟢 %s: %s\n", i18n.T("agent.persona.status.active"), colorize(active.Name, ColorGreen))
 		if active.Description != "" {
 			fmt.Printf("   %s\n", colorize(active.Description, ColorGray))
 		}
@@ -299,7 +301,7 @@ func (h *PersonaHandler) ShowAgentStatus() {
 			fmt.Printf("   Skills: %s\n", strings.Join(active.Skills, ", "))
 		}
 	} else {
-		fmt.Println(colorize(" ⚠ Nenhum agente ativo (usando persona padrão)", ColorYellow))
+		fmt.Println(colorize(" ⚠ "+i18n.T("agent.persona.status.none"), ColorYellow))
 	}
 
 	fmt.Println()
@@ -308,23 +310,23 @@ func (h *PersonaHandler) ShowAgentStatus() {
 
 // ShowHelp shows usage information for /agent subcommands
 func (h *PersonaHandler) ShowHelp() {
-	fmt.Println(colorize("📖 Subcomandos de Gerenciamento:", ColorCyan))
+	fmt.Println(colorize("📖 "+i18n.T("agent.persona.help.management_header"), ColorCyan))
 	fmt.Println()
-	fmt.Printf("   %s               - Lista agentes disponíveis\n", colorize("/agent list", ColorCyan))
-	fmt.Printf("   %s        - Carrega um agente específico\n", colorize("/agent load <nome>", ColorCyan))
-	fmt.Printf("   %s             - Lista skills disponíveis\n", colorize("/agent skills", ColorCyan))
-	fmt.Printf("   %s               - Mostra agente ativo e seu prompt (use --full para exibir tudo)\n", colorize("/agent show [--full]", ColorCyan))
-	fmt.Printf("   %s           - Lista apenas os agentes anexados\n", colorize("/agent status", ColorCyan))
-	fmt.Printf("   %s                - Desativa o agente atual\n", colorize("/agent off", ColorCyan))
+	fmt.Printf("   %s               - %s\n", colorize("/agent list", ColorCyan), i18n.T("agent.persona.help.list"))
+	fmt.Printf("   %s        - %s\n", colorize("/agent load <nome>", ColorCyan), i18n.T("agent.persona.help.load"))
+	fmt.Printf("   %s             - %s\n", colorize("/agent skills", ColorCyan), i18n.T("agent.persona.help.skills"))
+	fmt.Printf("   %s               - %s\n", colorize("/agent show [--full]", ColorCyan), i18n.T("agent.persona.help.show"))
+	fmt.Printf("   %s           - %s\n", colorize("/agent status", ColorCyan), i18n.T("agent.persona.help.status"))
+	fmt.Printf("   %s                - %s\n", colorize("/agent off", ColorCyan), i18n.T("agent.persona.help.off"))
 
 	fmt.Println()
-	fmt.Println(colorize("🚀 Modo Execução (com tarefa):", ColorCyan))
+	fmt.Println(colorize("🚀 "+i18n.T("agent.persona.help.exec_header"), ColorCyan))
 	fmt.Println()
-	fmt.Printf("   %s    - Executa uma tarefa no modo agente\n", colorize("/agent <tarefa>", ColorCyan))
-	fmt.Printf("   %s    - Executa no modo engenheiro de software\n", colorize("/coder <tarefa>", ColorCyan))
+	fmt.Printf("   %s    - %s\n", colorize("/agent <tarefa>", ColorCyan), i18n.T("agent.persona.help.agent_task"))
+	fmt.Printf("   %s    - %s\n", colorize("/coder <tarefa>", ColorCyan), i18n.T("agent.persona.help.coder_task"))
 
 	fmt.Println()
-	fmt.Printf("   📂 Agentes: %s\n", colorize(h.manager.GetAgentsDir(), ColorGray))
+	fmt.Printf("   📂 %s: %s\n", i18n.T("agent.persona.help.agents_dir"), colorize(h.manager.GetAgentsDir(), ColorGray))
 	fmt.Printf("   📂 Skills:  %s\n", colorize(h.manager.GetSkillsDir(), ColorGray))
 }
 
@@ -332,20 +334,20 @@ func (h *PersonaHandler) ShowHelp() {
 func (h *PersonaHandler) AttachAgent(name string) {
 	result, err := h.manager.AttachAgent(name)
 	if err != nil {
-		fmt.Println(colorize(fmt.Sprintf(" ❌ Erro ao anexar: %s", err.Error()), ColorRed))
+		fmt.Println(colorize(fmt.Sprintf(" ❌ %s: %s", i18n.T("agent.persona.attach.error"), err.Error()), ColorRed))
 		return
 	}
-	fmt.Printf(" 📓 Agente '%s' anexado! Skills adicionadas: %d\n", colorize(result.Agent.Name, ColorGreen), len(result.LoadedSkills))
+	fmt.Printf(" 📓 %s\n", i18n.T("agent.persona.attach.success", colorize(result.Agent.Name, ColorGreen), len(result.LoadedSkills)))
 }
 
 // DetachAgent removes an agent from active pool
 func (h *PersonaHandler) DetachAgent(name string) {
 	err := h.manager.DetachAgent(name)
 	if err != nil {
-		fmt.Println(colorize(fmt.Sprintf(" ❌ Erro ao desanexar: %s", err.Error()), ColorRed))
+		fmt.Println(colorize(fmt.Sprintf(" ❌ %s: %s", i18n.T("agent.persona.detach.error"), err.Error()), ColorRed))
 		return
 	}
-	fmt.Printf(" ✂️ Agente '%s' removido da sessão.\n", colorize(name, ColorYellow))
+	fmt.Printf(" ✂️ %s\n", i18n.T("agent.persona.detach.success", colorize(name, ColorYellow)))
 }
 
 // ShowAttachedAgents shows only the list of attached agents without prompt details
@@ -355,7 +357,7 @@ func (h *PersonaHandler) ShowAttachedAgents() {
 		fmt.Println(colorize(i18n.T("agent.persona.show.no_active"), ColorYellow))
 		return
 	}
-	fmt.Println(colorize("\n 🦾 Agentes Anexados:", ColorCyan))
+	fmt.Println(colorize("\n 🦾 "+i18n.T("agent.persona.attached.header"), ColorCyan))
 	fmt.Println(strings.Repeat("─", 50))
 	for i, a := range active {
 		fmt.Printf("  %d. %s - %s\n", i+1, colorize(a.Name, ColorGreen), a.Description)
@@ -374,6 +376,6 @@ func (h *PersonaHandler) UnloadAllAgents() {
 		return
 	}
 	h.manager.UnloadAllAgents()
-	fmt.Println(colorize("✇ Todos os agentes foram desativados.", ColorGreen))
+	fmt.Println(colorize(i18n.T("agent.persona.unload_all.success"), ColorGreen))
 	fmt.Println(i18n.T("agent.persona.off.hint"))
 }

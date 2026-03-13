@@ -18,6 +18,8 @@ server:
   metricsPort: 9090
   # Authentication token for gRPC server (leave empty to disable auth)
   token: ""
+  # Enable gRPC reflection for debugging
+  grpcReflection: false
 
 # TLS configuration
 tls:
@@ -187,6 +189,22 @@ securityContext:
   capabilities:
     drop:
       - ALL
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+networkPolicy:
+  enabled: false
+  # ingressFrom: []
 
 nodeSelector: {}
 tolerations: []

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -15,16 +16,21 @@ import (
 var localesFS embed.FS
 
 var printer *message.Printer
+var initOnce sync.Once
 
 // defaultLang é o idioma padrão caso a detecção falhe.
 var defaultLang = language.English
 
-// Init inicializa o sistema de internacionalização.
+// Init inicializa o sistema de internacionalização (thread-safe, idempotent).
 // Ele detecta o idioma com a seguinte prioridade:
 // 1. Variável de ambiente CHATCLI_LANG (pode ser definida no .env)
 // 2. Variáveis de ambiente do sistema (LC_ALL, LANG)
 // 3. Fallback para o idioma padrão (Inglês)
 func Init() {
+	initOnce.Do(initI18n)
+}
+
+func initI18n() {
 	// 1. Detectar o idioma do usuário com prioridade para CHATCLI_LANG
 	langStr := os.Getenv("CHATCLI_LANG") // Maior prioridade
 	if langStr == "" {

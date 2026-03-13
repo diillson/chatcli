@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -17,12 +18,12 @@ func (cli *ChatCLI) handleCompactCommand(userInput string) {
 	instruction := strings.TrimSpace(strings.TrimPrefix(userInput, "/compact"))
 
 	if cli.Client == nil {
-		fmt.Println(colorize("  No LLM provider configured.", ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("compact.error.no_provider"), ColorYellow))
 		return
 	}
 
 	if len(cli.history) < 4 {
-		fmt.Println(colorize("  History too short to compact.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("compact.error.history_too_short"), ColorGray))
 		return
 	}
 
@@ -35,15 +36,15 @@ func (cli *ChatCLI) handleCompactCommand(userInput string) {
 		cfg.BudgetRatio = 0.50 // more aggressive for explicit /compact
 		compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
 		if err != nil {
-			fmt.Println(colorize(fmt.Sprintf("  Compaction failed: %s", err), ColorYellow))
+			fmt.Println(colorize(fmt.Sprintf("  %s", i18n.T("compact.error.failed", err)), ColorYellow))
 			return
 		}
 
 		before := len(cli.history)
 		cli.history = compacted
 		after := len(cli.history)
-		fmt.Printf("  %s Compacted: %d → %d messages\n",
-			colorize("📦", ""), before, after)
+		fmt.Printf("  %s %s\n",
+			colorize("📦", ""), i18n.T("compact.success", before, after))
 		return
 	}
 
@@ -67,13 +68,13 @@ func (cli *ChatCLI) guidedCompact(ctx context.Context, instruction string) {
 	minKeepRecent := 4
 	recentStart := len(cli.history) - minKeepRecent
 	if recentStart <= systemEnd {
-		fmt.Println(colorize("  Not enough messages to compact with instruction.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("compact.error.not_enough_with_instruction"), ColorGray))
 		return
 	}
 
 	middleMessages := cli.history[systemEnd:recentStart]
 	if len(middleMessages) < 2 {
-		fmt.Println(colorize("  Not enough middle messages to compact.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("compact.error.not_enough_middle"), ColorGray))
 		return
 	}
 
@@ -108,8 +109,9 @@ CONVERSATION TO COMPACT:
 		{Role: "user", Content: prompt},
 	}
 
-	fmt.Printf("  %s Compacting with instruction: %s\n",
+	fmt.Printf("  %s %s %s\n",
 		colorize("📦", ""),
+		i18n.T("compact.compacting_with_instruction"),
 		colorize(instruction, ColorCyan),
 	)
 
@@ -120,7 +122,7 @@ CONVERSATION TO COMPACT:
 	}
 	if err != nil {
 		cli.logger.Warn("Guided compaction failed", zap.Error(err))
-		fmt.Println(colorize(fmt.Sprintf("  Compaction failed: %s", err), ColorYellow))
+		fmt.Println(colorize(fmt.Sprintf("  %s", i18n.T("compact.error.failed", err)), ColorYellow))
 		return
 	}
 
@@ -141,9 +143,10 @@ CONVERSATION TO COMPACT:
 	cli.history = result
 	after := len(cli.history)
 
-	fmt.Printf("  %s Compacted: %d → %d messages (preserved: %s)\n",
+	fmt.Printf("  %s %s (%s: %s)\n",
 		colorize("✓", ColorGreen),
-		before, after,
+		i18n.T("compact.success", before, after),
+		i18n.T("compact.preserved"),
 		colorize(instruction, ColorCyan),
 	)
 }

@@ -109,8 +109,12 @@ func (r *CustomRegistry) Search(ctx context.Context, query string) ([]SkillMeta,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("%s returned %d: %s", r.name, resp.StatusCode, string(body))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		detail := ""
+		if readErr == nil {
+			detail = string(body)
+		}
+		return nil, fmt.Errorf("%s returned %d: %s", r.name, resp.StatusCode, detail)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, customMaxBody))
@@ -178,8 +182,12 @@ func (r *CustomRegistry) GetSkillMeta(ctx context.Context, nameOrSlug string) (*
 		return nil, fmt.Errorf("skill '%s' not found in %s", nameOrSlug, r.name)
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("%s returned %d: %s", r.name, resp.StatusCode, string(body))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		detail := ""
+		if readErr == nil {
+			detail = string(body)
+		}
+		return nil, fmt.Errorf("%s returned %d: %s", r.name, resp.StatusCode, detail)
 	}
 
 	var entry customSkillEntry

@@ -183,7 +183,7 @@ func batchReadScript(ctx context.Context, input map[string]string, eng *engine.E
 			})
 			errWriter := engine.NewStreamWriter(func(string) {}) // discard errors
 
-			eng := engine.NewEngine(outWriter, errWriter)
+			eng := engine.NewEngine(outWriter, errWriter, "")
 			err := eng.Execute(ctx, "read", []string{"--file", filePath})
 			outWriter.Flush()
 

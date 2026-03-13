@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -52,14 +53,18 @@ func (cm *ContextManager) CreateExecutionContext() (context.Context, context.Can
 // RequestLLMContinuation solicita continuação à LLM com contexto adicional
 func (cm *ContextManager) RequestLLMContinuation(
 	ctx context.Context,
-	llmClient interface{}, // Será tipado corretamente depois
+	llmClient interface{},
 	history []models.Message,
 	previousCommand string,
 	output string,
 	stderr string,
 	userContext string,
 ) (string, error) {
-	// Criar novo contexto com timeout
+	llm, ok := llmClient.(client.LLMClient)
+	if !ok {
+		return "", fmt.Errorf("llmClient does not implement client.LLMClient interface")
+	}
+
 	newCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -70,13 +75,13 @@ func (cm *ContextManager) RequestLLMContinuation(
 	// Construir prompt
 	prompt := fmt.Sprintf(`O comando sugerido anteriormente foi:
     %s
-    
+
     O resultado (stdout) foi:
     %s
-    
+
     O erro (stderr) foi:
     %s
-    
+
     Por favor, sugira uma correção ou próximos passos baseados no resultado e no contexto fornecido.
     Forneça comandos executáveis no formato apropriado.`, previousCommand, outSafe, errSafe)
 
@@ -88,11 +93,13 @@ func (cm *ContextManager) RequestLLMContinuation(
 		zap.Int("history_size", len(history)),
 		zap.Int("prompt_length", len(prompt)))
 
-	deadline, _ := newCtx.Deadline()
-	cm.logger.Debug("Contexto para continuação criado", zap.Time("deadline", deadline))
+	response, err := llm.SendPrompt(newCtx, prompt, history, 0)
+	if err != nil {
+		cm.logger.Error("LLM continuation request failed", zap.Error(err))
+		return "", fmt.Errorf("LLM request failed: %w", err)
+	}
 
-	// Aqui será feita a chamada à LLM (implementaremos na integração)
-	return prompt, nil
+	return response, nil
 }
 
 // RequestLLMWithPreExecutionContext solicita refinamento antes da execução
@@ -103,26 +110,35 @@ func (cm *ContextManager) RequestLLMWithPreExecutionContext(
 	originalCommand string,
 	userContext string,
 ) (string, error) {
+	llm, ok := llmClient.(client.LLMClient)
+	if !ok {
+		return "", fmt.Errorf("llmClient does not implement client.LLMClient interface")
+	}
+
 	newCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	prompt := fmt.Sprintf(`O comando que você sugeriu foi:
-    `+"```"+`
-    %s
-    `+"```"+`
-    
-    Antes de executá-lo, o usuário forneceu o seguinte contexto ou instrução adicional:
-    %s
-    
-    Por favor, revise o comando sugerido com base neste novo contexto. Se necessário, modifique-o ou sugira um novo conjunto de comandos. Apresente os novos comandos no formato executável apropriado.`, originalCommand, userContext)
+`+"```"+`
+%s
+`+"```"+`
+
+Antes de executá-lo, o usuário forneceu o seguinte contexto ou instrução adicional:
+%s
+
+Por favor, revise o comando sugerido com base neste novo contexto. Se necessário, modifique-o ou sugira um novo conjunto de comandos. Apresente os novos comandos no formato executável apropriado.`, originalCommand, userContext)
 
 	cm.logger.Debug("Solicitando refinamento pré-execução",
 		zap.String("original_command", originalCommand),
 		zap.Int("context_length", len(userContext)))
 
-	// Retornar o prompt construído (implementação completa virá depois)
-	_ = newCtx // Para evitar warning
-	return prompt, nil
+	response, err := llm.SendPrompt(newCtx, prompt, history, 0)
+	if err != nil {
+		cm.logger.Error("LLM pre-execution refinement failed", zap.Error(err))
+		return "", fmt.Errorf("LLM request failed: %w", err)
+	}
+
+	return response, nil
 }
 
 // SetDefaultTimeout atualiza o timeout padrão

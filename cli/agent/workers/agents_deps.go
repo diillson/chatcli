@@ -151,7 +151,7 @@ func auditDepsScript(ctx context.Context, input map[string]string, _ *engine.Eng
 			buf.WriteString("\n")
 		})
 
-		eng := engine.NewEngine(outWriter, errWriter)
+		eng := engine.NewEngine(outWriter, errWriter, "")
 		err := eng.Execute(ctx, "exec", []string{"--cmd", c.cmd})
 		outWriter.Flush()
 		errWriter.Flush()
@@ -195,7 +195,7 @@ func updateDepsScript(ctx context.Context, input map[string]string, _ *engine.En
 		buf.WriteString("\n")
 	})
 
-	eng := engine.NewEngine(outWriter, errWriter)
+	eng := engine.NewEngine(outWriter, errWriter, "")
 	err := eng.Execute(ctx, "exec", []string{"--cmd", cmd})
 	outWriter.Flush()
 	errWriter.Flush()
@@ -250,7 +250,7 @@ func whyDepScript(ctx context.Context, input map[string]string, _ *engine.Engine
 			buf.WriteString("\n")
 		})
 
-		eng := engine.NewEngine(outWriter, errWriter)
+		eng := engine.NewEngine(outWriter, errWriter, "")
 		err := eng.Execute(ctx, "exec", []string{"--cmd", c.cmd})
 		outWriter.Flush()
 		errWriter.Flush()

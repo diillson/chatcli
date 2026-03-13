@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/i18n"
 )
 
 type SecurityDecision int
@@ -67,7 +69,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 
 	fmt.Println()
 	fmt.Println(purple + bold + "╔══════════════════════════════════════════════════════════╗" + reset)
-	fmt.Println(purple + bold + "║              🔒 SECURITY CHECK                            ║" + reset)
+	fmt.Println(purple + bold + "║              🔒 " + i18n.T("coder.security.header") + "                            ║" + reset)
 	fmt.Println(purple + bold + "╚══════════════════════════════════════════════════════════╝" + reset)
 
 	// --- Agent context (parallel mode) ---
@@ -78,7 +80,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 			if len(taskDisplay) > 120 {
 				taskDisplay = taskDisplay[:120] + "..."
 			}
-			fmt.Printf(" %s📋 Tarefa:%s %s%s%s\n", gray, reset, white, taskDisplay, reset)
+			fmt.Printf(" %s📋 %s:%s %s%s%s\n", gray, i18n.T("coder.security.task"), reset, white, taskDisplay, reset)
 		}
 		fmt.Println(gray + " " + strings.Repeat("─", 58) + reset)
 	}
@@ -87,7 +89,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	sub, _ := NormalizeCoderArgs(args)
 	actionLabel, details := formatActionDetails(sub, args)
 
-	fmt.Printf(" %s⚡ Ação:%s   %s%s%s\n", gray, reset, yellow+bold, actionLabel, reset)
+	fmt.Printf(" %s⚡ %s:%s   %s%s%s\n", gray, i18n.T("coder.security.action"), reset, yellow+bold, actionLabel, reset)
 	for _, d := range details {
 		fmt.Printf("           %s%s%s\n", cyan, d, reset)
 	}
@@ -97,22 +99,22 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	isExecCmd := pattern == ""
 
 	if isExecCmd {
-		fmt.Printf(" %s📜 Regra:%s  %sexec requer aprovação individual%s\n", gray, reset, gray, reset)
+		fmt.Printf(" %s📜 %s:%s  %s%s%s\n", gray, i18n.T("coder.security.rule"), reset, gray, i18n.T("coder.security.exec_requires_approval"), reset)
 	} else {
-		fmt.Printf(" %s📜 Regra:%s  %snenhuma regra para '%s'%s\n", gray, reset, gray, pattern, reset)
+		fmt.Printf(" %s📜 %s:%s  %s%s%s\n", gray, i18n.T("coder.security.rule"), reset, gray, i18n.T("coder.security.no_rule_for", pattern), reset)
 	}
 
 	fmt.Println(gray + " " + strings.Repeat("─", 58) + reset)
 
 	// --- Choices ---
-	fmt.Println(bold + " Escolha:" + reset)
-	fmt.Printf("   [%s] %s\n", green+"y"+reset, "Sim, executar (uma vez)")
+	fmt.Println(bold + " " + i18n.T("coder.security.choose") + ":" + reset)
+	fmt.Printf("   [%s] %s\n", green+"y"+reset, i18n.T("coder.security.yes_once"))
 	if !isExecCmd {
-		fmt.Printf("   [%s] %s\n", green+"a"+reset, "Permitir sempre ("+pattern+")")
+		fmt.Printf("   [%s] %s\n", green+"a"+reset, i18n.T("coder.security.allow_always", pattern))
 	}
-	fmt.Printf("   [%s] %s\n", red+"n"+reset, "Não, pular")
+	fmt.Printf("   [%s] %s\n", red+"n"+reset, i18n.T("coder.security.no_skip"))
 	if !isExecCmd {
-		fmt.Printf("   [%s] %s\n", red+"d"+reset, "Bloquear sempre ("+pattern+")")
+		fmt.Printf("   [%s] %s\n", red+"d"+reset, i18n.T("coder.security.deny_always", pattern))
 	}
 
 	fmt.Print("\n" + purple + " > " + reset)
@@ -124,7 +126,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	if inputCh != nil {
 		select {
 		case <-ctx.Done():
-			fmt.Println("\n" + red + " [Cancelado]" + reset)
+			fmt.Println("\n" + red + " [" + i18n.T("coder.security.cancelled") + "]" + reset)
 			return DecisionCancelled
 		case line := <-inputCh:
 			input = strings.TrimSpace(strings.ToLower(line))
@@ -142,7 +144,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 		select {
 		case <-ctx.Done():
 			_ = os.Stdin.SetReadDeadline(time.Now())
-			fmt.Println("\n" + red + " [Cancelado]" + reset)
+			fmt.Println("\n" + red + " [" + i18n.T("coder.security.cancelled") + "]" + reset)
 			return DecisionCancelled
 		case input = <-resultChan:
 		}
@@ -157,7 +159,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 		default:
 			// Unknown input (garbled terminal, paste artifacts, etc.)
 			// Deny once to avoid unintended execution.
-			fmt.Println(yellow + " [Entrada inválida — ação negada por segurança]" + reset)
+			fmt.Println(yellow + " [" + i18n.T("coder.security.invalid_input") + "]" + reset)
 			return DecisionDenyOnce
 		}
 	}
@@ -173,7 +175,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	default:
 		// Unknown input (garbled terminal, paste artifacts, etc.)
 		// Deny once to avoid unintended execution.
-		fmt.Println(yellow + " [Entrada inválida — ação negada por segurança]" + reset)
+		fmt.Println(yellow + " [" + i18n.T("coder.security.invalid_input") + "]" + reset)
 		return DecisionDenyOnce
 	}
 }
@@ -195,7 +197,7 @@ func formatActionDetails(subcmd, rawArgs string) (label string, details []string
 
 	switch subcmd {
 	case "exec":
-		label = "Executar comando no shell"
+		label = i18n.T("coder.security.action.exec")
 		cmd := extractField(argsMap, rawArgs, "cmd", "command")
 		if cmd != "" {
 			details = append(details, "$ "+cmd)
@@ -205,7 +207,7 @@ func formatActionDetails(subcmd, rawArgs string) (label string, details []string
 		}
 
 	case "test":
-		label = "Executar testes"
+		label = i18n.T("coder.security.action.test")
 		cmd := extractField(argsMap, rawArgs, "cmd", "command")
 		if cmd != "" {
 			details = append(details, "$ "+cmd)
@@ -215,38 +217,38 @@ func formatActionDetails(subcmd, rawArgs string) (label string, details []string
 		}
 
 	case "write":
-		label = "Escrever arquivo"
+		label = i18n.T("coder.security.action.write")
 		file := extractField(argsMap, rawArgs, "file", "path", "filepath")
 		if file != "" {
-			details = append(details, "arquivo: "+file)
+			details = append(details, i18n.T("coder.security.detail.file")+": "+file)
 		}
 
 	case "patch":
-		label = "Modificar arquivo (patch)"
+		label = i18n.T("coder.security.action.patch")
 		file := extractField(argsMap, rawArgs, "file", "path", "filepath")
 		if file != "" {
-			details = append(details, "arquivo: "+file)
+			details = append(details, i18n.T("coder.security.detail.file")+": "+file)
 		}
 
 	case "read":
-		label = "Ler arquivo"
+		label = i18n.T("coder.security.action.read")
 		file := extractField(argsMap, rawArgs, "file", "path", "filepath")
 		if file != "" {
-			details = append(details, "arquivo: "+file)
+			details = append(details, i18n.T("coder.security.detail.file")+": "+file)
 		}
 
 	case "search":
-		label = "Pesquisar no código"
+		label = i18n.T("coder.security.action.search")
 		term := extractField(argsMap, rawArgs, "term", "pattern", "query")
 		if term != "" {
-			details = append(details, "termo: "+term)
+			details = append(details, i18n.T("coder.security.detail.term")+": "+term)
 		}
 		if dir := extractField(argsMap, "", "dir"); dir != "" {
 			details = append(details, "dir: "+dir)
 		}
 
 	case "tree":
-		label = "Listar estrutura de diretórios"
+		label = i18n.T("coder.security.action.tree")
 		if dir := extractField(argsMap, rawArgs, "dir", "path"); dir != "" {
 			details = append(details, "dir: "+dir)
 		}
@@ -255,7 +257,7 @@ func formatActionDetails(subcmd, rawArgs string) (label string, details []string
 		if subcmd != "" {
 			label = subcmd
 		} else {
-			label = "Ação desconhecida"
+			label = i18n.T("coder.security.action.unknown")
 		}
 		// Show raw args truncated as fallback
 		display := rawArgs

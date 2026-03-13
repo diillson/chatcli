@@ -61,7 +61,10 @@ func doTokenExchange(hc *http.Client, req *http.Request) (*OAuthTokenResponse, e
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading token response body: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Sanitize response body to prevent leaking tokens in error messages
 		sanitized := utils.SanitizeSensitiveText(string(raw))

@@ -49,11 +49,17 @@ spec:
             {{- if .Values.server.metricsPort }}
             - "--metrics-port={{ .Values.server.metricsPort }}"
             {{- end }}
+            {{- if .Values.server.token }}
+            - "--token={{ .Values.server.token }}"
+            {{- end }}
             {{- if .Values.llm.provider }}
             - "--provider={{ .Values.llm.provider }}"
             {{- end }}
             {{- if .Values.llm.model }}
             - "--model={{ .Values.llm.model }}"
+            {{- end }}
+            {{- if and .Values.mcp.enabled .Values.mcp.servers }}
+            - "--mcp-config=/etc/chatcli/mcp/mcp_servers.json"
             {{- end }}
             {{- if .Values.tls.enabled }}
             - "--tls-cert={{ .Values.tls.certFile }}"
@@ -131,15 +137,23 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           livenessProbe:
-            exec:
-              command: ["pidof", "chatcli"]
-            initialDelaySeconds: 5
+            grpc:
+              port: {{ .Values.server.port }}
+            initialDelaySeconds: 10
             periodSeconds: 30
+            failureThreshold: 3
           readinessProbe:
-            exec:
-              command: ["pidof", "chatcli"]
-            initialDelaySeconds: 3
+            grpc:
+              port: {{ .Values.server.port }}
+            initialDelaySeconds: 5
             periodSeconds: 10
+            failureThreshold: 2
+          startupProbe:
+            grpc:
+              port: {{ .Values.server.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
       {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.watcher.enabled .Values.watcher.targets) (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) .Values.agents.enabled .Values.skills.enabled .Values.plugins.enabled (and .Values.mcp.enabled .Values.mcp.servers) .Values.bootstrap.enabled .Values.memory.enabled }}
       volumes:
         {{- if .Values.persistence.enabled }}

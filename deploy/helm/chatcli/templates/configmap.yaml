@@ -6,6 +6,9 @@ metadata:
     {{- include "chatcli.labels" . | nindent 4 }}
 data:
   CHATCLI_SERVER_PORT: {{ .Values.server.port | quote }}
+  {{- if .Values.server.grpcReflection }}
+  CHATCLI_GRPC_REFLECTION: "true"
+  {{- end }}
   {{- if .Values.llm.provider }}
   LLM_PROVIDER: {{ .Values.llm.provider | quote }}
   {{- end }}

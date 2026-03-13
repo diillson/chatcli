@@ -241,8 +241,12 @@ func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (stri
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		msg := "(unable to read response body)"
+		if readErr == nil {
+			msg = utils.SanitizeSensitiveText(string(bodyBytes))
+		}
+		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: msg}
 	}
 
 	var sb strings.Builder

@@ -148,7 +148,7 @@ func diffReviewScript(ctx context.Context, input map[string]string, _ *engine.En
 			buf.WriteString("\n")
 		})
 
-		eng := engine.NewEngine(outWriter, errWriter)
+		eng := engine.NewEngine(outWriter, errWriter, "")
 		err := eng.Execute(ctx, c.cmd, c.args)
 		outWriter.Flush()
 		errWriter.Flush()
@@ -191,7 +191,7 @@ func scanLintScript(ctx context.Context, input map[string]string, _ *engine.Engi
 			buf.WriteString("\n")
 		})
 
-		eng := engine.NewEngine(outWriter, errWriter)
+		eng := engine.NewEngine(outWriter, errWriter, "")
 		err := eng.Execute(ctx, "exec", []string{"--cmd", l.cmd})
 		outWriter.Flush()
 		errWriter.Flush()

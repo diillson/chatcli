@@ -616,6 +616,25 @@ func (m *Manager) GetMetrics() *ContextMetrics {
 	return metrics
 }
 
+// GetSessionsForContext returns all session IDs that have the given context attached.
+func (m *Manager) GetSessionsForContext(contextID string) []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var sessions []string
+	for sessionID, attached := range m.attachedContexts {
+		for _, a := range attached {
+			if a.ContextID == contextID {
+				sessions = append(sessions, sessionID)
+				break
+			}
+		}
+	}
+
+	sort.Strings(sessions)
+	return sessions
+}
+
 // Helper methods
 
 func (m *Manager) contextExistsByName(name string) bool {

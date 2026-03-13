@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
@@ -22,9 +23,10 @@ type Manager struct {
 
 // ServerConnection represents an active MCP server.
 type ServerConnection struct {
-	Config  ServerConfig
-	Status  ServerStatus
-	Process *os.Process
+	Config    ServerConfig
+	Status    ServerStatus
+	Process   *os.Process
+	transport mcpTransport // real transport (stdio or SSE)
 }
 
 // NewManager creates a new MCP manager.
@@ -95,12 +97,16 @@ func (m *Manager) StopAll() {
 	defer m.mu.Unlock()
 
 	for name, conn := range m.servers {
-		if conn.Process != nil {
+		if conn.transport != nil {
 			m.logger.Info("stopping MCP server", zap.String("server", name))
+			_ = conn.transport.Close()
+			conn.transport = nil
+		}
+		if conn.Process != nil {
 			_ = conn.Process.Kill()
 			conn.Process = nil
-			conn.Status.Connected = false
 		}
+		conn.Status.Connected = false
 	}
 }
 
@@ -164,7 +170,7 @@ func (m *Manager) IsMCPTool(name string) bool {
 	return ok
 }
 
-// startServer starts a single MCP server via stdio transport.
+// startServer starts a single MCP server via the configured transport.
 func (m *Manager) startServer(ctx context.Context, conn *ServerConnection) error {
 	switch conn.Config.Transport {
 	case TransportStdio:
@@ -176,34 +182,176 @@ func (m *Manager) startServer(ctx context.Context, conn *ServerConnection) error
 	}
 }
 
-// startStdioServer starts an MCP server communicating via stdin/stdout.
+// startStdioServer starts an MCP server communicating via stdin/stdout JSON-RPC 2.0.
 func (m *Manager) startStdioServer(ctx context.Context, conn *ServerConnection) error {
-	// TODO: Implement JSON-RPC over stdio transport
-	// This requires spawning the command and managing stdin/stdout pipes
-	// with the MCP protocol (JSON-RPC 2.0)
-	m.logger.Info("MCP stdio server registered (lazy start)",
+	m.logger.Info("starting MCP stdio server",
 		zap.String("server", conn.Config.Name),
 		zap.String("command", conn.Config.Command))
+
+	transport, err := newStdioTransport(ctx, conn.Config, m.logger)
+	if err != nil {
+		return fmt.Errorf("failed to start stdio transport: %w", err)
+	}
+
+	conn.transport = transport
+	conn.Process = transport.cmd.Process
+
+	// Initialize the MCP protocol
+	if err := m.initializeServer(conn); err != nil {
+		_ = transport.Close()
+		conn.transport = nil
+		conn.Process = nil
+		return fmt.Errorf("MCP initialize failed: %w", err)
+	}
+
+	// Discover tools
+	if err := m.discoverTools(conn); err != nil {
+		m.logger.Warn("MCP tool discovery failed (server may not support tools/list)",
+			zap.String("server", conn.Config.Name),
+			zap.Error(err))
+	}
+
 	conn.Status.Connected = true
+	conn.Status.StartedAt = time.Now()
+	m.logger.Info("MCP stdio server connected",
+		zap.String("server", conn.Config.Name),
+		zap.Int("tools", conn.Status.ToolCount))
+
 	return nil
 }
 
 // startSSEServer connects to an MCP server via Server-Sent Events.
 func (m *Manager) startSSEServer(ctx context.Context, conn *ServerConnection) error {
-	// TODO: Implement SSE transport
-	m.logger.Info("MCP SSE server registered",
+	m.logger.Info("connecting to MCP SSE server",
 		zap.String("server", conn.Config.Name),
 		zap.String("url", conn.Config.URL))
+
+	transport, err := newSSETransport(ctx, conn.Config, m.logger)
+	if err != nil {
+		return fmt.Errorf("failed to connect SSE transport: %w", err)
+	}
+
+	conn.transport = transport
+
+	// Initialize the MCP protocol
+	if err := m.initializeServer(conn); err != nil {
+		_ = transport.Close()
+		conn.transport = nil
+		return fmt.Errorf("MCP initialize failed: %w", err)
+	}
+
+	// Discover tools
+	if err := m.discoverTools(conn); err != nil {
+		m.logger.Warn("MCP tool discovery failed",
+			zap.String("server", conn.Config.Name),
+			zap.Error(err))
+	}
+
 	conn.Status.Connected = true
+	conn.Status.StartedAt = time.Now()
+	m.logger.Info("MCP SSE server connected",
+		zap.String("server", conn.Config.Name),
+		zap.Int("tools", conn.Status.ToolCount))
+
 	return nil
 }
 
-// callTool sends a tool execution request to the MCP server.
+// initializeServer sends the MCP initialize request.
+func (m *Manager) initializeServer(conn *ServerConnection) error {
+	params := initializeParams{
+		ProtocolVersion: "2024-11-05",
+		Capabilities:    capabilities{},
+		ClientInfo: clientInfo{
+			Name:    "chatcli",
+			Version: "1.0.0",
+		},
+	}
+
+	result, err := conn.transport.Call("initialize", params)
+	if err != nil {
+		return err
+	}
+
+	var initResult initializeResult
+	if err := json.Unmarshal(result, &initResult); err != nil {
+		m.logger.Debug("MCP initialize response parse warning", zap.Error(err))
+	}
+
+	m.logger.Info("MCP server initialized",
+		zap.String("server", conn.Config.Name),
+		zap.String("protocol", initResult.ProtocolVersion),
+		zap.String("serverName", initResult.ServerInfo.Name))
+
+	// Send initialized notification (no response expected)
+	_, _ = conn.transport.Call("notifications/initialized", nil)
+
+	return nil
+}
+
+// discoverTools calls tools/list on the MCP server and registers discovered tools.
+func (m *Manager) discoverTools(conn *ServerConnection) error {
+	result, err := conn.transport.Call("tools/list", nil)
+	if err != nil {
+		return err
+	}
+
+	var toolsList toolsListResult
+	if err := json.Unmarshal(result, &toolsList); err != nil {
+		return fmt.Errorf("parsing tools/list: %w", err)
+	}
+
+	m.mu.Lock()
+	for _, t := range toolsList.Tools {
+		m.tools[t.Name] = &MCPTool{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.InputSchema,
+			ServerName:  conn.Config.Name,
+		}
+	}
+	conn.Status.ToolCount = len(toolsList.Tools)
+	m.mu.Unlock()
+
+	return nil
+}
+
+// callTool sends a tools/call request to the MCP server via its transport.
 func (m *Manager) callTool(ctx context.Context, conn *ServerConnection, toolName string, args map[string]interface{}) (*MCPToolResult, error) {
-	// TODO: Implement actual JSON-RPC call to MCP server
-	// For now, return a placeholder indicating MCP is available but not fully wired
+	if conn.transport == nil {
+		return nil, fmt.Errorf("MCP server %q has no active transport", conn.Config.Name)
+	}
+
+	params := toolCallParams{
+		Name:      toolName,
+		Arguments: args,
+	}
+
+	result, err := conn.transport.Call("tools/call", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var callResult toolCallResult
+	if err := json.Unmarshal(result, &callResult); err != nil {
+		return nil, fmt.Errorf("parsing tools/call result: %w", err)
+	}
+
+	// Combine text content
+	var content string
+	var mimeType string
+	for _, c := range callResult.Content {
+		switch c.Type {
+		case "text":
+			content += c.Text
+		case "resource":
+			content += c.Data
+			mimeType = c.MimeType
+		}
+	}
+
 	return &MCPToolResult{
-		Content: fmt.Sprintf("MCP tool %q called with args %v (transport implementation pending)", toolName, args),
-		IsError: false,
+		Content:  content,
+		IsError:  callResult.IsError,
+		MimeType: mimeType,
 	}, nil
 }

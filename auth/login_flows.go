@@ -86,7 +86,10 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 	var rawCode string
 	fmt.Print("\n> Paste the code here: ")
 	reader := bufio.NewReader(os.Stdin)
-	rawCode, _ = reader.ReadString('\n')
+	rawCode, err = reader.ReadString('\n')
+	if err != nil && rawCode == "" {
+		return "", fmt.Errorf("failed to read authorization code: %w", err)
+	}
 	rawCode = strings.TrimSpace(rawCode)
 
 	var code, state string

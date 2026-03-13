@@ -174,6 +174,9 @@ func (c *AuthProfileCredential) String() string {
 	if redacted.Token != "" {
 		redacted.Token = "[REDACTED]"
 	}
-	data, _ := json.MarshalIndent(&redacted, "", "  ")
+	data, err := json.MarshalIndent(&redacted, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("Credential{Provider:%s, error:%v}", c.Provider, err)
+	}
 	return string(data)
 }

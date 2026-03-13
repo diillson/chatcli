@@ -185,7 +185,7 @@ func renameSymbolScript(ctx context.Context, input map[string]string, _ *engine.
 				buf.WriteString(line)
 				buf.WriteString("\n")
 			})
-			eng := engine.NewEngine(outWriter, engine.NewStreamWriter(func(string) {}))
+			eng := engine.NewEngine(outWriter, engine.NewStreamWriter(func(string) {}), "")
 
 			patched := 0
 			for j := 0; j < count; j++ {

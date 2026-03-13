@@ -106,10 +106,10 @@ func computeLineRange(total, start, end, head, tail int) (int, int) {
 }
 
 func createBackup(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil
-	}
 	input, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil // no file to back up
+	}
 	if err != nil {
 		return err
 	}

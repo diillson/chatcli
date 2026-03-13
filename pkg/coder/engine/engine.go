@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -23,13 +25,89 @@ const (
 // Engine is the core execution engine for @coder commands.
 // It is stdlib-only and writes all output to the provided io.Writer instances.
 type Engine struct {
-	Out io.Writer // primary output (replaces os.Stdout)
-	Err io.Writer // error/debug output (replaces os.Stderr)
+	Out           io.Writer // primary output (replaces os.Stdout)
+	Err           io.Writer // error/debug output (replaces os.Stderr)
+	WorkspaceRoot string    // workspace boundary for path validation (empty = cwd)
+}
+
+// sensitivePaths are system paths that must never be written to.
+var sensitivePaths = []string{
+	"/etc/passwd", "/etc/shadow", "/etc/sudoers",
+	"/etc/ssh/", "/etc/ssl/",
+	"/proc/", "/sys/", "/dev/",
+	"/boot/", "/sbin/",
+}
+
+// systemBinPaths are allowed for read/execute operations.
+var systemBinPaths = []string{
+	"/usr/bin/", "/usr/local/bin/", "/bin/", "/usr/sbin/",
+	"/opt/homebrew/bin/",
 }
 
 // NewEngine creates an Engine that writes to the given writers.
-func NewEngine(out, errOut io.Writer) *Engine {
-	return &Engine{Out: out, Err: errOut}
+// workspaceRoot defines the boundary for path validation; empty defaults to cwd.
+func NewEngine(out, errOut io.Writer, workspaceRoot string) *Engine {
+	root := workspaceRoot
+	if root == "" {
+		if wd, err := os.Getwd(); err == nil {
+			root = wd
+		}
+	}
+	return &Engine{Out: out, Err: errOut, WorkspaceRoot: root}
+}
+
+// validatePath checks that a file path is within the workspace boundary and not sensitive.
+func (e *Engine) validatePath(target string) error {
+	if target == "" {
+		return nil
+	}
+
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return fmt.Errorf("cannot resolve path %q: %w", target, err)
+	}
+
+	// Resolve symlinks (follow the real path)
+	resolved := abs
+	if evalPath, err := filepath.EvalSymlinks(abs); err == nil {
+		resolved = evalPath
+	} else {
+		parent := filepath.Dir(abs)
+		if evalParent, err2 := filepath.EvalSymlinks(parent); err2 == nil {
+			resolved = filepath.Join(evalParent, filepath.Base(abs))
+		}
+	}
+
+	// Block sensitive system paths
+	for _, sp := range sensitivePaths {
+		if strings.HasPrefix(resolved, sp) {
+			return fmt.Errorf("access to sensitive path %q is blocked", target)
+		}
+	}
+
+	// Enforce workspace boundary
+	if e.WorkspaceRoot != "" {
+		boundary, err := filepath.Abs(e.WorkspaceRoot)
+		if err == nil {
+			if evalB, err2 := filepath.EvalSymlinks(boundary); err2 == nil {
+				boundary = evalB
+			}
+		}
+
+		isSystemBin := false
+		for _, bp := range systemBinPaths {
+			if strings.HasPrefix(resolved, bp) {
+				isSystemBin = true
+				break
+			}
+		}
+
+		if !isSystemBin && resolved != boundary && !strings.HasPrefix(resolved, boundary+"/") {
+			return fmt.Errorf("path %q is outside workspace boundary %q", target, e.WorkspaceRoot)
+		}
+	}
+
+	return nil
 }
 
 // Execute dispatches a subcommand with the given args.

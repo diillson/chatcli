@@ -143,7 +143,7 @@ func runCoverageScript(ctx context.Context, input map[string]string, _ *engine.E
 		buf.WriteString("\n")
 	})
 
-	eng := engine.NewEngine(outWriter, errWriter)
+	eng := engine.NewEngine(outWriter, errWriter, "")
 	testErr := eng.Execute(ctx, "exec", []string{"--cmd", cmd})
 	outWriter.Flush()
 	errWriter.Flush()
@@ -167,7 +167,7 @@ func runCoverageScript(ctx context.Context, input map[string]string, _ *engine.E
 		funcBuf.WriteString(line)
 		funcBuf.WriteString("\n")
 	})
-	funcEng := engine.NewEngine(funcOut, engine.NewStreamWriter(func(string) {}))
+	funcEng := engine.NewEngine(funcOut, engine.NewStreamWriter(func(string) {}), "")
 	funcErr := funcEng.Execute(ctx, "exec", []string{"--cmd", funcCmd})
 	funcOut.Flush()
 

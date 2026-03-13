@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/pkg/registry"
 	"go.uber.org/zap"
@@ -56,9 +57,9 @@ func NewSkillHandler(logger *zap.Logger, personaMgr *persona.Manager) *SkillHand
 // HandleCommand routes /skill subcommands.
 func (sh *SkillHandler) HandleCommand(userInput string) {
 	if sh.registryMgr == nil {
-		fmt.Println(colorize(" Skill registry not initialized.", ColorYellow))
+		fmt.Println(colorize(" "+i18n.T("skill.registry.not_initialized"), ColorYellow))
 		if sh.initErr != nil {
-			fmt.Printf("  Error: %s\n", sh.initErr.Error())
+			fmt.Printf("  %s: %s\n", i18n.T("skill.error"), sh.initErr.Error())
 		}
 		return
 	}
@@ -74,7 +75,7 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 	switch subcommand {
 	case "search":
 		if len(args) < 3 {
-			fmt.Println(colorize(" Usage: /skill search <query>", ColorYellow))
+			fmt.Println(colorize(" "+i18n.T("skill.usage.search"), ColorYellow))
 			return
 		}
 		query := strings.Join(args[2:], " ")
@@ -82,14 +83,14 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 
 	case "install":
 		if len(args) < 3 {
-			fmt.Println(colorize(" Usage: /skill install <name>", ColorYellow))
+			fmt.Println(colorize(" "+i18n.T("skill.usage.install"), ColorYellow))
 			return
 		}
 		sh.Install(args[2])
 
 	case "uninstall", "remove":
 		if len(args) < 3 {
-			fmt.Println(colorize(" Usage: /skill uninstall <name>", ColorYellow))
+			fmt.Println(colorize(" "+i18n.T("skill.usage.uninstall"), ColorYellow))
 			return
 		}
 		sh.Uninstall(args[2])
@@ -102,7 +103,7 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 
 	case "info":
 		if len(args) < 3 {
-			fmt.Println(colorize(" Usage: /skill info <name>", ColorYellow))
+			fmt.Println(colorize(" "+i18n.T("skill.usage.info"), ColorYellow))
 			return
 		}
 		sh.Info(args[2])
@@ -111,13 +112,14 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 		sh.ShowHelp()
 
 	default:
-		fmt.Printf(" Unknown subcommand '%s'. Use /skill help for usage.\n", subcommand)
+		fmt.Printf(" %s\n", i18n.T("skill.unknown_subcommand", subcommand))
 	}
 }
 
 // Search performs a fan-out search across all registries.
 func (sh *SkillHandler) Search(query string) {
-	fmt.Printf("\n  Searching registries for %s...\n",
+	fmt.Printf("\n  %s %s...\n",
+		i18n.T("skill.search.searching"),
 		colorize(fmt.Sprintf("%q", query), ColorCyan))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -141,11 +143,11 @@ func (sh *SkillHandler) Search(query string) {
 	}
 
 	if len(merged) == 0 {
-		fmt.Printf("\n  %s\n\n", colorize("No skills found.", ColorYellow))
+		fmt.Printf("\n  %s\n\n", colorize(i18n.T("skill.search.no_results"), ColorYellow))
 		return
 	}
 
-	fmt.Printf("\n  Results (%d found):\n\n", len(merged))
+	fmt.Printf("\n  %s:\n\n", i18n.T("skill.search.results", len(merged)))
 
 	// Compute max name length for alignment
 	maxNameLen := 0
@@ -178,7 +180,7 @@ func (sh *SkillHandler) Search(query string) {
 		// Installed marker
 		installed := ""
 		if sh.registryMgr.IsInstalled(skill.Name) {
-			installed = " " + colorize("[installed]", ColorGreen)
+			installed = " " + colorize("["+i18n.T("skill.installed")+"]", ColorGreen)
 		}
 
 		// Build the line
@@ -206,8 +208,8 @@ func (sh *SkillHandler) Search(query string) {
 		}
 	}
 
-	fmt.Printf("\n  Use %s to install a skill.\n\n",
-		colorize("/skill install <name>", ColorCyan))
+	fmt.Printf("\n  %s\n\n",
+		i18n.T("skill.search.install_hint", colorize("/skill install <name>", ColorCyan)))
 }
 
 // Install downloads and installs a skill from a registry.
@@ -219,11 +221,11 @@ func (sh *SkillHandler) Install(name string) {
 	meta, err := sh.registryMgr.GetSkillMeta(ctx, name)
 	if err != nil {
 		// Try installing directly (search + download)
-		fmt.Printf("\n  Installing %s...\n", colorize(name, ColorCyan))
+		fmt.Printf("\n  %s %s...\n", i18n.T("skill.install.installing"), colorize(name, ColorCyan))
 
 		result, installErr := sh.registryMgr.Install(ctx, name)
 		if installErr != nil {
-			fmt.Printf("  %s %s\n\n", colorize("Error:", ColorRed), installErr.Error())
+			fmt.Printf("  %s %s\n\n", colorize(i18n.T("skill.error")+":", ColorRed), installErr.Error())
 			return
 		}
 
@@ -235,23 +237,23 @@ func (sh *SkillHandler) Install(name string) {
 	warning := registry.CheckModeration(meta)
 	if warning != "" {
 		if registry.ShouldBlock(meta.Moderation) {
-			fmt.Printf("\n  %s %s\n\n", colorize("BLOCKED:", ColorRed), warning)
+			fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.install.blocked")+":", ColorRed), warning)
 			return
 		}
 		// Suspicious — ask for confirmation
-		fmt.Printf("\n  %s %s\n", colorize("WARNING:", ColorYellow), warning)
-		fmt.Print("  Continue with installation? (y/N): ")
+		fmt.Printf("\n  %s %s\n", colorize(i18n.T("skill.install.warning")+":", ColorYellow), warning)
+		fmt.Print("  " + i18n.T("skill.install.confirm") + " (y/N): ")
 
 		reader := bufio.NewReader(os.Stdin)
 		answer, _ := reader.ReadString('\n')
 		answer = strings.TrimSpace(strings.ToLower(answer))
 		if answer != "y" && answer != "yes" {
-			fmt.Println("  Installation cancelled.")
+			fmt.Println("  " + i18n.T("skill.install.cancelled"))
 			return
 		}
 	}
 
-	fmt.Printf("\n  Installing %s", colorize(meta.Name, ColorCyan))
+	fmt.Printf("\n  %s %s", i18n.T("skill.install.installing"), colorize(meta.Name, ColorCyan))
 	if meta.Version != "" {
 		fmt.Printf(" v%s", meta.Version)
 	}
@@ -259,7 +261,7 @@ func (sh *SkillHandler) Install(name string) {
 
 	result, err := sh.registryMgr.Install(ctx, name)
 	if err != nil {
-		fmt.Printf("  %s %s\n\n", colorize("Error:", ColorRed), err.Error())
+		fmt.Printf("  %s %s\n\n", colorize(i18n.T("skill.error")+":", ColorRed), err.Error())
 		return
 	}
 
@@ -267,46 +269,50 @@ func (sh *SkillHandler) Install(name string) {
 }
 
 func (sh *SkillHandler) showInstallResult(result *registry.InstallResult) {
-	action := "Installed"
+	action := i18n.T("skill.install.result_installed")
 	if result.WasDuplicate {
-		action = "Updated"
+		action = i18n.T("skill.install.result_updated")
 	}
 
 	fmt.Printf("  %s %s", colorize(action, ColorGreen), colorize(result.Name, ColorCyan))
 	if result.Version != "" {
 		fmt.Printf(" v%s", result.Version)
 	}
-	fmt.Printf(" from %s\n", colorize(result.Source, ColorGray))
-	fmt.Printf("  Path: %s\n", colorize(result.InstallPath, ColorGray))
-	fmt.Printf("\n  Skill '%s' is now available.\n", result.Name)
-	fmt.Printf("  Verify with: %s\n\n", colorize("/agent skills", ColorCyan))
+	fmt.Printf(" %s %s\n", i18n.T("skill.install.from"), colorize(result.Source, ColorGray))
+	fmt.Printf("  %s: %s\n", i18n.T("skill.install.path"), colorize(result.InstallPath, ColorGray))
+	fmt.Printf("\n  %s\n", i18n.T("skill.install.available", result.Name))
+	fmt.Printf("  %s: %s\n\n", i18n.T("skill.install.verify"), colorize("/agent skills", ColorCyan))
 
 	// Refresh persona loader to pick up new skill
 	if sh.personaMgr != nil {
-		_, _ = sh.personaMgr.RefreshSkills()
+		if _, err := sh.personaMgr.RefreshSkills(); err != nil {
+			fmt.Printf("  %s %s: %v\n", colorize(i18n.T("skill.warning")+":", ColorYellow), i18n.T("skill.refresh_failed"), err)
+		}
 	}
 }
 
 // Uninstall removes an installed skill.
 func (sh *SkillHandler) Uninstall(name string) {
 	if !sh.registryMgr.IsInstalled(name) {
-		fmt.Printf("\n  Skill '%s' is not installed.\n\n", name)
+		fmt.Printf("\n  %s\n\n", i18n.T("skill.uninstall.not_installed", name))
 		return
 	}
 
-	fmt.Printf("\n  Removing skill '%s'...\n", colorize(name, ColorCyan))
+	fmt.Printf("\n  %s %s...\n", i18n.T("skill.uninstall.removing"), colorize(name, ColorCyan))
 
 	if err := sh.registryMgr.Uninstall(name); err != nil {
-		fmt.Printf("  %s %s\n\n", colorize("Error:", ColorRed), err.Error())
+		fmt.Printf("  %s %s\n\n", colorize(i18n.T("skill.error")+":", ColorRed), err.Error())
 		return
 	}
 
-	fmt.Printf("  %s Skill '%s' uninstalled.\n\n",
-		colorize("Done.", ColorGreen), name)
+	fmt.Printf("  %s %s\n\n",
+		colorize(i18n.T("skill.uninstall.done"), ColorGreen), i18n.T("skill.uninstall.success", name))
 
 	// Refresh persona loader
 	if sh.personaMgr != nil {
-		_, _ = sh.personaMgr.RefreshSkills()
+		if _, err := sh.personaMgr.RefreshSkills(); err != nil {
+			fmt.Printf("  %s %s: %v\n", colorize(i18n.T("skill.warning")+":", ColorYellow), i18n.T("skill.refresh_failed"), err)
+		}
 	}
 }
 
@@ -314,20 +320,20 @@ func (sh *SkillHandler) Uninstall(name string) {
 func (sh *SkillHandler) List() {
 	installed, err := sh.registryMgr.ListInstalled()
 	if err != nil {
-		fmt.Printf("  %s %s\n", colorize("Error:", ColorRed), err.Error())
+		fmt.Printf("  %s %s\n", colorize(i18n.T("skill.error")+":", ColorRed), err.Error())
 		return
 	}
 
 	fmt.Println()
 	if len(installed) == 0 {
-		fmt.Println(colorize("  No skills installed.", ColorYellow))
-		fmt.Printf("\n  Use %s to find and install skills.\n\n",
-			colorize("/skill search <query>", ColorCyan))
+		fmt.Println(colorize("  "+i18n.T("skill.list.empty"), ColorYellow))
+		fmt.Printf("\n  %s\n\n",
+			i18n.T("skill.list.search_hint", colorize("/skill search <query>", ColorCyan)))
 		return
 	}
 
 	fmt.Printf("  %s (%d):\n\n",
-		colorize("Installed Skills", ColorCyan), len(installed))
+		colorize(i18n.T("skill.list.header"), ColorCyan), len(installed))
 
 	// Compute column widths
 	maxNameLen := 0
@@ -377,7 +383,7 @@ func (sh *SkillHandler) List() {
 
 	// Show registries summary
 	regs := sh.registryMgr.GetRegistries()
-	fmt.Printf("\n  Registries (%d):\n", len(regs))
+	fmt.Printf("\n  %s (%d):\n", i18n.T("skill.registries.header"), len(regs))
 	for _, r := range regs {
 		status := colorize("[enabled]", ColorGreen)
 		if r.TempDisabled {
@@ -406,7 +412,7 @@ func (sh *SkillHandler) Info(name string) {
 
 	// Nothing found anywhere
 	if local == nil && remote == nil {
-		fmt.Printf("\n  Skill '%s' not found.\n\n", name)
+		fmt.Printf("\n  %s\n\n", i18n.T("skill.info.not_found", name))
 		return
 	}
 
@@ -419,7 +425,7 @@ func (sh *SkillHandler) Info(name string) {
 	} else if local != nil && local.Name != "" {
 		displayName = local.Name
 	}
-	fmt.Printf("  %s  %s\n", colorize("Name:", ColorCyan), displayName)
+	fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.name")+":", ColorCyan), displayName)
 
 	// Description
 	desc := ""
@@ -429,7 +435,7 @@ func (sh *SkillHandler) Info(name string) {
 		desc = local.Description
 	}
 	if desc != "" {
-		fmt.Printf("  %s  %s\n", colorize("Desc:", ColorCyan), desc)
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.desc")+":", ColorCyan), desc)
 	}
 
 	// Version
@@ -440,12 +446,12 @@ func (sh *SkillHandler) Info(name string) {
 		ver = local.Version
 	}
 	if ver != "" {
-		fmt.Printf("  %s  %s\n", colorize("Version:", ColorCyan), ver)
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.version")+":", ColorCyan), ver)
 	}
 
 	// Author
 	if remote != nil && remote.Author != "" {
-		fmt.Printf("  %s  %s\n", colorize("Author:", ColorCyan), remote.Author)
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.author")+":", ColorCyan), remote.Author)
 	}
 
 	// Source / Registry
@@ -456,37 +462,37 @@ func (sh *SkillHandler) Info(name string) {
 		source = local.Source
 	}
 	if source != "" {
-		fmt.Printf("  %s  %s\n", colorize("Source:", ColorCyan), source)
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.source")+":", ColorCyan), source)
 	}
 
 	// Tags
 	if remote != nil && len(remote.Tags) > 0 {
-		fmt.Printf("  %s  %s\n", colorize("Tags:", ColorCyan),
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.tags")+":", ColorCyan),
 			colorize(strings.Join(remote.Tags, ", "), ColorGray))
 	}
 
 	// Downloads
 	if remote != nil && remote.Downloads > 0 {
-		fmt.Printf("  %s  %d\n", colorize("Downloads:", ColorCyan), remote.Downloads)
+		fmt.Printf("  %s  %d\n", colorize(i18n.T("skill.info.downloads")+":", ColorCyan), remote.Downloads)
 	}
 
 	// Moderation
 	if remote != nil {
 		modTag := registry.FormatModerationTag(remote.Moderation)
 		if modTag != "" {
-			fmt.Printf("  %s  %s\n", colorize("Moderation:", ColorCyan),
+			fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.moderation")+":", ColorCyan),
 				colorize(modTag, ColorYellow))
 		}
 	}
 
 	// Install status and path
 	if local != nil {
-		fmt.Printf("  %s  %s\n", colorize("Status:", ColorCyan),
-			colorize("installed", ColorGreen))
-		fmt.Printf("  %s  %s\n", colorize("Path:", ColorCyan),
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.status")+":", ColorCyan),
+			colorize(i18n.T("skill.installed"), ColorGreen))
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.path")+":", ColorCyan),
 			colorize(local.Path, ColorGray))
 	} else {
-		fmt.Printf("  %s  not installed\n", colorize("Status:", ColorCyan))
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.status")+":", ColorCyan), i18n.T("skill.not_installed"))
 	}
 
 	fmt.Println()
@@ -496,7 +502,7 @@ func (sh *SkillHandler) Info(name string) {
 func (sh *SkillHandler) ShowRegistries() {
 	regs := sh.registryMgr.GetRegistries()
 
-	fmt.Printf("\n  %s\n\n", colorize("Configured Registries:", ColorCyan))
+	fmt.Printf("\n  %s\n\n", colorize(i18n.T("skill.registries.configured")+":", ColorCyan))
 
 	for i, r := range regs {
 		status := colorize("[enabled]", ColorGreen)
@@ -512,28 +518,28 @@ func (sh *SkillHandler) ShowRegistries() {
 		fmt.Printf("    %d. %-12s  %s  %s\n", i+1, r.Name, colorize(r.URL, ColorGray), status)
 	}
 
-	fmt.Printf("\n  Config: %s\n", colorize(sh.registryMgr.GetConfigPath(), ColorGray))
-	fmt.Println("  Edit the config file to add custom registries.")
+	fmt.Printf("\n  %s: %s\n", i18n.T("skill.registries.config"), colorize(sh.registryMgr.GetConfigPath(), ColorGray))
+	fmt.Println("  " + i18n.T("skill.registries.edit_hint"))
 	fmt.Println()
 }
 
 // ShowHelp displays usage information.
 func (sh *SkillHandler) ShowHelp() {
 	fmt.Println()
-	fmt.Printf("  %s\n", colorize("Skill Registry Commands:", ColorCyan))
+	fmt.Printf("  %s\n", colorize(i18n.T("skill.help.header")+":", ColorCyan))
 	fmt.Printf("  %s\n\n", colorize(strings.Repeat("─", 50), ColorGray))
 
 	commands := []struct {
 		cmd  string
 		desc string
 	}{
-		{"/skill search <query>", "Search for skills across registries"},
-		{"/skill install <name>", "Install a skill from a registry"},
-		{"/skill uninstall <name>", "Remove an installed skill"},
-		{"/skill list", "List installed skills"},
-		{"/skill info <name>", "Show skill details (local + registry)"},
-		{"/skill registries", "Show configured registries"},
-		{"/skill help", "Show this help"},
+		{"/skill search <query>", i18n.T("skill.help.search")},
+		{"/skill install <name>", i18n.T("skill.help.install")},
+		{"/skill uninstall <name>", i18n.T("skill.help.uninstall")},
+		{"/skill list", i18n.T("skill.help.list")},
+		{"/skill info <name>", i18n.T("skill.help.info")},
+		{"/skill registries", i18n.T("skill.help.registries")},
+		{"/skill help", i18n.T("skill.help.show_help")},
 	}
 
 	// Find max command length for alignment
@@ -549,10 +555,10 @@ func (sh *SkillHandler) ShowHelp() {
 		fmt.Printf("    %s   %s\n", colorize(padded, ColorCyan), c.desc)
 	}
 
-	fmt.Printf("\n  Skills dir: %s\n",
-		colorize(sh.registryMgr.GetInstallDir(), ColorGray))
-	fmt.Printf("  Config:     %s\n\n",
-		colorize(sh.registryMgr.GetConfigPath(), ColorGray))
+	fmt.Printf("\n  %s: %s\n",
+		i18n.T("skill.help.skills_dir"), colorize(sh.registryMgr.GetInstallDir(), ColorGray))
+	fmt.Printf("  %s:     %s\n\n",
+		i18n.T("skill.registries.config"), colorize(sh.registryMgr.GetConfigPath(), ColorGray))
 }
 
 // shortenRegistryError returns a concise error description for display.

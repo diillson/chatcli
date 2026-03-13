@@ -78,7 +78,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	config.Global = config.New(logger)
+	config.InitGlobal(logger)
 	config.Global.Load()
 	utils.LogStartupInfo(logger)
 
@@ -199,7 +199,7 @@ func runSubcommand(subcmd string, args []string) {
 		os.Exit(1)
 	}
 
-	config.Global = config.New(logger)
+	config.InitGlobal(logger)
 	config.Global.Load()
 
 	defer func() {
