@@ -28,6 +28,13 @@ var (
 	LatestVersionURL = "https://api.github.com/repos/diillson/chatcli/releases/latest"
 )
 
+// ReleaseInfo contém informações detalhadas de uma release do GitHub
+type ReleaseInfo struct {
+	TagName     string `json:"tag_name"`
+	PublishedAt string `json:"published_at"`
+	TargetHash  string `json:"target_commitish"`
+}
+
 // CheckLatestVersionImpl é a implementação injetável para checagem de versão (pode ser mocked)
 var CheckLatestVersionImpl = func(ctx context.Context) (string, bool, error) {
 	if strings.EqualFold(os.Getenv("CHATCLI_DISABLE_VERSION_CHECK"), "true") {
@@ -69,10 +76,7 @@ var CheckLatestVersionImpl = func(ctx context.Context) (string, bool, error) {
 		return "", false, err
 	}
 
-	var releaseInfo struct {
-		TagName string `json:"tag_name"`
-	}
-
+	var releaseInfo ReleaseInfo
 	if err := json.Unmarshal(body, &releaseInfo); err != nil {
 		return "", false, err
 	}
@@ -82,7 +86,37 @@ var CheckLatestVersionImpl = func(ctx context.Context) (string, bool, error) {
 	currentVersionBase := ExtractBaseVersion(currentVersionFull)
 	needsUpdate := NeedsUpdate(currentVersionBase, latestVersion)
 
+	// Enriquecer informações de build quando instalado via go install
+	// (sem ldflags — commit e data ficam "unknown")
+	enrichBuildInfoFromRelease(currentVersionBase, latestVersion, releaseInfo)
+
 	return latestVersion, needsUpdate, nil
+}
+
+// enrichBuildInfoFromRelease preenche CommitHash e BuildDate a partir da
+// release do GitHub quando estes não foram injetados via ldflags (ex: go install).
+func enrichBuildInfoFromRelease(currentBase, latestBase string, release ReleaseInfo) {
+	if currentBase != latestBase {
+		return // Só enriquece se a versão instalada é a mesma da latest
+	}
+
+	if CommitHash == "unknown" || CommitHash == "" {
+		if release.TargetHash != "" {
+			hash := release.TargetHash
+			if len(hash) > 12 {
+				hash = hash[:12]
+			}
+			CommitHash = hash
+		}
+	}
+
+	if BuildDate == "unknown" || BuildDate == "" {
+		if release.PublishedAt != "" {
+			if t, err := time.Parse(time.RFC3339, release.PublishedAt); err == nil {
+				BuildDate = t.Format("2006-01-02 15:04:05")
+			}
+		}
+	}
 }
 
 // GetBuildInfoImpl é a implementação injetável para GetBuildInfo (pode ser mocked)
@@ -109,10 +143,19 @@ var GetBuildInfoImpl = func() (string, string, string) {
 					}
 				}
 			}
-			// Build date do VCS info
-			if buildDate == "unknown" {
-				for _, setting := range info.Settings {
-					if setting.Key == "vcs.time" {
+			// Commit hash e build date do VCS info (funciona para go build em git repo)
+			for _, setting := range info.Settings {
+				switch setting.Key {
+				case "vcs.revision":
+					if commitHash == "unknown" || len(commitHash) < 7 {
+						hash := setting.Value
+						if len(hash) > 12 {
+							hash = hash[:12]
+						}
+						commitHash = hash
+					}
+				case "vcs.time":
+					if buildDate == "unknown" {
 						if t, err := time.Parse(time.RFC3339, setting.Value); err == nil {
 							buildDate = t.Format("2006-01-02 15:04:05")
 						} else {
