@@ -608,7 +608,7 @@ func TestCooldownExponentialBackoff(t *testing.T) {
 	chain.mu.Unlock()
 
 	primary.calls = 0
-	chain.SendPrompt(context.Background(), "hi", nil, 1000)
+	_, _ = chain.SendPrompt(context.Background(), "hi", nil, 1000)
 
 	chain.mu.RLock()
 	secondCooldown := chain.health["openai"].CooldownUntil
@@ -635,7 +635,7 @@ func TestAuthError_LongerCooldown(t *testing.T) {
 		makeEntry("claude", "claude-3", secondary),
 	}, WithMaxRetries(0), WithCooldown(1*time.Second, cooldownMax, 2.0))
 
-	chain.SendPrompt(context.Background(), "hi", nil, 1000)
+	_, _ = chain.SendPrompt(context.Background(), "hi", nil, 1000)
 
 	chain.mu.RLock()
 	h := chain.health["openai"]
