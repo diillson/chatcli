@@ -199,7 +199,7 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   - `LOG_MAX_SIZE` - **(Optional)** Maximum size of the log file before rotation (default: 100MB).
   - `HISTORY_MAX_SIZE` - **(Optional)** Maximum size of the history file before rotation (default: 100MB).
   - `HISTORY_FILE` - **(Optional)** Path to the history file (supports `~`). Default: `.chatcli_history`.
-  - `ENV`  - **(Optional)** Defines how the log will be displayed ( `dev `,  `prod `). Default:  `dev` .
+  - `ENV`  - **(Optional)** Defines how the log will be displayed ( `dev `,  `prod `). Default:  `prod` .
       -  dev  displays the logs directly in the terminal and saves them to the log file.
       -  prod  only saves them to the log file, keeping the terminal cleaner.
 

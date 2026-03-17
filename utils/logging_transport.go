@@ -67,7 +67,7 @@ func InitializeLogger() (*zap.Logger, error) {
 	fileSyncer := zapcore.AddSync(lumberjackLogger)
 
 	// 4. Configurar o core do logger com base no ambiente (ENV)
-	env := strings.ToLower(GetEnvOrDefault("ENV", "dev"))
+	env := strings.ToLower(GetEnvOrDefault("ENV", "prod"))
 	var core zapcore.Core
 
 	if env == "prod" {
