@@ -199,7 +199,7 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  `LOG_MAX_SIZE`  - **(Opcional)** Tamanho máximo do arquivo de log antes da rotação (padrão:  100MB ).
   -  `HISTORY_MAX_SIZE`  - **(Opcional)** Tamanho máximo do arquivo de histórico antes da ro t ação (padrão:  100MB ).
   -  `HISTORY_FILE`      - **(Opcional)** Caminho para o arquivo de histórico (suporta `~`). Padrão: `.chatcli_history`.  
-  -  `ENV`  - **(Opcional)** Define como o log será exibido ( `dev` ,  `prod` ), Padrão:  `dev` .
+  -  `ENV`  - **(Opcional)** Define como o log será exibido ( `dev` ,  `prod` ), Padrão:  `prod` .
       -  dev  mostra os logs direto no terminal e salva no arquivo de log.
       -  prod  apenas salva no arquivo de log mantendo um terminal mais limpo.
 
