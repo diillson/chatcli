@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.69.1](https://github.com/diillson/chatcli/compare/v1.69.0...v1.69.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* update default `ENV` value to `prod` in documentation and code. ([#625](https://github.com/diillson/chatcli/issues/625)) ([2451b5f](https://github.com/diillson/chatcli/commit/2451b5f7cf46f354cc38e0947593a82b1fc931da))
+
 ## [1.69.0](https://github.com/diillson/chatcli/compare/v1.68.5...v1.69.0) (2026-03-13)
 
 
