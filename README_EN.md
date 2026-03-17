@@ -123,22 +123,36 @@ ChatCLI is designed to be global. The user interface, including menus, tips, and
 
 ## Installation
 
-### Prerequisites
+### 1. Homebrew (Recommended)
 
-- **Go (version 1.23+)**: [Available at golang.org](https://golang.org/dl/).
+The easiest way to install on macOS and Linux:
 
-### 1. From GitHub Releases (Recommended)
+```bash
+brew tap diillson/chatcli
+brew install chatcli
+```
 
-The easiest way to install is to download the appropriate binary for your operating system and architecture from the [GitHub Releases page](https://github.com/diillson/chatcli/releases).
+To update:
 
-### 2. Installation via `go install`
+```bash
+brew upgrade chatcli
+```
+
+### 2. From GitHub Releases
+
+Download the appropriate binary for your operating system and architecture from the [GitHub Releases page](https://github.com/diillson/chatcli/releases).
+
+### 3. Installation via `go install`
+
+**Prerequisite:** Go (version 1.25+) — [Available at golang.org](https://golang.org/dl/).
 
 ```bash
 go install github.com/diillson/chatcli@latest
 ```
-This will install the binary to your  $GOPATH/bin  folder, allowing you to run  chatcli  directly from your terminal if  $GOPATH/bin  is in your  PATH .
 
-### 3. Build from Source
+This will install the binary to your `$GOPATH/bin` folder, allowing you to run `chatcli` directly from your terminal if `$GOPATH/bin` is in your `PATH`.
+
+### 4. Build from Source
 
 1. Clone the Repository:
 ```bash
