@@ -264,7 +264,10 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	// Initialize workspace context (bootstrap files + memory)
 	homeDir, _ := os.UserHomeDir()
 	globalDir := filepath.Join(homeDir, ".chatcli")
-	workspaceDir, _ := os.Getwd()
+	workspaceDir := detectProjectDir()
+	if workspaceDir == "" {
+		workspaceDir, _ = os.Getwd()
+	}
 
 	// CHATCLI_BOOTSTRAP_DIR overrides the global bootstrap directory
 	if envDir := os.Getenv("CHATCLI_BOOTSTRAP_DIR"); envDir != "" {
