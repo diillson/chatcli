@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -31,6 +32,10 @@ const (
 	memoryCooldown = 2 * time.Minute
 	// Timeout for the LLM call that extracts memory.
 	memoryExtractTimeout = 60 * time.Second
+	// How often to check for compaction (6 hours).
+	compactionCheckInterval = 6 * time.Hour
+	// How often to check for daily note cleanup (24 hours).
+	dailyCleanupInterval = 24 * time.Hour
 )
 
 func newMemoryWorker(cli *ChatCLI) *memoryWorker {
@@ -70,15 +75,23 @@ func (mw *memoryWorker) nudge() {
 }
 
 func (mw *memoryWorker) loop() {
-	ticker := time.NewTicker(3 * time.Minute)
-	defer ticker.Stop()
+	extractTicker := time.NewTicker(3 * time.Minute)
+	compactTicker := time.NewTicker(compactionCheckInterval)
+	cleanupTicker := time.NewTicker(dailyCleanupInterval)
+	defer extractTicker.Stop()
+	defer compactTicker.Stop()
+	defer cleanupTicker.Stop()
 
 	for {
 		select {
 		case <-mw.stopCh:
 			return
-		case <-ticker.C:
+		case <-extractTicker.C:
 			mw.maybeExtract()
+		case <-compactTicker.C:
+			mw.maybeCompact()
+		case <-cleanupTicker.C:
+			mw.cleanupDailyNotes()
 		}
 	}
 }
@@ -115,6 +128,14 @@ func (mw *memoryWorker) maybeExtract() {
 		zap.Int("from_idx", lastIdx),
 	)
 
+	// Record interaction event
+	if mw.cli.memoryStore != nil {
+		mw.cli.memoryStore.RecordInteraction(memory.InteractionEvent{
+			Timestamp: time.Now(),
+			Feature:   mw.detectFeature(),
+		})
+	}
+
 	// Show subtle status
 	mw.showStatus("updating memory...")
 
@@ -148,6 +169,8 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 		return fmt.Errorf("client or memory store not available")
 	}
 
+	mgr := mw.cli.memoryStore.Manager()
+
 	// Build conversation snippet for extraction
 	var sb strings.Builder
 	for _, msg := range messages {
@@ -159,20 +182,17 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
 	}
 
-	// Read existing long-term memory for context
-	existingMemory := mw.cli.memoryStore.ReadLongTerm()
-
-	// Build a single user prompt that combines instructions + context + conversation.
-	// All providers use the `prompt` param as the user message fallback,
-	// so we put everything in ONE user message to avoid duplication issues.
+	// Build enhanced prompt with existing context
 	var fullPrompt strings.Builder
-	fullPrompt.WriteString(memoryExtractionPrompt)
+	fullPrompt.WriteString(memory.EnhancedExtractionPrompt)
 	fullPrompt.WriteString("\n\n---\n\n")
-	if existingMemory != "" {
-		fullPrompt.WriteString("EXISTING LONG-TERM MEMORY (do NOT duplicate these facts):\n\n")
-		fullPrompt.WriteString(existingMemory)
+
+	existingContext := mgr.FormatExistingContext()
+	if existingContext != "" {
+		fullPrompt.WriteString(existingContext)
 		fullPrompt.WriteString("\n\n---\n\n")
 	}
+
 	fullPrompt.WriteString("CONVERSATION SEGMENT TO ANALYZE:\n\n")
 	fullPrompt.WriteString(sb.String())
 
@@ -182,12 +202,8 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 	prompt := fullPrompt.String()
 
 	// Pass prompt as both the prompt param and the last user message in history.
-	// This ensures all providers handle it correctly:
-	// - Providers that use history: see system + user messages
-	// - Providers that use prompt param: see the full prompt
-	// - The fallback check (prompt == history[last].Content) prevents duplication
 	history := []models.Message{
-		{Role: "system", Content: memoryExtractionPrompt},
+		{Role: "system", Content: memory.EnhancedExtractionPrompt},
 		{Role: "user", Content: prompt},
 	}
 
@@ -212,37 +228,87 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 		zap.String("response_preview", truncateForLog(response, 200)),
 	)
 
-	// Parse response: split into DAILY and LONGTERM sections
-	dailyContent, longTermContent := parseMemoryResponse(response)
+	// Use enhanced processing that populates profile, topics, projects
+	mw.cli.memoryStore.ProcessExtraction(response)
 
-	saved := false
-	// Write daily note
-	if dailyContent != "" {
-		if err := mw.cli.memoryStore.WriteDailyNote(dailyContent); err != nil {
-			mw.logger.Warn("Failed to write daily note", zap.Error(err))
-		} else {
-			saved = true
-			mw.logger.Debug("Memory worker: daily note written")
-		}
-	}
-
-	// Append to long-term memory (only genuinely new facts)
-	if longTermContent != "" {
-		if err := mw.cli.memoryStore.AppendLongTerm("\n" + longTermContent); err != nil {
-			mw.logger.Warn("Failed to append long-term memory", zap.Error(err))
-		} else {
-			saved = true
-			mw.logger.Debug("Memory worker: long-term memory updated")
-		}
-	}
-
-	if !saved && dailyContent == "" && longTermContent == "" {
-		mw.logger.Debug("Memory worker: parser returned empty sections",
-			zap.String("response_preview", truncateForLog(response, 300)),
-		)
-	}
-
+	mw.logger.Debug("Memory worker: enhanced extraction complete")
 	return nil
+}
+
+// maybeCompact checks if memory compaction should run and executes it.
+func (mw *memoryWorker) maybeCompact() {
+	if mw.cli.memoryStore == nil {
+		return
+	}
+
+	mgr := mw.cli.memoryStore.Manager()
+	if !mgr.NeedsCompaction() {
+		return
+	}
+
+	mw.logger.Info("Memory worker: starting compaction")
+
+	llmClient := mw.cli.getClient()
+	var sendPrompt func(ctx context.Context, prompt string) (string, error)
+
+	if llmClient != nil {
+		sendPrompt = func(ctx context.Context, prompt string) (string, error) {
+			history := []models.Message{
+				{Role: "user", Content: prompt},
+			}
+			return llmClient.SendPrompt(ctx, prompt, history, 0)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	if err := mgr.RunCompaction(ctx, sendPrompt); err != nil {
+		mw.logger.Warn("Memory worker: compaction failed", zap.Error(err))
+	} else {
+		mw.logger.Info("Memory worker: compaction complete")
+		if mw.cli.contextBuilder != nil {
+			mw.cli.contextBuilder.InvalidateCache()
+		}
+	}
+}
+
+// cleanupDailyNotes removes old daily notes.
+func (mw *memoryWorker) cleanupDailyNotes() {
+	if mw.cli.memoryStore == nil {
+		return
+	}
+
+	mgr := mw.cli.memoryStore.Manager()
+	deleted, err := mgr.CleanupDailyNotes()
+	if err != nil {
+		mw.logger.Warn("Memory worker: daily cleanup failed", zap.Error(err))
+	} else if deleted > 0 {
+		mw.logger.Info("Memory worker: cleaned up old daily notes", zap.Int("deleted", deleted))
+	}
+}
+
+// detectFeature detects the current mode for usage stats.
+func (mw *memoryWorker) detectFeature() string {
+	// Check recent messages for mode hints
+	histLen := len(mw.cli.history)
+	if histLen == 0 {
+		return "chat"
+	}
+
+	for i := histLen - 1; i >= 0 && i >= histLen-5; i-- {
+		content := mw.cli.history[i].Content
+		if strings.Contains(content, "/agent") || strings.Contains(content, "agent mode") {
+			return "agent"
+		}
+		if strings.Contains(content, "/coder") || strings.Contains(content, "coder mode") {
+			return "coder"
+		}
+		if strings.Contains(content, "/run") {
+			return "run"
+		}
+	}
+	return "chat"
 }
 
 func truncateForLog(s string, maxLen int) string {
@@ -252,9 +318,7 @@ func truncateForLog(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// showStatus logs the memory worker status. Writing directly to the terminal
-// from a background goroutine corrupts go-prompt's display on all platforms
-// (the user would need to press Enter to get the prompt back), so we only log.
+// showStatus logs the memory worker status.
 func (mw *memoryWorker) showStatus(msg string) {
 	mw.logger.Debug("Memory worker: " + msg)
 }
@@ -263,12 +327,14 @@ func (mw *memoryWorker) clearStatus() {
 	// no-op: status is only logged, not written to terminal
 }
 
+// --- Legacy parsing functions ---
+// Deprecated: These are kept only for existing tests in memory_worker_test.go.
+// Production code uses memory.Manager.ProcessExtraction() with the enhanced parser.
+
 // parseMemoryResponse splits the LLM response into daily notes and long-term facts.
-// Handles variations LLMs may produce: "## DAILY", "## Daily", "##DAILY", "# DAILY", etc.
 func parseMemoryResponse(response string) (daily string, longTerm string) {
 	upper := strings.ToUpper(response)
 
-	// Find section markers (case-insensitive, tolerant of spacing)
 	dailyIdx := findSectionIndex(upper, "DAILY")
 	longTermIdx := findSectionIndex(upper, "LONGTERM")
 	if longTermIdx < 0 {
@@ -278,9 +344,7 @@ func parseMemoryResponse(response string) (daily string, longTerm string) {
 		longTermIdx = findSectionIndex(upper, "LONG_TERM")
 	}
 
-	// Extract content after the header line
 	extractAfter := func(idx int) string {
-		// Find the end of the header line
 		nlIdx := strings.Index(response[idx:], "\n")
 		if nlIdx < 0 {
 			return ""
@@ -291,7 +355,6 @@ func parseMemoryResponse(response string) (daily string, longTerm string) {
 	switch {
 	case dailyIdx >= 0 && longTermIdx >= 0:
 		if dailyIdx < longTermIdx {
-			// DAILY comes first: content between DAILY header and LONGTERM marker
 			nlIdx := strings.Index(response[dailyIdx:], "\n")
 			if nlIdx >= 0 {
 				daily = strings.TrimSpace(response[dailyIdx+nlIdx+1 : longTermIdx])
@@ -309,11 +372,9 @@ func parseMemoryResponse(response string) (daily string, longTerm string) {
 	case longTermIdx >= 0:
 		longTerm = extractAfter(longTermIdx)
 	default:
-		// No markers — treat everything as daily note
 		daily = response
 	}
 
-	// Filter out NOTHING_NEW from both sections
 	if isNothingNew(daily) {
 		daily = ""
 	}
@@ -324,11 +385,8 @@ func parseMemoryResponse(response string) (daily string, longTerm string) {
 	return daily, longTerm
 }
 
-// isNothingNew checks if content is a variation of "NOTHING_NEW" that the LLM
-// may produce (with extra whitespace, different casing, underscores, hyphens, dots, etc).
 func isNothingNew(s string) bool {
 	normalized := strings.ToUpper(strings.TrimSpace(s))
-	// Strip trailing punctuation the LLM sometimes adds
 	normalized = strings.TrimRight(normalized, ".!,;:")
 	normalized = strings.TrimSpace(normalized)
 	switch normalized {
@@ -338,8 +396,6 @@ func isNothingNew(s string) bool {
 	return false
 }
 
-// findSectionIndex finds a markdown section header like "## KEYWORD" (case-insensitive).
-// Tolerates "# KEYWORD", "## KEYWORD", "##KEYWORD", "**KEYWORD**".
 func findSectionIndex(upperResponse string, keyword string) int {
 	patterns := []string{
 		"## " + keyword,
@@ -356,32 +412,3 @@ func findSectionIndex(upperResponse string, keyword string) int {
 	}
 	return best
 }
-
-const memoryExtractionPrompt = `You are a memory annotation system. Analyze this conversation segment and extract annotations.
-
-OUTPUT FORMAT — use EXACTLY these section headers:
-
-## DAILY
-Write a brief log of what was done in this segment. Use bullet points. Include:
-- Files read, modified or created (with paths)
-- Commands executed and their outcomes
-- Errors encountered and how they were resolved
-- Tasks completed or in progress
-
-## LONGTERM
-Write ONLY genuinely new facts that should be remembered permanently. These are:
-- Architectural decisions made
-- Patterns or conventions discovered/established
-- User preferences expressed
-- Important file paths or project structure insights
-- Technical constraints or gotchas learned
-- User data with name, age, location, etc.
-
-RULES:
-- If nothing new was learned for LONGTERM, write "NOTHING_NEW" in that section
-- If the conversation is trivial (greetings, simple questions), respond with just: NOTHING_NEW
-- Keep each bullet to ONE line
-- Use exact file paths, never paraphrase
-- Do NOT repeat facts already in EXISTING LONG-TERM MEMORY
-- Write in the same language the user is using in the conversation
-- Be concise — this is metadata, not prose`

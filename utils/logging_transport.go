@@ -66,8 +66,13 @@ func InitializeLogger() (*zap.Logger, error) {
 	}
 	fileSyncer := zapcore.AddSync(lumberjackLogger)
 
-	// 4. Configurar o core do logger com base no ambiente (ENV)
-	env := strings.ToLower(GetEnvOrDefault("ENV", "prod"))
+	// 4. Configurar o core do logger com base no ambiente (CHATCLI_ENV)
+	// Accepts: "dev" (console colorido + arquivo) ou "prod" (apenas arquivo JSON)
+	// Backward-compatible: also checks legacy "ENV" if CHATCLI_ENV is not set.
+	env := strings.ToLower(os.Getenv("CHATCLI_ENV"))
+	if env == "" {
+		env = strings.ToLower(GetEnvOrDefault("ENV", "prod"))
+	}
 	var core zapcore.Core
 
 	if env == "prod" {

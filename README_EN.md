@@ -235,6 +235,12 @@ ChatCLI uses environment variables to define its behavior and connect to LLM pro
   -  `CHATCLI_BOOTSTRAP_ENABLED`  – **(Optional)** Enable bootstrap file loading (SOUL.md, USER.md, etc.). Default: `false`.
   -  `CHATCLI_BOOTSTRAP_DIR`  – **(Optional)** Directory containing bootstrap files.
   -  `CHATCLI_MEMORY_ENABLED`  – **(Optional)** Enable persistent memory system. Default: `false`.
+  -  `CHATCLI_MEMORY_MAX_SIZE`  – **(Optional)** Maximum size of rendered MEMORY.md (bytes). Default: `32768` (32KB).
+  -  `CHATCLI_MEMORY_RETENTION_DAYS`  – **(Optional)** Days to retain daily notes before automatic cleanup. Default: `30`.
+  -  `CHATCLI_MEMORY_MAX_FACTS`  – **(Optional)** Maximum number of facts in the memory index. Default: `500`.
+  -  `CHATCLI_MEMORY_RETRIEVAL_BUDGET`  – **(Optional)** Maximum characters of memory injected into the system prompt. Default: `4000`.
+- Logging:
+  -  `CHATCLI_ENV`  – **(Optional)** Logging mode: `dev` (colored console + file), `prod` (file-only JSON). Default: `prod`. Backward-compatible with legacy `ENV`.
 - Safety:
   -  `CHATCLI_SAFETY_ENABLED`  – **(Optional)** Enable configurable shell safety rules. Default: `false`.
 - OAuth:
@@ -1477,14 +1483,44 @@ The bootstrap system loads Markdown files that define agent personality and rule
 
 Files are searched first in the workspace directory, then in the global directory (`~/.chatcli/`). Cache is automatically invalidated when the file is modified (via mtime).
 
-### Persistent Memory
+### Persistent Memory (Structured System)
 
-The memory system maintains context across sessions:
+The memory system maintains context across sessions using structured storage with multiple components:
 
-- **MEMORY.md** — Long-term facts, architectural decisions, project patterns
-- **Daily notes** — Organized as `memory/YYYYMM/YYYYMMDD.md` for journaling and temporal tracking
+- **FactIndex** (`memory_index.json`) — Long-term facts with relevance scores, hash-based deduplication, and exponential decay. Replaces the old append-only MEMORY.md.
+- **UserProfile** (`user_profile.json`) — Automatically detected user profile (name, role, expertise, language, most used commands).
+- **TopicTracker** (`topics.json`) — Recurring topics with weighted frequency and recency.
+- **ProjectTracker** (`projects.json`) — Active projects with path, technologies, status, and description.
+- **PatternDetector** (`usage_stats.json`) — Usage patterns: peak hours, session duration, common errors, preferred features.
+- **Daily notes** — Organized as `memory/YYYYMM/YYYYMMDD.md` with automatic cleanup after configurable retention (default: 30 days).
+- **MEMORY.md** — Auto-regenerated from FactIndex as a human-readable summary. Never the source of truth.
 
-`GetMemoryContext()` automatically assembles the memory section in the system prompt, including MEMORY.md content and recent daily notes.
+`GetRelevantContext()` uses **smart retrieval** — extracts keywords from recent messages and selects only relevant memories within a configurable budget (default: 4000 chars).
+
+#### `/memory` Commands
+
+| Subcommand | Description |
+|------------|-------------|
+| `/memory` or `/memory today` | Show today's notes |
+| `/memory yesterday` | Show yesterday's notes |
+| `/memory week` | Show notes from the last 7 days |
+| `/memory longterm` | Show MEMORY.md content |
+| `/memory list` | List all memory files |
+| `/memory load <date>` | Load a day's notes into context |
+| `/memory profile` | Show detected user profile |
+| `/memory topics` | Show tracked topics |
+| `/memory projects` | Show tracked projects |
+| `/memory stats` | Memory system statistics |
+| `/memory facts [category]` | List stored facts (optional filter) |
+| `/memory compact` | Force memory compaction |
+
+#### Automatic Compaction
+
+The system runs periodic compaction (every 24h) with a 2-level pipeline:
+1. **LLM-assisted** — Consolidates duplicate facts, removes obsolete, merges related
+2. **Score-based** (fallback) — Archives low-score facts to `memory_archive.json`
+
+Facts are scored with: `(1 + log(accessCount)) * exp(-daysSinceAccess * ln2 / halfLife)`
 
 --------
 
@@ -1507,7 +1543,8 @@ The project has a modular structure organized into packages:
 -  cli : Manages the interface and agent mode.
     -  cli/agent/workers : Multi-agent system with 12 specialized agents, async dispatcher, skills with accelerator scripts, and parallel orchestration.
     -  cli/bus : Internal message bus with typed pub/sub, channel filters, request-reply, and metrics.
-    -  cli/workspace : Bootstrap file loader (SOUL.md, USER.md), persistent memory (MEMORY.md, daily notes), and context builder.
+    -  cli/workspace : Bootstrap file loader (SOUL.md, USER.md), context builder, and memory facade.
+    -  cli/workspace/memory : Structured memory system (FactIndex, UserProfile, TopicTracker, ProjectTracker, PatternDetector, smart retrieval, LLM compaction).
     -  cli/skills : Skills system with YAML frontmatter, lazy loading, and remote registry.
     -  cli/mcp : MCP (Model Context Protocol) manager with stdio/SSE transport and tool discovery.
 -  config : Handles configuration via constants and versioned schema migration.

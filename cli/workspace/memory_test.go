@@ -108,8 +108,8 @@ func TestGetMemoryContext(t *testing.T) {
 	if !strings.Contains(ctx, "Important fact") {
 		t.Error("expected memory content")
 	}
-	if !strings.Contains(ctx, "Daily Notes") {
-		t.Error("expected 'Daily Notes' section")
+	if !strings.Contains(ctx, "Recent Activity") && !strings.Contains(ctx, "Daily Notes") {
+		t.Error("expected 'Recent Activity' or 'Daily Notes' section")
 	}
 }
 

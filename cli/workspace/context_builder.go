@@ -33,13 +33,22 @@ func NewContextBuilder(bootstrap *BootstrapLoader, memory *MemoryStore) *Context
 // Includes: bootstrap files + memory context.
 // Does NOT include mode-specific instructions (coder/agent prompts).
 func (cb *ContextBuilder) BuildSystemPromptPrefix() string {
-	cb.mu.RLock()
-	if cb.cache != nil && !cb.cache.stale && !cb.bootstrap.IsStale() {
-		content := cb.cache.content
+	return cb.BuildSystemPromptPrefixWithHints(nil)
+}
+
+// BuildSystemPromptPrefixWithHints returns workspace context with memory
+// retrieval tailored to the given conversation hints (keywords).
+func (cb *ContextBuilder) BuildSystemPromptPrefixWithHints(hints []string) string {
+	// When hints are provided, skip cache so retrieval reflects current context
+	if len(hints) == 0 {
+		cb.mu.RLock()
+		if cb.cache != nil && !cb.cache.stale && !cb.bootstrap.IsStale() {
+			content := cb.cache.content
+			cb.mu.RUnlock()
+			return content
+		}
 		cb.mu.RUnlock()
-		return content
 	}
-	cb.mu.RUnlock()
 
 	var parts []string
 
@@ -49,9 +58,14 @@ func (cb *ContextBuilder) BuildSystemPromptPrefix() string {
 		parts = append(parts, bootstrapContent)
 	}
 
-	// Memory context (MEMORY.md + daily notes)
+	// Memory context — smart retrieval with hints
 	if cb.memory != nil {
-		memoryContent := cb.memory.GetMemoryContext()
+		var memoryContent string
+		if len(hints) > 0 {
+			memoryContent = cb.memory.GetRelevantContext(hints)
+		} else {
+			memoryContent = cb.memory.GetMemoryContext()
+		}
 		if memoryContent != "" {
 			parts = append(parts, "# Memory\n\n"+memoryContent)
 		}
@@ -62,13 +76,16 @@ func (cb *ContextBuilder) BuildSystemPromptPrefix() string {
 		content = strings.Join(parts, "\n\n---\n\n")
 	}
 
-	cb.mu.Lock()
-	cb.cache = &promptCache{
-		content: content,
-		builtAt: time.Now(),
-		stale:   false,
+	// Only cache when no hints (generic context)
+	if len(hints) == 0 {
+		cb.mu.Lock()
+		cb.cache = &promptCache{
+			content: content,
+			builtAt: time.Now(),
+			stale:   false,
+		}
+		cb.mu.Unlock()
 	}
-	cb.mu.Unlock()
 
 	return content
 }

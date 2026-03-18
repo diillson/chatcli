@@ -13,6 +13,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/cli/ctxmgr"
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -132,8 +133,22 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	var systemParts []models.ContentBlock
 
 	// Part 1: Workspace context (SOUL.md, USER.md, IDENTITY.md, RULES.md, MEMORY.md)
+	// Extract hints from recent messages for smart memory retrieval
 	if cli.contextBuilder != nil {
-		if wsCtx := cli.contextBuilder.BuildSystemPromptPrefix(); wsCtx != "" {
+		var hints []string
+		hintWindow := 3
+		if len(cli.history) < hintWindow {
+			hintWindow = len(cli.history)
+		}
+		if hintWindow > 0 {
+			var recentTexts []string
+			for _, msg := range cli.history[len(cli.history)-hintWindow:] {
+				recentTexts = append(recentTexts, msg.Content)
+			}
+			hints = memory.ExtractKeywords(recentTexts)
+		}
+
+		if wsCtx := cli.contextBuilder.BuildSystemPromptPrefixWithHints(hints); wsCtx != "" {
 			dynCtx := cli.contextBuilder.BuildDynamicContext()
 			wsContent := wsCtx
 			if dynCtx != "" {
