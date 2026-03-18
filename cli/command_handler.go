@@ -23,6 +23,14 @@ func NewCommandHandler(cli *ChatCLI) *CommandHandler {
 }
 
 func (ch *CommandHandler) HandleCommand(userInput string) bool {
+	// Track command usage for memory pattern detection
+	if strings.HasPrefix(userInput, "/") && ch.cli.memoryStore != nil {
+		cmd := strings.Fields(userInput)[0]
+		if mgr := ch.cli.memoryStore.Manager(); mgr != nil {
+			mgr.Profile.RecordCommand(cmd)
+		}
+	}
+
 	switch {
 	case userInput == "/exit" || userInput == "exit" || userInput == "/quit" || userInput == "quit":
 		fmt.Println(i18n.T("status.exiting"))

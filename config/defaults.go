@@ -74,4 +74,18 @@ const (
 	AgentPluginMaxTurnsEnv = "CHATCLI_AGENT_PLUGIN_MAX_TURNS"
 	DefaultAgentMaxTurns   = 50
 	MaxAgentMaxTurns       = 200 // limite de segurança
+
+	// Memory system configuration
+	DefaultMemoryMaxSize      = 32 * 1024 // 32KB max for MEMORY.md
+	DefaultDailyNoteRetention = 30        // days to keep daily notes
+	DefaultMaxFacts           = 500       // max facts in index
+	DefaultRetrievalBudget    = 4000      // chars for system prompt memory section
+	DefaultDecayHalfLife      = 30.0      // days for score decay half-life
+
+	// Memory system environment variable overrides
+	MemoryMaxSizeEnv      = "CHATCLI_MEMORY_MAX_SIZE"
+	MemoryRetentionEnv    = "CHATCLI_MEMORY_RETENTION_DAYS"
+	MemoryMaxFactsEnv     = "CHATCLI_MEMORY_MAX_FACTS"
+	MemoryRetrievalEnv    = "CHATCLI_MEMORY_RETRIEVAL_BUDGET"
+	MemoryCompactionHours = 24 // hours between compaction runs
 )

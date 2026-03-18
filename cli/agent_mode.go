@@ -25,6 +25,7 @@ import (
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/metrics"
 	"github.com/diillson/chatcli/cli/paste"
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
@@ -300,8 +301,21 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	a.isOneShot = false
 
 	// Prepend workspace context (SOUL.md, USER.md, IDENTITY.md, RULES.md, MEMORY.md)
+	// Extract hints from recent history for smart memory retrieval
 	if a.cli.contextBuilder != nil {
-		if wsCtx := a.cli.contextBuilder.BuildSystemPromptPrefix(); wsCtx != "" {
+		var hints []string
+		hintWindow := 3
+		if len(a.cli.history) < hintWindow {
+			hintWindow = len(a.cli.history)
+		}
+		if hintWindow > 0 {
+			var recentTexts []string
+			for _, msg := range a.cli.history[len(a.cli.history)-hintWindow:] {
+				recentTexts = append(recentTexts, msg.Content)
+			}
+			hints = memory.ExtractKeywords(recentTexts)
+		}
+		if wsCtx := a.cli.contextBuilder.BuildSystemPromptPrefixWithHints(hints); wsCtx != "" {
 			systemInstruction = wsCtx + "\n\n---\n\n" + systemInstruction
 		}
 		if dynCtx := a.cli.contextBuilder.BuildDynamicContext(); dynCtx != "" {

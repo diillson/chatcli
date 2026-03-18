@@ -202,7 +202,8 @@ type ChatCLI struct {
 	lastEscTime time.Time // for Esc+Esc double-press detection
 
 	// Background memory annotation worker
-	memWorker *memoryWorker
+	memWorker        *memoryWorker
+	sessionStartTime time.Time // for session duration tracking
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
@@ -295,6 +296,11 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	if memoryEnabled {
 		cli.memWorker = newMemoryWorker(cli)
 		cli.memWorker.start()
+		// Record session start for usage pattern tracking
+		cli.sessionStartTime = time.Now()
+		if mgr := memStore.Manager(); mgr != nil {
+			mgr.Patterns.RecordSessionStart()
+		}
 	}
 
 	// Initialize persona handler
@@ -892,6 +898,13 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 }
 
 func (cli *ChatCLI) cleanup() {
+	// Record session end for usage pattern tracking
+	if cli.memoryStore != nil && !cli.sessionStartTime.IsZero() {
+		if mgr := cli.memoryStore.Manager(); mgr != nil {
+			mgr.Patterns.RecordSessionEnd(time.Since(cli.sessionStartTime))
+		}
+	}
+
 	// Stop background memory worker
 	if cli.memWorker != nil {
 		cli.memWorker.stop()

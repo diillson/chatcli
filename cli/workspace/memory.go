@@ -1,21 +1,12 @@
 package workspace
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"go.uber.org/zap"
 )
-
-// MemoryStore manages persistent AI memory.
-type MemoryStore struct {
-	memoryDir string // ~/.chatcli/memory/
-	logger    *zap.Logger
-}
 
 // DailyNote represents a single day's note.
 type DailyNote struct {
@@ -24,139 +15,97 @@ type DailyNote struct {
 	Content string
 }
 
-// NewMemoryStore creates a new memory store.
+// MemoryStore is the backward-compatible facade that delegates to the
+// new structured memory.Manager. All existing callers (ContextBuilder,
+// memoryWorker, memory_command) continue to work through this interface.
+type MemoryStore struct {
+	manager   *memory.Manager
+	memoryDir string
+	logger    *zap.Logger
+}
+
+// NewMemoryStore creates a new memory store backed by the structured Manager.
 func NewMemoryStore(baseDir string, logger *zap.Logger) *MemoryStore {
+	memDir := filepath.Join(baseDir, "memory")
+	mgr := memory.NewManager(memDir, memory.DefaultConfig(), logger)
+
 	return &MemoryStore{
-		memoryDir: filepath.Join(baseDir, "memory"),
+		manager:   mgr,
+		memoryDir: memDir,
 		logger:    logger,
 	}
 }
 
+// Manager returns the underlying memory.Manager for advanced operations.
+func (ms *MemoryStore) Manager() *memory.Manager {
+	return ms.manager
+}
+
 // EnsureDirectories creates the memory directory structure.
 func (ms *MemoryStore) EnsureDirectories() error {
-	return os.MkdirAll(ms.memoryDir, 0o755)
+	return ms.manager.EnsureDirectories()
 }
 
 // --- Long-term Memory ---
 
-func (ms *MemoryStore) memoryFilePath() string {
-	return filepath.Join(ms.memoryDir, "MEMORY.md")
-}
-
-// ReadLongTerm reads the main MEMORY.md file.
+// ReadLongTerm returns the rendered long-term memory content.
 func (ms *MemoryStore) ReadLongTerm() string {
-	data, err := os.ReadFile(ms.memoryFilePath())
-	if err != nil {
-		if !os.IsNotExist(err) {
-			ms.logger.Debug("failed to read long-term memory", zap.Error(err))
-		}
-		return ""
-	}
-	return string(data)
+	return ms.manager.ReadLongTerm()
 }
 
-// WriteLongTerm writes the entire MEMORY.md file.
+// WriteLongTerm replaces all long-term memory.
 func (ms *MemoryStore) WriteLongTerm(content string) error {
-	if err := ms.EnsureDirectories(); err != nil {
-		return err
-	}
-	return os.WriteFile(ms.memoryFilePath(), []byte(content), 0o644)
+	return ms.manager.WriteLongTerm(content)
 }
 
-// AppendLongTerm appends to MEMORY.md.
+// AppendLongTerm adds new content to long-term memory.
 func (ms *MemoryStore) AppendLongTerm(entry string) error {
-	if err := ms.EnsureDirectories(); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(ms.memoryFilePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("opening memory file: %w", err)
-	}
-	defer f.Close()
-	_, err = f.WriteString("\n" + entry)
-	return err
+	return ms.manager.AppendLongTerm(entry)
 }
 
 // --- Daily Notes ---
 
 // TodayNotePath returns the path for today's note.
 func (ms *MemoryStore) TodayNotePath() string {
-	now := time.Now()
-	return filepath.Join(ms.memoryDir, now.Format("200601"), now.Format("20060102")+".md")
+	return ms.manager.TodayNotePath()
 }
 
 // WriteDailyNote appends to today's daily note.
 func (ms *MemoryStore) WriteDailyNote(entry string) error {
-	path := ms.TodayNotePath()
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("creating daily notes dir: %w", err)
-	}
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("opening daily note: %w", err)
-	}
-	defer f.Close()
-
-	// Add timestamp header
-	ts := time.Now().Format("15:04")
-	_, err = f.WriteString(fmt.Sprintf("\n## %s\n\n%s\n", ts, entry))
-	return err
+	return ms.manager.WriteDailyNote(entry)
 }
 
 // GetRecentDailyNotes returns the last N days of notes.
 func (ms *MemoryStore) GetRecentDailyNotes(days int) []DailyNote {
-	var notes []DailyNote
-	now := time.Now()
-
-	for i := 0; i < days; i++ {
-		date := now.AddDate(0, 0, -i)
-		path := filepath.Join(ms.memoryDir, date.Format("200601"), date.Format("20060102")+".md")
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
+	managerNotes := ms.manager.GetRecentDailyNotes(days)
+	notes := make([]DailyNote, len(managerNotes))
+	for i, n := range managerNotes {
+		notes[i] = DailyNote{
+			Date:    n.Date,
+			Path:    n.Path,
+			Content: n.Content,
 		}
-		content := strings.TrimSpace(string(data))
-		if content == "" {
-			continue
-		}
-		notes = append(notes, DailyNote{
-			Date:    date,
-			Path:    path,
-			Content: content,
-		})
 	}
-
-	// Sort oldest first
-	sort.Slice(notes, func(i, j int) bool {
-		return notes[i].Date.Before(notes[j].Date)
-	})
-
 	return notes
 }
 
 // GetMemoryContext builds the memory section for the system prompt.
+// Uses smart retrieval when no hints are provided.
 func (ms *MemoryStore) GetMemoryContext() string {
-	var parts []string
+	return ms.manager.GetMemoryContext()
+}
 
-	longTerm := ms.ReadLongTerm()
-	if strings.TrimSpace(longTerm) != "" {
-		parts = append(parts, "## Long-term Memory\n\n"+longTerm)
-	}
+// GetRelevantContext returns memory tailored to conversation hints.
+func (ms *MemoryStore) GetRelevantContext(hints []string) string {
+	return ms.manager.GetRelevantContext(hints)
+}
 
-	recentNotes := ms.GetRecentDailyNotes(3)
-	if len(recentNotes) > 0 {
-		var notesParts []string
-		for _, note := range recentNotes {
-			dateStr := note.Date.Format("2006-01-02")
-			notesParts = append(notesParts, fmt.Sprintf("### %s\n\n%s", dateStr, note.Content))
-		}
-		parts = append(parts, "## Recent Daily Notes\n\n"+strings.Join(notesParts, "\n\n"))
-	}
+// ProcessExtraction processes enhanced extraction output from the memory worker.
+func (ms *MemoryStore) ProcessExtraction(response string) {
+	ms.manager.ProcessExtraction(response)
+}
 
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.Join(parts, "\n\n")
+// RecordInteraction records a usage event.
+func (ms *MemoryStore) RecordInteraction(event memory.InteractionEvent) {
+	ms.manager.RecordInteraction(event)
 }

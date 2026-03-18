@@ -235,6 +235,12 @@ O ChatCLI utiliza variáveis de ambiente para se conectar aos provedores de LLM 
   -  `CHATCLI_BOOTSTRAP_ENABLED`  – **(Opcional)** Ativa o carregamento de arquivos bootstrap (SOUL.md, USER.md, etc.). Padrão: `false`.
   -  `CHATCLI_BOOTSTRAP_DIR`  – **(Opcional)** Diretório contendo os arquivos bootstrap.
   -  `CHATCLI_MEMORY_ENABLED`  – **(Opcional)** Ativa o sistema de memória persistente. Padrão: `false`.
+  -  `CHATCLI_MEMORY_MAX_SIZE`  – **(Opcional)** Tamanho máximo do MEMORY.md renderizado (bytes). Padrão: `32768` (32KB).
+  -  `CHATCLI_MEMORY_RETENTION_DAYS`  – **(Opcional)** Dias para reter notas diárias antes da limpeza automática. Padrão: `30`.
+  -  `CHATCLI_MEMORY_MAX_FACTS`  – **(Opcional)** Número máximo de fatos no índice de memória. Padrão: `500`.
+  -  `CHATCLI_MEMORY_RETRIEVAL_BUDGET`  – **(Opcional)** Caracteres máximos de memória injetados no system prompt. Padrão: `4000`.
+- Logging:
+  -  `CHATCLI_ENV`  – **(Opcional)** Modo de logging: `dev` (console colorido + arquivo), `prod` (só arquivo JSON). Padrão: `prod`. Compatível com o legado `ENV`.
 - Segurança:
   -  `CHATCLI_SAFETY_ENABLED`  – **(Opcional)** Ativa regras de segurança configuráveis no shell. Padrão: `false`.
 - OAuth:
@@ -1531,14 +1537,44 @@ O sistema de bootstrap carrega arquivos Markdown que definem a personalidade e r
 
 Os arquivos são buscados primeiro no diretório do workspace e depois no diretório global (`~/.chatcli/`). O cache é invalidado automaticamente quando o arquivo é modificado (via mtime).
 
-### Memória Persistente
+### Memória Persistente (Sistema Estruturado)
 
-O sistema de memória mantém contexto entre sessões:
+O sistema de memória mantém contexto entre sessões usando armazenamento estruturado com múltiplos componentes:
 
-- **MEMORY.md** — Fatos de longo prazo, decisões arquiteturais, padrões do projeto
-- **Notas diárias** — Organizadas em `memory/YYYYMM/YYYYMMDD.md` para journaling e rastreamento temporal
+- **FactIndex** (`memory_index.json`) — Fatos de longo prazo com scores de relevância, deduplicação por hash e decay exponencial. Substitui o antigo append-only MEMORY.md.
+- **UserProfile** (`user_profile.json`) — Perfil do usuário detectado automaticamente (nome, role, expertise, idioma, comandos mais usados).
+- **TopicTracker** (`topics.json`) — Tópicos recorrentes com frequência e recência ponderada.
+- **ProjectTracker** (`projects.json`) — Projetos ativos com path, tecnologias, status e descrição.
+- **PatternDetector** (`usage_stats.json`) — Padrões de uso: horas de pico, duração de sessão, erros comuns, features preferidas.
+- **Notas diárias** — Organizadas em `memory/YYYYMM/YYYYMMDD.md` com limpeza automática após período configurável (padrão: 30 dias).
+- **MEMORY.md** — Regenerado automaticamente do FactIndex como resumo legível. Nunca mais é source of truth.
 
-O `GetMemoryContext()` monta automaticamente a seção de memória no system prompt, incluindo o conteúdo do MEMORY.md e as notas recentes.
+O `GetRelevantContext()` usa **smart retrieval** — extrai keywords das mensagens recentes e seleciona apenas as memórias relevantes dentro de um budget configurável (padrão: 4000 chars).
+
+#### Comandos `/memory`
+
+| Subcomando | Descrição |
+|------------|-----------|
+| `/memory` ou `/memory today` | Mostra as notas de hoje |
+| `/memory yesterday` | Mostra as notas de ontem |
+| `/memory week` | Mostra notas dos últimos 7 dias |
+| `/memory longterm` | Mostra o conteúdo do MEMORY.md |
+| `/memory list` | Lista todos os arquivos de memória |
+| `/memory load <data>` | Carrega notas de um dia no contexto |
+| `/memory profile` | Mostra o perfil do usuário detectado |
+| `/memory topics` | Mostra tópicos rastreados |
+| `/memory projects` | Mostra projetos rastreados |
+| `/memory stats` | Estatísticas do sistema de memória |
+| `/memory facts [categoria]` | Lista fatos armazenados (filtro opcional) |
+| `/memory compact` | Força compactação da memória |
+
+#### Compactação Automática
+
+O sistema executa compactação periódica (a cada 24h) com pipeline de 2 níveis:
+1. **LLM-assisted** — Consolida fatos duplicados, remove obsoletos, merge relacionados
+2. **Score-based** (fallback) — Arquiva fatos com score baixo em `memory_archive.json`
+
+Fatos são scorados com: `(1 + log(accessCount)) * exp(-daysSinceAccess * ln2 / halfLife)`
 
 --------
 
@@ -1561,7 +1597,8 @@ O projeto é modular e organizado em pacotes:
 -  cli : Gerencia a interface e o modo agente.
     -  cli/agent/workers : Sistema multi-agent com 12 agents especialistas, dispatcher assíncrono, skills com scripts aceleradores e orquestração paralela.
     -  cli/bus : Message bus interno com pub/sub tipado, filtros por canal, request-reply e métricas.
-    -  cli/workspace : Bootstrap file loader (SOUL.md, USER.md), memória persistente (MEMORY.md, notas diárias) e context builder.
+    -  cli/workspace : Bootstrap file loader (SOUL.md, USER.md), context builder e facade de memória.
+    -  cli/workspace/memory : Sistema de memória estruturado (FactIndex, UserProfile, TopicTracker, ProjectTracker, PatternDetector, smart retrieval, compactação LLM).
     -  cli/skills : Sistema de skills com YAML frontmatter, lazy loading e registry remoto.
     -  cli/mcp : Gerenciador MCP (Model Context Protocol) com transporte stdio/SSE e descoberta de tools.
 -  config : Lida com a configuração via constantes e migração versionada de schema.
