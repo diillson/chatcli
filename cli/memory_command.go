@@ -214,7 +214,9 @@ func (cli *ChatCLI) showMemoryProfile() {
 	fmt.Println(colorize("  User Profile", ColorCyan+ColorBold))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
-	if profile.Name == "" && profile.Role == "" && profile.ExpertiseLevel == "" {
+	if profile.Name == "" && profile.Role == "" && profile.ExpertiseLevel == "" &&
+		profile.PreferredLang == "" && profile.CommStyle == "" &&
+		len(profile.TopCommands) == 0 && len(profile.Preferences) == 0 {
 		fmt.Println(colorize("  No profile data yet. Interact more and the system will learn about you.", ColorGray))
 		fmt.Println()
 		return
