@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.70.0](https://github.com/diillson/chatcli/compare/v1.69.1...v1.70.0) (2026-03-18)
+
+
+### Features
+
+* **memory:** overhaul memory system with structured storage, smart retrieval and compaction ([#627](https://github.com/diillson/chatcli/issues/627)) ([8c0b11e](https://github.com/diillson/chatcli/commit/8c0b11e49f8a6bd9e8efde421b497047fa594169))
+
 ## [1.69.1](https://github.com/diillson/chatcli/compare/v1.69.0...v1.69.1) (2026-03-17)
 
 
