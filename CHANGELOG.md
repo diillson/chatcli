@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.70.1](https://github.com/diillson/chatcli/compare/v1.70.0...v1.70.1) (2026-03-18)
+
+
+### Bug Fixes
+
+* **memory:** check all profile fields before showing empty message ([#629](https://github.com/diillson/chatcli/issues/629)) ([9a2b769](https://github.com/diillson/chatcli/commit/9a2b769a2fcb58cec9c797b0dcaf2a1b31ec7e6e))
+
 ## [1.70.0](https://github.com/diillson/chatcli/compare/v1.69.1...v1.70.0) (2026-03-18)
 
 
