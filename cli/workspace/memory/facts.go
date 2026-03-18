@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // FactIndex manages scored long-term memory facts with JSON persistence.
@@ -274,7 +276,7 @@ func (fi *FactIndex) GenerateMarkdown(maxSize int) string {
 
 	for _, cat := range catOrder {
 		catFacts := categories[cat]
-		sb.WriteString(fmt.Sprintf("## %s\n\n", strings.Title(cat)))
+		sb.WriteString(fmt.Sprintf("## %s\n\n", cases.Title(language.English).String(cat)))
 		for _, f := range catFacts {
 			line := fmt.Sprintf("- %s\n", f.Content)
 			if sb.Len()+len(line) > maxSize {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
+
 	"go.uber.org/zap"
 )
 
@@ -15,8 +15,7 @@ import (
 type Manager struct {
 	baseDir string
 	logger  *zap.Logger
-	config  Config
-	mu      sync.RWMutex
+	config Config
 
 	Profile  *UserProfileStore
 	Facts    *FactIndex
