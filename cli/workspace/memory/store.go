@@ -15,7 +15,7 @@ import (
 type Manager struct {
 	baseDir string
 	logger  *zap.Logger
-	config Config
+	config  Config
 
 	Profile  *UserProfileStore
 	Facts    *FactIndex

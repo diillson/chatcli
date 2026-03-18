@@ -140,7 +140,7 @@ func (fi *FactIndex) Search(keywords []string) []*Fact {
 	fi.recalcScoresLocked()
 
 	type scoredFact struct {
-		fact     *Fact
+		fact      *Fact
 		relevance float64
 	}
 

@@ -12,11 +12,11 @@ import (
 
 // Compactor handles LLM-based memory consolidation and cleanup.
 type Compactor struct {
-	facts   *FactIndex
-	daily   *DailyNoteStore
-	config  Config
-	logger  *zap.Logger
-	memDir  string
+	facts  *FactIndex
+	daily  *DailyNoteStore
+	config Config
+	logger *zap.Logger
+	memDir string
 
 	lastCompaction time.Time
 }
@@ -189,9 +189,9 @@ func (c *Compactor) parseCompactionResponse(response string, originalFacts []*Fa
 		}
 
 		fact := &Fact{
-			Content:   line,
-			Category:  category,
-			CreatedAt: time.Now(),
+			Content:      line,
+			Category:     category,
+			CreatedAt:    time.Now(),
 			LastAccessed: time.Now(),
 			AccessCount:  1,
 			Score:        1.0,
