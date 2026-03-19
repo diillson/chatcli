@@ -23,6 +23,7 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -553,6 +554,100 @@ type multiCloser struct {
 
 func (m *multiCloser) Read(p []byte) (int, error) { return m.reader.Read(p) }
 func (m *multiCloser) Close() error               { return m.close() }
+
+// ListModels fetches available models from the Anthropic /v1/models endpoint.
+// Supports both API key and OAuth authentication modes.
+func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+	isOAuth := strings.HasPrefix(c.apiKey, "oauth:")
+
+	// Derive models URL from the messages URL
+	modelsURL := strings.TrimSuffix(c.apiURL, "/messages") + "/models"
+	if isOAuth {
+		modelsURL = withBetaQuery(modelsURL)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if isOAuth {
+		applyOAuthHeaders(req, c.apiKey)
+	} else if strings.HasPrefix(c.apiKey, "token:") {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimPrefix(c.apiKey, "token:"))
+		req.Header.Set("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+	} else if strings.HasPrefix(c.apiKey, "apikey:") {
+		req.Header.Set("x-api-key", strings.TrimPrefix(c.apiKey, "apikey:"))
+		req.Header.Set("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+	} else {
+		req.Header.Set("x-api-key", c.apiKey)
+		req.Header.Set("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch Anthropic models: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var bodyReader io.Reader = resp.Body
+	// OAuth responses may be compressed (same as SendPrompt)
+	if isOAuth {
+		decodedBody, err := decodeResponseBody(resp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode response body: %w", err)
+		}
+		defer func() { _ = decodedBody.Close() }()
+		bodyReader = decodedBody
+	}
+
+	bodyBytes, err := io.ReadAll(bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read models response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Anthropic /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+	}
+
+	var result struct {
+		Data []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+			Type        string `json:"type"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode models response: %w", err)
+	}
+
+	var modelList []client.ModelInfo
+	for _, m := range result.Data {
+		displayName := m.DisplayName
+		if displayName == "" {
+			displayName = m.ID
+		}
+		modelList = append(modelList, client.ModelInfo{
+			ID:          m.ID,
+			DisplayName: displayName,
+			Source:      client.ModelSourceAPI,
+		})
+
+		if _, ok := catalog.Resolve(catalog.ProviderClaudeAI, m.ID); !ok {
+			catalog.Register(catalog.ModelMeta{
+				ID:           m.ID,
+				Aliases:      []string{m.ID},
+				DisplayName:  displayName,
+				Provider:     catalog.ProviderClaudeAI,
+				PreferredAPI: catalog.APIAnthropicMessages,
+				APIVersion:   config.ClaudeAIAPIVersionDefault,
+			})
+		}
+	}
+
+	c.logger.Info("Fetched Anthropic models", zap.Int("count", len(modelList)))
+	return modelList, nil
+}
 
 func decodeResponseBody(resp *http.Response) (io.ReadCloser, error) {
 	encoding := strings.TrimSpace(strings.ToLower(resp.Header.Get("Content-Encoding")))

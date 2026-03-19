@@ -335,6 +335,7 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	cli.Model = newModel
 	fmt.Println(i18n.T("status.provider_switched", cli.Client.GetModelName(), cli.Provider))
 	fmt.Println()
+	cli.refreshModelCache()
 }
 
 func (cli *ChatCLI) handleSwitchCommand(userInput string) {
@@ -343,6 +344,7 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 	shouldSwitchModel, shouldUpdateStackSpot := false, false
 	maxTokensOverride := -1
 
+	listModels := false
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
 		case "--model":
@@ -350,6 +352,8 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 				newModel = args[i+1]
 				shouldSwitchModel = true
 				i++ // Pular o valor
+			} else {
+				listModels = true
 			}
 		case "--max-tokens":
 			if i+1 < len(args) {
@@ -401,11 +405,17 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 		}
 	}
 
+	if listModels {
+		cli.listAvailableModels()
+		return
+	}
+
 	if shouldSwitchModel {
 		fmt.Println(i18n.T("cli.switch.changing_model", newModel, cli.Provider))
 		newClient, err := cli.manager.GetClient(cli.Provider, newModel)
 		if err != nil {
 			fmt.Println(i18n.T("cli.switch.change_model_error", newModel, err))
+			cli.listAvailableModels()
 		} else {
 			cli.Client = newClient
 			cli.Model = newModel
@@ -417,6 +427,73 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 	if !shouldSwitchModel && maxTokensOverride == -1 && len(args) == 1 {
 		cli.switchProvider()
 	}
+}
+
+func (cli *ChatCLI) listAvailableModels() {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	models, err := cli.manager.ListModelsForProvider(ctx, cli.Provider)
+	if err != nil {
+		fmt.Printf("  Could not list models for %s: %v\n", cli.Provider, err)
+		return
+	}
+	if len(models) == 0 {
+		fmt.Printf("  No models found for %s\n", cli.Provider)
+		return
+	}
+
+	// Determine source for the header
+	source := "catalog"
+	if len(models) > 0 && models[0].Source == client.ModelSourceAPI {
+		source = "API"
+	}
+	fmt.Printf("\n  Available models for %s (source: %s):\n", cli.Provider, source)
+	for i, m := range models {
+		if m.DisplayName != "" && m.DisplayName != m.ID {
+			fmt.Printf("  %d. %s (%s)\n", i+1, m.ID, m.DisplayName)
+		} else {
+			fmt.Printf("  %d. %s\n", i+1, m.ID)
+		}
+	}
+	fmt.Println()
+}
+
+// refreshModelCache fetches available models for the current provider in background
+// and caches them for autocomplete suggestions.
+func (cli *ChatCLI) refreshModelCache() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		models, err := cli.manager.ListModelsForProvider(ctx, cli.Provider)
+		if err != nil {
+			cli.logger.Debug("Failed to refresh model cache", zap.String("provider", cli.Provider), zap.Error(err))
+			return
+		}
+
+		cli.cachedModelsMu.Lock()
+		cli.cachedModels = models
+		cli.cachedModelsMu.Unlock()
+
+		cli.logger.Debug("Model cache refreshed", zap.String("provider", cli.Provider), zap.Int("count", len(models)))
+	}()
+}
+
+// getCachedModels returns the cached model list (thread-safe).
+func (cli *ChatCLI) getCachedModels() []client.ModelInfo {
+	cli.cachedModelsMu.RLock()
+	defer cli.cachedModelsMu.RUnlock()
+	if len(cli.cachedModels) > 0 {
+		return cli.cachedModels
+	}
+	// Fallback: use static catalog
+	metas := catalog.ListByProvider(cli.Provider)
+	result := make([]client.ModelInfo, len(metas))
+	for i, m := range metas {
+		result[i] = client.ModelInfo{ID: m.ID, DisplayName: m.DisplayName, Source: client.ModelSourceCatalog}
+	}
+	return result
 }
 
 func (cli *ChatCLI) switchProvider() {

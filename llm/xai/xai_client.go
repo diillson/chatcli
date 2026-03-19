@@ -19,6 +19,7 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -175,4 +176,63 @@ func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	return firstChoice.Message.Content, nil
+}
+
+// ListModels fetches available models from the xAI /v1/models endpoint.
+func (c *XAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+	// Derive models URL from the chat completions URL
+	modelsURL := strings.TrimSuffix(c.apiURL, "/chat/completions") + "/models"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch xAI models: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read models response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("xAI /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+	}
+
+	var result struct {
+		Data []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode models response: %w", err)
+	}
+
+	var modelList []client.ModelInfo
+	for _, m := range result.Data {
+		modelList = append(modelList, client.ModelInfo{
+			ID:          m.ID,
+			DisplayName: m.ID,
+			Source:      client.ModelSourceAPI,
+		})
+
+		if _, ok := catalog.Resolve(catalog.ProviderXAI, m.ID); !ok {
+			catalog.Register(catalog.ModelMeta{
+				ID:           m.ID,
+				Aliases:      []string{m.ID},
+				DisplayName:  m.ID,
+				Provider:     catalog.ProviderXAI,
+				PreferredAPI: catalog.APIChatCompletions,
+			})
+		}
+	}
+
+	c.logger.Info("Fetched xAI models", zap.Int("count", len(modelList)))
+	return modelList, nil
 }

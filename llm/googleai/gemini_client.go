@@ -19,6 +19,7 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -372,6 +373,84 @@ func (c *GeminiClient) getMaxTokens() int {
 
 	// Usar o catálogo para obter limite baseado no modelo
 	return catalog.GetMaxTokens(catalog.ProviderGoogleAI, c.model, 0)
+}
+
+// ListModels fetches available models from the Google AI /v1beta/models endpoint.
+func (c *GeminiClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+	modelsURL := fmt.Sprintf("%s/models", c.baseURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("x-goog-api-key", c.apiKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch Google AI models: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read models response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Google AI /models returned %d: %s", resp.StatusCode, c.sanitizeErrorResponse(string(bodyBytes)))
+	}
+
+	var result struct {
+		Models []struct {
+			Name                       string   `json:"name"`
+			DisplayName                string   `json:"displayName"`
+			SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode models response: %w", err)
+	}
+
+	var modelList []client.ModelInfo
+	for _, m := range result.Models {
+		// Filter to models that support generateContent
+		supportsChat := false
+		for _, method := range m.SupportedGenerationMethods {
+			if method == "generateContent" {
+				supportsChat = true
+				break
+			}
+		}
+		if !supportsChat {
+			continue
+		}
+
+		// Name is like "models/gemini-2.0-flash", extract the model ID
+		modelID := strings.TrimPrefix(m.Name, "models/")
+		displayName := m.DisplayName
+		if displayName == "" {
+			displayName = modelID
+		}
+
+		modelList = append(modelList, client.ModelInfo{
+			ID:          modelID,
+			DisplayName: displayName,
+			Source:      client.ModelSourceAPI,
+		})
+
+		if _, ok := catalog.Resolve(catalog.ProviderGoogleAI, modelID); !ok {
+			catalog.Register(catalog.ModelMeta{
+				ID:           modelID,
+				Aliases:      []string{modelID},
+				DisplayName:  displayName,
+				Provider:     catalog.ProviderGoogleAI,
+				PreferredAPI: "gemini_api",
+			})
+		}
+	}
+
+	c.logger.Info("Fetched Google AI models", zap.Int("count", len(modelList)))
+	return modelList, nil
 }
 
 // getSafetySettings retorna as configurações de segurança para o Gemini

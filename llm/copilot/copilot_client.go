@@ -18,6 +18,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"github.com/diillson/chatcli/version"
@@ -30,6 +31,9 @@ const (
 
 	// CopilotChatCompletionsPath is the chat completions endpoint.
 	CopilotChatCompletionsPath = "/chat/completions"
+
+	// CopilotModelsPath is the models listing endpoint.
+	CopilotModelsPath = "/models"
 )
 
 // Client implements the LLMClient interface for GitHub Copilot.
@@ -216,4 +220,92 @@ func (c *Client) processResponse(resp *http.Response) (string, error) {
 	}
 
 	return result.Choices[0].Message.Content, nil
+}
+
+// newAuthenticatedRequest creates an HTTP request with Copilot auth headers.
+func (c *Client) newAuthenticatedRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	apiURL := c.baseURL + path
+	req, err := http.NewRequestWithContext(ctx, method, apiURL, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	token := auth.StripAuthPrefix(c.token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Openai-Intent", "conversation-edits")
+	req.Header.Set("X-Initiator", "user")
+	ver, _, _ := version.GetBuildInfo()
+	req.Header.Set("User-Agent", "chatcli/"+ver)
+	req.Header.Set("Editor-Version", "chatcli/"+ver)
+	req.Header.Set("Editor-Plugin-Version", "chatcli/"+ver)
+	return req, nil
+}
+
+// ListModels fetches available models from the Copilot API's /models endpoint.
+// It also dynamically registers discovered models in the catalog.
+func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+	req, err := c.newAuthenticatedRequest(ctx, http.MethodGet, CopilotModelsPath, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch Copilot models: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read models response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Copilot /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+	}
+
+	// OpenAI-compatible format: {"data": [{"id": "...", "name": "...", ...}]}
+	var result struct {
+		Data []struct {
+			ID           string            `json:"id"`
+			Name         string            `json:"name"`
+			ModelPickerEnabled bool        `json:"model_picker_enabled"`
+			Capabilities map[string]interface{} `json:"capabilities"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode models response: %w", err)
+	}
+
+	var modelInfos []client.ModelInfo
+	for _, m := range result.Data {
+		displayName := m.Name
+		if displayName == "" {
+			displayName = m.ID
+		}
+
+		modelInfos = append(modelInfos, client.ModelInfo{
+			ID:          m.ID,
+			DisplayName: displayName + " (Copilot)",
+			Source:      client.ModelSourceAPI,
+		})
+
+		// Dynamically register in catalog if not already present
+		if _, ok := catalog.Resolve(catalog.ProviderCopilot, m.ID); !ok {
+			catalog.Register(catalog.ModelMeta{
+				ID:              m.ID,
+				Aliases:         []string{"copilot-" + m.ID},
+				DisplayName:     displayName + " (Copilot)",
+				Provider:        catalog.ProviderCopilot,
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				PreferredAPI:    catalog.APIChatCompletions,
+				Capabilities:    []string{"tools"},
+			})
+		}
+	}
+
+	c.logger.Info("Fetched Copilot models", zap.Int("count", len(modelInfos)))
+	return modelInfos, nil
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -189,4 +190,71 @@ func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	return content, nil
+}
+
+// ListModels fetches available models from the OpenAI /v1/models endpoint.
+func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+	// Derive base URL from the chat completions URL
+	apiURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
+	modelsURL := strings.TrimSuffix(apiURL, "/chat/completions") + "/models"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch OpenAI models: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read models response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OpenAI /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+	}
+
+	var result struct {
+		Data []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode models response: %w", err)
+	}
+
+	var models []client.ModelInfo
+	for _, m := range result.Data {
+		// Filter to chat-capable models (gpt, o1, o3, o4, chatgpt)
+		id := strings.ToLower(m.ID)
+		if !strings.HasPrefix(id, "gpt-") && !strings.HasPrefix(id, "o1-") &&
+			!strings.HasPrefix(id, "o3-") && !strings.HasPrefix(id, "o4-") &&
+			!strings.HasPrefix(id, "chatgpt-") {
+			continue
+		}
+		models = append(models, client.ModelInfo{
+			ID:          m.ID,
+			DisplayName: m.ID,
+			Source:      client.ModelSourceAPI,
+		})
+
+		if _, ok := catalog.Resolve(catalog.ProviderOpenAI, m.ID); !ok {
+			catalog.Register(catalog.ModelMeta{
+				ID:           m.ID,
+				Aliases:      []string{m.ID},
+				DisplayName:  m.ID,
+				Provider:     catalog.ProviderOpenAI,
+				PreferredAPI: catalog.APIChatCompletions,
+			})
+		}
+	}
+
+	c.logger.Info("Fetched OpenAI models", zap.Int("count", len(models)))
+	return models, nil
 }

@@ -53,6 +53,10 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getAgentSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/switch") {
+		return cli.getSwitchSuggestions(d)
+	}
+
 	if strings.HasPrefix(lineBeforeCursor, "/auth") {
 		return cli.getAuthSuggestions(d)
 	}
@@ -860,6 +864,82 @@ func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
 				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 			}
 		}
+	}
+
+	return []prompt.Suggest{}
+}
+
+// getSwitchSuggestions returns autocomplete suggestions for /switch command.
+func (cli *ChatCLI) getSwitchSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	wordBeforeCursor := d.GetWordBeforeCursor()
+
+	// Just typed "/switch" without space
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{
+			{Text: "/switch", Description: "Trocar o provedor de LLM, seguido por --model troca o modelo"},
+		}
+	}
+
+	// Detect if previous word is --model → suggest model names
+	if len(args) >= 2 {
+		prevWord := args[len(args)-1]
+		if !strings.HasSuffix(line, " ") && len(args) > 1 {
+			prevWord = args[len(args)-2]
+		}
+
+		if prevWord == "--model" {
+			models := cli.getCachedModels()
+			suggestions := make([]prompt.Suggest, 0, len(models))
+			for _, m := range models {
+				desc := m.DisplayName
+				if desc == m.ID || desc == "" {
+					desc = cli.Provider
+				}
+				// Indicate source: [API] or [catalog]
+				if m.Source == "api" {
+					desc += " [API]"
+				} else {
+					desc += " [catalog]"
+				}
+				suggestions = append(suggestions, prompt.Suggest{
+					Text:        m.ID,
+					Description: desc,
+				})
+			}
+			return prompt.FilterHasPrefix(suggestions, wordBeforeCursor, true)
+		}
+	}
+
+	// Suggest flags
+	if strings.HasPrefix(wordBeforeCursor, "-") {
+		flags := []prompt.Suggest{
+			{Text: "--model", Description: "Troque o modelo (Runtime) baseado no provedor atual"},
+			{Text: "--max-tokens", Description: "Define o máximo de tokens para as próximas respostas (0 para padrão)"},
+		}
+		if cli.Provider == "STACKSPOT" {
+			flags = append(flags,
+				prompt.Suggest{Text: "--realm", Description: "Altera o Realm/Tenant em tempo de execução"},
+				prompt.Suggest{Text: "--agent-id", Description: "Altera o agent em tempo de execução"},
+			)
+		}
+		return prompt.FilterHasPrefix(flags, wordBeforeCursor, true)
+	}
+
+	// After "/switch " with space, suggest flags
+	if len(args) == 1 && strings.HasSuffix(line, " ") {
+		flags := []prompt.Suggest{
+			{Text: "--model", Description: "Troque o modelo (Runtime) baseado no provedor atual"},
+			{Text: "--max-tokens", Description: "Define o máximo de tokens para as próximas respostas (0 para padrão)"},
+		}
+		if cli.Provider == "STACKSPOT" {
+			flags = append(flags,
+				prompt.Suggest{Text: "--realm", Description: "Altera o Realm/Tenant em tempo de execução"},
+				prompt.Suggest{Text: "--agent-id", Description: "Altera o agent em tempo de execução"},
+			)
+		}
+		return flags
 	}
 
 	return []prompt.Suggest{}

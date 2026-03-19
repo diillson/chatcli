@@ -178,6 +178,7 @@ func (ch *CommandHandler) handleConnectCommand(userInput string) {
 	ch.cli.Model = remoteClient.GetModelName()
 	ch.cli.remoteConn = remoteClient
 	ch.cli.isRemote = true
+	ch.cli.refreshModelCache()
 
 	connInfo := fmt.Sprintf("version: %s, provider: %s, model: %s", ver, ch.cli.Provider, ch.cli.Model)
 	if useLocalAuth {
@@ -257,6 +258,7 @@ func (ch *CommandHandler) handleDisconnectCommand() {
 	ch.cli.localClient = nil
 	ch.cli.localProvider = ""
 	ch.cli.localModel = ""
+	ch.cli.refreshModelCache()
 
 	fmt.Println(colorize(i18n.T("connect.status.disconnected"), ColorGreen))
 	if ch.cli.Client != nil {
@@ -337,4 +339,5 @@ func (ch *CommandHandler) autoSwitchProvider(provider, model string) {
 	ch.cli.Provider = provider
 	ch.cli.Model = model
 	fmt.Println(i18n.T("status.provider_switched", ch.cli.Client.GetModelName(), ch.cli.Provider))
+	ch.cli.refreshModelCache()
 }
