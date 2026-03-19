@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -14,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	"github.com/diillson/chatcli/operator/api/rest"
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 	"github.com/diillson/chatcli/operator/controllers"
 )
@@ -131,6 +133,77 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "PostMortem")
 		os.Exit(1)
 	}
+
+	// NotificationReconciler — sends notifications on issue state changes and handles escalation
+	if err = (&controllers.NotificationReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Notification")
+		os.Exit(1)
+	}
+
+	// SLOReconciler — tracks SLO compliance with burn rate alerting
+	if err = (&controllers.SLOReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "SLO")
+		os.Exit(1)
+	}
+
+	// SLAReconciler — monitors SLA compliance for incident response/resolution
+	if err = (&controllers.SLAReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "SLA")
+		os.Exit(1)
+	}
+
+	// ApprovalReconciler — manages approval workflows for remediation actions
+	if err = (&controllers.ApprovalReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Approval")
+		os.Exit(1)
+	}
+
+	// FederationReconciler — manages multi-cluster registration and cross-cluster correlation
+	if err = (&controllers.FederationReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Federation")
+		os.Exit(1)
+	}
+
+	// ChaosReconciler — manages chaos engineering experiments
+	if err = (&controllers.ChaosReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Chaos")
+		os.Exit(1)
+	}
+
+	// REST API Gateway — provides HTTP API access to AIOps resources
+	apiServer := rest.NewAPIServer(mgr.GetClient(), ":8090")
+	if err := mgr.Add(apiServer); err != nil {
+		setupLog.Error(err, "unable to add REST API server")
+		os.Exit(1)
+	}
+
+	// RBAC Manager — ensure default roles exist
+	rbacMgr := controllers.NewRBACManager(mgr.GetClient())
+	go func() {
+		// Wait for cache sync then ensure roles
+		<-mgr.Elected()
+		if err := rbacMgr.EnsureRoles(context.Background()); err != nil {
+			setupLog.Error(err, "failed to ensure RBAC roles")
+		}
+	}()
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
