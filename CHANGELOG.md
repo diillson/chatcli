@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.70.2](https://github.com/diillson/chatcli/compare/v1.70.1...v1.70.2) (2026-03-19)
+
+
+### Bug Fixes
+
+* **bootstrap,copilot:** use detectProjectDir for bootstrap and fix nil response panic ([#631](https://github.com/diillson/chatcli/issues/631)) ([caff01d](https://github.com/diillson/chatcli/commit/caff01da49d061768feca63f2909f8bc89308d40))
+
 ## [1.70.1](https://github.com/diillson/chatcli/compare/v1.70.0...v1.70.1) (2026-03-18)
 
 
