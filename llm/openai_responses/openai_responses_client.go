@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -323,6 +324,182 @@ func buildOAuthPayload(history []models.Message, prompt string) (string, []map[s
 	}
 
 	return inst, input
+}
+
+// ListModels fetches available models. For OAuth tokens it uses the ChatGPT
+// backend endpoint; for API keys it uses the standard OpenAI /v1/models.
+func (c *OpenAIResponsesClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+	isOAuth := strings.HasPrefix(c.apiKey, "oauth:")
+
+	if isOAuth {
+		return c.listModelsOAuth(ctx)
+	}
+	return c.listModelsAPIKey(ctx)
+}
+
+// listModelsOAuth fetches models from the ChatGPT backend (chatgpt.com).
+func (c *OpenAIResponsesClient) listModelsOAuth(ctx context.Context) ([]client.ModelInfo, error) {
+	// ChatGPT backend models endpoint
+	baseURL := utils.GetEnvOrDefault("OPENAI_RESPONSES_API_URL", config.OpenAIOAuthResponsesURL)
+	// Derive backend-api/models from the codex/responses URL
+	modelsURL := strings.TrimSuffix(baseURL, "/codex/responses") + "/models"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch ChatGPT models: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read models response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ChatGPT /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+	}
+
+	// ChatGPT backend returns {"models": [{"slug": "gpt-4o", "title": "GPT-4o", ...}]}
+	// or {"categories": [..., {"default_model": "...", "browsing_model": "..."}]}
+	var result struct {
+		Models []struct {
+			Slug  string `json:"slug"`
+			Title string `json:"title"`
+		} `json:"models"`
+		// Alternative format with categories
+		Categories []struct {
+			DefaultModel string `json:"default_model"`
+			HumanName    string `json:"human_category_name"`
+		} `json:"categories"`
+	}
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode models response: %w", err)
+	}
+
+	seen := make(map[string]bool)
+	var modelList []client.ModelInfo
+
+	// Parse models array
+	for _, m := range result.Models {
+		if m.Slug == "" || seen[m.Slug] {
+			continue
+		}
+		seen[m.Slug] = true
+		displayName := m.Title
+		if displayName == "" {
+			displayName = m.Slug
+		}
+		modelList = append(modelList, client.ModelInfo{
+			ID:          m.Slug,
+			DisplayName: displayName,
+			Source:      client.ModelSourceAPI,
+		})
+		if _, ok := catalog.Resolve(catalog.ProviderOpenAI, m.Slug); !ok {
+			catalog.Register(catalog.ModelMeta{
+				ID:           m.Slug,
+				Aliases:      []string{m.Slug},
+				DisplayName:  displayName,
+				Provider:     catalog.ProviderOpenAI,
+				PreferredAPI: catalog.APIResponses,
+			})
+		}
+	}
+
+	// Parse categories (alternative format)
+	for _, cat := range result.Categories {
+		slug := cat.DefaultModel
+		if slug == "" || seen[slug] {
+			continue
+		}
+		seen[slug] = true
+		modelList = append(modelList, client.ModelInfo{
+			ID:          slug,
+			DisplayName: slug,
+			Source:      client.ModelSourceAPI,
+		})
+		if _, ok := catalog.Resolve(catalog.ProviderOpenAI, slug); !ok {
+			catalog.Register(catalog.ModelMeta{
+				ID:           slug,
+				Aliases:      []string{slug},
+				DisplayName:  slug,
+				Provider:     catalog.ProviderOpenAI,
+				PreferredAPI: catalog.APIResponses,
+			})
+		}
+	}
+
+	c.logger.Info("Fetched OpenAI models via OAuth", zap.Int("count", len(modelList)))
+	return modelList, nil
+}
+
+// listModelsAPIKey fetches models from the standard OpenAI /v1/models endpoint.
+func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.ModelInfo, error) {
+	modelsURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
+	modelsURL = strings.TrimSuffix(modelsURL, "/chat/completions") + "/models"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch OpenAI models: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read models response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OpenAI /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode models response: %w", err)
+	}
+
+	var modelList []client.ModelInfo
+	for _, m := range result.Data {
+		id := strings.ToLower(m.ID)
+		if !strings.HasPrefix(id, "gpt-") && !strings.HasPrefix(id, "o1-") &&
+			!strings.HasPrefix(id, "o3-") && !strings.HasPrefix(id, "o4-") &&
+			!strings.HasPrefix(id, "chatgpt-") {
+			continue
+		}
+		modelList = append(modelList, client.ModelInfo{
+			ID:          m.ID,
+			DisplayName: m.ID,
+			Source:      client.ModelSourceAPI,
+		})
+		if _, ok := catalog.Resolve(catalog.ProviderOpenAI, m.ID); !ok {
+			catalog.Register(catalog.ModelMeta{
+				ID:           m.ID,
+				Aliases:      []string{m.ID},
+				DisplayName:  m.ID,
+				Provider:     catalog.ProviderOpenAI,
+				PreferredAPI: catalog.APIResponses,
+			})
+		}
+	}
+
+	c.logger.Info("Fetched OpenAI models (Responses API key)", zap.Int("count", len(modelList)))
+	return modelList, nil
 }
 
 func buildTextFromHistory(history []models.Message, prompt string) string {

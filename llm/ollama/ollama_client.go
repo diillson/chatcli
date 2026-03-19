@@ -19,6 +19,7 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -171,6 +172,61 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	}
 
 	return response, nil
+}
+
+// ListModels fetches available models from the Ollama /api/tags endpoint.
+func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+	tagsURL := c.baseURL + "/api/tags"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tagsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch Ollama models: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read models response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Ollama /api/tags returned %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode models response: %w", err)
+	}
+
+	var modelList []client.ModelInfo
+	for _, m := range result.Models {
+		modelList = append(modelList, client.ModelInfo{
+			ID:          m.Name,
+			DisplayName: m.Name,
+			Source:      client.ModelSourceAPI,
+		})
+
+		if _, ok := catalog.Resolve(catalog.ProviderOllama, m.Name); !ok {
+			catalog.Register(catalog.ModelMeta{
+				ID:          m.Name,
+				Aliases:     []string{m.Name},
+				DisplayName: m.Name,
+				Provider:    catalog.ProviderOllama,
+			})
+		}
+	}
+
+	c.logger.Info("Fetched Ollama models", zap.Int("count", len(modelList)))
+	return modelList, nil
 }
 
 // filterThinking remove partes de "pensamento em voz alta" da resposta.

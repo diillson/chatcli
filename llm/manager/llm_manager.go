@@ -59,6 +59,9 @@ type LLMManager interface {
 	// plus provider-specific configuration. Supports all providers including StackSpot
 	// (needs client_id, client_key, realm, agent_id) and Ollama (needs base_url).
 	CreateClientWithConfig(provider, model, apiKey string, providerConfig map[string]string) (client.LLMClient, error)
+	// ListModelsForProvider lists available models for a provider, either dynamically
+	// from the provider's API (if supported) or from the static catalog.
+	ListModelsForProvider(ctx context.Context, provider string) ([]client.ModelInfo, error)
 }
 
 // LLMManagerImpl gerencia diferentes clientes LLM e o TokenManager
@@ -395,6 +398,44 @@ func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMCli
 	}
 
 	return clientInstance, nil
+}
+
+// ListModelsForProvider lists available models for a provider. If the provider's
+// client implements client.ModelLister, it fetches models dynamically from the API.
+// Otherwise, it falls back to the static catalog.
+func (m *LLMManagerImpl) ListModelsForProvider(ctx context.Context, provider string) ([]client.ModelInfo, error) {
+	factoryFunc, ok := m.clients[provider]
+	if !ok {
+		return nil, fmt.Errorf("erro: Provedor LLM '%s' não suportado ou não configurado", provider)
+	}
+
+	// Create a temporary client to check if it supports model listing
+	tempClient, err := factoryFunc("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client for model listing: %w", err)
+	}
+
+	if lister, ok := tempClient.(client.ModelLister); ok {
+		models, err := lister.ListModels(ctx)
+		if err != nil {
+			m.logger.Warn("Failed to fetch models dynamically, falling back to catalog",
+				zap.String("provider", provider), zap.Error(err))
+		} else if len(models) > 0 {
+			return models, nil
+		}
+	}
+
+	// Fallback to static catalog
+	metas := catalog.ListByProvider(provider)
+	var result []client.ModelInfo
+	for _, meta := range metas {
+		result = append(result, client.ModelInfo{
+			ID:          meta.ID,
+			DisplayName: meta.DisplayName,
+			Source:      client.ModelSourceCatalog,
+		})
+	}
+	return result, nil
 }
 
 // GetTokenManager retorna o TokenManager se ele estiver configurado.

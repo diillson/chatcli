@@ -2,9 +2,13 @@ package catalog
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/diillson/chatcli/config"
 )
+
+// mu protects the registry for concurrent read/write access.
+var mu sync.RWMutex
 
 // Provider names (alinhado com o restante do projeto)
 const (
@@ -74,6 +78,17 @@ var registry = []ModelMeta{
 		ID:              "gpt-5.3-codex",
 		Aliases:         []string{"gpt-5.3", "gpt-5.3-mini", "gpt-5.3-nano"},
 		DisplayName:     "GPT-5.3",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   50000,
+		MaxOutputTokens: 50000,
+		//PreferredAPI:    APIChatCompletions, // Possivel Roolback para APIResponses
+		PreferredAPI: APIResponses,
+		Capabilities: []string{"json_mode", "tools"},
+	},
+	{
+		ID:              "gpt-5.4",
+		Aliases:         []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"},
+		DisplayName:     "GPT-5.4",
 		Provider:        ProviderOpenAI,
 		ContextWindow:   50000,
 		MaxOutputTokens: 50000,
@@ -396,6 +411,8 @@ func Resolve(provider, model string) (ModelMeta, bool) {
 	if model == "" {
 		return ModelMeta{}, false
 	}
+	mu.RLock()
+	defer mu.RUnlock()
 	m := strings.ToLower(model)
 	p := strings.ToUpper(provider)
 
@@ -551,7 +568,39 @@ func HasCapability(provider, model, capability string) bool {
 
 // Lista (best-effort) de todos ModelMeta cadastrados (pode ser útil para debug).
 func ListAll() []ModelMeta {
+	mu.RLock()
+	defer mu.RUnlock()
 	out := make([]ModelMeta, len(registry))
 	copy(out, registry)
+	return out
+}
+
+// Register adds a ModelMeta to the registry. If a model with the same
+// Provider+ID already exists, it is replaced (to support dynamic refresh).
+func Register(meta ModelMeta) {
+	mu.Lock()
+	defer mu.Unlock()
+	p := strings.ToUpper(meta.Provider)
+	id := strings.ToLower(meta.ID)
+	for i, existing := range registry {
+		if strings.ToUpper(existing.Provider) == p && strings.ToLower(existing.ID) == id {
+			registry[i] = meta
+			return
+		}
+	}
+	registry = append(registry, meta)
+}
+
+// ListByProvider returns all ModelMeta entries for a given provider.
+func ListByProvider(provider string) []ModelMeta {
+	mu.RLock()
+	defer mu.RUnlock()
+	p := strings.ToUpper(provider)
+	var out []ModelMeta
+	for _, meta := range registry {
+		if strings.ToUpper(meta.Provider) == p {
+			out = append(out, meta)
+		}
+	}
 	return out
 }

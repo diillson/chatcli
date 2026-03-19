@@ -88,6 +88,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 			cli.Client = client
 			cli.Provider = prevProvider
 			cli.Model = prevModel
+			cli.refreshModelCache()
 			fmt.Println(i18n.T("status.reload_success_preserved"))
 			return
 		}
@@ -332,6 +333,7 @@ func (cli *ChatCLI) ApplyOverrides(mgr manager.LLMManager, provider, model strin
 	cli.Client = newClient
 	cli.Provider = prov
 	cli.Model = mod
+	cli.refreshModelCache()
 	return nil
 }
 

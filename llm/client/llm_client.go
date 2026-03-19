@@ -23,6 +23,27 @@ func (e *LLMError) Error() string {
 	return fmt.Sprintf("LLMError: %d - %s", e.Code, e.Message)
 }
 
+// ModelSource indicates where a model listing came from.
+type ModelSource string
+
+const (
+	ModelSourceAPI     ModelSource = "api"     // fetched dynamically from provider API
+	ModelSourceCatalog ModelSource = "catalog" // static catalog fallback
+)
+
+// ModelInfo represents a model available from a provider's API.
+type ModelInfo struct {
+	ID          string
+	DisplayName string
+	Source      ModelSource // "api" or "catalog"
+}
+
+// ModelLister is an optional interface that LLM clients can implement
+// to support listing available models from the provider's API.
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]ModelInfo, error)
+}
+
 // LLMClient define os métodos que um cliente LLM deve implementar
 type LLMClient interface {
 	// GetModelName retorna o nome do modelo de linguagem utilizado pelo cliente.

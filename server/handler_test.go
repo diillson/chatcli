@@ -55,6 +55,9 @@ func (m *mockLLMManager) SetStackSpotAgentID(agentID string)     {}
 func (m *mockLLMManager) GetStackSpotRealm() string              { return "" }
 func (m *mockLLMManager) GetStackSpotAgentID() string            { return "" }
 func (m *mockLLMManager) RefreshProviders()                      {}
+func (m *mockLLMManager) ListModelsForProvider(_ context.Context, _ string) ([]client.ModelInfo, error) {
+	return nil, nil
+}
 func (m *mockLLMManager) CreateClientWithKey(provider, model, apiKey string) (client.LLMClient, error) {
 	args := m.Called(provider, model, apiKey)
 	if args.Get(0) == nil {

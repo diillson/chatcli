@@ -80,12 +80,6 @@ var CommandFlags = map[string]map[string][]prompt.Suggest{
 		"-i":   {},
 		"--ai": {},
 	},
-	"/switch": {
-		"--model":      {},
-		"--max-tokens": {},
-		"--realm":      {},
-		"--agent-id":   {},
-	},
 	"/session": {
 		"new":    {},
 		"save":   {},
@@ -204,6 +198,10 @@ type ChatCLI struct {
 	// Background memory annotation worker
 	memWorker        *memoryWorker
 	sessionStartTime time.Time // for session duration tracking
+
+	// Cached provider models for autocomplete (populated asynchronously)
+	cachedModels   []client.ModelInfo
+	cachedModelsMu sync.RWMutex
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
@@ -328,6 +326,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	} else {
 		cli.commandHistory = history
 	}
+
+	// Pre-fetch available models for autocomplete
+	cli.refreshModelCache()
 
 	return cli, nil
 }
