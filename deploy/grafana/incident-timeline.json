@@ -1,0 +1,155 @@
+{
+  "__inputs": [
+    { "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus" }
+  ],
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "title": "Incident Lifecycle",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 3 }] } } },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Critical Issues (Active)",
+      "type": "stat",
+      "targets": [{ "expr": "sum(chatcli_operator_issues_total{severity=\"critical\",state=~\"Detected|Analyzing|Remediating\"}) or vector(0)", "legendFormat": "Critical" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 3 }, { "color": "red", "value": 10 }] } } },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Escalated Issues",
+      "type": "stat",
+      "targets": [{ "expr": "sum(increase(chatcli_operator_issues_total{state=\"Escalated\"}[24h])) or vector(0)", "legendFormat": "Escalated" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Resolved (24h)",
+      "type": "stat",
+      "targets": [{ "expr": "sum(increase(chatcli_operator_issues_total{state=\"Resolved\"}[24h])) or vector(0)", "legendFormat": "Resolved" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } } },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Anomalies Processed (24h)",
+      "type": "stat",
+      "targets": [{ "expr": "sum(increase(chatcli_operator_anomalies_processed_total[24h])) or vector(0)", "legendFormat": "Anomalies" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } } },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Issues from Correlation",
+      "type": "stat",
+      "targets": [{ "expr": "sum(increase(chatcli_operator_issues_created_by_correlation_total[24h])) or vector(0)", "legendFormat": "Correlated" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } } },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Escalation Levels Reached",
+      "type": "stat",
+      "targets": [{ "expr": "sum(increase(chatcli_operator_escalation_level_reached[24h])) or vector(0)", "legendFormat": "Escalations" }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "title": "Notification Delivery",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 15, "stacking": { "mode": "normal" } } } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "title": "Notifications by Channel",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum by (channel_type) (increase(chatcli_operator_notifications_sent_total[5m]))", "legendFormat": "{{channel_type}}" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 15 } } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "title": "Notification Failures",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum by (channel_type, reason) (increase(chatcli_operator_notifications_failed_total[5m]))", "legendFormat": "{{channel_type}} - {{reason}}" }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "title": "Approval Workflow",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 15 } } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "title": "Approval Decisions",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum by (mode, result) (increase(chatcli_operator_approvals_total[1h]))", "legendFormat": "{{mode}}/{{result}}" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "title": "Approval Decision Latency",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(chatcli_operator_approval_duration_seconds_bucket[30m]))", "legendFormat": "p50 {{mode}}" },
+        { "expr": "histogram_quantile(0.95, rate(chatcli_operator_approval_duration_seconds_bucket[30m]))", "legendFormat": "p95 {{mode}}" }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "title": "Federation",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 24 },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Connected Clusters",
+      "type": "stat",
+      "targets": [{ "expr": "chatcli_operator_federation_clusters_total{status=\"connected\"} or vector(0)", "legendFormat": "Connected" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } } },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 24 },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Cross-Cluster Issues",
+      "type": "stat",
+      "targets": [{ "expr": "chatcli_operator_federation_cross_cluster_issues_total or vector(0)", "legendFormat": "Cross-cluster" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } } },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 24 },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Cascade Detected",
+      "type": "stat",
+      "targets": [{ "expr": "chatcli_operator_federation_cascade_detected_total or vector(0)", "legendFormat": "Cascades" }]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["chatcli", "aiops", "incidents", "notifications", "approvals", "federation"],
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "ChatCLI AIOps - Incident Timeline & Workflows",
+  "uid": "chatcli-incident-timeline"
+}

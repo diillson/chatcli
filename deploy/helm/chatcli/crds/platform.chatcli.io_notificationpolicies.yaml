@@ -1,0 +1,312 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: notificationpolicies.
+spec:
+  group: ""
+  names:
+    kind: NotificationPolicy
+    listKind: NotificationPolicyList
+    plural: notificationpolicies
+    shortNames:
+    - np
+    singular: notificationpolicy
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.enabled
+      name: Enabled
+      type: boolean
+    - jsonPath: .spec.channels
+      name: Channels
+      type: integer
+    - jsonPath: .status.totalSent
+      name: Sent
+      type: integer
+    - jsonPath: .status.failedCount
+      name: Failed
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: ""
+    schema:
+      openAPIV3Schema:
+        description: NotificationPolicy defines notification delivery rules and channels.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NotificationPolicySpec defines the desired state of NotificationPolicy.
+            properties:
+              channels:
+                description: Channels available for notification delivery.
+                items:
+                  description: NotificationChannel defines a notification delivery
+                    channel.
+                  properties:
+                    config:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        Config holds channel-specific configuration.
+                        Slack: webhook_url, channel, username
+                        PagerDuty: routing_key, severity_map
+                        OpsGenie: api_key, responders, tags
+                        Email: smtp_host, smtp_port, smtp_user, smtp_password, from, to, tls_skip_verify
+                        Webhook: url, method, headers, secret
+                        Teams: webhook_url
+                      type: object
+                    name:
+                      description: Name is a unique identifier for this channel.
+                      type: string
+                    secretRef:
+                      description: |-
+                        SecretRef references a Secret containing sensitive config values (api_key, password, etc.).
+                        Keys from the secret override keys in Config.
+                      properties:
+                        name:
+                          description: Name is the Secret name.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type:
+                      description: Type of notification channel.
+                      enum:
+                      - slack
+                      - pagerduty
+                      - opsgenie
+                      - email
+                      - webhook
+                      - teams
+                      type: string
+                  required:
+                  - config
+                  - name
+                  - type
+                  type: object
+                type: array
+              enabled:
+                default: true
+                description: Enabled activates this policy.
+                type: boolean
+              rules:
+                description: Rules define when and where to send notifications.
+                items:
+                  description: NotificationRule defines matching criteria for when
+                    to send notifications.
+                  properties:
+                    channels:
+                      description: Channels lists channel names (from Spec.Channels)
+                        to send to when matched.
+                      items:
+                        type: string
+                      type: array
+                    name:
+                      description: Name is a human-readable identifier for this rule.
+                      type: string
+                    namespaces:
+                      description: Namespaces to match (empty = all).
+                      items:
+                        type: string
+                      type: array
+                    resourceKinds:
+                      description: ResourceKinds to match (empty = all).
+                      items:
+                        type: string
+                      type: array
+                    severities:
+                      description: Severities to match (empty = all).
+                      items:
+                        description: IssueSeverity represents the severity level of
+                          an issue.
+                        enum:
+                        - critical
+                        - high
+                        - medium
+                        - low
+                        type: string
+                      type: array
+                    signalTypes:
+                      description: SignalTypes to match (empty = all).
+                      items:
+                        type: string
+                      type: array
+                    states:
+                      description: States to match — which issue states trigger a
+                        notification.
+                      items:
+                        description: IssueState represents the lifecycle state of
+                          an issue.
+                        enum:
+                        - Detected
+                        - Analyzing
+                        - Remediating
+                        - Resolved
+                        - Escalated
+                        - Failed
+                        type: string
+                      type: array
+                  required:
+                  - channels
+                  - name
+                  type: object
+                type: array
+              templates:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Templates are custom Go text/template strings keyed by event type.
+                  Supported keys: issue_created, issue_resolved, issue_escalated, remediation_started,
+                  remediation_completed, remediation_failed.
+                type: object
+              throttle:
+                description: Throttle controls rate limiting.
+                properties:
+                  deduplicationWindow:
+                    default: 5m
+                    description: DeduplicationWindow suppresses duplicate notifications
+                      within this window (e.g., "5m", "15m").
+                    type: string
+                  groupingWindow:
+                    default: 1m
+                    description: GroupingWindow groups related notifications within
+                      this window into a single message.
+                    type: string
+                  maxPerHour:
+                    default: 10
+                    description: MaxPerHour limits the number of notifications per
+                      hour per issue.
+                    format: int32
+                    type: integer
+                type: object
+            required:
+            - channels
+            - enabled
+            - rules
+            type: object
+          status:
+            description: NotificationPolicyStatus defines the observed state of NotificationPolicy.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              failedCount:
+                description: FailedCount is the total number of failed deliveries.
+                format: int64
+                type: integer
+              lastNotifiedAt:
+                description: LastNotifiedAt is when the last notification was sent.
+                format: date-time
+                type: string
+              recentDeliveries:
+                description: RecentDeliveries tracks the last 20 delivery attempts.
+                items:
+                  description: NotificationDeliveryRecord tracks a single notification
+                    delivery.
+                  properties:
+                    channel:
+                      description: Channel name.
+                      type: string
+                    error:
+                      description: Error message if delivery failed.
+                      type: string
+                    sentAt:
+                      description: SentAt timestamp.
+                      format: date-time
+                      type: string
+                    success:
+                      description: Success indicates if delivery succeeded.
+                      type: boolean
+                  required:
+                  - channel
+                  - sentAt
+                  - success
+                  type: object
+                type: array
+              totalSent:
+                description: TotalSent is the total number of notifications sent.
+                format: int64
+                type: integer
+            required:
+            - failedCount
+            - totalSent
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
