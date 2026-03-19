@@ -375,8 +375,8 @@ func (c *OpenAIResponsesClient) listModelsOAuth(ctx context.Context) ([]client.M
 		} `json:"models"`
 		// Alternative format with categories
 		Categories []struct {
-			DefaultModel  string `json:"default_model"`
-			HumanName     string `json:"human_category_name"`
+			DefaultModel string `json:"default_model"`
+			HumanName    string `json:"human_category_name"`
 		} `json:"categories"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {

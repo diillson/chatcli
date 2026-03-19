@@ -267,10 +267,10 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	// OpenAI-compatible format: {"data": [{"id": "...", "name": "...", ...}]}
 	var result struct {
 		Data []struct {
-			ID           string            `json:"id"`
-			Name         string            `json:"name"`
-			ModelPickerEnabled bool        `json:"model_picker_enabled"`
-			Capabilities map[string]interface{} `json:"capabilities"`
+			ID                 string                 `json:"id"`
+			Name               string                 `json:"name"`
+			ModelPickerEnabled bool                   `json:"model_picker_enabled"`
+			Capabilities       map[string]interface{} `json:"capabilities"`
 		} `json:"data"`
 	}
 
