@@ -1,0 +1,135 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: auditevents.
+spec:
+  group: ""
+  names:
+    kind: AuditEvent
+    listKind: AuditEventList
+    plural: auditevents
+    shortNames:
+    - ae
+    singular: auditevent
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.eventType
+      name: EventType
+      type: string
+    - jsonPath: .spec.actor.name
+      name: Actor
+      type: string
+    - jsonPath: .spec.resource.name
+      name: Resource
+      type: string
+    - jsonPath: .spec.severity
+      name: Severity
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: ""
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AuditEvent is an immutable record of an action in the AIOps platform.
+          AuditEvents are append-only and should not be modified after creation.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AuditEventSpec defines the immutable audit event record.
+            properties:
+              actor:
+                description: Actor who performed the action.
+                properties:
+                  controller:
+                    description: Controller identifies which controller generated
+                      this event.
+                    type: string
+                  name:
+                    description: Name identifies the actor.
+                    type: string
+                  type:
+                    description: Type of actor (system/user/controller).
+                    type: string
+                required:
+                - name
+                - type
+                type: object
+              correlationId:
+                description: CorrelationID links related audit events (e.g., incident
+                  ID).
+                type: string
+              details:
+                additionalProperties:
+                  type: string
+                description: Details contains event-specific key-value pairs.
+                type: object
+              eventType:
+                description: |-
+                  EventType classifies the event.
+                  Supported: issue_created, issue_resolved, issue_escalated, remediation_started,
+                  remediation_completed, remediation_failed, approval_requested, approval_granted,
+                  approval_rejected, approval_expired, notification_sent, slo_violation, sla_breach,
+                  pattern_learned, config_changed, cluster_connected, cluster_disconnected,
+                  escalation_triggered, postmortem_created, runbook_generated.
+                type: string
+              resource:
+                description: Resource affected by the action.
+                properties:
+                  kind:
+                    description: Kind of the resource.
+                    type: string
+                  name:
+                    description: Name of the resource.
+                    type: string
+                  namespace:
+                    description: Namespace of the resource.
+                    type: string
+                  uid:
+                    description: UID of the resource.
+                    type: string
+                required:
+                - kind
+                - name
+                - namespace
+                type: object
+              severity:
+                default: info
+                description: Severity of the audit event (info/warning/critical).
+                type: string
+              timestamp:
+                description: Timestamp of when the event occurred.
+                format: date-time
+                type: string
+            required:
+            - actor
+            - eventType
+            - resource
+            - severity
+            - timestamp
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}

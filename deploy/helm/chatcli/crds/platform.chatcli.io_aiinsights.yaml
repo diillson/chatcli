@@ -1,111 +1,126 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: aiinsights.platform.chatcli.io
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.2
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: aiinsights.
 spec:
-  group: platform.chatcli.io
+  group: ""
   names:
     kind: AIInsight
     listKind: AIInsightList
     plural: aiinsights
-    singular: aiinsight
     shortNames:
-      - ai
+    - ai
+    singular: aiinsight
   scope: Namespaced
   versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      subresources:
-        status: {}
-      additionalPrinterColumns:
-        - name: Issue
-          type: string
-          jsonPath: .spec.issueRef.name
-        - name: Provider
-          type: string
-          jsonPath: .spec.provider
-        - name: Confidence
-          type: number
-          jsonPath: .status.confidence
-        - name: Age
-          type: date
-          jsonPath: .metadata.creationTimestamp
-      schema:
-        openAPIV3Schema:
-          description: AIInsight is the Schema for the aiinsights API.
-          type: object
-          properties:
-            apiVersion:
-              type: string
-            kind:
-              type: string
-            metadata:
-              type: object
-            spec:
-              description: AIInsightSpec defines the input for an AI analysis request.
-              type: object
-              required:
-                - issueRef
-                - provider
-                - model
-              properties:
-                issueRef:
-                  description: Reference to the Issue to analyze.
-                  type: object
-                  required:
-                    - name
-                  properties:
-                    name:
-                      type: string
-                provider:
-                  description: AI provider to use for the analysis.
-                  type: string
-                model:
-                  description: AI model identifier.
-                  type: string
-            status:
-              description: AIInsightStatus defines the observed state of an AIInsight.
-              type: object
-              properties:
-                analysis:
-                  description: AI-generated analysis text.
-                  type: string
-                confidence:
-                  description: Confidence score from 0.0 to 1.0.
-                  type: number
-                  format: double
-                recommendations:
-                  description: List of AI-generated recommendations.
-                  type: array
-                  items:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.issueRef.name
+      name: Issue
+      type: string
+    - jsonPath: .spec.provider
+      name: Provider
+      type: string
+    - jsonPath: .status.confidence
+      name: Confidence
+      type: number
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: ""
+    schema:
+      openAPIV3Schema:
+        description: AIInsight contains AI-generated analysis and recommendations.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AIInsightSpec defines the desired state of an AIInsight.
+            properties:
+              issueRef:
+                description: IssueRef references the parent Issue.
+                properties:
+                  name:
                     type: string
-                suggestedActions:
-                  description: Concrete remediation actions suggested by the AI.
-                  type: array
-                  items:
-                    type: object
-                    required:
-                      - name
-                      - action
-                    properties:
-                      name:
-                        description: Human-readable step name.
-                        type: string
-                      action:
-                        description: Remediation action type.
-                        type: string
-                      description:
-                        description: Why this action is recommended.
-                        type: string
-                      params:
-                        description: Action-specific parameters.
-                        type: object
-                        additionalProperties:
-                          type: string
-                generatedAt:
-                  description: Timestamp when the insight was generated.
+                required:
+                - name
+                type: object
+              model:
+                description: Model is the LLM model used for analysis.
+                type: string
+              provider:
+                description: Provider is the LLM provider used for analysis.
+                type: string
+            required:
+            - issueRef
+            - model
+            - provider
+            type: object
+          status:
+            description: AIInsightStatus defines the observed state of an AIInsight.
+            properties:
+              analysis:
+                description: Analysis is the AI-generated root cause analysis.
+                type: string
+              confidence:
+                description: Confidence is the AI's confidence in its analysis (0.0-1.0).
+                type: number
+              generatedAt:
+                description: GeneratedAt is when the analysis was generated.
+                format: date-time
+                type: string
+              recommendations:
+                description: Recommendations are AI-suggested actions (human-readable).
+                items:
                   type: string
-                  format: date-time
+                type: array
+              suggestedActions:
+                description: SuggestedActions are concrete remediation actions suggested
+                  by the AI.
+                items:
+                  description: SuggestedAction represents a concrete remediation action
+                    suggested by the AI.
+                  properties:
+                    action:
+                      description: Action is the remediation action type (ScaleDeployment,
+                        RestartDeployment, RollbackDeployment, PatchConfig).
+                      type: string
+                    description:
+                      description: Description explains why this action is recommended.
+                      type: string
+                    name:
+                      description: Name is a human-readable step name.
+                      type: string
+                    params:
+                      additionalProperties:
+                        type: string
+                      description: Params are action-specific parameters.
+                      type: object
+                  required:
+                  - action
+                  - name
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
