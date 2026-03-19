@@ -178,7 +178,8 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		respBodyBytes, err = io.ReadAll(resp.Body)
 		if err != nil {
 			t.Logger.Error("Erro ao ler o corpo da resposta", zap.Error(err))
-			return nil, err
+			_ = resp.Body.Close()
+			return resp, err
 		}
 		resp.Body = io.NopCloser(bytes.NewBuffer(respBodyBytes)) // Resetar o Body
 		// Remover dados sensíveis do corpo
