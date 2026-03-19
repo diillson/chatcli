@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.71.0](https://github.com/diillson/chatcli/compare/v1.70.2...v1.71.0) (2026-03-19)
+
+
+### Features
+
+* **providers:** add dynamic model listing from provider APIs with autocomplete ([#633](https://github.com/diillson/chatcli/issues/633)) ([a0bad4f](https://github.com/diillson/chatcli/commit/a0bad4f40b11445febbd1aca9c8158c9284ebde0))
+
 ## [1.70.2](https://github.com/diillson/chatcli/compare/v1.70.1...v1.70.2) (2026-03-19)
 
 
