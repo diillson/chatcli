@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.72.0](https://github.com/diillson/chatcli/compare/v1.71.0...v1.72.0) (2026-03-19)
+
+
+### Features
+
+* **operator:** AIOps Platform v2 — enterprise-grade incident management ([#635](https://github.com/diillson/chatcli/issues/635)) ([93f73da](https://github.com/diillson/chatcli/commit/93f73da8ec12ac30bfadf2f8ccf775be39f19c3f))
+
 ## [1.71.0](https://github.com/diillson/chatcli/compare/v1.70.2...v1.71.0) (2026-03-19)
 
 
