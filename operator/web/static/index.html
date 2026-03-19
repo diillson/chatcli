@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChatCLI AIOps Dashboard</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #1a1a2e;
+  --bg-card: #16213e;
+  --bg-card-hover: #1a2744;
+  --accent: #0f3460;
+  --highlight: #e94560;
+  --success: #00b4d8;
+  --warning: #f77f00;
+  --text: #e0e0e0;
+  --text-muted: #8892a4;
+  --text-dim: #5a6577;
+  --border: #2a3a5c;
+  --sev-critical: #ff4757;
+  --sev-high: #ff6348;
+  --sev-medium: #ffa502;
+  --sev-low: #2ed573;
+  --radius: 8px;
+  --shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+html { font-size: 14px; }
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== HEADER ===== */
+.header {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  padding: 0 1.5rem;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.header-left { display: flex; align-items: center; gap: 1rem; }
+.logo {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--highlight);
+  letter-spacing: -0.5px;
+}
+.logo span { color: var(--text); font-weight: 400; }
+.header-right { display: flex; align-items: center; gap: 1rem; }
+.refresh-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.refresh-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--sev-low);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.health-badge {
+  padding: 0.25rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.health-ok { background: rgba(46,213,115,0.15); color: var(--sev-low); }
+.health-err { background: rgba(255,71,87,0.15); color: var(--sev-critical); }
+
+/* ===== TABS ===== */
+.tab-bar {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  padding: 0 1.5rem;
+  gap: 0;
+  overflow-x: auto;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 0.75rem 1.25rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+  color: var(--highlight);
+  border-bottom-color: var(--highlight);
+}
+.tab-btn .badge {
+  margin-left: 0.4rem;
+  background: var(--highlight);
+  color: #fff;
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+/* ===== MAIN ===== */
+.main { flex: 1; padding: 1.5rem; max-width: 1600px; margin: 0 auto; width: 100%; }
+.page { display: none; }
+.page.active { display: block; }
+
+/* ===== CARDS ===== */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  transition: border-color 0.2s;
+}
+.stat-card:hover { border-color: var(--accent); }
+.stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem; }
+.stat-value { font-size: 1.75rem; font-weight: 700; }
+.stat-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+/* ===== GRID LAYOUTS ===== */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+
+/* ===== PANEL ===== */
+.panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.panel-header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.panel-title { font-size: 0.9rem; font-weight: 600; }
+.panel-body { padding: 1.25rem; }
+
+/* ===== TABLE ===== */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+td {
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid rgba(42,58,92,0.4);
+  vertical-align: top;
+}
+tr:hover td { background: rgba(15,52,96,0.15); }
+tr.expandable { cursor: pointer; }
+.expand-row td { padding: 0; }
+.expand-content {
+  padding: 1rem 1.5rem;
+  background: rgba(15,52,96,0.1);
+  font-size: 0.83rem;
+  line-height: 1.6;
+}
+.expand-content h4 { color: var(--highlight); margin: 0.75rem 0 0.3rem; font-size: 0.85rem; }
+.expand-content h4:first-child { margin-top: 0; }
+.expand-content p { margin-bottom: 0.4rem; }
+.expand-content ul { margin-left: 1.2rem; margin-bottom: 0.5rem; }
+
+/* ===== BADGES ===== */
+.badge-sev {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.badge-critical { background: rgba(255,71,87,0.2); color: var(--sev-critical); }
+.badge-high { background: rgba(255,99,72,0.2); color: var(--sev-high); }
+.badge-medium { background: rgba(255,165,2,0.2); color: var(--sev-medium); }
+.badge-low { background: rgba(46,213,115,0.2); color: var(--sev-low); }
+
+.badge-state {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.state-open, .state-firing, .state-pending { background: rgba(255,71,87,0.15); color: var(--sev-critical); }
+.state-acknowledged, .state-investigating, .state-inreview { background: rgba(255,165,2,0.15); color: var(--sev-medium); }
+.state-resolved, .state-closed, .state-approved, .state-healthy { background: rgba(46,213,115,0.15); color: var(--sev-low); }
+.state-rejected { background: rgba(255,71,87,0.15); color: var(--sev-critical); }
+.state-snoozed { background: rgba(0,180,216,0.15); color: var(--success); }
+.state-unknown, .state-draft { background: rgba(136,146,164,0.15); color: var(--text-muted); }
+
+/* ===== PIE CHART (CSS only) ===== */
+.pie-container { display: flex; align-items: center; gap: 2rem; padding: 1rem 0; }
+.pie {
+  width: 140px; height: 140px;
+  border-radius: 50%;
+  position: relative;
+  flex-shrink: 0;
+}
+.pie-center {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg-card);
+  width: 70px; height: 70px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+}
+.pie-center .num { font-size: 1.3rem; font-weight: 700; }
+.pie-center .lbl { font-size: 0.6rem; color: var(--text-muted); }
+.pie-legend { display: flex; flex-direction: column; gap: 0.5rem; }
+.legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+.legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+/* ===== TIMELINE ===== */
+.timeline { position: relative; padding-left: 1.5rem; }
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 0; bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+.timeline-item {
+  position: relative;
+  padding-bottom: 1rem;
+  font-size: 0.83rem;
+}
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -1.5rem;
+  top: 4px;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--highlight);
+}
+.timeline-time { font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.2rem; }
+.timeline-text { color: var(--text); }
+.timeline-type { color: var(--highlight); font-weight: 600; margin-right: 0.4rem; }
+
+/* ===== GAUGE BAR ===== */
+.gauge-bar {
+  height: 8px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 0.4rem 0;
+}
+.gauge-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+.gauge-ok { background: var(--sev-low); }
+.gauge-warn { background: var(--sev-medium); }
+.gauge-danger { background: var(--sev-critical); }
+
+/* ===== BURN RATES ===== */
+.burn-rates { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.burn-chip {
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: rgba(255,255,255,0.05);
+}
+.burn-ok { color: var(--sev-low); }
+.burn-warn { color: var(--sev-medium); }
+.burn-danger { color: var(--sev-critical); }
+
+/* ===== BUTTONS ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn:hover { background: var(--accent); border-color: var(--accent); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: var(--highlight); border-color: var(--highlight); color: #fff; }
+.btn-primary:hover { background: #d63851; }
+.btn-success { background: rgba(46,213,115,0.2); border-color: var(--sev-low); color: var(--sev-low); }
+.btn-success:hover { background: rgba(46,213,115,0.35); }
+.btn-danger { background: rgba(255,71,87,0.2); border-color: var(--sev-critical); color: var(--sev-critical); }
+.btn-danger:hover { background: rgba(255,71,87,0.35); }
+.btn-group { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+/* ===== FILTERS ===== */
+.filters {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.filter-select, .filter-input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  outline: none;
+}
+.filter-select:focus, .filter-input:focus { border-color: var(--highlight); }
+
+/* ===== INPUT ===== */
+.input-group { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
+.input-group label { font-size: 0.75rem; color: var(--text-muted); }
+.input-group input, .input-group textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+}
+.input-group input:focus, .input-group textarea:focus { border-color: var(--highlight); }
+
+/* ===== TOAST ===== */
+.toast-container {
+  position: fixed;
+  top: 70px;
+  right: 1.5rem;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.toast {
+  padding: 0.75rem 1.25rem;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  box-shadow: var(--shadow);
+  animation: slideIn 0.3s ease;
+  max-width: 380px;
+}
+.toast-success { background: #0d5a3c; color: #a8f0d4; border: 1px solid var(--sev-low); }
+.toast-error { background: #5a1520; color: #ffa5ad; border: 1px solid var(--sev-critical); }
+.toast-info { background: #0a3a5a; color: #a5dff0; border: 1px solid var(--success); }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* ===== LOADING ===== */
+.spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--highlight);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 2rem auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  flex-direction: column;
+  gap: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* ===== ERROR STATE ===== */
+.error-state {
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-muted);
+}
+.error-state p { margin-bottom: 1rem; font-size: 0.9rem; }
+
+/* ===== CLUSTER CARD ===== */
+.cluster-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+.cluster-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+.cluster-name { font-weight: 600; font-size: 1rem; }
+.cluster-detail { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+.cluster-detail b { color: var(--text); font-weight: 500; }
+
+/* ===== APPROVAL CARD ===== */
+.approval-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+.approval-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem; }
+.approval-name { font-weight: 600; font-size: 0.95rem; }
+.approval-meta { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+.approval-actions { display: flex; gap: 0.5rem; align-items: flex-end; margin-top: 0.75rem; }
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 900px) {
+  .grid-2 { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .pie-container { flex-direction: column; align-items: flex-start; }
+}
+@media (max-width: 600px) {
+  .header { padding: 0 1rem; }
+  .main { padding: 1rem; }
+  .tab-bar { padding: 0 0.5rem; }
+  .tab-btn { padding: 0.6rem 0.75rem; font-size: 0.8rem; }
+}
+
+/* ===== SCROLLBAR ===== */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* ===== EMPTY STATE ===== */
+.empty-state {
+  text-align: center;
+  padding: 2.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header-left">
+    <div class="logo">ChatCLI <span>AIOps</span></div>
+  </div>
+  <div class="header-right">
+    <div class="refresh-indicator">
+      <div class="refresh-dot" id="refreshDot"></div>
+      <span id="refreshTimer">Auto-refresh: 30s</span>
+    </div>
+    <span class="health-badge health-ok" id="healthBadge">Healthy</span>
+  </div>
+</header>
+
+<!-- TAB BAR -->
+<nav class="tab-bar" id="tabBar">
+  <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="incidents">Incidents</button>
+  <button class="tab-btn" data-tab="slos">SLOs</button>
+  <button class="tab-btn" data-tab="approvals">Approvals <span class="badge" id="approvalBadge" style="display:none">0</span></button>
+  <button class="tab-btn" data-tab="postmortems">PostMortems</button>
+  <button class="tab-btn" data-tab="clusters">Clusters</button>
+  <button class="tab-btn" data-tab="audit">Audit</button>
+</nav>
+
+<!-- MAIN CONTENT -->
+<main class="main">
+
+  <!-- OVERVIEW PAGE -->
+  <div class="page active" id="page-overview">
+    <div class="stats-grid" id="overviewStats"></div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Issues by Severity</span></div>
+        <div class="panel-body" id="severityPie"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Remediation Activity</span></div>
+        <div class="panel-body" id="remediationTimeline"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Recent Incidents</span></div>
+      <div class="panel-body table-wrap" id="recentIncidentsTable"></div>
+    </div>
+  </div>
+
+  <!-- INCIDENTS PAGE -->
+  <div class="page" id="page-incidents">
+    <div class="filters">
+      <select class="filter-select" id="incSeverityFilter">
+        <option value="">All Severities</option>
+        <option value="critical">Critical</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+      </select>
+      <select class="filter-select" id="incStateFilter">
+        <option value="">All States</option>
+        <option value="Open">Open</option>
+        <option value="Acknowledged">Acknowledged</option>
+        <option value="Investigating">Investigating</option>
+        <option value="Resolved">Resolved</option>
+        <option value="Snoozed">Snoozed</option>
+      </select>
+      <input class="filter-input" id="incNamespaceFilter" placeholder="Namespace..." style="width:150px">
+      <button class="btn btn-primary" onclick="loadIncidents()">Apply</button>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Incidents</span>
+        <span class="refresh-indicator" style="font-size:0.75rem; color: var(--text-muted);" id="incidentCount"></span>
+      </div>
+      <div class="panel-body table-wrap" id="incidentsTableBody"></div>
+    </div>
+  </div>
+
+  <!-- SLOS PAGE -->
+  <div class="page" id="page-slos">
+    <div class="grid-3" id="sloCards"></div>
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Active SLO Alerts</span></div>
+      <div class="panel-body" id="sloAlerts"></div>
+    </div>
+  </div>
+
+  <!-- APPROVALS PAGE -->
+  <div class="page" id="page-approvals">
+    <div class="filters">
+      <select class="filter-select" id="approvalStateFilter">
+        <option value="">All</option>
+        <option value="Pending" selected>Pending</option>
+        <option value="Approved">Approved</option>
+        <option value="Rejected">Rejected</option>
+      </select>
+      <button class="btn btn-primary" onclick="loadApprovals()">Apply</button>
+    </div>
+    <div id="approvalsList"></div>
+  </div>
+
+  <!-- POSTMORTEMS PAGE -->
+  <div class="page" id="page-postmortems">
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Post-Mortems</span></div>
+      <div class="panel-body table-wrap" id="postmortemsTableBody"></div>
+    </div>
+  </div>
+
+  <!-- CLUSTERS PAGE -->
+  <div class="page" id="page-clusters">
+    <div class="stats-grid" id="clusterSummary"></div>
+    <div class="grid-3" id="clusterCards"></div>
+  </div>
+
+  <!-- AUDIT PAGE -->
+  <div class="page" id="page-audit">
+    <div class="filters">
+      <input class="filter-input" id="auditSearch" placeholder="Search events..." style="width:220px">
+      <select class="filter-select" id="auditTypeFilter">
+        <option value="">All Types</option>
+        <option value="remediation">Remediation</option>
+        <option value="approval">Approval</option>
+        <option value="escalation">Escalation</option>
+        <option value="detection">Detection</option>
+      </select>
+      <select class="filter-select" id="auditSevFilter">
+        <option value="">All Severities</option>
+        <option value="critical">Critical</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+        <option value="info">Info</option>
+      </select>
+      <button class="btn btn-primary" onclick="loadAudit()">Apply</button>
+      <button class="btn" onclick="exportAudit()">Export JSON</button>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Audit Log</span>
+        <span style="font-size:0.75rem; color: var(--text-muted);" id="auditCount"></span>
+      </div>
+      <div class="panel-body table-wrap" id="auditTableBody"></div>
+    </div>
+  </div>
+
+</main>
+
+<!-- TOAST CONTAINER -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ============================================================
+// ChatCLI AIOps Dashboard - Pure Vanilla JS
+// ============================================================
+
+const API = '/api/v1';
+let currentTab = 'overview';
+let refreshInterval = null;
+let refreshCountdown = 30;
+let expandedRows = new Set();
+
+// ===== UTILITY FUNCTIONS =====
+
+async function apiFetch(path, opts = {}) {
+  try {
+    const res = await fetch(API + path, {
+      headers: { 'Content-Type': 'application/json', ...opts.headers },
+      ...opts,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || res.statusText);
+    }
+    return res.json();
+  } catch (e) {
+    console.error(`API error ${path}:`, e);
+    throw e;
+  }
+}
+
+async function apiPost(path, body) {
+  return apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
+}
+
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) { return document.querySelectorAll(sel); }
+
+function escapeHtml(str) {
+  if (!str) return '';
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function timeAgo(dateStr) {
+  if (!dateStr) return '-';
+  const now = Date.now();
+  const t = new Date(dateStr).getTime();
+  const diff = Math.max(0, now - t);
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return secs + 's ago';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  const days = Math.floor(hrs / 24);
+  return days + 'd ago';
+}
+
+function severityBadge(sev) {
+  const s = (sev || '').toLowerCase();
+  return `<span class="badge-sev badge-${s}">${escapeHtml(sev || 'unknown')}</span>`;
+}
+
+function stateBadge(state) {
+  const s = (state || '').toLowerCase().replace(/[\s_-]/g, '');
+  return `<span class="badge-state state-${s}">${escapeHtml(state || 'Unknown')}</span>`;
+}
+
+function showLoading(el) {
+  el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div><span>Loading...</span></div>';
+}
+
+function showError(el, msg, retryFn) {
+  el.innerHTML = `<div class="error-state"><p>${escapeHtml(msg)}</p>${retryFn ? '<button class="btn btn-primary" onclick="' + retryFn + '">Retry</button>' : ''}</div>`;
+}
+
+function showEmpty(el, msg) {
+  el.innerHTML = `<div class="empty-state">${escapeHtml(msg || 'No data available')}</div>`;
+}
+
+function toast(msg, type = 'info') {
+  const c = $('#toastContainer');
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, 4000);
+}
+
+// ===== TAB NAVIGATION =====
+
+function switchTab(tab) {
+  currentTab = tab;
+  $$('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  $$('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + tab));
+  expandedRows.clear();
+  loadCurrentTab();
+}
+
+$('#tabBar').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab-btn');
+  if (btn) switchTab(btn.dataset.tab);
+});
+
+// ===== AUTO-REFRESH =====
+
+function startRefresh() {
+  refreshCountdown = 30;
+  clearInterval(refreshInterval);
+  refreshInterval = setInterval(() => {
+    refreshCountdown--;
+    $('#refreshTimer').textContent = `Auto-refresh: ${refreshCountdown}s`;
+    if (refreshCountdown <= 0) {
+      refreshCountdown = 30;
+      loadCurrentTab();
+    }
+  }, 1000);
+}
+
+function loadCurrentTab() {
+  switch (currentTab) {
+    case 'overview': loadOverview(); break;
+    case 'incidents': loadIncidents(); break;
+    case 'slos': loadSLOs(); break;
+    case 'approvals': loadApprovals(); break;
+    case 'postmortems': loadPostMortems(); break;
+    case 'clusters': loadClusters(); break;
+    case 'audit': loadAudit(); break;
+  }
+  checkHealth();
+}
+
+// ===== HEALTH CHECK =====
+
+async function checkHealth() {
+  try {
+    const res = await fetch('/healthz');
+    const data = await res.json();
+    const badge = $('#healthBadge');
+    if (data.status === 'ok') {
+      badge.textContent = 'Healthy';
+      badge.className = 'health-badge health-ok';
+      $('#refreshDot').style.background = 'var(--sev-low)';
+    } else {
+      badge.textContent = 'Degraded';
+      badge.className = 'health-badge health-err';
+      $('#refreshDot').style.background = 'var(--sev-critical)';
+    }
+  } catch {
+    const badge = $('#healthBadge');
+    badge.textContent = 'Disconnected';
+    badge.className = 'health-badge health-err';
+    $('#refreshDot').style.background = 'var(--sev-critical)';
+  }
+}
+
+// ===== OVERVIEW PAGE =====
+
+async function loadOverview() {
+  loadOverviewStats();
+  loadSeverityPie();
+  loadRecentIncidents();
+  loadRemediationTimeline();
+}
+
+async function loadOverviewStats() {
+  const el = $('#overviewStats');
+  try {
+    const data = await apiFetch('/analytics/summary');
+    const s = data.spec || {};
+    const cards = [
+      { label: 'Active Issues', value: s.activeIssues ?? 0, color: 'var(--sev-critical)' },
+      { label: 'Resolved (24h)', value: s.resolvedLast24h ?? 0, color: 'var(--sev-low)' },
+      { label: 'MTTR', value: formatDuration(s.mttr), color: 'var(--success)' },
+      { label: 'Success Rate', value: ((s.successRate ?? 0) * 100).toFixed(1) + '%', color: 'var(--sev-low)' },
+      { label: 'SLO Budget', value: ((s.sloBudgetRemaining ?? 0) * 100).toFixed(1) + '%', color: 'var(--sev-medium)' },
+      { label: 'Active Clusters', value: s.activeClusters ?? 0, color: 'var(--success)' },
+    ];
+    el.innerHTML = cards.map(c => `
+      <div class="stat-card">
+        <div class="stat-label">${c.label}</div>
+        <div class="stat-value" style="color:${c.color}">${c.value}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    el.innerHTML = buildFallbackStats();
+  }
+}
+
+function buildFallbackStats() {
+  const cards = [
+    { label: 'Active Issues', value: '-' },
+    { label: 'Resolved (24h)', value: '-' },
+    { label: 'MTTR', value: '-' },
+    { label: 'Success Rate', value: '-' },
+    { label: 'SLO Budget', value: '-' },
+    { label: 'Active Clusters', value: '-' },
+  ];
+  return cards.map(c => `
+    <div class="stat-card">
+      <div class="stat-label">${c.label}</div>
+      <div class="stat-value" style="color:var(--text-muted)">${c.value}</div>
+    </div>
+  `).join('');
+}
+
+function formatDuration(val) {
+  if (!val) return '-';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') {
+    if (val < 60) return Math.round(val) + 's';
+    if (val < 3600) return Math.round(val / 60) + 'm';
+    return (val / 3600).toFixed(1) + 'h';
+  }
+  return String(val);
+}
+
+async function loadSeverityPie() {
+  const el = $('#severityPie');
+  try {
+    const data = await apiFetch('/incidents?pageSize=100');
+    const items = data.items || [];
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    items.forEach(i => {
+      const s = (i.severity || '').toLowerCase();
+      if (counts.hasOwnProperty(s)) counts[s]++;
+    });
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    if (total === 0) {
+      showEmpty(el, 'No incidents to display');
+      return;
+    }
+    const colors = { critical: 'var(--sev-critical)', high: 'var(--sev-high)', medium: 'var(--sev-medium)', low: 'var(--sev-low)' };
+    let gradParts = [];
+    let deg = 0;
+    for (const [sev, count] of Object.entries(counts)) {
+      if (count === 0) continue;
+      const pct = (count / total) * 360;
+      gradParts.push(`${colors[sev]} ${deg}deg ${deg + pct}deg`);
+      deg += pct;
+    }
+    el.innerHTML = `
+      <div class="pie-container">
+        <div class="pie" style="background: conic-gradient(${gradParts.join(', ')})">
+          <div class="pie-center"><span class="num">${total}</span><span class="lbl">Total</span></div>
+        </div>
+        <div class="pie-legend">
+          ${Object.entries(counts).map(([s, c]) => `
+            <div class="legend-item">
+              <div class="legend-dot" style="background:${colors[s]}"></div>
+              <span>${s.charAt(0).toUpperCase() + s.slice(1)}: ${c}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    showError(el, 'Failed to load severity data', 'loadSeverityPie()');
+  }
+}
+
+async function loadRecentIncidents() {
+  const el = $('#recentIncidentsTable');
+  try {
+    const data = await apiFetch('/incidents?pageSize=20');
+    const items = data.items || [];
+    if (items.length === 0) { showEmpty(el, 'No recent incidents'); return; }
+    el.innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Severity</th><th>State</th><th>Resource</th><th>Namespace</th><th>Age</th>
+        </tr></thead>
+        <tbody>
+          ${items.map(i => `<tr>
+            <td>${escapeHtml(i.name)}</td>
+            <td>${severityBadge(i.severity)}</td>
+            <td>${stateBadge(i.state)}</td>
+            <td>${escapeHtml((i.resource || {}).kind + '/' + (i.resource || {}).name)}</td>
+            <td>${escapeHtml(i.namespace)}</td>
+            <td>${timeAgo(i.creationTimestamp)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (e) {
+    showError(el, 'Failed to load recent incidents', 'loadRecentIncidents()');
+  }
+}
+
+async function loadRemediationTimeline() {
+  const el = $('#remediationTimeline');
+  try {
+    const data = await apiFetch('/incidents?pageSize=10');
+    const items = (data.items || []).filter(i => i.remediationAttempts > 0).slice(0, 10);
+    if (items.length === 0) {
+      showEmpty(el, 'No remediation activity');
+      return;
+    }
+    el.innerHTML = `<div class="timeline">
+      ${items.map(i => `
+        <div class="timeline-item">
+          <div class="timeline-time">${timeAgo(i.creationTimestamp)}</div>
+          <div class="timeline-text">
+            <span class="timeline-type">${escapeHtml(i.state)}</span>
+            ${escapeHtml(i.name)} - ${i.remediationAttempts} attempt(s)
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+  } catch (e) {
+    showError(el, 'Failed to load remediation activity', 'loadRemediationTimeline()');
+  }
+}
+
+// ===== INCIDENTS PAGE =====
+
+async function loadIncidents() {
+  const el = $('#incidentsTableBody');
+  showLoading(el);
+  const sev = $('#incSeverityFilter').value;
+  const state = $('#incStateFilter').value;
+  const ns = $('#incNamespaceFilter').value;
+  let q = '?pageSize=100';
+  if (sev) q += '&severity=' + encodeURIComponent(sev);
+  if (state) q += '&state=' + encodeURIComponent(state);
+  if (ns) q += '&namespace=' + encodeURIComponent(ns);
+  try {
+    const data = await apiFetch('/incidents' + q);
+    const items = data.items || [];
+    const total = (data.metadata || {}).totalCount || items.length;
+    $('#incidentCount').textContent = `${total} incident(s)`;
+    if (items.length === 0) { showEmpty(el, 'No incidents match the filters'); return; }
+    el.innerHTML = `<table>
+      <thead><tr>
+        <th></th><th>Name</th><th>Severity</th><th>State</th><th>Resource</th><th>Namespace</th><th>Risk</th><th>Age</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="incidentsTbody"></tbody>
+    </table>`;
+    const tbody = $('#incidentsTbody');
+    items.forEach((item, idx) => {
+      const id = 'inc-' + idx;
+      const isExpanded = expandedRows.has(id);
+      const mainRow = document.createElement('tr');
+      mainRow.className = 'expandable';
+      mainRow.innerHTML = `
+        <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td>${severityBadge(item.severity)}</td>
+        <td>${stateBadge(item.state)}</td>
+        <td>${escapeHtml((item.resource||{}).kind + '/' + (item.resource||{}).name)}</td>
+        <td>${escapeHtml(item.namespace)}</td>
+        <td>${item.riskScore != null ? item.riskScore.toFixed(1) : '-'}</td>
+        <td>${timeAgo(item.creationTimestamp)}</td>
+        <td class="btn-group">
+          ${item.state !== 'Resolved' ? `<button class="btn btn-success" onclick="event.stopPropagation(); ackIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Ack</button>` : ''}
+          ${item.state !== 'Resolved' ? `<button class="btn" onclick="event.stopPropagation(); snoozeIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Snooze</button>` : ''}
+        </td>
+      `;
+      mainRow.addEventListener('click', () => toggleIncidentExpand(id, item, mainRow));
+      tbody.appendChild(mainRow);
+      if (isExpanded) {
+        const expandRow = buildIncidentExpandRow(item);
+        tbody.appendChild(expandRow);
+      }
+    });
+  } catch (e) {
+    showError(el, 'Failed to load incidents: ' + e.message, 'loadIncidents()');
+  }
+}
+
+function toggleIncidentExpand(id, item, mainRow) {
+  if (expandedRows.has(id)) {
+    expandedRows.delete(id);
+    const next = mainRow.nextElementSibling;
+    if (next && next.classList.contains('expand-row')) next.remove();
+    mainRow.querySelector('td').innerHTML = '&#9654;';
+  } else {
+    expandedRows.add(id);
+    const expandRow = buildIncidentExpandRow(item);
+    mainRow.after(expandRow);
+    mainRow.querySelector('td').innerHTML = '&#9660;';
+  }
+}
+
+function buildIncidentExpandRow(item) {
+  const tr = document.createElement('tr');
+  tr.className = 'expand-row';
+  tr.innerHTML = `<td colspan="9">
+    <div class="expand-content">
+      <h4>Description</h4>
+      <p>${escapeHtml(item.description || 'No description available')}</p>
+      <h4>Details</h4>
+      <p>Signal Type: ${escapeHtml(item.signalType || '-')} | Source: ${escapeHtml(item.source || '-')}</p>
+      <p>Remediation Attempts: ${item.remediationAttempts || 0} / ${item.maxRemediationAttempts || '-'}</p>
+      ${item.resolution ? `<h4>Resolution</h4><p>${escapeHtml(item.resolution)}</p>` : ''}
+      ${item.detectedAt ? `<p>Detected: ${new Date(item.detectedAt).toLocaleString()}</p>` : ''}
+      ${item.resolvedAt ? `<p>Resolved: ${new Date(item.resolvedAt).toLocaleString()}</p>` : ''}
+    </div>
+  </td>`;
+  return tr;
+}
+
+async function ackIncident(name, ns) {
+  try {
+    await apiPost(`/incidents/${name}/acknowledge?namespace=${encodeURIComponent(ns)}`, {});
+    toast(`Incident ${name} acknowledged`, 'success');
+    loadIncidents();
+  } catch (e) {
+    toast(`Failed to acknowledge: ${e.message}`, 'error');
+  }
+}
+
+async function snoozeIncident(name, ns) {
+  const duration = prompt('Snooze duration (e.g. 1h, 30m, 2h):', '1h');
+  if (!duration) return;
+  try {
+    await apiPost(`/incidents/${name}/snooze?namespace=${encodeURIComponent(ns)}`, { duration });
+    toast(`Incident ${name} snoozed for ${duration}`, 'success');
+    loadIncidents();
+  } catch (e) {
+    toast(`Failed to snooze: ${e.message}`, 'error');
+  }
+}
+
+// ===== SLOs PAGE =====
+
+async function loadSLOs() {
+  const cardsEl = $('#sloCards');
+  const alertsEl = $('#sloAlerts');
+  showLoading(cardsEl);
+  try {
+    const data = await apiFetch('/slos?pageSize=100');
+    const items = data.items || [];
+    if (items.length === 0) { showEmpty(cardsEl, 'No SLOs configured'); showEmpty(alertsEl, 'No alerts'); return; }
+    cardsEl.innerHTML = items.map(slo => {
+      const budgetPct = slo.errorBudgetTotal > 0 ? ((slo.errorBudgetRemaining / slo.errorBudgetTotal) * 100) : 100;
+      const budgetClass = budgetPct > 50 ? 'gauge-ok' : budgetPct > 20 ? 'gauge-warn' : 'gauge-danger';
+      const currentPct = slo.currentValue || 0;
+      const target = slo.target || 99.9;
+      const meeting = currentPct >= target;
+      return `
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">${escapeHtml(slo.service || slo.name)}</span>
+            ${stateBadge(slo.state || (meeting ? 'Healthy' : 'Firing'))}
+          </div>
+          <div class="panel-body">
+            <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+              <span style="font-size:0.8rem; color:var(--text-muted)">SLI: ${escapeHtml(slo.sli || '-')}</span>
+              <span style="font-size:0.8rem; color:var(--text-muted)">Window: ${escapeHtml(slo.window || '30d')}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.3rem;">
+              <span style="font-size:1.5rem; font-weight:700; color:${meeting ? 'var(--sev-low)' : 'var(--sev-critical)'}">
+                ${currentPct.toFixed(2)}%
+              </span>
+              <span style="font-size:0.8rem; color:var(--text-muted)">Target: ${target.toFixed(2)}%</span>
+            </div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.3rem;">Error Budget Remaining</div>
+            <div class="gauge-bar"><div class="gauge-fill ${budgetClass}" style="width:${Math.max(0, Math.min(100, budgetPct))}%"></div></div>
+            <div style="font-size:0.75rem; color:var(--text-muted); text-align:right">${budgetPct.toFixed(1)}%</div>
+            <div class="burn-rates">
+              ${buildBurnChip('1h', slo)}
+              ${buildBurnChip('6h', slo)}
+              ${buildBurnChip('24h', slo)}
+              ${buildBurnChip('72h', slo)}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Show alerts for SLOs that are breaching
+    const alertItems = items.filter(s => (s.state || '').toLowerCase() === 'firing' || (s.currentValue || 0) < (s.target || 99.9));
+    if (alertItems.length === 0) {
+      alertsEl.innerHTML = '<div class="empty-state">No active SLO alerts</div>';
+    } else {
+      alertsEl.innerHTML = `<table>
+        <thead><tr><th>Service</th><th>Current</th><th>Target</th><th>Budget</th><th>State</th></tr></thead>
+        <tbody>
+          ${alertItems.map(s => `<tr>
+            <td>${escapeHtml(s.service || s.name)}</td>
+            <td style="color:var(--sev-critical)">${(s.currentValue || 0).toFixed(2)}%</td>
+            <td>${(s.target || 99.9).toFixed(2)}%</td>
+            <td>${s.errorBudgetTotal > 0 ? ((s.errorBudgetRemaining / s.errorBudgetTotal) * 100).toFixed(1) + '%' : '-'}</td>
+            <td>${stateBadge(s.state || 'Firing')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+    }
+  } catch (e) {
+    showError(cardsEl, 'Failed to load SLOs: ' + e.message, 'loadSLOs()');
+    showEmpty(alertsEl, '');
+  }
+}
+
+function buildBurnChip(window, slo) {
+  // Compute a simulated burn rate from the available budget data
+  const budgetUsedPct = slo.errorBudgetTotal > 0 ? (slo.errorBudgetUsed / slo.errorBudgetTotal) : 0;
+  let rate;
+  switch(window) {
+    case '1h': rate = budgetUsedPct * 720; break;
+    case '6h': rate = budgetUsedPct * 120; break;
+    case '24h': rate = budgetUsedPct * 30; break;
+    case '72h': rate = budgetUsedPct * 10; break;
+    default: rate = 0;
+  }
+  const cls = rate > 14 ? 'burn-danger' : rate > 1 ? 'burn-warn' : 'burn-ok';
+  return `<span class="burn-chip ${cls}">${window}: ${rate.toFixed(1)}x</span>`;
+}
+
+// ===== APPROVALS PAGE =====
+
+async function loadApprovals() {
+  const el = $('#approvalsList');
+  showLoading(el);
+  const state = $('#approvalStateFilter').value;
+  let q = '?pageSize=100';
+  if (state) q += '&state=' + encodeURIComponent(state);
+  try {
+    const data = await apiFetch('/approvals' + q);
+    const items = data.items || [];
+
+    // Update badge
+    const pendingCount = items.filter(i => i.state === 'Pending').length;
+    const badge = $('#approvalBadge');
+    if (pendingCount > 0) {
+      badge.style.display = '';
+      badge.textContent = pendingCount;
+    } else {
+      badge.style.display = 'none';
+    }
+
+    if (items.length === 0) { showEmpty(el, 'No approval requests found'); return; }
+    el.innerHTML = items.map((item, idx) => `
+      <div class="approval-card">
+        <div class="approval-header">
+          <div>
+            <div class="approval-name">${escapeHtml(item.name)}</div>
+            <div class="approval-meta">${escapeHtml(item.namespace)} | Requested by: ${escapeHtml(item.requestedBy || '-')}</div>
+          </div>
+          ${stateBadge(item.state)}
+        </div>
+        <div style="font-size:0.85rem; margin-bottom:0.5rem;">
+          <strong>Action:</strong> ${escapeHtml(item.action || '-')}<br>
+          <strong>Resource:</strong> ${escapeHtml(item.resource || '-')}<br>
+          <strong>Reason:</strong> ${escapeHtml(item.reason || '-')}
+        </div>
+        ${item.state === 'Pending' ? `
+          <div class="input-group">
+            <label>Decision Reason</label>
+            <input type="text" id="approval-reason-${idx}" placeholder="Enter reason...">
+          </div>
+          <div class="approval-actions">
+            <button class="btn btn-success" onclick="approveRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}', ${idx})">Approve</button>
+            <button class="btn btn-danger" onclick="rejectRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}', ${idx})">Reject</button>
+          </div>
+        ` : `
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">
+            ${item.approvedBy ? 'Approved by: ' + escapeHtml(item.approvedBy) : ''}
+            ${item.rejectedBy ? 'Rejected by: ' + escapeHtml(item.rejectedBy) : ''}
+            ${item.decisionReason ? ' | Reason: ' + escapeHtml(item.decisionReason) : ''}
+            ${item.decidedAt ? ' | ' + new Date(item.decidedAt).toLocaleString() : ''}
+          </div>
+        `}
+      </div>
+    `).join('');
+  } catch (e) {
+    showError(el, 'Failed to load approvals: ' + e.message, 'loadApprovals()');
+  }
+}
+
+async function approveRequest(name, ns, idx) {
+  const reason = document.getElementById('approval-reason-' + idx)?.value || '';
+  try {
+    await apiPost(`/approvals/${name}/approve?namespace=${encodeURIComponent(ns)}`, { approver: 'web-ui', reason });
+    toast(`Approval ${name} approved`, 'success');
+    loadApprovals();
+  } catch (e) {
+    toast(`Failed to approve: ${e.message}`, 'error');
+  }
+}
+
+async function rejectRequest(name, ns, idx) {
+  const reason = document.getElementById('approval-reason-' + idx)?.value || '';
+  try {
+    await apiPost(`/approvals/${name}/reject?namespace=${encodeURIComponent(ns)}`, { approver: 'web-ui', reason });
+    toast(`Approval ${name} rejected`, 'info');
+    loadApprovals();
+  } catch (e) {
+    toast(`Failed to reject: ${e.message}`, 'error');
+  }
+}
+
+// ===== POSTMORTEMS PAGE =====
+
+async function loadPostMortems() {
+  const el = $('#postmortemsTableBody');
+  showLoading(el);
+  try {
+    const data = await apiFetch('/postmortems?pageSize=100');
+    const items = data.items || [];
+    if (items.length === 0) { showEmpty(el, 'No post-mortems available'); return; }
+    el.innerHTML = `<table>
+      <thead><tr>
+        <th></th><th>Name</th><th>Severity</th><th>State</th><th>Duration</th><th>Issue</th><th>Created</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="pmTbody"></tbody>
+    </table>`;
+    const tbody = $('#pmTbody');
+    items.forEach((item, idx) => {
+      const id = 'pm-' + idx;
+      const isExpanded = expandedRows.has(id);
+      const mainRow = document.createElement('tr');
+      mainRow.className = 'expandable';
+      mainRow.innerHTML = `
+        <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td>${severityBadge(item.severity)}</td>
+        <td>${stateBadge(item.state)}</td>
+        <td>${escapeHtml(item.duration || '-')}</td>
+        <td>${escapeHtml(item.issueRef || '-')}</td>
+        <td>${timeAgo(item.creationTimestamp)}</td>
+        <td class="btn-group">
+          ${item.state !== 'Closed' ? `<button class="btn" onclick="event.stopPropagation(); reviewPM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Review</button>` : ''}
+          ${item.state === 'InReview' ? `<button class="btn btn-success" onclick="event.stopPropagation(); closePM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Close</button>` : ''}
+        </td>
+      `;
+      mainRow.addEventListener('click', () => togglePMExpand(id, item, mainRow));
+      tbody.appendChild(mainRow);
+      if (isExpanded) {
+        tbody.appendChild(buildPMExpandRow(item));
+      }
+    });
+  } catch (e) {
+    showError(el, 'Failed to load post-mortems: ' + e.message, 'loadPostMortems()');
+  }
+}
+
+function togglePMExpand(id, item, mainRow) {
+  if (expandedRows.has(id)) {
+    expandedRows.delete(id);
+    const next = mainRow.nextElementSibling;
+    if (next && next.classList.contains('expand-row')) next.remove();
+    mainRow.querySelector('td').innerHTML = '&#9654;';
+  } else {
+    expandedRows.add(id);
+    mainRow.after(buildPMExpandRow(item));
+    mainRow.querySelector('td').innerHTML = '&#9660;';
+  }
+}
+
+function buildPMExpandRow(item) {
+  const tr = document.createElement('tr');
+  tr.className = 'expand-row';
+  const timeline = (item.timeline || []).map(t =>
+    `<li><strong>${escapeHtml(t.type)}</strong> (${new Date(t.timestamp).toLocaleString()}): ${escapeHtml(t.detail)}</li>`
+  ).join('');
+  const lessons = (item.lessonsLearned || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
+  const preventions = (item.preventionActions || []).map(a => `<li>${escapeHtml(a)}</li>`).join('');
+  tr.innerHTML = `<td colspan="8">
+    <div class="expand-content">
+      <h4>Summary</h4>
+      <p>${escapeHtml(item.summary || 'No summary available')}</p>
+      <h4>Root Cause</h4>
+      <p>${escapeHtml(item.rootCause || 'Not determined')}</p>
+      <h4>Impact</h4>
+      <p>${escapeHtml(item.impact || '-')}</p>
+      ${timeline ? `<h4>Timeline</h4><ul>${timeline}</ul>` : ''}
+      ${lessons ? `<h4>Lessons Learned</h4><ul>${lessons}</ul>` : ''}
+      ${preventions ? `<h4>Prevention Actions</h4><ul>${preventions}</ul>` : ''}
+    </div>
+  </td>`;
+  return tr;
+}
+
+async function reviewPM(name, ns) {
+  try {
+    await apiPost(`/postmortems/${name}/review?namespace=${encodeURIComponent(ns)}`, { reviewer: 'web-ui' });
+    toast(`Post-mortem ${name} marked for review`, 'success');
+    loadPostMortems();
+  } catch (e) {
+    toast(`Failed to review: ${e.message}`, 'error');
+  }
+}
+
+async function closePM(name, ns) {
+  try {
+    await apiPost(`/postmortems/${name}/close?namespace=${encodeURIComponent(ns)}`, { reviewer: 'web-ui', notes: 'Closed via Web UI' });
+    toast(`Post-mortem ${name} closed`, 'success');
+    loadPostMortems();
+  } catch (e) {
+    toast(`Failed to close: ${e.message}`, 'error');
+  }
+}
+
+// ===== CLUSTERS PAGE =====
+
+async function loadClusters() {
+  const summaryEl = $('#clusterSummary');
+  const cardsEl = $('#clusterCards');
+  showLoading(cardsEl);
+  try {
+    const data = await apiFetch('/clusters/global-status');
+    const status = data.spec || {};
+    summaryEl.innerHTML = `
+      <div class="stat-card">
+        <div class="stat-label">Total Clusters</div>
+        <div class="stat-value">${status.totalClusters || 0}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Healthy</div>
+        <div class="stat-value" style="color:var(--sev-low)">${status.healthyClusters || 0}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Degraded</div>
+        <div class="stat-value" style="color:var(--sev-medium)">${status.degradedClusters || 0}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Offline</div>
+        <div class="stat-value" style="color:var(--sev-critical)">${status.offlineClusters || 0}</div>
+      </div>
+    `;
+    const clusters = status.clusters || [];
+    if (clusters.length === 0) { showEmpty(cardsEl, 'No clusters registered'); return; }
+    cardsEl.innerHTML = clusters.map(c => {
+      const stateClass = getClusterStateClass(c.state);
+      return `
+        <div class="cluster-card">
+          <div class="cluster-card-header">
+            <span class="cluster-name">${escapeHtml(c.name)}</span>
+            ${stateBadge(c.state)}
+          </div>
+          <div class="cluster-detail"><b>Region:</b> ${escapeHtml(c.region || '-')}</div>
+          <div class="cluster-detail"><b>Provider:</b> ${escapeHtml(c.provider || '-')}</div>
+          <div class="cluster-detail"><b>Environment:</b> ${escapeHtml(c.environment || '-')}</div>
+          <div class="cluster-detail"><b>Nodes:</b> ${c.nodeCount || '-'}</div>
+          <div class="cluster-detail"><b>Version:</b> ${escapeHtml(c.version || '-')}</div>
+          ${c.lastHeartbeat ? `<div class="cluster-detail"><b>Last Heartbeat:</b> ${timeAgo(c.lastHeartbeat)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    summaryEl.innerHTML = '';
+    showError(cardsEl, 'Failed to load clusters: ' + e.message, 'loadClusters()');
+  }
+}
+
+function getClusterStateClass(state) {
+  const s = (state || '').toLowerCase();
+  if (['healthy', 'connected', 'ready'].includes(s)) return 'state-healthy';
+  if (['degraded', 'warning'].includes(s)) return 'state-acknowledged';
+  return 'state-unknown';
+}
+
+// ===== AUDIT PAGE =====
+
+async function loadAudit() {
+  const el = $('#auditTableBody');
+  showLoading(el);
+  const search = $('#auditSearch').value;
+  const type = $('#auditTypeFilter').value;
+  const sev = $('#auditSevFilter').value;
+  let q = '?pageSize=100';
+  if (type) q += '&type=' + encodeURIComponent(type);
+  if (sev) q += '&severity=' + encodeURIComponent(sev);
+  try {
+    const data = await apiFetch('/audit' + q);
+    let items = data.items || [];
+    const total = (data.metadata || {}).totalCount || items.length;
+
+    // Client-side search filter
+    if (search) {
+      const s = search.toLowerCase();
+      items = items.filter(i =>
+        (i.name || '').toLowerCase().includes(s) ||
+        (i.detail || '').toLowerCase().includes(s) ||
+        (i.resource || '').toLowerCase().includes(s) ||
+        (i.resourceName || '').toLowerCase().includes(s) ||
+        (i.actor || '').toLowerCase().includes(s) ||
+        (i.action || '').toLowerCase().includes(s)
+      );
+    }
+
+    $('#auditCount').textContent = `${items.length} event(s)` + (items.length !== total ? ` of ${total}` : '');
+    if (items.length === 0) { showEmpty(el, 'No audit events found'); return; }
+    el.innerHTML = `<table>
+      <thead><tr>
+        <th>Timestamp</th><th>Type</th><th>Severity</th><th>Actor</th><th>Action</th><th>Resource</th><th>Detail</th>
+      </tr></thead>
+      <tbody>
+        ${items.map(i => `<tr>
+          <td style="white-space:nowrap">${i.timestamp ? new Date(i.timestamp).toLocaleString() : timeAgo(i.creationTimestamp)}</td>
+          <td>${escapeHtml(i.type || '-')}</td>
+          <td>${i.severity ? severityBadge(i.severity) : '-'}</td>
+          <td>${escapeHtml(i.actor || '-')}</td>
+          <td>${escapeHtml(i.action || '-')}</td>
+          <td>${escapeHtml(i.resource || '-')}${i.resourceName ? '/' + escapeHtml(i.resourceName) : ''}</td>
+          <td style="max-width:300px; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(i.detail || '')}">${escapeHtml(i.detail || '-')}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  } catch (e) {
+    showError(el, 'Failed to load audit events: ' + e.message, 'loadAudit()');
+  }
+}
+
+async function exportAudit() {
+  const type = $('#auditTypeFilter').value;
+  const sev = $('#auditSevFilter').value;
+  let q = '?';
+  if (type) q += 'type=' + encodeURIComponent(type) + '&';
+  if (sev) q += 'severity=' + encodeURIComponent(sev) + '&';
+  try {
+    const res = await fetch(API + '/audit/export' + q);
+    if (!res.ok) throw new Error(res.statusText);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-events-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('Audit events exported', 'success');
+  } catch (e) {
+    toast('Failed to export: ' + e.message, 'error');
+  }
+}
+
+// ===== PENDING APPROVALS BADGE (polled) =====
+
+async function updateApprovalBadge() {
+  try {
+    const data = await apiFetch('/approvals?state=Pending&pageSize=1');
+    const total = (data.metadata || {}).totalCount || (data.items || []).length;
+    const badge = $('#approvalBadge');
+    if (total > 0) {
+      badge.style.display = '';
+      badge.textContent = total;
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch { /* ignore */ }
+}
+
+// ===== INIT =====
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadOverview();
+  checkHealth();
+  updateApprovalBadge();
+  startRefresh();
+
+  // Debounced audit search
+  let auditTimeout;
+  $('#auditSearch').addEventListener('input', () => {
+    clearTimeout(auditTimeout);
+    auditTimeout = setTimeout(() => { if (currentTab === 'audit') loadAudit(); }, 400);
+  });
+});
+
+</script>
+</body>
+</html>
