@@ -14,10 +14,10 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	apiresource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -358,14 +358,14 @@ func (r *RemediationReconciler) executeExecDiagnostic(ctx context.Context, resou
 
 	// Whitelist of safe diagnostic commands
 	safeCommands := map[string]bool{
-		"env":            true,
-		"whoami":         true,
-		"df -h":          true,
-		"free -m":        true,
-		"cat /etc/hosts": true,
-		"ps aux":         true,
-		"netstat -tlnp":  true,
-		"ss -tlnp":       true,
+		"env":                            true,
+		"whoami":                         true,
+		"df -h":                          true,
+		"free -m":                        true,
+		"cat /etc/hosts":                 true,
+		"ps aux":                         true,
+		"netstat -tlnp":                  true,
+		"ss -tlnp":                       true,
 		"curl -s localhost/health":       true,
 		"curl -s localhost/healthz":      true,
 		"curl -s localhost:8080/health":  true,

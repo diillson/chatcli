@@ -47,11 +47,11 @@ type BlastRadiusPrediction struct {
 
 // AffectedService describes a service impacted by the remediation.
 type AffectedService struct {
-	Name          string
-	Namespace     string
-	CurrentHealth string
+	Name            string
+	Namespace       string
+	CurrentHealth   string
 	PredictedHealth string
-	Reason        string
+	Reason          string
 }
 
 // PDBCheckResult describes PodDisruptionBudget impact.
@@ -67,22 +67,22 @@ type PDBCheckResult struct {
 
 // QuotaCheckResult describes ResourceQuota impact.
 type QuotaCheckResult struct {
-	QuotaName     string
-	WouldExceed   bool
-	CPURemaining  string
-	MemRemaining  string
-	Detail        string
+	QuotaName    string
+	WouldExceed  bool
+	CPURemaining string
+	MemRemaining string
+	Detail       string
 }
 
 // NodeCapacityResult describes node capacity impact.
 type NodeCapacityResult struct {
-	TargetNode       string
-	CPUAllocatable   string
-	MemAllocatable   string
-	CPURequested     string
-	MemRequested     string
-	WouldExceed      bool
-	Detail           string
+	TargetNode     string
+	CPUAllocatable string
+	MemAllocatable string
+	CPURequested   string
+	MemRequested   string
+	WouldExceed    bool
+	Detail         string
 }
 
 // NewBlastRadiusPredictor creates a new BlastRadiusPredictor.

@@ -40,18 +40,18 @@ type MetricSeries struct {
 // MetricsSnapshot contains all collected metrics for an incident.
 type MetricsSnapshot struct {
 	// Resource-level metrics
-	CPUUsage       *MetricSeries
-	MemoryUsage    *MetricSeries
-	RestartCount   *MetricSeries
-	NetworkReceive *MetricSeries
+	CPUUsage        *MetricSeries
+	MemoryUsage     *MetricSeries
+	RestartCount    *MetricSeries
+	NetworkReceive  *MetricSeries
 	NetworkTransmit *MetricSeries
 
 	// Application-level metrics
-	RequestRate  *MetricSeries
-	ErrorRate    *MetricSeries
-	LatencyP50   *MetricSeries
-	LatencyP95   *MetricSeries
-	LatencyP99   *MetricSeries
+	RequestRate *MetricSeries
+	ErrorRate   *MetricSeries
+	LatencyP50  *MetricSeries
+	LatencyP95  *MetricSeries
+	LatencyP99  *MetricSeries
 
 	// HPA metrics
 	HPACurrentReplicas *MetricSeries
@@ -71,13 +71,13 @@ type MetricsSnapshot struct {
 
 // MetricTrend describes a significant change in a metric around the incident.
 type MetricTrend struct {
-	MetricName   string
-	BeforeValue  float64
-	DuringValue  float64
-	AfterValue   float64
+	MetricName    string
+	BeforeValue   float64
+	DuringValue   float64
+	AfterValue    float64
 	ChangePercent float64
-	Direction    string // "spike", "drop", "sustained_high", "sustained_low"
-	Significance string // "critical", "high", "medium", "low"
+	Direction     string // "spike", "drop", "sustained_high", "sustained_low"
+	Significance  string // "critical", "high", "medium", "low"
 }
 
 // MetricCorrelation describes a temporal correlation between a metric change and the incident.
@@ -275,8 +275,8 @@ type prometheusResponse struct {
 	Data   struct {
 		ResultType string `json:"resultType"`
 		Result     []struct {
-			Metric map[string]string  `json:"metric"`
-			Values [][]interface{}    `json:"values"`
+			Metric map[string]string `json:"metric"`
+			Values [][]interface{}   `json:"values"`
 		} `json:"result"`
 	} `json:"data"`
 }

@@ -23,14 +23,14 @@ import (
 // AnalyzeIssue RPC to fill the analysis, confidence, and recommendations.
 type AIInsightReconciler struct {
 	client.Client
-	Scheme             *runtime.Scheme
-	ServerClient       *ServerClient
-	ContextBuilder     *KubernetesContextBuilder
-	LogAnalyzer        *LogAnalyzer
-	MetricsCollector   *MetricsCollector
-	GitOpsDetector     *GitOpsDetector
-	SourceCodeAnalyzer *SourceCodeAnalyzer
-	CascadeAnalyzer    *CascadeAnalyzer
+	Scheme               *runtime.Scheme
+	ServerClient         *ServerClient
+	ContextBuilder       *KubernetesContextBuilder
+	LogAnalyzer          *LogAnalyzer
+	MetricsCollector     *MetricsCollector
+	GitOpsDetector       *GitOpsDetector
+	SourceCodeAnalyzer   *SourceCodeAnalyzer
+	CascadeAnalyzer      *CascadeAnalyzer
 	BlastRadiusPredictor *BlastRadiusPredictor
 }
 

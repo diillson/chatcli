@@ -42,18 +42,18 @@ type HelmReleaseInfo struct {
 
 // ArgoCDAppInfo contains parsed information about an ArgoCD Application.
 type ArgoCDAppInfo struct {
-	Name          string
-	Namespace     string
-	Project       string
-	RepoURL       string
-	Path          string
+	Name           string
+	Namespace      string
+	Project        string
+	RepoURL        string
+	Path           string
 	TargetRevision string
-	SyncStatus    string // Synced, OutOfSync, Unknown
-	HealthStatus  string // Healthy, Degraded, Progressing, Missing, Suspended, Unknown
-	SyncPolicy    string // manual, automated
-	LastSyncedAt  time.Time
+	SyncStatus     string // Synced, OutOfSync, Unknown
+	HealthStatus   string // Healthy, Degraded, Progressing, Missing, Suspended, Unknown
+	SyncPolicy     string // manual, automated
+	LastSyncedAt   time.Time
 	LastSyncResult string
-	Conditions    []string
+	Conditions     []string
 }
 
 // FluxKustomizationInfo contains parsed information about a Flux Kustomization.
@@ -191,8 +191,8 @@ func (g *GitOpsDetector) parseHelmReleaseData(data []byte, info *HelmReleaseInfo
 			} `json:"metadata"`
 		} `json:"chart"`
 		Info struct {
-			Status      string `json:"status"`
-			Description string `json:"description"`
+			Status        string    `json:"status"`
+			Description   string    `json:"description"`
 			FirstDeployed time.Time `json:"first_deployed"`
 			LastDeployed  time.Time `json:"last_deployed"`
 		} `json:"info"`
@@ -446,11 +446,11 @@ func (g *GitOpsDetector) ExecuteHelmRollback(ctx context.Context, resource platf
 			Name:      fmt.Sprintf("sh.helm.release.v1.%s.v%d", release.Name, newRevision),
 			Namespace: resource.Namespace,
 			Labels: map[string]string{
-				"owner":            "helm",
-				"name":             release.Name,
-				"version":          fmt.Sprintf("%d", newRevision),
-				"status":           "deployed",
-				"modifiedAt":       fmt.Sprintf("%d", time.Now().Unix()),
+				"owner":      "helm",
+				"name":       release.Name,
+				"version":    fmt.Sprintf("%d", newRevision),
+				"status":     "deployed",
+				"modifiedAt": fmt.Sprintf("%d", time.Now().Unix()),
 			},
 		},
 		Type: corev1.SecretType("helm.sh/release.v1"),

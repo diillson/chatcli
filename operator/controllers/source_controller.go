@@ -25,9 +25,9 @@ import (
 )
 
 const (
-	sourceRepoBaseDir      = "/tmp/chatcli-repos"
-	maxRecentCommits       = 20
-	maxSourceContextChars  = 5000
+	sourceRepoBaseDir     = "/tmp/chatcli-repos"
+	maxRecentCommits      = 20
+	maxSourceContextChars = 5000
 )
 
 // SourceRepositoryReconciler reconciles SourceRepository objects.
@@ -479,12 +479,12 @@ type SourceCodeContext struct {
 
 // CodeSnippet is a code excerpt around a line referenced in a stack trace.
 type CodeSnippet struct {
-	FilePath   string
-	Language   string
-	StartLine  int
-	EndLine    int
-	Content    string
-	Reason     string // why this snippet is relevant
+	FilePath  string
+	Language  string
+	StartLine int
+	EndLine   int
+	Content   string
+	Reason    string // why this snippet is relevant
 }
 
 // ConfigFileContent holds a config file's content.

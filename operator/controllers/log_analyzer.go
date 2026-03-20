@@ -47,13 +47,13 @@ type LogAnalysisResult struct {
 
 // StackTrace represents an extracted stack trace from logs.
 type StackTrace struct {
-	ExceptionType string
-	Message       string
-	Frames        []string
-	ContainerName string
-	PodName       string
-	Language      string
-	RawText       string
+	ExceptionType   string
+	Message         string
+	Frames          []string
+	ContainerName   string
+	PodName         string
+	Language        string
+	RawText         string
 	OccurrenceCount int
 }
 
@@ -368,9 +368,9 @@ func tryExtractJavaStackTrace(lines []string, start int, podName, containerName 
 	}
 
 	trace := StackTrace{
-		Language:      "java",
-		PodName:       podName,
-		ContainerName: containerName,
+		Language:        "java",
+		PodName:         podName,
+		ContainerName:   containerName,
 		OccurrenceCount: 1,
 	}
 
