@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "chatcli-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chatcli-operator.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "chatcli-operator.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+    - name: health
+      port: {{ .Values.health.port }}
+      targetPort: health
+      protocol: TCP
+    - name: api
+      port: {{ .Values.api.port }}
+      targetPort: api
+      protocol: TCP
