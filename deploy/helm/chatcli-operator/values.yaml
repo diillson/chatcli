@@ -1,0 +1,80 @@
+# ChatCLI Operator Helm Chart - Default Values
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/diillson/chatcli-operator
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Leader election (recommended for HA with replicaCount > 1)
+leaderElect: true
+
+# AIOps REST API and Web Dashboard
+api:
+  # Port for the REST API and embedded web dashboard
+  port: 8090
+
+# Prometheus metrics endpoint
+metrics:
+  # Port for Prometheus metrics scraping
+  port: 8080
+
+# Health probes
+health:
+  port: 8081
+
+# Prometheus URL for metrics collection during incident analysis.
+# When set, the operator queries Prometheus for CPU/memory/latency/error rate
+# trends correlated with incidents, providing quantitative context to the AI.
+# Example: "http://prometheus-server.monitoring.svc:9090"
+prometheusUrl: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# RBAC - the operator always needs cluster-wide access
+rbac:
+  create: true
+
+service:
+  type: ClusterIP
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# Pod-level security context
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Prometheus ServiceMonitor (requires Prometheus Operator)
+serviceMonitor:
+  enabled: false
+  interval: "30s"
+  scrapeTimeout: ""
+  labels: {}

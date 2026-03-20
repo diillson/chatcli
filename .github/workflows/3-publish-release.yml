@@ -301,6 +301,48 @@ jobs:
           git commit -m "chore: update chatcli formula to v${VER}"
           git push
 
+  helm_charts:
+    name: Publish Helm Charts to GHCR (OCI)
+    needs: [release_please]
+    if: needs.release_please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release_please.outputs.tag_name }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
+      - name: Update chart versions
+        env:
+          TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#v}"
+
+          # Update chatcli server chart
+          sed -i "s/^version:.*/version: ${VERSION}/" deploy/helm/chatcli/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" deploy/helm/chatcli/Chart.yaml
+
+          # Update chatcli-operator chart
+          sed -i "s/^version:.*/version: ${VERSION}/" deploy/helm/chatcli-operator/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" deploy/helm/chatcli-operator/Chart.yaml
+
+      - name: Package and push chatcli chart
+        run: |
+          helm package deploy/helm/chatcli/ -d /tmp/charts/
+          helm push /tmp/charts/chatcli-*.tgz oci://ghcr.io/diillson/charts
+
+      - name: Package and push chatcli-operator chart
+        run: |
+          helm package deploy/helm/chatcli-operator/ -d /tmp/charts/
+          helm push /tmp/charts/chatcli-operator-*.tgz oci://ghcr.io/diillson/charts
+
   # Opcional: sincroniza main -> develop após publicar a release
   sync_main_to_develop:
     needs: [release_please]
