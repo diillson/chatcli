@@ -117,6 +117,64 @@ rules:
       - create
       - update
       - patch
+  # SourceRepository CRD
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - sourcerepositories
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - sourcerepositories/status
+    verbs:
+      - get
+      - update
+      - patch
+  # NotificationPolicy, EscalationPolicy, ApprovalPolicy, ApprovalRequest, SLO, SLA, AuditEvent, ChaosExperiment, ClusterRegistration
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - notificationpolicies
+      - escalationpolicies
+      - approvalpolicies
+      - approvalrequests
+      - servicelevelobjectives
+      - incidentslas
+      - auditevents
+      - chaosexperiments
+      - clusterregistrations
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - platform.chatcli.io
+    resources:
+      - notificationpolicies/status
+      - escalationpolicies/status
+      - approvalpolicies/status
+      - approvalrequests/status
+      - servicelevelobjectives/status
+      - incidentslas/status
+      - auditevents/status
+      - chaosexperiments/status
+      - clusterregistrations/status
+    verbs:
+      - get
+      - update
+      - patch
   # AIInsight CRD
   - apiGroups:
       - platform.chatcli.io
@@ -199,6 +257,18 @@ rules:
       - get
       - list
       - watch
+      - update
+      - patch
+  # Batch resources (Jobs, CronJobs)
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+      - cronjobs
+    verbs:
+      - get
+      - list
+      - watch
   - apiGroups:
       - autoscaling
     resources:
@@ -207,18 +277,53 @@ rules:
       - get
       - list
       - watch
+      - update
+      - patch
   - apiGroups:
       - networking.k8s.io
     resources:
       - ingresses
+      - networkpolicies
     verbs:
       - get
       - list
       - watch
+      - update
+      - patch
+  # Policy (PDB checks for blast radius)
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+    verbs:
+      - get
+      - list
+      - watch
+  # Discovery (endpoint slices for dependency health)
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
+      - watch
+  # Nodes (cordon/drain remediation)
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
   - apiGroups:
       - metrics.k8s.io
     resources:
       - pods
+      - nodes
     verbs:
       - get
       - list

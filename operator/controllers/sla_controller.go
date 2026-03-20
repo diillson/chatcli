@@ -292,5 +292,8 @@ func (r *SLAReconciler) updateAverageTimes(ctx context.Context, sla *platformv1a
 }
 
 func (r *SLAReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).For(&platformv1alpha1.Issue{}).Complete(r)
+	return ctrl.NewControllerManagedBy(mgr).
+		Named("sla").
+		For(&platformv1alpha1.Issue{}).
+		Complete(r)
 }
