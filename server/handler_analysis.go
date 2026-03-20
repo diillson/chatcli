@@ -60,10 +60,11 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 
 	prompt := buildAnalysisPrompt(req)
 
-	// Enrich with K8s context if available
-	enrichedPrompt := h.enrichPrompt(prompt)
-
-	response, err := llmClient.SendPrompt(ctx, enrichedPrompt, nil, 0)
+	// NOTE: Do NOT call enrichPrompt() here. The operator sends its own enriched
+	// kubernetes_context (up to 30KB with logs, metrics, GitOps, source code, cascade
+	// analysis) in the RPC request. enrichPrompt() is for interactive CLI sessions only
+	// and would duplicate/conflict with the operator's context.
+	response, err := llmClient.SendPrompt(ctx, prompt, nil, 0)
 	if err != nil {
 		h.logger.Error("LLM analysis failed", zap.Error(err), zap.String("issue", req.IssueName))
 		return nil, status.Errorf(codes.Internal, "LLM analysis failed: %v", err)

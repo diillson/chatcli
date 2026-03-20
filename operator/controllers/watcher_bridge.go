@@ -221,7 +221,7 @@ func (wb *WatcherBridge) createAnomaly(ctx context.Context, alert *pb.WatcherAle
 			Source:     platformv1alpha1.AnomalySourceWatcher,
 			SignalType: signalType,
 			Resource: platformv1alpha1.ResourceRef{
-				Kind:      "Deployment",
+				Kind:      inferResourceKind(alert),
 				Name:      alert.Deployment,
 				Namespace: ns,
 			},
@@ -242,21 +242,103 @@ func (wb *WatcherBridge) createAnomaly(ctx context.Context, alert *pb.WatcherAle
 	return nil
 }
 
+// inferResourceKind determines the Kubernetes resource kind from a watcher alert.
+// If the alert includes a resource_kind field (from enhanced watchers), it uses that.
+// Otherwise, it infers from the alert type: node-level alerts → Node, job alerts → Job,
+// and defaults to Deployment for backward compatibility.
+func inferResourceKind(alert *pb.WatcherAlert) string {
+	// If the proto message carries an explicit resource_kind, prefer it
+	if alert.Object != "" {
+		// alert.Object sometimes carries "kind/name" format (e.g., "StatefulSet/postgres")
+		if idx := strings.Index(alert.Object, "/"); idx > 0 {
+			kind := alert.Object[:idx]
+			switch kind {
+			case "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Node":
+				return kind
+			}
+		}
+	}
+
+	// Infer from alert type for known patterns
+	switch alert.Type {
+	case "NodeNotReady", "DiskPressure", "MemoryPressure", "PIDPressure":
+		return "Node"
+	case "JobFailed", "CronJobMissed":
+		return "Job"
+	default:
+		return "Deployment"
+	}
+}
+
 // MapAlertTypeToSignal maps watcher AlertType strings to AnomalySignalType.
+// Covers all known watcher alert types and maps them to the operator's 21 signal types.
 func MapAlertTypeToSignal(alertType string) platformv1alpha1.AnomalySignalType {
 	switch alertType {
+	// Pod-level signals
 	case "HighRestartCount":
 		return platformv1alpha1.SignalPodRestart
 	case "OOMKilled":
 		return platformv1alpha1.SignalOOMKill
 	case "PodNotReady":
 		return platformv1alpha1.SignalPodNotReady
+	case "CrashLoopBackOff":
+		return platformv1alpha1.SignalCrashLoopBackOff
+	case "ImagePullBackOff", "ErrImagePull", "ImagePullError":
+		return platformv1alpha1.SignalImagePullError
+
+	// Deployment/workload signals
 	case "DeploymentFailing":
 		return platformv1alpha1.SignalDeployFail
-	case "CrashLoopBackOff":
-		return platformv1alpha1.SignalPodRestart
+
+	// Resource signals
+	case "CPUHigh", "HighCPU":
+		return platformv1alpha1.SignalCPUHigh
+	case "MemoryHigh", "HighMemory":
+		return platformv1alpha1.SignalMemoryHigh
+
+	// Node-level signals
+	case "DiskPressure":
+		return platformv1alpha1.SignalDiskPressure
+	case "NodeNotReady":
+		return platformv1alpha1.SignalNodeNotReady
+	case "MemoryPressure":
+		return platformv1alpha1.SignalMemoryHigh
+
+	// Application signals
+	case "HighErrorRate", "ErrorRate":
+		return platformv1alpha1.SignalErrorRate
+	case "HighLatency", "Latency":
+		return platformv1alpha1.SignalLatency
+
+	// Infrastructure signals
+	case "PVCPending":
+		return platformv1alpha1.SignalPVCPending
+	case "IngressError":
+		return platformv1alpha1.SignalIngressError
+	case "HPAMaxedOut", "HPAMaxed":
+		return platformv1alpha1.SignalHPAMaxed
+	case "CertificateExpiring":
+		return platformv1alpha1.SignalCertExpiring
+
+	// Job signals
+	case "JobFailed":
+		return platformv1alpha1.SignalJobFailed
+	case "CronJobMissed":
+		return platformv1alpha1.SignalCronJobMissed
+
+	// GitOps signals
+	case "HelmReleaseFailed":
+		return platformv1alpha1.SignalHelmReleaseFailed
+	case "ArgoCDDegraded":
+		return platformv1alpha1.SignalArgoCDDegraded
+	case "ConfigDrift":
+		return platformv1alpha1.SignalConfigDrift
+
 	default:
-		return platformv1alpha1.AnomalySignalType(strings.ToLower(alertType))
+		// Normalize unknown alert types to snake_case for forward compatibility
+		normalized := strings.ToLower(alertType)
+		normalized = strings.ReplaceAll(normalized, " ", "_")
+		return platformv1alpha1.AnomalySignalType(normalized)
 	}
 }
 
