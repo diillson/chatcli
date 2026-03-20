@@ -1,0 +1,20 @@
+apiVersion: v2
+name: chatcli-operator
+description: ChatCLI AIOps Operator - Autonomous incident detection, AI analysis, and remediation for Kubernetes
+type: application
+version: 0.1.0
+appVersion: "1.72.2"
+keywords:
+  - chatcli
+  - operator
+  - aiops
+  - kubernetes
+  - remediation
+  - incident-management
+  - sre
+home: https://chatcli.edilsonfreitas.com
+sources:
+  - https://github.com/diillson/chatcli
+maintainers:
+  - name: Edilson Freitas
+icon: https://chatcli.edilsonfreitas.com/images/logo-dark.svg

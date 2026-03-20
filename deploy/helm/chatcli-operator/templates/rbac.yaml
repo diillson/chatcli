@@ -1,0 +1,156 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "chatcli-operator.fullname" . }}
+  labels:
+    {{- include "chatcli-operator.labels" . | nindent 4 }}
+rules:
+  # ──────────────────────────────────────────────────
+  # Platform CRDs (all 17)
+  # ──────────────────────────────────────────────────
+  - apiGroups: ["platform.chatcli.io"]
+    resources:
+      - instances
+      - issues
+      - anomalies
+      - aiinsights
+      - remediationplans
+      - runbooks
+      - postmortems
+      - sourcerepositories
+      - notificationpolicies
+      - escalationpolicies
+      - approvalpolicies
+      - approvalrequests
+      - servicelevelobjectives
+      - incidentslas
+      - auditevents
+      - chaosexperiments
+      - clusterregistrations
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["platform.chatcli.io"]
+    resources:
+      - instances/status
+      - instances/finalizers
+      - issues/status
+      - issues/finalizers
+      - anomalies/status
+      - aiinsights/status
+      - remediationplans/status
+      - postmortems/status
+      - sourcerepositories/status
+      - notificationpolicies/status
+      - escalationpolicies/status
+      - approvalpolicies/status
+      - approvalrequests/status
+      - servicelevelobjectives/status
+      - incidentslas/status
+      - auditevents/status
+      - chaosexperiments/status
+      - clusterregistrations/status
+    verbs: ["get", "update", "patch"]
+
+  # ──────────────────────────────────────────────────
+  # Core resources
+  # ──────────────────────────────────────────────────
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "serviceaccounts", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  - apiGroups: [""]
+    resources: ["endpoints", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+
+  # ──────────────────────────────────────────────────
+  # Workload resources (remediation targets)
+  # ──────────────────────────────────────────────────
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+
+  # ──────────────────────────────────────────────────
+  # Autoscaling, Networking, Policy, Discovery
+  # ──────────────────────────────────────────────────
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+
+  # ──────────────────────────────────────────────────
+  # GitOps (optional — ArgoCD, Flux)
+  # ──────────────────────────────────────────────────
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    verbs: ["get", "list", "watch"]
+
+  # ──────────────────────────────────────────────────
+  # Metrics
+  # ──────────────────────────────────────────────────
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+
+  # ──────────────────────────────────────────────────
+  # RBAC (operator creates roles for Instance watcher)
+  # ──────────────────────────────────────────────────
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # ──────────────────────────────────────────────────
+  # Leader election
+  # ──────────────────────────────────────────────────
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "chatcli-operator.fullname" . }}
+  labels:
+    {{- include "chatcli-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "chatcli-operator.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "chatcli-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
