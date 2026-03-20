@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.72.1](https://github.com/diillson/chatcli/compare/v1.72.0...v1.72.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* **operator:** add missing COPY directives for channels and web packages in Dockerfile ([#637](https://github.com/diillson/chatcli/issues/637)) ([d3d9a10](https://github.com/diillson/chatcli/commit/d3d9a10af23e637afd2665adfda9e511874f02ea))
+
 ## [1.72.0](https://github.com/diillson/chatcli/compare/v1.71.0...v1.72.0) (2026-03-19)
 
 
