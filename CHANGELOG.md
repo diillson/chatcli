@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.75.0](https://github.com/diillson/chatcli/compare/v1.74.0...v1.75.0) (2026-03-20)
+
+
+### Features
+
+* **operator:** add dedicated Helm chart for the AIOps operator ([#647](https://github.com/diillson/chatcli/issues/647)) ([9488263](https://github.com/diillson/chatcli/commit/9488263db9cf47f639928d574f1cc7d6602912d1))
+
+
+### Bug Fixes
+
+* **operator:** resolve controller name collision and RBAC gaps blocking startup ([#645](https://github.com/diillson/chatcli/issues/645)) ([faa0e72](https://github.com/diillson/chatcli/commit/faa0e7250ceb06e5710593b1f1f8480999f55a14))
+
 ## [1.74.0](https://github.com/diillson/chatcli/compare/v1.73.0...v1.74.0) (2026-03-20)
 
 
