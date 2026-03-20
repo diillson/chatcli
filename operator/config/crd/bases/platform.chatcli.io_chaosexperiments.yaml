@@ -1,0 +1,295 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: chaosexperiments.platform.chatcli.io
+spec:
+  group: platform.chatcli.io
+  names:
+    kind: ChaosExperiment
+    listKind: ChaosExperimentList
+    plural: chaosexperiments
+    shortNames:
+    - chaos
+    singular: chaosexperiment
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.experimentType
+      name: Type
+      type: string
+    - jsonPath: .spec.target.name
+      name: Target
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .spec.duration
+      name: Duration
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ChaosExperiment represents a chaos engineering experiment targeting
+          a Kubernetes resource.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ChaosExperimentSpec defines the desired state of a ChaosExperiment.
+            properties:
+              dryRun:
+                description: DryRun simulates the experiment without executing destructive
+                  actions.
+                type: boolean
+              duration:
+                description: Duration of the experiment (e.g., "2m", "5m", "30s").
+                type: string
+              enabled:
+                default: true
+                description: Enabled controls whether the experiment is active. Disabled
+                  experiments are skipped.
+                type: boolean
+              experimentType:
+                description: ExperimentType is the type of chaos to inject.
+                enum:
+                - pod_kill
+                - pod_failure
+                - cpu_stress
+                - memory_stress
+                - network_delay
+                - network_loss
+                - disk_stress
+                type: string
+              linkedIssueRef:
+                description: LinkedIssueRef optionally links this experiment to an
+                  Issue it validates.
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+              parameters:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Parameters are experiment-specific key-value pairs.
+                  For pod_kill: count (number of pods to kill).
+                  For pod_failure: count, gracePeriodSeconds.
+                  For cpu_stress: cores, loadPercent.
+                  For memory_stress: bytes (e.g., "256Mi"), workers.
+                  For network_delay: latencyMs, jitterMs, interface.
+                  For network_loss: percent, correlation.
+                  For disk_stress: size (e.g., "1Gi"), workers.
+                type: object
+              postExperiment:
+                description: PostExperiment configures recovery verification and remediation
+                  testing.
+                properties:
+                  recoveryTimeout:
+                    description: RecoveryTimeout is the maximum time to wait for recovery
+                      (e.g., "5m").
+                    type: string
+                  runRemediationTest:
+                    description: RunRemediationTest re-injects the fault after a successful
+                      remediation to validate it works.
+                    type: boolean
+                  verifyRecovery:
+                    description: VerifyRecovery checks if the target deployment recovers
+                      after the experiment.
+                    type: boolean
+                type: object
+              safetyChecks:
+                description: SafetyChecks configures guardrails for the experiment.
+                properties:
+                  abortOnIssueDetected:
+                    description: AbortOnIssueDetected stops the experiment if AIOps
+                      detects a new issue targeting the same resource.
+                    type: boolean
+                  allowedNamespaces:
+                    description: AllowedNamespaces restricts which namespaces the
+                      experiment can target. Empty means all.
+                    items:
+                      type: string
+                    type: array
+                  blockedNamespaces:
+                    description: BlockedNamespaces prevents experiments from targeting
+                      these namespaces.
+                    items:
+                      type: string
+                    type: array
+                  maxConcurrentExperiments:
+                    default: 1
+                    description: MaxConcurrentExperiments is the maximum number of
+                      chaos experiments that can run simultaneously.
+                    format: int32
+                    type: integer
+                  minHealthyPods:
+                    description: MinHealthyPods is the minimum number of pods that
+                      must remain healthy during the experiment.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  requireApproval:
+                    description: RequireApproval creates an ApprovalRequest before
+                      executing the experiment.
+                    type: boolean
+                type: object
+              schedule:
+                description: Schedule is an optional cron expression for recurring
+                  experiments (e.g., "0 3 * * 1").
+                type: string
+              target:
+                description: Target is the Kubernetes resource to test.
+                properties:
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - kind
+                - name
+                - namespace
+                type: object
+            required:
+            - duration
+            - enabled
+            - experimentType
+            - target
+            type: object
+          status:
+            description: ChaosExperimentStatus defines the observed state of a ChaosExperiment.
+            properties:
+              completedAt:
+                description: CompletedAt is when the experiment finished.
+                format: date-time
+                type: string
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the experiment.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              podsAffected:
+                description: PodsAffected is the number of pods that were impacted
+                  by the experiment.
+                format: int32
+                type: integer
+              postExperimentSnapshot:
+                description: PostExperimentSnapshot captures the deployment state
+                  after the experiment.
+                type: string
+              preExperimentSnapshot:
+                description: PreExperimentSnapshot captures the deployment state before
+                  the experiment.
+                type: string
+              recoveryTime:
+                description: RecoveryTime is how long it took the target to recover
+                  (e.g., "45s").
+                type: string
+              recoveryVerified:
+                description: RecoveryVerified indicates whether the target recovered
+                  after the experiment.
+                type: boolean
+              result:
+                description: Result is a human-readable summary of the experiment
+                  outcome.
+                type: string
+              startedAt:
+                description: StartedAt is when the experiment began executing.
+                format: date-time
+                type: string
+              state:
+                description: State is the current lifecycle state of the experiment.
+                enum:
+                - Pending
+                - Running
+                - Completed
+                - Failed
+                - Aborted
+                type: string
+            required:
+            - podsAffected
+            - recoveryVerified
+            - state
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

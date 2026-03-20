@@ -50,7 +50,7 @@ uninstall:
 
 deploy: install
 	kubectl apply -f config/rbac/role.yaml
-	kubectl apply -f config/manager/manager.yaml
+	sed 's|image: ghcr.io/diillson/chatcli-operator:latest|image: ${IMG}|g' config/manager/manager.yaml | kubectl apply -f -
 
 undeploy:
 	kubectl delete -f config/manager/manager.yaml

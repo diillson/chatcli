@@ -4,27 +4,33 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: issues.platform.chatcli.io
+  name: clusterregistrations.platform.chatcli.io
 spec:
   group: platform.chatcli.io
   names:
-    kind: Issue
-    listKind: IssueList
-    plural: issues
+    kind: ClusterRegistration
+    listKind: ClusterRegistrationList
+    plural: clusterregistrations
     shortNames:
-    - iss
-    singular: issue
+    - cr
+    singular: clusterregistration
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.severity
-      name: Severity
+    - jsonPath: .spec.displayName
+      name: DisplayName
       type: string
-    - jsonPath: .status.state
-      name: State
+    - jsonPath: .spec.region
+      name: Region
       type: string
-    - jsonPath: .spec.riskScore
-      name: Risk
+    - jsonPath: .spec.environment
+      name: Environment
+      type: string
+    - jsonPath: .status.connected
+      name: Connected
+      type: boolean
+    - jsonPath: .status.nodeCount
+      name: Nodes
       type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -32,7 +38,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Issue represents a detected problem in the cluster.
+        description: ClusterRegistration represents a registered Kubernetes cluster
+          for multi-cluster federation.
         properties:
           apiVersion:
             description: |-
@@ -52,64 +59,80 @@ spec:
           metadata:
             type: object
           spec:
-            description: IssueSpec defines the desired state of an Issue.
+            description: ClusterRegistrationSpec defines the desired state of ClusterRegistration.
             properties:
-              correlationId:
-                description: CorrelationId links correlated anomaly signals.
+              capabilities:
+                description: Capabilities lists available cluster features (e.g.,
+                  "metrics-server", "prometheus", "istio").
+                items:
+                  type: string
+                type: array
+              displayName:
+                description: DisplayName is a human-readable name for this cluster.
                 type: string
-              description:
-                description: Description of the issue.
+              environment:
+                default: dev
+                description: Environment classification (prod/staging/dev).
+                enum:
+                - prod
+                - staging
+                - dev
                 type: string
-              resource:
-                description: Resource affected by the issue.
+              healthCheckInterval:
+                default: 30s
+                description: HealthCheckInterval defines how often to check cluster
+                  connectivity (e.g., "30s", "1m").
+                type: string
+              kubeconfigSecretRef:
+                description: KubeconfigSecretRef references a Secret containing the
+                  kubeconfig for this cluster.
                 properties:
-                  kind:
-                    type: string
                   name:
-                    type: string
-                  namespace:
+                    description: Name is the Secret name.
                     type: string
                 required:
-                - kind
                 - name
-                - namespace
                 type: object
-              riskScore:
-                description: RiskScore is an AI-calculated risk score (0-100).
+              labels:
+                additionalProperties:
+                  type: string
+                description: Labels for custom metadata.
+                type: object
+              maxConcurrentRemediations:
+                default: 3
+                description: MaxConcurrentRemediations limits parallel remediations
+                  in this cluster.
                 format: int32
-                maximum: 100
-                minimum: 0
                 type: integer
-              severity:
-                description: Severity of the issue.
+              region:
+                description: Region where the cluster is deployed (e.g., "us-east-1",
+                  "eu-west-1").
+                type: string
+              tier:
+                default: standard
+                description: Tier determines remediation policies (critical/standard/non-critical).
                 enum:
                 - critical
-                - high
-                - medium
-                - low
-                type: string
-              signalType:
-                description: SignalType is the type of signal that triggered the issue
-                  (e.g., "pod_restart", "oom_kill", "error_rate").
-                type: string
-              source:
-                description: Source that detected the issue.
-                enum:
-                - prometheus
-                - events
-                - logs
-                - webhook
-                - watcher
+                - standard
+                - non-critical
                 type: string
             required:
-            - description
-            - resource
-            - severity
-            - source
+            - displayName
+            - environment
+            - kubeconfigSecretRef
+            - tier
             type: object
           status:
-            description: IssueStatus defines the observed state of an Issue.
+            description: ClusterRegistrationStatus defines the observed state of ClusterRegistration.
             properties:
+              activeIssues:
+                description: ActiveIssues across all namespaces in this cluster.
+                format: int32
+                type: integer
+              activeRemediations:
+                description: ActiveRemediations in this cluster.
+                format: int32
+                type: integer
               conditions:
                 description: Conditions represent the latest available observations.
                 items:
@@ -167,42 +190,30 @@ spec:
                   - type
                   type: object
                 type: array
-              detectedAt:
-                description: DetectedAt is when the issue was first detected.
+              connected:
+                description: Connected indicates if the cluster is reachable.
+                type: boolean
+              kubernetesVersion:
+                description: KubernetesVersion reported by the cluster.
+                type: string
+              lastHealthCheck:
+                description: LastHealthCheck is when connectivity was last verified.
                 format: date-time
                 type: string
-              maxRemediationAttempts:
-                default: 3
-                description: MaxRemediationAttempts is the maximum number of remediation
-                  attempts allowed.
+              namespaceCount:
+                description: NamespaceCount in the cluster.
                 format: int32
                 type: integer
-              remediationAttempts:
-                description: RemediationAttempts is the number of remediation attempts
-                  made.
+              nodeCount:
+                description: NodeCount in the cluster.
                 format: int32
                 type: integer
-              resolution:
-                description: Resolution describes how the issue was resolved.
-                type: string
-              resolvedAt:
-                description: ResolvedAt is when the issue was resolved.
-                format: date-time
-                type: string
-              state:
-                description: State is the current lifecycle state.
-                enum:
-                - Detected
-                - Analyzing
-                - Remediating
-                - Resolved
-                - Escalated
-                - Failed
-                type: string
             required:
-            - maxRemediationAttempts
-            - remediationAttempts
-            - state
+            - activeIssues
+            - activeRemediations
+            - connected
+            - namespaceCount
+            - nodeCount
             type: object
         type: object
     served: true

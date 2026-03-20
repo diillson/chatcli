@@ -219,7 +219,11 @@ func main() {
 	}
 
 	// REST API Gateway — provides HTTP API access to AIOps resources
-	apiServer := rest.NewAPIServer(mgr.GetClient(), ":8090")
+	aiopsPort := os.Getenv("CHATCLI_AIOPS_PORT")
+	if aiopsPort == "" {
+		aiopsPort = "8090"
+	}
+	apiServer := rest.NewAPIServer(mgr.GetClient(), ":"+aiopsPort)
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server")
 		os.Exit(1)

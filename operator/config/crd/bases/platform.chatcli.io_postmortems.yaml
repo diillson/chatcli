@@ -1,166 +1,357 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: postmortems.platform.chatcli.io
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
+  name: postmortems.platform.chatcli.io
 spec:
   group: platform.chatcli.io
   names:
     kind: PostMortem
     listKind: PostMortemList
     plural: postmortems
-    singular: postmortem
     shortNames:
-      - pm
+    - pm
+    singular: postmortem
   scope: Namespaced
   versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      subresources:
-        status: {}
-      additionalPrinterColumns:
-        - name: Issue
-          type: string
-          jsonPath: .spec.issueRef.name
-        - name: Severity
-          type: string
-          jsonPath: .spec.severity
-        - name: State
-          type: string
-          jsonPath: .status.state
-        - name: Age
-          type: date
-          jsonPath: .metadata.creationTimestamp
-      schema:
-        openAPIV3Schema:
-          description: PostMortem captures the full incident lifecycle after resolution.
-          type: object
-          properties:
-            apiVersion:
-              type: string
-            kind:
-              type: string
-            metadata:
-              type: object
-            spec:
-              description: PostMortemSpec defines the immutable input fields.
-              type: object
-              required:
-                - issueRef
-                - resource
-                - severity
-              properties:
-                issueRef:
-                  description: Reference to the parent Issue.
-                  type: object
-                  required:
-                    - name
+  - additionalPrinterColumns:
+    - jsonPath: .spec.issueRef.name
+      name: Issue
+      type: string
+    - jsonPath: .spec.severity
+      name: Severity
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: PostMortem captures the full incident lifecycle after resolution.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PostMortemSpec defines the immutable input fields for a PostMortem.
+            properties:
+              issueRef:
+                description: IssueRef references the parent Issue.
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+              resource:
+                description: Resource that was affected.
+                properties:
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - kind
+                - name
+                - namespace
+                type: object
+              severity:
+                description: Severity of the original issue.
+                enum:
+                - critical
+                - high
+                - medium
+                - low
+                type: string
+            required:
+            - issueRef
+            - resource
+            - severity
+            type: object
+          status:
+            description: PostMortemStatus defines the observed state of a PostMortem.
+            properties:
+              actionsExecuted:
+                description: ActionsExecuted records all remediation actions and their
+                  results.
+                items:
+                  description: ActionRecord captures a single remediation action and
+                    its outcome.
                   properties:
-                    name:
+                    action:
+                      description: Action type that was executed (e.g., "RestartDeployment",
+                        "AdjustResources").
                       type: string
-                resource:
-                  description: Kubernetes resource that was affected.
-                  type: object
+                    detail:
+                      description: Detail describes the outcome.
+                      type: string
+                    params:
+                      additionalProperties:
+                        type: string
+                      description: Params are the action-specific parameters.
+                      type: object
+                    result:
+                      description: Result is "success" or "failed".
+                      type: string
+                    timestamp:
+                      description: Timestamp of execution.
+                      format: date-time
+                      type: string
                   required:
-                    - kind
-                    - name
-                    - namespace
+                  - action
+                  - detail
+                  - result
+                  - timestamp
+                  type: object
+                type: array
+              blastRadius:
+                description: BlastRadius describes all services and resources impacted
+                  by the incident.
+                items:
+                  description: BlastRadiusEntry describes a service or resource affected
+                    by the incident.
                   properties:
-                    kind:
+                    impact:
+                      description: Impact describes how this resource was affected.
                       type: string
-                    name:
-                      type: string
-                    namespace:
-                      type: string
-                severity:
-                  description: Severity of the original issue.
-                  type: string
-                  enum:
-                    - critical
-                    - high
-                    - medium
-                    - low
-            status:
-              description: PostMortemStatus defines the observed state.
-              type: object
-              properties:
-                state:
-                  description: Review lifecycle state.
-                  type: string
-                  enum:
-                    - Open
-                    - InReview
-                    - Closed
-                summary:
-                  description: AI-generated incident summary.
-                  type: string
-                rootCause:
-                  description: AI-determined root cause.
-                  type: string
-                impact:
-                  description: What was affected by the incident.
-                  type: string
-                timeline:
-                  description: Chronological list of incident events.
-                  type: array
-                  items:
-                    type: object
-                    required:
-                      - timestamp
-                      - type
-                      - detail
-                    properties:
-                      timestamp:
-                        type: string
-                        format: date-time
-                      type:
-                        type: string
-                      detail:
-                        type: string
-                actionsExecuted:
-                  description: All remediation actions and their results.
-                  type: array
-                  items:
-                    type: object
-                    required:
-                      - action
-                      - result
-                      - detail
-                      - timestamp
-                    properties:
-                      action:
-                        type: string
-                      params:
-                        type: object
-                        additionalProperties:
+                    resource:
+                      description: Resource affected.
+                      properties:
+                        kind:
                           type: string
-                      result:
-                        type: string
-                      detail:
-                        type: string
-                      timestamp:
-                        type: string
-                        format: date-time
-                lessonsLearned:
-                  description: AI-generated lessons from the incident.
-                  type: array
-                  items:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      - namespace
+                      type: object
+                    severity:
+                      description: Severity of the impact on this resource.
+                      type: string
+                  required:
+                  - impact
+                  - resource
+                  - severity
+                  type: object
+                type: array
+              cascadeChain:
+                description: CascadeChain describes the cascade failure chain if applicable.
+                items:
+                  type: string
+                type: array
+              duration:
+                description: Duration is the total incident duration (e.g., "12m34s").
+                type: string
+              errorBudgetBurned:
+                description: ErrorBudgetBurned is the percentage of error budget consumed
+                  by this incident.
+                type: number
+              feedback:
+                description: Feedback is human feedback on this PostMortem.
+                properties:
+                  comments:
+                    description: Comments from the developer.
                     type: string
-                preventionActions:
-                  description: AI-generated steps to prevent recurrence.
-                  type: array
-                  items:
+                  overrideRootCause:
+                    description: OverrideRootCause is the human-provided root cause
+                      (overrides AI analysis).
                     type: string
-                duration:
-                  description: Total incident duration.
+                  providedAt:
+                    description: ProvidedAt is when the feedback was given.
+                    format: date-time
+                    type: string
+                  providedBy:
+                    description: ProvidedBy identifies who provided the feedback.
+                    type: string
+                  remediationAccuracy:
+                    description: RemediationAccuracy rates the AI's remediation (1-5).
+                    format: int32
+                    maximum: 5
+                    minimum: 1
+                    type: integer
+                type: object
+              generatedAt:
+                description: GeneratedAt is when this PostMortem was auto-generated.
+                format: date-time
+                type: string
+              gitCorrelation:
+                description: GitCorrelation links the incident to suspected code changes.
+                properties:
+                  author:
+                    description: Author of the commit.
+                    type: string
+                  commitMessage:
+                    description: CommitMessage is the commit message.
+                    type: string
+                  commitSHA:
+                    description: CommitSHA is the suspected commit.
+                    type: string
+                  confidence:
+                    description: Confidence that this commit caused the incident (0.0-1.0).
+                    type: number
+                  filesChanged:
+                    description: FilesChanged lists the files modified.
+                    items:
+                      type: string
+                    type: array
+                  timestamp:
+                    description: Timestamp of the commit.
+                    format: date-time
+                    type: string
+                required:
+                - author
+                - commitMessage
+                - commitSHA
+                - confidence
+                - timestamp
+                type: object
+              gitOpsContext:
+                description: GitOpsContext describes Helm/ArgoCD/Flux state at the
+                  time of the incident.
+                type: string
+              impact:
+                description: Impact describes what was affected by the incident.
+                type: string
+              lessonsLearned:
+                description: LessonsLearned are AI-generated lessons from the incident.
+                items:
                   type: string
-                generatedAt:
-                  description: When this PostMortem was auto-generated.
+                type: array
+              logAnalysisSummary:
+                description: LogAnalysisSummary is a summary of key findings from
+                  log analysis.
+                type: string
+              metricSnapshots:
+                description: MetricSnapshots are metric values captured before, during,
+                  and after the incident.
+                items:
+                  description: MetricSnapshot captures a metric value at a point in
+                    time.
+                  properties:
+                    name:
+                      description: Name of the metric (e.g., "cpu_usage_percent",
+                        "memory_usage_bytes").
+                      type: string
+                    phase:
+                      description: 'Phase indicates when this was captured: "before",
+                        "during", or "after" the incident.'
+                      type: string
+                    timestamp:
+                      description: Timestamp of the measurement.
+                      format: date-time
+                      type: string
+                    value:
+                      description: Value is the metric value.
+                      type: string
+                  required:
+                  - name
+                  - phase
+                  - timestamp
+                  - value
+                  type: object
+                type: array
+              preventionActions:
+                description: PreventionActions are AI-generated steps to prevent recurrence.
+                items:
                   type: string
-                  format: date-time
-                reviewedAt:
-                  description: When the PostMortem was reviewed.
-                  type: string
-                  format: date-time
+                type: array
+              reviewedAt:
+                description: ReviewedAt is when the PostMortem was reviewed by a human.
+                format: date-time
+                type: string
+              rootCause:
+                description: RootCause is the AI-determined root cause.
+                type: string
+              sliImpact:
+                description: SLIImpact describes the impact on SLI error budgets.
+                type: string
+              state:
+                description: State is the review lifecycle state.
+                enum:
+                - Open
+                - InReview
+                - Closed
+                type: string
+              summary:
+                description: Summary is an AI-generated incident summary.
+                type: string
+              timeline:
+                description: Timeline is a chronological list of incident events.
+                items:
+                  description: TimelineEvent is a single timestamped event in the
+                    incident timeline.
+                  properties:
+                    detail:
+                      description: Detail describes what happened.
+                      type: string
+                    timestamp:
+                      description: Timestamp of this event.
+                      format: date-time
+                      type: string
+                    type:
+                      description: 'Type is one of: detected, analyzed, action_executed,
+                        action_failed, verified, resolved.'
+                      type: string
+                  required:
+                  - detail
+                  - timestamp
+                  - type
+                  type: object
+                type: array
+              trending:
+                description: Trending captures recurring incident pattern information.
+                properties:
+                  occurrenceCount:
+                    description: OccurrenceCount is how many times this pattern has
+                      occurred in the window.
+                    format: int32
+                    type: integer
+                  pattern:
+                    description: Pattern describes the recurring pattern.
+                    type: string
+                  relatedPostMortems:
+                    description: RelatedPostMortems references previous PostMortems
+                      for the same pattern.
+                    items:
+                      type: string
+                    type: array
+                  windowDays:
+                    description: WindowDays is the lookback window in days.
+                    format: int32
+                    type: integer
+                required:
+                - occurrenceCount
+                - windowDays
+                type: object
+            required:
+            - state
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
