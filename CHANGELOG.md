@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.74.0](https://github.com/diillson/chatcli/compare/v1.73.0...v1.74.0) (2026-03-20)
+
+
+### Features
+
+* **operator:** automatic rollback engine with structured snapshots ([#643](https://github.com/diillson/chatcli/issues/643)) ([541033f](https://github.com/diillson/chatcli/commit/541033fcf586ece156ce791964f393e4b1a70e90))
+
 ## [1.73.0](https://github.com/diillson/chatcli/compare/v1.72.2...v1.73.0) (2026-03-20)
 
 
