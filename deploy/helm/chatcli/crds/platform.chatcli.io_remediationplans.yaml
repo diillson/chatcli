@@ -195,6 +195,128 @@ spec:
           status:
             description: RemediationPlanStatus defines the observed state of a RemediationPlan.
             properties:
+              actionCheckpoints:
+                description: ActionCheckpoints record the state before each action
+                  for partial rollback.
+                items:
+                  description: |-
+                    ActionCheckpoint records the state after each individual action execution,
+                    enabling partial rollback when a multi-action plan fails midway.
+                  properties:
+                    actionIndex:
+                      description: ActionIndex is the 0-based index of the action
+                        that was executed.
+                      format: int32
+                      type: integer
+                    actionType:
+                      description: ActionType is the type of the action.
+                      enum:
+                      - ScaleDeployment
+                      - RollbackDeployment
+                      - RestartDeployment
+                      - PatchConfig
+                      - AdjustResources
+                      - DeletePod
+                      - HelmRollback
+                      - ArgoSyncApp
+                      - AdjustHPA
+                      - RestartStatefulSetPod
+                      - CordonNode
+                      - DrainNode
+                      - ResizePVC
+                      - RotateSecret
+                      - ExecDiagnostic
+                      - UpdateIngress
+                      - PatchNetworkPolicy
+                      - ApplyManifest
+                      - Custom
+                      type: string
+                    snapshotBefore:
+                      description: SnapshotBefore is the resource state captured before
+                        THIS action.
+                      properties:
+                        annotations:
+                          additionalProperties:
+                            type: string
+                          description: Annotations captures relevant annotations before
+                            modification.
+                          type: object
+                        capturedAt:
+                          description: CapturedAt is when this snapshot was taken.
+                          format: date-time
+                          type: string
+                        containerImages:
+                          additionalProperties:
+                            type: string
+                          description: ContainerImages maps container name to image
+                            before modification.
+                          type: object
+                        containerResources:
+                          additionalProperties:
+                            description: ContainerResourceSnapshot captures a single
+                              container's resource requests/limits.
+                            properties:
+                              cpuLimit:
+                                description: CPULimit before modification.
+                                type: string
+                              cpuRequest:
+                                description: CPURequest before modification.
+                                type: string
+                              memoryLimit:
+                                description: MemoryLimit before modification.
+                                type: string
+                              memoryRequest:
+                                description: MemoryRequest before modification.
+                                type: string
+                            type: object
+                          description: ContainerResources maps container name to its
+                            resources before modification.
+                          type: object
+                        hpaMaxReplicas:
+                          format: int32
+                          type: integer
+                        hpaMinReplicas:
+                          description: HPASpec captures HPA state before modification.
+                          format: int32
+                          type: integer
+                        namespace:
+                          description: Namespace of the resource.
+                          type: string
+                        nodeUnschedulable:
+                          description: NodeUnschedulable captures the node's schedulable
+                            state before cordon.
+                          type: boolean
+                        replicas:
+                          description: Replicas before modification.
+                          format: int32
+                          type: integer
+                        resourceKind:
+                          description: ResourceKind is the kind of resource (Deployment,
+                            StatefulSet, etc.).
+                          type: string
+                        resourceName:
+                          description: ResourceName is the name of the resource.
+                          type: string
+                      required:
+                      - capturedAt
+                      - namespace
+                      - resourceKind
+                      - resourceName
+                      type: object
+                    success:
+                      description: Success indicates whether this action succeeded.
+                      type: boolean
+                    timestamp:
+                      description: Timestamp of execution.
+                      format: date-time
+                      type: string
+                  required:
+                  - actionIndex
+                  - actionType
+                  - success
+                  - timestamp
+                  type: object
+                type: array
               actionsCompletedAt:
                 description: ActionsCompletedAt is when all actions finished executing
                   and verification began.
@@ -226,7 +348,8 @@ spec:
                       format: date-time
                       type: string
                     type:
-                      description: Type of evidence (log, metric_snapshot, event).
+                      description: Type of evidence (log, metric_snapshot, event,
+                        preflight_snapshot, rollback).
                       type: string
                   required:
                   - data
@@ -234,8 +357,93 @@ spec:
                   - type
                   type: object
                 type: array
+              postFailureHealthy:
+                description: PostFailureHealthy indicates whether the resource is
+                  healthy after failure+rollback.
+                type: boolean
+              preflightSnapshot:
+                description: |-
+                  PreflightSnapshot is the full restorable state of the resource before any actions.
+                  Used for automatic rollback on failure.
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    description: Annotations captures relevant annotations before
+                      modification.
+                    type: object
+                  capturedAt:
+                    description: CapturedAt is when this snapshot was taken.
+                    format: date-time
+                    type: string
+                  containerImages:
+                    additionalProperties:
+                      type: string
+                    description: ContainerImages maps container name to image before
+                      modification.
+                    type: object
+                  containerResources:
+                    additionalProperties:
+                      description: ContainerResourceSnapshot captures a single container's
+                        resource requests/limits.
+                      properties:
+                        cpuLimit:
+                          description: CPULimit before modification.
+                          type: string
+                        cpuRequest:
+                          description: CPURequest before modification.
+                          type: string
+                        memoryLimit:
+                          description: MemoryLimit before modification.
+                          type: string
+                        memoryRequest:
+                          description: MemoryRequest before modification.
+                          type: string
+                      type: object
+                    description: ContainerResources maps container name to its resources
+                      before modification.
+                    type: object
+                  hpaMaxReplicas:
+                    format: int32
+                    type: integer
+                  hpaMinReplicas:
+                    description: HPASpec captures HPA state before modification.
+                    format: int32
+                    type: integer
+                  namespace:
+                    description: Namespace of the resource.
+                    type: string
+                  nodeUnschedulable:
+                    description: NodeUnschedulable captures the node's schedulable
+                      state before cordon.
+                    type: boolean
+                  replicas:
+                    description: Replicas before modification.
+                    format: int32
+                    type: integer
+                  resourceKind:
+                    description: ResourceKind is the kind of resource (Deployment,
+                      StatefulSet, etc.).
+                    type: string
+                  resourceName:
+                    description: ResourceName is the name of the resource.
+                    type: string
+                required:
+                - capturedAt
+                - namespace
+                - resourceKind
+                - resourceName
+                type: object
               result:
                 description: Result describes the outcome.
+                type: string
+              rollbackPerformed:
+                description: RollbackPerformed indicates whether an automatic rollback
+                  was executed.
+                type: boolean
+              rollbackResult:
+                description: RollbackResult describes the outcome of the automatic
+                  rollback.
                 type: string
               startedAt:
                 description: StartedAt is when execution began.

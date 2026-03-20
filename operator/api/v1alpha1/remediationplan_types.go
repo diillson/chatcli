@@ -107,9 +107,87 @@ type RemediationPlanSpec struct {
 	AgenticMaxSteps int32 `json:"agenticMaxSteps,omitempty"`
 }
 
+// ResourceSnapshot captures the full restorable state of a Kubernetes resource
+// before remediation modifies it. Used for automatic rollback on failure.
+type ResourceSnapshot struct {
+	// ResourceKind is the kind of resource (Deployment, StatefulSet, etc.).
+	ResourceKind string `json:"resourceKind"`
+
+	// ResourceName is the name of the resource.
+	ResourceName string `json:"resourceName"`
+
+	// Namespace of the resource.
+	Namespace string `json:"namespace"`
+
+	// Replicas before modification.
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// ContainerImages maps container name to image before modification.
+	// +optional
+	ContainerImages map[string]string `json:"containerImages,omitempty"`
+
+	// ContainerResources maps container name to its resources before modification.
+	// +optional
+	ContainerResources map[string]ContainerResourceSnapshot `json:"containerResources,omitempty"`
+
+	// HPASpec captures HPA state before modification.
+	// +optional
+	HPAMinReplicas *int32 `json:"hpaMinReplicas,omitempty"`
+	// +optional
+	HPAMaxReplicas *int32 `json:"hpaMaxReplicas,omitempty"`
+
+	// NodeUnschedulable captures the node's schedulable state before cordon.
+	// +optional
+	NodeUnschedulable *bool `json:"nodeUnschedulable,omitempty"`
+
+	// Annotations captures relevant annotations before modification.
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// CapturedAt is when this snapshot was taken.
+	CapturedAt metav1.Time `json:"capturedAt"`
+}
+
+// ContainerResourceSnapshot captures a single container's resource requests/limits.
+type ContainerResourceSnapshot struct {
+	// CPURequest before modification.
+	// +optional
+	CPURequest string `json:"cpuRequest,omitempty"`
+	// CPULimit before modification.
+	// +optional
+	CPULimit string `json:"cpuLimit,omitempty"`
+	// MemoryRequest before modification.
+	// +optional
+	MemoryRequest string `json:"memoryRequest,omitempty"`
+	// MemoryLimit before modification.
+	// +optional
+	MemoryLimit string `json:"memoryLimit,omitempty"`
+}
+
+// ActionCheckpoint records the state after each individual action execution,
+// enabling partial rollback when a multi-action plan fails midway.
+type ActionCheckpoint struct {
+	// ActionIndex is the 0-based index of the action that was executed.
+	ActionIndex int32 `json:"actionIndex"`
+
+	// ActionType is the type of the action.
+	ActionType RemediationActionType `json:"actionType"`
+
+	// Success indicates whether this action succeeded.
+	Success bool `json:"success"`
+
+	// SnapshotBefore is the resource state captured before THIS action.
+	// +optional
+	SnapshotBefore *ResourceSnapshot `json:"snapshotBefore,omitempty"`
+
+	// Timestamp of execution.
+	Timestamp metav1.Time `json:"timestamp"`
+}
+
 // EvidenceItem is a piece of evidence collected during remediation.
 type EvidenceItem struct {
-	// Type of evidence (log, metric_snapshot, event).
+	// Type of evidence (log, metric_snapshot, event, preflight_snapshot, rollback).
 	Type string `json:"type"`
 
 	// Data content.
@@ -151,6 +229,27 @@ type RemediationPlanStatus struct {
 	// AgenticStartedAt is when the agentic loop first started.
 	// +optional
 	AgenticStartedAt *metav1.Time `json:"agenticStartedAt,omitempty"`
+
+	// PreflightSnapshot is the full restorable state of the resource before any actions.
+	// Used for automatic rollback on failure.
+	// +optional
+	PreflightSnapshot *ResourceSnapshot `json:"preflightSnapshot,omitempty"`
+
+	// ActionCheckpoints record the state before each action for partial rollback.
+	// +optional
+	ActionCheckpoints []ActionCheckpoint `json:"actionCheckpoints,omitempty"`
+
+	// RollbackPerformed indicates whether an automatic rollback was executed.
+	// +optional
+	RollbackPerformed bool `json:"rollbackPerformed,omitempty"`
+
+	// RollbackResult describes the outcome of the automatic rollback.
+	// +optional
+	RollbackResult string `json:"rollbackResult,omitempty"`
+
+	// PostFailureHealthy indicates whether the resource is healthy after failure+rollback.
+	// +optional
+	PostFailureHealthy *bool `json:"postFailureHealthy,omitempty"`
 }
 
 // +kubebuilder:object:root=true

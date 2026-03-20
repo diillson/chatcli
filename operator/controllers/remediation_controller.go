@@ -139,32 +139,114 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 	}
 
 	resource := issue.Spec.Resource
+	rollbackEngine := NewRollbackEngine(r.Client)
 
-	// Capture pre-flight snapshot for manual rollback reference
+	// Capture full restorable pre-flight snapshot (structured, not just text)
 	var evidence []platformv1alpha1.EvidenceItem
-	if snapshot, err := r.capturePreflightSnapshot(ctx, resource); err != nil {
-		log.Info("Failed to capture preflight snapshot", "error", err)
+	preflightSnapshot, err := rollbackEngine.CaptureSnapshot(ctx, resource)
+	if err != nil {
+		log.Info("Failed to capture structured snapshot, falling back to text", "error", err)
 	} else {
-		evidence = append(evidence, snapshot)
+		plan.Status.PreflightSnapshot = preflightSnapshot
+		evidence = append(evidence, platformv1alpha1.EvidenceItem{
+			Type:      "preflight_snapshot",
+			Data:      fmt.Sprintf("Structured snapshot captured: kind=%s replicas=%v containers=%d", resource.Kind, preflightSnapshot.Replicas, len(preflightSnapshot.ContainerImages)),
+			Timestamp: metav1.Now(),
+		})
 	}
 
-	// Execute each action
-	for _, action := range plan.Spec.Actions {
-		log.Info("Executing action", "type", action.Type, "resource", resource.Name)
+	// Also capture legacy text snapshot for backward compatibility
+	if textSnapshot, err := r.capturePreflightSnapshot(ctx, resource); err == nil {
+		evidence = append(evidence, textSnapshot)
+	}
 
-		err := r.executeAction(ctx, resource, &action)
+	// Execute each action with per-action checkpoints
+	var checkpoints []platformv1alpha1.ActionCheckpoint
+	for i, action := range plan.Spec.Actions {
+		log.Info("Executing action", "type", action.Type, "resource", resource.Name, "index", i)
 
-		if err != nil {
-			log.Error(err, "Action failed", "type", action.Type)
+		// Capture checkpoint before this action (for partial rollback)
+		checkpoint := platformv1alpha1.ActionCheckpoint{
+			ActionIndex: int32(i),
+			ActionType:  action.Type,
+			Timestamp:   metav1.Now(),
+		}
+
+		// For node actions, capture node-specific snapshot
+		if action.Type == platformv1alpha1.ActionCordonNode || action.Type == platformv1alpha1.ActionDrainNode {
+			if nodeName, ok := action.Params["node"]; ok {
+				if nodeSnap, err := rollbackEngine.CaptureNodeSnapshot(ctx, nodeName); err == nil {
+					checkpoint.SnapshotBefore = nodeSnap
+				}
+			}
+		} else {
+			// Re-capture resource snapshot before each action (state may have changed from previous action)
+			if actionSnap, err := rollbackEngine.CaptureSnapshot(ctx, resource); err == nil {
+				checkpoint.SnapshotBefore = actionSnap
+			}
+		}
+
+		execErr := r.executeAction(ctx, resource, &action)
+
+		if execErr != nil {
+			log.Error(execErr, "Action failed", "type", action.Type, "index", i)
+			checkpoint.Success = false
+			checkpoints = append(checkpoints, checkpoint)
+
 			now := metav1.Now()
-			plan.Status.State = platformv1alpha1.RemediationStateFailed
+			plan.Status.ActionCheckpoints = checkpoints
+
+			// Attempt automatic rollback to pre-flight state
+			rollbackResult := ""
+			if preflightSnapshot != nil {
+				log.Info("Attempting automatic rollback to pre-flight state", "plan", plan.Name)
+				if rbResult, rbErr := rollbackEngine.Rollback(ctx, preflightSnapshot); rbErr != nil {
+					rollbackResult = fmt.Sprintf("Rollback FAILED: %v", rbErr)
+					log.Error(rbErr, "Automatic rollback failed", "plan", plan.Name)
+					plan.Status.RollbackPerformed = true
+					plan.Status.RollbackResult = rollbackResult
+				} else {
+					rollbackResult = rbResult
+					log.Info("Automatic rollback succeeded", "plan", plan.Name, "result", rbResult)
+					plan.Status.RollbackPerformed = true
+					plan.Status.RollbackResult = rbResult
+				}
+			}
+
+			// Verify post-failure health
+			healthy := rollbackEngine.VerifyPostFailureHealth(ctx, resource)
+			plan.Status.PostFailureHealthy = &healthy
+
+			// Set final state
+			if plan.Status.RollbackPerformed && healthy {
+				plan.Status.State = platformv1alpha1.RemediationStateRolledBack
+			} else {
+				plan.Status.State = platformv1alpha1.RemediationStateFailed
+			}
+
 			plan.Status.CompletedAt = &now
-			plan.Status.Result = fmt.Sprintf("Action %s failed: %v", action.Type, err)
-			plan.Status.Evidence = append(plan.Status.Evidence, platformv1alpha1.EvidenceItem{
-				Type:      "error",
-				Data:      err.Error(),
+			plan.Status.Result = fmt.Sprintf("Action %s (index %d) failed: %v", action.Type, i, execErr)
+			if rollbackResult != "" {
+				plan.Status.Result += fmt.Sprintf(" | Rollback: %s", rollbackResult)
+			}
+			if healthy {
+				plan.Status.Result += " | Post-rollback: resource healthy"
+			} else {
+				plan.Status.Result += " | Post-failure: resource may be unhealthy"
+			}
+
+			plan.Status.Evidence = append(evidence, platformv1alpha1.EvidenceItem{
+				Type:      "action_failed",
+				Data:      fmt.Sprintf("Action %s failed: %v", action.Type, execErr),
 				Timestamp: now,
 			})
+			if rollbackResult != "" {
+				plan.Status.Evidence = append(plan.Status.Evidence, platformv1alpha1.EvidenceItem{
+					Type:      "rollback",
+					Data:      rollbackResult,
+					Timestamp: now,
+				})
+			}
 
 			remediationsTotal.WithLabelValues(string(action.Type), "failed").Inc()
 			if plan.Status.StartedAt != nil {
@@ -174,6 +256,10 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 			return ctrl.Result{}, r.Status().Update(ctx, plan)
 		}
 
+		// Action succeeded — record checkpoint
+		checkpoint.Success = true
+		checkpoints = append(checkpoints, checkpoint)
+
 		evidence = append(evidence, platformv1alpha1.EvidenceItem{
 			Type:      "action_completed",
 			Data:      fmt.Sprintf("Action %s executed successfully", action.Type),
@@ -182,13 +268,14 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 		remediationsTotal.WithLabelValues(string(action.Type), "success").Inc()
 	}
 
-	// All actions executed — transition to Verifying to confirm deployment health.
+	// All actions executed — transition to Verifying to confirm resource health.
 	now := metav1.Now()
 	plan.Status.State = platformv1alpha1.RemediationStateVerifying
 	plan.Status.ActionsCompletedAt = &now
 	plan.Status.Evidence = evidence
+	plan.Status.ActionCheckpoints = checkpoints
 
-	log.Info("Actions executed, verifying deployment health", "plan", plan.Name)
+	log.Info("Actions executed, verifying resource health", "plan", plan.Name)
 
 	if err := r.Status().Update(ctx, plan); err != nil {
 		return ctrl.Result{}, err
@@ -247,10 +334,45 @@ func (r *RemediationReconciler) handleVerifying(ctx context.Context, plan *platf
 	// Check if verification timeout exceeded.
 	if plan.Status.ActionsCompletedAt != nil && time.Since(plan.Status.ActionsCompletedAt.Time) > verificationTimeout {
 		now := metav1.Now()
-		plan.Status.State = platformv1alpha1.RemediationStateFailed
+
+		// Resource is still unhealthy after actions — attempt rollback to pre-flight state
+		if plan.Status.PreflightSnapshot != nil && !plan.Status.RollbackPerformed {
+			rollbackEngine := NewRollbackEngine(r.Client)
+			log.Info("Verification timeout — attempting rollback to pre-flight state", "plan", plan.Name)
+
+			if rbResult, rbErr := rollbackEngine.Rollback(ctx, plan.Status.PreflightSnapshot); rbErr != nil {
+				log.Error(rbErr, "Rollback after verification timeout failed", "plan", plan.Name)
+				plan.Status.RollbackPerformed = true
+				plan.Status.RollbackResult = fmt.Sprintf("Rollback FAILED: %v", rbErr)
+			} else {
+				log.Info("Rollback after verification timeout succeeded", "plan", plan.Name, "result", rbResult)
+				plan.Status.RollbackPerformed = true
+				plan.Status.RollbackResult = rbResult
+			}
+
+			postRollbackHealthy := rollbackEngine.VerifyPostFailureHealth(ctx, resource)
+			plan.Status.PostFailureHealthy = &postRollbackHealthy
+
+			plan.Status.Evidence = append(plan.Status.Evidence, platformv1alpha1.EvidenceItem{
+				Type:      "verification_timeout_rollback",
+				Data:      fmt.Sprintf("Verification timeout after %s. Rollback: %s", verificationTimeout, plan.Status.RollbackResult),
+				Timestamp: now,
+			})
+		}
+
+		if plan.Status.RollbackPerformed {
+			plan.Status.State = platformv1alpha1.RemediationStateRolledBack
+		} else {
+			plan.Status.State = platformv1alpha1.RemediationStateFailed
+		}
+
 		plan.Status.CompletedAt = &now
 		plan.Status.Result = fmt.Sprintf("Verification failed: %s %s/%s still unhealthy after %s",
 			resource.Kind, resource.Namespace, resource.Name, verificationTimeout)
+		if plan.Status.RollbackResult != "" {
+			plan.Status.Result += fmt.Sprintf(" | Rollback: %s", plan.Status.RollbackResult)
+		}
+
 		plan.Status.Evidence = append(plan.Status.Evidence, platformv1alpha1.EvidenceItem{
 			Type:      "verification_failed",
 			Data:      fmt.Sprintf("%s %s/%s unhealthy after verification timeout", resource.Kind, resource.Namespace, resource.Name),
@@ -262,7 +384,8 @@ func (r *RemediationReconciler) handleVerifying(ctx context.Context, plan *platf
 		}
 		remediationsTotal.WithLabelValues("verification", "failed").Inc()
 
-		log.Info("Verification failed, resource still unhealthy", "plan", plan.Name, "kind", resource.Kind)
+		log.Info("Verification failed, resource still unhealthy", "plan", plan.Name, "kind", resource.Kind,
+			"rollbackPerformed", plan.Status.RollbackPerformed)
 		return ctrl.Result{}, r.Status().Update(ctx, plan)
 	}
 
