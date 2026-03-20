@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.72.2](https://github.com/diillson/chatcli/compare/v1.72.1...v1.72.2) (2026-03-20)
+
+
+### Bug Fixes
+
+* **operator:** regenerate deepcopy and fix Docker build errors ([#639](https://github.com/diillson/chatcli/issues/639)) ([d344b88](https://github.com/diillson/chatcli/commit/d344b88f2556bbbf6a49e106a0c86fc4b430f27a))
+
 ## [1.72.1](https://github.com/diillson/chatcli/compare/v1.72.0...v1.72.1) (2026-03-20)
 
 
