@@ -97,11 +97,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Shared components for enriched AI analysis
+	contextBuilder := controllers.NewKubernetesContextBuilder(mgr.GetClient(), kubeClientset)
+	logAnalyzer := controllers.NewLogAnalyzer(mgr.GetClient(), kubeClientset)
+	gitOpsDetector := controllers.NewGitOpsDetector(mgr.GetClient())
+	sourceCodeAnalyzer := controllers.NewSourceCodeAnalyzer(mgr.GetClient())
+	cascadeAnalyzer := controllers.NewCascadeAnalyzer(mgr.GetClient())
+	blastRadiusPredictor := controllers.NewBlastRadiusPredictor(mgr.GetClient())
+
 	if err = (&controllers.RemediationReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		ServerClient:   serverClient,
-		ContextBuilder: controllers.NewKubernetesContextBuilder(mgr.GetClient(), kubeClientset),
+		ContextBuilder: contextBuilder,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Remediation")
 		os.Exit(1)
@@ -115,12 +123,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	// AIInsightReconciler — calls server AnalyzeIssue RPC to fill analysis
+	// MetricsCollector — optional, requires PROMETHEUS_URL env var
+	var metricsCollector *controllers.MetricsCollector
+	if promURL := os.Getenv("PROMETHEUS_URL"); promURL != "" {
+		metricsCollector = controllers.NewMetricsCollector(promURL)
+		setupLog.Info("Prometheus metrics collector enabled", "url", promURL)
+	}
+
+	// AIInsightReconciler — calls server AnalyzeIssue RPC with enriched context
 	if err = (&controllers.AIInsightReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		ServerClient:   serverClient,
-		ContextBuilder: controllers.NewKubernetesContextBuilder(mgr.GetClient(), kubeClientset),
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		ServerClient:         serverClient,
+		ContextBuilder:       contextBuilder,
+		LogAnalyzer:          logAnalyzer,
+		MetricsCollector:     metricsCollector,
+		GitOpsDetector:       gitOpsDetector,
+		SourceCodeAnalyzer:   sourceCodeAnalyzer,
+		CascadeAnalyzer:      cascadeAnalyzer,
+		BlastRadiusPredictor: blastRadiusPredictor,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AIInsight")
 		os.Exit(1)
@@ -176,6 +197,15 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Federation")
+		os.Exit(1)
+	}
+
+	// SourceRepositoryReconciler — syncs git repositories for code-aware diagnostics
+	if err = (&controllers.SourceRepositoryReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "SourceRepository")
 		os.Exit(1)
 	}
 

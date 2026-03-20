@@ -217,6 +217,12 @@ serviceMonitor:
   scrapeTimeout: ""
   labels: {}
 
+# AIOps enrichment — Prometheus URL for metrics collection during incident analysis.
+# When set, the operator queries Prometheus for CPU, memory, latency, error rate
+# trends around incident time, providing quantitative context to the AI.
+# Example: "http://prometheus-server.monitoring.svc:9090"
+prometheusUrl: ""
+
 # Extra environment variables
 extraEnv: []
 # - name: LOG_LEVEL

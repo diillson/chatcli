@@ -3,18 +3,31 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // AnomalySignalType classifies the kind of anomaly signal.
-// +kubebuilder:validation:Enum=error_rate;latency;pod_restart;cpu_high;memory_high;oom_kill;pod_not_ready;deploy_failing
+// +kubebuilder:validation:Enum=error_rate;latency;pod_restart;cpu_high;memory_high;oom_kill;pod_not_ready;deploy_failing;disk_pressure;node_not_ready;pvc_pending;ingress_error;hpa_maxed;job_failed;cronjob_missed;certificate_expiring;image_pull_error;crashloop_backoff;helm_release_failed;argocd_degraded;config_drift
 type AnomalySignalType string
 
 const (
-	SignalErrorRate   AnomalySignalType = "error_rate"
-	SignalLatency     AnomalySignalType = "latency"
-	SignalPodRestart  AnomalySignalType = "pod_restart"
-	SignalCPUHigh     AnomalySignalType = "cpu_high"
-	SignalMemoryHigh  AnomalySignalType = "memory_high"
-	SignalOOMKill     AnomalySignalType = "oom_kill"
-	SignalPodNotReady AnomalySignalType = "pod_not_ready"
-	SignalDeployFail  AnomalySignalType = "deploy_failing"
+	SignalErrorRate         AnomalySignalType = "error_rate"
+	SignalLatency           AnomalySignalType = "latency"
+	SignalPodRestart        AnomalySignalType = "pod_restart"
+	SignalCPUHigh           AnomalySignalType = "cpu_high"
+	SignalMemoryHigh        AnomalySignalType = "memory_high"
+	SignalOOMKill           AnomalySignalType = "oom_kill"
+	SignalPodNotReady       AnomalySignalType = "pod_not_ready"
+	SignalDeployFail        AnomalySignalType = "deploy_failing"
+	SignalDiskPressure      AnomalySignalType = "disk_pressure"
+	SignalNodeNotReady      AnomalySignalType = "node_not_ready"
+	SignalPVCPending        AnomalySignalType = "pvc_pending"
+	SignalIngressError      AnomalySignalType = "ingress_error"
+	SignalHPAMaxed          AnomalySignalType = "hpa_maxed"
+	SignalJobFailed         AnomalySignalType = "job_failed"
+	SignalCronJobMissed     AnomalySignalType = "cronjob_missed"
+	SignalCertExpiring      AnomalySignalType = "certificate_expiring"
+	SignalImagePullError    AnomalySignalType = "image_pull_error"
+	SignalCrashLoopBackOff  AnomalySignalType = "crashloop_backoff"
+	SignalHelmReleaseFailed AnomalySignalType = "helm_release_failed"
+	SignalArgoCDDegraded    AnomalySignalType = "argocd_degraded"
+	SignalConfigDrift       AnomalySignalType = "config_drift"
 )
 
 // AnomalySource is the origin system.

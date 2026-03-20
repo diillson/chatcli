@@ -16,17 +16,29 @@ const (
 )
 
 // RemediationActionType defines the type of remediation action.
-// +kubebuilder:validation:Enum=ScaleDeployment;RollbackDeployment;RestartDeployment;PatchConfig;AdjustResources;DeletePod;Custom
+// +kubebuilder:validation:Enum=ScaleDeployment;RollbackDeployment;RestartDeployment;PatchConfig;AdjustResources;DeletePod;HelmRollback;ArgoSyncApp;AdjustHPA;RestartStatefulSetPod;CordonNode;DrainNode;ResizePVC;RotateSecret;ExecDiagnostic;UpdateIngress;PatchNetworkPolicy;ApplyManifest;Custom
 type RemediationActionType string
 
 const (
-	ActionScaleDeployment    RemediationActionType = "ScaleDeployment"
-	ActionRollbackDeployment RemediationActionType = "RollbackDeployment"
-	ActionRestartDeployment  RemediationActionType = "RestartDeployment"
-	ActionPatchConfig        RemediationActionType = "PatchConfig"
-	ActionAdjustResources    RemediationActionType = "AdjustResources"
-	ActionDeletePod          RemediationActionType = "DeletePod"
-	ActionCustom             RemediationActionType = "Custom"
+	ActionScaleDeployment       RemediationActionType = "ScaleDeployment"
+	ActionRollbackDeployment    RemediationActionType = "RollbackDeployment"
+	ActionRestartDeployment     RemediationActionType = "RestartDeployment"
+	ActionPatchConfig           RemediationActionType = "PatchConfig"
+	ActionAdjustResources       RemediationActionType = "AdjustResources"
+	ActionDeletePod             RemediationActionType = "DeletePod"
+	ActionHelmRollback          RemediationActionType = "HelmRollback"
+	ActionArgoSyncApp           RemediationActionType = "ArgoSyncApp"
+	ActionAdjustHPA             RemediationActionType = "AdjustHPA"
+	ActionRestartStatefulSetPod RemediationActionType = "RestartStatefulSetPod"
+	ActionCordonNode            RemediationActionType = "CordonNode"
+	ActionDrainNode             RemediationActionType = "DrainNode"
+	ActionResizePVC             RemediationActionType = "ResizePVC"
+	ActionRotateSecret          RemediationActionType = "RotateSecret"
+	ActionExecDiagnostic        RemediationActionType = "ExecDiagnostic"
+	ActionUpdateIngress         RemediationActionType = "UpdateIngress"
+	ActionPatchNetworkPolicy    RemediationActionType = "PatchNetworkPolicy"
+	ActionApplyManifest         RemediationActionType = "ApplyManifest"
+	ActionCustom                RemediationActionType = "Custom"
 )
 
 // RemediationAction defines a single remediation step.

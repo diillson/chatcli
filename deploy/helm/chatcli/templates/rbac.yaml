@@ -27,21 +27,49 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "services", "endpoints", "namespaces"]
     verbs: ["get", "list", "watch"]
-  # Runbook CRD (controller creates auto-generated runbooks)
+  # Platform CRDs (operator manages these)
   - apiGroups: [ "platform.chatcli.io" ]
-    resources: [ "runbooks" ]
-    verbs: [ "get", "list", "watch", "create", "update", "patch" ]
-  # Apps resources
+    resources: [ "runbooks", "sourcerepositories", "sourcerepositories/status" ]
+    verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+  # Core resources for watcher + remediation
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Nodes (for cordon/drain remediation)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Apps resources (extended verbs for remediation)
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Batch resources (Jobs, CronJobs)
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
     verbs: ["get", "list", "watch"]
-  # Autoscaling
+  # Autoscaling (extended verbs for HPA adjustment)
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]
-    verbs: ["get", "list", "watch"]
-  # Networking
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Networking (extended verbs for ingress/networkpolicy remediation)
   - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Policy (PDB checks for blast radius prediction)
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch"]
+  # Discovery (endpoint slices for dependency health)
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  # ArgoCD Applications (optional — for GitOps detection)
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Flux Kustomizations (optional — for GitOps detection)
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
     verbs: ["get", "list", "watch"]
   # Metrics (for resource usage)
   - apiGroups: ["metrics.k8s.io"]
@@ -77,23 +105,47 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "services", "endpoints"]
     verbs: ["get", "list", "watch"]
-  # Runbook CRD (controller creates auto-generated runbooks)
+  # Platform CRDs (operator manages these)
   - apiGroups: [ "platform.chatcli.io" ]
-    resources: [ "runbooks" ]
-    verbs: [ "get", "list", "watch", "create", "update", "patch" ]
-  # Apps resources
+    resources: [ "runbooks", "sourcerepositories", "sourcerepositories/status" ]
+    verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+  # Core resources for watcher + remediation
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Apps resources (extended verbs for remediation)
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Batch resources
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
     verbs: ["get", "list", "watch"]
-  # Autoscaling
+  # Autoscaling (extended verbs for HPA adjustment)
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]
-    verbs: ["get", "list", "watch"]
-  # Networking
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Networking (extended verbs for remediation)
   - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Policy (PDB checks)
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
     verbs: ["get", "list", "watch"]
-  # Metrics (for resource usage)
+  # Discovery (endpoint slices)
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  # ArgoCD (optional)
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Flux (optional)
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    verbs: ["get", "list", "watch"]
+  # Metrics
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods"]
     verbs: ["get", "list"]

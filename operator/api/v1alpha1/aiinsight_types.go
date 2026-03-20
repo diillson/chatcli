@@ -52,6 +52,30 @@ type AIInsightStatus struct {
 	// GeneratedAt is when the analysis was generated.
 	// +optional
 	GeneratedAt *metav1.Time `json:"generatedAt,omitempty"`
+
+	// LogAnalysis contains structured findings from application log analysis.
+	// +optional
+	LogAnalysis string `json:"logAnalysis,omitempty"`
+
+	// MetricsContext contains Prometheus metric data correlated with the incident.
+	// +optional
+	MetricsContext string `json:"metricsContext,omitempty"`
+
+	// SourceCodeContext contains relevant source code snippets from the app repository.
+	// +optional
+	SourceCodeContext string `json:"sourceCodeContext,omitempty"`
+
+	// GitOpsContext contains Helm/ArgoCD/Flux status at the time of analysis.
+	// +optional
+	GitOpsContext string `json:"gitOpsContext,omitempty"`
+
+	// CascadeAnalysis describes cross-service cascade failure analysis.
+	// +optional
+	CascadeAnalysis string `json:"cascadeAnalysis,omitempty"`
+
+	// BlastRadiusPrediction describes the predicted impact of suggested actions.
+	// +optional
+	BlastRadiusPrediction string `json:"blastRadiusPrediction,omitempty"`
 }
 
 // +kubebuilder:object:root=true
