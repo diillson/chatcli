@@ -1,0 +1,219 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: sourcerepositories.platform.chatcli.io
+spec:
+  group: platform.chatcli.io
+  names:
+    kind: SourceRepository
+    listKind: SourceRepositoryList
+    plural: sourcerepositories
+    shortNames:
+    - srcrepo
+    singular: sourcerepository
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.url
+      name: URL
+      type: string
+    - jsonPath: .spec.branch
+      name: Branch
+      type: string
+    - jsonPath: .status.ready
+      name: Ready
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SourceRepository links a Kubernetes workload to its source code repository
+          for code-aware incident analysis and diagnostics.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: SourceRepositorySpec defines the desired state of a SourceRepository.
+            properties:
+              authType:
+                default: none
+                description: AuthType is the authentication method.
+                enum:
+                - none
+                - ssh
+                - token
+                - basic
+                type: string
+              branch:
+                default: main
+                description: Branch to track (defaults to "main").
+                type: string
+              dockerfile:
+                description: Dockerfile path within the repo for build context understanding.
+                type: string
+              language:
+                description: Language hint for the primary programming language.
+                type: string
+              paths:
+                description: |-
+                  Paths are the relevant source paths to analyze (e.g., ["src/", "cmd/"]).
+                  If empty, the entire repository is analyzed.
+                items:
+                  type: string
+                type: array
+              resource:
+                description: Resource links this repository to a specific Kubernetes
+                  resource.
+                properties:
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - kind
+                - name
+                - namespace
+                type: object
+              secretRef:
+                description: |-
+                  SecretRef references a Secret containing auth credentials.
+                  For token: key "token". For basic: keys "username" and "password". For ssh: key "ssh-key".
+                type: string
+              syncIntervalMinutes:
+                default: 30
+                description: SyncIntervalMinutes is how often to re-sync the repository
+                  (default 30).
+                format: int32
+                minimum: 5
+                type: integer
+              url:
+                description: URL is the git repository URL (HTTPS or SSH).
+                type: string
+            required:
+            - resource
+            - url
+            type: object
+          status:
+            description: SourceRepositoryStatus defines the observed state of a SourceRepository.
+            properties:
+              configFiles:
+                description: ConfigFiles are detected configuration files (Dockerfile,
+                  helm values, k8s manifests).
+                items:
+                  type: string
+                type: array
+              detectedLanguages:
+                description: DetectedLanguages lists languages detected in the repository.
+                items:
+                  type: string
+                type: array
+              entrypointFiles:
+                description: EntrypointFiles are the detected application entrypoints
+                  (main.go, app.py, index.js, etc.).
+                items:
+                  type: string
+                type: array
+              error:
+                description: Error describes any sync error.
+                type: string
+              headCommit:
+                description: HeadCommit is the latest commit on the tracked branch.
+                properties:
+                  author:
+                    description: Author of the commit.
+                    type: string
+                  filesChanged:
+                    description: FilesChanged lists the files modified in this commit.
+                    items:
+                      type: string
+                    type: array
+                  message:
+                    description: Message is the commit message.
+                    type: string
+                  sha:
+                    description: SHA is the commit hash.
+                    type: string
+                  timestamp:
+                    description: Timestamp of the commit.
+                    format: date-time
+                    type: string
+                required:
+                - author
+                - message
+                - sha
+                - timestamp
+                type: object
+              lastSyncedAt:
+                description: LastSyncedAt is when the repository was last successfully
+                  synced.
+                format: date-time
+                type: string
+              localPath:
+                description: LocalPath is where the repo is cloned locally on the
+                  operator.
+                type: string
+              ready:
+                description: Ready indicates whether the repository has been successfully
+                  cloned and indexed.
+                type: boolean
+              recentCommits:
+                description: RecentCommits are the last 20 commits for correlation.
+                items:
+                  description: GitCommitInfo holds information about a git commit.
+                  properties:
+                    author:
+                      description: Author of the commit.
+                      type: string
+                    filesChanged:
+                      description: FilesChanged lists the files modified in this commit.
+                      items:
+                        type: string
+                      type: array
+                    message:
+                      description: Message is the commit message.
+                      type: string
+                    sha:
+                      description: SHA is the commit hash.
+                      type: string
+                    timestamp:
+                      description: Timestamp of the commit.
+                      format: date-time
+                      type: string
+                  required:
+                  - author
+                  - message
+                  - sha
+                  - timestamp
+                  type: object
+                type: array
+            required:
+            - ready
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

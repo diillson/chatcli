@@ -1,93 +1,144 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: runbooks.platform.chatcli.io
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
+  name: runbooks.platform.chatcli.io
 spec:
   group: platform.chatcli.io
   names:
     kind: Runbook
     listKind: RunbookList
     plural: runbooks
-    singular: runbook
     shortNames:
-      - rb
+    - rb
+    singular: runbook
   scope: Namespaced
   versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      additionalPrinterColumns:
-        - name: Signal
-          type: string
-          jsonPath: .spec.trigger.signalType
-        - name: Severity
-          type: string
-          jsonPath: .spec.trigger.severity
-        - name: ResourceKind
-          type: string
-          jsonPath: .spec.trigger.resourceKind
-        - name: Age
-          type: date
-          jsonPath: .metadata.creationTimestamp
-      schema:
-        openAPIV3Schema:
-          description: Runbook is the Schema for the runbooks API. Declarative only, no status subresource.
-          type: object
-          properties:
-            apiVersion:
-              type: string
-            kind:
-              type: string
-            metadata:
-              type: object
-            spec:
-              description: RunbookSpec defines a reusable remediation runbook.
-              type: object
-              required:
-                - trigger
-                - steps
-              properties:
-                trigger:
-                  description: Conditions that activate this runbook.
-                  type: object
-                  required:
-                    - signalType
-                    - severity
-                    - resourceKind
+  - additionalPrinterColumns:
+    - jsonPath: .spec.trigger.signalType
+      name: Signal
+      type: string
+    - jsonPath: .spec.trigger.severity
+      name: Severity
+      type: string
+    - jsonPath: .spec.trigger.resourceKind
+      name: ResourceKind
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Runbook defines operational procedures linked to issue types.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RunbookSpec defines the desired state of a Runbook.
+            properties:
+              description:
+                description: Description explains the purpose of this runbook.
+                type: string
+              maxAttempts:
+                default: 3
+                description: MaxAttempts is the maximum number of remediation attempts.
+                format: int32
+                type: integer
+              steps:
+                description: Steps are the operational steps to follow.
+                items:
+                  description: RunbookStep defines a single operational step.
                   properties:
-                    signalType:
-                      description: The anomaly signal type that triggers this runbook.
+                    action:
+                      description: Action to execute (e.g., CheckRecentRollout, ScaleDeployment,
+                        RollbackDeployment).
                       type: string
-                    severity:
-                      description: Minimum severity level to trigger.
+                    description:
+                      description: Description explains why this step is needed and
+                        what it does.
                       type: string
-                    resourceKind:
-                      description: The Kubernetes resource kind this runbook applies to.
+                    name:
+                      description: Name of the step.
                       type: string
-                steps:
-                  description: Ordered list of remediation steps.
-                  type: array
-                  items:
-                    type: object
-                    required:
-                      - name
-                      - action
-                    properties:
-                      name:
-                        description: Human-readable step name.
+                    params:
+                      additionalProperties:
                         type: string
-                      action:
-                        description: Action type to execute.
-                        type: string
-                      params:
-                        description: Key-value parameters for the action.
-                        type: object
-                        additionalProperties:
-                          type: string
-                maxAttempts:
-                  description: Maximum number of remediation attempts.
-                  type: integer
-                  format: int32
-                  default: 3
+                      description: Params are optional key-value parameters for the
+                        action.
+                      type: object
+                  required:
+                  - action
+                  - name
+                  type: object
+                type: array
+              trigger:
+                description: Trigger defines when this runbook should be activated.
+                properties:
+                  resourceKind:
+                    description: ResourceKind is the kind of resource this runbook
+                      applies to.
+                    type: string
+                  severity:
+                    description: Severity that triggers this runbook.
+                    enum:
+                    - critical
+                    - high
+                    - medium
+                    - low
+                    type: string
+                  signalType:
+                    description: SignalType that triggers this runbook.
+                    enum:
+                    - error_rate
+                    - latency
+                    - pod_restart
+                    - cpu_high
+                    - memory_high
+                    - oom_kill
+                    - pod_not_ready
+                    - deploy_failing
+                    - disk_pressure
+                    - node_not_ready
+                    - pvc_pending
+                    - ingress_error
+                    - hpa_maxed
+                    - job_failed
+                    - cronjob_missed
+                    - certificate_expiring
+                    - image_pull_error
+                    - crashloop_backoff
+                    - helm_release_failed
+                    - argocd_degraded
+                    - config_drift
+                    type: string
+                required:
+                - resourceKind
+                - severity
+                - signalType
+                type: object
+            required:
+            - steps
+            - trigger
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}

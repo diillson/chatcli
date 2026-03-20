@@ -30,18 +30,18 @@ func NewRBACManager(c client.Client) *RBACManager {
 func (rm *RBACManager) EnsureRoles(ctx context.Context) error {
 	roles := map[string][]rbacv1.PolicyRule{
 		RoleViewer: {
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues", "anomalies", "aiinsights", "postmortems", "auditeevents", "servicelevelobjectives", "incidentslas"}, Verbs: []string{"get", "list", "watch"}},
+			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues", "anomalies", "aiinsights", "postmortems", "auditevents", "servicelevelobjectives", "incidentslas"}, Verbs: []string{"get", "list", "watch"}},
 			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"remediationplans", "runbooks", "approvalrequests"}, Verbs: []string{"get", "list", "watch"}},
 		},
 		RoleOperator: {
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues", "anomalies", "aiinsights", "postmortems", "auditeevents", "servicelevelobjectives", "incidentslas"}, Verbs: []string{"get", "list", "watch"}},
+			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues", "anomalies", "aiinsights", "postmortems", "auditevents", "servicelevelobjectives", "incidentslas"}, Verbs: []string{"get", "list", "watch"}},
 			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"remediationplans", "runbooks", "approvalrequests"}, Verbs: []string{"get", "list", "watch"}},
 			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues"}, Verbs: []string{"update", "patch"}},
 			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"approvalrequests"}, Verbs: []string{"update", "patch"}},
 			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"postmortems"}, Verbs: []string{"update", "patch"}},
 		},
 		RoleAdmin: {
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues", "anomalies", "aiinsights", "postmortems", "auditeevents", "servicelevelobjectives", "incidentslas", "remediationplans", "approvalrequests"}, Verbs: []string{"get", "list", "watch", "update", "patch"}},
+			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues", "anomalies", "aiinsights", "postmortems", "auditevents", "servicelevelobjectives", "incidentslas", "remediationplans", "approvalrequests"}, Verbs: []string{"get", "list", "watch", "update", "patch"}},
 			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"runbooks", "notificationpolicies", "servicelevelobjectives", "incidentslas"}, Verbs: []string{"get", "list", "watch", "create", "update", "patch", "delete"}},
 		},
 		RoleSuperAdmin: {

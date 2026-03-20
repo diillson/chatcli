@@ -1,200 +1,469 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: remediationplans.platform.chatcli.io
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
+  name: remediationplans.platform.chatcli.io
 spec:
   group: platform.chatcli.io
   names:
     kind: RemediationPlan
     listKind: RemediationPlanList
     plural: remediationplans
-    singular: remediationplan
     shortNames:
-      - rp
+    - rp
+    singular: remediationplan
   scope: Namespaced
   versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      subresources:
-        status: {}
-      additionalPrinterColumns:
-        - name: Issue
-          type: string
-          jsonPath: .spec.issueRef.name
-        - name: Attempt
-          type: integer
-          jsonPath: .spec.attempt
-        - name: State
-          type: string
-          jsonPath: .status.state
-        - name: Age
-          type: date
-          jsonPath: .metadata.creationTimestamp
-      schema:
-        openAPIV3Schema:
-          description: RemediationPlan is the Schema for the remediationplans API.
-          type: object
-          properties:
-            apiVersion:
-              type: string
-            kind:
-              type: string
-            metadata:
-              type: object
-            spec:
-              description: RemediationPlanSpec defines the desired remediation actions.
-              type: object
-              required:
-                - issueRef
-                - attempt
-                - strategy
-              properties:
-                issueRef:
-                  description: Reference to the Issue being remediated.
-                  type: object
-                  required:
-                    - name
+  - additionalPrinterColumns:
+    - jsonPath: .spec.issueRef.name
+      name: Issue
+      type: string
+    - jsonPath: .spec.attempt
+      name: Attempt
+      type: integer
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: RemediationPlan records a remediation attempt for an Issue.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RemediationPlanSpec defines the desired state of a RemediationPlan.
+            properties:
+              actions:
+                description: Actions to execute (ignored when AgenticMode is true).
+                items:
+                  description: RemediationAction defines a single remediation step.
                   properties:
-                    name:
-                      type: string
-                attempt:
-                  description: The attempt number for this remediation.
-                  type: integer
-                  format: int32
-                strategy:
-                  description: High-level strategy description for the remediation.
-                  type: string
-                actions:
-                  description: Ordered list of actions to execute.
-                  type: array
-                  items:
-                    type: object
-                    required:
-                      - type
-                    properties:
-                      type:
-                        description: Type of remediation action.
+                    params:
+                      additionalProperties:
                         type: string
-                        enum:
+                      description: Params are key-value parameters for the action.
+                      type: object
+                    type:
+                      description: Type of the remediation action.
+                      enum:
+                      - ScaleDeployment
+                      - RollbackDeployment
+                      - RestartDeployment
+                      - PatchConfig
+                      - AdjustResources
+                      - DeletePod
+                      - HelmRollback
+                      - ArgoSyncApp
+                      - AdjustHPA
+                      - RestartStatefulSetPod
+                      - CordonNode
+                      - DrainNode
+                      - ResizePVC
+                      - RotateSecret
+                      - ExecDiagnostic
+                      - UpdateIngress
+                      - PatchNetworkPolicy
+                      - ApplyManifest
+                      - Custom
+                      type: string
+                  required:
+                  - type
+                  type: object
+                type: array
+              agenticHistory:
+                description: |-
+                  AgenticHistory records all steps of the agentic loop.
+                  Stored in spec (not status) because it is the authoritative
+                  conversation history sent to the AI on every step.
+                items:
+                  description: AgenticStep records one turn of the AI-driven remediation
+                    loop.
+                  properties:
+                    action:
+                      description: Action is the action the AI decided to take (nil
+                        if observation-only or resolved).
+                      properties:
+                        params:
+                          additionalProperties:
+                            type: string
+                          description: Params are key-value parameters for the action.
+                          type: object
+                        type:
+                          description: Type of the remediation action.
+                          enum:
                           - ScaleDeployment
                           - RollbackDeployment
                           - RestartDeployment
                           - PatchConfig
                           - AdjustResources
                           - DeletePod
+                          - HelmRollback
+                          - ArgoSyncApp
+                          - AdjustHPA
+                          - RestartStatefulSetPod
+                          - CordonNode
+                          - DrainNode
+                          - ResizePVC
+                          - RotateSecret
+                          - ExecDiagnostic
+                          - UpdateIngress
+                          - PatchNetworkPolicy
+                          - ApplyManifest
                           - Custom
-                      params:
-                        description: Key-value parameters for the action.
-                        type: object
-                        additionalProperties:
                           type: string
-                safetyConstraints:
-                  description: Safety constraints that must hold during remediation.
-                  type: array
-                  items:
-                    type: string
-                agenticMode:
-                  description: Enables AI-driven step-by-step remediation.
-                  type: boolean
-                agenticMaxSteps:
-                  description: Maximum number of agentic steps before forced failure.
-                  type: integer
-                  format: int32
-                  default: 10
-                agenticHistory:
-                  description: Conversation history for agentic remediation.
-                  type: array
-                  items:
-                    type: object
-                    required:
-                      - stepNumber
-                      - aiMessage
-                      - timestamp
-                    properties:
-                      stepNumber:
-                        type: integer
-                        format: int32
-                      aiMessage:
-                        type: string
-                      action:
-                        type: object
-                        properties:
-                          type:
-                            type: string
-                            enum:
-                              - ScaleDeployment
-                              - RollbackDeployment
-                              - RestartDeployment
-                              - PatchConfig
-                              - AdjustResources
-                              - DeletePod
-                              - Custom
-                          params:
-                            type: object
-                            additionalProperties:
-                              type: string
-                      observation:
-                        type: string
-                      timestamp:
-                        type: string
-                        format: date-time
-            status:
-              description: RemediationPlanStatus defines the observed state of a RemediationPlan.
-              type: object
-              properties:
-                state:
-                  description: Current state of the remediation plan execution.
-                  type: string
-                  enum:
-                    - Pending
-                    - Executing
-                    - Verifying
-                    - Completed
-                    - Failed
-                    - RolledBack
-                startedAt:
-                  description: Timestamp when execution started.
-                  type: string
-                  format: date-time
-                actionsCompletedAt:
-                  description: Timestamp when all actions finished and verification began.
-                  type: string
-                  format: date-time
-                completedAt:
-                  description: Timestamp when execution completed.
-                  type: string
-                  format: date-time
-                result:
-                  description: Human-readable result summary.
-                  type: string
-                agenticStepCount:
-                  description: Number of agentic steps completed.
-                  type: integer
-                  format: int32
-                agenticStartedAt:
-                  description: When the agentic loop first started.
-                  type: string
-                  format: date-time
-                evidence:
-                  description: Evidence collected during remediation.
-                  type: array
-                  items:
-                    type: object
-                    required:
+                      required:
                       - type
-                      - data
-                      - timestamp
-                    properties:
-                      type:
-                        description: Type of evidence (e.g. metric, log, event).
-                        type: string
-                      data:
-                        description: Evidence payload.
-                        type: string
-                      timestamp:
-                        description: When the evidence was collected.
-                        type: string
-                        format: date-time
+                      type: object
+                    aiMessage:
+                      description: AIMessage is the AI's reasoning for this step.
+                      type: string
+                    observation:
+                      description: Observation is the result of executing the action.
+                      type: string
+                    stepNumber:
+                      description: StepNumber is 1-based, incremented each reconcile
+                        cycle.
+                      format: int32
+                      type: integer
+                    timestamp:
+                      description: Timestamp is when this step was recorded.
+                      format: date-time
+                      type: string
+                  required:
+                  - aiMessage
+                  - stepNumber
+                  - timestamp
+                  type: object
+                type: array
+              agenticMaxSteps:
+                default: 10
+                description: AgenticMaxSteps is the maximum number of agentic steps
+                  before forced failure.
+                format: int32
+                type: integer
+              agenticMode:
+                description: |-
+                  AgenticMode enables AI-driven step-by-step remediation.
+                  When true, Actions is ignored and the AI decides each step.
+                type: boolean
+              attempt:
+                description: Attempt number (1-based).
+                format: int32
+                type: integer
+              issueRef:
+                description: IssueRef references the parent Issue.
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+              safetyConstraints:
+                description: SafetyConstraints that must be respected.
+                items:
+                  type: string
+                type: array
+              strategy:
+                description: Strategy describes the remediation approach.
+                type: string
+            required:
+            - attempt
+            - issueRef
+            - strategy
+            type: object
+          status:
+            description: RemediationPlanStatus defines the observed state of a RemediationPlan.
+            properties:
+              actionCheckpoints:
+                description: ActionCheckpoints record the state before each action
+                  for partial rollback.
+                items:
+                  description: |-
+                    ActionCheckpoint records the state after each individual action execution,
+                    enabling partial rollback when a multi-action plan fails midway.
+                  properties:
+                    actionIndex:
+                      description: ActionIndex is the 0-based index of the action
+                        that was executed.
+                      format: int32
+                      type: integer
+                    actionType:
+                      description: ActionType is the type of the action.
+                      enum:
+                      - ScaleDeployment
+                      - RollbackDeployment
+                      - RestartDeployment
+                      - PatchConfig
+                      - AdjustResources
+                      - DeletePod
+                      - HelmRollback
+                      - ArgoSyncApp
+                      - AdjustHPA
+                      - RestartStatefulSetPod
+                      - CordonNode
+                      - DrainNode
+                      - ResizePVC
+                      - RotateSecret
+                      - ExecDiagnostic
+                      - UpdateIngress
+                      - PatchNetworkPolicy
+                      - ApplyManifest
+                      - Custom
+                      type: string
+                    snapshotBefore:
+                      description: SnapshotBefore is the resource state captured before
+                        THIS action.
+                      properties:
+                        annotations:
+                          additionalProperties:
+                            type: string
+                          description: Annotations captures relevant annotations before
+                            modification.
+                          type: object
+                        capturedAt:
+                          description: CapturedAt is when this snapshot was taken.
+                          format: date-time
+                          type: string
+                        containerImages:
+                          additionalProperties:
+                            type: string
+                          description: ContainerImages maps container name to image
+                            before modification.
+                          type: object
+                        containerResources:
+                          additionalProperties:
+                            description: ContainerResourceSnapshot captures a single
+                              container's resource requests/limits.
+                            properties:
+                              cpuLimit:
+                                description: CPULimit before modification.
+                                type: string
+                              cpuRequest:
+                                description: CPURequest before modification.
+                                type: string
+                              memoryLimit:
+                                description: MemoryLimit before modification.
+                                type: string
+                              memoryRequest:
+                                description: MemoryRequest before modification.
+                                type: string
+                            type: object
+                          description: ContainerResources maps container name to its
+                            resources before modification.
+                          type: object
+                        hpaMaxReplicas:
+                          format: int32
+                          type: integer
+                        hpaMinReplicas:
+                          description: HPASpec captures HPA state before modification.
+                          format: int32
+                          type: integer
+                        namespace:
+                          description: Namespace of the resource.
+                          type: string
+                        nodeUnschedulable:
+                          description: NodeUnschedulable captures the node's schedulable
+                            state before cordon.
+                          type: boolean
+                        replicas:
+                          description: Replicas before modification.
+                          format: int32
+                          type: integer
+                        resourceKind:
+                          description: ResourceKind is the kind of resource (Deployment,
+                            StatefulSet, etc.).
+                          type: string
+                        resourceName:
+                          description: ResourceName is the name of the resource.
+                          type: string
+                      required:
+                      - capturedAt
+                      - namespace
+                      - resourceKind
+                      - resourceName
+                      type: object
+                    success:
+                      description: Success indicates whether this action succeeded.
+                      type: boolean
+                    timestamp:
+                      description: Timestamp of execution.
+                      format: date-time
+                      type: string
+                  required:
+                  - actionIndex
+                  - actionType
+                  - success
+                  - timestamp
+                  type: object
+                type: array
+              actionsCompletedAt:
+                description: ActionsCompletedAt is when all actions finished executing
+                  and verification began.
+                format: date-time
+                type: string
+              agenticStartedAt:
+                description: AgenticStartedAt is when the agentic loop first started.
+                format: date-time
+                type: string
+              agenticStepCount:
+                description: AgenticStepCount is the number of agentic steps completed.
+                format: int32
+                type: integer
+              completedAt:
+                description: CompletedAt is when execution finished (after verification).
+                format: date-time
+                type: string
+              evidence:
+                description: Evidence collected during execution.
+                items:
+                  description: EvidenceItem is a piece of evidence collected during
+                    remediation.
+                  properties:
+                    data:
+                      description: Data content.
+                      type: string
+                    timestamp:
+                      description: Timestamp when collected.
+                      format: date-time
+                      type: string
+                    type:
+                      description: Type of evidence (log, metric_snapshot, event,
+                        preflight_snapshot, rollback).
+                      type: string
+                  required:
+                  - data
+                  - timestamp
+                  - type
+                  type: object
+                type: array
+              postFailureHealthy:
+                description: PostFailureHealthy indicates whether the resource is
+                  healthy after failure+rollback.
+                type: boolean
+              preflightSnapshot:
+                description: |-
+                  PreflightSnapshot is the full restorable state of the resource before any actions.
+                  Used for automatic rollback on failure.
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    description: Annotations captures relevant annotations before
+                      modification.
+                    type: object
+                  capturedAt:
+                    description: CapturedAt is when this snapshot was taken.
+                    format: date-time
+                    type: string
+                  containerImages:
+                    additionalProperties:
+                      type: string
+                    description: ContainerImages maps container name to image before
+                      modification.
+                    type: object
+                  containerResources:
+                    additionalProperties:
+                      description: ContainerResourceSnapshot captures a single container's
+                        resource requests/limits.
+                      properties:
+                        cpuLimit:
+                          description: CPULimit before modification.
+                          type: string
+                        cpuRequest:
+                          description: CPURequest before modification.
+                          type: string
+                        memoryLimit:
+                          description: MemoryLimit before modification.
+                          type: string
+                        memoryRequest:
+                          description: MemoryRequest before modification.
+                          type: string
+                      type: object
+                    description: ContainerResources maps container name to its resources
+                      before modification.
+                    type: object
+                  hpaMaxReplicas:
+                    format: int32
+                    type: integer
+                  hpaMinReplicas:
+                    description: HPASpec captures HPA state before modification.
+                    format: int32
+                    type: integer
+                  namespace:
+                    description: Namespace of the resource.
+                    type: string
+                  nodeUnschedulable:
+                    description: NodeUnschedulable captures the node's schedulable
+                      state before cordon.
+                    type: boolean
+                  replicas:
+                    description: Replicas before modification.
+                    format: int32
+                    type: integer
+                  resourceKind:
+                    description: ResourceKind is the kind of resource (Deployment,
+                      StatefulSet, etc.).
+                    type: string
+                  resourceName:
+                    description: ResourceName is the name of the resource.
+                    type: string
+                required:
+                - capturedAt
+                - namespace
+                - resourceKind
+                - resourceName
+                type: object
+              result:
+                description: Result describes the outcome.
+                type: string
+              rollbackPerformed:
+                description: RollbackPerformed indicates whether an automatic rollback
+                  was executed.
+                type: boolean
+              rollbackResult:
+                description: RollbackResult describes the outcome of the automatic
+                  rollback.
+                type: string
+              startedAt:
+                description: StartedAt is when execution began.
+                format: date-time
+                type: string
+              state:
+                description: State of the remediation plan execution.
+                enum:
+                - Pending
+                - Executing
+                - Verifying
+                - Completed
+                - Failed
+                - RolledBack
+                type: string
+            required:
+            - state
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

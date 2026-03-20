@@ -869,6 +869,7 @@ func parseDuration(s string, fallback time.Duration) time.Duration {
 // SetupWithManager sets up the controller with the Manager.
 func (r *NotificationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		Named("notification").
 		For(&platformv1alpha1.Issue{}).
 		Complete(r)
 }
