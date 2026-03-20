@@ -3,10 +3,10 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
-  name: postmortems.
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: postmortems.platform.chatcli.io
 spec:
-  group: ""
+  group: platform.chatcli.io
   names:
     kind: PostMortem
     listKind: PostMortemList
@@ -29,7 +29,7 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: ""
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: PostMortem captures the full incident lifecycle after resolution.
@@ -125,12 +125,113 @@ spec:
                   - timestamp
                   type: object
                 type: array
+              blastRadius:
+                description: BlastRadius describes all services and resources impacted
+                  by the incident.
+                items:
+                  description: BlastRadiusEntry describes a service or resource affected
+                    by the incident.
+                  properties:
+                    impact:
+                      description: Impact describes how this resource was affected.
+                      type: string
+                    resource:
+                      description: Resource affected.
+                      properties:
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      - namespace
+                      type: object
+                    severity:
+                      description: Severity of the impact on this resource.
+                      type: string
+                  required:
+                  - impact
+                  - resource
+                  - severity
+                  type: object
+                type: array
+              cascadeChain:
+                description: CascadeChain describes the cascade failure chain if applicable.
+                items:
+                  type: string
+                type: array
               duration:
                 description: Duration is the total incident duration (e.g., "12m34s").
                 type: string
+              errorBudgetBurned:
+                description: ErrorBudgetBurned is the percentage of error budget consumed
+                  by this incident.
+                type: number
+              feedback:
+                description: Feedback is human feedback on this PostMortem.
+                properties:
+                  comments:
+                    description: Comments from the developer.
+                    type: string
+                  overrideRootCause:
+                    description: OverrideRootCause is the human-provided root cause
+                      (overrides AI analysis).
+                    type: string
+                  providedAt:
+                    description: ProvidedAt is when the feedback was given.
+                    format: date-time
+                    type: string
+                  providedBy:
+                    description: ProvidedBy identifies who provided the feedback.
+                    type: string
+                  remediationAccuracy:
+                    description: RemediationAccuracy rates the AI's remediation (1-5).
+                    format: int32
+                    maximum: 5
+                    minimum: 1
+                    type: integer
+                type: object
               generatedAt:
                 description: GeneratedAt is when this PostMortem was auto-generated.
                 format: date-time
+                type: string
+              gitCorrelation:
+                description: GitCorrelation links the incident to suspected code changes.
+                properties:
+                  author:
+                    description: Author of the commit.
+                    type: string
+                  commitMessage:
+                    description: CommitMessage is the commit message.
+                    type: string
+                  commitSHA:
+                    description: CommitSHA is the suspected commit.
+                    type: string
+                  confidence:
+                    description: Confidence that this commit caused the incident (0.0-1.0).
+                    type: number
+                  filesChanged:
+                    description: FilesChanged lists the files modified.
+                    items:
+                      type: string
+                    type: array
+                  timestamp:
+                    description: Timestamp of the commit.
+                    format: date-time
+                    type: string
+                required:
+                - author
+                - commitMessage
+                - commitSHA
+                - confidence
+                - timestamp
+                type: object
+              gitOpsContext:
+                description: GitOpsContext describes Helm/ArgoCD/Flux state at the
+                  time of the incident.
                 type: string
               impact:
                 description: Impact describes what was affected by the incident.
@@ -139,6 +240,39 @@ spec:
                 description: LessonsLearned are AI-generated lessons from the incident.
                 items:
                   type: string
+                type: array
+              logAnalysisSummary:
+                description: LogAnalysisSummary is a summary of key findings from
+                  log analysis.
+                type: string
+              metricSnapshots:
+                description: MetricSnapshots are metric values captured before, during,
+                  and after the incident.
+                items:
+                  description: MetricSnapshot captures a metric value at a point in
+                    time.
+                  properties:
+                    name:
+                      description: Name of the metric (e.g., "cpu_usage_percent",
+                        "memory_usage_bytes").
+                      type: string
+                    phase:
+                      description: 'Phase indicates when this was captured: "before",
+                        "during", or "after" the incident.'
+                      type: string
+                    timestamp:
+                      description: Timestamp of the measurement.
+                      format: date-time
+                      type: string
+                    value:
+                      description: Value is the metric value.
+                      type: string
+                  required:
+                  - name
+                  - phase
+                  - timestamp
+                  - value
+                  type: object
                 type: array
               preventionActions:
                 description: PreventionActions are AI-generated steps to prevent recurrence.
@@ -151,6 +285,9 @@ spec:
                 type: string
               rootCause:
                 description: RootCause is the AI-determined root cause.
+                type: string
+              sliImpact:
+                description: SLIImpact describes the impact on SLI error budgets.
                 type: string
               state:
                 description: State is the review lifecycle state.
@@ -185,6 +322,31 @@ spec:
                   - type
                   type: object
                 type: array
+              trending:
+                description: Trending captures recurring incident pattern information.
+                properties:
+                  occurrenceCount:
+                    description: OccurrenceCount is how many times this pattern has
+                      occurred in the window.
+                    format: int32
+                    type: integer
+                  pattern:
+                    description: Pattern describes the recurring pattern.
+                    type: string
+                  relatedPostMortems:
+                    description: RelatedPostMortems references previous PostMortems
+                      for the same pattern.
+                    items:
+                      type: string
+                    type: array
+                  windowDays:
+                    description: WindowDays is the lookback window in days.
+                    format: int32
+                    type: integer
+                required:
+                - occurrenceCount
+                - windowDays
+                type: object
             required:
             - state
             type: object

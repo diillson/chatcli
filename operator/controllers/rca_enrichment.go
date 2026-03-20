@@ -26,6 +26,14 @@ type RCAContext struct {
 	DependencyStatus    []DependencyInfo
 	TimeCorrelation     string
 	PossibleCauses      []string
+
+	// Enhanced enrichments
+	LogAnalysis    string
+	MetricsContext string
+	SourceCode     string
+	GitOpsContext  string
+	CascadeChain   string
+	BlastRadius    string
 }
 
 type DeploymentChange struct {
@@ -251,6 +259,71 @@ func (e *RCAEnricher) correlateTimestamps(detectedAt time.Time, rca *RCAContext)
 		}
 	}
 	rca.TimeCorrelation = strings.Join(correlations, "; ")
+}
+
+// FormatForAI formats the full RCA context for LLM consumption.
+func (rca *RCAContext) FormatForAI() string {
+	var sb strings.Builder
+
+	sb.WriteString("## Root Cause Analysis Context\n\n")
+
+	if rca.TimeCorrelation != "" {
+		sb.WriteString("### Temporal Correlations\n")
+		sb.WriteString(rca.TimeCorrelation + "\n\n")
+	}
+
+	if len(rca.PossibleCauses) > 0 {
+		sb.WriteString("### Possible Causes (ranked)\n")
+		for i, c := range rca.PossibleCauses {
+			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, c))
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(rca.RecentDeployments) > 0 {
+		sb.WriteString("### Recent Deployment Changes\n")
+		for _, dc := range rca.RecentDeployments {
+			sb.WriteString(fmt.Sprintf("- Revision %d at %s: %s → %s (by %s)\n",
+				dc.Revision, dc.Timestamp.Format("15:04:05"),
+				dc.ImageBefore, dc.ImageAfter, dc.ChangedBy))
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(rca.RecentConfigChanges) > 0 {
+		sb.WriteString("### Recent Config Changes\n")
+		for _, cc := range rca.RecentConfigChanges {
+			sb.WriteString(fmt.Sprintf("- ConfigMap %s at %s\n", cc.ConfigMapName, cc.Timestamp.Format("15:04:05")))
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(rca.DependencyStatus) > 0 {
+		sb.WriteString("### Dependency Health\n")
+		for _, d := range rca.DependencyStatus {
+			status := "healthy"
+			if !d.Healthy {
+				status = "UNHEALTHY"
+			}
+			sb.WriteString(fmt.Sprintf("- %s/%s: %s (endpoints=%d)\n", d.Namespace, d.ServiceName, status, d.Endpoints))
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(rca.RelatedIssues) > 0 {
+		sb.WriteString("### Related Active Issues\n")
+		for _, ri := range rca.RelatedIssues {
+			sb.WriteString(fmt.Sprintf("- %s [%s] %s/%s state=%s\n",
+				ri.Name, ri.Severity, ri.Resource.Kind, ri.Resource.Name, ri.State))
+		}
+		sb.WriteString("\n")
+	}
+
+	result := sb.String()
+	if len(result) > 4000 {
+		result = result[:3997] + "..."
+	}
+	return result
 }
 
 func (e *RCAEnricher) rankCauses(rca *RCAContext) {

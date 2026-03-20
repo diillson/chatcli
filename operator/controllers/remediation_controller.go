@@ -10,6 +10,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apiresource "k8s.io/apimachinery/pkg/api/resource"
@@ -212,35 +213,26 @@ func (r *RemediationReconciler) handleVerifying(ctx context.Context, plan *platf
 
 	resource := issue.Spec.Resource
 
-	// Check deployment health.
-	var deploy appsv1.Deployment
-	if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &deploy); err != nil {
-		if errors.IsNotFound(err) {
+	// Check resource health based on kind.
+	healthy, verifyErr := r.verifyResourceHealth(ctx, resource)
+	if verifyErr != nil {
+		if errors.IsNotFound(verifyErr) {
 			plan.Status.State = platformv1alpha1.RemediationStateFailed
-			plan.Status.Result = fmt.Sprintf("Deployment %s/%s not found during verification", resource.Namespace, resource.Name)
+			plan.Status.Result = fmt.Sprintf("%s %s/%s not found during verification", resource.Kind, resource.Namespace, resource.Name)
 			return ctrl.Result{}, r.Status().Update(ctx, plan)
 		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, verifyErr
 	}
-
-	desired := int32(1)
-	if deploy.Spec.Replicas != nil {
-		desired = *deploy.Spec.Replicas
-	}
-
-	healthy := deploy.Status.ReadyReplicas >= desired &&
-		deploy.Status.UpdatedReplicas >= desired &&
-		deploy.Status.UnavailableReplicas == 0
 
 	if healthy {
 		now := metav1.Now()
 		plan.Status.State = platformv1alpha1.RemediationStateCompleted
 		plan.Status.CompletedAt = &now
-		plan.Status.Result = fmt.Sprintf("Remediation verified: %d/%d replicas ready, deployment healthy",
-			deploy.Status.ReadyReplicas, desired)
+		plan.Status.Result = fmt.Sprintf("Remediation verified: %s %s/%s is healthy",
+			resource.Kind, resource.Namespace, resource.Name)
 		plan.Status.Evidence = append(plan.Status.Evidence, platformv1alpha1.EvidenceItem{
 			Type:      "verification_passed",
-			Data:      fmt.Sprintf("ReadyReplicas=%d UpdatedReplicas=%d UnavailableReplicas=%d", deploy.Status.ReadyReplicas, deploy.Status.UpdatedReplicas, deploy.Status.UnavailableReplicas),
+			Data:      fmt.Sprintf("%s %s/%s verified healthy", resource.Kind, resource.Namespace, resource.Name),
 			Timestamp: now,
 		})
 
@@ -248,7 +240,7 @@ func (r *RemediationReconciler) handleVerifying(ctx context.Context, plan *platf
 			remediationDuration.Observe(now.Sub(plan.Status.StartedAt.Time).Seconds())
 		}
 
-		log.Info("Verification passed, deployment healthy", "plan", plan.Name, "readyReplicas", deploy.Status.ReadyReplicas)
+		log.Info("Verification passed, resource healthy", "plan", plan.Name, "kind", resource.Kind)
 		return ctrl.Result{}, r.Status().Update(ctx, plan)
 	}
 
@@ -257,11 +249,11 @@ func (r *RemediationReconciler) handleVerifying(ctx context.Context, plan *platf
 		now := metav1.Now()
 		plan.Status.State = platformv1alpha1.RemediationStateFailed
 		plan.Status.CompletedAt = &now
-		plan.Status.Result = fmt.Sprintf("Verification failed: deployment unhealthy after %s (ready=%d/%d, unavailable=%d)",
-			verificationTimeout, deploy.Status.ReadyReplicas, desired, deploy.Status.UnavailableReplicas)
+		plan.Status.Result = fmt.Sprintf("Verification failed: %s %s/%s still unhealthy after %s",
+			resource.Kind, resource.Namespace, resource.Name, verificationTimeout)
 		plan.Status.Evidence = append(plan.Status.Evidence, platformv1alpha1.EvidenceItem{
 			Type:      "verification_failed",
-			Data:      fmt.Sprintf("ReadyReplicas=%d UpdatedReplicas=%d UnavailableReplicas=%d desired=%d", deploy.Status.ReadyReplicas, deploy.Status.UpdatedReplicas, deploy.Status.UnavailableReplicas, desired),
+			Data:      fmt.Sprintf("%s %s/%s unhealthy after verification timeout", resource.Kind, resource.Namespace, resource.Name),
 			Timestamp: now,
 		})
 
@@ -270,14 +262,12 @@ func (r *RemediationReconciler) handleVerifying(ctx context.Context, plan *platf
 		}
 		remediationsTotal.WithLabelValues("verification", "failed").Inc()
 
-		log.Info("Verification failed, deployment still unhealthy", "plan", plan.Name,
-			"readyReplicas", deploy.Status.ReadyReplicas, "unavailable", deploy.Status.UnavailableReplicas)
+		log.Info("Verification failed, resource still unhealthy", "plan", plan.Name, "kind", resource.Kind)
 		return ctrl.Result{}, r.Status().Update(ctx, plan)
 	}
 
 	// Still waiting — requeue.
-	log.Info("Verifying deployment health", "plan", plan.Name,
-		"readyReplicas", deploy.Status.ReadyReplicas, "desired", desired,
+	log.Info("Verifying resource health", "plan", plan.Name, "kind", resource.Kind,
 		"elapsed", time.Since(plan.Status.ActionsCompletedAt.Time).Round(time.Second))
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
@@ -297,6 +287,30 @@ func (r *RemediationReconciler) executeAction(ctx context.Context, resource plat
 		return r.executeAdjustResources(ctx, resource, action.Params)
 	case platformv1alpha1.ActionDeletePod:
 		return r.executeDeletePod(ctx, resource, action.Params)
+	case platformv1alpha1.ActionHelmRollback:
+		return r.executeHelmRollback(ctx, resource, action.Params)
+	case platformv1alpha1.ActionArgoSyncApp:
+		return r.executeArgoSyncApp(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustHPA:
+		return r.executeAdjustHPA(ctx, resource, action.Params)
+	case platformv1alpha1.ActionRestartStatefulSetPod:
+		return r.executeRestartStatefulSetPod(ctx, resource, action.Params)
+	case platformv1alpha1.ActionCordonNode:
+		return r.executeCordonNode(ctx, resource, action.Params)
+	case platformv1alpha1.ActionDrainNode:
+		return r.executeDrainNode(ctx, resource, action.Params)
+	case platformv1alpha1.ActionResizePVC:
+		return r.executeResizePVC(ctx, resource, action.Params)
+	case platformv1alpha1.ActionRotateSecret:
+		return r.executeRotateSecret(ctx, resource, action.Params)
+	case platformv1alpha1.ActionExecDiagnostic:
+		return r.executeExecDiagnostic(ctx, resource, action.Params)
+	case platformv1alpha1.ActionUpdateIngress:
+		return r.executeUpdateIngress(ctx, resource, action.Params)
+	case platformv1alpha1.ActionPatchNetworkPolicy:
+		return r.executePatchNetworkPolicy(ctx, resource, action.Params)
+	case platformv1alpha1.ActionApplyManifest:
+		return r.executeApplyManifest(ctx, resource, action.Params)
 	default:
 		return fmt.Errorf("unsupported action type: %s", action.Type)
 	}
@@ -927,6 +941,81 @@ func (r *RemediationReconciler) validateSafetyConstraints(actions []platformv1al
 		}
 	}
 	return nil
+}
+
+// verifyResourceHealth checks health for any supported resource kind.
+func (r *RemediationReconciler) verifyResourceHealth(ctx context.Context, resource platformv1alpha1.ResourceRef) (bool, error) {
+	switch resource.Kind {
+	case "Deployment":
+		var deploy appsv1.Deployment
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &deploy); err != nil {
+			return false, err
+		}
+		desired := int32(1)
+		if deploy.Spec.Replicas != nil {
+			desired = *deploy.Spec.Replicas
+		}
+		healthy := deploy.Status.ReadyReplicas >= desired &&
+			deploy.Status.UpdatedReplicas >= desired &&
+			deploy.Status.UnavailableReplicas == 0
+		return healthy, nil
+
+	case "StatefulSet":
+		var sts appsv1.StatefulSet
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &sts); err != nil {
+			return false, err
+		}
+		desired := int32(1)
+		if sts.Spec.Replicas != nil {
+			desired = *sts.Spec.Replicas
+		}
+		healthy := sts.Status.ReadyReplicas >= desired && sts.Status.CurrentReplicas >= desired
+		return healthy, nil
+
+	case "DaemonSet":
+		var ds appsv1.DaemonSet
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &ds); err != nil {
+			return false, err
+		}
+		healthy := ds.Status.NumberReady >= ds.Status.DesiredNumberScheduled &&
+			ds.Status.NumberUnavailable == 0
+		return healthy, nil
+
+	case "Job":
+		var job batchv1.Job
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &job); err != nil {
+			return false, err
+		}
+		// Job is healthy if it completed successfully
+		for _, cond := range job.Status.Conditions {
+			if cond.Type == batchv1.JobComplete && cond.Status == "True" {
+				return true, nil
+			}
+		}
+		// Also consider it healthy if active pods > 0 (still running)
+		return job.Status.Active > 0, nil
+
+	default:
+		// For unknown resource kinds, check if pods are running
+		var podList corev1.PodList
+		if err := r.List(ctx, &podList, client.InNamespace(resource.Namespace)); err != nil {
+			return false, err
+		}
+		readyPods := 0
+		totalPods := 0
+		for i := range podList.Items {
+			if isResourcePod(&podList.Items[i], resource) {
+				totalPods++
+				if isPodReady(&podList.Items[i]) {
+					readyPods++
+				}
+			}
+		}
+		if totalPods == 0 {
+			return false, nil
+		}
+		return readyPods > 0, nil
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

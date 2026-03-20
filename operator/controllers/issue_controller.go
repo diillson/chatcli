@@ -337,11 +337,13 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 			issueResolutionDuration.Observe(now.Sub(issue.Status.DetectedAt.Time).Seconds())
 		}
 
-		// If this was an agentic plan, generate PostMortem and Runbook
+		// Generate PostMortem for ALL remediation modes (not just agentic)
+		if err := r.generatePostMortem(ctx, issue, plan); err != nil {
+			log.Error(err, "Failed to generate PostMortem, continuing")
+		}
+
+		// For agentic plans, also generate a reusable Runbook
 		if plan.Spec.AgenticMode && len(plan.Spec.AgenticHistory) > 0 {
-			if err := r.generatePostMortem(ctx, issue, plan); err != nil {
-				log.Error(err, "Failed to generate PostMortem, continuing")
-			}
 			if err := r.generateAgenticRunbook(ctx, issue, plan); err != nil {
 				log.Error(err, "Failed to generate agentic Runbook, continuing")
 			}
@@ -459,24 +461,10 @@ func (r *IssueReconciler) findMatchingRunbook(ctx context.Context, issue *platfo
 func (r *IssueReconciler) createRemediationPlan(ctx context.Context, issue *platformv1alpha1.Issue, runbook *platformv1alpha1.Runbook, insight *platformv1alpha1.AIInsight, attempt int32) error {
 	planName := fmt.Sprintf("%s-plan-%d", issue.Name, attempt)
 
-	// Build actions from runbook steps
+	// Build actions from runbook steps — use mapActionType for consistent mapping
 	var actions []platformv1alpha1.RemediationAction
 	for _, step := range runbook.Spec.Steps {
-		actionType := platformv1alpha1.ActionCustom
-		switch step.Action {
-		case "ScaleDeployment":
-			actionType = platformv1alpha1.ActionScaleDeployment
-		case "RollbackDeployment":
-			actionType = platformv1alpha1.ActionRollbackDeployment
-		case "RestartDeployment":
-			actionType = platformv1alpha1.ActionRestartDeployment
-		case "PatchConfig":
-			actionType = platformv1alpha1.ActionPatchConfig
-		case "AdjustResources":
-			actionType = platformv1alpha1.ActionAdjustResources
-		case "DeletePod":
-			actionType = platformv1alpha1.ActionDeletePod
-		}
+		actionType := mapActionType(step.Action)
 		actions = append(actions, platformv1alpha1.RemediationAction{
 			Type:   actionType,
 			Params: step.Params,
@@ -617,6 +605,30 @@ func mapActionType(action string) platformv1alpha1.RemediationActionType {
 		return platformv1alpha1.ActionAdjustResources
 	case "DeletePod":
 		return platformv1alpha1.ActionDeletePod
+	case "HelmRollback":
+		return platformv1alpha1.ActionHelmRollback
+	case "ArgoSyncApp":
+		return platformv1alpha1.ActionArgoSyncApp
+	case "AdjustHPA":
+		return platformv1alpha1.ActionAdjustHPA
+	case "RestartStatefulSetPod":
+		return platformv1alpha1.ActionRestartStatefulSetPod
+	case "CordonNode":
+		return platformv1alpha1.ActionCordonNode
+	case "DrainNode":
+		return platformv1alpha1.ActionDrainNode
+	case "ResizePVC":
+		return platformv1alpha1.ActionResizePVC
+	case "RotateSecret":
+		return platformv1alpha1.ActionRotateSecret
+	case "ExecDiagnostic":
+		return platformv1alpha1.ActionExecDiagnostic
+	case "UpdateIngress":
+		return platformv1alpha1.ActionUpdateIngress
+	case "PatchNetworkPolicy":
+		return platformv1alpha1.ActionPatchNetworkPolicy
+	case "ApplyManifest":
+		return platformv1alpha1.ActionApplyManifest
 	default:
 		return platformv1alpha1.ActionCustom
 	}
@@ -912,6 +924,44 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 		Duration:          duration,
 		GeneratedAt:       &now,
 	}
+
+	// Enrich with trending data (recurring incident detection)
+	pm.Status.Trending = r.buildTrendingInfo(ctx, issue)
+
+	// Enrich with cascade chain
+	cascadeAnalyzer := NewCascadeAnalyzer(r.Client)
+	if cascadeResult, err := cascadeAnalyzer.AnalyzeCascade(ctx, issue); err == nil && len(cascadeResult.Chain) >= 2 {
+		var chain []string
+		for _, n := range cascadeResult.Chain {
+			chain = append(chain, fmt.Sprintf("%s/%s(%s)", n.Namespace, n.ServiceName, n.Role))
+		}
+		pm.Status.CascadeChain = chain
+	}
+
+	// Enrich with GitOps context
+	gitopsDetector := NewGitOpsDetector(r.Client)
+	if gitopsCtx, err := gitopsDetector.DetectGitOpsContext(ctx, issue.Spec.Resource); err == nil {
+		pm.Status.GitOpsContext = gitopsCtx.Summary
+	}
+
+	// Enrich with git correlation from SourceRepository
+	srcAnalyzer := NewSourceCodeAnalyzer(r.Client)
+	detectedAt := issue.CreationTimestamp.Time
+	if issue.Status.DetectedAt != nil {
+		detectedAt = issue.Status.DetectedAt.Time
+	}
+	if srcCtx, err := srcAnalyzer.BuildSourceContext(ctx, issue.Spec.Resource, detectedAt, nil); err == nil && srcCtx != nil && srcCtx.SuspectedCommit != nil {
+		c := srcCtx.SuspectedCommit
+		pm.Status.GitCorrelation = &platformv1alpha1.GitCorrelation{
+			CommitSHA:     c.SHA,
+			CommitMessage: c.Message,
+			Author:        c.Author,
+			Timestamp:     c.Timestamp,
+			Confidence:    0.7,
+			FilesChanged:  c.FilesChanged,
+		}
+	}
+
 	return r.Status().Update(ctx, pm)
 }
 
@@ -966,6 +1016,43 @@ func (r *IssueReconciler) generateAgenticRunbook(ctx context.Context, issue *pla
 		return nil
 	})
 	return err
+}
+
+// buildTrendingInfo detects recurring incident patterns.
+func (r *IssueReconciler) buildTrendingInfo(ctx context.Context, issue *platformv1alpha1.Issue) *platformv1alpha1.TrendingInfo {
+	// Find PostMortems for same resource/signal in last 30 days
+	var pms platformv1alpha1.PostMortemList
+	if err := r.List(ctx, &pms, client.InNamespace(issue.Namespace)); err != nil {
+		return nil
+	}
+
+	windowDays := int32(30)
+	cutoff := time.Now().AddDate(0, 0, -int(windowDays))
+
+	var related []string
+	for _, pm := range pms.Items {
+		if pm.Spec.Resource.Name != issue.Spec.Resource.Name {
+			continue
+		}
+		if pm.Status.GeneratedAt == nil || pm.Status.GeneratedAt.Time.Before(cutoff) {
+			continue
+		}
+		if pm.Name == "pm-"+issue.Name {
+			continue
+		}
+		related = append(related, pm.Name)
+	}
+
+	if len(related) == 0 {
+		return nil
+	}
+
+	return &platformv1alpha1.TrendingInfo{
+		OccurrenceCount:    int32(len(related)) + 1, // +1 for current
+		WindowDays:         windowDays,
+		RelatedPostMortems: related,
+		Pattern:            fmt.Sprintf("Recurring %s on %s/%s (%d occurrences in %d days)", issue.Spec.SignalType, issue.Spec.Resource.Kind, issue.Spec.Resource.Name, len(related)+1, windowDays),
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

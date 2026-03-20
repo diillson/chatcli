@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -37,21 +39,25 @@ func NewKubernetesContextBuilder(c client.Client, clientset ...kubernetes.Interf
 // for the given resource reference. Returns a formatted text suitable for inclusion in
 // AI analysis prompts.
 func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource platformv1alpha1.ResourceRef) (string, error) {
-	if resource.Kind != "Deployment" {
-		return fmt.Sprintf("Resource kind %q — context collection only supports Deployments.", resource.Kind), nil
-	}
-
 	var sb strings.Builder
 
-	// 1. Deployment Status
-	deployCtx, err := b.buildDeploymentStatus(ctx, resource)
-	if err != nil {
-		sb.WriteString(fmt.Sprintf("## Deployment Status\nError fetching deployment: %v\n\n", err))
-	} else {
-		sb.WriteString(deployCtx)
+	switch resource.Kind {
+	case "Deployment":
+		b.buildDeploymentContext(ctx, resource, &sb)
+	case "StatefulSet":
+		b.buildStatefulSetContext(ctx, resource, &sb)
+	case "DaemonSet":
+		b.buildDaemonSetContext(ctx, resource, &sb)
+	case "Job":
+		b.buildJobContext(ctx, resource, &sb)
+	case "CronJob":
+		b.buildCronJobContext(ctx, resource, &sb)
+	default:
+		sb.WriteString(fmt.Sprintf("## Resource Status\nResource kind %q — collecting generic pod/event context.\n\n", resource.Kind))
 	}
 
-	// 2. Pod Details
+	// Common sections for all resource kinds
+	// Pod Details
 	podCtx, err := b.buildPodDetails(ctx, resource)
 	if err != nil {
 		sb.WriteString(fmt.Sprintf("## Pod Details\nError fetching pods: %v\n\n", err))
@@ -59,7 +65,7 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 		sb.WriteString(podCtx)
 	}
 
-	// 3. Pod Logs (unhealthy pods only)
+	// Pod Logs (unhealthy pods only)
 	if b.clientset != nil {
 		logCtx, err := b.buildPodLogs(ctx, resource)
 		if err != nil {
@@ -69,7 +75,7 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 		}
 	}
 
-	// 4. Recent Events
+	// Recent Events
 	eventCtx, err := b.buildRecentEvents(ctx, resource)
 	if err != nil {
 		sb.WriteString(fmt.Sprintf("## Recent Events\nError fetching events: %v\n\n", err))
@@ -77,12 +83,20 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 		sb.WriteString(eventCtx)
 	}
 
-	// 5. Revision History
-	revCtx, err := b.buildRevisionHistory(ctx, resource)
-	if err != nil {
-		sb.WriteString(fmt.Sprintf("## Revision History\nError fetching replicasets: %v\n\n", err))
-	} else {
-		sb.WriteString(revCtx)
+	// Revision History (Deployment only)
+	if resource.Kind == "Deployment" {
+		revCtx, err := b.buildRevisionHistory(ctx, resource)
+		if err != nil {
+			sb.WriteString(fmt.Sprintf("## Revision History\nError fetching replicasets: %v\n\n", err))
+		} else {
+			sb.WriteString(revCtx)
+		}
+	}
+
+	// HPA context (any resource kind)
+	hpaCtx := b.buildHPAContext(ctx, resource)
+	if hpaCtx != "" {
+		sb.WriteString(hpaCtx)
 	}
 
 	result := sb.String()
@@ -90,6 +104,256 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 		result = result[:maxContextChars-3] + "..."
 	}
 	return result, nil
+}
+
+// buildDeploymentContext writes Deployment-specific status.
+func (b *KubernetesContextBuilder) buildDeploymentContext(ctx context.Context, resource platformv1alpha1.ResourceRef, sb *strings.Builder) {
+	deployCtx, err := b.buildDeploymentStatus(ctx, resource)
+	if err != nil {
+		sb.WriteString(fmt.Sprintf("## Deployment Status\nError fetching deployment: %v\n\n", err))
+	} else {
+		sb.WriteString(deployCtx)
+	}
+}
+
+// buildStatefulSetContext writes StatefulSet-specific status.
+func (b *KubernetesContextBuilder) buildStatefulSetContext(ctx context.Context, resource platformv1alpha1.ResourceRef, sb *strings.Builder) {
+	var sts appsv1.StatefulSet
+	if err := b.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &sts); err != nil {
+		sb.WriteString(fmt.Sprintf("## StatefulSet Status\nError fetching StatefulSet: %v\n\n", err))
+		return
+	}
+
+	desired := int32(1)
+	if sts.Spec.Replicas != nil {
+		desired = *sts.Spec.Replicas
+	}
+
+	sb.WriteString("## StatefulSet Status\n")
+	sb.WriteString(fmt.Sprintf("Name: %s/%s\n", sts.Namespace, sts.Name))
+	sb.WriteString(fmt.Sprintf("Replicas: desired=%d ready=%d current=%d updated=%d\n",
+		desired, sts.Status.ReadyReplicas, sts.Status.CurrentReplicas, sts.Status.UpdatedReplicas))
+	sb.WriteString(fmt.Sprintf("Update Strategy: %s\n", sts.Spec.UpdateStrategy.Type))
+
+	if sts.Spec.UpdateStrategy.RollingUpdate != nil && sts.Spec.UpdateStrategy.RollingUpdate.Partition != nil {
+		sb.WriteString(fmt.Sprintf("Partition: %d\n", *sts.Spec.UpdateStrategy.RollingUpdate.Partition))
+	}
+	sb.WriteString(fmt.Sprintf("Service: %s\n", sts.Spec.ServiceName))
+	sb.WriteString(fmt.Sprintf("PodManagementPolicy: %s\n", sts.Spec.PodManagementPolicy))
+
+	// Container info
+	for _, c := range sts.Spec.Template.Spec.Containers {
+		sb.WriteString(fmt.Sprintf("Container: %s image=%s", c.Name, c.Image))
+		if c.Resources.Requests != nil {
+			sb.WriteString(fmt.Sprintf(" requests=[cpu=%s mem=%s]",
+				c.Resources.Requests.Cpu().String(), c.Resources.Requests.Memory().String()))
+		}
+		if c.Resources.Limits != nil {
+			sb.WriteString(fmt.Sprintf(" limits=[cpu=%s mem=%s]",
+				c.Resources.Limits.Cpu().String(), c.Resources.Limits.Memory().String()))
+		}
+		sb.WriteString("\n")
+	}
+
+	// VolumeClaimTemplates
+	for _, vct := range sts.Spec.VolumeClaimTemplates {
+		storage := vct.Spec.Resources.Requests.Storage()
+		sb.WriteString(fmt.Sprintf("VolumeClaimTemplate: %s storage=%s\n", vct.Name, storage.String()))
+	}
+
+	// Conditions
+	for _, cond := range sts.Status.Conditions {
+		sb.WriteString(fmt.Sprintf("Condition: %s=%s reason=%s message=%q\n",
+			cond.Type, cond.Status, cond.Reason, cond.Message))
+	}
+	sb.WriteString("\n")
+}
+
+// buildDaemonSetContext writes DaemonSet-specific status.
+func (b *KubernetesContextBuilder) buildDaemonSetContext(ctx context.Context, resource platformv1alpha1.ResourceRef, sb *strings.Builder) {
+	var ds appsv1.DaemonSet
+	if err := b.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &ds); err != nil {
+		sb.WriteString(fmt.Sprintf("## DaemonSet Status\nError fetching DaemonSet: %v\n\n", err))
+		return
+	}
+
+	sb.WriteString("## DaemonSet Status\n")
+	sb.WriteString(fmt.Sprintf("Name: %s/%s\n", ds.Namespace, ds.Name))
+	sb.WriteString(fmt.Sprintf("Desired: %d Current: %d Ready: %d Available: %d Unavailable: %d\n",
+		ds.Status.DesiredNumberScheduled, ds.Status.CurrentNumberScheduled,
+		ds.Status.NumberReady, ds.Status.NumberAvailable, ds.Status.NumberUnavailable))
+	sb.WriteString(fmt.Sprintf("Updated: %d MisScheduled: %d\n",
+		ds.Status.UpdatedNumberScheduled, ds.Status.NumberMisscheduled))
+	sb.WriteString(fmt.Sprintf("Update Strategy: %s\n", ds.Spec.UpdateStrategy.Type))
+
+	// Node selector
+	if ds.Spec.Template.Spec.NodeSelector != nil {
+		sb.WriteString(fmt.Sprintf("NodeSelector: %v\n", ds.Spec.Template.Spec.NodeSelector))
+	}
+
+	// Tolerations
+	for _, t := range ds.Spec.Template.Spec.Tolerations {
+		sb.WriteString(fmt.Sprintf("Toleration: %s=%s effect=%s\n", t.Key, t.Value, t.Effect))
+	}
+
+	// Containers
+	for _, c := range ds.Spec.Template.Spec.Containers {
+		sb.WriteString(fmt.Sprintf("Container: %s image=%s\n", c.Name, c.Image))
+	}
+
+	// Conditions
+	for _, cond := range ds.Status.Conditions {
+		sb.WriteString(fmt.Sprintf("Condition: %s=%s reason=%s\n", cond.Type, cond.Status, cond.Reason))
+	}
+	sb.WriteString("\n")
+}
+
+// buildJobContext writes Job-specific status.
+func (b *KubernetesContextBuilder) buildJobContext(ctx context.Context, resource platformv1alpha1.ResourceRef, sb *strings.Builder) {
+	var job batchv1.Job
+	if err := b.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &job); err != nil {
+		sb.WriteString(fmt.Sprintf("## Job Status\nError fetching Job: %v\n\n", err))
+		return
+	}
+
+	sb.WriteString("## Job Status\n")
+	sb.WriteString(fmt.Sprintf("Name: %s/%s\n", job.Namespace, job.Name))
+	sb.WriteString(fmt.Sprintf("Active: %d Succeeded: %d Failed: %d\n",
+		job.Status.Active, job.Status.Succeeded, job.Status.Failed))
+
+	if job.Spec.Completions != nil {
+		sb.WriteString(fmt.Sprintf("Completions: %d\n", *job.Spec.Completions))
+	}
+	if job.Spec.Parallelism != nil {
+		sb.WriteString(fmt.Sprintf("Parallelism: %d\n", *job.Spec.Parallelism))
+	}
+	if job.Spec.BackoffLimit != nil {
+		sb.WriteString(fmt.Sprintf("BackoffLimit: %d\n", *job.Spec.BackoffLimit))
+	}
+	if job.Spec.ActiveDeadlineSeconds != nil {
+		sb.WriteString(fmt.Sprintf("ActiveDeadlineSeconds: %d\n", *job.Spec.ActiveDeadlineSeconds))
+	}
+
+	if job.Status.StartTime != nil {
+		sb.WriteString(fmt.Sprintf("StartTime: %s\n", job.Status.StartTime.Format("2006-01-02 15:04:05")))
+	}
+	if job.Status.CompletionTime != nil {
+		sb.WriteString(fmt.Sprintf("CompletionTime: %s\n", job.Status.CompletionTime.Format("2006-01-02 15:04:05")))
+	}
+
+	// Conditions
+	for _, cond := range job.Status.Conditions {
+		sb.WriteString(fmt.Sprintf("Condition: %s=%s reason=%s message=%q\n",
+			cond.Type, cond.Status, cond.Reason, cond.Message))
+	}
+
+	// Containers
+	for _, c := range job.Spec.Template.Spec.Containers {
+		sb.WriteString(fmt.Sprintf("Container: %s image=%s\n", c.Name, c.Image))
+	}
+	sb.WriteString("\n")
+}
+
+// buildCronJobContext writes CronJob-specific status.
+func (b *KubernetesContextBuilder) buildCronJobContext(ctx context.Context, resource platformv1alpha1.ResourceRef, sb *strings.Builder) {
+	var cj batchv1.CronJob
+	if err := b.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &cj); err != nil {
+		sb.WriteString(fmt.Sprintf("## CronJob Status\nError fetching CronJob: %v\n\n", err))
+		return
+	}
+
+	sb.WriteString("## CronJob Status\n")
+	sb.WriteString(fmt.Sprintf("Name: %s/%s\n", cj.Namespace, cj.Name))
+	sb.WriteString(fmt.Sprintf("Schedule: %s\n", cj.Spec.Schedule))
+	sb.WriteString(fmt.Sprintf("Suspend: %t\n", cj.Spec.Suspend != nil && *cj.Spec.Suspend))
+
+	if cj.Status.LastScheduleTime != nil {
+		sb.WriteString(fmt.Sprintf("LastScheduleTime: %s\n", cj.Status.LastScheduleTime.Format("2006-01-02 15:04:05")))
+	}
+	if cj.Status.LastSuccessfulTime != nil {
+		sb.WriteString(fmt.Sprintf("LastSuccessfulTime: %s\n", cj.Status.LastSuccessfulTime.Format("2006-01-02 15:04:05")))
+	}
+
+	sb.WriteString(fmt.Sprintf("Active Jobs: %d\n", len(cj.Status.Active)))
+	for _, aj := range cj.Status.Active {
+		sb.WriteString(fmt.Sprintf("  - %s/%s\n", aj.Namespace, aj.Name))
+	}
+
+	if cj.Spec.ConcurrencyPolicy != "" {
+		sb.WriteString(fmt.Sprintf("ConcurrencyPolicy: %s\n", cj.Spec.ConcurrencyPolicy))
+	}
+	if cj.Spec.FailedJobsHistoryLimit != nil {
+		sb.WriteString(fmt.Sprintf("FailedJobsHistoryLimit: %d\n", *cj.Spec.FailedJobsHistoryLimit))
+	}
+	sb.WriteString("\n")
+}
+
+// buildHPAContext checks for HPAs targeting this resource.
+func (b *KubernetesContextBuilder) buildHPAContext(ctx context.Context, resource platformv1alpha1.ResourceRef) string {
+	var hpaList autoscalingv2.HorizontalPodAutoscalerList
+	if err := b.client.List(ctx, &hpaList, client.InNamespace(resource.Namespace)); err != nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, hpa := range hpaList.Items {
+		if hpa.Spec.ScaleTargetRef.Name != resource.Name {
+			continue
+		}
+		if hpa.Spec.ScaleTargetRef.Kind != resource.Kind {
+			continue
+		}
+
+		sb.WriteString("## HPA (Horizontal Pod Autoscaler)\n")
+		sb.WriteString(fmt.Sprintf("Name: %s\n", hpa.Name))
+		sb.WriteString(fmt.Sprintf("MinReplicas: %d MaxReplicas: %d\n",
+			*hpa.Spec.MinReplicas, hpa.Spec.MaxReplicas))
+		sb.WriteString(fmt.Sprintf("CurrentReplicas: %d DesiredReplicas: %d\n",
+			hpa.Status.CurrentReplicas, hpa.Status.DesiredReplicas))
+
+		// Metrics
+		for _, metric := range hpa.Spec.Metrics {
+			switch metric.Type {
+			case autoscalingv2.ResourceMetricSourceType:
+				if metric.Resource != nil {
+					sb.WriteString(fmt.Sprintf("Metric: %s target=%v\n",
+						metric.Resource.Name, metric.Resource.Target.AverageUtilization))
+				}
+			case autoscalingv2.PodsMetricSourceType:
+				if metric.Pods != nil {
+					sb.WriteString(fmt.Sprintf("Metric: pods/%s target=%s\n",
+						metric.Pods.Metric.Name, metric.Pods.Target.AverageValue))
+				}
+			}
+		}
+
+		// Current metrics
+		for _, cm := range hpa.Status.CurrentMetrics {
+			switch cm.Type {
+			case autoscalingv2.ResourceMetricSourceType:
+				if cm.Resource != nil && cm.Resource.Current.AverageUtilization != nil {
+					sb.WriteString(fmt.Sprintf("Current %s: %d%%\n",
+						cm.Resource.Name, *cm.Resource.Current.AverageUtilization))
+				}
+			}
+		}
+
+		// Conditions
+		for _, cond := range hpa.Status.Conditions {
+			sb.WriteString(fmt.Sprintf("Condition: %s=%s reason=%s message=%q\n",
+				cond.Type, cond.Status, cond.Reason, cond.Message))
+		}
+
+		// Detect HPA maxed out
+		if hpa.Status.CurrentReplicas >= hpa.Spec.MaxReplicas {
+			sb.WriteString("**WARNING: HPA is at max replicas — autoscaling cannot help further.**\n")
+		}
+
+		sb.WriteString("\n")
+		break // Only show first matching HPA
+	}
+
+	return sb.String()
 }
 
 func (b *KubernetesContextBuilder) buildDeploymentStatus(ctx context.Context, resource platformv1alpha1.ResourceRef) (string, error) {
@@ -149,10 +413,10 @@ func (b *KubernetesContextBuilder) buildPodDetails(ctx context.Context, resource
 		return "", err
 	}
 
-	// Filter pods owned by this deployment (via ReplicaSet)
+	// Filter pods owned by this resource
 	var matchingPods []corev1.Pod
 	for i := range podList.Items {
-		if isPodOwnedByDeployment(&podList.Items[i], resource.Name) {
+		if isResourcePod(&podList.Items[i], resource) {
 			matchingPods = append(matchingPods, podList.Items[i])
 		}
 	}
@@ -210,11 +474,11 @@ func (b *KubernetesContextBuilder) buildPodLogs(ctx context.Context, resource pl
 		return "", err
 	}
 
-	// Filter unhealthy pods owned by this deployment
+	// Filter unhealthy pods owned by this resource
 	var unhealthy []corev1.Pod
 	for i := range podList.Items {
 		pod := &podList.Items[i]
-		if !isPodOwnedByDeployment(pod, resource.Name) {
+		if !isResourcePod(pod, resource) {
 			continue
 		}
 		if !isPodReady(pod) || podRestartCount(pod) > 0 {

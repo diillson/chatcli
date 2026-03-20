@@ -132,6 +132,7 @@ IMPORTANT: The previous remediation attempts listed above have FAILED. Do NOT re
 
 Available remediation actions (use ONLY these):
 
+WORKLOAD ACTIONS:
 1. RestartDeployment — triggers a rolling restart of all pods. No params needed.
    Best for: stale state, memory leaks, transient errors.
 
@@ -140,27 +141,73 @@ Available remediation actions (use ONLY these):
 
 3. RollbackDeployment — rolls back to a previous deployment revision.
    Params (optional): {"toRevision": "<number|previous|healthy>"}
-     "previous" (default): rolls back to revision N-1.
-     "healthy": automatically finds the most recent revision with running pods.
-     "<number>": rolls back to that specific revision number.
    Best for: bad deployments, image bugs, config regressions.
-   IMPORTANT: Use the Revision History in the context to pick the right revision.
-   If a specific revision was healthy (readyReplicas > 0), prefer toRevision with that number.
 
 4. AdjustResources — changes CPU/memory requests and limits on a container.
-   Params: {"container": "name" (optional, defaults to first), "memory_limit": "1Gi", "memory_request": "512Mi", "cpu_limit": "1000m", "cpu_request": "500m"}
-   Provide only the values you want to change. Uses standard K8s notation (Mi, Gi, m for millicores).
+   Params: {"container": "name", "memory_limit": "1Gi", "memory_request": "512Mi", "cpu_limit": "1000m", "cpu_request": "500m"}
    Best for: OOMKilled pods, CPU throttling, resource quota issues.
-   Safety: limits cannot be set lower than requests.
 
-5. DeletePod — deletes a single unhealthy pod (the deployment controller recreates it).
+5. DeletePod — deletes a single unhealthy pod.
    Params (optional): {"pod": "specific-pod-name"}
-   If omitted, automatically selects the most-unhealthy pod (CrashLoopBackOff > highest restarts).
-   Best for: stuck pods, pods in CrashLoopBackOff that won't recover with restart.
-   Safety: refuses if only 1 pod exists, max 1 deletion per action.
+   Best for: stuck pods, CrashLoopBackOff that won't recover with restart.
 
-6. PatchConfig — updates a ConfigMap. Params: {"configmap": "name", "key1": "value1", "key2": "value2"}.
+6. PatchConfig — updates a ConfigMap. Params: {"configmap": "name", "key1": "value1"}.
    Best for: configuration errors, feature flag toggles.
+
+7. RestartStatefulSetPod — restarts a StatefulSet pod (preserves identity/storage).
+   Params (optional): {"pod": "specific-pod-name"} (omit for rolling restart of entire StatefulSet).
+   Best for: StatefulSet pod issues, database pod recovery.
+
+GITOPS ACTIONS:
+8. HelmRollback — rolls back a Helm release to the previous revision.
+   Params (optional): {"revision": "N"} (defaults to previous).
+   Best for: failed Helm upgrades, bad chart values.
+
+9. ArgoSyncApp — triggers an ArgoCD Application sync.
+   Params (optional): {"revision": "commit-sha"} (defaults to HEAD).
+   Best for: ArgoCD OutOfSync state, forcing re-sync after fix.
+
+AUTOSCALING ACTIONS:
+10. AdjustHPA — modifies HPA min/max replicas or target utilization.
+    Params: {"minReplicas": "N", "maxReplicas": "N", "targetCPUUtilization": "N"}
+    Best for: HPA maxed out, autoscaling misconfiguration.
+
+INFRASTRUCTURE ACTIONS:
+11. CordonNode — marks a node as unschedulable.
+    Params: {"node": "node-name"}
+    Best for: node-level issues, disk pressure, hardware problems.
+
+12. DrainNode — cordons and evicts all pods from a node.
+    Params: {"node": "node-name"}
+    Best for: urgent node evacuation, node maintenance.
+
+STORAGE ACTIONS:
+13. ResizePVC — expands a PersistentVolumeClaim (expansion only, no shrinking).
+    Params: {"pvc": "pvc-name", "size": "20Gi"}
+    Best for: disk pressure, PVC full, storage quota issues.
+
+SECURITY ACTIONS:
+14. RotateSecret — updates secret values or copies from a source secret.
+    Params: {"secret": "name", "sourceSecret": "new-secret-name"} or {"secret": "name", "key": "value"}.
+    Best for: expired credentials, certificate rotation.
+
+NETWORKING ACTIONS:
+15. UpdateIngress — modifies Ingress backend or annotations.
+    Params: {"ingress": "name", "backendService": "svc-name", "backendPort": "8080"}.
+    Best for: routing fixes, backend service changes.
+
+16. PatchNetworkPolicy — adds allowed ports to a NetworkPolicy.
+    Params: {"networkPolicy": "name", "allowPort": "8080", "protocol": "TCP"}.
+    Best for: connectivity issues caused by restrictive network policies.
+
+ADVANCED ACTIONS:
+17. ApplyManifest — applies a JSON manifest from a ConfigMap.
+    Params: {"configmap": "fix-manifest", "key": "manifest.yaml"}.
+    Best for: applying pre-prepared fix manifests.
+
+18. ExecDiagnostic — runs a whitelisted diagnostic command in a pod.
+    Params: {"command": "df -h"} (only pre-approved commands allowed).
+    Best for: gathering diagnostic data before making changes.
 
 Respond ONLY with a JSON object (no markdown, no code blocks):
 {
@@ -288,20 +335,42 @@ Current Kubernetes Cluster State (LIVE — refreshed before each step):
 
 Available Actions (you can execute ONE per step):
 
-MUTATING (changes the cluster):
+WORKLOAD:
 1. RestartDeployment — rolling restart of all pods. No params.
 2. ScaleDeployment — scale replicas. Params: {"replicas": "N"} (N >= 1).
-3. RollbackDeployment — rollback to a previous revision.
-   Params: {"toRevision": "previous|healthy|<number>"}
-4. AdjustResources — change CPU/memory requests/limits.
-   Params: {"container": "name", "memory_limit": "1Gi", "cpu_limit": "500m", ...}
-5. DeletePod — delete a single unhealthy pod.
-   Params: {"pod": "name"} (optional; auto-selects most-unhealthy if omitted).
-6. PatchConfig — update a ConfigMap.
-   Params: {"configmap": "name", "key1": "value1", ...}
+3. RollbackDeployment — rollback. Params: {"toRevision": "previous|healthy|<number>"}
+4. AdjustResources — change CPU/memory. Params: {"container": "name", "memory_limit": "1Gi", "cpu_limit": "500m"}
+5. DeletePod — delete unhealthy pod. Params: {"pod": "name"} (optional).
+6. PatchConfig — update ConfigMap. Params: {"configmap": "name", "key1": "value1"}
+7. RestartStatefulSetPod — restart StatefulSet pod. Params: {"pod": "name"} (optional for rolling restart).
 
-OBSERVATION (no action, wait for next context refresh):
-7. Observe — set next_action to null and resolved to false. Use this when you need to wait and see the effect of a previous action before deciding what to do next.`)
+GITOPS:
+8. HelmRollback — rollback Helm release. Params: {"revision": "N"} (optional).
+9. ArgoSyncApp — trigger ArgoCD sync. Params: {"revision": "sha"} (optional).
+
+AUTOSCALING:
+10. AdjustHPA — modify HPA. Params: {"minReplicas": "N", "maxReplicas": "N", "targetCPUUtilization": "N"}
+
+INFRASTRUCTURE:
+11. CordonNode — mark node unschedulable. Params: {"node": "name"}
+12. DrainNode — evict pods from node. Params: {"node": "name"}
+
+STORAGE:
+13. ResizePVC — expand PVC. Params: {"pvc": "name", "size": "20Gi"}
+
+SECURITY:
+14. RotateSecret — update secret. Params: {"secret": "name", "key": "new-value"} or {"secret": "name", "sourceSecret": "new-src"}
+
+NETWORKING:
+15. UpdateIngress — fix Ingress. Params: {"ingress": "name", "backendService": "svc", "backendPort": "8080"}
+16. PatchNetworkPolicy — open port. Params: {"networkPolicy": "name", "allowPort": "8080"}
+
+ADVANCED:
+17. ApplyManifest — apply fix from ConfigMap. Params: {"configmap": "fix-cm", "key": "manifest.yaml"}
+18. ExecDiagnostic — run diagnostic. Params: {"command": "df -h"} (whitelisted only).
+
+OBSERVATION (no cluster change):
+19. Observe — set next_action to null and resolved to false. Wait and see effect of previous action.`)
 
 	// Append conversation history
 	if len(req.History) > 0 {

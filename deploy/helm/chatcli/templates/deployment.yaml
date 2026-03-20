@@ -93,6 +93,10 @@ spec:
           env:
             - name: HOME
               value: /home/chatcli
+          {{- if .Values.prometheusUrl }}
+            - name: PROMETHEUS_URL
+              value: {{ .Values.prometheusUrl | quote }}
+          {{- end }}
           {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
           {{- end }}

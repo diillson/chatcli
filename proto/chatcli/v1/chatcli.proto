@@ -277,7 +277,7 @@ message AnalyzeIssueResponse {
 
 message SuggestedAction {
   string name = 1;                    // human-readable step name, e.g., "Restart pods"
-  string action = 2;                  // action type: "ScaleDeployment", "RollbackDeployment", "RestartDeployment", "PatchConfig"
+  string action = 2;                  // action type: ScaleDeployment, RollbackDeployment, RestartDeployment, PatchConfig, AdjustResources, DeletePod, HelmRollback, ArgoSyncApp, AdjustHPA, RestartStatefulSetPod, CordonNode, DrainNode, ResizePVC, RotateSecret, ExecDiagnostic, UpdateIngress, PatchNetworkPolicy, ApplyManifest, Custom
   string description = 3;            // explanation of why this action is recommended
   map<string, string> params = 4;    // action-specific params, e.g., {"replicas": "3"}
 }
