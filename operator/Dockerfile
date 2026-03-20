@@ -20,6 +20,8 @@ COPY proto/ proto/
 COPY operator/main.go operator/main.go
 COPY operator/api/ operator/api/
 COPY operator/controllers/ operator/controllers/
+COPY operator/channels/ operator/channels/
+COPY operator/web/ operator/web/
 
 # Build (TARGETARCH is injected by docker buildx for multi-arch)
 WORKDIR /workspace/operator
