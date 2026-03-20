@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.73.0](https://github.com/diillson/chatcli/compare/v1.72.2...v1.73.0) (2026-03-20)
+
+
+### Features
+
+* **operator:** advanced AIOps remediation engine with deep diagnostics ([#641](https://github.com/diillson/chatcli/issues/641)) ([159d2bd](https://github.com/diillson/chatcli/commit/159d2bd270f3cc32d9f614c6533fb7b66097836e))
+
 ## [1.72.2](https://github.com/diillson/chatcli/compare/v1.72.1...v1.72.2) (2026-03-20)
 
 
