@@ -18,7 +18,10 @@ import (
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
 
-const maxContextChars = 12000
+// maxContextChars limits the K8s context section size. This is one of several
+// context sections (logs, metrics, GitOps, source code, cascade) that are combined
+// in the AIInsight controller with a total limit of 30KB for the LLM prompt.
+const maxContextChars = 15000
 
 // KubernetesContextBuilder collects real cluster data for AI analysis enrichment.
 type KubernetesContextBuilder struct {

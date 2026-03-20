@@ -41,7 +41,14 @@ func TestMapAlertTypeToSignal(t *testing.T) {
 		{"OOMKilled", platformv1alpha1.SignalOOMKill},
 		{"PodNotReady", platformv1alpha1.SignalPodNotReady},
 		{"DeploymentFailing", platformv1alpha1.SignalDeployFail},
-		{"CrashLoopBackOff", platformv1alpha1.SignalPodRestart},
+		{"CrashLoopBackOff", platformv1alpha1.SignalCrashLoopBackOff},
+		{"ImagePullBackOff", platformv1alpha1.SignalImagePullError},
+		{"DiskPressure", platformv1alpha1.SignalDiskPressure},
+		{"NodeNotReady", platformv1alpha1.SignalNodeNotReady},
+		{"HPAMaxedOut", platformv1alpha1.SignalHPAMaxed},
+		{"HelmReleaseFailed", platformv1alpha1.SignalHelmReleaseFailed},
+		{"ArgoCDDegraded", platformv1alpha1.SignalArgoCDDegraded},
+		{"JobFailed", platformv1alpha1.SignalJobFailed},
 		{"unknown", platformv1alpha1.AnomalySignalType("unknown")},
 	}
 
