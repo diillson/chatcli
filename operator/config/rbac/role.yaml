@@ -341,7 +341,7 @@ rules:
       - update
       - patch
       - delete
-  # Secrets (API keys, TLS certs, auth tokens)
+  # Secrets (API keys, TLS certs, auth tokens, RotateSecret + HelmRollback)
   - apiGroups:
       - ""
     resources:
@@ -350,6 +350,9 @@ rules:
       - get
       - list
       - watch
+      - create
+      - update
+      - patch
   # Pods and logs (watcher, remediation restart, pod deletion)
   - apiGroups:
       - ""
@@ -399,6 +402,35 @@ rules:
       - watch
       - create
       - patch
+  # Namespaces (read for context)
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+  # ArgoCD Applications (GitOps detection + sync)
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - applications
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+  # Flux Kustomizations (GitOps detection)
+  - apiGroups:
+      - kustomize.toolkit.fluxcd.io
+    resources:
+      - kustomizations
+    verbs:
+      - get
+      - list
+      - watch
   # Leader election
   - apiGroups:
       - coordination.k8s.io
