@@ -877,7 +877,21 @@ func TestNeedsClusterRBAC(t *testing.T) {
 		want     bool
 	}{
 		{
-			name: "single target",
+			name: "single target same namespace as instance",
+			instance: func() *platformv1alpha1.Instance {
+				inst := newInstance("test", "default")
+				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
+					Enabled: true,
+					Targets: []platformv1alpha1.WatchTargetSpec{
+						{Deployment: "app", Namespace: "default"},
+					},
+				}
+				return inst
+			}(),
+			want: false,
+		},
+		{
+			name: "single target different namespace than instance",
 			instance: func() *platformv1alpha1.Instance {
 				inst := newInstance("test", "default")
 				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
@@ -888,10 +902,10 @@ func TestNeedsClusterRBAC(t *testing.T) {
 				}
 				return inst
 			}(),
-			want: false,
+			want: true,
 		},
 		{
-			name: "multiple targets same namespace",
+			name: "multiple targets same namespace different from instance",
 			instance: func() *platformv1alpha1.Instance {
 				inst := newInstance("test", "default")
 				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
@@ -900,6 +914,21 @@ func TestNeedsClusterRBAC(t *testing.T) {
 						{Deployment: "app-a", Namespace: "prod"},
 						{Deployment: "app-b", Namespace: "prod"},
 						{Deployment: "app-c", Namespace: "prod"},
+					},
+				}
+				return inst
+			}(),
+			want: true,
+		},
+		{
+			name: "multiple targets same namespace as instance",
+			instance: func() *platformv1alpha1.Instance {
+				inst := newInstance("test", "default")
+				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
+					Enabled: true,
+					Targets: []platformv1alpha1.WatchTargetSpec{
+						{Deployment: "app-a", Namespace: "default"},
+						{Deployment: "app-b", Namespace: "default"},
 					},
 				}
 				return inst

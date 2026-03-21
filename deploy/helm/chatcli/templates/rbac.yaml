@@ -2,7 +2,8 @@
 {{- /*
   Auto-detect if ClusterRole is needed:
   1. Explicitly set via rbac.clusterWide: true
-  2. Multi-target watcher with targets in different namespaces
+  2. Targets in multiple different namespaces
+  3. Any target in a different namespace than the Helm release namespace
 */ -}}
 {{- $needsClusterWide := .Values.rbac.clusterWide -}}
 {{- if and (not $needsClusterWide) .Values.watcher.enabled .Values.watcher.targets -}}
@@ -13,6 +14,12 @@
   {{- end -}}
   {{- if gt (len $namespaces) 1 -}}
     {{- $needsClusterWide = true -}}
+  {{- else -}}
+    {{- range $ns, $_ := $namespaces -}}
+      {{- if ne $ns $.Release.Namespace -}}
+        {{- $needsClusterWide = true -}}
+      {{- end -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}
 {{- if $needsClusterWide }}
