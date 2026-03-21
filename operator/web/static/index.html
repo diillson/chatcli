@@ -1068,9 +1068,9 @@ async function loadSLOs() {
     const items = data.items || [];
     if (items.length === 0) { showEmpty(cardsEl, 'No SLOs configured'); showEmpty(alertsEl, 'No alerts'); return; }
     cardsEl.innerHTML = items.map(slo => {
-      const budgetPct = slo.errorBudgetTotal > 0 ? ((slo.errorBudgetRemaining / slo.errorBudgetTotal) * 100) : 100;
+      const budgetPct = slo.errorBudgetRemaining || 100;
       const budgetClass = budgetPct > 50 ? 'gauge-ok' : budgetPct > 20 ? 'gauge-warn' : 'gauge-danger';
-      const currentPct = (slo.currentValue || 0) <= 1 ? (slo.currentValue || 0) * 100 : (slo.currentValue || 0);
+      const currentPct = slo.currentValue || 0;
       const target = slo.target || 99.9;
       const meeting = currentPct >= target;
       return `
@@ -1105,10 +1105,7 @@ async function loadSLOs() {
     }).join('');
 
     // Show alerts for SLOs that are breaching
-    const alertItems = items.filter(s => {
-      const cv = (s.currentValue || 0) <= 1 ? (s.currentValue || 0) * 100 : (s.currentValue || 0);
-      return (s.state || '').toLowerCase() === 'firing' || cv < (s.target || 99.9);
-    });
+    const alertItems = items.filter(s => (s.state || '').toLowerCase() === 'firing' || (s.currentValue || 0) < (s.target || 99.9));
     if (alertItems.length === 0) {
       alertsEl.innerHTML = '<div class="empty-state">No active SLO alerts</div>';
     } else {
@@ -1117,10 +1114,10 @@ async function loadSLOs() {
         <tbody>
           ${alertItems.map(s => `<tr>
             <td>${escapeHtml(s.service || s.name)}</td>
-            <td style="color:var(--sev-critical)">${((s.currentValue || 0) <= 1 ? (s.currentValue || 0) * 100 : (s.currentValue || 0)).toFixed(2)}%</td>
+            <td style="color:var(--sev-critical)">${(s.currentValue || 0).toFixed(2)}%</td>
             <td>${(s.target || 99.9).toFixed(2)}%</td>
-            <td>${s.errorBudgetTotal > 0 ? ((s.errorBudgetRemaining / s.errorBudgetTotal) * 100).toFixed(1) + '%' : '-'}</td>
-            <td>${stateBadge(s.state || 'Firing')}</td>
+            <td>${(s.errorBudgetRemaining || 0).toFixed(1)}%</td>
+            <td>${stateBadge(s.state || (s.currentValue >= s.target ? 'Healthy' : 'Firing'))}</td>
           </tr>`).join('')}
         </tbody>
       </table>`;

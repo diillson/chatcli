@@ -1708,17 +1708,30 @@ func unstructuredToSLO(obj map[string]interface{}) SLOItem {
 	}
 
 	if spec != nil {
-		slo.Service, _ = spec["service"].(string)
-		slo.SLI, _ = spec["sli"].(string)
-		slo.Target = toFloat64(spec["target"])
-		slo.Window, _ = spec["window"].(string)
+		slo.Service, _ = spec["serviceName"].(string)
+
+		// indicator.type → SLI
+		if indicator, ok := spec["indicator"].(map[string]interface{}); ok {
+			slo.SLI, _ = indicator["type"].(string)
+		}
+
+		// target.percentage and target.window (nested)
+		if target, ok := spec["target"].(map[string]interface{}); ok {
+			slo.Target = toFloat64(target["percentage"])
+			slo.Window, _ = target["window"].(string)
+		}
 	}
 
 	if status != nil {
-		slo.CurrentValue = toFloat64(status["currentValue"])
+		// currentValue is a fraction (0.0-1.0) — convert to percentage for display
+		slo.CurrentValue = toFloat64(status["currentValue"]) * 100
+
 		slo.ErrorBudgetTotal = toFloat64(status["errorBudgetTotal"])
 		slo.ErrorBudgetUsed = toFloat64(status["errorBudgetUsed"])
-		slo.ErrorBudgetRemaining = toFloat64(status["errorBudgetRemaining"])
+
+		// errorBudgetRemaining is a fraction (0.0-1.0) — convert to percentage
+		slo.ErrorBudgetRemaining = toFloat64(status["errorBudgetRemaining"]) * 100
+
 		slo.State, _ = status["state"].(string)
 	}
 
@@ -1738,10 +1751,20 @@ func unstructuredToApproval(obj map[string]interface{}) ApprovalItem {
 	}
 
 	if spec != nil {
-		ai.Resource, _ = spec["resource"].(string)
-		ai.Action, _ = spec["action"].(string)
-		ai.Reason, _ = spec["reason"].(string)
-		ai.RequestedBy, _ = spec["requestedBy"].(string)
+		ai.RequestedBy, _ = spec["requester"].(string)
+		ai.Reason, _ = spec["policyRef"].(string)
+
+		// Extract resource from issueRef
+		if issueRef, ok := spec["issueRef"].(map[string]interface{}); ok {
+			ai.Resource, _ = issueRef["name"].(string)
+		}
+
+		// Extract action from first requestedAction
+		if actions, ok := spec["requestedActions"].([]interface{}); ok && len(actions) > 0 {
+			if action, ok := actions[0].(map[string]interface{}); ok {
+				ai.Action, _ = action["type"].(string)
+			}
+		}
 	}
 
 	if status != nil {
