@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.75.4](https://github.com/diillson/chatcli/compare/v1.75.3...v1.75.4) (2026-03-21)
+
+
+### Bug Fixes
+
+* **operator:** replace wildcard RBAC in superadmin role with explicit resources ([#654](https://github.com/diillson/chatcli/issues/654)) ([c483d01](https://github.com/diillson/chatcli/commit/c483d0170be1e842acbd2d610be9a02234eb6ecc))
+
 ## [1.75.3](https://github.com/diillson/chatcli/compare/v1.75.2...v1.75.3) (2026-03-21)
 
 
