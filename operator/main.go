@@ -88,10 +88,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	auditRecorder := controllers.NewAuditRecorder(mgr.GetClient(), mgr.GetScheme())
+
 	if err = (&controllers.IssueReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		DedupInvalidator: watcherBridge,
+		AuditRecorder:    auditRecorder,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Issue")
 		os.Exit(1)

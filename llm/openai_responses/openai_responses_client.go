@@ -49,7 +49,7 @@ func NewOpenAIResponsesClient(apiKey, model string, logger *zap.Logger, maxAttem
 	}
 	return &OpenAIResponsesClient{
 		apiKey:      apiKey,
-		model:       model,
+		model:       strings.ToLower(model),
 		logger:      logger,
 		httpClient:  httpClient,
 		maxAttempts: maxAttempts,

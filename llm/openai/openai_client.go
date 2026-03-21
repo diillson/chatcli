@@ -42,7 +42,7 @@ func NewOpenAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, 
 
 	return &OpenAIClient{
 		apiKey:      apiKey,
-		model:       model,
+		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
 		maxAttempts: maxAttempts,
