@@ -665,7 +665,7 @@ func watcherPolicyRules() []rbacv1.PolicyRule {
 
 // needsClusterRBAC returns true if multi-target watches span multiple namespaces.
 func needsClusterRBAC(instance *platformv1alpha1.Instance) bool {
-	if instance.Spec.Watcher == nil || len(instance.Spec.Watcher.Targets) <= 1 {
+	if instance.Spec.Watcher == nil || len(instance.Spec.Watcher.Targets) == 0 {
 		return false
 	}
 	namespaces := make(map[string]struct{})
@@ -676,7 +676,17 @@ func needsClusterRBAC(instance *platformv1alpha1.Instance) bool {
 		}
 		namespaces[ns] = struct{}{}
 	}
-	return len(namespaces) > 1
+	// ClusterRole needed when targets are in multiple namespaces OR
+	// when any target is in a different namespace than the Instance itself.
+	if len(namespaces) > 1 {
+		return true
+	}
+	for ns := range namespaces {
+		if ns != instance.Namespace {
+			return true
+		}
+	}
+	return false
 }
 
 // reconcileRBAC creates Role + RoleBinding (or ClusterRole + ClusterRoleBinding for multi-namespace).
