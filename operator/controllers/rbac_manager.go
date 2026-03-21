@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	RoleViewer     = "chatcli-viewer"
-	RoleOperator   = "chatcli-operator"
-	RoleAdmin      = "chatcli-admin"
-	RoleSuperAdmin = "chatcli-superadmin"
+	RoleViewer     = "chatcli-role-viewer"
+	RoleOperator   = "chatcli-role-operator"
+	RoleAdmin      = "chatcli-role-admin"
+	RoleSuperAdmin = "chatcli-role-superadmin"
 )
 
 type RBACManager struct {
