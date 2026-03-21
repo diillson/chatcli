@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.75.3](https://github.com/diillson/chatcli/compare/v1.75.2...v1.75.3) (2026-03-21)
+
+
+### Bug Fixes
+
+* **operator:** rename RBACManager ClusterRoles to avoid Helm name collision ([#652](https://github.com/diillson/chatcli/issues/652)) ([fd42576](https://github.com/diillson/chatcli/commit/fd4257667d02876779338d6281f3784134e8857b))
+
 ## [1.75.2](https://github.com/diillson/chatcli/compare/v1.75.1...v1.75.2) (2026-03-21)
 
 
