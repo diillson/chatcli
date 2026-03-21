@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.75.1](https://github.com/diillson/chatcli/compare/v1.75.0...v1.75.1) (2026-03-21)
+
+
+### Bug Fixes
+
+* **operator:** correct GOOGLE_AI_API_KEY to GOOGLEAI_API_KEY ([#648](https://github.com/diillson/chatcli/issues/648)) ([90c08b8](https://github.com/diillson/chatcli/commit/90c08b8ced02a4992511cbaa8b535af559146975))
+
 ## [1.75.0](https://github.com/diillson/chatcli/compare/v1.74.0...v1.75.0) (2026-03-20)
 
 
