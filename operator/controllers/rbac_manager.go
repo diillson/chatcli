@@ -45,7 +45,23 @@ func (rm *RBACManager) EnsureRoles(ctx context.Context) error {
 			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"runbooks", "notificationpolicies", "servicelevelobjectives", "incidentslas"}, Verbs: []string{"get", "list", "watch", "create", "update", "patch", "delete"}},
 		},
 		RoleSuperAdmin: {
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"*"}, Verbs: []string{"*"}},
+			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{
+				"instances", "issues", "anomalies", "aiinsights", "remediationplans",
+				"runbooks", "postmortems", "sourcerepositories",
+				"notificationpolicies", "escalationpolicies",
+				"approvalpolicies", "approvalrequests",
+				"servicelevelobjectives", "incidentslas",
+				"auditevents", "chaosexperiments", "clusterregistrations",
+			}, Verbs: []string{"get", "list", "watch", "create", "update", "patch", "delete"}},
+			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{
+				"instances/status", "issues/status", "anomalies/status",
+				"aiinsights/status", "remediationplans/status", "postmortems/status",
+				"sourcerepositories/status", "notificationpolicies/status",
+				"escalationpolicies/status", "approvalpolicies/status",
+				"approvalrequests/status", "servicelevelobjectives/status",
+				"incidentslas/status", "auditevents/status",
+				"chaosexperiments/status", "clusterregistrations/status",
+			}, Verbs: []string{"get", "update", "patch"}},
 		},
 	}
 
