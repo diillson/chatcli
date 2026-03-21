@@ -69,7 +69,7 @@ spec:
               apiKeys:
                 description: |-
                   APIKeys references a Secret containing provider API keys.
-                  Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, GITHUB_COPILOT_TOKEN, etc.
+                  Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, GITHUB_COPILOT_TOKEN, etc.
                 properties:
                   name:
                     description: Name is the Secret name.
