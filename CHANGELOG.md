@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.76.0](https://github.com/diillson/chatcli/compare/v1.75.4...v1.76.0) (2026-03-21)
+
+
+### Features
+
+* **operator:** add provider fallback chain support to Instance CRD ([#658](https://github.com/diillson/chatcli/issues/658)) ([d27942f](https://github.com/diillson/chatcli/commit/d27942f9500cab020839a500d7fc6c5c72e06c8d))
+
+
+### Bug Fixes
+
+* **operator:** use ClusterRole when watcher targets are in different namespace than Instance ([#656](https://github.com/diillson/chatcli/issues/656)) ([4b3236b](https://github.com/diillson/chatcli/commit/4b3236b572598263f4355ee7ee2a7deeae569455))
+
 ## [1.75.4](https://github.com/diillson/chatcli/compare/v1.75.3...v1.75.4) (2026-03-21)
 
 
