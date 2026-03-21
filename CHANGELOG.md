@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.76.1](https://github.com/diillson/chatcli/compare/v1.76.0...v1.76.1) (2026-03-21)
+
+
+### Bug Fixes
+
+* **operator:** PostMortem standard mode, dashboard overview, audit trail, model lowercase, sortable tables ([#659](https://github.com/diillson/chatcli/issues/659)) ([9ef5c2c](https://github.com/diillson/chatcli/commit/9ef5c2c0f6e29d7694569248bf2654cc5eab1807))
+
 ## [1.76.0](https://github.com/diillson/chatcli/compare/v1.75.4...v1.76.0) (2026-03-21)
 
 
