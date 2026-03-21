@@ -70,12 +70,72 @@ spec:
                 description: |-
                   APIKeys references a Secret containing provider API keys.
                   Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, GITHUB_COPILOT_TOKEN, etc.
+                  All providers used in the fallback chain must have their API keys in this Secret.
                 properties:
                   name:
                     description: Name is the Secret name.
                     type: string
                 required:
                 - name
+                type: object
+              fallback:
+                description: |-
+                  Fallback configures automatic provider failover.
+                  When the primary provider fails (rate limit, timeout, server error),
+                  the system tries the next provider in the chain automatically.
+                properties:
+                  cooldownBase:
+                    default: 30s
+                    description: |-
+                      CooldownBase is the initial cooldown duration after a provider fails (e.g., "30s").
+                      Subsequent failures use exponential backoff up to CooldownMax.
+                    type: string
+                  cooldownMax:
+                    default: 5m
+                    description: CooldownMax is the maximum cooldown duration (e.g.,
+                      "5m").
+                    type: string
+                  enabled:
+                    description: Enabled activates the fallback chain.
+                    type: boolean
+                  maxRetries:
+                    default: 2
+                    description: MaxRetries is the number of retries per provider
+                      before moving to next.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  providers:
+                    description: |-
+                      Providers is an ordered list of fallback providers to try.
+                      First entry is highest priority. The primary provider (spec.provider)
+                      is always tried first, then these in order.
+                    items:
+                      description: FallbackProviderEntry defines a single provider
+                        in the fallback chain.
+                      properties:
+                        model:
+                          description: Model is the LLM model to use for this provider.
+                          type: string
+                        name:
+                          description: Name is the provider name (OPENAI, CLAUDEAI,
+                            GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT).
+                          enum:
+                          - OPENAI
+                          - CLAUDEAI
+                          - GOOGLEAI
+                          - XAI
+                          - STACKSPOT
+                          - OLLAMA
+                          - COPILOT
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                required:
+                - enabled
+                - providers
                 type: object
               image:
                 description: Image defines the container image for ChatCLI.

@@ -44,8 +44,15 @@ type InstanceSpec struct {
 	// +optional
 	SecurityContext *corev1.PodSecurityContext `json:"securityContext,omitempty"`
 
+	// Fallback configures automatic provider failover.
+	// When the primary provider fails (rate limit, timeout, server error),
+	// the system tries the next provider in the chain automatically.
+	// +optional
+	Fallback *FallbackSpec `json:"fallback,omitempty"`
+
 	// APIKeys references a Secret containing provider API keys.
 	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, GITHUB_COPILOT_TOKEN, etc.
+	// All providers used in the fallback chain must have their API keys in this Secret.
 	// +optional
 	APIKeys *SecretRefSpec `json:"apiKeys,omitempty"`
 
@@ -192,6 +199,47 @@ type PluginProvisionSpec struct {
 	// PVCName references a PVC with pre-installed plugin binaries.
 	// +optional
 	PVCName string `json:"pvcName,omitempty"`
+}
+
+// FallbackSpec configures automatic provider failover.
+// When the primary provider fails, the system automatically tries the next
+// provider in the chain. Requires API keys for all providers in the Secret.
+type FallbackSpec struct {
+	// Enabled activates the fallback chain.
+	Enabled bool `json:"enabled"`
+
+	// Providers is an ordered list of fallback providers to try.
+	// First entry is highest priority. The primary provider (spec.provider)
+	// is always tried first, then these in order.
+	Providers []FallbackProviderEntry `json:"providers"`
+
+	// MaxRetries is the number of retries per provider before moving to next.
+	// +kubebuilder:default=2
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxRetries int32 `json:"maxRetries,omitempty"`
+
+	// CooldownBase is the initial cooldown duration after a provider fails (e.g., "30s").
+	// Subsequent failures use exponential backoff up to CooldownMax.
+	// +kubebuilder:default="30s"
+	// +optional
+	CooldownBase string `json:"cooldownBase,omitempty"`
+
+	// CooldownMax is the maximum cooldown duration (e.g., "5m").
+	// +kubebuilder:default="5m"
+	// +optional
+	CooldownMax string `json:"cooldownMax,omitempty"`
+}
+
+// FallbackProviderEntry defines a single provider in the fallback chain.
+type FallbackProviderEntry struct {
+	// Name is the provider name (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT).
+	// +kubebuilder:validation:Enum=OPENAI;CLAUDEAI;GOOGLEAI;XAI;STACKSPOT;OLLAMA;COPILOT
+	Name string `json:"name"`
+
+	// Model is the LLM model to use for this provider.
+	// +optional
+	Model string `json:"model,omitempty"`
 }
 
 // PersistenceSpec configures persistent storage.

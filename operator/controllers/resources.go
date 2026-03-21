@@ -530,6 +530,30 @@ func (r *InstanceReconciler) reconcileConfigMap(ctx context.Context, instance *p
 		if instance.Spec.Server.Port > 0 {
 			cm.Data["CHATCLI_SERVER_PORT"] = strconv.Itoa(int(instance.Spec.Server.Port))
 		}
+		// Fallback chain configuration
+		if instance.Spec.Fallback != nil && instance.Spec.Fallback.Enabled && len(instance.Spec.Fallback.Providers) > 0 {
+			cm.Data["CHATCLI_FALLBACK_ENABLED"] = "true"
+
+			providerNames := make([]string, 0, len(instance.Spec.Fallback.Providers))
+			for _, p := range instance.Spec.Fallback.Providers {
+				providerNames = append(providerNames, p.Name)
+				if p.Model != "" {
+					cm.Data["CHATCLI_FALLBACK_MODEL_"+p.Name] = p.Model
+				}
+			}
+			cm.Data["CHATCLI_FALLBACK_PROVIDERS"] = strings.Join(providerNames, ",")
+
+			if instance.Spec.Fallback.MaxRetries > 0 {
+				cm.Data["CHATCLI_FALLBACK_MAX_RETRIES"] = strconv.Itoa(int(instance.Spec.Fallback.MaxRetries))
+			}
+			if instance.Spec.Fallback.CooldownBase != "" {
+				cm.Data["CHATCLI_FALLBACK_COOLDOWN_BASE"] = instance.Spec.Fallback.CooldownBase
+			}
+			if instance.Spec.Fallback.CooldownMax != "" {
+				cm.Data["CHATCLI_FALLBACK_COOLDOWN_MAX"] = instance.Spec.Fallback.CooldownMax
+			}
+		}
+
 		if instance.Spec.Watcher != nil && instance.Spec.Watcher.Enabled {
 			cm.Data["CHATCLI_WATCH_DEPLOYMENT"] = instance.Spec.Watcher.Deployment
 			cm.Data["CHATCLI_WATCH_NAMESPACE"] = instance.Spec.Watcher.Namespace
