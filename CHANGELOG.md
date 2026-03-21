@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.75.2](https://github.com/diillson/chatcli/compare/v1.75.1...v1.75.2) (2026-03-21)
+
+
+### Bug Fixes
+
+* **operator:** Helm image tag, REST API field mappings, and dashboard display ([#650](https://github.com/diillson/chatcli/issues/650)) ([e15817a](https://github.com/diillson/chatcli/commit/e15817a1cb597c443ec7597d725c59a5bed1d972))
+
 ## [1.75.1](https://github.com/diillson/chatcli/compare/v1.75.0...v1.75.1) (2026-03-21)
 
 
