@@ -1318,12 +1318,9 @@ func (s *APIServer) handleGlobalClusterStatus(w http.ResponseWriter, r *http.Req
 		cluster := unstructuredToCluster(item)
 		status.Clusters = append(status.Clusters, cluster)
 
-		switch strings.ToLower(cluster.State) {
-		case "healthy", "connected", "ready", "":
+		if cluster.Connected {
 			status.HealthyClusters++
-		case "degraded", "warning":
-			status.DegradedClusters++
-		default:
+		} else {
 			status.OfflineClusters++
 		}
 	}
@@ -1377,13 +1374,13 @@ func (s *APIServer) handleListAuditEvents(w http.ResponseWriter, r *http.Request
 	events := make([]AuditEventItem, 0, len(items))
 	for _, item := range items {
 		ae := unstructuredToAuditEvent(item)
-		if typeFilter != "" && ae.Type != typeFilter {
+		if typeFilter != "" && ae.EventType != typeFilter {
 			continue
 		}
 		if severityFilter != "" && ae.Severity != severityFilter {
 			continue
 		}
-		if resourceFilter != "" && ae.Resource != resourceFilter {
+		if resourceFilter != "" && ae.ResourceName != resourceFilter {
 			continue
 		}
 		if ae.Timestamp != "" {
@@ -1427,13 +1424,13 @@ func (s *APIServer) handleExportAuditEvents(w http.ResponseWriter, r *http.Reque
 	events := make([]AuditEventItem, 0, len(items))
 	for _, item := range items {
 		ae := unstructuredToAuditEvent(item)
-		if typeFilter != "" && ae.Type != typeFilter {
+		if typeFilter != "" && ae.EventType != typeFilter {
 			continue
 		}
 		if severityFilter != "" && ae.Severity != severityFilter {
 			continue
 		}
-		if resourceFilter != "" && ae.Resource != resourceFilter {
+		if resourceFilter != "" && ae.ResourceName != resourceFilter {
 			continue
 		}
 		if ae.Timestamp != "" {
@@ -1708,17 +1705,30 @@ func unstructuredToSLO(obj map[string]interface{}) SLOItem {
 	}
 
 	if spec != nil {
-		slo.Service, _ = spec["service"].(string)
-		slo.SLI, _ = spec["sli"].(string)
-		slo.Target = toFloat64(spec["target"])
-		slo.Window, _ = spec["window"].(string)
+		slo.Service, _ = spec["serviceName"].(string)
+
+		// indicator.type → SLI
+		if indicator, ok := spec["indicator"].(map[string]interface{}); ok {
+			slo.SLI, _ = indicator["type"].(string)
+		}
+
+		// target.percentage and target.window (nested)
+		if target, ok := spec["target"].(map[string]interface{}); ok {
+			slo.Target = toFloat64(target["percentage"])
+			slo.Window, _ = target["window"].(string)
+		}
 	}
 
 	if status != nil {
-		slo.CurrentValue = toFloat64(status["currentValue"])
+		// currentValue is a fraction (0.0-1.0) — convert to percentage for display
+		slo.CurrentValue = toFloat64(status["currentValue"]) * 100
+
 		slo.ErrorBudgetTotal = toFloat64(status["errorBudgetTotal"])
 		slo.ErrorBudgetUsed = toFloat64(status["errorBudgetUsed"])
-		slo.ErrorBudgetRemaining = toFloat64(status["errorBudgetRemaining"])
+
+		// errorBudgetRemaining is a fraction (0.0-1.0) — convert to percentage
+		slo.ErrorBudgetRemaining = toFloat64(status["errorBudgetRemaining"]) * 100
+
 		slo.State, _ = status["state"].(string)
 	}
 
@@ -1738,10 +1748,20 @@ func unstructuredToApproval(obj map[string]interface{}) ApprovalItem {
 	}
 
 	if spec != nil {
-		ai.Resource, _ = spec["resource"].(string)
-		ai.Action, _ = spec["action"].(string)
-		ai.Reason, _ = spec["reason"].(string)
-		ai.RequestedBy, _ = spec["requestedBy"].(string)
+		ai.RequestedBy, _ = spec["requester"].(string)
+		ai.Reason, _ = spec["policyRef"].(string)
+
+		// Extract resource from issueRef
+		if issueRef, ok := spec["issueRef"].(map[string]interface{}); ok {
+			ai.Resource, _ = issueRef["name"].(string)
+		}
+
+		// Extract action from first requestedAction
+		if actions, ok := spec["requestedActions"].([]interface{}); ok && len(actions) > 0 {
+			if action, ok := actions[0].(map[string]interface{}); ok {
+				ai.Action, _ = action["type"].(string)
+			}
+		}
 	}
 
 	if status != nil {
@@ -1773,22 +1793,22 @@ func unstructuredToCluster(obj map[string]interface{}) ClusterItem {
 	}
 
 	if spec != nil {
+		cluster.DisplayName, _ = spec["displayName"].(string)
 		cluster.Region, _ = spec["region"].(string)
-		cluster.Provider, _ = spec["provider"].(string)
 		cluster.Environment, _ = spec["environment"].(string)
-		cluster.APIEndpoint, _ = spec["apiEndpoint"].(string)
+		cluster.Tier, _ = spec["tier"].(string)
 	}
 
 	if status != nil {
-		cluster.State, _ = status["state"].(string)
-		cluster.Version, _ = status["version"].(string)
+		cluster.Connected, _ = status["connected"].(bool)
+		cluster.Version, _ = status["kubernetesVersion"].(string)
 		cluster.NodeCount = toInt64(status["nodeCount"])
-		if lh, ok := status["lastHeartbeat"].(string); ok {
-			cluster.LastHeartbeat = &lh
+		cluster.NamespaceCount = toInt64(status["namespaceCount"])
+		cluster.ActiveIssues = toInt64(status["activeIssues"])
+		cluster.ActiveRemediations = toInt64(status["activeRemediations"])
+		if lh, ok := status["lastHealthCheck"].(string); ok {
+			cluster.LastHealthCheck = &lh
 		}
-	}
-	if cluster.State == "" {
-		cluster.State = "Unknown"
 	}
 
 	return cluster
@@ -1805,15 +1825,34 @@ func unstructuredToAuditEvent(obj map[string]interface{}) AuditEventItem {
 	}
 
 	if spec != nil {
-		ae.Type, _ = spec["type"].(string)
+		ae.EventType, _ = spec["eventType"].(string)
 		ae.Severity, _ = spec["severity"].(string)
-		ae.Resource, _ = spec["resource"].(string)
-		ae.ResourceName, _ = spec["resourceName"].(string)
-		ae.ResourceNamespace, _ = spec["resourceNamespace"].(string)
-		ae.Actor, _ = spec["actor"].(string)
-		ae.Action, _ = spec["action"].(string)
-		ae.Detail, _ = spec["detail"].(string)
+		ae.CorrelationID, _ = spec["correlationId"].(string)
 		ae.Timestamp, _ = spec["timestamp"].(string)
+
+		// actor is a nested struct {type, name, controller}
+		if actor, ok := spec["actor"].(map[string]interface{}); ok {
+			ae.ActorType, _ = actor["type"].(string)
+			ae.ActorName, _ = actor["name"].(string)
+		}
+
+		// resource is a nested struct {kind, name, namespace}
+		if resource, ok := spec["resource"].(map[string]interface{}); ok {
+			ae.ResourceKind, _ = resource["kind"].(string)
+			ae.ResourceName, _ = resource["name"].(string)
+			ae.ResourceNamespace, _ = resource["namespace"].(string)
+		}
+
+		// details is a map — flatten first entry as detail for display
+		if details, ok := spec["details"].(map[string]interface{}); ok {
+			var parts []string
+			for k, v := range details {
+				parts = append(parts, k+"="+fmt.Sprintf("%v", v))
+			}
+			if len(parts) > 0 {
+				ae.Detail = strings.Join(parts, "; ")
+			}
+		}
 	}
 
 	if ae.Timestamp == "" {

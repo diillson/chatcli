@@ -1068,7 +1068,7 @@ async function loadSLOs() {
     const items = data.items || [];
     if (items.length === 0) { showEmpty(cardsEl, 'No SLOs configured'); showEmpty(alertsEl, 'No alerts'); return; }
     cardsEl.innerHTML = items.map(slo => {
-      const budgetPct = slo.errorBudgetTotal > 0 ? ((slo.errorBudgetRemaining / slo.errorBudgetTotal) * 100) : 100;
+      const budgetPct = slo.errorBudgetRemaining || 100;
       const budgetClass = budgetPct > 50 ? 'gauge-ok' : budgetPct > 20 ? 'gauge-warn' : 'gauge-danger';
       const currentPct = slo.currentValue || 0;
       const target = slo.target || 99.9;
@@ -1116,8 +1116,8 @@ async function loadSLOs() {
             <td>${escapeHtml(s.service || s.name)}</td>
             <td style="color:var(--sev-critical)">${(s.currentValue || 0).toFixed(2)}%</td>
             <td>${(s.target || 99.9).toFixed(2)}%</td>
-            <td>${s.errorBudgetTotal > 0 ? ((s.errorBudgetRemaining / s.errorBudgetTotal) * 100).toFixed(1) + '%' : '-'}</td>
-            <td>${stateBadge(s.state || 'Firing')}</td>
+            <td>${(s.errorBudgetRemaining || 0).toFixed(1)}%</td>
+            <td>${stateBadge(s.state || (s.currentValue >= s.target ? 'Healthy' : 'Firing'))}</td>
           </tr>`).join('')}
         </tbody>
       </table>`;
@@ -1358,19 +1358,22 @@ async function loadClusters() {
     const clusters = status.clusters || [];
     if (clusters.length === 0) { showEmpty(cardsEl, 'No clusters registered'); return; }
     cardsEl.innerHTML = clusters.map(c => {
-      const stateClass = getClusterStateClass(c.state);
+      const connState = c.connected ? 'Healthy' : 'Offline';
       return `
         <div class="cluster-card">
           <div class="cluster-card-header">
-            <span class="cluster-name">${escapeHtml(c.name)}</span>
-            ${stateBadge(c.state)}
+            <span class="cluster-name">${escapeHtml(c.displayName || c.name)}</span>
+            ${stateBadge(connState)}
           </div>
           <div class="cluster-detail"><b>Region:</b> ${escapeHtml(c.region || '-')}</div>
-          <div class="cluster-detail"><b>Provider:</b> ${escapeHtml(c.provider || '-')}</div>
           <div class="cluster-detail"><b>Environment:</b> ${escapeHtml(c.environment || '-')}</div>
+          <div class="cluster-detail"><b>Tier:</b> ${escapeHtml(c.tier || '-')}</div>
           <div class="cluster-detail"><b>Nodes:</b> ${c.nodeCount || '-'}</div>
+          <div class="cluster-detail"><b>Namespaces:</b> ${c.namespaceCount || '-'}</div>
           <div class="cluster-detail"><b>Version:</b> ${escapeHtml(c.version || '-')}</div>
-          ${c.lastHeartbeat ? `<div class="cluster-detail"><b>Last Heartbeat:</b> ${timeAgo(c.lastHeartbeat)}</div>` : ''}
+          <div class="cluster-detail"><b>Active Issues:</b> ${c.activeIssues || 0}</div>
+          <div class="cluster-detail"><b>Active Remediations:</b> ${c.activeRemediations || 0}</div>
+          ${c.lastHealthCheck ? `<div class="cluster-detail"><b>Last Health Check:</b> ${timeAgo(c.lastHealthCheck)}</div>` : ''}
         </div>
       `;
     }).join('');
@@ -1409,10 +1412,11 @@ async function loadAudit() {
       items = items.filter(i =>
         (i.name || '').toLowerCase().includes(s) ||
         (i.detail || '').toLowerCase().includes(s) ||
-        (i.resource || '').toLowerCase().includes(s) ||
+        (i.eventType || '').toLowerCase().includes(s) ||
         (i.resourceName || '').toLowerCase().includes(s) ||
-        (i.actor || '').toLowerCase().includes(s) ||
-        (i.action || '').toLowerCase().includes(s)
+        (i.resourceKind || '').toLowerCase().includes(s) ||
+        (i.actorName || '').toLowerCase().includes(s) ||
+        (i.correlationId || '').toLowerCase().includes(s)
       );
     }
 
@@ -1420,16 +1424,16 @@ async function loadAudit() {
     if (items.length === 0) { showEmpty(el, 'No audit events found'); return; }
     el.innerHTML = `<table>
       <thead><tr>
-        <th>Timestamp</th><th>Type</th><th>Severity</th><th>Actor</th><th>Action</th><th>Resource</th><th>Detail</th>
+        <th>Timestamp</th><th>Event Type</th><th>Severity</th><th>Actor</th><th>Resource</th><th>Correlation</th><th>Detail</th>
       </tr></thead>
       <tbody>
         ${items.map(i => `<tr>
           <td style="white-space:nowrap">${i.timestamp ? new Date(i.timestamp).toLocaleString() : timeAgo(i.creationTimestamp)}</td>
-          <td>${escapeHtml(i.type || '-')}</td>
+          <td>${escapeHtml(i.eventType || '-')}</td>
           <td>${i.severity ? severityBadge(i.severity) : '-'}</td>
-          <td>${escapeHtml(i.actor || '-')}</td>
-          <td>${escapeHtml(i.action || '-')}</td>
-          <td>${escapeHtml(i.resource || '-')}${i.resourceName ? '/' + escapeHtml(i.resourceName) : ''}</td>
+          <td>${escapeHtml(i.actorName || '-')}${i.actorType ? ' <small>(' + escapeHtml(i.actorType) + ')</small>' : ''}</td>
+          <td>${escapeHtml(i.resourceKind || '-')}${i.resourceName ? '/' + escapeHtml(i.resourceName) : ''}${i.resourceNamespace ? ' <small>(' + escapeHtml(i.resourceNamespace) + ')</small>' : ''}</td>
+          <td>${escapeHtml(i.correlationId || '-')}</td>
           <td style="max-width:300px; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(i.detail || '')}">${escapeHtml(i.detail || '-')}</td>
         </tr>`).join('')}
       </tbody>

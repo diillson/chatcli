@@ -4,7 +4,9 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/diillson/chatcli
-  tag: latest
+  # tag defaults to Chart.appVersion when empty — ensures version consistency.
+  # Override with --set image.tag=custom if needed.
+  tag: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
