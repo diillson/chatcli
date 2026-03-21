@@ -59,6 +59,34 @@ body {
 }
 .logo span { color: var(--text); font-weight: 400; }
 .header-right { display: flex; align-items: center; gap: 1rem; }
+.time-range-picker { position: relative; }
+.time-range-btn {
+  background: var(--bg-card); border: 1px solid var(--border); color: var(--text);
+  padding: 0.4rem 0.75rem; border-radius: var(--radius); cursor: pointer; font-size: 0.8rem;
+  transition: border-color 0.2s;
+}
+.time-range-btn:hover { border-color: var(--highlight); }
+.time-dropdown {
+  position: absolute; top: 100%; right: 0; margin-top: 0.5rem; z-index: 100;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); min-width: 240px; padding: 0.5rem;
+}
+.time-presets { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.25rem; margin-bottom: 0.5rem; }
+.time-presets button {
+  background: var(--accent); border: none; color: var(--text); padding: 0.35rem 0.5rem;
+  border-radius: 4px; cursor: pointer; font-size: 0.75rem; transition: background 0.2s;
+}
+.time-presets button:hover { background: var(--highlight); }
+.time-custom { border-top: 1px solid var(--border); padding-top: 0.5rem; }
+.time-custom label { display: block; font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.3rem; }
+.time-custom input {
+  width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  padding: 0.3rem; border-radius: 4px; font-size: 0.75rem; margin-bottom: 0.3rem;
+}
+.time-custom button {
+  width: 100%; background: var(--highlight); border: none; color: white; padding: 0.35rem;
+  border-radius: 4px; cursor: pointer; font-size: 0.75rem; margin-top: 0.25rem;
+}
 .refresh-indicator {
   display: flex;
   align-items: center;
@@ -488,6 +516,26 @@ tr.expandable { cursor: pointer; }
     <div class="logo">ChatCLI <span>AIOps</span></div>
   </div>
   <div class="header-right">
+    <div class="time-range-picker" id="timeRangePicker">
+      <button class="time-range-btn" onclick="toggleTimeDropdown()" title="Time range filter">
+        <span id="timeRangeLabel">All time</span> ▾
+      </button>
+      <div class="time-dropdown" id="timeDropdown" style="display:none">
+        <div class="time-presets">
+          <button onclick="setTimeRange('1h')">Last 1h</button>
+          <button onclick="setTimeRange('6h')">Last 6h</button>
+          <button onclick="setTimeRange('24h')">Last 24h</button>
+          <button onclick="setTimeRange('7d')">Last 7d</button>
+          <button onclick="setTimeRange('30d')">Last 30d</button>
+          <button onclick="setTimeRange('all')">All time</button>
+        </div>
+        <div class="time-custom">
+          <label>From <input type="datetime-local" id="timeFrom"></label>
+          <label>To <input type="datetime-local" id="timeTo"></label>
+          <button onclick="applyCustomRange()">Apply</button>
+        </div>
+      </div>
+    </div>
     <div class="refresh-indicator">
       <div class="refresh-dot" id="refreshDot"></div>
       <span id="refreshTimer">Auto-refresh: 30s</span>
@@ -669,6 +717,105 @@ async function apiPost(path, body) {
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
 
+// Sortable table columns — click header to sort ascending, click again for descending
+function makeSortable(tableEl) {
+  if (!tableEl) return;
+  const headers = tableEl.querySelectorAll('thead th');
+  headers.forEach((th, colIdx) => {
+    if (!th.textContent.trim()) return;
+    th.style.cursor = 'pointer';
+    th.style.userSelect = 'none';
+    th.title = 'Click to sort';
+    th.addEventListener('click', () => {
+      const tbody = tableEl.querySelector('tbody');
+      if (!tbody) return;
+      const rows = Array.from(tbody.rows);
+      const asc = th.dataset.sortDir !== 'asc';
+      th.dataset.sortDir = asc ? 'asc' : 'desc';
+      // Clear other headers
+      headers.forEach(h => { if (h !== th) delete h.dataset.sortDir; });
+      rows.sort((a, b) => {
+        const av = (a.cells[colIdx]?.textContent || '').trim().toLowerCase();
+        const bv = (b.cells[colIdx]?.textContent || '').trim().toLowerCase();
+        const an = parseFloat(av), bn = parseFloat(bv);
+        if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+      rows.forEach(r => tbody.appendChild(r));
+      // Update arrow indicator
+      headers.forEach(h => h.textContent = h.textContent.replace(/ [▲▼]$/, ''));
+      th.textContent += asc ? ' ▲' : ' ▼';
+    });
+  });
+}
+
+// ── Time Range Picker ──────────────────────────────────────────────────
+let globalTimeRange = { from: null, to: null, label: 'All time' };
+
+function toggleTimeDropdown() {
+  const dd = $('#timeDropdown');
+  dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  const picker = document.getElementById('timeRangePicker');
+  if (picker && !picker.contains(e.target)) {
+    document.getElementById('timeDropdown').style.display = 'none';
+  }
+});
+
+function setTimeRange(preset) {
+  const now = new Date();
+  let from = null;
+  let label = 'All time';
+
+  switch (preset) {
+    case '1h':  from = new Date(now - 3600000); label = 'Last 1h'; break;
+    case '6h':  from = new Date(now - 21600000); label = 'Last 6h'; break;
+    case '24h': from = new Date(now - 86400000); label = 'Last 24h'; break;
+    case '7d':  from = new Date(now - 604800000); label = 'Last 7d'; break;
+    case '30d': from = new Date(now - 2592000000); label = 'Last 30d'; break;
+    case 'all': from = null; label = 'All time'; break;
+  }
+
+  globalTimeRange = { from, to: preset === 'all' ? null : now, label };
+  $('#timeRangeLabel').textContent = label;
+  $('#timeDropdown').style.display = 'none';
+  refreshCurrentTab();
+}
+
+function applyCustomRange() {
+  const fromInput = $('#timeFrom').value;
+  const toInput = $('#timeTo').value;
+  if (!fromInput) return;
+
+  const from = new Date(fromInput);
+  const to = toInput ? new Date(toInput) : new Date();
+  const label = `${from.toLocaleDateString()} – ${to.toLocaleDateString()}`;
+
+  globalTimeRange = { from, to, label };
+  $('#timeRangeLabel').textContent = label;
+  $('#timeDropdown').style.display = 'none';
+  refreshCurrentTab();
+}
+
+function getTimeRangeQuery() {
+  let q = '';
+  if (globalTimeRange.from) {
+    q += '&from=' + encodeURIComponent(globalTimeRange.from.toISOString());
+  }
+  if (globalTimeRange.to) {
+    q += '&to=' + encodeURIComponent(globalTimeRange.to.toISOString());
+  }
+  return q;
+}
+
+function refreshCurrentTab() {
+  const activeTab = document.querySelector('.tab-bar .tab.active');
+  if (activeTab) activeTab.click();
+}
+
 function escapeHtml(str) {
   if (!str) return '';
   const d = document.createElement('div');
@@ -801,15 +948,16 @@ async function loadOverview() {
 async function loadOverviewStats() {
   const el = $('#overviewStats');
   try {
-    const data = await apiFetch('/analytics/summary');
+    const data = await apiFetch('/analytics/summary?' + getTimeRangeQuery());
     const s = data.spec || {};
+    const successRate = s.totalRemediations > 0 ? (s.successfulRemediations / s.totalRemediations) : 0;
     const cards = [
-      { label: 'Active Issues', value: s.activeIssues ?? 0, color: 'var(--sev-critical)' },
-      { label: 'Resolved (24h)', value: s.resolvedLast24h ?? 0, color: 'var(--sev-low)' },
-      { label: 'MTTR', value: formatDuration(s.mttr), color: 'var(--success)' },
-      { label: 'Success Rate', value: ((s.successRate ?? 0) * 100).toFixed(1) + '%', color: 'var(--sev-low)' },
-      { label: 'SLO Budget', value: ((s.sloBudgetRemaining ?? 0) * 100).toFixed(1) + '%', color: 'var(--sev-medium)' },
-      { label: 'Active Clusters', value: s.activeClusters ?? 0, color: 'var(--success)' },
+      { label: 'Active Issues', value: s.openIssues ?? 0, color: 'var(--sev-critical)' },
+      { label: 'Resolved', value: s.resolvedIssues ?? 0, color: 'var(--sev-low)' },
+      { label: 'Remediations', value: `${s.successfulRemediations ?? 0}/${s.totalRemediations ?? 0}`, color: 'var(--success)' },
+      { label: 'Success Rate', value: (successRate * 100).toFixed(1) + '%', color: 'var(--sev-low)' },
+      { label: 'PostMortems', value: s.totalPostMortems ?? 0, color: 'var(--sev-medium)' },
+      { label: 'Pending Approvals', value: s.pendingApprovals ?? 0, color: 'var(--warning)' },
     ];
     el.innerHTML = cards.map(c => `
       <div class="stat-card">
@@ -853,7 +1001,7 @@ function formatDuration(val) {
 async function loadSeverityPie() {
   const el = $('#severityPie');
   try {
-    const data = await apiFetch('/incidents?pageSize=100');
+    const data = await apiFetch('/incidents?pageSize=100' + getTimeRangeQuery());
     const items = data.items || [];
     const counts = { critical: 0, high: 0, medium: 0, low: 0 };
     items.forEach(i => {
@@ -897,7 +1045,7 @@ async function loadSeverityPie() {
 async function loadRecentIncidents() {
   const el = $('#recentIncidentsTable');
   try {
-    const data = await apiFetch('/incidents?pageSize=20');
+    const data = await apiFetch('/incidents?pageSize=20' + getTimeRangeQuery());
     const items = data.items || [];
     if (items.length === 0) { showEmpty(el, 'No recent incidents'); return; }
     el.innerHTML = `
@@ -925,7 +1073,7 @@ async function loadRecentIncidents() {
 async function loadRemediationTimeline() {
   const el = $('#remediationTimeline');
   try {
-    const data = await apiFetch('/incidents?pageSize=10');
+    const data = await apiFetch('/incidents?pageSize=10' + getTimeRangeQuery());
     const items = (data.items || []).filter(i => i.remediationAttempts > 0).slice(0, 10);
     if (items.length === 0) {
       showEmpty(el, 'No remediation activity');
@@ -960,8 +1108,8 @@ async function loadIncidents() {
   if (state) q += '&state=' + encodeURIComponent(state);
   if (ns) q += '&namespace=' + encodeURIComponent(ns);
   try {
-    const data = await apiFetch('/incidents' + q);
-    const items = data.items || [];
+    const data = await apiFetch('/incidents' + q + getTimeRangeQuery());
+    const items = (data.items || []).sort((a, b) => (b.creationTimestamp || '').localeCompare(a.creationTimestamp || ''));
     const total = (data.metadata || {}).totalCount || items.length;
     $('#incidentCount').textContent = `${total} incident(s)`;
     if (items.length === 0) { showEmpty(el, 'No incidents match the filters'); return; }
@@ -998,6 +1146,7 @@ async function loadIncidents() {
         tbody.appendChild(expandRow);
       }
     });
+    makeSortable(el.querySelector('table'));
   } catch (e) {
     showError(el, 'Failed to load incidents: ' + e.message, 'loadIncidents()');
   }
@@ -1064,8 +1213,8 @@ async function loadSLOs() {
   const alertsEl = $('#sloAlerts');
   showLoading(cardsEl);
   try {
-    const data = await apiFetch('/slos?pageSize=100');
-    const items = data.items || [];
+    const data = await apiFetch('/slos?pageSize=100' + getTimeRangeQuery());
+    const items = (data.items || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     if (items.length === 0) { showEmpty(cardsEl, 'No SLOs configured'); showEmpty(alertsEl, 'No alerts'); return; }
     cardsEl.innerHTML = items.map(slo => {
       const budgetPct = slo.errorBudgetRemaining || 100;
@@ -1152,8 +1301,8 @@ async function loadApprovals() {
   let q = '?pageSize=100';
   if (state) q += '&state=' + encodeURIComponent(state);
   try {
-    const data = await apiFetch('/approvals' + q);
-    const items = data.items || [];
+    const data = await apiFetch('/approvals' + q + getTimeRangeQuery());
+    const items = (data.items || []).sort((a, b) => (b.creationTimestamp || '').localeCompare(a.creationTimestamp || ''));
 
     // Update badge
     const pendingCount = items.filter(i => i.state === 'Pending').length;
@@ -1266,6 +1415,7 @@ async function loadPostMortems() {
         tbody.appendChild(buildPMExpandRow(item));
       }
     });
+    makeSortable(el.querySelector('table'));
   } catch (e) {
     showError(el, 'Failed to load post-mortems: ' + e.message, 'loadPostMortems()');
   }
@@ -1402,8 +1552,8 @@ async function loadAudit() {
   if (type) q += '&type=' + encodeURIComponent(type);
   if (sev) q += '&severity=' + encodeURIComponent(sev);
   try {
-    const data = await apiFetch('/audit' + q);
-    let items = data.items || [];
+    const data = await apiFetch('/audit' + q + getTimeRangeQuery());
+    let items = (data.items || []).sort((a, b) => (b.timestamp || b.creationTimestamp || '').localeCompare(a.timestamp || a.creationTimestamp || ''));
     const total = (data.metadata || {}).totalCount || items.length;
 
     // Client-side search filter
@@ -1438,6 +1588,7 @@ async function loadAudit() {
         </tr>`).join('')}
       </tbody>
     </table>`;
+    makeSortable(el.querySelector('table'));
   } catch (e) {
     showError(el, 'Failed to load audit events: ' + e.message, 'loadAudit()');
   }

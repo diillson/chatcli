@@ -9,8 +9,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// computeSummary calculates an overview of all AIOps metrics.
-func (s *APIServer) computeSummary(ctx context.Context) (*AnalyticsSummary, error) {
+// computeSummary calculates an overview of all AIOps metrics, optionally filtered by time range.
+func (s *APIServer) computeSummary(ctx context.Context, tr timeRangeParams) (*AnalyticsSummary, error) {
 	summary := &AnalyticsSummary{
 		SeverityBreakdown: make(map[string]int),
 	}
@@ -21,9 +21,17 @@ func (s *APIServer) computeSummary(ctx context.Context) (*AnalyticsSummary, erro
 		return nil, err
 	}
 
-	summary.TotalIssues = len(issues.Items)
-	var totalRisk int64
+	// Filter by time range
+	var filtered []v1alpha1.Issue
 	for _, iss := range issues.Items {
+		if inTimeRange(iss.CreationTimestamp.Time, tr) {
+			filtered = append(filtered, iss)
+		}
+	}
+
+	summary.TotalIssues = len(filtered)
+	var totalRisk int64
+	for _, iss := range filtered {
 		summary.SeverityBreakdown[string(iss.Spec.Severity)]++
 		totalRisk += int64(iss.Spec.RiskScore)
 
@@ -50,8 +58,14 @@ func (s *APIServer) computeSummary(ctx context.Context) (*AnalyticsSummary, erro
 	if err := s.client.List(ctx, &remediations); err != nil {
 		return nil, err
 	}
-	summary.TotalRemediations = len(remediations.Items)
+	var filteredPlans []v1alpha1.RemediationPlan
 	for _, rp := range remediations.Items {
+		if inTimeRange(rp.CreationTimestamp.Time, tr) {
+			filteredPlans = append(filteredPlans, rp)
+		}
+	}
+	summary.TotalRemediations = len(filteredPlans)
+	for _, rp := range filteredPlans {
 		switch rp.Status.State {
 		case v1alpha1.RemediationStateCompleted:
 			summary.SuccessfulRemediations++
@@ -65,7 +79,13 @@ func (s *APIServer) computeSummary(ctx context.Context) (*AnalyticsSummary, erro
 	if err := s.client.List(ctx, &postmortems); err != nil {
 		return nil, err
 	}
-	summary.TotalPostMortems = len(postmortems.Items)
+	var filteredPMs int
+	for _, pm := range postmortems.Items {
+		if inTimeRange(pm.CreationTimestamp.Time, tr) {
+			filteredPMs++
+		}
+	}
+	summary.TotalPostMortems = filteredPMs
 
 	// Fetch runbooks.
 	var runbooks v1alpha1.RunbookList

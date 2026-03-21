@@ -60,6 +60,7 @@ type RemediationReconciler struct {
 	Scheme         *runtime.Scheme
 	ServerClient   AgenticStepCaller
 	ContextBuilder *KubernetesContextBuilder
+	AuditRecorder  *AuditRecorder
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=remediationplans,verbs=get;list;watch;create;update;patch;delete
@@ -119,6 +120,14 @@ func (r *RemediationReconciler) handlePending(ctx context.Context, plan *platfor
 
 	if err := r.Status().Update(ctx, plan); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// Record audit event for remediation start
+	if r.AuditRecorder != nil {
+		var issue platformv1alpha1.Issue
+		if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &issue); err == nil {
+			_ = r.AuditRecorder.RecordRemediationStarted(ctx, plan, &issue)
+		}
 	}
 
 	return ctrl.Result{Requeue: true}, nil
@@ -325,6 +334,14 @@ func (r *RemediationReconciler) handleVerifying(ctx context.Context, plan *platf
 
 		if plan.Status.StartedAt != nil {
 			remediationDuration.Observe(now.Sub(plan.Status.StartedAt.Time).Seconds())
+		}
+
+		// Record audit event for remediation completion
+		if r.AuditRecorder != nil {
+			var iss platformv1alpha1.Issue
+			if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &iss); err == nil {
+				_ = r.AuditRecorder.RecordRemediationCompleted(ctx, plan, &iss)
+			}
 		}
 
 		log.Info("Verification passed, resource healthy", "plan", plan.Name, "kind", resource.Kind)

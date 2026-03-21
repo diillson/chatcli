@@ -40,7 +40,7 @@ func NewXAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, bac
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 	return &XAIClient{
 		apiKey:      apiKey,
-		model:       model,
+		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
 		maxAttempts: maxAttempts,

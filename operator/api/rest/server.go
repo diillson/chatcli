@@ -1139,7 +1139,7 @@ func (s *APIServer) routeAnalytics(w http.ResponseWriter, r *http.Request, rest 
 }
 
 func (s *APIServer) handleAnalyticsSummary(w http.ResponseWriter, r *http.Request) {
-	summary, err := s.computeSummary(r.Context())
+	summary, err := s.computeSummary(r.Context(), parseTimeRange(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to compute summary: "+err.Error())
 		return

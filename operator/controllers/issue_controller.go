@@ -82,6 +82,7 @@ type IssueReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
 	DedupInvalidator DedupInvalidator // optional: watcher bridge for dedup invalidation
+	AuditRecorder    *AuditRecorder   // optional: records audit trail events
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=issues,verbs=get;list;watch;create;update;patch;delete
@@ -195,6 +196,13 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 	})
 
 	issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateAnalyzing)).Inc()
+
+	// Record audit event
+	if r.AuditRecorder != nil {
+		if err := r.AuditRecorder.RecordIssueCreated(ctx, issue); err != nil {
+			log.Error(err, "Failed to record audit event for created issue")
+		}
+	}
 
 	if err := r.Status().Update(ctx, issue); err != nil {
 		return ctrl.Result{}, err
@@ -349,6 +357,13 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 			}
 		}
 
+		// Record audit event
+		if r.AuditRecorder != nil {
+			if err := r.AuditRecorder.RecordIssueResolved(ctx, issue); err != nil {
+				log.Error(err, "Failed to record audit event for resolved issue")
+			}
+		}
+
 		// Refresh dedup cooldown so stale alerts don't immediately re-trigger
 		r.refreshDedup(issue)
 
@@ -400,6 +415,13 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 		})
 
 		issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateEscalated)).Inc()
+
+		// Record audit event
+		if r.AuditRecorder != nil {
+			if err := r.AuditRecorder.RecordIssueEscalated(ctx, issue); err != nil {
+				log.Error(err, "Failed to record audit event for escalated issue")
+			}
+		}
 
 		// Refresh dedup cooldown so stale alerts don't immediately re-trigger
 		r.refreshDedup(issue)
@@ -823,45 +845,83 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 			Detail:    issue.Spec.Description,
 		})
 	}
-	for _, step := range plan.Spec.AgenticHistory {
-		evType := "action_executed"
-		if strings.HasPrefix(step.Observation, "FAILED:") {
-			evType = "action_failed"
+
+	// Build action records — from agentic history or standard plan actions
+	var actions []platformv1alpha1.ActionRecord
+
+	if len(plan.Spec.AgenticHistory) > 0 {
+		// Agentic mode: build from step history
+		for _, step := range plan.Spec.AgenticHistory {
+			evType := "action_executed"
+			if strings.HasPrefix(step.Observation, "FAILED:") {
+				evType = "action_failed"
+			}
+			actionStr := "(observation)"
+			if step.Action != nil {
+				actionStr = string(step.Action.Type)
+			}
+			timeline = append(timeline, platformv1alpha1.TimelineEvent{
+				Timestamp: step.Timestamp,
+				Type:      evType,
+				Detail:    fmt.Sprintf("Step %d: %s — %s", step.StepNumber, actionStr, step.Observation),
+			})
+			if step.Action != nil {
+				result := "success"
+				if strings.HasPrefix(step.Observation, "FAILED:") {
+					result = "failed"
+				}
+				actions = append(actions, platformv1alpha1.ActionRecord{
+					Action:    string(step.Action.Type),
+					Params:    step.Action.Params,
+					Result:    result,
+					Detail:    step.Observation,
+					Timestamp: step.Timestamp,
+				})
+			}
 		}
-		actionStr := "(observation)"
-		if step.Action != nil {
-			actionStr = string(step.Action.Type)
+	} else {
+		// Standard mode: build from plan actions + checkpoints/evidence
+		for i, action := range plan.Spec.Actions {
+			result := "success"
+			detail := fmt.Sprintf("Action %s executed", action.Type)
+
+			// Check checkpoint for this action
+			for _, cp := range plan.Status.ActionCheckpoints {
+				if cp.ActionIndex == int32(i) {
+					if !cp.Success {
+						result = "failed"
+						detail = fmt.Sprintf("Action %s failed", action.Type)
+					}
+					break
+				}
+			}
+
+			ts := now
+			if plan.Status.StartedAt != nil {
+				ts = *plan.Status.StartedAt
+			}
+
+			actions = append(actions, platformv1alpha1.ActionRecord{
+				Action:    string(action.Type),
+				Params:    action.Params,
+				Result:    result,
+				Detail:    detail,
+				Timestamp: ts,
+			})
+
+			timeline = append(timeline, platformv1alpha1.TimelineEvent{
+				Timestamp: ts,
+				Type:      "action_executed",
+				Detail:    fmt.Sprintf("%s: %s", action.Type, detail),
+			})
 		}
-		timeline = append(timeline, platformv1alpha1.TimelineEvent{
-			Timestamp: step.Timestamp,
-			Type:      evType,
-			Detail:    fmt.Sprintf("Step %d: %s — %s", step.StepNumber, actionStr, step.Observation),
-		})
 	}
+
 	timeline = append(timeline, platformv1alpha1.TimelineEvent{
 		Timestamp: now,
 		Type:      "resolved",
 		Detail:    plan.Status.Result,
 	})
-
-	// Build action records
-	var actions []platformv1alpha1.ActionRecord
-	for _, step := range plan.Spec.AgenticHistory {
-		if step.Action == nil {
-			continue
-		}
-		result := "success"
-		if strings.HasPrefix(step.Observation, "FAILED:") {
-			result = "failed"
-		}
-		actions = append(actions, platformv1alpha1.ActionRecord{
-			Action:    string(step.Action.Type),
-			Params:    step.Action.Params,
-			Result:    result,
-			Detail:    step.Observation,
-			Timestamp: step.Timestamp,
-		})
-	}
 
 	// Duration
 	duration := ""
@@ -869,7 +929,7 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 		duration = now.Sub(issue.Status.DetectedAt.Time).Round(time.Second).String()
 	}
 
-	// Read postmortem data from plan annotations
+	// Read postmortem data — from plan annotations (agentic) or AIInsight (standard)
 	summary := plan.Annotations["platform.chatcli.io/postmortem-summary"]
 	rootCause := plan.Annotations["platform.chatcli.io/root-cause"]
 	impact := plan.Annotations["platform.chatcli.io/impact"]
@@ -882,6 +942,32 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 	var preventionActions []string
 	if raw := plan.Annotations["platform.chatcli.io/prevention-actions"]; raw != "" {
 		preventionActions = strings.Split(raw, "\n---\n")
+	}
+
+	// For standard mode: if annotations are empty, populate from AIInsight
+	if summary == "" || rootCause == "" {
+		insightName := issue.Name + "-insight"
+		var insight platformv1alpha1.AIInsight
+		if err := r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: issue.Namespace}, &insight); err == nil {
+			if summary == "" && insight.Status.Analysis != "" {
+				summary = insight.Status.Analysis
+			}
+			if rootCause == "" && insight.Status.Analysis != "" {
+				// Use first 500 chars of analysis as root cause
+				rootCause = insight.Status.Analysis
+				if len(rootCause) > 500 {
+					rootCause = rootCause[:500] + "..."
+				}
+			}
+			if len(lessonsLearned) == 0 && len(insight.Status.Recommendations) > 0 {
+				lessonsLearned = insight.Status.Recommendations
+			}
+			if impact == "" {
+				impact = fmt.Sprintf("Issue %s on %s/%s (severity: %s, risk: %d)",
+					issue.Spec.SignalType, issue.Spec.Resource.Kind, issue.Spec.Resource.Name,
+					issue.Spec.Severity, issue.Spec.RiskScore)
+			}
+		}
 	}
 
 	pm := &platformv1alpha1.PostMortem{

@@ -117,7 +117,7 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempt
 	}
 	return &ClaudeClient{
 		apiKey:      apiKey,
-		model:       model,
+		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
 		maxAttempts: maxAttempts,

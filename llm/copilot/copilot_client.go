@@ -58,7 +58,7 @@ func NewClient(token, model string, logger *zap.Logger, maxAttempts int, backoff
 
 	return &Client{
 		token:       token,
-		model:       model,
+		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
 		maxAttempts: maxAttempts,
