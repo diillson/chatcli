@@ -15,7 +15,7 @@ type: Opaque
 stringData:
   ANTHROPIC_API_KEY: "<your-anthropic-api-key>"
   # OPENAI_API_KEY: "<your-openai-api-key>"
-  # GOOGLE_AI_API_KEY: "<your-google-api-key>"
+  # GOOGLEAI_API_KEY: "<your-google-api-key>"
 ---
 apiVersion: platform.chatcli.io/v1alpha1
 kind: Instance

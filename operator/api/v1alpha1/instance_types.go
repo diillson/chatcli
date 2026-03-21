@@ -45,7 +45,7 @@ type InstanceSpec struct {
 	SecurityContext *corev1.PodSecurityContext `json:"securityContext,omitempty"`
 
 	// APIKeys references a Secret containing provider API keys.
-	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, GITHUB_COPILOT_TOKEN, etc.
+	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, GITHUB_COPILOT_TOKEN, etc.
 	// +optional
 	APIKeys *SecretRefSpec `json:"apiKeys,omitempty"`
 
