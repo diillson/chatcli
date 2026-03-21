@@ -46,7 +46,7 @@ func NewClient(baseURL, model string, logger *zap.Logger, maxAttempts int, backo
 
 	return &Client{
 		baseURL:     strings.TrimRight(baseURL, "/"),
-		model:       model,
+		model:       strings.ToLower(model),
 		logger:      logger,
 		httpClient:  utils.NewHTTPClient(logger, 300*time.Second),
 		maxAttempts: maxAttempts,

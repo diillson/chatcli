@@ -1300,6 +1300,7 @@ async function loadPostMortems() {
         tbody.appendChild(buildPMExpandRow(item));
       }
     });
+    makeSortable(el.querySelector('table'));
   } catch (e) {
     showError(el, 'Failed to load post-mortems: ' + e.message, 'loadPostMortems()');
   }

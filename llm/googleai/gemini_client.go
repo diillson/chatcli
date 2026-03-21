@@ -55,7 +55,7 @@ func NewGeminiClient(apiKey, model string, logger *zap.Logger, maxAttempts int, 
 
 	return &GeminiClient{
 		apiKey:      apiKey,
-		model:       model,
+		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
 		maxAttempts: maxAttempts,

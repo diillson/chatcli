@@ -113,6 +113,7 @@ func main() {
 		Scheme:         mgr.GetScheme(),
 		ServerClient:   serverClient,
 		ContextBuilder: contextBuilder,
+		AuditRecorder:  auditRecorder,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Remediation")
 		os.Exit(1)
