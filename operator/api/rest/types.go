@@ -224,18 +224,21 @@ type SLOBudgetItem struct {
 
 // ClusterItem is the REST representation of a ClusterRegistration (unstructured).
 type ClusterItem struct {
-	Name              string            `json:"name"`
-	Namespace         string            `json:"namespace"`
-	Region            string            `json:"region,omitempty"`
-	Provider          string            `json:"provider,omitempty"`
-	Environment       string            `json:"environment,omitempty"`
-	APIEndpoint       string            `json:"apiEndpoint,omitempty"`
-	State             string            `json:"state,omitempty"`
-	Version           string            `json:"version,omitempty"`
-	NodeCount         int64             `json:"nodeCount,omitempty"`
-	LastHeartbeat     *string           `json:"lastHeartbeat,omitempty"`
-	CreationTimestamp string            `json:"creationTimestamp"`
-	Labels            map[string]string `json:"labels,omitempty"`
+	Name               string            `json:"name"`
+	Namespace          string            `json:"namespace"`
+	DisplayName        string            `json:"displayName,omitempty"`
+	Region             string            `json:"region,omitempty"`
+	Environment        string            `json:"environment,omitempty"`
+	Tier               string            `json:"tier,omitempty"`
+	Connected          bool              `json:"connected"`
+	Version            string            `json:"version,omitempty"`
+	NodeCount          int64             `json:"nodeCount,omitempty"`
+	NamespaceCount     int64             `json:"namespaceCount,omitempty"`
+	ActiveIssues       int64             `json:"activeIssues,omitempty"`
+	ActiveRemediations int64             `json:"activeRemediations,omitempty"`
+	LastHealthCheck    *string           `json:"lastHealthCheck,omitempty"`
+	CreationTimestamp  string            `json:"creationTimestamp"`
+	Labels             map[string]string `json:"labels,omitempty"`
 }
 
 // GlobalClusterStatus is the aggregated cross-cluster status.
@@ -251,13 +254,14 @@ type GlobalClusterStatus struct {
 type AuditEventItem struct {
 	Name              string `json:"name"`
 	Namespace         string `json:"namespace"`
-	Type              string `json:"type,omitempty"`
+	EventType         string `json:"eventType,omitempty"`
 	Severity          string `json:"severity,omitempty"`
-	Resource          string `json:"resource,omitempty"`
+	ActorType         string `json:"actorType,omitempty"`
+	ActorName         string `json:"actorName,omitempty"`
+	ResourceKind      string `json:"resourceKind,omitempty"`
 	ResourceName      string `json:"resourceName,omitempty"`
 	ResourceNamespace string `json:"resourceNamespace,omitempty"`
-	Actor             string `json:"actor,omitempty"`
-	Action            string `json:"action,omitempty"`
+	CorrelationID     string `json:"correlationId,omitempty"`
 	Detail            string `json:"detail,omitempty"`
 	Timestamp         string `json:"timestamp,omitempty"`
 	CreationTimestamp string `json:"creationTimestamp"`
