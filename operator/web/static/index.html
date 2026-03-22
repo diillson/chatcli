@@ -559,9 +559,18 @@ tr.expandable { cursor: pointer; }
         </div>
       </div>
     </div>
-    <div class="refresh-indicator">
+    <div class="refresh-indicator" style="display:flex; align-items:center; gap:0.5rem;">
       <div class="refresh-dot" id="refreshDot"></div>
-      <span id="refreshTimer">Auto-refresh: 30s</span>
+      <select id="refreshSelect" class="filter-select" style="width:auto; padding:0.25rem 0.5rem; font-size:0.75rem;" onchange="changeRefreshInterval()">
+        <option value="0">Off</option>
+        <option value="10">10s</option>
+        <option value="30" selected>30s</option>
+        <option value="60">1m</option>
+        <option value="120">2m</option>
+        <option value="300">5m</option>
+      </select>
+      <span id="refreshTimer" style="font-size:0.75rem; color:var(--text-muted); min-width:40px;">30s</span>
+      <button class="btn" style="padding:0.2rem 0.5rem; font-size:0.75rem;" onclick="manualRefresh()" title="Refresh now">&#8635;</button>
     </div>
     <span class="health-badge health-ok" id="healthBadge">Healthy</span>
   </div>
@@ -575,6 +584,7 @@ tr.expandable { cursor: pointer; }
   <button class="tab-btn" data-tab="approvals">Approvals <span class="badge" id="approvalBadge" style="display:none">0</span></button>
   <button class="tab-btn" data-tab="aiinsights">AI Insights</button>
   <button class="tab-btn" data-tab="remediations">Remediations</button>
+  <button class="tab-btn" data-tab="runbooks">Runbooks</button>
   <button class="tab-btn" data-tab="postmortems">PostMortems</button>
   <button class="tab-btn" data-tab="clusters">Clusters</button>
   <button class="tab-btn" data-tab="audit">Audit</button>
@@ -702,6 +712,17 @@ tr.expandable { cursor: pointer; }
     </div>
   </div>
 
+  <!-- RUNBOOKS PAGE -->
+  <div class="page" id="page-runbooks">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Runbooks</span>
+        <span style="font-size:0.75rem; color: var(--text-muted);" id="runbookCount"></span>
+      </div>
+      <div class="panel-body table-wrap" id="runbooksTableBody"></div>
+    </div>
+  </div>
+
   <!-- POSTMORTEMS PAGE -->
   <div class="page" id="page-postmortems">
     <div class="panel">
@@ -789,6 +810,7 @@ const API = '/api/v1';
 let currentTab = 'overview';
 let refreshInterval = null;
 let refreshCountdown = 30;
+let refreshSeconds = 30; // 0 = off
 let expandedRows = new Set();
 
 // ===== UTILITY FUNCTIONS =====
@@ -1024,16 +1046,34 @@ $('#tabBar').addEventListener('click', (e) => {
 // ===== AUTO-REFRESH =====
 
 function startRefresh() {
-  refreshCountdown = 30;
   clearInterval(refreshInterval);
+  if (refreshSeconds <= 0) {
+    $('#refreshTimer').textContent = 'Off';
+    $('#refreshDot').style.background = 'var(--text-dim)';
+    return;
+  }
+  refreshCountdown = refreshSeconds;
+  $('#refreshDot').style.background = 'var(--success)';
   refreshInterval = setInterval(() => {
     refreshCountdown--;
-    $('#refreshTimer').textContent = `Auto-refresh: ${refreshCountdown}s`;
+    $('#refreshTimer').textContent = `${refreshCountdown}s`;
     if (refreshCountdown <= 0) {
-      refreshCountdown = 30;
+      refreshCountdown = refreshSeconds;
       loadCurrentTab();
     }
   }, 1000);
+}
+
+function changeRefreshInterval() {
+  refreshSeconds = parseInt($('#refreshSelect').value, 10);
+  startRefresh();
+}
+
+function manualRefresh() {
+  loadCurrentTab();
+  if (refreshSeconds > 0) {
+    refreshCountdown = refreshSeconds;
+  }
 }
 
 function loadCurrentTab() {
@@ -1044,6 +1084,7 @@ function loadCurrentTab() {
     case 'approvals': loadApprovals(); break;
     case 'aiinsights': loadAIInsights(); break;
     case 'remediations': loadRemediations(); break;
+    case 'runbooks': loadRunbooks(); break;
     case 'postmortems': loadPostMortems(); break;
     case 'clusters': loadClusters(); break;
     case 'audit': loadAudit(); break;
@@ -1552,6 +1593,89 @@ async function rejectRequest(name, ns, idx) {
   } catch (e) {
     toast(`Failed to reject: ${e.message}`, 'error');
   }
+}
+
+// ===== RUNBOOKS PAGE =====
+
+async function loadRunbooks() {
+  const el = $('#runbooksTableBody');
+  showLoading(el);
+  try {
+    const data = await apiFetch('/runbooks?pageSize=100');
+    const items = data.items || [];
+    $('#runbookCount').textContent = `${items.length} runbook(s)`;
+    if (items.length === 0) { showEmpty(el, 'No runbooks available. Runbooks are auto-generated when the AI successfully remediates an incident.'); return; }
+    el.innerHTML = `<table>
+      <thead><tr>
+        <th></th><th>Name</th><th>Signal</th><th>Severity</th><th>Resource Kind</th><th>Steps</th><th>Max Attempts</th><th>Created</th>
+      </tr></thead>
+      <tbody id="runbooksTbody"></tbody>
+    </table>`;
+    const tbody = $('#runbooksTbody');
+    items.forEach((item, idx) => {
+      const id = 'rb-' + idx;
+      const isExpanded = expandedRows.has(id);
+      const trigger = item.trigger || {};
+      const stepsCount = (item.steps || []).length;
+      const mainRow = document.createElement('tr');
+      mainRow.className = 'expandable';
+      mainRow.dataset.rowId = id;
+      mainRow.innerHTML = `
+        <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td><span class="action-type-badge">${escapeHtml(trigger.signalType || '-')}</span></td>
+        <td>${severityBadge(trigger.severity || 'low')}</td>
+        <td>${resourceKindBadge(trigger.resourceKind || 'Unknown')}</td>
+        <td>${stepsCount}</td>
+        <td>${item.maxAttempts || 3}</td>
+        <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
+      `;
+      mainRow.addEventListener('click', () => toggleRunbookExpand(id, item, mainRow));
+      tbody.appendChild(mainRow);
+      if (isExpanded) tbody.appendChild(buildRunbookExpandRow(item));
+    });
+    makeSortable(el.querySelector('table'));
+  } catch (e) {
+    showError(el, 'Failed to load runbooks: ' + e.message, 'loadRunbooks()');
+  }
+}
+
+function toggleRunbookExpand(id, item, mainRow) {
+  if (expandedRows.has(id)) {
+    expandedRows.delete(id);
+    const next = mainRow.nextElementSibling;
+    if (next && next.classList.contains('expand-row')) next.remove();
+    mainRow.querySelector('td').innerHTML = '&#9654;';
+  } else {
+    expandedRows.add(id);
+    mainRow.after(buildRunbookExpandRow(item));
+    mainRow.querySelector('td').innerHTML = '&#9660;';
+  }
+}
+
+function buildRunbookExpandRow(item) {
+  const tr = document.createElement('tr');
+  tr.className = 'expand-row';
+  const steps = (item.steps || []).map((s, i) =>
+    `<li>
+      <strong>Step ${i + 1}: ${escapeHtml(s.name)}</strong>
+      <span class="action-type-badge" style="margin-left:0.5rem">${escapeHtml(s.action)}</span>
+      <p style="margin:0.25rem 0 0.5rem; color:var(--text-muted)">${escapeHtml(s.description || '')}</p>
+      ${s.params ? `<code style="font-size:0.75rem; color:var(--text-dim)">${escapeHtml(JSON.stringify(s.params))}</code>` : ''}
+    </li>`
+  ).join('');
+  tr.innerHTML = `<td colspan="8">
+    <div class="expand-content">
+      <h4>Description</h4>
+      <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.description || 'No description')}</p>
+      <h4>Trigger</h4>
+      <p>Signal: <span class="action-type-badge">${escapeHtml((item.trigger || {}).signalType || '-')}</span>
+         Severity: ${severityBadge((item.trigger || {}).severity || '-')}
+         Kind: ${resourceKindBadge((item.trigger || {}).resourceKind || '-')}</p>
+      ${steps ? `<h4>Steps (${(item.steps || []).length})</h4><ol>${steps}</ol>` : ''}
+    </div>
+  </td>`;
+  return tr;
 }
 
 // ===== POSTMORTEMS PAGE =====
