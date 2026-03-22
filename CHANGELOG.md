@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.85.0](https://github.com/diillson/chatcli/compare/v1.84.0...v1.85.0) (2026-03-22)
+
+
+### Features
+
+* **aiops:** wire all orphaned components — zero gaps between code and docs ([#685](https://github.com/diillson/chatcli/issues/685)) ([cfd6eda](https://github.com/diillson/chatcli/commit/cfd6edaa6f72ff7f4de8e494a5302a8ac39ab720))
+
 ## [1.84.0](https://github.com/diillson/chatcli/compare/v1.83.0...v1.84.0) (2026-03-22)
 
 
