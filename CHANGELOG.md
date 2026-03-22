@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.82.0](https://github.com/diillson/chatcli/compare/v1.81.2...v1.82.0) (2026-03-22)
+
+
+### Features
+
+* **dashboard:** add Runbooks tab and configurable auto-refresh control ([#679](https://github.com/diillson/chatcli/issues/679)) ([aff8ef8](https://github.com/diillson/chatcli/commit/aff8ef84eb9d154716306a70191f5db9cc1f28ac))
+
 ## [1.81.2](https://github.com/diillson/chatcli/compare/v1.81.1...v1.81.2) (2026-03-22)
 
 
