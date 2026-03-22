@@ -905,10 +905,21 @@ func (r *IssueReconciler) handleEscalated(ctx context.Context, issue *platformv1
 		return ctrl.Result{}, fmt.Errorf("auto-resolving escalated issue: %w", err)
 	}
 
+	// Add annotations to distinguish auto-resolve from manual resolve in audit trail
+	if issue.Annotations == nil {
+		issue.Annotations = make(map[string]string)
+	}
+	issue.Annotations["aiops.chatcli.io/resolved-by"] = "auto-resolve"
+	issue.Annotations["aiops.chatcli.io/resolved-at"] = now.Format("2006-01-02T15:04:05Z")
+	issue.Annotations["aiops.chatcli.io/auto-resolution"] = "true"
+	if err := r.Update(ctx, issue); err != nil {
+		log.Error(err, "Failed to update auto-resolve annotations", "name", issue.Name)
+	}
+
 	r.invalidateDedup(issue)
 
 	if r.AuditRecorder != nil {
-		r.AuditRecorder.RecordIssueResolved(ctx, issue, "auto-resolve")
+		r.AuditRecorder.RecordIssueResolved(ctx, issue)
 	}
 
 	issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateResolved)).Inc()
