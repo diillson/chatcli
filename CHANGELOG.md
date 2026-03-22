@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.77.2](https://github.com/diillson/chatcli/compare/v1.77.1...v1.77.2) (2026-03-22)
+
+
+### Bug Fixes
+
+* **postmortem:** retry Status().Update() on conflict with PostMortemReconciler ([#665](https://github.com/diillson/chatcli/issues/665)) ([77e190f](https://github.com/diillson/chatcli/commit/77e190f5f92fbe9607ab5df6a15bec6a35d241d4))
+
 ## [1.77.1](https://github.com/diillson/chatcli/compare/v1.77.0...v1.77.1) (2026-03-22)
 
 
