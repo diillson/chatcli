@@ -174,6 +174,26 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 
 	provider, model := resolveInstanceProvider(ctx, r.Client)
 
+	// Early runbook matching — inject candidate into AIInsight so the AI can validate it
+	candidateRunbook, _ := r.findMatchingRunbook(ctx, issue)
+	var runbookContext string
+	if candidateRunbook != nil {
+		var stepsDesc []string
+		for i, s := range candidateRunbook.Spec.Steps {
+			stepsDesc = append(stepsDesc, fmt.Sprintf("  Step %d: %s (%s) — %s", i+1, s.Name, s.Action, s.Description))
+		}
+		runbookContext = fmt.Sprintf(
+			"CANDIDATE RUNBOOK: %s\nTrigger: %s + %s + %s\nSteps:\n%s\n\nEvaluate if this runbook is appropriate for the current incident. "+
+				"If the runbook steps match the root cause, include 'RUNBOOK_APPROVED' in your analysis. "+
+				"If the runbook does NOT match (e.g., different root cause), include 'RUNBOOK_REJECTED' and explain why.",
+			candidateRunbook.Name,
+			candidateRunbook.Spec.Trigger.SignalType,
+			candidateRunbook.Spec.Trigger.Severity,
+			candidateRunbook.Spec.Trigger.ResourceKind,
+			strings.Join(stepsDesc, "\n"),
+		)
+	}
+
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, insight, func() error {
 		if err := controllerutil.SetControllerReference(issue, insight, r.Scheme); err != nil {
 			return err
@@ -182,6 +202,14 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 			IssueRef: platformv1alpha1.IssueRef{Name: issue.Name},
 			Provider: provider,
 			Model:    model,
+		}
+		// Inject runbook candidate for AI validation
+		if runbookContext != "" {
+			if insight.Annotations == nil {
+				insight.Annotations = make(map[string]string)
+			}
+			insight.Annotations["platform.chatcli.io/candidate-runbook"] = candidateRunbook.Name
+			insight.Annotations["platform.chatcli.io/runbook-context"] = runbookContext
 		}
 		return nil
 	})
@@ -237,27 +265,46 @@ func (r *IssueReconciler) handleAnalyzing(ctx context.Context, issue *platformv1
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	// 1. Find manual runbook (has precedence)
+	// 1. Find matching runbook and check if AI validated it
 	runbook, err := r.findMatchingRunbook(ctx, issue)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	if runbook != nil {
-		// Manual runbook found — use it
-		log.Info("Using manual runbook", "issue", issue.Name, "runbook", runbook.Name)
-		if runbook.Spec.MaxAttempts > 0 {
-			issue.Status.MaxRemediationAttempts = runbook.Spec.MaxAttempts
+		// Check if AI validated this runbook
+		aiApproved := strings.Contains(insight.Status.Analysis, "RUNBOOK_APPROVED")
+		aiRejected := strings.Contains(insight.Status.Analysis, "RUNBOOK_REJECTED")
+
+		if aiRejected {
+			// AI says runbook doesn't fit — skip it, use AI suggestions or agentic mode
+			log.Info("AI rejected candidate runbook, using alternative strategy",
+				"issue", issue.Name, "runbook", runbook.Name)
+			runbook = nil // force fallthrough to AI suggestions or agentic
+		} else if aiApproved {
+			log.Info("AI approved candidate runbook", "issue", issue.Name, "runbook", runbook.Name)
+			if runbook.Spec.MaxAttempts > 0 {
+				issue.Status.MaxRemediationAttempts = runbook.Spec.MaxAttempts
+			}
+		} else {
+			// AI didn't explicitly approve or reject — use runbook as default (backward compat)
+			log.Info("AI did not explicitly validate runbook, using it as default",
+				"issue", issue.Name, "runbook", runbook.Name)
+			if runbook.Spec.MaxAttempts > 0 {
+				issue.Status.MaxRemediationAttempts = runbook.Spec.MaxAttempts
+			}
 		}
-	} else if len(insight.Status.SuggestedActions) > 0 {
-		// 2. No manual runbook — generate one from AI
-		log.Info("No manual runbook found, generating from AI", "issue", issue.Name, "actions", len(insight.Status.SuggestedActions))
+	}
+
+	if runbook == nil && len(insight.Status.SuggestedActions) > 0 {
+		// 2. No valid runbook — generate one from AI suggestions
+		log.Info("No valid runbook, generating from AI", "issue", issue.Name, "actions", len(insight.Status.SuggestedActions))
 		runbook, err = r.generateRunbookFromAI(ctx, issue, &insight)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("generating runbook from AI: %w", err)
 		}
 		log.Info("Auto-generated runbook", "runbook", runbook.Name)
-	} else {
+	} else if runbook == nil {
 		// 3. No runbook and no AI actions — use agentic mode
 		log.Info("No runbook or AI actions found, using agentic remediation", "issue", issue.Name)
 
