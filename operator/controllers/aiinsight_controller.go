@@ -196,6 +196,17 @@ func (r *AIInsightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		failureCtx = insight.Annotations["platform.chatcli.io/failure-context"]
 	}
 
+	// Inject candidate runbook context for AI validation (if present)
+	if insight.Annotations != nil {
+		if rbCtx := insight.Annotations["platform.chatcli.io/runbook-context"]; rbCtx != "" {
+			combinedContext = combinedContext + "\n\n--- RUNBOOK VALIDATION ---\n" + rbCtx
+			// Re-truncate if needed
+			if len(combinedContext) > 32000 {
+				combinedContext = combinedContext[:32000] + "\n... (context truncated)"
+			}
+		}
+	}
+
 	// Call AnalyzeIssue RPC
 	analyzeReq := &pb.AnalyzeIssueRequest{
 		IssueName:              issue.Name,
