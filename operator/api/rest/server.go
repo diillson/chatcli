@@ -201,6 +201,10 @@ func (s *APIServer) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.routeClusters(w, r, rest)
 	case "audit":
 		s.routeAudit(w, r, rest)
+	case "aiinsights":
+		s.routeAIInsights(w, r, rest)
+	case "remediations":
+		s.routeRemediations(w, r, rest)
 	default:
 		writeError(w, http.StatusNotFound, "unknown resource: "+resource)
 	}
@@ -437,7 +441,9 @@ func (s *APIServer) handleResolveIncident(w http.ResponseWriter, r *http.Request
 	issue.Annotations["aiops.chatcli.io/resolved-by"] = roleFromContext(ctx)
 	issue.Annotations["aiops.chatcli.io/resolved-at"] = now.Format(time.RFC3339)
 	issue.Annotations["aiops.chatcli.io/manual-resolution"] = "true"
-	_ = s.client.Update(ctx, issue) // Non-fatal — status already updated
+	if err := s.client.Update(ctx, issue); err != nil {
+		log.Printf("[REST] warning: failed to update annotations on resolved issue %s: %v", issue.Name, err)
+	}
 
 	// Invalidate dedup for the resource so new anomalies can be detected
 	if s.watcherBridge != nil {
@@ -1518,6 +1524,12 @@ func (s *APIServer) handleExportAuditEvents(w http.ResponseWriter, r *http.Reque
 					continue
 				}
 			}
+		} else if ae.CreationTimestamp != "" {
+			if t, err := time.Parse(time.RFC3339, ae.CreationTimestamp); err == nil {
+				if !inTimeRange(t, tr) {
+					continue
+				}
+			}
 		}
 		events = append(events, ae)
 	}
@@ -2125,4 +2137,241 @@ func paginateSlice(total int, pp paginationParams) (start, end int) {
 		end = total
 	}
 	return start, end
+}
+
+// ========== AI Insights ==========
+
+func (s *APIServer) routeAIInsights(w http.ResponseWriter, r *http.Request, rest []string) {
+	switch {
+	case len(rest) == 0 && r.Method == http.MethodGet:
+		// GET /api/v1/aiinsights
+		if !hasMinRole(roleFromContext(r.Context()), "viewer") {
+			writeError(w, http.StatusForbidden, "insufficient permissions")
+			return
+		}
+		s.handleListAIInsights(w, r)
+
+	case len(rest) == 1 && r.Method == http.MethodGet:
+		// GET /api/v1/aiinsights/:name
+		if !hasMinRole(roleFromContext(r.Context()), "viewer") {
+			writeError(w, http.StatusForbidden, "insufficient permissions")
+			return
+		}
+		s.handleGetAIInsight(w, r, rest[0])
+
+	default:
+		writeError(w, http.StatusNotFound, "unknown aiinsights route")
+	}
+}
+
+func (s *APIServer) handleListAIInsights(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	pp := parsePagination(r)
+	ns := r.URL.Query().Get("namespace")
+	issueFilter := r.URL.Query().Get("issue")
+
+	var insights v1alpha1.AIInsightList
+	opts := []client.ListOption{}
+	if ns != "" {
+		opts = append(opts, client.InNamespace(ns))
+	}
+	if err := s.client.List(ctx, &insights, opts...); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list AI insights: "+err.Error())
+		return
+	}
+
+	var items []AIInsightItem
+	for _, ai := range insights.Items {
+		if issueFilter != "" && ai.Spec.IssueRef.Name != issueFilter {
+			continue
+		}
+		items = append(items, aiInsightToItem(ai))
+	}
+
+	total := len(items)
+	start, end := paginateSlice(total, pp)
+	writeListResponse(w, "AIInsightList", items[start:end], total, pp)
+}
+
+func (s *APIServer) handleGetAIInsight(w http.ResponseWriter, r *http.Request, name string) {
+	ctx := r.Context()
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		ns = "default"
+	}
+
+	var insight v1alpha1.AIInsight
+	if err := s.client.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &insight); err != nil {
+		writeError(w, http.StatusNotFound, "AI insight not found: "+err.Error())
+		return
+	}
+
+	item := aiInsightToItem(insight)
+	writeJSON(w, http.StatusOK, APIResponse{
+		APIVersion: "v1",
+		Kind:       "AIInsight",
+		ResourceMeta: &ResourceMeta{
+			Name:              insight.Name,
+			Namespace:         insight.Namespace,
+			UID:               string(insight.UID),
+			CreationTimestamp: insight.CreationTimestamp.Format(time.RFC3339),
+			Labels:            insight.Labels,
+			Annotations:       insight.Annotations,
+		},
+		Spec:   item,
+		Status: insight.Status,
+	})
+}
+
+func aiInsightToItem(ai v1alpha1.AIInsight) AIInsightItem {
+	item := AIInsightItem{
+		Name:                  ai.Name,
+		Namespace:             ai.Namespace,
+		IssueRef:              ai.Spec.IssueRef.Name,
+		Provider:              ai.Spec.Provider,
+		Model:                 ai.Spec.Model,
+		Analysis:              ai.Status.Analysis,
+		Confidence:            ai.Status.Confidence,
+		Recommendations:       ai.Status.Recommendations,
+		LogAnalysis:           ai.Status.LogAnalysis,
+		MetricsContext:        ai.Status.MetricsContext,
+		SourceCodeContext:     ai.Status.SourceCodeContext,
+		GitOpsContext:         ai.Status.GitOpsContext,
+		CascadeAnalysis:       ai.Status.CascadeAnalysis,
+		BlastRadiusPrediction: ai.Status.BlastRadiusPrediction,
+		CreationTimestamp:     ai.CreationTimestamp.Format(time.RFC3339),
+	}
+	if ai.Status.GeneratedAt != nil {
+		t := ai.Status.GeneratedAt.Format(time.RFC3339)
+		item.GeneratedAt = &t
+	}
+	for _, sa := range ai.Status.SuggestedActions {
+		item.SuggestedActions = append(item.SuggestedActions, SuggestedActionItem{
+			Name:        sa.Name,
+			Action:      sa.Action,
+			Description: sa.Description,
+			Params:      sa.Params,
+		})
+	}
+	return item
+}
+
+// ========== Remediations ==========
+
+func (s *APIServer) routeRemediations(w http.ResponseWriter, r *http.Request, rest []string) {
+	switch {
+	case len(rest) == 0 && r.Method == http.MethodGet:
+		// GET /api/v1/remediations
+		if !hasMinRole(roleFromContext(r.Context()), "viewer") {
+			writeError(w, http.StatusForbidden, "insufficient permissions")
+			return
+		}
+		s.handleListRemediations(w, r)
+
+	case len(rest) == 1 && r.Method == http.MethodGet:
+		// GET /api/v1/remediations/:name
+		if !hasMinRole(roleFromContext(r.Context()), "viewer") {
+			writeError(w, http.StatusForbidden, "insufficient permissions")
+			return
+		}
+		s.handleGetRemediation(w, r, rest[0])
+
+	default:
+		writeError(w, http.StatusNotFound, "unknown remediations route")
+	}
+}
+
+func (s *APIServer) handleListRemediations(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	pp := parsePagination(r)
+	ns := r.URL.Query().Get("namespace")
+	stateFilter := r.URL.Query().Get("state")
+	issueFilter := r.URL.Query().Get("issue")
+
+	var remediations v1alpha1.RemediationPlanList
+	opts := []client.ListOption{}
+	if ns != "" {
+		opts = append(opts, client.InNamespace(ns))
+	}
+	if err := s.client.List(ctx, &remediations, opts...); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list remediations: "+err.Error())
+		return
+	}
+
+	var items []RemediationItem
+	for _, rp := range remediations.Items {
+		if stateFilter != "" && !strings.EqualFold(string(rp.Status.State), stateFilter) {
+			continue
+		}
+		if issueFilter != "" && rp.Spec.IssueRef.Name != issueFilter {
+			continue
+		}
+		items = append(items, remediationToItem(rp))
+	}
+
+	total := len(items)
+	start, end := paginateSlice(total, pp)
+	writeListResponse(w, "RemediationPlanList", items[start:end], total, pp)
+}
+
+func (s *APIServer) handleGetRemediation(w http.ResponseWriter, r *http.Request, name string) {
+	ctx := r.Context()
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		ns = "default"
+	}
+
+	var rp v1alpha1.RemediationPlan
+	if err := s.client.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &rp); err != nil {
+		writeError(w, http.StatusNotFound, "remediation plan not found: "+err.Error())
+		return
+	}
+
+	detail := RemediationDetailItem{
+		RemediationItem:   remediationToItem(rp),
+		SafetyConstraints: rp.Spec.SafetyConstraints,
+		RollbackPerformed: rp.Status.RollbackPerformed,
+		RollbackResult:    rp.Status.RollbackResult,
+		Evidence:          []EvidenceDetailItem{},
+		AgenticHistory:    []AgenticStepItem{},
+	}
+
+	for _, ev := range rp.Status.Evidence {
+		detail.Evidence = append(detail.Evidence, EvidenceDetailItem{
+			Type:      ev.Type,
+			Data:      ev.Data,
+			Timestamp: ev.Timestamp.Format(time.RFC3339),
+		})
+	}
+
+	for _, step := range rp.Spec.AgenticHistory {
+		as := AgenticStepItem{
+			StepNumber:  step.StepNumber,
+			AIMessage:   step.AIMessage,
+			Observation: step.Observation,
+			Timestamp:   step.Timestamp.Format(time.RFC3339),
+		}
+		if step.Action != nil {
+			as.Action = &ActionItem{
+				Type:   string(step.Action.Type),
+				Params: step.Action.Params,
+			}
+		}
+		detail.AgenticHistory = append(detail.AgenticHistory, as)
+	}
+
+	writeJSON(w, http.StatusOK, APIResponse{
+		APIVersion: "v1",
+		Kind:       "RemediationPlan",
+		ResourceMeta: &ResourceMeta{
+			Name:              rp.Name,
+			Namespace:         rp.Namespace,
+			UID:               string(rp.UID),
+			CreationTimestamp: rp.CreationTimestamp.Format(time.RFC3339),
+			Labels:            rp.Labels,
+			Annotations:       rp.Annotations,
+		},
+		Spec:   detail,
+		Status: rp.Status,
+	})
 }

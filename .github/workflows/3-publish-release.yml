@@ -27,9 +27,10 @@ jobs:
         id: rp
         uses: googleapis/release-please-action@v4
         with:
-          release-type: go
           token: ${{ secrets.GH_RELEASE_TOKEN }}
           target-branch: ${{ github.ref_name }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
   build_and_upload:
     name: Build e upload de binários (após release criada)

@@ -573,6 +573,8 @@ tr.expandable { cursor: pointer; }
   <button class="tab-btn" data-tab="incidents">Incidents</button>
   <button class="tab-btn" data-tab="slos">SLOs</button>
   <button class="tab-btn" data-tab="approvals">Approvals <span class="badge" id="approvalBadge" style="display:none">0</span></button>
+  <button class="tab-btn" data-tab="aiinsights">AI Insights</button>
+  <button class="tab-btn" data-tab="remediations">Remediations</button>
   <button class="tab-btn" data-tab="postmortems">PostMortems</button>
   <button class="tab-btn" data-tab="clusters">Clusters</button>
   <button class="tab-btn" data-tab="audit">Audit</button>
@@ -659,6 +661,45 @@ tr.expandable { cursor: pointer; }
       <button class="btn btn-primary" onclick="loadApprovals()">Apply</button>
     </div>
     <div id="approvalsList"></div>
+  </div>
+
+  <!-- AI INSIGHTS PAGE -->
+  <div class="page" id="page-aiinsights">
+    <div class="filters">
+      <input class="filter-input" id="insightIssueFilter" placeholder="Filter by incident..." style="width:200px">
+      <button class="btn btn-primary" onclick="loadAIInsights()">Apply</button>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">AI Insights</span>
+        <span style="font-size:0.75rem; color: var(--text-muted);" id="insightCount"></span>
+      </div>
+      <div class="panel-body table-wrap" id="insightsTableBody"></div>
+    </div>
+  </div>
+
+  <!-- REMEDIATIONS PAGE -->
+  <div class="page" id="page-remediations">
+    <div class="filters">
+      <select class="filter-select" id="remediationStateFilter">
+        <option value="">All States</option>
+        <option value="Pending">Pending</option>
+        <option value="Executing">Executing</option>
+        <option value="Verifying">Verifying</option>
+        <option value="Completed">Completed</option>
+        <option value="Failed">Failed</option>
+        <option value="RolledBack">RolledBack</option>
+      </select>
+      <input class="filter-input" id="remediationIssueFilter" placeholder="Filter by incident..." style="width:200px">
+      <button class="btn btn-primary" onclick="loadRemediations()">Apply</button>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Remediation Plans</span>
+        <span style="font-size:0.75rem; color: var(--text-muted);" id="remediationCount"></span>
+      </div>
+      <div class="panel-body table-wrap" id="remediationsTableBody"></div>
+    </div>
   </div>
 
   <!-- POSTMORTEMS PAGE -->
@@ -1001,6 +1042,8 @@ function loadCurrentTab() {
     case 'incidents': loadIncidents(); break;
     case 'slos': loadSLOs(); break;
     case 'approvals': loadApprovals(); break;
+    case 'aiinsights': loadAIInsights(); break;
+    case 'remediations': loadRemediations(); break;
     case 'postmortems': loadPostMortems(); break;
     case 'clusters': loadClusters(); break;
     case 'audit': loadAudit(); break;
@@ -1619,6 +1662,180 @@ async function closePM(name, ns) {
   } catch (e) {
     toast(`Failed to close: ${e.message}`, 'error');
   }
+}
+
+// ===== AI INSIGHTS PAGE =====
+
+async function loadAIInsights() {
+  const el = $('#insightsTableBody');
+  showLoading(el);
+  try {
+    const issueFilter = ($('#insightIssueFilter') || {}).value || '';
+    const qs = issueFilter ? `?pageSize=100&issue=${encodeURIComponent(issueFilter)}` : '?pageSize=100';
+    const data = await apiFetch('/aiinsights' + qs);
+    const items = data.items || [];
+    $('#insightCount').textContent = `${items.length} insight(s)`;
+    if (items.length === 0) { showEmpty(el, 'No AI insights available'); return; }
+    el.innerHTML = `<table>
+      <thead><tr>
+        <th></th><th>Incident</th><th>Provider</th><th>Model</th><th>Confidence</th><th>Recommendations</th><th>Actions</th><th>Generated</th>
+      </tr></thead>
+      <tbody id="insightsTbody"></tbody>
+    </table>`;
+    const tbody = $('#insightsTbody');
+    items.forEach((item, idx) => {
+      const id = 'ai-' + idx;
+      const isExpanded = expandedRows.has(id);
+      const confidence = item.confidence || 0;
+      const confColor = confidence >= 0.85 ? 'var(--sev-low)' : confidence >= 0.7 ? 'var(--sev-medium)' : 'var(--sev-high)';
+      const recCount = (item.recommendations || []).length;
+      const actCount = (item.suggestedActions || []).length;
+      const mainRow = document.createElement('tr');
+      mainRow.className = 'expandable';
+      mainRow.dataset.rowId = id;
+      mainRow.innerHTML = `
+        <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
+        <td>${escapeHtml(item.issueRef || '-')}</td>
+        <td>${escapeHtml(item.provider || '-')}</td>
+        <td><small>${escapeHtml(item.model || '-')}</small></td>
+        <td><span style="color:${confColor}; font-weight:600">${(confidence * 100).toFixed(0)}%</span></td>
+        <td>${recCount}</td>
+        <td>${actCount > 0 ? `<span class="action-type-badge">${actCount} action(s)</span>` : '-'}</td>
+        <td data-sort-value="${new Date(item.generatedAt || item.creationTimestamp || 0).getTime()}">${timeAgo(item.generatedAt || item.creationTimestamp)}</td>
+      `;
+      mainRow.addEventListener('click', () => toggleInsightExpand(id, item, mainRow));
+      tbody.appendChild(mainRow);
+      if (isExpanded) tbody.appendChild(buildInsightExpandRow(item));
+    });
+    makeSortable(el.querySelector('table'));
+  } catch (e) {
+    showError(el, 'Failed to load AI insights: ' + e.message, 'loadAIInsights()');
+  }
+}
+
+function toggleInsightExpand(id, item, mainRow) {
+  if (expandedRows.has(id)) {
+    expandedRows.delete(id);
+    const next = mainRow.nextElementSibling;
+    if (next && next.classList.contains('expand-row')) next.remove();
+    mainRow.querySelector('td').innerHTML = '&#9654;';
+  } else {
+    expandedRows.add(id);
+    mainRow.after(buildInsightExpandRow(item));
+    mainRow.querySelector('td').innerHTML = '&#9660;';
+  }
+}
+
+function buildInsightExpandRow(item) {
+  const tr = document.createElement('tr');
+  tr.className = 'expand-row';
+  const recs = (item.recommendations || []).map(r => `<li>${escapeHtml(r)}</li>`).join('');
+  const actions = (item.suggestedActions || []).map(a =>
+    `<li><span class="action-type-badge">${escapeHtml(a.action)}</span> <strong>${escapeHtml(a.name)}</strong>: ${escapeHtml(a.description || '')}${a.params ? ` <small style="color:var(--text-muted)">${escapeHtml(JSON.stringify(a.params))}</small>` : ''}</li>`
+  ).join('');
+  tr.innerHTML = `<td colspan="8">
+    <div class="expand-content">
+      <h4>AI Analysis</h4>
+      <p style="white-space:pre-wrap; max-height:300px; overflow-y:auto;">${escapeHtml(item.analysis || 'Analysis pending...')}</p>
+      ${recs ? `<h4>Recommendations</h4><ul>${recs}</ul>` : ''}
+      ${actions ? `<h4>Suggested Actions</h4><ul>${actions}</ul>` : ''}
+      ${item.logAnalysis ? `<h4>Log Analysis</h4><p style="white-space:pre-wrap; max-height:200px; overflow-y:auto; font-size:0.8rem; color:var(--text-muted)">${escapeHtml(item.logAnalysis)}</p>` : ''}
+      ${item.cascadeAnalysis ? `<h4>Cascade Analysis</h4><p style="white-space:pre-wrap; font-size:0.85rem;">${escapeHtml(item.cascadeAnalysis)}</p>` : ''}
+      ${item.gitOpsContext ? `<h4>GitOps Context</h4><p style="font-size:0.85rem;">${escapeHtml(item.gitOpsContext)}</p>` : ''}
+      ${item.blastRadiusPrediction ? `<h4>Blast Radius Prediction</h4><p style="font-size:0.85rem;">${escapeHtml(item.blastRadiusPrediction)}</p>` : ''}
+    </div>
+  </td>`;
+  return tr;
+}
+
+// ===== REMEDIATIONS PAGE =====
+
+async function loadRemediations() {
+  const el = $('#remediationsTableBody');
+  showLoading(el);
+  try {
+    const stateFilter = ($('#remediationStateFilter') || {}).value || '';
+    const issueFilter = ($('#remediationIssueFilter') || {}).value || '';
+    let qs = '?pageSize=100';
+    if (stateFilter) qs += `&state=${encodeURIComponent(stateFilter)}`;
+    if (issueFilter) qs += `&issue=${encodeURIComponent(issueFilter)}`;
+    const data = await apiFetch('/remediations' + qs);
+    const items = data.items || [];
+    $('#remediationCount').textContent = `${items.length} plan(s)`;
+    if (items.length === 0) { showEmpty(el, 'No remediation plans available'); return; }
+    el.innerHTML = `<table>
+      <thead><tr>
+        <th></th><th>Name</th><th>Incident</th><th>Attempt</th><th>State</th><th>Mode</th><th>Actions</th><th>Started</th><th>Duration</th>
+      </tr></thead>
+      <tbody id="remTbody"></tbody>
+    </table>`;
+    const tbody = $('#remTbody');
+    items.forEach((item, idx) => {
+      const id = 'rem-' + idx;
+      const isExpanded = expandedRows.has(id);
+      const mode = item.agenticMode ? '<span style="color:var(--highlight); font-weight:600">Agentic</span>' : 'Runbook';
+      const actCount = (item.actions || []).length;
+      const stepsInfo = item.agenticMode ? `${item.agenticStepCount || 0} steps` : `${actCount} action(s)`;
+      const duration = item.startedAt && item.completedAt
+        ? formatDuration(new Date(item.completedAt) - new Date(item.startedAt))
+        : item.startedAt ? 'In progress...' : '-';
+      const mainRow = document.createElement('tr');
+      mainRow.className = 'expandable';
+      mainRow.dataset.rowId = id;
+      mainRow.innerHTML = `
+        <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td>${escapeHtml(item.issueRef || '-')}</td>
+        <td>#${item.attempt || 1}</td>
+        <td>${stateBadge(item.state)}</td>
+        <td>${mode}</td>
+        <td>${stepsInfo}</td>
+        <td data-sort-value="${new Date(item.startedAt || item.creationTimestamp || 0).getTime()}">${timeAgo(item.startedAt || item.creationTimestamp)}</td>
+        <td>${duration}</td>
+      `;
+      mainRow.addEventListener('click', () => toggleRemExpand(id, item, mainRow));
+      tbody.appendChild(mainRow);
+      if (isExpanded) tbody.appendChild(buildRemExpandRow(item));
+    });
+    makeSortable(el.querySelector('table'));
+  } catch (e) {
+    showError(el, 'Failed to load remediations: ' + e.message, 'loadRemediations()');
+  }
+}
+
+function toggleRemExpand(id, item, mainRow) {
+  if (expandedRows.has(id)) {
+    expandedRows.delete(id);
+    const next = mainRow.nextElementSibling;
+    if (next && next.classList.contains('expand-row')) next.remove();
+    mainRow.querySelector('td').innerHTML = '&#9654;';
+  } else {
+    expandedRows.add(id);
+    mainRow.after(buildRemExpandRow(item));
+    mainRow.querySelector('td').innerHTML = '&#9660;';
+  }
+}
+
+function buildRemExpandRow(item) {
+  const tr = document.createElement('tr');
+  tr.className = 'expand-row';
+  const actions = (item.actions || []).map(a =>
+    `<li><span class="action-type-badge">${escapeHtml(a.type)}</span>${a.params ? ` <small style="color:var(--text-muted)">${escapeHtml(JSON.stringify(a.params))}</small>` : ''}</li>`
+  ).join('');
+  tr.innerHTML = `<td colspan="9">
+    <div class="expand-content">
+      <h4>Strategy</h4>
+      <p>${escapeHtml(item.strategy || 'N/A')}</p>
+      ${actions ? `<h4>Planned Actions</h4><ul>${actions}</ul>` : ''}
+      ${item.result ? `<h4>Result</h4><p>${escapeHtml(item.result)}</p>` : ''}
+      <p style="margin-top:0.5rem; font-size:0.8rem; color:var(--text-muted)">
+        ${item.agenticMode ? `Agentic steps: ${item.agenticStepCount || 0}` : ''}
+        ${item.startedAt ? ` | Started: ${new Date(item.startedAt).toLocaleString()}` : ''}
+        ${item.completedAt ? ` | Completed: ${new Date(item.completedAt).toLocaleString()}` : ''}
+      </p>
+    </div>
+  </td>`;
+  return tr;
 }
 
 // ===== CLUSTERS PAGE =====
