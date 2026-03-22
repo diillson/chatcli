@@ -1241,6 +1241,7 @@ async function loadIncidents() {
         <td class="btn-group">
           ${item.state !== 'Resolved' ? `<button class="btn btn-success" onclick="event.stopPropagation(); ackIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Ack</button>` : ''}
           ${item.state !== 'Resolved' ? `<button class="btn" onclick="event.stopPropagation(); snoozeIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Snooze</button>` : ''}
+          ${item.state === 'Escalated' ? `<button class="btn" style="background:var(--sev-low);color:#000;font-weight:700" onclick="event.stopPropagation(); resolveIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Resolve</button>` : ''}
         </td>
       `;
       mainRow.addEventListener('click', () => toggleIncidentExpand(id, item, mainRow));
@@ -1326,6 +1327,18 @@ async function snoozeIncident(name, ns) {
     loadIncidents();
   } catch (e) {
     toast(`Failed to snooze: ${e.message}`, 'error');
+  }
+}
+
+async function resolveIncident(name, ns) {
+  const resolution = prompt('Resolution note (optional):', 'Manually resolved — root cause addressed');
+  if (resolution === null) return; // cancelled
+  try {
+    await apiPost(`/incidents/${name}/resolve?namespace=${encodeURIComponent(ns)}`, { resolution });
+    toast(`Incident ${name} resolved`, 'success');
+    loadIncidents();
+  } catch (e) {
+    toast(`Failed to resolve: ${e.message}`, 'error');
   }
 }
 

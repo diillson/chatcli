@@ -68,14 +68,20 @@ func singleGVK(plural string) schema.GroupVersionKind {
 	return schema.GroupVersionKind{Group: group, Version: version, Kind: kind}
 }
 
+// WatcherDedupInvalidator allows the API server to invalidate watcher dedup entries.
+type WatcherDedupInvalidator interface {
+	InvalidateDedupForResource(deployment, namespace string)
+}
+
 // APIServer provides a REST API gateway for AIOps resources.
 type APIServer struct {
-	client       client.Client
-	listenAddr   string
-	apiKeyHeader string
-	apiKeys      map[string]string // role -> key
-	limiter      *rateLimiter
-	corsOrigin   string
+	client        client.Client
+	listenAddr    string
+	apiKeyHeader  string
+	apiKeys       map[string]string // role -> key
+	limiter       *rateLimiter
+	corsOrigin    string
+	watcherBridge WatcherDedupInvalidator // optional, for dedup invalidation on manual resolve
 }
 
 // NewAPIServer creates a new APIServer.
@@ -93,6 +99,11 @@ func NewAPIServer(c client.Client, addr string) *APIServer {
 // SetAPIKeys configures API keys. Keys map role names to API key strings.
 func (s *APIServer) SetAPIKeys(keys map[string]string) {
 	s.apiKeys = keys
+}
+
+// SetWatcherBridge sets the watcher bridge for dedup invalidation on manual resolve.
+func (s *APIServer) SetWatcherBridge(wb WatcherDedupInvalidator) {
+	s.watcherBridge = wb
 }
 
 // SetCORSOrigin configures the allowed CORS origin.
@@ -230,6 +241,14 @@ func (s *APIServer) routeIncidents(w http.ResponseWriter, r *http.Request, rest 
 			return
 		}
 		s.handleSnoozeIncident(w, r, rest[0])
+
+	case len(rest) == 2 && rest[1] == "resolve" && r.Method == http.MethodPost:
+		// POST /api/v1/incidents/:name/resolve
+		if !hasMinRole(roleFromContext(r.Context()), "operator") {
+			writeError(w, http.StatusForbidden, "insufficient permissions")
+			return
+		}
+		s.handleResolveIncident(w, r, rest[0])
 
 	case len(rest) == 2 && rest[1] == "timeline" && r.Method == http.MethodGet:
 		// GET /api/v1/incidents/:name/timeline
@@ -369,6 +388,61 @@ func (s *APIServer) handleSnoozeIncident(w http.ResponseWriter, r *http.Request,
 	if err := s.client.Update(ctx, issue); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to snooze: "+err.Error())
 		return
+	}
+
+	item := issueToIncidentItem(*issue)
+	writeSingleResponse(w, "Incident", item, item, resourceMetaFromIssue(*issue))
+}
+
+func (s *APIServer) handleResolveIncident(w http.ResponseWriter, r *http.Request, name string) {
+	ctx := r.Context()
+	ns := r.URL.Query().Get("namespace")
+
+	var reqBody struct {
+		Resolution string `json:"resolution"`
+	}
+	_ = readJSON(r, &reqBody)
+
+	issue, err := s.getIssue(ctx, name, ns)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found: "+err.Error())
+		return
+	}
+
+	// Only allow resolving Escalated or non-terminal issues
+	if issue.Status.State == v1alpha1.IssueStateResolved {
+		writeError(w, http.StatusConflict, "issue is already resolved")
+		return
+	}
+
+	// Update status to Resolved
+	resolution := reqBody.Resolution
+	if resolution == "" {
+		resolution = "Manually resolved via dashboard"
+	}
+	issue.Status.State = v1alpha1.IssueStateResolved
+	issue.Status.Resolution = resolution
+	now := metav1.Now()
+	issue.Status.ResolvedAt = &now
+
+	if err := s.client.Status().Update(ctx, issue); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve: "+err.Error())
+		return
+	}
+
+	// Add annotation for audit trail
+	if issue.Annotations == nil {
+		issue.Annotations = make(map[string]string)
+	}
+	issue.Annotations["aiops.chatcli.io/resolved-by"] = roleFromContext(ctx)
+	issue.Annotations["aiops.chatcli.io/resolved-at"] = now.Format(time.RFC3339)
+	issue.Annotations["aiops.chatcli.io/manual-resolution"] = "true"
+	_ = s.client.Update(ctx, issue) // Non-fatal — status already updated
+
+	// Invalidate dedup for the resource so new anomalies can be detected
+	if s.watcherBridge != nil {
+		res := issue.Spec.Resource
+		s.watcherBridge.InvalidateDedupForResource(res.Name, res.Namespace)
 	}
 
 	item := issueToIncidentItem(*issue)
