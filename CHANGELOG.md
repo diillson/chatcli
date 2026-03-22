@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.81.0](https://github.com/diillson/chatcli/compare/v1.80.0...v1.81.0) (2026-03-22)
+
+
+### Features
+
+* **aiops:** configurable resilience, auto-resolve, and dedup invalidation ([#673](https://github.com/diillson/chatcli/issues/673)) ([4b6a000](https://github.com/diillson/chatcli/commit/4b6a0004229c084257de503bfb6eeb9221413d48))
+
 ## [1.80.0](https://github.com/diillson/chatcli/compare/v1.79.0...v1.80.0) (2026-03-22)
 
 
