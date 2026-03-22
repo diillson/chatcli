@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.83.0](https://github.com/diillson/chatcli/compare/v1.82.0...v1.83.0) (2026-03-22)
+
+
+### Features
+
+* **aiops:** AI validates candidate runbook before execution ([#681](https://github.com/diillson/chatcli/issues/681)) ([dac1422](https://github.com/diillson/chatcli/commit/dac1422280844e57029a8dd48cbdfcd2eb9719c8))
+
 ## [1.82.0](https://github.com/diillson/chatcli/compare/v1.81.2...v1.82.0) (2026-03-22)
 
 
