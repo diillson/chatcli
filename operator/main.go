@@ -100,6 +100,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Shared components for AIOps pipeline
+	patternStore := controllers.NewPatternStore(mgr.GetClient())
+	costTracker := controllers.NewCostTracker(mgr.GetClient())
+	noiseReducer := controllers.NewNoiseReducer(mgr.GetClient())
+
 	// Shared components for enriched AI analysis
 	contextBuilder := controllers.NewKubernetesContextBuilder(mgr.GetClient(), kubeClientset)
 	logAnalyzer := controllers.NewLogAnalyzer(mgr.GetClient(), kubeClientset)
@@ -114,14 +119,17 @@ func main() {
 		ServerClient:   serverClient,
 		ContextBuilder: contextBuilder,
 		AuditRecorder:  auditRecorder,
+		PatternStore:   patternStore,
+		CostTracker:    costTracker,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Remediation")
 		os.Exit(1)
 	}
 
 	if err = (&controllers.AnomalyReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		NoiseReducer: noiseReducer,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Anomaly")
 		os.Exit(1)
@@ -146,6 +154,7 @@ func main() {
 		SourceCodeAnalyzer:   sourceCodeAnalyzer,
 		CascadeAnalyzer:      cascadeAnalyzer,
 		BlastRadiusPredictor: blastRadiusPredictor,
+		CostTracker:          costTracker,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AIInsight")
 		os.Exit(1)
@@ -188,8 +197,9 @@ func main() {
 
 	// ApprovalReconciler — manages approval workflows for remediation actions
 	if err = (&controllers.ApprovalReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		BlastRadiusPredictor: blastRadiusPredictor,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Approval")
 		os.Exit(1)

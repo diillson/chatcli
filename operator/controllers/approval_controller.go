@@ -52,7 +52,8 @@ const (
 // ApprovalReconciler reconciles ApprovalRequest objects.
 type ApprovalReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme               *runtime.Scheme
+	BlastRadiusPredictor *BlastRadiusPredictor // Predicts impact of remediation actions before approval
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=approvalrequests,verbs=get;list;watch;create;update;patch;delete
@@ -138,6 +139,32 @@ func (r *ApprovalReconciler) reconcilePending(ctx context.Context, ar *platformv
 		} else if !inWindow {
 			logger.Info("Outside change window, requeueing")
 			return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
+		}
+	}
+
+	// Predict blast radius before approval decision (store in annotation, not spec)
+	if r.BlastRadiusPredictor != nil {
+		if ar.Annotations == nil || ar.Annotations["platform.chatcli.io/blast-radius"] == "" {
+			predCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			if plan, err := r.findRemediationPlan(predCtx, ar); err == nil && plan != nil && len(plan.Spec.Actions) > 0 {
+				var issue platformv1alpha1.Issue
+				if err := r.Get(predCtx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: ar.Namespace}, &issue); err == nil {
+					action := &plan.Spec.Actions[0]
+					if prediction, predErr := r.BlastRadiusPredictor.PredictImpact(predCtx, issue.Spec.Resource, action); predErr == nil && prediction != nil {
+						if ar.Annotations == nil {
+							ar.Annotations = make(map[string]string)
+						}
+						ar.Annotations["platform.chatcli.io/blast-radius"] = prediction.FormatForAI()
+						ar.Annotations["platform.chatcli.io/blast-risk-level"] = prediction.RiskLevel
+						if err := r.Update(ctx, ar); err != nil {
+							logger.Error(err, "Failed to update approval with blast radius", "approval", ar.Name)
+						} else {
+							logger.Info("Blast radius predicted", "approval", ar.Name, "risk", prediction.RiskLevel)
+						}
+					}
+				}
+			}
+			cancel()
 		}
 	}
 
@@ -575,6 +602,18 @@ func severityMaxRank(sev platformv1alpha1.IssueSeverity) int {
 // severityToRank returns the numeric rank for a given severity level (used externally).
 func severityToRank(sev platformv1alpha1.IssueSeverity) int {
 	return severityMaxRank(sev)
+}
+
+// findRemediationPlan finds the RemediationPlan associated with an ApprovalRequest.
+func (r *ApprovalReconciler) findRemediationPlan(ctx context.Context, ar *platformv1alpha1.ApprovalRequest) (*platformv1alpha1.RemediationPlan, error) {
+	if ar.Spec.RemediationPlanRef == "" {
+		return nil, nil
+	}
+	var plan platformv1alpha1.RemediationPlan
+	if err := r.Get(ctx, types.NamespacedName{Name: ar.Spec.RemediationPlanRef, Namespace: ar.Namespace}, &plan); err != nil {
+		return nil, err
+	}
+	return &plan, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

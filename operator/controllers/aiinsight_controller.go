@@ -32,6 +32,7 @@ type AIInsightReconciler struct {
 	SourceCodeAnalyzer   *SourceCodeAnalyzer
 	CascadeAnalyzer      *CascadeAnalyzer
 	BlastRadiusPredictor *BlastRadiusPredictor
+	CostTracker          *CostTracker // Records LLM costs per AI analysis call
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=aiinsights,verbs=get;list;watch;update;patch
@@ -227,6 +228,15 @@ func (r *AIInsightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err != nil {
 		logger.Error(err, "AnalyzeIssue RPC failed, requeuing", "issue", issueName)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	// Record LLM cost for this analysis call
+	if r.CostTracker != nil {
+		// Estimate tokens from context length (~4 chars per token) and response length
+		inputTokens := int64(len(combinedContext) / 4)
+		outputTokens := int64(len(resp.Analysis) / 4)
+		_ = r.CostTracker.RecordLLMCost(ctx, insight.Spec.IssueRef, issue.Namespace,
+			insight.Spec.Provider, insight.Spec.Model, inputTokens, outputTokens)
 	}
 
 	// Update AIInsight status with the analysis

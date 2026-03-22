@@ -51,6 +51,7 @@ type AnomalyReconciler struct {
 	client.Client
 	Scheme            *runtime.Scheme
 	CorrelationEngine *CorrelationEngine
+	NoiseReducer      *NoiseReducer // Suppresses repetitive/seasonal/flapping anomalies
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=anomalies,verbs=get;list;watch;create;update;patch;delete
@@ -122,6 +123,22 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		anomaliesProcessed.WithLabelValues("suppressed_cooldown").Inc()
 		return ctrl.Result{}, nil
+	}
+
+	// Noise reduction: suppress repetitive, seasonal, flapping, or high-fatigue anomalies
+	if r.NoiseReducer != nil {
+		if suppress, reason, _ := r.NoiseReducer.ShouldSuppress(ctx, &anomaly); suppress {
+			log.Info("Noise reducer suppressed anomaly",
+				"anomaly", anomaly.Name, "reason", reason)
+			if err := r.CorrelationEngine.MarkAnomalyCorrelated(ctx, &anomaly, "suppressed:"+reason); err != nil {
+				return ctrl.Result{}, fmt.Errorf("marking anomaly as suppressed: %w", err)
+			}
+			anomaliesProcessed.WithLabelValues("suppressed_noise").Inc()
+			return ctrl.Result{}, nil
+		}
+		if err := r.NoiseReducer.RecordAnomaly(ctx, &anomaly); err != nil {
+			log.Error(err, "Failed to record anomaly pattern (non-blocking)", "anomaly", anomaly.Name)
+		}
 	}
 
 	// No existing issue — find related anomalies and create a new Issue

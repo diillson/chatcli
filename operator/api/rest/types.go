@@ -185,6 +185,7 @@ type ApprovalItem struct {
 	DecidedAt         *string           `json:"decidedAt,omitempty"`
 	CreationTimestamp string            `json:"creationTimestamp"`
 	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
 }
 
 // ApprovalDecisionRequest is the body for approve/reject.

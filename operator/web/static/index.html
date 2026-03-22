@@ -606,6 +606,17 @@ tr.expandable { cursor: pointer; }
         <div class="panel-body" id="remediationTimeline"></div>
       </div>
     </div>
+    <div id="capacityWarnings"></div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Compliance & SLA</span></div>
+        <div class="panel-body" id="complianceCard"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Remediation by Strategy</span></div>
+        <div class="panel-body" id="remediationStrategyChart"></div>
+      </div>
+    </div>
     <div class="panel">
       <div class="panel-header"><span class="panel-title">Recent Incidents</span></div>
       <div class="panel-body table-wrap" id="recentIncidentsTable"></div>
@@ -734,6 +745,7 @@ tr.expandable { cursor: pointer; }
   <!-- CLUSTERS PAGE -->
   <div class="page" id="page-clusters">
     <div class="stats-grid" id="clusterSummary"></div>
+    <div id="federationPanel"></div>
     <div class="grid-3" id="clusterCards"></div>
   </div>
 
@@ -1123,6 +1135,8 @@ async function loadOverview() {
   loadSeverityPie();
   loadRecentIncidents();
   loadRemediationTimeline();
+  loadComplianceCard();
+  loadCapacityWarnings();
 }
 
 async function loadOverviewStats() {
@@ -1375,8 +1389,11 @@ function buildIncidentExpandRow(item) {
         ${item.resolvedAt ? `<span>Resolved: ${new Date(item.resolvedAt).toLocaleString()}</span>` : ''}
         ${item.detectedAt && item.resolvedAt ? `<span>Duration: ${formatDuration(new Date(item.resolvedAt) - new Date(item.detectedAt))}</span>` : ''}
       </div>
+      <div id="ai-preview-${escapeHtml(item.name)}" style="margin-top:0.5rem;"></div>
     </div>
   </td>`;
+  // Async load AI insight preview for this incident
+  loadAIInsightPreview(item.name);
   return tr;
 }
 
@@ -1390,6 +1407,29 @@ function formatDuration(ms) {
   if (hrs < 24) return hrs + 'h ' + (mins % 60) + 'm';
   const days = Math.floor(hrs / 24);
   return days + 'd ' + (hrs % 24) + 'h';
+}
+
+// Enhancement #4/#8: Load AI insight preview inline in incident expand row
+async function loadAIInsightPreview(incidentName) {
+  const el = document.getElementById('ai-preview-' + incidentName);
+  if (!el) return;
+  try {
+    const data = await apiFetch('/aiinsights?issue=' + encodeURIComponent(incidentName) + '&pageSize=1');
+    const items = data.items || [];
+    if (items.length === 0) return;
+    const ai = items[0];
+    const confPct = ((ai.confidence || 0) * 100).toFixed(0);
+    const confColor = ai.confidence >= 0.85 ? 'var(--sev-low)' : ai.confidence >= 0.7 ? 'var(--sev-medium)' : 'var(--sev-high)';
+    const recs = (ai.recommendations || []).slice(0, 3);
+    el.innerHTML = `
+      <h4 style="display:flex;align-items:center;gap:0.5rem;">AI Analysis
+        <span style="background:${confColor}; color:#fff; padding:0.1rem 0.4rem; border-radius:4px; font-size:0.7rem;">${confPct}% confidence</span>
+        <span style="font-size:0.7rem; color:var(--text-dim)">${escapeHtml(ai.provider || '')} / ${escapeHtml(ai.model || '')}</span>
+      </h4>
+      <p style="font-size:0.8rem; max-height:100px; overflow-y:auto; white-space:pre-wrap;">${escapeHtml((ai.analysis || '').substring(0, 500))}${(ai.analysis || '').length > 500 ? '...' : ''}</p>
+      ${recs.length > 0 ? `<div style="font-size:0.8rem;"><strong>Recommendations:</strong><ul style="margin:0.2rem 0 0 1rem;">${recs.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>` : ''}
+    `;
+  } catch (e) { /* silent */ }
 }
 
 async function ackIncident(name, ns) {
@@ -1548,6 +1588,7 @@ async function loadApprovals() {
           <strong>Action:</strong> ${escapeHtml(item.action || '-')}<br>
           <strong>Resource:</strong> ${escapeHtml(item.resource || '-')}<br>
           <strong>Reason:</strong> ${escapeHtml(item.reason || '-')}
+          ${(item.annotations && item.annotations['platform.chatcli.io/blast-risk-level']) ? `<br><strong>Blast Radius:</strong> <span style="color:${item.annotations['platform.chatcli.io/blast-risk-level'] === 'critical' ? 'var(--sev-critical)' : item.annotations['platform.chatcli.io/blast-risk-level'] === 'high' ? 'var(--sev-high)' : 'var(--sev-medium)'}; font-weight:600">${escapeHtml(item.annotations['platform.chatcli.io/blast-risk-level']).toUpperCase()}</span>` : ''}
         </div>
         ${item.state === 'Pending' ? `
           <div class="input-group">
@@ -1962,12 +2003,151 @@ function buildRemExpandRow(item) {
   return tr;
 }
 
+// ===== OVERVIEW ENHANCEMENTS =====
+
+// Enhancement #2: Compliance & SLA metrics
+async function loadComplianceCard() {
+  const el = $('#complianceCard');
+  if (!el) return;
+  try {
+    const data = await apiFetch('/analytics/compliance?' + getTimeRangeQuery());
+    const r = data.spec || {};
+    const inc = r.IncidentMetrics || {};
+    const sla = r.SLAMetrics || {};
+    const approval = r.ApprovalMetrics || {};
+    const compPct = sla.CompliancePercentage || 0;
+    const compColor = compPct >= 95 ? 'var(--sev-low)' : compPct >= 80 ? 'var(--sev-medium)' : 'var(--sev-critical)';
+    el.innerHTML = `
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+        <div>
+          <div style="font-size:2rem; font-weight:700; color:${compColor}">${compPct.toFixed(1)}%</div>
+          <div style="color:var(--text-muted); font-size:0.8rem">SLA Compliance</div>
+        </div>
+        <div style="font-size:0.85rem; color:var(--text-muted)">
+          <div>MTTD: ${inc.MTTD ? formatDuration(inc.MTTD / 1e6) : '-'}</div>
+          <div>MTTR: ${inc.MTTR ? formatDuration(inc.MTTR / 1e6) : '-'}</div>
+          <div>Response violations: ${sla.ResponseSLAViolations || 0}</div>
+          <div>Resolution violations: ${sla.ResolutionSLAViolations || 0}</div>
+          <div>Approvals (auto/manual): ${approval.AutoApproved || 0}/${approval.ManualApproved || 0}</div>
+        </div>
+      </div>`;
+  } catch (e) {
+    el.innerHTML = '<p style="color:var(--text-muted); font-size:0.8rem">Compliance data unavailable</p>';
+  }
+}
+
+// Enhancement #3: Capacity warnings
+async function loadCapacityWarnings() {
+  const el = $('#capacityWarnings');
+  if (!el) return;
+  try {
+    const data = await apiFetch('/analytics/capacity?' + getTimeRangeQuery());
+    const items = data.items || [];
+    if (items.length === 0) { el.innerHTML = ''; return; }
+    const warnings = items.filter(f => f.Urgency === 'urgent' || f.Urgency === 'plan');
+    if (warnings.length === 0) { el.innerHTML = ''; return; }
+    el.innerHTML = `
+      <div class="panel" style="border-left:3px solid var(--warning); margin-bottom:1rem;">
+        <div class="panel-header"><span class="panel-title" style="color:var(--warning)">Capacity Warnings (${warnings.length})</span></div>
+        <div class="panel-body">
+          ${warnings.map(w => {
+            const res = w.Resource || {};
+            const urgColor = w.Urgency === 'urgent' ? 'var(--sev-critical)' : 'var(--sev-medium)';
+            return `<div style="padding:0.3rem 0; border-bottom:1px solid var(--border);">
+              <span style="color:${urgColor}; font-weight:600; text-transform:uppercase; font-size:0.7rem">${escapeHtml(w.Urgency || 'unknown')}</span>
+              ${resourceKindBadge(res.Kind || 'Unknown')} ${escapeHtml(res.Name || '-')}
+              <span style="color:var(--text-muted); font-size:0.8rem">— ${escapeHtml(w.Recommendation || '')}</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  } catch (e) {
+    el.innerHTML = '';
+  }
+}
+
+// Enhancement #10: Remediation success by strategy (in Overview)
+async function loadRemediationStrategyChart() {
+  const el = $('#remediationStrategyChart');
+  if (!el) return;
+  try {
+    const data = await apiFetch('/analytics/remediation-stats?' + getTimeRangeQuery());
+    const items = data.items || [];
+    if (items.length === 0) { el.innerHTML = '<p style="color:var(--text-muted)">No remediation data</p>'; return; }
+    const sorted = items.sort((a, b) => (b.total || 0) - (a.total || 0)).slice(0, 8);
+    el.innerHTML = sorted.map(s => {
+      const rate = s.successRate != null ? (s.successRate * 100).toFixed(0) : 0;
+      const barColor = rate >= 80 ? 'var(--sev-low)' : rate >= 50 ? 'var(--sev-medium)' : 'var(--sev-critical)';
+      return `<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem;">
+        <span style="min-width:130px; font-size:0.75rem; color:var(--text-muted)">${escapeHtml(s.action || 'Unknown')}</span>
+        <div style="flex:1; background:var(--accent); border-radius:4px; height:16px; overflow:hidden;">
+          <div style="width:${rate}%; background:${barColor}; height:100%; border-radius:4px; transition:width 0.3s;"></div>
+        </div>
+        <span style="min-width:40px; text-align:right; font-size:0.75rem; font-weight:600; color:${barColor}">${rate}%</span>
+        <span style="min-width:30px; text-align:right; font-size:0.7rem; color:var(--text-dim)">(${s.total || 0})</span>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = '<p style="color:var(--text-muted); font-size:0.8rem">Stats unavailable</p>';
+  }
+}
+
+// Enhancement #5: Federation panel in Clusters tab
+async function loadFederationPanel() {
+  const el = $('#federationPanel');
+  if (!el) return;
+  try {
+    const [statusData, corrData] = await Promise.all([
+      apiFetch('/federation/status').catch(() => null),
+      apiFetch('/federation/correlations').catch(() => null)
+    ]);
+    const status = statusData ? (statusData.spec || {}) : null;
+    const correlations = corrData ? (corrData.items || []) : [];
+    if (!status && correlations.length === 0) { el.innerHTML = ''; return; }
+
+    let html = '<div class="panel" style="margin-bottom:1rem;"><div class="panel-header"><span class="panel-title">Federation</span></div><div class="panel-body">';
+    if (status) {
+      html += `<div class="stats-grid" style="margin-bottom:0.5rem;">
+        <div class="stat-card"><div class="stat-label">Connected</div><div class="stat-value" style="color:var(--sev-low)">${status.connectedClusters || 0}</div></div>
+        <div class="stat-card"><div class="stat-label">Disconnected</div><div class="stat-value" style="color:var(--sev-critical)">${status.disconnectedClusters || 0}</div></div>
+        <div class="stat-card"><div class="stat-label">Active Issues</div><div class="stat-value" style="color:var(--warning)">${status.totalActiveIssues || 0}</div></div>
+      </div>`;
+    }
+    if (correlations.length > 0) {
+      html += `<h4 style="margin:0.5rem 0 0.3rem; font-size:0.85rem;">Cross-Cluster Correlations (${correlations.length})</h4>`;
+      html += correlations.map(c => `
+        <div style="padding:0.3rem 0; border-bottom:1px solid var(--border); font-size:0.8rem;">
+          ${severityBadge(c.severity || 'low')}
+          <strong>${escapeHtml(c.issue || '-')}</strong>
+          <span style="color:var(--text-muted)">— ${escapeHtml(c.signalType || '-')}</span>
+          ${c.cascade ? '<span style="color:var(--sev-critical); font-size:0.7rem; margin-left:0.3rem">CASCADE</span>' : ''}
+          ${c.elevated ? '<span style="color:var(--sev-high); font-size:0.7rem; margin-left:0.3rem">ELEVATED</span>' : ''}
+          ${c.correlatedClusters ? `<span style="color:var(--text-dim); font-size:0.7rem; margin-left:0.3rem">${escapeHtml(c.correlatedClusters)}</span>` : ''}
+        </div>`).join('');
+    }
+    html += '</div></div>';
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = '';
+  }
+}
+
+// Call remediation strategy chart from Overview
+(function() {
+  const origLoadOverview = loadOverview;
+  loadOverview = async function() {
+    await origLoadOverview();
+    loadRemediationStrategyChart();
+  };
+})();
+
 // ===== CLUSTERS PAGE =====
 
 async function loadClusters() {
   const summaryEl = $('#clusterSummary');
   const cardsEl = $('#clusterCards');
   showLoading(cardsEl);
+  loadFederationPanel();
   try {
     const data = await apiFetch('/clusters/global-status');
     const status = data.spec || {};
