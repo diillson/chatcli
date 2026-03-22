@@ -1071,19 +1071,23 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 		return err
 	}
 
-	// Update status
-	pm.Status = platformv1alpha1.PostMortemStatus{
-		State:             platformv1alpha1.PostMortemStateOpen,
-		Summary:           summary,
-		RootCause:         rootCause,
-		Impact:            impact,
-		Timeline:          timeline,
-		ActionsExecuted:   actions,
-		LessonsLearned:    lessonsLearned,
-		PreventionActions: preventionActions,
-		Duration:          duration,
-		GeneratedAt:       &now,
+	// Re-fetch to get the latest resourceVersion (PostMortemReconciler may have
+	// already initialized the state to Open, changing the resourceVersion).
+	if err := r.Get(ctx, types.NamespacedName{Name: pm.Name, Namespace: pm.Namespace}, pm); err != nil {
+		return fmt.Errorf("re-fetching PostMortem before status update: %w", err)
 	}
+
+	// Apply all status fields on the fresh object
+	pm.Status.State = platformv1alpha1.PostMortemStateOpen
+	pm.Status.Summary = summary
+	pm.Status.RootCause = rootCause
+	pm.Status.Impact = impact
+	pm.Status.Timeline = timeline
+	pm.Status.ActionsExecuted = actions
+	pm.Status.LessonsLearned = lessonsLearned
+	pm.Status.PreventionActions = preventionActions
+	pm.Status.Duration = duration
+	pm.Status.GeneratedAt = &now
 
 	// Enrich with trending data (recurring incident detection)
 	pm.Status.Trending = r.buildTrendingInfo(ctx, issue)

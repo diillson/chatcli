@@ -1057,13 +1057,7 @@ func (s *APIServer) handlePostMortemStateChange(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	pm.Status.State = targetState
-	now := metav1.Now()
-	if targetState == v1alpha1.PostMortemStateInReview || targetState == v1alpha1.PostMortemStateClosed {
-		pm.Status.ReviewedAt = &now
-	}
-
-	// Add reviewer annotation if provided.
+	// Add reviewer annotation if provided (metadata update first).
 	if reqBody.Reviewer != "" {
 		if pm.Annotations == nil {
 			pm.Annotations = make(map[string]string)
@@ -1072,11 +1066,22 @@ func (s *APIServer) handlePostMortemStateChange(w http.ResponseWriter, r *http.R
 		if reqBody.Notes != "" {
 			pm.Annotations["aiops.chatcli.io/review-notes"] = reqBody.Notes
 		}
-		// Update the object metadata first.
 		if err := s.client.Update(ctx, &pm); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update postmortem metadata: "+err.Error())
 			return
 		}
+		// Re-fetch to get the latest resourceVersion after metadata update.
+		if err := s.client.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &pm); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to re-fetch postmortem: "+err.Error())
+			return
+		}
+	}
+
+	// Now update status with correct resourceVersion.
+	pm.Status.State = targetState
+	now := metav1.Now()
+	if targetState == v1alpha1.PostMortemStateInReview || targetState == v1alpha1.PostMortemStateClosed {
+		pm.Status.ReviewedAt = &now
 	}
 
 	if err := s.client.Status().Update(ctx, &pm); err != nil {

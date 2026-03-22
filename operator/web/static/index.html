@@ -681,18 +681,46 @@ tr.expandable { cursor: pointer; }
       <input class="filter-input" id="auditSearch" placeholder="Search events..." style="width:220px">
       <select class="filter-select" id="auditTypeFilter">
         <option value="">All Types</option>
-        <option value="remediation">Remediation</option>
-        <option value="approval">Approval</option>
-        <option value="escalation">Escalation</option>
-        <option value="detection">Detection</option>
+        <optgroup label="Issues">
+          <option value="issue_created">Issue Created</option>
+          <option value="issue_resolved">Issue Resolved</option>
+          <option value="issue_escalated">Issue Escalated</option>
+        </optgroup>
+        <optgroup label="Remediation">
+          <option value="remediation_started">Remediation Started</option>
+          <option value="remediation_completed">Remediation Completed</option>
+          <option value="remediation_failed">Remediation Failed</option>
+        </optgroup>
+        <optgroup label="Approvals">
+          <option value="approval_requested">Approval Requested</option>
+          <option value="approval_granted">Approval Granted</option>
+          <option value="approval_rejected">Approval Rejected</option>
+          <option value="approval_expired">Approval Expired</option>
+        </optgroup>
+        <optgroup label="Operations">
+          <option value="escalation_triggered">Escalation Triggered</option>
+          <option value="notification_sent">Notification Sent</option>
+          <option value="postmortem_created">PostMortem Created</option>
+          <option value="runbook_generated">Runbook Generated</option>
+        </optgroup>
+        <optgroup label="SLO/SLA">
+          <option value="slo_violation">SLO Violation</option>
+          <option value="sla_breach">SLA Breach</option>
+        </optgroup>
+        <optgroup label="Clusters">
+          <option value="cluster_connected">Cluster Connected</option>
+          <option value="cluster_disconnected">Cluster Disconnected</option>
+        </optgroup>
+        <optgroup label="System">
+          <option value="pattern_learned">Pattern Learned</option>
+          <option value="config_changed">Config Changed</option>
+        </optgroup>
       </select>
       <select class="filter-select" id="auditSevFilter">
         <option value="">All Severities</option>
-        <option value="critical">Critical</option>
-        <option value="high">High</option>
-        <option value="medium">Medium</option>
-        <option value="low">Low</option>
         <option value="info">Info</option>
+        <option value="warning">Warning</option>
+        <option value="critical">Critical</option>
       </select>
       <button class="btn btn-primary" onclick="loadAudit()">Apply</button>
       <button class="btn" onclick="exportAudit()">Export JSON</button>
