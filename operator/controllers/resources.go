@@ -613,8 +613,10 @@ func buildWatchConfigYAML(watcher *platformv1alpha1.WatcherSpec) string {
 	}
 
 	b.WriteString("targets:\n")
-	for _, t := range watcher.Targets {
-		b.WriteString(fmt.Sprintf("  - deployment: %q\n", t.Deployment))
+	for i := range watcher.Targets {
+		t := &watcher.Targets[i]
+		b.WriteString(fmt.Sprintf("  - deployment: %q\n", t.ResourceName()))
+		b.WriteString(fmt.Sprintf("    kind: %q\n", t.ResourceKind()))
 		ns := t.Namespace
 		if ns == "" {
 			ns = "default"

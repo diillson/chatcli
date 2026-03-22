@@ -832,7 +832,7 @@ targets:
 	cfg, err := LoadMultiWatchConfig(path)
 	assert.Error(t, err)
 	assert.Nil(t, cfg)
-	assert.Contains(t, err.Error(), "deployment is required")
+	assert.Contains(t, err.Error(), "deployment (resource name) is required")
 }
 
 func TestMultiLoadMultiWatchConfig_FileNotFound(t *testing.T) {
@@ -915,5 +915,5 @@ func TestMultiSingleTargetToMulti_TargetKey(t *testing.T) {
 		Namespace:  "staging",
 	}
 	multi := SingleTargetToMulti(cfg)
-	assert.Equal(t, "staging/myapp", multi.Targets[0].Key())
+	assert.Equal(t, "Deployment/staging/myapp", multi.Targets[0].Key())
 }

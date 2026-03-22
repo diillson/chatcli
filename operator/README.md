@@ -109,13 +109,19 @@ The operator implements a fully autonomous pipeline:
 5. EXECUTION     RemediationReconciler executes actions:
                    Standard mode: all actions executed sequentially
                    Agentic mode:  AI decides each action, observes result, decides next
-                   Supported actions:
-                   - ScaleDeployment (adjust replicas)
-                   - RestartDeployment (rollout restart)
-                   - RollbackDeployment (undo rollout — previous/healthy/specific rev)
-                   - PatchConfig (update ConfigMap)
-                   - AdjustResources (change CPU/memory requests/limits)
-                   - DeletePod (remove most-unhealthy pod)
+                   54 supported actions across 9 categories:
+                   Deployment: Scale, Restart, Rollback, AdjustResources, DeletePod, PatchConfig
+                   StatefulSet: Scale, Restart, Rollback (ControllerRevision), AdjustResources,
+                     DeletePod, ForceDelete, UpdateStrategy, RecreatePVC, PartitionUpdate
+                   DaemonSet: Restart, Rollback (ControllerRevision), AdjustResources,
+                     DeletePod, UpdateStrategy, PauseRollout, CordonAndDelete
+                   Job: Retry, AdjustResources, DeleteFailed, Suspend, Resume,
+                     AdjustParallelism, AdjustDeadline, AdjustBackoffLimit, ForceDeletePods
+                   CronJob: Suspend, Resume, Trigger, AdjustResources, AdjustSchedule,
+                     AdjustDeadline, AdjustHistory, AdjustConcurrency, DeleteActiveJobs, ReplaceTemplate
+                   Generic: HelmRollback, ArgoSync, AdjustHPA, CordonNode, DrainNode,
+                     ResizePVC, RotateSecret, ExecDiagnostic, UpdateIngress,
+                     PatchNetworkPolicy, ApplyManifest
 
 6. RESOLUTION    On success → Issue resolved, dedup entries invalidated
                  On failure → Re-analysis with failure context (different strategy)
@@ -168,11 +174,20 @@ spec:
     enabled: true
     interval: "30s"
     targets:
-      - deployment: api-gateway
+      - name: api-gateway
         namespace: production
         metricsPort: 9090
-      - deployment: worker
+      - name: worker
         namespace: batch
+      - name: postgres                # StatefulSet monitoring
+        kind: StatefulSet
+        namespace: production
+      - name: fluentd                 # DaemonSet monitoring
+        kind: DaemonSet
+        namespace: logging
+      - name: etl-pipeline            # CronJob monitoring
+        kind: CronJob
+        namespace: data
   agents:
     configMapRef: chatcli-agents         # ConfigMap with agent .md files
     skillsConfigMapRef: chatcli-skills   # ConfigMap with skill .md files
@@ -493,7 +508,7 @@ The operator uses a tiered remediation approach:
 
 **Retry with Strategy Escalation**: When remediation fails, the operator triggers AI re-analysis with failure evidence from previous attempts. The AI is instructed to suggest a fundamentally different strategy.
 
-**Supported actions**: `ScaleDeployment`, `RestartDeployment`, `RollbackDeployment` (previous/healthy/specific revision), `PatchConfig`, `AdjustResources` (CPU/memory), `DeletePod` (most-unhealthy), `Custom` (blocked by safety checks)
+**Supported actions (54 types)**: **Deployment**: `ScaleDeployment`, `RestartDeployment`, `RollbackDeployment` (previous/healthy/specific), `AdjustResources`, `DeletePod`, `PatchConfig` | **StatefulSet**: `ScaleStatefulSet`, `RestartStatefulSet`, `RollbackStatefulSet` (ControllerRevision), `AdjustStatefulSetResources`, `DeleteStatefulSetPod`, `ForceDeleteStatefulSetPod`, `UpdateStatefulSetStrategy`, `RecreateStatefulSetPVC`, `PartitionStatefulSetUpdate` | **DaemonSet**: `RestartDaemonSet`, `RollbackDaemonSet` (ControllerRevision), `AdjustDaemonSetResources`, `DeleteDaemonSetPod`, `UpdateDaemonSetStrategy`, `PauseDaemonSetRollout`, `CordonAndDeleteDaemonSetPod` | **Job**: `RetryJob`, `AdjustJobResources`, `DeleteFailedJob`, `SuspendJob`, `ResumeJob`, `AdjustJobParallelism`, `AdjustJobDeadline`, `AdjustJobBackoffLimit`, `ForceDeleteJobPods` | **CronJob**: `SuspendCronJob`, `ResumeCronJob`, `TriggerCronJob`, `AdjustCronJobResources`, `AdjustCronJobSchedule`, `AdjustCronJobDeadline`, `AdjustCronJobHistory`, `AdjustCronJobConcurrency`, `DeleteCronJobActiveJobs`, `ReplaceCronJobTemplate` | **GitOps**: `HelmRollback`, `ArgoSyncApp` | **Infra**: `CordonNode`, `DrainNode` | **Other**: `AdjustHPA`, `ResizePVC`, `RotateSecret`, `ExecDiagnostic`, `UpdateIngress`, `PatchNetworkPolicy`, `ApplyManifest`, `Custom` (blocked)
 
 Priority: **Manual Runbook > Auto-generated Runbook > Agentic AI > Escalation**
 
@@ -505,7 +520,7 @@ cd operator
 # Build
 go build ./...
 
-# Test (96 test functions, 125 with subtests)
+# Test (130 test functions, 185 with subtests)
 go test ./... -v
 
 # Docker (must be built from repo root due to go.mod replace directive)
@@ -525,13 +540,13 @@ make deploy IMG=ghcr.io/diillson/chatcli-operator:latest
 | InstanceReconciler | 15 | CRUD, watcher, persistence, replicas, RBAC, deletion |
 | AnomalyReconciler | 4 | Creation, correlation, existing issue attachment |
 | IssueReconciler | 12 | State machine, AI fallback, retry, agentic plan creation, PostMortem generation |
-| RemediationReconciler | 16 | All action types, safety checks, agentic loop (first step, resolved, max steps, timeout, action failed, observation) |
+| RemediationReconciler | 38 | All 54 action types (Deployment + StatefulSet + DaemonSet + Job + CronJob), safety constraints, agentic loop, rollback, verification |
 | AIInsightReconciler | 12 | Server connectivity, RPC mock, analysis parsing, withAuth, ConnectionOpts |
 | PostMortemReconciler | 2 | State initialization, terminal state |
 | WatcherBridge | 22 | Alert mapping, dedup, hash, pruning, anomaly creation, TLS/token buildConnectionOpts |
 | CorrelationEngine | 4 | Risk scoring, severity, incident ID, related anomalies |
 | Pipeline (E2E) | 3 | Full flow: Anomaly→Issue→Insight→Plan→Resolved, escalation, correlation |
-| MapActionType | 6 | All action type string→enum mappings |
+| MapActionType | 6+17 | All 54 action type string→enum mappings (Deployment + StatefulSet + DaemonSet + Job + CronJob) |
 
 ## Documentation
 

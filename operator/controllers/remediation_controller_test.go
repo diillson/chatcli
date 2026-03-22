@@ -7,6 +7,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -1287,5 +1288,627 @@ func TestAgentic_ObservationStep(t *testing.T) {
 	}
 	if !strings.Contains(step.Observation, "Observation step") {
 		t.Errorf("expected 'Observation step' in observation, got %q", step.Observation)
+	}
+}
+
+// ============================================================================
+// Test Helpers for New Resource Types
+// ============================================================================
+
+func newStatefulSet(name, ns string, replicas int32) *appsv1.StatefulSet {
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, UID: "sts-uid"},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: name, Image: "test:latest"}}},
+			},
+			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.RollingUpdateStatefulSetStrategyType},
+		},
+	}
+}
+
+func newDaemonSet(name, ns string) *appsv1.DaemonSet {
+	return &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, UID: "ds-uid"},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: name, Image: "test:latest"}}},
+			},
+			UpdateStrategy: appsv1.DaemonSetUpdateStrategy{Type: appsv1.RollingUpdateDaemonSetStrategyType},
+		},
+		Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 3, NumberReady: 3},
+	}
+}
+
+func newJob(name, ns string) *batchv1.Job {
+	p := int32(1)
+	bl := int32(3)
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, UID: "job-uid"},
+		Spec: batchv1.JobSpec{
+			Parallelism:  &p,
+			BackoffLimit: &bl,
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers:    []corev1.Container{{Name: name, Image: "test:latest"}},
+					RestartPolicy: corev1.RestartPolicyNever,
+				},
+			},
+		},
+	}
+}
+
+func newCronJob(name, ns string) *batchv1.CronJob {
+	return &batchv1.CronJob{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, UID: "cj-uid"},
+		Spec: batchv1.CronJobSpec{
+			Schedule: "*/5 * * * *",
+			JobTemplate: batchv1.JobTemplateSpec{
+				Spec: batchv1.JobSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers:    []corev1.Container{{Name: name, Image: "test:latest"}},
+							RestartPolicy: corev1.RestartPolicyNever,
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func newRemediationPlanForAction(name, ns, issueName string, actionType platformv1alpha1.RemediationActionType, params map[string]string) *platformv1alpha1.RemediationPlan {
+	now := metav1.Now()
+	return &platformv1alpha1.RemediationPlan{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, UID: "plan-uid-new"},
+		Spec: platformv1alpha1.RemediationPlanSpec{
+			IssueRef: platformv1alpha1.IssueRef{Name: issueName},
+			Attempt:  1,
+			Strategy: "test",
+			Actions:  []platformv1alpha1.RemediationAction{{Type: actionType, Params: params}},
+		},
+		Status: platformv1alpha1.RemediationPlanStatus{
+			State:     platformv1alpha1.RemediationStateExecuting,
+			StartedAt: &now,
+		},
+	}
+}
+
+// ============================================================================
+// StatefulSet Tests
+// ============================================================================
+
+func TestRemediationReconcile_ScaleStatefulSet(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "StatefulSet", Name: "db", Namespace: "default"}
+	sts := newStatefulSet("db", "default", 3)
+	plan := newRemediationPlanForAction("scale-sts", "default", "test-issue",
+		platformv1alpha1.ActionScaleStatefulSet, map[string]string{"replicas": "5"})
+
+	r, c := setupFakeRemediationReconciler(issue, plan, sts)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "scale-sts", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated appsv1.StatefulSet
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "db", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get STS: %v", err)
+	}
+	if *updated.Spec.Replicas != 5 {
+		t.Errorf("expected 5 replicas, got %d", *updated.Spec.Replicas)
+	}
+}
+
+func TestRemediationReconcile_RestartStatefulSet(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "StatefulSet", Name: "db", Namespace: "default"}
+	sts := newStatefulSet("db", "default", 3)
+	plan := newRemediationPlanForAction("restart-sts", "default", "test-issue",
+		platformv1alpha1.ActionRestartStatefulSet, nil)
+
+	r, c := setupFakeRemediationReconciler(issue, plan, sts)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "restart-sts", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated appsv1.StatefulSet
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "db", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get STS: %v", err)
+	}
+	if _, ok := updated.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]; !ok {
+		t.Error("expected restart annotation on StatefulSet")
+	}
+}
+
+func TestRemediationReconcile_AdjustStatefulSetResources(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "StatefulSet", Name: "db", Namespace: "default"}
+	sts := newStatefulSet("db", "default", 3)
+	plan := newRemediationPlanForAction("adjust-sts", "default", "test-issue",
+		platformv1alpha1.ActionAdjustStatefulSetResources, map[string]string{"memory_limit": "2Gi"})
+
+	r, c := setupFakeRemediationReconciler(issue, plan, sts)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "adjust-sts", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated appsv1.StatefulSet
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "db", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get STS: %v", err)
+	}
+	memLimit := updated.Spec.Template.Spec.Containers[0].Resources.Limits.Memory()
+	if memLimit.String() != "2Gi" {
+		t.Errorf("expected memory_limit=2Gi, got %s", memLimit.String())
+	}
+}
+
+func TestRemediationReconcile_PartitionStatefulSetUpdate(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "StatefulSet", Name: "db", Namespace: "default"}
+	sts := newStatefulSet("db", "default", 5)
+	plan := newRemediationPlanForAction("partition-sts", "default", "test-issue",
+		platformv1alpha1.ActionPartitionStatefulSetUpdate, map[string]string{"partition": "3"})
+
+	r, c := setupFakeRemediationReconciler(issue, plan, sts)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "partition-sts", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated appsv1.StatefulSet
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "db", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get STS: %v", err)
+	}
+	if updated.Spec.UpdateStrategy.RollingUpdate == nil || *updated.Spec.UpdateStrategy.RollingUpdate.Partition != 3 {
+		t.Error("expected partition=3 on StatefulSet")
+	}
+}
+
+func TestSafetyConstraint_ScaleStatefulSetToZero(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "StatefulSet", Name: "db", Namespace: "default"}
+	sts := newStatefulSet("db", "default", 3)
+	plan := newRemediationPlanForAction("scale-sts-0", "default", "test-issue",
+		platformv1alpha1.ActionScaleStatefulSet, map[string]string{"replicas": "0"})
+	plan.Status.State = platformv1alpha1.RemediationStatePending
+
+	r, c := setupFakeRemediationReconciler(issue, plan, sts)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "scale-sts-0", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated platformv1alpha1.RemediationPlan
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "scale-sts-0", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get plan: %v", err)
+	}
+	if updated.Status.State != platformv1alpha1.RemediationStateFailed {
+		t.Errorf("expected Failed state for scale-to-0, got %q", updated.Status.State)
+	}
+}
+
+// ============================================================================
+// DaemonSet Tests
+// ============================================================================
+
+func TestRemediationReconcile_RestartDaemonSet(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "DaemonSet", Name: "agent", Namespace: "default"}
+	ds := newDaemonSet("agent", "default")
+	plan := newRemediationPlanForAction("restart-ds", "default", "test-issue",
+		platformv1alpha1.ActionRestartDaemonSet, nil)
+
+	r, c := setupFakeRemediationReconciler(issue, plan, ds)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "restart-ds", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated appsv1.DaemonSet
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "agent", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get DS: %v", err)
+	}
+	if _, ok := updated.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]; !ok {
+		t.Error("expected restart annotation on DaemonSet")
+	}
+}
+
+func TestRemediationReconcile_AdjustDaemonSetResources(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "DaemonSet", Name: "agent", Namespace: "default"}
+	ds := newDaemonSet("agent", "default")
+	plan := newRemediationPlanForAction("adjust-ds", "default", "test-issue",
+		platformv1alpha1.ActionAdjustDaemonSetResources, map[string]string{"memory_limit": "512Mi"})
+
+	r, c := setupFakeRemediationReconciler(issue, plan, ds)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "adjust-ds", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated appsv1.DaemonSet
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "agent", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get DS: %v", err)
+	}
+	memLimit := updated.Spec.Template.Spec.Containers[0].Resources.Limits.Memory()
+	if memLimit.String() != "512Mi" {
+		t.Errorf("expected memory_limit=512Mi, got %s", memLimit.String())
+	}
+}
+
+func TestRemediationReconcile_PauseDaemonSetRollout(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "DaemonSet", Name: "agent", Namespace: "default"}
+	ds := newDaemonSet("agent", "default")
+	plan := newRemediationPlanForAction("pause-ds", "default", "test-issue",
+		platformv1alpha1.ActionPauseDaemonSetRollout, nil)
+
+	r, c := setupFakeRemediationReconciler(issue, plan, ds)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "pause-ds", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated appsv1.DaemonSet
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "agent", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get DS: %v", err)
+	}
+	if updated.Spec.UpdateStrategy.RollingUpdate == nil || updated.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable.IntValue() != 0 {
+		t.Error("expected maxUnavailable=0 for paused DaemonSet")
+	}
+}
+
+// ============================================================================
+// Job Tests
+// ============================================================================
+
+func TestRemediationReconcile_SuspendJob(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "Job", Name: "batch", Namespace: "default"}
+	job := newJob("batch", "default")
+	plan := newRemediationPlanForAction("suspend-job", "default", "test-issue",
+		platformv1alpha1.ActionSuspendJob, nil)
+
+	r, c := setupFakeRemediationReconciler(issue, plan, job)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "suspend-job", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated batchv1.Job
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "batch", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get Job: %v", err)
+	}
+	if updated.Spec.Suspend == nil || !*updated.Spec.Suspend {
+		t.Error("expected Job to be suspended")
+	}
+}
+
+func TestRemediationReconcile_ResumeJob(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "Job", Name: "batch", Namespace: "default"}
+	job := newJob("batch", "default")
+	tr := true
+	job.Spec.Suspend = &tr
+	plan := newRemediationPlanForAction("resume-job", "default", "test-issue",
+		platformv1alpha1.ActionResumeJob, nil)
+
+	r, c := setupFakeRemediationReconciler(issue, plan, job)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "resume-job", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated batchv1.Job
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "batch", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get Job: %v", err)
+	}
+	if updated.Spec.Suspend == nil || *updated.Spec.Suspend {
+		t.Error("expected Job to be resumed (suspend=false)")
+	}
+}
+
+func TestRemediationReconcile_AdjustJobParallelism(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "Job", Name: "batch", Namespace: "default"}
+	job := newJob("batch", "default")
+	plan := newRemediationPlanForAction("parallelism-job", "default", "test-issue",
+		platformv1alpha1.ActionAdjustJobParallelism, map[string]string{"parallelism": "4"})
+
+	r, c := setupFakeRemediationReconciler(issue, plan, job)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "parallelism-job", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated batchv1.Job
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "batch", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get Job: %v", err)
+	}
+	if *updated.Spec.Parallelism != 4 {
+		t.Errorf("expected parallelism=4, got %d", *updated.Spec.Parallelism)
+	}
+}
+
+func TestRemediationReconcile_AdjustJobDeadline(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "Job", Name: "batch", Namespace: "default"}
+	job := newJob("batch", "default")
+	plan := newRemediationPlanForAction("deadline-job", "default", "test-issue",
+		platformv1alpha1.ActionAdjustJobDeadline, map[string]string{"activeDeadlineSeconds": "3600"})
+
+	r, c := setupFakeRemediationReconciler(issue, plan, job)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "deadline-job", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated batchv1.Job
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "batch", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get Job: %v", err)
+	}
+	if *updated.Spec.ActiveDeadlineSeconds != 3600 {
+		t.Errorf("expected deadline=3600, got %d", *updated.Spec.ActiveDeadlineSeconds)
+	}
+}
+
+func TestRemediationReconcile_AdjustJobBackoffLimit(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "Job", Name: "batch", Namespace: "default"}
+	job := newJob("batch", "default")
+	plan := newRemediationPlanForAction("backoff-job", "default", "test-issue",
+		platformv1alpha1.ActionAdjustJobBackoffLimit, map[string]string{"backoffLimit": "10"})
+
+	r, c := setupFakeRemediationReconciler(issue, plan, job)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "backoff-job", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated batchv1.Job
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "batch", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get Job: %v", err)
+	}
+	if *updated.Spec.BackoffLimit != 10 {
+		t.Errorf("expected backoffLimit=10, got %d", *updated.Spec.BackoffLimit)
+	}
+}
+
+// ============================================================================
+// CronJob Tests
+// ============================================================================
+
+func TestRemediationReconcile_SuspendCronJob(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "CronJob", Name: "etl", Namespace: "default"}
+	cj := newCronJob("etl", "default")
+	plan := newRemediationPlanForAction("suspend-cj", "default", "test-issue",
+		platformv1alpha1.ActionSuspendCronJob, nil)
+
+	r, c := setupFakeRemediationReconciler(issue, plan, cj)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "suspend-cj", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated batchv1.CronJob
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "etl", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get CronJob: %v", err)
+	}
+	if updated.Spec.Suspend == nil || !*updated.Spec.Suspend {
+		t.Error("expected CronJob to be suspended")
+	}
+}
+
+func TestRemediationReconcile_ResumeCronJob(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "CronJob", Name: "etl", Namespace: "default"}
+	cj := newCronJob("etl", "default")
+	tr := true
+	cj.Spec.Suspend = &tr
+	plan := newRemediationPlanForAction("resume-cj", "default", "test-issue",
+		platformv1alpha1.ActionResumeCronJob, nil)
+
+	r, c := setupFakeRemediationReconciler(issue, plan, cj)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "resume-cj", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated batchv1.CronJob
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "etl", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get CronJob: %v", err)
+	}
+	if updated.Spec.Suspend == nil || *updated.Spec.Suspend {
+		t.Error("expected CronJob to be resumed")
+	}
+}
+
+func TestRemediationReconcile_AdjustCronJobSchedule(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "CronJob", Name: "etl", Namespace: "default"}
+	cj := newCronJob("etl", "default")
+	plan := newRemediationPlanForAction("schedule-cj", "default", "test-issue",
+		platformv1alpha1.ActionAdjustCronJobSchedule, map[string]string{"schedule": "0 */2 * * *"})
+
+	r, c := setupFakeRemediationReconciler(issue, plan, cj)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "schedule-cj", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated batchv1.CronJob
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "etl", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get CronJob: %v", err)
+	}
+	if updated.Spec.Schedule != "0 */2 * * *" {
+		t.Errorf("expected schedule '0 */2 * * *', got %q", updated.Spec.Schedule)
+	}
+}
+
+func TestRemediationReconcile_AdjustCronJobConcurrency(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "CronJob", Name: "etl", Namespace: "default"}
+	cj := newCronJob("etl", "default")
+	plan := newRemediationPlanForAction("concurrency-cj", "default", "test-issue",
+		platformv1alpha1.ActionAdjustCronJobConcurrency, map[string]string{"concurrencyPolicy": "Forbid"})
+
+	r, c := setupFakeRemediationReconciler(issue, plan, cj)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "concurrency-cj", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated batchv1.CronJob
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "etl", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get CronJob: %v", err)
+	}
+	if updated.Spec.ConcurrencyPolicy != batchv1.ForbidConcurrent {
+		t.Errorf("expected Forbid, got %q", updated.Spec.ConcurrencyPolicy)
+	}
+}
+
+func TestRemediationReconcile_AdjustCronJobHistory(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "CronJob", Name: "etl", Namespace: "default"}
+	cj := newCronJob("etl", "default")
+	plan := newRemediationPlanForAction("history-cj", "default", "test-issue",
+		platformv1alpha1.ActionAdjustCronJobHistory, map[string]string{
+			"successfulJobsHistoryLimit": "5",
+			"failedJobsHistoryLimit":     "3",
+		})
+
+	r, c := setupFakeRemediationReconciler(issue, plan, cj)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "history-cj", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated batchv1.CronJob
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "etl", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get CronJob: %v", err)
+	}
+	if *updated.Spec.SuccessfulJobsHistoryLimit != 5 {
+		t.Errorf("expected successfulJobsHistoryLimit=5, got %d", *updated.Spec.SuccessfulJobsHistoryLimit)
+	}
+	if *updated.Spec.FailedJobsHistoryLimit != 3 {
+		t.Errorf("expected failedJobsHistoryLimit=3, got %d", *updated.Spec.FailedJobsHistoryLimit)
+	}
+}
+
+func TestRemediationReconcile_TriggerCronJob(t *testing.T) {
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Resource = platformv1alpha1.ResourceRef{Kind: "CronJob", Name: "etl", Namespace: "default"}
+	cj := newCronJob("etl", "default")
+	plan := newRemediationPlanForAction("trigger-cj", "default", "test-issue",
+		platformv1alpha1.ActionTriggerCronJob, nil)
+
+	r, c := setupFakeRemediationReconciler(issue, plan, cj)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "trigger-cj", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	// Verify a Job was created
+	var jobs batchv1.JobList
+	if err := c.List(context.Background(), &jobs, client.InNamespace("default")); err != nil {
+		t.Fatalf("failed to list jobs: %v", err)
+	}
+	found := false
+	for _, j := range jobs.Items {
+		if strings.HasPrefix(j.Name, "etl-manual-") {
+			found = true
+			if j.Labels["platform.chatcli.io/cronjob"] != "etl" {
+				t.Error("expected cronjob label on triggered Job")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected a manual Job to be created from CronJob trigger")
+	}
+}
+
+// ============================================================================
+// MapActionType Tests for New Actions
+// ============================================================================
+
+func TestMapActionType_NewActions(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected platformv1alpha1.RemediationActionType
+	}{
+		{"ScaleStatefulSet", platformv1alpha1.ActionScaleStatefulSet},
+		{"RestartStatefulSet", platformv1alpha1.ActionRestartStatefulSet},
+		{"RollbackStatefulSet", platformv1alpha1.ActionRollbackStatefulSet},
+		{"RestartDaemonSet", platformv1alpha1.ActionRestartDaemonSet},
+		{"RollbackDaemonSet", platformv1alpha1.ActionRollbackDaemonSet},
+		{"PauseDaemonSetRollout", platformv1alpha1.ActionPauseDaemonSetRollout},
+		{"RetryJob", platformv1alpha1.ActionRetryJob},
+		{"SuspendJob", platformv1alpha1.ActionSuspendJob},
+		{"ResumeJob", platformv1alpha1.ActionResumeJob},
+		{"SuspendCronJob", platformv1alpha1.ActionSuspendCronJob},
+		{"ResumeCronJob", platformv1alpha1.ActionResumeCronJob},
+		{"TriggerCronJob", platformv1alpha1.ActionTriggerCronJob},
+		{"AdjustCronJobSchedule", platformv1alpha1.ActionAdjustCronJobSchedule},
+		{"AdjustCronJobConcurrency", platformv1alpha1.ActionAdjustCronJobConcurrency},
+		{"ForceDeleteStatefulSetPod", platformv1alpha1.ActionForceDeleteStatefulSetPod},
+		{"DeleteCronJobActiveJobs", platformv1alpha1.ActionDeleteCronJobActiveJobs},
+		{"UnknownAction", platformv1alpha1.ActionCustom},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := mapActionType(tt.input)
+			if result != tt.expected {
+				t.Errorf("mapActionType(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
 	}
 }

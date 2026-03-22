@@ -2461,6 +2461,46 @@ func (in *ResourceSnapshot) DeepCopyInto(out *ResourceSnapshot) {
 			(*out)[key] = val
 		}
 	}
+	if in.Suspend != nil {
+		in, out := &in.Suspend, &out.Suspend
+		*out = new(bool)
+		**out = **in
+	}
+	if in.ActiveDeadlineSeconds != nil {
+		in, out := &in.ActiveDeadlineSeconds, &out.ActiveDeadlineSeconds
+		*out = new(int64)
+		**out = **in
+	}
+	if in.BackoffLimit != nil {
+		in, out := &in.BackoffLimit, &out.BackoffLimit
+		*out = new(int32)
+		**out = **in
+	}
+	if in.Parallelism != nil {
+		in, out := &in.Parallelism, &out.Parallelism
+		*out = new(int32)
+		**out = **in
+	}
+	if in.StartingDeadlineSeconds != nil {
+		in, out := &in.StartingDeadlineSeconds, &out.StartingDeadlineSeconds
+		*out = new(int64)
+		**out = **in
+	}
+	if in.SuccessfulJobsHistoryLimit != nil {
+		in, out := &in.SuccessfulJobsHistoryLimit, &out.SuccessfulJobsHistoryLimit
+		*out = new(int32)
+		**out = **in
+	}
+	if in.FailedJobsHistoryLimit != nil {
+		in, out := &in.FailedJobsHistoryLimit, &out.FailedJobsHistoryLimit
+		*out = new(int32)
+		**out = **in
+	}
+	if in.Partition != nil {
+		in, out := &in.Partition, &out.Partition
+		*out = new(int32)
+		**out = **in
+	}
 	in.CapturedAt.DeepCopyInto(&out.CapturedAt)
 }
 

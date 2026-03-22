@@ -173,8 +173,8 @@ func (w *ResourceWatcher) collect(ctx context.Context) error {
 	// 8. Update Prometheus metrics
 	if w.metricsRecorder != nil {
 		w.metricsRecorder.ObserveCollectionDuration(target, time.Since(start).Seconds())
-		w.metricsRecorder.SetPodsReady(w.config.Namespace, w.config.Deployment, float64(snap.Deployment.ReadyReplicas))
-		w.metricsRecorder.SetPodsDesired(w.config.Namespace, w.config.Deployment, float64(snap.Deployment.Replicas))
+		w.metricsRecorder.SetPodsReady(w.config.Namespace, w.config.Deployment, float64(snap.Resource.ReadyReplicas))
+		w.metricsRecorder.SetPodsDesired(w.config.Namespace, w.config.Deployment, float64(snap.Resource.Replicas))
 		stats := w.store.Stats()
 		w.metricsRecorder.SetSnapshotsStored(target, float64(stats.SnapshotCount))
 		var totalRestarts int32
@@ -207,6 +207,7 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Type:      AlertHighRestarts,
 				Message:   fmt.Sprintf("Pod %s has %d restarts", pod.Name, pod.RestartCount),
 				Object:    pod.Name,
+				Namespace: w.config.Namespace,
 			})
 			if w.metricsRecorder != nil {
 				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertHighRestarts))
@@ -221,6 +222,7 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Type:      AlertPodOOMKilled,
 				Message:   fmt.Sprintf("Pod %s was OOMKilled (exit code %d)", pod.Name, pod.LastTerminated.ExitCode),
 				Object:    pod.Name,
+				Namespace: w.config.Namespace,
 			})
 			if w.metricsRecorder != nil {
 				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertPodOOMKilled))
@@ -235,6 +237,7 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Type:      AlertPodNotReady,
 				Message:   fmt.Sprintf("Pod %s is running but not ready (%d/%d containers)", pod.Name, pod.ReadyCount, pod.ContainerCount),
 				Object:    pod.Name,
+				Namespace: w.config.Namespace,
 			})
 			if w.metricsRecorder != nil {
 				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertPodNotReady))
@@ -242,18 +245,82 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 		}
 	}
 
-	// Deployment not at desired replicas
-	d := snap.Deployment
-	if d.ReadyReplicas < d.Replicas {
-		w.store.AddAlert(Alert{
-			Timestamp: now,
-			Severity:  SeverityWarning,
-			Type:      AlertDeployFailing,
-			Message:   fmt.Sprintf("Deployment %s has %d/%d replicas ready", d.Name, d.ReadyReplicas, d.Replicas),
-			Object:    d.Name,
-		})
-		if w.metricsRecorder != nil {
-			w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertDeployFailing))
+	// Resource not at desired state (kind-aware)
+	r := snap.Resource
+	switch r.Kind {
+	case "Deployment", "StatefulSet":
+		if r.ReadyReplicas < r.Replicas {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityWarning,
+				Type:      AlertDeployFailing,
+				Message:   fmt.Sprintf("%s %s has %d/%d replicas ready", r.Kind, r.Name, r.ReadyReplicas, r.Replicas),
+				Object:    fmt.Sprintf("%s/%s", r.Kind, r.Name),
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertDeployFailing))
+			}
+		}
+	case "DaemonSet":
+		if r.ReadyReplicas < r.Replicas {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityWarning,
+				Type:      AlertDeployFailing,
+				Message:   fmt.Sprintf("DaemonSet %s has %d/%d nodes ready", r.Name, r.ReadyReplicas, r.Replicas),
+				Object:    fmt.Sprintf("DaemonSet/%s", r.Name),
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertDeployFailing))
+			}
+		}
+	case "Job":
+		if r.Failed > 0 {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityCritical,
+				Type:      AlertJobFailed,
+				Message:   fmt.Sprintf("Job %s has %d failed pods (active=%d, succeeded=%d)", r.Name, r.Failed, r.Active, r.Succeeded),
+				Object:    fmt.Sprintf("Job/%s", r.Name),
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertJobFailed))
+			}
+		}
+	case "CronJob":
+		if r.Suspended {
+			// Don't alert for intentionally suspended CronJobs
+		} else if r.LastScheduleTime != nil && time.Since(*r.LastScheduleTime) > 2*time.Hour {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityWarning,
+				Type:      AlertCronJobMissed,
+				Message:   fmt.Sprintf("CronJob %s hasn't been scheduled for %s (schedule: %s)", r.Name, time.Since(*r.LastScheduleTime).Round(time.Minute), r.Schedule),
+				Object:    fmt.Sprintf("CronJob/%s", r.Name),
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertCronJobMissed))
+			}
+		}
+	default:
+		// Backward compat: use legacy Deployment check
+		d := snap.Deployment
+		if d.ReadyReplicas < d.Replicas {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityWarning,
+				Type:      AlertDeployFailing,
+				Message:   fmt.Sprintf("%s has %d/%d replicas ready", d.Name, d.ReadyReplicas, d.Replicas),
+				Object:    d.Name,
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertDeployFailing))
+			}
 		}
 	}
 }

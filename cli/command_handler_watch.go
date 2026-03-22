@@ -62,6 +62,11 @@ func (ch *CommandHandler) handleWatchStartCommand(args []string) {
 				i++
 				cfg.Deployment = args[i]
 			}
+		case "--kind":
+			if i+1 < len(args) {
+				i++
+				cfg.Kind = args[i]
+			}
 		case "--namespace":
 			if i+1 < len(args) {
 				i++

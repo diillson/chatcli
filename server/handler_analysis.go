@@ -210,6 +210,99 @@ ADVANCED ACTIONS:
     Params: {"command": "df -h"} (only pre-approved commands allowed).
     Best for: gathering diagnostic data before making changes.
 
+STATEFULSET ACTIONS (for StatefulSet resources):
+19. ScaleStatefulSet — scales StatefulSet replicas (ordered scaling). Params: {"replicas": "N"} (N >= 1).
+    Best for: StatefulSet capacity issues, database read replicas.
+20. RestartStatefulSet — rolling restart of all StatefulSet pods (ordered). No params.
+    Best for: stale state, memory leaks in stateful workloads.
+21. RollbackStatefulSet — rollback via ControllerRevision. Params: {"toRevision": "previous|<number>"}.
+    Best for: bad StatefulSet updates, image regressions in databases.
+22. AdjustStatefulSetResources — change CPU/memory on StatefulSet containers.
+    Params: {"container": "name", "memory_limit": "2Gi", "cpu_limit": "1000m"}.
+    Best for: OOMKilled StatefulSet pods, CPU throttling on databases.
+23. DeleteStatefulSetPod — delete specific or unhealthiest StatefulSet pod (preserves PVC identity).
+    Params: {"pod": "name"} (optional, auto-selects unhealthiest).
+    Best for: stuck pods, CrashLoopBackOff in stateful workloads.
+24. ForceDeleteStatefulSetPod — force-delete a stuck terminating pod (grace=0).
+    Params: {"pod": "name"} (REQUIRED). WARNING: risk of data corruption.
+    Best for: pods stuck in Terminating state that won't gracefully stop.
+25. UpdateStatefulSetStrategy — change updateStrategy type.
+    Params: {"type": "RollingUpdate|OnDelete", "maxUnavailable": "1"}.
+    Best for: changing rollout behavior, switching to OnDelete for manual control.
+26. RecreateStatefulSetPVC — delete stuck PVC for recreation by StatefulSet controller.
+    Params: {"pvc": "name", "confirm": "true"} (confirm REQUIRED).
+    Best for: corrupted PVC, stuck PVC in Pending state.
+27. PartitionStatefulSetUpdate — set partition for canary rollout.
+    Params: {"partition": "N"} (pods with ordinal >= N get updated).
+    Best for: canary deployments, gradual rollouts of stateful workloads.
+
+DAEMONSET ACTIONS (for DaemonSet resources):
+28. RestartDaemonSet — rolling restart of all DaemonSet pods across nodes. No params.
+    Best for: refreshing DaemonSet pods cluster-wide (logging, monitoring agents).
+29. RollbackDaemonSet — rollback via ControllerRevision. Params: {"toRevision": "previous|<number>"}.
+    Best for: bad DaemonSet updates affecting cluster-wide agents.
+30. AdjustDaemonSetResources — change CPU/memory on DaemonSet containers.
+    Params: {"container": "name", "memory_limit": "512Mi", "cpu_limit": "200m"}.
+    Best for: OOMKilled DaemonSet pods, resource pressure on nodes.
+31. DeleteDaemonSetPod — delete DaemonSet pod (optionally on specific node).
+    Params: {"pod": "name"} or {"node": "node-name"} (optional).
+    Best for: recovering a DaemonSet pod on a specific node.
+32. UpdateDaemonSetStrategy — change update strategy.
+    Params: {"type": "RollingUpdate|OnDelete", "maxUnavailable": "1", "maxSurge": "0"}.
+    Best for: controlling DaemonSet rollout speed.
+33. PauseDaemonSetRollout — pause DaemonSet rollout (sets maxUnavailable=0). No params.
+    Best for: stopping a bad rollout in progress.
+34. CordonAndDeleteDaemonSetPod — cordon node then delete DaemonSet pod on it.
+    Params: {"node": "node-name"} (REQUIRED).
+    Best for: targeted DaemonSet pod recovery with node isolation.
+
+JOB ACTIONS (for Job resources):
+35. RetryJob — delete failed Job and recreate from its spec. No params.
+    Best for: transient Job failures, retrying after fixing root cause.
+36. AdjustJobResources — change CPU/memory on Job template containers.
+    Params: {"container": "name", "memory_limit": "2Gi"}.
+    Best for: OOMKilled Job pods.
+37. DeleteFailedJob — clean up a failed Job and its pods. No params.
+    Best for: cleaning up after investigation.
+38. SuspendJob — pause a running Job (suspend=true). No params.
+    Best for: pausing work while investigating issues.
+39. ResumeJob — resume a suspended Job (suspend=false). No params.
+    Best for: resuming after fixing the root cause.
+40. AdjustJobParallelism — change Job parallelism. Params: {"parallelism": "N"}.
+    Best for: reducing load from parallel Job workers.
+41. AdjustJobDeadline — change activeDeadlineSeconds. Params: {"activeDeadlineSeconds": "N"}.
+    Best for: extending deadline for slow Jobs.
+42. AdjustJobBackoffLimit — change backoffLimit. Params: {"backoffLimit": "N"}.
+    Best for: allowing more retries for flaky Jobs.
+43. ForceDeleteJobPods — force-delete all pods of a Job (grace=0). No params.
+    Best for: cleaning up stuck Job pods that won't terminate.
+
+CRONJOB ACTIONS (for CronJob resources):
+44. SuspendCronJob — pause CronJob scheduling (suspend=true). No params.
+    Best for: stopping problematic scheduled jobs.
+45. ResumeCronJob — resume CronJob scheduling (suspend=false). No params.
+    Best for: resuming after fixing the root cause.
+46. TriggerCronJob — create a Job from CronJob template immediately. No params.
+    Best for: missed schedules, manual triggering after fix.
+47. AdjustCronJobResources — change CPU/memory on CronJob jobTemplate containers.
+    Params: {"container": "name", "memory_limit": "2Gi"}.
+    Best for: OOMKilled CronJob pods.
+48. AdjustCronJobSchedule — change cron schedule expression. Params: {"schedule": "*/5 * * * *"}.
+    Best for: adjusting frequency of scheduled jobs.
+49. AdjustCronJobDeadline — change startingDeadlineSeconds. Params: {"startingDeadlineSeconds": "N"}.
+    Best for: CronJobs missing their schedule window.
+50. AdjustCronJobHistory — change history limits.
+    Params: {"successfulJobsHistoryLimit": "N", "failedJobsHistoryLimit": "N"}.
+    Best for: managing Job history retention.
+51. AdjustCronJobConcurrency — change concurrencyPolicy.
+    Params: {"concurrencyPolicy": "Allow|Forbid|Replace"}.
+    Best for: preventing concurrent job runs or allowing them.
+52. DeleteCronJobActiveJobs — delete all currently running Jobs. No params.
+    Best for: stopping runaway CronJob executions.
+53. ReplaceCronJobTemplate — replace jobTemplate from ConfigMap.
+    Params: {"configmap": "name", "key": "jobtemplate.json"}.
+    Best for: applying pre-prepared job template fixes.
+
 Respond ONLY with a JSON object (no markdown, no code blocks):
 {
   "analysis": "Detailed root cause analysis and impact assessment",
@@ -228,7 +321,12 @@ Rules:
 - Each action must have a description explaining WHY it is recommended
 - For OOMKilled issues, ALWAYS consider AdjustResources before restart/rollback
 - For CrashLoopBackOff after a recent deploy, prefer RollbackDeployment with toRevision
-- Prefer targeted fixes (AdjustResources, specific rollback) over broad actions (restart)`)
+- Prefer targeted fixes (AdjustResources, specific rollback) over broad actions (restart)
+- For StatefulSet issues, prefer ordered operations (ScaleStatefulSet, PartitionStatefulSetUpdate) and beware of primary/replica topology
+- For DaemonSet issues, be aware of cluster-wide impact — prefer PauseDaemonSetRollout to stop bad rollouts
+- For Job failures, prefer SuspendJob to investigate, then RetryJob or AdjustJobResources
+- For CronJob missed schedules, check if suspended first (ResumeCronJob), then TriggerCronJob manually
+- Use resource-type-specific actions when available (e.g., ScaleStatefulSet instead of ScaleDeployment for StatefulSets)`)
 
 	return sb.String()
 }
@@ -370,8 +468,51 @@ ADVANCED:
 17. ApplyManifest — apply fix from ConfigMap. Params: {"configmap": "fix-cm", "key": "manifest.yaml"}
 18. ExecDiagnostic — run diagnostic. Params: {"command": "df -h"} (whitelisted only).
 
+STATEFULSET:
+19. ScaleStatefulSet — scale replicas. Params: {"replicas": "N"}.
+20. RestartStatefulSet — rolling restart. No params.
+21. RollbackStatefulSet — rollback via ControllerRevision. Params: {"toRevision": "previous|<N>"}.
+22. AdjustStatefulSetResources — change CPU/memory. Same params as AdjustResources.
+23. DeleteStatefulSetPod — delete pod. Params: {"pod": "name"} (optional).
+24. ForceDeleteStatefulSetPod — force-delete stuck pod (grace=0). Params: {"pod": "name"} (REQUIRED).
+25. UpdateStatefulSetStrategy — change strategy. Params: {"type": "RollingUpdate|OnDelete"}.
+26. RecreateStatefulSetPVC — delete stuck PVC. Params: {"pvc": "name", "confirm": "true"}.
+27. PartitionStatefulSetUpdate — canary partition. Params: {"partition": "N"}.
+
+DAEMONSET:
+28. RestartDaemonSet — rolling restart. No params.
+29. RollbackDaemonSet — rollback via ControllerRevision. Params: {"toRevision": "previous|<N>"}.
+30. AdjustDaemonSetResources — change CPU/memory. Same params as AdjustResources.
+31. DeleteDaemonSetPod — delete pod. Params: {"pod": "name"} or {"node": "name"}.
+32. UpdateDaemonSetStrategy — change strategy. Params: {"type": "RollingUpdate|OnDelete", "maxUnavailable": "1"}.
+33. PauseDaemonSetRollout — pause rollout (maxUnavailable=0). No params.
+34. CordonAndDeleteDaemonSetPod — cordon node + delete pod. Params: {"node": "name"} (REQUIRED).
+
+JOB:
+35. RetryJob — delete failed Job + recreate. No params.
+36. AdjustJobResources — change CPU/memory. Same params as AdjustResources.
+37. DeleteFailedJob — clean up failed Job. No params.
+38. SuspendJob — pause Job. No params.
+39. ResumeJob — resume Job. No params.
+40. AdjustJobParallelism — change parallelism. Params: {"parallelism": "N"}.
+41. AdjustJobDeadline — change deadline. Params: {"activeDeadlineSeconds": "N"}.
+42. AdjustJobBackoffLimit — change backoff. Params: {"backoffLimit": "N"}.
+43. ForceDeleteJobPods — force-delete all Job pods. No params.
+
+CRONJOB:
+44. SuspendCronJob — pause scheduling. No params.
+45. ResumeCronJob — resume scheduling. No params.
+46. TriggerCronJob — create Job from template now. No params.
+47. AdjustCronJobResources — change CPU/memory on jobTemplate. Same params as AdjustResources.
+48. AdjustCronJobSchedule — change schedule. Params: {"schedule": "*/5 * * * *"}.
+49. AdjustCronJobDeadline — change deadline. Params: {"startingDeadlineSeconds": "N"}.
+50. AdjustCronJobHistory — change history. Params: {"successfulJobsHistoryLimit": "N", "failedJobsHistoryLimit": "N"}.
+51. AdjustCronJobConcurrency — change policy. Params: {"concurrencyPolicy": "Allow|Forbid|Replace"}.
+52. DeleteCronJobActiveJobs — kill running Jobs. No params.
+53. ReplaceCronJobTemplate — replace template from ConfigMap. Params: {"configmap": "name", "key": "jobtemplate.json"}.
+
 OBSERVATION (no cluster change):
-19. Observe — set next_action to null and resolved to false. Wait and see effect of previous action.`)
+54. Observe — set next_action to null and resolved to false. Wait and see effect of previous action.`)
 
 	// Append conversation history
 	if len(req.History) > 0 {

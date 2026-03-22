@@ -10,14 +10,51 @@ import "time"
 // ResourceSnapshot captures the state of monitored resources at a point in time.
 type ResourceSnapshot struct {
 	Timestamp  time.Time
-	Deployment DeploymentStatus
+	Resource   ResourceStatus
+	Deployment DeploymentStatus // Deprecated: alias for Resource (kept for backward compat)
 	Pods       []PodStatus
 	Events     []K8sEvent
 	HPA        *HPAStatus
 	AppMetrics *AppMetrics // application-level Prometheus metrics (nil if not configured)
 }
 
+// SyncDeploymentAlias copies Resource fields to the deprecated Deployment alias for backward compat.
+func (s *ResourceSnapshot) SyncDeploymentAlias() {
+	s.Deployment = DeploymentStatus{
+		Name:              s.Resource.Name,
+		Namespace:         s.Resource.Namespace,
+		Replicas:          s.Resource.Replicas,
+		ReadyReplicas:     s.Resource.ReadyReplicas,
+		UpdatedReplicas:   s.Resource.UpdatedReplicas,
+		AvailableReplicas: s.Resource.AvailableReplicas,
+		Conditions:        s.Resource.Conditions,
+		Strategy:          s.Resource.Strategy,
+	}
+}
+
+// ResourceStatus holds resource-level information for any Kubernetes workload kind.
+type ResourceStatus struct {
+	Kind              string // Deployment, StatefulSet, DaemonSet, Job, CronJob
+	Name              string
+	Namespace         string
+	Replicas          int32    // Desired replicas (Deployment/StatefulSet) or DesiredNumberScheduled (DaemonSet) or Parallelism (Job)
+	ReadyReplicas     int32    // ReadyReplicas (Deploy/STS) or NumberReady (DS) or Active (Job)
+	UpdatedReplicas   int32    // UpdatedReplicas (Deploy) or UpdatedReplicas (STS) or UpdatedNumberScheduled (DS)
+	AvailableReplicas int32    // AvailableReplicas (Deploy) or NumberAvailable (DS) or Succeeded (Job)
+	UnavailableCount  int32    // UnavailableReplicas (Deploy) or NumberUnavailable (DS) or Failed (Job)
+	Conditions        []string // human-readable condition summaries
+	Strategy          string   // Deployment strategy or StatefulSet/DaemonSet update strategy
+	// Job/CronJob specific
+	Succeeded        int32      // Job: succeeded count
+	Failed           int32      // Job: failed count
+	Active           int32      // Job: active count; CronJob: active jobs count
+	Schedule         string     // CronJob: schedule expression
+	Suspended        bool       // Job/CronJob: suspend state
+	LastScheduleTime *time.Time // CronJob: last schedule
+}
+
 // DeploymentStatus holds deployment-level information.
+// Deprecated: Use ResourceStatus instead. Kept for backward compatibility with existing code.
 type DeploymentStatus struct {
 	Name              string
 	Namespace         string
@@ -78,7 +115,8 @@ type Alert struct {
 	Severity  AlertSeverity
 	Type      AlertType
 	Message   string
-	Object    string // affected resource
+	Object    string // affected resource (format: "Kind/Name" for resources, or just pod name)
+	Namespace string // namespace of the affected resource
 }
 
 // AlertSeverity indicates the severity level of an alert.
@@ -100,16 +138,27 @@ const (
 	AlertPodNotReady   AlertType = "PodNotReady"
 	AlertScaleEvent    AlertType = "ScaleEvent"
 	AlertDeployFailing AlertType = "DeploymentFailing"
+	AlertJobFailed     AlertType = "JobFailed"
+	AlertCronJobMissed AlertType = "CronJobMissed"
 )
 
 // WatchConfig holds configuration for the Kubernetes watcher.
 type WatchConfig struct {
 	Deployment  string
+	Kind        string // Deployment, StatefulSet, DaemonSet, Job, CronJob (default: Deployment)
 	Namespace   string
 	Interval    time.Duration
 	Window      time.Duration
 	MaxLogLines int
 	Kubeconfig  string // path to kubeconfig (empty = in-cluster)
+}
+
+// ResourceKind returns the effective kind, defaulting to "Deployment".
+func (c *WatchConfig) ResourceKind() string {
+	if c.Kind != "" {
+		return c.Kind
+	}
+	return "Deployment"
 }
 
 // LogEntry holds a log line from a pod.
@@ -121,18 +170,27 @@ type LogEntry struct {
 	IsError   bool
 }
 
-// WatchTarget defines a single deployment to watch with optional Prometheus scraping.
+// WatchTarget defines a single Kubernetes resource to watch with optional Prometheus scraping.
 type WatchTarget struct {
 	Deployment    string   `yaml:"deployment" json:"deployment"`
+	Kind          string   `yaml:"kind,omitempty" json:"kind,omitempty"` // Deployment, StatefulSet, DaemonSet, Job, CronJob (default: Deployment)
 	Namespace     string   `yaml:"namespace" json:"namespace"`
 	MetricsPort   int      `yaml:"metricsPort,omitempty" json:"metricsPort,omitempty"`
 	MetricsPath   string   `yaml:"metricsPath,omitempty" json:"metricsPath,omitempty"`
 	MetricsFilter []string `yaml:"metricsFilter,omitempty" json:"metricsFilter,omitempty"`
 }
 
-// Key returns a unique identifier for this target: "namespace/deployment".
+// ResourceKind returns the effective resource kind, defaulting to "Deployment".
+func (t WatchTarget) ResourceKind() string {
+	if t.Kind != "" {
+		return t.Kind
+	}
+	return "Deployment"
+}
+
+// Key returns a unique identifier for this target: "kind/namespace/name".
 func (t WatchTarget) Key() string {
-	return t.Namespace + "/" + t.Deployment
+	return t.ResourceKind() + "/" + t.Namespace + "/" + t.Deployment
 }
 
 // MultiWatchConfig holds configuration for multi-deployment watching.

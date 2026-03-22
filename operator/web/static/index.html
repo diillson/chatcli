@@ -243,6 +243,29 @@ tr.expandable { cursor: pointer; }
 .badge-medium { background: rgba(255,165,2,0.2); color: var(--sev-medium); }
 .badge-low { background: rgba(46,213,115,0.2); color: var(--sev-low); }
 
+.resource-kind-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #e0e0e0;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.action-type-badge {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: 500;
+  font-family: 'SF Mono', Consolas, monospace;
+  background: rgba(15,52,96,0.6);
+  color: var(--success);
+  border: 1px solid rgba(0,180,216,0.2);
+}
+
 .badge-state {
   display: inline-block;
   padding: 0.15rem 0.5rem;
@@ -595,6 +618,14 @@ tr.expandable { cursor: pointer; }
         <option value="Resolved">Resolved</option>
         <option value="Snoozed">Snoozed</option>
       </select>
+      <select class="filter-select" id="incKindFilter">
+        <option value="">All Kinds</option>
+        <option value="Deployment">Deployment</option>
+        <option value="StatefulSet">StatefulSet</option>
+        <option value="DaemonSet">DaemonSet</option>
+        <option value="Job">Job</option>
+        <option value="CronJob">CronJob</option>
+      </select>
       <input class="filter-input" id="incNamespaceFilter" placeholder="Namespace..." style="width:150px">
       <button class="btn btn-primary" onclick="loadIncidents()">Apply</button>
     </div>
@@ -729,20 +760,43 @@ function makeSortable(tableEl) {
     th.addEventListener('click', () => {
       const tbody = tableEl.querySelector('tbody');
       if (!tbody) return;
-      const rows = Array.from(tbody.rows);
+      const rows = Array.from(tbody.querySelectorAll('tr:not(.expand-row)'));
       const asc = th.dataset.sortDir !== 'asc';
       th.dataset.sortDir = asc ? 'asc' : 'desc';
-      // Clear other headers
       headers.forEach(h => { if (h !== th) delete h.dataset.sortDir; });
       rows.sort((a, b) => {
+        // Priority 1: data-sort-value attribute (used for timestamps and numeric values)
+        const aSortVal = a.cells[colIdx]?.dataset.sortValue;
+        const bSortVal = b.cells[colIdx]?.dataset.sortValue;
+        if (aSortVal !== undefined && bSortVal !== undefined) {
+          const an = parseFloat(aSortVal), bn = parseFloat(bSortVal);
+          if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+          return asc ? aSortVal.localeCompare(bSortVal) : bSortVal.localeCompare(aSortVal);
+        }
+        // Priority 2: text content
         const av = (a.cells[colIdx]?.textContent || '').trim().toLowerCase();
         const bv = (b.cells[colIdx]?.textContent || '').trim().toLowerCase();
+        // Try numeric
         const an = parseFloat(av), bn = parseFloat(bv);
         if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+        // Try timestamp patterns (Xm ago, Xh ago, Xd ago)
+        const timeToSecs = s => {
+          const m = s.match(/^(\d+)(s|m|h|d) ago$/);
+          if (!m) return NaN;
+          const v = parseInt(m[1]);
+          switch(m[2]) { case 's': return v; case 'm': return v*60; case 'h': return v*3600; case 'd': return v*86400; }
+          return NaN;
+        };
+        const at = timeToSecs(av), bt = timeToSecs(bv);
+        if (!isNaN(at) && !isNaN(bt)) return asc ? at - bt : bt - at;
         return asc ? av.localeCompare(bv) : bv.localeCompare(av);
       });
-      rows.forEach(r => tbody.appendChild(r));
-      // Update arrow indicator
+      rows.forEach(r => {
+        tbody.appendChild(r);
+        // Move expand row right after its parent if it exists
+        const expandRow = tbody.querySelector(`.expand-row[data-parent="${r.dataset.rowId}"]`);
+        if (expandRow) tbody.appendChild(expandRow);
+      });
       headers.forEach(h => h.textContent = h.textContent.replace(/ [▲▼]$/, ''));
       th.textContent += asc ? ' ▲' : ' ▼';
     });
@@ -841,6 +895,20 @@ function timeAgo(dateStr) {
 function severityBadge(sev) {
   const s = (sev || '').toLowerCase();
   return `<span class="badge-sev badge-${s}">${escapeHtml(sev || 'unknown')}</span>`;
+}
+
+function resourceKindBadge(kind) {
+  const icons = {
+    'Deployment': '🚀', 'StatefulSet': '🗄️', 'DaemonSet': '🌐',
+    'Job': '⚡', 'CronJob': '⏰', 'Node': '🖥️', 'Pod': '📦',
+  };
+  const colors = {
+    'Deployment': '#0f3460', 'StatefulSet': '#6c3483', 'DaemonSet': '#1a5276',
+    'Job': '#784212', 'CronJob': '#7d6608', 'Node': '#1b4332', 'Pod': '#2c3e50',
+  };
+  const icon = icons[kind] || '📋';
+  const color = colors[kind] || 'var(--accent)';
+  return `<span class="resource-kind-badge" style="background:${color}" title="${kind || 'Unknown'}">${icon} ${escapeHtml(kind || '?')}</span>`;
 }
 
 function stateBadge(state) {
@@ -1058,9 +1126,9 @@ async function loadRecentIncidents() {
             <td>${escapeHtml(i.name)}</td>
             <td>${severityBadge(i.severity)}</td>
             <td>${stateBadge(i.state)}</td>
-            <td>${escapeHtml((i.resource || {}).kind + '/' + (i.resource || {}).name)}</td>
+            <td>${resourceKindBadge((i.resource || {}).kind)} ${escapeHtml((i.resource || {}).name)}</td>
             <td>${escapeHtml(i.namespace)}</td>
-            <td>${timeAgo(i.creationTimestamp)}</td>
+            <td data-sort-value="${new Date(i.creationTimestamp || 0).getTime()}">${timeAgo(i.creationTimestamp)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -1085,7 +1153,9 @@ async function loadRemediationTimeline() {
           <div class="timeline-time">${timeAgo(i.creationTimestamp)}</div>
           <div class="timeline-text">
             <span class="timeline-type">${escapeHtml(i.state)}</span>
-            ${escapeHtml(i.name)} - ${i.remediationAttempts} attempt(s)
+            ${resourceKindBadge((i.resource || {}).kind)}
+            ${escapeHtml((i.resource || {}).name || i.name)} - ${i.remediationAttempts} attempt(s)
+            ${i.signalType ? `<span style="color:var(--text-muted);font-size:0.75rem"> (${escapeHtml(i.signalType)})</span>` : ''}
           </div>
         </div>
       `).join('')}
@@ -1102,6 +1172,7 @@ async function loadIncidents() {
   showLoading(el);
   const sev = $('#incSeverityFilter').value;
   const state = $('#incStateFilter').value;
+  const kindFilter = $('#incKindFilter').value;
   const ns = $('#incNamespaceFilter').value;
   let q = '?pageSize=100';
   if (sev) q += '&severity=' + encodeURIComponent(sev);
@@ -1109,7 +1180,11 @@ async function loadIncidents() {
   if (ns) q += '&namespace=' + encodeURIComponent(ns);
   try {
     const data = await apiFetch('/incidents' + q + getTimeRangeQuery());
-    const items = (data.items || []).sort((a, b) => (b.creationTimestamp || '').localeCompare(a.creationTimestamp || ''));
+    let items = (data.items || []).sort((a, b) => (b.creationTimestamp || '').localeCompare(a.creationTimestamp || ''));
+    // Client-side filter by resource kind
+    if (kindFilter) {
+      items = items.filter(i => (i.resource || {}).kind === kindFilter);
+    }
     const total = (data.metadata || {}).totalCount || items.length;
     $('#incidentCount').textContent = `${total} incident(s)`;
     if (items.length === 0) { showEmpty(el, 'No incidents match the filters'); return; }
@@ -1125,15 +1200,16 @@ async function loadIncidents() {
       const isExpanded = expandedRows.has(id);
       const mainRow = document.createElement('tr');
       mainRow.className = 'expandable';
+      mainRow.dataset.rowId = id;
       mainRow.innerHTML = `
         <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
         <td>${escapeHtml(item.name)}</td>
         <td>${severityBadge(item.severity)}</td>
         <td>${stateBadge(item.state)}</td>
-        <td>${escapeHtml((item.resource||{}).kind + '/' + (item.resource||{}).name)}</td>
+        <td>${resourceKindBadge((item.resource||{}).kind)} ${escapeHtml((item.resource||{}).name)}</td>
         <td>${escapeHtml(item.namespace)}</td>
-        <td>${item.riskScore != null ? item.riskScore.toFixed(1) : '-'}</td>
-        <td>${timeAgo(item.creationTimestamp)}</td>
+        <td data-sort-value="${item.riskScore || 0}">${item.riskScore != null ? item.riskScore.toFixed(1) : '-'}</td>
+        <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
         <td class="btn-group">
           ${item.state !== 'Resolved' ? `<button class="btn btn-success" onclick="event.stopPropagation(); ackIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Ack</button>` : ''}
           ${item.state !== 'Resolved' ? `<button class="btn" onclick="event.stopPropagation(); snoozeIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Snooze</button>` : ''}
@@ -1169,19 +1245,38 @@ function toggleIncidentExpand(id, item, mainRow) {
 function buildIncidentExpandRow(item) {
   const tr = document.createElement('tr');
   tr.className = 'expand-row';
+  tr.dataset.parent = item._rowId || '';
+  const res = item.resource || {};
   tr.innerHTML = `<td colspan="9">
     <div class="expand-content">
       <h4>Description</h4>
       <p>${escapeHtml(item.description || 'No description available')}</p>
+      <h4>Resource</h4>
+      <p>${resourceKindBadge(res.kind)} <strong>${escapeHtml(res.name || '-')}</strong> in <em>${escapeHtml(res.namespace || item.namespace || '-')}</em></p>
       <h4>Details</h4>
-      <p>Signal Type: ${escapeHtml(item.signalType || '-')} | Source: ${escapeHtml(item.source || '-')}</p>
+      <p>Signal Type: <span class="action-type-badge">${escapeHtml(item.signalType || '-')}</span> | Source: ${escapeHtml(item.source || '-')} | Risk Score: <strong>${item.riskScore != null ? item.riskScore.toFixed(1) : '-'}</strong></p>
       <p>Remediation Attempts: ${item.remediationAttempts || 0} / ${item.maxRemediationAttempts || '-'}</p>
       ${item.resolution ? `<h4>Resolution</h4><p>${escapeHtml(item.resolution)}</p>` : ''}
-      ${item.detectedAt ? `<p>Detected: ${new Date(item.detectedAt).toLocaleString()}</p>` : ''}
-      ${item.resolvedAt ? `<p>Resolved: ${new Date(item.resolvedAt).toLocaleString()}</p>` : ''}
+      <div style="display:flex;gap:2rem;margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)">
+        ${item.detectedAt ? `<span>Detected: ${new Date(item.detectedAt).toLocaleString()}</span>` : ''}
+        ${item.resolvedAt ? `<span>Resolved: ${new Date(item.resolvedAt).toLocaleString()}</span>` : ''}
+        ${item.detectedAt && item.resolvedAt ? `<span>Duration: ${formatDuration(new Date(item.resolvedAt) - new Date(item.detectedAt))}</span>` : ''}
+      </div>
     </div>
   </td>`;
   return tr;
+}
+
+function formatDuration(ms) {
+  if (!ms || ms < 0) return '-';
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return secs + 's';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return mins + 'm ' + (secs % 60) + 's';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ' + (mins % 60) + 'm';
+  const days = Math.floor(hrs / 24);
+  return days + 'd ' + (hrs % 24) + 'h';
 }
 
 async function ackIncident(name, ns) {
@@ -1386,7 +1481,7 @@ async function loadPostMortems() {
     if (items.length === 0) { showEmpty(el, 'No post-mortems available'); return; }
     el.innerHTML = `<table>
       <thead><tr>
-        <th></th><th>Name</th><th>Severity</th><th>State</th><th>Duration</th><th>Issue</th><th>Created</th><th>Actions</th>
+        <th></th><th>Name</th><th>Severity</th><th>State</th><th>Resource</th><th>Duration</th><th>Issue</th><th>Created</th><th>Actions</th>
       </tr></thead>
       <tbody id="pmTbody"></tbody>
     </table>`;
@@ -1396,14 +1491,16 @@ async function loadPostMortems() {
       const isExpanded = expandedRows.has(id);
       const mainRow = document.createElement('tr');
       mainRow.className = 'expandable';
+      mainRow.dataset.rowId = id;
       mainRow.innerHTML = `
         <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
         <td>${escapeHtml(item.name)}</td>
         <td>${severityBadge(item.severity)}</td>
         <td>${stateBadge(item.state)}</td>
+        <td>${resourceKindBadge((item.resource||{}).kind)} ${escapeHtml((item.resource||{}).name || '-')}</td>
         <td>${escapeHtml(item.duration || '-')}</td>
         <td>${escapeHtml(item.issueRef || '-')}</td>
-        <td>${timeAgo(item.creationTimestamp)}</td>
+        <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
         <td class="btn-group">
           ${item.state !== 'Closed' ? `<button class="btn" onclick="event.stopPropagation(); reviewPM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Review</button>` : ''}
           ${item.state === 'InReview' ? `<button class="btn btn-success" onclick="event.stopPropagation(); closePM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Close</button>` : ''}
@@ -1437,12 +1534,16 @@ function togglePMExpand(id, item, mainRow) {
 function buildPMExpandRow(item) {
   const tr = document.createElement('tr');
   tr.className = 'expand-row';
+  tr.dataset.parent = 'pm-' + (item._idx || '');
   const timeline = (item.timeline || []).map(t =>
     `<li><strong>${escapeHtml(t.type)}</strong> (${new Date(t.timestamp).toLocaleString()}): ${escapeHtml(t.detail)}</li>`
   ).join('');
+  const actionsExecuted = (item.actionsExecuted || []).map(a =>
+    `<li><span class="action-type-badge">${escapeHtml(a.action || '-')}</span> ${a.result === 'success' ? '✅' : '❌'} ${escapeHtml(a.detail || '')} <small style="color:var(--text-muted)">${a.timestamp ? new Date(a.timestamp).toLocaleString() : ''}</small></li>`
+  ).join('');
   const lessons = (item.lessonsLearned || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
   const preventions = (item.preventionActions || []).map(a => `<li>${escapeHtml(a)}</li>`).join('');
-  tr.innerHTML = `<td colspan="8">
+  tr.innerHTML = `<td colspan="9">
     <div class="expand-content">
       <h4>Summary</h4>
       <p>${escapeHtml(item.summary || 'No summary available')}</p>
@@ -1451,6 +1552,7 @@ function buildPMExpandRow(item) {
       <h4>Impact</h4>
       <p>${escapeHtml(item.impact || '-')}</p>
       ${timeline ? `<h4>Timeline</h4><ul>${timeline}</ul>` : ''}
+      ${actionsExecuted ? `<h4>Actions Executed</h4><ul>${actionsExecuted}</ul>` : ''}
       ${lessons ? `<h4>Lessons Learned</h4><ul>${lessons}</ul>` : ''}
       ${preventions ? `<h4>Prevention Actions</h4><ul>${preventions}</ul>` : ''}
     </div>
@@ -1578,11 +1680,11 @@ async function loadAudit() {
       </tr></thead>
       <tbody>
         ${items.map(i => `<tr>
-          <td style="white-space:nowrap">${i.timestamp ? new Date(i.timestamp).toLocaleString() : timeAgo(i.creationTimestamp)}</td>
+          <td style="white-space:nowrap" data-sort-value="${new Date(i.timestamp || i.creationTimestamp || 0).getTime()}">${i.timestamp ? new Date(i.timestamp).toLocaleString() : timeAgo(i.creationTimestamp)}</td>
           <td>${escapeHtml(i.eventType || '-')}</td>
           <td>${i.severity ? severityBadge(i.severity) : '-'}</td>
           <td>${escapeHtml(i.actorName || '-')}${i.actorType ? ' <small>(' + escapeHtml(i.actorType) + ')</small>' : ''}</td>
-          <td>${escapeHtml(i.resourceKind || '-')}${i.resourceName ? '/' + escapeHtml(i.resourceName) : ''}${i.resourceNamespace ? ' <small>(' + escapeHtml(i.resourceNamespace) + ')</small>' : ''}</td>
+          <td>${resourceKindBadge(i.resourceKind)} ${i.resourceName ? escapeHtml(i.resourceName) : '-'}${i.resourceNamespace ? ' <small>(' + escapeHtml(i.resourceNamespace) + ')</small>' : ''}</td>
           <td>${escapeHtml(i.correlationId || '-')}</td>
           <td style="max-width:300px; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(i.detail || '')}">${escapeHtml(i.detail || '-')}</td>
         </tr>`).join('')}

@@ -259,7 +259,7 @@ rules:
       - watch
       - update
       - patch
-  # Batch resources (Jobs, CronJobs)
+  # Batch resources (Jobs, CronJobs) — full CRUD for AIOps remediation
   - apiGroups:
       - batch
     resources:
@@ -269,6 +269,18 @@ rules:
       - get
       - list
       - watch
+      - create
+      - update
+      - patch
+      - delete
+  # ControllerRevisions (for StatefulSet/DaemonSet rollback)
+  - apiGroups:
+      - apps
+    resources:
+      - controllerrevisions
+    verbs:
+      - get
+      - list
   - apiGroups:
       - autoscaling
     resources:

@@ -90,7 +90,10 @@ rules:
     verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: ["batch"]
     resources: ["jobs", "cronjobs"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["controllerrevisions"]
+    verbs: ["get", "list"]
 
   # ──────────────────────────────────────────────────
   # Autoscaling, Networking, Policy, Discovery

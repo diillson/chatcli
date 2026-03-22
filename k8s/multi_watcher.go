@@ -89,6 +89,7 @@ func (mw *MultiWatcher) createWatcher(target WatchTarget, cfg MultiWatchConfig) 
 		metricsClient: mw.metricsClient,
 		config: WatchConfig{
 			Deployment:  target.Deployment,
+			Kind:        target.ResourceKind(),
 			Namespace:   target.Namespace,
 			Interval:    cfg.Interval,
 			Window:      cfg.Window,
@@ -98,16 +99,16 @@ func (mw *MultiWatcher) createWatcher(target WatchTarget, cfg MultiWatchConfig) 
 		store:  store,
 		logger: targetLogger,
 
-		deployCollector:  NewDeploymentCollector(mw.clientset, target.Namespace, target.Deployment, targetLogger),
-		eventCollector:   NewEventCollector(mw.clientset, target.Namespace, target.Deployment, targetLogger),
-		logCollector:     NewLogCollector(mw.clientset, target.Namespace, target.Deployment, cfg.MaxLogLines, targetLogger),
-		hpaCollector:     NewHPACollector(mw.clientset, target.Namespace, target.Deployment, targetLogger),
+		deployCollector:  NewResourceCollector(mw.clientset, target.Namespace, target.Deployment, target.ResourceKind(), targetLogger),
+		eventCollector:   NewResourceEventCollector(mw.clientset, target.Namespace, target.Deployment, target.ResourceKind(), targetLogger),
+		logCollector:     NewResourceLogCollector(mw.clientset, target.Namespace, target.Deployment, target.ResourceKind(), cfg.MaxLogLines, targetLogger),
+		hpaCollector:     NewResourceHPACollector(mw.clientset, target.Namespace, target.Deployment, target.ResourceKind(), targetLogger),
 		metricsCollector: NewMetricsCollector(mw.clientset, mw.metricsClient, target.Namespace, target.Deployment, targetLogger),
 	}
 
 	if target.MetricsPort > 0 {
-		w.promCollector = NewPrometheusCollector(
-			mw.clientset, target.Namespace, target.Deployment,
+		w.promCollector = NewResourcePrometheusCollector(
+			mw.clientset, target.Namespace, target.Deployment, target.ResourceKind(),
 			target.MetricsPort, target.MetricsPath, target.MetricsFilter,
 			targetLogger,
 		)

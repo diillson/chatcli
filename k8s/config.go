@@ -71,9 +71,17 @@ func LoadMultiWatchConfig(path string) (*MultiWatchConfig, error) {
 		cfg.MaxContextChars = 32000
 	}
 
+	validKinds := map[string]bool{
+		"Deployment": true, "StatefulSet": true, "DaemonSet": true,
+		"Job": true, "CronJob": true, "": true, // empty = default Deployment
+	}
+
 	for i, t := range cfg.Targets {
 		if t.Deployment == "" {
-			return nil, fmt.Errorf("target[%d]: deployment is required", i)
+			return nil, fmt.Errorf("target[%d]: deployment (resource name) is required", i)
+		}
+		if !validKinds[t.Kind] {
+			return nil, fmt.Errorf("target[%d]: invalid kind %q (must be Deployment, StatefulSet, DaemonSet, Job, or CronJob)", i, t.Kind)
 		}
 		if t.Namespace == "" {
 			cfg.Targets[i].Namespace = "default"
@@ -92,6 +100,7 @@ func SingleTargetToMulti(cfg WatchConfig) MultiWatchConfig {
 		Targets: []WatchTarget{
 			{
 				Deployment: cfg.Deployment,
+				Kind:       cfg.Kind,
 				Namespace:  cfg.Namespace,
 			},
 		},
