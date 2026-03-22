@@ -267,6 +267,61 @@ type AuditEventItem struct {
 	CreationTimestamp string `json:"creationTimestamp"`
 }
 
+// AIInsightItem is the REST representation of an AIInsight.
+type AIInsightItem struct {
+	Name                  string              `json:"name"`
+	Namespace             string              `json:"namespace"`
+	IssueRef              string              `json:"issueRef"`
+	Provider              string              `json:"provider"`
+	Model                 string              `json:"model"`
+	Analysis              string              `json:"analysis,omitempty"`
+	Confidence            float64             `json:"confidence"`
+	Recommendations       []string            `json:"recommendations,omitempty"`
+	SuggestedActions      []SuggestedActionItem `json:"suggestedActions,omitempty"`
+	LogAnalysis           string              `json:"logAnalysis,omitempty"`
+	MetricsContext        string              `json:"metricsContext,omitempty"`
+	SourceCodeContext     string              `json:"sourceCodeContext,omitempty"`
+	GitOpsContext         string              `json:"gitOpsContext,omitempty"`
+	CascadeAnalysis       string              `json:"cascadeAnalysis,omitempty"`
+	BlastRadiusPrediction string              `json:"blastRadiusPrediction,omitempty"`
+	GeneratedAt           *string             `json:"generatedAt,omitempty"`
+	CreationTimestamp     string              `json:"creationTimestamp"`
+}
+
+// SuggestedActionItem is the REST representation of an AI-suggested action.
+type SuggestedActionItem struct {
+	Name        string            `json:"name"`
+	Action      string            `json:"action"`
+	Description string            `json:"description,omitempty"`
+	Params      map[string]string `json:"params,omitempty"`
+}
+
+// RemediationDetailItem extends RemediationItem with execution evidence and rollback info.
+type RemediationDetailItem struct {
+	RemediationItem
+	SafetyConstraints  []string              `json:"safetyConstraints,omitempty"`
+	Evidence           []EvidenceDetailItem  `json:"evidence,omitempty"`
+	RollbackPerformed  bool                  `json:"rollbackPerformed"`
+	RollbackResult     string                `json:"rollbackResult,omitempty"`
+	AgenticHistory     []AgenticStepItem     `json:"agenticHistory,omitempty"`
+}
+
+// EvidenceDetailItem is a piece of evidence collected during remediation execution.
+type EvidenceDetailItem struct {
+	Type      string `json:"type"`
+	Data      string `json:"data"`
+	Timestamp string `json:"timestamp"`
+}
+
+// AgenticStepItem is the REST representation of an agentic remediation step.
+type AgenticStepItem struct {
+	StepNumber  int32       `json:"stepNumber"`
+	AIMessage   string      `json:"aiMessage"`
+	Action      *ActionItem `json:"action,omitempty"`
+	Observation string      `json:"observation"`
+	Timestamp   string      `json:"timestamp"`
+}
+
 // AnalyticsSummary provides an overview of AIOps metrics.
 type AnalyticsSummary struct {
 	TotalIssues            int            `json:"totalIssues"`
