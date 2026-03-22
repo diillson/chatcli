@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"regexp"
 	"sort"
@@ -174,23 +175,38 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 
 	provider, model := resolveInstanceProvider(ctx, r.Client)
 
-	// Early runbook matching — inject candidate into AIInsight so the AI can validate it
-	candidateRunbook, _ := r.findMatchingRunbook(ctx, issue)
+	// Early runbook matching — inject ALL candidates into AIInsight so the AI can choose
+	candidateRunbooks := r.findAllMatchingRunbooks(ctx, issue)
 	var runbookContext string
-	if candidateRunbook != nil {
-		var stepsDesc []string
-		for i, s := range candidateRunbook.Spec.Steps {
-			stepsDesc = append(stepsDesc, fmt.Sprintf("  Step %d: %s (%s) — %s", i+1, s.Name, s.Action, s.Description))
+	var candidateNames []string
+	if len(candidateRunbooks) > 0 {
+		var sections []string
+		for _, rb := range candidateRunbooks {
+			candidateNames = append(candidateNames, rb.Name)
+			var stepsDesc []string
+			for i, s := range rb.Spec.Steps {
+				stepsDesc = append(stepsDesc, fmt.Sprintf("  Step %d: %s (%s) — %s", i+1, s.Name, s.Action, s.Description))
+			}
+			// Truncate description to avoid bloating the context
+			desc := rb.Spec.Description
+			if len(desc) > 200 {
+				desc = desc[:200] + "..."
+			}
+			sections = append(sections, fmt.Sprintf(
+				"RUNBOOK: %s\nDescription: %s\nTrigger: %s + %s + %s\nSteps:\n%s",
+				rb.Name, desc,
+				rb.Spec.Trigger.SignalType, rb.Spec.Trigger.Severity, rb.Spec.Trigger.ResourceKind,
+				strings.Join(stepsDesc, "\n"),
+			))
 		}
 		runbookContext = fmt.Sprintf(
-			"CANDIDATE RUNBOOK: %s\nTrigger: %s + %s + %s\nSteps:\n%s\n\nEvaluate if this runbook is appropriate for the current incident. "+
-				"If the runbook steps match the root cause, include 'RUNBOOK_APPROVED' in your analysis. "+
-				"If the runbook does NOT match (e.g., different root cause), include 'RUNBOOK_REJECTED' and explain why.",
-			candidateRunbook.Name,
-			candidateRunbook.Spec.Trigger.SignalType,
-			candidateRunbook.Spec.Trigger.Severity,
-			candidateRunbook.Spec.Trigger.ResourceKind,
-			strings.Join(stepsDesc, "\n"),
+			"CANDIDATE RUNBOOKS (%d found):\n\n%s\n\n"+
+				"Evaluate each runbook against the current incident's root cause. "+
+				"If one of the runbooks matches, include 'RUNBOOK_APPROVED: <runbook-name>' in your analysis. "+
+				"If NONE of the runbooks match the current root cause, include 'RUNBOOK_REJECTED' and explain why. "+
+				"Only approve a runbook if its steps directly address the root cause you identified.",
+			len(candidateRunbooks),
+			strings.Join(sections, "\n\n---\n\n"),
 		)
 	}
 
@@ -203,12 +219,12 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 			Provider: provider,
 			Model:    model,
 		}
-		// Inject runbook candidate for AI validation
+		// Inject runbook candidates for AI validation
 		if runbookContext != "" {
 			if insight.Annotations == nil {
 				insight.Annotations = make(map[string]string)
 			}
-			insight.Annotations["platform.chatcli.io/candidate-runbook"] = candidateRunbook.Name
+			insight.Annotations["platform.chatcli.io/candidate-runbooks"] = strings.Join(candidateNames, ",")
 			insight.Annotations["platform.chatcli.io/runbook-context"] = runbookContext
 		}
 		return nil
@@ -265,32 +281,53 @@ func (r *IssueReconciler) handleAnalyzing(ctx context.Context, issue *platformv1
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	// 1. Find matching runbook and check if AI validated it
-	runbook, err := r.findMatchingRunbook(ctx, issue)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
+	// 1. Find matching runbooks and check if AI validated one
+	var runbook *platformv1alpha1.Runbook
+	candidates := r.findAllMatchingRunbooks(ctx, issue)
 
-	if runbook != nil {
-		// Check if AI validated this runbook
-		aiApproved := strings.Contains(insight.Status.Analysis, "RUNBOOK_APPROVED")
+	if len(candidates) > 0 {
 		aiRejected := strings.Contains(insight.Status.Analysis, "RUNBOOK_REJECTED")
 
 		if aiRejected {
-			// AI says runbook doesn't fit — skip it, use AI suggestions or agentic mode
-			log.Info("AI rejected candidate runbook, using alternative strategy",
-				"issue", issue.Name, "runbook", runbook.Name)
-			runbook = nil // force fallthrough to AI suggestions or agentic
-		} else if aiApproved {
-			log.Info("AI approved candidate runbook", "issue", issue.Name, "runbook", runbook.Name)
-			if runbook.Spec.MaxAttempts > 0 {
-				issue.Status.MaxRemediationAttempts = runbook.Spec.MaxAttempts
-			}
+			log.Info("AI rejected all candidate runbooks, using alternative strategy",
+				"issue", issue.Name, "candidates", len(candidates))
+			// runbook stays nil — fallthrough to AI suggestions or agentic
 		} else {
-			// AI didn't explicitly approve or reject — use runbook as default (backward compat)
-			log.Info("AI did not explicitly validate runbook, using it as default",
-				"issue", issue.Name, "runbook", runbook.Name)
-			if runbook.Spec.MaxAttempts > 0 {
+			// Check if AI approved a specific runbook by name: "RUNBOOK_APPROVED: <name>"
+			var approvedName string
+			for _, line := range strings.Split(insight.Status.Analysis, "\n") {
+				if idx := strings.Index(line, "RUNBOOK_APPROVED:"); idx >= 0 {
+					approvedName = strings.TrimSpace(line[idx+len("RUNBOOK_APPROVED:"):])
+					break
+				}
+				if strings.Contains(line, "RUNBOOK_APPROVED") {
+					// Simple approval without name — use first candidate
+					approvedName = candidates[0].Name
+					break
+				}
+			}
+
+			if approvedName != "" {
+				// Find the approved runbook by name
+				for _, rb := range candidates {
+					if rb.Name == approvedName {
+						runbook = rb
+						break
+					}
+				}
+				if runbook == nil {
+					// Name didn't match exactly — use first candidate
+					runbook = candidates[0]
+				}
+				log.Info("AI approved runbook", "issue", issue.Name, "runbook", runbook.Name)
+			} else {
+				// AI didn't explicitly approve or reject — use first candidate (backward compat)
+				runbook = candidates[0]
+				log.Info("AI did not explicitly validate runbook, using first candidate",
+					"issue", issue.Name, "runbook", runbook.Name)
+			}
+
+			if runbook != nil && runbook.Spec.MaxAttempts > 0 {
 				issue.Status.MaxRemediationAttempts = runbook.Spec.MaxAttempts
 			}
 		}
@@ -299,6 +336,7 @@ func (r *IssueReconciler) handleAnalyzing(ctx context.Context, issue *platformv1
 	if runbook == nil && len(insight.Status.SuggestedActions) > 0 {
 		// 2. No valid runbook — generate one from AI suggestions
 		log.Info("No valid runbook, generating from AI", "issue", issue.Name, "actions", len(insight.Status.SuggestedActions))
+		var err error
 		runbook, err = r.generateRunbookFromAI(ctx, issue, &insight)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("generating runbook from AI: %w", err)
@@ -489,45 +527,49 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 // Tier 1 (preferred): SignalType + Severity + ResourceKind (exact match)
 // Tier 2 (fallback):  Severity + ResourceKind (without signal match)
 func (r *IssueReconciler) findMatchingRunbook(ctx context.Context, issue *platformv1alpha1.Issue) (*platformv1alpha1.Runbook, error) {
+	candidates := r.findAllMatchingRunbooks(ctx, issue)
+	if len(candidates) > 0 {
+		return candidates[0], nil
+	}
+	return nil, nil
+}
+
+// findAllMatchingRunbooks returns ALL runbooks matching the issue's trigger criteria,
+// sorted by tier (Tier 1 first, then Tier 2). Multiple runbooks for the same signal
+// can exist when different root causes have been learned.
+func (r *IssueReconciler) findAllMatchingRunbooks(ctx context.Context, issue *platformv1alpha1.Issue) []*platformv1alpha1.Runbook {
 	var runbooks platformv1alpha1.RunbookList
 	if err := r.List(ctx, &runbooks, client.InNamespace(issue.Namespace)); err != nil {
-		return nil, err
+		return nil
 	}
 
-	// Also list cluster-scoped runbooks (in all namespaces)
 	var allRunbooks platformv1alpha1.RunbookList
 	if err := r.List(ctx, &allRunbooks); err != nil {
-		return nil, err
+		return nil
 	}
 
-	candidates := append(runbooks.Items, allRunbooks.Items...)
+	all := append(runbooks.Items, allRunbooks.Items...)
 
-	// Resolve signal type: prefer Spec.SignalType, fallback to label
 	signalType := issue.Spec.SignalType
 	if signalType == "" && issue.Labels != nil {
 		signalType = issue.Labels["platform.chatcli.io/signal"]
 	}
 
-	// Tier 1: SignalType + Severity + ResourceKind
-	var tier2Match *platformv1alpha1.Runbook
-	for i := range candidates {
-		rb := &candidates[i]
+	var tier1, tier2 []*platformv1alpha1.Runbook
+	for i := range all {
+		rb := &all[i]
 		if rb.Spec.Trigger.Severity != issue.Spec.Severity ||
 			rb.Spec.Trigger.ResourceKind != issue.Spec.Resource.Kind {
 			continue
 		}
-		// Severity + ResourceKind match
 		if signalType != "" && string(rb.Spec.Trigger.SignalType) == signalType {
-			// Tier 1 exact match — return immediately
-			return rb, nil
-		}
-		// Tier 2 match — save as fallback
-		if tier2Match == nil {
-			tier2Match = rb
+			tier1 = append(tier1, rb)
+		} else {
+			tier2 = append(tier2, rb)
 		}
 	}
 
-	return tier2Match, nil
+	return append(tier1, tier2...)
 }
 
 // createRemediationPlan creates a RemediationPlan from a Runbook.
@@ -587,9 +629,11 @@ func (r *IssueReconciler) generateRunbookFromAI(ctx context.Context, issue *plat
 		signalType = issue.Labels["platform.chatcli.io/signal"]
 	}
 
-	// Build a deterministic name: auto-{signal}-{severity}-{kind}
-	rbName := sanitizeRunbookName(fmt.Sprintf("auto-%s-%s-%s",
-		signalType, issue.Spec.Severity, strings.ToLower(issue.Spec.Resource.Kind)))
+	// Build name with hash of root cause analysis — different causes produce different runbooks
+	// e.g.: auto-oom-kill-critical-deployment-a3f2b1
+	analysisHash := fmt.Sprintf("%x", sha256.Sum256([]byte(insight.Status.Analysis)))[:6]
+	rbName := sanitizeRunbookName(fmt.Sprintf("auto-%s-%s-%s-%s",
+		signalType, issue.Spec.Severity, strings.ToLower(issue.Spec.Resource.Kind), analysisHash))
 
 	// Convert AI suggested actions to runbook steps
 	var steps []platformv1alpha1.RunbookStep
