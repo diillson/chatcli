@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.77.1](https://github.com/diillson/chatcli/compare/v1.77.0...v1.77.1) (2026-03-22)
+
+
+### Bug Fixes
+
+* **aiops:** PostMortem population, Review/Close state, Audit filters ([#663](https://github.com/diillson/chatcli/issues/663)) ([8c704f8](https://github.com/diillson/chatcli/commit/8c704f83c1a0fab3c03832958034b9e0b39360c1))
+
 ## [1.77.0](https://github.com/diillson/chatcli/compare/v1.76.1...v1.77.0) (2026-03-22)
 
 
