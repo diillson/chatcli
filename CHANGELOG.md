@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.85.1](https://github.com/diillson/chatcli/compare/v1.85.0...v1.85.1) (2026-03-22)
+
+
+### Bug Fixes
+
+* **aiops:** fix double multiplication in success rate and calculate SLA compliance ([#687](https://github.com/diillson/chatcli/issues/687)) ([85427e0](https://github.com/diillson/chatcli/commit/85427e0078ffa7528b2331b2884d403803ac4da8))
+
 ## [1.85.0](https://github.com/diillson/chatcli/compare/v1.84.0...v1.85.0) (2026-03-22)
 
 
