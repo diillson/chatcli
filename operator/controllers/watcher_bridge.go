@@ -24,8 +24,8 @@ const (
 	// PollInterval is how often the bridge polls the server for alerts.
 	PollInterval = 30 * time.Second
 
-	// DedupTTL is how long dedup hashes are kept to avoid creating duplicate anomalies.
-	DedupTTL = 2 * time.Hour
+	// DefaultDedupTTL is the default dedup TTL when no Instance AIOps config is set.
+	DefaultDedupTTL = 60 * time.Minute
 )
 
 // WatcherBridge polls the ChatCLI server's GetAlerts RPC and creates Anomaly CRs.
@@ -344,8 +344,9 @@ func MapAlertTypeToSignal(alertType string) platformv1alpha1.AnomalySignalType {
 
 // alertHash generates a dedup hash for an alert using type|deployment|namespace.
 // Time is intentionally excluded: the same ongoing problem (e.g. CrashLoopBackOff)
-// produces one Anomaly, not one per poll cycle. The DedupTTL (2h) ensures that
-// if the problem resolves and recurs later, a fresh Anomaly is created.
+// produces one Anomaly, not one per poll cycle. The dedup TTL (configurable via
+// Instance AIOps, default 60m) ensures that if the problem resolves and recurs
+// later, a fresh Anomaly is created.
 func alertHash(alert *pb.WatcherAlert) string {
 	data := fmt.Sprintf("%s|%s|%s", alert.Type, alert.Deployment, alert.Namespace)
 	h := sha256.Sum256([]byte(data))
@@ -368,7 +369,11 @@ func (wb *WatcherBridge) markSeen(hash string) {
 func (wb *WatcherBridge) pruneDedup() {
 	wb.mu.Lock()
 	defer wb.mu.Unlock()
-	cutoff := time.Now().Add(-DedupTTL)
+	ttl := DefaultDedupTTL
+	if wb.connectedInstance != nil {
+		ttl = wb.connectedInstance.Spec.AIOps.GetDedupTTL()
+	}
+	cutoff := time.Now().Add(-ttl)
 	for hash, ts := range wb.seen {
 		if ts.Before(cutoff) {
 			delete(wb.seen, hash)
@@ -376,21 +381,19 @@ func (wb *WatcherBridge) pruneDedup() {
 	}
 }
 
-// RefreshDedupForResource resets dedup entry timestamps for a specific deployment+namespace,
-// extending suppression for another DedupTTL period. Called when an Issue reaches a terminal
-// state (Resolved/Escalated/Failed) so that stale alerts don't immediately re-trigger.
-// If the problem truly recurs after DedupTTL, a fresh Anomaly will be created.
-func (wb *WatcherBridge) RefreshDedupForResource(deployment, namespace string) {
+// InvalidateDedupForResource removes all dedup entries for a specific deployment+namespace,
+// allowing new anomalies to be detected immediately. Called when an Issue reaches a terminal
+// state (Resolved/Escalated/Failed) so that genuine new problems are detected without delay.
+func (wb *WatcherBridge) InvalidateDedupForResource(deployment, namespace string) {
 	wb.mu.Lock()
 	defer wb.mu.Unlock()
 
-	now := time.Now()
 	for hash := range wb.seen {
 		for _, alertType := range knownAlertTypes {
 			candidate := fmt.Sprintf("%s|%s|%s", alertType, deployment, namespace)
 			h := sha256.Sum256([]byte(candidate))
 			if hash == fmt.Sprintf("%x", h[:8]) {
-				wb.seen[hash] = now // refresh timestamp instead of delete
+				delete(wb.seen, hash)
 			}
 		}
 	}

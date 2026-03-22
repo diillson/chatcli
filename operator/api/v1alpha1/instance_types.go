@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -49,6 +51,11 @@ type InstanceSpec struct {
 	// the system tries the next provider in the chain automatically.
 	// +optional
 	Fallback *FallbackSpec `json:"fallback,omitempty"`
+
+	// AIOps configures the autonomous incident management pipeline.
+	// All fields are optional with sensible defaults.
+	// +optional
+	AIOps *AIOpsSpec `json:"aiops,omitempty"`
 
 	// APIKeys references a Secret containing provider API keys.
 	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, GITHUB_COPILOT_TOKEN, etc.
@@ -270,6 +277,71 @@ type FallbackProviderEntry struct {
 	// Model is the LLM model to use for this provider.
 	// +optional
 	Model string `json:"model,omitempty"`
+}
+
+// AIOpsSpec configures the autonomous incident management pipeline.
+type AIOpsSpec struct {
+	// MaxRemediationAttempts is the maximum number of remediation attempts before escalating to human.
+	// Higher values give the AI more chances to try different strategies.
+	// +kubebuilder:default=5
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
+	// +optional
+	MaxRemediationAttempts int32 `json:"maxRemediationAttempts,omitempty"`
+
+	// ResolutionCooldownMinutes is how long (in minutes) after an issue is resolved before
+	// new anomalies for the same resource can create a new issue. Prevents stale re-triggers.
+	// +kubebuilder:default=10
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=120
+	// +optional
+	ResolutionCooldownMinutes int32 `json:"resolutionCooldownMinutes,omitempty"`
+
+	// DedupTTLMinutes is how long (in minutes) the bridge dedup cache retains alert hashes.
+	// After this period, the same alert can create a new Anomaly CR.
+	// +kubebuilder:default=60
+	// +kubebuilder:validation:Minimum=5
+	// +kubebuilder:validation:Maximum=1440
+	// +optional
+	DedupTTLMinutes int32 `json:"dedupTTLMinutes,omitempty"`
+
+	// EnableAutoResolve enables automatic resolution of Escalated issues when the
+	// watcher detects the resource has recovered (all pods healthy).
+	// +kubebuilder:default=true
+	// +optional
+	EnableAutoResolve *bool `json:"enableAutoResolve,omitempty"`
+}
+
+// GetMaxRemediationAttempts returns the configured max attempts or the default (5).
+func (a *AIOpsSpec) GetMaxRemediationAttempts() int32 {
+	if a != nil && a.MaxRemediationAttempts > 0 {
+		return a.MaxRemediationAttempts
+	}
+	return 5
+}
+
+// GetResolutionCooldown returns the configured cooldown or the default (10 minutes).
+func (a *AIOpsSpec) GetResolutionCooldown() time.Duration {
+	if a != nil && a.ResolutionCooldownMinutes > 0 {
+		return time.Duration(a.ResolutionCooldownMinutes) * time.Minute
+	}
+	return 10 * time.Minute
+}
+
+// GetDedupTTL returns the configured dedup TTL or the default (60 minutes).
+func (a *AIOpsSpec) GetDedupTTL() time.Duration {
+	if a != nil && a.DedupTTLMinutes > 0 {
+		return time.Duration(a.DedupTTLMinutes) * time.Minute
+	}
+	return 60 * time.Minute
+}
+
+// IsAutoResolveEnabled returns whether auto-resolve is enabled (default: true).
+func (a *AIOpsSpec) IsAutoResolveEnabled() bool {
+	if a != nil && a.EnableAutoResolve != nil {
+		return *a.EnableAutoResolve
+	}
+	return true
 }
 
 // PersistenceSpec configures persistent storage.
