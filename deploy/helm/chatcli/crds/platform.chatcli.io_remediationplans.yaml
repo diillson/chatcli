@@ -85,6 +85,41 @@ spec:
                       - UpdateIngress
                       - PatchNetworkPolicy
                       - ApplyManifest
+                      - ScaleStatefulSet
+                      - RestartStatefulSet
+                      - RollbackStatefulSet
+                      - AdjustStatefulSetResources
+                      - DeleteStatefulSetPod
+                      - ForceDeleteStatefulSetPod
+                      - UpdateStatefulSetStrategy
+                      - RecreateStatefulSetPVC
+                      - PartitionStatefulSetUpdate
+                      - RestartDaemonSet
+                      - RollbackDaemonSet
+                      - AdjustDaemonSetResources
+                      - DeleteDaemonSetPod
+                      - UpdateDaemonSetStrategy
+                      - PauseDaemonSetRollout
+                      - CordonAndDeleteDaemonSetPod
+                      - RetryJob
+                      - AdjustJobResources
+                      - DeleteFailedJob
+                      - SuspendJob
+                      - ResumeJob
+                      - AdjustJobParallelism
+                      - AdjustJobDeadline
+                      - AdjustJobBackoffLimit
+                      - ForceDeleteJobPods
+                      - SuspendCronJob
+                      - ResumeCronJob
+                      - TriggerCronJob
+                      - AdjustCronJobResources
+                      - AdjustCronJobSchedule
+                      - AdjustCronJobDeadline
+                      - AdjustCronJobHistory
+                      - AdjustCronJobConcurrency
+                      - DeleteCronJobActiveJobs
+                      - ReplaceCronJobTemplate
                       - Custom
                       type: string
                   required:
@@ -130,6 +165,41 @@ spec:
                           - UpdateIngress
                           - PatchNetworkPolicy
                           - ApplyManifest
+                          - ScaleStatefulSet
+                          - RestartStatefulSet
+                          - RollbackStatefulSet
+                          - AdjustStatefulSetResources
+                          - DeleteStatefulSetPod
+                          - ForceDeleteStatefulSetPod
+                          - UpdateStatefulSetStrategy
+                          - RecreateStatefulSetPVC
+                          - PartitionStatefulSetUpdate
+                          - RestartDaemonSet
+                          - RollbackDaemonSet
+                          - AdjustDaemonSetResources
+                          - DeleteDaemonSetPod
+                          - UpdateDaemonSetStrategy
+                          - PauseDaemonSetRollout
+                          - CordonAndDeleteDaemonSetPod
+                          - RetryJob
+                          - AdjustJobResources
+                          - DeleteFailedJob
+                          - SuspendJob
+                          - ResumeJob
+                          - AdjustJobParallelism
+                          - AdjustJobDeadline
+                          - AdjustJobBackoffLimit
+                          - ForceDeleteJobPods
+                          - SuspendCronJob
+                          - ResumeCronJob
+                          - TriggerCronJob
+                          - AdjustCronJobResources
+                          - AdjustCronJobSchedule
+                          - AdjustCronJobDeadline
+                          - AdjustCronJobHistory
+                          - AdjustCronJobConcurrency
+                          - DeleteCronJobActiveJobs
+                          - ReplaceCronJobTemplate
                           - Custom
                           type: string
                       required:
@@ -229,21 +299,70 @@ spec:
                       - UpdateIngress
                       - PatchNetworkPolicy
                       - ApplyManifest
+                      - ScaleStatefulSet
+                      - RestartStatefulSet
+                      - RollbackStatefulSet
+                      - AdjustStatefulSetResources
+                      - DeleteStatefulSetPod
+                      - ForceDeleteStatefulSetPod
+                      - UpdateStatefulSetStrategy
+                      - RecreateStatefulSetPVC
+                      - PartitionStatefulSetUpdate
+                      - RestartDaemonSet
+                      - RollbackDaemonSet
+                      - AdjustDaemonSetResources
+                      - DeleteDaemonSetPod
+                      - UpdateDaemonSetStrategy
+                      - PauseDaemonSetRollout
+                      - CordonAndDeleteDaemonSetPod
+                      - RetryJob
+                      - AdjustJobResources
+                      - DeleteFailedJob
+                      - SuspendJob
+                      - ResumeJob
+                      - AdjustJobParallelism
+                      - AdjustJobDeadline
+                      - AdjustJobBackoffLimit
+                      - ForceDeleteJobPods
+                      - SuspendCronJob
+                      - ResumeCronJob
+                      - TriggerCronJob
+                      - AdjustCronJobResources
+                      - AdjustCronJobSchedule
+                      - AdjustCronJobDeadline
+                      - AdjustCronJobHistory
+                      - AdjustCronJobConcurrency
+                      - DeleteCronJobActiveJobs
+                      - ReplaceCronJobTemplate
                       - Custom
                       type: string
                     snapshotBefore:
                       description: SnapshotBefore is the resource state captured before
                         THIS action.
                       properties:
+                        activeDeadlineSeconds:
+                          description: ActiveDeadlineSeconds captures job deadline
+                            before modification.
+                          format: int64
+                          type: integer
                         annotations:
                           additionalProperties:
                             type: string
                           description: Annotations captures relevant annotations before
                             modification.
                           type: object
+                        backoffLimit:
+                          description: BackoffLimit captures job backoff limit before
+                            modification.
+                          format: int32
+                          type: integer
                         capturedAt:
                           description: CapturedAt is when this snapshot was taken.
                           format: date-time
+                          type: string
+                        concurrencyPolicy:
+                          description: ConcurrencyPolicy captures cronjob concurrency
+                            before modification.
                           type: string
                         containerImages:
                           additionalProperties:
@@ -272,6 +391,14 @@ spec:
                           description: ContainerResources maps container name to its
                             resources before modification.
                           type: object
+                        failedJobsHistoryLimit:
+                          description: FailedJobsHistoryLimit captures history limit.
+                          format: int32
+                          type: integer
+                        fullSpec:
+                          description: FullSpec stores a JSON-serialized copy of the
+                            full spec for complex rollbacks.
+                          type: string
                         hpaMaxReplicas:
                           format: int32
                           type: integer
@@ -279,6 +406,10 @@ spec:
                           description: HPASpec captures HPA state before modification.
                           format: int32
                           type: integer
+                        maxUnavailable:
+                          description: MaxUnavailable captures DaemonSet maxUnavailable
+                            value.
+                          type: string
                         namespace:
                           description: Namespace of the resource.
                           type: string
@@ -286,6 +417,15 @@ spec:
                           description: NodeUnschedulable captures the node's schedulable
                             state before cordon.
                           type: boolean
+                        parallelism:
+                          description: Parallelism captures job parallelism before
+                            modification.
+                          format: int32
+                          type: integer
+                        partition:
+                          description: Partition captures StatefulSet partition value.
+                          format: int32
+                          type: integer
                         replicas:
                           description: Replicas before modification.
                           format: int32
@@ -296,6 +436,25 @@ spec:
                           type: string
                         resourceName:
                           description: ResourceName is the name of the resource.
+                          type: string
+                        schedule:
+                          description: Schedule captures cron schedule before modification.
+                          type: string
+                        startingDeadlineSeconds:
+                          description: StartingDeadlineSeconds captures cronjob deadline.
+                          format: int64
+                          type: integer
+                        successfulJobsHistoryLimit:
+                          description: SuccessfulJobsHistoryLimit captures history
+                            limit.
+                          format: int32
+                          type: integer
+                        suspend:
+                          description: Suspend captures the suspend state (Job, CronJob).
+                          type: boolean
+                        updateStrategyType:
+                          description: UpdateStrategyType captures StatefulSet/DaemonSet
+                            update strategy type.
                           type: string
                       required:
                       - capturedAt
@@ -366,15 +525,28 @@ spec:
                   PreflightSnapshot is the full restorable state of the resource before any actions.
                   Used for automatic rollback on failure.
                 properties:
+                  activeDeadlineSeconds:
+                    description: ActiveDeadlineSeconds captures job deadline before
+                      modification.
+                    format: int64
+                    type: integer
                   annotations:
                     additionalProperties:
                       type: string
                     description: Annotations captures relevant annotations before
                       modification.
                     type: object
+                  backoffLimit:
+                    description: BackoffLimit captures job backoff limit before modification.
+                    format: int32
+                    type: integer
                   capturedAt:
                     description: CapturedAt is when this snapshot was taken.
                     format: date-time
+                    type: string
+                  concurrencyPolicy:
+                    description: ConcurrencyPolicy captures cronjob concurrency before
+                      modification.
                     type: string
                   containerImages:
                     additionalProperties:
@@ -403,6 +575,14 @@ spec:
                     description: ContainerResources maps container name to its resources
                       before modification.
                     type: object
+                  failedJobsHistoryLimit:
+                    description: FailedJobsHistoryLimit captures history limit.
+                    format: int32
+                    type: integer
+                  fullSpec:
+                    description: FullSpec stores a JSON-serialized copy of the full
+                      spec for complex rollbacks.
+                    type: string
                   hpaMaxReplicas:
                     format: int32
                     type: integer
@@ -410,6 +590,10 @@ spec:
                     description: HPASpec captures HPA state before modification.
                     format: int32
                     type: integer
+                  maxUnavailable:
+                    description: MaxUnavailable captures DaemonSet maxUnavailable
+                      value.
+                    type: string
                   namespace:
                     description: Namespace of the resource.
                     type: string
@@ -417,6 +601,14 @@ spec:
                     description: NodeUnschedulable captures the node's schedulable
                       state before cordon.
                     type: boolean
+                  parallelism:
+                    description: Parallelism captures job parallelism before modification.
+                    format: int32
+                    type: integer
+                  partition:
+                    description: Partition captures StatefulSet partition value.
+                    format: int32
+                    type: integer
                   replicas:
                     description: Replicas before modification.
                     format: int32
@@ -427,6 +619,24 @@ spec:
                     type: string
                   resourceName:
                     description: ResourceName is the name of the resource.
+                    type: string
+                  schedule:
+                    description: Schedule captures cron schedule before modification.
+                    type: string
+                  startingDeadlineSeconds:
+                    description: StartingDeadlineSeconds captures cronjob deadline.
+                    format: int64
+                    type: integer
+                  successfulJobsHistoryLimit:
+                    description: SuccessfulJobsHistoryLimit captures history limit.
+                    format: int32
+                    type: integer
+                  suspend:
+                    description: Suspend captures the suspend state (Job, CronJob).
+                    type: boolean
+                  updateStrategyType:
+                    description: UpdateStrategyType captures StatefulSet/DaemonSet
+                      update strategy type.
                     type: string
                 required:
                 - capturedAt

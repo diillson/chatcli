@@ -308,7 +308,7 @@ func TestGenerateStatusSummary_Healthy(t *testing.T) {
 
 	summary := summarizer.GenerateStatusSummary()
 	assert.Contains(t, summary, "production/myapp")
-	assert.Contains(t, summary, "3/3 pods ready")
+	assert.Contains(t, summary, "3/3 ready")
 	assert.Contains(t, summary, "healthy")
 	assert.Contains(t, summary, "0 alerts")
 }
@@ -328,7 +328,7 @@ func TestGenerateStatusSummary_Degraded(t *testing.T) {
 	})
 
 	summary := summarizer.GenerateStatusSummary()
-	assert.Contains(t, summary, "2/3 pods ready")
+	assert.Contains(t, summary, "2/3 ready")
 	assert.Contains(t, summary, "degraded")
 }
 

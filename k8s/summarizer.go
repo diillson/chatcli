@@ -32,19 +32,61 @@ func (s *Summarizer) GenerateContext() string {
 
 	var b strings.Builder
 
-	// Header
-	d := snap.Deployment
-	b.WriteString(fmt.Sprintf("[K8s Context: deployment/%s in namespace/%s]\n", d.Name, d.Namespace))
+	// Header — use Resource if available, fallback to Deployment alias
+	r := snap.Resource
+	if r.Name == "" {
+		// Backward compat: populate from legacy Deployment field
+		r = ResourceStatus{
+			Kind:              "Deployment",
+			Name:              snap.Deployment.Name,
+			Namespace:         snap.Deployment.Namespace,
+			Replicas:          snap.Deployment.Replicas,
+			ReadyReplicas:     snap.Deployment.ReadyReplicas,
+			UpdatedReplicas:   snap.Deployment.UpdatedReplicas,
+			AvailableReplicas: snap.Deployment.AvailableReplicas,
+			Conditions:        snap.Deployment.Conditions,
+			Strategy:          snap.Deployment.Strategy,
+		}
+	}
+	kind := r.Kind
+	if kind == "" {
+		kind = "Deployment"
+	}
+	b.WriteString(fmt.Sprintf("[K8s Context: %s/%s in namespace/%s]\n", strings.ToLower(kind), r.Name, r.Namespace))
 	b.WriteString(fmt.Sprintf("Collected at: %s\n\n", snap.Timestamp.Format(time.RFC3339)))
 
-	// Deployment Status
-	b.WriteString("## Deployment Status\n")
-	b.WriteString(fmt.Sprintf("  Replicas: %d/%d ready, %d updated, %d available\n",
-		d.ReadyReplicas, d.Replicas, d.UpdatedReplicas, d.AvailableReplicas))
-	b.WriteString(fmt.Sprintf("  Strategy: %s\n", d.Strategy))
-	if len(d.Conditions) > 0 {
+	// Resource Status (kind-aware)
+	b.WriteString(fmt.Sprintf("## %s Status\n", kind))
+	switch kind {
+	case "Job":
+		b.WriteString(fmt.Sprintf("  Active: %d, Succeeded: %d, Failed: %d\n", r.Active, r.Succeeded, r.Failed))
+		if r.Suspended {
+			b.WriteString("  State: SUSPENDED\n")
+		}
+	case "CronJob":
+		b.WriteString(fmt.Sprintf("  Schedule: %s, Active Jobs: %d\n", r.Schedule, r.Active))
+		if r.Suspended {
+			b.WriteString("  State: SUSPENDED\n")
+		}
+		if r.LastScheduleTime != nil {
+			b.WriteString(fmt.Sprintf("  Last scheduled: %s\n", r.LastScheduleTime.Format(time.RFC3339)))
+		}
+	case "DaemonSet":
+		b.WriteString(fmt.Sprintf("  Nodes: %d/%d ready, %d updated, %d available, %d unavailable\n",
+			r.ReadyReplicas, r.Replicas, r.UpdatedReplicas, r.AvailableReplicas, r.UnavailableCount))
+		if r.Strategy != "" {
+			b.WriteString(fmt.Sprintf("  Update Strategy: %s\n", r.Strategy))
+		}
+	default: // Deployment, StatefulSet
+		b.WriteString(fmt.Sprintf("  Replicas: %d/%d ready, %d updated, %d available\n",
+			r.ReadyReplicas, r.Replicas, r.UpdatedReplicas, r.AvailableReplicas))
+		if r.Strategy != "" {
+			b.WriteString(fmt.Sprintf("  Strategy: %s\n", r.Strategy))
+		}
+	}
+	if len(r.Conditions) > 0 {
 		b.WriteString("  Conditions:\n")
-		for _, c := range d.Conditions {
+		for _, c := range r.Conditions {
 			b.WriteString(fmt.Sprintf("    - %s\n", c))
 		}
 	}
@@ -149,12 +191,19 @@ func (s *Summarizer) GenerateStatusSummary() string {
 		return "No data"
 	}
 
-	d := snap.Deployment
+	r := snap.Resource
+	if r.Name == "" {
+		r.Name = snap.Deployment.Name
+		r.Namespace = snap.Deployment.Namespace
+		r.Replicas = snap.Deployment.Replicas
+		r.ReadyReplicas = snap.Deployment.ReadyReplicas
+		r.Kind = "Deployment"
+	}
 	alerts := s.store.GetAlerts()
 	stats := s.store.Stats()
 
 	healthIcon := "healthy"
-	if d.ReadyReplicas < d.Replicas {
+	if r.ReadyReplicas < r.Replicas && r.Kind != "CronJob" {
 		healthIcon = "degraded"
 	}
 	if len(alerts) > 0 {
@@ -166,8 +215,22 @@ func (s *Summarizer) GenerateStatusSummary() string {
 		}
 	}
 
-	return fmt.Sprintf("%s/%s: %d/%d pods ready | %s | %d alerts | %d snapshots collected",
-		d.Namespace, d.Name, d.ReadyReplicas, d.Replicas, healthIcon, len(alerts), stats.SnapshotCount)
+	kind := r.Kind
+	if kind == "" {
+		kind = "Deployment"
+	}
+
+	switch kind {
+	case "Job":
+		return fmt.Sprintf("%s/%s (%s): active=%d succeeded=%d failed=%d | %s | %d alerts",
+			r.Namespace, r.Name, kind, r.Active, r.Succeeded, r.Failed, healthIcon, len(alerts))
+	case "CronJob":
+		return fmt.Sprintf("%s/%s (%s): schedule=%s active=%d suspended=%v | %s | %d alerts",
+			r.Namespace, r.Name, kind, r.Schedule, r.Active, r.Suspended, healthIcon, len(alerts))
+	default:
+		return fmt.Sprintf("%s/%s (%s): %d/%d ready | %s | %d alerts | %d snapshots",
+			r.Namespace, r.Name, kind, r.ReadyReplicas, r.Replicas, healthIcon, len(alerts), stats.SnapshotCount)
+	}
 }
 
 // MultiSummarizer generates budget-constrained context from multiple watch targets.
@@ -308,7 +371,11 @@ func (ms *MultiSummarizer) GenerateStatusSummary() string {
 			continue
 		}
 		alerts := store.GetAlerts()
-		d := snap.Deployment
+		r := snap.Resource
+		if r.Name == "" {
+			r.Replicas = snap.Deployment.Replicas
+			r.ReadyReplicas = snap.Deployment.ReadyReplicas
+		}
 
 		isCritical, isWarning := false, false
 		for _, a := range alerts {
@@ -319,7 +386,7 @@ func (ms *MultiSummarizer) GenerateStatusSummary() string {
 				isWarning = true
 			}
 		}
-		if d.ReadyReplicas < d.Replicas {
+		if r.ReadyReplicas < r.Replicas && r.Kind != "CronJob" {
 			isWarning = true
 		}
 
@@ -349,7 +416,11 @@ func (ms *MultiSummarizer) scoreTargets() []TargetHealthScore {
 		errorLogs := store.GetErrorLogs(1)
 
 		score := 0
-		d := snap.Deployment
+		r := snap.Resource
+		if r.Name == "" {
+			r.Replicas = snap.Deployment.Replicas
+			r.ReadyReplicas = snap.Deployment.ReadyReplicas
+		}
 
 		for _, a := range alerts {
 			if a.Severity == SeverityCritical {
@@ -358,7 +429,7 @@ func (ms *MultiSummarizer) scoreTargets() []TargetHealthScore {
 			}
 		}
 		if score < 2 {
-			if d.ReadyReplicas < d.Replicas {
+			if r.ReadyReplicas < r.Replicas && r.Kind != "CronJob" {
 				score = 1
 			}
 			for _, a := range alerts {

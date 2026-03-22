@@ -559,11 +559,26 @@ spec:
                       Targets defines multiple deployments to watch simultaneously.
                       When set, Deployment and Namespace fields are ignored.
                     items:
-                      description: WatchTargetSpec defines a single deployment target
+                      description: WatchTargetSpec defines a single resource target
                         for multi-target watching.
                       properties:
                         deployment:
-                          description: Deployment is the deployment name to monitor.
+                          description: |-
+                            Deployment is the resource name to monitor.
+                            Deprecated: Use "name" instead. Kept for backward compatibility — if both are set, "name" takes precedence.
+                          type: string
+                        kind:
+                          default: Deployment
+                          description: |-
+                            Kind is the Kubernetes resource kind to monitor.
+                            Supported values: Deployment, StatefulSet, DaemonSet, Job, CronJob.
+                            Defaults to "Deployment" when omitted for backward compatibility.
+                          enum:
+                          - Deployment
+                          - StatefulSet
+                          - DaemonSet
+                          - Job
+                          - CronJob
                           type: string
                         metricsFilter:
                           description: MetricsFilter is a list of glob patterns to
@@ -580,11 +595,14 @@ spec:
                             are exposed (0 = disabled).
                           format: int32
                           type: integer
+                        name:
+                          description: Name is the resource name to monitor (e.g.,
+                            "api-gateway", "postgres", "fluentd").
+                          type: string
                         namespace:
-                          description: Namespace is the namespace of the deployment.
+                          description: Namespace is the namespace of the resource.
                           type: string
                       required:
-                      - deployment
                       - namespace
                       type: object
                     type: array

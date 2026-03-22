@@ -16,10 +16,11 @@ const (
 )
 
 // RemediationActionType defines the type of remediation action.
-// +kubebuilder:validation:Enum=ScaleDeployment;RollbackDeployment;RestartDeployment;PatchConfig;AdjustResources;DeletePod;HelmRollback;ArgoSyncApp;AdjustHPA;RestartStatefulSetPod;CordonNode;DrainNode;ResizePVC;RotateSecret;ExecDiagnostic;UpdateIngress;PatchNetworkPolicy;ApplyManifest;Custom
+// +kubebuilder:validation:Enum=ScaleDeployment;RollbackDeployment;RestartDeployment;PatchConfig;AdjustResources;DeletePod;HelmRollback;ArgoSyncApp;AdjustHPA;RestartStatefulSetPod;CordonNode;DrainNode;ResizePVC;RotateSecret;ExecDiagnostic;UpdateIngress;PatchNetworkPolicy;ApplyManifest;ScaleStatefulSet;RestartStatefulSet;RollbackStatefulSet;AdjustStatefulSetResources;DeleteStatefulSetPod;ForceDeleteStatefulSetPod;UpdateStatefulSetStrategy;RecreateStatefulSetPVC;PartitionStatefulSetUpdate;RestartDaemonSet;RollbackDaemonSet;AdjustDaemonSetResources;DeleteDaemonSetPod;UpdateDaemonSetStrategy;PauseDaemonSetRollout;CordonAndDeleteDaemonSetPod;RetryJob;AdjustJobResources;DeleteFailedJob;SuspendJob;ResumeJob;AdjustJobParallelism;AdjustJobDeadline;AdjustJobBackoffLimit;ForceDeleteJobPods;SuspendCronJob;ResumeCronJob;TriggerCronJob;AdjustCronJobResources;AdjustCronJobSchedule;AdjustCronJobDeadline;AdjustCronJobHistory;AdjustCronJobConcurrency;DeleteCronJobActiveJobs;ReplaceCronJobTemplate;Custom
 type RemediationActionType string
 
 const (
+	// --- Deployment / Generic Actions ---
 	ActionScaleDeployment       RemediationActionType = "ScaleDeployment"
 	ActionRollbackDeployment    RemediationActionType = "RollbackDeployment"
 	ActionRestartDeployment     RemediationActionType = "RestartDeployment"
@@ -38,7 +39,52 @@ const (
 	ActionUpdateIngress         RemediationActionType = "UpdateIngress"
 	ActionPatchNetworkPolicy    RemediationActionType = "PatchNetworkPolicy"
 	ActionApplyManifest         RemediationActionType = "ApplyManifest"
-	ActionCustom                RemediationActionType = "Custom"
+
+	// --- StatefulSet Actions ---
+	ActionScaleStatefulSet           RemediationActionType = "ScaleStatefulSet"
+	ActionRestartStatefulSet         RemediationActionType = "RestartStatefulSet"
+	ActionRollbackStatefulSet        RemediationActionType = "RollbackStatefulSet"
+	ActionAdjustStatefulSetResources RemediationActionType = "AdjustStatefulSetResources"
+	ActionDeleteStatefulSetPod       RemediationActionType = "DeleteStatefulSetPod"
+	ActionForceDeleteStatefulSetPod  RemediationActionType = "ForceDeleteStatefulSetPod"
+	ActionUpdateStatefulSetStrategy  RemediationActionType = "UpdateStatefulSetStrategy"
+	ActionRecreateStatefulSetPVC     RemediationActionType = "RecreateStatefulSetPVC"
+	ActionPartitionStatefulSetUpdate RemediationActionType = "PartitionStatefulSetUpdate"
+
+	// --- DaemonSet Actions ---
+	ActionRestartDaemonSet            RemediationActionType = "RestartDaemonSet"
+	ActionRollbackDaemonSet           RemediationActionType = "RollbackDaemonSet"
+	ActionAdjustDaemonSetResources    RemediationActionType = "AdjustDaemonSetResources"
+	ActionDeleteDaemonSetPod          RemediationActionType = "DeleteDaemonSetPod"
+	ActionUpdateDaemonSetStrategy     RemediationActionType = "UpdateDaemonSetStrategy"
+	ActionPauseDaemonSetRollout       RemediationActionType = "PauseDaemonSetRollout"
+	ActionCordonAndDeleteDaemonSetPod RemediationActionType = "CordonAndDeleteDaemonSetPod"
+
+	// --- Job Actions ---
+	ActionRetryJob              RemediationActionType = "RetryJob"
+	ActionAdjustJobResources    RemediationActionType = "AdjustJobResources"
+	ActionDeleteFailedJob       RemediationActionType = "DeleteFailedJob"
+	ActionSuspendJob            RemediationActionType = "SuspendJob"
+	ActionResumeJob             RemediationActionType = "ResumeJob"
+	ActionAdjustJobParallelism  RemediationActionType = "AdjustJobParallelism"
+	ActionAdjustJobDeadline     RemediationActionType = "AdjustJobDeadline"
+	ActionAdjustJobBackoffLimit RemediationActionType = "AdjustJobBackoffLimit"
+	ActionForceDeleteJobPods    RemediationActionType = "ForceDeleteJobPods"
+
+	// --- CronJob Actions ---
+	ActionSuspendCronJob           RemediationActionType = "SuspendCronJob"
+	ActionResumeCronJob            RemediationActionType = "ResumeCronJob"
+	ActionTriggerCronJob           RemediationActionType = "TriggerCronJob"
+	ActionAdjustCronJobResources   RemediationActionType = "AdjustCronJobResources"
+	ActionAdjustCronJobSchedule    RemediationActionType = "AdjustCronJobSchedule"
+	ActionAdjustCronJobDeadline    RemediationActionType = "AdjustCronJobDeadline"
+	ActionAdjustCronJobHistory     RemediationActionType = "AdjustCronJobHistory"
+	ActionAdjustCronJobConcurrency RemediationActionType = "AdjustCronJobConcurrency"
+	ActionDeleteCronJobActiveJobs  RemediationActionType = "DeleteCronJobActiveJobs"
+	ActionReplaceCronJobTemplate   RemediationActionType = "ReplaceCronJobTemplate"
+
+	// --- Fallback ---
+	ActionCustom RemediationActionType = "Custom"
 )
 
 // RemediationAction defines a single remediation step.
@@ -144,6 +190,62 @@ type ResourceSnapshot struct {
 	// Annotations captures relevant annotations before modification.
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// --- Job/CronJob state ---
+
+	// Suspend captures the suspend state (Job, CronJob).
+	// +optional
+	Suspend *bool `json:"suspend,omitempty"`
+
+	// ActiveDeadlineSeconds captures job deadline before modification.
+	// +optional
+	ActiveDeadlineSeconds *int64 `json:"activeDeadlineSeconds,omitempty"`
+
+	// BackoffLimit captures job backoff limit before modification.
+	// +optional
+	BackoffLimit *int32 `json:"backoffLimit,omitempty"`
+
+	// Parallelism captures job parallelism before modification.
+	// +optional
+	Parallelism *int32 `json:"parallelism,omitempty"`
+
+	// Schedule captures cron schedule before modification.
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// ConcurrencyPolicy captures cronjob concurrency before modification.
+	// +optional
+	ConcurrencyPolicy string `json:"concurrencyPolicy,omitempty"`
+
+	// StartingDeadlineSeconds captures cronjob deadline.
+	// +optional
+	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty"`
+
+	// SuccessfulJobsHistoryLimit captures history limit.
+	// +optional
+	SuccessfulJobsHistoryLimit *int32 `json:"successfulJobsHistoryLimit,omitempty"`
+
+	// FailedJobsHistoryLimit captures history limit.
+	// +optional
+	FailedJobsHistoryLimit *int32 `json:"failedJobsHistoryLimit,omitempty"`
+
+	// --- StatefulSet/DaemonSet update strategy state ---
+
+	// UpdateStrategyType captures StatefulSet/DaemonSet update strategy type.
+	// +optional
+	UpdateStrategyType string `json:"updateStrategyType,omitempty"`
+
+	// Partition captures StatefulSet partition value.
+	// +optional
+	Partition *int32 `json:"partition,omitempty"`
+
+	// MaxUnavailable captures DaemonSet maxUnavailable value.
+	// +optional
+	MaxUnavailable string `json:"maxUnavailable,omitempty"`
+
+	// FullSpec stores a JSON-serialized copy of the full spec for complex rollbacks.
+	// +optional
+	FullSpec string `json:"fullSpec,omitempty"`
 
 	// CapturedAt is when this snapshot was taken.
 	CapturedAt metav1.Time `json:"capturedAt"`

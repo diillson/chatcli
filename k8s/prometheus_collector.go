@@ -20,11 +20,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// PrometheusCollector scrapes /metrics endpoints from pods of a deployment.
+// PrometheusCollector scrapes /metrics endpoints from pods of a Kubernetes resource.
 type PrometheusCollector struct {
 	clientset  kubernetes.Interface
 	namespace  string
 	deployment string
+	kind       string // Deployment, StatefulSet, DaemonSet, Job, CronJob
 	port       int
 	path       string
 	filters    []string // glob patterns for metric names
@@ -47,6 +48,34 @@ func NewPrometheusCollector(
 		clientset:  clientset,
 		namespace:  namespace,
 		deployment: deployment,
+		kind:       "Deployment",
+		port:       port,
+		path:       path,
+		filters:    filters,
+		httpClient: &http.Client{Timeout: 5 * time.Second},
+		logger:     logger,
+	}
+}
+
+// NewResourcePrometheusCollector creates a collector for any resource kind.
+func NewResourcePrometheusCollector(
+	clientset kubernetes.Interface,
+	namespace, name, kind string,
+	port int, path string,
+	filters []string,
+	logger *zap.Logger,
+) *PrometheusCollector {
+	if path == "" {
+		path = "/metrics"
+	}
+	if kind == "" {
+		kind = "Deployment"
+	}
+	return &PrometheusCollector{
+		clientset:  clientset,
+		namespace:  namespace,
+		deployment: name,
+		kind:       kind,
 		port:       port,
 		path:       path,
 		filters:    filters,
@@ -57,20 +86,14 @@ func NewPrometheusCollector(
 
 // Collect scrapes metrics from the first Ready pod and returns AppMetrics.
 func (c *PrometheusCollector) Collect(ctx context.Context) *AppMetrics {
-	deploy, err := c.clientset.AppsV1().Deployments(c.namespace).Get(ctx, c.deployment, metav1.GetOptions{})
+	selectorStr, err := getLabelSelector(ctx, c.clientset, c.namespace, c.deployment, c.kind)
 	if err != nil {
-		c.logger.Debug("PrometheusCollector: failed to get deployment", zap.Error(err))
-		return nil
-	}
-
-	selector, err := metav1.LabelSelectorAsSelector(deploy.Spec.Selector)
-	if err != nil {
-		c.logger.Debug("PrometheusCollector: bad selector", zap.Error(err))
+		c.logger.Debug("PrometheusCollector: failed to get selector", zap.String("kind", c.kind), zap.Error(err))
 		return nil
 	}
 
 	pods, err := c.clientset.CoreV1().Pods(c.namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector.String(),
+		LabelSelector: selectorStr,
 	})
 	if err != nil {
 		c.logger.Debug("PrometheusCollector: failed to list pods", zap.Error(err))

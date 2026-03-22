@@ -2,15 +2,18 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -44,6 +47,10 @@ func (re *RollbackEngine) CaptureSnapshot(ctx context.Context, resource platform
 		return re.captureStatefulSetSnapshot(ctx, resource, snapshot)
 	case "DaemonSet":
 		return re.captureDaemonSetSnapshot(ctx, resource, snapshot)
+	case "Job":
+		return re.captureJobSnapshot(ctx, resource, snapshot)
+	case "CronJob":
+		return re.captureCronJobSnapshot(ctx, resource, snapshot)
 	default:
 		// For unsupported kinds, capture what we can via pods
 		return snapshot, nil
@@ -126,6 +133,23 @@ func (re *RollbackEngine) captureStatefulSetSnapshot(ctx context.Context, resour
 		snapshot.ContainerResources[c.Name] = rs
 	}
 
+	// Capture update strategy
+	snapshot.UpdateStrategyType = string(sts.Spec.UpdateStrategy.Type)
+	if sts.Spec.UpdateStrategy.RollingUpdate != nil && sts.Spec.UpdateStrategy.RollingUpdate.Partition != nil {
+		snapshot.Partition = sts.Spec.UpdateStrategy.RollingUpdate.Partition
+	}
+
+	// Capture restart annotation
+	snapshot.Annotations = make(map[string]string)
+	if sts.Spec.Template.Annotations != nil {
+		if v, ok := sts.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]; ok {
+			snapshot.Annotations["kubectl.kubernetes.io/restartedAt"] = v
+		}
+	}
+
+	// Capture HPA if one exists
+	re.captureHPASnapshot(ctx, resource, snapshot)
+
 	return snapshot, nil
 }
 
@@ -150,6 +174,92 @@ func (re *RollbackEngine) captureDaemonSetSnapshot(ctx context.Context, resource
 			rs.MemoryLimit = c.Resources.Limits.Memory().String()
 		}
 		snapshot.ContainerResources[c.Name] = rs
+	}
+
+	// Capture update strategy
+	snapshot.UpdateStrategyType = string(ds.Spec.UpdateStrategy.Type)
+	if ds.Spec.UpdateStrategy.RollingUpdate != nil && ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable != nil {
+		snapshot.MaxUnavailable = ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable.String()
+	}
+
+	// Capture restart annotation
+	snapshot.Annotations = make(map[string]string)
+	if ds.Spec.Template.Annotations != nil {
+		if v, ok := ds.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]; ok {
+			snapshot.Annotations["kubectl.kubernetes.io/restartedAt"] = v
+		}
+	}
+
+	return snapshot, nil
+}
+
+func (re *RollbackEngine) captureJobSnapshot(ctx context.Context, resource platformv1alpha1.ResourceRef, snapshot *platformv1alpha1.ResourceSnapshot) (*platformv1alpha1.ResourceSnapshot, error) {
+	var job batchv1.Job
+	if err := re.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &job); err != nil {
+		return nil, fmt.Errorf("capturing job snapshot: %w", err)
+	}
+
+	snapshot.Suspend = job.Spec.Suspend
+	snapshot.ActiveDeadlineSeconds = job.Spec.ActiveDeadlineSeconds
+	snapshot.BackoffLimit = job.Spec.BackoffLimit
+	snapshot.Parallelism = job.Spec.Parallelism
+
+	snapshot.ContainerImages = make(map[string]string)
+	snapshot.ContainerResources = make(map[string]platformv1alpha1.ContainerResourceSnapshot)
+	for _, c := range job.Spec.Template.Spec.Containers {
+		snapshot.ContainerImages[c.Name] = c.Image
+		rs := platformv1alpha1.ContainerResourceSnapshot{}
+		if c.Resources.Requests != nil {
+			rs.CPURequest = c.Resources.Requests.Cpu().String()
+			rs.MemoryRequest = c.Resources.Requests.Memory().String()
+		}
+		if c.Resources.Limits != nil {
+			rs.CPULimit = c.Resources.Limits.Cpu().String()
+			rs.MemoryLimit = c.Resources.Limits.Memory().String()
+		}
+		snapshot.ContainerResources[c.Name] = rs
+	}
+
+	// Serialize full spec for complex rollbacks
+	if specJSON, err := json.Marshal(job.Spec); err == nil {
+		snapshot.FullSpec = string(specJSON)
+	}
+
+	return snapshot, nil
+}
+
+func (re *RollbackEngine) captureCronJobSnapshot(ctx context.Context, resource platformv1alpha1.ResourceRef, snapshot *platformv1alpha1.ResourceSnapshot) (*platformv1alpha1.ResourceSnapshot, error) {
+	var cj batchv1.CronJob
+	if err := re.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &cj); err != nil {
+		return nil, fmt.Errorf("capturing cronjob snapshot: %w", err)
+	}
+
+	snapshot.Suspend = cj.Spec.Suspend
+	snapshot.Schedule = cj.Spec.Schedule
+	snapshot.ConcurrencyPolicy = string(cj.Spec.ConcurrencyPolicy)
+	snapshot.StartingDeadlineSeconds = cj.Spec.StartingDeadlineSeconds
+	snapshot.SuccessfulJobsHistoryLimit = cj.Spec.SuccessfulJobsHistoryLimit
+	snapshot.FailedJobsHistoryLimit = cj.Spec.FailedJobsHistoryLimit
+
+	snapshot.ContainerImages = make(map[string]string)
+	snapshot.ContainerResources = make(map[string]platformv1alpha1.ContainerResourceSnapshot)
+	for _, c := range cj.Spec.JobTemplate.Spec.Template.Spec.Containers {
+		snapshot.ContainerImages[c.Name] = c.Image
+		rs := platformv1alpha1.ContainerResourceSnapshot{}
+		if c.Resources.Requests != nil {
+			rs.CPURequest = c.Resources.Requests.Cpu().String()
+			rs.MemoryRequest = c.Resources.Requests.Memory().String()
+		}
+		if c.Resources.Limits != nil {
+			rs.CPULimit = c.Resources.Limits.Cpu().String()
+			rs.MemoryLimit = c.Resources.Limits.Memory().String()
+		}
+		snapshot.ContainerResources[c.Name] = rs
+	}
+
+	// Serialize full spec for complex rollbacks
+	if specJSON, err := json.Marshal(cj.Spec); err == nil {
+		snapshot.FullSpec = string(specJSON)
 	}
 
 	return snapshot, nil
@@ -207,6 +317,10 @@ func (re *RollbackEngine) Rollback(ctx context.Context, snapshot *platformv1alph
 		return re.rollbackStatefulSet(ctx, snapshot)
 	case "DaemonSet":
 		return re.rollbackDaemonSet(ctx, snapshot)
+	case "Job":
+		return re.rollbackJob(ctx, snapshot)
+	case "CronJob":
+		return re.rollbackCronJob(ctx, snapshot)
 	case "Node":
 		return re.rollbackNode(ctx, snapshot)
 	default:
@@ -302,12 +416,34 @@ func (re *RollbackEngine) rollbackStatefulSet(ctx context.Context, snapshot *pla
 		}
 	}
 
+	// Restore update strategy
+	if snapshot.UpdateStrategyType != "" && string(sts.Spec.UpdateStrategy.Type) != snapshot.UpdateStrategyType {
+		sts.Spec.UpdateStrategy.Type = appsv1.StatefulSetUpdateStrategyType(snapshot.UpdateStrategyType)
+		changes = append(changes, fmt.Sprintf("updateStrategy: %s", snapshot.UpdateStrategyType))
+	}
+	if snapshot.Partition != nil {
+		if sts.Spec.UpdateStrategy.RollingUpdate == nil {
+			sts.Spec.UpdateStrategy.RollingUpdate = &appsv1.RollingUpdateStatefulSetStrategy{}
+		}
+		if sts.Spec.UpdateStrategy.RollingUpdate.Partition == nil || *sts.Spec.UpdateStrategy.RollingUpdate.Partition != *snapshot.Partition {
+			sts.Spec.UpdateStrategy.RollingUpdate.Partition = snapshot.Partition
+			changes = append(changes, fmt.Sprintf("partition: %d", *snapshot.Partition))
+		}
+	}
+
 	if len(changes) == 0 {
 		return "no changes to rollback (state unchanged)", nil
 	}
 
 	if err := re.client.Update(ctx, &sts); err != nil {
 		return "", fmt.Errorf("applying statefulset rollback: %w", err)
+	}
+
+	// Rollback HPA if snapshot has data
+	if snapshot.HPAMinReplicas != nil || snapshot.HPAMaxReplicas != nil {
+		if hpaResult := re.rollbackHPA(ctx, snapshot); hpaResult != "" {
+			changes = append(changes, hpaResult)
+		}
 	}
 
 	return fmt.Sprintf("Rolled back StatefulSet %s/%s: %s", snapshot.Namespace, snapshot.ResourceName, strings.Join(changes, "; ")), nil
@@ -332,6 +468,22 @@ func (re *RollbackEngine) rollbackDaemonSet(ctx context.Context, snapshot *platf
 		}
 	}
 
+	// Restore update strategy
+	if snapshot.UpdateStrategyType != "" && string(ds.Spec.UpdateStrategy.Type) != snapshot.UpdateStrategyType {
+		ds.Spec.UpdateStrategy.Type = appsv1.DaemonSetUpdateStrategyType(snapshot.UpdateStrategyType)
+		changes = append(changes, fmt.Sprintf("updateStrategy: %s", snapshot.UpdateStrategyType))
+	}
+	if snapshot.MaxUnavailable != "" {
+		mu := intstr.Parse(snapshot.MaxUnavailable)
+		if ds.Spec.UpdateStrategy.RollingUpdate == nil {
+			ds.Spec.UpdateStrategy.RollingUpdate = &appsv1.RollingUpdateDaemonSet{}
+		}
+		if ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable == nil || ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable.String() != snapshot.MaxUnavailable {
+			ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable = &mu
+			changes = append(changes, fmt.Sprintf("maxUnavailable: %s", snapshot.MaxUnavailable))
+		}
+	}
+
 	if len(changes) == 0 {
 		return "no changes to rollback (state unchanged)", nil
 	}
@@ -341,6 +493,112 @@ func (re *RollbackEngine) rollbackDaemonSet(ctx context.Context, snapshot *platf
 	}
 
 	return fmt.Sprintf("Rolled back DaemonSet %s/%s: %s", snapshot.Namespace, snapshot.ResourceName, strings.Join(changes, "; ")), nil
+}
+
+func (re *RollbackEngine) rollbackJob(ctx context.Context, snapshot *platformv1alpha1.ResourceSnapshot) (string, error) {
+	var job batchv1.Job
+	if err := re.client.Get(ctx, types.NamespacedName{
+		Name: snapshot.ResourceName, Namespace: snapshot.Namespace,
+	}, &job); err != nil {
+		return "", fmt.Errorf("getting job for rollback: %w", err)
+	}
+
+	var changes []string
+
+	if snapshot.Suspend != nil && (job.Spec.Suspend == nil || *job.Spec.Suspend != *snapshot.Suspend) {
+		job.Spec.Suspend = snapshot.Suspend
+		changes = append(changes, fmt.Sprintf("suspend: %v", *snapshot.Suspend))
+	}
+	if snapshot.ActiveDeadlineSeconds != nil && (job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != *snapshot.ActiveDeadlineSeconds) {
+		job.Spec.ActiveDeadlineSeconds = snapshot.ActiveDeadlineSeconds
+		changes = append(changes, fmt.Sprintf("activeDeadlineSeconds: %d", *snapshot.ActiveDeadlineSeconds))
+	}
+	if snapshot.BackoffLimit != nil && (job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != *snapshot.BackoffLimit) {
+		job.Spec.BackoffLimit = snapshot.BackoffLimit
+		changes = append(changes, fmt.Sprintf("backoffLimit: %d", *snapshot.BackoffLimit))
+	}
+	if snapshot.Parallelism != nil && (job.Spec.Parallelism == nil || *job.Spec.Parallelism != *snapshot.Parallelism) {
+		job.Spec.Parallelism = snapshot.Parallelism
+		changes = append(changes, fmt.Sprintf("parallelism: %d", *snapshot.Parallelism))
+	}
+
+	// Restore container resources
+	for i := range job.Spec.Template.Spec.Containers {
+		c := &job.Spec.Template.Spec.Containers[i]
+		if rs, ok := snapshot.ContainerResources[c.Name]; ok {
+			restored := re.restoreContainerResources(c, rs)
+			if restored != "" {
+				changes = append(changes, fmt.Sprintf("container %s: %s", c.Name, restored))
+			}
+		}
+	}
+
+	if len(changes) == 0 {
+		return "no changes to rollback (state unchanged)", nil
+	}
+
+	if err := re.client.Update(ctx, &job); err != nil {
+		return "", fmt.Errorf("applying job rollback: %w", err)
+	}
+
+	return fmt.Sprintf("Rolled back Job %s/%s: %s", snapshot.Namespace, snapshot.ResourceName, strings.Join(changes, "; ")), nil
+}
+
+func (re *RollbackEngine) rollbackCronJob(ctx context.Context, snapshot *platformv1alpha1.ResourceSnapshot) (string, error) {
+	var cj batchv1.CronJob
+	if err := re.client.Get(ctx, types.NamespacedName{
+		Name: snapshot.ResourceName, Namespace: snapshot.Namespace,
+	}, &cj); err != nil {
+		return "", fmt.Errorf("getting cronjob for rollback: %w", err)
+	}
+
+	var changes []string
+
+	if snapshot.Suspend != nil && (cj.Spec.Suspend == nil || *cj.Spec.Suspend != *snapshot.Suspend) {
+		cj.Spec.Suspend = snapshot.Suspend
+		changes = append(changes, fmt.Sprintf("suspend: %v", *snapshot.Suspend))
+	}
+	if snapshot.Schedule != "" && cj.Spec.Schedule != snapshot.Schedule {
+		cj.Spec.Schedule = snapshot.Schedule
+		changes = append(changes, fmt.Sprintf("schedule: %s", snapshot.Schedule))
+	}
+	if snapshot.ConcurrencyPolicy != "" && string(cj.Spec.ConcurrencyPolicy) != snapshot.ConcurrencyPolicy {
+		cj.Spec.ConcurrencyPolicy = batchv1.ConcurrencyPolicy(snapshot.ConcurrencyPolicy)
+		changes = append(changes, fmt.Sprintf("concurrencyPolicy: %s", snapshot.ConcurrencyPolicy))
+	}
+	if snapshot.StartingDeadlineSeconds != nil && (cj.Spec.StartingDeadlineSeconds == nil || *cj.Spec.StartingDeadlineSeconds != *snapshot.StartingDeadlineSeconds) {
+		cj.Spec.StartingDeadlineSeconds = snapshot.StartingDeadlineSeconds
+		changes = append(changes, fmt.Sprintf("startingDeadlineSeconds: %d", *snapshot.StartingDeadlineSeconds))
+	}
+	if snapshot.SuccessfulJobsHistoryLimit != nil && (cj.Spec.SuccessfulJobsHistoryLimit == nil || *cj.Spec.SuccessfulJobsHistoryLimit != *snapshot.SuccessfulJobsHistoryLimit) {
+		cj.Spec.SuccessfulJobsHistoryLimit = snapshot.SuccessfulJobsHistoryLimit
+		changes = append(changes, fmt.Sprintf("successfulJobsHistoryLimit: %d", *snapshot.SuccessfulJobsHistoryLimit))
+	}
+	if snapshot.FailedJobsHistoryLimit != nil && (cj.Spec.FailedJobsHistoryLimit == nil || *cj.Spec.FailedJobsHistoryLimit != *snapshot.FailedJobsHistoryLimit) {
+		cj.Spec.FailedJobsHistoryLimit = snapshot.FailedJobsHistoryLimit
+		changes = append(changes, fmt.Sprintf("failedJobsHistoryLimit: %d", *snapshot.FailedJobsHistoryLimit))
+	}
+
+	// Restore container resources in jobTemplate
+	for i := range cj.Spec.JobTemplate.Spec.Template.Spec.Containers {
+		c := &cj.Spec.JobTemplate.Spec.Template.Spec.Containers[i]
+		if rs, ok := snapshot.ContainerResources[c.Name]; ok {
+			restored := re.restoreContainerResources(c, rs)
+			if restored != "" {
+				changes = append(changes, fmt.Sprintf("container %s: %s", c.Name, restored))
+			}
+		}
+	}
+
+	if len(changes) == 0 {
+		return "no changes to rollback (state unchanged)", nil
+	}
+
+	if err := re.client.Update(ctx, &cj); err != nil {
+		return "", fmt.Errorf("applying cronjob rollback: %w", err)
+	}
+
+	return fmt.Sprintf("Rolled back CronJob %s/%s: %s", snapshot.Namespace, snapshot.ResourceName, strings.Join(changes, "; ")), nil
 }
 
 func (re *RollbackEngine) rollbackNode(ctx context.Context, snapshot *platformv1alpha1.ResourceSnapshot) (string, error) {
@@ -465,6 +723,36 @@ func (re *RollbackEngine) VerifyPostFailureHealth(ctx context.Context, resource 
 			desired = *sts.Spec.Replicas
 		}
 		return sts.Status.ReadyReplicas >= desired
+
+	case "DaemonSet":
+		var ds appsv1.DaemonSet
+		if err := re.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &ds); err != nil {
+			return false
+		}
+		return ds.Status.NumberReady >= ds.Status.DesiredNumberScheduled && ds.Status.NumberUnavailable == 0
+
+	case "Job":
+		var job batchv1.Job
+		if err := re.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &job); err != nil {
+			return false
+		}
+		for _, cond := range job.Status.Conditions {
+			if cond.Type == batchv1.JobComplete && cond.Status == "True" {
+				return true
+			}
+		}
+		return job.Status.Active > 0
+
+	case "CronJob":
+		var cj batchv1.CronJob
+		if err := re.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &cj); err != nil {
+			return false
+		}
+		// CronJob is healthy if suspended intentionally or has recent successful schedule
+		if cj.Spec.Suspend != nil && *cj.Spec.Suspend {
+			return true
+		}
+		return cj.Status.LastSuccessfulTime != nil || len(cj.Status.Active) > 0
 
 	default:
 		return false

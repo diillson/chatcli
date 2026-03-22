@@ -14,87 +14,257 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	metricsv "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
-// DeploymentCollector collects deployment status and pod information.
+// getLabelSelector returns the label selector string for any supported workload kind.
+// For CronJobs, returns a prefix-based label match since CronJobs have no direct selector.
+func getLabelSelector(ctx context.Context, clientset kubernetes.Interface, namespace, name, kind string) (string, error) {
+	switch kind {
+	case "Deployment":
+		obj, err := clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return "", fmt.Errorf("failed to get Deployment %s/%s: %w", namespace, name, err)
+		}
+		sel, err := metav1.LabelSelectorAsSelector(obj.Spec.Selector)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse Deployment selector: %w", err)
+		}
+		return sel.String(), nil
+
+	case "StatefulSet":
+		obj, err := clientset.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return "", fmt.Errorf("failed to get StatefulSet %s/%s: %w", namespace, name, err)
+		}
+		sel, err := metav1.LabelSelectorAsSelector(obj.Spec.Selector)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse StatefulSet selector: %w", err)
+		}
+		return sel.String(), nil
+
+	case "DaemonSet":
+		obj, err := clientset.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return "", fmt.Errorf("failed to get DaemonSet %s/%s: %w", namespace, name, err)
+		}
+		sel, err := metav1.LabelSelectorAsSelector(obj.Spec.Selector)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse DaemonSet selector: %w", err)
+		}
+		return sel.String(), nil
+
+	case "Job":
+		obj, err := clientset.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return "", fmt.Errorf("failed to get Job %s/%s: %w", namespace, name, err)
+		}
+		if obj.Spec.Selector != nil {
+			sel, err := metav1.LabelSelectorAsSelector(obj.Spec.Selector)
+			if err != nil {
+				return "", fmt.Errorf("failed to parse Job selector: %w", err)
+			}
+			return sel.String(), nil
+		}
+		// Fallback: use job-name label
+		return labels.Set{"job-name": name}.String(), nil
+
+	case "CronJob":
+		// CronJobs don't have a direct selector; match pods via child Jobs
+		return labels.Set{"job-name": name}.String(), nil
+
+	default:
+		return "", fmt.Errorf("unsupported resource kind: %s", kind)
+	}
+}
+
+// collectResourceStatus collects the ResourceStatus for any supported workload kind.
+func collectResourceStatus(ctx context.Context, clientset kubernetes.Interface, namespace, name, kind string) (ResourceStatus, error) {
+	rs := ResourceStatus{Kind: kind, Name: name, Namespace: namespace}
+
+	switch kind {
+	case "Deployment":
+		obj, err := clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return rs, fmt.Errorf("failed to get Deployment: %w", err)
+		}
+		if obj.Spec.Replicas != nil {
+			rs.Replicas = *obj.Spec.Replicas
+		}
+		rs.ReadyReplicas = obj.Status.ReadyReplicas
+		rs.UpdatedReplicas = obj.Status.UpdatedReplicas
+		rs.AvailableReplicas = obj.Status.AvailableReplicas
+		rs.UnavailableCount = obj.Status.UnavailableReplicas
+		if obj.Spec.Strategy.Type != "" {
+			rs.Strategy = string(obj.Spec.Strategy.Type)
+		}
+		for _, cond := range obj.Status.Conditions {
+			rs.Conditions = append(rs.Conditions, fmt.Sprintf("%s=%s (%s)", cond.Type, cond.Status, cond.Reason))
+		}
+
+	case "StatefulSet":
+		obj, err := clientset.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return rs, fmt.Errorf("failed to get StatefulSet: %w", err)
+		}
+		if obj.Spec.Replicas != nil {
+			rs.Replicas = *obj.Spec.Replicas
+		}
+		rs.ReadyReplicas = obj.Status.ReadyReplicas
+		rs.UpdatedReplicas = obj.Status.UpdatedReplicas
+		rs.AvailableReplicas = obj.Status.CurrentReplicas
+		rs.Strategy = string(obj.Spec.UpdateStrategy.Type)
+		for _, cond := range obj.Status.Conditions {
+			rs.Conditions = append(rs.Conditions, fmt.Sprintf("%s=%s (%s)", cond.Type, cond.Status, cond.Reason))
+		}
+
+	case "DaemonSet":
+		obj, err := clientset.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return rs, fmt.Errorf("failed to get DaemonSet: %w", err)
+		}
+		rs.Replicas = obj.Status.DesiredNumberScheduled
+		rs.ReadyReplicas = obj.Status.NumberReady
+		rs.UpdatedReplicas = obj.Status.UpdatedNumberScheduled
+		rs.AvailableReplicas = obj.Status.NumberAvailable
+		rs.UnavailableCount = obj.Status.NumberUnavailable
+		rs.Strategy = string(obj.Spec.UpdateStrategy.Type)
+		for _, cond := range obj.Status.Conditions {
+			rs.Conditions = append(rs.Conditions, fmt.Sprintf("%s=%s (%s)", cond.Type, cond.Status, cond.Reason))
+		}
+
+	case "Job":
+		obj, err := clientset.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return rs, fmt.Errorf("failed to get Job: %w", err)
+		}
+		if obj.Spec.Parallelism != nil {
+			rs.Replicas = *obj.Spec.Parallelism
+		}
+		rs.Active = obj.Status.Active
+		rs.Succeeded = obj.Status.Succeeded
+		rs.Failed = obj.Status.Failed
+		rs.ReadyReplicas = obj.Status.Active
+		rs.AvailableReplicas = obj.Status.Succeeded
+		rs.UnavailableCount = obj.Status.Failed
+		if obj.Spec.Suspend != nil {
+			rs.Suspended = *obj.Spec.Suspend
+		}
+		for _, cond := range obj.Status.Conditions {
+			rs.Conditions = append(rs.Conditions, fmt.Sprintf("%s=%s (%s)", cond.Type, cond.Status, cond.Reason))
+		}
+
+	case "CronJob":
+		obj, err := clientset.BatchV1().CronJobs(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return rs, fmt.Errorf("failed to get CronJob: %w", err)
+		}
+		rs.Schedule = obj.Spec.Schedule
+		rs.Active = int32(len(obj.Status.Active))
+		if obj.Spec.Suspend != nil {
+			rs.Suspended = *obj.Spec.Suspend
+		}
+		if obj.Status.LastScheduleTime != nil {
+			t := obj.Status.LastScheduleTime.Time
+			rs.LastScheduleTime = &t
+		}
+		// CronJob doesn't have replica counts
+	}
+
+	return rs, nil
+}
+
+// Ensure imports are used
+var _ = batchv1.Job{}
+
+// DeploymentCollector collects resource status and pod information for any workload kind.
+// Despite the name (kept for backward compatibility), it supports Deployment, StatefulSet,
+// DaemonSet, Job, and CronJob via the kind field.
 type DeploymentCollector struct {
 	clientset  kubernetes.Interface
 	namespace  string
 	deployment string
+	kind       string // resource kind (default: Deployment)
 	logger     *zap.Logger
 }
 
 // NewDeploymentCollector creates a collector for deployment and pod status.
+// For backward compatibility, kind defaults to "Deployment".
 func NewDeploymentCollector(clientset kubernetes.Interface, namespace, deployment string, logger *zap.Logger) *DeploymentCollector {
 	return &DeploymentCollector{
 		clientset:  clientset,
 		namespace:  namespace,
 		deployment: deployment,
+		kind:       "Deployment",
 		logger:     logger,
 	}
 }
 
-// Collect gathers deployment status and pod information.
+// NewResourceCollector creates a collector for any Kubernetes workload kind.
+func NewResourceCollector(clientset kubernetes.Interface, namespace, name, kind string, logger *zap.Logger) *DeploymentCollector {
+	if kind == "" {
+		kind = "Deployment"
+	}
+	return &DeploymentCollector{
+		clientset:  clientset,
+		namespace:  namespace,
+		deployment: name,
+		kind:       kind,
+		logger:     logger,
+	}
+}
+
+// Collect gathers resource status and pod information for the configured workload kind.
 func (c *DeploymentCollector) Collect(ctx context.Context) (*ResourceSnapshot, error) {
 	snap := &ResourceSnapshot{
 		Timestamp: time.Now(),
 	}
 
-	// Get deployment
-	deploy, err := c.clientset.AppsV1().Deployments(c.namespace).Get(ctx, c.deployment, metav1.GetOptions{})
+	// Collect resource status (works for all kinds)
+	rs, err := collectResourceStatus(ctx, c.clientset, c.namespace, c.deployment, c.kind)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get deployment %s/%s: %w", c.namespace, c.deployment, err)
+		return nil, err
+	}
+	snap.Resource = rs
+	snap.SyncDeploymentAlias() // backward compat
+
+	// Get pods via label selector
+	selectorStr, err := getLabelSelector(ctx, c.clientset, c.namespace, c.deployment, c.kind)
+	if err != nil {
+		c.logger.Warn("Failed to get label selector, falling back to name prefix",
+			zap.String("kind", c.kind), zap.Error(err))
+		// Fallback: list all pods and filter by name prefix
+		selectorStr = ""
 	}
 
-	snap.Deployment = c.extractDeploymentStatus(deploy)
-
-	// Get pods for this deployment via label selector
-	selector, err := metav1.LabelSelectorAsSelector(deploy.Spec.Selector)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse deployment selector: %w", err)
+	var podList *corev1.PodList
+	if selectorStr != "" {
+		podList, err = c.clientset.CoreV1().Pods(c.namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: selectorStr,
+		})
+	} else {
+		podList, err = c.clientset.CoreV1().Pods(c.namespace).List(ctx, metav1.ListOptions{})
 	}
-
-	pods, err := c.clientset.CoreV1().Pods(c.namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector.String(),
-	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
 
-	snap.Pods = make([]PodStatus, 0, len(pods.Items))
-	for _, pod := range pods.Items {
+	snap.Pods = make([]PodStatus, 0, len(podList.Items))
+	for _, pod := range podList.Items {
+		// If no selector was available, filter by name prefix
+		if selectorStr == "" && !strings.HasPrefix(pod.Name, c.deployment) {
+			continue
+		}
 		snap.Pods = append(snap.Pods, c.extractPodStatus(&pod))
 	}
 
 	return snap, nil
-}
-
-func (c *DeploymentCollector) extractDeploymentStatus(deploy *appsv1.Deployment) DeploymentStatus {
-	status := DeploymentStatus{
-		Name:              deploy.Name,
-		Namespace:         deploy.Namespace,
-		Replicas:          *deploy.Spec.Replicas,
-		ReadyReplicas:     deploy.Status.ReadyReplicas,
-		UpdatedReplicas:   deploy.Status.UpdatedReplicas,
-		AvailableReplicas: deploy.Status.AvailableReplicas,
-	}
-
-	if deploy.Spec.Strategy.Type != "" {
-		status.Strategy = string(deploy.Spec.Strategy.Type)
-	}
-
-	for _, cond := range deploy.Status.Conditions {
-		status.Conditions = append(status.Conditions,
-			fmt.Sprintf("%s=%s (%s)", cond.Type, cond.Status, cond.Reason))
-	}
-
-	return status
 }
 
 func (c *DeploymentCollector) extractPodStatus(pod *corev1.Pod) PodStatus {
@@ -139,11 +309,12 @@ func (c *DeploymentCollector) extractPodStatus(pod *corev1.Pod) PodStatus {
 	return ps
 }
 
-// EventCollector collects Kubernetes events related to the deployment.
+// EventCollector collects Kubernetes events related to a resource and its pods.
 type EventCollector struct {
 	clientset  kubernetes.Interface
 	namespace  string
 	deployment string
+	kind       string
 	logger     *zap.Logger
 }
 
@@ -153,59 +324,65 @@ func NewEventCollector(clientset kubernetes.Interface, namespace, deployment str
 		clientset:  clientset,
 		namespace:  namespace,
 		deployment: deployment,
+		kind:       "Deployment",
 		logger:     logger,
 	}
 }
 
-// Collect gathers recent events for the deployment and its pods.
+// NewResourceEventCollector creates an event collector for any resource kind.
+func NewResourceEventCollector(clientset kubernetes.Interface, namespace, name, kind string, logger *zap.Logger) *EventCollector {
+	if kind == "" {
+		kind = "Deployment"
+	}
+	return &EventCollector{clientset: clientset, namespace: namespace, deployment: name, kind: kind, logger: logger}
+}
+
+// Collect gathers recent events for the resource and its pods.
 func (c *EventCollector) Collect(ctx context.Context) ([]K8sEvent, error) {
+	// Get events for the resource itself
 	events, err := c.clientset.CoreV1().Events(c.namespace).List(ctx, metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("involvedObject.name=%s", c.deployment),
 	})
 	if err != nil {
-		c.logger.Warn("Failed to list deployment events", zap.Error(err))
+		c.logger.Warn("Failed to list resource events", zap.Error(err))
 	}
 
-	// Also get events for pods matching the deployment
-	deploy, err := c.clientset.AppsV1().Deployments(c.namespace).Get(ctx, c.deployment, metav1.GetOptions{})
+	// Get pods via label selector to find pod events
+	selectorStr, err := getLabelSelector(ctx, c.clientset, c.namespace, c.deployment, c.kind)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get deployment: %w", err)
-	}
-
-	selector, err := metav1.LabelSelectorAsSelector(deploy.Spec.Selector)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse selector: %w", err)
+		c.logger.Warn("Failed to get selector for events, using resource events only", zap.Error(err))
+		result := make([]K8sEvent, 0)
+		if events != nil {
+			for _, ev := range events.Items {
+				result = append(result, eventToK8sEvent(&ev))
+			}
+		}
+		return result, nil
 	}
 
 	podList, err := c.clientset.CoreV1().Pods(c.namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector.String(),
+		LabelSelector: selectorStr,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
 
-	// Collect pod names for event filtering
 	podNames := make(map[string]bool)
 	for _, pod := range podList.Items {
 		podNames[pod.Name] = true
 	}
 
-	// Get all namespace events and filter
 	allEvents, err := c.clientset.CoreV1().Events(c.namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list events: %w", err)
 	}
 
 	result := make([]K8sEvent, 0)
-
-	// Add deployment events
 	if events != nil {
 		for _, ev := range events.Items {
 			result = append(result, eventToK8sEvent(&ev))
 		}
 	}
-
-	// Add pod events
 	for _, ev := range allEvents.Items {
 		if podNames[ev.InvolvedObject.Name] {
 			result = append(result, eventToK8sEvent(&ev))
@@ -235,6 +412,7 @@ type LogCollector struct {
 	clientset  kubernetes.Interface
 	namespace  string
 	deployment string
+	kind       string
 	maxLines   int
 	logger     *zap.Logger
 }
@@ -245,25 +423,29 @@ func NewLogCollector(clientset kubernetes.Interface, namespace, deployment strin
 		clientset:  clientset,
 		namespace:  namespace,
 		deployment: deployment,
+		kind:       "Deployment",
 		maxLines:   maxLines,
 		logger:     logger,
 	}
 }
 
-// Collect gathers recent logs from all pods of the deployment.
-func (c *LogCollector) Collect(ctx context.Context) ([]LogEntry, error) {
-	deploy, err := c.clientset.AppsV1().Deployments(c.namespace).Get(ctx, c.deployment, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get deployment: %w", err)
+// NewResourceLogCollector creates a log collector for any resource kind.
+func NewResourceLogCollector(clientset kubernetes.Interface, namespace, name, kind string, maxLines int, logger *zap.Logger) *LogCollector {
+	if kind == "" {
+		kind = "Deployment"
 	}
+	return &LogCollector{clientset: clientset, namespace: namespace, deployment: name, kind: kind, maxLines: maxLines, logger: logger}
+}
 
-	selector, err := metav1.LabelSelectorAsSelector(deploy.Spec.Selector)
+// Collect gathers recent logs from all pods of the resource.
+func (c *LogCollector) Collect(ctx context.Context) ([]LogEntry, error) {
+	selectorStr, err := getLabelSelector(ctx, c.clientset, c.namespace, c.deployment, c.kind)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse selector: %w", err)
+		return nil, fmt.Errorf("failed to get selector for %s/%s: %w", c.kind, c.deployment, err)
 	}
 
 	pods, err := c.clientset.CoreV1().Pods(c.namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector.String(),
+		LabelSelector: selectorStr,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
@@ -338,6 +520,7 @@ type HPACollector struct {
 	clientset  kubernetes.Interface
 	namespace  string
 	deployment string
+	kind       string
 	logger     *zap.Logger
 }
 
@@ -347,24 +530,38 @@ func NewHPACollector(clientset kubernetes.Interface, namespace, deployment strin
 		clientset:  clientset,
 		namespace:  namespace,
 		deployment: deployment,
+		kind:       "Deployment",
 		logger:     logger,
 	}
 }
 
-// Collect gathers HPA status if one exists for the deployment.
+// NewResourceHPACollector creates an HPA collector for any resource kind.
+func NewResourceHPACollector(clientset kubernetes.Interface, namespace, name, kind string, logger *zap.Logger) *HPACollector {
+	if kind == "" {
+		kind = "Deployment"
+	}
+	return &HPACollector{clientset: clientset, namespace: namespace, deployment: name, kind: kind, logger: logger}
+}
+
+// Collect gathers HPA status if one exists for the resource.
 func (c *HPACollector) Collect(ctx context.Context) (*HPAStatus, error) {
+	// Jobs and CronJobs cannot have HPA
+	if c.kind == "Job" || c.kind == "CronJob" {
+		return nil, nil
+	}
+
 	hpas, err := c.clientset.AutoscalingV2().HorizontalPodAutoscalers(c.namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, nil // HPA might not be available, not an error
 	}
 
 	for _, hpa := range hpas.Items {
-		if hpa.Spec.ScaleTargetRef.Kind == "Deployment" && hpa.Spec.ScaleTargetRef.Name == c.deployment {
+		if hpa.Spec.ScaleTargetRef.Kind == c.kind && hpa.Spec.ScaleTargetRef.Name == c.deployment {
 			return c.extractHPAStatus(&hpa), nil
 		}
 	}
 
-	return nil, nil // No HPA for this deployment
+	return nil, nil // No HPA for this resource
 }
 
 func (c *HPACollector) extractHPAStatus(hpa *autoscalingv2.HorizontalPodAutoscaler) *HPAStatus {

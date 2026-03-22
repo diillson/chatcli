@@ -158,12 +158,26 @@ type WatcherSpec struct {
 	MaxContextChars int32 `json:"maxContextChars,omitempty"`
 }
 
-// WatchTargetSpec defines a single deployment target for multi-target watching.
+// WatchTargetSpec defines a single resource target for multi-target watching.
 type WatchTargetSpec struct {
-	// Deployment is the deployment name to monitor.
-	Deployment string `json:"deployment"`
+	// Name is the resource name to monitor (e.g., "api-gateway", "postgres", "fluentd").
+	// +optional
+	Name string `json:"name,omitempty"`
 
-	// Namespace is the namespace of the deployment.
+	// Deployment is the resource name to monitor.
+	// Deprecated: Use "name" instead. Kept for backward compatibility — if both are set, "name" takes precedence.
+	// +optional
+	Deployment string `json:"deployment,omitempty"`
+
+	// Kind is the Kubernetes resource kind to monitor.
+	// Supported values: Deployment, StatefulSet, DaemonSet, Job, CronJob.
+	// Defaults to "Deployment" when omitted for backward compatibility.
+	// +kubebuilder:validation:Enum=Deployment;StatefulSet;DaemonSet;Job;CronJob
+	// +kubebuilder:default=Deployment
+	// +optional
+	Kind string `json:"kind,omitempty"`
+
+	// Namespace is the namespace of the resource.
 	Namespace string `json:"namespace"`
 
 	// MetricsPort is the port where Prometheus metrics are exposed (0 = disabled).
@@ -177,6 +191,22 @@ type WatchTargetSpec struct {
 	// MetricsFilter is a list of glob patterns to filter Prometheus metrics.
 	// +optional
 	MetricsFilter []string `json:"metricsFilter,omitempty"`
+}
+
+// ResourceName returns the effective resource name, preferring Name over deprecated Deployment.
+func (w *WatchTargetSpec) ResourceName() string {
+	if w.Name != "" {
+		return w.Name
+	}
+	return w.Deployment
+}
+
+// ResourceKind returns the effective resource kind, defaulting to "Deployment".
+func (w *WatchTargetSpec) ResourceKind() string {
+	if w.Kind != "" {
+		return w.Kind
+	}
+	return "Deployment"
 }
 
 // AgentProvisionSpec configures agent/skill provisioning for the instance.

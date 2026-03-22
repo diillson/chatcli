@@ -278,9 +278,15 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 			AlertsFunc: func() []server.AlertInfo {
 				var all []server.AlertInfo
 				for key, store := range stores {
-					parts := strings.SplitN(key, "/", 2)
+					// Key format is "Kind/namespace/name" (e.g., "Deployment/production/api-gateway")
+					parts := strings.SplitN(key, "/", 3)
 					ns, deploy := "", ""
-					if len(parts) == 2 {
+					if len(parts) == 3 {
+						// kind = parts[0] (not used here, carried via alert.Object)
+						ns = parts[1]
+						deploy = parts[2]
+					} else if len(parts) == 2 {
+						// Backward compat: "namespace/name"
 						ns = parts[0]
 						deploy = parts[1]
 					}

@@ -451,6 +451,85 @@ func (r *RemediationReconciler) executeAction(ctx context.Context, resource plat
 		return r.executePatchNetworkPolicy(ctx, resource, action.Params)
 	case platformv1alpha1.ActionApplyManifest:
 		return r.executeApplyManifest(ctx, resource, action.Params)
+
+	// --- StatefulSet Actions ---
+	case platformv1alpha1.ActionScaleStatefulSet:
+		return r.executeScaleStatefulSet(ctx, resource, action.Params)
+	case platformv1alpha1.ActionRestartStatefulSet:
+		return r.executeRestartStatefulSet(ctx, resource)
+	case platformv1alpha1.ActionRollbackStatefulSet:
+		return r.executeRollbackStatefulSet(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustStatefulSetResources:
+		return r.executeAdjustStatefulSetResources(ctx, resource, action.Params)
+	case platformv1alpha1.ActionDeleteStatefulSetPod:
+		return r.executeDeleteStatefulSetPod(ctx, resource, action.Params)
+	case platformv1alpha1.ActionForceDeleteStatefulSetPod:
+		return r.executeForceDeleteStatefulSetPod(ctx, resource, action.Params)
+	case platformv1alpha1.ActionUpdateStatefulSetStrategy:
+		return r.executeUpdateStatefulSetStrategy(ctx, resource, action.Params)
+	case platformv1alpha1.ActionRecreateStatefulSetPVC:
+		return r.executeRecreateStatefulSetPVC(ctx, resource, action.Params)
+	case platformv1alpha1.ActionPartitionStatefulSetUpdate:
+		return r.executePartitionStatefulSetUpdate(ctx, resource, action.Params)
+
+	// --- DaemonSet Actions ---
+	case platformv1alpha1.ActionRestartDaemonSet:
+		return r.executeRestartDaemonSet(ctx, resource)
+	case platformv1alpha1.ActionRollbackDaemonSet:
+		return r.executeRollbackDaemonSet(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustDaemonSetResources:
+		return r.executeAdjustDaemonSetResources(ctx, resource, action.Params)
+	case platformv1alpha1.ActionDeleteDaemonSetPod:
+		return r.executeDeleteDaemonSetPod(ctx, resource, action.Params)
+	case platformv1alpha1.ActionUpdateDaemonSetStrategy:
+		return r.executeUpdateDaemonSetStrategy(ctx, resource, action.Params)
+	case platformv1alpha1.ActionPauseDaemonSetRollout:
+		return r.executePauseDaemonSetRollout(ctx, resource)
+	case platformv1alpha1.ActionCordonAndDeleteDaemonSetPod:
+		return r.executeCordonAndDeleteDaemonSetPod(ctx, resource, action.Params)
+
+	// --- Job Actions ---
+	case platformv1alpha1.ActionRetryJob:
+		return r.executeRetryJob(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustJobResources:
+		return r.executeAdjustJobResources(ctx, resource, action.Params)
+	case platformv1alpha1.ActionDeleteFailedJob:
+		return r.executeDeleteFailedJob(ctx, resource, action.Params)
+	case platformv1alpha1.ActionSuspendJob:
+		return r.executeSuspendJob(ctx, resource, action.Params)
+	case platformv1alpha1.ActionResumeJob:
+		return r.executeResumeJob(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustJobParallelism:
+		return r.executeAdjustJobParallelism(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustJobDeadline:
+		return r.executeAdjustJobDeadline(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustJobBackoffLimit:
+		return r.executeAdjustJobBackoffLimit(ctx, resource, action.Params)
+	case platformv1alpha1.ActionForceDeleteJobPods:
+		return r.executeForceDeleteJobPods(ctx, resource, action.Params)
+
+	// --- CronJob Actions ---
+	case platformv1alpha1.ActionSuspendCronJob:
+		return r.executeSuspendCronJob(ctx, resource, action.Params)
+	case platformv1alpha1.ActionResumeCronJob:
+		return r.executeResumeCronJob(ctx, resource, action.Params)
+	case platformv1alpha1.ActionTriggerCronJob:
+		return r.executeTriggerCronJob(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustCronJobResources:
+		return r.executeAdjustCronJobResources(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustCronJobSchedule:
+		return r.executeAdjustCronJobSchedule(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustCronJobDeadline:
+		return r.executeAdjustCronJobDeadline(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustCronJobHistory:
+		return r.executeAdjustCronJobHistory(ctx, resource, action.Params)
+	case platformv1alpha1.ActionAdjustCronJobConcurrency:
+		return r.executeAdjustCronJobConcurrency(ctx, resource, action.Params)
+	case platformv1alpha1.ActionDeleteCronJobActiveJobs:
+		return r.executeDeleteCronJobActiveJobs(ctx, resource, action.Params)
+	case platformv1alpha1.ActionReplaceCronJobTemplate:
+		return r.executeReplaceCronJobTemplate(ctx, resource, action.Params)
+
 	default:
 		return fmt.Errorf("unsupported action type: %s", action.Type)
 	}
@@ -952,7 +1031,7 @@ func (r *RemediationReconciler) executeDeletePod(ctx context.Context, resource p
 		return nil
 	}
 
-	// No specific pod — find the most-unhealthy pod owned by this deployment
+	// No specific pod — find the most-unhealthy pod owned by this resource
 	var podList corev1.PodList
 	if err := r.List(ctx, &podList, client.InNamespace(resource.Namespace)); err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
@@ -960,19 +1039,19 @@ func (r *RemediationReconciler) executeDeletePod(ctx context.Context, resource p
 
 	var matchingPods []corev1.Pod
 	for i := range podList.Items {
-		if isPodOwnedByDeployment(&podList.Items[i], resource.Name) {
+		if isResourcePod(&podList.Items[i], resource) {
 			matchingPods = append(matchingPods, podList.Items[i])
 		}
 	}
 
 	if len(matchingPods) == 0 {
-		return fmt.Errorf("no pods found for deployment %s/%s", resource.Namespace, resource.Name)
+		return fmt.Errorf("no pods found for %s/%s", resource.Kind, resource.Name)
 	}
 
 	// Safety: never delete all pods
 	if len(matchingPods) <= 1 {
-		return fmt.Errorf("only %d pod(s) found for deployment %s/%s, refusing to delete (would cause full outage)",
-			len(matchingPods), resource.Namespace, resource.Name)
+		return fmt.Errorf("only %d pod(s) found for %s/%s, refusing to delete (would cause full outage)",
+			len(matchingPods), resource.Kind, resource.Name)
 	}
 
 	// Sort by unhealthiness: CrashLoopBackOff first, then by restart count
@@ -1008,33 +1087,89 @@ func isPodCrashLooping(pod *corev1.Pod) bool {
 	return false
 }
 
-// capturePreflightSnapshot records the deployment's current state as evidence before
+// capturePreflightSnapshot records the resource's current state as evidence before
 // executing any remediation actions, enabling manual rollback if needed.
 func (r *RemediationReconciler) capturePreflightSnapshot(ctx context.Context, resource platformv1alpha1.ResourceRef) (platformv1alpha1.EvidenceItem, error) {
-	var deploy appsv1.Deployment
-	if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &deploy); err != nil {
-		return platformv1alpha1.EvidenceItem{}, fmt.Errorf("failed to get deployment for snapshot: %w", err)
-	}
-
-	desired := int32(1)
-	if deploy.Spec.Replicas != nil {
-		desired = *deploy.Spec.Replicas
-	}
-
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("deployment=%s/%s replicas=%d", resource.Namespace, resource.Name, desired))
-	for _, c := range deploy.Spec.Template.Spec.Containers {
-		sb.WriteString(fmt.Sprintf(" container=%s image=%s", c.Name, c.Image))
-		if c.Resources.Limits != nil {
-			sb.WriteString(fmt.Sprintf(" limits=[cpu=%s mem=%s]",
-				c.Resources.Limits.Cpu().String(),
-				c.Resources.Limits.Memory().String()))
+	nn := types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}
+
+	writeContainers := func(containers []corev1.Container) {
+		for _, c := range containers {
+			sb.WriteString(fmt.Sprintf(" container=%s image=%s", c.Name, c.Image))
+			if c.Resources.Limits != nil {
+				sb.WriteString(fmt.Sprintf(" limits=[cpu=%s mem=%s]",
+					c.Resources.Limits.Cpu().String(),
+					c.Resources.Limits.Memory().String()))
+			}
+			if c.Resources.Requests != nil {
+				sb.WriteString(fmt.Sprintf(" requests=[cpu=%s mem=%s]",
+					c.Resources.Requests.Cpu().String(),
+					c.Resources.Requests.Memory().String()))
+			}
 		}
-		if c.Resources.Requests != nil {
-			sb.WriteString(fmt.Sprintf(" requests=[cpu=%s mem=%s]",
-				c.Resources.Requests.Cpu().String(),
-				c.Resources.Requests.Memory().String()))
+	}
+
+	switch resource.Kind {
+	case "Deployment":
+		var deploy appsv1.Deployment
+		if err := r.Get(ctx, nn, &deploy); err != nil {
+			return platformv1alpha1.EvidenceItem{}, fmt.Errorf("failed to get Deployment for snapshot: %w", err)
 		}
+		desired := int32(1)
+		if deploy.Spec.Replicas != nil {
+			desired = *deploy.Spec.Replicas
+		}
+		sb.WriteString(fmt.Sprintf("Deployment=%s/%s replicas=%d", resource.Namespace, resource.Name, desired))
+		writeContainers(deploy.Spec.Template.Spec.Containers)
+
+	case "StatefulSet":
+		var sts appsv1.StatefulSet
+		if err := r.Get(ctx, nn, &sts); err != nil {
+			return platformv1alpha1.EvidenceItem{}, fmt.Errorf("failed to get StatefulSet for snapshot: %w", err)
+		}
+		desired := int32(1)
+		if sts.Spec.Replicas != nil {
+			desired = *sts.Spec.Replicas
+		}
+		sb.WriteString(fmt.Sprintf("StatefulSet=%s/%s replicas=%d strategy=%s", resource.Namespace, resource.Name, desired, sts.Spec.UpdateStrategy.Type))
+		writeContainers(sts.Spec.Template.Spec.Containers)
+
+	case "DaemonSet":
+		var ds appsv1.DaemonSet
+		if err := r.Get(ctx, nn, &ds); err != nil {
+			return platformv1alpha1.EvidenceItem{}, fmt.Errorf("failed to get DaemonSet for snapshot: %w", err)
+		}
+		sb.WriteString(fmt.Sprintf("DaemonSet=%s/%s desired=%d ready=%d strategy=%s",
+			resource.Namespace, resource.Name, ds.Status.DesiredNumberScheduled, ds.Status.NumberReady, ds.Spec.UpdateStrategy.Type))
+		writeContainers(ds.Spec.Template.Spec.Containers)
+
+	case "Job":
+		var job batchv1.Job
+		if err := r.Get(ctx, nn, &job); err != nil {
+			return platformv1alpha1.EvidenceItem{}, fmt.Errorf("failed to get Job for snapshot: %w", err)
+		}
+		sb.WriteString(fmt.Sprintf("Job=%s/%s active=%d succeeded=%d failed=%d",
+			resource.Namespace, resource.Name, job.Status.Active, job.Status.Succeeded, job.Status.Failed))
+		if job.Spec.Parallelism != nil {
+			sb.WriteString(fmt.Sprintf(" parallelism=%d", *job.Spec.Parallelism))
+		}
+		writeContainers(job.Spec.Template.Spec.Containers)
+
+	case "CronJob":
+		var cj batchv1.CronJob
+		if err := r.Get(ctx, nn, &cj); err != nil {
+			return platformv1alpha1.EvidenceItem{}, fmt.Errorf("failed to get CronJob for snapshot: %w", err)
+		}
+		suspended := false
+		if cj.Spec.Suspend != nil {
+			suspended = *cj.Spec.Suspend
+		}
+		sb.WriteString(fmt.Sprintf("CronJob=%s/%s schedule=%s suspended=%v active=%d",
+			resource.Namespace, resource.Name, cj.Spec.Schedule, suspended, len(cj.Status.Active)))
+		writeContainers(cj.Spec.JobTemplate.Spec.Template.Spec.Containers)
+
+	default:
+		sb.WriteString(fmt.Sprintf("%s=%s/%s", resource.Kind, resource.Namespace, resource.Name))
 	}
 
 	return platformv1alpha1.EvidenceItem{
@@ -1075,6 +1210,82 @@ func (r *RemediationReconciler) validateSafetyConstraints(actions []platformv1al
 			}
 			if deletePodCount > 1 {
 				return fmt.Errorf("only one DeletePod action is allowed per remediation plan")
+			}
+		case platformv1alpha1.ActionScaleStatefulSet:
+			if replicas, ok := action.Params["replicas"]; ok {
+				n, err := strconv.Atoi(replicas)
+				if err == nil && n == 0 {
+					return fmt.Errorf("scaling StatefulSet to 0 replicas is not allowed (destructive)")
+				}
+			}
+		case platformv1alpha1.ActionAdjustStatefulSetResources,
+			platformv1alpha1.ActionAdjustDaemonSetResources,
+			platformv1alpha1.ActionAdjustJobResources,
+			platformv1alpha1.ActionAdjustCronJobResources:
+			hasResource := false
+			for _, key := range []string{"memory_limit", "memory_request", "cpu_limit", "cpu_request"} {
+				if _, ok := action.Params[key]; ok {
+					hasResource = true
+					break
+				}
+			}
+			if !hasResource {
+				return fmt.Errorf("%s requires at least one of: memory_limit, memory_request, cpu_limit, cpu_request", action.Type)
+			}
+		case platformv1alpha1.ActionDeleteStatefulSetPod, platformv1alpha1.ActionDeleteDaemonSetPod:
+			deleteCount := 0
+			for _, a := range actions {
+				if a.Type == action.Type {
+					deleteCount++
+				}
+			}
+			if deleteCount > 1 {
+				return fmt.Errorf("only one %s action is allowed per remediation plan", action.Type)
+			}
+		case platformv1alpha1.ActionForceDeleteStatefulSetPod:
+			if _, ok := action.Params["pod"]; !ok {
+				return fmt.Errorf("ForceDeleteStatefulSetPod requires 'pod' param")
+			}
+			forceCount := 0
+			for _, a := range actions {
+				if a.Type == platformv1alpha1.ActionForceDeleteStatefulSetPod {
+					forceCount++
+				}
+			}
+			if forceCount > 1 {
+				return fmt.Errorf("only one ForceDeleteStatefulSetPod is allowed per plan")
+			}
+		case platformv1alpha1.ActionRecreateStatefulSetPVC:
+			if action.Params["confirm"] != "true" {
+				return fmt.Errorf("RecreateStatefulSetPVC requires confirm=true (destructive)")
+			}
+		case platformv1alpha1.ActionCordonAndDeleteDaemonSetPod:
+			if _, ok := action.Params["node"]; !ok {
+				return fmt.Errorf("CordonAndDeleteDaemonSetPod requires 'node' param")
+			}
+		case platformv1alpha1.ActionForceDeleteJobPods:
+			forceCount := 0
+			for _, a := range actions {
+				if a.Type == platformv1alpha1.ActionForceDeleteJobPods {
+					forceCount++
+				}
+			}
+			if forceCount > 1 {
+				return fmt.Errorf("only one ForceDeleteJobPods is allowed per plan")
+			}
+		case platformv1alpha1.ActionDeleteCronJobActiveJobs:
+			deleteCount := 0
+			for _, a := range actions {
+				if a.Type == platformv1alpha1.ActionDeleteCronJobActiveJobs {
+					deleteCount++
+				}
+			}
+			if deleteCount > 1 {
+				return fmt.Errorf("only one DeleteCronJobActiveJobs is allowed per plan")
+			}
+		case platformv1alpha1.ActionReplaceCronJobTemplate:
+			if _, ok := action.Params["configmap"]; !ok {
+				return fmt.Errorf("ReplaceCronJobTemplate requires 'configmap' param")
 			}
 		case platformv1alpha1.ActionCustom:
 			return fmt.Errorf("custom actions require manual approval")
@@ -1134,6 +1345,20 @@ func (r *RemediationReconciler) verifyResourceHealth(ctx context.Context, resour
 		}
 		// Also consider it healthy if active pods > 0 (still running)
 		return job.Status.Active > 0, nil
+
+	case "CronJob":
+		var cj batchv1.CronJob
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &cj); err != nil {
+			return false, err
+		}
+		// CronJob is healthy if suspended intentionally, has recent success, or has active jobs
+		if cj.Spec.Suspend != nil && *cj.Spec.Suspend {
+			return true, nil
+		}
+		if cj.Status.LastSuccessfulTime != nil || len(cj.Status.Active) > 0 {
+			return true, nil
+		}
+		return false, nil
 
 	default:
 		// For unknown resource kinds, check if pods are running

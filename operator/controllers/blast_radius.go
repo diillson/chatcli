@@ -7,6 +7,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apiresource "k8s.io/apimachinery/pkg/api/resource"
@@ -112,6 +113,59 @@ func (bp *BlastRadiusPredictor) PredictImpact(ctx context.Context, resource plat
 		bp.predictNodeImpact(ctx, resource, action, prediction)
 	case platformv1alpha1.ActionAdjustHPA:
 		bp.predictHPAAdjustImpact(ctx, resource, action.Params, prediction)
+
+	// StatefulSet
+	case platformv1alpha1.ActionScaleStatefulSet:
+		bp.predictScaleStatefulSetImpact(ctx, resource, action.Params, prediction)
+	case platformv1alpha1.ActionRestartStatefulSet:
+		bp.predictRestartWorkloadImpact(ctx, resource, prediction, "StatefulSet")
+	case platformv1alpha1.ActionRollbackStatefulSet, platformv1alpha1.ActionRollbackDaemonSet:
+		prediction.Warnings = append(prediction.Warnings,
+			"ControllerRevision rollback will trigger rolling update")
+	case platformv1alpha1.ActionAdjustStatefulSetResources, platformv1alpha1.ActionAdjustDaemonSetResources,
+		platformv1alpha1.ActionAdjustJobResources, platformv1alpha1.ActionAdjustCronJobResources:
+		bp.predictResourceAdjustImpact(ctx, resource, action.Params, prediction)
+	case platformv1alpha1.ActionDeleteStatefulSetPod, platformv1alpha1.ActionDeleteDaemonSetPod:
+		bp.predictDeleteWorkloadPodImpact(ctx, resource, prediction)
+	case platformv1alpha1.ActionForceDeleteStatefulSetPod:
+		prediction.Warnings = append(prediction.Warnings,
+			"Force-deleting a StatefulSet pod (grace=0) — risk of data corruption if pod has unflushed writes")
+	case platformv1alpha1.ActionRecreateStatefulSetPVC:
+		prediction.Blockers = append(prediction.Blockers,
+			"RecreateStatefulSetPVC will DELETE data — ensure backups exist")
+		prediction.Safe = false
+	case platformv1alpha1.ActionPartitionStatefulSetUpdate:
+		prediction.Warnings = append(prediction.Warnings,
+			"Setting partition for canary rollout — only pods with ordinal >= partition will be updated")
+
+	// DaemonSet
+	case platformv1alpha1.ActionRestartDaemonSet:
+		bp.predictDaemonSetClusterImpact(ctx, resource, prediction, "restart")
+	case platformv1alpha1.ActionPauseDaemonSetRollout:
+		// Low risk — just pausing
+	case platformv1alpha1.ActionCordonAndDeleteDaemonSetPod:
+		prediction.Warnings = append(prediction.Warnings,
+			"CordonAndDelete: will cordon node AND delete DaemonSet pod — medium risk compound action")
+
+	// Job
+	case platformv1alpha1.ActionRetryJob:
+		prediction.Warnings = append(prediction.Warnings, "RetryJob: will delete failed Job and create a new one")
+	case platformv1alpha1.ActionForceDeleteJobPods:
+		prediction.Warnings = append(prediction.Warnings,
+			"Force-deleting all Job pods (grace=0) — running work will be interrupted")
+	case platformv1alpha1.ActionSuspendJob, platformv1alpha1.ActionResumeJob,
+		platformv1alpha1.ActionSuspendCronJob, platformv1alpha1.ActionResumeCronJob:
+		// Low risk — suspend/resume
+
+	// CronJob
+	case platformv1alpha1.ActionTriggerCronJob:
+		bp.predictTriggerCronJobImpact(ctx, resource, prediction)
+	case platformv1alpha1.ActionDeleteCronJobActiveJobs:
+		prediction.Warnings = append(prediction.Warnings,
+			"Deleting active CronJob jobs — running workloads will be interrupted")
+	case platformv1alpha1.ActionReplaceCronJobTemplate:
+		prediction.Warnings = append(prediction.Warnings,
+			"Replacing CronJob template — all future jobs will use the new template")
 	}
 
 	// Check PDB
@@ -206,6 +260,10 @@ func (bp *BlastRadiusPredictor) predictRestartImpact(ctx context.Context, resour
 }
 
 func (bp *BlastRadiusPredictor) predictDeletePodImpact(ctx context.Context, resource platformv1alpha1.ResourceRef, params map[string]string, prediction *BlastRadiusPrediction) {
+	bp.predictDeleteWorkloadPodImpact(ctx, resource, prediction)
+}
+
+func (bp *BlastRadiusPredictor) predictDeleteWorkloadPodImpact(ctx context.Context, resource platformv1alpha1.ResourceRef, prediction *BlastRadiusPrediction) {
 	var podList corev1.PodList
 	if err := bp.client.List(ctx, &podList, client.InNamespace(resource.Namespace)); err != nil {
 		return
@@ -213,7 +271,7 @@ func (bp *BlastRadiusPredictor) predictDeletePodImpact(ctx context.Context, reso
 
 	var matchingPods int
 	for i := range podList.Items {
-		if isPodOwnedByDeployment(&podList.Items[i], resource.Name) {
+		if isResourcePod(&podList.Items[i], resource) {
 			matchingPods++
 		}
 	}
@@ -225,6 +283,88 @@ func (bp *BlastRadiusPredictor) predictDeletePodImpact(ctx context.Context, reso
 	} else if matchingPods == 2 {
 		prediction.Warnings = append(prediction.Warnings,
 			"Deleting 1 of 2 pods — 50% capacity reduction")
+	}
+}
+
+func (bp *BlastRadiusPredictor) predictScaleStatefulSetImpact(ctx context.Context, resource platformv1alpha1.ResourceRef, params map[string]string, prediction *BlastRadiusPrediction) {
+	replicasStr, ok := params["replicas"]
+	if !ok {
+		return
+	}
+	var target int32
+	fmt.Sscanf(replicasStr, "%d", &target)
+
+	var sts appsv1.StatefulSet
+	if err := bp.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &sts); err != nil {
+		return
+	}
+
+	current := int32(1)
+	if sts.Spec.Replicas != nil {
+		current = *sts.Spec.Replicas
+	}
+
+	if target == 0 {
+		prediction.Blockers = append(prediction.Blockers,
+			"BLOCKED: Scaling StatefulSet to 0 would cause complete outage")
+		prediction.Safe = false
+	}
+
+	if target < current {
+		prediction.Warnings = append(prediction.Warnings,
+			fmt.Sprintf("Scaling StatefulSet down from %d to %d — highest ordinal pods removed first (may be primary)", current, target))
+	}
+
+	if target > current*3 {
+		prediction.Warnings = append(prediction.Warnings,
+			fmt.Sprintf("Large StatefulSet scale-up from %d to %d — check PVC provisioning capacity", current, target))
+	}
+}
+
+func (bp *BlastRadiusPredictor) predictRestartWorkloadImpact(ctx context.Context, resource platformv1alpha1.ResourceRef, prediction *BlastRadiusPrediction, kind string) {
+	switch kind {
+	case "StatefulSet":
+		var sts appsv1.StatefulSet
+		if err := bp.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &sts); err != nil {
+			return
+		}
+		replicas := int32(1)
+		if sts.Spec.Replicas != nil {
+			replicas = *sts.Spec.Replicas
+		}
+		if replicas == 1 {
+			prediction.Warnings = append(prediction.Warnings,
+				"Restarting single-replica StatefulSet — brief downtime expected")
+		}
+		prediction.Warnings = append(prediction.Warnings,
+			"StatefulSet rolling restart follows ordinal order (reverse)")
+	}
+}
+
+func (bp *BlastRadiusPredictor) predictDaemonSetClusterImpact(ctx context.Context, resource platformv1alpha1.ResourceRef, prediction *BlastRadiusPrediction, action string) {
+	var ds appsv1.DaemonSet
+	if err := bp.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &ds); err != nil {
+		return
+	}
+
+	prediction.Warnings = append(prediction.Warnings,
+		fmt.Sprintf("DaemonSet %s affects ALL nodes — %d desired pods cluster-wide", action, ds.Status.DesiredNumberScheduled))
+
+	if ds.Status.DesiredNumberScheduled > 50 {
+		prediction.Warnings = append(prediction.Warnings,
+			"Large DaemonSet (>50 nodes) — consider using partition/maxUnavailable to limit blast radius")
+	}
+}
+
+func (bp *BlastRadiusPredictor) predictTriggerCronJobImpact(ctx context.Context, resource platformv1alpha1.ResourceRef, prediction *BlastRadiusPrediction) {
+	var cj batchv1.CronJob
+	if err := bp.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &cj); err != nil {
+		return
+	}
+
+	if cj.Spec.ConcurrencyPolicy == batchv1.ForbidConcurrent && len(cj.Status.Active) > 0 {
+		prediction.Warnings = append(prediction.Warnings,
+			"CronJob has concurrencyPolicy=Forbid and active jobs — manual trigger may not run")
 	}
 }
 
@@ -281,6 +421,44 @@ func (bp *BlastRadiusPredictor) predictHPAAdjustImpact(ctx context.Context, reso
 	}
 }
 
+// getPodTemplateLabels returns the pod template labels for any supported workload kind.
+func (bp *BlastRadiusPredictor) getPodTemplateLabels(ctx context.Context, res platformv1alpha1.ResourceRef) map[string]string {
+	switch res.Kind {
+	case "Deployment":
+		var d appsv1.Deployment
+		if err := bp.client.Get(ctx, types.NamespacedName{Name: res.Name, Namespace: res.Namespace}, &d); err != nil {
+			return nil
+		}
+		return d.Spec.Template.Labels
+	case "StatefulSet":
+		var s appsv1.StatefulSet
+		if err := bp.client.Get(ctx, types.NamespacedName{Name: res.Name, Namespace: res.Namespace}, &s); err != nil {
+			return nil
+		}
+		return s.Spec.Template.Labels
+	case "DaemonSet":
+		var d appsv1.DaemonSet
+		if err := bp.client.Get(ctx, types.NamespacedName{Name: res.Name, Namespace: res.Namespace}, &d); err != nil {
+			return nil
+		}
+		return d.Spec.Template.Labels
+	case "Job":
+		var j batchv1.Job
+		if err := bp.client.Get(ctx, types.NamespacedName{Name: res.Name, Namespace: res.Namespace}, &j); err != nil {
+			return nil
+		}
+		return j.Spec.Template.Labels
+	case "CronJob":
+		var c batchv1.CronJob
+		if err := bp.client.Get(ctx, types.NamespacedName{Name: res.Name, Namespace: res.Namespace}, &c); err != nil {
+			return nil
+		}
+		return c.Spec.JobTemplate.Spec.Template.Labels
+	default:
+		return nil
+	}
+}
+
 // checkPDB checks if the action would violate PodDisruptionBudgets.
 func (bp *BlastRadiusPredictor) checkPDB(ctx context.Context, res platformv1alpha1.ResourceRef, prediction *BlastRadiusPrediction) {
 	var pdbList policyv1.PodDisruptionBudgetList
@@ -288,9 +466,8 @@ func (bp *BlastRadiusPredictor) checkPDB(ctx context.Context, res platformv1alph
 		return
 	}
 
-	// Get deployment labels to match PDB selectors
-	var deploy appsv1.Deployment
-	if err := bp.client.Get(ctx, types.NamespacedName{Name: res.Name, Namespace: res.Namespace}, &deploy); err != nil {
+	podLabels := bp.getPodTemplateLabels(ctx, res)
+	if podLabels == nil {
 		return
 	}
 
@@ -299,10 +476,9 @@ func (bp *BlastRadiusPredictor) checkPDB(ctx context.Context, res platformv1alph
 			continue
 		}
 
-		// Check if PDB selector matches deployment pods
 		matches := true
 		for k, v := range pdb.Spec.Selector.MatchLabels {
-			if deploy.Spec.Template.Labels[k] != v {
+			if podLabels[k] != v {
 				matches = false
 				break
 			}
@@ -390,14 +566,13 @@ func (bp *BlastRadiusPredictor) checkQuota(ctx context.Context, res platformv1al
 
 // findAffectedServices discovers services that depend on the resource.
 func (bp *BlastRadiusPredictor) findAffectedServices(ctx context.Context, res platformv1alpha1.ResourceRef, prediction *BlastRadiusPrediction) {
-	// Get the deployment's service
 	var services corev1.ServiceList
 	if err := bp.client.List(ctx, &services, client.InNamespace(res.Namespace)); err != nil {
 		return
 	}
 
-	var deploy appsv1.Deployment
-	if err := bp.client.Get(ctx, types.NamespacedName{Name: res.Name, Namespace: res.Namespace}, &deploy); err != nil {
+	podLabels := bp.getPodTemplateLabels(ctx, res)
+	if podLabels == nil {
 		return
 	}
 
@@ -407,7 +582,7 @@ func (bp *BlastRadiusPredictor) findAffectedServices(ctx context.Context, res pl
 		}
 		matches := true
 		for k, v := range svc.Spec.Selector {
-			if deploy.Spec.Template.Labels[k] != v {
+			if podLabels[k] != v {
 				matches = false
 				break
 			}
