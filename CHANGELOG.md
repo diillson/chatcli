@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.81.1](https://github.com/diillson/chatcli/compare/v1.81.0...v1.81.1) (2026-03-22)
+
+
+### Bug Fixes
+
+* **aiops:** remove extra argument in RecordIssueResolved call ([#675](https://github.com/diillson/chatcli/issues/675)) ([da05972](https://github.com/diillson/chatcli/commit/da05972a0716b27b177e38f4988adef42f2b255c))
+
 ## [1.81.0](https://github.com/diillson/chatcli/compare/v1.80.0...v1.81.0) (2026-03-22)
 
 
