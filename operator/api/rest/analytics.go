@@ -433,7 +433,7 @@ func (s *APIServer) computeRemediationStats(ctx context.Context, tr timeRangePar
 	for _, e := range entries {
 		var successRate float64
 		if e.Stats.Total > 0 {
-			successRate = float64(e.Stats.Successful) / float64(e.Stats.Total) * 100.0
+			successRate = float64(e.Stats.Successful) / float64(e.Stats.Total)
 		}
 		var avgDur float64
 		if e.Stats.DurCount > 0 {

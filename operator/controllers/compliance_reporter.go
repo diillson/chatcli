@@ -189,6 +189,43 @@ func (cr *ComplianceReporter) GenerateReport(ctx context.Context, namespace stri
 		}
 	}
 
+	// SLA Compliance — calculate from issues and SLA definitions
+	// CompliancePercentage = ((totalIncidents - slaViolations) / totalIncidents) * 100
+	totalIncidents := report.IncidentMetrics.TotalIncidents
+	if totalIncidents > 0 {
+		// Count SLA violations: issues that were escalated (indicates SLA breach)
+		// or have SLA-related annotations
+		var violations int64
+		for _, iss := range issues.Items {
+			if iss.CreationTimestamp.Time.Before(start) {
+				continue
+			}
+			// Escalated = SLA resolution time exceeded
+			if iss.Status.State == platformv1alpha1.IssueStateEscalated {
+				report.SLAMetrics.ResolutionSLAViolations++
+				violations++
+			}
+			// Check if response SLA was violated (DetectedAt too late)
+			if iss.Status.DetectedAt != nil {
+				detectTime := iss.Status.DetectedAt.Time.Sub(iss.CreationTimestamp.Time)
+				report.SLAMetrics.AverageResponseTime += detectTime
+			}
+			if iss.Status.ResolvedAt != nil {
+				resolveTime := iss.Status.ResolvedAt.Time.Sub(iss.CreationTimestamp.Time)
+				report.SLAMetrics.AverageResolutionTime += resolveTime
+			}
+		}
+		if detectCount > 0 {
+			report.SLAMetrics.AverageResponseTime = report.SLAMetrics.AverageResponseTime / time.Duration(detectCount)
+		}
+		if resolveCount > 0 {
+			report.SLAMetrics.AverageResolutionTime = report.SLAMetrics.AverageResolutionTime / time.Duration(resolveCount)
+		}
+		report.SLAMetrics.CompliancePercentage = float64(totalIncidents-violations) / float64(totalIncidents) * 100
+	} else {
+		report.SLAMetrics.CompliancePercentage = 100 // No incidents = 100% compliance
+	}
+
 	// Audit events
 	var auditEvents platformv1alpha1.AuditEventList
 	if err := cr.client.List(ctx, &auditEvents, opts...); err == nil {
