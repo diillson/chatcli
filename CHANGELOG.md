@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.84.0](https://github.com/diillson/chatcli/compare/v1.83.0...v1.84.0) (2026-03-22)
+
+
+### Features
+
+* **aiops:** multi-runbook support — different root causes generate different runbooks ([#683](https://github.com/diillson/chatcli/issues/683)) ([945c66a](https://github.com/diillson/chatcli/commit/945c66a09dcb44203969ae5c45caefe82f28ef90))
+
 ## [1.83.0](https://github.com/diillson/chatcli/compare/v1.82.0...v1.83.0) (2026-03-22)
 
 
