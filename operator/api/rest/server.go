@@ -13,6 +13,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/operator/controllers"
 	"github.com/diillson/chatcli/operator/web"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -205,6 +206,8 @@ func (s *APIServer) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.routeAIInsights(w, r, rest)
 	case "remediations":
 		s.routeRemediations(w, r, rest)
+	case "federation":
+		s.routeFederation(w, r, rest)
 	default:
 		writeError(w, http.StatusNotFound, "unknown resource: "+resource)
 	}
@@ -1218,6 +1221,10 @@ func (s *APIServer) routeAnalytics(w http.ResponseWriter, r *http.Request, rest 
 		s.handleAnalyticsTopResources(w, r, tr)
 	case "remediation-stats":
 		s.handleAnalyticsRemediationStats(w, r, tr)
+	case "compliance":
+		s.handleAnalyticsCompliance(w, r, tr)
+	case "capacity":
+		s.handleAnalyticsCapacity(w, r, tr)
 	default:
 		writeError(w, http.StatusNotFound, "unknown analytics endpoint: "+rest[0])
 	}
@@ -1317,6 +1324,68 @@ func (s *APIServer) handleAnalyticsRemediationStats(w http.ResponseWriter, r *ht
 		Kind:       "RemediationStats",
 		Metadata:   &ListMeta{TotalCount: len(stats), Page: 1, PageSize: len(stats)},
 		Items:      stats,
+	})
+}
+
+func (s *APIServer) handleAnalyticsCompliance(w http.ResponseWriter, r *http.Request, tr timeRangeParams) {
+	reporter := controllers.NewComplianceReporter(s.client)
+	ns := r.URL.Query().Get("namespace")
+	window := 7 * 24 * time.Hour // default 7 days
+	if tr.From != nil && tr.To != nil {
+		window = tr.To.Sub(*tr.From)
+	}
+	report, err := reporter.GenerateReport(r.Context(), ns, window)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate compliance report: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, APIResponse{
+		APIVersion: "v1",
+		Kind:       "ComplianceReport",
+		Spec:       report,
+	})
+}
+
+func (s *APIServer) handleAnalyticsCapacity(w http.ResponseWriter, r *http.Request, tr timeRangeParams) {
+	ctx := r.Context()
+	planner := controllers.NewCapacityPlanner(s.client)
+	ns := r.URL.Query().Get("namespace")
+	window := 7 * 24 * time.Hour
+	if tr.From != nil && tr.To != nil {
+		window = tr.To.Sub(*tr.From)
+	}
+
+	// Collect unique resources from active/recent issues
+	var issues v1alpha1.IssueList
+	opts := []client.ListOption{}
+	if ns != "" {
+		opts = append(opts, client.InNamespace(ns))
+	}
+	if err := s.client.List(ctx, &issues, opts...); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list issues for capacity analysis: "+err.Error())
+		return
+	}
+
+	seen := make(map[string]bool)
+	var forecasts []interface{}
+	for _, iss := range issues.Items {
+		key := fmt.Sprintf("%s/%s/%s", iss.Spec.Resource.Kind, iss.Spec.Resource.Namespace, iss.Spec.Resource.Name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		forecast, err := planner.AnalyzeResourceTrends(ctx, iss.Spec.Resource, window)
+		if err != nil {
+			continue
+		}
+		forecasts = append(forecasts, forecast)
+	}
+
+	writeJSON(w, http.StatusOK, APIResponse{
+		APIVersion: "v1",
+		Kind:       "CapacityForecastList",
+		Metadata:   &ListMeta{TotalCount: len(forecasts), Page: 1, PageSize: len(forecasts)},
+		Items:      forecasts,
 	})
 }
 
@@ -2137,6 +2206,144 @@ func paginateSlice(total int, pp paginationParams) (start, end int) {
 		end = total
 	}
 	return start, end
+}
+
+// ========== Federation ==========
+
+func (s *APIServer) routeFederation(w http.ResponseWriter, r *http.Request, rest []string) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "federation endpoints only support GET")
+		return
+	}
+	if !hasMinRole(roleFromContext(r.Context()), "viewer") {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
+	switch {
+	case len(rest) == 0 || rest[0] == "status":
+		s.handleFederationStatus(w, r)
+	case rest[0] == "clusters":
+		s.handleFederationClusters(w, r)
+	case rest[0] == "correlations":
+		s.handleFederationCorrelations(w, r)
+	default:
+		writeError(w, http.StatusNotFound, "unknown federation endpoint: "+rest[0])
+	}
+}
+
+func (s *APIServer) handleFederationStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	clusterItems, err := s.listUnstructured(ctx, "clusterregistrations", "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list clusters: "+err.Error())
+		return
+	}
+
+	var issues v1alpha1.IssueList
+	if err := s.client.List(ctx, &issues); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list issues: "+err.Error())
+		return
+	}
+
+	connected, disconnected := 0, 0
+	for _, c := range clusterItems {
+		status, _ := c["status"].(map[string]interface{})
+		if status != nil {
+			if conn, _ := status["connected"].(bool); conn {
+				connected++
+			} else {
+				disconnected++
+			}
+		} else {
+			disconnected++
+		}
+	}
+
+	activeIssues := 0
+	for _, iss := range issues.Items {
+		if iss.Status.State != v1alpha1.IssueStateResolved &&
+			iss.Status.State != v1alpha1.IssueStateFailed {
+			activeIssues++
+		}
+	}
+
+	status := map[string]interface{}{
+		"totalClusters":        len(clusterItems),
+		"connectedClusters":    connected,
+		"disconnectedClusters": disconnected,
+		"totalActiveIssues":    activeIssues,
+	}
+
+	writeJSON(w, http.StatusOK, APIResponse{
+		APIVersion: "v1",
+		Kind:       "FederationStatus",
+		Spec:       status,
+	})
+}
+
+func (s *APIServer) handleFederationClusters(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tier := r.URL.Query().Get("tier")
+
+	items, err := s.listUnstructured(ctx, "clusterregistrations", "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list clusters: "+err.Error())
+		return
+	}
+
+	var clusters []ClusterItem
+	for _, item := range items {
+		ci := unstructuredToCluster(item)
+		if tier != "" && ci.Tier != tier {
+			continue
+		}
+		clusters = append(clusters, ci)
+	}
+
+	writeListResponse(w, "ClusterRegistrationList", clusters, len(clusters), paginationParams{Page: 1, PageSize: len(clusters)})
+}
+
+func (s *APIServer) handleFederationCorrelations(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var issues v1alpha1.IssueList
+	if err := s.client.List(ctx, &issues); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list issues: "+err.Error())
+		return
+	}
+
+	var correlations []map[string]interface{}
+	seen := make(map[string]bool)
+	for _, iss := range issues.Items {
+		if iss.Annotations == nil {
+			continue
+		}
+		corrID := iss.Annotations["platform.chatcli.io/correlation-id"]
+		if corrID == "" || seen[corrID] {
+			continue
+		}
+		seen[corrID] = true
+
+		correlations = append(correlations, map[string]interface{}{
+			"correlationId":      corrID,
+			"issue":              iss.Name,
+			"namespace":          iss.Namespace,
+			"severity":           string(iss.Spec.Severity),
+			"signalType":         iss.Spec.SignalType,
+			"correlatedClusters": iss.Annotations["platform.chatcli.io/correlated-clusters"],
+			"elevated":           iss.Annotations["platform.chatcli.io/elevated-severity"] == "true",
+			"cascade":            iss.Annotations["platform.chatcli.io/cascade-detected"] == "true",
+		})
+	}
+
+	writeJSON(w, http.StatusOK, APIResponse{
+		APIVersion: "v1",
+		Kind:       "FederationCorrelations",
+		Metadata:   &ListMeta{TotalCount: len(correlations), Page: 1, PageSize: len(correlations)},
+		Items:      correlations,
+	})
 }
 
 // ========== AI Insights ==========

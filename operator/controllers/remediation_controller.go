@@ -61,6 +61,8 @@ type RemediationReconciler struct {
 	ServerClient   AgenticStepCaller
 	ContextBuilder *KubernetesContextBuilder
 	AuditRecorder  *AuditRecorder
+	PatternStore   *PatternStore // Records resolution/failure patterns for Decision Engine learning
+	CostTracker    *CostTracker  // Tracks LLM and downtime costs per incident
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=remediationplans,verbs=get;list;watch;create;update;patch;delete
@@ -81,23 +83,42 @@ func (r *RemediationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	prevState := plan.Status.State
+
+	var result ctrl.Result
+	var reconcileErr error
+
 	switch plan.Status.State {
 	case "", platformv1alpha1.RemediationStatePending:
-		return r.handlePending(ctx, &plan)
+		result, reconcileErr = r.handlePending(ctx, &plan)
 	case platformv1alpha1.RemediationStateExecuting:
 		if plan.Spec.AgenticMode {
-			return r.handleAgenticExecuting(ctx, &plan)
+			result, reconcileErr = r.handleAgenticExecuting(ctx, &plan)
+		} else {
+			result, reconcileErr = r.handleExecuting(ctx, &plan)
 		}
-		return r.handleExecuting(ctx, &plan)
 	case platformv1alpha1.RemediationStateVerifying:
-		return r.handleVerifying(ctx, &plan)
+		result, reconcileErr = r.handleVerifying(ctx, &plan)
 	case platformv1alpha1.RemediationStateCompleted, platformv1alpha1.RemediationStateFailed, platformv1alpha1.RemediationStateRolledBack:
-		// Terminal states
+		return ctrl.Result{}, nil
+	default:
+		log.Info("Unknown remediation state", "state", plan.Status.State)
 		return ctrl.Result{}, nil
 	}
 
-	log.Info("Unknown remediation state", "state", plan.Status.State)
-	return ctrl.Result{}, nil
+	// Check if handler transitioned to a terminal state (use local plan, not re-fetch)
+	// The handler modifies the plan pointer directly via Status().Update(), so plan.Status.State
+	// reflects the latest state without needing a re-fetch (avoiding race conditions).
+	if plan.Status.State != prevState {
+		switch plan.Status.State {
+		case platformv1alpha1.RemediationStateCompleted:
+			r.recordPatternResolution(ctx, &plan)
+		case platformv1alpha1.RemediationStateFailed, platformv1alpha1.RemediationStateRolledBack:
+			r.recordPatternFailure(ctx, &plan)
+		}
+	}
+
+	return result, reconcileErr
 }
 
 func (r *RemediationReconciler) handlePending(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
@@ -1380,6 +1401,34 @@ func (r *RemediationReconciler) verifyResourceHealth(ctx context.Context, resour
 			return false, nil
 		}
 		return readyPods > 0, nil
+	}
+}
+
+// recordPatternResolution records a successful resolution in the PatternStore for Decision Engine learning.
+func (r *RemediationReconciler) recordPatternResolution(ctx context.Context, plan *platformv1alpha1.RemediationPlan) {
+	if r.PatternStore == nil {
+		return
+	}
+	var issue platformv1alpha1.Issue
+	if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &issue); err != nil {
+		return
+	}
+	if err := r.PatternStore.RecordResolution(ctx, &issue, plan); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to record resolution pattern", "plan", plan.Name)
+	}
+}
+
+// recordPatternFailure records a failed remediation in the PatternStore.
+func (r *RemediationReconciler) recordPatternFailure(ctx context.Context, plan *platformv1alpha1.RemediationPlan) {
+	if r.PatternStore == nil {
+		return
+	}
+	var issue platformv1alpha1.Issue
+	if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &issue); err != nil {
+		return
+	}
+	if err := r.PatternStore.RecordFailure(ctx, &issue, plan); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to record failure pattern", "plan", plan.Name)
 	}
 }
 
