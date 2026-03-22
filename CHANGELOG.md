@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.77.0](https://github.com/diillson/chatcli/compare/v1.76.1...v1.77.0) (2026-03-22)
+
+
+### Features
+
+* **aiops:** expand remediation to all K8s workload types (54 actions) ([#661](https://github.com/diillson/chatcli/issues/661)) ([deee425](https://github.com/diillson/chatcli/commit/deee425f47cb60ff733f47c39c6912a9583580c9))
+
 ## [1.76.1](https://github.com/diillson/chatcli/compare/v1.76.0...v1.76.1) (2026-03-21)
 
 
