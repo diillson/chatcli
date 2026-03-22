@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.79.0](https://github.com/diillson/chatcli/compare/v1.78.0...v1.79.0) (2026-03-22)
+
+
+### Features
+
+* **aiops:** AI Insights & Remediations API, dashboard views, and Helm chart version sync ([#669](https://github.com/diillson/chatcli/issues/669)) ([54fde90](https://github.com/diillson/chatcli/commit/54fde90bd5c8698999550814a08315843e40d59b))
+
 ## [1.78.0](https://github.com/diillson/chatcli/compare/v1.77.2...v1.78.0) (2026-03-22)
 
 
