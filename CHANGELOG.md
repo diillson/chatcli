@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.81.2](https://github.com/diillson/chatcli/compare/v1.81.1...v1.81.2) (2026-03-22)
+
+
+### Bug Fixes
+
+* **operator:** add aiops field to Instance CRD schema in both Helm charts ([#677](https://github.com/diillson/chatcli/issues/677)) ([d8d796b](https://github.com/diillson/chatcli/commit/d8d796bb2f2de3456086b20d58977d5d781d06c0))
+
 ## [1.81.1](https://github.com/diillson/chatcli/compare/v1.81.0...v1.81.1) (2026-03-22)
 
 
