@@ -441,7 +441,9 @@ func (s *APIServer) handleResolveIncident(w http.ResponseWriter, r *http.Request
 	issue.Annotations["aiops.chatcli.io/resolved-by"] = roleFromContext(ctx)
 	issue.Annotations["aiops.chatcli.io/resolved-at"] = now.Format(time.RFC3339)
 	issue.Annotations["aiops.chatcli.io/manual-resolution"] = "true"
-	_ = s.client.Update(ctx, issue) // Non-fatal — status already updated
+	if err := s.client.Update(ctx, issue); err != nil {
+		log.Printf("[REST] warning: failed to update annotations on resolved issue %s: %v", issue.Name, err)
+	}
 
 	// Invalidate dedup for the resource so new anomalies can be detected
 	if s.watcherBridge != nil {
@@ -1522,6 +1524,12 @@ func (s *APIServer) handleExportAuditEvents(w http.ResponseWriter, r *http.Reque
 					continue
 				}
 			}
+		} else if ae.CreationTimestamp != "" {
+			if t, err := time.Parse(time.RFC3339, ae.CreationTimestamp); err == nil {
+				if !inTimeRange(t, tr) {
+					continue
+				}
+			}
 		}
 		events = append(events, ae)
 	}
@@ -2194,7 +2202,7 @@ func (s *APIServer) handleGetAIInsight(w http.ResponseWriter, r *http.Request, n
 
 	var insight v1alpha1.AIInsight
 	if err := s.client.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &insight); err != nil {
-		writeError(w, http.StatusNotFound, "AI insight not found: "+name)
+		writeError(w, http.StatusNotFound, "AI insight not found: "+err.Error())
 		return
 	}
 
@@ -2315,7 +2323,7 @@ func (s *APIServer) handleGetRemediation(w http.ResponseWriter, r *http.Request,
 
 	var rp v1alpha1.RemediationPlan
 	if err := s.client.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &rp); err != nil {
-		writeError(w, http.StatusNotFound, "remediation plan not found: "+name)
+		writeError(w, http.StatusNotFound, "remediation plan not found: "+err.Error())
 		return
 	}
 
@@ -2324,6 +2332,8 @@ func (s *APIServer) handleGetRemediation(w http.ResponseWriter, r *http.Request,
 		SafetyConstraints: rp.Spec.SafetyConstraints,
 		RollbackPerformed: rp.Status.RollbackPerformed,
 		RollbackResult:    rp.Status.RollbackResult,
+		Evidence:          []EvidenceDetailItem{},
+		AgenticHistory:    []AgenticStepItem{},
 	}
 
 	for _, ev := range rp.Status.Evidence {

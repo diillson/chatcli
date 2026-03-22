@@ -1731,7 +1731,7 @@ function buildInsightExpandRow(item) {
   tr.className = 'expand-row';
   const recs = (item.recommendations || []).map(r => `<li>${escapeHtml(r)}</li>`).join('');
   const actions = (item.suggestedActions || []).map(a =>
-    `<li><span class="action-type-badge">${escapeHtml(a.action)}</span> <strong>${escapeHtml(a.name)}</strong>: ${escapeHtml(a.description || '')}${a.params ? ` <small style="color:var(--text-muted)">${JSON.stringify(a.params)}</small>` : ''}</li>`
+    `<li><span class="action-type-badge">${escapeHtml(a.action)}</span> <strong>${escapeHtml(a.name)}</strong>: ${escapeHtml(a.description || '')}${a.params ? ` <small style="color:var(--text-muted)">${escapeHtml(JSON.stringify(a.params))}</small>` : ''}</li>`
   ).join('');
   tr.innerHTML = `<td colspan="8">
     <div class="expand-content">
@@ -1803,16 +1803,6 @@ async function loadRemediations() {
   }
 }
 
-function formatDuration(ms) {
-  if (ms < 0) return '-';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return s + 's';
-  const m = Math.floor(s / 60);
-  if (m < 60) return m + 'm ' + (s % 60) + 's';
-  const h = Math.floor(m / 60);
-  return h + 'h ' + (m % 60) + 'm';
-}
-
 function toggleRemExpand(id, item, mainRow) {
   if (expandedRows.has(id)) {
     expandedRows.delete(id);
@@ -1830,7 +1820,7 @@ function buildRemExpandRow(item) {
   const tr = document.createElement('tr');
   tr.className = 'expand-row';
   const actions = (item.actions || []).map(a =>
-    `<li><span class="action-type-badge">${escapeHtml(a.type)}</span>${a.params ? ` <small style="color:var(--text-muted)">${JSON.stringify(a.params)}</small>` : ''}</li>`
+    `<li><span class="action-type-badge">${escapeHtml(a.type)}</span>${a.params ? ` <small style="color:var(--text-muted)">${escapeHtml(JSON.stringify(a.params))}</small>` : ''}</li>`
   ).join('');
   tr.innerHTML = `<td colspan="9">
     <div class="expand-content">
