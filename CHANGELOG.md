@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.78.0](https://github.com/diillson/chatcli/compare/v1.77.2...v1.78.0) (2026-03-22)
+
+
+### Features
+
+* **aiops:** manual resolve for escalated incidents via API and dashboard ([#667](https://github.com/diillson/chatcli/issues/667)) ([5a0946c](https://github.com/diillson/chatcli/commit/5a0946cf7e5952e67f0c258d8df29e8e2e93b18f))
+
 ## [1.77.2](https://github.com/diillson/chatcli/compare/v1.77.1...v1.77.2) (2026-03-22)
 
 
