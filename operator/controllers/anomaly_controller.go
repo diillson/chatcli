@@ -109,7 +109,7 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Cooldown: check if same resource was recently resolved (suppress stale re-triggers)
-	const resolutionCooldown = 30 * time.Minute
+	resolutionCooldown := r.getResolutionCooldown(ctx)
 	recentlyResolved, err := r.CorrelationEngine.FindRecentlyResolvedIssue(ctx, resource, resolutionCooldown)
 	if err != nil {
 		log.Error(err, "Failed to check recently resolved issues")
@@ -185,6 +185,15 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	anomaliesProcessed.WithLabelValues("new_issue_created").Inc()
 	return ctrl.Result{}, nil
+}
+
+// getResolutionCooldown reads the cooldown from the first Instance's AIOps config.
+func (r *AnomalyReconciler) getResolutionCooldown(ctx context.Context) time.Duration {
+	var instances platformv1alpha1.InstanceList
+	if err := r.List(ctx, &instances); err == nil && len(instances.Items) > 0 {
+		return instances.Items[0].Spec.AIOps.GetResolutionCooldown()
+	}
+	return 10 * time.Minute // default
 }
 
 // SetupWithManager sets up the controller with the Manager.

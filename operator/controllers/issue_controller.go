@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,9 +73,9 @@ func init() {
 	)
 }
 
-// DedupInvalidator allows refreshing dedup entries when issues reach terminal states.
+// DedupInvalidator allows invalidating dedup entries when issues reach terminal states.
 type DedupInvalidator interface {
-	RefreshDedupForResource(deployment, namespace string)
+	InvalidateDedupForResource(deployment, namespace string)
 }
 
 // IssueReconciler reconciles Issue objects.
@@ -134,7 +135,9 @@ func (r *IssueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return r.handleAnalyzing(ctx, &issue)
 	case platformv1alpha1.IssueStateRemediating:
 		return r.handleRemediating(ctx, &issue)
-	case platformv1alpha1.IssueStateResolved, platformv1alpha1.IssueStateEscalated, platformv1alpha1.IssueStateFailed:
+	case platformv1alpha1.IssueStateEscalated:
+		return r.handleEscalated(ctx, &issue)
+	case platformv1alpha1.IssueStateResolved, platformv1alpha1.IssueStateFailed:
 		// Terminal states
 		log.Info("Issue in terminal state", "name", issue.Name, "state", issue.Status.State)
 		return ctrl.Result{}, nil
@@ -156,7 +159,8 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 		issue.Status.DetectedAt = &now
 	}
 	if issue.Status.MaxRemediationAttempts == 0 {
-		issue.Status.MaxRemediationAttempts = 3
+		// Read from Instance AIOps config, fallback to default (5)
+		issue.Status.MaxRemediationAttempts = r.getMaxRemediationAttempts(ctx)
 	}
 
 	// Create AIInsight for analysis
@@ -365,7 +369,7 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 		}
 
 		// Refresh dedup cooldown so stale alerts don't immediately re-trigger
-		r.refreshDedup(issue)
+		r.invalidateDedup(issue)
 
 		return ctrl.Result{}, r.Status().Update(ctx, issue)
 
@@ -424,7 +428,7 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 		}
 
 		// Refresh dedup cooldown so stale alerts don't immediately re-trigger
-		r.refreshDedup(issue)
+		r.invalidateDedup(issue)
 
 		return ctrl.Result{}, r.Status().Update(ctx, issue)
 
@@ -861,14 +865,113 @@ func (r *IssueReconciler) retryWithExistingRunbook(ctx context.Context, issue *p
 	return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 }
 
-// refreshDedup resets dedup cooldown for the issue's resource, extending suppression.
-func (r *IssueReconciler) refreshDedup(issue *platformv1alpha1.Issue) {
+// handleEscalated checks if an escalated issue's resource has recovered and auto-resolves it.
+func (r *IssueReconciler) handleEscalated(ctx context.Context, issue *platformv1alpha1.Issue) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	aiops := r.getAIOpsConfig(ctx)
+	if !aiops.IsAutoResolveEnabled() {
+		log.Info("Auto-resolve disabled, issue remains Escalated", "name", issue.Name)
+		return ctrl.Result{}, nil
+	}
+
+	resource := issue.Spec.Resource
+	healthy, err := r.isResourceHealthy(ctx, resource)
+	if err != nil {
+		log.Error(err, "Failed to check resource health for auto-resolve", "name", issue.Name)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	if !healthy {
+		// Resource still unhealthy — recheck in 30 seconds
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	// Resource is healthy — auto-resolve the escalated issue
+	log.Info("Auto-resolving Escalated issue: resource recovered", "name", issue.Name, "resource", resource.Name)
+	now := metav1.Now()
+	issue.Status.State = platformv1alpha1.IssueStateResolved
+	issue.Status.Resolution = "Auto-resolved: resource recovered while awaiting human intervention"
+	issue.Status.ResolvedAt = &now
+	meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
+		Type:               string(platformv1alpha1.IssueStateResolved),
+		Status:             metav1.ConditionTrue,
+		Reason:             "AutoResolved",
+		Message:            "Resource recovered — all replicas healthy. Issue auto-resolved.",
+		LastTransitionTime: now,
+	})
+
+	if err := r.Status().Update(ctx, issue); err != nil {
+		return ctrl.Result{}, fmt.Errorf("auto-resolving escalated issue: %w", err)
+	}
+
+	r.invalidateDedup(issue)
+
+	if r.AuditRecorder != nil {
+		r.AuditRecorder.RecordIssueResolved(ctx, issue, "auto-resolve")
+	}
+
+	issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateResolved)).Inc()
+	return ctrl.Result{}, nil
+}
+
+// isResourceHealthy checks if the target resource has all replicas ready.
+func (r *IssueReconciler) isResourceHealthy(ctx context.Context, resource platformv1alpha1.ResourceRef) (bool, error) {
+	switch resource.Kind {
+	case "Deployment":
+		var deploy appsv1.Deployment
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &deploy); err != nil {
+			return false, err
+		}
+		desired := int32(1)
+		if deploy.Spec.Replicas != nil {
+			desired = *deploy.Spec.Replicas
+		}
+		return deploy.Status.ReadyReplicas >= desired && deploy.Status.UnavailableReplicas == 0, nil
+
+	case "StatefulSet":
+		var sts appsv1.StatefulSet
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &sts); err != nil {
+			return false, err
+		}
+		desired := int32(1)
+		if sts.Spec.Replicas != nil {
+			desired = *sts.Spec.Replicas
+		}
+		return sts.Status.ReadyReplicas >= desired, nil
+
+	default:
+		// For other kinds, assume not healthy to avoid false auto-resolve
+		return false, nil
+	}
+}
+
+// invalidateDedup removes dedup entries for the issue's resource, allowing new anomalies to be detected.
+func (r *IssueReconciler) invalidateDedup(issue *platformv1alpha1.Issue) {
 	if r.DedupInvalidator != nil {
-		r.DedupInvalidator.RefreshDedupForResource(
+		r.DedupInvalidator.InvalidateDedupForResource(
 			issue.Spec.Resource.Name,
 			issue.Spec.Resource.Namespace,
 		)
 	}
+}
+
+// getMaxRemediationAttempts reads the max attempts from the first Instance's AIOps config.
+func (r *IssueReconciler) getMaxRemediationAttempts(ctx context.Context) int32 {
+	var instances platformv1alpha1.InstanceList
+	if err := r.List(ctx, &instances); err == nil && len(instances.Items) > 0 {
+		return instances.Items[0].Spec.AIOps.GetMaxRemediationAttempts()
+	}
+	return 5 // default
+}
+
+// getAIOpsConfig reads the AIOps config from the first Instance.
+func (r *IssueReconciler) getAIOpsConfig(ctx context.Context) *platformv1alpha1.AIOpsSpec {
+	var instances platformv1alpha1.InstanceList
+	if err := r.List(ctx, &instances); err == nil && len(instances.Items) > 0 {
+		return instances.Items[0].Spec.AIOps
+	}
+	return nil
 }
 
 // createAgenticRemediationPlan creates a RemediationPlan in agentic mode (AI-driven step-by-step).
