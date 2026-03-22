@@ -1071,26 +1071,22 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 		return err
 	}
 
-	// Re-fetch to get the latest resourceVersion (PostMortemReconciler may have
-	// already initialized the state to Open, changing the resourceVersion).
-	if err := r.Get(ctx, types.NamespacedName{Name: pm.Name, Namespace: pm.Namespace}, pm); err != nil {
-		return fmt.Errorf("re-fetching PostMortem before status update: %w", err)
+	// Apply all status fields
+	applyPostMortemStatus := func(pm *platformv1alpha1.PostMortem) {
+		pm.Status.State = platformv1alpha1.PostMortemStateOpen
+		pm.Status.Summary = summary
+		pm.Status.RootCause = rootCause
+		pm.Status.Impact = impact
+		pm.Status.Timeline = timeline
+		pm.Status.ActionsExecuted = actions
+		pm.Status.LessonsLearned = lessonsLearned
+		pm.Status.PreventionActions = preventionActions
+		pm.Status.Duration = duration
+		pm.Status.GeneratedAt = &now
+		pm.Status.Trending = r.buildTrendingInfo(ctx, issue)
 	}
 
-	// Apply all status fields on the fresh object
-	pm.Status.State = platformv1alpha1.PostMortemStateOpen
-	pm.Status.Summary = summary
-	pm.Status.RootCause = rootCause
-	pm.Status.Impact = impact
-	pm.Status.Timeline = timeline
-	pm.Status.ActionsExecuted = actions
-	pm.Status.LessonsLearned = lessonsLearned
-	pm.Status.PreventionActions = preventionActions
-	pm.Status.Duration = duration
-	pm.Status.GeneratedAt = &now
-
-	// Enrich with trending data (recurring incident detection)
-	pm.Status.Trending = r.buildTrendingInfo(ctx, issue)
+	applyPostMortemStatus(pm)
 
 	// Enrich with cascade chain
 	cascadeAnalyzer := NewCascadeAnalyzer(r.Client)
@@ -1126,7 +1122,20 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 		}
 	}
 
-	return r.Status().Update(ctx, pm)
+	// Try Status().Update() with retry on conflict (PostMortemReconciler may race).
+	if err := r.Status().Update(ctx, pm); err != nil {
+		// Conflict: re-fetch and re-apply
+		if errors.IsConflict(err) || errors.IsNotFound(err) {
+			time.Sleep(500 * time.Millisecond)
+			if fetchErr := r.Get(ctx, types.NamespacedName{Name: pm.Name, Namespace: pm.Namespace}, pm); fetchErr != nil {
+				return fmt.Errorf("re-fetching PostMortem after conflict: %w", fetchErr)
+			}
+			applyPostMortemStatus(pm)
+			return r.Status().Update(ctx, pm)
+		}
+		return err
+	}
+	return nil
 }
 
 // generateAgenticRunbook creates a Runbook from the successful actions of an agentic session.
