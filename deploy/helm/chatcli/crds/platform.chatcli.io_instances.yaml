@@ -66,6 +66,42 @@ spec:
                       skill .md files.
                     type: string
                 type: object
+              aiops:
+                description: AIOps configures the autonomous incident management
+                  pipeline. All fields are optional with sensible defaults.
+                properties:
+                  dedupTTLMinutes:
+                    default: 60
+                    description: DedupTTLMinutes is how long (in minutes) the bridge
+                      dedup cache retains alert hashes.
+                    format: int32
+                    maximum: 1440
+                    minimum: 5
+                    type: integer
+                  enableAutoResolve:
+                    default: true
+                    description: EnableAutoResolve enables automatic resolution of
+                      Escalated issues when the watcher detects the resource has
+                      recovered (all pods healthy).
+                    type: boolean
+                  maxRemediationAttempts:
+                    default: 5
+                    description: MaxRemediationAttempts is the maximum number of
+                      remediation attempts before escalating to human.
+                    format: int32
+                    maximum: 10
+                    minimum: 1
+                    type: integer
+                  resolutionCooldownMinutes:
+                    default: 10
+                    description: ResolutionCooldownMinutes is how long (in minutes)
+                      after an issue is resolved before new anomalies for the same
+                      resource can create a new issue.
+                    format: int32
+                    maximum: 120
+                    minimum: 0
+                    type: integer
+                type: object
               apiKeys:
                 description: |-
                   APIKeys references a Secret containing provider API keys.
