@@ -8,6 +8,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -77,6 +79,10 @@ func main() {
 		fmt.Println(i18n.T("main.error_logger_init", err))
 		os.Exit(1)
 	}
+
+	// Silence Go's default logger to prevent http2/net internal messages
+	// (e.g. "RoundTrip retrying after failure") from leaking to stderr.
+	log.SetOutput(io.Discard)
 
 	config.InitGlobal(logger)
 	config.Global.Load()

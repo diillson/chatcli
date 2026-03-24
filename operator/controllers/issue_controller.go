@@ -675,7 +675,7 @@ func (r *IssueReconciler) generateRunbookFromAI(ctx context.Context, issue *plat
 				ResourceKind: issue.Spec.Resource.Kind,
 			},
 			Steps:       steps,
-			MaxAttempts: 3,
+			MaxAttempts: r.getMaxRemediationAttempts(ctx),
 		}
 		return nil
 	})
@@ -1389,7 +1389,7 @@ func (r *IssueReconciler) generateAgenticRunbook(ctx context.Context, issue *pla
 				ResourceKind: issue.Spec.Resource.Kind,
 			},
 			Steps:       steps,
-			MaxAttempts: 3,
+			MaxAttempts: r.getMaxRemediationAttempts(ctx),
 		}
 		return nil
 	})

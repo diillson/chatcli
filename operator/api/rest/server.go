@@ -15,6 +15,7 @@ import (
 	v1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 	"github.com/diillson/chatcli/operator/controllers"
 	"github.com/diillson/chatcli/operator/web"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -1043,6 +1044,13 @@ func (s *APIServer) routePostMortems(w http.ResponseWriter, r *http.Request, res
 		}
 		s.handlePostMortemStateChange(w, r, rest[0], v1alpha1.PostMortemStateClosed)
 
+	case len(rest) == 2 && rest[1] == "feedback" && r.Method == http.MethodPost:
+		if !hasMinRole(roleFromContext(r.Context()), "operator") {
+			writeError(w, http.StatusForbidden, "insufficient permissions")
+			return
+		}
+		s.handlePostMortemFeedback(w, r, rest[0])
+
 	default:
 		writeError(w, http.StatusNotFound, "unknown postmortems endpoint")
 	}
@@ -1168,7 +1176,85 @@ func (s *APIServer) handlePostMortemStateChange(w http.ResponseWriter, r *http.R
 	}
 
 	if err := s.client.Status().Update(ctx, &pm); err != nil {
+		if apierrors.IsConflict(err) {
+			writeError(w, http.StatusConflict, "postmortem was modified concurrently, please retry")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to update postmortem status: "+err.Error())
+		return
+	}
+
+	item := postmortemToItem(pm)
+	writeJSON(w, http.StatusOK, APIResponse{
+		APIVersion: "v1",
+		Kind:       "PostMortem",
+		Spec:       item,
+		Status:     item,
+		ResourceMeta: &ResourceMeta{
+			Name:              pm.Name,
+			Namespace:         pm.Namespace,
+			UID:               string(pm.UID),
+			CreationTimestamp: pm.CreationTimestamp.Format(time.RFC3339),
+			Labels:            pm.Labels,
+			Annotations:       pm.Annotations,
+		},
+	})
+}
+
+func (s *APIServer) handlePostMortemFeedback(w http.ResponseWriter, r *http.Request, name string) {
+	ctx := r.Context()
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		ns = "default"
+	}
+
+	var reqBody FeedbackRequest
+	if err := readJSON(r, &reqBody); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if reqBody.ProvidedBy == "" {
+		writeError(w, http.StatusBadRequest, "providedBy is required")
+		return
+	}
+	if len(reqBody.ProvidedBy) > 253 {
+		writeError(w, http.StatusBadRequest, "providedBy must be at most 253 characters")
+		return
+	}
+	if reqBody.RemediationAccuracy < 1 || reqBody.RemediationAccuracy > 5 {
+		writeError(w, http.StatusBadRequest, "remediationAccuracy must be between 1 and 5")
+		return
+	}
+	if len(reqBody.OverrideRootCause) > 4096 {
+		writeError(w, http.StatusBadRequest, "overrideRootCause must be at most 4096 characters")
+		return
+	}
+	if len(reqBody.Comments) > 4096 {
+		writeError(w, http.StatusBadRequest, "comments must be at most 4096 characters")
+		return
+	}
+
+	var pm v1alpha1.PostMortem
+	if err := s.client.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &pm); err != nil {
+		writeError(w, http.StatusNotFound, "postmortem not found: "+err.Error())
+		return
+	}
+
+	now := metav1.Now()
+	pm.Status.Feedback = &v1alpha1.DevFeedback{
+		OverrideRootCause:   reqBody.OverrideRootCause,
+		RemediationAccuracy: reqBody.RemediationAccuracy,
+		Comments:            reqBody.Comments,
+		ProvidedBy:          reqBody.ProvidedBy,
+		ProvidedAt:          &now,
+	}
+
+	if err := s.client.Status().Update(ctx, &pm); err != nil {
+		if apierrors.IsConflict(err) {
+			writeError(w, http.StatusConflict, "postmortem was modified concurrently, please retry")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update postmortem feedback: "+err.Error())
 		return
 	}
 
@@ -1799,6 +1885,19 @@ func postmortemToItem(pm v1alpha1.PostMortem) PostMortemItem {
 		LessonsLearned:    pm.Status.LessonsLearned,
 		PreventionActions: pm.Status.PreventionActions,
 		CreationTimestamp: pm.CreationTimestamp.Format(time.RFC3339),
+	}
+	if pm.Status.Feedback != nil {
+		fb := &DevFeedbackItem{
+			OverrideRootCause:   pm.Status.Feedback.OverrideRootCause,
+			RemediationAccuracy: pm.Status.Feedback.RemediationAccuracy,
+			Comments:            pm.Status.Feedback.Comments,
+			ProvidedBy:          pm.Status.Feedback.ProvidedBy,
+		}
+		if pm.Status.Feedback.ProvidedAt != nil {
+			t := pm.Status.Feedback.ProvidedAt.Format(time.RFC3339)
+			fb.ProvidedAt = &t
+		}
+		item.Feedback = fb
 	}
 	if pm.Status.GeneratedAt != nil {
 		t := pm.Status.GeneratedAt.Format(time.RFC3339)

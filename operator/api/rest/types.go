@@ -112,9 +112,19 @@ type PostMortemItem struct {
 	PreventionActions []string           `json:"preventionActions,omitempty"`
 	Timeline          []TimelineItem     `json:"timeline,omitempty"`
 	ActionsExecuted   []ActionRecordItem `json:"actionsExecuted,omitempty"`
+	Feedback          *DevFeedbackItem   `json:"feedback,omitempty"`
 	GeneratedAt       *string            `json:"generatedAt,omitempty"`
 	ReviewedAt        *string            `json:"reviewedAt,omitempty"`
 	CreationTimestamp string             `json:"creationTimestamp"`
+}
+
+// DevFeedbackItem is the REST representation of developer feedback on a PostMortem.
+type DevFeedbackItem struct {
+	OverrideRootCause   string  `json:"overrideRootCause,omitempty"`
+	RemediationAccuracy int32   `json:"remediationAccuracy,omitempty"`
+	Comments            string  `json:"comments,omitempty"`
+	ProvidedBy          string  `json:"providedBy,omitempty"`
+	ProvidedAt          *string `json:"providedAt,omitempty"`
 }
 
 // TimelineItem is the REST representation of a TimelineEvent.
@@ -332,6 +342,8 @@ type AnalyticsSummary struct {
 	TotalRemediations      int            `json:"totalRemediations"`
 	SuccessfulRemediations int            `json:"successfulRemediations"`
 	FailedRemediations     int            `json:"failedRemediations"`
+	RemediatedIssues       int            `json:"remediatedIssues"`
+	ResolvedByRemediation  int            `json:"resolvedByRemediation"`
 	TotalPostMortems       int            `json:"totalPostMortems"`
 	TotalRunbooks          int            `json:"totalRunbooks"`
 	TotalSLOs              int            `json:"totalSLOs"`
@@ -383,6 +395,14 @@ type SnoozeRequest struct {
 type ReviewRequest struct {
 	Reviewer string `json:"reviewer,omitempty"`
 	Notes    string `json:"notes,omitempty"`
+}
+
+// FeedbackRequest is the body for submitting developer feedback on a post-mortem.
+type FeedbackRequest struct {
+	OverrideRootCause   string `json:"overrideRootCause,omitempty"`
+	RemediationAccuracy int32  `json:"remediationAccuracy"`
+	Comments            string `json:"comments,omitempty"`
+	ProvidedBy          string `json:"providedBy"`
 }
 
 // HealthResponse is the response for health/readiness endpoints.
