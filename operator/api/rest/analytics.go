@@ -74,6 +74,33 @@ func (s *APIServer) computeSummary(ctx context.Context, tr timeRangeParams) (*An
 		}
 	}
 
+	// Success rate based on remediation activity (Issue outcome).
+	// Use ALL issues (not time-filtered) for the state map so that plans
+	// whose parent Issue falls outside the time range are not penalized.
+	allIssueStateMap := make(map[string]v1alpha1.IssueState)
+	for _, iss := range issues.Items {
+		allIssueStateMap[iss.Name] = iss.Status.State
+	}
+	remediatedIssues := make(map[string]bool)
+	for _, rp := range filteredPlans {
+		issName := rp.Spec.IssueRef.Name
+		if _, found := allIssueStateMap[issName]; !found {
+			continue // skip orphaned plans (Issue deleted)
+		}
+		if _, seen := remediatedIssues[issName]; !seen {
+			remediatedIssues[issName] = false
+		}
+		if allIssueStateMap[issName] == v1alpha1.IssueStateResolved {
+			remediatedIssues[issName] = true
+		}
+	}
+	for _, resolved := range remediatedIssues {
+		summary.RemediatedIssues++
+		if resolved {
+			summary.ResolvedByRemediation++
+		}
+	}
+
 	// Fetch postmortems.
 	var postmortems v1alpha1.PostMortemList
 	if err := s.client.List(ctx, &postmortems); err != nil {
@@ -343,13 +370,70 @@ func (s *APIServer) computeTopResources(ctx context.Context, tr timeRangeParams,
 	return result, nil
 }
 
-// computeRemediationStats calculates remediation success rates by action type.
+// computeRemediationStats calculates remediation success rates based on the
+// outcome of the parent Issue (remediation activity), not individual plan states.
+// If the Issue was ultimately Resolved, all plans for that issue count as
+// successful remediation — even if some intermediate attempts failed.
+// Plans are grouped by primary strategy for the breakdown view.
 func (s *APIServer) computeRemediationStats(ctx context.Context, tr timeRangeParams) ([]RemediationStat, error) {
+	// Fetch issues to determine remediation outcome.
+	var issues v1alpha1.IssueList
+	if err := s.client.List(ctx, &issues); err != nil {
+		return nil, err
+	}
+	issueStateMap := make(map[string]v1alpha1.IssueState)
+	for _, iss := range issues.Items {
+		issueStateMap[iss.Name] = iss.Status.State
+	}
+
 	var remediations v1alpha1.RemediationPlanList
 	if err := s.client.List(ctx, &remediations); err != nil {
 		return nil, err
 	}
 
+	// Group plans by Issue, then determine success by Issue outcome.
+	// For the strategy breakdown, each Issue counts once per strategy used.
+	type issueGroup struct {
+		strategies  map[string]bool
+		resolved    bool
+		totalDurSec float64
+		durCount    int
+	}
+
+	byIssue := make(map[string]*issueGroup)
+
+	for _, rp := range remediations.Items {
+		if !inTimeRange(rp.CreationTimestamp.Time, tr) {
+			continue
+		}
+
+		issName := rp.Spec.IssueRef.Name
+		if _, found := issueStateMap[issName]; !found {
+			continue // skip orphaned plans (Issue deleted)
+		}
+		ig, ok := byIssue[issName]
+		if !ok {
+			ig = &issueGroup{strategies: make(map[string]bool)}
+			byIssue[issName] = ig
+		}
+
+		// Mark resolved if parent Issue is Resolved.
+		if issueStateMap[issName] == v1alpha1.IssueStateResolved {
+			ig.resolved = true
+		}
+
+		// Collect strategy label.
+		strategy := planStrategy(rp)
+		ig.strategies[strategy] = true
+
+		// Accumulate duration from terminal plans.
+		if rp.Status.StartedAt != nil && rp.Status.CompletedAt != nil {
+			ig.totalDurSec += rp.Status.CompletedAt.Time.Sub(rp.Status.StartedAt.Time).Seconds()
+			ig.durCount++
+		}
+	}
+
+	// Build stats per strategy: each Issue counts once per strategy it used.
 	type actionStats struct {
 		Total       int
 		Successful  int
@@ -357,61 +441,24 @@ func (s *APIServer) computeRemediationStats(ctx context.Context, tr timeRangePar
 		TotalDurSec float64
 		DurCount    int
 	}
-
 	stats := make(map[string]*actionStats)
 
-	for _, rp := range remediations.Items {
-		created := rp.CreationTimestamp.Time
-		if !inTimeRange(created, tr) {
-			continue
-		}
-
-		// Determine action types from the plan.
-		actionTypes := make(map[string]bool)
-		for _, a := range rp.Spec.Actions {
-			actionTypes[string(a.Type)] = true
-		}
-		// If agentic mode, extract from history.
-		if rp.Spec.AgenticMode {
-			for _, step := range rp.Spec.AgenticHistory {
-				if step.Action != nil {
-					actionTypes[string(step.Action.Type)] = true
-				}
-			}
-		}
-		// If no specific action types found, categorize as "Unknown".
-		if len(actionTypes) == 0 {
-			actionTypes["Unknown"] = true
-		}
-
-		isCompleted := rp.Status.State == v1alpha1.RemediationStateCompleted
-		isFailed := rp.Status.State == v1alpha1.RemediationStateFailed ||
-			rp.Status.State == v1alpha1.RemediationStateRolledBack
-
-		// Calculate duration if completed or failed.
-		var durSec float64
-		hasDuration := false
-		if rp.Status.StartedAt != nil && rp.Status.CompletedAt != nil {
-			durSec = rp.Status.CompletedAt.Time.Sub(rp.Status.StartedAt.Time).Seconds()
-			hasDuration = true
-		}
-
-		for actionType := range actionTypes {
-			as, ok := stats[actionType]
+	for _, ig := range byIssue {
+		for strategy := range ig.strategies {
+			as, ok := stats[strategy]
 			if !ok {
 				as = &actionStats{}
-				stats[actionType] = as
+				stats[strategy] = as
 			}
 			as.Total++
-			if isCompleted {
+			if ig.resolved {
 				as.Successful++
-			}
-			if isFailed {
+			} else {
 				as.Failed++
 			}
-			if hasDuration {
-				as.TotalDurSec += durSec
-				as.DurCount++
+			if ig.durCount > 0 {
+				as.TotalDurSec += ig.totalDurSec
+				as.DurCount += ig.durCount
 			}
 		}
 	}
@@ -450,6 +497,25 @@ func (s *APIServer) computeRemediationStats(ctx context.Context, tr timeRangePar
 	}
 
 	return result, nil
+}
+
+// planStrategy returns a label for the primary strategy used by a remediation plan.
+func planStrategy(rp v1alpha1.RemediationPlan) string {
+	if rp.Spec.AgenticMode {
+		if rp.Spec.Strategy != "" {
+			return rp.Spec.Strategy
+		}
+		for _, step := range rp.Spec.AgenticHistory {
+			if step.Action != nil {
+				return string(step.Action.Type)
+			}
+		}
+		return "Agentic"
+	}
+	if len(rp.Spec.Actions) > 0 {
+		return string(rp.Spec.Actions[0].Type)
+	}
+	return "Unknown"
 }
 
 // --- Helpers ---

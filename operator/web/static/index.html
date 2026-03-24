@@ -977,7 +977,7 @@ function escapeHtml(str) {
   if (!str) return '';
   const d = document.createElement('div');
   d.textContent = str;
-  return d.innerHTML;
+  return d.innerHTML.replace(/'/g, '&#39;');
 }
 
 function timeAgo(dateStr) {
@@ -996,7 +996,7 @@ function timeAgo(dateStr) {
 }
 
 function severityBadge(sev) {
-  const s = (sev || '').toLowerCase();
+  const s = (sev || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
   return `<span class="badge-sev badge-${s}">${escapeHtml(sev || 'unknown')}</span>`;
 }
 
@@ -1011,11 +1011,11 @@ function resourceKindBadge(kind) {
   };
   const icon = icons[kind] || '📋';
   const color = colors[kind] || 'var(--accent)';
-  return `<span class="resource-kind-badge" style="background:${color}" title="${kind || 'Unknown'}">${icon} ${escapeHtml(kind || '?')}</span>`;
+  return `<span class="resource-kind-badge" style="background:${color}" title="${escapeHtml(kind || 'Unknown')}">${icon} ${escapeHtml(kind || '?')}</span>`;
 }
 
 function stateBadge(state) {
-  const s = (state || '').toLowerCase().replace(/[\s_-]/g, '');
+  const s = (state || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   return `<span class="badge-state state-${s}">${escapeHtml(state || 'Unknown')}</span>`;
 }
 
@@ -1144,11 +1144,11 @@ async function loadOverviewStats() {
   try {
     const data = await apiFetch('/analytics/summary?' + getTimeRangeQuery());
     const s = data.spec || {};
-    const successRate = s.totalRemediations > 0 ? (s.successfulRemediations / s.totalRemediations) : 0;
+    const successRate = s.remediatedIssues > 0 ? (s.resolvedByRemediation / s.remediatedIssues) : 0;
     const cards = [
       { label: 'Active Issues', value: s.openIssues ?? 0, color: 'var(--sev-critical)' },
       { label: 'Resolved', value: s.resolvedIssues ?? 0, color: 'var(--sev-low)' },
-      { label: 'Remediations', value: `${s.successfulRemediations ?? 0}/${s.totalRemediations ?? 0}`, color: 'var(--success)' },
+      { label: 'Remediations', value: `${s.resolvedByRemediation ?? 0}/${s.remediatedIssues ?? 0}`, color: 'var(--success)' },
       { label: 'Success Rate', value: (successRate * 100).toFixed(1) + '%', color: 'var(--sev-low)' },
       { label: 'PostMortems', value: s.totalPostMortems ?? 0, color: 'var(--sev-medium)' },
       { label: 'Pending Approvals', value: s.pendingApprovals ?? 0, color: 'var(--warning)' },
@@ -1795,15 +1795,54 @@ function buildPMExpandRow(item) {
   tr.innerHTML = `<td colspan="9">
     <div class="expand-content">
       <h4>Summary</h4>
-      <p>${escapeHtml(item.summary || 'No summary available')}</p>
+      <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.summary || 'No summary available')}</p>
       <h4>Root Cause</h4>
-      <p>${escapeHtml(item.rootCause || 'Not determined')}</p>
+      <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.rootCause || 'Not determined')}</p>
       <h4>Impact</h4>
-      <p>${escapeHtml(item.impact || '-')}</p>
+      <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.impact || '-')}</p>
       ${timeline ? `<h4>Timeline</h4><ul>${timeline}</ul>` : ''}
       ${actionsExecuted ? `<h4>Actions Executed</h4><ul>${actionsExecuted}</ul>` : ''}
       ${lessons ? `<h4>Lessons Learned</h4><ul>${lessons}</ul>` : ''}
       ${preventions ? `<h4>Prevention Actions</h4><ul>${preventions}</ul>` : ''}
+      <h4>Developer Feedback</h4>
+      ${item.feedback ? `
+        <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; margin-bottom:1rem;">
+          <div style="display:flex; gap:1.5rem; flex-wrap:wrap; margin-bottom:0.5rem;">
+            <span><strong>Provided by:</strong> ${escapeHtml(item.feedback.providedBy || '-')}</span>
+            <span><strong>At:</strong> ${item.feedback.providedAt ? new Date(item.feedback.providedAt).toLocaleString() : '-'}</span>
+            <span><strong>Remediation Accuracy:</strong> ${'★'.repeat(item.feedback.remediationAccuracy || 0)}${'☆'.repeat(5 - (item.feedback.remediationAccuracy || 0))}</span>
+          </div>
+          ${item.feedback.overrideRootCause ? `<p><strong>Root Cause Override:</strong> ${escapeHtml(item.feedback.overrideRootCause)}</p>` : ''}
+          ${item.feedback.comments ? `<p><strong>Comments:</strong> ${escapeHtml(item.feedback.comments)}</p>` : ''}
+        </div>
+      ` : `
+        <div id="feedback-form-${escapeHtml(item.name)}" style="background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:1rem;">
+          <div style="display:flex; flex-direction:column; gap:0.75rem;">
+            <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+              <label style="min-width:140px;">Remediation Accuracy:</label>
+              <span class="star-rating" data-pm="${escapeHtml(item.name)}">
+                ${[1,2,3,4,5].map(n => `<span class="star" data-value="${n}" style="cursor:pointer; font-size:1.3rem; color:var(--text-muted)" onmouseover="previewStars(this)" onmouseout="resetStars(this)" onclick="selectStar(this)">☆</span>`).join('')}
+              </span>
+              <input type="hidden" id="fb-accuracy-${escapeHtml(item.name)}" value="0">
+            </div>
+            <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+              <label style="min-width:140px;">Your Name:</label>
+              <input type="text" id="fb-author-${escapeHtml(item.name)}" placeholder="e.g., john.doe" style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; flex:1; min-width:150px;">
+            </div>
+            <div style="display:flex; gap:1rem; align-items:start; flex-wrap:wrap;">
+              <label style="min-width:140px;">Root Cause Override:</label>
+              <input type="text" id="fb-rootcause-${escapeHtml(item.name)}" placeholder="Leave empty to keep AI root cause" style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; flex:1; min-width:150px;">
+            </div>
+            <div style="display:flex; gap:1rem; align-items:start; flex-wrap:wrap;">
+              <label style="min-width:140px;">Comments:</label>
+              <textarea id="fb-comments-${escapeHtml(item.name)}" rows="2" placeholder="Additional comments..." style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; flex:1; min-width:150px; resize:vertical;"></textarea>
+            </div>
+            <div style="text-align:right;">
+              <button class="btn btn-success" onclick="event.stopPropagation(); submitFeedback('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Submit Feedback</button>
+            </div>
+          </div>
+        </div>
+      `}
     </div>
   </td>`;
   return tr;
@@ -1826,6 +1865,46 @@ async function closePM(name, ns) {
     loadPostMortems();
   } catch (e) {
     toast(`Failed to close: ${e.message}`, 'error');
+  }
+}
+
+function previewStars(el) {
+  const val = parseInt(el.dataset.value);
+  const siblings = el.parentElement.querySelectorAll('.star');
+  siblings.forEach(s => { s.textContent = parseInt(s.dataset.value) <= val ? '★' : '☆'; s.style.color = parseInt(s.dataset.value) <= val ? 'var(--sev-medium)' : 'var(--text-muted)'; });
+}
+function resetStars(el) {
+  const pm = el.parentElement.dataset.pm;
+  const selected = parseInt(document.getElementById('fb-accuracy-' + pm).value) || 0;
+  el.parentElement.querySelectorAll('.star').forEach(s => { s.textContent = parseInt(s.dataset.value) <= selected ? '★' : '☆'; s.style.color = parseInt(s.dataset.value) <= selected ? 'var(--sev-medium)' : 'var(--text-muted)'; });
+}
+function selectStar(el) {
+  const val = parseInt(el.dataset.value);
+  const pm = el.parentElement.dataset.pm;
+  document.getElementById('fb-accuracy-' + pm).value = val;
+  previewStars(el);
+}
+
+async function submitFeedback(name, ns) {
+  const accuracy = parseInt(document.getElementById('fb-accuracy-' + name).value) || 0;
+  const author = (document.getElementById('fb-author-' + name).value || '').trim();
+  const rootCause = (document.getElementById('fb-rootcause-' + name).value || '').trim();
+  const comments = (document.getElementById('fb-comments-' + name).value || '').trim();
+
+  if (!author) { toast('Please provide your name', 'error'); return; }
+  if (accuracy < 1 || accuracy > 5) { toast('Please rate the remediation accuracy (1-5 stars)', 'error'); return; }
+
+  try {
+    await apiPost(`/postmortems/${name}/feedback?namespace=${encodeURIComponent(ns)}`, {
+      overrideRootCause: rootCause,
+      remediationAccuracy: accuracy,
+      comments: comments,
+      providedBy: author
+    });
+    toast(`Feedback submitted for ${name}`, 'success');
+    loadPostMortems();
+  } catch (e) {
+    toast(`Failed to submit feedback: ${e.message}`, 'error');
   }
 }
 
