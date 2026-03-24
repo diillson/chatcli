@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.86.0](https://github.com/diillson/chatcli/compare/v1.85.1...v1.86.0) (2026-03-24)
+
+
+### Features
+
+* **aiops:** add postmortem developer feedback, fix success rate, harden dashboard security ([#689](https://github.com/diillson/chatcli/issues/689)) ([7088c37](https://github.com/diillson/chatcli/commit/7088c37afa088690692e863ec1f8c8e6aff66b1e))
+
 ## [1.85.1](https://github.com/diillson/chatcli/compare/v1.85.0...v1.85.1) (2026-03-22)
 
 
