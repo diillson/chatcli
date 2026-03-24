@@ -310,6 +310,23 @@ type AIOpsSpec struct {
 	// +kubebuilder:default=true
 	// +optional
 	EnableAutoResolve *bool `json:"enableAutoResolve,omitempty"`
+
+	// AgenticMaxSteps is the maximum number of steps the AI can take in agentic
+	// remediation mode before forced failure. Higher values give the AI more room
+	// to investigate and try different approaches.
+	// +kubebuilder:default=10
+	// +kubebuilder:validation:Minimum=3
+	// +kubebuilder:validation:Maximum=30
+	// +optional
+	AgenticMaxSteps int32 `json:"agenticMaxSteps,omitempty"`
+}
+
+// GetAgenticMaxSteps returns the configured max agentic steps or the default (10).
+func (a *AIOpsSpec) GetAgenticMaxSteps() int32 {
+	if a != nil && a.AgenticMaxSteps > 0 {
+		return a.AgenticMaxSteps
+	}
+	return 10
 }
 
 // GetMaxRemediationAttempts returns the configured max attempts or the default (5).

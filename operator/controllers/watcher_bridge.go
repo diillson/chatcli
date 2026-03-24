@@ -261,7 +261,7 @@ func inferResourceKind(alert *pb.WatcherAlert) string {
 
 	// Infer from alert type for known patterns
 	switch alert.Type {
-	case "NodeNotReady", "DiskPressure", "MemoryPressure", "PIDPressure":
+	case "NodeNotReady", "DiskPressure", "MemoryPressure", "PIDPressure", "NetworkUnavailable", "NodeUnschedulable":
 		return "Node"
 	case "JobFailed", "CronJobMissed":
 		return "Job"
@@ -303,6 +303,12 @@ func MapAlertTypeToSignal(alertType string) platformv1alpha1.AnomalySignalType {
 		return platformv1alpha1.SignalNodeNotReady
 	case "MemoryPressure":
 		return platformv1alpha1.SignalMemoryHigh
+	case "PIDPressure":
+		return platformv1alpha1.SignalNodeNotReady
+	case "NetworkUnavailable":
+		return platformv1alpha1.SignalNodeNotReady
+	case "NodeUnschedulable":
+		return platformv1alpha1.SignalNodeNotReady
 
 	// Application signals
 	case "HighErrorRate", "ErrorRate":

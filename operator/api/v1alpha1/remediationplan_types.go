@@ -3,16 +3,17 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // RemediationState represents the execution state of a remediation plan.
-// +kubebuilder:validation:Enum=Pending;Executing;Verifying;Completed;Failed;RolledBack
+// +kubebuilder:validation:Enum=Pending;WaitingApproval;Executing;Verifying;Completed;Failed;RolledBack
 type RemediationState string
 
 const (
-	RemediationStatePending    RemediationState = "Pending"
-	RemediationStateExecuting  RemediationState = "Executing"
-	RemediationStateVerifying  RemediationState = "Verifying"
-	RemediationStateCompleted  RemediationState = "Completed"
-	RemediationStateFailed     RemediationState = "Failed"
-	RemediationStateRolledBack RemediationState = "RolledBack"
+	RemediationStatePending          RemediationState = "Pending"
+	RemediationStateWaitingApproval  RemediationState = "WaitingApproval"
+	RemediationStateExecuting        RemediationState = "Executing"
+	RemediationStateVerifying        RemediationState = "Verifying"
+	RemediationStateCompleted        RemediationState = "Completed"
+	RemediationStateFailed           RemediationState = "Failed"
+	RemediationStateRolledBack       RemediationState = "RolledBack"
 )
 
 // RemediationActionType defines the type of remediation action.

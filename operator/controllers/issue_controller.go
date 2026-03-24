@@ -1096,7 +1096,7 @@ func (r *IssueReconciler) createAgenticRemediationPlan(ctx context.Context, issu
 			Attempt:         attempt,
 			Strategy:        "Agentic AI-driven remediation",
 			AgenticMode:     true,
-			AgenticMaxSteps: 10,
+			AgenticMaxSteps: r.getAIOpsConfig(ctx).GetAgenticMaxSteps(),
 			SafetyConstraints: []string{
 				"No scaling to 0 replicas",
 				"No delete operations without pod count check",
@@ -1139,21 +1139,31 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 			if step.Action != nil {
 				actionStr = string(step.Action.Type)
 			}
+			// Include AI reasoning in timeline for full audit trail
+			detail := fmt.Sprintf("Step %d: %s — %s", step.StepNumber, actionStr, step.Observation)
+			if step.AIMessage != "" {
+				detail = fmt.Sprintf("Step %d [AI reasoning: %s] Action: %s — %s", step.StepNumber, step.AIMessage, actionStr, step.Observation)
+			}
 			timeline = append(timeline, platformv1alpha1.TimelineEvent{
 				Timestamp: step.Timestamp,
 				Type:      evType,
-				Detail:    fmt.Sprintf("Step %d: %s — %s", step.StepNumber, actionStr, step.Observation),
+				Detail:    detail,
 			})
 			if step.Action != nil {
 				result := "success"
 				if strings.HasPrefix(step.Observation, "FAILED:") {
 					result = "failed"
 				}
+				// Include AI reasoning in action detail for audit
+				actionDetail := step.Observation
+				if step.AIMessage != "" {
+					actionDetail = fmt.Sprintf("[AI: %s] %s", step.AIMessage, step.Observation)
+				}
 				actions = append(actions, platformv1alpha1.ActionRecord{
 					Action:    string(step.Action.Type),
 					Params:    step.Action.Params,
 					Result:    result,
-					Detail:    step.Observation,
+					Detail:    actionDetail,
 					Timestamp: step.Timestamp,
 				})
 			}
@@ -1232,11 +1242,7 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 				summary = insight.Status.Analysis
 			}
 			if rootCause == "" && insight.Status.Analysis != "" {
-				// Use first 500 chars of analysis as root cause
 				rootCause = insight.Status.Analysis
-				if len(rootCause) > 500 {
-					rootCause = rootCause[:500] + "..."
-				}
 			}
 			if len(lessonsLearned) == 0 && len(insight.Status.Recommendations) > 0 {
 				lessonsLearned = insight.Status.Recommendations

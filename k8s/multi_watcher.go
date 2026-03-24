@@ -104,6 +104,7 @@ func (mw *MultiWatcher) createWatcher(target WatchTarget, cfg MultiWatchConfig) 
 		logCollector:     NewResourceLogCollector(mw.clientset, target.Namespace, target.Deployment, target.ResourceKind(), cfg.MaxLogLines, targetLogger),
 		hpaCollector:     NewResourceHPACollector(mw.clientset, target.Namespace, target.Deployment, target.ResourceKind(), targetLogger),
 		metricsCollector: NewMetricsCollector(mw.clientset, mw.metricsClient, target.Namespace, target.Deployment, targetLogger),
+		nodeCollector:    NewNodeCollector(mw.clientset, mw.metricsClient, target.Namespace, target.Deployment, target.ResourceKind(), targetLogger),
 	}
 
 	if target.MetricsPort > 0 {

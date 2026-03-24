@@ -647,3 +647,145 @@ func (c *MetricsCollector) Collect(ctx context.Context, pods []PodStatus) []PodS
 
 	return pods
 }
+
+// NodeCollector collects health status for nodes where target pods run.
+type NodeCollector struct {
+	clientset     kubernetes.Interface
+	metricsClient metricsv.Interface
+	namespace     string
+	name          string
+	kind          string
+	logger        *zap.Logger
+}
+
+// NewNodeCollector creates a NodeCollector.
+func NewNodeCollector(clientset kubernetes.Interface, metricsClient metricsv.Interface, namespace, name, kind string, logger *zap.Logger) *NodeCollector {
+	return &NodeCollector{
+		clientset:     clientset,
+		metricsClient: metricsClient,
+		namespace:     namespace,
+		name:          name,
+		kind:          kind,
+		logger:        logger,
+	}
+}
+
+// Collect returns the health status of all nodes where the target's pods are running.
+func (nc *NodeCollector) Collect(ctx context.Context, pods []PodStatus) []NodeStatus {
+	// Find unique node names from pod spec
+	nodeNames := nc.getNodeNames(ctx, pods)
+	if len(nodeNames) == 0 {
+		return nil
+	}
+
+	// Collect node metrics (optional)
+	nodeMetrics := make(map[string]struct{ cpu, mem string })
+	if nc.metricsClient != nil {
+		nmList, err := nc.metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{})
+		if err == nil {
+			for _, nm := range nmList.Items {
+				if _, relevant := nodeNames[nm.Name]; relevant {
+					nodeMetrics[nm.Name] = struct{ cpu, mem string }{
+						cpu: nm.Usage.Cpu().String(),
+						mem: nm.Usage.Memory().String(),
+					}
+				}
+			}
+		}
+	}
+
+	// Fetch node objects
+	var result []NodeStatus
+	for nodeName := range nodeNames {
+		node, err := nc.clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			nc.logger.Debug("Failed to get node", zap.String("node", nodeName), zap.Error(err))
+			continue
+		}
+
+		ns := NodeStatus{
+			Name:              node.Name,
+			Unschedulable:     node.Spec.Unschedulable,
+			KubeletVersion:    node.Status.NodeInfo.KubeletVersion,
+			CPUCapacity:       node.Status.Capacity.Cpu().String(),
+			MemoryCapacity:    node.Status.Capacity.Memory().String(),
+			CPUAllocatable:    node.Status.Allocatable.Cpu().String(),
+			MemoryAllocatable: node.Status.Allocatable.Memory().String(),
+			PodCapacity:       int32(node.Status.Capacity.Pods().Value()),
+		}
+
+		// Parse conditions
+		for _, cond := range node.Status.Conditions {
+			switch cond.Type {
+			case corev1.NodeReady:
+				ns.Ready = cond.Status == corev1.ConditionTrue
+				if cond.Status != corev1.ConditionTrue {
+					ns.Conditions = append(ns.Conditions, fmt.Sprintf("NotReady: %s", cond.Message))
+				}
+			case corev1.NodeDiskPressure:
+				ns.DiskPressure = cond.Status == corev1.ConditionTrue
+				if cond.Status == corev1.ConditionTrue {
+					ns.Conditions = append(ns.Conditions, fmt.Sprintf("DiskPressure: %s", cond.Message))
+				}
+			case corev1.NodeMemoryPressure:
+				ns.MemoryPressure = cond.Status == corev1.ConditionTrue
+				if cond.Status == corev1.ConditionTrue {
+					ns.Conditions = append(ns.Conditions, fmt.Sprintf("MemoryPressure: %s", cond.Message))
+				}
+			case corev1.NodePIDPressure:
+				ns.PIDPressure = cond.Status == corev1.ConditionTrue
+				if cond.Status == corev1.ConditionTrue {
+					ns.Conditions = append(ns.Conditions, fmt.Sprintf("PIDPressure: %s", cond.Message))
+				}
+			case corev1.NodeNetworkUnavailable:
+				ns.NetworkUnavail = cond.Status == corev1.ConditionTrue
+				if cond.Status == corev1.ConditionTrue {
+					ns.Conditions = append(ns.Conditions, fmt.Sprintf("NetworkUnavailable: %s", cond.Message))
+				}
+			}
+		}
+
+		// Enrich with metrics
+		if m, ok := nodeMetrics[node.Name]; ok {
+			ns.CPUUsage = m.cpu
+			ns.MemoryUsage = m.mem
+		}
+
+		// Count pods on this node
+		podList, err := nc.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+			FieldSelector: "spec.nodeName=" + node.Name + ",status.phase!=Succeeded,status.phase!=Failed",
+		})
+		if err == nil {
+			ns.PodCount = int32(len(podList.Items))
+		}
+
+		result = append(result, ns)
+	}
+
+	return result
+}
+
+// getNodeNames returns a set of node names where the target's pods are running.
+func (nc *NodeCollector) getNodeNames(ctx context.Context, pods []PodStatus) map[string]struct{} {
+	sel, err := getLabelSelector(ctx, nc.clientset, nc.namespace, nc.name, nc.kind)
+	if err != nil {
+		nc.logger.Debug("Failed to get label selector for node discovery", zap.Error(err))
+		return nil
+	}
+
+	podList, err := nc.clientset.CoreV1().Pods(nc.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: sel,
+	})
+	if err != nil {
+		nc.logger.Debug("Failed to list pods for node discovery", zap.Error(err))
+		return nil
+	}
+
+	nodes := make(map[string]struct{})
+	for _, pod := range podList.Items {
+		if pod.Spec.NodeName != "" {
+			nodes[pod.Spec.NodeName] = struct{}{}
+		}
+	}
+	return nodes
+}

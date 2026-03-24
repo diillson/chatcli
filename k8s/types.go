@@ -13,6 +13,7 @@ type ResourceSnapshot struct {
 	Resource   ResourceStatus
 	Deployment DeploymentStatus // Deprecated: alias for Resource (kept for backward compat)
 	Pods       []PodStatus
+	Nodes      []NodeStatus // nodes where the target's pods are running
 	Events     []K8sEvent
 	HPA        *HPAStatus
 	AppMetrics *AppMetrics // application-level Prometheus metrics (nil if not configured)
@@ -109,6 +110,27 @@ type HPAStatus struct {
 	CurrentMetrics  []string // human-readable metric summaries
 }
 
+// NodeStatus holds node-level health information.
+type NodeStatus struct {
+	Name              string
+	Ready             bool
+	Unschedulable     bool
+	DiskPressure      bool
+	MemoryPressure    bool
+	PIDPressure       bool
+	NetworkUnavail    bool
+	Conditions        []string // human-readable condition summaries
+	CPUCapacity       string   // e.g., "4"
+	MemoryCapacity    string   // e.g., "8Gi"
+	CPUAllocatable    string
+	MemoryAllocatable string
+	CPUUsage          string // from metrics server, e.g., "1200m"
+	MemoryUsage       string // from metrics server, e.g., "3Gi"
+	PodCount          int32
+	PodCapacity       int32
+	KubeletVersion    string
+}
+
 // Alert represents an anomaly detected by the watcher.
 type Alert struct {
 	Timestamp time.Time
@@ -138,8 +160,14 @@ const (
 	AlertPodNotReady   AlertType = "PodNotReady"
 	AlertScaleEvent    AlertType = "ScaleEvent"
 	AlertDeployFailing AlertType = "DeploymentFailing"
-	AlertJobFailed     AlertType = "JobFailed"
-	AlertCronJobMissed AlertType = "CronJobMissed"
+	AlertJobFailed      AlertType = "JobFailed"
+	AlertCronJobMissed  AlertType = "CronJobMissed"
+	AlertNodeNotReady   AlertType = "NodeNotReady"
+	AlertDiskPressure   AlertType = "DiskPressure"
+	AlertMemoryPressure AlertType = "MemoryPressure"
+	AlertPIDPressure    AlertType = "PIDPressure"
+	AlertNetworkUnavail AlertType = "NetworkUnavailable"
+	AlertNodeUnschedul  AlertType = "NodeUnschedulable"
 )
 
 // WatchConfig holds configuration for the Kubernetes watcher.
