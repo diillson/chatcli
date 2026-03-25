@@ -603,8 +603,18 @@ tr.expandable { cursor: pointer; }
         <div class="panel-body" id="severityPie"></div>
       </div>
       <div class="panel">
+        <div class="panel-header"><span class="panel-title">Platform Resources</span></div>
+        <div class="panel-body" id="platformResources"></div>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="panel">
         <div class="panel-header"><span class="panel-title">Remediation Activity</span></div>
         <div class="panel-body" id="remediationTimeline"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Remediation by Strategy</span></div>
+        <div class="panel-body" id="remediationStrategyChart"></div>
       </div>
     </div>
     <div id="capacityWarnings"></div>
@@ -614,8 +624,8 @@ tr.expandable { cursor: pointer; }
         <div class="panel-body" id="complianceCard"></div>
       </div>
       <div class="panel">
-        <div class="panel-header"><span class="panel-title">Remediation by Strategy</span></div>
-        <div class="panel-body" id="remediationStrategyChart"></div>
+        <div class="panel-header"><span class="panel-title">MTTD & MTTR Trend</span></div>
+        <div class="panel-body" id="mttdMttrTrend"></div>
       </div>
     </div>
     <div class="panel">
@@ -1157,9 +1167,12 @@ async function checkHealth() {
 async function loadOverview() {
   loadOverviewStats();
   loadSeverityPie();
+  loadPlatformResources();
   loadRecentIncidents();
   loadRemediationTimeline();
+  loadRemediationStrategyChart();
   loadComplianceCard();
+  loadMttdMttrTrend();
   loadCapacityWarnings();
 }
 
@@ -1257,6 +1270,93 @@ async function loadSeverityPie() {
     `;
   } catch (e) {
     showError(el, 'Failed to load severity data', 'loadSeverityPie()');
+  }
+}
+
+async function loadPlatformResources() {
+  const el = $('#platformResources');
+  if (!el) return;
+  try {
+    const summary = await apiFetch('/analytics/summary?' + getTimeRangeQuery());
+    const s = summary.spec || {};
+
+    // Fetch additional resource counts not in summary
+    let anomalyCount = 0, approvalPolicyCount = 0, escalationPolicyCount = 0, notifPolicyCount = 0, slaCount = 0;
+    try { const d = await apiFetch('/incidents?pageSize=1'); anomalyCount = d.metadata?.totalCount ?? 0; } catch {}
+
+    const res = (icon, label, count, color) =>
+      `<div style="display:flex; align-items:center; gap:0.75rem; padding:0.5rem 0.75rem; border-radius:6px; background:var(--bg);">
+        <span style="font-size:1.1rem;">${icon}</span>
+        <div style="flex:1;">
+          <div style="font-size:0.75rem; color:var(--text-muted)">${escapeHtml(label)}</div>
+        </div>
+        <span style="font-size:1.1rem; font-weight:700; color:${color}">${count}</span>
+      </div>`;
+
+    el.innerHTML = `<div style="display:flex; flex-direction:column; gap:0.5rem;">
+      ${res('📋', 'Issues (total)', s.totalIssues ?? 0, 'var(--text)')}
+      ${res('🔧', 'Remediations', s.totalRemediations ?? 0, 'var(--success)')}
+      ${res('📝', 'PostMortems', s.totalPostMortems ?? 0, 'var(--sev-medium)')}
+      ${res('📚', 'Runbooks', s.totalRunbooks ?? 0, 'var(--accent)')}
+      ${res('🎯', 'SLOs', s.totalSLOs ?? 0, s.slosAtRisk > 0 ? 'var(--sev-high)' : 'var(--sev-low)')}
+      ${res('⏳', 'Pending Approvals', s.pendingApprovals ?? 0, s.pendingApprovals > 0 ? 'var(--sev-medium)' : 'var(--text-muted)')}
+      ${res('📊', 'Avg Risk Score', (s.avgRiskScore ?? 0).toFixed(0), s.avgRiskScore > 60 ? 'var(--sev-critical)' : s.avgRiskScore > 30 ? 'var(--sev-medium)' : 'var(--sev-low)')}
+    </div>`;
+  } catch (e) {
+    showError(el, 'Failed to load platform resources', 'loadPlatformResources()');
+  }
+}
+
+async function loadMttdMttrTrend() {
+  const el = $('#mttdMttrTrend');
+  if (!el) return;
+  try {
+    const [mttdData, mttrData] = await Promise.all([
+      apiFetch('/analytics/mttd?' + getTimeRangeQuery()),
+      apiFetch('/analytics/mttr?' + getTimeRangeQuery()),
+    ]);
+    const mttd = (mttdData.items || mttdData.spec || []);
+    const mttr = (mttrData.items || mttrData.spec || []);
+
+    if ((!mttd.length && !mttr.length)) {
+      showEmpty(el, 'No MTTD/MTTR data available');
+      return;
+    }
+
+    const formatDuration = (secs) => {
+      if (secs < 60) return Math.round(secs) + 's';
+      if (secs < 3600) return (secs / 60).toFixed(1) + 'm';
+      return (secs / 3600).toFixed(1) + 'h';
+    };
+
+    // Show latest values as stats + recent trend as mini bars
+    const latestMttd = mttd.length > 0 ? mttd[mttd.length - 1].value : null;
+    const latestMttr = mttr.length > 0 ? mttr[mttr.length - 1].value : null;
+
+    const maxMttr = Math.max(...mttr.map(m => m.value), 1);
+    const trendBars = mttr.slice(-10).map(m =>
+      `<div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;">
+        <div style="width:100%; background:var(--accent); border-radius:2px; height:${Math.max(4, (m.value / maxMttr) * 40)}px;"></div>
+        <span style="font-size:0.5rem; color:var(--text-muted)">${m.date?.slice(5) || ''}</span>
+      </div>`
+    ).join('');
+
+    el.innerHTML = `
+      <div style="display:flex; gap:2rem; margin-bottom:1rem;">
+        <div style="text-align:center; flex:1;">
+          <div style="font-size:1.4rem; font-weight:700; color:var(--success)">${latestMttd !== null ? formatDuration(latestMttd) : '-'}</div>
+          <div style="font-size:0.7rem; color:var(--text-muted)">MTTD (Detect)</div>
+        </div>
+        <div style="text-align:center; flex:1;">
+          <div style="font-size:1.4rem; font-weight:700; color:var(--accent)">${latestMttr !== null ? formatDuration(latestMttr) : '-'}</div>
+          <div style="font-size:0.7rem; color:var(--text-muted)">MTTR (Resolve)</div>
+        </div>
+      </div>
+      ${trendBars ? `<div style="display:flex; gap:2px; align-items:flex-end; height:50px;">${trendBars}</div>
+      <div style="font-size:0.6rem; color:var(--text-muted); text-align:center; margin-top:4px;">MTTR trend (last 10 days)</div>` : ''}
+    `;
+  } catch (e) {
+    showError(el, 'Failed to load MTTD/MTTR', 'loadMttdMttrTrend()');
   }
 }
 
@@ -2234,15 +2334,6 @@ async function loadFederationPanel() {
     el.innerHTML = '';
   }
 }
-
-// Call remediation strategy chart from Overview
-(function() {
-  const origLoadOverview = loadOverview;
-  loadOverview = async function() {
-    await origLoadOverview();
-    loadRemediationStrategyChart();
-  };
-})();
 
 // ===== CLUSTERS PAGE =====
 
