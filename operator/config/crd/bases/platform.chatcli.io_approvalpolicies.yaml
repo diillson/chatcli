@@ -154,6 +154,7 @@ spec:
                             - AdjustHPA
                             - RestartStatefulSetPod
                             - CordonNode
+                            - UncordonNode
                             - DrainNode
                             - ResizePVC
                             - RotateSecret

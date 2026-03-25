@@ -4,154 +4,997 @@
   ],
   "editable": true,
   "graphTooltip": 1,
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(chatcli_operator_slo_current_value, service)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Service",
+        "multi": true,
+        "name": "service",
+        "options": [],
+        "query": { "query": "label_values(chatcli_operator_slo_current_value, service)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(chatcli_operator_slo_current_value, slo_name)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "SLO Name",
+        "multi": true,
+        "name": "slo_name",
+        "options": [],
+        "query": { "query": "label_values(chatcli_operator_slo_current_value, slo_name)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
   "panels": [
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
       "title": "Error Budget Status",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
-        "defaults": { "unit": "percentunit", "min": 0, "max": 1, "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 0.25 }, { "color": "yellow", "value": 0.5 }, { "color": "green", "value": 0.75 }] } }
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.25 },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.75 }
+            ]
+          }
+        }
       },
       "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
+      "id": 2,
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
       "title": "Error Budget Remaining",
       "type": "gauge",
-      "targets": [{ "expr": "chatcli_operator_slo_error_budget_remaining", "legendFormat": "{{slo_name}}" }]
+      "targets": [
+        {
+          "expr": "chatcli_operator_slo_error_budget_remaining{service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{slo_name}}",
+          "refId": "A"
+        }
+      ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
-        "defaults": { "unit": "percentunit", "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0 }] } }
+        "defaults": {
+          "unit": "percentunit",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.95 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        }
       },
       "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
-      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
       "title": "Current SLI Value",
       "type": "stat",
-      "targets": [{ "expr": "chatcli_operator_slo_current_value", "legendFormat": "{{service}} - {{slo_name}}" }]
+      "targets": [
+        {
+          "expr": "chatcli_operator_slo_current_value{service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} - {{slo_name}}",
+          "refId": "A"
+        }
+      ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 3 }, { "color": "orange", "value": 6 }, { "color": "red", "value": 14 }] } } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "orange", "value": 6 },
+              { "color": "red", "value": 14 }
+            ]
+          }
+        }
+      },
       "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
       "title": "Burn Rate (1h)",
       "type": "stat",
-      "targets": [{ "expr": "chatcli_operator_slo_burn_rate{window=\"1h\"}", "legendFormat": "{{service}}" }]
+      "targets": [
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"1h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
       "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
-      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
       "title": "SLO Violations (24h)",
       "type": "stat",
-      "targets": [{ "expr": "sum(increase(chatcli_operator_slo_violations_total[24h]))", "legendFormat": "Violations" }]
+      "targets": [
+        {
+          "expr": "sum(increase(chatcli_operator_slo_violations_total{service=~\"$service\", slo_name=~\"$slo_name\"}[24h]))",
+          "legendFormat": "Violations",
+          "refId": "A"
+        }
+      ]
     },
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "id": 6,
       "title": "Multi-Window Burn Rates",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
-        "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 10 }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 14.4 }] } },
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 14.4 }
+            ]
+          }
+        },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "14.4x threshold" }, "properties": [{ "id": "custom.lineStyle", "value": { "fill": "dash" } }, { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+          {
+            "matcher": { "id": "byName", "options": "14.4x threshold" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
         ]
       },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 7,
       "title": "Burn Rate - 1h Window (Page threshold: 14.4x)",
       "type": "timeseries",
       "targets": [
-        { "expr": "chatcli_operator_slo_burn_rate{window=\"1h\"}", "legendFormat": "{{service}} (1h)" },
-        { "expr": "vector(14.4)", "legendFormat": "14.4x threshold" }
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"1h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} (1h)",
+          "refId": "A"
+        },
+        {
+          "expr": "vector(14.4)",
+          "legendFormat": "14.4x threshold",
+          "refId": "B"
+        }
       ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
-        "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 10 }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 6 }] } },
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 6 }
+            ]
+          }
+        },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "6x threshold" }, "properties": [{ "id": "custom.lineStyle", "value": { "fill": "dash" } }, { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+          {
+            "matcher": { "id": "byName", "options": "6x threshold" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
         ]
       },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 8,
       "title": "Burn Rate - 6h Window (Ticket threshold: 6x)",
       "type": "timeseries",
       "targets": [
-        { "expr": "chatcli_operator_slo_burn_rate{window=\"6h\"}", "legendFormat": "{{service}} (6h)" },
-        { "expr": "vector(6)", "legendFormat": "6x threshold" }
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"6h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} (6h)",
+          "refId": "A"
+        },
+        {
+          "expr": "vector(6)",
+          "legendFormat": "6x threshold",
+          "refId": "B"
+        }
       ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "3x threshold" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "title": "Burn Rate - 24h Window",
+      "id": 9,
+      "title": "Burn Rate - 24h Window (3x threshold)",
       "type": "timeseries",
       "targets": [
-        { "expr": "chatcli_operator_slo_burn_rate{window=\"24h\"}", "legendFormat": "{{service}} (24h)" },
-        { "expr": "vector(3)", "legendFormat": "3x threshold" }
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"24h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} (24h)",
+          "refId": "A"
+        },
+        {
+          "expr": "vector(3)",
+          "legendFormat": "3x threshold",
+          "refId": "B"
+        }
       ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "blue", "value": 1 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "1x threshold" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "title": "Burn Rate - 72h Window",
+      "id": 10,
+      "title": "Burn Rate - 72h Window (1x threshold)",
       "type": "timeseries",
       "targets": [
-        { "expr": "chatcli_operator_slo_burn_rate{window=\"72h\"}", "legendFormat": "{{service}} (72h)" },
-        { "expr": "vector(1)", "legendFormat": "1x threshold" }
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"72h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} (72h)",
+          "refId": "A"
+        },
+        {
+          "expr": "vector(1)",
+          "legendFormat": "1x threshold",
+          "refId": "B"
+        }
       ]
     },
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 11,
       "title": "SLA Compliance",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
-        "defaults": { "unit": "percent", "min": 0, "max": 100, "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 90 }, { "color": "green", "value": 99 }] } }
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 90 },
+              { "color": "green", "value": 99 }
+            ]
+          }
+        }
       },
       "gridPos": { "h": 6, "w": 8, "x": 0, "y": 25 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdMarkers": true },
+      "id": 12,
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdMarkers": true
+      },
       "title": "SLA Compliance %",
       "type": "gauge",
-      "targets": [{ "expr": "chatcli_operator_sla_compliance_percentage", "legendFormat": "{{severity}}" }]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } } },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 25 },
-      "title": "SLA Response Time by Severity",
-      "type": "timeseries",
       "targets": [
-        { "expr": "histogram_quantile(0.95, rate(chatcli_operator_sla_response_time_seconds_bucket[30m]))", "legendFormat": "p95 {{severity}}" }
+        {
+          "expr": "chatcli_operator_sla_compliance_percentage",
+          "legendFormat": "{{severity}}",
+          "refId": "A"
+        }
       ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2 } } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 2, "spanNulls": false }
+        }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 25 },
+      "id": 13,
+      "title": "SLA Response Time by Severity",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(chatcli_operator_sla_response_time_seconds_bucket[30m]))",
+          "legendFormat": "p95 {{severity}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "spanNulls": false }
+        }
+      },
       "gridPos": { "h": 6, "w": 8, "x": 16, "y": 25 },
+      "id": 14,
       "title": "SLA Violations Rate",
       "type": "timeseries",
       "targets": [
-        { "expr": "sum by (severity, type) (increase(chatcli_operator_sla_violations_total[1h]))", "legendFormat": "{{severity}}/{{type}}" }
+        {
+          "expr": "sum by (severity, type) (increase(chatcli_operator_sla_violations_total[1h]))",
+          "legendFormat": "{{severity}}/{{type}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
+      "id": 15,
+      "title": "SLO Detail by Service",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Current SLI value per service and SLO with target reference line at 0.999",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "axisLabel": "SLI",
+            "axisSoftMin": 0.95,
+            "axisSoftMax": 1
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.95 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Target (99.9%)" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 32 },
+      "id": 16,
+      "title": "Current SLI by Service",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "chatcli_operator_slo_current_value{service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} / {{slo_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "vector(0.999)",
+          "legendFormat": "Target (99.9%)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Remaining error budget per service and SLO name",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.25 },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.75 }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "gradientMode": "scheme",
+            "axisCenteredZero": false
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 32 },
+      "id": 17,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "groupWidth": 0.7,
+        "barWidth": 0.8,
+        "xTickLabelRotation": -45,
+        "stacking": "none",
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "title": "Error Budget by Service",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "chatcli_operator_slo_error_budget_remaining{service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} / {{slo_name}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "SLO violation rate by service and severity over 5m windows",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "spanNulls": false,
+            "stacking": { "mode": "none" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.01 },
+              { "color": "red", "value": 0.1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 32 },
+      "id": 18,
+      "title": "SLO Violations by Service",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (service, severity) (rate(chatcli_operator_slo_violations_total{service=~\"$service\", slo_name=~\"$slo_name\"}[5m]))",
+          "legendFormat": "{{service}} [{{severity}}]",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 },
+      "id": 19,
+      "title": "Burn Rate Analysis",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "All 4 burn rate windows side-by-side for each service/SLO. Green < 1x, Yellow 1-3x, Orange 3-6x, Red > 6x.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "orange", "value": 3 },
+              { "color": "red", "value": 6 },
+              { "color": "dark-red", "value": 14.4 }
+            ]
+          },
+          "decimals": 2
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 41 },
+      "id": 20,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "orientation": "auto",
+        "justifyMode": "center"
+      },
+      "title": "Burn Rate Heatmap (All Windows)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"1h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} 1h",
+          "refId": "A"
+        },
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"6h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} 6h",
+          "refId": "B"
+        },
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"24h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} 24h",
+          "refId": "C"
+        },
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"72h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} 72h",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "All burn rate windows overlaid with their respective Google SRE thresholds: 1h=14.4x (page), 6h=6x (ticket), 24h=3x, 72h=1x",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "axisLabel": "Burn Rate Multiple"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Threshold 14.4x (1h page)" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Threshold 6x (6h ticket)" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Threshold 3x (24h)" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Threshold 1x (72h)" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 41 },
+      "id": 21,
+      "title": "Burn Rate vs Threshold (All Windows)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"1h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} 1h",
+          "refId": "A"
+        },
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"6h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} 6h",
+          "refId": "B"
+        },
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"24h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} 24h",
+          "refId": "C"
+        },
+        {
+          "expr": "chatcli_operator_slo_burn_rate{window=\"72h\", service=~\"$service\", slo_name=~\"$slo_name\"}",
+          "legendFormat": "{{service}} 72h",
+          "refId": "D"
+        },
+        {
+          "expr": "vector(14.4)",
+          "legendFormat": "Threshold 14.4x (1h page)",
+          "refId": "E"
+        },
+        {
+          "expr": "vector(6)",
+          "legendFormat": "Threshold 6x (6h ticket)",
+          "refId": "F"
+        },
+        {
+          "expr": "vector(3)",
+          "legendFormat": "Threshold 3x (24h)",
+          "refId": "G"
+        },
+        {
+          "expr": "vector(1)",
+          "legendFormat": "Threshold 1x (72h)",
+          "refId": "H"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Estimated time until error budget is fully consumed at the current 1h burn rate. budget_remaining / (burn_rate * budget_total / window). Lower values = more urgent.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 6 },
+              { "color": "yellow", "value": 24 },
+              { "color": "green", "value": 72 }
+            ]
+          },
+          "decimals": 1
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 41 },
+      "id": 22,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "orientation": "auto"
+      },
+      "title": "Time Until Budget Exhaustion",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "(\n  chatcli_operator_slo_error_budget_remaining{service=~\"$service\", slo_name=~\"$slo_name\"}\n  / clamp_min(chatcli_operator_slo_burn_rate{window=\"1h\", service=~\"$service\", slo_name=~\"$slo_name\"}, 0.001)\n) * 720",
+          "legendFormat": "{{service}} / {{slo_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 49 },
+      "id": 23,
+      "title": "SLA Deep Dive",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Response time percentile distribution from histogram buckets",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "axisLabel": "Response Time"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "p50" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p90" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p95" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p99" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 50 },
+      "id": 24,
+      "title": "SLA Response Time Distribution",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(chatcli_operator_sla_response_time_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum by (le) (rate(chatcli_operator_sla_response_time_seconds_bucket[5m])))",
+          "legendFormat": "p90",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(chatcli_operator_sla_response_time_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(chatcli_operator_sla_response_time_seconds_bucket[5m])))",
+          "legendFormat": "p99",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Resolution time percentile distribution from histogram buckets",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "axisLabel": "Resolution Time"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "p50" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p90" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p95" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p99" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 50 },
+      "id": 25,
+      "title": "SLA Resolution Time Distribution",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(chatcli_operator_sla_resolution_time_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum by (le) (rate(chatcli_operator_sla_resolution_time_seconds_bucket[5m])))",
+          "legendFormat": "p90",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(chatcli_operator_sla_resolution_time_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(chatcli_operator_sla_resolution_time_seconds_bucket[5m])))",
+          "legendFormat": "p99",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "SLA compliance percentage trend over time, broken down by severity level",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "axisLabel": "Compliance %",
+            "axisSoftMin": 90,
+            "axisSoftMax": 100
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 90 },
+              { "color": "green", "value": 99 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 50 },
+      "id": 26,
+      "title": "SLA Compliance Trend",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "chatcli_operator_sla_compliance_percentage",
+          "legendFormat": "{{severity}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Total SLA violations in the last 24 hours grouped by violation type",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "fillOpacity": 80,
+            "gradientMode": "scheme",
+            "axisCenteredZero": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 50 },
+      "id": 27,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "groupWidth": 0.7,
+        "barWidth": 0.8,
+        "xTickLabelRotation": -45,
+        "stacking": "none",
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "title": "Violations by Type (24h)",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "sum by (type) (increase(chatcli_operator_sla_violations_total[24h]))",
+          "legendFormat": "{{type}}",
+          "refId": "A",
+          "instant": true
+        }
       ]
     }
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["chatcli", "aiops", "slo", "sla"],
+  "tags": ["chatcli", "aiops", "slo", "sla", "burn-rate", "error-budget"],
   "time": { "from": "now-24h", "to": "now" },
   "title": "ChatCLI AIOps - SLO Burn Rate & SLA Compliance",
   "uid": "chatcli-slo-burn-rate"

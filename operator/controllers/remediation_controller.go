@@ -91,6 +91,8 @@ func (r *RemediationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	switch plan.Status.State {
 	case "", platformv1alpha1.RemediationStatePending:
 		result, reconcileErr = r.handlePending(ctx, &plan)
+	case platformv1alpha1.RemediationStateWaitingApproval:
+		result, reconcileErr = r.handleWaitingApproval(ctx, &plan)
 	case platformv1alpha1.RemediationStateExecuting:
 		if plan.Spec.AgenticMode {
 			result, reconcileErr = r.handleAgenticExecuting(ctx, &plan)
@@ -121,9 +123,78 @@ func (r *RemediationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return result, reconcileErr
 }
 
+func (r *RemediationReconciler) handleWaitingApproval(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	// Always check the ApprovalRequest CR status directly — not just the annotation.
+	// This prevents bypass via manual annotation deletion.
+	arName := fmt.Sprintf("approval-%s", plan.Name)
+	var ar platformv1alpha1.ApprovalRequest
+	if err := r.Get(ctx, types.NamespacedName{Name: arName, Namespace: plan.Namespace}, &ar); err != nil {
+		log.Info("Approval request not found, failing plan", "plan", plan.Name)
+		plan.Status.State = platformv1alpha1.RemediationStateFailed
+		plan.Status.Result = "Approval request was deleted before decision"
+		return ctrl.Result{}, r.Status().Update(ctx, plan)
+	}
+
+	switch ar.Status.State {
+	case platformv1alpha1.ApprovalStateApproved:
+		approvedBy, _ := lastDecision(ar.Status.Decisions)
+		log.Info("Approval granted, proceeding with execution", "plan", plan.Name, "approvedBy", approvedBy)
+		now := metav1.Now()
+		plan.Status.State = platformv1alpha1.RemediationStateExecuting
+		plan.Status.StartedAt = &now
+		plan.Status.Result = ""
+		return ctrl.Result{Requeue: true}, r.Status().Update(ctx, plan)
+
+	case platformv1alpha1.ApprovalStateRejected:
+		rejectedBy, reason := lastDecision(ar.Status.Decisions)
+		log.Info("Approval rejected", "plan", plan.Name, "rejectedBy", rejectedBy)
+		plan.Status.State = platformv1alpha1.RemediationStateFailed
+		plan.Status.Result = fmt.Sprintf("Approval rejected by %s: %s", rejectedBy, reason)
+		return ctrl.Result{}, r.Status().Update(ctx, plan)
+
+	case platformv1alpha1.ApprovalStateExpired:
+		log.Info("Approval expired", "plan", plan.Name)
+		plan.Status.State = platformv1alpha1.RemediationStateFailed
+		plan.Status.Result = "Approval request expired without decision"
+		return ctrl.Result{}, r.Status().Update(ctx, plan)
+
+	default: // Pending
+		log.Info("Still waiting for approval decision", "plan", plan.Name)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+}
+
 func (r *RemediationReconciler) handlePending(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.Info("Starting remediation", "plan", plan.Name, "attempt", plan.Spec.Attempt)
+
+	// Check if an ApprovalPolicy requires approval for this plan
+	var issue platformv1alpha1.Issue
+	if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &issue); err == nil {
+		var insight platformv1alpha1.AIInsight
+		insightName := issue.Name + "-insight"
+		_ = r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: plan.Namespace}, &insight)
+
+		required, policy, rule, err := CheckApprovalRequired(ctx, r.Client, plan, &issue, &insight)
+		if err != nil {
+			log.Error(err, "Failed to check approval policy, proceeding without approval")
+		} else if required && rule.Mode != platformv1alpha1.ApprovalModeAuto {
+			log.Info("Approval required by policy", "plan", plan.Name, "policy", policy.Name, "rule", rule.Name, "mode", rule.Mode)
+			if err := CreateApprovalRequest(ctx, r.Client, r.Scheme, plan, &issue, &insight, policy, rule); err != nil {
+				log.Error(err, "Failed to create approval request, proceeding without approval")
+			} else {
+				plan.Status.State = platformv1alpha1.RemediationStateWaitingApproval
+				plan.Status.Result = fmt.Sprintf("Waiting for %s approval (policy: %s, rule: %s)", rule.Mode, policy.Name, rule.Name)
+				if err := r.Status().Update(ctx, plan); err != nil {
+					return ctrl.Result{}, err
+				}
+				log.Info("Approval request created, plan set to WaitingApproval", "plan", plan.Name)
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
+		}
+	}
 
 	// Validate safety constraints (skip for agentic mode — no pre-planned actions)
 	if !plan.Spec.AgenticMode {
@@ -190,10 +261,27 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 		evidence = append(evidence, textSnapshot)
 	}
 
-	// Execute each action with per-action checkpoints
+	// Execute each action with ReAct loop: Act → Observe → decide if resource is healthy (early exit)
 	var checkpoints []platformv1alpha1.ActionCheckpoint
 	for i, action := range plan.Spec.Actions {
-		log.Info("Executing action", "type", action.Type, "resource", resource.Name, "index", i)
+		// ReAct: OBSERVE — check if resource is already healthy before running next action
+		if i > 0 {
+			if rollbackEngine.VerifyPostFailureHealth(ctx, resource) {
+				log.Info("Resource healthy after action — early exit (ReAct)",
+					"plan", plan.Name, "actionsExecuted", i, "totalActions", len(plan.Spec.Actions),
+					"skippedActions", len(plan.Spec.Actions)-i)
+
+				evidence = append(evidence, platformv1alpha1.EvidenceItem{
+					Type:      "react_early_exit",
+					Data:      fmt.Sprintf("Resource healthy after %d/%d actions — skipped remaining %d actions", i, len(plan.Spec.Actions), len(plan.Spec.Actions)-i),
+					Timestamp: metav1.Now(),
+				})
+				break
+			}
+		}
+
+		// ReAct: ACT — execute the action
+		log.Info("Executing action", "type", action.Type, "resource", resource.Name, "index", i, "total", len(plan.Spec.Actions))
 
 		// Capture checkpoint before this action (for partial rollback)
 		checkpoint := platformv1alpha1.ActionCheckpoint{
@@ -203,7 +291,7 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 		}
 
 		// For node actions, capture node-specific snapshot
-		if action.Type == platformv1alpha1.ActionCordonNode || action.Type == platformv1alpha1.ActionDrainNode {
+		if action.Type == platformv1alpha1.ActionCordonNode || action.Type == platformv1alpha1.ActionUncordonNode || action.Type == platformv1alpha1.ActionDrainNode {
 			if nodeName, ok := action.Params["node"]; ok {
 				if nodeSnap, err := rollbackEngine.CaptureNodeSnapshot(ctx, nodeName); err == nil {
 					checkpoint.SnapshotBefore = nodeSnap
@@ -292,26 +380,35 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 
 		evidence = append(evidence, platformv1alpha1.EvidenceItem{
 			Type:      "action_completed",
-			Data:      fmt.Sprintf("Action %s executed successfully", action.Type),
+			Data:      fmt.Sprintf("Action %s executed successfully (%d/%d)", action.Type, i+1, len(plan.Spec.Actions)),
 			Timestamp: metav1.Now(),
 		})
 		remediationsTotal.WithLabelValues(string(action.Type), "success").Inc()
 	}
 
-	// All actions executed — transition to Verifying to confirm resource health.
+	// All actions executed (or early exit) — transition to Verifying
 	now := metav1.Now()
 	plan.Status.State = platformv1alpha1.RemediationStateVerifying
 	plan.Status.ActionsCompletedAt = &now
 	plan.Status.Evidence = evidence
 	plan.Status.ActionCheckpoints = checkpoints
 
-	log.Info("Actions executed, verifying resource health", "plan", plan.Name)
+	log.Info("Actions executed, verifying resource health", "plan", plan.Name, "actionsRun", len(checkpoints), "totalPlanned", len(plan.Spec.Actions))
 
 	if err := r.Status().Update(ctx, plan); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+// lastDecision returns the approver and reason from the last decision in the list.
+func lastDecision(decisions []platformv1alpha1.ApprovalDecision) (string, string) {
+	if len(decisions) == 0 {
+		return "unknown", ""
+	}
+	d := decisions[len(decisions)-1]
+	return d.Approver, d.Reason
 }
 
 func (r *RemediationReconciler) handleVerifying(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
@@ -458,6 +555,8 @@ func (r *RemediationReconciler) executeAction(ctx context.Context, resource plat
 		return r.executeRestartStatefulSetPod(ctx, resource, action.Params)
 	case platformv1alpha1.ActionCordonNode:
 		return r.executeCordonNode(ctx, resource, action.Params)
+	case platformv1alpha1.ActionUncordonNode:
+		return r.executeUncordonNode(ctx, resource, action.Params)
 	case platformv1alpha1.ActionDrainNode:
 		return r.executeDrainNode(ctx, resource, action.Params)
 	case platformv1alpha1.ActionResizePVC:

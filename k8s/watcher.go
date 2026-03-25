@@ -33,6 +33,7 @@ type ResourceWatcher struct {
 	logCollector     *LogCollector
 	hpaCollector     *HPACollector
 	metricsCollector *MetricsCollector
+	nodeCollector    *NodeCollector
 	promCollector    *PrometheusCollector // optional: app-level Prometheus metrics
 
 	// Prometheus metrics recorder (optional)
@@ -82,6 +83,7 @@ func NewResourceWatcher(cfg WatchConfig, logger *zap.Logger) (*ResourceWatcher, 
 		logCollector:     NewLogCollector(clientset, cfg.Namespace, cfg.Deployment, cfg.MaxLogLines, logger),
 		hpaCollector:     NewHPACollector(clientset, cfg.Namespace, cfg.Deployment, logger),
 		metricsCollector: NewMetricsCollector(clientset, metricsClient, cfg.Namespace, cfg.Deployment, logger),
+		nodeCollector:    NewNodeCollector(clientset, metricsClient, cfg.Namespace, cfg.Deployment, cfg.ResourceKind(), logger),
 	}
 
 	return w, nil
@@ -154,6 +156,11 @@ func (w *ResourceWatcher) collect(ctx context.Context) error {
 	// 4.5 Collect application metrics from Prometheus endpoint
 	if w.promCollector != nil {
 		snap.AppMetrics = w.promCollector.Collect(ctx)
+	}
+
+	// 4.6 Collect node health for nodes where target pods run
+	if w.nodeCollector != nil {
+		snap.Nodes = w.nodeCollector.Collect(ctx, snap.Pods)
 	}
 
 	// 5. Store snapshot
@@ -320,6 +327,115 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 			})
 			if w.metricsRecorder != nil {
 				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertDeployFailing))
+			}
+		}
+	}
+
+	// Node-level anomalies
+	w.detectNodeAnomalies(snap, now, target)
+}
+
+// detectNodeAnomalies checks node health and emits alerts for problems.
+func (w *ResourceWatcher) detectNodeAnomalies(snap *ResourceSnapshot, now time.Time, target string) {
+	for _, node := range snap.Nodes {
+		nodeObj := fmt.Sprintf("Node/%s", node.Name)
+
+		if !node.Ready {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityCritical,
+				Type:      AlertNodeNotReady,
+				Message:   fmt.Sprintf("Node %s is NotReady", node.Name),
+				Object:    nodeObj,
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertNodeNotReady))
+			}
+		}
+
+		if node.DiskPressure {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityCritical,
+				Type:      AlertDiskPressure,
+				Message:   fmt.Sprintf("Node %s has DiskPressure", node.Name),
+				Object:    nodeObj,
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertDiskPressure))
+			}
+		}
+
+		if node.MemoryPressure {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityCritical,
+				Type:      AlertMemoryPressure,
+				Message:   fmt.Sprintf("Node %s has MemoryPressure", node.Name),
+				Object:    nodeObj,
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertMemoryPressure))
+			}
+		}
+
+		if node.PIDPressure {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityWarning,
+				Type:      AlertPIDPressure,
+				Message:   fmt.Sprintf("Node %s has PIDPressure", node.Name),
+				Object:    nodeObj,
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertPIDPressure))
+			}
+		}
+
+		if node.NetworkUnavail {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityCritical,
+				Type:      AlertNetworkUnavail,
+				Message:   fmt.Sprintf("Node %s has NetworkUnavailable", node.Name),
+				Object:    nodeObj,
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertNetworkUnavail))
+			}
+		}
+
+		if node.Unschedulable {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityWarning,
+				Type:      AlertNodeUnschedul,
+				Message:   fmt.Sprintf("Node %s is cordoned (unschedulable)", node.Name),
+				Object:    nodeObj,
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertNodeUnschedul))
+			}
+		}
+
+		// Pod capacity warning: node running >90% of pod capacity
+		if node.PodCapacity > 0 && float64(node.PodCount)/float64(node.PodCapacity) > 0.9 {
+			w.store.AddAlert(Alert{
+				Timestamp: now,
+				Severity:  SeverityWarning,
+				Type:      AlertPodCapacityHigh,
+				Message:   fmt.Sprintf("Node %s pod capacity at %d/%d (>90%%)", node.Name, node.PodCount, node.PodCapacity),
+				Object:    nodeObj,
+				Namespace: w.config.Namespace,
+			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertPodCapacityHigh))
 			}
 		}
 	}

@@ -134,8 +134,8 @@ func TestIssueReconcile_DetectedToAnalyzing(t *testing.T) {
 	if updated.Status.DetectedAt == nil {
 		t.Error("expected detectedAt to be set")
 	}
-	if updated.Status.MaxRemediationAttempts != 3 {
-		t.Errorf("expected maxRemediationAttempts 3, got %d", updated.Status.MaxRemediationAttempts)
+	if updated.Status.MaxRemediationAttempts != 5 {
+		t.Errorf("expected maxRemediationAttempts 5 (default), got %d", updated.Status.MaxRemediationAttempts)
 	}
 }
 
@@ -479,9 +479,9 @@ func TestIssueReconcile_AnalyzingToRemediatingFromAI(t *testing.T) {
 		}
 	}
 
-	// Verify auto-generated Runbook was created
+	// Verify auto-generated Runbook was created (name includes hash of AI analysis)
 	var runbook platformv1alpha1.Runbook
-	if err := c.Get(ctx, types.NamespacedName{Name: "auto-high-deployment", Namespace: "default"}, &runbook); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: "auto-high-deployment-8782ff", Namespace: "default"}, &runbook); err != nil {
 		t.Fatalf("expected auto-generated Runbook: %v", err)
 	}
 	if runbook.Labels["platform.chatcli.io/auto-generated"] != "true" {

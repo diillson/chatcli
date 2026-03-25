@@ -194,9 +194,18 @@ body {
 }
 .panel-title { font-size: 0.9rem; font-weight: 600; }
 .panel-body { padding: 1.25rem; }
+.drag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+.drag-grid .panel-full { grid-column: 1 / -1; }
+.drag-grip { color: var(--text-dim); margin-right: 0.5rem; font-size: 1rem; cursor: grab; user-select: none; }
+.drag-grip:active { cursor: grabbing; }
+.panel[draggable="true"] .panel-header { cursor: grab; }
+.panel[draggable="true"] .panel-header:active { cursor: grabbing; }
+.panel.drag-over { border: 2px dashed var(--accent); background: rgba(233, 69, 96, 0.05); }
+.panel.dragging { opacity: 0.3; transform: scale(0.98); }
 
 /* ===== TABLE ===== */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
+.table-wrap table thead { position: sticky; top: 0; z-index: 2; background: var(--card-bg); }
 table { width: 100%; border-collapse: collapse; }
 th {
   text-align: left;
@@ -596,30 +605,36 @@ tr.expandable { cursor: pointer; }
   <!-- OVERVIEW PAGE -->
   <div class="page active" id="page-overview">
     <div class="stats-grid" id="overviewStats"></div>
-    <div class="grid-2">
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">Issues by Severity</span></div>
+    <div id="capacityWarnings"></div>
+    <div class="drag-grid" id="overviewPanels">
+      <div class="panel" draggable="true" data-panel-id="severityPie">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Issues by Severity</span></div>
         <div class="panel-body" id="severityPie"></div>
       </div>
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">Remediation Activity</span></div>
+      <div class="panel" draggable="true" data-panel-id="platformResources">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Platform Resources</span></div>
+        <div class="panel-body" id="platformResources"></div>
+      </div>
+      <div class="panel" draggable="true" data-panel-id="remediationTimeline">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Remediation Activity</span></div>
         <div class="panel-body" id="remediationTimeline"></div>
       </div>
-    </div>
-    <div id="capacityWarnings"></div>
-    <div class="grid-2">
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">Compliance & SLA</span></div>
-        <div class="panel-body" id="complianceCard"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">Remediation by Strategy</span></div>
+      <div class="panel" draggable="true" data-panel-id="remediationStrategyChart">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Remediation by Strategy</span></div>
         <div class="panel-body" id="remediationStrategyChart"></div>
       </div>
-    </div>
-    <div class="panel">
-      <div class="panel-header"><span class="panel-title">Recent Incidents</span></div>
-      <div class="panel-body table-wrap" id="recentIncidentsTable"></div>
+      <div class="panel" draggable="true" data-panel-id="complianceCard">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Compliance & SLA</span></div>
+        <div class="panel-body" id="complianceCard"></div>
+      </div>
+      <div class="panel" draggable="true" data-panel-id="mttdMttrTrend">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">MTTD & MTTR Trend</span></div>
+        <div class="panel-body" id="mttdMttrTrend"></div>
+      </div>
+      <div class="panel panel-full" draggable="true" data-panel-id="recentIncidentsTable">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Recent Incidents</span></div>
+        <div class="panel-body table-wrap" id="recentIncidentsTable"></div>
+      </div>
     </div>
   </div>
 
@@ -825,6 +840,85 @@ let refreshCountdown = 30;
 let refreshSeconds = 30; // 0 = off
 let expandedRows = new Set();
 
+// Sort state per tab: { tabName: { colIdx, asc } }
+const sortState = {};
+
+// Drag-and-drop panel reordering
+let draggedPanel = null;
+
+function initDragPanels(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  // Restore saved order
+  const savedOrder = localStorage.getItem('panelOrder_' + containerId);
+  if (savedOrder) {
+    try {
+      const order = JSON.parse(savedOrder);
+      const panels = Array.from(container.querySelectorAll('.panel[data-panel-id]'));
+      const panelMap = {};
+      panels.forEach(p => { panelMap[p.dataset.panelId] = p; });
+      order.forEach(id => {
+        const p = panelMap[id];
+        if (p) container.appendChild(p);
+      });
+    } catch {}
+  }
+
+  container.addEventListener('dragstart', e => {
+    const panel = e.target.closest('.panel[draggable]');
+    if (!panel) return;
+    draggedPanel = panel;
+    panel.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', panel.dataset.panelId);
+  });
+
+  container.addEventListener('dragend', e => {
+    const panel = e.target.closest('.panel[draggable]');
+    if (panel) panel.classList.remove('dragging');
+    container.querySelectorAll('.panel').forEach(p => p.classList.remove('drag-over'));
+    draggedPanel = null;
+  });
+
+  container.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const target = e.target.closest('.panel[draggable]');
+    if (!target || target === draggedPanel) return;
+    container.querySelectorAll('.panel').forEach(p => p.classList.remove('drag-over'));
+    target.classList.add('drag-over');
+  });
+
+  container.addEventListener('dragleave', e => {
+    const target = e.target.closest('.panel[draggable]');
+    if (target) target.classList.remove('drag-over');
+  });
+
+  container.addEventListener('drop', e => {
+    e.preventDefault();
+    const target = e.target.closest('.panel[draggable]');
+    if (!target || !draggedPanel || target === draggedPanel) return;
+    target.classList.remove('drag-over');
+
+    // Determine insertion position
+    const panels = Array.from(container.querySelectorAll('.panel[data-panel-id]'));
+    const dragIdx = panels.indexOf(draggedPanel);
+    const dropIdx = panels.indexOf(target);
+
+    if (dragIdx < dropIdx) {
+      target.after(draggedPanel);
+    } else {
+      target.before(draggedPanel);
+    }
+
+    // Save order to localStorage
+    const newOrder = Array.from(container.querySelectorAll('.panel[data-panel-id]'))
+      .map(p => p.dataset.panelId);
+    localStorage.setItem('panelOrder_' + containerId, JSON.stringify(newOrder));
+  });
+}
+
 // ===== UTILITY FUNCTIONS =====
 
 async function apiFetch(path, opts = {}) {
@@ -852,58 +946,78 @@ function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
 
 // Sortable table columns — click header to sort ascending, click again for descending
-function makeSortable(tableEl) {
+function sortTableByCol(tableEl, colIdx, asc) {
+  const tbody = tableEl.querySelector('tbody');
+  if (!tbody) return;
+  const rows = Array.from(tbody.querySelectorAll('tr:not(.expand-row)'));
+  rows.sort((a, b) => {
+    const aSortVal = a.cells[colIdx]?.dataset.sortValue;
+    const bSortVal = b.cells[colIdx]?.dataset.sortValue;
+    if (aSortVal !== undefined && bSortVal !== undefined) {
+      const an = parseFloat(aSortVal), bn = parseFloat(bSortVal);
+      if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+      return asc ? aSortVal.localeCompare(bSortVal) : bSortVal.localeCompare(aSortVal);
+    }
+    const av = (a.cells[colIdx]?.textContent || '').trim().toLowerCase();
+    const bv = (b.cells[colIdx]?.textContent || '').trim().toLowerCase();
+    const an = parseFloat(av), bn = parseFloat(bv);
+    if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+    const timeToSecs = s => {
+      const m = s.match(/^(\d+)(s|m|h|d) ago$/);
+      if (!m) return NaN;
+      const v = parseInt(m[1]);
+      switch(m[2]) { case 's': return v; case 'm': return v*60; case 'h': return v*3600; case 'd': return v*86400; }
+      return NaN;
+    };
+    const at = timeToSecs(av), bt = timeToSecs(bv);
+    if (!isNaN(at) && !isNaN(bt)) return asc ? at - bt : bt - at;
+    return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  rows.forEach(r => {
+    tbody.appendChild(r);
+    const expandRow = tbody.querySelector(`.expand-row[data-parent="${r.dataset.rowId}"]`);
+    if (expandRow) tbody.appendChild(expandRow);
+  });
+  const headers = tableEl.querySelectorAll('thead th');
+  headers.forEach(h => h.textContent = h.textContent.replace(/ [▲▼]$/, ''));
+  if (headers[colIdx]) headers[colIdx].textContent += asc ? ' ▲' : ' ▼';
+}
+
+function makeSortable(tableEl, defaultSortCol) {
   if (!tableEl) return;
   const headers = tableEl.querySelectorAll('thead th');
+
+  // Find timestamp column as default sort if not specified
+  if (defaultSortCol === undefined) {
+    headers.forEach((th, i) => {
+      const txt = th.textContent.toLowerCase();
+      if (txt.includes('created') || txt.includes('age') || txt.includes('timestamp') || txt.includes('time')) {
+        defaultSortCol = i;
+      }
+    });
+  }
+
   headers.forEach((th, colIdx) => {
     if (!th.textContent.trim()) return;
     th.style.cursor = 'pointer';
     th.style.userSelect = 'none';
     th.title = 'Click to sort';
     th.addEventListener('click', () => {
-      const tbody = tableEl.querySelector('tbody');
-      if (!tbody) return;
-      const rows = Array.from(tbody.querySelectorAll('tr:not(.expand-row)'));
-      const asc = th.dataset.sortDir !== 'asc';
-      th.dataset.sortDir = asc ? 'asc' : 'desc';
-      headers.forEach(h => { if (h !== th) delete h.dataset.sortDir; });
-      rows.sort((a, b) => {
-        // Priority 1: data-sort-value attribute (used for timestamps and numeric values)
-        const aSortVal = a.cells[colIdx]?.dataset.sortValue;
-        const bSortVal = b.cells[colIdx]?.dataset.sortValue;
-        if (aSortVal !== undefined && bSortVal !== undefined) {
-          const an = parseFloat(aSortVal), bn = parseFloat(bSortVal);
-          if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
-          return asc ? aSortVal.localeCompare(bSortVal) : bSortVal.localeCompare(aSortVal);
-        }
-        // Priority 2: text content
-        const av = (a.cells[colIdx]?.textContent || '').trim().toLowerCase();
-        const bv = (b.cells[colIdx]?.textContent || '').trim().toLowerCase();
-        // Try numeric
-        const an = parseFloat(av), bn = parseFloat(bv);
-        if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
-        // Try timestamp patterns (Xm ago, Xh ago, Xd ago)
-        const timeToSecs = s => {
-          const m = s.match(/^(\d+)(s|m|h|d) ago$/);
-          if (!m) return NaN;
-          const v = parseInt(m[1]);
-          switch(m[2]) { case 's': return v; case 'm': return v*60; case 'h': return v*3600; case 'd': return v*86400; }
-          return NaN;
-        };
-        const at = timeToSecs(av), bt = timeToSecs(bv);
-        if (!isNaN(at) && !isNaN(bt)) return asc ? at - bt : bt - at;
-        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
-      });
-      rows.forEach(r => {
-        tbody.appendChild(r);
-        // Move expand row right after its parent if it exists
-        const expandRow = tbody.querySelector(`.expand-row[data-parent="${r.dataset.rowId}"]`);
-        if (expandRow) tbody.appendChild(expandRow);
-      });
-      headers.forEach(h => h.textContent = h.textContent.replace(/ [▲▼]$/, ''));
-      th.textContent += asc ? ' ▲' : ' ▼';
+      const saved = sortState[currentTab];
+      const asc = (saved && saved.colIdx === colIdx) ? !saved.asc : (colIdx === defaultSortCol ? false : true);
+      sortState[currentTab] = { colIdx, asc };
+      sortTableByCol(tableEl, colIdx, asc);
     });
   });
+
+  // Restore saved sort or apply default (timestamp DESC = newest first)
+  const saved = sortState[currentTab];
+  if (saved !== undefined) {
+    sortTableByCol(tableEl, saved.colIdx, saved.asc);
+  } else if (defaultSortCol !== undefined) {
+    sortState[currentTab] = { colIdx: defaultSortCol, asc: false };
+    sortTableByCol(tableEl, defaultSortCol, false);
+  }
 }
 
 // ── Time Range Picker ──────────────────────────────────────────────────
@@ -1133,9 +1247,12 @@ async function checkHealth() {
 async function loadOverview() {
   loadOverviewStats();
   loadSeverityPie();
+  loadPlatformResources();
   loadRecentIncidents();
   loadRemediationTimeline();
+  loadRemediationStrategyChart();
   loadComplianceCard();
+  loadMttdMttrTrend();
   loadCapacityWarnings();
 }
 
@@ -1233,6 +1350,100 @@ async function loadSeverityPie() {
     `;
   } catch (e) {
     showError(el, 'Failed to load severity data', 'loadSeverityPie()');
+  }
+}
+
+async function loadPlatformResources() {
+  const el = $('#platformResources');
+  if (!el) return;
+  try {
+    const summary = await apiFetch('/analytics/summary?' + getTimeRangeQuery());
+    const s = summary.spec || {};
+
+    // Fetch additional resource counts not in summary
+    let anomalyCount = 0, approvalPolicyCount = 0, escalationPolicyCount = 0, notifPolicyCount = 0, slaCount = 0;
+    try { const d = await apiFetch('/incidents?pageSize=1'); anomalyCount = d.metadata?.totalCount ?? 0; } catch {}
+
+    const res = (icon, label, count, color) =>
+      `<div style="display:flex; align-items:center; gap:0.75rem; padding:0.5rem 0.75rem; border-radius:6px; background:var(--bg);">
+        <span style="font-size:1.1rem;">${icon}</span>
+        <div style="flex:1;">
+          <div style="font-size:0.75rem; color:var(--text-muted)">${escapeHtml(label)}</div>
+        </div>
+        <span style="font-size:1.1rem; font-weight:700; color:${color}">${count}</span>
+      </div>`;
+
+    el.innerHTML = `<div style="display:flex; flex-direction:column; gap:0.5rem;">
+      ${res('📋', 'Issues (total)', s.totalIssues ?? 0, 'var(--text)')}
+      ${res('🔧', 'Remediations', s.totalRemediations ?? 0, 'var(--success)')}
+      ${res('📝', 'PostMortems', s.totalPostMortems ?? 0, 'var(--sev-medium)')}
+      ${res('📚', 'Runbooks', s.totalRunbooks ?? 0, 'var(--accent)')}
+      ${res('🎯', 'SLOs', s.totalSLOs ?? 0, s.slosAtRisk > 0 ? 'var(--sev-high)' : 'var(--sev-low)')}
+      ${res('⏳', 'Pending Approvals', s.pendingApprovals ?? 0, s.pendingApprovals > 0 ? 'var(--sev-medium)' : 'var(--text-muted)')}
+      ${res('📊', 'Avg Risk Score', (s.avgRiskScore ?? 0).toFixed(0), s.avgRiskScore > 60 ? 'var(--sev-critical)' : s.avgRiskScore > 30 ? 'var(--sev-medium)' : 'var(--sev-low)')}
+    </div>`;
+  } catch (e) {
+    showError(el, 'Failed to load platform resources', 'loadPlatformResources()');
+  }
+}
+
+async function loadMttdMttrTrend() {
+  const el = $('#mttdMttrTrend');
+  if (!el) return;
+  try {
+    const [mttdData, mttrData] = await Promise.all([
+      apiFetch('/analytics/mttd?' + getTimeRangeQuery()),
+      apiFetch('/analytics/mttr?' + getTimeRangeQuery()),
+    ]);
+    const mttd = (mttdData.items || mttdData.spec || []);
+    const mttr = (mttrData.items || mttrData.spec || []);
+
+    if ((!mttd.length && !mttr.length)) {
+      showEmpty(el, 'No MTTD/MTTR data available');
+      return;
+    }
+
+    const formatDuration = (secs) => {
+      if (secs === 0) return '< 1s';
+      if (secs < 60) return Math.round(secs) + 's';
+      if (secs < 3600) return (secs / 60).toFixed(1) + 'm';
+      return (secs / 3600).toFixed(1) + 'h';
+    };
+
+    // Show latest values as stats + recent trend as mini bars
+    const latestMttdEntry = mttd.length > 0 ? mttd[mttd.length - 1] : null;
+    const latestMttrEntry = mttr.length > 0 ? mttr[mttr.length - 1] : null;
+    const latestMttd = latestMttdEntry ? latestMttdEntry.value : null;
+    const latestMttr = latestMttrEntry ? latestMttrEntry.value : null;
+    const mttdSamples = latestMttdEntry ? latestMttdEntry.count : 0;
+    const mttrSamples = latestMttrEntry ? latestMttrEntry.count : 0;
+
+    const maxMttr = Math.max(...mttr.map(m => m.value), 1);
+    const trendBars = mttr.slice(-10).map(m =>
+      `<div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;" title="${m.date}: ${formatDuration(m.value)} (${m.count} samples)">
+        <div style="width:100%; background:var(--accent); border-radius:2px; height:${Math.max(4, (m.value / maxMttr) * 40)}px;"></div>
+        <span style="font-size:0.5rem; color:var(--text-muted)">${m.date?.slice(5) || ''}</span>
+      </div>`
+    ).join('');
+
+    el.innerHTML = `
+      <div style="display:flex; gap:2rem; margin-bottom:1rem;">
+        <div style="text-align:center; flex:1;">
+          <div style="font-size:1.4rem; font-weight:700; color:var(--success)">${latestMttd !== null ? formatDuration(latestMttd) : '-'}</div>
+          <div style="font-size:0.7rem; color:var(--text-muted)">MTTD (Detect)</div>
+          <div style="font-size:0.6rem; color:var(--text-dim)">${mttdSamples} samples</div>
+        </div>
+        <div style="text-align:center; flex:1;">
+          <div style="font-size:1.4rem; font-weight:700; color:var(--accent)">${latestMttr !== null ? formatDuration(latestMttr) : '-'}</div>
+          <div style="font-size:0.7rem; color:var(--text-muted)">MTTR (Resolve)</div>
+          <div style="font-size:0.6rem; color:var(--text-dim)">${mttrSamples} samples</div>
+        </div>
+      </div>
+      ${trendBars ? `<div style="display:flex; gap:2px; align-items:flex-end; height:50px;">${trendBars}</div>
+      <div style="font-size:0.6rem; color:var(--text-muted); text-align:center; margin-top:4px;">MTTR trend (last 10 days)</div>` : ''}
+    `;
+  } catch (e) {
+    showError(el, 'Failed to load MTTD/MTTR', 'loadMttdMttrTrend()');
   }
 }
 
@@ -2211,15 +2422,6 @@ async function loadFederationPanel() {
   }
 }
 
-// Call remediation strategy chart from Overview
-(function() {
-  const origLoadOverview = loadOverview;
-  loadOverview = async function() {
-    await origLoadOverview();
-    loadRemediationStrategyChart();
-  };
-})();
-
 // ===== CLUSTERS PAGE =====
 
 async function loadClusters() {
@@ -2380,6 +2582,7 @@ async function updateApprovalBadge() {
 // ===== INIT =====
 
 document.addEventListener('DOMContentLoaded', () => {
+  initDragPanels('overviewPanels');
   loadOverview();
   checkHealth();
   updateApprovalBadge();

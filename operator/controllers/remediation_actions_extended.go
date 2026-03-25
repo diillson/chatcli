@@ -199,6 +199,34 @@ func (r *RemediationReconciler) executeCordonNode(ctx context.Context, resource 
 	return nil
 }
 
+// executeUncordonNode marks a node as schedulable again.
+func (r *RemediationReconciler) executeUncordonNode(ctx context.Context, resource platformv1alpha1.ResourceRef, params map[string]string) error {
+	logger := log.FromContext(ctx)
+
+	nodeName, ok := params["node"]
+	if !ok || nodeName == "" {
+		return fmt.Errorf("missing 'node' param")
+	}
+
+	var node corev1.Node
+	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
+		return fmt.Errorf("failed to get node %s: %w", nodeName, err)
+	}
+
+	if !node.Spec.Unschedulable {
+		logger.Info("Node already schedulable", "node", nodeName)
+		return nil
+	}
+
+	node.Spec.Unschedulable = false
+	if err := r.Update(ctx, &node); err != nil {
+		return fmt.Errorf("failed to uncordon node %s: %w", nodeName, err)
+	}
+
+	logger.Info("Node uncordoned", "node", nodeName)
+	return nil
+}
+
 // executeDrainNode cordons and evicts pods from a node.
 func (r *RemediationReconciler) executeDrainNode(ctx context.Context, resource platformv1alpha1.ResourceRef, params map[string]string) error {
 	logger := log.FromContext(ctx)

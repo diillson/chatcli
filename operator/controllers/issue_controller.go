@@ -732,6 +732,8 @@ func mapActionType(action string) platformv1alpha1.RemediationActionType {
 		return platformv1alpha1.ActionRestartStatefulSetPod
 	case "CordonNode":
 		return platformv1alpha1.ActionCordonNode
+	case "UncordonNode":
+		return platformv1alpha1.ActionUncordonNode
 	case "DrainNode":
 		return platformv1alpha1.ActionDrainNode
 	case "ResizePVC":
@@ -1067,6 +1069,15 @@ func (r *IssueReconciler) getMaxRemediationAttempts(ctx context.Context) int32 {
 	return 5 // default
 }
 
+// getAgenticMaxSteps reads the agentic max steps from the first Instance's AIOps config.
+func (r *IssueReconciler) getAgenticMaxSteps(ctx context.Context) int32 {
+	cfg := r.getAIOpsConfig(ctx)
+	if cfg != nil {
+		return cfg.GetAgenticMaxSteps()
+	}
+	return 10 // default
+}
+
 // getAIOpsConfig reads the AIOps config from the first Instance.
 func (r *IssueReconciler) getAIOpsConfig(ctx context.Context) *platformv1alpha1.AIOpsSpec {
 	var instances platformv1alpha1.InstanceList
@@ -1096,7 +1107,7 @@ func (r *IssueReconciler) createAgenticRemediationPlan(ctx context.Context, issu
 			Attempt:         attempt,
 			Strategy:        "Agentic AI-driven remediation",
 			AgenticMode:     true,
-			AgenticMaxSteps: 10,
+			AgenticMaxSteps: r.getAgenticMaxSteps(ctx),
 			SafetyConstraints: []string{
 				"No scaling to 0 replicas",
 				"No delete operations without pod count check",
@@ -1139,21 +1150,31 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 			if step.Action != nil {
 				actionStr = string(step.Action.Type)
 			}
+			// Include AI reasoning in timeline for full audit trail
+			detail := fmt.Sprintf("Step %d: %s — %s", step.StepNumber, actionStr, step.Observation)
+			if step.AIMessage != "" {
+				detail = fmt.Sprintf("Step %d [AI reasoning: %s] Action: %s — %s", step.StepNumber, step.AIMessage, actionStr, step.Observation)
+			}
 			timeline = append(timeline, platformv1alpha1.TimelineEvent{
 				Timestamp: step.Timestamp,
 				Type:      evType,
-				Detail:    fmt.Sprintf("Step %d: %s — %s", step.StepNumber, actionStr, step.Observation),
+				Detail:    detail,
 			})
 			if step.Action != nil {
 				result := "success"
 				if strings.HasPrefix(step.Observation, "FAILED:") {
 					result = "failed"
 				}
+				// Include AI reasoning in action detail for audit
+				actionDetail := step.Observation
+				if step.AIMessage != "" {
+					actionDetail = fmt.Sprintf("[AI: %s] %s", step.AIMessage, step.Observation)
+				}
 				actions = append(actions, platformv1alpha1.ActionRecord{
 					Action:    string(step.Action.Type),
 					Params:    step.Action.Params,
 					Result:    result,
-					Detail:    step.Observation,
+					Detail:    actionDetail,
 					Timestamp: step.Timestamp,
 				})
 			}
@@ -1232,11 +1253,7 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 				summary = insight.Status.Analysis
 			}
 			if rootCause == "" && insight.Status.Analysis != "" {
-				// Use first 500 chars of analysis as root cause
 				rootCause = insight.Status.Analysis
-				if len(rootCause) > 500 {
-					rootCause = rootCause[:500] + "..."
-				}
 			}
 			if len(lessonsLearned) == 0 && len(insight.Status.Recommendations) > 0 {
 				lessonsLearned = insight.Status.Recommendations

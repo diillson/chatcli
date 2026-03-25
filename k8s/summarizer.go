@@ -129,6 +129,41 @@ func (s *Summarizer) GenerateContext() string {
 		}
 	}
 
+	// Node Health
+	if len(snap.Nodes) > 0 {
+		b.WriteString(fmt.Sprintf("\n## Nodes (%d)\n", len(snap.Nodes)))
+		for _, node := range snap.Nodes {
+			status := "Ready"
+			if !node.Ready {
+				status = "NOT READY"
+			}
+			line := fmt.Sprintf("  - %s: %s", node.Name, status)
+			if node.Unschedulable {
+				line += " [CORDONED]"
+			}
+			if node.DiskPressure {
+				line += " [DiskPressure]"
+			}
+			if node.MemoryPressure {
+				line += " [MemoryPressure]"
+			}
+			if node.PIDPressure {
+				line += " [PIDPressure]"
+			}
+			if node.NetworkUnavail {
+				line += " [NetworkUnavailable]"
+			}
+			if node.CPUUsage != "" {
+				line += fmt.Sprintf(" cpu=%s/%s mem=%s/%s", node.CPUUsage, node.CPUAllocatable, node.MemoryUsage, node.MemoryAllocatable)
+			}
+			line += fmt.Sprintf(" pods=%d/%d k8s=%s", node.PodCount, node.PodCapacity, node.KubeletVersion)
+			b.WriteString(line + "\n")
+			for _, cond := range node.Conditions {
+				b.WriteString(fmt.Sprintf("    %s\n", cond))
+			}
+		}
+	}
+
 	// Recent Events
 	if len(snap.Events) > 0 {
 		b.WriteString(fmt.Sprintf("\n## Recent Events (%d)\n", len(snap.Events)))
