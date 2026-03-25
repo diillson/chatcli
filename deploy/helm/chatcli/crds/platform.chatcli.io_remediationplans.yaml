@@ -663,6 +663,7 @@ spec:
                 description: State of the remediation plan execution.
                 enum:
                 - Pending
+                - WaitingApproval
                 - Executing
                 - Verifying
                 - Completed

@@ -67,36 +67,49 @@ spec:
                     type: string
                 type: object
               aiops:
-                description: AIOps configures the autonomous incident management
-                  pipeline. All fields are optional with sensible defaults.
+                description: |-
+                  AIOps configures the autonomous incident management pipeline.
+                  All fields are optional with sensible defaults.
                 properties:
+                  agenticMaxSteps:
+                    default: 10
+                    description: |-
+                      AgenticMaxSteps is the maximum number of steps the AI can take in agentic
+                      remediation mode before forced failure. Higher values give the AI more room
+                      to investigate and try different approaches.
+                    format: int32
+                    maximum: 30
+                    minimum: 3
+                    type: integer
                   dedupTTLMinutes:
                     default: 60
-                    description: DedupTTLMinutes is how long (in minutes) the bridge
-                      dedup cache retains alert hashes.
+                    description: |-
+                      DedupTTLMinutes is how long (in minutes) the bridge dedup cache retains alert hashes.
+                      After this period, the same alert can create a new Anomaly CR.
                     format: int32
                     maximum: 1440
                     minimum: 5
                     type: integer
                   enableAutoResolve:
                     default: true
-                    description: EnableAutoResolve enables automatic resolution of
-                      Escalated issues when the watcher detects the resource has
-                      recovered (all pods healthy).
+                    description: |-
+                      EnableAutoResolve enables automatic resolution of Escalated issues when the
+                      watcher detects the resource has recovered (all pods healthy).
                     type: boolean
                   maxRemediationAttempts:
                     default: 5
-                    description: MaxRemediationAttempts is the maximum number of
-                      remediation attempts before escalating to human.
+                    description: |-
+                      MaxRemediationAttempts is the maximum number of remediation attempts before escalating to human.
+                      Higher values give the AI more chances to try different strategies.
                     format: int32
                     maximum: 10
                     minimum: 1
                     type: integer
                   resolutionCooldownMinutes:
                     default: 10
-                    description: ResolutionCooldownMinutes is how long (in minutes)
-                      after an issue is resolved before new anomalies for the same
-                      resource can create a new issue.
+                    description: |-
+                      ResolutionCooldownMinutes is how long (in minutes) after an issue is resolved before
+                      new anomalies for the same resource can create a new issue. Prevents stale re-triggers.
                     format: int32
                     maximum: 120
                     minimum: 0

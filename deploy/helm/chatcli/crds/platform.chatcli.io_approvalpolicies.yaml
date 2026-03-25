@@ -161,6 +161,41 @@ spec:
                             - UpdateIngress
                             - PatchNetworkPolicy
                             - ApplyManifest
+                            - ScaleStatefulSet
+                            - RestartStatefulSet
+                            - RollbackStatefulSet
+                            - AdjustStatefulSetResources
+                            - DeleteStatefulSetPod
+                            - ForceDeleteStatefulSetPod
+                            - UpdateStatefulSetStrategy
+                            - RecreateStatefulSetPVC
+                            - PartitionStatefulSetUpdate
+                            - RestartDaemonSet
+                            - RollbackDaemonSet
+                            - AdjustDaemonSetResources
+                            - DeleteDaemonSetPod
+                            - UpdateDaemonSetStrategy
+                            - PauseDaemonSetRollout
+                            - CordonAndDeleteDaemonSetPod
+                            - RetryJob
+                            - AdjustJobResources
+                            - DeleteFailedJob
+                            - SuspendJob
+                            - ResumeJob
+                            - AdjustJobParallelism
+                            - AdjustJobDeadline
+                            - AdjustJobBackoffLimit
+                            - ForceDeleteJobPods
+                            - SuspendCronJob
+                            - ResumeCronJob
+                            - TriggerCronJob
+                            - AdjustCronJobResources
+                            - AdjustCronJobSchedule
+                            - AdjustCronJobDeadline
+                            - AdjustCronJobHistory
+                            - AdjustCronJobConcurrency
+                            - DeleteCronJobActiveJobs
+                            - ReplaceCronJobTemplate
                             - Custom
                             type: string
                           type: array

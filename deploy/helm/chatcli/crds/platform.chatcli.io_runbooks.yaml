@@ -117,6 +117,9 @@ spec:
                     - deploy_failing
                     - disk_pressure
                     - node_not_ready
+                    - pid_pressure
+                    - network_unavailable
+                    - pod_capacity_high
                     - pvc_pending
                     - ingress_error
                     - hpa_maxed
