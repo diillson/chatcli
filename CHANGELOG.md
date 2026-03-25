@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.88.0](https://github.com/diillson/chatcli/compare/v1.87.0...v1.88.0) (2026-03-25)
+
+
+### Features
+
+* **aiops:** add REST API authentication with hot-reload and dashboard login ([#693](https://github.com/diillson/chatcli/issues/693)) ([1740817](https://github.com/diillson/chatcli/commit/1740817fe137b71f4d475fa988dfbe90f4f4ad1b))
+
 ## [1.87.0](https://github.com/diillson/chatcli/compare/v1.86.0...v1.87.0) (2026-03-25)
 
 
