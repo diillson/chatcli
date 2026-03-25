@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.88.1](https://github.com/diillson/chatcli/compare/v1.88.0...v1.88.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* **windows:** resolve shell via COMSPEC/SHELL env vars instead of hardcoded cmd.exe ([#695](https://github.com/diillson/chatcli/issues/695)) ([095e63e](https://github.com/diillson/chatcli/commit/095e63ebb0116e7dc52a0f784aa8d6a6fd93bcae))
+
 ## [1.88.0](https://github.com/diillson/chatcli/compare/v1.87.0...v1.88.0) (2026-03-25)
 
 
