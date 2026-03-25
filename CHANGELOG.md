@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.87.0](https://github.com/diillson/chatcli/compare/v1.86.0...v1.87.0) (2026-03-25)
+
+
+### Features
+
+* **aiops:** add node monitoring, ReAct loop, approval integration, agentic audit trail ([#691](https://github.com/diillson/chatcli/issues/691)) ([59d9d12](https://github.com/diillson/chatcli/commit/59d9d12512da7101ea5b97dcb36ad29378c06ee5))
+
 ## [1.86.0](https://github.com/diillson/chatcli/compare/v1.85.1...v1.86.0) (2026-03-24)
 
 
