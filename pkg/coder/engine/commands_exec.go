@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -13,6 +14,34 @@ import (
 	"sync"
 	"time"
 )
+
+// resolveShell returns the shell binary and its command flag for the current OS.
+// On Windows it checks SHELL (set by Git Bash/MSYS2), then COMSPEC, then falls back
+// to the absolute path of cmd.exe.
+func resolveShell() (shell, flag string) {
+	if runtime.GOOS != "windows" {
+		return "sh", "-c"
+	}
+
+	// Git Bash / MSYS2 set $SHELL to something like /usr/bin/bash
+	if s := os.Getenv("SHELL"); s != "" {
+		lower := strings.ToLower(s)
+		if strings.Contains(lower, "bash") {
+			return s, "-c"
+		}
+	}
+
+	// COMSPEC is the standard Windows way to locate the command interpreter
+	if comspec := os.Getenv("COMSPEC"); comspec != "" {
+		lower := strings.ToLower(comspec)
+		if strings.Contains(lower, "powershell") || strings.Contains(lower, "pwsh") {
+			return comspec, "-Command"
+		}
+		return comspec, "/C"
+	}
+
+	return `C:\Windows\System32\cmd.exe`, "/C"
+}
 
 func (e *Engine) handleExec(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
@@ -40,12 +69,8 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(*timeout)*time.Second)
 	defer cancel()
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(execCtx, "cmd.exe", "/C", finalCmd)
-	} else {
-		cmd = exec.CommandContext(execCtx, "sh", "-c", finalCmd)
-	}
+	shell, shellFlag := resolveShell()
+	cmd := exec.CommandContext(execCtx, shell, shellFlag, finalCmd)
 	if *dir != "" {
 		if err := e.validatePath(*dir); err != nil {
 			return err
@@ -204,12 +229,8 @@ func runCommand(dir, cmd string, args ...string) (string, error) {
 }
 
 func runCommandWithContext(ctx context.Context, dir, cmdLine string) (string, error) {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd.exe", "/C", cmdLine)
-	} else {
-		cmd = exec.CommandContext(ctx, "sh", "-c", cmdLine)
-	}
+	shell, shellFlag := resolveShell()
+	cmd := exec.CommandContext(ctx, shell, shellFlag, cmdLine)
 	if dir != "" {
 		cmd.Dir = dir
 	}
