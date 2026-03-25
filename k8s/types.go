@@ -154,20 +154,21 @@ const (
 type AlertType string
 
 const (
-	AlertPodCrashLoop  AlertType = "CrashLoopBackOff"
-	AlertPodOOMKilled  AlertType = "OOMKilled"
-	AlertHighRestarts  AlertType = "HighRestartCount"
-	AlertPodNotReady   AlertType = "PodNotReady"
-	AlertScaleEvent    AlertType = "ScaleEvent"
-	AlertDeployFailing AlertType = "DeploymentFailing"
-	AlertJobFailed      AlertType = "JobFailed"
-	AlertCronJobMissed  AlertType = "CronJobMissed"
-	AlertNodeNotReady   AlertType = "NodeNotReady"
-	AlertDiskPressure   AlertType = "DiskPressure"
-	AlertMemoryPressure AlertType = "MemoryPressure"
-	AlertPIDPressure    AlertType = "PIDPressure"
-	AlertNetworkUnavail AlertType = "NetworkUnavailable"
-	AlertNodeUnschedul  AlertType = "NodeUnschedulable"
+	AlertPodCrashLoop    AlertType = "CrashLoopBackOff"
+	AlertPodOOMKilled    AlertType = "OOMKilled"
+	AlertHighRestarts    AlertType = "HighRestartCount"
+	AlertPodNotReady     AlertType = "PodNotReady"
+	AlertScaleEvent      AlertType = "ScaleEvent"
+	AlertDeployFailing   AlertType = "DeploymentFailing"
+	AlertJobFailed       AlertType = "JobFailed"
+	AlertCronJobMissed   AlertType = "CronJobMissed"
+	AlertNodeNotReady    AlertType = "NodeNotReady"
+	AlertDiskPressure    AlertType = "DiskPressure"
+	AlertMemoryPressure  AlertType = "MemoryPressure"
+	AlertPIDPressure     AlertType = "PIDPressure"
+	AlertNetworkUnavail  AlertType = "NetworkUnavailable"
+	AlertNodeUnschedul   AlertType = "NodeUnschedulable"
+	AlertPodCapacityHigh AlertType = "PodCapacityHigh"
 )
 
 // WatchConfig holds configuration for the Kubernetes watcher.

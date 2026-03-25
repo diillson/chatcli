@@ -429,11 +429,14 @@ func (w *ResourceWatcher) detectNodeAnomalies(snap *ResourceSnapshot, now time.T
 			w.store.AddAlert(Alert{
 				Timestamp: now,
 				Severity:  SeverityWarning,
-				Type:      AlertNodeUnschedul,
+				Type:      AlertPodCapacityHigh,
 				Message:   fmt.Sprintf("Node %s pod capacity at %d/%d (>90%%)", node.Name, node.PodCount, node.PodCapacity),
 				Object:    nodeObj,
 				Namespace: w.config.Namespace,
 			})
+			if w.metricsRecorder != nil {
+				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertPodCapacityHigh))
+			}
 		}
 	}
 }

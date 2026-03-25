@@ -126,47 +126,44 @@ func (r *RemediationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 func (r *RemediationReconciler) handleWaitingApproval(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	// Check if the approval annotation was removed (approved or rejected by ApprovalReconciler)
-	if !IsApprovalPending(plan) {
-		// Approval was processed — check if the approval request was approved or rejected
-		arName := fmt.Sprintf("approval-%s", plan.Name)
-		var ar platformv1alpha1.ApprovalRequest
-		if err := r.Get(ctx, types.NamespacedName{Name: arName, Namespace: plan.Namespace}, &ar); err != nil {
-			// ApprovalRequest not found — may have been cleaned up, proceed with execution
-			log.Info("Approval request not found, proceeding with execution", "plan", plan.Name)
-		} else {
-			switch ar.Status.State {
-			case platformv1alpha1.ApprovalStateRejected:
-				rejectedBy, reason := lastDecision(ar.Status.Decisions)
-				log.Info("Approval rejected", "plan", plan.Name, "rejectedBy", rejectedBy)
-				plan.Status.State = platformv1alpha1.RemediationStateFailed
-				plan.Status.Result = fmt.Sprintf("Approval rejected by %s: %s", rejectedBy, reason)
-				return ctrl.Result{}, r.Status().Update(ctx, plan)
-			case platformv1alpha1.ApprovalStateExpired:
-				log.Info("Approval expired", "plan", plan.Name)
-				plan.Status.State = platformv1alpha1.RemediationStateFailed
-				plan.Status.Result = "Approval request expired without decision"
-				return ctrl.Result{}, r.Status().Update(ctx, plan)
-			case platformv1alpha1.ApprovalStateApproved:
-				approvedBy, _ := lastDecision(ar.Status.Decisions)
-				log.Info("Approval granted, proceeding with execution", "plan", plan.Name, "approvedBy", approvedBy)
-			case platformv1alpha1.ApprovalStatePending:
-				// Still waiting
-				log.Info("Still waiting for approval decision", "plan", plan.Name)
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-			}
-		}
+	// Always check the ApprovalRequest CR status directly — not just the annotation.
+	// This prevents bypass via manual annotation deletion.
+	arName := fmt.Sprintf("approval-%s", plan.Name)
+	var ar platformv1alpha1.ApprovalRequest
+	if err := r.Get(ctx, types.NamespacedName{Name: arName, Namespace: plan.Namespace}, &ar); err != nil {
+		log.Info("Approval request not found, failing plan", "plan", plan.Name)
+		plan.Status.State = platformv1alpha1.RemediationStateFailed
+		plan.Status.Result = "Approval request was deleted before decision"
+		return ctrl.Result{}, r.Status().Update(ctx, plan)
+	}
 
-		// Transition to Executing
+	switch ar.Status.State {
+	case platformv1alpha1.ApprovalStateApproved:
+		approvedBy, _ := lastDecision(ar.Status.Decisions)
+		log.Info("Approval granted, proceeding with execution", "plan", plan.Name, "approvedBy", approvedBy)
 		now := metav1.Now()
 		plan.Status.State = platformv1alpha1.RemediationStateExecuting
 		plan.Status.StartedAt = &now
 		plan.Status.Result = ""
 		return ctrl.Result{Requeue: true}, r.Status().Update(ctx, plan)
-	}
 
-	log.Info("Still waiting for approval", "plan", plan.Name)
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	case platformv1alpha1.ApprovalStateRejected:
+		rejectedBy, reason := lastDecision(ar.Status.Decisions)
+		log.Info("Approval rejected", "plan", plan.Name, "rejectedBy", rejectedBy)
+		plan.Status.State = platformv1alpha1.RemediationStateFailed
+		plan.Status.Result = fmt.Sprintf("Approval rejected by %s: %s", rejectedBy, reason)
+		return ctrl.Result{}, r.Status().Update(ctx, plan)
+
+	case platformv1alpha1.ApprovalStateExpired:
+		log.Info("Approval expired", "plan", plan.Name)
+		plan.Status.State = platformv1alpha1.RemediationStateFailed
+		plan.Status.Result = "Approval request expired without decision"
+		return ctrl.Result{}, r.Status().Update(ctx, plan)
+
+	default: // Pending
+		log.Info("Still waiting for approval decision", "plan", plan.Name)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
 }
 
 func (r *RemediationReconciler) handlePending(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
@@ -269,9 +266,6 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 	for i, action := range plan.Spec.Actions {
 		// ReAct: OBSERVE — check if resource is already healthy before running next action
 		if i > 0 {
-			// Brief stabilization wait before health check
-			time.Sleep(5 * time.Second)
-
 			if rollbackEngine.VerifyPostFailureHealth(ctx, resource) {
 				log.Info("Resource healthy after action — early exit (ReAct)",
 					"plan", plan.Name, "actionsExecuted", i, "totalActions", len(plan.Spec.Actions),

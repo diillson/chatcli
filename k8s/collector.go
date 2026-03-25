@@ -694,6 +694,19 @@ func (nc *NodeCollector) Collect(ctx context.Context, pods []PodStatus) []NodeSt
 		}
 	}
 
+	// Count active pods per node in a single API call (instead of N calls)
+	podCountByNode := make(map[string]int32)
+	allPods, err := nc.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+		FieldSelector: "status.phase!=Succeeded,status.phase!=Failed",
+	})
+	if err == nil {
+		for _, p := range allPods.Items {
+			if _, relevant := nodeNames[p.Spec.NodeName]; relevant {
+				podCountByNode[p.Spec.NodeName]++
+			}
+		}
+	}
+
 	// Fetch node objects
 	var result []NodeStatus
 	for nodeName := range nodeNames {
@@ -751,13 +764,8 @@ func (nc *NodeCollector) Collect(ctx context.Context, pods []PodStatus) []NodeSt
 			ns.MemoryUsage = m.mem
 		}
 
-		// Count pods on this node
-		podList, err := nc.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-			FieldSelector: "spec.nodeName=" + node.Name + ",status.phase!=Succeeded,status.phase!=Failed",
-		})
-		if err == nil {
-			ns.PodCount = int32(len(podList.Items))
-		}
+		// Pod count from pre-fetched data
+		ns.PodCount = podCountByNode[node.Name]
 
 		result = append(result, ns)
 	}
