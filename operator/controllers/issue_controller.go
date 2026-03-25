@@ -1067,6 +1067,15 @@ func (r *IssueReconciler) getMaxRemediationAttempts(ctx context.Context) int32 {
 	return 5 // default
 }
 
+// getAgenticMaxSteps reads the agentic max steps from the first Instance's AIOps config.
+func (r *IssueReconciler) getAgenticMaxSteps(ctx context.Context) int32 {
+	cfg := r.getAIOpsConfig(ctx)
+	if cfg != nil {
+		return cfg.GetAgenticMaxSteps()
+	}
+	return 10 // default
+}
+
 // getAIOpsConfig reads the AIOps config from the first Instance.
 func (r *IssueReconciler) getAIOpsConfig(ctx context.Context) *platformv1alpha1.AIOpsSpec {
 	var instances platformv1alpha1.InstanceList
@@ -1096,7 +1105,7 @@ func (r *IssueReconciler) createAgenticRemediationPlan(ctx context.Context, issu
 			Attempt:         attempt,
 			Strategy:        "Agentic AI-driven remediation",
 			AgenticMode:     true,
-			AgenticMaxSteps: r.getAIOpsConfig(ctx).GetAgenticMaxSteps(),
+			AgenticMaxSteps: r.getAgenticMaxSteps(ctx),
 			SafetyConstraints: []string{
 				"No scaling to 0 replicas",
 				"No delete operations without pod count check",

@@ -304,13 +304,13 @@ func MapAlertTypeToSignal(alertType string) platformv1alpha1.AnomalySignalType {
 	case "MemoryPressure":
 		return platformv1alpha1.SignalMemoryHigh
 	case "PIDPressure":
-		return platformv1alpha1.SignalNodeNotReady
+		return platformv1alpha1.SignalPIDPressure
 	case "NetworkUnavailable":
-		return platformv1alpha1.SignalNodeNotReady
+		return platformv1alpha1.SignalNetworkUnavail
 	case "NodeUnschedulable":
 		return platformv1alpha1.SignalNodeNotReady
 	case "PodCapacityHigh":
-		return platformv1alpha1.SignalNodeNotReady
+		return platformv1alpha1.SignalPodCapacityHigh
 
 	// Application signals
 	case "HighErrorRate", "ErrorRate":

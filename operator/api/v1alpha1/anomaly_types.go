@@ -3,7 +3,7 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // AnomalySignalType classifies the kind of anomaly signal.
-// +kubebuilder:validation:Enum=error_rate;latency;pod_restart;cpu_high;memory_high;oom_kill;pod_not_ready;deploy_failing;disk_pressure;node_not_ready;pvc_pending;ingress_error;hpa_maxed;job_failed;cronjob_missed;certificate_expiring;image_pull_error;crashloop_backoff;helm_release_failed;argocd_degraded;config_drift
+// +kubebuilder:validation:Enum=error_rate;latency;pod_restart;cpu_high;memory_high;oom_kill;pod_not_ready;deploy_failing;disk_pressure;node_not_ready;pid_pressure;network_unavailable;pod_capacity_high;pvc_pending;ingress_error;hpa_maxed;job_failed;cronjob_missed;certificate_expiring;image_pull_error;crashloop_backoff;helm_release_failed;argocd_degraded;config_drift
 type AnomalySignalType string
 
 const (
@@ -17,6 +17,9 @@ const (
 	SignalDeployFail        AnomalySignalType = "deploy_failing"
 	SignalDiskPressure      AnomalySignalType = "disk_pressure"
 	SignalNodeNotReady      AnomalySignalType = "node_not_ready"
+	SignalPIDPressure       AnomalySignalType = "pid_pressure"
+	SignalNetworkUnavail    AnomalySignalType = "network_unavailable"
+	SignalPodCapacityHigh   AnomalySignalType = "pod_capacity_high"
 	SignalPVCPending        AnomalySignalType = "pvc_pending"
 	SignalIngressError      AnomalySignalType = "ingress_error"
 	SignalHPAMaxed          AnomalySignalType = "hpa_maxed"
