@@ -291,7 +291,7 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 		}
 
 		// For node actions, capture node-specific snapshot
-		if action.Type == platformv1alpha1.ActionCordonNode || action.Type == platformv1alpha1.ActionDrainNode {
+		if action.Type == platformv1alpha1.ActionCordonNode || action.Type == platformv1alpha1.ActionUncordonNode || action.Type == platformv1alpha1.ActionDrainNode {
 			if nodeName, ok := action.Params["node"]; ok {
 				if nodeSnap, err := rollbackEngine.CaptureNodeSnapshot(ctx, nodeName); err == nil {
 					checkpoint.SnapshotBefore = nodeSnap
@@ -555,6 +555,8 @@ func (r *RemediationReconciler) executeAction(ctx context.Context, resource plat
 		return r.executeRestartStatefulSetPod(ctx, resource, action.Params)
 	case platformv1alpha1.ActionCordonNode:
 		return r.executeCordonNode(ctx, resource, action.Params)
+	case platformv1alpha1.ActionUncordonNode:
+		return r.executeUncordonNode(ctx, resource, action.Params)
 	case platformv1alpha1.ActionDrainNode:
 		return r.executeDrainNode(ctx, resource, action.Params)
 	case platformv1alpha1.ActionResizePVC:

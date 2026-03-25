@@ -732,6 +732,8 @@ func mapActionType(action string) platformv1alpha1.RemediationActionType {
 		return platformv1alpha1.ActionRestartStatefulSetPod
 	case "CordonNode":
 		return platformv1alpha1.ActionCordonNode
+	case "UncordonNode":
+		return platformv1alpha1.ActionUncordonNode
 	case "DrainNode":
 		return platformv1alpha1.ActionDrainNode
 	case "ResizePVC":

@@ -174,39 +174,46 @@ AUTOSCALING ACTIONS:
     Best for: HPA maxed out, autoscaling misconfiguration.
 
 INFRASTRUCTURE ACTIONS:
-11. CordonNode — marks a node as unschedulable.
+11. CordonNode — marks a node as unschedulable (prevents new pods from being scheduled).
     Params: {"node": "node-name"}
-    Best for: node-level issues, disk pressure, hardware problems.
+    Best for: node with DiskPressure, MemoryPressure, or hardware problems — cordon BEFORE draining.
+    IMPORTANT: Do NOT cordon a node that is ALREADY cordoned/unschedulable. If the node is already unschedulable and healthy, use UncordonNode instead.
 
-12. DrainNode — cordons and evicts all pods from a node.
+12. UncordonNode — marks a cordoned node as schedulable again (reverses CordonNode).
     Params: {"node": "node-name"}
-    Best for: urgent node evacuation, node maintenance.
+    Best for: node was cordoned for maintenance and is now healthy, node was incorrectly cordoned, node issues have been resolved.
+    IMPORTANT: Use this when the signal is "node_not_ready" and the node condition is "Unschedulable" but the node is otherwise Ready (all conditions healthy). This RESTORES normal scheduling.
+
+13. DrainNode — cordons and evicts all pods from a node (disruptive).
+    Params: {"node": "node-name"}
+    Best for: urgent node evacuation, node hardware failure, node decommissioning.
+    WARNING: This evicts ALL pods from the node. Only use when the node has actual hardware/kernel issues, NOT for a simple cordon/uncordon situation.
 
 STORAGE ACTIONS:
-13. ResizePVC — expands a PersistentVolumeClaim (expansion only, no shrinking).
+14. ResizePVC — expands a PersistentVolumeClaim (expansion only, no shrinking).
     Params: {"pvc": "pvc-name", "size": "20Gi"}
     Best for: disk pressure, PVC full, storage quota issues.
 
 SECURITY ACTIONS:
-14. RotateSecret — updates secret values or copies from a source secret.
+15. RotateSecret — updates secret values or copies from a source secret.
     Params: {"secret": "name", "sourceSecret": "new-secret-name"} or {"secret": "name", "key": "value"}.
     Best for: expired credentials, certificate rotation.
 
 NETWORKING ACTIONS:
-15. UpdateIngress — modifies Ingress backend or annotations.
+16. UpdateIngress — modifies Ingress backend or annotations.
     Params: {"ingress": "name", "backendService": "svc-name", "backendPort": "8080"}.
     Best for: routing fixes, backend service changes.
 
-16. PatchNetworkPolicy — adds allowed ports to a NetworkPolicy.
+17. PatchNetworkPolicy — adds allowed ports to a NetworkPolicy.
     Params: {"networkPolicy": "name", "allowPort": "8080", "protocol": "TCP"}.
     Best for: connectivity issues caused by restrictive network policies.
 
 ADVANCED ACTIONS:
-17. ApplyManifest — applies a JSON manifest from a ConfigMap.
+18. ApplyManifest — applies a JSON manifest from a ConfigMap.
     Params: {"configmap": "fix-manifest", "key": "manifest.yaml"}.
     Best for: applying pre-prepared fix manifests.
 
-18. ExecDiagnostic — runs a whitelisted diagnostic command in a pod.
+19. ExecDiagnostic — runs a whitelisted diagnostic command in a pod.
     Params: {"command": "df -h"} (only pre-approved commands allowed).
     Best for: gathering diagnostic data before making changes.
 
@@ -451,18 +458,19 @@ AUTOSCALING:
 10. AdjustHPA — modify HPA. Params: {"minReplicas": "N", "maxReplicas": "N", "targetCPUUtilization": "N"}
 
 INFRASTRUCTURE:
-11. CordonNode — mark node unschedulable. Params: {"node": "name"}
-12. DrainNode — evict pods from node. Params: {"node": "name"}
+11. CordonNode — mark node unschedulable. Params: {"node": "name"}. Do NOT use if node is already unschedulable.
+12. UncordonNode — make cordoned node schedulable again. Params: {"node": "name"}. Use when node is unschedulable but healthy.
+13. DrainNode — evict ALL pods from node (disruptive). Params: {"node": "name"}. Only for hardware/kernel failure.
 
 STORAGE:
-13. ResizePVC — expand PVC. Params: {"pvc": "name", "size": "20Gi"}
+14. ResizePVC — expand PVC. Params: {"pvc": "name", "size": "20Gi"}
 
 SECURITY:
-14. RotateSecret — update secret. Params: {"secret": "name", "key": "new-value"} or {"secret": "name", "sourceSecret": "new-src"}
+15. RotateSecret — update secret. Params: {"secret": "name", "key": "new-value"} or {"secret": "name", "sourceSecret": "new-src"}
 
 NETWORKING:
-15. UpdateIngress — fix Ingress. Params: {"ingress": "name", "backendService": "svc", "backendPort": "8080"}
-16. PatchNetworkPolicy — open port. Params: {"networkPolicy": "name", "allowPort": "8080"}
+16. UpdateIngress — fix Ingress. Params: {"ingress": "name", "backendService": "svc", "backendPort": "8080"}
+17. PatchNetworkPolicy — open port. Params: {"networkPolicy": "name", "allowPort": "8080"}
 
 ADVANCED:
 17. ApplyManifest — apply fix from ConfigMap. Params: {"configmap": "fix-cm", "key": "manifest.yaml"}

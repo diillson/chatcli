@@ -7,17 +7,17 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 type RemediationState string
 
 const (
-	RemediationStatePending          RemediationState = "Pending"
-	RemediationStateWaitingApproval  RemediationState = "WaitingApproval"
-	RemediationStateExecuting        RemediationState = "Executing"
-	RemediationStateVerifying        RemediationState = "Verifying"
-	RemediationStateCompleted        RemediationState = "Completed"
-	RemediationStateFailed           RemediationState = "Failed"
-	RemediationStateRolledBack       RemediationState = "RolledBack"
+	RemediationStatePending         RemediationState = "Pending"
+	RemediationStateWaitingApproval RemediationState = "WaitingApproval"
+	RemediationStateExecuting       RemediationState = "Executing"
+	RemediationStateVerifying       RemediationState = "Verifying"
+	RemediationStateCompleted       RemediationState = "Completed"
+	RemediationStateFailed          RemediationState = "Failed"
+	RemediationStateRolledBack      RemediationState = "RolledBack"
 )
 
 // RemediationActionType defines the type of remediation action.
-// +kubebuilder:validation:Enum=ScaleDeployment;RollbackDeployment;RestartDeployment;PatchConfig;AdjustResources;DeletePod;HelmRollback;ArgoSyncApp;AdjustHPA;RestartStatefulSetPod;CordonNode;DrainNode;ResizePVC;RotateSecret;ExecDiagnostic;UpdateIngress;PatchNetworkPolicy;ApplyManifest;ScaleStatefulSet;RestartStatefulSet;RollbackStatefulSet;AdjustStatefulSetResources;DeleteStatefulSetPod;ForceDeleteStatefulSetPod;UpdateStatefulSetStrategy;RecreateStatefulSetPVC;PartitionStatefulSetUpdate;RestartDaemonSet;RollbackDaemonSet;AdjustDaemonSetResources;DeleteDaemonSetPod;UpdateDaemonSetStrategy;PauseDaemonSetRollout;CordonAndDeleteDaemonSetPod;RetryJob;AdjustJobResources;DeleteFailedJob;SuspendJob;ResumeJob;AdjustJobParallelism;AdjustJobDeadline;AdjustJobBackoffLimit;ForceDeleteJobPods;SuspendCronJob;ResumeCronJob;TriggerCronJob;AdjustCronJobResources;AdjustCronJobSchedule;AdjustCronJobDeadline;AdjustCronJobHistory;AdjustCronJobConcurrency;DeleteCronJobActiveJobs;ReplaceCronJobTemplate;Custom
+// +kubebuilder:validation:Enum=ScaleDeployment;RollbackDeployment;RestartDeployment;PatchConfig;AdjustResources;DeletePod;HelmRollback;ArgoSyncApp;AdjustHPA;RestartStatefulSetPod;CordonNode;UncordonNode;DrainNode;ResizePVC;RotateSecret;ExecDiagnostic;UpdateIngress;PatchNetworkPolicy;ApplyManifest;ScaleStatefulSet;RestartStatefulSet;RollbackStatefulSet;AdjustStatefulSetResources;DeleteStatefulSetPod;ForceDeleteStatefulSetPod;UpdateStatefulSetStrategy;RecreateStatefulSetPVC;PartitionStatefulSetUpdate;RestartDaemonSet;RollbackDaemonSet;AdjustDaemonSetResources;DeleteDaemonSetPod;UpdateDaemonSetStrategy;PauseDaemonSetRollout;CordonAndDeleteDaemonSetPod;RetryJob;AdjustJobResources;DeleteFailedJob;SuspendJob;ResumeJob;AdjustJobParallelism;AdjustJobDeadline;AdjustJobBackoffLimit;ForceDeleteJobPods;SuspendCronJob;ResumeCronJob;TriggerCronJob;AdjustCronJobResources;AdjustCronJobSchedule;AdjustCronJobDeadline;AdjustCronJobHistory;AdjustCronJobConcurrency;DeleteCronJobActiveJobs;ReplaceCronJobTemplate;Custom
 type RemediationActionType string
 
 const (
@@ -33,6 +33,7 @@ const (
 	ActionAdjustHPA             RemediationActionType = "AdjustHPA"
 	ActionRestartStatefulSetPod RemediationActionType = "RestartStatefulSetPod"
 	ActionCordonNode            RemediationActionType = "CordonNode"
+	ActionUncordonNode          RemediationActionType = "UncordonNode"
 	ActionDrainNode             RemediationActionType = "DrainNode"
 	ActionResizePVC             RemediationActionType = "ResizePVC"
 	ActionRotateSecret          RemediationActionType = "RotateSecret"
