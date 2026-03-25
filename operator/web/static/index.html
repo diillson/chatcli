@@ -194,6 +194,14 @@ body {
 }
 .panel-title { font-size: 0.9rem; font-weight: 600; }
 .panel-body { padding: 1.25rem; }
+.drag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+.drag-grid .panel-full { grid-column: 1 / -1; }
+.drag-grip { color: var(--text-dim); margin-right: 0.5rem; font-size: 1rem; cursor: grab; user-select: none; }
+.drag-grip:active { cursor: grabbing; }
+.panel[draggable="true"] .panel-header { cursor: grab; }
+.panel[draggable="true"] .panel-header:active { cursor: grabbing; }
+.panel.drag-over { border: 2px dashed var(--accent); background: rgba(233, 69, 96, 0.05); }
+.panel.dragging { opacity: 0.3; transform: scale(0.98); }
 
 /* ===== TABLE ===== */
 .table-wrap { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
@@ -597,40 +605,36 @@ tr.expandable { cursor: pointer; }
   <!-- OVERVIEW PAGE -->
   <div class="page active" id="page-overview">
     <div class="stats-grid" id="overviewStats"></div>
-    <div class="grid-2">
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">Issues by Severity</span></div>
+    <div id="capacityWarnings"></div>
+    <div class="drag-grid" id="overviewPanels">
+      <div class="panel" draggable="true" data-panel-id="severityPie">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Issues by Severity</span></div>
         <div class="panel-body" id="severityPie"></div>
       </div>
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">Platform Resources</span></div>
+      <div class="panel" draggable="true" data-panel-id="platformResources">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Platform Resources</span></div>
         <div class="panel-body" id="platformResources"></div>
       </div>
-    </div>
-    <div class="grid-2">
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">Remediation Activity</span></div>
+      <div class="panel" draggable="true" data-panel-id="remediationTimeline">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Remediation Activity</span></div>
         <div class="panel-body" id="remediationTimeline"></div>
       </div>
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">Remediation by Strategy</span></div>
+      <div class="panel" draggable="true" data-panel-id="remediationStrategyChart">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Remediation by Strategy</span></div>
         <div class="panel-body" id="remediationStrategyChart"></div>
       </div>
-    </div>
-    <div id="capacityWarnings"></div>
-    <div class="grid-2">
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">Compliance & SLA</span></div>
+      <div class="panel" draggable="true" data-panel-id="complianceCard">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Compliance & SLA</span></div>
         <div class="panel-body" id="complianceCard"></div>
       </div>
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">MTTD & MTTR Trend</span></div>
+      <div class="panel" draggable="true" data-panel-id="mttdMttrTrend">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">MTTD & MTTR Trend</span></div>
         <div class="panel-body" id="mttdMttrTrend"></div>
       </div>
-    </div>
-    <div class="panel">
-      <div class="panel-header"><span class="panel-title">Recent Incidents</span></div>
-      <div class="panel-body table-wrap" id="recentIncidentsTable"></div>
+      <div class="panel panel-full" draggable="true" data-panel-id="recentIncidentsTable">
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Recent Incidents</span></div>
+        <div class="panel-body table-wrap" id="recentIncidentsTable"></div>
+      </div>
     </div>
   </div>
 
@@ -838,6 +842,82 @@ let expandedRows = new Set();
 
 // Sort state per tab: { tabName: { colIdx, asc } }
 const sortState = {};
+
+// Drag-and-drop panel reordering
+let draggedPanel = null;
+
+function initDragPanels(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  // Restore saved order
+  const savedOrder = localStorage.getItem('panelOrder_' + containerId);
+  if (savedOrder) {
+    try {
+      const order = JSON.parse(savedOrder);
+      const panels = Array.from(container.querySelectorAll('.panel[data-panel-id]'));
+      const panelMap = {};
+      panels.forEach(p => { panelMap[p.dataset.panelId] = p; });
+      order.forEach(id => {
+        const p = panelMap[id];
+        if (p) container.appendChild(p);
+      });
+    } catch {}
+  }
+
+  container.addEventListener('dragstart', e => {
+    const panel = e.target.closest('.panel[draggable]');
+    if (!panel) return;
+    draggedPanel = panel;
+    panel.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', panel.dataset.panelId);
+  });
+
+  container.addEventListener('dragend', e => {
+    const panel = e.target.closest('.panel[draggable]');
+    if (panel) panel.classList.remove('dragging');
+    container.querySelectorAll('.panel').forEach(p => p.classList.remove('drag-over'));
+    draggedPanel = null;
+  });
+
+  container.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const target = e.target.closest('.panel[draggable]');
+    if (!target || target === draggedPanel) return;
+    container.querySelectorAll('.panel').forEach(p => p.classList.remove('drag-over'));
+    target.classList.add('drag-over');
+  });
+
+  container.addEventListener('dragleave', e => {
+    const target = e.target.closest('.panel[draggable]');
+    if (target) target.classList.remove('drag-over');
+  });
+
+  container.addEventListener('drop', e => {
+    e.preventDefault();
+    const target = e.target.closest('.panel[draggable]');
+    if (!target || !draggedPanel || target === draggedPanel) return;
+    target.classList.remove('drag-over');
+
+    // Determine insertion position
+    const panels = Array.from(container.querySelectorAll('.panel[data-panel-id]'));
+    const dragIdx = panels.indexOf(draggedPanel);
+    const dropIdx = panels.indexOf(target);
+
+    if (dragIdx < dropIdx) {
+      target.after(draggedPanel);
+    } else {
+      target.before(draggedPanel);
+    }
+
+    // Save order to localStorage
+    const newOrder = Array.from(container.querySelectorAll('.panel[data-panel-id]'))
+      .map(p => p.dataset.panelId);
+    localStorage.setItem('panelOrder_' + containerId, JSON.stringify(newOrder));
+  });
+}
 
 // ===== UTILITY FUNCTIONS =====
 
@@ -1324,18 +1404,23 @@ async function loadMttdMttrTrend() {
     }
 
     const formatDuration = (secs) => {
+      if (secs === 0) return '< 1s';
       if (secs < 60) return Math.round(secs) + 's';
       if (secs < 3600) return (secs / 60).toFixed(1) + 'm';
       return (secs / 3600).toFixed(1) + 'h';
     };
 
     // Show latest values as stats + recent trend as mini bars
-    const latestMttd = mttd.length > 0 ? mttd[mttd.length - 1].value : null;
-    const latestMttr = mttr.length > 0 ? mttr[mttr.length - 1].value : null;
+    const latestMttdEntry = mttd.length > 0 ? mttd[mttd.length - 1] : null;
+    const latestMttrEntry = mttr.length > 0 ? mttr[mttr.length - 1] : null;
+    const latestMttd = latestMttdEntry ? latestMttdEntry.value : null;
+    const latestMttr = latestMttrEntry ? latestMttrEntry.value : null;
+    const mttdSamples = latestMttdEntry ? latestMttdEntry.count : 0;
+    const mttrSamples = latestMttrEntry ? latestMttrEntry.count : 0;
 
     const maxMttr = Math.max(...mttr.map(m => m.value), 1);
     const trendBars = mttr.slice(-10).map(m =>
-      `<div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;">
+      `<div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;" title="${m.date}: ${formatDuration(m.value)} (${m.count} samples)">
         <div style="width:100%; background:var(--accent); border-radius:2px; height:${Math.max(4, (m.value / maxMttr) * 40)}px;"></div>
         <span style="font-size:0.5rem; color:var(--text-muted)">${m.date?.slice(5) || ''}</span>
       </div>`
@@ -1346,10 +1431,12 @@ async function loadMttdMttrTrend() {
         <div style="text-align:center; flex:1;">
           <div style="font-size:1.4rem; font-weight:700; color:var(--success)">${latestMttd !== null ? formatDuration(latestMttd) : '-'}</div>
           <div style="font-size:0.7rem; color:var(--text-muted)">MTTD (Detect)</div>
+          <div style="font-size:0.6rem; color:var(--text-dim)">${mttdSamples} samples</div>
         </div>
         <div style="text-align:center; flex:1;">
           <div style="font-size:1.4rem; font-weight:700; color:var(--accent)">${latestMttr !== null ? formatDuration(latestMttr) : '-'}</div>
           <div style="font-size:0.7rem; color:var(--text-muted)">MTTR (Resolve)</div>
+          <div style="font-size:0.6rem; color:var(--text-dim)">${mttrSamples} samples</div>
         </div>
       </div>
       ${trendBars ? `<div style="display:flex; gap:2px; align-items:flex-end; height:50px;">${trendBars}</div>
@@ -2495,6 +2582,7 @@ async function updateApprovalBadge() {
 // ===== INIT =====
 
 document.addEventListener('DOMContentLoaded', () => {
+  initDragPanels('overviewPanels');
   loadOverview();
   checkHealth();
   updateApprovalBadge();
