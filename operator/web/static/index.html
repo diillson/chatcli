@@ -196,7 +196,8 @@ body {
 .panel-body { padding: 1.25rem; }
 
 /* ===== TABLE ===== */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
+.table-wrap table thead { position: sticky; top: 0; z-index: 2; background: var(--card-bg); }
 table { width: 100%; border-collapse: collapse; }
 th {
   text-align: left;
@@ -825,6 +826,9 @@ let refreshCountdown = 30;
 let refreshSeconds = 30; // 0 = off
 let expandedRows = new Set();
 
+// Sort state per tab: { tabName: { colIdx, asc } }
+const sortState = {};
+
 // ===== UTILITY FUNCTIONS =====
 
 async function apiFetch(path, opts = {}) {
@@ -852,58 +856,78 @@ function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
 
 // Sortable table columns — click header to sort ascending, click again for descending
-function makeSortable(tableEl) {
+function sortTableByCol(tableEl, colIdx, asc) {
+  const tbody = tableEl.querySelector('tbody');
+  if (!tbody) return;
+  const rows = Array.from(tbody.querySelectorAll('tr:not(.expand-row)'));
+  rows.sort((a, b) => {
+    const aSortVal = a.cells[colIdx]?.dataset.sortValue;
+    const bSortVal = b.cells[colIdx]?.dataset.sortValue;
+    if (aSortVal !== undefined && bSortVal !== undefined) {
+      const an = parseFloat(aSortVal), bn = parseFloat(bSortVal);
+      if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+      return asc ? aSortVal.localeCompare(bSortVal) : bSortVal.localeCompare(aSortVal);
+    }
+    const av = (a.cells[colIdx]?.textContent || '').trim().toLowerCase();
+    const bv = (b.cells[colIdx]?.textContent || '').trim().toLowerCase();
+    const an = parseFloat(av), bn = parseFloat(bv);
+    if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+    const timeToSecs = s => {
+      const m = s.match(/^(\d+)(s|m|h|d) ago$/);
+      if (!m) return NaN;
+      const v = parseInt(m[1]);
+      switch(m[2]) { case 's': return v; case 'm': return v*60; case 'h': return v*3600; case 'd': return v*86400; }
+      return NaN;
+    };
+    const at = timeToSecs(av), bt = timeToSecs(bv);
+    if (!isNaN(at) && !isNaN(bt)) return asc ? at - bt : bt - at;
+    return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  rows.forEach(r => {
+    tbody.appendChild(r);
+    const expandRow = tbody.querySelector(`.expand-row[data-parent="${r.dataset.rowId}"]`);
+    if (expandRow) tbody.appendChild(expandRow);
+  });
+  const headers = tableEl.querySelectorAll('thead th');
+  headers.forEach(h => h.textContent = h.textContent.replace(/ [▲▼]$/, ''));
+  if (headers[colIdx]) headers[colIdx].textContent += asc ? ' ▲' : ' ▼';
+}
+
+function makeSortable(tableEl, defaultSortCol) {
   if (!tableEl) return;
   const headers = tableEl.querySelectorAll('thead th');
+
+  // Find timestamp column as default sort if not specified
+  if (defaultSortCol === undefined) {
+    headers.forEach((th, i) => {
+      const txt = th.textContent.toLowerCase();
+      if (txt.includes('created') || txt.includes('age') || txt.includes('timestamp') || txt.includes('time')) {
+        defaultSortCol = i;
+      }
+    });
+  }
+
   headers.forEach((th, colIdx) => {
     if (!th.textContent.trim()) return;
     th.style.cursor = 'pointer';
     th.style.userSelect = 'none';
     th.title = 'Click to sort';
     th.addEventListener('click', () => {
-      const tbody = tableEl.querySelector('tbody');
-      if (!tbody) return;
-      const rows = Array.from(tbody.querySelectorAll('tr:not(.expand-row)'));
-      const asc = th.dataset.sortDir !== 'asc';
-      th.dataset.sortDir = asc ? 'asc' : 'desc';
-      headers.forEach(h => { if (h !== th) delete h.dataset.sortDir; });
-      rows.sort((a, b) => {
-        // Priority 1: data-sort-value attribute (used for timestamps and numeric values)
-        const aSortVal = a.cells[colIdx]?.dataset.sortValue;
-        const bSortVal = b.cells[colIdx]?.dataset.sortValue;
-        if (aSortVal !== undefined && bSortVal !== undefined) {
-          const an = parseFloat(aSortVal), bn = parseFloat(bSortVal);
-          if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
-          return asc ? aSortVal.localeCompare(bSortVal) : bSortVal.localeCompare(aSortVal);
-        }
-        // Priority 2: text content
-        const av = (a.cells[colIdx]?.textContent || '').trim().toLowerCase();
-        const bv = (b.cells[colIdx]?.textContent || '').trim().toLowerCase();
-        // Try numeric
-        const an = parseFloat(av), bn = parseFloat(bv);
-        if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
-        // Try timestamp patterns (Xm ago, Xh ago, Xd ago)
-        const timeToSecs = s => {
-          const m = s.match(/^(\d+)(s|m|h|d) ago$/);
-          if (!m) return NaN;
-          const v = parseInt(m[1]);
-          switch(m[2]) { case 's': return v; case 'm': return v*60; case 'h': return v*3600; case 'd': return v*86400; }
-          return NaN;
-        };
-        const at = timeToSecs(av), bt = timeToSecs(bv);
-        if (!isNaN(at) && !isNaN(bt)) return asc ? at - bt : bt - at;
-        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
-      });
-      rows.forEach(r => {
-        tbody.appendChild(r);
-        // Move expand row right after its parent if it exists
-        const expandRow = tbody.querySelector(`.expand-row[data-parent="${r.dataset.rowId}"]`);
-        if (expandRow) tbody.appendChild(expandRow);
-      });
-      headers.forEach(h => h.textContent = h.textContent.replace(/ [▲▼]$/, ''));
-      th.textContent += asc ? ' ▲' : ' ▼';
+      const saved = sortState[currentTab];
+      const asc = (saved && saved.colIdx === colIdx) ? !saved.asc : (colIdx === defaultSortCol ? false : true);
+      sortState[currentTab] = { colIdx, asc };
+      sortTableByCol(tableEl, colIdx, asc);
     });
   });
+
+  // Restore saved sort or apply default (timestamp DESC = newest first)
+  const saved = sortState[currentTab];
+  if (saved !== undefined) {
+    sortTableByCol(tableEl, saved.colIdx, saved.asc);
+  } else if (defaultSortCol !== undefined) {
+    sortState[currentTab] = { colIdx: defaultSortCol, asc: false };
+    sortTableByCol(tableEl, defaultSortCol, false);
+  }
 }
 
 // ── Time Range Picker ──────────────────────────────────────────────────
