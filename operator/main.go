@@ -3,9 +3,14 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	uberzap "go.uber.org/zap"
+	"gopkg.in/yaml.v3"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -238,6 +243,12 @@ func main() {
 		aiopsPort = "8090"
 	}
 	apiServer := rest.NewAPIServer(mgr.GetClient(), ":"+aiopsPort)
+
+	// Load API keys from ConfigMap chatcli-operator-config (field: api-keys)
+	// and start a watcher to hot-reload on changes (no restart needed)
+	loadAPIKeysFromConfigMap(kubeClientset, apiServer)
+	go watchAPIKeysConfigMap(kubeClientset, apiServer)
+
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server")
 		os.Exit(1)
@@ -267,4 +278,112 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// apiKeyEntry represents a single API key entry from the ConfigMap.
+type apiKeyEntry struct {
+	Key         string `yaml:"key"`
+	Role        string `yaml:"role"`
+	Description string `yaml:"description"`
+}
+
+// loadAPIKeysFromConfigMap reads API keys from the chatcli-operator-config ConfigMap.
+// The ConfigMap field "api-keys" contains a YAML list of {key, role, description}.
+func loadAPIKeysFromConfigMap(clientset kubernetes.Interface, apiServer *rest.APIServer) {
+	configMapName := "chatcli-operator-config"
+	namespace := resolveNamespace()
+
+	cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), configMapName, metav1.GetOptions{})
+	if err != nil {
+		setupLog.Info("no API keys ConfigMap found, REST API running in dev mode (no auth)",
+			"configmap", fmt.Sprintf("%s/%s", namespace, configMapName))
+		return
+	}
+
+	apiKeysYAML, ok := cm.Data["api-keys"]
+	if !ok || strings.TrimSpace(apiKeysYAML) == "" {
+		setupLog.Info("ConfigMap found but no api-keys field, REST API running in dev mode")
+		return
+	}
+
+	var entries []apiKeyEntry
+	if err := yaml.Unmarshal([]byte(apiKeysYAML), &entries); err != nil {
+		setupLog.Error(err, "failed to parse api-keys from ConfigMap")
+		return
+	}
+
+	keys := make(map[string]string)
+	for _, e := range entries {
+		if e.Key != "" && e.Role != "" {
+			keys[e.Key] = e.Role
+			setupLog.Info("loaded API key", "role", e.Role, "description", e.Description)
+		}
+	}
+
+	if len(keys) > 0 {
+		apiServer.SetAPIKeys(keys)
+		setupLog.Info("REST API authentication enabled", "keys", len(keys))
+	}
+}
+
+// watchAPIKeysConfigMap polls the ConfigMap for changes and hot-reloads API keys.
+func watchAPIKeysConfigMap(clientset kubernetes.Interface, apiServer *rest.APIServer) {
+	configMapName := "chatcli-operator-config"
+	namespace := resolveNamespace()
+
+	var lastResourceVersion string
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), configMapName, metav1.GetOptions{})
+		if err != nil {
+			// ConfigMap deleted or not found — revert to dev mode (no auth)
+			if lastResourceVersion != "" {
+				apiServer.SetAPIKeys(make(map[string]string))
+				lastResourceVersion = ""
+				setupLog.Info("API keys ConfigMap removed, REST API reverted to dev mode (no auth)")
+			}
+			continue
+		}
+
+		if cm.ResourceVersion == lastResourceVersion {
+			continue
+		}
+		lastResourceVersion = cm.ResourceVersion
+
+		apiKeysYAML, ok := cm.Data["api-keys"]
+		if !ok || strings.TrimSpace(apiKeysYAML) == "" {
+			apiServer.SetAPIKeys(make(map[string]string))
+			setupLog.Info("api-keys field empty or removed, REST API reverted to dev mode (no auth)")
+			continue
+		}
+
+		var entries []apiKeyEntry
+		if err := yaml.Unmarshal([]byte(apiKeysYAML), &entries); err != nil {
+			setupLog.Error(err, "failed to parse api-keys on hot-reload")
+			continue
+		}
+
+		keys := make(map[string]string)
+		for _, e := range entries {
+			if e.Key != "" && e.Role != "" {
+				keys[e.Key] = e.Role
+			}
+		}
+
+		apiServer.SetAPIKeys(keys)
+		setupLog.Info("API keys hot-reloaded from ConfigMap", "keys", len(keys))
+	}
+}
+
+// resolveNamespace returns the namespace the operator is running in.
+func resolveNamespace() string {
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		return ns
+	}
+	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+		return strings.TrimSpace(string(data))
+	}
+	return "chatcli-system"
 }

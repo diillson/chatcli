@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	v1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
@@ -80,7 +81,8 @@ type APIServer struct {
 	client        client.Client
 	listenAddr    string
 	apiKeyHeader  string
-	apiKeys       map[string]string // role -> key
+	apiKeysMu     sync.RWMutex
+	apiKeys       map[string]string // key -> role
 	limiter       *rateLimiter
 	corsOrigin    string
 	watcherBridge WatcherDedupInvalidator // optional, for dedup invalidation on manual resolve
@@ -98,8 +100,11 @@ func NewAPIServer(c client.Client, addr string) *APIServer {
 	}
 }
 
-// SetAPIKeys configures API keys. Keys map role names to API key strings.
+// SetAPIKeys configures API keys. Keys map API key strings to role names.
+// Thread-safe: can be called at any time to hot-reload keys.
 func (s *APIServer) SetAPIKeys(keys map[string]string) {
+	s.apiKeysMu.Lock()
+	defer s.apiKeysMu.Unlock()
 	s.apiKeys = keys
 }
 

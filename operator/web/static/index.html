@@ -582,6 +582,7 @@ tr.expandable { cursor: pointer; }
       <button class="btn" style="padding:0.2rem 0.5rem; font-size:0.75rem;" onclick="manualRefresh()" title="Refresh now">&#8635;</button>
     </div>
     <span class="health-badge health-ok" id="healthBadge">Healthy</span>
+    <button class="btn" id="logoutBtn" style="padding:0.2rem 0.5rem;font-size:0.7rem;opacity:0.7;display:none" onclick="logoutApiKey()" title="Change API key">&#128274;</button>
   </div>
 </header>
 
@@ -834,6 +835,7 @@ tr.expandable { cursor: pointer; }
 // ============================================================
 
 const API = '/api/v1';
+let apiKey = localStorage.getItem('chatcli_api_key') || '';
 let currentTab = 'overview';
 let refreshInterval = null;
 let refreshCountdown = 30;
@@ -923,10 +925,16 @@ function initDragPanels(containerId) {
 
 async function apiFetch(path, opts = {}) {
   try {
-    const res = await fetch(API + path, {
-      headers: { 'Content-Type': 'application/json', ...opts.headers },
-      ...opts,
-    });
+    const headers = { 'Content-Type': 'application/json', ...opts.headers };
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    const res = await fetch(API + path, { ...opts, headers });
+    if (res.status === 401) {
+      apiKey = '';
+      localStorage.removeItem('chatcli_api_key');
+      updateLogoutBtn();
+      promptApiKey();
+      throw new Error('Authentication required');
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: res.statusText }));
       throw new Error(err.message || res.statusText);
@@ -940,6 +948,56 @@ async function apiFetch(path, opts = {}) {
 
 async function apiPost(path, body) {
   return apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
+}
+
+function promptApiKey() {
+  const existing = document.getElementById('apiKeyOverlay');
+  if (existing) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'apiKeyOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9999';
+  overlay.innerHTML = `
+    <div style="background:var(--bg-card,#16213e);border-radius:12px;padding:32px;max-width:420px;width:90%;text-align:center">
+      <h2 style="margin-bottom:12px;color:var(--text,#e0e0e0)">API Key Required</h2>
+      <p style="margin-bottom:20px;color:var(--text-muted,#8892a4);font-size:14px">Enter your API key to access the dashboard.</p>
+      <input id="apiKeyInput" type="password" placeholder="ck_live_..." style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid var(--accent,#0f3460);background:var(--bg,#1a1a2e);color:var(--text,#e0e0e0);font-size:14px;margin-bottom:16px;outline:none" />
+      <div><button id="apiKeySubmit" style="padding:10px 32px;border-radius:8px;border:none;background:var(--success,#00b4d8);color:#fff;font-weight:600;cursor:pointer;font-size:14px">Connect</button></div>
+      <p id="apiKeyError" style="color:var(--highlight,#e94560);font-size:12px;margin-top:12px;display:none">Invalid API key. Please try again.</p>
+    </div>`;
+  document.body.appendChild(overlay);
+  const input = document.getElementById('apiKeyInput');
+  const btn = document.getElementById('apiKeySubmit');
+  const errMsg = document.getElementById('apiKeyError');
+  async function submit() {
+    const key = input.value.trim();
+    if (!key) return;
+    btn.disabled = true; btn.textContent = 'Verifying...';
+    try {
+      const res = await fetch(API + '/incidents?pageSize=1', { headers: { 'X-API-Key': key } });
+      if (res.status === 401) { errMsg.style.display = 'block'; btn.disabled = false; btn.textContent = 'Connect'; return; }
+      apiKey = key;
+      localStorage.setItem('chatcli_api_key', key);
+      overlay.remove();
+      updateLogoutBtn();
+      switchTab(currentTab);
+    } catch { errMsg.style.display = 'block'; btn.disabled = false; btn.textContent = 'Connect'; }
+  }
+  btn.addEventListener('click', submit);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+  input.focus();
+}
+
+function logoutApiKey() {
+  apiKey = '';
+  localStorage.removeItem('chatcli_api_key');
+  const btn = document.getElementById('logoutBtn');
+  if (btn) btn.style.display = 'none';
+  promptApiKey();
+}
+
+function updateLogoutBtn() {
+  const btn = document.getElementById('logoutBtn');
+  if (btn) btn.style.display = apiKey ? 'inline-block' : 'none';
 }
 
 function $(sel) { return document.querySelector(sel); }
@@ -2546,7 +2604,9 @@ async function exportAudit() {
   if (type) q += 'type=' + encodeURIComponent(type) + '&';
   if (sev) q += 'severity=' + encodeURIComponent(sev) + '&';
   try {
-    const res = await fetch(API + '/audit/export' + q);
+    const hdrs = {};
+    if (apiKey) hdrs['X-API-Key'] = apiKey;
+    const res = await fetch(API + '/audit/export' + q, { headers: hdrs });
     if (!res.ok) throw new Error(res.statusText);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -2582,6 +2642,7 @@ async function updateApprovalBadge() {
 // ===== INIT =====
 
 document.addEventListener('DOMContentLoaded', () => {
+  updateLogoutBtn();
   initDragPanels('overviewPanels');
   loadOverview();
   checkHealth();
