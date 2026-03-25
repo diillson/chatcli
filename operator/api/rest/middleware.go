@@ -28,8 +28,12 @@ func roleFromContext(ctx context.Context) string {
 // authMiddleware checks the X-API-Key header and maps to a role.
 func (s *APIServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.apiKeysMu.RLock()
+		keysLen := len(s.apiKeys)
+		s.apiKeysMu.RUnlock()
+
 		// If no keys are configured, allow all (development mode).
-		if len(s.apiKeys) == 0 {
+		if keysLen == 0 {
 			ctx := context.WithValue(r.Context(), contextKeyRole, "admin")
 			ctx = context.WithValue(ctx, contextKeyAPIKey, "dev-mode")
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -43,14 +47,10 @@ func (s *APIServer) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Find the role for this key.
-		role := ""
-		for r, k := range s.apiKeys {
-			if k == apiKey {
-				role = r
-				break
-			}
-		}
-		if role == "" {
+		s.apiKeysMu.RLock()
+		role, ok := s.apiKeys[apiKey]
+		s.apiKeysMu.RUnlock()
+		if !ok {
 			writeError(w, http.StatusUnauthorized, "invalid API key")
 			return
 		}
