@@ -683,8 +683,13 @@ func watcherPolicyRules() []rbacv1.PolicyRule {
 		},
 		{
 			APIGroups: []string{"metrics.k8s.io"},
-			Resources: []string{"pods"},
+			Resources: []string{"pods", "nodes"},
 			Verbs:     []string{"get", "list"},
+		},
+		{
+			APIGroups: []string{""},
+			Resources: []string{"nodes"},
+			Verbs:     []string{"get", "list", "watch"},
 		},
 	}
 }
