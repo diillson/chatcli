@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.88.2](https://github.com/diillson/chatcli/compare/v1.88.1...v1.88.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* **history:** create parent directory for custom HISTORY_FILE path ([#697](https://github.com/diillson/chatcli/issues/697)) ([6603863](https://github.com/diillson/chatcli/commit/660386336673958e1ad4ca164941e61a8fff188b))
+
 ## [1.88.1](https://github.com/diillson/chatcli/compare/v1.88.0...v1.88.1) (2026-03-25)
 
 
