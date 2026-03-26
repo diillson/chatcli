@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,16 @@ func NewHistoryManager(logger *zap.Logger) *HistoryManager {
 			zap.String("path", rawPath),
 			zap.Error(err))
 		finalPath = rawPath
+	}
+
+	// Ensure the parent directory exists so that both Load and Append work
+	// even when the user provides a custom path via HISTORY_FILE.
+	if dir := filepath.Dir(finalPath); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			logger.Warn("Falha ao criar diretório do arquivo de histórico",
+				zap.String("dir", dir),
+				zap.Error(err))
+		}
 	}
 
 	return &HistoryManager{
