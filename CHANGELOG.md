@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.88.3](https://github.com/diillson/chatcli/compare/v1.88.2...v1.88.3) (2026-03-27)
+
+
+### Bug Fixes
+
+* **ux:** add mode awareness to system prompts and AI response language support ([#699](https://github.com/diillson/chatcli/issues/699)) ([e41c6f8](https://github.com/diillson/chatcli/commit/e41c6f8976ae041dc908013976f38bc1be662f5e))
+
 ## [1.88.2](https://github.com/diillson/chatcli/compare/v1.88.1...v1.88.2) (2026-03-26)
 
 
