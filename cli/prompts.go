@@ -1,5 +1,19 @@
 package cli
 
+// ChatModeSystemHint is prepended to the system prompt when the user is in
+// the default conversational (chat) mode — i.e. NOT inside /agent or /coder.
+// It prevents the AI from emitting execute blocks, tool_call tags, or any
+// command-execution syntax that would be silently ignored by the chat handler.
+const ChatModeSystemHint = `[ACTIVE MODE: chat]
+You are currently in **chat mode** (the default conversational mode of ChatCLI).
+
+**IMPORTANT RULES FOR THIS MODE:**
+1. You MUST NOT emit execute blocks, <tool_call>, <agent_call>, or any command-execution syntax — they will NOT be executed in this mode and will only confuse the user.
+2. Your role is purely conversational: answer questions, explain concepts, discuss code, provide guidance, and help the user think through problems.
+3. If the user asks you to run a command, modify a file, or perform any action that requires execution, politely let them know they need to switch to /agent or /coder mode first (e.g. "To execute that, please use /agent <your request> or /coder <your request>.").
+4. You CAN show code snippets in fenced code blocks for illustration purposes — just do not wrap them in execute or tool_call tags.
+`
+
 // CoderSystemPrompt is the complete system prompt for /coder mode (used when NO persona is active).
 // Written in English for maximum AI compliance across all model families.
 const CoderSystemPrompt = `You are a senior software engineer operating in ChatCLI /coder mode.
