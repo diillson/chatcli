@@ -69,7 +69,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 
 	fmt.Println()
 	fmt.Println(purple + bold + "╔══════════════════════════════════════════════════════════╗" + reset)
-	fmt.Println(purple + bold + "║              🔒 " + i18n.T("coder.security.header") + "                            ║" + reset)
+	fmt.Println(purple + bold + "║              🔒 " + i18n.T("coder.security.header") + "║" + reset)
 	fmt.Println(purple + bold + "╚══════════════════════════════════════════════════════════╝" + reset)
 
 	// --- Agent context (parallel mode) ---

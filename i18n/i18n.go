@@ -16,6 +16,7 @@ import (
 var localesFS embed.FS
 
 var printer *message.Printer
+var activeTag language.Tag
 var initOnce sync.Once
 
 // defaultLang é o idioma padrão caso a detecção falhe.
@@ -96,7 +97,14 @@ func initI18n() {
 	bestTag, _, _ := matcher.Match(userLang)
 
 	// 4. Configurar o printer global para o melhor idioma encontrado.
+	activeTag = bestTag
 	printer = message.NewPrinter(bestTag)
+}
+
+// ActiveTag returns the resolved language tag (e.g. "pt-BR", "en-US", "en").
+func ActiveTag() language.Tag {
+	Init() // ensure initialized
+	return activeTag
 }
 
 // T é a função principal para obter uma string traduzida.

@@ -132,6 +132,14 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	var systemParts []models.ContentBlock
 
+	// Part 0: Mode awareness + language instruction
+	modeAndLang := ChatModeSystemHint + "\n" + i18n.T("ai.response_language")
+	systemParts = append(systemParts, models.ContentBlock{
+		Type:         "text",
+		Text:         modeAndLang,
+		CacheControl: &models.CacheControl{Type: "ephemeral"},
+	})
+
 	// Part 1: Workspace context (SOUL.md, USER.md, IDENTITY.md, RULES.md, MEMORY.md)
 	// Extract hints from recent messages for smart memory retrieval
 	if cli.contextBuilder != nil {

@@ -297,6 +297,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		systemInstruction = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
 	}
 
+	// Append language instruction so the AI responds in the user's locale
+	systemInstruction += "\n\n" + i18n.T("ai.response_language")
+
 	a.isCoderMode = isCoder
 	a.isOneShot = false
 
@@ -440,7 +443,7 @@ func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
 
 // RunOnce executa modo agente one-shot
 func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool) error {
-	systemInstruction := i18n.T("agent.system_prompt.oneshot")
+	systemInstruction := i18n.T("agent.system_prompt.oneshot") + "\n\n" + i18n.T("ai.response_language")
 
 	// Inject K8s watcher context if active
 	enrichedQuery := query
