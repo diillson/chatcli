@@ -6,6 +6,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/mattn/go-runewidth"
 	"go.uber.org/zap"
 	"golang.org/x/term"
 )
@@ -274,11 +276,12 @@ func (r *UIRenderer) PrintPrompt() string {
 	return r.Colorize(i18n.T("agent.prompt.choice"), ColorLime)
 }
 
-// VisibleLen calcula comprimento visível (sem ANSI codes) - EXPORTADA
+// VisibleLen calcula comprimento visível em colunas do terminal (sem ANSI codes).
+// Usa runewidth para tratar emojis e caracteres wide corretamente.
 func VisibleLen(s string) int {
 	ansiRe := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	cleaned := ansiRe.ReplaceAllString(s, "")
-	return len(cleaned)
+	return runewidth.StringWidth(cleaned)
 }
 
 // RenderTimelineEvent desenha um "card" estilizado ajustado à largura do terminal
@@ -624,4 +627,281 @@ func (r *UIRenderer) RenderStreamBoxEnd(color string) {
 
 	footer := "╰" + strings.Repeat("─", footerLen)
 	fmt.Println(r.Colorize(footer, color))
+}
+
+// ─── Compact display (aru-style) ────────────────────────────────────────────
+// All compact methods render single inline lines instead of card boxes.
+// This dramatically reduces visual noise in coder mode.
+
+// CompactToolStart renders a tool call start in compact format:
+//
+//	↻ Read(main.go)
+func (r *UIRenderer) CompactToolStart(toolLabel string) {
+	fmt.Printf("  %s %s\n",
+		r.Colorize("↻", ColorCyan),
+		r.Colorize(toolLabel, ColorGray))
+}
+
+// CompactToolDone renders a completed tool call in compact format:
+//
+//	✓ Read(main.go) 1.2s
+func (r *UIRenderer) CompactToolDone(toolLabel string, duration string, isError bool) {
+	if isError {
+		fmt.Printf("  %s %s %s\n",
+			r.Colorize("✗", ColorYellow),
+			r.Colorize(toolLabel, ColorGray),
+			r.Colorize(duration, ColorYellow))
+	} else {
+		fmt.Printf("  %s %s %s\n",
+			r.Colorize("✓", ColorGreen+ColorBold),
+			r.Colorize(toolLabel, ColorGray),
+			r.Colorize(duration, ColorCyan))
+	}
+}
+
+// CompactLine renders a single inline status line (no card/box).
+// Used for reasoning, explanations, errors, summaries in compact mode.
+//
+//	● PLANO  Ler main.go, modificar handler, atualizar testes
+//	✗ ERRO   Arquivo não encontrado
+//	✓ OK     2 arquivos modificados
+func (r *UIRenderer) CompactLine(icon, label, text string, color string) {
+	// Truncate text to single line
+	text = strings.TrimSpace(text)
+	if idx := strings.Index(text, "\n"); idx >= 0 {
+		// Take first non-empty line
+		first := strings.TrimSpace(text[:idx])
+		rest := strings.TrimSpace(text[idx+1:])
+		if first == "" && rest != "" {
+			if idx2 := strings.Index(rest, "\n"); idx2 >= 0 {
+				first = strings.TrimSpace(rest[:idx2])
+			} else {
+				first = rest
+			}
+		}
+		text = first
+	}
+	if len(text) > 120 {
+		text = text[:117] + "..."
+	}
+
+	fmt.Printf("  %s %s %s\n",
+		r.Colorize(icon, color),
+		r.Colorize(label, color+ColorBold),
+		r.Colorize(text, ColorGray))
+}
+
+// CompactMultiLine renders a compact block: icon + label on first line,
+// then indented content lines (max N lines). For reasoning/plan display.
+//
+//	● PLANO
+//	  1. Ler main.go
+//	  2. Modificar handleRequest
+//	  3. Atualizar testes
+func (r *UIRenderer) CompactMultiLine(icon, label, text string, color string, maxLines int) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+
+	fmt.Printf("  %s %s\n",
+		r.Colorize(icon, color),
+		r.Colorize(label, color+ColorBold))
+
+	lines := strings.Split(text, "\n")
+	shown := 0
+	for _, line := range lines {
+		if shown >= maxLines {
+			fmt.Printf("    %s\n", r.Colorize("...", ColorGray))
+			break
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		fmt.Printf("    %s\n", r.Colorize(trimmed, ColorGray))
+		shown++
+	}
+}
+
+// CompactError renders an error inline.
+//
+//	✗ BLOCKED  Ação negada pelo usuário
+func (r *UIRenderer) CompactError(msg string) {
+	msg = strings.TrimSpace(msg)
+	if len(msg) > 120 {
+		msg = msg[:117] + "..."
+	}
+	fmt.Printf("  %s %s\n",
+		r.Colorize("✗", ColorYellow),
+		r.Colorize(msg, ColorYellow))
+}
+
+// CompactBatchSummary renders a one-line batch summary.
+//
+//	✓ 4/4 ações concluídas
+//	✗ 2/4 ações concluídas (com erros)
+func (r *UIRenderer) CompactBatchSummary(successCount, total int, hasError bool) {
+	if hasError {
+		fmt.Printf("\n  %s %s\n",
+			r.Colorize("✗", ColorYellow),
+			r.Colorize(fmt.Sprintf("%d/%d concluídas (com erros)", successCount, total), ColorYellow))
+	} else if total > 1 {
+		fmt.Printf("\n  %s %s\n",
+			r.Colorize("✓", ColorGreen+ColorBold),
+			r.Colorize(fmt.Sprintf("%d/%d concluídas", successCount, total), ColorGreen))
+	}
+}
+
+// CompactToolLabel builds a compact label from a subcmd + args.
+// Examples: "Read(main.go)", "Write(pkg/handler.go)", "Exec(go test ./...)", "Patch(3 edits)"
+func CompactToolLabel(subcmd string, rawArgs string) string {
+	// Map subcmd to display name
+	displayNames := map[string]string{
+		"read":        "Read",
+		"write":       "Write",
+		"patch":       "Patch",
+		"tree":        "Tree",
+		"search":      "Search",
+		"exec":        "Exec",
+		"test":        "Test",
+		"rollback":    "Rollback",
+		"clean":       "Clean",
+		"git-status":  "GitStatus",
+		"git-diff":    "GitDiff",
+		"git-log":     "GitLog",
+		"git-changed": "GitChanged",
+		"git-branch":  "GitBranch",
+		// Native tool names
+		"read_file":      "Read",
+		"write_file":     "Write",
+		"patch_file":     "Patch",
+		"list_directory": "Tree",
+		"search_files":   "Search",
+		"run_command":    "Exec",
+		"run_tests":      "Test",
+		"rollback_file":  "Rollback",
+		"clean_backups":  "Clean",
+		"git_status":     "GitStatus",
+		"git_diff":       "GitDiff",
+		"git_log":        "GitLog",
+		"git_changed":    "GitChanged",
+		"git_branch":     "GitBranch",
+	}
+
+	name := displayNames[subcmd]
+	if name == "" {
+		name = subcmd
+	}
+
+	// Extract primary argument for the label
+	arg := extractPrimaryArg(subcmd, rawArgs)
+	if arg == "" {
+		return name
+	}
+
+	// Truncate long args
+	if len(arg) > 60 {
+		arg = arg[:57] + "..."
+	}
+
+	return fmt.Sprintf("%s(%s)", name, arg)
+}
+
+// extractPrimaryArg pulls the most relevant argument from raw args for compact display.
+func extractPrimaryArg(subcmd string, rawArgs string) string {
+	// Try JSON args first
+	var jsonArgs map[string]interface{}
+	if err := json.Unmarshal([]byte(rawArgs), &jsonArgs); err == nil {
+		// Check for nested {"cmd":"...", "args":{...}} format
+		if inner, ok := jsonArgs["args"]; ok {
+			if innerMap, ok := inner.(map[string]interface{}); ok {
+				jsonArgs = innerMap
+			}
+		}
+		switch subcmd {
+		case "read", "write", "patch", "read_file", "write_file", "patch_file", "rollback", "rollback_file":
+			if f, ok := jsonArgs["file"].(string); ok {
+				return f
+			}
+			if f, ok := jsonArgs["path"].(string); ok {
+				return f
+			}
+		case "exec", "run_command":
+			if c, ok := jsonArgs["cmd"].(string); ok {
+				return c
+			}
+			if c, ok := jsonArgs["command"].(string); ok {
+				return c
+			}
+		case "search", "search_files":
+			if t, ok := jsonArgs["term"].(string); ok {
+				return t
+			}
+		case "tree", "list_directory":
+			if d, ok := jsonArgs["dir"].(string); ok {
+				return d
+			}
+			return "."
+		case "test", "run_tests":
+			if c, ok := jsonArgs["cmd"].(string); ok {
+				return c
+			}
+			if d, ok := jsonArgs["dir"].(string); ok {
+				return d
+			}
+			return "auto"
+		case "git-status", "git_status", "git-diff", "git_diff", "git-log", "git_log",
+			"git-changed", "git_changed", "git-branch", "git_branch":
+			if d, ok := jsonArgs["dir"].(string); ok {
+				return d
+			}
+			if p, ok := jsonArgs["path"].(string); ok {
+				return p
+			}
+			return "."
+		}
+		return ""
+	}
+
+	// CLI-style: try --file, --cmd, --term
+	parts := strings.Fields(rawArgs)
+	for i, p := range parts {
+		switch p {
+		case "--file", "-f", "--path":
+			if i+1 < len(parts) {
+				return parts[i+1]
+			}
+		case "--cmd", "--command":
+			if i+1 < len(parts) {
+				return parts[i+1]
+			}
+		case "--term", "--query":
+			if i+1 < len(parts) {
+				return parts[i+1]
+			}
+		case "--dir":
+			if i+1 < len(parts) {
+				return parts[i+1]
+			}
+		}
+	}
+
+	return ""
+}
+
+// ─── Status phrases (rotating while thinking) ──────────────────────────────
+
+// StatusPhrases are fun rotating messages shown while the LLM is thinking.
+var StatusPhrases = []string{
+	"Thinking...",
+	"Analyzing...",
+	"Processing...",
+	"Reasoning...",
+	"Planning...",
+	"Exploring...",
+	"Connecting dots...",
+	"Crafting solution...",
+	"Reading code...",
+	"Mapping structure...",
 }

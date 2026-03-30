@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -51,10 +52,41 @@ func isCoderMinimalUI() bool {
 	if val == "" || val == "full" || val == "false" || val == "0" {
 		return false
 	}
-	if val == "minimal" || val == "min" || val == "true" || val == "1" {
+	if val == "minimal" || val == "min" || val == "true" || val == "1" || val == "compact" {
 		return true
 	}
 	return false
+}
+
+// isCoderCompactUI returns true when the user wants the aru-style ultra-compact UI:
+//
+//	✓ Read(main.go) 1.2s
+//	✓ Write(handler.go) 0.3s
+//
+// Set via CHATCLI_CODER_UI=compact
+func isCoderCompactUI() bool {
+	val := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_UI")))
+	return val == "compact"
+}
+
+// extractSubcmdFromArgs extracts the coder subcommand from raw tool call args.
+// Works with both JSON ({"cmd":"read",...}) and CLI-style ("read --file main.go") args.
+func extractSubcmdFromArgs(argsStr string) string {
+	// Try JSON format
+	type jsonCmd struct {
+		Cmd string `json:"cmd"`
+	}
+	var jc jsonCmd
+	if err := json.Unmarshal([]byte(argsStr), &jc); err == nil && jc.Cmd != "" {
+		return jc.Cmd
+	}
+
+	// CLI-style: first word
+	parts := strings.Fields(argsStr)
+	if len(parts) > 0 {
+		return parts[0]
+	}
+	return "unknown"
 }
 
 func isCoderBannerEnabled() bool {
