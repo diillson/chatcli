@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.89.1](https://github.com/diillson/chatcli/compare/v1.89.0...v1.89.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* **coder:** native function calling, compact UI, parser robustness ([#703](https://github.com/diillson/chatcli/issues/703)) ([41cbea1](https://github.com/diillson/chatcli/commit/41cbea137ac9b55d1dc4fa766f59248dee4522e2))
+
 ## [1.89.0](https://github.com/diillson/chatcli/compare/v1.88.3...v1.89.0) (2026-03-30)
 
 
