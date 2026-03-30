@@ -926,7 +926,7 @@ func TestSSETransportCallWithHTTPServer(t *testing.T) {
 		Transport: TransportSSE,
 	}
 
-	tr, err := newSSETransport(ctx, cfg, testLogger())
+	tr, err := newSSETransport(ctx, cfg, testLogger(), NewChannelManager(testLogger()), "test-server")
 	if err != nil {
 		t.Fatalf("newSSETransport: %v", err)
 	}

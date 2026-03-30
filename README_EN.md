@@ -61,6 +61,15 @@
 - [Native Tool Use (Structured API)](#native-tool-use-structured-api)
 - [MCP (Model Context Protocol)](#mcp-model-context-protocol)
 - [Bootstrap and Memory](#bootstrap-and-memory)
+- [Hooks System](#hooks-system)
+- [WebFetch and WebSearch](#webfetch-and-websearch)
+- [Cost Tracking](#cost-tracking)
+- [Git Worktrees](#git-worktrees)
+- [MCP Channels](#mcp-channels)
+- [Path-Specific Rules](#path-specific-rules)
+- [@path Direct Mentions](#path-direct-mentions)
+- [Session Fork](#session-fork)
+- [Advanced Skill Frontmatter](#advanced-skill-frontmatter)
 - [Configuration Migration](#configuration-migration)
 - [Kubernetes Monitoring (K8s Watcher)](#kubernetes-monitoring-k8s-watcher)
 - [Code Structure and Technologies](#code-structure-and-technologies)
@@ -108,6 +117,12 @@
 - **Configuration Migration**: Versioned config schema migration system with automatic backup and rollback, ensuring safe upgrades between versions.
 - **Provider Registry with Auto-registration**: Each LLM provider self-registers via Go's `init()`, eliminating `switch/case` blocks and making it easy to add new providers.
 - **Configurable Shell Safety**: Configurable deny/allow patterns with severity levels, path traversal detection, workspace boundaries, and graceful process termination (SIGTERM/SIGKILL).
+- **Hooks System**: Lifecycle event hooks (PreToolUse, PostToolUse, SessionStart, etc.) with support for shell commands and HTTP webhooks.
+- **WebFetch and WebSearch**: Built-in tools for web search (DuckDuckGo) and page fetching with HTML text extraction.
+- **Cost Tracking**: Per-session cost tracking with pricing tables for Claude, GPT-4, Gemini, and Grok.
+- **Git Worktrees**: Git worktree management for isolated work on parallel branches.
+- **MCP Channels**: Push messages from MCP servers for reactive notifications (CI, alerts).
+- **Path-Specific Rules**: Per-path rules (`.chatcli/rules/`) with `paths:` frontmatter for conditional application.
 
 -----
 
@@ -427,6 +442,8 @@ Note: The same contextual features work within the  --prompt  text, such as  @fi
     -  /session save <name> ,  /session load <name> ,  /session list ,  /session delete <name> ,  /session new
 - Configuration and Status:
   -  /switch ,  /reload ,  /config  or  /status  (displays runtime settings, current provider, and model).
+- Context Management:
+  - /context create | attach | list | show | delete
 - Authentication:
   -  `/auth status` ,  `/auth login <provider>` ,  `/auth logout <provider>`
 - General:
@@ -437,6 +454,13 @@ Note: The same contextual features work within the  --prompt  text, such as  @fi
   -  Ctrl+C  (twice) or  Ctrl+D : Exits the application.
 - Context:
   -  @history ,  @git ,  @env ,  @file ,  @command .
+- Advanced Tools:
+  - `/mcp status`, `/mcp tools`, `/mcp restart`
+  - `/hooks` — List configured hooks
+  - `/cost` — Show estimated session cost
+  - `/worktree create|list|remove|status` — Manage git worktrees
+  - `/channel [list|inject|<name>]` — MCP channel messages
+  - `/session fork <name>` — Fork the current session
 
 --------
 
@@ -1465,6 +1489,43 @@ Create `~/.chatcli/mcp_servers.json`:
 
 MCP tools are automatically prefixed with `mcp_` and exposed to the AI with the description `[MCP:<server>]`.
 
+### MCP in Client Mode
+
+MCP now works directly in interactive mode (TTY), not just in server mode. ChatCLI auto-detects the `~/.chatcli/mcp_servers.json` file and initializes servers automatically.
+
+- MCP tools are exposed in all 3 modes (chat, agent, coder)
+- In agent/coder mode, invoke with `<tool_call name="mcp_<tool>" args='{"param":"value"}' />`
+- **Deferred schemas**: only name+description are sent in the prompt (token savings). The full schema is returned on demand when the model invokes without args.
+- Manage with `/mcp status`, `/mcp tools`, `/mcp restart`
+
+### MCP via Operator (Instance CRD)
+
+When using the ChatCLI Operator, configure MCP directly in the `Instance` resource:
+
+```yaml
+spec:
+  mcp:
+    enabled: true
+    servers:
+      - name: filesystem
+        transport: stdio
+        command: npx
+        args: ["-y", "@anthropic/mcp-server-filesystem", "/workspace"]
+        enabled: true
+    # Or reference an existing ConfigMap:
+    # existingConfigMap: "my-mcp-config"
+```
+
+The controller automatically generates the ConfigMap, mounts at `/etc/chatcli/mcp/`, and passes `--mcp-config` to the container.
+
+### MCP Channels
+
+MCP servers can send push messages to the session via SSE:
+
+- Messages are stored in a circular buffer (up to 100)
+- The last 5 messages are automatically injected into the system prompt
+- Manage with `/channel list`, `/channel inject`, `/channel <name>`
+
 --------
 
 ## Bootstrap and Memory
@@ -1521,6 +1582,321 @@ The system runs periodic compaction (every 24h) with a 2-level pipeline:
 2. **Score-based** (fallback) — Archives low-score facts to `memory_archive.json`
 
 Facts are scored with: `(1 + log(accessCount)) * exp(-daysSinceAccess * ln2 / halfLife)`
+
+--------
+
+## Hooks System
+
+The hooks system allows you to attach **lifecycle event handlers** that execute shell commands or HTTP webhooks at specific points during a ChatCLI session.
+
+### Supported Events
+
+| Event | When It Fires |
+|:------|:-------------|
+| `PreToolUse` | Before a tool is invoked |
+| `PostToolUse` | After a tool completes |
+| `SessionStart` | When a session begins |
+| `SessionEnd` | When a session ends |
+
+### Hook Types
+
+- **Command hooks**: Execute a shell command. The hook receives context via environment variables.
+- **HTTP hooks**: Send an HTTP request to a webhook URL with a JSON payload.
+
+### Blocking Behavior
+
+A command hook can **block the operation** by exiting with code `2`. This is useful for enforcing policies (e.g., preventing writes to certain paths).
+
+### ToolPattern Filtering
+
+Hooks can specify a `toolPattern` to match only specific tools:
+
+```json
+{
+  "hooks": [
+    {
+      "event": "PreToolUse",
+      "toolPattern": "@coder write*",
+      "command": "echo 'Write detected' >> /tmp/hook.log"
+    },
+    {
+      "event": "PostToolUse",
+      "type": "http",
+      "url": "https://example.com/webhook",
+      "toolPattern": "@coder exec*"
+    }
+  ]
+}
+```
+
+### Configuration
+
+Hooks are configured in `~/.chatcli/hooks.json` or `.chatcli/hooks.json` (project-local):
+
+```json
+{
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "command": "echo 'Session started at $(date)' >> ~/.chatcli/session.log"
+    },
+    {
+      "event": "PreToolUse",
+      "toolPattern": "@coder exec*",
+      "command": "/usr/local/bin/policy-check.sh",
+      "blocking": true
+    }
+  ]
+}
+```
+
+Use `/hooks` to list all configured hooks and their status.
+
+--------
+
+## WebFetch and WebSearch
+
+ChatCLI includes **built-in tools** for web interaction, available in agent and coder modes.
+
+### @webfetch
+
+Fetches a web page and extracts readable text content from the HTML:
+
+```
+@webfetch https://example.com/docs/api-reference
+```
+
+- Extracts main text content, stripping navigation, ads, and boilerplate
+- Useful for pulling documentation, articles, or reference material into context
+
+### @websearch
+
+Performs a web search using DuckDuckGo and returns summarized results:
+
+```
+@websearch "golang context best practices"
+```
+
+- Returns titles, URLs, and snippets for the top results
+- No API key required (uses DuckDuckGo)
+- Ideal for quickly finding information without leaving the terminal
+
+### Usage Examples
+
+```bash
+# In agent mode
+/agent Search for the latest Go 1.23 release notes and summarize the changes
+
+# Direct tool invocation
+@websearch "kubernetes pod security standards 2025"
+@webfetch https://kubernetes.io/docs/concepts/security/pod-security-standards/
+```
+
+--------
+
+## Cost Tracking
+
+ChatCLI tracks **estimated token usage and costs** for each session, helping you monitor API spending.
+
+### `/cost` Command
+
+Run `/cost` to display a breakdown of the current session:
+
+- **Input tokens**: Tokens sent to the model
+- **Output tokens**: Tokens generated by the model
+- **Total cost**: Estimated cost based on provider pricing
+
+### Supported Pricing Tables
+
+| Provider | Models |
+|:---------|:-------|
+| **Anthropic** | Claude Opus, Sonnet, Haiku (including cached pricing) |
+| **OpenAI** | GPT-4o, GPT-4o-mini, GPT-4, o1, o3 |
+| **Google** | Gemini 2.5 Pro, Gemini 2.5 Flash |
+| **xAI** | Grok-4, Grok-3 |
+
+Pricing is updated periodically. The estimate reflects list prices and may differ from your actual billing.
+
+--------
+
+## Git Worktrees
+
+ChatCLI integrates with **git worktrees** for isolated work on parallel branches without switching the main working directory.
+
+### Commands
+
+| Command | Description |
+|:--------|:------------|
+| `/worktree create <branch> [path]` | Create a new worktree for a branch |
+| `/worktree list` | List all active worktrees |
+| `/worktree remove <path>` | Remove a worktree |
+| `/worktree status` | Show status of all worktrees |
+
+### Example
+
+```bash
+# Create a worktree for a feature branch
+/worktree create feature/auth-refactor
+
+# List worktrees
+/worktree list
+
+# Remove when done
+/worktree remove ../chatcli-feature-auth-refactor
+```
+
+Worktrees provide **branch isolation** — each worktree has its own working directory, so you can work on multiple branches simultaneously without stashing or committing in-progress work.
+
+--------
+
+## MCP Channels
+
+MCP Channels extend the MCP integration with **push-based messaging** from MCP servers to the ChatCLI session.
+
+### How It Works
+
+- MCP servers can send **push messages** via SSE to the client
+- Messages are stored in a **circular buffer** (up to 100 messages)
+- The **last 5 messages** are automatically injected into the system prompt
+- Useful for CI notifications, alerts, deployment status, and other reactive events
+
+### Commands
+
+| Command | Description |
+|:--------|:------------|
+| `/channel list` | List all available MCP channels and their message counts |
+| `/channel inject` | Manually inject channel messages into the current context |
+| `/channel <name>` | View messages from a specific channel |
+
+--------
+
+## Path-Specific Rules
+
+ChatCLI supports **path-specific rules** that apply conditionally based on the files being worked on. Rules are stored as Markdown files with YAML frontmatter.
+
+### Configuration
+
+Create rules in `.chatcli/rules/` (project-level) or `~/.chatcli/rules/` (global):
+
+```yaml
+---
+paths:
+  - "src/api/**/*.go"
+  - "internal/handlers/**"
+---
+# API Handler Rules
+
+- All handlers must validate input parameters
+- Use structured error responses with proper HTTP status codes
+- Include request ID in all log entries
+```
+
+### How It Works
+
+- **Frontmatter `paths:`** uses glob patterns to match files
+- When the AI is working on matching files, the rule content is injected into the system prompt
+- **Workspace rules override global rules** with the same name
+- Multiple rules can match simultaneously
+
+### Glob Matching
+
+Patterns follow standard glob syntax:
+
+- `*` matches any file in a single directory
+- `**` matches across directory boundaries
+- `*.go` matches all Go files
+- `src/**/*.ts` matches all TypeScript files under `src/`
+
+--------
+
+## @path Direct Mentions
+
+You can reference files directly in your prompt using the `@path` syntax:
+
+```bash
+@src/main.go explain this file
+@internal/auth/ what does this package do?
+```
+
+### Behavior
+
+- **Only expands if the path exists** on the filesystem
+- Does not conflict with known `@commands` (`@git`, `@env`, `@file`, etc.)
+- Works with both files and directories
+- The file or directory content is injected into the prompt context
+
+This provides a quick shorthand for `@file <path>` when referencing specific files.
+
+--------
+
+## Session Fork
+
+The `/session fork` command creates an **independent copy** of the current session.
+
+```bash
+/session fork my-experiment
+```
+
+### How It Works
+
+- Creates a new session with a copy of the current conversation history
+- The forked session is fully **independent** — changes to one do not affect the other
+- Useful for exploring alternative approaches without losing the original context
+- The forked session appears in `/session list` and can be loaded normally
+
+--------
+
+## Advanced Skill Frontmatter
+
+Skills support extended YAML frontmatter fields for fine-grained control over behavior, discovery, and invocation.
+
+### Available Fields
+
+| Field | Type | Description |
+|:------|:-----|:------------|
+| `name` | string | Skill identifier (required) |
+| `description` | string | Brief description of what the skill does |
+| `model` | string | Preferred LLM model for this skill (e.g., `claude-sonnet-4-5`) |
+| `effort` | string | Reasoning effort level (`low`, `medium`, `high`) |
+| `paths` | list | Glob patterns — skill activates when matching files are in context |
+| `triggers` | list | Keywords or phrases that auto-activate the skill |
+| `tags` | list | Categorization tags for search and filtering |
+| `category` | string | Skill category (e.g., `coding`, `devops`, `security`) |
+| `version` | string | Semantic version of the skill |
+| `author` | string | Skill author |
+| `user-invocable` | bool | Whether the user can invoke this skill directly (default: `true`) |
+| `disable-model-invocation` | bool | Prevent the model from auto-invoking this skill (default: `false`) |
+| `argument-hint` | string | Hint text shown when the user invokes the skill (e.g., `<file-path>`) |
+
+### Example
+
+```yaml
+---
+name: "security-audit"
+description: "Performs a security audit on the given code"
+model: "claude-sonnet-4-5"
+effort: "high"
+paths:
+  - "src/auth/**"
+  - "src/crypto/**"
+triggers:
+  - "security"
+  - "vulnerability"
+  - "audit"
+tags:
+  - security
+  - audit
+category: "security"
+version: "1.2.0"
+author: "security-team"
+user-invocable: true
+disable-model-invocation: false
+argument-hint: "<file-or-directory>"
+---
+# Security Audit Skill
+
+Analyze the provided code for common security vulnerabilities...
+```
 
 --------
 

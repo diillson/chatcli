@@ -41,6 +41,12 @@ func (ms *MemoryStore) Manager() *memory.Manager {
 	return ms.manager
 }
 
+// SetWorkspaceDir sets the current session's workspace directory so that
+// new facts are annotated with the project they were learned in.
+func (ms *MemoryStore) SetWorkspaceDir(dir string) {
+	ms.manager.SetWorkspaceDir(dir)
+}
+
 // EnsureDirectories creates the memory directory structure.
 func (ms *MemoryStore) EnsureDirectories() error {
 	return ms.manager.EnsureDirectories()

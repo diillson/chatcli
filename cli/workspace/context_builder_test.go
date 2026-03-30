@@ -21,7 +21,7 @@ func TestContextBuilder_BuildSystemPromptPrefix(t *testing.T) {
 
 	bl := NewBootstrapLoader(wsDir, globalDir, testLogger())
 	ms := NewMemoryStore(memDir, testLogger())
-	cb := NewContextBuilder(bl, ms)
+	cb := NewContextBuilder(bl, ms, t.TempDir())
 
 	result := cb.BuildSystemPromptPrefix()
 
@@ -39,7 +39,7 @@ func TestContextBuilder_BuildSystemPromptPrefix(t *testing.T) {
 func TestContextBuilder_EmptyFiles(t *testing.T) {
 	bl := NewBootstrapLoader(t.TempDir(), t.TempDir(), testLogger())
 	ms := NewMemoryStore(t.TempDir(), testLogger())
-	cb := NewContextBuilder(bl, ms)
+	cb := NewContextBuilder(bl, ms, t.TempDir())
 
 	result := cb.BuildSystemPromptPrefix()
 	if result != "" {
@@ -53,7 +53,7 @@ func TestContextBuilder_Cache(t *testing.T) {
 
 	bl := NewBootstrapLoader(wsDir, "", testLogger())
 	ms := NewMemoryStore(t.TempDir(), testLogger())
-	cb := NewContextBuilder(bl, ms)
+	cb := NewContextBuilder(bl, ms, t.TempDir())
 
 	r1 := cb.BuildSystemPromptPrefix()
 	r2 := cb.BuildSystemPromptPrefix()
@@ -66,11 +66,18 @@ func TestContextBuilder_Cache(t *testing.T) {
 func TestContextBuilder_DynamicContext(t *testing.T) {
 	bl := NewBootstrapLoader(t.TempDir(), t.TempDir(), testLogger())
 	ms := NewMemoryStore(t.TempDir(), testLogger())
-	cb := NewContextBuilder(bl, ms)
+	wsDir := t.TempDir()
+	cb := NewContextBuilder(bl, ms, wsDir)
 
 	dyn := cb.BuildDynamicContext()
 	if !strings.Contains(dyn, "Current date and time") {
 		t.Errorf("expected dynamic context with date, got %q", dyn)
+	}
+	if !strings.Contains(dyn, "Current working directory: "+wsDir) {
+		t.Errorf("expected CWD in dynamic context, got %q", dyn)
+	}
+	if !strings.Contains(dyn, "IMPORTANT") {
+		t.Errorf("expected disambiguation instruction in dynamic context, got %q", dyn)
 	}
 }
 
@@ -80,7 +87,7 @@ func TestContextBuilder_InvalidateCache(t *testing.T) {
 
 	bl := NewBootstrapLoader(wsDir, "", testLogger())
 	ms := NewMemoryStore(t.TempDir(), testLogger())
-	cb := NewContextBuilder(bl, ms)
+	cb := NewContextBuilder(bl, ms, t.TempDir())
 
 	cb.BuildSystemPromptPrefix()
 	cb.InvalidateCache()

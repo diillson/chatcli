@@ -13,6 +13,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/cli/ctxmgr"
+	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
@@ -110,6 +111,18 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	// Save checkpoint before processing (for rewind support)
 	cli.saveCheckpoint()
 
+	// Fire UserPromptSubmit hook
+	if cli.hookManager != nil {
+		wd, _ := os.Getwd()
+		cli.hookManager.FireAsync(hooks.HookEvent{
+			Type:       hooks.EventUserPromptSubmit,
+			Timestamp:  time.Now(),
+			UserPrompt: in,
+			SessionID:  cli.currentSessionName,
+			WorkingDir: wd,
+		})
+	}
+
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
 	userInput, additionalContext := cli.processSpecialCommands(in)
@@ -191,7 +204,59 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		})
 	}
 
-	// Part 3: K8s watcher context (small, changes often — no cache hint)
+	// Part 3: Auto-triggered skills based on user input keywords
+	if cli.personaHandler != nil {
+		mgr := cli.personaHandler.GetManager()
+		if mgr != nil {
+			triggered := mgr.FindTriggeredSkills(userInput)
+			if len(triggered) > 0 {
+				var skillCtx strings.Builder
+				skillCtx.WriteString("# Auto-loaded Skills\n\n")
+				for _, skill := range triggered {
+					skillCtx.WriteString(fmt.Sprintf("## Skill: %s\n\n", skill.Name))
+					if skill.Description != "" {
+						skillCtx.WriteString(skill.Description + "\n\n")
+					}
+					skillCtx.WriteString(skill.Content + "\n\n")
+				}
+				systemParts = append(systemParts, models.ContentBlock{
+					Type: "text",
+					Text: skillCtx.String(),
+				})
+			}
+		}
+	}
+
+	// Part 5: MCP Channel messages (recent push messages from servers)
+	if cli.mcpManager != nil {
+		channelCtx := cli.mcpManager.Channels().FormatForPrompt(5)
+		if channelCtx != "" {
+			systemParts = append(systemParts, models.ContentBlock{
+				Type: "text",
+				Text: channelCtx,
+			})
+		}
+	}
+
+	// Part 6: MCP tools context (deferred — name+description only, saves tokens)
+	if cli.mcpManager != nil {
+		mcpTools := cli.mcpManager.GetToolsSummary()
+		if len(mcpTools) > 0 {
+			var mcpCtx strings.Builder
+			mcpCtx.WriteString("# Available MCP Tools\n\n")
+			mcpCtx.WriteString("The following external tools are available via MCP servers. ")
+			mcpCtx.WriteString("In agent/coder mode they can be invoked directly.\n\n")
+			for _, t := range mcpTools {
+				mcpCtx.WriteString(fmt.Sprintf("- **%s**: %s\n", t.Function.Name, t.Function.Description))
+			}
+			systemParts = append(systemParts, models.ContentBlock{
+				Type: "text",
+				Text: mcpCtx.String(),
+			})
+		}
+	}
+
+	// Part 4: K8s watcher context (small, changes often — no cache hint)
 	if cli.WatcherContextFunc != nil {
 		if k8sCtx := cli.WatcherContextFunc(); k8sCtx != "" {
 			systemParts = append(systemParts, models.ContentBlock{
@@ -278,6 +343,13 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 			Role:    "assistant",
 			Content: aiResponse,
 		})
+
+		// Track cost: estimate tokens from character count
+		if cli.costTracker != nil {
+			promptTokens := len(userInput+additionalContext) / 4
+			completionTokens := len(aiResponse) / 4
+			cli.costTracker.RecordUsage(cli.Provider, cli.Model, promptTokens, completionTokens)
+		}
 
 		// Exibir nome do modelo como label na linha do prompt
 		modelName := cli.Client.GetModelName()

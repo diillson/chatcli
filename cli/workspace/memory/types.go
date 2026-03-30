@@ -18,15 +18,16 @@ type UserProfile struct {
 
 // Fact is a single unit of long-term memory with scoring metadata.
 type Fact struct {
-	ID           string    `json:"id"`
-	Content      string    `json:"content"`
-	Category     string    `json:"category"` // architecture, pattern, preference, gotcha, project, personal
-	Tags         []string  `json:"tags,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	LastAccessed time.Time `json:"last_accessed"`
-	AccessCount  int       `json:"access_count"`
-	Score        float64   `json:"score"`
-	Source       string    `json:"source,omitempty"`
+	ID            string    `json:"id"`
+	Content       string    `json:"content"`
+	Category      string    `json:"category"` // architecture, pattern, preference, gotcha, project, personal
+	Tags          []string  `json:"tags,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	LastAccessed  time.Time `json:"last_accessed"`
+	AccessCount   int       `json:"access_count"`
+	Score         float64   `json:"score"`
+	Source        string    `json:"source,omitempty"`
+	SourceProject string    `json:"source_project,omitempty"` // project path where this fact was learned
 }
 
 // Topic tracks a recurring subject across conversations.

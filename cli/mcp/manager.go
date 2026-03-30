@@ -15,10 +15,11 @@ import (
 
 // Manager manages MCP server connections and tool routing.
 type Manager struct {
-	servers map[string]*ServerConnection
-	tools   map[string]*MCPTool // tool name -> tool
-	mu      sync.RWMutex
-	logger  *zap.Logger
+	servers  map[string]*ServerConnection
+	tools    map[string]*MCPTool // tool name -> tool
+	channels *ChannelManager     // handles push messages from servers
+	mu       sync.RWMutex
+	logger   *zap.Logger
 }
 
 // ServerConnection represents an active MCP server.
@@ -32,10 +33,16 @@ type ServerConnection struct {
 // NewManager creates a new MCP manager.
 func NewManager(logger *zap.Logger) *Manager {
 	return &Manager{
-		servers: make(map[string]*ServerConnection),
-		tools:   make(map[string]*MCPTool),
-		logger:  logger,
+		servers:  make(map[string]*ServerConnection),
+		tools:    make(map[string]*MCPTool),
+		channels: NewChannelManager(logger),
+		logger:   logger,
 	}
+}
+
+// Channels returns the channel manager for push message handling.
+func (m *Manager) Channels() *ChannelManager {
+	return m.channels
 }
 
 // LoadConfig loads MCP server configurations from a JSON file.
@@ -127,6 +134,45 @@ func (m *Manager) GetTools() []models.ToolDefinition {
 		})
 	}
 	return defs
+}
+
+// GetToolsSummary returns lightweight tool descriptions (name + description only).
+// This saves tokens in the system prompt by deferring full schemas until invocation.
+func (m *Manager) GetToolsSummary() []models.ToolDefinition {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	defs := make([]models.ToolDefinition, 0, len(m.tools))
+	for _, tool := range m.tools {
+		defs = append(defs, models.ToolDefinition{
+			Type: "function",
+			Function: models.ToolFunctionDef{
+				Name:        "mcp_" + tool.Name,
+				Description: fmt.Sprintf("[MCP:%s] %s", tool.ServerName, tool.Description),
+				// Parameters intentionally omitted — deferred until invocation
+			},
+		})
+	}
+	return defs
+}
+
+// GetToolSchema returns the full JSON schema for a specific MCP tool.
+// Used when the model attempts to invoke a tool and needs parameter details.
+func (m *Manager) GetToolSchema(toolName string) map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if tool, ok := m.tools[toolName]; ok {
+		return tool.Parameters
+	}
+	return nil
+}
+
+// ToolCount returns the number of discovered MCP tools.
+func (m *Manager) ToolCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.tools)
 }
 
 // ExecuteTool executes an MCP tool by name.
@@ -226,7 +272,7 @@ func (m *Manager) startSSEServer(ctx context.Context, conn *ServerConnection) er
 		zap.String("server", conn.Config.Name),
 		zap.String("url", conn.Config.URL))
 
-	transport, err := newSSETransport(ctx, conn.Config, m.logger)
+	transport, err := newSSETransport(ctx, conn.Config, m.logger, m.channels, conn.Config.Name)
 	if err != nil {
 		return fmt.Errorf("failed to connect SSE transport: %w", err)
 	}

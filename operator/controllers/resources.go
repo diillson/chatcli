@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
@@ -314,6 +316,29 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		})
 	}
 
+	// MCP ConfigMap volume
+	if instance.Spec.MCP != nil && instance.Spec.MCP.Enabled {
+		mcpConfigMapName := instance.Name + "-mcp"
+		if instance.Spec.MCP.ExistingConfigMap != "" {
+			mcpConfigMapName = instance.Spec.MCP.ExistingConfigMap
+		}
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "mcp-config",
+			MountPath: "/etc/chatcli/mcp",
+			ReadOnly:  true,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "mcp-config",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: mcpConfigMapName,
+					},
+				},
+			},
+		})
+	}
+
 	// Plugins volume (PVC or emptyDir for init container)
 	var initContainers []corev1.Container
 	if instance.Spec.Plugins != nil {
@@ -415,6 +440,11 @@ func (r *InstanceReconciler) buildContainerArgs(instance *platformv1alpha1.Insta
 		args = append(args, "--tls-key", "/etc/chatcli/tls/tls.key")
 	}
 
+	// MCP args
+	if instance.Spec.MCP != nil && instance.Spec.MCP.Enabled {
+		args = append(args, "--mcp-config", "/etc/chatcli/mcp/mcp_servers.json")
+	}
+
 	// Watcher args
 	if instance.Spec.Watcher != nil && instance.Spec.Watcher.Enabled {
 		if len(instance.Spec.Watcher.Targets) > 0 {
@@ -502,6 +532,65 @@ func (r *InstanceReconciler) reconcileService(ctx context.Context, instance *pla
 			svc.Spec.ClusterIP = corev1.ClusterIPNone
 		}
 		return nil
+	})
+	return err
+}
+
+// reconcileMCPConfigMap creates or updates a ConfigMap with mcp_servers.json for MCP integration.
+func (r *InstanceReconciler) reconcileMCPConfigMap(ctx context.Context, instance *platformv1alpha1.Instance) error {
+	if instance.Spec.MCP == nil || !instance.Spec.MCP.Enabled {
+		return nil
+	}
+	// If using existing ConfigMap, nothing to create
+	if instance.Spec.MCP.ExistingConfigMap != "" {
+		return nil
+	}
+
+	// Build mcp_servers.json from spec
+	type mcpServerJSON struct {
+		Name      string            `json:"name"`
+		Transport string            `json:"transport"`
+		Command   string            `json:"command,omitempty"`
+		Args      []string          `json:"args,omitempty"`
+		Env       map[string]string `json:"env,omitempty"`
+		URL       string            `json:"url,omitempty"`
+		Enabled   bool              `json:"enabled"`
+	}
+	type mcpConfig struct {
+		Servers []mcpServerJSON `json:"mcpServers"`
+	}
+
+	cfg := mcpConfig{}
+	for _, s := range instance.Spec.MCP.Servers {
+		cfg.Servers = append(cfg.Servers, mcpServerJSON{
+			Name:      s.Name,
+			Transport: s.Transport,
+			Command:   s.Command,
+			Args:      s.Args,
+			Env:       s.Env,
+			URL:       s.URL,
+			Enabled:   s.Enabled,
+		})
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal MCP config: %w", err)
+	}
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      instance.Name + "-mcp",
+			Namespace: instance.Namespace,
+		},
+	}
+
+	_, err = ctrl.CreateOrUpdate(ctx, r.Client, cm, func() error {
+		cm.Labels = labels(instance)
+		cm.Data = map[string]string{
+			"mcp_servers.json": string(data),
+		}
+		return ctrl.SetControllerReference(instance, cm, r.Scheme)
 	})
 	return err
 }

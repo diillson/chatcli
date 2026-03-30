@@ -169,6 +169,12 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 		return err
 	}
 
+	// Track cost for one-shot mode
+	if cli.costTracker != nil {
+		cli.costTracker.EstimateAndRecord(cli.Provider, cli.Model,
+			len(userInput+additionalContext), len(aiResponse))
+	}
+
 	if rawOutput {
 		fmt.Println(aiResponse) // Imprime texto limpo
 	} else {

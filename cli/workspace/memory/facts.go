@@ -40,6 +40,12 @@ func NewFactIndex(memoryDir string, config Config, logger *zap.Logger) *FactInde
 // AddFact adds a new fact, deduplicating by content hash.
 // Returns true if the fact was actually added (not a duplicate).
 func (fi *FactIndex) AddFact(content, category string, tags []string) bool {
+	return fi.AddFactWithSource(content, category, tags, "")
+}
+
+// AddFactWithSource adds a new fact with source project annotation.
+// sourceProject is the workspace directory where the fact was learned (may be empty).
+func (fi *FactIndex) AddFactWithSource(content, category string, tags []string, sourceProject string) bool {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return false
@@ -54,19 +60,24 @@ func (fi *FactIndex) AddFact(content, category string, tags []string) bool {
 		// Fact already exists — bump access count and update timestamp
 		existing.AccessCount++
 		existing.LastAccessed = time.Now()
+		// Update source project if it was missing
+		if existing.SourceProject == "" && sourceProject != "" {
+			existing.SourceProject = sourceProject
+		}
 		fi.persistLocked()
 		return false
 	}
 
 	fact := &Fact{
-		ID:           id,
-		Content:      content,
-		Category:     category,
-		Tags:         tags,
-		CreatedAt:    time.Now(),
-		LastAccessed: time.Now(),
-		AccessCount:  1,
-		Score:        1.0,
+		ID:            id,
+		Content:       content,
+		Category:      category,
+		Tags:          tags,
+		CreatedAt:     time.Now(),
+		LastAccessed:  time.Now(),
+		AccessCount:   1,
+		Score:         1.0,
+		SourceProject: sourceProject,
 	}
 
 	fi.facts[id] = fact

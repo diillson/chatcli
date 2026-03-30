@@ -410,3 +410,45 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 		}
 	}
 }
+
+// handleForkSession creates a fork of the current session.
+// If a session is loaded, forks from that. Otherwise, forks from in-memory history.
+func (cli *ChatCLI) handleForkSession(newName string) {
+	// Build session data from current state
+	sd := &SessionData{
+		Version:     2,
+		ChatHistory: make([]models.Message, len(cli.history)),
+	}
+	copy(sd.ChatHistory, cli.history)
+
+	// If the current session has a name (was loaded/saved), we can fork from file
+	if cli.currentSessionName != "" {
+		if err := cli.sessionManager.ForkSession(cli.currentSessionName, newName); err != nil {
+			fmt.Println(colorize(fmt.Sprintf("  Erro ao fork: %v", err), ColorRed))
+			return
+		}
+	} else {
+		// Fork from in-memory state
+		if err := cli.sessionManager.ForkCurrentToNew(newName, sd); err != nil {
+			fmt.Println(colorize(fmt.Sprintf("  Erro ao fork: %v", err), ColorRed))
+			return
+		}
+	}
+
+	// Switch to the forked session
+	oldName := cli.currentSessionName
+	if oldName == "" {
+		oldName = "(unsaved)"
+	}
+	cli.currentSessionName = newName
+
+	fmt.Println()
+	fmt.Println(uiBox("✅", "SESSION FORKED", ColorGreen))
+	p := uiPrefix(ColorGreen)
+	fmt.Println(p + fmt.Sprintf("  %sDe:%s       %s", ColorGray, ColorReset, oldName))
+	fmt.Println(p + fmt.Sprintf("  %sPara:%s     %s", ColorGray, ColorReset, colorize(newName, ColorCyan)))
+	fmt.Println(p + fmt.Sprintf("  %sMensagens:%s %d", ColorGray, ColorReset, len(cli.history)))
+	fmt.Println(p + colorize("  Agora trabalhando no fork. O original permanece intacto.", ColorGray))
+	fmt.Println(uiBoxEnd(ColorGreen))
+	fmt.Println()
+}

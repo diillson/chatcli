@@ -7,6 +7,7 @@
 package persona
 
 import (
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -76,6 +77,21 @@ type Skill struct {
 	Description string     `json:"description" yaml:"description"`
 	Tools       StringList `json:"allowed-tools" yaml:"allowed-tools"` // Usando StringList
 
+	// Advanced frontmatter fields
+	Model    string     `json:"model,omitempty" yaml:"model"`       // Preferred model for this skill (e.g., "sonnet", "opus")
+	Effort   string     `json:"effort,omitempty" yaml:"effort"`     // Effort level: "low", "medium", "high", "max"
+	Paths    StringList `json:"paths,omitempty" yaml:"paths"`       // Glob patterns for file matching (lazy load)
+	Triggers StringList `json:"triggers,omitempty" yaml:"triggers"` // Keywords that auto-activate this skill
+	Tags     StringList `json:"tags,omitempty" yaml:"tags"`         // Categorization tags
+	Category string     `json:"category,omitempty" yaml:"category"` // Skill category (e.g., "code-quality", "testing")
+	Version  string     `json:"version,omitempty" yaml:"version"`   // Skill version
+	Author   string     `json:"author,omitempty" yaml:"author"`     // Skill author
+
+	// Behavior controls
+	UserInvocable          bool   `json:"user-invocable,omitempty" yaml:"user-invocable"`                     // Can be invoked with /skill-name
+	DisableModelInvocation bool   `json:"disable-model-invocation,omitempty" yaml:"disable-model-invocation"` // Only manual invocation
+	ArgumentHint           string `json:"argument-hint,omitempty" yaml:"argument-hint"`                       // Shows expected args in autocomplete
+
 	// Content is the markdown body (without frontmatter)
 	Content string `json:"-" yaml:"-"`
 
@@ -90,6 +106,45 @@ type Skill struct {
 
 	// Scripts mapeia "scripts/nomescript.py" -> caminho absoluto
 	Scripts map[string]string `json:"scripts" yaml:"-"`
+}
+
+// MatchesTrigger checks if the given text contains any of the skill's trigger keywords.
+func (s *Skill) MatchesTrigger(text string) bool {
+	if len(s.Triggers) == 0 {
+		return false
+	}
+	textLower := strings.ToLower(text)
+	for _, trigger := range s.Triggers {
+		if strings.Contains(textLower, strings.ToLower(trigger)) {
+			return true
+		}
+	}
+	return false
+}
+
+// MatchesPath checks if any of the given file paths match the skill's path patterns.
+func (s *Skill) MatchesPath(filePaths []string) bool {
+	if len(s.Paths) == 0 {
+		return false
+	}
+	for _, pattern := range s.Paths {
+		for _, fp := range filePaths {
+			if matched, _ := filepath.Match(pattern, fp); matched {
+				return true
+			}
+			if matched, _ := filepath.Match(pattern, filepath.Base(fp)); matched {
+				return true
+			}
+			// Support ** prefix matching
+			if strings.Contains(pattern, "**") {
+				prefix := strings.Split(pattern, "**")[0]
+				if strings.HasPrefix(fp, prefix) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // LoadResult represents the result of loading an agent with its skills

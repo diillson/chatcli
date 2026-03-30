@@ -28,11 +28,13 @@ type sseTransport struct {
 	logger      *zap.Logger
 	cancel      context.CancelFunc
 	done        chan struct{}
-	ready       chan struct{} // closed when messagesURL is discovered
+	ready       chan struct{}   // closed when messagesURL is discovered
+	channelMgr  *ChannelManager // receives push notifications
+	serverName  string          // for channel routing
 }
 
 // newSSETransport connects to the MCP server SSE endpoint and starts listening.
-func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger) (*sseTransport, error) {
+func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger, channelMgr *ChannelManager, serverName string) (*sseTransport, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	t := &sseTransport{
@@ -43,6 +45,8 @@ func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger) 
 		cancel:     cancel,
 		done:       make(chan struct{}),
 		ready:      make(chan struct{}),
+		channelMgr: channelMgr,
+		serverName: serverName,
 	}
 
 	// Connect to SSE endpoint
@@ -136,12 +140,26 @@ func (t *sseTransport) handleSSEEvent(eventType, data string) {
 			return
 		}
 
-		t.pendMu.Lock()
-		ch, ok := t.pending[resp.ID]
-		t.pendMu.Unlock()
+		// If message has an ID, it's a response to a pending request
+		if resp.ID != 0 {
+			t.pendMu.Lock()
+			ch, ok := t.pending[resp.ID]
+			t.pendMu.Unlock()
 
-		if ok {
-			ch <- &resp
+			if ok {
+				ch <- &resp
+			}
+		} else {
+			// No ID = push notification from server → route to ChannelManager
+			if t.channelMgr != nil {
+				t.channelMgr.ProcessSSENotification(t.serverName, []byte(data))
+			}
+		}
+
+	default:
+		// Unknown event types may be server-specific notifications
+		if t.channelMgr != nil && data != "" {
+			t.channelMgr.ProcessSSENotification(t.serverName, []byte(data))
 		}
 	}
 }

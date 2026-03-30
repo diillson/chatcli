@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/cli/hooks"
+	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/workspace"
@@ -199,6 +201,16 @@ type ChatCLI struct {
 	memWorker        *memoryWorker
 	sessionStartTime time.Time // for session duration tracking
 
+	// MCP (Model Context Protocol) servers for client mode
+	mcpManager *mcp.Manager
+	mcpCancel  context.CancelFunc // cancel function for MCP server lifecycle
+
+	// Hooks system for lifecycle events
+	hookManager *hooks.Manager
+
+	// Cost tracking for the current session
+	costTracker *CostTracker
+
 	// Cached provider models for autocomplete (populated asynchronously)
 	cachedModels   []client.ModelInfo
 	cachedModelsMu sync.RWMutex
@@ -226,6 +238,8 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	cli.pluginManager = pluginMgr
 	if pluginMgr != nil {
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCoderPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebFetchPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
 	}
 
 	cli.configureProviderAndModel()
@@ -291,7 +305,10 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		logger.Info("Memory disabled via CHATCLI_MEMORY_ENABLED=false")
 	}
 	cli.memoryStore = memStore
-	cli.contextBuilder = workspace.NewContextBuilder(bootstrapLoader, memStore)
+	if memStore != nil {
+		memStore.SetWorkspaceDir(workspaceDir)
+	}
+	cli.contextBuilder = workspace.NewContextBuilder(bootstrapLoader, memStore, workspaceDir)
 
 	// Start background memory annotation worker
 	if memoryEnabled {
@@ -301,6 +318,46 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		cli.sessionStartTime = time.Now()
 		if mgr := memStore.Manager(); mgr != nil {
 			mgr.Patterns.RecordSessionStart()
+		}
+	}
+
+	// Initialize hooks system
+	cli.hookManager = hooks.NewManager(logger)
+	cli.hookManager.LoadFromSettings()
+
+	// Initialize cost tracker
+	cli.costTracker = NewCostTracker()
+
+	// Initialize MCP servers for client mode
+	mcpEnabled := os.Getenv("CHATCLI_MCP_ENABLED") == "true"
+	mcpConfigPath := os.Getenv("CHATCLI_MCP_CONFIG")
+	if mcpConfigPath == "" {
+		mcpConfigPath = mcp.DefaultConfigPath()
+	}
+	// Auto-enable if config file exists (even without env var)
+	if !mcpEnabled {
+		if _, err := os.Stat(mcpConfigPath); err == nil {
+			mcpEnabled = true
+		}
+	}
+	if mcpEnabled {
+		mcpMgr := mcp.NewManager(logger)
+		if err := mcpMgr.LoadConfig(mcpConfigPath); err != nil {
+			logger.Warn("Failed to load MCP config", zap.String("path", mcpConfigPath), zap.Error(err))
+		} else {
+			mcpCtx, mcpCancelFn := context.WithCancel(context.Background())
+			if err := mcpMgr.StartAll(mcpCtx); err != nil {
+				logger.Warn("Failed to start MCP servers", zap.Error(err))
+				mcpCancelFn()
+			} else {
+				cli.mcpManager = mcpMgr
+				cli.mcpCancel = mcpCancelFn
+				statuses := mcpMgr.GetServerStatus()
+				tools := mcpMgr.GetTools()
+				logger.Info("MCP manager initialized (client mode)",
+					zap.Int("servers", len(statuses)),
+					zap.Int("tools", len(tools)))
+			}
 		}
 	}
 
@@ -329,6 +386,17 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 
 	// Pre-fetch available models for autocomplete
 	cli.refreshModelCache()
+
+	// Fire SessionStart hook
+	if cli.hookManager != nil {
+		wd, _ := os.Getwd()
+		cli.hookManager.FireAsync(hooks.HookEvent{
+			Type:       hooks.EventSessionStart,
+			Timestamp:  time.Now(),
+			SessionID:  cli.currentSessionName,
+			WorkingDir: wd,
+		})
+	}
 
 	return cli, nil
 }
@@ -902,6 +970,17 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 }
 
 func (cli *ChatCLI) cleanup() {
+	// Fire SessionEnd hook
+	if cli.hookManager != nil {
+		wd, _ := os.Getwd()
+		cli.hookManager.Fire(hooks.HookEvent{
+			Type:       hooks.EventSessionEnd,
+			Timestamp:  time.Now(),
+			SessionID:  cli.currentSessionName,
+			WorkingDir: wd,
+		})
+	}
+
 	// Record session end for usage pattern tracking
 	if cli.memoryStore != nil && !cli.sessionStartTime.IsZero() {
 		if mgr := cli.memoryStore.Manager(); mgr != nil {
@@ -912,6 +991,14 @@ func (cli *ChatCLI) cleanup() {
 	// Stop background memory worker
 	if cli.memWorker != nil {
 		cli.memWorker.stop()
+	}
+
+	// Stop MCP servers
+	if cli.mcpManager != nil {
+		cli.mcpManager.StopAll()
+	}
+	if cli.mcpCancel != nil {
+		cli.mcpCancel()
 	}
 
 	if err := cli.historyManager.AppendAndRotateHistory(cli.newCommandsInSession); err != nil {
