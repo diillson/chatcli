@@ -20,6 +20,7 @@ const (
 	ProviderXAI             = "XAI"
 	ProviderOllama          = "OLLAMA"
 	ProviderCopilot         = "COPILOT"
+	ProviderGitHubModels    = "GITHUB_MODELS"
 )
 
 // PreferredAPI define qual API é preferida para o modelo

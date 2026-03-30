@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/copilot"
+	github_models "github.com/diillson/chatcli/llm/github_models"
 	"github.com/diillson/chatcli/llm/googleai"
 	"github.com/diillson/chatcli/llm/ollama"
 	"github.com/diillson/chatcli/llm/openai"
@@ -97,6 +98,7 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarXAIClient(maxRetries, initialBackoff)
 	manager.configurarOllamaClient(maxRetries, initialBackoff)
 	manager.configurarCopilotClient(maxRetries, initialBackoff)
+	manager.configurarGitHubModelsClient(maxRetries, initialBackoff)
 
 	return manager, nil
 }
@@ -366,6 +368,29 @@ func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff 
 			model = config.DefaultCopilotModel
 		}
 		return copilot.NewClient(res.APIKey, model, m.logger, maxRetries, initialBackoff), nil
+	}
+}
+
+// configurarGitHubModelsClient configura o cliente GitHub Models marketplace
+func (m *LLMManagerImpl) configurarGitHubModelsClient(maxRetries int, initialBackoff time.Duration) {
+	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubModels, m.logger)
+	if err != nil {
+		m.logger.Info("GitHub Models not configured, provider GITHUB_MODELS will not be available", zap.Error(err))
+		return
+	}
+	if resolved.APIKey == "" {
+		return
+	}
+	m.logger.Info("Configurando provedor GitHub Models")
+	m.clients["GITHUB_MODELS"] = func(model string) (client.LLMClient, error) {
+		res, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubModels, m.logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve GitHub Models auth: %w", err)
+		}
+		if model == "" {
+			model = config.DefaultGitHubModelsModel
+		}
+		return github_models.NewGitHubModelsClient(res.APIKey, model, m.logger, maxRetries, initialBackoff), nil
 	}
 }
 
