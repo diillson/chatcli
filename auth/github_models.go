@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	"go.uber.org/zap"
@@ -43,13 +45,21 @@ func LoginGitHubModelsPAT(_ context.Context, logger *zap.Logger) (string, error)
 		}
 	}
 
+	// Reset terminal from raw mode (go-prompt/bubbletea) so stdin reads work
+	if runtime.GOOS != "windows" {
+		cmd := exec.Command("stty", "sane")
+		cmd.Stdin = os.Stdin
+		_ = cmd.Run()
+	}
+
 	// Prompt user for token
 	fmt.Print("  Paste your GitHub token (ghp_... or github_pat_...): ")
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		return "", fmt.Errorf("no input received")
+	reader := bufio.NewReader(os.Stdin)
+	rawToken, err := reader.ReadString('\n')
+	if err != nil && rawToken == "" {
+		return "", fmt.Errorf("failed to read token: %w", err)
 	}
-	token := strings.TrimSpace(scanner.Text())
+	token := strings.TrimSpace(rawToken)
 	if token == "" {
 		return "", fmt.Errorf("empty token")
 	}

@@ -158,6 +158,11 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 }
 
 // ListModels fetches available models from the GitHub Models API.
+// The API returns a plain JSON array (not OpenAI format) with fields:
+//
+//	name, friendly_name, task, publisher, model_family, etc.
+//
+// We filter to chat-completion models only.
 func (c *GitHubModelsClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	modelsURL := c.getModelsURL()
 
@@ -182,37 +187,68 @@ func (c *GitHubModelsClient) ListModels(ctx context.Context) ([]client.ModelInfo
 		return nil, fmt.Errorf("GitHub Models /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
 	}
 
-	// GitHub Models returns OpenAI-compatible format: {"data": [{"id": "..."}]}
-	var result struct {
-		Data []struct {
-			ID      string `json:"id"`
-			OwnedBy string `json:"owned_by"`
-		} `json:"data"`
+	// GitHub Models returns a plain JSON array (NOT OpenAI {"data":[...]} format)
+	type ghModel struct {
+		ID           string `json:"id"`   // Azure registry path (long)
+		Name         string `json:"name"` // Model name used for inference
+		FriendlyName string `json:"friendly_name"`
+		Publisher    string `json:"publisher"`
+		ModelFamily  string `json:"model_family"`
+		Task         string `json:"task"` // "chat-completion", "embeddings", etc.
 	}
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("decoding models: %w", err)
+
+	// Try plain array first (actual GitHub Models format)
+	var models []ghModel
+	if err := json.Unmarshal(bodyBytes, &models); err != nil {
+		// Fallback: try OpenAI-compatible {"data": [...]} format
+		var wrapped struct {
+			Data []ghModel `json:"data"`
+		}
+		if err2 := json.Unmarshal(bodyBytes, &wrapped); err2 != nil {
+			return nil, fmt.Errorf("decoding models (tried array and OpenAI formats): %w", err)
+		}
+		models = wrapped.Data
 	}
 
 	var modelList []client.ModelInfo
-	for _, m := range result.Data {
+	for _, m := range models {
+		// Filter to chat-capable models only
+		if m.Task != "" && m.Task != "chat-completion" {
+			continue
+		}
+
+		// Use Name for inference (not the long Azure registry ID)
+		modelID := m.Name
+		if modelID == "" {
+			modelID = m.ID
+		}
+
+		displayName := m.FriendlyName
+		if displayName == "" {
+			displayName = modelID
+		}
+		if m.Publisher != "" {
+			displayName = fmt.Sprintf("%s (%s)", displayName, m.Publisher)
+		}
+
 		modelList = append(modelList, client.ModelInfo{
-			ID:          m.ID,
-			DisplayName: m.ID,
+			ID:          modelID,
+			DisplayName: displayName,
 			Source:      client.ModelSourceAPI,
 		})
 
 		// Register in catalog for downstream use
-		if _, ok := catalog.Resolve(catalog.ProviderGitHubModels, m.ID); !ok {
+		if _, ok := catalog.Resolve(catalog.ProviderGitHubModels, modelID); !ok {
 			catalog.Register(catalog.ModelMeta{
-				ID:           m.ID,
-				Aliases:      []string{m.ID},
-				DisplayName:  m.ID,
+				ID:           modelID,
+				Aliases:      []string{modelID},
+				DisplayName:  displayName,
 				Provider:     catalog.ProviderGitHubModels,
 				PreferredAPI: catalog.APIChatCompletions,
 			})
 		}
 	}
 
-	c.logger.Info("Fetched GitHub Models", zap.Int("count", len(modelList)))
+	c.logger.Info("Fetched GitHub Models", zap.Int("total", len(models)), zap.Int("chat", len(modelList)))
 	return modelList, nil
 }

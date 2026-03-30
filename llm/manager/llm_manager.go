@@ -440,26 +440,39 @@ func (m *LLMManagerImpl) ListModelsForProvider(ctx context.Context, provider str
 		return nil, fmt.Errorf("failed to create client for model listing: %w", err)
 	}
 
+	// Collect models from API (if supported) + catalog, deduplicated.
+	seen := make(map[string]bool)
+	var result []client.ModelInfo
+
+	// Try API listing first
 	if lister, ok := tempClient.(client.ModelLister); ok {
-		models, err := lister.ListModels(ctx)
+		apiModels, err := lister.ListModels(ctx)
 		if err != nil {
-			m.logger.Warn("Failed to fetch models dynamically, falling back to catalog",
+			m.logger.Warn("Failed to fetch models from API, will include catalog models",
 				zap.String("provider", provider), zap.Error(err))
-		} else if len(models) > 0 {
-			return models, nil
+		} else {
+			for _, am := range apiModels {
+				if !seen[am.ID] {
+					seen[am.ID] = true
+					result = append(result, am)
+				}
+			}
 		}
 	}
 
-	// Fallback to static catalog
+	// Always merge catalog models (they may include models the API doesn't list)
 	metas := catalog.ListByProvider(provider)
-	var result []client.ModelInfo
 	for _, meta := range metas {
-		result = append(result, client.ModelInfo{
-			ID:          meta.ID,
-			DisplayName: meta.DisplayName,
-			Source:      client.ModelSourceCatalog,
-		})
+		if !seen[meta.ID] {
+			seen[meta.ID] = true
+			result = append(result, client.ModelInfo{
+				ID:          meta.ID,
+				DisplayName: meta.DisplayName,
+				Source:      client.ModelSourceCatalog,
+			})
+		}
 	}
+
 	return result, nil
 }
 
@@ -514,6 +527,7 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	m.configurarOpenAIClient(maxRetries, initialBackoff)
 	m.configurarClaudeAIClient(maxRetries, initialBackoff)
 	m.configurarCopilotClient(maxRetries, initialBackoff)
+	m.configurarGitHubModelsClient(maxRetries, initialBackoff)
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key
