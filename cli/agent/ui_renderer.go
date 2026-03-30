@@ -776,7 +776,7 @@ func CompactToolLabel(subcmd string, rawArgs string) string {
 		"read_file":      "Read",
 		"write_file":     "Write",
 		"patch_file":     "Patch",
-		"list_directory":  "Tree",
+		"list_directory": "Tree",
 		"search_files":   "Search",
 		"run_command":    "Exec",
 		"run_tests":      "Test",

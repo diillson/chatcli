@@ -20,12 +20,12 @@ import (
 // resolvedToolCall is a unified representation of a tool call,
 // regardless of whether it came from native function calling or XML parsing.
 type resolvedToolCall struct {
-	ID     string                 // tool call ID (native) or generated
-	Name   string                 // native function name or @coder
-	Subcmd string                 // engine subcommand (read, write, patch, etc.)
-	Args   []string               // CLI-style flags for engine.Execute
-	RawArgs string                // original args string for display/logging
-	Native bool                   // true if from native function calling
+	ID         string                 // tool call ID (native) or generated
+	Name       string                 // native function name or @coder
+	Subcmd     string                 // engine subcommand (read, write, patch, etc.)
+	Args       []string               // CLI-style flags for engine.Execute
+	RawArgs    string                 // original args string for display/logging
+	Native     bool                   // true if from native function calling
 	NativeArgs map[string]interface{} // structured args (native only)
 }
 
@@ -256,11 +256,11 @@ func RunWorkerReAct(
 
 		// --- Execute tool calls ---
 		type execResult struct {
-			index   int
-			record  ToolCallRecord
-			output  string
-			failed  bool
-			toolID  string // for native tool result messages
+			index  int
+			record ToolCallRecord
+			output string
+			failed bool
+			toolID string // for native tool result messages
 		}
 		results := make([]execResult, len(validated))
 
@@ -552,46 +552,46 @@ func parseCoderToolCall(tc agent.ToolCall) (string, []string, error) {
 // normalizeSubcommand maps common LLM variations to the canonical subcommand name.
 func normalizeSubcommand(cmd string) string {
 	aliases := map[string]string{
-		"read_file":     "read",
-		"readfile":      "read",
-		"read-file":     "read",
-		"write_file":    "write",
-		"writefile":     "write",
-		"write-file":    "write",
-		"patch_file":    "patch",
-		"patchfile":     "patch",
-		"patch-file":    "patch",
-		"edit":          "patch",
-		"edit_file":     "patch",
-		"editfile":      "patch",
-		"search_files":  "search",
-		"searchfiles":   "search",
-		"grep":          "search",
-		"find":          "search",
-		"run_command":   "exec",
-		"run":           "exec",
-		"shell":         "exec",
-		"bash":          "exec",
-		"execute":       "exec",
-		"list_dir":      "tree",
-		"listdir":       "tree",
-		"ls":            "tree",
-		"list":          "tree",
+		"read_file":      "read",
+		"readfile":       "read",
+		"read-file":      "read",
+		"write_file":     "write",
+		"writefile":      "write",
+		"write-file":     "write",
+		"patch_file":     "patch",
+		"patchfile":      "patch",
+		"patch-file":     "patch",
+		"edit":           "patch",
+		"edit_file":      "patch",
+		"editfile":       "patch",
+		"search_files":   "search",
+		"searchfiles":    "search",
+		"grep":           "search",
+		"find":           "search",
+		"run_command":    "exec",
+		"run":            "exec",
+		"shell":          "exec",
+		"bash":           "exec",
+		"execute":        "exec",
+		"list_dir":       "tree",
+		"listdir":        "tree",
+		"ls":             "tree",
+		"list":           "tree",
 		"list_directory": "tree",
-		"run_tests":     "test",
-		"run_test":      "test",
-		"git_status":    "git-status",
-		"gitstatus":     "git-status",
-		"git_diff":      "git-diff",
-		"gitdiff":       "git-diff",
-		"git_log":       "git-log",
-		"gitlog":        "git-log",
-		"git_changed":   "git-changed",
-		"gitchanged":    "git-changed",
-		"git_branch":    "git-branch",
-		"gitbranch":     "git-branch",
-		"rollback_file": "rollback",
-		"clean_backups": "clean",
+		"run_tests":      "test",
+		"run_test":       "test",
+		"git_status":     "git-status",
+		"gitstatus":      "git-status",
+		"git_diff":       "git-diff",
+		"gitdiff":        "git-diff",
+		"git_log":        "git-log",
+		"gitlog":         "git-log",
+		"git_changed":    "git-changed",
+		"gitchanged":     "git-changed",
+		"git_branch":     "git-branch",
+		"gitbranch":      "git-branch",
+		"rollback_file":  "rollback",
+		"clean_backups":  "clean",
 	}
 	if canonical, ok := aliases[strings.ToLower(cmd)]; ok {
 		return canonical

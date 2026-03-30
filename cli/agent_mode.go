@@ -1086,7 +1086,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					totalDuration += ar.Duration
 					if ar.Error != nil {
 						if coderCompactUI {
-							renderer.CompactToolDone(fmt.Sprintf("%s", ar.Agent), ar.Duration.Round(time.Millisecond).String(), true)
+							renderer.CompactToolDone(string(ar.Agent), ar.Duration.Round(time.Millisecond).String(), true)
 						} else {
 							renderer.RenderTimelineEvent("❌", fmt.Sprintf("[%s] FAILED", ar.Agent), ar.Error.Error(), agent.ColorYellow)
 						}

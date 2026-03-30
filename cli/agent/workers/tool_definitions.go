@@ -368,7 +368,7 @@ var nativeToolNameMap = map[string]string{
 	"read_file":      "read",
 	"write_file":     "write",
 	"patch_file":     "patch",
-	"list_directory":  "tree",
+	"list_directory": "tree",
 	"search_files":   "search",
 	"run_command":    "exec",
 	"git_status":     "git-status",
