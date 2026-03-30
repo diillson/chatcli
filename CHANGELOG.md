@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.89.0](https://github.com/diillson/chatcli/compare/v1.88.3...v1.89.0) (2026-03-30)
+
+
+### Features
+
+* add MCP client mode, hooks system, web tools, cost tracking, worktrees, channels, and path-specific rules ([#701](https://github.com/diillson/chatcli/issues/701)) ([169779a](https://github.com/diillson/chatcli/commit/169779aabbdad57aa0e8773cebb14ed362d75636))
+
 ## [1.88.3](https://github.com/diillson/chatcli/compare/v1.88.2...v1.88.3) (2026-03-27)
 
 
