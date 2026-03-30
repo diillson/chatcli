@@ -187,6 +187,12 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 	fullPrompt.WriteString(memory.EnhancedExtractionPrompt)
 	fullPrompt.WriteString("\n\n---\n\n")
 
+	// Include current workspace so the extraction LLM can distinguish session context
+	if wsDir := mgr.WorkspaceDir(); wsDir != "" {
+		fullPrompt.WriteString(fmt.Sprintf("CURRENT SESSION WORKSPACE: %s\n", wsDir))
+		fullPrompt.WriteString("(All paths and facts from this conversation belong to this workspace.)\n\n---\n\n")
+	}
+
 	existingContext := mgr.FormatExistingContext()
 	if existingContext != "" {
 		fullPrompt.WriteString(existingContext)

@@ -18,6 +18,11 @@ import (
 func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 	var additionalContext string
 
+	// Pre-process @path/to/file mentions into @file path/to/file
+	// Matches @./relative/path, @src/file.go, @~/home/file, @/absolute/path
+	// but NOT @file (already handled), @command, @coder, @websearch, @webfetch
+	userInput = expandPathMentions(userInput)
+
 	// Processar comandos especiais
 	userInput, context := cli.processHistoryCommand(userInput)
 	additionalContext += context

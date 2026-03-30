@@ -3,9 +3,11 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
@@ -31,6 +33,17 @@ func (cli *ChatCLI) handleCompactCommand(userInput string) {
 	defer cancel()
 
 	if instruction == "" {
+		// Fire PreCompact hook
+		if cli.hookManager != nil {
+			wd, _ := os.Getwd()
+			cli.hookManager.Fire(hooks.HookEvent{
+				Type:       hooks.EventPreCompact,
+				Timestamp:  time.Now(),
+				SessionID:  cli.currentSessionName,
+				WorkingDir: wd,
+			})
+		}
+
 		// Automatic compaction
 		cfg := DefaultCompactConfig(cli.Provider, cli.Model)
 		cfg.BudgetRatio = 0.50 // more aggressive for explicit /compact
@@ -45,6 +58,17 @@ func (cli *ChatCLI) handleCompactCommand(userInput string) {
 		after := len(cli.history)
 		fmt.Printf("  %s %s\n",
 			colorize("📦", ""), i18n.T("compact.success", before, after))
+
+		// Fire PostCompact hook
+		if cli.hookManager != nil {
+			wd, _ := os.Getwd()
+			cli.hookManager.FireAsync(hooks.HookEvent{
+				Type:       hooks.EventPostCompact,
+				Timestamp:  time.Now(),
+				SessionID:  cli.currentSessionName,
+				WorkingDir: wd,
+			})
+		}
 		return
 	}
 

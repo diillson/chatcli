@@ -230,6 +230,25 @@ func (m *Manager) GetSkill(name string) (*Skill, error) {
 	return m.loader.GetSkill(name)
 }
 
+// FindTriggeredSkills returns skills whose triggers match the given text.
+// Skills with DisableModelInvocation=true are excluded.
+func (m *Manager) FindTriggeredSkills(text string) []*Skill {
+	allSkills, err := m.loader.ListSkills()
+	if err != nil {
+		return nil
+	}
+	var matched []*Skill
+	for _, skill := range allSkills {
+		if skill.DisableModelInvocation {
+			continue
+		}
+		if skill.MatchesTrigger(text) {
+			matched = append(matched, skill)
+		}
+	}
+	return matched
+}
+
 // ValidateAgent checks if an agent configuration is valid
 func (m *Manager) ValidateAgent(name string) ([]string, []string, error) {
 	return m.builder.ValidateAgent(name)

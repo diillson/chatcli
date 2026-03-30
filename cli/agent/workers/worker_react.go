@@ -157,6 +157,7 @@ func RunWorkerReAct(
 				allReadOnly = false
 			}
 			validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, args: args})
+
 		}
 
 		// Count runnable (non-blocked) tool calls

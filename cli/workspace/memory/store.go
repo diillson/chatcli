@@ -13,9 +13,10 @@ import (
 // It owns all sub-stores and provides the same API surface that
 // ContextBuilder and memoryWorker currently use, plus new capabilities.
 type Manager struct {
-	baseDir string
-	logger  *zap.Logger
-	config  Config
+	baseDir      string
+	workspaceDir string // current session's workspace directory
+	logger       *zap.Logger
+	config       Config
 
 	Profile  *UserProfileStore
 	Facts    *FactIndex
@@ -129,7 +130,7 @@ func (m *Manager) AppendLongTerm(entry string) error {
 		factContent = strings.TrimPrefix(factContent, "* ")
 		factContent = strings.TrimSpace(factContent)
 		if len(factContent) >= 5 {
-			m.Facts.AddFact(factContent, "general", extractTags(factContent))
+			m.Facts.AddFactWithSource(factContent, "general", extractTags(factContent), m.workspaceDir)
 		}
 	}
 
@@ -510,6 +511,19 @@ func (m *Manager) FormatExistingContext() string {
 // MemoryDir returns the base memory directory path.
 func (m *Manager) MemoryDir() string {
 	return m.baseDir
+}
+
+// SetWorkspaceDir sets the current session's workspace directory.
+// Facts created during this session will be annotated with this path.
+// The retriever also uses this to disambiguate facts from other projects.
+func (m *Manager) SetWorkspaceDir(dir string) {
+	m.workspaceDir = dir
+	m.retriever.SetWorkspaceDir(dir)
+}
+
+// WorkspaceDir returns the current session's workspace directory.
+func (m *Manager) WorkspaceDir() string {
+	return m.workspaceDir
 }
 
 // FormatStats returns a formatted string of memory system statistics.

@@ -154,6 +154,15 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
+	if instance.Spec.MCP != nil && instance.Spec.MCP.Enabled {
+		if err := r.reconcileMCPConfigMap(ctx, &instance); err != nil {
+			log.Error(err, "failed to reconcile MCP ConfigMap")
+			reconciliationsTotal.WithLabelValues("error").Inc()
+			reconcileDuration.Observe(time.Since(start).Seconds())
+			return ctrl.Result{}, err
+		}
+	}
+
 	if instance.Spec.Watcher != nil && instance.Spec.Watcher.Enabled && len(instance.Spec.Watcher.Targets) > 0 {
 		if err := r.reconcileWatchConfigMap(ctx, &instance); err != nil {
 			log.Error(err, "failed to reconcile watch config ConfigMap")

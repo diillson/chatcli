@@ -7,13 +7,14 @@ import (
 
 // RelevanceRetriever selects the most relevant memories for the current conversation.
 type RelevanceRetriever struct {
-	facts    *FactIndex
-	profile  *UserProfileStore
-	topics   *TopicTracker
-	projects *ProjectTracker
-	patterns *PatternDetector
-	daily    *DailyNoteStore
-	config   Config
+	facts        *FactIndex
+	profile      *UserProfileStore
+	topics       *TopicTracker
+	projects     *ProjectTracker
+	patterns     *PatternDetector
+	daily        *DailyNoteStore
+	config       Config
+	workspaceDir string // current session workspace for disambiguation
 }
 
 // NewRelevanceRetriever creates a new retriever.
@@ -35,6 +36,11 @@ func NewRelevanceRetriever(
 		daily:    daily,
 		config:   config,
 	}
+}
+
+// SetWorkspaceDir updates the current workspace directory for disambiguation.
+func (r *RelevanceRetriever) SetWorkspaceDir(dir string) {
+	r.workspaceDir = dir
 }
 
 // Retrieve returns memory context tailored to the current conversation.
@@ -92,6 +98,10 @@ func (r *RelevanceRetriever) Retrieve(hints []string) string {
 
 		for _, f := range relevantFacts {
 			line := fmt.Sprintf("- [%s] %s", f.Category, f.Content)
+			// Annotate facts from other projects so the model knows they're not from CWD
+			if f.SourceProject != "" && r.workspaceDir != "" && f.SourceProject != r.workspaceDir {
+				line += fmt.Sprintf(" (from: %s)", f.SourceProject)
+			}
 			if usedChars+len(line)+1 > remaining {
 				break
 			}

@@ -142,6 +142,53 @@ func (sm *SessionManager) ListSessions() ([]string, error) {
 	return sessions, nil
 }
 
+// ForkSession creates a copy of an existing session with a new name.
+// The forked session is an independent copy — changes to either session don't affect the other.
+func (sm *SessionManager) ForkSession(sourceName, newName string) error {
+	if sourceName == "" || newName == "" {
+		return fmt.Errorf("source and target session names required")
+	}
+	if sourceName == newName {
+		return fmt.Errorf("source and target names must be different")
+	}
+
+	// Check target doesn't already exist
+	targetPath := sm.getSessionPath(newName)
+	if _, err := os.Stat(targetPath); err == nil {
+		return fmt.Errorf("sessão '%s' já existe, escolha outro nome", newName)
+	}
+
+	// Load source
+	sd, err := sm.LoadSessionV2(sourceName)
+	if err != nil {
+		return fmt.Errorf("falha ao carregar sessão fonte: %w", err)
+	}
+
+	// Save as new name
+	if err := sm.SaveSessionV2(newName, sd); err != nil {
+		return fmt.Errorf("falha ao salvar sessão fork: %w", err)
+	}
+
+	sm.logger.Info("Session forked",
+		zap.String("source", sourceName),
+		zap.String("fork", newName))
+	return nil
+}
+
+// ForkCurrentToNew creates a fork from in-memory session data (for forking unsaved sessions).
+func (sm *SessionManager) ForkCurrentToNew(newName string, sd *SessionData) error {
+	if newName == "" {
+		return fmt.Errorf("target session name required")
+	}
+
+	targetPath := sm.getSessionPath(newName)
+	if _, err := os.Stat(targetPath); err == nil {
+		return fmt.Errorf("sessão '%s' já existe", newName)
+	}
+
+	return sm.SaveSessionV2(newName, sd)
+}
+
 // DeleteSession apaga um arquivo de sessão.
 func (sm *SessionManager) DeleteSession(name string) error {
 	filePath := sm.getSessionPath(name)

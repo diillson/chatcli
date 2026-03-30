@@ -13,6 +13,7 @@ const (
 	MessageTypeAgentResult
 	MessageTypeSystem
 	MessageTypeError
+	MessageTypeChannel // MCP channel push messages
 )
 
 // String returns the human-readable name.
@@ -32,6 +33,8 @@ func (mt MessageType) String() string {
 		return "system"
 	case MessageTypeError:
 		return "error"
+	case MessageTypeChannel:
+		return "channel"
 	default:
 		return "unknown"
 	}

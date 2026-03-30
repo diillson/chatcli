@@ -61,6 +61,15 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 - [Tool Use Nativo (API Estruturada)](#tool-use-nativo-api-estruturada)
 - [MCP (Model Context Protocol)](#mcp-model-context-protocol)
 - [Bootstrap e Memória](#bootstrap-e-memória)
+- [Sistema de Hooks](#sistema-de-hooks)
+- [WebFetch e WebSearch](#webfetch-e-websearch)
+- [Cost Tracking](#cost-tracking)
+- [Git Worktrees](#git-worktrees)
+- [MCP Channels](#mcp-channels)
+- [Path-Specific Rules](#path-specific-rules)
+- [@path Direct Mentions](#path-direct-mentions)
+- [Session Fork](#session-fork)
+- [Skill Frontmatter Avançado](#skill-frontmatter-avançado)
 - [Migração de Configuração](#migração-de-configuração)
 - [Monitoramento Kubernetes (K8s Watcher)](#monitoramento-kubernetes-k8s-watcher)
 - [Estrutura do Código e Tecnologias](#estrutura-do-código-e-tecnologias)
@@ -108,6 +117,12 @@ O **ChatCLI** é uma aplicação de linha de comando (CLI) avançada que integra
 - **Migração de Configuração**: Sistema versionado de migração de schema de configuração com backup automático e rollback, garantindo upgrades seguros entre versões.
 - **Registry de Provedores com Auto-registro**: Cada provedor LLM se registra automaticamente via `init()`, eliminando blocos `switch/case` e facilitando a adição de novos provedores.
 - **Segurança Configurável no Shell**: Regras de deny/allow configuráveis com severidade, detecção de path traversal, limites de workspace e terminação graceful de processos (SIGTERM/SIGKILL).
+- **Hooks System**: Sistema de hooks para lifecycle events (PreToolUse, PostToolUse, SessionStart, etc.) com suporte a shell commands e HTTP webhooks.
+- **WebFetch e WebSearch**: Ferramentas built-in para busca web (DuckDuckGo) e fetch de páginas com extração de texto HTML.
+- **Cost Tracking**: Rastreamento de custo por sessão com pricing tables para Claude, GPT-4, Gemini e Grok.
+- **Git Worktrees**: Gerenciamento de git worktrees para trabalho isolado em branches paralelas.
+- **MCP Channels**: Push messages de servidores MCP para notificações reativas (CI, alerts).
+- **Path-Specific Rules**: Regras por path (`.chatcli/rules/`) com frontmatter `paths:` para aplicação condicional.
 
 -----
 
@@ -442,6 +457,13 @@ Observação: as mesmas features de contexto funcionam dentro do texto do  --pro
   -  Ctrl+C  (duas vezes) ou  Ctrl+D : Encerra a aplicação.
 - Contexto:
   -  @history ,  @git ,  @env ,  @file ,  @command .
+- Ferramentas Avançadas:
+  - `/mcp status`, `/mcp tools`, `/mcp restart`
+  - `/hooks` — Lista hooks configurados
+  - `/cost` — Exibe custo estimado da sessão
+  - `/worktree create|list|remove|status` — Gerencia git worktrees
+  - `/channel [list|inject|<name>]` — Mensagens de MCP channels
+  - `/session fork <nome>` — Cria fork da sessão atual
 
 --------
 
@@ -1519,6 +1541,43 @@ Crie `~/.chatcli/mcp_servers.json`:
 
 Ferramentas MCP são automaticamente prefixadas com `mcp_` e expostas à IA com a descrição `[MCP:<server>]`.
 
+### MCP no Modo Client
+
+O MCP agora funciona diretamente no modo interativo (TTY), não apenas no modo servidor. O ChatCLI auto-detecta o arquivo `~/.chatcli/mcp_servers.json` e inicializa os servidores automaticamente.
+
+- Tools MCP são expostas nos 3 modos (chat, agent, coder)
+- No agent/coder mode, invoque com `<tool_call name="mcp_<tool>" args='{"param":"value"}' />`
+- **Deferred schemas**: apenas nome+descrição são enviados no prompt (economia de tokens). O schema completo é retornado sob demanda quando o modelo invoca sem args.
+- Gerencie com `/mcp status`, `/mcp tools`, `/mcp restart`
+
+### MCP via Operator (Instance CRD)
+
+Ao usar o ChatCLI Operator, configure MCP diretamente no recurso `Instance`:
+
+```yaml
+spec:
+  mcp:
+    enabled: true
+    servers:
+      - name: filesystem
+        transport: stdio
+        command: npx
+        args: ["-y", "@anthropic/mcp-server-filesystem", "/workspace"]
+        enabled: true
+    # Ou referencie ConfigMap existente:
+    # existingConfigMap: "my-mcp-config"
+```
+
+O controller gera automaticamente o ConfigMap, monta em `/etc/chatcli/mcp/` e passa `--mcp-config` ao container.
+
+### MCP Channels
+
+Servidores MCP podem enviar push messages para a sessão via SSE:
+
+- Mensagens são armazenadas em buffer circular (até 100)
+- Últimas 5 mensagens são automaticamente injetadas no system prompt
+- Gerencie com `/channel list`, `/channel inject`, `/channel <nome>`
+
 --------
 
 ## Bootstrap e Memória
@@ -1575,6 +1634,342 @@ O sistema executa compactação periódica (a cada 24h) com pipeline de 2 nívei
 2. **Score-based** (fallback) — Arquiva fatos com score baixo em `memory_archive.json`
 
 Fatos são scorados com: `(1 + log(accessCount)) * exp(-daysSinceAccess * ln2 / halfLife)`
+
+--------
+
+## Sistema de Hooks
+
+O ChatCLI possui um sistema de hooks que permite executar ações automáticas em resposta a eventos do lifecycle da aplicação. Hooks podem ser shell commands ou HTTP webhooks.
+
+### Configuração
+
+Hooks são configurados via JSON em dois níveis:
+
+- **Global**: `~/.chatcli/hooks.json`
+- **Projeto**: `.chatcli/hooks.json` (na raiz do projeto)
+
+### Eventos Disponíveis
+
+| Evento | Descrição |
+|--------|-----------|
+| `SessionStart` | Início de uma nova sessão |
+| `SessionEnd` | Encerramento da sessão |
+| `PreToolUse` | Antes de executar uma ferramenta |
+| `PostToolUse` | Após execução bem-sucedida de uma ferramenta |
+| `PostToolUseFailure` | Após falha na execução de uma ferramenta |
+| `UserPromptSubmit` | Quando o usuário envia um prompt |
+| `PreCompact` | Antes da compactação de memória |
+| `PostCompact` | Após a compactação de memória |
+| `Notification` | Notificações gerais do sistema |
+
+### Tipos de Hook
+
+- **command**: Executa um comando shell. Se o exit code for **2** em `PreToolUse`, a ação é **bloqueada**.
+- **http**: Envia um POST HTTP para a URL configurada.
+
+### Filtragem por ToolPattern
+
+Use padrões glob no campo `toolPattern` para filtrar quais ferramentas ativam o hook:
+
+- `*` — Todas as ferramentas
+- `mcp_*` — Apenas ferramentas MCP
+- `@coder` — Apenas o plugin coder
+
+### Exemplo de Configuração
+
+```json
+{
+  "hooks": [
+    {
+      "event": "PreToolUse",
+      "type": "command",
+      "command": "/usr/local/bin/audit-tool.sh",
+      "toolPattern": "@coder"
+    },
+    {
+      "event": "PostToolUse",
+      "type": "http",
+      "url": "https://hooks.example.com/chatcli",
+      "toolPattern": "*"
+    },
+    {
+      "event": "SessionStart",
+      "type": "command",
+      "command": "echo 'Sessão iniciada' >> ~/.chatcli/audit.log"
+    }
+  ]
+}
+```
+
+### Variáveis de Ambiente
+
+Os hooks do tipo `command` recebem variáveis de ambiente com contexto:
+
+| Variável | Descrição |
+|----------|-----------|
+| `CHATCLI_HOOK_EVENT` | Nome do evento que disparou o hook |
+| `CHATCLI_HOOK_TOOL` | Nome da ferramenta (quando aplicável) |
+| `CHATCLI_HOOK_SESSION` | ID da sessão atual |
+
+Use `/hooks` no modo interativo para listar os hooks configurados.
+
+--------
+
+## WebFetch e WebSearch
+
+O ChatCLI inclui ferramentas built-in para acesso à web, disponíveis nos modos agent e coder.
+
+### @webfetch
+
+Busca o conteúdo de uma URL, remove tags HTML e retorna o texto extraído. Utiliza `golang.org/x/net/html` para parsing.
+
+```bash
+# No modo agent/coder
+/agent Leia o conteúdo de https://example.com e resuma os pontos principais
+
+# O agente invoca automaticamente:
+# <tool_call name="@webfetch" args='{"url":"https://example.com"}' />
+```
+
+### @websearch
+
+Realiza buscas na web via DuckDuckGo e retorna resultados com título, URL e snippet.
+
+```bash
+# No modo agent/coder
+/agent Pesquise as melhores práticas de Go para tratamento de erros
+
+# O agente invoca automaticamente:
+# <tool_call name="@websearch" args='{"query":"Go error handling best practices"}' />
+```
+
+Ambas as ferramentas são disponibilizadas automaticamente nos 3 modos (chat, agent, coder) e não requerem configuração adicional.
+
+--------
+
+## Cost Tracking
+
+O ChatCLI rastreia o custo estimado de cada sessão com base no consumo de tokens (prompt e completion).
+
+### Como Funciona
+
+- O custo é calculado automaticamente a cada chamada ao provedor LLM
+- Tokens de prompt e completion são contabilizados separadamente
+- Pricing tables embarcadas para os principais modelos:
+  - **Claude** (Haiku, Sonnet, Opus)
+  - **GPT-4** (GPT-4o, GPT-4o-mini, GPT-4.1)
+  - **Gemini** (Flash, Pro)
+  - **Grok**
+
+### Comando
+
+```bash
+/cost
+```
+
+Exibe um resumo com:
+- Total de tokens de prompt e completion
+- Custo estimado em USD
+- Breakdown por modelo (quando múltiplos modelos foram usados na sessão)
+
+Funciona nos modos chat, agent e coder.
+
+--------
+
+## Git Worktrees
+
+O ChatCLI oferece gerenciamento integrado de git worktrees para trabalho isolado em branches paralelas.
+
+### Comandos
+
+| Comando | Descrição |
+|---------|-----------|
+| `/worktree create <branch>` | Cria um novo worktree para a branch especificada |
+| `/worktree list` | Lista todos os worktrees ativos |
+| `/worktree remove <branch>` | Remove um worktree existente |
+| `/worktree status` | Exibe status de todos os worktrees |
+
+### Comportamento
+
+- O worktree é criado no diretório adjacente à raiz do repositório (ex.: `../repo-branch`)
+- Branches existentes são detectadas automaticamente; branches novas são criadas a partir de HEAD
+- Após `create`, o CWD da sessão muda automaticamente para o novo worktree
+- Ideal para trabalhar em múltiplas features ou hotfixes simultaneamente sem `git stash`
+
+### Exemplo
+
+```bash
+# Criar worktree para uma feature
+/worktree create feature/nova-api
+
+# Listar worktrees
+/worktree list
+
+# Remover quando terminar
+/worktree remove feature/nova-api
+```
+
+--------
+
+## MCP Channels
+
+Servidores MCP podem enviar **push messages** para a sessão do ChatCLI via Server-Sent Events (SSE), permitindo notificações reativas de CI, alertas e outros eventos externos.
+
+### Como Funciona
+
+- Mensagens recebidas são armazenadas em um **buffer circular** (até 100 mensagens por canal)
+- As **últimas 5 mensagens** são automaticamente injetadas no system prompt para contexto
+- Cada canal é identificado pelo nome do servidor MCP que o originou
+
+### Comandos
+
+| Comando | Descrição |
+|---------|-----------|
+| `/channel list` | Lista todos os canais ativos e contagem de mensagens |
+| `/channel inject` | Injeta manualmente as mensagens pendentes no contexto |
+| `/channel <nome>` | Exibe as mensagens de um canal específico |
+
+### Casos de Uso
+
+- Receber notificações de CI/CD (build failures, deploy status)
+- Alertas de monitoramento (Prometheus, Grafana)
+- Mensagens de outros agentes ou sistemas externos
+
+--------
+
+## Path-Specific Rules
+
+O ChatCLI suporta regras condicionais aplicadas por path, permitindo instruções específicas para diferentes partes do codebase.
+
+### Estrutura
+
+Regras são definidas como arquivos Markdown em:
+
+- **Global**: `~/.chatcli/rules/*.md`
+- **Workspace**: `.chatcli/rules/*.md` (na raiz do projeto)
+
+### Frontmatter `paths:`
+
+Cada arquivo de regra pode conter um frontmatter YAML com o campo `paths:` que define quando a regra deve ser aplicada:
+
+```yaml
+---
+paths: ["*.go", "src/**"]
+---
+# Regras para código Go
+
+1. Use `errors.New` em vez de `fmt.Errorf` quando não houver contexto adicional
+2. Sempre verifique erros retornados
+3. Prefira interfaces pequenas (1-3 métodos)
+```
+
+### Precedência
+
+- Regras do workspace (`.chatcli/rules/`) têm prioridade sobre regras globais (`~/.chatcli/rules/`)
+- Regras globais servem como fallback para projetos sem regras locais
+- O carregamento é **lazy** — regras são aplicadas com base em hints da conversa (arquivos mencionados, contexto do prompt)
+
+--------
+
+## @path Direct Mentions
+
+O ChatCLI expande automaticamente menções a caminhos de arquivo no prompt:
+
+- `@src/main.go` é expandido para `@file src/main.go`
+- A expansão só ocorre se o caminho existe no filesystem
+- Comandos conhecidos (`@file`, `@coder`, `@git`, etc.) não são afetados
+
+Isso permite uma sintaxe mais concisa ao referenciar arquivos:
+
+```bash
+# Em vez de:
+@file src/main.go Explique esta função
+
+# Basta usar:
+@src/main.go Explique esta função
+```
+
+--------
+
+## Session Fork
+
+O comando `/session fork` cria uma cópia independente da sessão atual, permitindo explorar caminhos alternativos sem perder o contexto original.
+
+### Uso
+
+```bash
+/session fork <nome>
+```
+
+### Comportamento
+
+- Cria uma cópia completa da sessão atual (histórico, contextos, configurações)
+- Funciona tanto com sessões salvas quanto com sessões não salvas
+- Após o fork, a sessão ativa muda automaticamente para a nova cópia
+- A sessão original permanece intacta e pode ser retomada com `/session load`
+
+### Exemplo
+
+```bash
+# Criar fork para experimentar uma abordagem diferente
+/session fork experimento-refactor
+
+# Trabalhar no fork...
+# Se a abordagem não funcionar, voltar à sessão original:
+/session load minha-sessao
+```
+
+--------
+
+## Skill Frontmatter Avançado
+
+Além dos campos básicos (`name`, `description`, `skills`, `plugins`, `tools`), o frontmatter YAML de agents e skills suporta campos avançados para controle fino de comportamento:
+
+### Campos Disponíveis
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `model` | string | Modelo LLM preferido para este agent/skill |
+| `effort` | string | Nível de esforço do modelo (`low`, `medium`, `high`) |
+| `paths` | list | Paths glob para ativação condicional (ex.: `["*.go", "src/**"]`) |
+| `triggers` | list | Palavras-chave que ativam o agent automaticamente |
+| `tags` | list | Tags para organização e busca |
+| `category` | string | Categoria do agent/skill |
+| `version` | string | Versão do agent/skill |
+| `author` | string | Autor do agent/skill |
+| `user-invocable` | bool | Se o usuário pode invocar diretamente (padrão: `true`) |
+| `disable-model-invocation` | bool | Impede que o modelo invoque automaticamente |
+| `argument-hint` | string | Dica de argumento exibida no auto-complete |
+
+### Exemplo Completo
+
+```yaml
+---
+name: "go-security-reviewer"
+description: "Especialista em segurança para código Go"
+model: "claude-sonnet-4-20250514"
+effort: "high"
+paths: ["*.go", "**/*_test.go"]
+triggers: ["segurança", "vulnerabilidade", "CVE", "security"]
+tags: ["security", "golang", "review"]
+category: "security"
+version: "2.0.0"
+author: "time-security"
+user-invocable: true
+disable-model-invocation: false
+argument-hint: "<arquivo ou diretório Go para revisar>"
+tools: Read, Grep, Glob, Bash
+skills:
+  - clean-code
+  - owasp-top10
+plugins:
+  - "@coder"
+---
+# Revisor de Segurança Go
+
+Você é um especialista em segurança de aplicações Go.
+Analise o código em busca de vulnerabilidades comuns...
+```
 
 --------
 

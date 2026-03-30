@@ -23,6 +23,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
+	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/metrics"
 	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -468,6 +469,11 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 		return fmt.Errorf("erro ao obter resposta da IA: %w", err)
 	}
 
+	// Track cost for agent mode initial call
+	if a.cli.costTracker != nil {
+		a.cli.costTracker.EstimateAndRecord(a.cli.Provider, a.cli.Model, len(enrichedQuery), len(aiResponse))
+	}
+
 	commandBlocks := a.extractCommandBlocks(aiResponse)
 	a.displayResponseWithoutCommands(aiResponse, commandBlocks)
 
@@ -630,6 +636,22 @@ func (a *AgentMode) getToolContextString() string {
 			"- exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"mkdir -p testeapi\"}}\n\n"
 	}
 
+	// Include MCP tools from connected servers (deferred schemas — only name+description)
+	// Full parameter schemas are fetched on-demand when the tool is invoked.
+	if a.cli.mcpManager != nil {
+		mcpTools := a.cli.mcpManager.GetToolsSummary()
+		if len(mcpTools) > 0 {
+			var mcpSection strings.Builder
+			mcpSection.WriteString("MCP Tools (external):\n")
+			mcpSection.WriteString("  Para invocar: <tool_call name=\"mcp_<tool>\" args='{\"param\":\"value\"}' />\n")
+			mcpSection.WriteString("  Se precisar dos parâmetros exatos, invoque e o sistema retornará o schema.\n\n")
+			for _, t := range mcpTools {
+				mcpSection.WriteString(fmt.Sprintf("  - %s: %s\n", t.Function.Name, t.Function.Description))
+			}
+			toolDescriptions = append(toolDescriptions, mcpSection.String())
+		}
+	}
+
 	toolContext := "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + coderCheatSheet + strings.Join(toolDescriptions, "\n") + "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
 	if a.isCoderMode {
 		toolContext += "\nDicas rápidas (@coder):\n" +
@@ -735,6 +757,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Auto-retry on OAuth token expiration (401)
 		if a.cli.refreshClientOnAuthError(err) {
 			aiResponse, err = a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
+		}
+
+		// Track cost for agent mode turn
+		if a.cli.costTracker != nil && err == nil {
+			inputChars := 0
+			for _, m := range turnHistory {
+				inputChars += len(m.Content)
+			}
+			a.cli.costTracker.EstimateAndRecord(a.cli.Provider, a.cli.Model, inputChars, len(aiResponse))
 		}
 
 		// Para o timer e obtém a duração
@@ -1175,7 +1206,62 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				var execErr error
 
 				// --- Preparação da Execução ---
-				if parseErr != nil {
+				// MCP tools handle their own arg parsing (JSON), so check them BEFORE parseErr
+				if a.cli.mcpManager != nil && strings.HasPrefix(toolName, "mcp_") {
+					// MCP tool dispatch — strip prefix and route to MCP server
+					mcpToolName := strings.TrimPrefix(toolName, "mcp_")
+					if a.cli.mcpManager.IsMCPTool(mcpToolName) {
+						// Parse args into map for MCP
+						mcpArgs := make(map[string]interface{})
+						for i := 0; i < len(toolArgs)-1; i += 2 {
+							mcpArgs[toolArgs[i]] = toolArgs[i+1]
+						}
+						// Also try JSON parsing if single arg
+						if len(toolArgs) == 1 {
+							_ = json.Unmarshal([]byte(toolArgs[0]), &mcpArgs)
+						}
+						// If toolArgs came from JSON parsing (parseToolArgsWithJSON), they're key=value pairs
+						// Try re-parsing from normalized args string
+						if len(mcpArgs) == 0 {
+							_ = json.Unmarshal([]byte(normalizedArgsStr), &mcpArgs)
+						}
+
+						// Deferred schema: if model invoked with empty args, return the full schema
+						if len(mcpArgs) == 0 {
+							schema := a.cli.mcpManager.GetToolSchema(mcpToolName)
+							if schema != nil {
+								schemaJSON, _ := json.MarshalIndent(schema, "", "  ")
+								toolOutput = fmt.Sprintf("MCP tool '%s' requires parameters. Here is the schema:\n%s\n\nPlease invoke again with the correct arguments.", mcpToolName, string(schemaJSON))
+							} else {
+								toolOutput = fmt.Sprintf("MCP tool '%s' requires arguments in JSON format: {\"param\": \"value\"}", mcpToolName)
+							}
+						} else {
+							a.cli.animation.StopThinkingAnimation()
+							renderer.RenderStreamBoxStart("🔌", fmt.Sprintf("MCP: %s", mcpToolName), agent.ColorPurple)
+
+							result, mcpErr := a.cli.mcpManager.ExecuteTool(ctx, mcpToolName, mcpArgs)
+							if mcpErr != nil {
+								execErr = mcpErr
+								toolOutput = fmt.Sprintf("MCP tool error: %v", mcpErr)
+							} else {
+								toolOutput = result.Content
+								if result.IsError {
+									execErr = fmt.Errorf("MCP tool returned error")
+								}
+							}
+
+							renderer.RenderStreamBoxEnd(agent.ColorPurple)
+						}
+
+						if ctx.Err() != nil {
+							return ctx.Err()
+						}
+					} else {
+						execErr = fmt.Errorf("MCP tool não encontrado")
+						toolOutput = fmt.Sprintf("Ferramenta MCP '%s' não existe ou servidor desconectado.", mcpToolName)
+					}
+				} else if parseErr != nil {
+					// Non-MCP tool with parse error
 					execErr = parseErr
 					toolOutput = fmt.Sprintf("Args parsing error: %v", parseErr)
 
@@ -1243,6 +1329,34 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 						// Se não houve erro de validação, EXECUTA
 						if !batchHasError {
+							// Fire PreToolUse hook — may block the action
+							if a.cli.hookManager != nil {
+								wd, _ := os.Getwd()
+								hookResult := a.cli.hookManager.Fire(hooks.HookEvent{
+									Type:       hooks.EventPreToolUse,
+									Timestamp:  time.Now(),
+									ToolName:   toolName,
+									ToolArgs:   normalizedArgsStr,
+									SessionID:  a.cli.currentSessionName,
+									WorkingDir: wd,
+								})
+								if hookResult != nil && hookResult.Blocked {
+									msg := fmt.Sprintf("BLOCKED by hook: %s", hookResult.BlockReason)
+									if coderMinimal {
+										renderer.RenderToolResultMinimal(msg, true)
+									} else {
+										renderer.RenderToolResult(msg, true)
+									}
+									a.cli.history = append(a.cli.history, models.Message{
+										Role: "user", Content: "HOOK BLOCK: " + msg,
+									})
+									batchHasError = true
+									execErr = fmt.Errorf("blocked by hook: %s", hookResult.BlockReason)
+								}
+							}
+						}
+
+						if !batchHasError {
 							// UX: Animação durante a execução
 							subCmd := "ação"
 							if len(toolArgs) > 0 {
@@ -1284,6 +1398,32 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					renderer.RenderToolResultMinimal(displayForHuman, execErr != nil)
 				} else {
 					renderer.RenderToolResult(displayForHuman, execErr != nil)
+				}
+
+				// Fire PostToolUse / PostToolUseFailure hooks
+				if a.cli.hookManager != nil {
+					wd, _ := os.Getwd()
+					eventType := hooks.EventPostToolUse
+					errStr := ""
+					if execErr != nil {
+						eventType = hooks.EventPostToolUseFailure
+						errStr = execErr.Error()
+					}
+					// Truncate output for hook payload
+					hookOutput := toolOutput
+					if len(hookOutput) > 2000 {
+						hookOutput = hookOutput[:2000] + "...(truncated)"
+					}
+					a.cli.hookManager.FireAsync(hooks.HookEvent{
+						Type:       eventType,
+						Timestamp:  time.Now(),
+						ToolName:   toolName,
+						ToolArgs:   normalizedArgsStr,
+						ToolOutput: hookOutput,
+						Error:      errStr,
+						SessionID:  a.cli.currentSessionName,
+						WorkingDir: wd,
+					})
 				}
 
 				// Atualiza status da tarefa e re-renderiza plano

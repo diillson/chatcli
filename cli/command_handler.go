@@ -114,6 +114,21 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/metrics":
 		ch.handleMetricsCommand()
 		return false
+	case strings.HasPrefix(userInput, "/mcp"):
+		ch.cli.handleMCPCommand(userInput)
+		return false
+	case strings.HasPrefix(userInput, "/hooks"):
+		ch.cli.handleHooksCommand(userInput)
+		return false
+	case userInput == "/cost":
+		ch.cli.handleCostCommand()
+		return false
+	case strings.HasPrefix(userInput, "/worktree"):
+		ch.cli.handleWorktreeCommand(userInput)
+		return false
+	case strings.HasPrefix(userInput, "/channel"):
+		ch.cli.handleChannelCommand(userInput)
+		return false
 	case userInput == "/reset" || userInput == "/redraw" || userInput == "/clear":
 		fmt.Print("\033[0m")
 		os.Stdout.Sync()
@@ -183,6 +198,12 @@ func (ch *CommandHandler) handleSessionCommand(userInput string) {
 		ch.cli.clearAllHistories()
 		ch.cli.currentSessionName = ""
 		fmt.Println(i18n.T("session.new_session_started"))
+	case "fork":
+		if name == "" {
+			fmt.Println(colorize("  Uso: /session fork <novo-nome>", ColorYellow))
+			return
+		}
+		ch.cli.handleForkSession(name)
 	default:
 		// CORREÇÃO: Usar Println com i18n.T
 		fmt.Println(i18n.T("session.unknown_command", command))

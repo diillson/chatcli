@@ -168,7 +168,6 @@ func (pd *PatternDetector) FormatForPrompt() string {
 	var parts []string
 
 	if s.SessionCount > 0 {
-		parts = append(parts, strings.Repeat("", 0)) // placeholder
 		avgMin := s.AvgSessionSecs / 60.0
 		if avgMin > 0 {
 			parts = append(parts, formatStat("Sessions: %d (avg %.0f min)", s.SessionCount, avgMin))

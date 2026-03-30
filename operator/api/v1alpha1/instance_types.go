@@ -70,6 +70,58 @@ type InstanceSpec struct {
 	// Plugins configures plugin provisioning for the instance.
 	// +optional
 	Plugins *PluginProvisionSpec `json:"plugins,omitempty"`
+
+	// MCP configures MCP (Model Context Protocol) servers for the instance.
+	// MCP servers expose external tools (filesystem, search, databases, etc.)
+	// that the AI can invoke during conversations.
+	// +optional
+	MCP *MCPSpec `json:"mcp,omitempty"`
+}
+
+// MCPSpec configures MCP server connections for the instance.
+type MCPSpec struct {
+	// Enabled activates MCP server connections.
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled"`
+
+	// Servers is the list of MCP server configurations.
+	// +optional
+	Servers []MCPServerSpec `json:"servers,omitempty"`
+
+	// ExistingConfigMap references an existing ConfigMap containing mcp_servers.json.
+	// If set, Servers field is ignored and this ConfigMap is mounted instead.
+	// +optional
+	ExistingConfigMap string `json:"existingConfigMap,omitempty"`
+}
+
+// MCPServerSpec defines a single MCP server connection.
+type MCPServerSpec struct {
+	// Name is a unique identifier for this MCP server.
+	Name string `json:"name"`
+
+	// Transport is the communication protocol: "stdio" (local process) or "sse" (HTTP SSE).
+	// +kubebuilder:validation:Enum=stdio;sse
+	Transport string `json:"transport"`
+
+	// Command is the executable to start (stdio transport only).
+	// +optional
+	Command string `json:"command,omitempty"`
+
+	// Args are command-line arguments for the executable (stdio transport only).
+	// +optional
+	Args []string `json:"args,omitempty"`
+
+	// Env are environment variables for the process (stdio transport only).
+	// +optional
+	Env map[string]string `json:"env,omitempty"`
+
+	// URL is the SSE endpoint URL (sse transport only).
+	// +optional
+	URL string `json:"url,omitempty"`
+
+	// Enabled controls whether this server is active.
+	// +kubebuilder:default=true
+	Enabled bool `json:"enabled"`
 }
 
 // ImageSpec defines the container image configuration.

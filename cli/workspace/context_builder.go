@@ -9,10 +9,12 @@ import (
 
 // ContextBuilder assembles the full system prompt from workspace sources.
 type ContextBuilder struct {
-	bootstrap *BootstrapLoader
-	memory    *MemoryStore
-	cache     *promptCache
-	mu        sync.RWMutex
+	bootstrap    *BootstrapLoader
+	memory       *MemoryStore
+	rules        *RulesLoader
+	workspaceDir string // current working directory / project root
+	cache        *promptCache
+	mu           sync.RWMutex
 }
 
 type promptCache struct {
@@ -22,11 +24,29 @@ type promptCache struct {
 }
 
 // NewContextBuilder creates a new context builder.
-func NewContextBuilder(bootstrap *BootstrapLoader, memory *MemoryStore) *ContextBuilder {
-	return &ContextBuilder{
-		bootstrap: bootstrap,
-		memory:    memory,
+// workspaceDir is the detected project root (or CWD) where the session started.
+func NewContextBuilder(bootstrap *BootstrapLoader, memory *MemoryStore, workspaceDir string) *ContextBuilder {
+	cb := &ContextBuilder{
+		bootstrap:    bootstrap,
+		memory:       memory,
+		workspaceDir: workspaceDir,
 	}
+
+	// Initialize path-specific rules loader
+	if bootstrap != nil {
+		globalDir := ""
+		if bootstrap.globalDir != "" {
+			globalDir = bootstrap.globalDir
+		}
+		cb.rules = NewRulesLoader(workspaceDir, globalDir, bootstrap.logger)
+	}
+
+	return cb
+}
+
+// WorkspaceDir returns the current workspace directory.
+func (cb *ContextBuilder) WorkspaceDir() string {
+	return cb.workspaceDir
 }
 
 // BuildSystemPromptPrefix returns workspace context to prepend to the system prompt.
@@ -71,6 +91,24 @@ func (cb *ContextBuilder) BuildSystemPromptPrefixWithHints(hints []string) strin
 		}
 	}
 
+	// Path-specific rules — loaded lazily based on file-like hints
+	if cb.rules != nil && len(hints) > 0 {
+		// Filter hints to only those that look like file paths
+		// (contain dots or slashes), which avoids matching generic keywords
+		var pathHints []string
+		for _, h := range hints {
+			if strings.Contains(h, ".") || strings.Contains(h, "/") {
+				pathHints = append(pathHints, h)
+			}
+		}
+		if len(pathHints) > 0 {
+			rulesContent := cb.rules.LoadMatchingRules(pathHints)
+			if rulesContent != "" {
+				parts = append(parts, rulesContent)
+			}
+		}
+	}
+
 	content := ""
 	if len(parts) > 0 {
 		content = strings.Join(parts, "\n\n---\n\n")
@@ -90,10 +128,24 @@ func (cb *ContextBuilder) BuildSystemPromptPrefixWithHints(hints []string) strin
 	return content
 }
 
-// BuildDynamicContext returns time-sensitive context.
+// BuildDynamicContext returns time-sensitive and session-aware context.
+// Includes current time, working directory, and disambiguation instructions
+// so the model never confuses paths from long-term memory with the current session.
 func (cb *ContextBuilder) BuildDynamicContext() string {
 	now := time.Now()
-	return fmt.Sprintf("Current date and time: %s", now.Format("2006-01-02 15:04:05 MST"))
+	var parts []string
+	parts = append(parts, fmt.Sprintf("Current date and time: %s", now.Format("2006-01-02 15:04:05 MST")))
+
+	if cb.workspaceDir != "" {
+		parts = append(parts, fmt.Sprintf("Current working directory: %s", cb.workspaceDir))
+		parts = append(parts,
+			"IMPORTANT: When the user refers to \"here\", \"this project\", \"current directory\", "+
+				"or uses relative paths, ALWAYS resolve them against the current working directory above — "+
+				"NOT against paths from long-term memory or previous sessions. "+
+				"Memory may contain paths from other projects; treat those as historical context only.")
+	}
+
+	return strings.Join(parts, "\n")
 }
 
 // InvalidateCache forces rebuild on next call.

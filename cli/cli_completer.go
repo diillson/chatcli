@@ -69,6 +69,22 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getWatchSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/mcp") {
+		return cli.getMCPSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/hooks ") {
+		return cli.getHooksSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/worktree ") {
+		return cli.getWorktreeSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/channel ") {
+		return cli.getChannelSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -191,6 +207,11 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/disconnect", Description: "Desconectar do servidor remoto e voltar ao modo local"},
 		{Text: "/watch", Description: "Exibe o status do K8s watcher (quando ativo)"},
 		{Text: "/metrics", Description: "Exibe métricas de runtime (provider, sessão, tokens, memória)"},
+		{Text: "/mcp", Description: "Gerencia servidores MCP (status, tools, restart)"},
+		{Text: "/hooks", Description: "Exibe hooks de lifecycle configurados"},
+		{Text: "/cost", Description: "Exibe custo estimado da sessão atual"},
+		{Text: "/worktree", Description: "Gerencia git worktrees para trabalho isolado em branches"},
+		{Text: "/channel", Description: "Gerencia MCP channels para push messages de servidores externos"},
 		{Text: "/compact", Description: "Compacta o histórico (use /compact <instrução> para guiar o que preservar)"},
 		{Text: "/rewind", Description: "Volta a um checkpoint anterior da conversa"},
 		{Text: "/memory", Description: "Ver/carregar anotações de memória (today, yesterday, week, load <data>, longterm, list)"},
@@ -658,6 +679,7 @@ func (cli *ChatCLI) getSessionSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "load", Description: "Carregar sessão salva anteriormente"},
 			{Text: "list", Description: "Listar todas as sessões salvas"},
 			{Text: "delete", Description: "Deletar uma sessão salva"},
+			{Text: "fork", Description: "Criar fork da sessão atual com novo nome"},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
