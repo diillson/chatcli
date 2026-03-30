@@ -523,17 +523,32 @@ func (cli *ChatCLI) listAvailableModels() {
 		return
 	}
 
-	// Determine source for the header
-	source := "catalog"
-	if len(models) > 0 && models[0].Source == client.ModelSourceAPI {
-		source = "API"
-	}
-	fmt.Printf("\n  Available models for %s (source: %s):\n", cli.Provider, source)
-	for i, m := range models {
-		if m.DisplayName != "" && m.DisplayName != m.ID {
-			fmt.Printf("  %d. %s (%s)\n", i+1, m.ID, m.DisplayName)
+	// Count sources
+	apiCount, catalogCount := 0, 0
+	for _, m := range models {
+		if m.Source == client.ModelSourceAPI {
+			apiCount++
 		} else {
-			fmt.Printf("  %d. %s\n", i+1, m.ID)
+			catalogCount++
+		}
+	}
+
+	sourceInfo := "catalog"
+	if apiCount > 0 && catalogCount > 0 {
+		sourceInfo = fmt.Sprintf("API: %d + catalog: %d", apiCount, catalogCount)
+	} else if apiCount > 0 {
+		sourceInfo = "API"
+	}
+	fmt.Printf("\n  Available models for %s (%s):\n", cli.Provider, sourceInfo)
+	for i, m := range models {
+		tag := ""
+		if m.Source == client.ModelSourceAPI {
+			tag = " [api]"
+		}
+		if m.DisplayName != "" && m.DisplayName != m.ID {
+			fmt.Printf("  %d. %s (%s)%s\n", i+1, m.ID, m.DisplayName, tag)
+		} else {
+			fmt.Printf("  %d. %s%s\n", i+1, m.ID, tag)
 		}
 	}
 	fmt.Println()

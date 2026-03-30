@@ -332,7 +332,14 @@ func (c *OpenAIResponsesClient) ListModels(ctx context.Context) ([]client.ModelI
 	isOAuth := strings.HasPrefix(c.apiKey, "oauth:")
 
 	if isOAuth {
-		return c.listModelsOAuth(ctx)
+		models, err := c.listModelsOAuth(ctx)
+		if err != nil {
+			c.logger.Warn("OAuth model listing failed, trying standard API",
+				zap.Error(err))
+			// Fallback: try standard OpenAI /v1/models with the OAuth token
+			return c.listModelsAPIKey(ctx)
+		}
+		return models, nil
 	}
 	return c.listModelsAPIKey(ctx)
 }

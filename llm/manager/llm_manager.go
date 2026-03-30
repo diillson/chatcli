@@ -446,11 +446,17 @@ func (m *LLMManagerImpl) ListModelsForProvider(ctx context.Context, provider str
 
 	// Try API listing first
 	if lister, ok := tempClient.(client.ModelLister); ok {
+		m.logger.Debug("Attempting API model listing",
+			zap.String("provider", provider),
+			zap.String("clientType", fmt.Sprintf("%T", tempClient)))
 		apiModels, err := lister.ListModels(ctx)
 		if err != nil {
 			m.logger.Warn("Failed to fetch models from API, will include catalog models",
 				zap.String("provider", provider), zap.Error(err))
 		} else {
+			m.logger.Debug("API model listing succeeded",
+				zap.String("provider", provider),
+				zap.Int("count", len(apiModels)))
 			for _, am := range apiModels {
 				if !seen[am.ID] {
 					seen[am.ID] = true
@@ -458,6 +464,10 @@ func (m *LLMManagerImpl) ListModelsForProvider(ctx context.Context, provider str
 				}
 			}
 		}
+	} else {
+		m.logger.Debug("Client does not implement ModelLister",
+			zap.String("provider", provider),
+			zap.String("clientType", fmt.Sprintf("%T", tempClient)))
 	}
 
 	// Always merge catalog models (they may include models the API doesn't list)
