@@ -17,6 +17,18 @@ import (
 	"go.uber.org/zap"
 )
 
+// resolvedToolCall is a unified representation of a tool call,
+// regardless of whether it came from native function calling or XML parsing.
+type resolvedToolCall struct {
+	ID     string                 // tool call ID (native) or generated
+	Name   string                 // native function name or @coder
+	Subcmd string                 // engine subcommand (read, write, patch, etc.)
+	Args   []string               // CLI-style flags for engine.Execute
+	RawArgs string                // original args string for display/logging
+	Native bool                   // true if from native function calling
+	NativeArgs map[string]interface{} // structured args (native only)
+}
+
 // WorkerReActConfig controls the worker's internal ReAct loop.
 type WorkerReActConfig struct {
 	MaxTurns        int
@@ -35,7 +47,10 @@ const MaxWorkerOutputBytes = 30 * 1024
 // RunWorkerReAct executes a mini ReAct loop for a single worker agent.
 // Each turn: send task to LLM → parse tool_calls → execute via Engine → feedback.
 // If no tool_calls are emitted, the worker is done and returns the final text.
-// Executable skills are short-circuited (executed directly without LLM call).
+//
+// When the LLM client supports native tool calling (ToolAwareClient), this function
+// uses structured function calling — no XML parsing or base64 needed.
+// Otherwise, falls back to XML/JSON parsing from response text.
 func RunWorkerReAct(
 	ctx context.Context,
 	config WorkerReActConfig,
@@ -52,7 +67,6 @@ func RunWorkerReAct(
 	maxTurns := config.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = DefaultWorkerMaxTurns
-		// Allow env override for worker max turns
 		if envVal := os.Getenv("CHATCLI_AGENT_WORKER_MAX_TURNS"); envVal != "" {
 			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
 				maxTurns = v
@@ -60,8 +74,29 @@ func RunWorkerReAct(
 		}
 	}
 
+	// Detect if we can use native function calling
+	toolAware, useNativeTools := client.AsToolAware(llmClient)
+	if useNativeTools && !toolAware.SupportsNativeTools() {
+		useNativeTools = false
+	}
+
+	// Build tool definitions for native mode
+	var toolDefs []models.ToolDefinition
+	if useNativeTools {
+		toolDefs = CoderToolDefinitions(config.AllowedCommands)
+		logger.Info("Using native function calling",
+			zap.Int("tools", len(toolDefs)),
+			zap.String("callID", callID))
+	}
+
+	// Adjust system prompt for native tool mode (no XML instructions needed)
+	systemPrompt := config.SystemPrompt
+	if useNativeTools {
+		systemPrompt = nativeToolSystemPrompt(config)
+	}
+
 	history := []models.Message{
-		{Role: "system", Content: config.SystemPrompt},
+		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: task},
 	}
 
@@ -76,10 +111,9 @@ func RunWorkerReAct(
 
 	// --- Failure tracking for reflection ---
 	consecutiveFailures := 0
-	blockedCmds := make(map[string]int) // cmd → count of times blocked/failed
+	blockedCmds := make(map[string]int)
 
 	for turn := 0; turn < maxTurns; turn++ {
-		// Check cancellation
 		select {
 		case <-ctx.Done():
 			return &AgentResult{
@@ -92,75 +126,127 @@ func RunWorkerReAct(
 		default:
 		}
 
-		// Call LLM
-		response, err := llmClient.SendPrompt(ctx, "", history, 0)
-		if err != nil {
-			return &AgentResult{
-				CallID:    callID,
-				Output:    finalOutput.String(),
-				Error:     fmt.Errorf("LLM call failed on turn %d: %w", turn+1, err),
-				Duration:  time.Since(startTime),
-				ToolCalls: allToolCalls,
-			}, err
+		// --- Call LLM (native or text mode) ---
+		var responseText string
+		var nativeToolCalls []models.ToolCall
+
+		if useNativeTools {
+			llmResp, err := toolAware.SendPromptWithTools(ctx, "", history, toolDefs, 0)
+			if err != nil {
+				return &AgentResult{
+					CallID:    callID,
+					Output:    finalOutput.String(),
+					Error:     fmt.Errorf("LLM call failed on turn %d: %w", turn+1, err),
+					Duration:  time.Since(startTime),
+					ToolCalls: allToolCalls,
+				}, err
+			}
+			responseText = llmResp.Content
+			nativeToolCalls = llmResp.ToolCalls
+
+			// Build assistant message with structured tool calls
+			history = append(history, models.Message{
+				Role:      "assistant",
+				Content:   responseText,
+				ToolCalls: nativeToolCalls,
+			})
+		} else {
+			var err error
+			responseText, err = llmClient.SendPrompt(ctx, "", history, 0)
+			if err != nil {
+				return &AgentResult{
+					CallID:    callID,
+					Output:    finalOutput.String(),
+					Error:     fmt.Errorf("LLM call failed on turn %d: %w", turn+1, err),
+					Duration:  time.Since(startTime),
+					ToolCalls: allToolCalls,
+				}, err
+			}
+			history = append(history, models.Message{Role: "assistant", Content: responseText})
 		}
 
-		history = append(history, models.Message{Role: "assistant", Content: response})
+		// --- Resolve tool calls to unified format ---
+		var resolved []resolvedToolCall
 
-		// Parse tool_calls from response
-		toolCalls, _ := agent.ParseToolCalls(response)
+		if useNativeTools && len(nativeToolCalls) > 0 {
+			for _, ntc := range nativeToolCalls {
+				subcmd, found := NativeToolNameToSubcmd(ntc.Name)
+				if !found {
+					subcmd = ntc.Name
+				}
+				flags := NativeToolArgsToFlags(subcmd, ntc.Arguments)
+				argsJSON, _ := json.Marshal(ntc.Arguments)
 
-		if len(toolCalls) == 0 {
-			// No tool calls — worker is done, capture final response
-			finalOutput.WriteString(response)
+				resolved = append(resolved, resolvedToolCall{
+					ID:         ntc.ID,
+					Name:       ntc.Name,
+					Subcmd:     subcmd,
+					Args:       flags,
+					RawArgs:    string(argsJSON),
+					Native:     true,
+					NativeArgs: ntc.Arguments,
+				})
+			}
+		} else if !useNativeTools {
+			// XML/JSON parsing fallback
+			xmlToolCalls, _ := agent.ParseToolCalls(responseText)
+			for _, tc := range xmlToolCalls {
+				subcmd, args, parseErr := parseCoderToolCall(tc)
+				if parseErr != nil {
+					allToolCalls = append(allToolCalls, ToolCallRecord{Name: tc.Name, Args: tc.Args, Error: parseErr})
+					continue
+				}
+				resolved = append(resolved, resolvedToolCall{
+					ID:      fmt.Sprintf("xml_%d", turn),
+					Name:    tc.Name,
+					Subcmd:  subcmd,
+					Args:    args,
+					RawArgs: tc.Args,
+				})
+			}
+		}
+
+		if len(resolved) == 0 {
+			// No tool calls — worker is done
+			finalOutput.WriteString(responseText)
 			break
 		}
 
-		// Pre-validate and classify tool calls
+		// --- Pre-validate and classify ---
 		type validatedTC struct {
 			index   int
-			tc      agent.ToolCall
-			subcmd  string
-			args    []string
+			rtc     resolvedToolCall
 			blocked bool
 			msg     string
 		}
-		validated := make([]validatedTC, 0, len(toolCalls))
+		validated := make([]validatedTC, 0, len(resolved))
 		allReadOnly := true
-		for i, tc := range toolCalls {
-			subcmd, args, parseErr := parseCoderToolCall(tc)
-			if parseErr != nil {
-				allToolCalls = append(allToolCalls, ToolCallRecord{Name: tc.Name, Args: tc.Args, Error: parseErr})
-				validated = append(validated, validatedTC{index: i, tc: tc, blocked: true, msg: fmt.Sprintf("[ERROR] Failed to parse tool call: %v", parseErr)})
+
+		for i, rtc := range resolved {
+			if blockedCmds[rtc.Subcmd] >= maxBlockedRetries {
+				allToolCalls = append(allToolCalls, ToolCallRecord{Name: rtc.Subcmd, Args: rtc.RawArgs, Error: fmt.Errorf("command %q permanently blocked after %d failed attempts", rtc.Subcmd, maxBlockedRetries)})
+				validated = append(validated, validatedTC{index: i, rtc: rtc, blocked: true, msg: fmt.Sprintf("[PERMANENTLY BLOCKED] Command %q has failed %d times. You MUST use a completely different approach.", rtc.Subcmd, maxBlockedRetries)})
 				continue
 			}
 
-			// Check if this command has been blocked too many times
-			if blockedCmds[subcmd] >= maxBlockedRetries {
-				allToolCalls = append(allToolCalls, ToolCallRecord{Name: subcmd, Args: tc.Args, Error: fmt.Errorf("command %q permanently blocked after %d failed attempts", subcmd, maxBlockedRetries)})
-				validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, blocked: true, msg: fmt.Sprintf("[PERMANENTLY BLOCKED] Command %q has failed %d times. You MUST use a completely different approach. Do NOT retry this command.", subcmd, maxBlockedRetries)})
+			if !allowed[rtc.Subcmd] {
+				allToolCalls = append(allToolCalls, ToolCallRecord{Name: rtc.Subcmd, Args: rtc.RawArgs, Error: fmt.Errorf("command %q not allowed for this agent", rtc.Subcmd)})
+				validated = append(validated, validatedTC{index: i, rtc: rtc, blocked: true, msg: fmt.Sprintf("[BLOCKED] Command %q is not allowed. Allowed: %v", rtc.Subcmd, config.AllowedCommands)})
+				blockedCmds[rtc.Subcmd]++
 				continue
 			}
-
-			if !allowed[subcmd] {
-				allToolCalls = append(allToolCalls, ToolCallRecord{Name: subcmd, Args: tc.Args, Error: fmt.Errorf("command %q not allowed for this agent", subcmd)})
-				validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, blocked: true, msg: fmt.Sprintf("[BLOCKED] Command %q is not allowed for this agent. Allowed: %v", subcmd, config.AllowedCommands)})
-				blockedCmds[subcmd]++
+			if config.ReadOnly && isWriteCommand(rtc.Subcmd) {
+				allToolCalls = append(allToolCalls, ToolCallRecord{Name: rtc.Subcmd, Args: rtc.RawArgs, Error: fmt.Errorf("write command %q blocked for read-only agent", rtc.Subcmd)})
+				validated = append(validated, validatedTC{index: i, rtc: rtc, blocked: true, msg: fmt.Sprintf("[BLOCKED] This agent is read-only and cannot execute %q", rtc.Subcmd)})
+				blockedCmds[rtc.Subcmd]++
 				continue
 			}
-			if config.ReadOnly && isWriteCommand(subcmd) {
-				allToolCalls = append(allToolCalls, ToolCallRecord{Name: subcmd, Args: tc.Args, Error: fmt.Errorf("write command %q blocked for read-only agent", subcmd)})
-				validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, blocked: true, msg: fmt.Sprintf("[BLOCKED] This agent is read-only and cannot execute %q", subcmd)})
-				blockedCmds[subcmd]++
-				continue
-			}
-			if isWriteCommand(subcmd) {
+			if isWriteCommand(rtc.Subcmd) {
 				allReadOnly = false
 			}
-			validated = append(validated, validatedTC{index: i, tc: tc, subcmd: subcmd, args: args})
-
+			validated = append(validated, validatedTC{index: i, rtc: rtc})
 		}
 
-		// Count runnable (non-blocked) tool calls
 		var runnable []validatedTC
 		for _, v := range validated {
 			if !v.blocked {
@@ -168,12 +254,13 @@ func RunWorkerReAct(
 			}
 		}
 
-		// Execute tool calls: parallel for read-only batches, sequential otherwise
+		// --- Execute tool calls ---
 		type execResult struct {
-			index  int
-			record ToolCallRecord
-			output string
-			failed bool
+			index   int
+			record  ToolCallRecord
+			output  string
+			failed  bool
+			toolID  string // for native tool result messages
 		}
 		results := make([]execResult, len(validated))
 
@@ -186,29 +273,24 @@ func RunWorkerReAct(
 
 		executeOne := func(v validatedTC) execResult {
 			if v.blocked {
-				return execResult{index: v.index, output: v.msg + "\n", failed: true}
+				return execResult{index: v.index, output: v.msg + "\n", failed: true, toolID: v.rtc.ID}
 			}
 
-			// --- POLICY CHECK ---
 			if policyChecker != nil {
-				allowed, msg := policyChecker.CheckAndPrompt(ctx, v.tc.Name, v.tc.Args)
-				if !allowed {
+				policyAllowed, msg := policyChecker.CheckAndPrompt(ctx, v.rtc.Name, v.rtc.RawArgs)
+				if !policyAllowed {
 					blockedMsg := fmt.Sprintf("[BLOCKED BY POLICY] %s", msg)
 					record := ToolCallRecord{
-						Name:  v.subcmd,
-						Args:  v.tc.Args,
+						Name:  v.rtc.Subcmd,
+						Args:  v.rtc.RawArgs,
 						Error: fmt.Errorf("blocked by security policy"),
 					}
-					logger.Warn("Tool call blocked by policy",
-						zap.String("subcmd", v.subcmd),
-						zap.String("message", msg),
-					)
-					return execResult{index: v.index, record: record, output: blockedMsg + "\n", failed: true}
+					return execResult{index: v.index, record: record, output: blockedMsg + "\n", failed: true, toolID: v.rtc.ID}
 				}
 			}
 
-			filePath := extractFilePathFromArgs(v.tc.Args)
-			if isWriteCommand(v.subcmd) && filePath != "" && lockMgr != nil {
+			filePath := extractFilePathFromResolved(v.rtc)
+			if isWriteCommand(v.rtc.Subcmd) && filePath != "" && lockMgr != nil {
 				lockMgr.Lock(filePath)
 			}
 
@@ -224,11 +306,11 @@ func RunWorkerReAct(
 			})
 
 			eng := engine.NewEngine(outWriter, errWriter, "")
-			execErr := eng.Execute(ctx, v.subcmd, v.args)
+			execErr := eng.Execute(ctx, v.rtc.Subcmd, v.rtc.Args)
 			outWriter.Flush()
 			errWriter.Flush()
 
-			if isWriteCommand(v.subcmd) && filePath != "" && lockMgr != nil {
+			if isWriteCommand(v.rtc.Subcmd) && filePath != "" && lockMgr != nil {
 				lockMgr.Unlock(filePath)
 			}
 
@@ -237,18 +319,18 @@ func RunWorkerReAct(
 				output = output[:MaxWorkerOutputBytes] + "\n... [output truncated]"
 			}
 
-			record := ToolCallRecord{Name: v.subcmd, Args: v.tc.Args, Output: output}
+			record := ToolCallRecord{Name: v.rtc.Subcmd, Args: v.rtc.RawArgs, Output: output}
 			hasFailed := false
 			if execErr != nil {
 				record.Error = execErr
 				hasFailed = true
 			}
 
-			out := fmt.Sprintf("[%s] %s\n", v.subcmd, output)
+			out := fmt.Sprintf("[%s] %s\n", v.rtc.Subcmd, output)
 			if execErr != nil {
 				out += fmt.Sprintf("[ERROR] %v\n", execErr)
 			}
-			return execResult{index: v.index, record: record, output: out, failed: hasFailed}
+			return execResult{index: v.index, record: record, output: out, failed: hasFailed, toolID: v.rtc.ID}
 		}
 
 		if canParallelize {
@@ -257,7 +339,7 @@ func RunWorkerReAct(
 			var mu sync.Mutex
 			for i, v := range validated {
 				if v.blocked {
-					results[i] = execResult{index: v.index, output: v.msg + "\n", failed: true}
+					results[i] = execResult{index: v.index, output: v.msg + "\n", failed: true, toolID: v.rtc.ID}
 					continue
 				}
 				wg.Add(1)
@@ -276,11 +358,12 @@ func RunWorkerReAct(
 			}
 		}
 
-		// Aggregate results in original order and count failures
+		// --- Aggregate results ---
 		var turnOutput strings.Builder
 		turnFailures := 0
 		turnBlocked := 0
 		var failedCmds []string
+
 		for _, r := range results {
 			if r.record.Name != "" {
 				allToolCalls = append(allToolCalls, r.record)
@@ -290,7 +373,6 @@ func RunWorkerReAct(
 				turnFailures++
 				if r.record.Name != "" {
 					failedCmds = append(failedCmds, r.record.Name)
-					// Track blocked/failed commands for repeat detection
 					if r.record.Error != nil {
 						blockedCmds[r.record.Name]++
 					}
@@ -298,63 +380,65 @@ func RunWorkerReAct(
 			}
 		}
 
-		// Count blocked-only results (no runnable succeeded)
 		for _, v := range validated {
 			if v.blocked {
 				turnBlocked++
 			}
 		}
 
-		// Build feedback with optional reflection prompt
-		feedback := turnOutput.String()
-		if len(feedback) > MaxWorkerOutputBytes {
-			feedback = feedback[:MaxWorkerOutputBytes] + "\n... [feedback truncated]"
+		// --- Build feedback and inject into history ---
+		if useNativeTools {
+			// Native mode: send proper tool_result messages
+			for _, r := range results {
+				toolContent := r.output
+				if r.failed && r.record.Error != nil {
+					toolContent = fmt.Sprintf("[ERROR] %v\n%s", r.record.Error, r.output)
+				}
+				history = append(history, models.Message{
+					Role:       "tool",
+					Content:    toolContent,
+					ToolCallID: r.toolID,
+				})
+			}
+		} else {
+			// Text mode: append feedback as user message (legacy behavior)
+			feedback := turnOutput.String()
+			if len(feedback) > MaxWorkerOutputBytes {
+				feedback = feedback[:MaxWorkerOutputBytes] + "\n... [feedback truncated]"
+			}
+
+			// --- REFLECTION MECHANISM ---
+			if turnFailures > 0 {
+				feedback += buildReflectionPrompt(turnBlocked, len(validated), consecutiveFailures, blockedCmds)
+			}
+
+			history = append(history, models.Message{Role: "user", Content: feedback})
 		}
 
-		// --- REFLECTION MECHANISM ---
-		if turnFailures > 0 {
+		// Reflection for native mode too
+		if useNativeTools && turnFailures > 0 {
 			consecutiveFailures++
-
-			// Build reflection prompt based on failure severity
-			var reflection strings.Builder
-			reflection.WriteString("\n\n")
-
-			if turnBlocked == len(validated) {
-				// ALL tool calls in this turn were blocked/failed
-				reflection.WriteString(reflectionAllBlockedPrompt)
-			} else if consecutiveFailures >= 3 {
-				// Multiple consecutive turns with failures — escalate
-				reflection.WriteString(fmt.Sprintf(reflectionEscalatePrompt, consecutiveFailures))
-			} else {
-				// Some failures — standard reflection
-				reflection.WriteString(reflectionStandardPrompt)
+			reflectionMsg := buildReflectionPrompt(turnBlocked, len(validated), consecutiveFailures, blockedCmds)
+			if reflectionMsg != "" {
+				history = append(history, models.Message{Role: "user", Content: reflectionMsg})
 			}
-
-			// Add blacklist of commands that have failed too many times
-			var blacklisted []string
-			for cmd, count := range blockedCmds {
-				if count >= maxBlockedRetries {
-					blacklisted = append(blacklisted, cmd)
-				}
-			}
-			if len(blacklisted) > 0 {
-				reflection.WriteString(fmt.Sprintf("\n\nBLACKLISTED COMMANDS (do NOT use): %s", strings.Join(blacklisted, ", ")))
-			}
-
-			feedback += reflection.String()
-
+			logger.Debug("Reflection prompt injected (native)",
+				zap.Int("consecutive_failures", consecutiveFailures),
+				zap.Strings("failed_cmds", failedCmds),
+				zap.Int("turn", turn+1),
+			)
+		} else if !useNativeTools && turnFailures > 0 {
+			consecutiveFailures++
 			logger.Debug("Reflection prompt injected",
 				zap.Int("consecutive_failures", consecutiveFailures),
 				zap.Strings("failed_cmds", failedCmds),
 				zap.Int("turn", turn+1),
 			)
 		} else {
-			// Successful turn — reset consecutive failure counter
 			consecutiveFailures = 0
 		}
 
-		history = append(history, models.Message{Role: "user", Content: feedback})
-		finalOutput.WriteString(feedback)
+		finalOutput.WriteString(turnOutput.String())
 	}
 
 	output := finalOutput.String()
@@ -369,6 +453,63 @@ func RunWorkerReAct(
 		ToolCalls:     allToolCalls,
 		ParallelCalls: maxParallel,
 	}, nil
+}
+
+// nativeToolSystemPrompt builds a cleaner system prompt for native tool calling mode.
+// No XML syntax instructions needed — the LLM calls tools via the API directly.
+func nativeToolSystemPrompt(config WorkerReActConfig) string {
+	return `You are a specialized coding agent in ChatCLI.
+
+## RULES
+1. ALWAYS read a file before modifying it — never edit blind.
+2. Keep changes minimal and focused on the task.
+3. Preserve existing code style and conventions.
+4. Do NOT narrate your actions. No "Let me...", "I will...", "Now I'll...".
+5. Call tools directly — zero narration between tool calls.
+6. Only output text AFTER all tool calls are done, for the final result or if blocked.
+
+## WORKFLOW
+- Read relevant files first to understand context
+- Make targeted changes (prefer patch over full write)
+- Verify critical changes by reading the result
+
+Content is always plain text — no base64 encoding needed.`
+}
+
+// buildReflectionPrompt constructs reflection guidance based on failure severity.
+func buildReflectionPrompt(turnBlocked, totalValidated, consecutiveFailures int, blockedCmds map[string]int) string {
+	var reflection strings.Builder
+	reflection.WriteString("\n\n")
+
+	if turnBlocked == totalValidated {
+		reflection.WriteString(reflectionAllBlockedPrompt)
+	} else if consecutiveFailures >= 3 {
+		reflection.WriteString(fmt.Sprintf(reflectionEscalatePrompt, consecutiveFailures))
+	} else {
+		reflection.WriteString(reflectionStandardPrompt)
+	}
+
+	var blacklisted []string
+	for cmd, count := range blockedCmds {
+		if count >= maxBlockedRetries {
+			blacklisted = append(blacklisted, cmd)
+		}
+	}
+	if len(blacklisted) > 0 {
+		reflection.WriteString(fmt.Sprintf("\n\nBLACKLISTED COMMANDS (do NOT use): %s", strings.Join(blacklisted, ", ")))
+	}
+
+	return reflection.String()
+}
+
+// extractFilePathFromResolved extracts file path from a resolved tool call.
+func extractFilePathFromResolved(rtc resolvedToolCall) string {
+	if rtc.Native && rtc.NativeArgs != nil {
+		if f, ok := rtc.NativeArgs["file"].(string); ok {
+			return f
+		}
+	}
+	return extractFilePathFromArgs(rtc.RawArgs)
 }
 
 // parseCoderToolCall extracts the subcommand and args from a tool call.
@@ -402,7 +543,60 @@ func parseCoderToolCall(tc agent.ToolCall) (string, []string, error) {
 	if len(parts) == 0 {
 		return "", nil, fmt.Errorf("empty tool call args")
 	}
-	return parts[0], parts[1:], nil
+
+	// Normalize common LLM misspellings of subcommands
+	subcmd := normalizeSubcommand(parts[0])
+	return subcmd, parts[1:], nil
+}
+
+// normalizeSubcommand maps common LLM variations to the canonical subcommand name.
+func normalizeSubcommand(cmd string) string {
+	aliases := map[string]string{
+		"read_file":     "read",
+		"readfile":      "read",
+		"read-file":     "read",
+		"write_file":    "write",
+		"writefile":     "write",
+		"write-file":    "write",
+		"patch_file":    "patch",
+		"patchfile":     "patch",
+		"patch-file":    "patch",
+		"edit":          "patch",
+		"edit_file":     "patch",
+		"editfile":      "patch",
+		"search_files":  "search",
+		"searchfiles":   "search",
+		"grep":          "search",
+		"find":          "search",
+		"run_command":   "exec",
+		"run":           "exec",
+		"shell":         "exec",
+		"bash":          "exec",
+		"execute":       "exec",
+		"list_dir":      "tree",
+		"listdir":       "tree",
+		"ls":            "tree",
+		"list":          "tree",
+		"list_directory": "tree",
+		"run_tests":     "test",
+		"run_test":      "test",
+		"git_status":    "git-status",
+		"gitstatus":     "git-status",
+		"git_diff":      "git-diff",
+		"gitdiff":       "git-diff",
+		"git_log":       "git-log",
+		"gitlog":        "git-log",
+		"git_changed":   "git-changed",
+		"gitchanged":    "git-changed",
+		"git_branch":    "git-branch",
+		"gitbranch":     "git-branch",
+		"rollback_file": "rollback",
+		"clean_backups": "clean",
+	}
+	if canonical, ok := aliases[strings.ToLower(cmd)]; ok {
+		return canonical
+	}
+	return cmd
 }
 
 // normalizeArgAliases maps common LLM arg mistakes to the correct flag names.

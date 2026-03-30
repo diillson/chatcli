@@ -38,6 +38,12 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 		calls = append(calls, jsonCalls...)
 	}
 
+	// Try extracting from markdown code blocks (```xml or ```json)
+	if len(calls) == 0 {
+		mdCalls := parseMarkdownCodeBlockToolCalls(text)
+		calls = append(calls, mdCalls...)
+	}
+
 	if xmlErr != nil && len(calls) == 0 {
 		return nil, xmlErr
 	}
@@ -298,6 +304,7 @@ func indexCaseInsensitive(haystack, needle string) int {
 //
 //	{"tool_call":"@coder","args":{...}}
 //	{"name":"@coder","arguments":{...}}
+//	{"cmd":"read","args":{"file":"main.go"}}  (implicit @coder)
 func parseJSONToolCalls(text string) []ToolCall {
 	var calls []ToolCall
 
@@ -331,6 +338,49 @@ func parseJSONToolCalls(text string) []ToolCall {
 		})
 
 		i += len(jsonStr) - 1
+	}
+
+	return calls
+}
+
+// parseMarkdownCodeBlockToolCalls extracts tool calls from markdown code blocks.
+// LLMs sometimes wrap tool calls in ```xml or ```json blocks.
+func parseMarkdownCodeBlockToolCalls(text string) []ToolCall {
+	var calls []ToolCall
+
+	// Find ```xml ... ``` or ```json ... ``` blocks
+	searchFrom := 0
+	for searchFrom < len(text) {
+		startIdx := strings.Index(text[searchFrom:], "```")
+		if startIdx < 0 {
+			break
+		}
+		startIdx += searchFrom
+
+		// Find the end of the opening fence line
+		lineEnd := strings.Index(text[startIdx+3:], "\n")
+		if lineEnd < 0 {
+			break
+		}
+		lineEnd += startIdx + 3
+
+		// Find closing ```
+		closeIdx := strings.Index(text[lineEnd:], "```")
+		if closeIdx < 0 {
+			break
+		}
+		closeIdx += lineEnd
+
+		blockContent := text[lineEnd:closeIdx]
+
+		// Try parsing the block content as tool calls
+		xmlCalls, _ := parseXMLToolCalls(blockContent)
+		calls = append(calls, xmlCalls...)
+
+		jsonCalls := parseJSONToolCalls(blockContent)
+		calls = append(calls, jsonCalls...)
+
+		searchFrom = closeIdx + 3
 	}
 
 	return calls
@@ -382,8 +432,14 @@ func extractJSONObject(text string, pos int) string {
 }
 
 // jsonObjToToolCall checks if a JSON object represents a tool call and converts it.
+// Supports multiple formats LLMs commonly output:
+//
+//	{"tool_call":"@coder", "args":{...}}
+//	{"name":"@coder", "arguments":{...}}
+//	{"cmd":"read", "args":{"file":"main.go"}}  (implicit @coder)
+//	{"tool":"@coder", "args":"read --file main.go"}
 func jsonObjToToolCall(obj map[string]interface{}) (ToolCall, bool) {
-	// Try various common key patterns
+	// Try various common key patterns for the tool name
 	name := ""
 	if v, ok := obj["tool_call"].(string); ok {
 		name = v
@@ -393,31 +449,62 @@ func jsonObjToToolCall(obj map[string]interface{}) (ToolCall, bool) {
 		name = v
 	}
 
-	if name == "" || !strings.HasPrefix(name, "@") {
-		return ToolCall{}, false
-	}
-
 	// Extract args
 	var argsStr string
-	if v, ok := obj["args"]; ok {
+	extractArgs := func(v interface{}) string {
 		if s, ok := v.(string); ok {
-			argsStr = s
-		} else {
-			b, err := json.Marshal(v)
-			if err == nil {
-				argsStr = string(b)
-			}
+			return s
 		}
+		b, err := json.Marshal(v)
+		if err == nil {
+			return string(b)
+		}
+		return ""
+	}
+
+	if v, ok := obj["args"]; ok {
+		argsStr = extractArgs(v)
 	} else if v, ok := obj["arguments"]; ok {
-		if s, ok := v.(string); ok {
-			argsStr = s
-		} else {
-			b, err := json.Marshal(v)
+		argsStr = extractArgs(v)
+	}
+
+	// If we have a name with @, return directly
+	if name != "" && strings.HasPrefix(name, "@") {
+		return ToolCall{Name: name, Args: argsStr}, true
+	}
+
+	// Implicit @coder format: {"cmd":"read", "args":{"file":"main.go"}}
+	// This is the most common format LLMs produce when confused
+	if cmd, ok := obj["cmd"].(string); ok && cmd != "" {
+		// Valid coder subcommands
+		validCmds := map[string]bool{
+			"read": true, "write": true, "patch": true, "tree": true,
+			"search": true, "exec": true, "test": true, "rollback": true, "clean": true,
+			"git-status": true, "git-diff": true, "git-log": true,
+			"git-changed": true, "git-branch": true,
+		}
+		if validCmds[cmd] {
+			// Wrap in standard format
+			wrapped := map[string]interface{}{"cmd": cmd}
+			if v, ok := obj["args"]; ok {
+				wrapped["args"] = v
+			}
+			b, err := json.Marshal(wrapped)
 			if err == nil {
-				argsStr = string(b)
+				return ToolCall{Name: "@coder", Args: string(b)}, true
 			}
 		}
 	}
 
-	return ToolCall{Name: name, Args: argsStr}, true
+	// Try name without @ prefix (some models drop it)
+	if name != "" {
+		validNames := map[string]bool{
+			"coder": true, "file": true, "shell": true, "search": true,
+		}
+		if validNames[name] {
+			return ToolCall{Name: "@" + name, Args: argsStr}, true
+		}
+	}
+
+	return ToolCall{}, false
 }

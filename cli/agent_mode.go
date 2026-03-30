@@ -29,6 +29,7 @@ import (
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -752,11 +753,38 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		turnHistory := buildTurnHistoryWithAnchor()
 
-		// Chamada à LLM
-		aiResponse, err := a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
-		// Auto-retry on OAuth token expiration (401)
-		if a.cli.refreshClientOnAuthError(err) {
+		// Detect native function calling support
+		var nativeToolCalls []models.ToolCall
+		toolAwareClient, canUseNativeTools := llmclient.AsToolAware(a.cli.Client)
+		if canUseNativeTools && !toolAwareClient.SupportsNativeTools() {
+			canUseNativeTools = false
+		}
+
+		// Get tool definitions for native mode (coder mode only)
+		var nativeToolDefs []models.ToolDefinition
+		if canUseNativeTools && a.isCoderMode {
+			nativeToolDefs = workers.CoderToolDefinitions(nil) // all commands
+		}
+
+		// Chamada à LLM (native tools or text)
+		var aiResponse string
+		var err error
+
+		if canUseNativeTools && len(nativeToolDefs) > 0 {
+			var llmResp *models.LLMResponse
+			llmResp, err = toolAwareClient.SendPromptWithTools(ctx, "", turnHistory, nativeToolDefs, 0)
+			if a.cli.refreshClientOnAuthError(err) {
+				llmResp, err = toolAwareClient.SendPromptWithTools(ctx, "", turnHistory, nativeToolDefs, 0)
+			}
+			if err == nil && llmResp != nil {
+				aiResponse = llmResp.Content
+				nativeToolCalls = llmResp.ToolCalls
+			}
+		} else {
 			aiResponse, err = a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
+			if a.cli.refreshClientOnAuthError(err) {
+				aiResponse, err = a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
+			}
 		}
 
 		// Track cost for agent mode turn
@@ -784,7 +812,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		}
 
 		if err != nil {
-			// Se for cancelamento, retorna limpo para o cli.go tratar
 			if errors.Is(err, context.Canceled) {
 				return err
 			}
@@ -792,13 +819,42 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		}
 
 		// Persistir a resposta no histórico "real"
-		a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
+		if len(nativeToolCalls) > 0 {
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:      "assistant",
+				Content:   aiResponse,
+				ToolCalls: nativeToolCalls,
+			})
+		} else {
+			a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
+		}
 
-		// Parsear Tool Calls (XML)
-		toolCalls, parseErr := agent.ParseToolCalls(aiResponse)
-		if parseErr != nil {
-			a.logger.Warn("Falha ao parsear tool_calls", zap.Error(parseErr))
-			toolCalls = nil
+		// Parsear Tool Calls — native ou XML fallback
+		var toolCalls []agent.ToolCall
+		if len(nativeToolCalls) > 0 {
+			// Convert native tool calls to agent.ToolCall format
+			for _, ntc := range nativeToolCalls {
+				subcmd, _ := workers.NativeToolNameToSubcmd(ntc.Name)
+				flags := workers.NativeToolArgsToFlags(subcmd, ntc.Arguments)
+				// Build CLI-style args string for the existing execution pipeline
+				argsJSON, _ := json.Marshal(map[string]interface{}{
+					"cmd":  subcmd,
+					"args": ntc.Arguments,
+				})
+				toolCalls = append(toolCalls, agent.ToolCall{
+					Name: "@coder",
+					Args: string(argsJSON),
+					Raw:  string(argsJSON),
+				})
+				_ = flags // flags are rebuilt downstream by parseToolArgsWithJSON
+			}
+		} else {
+			var parseErr error
+			toolCalls, parseErr = agent.ParseToolCalls(aiResponse)
+			if parseErr != nil {
+				a.logger.Warn("Falha ao parsear tool_calls", zap.Error(parseErr))
+				toolCalls = nil
+			}
 		}
 
 		// Separar pensamento (texto antes do primeiro tool_call)
@@ -830,9 +886,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		remaining = strings.TrimSpace(removeXMLTags(remaining))
 
 		coderMinimal := a.isCoderMode && isCoderMinimalUI()
+		coderCompactGlobal := a.isCoderMode && isCoderCompactUI()
 
 		if strings.TrimSpace(reasoning) != "" {
-			if coderMinimal {
+			if coderCompactGlobal {
+				renderer.CompactMultiLine("●", "PLANO", reasoning, agent.ColorCyan, 5)
+			} else if coderMinimal {
 				renderer.RenderTimelineEvent("🧭", "PLANO", compactText(reasoning, 3, 260), agent.ColorCyan)
 			} else {
 				renderMDCard("🧠", "RACIOCÍNIO", reasoning, agent.ColorCyan)
@@ -843,7 +902,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 		}
 		if strings.TrimSpace(explanation) != "" {
-			if coderMinimal {
+			if coderCompactGlobal {
+				renderer.CompactLine("◆", "NOTA", explanation, agent.ColorLime)
+			} else if coderMinimal {
 				renderer.RenderTimelineEvent("📝", "NOTA", compactText(explanation, 2, 220), agent.ColorLime)
 			} else {
 				renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
@@ -858,7 +919,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if strings.TrimSpace(progress) == "" {
 				return
 			}
-			if coderMinimal {
+			if coderCompactGlobal {
+				renderer.CompactMultiLine("◇", "STATUS", progress, agent.ColorLime, 4)
+			} else if coderMinimal {
 				renderer.RenderTimelineEvent("🧩", "STATUS", compactText(progress, 2, 220), agent.ColorLime)
 			} else {
 				renderMDCard("🧩", "PLANO DE AÇÃO", progress, agent.ColorLime)
@@ -868,7 +931,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Renderizar progresso inicial das tarefas (somente no modo /coder)
 		renderPlanProgress()
 		if strings.TrimSpace(remaining) != "" {
-			if coderMinimal {
+			if coderCompactGlobal {
+				renderer.CompactLine("◆", "", remaining, agent.ColorGray)
+			} else if coderMinimal {
 				renderer.RenderTimelineEvent("💬", "RESUMO", compactText(remaining, 2, 220), agent.ColorGray)
 			} else {
 				renderMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
@@ -921,19 +986,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			agentCalls, _ := workers.ParseAgentCalls(aiResponse)
 			if len(agentCalls) > 0 {
 				coderMinUI := a.isCoderMode && isCoderMinimalUI()
+				coderCompactUI := a.isCoderMode && isCoderCompactUI()
 				n := len(agentCalls)
 				agentWord := "agent"
 				if n > 1 {
 					agentWord = "agents"
 				}
-				if coderMinUI {
+				if coderCompactUI {
+					renderer.CompactLine("●", "AGENTS", fmt.Sprintf("%d %s", n, agentWord), agent.ColorPurple)
+				} else if coderMinUI {
 					renderer.RenderTimelineEvent("🚀", "AGENTS", fmt.Sprintf("%d %s dispatched", n, agentWord), agent.ColorPurple)
 				} else {
 					renderer.RenderTimelineEvent("🚀", "MULTI-AGENT DISPATCH", fmt.Sprintf("Dispatching %d %s", n, agentWord), agent.ColorPurple)
 				}
 
-				for i, ac := range agentCalls {
-					renderer.RenderTimelineEvent("🤖", fmt.Sprintf("[%s] #%d", ac.Agent, i+1), truncateForUI(ac.Task, 120), agent.ColorCyan)
+				if !coderCompactUI {
+					for i, ac := range agentCalls {
+						renderer.RenderTimelineEvent("🤖", fmt.Sprintf("[%s] #%d", ac.Agent, i+1), truncateForUI(ac.Task, 120), agent.ColorCyan)
+					}
 				}
 
 				// Dispatch with live progress feedback
@@ -1015,40 +1085,49 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					totalParallelCalls += ar.ParallelCalls
 					totalDuration += ar.Duration
 					if ar.Error != nil {
-						renderer.RenderTimelineEvent("❌", fmt.Sprintf("[%s] FAILED", ar.Agent), ar.Error.Error(), agent.ColorYellow)
+						if coderCompactUI {
+							renderer.CompactToolDone(fmt.Sprintf("%s", ar.Agent), ar.Duration.Round(time.Millisecond).String(), true)
+						} else {
+							renderer.RenderTimelineEvent("❌", fmt.Sprintf("[%s] FAILED", ar.Agent), ar.Error.Error(), agent.ColorYellow)
+						}
 					} else {
 						successCount++
-						summary := truncateForUI(ar.Output, 200)
-						// Mostra info de paralelismo quando houver
-						parallelInfo := ""
-						if ar.ParallelCalls > 1 {
-							parallelInfo = fmt.Sprintf(", %d em paralelo", ar.ParallelCalls)
+						if coderCompactUI {
+							renderer.CompactToolDone(fmt.Sprintf("%s(%d calls)", ar.Agent, tcCount), ar.Duration.Round(time.Millisecond).String(), false)
+						} else {
+							summary := truncateForUI(ar.Output, 200)
+							parallelInfo := ""
+							if ar.ParallelCalls > 1 {
+								parallelInfo = fmt.Sprintf(", %d em paralelo", ar.ParallelCalls)
+							}
+							tcLabel := "tool calls"
+							if tcCount == 1 {
+								tcLabel = "tool call"
+							}
+							title := fmt.Sprintf("[%s] OK (%s, %d %s%s)", ar.Agent, ar.Duration.Round(time.Millisecond), tcCount, tcLabel, parallelInfo)
+							renderer.RenderTimelineEvent("✅", title, summary, agent.ColorGreen)
 						}
-						tcLabel := "tool call"
-						if tcCount != 1 {
-							tcLabel = "tool calls"
-						}
-						title := fmt.Sprintf("[%s] OK (%s, %d %s%s)", ar.Agent, ar.Duration.Round(time.Millisecond), tcCount, tcLabel, parallelInfo)
-						renderer.RenderTimelineEvent("✅", title, summary, agent.ColorGreen)
 					}
 				}
 				a.toolCallsExecd += totalAgentToolCalls
 				turnToolCalls += totalAgentToolCalls
 
-				// Resumo compacto do dispatch
-				tcWord := "tool calls"
-				if totalAgentToolCalls == 1 {
-					tcWord = "tool call"
+				if !coderCompactUI {
+					// Resumo compacto do dispatch
+					tcWord := "tool calls"
+					if totalAgentToolCalls == 1 {
+						tcWord = "tool call"
+					}
+					parallelSuffix := ""
+					if totalParallelCalls > 1 {
+						parallelSuffix = fmt.Sprintf(" | %d goroutines paralelas", totalParallelCalls)
+					}
+					renderer.RenderTimelineEvent("📊", "RESUMO",
+						fmt.Sprintf("%d/%d %s concluidos | %d %s executadas%s | %s total",
+							successCount, n, agentWord, totalAgentToolCalls, tcWord,
+							parallelSuffix, totalDuration.Round(time.Millisecond)),
+						agent.ColorGray)
 				}
-				parallelSuffix := ""
-				if totalParallelCalls > 1 {
-					parallelSuffix = fmt.Sprintf(" | %d goroutines paralelas", totalParallelCalls)
-				}
-				renderer.RenderTimelineEvent("📊", "RESUMO",
-					fmt.Sprintf("%d/%d %s concluidos | %d %s executadas%s | %s total",
-						successCount, n, agentWord, totalAgentToolCalls, tcWord,
-						parallelSuffix, totalDuration.Round(time.Millisecond)),
-					agent.ColorGray)
 
 				// Inject results as feedback for the orchestrator
 				feedback := workers.FormatResults(agentResults)
@@ -1069,14 +1148,28 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// =========================================================
 		if len(toolCalls) > 0 {
 			coderMinimal := a.isCoderMode && isCoderMinimalUI()
+			coderCompact := a.isCoderMode && isCoderCompactUI()
 			var batchOutputBuilder strings.Builder
 			var batchHasError bool
 			successCount := 0
 			totalActions := len(toolCalls)
 
+			// Helper: render error message respecting compact mode
+			renderError := func(msg string) {
+				if coderCompact {
+					renderer.CompactError(msg)
+				} else if coderMinimal {
+					renderer.RenderToolResultMinimal(msg, true)
+				} else {
+					renderer.RenderToolResult(msg, true)
+				}
+			}
+
 			// 1. Renderiza cabeçalho do lote se houver mais de 1 ação
 			if totalActions > 1 {
-				if coderMinimal {
+				if coderCompact {
+					// Compact mode: no batch header, just tool lines
+				} else if coderMinimal {
 					renderer.RenderTimelineEvent("📦", "LOTE", fmt.Sprintf("%d ações", totalActions), agent.ColorPurple)
 				} else {
 					renderer.RenderBatchHeader(totalActions)
@@ -1096,12 +1189,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							a.lastPolicyMatch = nil
 						}
 						if action == coder.ActionDeny {
-							msg := "🛫 AÇÃO BLOQUEADA PELO USUÁRIO (Regra de Segurança). NÃO TENTE NOVAMENTE."
-							if coderMinimal {
-								renderer.RenderToolResultMinimal(msg, true)
-							} else {
-								renderer.RenderToolResult(msg, true)
-							}
+							msg := "AÇÃO BLOQUEADA (Regra de Segurança)"
+							renderError(msg)
 							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 							batchHasError = true
 							break
@@ -1111,8 +1200,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							pattern := coder.GetSuggestedPattern(tc.Name, tc.Args)
 							switch decision {
 							case coder.DecisionAllowAlways:
-								// Only persist rule if pattern is non-empty.
-								// Exec commands return "" to prevent blanket allow.
 								if pattern != "" {
 									_ = pm.AddRule(pattern, coder.ActionAllow)
 								}
@@ -1120,30 +1207,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								if pattern != "" {
 									_ = pm.AddRule(pattern, coder.ActionDeny)
 								}
-								msg := "🛫 AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
-								if coderMinimal {
-									renderer.RenderToolResultMinimal(msg, true)
-								} else {
-									renderer.RenderToolResult(msg, true)
-								}
+								msg := "AÇÃO BLOQUEADA PERMANENTEMENTE"
+								renderError(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 								batchHasError = true
 							case coder.DecisionDenyOnce:
-								msg := "🛫 AÇÃO NEGADA PELO USUÁRIO DESTA VEZ. Tente uma abordagem diferente ou pergunte ao usuário."
-								if coderMinimal {
-									renderer.RenderToolResultMinimal(msg, true)
-								} else {
-									renderer.RenderToolResult(msg, true)
-								}
+								msg := "AÇÃO NEGADA PELO USUÁRIO"
+								renderError(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 								batchHasError = true
 							case coder.DecisionCancelled:
-								msg := "⏹ OPERAÇÃO CANCELADA PELO USUÁRIO (Ctrl+C). Pode tentar a mesma ação novamente se necessário."
-								if coderMinimal {
-									renderer.RenderToolResultMinimal(msg, true)
-								} else {
-									renderer.RenderToolResult(msg, true)
-								}
+								msg := "OPERAÇÃO CANCELADA (Ctrl+C)"
+								renderError(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
 								batchHasError = true
 							}
@@ -1157,12 +1232,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				toolName := tc.Name
 				toolArgsStr := tc.Args
 
+				// Build compact label for aru-style display
+				toolSubcmd := extractSubcmdFromArgs(toolArgsStr)
+				compactLabel := agent.CompactToolLabel(toolSubcmd, toolArgsStr)
+				toolStartTime := time.Now()
+
 				// UX: Pequena pausa para separar visualmente o pensamento da ação
-				time.Sleep(200 * time.Millisecond)
+				if !coderCompact {
+					time.Sleep(200 * time.Millisecond)
+				}
 
 				// 2. Renderiza a BOX de ação IMEDIATAMENTE (antes de processar)
-				// Isso dá feedback visual "Real-Time" do que está prestes a acontecer
-				if coderMinimal {
+				if coderCompact {
+					renderer.CompactToolStart(compactLabel)
+				} else if coderMinimal {
 					renderer.RenderToolCallMinimal(toolName, toolArgsStr, i+1, totalActions)
 				} else {
 					renderer.RenderToolCallWithProgress(toolName, toolArgsStr, i+1, totalActions)
@@ -1170,7 +1253,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 				// UX: Força flush e pausa para leitura
 				os.Stdout.Sync()
-				time.Sleep(300 * time.Millisecond)
+				if !coderCompact {
+					time.Sleep(300 * time.Millisecond)
+				}
 
 				// --- Lógica de Sanitização e Validação ---
 				normalizedArgsStr := sanitizeToolCallArgs(toolArgsStr, a.logger, toolName, a.isCoderMode)
@@ -1189,11 +1274,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					} else {
 						// Could not compact - enforce single line as before
 						msg := buildCoderSingleLineArgsEnforcementPrompt(toolArgsStr)
-						if coderMinimal {
-							renderer.RenderToolResultMinimal("Format error: args contain line breaks.\n"+msg, true)
-						} else {
-							renderer.RenderToolResult("Format error: args contain line breaks.\n"+msg, true)
-						}
+						renderError("Format error: args contain line breaks")
 
 						a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
 						batchHasError = true
@@ -1237,7 +1318,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							}
 						} else {
 							a.cli.animation.StopThinkingAnimation()
-							renderer.RenderStreamBoxStart("🔌", fmt.Sprintf("MCP: %s", mcpToolName), agent.ColorPurple)
+							if !coderCompact {
+								renderer.RenderStreamBoxStart("🔌", fmt.Sprintf("MCP: %s", mcpToolName), agent.ColorPurple)
+							}
 
 							result, mcpErr := a.cli.mcpManager.ExecuteTool(ctx, mcpToolName, mcpArgs)
 							if mcpErr != nil {
@@ -1250,7 +1333,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								}
 							}
 
-							renderer.RenderStreamBoxEnd(agent.ColorPurple)
+							if !coderCompact {
+								renderer.RenderStreamBoxEnd(agent.ColorPurple)
+							}
 						}
 
 						if ctx.Err() != nil {
@@ -1290,12 +1375,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						if a.isCoderMode && strings.EqualFold(strings.TrimSpace(toolName), "@coder") {
 							if missing, which := isCoderArgsMissingRequiredValue(toolArgs); missing {
 								msg := buildCoderToolCallFixPrompt(which)
-								// Feedback visual
-								if coderMinimal {
-									renderer.RenderToolResultMinimal("Args inválido para @coder: falta argumento válido em "+which, true)
-								} else {
-									renderer.RenderToolResult("Args inválido para @coder: falta argumento válido em "+which, true)
-								}
+								renderError("Args inválido: falta " + which)
 
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
 								batchHasError = true
@@ -1313,11 +1393,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									"BLOCKED: Dangerous command detected in @coder exec: %q. "+
 										"This command is forbidden regardless of policy rules. "+
 										"DO NOT retry this command.", shellCmd)
-								if coderMinimal {
-									renderer.RenderToolResultMinimal(msg, true)
-								} else {
-									renderer.RenderToolResult(msg, true)
-								}
+								renderError(msg)
 								a.cli.history = append(a.cli.history, models.Message{
 									Role: "user", Content: "SECURITY BLOCK: " + msg,
 								})
@@ -1342,11 +1418,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								})
 								if hookResult != nil && hookResult.Blocked {
 									msg := fmt.Sprintf("BLOCKED by hook: %s", hookResult.BlockReason)
-									if coderMinimal {
-										renderer.RenderToolResultMinimal(msg, true)
-									} else {
-										renderer.RenderToolResult(msg, true)
-									}
+									renderError(msg)
 									a.cli.history = append(a.cli.history, models.Message{
 										Role: "user", Content: "HOOK BLOCK: " + msg,
 									})
@@ -1364,17 +1436,23 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							}
 							a.cli.animation.StopThinkingAnimation()
 
-							renderer.RenderStreamBoxStart("🔨", fmt.Sprintf("EXECUTANDO: %s %s", toolName, subCmd), agent.ColorPurple)
+							if !coderCompact {
+								renderer.RenderStreamBoxStart("🔨", fmt.Sprintf("EXECUTANDO: %s %s", toolName, subCmd), agent.ColorPurple)
+							}
 
 							streamCallback := func(line string) {
-								renderer.StreamOutput(line)
+								if !coderCompact {
+									renderer.StreamOutput(line)
+								}
 							}
 
 							// Marca tarefa como em andamento ANTES de executar
 							agent.MarkTaskInProgress(a.taskTracker)
 							toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
 
-							renderer.RenderStreamBoxEnd(agent.ColorPurple)
+							if !coderCompact {
+								renderer.RenderStreamBoxEnd(agent.ColorPurple)
+							}
 
 							// Se o contexto foi cancelado (Ctrl+C), propaga imediatamente
 							if ctx.Err() != nil {
@@ -1394,7 +1472,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						displayForHuman = displayForHuman + "\n\n--- ERRO ---\n" + errText
 					}
 				}
-				if coderMinimal {
+				if coderCompact {
+					elapsed := time.Since(toolStartTime)
+					durationStr := ""
+					if elapsed >= 500*time.Millisecond {
+						durationStr = fmt.Sprintf("%.1fs", elapsed.Seconds())
+					}
+					renderer.CompactToolDone(compactLabel, durationStr, execErr != nil)
+				} else if coderMinimal {
 					renderer.RenderToolResultMinimal(displayForHuman, execErr != nil)
 				} else {
 					renderer.RenderToolResult(displayForHuman, execErr != nil)
@@ -1462,7 +1547,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// 4. Renderiza rodapé do lote
 			if totalActions > 1 {
-				renderer.RenderBatchSummary(successCount, totalActions, batchHasError)
+				if coderCompact {
+					renderer.CompactBatchSummary(successCount, totalActions, batchHasError)
+				} else {
+					renderer.RenderBatchSummary(successCount, totalActions, batchHasError)
+				}
 			}
 
 			// Lógica de Continuação:

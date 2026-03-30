@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/mattn/go-runewidth"
 )
 
 type SecurityDecision int
@@ -68,9 +69,21 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	reset := "\u001b[0m"
 
 	fmt.Println()
-	fmt.Println(purple + bold + "╔══════════════════════════════════════════════════════════╗" + reset)
-	fmt.Println(purple + bold + "║              🔒 " + i18n.T("coder.security.header") + "║" + reset)
-	fmt.Println(purple + bold + "╚══════════════════════════════════════════════════════════╝" + reset)
+	boxWidth := 58 // inner width between ║ borders
+	headerText := "🔒 " + i18n.T("coder.security.header")
+	// Calculate visible width using go-runewidth (handles emojis, CJK, etc.)
+	visLen := runewidth.StringWidth(headerText)
+	padTotal := boxWidth - visLen
+	if padTotal < 0 {
+		padTotal = 0
+	}
+	padLeft := padTotal / 2
+	padRight := padTotal - padLeft
+	paddedHeader := strings.Repeat(" ", padLeft) + headerText + strings.Repeat(" ", padRight)
+
+	fmt.Println(purple + bold + "╔" + strings.Repeat("═", boxWidth) + "╗" + reset)
+	fmt.Println(purple + bold + "║" + paddedHeader + "║" + reset)
+	fmt.Println(purple + bold + "╚" + strings.Repeat("═", boxWidth) + "╝" + reset)
 
 	// --- Agent context (parallel mode) ---
 	if secCtx != nil && secCtx.AgentName != "" {

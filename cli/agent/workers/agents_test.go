@@ -61,8 +61,8 @@ func TestCoderAgent_Interface(t *testing.T) {
 		t.Error("CoderAgent should NOT be read-only")
 	}
 	cmds := a.AllowedCommands()
-	if len(cmds) != 4 {
-		t.Errorf("expected 4 allowed commands, got %d", len(cmds))
+	if len(cmds) != 6 {
+		t.Errorf("expected 6 allowed commands, got %d", len(cmds))
 	}
 	if a.Description() == "" {
 		t.Error("expected non-empty description")

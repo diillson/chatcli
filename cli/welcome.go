@@ -5,10 +5,10 @@ import (
 	"math/rand"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
-	"github.com/diillson/chatcli/i18n" // <-- 1. IMPORTAR PACOTE I18N
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/version"
+	"github.com/mattn/go-runewidth"
 )
 
 // Dicas agora contêm as chaves de tradução.
@@ -71,7 +71,7 @@ func removeColorCodes(s string) string {
 }
 
 func visibleLen(s string) int {
-	return utf8.RuneCountInString(removeColorCodes(s))
+	return runewidth.StringWidth(removeColorCodes(s))
 }
 
 // --- quebra preservando códigos ANSI ---
@@ -160,7 +160,7 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 	v, c, _ := version.GetBuildInfo()
 	if v != "" && v != "dev" && v != "unknown" {
 		versionStr := i18n.T("version.label", v, c)
-		padding := (screenWidth - len(versionStr)) / 2
+		padding := (screenWidth - visibleLen(versionStr)) / 2
 		fmt.Printf("%s%s\n\n", strings.Repeat(" ", padding), colorize(versionStr, ColorGray))
 	}
 
