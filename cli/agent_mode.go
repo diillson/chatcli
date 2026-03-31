@@ -59,9 +59,10 @@ type AgentMode struct {
 	policyAdapter   *workerPolicyAdapter
 	parallelMode    bool
 	// Centralized stdin reader for type-ahead queue support
-	stdinLines chan string   // all stdin lines flow through here
-	stdinDone  chan struct{} // signals reader goroutine to stop
-	stdinWg    sync.WaitGroup
+	stdinLines   chan string   // all stdin lines flow through here
+	stdinDone    chan struct{} // signals reader goroutine to stop
+	stdinWg      sync.WaitGroup
+	multilineBuf MultilineBuffer // ``` delimited multiline input
 }
 
 // startStdinReader starts a goroutine that reads lines from stdin and sends
@@ -171,6 +172,33 @@ func (a *AgentMode) readLine() string {
 	reader := bufio.NewReader(os.Stdin)
 	line, _ := reader.ReadString('\n')
 	return strings.TrimSpace(line)
+}
+
+// readMultiline reads from the stdinLines channel with ``` multiline support.
+// When the user types ``` on a line by itself, subsequent lines are accumulated
+// until another ``` closes the block. For single-line input, returns immediately.
+// Respects context cancellation.
+func (a *AgentMode) readMultiline(ctx context.Context) (string, error) {
+	for {
+		var line string
+		if a.stdinLines != nil {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case line = <-a.stdinLines:
+			}
+		} else {
+			line = strings.TrimSpace(a.readLine())
+		}
+
+		complete, fullText := a.multilineBuf.ProcessLine(line)
+		if !complete {
+			// Show continuation prompt while accumulating
+			fmt.Printf("  \033[90m... [%d] \033[0m", a.multilineBuf.LineCount()+1)
+			continue
+		}
+		return fullText, nil
+	}
 }
 
 // drainStdinToQueue moves any pending stdin lines into the message queue.
@@ -1644,17 +1672,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			fmt.Print(renderer.Colorize("  ⏳ "+i18n.T("coder.waiting_for_input"), agent.ColorCyan))
 			fmt.Print(" ")
 
-			var userInput string
-			if a.stdinLines != nil {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case line := <-a.stdinLines:
-					userInput = strings.TrimSpace(line)
-				}
-			} else {
-				userInput = strings.TrimSpace(a.readLine())
+			userInput, err := a.readMultiline(ctx)
+			if err != nil {
+				return err
 			}
+			userInput = strings.TrimSpace(userInput)
 
 			// Allow the user to exit explicitly
 			if userInput == "" || strings.EqualFold(userInput, "exit") || strings.EqualFold(userInput, "quit") || strings.EqualFold(userInput, "sair") {

@@ -214,6 +214,9 @@ type ChatCLI struct {
 	// Cached provider models for autocomplete (populated asynchronously)
 	cachedModels   []client.ModelInfo
 	cachedModelsMu sync.RWMutex
+
+	// Multiline input buffer (``` delimiter toggle)
+	multilineBuf MultilineBuffer
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
@@ -442,6 +445,15 @@ func (cli *ChatCLI) executor(in string) {
 			fmt.Printf("  %s\n", i18n.T("paste.detected.short", info.CharCount))
 		}
 	}
+
+	// Multiline input: accumulate lines between ``` delimiters.
+	// While active, each Enter adds a line instead of submitting.
+	complete, fullText := cli.multilineBuf.ProcessLine(in)
+	if !complete {
+		return // still accumulating — changeLivePrefix shows "... "
+	}
+	// Use the assembled text (single-line returns as-is; multiline returns joined)
+	in = fullText
 
 	if in != "" {
 		cli.commandHistory = append(cli.commandHistory, in)
@@ -884,6 +896,14 @@ func (cli *ChatCLI) runCoderLogic() {
 }
 
 func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
+	// Cancel multiline mode on Ctrl+C
+	if cli.multilineBuf.Active() {
+		cli.multilineBuf.Reset()
+		buf.DeleteBeforeCursor(len([]rune(buf.Text())))
+		fmt.Println("\n  \033[90m[multiline cancelled]\033[0m")
+		return
+	}
+
 	if cli.isExecuting.Load() {
 		// Clear queued messages first
 		cli.messageQueueMu.Lock()
@@ -934,6 +954,11 @@ func (cli *ChatCLI) handleEscape(buf *prompt.Buffer) {
 }
 
 func (cli *ChatCLI) changeLivePrefix() (string, bool) {
+	// Show continuation prompt while accumulating multiline input
+	if cli.multilineBuf.Active() {
+		return fmt.Sprintf("  \033[90m... [%d] \033[0m", cli.multilineBuf.LineCount()+1), true
+	}
+
 	switch cli.interactionState {
 	case StateSwitchingProvider:
 		return i18n.T("prompt.select_provider"), true
