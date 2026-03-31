@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.90.1](https://github.com/diillson/chatcli/compare/v1.90.0...v1.90.1) (2026-03-31)
+
+
+### Bug Fixes
+
+* **coder:** deduplicate tool calls, wait for user input, add multiline ([#708](https://github.com/diillson/chatcli/issues/708)) ([d9ac4c3](https://github.com/diillson/chatcli/commit/d9ac4c3cd9489ca945aa7097ad6bb4ed35099377))
+
 ## [1.90.0](https://github.com/diillson/chatcli/compare/v1.89.1...v1.90.0) (2026-03-31)
 
 
