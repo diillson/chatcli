@@ -32,10 +32,16 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 		calls = append(calls, xmlCalls...)
 	}
 
-	// Also try JSON-style tool calls (for models that output JSON)
+	// Also try JSON-style tool calls (for models that output JSON).
+	// Only add JSON calls that are NOT duplicates of already-parsed XML calls.
+	// The JSON scanner can pick up JSON embedded inside XML args attributes
+	// (e.g. the {"cmd":"read",...} inside args='{"cmd":"read",...}'), which
+	// would cause the same tool call to appear twice in the batch.
 	jsonCalls := parseJSONToolCalls(text)
-	if len(jsonCalls) > 0 {
-		calls = append(calls, jsonCalls...)
+	for _, jc := range jsonCalls {
+		if !isDuplicateToolCall(calls, jc) {
+			calls = append(calls, jc)
+		}
 	}
 
 	// Try extracting from markdown code blocks (```xml or ```json)
@@ -49,6 +55,29 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 	}
 
 	return calls, nil
+}
+
+// isDuplicateToolCall checks whether candidate is a duplicate of any existing
+// call. Two calls are considered duplicates when they target the same tool and
+// the candidate's args string appears inside (or is equal to) an existing
+// call's args. This catches the common case where parseJSONToolCalls extracts
+// the JSON object that is already embedded in an XML tool_call's args attribute.
+func isDuplicateToolCall(existing []ToolCall, candidate ToolCall) bool {
+	for _, ec := range existing {
+		if ec.Name != candidate.Name {
+			continue
+		}
+		if ec.Args == candidate.Args {
+			return true
+		}
+		if strings.Contains(ec.Args, candidate.Args) {
+			return true
+		}
+		if candidate.Raw != "" && ec.Raw != "" && strings.Contains(ec.Raw, candidate.Raw) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseXMLToolCalls uses a stateful scanner to properly handle quoted attributes
