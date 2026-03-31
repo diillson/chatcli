@@ -4,8 +4,8 @@ description: >-
   ChatCLI AIOps Operator - Autonomous incident detection, AI analysis, and
   remediation for Kubernetes
 type: application
-version: 1.90.0
-appVersion: 1.90.0
+version: 1.90.1
+appVersion: 1.90.1
 keywords:
   - chatcli
   - operator
