@@ -535,9 +535,6 @@ func (a *AgentMode) getToolContextString() string {
 	var toolDescriptions []string
 	coderCheatSheet := ""
 	for _, plugin := range plugins {
-		if a.isCoderMode && !strings.EqualFold(plugin.Name(), "@coder") {
-			continue
-		}
 
 		var b strings.Builder
 		b.WriteString(fmt.Sprintf("- Ferramenta: %s\n", plugin.Name()))
@@ -941,7 +938,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		}
 
 		// =========================
-		// VALIDAÇÕES ESTRITAS DO /CODER
+		// VALIDAÇÕES DO /CODER
 		// =========================
 		if a.isCoderMode {
 			if len(toolCalls) > 0 {
@@ -955,12 +952,33 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					continue
 				}
 
-				// Require exclusive use of @coder
-				if !strings.EqualFold(strings.TrimSpace(toolCalls[0].Name), "@coder") {
+				// Validate that the tool exists (any registered plugin, MCP tool, or @coder)
+				firstName := strings.TrimSpace(toolCalls[0].Name)
+				isKnownTool := false
+				if a.cli.pluginManager != nil {
+					if _, found := a.cli.pluginManager.GetPlugin(firstName); found {
+						isKnownTool = true
+					}
+				}
+				if !isKnownTool && a.cli.mcpManager != nil && strings.HasPrefix(firstName, "mcp_") {
+					mcpName := strings.TrimPrefix(firstName, "mcp_")
+					if a.cli.mcpManager.IsMCPTool(mcpName) {
+						isKnownTool = true
+					}
+				}
+				if !isKnownTool {
+					// Build list of available tools for the error message
+					var availableTools []string
+					if a.cli.pluginManager != nil {
+						for _, p := range a.cli.pluginManager.GetPlugins() {
+							availableTools = append(availableTools, p.Name())
+						}
+					}
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
-						Content: "FORMAT ERROR: In /coder mode, the ONLY allowed tool is @coder. " +
-							"Resend using: <tool_call name=\"@coder\" args='{\"cmd\":\"...\",\"args\":{...}}' />",
+						Content: fmt.Sprintf("FORMAT ERROR: Tool %q not found. Available tools: %s. "+
+							"Use <tool_call name=\"TOOL\" args='...' />",
+							firstName, strings.Join(availableTools, ", ")),
 					})
 					continue
 				}
@@ -972,7 +990,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
 						Content: "FORMAT ERROR: Code blocks and shell commands are NOT allowed in /coder mode. " +
-							"You MUST use <reasoning> followed by <tool_call name=\"@coder\" args='{\"cmd\":\"exec\",\"args\":{\"cmd\":\"your command\"}}' />",
+							"You MUST use <reasoning> followed by <tool_call> tags. " +
+							"For shell commands: <tool_call name=\"@coder\" args='{\"cmd\":\"exec\",\"args\":{\"cmd\":\"your command\"}}' />",
 					})
 					continue
 				}
@@ -1367,7 +1386,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						toolOutput = fmt.Sprintf("Ferramenta '%s' não existe ou não está instalada.", toolName)
 
 						if a.isCoderMode {
-							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "Ferramenta não encontrada. Use @coder."})
+							var available []string
+							for _, p := range a.cli.pluginManager.GetPlugins() {
+								available = append(available, p.Name())
+							}
+							a.cli.history = append(a.cli.history, models.Message{
+								Role:    "user",
+								Content: fmt.Sprintf("Tool %q not found. Available: %s", toolName, strings.Join(available, ", ")),
+							})
 							batchHasError = true
 						}
 					} else {
