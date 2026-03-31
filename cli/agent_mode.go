@@ -59,9 +59,10 @@ type AgentMode struct {
 	policyAdapter   *workerPolicyAdapter
 	parallelMode    bool
 	// Centralized stdin reader for type-ahead queue support
-	stdinLines chan string   // all stdin lines flow through here
-	stdinDone  chan struct{} // signals reader goroutine to stop
-	stdinWg    sync.WaitGroup
+	stdinLines   chan string   // all stdin lines flow through here
+	stdinDone    chan struct{} // signals reader goroutine to stop
+	stdinWg      sync.WaitGroup
+	multilineBuf MultilineBuffer // ``` delimited multiline input
 }
 
 // startStdinReader starts a goroutine that reads lines from stdin and sends
@@ -171,6 +172,37 @@ func (a *AgentMode) readLine() string {
 	reader := bufio.NewReader(os.Stdin)
 	line, _ := reader.ReadString('\n')
 	return strings.TrimSpace(line)
+}
+
+// readMultiline reads from the stdinLines channel with ``` multiline support.
+// When the user types ``` on a line by itself, subsequent lines are accumulated
+// until another ``` closes the block. For single-line input, returns immediately.
+// Respects context cancellation.
+func (a *AgentMode) readMultiline(ctx context.Context) (string, error) {
+	for {
+		var line string
+		if a.stdinLines != nil {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case line = <-a.stdinLines:
+			}
+		} else {
+			line = strings.TrimSpace(a.readLine())
+		}
+
+		wasActive := a.multilineBuf.Active()
+		complete, fullText := a.multilineBuf.ProcessLine(line)
+		if !complete {
+			if !wasActive {
+				// Just entered multiline mode — show hint
+				fmt.Printf("\n  \033[90m📝 %s\033[0m\n", i18n.T("multiline.hint", a.multilineBuf.Delimiter()))
+			}
+			fmt.Printf("  \033[90m... [%d] \033[0m", a.multilineBuf.LineCount()+1)
+			continue
+		}
+		return fullText, nil
+	}
 }
 
 // drainStdinToQueue moves any pending stdin lines into the message queue.
@@ -1633,6 +1665,36 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// ==========================================
 		// PRIORIDADE 3: RESPOSTA FINAL (sem ações)
 		// ==========================================
+
+		// In coder mode, the AI may respond without tool calls when it needs
+		// information from the user (e.g., "What role should I use?", "Which
+		// file do you mean?"). Instead of exiting, wait for user input so the
+		// conversation can continue.
+		if a.isCoderMode && !a.isOneShot {
+			showTurnStats()
+			fmt.Println()
+			fmt.Print(renderer.Colorize("  ⏳ "+i18n.T("coder.waiting_for_input"), agent.ColorCyan))
+			fmt.Print(" ")
+
+			userInput, err := a.readMultiline(ctx)
+			if err != nil {
+				return err
+			}
+			userInput = strings.TrimSpace(userInput)
+
+			// Allow the user to exit explicitly
+			if userInput == "" || strings.EqualFold(userInput, "exit") || strings.EqualFold(userInput, "quit") || strings.EqualFold(userInput, "sair") {
+				fmt.Println(renderer.Colorize("\n"+i18n.T("agent.status.task_completed"), agent.ColorGreen+agent.ColorBold))
+				return nil
+			}
+
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: userInput,
+			})
+			continue
+		}
+
 		showTurnStats()
 		fmt.Println(renderer.Colorize("\n"+i18n.T("agent.status.task_completed"), agent.ColorGreen+agent.ColorBold))
 		return nil

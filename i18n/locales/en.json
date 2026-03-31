@@ -912,6 +912,9 @@
   "coder.quick_tip.search": "  - search: {\"cmd\":\"search\",\"args\":{\"term\":\"Login\",\"dir\":\".\"}}",
   "coder.quick_tip.write": "  - write: {\"cmd\":\"write\",\"args\":{\"file\":\"x.go\",\"encoding\":\"base64\",\"content\":\"...\"}}",
   "coder.quick_tip.exec": "  - exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"mkdir -p testeapi\"}}",
+  "coder.waiting_for_input": "Waiting for your response (--- for multiline, 'exit' to finish):",
+  "multiline.hint": "Multiline mode — type %s on a new line to finish",
+  "multiline.cancelled": "multiline cancelled",
   "agent.status.task_completed": "🏁 TASK COMPLETED",
   "agent.status.max_turns_stopped": "⚠️ Limit of %d steps reached. The agent stopped to prevent an infinite loop.",
 
