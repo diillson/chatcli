@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.90.0](https://github.com/diillson/chatcli/compare/v1.89.1...v1.90.0) (2026-03-31)
+
+
+### Features
+
+* **provider:** add GitHub Models marketplace provider ([#705](https://github.com/diillson/chatcli/issues/705)) ([cd96444](https://github.com/diillson/chatcli/commit/cd96444772dd4a70c1925cb67f1192fe1a6d28f4))
+
 ## [1.89.1](https://github.com/diillson/chatcli/compare/v1.89.0...v1.89.1) (2026-03-30)
 
 
