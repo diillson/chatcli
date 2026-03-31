@@ -24,9 +24,12 @@ import (
 // Ensure ClaudeClient implements ToolAwareClient.
 var _ client.ToolAwareClient = (*ClaudeClient)(nil)
 
-// SupportsNativeTools returns true — Claude supports native tool calling.
+// SupportsNativeTools returns true for API key auth, false for OAuth.
+// The OAuth endpoint (console.anthropic.com) uses a different message format
+// and requires streaming — tool calling via native API is not compatible.
+// OAuth users fall back to XML-based tool parsing which works reliably.
 func (c *ClaudeClient) SupportsNativeTools() bool {
-	return true
+	return !strings.HasPrefix(c.apiKey, "oauth:")
 }
 
 // SendPromptWithTools sends a prompt with tool definitions via Anthropic's native tool use API.
