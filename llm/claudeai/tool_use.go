@@ -24,9 +24,12 @@ import (
 // Ensure ClaudeClient implements ToolAwareClient.
 var _ client.ToolAwareClient = (*ClaudeClient)(nil)
 
-// SupportsNativeTools returns true — Claude supports native tool calling.
+// SupportsNativeTools returns true for API key auth, false for OAuth.
+// The OAuth endpoint (console.anthropic.com) uses a different message format
+// and requires streaming — tool calling via native API is not compatible.
+// OAuth users fall back to XML-based tool parsing which works reliably.
 func (c *ClaudeClient) SupportsNativeTools() bool {
-	return true
+	return !strings.HasPrefix(c.apiKey, "oauth:")
 }
 
 // SendPromptWithTools sends a prompt with tool definitions via Anthropic's native tool use API.
@@ -86,7 +89,17 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		}
 		defer resp.Body.Close()
 
-		bodyBytes, err := io.ReadAll(resp.Body)
+		// Decode compressed response (gzip, deflate, br) — OAuth endpoints
+		// send compressed responses when Accept-Encoding is set.
+		reader, decErr := decodeResponseBody(resp)
+		if decErr != nil {
+			return "", fmt.Errorf("decoding response body: %w", decErr)
+		}
+		if reader != resp.Body {
+			defer reader.Close()
+		}
+
+		bodyBytes, err := io.ReadAll(reader)
 		if err != nil {
 			return "", fmt.Errorf("reading response: %w", err)
 		}
@@ -223,7 +236,12 @@ func buildClaudeToolMessages(prompt string, history []models.Message) []interfac
 
 // buildToolRequest creates the HTTP request for tool use calls.
 func (c *ClaudeClient) buildToolRequest(ctx context.Context, jsonValue []byte) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, bytes.NewReader(jsonValue))
+	reqURL := c.apiURL
+	if strings.HasPrefix(c.apiKey, "oauth:") {
+		reqURL = withBetaQuery(reqURL)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}

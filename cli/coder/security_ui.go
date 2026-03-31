@@ -100,7 +100,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 
 	// --- Parse and display the action in human-readable form ---
 	sub, _ := NormalizeCoderArgs(args)
-	actionLabel, details := formatActionDetails(sub, args)
+	actionLabel, details := formatActionDetails(sub, toolName, args)
 
 	fmt.Printf(" %s⚡ %s:%s   %s%s%s\n", gray, i18n.T("coder.security.action"), reset, yellow+bold, actionLabel, reset)
 	for _, d := range details {
@@ -195,8 +195,9 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 
 // formatActionDetails parses the raw tool args and returns a human-readable
 // action label and detail lines for the security prompt.
-func formatActionDetails(subcmd, rawArgs string) (label string, details []string) {
-	// Try parsing JSON args for structured display
+// toolName is the plugin name (e.g. "@coder", "@webfetch", "@websearch", "mcp_tool").
+func formatActionDetails(subcmd, toolName, rawArgs string) (label string, details []string) {
+	// Try parsing JSON args (flat or nested @coder format)
 	var parsed struct {
 		Cmd  string          `json:"cmd"`
 		Args json.RawMessage `json:"args"`
@@ -206,8 +207,48 @@ func formatActionDetails(subcmd, rawArgs string) (label string, details []string
 	if err := json.Unmarshal([]byte(rawArgs), &parsed); err == nil && parsed.Cmd != "" {
 		subcmd = parsed.Cmd
 		_ = json.Unmarshal(parsed.Args, &argsMap)
+	} else {
+		// Flat JSON args (non-@coder plugins): {"url":"...", "query":"..."}
+		_ = json.Unmarshal([]byte(rawArgs), &argsMap)
 	}
 
+	// --- Non-@coder plugins: display by toolName ---
+	toolLower := strings.ToLower(strings.TrimSpace(toolName))
+
+	switch toolLower {
+	case "@webfetch":
+		label = "Web Fetch"
+		if url := extractField(argsMap, rawArgs, "url"); url != "" {
+			details = append(details, "URL: "+url)
+		}
+		if raw := extractField(argsMap, "", "raw"); raw == "true" {
+			details = append(details, "mode: raw HTML")
+		}
+		return
+
+	case "@websearch":
+		label = "Web Search"
+		if q := extractField(argsMap, rawArgs, "query", "q", "term"); q != "" {
+			details = append(details, "query: "+q)
+		}
+		return
+	}
+
+	// MCP tools
+	if strings.HasPrefix(toolLower, "mcp_") {
+		mcpName := strings.TrimPrefix(toolLower, "mcp_")
+		label = "MCP: " + mcpName
+		display := rawArgs
+		if len(display) > 150 {
+			display = display[:150] + "..."
+		}
+		if display != "" {
+			details = append(details, display)
+		}
+		return
+	}
+
+	// --- @coder subcommands ---
 	switch subcmd {
 	case "exec":
 		label = i18n.T("coder.security.action.exec")
@@ -267,12 +308,14 @@ func formatActionDetails(subcmd, rawArgs string) (label string, details []string
 		}
 
 	default:
-		if subcmd != "" {
+		// For unknown tools, use the tool name as label
+		if toolName != "" && toolLower != "@coder" {
+			label = toolName
+		} else if subcmd != "" {
 			label = subcmd
 		} else {
 			label = i18n.T("coder.security.action.unknown")
 		}
-		// Show raw args truncated as fallback
 		display := rawArgs
 		if len(display) > 150 {
 			display = display[:150] + "..."

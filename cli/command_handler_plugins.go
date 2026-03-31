@@ -72,6 +72,17 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			ch.autoSwitchProvider("COPILOT",
 				utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel))
 			return
+		case "github-models", "gh-models":
+			id, err := auth.LoginGitHubModelsPAT(ctx, ch.cli.logger)
+			if err != nil {
+				fmt.Println(i18n.T("auth.login.failed", err))
+				return
+			}
+			fmt.Println(i18n.T("auth.login.success", "GitHub Models", id))
+			ch.cli.manager.RefreshProviders()
+			ch.autoSwitchProvider("GITHUB_MODELS",
+				utils.GetEnvOrDefault("GITHUB_MODELS_MODEL", config.DefaultGitHubModelsModel))
+			return
 		default:
 			fmt.Println(i18n.T("auth.error.unknown_provider"))
 			return
@@ -92,6 +103,8 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			pid = auth.ProviderOpenAICodex
 		case "github-copilot", "copilot", "gh-copilot":
 			pid = auth.ProviderGitHubCopilot
+		case "github-models", "gh-models":
+			pid = auth.ProviderGitHubModels
 		default:
 			fmt.Println(i18n.T("auth.error.unknown_provider"))
 			return

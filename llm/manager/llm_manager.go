@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/copilot"
+	github_models "github.com/diillson/chatcli/llm/github_models"
 	"github.com/diillson/chatcli/llm/googleai"
 	"github.com/diillson/chatcli/llm/ollama"
 	"github.com/diillson/chatcli/llm/openai"
@@ -97,6 +98,7 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarXAIClient(maxRetries, initialBackoff)
 	manager.configurarOllamaClient(maxRetries, initialBackoff)
 	manager.configurarCopilotClient(maxRetries, initialBackoff)
+	manager.configurarGitHubModelsClient(maxRetries, initialBackoff)
 
 	return manager, nil
 }
@@ -369,6 +371,29 @@ func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff 
 	}
 }
 
+// configurarGitHubModelsClient configura o cliente GitHub Models marketplace
+func (m *LLMManagerImpl) configurarGitHubModelsClient(maxRetries int, initialBackoff time.Duration) {
+	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubModels, m.logger)
+	if err != nil {
+		m.logger.Info("GitHub Models not configured, provider GITHUB_MODELS will not be available", zap.Error(err))
+		return
+	}
+	if resolved.APIKey == "" {
+		return
+	}
+	m.logger.Info("Configurando provedor GitHub Models")
+	m.clients["GITHUB_MODELS"] = func(model string) (client.LLMClient, error) {
+		res, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubModels, m.logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve GitHub Models auth: %w", err)
+		}
+		if model == "" {
+			model = config.DefaultGitHubModelsModel
+		}
+		return github_models.NewGitHubModelsClient(res.APIKey, model, m.logger, maxRetries, initialBackoff), nil
+	}
+}
+
 // GetAvailableProviders retorna uma lista de provedores disponíveis configurados
 func (m *LLMManagerImpl) GetAvailableProviders() []string {
 	var providers []string
@@ -415,26 +440,49 @@ func (m *LLMManagerImpl) ListModelsForProvider(ctx context.Context, provider str
 		return nil, fmt.Errorf("failed to create client for model listing: %w", err)
 	}
 
+	// Collect models from API (if supported) + catalog, deduplicated.
+	seen := make(map[string]bool)
+	var result []client.ModelInfo
+
+	// Try API listing first
 	if lister, ok := tempClient.(client.ModelLister); ok {
-		models, err := lister.ListModels(ctx)
+		m.logger.Debug("Attempting API model listing",
+			zap.String("provider", provider),
+			zap.String("clientType", fmt.Sprintf("%T", tempClient)))
+		apiModels, err := lister.ListModels(ctx)
 		if err != nil {
-			m.logger.Warn("Failed to fetch models dynamically, falling back to catalog",
+			m.logger.Warn("Failed to fetch models from API, will include catalog models",
 				zap.String("provider", provider), zap.Error(err))
-		} else if len(models) > 0 {
-			return models, nil
+		} else {
+			m.logger.Debug("API model listing succeeded",
+				zap.String("provider", provider),
+				zap.Int("count", len(apiModels)))
+			for _, am := range apiModels {
+				if !seen[am.ID] {
+					seen[am.ID] = true
+					result = append(result, am)
+				}
+			}
+		}
+	} else {
+		m.logger.Debug("Client does not implement ModelLister",
+			zap.String("provider", provider),
+			zap.String("clientType", fmt.Sprintf("%T", tempClient)))
+	}
+
+	// Always merge catalog models (they may include models the API doesn't list)
+	metas := catalog.ListByProvider(provider)
+	for _, meta := range metas {
+		if !seen[meta.ID] {
+			seen[meta.ID] = true
+			result = append(result, client.ModelInfo{
+				ID:          meta.ID,
+				DisplayName: meta.DisplayName,
+				Source:      client.ModelSourceCatalog,
+			})
 		}
 	}
 
-	// Fallback to static catalog
-	metas := catalog.ListByProvider(provider)
-	var result []client.ModelInfo
-	for _, meta := range metas {
-		result = append(result, client.ModelInfo{
-			ID:          meta.ID,
-			DisplayName: meta.DisplayName,
-			Source:      client.ModelSourceCatalog,
-		})
-	}
 	return result, nil
 }
 
@@ -489,6 +537,7 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	m.configurarOpenAIClient(maxRetries, initialBackoff)
 	m.configurarClaudeAIClient(maxRetries, initialBackoff)
 	m.configurarCopilotClient(maxRetries, initialBackoff)
+	m.configurarGitHubModelsClient(maxRetries, initialBackoff)
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key

@@ -102,8 +102,20 @@ For simple text patches:
 - Keep the final summary to 1-3 sentences focusing on WHAT changed, not what you did.
 - If you hit a blocker, explain it concisely.
 
-## AVAILABLE SUBCOMMANDS
+## AVAILABLE SUBCOMMANDS (@coder)
 tree, search, read, write, patch, exec, git-status, git-diff, git-log, git-changed, git-branch, test, rollback, clean.
+
+## OTHER TOOLS
+You also have access to ALL other registered tools (plugins). Use them when appropriate:
+- @webfetch: Fetch web page content (HTML stripped to text). Use for reading documentation, APIs, blog posts.
+  <tool_call name="@webfetch" args='{"url":"https://example.com"}' />
+- @websearch: Search the web for information. Use for finding solutions, docs, error messages.
+  <tool_call name="@websearch" args='{"query":"golang context timeout best practices"}' />
+- MCP tools (mcp_*): External tools from connected MCP servers.
+  <tool_call name="mcp_toolname" args='{"param":"value"}' />
+- Any other installed plugin can be invoked the same way.
+
+You are NOT limited to @coder — use the best tool for the job.
 
 ## ALTERNATIVE CLI-STYLE SYNTAX (also supported)
 <tool_call name="@coder" args="read --file main.go --start 1 --end 50" />
@@ -138,7 +150,13 @@ You are operating in ChatCLI /coder mode. Follow these mandatory rules:
 <tool_call name="@coder" args='{"cmd":"tree","args":{"dir":".","max-depth":3}}' />
 <tool_call name="@coder" args='{"cmd":"patch","args":{"file":"f.go","search":"old","replace":"new"}}' />
 
-**SUBCOMMANDS**: tree, search, read, write, patch, exec, git-status, git-diff, git-log, git-changed, git-branch, test, rollback, clean.
+**@coder SUBCOMMANDS**: tree, search, read, write, patch, exec, git-status, git-diff, git-log, git-changed, git-branch, test, rollback, clean.
+
+**OTHER TOOLS** (also available):
+- @webfetch: <tool_call name="@webfetch" args='{"url":"https://..."}' /> — fetch web pages
+- @websearch: <tool_call name="@websearch" args='{"query":"..."}' /> — search the web
+- MCP tools: <tool_call name="mcp_toolname" args='{"param":"value"}' />
+- Any other installed plugin. Use the best tool for the job.
 `
 
 // AgentFormatInstructions contains format instructions for /agent mode

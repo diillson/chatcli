@@ -24,6 +24,7 @@ const (
 	ProviderOpenAI        ProviderID = "openai"
 	ProviderOpenAICodex   ProviderID = "openai-codex"
 	ProviderGitHubCopilot ProviderID = "github-copilot"
+	ProviderGitHubModels  ProviderID = "github-models"
 )
 
 // AuthMode indica como a autenticação foi resolvida.

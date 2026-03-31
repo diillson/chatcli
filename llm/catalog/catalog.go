@@ -20,6 +20,7 @@ const (
 	ProviderXAI             = "XAI"
 	ProviderOllama          = "OLLAMA"
 	ProviderCopilot         = "COPILOT"
+	ProviderGitHubModels    = "GITHUB_MODELS"
 )
 
 // PreferredAPI define qual API é preferida para o modelo
@@ -352,6 +353,94 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools"},
 	},
+	// GitHub Models marketplace (models.inference.ai.azure.com)
+	// These are the known models available via GitHub PAT.
+	// The actual availability depends on the user's GitHub plan.
+	{
+		ID:              "gpt-4o",
+		Aliases:         []string{"gh-gpt-4o"},
+		DisplayName:     "GPT-4o (GitHub Models)",
+		Provider:        ProviderGitHubModels,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gpt-4o-mini",
+		Aliases:         []string{"gh-gpt-4o-mini"},
+		DisplayName:     "GPT-4o mini (GitHub Models)",
+		Provider:        ProviderGitHubModels,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "Meta-Llama-3.1-405B-Instruct",
+		Aliases:         []string{"llama-3.1-405b", "meta-llama-405b"},
+		DisplayName:     "Llama 3.1 405B (GitHub Models)",
+		Provider:        ProviderGitHubModels,
+		ContextWindow:   128000,
+		MaxOutputTokens: 4096,
+		PreferredAPI:    APIChatCompletions,
+	},
+	{
+		ID:              "Meta-Llama-3.1-8B-Instruct",
+		Aliases:         []string{"llama-3.1-8b", "meta-llama-8b"},
+		DisplayName:     "Llama 3.1 8B (GitHub Models)",
+		Provider:        ProviderGitHubModels,
+		ContextWindow:   128000,
+		MaxOutputTokens: 4096,
+		PreferredAPI:    APIChatCompletions,
+	},
+	// Models below require GitHub Copilot Pro or expanded access
+	{
+		ID:              "DeepSeek-R1",
+		Aliases:         []string{"deepseek-r1", "deepseek"},
+		DisplayName:     "DeepSeek R1 (GitHub Models)",
+		Provider:        ProviderGitHubModels,
+		ContextWindow:   64000,
+		MaxOutputTokens: 8192,
+		PreferredAPI:    APIChatCompletions,
+	},
+	{
+		ID:              "Mistral-large-2411",
+		Aliases:         []string{"mistral-large", "mistral"},
+		DisplayName:     "Mistral Large (GitHub Models)",
+		Provider:        ProviderGitHubModels,
+		ContextWindow:   128000,
+		MaxOutputTokens: 4096,
+		PreferredAPI:    APIChatCompletions,
+	},
+	{
+		ID:              "Phi-4",
+		Aliases:         []string{"phi-4", "phi4"},
+		DisplayName:     "Phi-4 (GitHub Models)",
+		Provider:        ProviderGitHubModels,
+		ContextWindow:   16384,
+		MaxOutputTokens: 4096,
+		PreferredAPI:    APIChatCompletions,
+	},
+	{
+		ID:              "AI21-Jamba-1.5-Large",
+		Aliases:         []string{"jamba-1.5-large", "jamba"},
+		DisplayName:     "Jamba 1.5 Large (GitHub Models)",
+		Provider:        ProviderGitHubModels,
+		ContextWindow:   256000,
+		MaxOutputTokens: 4096,
+		PreferredAPI:    APIChatCompletions,
+	},
+	{
+		ID:              "Cohere-command-r-plus-08-2024",
+		Aliases:         []string{"cohere-command-r-plus", "cohere"},
+		DisplayName:     "Cohere Command R+ (GitHub Models)",
+		Provider:        ProviderGitHubModels,
+		ContextWindow:   128000,
+		MaxOutputTokens: 4096,
+		PreferredAPI:    APIChatCompletions,
+	},
+
 	// xAI (Grok) Models
 	{
 		ID:              "grok-4-fast",
@@ -487,6 +576,8 @@ func GetMaxTokens(provider, model string, override int) int {
 		return 8192
 	case ProviderCopilot:
 		return 16384
+	case ProviderGitHubModels:
+		return 4096
 	default:
 		return 50000
 	}
@@ -510,6 +601,8 @@ func GetContextWindow(provider, model string) int {
 	case ProviderOllama:
 		return 8192
 	case ProviderCopilot:
+		return 128000
+	case ProviderGitHubModels:
 		return 128000
 	default:
 		return 50000

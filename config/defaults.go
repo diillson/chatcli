@@ -39,6 +39,10 @@ const (
 	DefaultCopilotModel = "gpt-4o"
 	CopilotAPIURL       = "https://api.githubcopilot.com/chat/completions"
 
+	// Valores padrão para GitHub Models (marketplace)
+	DefaultGitHubModelsModel = "gpt-4o"
+	GitHubModelsAPIURL       = "https://models.inference.ai.azure.com/chat/completions"
+
 	// Valores padrão para Ollama
 	DefaultOllamaModel          = "gpt-oss:20b"
 	OllamaDefaultBaseURL        = "http://localhost:11434"

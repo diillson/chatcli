@@ -225,7 +225,7 @@ func (cli *ChatCLI) getConnectSuggestions(d prompt.Document) []prompt.Suggest {
 	if strings.HasPrefix(wordBeforeCursor, "-") {
 		flags := []prompt.Suggest{
 			{Text: "--token", Description: "Token de autenticação do servidor"},
-			{Text: "--provider", Description: "Provedor LLM (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT)"},
+			{Text: "--provider", Description: "Provedor LLM (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS)"},
 			{Text: "--model", Description: "Modelo LLM (gpt-4, claude-3, etc.)"},
 			{Text: "--llm-key", Description: "API key/OAuth token para enviar ao servidor"},
 			{Text: "--use-local-auth", Description: "Usar credenciais OAuth locais (de /auth login)"},
@@ -982,8 +982,8 @@ func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		suggestions := []prompt.Suggest{
 			{Text: "status", Description: "Exibir status de autenticação de todos os provedores"},
-			{Text: "login", Description: "Autenticar com um provedor (anthropic, openai-codex ou github-copilot)"},
-			{Text: "logout", Description: "Remover credenciais de um provedor (anthropic, openai-codex ou github-copilot)"},
+			{Text: "login", Description: "Autenticar com um provedor (anthropic, openai-codex, github-copilot, github-models)"},
+			{Text: "logout", Description: "Remover credenciais de um provedor (anthropic, openai-codex, github-copilot, github-models)"},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -997,6 +997,7 @@ func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
 					{Text: "anthropic", Description: "Anthropic (Claude)"},
 					{Text: "openai-codex", Description: "OpenAI (GPT Plus / Codex)"},
 					{Text: "github-copilot", Description: "GitHub Copilot"},
+					{Text: "github-models", Description: "GitHub Models (GPT-4o, Llama, Mistral, DeepSeek...)"},
 				}
 				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 			}

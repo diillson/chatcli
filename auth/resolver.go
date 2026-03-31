@@ -117,6 +117,13 @@ func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (
 		if v := strings.TrimSpace(os.Getenv("GITHUB_COPILOT_TOKEN")); v != "" {
 			return &ResolvedAuth{APIKey: "token:" + v, Source: "env:GITHUB_COPILOT_TOKEN", Mode: AuthModeToken, Provider: provider}, nil
 		}
+
+	case ProviderGitHubModels:
+		for _, envKey := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_MODELS_TOKEN"} {
+			if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+				return &ResolvedAuth{APIKey: "token:" + v, Source: "env:" + envKey, Mode: AuthModeToken, Provider: provider}, nil
+			}
+		}
 	}
 
 	return nil, fmt.Errorf("no credentials for provider %s", provider)
