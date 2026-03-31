@@ -233,7 +233,12 @@ func buildClaudeToolMessages(prompt string, history []models.Message) []interfac
 
 // buildToolRequest creates the HTTP request for tool use calls.
 func (c *ClaudeClient) buildToolRequest(ctx context.Context, jsonValue []byte) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, bytes.NewReader(jsonValue))
+	reqURL := c.apiURL
+	if strings.HasPrefix(c.apiKey, "oauth:") {
+		reqURL = withBetaQuery(reqURL)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
