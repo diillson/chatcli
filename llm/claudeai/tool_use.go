@@ -86,7 +86,17 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		}
 		defer resp.Body.Close()
 
-		bodyBytes, err := io.ReadAll(resp.Body)
+		// Decode compressed response (gzip, deflate, br) — OAuth endpoints
+		// send compressed responses when Accept-Encoding is set.
+		reader, decErr := decodeResponseBody(resp)
+		if decErr != nil {
+			return "", fmt.Errorf("decoding response body: %w", decErr)
+		}
+		if reader != resp.Body {
+			defer reader.Close()
+		}
+
+		bodyBytes, err := io.ReadAll(reader)
 		if err != nil {
 			return "", fmt.Errorf("reading response: %w", err)
 		}
