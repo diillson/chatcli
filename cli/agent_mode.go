@@ -1633,6 +1633,42 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// ==========================================
 		// PRIORIDADE 3: RESPOSTA FINAL (sem ações)
 		// ==========================================
+
+		// In coder mode, the AI may respond without tool calls when it needs
+		// information from the user (e.g., "What role should I use?", "Which
+		// file do you mean?"). Instead of exiting, wait for user input so the
+		// conversation can continue.
+		if a.isCoderMode && !a.isOneShot {
+			showTurnStats()
+			fmt.Println()
+			fmt.Print(renderer.Colorize("  ⏳ "+i18n.T("coder.waiting_for_input"), agent.ColorCyan))
+			fmt.Print(" ")
+
+			var userInput string
+			if a.stdinLines != nil {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case line := <-a.stdinLines:
+					userInput = strings.TrimSpace(line)
+				}
+			} else {
+				userInput = strings.TrimSpace(a.readLine())
+			}
+
+			// Allow the user to exit explicitly
+			if userInput == "" || strings.EqualFold(userInput, "exit") || strings.EqualFold(userInput, "quit") || strings.EqualFold(userInput, "sair") {
+				fmt.Println(renderer.Colorize("\n"+i18n.T("agent.status.task_completed"), agent.ColorGreen+agent.ColorBold))
+				return nil
+			}
+
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: userInput,
+			})
+			continue
+		}
+
 		showTurnStats()
 		fmt.Println(renderer.Colorize("\n"+i18n.T("agent.status.task_completed"), agent.ColorGreen+agent.ColorBold))
 		return nil
