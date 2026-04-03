@@ -6,6 +6,10 @@ description: >-
 type: application
 version: 1.90.1
 appVersion: 1.90.1
+home: https://chatcli.edilsonfreitas.com
+sources:
+  - https://github.com/diillson/chatcli
+icon: https://chatcli.edilsonfreitas.com/images/logo-dark.svg
 keywords:
   - chatcli
   - operator
@@ -14,9 +18,138 @@ keywords:
   - remediation
   - incident-management
   - sre
-home: https://chatcli.edilsonfreitas.com
-sources:
-  - https://github.com/diillson/chatcli
+  - observability
+  - chaos-engineering
 maintainers:
   - name: Edilson Freitas
-icon: https://chatcli.edilsonfreitas.com/images/logo-dark.svg
+    email: diillson@hotmail.com
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/containsSecurityUpdates: "false"
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Seamless Upgrades
+  artifacthub.io/crds: |
+    - kind: AIInsight
+      version: v1alpha1
+      description: AI-generated analysis and recommendations for detected issues
+    - kind: Anomaly
+      version: v1alpha1
+      description: Raw signal from watchers before correlation into issues
+    - kind: ApprovalPolicy
+      version: v1alpha1
+      description: Approval requirements for remediation actions
+    - kind: ApprovalRequest
+      version: v1alpha1
+      description: Pending approval for a remediation action
+    - kind: AuditEvent
+      version: v1alpha1
+      description: Immutable record of an action in the AIOps platform
+    - kind: ChaosExperiment
+      version: v1alpha1
+      description: Chaos engineering experiment targeting a Kubernetes resource
+    - kind: ClusterRegistration
+      version: v1alpha1
+      description: Registered Kubernetes cluster for multi-cluster federation
+    - kind: EscalationPolicy
+      version: v1alpha1
+      description: Escalation chains for incident management
+    - kind: IncidentSLA
+      version: v1alpha1
+      description: SLA targets for incident response and resolution by severity
+    - kind: Instance
+      version: v1alpha1
+      description: ChatCLI instance configuration
+    - kind: Issue
+      version: v1alpha1
+      description: Detected problem in the cluster
+    - kind: NotificationPolicy
+      version: v1alpha1
+      description: Notification delivery rules and channels
+    - kind: PostMortem
+      version: v1alpha1
+      description: Full incident lifecycle captured after resolution
+    - kind: RemediationPlan
+      version: v1alpha1
+      description: Remediation attempt for an Issue
+    - kind: Runbook
+      version: v1alpha1
+      description: Operational procedures linked to issue types
+    - kind: ServiceLevelObjective
+      version: v1alpha1
+      description: Service level objective with burn rate alerting
+    - kind: SourceRepository
+      version: v1alpha1
+      description: Links a Kubernetes workload to its source code repository for code-aware incident analysis
+  artifacthub.io/crdsExamples: |
+    - apiVersion: platform.chatcli.io/v1alpha1
+      kind: Issue
+      metadata:
+        name: high-cpu-api-server
+        namespace: production
+      spec:
+        title: "High CPU usage on api-server"
+        severity: critical
+        source: prometheus-watcher
+        resourceRef:
+          kind: Deployment
+          name: api-server
+          namespace: production
+    - apiVersion: platform.chatcli.io/v1alpha1
+      kind: ApprovalPolicy
+      metadata:
+        name: production-approval
+        namespace: aiops-system
+      spec:
+        enabled: true
+        defaultMode: manual
+        rules:
+          - name: critical-manual
+            match:
+              severities: ["critical", "high"]
+              actionTypes: ["restart", "scale", "rollback"]
+              namespaces: ["production"]
+            mode: manual
+            timeoutMinutes: 15
+          - name: low-severity-auto
+            match:
+              severities: ["low", "warning"]
+            mode: auto
+            timeoutMinutes: 30
+            autoApproveConditions:
+              minConfidence: 0.85
+              maxSeverity: warning
+              historicalSuccessRate: 0.9
+    - apiVersion: platform.chatcli.io/v1alpha1
+      kind: ChaosExperiment
+      metadata:
+        name: api-pod-failure
+        namespace: chaos-testing
+      spec:
+        target:
+          kind: Deployment
+          name: api-server
+          namespace: production
+        experimentType: pod-failure
+        duration: 5m
+        schedule: "0 3 * * 1"
+    - apiVersion: platform.chatcli.io/v1alpha1
+      kind: ServiceLevelObjective
+      metadata:
+        name: api-availability
+        namespace: production
+      spec:
+        service: api-server
+        indicator:
+          type: availability
+          metricQuery: "sum(rate(http_requests_total{code!~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))"
+        target: "99.9"
+        window: 30d
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://chatcli.edilsonfreitas.com
+    - name: Source
+      url: https://github.com/diillson/chatcli
+  artifacthub.io/maintainers: |
+    - name: Edilson Freitas
+      email: diillson@hotmail.com
