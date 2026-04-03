@@ -4,7 +4,7 @@ Deploy ChatCLI as a gRPC server on Kubernetes with multi-provider LLM support, a
 
 ## Prerequisites
 
-- Kubernetes 1.26+
+- Kubernetes 1.30+
 - Helm 3.10+
 - At least one LLM provider API key
 

@@ -4,7 +4,7 @@ Kubernetes operator for autonomous incident detection, AI-powered analysis, and 
 
 ## Prerequisites
 
-- Kubernetes 1.26+
+- Kubernetes 1.30+
 - Helm 3.10+
 
 ## Installation
