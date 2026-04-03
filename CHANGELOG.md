@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.91.0](https://github.com/diillson/chatcli/compare/v1.90.1...v1.91.0) (2026-04-03)
+
+
+### Features
+
+* **helm:** add ArtifactHub integration and enrich chart metadata ([#711](https://github.com/diillson/chatcli/issues/711)) ([dc89f68](https://github.com/diillson/chatcli/commit/dc89f68da3fd22dc4f64fc366925e37fee788782))
+
+
+### Bug Fixes
+
+* **helm:** split artifacthub-repo.yml into separate repository IDs ([#713](https://github.com/diillson/chatcli/issues/713)) ([5c7fd35](https://github.com/diillson/chatcli/commit/5c7fd353f70e30258ecc862f47fb41fed4b2bf69))
+
 ## [1.90.1](https://github.com/diillson/chatcli/compare/v1.90.0...v1.90.1) (2026-03-31)
 
 

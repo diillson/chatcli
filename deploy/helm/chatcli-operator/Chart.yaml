@@ -4,8 +4,8 @@ description: >-
   ChatCLI AIOps Operator - Autonomous incident detection, AI analysis, and
   remediation for Kubernetes
 type: application
-version: 1.90.1
-appVersion: 1.90.1
+version: 1.91.0
+appVersion: 1.91.0
 home: https://chatcli.edilsonfreitas.com
 sources:
   - https://github.com/diillson/chatcli
@@ -25,9 +25,9 @@ maintainers:
     email: diillson@hotmail.com
 annotations:
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/containsSecurityUpdates: "false"
-  artifacthub.io/prerelease: "false"
-  artifacthub.io/operator: "true"
+  artifacthub.io/containsSecurityUpdates: 'false'
+  artifacthub.io/prerelease: 'false'
+  artifacthub.io/operator: 'true'
   artifacthub.io/operatorCapabilities: Seamless Upgrades
   artifacthub.io/crds: |
     - kind: AIInsight
