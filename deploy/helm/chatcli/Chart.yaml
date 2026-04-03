@@ -2,8 +2,8 @@ apiVersion: v2
 name: chatcli
 description: ChatCLI - CLI for LLM interaction with gRPC server mode
 type: application
-version: 1.90.1
-appVersion: 1.90.1
+version: 1.91.0
+appVersion: 1.91.0
 home: https://chatcli.edilsonfreitas.com
 sources:
   - https://github.com/diillson/chatcli
@@ -24,9 +24,9 @@ maintainers:
     email: diillson@hotmail.com
 annotations:
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/containsSecurityUpdates: "false"
-  artifacthub.io/prerelease: "false"
-  artifacthub.io/operator: "false"
+  artifacthub.io/containsSecurityUpdates: 'false'
+  artifacthub.io/prerelease: 'false'
+  artifacthub.io/operator: 'false'
   artifacthub.io/crds: |
     - kind: AIInsight
       version: v1alpha1
