@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -49,13 +50,13 @@ func (h *Handler) GetAlerts(ctx context.Context, req *pb.GetAlertsRequest) (*pb.
 // AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
 func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest) (*pb.AnalyzeIssueResponse, error) {
 	if req.IssueName == "" {
-		return nil, status.Error(codes.InvalidArgument, "issue_name is required")
+		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.analysis.issue_name_required"))
 	}
 
 	llmClient, err := h.getClient(req.Provider, req.Model, "", nil)
 	if err != nil {
-		h.logger.Error("Failed to get LLM client for analysis", zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "failed to get LLM client: %v", err)
+		h.logger.Error(i18n.T("server.analysis.llm_client_failed"), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.analysis.get_client_error", err))
 	}
 
 	prompt := buildAnalysisPrompt(req)
@@ -66,8 +67,8 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 	// and would duplicate/conflict with the operator's context.
 	response, err := llmClient.SendPrompt(ctx, prompt, nil, 0)
 	if err != nil {
-		h.logger.Error("LLM analysis failed", zap.Error(err), zap.String("issue", req.IssueName))
-		return nil, status.Errorf(codes.Internal, "LLM analysis failed: %v", err)
+		h.logger.Error(i18n.T("server.analysis.llm_failed"), zap.Error(err), zap.String("issue", req.IssueName))
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.analysis.llm_error", err))
 	}
 
 	analysis := parseAnalysisResponse(response)
@@ -375,7 +376,7 @@ func parseAnalysisResponse(response string) analysisResult {
 		return analysisResult{
 			Analysis:        response,
 			Confidence:      0.5,
-			Recommendations: []string{"Review the issue manually — AI response could not be parsed"},
+			Recommendations: []string{i18n.T("server.analysis.parse_fallback")},
 		}
 	}
 
@@ -395,20 +396,20 @@ func parseAnalysisResponse(response string) analysisResult {
 // AgenticStep runs one step of the AI-driven remediation loop.
 func (h *Handler) AgenticStep(ctx context.Context, req *pb.AgenticStepRequest) (*pb.AgenticStepResponse, error) {
 	if req.IssueName == "" {
-		return nil, status.Error(codes.InvalidArgument, "issue_name is required")
+		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.agentic.issue_name_required"))
 	}
 
 	llmClient, err := h.getClient(req.Provider, req.Model, "", nil)
 	if err != nil {
-		h.logger.Error("Failed to get LLM client for agentic step", zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "failed to get LLM client: %v", err)
+		h.logger.Error(i18n.T("server.agentic.llm_client_failed"), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.agentic.get_client_error", err))
 	}
 
 	prompt := buildAgenticStepPrompt(req)
 	response, err := llmClient.SendPrompt(ctx, prompt, nil, 0)
 	if err != nil {
-		h.logger.Error("LLM agentic step failed", zap.Error(err), zap.String("issue", req.IssueName), zap.Int32("step", req.CurrentStep))
-		return nil, status.Errorf(codes.Internal, "LLM agentic step failed: %v", err)
+		h.logger.Error(i18n.T("server.agentic.llm_failed"), zap.Error(err), zap.String("issue", req.IssueName), zap.Int32("step", req.CurrentStep))
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.agentic.llm_error", err))
 	}
 
 	return parseAgenticStepResponse(response), nil
@@ -624,7 +625,7 @@ func parseAgenticStepResponse(response string) *pb.AgenticStepResponse {
 	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
 		// Parse failure — return safe default (will trigger escalation)
 		return &pb.AgenticStepResponse{
-			Reasoning: fmt.Sprintf("Failed to parse AI response: %v. Raw: %s", err, response),
+			Reasoning: i18n.T("server.analysis.parse_failed", err, response),
 			Resolved:  false,
 		}
 	}

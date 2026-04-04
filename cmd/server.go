@@ -18,6 +18,7 @@ import (
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/k8s"
 	"github.com/diillson/chatcli/llm/fallback"
 	"github.com/diillson/chatcli/llm/manager"
@@ -109,7 +110,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	// Create session manager for server-side session persistence
 	sessionMgr, err := cli.NewSessionManager(logger)
 	if err != nil {
-		logger.Warn("Failed to initialize session manager, sessions will be unavailable", zap.Error(err))
+		logger.Warn(i18n.T("cmd.server.session_init_failed"), zap.Error(err))
 	}
 
 	cfg := server.Config{
@@ -127,12 +128,12 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	// Initialize plugin manager for remote discovery and execution
 	pluginMgr, pluginErr := plugins.NewManager(logger)
 	if pluginErr != nil {
-		logger.Warn("Failed to initialize plugin manager, remote plugins will be unavailable", zap.Error(pluginErr))
+		logger.Warn(i18n.T("cmd.server.plugin_init_failed"), zap.Error(pluginErr))
 	} else {
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCoderPlugin())
 		srv.SetPluginManager(pluginMgr)
 		defer pluginMgr.Close()
-		logger.Info("Plugin manager initialized for remote discovery",
+		logger.Info(i18n.T("cmd.server.plugin_init_success"),
 			zap.Int("plugins", len(pluginMgr.GetPlugins())),
 			zap.String("dir", pluginMgr.PluginsDir()),
 		)
@@ -142,7 +143,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	personaLoader := persona.NewLoader(logger)
 	srv.SetPersonaLoader(personaLoader)
 	if agents, err := personaLoader.ListAgents(); err == nil {
-		logger.Info("Persona loader initialized for remote discovery",
+		logger.Info(i18n.T("cmd.server.persona_init_success"),
 			zap.Int("agents", len(agents)),
 		)
 	}
@@ -163,7 +164,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 			}
 			c, err := llmMgr.GetClient(p, model)
 			if err != nil {
-				logger.Warn("fallback provider unavailable, skipping",
+				logger.Warn(i18n.T("cmd.server.fallback_unavailable"),
 					zap.String("provider", p), zap.Error(err))
 				continue
 			}
@@ -180,7 +181,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 				fallback.WithCooldown(opts.FallbackCooldownBase, opts.FallbackCooldownMax, 2.0),
 			)
 			srv.SetFallbackChain(chain)
-			logger.Info("Fallback chain initialized",
+			logger.Info(i18n.T("cmd.server.fallback_init_success"),
 				zap.Int("providers", len(entries)),
 				zap.Strings("chain", func() []string {
 					names := make([]string, len(entries))
@@ -201,17 +202,17 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 			configPath = mcp.DefaultConfigPath()
 		}
 		if err := mcpMgr.LoadConfig(configPath); err != nil {
-			logger.Warn("Failed to load MCP config, MCP tools will be unavailable",
+			logger.Warn(i18n.T("cmd.server.mcp_config_failed"),
 				zap.String("config", configPath), zap.Error(err))
 		} else {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if err := mcpMgr.StartAll(ctx); err != nil {
-				logger.Warn("Failed to start MCP servers", zap.Error(err))
+				logger.Warn(i18n.T("cmd.server.mcp_start_failed"), zap.Error(err))
 			} else {
 				srv.SetMCPManager(mcpMgr)
 				defer mcpMgr.StopAll()
-				logger.Info("MCP manager initialized",
+				logger.Info(i18n.T("cmd.server.mcp_init_success"),
 					zap.Int("servers", len(mcpMgr.GetServerStatus())),
 					zap.Int("tools", len(mcpMgr.GetTools())),
 				)
@@ -226,7 +227,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		if opts.WatchConfig != "" {
 			mcfg, err := k8s.LoadMultiWatchConfig(opts.WatchConfig)
 			if err != nil {
-				return fmt.Errorf("failed to load watch config: %w", err)
+				return fmt.Errorf("%s: %w", i18n.T("cmd.server.watch_config_failed"), err)
 			}
 			if opts.WatchKubeconfig != "" {
 				mcfg.Kubeconfig = opts.WatchKubeconfig
@@ -247,7 +248,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 
 		mw, err := k8s.NewMultiWatcher(multiCfg, logger)
 		if err != nil {
-			return fmt.Errorf("failed to create K8s watcher: %w", err)
+			return fmt.Errorf("%s: %w", i18n.T("cmd.server.watch_create_failed"), err)
 		}
 
 		// Wire watcher Prometheus metrics if metrics are enabled
@@ -312,17 +313,16 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		defer cancel()
 
 		go func() {
-			logger.Info("Starting K8s multi-watcher",
+			logger.Info(i18n.T("cmd.server.watch_starting"),
 				zap.Int("targets", mw.TargetCount()),
 				zap.Duration("interval", multiCfg.Interval),
 			)
 			if err := mw.Start(ctx); err != nil && err != context.Canceled {
-				logger.Error("K8s multi-watcher stopped with error", zap.Error(err))
+				logger.Error(i18n.T("cmd.server.watch_error"), zap.Error(err))
 			}
 		}()
 
-		fmt.Printf("K8s watcher active: %d targets (interval: %s)\n",
-			mw.TargetCount(), multiCfg.Interval)
+		fmt.Println(i18n.T("cmd.server.watch_active", mw.TargetCount(), multiCfg.Interval))
 	}
 
 	return srv.Start()

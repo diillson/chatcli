@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/diillson/chatcli/i18n"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -49,7 +50,7 @@ func (h *Handler) ListRemoteAgents(ctx context.Context, req *pb.ListRemoteAgents
 
 	agents, err := h.personaLoader.ListAgents()
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to list agents: %v", err)
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.remote.agents_list_error", err))
 	}
 
 	var result []*pb.AgentInfo
@@ -75,7 +76,7 @@ func (h *Handler) ListRemoteSkills(ctx context.Context, req *pb.ListRemoteSkills
 
 	skills, err := h.personaLoader.ListSkills()
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to list skills: %v", err)
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.remote.skills_list_error", err))
 	}
 
 	var result []*pb.SkillInfo
@@ -111,15 +112,15 @@ func (h *Handler) ListRemoteSkills(ctx context.Context, req *pb.ListRemoteSkills
 // GetAgentDefinition returns the full definition of a server-side agent.
 func (h *Handler) GetAgentDefinition(ctx context.Context, req *pb.GetAgentDefinitionRequest) (*pb.GetAgentDefinitionResponse, error) {
 	if h.personaLoader == nil {
-		return nil, status.Error(codes.Unavailable, "persona system not available")
+		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.remote.persona_unavailable"))
 	}
 	if req.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "agent name is required")
+		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.remote.agent_name_required"))
 	}
 
 	agent, err := h.personaLoader.GetAgent(req.Name)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "agent not found: %v", err)
+		return nil, status.Errorf(codes.NotFound, "%s", i18n.T("server.remote.agent_not_found", err))
 	}
 
 	return &pb.GetAgentDefinitionResponse{
@@ -137,15 +138,15 @@ func (h *Handler) GetAgentDefinition(ctx context.Context, req *pb.GetAgentDefini
 // GetSkillContent returns the full content of a server-side skill.
 func (h *Handler) GetSkillContent(ctx context.Context, req *pb.GetSkillContentRequest) (*pb.GetSkillContentResponse, error) {
 	if h.personaLoader == nil {
-		return nil, status.Error(codes.Unavailable, "persona system not available")
+		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.remote.persona_unavailable"))
 	}
 	if req.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "skill name is required")
+		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.remote.skill_name_required"))
 	}
 
 	skill, err := h.personaLoader.GetSkill(req.Name)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "skill not found: %v", err)
+		return nil, status.Errorf(codes.NotFound, "%s", i18n.T("server.remote.skill_not_found", err))
 	}
 
 	info := &pb.SkillInfo{
@@ -173,18 +174,18 @@ func (h *Handler) GetSkillContent(ctx context.Context, req *pb.GetSkillContentRe
 // ExecuteRemotePlugin executes a plugin on the server and returns the output.
 func (h *Handler) ExecuteRemotePlugin(ctx context.Context, req *pb.ExecuteRemotePluginRequest) (*pb.ExecuteRemotePluginResponse, error) {
 	if h.pluginManager == nil {
-		return nil, status.Error(codes.Unavailable, "plugin system not available")
+		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.remote.plugin_unavailable"))
 	}
 	if req.PluginName == "" {
-		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
+		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.remote.plugin_name_required"))
 	}
 
 	plugin, ok := h.pluginManager.GetPlugin(req.PluginName)
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "plugin not found: %s", req.PluginName)
+		return nil, status.Errorf(codes.NotFound, "%s", i18n.T("server.remote.plugin_not_found", req.PluginName))
 	}
 
-	h.logger.Info("Executing remote plugin",
+	h.logger.Info(i18n.T("server.remote.plugin_executing"),
 		zap.String("plugin", req.PluginName),
 		zap.Strings("args", req.Args),
 	)
@@ -204,26 +205,26 @@ func (h *Handler) ExecuteRemotePlugin(ctx context.Context, req *pb.ExecuteRemote
 // DownloadPlugin streams the plugin binary to the client.
 func (h *Handler) DownloadPlugin(req *pb.DownloadPluginRequest, stream pb.ChatCLIService_DownloadPluginServer) error {
 	if h.pluginManager == nil {
-		return status.Error(codes.Unavailable, "plugin system not available")
+		return status.Errorf(codes.Unavailable, "%s", i18n.T("server.remote.plugin_unavailable"))
 	}
 	if req.PluginName == "" {
-		return status.Error(codes.InvalidArgument, "plugin_name is required")
+		return status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.remote.plugin_name_required"))
 	}
 
 	plugin, ok := h.pluginManager.GetPlugin(req.PluginName)
 	if !ok {
-		return status.Errorf(codes.NotFound, "plugin not found: %s", req.PluginName)
+		return status.Errorf(codes.NotFound, "%s", i18n.T("server.remote.plugin_not_found", req.PluginName))
 	}
 
 	pluginPath := plugin.Path()
 	info, err := os.Stat(pluginPath)
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to stat plugin binary: %v", err)
+		return status.Errorf(codes.Internal, "%s", i18n.T("server.remote.plugin_stat_error", err))
 	}
 
 	f, err := os.Open(pluginPath)
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to open plugin binary: %v", err)
+		return status.Errorf(codes.Internal, "%s", i18n.T("server.remote.plugin_open_error", err))
 	}
 	defer f.Close()
 
@@ -253,7 +254,7 @@ func (h *Handler) DownloadPlugin(req *pb.DownloadPluginRequest, stream pb.ChatCL
 			break
 		}
 		if readErr != nil {
-			return status.Errorf(codes.Internal, "read error: %v", readErr)
+			return status.Errorf(codes.Internal, "%s", i18n.T("server.remote.plugin_read_error", readErr))
 		}
 	}
 

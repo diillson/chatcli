@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -12,14 +13,14 @@ import (
 // Supported: anthropic, openai-codex.
 func RefreshOAuth(ctx context.Context, cred *AuthProfileCredential, logger *zap.Logger) (*AuthProfileCredential, error) {
 	if cred == nil {
-		return nil, fmt.Errorf("nil cred")
+		return nil, fmt.Errorf("%s", i18n.T("auth.refresh.nil_cred"))
 	}
 	if cred.CredType != CredentialOAuth {
-		return nil, fmt.Errorf("cred is not oauth")
+		return nil, fmt.Errorf("%s", i18n.T("auth.refresh.not_oauth"))
 	}
 	refresh := strings.TrimSpace(cred.Refresh)
 	if refresh == "" {
-		return nil, fmt.Errorf("missing refresh token")
+		return nil, fmt.Errorf("%s", i18n.T("auth.refresh.missing_refresh"))
 	}
 
 	var tokenURL string
@@ -38,7 +39,7 @@ func RefreshOAuth(ctx context.Context, cred *AuthProfileCredential, logger *zap.
 			clientID = OpenAICodexClientID()
 		}
 	default:
-		return nil, fmt.Errorf("unsupported oauth provider: %s", cred.Provider)
+		return nil, fmt.Errorf("%s", i18n.T("auth.refresh.unsupported_provider", cred.Provider))
 	}
 
 	var tr *OAuthTokenResponse
@@ -59,7 +60,7 @@ func RefreshOAuth(ctx context.Context, cred *AuthProfileCredential, logger *zap.
 		})
 	}
 	if err != nil {
-		return nil, fmt.Errorf("oauth refresh failed: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("auth.refresh.failed"), err)
 	}
 
 	if tr.AccessToken != "" {

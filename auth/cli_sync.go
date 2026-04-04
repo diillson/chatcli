@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -56,16 +57,16 @@ func syncClaudeCodeCreds(logger *zap.Logger) bool {
 		store := LoadStore(logger)
 		existing := store.Profiles["anthropic-oauth-sync"]
 		if existing != nil && existing.Expires > cred.Expires {
-			logger.Debug("existing Anthropic credentials are newer, skipping sync")
+			logger.Debug(i18n.T("auth.sync.anthropic_newer"))
 			return false
 		}
 
 		if err := UpsertProfile("anthropic-oauth-sync", cred, logger); err != nil {
-			logger.Warn("failed to save synced Anthropic credentials", zap.Error(err))
+			logger.Warn(i18n.T("auth.sync.anthropic_save_failed"), zap.Error(err))
 			return false
 		}
 
-		logger.Info("synced Anthropic credentials from Claude Code",
+		logger.Info(i18n.T("auth.sync.anthropic_synced"),
 			zap.String("source", path))
 		return true
 	}
@@ -99,16 +100,16 @@ func syncCodexCliCreds(logger *zap.Logger) bool {
 		store := LoadStore(logger)
 		existing := store.Profiles["openai-codex-sync"]
 		if existing != nil && existing.Expires > cred.Expires {
-			logger.Debug("existing OpenAI Codex credentials are newer, skipping sync")
+			logger.Debug(i18n.T("auth.sync.codex_newer"))
 			return false
 		}
 
 		if err := UpsertProfile("openai-codex-sync", cred, logger); err != nil {
-			logger.Warn("failed to save synced Codex credentials", zap.Error(err))
+			logger.Warn(i18n.T("auth.sync.codex_save_failed"), zap.Error(err))
 			return false
 		}
 
-		logger.Info("synced OpenAI credentials from Codex CLI",
+		logger.Info(i18n.T("auth.sync.codex_synced"),
 			zap.String("source", path))
 		return true
 	}
@@ -132,7 +133,7 @@ func parseClaudeCredentials(data []byte, logger *zap.Logger) *AuthProfileCredent
 			expires = t.Unix()
 		}
 		if expires > 0 && time.Now().Unix() > expires {
-			logger.Debug("Claude Code token expired, skipping")
+			logger.Debug(i18n.T("auth.sync.claude_expired"))
 			return nil
 		}
 		return &AuthProfileCredential{
@@ -152,7 +153,7 @@ func parseClaudeCredentials(data []byte, logger *zap.Logger) *AuthProfileCredent
 	}
 	if err := json.Unmarshal(data, &format2); err == nil && format2.AccessToken != "" {
 		if format2.ExpiresAt > 0 && time.Now().Unix() > format2.ExpiresAt {
-			logger.Debug("Claude credential expired, skipping")
+			logger.Debug(i18n.T("auth.sync.claude_cred_expired"))
 			return nil
 		}
 		return &AuthProfileCredential{
@@ -176,7 +177,7 @@ func parseCodexCredentials(data []byte, logger *zap.Logger) *AuthProfileCredenti
 	}
 	if err := json.Unmarshal(data, &creds); err == nil && creds.AccessToken != "" {
 		if creds.ExpiresAt > 0 && time.Now().Unix() > creds.ExpiresAt {
-			logger.Debug("Codex CLI token expired, skipping")
+			logger.Debug(i18n.T("auth.sync.codex_token_expired"))
 			return nil
 		}
 		return &AuthProfileCredential{

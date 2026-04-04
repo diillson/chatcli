@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -67,12 +68,12 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 	authURL := AnthropicAuthURL + "?" + q.Encode()
 
 	// Try to open browser automatically for convenience
-	fmt.Println("\nAUTH [Anthropic] Opening browser for authentication...")
+	fmt.Println(i18n.T("auth.login.anthropic_opening"))
 	if openErr := openBrowser(authURL); openErr != nil {
-		fmt.Println("Could not open browser automatically. Open this URL manually:")
+		fmt.Println(i18n.T("auth.login.browser_failed"))
 	} else {
-		fmt.Println("Browser opened. After authorizing, copy the code shown on the page and paste it below.")
-		fmt.Println("If the browser did not open, copy and paste this URL:")
+		fmt.Println(i18n.T("auth.login.anthropic_browser_ok"))
+		fmt.Println(i18n.T("auth.login.anthropic_browser_hint"))
 	}
 	fmt.Println(authURL)
 
@@ -84,11 +85,11 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 	}
 
 	var rawCode string
-	fmt.Print("\n> Paste the code here: ")
+	fmt.Print(i18n.T("auth.login.anthropic_paste_code"))
 	reader := bufio.NewReader(os.Stdin)
 	rawCode, err = reader.ReadString('\n')
 	if err != nil && rawCode == "" {
-		return "", fmt.Errorf("failed to read authorization code: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("auth.login.anthropic_read_failed"), err)
 	}
 	rawCode = strings.TrimSpace(rawCode)
 
@@ -100,7 +101,7 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 		code = rawCode
 	}
 	if code == "" {
-		return "", fmt.Errorf("code is required")
+		return "", fmt.Errorf("%s", i18n.T("auth.login.anthropic_code_required"))
 	}
 
 	tr, err := exchangeAnthropicToken(ctx, AnthropicTokenURL, map[string]any{
@@ -137,7 +138,7 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 	}
 	state, err := GenerateState()
 	if err != nil {
-		return "", fmt.Errorf("failed to generate OAuth state: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("auth.login.openai_state_failed"), err)
 	}
 
 	clientID := OpenAICodexClientID() // M5: supports env override
@@ -160,7 +161,7 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 
 	listener, err := net.Listen("tcp", "localhost:"+OpenAICallbackPort)
 	if err != nil {
-		return "", fmt.Errorf("failed to start local callback server on port %s: %w", OpenAICallbackPort, err)
+		return "", fmt.Errorf("%s: %w", i18n.T("auth.login.openai_listener_failed", OpenAICallbackPort), err)
 	}
 
 	srv := &http.Server{
@@ -183,20 +184,20 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 		if receivedState != state {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprint(w, "<html><body><h2>Authentication failed</h2><p>Invalid state parameter (possible CSRF attack). You can close this tab.</p></body></html>")
-			errCh <- fmt.Errorf("OAuth state mismatch: possible CSRF attack")
+			fmt.Fprint(w, i18n.T("auth.login.openai_auth_failed_html"))
+			errCh <- fmt.Errorf("%s", i18n.T("auth.login.openai_csrf_error"))
 			return
 		}
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, "<html><body><h2>Authentication failed</h2><p>No authorization code received. You can close this tab.</p></body></html>")
-			errCh <- fmt.Errorf("no code in callback")
+			fmt.Fprint(w, i18n.T("auth.login.openai_no_code_html"))
+			errCh <- fmt.Errorf("%s", i18n.T("auth.login.openai_no_code_error"))
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, "<html><body><h2>Authentication successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>")
+		fmt.Fprint(w, i18n.T("auth.login.openai_success_html"))
 		codeCh <- code
 	})
 
@@ -213,17 +214,17 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 	}()
 
 	// Open browser automatically
-	fmt.Println("\nAUTH [OpenAI Codex] Opening browser for authentication...")
+	fmt.Println(i18n.T("auth.login.openai_opening"))
 	if openErr := openBrowser(authURL); openErr != nil {
-		fmt.Println("Could not open browser automatically. Open this URL manually:")
+		fmt.Println(i18n.T("auth.login.openai_browser_failed"))
 		fmt.Println(authURL)
 	} else {
-		fmt.Println("Browser opened. Waiting for authentication callback...")
-		fmt.Println("If the browser did not open, copy and paste this URL:")
+		fmt.Println(i18n.T("auth.login.openai_browser_ok"))
+		fmt.Println(i18n.T("auth.login.openai_browser_hint"))
 		fmt.Println(authURL)
 	}
 
-	fmt.Println("\nWaiting for callback (press Ctrl+C to cancel, auto-timeout in 5 minutes)...")
+	fmt.Println(i18n.T("auth.login.openai_waiting"))
 
 	// M2: Add global timeout so port doesn't stay open indefinitely
 	timeoutTimer := time.NewTimer(oauthCallbackTimeout)
@@ -235,9 +236,9 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 	case code = <-codeCh:
 		// got it
 	case cbErr := <-errCh:
-		return "", fmt.Errorf("callback error: %w", cbErr)
+		return "", fmt.Errorf("%s: %w", i18n.T("auth.login.openai_callback_error"), cbErr)
 	case <-timeoutTimer.C:
-		return "", fmt.Errorf("OAuth callback timed out after %s", oauthCallbackTimeout)
+		return "", fmt.Errorf("%s", i18n.T("auth.login.openai_timeout", oauthCallbackTimeout))
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
@@ -279,7 +280,7 @@ func openBrowser(rawURL string) error {
 	case "windows":
 		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL).Start()
 	default:
-		return fmt.Errorf("unsupported platform")
+		return fmt.Errorf("%s", i18n.T("auth.login.unsupported_platform"))
 	}
 }
 
@@ -291,14 +292,14 @@ func FormatAuthStatus(logger *zap.Logger) string {
 	gm := store.Profiles["github-models:default"]
 	fmtAuth := func(c *AuthProfileCredential) string {
 		if c == nil {
-			return "not connected"
+			return i18n.T("auth.login.status_not_connected")
 		}
 		if c.Expires == 0 {
-			return fmt.Sprintf("type=%s expiry=no expiry (persistent)", c.CredType)
+			return i18n.T("auth.login.status_no_expiry", c.CredType)
 		}
-		return fmt.Sprintf("type=%s expiry=%s", c.CredType, FormatExpiry(c.Expires))
+		return i18n.T("auth.login.status_format", c.CredType, FormatExpiry(c.Expires))
 	}
-	return fmt.Sprintf("Anthropic: %s\nOpenAI Codex: %s\nGitHub Copilot: %s\nGitHub Models: %s", fmtAuth(a), fmtAuth(o), fmtAuth(g), fmtAuth(gm))
+	return i18n.T("auth.login.status_display", fmtAuth(a), fmtAuth(o), fmtAuth(g), fmtAuth(gm))
 }
 
 func Logout(provider ProviderID, logger *zap.Logger) error {

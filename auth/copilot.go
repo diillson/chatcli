@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -62,25 +63,24 @@ func LoginGitHubCopilotOAuth(ctx context.Context, logger *zap.Logger) (profileID
 	// Step 1: Request device code
 	deviceResp, err := requestDeviceCode(ctx, logger)
 	if err != nil {
-		return "", fmt.Errorf("failed to request device code: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("auth.copilot.device_code_failed"), err)
 	}
 
 	// Step 2: Display instructions to user
+	fmt.Println(i18n.T("auth.copilot.opening"))
 	fmt.Println()
-	fmt.Println("AUTH [GitHub Copilot] Device authentication required.")
-	fmt.Println()
-	fmt.Printf("  1. Open: %s\n", deviceResp.VerificationURI)
-	fmt.Printf("  2. Enter code: %s\n", deviceResp.UserCode)
+	fmt.Print(i18n.T("auth.copilot.step1", deviceResp.VerificationURI))
+	fmt.Print(i18n.T("auth.copilot.step2", deviceResp.UserCode))
 	fmt.Println()
 
 	// Try to open browser automatically
 	if openErr := openBrowser(deviceResp.VerificationURI); openErr != nil {
-		fmt.Println("Could not open browser automatically. Open the URL above manually.")
+		fmt.Println(i18n.T("auth.copilot.browser_failed"))
 	} else {
-		fmt.Println("Browser opened. Enter the code above and authorize the application.")
+		fmt.Println(i18n.T("auth.copilot.browser_ok"))
 	}
 	fmt.Println()
-	fmt.Println("Waiting for authorization (press Ctrl+C to cancel)...")
+	fmt.Println(i18n.T("auth.copilot.waiting"))
 
 	// Step 3: Poll for token
 	interval := copilotDefaultInterval
@@ -107,10 +107,10 @@ func LoginGitHubCopilotOAuth(ctx context.Context, logger *zap.Logger) (profileID
 		Expires: 0,
 	}
 	if err := UpsertProfile(profileID, cred, logger); err != nil {
-		return "", fmt.Errorf("failed to save credentials: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("auth.copilot.save_failed"), err)
 	}
 
-	fmt.Println("GitHub Copilot authentication successful!")
+	fmt.Println(i18n.T("auth.copilot.success"))
 	return profileID, nil
 }
 
@@ -137,21 +137,21 @@ func requestDeviceCode(ctx context.Context, logger *zap.Logger) (*DeviceCodeResp
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read device code response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("auth.copilot.read_response_failed"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		sanitized := utils.SanitizeSensitiveText(string(raw))
-		return nil, fmt.Errorf("device code request failed (%s): %s", resp.Status, sanitized)
+		return nil, fmt.Errorf("%s", i18n.T("auth.copilot.request_failed", resp.Status, sanitized))
 	}
 
 	var dcResp DeviceCodeResponse
 	if err := json.Unmarshal(raw, &dcResp); err != nil {
-		return nil, fmt.Errorf("failed to parse device code response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("auth.copilot.parse_failed"), err)
 	}
 
 	if dcResp.DeviceCode == "" || dcResp.UserCode == "" {
-		return nil, fmt.Errorf("invalid device code response: missing device_code or user_code")
+		return nil, fmt.Errorf("%s", i18n.T("auth.copilot.invalid_response"))
 	}
 
 	return &dcResp, nil
@@ -169,7 +169,7 @@ func pollForToken(ctx context.Context, logger *zap.Logger, deviceCode string, in
 		}
 
 		if time.Now().After(expiresAt) {
-			return "", fmt.Errorf("device code expired; please try again")
+			return "", fmt.Errorf("%s", i18n.T("auth.copilot.code_expired"))
 		}
 
 		time.Sleep(interval)
@@ -193,7 +193,7 @@ func pollForToken(ctx context.Context, logger *zap.Logger, deviceCode string, in
 
 		resp, err := hc.Do(req)
 		if err != nil {
-			logger.Debug("Token poll request failed, retrying", zap.Error(err))
+			logger.Debug(i18n.T("auth.copilot.poll_retry"), zap.Error(err))
 			continue
 		}
 
@@ -214,7 +214,7 @@ func pollForToken(ctx context.Context, logger *zap.Logger, deviceCode string, in
 			if tr.AccessToken != "" {
 				return tr.AccessToken, nil
 			}
-			return "", fmt.Errorf("empty access token in response")
+			return "", fmt.Errorf("%s", i18n.T("auth.copilot.empty_token"))
 
 		case "authorization_pending":
 			// User hasn't authorized yet, continue polling
@@ -223,17 +223,17 @@ func pollForToken(ctx context.Context, logger *zap.Logger, deviceCode string, in
 		case "slow_down":
 			// GitHub wants us to slow down — add 5 seconds per spec
 			interval += 5 * time.Second
-			logger.Debug("Slowing down poll interval", zap.Duration("new_interval", interval))
+			logger.Debug(i18n.T("auth.copilot.slow_down"), zap.Duration("new_interval", interval))
 			continue
 
 		case "expired_token":
-			return "", fmt.Errorf("device code expired; please try again")
+			return "", fmt.Errorf("%s", i18n.T("auth.copilot.code_expired"))
 
 		case "access_denied":
-			return "", fmt.Errorf("authorization denied by user")
+			return "", fmt.Errorf("%s", i18n.T("auth.copilot.denied"))
 
 		default:
-			return "", fmt.Errorf("OAuth error: %s — %s", tr.Error, tr.ErrorDesc)
+			return "", fmt.Errorf("%s", i18n.T("auth.copilot.oauth_error", tr.Error, tr.ErrorDesc))
 		}
 	}
 }

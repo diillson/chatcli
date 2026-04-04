@@ -15,6 +15,7 @@ import (
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/client/remote"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/manager"
 	"go.uber.org/zap"
 )
@@ -103,14 +104,14 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 
 	if opts.Address == "" {
 		PrintConnectUsage()
-		return fmt.Errorf("server address is required (use --addr or positional argument)")
+		return fmt.Errorf("%s", i18n.T("cmd.connect.addr_required"))
 	}
 
 	// Resolve local auth if requested
 	if opts.UseLocalAuth && opts.ClientAPIKey == "" {
 		resolvedKey, resolvedProvider, err := resolveLocalAuth(ctx, opts.Provider, logger)
 		if err != nil {
-			return fmt.Errorf("failed to resolve local auth: %w", err)
+			return fmt.Errorf("%s: %w", i18n.T("cmd.connect.local_auth_failed"), err)
 		}
 		opts.ClientAPIKey = resolvedKey
 		// If provider wasn't explicitly set, use the one from auth resolution
@@ -151,37 +152,37 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 
 	remoteClient, err := remote.NewClient(remoteCfg, logger)
 	if err != nil {
-		return fmt.Errorf("failed to connect to remote server: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("cmd.connect.remote_failed"), err)
 	}
 	defer remoteClient.Close()
 
 	// Health check
 	healthy, ver, err := remoteClient.Health(ctx)
 	if err != nil {
-		return fmt.Errorf("server health check failed: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("cmd.connect.health_failed"), err)
 	}
 	if !healthy {
-		return fmt.Errorf("server is not healthy")
+		return fmt.Errorf("%s", i18n.T("cmd.connect.not_healthy"))
 	}
 
 	connInfo := fmt.Sprintf("version: %s, provider: %s, model: %s", ver, remoteClient.GetProvider(), remoteClient.GetModelName())
 	if opts.UseLocalAuth {
-		connInfo += ", using local OAuth credentials"
+		connInfo += i18n.T("cmd.connect.using_local_oauth")
 	} else if opts.ClientAPIKey != "" {
-		connInfo += ", using your own API key"
+		connInfo += i18n.T("cmd.connect.using_api_key")
 	}
-	fmt.Printf("Connected to ChatCLI server (%s)\n", connInfo)
+	fmt.Println(i18n.T("cmd.connect.connected", connInfo))
 
 	// Check if server has K8s watcher active
 	if info, err := remoteClient.GetServerInfo(ctx); err == nil && info.WatcherActive {
-		fmt.Printf("K8s watcher active: %s (context injected into all prompts)\n", info.WatcherTarget)
+		fmt.Println(i18n.T("cmd.connect.watcher_active", info.WatcherTarget))
 	}
 
 	// One-shot mode via connect
 	if opts.Prompt != "" {
 		response, err := remoteClient.SendPrompt(ctx, opts.Prompt, nil, opts.MaxTokens)
 		if err != nil {
-			return fmt.Errorf("remote prompt failed: %w", err)
+			return fmt.Errorf("%s: %w", i18n.T("cmd.connect.prompt_failed"), err)
 		}
 		fmt.Println(response)
 		return nil
@@ -190,7 +191,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	// Interactive mode: create ChatCLI with remote client as the LLM backend
 	chatCLI, err := cli.NewChatCLI(llmMgr, logger)
 	if err != nil {
-		return fmt.Errorf("failed to initialize ChatCLI: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("cmd.connect.init_failed"), err)
 	}
 
 	// Override the LLM client with the remote client
@@ -209,15 +210,12 @@ func resolveLocalAuth(ctx context.Context, provider string, logger *zap.Logger) 
 	if provider != "" {
 		authProvider, ok := llmProviderToAuthProvider(provider)
 		if !ok {
-			return "", "", fmt.Errorf(
-				"--use-local-auth only supports OAuth providers (CLAUDEAI, OPENAI, COPILOT). "+
-					"Provider '%s' requires --llm-key with an API key instead", provider)
+			return "", "", fmt.Errorf("%s", i18n.T("cmd.connect.auth_unsupported", provider))
 		}
 
 		resolved, err := auth.ResolveAuth(ctx, authProvider, logger)
 		if err != nil {
-			return "", "", fmt.Errorf("no local credentials found for %s: %w\n"+
-				"Run 'chatcli' then '/auth login %s' first", provider, err, string(authProvider))
+			return "", "", fmt.Errorf("%s: %w", i18n.T("cmd.connect.auth_not_found", provider, string(authProvider)), err)
 		}
 		return resolved.APIKey, provider, nil
 	}
@@ -233,7 +231,7 @@ func resolveLocalAuth(ctx context.Context, provider string, logger *zap.Logger) 
 	} {
 		resolved, err := auth.ResolveAuth(ctx, candidate.authProvider, logger)
 		if err == nil && resolved.APIKey != "" {
-			logger.Info("Auto-resolved local auth",
+			logger.Info(i18n.T("cmd.connect.auth_auto_resolved"),
 				zap.String("provider", candidate.llmProvider),
 				zap.String("source", resolved.Source),
 				zap.String("mode", string(resolved.Mode)),
@@ -242,7 +240,7 @@ func resolveLocalAuth(ctx context.Context, provider string, logger *zap.Logger) 
 		}
 	}
 
-	return "", "", fmt.Errorf("no local OAuth credentials found. Run 'chatcli' then '/auth login anthropic' or '/auth login openai-codex' or '/auth login github-copilot' first")
+	return "", "", fmt.Errorf("%s", i18n.T("cmd.connect.auth_no_creds"))
 }
 
 // PrintConnectUsage prints help for the connect subcommand.

@@ -17,6 +17,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/fallback"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/metrics"
@@ -110,14 +111,14 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
 		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
 		if err != nil {
-			logger.Fatal("Failed to load TLS certificate", zap.Error(err))
+			logger.Fatal(i18n.T("server.tls.load_failed"), zap.Error(err))
 		}
 		tlsConfig := &tls.Config{
 			Certificates: []tls.Certificate{cert},
 			MinVersion:   tls.VersionTLS12,
 		}
 		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
-		logger.Info("TLS enabled", zap.String("cert", cfg.TLSCertFile))
+		logger.Info(i18n.T("server.tls.enabled"), zap.String("cert", cfg.TLSCertFile))
 	}
 
 	grpcServer := grpc.NewServer(opts...)
@@ -138,7 +139,7 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 	// or CHATCLI_GRPC_REFLECTION=true.
 	if cfg.EnableReflection || strings.EqualFold(os.Getenv("CHATCLI_GRPC_REFLECTION"), "true") {
 		reflection.Register(grpcServer)
-		logger.Info("gRPC reflection enabled")
+		logger.Info(i18n.T("server.reflection.enabled"))
 	}
 
 	return &Server{
@@ -161,7 +162,7 @@ func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.config.Port)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", addr, err)
+		return fmt.Errorf("%s: %w", i18n.T("server.listen.failed", addr), err)
 	}
 
 	// Graceful shutdown on SIGINT/SIGTERM
@@ -169,14 +170,14 @@ func (s *Server) Start() error {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigChan
-		s.logger.Info("Received shutdown signal", zap.String("signal", sig.String()))
+		s.logger.Info(i18n.T("server.shutdown.signal"), zap.String("signal", sig.String()))
 		if s.metricsServer != nil {
 			s.metricsServer.Stop()
 		}
 		s.grpcServer.GracefulStop()
 	}()
 
-	s.logger.Info("ChatCLI gRPC server starting",
+	s.logger.Info(i18n.T("server.starting"),
 		zap.Int("port", s.config.Port),
 		zap.String("provider", s.config.Provider),
 		zap.String("model", s.config.Model),
@@ -185,19 +186,19 @@ func (s *Server) Start() error {
 		zap.Int("metrics_port", s.config.MetricsPort),
 	)
 
-	fmt.Printf("🚀 ChatCLI server listening on %s\n", addr)
+	fmt.Println(i18n.T("server.listening", addr))
 	if s.config.Token != "" {
-		fmt.Println("🔒 Authentication enabled (Bearer token required)")
+		fmt.Println(i18n.T("server.auth_enabled"))
 	}
 	if s.config.MetricsPort > 0 {
-		fmt.Printf("📊 Prometheus metrics on :%d/metrics\n", s.config.MetricsPort)
+		fmt.Println(i18n.T("server.metrics_enabled", s.config.MetricsPort))
 	}
 
 	if err := s.grpcServer.Serve(lis); err != nil {
-		return fmt.Errorf("gRPC server failed: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("server.grpc_failed"), err)
 	}
 
-	s.logger.Info("ChatCLI gRPC server stopped")
+	s.logger.Info(i18n.T("server.stopped"))
 	return nil
 }
 

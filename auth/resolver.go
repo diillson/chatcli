@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -46,13 +47,13 @@ func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (
 			if c.IsExpired() {
 				if _, err := RefreshOAuth(ctx, c, logger); err != nil {
 					if logger != nil {
-						logger.Warn("OAuth token refresh failed",
+						logger.Warn(i18n.T("auth.resolver.oauth_refresh_failed"),
 							zap.String("provider", string(c.Provider)),
 							zap.Error(err))
 					}
 				} else {
 					if saveErr := SaveStore(store, logger); saveErr != nil && logger != nil {
-						logger.Warn("Failed to persist refreshed OAuth token",
+						logger.Warn(i18n.T("auth.resolver.oauth_save_failed"),
 							zap.String("provider", string(c.Provider)),
 							zap.Error(saveErr))
 					}
@@ -126,5 +127,5 @@ func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (
 		}
 	}
 
-	return nil, fmt.Errorf("no credentials for provider %s", provider)
+	return nil, fmt.Errorf("%s", i18n.T("auth.resolver.no_credentials", provider))
 }

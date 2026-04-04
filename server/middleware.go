@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -24,13 +25,13 @@ func loggingUnaryInterceptor(logger *zap.Logger) grpc.UnaryServerInterceptor {
 		duration := time.Since(start)
 
 		if err != nil {
-			logger.Warn("gRPC unary call",
+			logger.Warn(i18n.T("server.middleware.unary_call"),
 				zap.String("method", info.FullMethod),
 				zap.Duration("duration", duration),
 				zap.Error(err),
 			)
 		} else {
-			logger.Info("gRPC unary call",
+			logger.Info(i18n.T("server.middleware.unary_call"),
 				zap.String("method", info.FullMethod),
 				zap.Duration("duration", duration),
 			)
@@ -48,13 +49,13 @@ func loggingStreamInterceptor(logger *zap.Logger) grpc.StreamServerInterceptor {
 		duration := time.Since(start)
 
 		if err != nil {
-			logger.Warn("gRPC stream call",
+			logger.Warn(i18n.T("server.middleware.stream_call"),
 				zap.String("method", info.FullMethod),
 				zap.Duration("duration", duration),
 				zap.Error(err),
 			)
 		} else {
-			logger.Info("gRPC stream call",
+			logger.Info(i18n.T("server.middleware.stream_call"),
 				zap.String("method", info.FullMethod),
 				zap.Duration("duration", duration),
 			)
@@ -69,12 +70,12 @@ func recoveryUnaryInterceptor(logger *zap.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error("Panic recovered in gRPC unary handler",
+				logger.Error(i18n.T("server.middleware.panic_unary"),
 					zap.Any("panic", r),
 					zap.String("method", info.FullMethod),
 					zap.String("stack", string(debug.Stack())),
 				)
-				err = status.Errorf(codes.Internal, "internal server error")
+				err = status.Errorf(codes.Internal, "%s", i18n.T("server.middleware.internal_error"))
 			}
 		}()
 		return handler(ctx, req)
@@ -86,12 +87,12 @@ func recoveryStreamInterceptor(logger *zap.Logger) grpc.StreamServerInterceptor 
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error("Panic recovered in gRPC stream handler",
+				logger.Error(i18n.T("server.middleware.panic_stream"),
 					zap.Any("panic", r),
 					zap.String("method", info.FullMethod),
 					zap.String("stack", string(debug.Stack())),
 				)
-				err = status.Errorf(codes.Internal, "internal server error")
+				err = status.Errorf(codes.Internal, "%s", i18n.T("server.middleware.internal_error"))
 			}
 		}()
 		return handler(srv, ss)

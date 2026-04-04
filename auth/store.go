@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -52,14 +53,14 @@ func loadStoreUnlocked(logger *zap.Logger) *AuthProfileStore {
 	if err != nil {
 		if os.IsNotExist(err) {
 			if logger != nil {
-				logger.Debug("Auth store not found, creating new", zap.String("path", storePath))
+				logger.Debug(i18n.T("auth.store.not_found"), zap.String("path", storePath))
 			}
 			store := NewAuthProfileStore()
 			cachedStore = store
 			return store
 		}
 		if logger != nil {
-			logger.Error("Failed to read auth store", zap.Error(err))
+			logger.Error(i18n.T("auth.store.read_failed"), zap.Error(err))
 		}
 		store := NewAuthProfileStore()
 		cachedStore = store
@@ -70,7 +71,7 @@ func loadStoreUnlocked(logger *zap.Logger) *AuthProfileStore {
 	plaintext, err := decryptData(data)
 	if err != nil {
 		if logger != nil {
-			logger.Error("Failed to decrypt auth store", zap.Error(err))
+			logger.Error(i18n.T("auth.store.decrypt_failed"), zap.Error(err))
 		}
 		s := NewAuthProfileStore()
 		cachedStore = s
@@ -80,7 +81,7 @@ func loadStoreUnlocked(logger *zap.Logger) *AuthProfileStore {
 	var store AuthProfileStore
 	if err := json.Unmarshal(plaintext, &store); err != nil {
 		if logger != nil {
-			logger.Error("Failed to parse auth store", zap.Error(err))
+			logger.Error(i18n.T("auth.store.parse_failed"), zap.Error(err))
 		}
 		s := NewAuthProfileStore()
 		cachedStore = s
@@ -113,28 +114,28 @@ func saveStoreUnlocked(store *AuthProfileStore, logger *zap.Logger) error {
 	storePath := DefaultStorePath()
 
 	if err := EnsureStoreDir(storePath); err != nil {
-		return fmt.Errorf("failed to create auth directory: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("auth.store.create_dir_failed"), err)
 	}
 
 	data, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal auth store: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("auth.store.marshal_failed"), err)
 	}
 
 	// H3: Encrypt data before writing to disk
 	encrypted, err := encryptData(data)
 	if err != nil {
-		return fmt.Errorf("failed to encrypt auth store: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("auth.store.encrypt_failed"), err)
 	}
 
 	if err := os.WriteFile(storePath, encrypted, 0o600); err != nil {
-		return fmt.Errorf("failed to write auth store: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("auth.store.write_failed"), err)
 	}
 
 	cachedStore = store
 
 	if logger != nil {
-		logger.Debug("Auth store saved (encrypted)", zap.String("path", storePath), zap.Int("profiles", len(store.Profiles)))
+		logger.Debug(i18n.T("auth.store.saved"), zap.String("path", storePath), zap.Int("profiles", len(store.Profiles)))
 	}
 
 	return nil
