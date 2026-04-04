@@ -169,7 +169,7 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 			partialResponse, getErr := c.getLatestResponse(ctx, threadID)
 			if getErr == nil && partialResponse != "" {
 				c.logger.Info(i18n.T("llm.assistant.partial_response"))
-				return fmt.Sprintf("%s", i18n.T("llm.assistant.partial_response_prefix", partialResponse)), nil
+				return i18n.T("llm.assistant.partial_response_prefix", partialResponse), nil
 			}
 		}
 

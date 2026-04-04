@@ -152,7 +152,7 @@ func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 		if readErr == nil {
 			sanitized = utils.SanitizeSensitiveText(string(bodyBytes))
 		}
-		errMsg := fmt.Sprintf("%s", i18n.T("llm.token.get_failed", resp.StatusCode, sanitized))
+		errMsg := i18n.T("llm.token.get_failed", resp.StatusCode, sanitized)
 		tm.logger.Error(i18n.T("llm.token.request_failed"), zap.String("response", errMsg))
 		return "", errors.New(errMsg)
 	}
