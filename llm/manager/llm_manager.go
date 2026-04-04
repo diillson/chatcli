@@ -29,7 +29,9 @@ import (
 	"github.com/diillson/chatcli/llm/openai_responses"
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/diillson/chatcli/llm/token"
+	"github.com/diillson/chatcli/llm/minimax"
 	"github.com/diillson/chatcli/llm/xai"
+	"github.com/diillson/chatcli/llm/zai"
 	"go.uber.org/zap"
 )
 
@@ -96,6 +98,8 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarClaudeAIClient(maxRetries, initialBackoff)
 	manager.configurarGoogleAIClient(maxRetries, initialBackoff)
 	manager.configurarXAIClient(maxRetries, initialBackoff)
+	manager.configurarZAIClient(maxRetries, initialBackoff)
+	manager.configurarMiniMaxClient(maxRetries, initialBackoff)
 	manager.configurarOllamaClient(maxRetries, initialBackoff)
 	manager.configurarCopilotClient(maxRetries, initialBackoff)
 	manager.configurarGitHubModelsClient(maxRetries, initialBackoff)
@@ -267,6 +271,48 @@ func (m *LLMManagerImpl) configurarXAIClient(maxRetries int, initialBackoff time
 		}
 	} else {
 		m.logger.Warn("XAI_API_KEY não definida, o provedor xAI não estará disponível")
+	}
+}
+
+func (m *LLMManagerImpl) configurarZAIClient(maxRetries int, initialBackoff time.Duration) {
+	apiKey := config.Global.GetString("ZAI_API_KEY")
+	if apiKey != "" {
+		m.logger.Info("Configurando provedor ZAI (Zhipu AI)")
+		m.clients["ZAI"] = func(model string) (client.LLMClient, error) {
+			if model == "" {
+				model = config.DefaultZAIModel
+			}
+			return zai.NewZAIClient(
+				apiKey,
+				model,
+				m.logger,
+				maxRetries,
+				initialBackoff,
+			), nil
+		}
+	} else {
+		m.logger.Warn("ZAI_API_KEY não definida, o provedor ZAI não estará disponível")
+	}
+}
+
+func (m *LLMManagerImpl) configurarMiniMaxClient(maxRetries int, initialBackoff time.Duration) {
+	apiKey := config.Global.GetString("MINIMAX_API_KEY")
+	if apiKey != "" {
+		m.logger.Info("Configurando provedor MiniMax")
+		m.clients["MINIMAX"] = func(model string) (client.LLMClient, error) {
+			if model == "" {
+				model = config.DefaultMiniMaxModel
+			}
+			return minimax.NewMiniMaxClient(
+				apiKey,
+				model,
+				m.logger,
+				maxRetries,
+				initialBackoff,
+			), nil
+		}
+	} else {
+		m.logger.Warn("MINIMAX_API_KEY não definida, o provedor MiniMax não estará disponível")
 	}
 }
 
@@ -538,11 +584,13 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	m.configurarClaudeAIClient(maxRetries, initialBackoff)
 	m.configurarCopilotClient(maxRetries, initialBackoff)
 	m.configurarGitHubModelsClient(maxRetries, initialBackoff)
+	m.configurarZAIClient(maxRetries, initialBackoff)
+	m.configurarMiniMaxClient(maxRetries, initialBackoff)
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key
 // instead of the server's default credentials. Supports OPENAI, CLAUDEAI,
-// GOOGLEAI, and XAI providers. Returns an error for unsupported providers.
+// GOOGLEAI, XAI, ZAI, MINIMAX, and COPILOT providers. Returns an error for unsupported providers.
 func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (client.LLMClient, error) {
 	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
 	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
@@ -581,6 +629,18 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 			model = config.DefaultXAIModel
 		}
 		return xai.NewXAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "ZAI":
+		if model == "" {
+			model = config.DefaultZAIModel
+		}
+		return zai.NewZAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "MINIMAX":
+		if model == "" {
+			model = config.DefaultMiniMaxModel
+		}
+		return minimax.NewMiniMaxClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "COPILOT":
 		if model == "" {

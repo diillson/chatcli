@@ -13,8 +13,8 @@ const (
 	DefaultStackSpotAgentID  = "default"
 
 	// Valores padrão para OpenAI
-	DefaultOpenAIModel       = "gpt-5.2"
-	DefaultOpenAiAssistModel = "gpt-4o-mini"
+	DefaultOpenAIModel       = "gpt-5.4"
+	DefaultOpenAiAssistModel = "gpt-4o"
 	OpenAIAPIURL             = "https://api.openai.com/v1/chat/completions"
 	OpenAIResponsesAPIURL    = "https://api.openai.com/v1/responses"
 
@@ -22,18 +22,26 @@ const (
 	OpenAIOAuthResponsesURL = "https://chatgpt.com/backend-api/codex/responses"
 
 	// Valores padrão para ClaudeAI
-	DefaultClaudeAIModel      = "claude-sonnet-4-5"
+	DefaultClaudeAIModel      = "claude-sonnet-4-6"
 	ClaudeAIAPIURL            = "https://api.anthropic.com/v1/messages"
 	ClaudeAIAPIVersionDefault = "2023-06-01" // Versão padrão da APIClaudeAI
 
 	// Valores padrão para Google Gemini
-	DefaultGoogleAIModel   = "gemini-2.0-flash-lite"
+	DefaultGoogleAIModel   = "gemini-2.5-flash"
 	GoogleAIAPIURL         = "https://generativelanguage.googleapis.com/v1beta"
 	DefaultGoogleAITimeout = 5 * time.Minute
 
 	// Valores padrão para xAI
-	DefaultXAIModel = "grok-code-fast-1"
+	DefaultXAIModel = "grok-4-1"
 	XAIAPIURL       = "https://api.x.ai/v1/chat/completions"
+
+	// Valores padrão para ZAI (Zhipu AI / z.ai)
+	DefaultZAIModel = "glm-5"
+	ZAIAPIURL       = "https://api.z.ai/api/paas/v4/chat/completions"
+
+	// Valores padrão para MiniMax
+	DefaultMiniMaxModel = "MiniMax-M2.7"
+	MiniMaxAPIURL       = "https://api.minimax.io/v1/chat/completions"
 
 	// Valores padrão para GitHub Copilot
 	DefaultCopilotModel = "gpt-4o"

@@ -18,6 +18,8 @@ const (
 	ProviderStackSpot       = "STACKSPOT"
 	ProviderGoogleAI        = "GOOGLEAI"
 	ProviderXAI             = "XAI"
+	ProviderZAI             = "ZAI"
+	ProviderMiniMax         = "MINIMAX"
 	ProviderOllama          = "OLLAMA"
 	ProviderCopilot         = "COPILOT"
 	ProviderGitHubModels    = "GITHUB_MODELS"
@@ -492,6 +494,130 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"json_mode"},
 	},
+
+	// ZAI (Zhipu AI / z.ai) Models
+	{
+		ID:              "glm-5",
+		Aliases:         []string{"glm-5"},
+		DisplayName:     "GLM-5",
+		Provider:        ProviderZAI,
+		ContextWindow:   128000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision"},
+	},
+	{
+		ID:              "glm-4.7",
+		Aliases:         []string{"glm-4.7"},
+		DisplayName:     "GLM-4.7",
+		Provider:        ProviderZAI,
+		ContextWindow:   202752,
+		MaxOutputTokens: 65535,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools"},
+	},
+	{
+		ID:              "glm-4.5",
+		Aliases:         []string{"glm-4.5"},
+		DisplayName:     "GLM-4.5",
+		Provider:        ProviderZAI,
+		ContextWindow:   128000,
+		MaxOutputTokens: 98304,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools"},
+	},
+	{
+		ID:              "glm-4.5-flash",
+		Aliases:         []string{"glm-4.5-flash", "glm-4-flash"},
+		DisplayName:     "GLM-4.5 Flash",
+		Provider:        ProviderZAI,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools"},
+	},
+	{
+		ID:              "glm-5v-turbo",
+		Aliases:         []string{"glm-5v-turbo"},
+		DisplayName:     "GLM-5V Turbo",
+		Provider:        ProviderZAI,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision"},
+	},
+	{
+		ID:              "glm-4.5v",
+		Aliases:         []string{"glm-4.5v", "glm-4-5v"},
+		DisplayName:     "GLM-4.5V",
+		Provider:        ProviderZAI,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision"},
+	},
+	{
+		ID:              "codegeex-4",
+		Aliases:         []string{"codegeex-4", "codegeex"},
+		DisplayName:     "CodeGeeX-4",
+		Provider:        ProviderZAI,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools"},
+	},
+
+	// MiniMax Models
+	{
+		ID:              "MiniMax-M2.7",
+		Aliases:         []string{"minimax-m2.7", "m2.7"},
+		DisplayName:     "MiniMax M2.7",
+		Provider:        ProviderMiniMax,
+		ContextWindow:   204800,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision"},
+	},
+	{
+		ID:              "MiniMax-M2.7-highspeed",
+		Aliases:         []string{"minimax-m2.7-highspeed", "m2.7-highspeed"},
+		DisplayName:     "MiniMax M2.7 Highspeed",
+		Provider:        ProviderMiniMax,
+		ContextWindow:   204800,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision"},
+	},
+	{
+		ID:              "MiniMax-M2.5",
+		Aliases:         []string{"minimax-m2.5", "m2.5"},
+		DisplayName:     "MiniMax M2.5",
+		Provider:        ProviderMiniMax,
+		ContextWindow:   196608,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision"},
+	},
+	{
+		ID:              "MiniMax-M2.5-highspeed",
+		Aliases:         []string{"minimax-m2.5-highspeed", "m2.5-highspeed"},
+		DisplayName:     "MiniMax M2.5 Highspeed",
+		Provider:        ProviderMiniMax,
+		ContextWindow:   196608,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision"},
+	},
+	{
+		ID:              "MiniMax-Text-01",
+		Aliases:         []string{"minimax-text-01", "text-01"},
+		DisplayName:     "MiniMax Text-01",
+		Provider:        ProviderMiniMax,
+		ContextWindow:   128000,
+		MaxOutputTokens: 2048,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"json_mode"},
+	},
 }
 
 // Resolve procura metadados por provedor e string de modelo (case-insensitive),
@@ -572,6 +698,10 @@ func GetMaxTokens(provider, model string, override int) int {
 		return 50000
 	case ProviderXAI:
 		return 50000
+	case ProviderZAI:
+		return 65535
+	case ProviderMiniMax:
+		return 131072
 	case ProviderOllama:
 		return 8192
 	case ProviderCopilot:
@@ -598,6 +728,10 @@ func GetContextWindow(provider, model string) int {
 		return 128000
 	case ProviderXAI:
 		return 128000
+	case ProviderZAI:
+		return 202752
+	case ProviderMiniMax:
+		return 204800
 	case ProviderOllama:
 		return 8192
 	case ProviderCopilot:
