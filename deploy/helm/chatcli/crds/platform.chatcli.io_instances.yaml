@@ -167,16 +167,21 @@ spec:
                           description: Model is the LLM model to use for this provider.
                           type: string
                         name:
-                          description: Name is the provider name (OPENAI, CLAUDEAI,
-                            GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT).
+                          description: Name is the provider name (OPENAI, OPENAI_ASSISTANT,
+                            CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA,
+                            COPILOT, GITHUB_MODELS).
                           enum:
                           - OPENAI
+                          - OPENAI_ASSISTANT
                           - CLAUDEAI
                           - GOOGLEAI
                           - XAI
+                          - ZAI
+                          - MINIMAX
                           - STACKSPOT
                           - OLLAMA
                           - COPILOT
+                          - GITHUB_MODELS
                           type: string
                       required:
                       - name
@@ -232,8 +237,9 @@ spec:
                     type: string
                 type: object
               provider:
-                description: Provider is the LLM provider (OPENAI, CLAUDEAI, GOOGLEAI,
-                  XAI, STACKSPOT, OLLAMA, COPILOT).
+                description: Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT,
+                  CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA,
+                  COPILOT, GITHUB_MODELS).
                 type: string
               replicas:
                 default: 1
