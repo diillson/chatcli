@@ -277,7 +277,7 @@ func (ch *CommandHandler) resolveLocalAuth(provider string) (apiKey string, reso
 		authProvider, ok := llmProviderToAuthProvider(provider)
 		if !ok {
 			return "", "", fmt.Errorf(
-				"--use-local-auth only supports OAuth providers (CLAUDEAI, OPENAI). "+
+				"--use-local-auth only supports OAuth providers (CLAUDEAI, OPENAI, COPILOT). "+
 					"Provider '%s' requires --llm-key with an API key instead", provider)
 		}
 

@@ -225,7 +225,7 @@ func (cli *ChatCLI) getConnectSuggestions(d prompt.Document) []prompt.Suggest {
 	if strings.HasPrefix(wordBeforeCursor, "-") {
 		flags := []prompt.Suggest{
 			{Text: "--token", Description: "Token de autenticação do servidor"},
-			{Text: "--provider", Description: "Provedor LLM (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS)"},
+			{Text: "--provider", Description: "Provedor LLM (OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS)"},
 			{Text: "--model", Description: "Modelo LLM (gpt-4, claude-3, etc.)"},
 			{Text: "--llm-key", Description: "API key/OAuth token para enviar ao servidor"},
 			{Text: "--use-local-auth", Description: "Usar credenciais OAuth locais (de /auth login)"},

@@ -79,7 +79,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	fs.StringVar(&opts.CertFile, "ca-cert", "", "CA certificate file for TLS")
 	fs.StringVar(&opts.ClientAPIKey, "llm-key", os.Getenv("CHATCLI_CLIENT_API_KEY"), "Your own LLM API key/OAuth token (forwarded to server)")
 	fs.BoolVar(&opts.UseLocalAuth, "use-local-auth", false, "Use OAuth/API key from local auth store (~/.chatcli/auth-profiles.json)")
-	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider (e.g., OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT)")
+	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider (e.g., OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT)")
 	fs.StringVar(&opts.Model, "model", "", "Override server's default LLM model (e.g., gpt-4, gemini-2.0-flash)")
 	fs.StringVar(&opts.ClientID, "client-id", "", "StackSpot: Client ID for authentication")
 	fs.StringVar(&opts.ClientKey, "client-key", "", "StackSpot: Client Key for authentication")
@@ -257,7 +257,7 @@ Arguments:
 Flags:
   --addr <host:port>    Server address (env: CHATCLI_REMOTE_ADDR)
   --token <string>      Server auth token (env: CHATCLI_REMOTE_TOKEN)
-  --provider <string>   Override LLM provider (OPENAI, CLAUDEAI, GOOGLEAI, XAI, STACKSPOT, OLLAMA, COPILOT)
+  --provider <string>   Override LLM provider (OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT)
   --model <string>      Override LLM model (e.g., gpt-4, gemini-2.0-flash)
   --llm-key <string>    Your own LLM API key/OAuth token (env: CHATCLI_CLIENT_API_KEY)
   --use-local-auth      Use OAuth credentials from local auth store (from /auth login)
@@ -279,7 +279,7 @@ Flags:
 Credential modes (pick one):
   1. Server credentials (default): Server uses its own API keys from env vars
   2. --use-local-auth: Reads your local OAuth token (from /auth login) and forwards it
-  3. --llm-key <key>: Manually pass an API key or OAuth token (OPENAI, CLAUDEAI, GOOGLEAI, XAI, COPILOT)
+  3. --llm-key <key>: Manually pass an API key or OAuth token (OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, COPILOT)
   4. --client-id + --client-key + --realm + --agent-id: StackSpot credentials
   5. --ollama-url: Connect to an Ollama server (no credentials needed)
 

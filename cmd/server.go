@@ -70,7 +70,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	fs.IntVar(&opts.MetricsPort, "metrics-port", getEnvInt("CHATCLI_METRICS_PORT", 9090), "Prometheus metrics HTTP port (0 = disabled)")
 
 	// Fallback chain flags
-	fs.StringVar(&opts.FallbackProviders, "fallback-providers", os.Getenv("CHATCLI_FALLBACK_PROVIDERS"), "Comma-separated fallback providers (e.g. OPENAI,CLAUDEAI,GOOGLEAI)")
+	fs.StringVar(&opts.FallbackProviders, "fallback-providers", os.Getenv("CHATCLI_FALLBACK_PROVIDERS"), "Comma-separated fallback providers (e.g. OPENAI,CLAUDEAI,GOOGLEAI,ZAI,MINIMAX)")
 	fs.IntVar(&opts.FallbackMaxRetries, "fallback-max-retries", getEnvInt("CHATCLI_FALLBACK_MAX_RETRIES", 2), "Max retries per provider before fallback")
 	fs.DurationVar(&opts.FallbackCooldownBase, "fallback-cooldown-base", getEnvDuration("CHATCLI_FALLBACK_COOLDOWN_BASE", 30*time.Second), "Base cooldown duration after provider failure")
 	fs.DurationVar(&opts.FallbackCooldownMax, "fallback-cooldown-max", getEnvDuration("CHATCLI_FALLBACK_COOLDOWN_MAX", 5*time.Minute), "Maximum cooldown duration")
@@ -376,7 +376,7 @@ Examples:
   chatcli server --tls-cert cert.pem --tls-key key.pem
 
   # Server with provider fallback chain
-  chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI,COPILOT
+  chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI,ZAI,MINIMAX,COPILOT
 
   # Server with MCP tools
   chatcli server --mcp-config ~/.chatcli/mcp_servers.json
