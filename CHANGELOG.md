@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.92.0](https://github.com/diillson/chatcli/compare/v1.91.0...v1.92.0) (2026-04-04)
+
+
+### Features
+
+* **ci:** auto-sync version to docs on release ([#718](https://github.com/diillson/chatcli/issues/718)) ([bee047b](https://github.com/diillson/chatcli/commit/bee047b34deb7eaaf27d3dc1de87799178ed0400))
+
+
+### Bug Fixes
+
+* **deps:** update dependencies and fix CVE-2026-33186 ([#716](https://github.com/diillson/chatcli/issues/716)) ([16f03d3](https://github.com/diillson/chatcli/commit/16f03d3974a334ccc28a63d150c8c81c1914b992))
+
 ## [1.91.0](https://github.com/diillson/chatcli/compare/v1.90.1...v1.91.0) (2026-04-03)
 
 
