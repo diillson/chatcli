@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -106,7 +107,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("erro ao preparar payload do Ollama: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.ollama.prepare_payload"), err)
 	}
 
 	// Agora use Retry para encapsular a lógica de requisição e parsing
@@ -115,7 +116,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, utils.NewJSONReader(body))
 		if err != nil {
-			return "", fmt.Errorf("erro criando requisição Ollama: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.ollama.create_request"), err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 
@@ -127,7 +128,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return "", fmt.Errorf("erro ao ler resposta do Ollama: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.ollama.read_response"), err)
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -145,17 +146,17 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 
 		// Use Unmarshal com bodyBytes
 		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			return "", fmt.Errorf("erro ao decodificar resposta do Ollama: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.ollama.decode_response"), err)
 		}
 
 		if result.Error != "" {
-			return "", fmt.Errorf("erro Ollama: %s", result.Error)
+			return "", fmt.Errorf("%s", i18n.T("llm.ollama.api_error", result.Error))
 		}
 		return result.Message.Content, nil
 	})
 
 	if err != nil {
-		c.logger.Error("Erro ao obter resposta do Ollama após retries", zap.Error(err))
+		c.logger.Error(i18n.T("llm.ollama.get_response_error"), zap.Error(err))
 		return "", err
 	}
 
@@ -163,12 +164,12 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	if strings.EqualFold(os.Getenv("OLLAMA_FILTER_THINKING"), config.OllamaFilterThinkingDefault) {
 		filtered := filterThinking(response)
 		if filtered != response {
-			c.logger.Debug("Filtro de 'thinking' aplicado com sucesso",
+			c.logger.Debug(i18n.T("llm.ollama.filter_applied"),
 				zap.Int("original_length", len(response)),
 				zap.Int("filtered_length", len(filtered)))
 			return filtered, nil
 		}
-		c.logger.Debug("Nenhum 'thinking' detectado, retornando resposta original")
+		c.logger.Debug(i18n.T("llm.ollama.no_thinking_detected"))
 	}
 
 	return response, nil
@@ -180,22 +181,22 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tagsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.ollama.create_request"), err)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch Ollama models: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.ollama.fetch_models_failed"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.ollama.read_response"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Ollama /api/tags returned %d: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("%s", i18n.T("llm.error.api_error_code", "Ollama", resp.StatusCode, string(bodyBytes)))
 	}
 
 	var result struct {
@@ -204,7 +205,7 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.ollama.decode_response"), err)
 	}
 
 	var modelList []client.ModelInfo
@@ -225,7 +226,7 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 		}
 	}
 
-	c.logger.Info("Fetched Ollama models", zap.Int("count", len(modelList)))
+	c.logger.Info(i18n.T("llm.info.fetched_models", "Ollama"), zap.Int("count", len(modelList)))
 	return modelList, nil
 }
 

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -58,7 +59,7 @@ func (tm *TokenManager) SetRealm(realm string) {
 	if tm.realm != realm {
 		tm.realm = realm
 		tm.accessToken = "" // Limpa o token para forçar a solicitação de um novo
-		tm.logger.Info("Valor do realm atualizado", zap.String("new_realm", realm))
+		tm.logger.Info(i18n.T("llm.token.realm_updated"), zap.String("new_realm", realm))
 	}
 }
 
@@ -70,11 +71,11 @@ func (tm *TokenManager) GetAccessToken(ctx context.Context) (string, error) {
 	tm.mu.RUnlock()
 
 	if time.Until(expiration) > 60*time.Second && token != "" {
-		tm.logger.Debug("Token válido encontrado", zap.Time("expires_at", expiration))
+		tm.logger.Debug(i18n.T("llm.token.valid_found"), zap.Time("expires_at", expiration))
 		return token, nil
 	}
 
-	tm.logger.Info("Token expirado ou ausente, iniciando renovação")
+	tm.logger.Info(i18n.T("llm.token.expired_or_missing"))
 	return tm.refreshToken(ctx)
 }
 
@@ -92,13 +93,13 @@ func (tm *TokenManager) refreshToken(ctx context.Context) (string, error) {
 		token, err := tm.requestToken(ctx)
 		if err != nil {
 			if utils.IsTemporaryError(err) {
-				tm.logger.Warn("Erro temporário ao renovar o token",
+				tm.logger.Warn(i18n.T("llm.token.temp_error"),
 					zap.Int("attempt", attempt),
 					zap.Error(err),
 					zap.Duration("backoff", backoff),
 				)
 				if attempt < maxAttempts {
-					tm.logger.Warn("Aplicando backoff antes de nova tentativa",
+					tm.logger.Warn(i18n.T("llm.token.backoff_retry"),
 						zap.Int("attempt", attempt),
 						zap.Duration("backoff", backoff),
 					)
@@ -107,12 +108,12 @@ func (tm *TokenManager) refreshToken(ctx context.Context) (string, error) {
 					continue
 				}
 			}
-			return "", fmt.Errorf("erro ao renovar o token: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.token.renew_error"), err)
 		}
 		return token, nil
 	}
 
-	return "", fmt.Errorf("falha ao renovar o token após %d tentativas", maxAttempts)
+	return "", fmt.Errorf("%s", i18n.T("llm.token.renew_failed_attempts", maxAttempts))
 }
 
 // requestToken faz a requisição para obter um novo token de acesso
@@ -120,7 +121,7 @@ func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	tm.logger.Info("Renovando o access token...")
+	tm.logger.Info(i18n.T("llm.token.renewing"))
 
 	tokenURL := fmt.Sprintf("https://idm.stackspot.com/%s/oidc/oauth/token", tm.realm)
 	if tm.tokenURLOverride != "" {
@@ -132,15 +133,15 @@ func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 
 	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, data)
 	if err != nil {
-		tm.logger.Error("Erro ao criar a requisição de token", zap.Error(err))
-		return "", fmt.Errorf("erro ao criar a requisição: %w", err)
+		tm.logger.Error(i18n.T("llm.token.create_request_error"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.token.create_request_error"), err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := tm.client.Do(req)
 	if err != nil {
-		tm.logger.Error("Erro ao fazer a requisição de token", zap.Error(err))
-		return "", fmt.Errorf("erro ao fazer a requisição: %w", err)
+		tm.logger.Error(i18n.T("llm.token.request_error"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.token.request_error"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -151,33 +152,33 @@ func (tm *TokenManager) requestToken(ctx context.Context) (string, error) {
 		if readErr == nil {
 			sanitized = utils.SanitizeSensitiveText(string(bodyBytes))
 		}
-		errMsg := fmt.Sprintf("falha ao obter o token: status %d, resposta: %s", resp.StatusCode, sanitized)
-		tm.logger.Error("Falha na requisição de token", zap.String("response", errMsg))
+		errMsg := fmt.Sprintf("%s", i18n.T("llm.token.get_failed", resp.StatusCode, sanitized))
+		tm.logger.Error(i18n.T("llm.token.request_failed"), zap.String("response", errMsg))
 		return "", errors.New(errMsg)
 	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		tm.logger.Error("Erro ao decodificar a resposta de token", zap.Error(err))
-		return "", fmt.Errorf("erro ao decodificar a resposta: %w", err)
+		tm.logger.Error(i18n.T("llm.token.decode_error"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.token.decode_error"), err)
 	}
 
 	accessToken, ok := result["access_token"].(string)
 	if !ok {
 		// Don't log the full result as it may contain partial credentials
-		tm.logger.Error("access_token não encontrado na resposta de token")
-		return "", fmt.Errorf("não foi possível obter o access_token")
+		tm.logger.Error(i18n.T("llm.token.access_token_missing"))
+		return "", errors.New(i18n.T("llm.token.access_token_get_failed"))
 	}
 
 	expiresIn, ok := result["expires_in"].(float64)
 	if !ok {
-		tm.logger.Error("expires_in não encontrado na resposta de token")
-		return "", fmt.Errorf("não foi possível obter expires_in")
+		tm.logger.Error(i18n.T("llm.token.expires_in_missing"))
+		return "", errors.New(i18n.T("llm.token.expires_in_get_failed"))
 	}
 
 	tm.accessToken = accessToken
 	tm.expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
-	tm.logger.Info("Token renovado com sucesso", zap.Time("expires_at", tm.expiresAt))
+	tm.logger.Info(i18n.T("llm.token.renewed_success"), zap.Time("expires_at", tm.expiresAt))
 
 	return tm.accessToken, nil
 }

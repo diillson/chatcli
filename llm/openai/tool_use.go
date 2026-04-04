@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -63,7 +64,7 @@ func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, h
 
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling payload: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.tool.error.marshaling_payload"), err)
 	}
 
 	resp, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
@@ -75,7 +76,7 @@ func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, h
 
 		bodyBytes, err := io.ReadAll(httpResp.Body)
 		if err != nil {
-			return "", fmt.Errorf("reading response: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.tool.error.reading_response"), err)
 		}
 		if httpResp.StatusCode != 200 {
 			return "", &utils.APIError{StatusCode: httpResp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
@@ -163,22 +164,22 @@ func buildToolMessages(prompt string, history []models.Message) []interface{} {
 func parseToolResponse(body string, logger *zap.Logger) (*models.LLMResponse, error) {
 	var result map[string]interface{}
 	if err := json.Unmarshal([]byte(body), &result); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.tool.error.decoding_response"), err)
 	}
 
 	choices, ok := result["choices"].([]interface{})
 	if !ok || len(choices) == 0 {
-		return nil, fmt.Errorf("no choices in response")
+		return nil, fmt.Errorf("%s", i18n.T("llm.tool.error.no_choices"))
 	}
 
 	firstChoice, ok := choices[0].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("unexpected choice format")
+		return nil, fmt.Errorf("%s", i18n.T("llm.tool.error.unexpected_choice_format"))
 	}
 
 	message, ok := firstChoice["message"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("no message in choice")
+		return nil, fmt.Errorf("%s", i18n.T("llm.tool.error.no_message_in_choice"))
 	}
 
 	response := &models.LLMResponse{}

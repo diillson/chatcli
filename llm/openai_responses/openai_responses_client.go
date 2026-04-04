@@ -20,6 +20,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -113,7 +114,7 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 
 	jsonValue, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("erro ao preparar payload para Responses API: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.responses.prepare_payload"), err)
 	}
 
 	// Retry para encapsular a lógica de requisição e parsing
@@ -129,7 +130,7 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 	})
 
 	if err != nil {
-		c.logger.Error("Erro ao obter resposta da OpenAI Responses após retries", zap.Error(err))
+		c.logger.Error(i18n.T("llm.responses.get_response_error"), zap.Error(err))
 		return "", err
 	}
 
@@ -147,7 +148,7 @@ func (c *OpenAIResponsesClient) sendRequest(ctx context.Context, body []byte) (*
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("erro ao criar requisição para Responses API: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.responses.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
@@ -164,7 +165,7 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("erro ao ler resposta da Responses API: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.responses.read_response"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -191,7 +192,7 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 	}
 
 	if err := json.Unmarshal(bodyBytes, &response); err != nil {
-		return "", fmt.Errorf("erro ao decodificar resposta da Responses API: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.responses.decode_response"), err)
 	}
 
 	// Tentar extrair do caminho simples primeiro (comum em mocks e respostas diretas)
@@ -201,17 +202,17 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 
 	// 1. Verificar se a API retornou um erro explícito no corpo
 	if response.Error != nil && response.Error.Message != "" {
-		c.logger.Error("API da OpenAI Responses retornou um erro no payload", zap.String("error_message", response.Error.Message))
-		return "", fmt.Errorf("erro da API OpenAI: %s", response.Error.Message)
+		c.logger.Error(i18n.T("llm.responses.api_error"), zap.String("error_message", response.Error.Message))
+		return "", fmt.Errorf("%s", i18n.T("llm.responses.api_error_msg", response.Error.Message))
 	}
 
 	// 2. Verificar o status da resposta
 	if response.Status == "incomplete" {
 		if response.IncompleteDetails != nil && response.IncompleteDetails.Reason == "max_output_tokens" {
-			c.logger.Warn("Resposta incompleta devido a max_output_tokens baixo.", zap.Int("body_size", len(bodyBytes)))
-			return "", errors.New("a resposta da OpenAI foi incompleta, o valor de 'max_output_tokens' é muito baixo")
+			c.logger.Warn(i18n.T("llm.responses.incomplete_max_tokens"), zap.Int("body_size", len(bodyBytes)))
+			return "", errors.New(i18n.T("llm.responses.incomplete_max_tokens"))
 		}
-		return "", fmt.Errorf("a resposta da OpenAI foi incompleta por um motivo desconhecido (status: %s)", response.Status)
+		return "", fmt.Errorf("%s", i18n.T("llm.responses.incomplete_unknown", response.Status))
 	}
 
 	// 3. Iterar para encontrar o texto apenas se o status for 'completed'
@@ -233,8 +234,8 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 	}
 
 	// Se chegou aqui, não foi possível extrair
-	c.logger.Warn("Não foi possível extrair texto da resposta, mesmo com status 'completed'.", zap.Int("body_size", len(bodyBytes)))
-	return "", fmt.Errorf("não foi possível extrair o texto da resposta da Responses API")
+	c.logger.Warn(i18n.T("llm.warn.could_not_extract_text"), zap.Int("body_size", len(bodyBytes)))
+	return "", errors.New(i18n.T("llm.warn.could_not_extract_text_error"))
 }
 
 // processStreamResponse handles SSE streaming responses from the ChatGPT backend.
@@ -280,11 +281,11 @@ func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (stri
 	}
 
 	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("erro ao ler stream SSE: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.read_sse_stream"), err)
 	}
 
 	if sb.Len() == 0 {
-		return "", fmt.Errorf("nenhum texto extraído do stream SSE da Responses API")
+		return "", errors.New(i18n.T("llm.error.no_text_from_sse"))
 	}
 
 	return sb.String(), nil
@@ -334,7 +335,7 @@ func (c *OpenAIResponsesClient) ListModels(ctx context.Context) ([]client.ModelI
 	if isOAuth {
 		models, err := c.listModelsOAuth(ctx)
 		if err != nil {
-			c.logger.Warn("OAuth model listing failed, trying standard API",
+			c.logger.Warn(i18n.T("llm.responses.oauth_listing_failed"),
 				zap.Error(err))
 			// Fallback: try standard OpenAI /v1/models with the OAuth token
 			return c.listModelsAPIKey(ctx)
@@ -353,24 +354,24 @@ func (c *OpenAIResponsesClient) listModelsOAuth(ctx context.Context) ([]client.M
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "OpenAI"), err)
 	}
 	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch ChatGPT models: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.responses.fetch_chatgpt_models_failed"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "OpenAI"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ChatGPT /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+		return nil, fmt.Errorf("%s", i18n.T("llm.error.api_error_code", "ChatGPT", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes))))
 	}
 
 	// ChatGPT backend returns {"models": [{"slug": "gpt-4o", "title": "GPT-4o", ...}]}
@@ -387,7 +388,7 @@ func (c *OpenAIResponsesClient) listModelsOAuth(ctx context.Context) ([]client.M
 		} `json:"categories"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenAI"), err)
 	}
 
 	seen := make(map[string]bool)
@@ -442,7 +443,7 @@ func (c *OpenAIResponsesClient) listModelsOAuth(ctx context.Context) ([]client.M
 		}
 	}
 
-	c.logger.Info("Fetched OpenAI models via OAuth", zap.Int("count", len(modelList)))
+	c.logger.Info(i18n.T("llm.responses.fetch_models_oauth"), zap.Int("count", len(modelList)))
 	return modelList, nil
 }
 
@@ -453,23 +454,23 @@ func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "OpenAI"), err)
 	}
 	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch OpenAI models: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "OpenAI"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "OpenAI"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OpenAI /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+		return nil, fmt.Errorf("%s", i18n.T("llm.error.api_error_code", "OpenAI", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes))))
 	}
 
 	var result struct {
@@ -478,7 +479,7 @@ func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenAI"), err)
 	}
 
 	var modelList []client.ModelInfo
@@ -505,7 +506,7 @@ func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.
 		}
 	}
 
-	c.logger.Info("Fetched OpenAI models (Responses API key)", zap.Int("count", len(modelList)))
+	c.logger.Info(i18n.T("llm.responses.fetch_models_apikey"), zap.Int("count", len(modelList)))
 	return modelList, nil
 }
 

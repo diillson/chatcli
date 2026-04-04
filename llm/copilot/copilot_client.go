@@ -8,6 +8,7 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -129,8 +131,8 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
-		c.logger.Error("Failed to marshal payload", zap.Error(err))
-		return "", fmt.Errorf("failed to prepare request: %w", err)
+		c.logger.Error(i18n.T("llm.copilot.marshal_failed"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.copilot.prepare_request_failed"), err)
 	}
 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
@@ -150,8 +152,8 @@ func (c *Client) sendRequest(ctx context.Context, jsonValue []byte) (*http.Respo
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
 	if err != nil {
-		c.logger.Error("Failed to create request", zap.Error(err))
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		c.logger.Error(i18n.T("llm.copilot.create_request_failed"), zap.Error(err))
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.copilot.create_request_failed"), err)
 	}
 
 	// Required headers for Copilot API
@@ -183,14 +185,14 @@ func (c *Client) processResponse(resp *http.Response) (string, error) {
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.logger.Error("Failed to read Copilot response", zap.Error(err))
-		return "", fmt.Errorf("failed to read Copilot response: %w", err)
+		c.logger.Error(i18n.T("llm.copilot.read_response_failed"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.copilot.read_response_failed"), err)
 	}
 
 	if resp.StatusCode == http.StatusForbidden {
 		return "", &utils.APIError{
 			StatusCode: resp.StatusCode,
-			Message:    "GitHub Copilot: access denied (403). Your Copilot subscription may have expired or the token is invalid. Run '/auth login github-copilot' to re-authenticate.",
+			Message:    i18n.T("llm.copilot.access_denied"),
 		}
 	}
 
@@ -210,13 +212,13 @@ func (c *Client) processResponse(resp *http.Response) (string, error) {
 	}
 
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		c.logger.Error("Failed to decode Copilot response", zap.Error(err))
-		return "", fmt.Errorf("failed to decode Copilot response: %w", err)
+		c.logger.Error(i18n.T("llm.copilot.decode_response_failed"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.copilot.decode_response_failed"), err)
 	}
 
 	if len(result.Choices) == 0 {
-		c.logger.Error("No response from Copilot", zap.String("body", string(bodyBytes)))
-		return "", fmt.Errorf("no response received from GitHub Copilot")
+		c.logger.Error(i18n.T("llm.copilot.no_response"), zap.String("body", string(bodyBytes)))
+		return "", errors.New(i18n.T("llm.copilot.no_response_error"))
 	}
 
 	return result.Choices[0].Message.Content, nil
@@ -227,7 +229,7 @@ func (c *Client) newAuthenticatedRequest(ctx context.Context, method, path strin
 	apiURL := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, apiURL, body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.copilot.create_request_failed"), err)
 	}
 	token := auth.StripAuthPrefix(c.token)
 	req.Header.Set("Content-Type", "application/json")
@@ -251,17 +253,17 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch Copilot models: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.copilot.fetch_models_failed"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "Copilot"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Copilot /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+		return nil, fmt.Errorf("%s", i18n.T("llm.error.api_error_code", "Copilot", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes))))
 	}
 
 	// OpenAI-compatible format: {"data": [{"id": "...", "name": "...", ...}]}
@@ -275,7 +277,7 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	}
 
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "Copilot"), err)
 	}
 
 	var modelInfos []client.ModelInfo
@@ -306,6 +308,6 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 		}
 	}
 
-	c.logger.Info("Fetched Copilot models", zap.Int("count", len(modelInfos)))
+	c.logger.Info(i18n.T("llm.info.fetched_models", "Copilot"), zap.Int("count", len(modelInfos)))
 	return modelInfos, nil
 }

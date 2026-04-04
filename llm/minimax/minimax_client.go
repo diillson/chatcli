@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -59,7 +60,7 @@ func (c *MiniMaxClient) GetModelName() string {
 func (c *MiniMaxClient) getMaxTokens() int {
 	if tokenStr := os.Getenv("MINIMAX_MAX_TOKENS"); tokenStr != "" {
 		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
-			c.logger.Debug("Usando MINIMAX_MAX_TOKENS personalizado", zap.Int("max_tokens", parsedTokens))
+			c.logger.Debug(i18n.T("llm.info.using_custom_max_tokens", "MINIMAX_MAX_TOKENS"), zap.Int("max_tokens", parsedTokens))
 			return parsedTokens
 		}
 	}
@@ -99,8 +100,8 @@ func (c *MiniMaxClient) SendPrompt(ctx context.Context, prompt string, history [
 
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
-		c.logger.Error("Erro ao marshalizar o payload para MiniMax", zap.Error(err))
-		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
+		c.logger.Error(i18n.T("llm.error.marshal_payload_for", "MiniMax"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
@@ -112,7 +113,7 @@ func (c *MiniMaxClient) SendPrompt(ctx context.Context, prompt string, history [
 	})
 
 	if err != nil {
-		c.logger.Error("Erro ao obter resposta da MiniMax após retries", zap.Error(err))
+		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "MiniMax"), zap.Error(err))
 		return "", err
 	}
 
@@ -125,8 +126,8 @@ func (c *MiniMaxClient) sendRequest(ctx context.Context, jsonValue []byte) (*htt
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
 	if err != nil {
-		c.logger.Error("Erro ao criar a requisição", zap.Error(err))
-		return nil, fmt.Errorf("erro ao criar a requisição: %w", err)
+		c.logger.Error(i18n.T("llm.error.create_request"), zap.Error(err))
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -145,8 +146,8 @@ func (c *MiniMaxClient) processResponse(resp *http.Response) (string, error) {
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.logger.Error("Erro ao ler a resposta da MiniMax", zap.Error(err))
-		return "", fmt.Errorf("erro ao ler a resposta da MiniMax: %w", err)
+		c.logger.Error(i18n.T("llm.error.read_response_for", "MiniMax"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "MiniMax"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -170,39 +171,39 @@ func (c *MiniMaxClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		c.logger.Error("Erro ao decodificar a resposta JSON da MiniMax", zap.Error(err), zap.Int("body_size", len(bodyBytes)))
-		return "", fmt.Errorf("erro ao decodificar a resposta da MiniMax: %w", err)
+		c.logger.Error(i18n.T("llm.error.decode_response_json_for", "MiniMax"), zap.Error(err), zap.Int("body_size", len(bodyBytes)))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "MiniMax"), err)
 	}
 
 	// MiniMax pode retornar erro no campo error (formato OpenAI)
 	if result.Error.Message != "" {
-		c.logger.Error("API da MiniMax retornou um erro no payload", zap.String("error_message", result.Error.Message))
-		return "", fmt.Errorf("erro da API MiniMax: %s", result.Error.Message)
+		c.logger.Error(i18n.T("llm.error.api_error_payload", "MiniMax"), zap.String("error_message", result.Error.Message))
+		return "", fmt.Errorf("%s", i18n.T("llm.error.api_error", "MiniMax", result.Error.Message))
 	}
 
 	// MiniMax também usa base_resp para erros em alguns endpoints
 	if result.BaseResp.StatusCode != 0 && result.BaseResp.StatusMsg != "" {
-		c.logger.Error("API da MiniMax retornou erro via base_resp",
+		c.logger.Error(i18n.T("llm.error.api_error_base_resp", "MiniMax"),
 			zap.Int("status_code", result.BaseResp.StatusCode),
 			zap.String("status_msg", result.BaseResp.StatusMsg))
-		return "", fmt.Errorf("erro da API MiniMax (code %d): %s", result.BaseResp.StatusCode, result.BaseResp.StatusMsg)
+		return "", fmt.Errorf("%s", i18n.T("llm.error.api_error_code", "MiniMax", result.BaseResp.StatusCode, result.BaseResp.StatusMsg))
 	}
 
 	if len(result.Choices) == 0 {
-		c.logger.Warn("Nenhuma 'choice' na resposta da MiniMax.", zap.Int("body_size", len(bodyBytes)))
-		return "", errors.New("a API da MiniMax não retornou nenhuma resposta (array 'choices' vazio)")
+		c.logger.Warn(i18n.T("llm.warn.empty_choices", "MiniMax"), zap.Int("body_size", len(bodyBytes)))
+		return "", errors.New(i18n.T("llm.error.no_choices", "MiniMax"))
 	}
 
 	firstChoice := result.Choices[0]
 	if firstChoice.Message.Content == "" {
-		c.logger.Warn("Resposta da MiniMax com conteúdo vazio.",
+		c.logger.Warn(i18n.T("llm.warn.empty_content", "MiniMax"),
 			zap.String("finish_reason", firstChoice.FinishReason),
 			zap.Int("body_size", len(bodyBytes)))
 
 		if firstChoice.FinishReason == "length" {
-			return "", errors.New("a API da MiniMax retornou uma resposta vazia, provavelmente porque o valor de 'max_tokens' é muito baixo")
+			return "", errors.New(i18n.T("llm.error.empty_response_max_tokens", "MiniMax"))
 		}
-		return "", errors.New("a API da MiniMax retornou uma resposta vazia por um motivo não especificado")
+		return "", errors.New(i18n.T("llm.error.empty_response_unspecified", "MiniMax"))
 	}
 
 	return firstChoice.Message.Content, nil
@@ -216,23 +217,23 @@ func (c *MiniMaxClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch MiniMax models: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "MiniMax"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "MiniMax"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("MiniMax /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+		return nil, fmt.Errorf("%s: %d: %s", i18n.T("llm.error.request_failed", "MiniMax"), resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
 	}
 
 	var result struct {
@@ -242,7 +243,7 @@ func (c *MiniMaxClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "MiniMax"), err)
 	}
 
 	var modelsList []client.ModelInfo
@@ -268,6 +269,6 @@ func (c *MiniMaxClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 		}
 	}
 
-	c.logger.Info("Fetched MiniMax models", zap.Int("count", len(modelsList)))
+	c.logger.Info(i18n.T("llm.info.fetched_models", "MiniMax"), zap.Int("count", len(modelsList)))
 	return modelsList, nil
 }

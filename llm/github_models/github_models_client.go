@@ -20,6 +20,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -112,13 +113,13 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("marshaling payload: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.marshal_payload_for", "GitHub Models"), err)
 	}
 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.getAPIURL(), utils.NewJSONReader(jsonValue))
 		if err != nil {
-			return "", fmt.Errorf("creating request: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "GitHub Models"), err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
@@ -131,7 +132,7 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return "", fmt.Errorf("reading response: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "GitHub Models"), err)
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -146,10 +147,10 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 			} `json:"choices"`
 		}
 		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			return "", fmt.Errorf("decoding response: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "GitHub Models"), err)
 		}
 		if len(result.Choices) == 0 {
-			return "", fmt.Errorf("no choices in response")
+			return "", fmt.Errorf("%s", i18n.T("llm.error.no_choices", "GitHub Models"))
 		}
 		return result.Choices[0].Message.Content, nil
 	})
@@ -168,23 +169,23 @@ func (c *GitHubModelsClient) ListModels(ctx context.Context) ([]client.ModelInfo
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "GitHub Models"), err)
 	}
 	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetching models: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "GitHub Models"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "GitHub Models"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub Models /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+		return nil, fmt.Errorf("%s", i18n.T("llm.error.api_error_code", "GitHub Models", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes))))
 	}
 
 	// GitHub Models returns a plain JSON array (NOT OpenAI {"data":[...]} format)
@@ -205,7 +206,7 @@ func (c *GitHubModelsClient) ListModels(ctx context.Context) ([]client.ModelInfo
 			Data []ghModel `json:"data"`
 		}
 		if err2 := json.Unmarshal(bodyBytes, &wrapped); err2 != nil {
-			return nil, fmt.Errorf("decoding models (tried array and OpenAI formats): %w", err)
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "GitHub Models"), err)
 		}
 		models = wrapped.Data
 	}
@@ -249,6 +250,6 @@ func (c *GitHubModelsClient) ListModels(ctx context.Context) ([]client.ModelInfo
 		}
 	}
 
-	c.logger.Info("Fetched GitHub Models", zap.Int("total", len(models)), zap.Int("chat", len(modelList)))
+	c.logger.Info(i18n.T("llm.info.fetched_models", "GitHub Models"), zap.Int("total", len(models)), zap.Int("chat", len(modelList)))
 	return modelList, nil
 }

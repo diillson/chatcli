@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -74,7 +75,7 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 
 	jsonValue, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling payload: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.tool.error.marshaling_payload"), err)
 	}
 
 	respBody, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
@@ -93,7 +94,7 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		// send compressed responses when Accept-Encoding is set.
 		reader, decErr := decodeResponseBody(resp)
 		if decErr != nil {
-			return "", fmt.Errorf("decoding response body: %w", decErr)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.tool.error.decoding_response_body"), decErr)
 		}
 		if reader != resp.Body {
 			defer reader.Close()
@@ -101,7 +102,7 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 
 		bodyBytes, err := io.ReadAll(reader)
 		if err != nil {
-			return "", fmt.Errorf("reading response: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.tool.error.reading_response"), err)
 		}
 
 		if resp.StatusCode != 200 {
@@ -243,7 +244,7 @@ func (c *ClaudeClient) buildToolRequest(ctx context.Context, jsonValue []byte) (
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.tool.error.creating_request"), err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -271,7 +272,7 @@ func (c *ClaudeClient) buildToolRequest(ctx context.Context, jsonValue []byte) (
 func parseClaudeToolResponse(body string, logger *zap.Logger) (*models.LLMResponse, error) {
 	var result map[string]interface{}
 	if err := json.Unmarshal([]byte(body), &result); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.tool.error.decoding_response"), err)
 	}
 
 	response := &models.LLMResponse{}
