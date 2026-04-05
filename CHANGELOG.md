@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.93.1](https://github.com/diillson/chatcli/compare/v1.93.0...v1.93.1) (2026-04-05)
+
+
+### Bug Fixes
+
+* **helm:** update workflow to split ArtifactHub metadata per chart and enhance packaging process ([#721](https://github.com/diillson/chatcli/issues/721)) ([a024bb0](https://github.com/diillson/chatcli/commit/a024bb0b7ad5e934cf56ce4b9689c8ae5d230530))
+
 ## [1.93.0](https://github.com/diillson/chatcli/compare/v1.92.0...v1.93.0) (2026-04-05)
 
 
