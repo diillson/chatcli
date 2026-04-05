@@ -1329,5 +1329,6 @@
   "auth.sync.codex_token_expired": "Codex CLI token expired, skipping",
   "llm.zai.jwt_generated": "ZAI JWT token generated",
   "llm.zai.jwt_cached": "Using cached ZAI JWT token",
-  "llm.zai.jwt_invalid_key": "Invalid ZAI API key format for JWT (expected id.secret), using raw key"
+  "llm.zai.jwt_invalid_key": "Invalid ZAI API key format for JWT (expected id.secret), using raw key",
+  "llm.info.using_custom_base_url": "Using custom base URL for %s: %s"
 }

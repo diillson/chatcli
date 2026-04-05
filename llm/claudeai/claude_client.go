@@ -116,6 +116,13 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempt
 	} else {
 		httpClient = utils.NewHTTPClient(logger, 900*time.Second)
 	}
+	// Allow overriding the API URL via ANTHROPIC_BASE_URL (e.g., for MiniMax Anthropic-compatible endpoint)
+	apiURL := config.ClaudeAIAPIURL
+	if baseURL := os.Getenv("ANTHROPIC_BASE_URL"); baseURL != "" {
+		apiURL = strings.TrimRight(baseURL, "/") + "/v1/messages"
+		logger.Info(i18n.T("llm.info.using_custom_base_url", "Anthropic", apiURL))
+	}
+
 	return &ClaudeClient{
 		apiKey:      apiKey,
 		model:       strings.ToLower(model),
@@ -123,7 +130,7 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempt
 		client:      httpClient,
 		maxAttempts: maxAttempts,
 		backoff:     backoff,
-		apiURL:      config.ClaudeAIAPIURL,
+		apiURL:      apiURL,
 	}
 }
 
