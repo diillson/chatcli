@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.93.3](https://github.com/diillson/chatcli/compare/v1.93.2...v1.93.3) (2026-04-05)
+
+
+### Bug Fixes
+
+* **helm:** add GHCR login step to publish workflow using ORAS ([#725](https://github.com/diillson/chatcli/issues/725)) ([ef19c8e](https://github.com/diillson/chatcli/commit/ef19c8e66140242a7a659289a4655b26f0e8a622))
+
 ## [1.93.2](https://github.com/diillson/chatcli/compare/v1.93.1...v1.93.2) (2026-04-05)
 
 
