@@ -113,13 +113,28 @@ for chart_file in "$@"; do
     { print }
   ' "$chart_file" > "$tmpfile"
 
-  # Find the line number of the annotations: block to insert after
-  # We insert right after the last existing artifacthub.io/ annotation
+  # Find the line number after the last existing artifacthub.io/ annotation,
+  # including any multi-line block scalar content that follows it.
   insert_after=$(grep -n 'artifacthub\.io/' "$tmpfile" | tail -1 | cut -d: -f1)
 
   if [[ -z "$insert_after" ]]; then
     # No existing artifacthub annotations, find the annotations: key
     insert_after=$(grep -n '^annotations:' "$tmpfile" | head -1 | cut -d: -f1)
+  fi
+
+  if [[ -n "$insert_after" ]]; then
+    # Skip past multi-line block scalar continuation lines (4+ leading spaces)
+    # that belong to the annotation found above (e.g., maintainers, crds, links)
+    total_lines=$(wc -l < "$tmpfile")
+    while [[ $insert_after -lt $total_lines ]]; do
+      next_line=$(sed -n "$((insert_after + 1))p" "$tmpfile")
+      # Stop when the next line is NOT indented content (block scalar lines
+      # use 4+ spaces) or is a new artifacthub.io annotation key
+      if [[ ! "$next_line" =~ ^[[:space:]]{4} ]]; then
+        break
+      fi
+      insert_after=$((insert_after + 1))
+    done
   fi
 
   if [[ -z "$insert_after" ]]; then
