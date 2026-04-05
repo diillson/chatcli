@@ -1,0 +1,865 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ChatCLI Server Helm Chart Values",
+  "description": "JSON Schema for the ChatCLI Helm chart values.yaml configuration.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Number of pod replicas to deploy."
+    },
+    "image": {
+      "type": "object",
+      "description": "Container image configuration.",
+      "additionalProperties": false,
+      "required": ["repository"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Container image repository."
+        },
+        "tag": {
+          "type": "string",
+          "description": "Container image tag. Defaults to the chart appVersion if not set."
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"],
+          "default": "IfNotPresent",
+          "description": "Image pull policy."
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "description": "List of image pull secrets for private registries.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the Kubernetes secret."
+          }
+        }
+      }
+    },
+    "nameOverride": {
+      "type": "string",
+      "description": "Override the chart name."
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "description": "Override the full release name."
+    },
+    "server": {
+      "type": "object",
+      "description": "ChatCLI server configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Primary server listening port."
+        },
+        "metricsPort": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Metrics endpoint port. Set to 0 to disable."
+        },
+        "token": {
+          "type": "string",
+          "description": "Authentication token for the server."
+        },
+        "grpcReflection": {
+          "type": "boolean",
+          "description": "Enable gRPC reflection for debugging."
+        }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "description": "TLS configuration for the server.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable TLS."
+        },
+        "certFile": {
+          "type": "string",
+          "description": "Path to the TLS certificate file inside the container."
+        },
+        "keyFile": {
+          "type": "string",
+          "description": "Path to the TLS private key file inside the container."
+        },
+        "existingSecret": {
+          "type": "string",
+          "description": "Name of an existing Kubernetes secret containing TLS cert and key."
+        }
+      }
+    },
+    "llm": {
+      "type": "object",
+      "description": "Default LLM provider and model configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "",
+            "OPENAI",
+            "CLAUDEAI",
+            "GOOGLEAI",
+            "XAI",
+            "ZAI",
+            "MINIMAX",
+            "STACKSPOT",
+            "OLLAMA",
+            "COPILOT"
+          ],
+          "description": "LLM provider to use."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model name or identifier for the selected provider."
+        }
+      }
+    },
+    "fallback": {
+      "type": "object",
+      "description": "Fallback provider chain configuration for automatic failover.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable fallback provider chain."
+        },
+        "providers": {
+          "type": "array",
+          "description": "Ordered list of fallback providers.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Provider name."
+              },
+              "model": {
+                "type": "string",
+                "description": "Model to use with this provider."
+              }
+            }
+          }
+        },
+        "maxRetries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of retry attempts across providers."
+        },
+        "cooldownBase": {
+          "type": "string",
+          "description": "Base duration for exponential cooldown between retries (e.g. '1s', '500ms')."
+        },
+        "cooldownMax": {
+          "type": "string",
+          "description": "Maximum cooldown duration (e.g. '30s')."
+        }
+      }
+    },
+    "mcp": {
+      "type": "object",
+      "description": "Model Context Protocol (MCP) server configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable MCP integration."
+        },
+        "servers": {
+          "type": "array",
+          "description": "List of MCP server definitions.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "MCP server name."
+              },
+              "transport": {
+                "type": "string",
+                "enum": ["stdio", "sse"],
+                "description": "Transport type for the MCP server."
+              },
+              "command": {
+                "type": "string",
+                "description": "Command to launch the MCP server (stdio transport)."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments for the MCP server command."
+              },
+              "url": {
+                "type": "string",
+                "description": "URL for the MCP server (sse transport)."
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Whether this MCP server is enabled."
+              }
+            }
+          }
+        },
+        "existingConfigMap": {
+          "type": "string",
+          "description": "Name of an existing ConfigMap containing MCP server configuration."
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "description": "API keys and secrets for LLM providers. Prefer existingSecret for production.",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": {
+          "type": "string",
+          "description": "Name of an existing Kubernetes secret containing all API keys."
+        },
+        "openaiApiKey": {
+          "type": "string",
+          "description": "OpenAI API key."
+        },
+        "anthropicApiKey": {
+          "type": "string",
+          "description": "Anthropic API key."
+        },
+        "googleaiApiKey": {
+          "type": "string",
+          "description": "Google AI API key."
+        },
+        "xaiApiKey": {
+          "type": "string",
+          "description": "xAI API key."
+        },
+        "zaiApiKey": {
+          "type": "string",
+          "description": "ZAI API key."
+        },
+        "minimaxApiKey": {
+          "type": "string",
+          "description": "MiniMax API key."
+        },
+        "minimaxApiCompat": {
+          "type": "string",
+          "description": "MiniMax API compatibility setting."
+        },
+        "stackspotClientId": {
+          "type": "string",
+          "description": "StackSpot client ID."
+        },
+        "stackspotClientKey": {
+          "type": "string",
+          "description": "StackSpot client key."
+        },
+        "stackspotRealm": {
+          "type": "string",
+          "description": "StackSpot realm."
+        },
+        "stackspotAgentId": {
+          "type": "string",
+          "description": "StackSpot agent ID."
+        },
+        "githubCopilotToken": {
+          "type": "string",
+          "description": "GitHub Copilot authentication token."
+        }
+      }
+    },
+    "copilot": {
+      "type": "object",
+      "description": "GitHub Copilot-specific configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "Copilot model name."
+        },
+        "maxTokens": {
+          "type": "string",
+          "description": "Maximum token count for Copilot responses."
+        },
+        "apiBaseUrl": {
+          "type": "string",
+          "description": "Base URL for the Copilot API."
+        }
+      }
+    },
+    "ollama": {
+      "type": "object",
+      "description": "Ollama local LLM configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable Ollama integration."
+        },
+        "baseUrl": {
+          "type": "string",
+          "description": "Base URL for the Ollama server."
+        },
+        "model": {
+          "type": "string",
+          "description": "Default Ollama model name."
+        }
+      }
+    },
+    "watcher": {
+      "type": "object",
+      "description": "Deployment watcher configuration for monitoring external workloads.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the deployment watcher."
+        },
+        "deployment": {
+          "type": "string",
+          "description": "Primary deployment name to watch."
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Namespace of the primary deployment."
+        },
+        "targets": {
+          "type": "array",
+          "description": "List of additional deployments to watch.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["deployment", "namespace"],
+            "properties": {
+              "deployment": {
+                "type": "string",
+                "description": "Deployment name."
+              },
+              "namespace": {
+                "type": "string",
+                "description": "Deployment namespace."
+              },
+              "metricsPort": {
+                "type": "integer",
+                "description": "Port where the target exposes metrics."
+              },
+              "metricsPath": {
+                "type": "string",
+                "description": "HTTP path for the metrics endpoint."
+              },
+              "metricsFilter": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "List of metric name filters to collect."
+              }
+            }
+          }
+        },
+        "interval": {
+          "type": "string",
+          "description": "Polling interval (e.g. '30s', '1m')."
+        },
+        "window": {
+          "type": "string",
+          "description": "Observation window for analysis (e.g. '5m')."
+        },
+        "maxLogLines": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of log lines to collect per pod."
+        },
+        "maxContextChars": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Maximum number of characters to include in the LLM context."
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "description": "Service account configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Create a service account."
+        },
+        "name": {
+          "type": "string",
+          "description": "Service account name. Generated from fullname if not set."
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Annotations to add to the service account."
+        }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "description": "RBAC configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Create RBAC resources."
+        },
+        "clusterWide": {
+          "type": "boolean",
+          "description": "Create ClusterRole/ClusterRoleBinding instead of namespaced Role/RoleBinding."
+        },
+        "additionalRules": {
+          "type": "array",
+          "description": "Additional RBAC policy rules to include.",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "description": "Kubernetes Service configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer"],
+          "description": "Service type."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Service port."
+        },
+        "headless": {
+          "type": "boolean",
+          "description": "Create a headless service (clusterIP: None)."
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "description": "Ingress configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable ingress."
+        },
+        "className": {
+          "type": "string",
+          "description": "Ingress class name."
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Annotations to add to the ingress resource.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "hosts": {
+          "type": "array",
+          "description": "List of ingress hosts.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "Hostname."
+              },
+              "paths": {
+                "type": "array",
+                "description": "Paths for this host.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "URL path."
+                    },
+                    "pathType": {
+                      "type": "string",
+                      "description": "Path type (Prefix, Exact, ImplementationSpecific)."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": {
+          "type": "array",
+          "description": "TLS configuration for ingress.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "secretName": {
+                "type": "string",
+                "description": "Name of the TLS secret."
+              },
+              "hosts": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Hostnames covered by this TLS certificate."
+              }
+            }
+          }
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "description": "CPU and memory resource requests and limits.",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "memory": {
+              "type": "string",
+              "description": "Memory request (e.g. '128Mi')."
+            },
+            "cpu": {
+              "type": "string",
+              "description": "CPU request (e.g. '100m')."
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "memory": {
+              "type": "string",
+              "description": "Memory limit (e.g. '256Mi')."
+            },
+            "cpu": {
+              "type": "string",
+              "description": "CPU limit (e.g. '500m')."
+            }
+          }
+        }
+      }
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "description": "Pod-level security context. Passed directly to the pod spec."
+    },
+    "securityContext": {
+      "type": "object",
+      "description": "Container-level security context. Passed directly to the container spec."
+    },
+    "autoscaling": {
+      "type": "object",
+      "description": "Horizontal Pod Autoscaler configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable HPA."
+        },
+        "minReplicas": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Minimum number of replicas."
+        },
+        "maxReplicas": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of replicas."
+        },
+        "targetCPUUtilizationPercentage": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Target CPU utilization percentage for scaling."
+        }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "description": "Pod Disruption Budget configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable PDB."
+        },
+        "minAvailable": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string" }
+          ],
+          "description": "Minimum number or percentage of pods that must be available."
+        },
+        "maxUnavailable": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string" }
+          ],
+          "description": "Maximum number or percentage of pods that can be unavailable."
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "description": "Network policy configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable network policy."
+        }
+      }
+    },
+    "nodeSelector": {
+      "type": "object",
+      "description": "Node selector labels for pod scheduling.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "tolerations": {
+      "type": "array",
+      "description": "Tolerations for pod scheduling.",
+      "items": {
+        "type": "object"
+      }
+    },
+    "affinity": {
+      "type": "object",
+      "description": "Affinity rules for pod scheduling."
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "description": "Prometheus ServiceMonitor configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Create a ServiceMonitor resource."
+        },
+        "interval": {
+          "type": "string",
+          "description": "Scrape interval (e.g. '30s')."
+        },
+        "scrapeTimeout": {
+          "type": "string",
+          "description": "Scrape timeout (e.g. '10s')."
+        },
+        "labels": {
+          "type": "object",
+          "description": "Additional labels to add to the ServiceMonitor.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "prometheusUrl": {
+      "type": "string",
+      "description": "Prometheus server URL for querying metrics."
+    },
+    "extraEnv": {
+      "type": "array",
+      "description": "Additional environment variables for the container.",
+      "items": {
+        "type": "object"
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "description": "Persistent volume configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable persistent storage."
+        },
+        "storageClass": {
+          "type": "string",
+          "description": "Storage class name. Use '-' for default."
+        },
+        "accessModes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Access modes (e.g. ['ReadWriteOnce'])."
+        },
+        "size": {
+          "type": "string",
+          "description": "Volume size (e.g. '1Gi')."
+        }
+      }
+    },
+    "agents": {
+      "type": "object",
+      "description": "Agent definitions configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable agent definitions."
+        },
+        "definitions": {
+          "type": "object",
+          "description": "Map of agent name to agent definition content.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "existingConfigMap": {
+          "type": "string",
+          "description": "Name of an existing ConfigMap containing agent definitions."
+        }
+      }
+    },
+    "skills": {
+      "type": "object",
+      "description": "Skill definitions configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable skill definitions."
+        },
+        "definitions": {
+          "type": "object",
+          "description": "Map of skill name to skill definition content.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "existingConfigMap": {
+          "type": "string",
+          "description": "Name of an existing ConfigMap containing skill definitions."
+        }
+      }
+    },
+    "bootstrap": {
+      "type": "object",
+      "description": "Bootstrap definitions configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable bootstrap definitions."
+        },
+        "definitions": {
+          "type": "object",
+          "description": "Map of bootstrap name to bootstrap definition content.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "existingConfigMap": {
+          "type": "string",
+          "description": "Name of an existing ConfigMap containing bootstrap definitions."
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "description": "Memory feature configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable memory feature."
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "description": "Safety guardrails configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable safety guardrails."
+        },
+        "config": {
+          "type": "object",
+          "description": "Safety configuration object. Structure depends on the safety implementation."
+        },
+        "existingConfigMap": {
+          "type": "string",
+          "description": "Name of an existing ConfigMap containing safety configuration."
+        }
+      }
+    },
+    "skillRegistry": {
+      "type": "object",
+      "description": "Skill registry configuration for discovering and installing skills.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable skill registry integration."
+        },
+        "registryUrls": {
+          "type": "string",
+          "description": "Comma-separated list of skill registry URLs."
+        },
+        "registryDisable": {
+          "type": "string",
+          "description": "Comma-separated list of registries to disable."
+        },
+        "installDir": {
+          "type": "string",
+          "description": "Directory where downloaded skills are installed."
+        }
+      }
+    },
+    "plugins": {
+      "type": "object",
+      "description": "Plugin system configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable plugins."
+        },
+        "initImage": {
+          "type": "string",
+          "description": "Init container image used to install plugins."
+        },
+        "existingPVC": {
+          "type": "string",
+          "description": "Name of an existing PersistentVolumeClaim for plugin storage."
+        }
+      }
+    }
+  }
+}

@@ -1,5 +1,9 @@
 # ChatCLI AIOps Operator Helm Chart
 
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/chatcli-operator)](https://artifacthub.io/packages/helm/chatcli-operator/chatcli-operator)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![GitHub](https://img.shields.io/badge/GitHub-diillson%2Fchatcli-181717?logo=github)](https://github.com/diillson/chatcli)
+
 Kubernetes operator for **autonomous incident detection, AI-powered analysis, and automated remediation**. The operator watches cluster resources, correlates anomalies into issues, generates AI insights with root cause analysis, and executes approved remediation plans — closing the full incident lifecycle automatically.
 
 ## Features
@@ -39,6 +43,22 @@ helm install chatcli-operator oci://ghcr.io/diillson/charts/chatcli-operator \
 git clone https://github.com/diillson/chatcli.git
 helm install chatcli-operator deploy/helm/chatcli-operator \
   --namespace aiops-system --create-namespace
+```
+
+### Verify Signature
+
+All chart OCI artifacts and container images are signed with [Cosign](https://github.com/sigstore/cosign) using keyless OIDC via GitHub Actions:
+
+```bash
+# Verify the Helm chart
+cosign verify ghcr.io/diillson/charts/chatcli-operator:<version> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp 'https://github.com/diillson/chatcli/'
+
+# Verify the container image
+cosign verify ghcr.io/diillson/chatcli-operator:<version> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp 'https://github.com/diillson/chatcli/'
 ```
 
 ### With Prometheus Integration

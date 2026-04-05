@@ -1,5 +1,9 @@
 # ChatCLI Server Helm Chart
 
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/chatcli)](https://artifacthub.io/packages/helm/chatcli/chatcli)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![GitHub](https://img.shields.io/badge/GitHub-diillson%2Fchatcli-181717?logo=github)](https://github.com/diillson/chatcli)
+
 Deploy **ChatCLI** as a gRPC server on Kubernetes — a multi-provider LLM gateway with intelligent agent modes, automatic failover, MCP integration, Kubernetes-native observability, and AIOps capabilities.
 
 ## Features
@@ -44,6 +48,22 @@ helm install chatcli deploy/helm/chatcli \
   --namespace chatcli --create-namespace \
   --set llm.provider=OPENAI \
   --set secrets.openaiApiKey=sk-xxx
+```
+
+### Verify Signature
+
+All chart OCI artifacts and container images are signed with [Cosign](https://github.com/sigstore/cosign) using keyless OIDC via GitHub Actions:
+
+```bash
+# Verify the Helm chart
+cosign verify ghcr.io/diillson/charts/chatcli:<version> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp 'https://github.com/diillson/chatcli/'
+
+# Verify the container image
+cosign verify ghcr.io/diillson/chatcli:<version> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp 'https://github.com/diillson/chatcli/'
 ```
 
 ### Using an Existing Secret

@@ -112,11 +112,18 @@ jobs:
     needs: [release_please]
     if: needs.release_please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.release_please.outputs.tag_name }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -141,6 +148,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push
+        id: build-chatcli
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -151,16 +159,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Sign ChatCLI image with Cosign (keyless OIDC)
+        run: cosign sign --yes "ghcr.io/diillson/chatcli@${{ steps.build-chatcli.outputs.digest }}"
+
   docker_operator:
     name: Build & Push Operator image to GHCR
     needs: [release_please]
     if: needs.release_please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.release_please.outputs.tag_name }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -185,6 +203,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push
+        id: build-operator
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -195,6 +214,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Sign Operator image with Cosign (keyless OIDC)
+        run: cosign sign --yes "ghcr.io/diillson/chatcli-operator@${{ steps.build-operator.outputs.digest }}"
 
   # Atualiza a formula do Homebrew tap após upload dos binários
   update_homebrew:
@@ -311,6 +333,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
 
     steps:
       - name: Checkout tag
@@ -320,6 +343,12 @@ jobs:
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.4
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.repository_owner }} --password-stdin
@@ -377,6 +406,27 @@ jobs:
           set -euo pipefail
           VERSION="${TAG_NAME#v}"
           helm push "/tmp/charts/chatcli-operator-${VERSION}.tgz" oci://ghcr.io/diillson/charts
+
+      - name: Login to GHCR with crane
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | crane auth login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
+      - name: Sign chatcli chart with Cosign (keyless OIDC)
+        env:
+          TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#v}"
+          CHART_DIGEST=$(crane digest "ghcr.io/diillson/charts/chatcli:${VERSION}")
+          cosign sign --yes "ghcr.io/diillson/charts/chatcli@${CHART_DIGEST}"
+
+      - name: Sign chatcli-operator chart with Cosign (keyless OIDC)
+        env:
+          TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#v}"
+          CHART_DIGEST=$(crane digest "ghcr.io/diillson/charts/chatcli-operator:${VERSION}")
+          cosign sign --yes "ghcr.io/diillson/charts/chatcli-operator@${CHART_DIGEST}"
 
       - name: Push Artifact Hub metadata for chatcli
         run: |
