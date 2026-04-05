@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.94.1](https://github.com/diillson/chatcli/compare/v1.94.0...v1.94.1) (2026-04-05)
+
+
+### Bug Fixes
+
+* **helm:** skip multi-line block content when injecting changelog annotation ([#729](https://github.com/diillson/chatcli/issues/729)) ([535d683](https://github.com/diillson/chatcli/commit/535d683dc98c124ab5b1c4bdb209a970d5392a5d))
+
 ## [1.94.0](https://github.com/diillson/chatcli/compare/v1.93.3...v1.94.0) (2026-04-05)
 
 
