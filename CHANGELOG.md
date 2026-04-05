@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.94.0](https://github.com/diillson/chatcli/compare/v1.93.3...v1.94.0) (2026-04-05)
+
+
+### Features
+
+* **helm:** add cosign signing, values schema, and chart documentation ([#727](https://github.com/diillson/chatcli/issues/727)) ([b7d3ee6](https://github.com/diillson/chatcli/commit/b7d3ee6fe6a3641f39efd17eec6bc1db1bad59d7))
+
 ## [1.93.3](https://github.com/diillson/chatcli/compare/v1.93.2...v1.93.3) (2026-04-05)
 
 
