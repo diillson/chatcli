@@ -36,12 +36,14 @@ type ZAIClient struct {
 	maxAttempts int
 	backoff     time.Duration
 	apiURL      string
+	useJWT      bool
+	jwtAuth     *jwtCache
 }
 
 // NewZAIClient cria uma nova instância de ZAIClient.
 func NewZAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ZAIClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
-	return &ZAIClient{
+	c := &ZAIClient{
 		apiKey:      apiKey,
 		model:       strings.ToLower(model),
 		logger:      logger,
@@ -50,6 +52,43 @@ func NewZAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, bac
 		backoff:     backoff,
 		apiURL:      config.ZAIAPIURL,
 	}
+
+	// Enable JWT auth if the API key is in id.secret format
+	if strings.Contains(apiKey, ".") {
+		parts := strings.SplitN(apiKey, ".", 2)
+		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			c.useJWT = true
+			c.jwtAuth = &jwtCache{}
+		}
+	}
+
+	return c
+}
+
+// getAuthToken returns the appropriate auth token for the Authorization header.
+// If JWT auth is enabled, it returns a cached JWT or generates a new one.
+// Otherwise, it returns the raw API key.
+func (c *ZAIClient) getAuthToken() string {
+	if !c.useJWT {
+		return c.apiKey
+	}
+
+	// Check cache first (with 5-minute safety margin)
+	if token := c.jwtAuth.getToken(5 * time.Minute); token != "" {
+		c.logger.Debug(i18n.T("llm.zai.jwt_cached"))
+		return token
+	}
+
+	// Generate new JWT
+	token, expiresAt, err := generateZAIJWT(c.apiKey, config.DefaultZAIJWTTTL)
+	if err != nil {
+		c.logger.Warn(i18n.T("llm.zai.jwt_invalid_key"), zap.Error(err))
+		return c.apiKey
+	}
+
+	c.jwtAuth.setToken(token, expiresAt)
+	c.logger.Debug(i18n.T("llm.zai.jwt_generated"))
+	return token
 }
 
 // GetModelName retorna o nome amigável do modelo ZAI via catálogo.
@@ -130,7 +169,7 @@ func (c *ZAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Re
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+c.getAuthToken())
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -205,7 +244,7 @@ func (c *ZAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) 
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+c.getAuthToken())
 
 	resp, err := c.client.Do(req)
 	if err != nil {

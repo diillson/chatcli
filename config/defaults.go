@@ -36,12 +36,14 @@ const (
 	XAIAPIURL       = "https://api.x.ai/v1/chat/completions"
 
 	// Valores padrão para ZAI (Zhipu AI / z.ai)
-	DefaultZAIModel = "glm-5"
-	ZAIAPIURL       = "https://api.z.ai/api/paas/v4/chat/completions"
+	DefaultZAIModel  = "glm-5"
+	ZAIAPIURL        = "https://api.z.ai/api/paas/v4/chat/completions"
+	DefaultZAIJWTTTL = 30 * time.Minute // JWT token validity for ZAI auth
 
 	// Valores padrão para MiniMax
-	DefaultMiniMaxModel = "MiniMax-M2.7"
-	MiniMaxAPIURL       = "https://api.minimax.io/v1/text/chatcompletion_v2"
+	DefaultMiniMaxModel    = "MiniMax-M2.7"
+	MiniMaxAPIURL          = "https://api.minimax.io/v1/text/chatcompletion_v2"
+	MiniMaxAnthropicAPIURL = "https://api.minimax.io/anthropic/v1/messages"
 
 	// Valores padrão para GitHub Copilot
 	DefaultCopilotModel = "gpt-4o"

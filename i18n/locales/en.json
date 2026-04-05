@@ -933,6 +933,7 @@
   "llm.warn.empty_content": "%s response with empty content.",
   "llm.warn.could_not_extract_text": "Could not extract text from response, even with 'completed' status.",
   "llm.warn.could_not_extract_text_error": "could not extract text from Responses API response",
+  "llm.minimax.using_anthropic_compat": "MiniMax using Anthropic-compatible endpoint",
   "llm.info.fetched_models": "Fetched %s models",
   "llm.info.fetched_models_total": "Fetched %s models (total: %d, chat: %d)",
   "llm.info.configuring_provider": "Configuring provider %s",
@@ -1325,5 +1326,8 @@
   "auth.sync.codex_synced": "synced OpenAI credentials from Codex CLI",
   "auth.sync.claude_expired": "Claude Code token expired, skipping",
   "auth.sync.claude_cred_expired": "Claude credential expired, skipping",
-  "auth.sync.codex_token_expired": "Codex CLI token expired, skipping"
+  "auth.sync.codex_token_expired": "Codex CLI token expired, skipping",
+  "llm.zai.jwt_generated": "ZAI JWT token generated",
+  "llm.zai.jwt_cached": "Using cached ZAI JWT token",
+  "llm.zai.jwt_invalid_key": "Invalid ZAI API key format for JWT (expected id.secret), using raw key"
 }
