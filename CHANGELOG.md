@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.93.0](https://github.com/diillson/chatcli/compare/v1.92.0...v1.93.0) (2026-04-05)
+
+
+### Features
+
+* **provider:** add ZAI and MiniMax LLM providers ([#719](https://github.com/diillson/chatcli/issues/719)) ([609339e](https://github.com/diillson/chatcli/commit/609339ea7671cafae7acc0ee1f65ca7bb2a7238e))
+
 ## [1.92.0](https://github.com/diillson/chatcli/compare/v1.91.0...v1.92.0) (2026-04-04)
 
 
