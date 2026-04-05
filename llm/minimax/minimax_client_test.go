@@ -472,3 +472,110 @@ func TestMiniMaxClient_ModelCaseSensitive(t *testing.T) {
 
 	assert.Equal(t, "MiniMax-M2.7", receivedPayload["model"])
 }
+
+func TestMiniMaxClient_AnthropicCompat_SendPrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer test-minimax-key", r.Header.Get("Authorization"))
+		assert.Equal(t, "2023-06-01", r.Header.Get("anthropic-version"))
+
+		var payload map[string]interface{}
+		err := json.NewDecoder(r.Body).Decode(&payload)
+		require.NoError(t, err)
+		assert.Equal(t, "MiniMax-M2.7", payload["model"])
+		// Verify Anthropic format: system as top-level string, no system in messages
+		assert.Equal(t, "You are helpful.", payload["system"])
+		msgs := payload["messages"].([]interface{})
+		for _, m := range msgs {
+			msg := m.(map[string]interface{})
+			assert.NotEqual(t, "system", msg["role"], "system messages should be extracted from messages array")
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"content": [{"type": "text", "text": "Hello from Anthropic-compat!"}],
+			"stop_reason": "end_turn",
+			"usage": {"input_tokens": 10, "output_tokens": 20}
+		}`))
+	}))
+	defer server.Close()
+
+	logger, _ := zap.NewDevelopment()
+	c := &MiniMaxClient{
+		apiKey:          "test-minimax-key",
+		model:           "MiniMax-M2.7",
+		logger:          logger,
+		client:          http.DefaultClient,
+		maxAttempts:     1,
+		backoff:         0,
+		apiURL:          server.URL,
+		anthropicCompat: true,
+	}
+
+	history := []models.Message{
+		{Role: "system", Content: "You are helpful."},
+		{Role: "user", Content: "Hi"},
+	}
+	resp, err := c.SendPrompt(context.Background(), "Hi", history, 100)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello from Anthropic-compat!", resp)
+}
+
+func TestMiniMaxClient_AnthropicCompat_Headers(t *testing.T) {
+	var receivedHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"content": [{"type": "text", "text": "ok"}],
+			"stop_reason": "end_turn"
+		}`))
+	}))
+	defer server.Close()
+
+	logger, _ := zap.NewDevelopment()
+	c := &MiniMaxClient{
+		apiKey:          "test-key-abc",
+		model:           "MiniMax-M2.7",
+		logger:          logger,
+		client:          http.DefaultClient,
+		maxAttempts:     1,
+		backoff:         0,
+		apiURL:          server.URL,
+		anthropicCompat: true,
+	}
+
+	_, err := c.SendPrompt(context.Background(), "test", []models.Message{{Role: "user", Content: "test"}}, 100)
+	require.NoError(t, err)
+
+	assert.Equal(t, "2023-06-01", receivedHeaders.Get("anthropic-version"))
+	assert.Equal(t, "Bearer test-key-abc", receivedHeaders.Get("Authorization"))
+	assert.Equal(t, "application/json", receivedHeaders.Get("Content-Type"))
+}
+
+func TestMiniMaxClient_AnthropicCompat_ErrorResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"error": {"type": "invalid_request_error", "message": "max_tokens must be positive"},
+			"content": []
+		}`))
+	}))
+	defer server.Close()
+
+	logger, _ := zap.NewDevelopment()
+	c := &MiniMaxClient{
+		apiKey:          "test-key",
+		model:           "MiniMax-M2.7",
+		logger:          logger,
+		client:          http.DefaultClient,
+		maxAttempts:     1,
+		backoff:         0,
+		apiURL:          server.URL,
+		anthropicCompat: true,
+	}
+
+	_, err := c.SendPrompt(context.Background(), "test", []models.Message{{Role: "user", Content: "test"}}, 100)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "max_tokens must be positive")
+}
