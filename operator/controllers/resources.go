@@ -555,6 +555,7 @@ func (r *InstanceReconciler) reconcileMCPConfigMap(ctx context.Context, instance
 		Env       map[string]string `json:"env,omitempty"`
 		URL       string            `json:"url,omitempty"`
 		Enabled   bool              `json:"enabled"`
+		Overrides []string          `json:"overrides,omitempty"`
 	}
 	type mcpConfig struct {
 		Servers []mcpServerJSON `json:"mcpServers"`
@@ -570,6 +571,7 @@ func (r *InstanceReconciler) reconcileMCPConfigMap(ctx context.Context, instance
 			Env:       s.Env,
 			URL:       s.URL,
 			Enabled:   s.Enabled,
+			Overrides: s.Overrides,
 		})
 	}
 

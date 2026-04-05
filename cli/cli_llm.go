@@ -240,6 +240,11 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	// Part 6: MCP tools context (deferred — name+description only, saves tokens)
 	if cli.mcpManager != nil {
+		// Sync MCP shadow state: hide built-ins overridden by connected MCP servers
+		if cli.pluginManager != nil {
+			cli.pluginManager.SetShadowedBuiltins(cli.mcpManager.GetShadowedBuiltins())
+		}
+
 		mcpTools := cli.mcpManager.GetToolsSummary()
 		if len(mcpTools) > 0 {
 			var mcpCtx strings.Builder

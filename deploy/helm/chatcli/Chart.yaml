@@ -7,7 +7,7 @@ appVersion: 1.94.1
 home: https://chatcli.edilsonfreitas.com
 sources:
   - https://github.com/diillson/chatcli
-icon: https://chatcli.edilsonfreitas.com/images/logo-dark.svg
+icon: https://chatcli.edilsonfreitas.com/images/icon-artifacthub.svg
 keywords:
   - chatcli
   - llm

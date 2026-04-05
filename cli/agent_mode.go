@@ -559,6 +559,15 @@ func (a *AgentMode) getToolContextString() string {
 	if a.cli.pluginManager == nil {
 		return ""
 	}
+
+	// Sync MCP shadow state: hide built-ins overridden by connected MCP servers,
+	// restore them automatically when servers disconnect.
+	if a.cli.mcpManager != nil {
+		a.cli.pluginManager.SetShadowedBuiltins(a.cli.mcpManager.GetShadowedBuiltins())
+	} else {
+		a.cli.pluginManager.SetShadowedBuiltins(nil)
+	}
+
 	plugins := a.cli.pluginManager.GetPlugins()
 	if len(plugins) == 0 {
 		return ""

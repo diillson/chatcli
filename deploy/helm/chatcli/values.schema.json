@@ -217,6 +217,13 @@
               "enabled": {
                 "type": "boolean",
                 "description": "Whether this MCP server is enabled."
+              },
+              "overrides": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Built-in plugin names this MCP server replaces (e.g. [\"@webfetch\", \"@websearch\"]). When connected, these built-ins are hidden; on disconnect they are restored automatically."
               }
             }
           }

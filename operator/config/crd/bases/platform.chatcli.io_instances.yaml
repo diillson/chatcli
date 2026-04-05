@@ -117,8 +117,9 @@ spec:
                 type: object
               apiKeys:
                 description: |-
-                  APIKeys references a Secret containing provider API keys.
-                  Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, GITHUB_COPILOT_TOKEN, etc.
+                  APIKeys references a Secret containing provider API keys and config.
+                  Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, XAI_API_KEY,
+                  ZAI_API_KEY, MINIMAX_API_KEY, MINIMAX_API_COMPAT, GITHUB_COPILOT_TOKEN, etc.
                   All providers used in the fallback chain must have their API keys in this Secret.
                 properties:
                   name:
@@ -207,6 +208,78 @@ spec:
                     description: Tag is the container image tag.
                     type: string
                 type: object
+              mcp:
+                description: |-
+                  MCP configures MCP (Model Context Protocol) servers for the instance.
+                  MCP servers expose external tools (filesystem, search, databases, etc.)
+                  that the AI can invoke during conversations.
+                properties:
+                  enabled:
+                    default: false
+                    description: Enabled activates MCP server connections.
+                    type: boolean
+                  existingConfigMap:
+                    description: |-
+                      ExistingConfigMap references an existing ConfigMap containing mcp_servers.json.
+                      If set, Servers field is ignored and this ConfigMap is mounted instead.
+                    type: string
+                  servers:
+                    description: Servers is the list of MCP server configurations.
+                    items:
+                      description: MCPServerSpec defines a single MCP server connection.
+                      properties:
+                        args:
+                          description: Args are command-line arguments for the executable
+                            (stdio transport only).
+                          items:
+                            type: string
+                          type: array
+                        command:
+                          description: Command is the executable to start (stdio transport
+                            only).
+                          type: string
+                        enabled:
+                          default: true
+                          description: Enabled controls whether this server is active.
+                          type: boolean
+                        env:
+                          additionalProperties:
+                            type: string
+                          description: Env are environment variables for the process
+                            (stdio transport only).
+                          type: object
+                        name:
+                          description: Name is a unique identifier for this MCP server.
+                          type: string
+                        overrides:
+                          description: |-
+                            Overrides lists built-in plugin names that this MCP server replaces.
+                            When the server is connected, these built-ins are hidden from the LLM prompt.
+                            If the server disconnects, the built-ins are automatically restored (fallback).
+                            Example: ["@webfetch", "@websearch"]
+                          items:
+                            type: string
+                          type: array
+                        transport:
+                          description: 'Transport is the communication protocol: "stdio"
+                            (local process) or "sse" (HTTP SSE).'
+                          enum:
+                          - stdio
+                          - sse
+                          type: string
+                        url:
+                          description: URL is the SSE endpoint URL (sse transport
+                            only).
+                          type: string
+                      required:
+                      - enabled
+                      - name
+                      - transport
+                      type: object
+                    type: array
+                required:
+                - enabled
+                type: object
               model:
                 description: Model is the LLM model name.
                 type: string
@@ -238,8 +311,8 @@ spec:
                 type: object
               provider:
                 description: Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT,
-                  CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA,
-                  COPILOT, GITHUB_MODELS).
+                  CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT,
+                  GITHUB_MODELS).
                 type: string
               replicas:
                 default: 1

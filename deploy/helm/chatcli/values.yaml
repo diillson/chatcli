@@ -66,10 +66,14 @@ mcp:
   #     command: npx
   #     args: ["-y", "@anthropic/mcp-server-filesystem", "/workspace"]
   #     enabled: true
-  #   - name: web-search
+  #   - name: web-tools
   #     transport: sse
-  #     url: "http://mcp-search:8080/sse"
+  #     url: "http://mcp-web:8080/sse"
   #     enabled: true
+  #     # overrides: built-in plugins this MCP server replaces.
+  #     # When connected, these built-ins are hidden from the LLM.
+  #     # If the server disconnects, built-ins are restored automatically.
+  #     overrides: ["@webfetch", "@websearch"]
   servers: []
   # Or reference an existing ConfigMap with mcp_servers.json
   existingConfigMap: ""
