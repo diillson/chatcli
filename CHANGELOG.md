@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.93.2](https://github.com/diillson/chatcli/compare/v1.93.1...v1.93.2) (2026-04-05)
+
+
+### Bug Fixes
+
+* **helm:** add version consistency and set strict mode in chart packaging workflow ([#723](https://github.com/diillson/chatcli/issues/723)) ([f306f18](https://github.com/diillson/chatcli/commit/f306f182730f74c57cff6caff2c45381b8ae23c2))
+
 ## [1.93.1](https://github.com/diillson/chatcli/compare/v1.93.0...v1.93.1) (2026-04-05)
 
 
