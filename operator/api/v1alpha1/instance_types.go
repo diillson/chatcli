@@ -123,6 +123,13 @@ type MCPServerSpec struct {
 	// Enabled controls whether this server is active.
 	// +kubebuilder:default=true
 	Enabled bool `json:"enabled"`
+
+	// Overrides lists built-in plugin names that this MCP server replaces.
+	// When the server is connected, these built-ins are hidden from the LLM prompt.
+	// If the server disconnects, the built-ins are automatically restored (fallback).
+	// Example: ["@webfetch", "@websearch"]
+	// +optional
+	Overrides []string `json:"overrides,omitempty"`
 }
 
 // ImageSpec defines the container image configuration.

@@ -11,6 +11,11 @@ type ServerConfig struct {
 	Transport TransportType     `json:"transport"`
 	URL       string            `json:"url,omitempty"` // For SSE transport
 	Enabled   bool              `json:"enabled"`
+	// Overrides lists built-in plugin names that this MCP server replaces.
+	// When the server is connected, these built-ins are shadowed (hidden from the LLM).
+	// If the server disconnects, the built-ins are automatically restored.
+	// Example: ["@webfetch", "@websearch"]
+	Overrides []string `json:"overrides,omitempty"`
 }
 
 // TransportType defines MCP transport mechanism.

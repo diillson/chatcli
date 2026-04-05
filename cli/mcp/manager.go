@@ -216,6 +216,31 @@ func (m *Manager) IsMCPTool(name string) bool {
 	return ok
 }
 
+// GetShadowedBuiltins returns the list of built-in plugin names that should be
+// hidden because a connected MCP server declares them in its "overrides" field.
+// Only overrides from currently connected servers are returned — if a server
+// disconnects, its overrides are automatically released and the built-ins become
+// visible to the LLM again.
+func (m *Manager) GetShadowedBuiltins() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	seen := make(map[string]struct{})
+	var shadowed []string
+	for _, conn := range m.servers {
+		if !conn.Status.Connected {
+			continue
+		}
+		for _, name := range conn.Config.Overrides {
+			if _, exists := seen[name]; !exists {
+				seen[name] = struct{}{}
+				shadowed = append(shadowed, name)
+			}
+		}
+	}
+	return shadowed
+}
+
 // startServer starts a single MCP server via the configured transport.
 func (m *Manager) startServer(ctx context.Context, conn *ServerConnection) error {
 	switch conn.Config.Transport {

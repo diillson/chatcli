@@ -17,6 +17,7 @@ import (
 type Manager struct {
 	plugins    map[string]Plugin
 	builtins   map[string]Plugin
+	shadowed   map[string]struct{} // built-in names hidden by MCP overrides
 	pluginsDir string
 	logger     *zap.Logger
 	mu         sync.RWMutex
@@ -44,6 +45,7 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 	m := &Manager{
 		plugins:    make(map[string]Plugin),
 		builtins:   make(map[string]Plugin),
+		shadowed:   make(map[string]struct{}),
 		pluginsDir: pluginsDir,
 		logger:     logger,
 		watcher:    watcher,
@@ -163,6 +165,10 @@ func (m *Manager) GetPlugins() []Plugin {
 
 	list := make([]Plugin, 0, len(m.plugins))
 	for _, p := range m.plugins {
+		// Skip built-ins that are shadowed by MCP server overrides
+		if _, hidden := m.shadowed[p.Name()]; hidden {
+			continue
+		}
 		list = append(list, p)
 	}
 	// Ordena por nome para consistência
@@ -170,6 +176,19 @@ func (m *Manager) GetPlugins() []Plugin {
 		return list[i].Name() < list[j].Name()
 	})
 	return list
+}
+
+// SetShadowedBuiltins updates the set of built-in plugin names that are hidden
+// because MCP servers declared them as overrides. Call this whenever MCP server
+// connectivity changes so that built-ins are restored when servers disconnect.
+func (m *Manager) SetShadowedBuiltins(names []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.shadowed = make(map[string]struct{}, len(names))
+	for _, n := range names {
+		m.shadowed[n] = struct{}{}
+	}
 }
 
 // RegisterBuiltinPlugin registers a builtin plugin. It is stored in a separate

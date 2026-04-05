@@ -27,6 +27,9 @@ data:
           {{- if $srv.env }}
           "env": {{ $srv.env | toJson }},
           {{- end }}
+          {{- if $srv.overrides }}
+          "overrides": {{ $srv.overrides | toJson }},
+          {{- end }}
           "enabled": {{ $srv.enabled | default true }}
         }
         {{- end }}
