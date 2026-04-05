@@ -327,6 +327,9 @@ jobs:
       - name: Install ORAS
         uses: oras-project/setup-oras@v1
 
+      - name: Login to GHCR with ORAS
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
       - name: Update chart versions
         env:
           TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
