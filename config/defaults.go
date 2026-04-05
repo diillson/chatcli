@@ -41,7 +41,7 @@ const (
 
 	// Valores padrão para MiniMax
 	DefaultMiniMaxModel = "MiniMax-M2.7"
-	MiniMaxAPIURL       = "https://api.minimax.io/v1/chat/completions"
+	MiniMaxAPIURL       = "https://api.minimax.io/v1/text/chatcompletion_v2"
 
 	// Valores padrão para GitHub Copilot
 	DefaultCopilotModel = "gpt-4o"

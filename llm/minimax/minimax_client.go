@@ -212,8 +212,12 @@ func (c *MiniMaxClient) processResponse(resp *http.Response) (string, error) {
 // ListModels fetches available models from the MiniMax API.
 func (c *MiniMaxClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	apiURL := utils.GetEnvOrDefault("MINIMAX_API_URL", c.apiURL)
-	// MiniMax OpenAI-compatible endpoint: derive /models from base
-	modelsURL := strings.TrimSuffix(apiURL, "/chat/completions") + "/models"
+	// Derive /models from base URL (works with both /chat/completions and /text/chatcompletion_v2)
+	base := apiURL
+	for _, suffix := range []string{"/chat/completions", "/text/chatcompletion_v2", "/text/chatcompletion"} {
+		base = strings.TrimSuffix(base, suffix)
+	}
+	modelsURL := base + "/models"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
