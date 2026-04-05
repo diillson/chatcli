@@ -57,8 +57,9 @@ type InstanceSpec struct {
 	// +optional
 	AIOps *AIOpsSpec `json:"aiops,omitempty"`
 
-	// APIKeys references a Secret containing provider API keys.
-	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, GITHUB_COPILOT_TOKEN, etc.
+	// APIKeys references a Secret containing provider API keys and config.
+	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, XAI_API_KEY,
+	// ZAI_API_KEY, MINIMAX_API_KEY, MINIMAX_API_COMPAT, GITHUB_COPILOT_TOKEN, etc.
 	// All providers used in the fallback chain must have their API keys in this Secret.
 	// +optional
 	APIKeys *SecretRefSpec `json:"apiKeys,omitempty"`
