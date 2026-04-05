@@ -87,6 +87,7 @@ secrets:
   zaiApiKey: ""
   # MiniMax
   minimaxApiKey: ""
+  minimaxApiCompat: ""  # Empty = native API, "anthropic" = Anthropic Messages API compat
   # StackSpot
   stackspotClientId: ""
   stackspotClientKey: ""

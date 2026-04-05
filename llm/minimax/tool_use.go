@@ -23,9 +23,10 @@ import (
 // Ensure MiniMaxClient implements ToolAwareClient.
 var _ client.ToolAwareClient = (*MiniMaxClient)(nil)
 
-// SupportsNativeTools returns true — MiniMax supports native tool calling (OpenAI-compatible format).
+// SupportsNativeTools returns true for native API (OpenAI-compatible tool calling).
+// Returns false when Anthropic compat mode is enabled (different tool format, uses XML fallback).
 func (c *MiniMaxClient) SupportsNativeTools() bool {
-	return true
+	return !c.anthropicCompat
 }
 
 // SendPromptWithTools sends a prompt with tool definitions via MiniMax's native tool calling API.
