@@ -4,7 +4,7 @@ Deploy **ChatCLI** as a gRPC server on Kubernetes — a multi-provider LLM gatew
 
 ## Features
 
-- **Multi-Provider LLM**: OpenAI, Anthropic Claude, Google Gemini, xAI Grok, GitHub Copilot, StackSpot AI, Ollama (local)
+- **Multi-Provider LLM**: OpenAI, Anthropic Claude, Google Gemini, xAI Grok, ZAI (Zhipu AI), MiniMax, GitHub Copilot, StackSpot AI, Ollama (local)
 - **Automatic Failover**: Provider fallback chain with intelligent error classification (rate limit, timeout, auth error, context overflow), exponential cooldown, and health monitoring
 - **Agent Mode**: ReAct loop (Reason + Act) with 12 built-in specialized agents running in parallel — File, Coder, Shell, Git, Search, Planner, Reviewer, Tester, Refactor, Diagnostics, Formatter, Deps
 - **Coder Mode**: Specialized software engineering agent with strict tool contracts, auto-correction, git integration, and rollback support
@@ -84,12 +84,14 @@ Clients can use their own API keys (personal mode) or the server's configured pr
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `llm.provider` | Default provider: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `STACKSPOT`, `OLLAMA`, `COPILOT` | `""` |
+| `llm.provider` | Default provider: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `ZAI`, `MINIMAX`, `STACKSPOT`, `OLLAMA`, `COPILOT` | `""` |
 | `llm.model` | Model override | `""` |
 | `secrets.openaiApiKey` | OpenAI API key | `""` |
 | `secrets.anthropicApiKey` | Anthropic API key | `""` |
 | `secrets.googleaiApiKey` | Google AI API key | `""` |
 | `secrets.xaiApiKey` | xAI API key | `""` |
+| `secrets.zaiApiKey` | ZAI (Zhipu AI) API key | `""` |
+| `secrets.minimaxApiKey` | MiniMax API key | `""` |
 | `secrets.githubCopilotToken` | GitHub Copilot token | `""` |
 | `secrets.stackspotClientId` | StackSpot client ID | `""` |
 | `secrets.stackspotClientKey` | StackSpot client key | `""` |
@@ -119,6 +121,10 @@ fallback:
       model: claude-sonnet-4-20250514
     - name: GOOGLEAI
       model: gemini-2.0-flash
+    - name: ZAI
+      model: glm-4.7
+    - name: MINIMAX
+      model: MiniMax-M2.7
 ```
 
 ### gRPC Server

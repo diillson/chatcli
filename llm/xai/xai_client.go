@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -57,7 +58,7 @@ func (c *XAIClient) GetModelName() string {
 func (c *XAIClient) getMaxTokens() int {
 	if tokenStr := os.Getenv("XAI_MAX_TOKENS"); tokenStr != "" {
 		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
-			c.logger.Debug("Usando XAI_MAX_TOKENS personalizado", zap.Int("max_tokens", parsedTokens))
+			c.logger.Debug(i18n.T("llm.info.using_custom_max_tokens", "XAI_MAX_TOKENS"), zap.Int("max_tokens", parsedTokens))
 			return parsedTokens
 		}
 	}
@@ -89,8 +90,8 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
-		c.logger.Error("Erro ao marshalizar o payload para xAI", zap.Error(err))
-		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
+		c.logger.Error(i18n.T("llm.error.marshal_payload_for", "xAI"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
 
 	// Agora use Retry para encapsular a lógica de requisição e parsing
@@ -103,7 +104,7 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 	})
 
 	if err != nil {
-		c.logger.Error("Erro ao obter resposta da xAI após retries", zap.Error(err))
+		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "xAI"), zap.Error(err))
 		return "", err
 	}
 
@@ -113,7 +114,7 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 func (c *XAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, utils.NewJSONReader(jsonValue))
 	if err != nil {
-		return nil, fmt.Errorf("erro ao criar a requisição: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -125,8 +126,8 @@ func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.logger.Error("Erro ao ler a resposta da xAI", zap.Error(err))
-		return "", fmt.Errorf("erro ao ler a resposta da xAI: %w", err)
+		c.logger.Error(i18n.T("llm.error.read_response_for", "xAI"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "xAI"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -146,33 +147,32 @@ func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		c.logger.Error("Erro ao decodificar a resposta JSON da xAI", zap.Error(err), zap.Int("body_size", len(bodyBytes)))
-		return "", fmt.Errorf("erro ao decodificar a resposta da xAI: %w", err)
+		c.logger.Error(i18n.T("llm.error.decode_response_json_for", "xAI"), zap.Error(err), zap.Int("body_size", len(bodyBytes)))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "xAI"), err)
 	}
 
 	// Verificar se a API retornou um erro explícito no corpo (mesmo com status 200)
 	if result.Error.Message != "" {
-		c.logger.Error("API da xAI retornou um erro no payload", zap.String("error_message", result.Error.Message))
-		return "", fmt.Errorf("erro da API xAI: %s", result.Error.Message)
+		c.logger.Error(i18n.T("llm.error.api_error_payload", "xAI"), zap.String("error_message", result.Error.Message))
+		return "", fmt.Errorf("%s", i18n.T("llm.error.api_error", "xAI", result.Error.Message))
 	}
 
 	// Verificar se não há 'choices'
 	if len(result.Choices) == 0 {
-		c.logger.Warn("Nenhuma 'choice' na resposta da xAI.", zap.Int("body_size", len(bodyBytes)))
-		return "", errors.New("a API da xAI não retornou nenhuma resposta (array 'choices' vazio)")
+		c.logger.Warn(i18n.T("llm.warn.empty_choices", "xAI"), zap.Int("body_size", len(bodyBytes)))
+		return "", errors.New(i18n.T("llm.error.no_choices", "xAI"))
 	}
 
 	firstChoice := result.Choices[0]
 	if firstChoice.Message.Content == "" {
-		c.logger.Warn("Resposta da xAI com conteúdo vazio.",
+		c.logger.Warn(i18n.T("llm.warn.empty_content", "xAI"),
 			zap.String("finish_reason", firstChoice.FinishReason),
 			zap.Int("body_size", len(bodyBytes)))
 
-		// Retorna um erro amigável para o usuário
 		if firstChoice.FinishReason == "length" {
-			return "", errors.New("a API da xAI retornou uma resposta vazia, provavelmente porque o valor de 'max_tokens' é muito baixo")
+			return "", errors.New(i18n.T("llm.error.empty_response_max_tokens", "xAI"))
 		}
-		return "", errors.New("a API da xAI retornou uma resposta vazia por um motivo não especificado")
+		return "", errors.New(i18n.T("llm.error.empty_response_unspecified", "xAI"))
 	}
 
 	return firstChoice.Message.Content, nil
@@ -185,23 +185,23 @@ func (c *XAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch xAI models: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "xAI"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "xAI"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("xAI /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+		return nil, fmt.Errorf("%s: %d: %s", i18n.T("llm.error.request_failed", "xAI"), resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
 	}
 
 	var result struct {
@@ -211,7 +211,7 @@ func (c *XAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) 
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "xAI"), err)
 	}
 
 	var modelList []client.ModelInfo
@@ -233,6 +233,6 @@ func (c *XAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) 
 		}
 	}
 
-	c.logger.Info("Fetched xAI models", zap.Int("count", len(modelList)))
+	c.logger.Info(i18n.T("llm.info.fetched_models", "xAI"), zap.Int("count", len(modelList)))
 	return modelList, nil
 }

@@ -8,6 +8,7 @@ package openai_assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -79,7 +81,7 @@ func NewOpenAIAssistantClient(apiKey, model string, logger *zap.Logger) (*OpenAI
 	// Criar o diretório de cache se não existir
 	cacheDir := filepath.Join(os.TempDir(), "chatcli-openai-cache")
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
-		return nil, fmt.Errorf("erro ao criar diretório de cache: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.assistant.create_cache_dir_error"), err)
 	}
 
 	assistantClient := &OpenAIAssistantClient{
@@ -119,11 +121,11 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 		threadID, err := c.createThread(ctx)
 		if err != nil {
 			c.mu.Unlock()
-			return "", fmt.Errorf("erro ao criar thread: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.create_thread_error"), err)
 		}
 		c.currentThreadID = threadID
 		c.activeThreads[threadID] = time.Now()
-		c.logger.Info("Thread criada", zap.String("threadID", threadID))
+		c.logger.Info(i18n.T("llm.assistant.thread_created"), zap.String("threadID", threadID))
 	}
 
 	threadID := c.currentThreadID
@@ -131,19 +133,19 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 
 	// Adicionar a mensagem ao thread
 	if err := c.addMessageToThread(ctx, threadID, prompt); err != nil {
-		c.logger.Error("Erro ao adicionar mensagem ao thread",
+		c.logger.Error(i18n.T("llm.assistant.add_message_error"),
 			zap.String("threadID", threadID),
 			zap.Error(err))
-		return "", fmt.Errorf("erro ao adicionar mensagem ao thread: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.add_message_error"), err)
 	}
 
 	// Executar o assistente no thread
 	runID, err := c.runAssistant(ctx, threadID)
 	if err != nil {
-		c.logger.Error("Erro ao executar o assistente",
+		c.logger.Error(i18n.T("llm.assistant.run_error"),
 			zap.String("threadID", threadID),
 			zap.Error(err))
-		return "", fmt.Errorf("erro ao executar o assistente: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.run_error"), err)
 	}
 
 	c.logger.Debug("Assistente executando",
@@ -153,42 +155,42 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 	// Aguardar a conclusão da execução
 	runStatus, err := c.waitForRunCompletion(ctx, threadID, runID)
 	if err != nil {
-		c.logger.Error("Erro ao aguardar resposta",
+		c.logger.Error(i18n.T("llm.assistant.wait_response_error"),
 			zap.String("threadID", threadID),
 			zap.String("runID", runID),
 			zap.Error(err))
 
 		// Se for um erro de timeout, podemos tentar recuperar parcialmente
 		if strings.Contains(err.Error(), "timeout") {
-			c.logger.Warn("Tentando recuperar mensagens após timeout",
+			c.logger.Warn(i18n.T("llm.assistant.timeout_recovery"),
 				zap.String("threadID", threadID))
 
 			// Tentar obter a última resposta mesmo com timeout
 			partialResponse, getErr := c.getLatestResponse(ctx, threadID)
 			if getErr == nil && partialResponse != "" {
-				c.logger.Info("Resposta parcial recuperada com sucesso após timeout")
-				return fmt.Sprintf("[Resposta parcial devido a timeout] %s", partialResponse), nil
+				c.logger.Info(i18n.T("llm.assistant.partial_response"))
+				return i18n.T("llm.assistant.partial_response_prefix", partialResponse), nil
 			}
 		}
 
-		return "", fmt.Errorf("erro ao aguardar resposta: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.wait_response_error"), err)
 	}
 
 	if runStatus != "completed" {
-		c.logger.Error("Execução do assistente falhou",
+		c.logger.Error(i18n.T("llm.assistant.run_failed", runStatus),
 			zap.String("threadID", threadID),
 			zap.String("runID", runID),
 			zap.String("status", runStatus))
-		return "", fmt.Errorf("execução do assistente falhou: %s", runStatus)
+		return "", fmt.Errorf("%s", i18n.T("llm.assistant.run_failed", runStatus))
 	}
 
 	// Obter a resposta
 	response, err := c.getLatestResponse(ctx, threadID)
 	if err != nil {
-		c.logger.Error("Erro ao obter resposta",
+		c.logger.Error(i18n.T("llm.assistant.get_response_error"),
 			zap.String("threadID", threadID),
 			zap.Error(err))
-		return "", fmt.Errorf("erro ao obter resposta: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.get_response_error"), err)
 	}
 
 	return response, nil
@@ -211,7 +213,7 @@ func (c *OpenAIAssistantClient) Cleanup() error {
 	// Tenta finalizar qualquer run ativo na thread
 	c.finishActiveRuns(ctx, threadID)
 
-	c.logger.Info("Limpeza de recursos do OpenAI Assistant realizada")
+	c.logger.Info(i18n.T("llm.assistant.cleanup_done"))
 	return nil
 }
 
@@ -221,7 +223,7 @@ func (c *OpenAIAssistantClient) finishActiveRuns(ctx context.Context, threadID s
 	endpoint := fmt.Sprintf("/threads/%s/runs?limit=10", threadID)
 	resp, err := c.client.Get(ctx, endpoint)
 	if err != nil {
-		c.logger.Warn("Erro ao listar runs para limpeza", zap.Error(err))
+		c.logger.Warn(i18n.T("llm.assistant.list_runs_error"), zap.Error(err))
 		return
 	}
 
@@ -233,7 +235,7 @@ func (c *OpenAIAssistantClient) finishActiveRuns(ctx context.Context, threadID s
 	}
 
 	if err := json.Unmarshal(resp, &runsResponse); err != nil {
-		c.logger.Warn("Erro ao decodificar resposta de runs", zap.Error(err))
+		c.logger.Warn(i18n.T("llm.assistant.decode_runs_error"), zap.Error(err))
 		return
 	}
 
@@ -243,11 +245,11 @@ func (c *OpenAIAssistantClient) finishActiveRuns(ctx context.Context, threadID s
 			cancelEndpoint := fmt.Sprintf("/threads/%s/runs/%s/cancel", threadID, run.ID)
 			_, err := c.client.Post(ctx, cancelEndpoint, nil)
 			if err != nil {
-				c.logger.Warn("Erro ao cancelar run",
+				c.logger.Warn(i18n.T("llm.assistant.cancel_run_error"),
 					zap.String("runID", run.ID),
 					zap.Error(err))
 			} else {
-				c.logger.Info("Run cancelado com sucesso", zap.String("runID", run.ID))
+				c.logger.Info(i18n.T("llm.assistant.run_cancelled"), zap.String("runID", run.ID))
 			}
 		}
 	}
@@ -261,7 +263,7 @@ func (c *OpenAIAssistantClient) initializeAssistant() error {
 		// Verificar se o assistente ainda existe
 		if c.verifyAssistantExists(context.Background(), assistantID) {
 			c.assistantID = assistantID
-			c.logger.Info("Assistente recuperado do cache", zap.String("assistantID", assistantID))
+			c.logger.Info(i18n.T("llm.assistant.recovered_from_cache"), zap.String("assistantID", assistantID))
 			return nil
 		}
 	}
@@ -286,7 +288,7 @@ func (c *OpenAIAssistantClient) initializeAssistant() error {
 
 	resp, err := c.client.Post(ctx, "/assistants", payload)
 	if err != nil {
-		return fmt.Errorf("erro ao criar assistente: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("llm.assistant.create_error"), err)
 	}
 
 	var assistant struct {
@@ -294,17 +296,17 @@ func (c *OpenAIAssistantClient) initializeAssistant() error {
 	}
 
 	if err := json.Unmarshal(resp, &assistant); err != nil {
-		return fmt.Errorf("erro ao decodificar resposta do assistente: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("llm.assistant.decode_response_error"), err)
 	}
 
 	c.assistantID = assistant.ID
 
 	// Salvar no cache
 	if err := c.saveAssistantIDToCache(assistant.ID); err != nil {
-		c.logger.Warn("Não foi possível salvar assistantID no cache", zap.Error(err))
+		c.logger.Warn(i18n.T("llm.assistant.cache_save_failed"), zap.Error(err))
 	}
 
-	c.logger.Info("Novo assistente criado", zap.String("assistantID", assistant.ID))
+	c.logger.Info(i18n.T("llm.assistant.new_created"), zap.String("assistantID", assistant.ID))
 	return nil
 }
 
@@ -333,7 +335,7 @@ func (c *OpenAIAssistantClient) loadAssistantIDFromCache() (string, error) {
 
 	// Verificar se o modelo mudou - se sim, criar novo assistente
 	if cache.Model != c.model {
-		return "", fmt.Errorf("modelo diferente do cache")
+		return "", errors.New(i18n.T("llm.assistant.model_different"))
 	}
 
 	return cache.AssistantID, nil
@@ -408,7 +410,7 @@ func (r *FileRegistry) loadCache() {
 
 	// Verificar se o arquivo de cache existe
 	if _, err := os.Stat(r.cachePath); os.IsNotExist(err) {
-		r.logger.Info("Arquivo de cache não encontrado, criando novo registro",
+		r.logger.Info(i18n.T("llm.assistant.cache_not_found"),
 			zap.String("path", r.cachePath))
 		return
 	}
@@ -416,7 +418,7 @@ func (r *FileRegistry) loadCache() {
 	// Abrir e ler o arquivo
 	data, err := os.ReadFile(r.cachePath)
 	if err != nil {
-		r.logger.Warn("Erro ao ler arquivo de cache", zap.Error(err))
+		r.logger.Warn(i18n.T("llm.assistant.cache_read_error"), zap.Error(err))
 		return
 	}
 
@@ -429,7 +431,7 @@ func (r *FileRegistry) loadCache() {
 	}
 
 	if err := json.Unmarshal(data, &cache); err != nil {
-		r.logger.Warn("Erro ao decodificar cache", zap.Error(err))
+		r.logger.Warn(i18n.T("llm.assistant.cache_decode_error"), zap.Error(err))
 		return
 	}
 
@@ -448,7 +450,7 @@ func (r *FileRegistry) loadCache() {
 	r.TotalSize = validSize
 	r.assistantID = cache.AssistantID
 
-	r.logger.Info("Cache carregado com sucesso",
+	r.logger.Info(i18n.T("llm.assistant.cache_loaded"),
 		zap.Int("file_count", len(r.Files)),
 		zap.Int64("total_size", r.TotalSize))
 }
@@ -461,7 +463,7 @@ func (r *FileRegistry) saveCache() {
 	// Criar o diretório do cache se não existir
 	cacheDir := filepath.Dir(r.cachePath)
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
-		r.logger.Warn("Erro ao criar diretório de cache",
+		r.logger.Warn(i18n.T("llm.assistant.cache_dir_error"),
 			zap.String("dir", cacheDir),
 			zap.Error(err))
 		return
@@ -483,17 +485,17 @@ func (r *FileRegistry) saveCache() {
 	// Codificar os dados
 	data, err := json.MarshalIndent(cache, "", "  ")
 	if err != nil {
-		r.logger.Warn("Erro ao codificar cache", zap.Error(err))
+		r.logger.Warn(i18n.T("llm.assistant.cache_encode_error"), zap.Error(err))
 		return
 	}
 
 	// Salvar no arquivo
 	if err := os.WriteFile(r.cachePath, data, 0o600); err != nil {
-		r.logger.Warn("Erro ao salvar cache", zap.Error(err))
+		r.logger.Warn(i18n.T("llm.assistant.cache_save_error"), zap.Error(err))
 		return
 	}
 
-	r.logger.Debug("Cache salvo com sucesso",
+	r.logger.Debug(i18n.T("llm.assistant.cache_saved"),
 		zap.String("path", r.cachePath),
 		zap.Int("file_count", len(r.Files)))
 }
@@ -512,7 +514,7 @@ func (c *OpenAIAssistantClient) createThread(ctx context.Context) (string, error
 	}
 
 	if err := json.Unmarshal(resp, &response); err != nil {
-		return "", fmt.Errorf("erro ao decodificar resposta: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.decode_response"), err)
 	}
 
 	return response.ID, nil
@@ -545,7 +547,7 @@ func (c *OpenAIAssistantClient) runAssistant(ctx context.Context, threadID strin
 	}
 
 	if err := json.Unmarshal(resp, &response); err != nil {
-		return "", fmt.Errorf("erro ao decodificar resposta: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.decode_response"), err)
 	}
 
 	return response.ID, nil
@@ -568,14 +570,14 @@ func (c *OpenAIAssistantClient) waitForRunCompletion(ctx context.Context, thread
 		}
 
 		if err := json.Unmarshal(resp, &runStatus); err != nil {
-			return "", fmt.Errorf("erro ao decodificar status: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.decode_status"), err)
 		}
 
 		switch runStatus.Status {
 		case "completed":
 			return "completed", nil
 		case "failed", "cancelled", "expired":
-			return runStatus.Status, fmt.Errorf("execução falhou com status: %s", runStatus.Status)
+			return runStatus.Status, fmt.Errorf("%s", i18n.T("llm.assistant.execution_failed", runStatus.Status))
 		}
 
 		// Backoff exponencial com limite máximo
@@ -589,7 +591,7 @@ func (c *OpenAIAssistantClient) waitForRunCompletion(ctx context.Context, thread
 		}
 	}
 
-	return "", fmt.Errorf("timeout ao aguardar conclusão")
+	return "", errors.New(i18n.T("llm.assistant.timeout_waiting"))
 }
 
 // Obter a última resposta do assistente
@@ -612,11 +614,11 @@ func (c *OpenAIAssistantClient) getLatestResponse(ctx context.Context, threadID 
 	}
 
 	if err := json.Unmarshal(resp, &response); err != nil {
-		return "", fmt.Errorf("erro ao decodificar mensagens: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.decode_messages"), err)
 	}
 
 	if len(response.Data) == 0 || response.Data[0].Role != "assistant" {
-		return "", fmt.Errorf("nenhuma resposta do assistente encontrada")
+		return "", errors.New(i18n.T("llm.assistant.no_assistant_response"))
 	}
 
 	var fullResponse strings.Builder

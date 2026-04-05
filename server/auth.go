@@ -10,6 +10,7 @@ import (
 	"crypto/subtle"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -62,26 +63,26 @@ func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) err
 
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		a.logger.Warn("Missing metadata in request", zap.String("method", method))
-		return status.Error(codes.Unauthenticated, "missing metadata")
+		a.logger.Warn(i18n.T("server.auth.metadata_warn"), zap.String("method", method))
+		return status.Errorf(codes.Unauthenticated, "%s", i18n.T("server.auth.missing_metadata"))
 	}
 
 	values := md.Get("authorization")
 	if len(values) == 0 {
-		a.logger.Warn("Missing authorization header", zap.String("method", method))
-		return status.Error(codes.Unauthenticated, "missing authorization header")
+		a.logger.Warn(i18n.T("server.auth.authorization_warn"), zap.String("method", method))
+		return status.Errorf(codes.Unauthenticated, "%s", i18n.T("server.auth.missing_authorization"))
 	}
 
 	token := values[0]
 	if !strings.HasPrefix(token, "Bearer ") {
-		a.logger.Warn("Invalid authorization format", zap.String("method", method))
-		return status.Error(codes.Unauthenticated, "invalid authorization format, expected 'Bearer <token>'")
+		a.logger.Warn(i18n.T("server.auth.format_warn"), zap.String("method", method))
+		return status.Errorf(codes.Unauthenticated, "%s", i18n.T("server.auth.invalid_format"))
 	}
 
 	token = strings.TrimPrefix(token, "Bearer ")
 	if subtle.ConstantTimeCompare([]byte(token), []byte(a.token)) != 1 {
-		a.logger.Warn("Invalid token", zap.String("method", method))
-		return status.Error(codes.PermissionDenied, "invalid token")
+		a.logger.Warn(i18n.T("server.auth.token_warn"), zap.String("method", method))
+		return status.Errorf(codes.PermissionDenied, "%s", i18n.T("server.auth.invalid_token"))
 	}
 
 	return nil

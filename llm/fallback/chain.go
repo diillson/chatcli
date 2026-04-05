@@ -2,11 +2,13 @@ package fallback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
@@ -128,7 +130,7 @@ func (c *Chain) SendPrompt(ctx context.Context, prompt string, history []models.
 		}
 
 		if !c.isAvailable(entry.Provider) {
-			c.logger.Debug("skipping provider (cooldown)",
+			c.logger.Debug(i18n.T("llm.fallback.skipping_cooldown"),
 				zap.String("provider", entry.Provider))
 			continue
 		}
@@ -145,7 +147,7 @@ func (c *Chain) SendPrompt(ctx context.Context, prompt string, history []models.
 			}
 
 			errClass := ClassifyError(err)
-			c.logger.Warn("provider request failed",
+			c.logger.Warn(i18n.T("llm.fallback.request_failed"),
 				zap.String("provider", entry.Provider),
 				zap.Int("attempt", attempt+1),
 				zap.String("error_class", errClass.String()),
@@ -176,9 +178,9 @@ func (c *Chain) SendPrompt(ctx context.Context, prompt string, history []models.
 	}
 
 	if lastErr != nil {
-		return "", fmt.Errorf("all providers failed; last error: %w", lastErr)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.fallback.all_failed"), lastErr)
 	}
-	return "", fmt.Errorf("no providers available in fallback chain")
+	return "", errors.New(i18n.T("llm.fallback.no_providers"))
 }
 
 // SendPromptWithTools attempts tool-aware requests through the chain.
@@ -195,7 +197,7 @@ func (c *Chain) SendPromptWithTools(ctx context.Context, prompt string, history 
 
 		tac, ok := client.AsToolAware(entry.Client)
 		if !ok {
-			c.logger.Debug("provider does not support native tools, skipping",
+			c.logger.Debug(i18n.T("llm.fallback.no_native_tools"),
 				zap.String("provider", entry.Provider))
 			continue
 		}
@@ -233,9 +235,9 @@ func (c *Chain) SendPromptWithTools(ctx context.Context, prompt string, history 
 	}
 
 	if lastErr != nil {
-		return nil, fmt.Errorf("all providers failed; last error: %w", lastErr)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.fallback.all_failed"), lastErr)
 	}
-	return nil, fmt.Errorf("no tool-aware providers available in fallback chain")
+	return nil, errors.New(i18n.T("llm.fallback.no_tool_providers"))
 }
 
 // GetHealth returns health status for all providers.

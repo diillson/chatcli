@@ -101,7 +101,7 @@ func TestLLMManager_GetClient(t *testing.T) {
 		client, err := mgr.GetClient("BARD", "")
 		assert.Error(t, err)
 		assert.Nil(t, client)
-		assert.Contains(t, err.Error(), "não suportado ou não configurado")
+		assert.Contains(t, err.Error(), "BARD")
 	})
 
 	t.Run("Provider not configured", func(t *testing.T) {
@@ -113,7 +113,7 @@ func TestLLMManager_GetClient(t *testing.T) {
 		client, err := mgr.GetClient("OPENAI", "gpt-4o")
 		assert.Error(t, err)
 		assert.Nil(t, client)
-		assert.Contains(t, err.Error(), "não suportado ou não configurado")
+		assert.Contains(t, err.Error(), "OPENAI")
 	})
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/fallback"
 	"github.com/diillson/chatcli/llm/manager"
@@ -136,7 +137,7 @@ func (h *Handler) enrichPrompt(prompt string) string {
 	if ctx == "" {
 		return prompt
 	}
-	return ctx + "\n\nUser Question: " + prompt
+	return ctx + i18n.T("server.handler.user_question_prefix") + prompt
 }
 
 // getClient resolves the LLM client to use, optionally overriding provider/model.
@@ -158,14 +159,14 @@ func (h *Handler) getClient(provider, model, clientAPIKey string, providerConfig
 
 	// Client-forwarded credentials with provider-specific config (StackSpot, Ollama, etc.)
 	if len(providerConfig) > 0 {
-		h.logger.Info("Using client-provided config",
+		h.logger.Info(i18n.T("server.handler.client_config"),
 			zap.String("provider", provider),
 			zap.Int("config_keys", len(providerConfig)),
 		)
 		c, err = h.llmManager.CreateClientWithConfig(provider, model, clientAPIKey, providerConfig)
 	} else if clientAPIKey != "" {
 		// Client-forwarded API key only (OpenAI, Claude, Google, xAI)
-		h.logger.Info("Using client-provided API key",
+		h.logger.Info(i18n.T("server.handler.client_api_key"),
 			zap.String("provider", provider),
 		)
 		c, err = h.llmManager.CreateClientWithKey(provider, model, clientAPIKey)

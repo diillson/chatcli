@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/k8s"
 	"github.com/diillson/chatcli/llm/manager"
 	"go.uber.org/zap"
@@ -56,7 +57,7 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 
 	if opts.Deployment == "" && opts.ConfigFile == "" {
 		PrintWatchUsage()
-		return fmt.Errorf("deployment name or config file required (use --deployment or --config)")
+		return fmt.Errorf("%s", i18n.T("cmd.watch.deployment_required"))
 	}
 
 	// Build multi-watch config (single-target or multi-target)
@@ -65,7 +66,7 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 	if opts.ConfigFile != "" {
 		mcfg, err := k8s.LoadMultiWatchConfig(opts.ConfigFile)
 		if err != nil {
-			return fmt.Errorf("failed to load watch config: %w", err)
+			return fmt.Errorf("%s: %w", i18n.T("cmd.watch.config_failed"), err)
 		}
 		if opts.Kubeconfig != "" {
 			mcfg.Kubeconfig = opts.Kubeconfig
@@ -85,7 +86,7 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 
 	mw, err := k8s.NewMultiWatcher(multiCfg, logger)
 	if err != nil {
-		return fmt.Errorf("failed to create K8s watcher: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("cmd.watch.create_failed"), err)
 	}
 
 	stores := mw.GetStores()
@@ -118,17 +119,16 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 		}()
 
 		if err := mw.Start(watchCtx); err != nil && err != context.Canceled {
-			logger.Error("K8s watcher stopped with error", zap.Error(err))
+			logger.Error(i18n.T("cmd.watch.error"), zap.Error(err))
 		}
 	}()
 
-	fmt.Printf("Starting K8s watcher: %d targets (interval: %s, window: %s)\n",
-		mw.TargetCount(), multiCfg.Interval, multiCfg.Window)
+	fmt.Println(i18n.T("cmd.watch.starting", mw.TargetCount(), multiCfg.Interval, multiCfg.Window))
 
 	// Wait for first data collection
 	select {
 	case <-watcherReady:
-		fmt.Println("Initial data collected. K8s context will be injected into all prompts.")
+		fmt.Println(i18n.T("cmd.watch.data_collected"))
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -141,18 +141,18 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 	// Interactive mode
 	chatCLI, err := cli.NewChatCLI(llmMgr, logger)
 	if err != nil {
-		return fmt.Errorf("failed to initialize ChatCLI: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("cmd.watch.init_failed"), err)
 	}
 
 	if err := chatCLI.ApplyOverrides(llmMgr, opts.Provider, opts.Model); err != nil {
-		return fmt.Errorf("failed to apply provider/model overrides: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("cmd.watch.override_failed"), err)
 	}
 
 	chatCLI.WatcherContextFunc = multiSum.GenerateContext
 	chatCLI.SetWatching(true, multiSum.GenerateStatusSummary)
 
-	fmt.Println("Type your questions about the deployments. K8s context is automatically included.")
-	fmt.Printf("Use /watch to see current status.\n\n")
+	fmt.Println(i18n.T("cmd.watch.interactive_hint"))
+	fmt.Print(i18n.T("cmd.watch.interactive_hint2"))
 
 	chatCLI.Start(ctx)
 	return nil
@@ -169,14 +169,14 @@ func runWatchOneShot(ctx context.Context, opts *WatchOptions, cg contextGenerato
 	if provider == "" {
 		available := llmMgr.GetAvailableProviders()
 		if len(available) == 0 {
-			return fmt.Errorf("no LLM provider configured")
+			return fmt.Errorf("%s", i18n.T("cmd.watch.no_provider"))
 		}
 		provider = available[0]
 	}
 
 	llmClient, err := llmMgr.GetClient(provider, opts.Model)
 	if err != nil {
-		return fmt.Errorf("failed to create LLM client: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("cmd.watch.llm_client_failed"), err)
 	}
 
 	k8sContext := cg.GenerateContext()
@@ -184,7 +184,7 @@ func runWatchOneShot(ctx context.Context, opts *WatchOptions, cg contextGenerato
 
 	response, err := llmClient.SendPrompt(ctx, fullPrompt, nil, opts.MaxTokens)
 	if err != nil {
-		return fmt.Errorf("LLM request failed: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("cmd.watch.llm_request_failed"), err)
 	}
 
 	fmt.Println(response)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -123,7 +124,7 @@ func TestPollForToken_Expired(t *testing.T) {
 	if err == nil {
 		t.Error("expected error from expired device code")
 	}
-	if err != nil && err.Error() != "device code expired; please try again" {
+	if err != nil && !strings.Contains(err.Error(), "device code expired") && !strings.Contains(err.Error(), "auth.copilot.code_expired") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

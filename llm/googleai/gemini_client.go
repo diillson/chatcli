@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -46,7 +47,7 @@ func NewGeminiClient(apiKey, model string, logger *zap.Logger, maxAttempts int, 
 	}
 
 	// Log de inicialização
-	logger.Info("Inicializando cliente Google AI (Gemini)",
+	logger.Info(i18n.T("llm.info.initializing_client", "Google AI (Gemini)"),
 		zap.String("model", model),
 		zap.Int("max_attempts", maxAttempts),
 		zap.Duration("backoff", backoff),
@@ -77,7 +78,7 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 	}
 
 	// ... (lógica de build do payload, logs, etc., permanece a mesma)
-	c.logger.Info("Iniciando requisição para Google AI",
+	c.logger.Info(i18n.T("llm.info.starting_request", "Google AI"),
 		zap.String("model", c.model),
 		zap.Int("history_length", len(history)),
 		zap.Int("prompt_length", len(prompt)))
@@ -113,8 +114,8 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 
 	jsonValue, err := json.Marshal(reqBody)
 	if err != nil {
-		c.logger.Error("Erro ao marshalizar o payload para Google AI", zap.Error(err), zap.String("model", c.model))
-		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
+		c.logger.Error(i18n.T("llm.error.marshal_payload_for", "Google AI"), zap.Error(err), zap.String("model", c.model))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
 
 	c.logger.Debug("Payload preparado", zap.Int("payload_size", len(jsonValue)), zap.String("model", c.model))
@@ -129,11 +130,11 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 	})
 
 	if err != nil {
-		c.logger.Error("Erro ao obter resposta do Google AI após retries", zap.Error(err))
+		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Google AI"), zap.Error(err))
 		return "", err
 	}
 
-	c.logger.Info("Resposta recebida do Google AI com sucesso",
+	c.logger.Info(i18n.T("llm.info.response_received", "Google AI"),
 		zap.Int("response_length", len(response)))
 	return response, nil
 }
@@ -185,10 +186,10 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(jsonValue)))
 	if err != nil {
-		c.logger.Error("Erro ao criar requisição HTTP para Google AI",
+		c.logger.Error(i18n.T("llm.error.create_request_for", "Google AI"),
 			zap.Error(err),
 			zap.String("model", c.model))
-		return "", fmt.Errorf("erro ao criar requisição: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -199,12 +200,12 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 	duration := time.Since(startTime)
 
 	if err != nil {
-		c.logger.Error("Erro na requisição HTTP para Google AI",
+		c.logger.Error(i18n.T("llm.error.request_failed", "Google AI"),
 			zap.Error(err),
 			zap.Duration("duration", duration),
 			zap.String("model", c.model))
 
-		return "", fmt.Errorf("erro na requisição para Google AI: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "Google AI"), err)
 	}
 	defer resp.Body.Close()
 
@@ -215,10 +216,10 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.logger.Error("Erro ao ler corpo da resposta do Google AI",
+		c.logger.Error(i18n.T("llm.error.read_body", "Google AI"),
 			zap.Error(err),
 			zap.String("model", c.model))
-		return "", fmt.Errorf("erro ao ler resposta: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.read_response"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -262,31 +263,31 @@ func (c *GeminiClient) parseResponse(bodyBytes []byte) (string, error) {
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		sanitizedResponse := c.sanitizeErrorResponse(string(bodyBytes))
 
-		c.logger.Error("Erro ao decodificar resposta JSON do Google AI",
+		c.logger.Error(i18n.T("llm.googleai.decode_error"),
 			zap.Error(err),
 			zap.String("model", c.model),
 			zap.String("raw_response", sanitizedResponse[:min(500, len(sanitizedResponse))]))
-		return "", fmt.Errorf("erro ao decodificar resposta: %w", err)
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response"), err)
 	}
 
 	// Verificar se há erro na resposta
 	if result.Error.Code != 0 {
-		c.logger.Error("Erro retornado pela API do Google AI",
+		c.logger.Error(i18n.T("llm.googleai.api_error"),
 			zap.Int("error_code", result.Error.Code),
 			zap.String("error_message", result.Error.Message),
 			zap.String("error_status", result.Error.Status),
 			zap.String("model", c.model))
-		return "", fmt.Errorf("erro da API: %s (código: %d)", result.Error.Message, result.Error.Code)
+		return "", fmt.Errorf("%s", i18n.T("llm.googleai.api_error_msg", result.Error.Message, result.Error.Code))
 	}
 
 	if len(result.Candidates) == 0 {
-		c.logger.Error("Nenhum candidato na resposta do Google AI",
+		c.logger.Error(i18n.T("llm.googleai.no_candidates"),
 			zap.String("model", c.model))
-		return "", fmt.Errorf("nenhuma resposta recebida do Google AI")
+		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "Google AI"))
 	}
 
 	// Log detalhado de uso de tokens
-	c.logger.Info("Estatísticas de uso de tokens do Google AI",
+	c.logger.Info(i18n.T("llm.info.token_usage_stats", "Google AI"),
 		zap.Int("prompt_tokens", result.UsageMetadata.PromptTokenCount),
 		zap.Int("response_tokens", result.UsageMetadata.CandidatesTokenCount),
 		zap.Int("total_tokens", result.UsageMetadata.TotalTokenCount),
@@ -322,12 +323,12 @@ func (c *GeminiClient) parseResponse(bodyBytes []byte) (string, error) {
 		zap.String("model", c.model))
 
 	if responseText.Len() == 0 {
-		c.logger.Error("Resposta vazia do Google AI",
+		c.logger.Error(i18n.T("llm.error.empty_response", "Google AI"),
 			zap.String("model", c.model))
-		return "", fmt.Errorf("resposta vazia do Google AI")
+		return "", fmt.Errorf("%s", i18n.T("llm.error.empty_response", "Google AI"))
 	}
 
-	c.logger.Info("Parse da resposta do Google AI concluído com sucesso",
+	c.logger.Info(i18n.T("llm.info.parse_complete", "Google AI"),
 		zap.Int("response_length", responseText.Len()),
 		zap.String("model", c.model))
 
@@ -381,19 +382,19 @@ func (c *GeminiClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("x-goog-api-key", c.apiKey)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch Google AI models: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "Google AI"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "Google AI"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -408,7 +409,7 @@ func (c *GeminiClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "Google AI"), err)
 	}
 
 	var modelList []client.ModelInfo
@@ -449,7 +450,7 @@ func (c *GeminiClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		}
 	}
 
-	c.logger.Info("Fetched Google AI models", zap.Int("count", len(modelList)))
+	c.logger.Info(i18n.T("llm.info.fetched_models", "Google AI"), zap.Int("count", len(modelList)))
 	return modelList, nil
 }
 

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -115,6 +116,13 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempt
 	} else {
 		httpClient = utils.NewHTTPClient(logger, 900*time.Second)
 	}
+	// Allow overriding the API URL via ANTHROPIC_BASE_URL (e.g., for MiniMax Anthropic-compatible endpoint)
+	apiURL := config.ClaudeAIAPIURL
+	if baseURL := os.Getenv("ANTHROPIC_BASE_URL"); baseURL != "" {
+		apiURL = strings.TrimRight(baseURL, "/") + "/v1/messages"
+		logger.Info(i18n.T("llm.info.using_custom_base_url", "Anthropic", apiURL))
+	}
+
 	return &ClaudeClient{
 		apiKey:      apiKey,
 		model:       strings.ToLower(model),
@@ -122,7 +130,7 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempt
 		client:      httpClient,
 		maxAttempts: maxAttempts,
 		backoff:     backoff,
-		apiURL:      config.ClaudeAIAPIURL,
+		apiURL:      apiURL,
 	}
 }
 
@@ -173,8 +181,8 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 
 	jsonValue, err := json.Marshal(reqBody)
 	if err != nil {
-		c.logger.Error("Erro ao marshalizar o payload", zap.Error(err))
-		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
+		c.logger.Error(i18n.T("llm.error.marshal_payload"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
 
 	if isOAuth {
@@ -190,7 +198,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
 		if err != nil {
-			return "", fmt.Errorf("erro ao criar a requisição: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 		}
 		req = req.WithContext(context.WithValue(req.Context(), oauthModelKey{}, c.model))
 
@@ -221,7 +229,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	})
 
 	if err != nil {
-		c.logger.Error("Erro ao obter resposta da Claude AI após retries", zap.Error(err))
+		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Claude AI"), zap.Error(err))
 		return "", err
 	}
 
@@ -239,8 +247,8 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.logger.Error("Erro ao ler a resposta da ClaudeAI", zap.Error(err))
-		return "", fmt.Errorf("erro ao ler a resposta: %w", err)
+		c.logger.Error(i18n.T("llm.error.read_response_for", "ClaudeAI"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.read_response"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -255,8 +263,8 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		c.logger.Error("Erro ao decodificar a resposta da ClaudeAI", zap.Error(err))
-		return "", fmt.Errorf("erro ao decodificar a resposta: %w", err)
+		c.logger.Error(i18n.T("llm.error.decode_response_for", "ClaudeAI"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response"), err)
 	}
 
 	var responseText string
@@ -267,8 +275,8 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	if responseText == "" {
-		c.logger.Error("Nenhum conteúdo de texto encontrado na resposta da ClaudeAI")
-		return "", fmt.Errorf("erro ao obter a resposta da ClaudeAI")
+		c.logger.Error(i18n.T("llm.error.no_text_content", "ClaudeAI"))
+		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "ClaudeAI"))
 	}
 
 	return responseText, nil
@@ -298,7 +306,7 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response) (string, error
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil && err != io.EOF {
-			return "", fmt.Errorf("erro ao ler stream: %w", err)
+			return "", fmt.Errorf("%s: %w", i18n.T("llm.error.read_stream"), err)
 		}
 		if len(line) == 0 && err == io.EOF {
 			break
@@ -343,8 +351,8 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response) (string, error
 
 	responseText := out.String()
 	if responseText == "" {
-		c.logger.Error("Nenhum conteúdo de texto encontrado na resposta da ClaudeAI (stream)")
-		return "", fmt.Errorf("erro ao obter a resposta da ClaudeAI")
+		c.logger.Error(i18n.T("llm.error.no_text_content_stream", "ClaudeAI"))
+		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "ClaudeAI"))
 	}
 
 	return responseText, nil
@@ -568,7 +576,7 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 
 	if isOAuth {
@@ -586,7 +594,7 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch Anthropic models: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "Anthropic"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -595,7 +603,7 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 	if isOAuth {
 		decodedBody, err := decodeResponseBody(resp)
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode response body: %w", err)
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.tool.error.decoding_response_body"), err)
 		}
 		defer func() { _ = decodedBody.Close() }()
 		bodyReader = decodedBody
@@ -603,7 +611,7 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 
 	bodyBytes, err := io.ReadAll(bodyReader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "Anthropic"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -618,7 +626,7 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "Anthropic"), err)
 	}
 
 	var modelList []client.ModelInfo
@@ -645,7 +653,7 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		}
 	}
 
-	c.logger.Info("Fetched Anthropic models", zap.Int("count", len(modelList)))
+	c.logger.Info(i18n.T("llm.info.fetched_models", "Anthropic"), zap.Int("count", len(modelList)))
 	return modelList, nil
 }
 
@@ -677,6 +685,6 @@ func decodeResponseBody(resp *http.Response) (io.ReadCloser, error) {
 		}, nil
 	default:
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("content-encoding nao suportado: %s", encoding)
+		return nil, fmt.Errorf("%s", i18n.T("llm.error.content_encoding_unsupported", encoding))
 	}
 }

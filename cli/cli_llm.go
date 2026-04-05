@@ -396,11 +396,20 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	if newProvider == "XAI" {
 		newModel = utils.GetEnvOrDefault("XAI_MODEL", config.DefaultXAIModel)
 	}
+	if newProvider == "ZAI" {
+		newModel = utils.GetEnvOrDefault("ZAI_MODEL", config.DefaultZAIModel)
+	}
+	if newProvider == "MINIMAX" {
+		newModel = utils.GetEnvOrDefault("MINIMAX_MODEL", config.DefaultMiniMaxModel)
+	}
 	if newProvider == "OLLAMA" {
 		newModel = utils.GetEnvOrDefault("OLLAMA_MODEL", config.DefaultOllamaModel)
 	}
 	if newProvider == "COPILOT" {
 		newModel = utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel)
+	}
+	if newProvider == "GITHUB_MODELS" {
+		newModel = utils.GetEnvOrDefault("GITHUB_MODELS_MODEL", config.DefaultGitHubModelsModel)
 	}
 
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
@@ -674,6 +683,18 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 				override = n
 			}
 		}
+	} else if strings.ToUpper(cli.Provider) == "ZAI" {
+		if v := os.Getenv("ZAI_MAX_TOKENS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				override = n
+			}
+		}
+	} else if strings.ToUpper(cli.Provider) == "MINIMAX" {
+		if v := os.Getenv("MINIMAX_MAX_TOKENS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				override = n
+			}
+		}
 	} else if strings.ToUpper(cli.Provider) == "OLLAMA" {
 		if v := os.Getenv("OLLAMA_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -682,6 +703,18 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 		}
 	} else if strings.ToUpper(cli.Provider) == "STACKSPOT" {
 		if v := os.Getenv("STACKSPOT_MAX_TOKENS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				override = n
+			}
+		}
+	} else if strings.ToUpper(cli.Provider) == "COPILOT" {
+		if v := os.Getenv("COPILOT_MAX_TOKENS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				override = n
+			}
+		}
+	} else if strings.ToUpper(cli.Provider) == "GITHUB_MODELS" {
+		if v := os.Getenv("GITHUB_MODELS_MAX_TOKENS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				override = n
 			}

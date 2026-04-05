@@ -85,6 +85,9 @@ func (cm *ConfigManager) loadDefaults() {
 	cm.values["ANTHROPIC_MODEL"] = DefaultClaudeAIModel
 	cm.values["GOOGLEAI_MODEL"] = DefaultGoogleAIModel
 	cm.values["XAI_MODEL"] = DefaultXAIModel
+	cm.values["ZAI_MODEL"] = DefaultZAIModel
+	cm.values["MINIMAX_MODEL"] = DefaultMiniMaxModel
+	cm.values["MINIMAX_API_COMPAT"] = ""
 	cm.values["OLLAMA_MODEL"] = DefaultOllamaModel
 	cm.values["OLLAMA_BASE_URL"] = OllamaDefaultBaseURL
 	cm.values["COPILOT_MODEL"] = DefaultCopilotModel

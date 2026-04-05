@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"github.com/diillson/chatcli/version"
@@ -23,13 +24,13 @@ import (
 // SendPrompt handles a single prompt request.
 func (h *Handler) SendPrompt(ctx context.Context, req *pb.SendPromptRequest) (*pb.SendPromptResponse, error) {
 	if req.Prompt == "" {
-		return nil, status.Error(codes.InvalidArgument, "prompt cannot be empty")
+		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.prompt_empty"))
 	}
 
 	llmClient, err := h.getClient(req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
 	if err != nil {
-		h.logger.Error("Failed to get LLM client", zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "failed to get LLM client: %v", err)
+		h.logger.Error(i18n.T("server.session.llm_client_failed"), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.get_client_error", err))
 	}
 
 	history := protoToHistory(req.History)
@@ -38,8 +39,8 @@ func (h *Handler) SendPrompt(ctx context.Context, req *pb.SendPromptRequest) (*p
 	enrichedPrompt := h.enrichPrompt(req.Prompt)
 	response, err := llmClient.SendPrompt(ctx, enrichedPrompt, history, maxTokens)
 	if err != nil {
-		h.logger.Error("LLM SendPrompt failed", zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "LLM error: %v", err)
+		h.logger.Error(i18n.T("server.session.send_prompt_failed"), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.llm_error", err))
 	}
 
 	provider := req.Provider
@@ -57,13 +58,13 @@ func (h *Handler) SendPrompt(ctx context.Context, req *pb.SendPromptRequest) (*p
 // StreamPrompt handles a streaming prompt request.
 func (h *Handler) StreamPrompt(req *pb.StreamPromptRequest, stream pb.ChatCLIService_StreamPromptServer) error {
 	if req.Prompt == "" {
-		return status.Error(codes.InvalidArgument, "prompt cannot be empty")
+		return status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.prompt_empty"))
 	}
 
 	llmClient, err := h.getClient(req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
 	if err != nil {
-		h.logger.Error("Failed to get LLM client for stream", zap.Error(err))
-		return status.Errorf(codes.Internal, "failed to get LLM client: %v", err)
+		h.logger.Error(i18n.T("server.session.stream_client_failed"), zap.Error(err))
+		return status.Errorf(codes.Internal, "%s", i18n.T("server.session.get_client_error", err))
 	}
 
 	history := protoToHistory(req.History)
@@ -72,8 +73,8 @@ func (h *Handler) StreamPrompt(req *pb.StreamPromptRequest, stream pb.ChatCLISer
 	enrichedPrompt := h.enrichPrompt(req.Prompt)
 	response, err := llmClient.SendPrompt(stream.Context(), enrichedPrompt, history, maxTokens)
 	if err != nil {
-		h.logger.Error("LLM StreamPrompt failed", zap.Error(err))
-		return status.Errorf(codes.Internal, "LLM error: %v", err)
+		h.logger.Error(i18n.T("server.session.stream_failed"), zap.Error(err))
+		return status.Errorf(codes.Internal, "%s", i18n.T("server.session.llm_error", err))
 	}
 
 	provider := req.Provider
@@ -101,7 +102,7 @@ func (h *Handler) StreamPrompt(req *pb.StreamPromptRequest, stream pb.ChatCLISer
 
 // InteractiveSession handles bidirectional streaming for interactive mode.
 func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSessionServer) error {
-	h.logger.Info("Interactive session started")
+	h.logger.Info(i18n.T("server.session.interactive_started"))
 	if h.sessionMetrics != nil {
 		h.sessionMetrics.ActiveSessions.Inc()
 		defer h.sessionMetrics.ActiveSessions.Dec()
@@ -115,11 +116,11 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 	for {
 		msg, err := stream.Recv()
 		if err == io.EOF {
-			h.logger.Info("Interactive session ended (client closed)")
+			h.logger.Info(i18n.T("server.session.interactive_ended"))
 			return nil
 		}
 		if err != nil {
-			h.logger.Error("Interactive session recv error", zap.Error(err))
+			h.logger.Error(i18n.T("server.session.interactive_recv_error"), zap.Error(err))
 			return err
 		}
 
@@ -133,7 +134,7 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 				mu.Unlock()
 				sendErr := stream.Send(&pb.SessionMessage{
 					Type:    pb.SessionMessage_ERROR,
-					Content: fmt.Sprintf("Failed to get LLM client: %v", err),
+					Content: i18n.T("server.session.interactive_llm_error", err),
 				})
 				if sendErr != nil {
 					return sendErr
@@ -148,7 +149,7 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 				mu.Unlock()
 				sendErr := stream.Send(&pb.SessionMessage{
 					Type:    pb.SessionMessage_ERROR,
-					Content: fmt.Sprintf("LLM error: %v", err),
+					Content: i18n.T("server.session.interactive_llm_response_error", err),
 				})
 				if sendErr != nil {
 					return sendErr
@@ -180,7 +181,7 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 			}
 
 		default:
-			h.logger.Warn("Unhandled session message type", zap.Int32("type", int32(msg.Type)))
+			h.logger.Warn(i18n.T("server.session.unhandled_message_type"), zap.Int32("type", int32(msg.Type)))
 		}
 	}
 }
@@ -188,12 +189,12 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 // ListSessions returns all saved session names.
 func (h *Handler) ListSessions(ctx context.Context, req *pb.ListSessionsRequest) (*pb.ListSessionsResponse, error) {
 	if h.sessionManager == nil {
-		return nil, status.Error(codes.Unavailable, "session management not available")
+		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.session.mgmt_unavailable"))
 	}
 
 	sessions, err := h.sessionManager.ListSessions()
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to list sessions: %v", err)
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.list_error", err))
 	}
 
 	if h.sessionMetrics != nil {
@@ -205,18 +206,18 @@ func (h *Handler) ListSessions(ctx context.Context, req *pb.ListSessionsRequest)
 // LoadSession loads a saved session.
 func (h *Handler) LoadSession(ctx context.Context, req *pb.LoadSessionRequest) (*pb.LoadSessionResponse, error) {
 	if h.sessionManager == nil {
-		return nil, status.Error(codes.Unavailable, "session management not available")
+		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.session.mgmt_unavailable"))
 	}
 
 	if req.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "session name cannot be empty")
+		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.name_empty"))
 	}
 
 	// Try v2 first if store supports it
 	if v2Store, ok := h.sessionManager.(SessionStoreV2); ok {
 		sd, err := v2Store.LoadSessionV2(req.Name)
 		if err != nil {
-			return nil, status.Errorf(codes.NotFound, "session not found: %v", err)
+			return nil, status.Errorf(codes.NotFound, "%s", i18n.T("server.session.not_found", err))
 		}
 		if h.sessionMetrics != nil {
 			h.sessionMetrics.OperationsTotal.WithLabelValues("load").Inc()
@@ -230,7 +231,7 @@ func (h *Handler) LoadSession(ctx context.Context, req *pb.LoadSessionRequest) (
 	// Fallback to v1
 	msgs, err := h.sessionManager.LoadSession(req.Name)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "session not found: %v", err)
+		return nil, status.Errorf(codes.NotFound, "%s", i18n.T("server.session.not_found", err))
 	}
 
 	if h.sessionMetrics != nil {
@@ -242,11 +243,11 @@ func (h *Handler) LoadSession(ctx context.Context, req *pb.LoadSessionRequest) (
 // SaveSession saves the conversation history.
 func (h *Handler) SaveSession(ctx context.Context, req *pb.SaveSessionRequest) (*pb.SaveSessionResponse, error) {
 	if h.sessionManager == nil {
-		return nil, status.Error(codes.Unavailable, "session management not available")
+		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.session.mgmt_unavailable"))
 	}
 
 	if req.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "session name cannot be empty")
+		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.name_empty"))
 	}
 
 	// Prefer v2 if client sent session_data AND store supports v2
@@ -254,7 +255,7 @@ func (h *Handler) SaveSession(ctx context.Context, req *pb.SaveSessionRequest) (
 		if v2Store, ok := h.sessionManager.(SessionStoreV2); ok {
 			sd := protoSessionDataToModels(req.SessionData)
 			if err := v2Store.SaveSessionV2(req.Name, sd); err != nil {
-				return nil, status.Errorf(codes.Internal, "failed to save session: %v", err)
+				return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.save_error", err))
 			}
 			if h.sessionMetrics != nil {
 				h.sessionMetrics.OperationsTotal.WithLabelValues("save").Inc()
@@ -266,7 +267,7 @@ func (h *Handler) SaveSession(ctx context.Context, req *pb.SaveSessionRequest) (
 	// Fallback to v1
 	history := protoToHistory(req.Messages)
 	if err := h.sessionManager.SaveSession(req.Name, history); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to save session: %v", err)
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.save_error", err))
 	}
 
 	if h.sessionMetrics != nil {
@@ -278,15 +279,15 @@ func (h *Handler) SaveSession(ctx context.Context, req *pb.SaveSessionRequest) (
 // DeleteSession removes a saved session.
 func (h *Handler) DeleteSession(ctx context.Context, req *pb.DeleteSessionRequest) (*pb.DeleteSessionResponse, error) {
 	if h.sessionManager == nil {
-		return nil, status.Error(codes.Unavailable, "session management not available")
+		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.session.mgmt_unavailable"))
 	}
 
 	if req.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "session name cannot be empty")
+		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.name_empty"))
 	}
 
 	if err := h.sessionManager.DeleteSession(req.Name); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to delete session: %v", err)
+		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.delete_error", err))
 	}
 
 	if h.sessionMetrics != nil {
@@ -299,7 +300,7 @@ func (h *Handler) DeleteSession(ctx context.Context, req *pb.DeleteSessionReques
 func (h *Handler) executeRemoteCommand(rawCommand string) string {
 	cmd := strings.TrimSpace(rawCommand)
 	if cmd == "" {
-		return "Error: empty command"
+		return i18n.T("server.session.cmd_empty")
 	}
 
 	// Normalize: remove leading '/' if present
@@ -317,50 +318,44 @@ func (h *Handler) executeRemoteCommand(rawCommand string) string {
 	case cmd == "skills list":
 		return h.cmdSkillsList()
 	default:
-		return fmt.Sprintf("Unknown command: '%s'\n\nAvailable remote commands:\n"+
-			"  /status          - Server info (provider, model, version, watcher)\n"+
-			"  /watcher status  - K8s watcher status\n"+
-			"  /plugins list    - List available plugins\n"+
-			"  /agents list     - List available agents\n"+
-			"  /skills list     - List available skills",
-			rawCommand)
+		return i18n.T("server.session.cmd_unknown", rawCommand)
 	}
 }
 
 func (h *Handler) cmdStatus() string {
 	vi := version.GetCurrentVersion()
 	var b strings.Builder
-	b.WriteString("=== Server Status ===\n")
-	b.WriteString(fmt.Sprintf("Version:  %s\n", vi.Version))
-	b.WriteString(fmt.Sprintf("Provider: %s\n", h.defaultProvider))
-	b.WriteString(fmt.Sprintf("Model:    %s\n", h.defaultModel))
+	b.WriteString(i18n.T("server.session.cmd_status_header"))
+	b.WriteString(i18n.T("server.session.cmd_status_version", vi.Version))
+	b.WriteString(i18n.T("server.session.cmd_status_provider", h.defaultProvider))
+	b.WriteString(i18n.T("server.session.cmd_status_model", h.defaultModel))
 
 	if h.watcherContextFunc != nil {
-		b.WriteString("Watcher:  active")
+		b.WriteString(i18n.T("server.session.cmd_status_watcher_active"))
 		if h.watcherDeployment != "" {
-			b.WriteString(fmt.Sprintf(" (%s/%s)", h.watcherNamespace, h.watcherDeployment))
+			b.WriteString(i18n.T("server.session.cmd_status_watcher_target", h.watcherNamespace, h.watcherDeployment))
 		}
 		b.WriteString("\n")
 	} else {
-		b.WriteString("Watcher:  inactive\n")
+		b.WriteString(i18n.T("server.session.cmd_status_watcher_inactive"))
 	}
 
 	if h.pluginManager != nil {
-		b.WriteString(fmt.Sprintf("Plugins:  %d loaded\n", len(h.pluginManager.GetPlugins())))
+		b.WriteString(i18n.T("server.session.cmd_status_plugins", len(h.pluginManager.GetPlugins())))
 	}
 	if h.personaLoader != nil {
 		if agents, err := h.personaLoader.ListAgents(); err == nil {
-			b.WriteString(fmt.Sprintf("Agents:   %d available\n", len(agents)))
+			b.WriteString(i18n.T("server.session.cmd_status_agents", len(agents)))
 		}
 		if skills, err := h.personaLoader.ListSkills(); err == nil {
-			b.WriteString(fmt.Sprintf("Skills:   %d available\n", len(skills)))
+			b.WriteString(i18n.T("server.session.cmd_status_skills", len(skills)))
 		}
 	}
 	if h.fallbackChain != nil {
-		b.WriteString("Fallback: configured\n")
+		b.WriteString(i18n.T("server.session.cmd_status_fallback"))
 	}
 	if h.mcpManager != nil {
-		b.WriteString("MCP:      active\n")
+		b.WriteString(i18n.T("server.session.cmd_status_mcp"))
 	}
 
 	return b.String()
@@ -368,24 +363,24 @@ func (h *Handler) cmdStatus() string {
 
 func (h *Handler) cmdWatcherStatus() string {
 	if h.watcherContextFunc == nil {
-		return "K8s Watcher: inactive (no watcher configured)"
+		return i18n.T("server.session.cmd_watcher_inactive")
 	}
 
 	var b strings.Builder
-	b.WriteString("=== K8s Watcher Status ===\n")
-	b.WriteString("Status:     active\n")
+	b.WriteString(i18n.T("server.session.cmd_watcher_header"))
+	b.WriteString(i18n.T("server.session.cmd_watcher_status_active"))
 	if h.watcherDeployment != "" {
-		b.WriteString(fmt.Sprintf("Deployment: %s\n", h.watcherDeployment))
-		b.WriteString(fmt.Sprintf("Namespace:  %s\n", h.watcherNamespace))
+		b.WriteString(i18n.T("server.session.cmd_watcher_deployment", h.watcherDeployment))
+		b.WriteString(i18n.T("server.session.cmd_watcher_namespace", h.watcherNamespace))
 	}
 	if h.watcherStatusFunc != nil {
-		b.WriteString(fmt.Sprintf("Summary:    %s\n", h.watcherStatusFunc()))
+		b.WriteString(i18n.T("server.session.cmd_watcher_summary", h.watcherStatusFunc()))
 	}
 	if h.watcherStatsFunc != nil {
 		alertCount, snapshotCount, podCount := h.watcherStatsFunc()
-		b.WriteString(fmt.Sprintf("Alerts:     %d\n", alertCount))
-		b.WriteString(fmt.Sprintf("Snapshots:  %d\n", snapshotCount))
-		b.WriteString(fmt.Sprintf("Pods:       %d\n", podCount))
+		b.WriteString(i18n.T("server.session.cmd_watcher_alerts", alertCount))
+		b.WriteString(i18n.T("server.session.cmd_watcher_snapshots", snapshotCount))
+		b.WriteString(i18n.T("server.session.cmd_watcher_pods", podCount))
 	}
 
 	return b.String()
@@ -393,16 +388,16 @@ func (h *Handler) cmdWatcherStatus() string {
 
 func (h *Handler) cmdPluginsList() string {
 	if h.pluginManager == nil {
-		return "No plugin manager configured on this server."
+		return i18n.T("server.session.cmd_plugins_none_mgr")
 	}
 
 	plugins := h.pluginManager.GetPlugins()
 	if len(plugins) == 0 {
-		return "No plugins available."
+		return i18n.T("server.session.cmd_plugins_none")
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("=== Plugins (%d) ===\n", len(plugins)))
+	b.WriteString(i18n.T("server.session.cmd_plugins_header", len(plugins)))
 	for _, p := range plugins {
 		b.WriteString(fmt.Sprintf("  - %s", p.Name()))
 		if v := p.Version(); v != "" {
@@ -419,19 +414,19 @@ func (h *Handler) cmdPluginsList() string {
 
 func (h *Handler) cmdAgentsList() string {
 	if h.personaLoader == nil {
-		return "No persona loader configured on this server."
+		return i18n.T("server.session.cmd_agents_none_loader")
 	}
 
 	agents, err := h.personaLoader.ListAgents()
 	if err != nil {
-		return fmt.Sprintf("Error listing agents: %v", err)
+		return i18n.T("server.session.cmd_agents_error", err)
 	}
 	if len(agents) == 0 {
-		return "No agents available."
+		return i18n.T("server.session.cmd_agents_none")
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("=== Agents (%d) ===\n", len(agents)))
+	b.WriteString(i18n.T("server.session.cmd_agents_header", len(agents)))
 	for _, a := range agents {
 		b.WriteString(fmt.Sprintf("  - %s", a.Name))
 		if a.Description != "" {
@@ -445,19 +440,19 @@ func (h *Handler) cmdAgentsList() string {
 
 func (h *Handler) cmdSkillsList() string {
 	if h.personaLoader == nil {
-		return "No persona loader configured on this server."
+		return i18n.T("server.session.cmd_skills_none_loader")
 	}
 
 	skills, err := h.personaLoader.ListSkills()
 	if err != nil {
-		return fmt.Sprintf("Error listing skills: %v", err)
+		return i18n.T("server.session.cmd_skills_error", err)
 	}
 	if len(skills) == 0 {
-		return "No skills available."
+		return i18n.T("server.session.cmd_skills_none")
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("=== Skills (%d) ===\n", len(skills)))
+	b.WriteString(i18n.T("server.session.cmd_skills_header", len(skills)))
 	for _, s := range skills {
 		b.WriteString(fmt.Sprintf("  - %s", s.Name))
 		if s.Description != "" {

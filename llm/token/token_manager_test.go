@@ -7,10 +7,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+func init() {
+	i18n.Init()
+}
 
 func TestTokenManager_GetAccessToken_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

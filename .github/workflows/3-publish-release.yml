@@ -334,6 +334,12 @@ jobs:
           sed -i "s/^version:.*/version: ${VERSION}/" deploy/helm/chatcli-operator/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" deploy/helm/chatcli-operator/Chart.yaml
 
+      - name: Inject ArtifactHub changelog from CHANGELOG.md
+        run: |
+          bash scripts/generate-artifacthub-changelog.sh \
+            deploy/helm/chatcli/Chart.yaml \
+            deploy/helm/chatcli-operator/Chart.yaml
+
       - name: Package and push chatcli chart
         run: |
           helm package deploy/helm/chatcli/ -d /tmp/charts/

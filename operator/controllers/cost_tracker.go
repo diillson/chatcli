@@ -97,6 +97,14 @@ func (ct *CostTracker) getTokenPricing(ctx context.Context, namespace, provider 
 		return tokenPricing{InputPerMillion: 10.0, OutputPerMillion: 30.0}
 	case provider == "GOOGLEAI" || provider == "googleai":
 		return tokenPricing{InputPerMillion: 1.25, OutputPerMillion: 5.0}
+	case provider == "XAI" || provider == "xai":
+		return tokenPricing{InputPerMillion: 3.0, OutputPerMillion: 15.0}
+	case provider == "ZAI" || provider == "zai":
+		return tokenPricing{InputPerMillion: 1.0, OutputPerMillion: 4.0}
+	case provider == "MINIMAX" || provider == "minimax":
+		return tokenPricing{InputPerMillion: 0.3, OutputPerMillion: 1.2}
+	case provider == "COPILOT" || provider == "copilot":
+		return tokenPricing{InputPerMillion: 10.0, OutputPerMillion: 30.0}
 	default:
 		return tokenPricing{InputPerMillion: 1.0, OutputPerMillion: 3.0}
 	}

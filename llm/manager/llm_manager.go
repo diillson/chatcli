@@ -8,6 +8,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -17,12 +18,14 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/copilot"
 	github_models "github.com/diillson/chatcli/llm/github_models"
 	"github.com/diillson/chatcli/llm/googleai"
+	"github.com/diillson/chatcli/llm/minimax"
 	"github.com/diillson/chatcli/llm/ollama"
 	"github.com/diillson/chatcli/llm/openai"
 	"github.com/diillson/chatcli/llm/openai_assistant"
@@ -30,6 +33,7 @@ import (
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/diillson/chatcli/llm/token"
 	"github.com/diillson/chatcli/llm/xai"
+	"github.com/diillson/chatcli/llm/zai"
 	"go.uber.org/zap"
 )
 
@@ -80,7 +84,7 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
 	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
 
-	logger.Info("Política de Retry configurada",
+	logger.Info(i18n.T("llm.manager.retry_policy"),
 		zap.Int("max_retries", maxRetries),
 		zap.Duration("initial_backoff", initialBackoff))
 
@@ -96,6 +100,8 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarClaudeAIClient(maxRetries, initialBackoff)
 	manager.configurarGoogleAIClient(maxRetries, initialBackoff)
 	manager.configurarXAIClient(maxRetries, initialBackoff)
+	manager.configurarZAIClient(maxRetries, initialBackoff)
+	manager.configurarMiniMaxClient(maxRetries, initialBackoff)
 	manager.configurarOllamaClient(maxRetries, initialBackoff)
 	manager.configurarCopilotClient(maxRetries, initialBackoff)
 	manager.configurarGitHubModelsClient(maxRetries, initialBackoff)
@@ -107,7 +113,7 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff time.Duration) {
 	apiKey := config.Global.GetString("GOOGLEAI_API_KEY")
 	if apiKey != "" {
-		m.logger.Info("Configurando provedor Google AI",
+		m.logger.Info(i18n.T("llm.info.configuring_provider", "Google AI"),
 			zap.Bool("api_key_present", true),
 			zap.Int("api_key_length", len(apiKey)))
 
@@ -124,7 +130,7 @@ func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff
 			), nil
 		}
 	} else {
-		m.logger.Warn("GOOGLEAI_API_KEY não definida, o provedor GOOGLEAI não estará disponível")
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "GOOGLEAI_API_KEY", "GOOGLEAI"))
 	}
 }
 
@@ -132,18 +138,18 @@ func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff
 func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff time.Duration) {
 	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderOpenAI, m.logger)
 	if err != nil {
-		m.logger.Warn("OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível", zap.Error(err))
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "OPENAI_API_KEY", "OPENAI"), zap.Error(err))
 		return
 	}
 	if resolved.APIKey == "" {
-		m.logger.Warn("OPENAI_API_KEY não definida, o provedor OPENAI não estará disponível")
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "OPENAI_API_KEY", "OPENAI"))
 		return
 	}
 	m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
 		// Re-resolve auth on each client creation to pick up refreshed tokens
 		res, err := auth.ResolveAuth(context.Background(), auth.ProviderOpenAI, m.logger)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve OpenAI auth: %w", err)
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "OpenAI"), err)
 		}
 		apiKey := res.APIKey
 		if model == "" {
@@ -160,7 +166,7 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 		}
 
 		if useResponses {
-			m.logger.Info("Usando OpenAI Responses API", zap.String("model", model), zap.Bool("oauth", isOAuth))
+			m.logger.Info(i18n.T("llm.manager.using_responses_api"), zap.String("model", model), zap.Bool("oauth", isOAuth))
 			return openai_responses.NewOpenAIResponsesClient(
 				apiKey, model, m.logger,
 				maxRetries,
@@ -168,14 +174,14 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 			), nil
 		}
 
-		m.logger.Info("Usando OpenAI Chat Completions API", zap.String("model", model))
+		m.logger.Info(i18n.T("llm.manager.using_chat_completions"), zap.String("model", model))
 		return openai.NewOpenAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
 	}
 
 	m.clients["OPENAI_ASSISTANT"] = func(model string) (client.LLMClient, error) {
 		res, err := auth.ResolveAuth(context.Background(), auth.ProviderOpenAI, m.logger)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve OpenAI auth: %w", err)
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "OpenAI"), err)
 		}
 		if model == "" {
 			model = config.DefaultOpenAiAssistModel
@@ -191,7 +197,7 @@ func (m *LLMManagerImpl) configurarStackSpotClient(maxRetries int, initialBackof
 
 	// Se as credenciais existirem, o provedor será registrado.
 	if clientID == "" || clientKey == "" {
-		m.logger.Warn("CLIENT_ID ou CLIENT_KEY não definidos, o provedor STACKSPOT não estará disponível")
+		m.logger.Warn(i18n.T("llm.manager.stackspot_credentials_missing"))
 		return
 	}
 
@@ -211,7 +217,7 @@ func (m *LLMManagerImpl) configurarStackSpotClient(maxRetries int, initialBackof
 		m.mu.RUnlock()
 
 		if currentRealm == "" || currentAgentID == "" {
-			return nil, fmt.Errorf("provedor STACKSPOT requer STACKSPOT_REALM e STACKSPOT_AGENT_ID. Forneça-os no .env ou via flags --realm e --agent-id")
+			return nil, errors.New(i18n.T("llm.manager.stackspot_requires_config"))
 		}
 
 		return stackspotai.NewStackSpotClient(m.tokenManager, currentAgentID, m.logger, maxRetries, initialBackoff), nil
@@ -222,18 +228,18 @@ func (m *LLMManagerImpl) configurarStackSpotClient(maxRetries int, initialBackof
 func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff time.Duration) {
 	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderAnthropic, m.logger)
 	if err != nil {
-		m.logger.Warn("ANTHROPIC_API_KEY não definida, o provedor CLAUDEAI não estará disponível", zap.Error(err))
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "ANTHROPIC_API_KEY", "CLAUDEAI"), zap.Error(err))
 		return
 	}
 	if resolved.APIKey == "" {
-		m.logger.Warn("ANTHROPIC_API_KEY não definida, o provedor ClaudeAI não estará disponível")
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "ANTHROPIC_API_KEY", "ClaudeAI"))
 		return
 	}
 	m.clients["CLAUDEAI"] = func(model string) (client.LLMClient, error) {
 		// Re-resolve auth on each client creation to pick up refreshed tokens
 		res, err := auth.ResolveAuth(context.Background(), auth.ProviderAnthropic, m.logger)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve Anthropic auth: %w", err)
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "Anthropic"), err)
 		}
 		if model == "" {
 			model = config.DefaultClaudeAIModel
@@ -252,7 +258,7 @@ func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff
 func (m *LLMManagerImpl) configurarXAIClient(maxRetries int, initialBackoff time.Duration) {
 	apiKey := config.Global.GetString("XAI_API_KEY")
 	if apiKey != "" {
-		m.logger.Info("Configurando provedor xAI")
+		m.logger.Info(i18n.T("llm.info.configuring_provider", "xAI"))
 		m.clients["XAI"] = func(model string) (client.LLMClient, error) {
 			if model == "" {
 				model = config.DefaultXAIModel
@@ -266,7 +272,49 @@ func (m *LLMManagerImpl) configurarXAIClient(maxRetries int, initialBackoff time
 			), nil
 		}
 	} else {
-		m.logger.Warn("XAI_API_KEY não definida, o provedor xAI não estará disponível")
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "XAI_API_KEY", "xAI"))
+	}
+}
+
+func (m *LLMManagerImpl) configurarZAIClient(maxRetries int, initialBackoff time.Duration) {
+	apiKey := config.Global.GetString("ZAI_API_KEY")
+	if apiKey != "" {
+		m.logger.Info(i18n.T("llm.info.configuring_provider", "ZAI (Zhipu AI)"))
+		m.clients["ZAI"] = func(model string) (client.LLMClient, error) {
+			if model == "" {
+				model = config.DefaultZAIModel
+			}
+			return zai.NewZAIClient(
+				apiKey,
+				model,
+				m.logger,
+				maxRetries,
+				initialBackoff,
+			), nil
+		}
+	} else {
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "ZAI_API_KEY", "ZAI"))
+	}
+}
+
+func (m *LLMManagerImpl) configurarMiniMaxClient(maxRetries int, initialBackoff time.Duration) {
+	apiKey := config.Global.GetString("MINIMAX_API_KEY")
+	if apiKey != "" {
+		m.logger.Info(i18n.T("llm.info.configuring_provider", "MiniMax"))
+		m.clients["MINIMAX"] = func(model string) (client.LLMClient, error) {
+			if model == "" {
+				model = config.DefaultMiniMaxModel
+			}
+			return minimax.NewMiniMaxClient(
+				apiKey,
+				model,
+				m.logger,
+				maxRetries,
+				initialBackoff,
+			), nil
+		}
+	} else {
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "MINIMAX_API_KEY", "MiniMax"))
 	}
 }
 
@@ -275,7 +323,7 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 	enable := config.Global.GetBool("OLLAMA_ENABLED", false)
 
 	if !enable {
-		m.logger.Info("OLLAMA_ENABLED não está ativo, provider Ollama ignorado.")
+		m.logger.Info(i18n.T("llm.manager.ollama_not_active"))
 		return
 	}
 
@@ -284,7 +332,7 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 
 	resp, err := hc.Get(checkURL)
 	if err != nil {
-		m.logger.Warn("Ollama não foi detectado no endereço configurado; o provider não estará disponível.",
+		m.logger.Warn(i18n.T("llm.manager.ollama_not_detected"),
 			zap.String("baseURL", baseURL),
 			zap.Error(err))
 		return
@@ -292,7 +340,7 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		m.logger.Warn("Erro ao se comunicar com o serviço Ollama (verifique se está rodando).",
+		m.logger.Warn(i18n.T("llm.manager.ollama_comm_error"),
 			zap.String("baseURL", baseURL),
 			zap.Int("status_code", resp.StatusCode))
 		return
@@ -304,15 +352,15 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
-		m.logger.Warn("Não foi possível decodificar a lista de modelos do Ollama.", zap.Error(err))
+		m.logger.Warn(i18n.T("llm.manager.ollama_decode_error"), zap.Error(err))
 		return
 	}
 	if len(tags.Models) == 0 {
-		m.logger.Warn("Nenhum modelo encontrado no serviço Ollama. Baixe um com 'ollama pull <nome_modelo>'.")
+		m.logger.Warn(i18n.T("llm.manager.ollama_no_models"))
 		return
 	}
 
-	m.logger.Info("Configurando provedor OLLAMA",
+	m.logger.Info(i18n.T("llm.info.configuring_provider", "OLLAMA"),
 		zap.String("baseURL", baseURL),
 		zap.Int("modelos_encontrados", len(tags.Models)),
 	)
@@ -334,7 +382,7 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 			for _, m := range tags.Models {
 				availableModels = append(availableModels, m.Name)
 			}
-			return nil, fmt.Errorf("modelo '%s' não encontrado no Ollama. Modelos disponíveis: %s", model, strings.Join(availableModels, ", "))
+			return nil, fmt.Errorf("%s", i18n.T("llm.manager.model_not_found_ollama", model, strings.Join(availableModels, ", ")))
 		}
 
 		return ollama.NewClient(
@@ -351,18 +399,18 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff time.Duration) {
 	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubCopilot, m.logger)
 	if err != nil {
-		m.logger.Info("GitHub Copilot not configured, provider COPILOT will not be available", zap.Error(err))
+		m.logger.Info(i18n.T("llm.warn.provider_not_configured", "GitHub Copilot", "COPILOT"), zap.Error(err))
 		return
 	}
 	if resolved.APIKey == "" {
 		return
 	}
-	m.logger.Info("Configurando provedor GitHub Copilot")
+	m.logger.Info(i18n.T("llm.info.configuring_provider", "GitHub Copilot"))
 	m.clients["COPILOT"] = func(model string) (client.LLMClient, error) {
 		// Re-resolve auth on each client creation to pick up refreshed tokens
 		res, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubCopilot, m.logger)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve GitHub Copilot auth: %w", err)
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "GitHub Copilot"), err)
 		}
 		if model == "" {
 			model = config.DefaultCopilotModel
@@ -375,17 +423,17 @@ func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff 
 func (m *LLMManagerImpl) configurarGitHubModelsClient(maxRetries int, initialBackoff time.Duration) {
 	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubModels, m.logger)
 	if err != nil {
-		m.logger.Info("GitHub Models not configured, provider GITHUB_MODELS will not be available", zap.Error(err))
+		m.logger.Info(i18n.T("llm.warn.provider_not_configured", "GitHub Models", "GITHUB_MODELS"), zap.Error(err))
 		return
 	}
 	if resolved.APIKey == "" {
 		return
 	}
-	m.logger.Info("Configurando provedor GitHub Models")
+	m.logger.Info(i18n.T("llm.info.configuring_provider", "GitHub Models"))
 	m.clients["GITHUB_MODELS"] = func(model string) (client.LLMClient, error) {
 		res, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubModels, m.logger)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve GitHub Models auth: %w", err)
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "GitHub Models"), err)
 		}
 		if model == "" {
 			model = config.DefaultGitHubModelsModel
@@ -408,14 +456,14 @@ func (m *LLMManagerImpl) GetAvailableProviders() []string {
 func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMClient, error) {
 	factoryFunc, ok := m.clients[provider]
 	if !ok {
-		m.logger.Warn("Tentativa de obter cliente para provedor não configurado",
+		m.logger.Warn(i18n.T("llm.manager.client_attempt_failed"),
 			zap.String("provider", provider))
-		return nil, fmt.Errorf("erro: Provedor LLM '%s' não suportado ou não configurado", provider)
+		return nil, fmt.Errorf("%s", i18n.T("llm.manager.provider_unsupported", provider))
 	}
 
 	clientInstance, err := factoryFunc(model)
 	if err != nil {
-		m.logger.Error("Erro ao criar instância do cliente LLM",
+		m.logger.Error(i18n.T("llm.manager.client_create_error"),
 			zap.String("provider", provider),
 			zap.String("model", model),
 			zap.Error(err))
@@ -431,13 +479,13 @@ func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMCli
 func (m *LLMManagerImpl) ListModelsForProvider(ctx context.Context, provider string) ([]client.ModelInfo, error) {
 	factoryFunc, ok := m.clients[provider]
 	if !ok {
-		return nil, fmt.Errorf("erro: Provedor LLM '%s' não suportado ou não configurado", provider)
+		return nil, fmt.Errorf("%s", i18n.T("llm.manager.provider_unsupported", provider))
 	}
 
 	// Create a temporary client to check if it supports model listing
 	tempClient, err := factoryFunc("")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create client for model listing: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_create_for_listing"), err)
 	}
 
 	// Collect models from API (if supported) + catalog, deduplicated.
@@ -451,7 +499,7 @@ func (m *LLMManagerImpl) ListModelsForProvider(ctx context.Context, provider str
 			zap.String("clientType", fmt.Sprintf("%T", tempClient)))
 		apiModels, err := lister.ListModels(ctx)
 		if err != nil {
-			m.logger.Warn("Failed to fetch models from API, will include catalog models",
+			m.logger.Warn(i18n.T("llm.manager.api_listing_failed"),
 				zap.String("provider", provider), zap.Error(err))
 		} else {
 			m.logger.Debug("API model listing succeeded",
@@ -538,11 +586,13 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	m.configurarClaudeAIClient(maxRetries, initialBackoff)
 	m.configurarCopilotClient(maxRetries, initialBackoff)
 	m.configurarGitHubModelsClient(maxRetries, initialBackoff)
+	m.configurarZAIClient(maxRetries, initialBackoff)
+	m.configurarMiniMaxClient(maxRetries, initialBackoff)
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key
 // instead of the server's default credentials. Supports OPENAI, CLAUDEAI,
-// GOOGLEAI, and XAI providers. Returns an error for unsupported providers.
+// GOOGLEAI, XAI, ZAI, MINIMAX, and COPILOT providers. Returns an error for unsupported providers.
 func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (client.LLMClient, error) {
 	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
 	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
@@ -582,6 +632,18 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 		}
 		return xai.NewXAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
 
+	case "ZAI":
+		if model == "" {
+			model = config.DefaultZAIModel
+		}
+		return zai.NewZAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "MINIMAX":
+		if model == "" {
+			model = config.DefaultMiniMaxModel
+		}
+		return minimax.NewMiniMaxClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
 	case "COPILOT":
 		if model == "" {
 			model = config.DefaultCopilotModel
@@ -589,7 +651,7 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 		return copilot.NewClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
 
 	default:
-		return nil, fmt.Errorf("CreateClientWithKey: provider '%s' does not support client-provided API keys", provider)
+		return nil, fmt.Errorf("%s", i18n.T("llm.manager.create_client_unsupported", provider))
 	}
 }
 
@@ -613,13 +675,13 @@ func (m *LLMManagerImpl) CreateClientWithConfig(provider, model, apiKey string, 
 		agentID := providerConfig["agent_id"]
 
 		if clientID == "" || clientKey == "" {
-			return nil, fmt.Errorf("STACKSPOT requires 'client_id' and 'client_key' in provider_config")
+			return nil, fmt.Errorf("%s", i18n.T("llm.manager.stackspot_requires_field", "client_id and client_key"))
 		}
 		if realm == "" {
-			return nil, fmt.Errorf("STACKSPOT requires 'realm' in provider_config")
+			return nil, fmt.Errorf("%s", i18n.T("llm.manager.stackspot_requires_field", "realm"))
 		}
 		if agentID == "" {
-			return nil, fmt.Errorf("STACKSPOT requires 'agent_id' in provider_config")
+			return nil, fmt.Errorf("%s", i18n.T("llm.manager.stackspot_requires_field", "agent_id"))
 		}
 
 		tm := token.NewTokenManager(clientID, clientKey, realm, m.logger)

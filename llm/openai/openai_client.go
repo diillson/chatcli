@@ -18,6 +18,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 
@@ -109,8 +110,8 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
-		c.logger.Error("Erro ao marshalizar o payload", zap.Error(err))
-		return "", fmt.Errorf("erro ao preparar a requisição: %w", err)
+		c.logger.Error(i18n.T("llm.error.marshal_payload"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
@@ -130,8 +131,8 @@ func (c *OpenAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
 	if err != nil {
-		c.logger.Error("Erro ao criar a requisição", zap.Error(err))
-		return nil, fmt.Errorf("erro ao criar a requisição: %w", err)
+		c.logger.Error(i18n.T("llm.error.create_request"), zap.Error(err))
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
@@ -150,8 +151,8 @@ func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.logger.Error("Erro ao ler a resposta da OpenAI", zap.Error(err))
-		return "", fmt.Errorf("erro ao ler a resposta da OpenAI: %w", err)
+		c.logger.Error(i18n.T("llm.error.read_response_for", "OpenAI"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "OpenAI"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -161,32 +162,32 @@ func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
 	var result map[string]interface{}
 	// CORREÇÃO AQUI: Use Unmarshal com bodyBytes
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		c.logger.Error("Erro ao decodificar a resposta da OpenAI", zap.Error(err))
-		return "", fmt.Errorf("erro ao decodificar a resposta da OpenAI: %w", err)
+		c.logger.Error(i18n.T("llm.error.decode_response_for", "OpenAI"), zap.Error(err))
+		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenAI"), err)
 	}
 
 	choices, ok := result["choices"].([]interface{})
 	if !ok || len(choices) == 0 {
-		c.logger.Error("Nenhuma resposta recebida da OpenAI", zap.Any("resultado", result))
-		return "", fmt.Errorf("nenhuma resposta recebida da OpenAI")
+		c.logger.Error(i18n.T("llm.error.no_response", "OpenAI"), zap.Any("resultado", result))
+		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "OpenAI"))
 	}
 
 	firstChoice, ok := choices[0].(map[string]interface{})
 	if !ok {
-		c.logger.Error("Formato inesperado no primeiro choice", zap.Any("choice", choices[0]))
-		return "", fmt.Errorf("formato inesperado na resposta da OpenAI")
+		c.logger.Error(i18n.T("llm.error.unexpected_format", "OpenAI"), zap.Any("choice", choices[0]))
+		return "", fmt.Errorf("%s", i18n.T("llm.error.unexpected_format", "OpenAI"))
 	}
 
 	message, ok := firstChoice["message"].(map[string]interface{})
 	if !ok {
-		c.logger.Error("Campo 'message' ausente na resposta", zap.Any("choice", firstChoice))
-		return "", fmt.Errorf("campo 'message' ausente na resposta da OpenAI")
+		c.logger.Error(i18n.T("llm.error.missing_message_field", "OpenAI"), zap.Any("choice", firstChoice))
+		return "", fmt.Errorf("%s", i18n.T("llm.error.missing_message_field", "OpenAI"))
 	}
 
 	content, ok := message["content"].(string)
 	if !ok {
-		c.logger.Error("Conteúdo da mensagem não é uma string", zap.Any("content", message["content"]))
-		return "", fmt.Errorf("conteúdo da mensagem não é válido")
+		c.logger.Error(i18n.T("llm.error.invalid_message_content"), zap.Any("content", message["content"]))
+		return "", fmt.Errorf("%s", i18n.T("llm.error.invalid_message_content"))
 	}
 
 	return content, nil
@@ -200,19 +201,19 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch OpenAI models: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "OpenAI"), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "OpenAI"), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -226,7 +227,7 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode models response: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenAI"), err)
 	}
 
 	var models []client.ModelInfo
@@ -255,6 +256,6 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		}
 	}
 
-	c.logger.Info("Fetched OpenAI models", zap.Int("count", len(models)))
+	c.logger.Info(i18n.T("llm.info.fetched_models", "OpenAI"), zap.Int("count", len(models)))
 	return models, nil
 }

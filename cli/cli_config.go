@@ -56,10 +56,15 @@ func (cli *ChatCLI) reloadConfiguration() {
 		"LOG_LEVEL", "ENV", "LLM_PROVIDER", "LOG_FILE", "LOG_MAX_SIZE", "HISTORY_MAX_SIZE",
 		"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_ASSISTANT_MODEL",
 		"OPENAI_USE_RESPONSES", "OPENAI_MAX_TOKENS",
-		"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_MAX_TOKENS", "ANTHROPIC_API_VERSION",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_MAX_TOKENS", "ANTHROPIC_API_VERSION", "ANTHROPIC_BASE_URL",
 		"GOOGLEAI_API_KEY", "GOOGLEAI_MODEL", "GOOGLEAI_MAX_TOKENS",
+		"XAI_API_KEY", "XAI_MODEL", "XAI_MAX_TOKENS",
+		"ZAI_API_KEY", "ZAI_MODEL", "ZAI_MAX_TOKENS",
+		"MINIMAX_API_KEY", "MINIMAX_MODEL", "MINIMAX_MAX_TOKENS", "MINIMAX_API_COMPAT",
+		"OLLAMA_ENABLED", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "OLLAMA_MAX_TOKENS",
 		"CLIENT_ID", "CLIENT_KEY", "STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
 		"COPILOT_MODEL", "COPILOT_MAX_TOKENS", "GITHUB_COPILOT_TOKEN",
+		"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_MODELS_TOKEN", "GITHUB_MODELS_MODEL",
 	}
 
 	for _, variable := range variablesToUnset {
@@ -140,6 +145,18 @@ func (cli *ChatCLI) configureProviderAndModel() {
 			cli.Model = config.DefaultXAIModel
 		}
 	}
+	if cli.Provider == "ZAI" {
+		cli.Model = os.Getenv("ZAI_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultZAIModel
+		}
+	}
+	if cli.Provider == "MINIMAX" {
+		cli.Model = os.Getenv("MINIMAX_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultMiniMaxModel
+		}
+	}
 	if cli.Provider == "OLLAMA" {
 		cli.Model = os.Getenv("OLLAMA_MODEL")
 		if cli.Model == "" {
@@ -150,6 +167,12 @@ func (cli *ChatCLI) configureProviderAndModel() {
 		cli.Model = os.Getenv("COPILOT_MODEL")
 		if cli.Model == "" {
 			cli.Model = config.DefaultCopilotModel
+		}
+	}
+	if cli.Provider == "GITHUB_MODELS" {
+		cli.Model = os.Getenv("GITHUB_MODELS_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultGitHubModelsModel
 		}
 	}
 }

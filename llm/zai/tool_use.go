@@ -1,9 +1,10 @@
 /*
- * ChatCLI - Native Tool Use support for OpenAI
+ * ChatCLI - Native Tool Use support for ZAI (Zhipu AI)
+ * ZAI API é compatível com o formato OpenAI para tool calling.
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  */
-package openai
+package zai
 
 import (
 	"context"
@@ -19,16 +20,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// Ensure OpenAIClient implements ToolAwareClient.
-var _ client.ToolAwareClient = (*OpenAIClient)(nil)
+// Ensure ZAIClient implements ToolAwareClient.
+var _ client.ToolAwareClient = (*ZAIClient)(nil)
 
-// SupportsNativeTools returns true — OpenAI supports native tool calling.
-func (c *OpenAIClient) SupportsNativeTools() bool {
+// SupportsNativeTools returns true — ZAI supports native tool calling (OpenAI-compatible format).
+func (c *ZAIClient) SupportsNativeTools() bool {
 	return true
 }
 
-// SendPromptWithTools sends a prompt with tool definitions via OpenAI's native tool calling API.
-func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
+// SendPromptWithTools sends a prompt with tool definitions via ZAI's native tool calling API.
+func (c *ZAIClient) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
 		effectiveMaxTokens = c.getMaxTokens()
@@ -40,7 +41,7 @@ func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	// Build messages with tool call support
 	messages := buildToolMessages(prompt, history)
 
-	// Build tools payload
+	// Build tools payload (OpenAI-compatible format)
 	toolDefs := make([]map[string]interface{}, 0, len(sortedTools))
 	for _, t := range sortedTools {
 		toolDefs = append(toolDefs, map[string]interface{}{
@@ -160,7 +161,7 @@ func buildToolMessages(prompt string, history []models.Message) []interface{} {
 	return messages
 }
 
-// parseToolResponse parses the OpenAI API response with tool call support.
+// parseToolResponse parses the ZAI API response with tool call support (OpenAI-compatible format).
 func parseToolResponse(body string, logger *zap.Logger) (*models.LLMResponse, error) {
 	var result map[string]interface{}
 	if err := json.Unmarshal([]byte(body), &result); err != nil {
