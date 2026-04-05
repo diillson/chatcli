@@ -1,0 +1,343 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ChatCLI Operator Helm Chart Values",
+  "description": "JSON Schema for validating the values.yaml of the chatcli-operator Helm chart.",
+  "type": "object",
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of operator pod replicas.",
+      "default": 1
+    },
+    "image": {
+      "type": "object",
+      "description": "Container image configuration.",
+      "required": ["repository"],
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Container image repository."
+        },
+        "tag": {
+          "type": "string",
+          "description": "Image tag. Defaults to the chart appVersion if empty.",
+          "default": ""
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"],
+          "description": "Kubernetes image pull policy.",
+          "default": "IfNotPresent"
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "description": "List of Docker registry pull secrets.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "default": []
+    },
+    "nameOverride": {
+      "type": "string",
+      "description": "Override the chart name.",
+      "default": ""
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "description": "Override the full release name.",
+      "default": ""
+    },
+    "leaderElect": {
+      "type": "boolean",
+      "description": "Enable leader election for the operator.",
+      "default": true
+    },
+    "api": {
+      "type": "object",
+      "description": "API server port configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port for the API server.",
+          "default": 8090
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Metrics endpoint configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port for the metrics endpoint.",
+          "default": 8080
+        }
+      }
+    },
+    "health": {
+      "type": "object",
+      "description": "Health probe endpoint configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port for the health probes.",
+          "default": 8081
+        }
+      }
+    },
+    "prometheusUrl": {
+      "type": "string",
+      "description": "URL of the Prometheus instance to query for metrics.",
+      "default": ""
+    },
+    "serviceAccount": {
+      "type": "object",
+      "description": "Service account configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Whether to create a service account.",
+          "default": true
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the service account. If not set and create is true, a name is generated.",
+          "default": ""
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Annotations to add to the service account.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "description": "RBAC configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Whether to create RBAC resources.",
+          "default": true
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "description": "Kubernetes Service configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer"],
+          "description": "Kubernetes Service type.",
+          "default": "ClusterIP"
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "description": "CPU and memory resource requests and limits.",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "description": "CPU request (e.g. 100m, 0.5)."
+            },
+            "memory": {
+              "type": "string",
+              "description": "Memory request (e.g. 128Mi, 1Gi)."
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "description": "CPU limit (e.g. 500m, 1)."
+            },
+            "memory": {
+              "type": "string",
+              "description": "Memory limit (e.g. 256Mi, 1Gi)."
+            }
+          }
+        }
+      }
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "description": "Pod-level security context.",
+      "properties": {
+        "runAsNonRoot": {
+          "type": "boolean",
+          "description": "Require the pod to run as a non-root user."
+        },
+        "runAsUser": {
+          "type": "integer",
+          "description": "UID to run the pod as."
+        },
+        "runAsGroup": {
+          "type": "integer",
+          "description": "GID to run the pod as."
+        },
+        "fsGroup": {
+          "type": "integer",
+          "description": "Filesystem group for volumes."
+        },
+        "seccompProfile": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "Seccomp profile type (e.g. RuntimeDefault, Localhost)."
+            },
+            "localhostProfile": {
+              "type": "string",
+              "description": "Path to a localhost seccomp profile."
+            }
+          }
+        }
+      }
+    },
+    "securityContext": {
+      "type": "object",
+      "description": "Container-level security context.",
+      "properties": {
+        "allowPrivilegeEscalation": {
+          "type": "boolean",
+          "description": "Whether the container can gain more privileges than its parent."
+        },
+        "readOnlyRootFilesystem": {
+          "type": "boolean",
+          "description": "Mount the root filesystem as read-only."
+        },
+        "runAsNonRoot": {
+          "type": "boolean",
+          "description": "Require the container to run as non-root."
+        },
+        "runAsUser": {
+          "type": "integer",
+          "description": "UID to run the container as."
+        },
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "drop": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Linux capabilities to drop."
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Linux capabilities to add."
+            }
+          }
+        }
+      }
+    },
+    "nodeSelector": {
+      "type": "object",
+      "description": "Node selector labels for pod scheduling.",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "tolerations": {
+      "type": "array",
+      "description": "Tolerations for pod scheduling.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "string",
+            "enum": ["Exists", "Equal"]
+          },
+          "value": {
+            "type": "string"
+          },
+          "effect": {
+            "type": "string",
+            "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"]
+          },
+          "tolerationSeconds": {
+            "type": "integer"
+          }
+        }
+      },
+      "default": []
+    },
+    "affinity": {
+      "type": "object",
+      "description": "Affinity rules for pod scheduling.",
+      "default": {}
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "description": "Prometheus ServiceMonitor configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether to create a ServiceMonitor resource.",
+          "default": false
+        },
+        "interval": {
+          "type": "string",
+          "description": "Scrape interval (e.g. 30s, 1m).",
+          "default": "30s"
+        },
+        "scrapeTimeout": {
+          "type": "string",
+          "description": "Scrape timeout. Must be less than the interval.",
+          "default": ""
+        },
+        "labels": {
+          "type": "object",
+          "description": "Additional labels for the ServiceMonitor.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}
