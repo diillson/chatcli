@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.95.0](https://github.com/diillson/chatcli/compare/v1.94.1...v1.95.0) (2026-04-05)
+
+
+### Features
+
+* **mcp:** add built-in overrides with shadow + automatic fallback ([#731](https://github.com/diillson/chatcli/issues/731)) ([783eea7](https://github.com/diillson/chatcli/commit/783eea7932b3c6e95c247c5f3a06d1bb36d6b1a2))
+
 ## [1.94.1](https://github.com/diillson/chatcli/compare/v1.94.0...v1.94.1) (2026-04-05)
 
 
