@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/token"
 	"github.com/diillson/chatcli/models"
@@ -13,6 +15,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
+
+func TestMain(m *testing.M) {
+	i18n.Init()
+	os.Exit(m.Run())
+}
 
 // --- Mock LLMClient (implements client.LLMClient) ---
 
