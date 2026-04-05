@@ -307,6 +307,11 @@ jobs:
     needs: [release_please]
     if: needs.release_please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - name: Checkout tag
         uses: actions/checkout@v4
@@ -318,6 +323,9 @@ jobs:
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
+      - name: Install ORAS
+        uses: oras-project/setup-oras@v1
 
       - name: Update chart versions
         env:
@@ -340,15 +348,34 @@ jobs:
             deploy/helm/chatcli/Chart.yaml \
             deploy/helm/chatcli-operator/Chart.yaml
 
-      - name: Package and push chatcli chart
+      - name: Package charts
         run: |
+          set -euo pipefail
+          mkdir -p /tmp/charts
           helm package deploy/helm/chatcli/ -d /tmp/charts/
+          helm package deploy/helm/chatcli-operator/ -d /tmp/charts/
+
+      - name: Push chatcli chart
+        run: |
           helm push /tmp/charts/chatcli-*.tgz oci://ghcr.io/diillson/charts
 
-      - name: Package and push chatcli-operator chart
+      - name: Push chatcli-operator chart
         run: |
-          helm package deploy/helm/chatcli-operator/ -d /tmp/charts/
           helm push /tmp/charts/chatcli-operator-*.tgz oci://ghcr.io/diillson/charts
+
+      - name: Push Artifact Hub metadata for chatcli
+        run: |
+          oras push \
+            ghcr.io/diillson/charts/chatcli:artifacthub.io \
+            --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+            artifacthub/chatcli-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+
+      - name: Push Artifact Hub metadata for chatcli-operator
+        run: |
+          oras push \
+            ghcr.io/diillson/charts/chatcli-operator:artifacthub.io \
+            --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+            artifacthub/chatcli-operator-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
 
   # Atualiza versões na documentação (chatcli.ai) automaticamente
   update_docs_version:
