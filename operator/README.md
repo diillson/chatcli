@@ -619,6 +619,6 @@ make deploy IMG=ghcr.io/diillson/chatcli-operator:latest
 
 ## Documentation
 
-Full documentation at [diillson.github.io/chatcli/docs/features/k8s-operator](https://diillson.github.io/chatcli/docs/features/k8s-operator/)
+Full documentation at [https://chatcli.edilsonfreitas.com/features/k8s-operator](https://chatcli.edilsonfreitas.com/features/k8s-operator/)
 
-Deep-dive AIOps architecture at [diillson.github.io/chatcli/docs/features/aiops-platform](https://diillson.github.io/chatcli/docs/features/aiops-platform/)
+Deep-dive AIOps architecture at [https://chatcli.edilsonfreitas.com/features/aiops-platform](https://chatcli.edilsonfreitas.com/features/aiops-platform/)
