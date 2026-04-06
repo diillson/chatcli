@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.96.0](https://github.com/diillson/chatcli/compare/v1.95.0...v1.96.0) (2026-04-06)
+
+
+### Features
+
+* **security:** enterprise security hardening — all 48 audit findings ([#733](https://github.com/diillson/chatcli/issues/733)) ([f0368e4](https://github.com/diillson/chatcli/commit/f0368e4c3f80dbad85f3470814c73f6fd0a8de68))
+
 ## [1.95.0](https://github.com/diillson/chatcli/compare/v1.94.1...v1.95.0) (2026-04-05)
 
 
