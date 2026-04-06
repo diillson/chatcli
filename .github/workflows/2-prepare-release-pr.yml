@@ -33,7 +33,7 @@ jobs:
           echo "::add-mask::${{ secrets.OPENAI_API_KEY }}"
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # fetch-depth: 0 é essencial para buscar todo o histórico e poder comparar as branches
           fetch-depth: 0
