@@ -629,14 +629,11 @@ func (r *RemediationReconciler) executeApplyManifest(ctx context.Context, resour
 			obj.GetNamespace(), resource.Namespace)
 	}
 
-	// Safety: disallow certain dangerous kinds
-	dangerousKinds := map[string]bool{
-		"ClusterRole": true, "ClusterRoleBinding": true,
-		"Namespace": true, "Node": true,
-		"PersistentVolume": true,
-	}
-	if dangerousKinds[obj.GetKind()] {
-		return fmt.Errorf("applying %s resources is not allowed for safety", obj.GetKind())
+	// Security (C5): Use allowlist approach instead of blocklist.
+	// Cached at package level to avoid per-call allocation.
+	allowlist := getResourceAllowlist()
+	if err := allowlist.CheckResourceAccess(obj.GetKind()); err != nil {
+		return fmt.Errorf("resource access denied: %w", err)
 	}
 
 	// Try to get existing — if exists, update; if not, create

@@ -1,6 +1,6 @@
 module github.com/diillson/chatcli/operator
 
-go 1.25.7
+go 1.26.1
 
 require (
 	github.com/diillson/chatcli v0.0.0

@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: chatcli-operator-netpol
+  namespace: chatcli-system
+  labels:
+    app.kubernetes.io/name: chatcli-operator
+    app.kubernetes.io/component: security
+spec:
+  podSelector:
+    matchLabels:
+      control-plane: controller-manager
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow REST API access (port 8090)
+    - ports:
+        - protocol: TCP
+          port: 8090
+    # Allow metrics scraping (port 8443)
+    - ports:
+        - protocol: TCP
+          port: 8443
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+    # Allow webhook traffic (port 9443)
+    - ports:
+        - protocol: TCP
+          port: 9443
+  egress:
+    # Allow DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow Kubernetes API server (typically port 443 or 6443)
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+    # Allow gRPC server communication (configurable port)
+    - ports:
+        - protocol: TCP
+          port: 50051
+    # Block cloud metadata endpoints explicitly via CIDR deny
+    # Note: NetworkPolicy doesn't support deny rules natively.
+    # Use a NetworkPolicy engine like Calico or Cilium for explicit deny of 169.254.169.254/32

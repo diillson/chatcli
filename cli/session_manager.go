@@ -5,12 +5,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
+
+// Security (L4): Strict session name validation
+var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_\-.]{0,254}$`)
 
 // SessionData is an alias for the shared models.SessionData type.
 // Kept for local convenience within the cli package.
@@ -40,12 +46,73 @@ func NewSessionManager(logger *zap.Logger) (*SessionManager, error) {
 	}, nil
 }
 
+// validateSessionName checks the session name against security rules (L4).
+func validateSessionName(name string) error {
+	if name == "" {
+		return fmt.Errorf("session name cannot be empty")
+	}
+	// Reject null bytes, control characters
+	for _, c := range name {
+		if c < 0x20 || c == 0x7f || c == 0x00 {
+			return fmt.Errorf("session name contains invalid control characters")
+		}
+	}
+	if !validSessionName.MatchString(name) {
+		return fmt.Errorf("session name must be alphanumeric with dash/underscore/dot only (max 255 chars)")
+	}
+	return nil
+}
+
 // getSessionPath retorna o caminho completo para um arquivo de sessão.
 func (sm *SessionManager) getSessionPath(name string) string {
 	// Sanitiza o nome para evitar problemas com o sistema de arquivos
 	safeName := strings.ReplaceAll(name, "/", "_")
 	safeName = strings.ReplaceAll(safeName, "\\", "_")
 	return filepath.Join(sm.sessionsDir, safeName+".json")
+}
+
+// CleanExpiredSessions removes sessions older than the configured TTL (L6).
+// Default TTL: 90 days, configurable via CHATCLI_SESSION_TTL (in days).
+func (sm *SessionManager) CleanExpiredSessions() int {
+	ttlDays := 90
+	if v := os.Getenv("CHATCLI_SESSION_TTL"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSuffix(v, "d")); err == nil && n > 0 {
+			ttlDays = n
+		}
+	}
+
+	maxAge := time.Duration(ttlDays) * 24 * time.Hour
+	cutoff := time.Now().Add(-maxAge)
+	cleaned := 0
+
+	entries, err := os.ReadDir(sm.sessionsDir)
+	if err != nil {
+		return 0
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			path := filepath.Join(sm.sessionsDir, entry.Name())
+			if err := os.Remove(path); err == nil {
+				sm.logger.Info("Expired session cleaned",
+					zap.String("session", entry.Name()),
+					zap.Time("modified", info.ModTime()))
+				cleaned++
+			}
+		}
+	}
+
+	if cleaned > 0 {
+		sm.logger.Info("Session cleanup completed", zap.Int("removed", cleaned), zap.Int("ttl_days", ttlDays))
+	}
+	return cleaned
 }
 
 // SaveSession salva o histórico da conversa em um arquivo JSON.
@@ -59,8 +126,9 @@ func (sm *SessionManager) SaveSession(name string, history []models.Message) err
 
 // SaveSessionV2 salva uma sessão completa com históricos escopados.
 func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
-	if name == "" {
-		return fmt.Errorf("o nome da sessão não pode ser vazio")
+	// Security (L4): Validate session name
+	if err := validateSessionName(name); err != nil {
+		return err
 	}
 
 	sd.Version = 2

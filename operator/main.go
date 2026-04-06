@@ -287,22 +287,59 @@ type apiKeyEntry struct {
 	Description string `yaml:"description"`
 }
 
-// loadAPIKeysFromConfigMap reads API keys from the chatcli-operator-config ConfigMap.
-// The ConfigMap field "api-keys" contains a YAML list of {key, role, description}.
+// loadAPIKeysFromConfigMap reads API keys from Secret or ConfigMap.
+// Security (M5): Prefers Secret "chatcli-operator-secrets" over ConfigMap for API keys.
 func loadAPIKeysFromConfigMap(clientset kubernetes.Interface, apiServer *rest.APIServer) {
-	configMapName := "chatcli-operator-config"
 	namespace := resolveNamespace()
+
+	// Security (C4): Fail-closed — refuse to start REST API without auth unless dev mode
+	devMode := strings.EqualFold(os.Getenv("CHATCLI_OPERATOR_DEV_MODE"), "true")
+
+	// Security (M5): Try Secret first, then fall back to ConfigMap
+	secretName := "chatcli-operator-secrets"
+	secret, err := clientset.CoreV1().Secrets(namespace).Get(context.Background(), secretName, metav1.GetOptions{})
+	if err == nil {
+		if apiKeysData, ok := secret.Data["api-keys"]; ok && len(apiKeysData) > 0 {
+			var entries []apiKeyEntry
+			if err := yaml.Unmarshal(apiKeysData, &entries); err == nil && len(entries) > 0 {
+				keys := make(map[string]string)
+				for _, e := range entries {
+					if e.Key != "" && e.Role != "" {
+						keys[e.Key] = e.Role
+						setupLog.Info("loaded API key from Secret", "role", e.Role, "description", e.Description)
+					}
+				}
+				if len(keys) > 0 {
+					apiServer.SetAPIKeys(keys)
+					setupLog.Info("REST API authentication enabled (from Secret)", "keys", len(keys))
+					return
+				}
+			}
+		}
+	}
+
+	// Fall back to ConfigMap
+	configMapName := "chatcli-operator-config"
 
 	cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), configMapName, metav1.GetOptions{})
 	if err != nil {
-		setupLog.Info("no API keys ConfigMap found, REST API running in dev mode (no auth)",
+		if devMode {
+			setupLog.Info("WARNING: no API keys ConfigMap found, REST API running in DEV MODE (no auth)",
+				"configmap", fmt.Sprintf("%s/%s", namespace, configMapName))
+			return
+		}
+		setupLog.Error(err, "SECURITY: no API keys ConfigMap found and CHATCLI_OPERATOR_DEV_MODE is not set — REST API will reject all unauthenticated requests",
 			"configmap", fmt.Sprintf("%s/%s", namespace, configMapName))
 		return
 	}
 
 	apiKeysYAML, ok := cm.Data["api-keys"]
 	if !ok || strings.TrimSpace(apiKeysYAML) == "" {
-		setupLog.Info("ConfigMap found but no api-keys field, REST API running in dev mode")
+		if devMode {
+			setupLog.Info("WARNING: ConfigMap found but no api-keys field, REST API running in DEV MODE")
+			return
+		}
+		setupLog.Error(nil, "SECURITY: ConfigMap found but no api-keys field and CHATCLI_OPERATOR_DEV_MODE is not set — REST API will reject all unauthenticated requests")
 		return
 	}
 

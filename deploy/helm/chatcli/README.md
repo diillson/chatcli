@@ -4,13 +4,13 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub](https://img.shields.io/badge/GitHub-diillson%2Fchatcli-181717?logo=github)](https://github.com/diillson/chatcli)
 
-Deploy **ChatCLI** as a gRPC server on Kubernetes — a multi-provider LLM gateway with intelligent agent modes, automatic failover, MCP integration, Kubernetes-native observability, and AIOps capabilities.
+Deploy **ChatCLI** as a production-grade, security-hardened gRPC server on Kubernetes -- a multi-provider LLM gateway with intelligent agent modes, automatic failover, MCP integration, Kubernetes-native observability, enterprise security controls, and AIOps capabilities.
 
 ## Features
 
 - **Multi-Provider LLM**: OpenAI, Anthropic Claude, Google Gemini, xAI Grok, ZAI (Zhipu AI), MiniMax, GitHub Copilot, StackSpot AI, Ollama (local)
 - **Automatic Failover**: Provider fallback chain with intelligent error classification (rate limit, timeout, auth error, context overflow), exponential cooldown, and health monitoring
-- **Agent Mode**: ReAct loop (Reason + Act) with 12 built-in specialized agents running in parallel — File, Coder, Shell, Git, Search, Planner, Reviewer, Tester, Refactor, Diagnostics, Formatter, Deps
+- **Agent Mode**: ReAct loop (Reason + Act) with 12 built-in specialized agents running in parallel -- File, Coder, Shell, Git, Search, Planner, Reviewer, Tester, Refactor, Diagnostics, Formatter, Deps
 - **Coder Mode**: Specialized software engineering agent with strict tool contracts, auto-correction, git integration, and rollback support
 - **MCP Integration**: Model Context Protocol support for extending LLM capabilities with external tools (stdio and SSE transports)
 - **Kubernetes Watcher**: Real-time multi-target deployment monitoring with metrics, logs, events, HPA, node health, and Prometheus scraping
@@ -21,6 +21,7 @@ Deploy **ChatCLI** as a gRPC server on Kubernetes — a multi-provider LLM gatew
 - **Bootstrap Files**: Customizable system prompt via SOUL.md, USER.md, IDENTITY.md, RULES.md, AGENTS.md
 - **Session Management**: Save, load, fork, and export conversation sessions
 - **gRPC Server**: High-performance server with optional TLS, token authentication, and Prometheus metrics
+- **Enterprise Security**: JWT + RBAC, rate limiting, SSRF prevention, TLS 1.3, plugin signatures, session encryption, structured audit logging
 - **Security Hardened**: Non-root, read-only filesystem, dropped capabilities, seccomp profile, shell injection prevention
 
 ## Prerequisites
@@ -307,6 +308,43 @@ agents:
 | `rbac.create` | Create RBAC resources | `true` |
 | `rbac.clusterWide` | Use ClusterRole for multi-namespace watcher | `false` |
 | `rbac.additionalRules` | Additional RBAC rules | `[]` |
+
+### Security Hardening
+
+Fine-grained security controls for production deployments. These parameters configure JWT authentication, rate limiting, gRPC transport constraints, audit logging, agent sandboxing, session lifecycle, and plugin trust policies.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `security.jwtSecret` | JWT signing secret for server authentication | `""` |
+| `security.jwtSecretRef` | Reference to Secret key for JWT secret (recommended) | `{}` |
+| `security.rateLimitRps` | Per-client rate limit in requests/second | `""` (default: 10) |
+| `security.rateLimitBurst` | Rate limit burst size | `""` (default: 30) |
+| `security.maxRecvMsgSize` | Max gRPC receive message size in bytes | `""` (default: 50MB) |
+| `security.maxSendMsgSize` | Max gRPC send message size in bytes | `""` (default: 50MB) |
+| `security.maxConcurrentStreams` | Max concurrent gRPC streams | `""` (default: 100) |
+| `security.bindAddress` | Server bind address | `""` (default: 127.0.0.1) |
+| `security.auditLogPath` | Audit log file path (JSON lines) | `""` |
+| `security.debug` | Enable debug logging with stack traces | `false` |
+| `security.agentSecurityMode` | Agent command validation: strict or permissive | `""` (default: strict) |
+| `security.sessionTTL` | Session expiry in days | `""` (default: 90) |
+| `security.envRedactMode` | Env var redaction: strict or permissive | `""` (default: permissive) |
+| `security.allowUnsignedPlugins` | Allow loading unsigned plugins | `false` |
+| `security.allowInsecure` | Allow non-TLS gRPC connections | `false` |
+| `security.encryptionKey` | Session encryption key (use secretKeyRef via extraEnv for production) | `""` |
+
+> **Production recommendation:** Always use `security.jwtSecretRef` to reference a pre-existing Kubernetes Secret rather than inlining the JWT secret in values. For the encryption key, inject it via `extraEnv` with a `secretKeyRef` to avoid storing sensitive material in Helm values.
+
+```yaml
+security:
+  jwtSecretRef:
+    name: chatcli-jwt
+    key: secret
+  rateLimitRps: 20
+  rateLimitBurst: 50
+  bindAddress: "0.0.0.0"
+  agentSecurityMode: strict
+  auditLogPath: "/var/log/chatcli/audit.jsonl"
+```
 
 ### Autoscaling & Availability
 

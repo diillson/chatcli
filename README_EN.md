@@ -6,6 +6,7 @@
 
 <h1 align="center">ChatCLI</h1>
 <p align="center"><strong>Multi-provider AI platform for terminal, server, and Kubernetes</strong></p>
+<p align="center"><em>11 providers. 12 agents. One interface.</em></p>
 
 <div align="center">
   <img src="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml/badge.svg"/>
@@ -34,29 +35,39 @@
   <img src="https://raw.githubusercontent.com/diillson/chatcli/main/assets/chatcli-demo.gif" alt="ChatCLI Demo" width="800">
 </p>
 
-## What is ChatCLI?
+<br>
 
-A CLI, gRPC server, and Kubernetes operator that connects **11 LLM providers** to a unified interface with autonomous agents, native tool calling, automatic failover, and a full AIOps pipeline.
+## Overview
 
-### Supported providers
+ChatCLI is a CLI, gRPC server, and Kubernetes operator that connects **11 LLM providers** to a single, unified interface. It ships with autonomous agents, native tool calling, automatic failover, enterprise-grade security, and a full AIOps pipeline -- all from your terminal.
+
+> **Why ChatCLI?** &mdash; Most AI tools lock you into one provider. ChatCLI gives you a consistent experience across OpenAI, Anthropic, Google, xAI, and seven more, with transparent failover, cost tracking, and the ability to run entirely on-prem via Ollama.
+
+<br>
+
+## Supported Providers
 
 | Provider | Default Model | Tool Calling | Vision |
-|---|---|---|---|
+|:--|:--|:--|:--|
 | **OpenAI** | gpt-5.4 | Native | Yes |
 | **Anthropic (Claude)** | claude-sonnet-4-6 | Native | Yes |
 | **Google Gemini** | gemini-2.5-flash | Native | Yes |
-| **xAI (Grok)** | grok-4-1 | XML fallback | - |
+| **xAI (Grok)** | grok-4-1 | XML fallback | -- |
 | **ZAI (Zhipu AI)** | glm-5 | Native | Yes |
 | **MiniMax** | MiniMax-M2.7 | Native | Yes |
 | **GitHub Copilot** | gpt-4o | Native | Yes |
 | **GitHub Models** | gpt-4o | Native | Yes |
-| **StackSpot AI** | StackSpotAI | - | - |
-| **Ollama** | (local) | XML fallback | - |
-| **OpenAI Assistants** | gpt-4o | Assistants API | - |
+| **StackSpot AI** | StackSpotAI | -- | -- |
+| **Ollama** | (local) | XML fallback | -- |
+| **OpenAI Assistants** | gpt-4o | Assistants API | -- |
+
+<br>
 
 ---
 
-## Installation
+## Getting Started
+
+### Installation
 
 ```bash
 # Homebrew (macOS / Linux)
@@ -70,21 +81,19 @@ go install github.com/diillson/chatcli@latest
 ```
 
 <details>
-<summary>Build from source</summary>
+<summary><strong>Build from source</strong></summary>
 
 ```bash
 git clone https://github.com/diillson/chatcli.git && cd chatcli
 go mod tidy && go build -o chatcli
 
-# With version info
+# With version metadata
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
 go build -ldflags "-X github.com/diillson/chatcli/version.Version=${VERSION}" -o chatcli
 ```
 </details>
 
----
-
-## Quick setup
+### Quick Setup
 
 Create a `.env` file or export the variables:
 
@@ -94,10 +103,10 @@ OPENAI_API_KEY=sk-xxx         # Key for the chosen provider
 ```
 
 <details>
-<summary>All provider variables</summary>
+<summary><strong>Full provider configuration reference</strong></summary>
 
 | Provider | API Key | Model | Extras |
-|---|---|---|---|
+|:--|:--|:--|:--|
 | OpenAI | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES` |
 | Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` | `ANTHROPIC_MAX_TOKENS` |
 | Google Gemini | `GOOGLEAI_API_KEY` | `GOOGLEAI_MODEL` | `GOOGLEAI_MAX_TOKENS` |
@@ -106,16 +115,20 @@ OPENAI_API_KEY=sk-xxx         # Key for the chosen provider
 | MiniMax | `MINIMAX_API_KEY` | `MINIMAX_MODEL` | `MINIMAX_MAX_TOKENS` |
 | GitHub Copilot | `GITHUB_COPILOT_TOKEN` | `COPILOT_MODEL` | or `/auth login github-copilot` |
 | GitHub Models | `GITHUB_TOKEN` | `GITHUB_MODELS_MODEL` | `GH_TOKEN`, `GITHUB_MODELS_TOKEN` |
-| StackSpot | `CLIENT_ID`, `CLIENT_KEY` | - | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
-| Ollama | - | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
+| StackSpot | `CLIENT_ID`, `CLIENT_KEY` | -- | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
+| Ollama | -- | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
 
 </details>
 
+<br>
+
 ---
 
-## Three modes of operation
+## Three Modes of Operation
 
 ### 1. Interactive CLI
+
+> Your terminal becomes an AI-powered workstation.
 
 ```bash
 chatcli                              # Interactive mode
@@ -123,17 +136,19 @@ chatcli -p "Explain this repo"       # One-shot
 git diff | chatcli -p "Summarize"    # Pipe stdin
 ```
 
-**Context commands** — inject data directly into your prompt:
+**Context commands** -- inject data directly into your prompt:
 
-| Command | What it does |
-|---|---|
+| Command | Description |
+|:--|:--|
 | `@git` | Status, branches, and recent commits |
-| `@file <path>` | File/directory contents |
+| `@file <path>` | File or directory contents |
 | `@env` | Environment variables |
 | `@history` | Recent shell commands |
-| `@command <cmd>` | Execute and inject output |
+| `@command <cmd>` | Execute a command and inject its output |
 
 ### 2. gRPC Server
+
+> Deploy ChatCLI as a shared backend with authentication, metrics, and failover.
 
 ```bash
 chatcli server --port 50051 --token my-token
@@ -142,9 +157,11 @@ chatcli server --port 50051 --token my-token
 chatcli connect --server host:50051 --token my-token
 ```
 
-Automatic failover, TLS, Prometheus metrics, MCP, plugin/agent/skill discovery.
+Includes automatic failover, TLS, Prometheus metrics, MCP support, and plugin/agent/skill discovery.
 
 ### 3. Kubernetes Operator
+
+> AIOps at scale -- anomaly detection, AI-driven remediation, and SLO monitoring.
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -164,7 +181,7 @@ spec:
         model: MiniMax-M2.7
 ```
 
-Autonomous AIOps pipeline: anomaly detection, issue correlation, AI analysis, automated remediation, post-mortems, and SLO monitoring. 17 CRDs, 54+ remediation actions.
+The operator delivers an autonomous AIOps pipeline: anomaly detection, issue correlation, AI analysis, automated remediation, post-mortem generation, and SLO monitoring. **17 CRDs** and **54+ remediation actions** out of the box.
 
 ```bash
 # Helm install
@@ -176,20 +193,24 @@ helm install chatcli-operator oci://ghcr.io/diillson/charts/chatcli-operator \
   --namespace aiops-system --create-namespace
 ```
 
+<br>
+
 ---
 
-## Key features
+## Core Features
 
 ### Agent Mode
 
-ReAct engine (Reason + Act) with **12 specialized agents** running in parallel: File, Coder, Shell, Git, Search, Planner, Reviewer, Tester, Refactor, Diagnostics, Formatter, Deps.
+> 12 specialized agents coordinated by a ReAct engine (Reason + Act), running in parallel.
+
+**File** &middot; **Coder** &middot; **Shell** &middot; **Git** &middot; **Search** &middot; **Planner** &middot; **Reviewer** &middot; **Tester** &middot; **Refactor** &middot; **Diagnostics** &middot; **Formatter** &middot; **Deps**
 
 ```bash
-/agent "Refactor the auth module to use JWT"
+/coder "Refactor the auth module to use JWT"
 chatcli -p "Create tests for the utils package" --agent-auto-exec
 ```
 
-### Native tool calling
+### Native Tool Calling
 
 Structured tool calls via OpenAI, Anthropic, Google, ZAI, and MiniMax native APIs. Ephemeral cache support for Anthropic. Automatic XML fallback for providers without native support.
 
@@ -204,7 +225,7 @@ Structured tool calls via OpenAI, Anthropic, Google, ZAI, and MiniMax native API
 
 Credentials stored with **AES-256-GCM** encryption in `~/.chatcli/auth-profiles.json`.
 
-### Provider fallback
+### Provider Fallback
 
 ```bash
 CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,ZAI,MINIMAX
@@ -224,11 +245,12 @@ Error classification (rate limit, timeout, auth, context overflow), exponential 
 }
 ```
 
-### More features
+<details>
+<summary><strong>All features at a glance</strong></summary>
 
 | Feature | Description |
-|---|---|
-| **Persistent contexts** | `/context create`, `/context attach` — inject entire projects into system prompt with cache hints |
+|:--|:--|
+| **Persistent contexts** | `/context create`, `/context attach` -- inject entire projects into the system prompt with cache hints |
 | **Bootstrap & Memory** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + long-term memory with facts and decay |
 | **Plugins** | Extensible system with auto-detection, schema validation, and remote plugins |
 | **Skills** | Multi-source registry with fuzzy search, moderation, and atomic installation |
@@ -241,6 +263,42 @@ Error classification (rate limit, timeout, auth, context overflow), exponential 
 | **i18n** | Interface in Portuguese and English with automatic detection |
 | **Session management** | Save, load, fork, and export conversations |
 
+</details>
+
+<br>
+
+---
+
+## Enterprise Security
+
+> Security is not an afterthought. ChatCLI is hardened at every layer -- from the credential store on your laptop to the operator running in production.
+
+### Authentication & Authorization
+
+- **JWT-based authentication** with role-based access control (RBAC): `admin`, `user`, and `readonly` roles
+- Per-client **rate limiting** to prevent abuse and ensure fair resource allocation
+- Built-in **OAuth PKCE** and **Device Flow** for provider authentication without exposing secrets
+
+### Encryption & Data Protection
+
+- **AES-256-GCM encryption at rest** for sessions, credentials, and stored tokens
+- **TLS 1.3 enforcement** for all gRPC server communication
+- **SSRF prevention** with strict URL validation and private network blocking
+
+### Code & Plugin Integrity
+
+- **Ed25519 plugin signature verification** -- only cryptographically signed plugins are loaded
+- **Agent command allowlist** with **150+ categorized commands** controlling what agents can execute
+- **Schema validation** for all plugin manifests and tool definitions
+
+### Auditing & Compliance
+
+- **Structured audit logging** in JSON Lines format for every authenticated action
+- **Automated security scanning** integrated into CI: `govulncheck`, `gosec`, and Dependabot
+- Versioned configuration with migration support for safe upgrades
+
+<br>
+
 ---
 
 ## Architecture
@@ -250,13 +308,17 @@ chatcli/
   cli/            TUI interface (Bubble Tea), agent mode, multi-agent workers
   llm/            11 providers, auto-register registry, fallback chain, catalog
   server/         gRPC server with TLS, auth, metrics, and MCP
-  operator/       Kubernetes Operator — 17 CRDs, autonomous AIOps pipeline
+  operator/       Kubernetes Operator -- 17 CRDs, autonomous AIOps pipeline
   k8s/            Watcher (collectors, store, summarizer)
   models/         Shared types (ToolDefinition, ToolCall, LLMResponse)
   auth/           OAuth PKCE, Device Flow, token refresh, encrypted store
   config/         ConfigManager with versioned migration
   i18n/           Internationalization (embed.FS + golang.org/x/text)
 ```
+
+> **Design principles:** provider-agnostic abstractions, zero hard-coded credentials, structured event-driven TUI via Bubble Tea, and a plugin system that trusts nothing unsigned.
+
+<br>
 
 ---
 
@@ -267,17 +329,23 @@ chatcli/
 3. Commit and push
 4. Open a Pull Request
 
+All contributions are welcome -- features, bug fixes, documentation, and security improvements.
+
+<br>
+
 ---
 
 ## License
 
 [Apache License 2.0](LICENSE)
 
+<br>
+
 ---
 
-## Links
-
-- **Full documentation**: [chatcli.edilsonfreitas.com](https://chatcli.edilsonfreitas.com)
-- **Releases**: [github.com/diillson/chatcli/releases](https://github.com/diillson/chatcli/releases)
-- **Helm Charts**: [ArtifactHub](https://artifacthub.io/packages/helm/chatcli/chatcli)
-- **Issues**: [github.com/diillson/chatcli/issues](https://github.com/diillson/chatcli/issues)
+<p align="center">
+  <a href="https://chatcli.edilsonfreitas.com"><strong>Documentation</strong></a> &middot;
+  <a href="https://github.com/diillson/chatcli/releases"><strong>Releases</strong></a> &middot;
+  <a href="https://artifacthub.io/packages/helm/chatcli/chatcli"><strong>Helm Charts</strong></a> &middot;
+  <a href="https://github.com/diillson/chatcli/issues"><strong>Issues</strong></a>
+</p>

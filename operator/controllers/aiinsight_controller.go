@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -185,8 +186,9 @@ func (r *AIInsightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// Final combined context (respect LLM token limits)
-	combinedContext := enrichedContext.String()
+	// Security (M1): Scrub sensitive data from logs before sending to LLM
+	scrubber := NewLogScrubber(os.Getenv("CHATCLI_LOG_SCRUB_PATTERNS"))
+	combinedContext := scrubber.ScrubText(enrichedContext.String())
 	if len(combinedContext) > 30000 {
 		combinedContext = combinedContext[:30000] + "\n... (context truncated)"
 	}

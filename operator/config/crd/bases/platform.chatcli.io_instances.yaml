@@ -115,6 +115,53 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              extraEnv:
+                description: |-
+                  ExtraEnv allows passing arbitrary environment variables to the ChatCLI server pod.
+                  Use for security config (CHATCLI_AGENT_SECURITY_MODE, CHATCLI_SESSION_TTL, etc.)
+                  or any other CHATCLI_* env vars not covered by structured fields.
+                  Supports both plain values and valueFrom (secretKeyRef, configMapKeyRef).
+                items:
+                  description: EnvVar represents an environment variable present in a Container.
+                  properties:
+                    name:
+                      description: Name of the environment variable.
+                      type: string
+                    value:
+                      description: Value of the environment variable.
+                      type: string
+                    valueFrom:
+                      description: Source for the environment variable's value.
+                      properties:
+                        configMapKeyRef:
+                          description: Selects a key of a ConfigMap.
+                          properties:
+                            key:
+                              type: string
+                            name:
+                              type: string
+                            optional:
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                        secretKeyRef:
+                          description: Selects a key of a Secret.
+                          properties:
+                            key:
+                              type: string
+                            name:
+                              type: string
+                            optional:
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                      type: object
+                  required:
+                  - name
+                  type: object
+                type: array
               apiKeys:
                 description: |-
                   APIKeys references a Secret containing provider API keys and config.
@@ -636,6 +683,55 @@ spec:
                         description: SecretName is the name of the Secret containing
                           tls.crt and tls.key.
                         type: string
+                    type: object
+                  security:
+                    description: Security configures server security parameters.
+                    properties:
+                      jwtSecretRef:
+                        description: JWTSecretRef references a Secret key containing the JWT signing secret. Maps to CHATCLI_JWT_SECRET.
+                        properties:
+                          key:
+                            description: Key is the key within the Secret.
+                            type: string
+                          name:
+                            description: Name is the Secret name.
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      rateLimitRps:
+                        description: Per-client rate limit in requests per second. Maps to CHATCLI_RATE_LIMIT_RPS. Default 10.
+                        format: int32
+                        type: integer
+                      rateLimitBurst:
+                        description: Maximum burst size for rate limiting. Maps to CHATCLI_RATE_LIMIT_BURST. Default 30.
+                        format: int32
+                        type: integer
+                      maxRecvMsgSize:
+                        description: Maximum message size in bytes the server can receive. Maps to CHATCLI_MAX_RECV_MSG_SIZE. Default 52428800 (50MB).
+                        format: int32
+                        type: integer
+                      maxSendMsgSize:
+                        description: Maximum message size in bytes the server can send. Maps to CHATCLI_MAX_SEND_MSG_SIZE. Default 52428800 (50MB).
+                        format: int32
+                        type: integer
+                      maxConcurrentStreams:
+                        description: Limits simultaneous gRPC streams per connection. Maps to CHATCLI_MAX_CONCURRENT_STREAMS. Default 100.
+                        format: int32
+                        type: integer
+                      bindAddress:
+                        description: Address to bind the server to. Maps to CHATCLI_BIND_ADDRESS. Default "127.0.0.1". Set "0.0.0.0" to expose.
+                        type: string
+                      auditLogPath:
+                        description: File path for structured audit logs (JSON lines). Maps to CHATCLI_AUDIT_LOG_PATH.
+                        type: string
+                      debug:
+                        description: Enable verbose logging including stack traces. Maps to CHATCLI_DEBUG.
+                        type: boolean
+                      enableReflection:
+                        description: Enable gRPC reflection (also needs CHATCLI_GRPC_REFLECTION=true).
+                        type: boolean
                     type: object
                   token:
                     description: Token references a Secret containing the auth token.

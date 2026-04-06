@@ -129,11 +129,15 @@ rules:
     verbs: ["get", "list"]
 
   # ──────────────────────────────────────────────────
-  # RBAC (operator creates roles for Instance watcher)
+  # RBAC — namespace-scoped roles for Instance watcher
   # ──────────────────────────────────────────────────
   - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+    resources: ["roles", "rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Security (H5): ClusterRoles/ClusterRoleBindings read-only to prevent privilege escalation
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list", "watch"]
 
   # ──────────────────────────────────────────────────
   # Leader election

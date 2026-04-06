@@ -46,11 +46,14 @@ spec:
       terminationGracePeriodSeconds: 10
       securityContext:
         runAsNonRoot: true
+        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: ghcr.io/diillson/chatcli-operator:latest
+          # Security (C6): Pin image to specific version. Production should use SHA256 digest.
+          image: ghcr.io/diillson/chatcli-operator:1.95.0
+          imagePullPolicy: IfNotPresent
           args:
             - --leader-elect
           ports:

@@ -103,9 +103,85 @@ func (hm *HistoryManager) LoadHistory() ([]string, error) {
 }
 
 // AppendAndRotateHistory salva o histórico no arquivo e faz backup se o tamanho exceder o limite
+// secretPrefixes are known secret value prefixes to redact in history.
+var secretPrefixes = []string{"sk-", "ghp_", "gho_", "ghs_", "github_pat_", "xoxb-", "xoxp-", "AKIA"}
+
+// sensitiveKeyPatterns are key names whose values should be redacted.
+var sensitiveKeyPatterns = []string{"password", "secret", "token", "api_key", "apikey"}
+
+// redactHistoryEntry removes sensitive content from a history entry before persisting.
+// Uses a single-pass approach to avoid overlapping replacement issues.
+func redactHistoryEntry(entry string) string {
+	// Build result using a strings.Builder for safe single-pass redaction
+	var result strings.Builder
+	i := 0
+	for i < len(entry) {
+		redacted := false
+
+		// Check secret prefixes (sk-, ghp_, AKIA, etc.)
+		for _, prefix := range secretPrefixes {
+			if i+len(prefix) <= len(entry) && entry[i:i+len(prefix)] == prefix {
+				result.WriteString("[REDACTED]")
+				// Skip the full token (until delimiter)
+				j := i + len(prefix)
+				for j < len(entry) && entry[j] != ' ' && entry[j] != '\n' && entry[j] != '"' && entry[j] != '\'' && entry[j] != ';' {
+					j++
+				}
+				i = j
+				redacted = true
+				break
+			}
+		}
+		if redacted {
+			continue
+		}
+
+		// Check key=value patterns (password=xxx, secret: xxx, etc.)
+		for _, key := range sensitiveKeyPatterns {
+			for _, sep := range []string{"=", ": "} {
+				pat := key + sep
+				if i+len(pat) <= len(entry) && strings.EqualFold(entry[i:i+len(pat)], pat) {
+					result.WriteString(entry[i : i+len(pat)])
+					result.WriteString("[REDACTED]")
+					// Skip the value
+					j := i + len(pat)
+					for j < len(entry) && entry[j] != ' ' && entry[j] != '\n' && entry[j] != ';' {
+						j++
+					}
+					i = j
+					redacted = true
+					break
+				}
+			}
+			if redacted {
+				break
+			}
+		}
+		if redacted {
+			continue
+		}
+
+		result.WriteByte(entry[i])
+		i++
+	}
+	return result.String()
+}
+
 func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {
+	// Security (L11): Respect CHATCLI_DISABLE_HISTORY
+	if strings.EqualFold(os.Getenv("CHATCLI_DISABLE_HISTORY"), "true") {
+		return nil
+	}
+
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
+
+	// Security (L11): Redact sensitive content before persisting
+	redacted := make([]string, len(newCommands))
+	for i, cmd := range newCommands {
+		redacted[i] = redactHistoryEntry(cmd)
+	}
+
 	// 1. Anexar os novos comandos ao arquivo de histórico
 	f, err := os.OpenFile(hm.historyFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -114,7 +190,7 @@ func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {
 	}
 
 	writer := bufio.NewWriter(f)
-	for _, cmd := range newCommands {
+	for _, cmd := range redacted {
 		if _, err := fmt.Fprintln(writer, cmd); err != nil {
 			// Ignorar erro de escrita individual, mas logar
 			hm.logger.Warn("Erro ao escrever comando no histórico", zap.String("command", cmd), zap.Error(err))

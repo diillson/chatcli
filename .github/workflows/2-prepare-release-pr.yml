@@ -27,6 +27,11 @@ jobs:
       GOPATH: ${{ github.workspace }}/go
 
     steps:
+      # Security (M16): Mask API key to prevent accidental log exposure
+      - name: Mask sensitive environment variables
+        run: |
+          echo "::add-mask::${{ secrets.OPENAI_API_KEY }}"
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -39,7 +44,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version-file: go.mod
 
       - name: Install ChatCLI
         run: go install github.com/diillson/chatcli@latest

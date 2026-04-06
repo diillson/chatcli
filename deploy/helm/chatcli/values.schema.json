@@ -867,6 +867,83 @@
           "description": "Name of an existing PersistentVolumeClaim for plugin storage."
         }
       }
+    },
+    "security": {
+      "type": "object",
+      "description": "Security hardening configuration. All fields map to CHATCLI_* environment variables.",
+      "additionalProperties": false,
+      "properties": {
+        "jwtSecret": {
+          "type": "string",
+          "description": "JWT signing secret for server authentication. For production use jwtSecretRef instead."
+        },
+        "jwtSecretRef": {
+          "type": "object",
+          "description": "Reference to a Kubernetes Secret key containing the JWT secret.",
+          "properties": {
+            "name": { "type": "string" },
+            "key": { "type": "string" }
+          }
+        },
+        "rateLimitRps": {
+          "type": ["string", "integer"],
+          "description": "Per-client rate limit in requests/second. Default: 10."
+        },
+        "rateLimitBurst": {
+          "type": ["string", "integer"],
+          "description": "Rate limit burst size. Default: 30."
+        },
+        "maxRecvMsgSize": {
+          "type": ["string", "integer"],
+          "description": "Max gRPC receive message size in bytes. Default: 52428800 (50MB)."
+        },
+        "maxSendMsgSize": {
+          "type": ["string", "integer"],
+          "description": "Max gRPC send message size in bytes. Default: 52428800 (50MB)."
+        },
+        "maxConcurrentStreams": {
+          "type": ["string", "integer"],
+          "description": "Max concurrent gRPC streams. Default: 100."
+        },
+        "bindAddress": {
+          "type": "string",
+          "description": "Server bind address. Default: 127.0.0.1. Set 0.0.0.0 to expose."
+        },
+        "auditLogPath": {
+          "type": "string",
+          "description": "File path for JSON-lines audit log."
+        },
+        "debug": {
+          "type": "boolean",
+          "description": "Enable debug mode with stack traces. Default: false."
+        },
+        "agentSecurityMode": {
+          "type": "string",
+          "enum": ["strict", "permissive", ""],
+          "description": "Agent command validation mode. Default: strict."
+        },
+        "sessionTTL": {
+          "type": ["string", "integer"],
+          "description": "Session TTL in days. Default: 90."
+        },
+        "envRedactMode": {
+          "type": "string",
+          "enum": ["strict", "permissive", ""],
+          "description": "Environment variable redaction mode. Default: permissive."
+        },
+        "allowUnsignedPlugins": {
+          "type": "boolean",
+          "description": "Allow loading unsigned plugins. Default: false."
+        },
+        "allowInsecure": {
+          "type": "boolean",
+          "description": "Allow non-TLS gRPC connections. Default: false."
+        },
+        "encryptionKey": {
+          "type": "string",
+          "description": "Encryption key for sessions at rest. Use secretKeyRef via extraEnv for production."
+        }
+      }
     }
   }
 }

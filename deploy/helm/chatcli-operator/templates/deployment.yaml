@@ -49,6 +49,50 @@ spec:
             - name: CHATCLI_AIOPS_PORT
               value: {{ .Values.api.port | quote }}
           {{- end }}
+          {{- /* Security configuration */ -}}
+          {{- if .Values.security.devMode }}
+            - name: CHATCLI_OPERATOR_DEV_MODE
+              value: "true"
+          {{- end }}
+          {{- if .Values.security.apiTLS.certFile }}
+            - name: CHATCLI_AIOPS_TLS_CERT
+              value: {{ .Values.security.apiTLS.certFile | quote }}
+          {{- end }}
+          {{- if .Values.security.apiTLS.keyFile }}
+            - name: CHATCLI_AIOPS_TLS_KEY
+              value: {{ .Values.security.apiTLS.keyFile | quote }}
+          {{- end }}
+          {{- if .Values.security.grpcTLS.certFile }}
+            - name: CHATCLI_GRPC_TLS_CERT
+              value: {{ .Values.security.grpcTLS.certFile | quote }}
+          {{- end }}
+          {{- if .Values.security.grpcTLS.keyFile }}
+            - name: CHATCLI_GRPC_TLS_KEY
+              value: {{ .Values.security.grpcTLS.keyFile | quote }}
+          {{- end }}
+          {{- if .Values.security.grpcTLS.caFile }}
+            - name: CHATCLI_GRPC_TLS_CA
+              value: {{ .Values.security.grpcTLS.caFile | quote }}
+          {{- end }}
+          {{- if .Values.security.allowedResourceTypes }}
+            - name: CHATCLI_ALLOWED_RESOURCE_TYPES
+              value: {{ .Values.security.allowedResourceTypes | quote }}
+          {{- end }}
+          {{- if .Values.security.logScrubPatterns }}
+            - name: CHATCLI_LOG_SCRUB_PATTERNS
+              value: {{ .Values.security.logScrubPatterns | quote }}
+          {{- end }}
+          {{- if .Values.security.corsOrigin }}
+            - name: CHATCLI_CORS_ORIGIN
+              value: {{ .Values.security.corsOrigin | quote }}
+          {{- end }}
+          {{- if .Values.security.auditLogPath }}
+            - name: CHATCLI_AUDIT_LOG_PATH
+              value: {{ .Values.security.auditLogPath | quote }}
+          {{- end }}
+          {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: metrics
               containerPort: {{ .Values.metrics.port }}

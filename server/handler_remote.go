@@ -9,6 +9,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/diillson/chatcli/i18n"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
@@ -21,15 +22,26 @@ import (
 // Remote Resource Discovery RPCs
 // =============================================================================
 
-// ListRemotePlugins returns all plugins installed on the server.
+// ListRemotePlugins returns plugins installed on the server.
+// Security (L12): Filters by role — admin sees all, user sees non-internal, readonly sees none.
 func (h *Handler) ListRemotePlugins(ctx context.Context, req *pb.ListRemotePluginsRequest) (*pb.ListRemotePluginsResponse, error) {
 	if h.pluginManager == nil {
 		return &pb.ListRemotePluginsResponse{}, nil
 	}
 
+	// Access control based on role
+	user := UserFromContext(ctx)
+	if user != nil && user.Role == RoleReadonly {
+		return &pb.ListRemotePluginsResponse{}, nil // readonly sees nothing
+	}
+
 	plist := h.pluginManager.GetPlugins()
 	var result []*pb.PluginInfo
 	for _, p := range plist {
+		// Filter internal plugins (prefixed with _) for non-admin users
+		if user != nil && user.Role != RoleAdmin && strings.HasPrefix(p.Name(), "_") {
+			continue
+		}
 		result = append(result, &pb.PluginInfo{
 			Name:        p.Name(),
 			Description: p.Description(),
@@ -172,7 +184,13 @@ func (h *Handler) GetSkillContent(ctx context.Context, req *pb.GetSkillContentRe
 }
 
 // ExecuteRemotePlugin executes a plugin on the server and returns the output.
+// Security (C1): Requires at least "user" role — readonly users cannot execute plugins.
 func (h *Handler) ExecuteRemotePlugin(ctx context.Context, req *pb.ExecuteRemotePluginRequest) (*pb.ExecuteRemotePluginResponse, error) {
+	// Access control: readonly users cannot execute plugins
+	if user := UserFromContext(ctx); user != nil && !user.HasRole(RoleUser) {
+		return nil, status.Errorf(codes.PermissionDenied, "insufficient permissions: role %q cannot execute plugins", user.Role)
+	}
+
 	if h.pluginManager == nil {
 		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.remote.plugin_unavailable"))
 	}

@@ -97,6 +97,74 @@ spec:
             - name: PROMETHEUS_URL
               value: {{ .Values.prometheusUrl | quote }}
           {{- end }}
+          {{- /* Security configuration env vars */ -}}
+          {{- if .Values.security.jwtSecret }}
+            - name: CHATCLI_JWT_SECRET
+              value: {{ .Values.security.jwtSecret | quote }}
+          {{- end }}
+          {{- if .Values.security.jwtSecretRef }}
+            - name: CHATCLI_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.security.jwtSecretRef.name }}
+                  key: {{ .Values.security.jwtSecretRef.key }}
+          {{- end }}
+          {{- if .Values.security.rateLimitRps }}
+            - name: CHATCLI_RATE_LIMIT_RPS
+              value: {{ .Values.security.rateLimitRps | quote }}
+          {{- end }}
+          {{- if .Values.security.rateLimitBurst }}
+            - name: CHATCLI_RATE_LIMIT_BURST
+              value: {{ .Values.security.rateLimitBurst | quote }}
+          {{- end }}
+          {{- if .Values.security.maxRecvMsgSize }}
+            - name: CHATCLI_MAX_RECV_MSG_SIZE
+              value: {{ .Values.security.maxRecvMsgSize | quote }}
+          {{- end }}
+          {{- if .Values.security.maxSendMsgSize }}
+            - name: CHATCLI_MAX_SEND_MSG_SIZE
+              value: {{ .Values.security.maxSendMsgSize | quote }}
+          {{- end }}
+          {{- if .Values.security.maxConcurrentStreams }}
+            - name: CHATCLI_MAX_CONCURRENT_STREAMS
+              value: {{ .Values.security.maxConcurrentStreams | quote }}
+          {{- end }}
+          {{- if .Values.security.bindAddress }}
+            - name: CHATCLI_BIND_ADDRESS
+              value: {{ .Values.security.bindAddress | quote }}
+          {{- end }}
+          {{- if .Values.security.auditLogPath }}
+            - name: CHATCLI_AUDIT_LOG_PATH
+              value: {{ .Values.security.auditLogPath | quote }}
+          {{- end }}
+          {{- if .Values.security.debug }}
+            - name: CHATCLI_DEBUG
+              value: "true"
+          {{- end }}
+          {{- if .Values.security.agentSecurityMode }}
+            - name: CHATCLI_AGENT_SECURITY_MODE
+              value: {{ .Values.security.agentSecurityMode | quote }}
+          {{- end }}
+          {{- if .Values.security.sessionTTL }}
+            - name: CHATCLI_SESSION_TTL
+              value: {{ .Values.security.sessionTTL | quote }}
+          {{- end }}
+          {{- if .Values.security.envRedactMode }}
+            - name: CHATCLI_ENV_REDACT_MODE
+              value: {{ .Values.security.envRedactMode | quote }}
+          {{- end }}
+          {{- if .Values.security.allowUnsignedPlugins }}
+            - name: CHATCLI_ALLOW_UNSIGNED_PLUGINS
+              value: "true"
+          {{- end }}
+          {{- if .Values.security.allowInsecure }}
+            - name: CHATCLI_ALLOW_INSECURE
+              value: "true"
+          {{- end }}
+          {{- if .Values.security.encryptionKey }}
+            - name: CHATCLI_ENCRYPTION_KEY
+              value: {{ .Values.security.encryptionKey | quote }}
+          {{- end }}
           {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
