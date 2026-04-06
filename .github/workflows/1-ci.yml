@@ -49,7 +49,7 @@ jobs:
           go tool cover -func=coverage.out > coverage.txt
 
       - name: Upload coverage report artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage.txt
