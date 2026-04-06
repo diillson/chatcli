@@ -234,10 +234,65 @@ serviceMonitor:
 # Example: "http://prometheus-server.monitoring.svc:9090"
 prometheusUrl: ""
 
+# Security hardening configuration
+# All fields map to CHATCLI_* environment variables on the server pod.
+security:
+  # JWT authentication secret (leave empty to use legacy token auth)
+  # For production: use jwtSecretRef to reference a Kubernetes Secret instead.
+  jwtSecret: ""
+  # Reference a Secret key for JWT secret (recommended over plain jwtSecret)
+  jwtSecretRef: {}
+  #   name: chatcli-jwt
+  #   key: secret
+
+  # Per-client rate limiting
+  rateLimitRps: ""      # requests/second (default: 10)
+  rateLimitBurst: ""    # burst size (default: 30)
+
+  # gRPC message size limits
+  maxRecvMsgSize: ""    # bytes (default: 52428800 = 50MB)
+  maxSendMsgSize: ""    # bytes (default: 52428800 = 50MB)
+  maxConcurrentStreams: "" # (default: 100)
+
+  # Server bind address (default: 127.0.0.1, set 0.0.0.0 to expose)
+  bindAddress: ""
+
+  # Audit logging
+  auditLogPath: ""      # file path for JSON-lines audit log
+
+  # Debug mode (enables stack traces in error logs)
+  debug: false
+
+  # Agent security mode: "strict" (allowlist only) or "permissive" (allowlist + denylist)
+  agentSecurityMode: ""
+
+  # Session TTL in days (default: 90)
+  sessionTTL: ""
+
+  # Environment variable redaction: "strict" or "permissive"
+  envRedactMode: ""
+
+  # Allow unsigned plugins (dev only, default: false)
+  allowUnsignedPlugins: false
+
+  # Allow insecure (non-TLS) gRPC connections (default: false)
+  allowInsecure: false
+
+  # Encryption key for sessions at rest (leave empty to use auth key)
+  # For production: set via extraEnv with secretKeyRef instead.
+  encryptionKey: ""
+
 # Extra environment variables
 extraEnv: []
 # - name: LOG_LEVEL
 #   value: "debug"
+# - name: CHATCLI_AGENT_ALLOWLIST
+#   value: "terraform,ansible,packer"
+# - name: CHATCLI_ENCRYPTION_KEY
+#   valueFrom:
+#     secretKeyRef:
+#       name: chatcli-secrets
+#       key: encryption-key
 
 # Persistence for sessions
 persistence:

@@ -337,6 +337,63 @@
           "default": {}
         }
       }
+    },
+    "security": {
+      "type": "object",
+      "description": "Security hardening configuration for the operator.",
+      "properties": {
+        "devMode": {
+          "type": "boolean",
+          "description": "Enable dev mode (disables REST API auth). NEVER use in production.",
+          "default": false
+        },
+        "apiTLS": {
+          "type": "object",
+          "description": "TLS configuration for the REST API.",
+          "properties": {
+            "certFile": { "type": "string" },
+            "keyFile": { "type": "string" }
+          }
+        },
+        "grpcTLS": {
+          "type": "object",
+          "description": "TLS for gRPC communication with ChatCLI server.",
+          "properties": {
+            "certFile": { "type": "string" },
+            "keyFile": { "type": "string" },
+            "caFile": { "type": "string" }
+          }
+        },
+        "allowedResourceTypes": {
+          "type": "string",
+          "description": "Comma-separated list of allowed resource types for remediation."
+        },
+        "logScrubPatterns": {
+          "type": "string",
+          "description": "Comma-separated custom regex patterns for log scrubbing."
+        },
+        "corsOrigin": {
+          "type": "string",
+          "description": "CORS allowed origin. Empty = deny all (default)."
+        },
+        "auditLogPath": {
+          "type": "string",
+          "description": "File path for structured audit logs."
+        }
+      }
+    },
+    "extraEnv": {
+      "type": "array",
+      "description": "Extra environment variables for the operator pod.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "value": { "type": "string" },
+          "valueFrom": { "type": "object" }
+        }
+      }
     }
   },
   "additionalProperties": false

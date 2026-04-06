@@ -70,6 +70,33 @@ securityContext:
     drop:
       - ALL
 
+# Security hardening configuration for the operator
+security:
+  # Dev mode disables authentication on the REST API (NEVER use in production)
+  devMode: false
+  # TLS for the REST API (port 8090)
+  apiTLS:
+    certFile: ""  # CHATCLI_AIOPS_TLS_CERT
+    keyFile: ""   # CHATCLI_AIOPS_TLS_KEY
+  # gRPC TLS for communication with ChatCLI server
+  grpcTLS:
+    certFile: ""  # CHATCLI_GRPC_TLS_CERT
+    keyFile: ""   # CHATCLI_GRPC_TLS_KEY
+    caFile: ""    # CHATCLI_GRPC_TLS_CA
+  # Allowed resource types for remediation (comma-separated)
+  allowedResourceTypes: ""
+  # Custom log scrub patterns (comma-separated regexes)
+  logScrubPatterns: ""
+  # CORS allowed origin (empty = deny all)
+  corsOrigin: ""
+  # Audit log file path
+  auditLogPath: ""
+
+# Extra environment variables for the operator pod
+extraEnv: []
+# - name: CHATCLI_ALLOWED_RESOURCE_TYPES
+#   value: "Deployment,Service,ConfigMap,HPA"
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
