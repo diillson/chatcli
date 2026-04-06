@@ -33,10 +33,10 @@ func (v *RemediationPlanValidator) Handle(ctx context.Context, req admission.Req
 			return admission.Allowed("unable to decode, allowing")
 		}
 
-		if plan.Status.Phase == "Running" || plan.Status.Phase == "InProgress" {
+		if plan.Status.State == platformv1alpha1.RemediationStateExecuting || plan.Status.State == platformv1alpha1.RemediationStateVerifying {
 			return admission.Denied(fmt.Sprintf(
-				"cannot delete RemediationPlan %s/%s while in phase %q — wait for completion or cancel first",
-				plan.Namespace, plan.Name, plan.Status.Phase,
+				"cannot delete RemediationPlan %s/%s while in state %q — wait for completion or cancel first",
+				plan.Namespace, plan.Name, plan.Status.State,
 			))
 		}
 	}

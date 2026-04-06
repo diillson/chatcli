@@ -103,39 +103,68 @@ func (hm *HistoryManager) LoadHistory() ([]string, error) {
 }
 
 // AppendAndRotateHistory salva o histórico no arquivo e faz backup se o tamanho exceder o limite
+// secretPrefixes are known secret value prefixes to redact in history.
+var secretPrefixes = []string{"sk-", "ghp_", "gho_", "ghs_", "github_pat_", "xoxb-", "xoxp-", "AKIA"}
+
+// sensitiveKeyPatterns are key names whose values should be redacted.
+var sensitiveKeyPatterns = []string{"password", "secret", "token", "api_key", "apikey"}
+
 // redactHistoryEntry removes sensitive content from a history entry before persisting.
-// Security (L11): Detects API key patterns, tokens, passwords and replaces with [REDACTED].
+// Uses a single-pass approach to avoid overlapping replacement issues.
 func redactHistoryEntry(entry string) string {
-	// Common secret prefixes
-	for _, prefix := range []string{"sk-", "ghp_", "gho_", "ghs_", "xoxb-", "xoxp-", "AKIA", "eyJ"} {
-		if idx := strings.Index(entry, prefix); idx >= 0 {
-			// Find end of token (next space or end)
-			end := idx + len(prefix)
-			for end < len(entry) && entry[end] != ' ' && entry[end] != '\n' && entry[end] != '"' && entry[end] != '\'' {
-				end++
-			}
-			entry = entry[:idx] + "[REDACTED]" + entry[end:]
-		}
-	}
-	// Redact key=value patterns for known sensitive keys
-	for _, key := range []string{"password", "secret", "token", "api_key", "apikey"} {
-		lower := strings.ToLower(entry)
-		for _, sep := range []string{"=", ": "} {
-			pattern := key + sep
-			if idx := strings.Index(lower, pattern); idx >= 0 {
-				valStart := idx + len(pattern)
-				valEnd := valStart
-				for valEnd < len(entry) && entry[valEnd] != ' ' && entry[valEnd] != '\n' && entry[valEnd] != ';' {
-					valEnd++
+	// Build result using a strings.Builder for safe single-pass redaction
+	var result strings.Builder
+	i := 0
+	for i < len(entry) {
+		redacted := false
+
+		// Check secret prefixes (sk-, ghp_, AKIA, etc.)
+		for _, prefix := range secretPrefixes {
+			if i+len(prefix) <= len(entry) && entry[i:i+len(prefix)] == prefix {
+				result.WriteString("[REDACTED]")
+				// Skip the full token (until delimiter)
+				j := i + len(prefix)
+				for j < len(entry) && entry[j] != ' ' && entry[j] != '\n' && entry[j] != '"' && entry[j] != '\'' && entry[j] != ';' {
+					j++
 				}
-				if valEnd > valStart {
-					entry = entry[:valStart] + "[REDACTED]" + entry[valEnd:]
-					lower = strings.ToLower(entry) // refresh
-				}
+				i = j
+				redacted = true
+				break
 			}
 		}
+		if redacted {
+			continue
+		}
+
+		// Check key=value patterns (password=xxx, secret: xxx, etc.)
+		for _, key := range sensitiveKeyPatterns {
+			for _, sep := range []string{"=", ": "} {
+				pat := key + sep
+				if i+len(pat) <= len(entry) && strings.EqualFold(entry[i:i+len(pat)], pat) {
+					result.WriteString(entry[i : i+len(pat)])
+					result.WriteString("[REDACTED]")
+					// Skip the value
+					j := i + len(pat)
+					for j < len(entry) && entry[j] != ' ' && entry[j] != '\n' && entry[j] != ';' {
+						j++
+					}
+					i = j
+					redacted = true
+					break
+				}
+			}
+			if redacted {
+				break
+			}
+		}
+		if redacted {
+			continue
+		}
+
+		result.WriteByte(entry[i])
+		i++
 	}
-	return entry
+	return result.String()
 }
 
 func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {

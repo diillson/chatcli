@@ -7,9 +7,24 @@ package controllers
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 )
+
+// Cached singleton — initialized once, reused across reconciliations.
+var (
+	cachedAllowlist     *ResourceAllowlist
+	cachedAllowlistOnce sync.Once
+)
+
+// getResourceAllowlist returns a cached ResourceAllowlist singleton.
+func getResourceAllowlist() *ResourceAllowlist {
+	cachedAllowlistOnce.Do(func() {
+		cachedAllowlist = NewResourceAllowlist(os.Getenv("CHATCLI_ALLOWED_RESOURCE_TYPES"))
+	})
+	return cachedAllowlist
+}
 
 // ResourceAllowlist controls which Kubernetes resource types can be created/modified
 // by remediation actions. Uses an allowlist approach (C5) — any resource type not

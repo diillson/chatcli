@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -631,8 +630,8 @@ func (r *RemediationReconciler) executeApplyManifest(ctx context.Context, resour
 	}
 
 	// Security (C5): Use allowlist approach instead of blocklist.
-	// Only explicitly permitted resource types can be applied without approval.
-	allowlist := NewResourceAllowlist(os.Getenv("CHATCLI_ALLOWED_RESOURCE_TYPES"))
+	// Cached at package level to avoid per-call allocation.
+	allowlist := getResourceAllowlist()
 	if err := allowlist.CheckResourceAccess(obj.GetKind()); err != nil {
 		return fmt.Errorf("resource access denied: %w", err)
 	}

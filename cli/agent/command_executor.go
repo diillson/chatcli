@@ -24,15 +24,19 @@ import (
 
 // CommandExecutor executa comandos do sistema de forma segura
 type CommandExecutor struct {
-	logger    *zap.Logger
-	validator *CommandValidator
+	logger        *zap.Logger
+	validator     *CommandValidator
+	allowlist     *CommandAllowlist
+	readValidator *SensitiveReadPaths
 }
 
 // NewCommandExecutor cria uma nova instância do executor
 func NewCommandExecutor(logger *zap.Logger) *CommandExecutor {
 	return &CommandExecutor{
-		logger:    logger,
-		validator: NewCommandValidator(logger),
+		logger:        logger,
+		validator:     NewCommandValidator(logger),
+		allowlist:     NewCommandAllowlist(),
+		readValidator: NewSensitiveReadPaths(),
 	}
 }
 
@@ -48,7 +52,23 @@ type ExecutionResult struct {
 
 // Execute executa um comando e retorna o resultado
 func (e *CommandExecutor) Execute(ctx context.Context, command string, interactive bool) (*ExecutionResult, error) {
-	// Validar comando
+	// Security (H8): Allowlist-based command validation (defense in depth)
+	if e.allowlist.GetMode() == SecurityModeStrict {
+		if allowed, _, reason := e.allowlist.IsAllowed(command); !allowed {
+			e.logger.Warn("Command blocked by allowlist", zap.String("command", command), zap.String("reason", reason))
+			return &ExecutionResult{
+				Command: command,
+				Error:   reason,
+			}, fmt.Errorf("command blocked: %s (set CHATCLI_AGENT_SECURITY_MODE=permissive to use denylist fallback)", reason)
+		}
+	} else if e.allowlist.GetMode() == SecurityModePermissive {
+		// In permissive mode, check allowlist first; if not allowed, fall through to denylist
+		if allowed, _, _ := e.allowlist.IsAllowed(command); !allowed {
+			e.logger.Debug("Command not in allowlist, falling through to denylist", zap.String("command", command))
+		}
+	}
+
+	// Legacy denylist validation (always active as second layer)
 	if err := e.validator.ValidateCommand(command); err != nil {
 		e.logger.Warn("Comando inválido", zap.String("command", command), zap.Error(err))
 		return &ExecutionResult{

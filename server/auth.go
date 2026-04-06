@@ -52,6 +52,9 @@ func NewTokenAuthInterceptor(token string, logger *zap.Logger) *TokenAuthInterce
 		logger.Info("JWT authentication enabled (HS256)")
 	}
 
+	// Start background cleanup to prevent memory leak from auth failure limiters
+	ai.startFailureLimiterCleanup()
+
 	return ai
 }
 
@@ -154,66 +157,77 @@ func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (co
 	return ctx, status.Errorf(codes.Unauthenticated, "authentication failed")
 }
 
+// jwtClockSkew is the tolerance for token expiry checks (handles clock drift).
+const jwtClockSkew = 30 // seconds
+
 // validateJWT parses and validates a JWT token, extracting user identity.
+// Validates: signature (HS256), expiry (with clock skew), audience, and issuer.
 func (a *TokenAuthInterceptor) validateJWT(tokenStr string) (*UserInfo, error) {
-	// JWT format: header.payload.signature (3 parts separated by dots)
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) != 3 {
 		return nil, status.Errorf(codes.Unauthenticated, "invalid token format")
 	}
 
-	// For HS256 JWT validation, we use crypto/hmac to verify the signature
-	// and then decode the claims manually to avoid adding jwt library dependency
-	// that may not be in go.mod yet.
-	//
-	// The claims we extract: sub (subject), roles (role), tenant_id, email
-	import_b64 := strings.NewReplacer("-", "+", "_", "/")
-	payloadB64 := import_b64.Replace(parts[1])
-	// Pad if necessary
-	switch len(payloadB64) % 4 {
-	case 2:
-		payloadB64 += "=="
-	case 3:
-		payloadB64 += "="
-	}
+	// Base64url → standard base64 replacer
+	b64URLReplacer := strings.NewReplacer("-", "+", "_", "/")
 
 	// Verify HMAC-SHA256 signature
-	import_crypto_hmac := computeHS256(parts[0]+"."+parts[1], a.jwtSecret)
-	sigB64 := strings.NewReplacer("-", "+", "_", "/").Replace(parts[2])
-	switch len(sigB64) % 4 {
-	case 2:
-		sigB64 += "=="
-	case 3:
-		sigB64 += "="
-	}
+	expectedSig := computeHS256(parts[0]+"."+parts[1], a.jwtSecret)
+	sigB64 := padBase64(b64URLReplacer.Replace(parts[2]))
 
-	import_encoding_b64_sig, err := base64Decode(sigB64)
+	actualSig, err := base64Decode(sigB64)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid signature encoding")
+		return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
 	}
 
-	if subtle.ConstantTimeCompare(import_crypto_hmac, import_encoding_b64_sig) != 1 {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid signature")
+	if subtle.ConstantTimeCompare(expectedSig, actualSig) != 1 {
+		return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
 	}
 
 	// Decode payload
+	payloadB64 := padBase64(b64URLReplacer.Replace(parts[1]))
 	payloadBytes, err := base64Decode(payloadB64)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid payload encoding")
+		return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
 	}
 
-	// Parse claims
 	claims, err := parseJSONClaims(payloadBytes)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid claims")
+		return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
 	}
 
-	// Check expiry
+	now := time.Now().Unix()
+
+	// Check expiry with clock skew tolerance
 	if exp, ok := claims["exp"]; ok {
 		if expFloat, ok := exp.(float64); ok {
-			if time.Now().Unix() > int64(expFloat) {
+			if now > int64(expFloat)+jwtClockSkew {
 				return nil, status.Errorf(codes.Unauthenticated, "token expired")
 			}
+		}
+	}
+
+	// Check not-before with clock skew tolerance
+	if nbf, ok := claims["nbf"]; ok {
+		if nbfFloat, ok := nbf.(float64); ok {
+			if now < int64(nbfFloat)-jwtClockSkew {
+				return nil, status.Errorf(codes.Unauthenticated, "token not yet valid")
+			}
+		}
+	}
+
+	// Validate issuer if configured (CHATCLI_JWT_ISSUER)
+	if expectedIss := os.Getenv("CHATCLI_JWT_ISSUER"); expectedIss != "" {
+		if iss := getStringClaim(claims, "iss"); iss != expectedIss {
+			return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
+		}
+	}
+
+	// Validate audience if configured (CHATCLI_JWT_AUDIENCE)
+	if expectedAud := os.Getenv("CHATCLI_JWT_AUDIENCE"); expectedAud != "" {
+		aud := getStringClaim(claims, "aud")
+		if aud != expectedAud {
+			return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
 		}
 	}
 
@@ -230,6 +244,34 @@ func (a *TokenAuthInterceptor) validateJWT(tokenStr string) (*UserInfo, error) {
 	}
 
 	return user, nil
+}
+
+// padBase64 adds standard base64 padding if necessary.
+func padBase64(s string) string {
+	switch len(s) % 4 {
+	case 2:
+		return s + "=="
+	case 3:
+		return s + "="
+	}
+	return s
+}
+
+// startFailureLimiterCleanup evicts stale auth failure limiters every 5 minutes.
+func (a *TokenAuthInterceptor) startFailureLimiterCleanup() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			a.failureMu.Lock()
+			// Evict all limiters — they'll be recreated on next failure.
+			// This bounds memory to O(unique IPs in last 5 minutes).
+			if len(a.failureLimiters) > 0 {
+				a.failureLimiters = make(map[string]*rate.Limiter)
+			}
+			a.failureMu.Unlock()
+		}
+	}()
 }
 
 // checkFailureRate returns true if the client hasn't exceeded the auth failure limit.

@@ -51,6 +51,8 @@ type Server struct {
 	handler       *Handler
 	logger        *zap.Logger
 	metricsServer *metrics.Server
+	rateLimiter   *PerClientRateLimiter // for cleanup on shutdown
+	auditLogger   *AuditLogger          // for cleanup on shutdown
 }
 
 // New creates a new ChatCLI gRPC server.
@@ -177,6 +179,8 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 		handler:       handler,
 		logger:        logger,
 		metricsServer: metricsServer,
+		rateLimiter:   rateLimiter,
+		auditLogger:   auditLogger,
 	}
 }
 
@@ -236,10 +240,16 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Stop gracefully stops the server.
+// Stop gracefully stops the server and cleans up resources.
 func (s *Server) Stop() {
 	if s.metricsServer != nil {
 		s.metricsServer.Stop()
+	}
+	if s.rateLimiter != nil {
+		s.rateLimiter.Stop()
+	}
+	if s.auditLogger != nil {
+		s.auditLogger.Close()
 	}
 	s.grpcServer.GracefulStop()
 }
