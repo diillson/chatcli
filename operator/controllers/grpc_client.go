@@ -13,7 +13,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	_ "google.golang.org/grpc/credentials/insecure" // kept for backward compat reference
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 )
@@ -98,8 +97,8 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 	if opts.TLSEnabled {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	} else {
-		// Even without explicit TLS flag, use system TLS (never insecure)
-		sc.logger.Warn("TLS not explicitly enabled — using system TLS with default CAs")
+		// Security (H7): TLS always enforced — insecure connections are not permitted
+		sc.logger.Info("TLS enforced with system CAs (explicit TLS flag not set, but TLS is mandatory)")
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	}
 

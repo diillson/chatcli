@@ -2,7 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: chatcli-operator-netpol
-  namespace: system
+  namespace: chatcli-system
   labels:
     app.kubernetes.io/name: chatcli-operator
     app.kubernetes.io/component: security
