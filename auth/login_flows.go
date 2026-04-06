@@ -115,6 +115,15 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 	if err != nil {
 		return "", err
 	}
+	// Security (M12): Validate OAuth response fields
+	if tr.AccessToken == "" {
+		return "", fmt.Errorf("OAuth token exchange returned empty access token")
+	}
+	if tr.ExpiresIn <= 0 {
+		logger.Warn("OAuth token has no expiry set, using default 3600s")
+		tr.ExpiresIn = 3600
+	}
+
 	profileID = "anthropic:default"
 	cred := &AuthProfileCredential{
 		CredType: CredentialOAuth,

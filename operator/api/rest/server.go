@@ -2,12 +2,14 @@ package rest
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -171,9 +173,24 @@ func (s *APIServer) Start(ctx context.Context) error {
 		}
 	}()
 
-	log.Printf("[REST] API server starting on %s", s.listenAddr)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		return fmt.Errorf("REST API server failed: %w", err)
+	// Security (M4): TLS support for REST API.
+	// If CHATCLI_AIOPS_TLS_CERT and CHATCLI_AIOPS_TLS_KEY are set, use HTTPS.
+	certFile := os.Getenv("CHATCLI_AIOPS_TLS_CERT")
+	keyFile := os.Getenv("CHATCLI_AIOPS_TLS_KEY")
+
+	if certFile != "" && keyFile != "" {
+		server.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS13,
+		}
+		log.Printf("[REST] API server starting with TLS on %s", s.listenAddr)
+		if err := server.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("REST API server (TLS) failed: %w", err)
+		}
+	} else {
+		log.Printf("[REST] API server starting on %s (no TLS — configure CHATCLI_AIOPS_TLS_CERT/KEY for production)", s.listenAddr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("REST API server failed: %w", err)
+		}
 	}
 	return nil
 }
