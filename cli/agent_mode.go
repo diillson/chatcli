@@ -33,6 +33,7 @@ import (
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
+	"golang.org/x/term"
 )
 
 // AgentMode representa a funcionalidade de agente autônomo no ChatCLI
@@ -172,6 +173,39 @@ func (a *AgentMode) readLine() string {
 	reader := bufio.NewReader(os.Stdin)
 	line, _ := reader.ReadString('\n')
 	return strings.TrimSpace(line)
+}
+
+// stdinStdout is an io.ReadWriter that reads from stdin and writes to stdout.
+// Required by term.NewTerminal which needs a single ReadWriter.
+type stdinStdout struct{}
+
+func (stdinStdout) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
+func (stdinStdout) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
+
+// readLineWithEditing reads a single line with full terminal line-editing support
+// (arrow keys, Home, End, Ctrl+A/E, backspace, delete, etc.) using golang.org/x/term.
+// This is used for coder mode interactive input where the user needs to edit text.
+func (a *AgentMode) readLineWithEditing() (string, error) {
+	fd := int(os.Stdin.Fd())
+
+	// Put terminal into raw mode so term.Terminal can handle escape sequences
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		// Fallback to simple read if raw mode fails (e.g., piped input)
+		reader := bufio.NewReader(os.Stdin)
+		line, _ := reader.ReadString('\n')
+		return strings.TrimSpace(line), nil
+	}
+	defer term.Restore(fd, oldState)
+
+	// term.NewTerminal provides full readline: arrow keys, Ctrl+A/E, word
+	// movement, backspace, delete — all processed correctly.
+	t := term.NewTerminal(stdinStdout{}, "  > ")
+	line, err := t.ReadLine()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
 }
 
 // readMultiline reads from the stdinLines channel with ``` multiline support.
@@ -1683,9 +1717,23 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			showTurnStats()
 			fmt.Println()
 			fmt.Print(renderer.Colorize("  ⏳ "+i18n.T("coder.waiting_for_input"), agent.ColorCyan))
-			fmt.Print(" ")
+			fmt.Println() // newline before input for clean cursor positioning
 
-			userInput, err := a.readMultiline(ctx)
+			// Stop the raw stdin reader so we can use line-editing input.
+			// The raw reader captures escape sequences as literal bytes (^[[A for arrows),
+			// making it impossible to navigate text. We temporarily switch to
+			// golang.org/x/term which provides full readline support.
+			hadStdinReader := a.stdinLines != nil
+			if hadStdinReader {
+				a.stopStdinReader()
+			}
+
+			userInput, err := a.readLineWithEditing()
+
+			// Restart the stdin reader for subsequent agent turns
+			if hadStdinReader {
+				a.startStdinReader()
+			}
 			if err != nil {
 				return err
 			}
