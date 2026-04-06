@@ -342,7 +342,7 @@ jobs:
           ref: ${{ needs.release_please.outputs.tag_name }}
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
