@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.96.1](https://github.com/diillson/chatcli/compare/v1.96.0...v1.96.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* **operator:** sync golang.org/x/time to v0.15.0 matching main module ([#746](https://github.com/diillson/chatcli/issues/746)) ([629b26b](https://github.com/diillson/chatcli/commit/629b26b8748f175748a948d6ae304d7fa782113f))
+
 ## [1.96.0](https://github.com/diillson/chatcli/compare/v1.95.0...v1.96.0) (2026-04-06)
 
 
