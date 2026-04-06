@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub](https://img.shields.io/badge/GitHub-diillson%2Fchatcli-181717?logo=github)](https://github.com/diillson/chatcli)
 
-Kubernetes operator for **autonomous incident detection, AI-powered analysis, and automated remediation**. The operator watches cluster resources, correlates anomalies into issues, generates AI insights with root cause analysis, and executes approved remediation plans — closing the full incident lifecycle automatically.
+A production-grade, security-hardened Kubernetes operator for **autonomous incident detection, AI-powered root cause analysis, and automated remediation**. The operator watches cluster resources, correlates anomalies into actionable issues, generates AI insights with full root cause analysis, and executes approved remediation plans -- closing the entire incident lifecycle automatically. Built with defense-in-depth security controls including fail-closed authentication, resource allowlists, log scrubbing, and TLS 1.3 enforcement.
 
 ## Features
 
@@ -22,6 +22,7 @@ Kubernetes operator for **autonomous incident detection, AI-powered analysis, an
 - **REST API Gateway**: 30+ endpoints for programmatic access (port 8090)
 - **Web Dashboard**: Built-in web interface for incident management
 - **Prometheus Metrics**: 20+ operator metrics with 4 pre-configured Grafana dashboards
+- **Enterprise Security**: Fail-closed auth, resource allowlist, log scrubbing, CORS hardening, TLS 1.3, RBAC least-privilege, structured audit logging
 
 ## Prerequisites
 
@@ -102,16 +103,16 @@ helm install chatcli-operator oci://ghcr.io/diillson/charts/chatcli-operator \
 
 ### Incident Lifecycle
 
-1. **Detection** — WatcherBridge polls ChatCLI server alerts every 30s, creates `Anomaly` resources
-2. **Correlation** — AnomalyReconciler groups anomalies by resource and time window, calculates risk scores, creates `Issue` resources
-3. **Analysis** — AIInsightReconciler enriches issues with K8s context, logs (stack trace extraction), metrics, GitOps status, code correlation, and cascade analysis
-4. **Planning** — IssueReconciler selects a matching runbook or generates AI-suggested remediation actions
-5. **Approval** — ApprovalPolicy rules determine if auto/manual/quorum approval is needed, with blast radius prediction
-6. **Execution** — RemediationReconciler executes approved plans (restart, scale, rollback, Helm upgrade, ArgoCD sync, etc.)
-7. **Resolution** — Success marks the issue as resolved; failure triggers re-analysis with failure context
-8. **PostMortem** — Auto-generated for all remediations with timeline, root cause, and recommendations
-9. **Notifications** — Multi-channel delivery with throttling, deduplication, and escalation
-10. **SLO Tracking** — Burn rate alerting and error budget consumption monitoring
+1. **Detection** -- WatcherBridge polls ChatCLI server alerts every 30s, creates `Anomaly` resources
+2. **Correlation** -- AnomalyReconciler groups anomalies by resource and time window, calculates risk scores, creates `Issue` resources
+3. **Analysis** -- AIInsightReconciler enriches issues with K8s context, logs (stack trace extraction), metrics, GitOps status, code correlation, and cascade analysis
+4. **Planning** -- IssueReconciler selects a matching runbook or generates AI-suggested remediation actions
+5. **Approval** -- ApprovalPolicy rules determine if auto/manual/quorum approval is needed, with blast radius prediction
+6. **Execution** -- RemediationReconciler executes approved plans (restart, scale, rollback, Helm upgrade, ArgoCD sync, etc.)
+7. **Resolution** -- Success marks the issue as resolved; failure triggers re-analysis with failure context
+8. **PostMortem** -- Auto-generated for all remediations with timeline, root cause, and recommendations
+9. **Notifications** -- Multi-channel delivery with throttling, deduplication, and escalation
+10. **SLO Tracking** -- Burn rate alerting and error budget consumption monitoring
 
 ## Configuration
 
@@ -162,6 +163,46 @@ The operator requires cluster-wide access to monitor and remediate resources acr
 | `securityContext.allowPrivilegeEscalation` | Allow privilege escalation | `false` |
 | `securityContext.readOnlyRootFilesystem` | Read-only root filesystem | `true` |
 | `securityContext.capabilities.drop` | Dropped capabilities | `["ALL"]` |
+
+### Security Hardening
+
+The operator ships with defense-in-depth security controls suitable for production and regulated environments. Key security properties:
+
+- **Fail-closed REST API authentication** -- API keys are required for all REST endpoints; there is no anonymous access unless `security.devMode` is explicitly enabled
+- **Resource type allowlist for remediation** -- Only 17 safe resource types are permitted by default; 18 dangerous types (Namespace, Node, PersistentVolume, etc.) are blocked unless explicitly allowed
+- **Log scrubbing before LLM submission** -- 18 regex patterns automatically redact secrets, tokens, passwords, and PII from log data before it is sent to any AI provider
+- **CORS deny-all default** -- Cross-origin requests are rejected unless an explicit origin is configured
+- **TLS 1.3 enforced for gRPC** -- All gRPC communication between components uses TLS 1.3 with mutual TLS support
+- **RBAC least-privilege** -- ClusterRoles grant read-only access to ClusterRoles and ClusterRoleBindings; write access is scoped to operator-managed resources only
+- **NetworkPolicy for operator pod** -- Restricts ingress and egress traffic to known required endpoints
+- **Structured audit logging** -- All operator actions are recorded as JSON lines for integration with SIEM and compliance tooling
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `security.devMode` | Enable dev mode (disables REST API auth) | `false` |
+| `security.apiTLS.certFile` | TLS certificate for REST API | `""` |
+| `security.apiTLS.keyFile` | TLS key for REST API | `""` |
+| `security.grpcTLS.certFile` | mTLS client certificate for gRPC | `""` |
+| `security.grpcTLS.keyFile` | mTLS client key for gRPC | `""` |
+| `security.grpcTLS.caFile` | CA certificate for gRPC server verification | `""` |
+| `security.allowedResourceTypes` | Comma-separated allowed resource types for remediation | `""` |
+| `security.logScrubPatterns` | Custom regex patterns for log scrubbing before LLM | `""` |
+| `security.corsOrigin` | Allowed CORS origin (empty = deny all) | `""` |
+| `security.auditLogPath` | Audit log file path (JSON lines) | `""` |
+| `extraEnv` | Extra environment variables for operator pod | `[]` |
+
+**Example: Production security configuration**
+
+```yaml
+security:
+  allowedResourceTypes: "Deployment,Service,ConfigMap,HPA,PDB"
+  corsOrigin: "https://dashboard.example.com"
+  auditLogPath: "/var/log/operator/audit.jsonl"
+  grpcTLS:
+    certFile: "/etc/tls/client.crt"
+    keyFile: "/etc/tls/client.key"
+    caFile: "/etc/tls/ca.crt"
+```
 
 ### Resources
 
