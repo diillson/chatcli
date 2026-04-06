@@ -132,11 +132,11 @@ func (s *SensitiveReadPaths) isSensitivePath(path string) (bool, string) {
 
 	// Sensitive directory patterns (block everything under these)
 	sensitiveGlobs := map[string]string{
-		filepath.Join(home, ".ssh"):    "SSH keys and config are blocked",
-		filepath.Join(home, ".gnupg"):  "GPG keys are blocked",
-		filepath.Join(home, ".aws"):    "AWS credentials are blocked",
-		filepath.Join(home, ".gcloud"): "GCloud credentials are blocked",
-		filepath.Join(home, ".azure"):  "Azure credentials are blocked",
+		filepath.Join(home, ".ssh"):              "SSH keys and config are blocked",
+		filepath.Join(home, ".gnupg"):            "GPG keys are blocked",
+		filepath.Join(home, ".aws"):              "AWS credentials are blocked",
+		filepath.Join(home, ".gcloud"):           "GCloud credentials are blocked",
+		filepath.Join(home, ".azure"):            "Azure credentials are blocked",
 		filepath.Join(home, ".config", "gcloud"): "GCloud config is blocked",
 	}
 
@@ -154,12 +154,12 @@ func (s *SensitiveReadPaths) isSensitivePath(path string) (bool, string) {
 
 	// Sensitive individual files
 	sensitiveFiles := map[string]string{
-		filepath.Join(home, ".netrc"):               "netrc may contain credentials",
-		filepath.Join(home, ".npmrc"):                "npmrc may contain auth tokens",
-		filepath.Join(home, ".docker", "config.json"): "Docker config may contain registry credentials",
-		filepath.Join(home, ".pypirc"):               "pypirc may contain credentials",
-		filepath.Join(home, ".gem", "credentials"):   "gem credentials file",
-		filepath.Join(home, ".m2", "settings.xml"):   "Maven settings may contain credentials",
+		filepath.Join(home, ".netrc"):                       "netrc may contain credentials",
+		filepath.Join(home, ".npmrc"):                       "npmrc may contain auth tokens",
+		filepath.Join(home, ".docker", "config.json"):       "Docker config may contain registry credentials",
+		filepath.Join(home, ".pypirc"):                      "pypirc may contain credentials",
+		filepath.Join(home, ".gem", "credentials"):          "gem credentials file",
+		filepath.Join(home, ".m2", "settings.xml"):          "Maven settings may contain credentials",
 		filepath.Join(home, ".gradle", "gradle.properties"): "Gradle properties may contain credentials",
 	}
 	for fp, reason := range sensitiveFiles {

@@ -17,9 +17,9 @@ import (
 type KeychainBackend string
 
 const (
-	KeychainAuto    KeychainBackend = "auto"
-	KeychainNative  KeychainBackend = "keychain"
-	KeychainFile    KeychainBackend = "file"
+	KeychainAuto   KeychainBackend = "auto"
+	KeychainNative KeychainBackend = "keychain"
+	KeychainFile   KeychainBackend = "file"
 )
 
 const keychainServiceName = "chatcli"

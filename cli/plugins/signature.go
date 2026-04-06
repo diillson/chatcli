@@ -28,7 +28,7 @@ var (
 
 // PluginVerifier verifies Ed25519 signatures on plugin binaries.
 type PluginVerifier struct {
-	trustedKeys []ed25519.PublicKey
+	trustedKeys   []ed25519.PublicKey
 	allowUnsigned bool
 }
 

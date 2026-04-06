@@ -25,9 +25,9 @@ const (
 // In strict mode, only allowed commands can execute.
 // In permissive mode, unknown commands fall back to the legacy denylist validator.
 type CommandAllowlist struct {
-	mu             sync.RWMutex
+	mu              sync.RWMutex
 	allowedCommands map[string]string // command -> category
-	mode           SecurityMode
+	mode            SecurityMode
 }
 
 // DefaultAllowedCommands returns the categorized command allowlist.
@@ -121,7 +121,7 @@ func NewCommandAllowlist() *CommandAllowlist {
 
 	al := &CommandAllowlist{
 		allowedCommands: DefaultAllowedCommands(),
-		mode:           mode,
+		mode:            mode,
 	}
 
 	// Add custom commands from CHATCLI_AGENT_ALLOWLIST env var (comma-separated)

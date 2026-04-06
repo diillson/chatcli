@@ -72,7 +72,7 @@ func NewEnvRedactor() *EnvRedactor {
 			// Messaging
 			"SLACK_TOKEN": true, "SLACK_BOT_TOKEN": true,
 			"SLACK_WEBHOOK_URL": true,
-			"DISCORD_TOKEN": true, "DISCORD_BOT_TOKEN": true,
+			"DISCORD_TOKEN":     true, "DISCORD_BOT_TOKEN": true,
 			"TELEGRAM_BOT_TOKEN": true,
 			// Payment/SaaS
 			"STRIPE_SECRET_KEY": true, "STRIPE_WEBHOOK_SECRET": true,
@@ -98,23 +98,23 @@ func NewEnvRedactor() *EnvRedactor {
 			"_PASS", "_PWD", "_APIKEY",
 		},
 		valuePatterns: []string{
-			"sk-",     // OpenAI
-			"ghp_",    // GitHub PAT
-			"gho_",    // GitHub OAuth
-			"ghs_",    // GitHub App
+			"sk-",         // OpenAI
+			"ghp_",        // GitHub PAT
+			"gho_",        // GitHub OAuth
+			"ghs_",        // GitHub App
 			"github_pat_", // GitHub fine-grained
-			"xoxb-",   // Slack bot
-			"xoxp-",   // Slack user
-			"xoxa-",   // Slack app
-			"AKIA",    // AWS access key
-			"eyJ",     // JWT/base64 encoded
-			"Bearer ", // auth header
-			"Basic ",  // basic auth
-			"sk_live_", // Stripe live
-			"sk_test_", // Stripe test
-			"rk_live_", // Stripe restricted
-			"whsec_",  // Stripe webhook
-			"SG.",     // SendGrid
+			"xoxb-",       // Slack bot
+			"xoxp-",       // Slack user
+			"xoxa-",       // Slack app
+			"AKIA",        // AWS access key
+			"eyJ",         // JWT/base64 encoded
+			"Bearer ",     // auth header
+			"Basic ",      // basic auth
+			"sk_live_",    // Stripe live
+			"sk_test_",    // Stripe test
+			"rk_live_",    // Stripe restricted
+			"whsec_",      // Stripe webhook
+			"SG.",         // SendGrid
 		},
 		safeVars: map[string]bool{
 			// Shell/System

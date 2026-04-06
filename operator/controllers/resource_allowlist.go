@@ -15,56 +15,56 @@ import (
 // by remediation actions. Uses an allowlist approach (C5) — any resource type not
 // explicitly permitted requires manual approval.
 type ResourceAllowlist struct {
-	mu              sync.RWMutex
-	allowedTypes    map[string]bool
-	dangerousTypes  map[string]string // kind -> reason
-	managedNSLabel  string            // namespace label required for operations
+	mu             sync.RWMutex
+	allowedTypes   map[string]bool
+	dangerousTypes map[string]string // kind -> reason
+	managedNSLabel string            // namespace label required for operations
 }
 
 // DefaultAllowedResourceTypes returns the resource types safe for automated remediation.
 func DefaultAllowedResourceTypes() map[string]bool {
 	return map[string]bool{
-		"Deployment":         true,
-		"StatefulSet":        true,
-		"DaemonSet":          true,
-		"ReplicaSet":         true,
-		"Service":            true,
-		"ConfigMap":          true,
+		"Deployment":              true,
+		"StatefulSet":             true,
+		"DaemonSet":               true,
+		"ReplicaSet":              true,
+		"Service":                 true,
+		"ConfigMap":               true,
 		"HorizontalPodAutoscaler": true,
 		"PodDisruptionBudget":     true,
-		"Ingress":            true,
-		"CronJob":            true,
-		"Job":                true,
-		"ServiceMonitor":     true,
-		"PrometheusRule":     true,
-		"PodMonitor":         true,
-		"ServiceEntry":       true,
-		"VirtualService":     true,
-		"DestinationRule":    true,
+		"Ingress":                 true,
+		"CronJob":                 true,
+		"Job":                     true,
+		"ServiceMonitor":          true,
+		"PrometheusRule":          true,
+		"PodMonitor":              true,
+		"ServiceEntry":            true,
+		"VirtualService":          true,
+		"DestinationRule":         true,
 	}
 }
 
 // DefaultDangerousResourceTypes returns types that require explicit approval with reasons.
 func DefaultDangerousResourceTypes() map[string]string {
 	return map[string]string{
-		"ClusterRole":        "can escalate cluster-wide permissions",
-		"ClusterRoleBinding": "can grant cluster-wide access to any subject",
-		"Role":               "can modify namespace-scoped permissions",
-		"RoleBinding":        "can grant namespace-scoped access",
-		"Namespace":          "can affect isolation boundaries",
-		"Node":               "can affect cluster node state",
-		"PersistentVolume":   "can affect persistent storage across namespaces",
-		"StorageClass":       "can affect storage provisioning cluster-wide",
-		"Secret":             "contains sensitive credentials and keys",
-		"ServiceAccount":     "can be used for privilege escalation via token mounting",
-		"NetworkPolicy":      "can isolate or expose workloads to network traffic",
-		"PodSecurityPolicy":  "can affect pod security constraints",
+		"ClusterRole":                    "can escalate cluster-wide permissions",
+		"ClusterRoleBinding":             "can grant cluster-wide access to any subject",
+		"Role":                           "can modify namespace-scoped permissions",
+		"RoleBinding":                    "can grant namespace-scoped access",
+		"Namespace":                      "can affect isolation boundaries",
+		"Node":                           "can affect cluster node state",
+		"PersistentVolume":               "can affect persistent storage across namespaces",
+		"StorageClass":                   "can affect storage provisioning cluster-wide",
+		"Secret":                         "contains sensitive credentials and keys",
+		"ServiceAccount":                 "can be used for privilege escalation via token mounting",
+		"NetworkPolicy":                  "can isolate or expose workloads to network traffic",
+		"PodSecurityPolicy":              "can affect pod security constraints",
 		"MutatingWebhookConfiguration":   "can intercept and modify all API requests",
 		"ValidatingWebhookConfiguration": "can intercept and reject API requests",
 		"CustomResourceDefinition":       "can extend the API surface",
-		"PriorityClass":      "can affect pod scheduling priority",
-		"ResourceQuota":      "can affect namespace resource limits",
-		"LimitRange":         "can affect pod resource defaults",
+		"PriorityClass":                  "can affect pod scheduling priority",
+		"ResourceQuota":                  "can affect namespace resource limits",
+		"LimitRange":                     "can affect pod resource defaults",
 	}
 }
 
