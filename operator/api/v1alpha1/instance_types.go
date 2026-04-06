@@ -77,6 +77,12 @@ type InstanceSpec struct {
 	// that the AI can invoke during conversations.
 	// +optional
 	MCP *MCPSpec `json:"mcp,omitempty"`
+
+	// ExtraEnv allows passing arbitrary environment variables to the ChatCLI server pod.
+	// Use this for security configuration (CHATCLI_RATE_LIMIT_RPS, CHATCLI_AGENT_SECURITY_MODE, etc.)
+	// or any other CHATCLI_* env vars not covered by structured fields.
+	// +optional
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
 }
 
 // MCPSpec configures MCP server connections for the instance.
@@ -165,6 +171,63 @@ type ServerSpec struct {
 	// Token references a Secret containing the auth token.
 	// +optional
 	Token *SecretKeyRefSpec `json:"token,omitempty"`
+
+	// Security configures server security parameters.
+	// +optional
+	Security *ServerSecuritySpec `json:"security,omitempty"`
+}
+
+// ServerSecuritySpec defines security settings for the gRPC server.
+type ServerSecuritySpec struct {
+	// JWTSecretRef references a Secret key containing the JWT signing secret.
+	// Maps to CHATCLI_JWT_SECRET env var.
+	// +optional
+	JWTSecretRef *SecretKeyRefSpec `json:"jwtSecretRef,omitempty"`
+
+	// RateLimitRPS is the per-client rate limit in requests per second.
+	// Maps to CHATCLI_RATE_LIMIT_RPS env var. Default: 10.
+	// +optional
+	RateLimitRPS *int32 `json:"rateLimitRps,omitempty"`
+
+	// RateLimitBurst is the maximum burst size for rate limiting.
+	// Maps to CHATCLI_RATE_LIMIT_BURST env var. Default: 30.
+	// +optional
+	RateLimitBurst *int32 `json:"rateLimitBurst,omitempty"`
+
+	// MaxRecvMsgSize is the maximum message size in bytes the server can receive.
+	// Maps to CHATCLI_MAX_RECV_MSG_SIZE env var. Default: 52428800 (50MB).
+	// +optional
+	MaxRecvMsgSize *int32 `json:"maxRecvMsgSize,omitempty"`
+
+	// MaxSendMsgSize is the maximum message size in bytes the server can send.
+	// Maps to CHATCLI_MAX_SEND_MSG_SIZE env var. Default: 52428800 (50MB).
+	// +optional
+	MaxSendMsgSize *int32 `json:"maxSendMsgSize,omitempty"`
+
+	// MaxConcurrentStreams limits simultaneous gRPC streams per connection.
+	// Maps to CHATCLI_MAX_CONCURRENT_STREAMS env var. Default: 100.
+	// +optional
+	MaxConcurrentStreams *int32 `json:"maxConcurrentStreams,omitempty"`
+
+	// BindAddress is the address to bind the server to.
+	// Maps to CHATCLI_BIND_ADDRESS env var. Default: "127.0.0.1".
+	// Set to "0.0.0.0" to expose to all interfaces.
+	// +optional
+	BindAddress string `json:"bindAddress,omitempty"`
+
+	// AuditLogPath is the file path for structured audit logs (JSON lines).
+	// Maps to CHATCLI_AUDIT_LOG_PATH env var.
+	// +optional
+	AuditLogPath string `json:"auditLogPath,omitempty"`
+
+	// Debug enables verbose logging including stack traces on errors.
+	// Maps to CHATCLI_DEBUG env var.
+	// +optional
+	Debug bool `json:"debug,omitempty"`
+
+	// EnableReflection enables gRPC reflection (requires also CHATCLI_GRPC_REFLECTION=true).
+	// +optional
+	EnableReflection bool `json:"enableReflection,omitempty"`
 }
 
 // TLSSpec configures TLS.

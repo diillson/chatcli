@@ -194,6 +194,39 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		})
 	}
 
+	// ExtraEnv: arbitrary env vars from spec.extraEnv (security config, custom vars, etc.)
+	if len(instance.Spec.ExtraEnv) > 0 {
+		container.Env = append(container.Env, instance.Spec.ExtraEnv...)
+	}
+
+	// JWT Secret reference from spec.server.security.jwtSecretRef
+	if sec := instance.Spec.Server.Security; sec != nil && sec.JWTSecretRef != nil {
+		container.Env = append(container.Env, corev1.EnvVar{
+			Name: "CHATCLI_JWT_SECRET",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: sec.JWTSecretRef.Name},
+					Key:                  sec.JWTSecretRef.Key,
+					Optional:             boolPtr(true),
+				},
+			},
+		})
+	}
+
+	// Server token from spec.server.token
+	if instance.Spec.Server.Token != nil {
+		container.Env = append(container.Env, corev1.EnvVar{
+			Name: "CHATCLI_SERVER_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: instance.Spec.Server.Token.Name},
+					Key:                  instance.Spec.Server.Token.Key,
+					Optional:             boolPtr(true),
+				},
+			},
+		})
+	}
+
 	// Volume mounts
 	var volumeMounts []corev1.VolumeMount
 	var volumes []corev1.Volume
@@ -642,6 +675,37 @@ func (r *InstanceReconciler) reconcileConfigMap(ctx context.Context, instance *p
 			}
 			if instance.Spec.Fallback.CooldownMax != "" {
 				cm.Data["CHATCLI_FALLBACK_COOLDOWN_MAX"] = instance.Spec.Fallback.CooldownMax
+			}
+		}
+
+		// Security configuration from spec.server.security
+		if sec := instance.Spec.Server.Security; sec != nil {
+			if sec.RateLimitRPS != nil {
+				cm.Data["CHATCLI_RATE_LIMIT_RPS"] = strconv.Itoa(int(*sec.RateLimitRPS))
+			}
+			if sec.RateLimitBurst != nil {
+				cm.Data["CHATCLI_RATE_LIMIT_BURST"] = strconv.Itoa(int(*sec.RateLimitBurst))
+			}
+			if sec.MaxRecvMsgSize != nil {
+				cm.Data["CHATCLI_MAX_RECV_MSG_SIZE"] = strconv.Itoa(int(*sec.MaxRecvMsgSize))
+			}
+			if sec.MaxSendMsgSize != nil {
+				cm.Data["CHATCLI_MAX_SEND_MSG_SIZE"] = strconv.Itoa(int(*sec.MaxSendMsgSize))
+			}
+			if sec.MaxConcurrentStreams != nil {
+				cm.Data["CHATCLI_MAX_CONCURRENT_STREAMS"] = strconv.Itoa(int(*sec.MaxConcurrentStreams))
+			}
+			if sec.BindAddress != "" {
+				cm.Data["CHATCLI_BIND_ADDRESS"] = sec.BindAddress
+			}
+			if sec.AuditLogPath != "" {
+				cm.Data["CHATCLI_AUDIT_LOG_PATH"] = sec.AuditLogPath
+			}
+			if sec.Debug {
+				cm.Data["CHATCLI_DEBUG"] = "true"
+			}
+			if sec.EnableReflection {
+				cm.Data["CHATCLI_GRPC_REFLECTION"] = "true"
 			}
 		}
 
