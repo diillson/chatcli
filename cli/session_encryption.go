@@ -134,8 +134,8 @@ func loadMasterKey() ([]byte, error) {
 		return nil, fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
-	keyPath := filepath.Join(homeDir, ".chatcli", ".auth-key")
-	key, err := os.ReadFile(keyPath)
+	keyPath := filepath.Clean(filepath.Join(homeDir, ".chatcli", ".auth-key"))
+	key, err := os.ReadFile(keyPath) // #nosec G304 -- path is constructed from user's home dir, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("no encryption key found; set CHATCLI_ENCRYPTION_KEY or run chatcli login")

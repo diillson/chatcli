@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -51,7 +52,8 @@ func NewAuditLogger(logger *zap.Logger) *AuditLogger {
 	}
 
 	if path := os.Getenv("CHATCLI_AUDIT_LOG_PATH"); path != "" {
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		cleanPath := filepath.Clean(path)
+		f, err := os.OpenFile(cleanPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
 			logger.Error("failed to open audit log file", zap.String("path", path), zap.Error(err))
 		} else {
@@ -88,7 +90,9 @@ func (al *AuditLogger) Log(entry AuditEntry) {
 // Close shuts down the audit file writer.
 func (al *AuditLogger) Close() {
 	if al.fileWriter != nil {
-		al.fileWriter.Close()
+		if err := al.fileWriter.Close(); err != nil {
+			al.zapLogger.Error("failed to close audit log file", zap.Error(err))
+		}
 	}
 }
 

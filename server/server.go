@@ -119,7 +119,7 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 		grpc.ChainStreamInterceptor(streamChain...),
 		grpc.MaxRecvMsgSize(maxRecvMsgSize),
 		grpc.MaxSendMsgSize(maxSendMsgSize),
-		grpc.MaxConcurrentStreams(uint32(maxConcurrentStreams)),
+		grpc.MaxConcurrentStreams(safeUint32(maxConcurrentStreams)),
 		// Allow operator and remote clients to send keepalive pings frequently.
 		// Without this the default MinTime is 5min, causing ENHANCE_YOUR_CALM
 		// disconnects for clients pinging every 30s.
@@ -272,6 +272,17 @@ func (s *Server) SetFallbackChain(chain *fallback.Chain) {
 // SetMCPManager configures the MCP manager for tool interoperability.
 func (s *Server) SetMCPManager(mgr *mcp.Manager) {
 	s.handler.SetMCPManager(mgr)
+}
+
+// safeUint32 converts an int to uint32 with bounds checking to prevent overflow.
+func safeUint32(v int) uint32 {
+	if v < 0 {
+		return 0
+	}
+	if v > int(^uint32(0)) {
+		return ^uint32(0)
+	}
+	return uint32(v)
 }
 
 // envIntOrDefault reads an integer from an environment variable, returning the default on failure.

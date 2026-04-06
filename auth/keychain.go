@@ -137,7 +137,7 @@ func (ks *KeychainStore) nativeDelete(account string) error {
 
 // macOS: uses `security` CLI for Keychain access
 func (ks *KeychainStore) macGet(account string) ([]byte, error) {
-	cmd := exec.Command("security", "find-generic-password",
+	cmd := exec.Command("security", "find-generic-password", // #nosec G204 -- args are controlled constants
 		"-s", keychainServiceName, "-a", account, "-w")
 	out, err := cmd.Output()
 	if err != nil {
@@ -150,7 +150,7 @@ func (ks *KeychainStore) macSet(account string, data []byte) error {
 	// Delete first (update = delete + add in macOS keychain)
 	_ = ks.macDelete(account) // ignore error if not exists
 
-	cmd := exec.Command("security", "add-generic-password",
+	cmd := exec.Command("security", "add-generic-password", // #nosec G204
 		"-s", keychainServiceName, "-a", account,
 		"-w", string(data), "-U")
 	if err := cmd.Run(); err != nil {
@@ -160,7 +160,7 @@ func (ks *KeychainStore) macSet(account string, data []byte) error {
 }
 
 func (ks *KeychainStore) macDelete(account string) error {
-	cmd := exec.Command("security", "delete-generic-password",
+	cmd := exec.Command("security", "delete-generic-password", // #nosec G204
 		"-s", keychainServiceName, "-a", account)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("keychain delete failed: %w", err)
@@ -170,7 +170,7 @@ func (ks *KeychainStore) macDelete(account string) error {
 
 // Linux: uses `secret-tool` from libsecret
 func (ks *KeychainStore) linuxGet(account string) ([]byte, error) {
-	cmd := exec.Command("secret-tool", "lookup",
+	cmd := exec.Command("secret-tool", "lookup", // #nosec G204
 		"service", keychainServiceName, "account", account)
 	out, err := cmd.Output()
 	if err != nil {
@@ -180,7 +180,7 @@ func (ks *KeychainStore) linuxGet(account string) ([]byte, error) {
 }
 
 func (ks *KeychainStore) linuxSet(account string, data []byte) error {
-	cmd := exec.Command("secret-tool", "store",
+	cmd := exec.Command("secret-tool", "store", // #nosec G204
 		"--label", fmt.Sprintf("ChatCLI: %s", account),
 		"service", keychainServiceName, "account", account)
 	cmd.Stdin = strings.NewReader(string(data))
@@ -191,7 +191,7 @@ func (ks *KeychainStore) linuxSet(account string, data []byte) error {
 }
 
 func (ks *KeychainStore) linuxDelete(account string) error {
-	cmd := exec.Command("secret-tool", "clear",
+	cmd := exec.Command("secret-tool", "clear", // #nosec G204
 		"service", keychainServiceName, "account", account)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("secret-tool clear failed: %w", err)

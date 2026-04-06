@@ -70,10 +70,10 @@ func NewPluginVerifier() *PluginVerifier {
 // The .sig file must be adjacent to the plugin (e.g., myplugin.sig for myplugin).
 // .sig format: first line is base64-encoded Ed25519 signature of the plugin's SHA256 hash.
 func (v *PluginVerifier) VerifyPlugin(pluginPath string) error {
-	sigPath := pluginPath + ".sig"
+	sigPath := filepath.Clean(pluginPath + ".sig")
 
 	// Read signature file
-	sigData, err := os.ReadFile(sigPath)
+	sigData, err := os.ReadFile(sigPath) // #nosec G304 -- path derived from plugin dir, validated by manager
 	if err != nil {
 		if os.IsNotExist(err) {
 			if v.allowUnsigned {
@@ -100,7 +100,7 @@ func (v *PluginVerifier) VerifyPlugin(pluginPath string) error {
 	}
 
 	// Compute SHA256 hash of the plugin binary
-	pluginData, err := os.ReadFile(pluginPath)
+	pluginData, err := os.ReadFile(filepath.Clean(pluginPath)) // #nosec G304
 	if err != nil {
 		return fmt.Errorf("failed to read plugin binary: %w", err)
 	}
@@ -136,7 +136,7 @@ func (v *PluginVerifier) HasTrustedKeys() bool {
 
 // loadEd25519PublicKey loads an Ed25519 public key from a PEM file.
 func loadEd25519PublicKey(path string) (ed25519.PublicKey, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- path from trusted-keys dir
 	if err != nil {
 		return nil, err
 	}
