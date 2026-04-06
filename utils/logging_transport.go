@@ -267,17 +267,33 @@ func headersToString(headers http.Header) string {
 }
 
 // sensitiveKeys is the set of JSON keys whose values should be redacted.
+// Security (M14): Extended with comprehensive patterns.
 var sensitiveKeys = map[string]bool{
-	"api_key":       true,
-	"password":      true,
-	"token":         true,
-	"access_token":  true,
-	"refresh_token": true,
-	"client_secret": true,
-	"client_key":    true,
-	"authorization": true,
-	"secret":        true,
-	"key":           true,
+	"api_key":         true,
+	"apikey":          true,
+	"password":        true,
+	"passwd":          true,
+	"token":           true,
+	"access_token":    true,
+	"refresh_token":   true,
+	"id_token":        true,
+	"client_secret":   true,
+	"client_key":      true,
+	"authorization":   true,
+	"secret":          true,
+	"key":             true,
+	"private_key":     true,
+	"signing_key":     true,
+	"encryption_key":  true,
+	"session_secret":  true,
+	"jwt_secret":      true,
+	"bearer":          true,
+	"credentials":     true,
+	"auth":            true,
+	"x-api-key":       true,
+	"x-auth-token":    true,
+	"cookie":          true,
+	"set-cookie":      true,
 }
 
 // sanitizeJSON recursively sanitizes sensitive fields in any JSON value.

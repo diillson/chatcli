@@ -7,7 +7,10 @@ package remote
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -51,19 +54,50 @@ type Config struct {
 func NewClient(cfg Config, logger *zap.Logger) (*Client, error) {
 	var dialOpts []grpc.DialOption
 
+	// Security (H4): TLS configuration with TLS 1.3 minimum.
+	// Use CHATCLI_TLS_CLIENT_CERT/KEY for mTLS client certificates.
 	if cfg.TLS {
-		if cfg.CertFile != "" {
-			creds, err := credentials.NewClientTLSFromFile(cfg.CertFile, "")
-			if err != nil {
-				return nil, fmt.Errorf("failed to load TLS certificate: %w", err)
-			}
-			dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
-		} else {
-			dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(nil)))
+		tlsCfg := &tls.Config{
+			MinVersion: tls.VersionTLS13,
 		}
+
+		if cfg.CertFile != "" {
+			caCert, err := os.ReadFile(cfg.CertFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+			}
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to parse CA certificate")
+			}
+			tlsCfg.RootCAs = certPool
+		}
+
+		// mTLS: load client certificate if configured
+		if certPath := os.Getenv("CHATCLI_TLS_CLIENT_CERT"); certPath != "" {
+			keyPath := os.Getenv("CHATCLI_TLS_CLIENT_KEY")
+			if keyPath == "" {
+				return nil, fmt.Errorf("CHATCLI_TLS_CLIENT_CERT set but CHATCLI_TLS_CLIENT_KEY is missing")
+			}
+			clientCert, err := tls.LoadX509KeyPair(certPath, keyPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load client TLS cert/key: %w", err)
+			}
+			tlsCfg.Certificates = []tls.Certificate{clientCert}
+		}
+
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	} else {
-		logger.Warn("TLS is disabled; connection is unencrypted. Enable TLS for production use.")
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		// Security: Require explicit opt-in for insecure connections
+		if strings.EqualFold(os.Getenv("CHATCLI_ALLOW_INSECURE"), "true") {
+			logger.Warn("SECURITY WARNING: TLS is disabled. Connection is unencrypted. Set CHATCLI_ALLOW_INSECURE=false for production.")
+			dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		} else {
+			logger.Warn("TLS disabled but CHATCLI_ALLOW_INSECURE not set — using system TLS")
+			dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+				MinVersion: tls.VersionTLS13,
+			})))
+		}
 	}
 
 	// Keepalive: detect dead connections without flooding the server.

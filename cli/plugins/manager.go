@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -128,8 +129,29 @@ func (m *Manager) Reload() {
 		return
 	}
 
+	// Security (C3/H9): Verify plugin signatures before loading
+	verifier := NewPluginVerifier()
+	if verifier.AllowsUnsigned() {
+		m.logger.Warn("SECURITY: unsigned plugins are allowed (CHATCLI_ALLOW_UNSIGNED_PLUGINS=true) — disable in production")
+	}
+
 	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".sig") || strings.HasPrefix(entry.Name(), ".") {
+			continue // skip signature files and hidden files
+		}
 		pluginPath := filepath.Join(m.pluginsDir, entry.Name())
+
+		// Verify plugin signature
+		if err := verifier.VerifyPlugin(pluginPath); err != nil {
+			if err == ErrNoSignature && verifier.AllowsUnsigned() {
+				m.logger.Warn("Loading unsigned plugin (dev mode)", zap.String("plugin", entry.Name()))
+			} else {
+				m.logger.Warn("Plugin signature verification failed, skipping",
+					zap.String("plugin", entry.Name()), zap.Error(err))
+				continue
+			}
+		}
+
 		plugin, err := NewPluginFromPath(pluginPath)
 		if err != nil {
 			m.logger.Warn("Arquivo inválido no diretório de plugins, pulando.", zap.String("path", pluginPath), zap.Error(err))
