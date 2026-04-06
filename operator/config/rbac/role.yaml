@@ -388,21 +388,27 @@ rules:
       - create
       - update
       - patch
+  # Security (H5): RBAC resources — read-only for monitoring.
+  # Removed patch/delete/create on ClusterRoles and ClusterRoleBindings
+  # to prevent privilege escalation if operator is compromised.
   - apiGroups:
       - rbac.authorization.k8s.io
     resources:
       - roles
       - rolebindings
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
       - clusterroles
       - clusterrolebindings
     verbs:
       - get
       - list
       - watch
-      - create
-      - update
-      - patch
-      - delete
   # Events (emit + read for watcher)
   - apiGroups:
       - ""

@@ -27,6 +27,11 @@ jobs:
       GOPATH: ${{ github.workspace }}/go
 
     steps:
+      # Security (M16): Mask API key to prevent accidental log exposure
+      - name: Mask sensitive environment variables
+        run: |
+          echo "::add-mask::${{ secrets.OPENAI_API_KEY }}"
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:

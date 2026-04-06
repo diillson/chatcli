@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
+	_ "google.golang.org/grpc/credentials/insecure" // kept for backward compat reference
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 )
@@ -55,20 +56,51 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 
 	var dialOpts []grpc.DialOption
 
+	// Security (H7): TLS always required. Upgraded to TLS 1.3.
+	// Use CHATCLI_GRPC_TLS_CERT/KEY for mTLS client certificates.
+	// Use CHATCLI_GRPC_TLS_CA for custom CA certificate.
+	tlsCfg := &tls.Config{
+		MinVersion: tls.VersionTLS13,
+	}
+
+	// Load custom CA certificate if provided
+	if len(opts.CACert) > 0 {
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(opts.CACert) {
+			return fmt.Errorf("failed to parse CA certificate")
+		}
+		tlsCfg.RootCAs = certPool
+	} else if caCertPath := os.Getenv("CHATCLI_GRPC_TLS_CA"); caCertPath != "" {
+		caCert, err := os.ReadFile(caCertPath)
+		if err != nil {
+			return fmt.Errorf("failed to read CA cert from %s: %w", caCertPath, err)
+		}
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return fmt.Errorf("failed to parse CA certificate from %s", caCertPath)
+		}
+		tlsCfg.RootCAs = certPool
+	}
+
+	// mTLS: load client certificate if configured
+	if certPath := os.Getenv("CHATCLI_GRPC_TLS_CERT"); certPath != "" {
+		keyPath := os.Getenv("CHATCLI_GRPC_TLS_KEY")
+		if keyPath == "" {
+			return fmt.Errorf("CHATCLI_GRPC_TLS_CERT set but CHATCLI_GRPC_TLS_KEY is missing")
+		}
+		clientCert, err := tls.LoadX509KeyPair(certPath, keyPath)
+		if err != nil {
+			return fmt.Errorf("failed to load client TLS cert/key: %w", err)
+		}
+		tlsCfg.Certificates = []tls.Certificate{clientCert}
+	}
+
 	if opts.TLSEnabled {
-		tlsCfg := &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		}
-		if len(opts.CACert) > 0 {
-			certPool := x509.NewCertPool()
-			if !certPool.AppendCertsFromPEM(opts.CACert) {
-				return fmt.Errorf("failed to parse CA certificate")
-			}
-			tlsCfg.RootCAs = certPool
-		}
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	} else {
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		// Even without explicit TLS flag, use system TLS (never insecure)
+		sc.logger.Warn("TLS not explicitly enabled — using system TLS with default CAs")
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	}
 
 	// Keepalive: detect dead connections without flooding the server.

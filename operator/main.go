@@ -293,16 +293,28 @@ func loadAPIKeysFromConfigMap(clientset kubernetes.Interface, apiServer *rest.AP
 	configMapName := "chatcli-operator-config"
 	namespace := resolveNamespace()
 
+	// Security (C4): Fail-closed — refuse to start REST API without auth unless dev mode
+	devMode := strings.EqualFold(os.Getenv("CHATCLI_OPERATOR_DEV_MODE"), "true")
+
 	cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), configMapName, metav1.GetOptions{})
 	if err != nil {
-		setupLog.Info("no API keys ConfigMap found, REST API running in dev mode (no auth)",
+		if devMode {
+			setupLog.Info("WARNING: no API keys ConfigMap found, REST API running in DEV MODE (no auth)",
+				"configmap", fmt.Sprintf("%s/%s", namespace, configMapName))
+			return
+		}
+		setupLog.Error(err, "SECURITY: no API keys ConfigMap found and CHATCLI_OPERATOR_DEV_MODE is not set — REST API will reject all unauthenticated requests",
 			"configmap", fmt.Sprintf("%s/%s", namespace, configMapName))
 		return
 	}
 
 	apiKeysYAML, ok := cm.Data["api-keys"]
 	if !ok || strings.TrimSpace(apiKeysYAML) == "" {
-		setupLog.Info("ConfigMap found but no api-keys field, REST API running in dev mode")
+		if devMode {
+			setupLog.Info("WARNING: ConfigMap found but no api-keys field, REST API running in DEV MODE")
+			return
+		}
+		setupLog.Error(nil, "SECURITY: ConfigMap found but no api-keys field and CHATCLI_OPERATOR_DEV_MODE is not set — REST API will reject all unauthenticated requests")
 		return
 	}
 

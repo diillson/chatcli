@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -63,6 +64,9 @@ type Handler struct {
 
 	// MCP manager (optional, nil when not configured)
 	mcpManager *mcp.Manager
+
+	// Security: SSRF validator for provider URL checking (H1)
+	ssrfValidator *SSRFValidator
 }
 
 // SessionStore abstracts session persistence for testability.
@@ -99,6 +103,7 @@ func NewHandler(llmMgr manager.LLMManager, sessionStore SessionStore, logger *za
 		logger:          logger,
 		defaultProvider: provider,
 		defaultModel:    model,
+		ssrfValidator:   NewSSRFValidator(logger),
 	}
 }
 
@@ -156,6 +161,17 @@ func (h *Handler) getClient(provider, model, clientAPIKey string, providerConfig
 		c   client.LLMClient
 		err error
 	)
+
+	// Security: SSRF prevention — validate provider_config URLs before use (H1)
+	if len(providerConfig) > 0 && h.ssrfValidator != nil {
+		if err := h.ssrfValidator.ValidateProviderConfig(providerConfig); err != nil {
+			h.logger.Warn("SSRF: blocked provider config",
+				zap.String("provider", provider),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("invalid provider configuration: %w", err)
+		}
+	}
 
 	// Client-forwarded credentials with provider-specific config (StackSpot, Ollama, etc.)
 	if len(providerConfig) > 0 {

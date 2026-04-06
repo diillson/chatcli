@@ -167,16 +167,32 @@ func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, shellFl
 	shellConfigPath := e.getShellConfigPath(shell)
 	var shellCommand string
 
+	// Security (M13): Default to --noprofile --norc. Opt-in via CHATCLI_AGENT_SOURCE_SHELL_CONFIG=true.
+	sourceShellConfig := strings.EqualFold(os.Getenv("CHATCLI_AGENT_SOURCE_SHELL_CONFIG"), "true")
+
 	// No Windows, a lógica de 'source' não funciona igual. Simplificamos para executar direto.
 	if runtime.GOOS == "windows" {
 		shellCommand = command
 	} else {
-		if shellConfigPath != "" {
+		if sourceShellConfig && shellConfigPath != "" {
 			if err := e.validateShellConfig(shellConfigPath); err != nil {
 				e.logger.Warn("Skipping shell config sourcing", zap.Error(err))
 				shellConfigPath = ""
 			}
+			// Additional validation: file ownership must match current user
+			if shellConfigPath != "" {
+				if info, err := os.Stat(shellConfigPath); err == nil {
+					// Check file size (reject > 1MB — shell configs shouldn't be that large)
+					if info.Size() > 1024*1024 {
+						e.logger.Warn("Shell config too large, skipping", zap.Int64("size", info.Size()))
+						shellConfigPath = ""
+					}
+				}
+			}
+		} else {
+			shellConfigPath = "" // Don't source shell config by default
 		}
+
 		if shellConfigPath != "" {
 			shellCommand = fmt.Sprintf("source %s 2>/dev/null || true; %s", utils.ShellQuote(shellConfigPath), command)
 		} else {

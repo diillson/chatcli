@@ -95,8 +95,8 @@ func NewAPIServer(c client.Client, addr string) *APIServer {
 		listenAddr:   addr,
 		apiKeyHeader: "X-API-Key",
 		apiKeys:      make(map[string]string),
-		limiter:      newRateLimiter(100), // 100 requests/minute
-		corsOrigin:   "*",
+		limiter:      newRateLimiter(30), // Security (M3): 30 requests/minute (reduced from 100)
+		corsOrigin:   "",                 // Security (H6): deny-all CORS by default
 	}
 }
 

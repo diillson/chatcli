@@ -265,5 +265,6 @@ func (c *Client) DownloadPlugin(ctx context.Context, pluginName, targetDir strin
 }
 
 func writePluginFile(path string, data []byte) error {
-	return os.WriteFile(path, data, 0o755)
+	// Security (C7): Owner-only executable permissions (was 0o755 world-executable)
+	return os.WriteFile(path, data, 0o700)
 }

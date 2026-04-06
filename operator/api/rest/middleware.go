@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -32,11 +33,15 @@ func (s *APIServer) authMiddleware(next http.Handler) http.Handler {
 		keysLen := len(s.apiKeys)
 		s.apiKeysMu.RUnlock()
 
-		// If no keys are configured, allow all (development mode).
+		// Security (C4): Fail-closed. If no keys configured, reject unless dev mode.
 		if keysLen == 0 {
-			ctx := context.WithValue(r.Context(), contextKeyRole, "admin")
-			ctx = context.WithValue(ctx, contextKeyAPIKey, "dev-mode")
-			next.ServeHTTP(w, r.WithContext(ctx))
+			if os.Getenv("CHATCLI_OPERATOR_DEV_MODE") == "true" {
+				ctx := context.WithValue(r.Context(), contextKeyRole, "admin")
+				ctx = context.WithValue(ctx, contextKeyAPIKey, "dev-mode")
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+			writeError(w, http.StatusUnauthorized, "no API keys configured; set CHATCLI_OPERATOR_DEV_MODE=true for development")
 			return
 		}
 
@@ -168,17 +173,22 @@ func (s *APIServer) rateLimitMiddleware(next http.Handler) http.Handler {
 // --- CORS Middleware ---
 
 // corsMiddleware adds CORS headers to responses.
+// Security (H6): Default to deny-all CORS. Require explicit origin configuration.
 func (s *APIServer) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := s.corsOrigin
+		// Security: deny-all by default — CORS only if explicitly configured
 		if origin == "" {
-			origin = "*"
+			// No CORS headers set — browser cross-origin requests will be blocked
+			next.ServeHTTP(w, r)
+			return
 		}
 
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, "+s.apiKeyHeader+", Authorization")
-		w.Header().Set("Access-Control-Max-Age", "86400")
+		w.Header().Set("Access-Control-Allow-Credentials", "false")
+		w.Header().Set("Access-Control-Max-Age", "3600") // 1 hour, not 24h
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

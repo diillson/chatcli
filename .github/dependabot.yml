@@ -1,0 +1,43 @@
+version: 2
+updates:
+  # Go module dependencies
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "diillson"
+    labels:
+      - "dependencies"
+      - "security"
+
+  # GitHub Actions versions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "ci/cd"
+      - "dependencies"
+
+  # Dockerfile base images (main)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "docker"
+      - "dependencies"
+
+  # Dockerfile base images (operator)
+  - package-ecosystem: "docker"
+    directory: "/operator"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "docker"
+      - "dependencies"
