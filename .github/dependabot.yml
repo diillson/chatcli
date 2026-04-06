@@ -33,6 +33,19 @@ updates:
       - "docker"
       - "dependencies"
 
+  # Go module dependencies (operator — separate go.mod)
+  - package-ecosystem: "gomod"
+    directory: "/operator"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "diillson"
+    labels:
+      - "dependencies"
+      - "operator"
+
   # Dockerfile base images (operator)
   - package-ecosystem: "docker"
     directory: "/operator"
