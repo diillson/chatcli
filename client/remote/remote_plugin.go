@@ -270,5 +270,5 @@ func writePluginFile(path string, data []byte) error {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o700)
+	return os.Chmod(path, 0o700) // #nosec G302 -- plugins must be executable by owner
 }
