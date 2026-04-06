@@ -186,7 +186,7 @@ func (stdinStdout) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
 // (arrow keys, Home, End, Ctrl+A/E, backspace, delete, etc.) using golang.org/x/term.
 // This is used for coder mode interactive input where the user needs to edit text.
 func (a *AgentMode) readLineWithEditing() (string, error) {
-	fd := int(os.Stdin.Fd())
+	fd := int(os.Stdin.Fd()) // #nosec G115 -- Fd() returns uintptr, safe on all supported platforms
 
 	// Put terminal into raw mode so term.Terminal can handle escape sequences
 	oldState, err := term.MakeRaw(fd)
@@ -196,7 +196,7 @@ func (a *AgentMode) readLineWithEditing() (string, error) {
 		line, _ := reader.ReadString('\n')
 		return strings.TrimSpace(line), nil
 	}
-	defer term.Restore(fd, oldState)
+	defer func() { _ = term.Restore(fd, oldState) }()
 
 	// term.NewTerminal provides full readline: arrow keys, Ctrl+A/E, word
 	// movement, backspace, delete — all processed correctly.
@@ -205,38 +205,28 @@ func (a *AgentMode) readLineWithEditing() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(line), nil
-}
 
-// readMultiline reads from the stdinLines channel with ``` multiline support.
-// When the user types ``` on a line by itself, subsequent lines are accumulated
-// until another ``` closes the block. For single-line input, returns immediately.
-// Respects context cancellation.
-func (a *AgentMode) readMultiline(ctx context.Context) (string, error) {
-	for {
-		var line string
-		if a.stdinLines != nil {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case line = <-a.stdinLines:
-			}
-		} else {
-			line = strings.TrimSpace(a.readLine())
-		}
+	trimmed := strings.TrimSpace(line)
 
-		wasActive := a.multilineBuf.Active()
-		complete, fullText := a.multilineBuf.ProcessLine(line)
-		if !complete {
-			if !wasActive {
-				// Just entered multiline mode — show hint
-				fmt.Printf("\n  \033[90m📝 %s\033[0m\n", i18n.T("multiline.hint", a.multilineBuf.Delimiter()))
-			}
+	// Support multiline delimiter: if the user types "---", enter multiline mode
+	// using the standard multilineBuf accumulator.
+	if trimmed == "---" || trimmed == "```" {
+		_ = term.Restore(fd, oldState) // restore terminal for multiline input
+		a.multilineBuf.ProcessLine(trimmed)
+		fmt.Printf("\n  \033[90m📝 %s\033[0m\n", i18n.T("multiline.hint", a.multilineBuf.Delimiter()))
+		reader := bufio.NewReader(os.Stdin)
+		for {
 			fmt.Printf("  \033[90m... [%d] \033[0m", a.multilineBuf.LineCount()+1)
-			continue
+			nextLine, _ := reader.ReadString('\n')
+			nextLine = strings.TrimRight(nextLine, "\r\n")
+			complete, fullText := a.multilineBuf.ProcessLine(nextLine)
+			if complete {
+				return strings.TrimSpace(fullText), nil
+			}
 		}
-		return fullText, nil
 	}
+
+	return trimmed, nil
 }
 
 // drainStdinToQueue moves any pending stdin lines into the message queue.
