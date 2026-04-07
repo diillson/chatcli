@@ -107,9 +107,119 @@ jobs:
             done
           done
 
-  docker_chatcli:
-    name: Build & Push ChatCLI image to GHCR
+  # ---------------------------------------------------------------------------
+  # ChatCLI Docker: native per-arch builds (no QEMU) → Trivy gate → merge manifest → sign
+  # ---------------------------------------------------------------------------
+  docker_chatcli_build:
+    name: "Build ChatCLI (${{ matrix.arch }})"
     needs: [release_please]
+    if: needs.release_please.outputs.release_created == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            platform: linux/arm64
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release_please.outputs.tag_name }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/diillson/chatcli
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=ghcr.io/diillson/chatcli,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=chatcli-${{ matrix.arch }}
+          cache-to: type=gha,scope=chatcli-${{ matrix.arch }},mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatcli-digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker_chatcli_trivy:
+    name: "Trivy scan — ChatCLI"
+    needs: [release_please, docker_chatcli_build]
+    if: needs.release_please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout (for .trivyignore.yaml)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release_please.outputs.tag_name }}
+          sparse-checkout: .trivyignore.yaml
+
+      - name: Download amd64 digest
+        uses: actions/download-artifact@v4
+        with:
+          name: chatcli-digest-amd64
+          path: /tmp/digests
+
+      - name: Resolve digest
+        id: digest
+        run: echo "sha=sha256:$(ls /tmp/digests)" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trivy gate (fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "ghcr.io/diillson/chatcli@${{ steps.digest.outputs.sha }}"
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+          scanners: vuln
+          exit-code: '1'
+
+  docker_chatcli_merge:
+    name: "Merge & Sign — ChatCLI manifest"
+    needs: [release_please, docker_chatcli_build, docker_chatcli_trivy]
     if: needs.release_please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -117,16 +227,12 @@ jobs:
       packages: write
       id-token: write
     steps:
-      - name: Checkout tag
-        uses: actions/checkout@v6
+      - name: Download all digests
+        uses: actions/download-artifact@v4
         with:
-          ref: ${{ needs.release_please.outputs.tag_name }}
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+          pattern: chatcli-digest-*
+          path: /tmp/digests
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -147,24 +253,137 @@ jobs:
             type=semver,pattern={{version}},value=${{ needs.release_please.outputs.tag_name }}
             type=raw,value=latest
 
-      - name: Build and push
-        id: build-chatcli
+      - name: Create multi-arch manifest and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< '${{ steps.meta.outputs.json }}') \
+            $(printf 'ghcr.io/diillson/chatcli@sha256:%s ' *)
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign manifest with Cosign (keyless OIDC)
+        run: |
+          docker buildx imagetools inspect \
+            "ghcr.io/diillson/chatcli:${{ steps.meta.outputs.version }}" \
+            --format '{{.Manifest.Digest}}' | \
+          xargs -I{} cosign sign --yes "ghcr.io/diillson/chatcli@{}"
+
+  # ---------------------------------------------------------------------------
+  # Operator Docker: native per-arch builds (no QEMU) → Trivy gate → merge manifest → sign
+  # ---------------------------------------------------------------------------
+  docker_operator_build:
+    name: "Build Operator (${{ matrix.arch }})"
+    needs: [release_please]
+    if: needs.release_please.outputs.release_created == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            platform: linux/arm64
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release_please.outputs.tag_name }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/diillson/chatcli-operator
+
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
+          file: ./operator/Dockerfile
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          outputs: type=image,name=ghcr.io/diillson/chatcli-operator,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=operator-${{ matrix.arch }}
+          cache-to: type=gha,scope=operator-${{ matrix.arch }},mode=max
 
-      - name: Sign ChatCLI image with Cosign (keyless OIDC)
-        run: cosign sign --yes "ghcr.io/diillson/chatcli@${{ steps.build-chatcli.outputs.digest }}"
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
 
-  docker_operator:
-    name: Build & Push Operator image to GHCR
-    needs: [release_please]
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: operator-digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker_operator_trivy:
+    name: "Trivy scan — Operator"
+    needs: [release_please, docker_operator_build]
+    if: needs.release_please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout (for .trivyignore.yaml)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release_please.outputs.tag_name }}
+          sparse-checkout: .trivyignore.yaml
+
+      - name: Download amd64 digest
+        uses: actions/download-artifact@v4
+        with:
+          name: operator-digest-amd64
+          path: /tmp/digests
+
+      - name: Resolve digest
+        id: digest
+        run: echo "sha=sha256:$(ls /tmp/digests)" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trivy gate (fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "ghcr.io/diillson/chatcli-operator@${{ steps.digest.outputs.sha }}"
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+          scanners: vuln
+          exit-code: '1'
+
+  docker_operator_merge:
+    name: "Merge & Sign — Operator manifest"
+    needs: [release_please, docker_operator_build, docker_operator_trivy]
     if: needs.release_please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -172,16 +391,12 @@ jobs:
       packages: write
       id-token: write
     steps:
-      - name: Checkout tag
-        uses: actions/checkout@v6
+      - name: Download all digests
+        uses: actions/download-artifact@v4
         with:
-          ref: ${{ needs.release_please.outputs.tag_name }}
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+          pattern: operator-digest-*
+          path: /tmp/digests
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -202,21 +417,22 @@ jobs:
             type=semver,pattern={{version}},value=${{ needs.release_please.outputs.tag_name }}
             type=raw,value=latest
 
-      - name: Build and push
-        id: build-operator
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./operator/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create multi-arch manifest and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< '${{ steps.meta.outputs.json }}') \
+            $(printf 'ghcr.io/diillson/chatcli-operator@sha256:%s ' *)
 
-      - name: Sign Operator image with Cosign (keyless OIDC)
-        run: cosign sign --yes "ghcr.io/diillson/chatcli-operator@${{ steps.build-operator.outputs.digest }}"
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign manifest with Cosign (keyless OIDC)
+        run: |
+          docker buildx imagetools inspect \
+            "ghcr.io/diillson/chatcli-operator:${{ steps.meta.outputs.version }}" \
+            --format '{{.Manifest.Digest}}' | \
+          xargs -I{} cosign sign --yes "ghcr.io/diillson/chatcli-operator@{}"
 
   # Atualiza a formula do Homebrew tap após upload dos binários
   update_homebrew:

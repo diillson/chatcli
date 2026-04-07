@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   security-events: write
+  packages: read
 
 jobs:
   govulncheck:
@@ -62,3 +63,94 @@ jobs:
         with:
           fail-on-severity: high
           deny-licenses: GPL-3.0, AGPL-3.0
+
+  trivy-image-chatcli:
+    name: Trivy — ChatCLI Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build ChatCLI image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: chatcli:scan
+
+      # SARIF upload — informational, all severities, never blocks
+      - name: Trivy scan (SARIF report)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: chatcli:scan
+          format: sarif
+          output: trivy-chatcli.sarif
+          exit-code: '0'
+
+      - name: Upload Trivy SARIF results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-chatcli.sarif
+          category: trivy-chatcli
+
+      # Gate — only fails on fixable HIGH/CRITICAL OS vulns (Go vulns covered by govulncheck)
+      - name: Trivy gate (fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: chatcli:scan
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+          scanners: vuln
+          exit-code: '1'
+
+  trivy-image-operator:
+    name: Trivy — Operator Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Operator image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./operator/Dockerfile
+          push: false
+          load: true
+          tags: chatcli-operator:scan
+
+      # SARIF upload — informational, all severities, never blocks
+      - name: Trivy scan (SARIF report)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: chatcli-operator:scan
+          format: sarif
+          output: trivy-operator.sarif
+          exit-code: '0'
+
+      - name: Upload Trivy SARIF results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-operator.sarif
+          category: trivy-operator
+
+      # Gate — only fails on fixable HIGH/CRITICAL OS vulns (Go vulns covered by govulncheck)
+      - name: Trivy gate (fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: chatcli-operator:scan
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+          scanners: vuln
+          exit-code: '1'

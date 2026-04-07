@@ -12,12 +12,17 @@
 
 <div align="center">
   <img src="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml/badge.svg"/>
+  <a href="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml">
+    <img src="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml/badge.svg" alt="Security Scan"/>
+  </a>
   <a href="https://github.com/diillson/chatcli/releases">
     <img src="https://img.shields.io/github/v/release/diillson/chatcli"/>
   </a>
-  <a href="https://artifacthub.io/packages/helm/chatcli/chatcli">
+  <a href="https://artifacthub.io/packages/search?ts_query_web=chatcli&sort=relevance&page=1">
     <img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/chatcli"/>
   </a>
+  <img src="https://img.shields.io/badge/Trivy-image%20scanning-00C9A7?logo=aquasecurity" alt="Trivy"/>
+  <img src="https://img.shields.io/badge/Sigstore-cosign%20signed-4B32C3?logo=sigstore" alt="Cosign Signed"/>
   <img src="https://img.shields.io/github/go-mod/go-version/diillson/chatcli?label=Go"/>
   <img src="https://img.shields.io/github/license/diillson/chatcli"/>
   <img src="https://img.shields.io/github/last-commit/diillson/chatcli"/>
@@ -416,6 +421,6 @@ chatcli/
 <p align="center">
   <a href="https://chatcli.edilsonfreitas.com"><strong>Documentação</strong></a> &bull;
   <a href="https://github.com/diillson/chatcli/releases"><strong>Releases</strong></a> &bull;
-  <a href="https://artifacthub.io/packages/helm/chatcli/chatcli"><strong>Helm Charts</strong></a> &bull;
+  <a href="https://artifacthub.io/packages/search?ts_query_web=chatcli&sort=relevance&page=1"><strong>Helm Charts</strong></a> &bull;
   <a href="https://github.com/diillson/chatcli/issues"><strong>Issues</strong></a>
 </p>

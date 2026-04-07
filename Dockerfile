@@ -18,31 +18,21 @@ COPY . .
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o chatcli .
 
+# Build grpc_health_probe for Docker HEALTHCHECK (standalone/compose environments)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go install github.com/grpc-ecosystem/grpc-health-probe@latest && \
+    cp "$(go env GOPATH)/bin/grpc-health-probe" /usr/local/bin/grpc-health-probe
+
 # --- Runtime stage ---
-FROM alpine:3.23
-
-RUN apk add --no-cache ca-certificates tzdata
-
-# Create non-root user
-RUN addgroup -S chatcli && adduser -S chatcli -G chatcli
-
-# Create directories for sessions, plugins, memory, skills, and bootstrap
-RUN mkdir -p /home/chatcli/.chatcli/sessions \
-             /home/chatcli/.chatcli/plugins \
-             /home/chatcli/.chatcli/memory \
-             /home/chatcli/.chatcli/skills \
-             /home/chatcli/.chatcli/bootstrap && \
-    chown -R chatcli:chatcli /home/chatcli/.chatcli
+# Distroless static image: zero OS packages, zero CVEs, nonroot by default.
+FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=builder /app/chatcli /usr/local/bin/chatcli
-
-USER chatcli
-WORKDIR /home/chatcli
+COPY --from=builder /usr/local/bin/grpc-health-probe /usr/local/bin/grpc-health-probe
 
 EXPOSE 50051
 
-# Health check: verify the server process is running and listening
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD pidof chatcli > /dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/usr/local/bin/grpc-health-probe", "-addr=:50051"]
 
 ENTRYPOINT ["chatcli", "server"]
