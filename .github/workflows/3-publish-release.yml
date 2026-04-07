@@ -265,10 +265,8 @@ jobs:
 
       - name: Sign manifest with Cosign (keyless OIDC)
         run: |
-          docker buildx imagetools inspect \
-            "ghcr.io/diillson/chatcli:${{ steps.meta.outputs.version }}" \
-            --format '{{.Manifest.Digest}}' | \
-          xargs -I{} cosign sign --yes "ghcr.io/diillson/chatcli@{}"
+          cosign sign --yes --recursive \
+            "ghcr.io/diillson/chatcli:${{ steps.meta.outputs.version }}"
 
   # ---------------------------------------------------------------------------
   # Operator Docker: native per-arch builds (no QEMU) → Trivy gate → merge manifest → sign
@@ -429,10 +427,8 @@ jobs:
 
       - name: Sign manifest with Cosign (keyless OIDC)
         run: |
-          docker buildx imagetools inspect \
-            "ghcr.io/diillson/chatcli-operator:${{ steps.meta.outputs.version }}" \
-            --format '{{.Manifest.Digest}}' | \
-          xargs -I{} cosign sign --yes "ghcr.io/diillson/chatcli-operator@{}"
+          cosign sign --yes --recursive \
+            "ghcr.io/diillson/chatcli-operator:${{ steps.meta.outputs.version }}"
 
   # Atualiza a formula do Homebrew tap após upload dos binários
   update_homebrew:
