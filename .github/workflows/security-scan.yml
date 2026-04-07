@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   security-events: write
+  packages: read
 
 jobs:
   govulncheck:
@@ -62,3 +63,70 @@ jobs:
         with:
           fail-on-severity: high
           deny-licenses: GPL-3.0, AGPL-3.0
+
+  trivy-image-chatcli:
+    name: Trivy — ChatCLI Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build ChatCLI image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: chatcli:scan
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: chatcli:scan
+          format: sarif
+          output: trivy-chatcli.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+
+      - name: Upload Trivy SARIF results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-chatcli.sarif
+          category: trivy-chatcli
+
+  trivy-image-operator:
+    name: Trivy — Operator Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Operator image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./operator/Dockerfile
+          push: false
+          load: true
+          tags: chatcli-operator:scan
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: chatcli-operator:scan
+          format: sarif
+          output: trivy-operator.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+
+      - name: Upload Trivy SARIF results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-operator.sarif
+          category: trivy-operator

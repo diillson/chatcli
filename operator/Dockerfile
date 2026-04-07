@@ -28,10 +28,12 @@ WORKDIR /workspace/operator
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -a -o manager main.go
 
-# Runtime — uses alpine instead of distroless because the SourceRepository
-# controller needs git to clone and sync application repositories.
-FROM alpine:3.23 AS runtime
-RUN apk add --no-cache git ca-certificates tzdata && \
+# Runtime — Alpine is required because the SourceRepository controller
+# needs git to clone and sync application repositories.
+# Pinned to exact patch version; Dependabot keeps this updated.
+FROM alpine:3.23.3 AS runtime
+RUN apk update && apk upgrade --no-cache && \
+    apk add --no-cache git ca-certificates tzdata && \
     adduser -D -u 65532 -g 65532 nonroot
 WORKDIR /
 COPY --from=builder /workspace/operator/manager .
