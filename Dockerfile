@@ -18,10 +18,13 @@ COPY . .
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o chatcli .
 
-# Build grpc_health_probe for Docker HEALTHCHECK (standalone/compose environments)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
-    go install github.com/grpc-ecosystem/grpc-health-probe@latest && \
-    cp "$(go env GOPATH)/bin/grpc-health-probe" /usr/local/bin/grpc-health-probe
+# Build grpc_health_probe with patched dependencies (CVE-2026-34986: go-jose/v4)
+RUN git clone --depth 1 https://github.com/grpc-ecosystem/grpc-health-probe /tmp/ghp && \
+    cd /tmp/ghp && \
+    go get github.com/go-jose/go-jose/v4@v4.1.4 && \
+    go mod tidy && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /usr/local/bin/grpc-health-probe . && \
+    rm -rf /tmp/ghp
 
 # --- Runtime stage ---
 # Distroless static image: zero OS packages, zero CVEs, nonroot by default.

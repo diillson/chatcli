@@ -1,11 +1,9 @@
-vulnerabilities:
-  # grpc-health-probe transitive dependency; the binary does not perform
-  # JWE decryption, so the panic path is unreachable in this context.
-  # Revisit when grpc-health-probe releases a version with go-jose >= v4.1.4.
-  - id: CVE-2026-34986
-    paths:
-      - usr/local/bin/grpc-health-probe
-    statement: >
-      grpc-health-probe is a simple gRPC health-check client that never
-      processes JWE tokens. The vulnerable code path in go-jose is not
-      reachable from this binary.
+# Trivy vulnerability suppressions with documented justification.
+# Only add entries here for CVEs that are confirmed false positives
+# or unreachable in the context of this project.
+#
+# Format:
+#   - id: CVE-YYYY-NNNNN
+#     paths: [binary/path]
+#     statement: "Justification for suppression"
+vulnerabilities: []
