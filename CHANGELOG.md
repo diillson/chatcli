@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.97.1](https://github.com/diillson/chatcli/compare/v1.97.0...v1.97.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* **docker:** harden images — distroless, Trivy gate, native multi-arch ([#757](https://github.com/diillson/chatcli/issues/757)) ([9f5313f](https://github.com/diillson/chatcli/commit/9f5313f678800c4f47be26a5f1fd72403b043517))
+
 ## [1.97.0](https://github.com/diillson/chatcli/compare/v1.96.1...v1.97.0) (2026-04-07)
 
 
