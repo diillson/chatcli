@@ -200,12 +200,14 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Trivy vulnerability scan (gate)
+      - name: Trivy gate (fixable HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: "ghcr.io/diillson/chatcli@${{ steps.digest.outputs.sha }}"
           format: table
           severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          scanners: vuln
           exit-code: '1'
 
   docker_chatcli_merge:
@@ -355,12 +357,14 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Trivy vulnerability scan (gate)
+      - name: Trivy gate (fixable HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: "ghcr.io/diillson/chatcli-operator@${{ steps.digest.outputs.sha }}"
           format: table
           severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          scanners: vuln
           exit-code: '1'
 
   docker_operator_merge:

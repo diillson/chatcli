@@ -81,14 +81,14 @@ jobs:
           load: true
           tags: chatcli:scan
 
-      - name: Run Trivy vulnerability scanner
+      # SARIF upload — informational, all severities, never blocks
+      - name: Trivy scan (SARIF report)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: chatcli:scan
           format: sarif
           output: trivy-chatcli.sarif
-          severity: CRITICAL,HIGH
-          exit-code: '1'
+          exit-code: '0'
 
       - name: Upload Trivy SARIF results
         uses: github/codeql-action/upload-sarif@v4
@@ -96,6 +96,17 @@ jobs:
         with:
           sarif_file: trivy-chatcli.sarif
           category: trivy-chatcli
+
+      # Gate — only fails on fixable HIGH/CRITICAL OS vulns (Go vulns covered by govulncheck)
+      - name: Trivy gate (fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: chatcli:scan
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          scanners: vuln
+          exit-code: '1'
 
   trivy-image-operator:
     name: Trivy — Operator Image
@@ -115,14 +126,14 @@ jobs:
           load: true
           tags: chatcli-operator:scan
 
-      - name: Run Trivy vulnerability scanner
+      # SARIF upload — informational, all severities, never blocks
+      - name: Trivy scan (SARIF report)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: chatcli-operator:scan
           format: sarif
           output: trivy-operator.sarif
-          severity: CRITICAL,HIGH
-          exit-code: '1'
+          exit-code: '0'
 
       - name: Upload Trivy SARIF results
         uses: github/codeql-action/upload-sarif@v4
@@ -130,3 +141,14 @@ jobs:
         with:
           sarif_file: trivy-operator.sarif
           category: trivy-operator
+
+      # Gate — only fails on fixable HIGH/CRITICAL OS vulns (Go vulns covered by govulncheck)
+      - name: Trivy gate (fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: chatcli-operator:scan
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          scanners: vuln
+          exit-code: '1'
