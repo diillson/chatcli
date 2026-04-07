@@ -200,10 +200,17 @@ func (s *Server) Start() error {
 		s.metricsServer.Start()
 	}
 
-	// Security: Bind to localhost by default, require explicit CHATCLI_BIND_ADDRESS for 0.0.0.0 (L3)
+	// Bind address: localhost for local CLI usage, 0.0.0.0 inside Kubernetes.
+	// KUBERNETES_SERVICE_HOST is injected by kubelet into every pod — its presence
+	// means we're running in K8s and must listen on all interfaces for health
+	// checks and Service routing to work.
 	bindAddr := os.Getenv("CHATCLI_BIND_ADDRESS")
 	if bindAddr == "" {
-		bindAddr = "127.0.0.1"
+		if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+			bindAddr = "0.0.0.0"
+		} else {
+			bindAddr = "127.0.0.1"
+		}
 	}
 	addr := fmt.Sprintf("%s:%d", bindAddr, s.config.Port)
 	lis, err := net.Listen("tcp", addr)
