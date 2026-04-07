@@ -139,7 +139,15 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
 		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
 		if err != nil {
-			logger.Fatal(i18n.T("server.tls.load_failed"), zap.Error(err))
+			// Write to stderr directly before Fatal — zap may not flush in containers
+			// with read-only filesystems or redirected stdout, causing silent exits.
+			fmt.Fprintf(os.Stderr, "FATAL: TLS certificate load failed: %v (cert=%s, key=%s)\n",
+				err, cfg.TLSCertFile, cfg.TLSKeyFile)
+			logger.Fatal(i18n.T("server.tls.load_failed"),
+				zap.Error(err),
+				zap.String("cert", cfg.TLSCertFile),
+				zap.String("key", cfg.TLSKeyFile),
+			)
 		}
 		tlsConfig := &tls.Config{
 			Certificates: []tls.Certificate{cert},
@@ -192,10 +200,17 @@ func (s *Server) Start() error {
 		s.metricsServer.Start()
 	}
 
-	// Security: Bind to localhost by default, require explicit CHATCLI_BIND_ADDRESS for 0.0.0.0 (L3)
+	// Bind address: localhost for local CLI usage, 0.0.0.0 inside Kubernetes.
+	// KUBERNETES_SERVICE_HOST is injected by kubelet into every pod — its presence
+	// means we're running in K8s and must listen on all interfaces for health
+	// checks and Service routing to work.
 	bindAddr := os.Getenv("CHATCLI_BIND_ADDRESS")
 	if bindAddr == "" {
-		bindAddr = "127.0.0.1"
+		if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+			bindAddr = "0.0.0.0"
+		} else {
+			bindAddr = "127.0.0.1"
+		}
 	}
 	addr := fmt.Sprintf("%s:%d", bindAddr, s.config.Port)
 	lis, err := net.Listen("tcp", addr)
