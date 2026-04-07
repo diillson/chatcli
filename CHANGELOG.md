@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.97.2](https://github.com/diillson/chatcli/compare/v1.97.1...v1.97.2) (2026-04-07)
+
+
+### Bug Fixes
+
+* **ci:** fix Cosign sign step — use tag resolution instead of broken inspect ([#759](https://github.com/diillson/chatcli/issues/759)) ([a90995e](https://github.com/diillson/chatcli/commit/a90995e816e545994f55807cd39753c73e2cee69))
+
 ## [1.97.1](https://github.com/diillson/chatcli/compare/v1.97.0...v1.97.1) (2026-04-07)
 
 
