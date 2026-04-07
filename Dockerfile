@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o c
 # --- Runtime stage ---
 FROM alpine:3.23
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk update && apk upgrade --no-cache && apk add --no-cache ca-certificates tzdata
 
 # Create non-root user
 RUN addgroup -S chatcli && adduser -S chatcli -G chatcli

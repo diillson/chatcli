@@ -31,7 +31,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -a -o manager main.go
 # Runtime — uses alpine instead of distroless because the SourceRepository
 # controller needs git to clone and sync application repositories.
 FROM alpine:3.23 AS runtime
-RUN apk add --no-cache git ca-certificates tzdata && \
+RUN apk update && apk upgrade --no-cache && apk add --no-cache git ca-certificates tzdata && \
     adduser -D -u 65532 -g 65532 nonroot
 WORKDIR /
 COPY --from=builder /workspace/operator/manager .

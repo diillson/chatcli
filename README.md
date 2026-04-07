@@ -15,7 +15,7 @@
   <a href="https://github.com/diillson/chatcli/releases">
     <img src="https://img.shields.io/github/v/release/diillson/chatcli"/>
   </a>
-  <a href="https://artifacthub.io/packages/helm/chatcli/chatcli">
+  <a href="https://artifacthub.io/packages/search?ts_query_web=chatcli&sort=relevance&page=1">
     <img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/chatcli"/>
   </a>
   <img src="https://img.shields.io/github/go-mod/go-version/diillson/chatcli?label=Go"/>
@@ -416,6 +416,6 @@ chatcli/
 <p align="center">
   <a href="https://chatcli.edilsonfreitas.com"><strong>Documentação</strong></a> &bull;
   <a href="https://github.com/diillson/chatcli/releases"><strong>Releases</strong></a> &bull;
-  <a href="https://artifacthub.io/packages/helm/chatcli/chatcli"><strong>Helm Charts</strong></a> &bull;
+  <a href="https://artifacthub.io/packages/search?ts_query_web=chatcli&sort=relevance&page=1"><strong>Helm Charts</strong></a> &bull;
   <a href="https://github.com/diillson/chatcli/issues"><strong>Issues</strong></a>
 </p>
