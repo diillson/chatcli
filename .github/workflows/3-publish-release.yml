@@ -183,6 +183,12 @@ jobs:
       contents: read
       packages: read
     steps:
+      - name: Checkout (for .trivyignore.yaml)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release_please.outputs.tag_name }}
+          sparse-checkout: .trivyignore.yaml
+
       - name: Download amd64 digest
         uses: actions/download-artifact@v4
         with:
@@ -207,6 +213,7 @@ jobs:
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
           scanners: vuln
           exit-code: '1'
 
@@ -340,6 +347,12 @@ jobs:
       contents: read
       packages: read
     steps:
+      - name: Checkout (for .trivyignore.yaml)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release_please.outputs.tag_name }}
+          sparse-checkout: .trivyignore.yaml
+
       - name: Download amd64 digest
         uses: actions/download-artifact@v4
         with:
@@ -364,6 +377,7 @@ jobs:
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
           scanners: vuln
           exit-code: '1'
 
