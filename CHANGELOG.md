@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.97.0](https://github.com/diillson/chatcli/compare/v1.96.1...v1.97.0) (2026-04-07)
+
+
+### Features
+
+* **operator:** hot-reload API keys from both Secret and ConfigMap ([#754](https://github.com/diillson/chatcli/issues/754)) ([4565146](https://github.com/diillson/chatcli/commit/4565146038559aa06c42db0f5f6de6c9210787cc))
+
 ## [1.96.1](https://github.com/diillson/chatcli/compare/v1.96.0...v1.96.1) (2026-04-06)
 
 
