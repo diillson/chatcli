@@ -139,7 +139,15 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
 		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
 		if err != nil {
-			logger.Fatal(i18n.T("server.tls.load_failed"), zap.Error(err))
+			// Write to stderr directly before Fatal — zap may not flush in containers
+			// with read-only filesystems or redirected stdout, causing silent exits.
+			fmt.Fprintf(os.Stderr, "FATAL: TLS certificate load failed: %v (cert=%s, key=%s)\n",
+				err, cfg.TLSCertFile, cfg.TLSKeyFile)
+			logger.Fatal(i18n.T("server.tls.load_failed"),
+				zap.Error(err),
+				zap.String("cert", cfg.TLSCertFile),
+				zap.String("key", cfg.TLSKeyFile),
+			)
 		}
 		tlsConfig := &tls.Config{
 			Certificates: []tls.Certificate{cert},
