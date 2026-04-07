@@ -363,55 +363,104 @@ func loadAPIKeysFromConfigMap(clientset kubernetes.Interface, apiServer *rest.AP
 	}
 }
 
-// watchAPIKeysConfigMap polls the ConfigMap for changes and hot-reloads API keys.
+// watchAPIKeys polls both Secret and ConfigMap for changes and hot-reloads API keys.
+// Priority: Secret "chatcli-operator-secrets" > ConfigMap "chatcli-operator-config".
 func watchAPIKeysConfigMap(clientset kubernetes.Interface, apiServer *rest.APIServer) {
+	secretName := "chatcli-operator-secrets"
 	configMapName := "chatcli-operator-config"
 	namespace := resolveNamespace()
 
-	var lastResourceVersion string
+	var lastSecretVersion string
+	var lastConfigMapVersion string
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), configMapName, metav1.GetOptions{})
-		if err != nil {
-			// ConfigMap deleted or not found — revert to dev mode (no auth)
-			if lastResourceVersion != "" {
+		// Try Secret first (preferred for sensitive data)
+		if keys, version, ok := tryLoadKeysFromSecret(clientset, namespace, secretName); ok {
+			if version != lastSecretVersion {
+				lastSecretVersion = version
+				apiServer.SetAPIKeys(keys)
+				if len(keys) > 0 {
+					setupLog.Info("API keys hot-reloaded from Secret", "keys", len(keys))
+				}
+			}
+			continue // Secret takes priority — skip ConfigMap
+		}
+		lastSecretVersion = ""
+
+		// Fallback to ConfigMap
+		if keys, version, ok := tryLoadKeysFromConfigMap(clientset, namespace, configMapName); ok {
+			if version != lastConfigMapVersion {
+				lastConfigMapVersion = version
+				apiServer.SetAPIKeys(keys)
+				if len(keys) > 0 {
+					setupLog.Info("API keys hot-reloaded from ConfigMap", "keys", len(keys))
+				}
+			}
+			continue
+		}
+
+		// Neither Secret nor ConfigMap found — clear keys if previously loaded
+		if lastConfigMapVersion != "" || lastSecretVersion != "" {
+			devMode := strings.EqualFold(os.Getenv("CHATCLI_OPERATOR_DEV_MODE"), "true")
+			if devMode {
 				apiServer.SetAPIKeys(make(map[string]string))
-				lastResourceVersion = ""
-				setupLog.Info("API keys ConfigMap removed, REST API reverted to dev mode (no auth)")
+				setupLog.Info("API keys removed, REST API reverted to dev mode (no auth)")
+			} else {
+				setupLog.Info("API keys removed, REST API will reject unauthenticated requests")
 			}
-			continue
+			lastConfigMapVersion = ""
+			lastSecretVersion = ""
 		}
-
-		if cm.ResourceVersion == lastResourceVersion {
-			continue
-		}
-		lastResourceVersion = cm.ResourceVersion
-
-		apiKeysYAML, ok := cm.Data["api-keys"]
-		if !ok || strings.TrimSpace(apiKeysYAML) == "" {
-			apiServer.SetAPIKeys(make(map[string]string))
-			setupLog.Info("api-keys field empty or removed, REST API reverted to dev mode (no auth)")
-			continue
-		}
-
-		var entries []apiKeyEntry
-		if err := yaml.Unmarshal([]byte(apiKeysYAML), &entries); err != nil {
-			setupLog.Error(err, "failed to parse api-keys on hot-reload")
-			continue
-		}
-
-		keys := make(map[string]string)
-		for _, e := range entries {
-			if e.Key != "" && e.Role != "" {
-				keys[e.Key] = e.Role
-			}
-		}
-
-		apiServer.SetAPIKeys(keys)
-		setupLog.Info("API keys hot-reloaded from ConfigMap", "keys", len(keys))
 	}
+}
+
+// tryLoadKeysFromSecret attempts to load API keys from a Kubernetes Secret.
+func tryLoadKeysFromSecret(clientset kubernetes.Interface, namespace, name string) (map[string]string, string, bool) {
+	secret, err := clientset.CoreV1().Secrets(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		return nil, "", false
+	}
+
+	data, ok := secret.Data["api-keys"]
+	if !ok || len(data) == 0 {
+		return nil, secret.ResourceVersion, true // Secret exists but no keys
+	}
+
+	return parseAPIKeys(data, secret.ResourceVersion)
+}
+
+// tryLoadKeysFromConfigMap attempts to load API keys from a Kubernetes ConfigMap.
+func tryLoadKeysFromConfigMap(clientset kubernetes.Interface, namespace, name string) (map[string]string, string, bool) {
+	cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		return nil, "", false
+	}
+
+	data, ok := cm.Data["api-keys"]
+	if !ok || strings.TrimSpace(data) == "" {
+		return nil, cm.ResourceVersion, true // ConfigMap exists but no keys
+	}
+
+	return parseAPIKeys([]byte(data), cm.ResourceVersion)
+}
+
+// parseAPIKeys parses YAML api-keys data into a role map.
+func parseAPIKeys(data []byte, resourceVersion string) (map[string]string, string, bool) {
+	var entries []apiKeyEntry
+	if err := yaml.Unmarshal(data, &entries); err != nil {
+		setupLog.Error(err, "failed to parse api-keys on hot-reload")
+		return nil, resourceVersion, true
+	}
+
+	keys := make(map[string]string)
+	for _, e := range entries {
+		if e.Key != "" && e.Role != "" {
+			keys[e.Key] = e.Role
+		}
+	}
+	return keys, resourceVersion, true
 }
 
 // resolveNamespace returns the namespace the operator is running in.
