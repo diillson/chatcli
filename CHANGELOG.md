@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.97.3](https://github.com/diillson/chatcli/compare/v1.97.2...v1.97.3) (2026-04-07)
+
+
+### Bug Fixes
+
+* **docker:** patch CVE-2026-34986 in grpc-health-probe ([#761](https://github.com/diillson/chatcli/issues/761)) ([451540b](https://github.com/diillson/chatcli/commit/451540b007279128109444479f6ca5dc646436b5))
+
 ## [1.97.2](https://github.com/diillson/chatcli/compare/v1.97.1...v1.97.2) (2026-04-07)
 
 
