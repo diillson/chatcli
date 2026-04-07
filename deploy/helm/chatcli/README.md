@@ -1,6 +1,10 @@
 # ChatCLI Server Helm Chart
 
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/chatcli)](https://artifacthub.io/packages/helm/chatcli/chatcli)
+[![Security Scan](https://github.com/diillson/chatcli/actions/workflows/security-scan.yml/badge.svg)](https://github.com/diillson/chatcli/actions/workflows/security-scan.yml)
+![Trivy](https://img.shields.io/badge/Trivy-image%20scanning-00C9A7?logo=aquasecurity)
+![Cosign](https://img.shields.io/badge/Sigstore-cosign%20signed-4B32C3?logo=sigstore)
+![Distroless](https://img.shields.io/badge/Runtime-distroless%2Fstatic-326CE5?logo=google)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub](https://img.shields.io/badge/GitHub-diillson%2Fchatcli-181717?logo=github)](https://github.com/diillson/chatcli)
 
