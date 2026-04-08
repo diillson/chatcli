@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.98.0](https://github.com/diillson/chatcli/compare/v1.97.4...v1.98.0) (2026-04-08)
+
+
+### Features
+
+* **provider:** add OpenRouter as LLM provider with full feature parity ([#765](https://github.com/diillson/chatcli/issues/765)) ([63e2237](https://github.com/diillson/chatcli/commit/63e223701b9bb68cf532804f2ca7350c3d26dc6e))
+
 ## [1.97.4](https://github.com/diillson/chatcli/compare/v1.97.3...v1.97.4) (2026-04-08)
 
 
