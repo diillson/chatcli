@@ -30,6 +30,7 @@ import (
 	"github.com/diillson/chatcli/llm/openai"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/llm/openai_responses"
+	"github.com/diillson/chatcli/llm/openrouter"
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/diillson/chatcli/llm/token"
 	"github.com/diillson/chatcli/llm/xai"
@@ -105,6 +106,7 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarOllamaClient(maxRetries, initialBackoff)
 	manager.configurarCopilotClient(maxRetries, initialBackoff)
 	manager.configurarGitHubModelsClient(maxRetries, initialBackoff)
+	manager.configurarOpenRouterClient(maxRetries, initialBackoff)
 
 	return manager, nil
 }
@@ -442,6 +444,28 @@ func (m *LLMManagerImpl) configurarGitHubModelsClient(maxRetries int, initialBac
 	}
 }
 
+// configurarOpenRouterClient configura o cliente OpenRouter
+func (m *LLMManagerImpl) configurarOpenRouterClient(maxRetries int, initialBackoff time.Duration) {
+	apiKey := config.Global.GetString("OPENROUTER_API_KEY")
+	if apiKey != "" {
+		m.logger.Info(i18n.T("llm.info.configuring_provider", "OpenRouter"))
+		m.clients["OPENROUTER"] = func(model string) (client.LLMClient, error) {
+			if model == "" {
+				model = config.DefaultOpenRouterModel
+			}
+			return openrouter.NewOpenRouterClient(
+				apiKey,
+				model,
+				m.logger,
+				maxRetries,
+				initialBackoff,
+			), nil
+		}
+	} else {
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "OPENROUTER_API_KEY", "OPENROUTER"))
+	}
+}
+
 // GetAvailableProviders retorna uma lista de provedores disponíveis configurados
 func (m *LLMManagerImpl) GetAvailableProviders() []string {
 	var providers []string
@@ -588,6 +612,7 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	m.configurarGitHubModelsClient(maxRetries, initialBackoff)
 	m.configurarZAIClient(maxRetries, initialBackoff)
 	m.configurarMiniMaxClient(maxRetries, initialBackoff)
+	m.configurarOpenRouterClient(maxRetries, initialBackoff)
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key
@@ -649,6 +674,12 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 			model = config.DefaultCopilotModel
 		}
 		return copilot.NewClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "OPENROUTER":
+		if model == "" {
+			model = config.DefaultOpenRouterModel
+		}
+		return openrouter.NewOpenRouterClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
 
 	default:
 		return nil, fmt.Errorf("%s", i18n.T("llm.manager.create_client_unsupported", provider))

@@ -109,7 +109,7 @@ Clients can use their own API keys (personal mode) or the server's configured pr
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `llm.provider` | Default provider: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `ZAI`, `MINIMAX`, `STACKSPOT`, `OLLAMA`, `COPILOT` | `""` |
+| `llm.provider` | Default provider: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `ZAI`, `MINIMAX`, `STACKSPOT`, `OLLAMA`, `COPILOT`, `OPENROUTER` | `""` |
 | `llm.model` | Model override | `""` |
 | `secrets.openaiApiKey` | OpenAI API key | `""` |
 | `secrets.anthropicApiKey` | Anthropic API key | `""` |
@@ -118,6 +118,7 @@ Clients can use their own API keys (personal mode) or the server's configured pr
 | `secrets.zaiApiKey` | ZAI (Zhipu AI) API key | `""` |
 | `secrets.minimaxApiKey` | MiniMax API key | `""` |
 | `secrets.githubCopilotToken` | GitHub Copilot token | `""` |
+| `secrets.openrouterApiKey` | OpenRouter API key | `""` |
 | `secrets.stackspotClientId` | StackSpot client ID | `""` |
 | `secrets.stackspotClientKey` | StackSpot client key | `""` |
 | `secrets.stackspotRealm` | StackSpot realm | `""` |
@@ -150,6 +151,8 @@ fallback:
       model: glm-4.7
     - name: MINIMAX
       model: MiniMax-M2.7
+    - name: OPENROUTER
+      model: anthropic/claude-sonnet-4
 ```
 
 ### gRPC Server

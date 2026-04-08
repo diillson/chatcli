@@ -53,6 +53,10 @@ const (
 	DefaultGitHubModelsModel = "gpt-4o"
 	GitHubModelsAPIURL       = "https://models.inference.ai.azure.com/chat/completions"
 
+	// Valores padrão para OpenRouter
+	DefaultOpenRouterModel = "openai/gpt-4o"
+	OpenRouterAPIURL       = "https://openrouter.ai/api/v1/chat/completions"
+
 	// Valores padrão para Ollama
 	DefaultOllamaModel          = "gpt-oss:20b"
 	OllamaDefaultBaseURL        = "http://localhost:11434"

@@ -15,7 +15,7 @@ type InstanceSpec struct {
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS).
+	// Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER).
 	Provider string `json:"provider"`
 
 	// Model is the LLM model name.
@@ -59,7 +59,7 @@ type InstanceSpec struct {
 
 	// APIKeys references a Secret containing provider API keys and config.
 	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, XAI_API_KEY,
-	// ZAI_API_KEY, MINIMAX_API_KEY, MINIMAX_API_COMPAT, GITHUB_COPILOT_TOKEN, etc.
+	// ZAI_API_KEY, MINIMAX_API_KEY, MINIMAX_API_COMPAT, GITHUB_COPILOT_TOKEN, OPENROUTER_API_KEY, etc.
 	// All providers used in the fallback chain must have their API keys in this Secret.
 	// +optional
 	APIKeys *SecretRefSpec `json:"apiKeys,omitempty"`
@@ -393,8 +393,8 @@ type FallbackSpec struct {
 
 // FallbackProviderEntry defines a single provider in the fallback chain.
 type FallbackProviderEntry struct {
-	// Name is the provider name (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS).
-	// +kubebuilder:validation:Enum=OPENAI;OPENAI_ASSISTANT;CLAUDEAI;GOOGLEAI;XAI;ZAI;MINIMAX;STACKSPOT;OLLAMA;COPILOT;GITHUB_MODELS
+	// Name is the provider name (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER).
+	// +kubebuilder:validation:Enum=OPENAI;OPENAI_ASSISTANT;CLAUDEAI;GOOGLEAI;XAI;ZAI;MINIMAX;STACKSPOT;OLLAMA;COPILOT;GITHUB_MODELS;OPENROUTER
 	Name string `json:"name"`
 
 	// Model is the LLM model to use for this provider.

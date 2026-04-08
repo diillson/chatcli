@@ -23,6 +23,7 @@ const (
 	ProviderOllama          = "OLLAMA"
 	ProviderCopilot         = "COPILOT"
 	ProviderGitHubModels    = "GITHUB_MODELS"
+	ProviderOpenRouter      = "OPENROUTER"
 )
 
 // PreferredAPI define qual API é preferida para o modelo
@@ -618,6 +619,100 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"json_mode"},
 	},
+
+	// OpenRouter Models (multi-provider gateway)
+	// Models use provider/model-name format. Only popular defaults are listed;
+	// the full catalog is fetched dynamically via ListModels.
+	{
+		ID:              "openai/gpt-4o",
+		Aliases:         []string{"openrouter-gpt-4o"},
+		DisplayName:     "GPT-4o (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "openai/gpt-4o-mini",
+		Aliases:         []string{"openrouter-gpt-4o-mini"},
+		DisplayName:     "GPT-4o mini (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "anthropic/claude-sonnet-4",
+		Aliases:         []string{"openrouter-claude-sonnet-4"},
+		DisplayName:     "Claude Sonnet 4 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+	{
+		ID:              "anthropic/claude-opus-4",
+		Aliases:         []string{"openrouter-claude-opus-4"},
+		DisplayName:     "Claude Opus 4 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   200000,
+		MaxOutputTokens: 32000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+	{
+		ID:              "google/gemini-2.5-pro",
+		Aliases:         []string{"openrouter-gemini-2.5-pro"},
+		DisplayName:     "Gemini 2.5 Pro (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "google/gemini-2.5-flash",
+		Aliases:         []string{"openrouter-gemini-2.5-flash"},
+		DisplayName:     "Gemini 2.5 Flash (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "meta-llama/llama-4-maverick",
+		Aliases:         []string{"openrouter-llama-4-maverick"},
+		DisplayName:     "Llama 4 Maverick (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools"},
+	},
+	{
+		ID:              "deepseek/deepseek-r1",
+		Aliases:         []string{"openrouter-deepseek-r1"},
+		DisplayName:     "DeepSeek R1 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   163840,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools"},
+	},
+	{
+		ID:              "mistralai/mistral-large",
+		Aliases:         []string{"openrouter-mistral-large"},
+		DisplayName:     "Mistral Large (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   128000,
+		MaxOutputTokens: 32768,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
 }
 
 // Resolve procura metadados por provedor e string de modelo (case-insensitive),
@@ -708,6 +803,8 @@ func GetMaxTokens(provider, model string, override int) int {
 		return 16384
 	case ProviderGitHubModels:
 		return 4096
+	case ProviderOpenRouter:
+		return 16384
 	default:
 		return 50000
 	}
@@ -737,6 +834,8 @@ func GetContextWindow(provider, model string) int {
 	case ProviderCopilot:
 		return 128000
 	case ProviderGitHubModels:
+		return 128000
+	case ProviderOpenRouter:
 		return 128000
 	default:
 		return 50000
