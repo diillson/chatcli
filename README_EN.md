@@ -6,7 +6,7 @@
 
 <h1 align="center">ChatCLI</h1>
 <p align="center"><strong>Multi-provider AI platform for terminal, server, and Kubernetes</strong></p>
-<p align="center"><em>11 providers. 12 agents. One interface.</em></p>
+<p align="center"><em>12 providers. 12 agents. One interface.</em></p>
 
 <div align="center">
   <img src="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml/badge.svg"/>
@@ -44,9 +44,9 @@
 
 ## Overview
 
-ChatCLI is a CLI, gRPC server, and Kubernetes operator that connects **11 LLM providers** to a single, unified interface. It ships with autonomous agents, native tool calling, automatic failover, enterprise-grade security, and a full AIOps pipeline -- all from your terminal.
+ChatCLI is a CLI, gRPC server, and Kubernetes operator that connects **12 LLM providers** to a single, unified interface. It ships with autonomous agents, native tool calling, automatic failover, enterprise-grade security, and a full AIOps pipeline -- all from your terminal.
 
-> **Why ChatCLI?** &mdash; Most AI tools lock you into one provider. ChatCLI gives you a consistent experience across OpenAI, Anthropic, Google, xAI, and seven more, with transparent failover, cost tracking, and the ability to run entirely on-prem via Ollama.
+> **Why ChatCLI?** &mdash; Most AI tools lock you into one provider. ChatCLI gives you a consistent experience across OpenAI, Anthropic, Google, xAI, and eight more -- including OpenRouter with access to 200+ models -- with transparent failover, cost tracking, and the ability to run entirely on-prem via Ollama.
 
 <br>
 
@@ -63,6 +63,7 @@ ChatCLI is a CLI, gRPC server, and Kubernetes operator that connects **11 LLM pr
 | **GitHub Copilot** | gpt-4o | Native | Yes |
 | **GitHub Models** | gpt-4o | Native | Yes |
 | **StackSpot AI** | StackSpotAI | -- | -- |
+| **OpenRouter** | openai/gpt-4o | Native | Yes |
 | **Ollama** | (local) | XML fallback | -- |
 | **OpenAI Assistants** | gpt-4o | Assistants API | -- |
 
@@ -103,7 +104,7 @@ go build -ldflags "-X github.com/diillson/chatcli/version.Version=${VERSION}" -o
 Create a `.env` file or export the variables:
 
 ```bash
-LLM_PROVIDER=OPENAI          # OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, COPILOT, OLLAMA, STACKSPOT
+LLM_PROVIDER=OPENAI          # OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, COPILOT, OLLAMA, STACKSPOT, OPENROUTER
 OPENAI_API_KEY=sk-xxx         # Key for the chosen provider
 ```
 
@@ -121,6 +122,7 @@ OPENAI_API_KEY=sk-xxx         # Key for the chosen provider
 | GitHub Copilot | `GITHUB_COPILOT_TOKEN` | `COPILOT_MODEL` | or `/auth login github-copilot` |
 | GitHub Models | `GITHUB_TOKEN` | `GITHUB_MODELS_MODEL` | `GH_TOKEN`, `GITHUB_MODELS_TOKEN` |
 | StackSpot | `CLIENT_ID`, `CLIENT_KEY` | -- | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
+| OpenRouter | `OPENROUTER_API_KEY` | -- | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS` |
 | Ollama | -- | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
 
 </details>
@@ -217,7 +219,7 @@ chatcli -p "Create tests for the utils package" --agent-auto-exec
 
 ### Native Tool Calling
 
-Structured tool calls via OpenAI, Anthropic, Google, ZAI, and MiniMax native APIs. Ephemeral cache support for Anthropic. Automatic XML fallback for providers without native support.
+Structured tool calls via OpenAI, Anthropic, Google, ZAI, MiniMax, and OpenRouter native APIs. Ephemeral cache support for Anthropic. Automatic XML fallback for providers without native support.
 
 ### Built-in OAuth
 
@@ -233,7 +235,7 @@ Credentials stored with **AES-256-GCM** encryption in `~/.chatcli/auth-profiles.
 ### Provider Fallback
 
 ```bash
-CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,ZAI,MINIMAX
+CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,ZAI,MINIMAX,OPENROUTER
 ```
 
 Error classification (rate limit, timeout, auth, context overflow), exponential backoff, and per-provider cooldown.
@@ -311,7 +313,7 @@ Error classification (rate limit, timeout, auth, context overflow), exponential 
 ```
 chatcli/
   cli/            TUI interface (Bubble Tea), agent mode, multi-agent workers
-  llm/            11 providers, auto-register registry, fallback chain, catalog
+  llm/            12 providers, auto-register registry, fallback chain, catalog
   server/         gRPC server with TLS, auth, metrics, and MCP
   operator/       Kubernetes Operator -- 17 CRDs, autonomous AIOps pipeline
   k8s/            Watcher (collectors, store, summarizer)

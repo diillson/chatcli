@@ -7,7 +7,7 @@
 <h1 align="center">ChatCLI</h1>
 <p align="center">
   <strong>A plataforma de IA unificada para terminal, servidor e Kubernetes.</strong><br>
-  <sub>11 provedores. 12 agentes autônomos. Um único binário.</sub>
+  <sub>12 provedores. 12 agentes autônomos. Um único binário.</sub>
 </p>
 
 <div align="center">
@@ -52,7 +52,7 @@
 
 | | |
 |---|---|
-| **Multi-provider de verdade** | 11 provedores de LLM com fallback automático, backoff exponencial e cooldown inteligente. |
+| **Multi-provider de verdade** | 12 provedores de LLM com fallback automático, backoff exponencial e cooldown inteligente. |
 | **Agentes autônomos** | 12 agentes especializados com motor ReAct (Reason + Act) e execução em paralelo. |
 | **Production-ready** | gRPC + TLS, JWT + RBAC, AES-256-GCM, rate limiting, audit logging, Prometheus metrics. |
 | **Kubernetes-native** | Operador com 17 CRDs e pipeline AIOps autônomo: 54+ ações de remediação automatizada. |
@@ -94,7 +94,7 @@ go build -ldflags "-X github.com/diillson/chatcli/version.Version=${VERSION}" -o
 Crie um arquivo `.env` na raiz ou exporte as variáveis:
 
 ```bash
-LLM_PROVIDER=OPENAI          # OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, COPILOT, OLLAMA, STACKSPOT
+LLM_PROVIDER=OPENAI          # OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, COPILOT, OLLAMA, STACKSPOT, OPENROUTER
 OPENAI_API_KEY=sk-xxx         # Chave do provider escolhido
 ```
 
@@ -112,6 +112,7 @@ OPENAI_API_KEY=sk-xxx         # Chave do provider escolhido
 | GitHub Copilot | `GITHUB_COPILOT_TOKEN` | `COPILOT_MODEL` | ou `/auth login github-copilot` |
 | GitHub Models | `GITHUB_TOKEN` | `GITHUB_MODELS_MODEL` | `GH_TOKEN`, `GITHUB_MODELS_TOKEN` |
 | StackSpot | `CLIENT_ID`, `CLIENT_KEY` | - | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
+| OpenRouter | `OPENROUTER_API_KEY` | - | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS` |
 | Ollama | - | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
 
 </details>
@@ -221,7 +222,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 
 ## Provedores suportados
 
-> 11 provedores com interface unificada. Fallback automático entre providers com classificação inteligente de erros.
+> 12 provedores com interface unificada. Fallback automático entre providers com classificação inteligente de erros.
 
 | Provider | Default Model | Tool Calling | Vision |
 |---|---|---|---|
@@ -234,12 +235,13 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 | **GitHub Copilot** | gpt-4o | Nativo | Sim |
 | **GitHub Models** | gpt-4o | Nativo | Sim |
 | **StackSpot AI** | StackSpotAI | - | - |
+| **OpenRouter** | openai/gpt-4o | Nativo | Sim |
 | **Ollama** | (local) | XML fallback | - |
 | **OpenAI Assistants** | gpt-4o | Assistants API | - |
 
 ```bash
 # Fallback chain configurável
-CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,ZAI,MINIMAX
+CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,ZAI,MINIMAX,OPENROUTER
 ```
 
 Classificação de erros (rate limit, timeout, auth, context overflow), backoff exponencial e cooldown por provider.
@@ -343,7 +345,7 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 
 | Feature | Descrição |
 |---|---|
-| **Tool calling nativo** | Chamadas estruturadas via API da OpenAI, Anthropic, Google, ZAI e MiniMax. Cache `ephemeral` para Anthropic. XML fallback automático para providers sem suporte nativo. |
+| **Tool calling nativo** | Chamadas estruturadas via API da OpenAI, Anthropic, Google, ZAI, MiniMax e OpenRouter. Cache `ephemeral` para Anthropic. XML fallback automático para providers sem suporte nativo. |
 | **MCP (Model Context Protocol)** | Integração com servidores MCP via stdio e SSE para contexto expandido. |
 | **Contextos persistentes** | `/context create`, `/context attach` — injeta projetos inteiros no system prompt com cache hints. |
 | **Bootstrap e Memoria** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + memoria de longo prazo com facts e decay. |
@@ -389,7 +391,7 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 ```
 chatcli/
   cli/            Interface TUI (Bubble Tea), modo agente, multi-agent workers
-  llm/            11 providers, registry auto-registro, fallback chain, catalog
+  llm/            12 providers, registry auto-registro, fallback chain, catalog
   server/         Servidor gRPC com TLS, JWT auth, metrics e MCP
   operator/       Kubernetes Operator — 17 CRDs, pipeline AIOps autônomo
   k8s/            Watcher (collectors, store, summarizer)
