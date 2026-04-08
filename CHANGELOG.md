@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.97.4](https://github.com/diillson/chatcli/compare/v1.97.3...v1.97.4) (2026-04-08)
+
+
+### Bug Fixes
+
+* **security:** upgrade Go stdlib to 1.26.2 to resolve 7 CVEs ([#763](https://github.com/diillson/chatcli/issues/763)) ([7fb650c](https://github.com/diillson/chatcli/commit/7fb650c12039632545276b6a65e690200b90f631))
+
 ## [1.97.3](https://github.com/diillson/chatcli/compare/v1.97.2...v1.97.3) (2026-04-07)
 
 
