@@ -105,6 +105,10 @@ func (ct *CostTracker) getTokenPricing(ctx context.Context, namespace, provider 
 		return tokenPricing{InputPerMillion: 0.3, OutputPerMillion: 1.2}
 	case provider == "COPILOT" || provider == "copilot":
 		return tokenPricing{InputPerMillion: 10.0, OutputPerMillion: 30.0}
+	case provider == "OPENROUTER" || provider == "openrouter":
+		// OpenRouter pricing varies by routed model; use conservative average.
+		// Override via ConfigMap chatcli-cost-config for accurate per-model pricing.
+		return tokenPricing{InputPerMillion: 2.0, OutputPerMillion: 8.0}
 	default:
 		return tokenPricing{InputPerMillion: 1.0, OutputPerMillion: 3.0}
 	}

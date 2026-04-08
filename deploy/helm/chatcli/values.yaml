@@ -34,7 +34,7 @@ tls:
 
 # LLM Provider configuration
 llm:
-  # Default provider: OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT
+  # Default provider: OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, OPENROUTER
   provider: ""
   model: ""
 
@@ -99,6 +99,8 @@ secrets:
   stackspotAgentId: ""
   # GitHub Copilot
   githubCopilotToken: ""
+  # OpenRouter
+  openrouterApiKey: ""
 
 # GitHub Copilot configuration (if using COPILOT provider)
 # Authenticate via /auth login github-copilot (Device Flow OAuth)
