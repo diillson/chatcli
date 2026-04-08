@@ -2,7 +2,7 @@
 # Must be built from the repo root: docker build -f operator/Dockerfile .
 # This is required because go.mod uses: replace github.com/diillson/chatcli => ../
 
-FROM golang:1.26 AS builder
+FROM golang:1.26.2 AS builder
 
 WORKDIR /workspace
 

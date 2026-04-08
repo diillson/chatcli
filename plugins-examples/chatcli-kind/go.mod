@@ -1,6 +1,6 @@
 module github.com/diillson/chatcli/plugins-examples/chatcli-kind
 
-go 1.25.4
+go 1.25.9
 
 require (
 	k8s.io/apimachinery v0.34.2
