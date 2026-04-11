@@ -287,8 +287,8 @@ func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (stri
 		}
 
 		var event struct {
-			Type     string `json:"type"`
-			Delta    string `json:"delta"`
+			Type     string          `json:"type"`
+			Delta    string          `json:"delta"`
 			Response json.RawMessage `json:"response,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {

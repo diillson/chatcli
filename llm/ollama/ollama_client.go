@@ -147,11 +147,11 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 				Role    string `json:"role"`
 				Content string `json:"content"`
 			} `json:"message"`
-			Done             bool   `json:"done"`
-			Error            string `json:"error"`
-			EvalCount        int    `json:"eval_count"`
-			PromptEvalCount  int    `json:"prompt_eval_count"`
-			DoneReason       string `json:"done_reason"`
+			Done            bool   `json:"done"`
+			Error           string `json:"error"`
+			EvalCount       int    `json:"eval_count"`
+			PromptEvalCount int    `json:"prompt_eval_count"`
+			DoneReason      string `json:"done_reason"`
 		}
 
 		// Use Unmarshal com bodyBytes

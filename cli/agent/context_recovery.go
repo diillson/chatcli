@@ -54,13 +54,13 @@ func DefaultContextRecoveryConfig() ContextRecoveryConfig {
 	}
 
 	if v := os.Getenv("CHATCLI_MAX_RECOVERY_ATTEMPTS"); v != "" {
-		fmt.Sscanf(v, "%d", &cfg.MaxRecoveryAttempts)
+		_, _ = fmt.Sscanf(v, "%d", &cfg.MaxRecoveryAttempts)
 	}
 	if v := os.Getenv("CHATCLI_MAX_TOKEN_ESCALATIONS"); v != "" {
-		fmt.Sscanf(v, "%d", &cfg.MaxTokenEscalations)
+		_, _ = fmt.Sscanf(v, "%d", &cfg.MaxTokenEscalations)
 	}
 	if v := os.Getenv("CHATCLI_EMERGENCY_KEEP_MESSAGES"); v != "" {
-		fmt.Sscanf(v, "%d", &cfg.EmergencyKeepMessages)
+		_, _ = fmt.Sscanf(v, "%d", &cfg.EmergencyKeepMessages)
 	}
 
 	return cfg

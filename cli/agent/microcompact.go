@@ -59,18 +59,12 @@ func DefaultMicrocompactConfig() MicrocompactConfig {
 		MinContentSize:       3000,
 	}
 	if v := os.Getenv("CHATCLI_MICROCOMPACT_TRUNCATE_TURNS"); v != "" {
-		fmt.Sscanf(v, "%d", &cfg.TurnsBeforeTruncate)
+		_, _ = fmt.Sscanf(v, "%d", &cfg.TurnsBeforeTruncate)
 	}
 	if v := os.Getenv("CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS"); v != "" {
-		fmt.Sscanf(v, "%d", &cfg.TurnsBeforeSummarize)
+		_, _ = fmt.Sscanf(v, "%d", &cfg.TurnsBeforeSummarize)
 	}
 	return cfg
-}
-
-// compactableToolPatterns are tool call IDs or content patterns that indicate
-// a read-only result safe for compaction.
-var compactableRoles = map[string]bool{
-	"tool": true,
 }
 
 // MicrocompactReport describes what the microcompact did.
@@ -91,12 +85,6 @@ func ApplyMicrocompact(history []models.Message, currentTurn int, config Microco
 
 	if len(history) == 0 || currentTurn < config.TurnsBeforeTruncate {
 		return history, report
-	}
-
-	// Identify turns: each assistant message with tool calls starts a new turn
-	type turn struct {
-		assistantIdx int
-		turnNumber   int
 	}
 
 	turnNumber := 0

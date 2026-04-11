@@ -60,11 +60,11 @@ var readOnlyAllowlist = []ReadOnlyCommand{
 	{Name: "grep", UnsafeFlags: []string{}},
 	{Name: "egrep", UnsafeFlags: []string{}},
 	{Name: "fgrep", UnsafeFlags: []string{}},
-	{Name: "rg", UnsafeFlags: []string{}},    // ripgrep
-	{Name: "ag", UnsafeFlags: []string{}},    // silversearcher
-	{Name: "awk", UnsafeFlags: []string{}},   // read-only by default
+	{Name: "rg", UnsafeFlags: []string{}},                    // ripgrep
+	{Name: "ag", UnsafeFlags: []string{}},                    // silversearcher
+	{Name: "awk", UnsafeFlags: []string{}},                   // read-only by default
 	{Name: "sed", UnsafeFlags: []string{"-i", "--in-place"}}, // -i modifies in-place
-	{Name: "sort", UnsafeFlags: []string{"-o"}}, // -o writes to file
+	{Name: "sort", UnsafeFlags: []string{"-o"}},              // -o writes to file
 	{Name: "uniq", UnsafeFlags: []string{}},
 	{Name: "cut", UnsafeFlags: []string{}},
 	{Name: "tr", UnsafeFlags: []string{}},
@@ -212,7 +212,7 @@ func containsDangerousPipeTarget(cmdLine string) bool {
 		"rm": true, "dd": true, "mkfs": true, "tee": true,
 		"sh": true, "bash": true, "zsh": true, "eval": true,
 		"xargs": true, // xargs can execute anything
-		"sudo": true,
+		"sudo":  true,
 	}
 
 	cmd := parts[0]

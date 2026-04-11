@@ -38,7 +38,7 @@ var (
 func getResultDir() string {
 	resultDirOnce.Do(func() {
 		dir := filepath.Join(os.TempDir(), "chatcli-tool-results")
-		os.MkdirAll(dir, 0o700)
+		_ = os.MkdirAll(dir, 0o700)
 		resultDir = dir
 	})
 	return resultDir

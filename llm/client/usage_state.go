@@ -26,9 +26,9 @@ import (
 //	c.StoreUsage(&models.UsageInfo{...})
 //	c.StoreStopReason("end_turn")
 type UsageState struct {
-	mu         sync.RWMutex
-	lastUsage  *models.UsageInfo
-	lastStop   string
+	mu        sync.RWMutex
+	lastUsage *models.UsageInfo
+	lastStop  string
 }
 
 // StoreUsage saves usage info from the most recent API response.

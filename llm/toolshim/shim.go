@@ -116,10 +116,7 @@ func (s *Shim) ParseToolResponse(text string, tools []models.ToolDefinition) []m
 	var result []models.ToolCall
 	for i, tc := range parsed {
 		// Normalize the tool name — it might be "read_file" or "@coder" or just "read"
-		name := tc.Name
-		if strings.HasPrefix(name, "@") {
-			name = strings.TrimPrefix(name, "@")
-		}
+		name := strings.TrimPrefix(tc.Name, "@")
 
 		// Try to match against known tool definitions
 		matchedName := matchToolName(name, tc.Args, tools)
@@ -131,7 +128,7 @@ func (s *Shim) ParseToolResponse(text string, tools []models.ToolDefinition) []m
 		args := make(map[string]interface{})
 		normalized, ok := agent.NormalizeToolArgs(matchedName, tc.Args)
 		if ok {
-			json.Unmarshal([]byte(normalized), &args)
+			_ = json.Unmarshal([]byte(normalized), &args)
 		}
 
 		result = append(result, models.ToolCall{

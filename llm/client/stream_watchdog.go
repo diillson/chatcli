@@ -36,8 +36,7 @@ func DefaultWatchdogConfig() WatchdogConfig {
 	idle := 90 * time.Second
 	if v := os.Getenv("CHATCLI_STREAM_IDLE_TIMEOUT_SECONDS"); v != "" {
 		var secs int
-		fmt.Sscanf(v, "%d", &secs)
-		if secs > 0 {
+		if _, err := fmt.Sscanf(v, "%d", &secs); err == nil && secs > 0 {
 			idle = time.Duration(secs) * time.Second
 		}
 	}

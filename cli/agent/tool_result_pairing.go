@@ -72,9 +72,9 @@ func EnsureToolResultPairing(history []models.Message, logger *zap.Logger) ([]mo
 		name     string
 	}
 
-	allToolUses := make(map[string]toolUseInfo)   // id → info (first occurrence)
-	allToolResults := make(map[string]int)         // toolCallID → message index
-	seenToolUseIDs := make(map[string]bool)        // for dedup detection
+	allToolUses := make(map[string]toolUseInfo) // id → info (first occurrence)
+	allToolResults := make(map[string]int)      // toolCallID → message index
+	seenToolUseIDs := make(map[string]bool)     // for dedup detection
 
 	for i, msg := range history {
 		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {

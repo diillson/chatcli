@@ -449,32 +449,32 @@ var defaultFieldForTool = map[string]string{
 	"clean_backups":  "dir",
 
 	// Engine subcommand names (used in XML mode)
-	"read":       "file",
-	"write":      "file",
-	"patch":      "file",
-	"tree":       "dir",
-	"search":     "term",
-	"exec":       "cmd",
-	"git-status": "dir",
-	"git-diff":   "dir",
-	"git-log":    "dir",
-	"git-changed":"dir",
-	"git-branch": "dir",
-	"test":       "dir",
-	"rollback":   "file",
-	"clean":      "dir",
+	"read":        "file",
+	"write":       "file",
+	"patch":       "file",
+	"tree":        "dir",
+	"search":      "term",
+	"exec":        "cmd",
+	"git-status":  "dir",
+	"git-diff":    "dir",
+	"git-log":     "dir",
+	"git-changed": "dir",
+	"git-branch":  "dir",
+	"test":        "dir",
+	"rollback":    "file",
+	"clean":       "dir",
 
 	// Generic aliases
-	"@coder":  "cmd",
-	"coder":   "cmd",
-	"bash":    "command",
-	"shell":   "command",
-	"Bash":    "command",
-	"Read":    "file_path",
-	"Write":   "file_path",
-	"Glob":    "pattern",
-	"Grep":    "pattern",
-	"Edit":    "file_path",
+	"@coder": "cmd",
+	"coder":  "cmd",
+	"bash":   "command",
+	"shell":  "command",
+	"Bash":   "command",
+	"Read":   "file_path",
+	"Write":  "file_path",
+	"Glob":   "pattern",
+	"Grep":   "pattern",
+	"Edit":   "file_path",
 }
 
 // WrapPlainStringForTool wraps a plain string value into the appropriate JSON
@@ -546,8 +546,5 @@ func looksLikeCLIArgs(s string) bool {
 		"git-status": true, "git-diff": true, "git-log": true,
 		"git-changed": true, "git-branch": true,
 	}
-	if knownSubcmds[strings.ToLower(parts[0])] {
-		return true
-	}
-	return false
+	return knownSubcmds[strings.ToLower(parts[0])]
 }

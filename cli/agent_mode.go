@@ -773,7 +773,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 	// Context recovery state for the session
 	contextRecovery := agent.NewContextRecovery(agent.DefaultContextRecoveryConfig(), a.logger)
-	currentMaxTokens := 0 // 0 = use provider default
+	currentMaxTokens := 0           // 0 = use provider default
 	providerMaxTokensCap := 128_000 // conservative default; providers may support more
 
 	// --- LOOP PRINCIPAL DO AGENTE (ReAct) ---

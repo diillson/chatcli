@@ -44,7 +44,7 @@ type ModelUsageRecord struct {
 	CacheReadTokens     int64 `json:"cache_read_tokens,omitempty"`
 
 	// Tracking
-	Requests   int  `json:"requests"`
+	Requests    int  `json:"requests"`
 	HasRealData bool `json:"has_real_data"` // true if at least one call returned API usage
 
 	// Computed cost (in USD)
@@ -56,12 +56,12 @@ type ModelUsageRecord struct {
 
 // SessionCostData is the serializable snapshot of a cost tracking session.
 type SessionCostData struct {
-	SessionID    string                      `json:"session_id"`
-	StartTime    time.Time                   `json:"start_time"`
-	LastUpdate   time.Time                   `json:"last_update"`
-	ModelUsage   map[string]*ModelUsageRecord `json:"model_usage"` // key: "provider:model"
-	TotalCostUSD float64                     `json:"total_cost_usd"`
-	TotalRequests int                        `json:"total_requests"`
+	SessionID     string                       `json:"session_id"`
+	StartTime     time.Time                    `json:"start_time"`
+	LastUpdate    time.Time                    `json:"last_update"`
+	ModelUsage    map[string]*ModelUsageRecord `json:"model_usage"` // key: "provider:model"
+	TotalCostUSD  float64                      `json:"total_cost_usd"`
+	TotalRequests int                          `json:"total_requests"`
 }
 
 // CostTracker tracks token usage and estimated cost for the current session,
@@ -70,9 +70,9 @@ type SessionCostData struct {
 type CostTracker struct {
 	mu sync.RWMutex
 
-	sessionID   string
+	sessionID    string
 	sessionStart time.Time
-	lastUpdate  time.Time
+	lastUpdate   time.Time
 
 	// Per-model usage: key is "provider:model"
 	modelUsage map[string]*ModelUsageRecord
@@ -86,7 +86,7 @@ type CostTracker struct {
 	totalCostUSD          float64
 
 	// Budget enforcement
-	budgetLimitUSD float64 // 0 = no limit
+	budgetLimitUSD   float64 // 0 = no limit
 	budgetWarningPct float64 // fraction (0.8 = 80%)
 
 	// For backward compat display
@@ -98,20 +98,20 @@ type CostTracker struct {
 func NewCostTracker() *CostTracker {
 	budgetLimit := 0.0
 	if v := os.Getenv("CHATCLI_SESSION_BUDGET_USD"); v != "" {
-		fmt.Sscanf(v, "%f", &budgetLimit)
+		_, _ = fmt.Sscanf(v, "%f", &budgetLimit)
 	}
 
 	warningPct := 0.80
 	if v := os.Getenv("CHATCLI_BUDGET_WARNING_PCT"); v != "" {
-		fmt.Sscanf(v, "%f", &warningPct)
+		_, _ = fmt.Sscanf(v, "%f", &warningPct)
 	}
 
 	return &CostTracker{
-		sessionID:      fmt.Sprintf("%d", time.Now().UnixNano()),
-		sessionStart:   time.Now(),
-		lastUpdate:     time.Now(),
-		modelUsage:     make(map[string]*ModelUsageRecord),
-		budgetLimitUSD: budgetLimit,
+		sessionID:        fmt.Sprintf("%d", time.Now().UnixNano()),
+		sessionStart:     time.Now(),
+		lastUpdate:       time.Now(),
+		modelUsage:       make(map[string]*ModelUsageRecord),
+		budgetLimitUSD:   budgetLimit,
 		budgetWarningPct: warningPct,
 	}
 }

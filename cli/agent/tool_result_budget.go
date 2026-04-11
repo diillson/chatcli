@@ -45,10 +45,10 @@ var (
 
 func init() {
 	if v := os.Getenv("CHATCLI_TOOL_RESULT_BUDGET_CHARS"); v != "" {
-		fmt.Sscanf(v, "%d", &DefaultTurnBudgetChars)
+		_, _ = fmt.Sscanf(v, "%d", &DefaultTurnBudgetChars)
 	}
 	if v := os.Getenv("CHATCLI_TOOL_RESULT_MAX_CHARS"); v != "" {
-		fmt.Sscanf(v, "%d", &DefaultPerResultMaxChars)
+		_, _ = fmt.Sscanf(v, "%d", &DefaultPerResultMaxChars)
 	}
 }
 
