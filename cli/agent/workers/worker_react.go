@@ -220,7 +220,6 @@ func RunWorkerReAct(
 			msg     string
 		}
 		validated := make([]validatedTC, 0, len(resolved))
-		allReadOnly := true
 
 		for i, rtc := range resolved {
 			if blockedCmds[rtc.Subcmd] >= maxBlockedRetries {
@@ -241,16 +240,15 @@ func RunWorkerReAct(
 				blockedCmds[rtc.Subcmd]++
 				continue
 			}
-			if isWriteCommand(rtc.Subcmd) {
-				allReadOnly = false
-			}
 			validated = append(validated, validatedTC{index: i, rtc: rtc})
 		}
 
 		var runnable []validatedTC
+		var runnableResolved []resolvedToolCall
 		for _, v := range validated {
 			if !v.blocked {
 				runnable = append(runnable, v)
+				runnableResolved = append(runnableResolved, v.rtc)
 			}
 		}
 
@@ -264,7 +262,10 @@ func RunWorkerReAct(
 		}
 		results := make([]execResult, len(validated))
 
-		canParallelize := allReadOnly && len(runnable) > 1
+		// Use the concurrency classifier for smarter parallelization.
+		// This allows file-scoped writes (write/patch) to different files
+		// to run in parallel, not just read-only commands.
+		canParallelize, _, _ := CanParallelizeToolCalls(runnableResolved)
 		if canParallelize {
 			logger.Info("Executing tool calls in parallel",
 				zap.Int("count", len(runnable)),
@@ -315,9 +316,8 @@ func RunWorkerReAct(
 			}
 
 			output := outBuf.String() + errBuf.String()
-			if len(output) > MaxWorkerOutputBytes {
-				output = output[:MaxWorkerOutputBytes] + "\n... [output truncated]"
-			}
+			// Use smart truncation: large results saved to disk with inline preview
+			output = TruncateToolResult(v.rtc.Subcmd, output)
 
 			record := ToolCallRecord{Name: v.rtc.Subcmd, Args: v.rtc.RawArgs, Output: output}
 			hasFailed := false

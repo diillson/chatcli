@@ -34,7 +34,14 @@ type XAIClient struct {
 	maxAttempts int
 	backoff     time.Duration
 	apiURL      string
+	usageState  client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *XAIClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *XAIClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewXAIClient cria uma nova instância de XAIClient.
 func NewXAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *XAIClient {
@@ -149,6 +156,15 @@ func (c *XAIClient) processResponse(resp *http.Response) (string, error) {
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		c.logger.Error(i18n.T("llm.error.decode_response_json_for", "xAI"), zap.Error(err), zap.Int("body_size", len(bodyBytes)))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "xAI"), err)
+	}
+
+	// Extract usage and stop reason
+	var rawResult map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &rawResult); err == nil {
+		if usage := client.ParseOpenAIUsage(rawResult); usage != nil {
+			c.usageState.StoreUsage(usage)
+		}
+		c.usageState.StoreStopReason(client.ParseOpenAIFinishReason(rawResult))
 	}
 
 	// Verificar se a API retornou um erro explícito no corpo (mesmo com status 200)

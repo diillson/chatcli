@@ -528,7 +528,8 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 
 	// Track cost for agent mode initial call
 	if a.cli.costTracker != nil {
-		a.cli.costTracker.EstimateAndRecord(a.cli.Provider, a.cli.Model, len(enrichedQuery), len(aiResponse))
+		usage := llmclient.GetUsageOrEstimate(a.cli.Client, len(enrichedQuery), len(aiResponse))
+		a.cli.costTracker.RecordRealUsage(a.cli.Provider, a.cli.Model, usage)
 	}
 
 	commandBlocks := a.extractCommandBlocks(aiResponse)
@@ -770,6 +771,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		renderer.RenderMarkdownTimelineEvent(icon, title, rendered, color)
 	}
 
+	// Context recovery state for the session
+	contextRecovery := agent.NewContextRecovery(agent.DefaultContextRecoveryConfig(), a.logger)
+	currentMaxTokens := 0           // 0 = use provider default
+	providerMaxTokensCap := 128_000 // conservative default; providers may support more
+
 	// --- LOOP PRINCIPAL DO AGENTE (ReAct) ---
 	for turn := 0; turn < maxTurns; turn++ {
 		// Verificar cancelamento pelo usuário (Ctrl+C)
@@ -815,6 +821,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		turnHistory := buildTurnHistoryWithAnchor()
 
+		// Validate tool result pairing and enforce budget before sending to API
+		turnHistory, pairingReport := agent.EnsureToolResultPairing(turnHistory, a.logger)
+		if pairingReport.HasRepairs() {
+			a.logger.Info("Tool result pairing repaired before API call",
+				zap.Int("synthetic_results", pairingReport.SyntheticResultsInjected),
+				zap.Int("orphans_removed", pairingReport.OrphanResultsRemoved))
+		}
+		turnHistory, _ = agent.EnforceToolResultBudget(turnHistory, a.logger)
+
 		// Detect native function calling support
 		var nativeToolCalls []models.ToolCall
 		toolAwareClient, canUseNativeTools := llmclient.AsToolAware(a.cli.Client)
@@ -822,40 +837,48 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			canUseNativeTools = false
 		}
 
-		// Get tool definitions for native mode (coder mode only)
+		// Get tool definitions for native mode.
+		// In coder mode: coder tools + plugin tools (websearch, webfetch)
+		// In agent mode: plugin tools only (websearch, webfetch)
 		var nativeToolDefs []models.ToolDefinition
-		if canUseNativeTools && a.isCoderMode {
-			nativeToolDefs = workers.CoderToolDefinitions(nil) // all commands
+		if canUseNativeTools {
+			if a.isCoderMode {
+				nativeToolDefs = workers.CoderToolDefinitions(nil)
+			}
+			// Always include plugin tools (websearch, webfetch) for all modes.
+			// This eliminates phantom tool call detection issues from XML parsing.
+			nativeToolDefs = append(nativeToolDefs, workers.PluginToolDefinitions()...)
 		}
 
 		// Chamada à LLM (native tools or text)
 		var aiResponse string
 		var err error
+		var llmResp *models.LLMResponse
 
 		if canUseNativeTools && len(nativeToolDefs) > 0 {
-			var llmResp *models.LLMResponse
-			llmResp, err = toolAwareClient.SendPromptWithTools(ctx, "", turnHistory, nativeToolDefs, 0)
+			llmResp, err = toolAwareClient.SendPromptWithTools(ctx, "", turnHistory, nativeToolDefs, currentMaxTokens)
 			if a.cli.refreshClientOnAuthError(err) {
-				llmResp, err = toolAwareClient.SendPromptWithTools(ctx, "", turnHistory, nativeToolDefs, 0)
+				llmResp, err = toolAwareClient.SendPromptWithTools(ctx, "", turnHistory, nativeToolDefs, currentMaxTokens)
 			}
 			if err == nil && llmResp != nil {
 				aiResponse = llmResp.Content
 				nativeToolCalls = llmResp.ToolCalls
 			}
 		} else {
-			aiResponse, err = a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
+			aiResponse, err = a.cli.Client.SendPrompt(ctx, "", turnHistory, currentMaxTokens)
 			if a.cli.refreshClientOnAuthError(err) {
-				aiResponse, err = a.cli.Client.SendPrompt(ctx, "", turnHistory, 0)
+				aiResponse, err = a.cli.Client.SendPrompt(ctx, "", turnHistory, currentMaxTokens)
 			}
 		}
 
-		// Track cost for agent mode turn
+		// Track cost for agent mode turn — prefer real API usage
 		if a.cli.costTracker != nil && err == nil {
 			inputChars := 0
 			for _, m := range turnHistory {
 				inputChars += len(m.Content)
 			}
-			a.cli.costTracker.EstimateAndRecord(a.cli.Provider, a.cli.Model, inputChars, len(aiResponse))
+			usage := llmclient.GetUsageOrEstimate(a.cli.Client, inputChars, len(aiResponse))
+			a.cli.costTracker.RecordRealUsage(a.cli.Provider, a.cli.Model, usage)
 		}
 
 		// Para o timer e obtém a duração
@@ -877,7 +900,45 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if errors.Is(err, context.Canceled) {
 				return err
 			}
+
+			// Context-too-long recovery: try compaction + retry before giving up
+			if agent.IsContextTooLongError(err) && contextRecovery.CanRecoverContextOverflow() {
+				a.logger.Warn("Context too long — attempting recovery",
+					zap.Int("turn", turn+1), zap.Error(err))
+
+				recoveredHistory, recovered := contextRecovery.RecoverContextOverflow(a.cli.history)
+				if recovered {
+					a.cli.history = recoveredHistory
+					continue // retry the turn with compacted history
+				}
+			}
+
 			return fmt.Errorf("erro ao obter resposta da IA no turno %d: %w", turn+1, err)
+		}
+
+		// Max-output-tokens recovery: detect truncation and escalate
+		stopReason := ""
+		if llmResp != nil && llmResp.StopReason != "" {
+			stopReason = llmResp.StopReason
+		} else if src, ok := llmclient.AsStopReasonAware(a.cli.Client); ok {
+			stopReason = src.LastStopReason()
+		}
+		if stopReason == "max_tokens" || stopReason == "length" {
+			effectiveMax := currentMaxTokens
+			if effectiveMax <= 0 {
+				effectiveMax = 4096 // common default
+			}
+			if newMax, ok := contextRecovery.MaxTokensEscalation(effectiveMax, providerMaxTokensCap); ok {
+				currentMaxTokens = newMax
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "assistant",
+					Content: aiResponse,
+				})
+				a.cli.history = append(a.cli.history, agent.ContinuationMessage())
+				a.logger.Info("Max tokens hit — escalated and continuing",
+					zap.Int("new_max_tokens", currentMaxTokens))
+				continue // retry with higher limit
+			}
 		}
 
 		// Persistir a resposta no histórico "real"
@@ -894,21 +955,31 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Parsear Tool Calls — native ou XML fallback
 		var toolCalls []agent.ToolCall
 		if len(nativeToolCalls) > 0 {
-			// Convert native tool calls to agent.ToolCall format
+			// Convert native tool calls to agent.ToolCall format.
+			// Plugin tools (web_search, web_fetch) map to their respective plugins.
+			// Coder tools (read_file, write_file, etc.) map to @coder.
 			for _, ntc := range nativeToolCalls {
-				subcmd, _ := workers.NativeToolNameToSubcmd(ntc.Name)
-				flags := workers.NativeToolArgsToFlags(subcmd, ntc.Arguments)
-				// Build CLI-style args string for the existing execution pipeline
-				argsJSON, _ := json.Marshal(map[string]interface{}{
-					"cmd":  subcmd,
-					"args": ntc.Arguments,
-				})
-				toolCalls = append(toolCalls, agent.ToolCall{
-					Name: "@coder",
-					Args: string(argsJSON),
-					Raw:  string(argsJSON),
-				})
-				_ = flags // flags are rebuilt downstream by parseToolArgsWithJSON
+				if pluginName, pluginArgs, isPlugin := workers.ResolveNativePluginTool(ntc.Name, ntc.Arguments); isPlugin {
+					// Plugin tool: map to the plugin's CLI args format
+					argsStr := strings.Join(pluginArgs, " ")
+					toolCalls = append(toolCalls, agent.ToolCall{
+						Name: pluginName,
+						Args: argsStr,
+						Raw:  argsStr,
+					})
+				} else {
+					// Coder tool: map to @coder with JSON args
+					subcmd, _ := workers.NativeToolNameToSubcmd(ntc.Name)
+					argsJSON, _ := json.Marshal(map[string]interface{}{
+						"cmd":  subcmd,
+						"args": ntc.Arguments,
+					})
+					toolCalls = append(toolCalls, agent.ToolCall{
+						Name: "@coder",
+						Args: string(argsJSON),
+						Raw:  string(argsJSON),
+					})
+				}
 			}
 		} else {
 			var parseErr error

@@ -68,30 +68,110 @@ func (pm *PolicyManager) Check(toolName, args string) Action {
 	} else if sub != "" {
 		fullCommand = strings.TrimSpace(fmt.Sprintf("%s %s", toolName, sub))
 	} else {
-		// Cannot determine subcommand — use just toolName so no allow rule
-		// like "@coder read" matches. Falls through to ActionAsk (safe default).
 		fullCommand = strings.TrimSpace(toolName)
 	}
 
-	var bestMatch Rule
-	matched := false
+	// Classify all matching rules by action type
+	var bestDeny Rule
+	hasDeny := false
+	var bestAllow Rule
+	hasAllow := false
+	var bestAsk Rule
+	hasAsk := false
 
 	for _, rule := range pm.Rules {
-		if matchesWithBoundary(fullCommand, rule.Pattern) {
-			if !matched || len(rule.Pattern) > len(bestMatch.Pattern) {
-				bestMatch = rule
-				matched = true
+		if !matchesWithBoundary(fullCommand, rule.Pattern) {
+			continue
+		}
+		switch rule.Action {
+		case ActionDeny:
+			if !hasDeny || len(rule.Pattern) > len(bestDeny.Pattern) {
+				bestDeny = rule
+				hasDeny = true
+			}
+		case ActionAllow:
+			if !hasAllow || len(rule.Pattern) > len(bestAllow.Pattern) {
+				bestAllow = rule
+				hasAllow = true
+			}
+		case ActionAsk:
+			if !hasAsk || len(rule.Pattern) > len(bestAsk.Pattern) {
+				bestAsk = rule
+				hasAsk = true
 			}
 		}
 	}
 
-	if matched {
-		pm.lastRule = &bestMatch
-		return bestMatch.Action
+	// Priority 1: Deny rules always win (strictest)
+	if hasDeny {
+		pm.lastRule = &bestDeny
+		return ActionDeny
+	}
+
+	// Priority 2: Safety bypass immunity — certain operations ALWAYS require
+	// confirmation, regardless of any allow rules. Deny rules (above) still
+	// take precedence since they're more restrictive than ask.
+	if IsSafetyImmune(toolName, args) {
+		pm.lastRule = nil
+		return ActionAsk
+	}
+
+	// Priority 3: If we have both allow and ask, the more specific pattern wins
+	if hasAllow && hasAsk {
+		if len(bestAsk.Pattern) > len(bestAllow.Pattern) {
+			pm.lastRule = &bestAsk
+			return ActionAsk
+		}
+		pm.lastRule = &bestAllow
+		return ActionAllow
+	}
+
+	if hasAsk {
+		pm.lastRule = &bestAsk
+		return ActionAsk
+	}
+
+	if hasAllow {
+		pm.lastRule = &bestAllow
+		return ActionAllow
+	}
+
+	// Priority 4: No explicit rule — check if it's a read-only exec command
+	if sub == "exec" {
+		_, cmdNormalized := NormalizeCoderArgs(args)
+		shellCmd := extractShellCommand(cmdNormalized)
+		if shellCmd != "" && IsReadOnlyCommand(shellCmd) {
+			pm.lastRule = nil
+			return ActionAllow
+		}
 	}
 
 	pm.lastRule = nil
 	return ActionAsk
+}
+
+// extractShellCommand extracts the shell command from normalized coder exec args.
+func extractShellCommand(normalized string) string {
+	// normalized is like: "exec --cmd ls -la --dir /tmp"
+	// We need the value after --cmd
+	fields := strings.Fields(normalized)
+	for i, f := range fields {
+		if f == "--cmd" && i+1 < len(fields) {
+			// Everything after --cmd until the next -- flag is the command
+			var cmd strings.Builder
+			for j := i + 1; j < len(fields); j++ {
+				if strings.HasPrefix(fields[j], "--") && !strings.ContainsAny(fields[j], "=") {
+					break
+				}
+				if cmd.Len() > 0 {
+					cmd.WriteByte(' ')
+				}
+				cmd.WriteString(fields[j])
+			}
+			return cmd.String()
+		}
+	}
+	return ""
 }
 
 func (pm *PolicyManager) AddRule(pattern string, action Action) error {

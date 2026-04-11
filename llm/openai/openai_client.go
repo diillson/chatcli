@@ -6,6 +6,7 @@
 package openai
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -35,7 +36,14 @@ type OpenAIClient struct {
 	client      *http.Client
 	maxAttempts int
 	backoff     time.Duration
+	usageState  client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *OpenAIClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *OpenAIClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewOpenAIClient cria uma nova instância de OpenAIClient.
 func NewOpenAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenAIClient {
@@ -160,11 +168,16 @@ func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	var result map[string]interface{}
-	// CORREÇÃO AQUI: Use Unmarshal com bodyBytes
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		c.logger.Error(i18n.T("llm.error.decode_response_for", "OpenAI"), zap.Error(err))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenAI"), err)
 	}
+
+	// Extract usage and stop reason
+	if usage := client.ParseOpenAIUsage(result); usage != nil {
+		c.usageState.StoreUsage(usage)
+	}
+	c.usageState.StoreStopReason(client.ParseOpenAIFinishReason(result))
 
 	choices, ok := result["choices"].([]interface{})
 	if !ok || len(choices) == 0 {
@@ -258,4 +271,115 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 
 	c.logger.Info(i18n.T("llm.info.fetched_models", "OpenAI"), zap.Int("count", len(models)))
 	return models, nil
+}
+
+// SupportsStreaming returns true — OpenAI supports SSE streaming.
+func (c *OpenAIClient) SupportsStreaming() bool {
+	return true
+}
+
+// SendPromptStream sends a prompt and returns a channel of streaming chunks.
+func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, history []models.Message, maxTokens int) (<-chan client.StreamChunk, error) {
+	effectiveMaxTokens := maxTokens
+	if effectiveMaxTokens <= 0 {
+		effectiveMaxTokens = c.getMaxTokens()
+	}
+
+	messages := []map[string]string{}
+	for _, msg := range history {
+		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		switch role {
+		case "system", "user", "assistant":
+		default:
+			role = "user"
+		}
+		messages = append(messages, map[string]string{"role": role, "content": msg.Content})
+	}
+	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+		if strings.TrimSpace(prompt) != "" {
+			messages = append(messages, map[string]string{"role": "user", "content": prompt})
+		}
+	}
+
+	payload := map[string]interface{}{
+		"model":      c.model,
+		"messages":   messages,
+		"max_tokens": effectiveMaxTokens,
+		"stream":     true,
+	}
+
+	jsonValue, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal stream request: %w", err)
+	}
+
+	resp, err := c.sendRequest(ctx, jsonValue)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(raw))}
+	}
+
+	chunks := make(chan client.StreamChunk, 64)
+
+	go func() {
+		defer close(chunks)
+		defer func() { _ = resp.Body.Close() }()
+
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				chunks <- client.StreamChunk{
+					Done:       true,
+					Usage:      c.usageState.LastUsage(),
+					StopReason: c.usageState.LastStopReason(),
+				}
+				return
+			}
+
+			var evt map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &evt); err != nil {
+				continue
+			}
+
+			// Extract text delta
+			if choices, ok := evt["choices"].([]interface{}); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]interface{}); ok {
+					if delta, ok := choice["delta"].(map[string]interface{}); ok {
+						if content, ok := delta["content"].(string); ok && content != "" {
+							chunks <- client.StreamChunk{Text: content}
+						}
+					}
+					if reason, ok := choice["finish_reason"].(string); ok && reason != "" {
+						c.usageState.StoreStopReason(reason)
+					}
+				}
+			}
+
+			// Extract usage (some OpenAI models include it in the final chunk)
+			if usage := client.ParseOpenAIUsage(evt); usage != nil {
+				c.usageState.StoreUsage(usage)
+			}
+		}
+
+		// Scanner finished without [DONE]
+		chunks <- client.StreamChunk{
+			Done:       true,
+			Usage:      c.usageState.LastUsage(),
+			StopReason: c.usageState.LastStopReason(),
+		}
+	}()
+
+	return chunks, nil
 }

@@ -33,7 +33,14 @@ type Client struct {
 	httpClient  *http.Client
 	maxAttempts int
 	backoff     time.Duration
+	usageState  client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *Client) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *Client) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewClient cria uma nova instância de Client para Ollama.
 // Agora sem fallback interno: usa apenas os params passados (vindos do manager/ENVs).
@@ -140,8 +147,11 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 				Role    string `json:"role"`
 				Content string `json:"content"`
 			} `json:"message"`
-			Done  bool   `json:"done"`
-			Error string `json:"error"`
+			Done            bool   `json:"done"`
+			Error           string `json:"error"`
+			EvalCount       int    `json:"eval_count"`
+			PromptEvalCount int    `json:"prompt_eval_count"`
+			DoneReason      string `json:"done_reason"`
 		}
 
 		// Use Unmarshal com bodyBytes
@@ -152,6 +162,20 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		if result.Error != "" {
 			return "", fmt.Errorf("%s", i18n.T("llm.ollama.api_error", result.Error))
 		}
+
+		// Extract usage from Ollama's custom format
+		if result.EvalCount > 0 || result.PromptEvalCount > 0 {
+			c.usageState.StoreUsage(&models.UsageInfo{
+				PromptTokens:     result.PromptEvalCount,
+				CompletionTokens: result.EvalCount,
+				TotalTokens:      result.PromptEvalCount + result.EvalCount,
+				IsReal:           true,
+			})
+		}
+		if result.DoneReason != "" {
+			c.usageState.StoreStopReason(result.DoneReason)
+		}
+
 		return result.Message.Content, nil
 	})
 

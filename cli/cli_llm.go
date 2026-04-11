@@ -314,62 +314,96 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
 
-	// Usar histórico temporário com contextos injetados
-	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
-	// Auto-retry on OAuth token expiration (401)
-	if cli.refreshClientOnAuthError(err) {
+	// Try streaming if supported, fall back to buffered request
+	var aiResponse string
+
+	if sc, ok := client.AsStreamingClient(cli.Client); ok {
+		// Real-time streaming: display chunks as they arrive
+		chunks, streamErr := sc.SendPromptStream(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
+		if streamErr != nil && cli.refreshClientOnAuthError(streamErr) {
+			chunks, streamErr = sc.SendPromptStream(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
+		}
+
+		cli.animation.StopThinkingAnimation()
+		stopSpinner()
+		cli.interactionState = StateNormal
+		cli.forceRefreshPrompt()
+		time.Sleep(50 * time.Millisecond)
+
+		if streamErr != nil {
+			err = streamErr
+		} else {
+			modelName := cli.Client.GetModelName()
+			fmt.Printf("%s\n", colorize(modelName+":", ColorPurple))
+
+			// Stream chunks with watchdog protection
+			result := client.WatchStream(ctx, chunks, client.DefaultWatchdogConfig(), cli.logger)
+			aiResponse = result.Text
+
+			if result.WasStalled {
+				fmt.Printf("\n%s\n", colorize("[Stream stalled — partial response shown]", ColorYellow))
+			}
+
+			// Store usage from streaming result
+			if result.Usage != nil {
+				cli.costTracker.RecordRealUsage(cli.Provider, cli.Model, result.Usage)
+			}
+		}
+	} else {
+		// Non-streaming: buffered request
 		aiResponse, err = cli.Client.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
+		if cli.refreshClientOnAuthError(err) {
+			aiResponse, err = cli.Client.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
+		}
+
+		cli.animation.StopThinkingAnimation()
+		stopSpinner()
+		cli.interactionState = StateNormal
+		cli.forceRefreshPrompt()
+		time.Sleep(50 * time.Millisecond)
 	}
-
-	cli.animation.StopThinkingAnimation()
-
-	// Stop the prefix spinner before printing the response.
-	// Without this, the SIGWINCH signals cause go-prompt to redraw the
-	// [ModelName ⠹] prefix in the middle of the response text.
-	stopSpinner()
-	cli.interactionState = StateNormal
-	cli.forceRefreshPrompt()
-
-	// Pequena pausa para garantir que o terminal está limpo
-	time.Sleep(50 * time.Millisecond)
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Println(i18n.T("status.operation_cancelled"))
-			// Não adicionar ao histórico se cancelado
 		} else {
 			fmt.Println(i18n.T("error.generic", err.Error()))
 		}
 	} else {
-		// Adicionar APENAS a mensagem do usuário e resposta ao histórico permanente
-		// (Contextos não são salvos no histórico para não poluir)
 		cli.history = append(cli.history, userMessage)
 		cli.history = append(cli.history, models.Message{
 			Role:    "assistant",
 			Content: aiResponse,
 		})
 
-		// Track cost: estimate tokens from character count
+		// Track cost for non-streaming path (streaming path tracks above)
 		if cli.costTracker != nil {
-			promptTokens := len(userInput+additionalContext) / 4
-			completionTokens := len(aiResponse) / 4
-			cli.costTracker.RecordUsage(cli.Provider, cli.Model, promptTokens, completionTokens)
+			if !client.IsStreamingCapable(cli.Client) {
+				usage := client.GetUsageOrEstimate(cli.Client, len(userInput+additionalContext), len(aiResponse))
+				cli.costTracker.RecordRealUsage(cli.Provider, cli.Model, usage)
+			}
 		}
 
-		// Exibir nome do modelo como label na linha do prompt
-		modelName := cli.Client.GetModelName()
-		fmt.Printf("%s\n", colorize(modelName+":", ColorPurple))
+		// Display response (streaming path already displayed inline)
+		if !client.IsStreamingCapable(cli.Client) {
+			modelName := cli.Client.GetModelName()
+			fmt.Printf("%s\n", colorize(modelName+":", ColorPurple))
 
-		// Garantir que markdown renderizado termina com reset
-		renderedResponse := cli.renderMarkdown(aiResponse)
-		renderedResponse = ensureANSIReset(renderedResponse)
-
-		cli.typewriterEffect(renderedResponse, 2*time.Millisecond)
-		fmt.Print("\033[0m") // Reset final
+			renderedResponse := cli.renderMarkdown(aiResponse)
+			renderedResponse = ensureANSIReset(renderedResponse)
+			cli.typewriterEffect(renderedResponse, 2*time.Millisecond)
+		} else {
+			// For streaming, render the final markdown (streaming showed raw text)
+			renderedResponse := cli.renderMarkdown(aiResponse)
+			renderedResponse = ensureANSIReset(renderedResponse)
+			// Overwrite streaming output with markdown-rendered version
+			fmt.Print("\033[2K\r") // clear current line
+			fmt.Print(renderedResponse)
+		}
+		fmt.Print("\033[0m")
 		fmt.Println()
-		fmt.Println() // Linha extra para separar visualmente as mensagens
+		fmt.Println()
 
-		// Nudge background memory worker to check if annotations are needed
 		if cli.memWorker != nil {
 			cli.memWorker.nudge()
 		}

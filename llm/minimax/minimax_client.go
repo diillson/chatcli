@@ -38,7 +38,14 @@ type MiniMaxClient struct {
 	backoff         time.Duration
 	apiURL          string
 	anthropicCompat bool
+	usageState      client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *MiniMaxClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *MiniMaxClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewMiniMaxClient cria uma nova instância de MiniMaxClient.
 func NewMiniMaxClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *MiniMaxClient {
@@ -200,6 +207,15 @@ func (c *MiniMaxClient) processResponse(resp *http.Response) (string, error) {
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "MiniMax"), err)
 	}
 
+	// Extract usage and stop reason (OpenAI format)
+	var rawResult map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &rawResult); err == nil {
+		if usage := client.ParseOpenAIUsage(rawResult); usage != nil {
+			c.usageState.StoreUsage(usage)
+		}
+		c.usageState.StoreStopReason(client.ParseOpenAIFinishReason(rawResult))
+	}
+
 	// MiniMax pode retornar erro no campo error (formato OpenAI)
 	if result.Error.Message != "" {
 		c.logger.Error(i18n.T("llm.error.api_error_payload", "MiniMax"), zap.String("error_message", result.Error.Message))
@@ -291,6 +307,15 @@ func (c *MiniMaxClient) processAnthropicResponse(resp *http.Response) (string, e
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		c.logger.Error(i18n.T("llm.error.decode_response_json_for", "MiniMax"), zap.Error(err), zap.Int("body_size", len(bodyBytes)))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "MiniMax"), err)
+	}
+
+	// Extract usage and stop reason (Anthropic format)
+	var rawResult map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &rawResult); err == nil {
+		if usage := client.ParseAnthropicUsage(rawResult); usage != nil {
+			c.usageState.StoreUsage(usage)
+		}
+		c.usageState.StoreStopReason(client.ParseAnthropicStopReason(rawResult))
 	}
 
 	if result.Error.Message != "" {

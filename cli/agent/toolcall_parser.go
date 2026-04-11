@@ -50,11 +50,41 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 		calls = append(calls, mdCalls...)
 	}
 
+	// Apply JSON recovery/normalization to ALL parsed calls (XML, JSON, markdown).
+	// This fixes single quotes, unquoted keys, and other malformations.
+	// Must run AFTER all parsing stages so that every source benefits from recovery.
+	for i := range calls {
+		calls[i].Args = recoverToolCallArgs(calls[i].Name, calls[i].Args)
+	}
+
 	if xmlErr != nil && len(calls) == 0 {
 		return nil, xmlErr
 	}
 
 	return calls, nil
+}
+
+// recoverToolCallArgs applies JSON recovery to tool call args.
+// If args is already valid JSON, returns as-is.
+// Otherwise attempts multiple recovery strategies (single quotes, unquoted keys, etc.).
+func recoverToolCallArgs(toolName, args string) string {
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" {
+		return args
+	}
+
+	// If it's already valid JSON, no recovery needed
+	var v interface{}
+	if json.Unmarshal([]byte(trimmed), &v) == nil {
+		return args
+	}
+
+	// Try recovery
+	if normalized, ok := NormalizeToolArgs(toolName, trimmed); ok {
+		return normalized
+	}
+
+	return args
 }
 
 // isDuplicateToolCall checks whether candidate is a duplicate of any existing
@@ -351,7 +381,15 @@ func parseJSONToolCalls(text string) []ToolCall {
 
 		var obj map[string]interface{}
 		if err := json.Unmarshal([]byte(jsonStr), &obj); err != nil {
-			continue
+			// Try JSON recovery before giving up
+			if recovered, ok := NormalizeToolArgs("", jsonStr); ok && recovered != jsonStr {
+				if json.Unmarshal([]byte(recovered), &obj) != nil {
+					continue
+				}
+				jsonStr = recovered
+			} else {
+				continue
+			}
 		}
 
 		// Check if this is a tool call object
@@ -416,13 +454,16 @@ func parseMarkdownCodeBlockToolCalls(text string) []ToolCall {
 }
 
 // extractJSONObject attempts to extract a balanced JSON object starting at pos.
+// Tracks both single and double quoted strings so that braces inside quoted
+// values (e.g., {'cmd': 'echo }'}) don't cause premature termination.
 func extractJSONObject(text string, pos int) string {
 	if pos >= len(text) || text[pos] != '{' {
 		return ""
 	}
 
 	depth := 0
-	inString := false
+	inDouble := false
+	inSingle := false
 	escaped := false
 
 	for i := pos; i < len(text); i++ {
@@ -433,23 +474,33 @@ func extractJSONObject(text string, pos int) string {
 			continue
 		}
 
-		if ch == '\\' && inString {
+		if ch == '\\' && (inDouble || inSingle) {
 			escaped = true
 			continue
 		}
 
-		if ch == '"' {
-			inString = !inString
+		if inDouble {
+			if ch == '"' {
+				inDouble = false
+			}
 			continue
 		}
 
-		if inString {
+		if inSingle {
+			if ch == '\'' {
+				inSingle = false
+			}
 			continue
 		}
 
-		if ch == '{' {
+		switch ch {
+		case '"':
+			inDouble = true
+		case '\'':
+			inSingle = true
+		case '{':
 			depth++
-		} else if ch == '}' {
+		case '}':
 			depth--
 			if depth == 0 {
 				return text[pos : i+1]
@@ -468,6 +519,22 @@ func extractJSONObject(text string, pos int) string {
 //	{"cmd":"read", "args":{"file":"main.go"}}  (implicit @coder)
 //	{"tool":"@coder", "args":"read --file main.go"}
 func jsonObjToToolCall(obj map[string]interface{}) (ToolCall, bool) {
+	// Reject objects that look like search results, API responses, or data payloads.
+	// These commonly appear in tool outputs and should NOT be parsed as tool calls.
+	if _, hasURL := obj["url"]; hasURL {
+		return ToolCall{}, false // search result or web response
+	}
+	if _, hasTitle := obj["title"]; hasTitle {
+		if _, hasSnippet := obj["snippet"]; hasSnippet {
+			return ToolCall{}, false // search result
+		}
+	}
+	if _, hasType := obj["type"]; hasType {
+		if _, hasError := obj["error"]; hasError {
+			return ToolCall{}, false // API error response
+		}
+	}
+
 	// Try various common key patterns for the tool name
 	name := ""
 	if v, ok := obj["tool_call"].(string); ok {
@@ -503,9 +570,14 @@ func jsonObjToToolCall(obj map[string]interface{}) (ToolCall, bool) {
 	}
 
 	// Implicit @coder format: {"cmd":"read", "args":{"file":"main.go"}}
-	// This is the most common format LLMs produce when confused
+	// This is the most common format LLMs produce when confused.
+	//
+	// IMPORTANT: This must NOT match tool call args from other tools like @websearch.
+	// The @websearch plugin uses {"cmd":"search","args":{"query":"..."}} which has the
+	// same structure. We distinguish by checking the inner args keys:
+	//   - @coder search uses: term, dir, regex, glob, context, max_results
+	//   - @websearch uses: query, num_results, language
 	if cmd, ok := obj["cmd"].(string); ok && cmd != "" {
-		// Valid coder subcommands
 		validCmds := map[string]bool{
 			"read": true, "write": true, "patch": true, "tree": true,
 			"search": true, "exec": true, "test": true, "rollback": true, "clean": true,
@@ -513,7 +585,16 @@ func jsonObjToToolCall(obj map[string]interface{}) (ToolCall, bool) {
 			"git-changed": true, "git-branch": true,
 		}
 		if validCmds[cmd] {
-			// Wrap in standard format
+			// Extra validation for "search" — reject if inner args look like @websearch
+			if cmd == "search" {
+				if innerArgs, ok := obj["args"].(map[string]interface{}); ok {
+					if _, hasQuery := innerArgs["query"]; hasQuery {
+						// This is @websearch format, not @coder search
+						return ToolCall{}, false
+					}
+				}
+			}
+
 			wrapped := map[string]interface{}{"cmd": cmd}
 			if v, ok := obj["args"]; ok {
 				wrapped["args"] = v
@@ -525,14 +606,13 @@ func jsonObjToToolCall(obj map[string]interface{}) (ToolCall, bool) {
 		}
 	}
 
-	// Try name without @ prefix (some models drop it)
-	if name != "" {
-		validNames := map[string]bool{
-			"coder": true, "file": true, "shell": true, "search": true,
-		}
-		if validNames[name] {
-			return ToolCall{Name: "@" + name, Args: argsStr}, true
-		}
+	// Try name without @ prefix (some models drop it).
+	// IMPORTANT: Only "coder" is valid here. Do NOT add generic names like
+	// "search", "file", "shell" — they collide with JSON fields in tool outputs
+	// (e.g., websearch results containing {"name":"search",...} would be
+	// falsely detected as @search tool calls).
+	if name == "coder" {
+		return ToolCall{Name: "@coder", Args: argsStr}, true
 	}
 
 	return ToolCall{}, false

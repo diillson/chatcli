@@ -271,7 +271,8 @@ func TestCheck_BackwardsCompatibility(t *testing.T) {
 		{"git-status allowed", "@coder", `{"cmd":"git-status"}`, ActionAllow},
 		{"git-diff allowed", "@coder", `{"cmd":"git-diff"}`, ActionAllow},
 		{"write falls to ask", "@coder", `{"cmd":"write","args":{"file":"x"}}`, ActionAsk},
-		{"exec falls to ask", "@coder", `{"cmd":"exec","args":{"cmd":"ls"}}`, ActionAsk},
+		{"exec read-only auto-allowed", "@coder", `{"cmd":"exec","args":{"cmd":"ls"}}`, ActionAllow},
+		{"exec non-readonly asks", "@coder", `{"cmd":"exec","args":{"cmd":"npm install"}}`, ActionAsk},
 		{"patch falls to ask", "@coder", `{"cmd":"patch","args":{"file":"x"}}`, ActionAsk},
 	}
 

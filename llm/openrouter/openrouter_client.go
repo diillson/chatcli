@@ -37,7 +37,14 @@ type OpenRouterClient struct {
 	client      *http.Client
 	maxAttempts int
 	backoff     time.Duration
+	usageState  client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *OpenRouterClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *OpenRouterClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewOpenRouterClient creates a new OpenRouter client instance.
 func NewOpenRouterClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenRouterClient {
@@ -319,13 +326,20 @@ func (c *OpenRouterClient) processResponse(resp *http.Response) (string, error) 
 		return "", errors.New(i18n.T("llm.error.empty_response_unspecified", "OpenRouter"))
 	}
 
-	// Log usage metadata for cost tracking
+	// Store and log usage metadata for cost tracking
 	if result.Usage != nil {
+		c.usageState.StoreUsage(&models.UsageInfo{
+			PromptTokens:     result.Usage.PromptTokens,
+			CompletionTokens: result.Usage.CompletionTokens,
+			TotalTokens:      result.Usage.TotalTokens,
+			IsReal:           true,
+		})
 		c.logger.Debug("OpenRouter usage",
 			zap.Int("prompt_tokens", result.Usage.PromptTokens),
 			zap.Int("completion_tokens", result.Usage.CompletionTokens),
 			zap.Int("total_tokens", result.Usage.TotalTokens))
 	}
+	c.usageState.StoreStopReason(firstChoice.FinishReason)
 
 	return content, nil
 }
