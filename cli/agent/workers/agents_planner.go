@@ -10,13 +10,21 @@ import (
 
 // PlannerAgent is a pure reasoning agent with NO tool access.
 // It uses an LLM to analyze tasks, create execution plans, and decompose complex tasks.
+//
+// Default effort: "high" — planning is the agent we most want to think hard
+// (no tool actions to pay for, all value comes from the quality of the
+// decomposition). Override with CHATCLI_AGENT_PLANNER_{MODEL,EFFORT}.
 type PlannerAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewPlannerAgent creates a PlannerAgent with its pre-built skills.
 func NewPlannerAgent() *PlannerAgent {
-	a := &PlannerAgent{skills: NewSkillSet()}
+	a := &PlannerAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("PLANNER", "", "high"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

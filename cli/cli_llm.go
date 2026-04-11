@@ -20,6 +20,7 @@ import (
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -204,26 +205,75 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		})
 	}
 
-	// Part 3: Auto-triggered skills based on user input keywords
+	// Part 2.5: Manually invoked skill via `/<skill-name>` (Fase 2).
+	// Consumed once — cleared right after reading so it only affects this
+	// turn. Goes BEFORE the auto-activated block so manual intent has
+	// precedence when both happen simultaneously.
+	var manualSkill *persona.Skill
+	var manualSkillArgs string
+	if cli.pendingManualSkill != nil {
+		manualSkill = cli.pendingManualSkill
+		manualSkillArgs = cli.pendingManualSkillArgs
+		cli.pendingManualSkill = nil
+		cli.pendingManualSkillArgs = ""
+		if block := renderManualSkillBlock(manualSkill, manualSkillArgs); block != "" {
+			systemParts = append(systemParts, models.ContentBlock{
+				Type: "text",
+				Text: block,
+			})
+		}
+	}
+
+	// Part 3: Auto-activated skills (triggers + path globs).
+	//
+	// Honors the full advanced frontmatter contract from the docs:
+	//  - `triggers:` → keyword match against userInput
+	//  - `paths:`    → glob match against file tokens extracted from userInput
+	//                  and @file commands (supports `*`, `**`, basename match)
+	//  - `disable-model-invocation` → skill is excluded from auto-activation
+	//  - `model:` / `effort:` → forwarded to provider for this single turn
+	//                           (see skillEffort / skillModelHint below)
+	var skillEffort client.SkillEffort
+	var skillModelHint string
 	if cli.personaHandler != nil {
 		mgr := cli.personaHandler.GetManager()
 		if mgr != nil {
-			triggered := mgr.FindTriggeredSkills(userInput)
-			if len(triggered) > 0 {
-				var skillCtx strings.Builder
-				skillCtx.WriteString("# Auto-loaded Skills\n\n")
-				for _, skill := range triggered {
-					skillCtx.WriteString(fmt.Sprintf("## Skill: %s\n\n", skill.Name))
-					if skill.Description != "" {
-						skillCtx.WriteString(skill.Description + "\n\n")
-					}
-					skillCtx.WriteString(skill.Content + "\n\n")
+			filePaths := extractFilePaths(userInput + " " + additionalContext)
+			activated := mgr.FindAutoActivatedSkills(userInput, filePaths)
+			if len(activated) > 0 {
+				block := buildSkillInjectionBlock(activated)
+				if block != "" {
+					systemParts = append(systemParts, models.ContentBlock{
+						Type: "text",
+						Text: block,
+					})
 				}
-				systemParts = append(systemParts, models.ContentBlock{
-					Type: "text",
-					Text: skillCtx.String(),
-				})
+				// Resolve model/effort hints from the activated set.
+				model, effort, conflict := pickSkillModelAndEffort(activated)
+				skillModelHint = model
+				skillEffort = client.NormalizeEffort(effort)
+				if conflict != "" {
+					cli.logger.Warn("multiple auto-activated skills disagree on model; using the first",
+						zap.String("losing_skill", conflict),
+						zap.String("chosen_model", skillModelHint))
+				}
+				cli.logger.Debug("auto-activated skills",
+					zap.Int("count", len(activated)),
+					zap.Strings("file_paths", filePaths),
+					zap.String("skill_model", skillModelHint),
+					zap.String("skill_effort", string(skillEffort)))
 			}
+		}
+	}
+
+	// Manual invocation hints override auto-activation hints (explicit
+	// user intent wins), but only when the manual skill actually sets them.
+	if manualSkill != nil {
+		if m := strings.TrimSpace(manualSkill.Model); m != "" {
+			skillModelHint = m
+		}
+		if e := strings.TrimSpace(manualSkill.Effort); e != "" {
+			skillEffort = client.NormalizeEffort(e)
 		}
 	}
 
@@ -314,10 +364,44 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
 
+	// Resolve the per-turn client from any skill model hint. The resolver
+	// tries (in order):
+	//   1. the user provider's API-cached model list,
+	//   2. the static catalog (exact, alias, prefix),
+	//   3. a family-prefix heuristic (claude-*, gpt-*, gemini-*, ...),
+	//   4. an optimistic same-provider attempt.
+	// Cross-provider swaps are honored when the target provider has an API
+	// key configured; otherwise we stay on the user's client and surface a
+	// user-visible notice so the skill's preference is never silently
+	// dropped. cli.Client / cli.Provider / cli.Model are NOT mutated.
+	cli.ensureModelCacheWarm()
+	resolution := cli.resolveSkillClient(skillModelHint)
+	activeClient := resolution.Client
+	if resolution.Changed {
+		cli.logger.Info("skill model hint honored",
+			zap.String("note", resolution.Note),
+			zap.String("from_provider", cli.Provider),
+			zap.String("to_provider", resolution.Provider),
+			zap.String("from_model", cli.Model),
+			zap.String("to_model", resolution.Model))
+		if resolution.CrossProvider {
+			fmt.Printf("  %s\n", colorize(
+				fmt.Sprintf("skill requested %s/%s — swapping for this turn",
+					resolution.Provider, resolution.Model),
+				ColorGray))
+		}
+	} else if resolution.UserMessage != "" {
+		fmt.Printf("  %s\n", colorize("⚠ "+resolution.UserMessage, ColorYellow))
+	}
+
+	// Attach effort hint to ctx so the provider's SendPrompt can opt into
+	// extended thinking / reasoning_effort for this turn.
+	ctx = client.WithEffortHint(ctx, skillEffort)
+
 	// Try streaming if supported, fall back to buffered request
 	var aiResponse string
 
-	if sc, ok := client.AsStreamingClient(cli.Client); ok {
+	if sc, ok := client.AsStreamingClient(activeClient); ok {
 		// Real-time streaming: display chunks as they arrive
 		chunks, streamErr := sc.SendPromptStream(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 		if streamErr != nil && cli.refreshClientOnAuthError(streamErr) {
@@ -333,7 +417,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		if streamErr != nil {
 			err = streamErr
 		} else {
-			modelName := cli.Client.GetModelName()
+			modelName := activeClient.GetModelName()
 			fmt.Printf("%s\n", colorize(modelName+":", ColorPurple))
 
 			// Stream chunks with watchdog protection
@@ -344,16 +428,17 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 				fmt.Printf("\n%s\n", colorize("[Stream stalled — partial response shown]", ColorYellow))
 			}
 
-			// Store usage from streaming result
+			// Store usage from streaming result against whichever
+			// provider+model actually served the turn.
 			if result.Usage != nil {
-				cli.costTracker.RecordRealUsage(cli.Provider, cli.Model, result.Usage)
+				cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, result.Usage)
 			}
 		}
 	} else {
 		// Non-streaming: buffered request
-		aiResponse, err = cli.Client.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
+		aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 		if cli.refreshClientOnAuthError(err) {
-			aiResponse, err = cli.Client.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
+			aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 		}
 
 		cli.animation.StopThinkingAnimation()
@@ -378,15 +463,15 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 		// Track cost for non-streaming path (streaming path tracks above)
 		if cli.costTracker != nil {
-			if !client.IsStreamingCapable(cli.Client) {
-				usage := client.GetUsageOrEstimate(cli.Client, len(userInput+additionalContext), len(aiResponse))
-				cli.costTracker.RecordRealUsage(cli.Provider, cli.Model, usage)
+			if !client.IsStreamingCapable(activeClient) {
+				usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
+				cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)
 			}
 		}
 
 		// Display response (streaming path already displayed inline)
-		if !client.IsStreamingCapable(cli.Client) {
-			modelName := cli.Client.GetModelName()
+		if !client.IsStreamingCapable(activeClient) {
+			modelName := activeClient.GetModelName()
 			fmt.Printf("%s\n", colorize(modelName+":", ColorPurple))
 
 			renderedResponse := cli.renderMarkdown(aiResponse)

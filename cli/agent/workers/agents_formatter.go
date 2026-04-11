@@ -10,13 +10,20 @@ import (
 )
 
 // FormatterAgent is the specialized agent for code formatting and style normalization.
+//
+// Default effort: "low" — formatting is mechanical, tool-driven.
+// Override with CHATCLI_AGENT_FORMATTER_{MODEL,EFFORT}.
 type FormatterAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewFormatterAgent creates a FormatterAgent with its pre-built skills.
 func NewFormatterAgent() *FormatterAgent {
-	a := &FormatterAgent{skills: NewSkillSet()}
+	a := &FormatterAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("FORMATTER", "", "low"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

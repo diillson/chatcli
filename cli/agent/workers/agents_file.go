@@ -13,13 +13,20 @@ import (
 )
 
 // FileAgent is the specialized agent for reading, analyzing, and understanding code.
+//
+// Default effort: "low" — file reads are mechanical, no reasoning is needed.
+// Override with CHATCLI_AGENT_FILE_{MODEL,EFFORT}.
 type FileAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewFileAgent creates a FileAgent with its pre-built skills.
 func NewFileAgent() *FileAgent {
-	a := &FileAgent{skills: NewSkillSet()}
+	a := &FileAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("FILE", "", "low"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

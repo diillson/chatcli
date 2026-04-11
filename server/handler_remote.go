@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/persona"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -67,17 +68,29 @@ func (h *Handler) ListRemoteAgents(ctx context.Context, req *pb.ListRemoteAgents
 
 	var result []*pb.AgentInfo
 	for _, a := range agents {
-		result = append(result, &pb.AgentInfo{
-			Name:        a.Name,
-			Description: a.Description,
-			Skills:      []string(a.Skills),
-			Plugins:     []string(a.Plugins),
-			Model:       a.Model,
-			Content:     a.Content,
-		})
+		result = append(result, agentToProto(a))
 	}
 
 	return &pb.ListRemoteAgentsResponse{Agents: result}, nil
+}
+
+// agentToProto maps a persona.Agent (server-side) to the gRPC wire type.
+// Kept as a helper so ListRemoteAgents and GetAgentDefinition cannot drift
+// out of sync, and so new persona frontmatter fields land in one place.
+func agentToProto(a *persona.Agent) *pb.AgentInfo {
+	return &pb.AgentInfo{
+		Name:        a.Name,
+		Description: a.Description,
+		Skills:      []string(a.Skills),
+		Plugins:     []string(a.Plugins),
+		Model:       a.Model,
+		Content:     a.Content,
+		Effort:      a.Effort,
+		Category:    a.Category,
+		Version:     a.Version,
+		Author:      a.Author,
+		Tags:        []string(a.Tags),
+	}
 }
 
 // ListRemoteSkills returns all skills available on the server.
@@ -136,14 +149,7 @@ func (h *Handler) GetAgentDefinition(ctx context.Context, req *pb.GetAgentDefini
 	}
 
 	return &pb.GetAgentDefinitionResponse{
-		Agent: &pb.AgentInfo{
-			Name:        agent.Name,
-			Description: agent.Description,
-			Skills:      []string(agent.Skills),
-			Plugins:     []string(agent.Plugins),
-			Model:       agent.Model,
-			Content:     agent.Content,
-		},
+		Agent: agentToProto(agent),
 	}, nil
 }
 

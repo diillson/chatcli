@@ -64,6 +64,12 @@ type AgentMode struct {
 	stdinDone    chan struct{} // signals reader goroutine to stop
 	stdinWg      sync.WaitGroup
 	multilineBuf MultilineBuffer // ``` delimited multiline input
+
+	// Skill hints captured at the start of Run() from auto-activated or
+	// manually invoked skills. Applied to each LLM turn via ctx for the
+	// duration of the agent loop. Cleared when the loop exits.
+	skillModelHint  string
+	skillEffortHint llmclient.SkillEffort
 }
 
 // startStdinReader starts a goroutine that reads lines from stdin and sends
@@ -312,6 +318,40 @@ func (a *AgentMode) getInput(promptStr string) string {
 	return a.readLine()
 }
 
+// clientAndCtxForTurn resolves the LLM client and context for a single ReAct
+// turn, honoring any skill model/effort hints captured at Run() start.
+//
+// Delegates model resolution to ChatCLI.resolveSkillClient so chat mode and
+// agent mode share the same logic: API-cached lookup → catalog → family
+// heuristic → optimistic user-provider attempt → graceful fallback with a
+// user-visible message when the hint's target provider is unavailable.
+//
+// The effort hint is attached to ctx so the provider's SendPrompt can opt
+// into extended thinking / reasoning_effort for this single call.
+//
+// Neither hint mutates a.cli.Client / a.cli.Provider / a.cli.Model — the
+// user's active choices are preserved across turns.
+func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClient, context.Context) {
+	turnClient := a.cli.Client
+	if a.skillModelHint != "" {
+		resolution := a.cli.resolveSkillClient(a.skillModelHint)
+		turnClient = resolution.Client
+		// Log once per turn — the ReAct loop can spin many times and we
+		// don't want to spam. agent_mode.go only calls this helper from
+		// the turn loop, so a single log per turn is acceptable.
+		if resolution.Changed {
+			a.logger.Debug("agent turn: skill model hint honored",
+				zap.String("note", resolution.Note),
+				zap.String("to_provider", resolution.Provider),
+				zap.String("to_model", resolution.Model))
+		}
+	}
+	if a.skillEffortHint != llmclient.EffortUnset {
+		ctx = llmclient.WithEffortHint(ctx, a.skillEffortHint)
+	}
+	return turnClient, ctx
+}
+
 // Run inicia o modo agente com uma consulta do usuário, utilizando um loop de Raciocínio-Ação (ReAct).
 // Agora aceita systemPromptOverride para definir personas específicas (ex: Coder).
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string, systemPromptOverride string) error {
@@ -386,6 +426,75 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// Adiciona contexto de ferramentas (plugins) ao prompt
 	systemInstruction += a.getToolContextString()
+
+	// Fase 5: Inject auto-activated skills (triggers + path globs) into the
+	// agent-mode system prompt. Also honors a `/<skill-name>` manual
+	// invocation that was staged right before Run() was called — that is
+	// how `/coder` and `/agent` interplay with skill invocation.
+	//
+	// Only fires once at the start of the loop so we don't inflate cache
+	// across tool iterations.
+	//
+	// Reset hints from any previous Run() so a second `/agent` call
+	// without an active skill does not inherit the old model/effort.
+	a.skillModelHint = ""
+	a.skillEffortHint = llmclient.EffortUnset
+	if a.cli.personaHandler != nil {
+		mgr := a.cli.personaHandler.GetManager()
+		if mgr != nil {
+			filePaths := extractFilePaths(query + " " + additionalContext)
+			activated := mgr.FindAutoActivatedSkills(query, filePaths)
+			if len(activated) > 0 {
+				systemInstruction += "\n\n" + buildSkillInjectionBlock(activated)
+				// Honor the first skill's model/effort hint for the worker
+				// by recording them onto the agent mode state. The ReAct
+				// loop reads them via contextual WithEffortHint wrappers
+				// in processAIResponseAndAct.
+				model, effort, _ := pickSkillModelAndEffort(activated)
+				if model != "" {
+					a.skillModelHint = model
+				}
+				if effort != "" {
+					a.skillEffortHint = llmclient.NormalizeEffort(effort)
+				}
+				a.logger.Info("agent mode: auto-activated skills injected",
+					zap.Int("count", len(activated)),
+					zap.String("model_hint", a.skillModelHint),
+					zap.String("effort_hint", string(a.skillEffortHint)))
+			}
+		}
+	}
+	if a.cli.pendingManualSkill != nil {
+		manual := a.cli.pendingManualSkill
+		manualArgs := a.cli.pendingManualSkillArgs
+		a.cli.pendingManualSkill = nil
+		a.cli.pendingManualSkillArgs = ""
+		if block := renderManualSkillBlock(manual, manualArgs); block != "" {
+			systemInstruction += "\n\n" + block
+		}
+		if m := strings.TrimSpace(manual.Model); m != "" {
+			a.skillModelHint = m
+		}
+		if e := strings.TrimSpace(manual.Effort); e != "" {
+			a.skillEffortHint = llmclient.NormalizeEffort(e)
+		}
+	}
+
+	// If we captured a skill model hint, pre-resolve it once so the user
+	// sees exactly what will run (or why their preference is being
+	// ignored) before the agent loop starts burning turns.
+	if a.skillModelHint != "" {
+		a.cli.ensureModelCacheWarm()
+		preview := a.cli.resolveSkillClient(a.skillModelHint)
+		if preview.Changed {
+			fmt.Printf("  %s\n", colorize(
+				fmt.Sprintf("skill model hint: running agent on %s/%s",
+					preview.Provider, preview.Model),
+				ColorGray))
+		} else if preview.UserMessage != "" {
+			fmt.Printf("  %s\n", colorize("⚠ "+preview.UserMessage, ColorYellow))
+		}
+	}
 
 	// Multi-Agent Orchestration: sempre ativo nos modos /agent e /coder.
 	// A env CHATCLI_AGENT_PARALLEL_MODE pode desativar explicitamente (=false ou =0).
@@ -830,9 +939,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		}
 		turnHistory, _ = agent.EnforceToolResultBudget(turnHistory, a.logger)
 
+		// Resolve per-turn client + effort hint from any active skill
+		// hints. Model swap is transparent; effort flows via ctx so the
+		// provider's SendPrompt can enable extended thinking / reasoning.
+		turnClient, turnCtx := a.clientAndCtxForTurn(ctx)
+
 		// Detect native function calling support
 		var nativeToolCalls []models.ToolCall
-		toolAwareClient, canUseNativeTools := llmclient.AsToolAware(a.cli.Client)
+		toolAwareClient, canUseNativeTools := llmclient.AsToolAware(turnClient)
 		if canUseNativeTools && !toolAwareClient.SupportsNativeTools() {
 			canUseNativeTools = false
 		}
@@ -856,29 +970,38 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		var llmResp *models.LLMResponse
 
 		if canUseNativeTools && len(nativeToolDefs) > 0 {
-			llmResp, err = toolAwareClient.SendPromptWithTools(ctx, "", turnHistory, nativeToolDefs, currentMaxTokens)
+			llmResp, err = toolAwareClient.SendPromptWithTools(turnCtx, "", turnHistory, nativeToolDefs, currentMaxTokens)
 			if a.cli.refreshClientOnAuthError(err) {
-				llmResp, err = toolAwareClient.SendPromptWithTools(ctx, "", turnHistory, nativeToolDefs, currentMaxTokens)
+				llmResp, err = toolAwareClient.SendPromptWithTools(turnCtx, "", turnHistory, nativeToolDefs, currentMaxTokens)
 			}
 			if err == nil && llmResp != nil {
 				aiResponse = llmResp.Content
 				nativeToolCalls = llmResp.ToolCalls
 			}
 		} else {
-			aiResponse, err = a.cli.Client.SendPrompt(ctx, "", turnHistory, currentMaxTokens)
+			aiResponse, err = turnClient.SendPrompt(turnCtx, "", turnHistory, currentMaxTokens)
 			if a.cli.refreshClientOnAuthError(err) {
-				aiResponse, err = a.cli.Client.SendPrompt(ctx, "", turnHistory, currentMaxTokens)
+				aiResponse, err = turnClient.SendPrompt(turnCtx, "", turnHistory, currentMaxTokens)
 			}
 		}
 
-		// Track cost for agent mode turn — prefer real API usage
+		// Track cost for agent mode turn — prefer real API usage.
+		// Attribute to whichever provider+model the resolver actually
+		// served this turn (see clientAndCtxForTurn).
 		if a.cli.costTracker != nil && err == nil {
 			inputChars := 0
 			for _, m := range turnHistory {
 				inputChars += len(m.Content)
 			}
-			usage := llmclient.GetUsageOrEstimate(a.cli.Client, inputChars, len(aiResponse))
-			a.cli.costTracker.RecordRealUsage(a.cli.Provider, a.cli.Model, usage)
+			usage := llmclient.GetUsageOrEstimate(turnClient, inputChars, len(aiResponse))
+			effProvider := a.cli.Provider
+			effModel := a.cli.Model
+			if a.skillModelHint != "" {
+				resolution := a.cli.resolveSkillClient(a.skillModelHint)
+				effProvider = resolution.Provider
+				effModel = resolution.Model
+			}
+			a.cli.costTracker.RecordRealUsage(effProvider, effModel, usage)
 		}
 
 		// Para o timer e obtém a duração

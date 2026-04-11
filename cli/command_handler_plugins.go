@@ -315,8 +315,13 @@ func (ch *CommandHandler) handleAgentPersonaSubcommand(userInput string) bool {
 
 	args := strings.Fields(userInput)
 	if len(args) < 2 {
-		// Apenas "/agent" sem argumentos - inicia modo agente (igual /run)
-		return false
+		// Apenas "/agent" sem argumentos: não entra em modo agente com
+		// mensagem vazia. Mostra status + ajuda para que o usuário forneça
+		// um contexto antes de invocar o loop ReAct.
+		ch.cli.personaHandler.ShowHelp()
+		fmt.Println()
+		fmt.Println(colorize("  "+i18n.T("agent.usage.hint"), ColorYellow))
+		return true
 	}
 
 	subcommand := strings.ToLower(args[1])

@@ -79,6 +79,12 @@ type AgentEvent struct {
 }
 
 // WorkerAgent is the interface every specialized agent must implement.
+//
+// The Model() and Effort() methods declare per-worker LLM preferences.
+// Empty strings mean "inherit the user's active provider/model and send no
+// effort hint". The dispatcher runs both through the shared model resolver
+// (llm/client.ResolveModelRouting) so cross-provider swap, graceful
+// fallback, and extended thinking / reasoning_effort happen uniformly.
 type WorkerAgent interface {
 	// Type returns the agent's type identifier.
 	Type() AgentType
@@ -94,6 +100,11 @@ type WorkerAgent interface {
 	AllowedCommands() []string
 	// IsReadOnly returns true if this agent never writes files.
 	IsReadOnly() bool
+	// Model returns this agent's preferred model id ("" = inherit).
+	Model() string
+	// Effort returns this agent's default effort level: "low", "medium",
+	// "high", "max", or "" (no hint).
+	Effort() string
 	// Execute runs the agent on a task with the provided dependencies.
 	Execute(ctx context.Context, task string, deps *WorkerDeps) (*AgentResult, error)
 }

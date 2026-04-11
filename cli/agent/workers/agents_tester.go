@@ -14,13 +14,20 @@ import (
 )
 
 // TesterAgent is the specialized agent for test generation, execution, and coverage analysis.
+//
+// Default effort: "medium" — generating good tests needs understanding but
+// most of it is boilerplate. Override with CHATCLI_AGENT_TESTER_{MODEL,EFFORT}.
 type TesterAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewTesterAgent creates a TesterAgent with its pre-built skills.
 func NewTesterAgent() *TesterAgent {
-	a := &TesterAgent{skills: NewSkillSet()}
+	a := &TesterAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("TESTER", "", "medium"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

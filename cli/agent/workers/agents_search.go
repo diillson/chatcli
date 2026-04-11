@@ -11,13 +11,20 @@ import (
 )
 
 // SearchAgent is the specialized agent for finding things across the codebase.
+//
+// Default effort: "low" — grep/tree/read are mechanical.
+// Override with CHATCLI_AGENT_SEARCH_{MODEL,EFFORT}.
 type SearchAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewSearchAgent creates a SearchAgent with its pre-built skills.
 func NewSearchAgent() *SearchAgent {
-	a := &SearchAgent{skills: NewSkillSet()}
+	a := &SearchAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("SEARCH", "", "low"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

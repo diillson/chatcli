@@ -10,13 +10,20 @@ import (
 )
 
 // DiagnosticsAgent is the specialized agent for troubleshooting and investigating issues.
+//
+// Default effort: "high" — root cause analysis is the canonical job where
+// deep thinking pays off. Override with CHATCLI_AGENT_DIAGNOSTICS_{MODEL,EFFORT}.
 type DiagnosticsAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewDiagnosticsAgent creates a DiagnosticsAgent with its pre-built skills.
 func NewDiagnosticsAgent() *DiagnosticsAgent {
-	a := &DiagnosticsAgent{skills: NewSkillSet()}
+	a := &DiagnosticsAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("DIAGNOSTICS", "", "high"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

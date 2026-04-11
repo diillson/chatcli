@@ -249,6 +249,73 @@ func (m *Manager) FindTriggeredSkills(text string) []*Skill {
 	return matched
 }
 
+// FindPathMatchedSkills returns skills whose `paths:` globs match any of the
+// given file paths. Skills with DisableModelInvocation=true are excluded.
+// filePaths should be forward-slash normalized; MatchesPath re-normalizes
+// defensively so callers may pass OS paths too.
+func (m *Manager) FindPathMatchedSkills(filePaths []string) []*Skill {
+	if len(filePaths) == 0 {
+		return nil
+	}
+	allSkills, err := m.loader.ListSkills()
+	if err != nil {
+		return nil
+	}
+	var matched []*Skill
+	for _, skill := range allSkills {
+		if skill.DisableModelInvocation {
+			continue
+		}
+		if skill.MatchesPath(filePaths) {
+			matched = append(matched, skill)
+		}
+	}
+	return matched
+}
+
+// FindAutoActivatedSkills merges trigger-based and path-based activation,
+// deduplicating by skill name. Returned slice is safe to iterate in any order.
+func (m *Manager) FindAutoActivatedSkills(text string, filePaths []string) []*Skill {
+	seen := make(map[string]bool)
+	var out []*Skill
+	for _, s := range m.FindTriggeredSkills(text) {
+		if !seen[s.Name] {
+			seen[s.Name] = true
+			out = append(out, s)
+		}
+	}
+	for _, s := range m.FindPathMatchedSkills(filePaths) {
+		if !seen[s.Name] {
+			seen[s.Name] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// GetSkillByName resolves a skill by its exact name, preferring project-local
+// over global sources (delegates to loader.GetSkill).
+func (m *Manager) GetSkillByName(name string) (*Skill, error) {
+	return m.loader.GetSkill(name)
+}
+
+// ListAllSkills returns every loadable skill (installed or built-in), for
+// use by completers and the /<skill-name> router. Skills without a Name set
+// are filtered out.
+func (m *Manager) ListAllSkills() []*Skill {
+	skills, err := m.loader.ListSkills()
+	if err != nil {
+		return nil
+	}
+	out := skills[:0:len(skills)]
+	for _, s := range skills {
+		if s != nil && s.Name != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // ValidateAgent checks if an agent configuration is valid
 func (m *Manager) ValidateAgent(name string) ([]string, []string, error) {
 	return m.builder.ValidateAgent(name)

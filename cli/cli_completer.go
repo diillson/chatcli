@@ -109,7 +109,23 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 	// 4. Autocomplete para iniciar comandos
 	if !strings.Contains(lineBeforeCursor, " ") {
 		if strings.HasPrefix(wordBeforeCursor, "/") {
-			return prompt.FilterHasPrefix(cli.GetInternalCommands(), wordBeforeCursor, true)
+			suggestions := cli.GetInternalCommands()
+			// Merge user-invocable skills so the user can discover and run
+			// them by just typing "/" — names that collide with a built-in
+			// are not added because tryInvokeUserSkill would refuse them
+			// anyway (reservedSlashCommands guard).
+			if skillSuggestions := cli.getUserInvocableSkillSuggestions(); len(skillSuggestions) > 0 {
+				existing := make(map[string]bool, len(suggestions))
+				for _, s := range suggestions {
+					existing[s.Text] = true
+				}
+				for _, s := range skillSuggestions {
+					if !existing[s.Text] {
+						suggestions = append(suggestions, s)
+					}
+				}
+			}
+			return prompt.FilterHasPrefix(suggestions, wordBeforeCursor, true)
 		}
 	}
 
@@ -216,6 +232,49 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/rewind", Description: "Volta a um checkpoint anterior da conversa"},
 		{Text: "/memory", Description: "Ver/carregar anotações de memória (today, yesterday, week, load <data>, longterm, list)"},
 	}
+}
+
+// getUserInvocableSkillSuggestions returns completer entries for every
+// installed skill that has `user-invocable: true`. The description is taken
+// from the skill's `description:` frontmatter, with the `argument-hint:` (if
+// any) appended so the user can see the expected arg shape inline.
+//
+// These entries are merged into the top-level "/" completion list so the
+// user can type "/" and immediately see available skills alongside built-ins.
+func (cli *ChatCLI) getUserInvocableSkillSuggestions() []prompt.Suggest {
+	if cli.personaHandler == nil {
+		return nil
+	}
+	mgr := cli.personaHandler.GetManager()
+	if mgr == nil {
+		return nil
+	}
+	skills := mgr.ListAllSkills()
+	if len(skills) == 0 {
+		return nil
+	}
+	var out []prompt.Suggest
+	for _, s := range skills {
+		if !s.UserInvocable {
+			continue
+		}
+		desc := s.Description
+		if s.ArgumentHint != "" {
+			if desc != "" {
+				desc = desc + "  " + s.ArgumentHint
+			} else {
+				desc = s.ArgumentHint
+			}
+		}
+		if desc == "" {
+			desc = "user-invocable skill"
+		}
+		out = append(out, prompt.Suggest{
+			Text:        "/" + s.Name,
+			Description: desc,
+		})
+	}
+	return out
 }
 
 // getConnectSuggestions returns autocomplete suggestions for /connect flags.
