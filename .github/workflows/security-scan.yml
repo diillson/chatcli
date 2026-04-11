@@ -79,6 +79,7 @@ jobs:
           context: .
           push: false
           load: true
+          no-cache: true
           tags: chatcli:scan
 
       # SARIF upload — informational, all severities, never blocks
@@ -125,6 +126,7 @@ jobs:
           file: ./operator/Dockerfile
           push: false
           load: true
+          no-cache: true
           tags: chatcli-operator:scan
 
       # SARIF upload — informational, all severities, never blocks
