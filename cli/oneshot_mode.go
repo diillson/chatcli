@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -169,10 +170,10 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 		return err
 	}
 
-	// Track cost for one-shot mode
+	// Track cost for one-shot mode — prefer real API usage
 	if cli.costTracker != nil {
-		cli.costTracker.EstimateAndRecord(cli.Provider, cli.Model,
-			len(userInput+additionalContext), len(aiResponse))
+		usage := client.GetUsageOrEstimate(cli.Client, len(userInput+additionalContext), len(aiResponse))
+		cli.costTracker.RecordRealUsage(cli.Provider, cli.Model, usage)
 	}
 
 	if rawOutput {

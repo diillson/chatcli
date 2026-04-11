@@ -171,7 +171,16 @@ func processLineContinuations(input string) string {
 
 // removeBogusBackslashSpace remove "\ " fora de aspas que não faz sentido
 // Exemplo: --search \ "valor" -> --search "valor"
+//
+// IMPORTANT: When input looks like JSON (starts with { or [), escaped quotes \"
+// are valid JSON escapes and MUST be preserved. Only strip bogus backslashes
+// in CLI-style args.
 func removeBogusBackslashSpace(input string) string {
+	// If the input looks like JSON, don't strip \" — it's a valid JSON escape.
+	// Stripping it breaks commands like: {"cmd":"exec","args":{"cmd":"docker --format \"{{.V}}\""}}
+	trimmed := strings.TrimSpace(input)
+	isJSON := len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[')
+
 	var result strings.Builder
 	runes := []rune(input)
 	n := len(runes)
@@ -218,9 +227,17 @@ func removeBogusBackslashSpace(input string) string {
 					continue
 				}
 
-				// Se for aspa (\" ou \'), pode ser erro - remove a barra
+				// Se for aspa (\" ou \'), em JSON é escape válido — preservar.
+				// Em CLI-style args pode ser erro da IA — remover barra.
 				if next == '"' || next == '\'' {
-					// Mantém só a aspa, remove a barra
+					if isJSON {
+						// JSON: \" é escape válido, preservar a barra
+						result.WriteRune(ch)
+						result.WriteRune(next)
+						i += 2
+						continue
+					}
+					// CLI: provavelmente erro da IA, remover a barra
 					i++
 					continue
 				}

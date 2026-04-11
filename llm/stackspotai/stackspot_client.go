@@ -16,6 +16,7 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/token"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -31,7 +32,14 @@ type StackSpotClient struct {
 	maxAttempts  int
 	backoff      time.Duration
 	baseURL      string
+	usageState   client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *StackSpotClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *StackSpotClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewStackSpotClient cria uma nova instância de StackSpotClient.
 func NewStackSpotClient(tokenManager token.Manager, agentID string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *StackSpotClient {
@@ -128,6 +136,20 @@ func (c *StackSpotClient) sendChatRequest(ctx context.Context, prompt, accessTok
 		zap.Int("enrichment", response.Tokens.Enrichment),
 		zap.Int("output", response.Tokens.Output),
 	)
+
+	// Store usage info (StackSpot custom format)
+	promptTokens := response.Tokens.User + response.Tokens.Enrichment
+	if promptTokens > 0 || response.Tokens.Output > 0 {
+		c.usageState.StoreUsage(&models.UsageInfo{
+			PromptTokens:     promptTokens,
+			CompletionTokens: response.Tokens.Output,
+			TotalTokens:      promptTokens + response.Tokens.Output,
+			IsReal:           true,
+		})
+	}
+	if response.StopReason != "" {
+		c.usageState.StoreStopReason(response.StopReason)
+	}
 
 	if response.Message == "" {
 		return "", fmt.Errorf("%s", i18n.T("llm.stackspot.empty_response", response.StopReason))

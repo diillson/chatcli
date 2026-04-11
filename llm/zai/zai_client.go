@@ -38,7 +38,14 @@ type ZAIClient struct {
 	apiURL      string
 	useJWT      bool
 	jwtAuth     *jwtCache
+	usageState  client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *ZAIClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *ZAIClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewZAIClient cria uma nova instância de ZAIClient.
 func NewZAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ZAIClient {
@@ -208,6 +215,15 @@ func (c *ZAIClient) processResponse(resp *http.Response) (string, error) {
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		c.logger.Error(i18n.T("llm.error.decode_response_json_for", "ZAI"), zap.Error(err), zap.Int("body_size", len(bodyBytes)))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "ZAI"), err)
+	}
+
+	// Extract usage and stop reason
+	var rawResult map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &rawResult); err == nil {
+		if usage := client.ParseOpenAIUsage(rawResult); usage != nil {
+			c.usageState.StoreUsage(usage)
+		}
+		c.usageState.StoreStopReason(client.ParseOpenAIFinishReason(rawResult))
 	}
 
 	if result.Error.Message != "" {

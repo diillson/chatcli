@@ -122,7 +122,9 @@
             "MINIMAX",
             "STACKSPOT",
             "OLLAMA",
-            "COPILOT"
+            "COPILOT",
+            "GITHUB_MODELS",
+            "OPENROUTER"
           ],
           "description": "LLM provider to use."
         },
@@ -290,6 +292,14 @@
         "githubCopilotToken": {
           "type": "string",
           "description": "GitHub Copilot authentication token."
+        },
+        "githubModelsToken": {
+          "type": "string",
+          "description": "GitHub Models authentication token."
+        },
+        "openrouterApiKey": {
+          "type": "string",
+          "description": "OpenRouter API key for accessing multiple LLM providers through a single endpoint."
         }
       }
     },

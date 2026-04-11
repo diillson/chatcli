@@ -35,7 +35,14 @@ type GeminiClient struct {
 	maxAttempts int
 	backoff     time.Duration
 	baseURL     string
+	usageState  client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *GeminiClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *GeminiClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewGeminiClient cria uma nova instância de GeminiClient.
 // Agora sem fallback interno: usa apenas os params passados (vindos do manager/ENVs).
@@ -292,6 +299,21 @@ func (c *GeminiClient) parseResponse(bodyBytes []byte) (string, error) {
 		zap.Int("response_tokens", result.UsageMetadata.CandidatesTokenCount),
 		zap.Int("total_tokens", result.UsageMetadata.TotalTokenCount),
 		zap.String("model", c.model))
+
+	// Store usage info
+	if result.UsageMetadata.TotalTokenCount > 0 || result.UsageMetadata.PromptTokenCount > 0 {
+		c.usageState.StoreUsage(&models.UsageInfo{
+			PromptTokens:     result.UsageMetadata.PromptTokenCount,
+			CompletionTokens: result.UsageMetadata.CandidatesTokenCount,
+			TotalTokens:      result.UsageMetadata.TotalTokenCount,
+			IsReal:           true,
+		})
+	}
+
+	// Store stop reason
+	if len(result.Candidates) > 0 && result.Candidates[0].FinishReason != "" {
+		c.usageState.StoreStopReason(result.Candidates[0].FinishReason)
+	}
 
 	// Log do finish reason
 	if len(result.Candidates) > 0 {

@@ -47,7 +47,14 @@ type Client struct {
 	maxAttempts int
 	backoff     time.Duration
 	baseURL     string
+	usageState  client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *Client) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *Client) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewClient creates a new GitHub Copilot client.
 func NewClient(token, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *Client {
@@ -214,6 +221,15 @@ func (c *Client) processResponse(resp *http.Response) (string, error) {
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		c.logger.Error(i18n.T("llm.copilot.decode_response_failed"), zap.Error(err))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.copilot.decode_response_failed"), err)
+	}
+
+	// Extract usage and stop reason
+	var rawResult map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &rawResult); err == nil {
+		if usage := client.ParseOpenAIUsage(rawResult); usage != nil {
+			c.usageState.StoreUsage(usage)
+		}
+		c.usageState.StoreStopReason(client.ParseOpenAIFinishReason(rawResult))
 	}
 
 	if len(result.Choices) == 0 {

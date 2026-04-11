@@ -65,9 +65,48 @@ type SessionData struct {
 	SharedMemory []Message `json:"shared_memory,omitempty"`
 }
 
-// UsageInfo representa informações de uso de tokens retornadas pelas APIs
+// UsageInfo represents token usage information returned by LLM APIs.
+// All fields are optional — providers populate what they report.
 type UsageInfo struct {
-	PromptTokens     int // Tokens usados no prompt
-	CompletionTokens int // Tokens usados na resposta
-	TotalTokens      int // Total de tokens usados
+	// Core token counts (reported by all providers)
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+
+	// Anthropic prompt caching (reduces cost for repeated prefixes)
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+
+	// Whether these values came from the API (true) or were estimated (false).
+	// Callers can use this to decide display precision and cost accuracy.
+	IsReal bool `json:"-"`
+}
+
+// Merge adds the token counts from other into this UsageInfo.
+// Useful for aggregating usage across multiple API calls in a session.
+func (u *UsageInfo) Merge(other *UsageInfo) {
+	if other == nil {
+		return
+	}
+	u.PromptTokens += other.PromptTokens
+	u.CompletionTokens += other.CompletionTokens
+	u.TotalTokens += other.TotalTokens
+	u.CacheCreationInputTokens += other.CacheCreationInputTokens
+	u.CacheReadInputTokens += other.CacheReadInputTokens
+	if other.IsReal {
+		u.IsReal = true
+	}
+}
+
+// EstimateFromChars creates a UsageInfo estimated from character counts.
+// Uses 4 chars per token heuristic. Marked as IsReal=false.
+func EstimateFromChars(inputChars, outputChars int) *UsageInfo {
+	prompt := inputChars / 4
+	completion := outputChars / 4
+	return &UsageInfo{
+		PromptTokens:     prompt,
+		CompletionTokens: completion,
+		TotalTokens:      prompt + completion,
+		IsReal:           false,
+	}
 }

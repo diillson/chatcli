@@ -36,7 +36,14 @@ type OpenAIResponsesClient struct {
 	httpClient  *http.Client
 	maxAttempts int
 	backoff     time.Duration
+	usageState  client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *OpenAIResponsesClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *OpenAIResponsesClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewOpenAIResponsesClient cria uma nova instância de OpenAIResponsesClient.
 // Agora sem fallback interno: usa apenas os params passados (vindos do manager/ENVs).
@@ -195,6 +202,18 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.responses.decode_response"), err)
 	}
 
+	// Extract usage and stop reason from the Responses API format
+	var rawResult map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &rawResult); err == nil {
+		if usage := client.ParseOpenAIUsage(rawResult); usage != nil {
+			c.usageState.StoreUsage(usage)
+		}
+		// Responses API uses "status" instead of choices[].finish_reason
+		if status, ok := rawResult["status"].(string); ok && status != "" {
+			c.usageState.StoreStopReason(status)
+		}
+	}
+
 	// Tentar extrair do caminho simples primeiro (comum em mocks e respostas diretas)
 	if response.OutputText != "" {
 		return response.OutputText, nil
@@ -268,8 +287,9 @@ func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (stri
 		}
 
 		var event struct {
-			Type  string `json:"type"`
-			Delta string `json:"delta"`
+			Type     string `json:"type"`
+			Delta    string `json:"delta"`
+			Response json.RawMessage `json:"response,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			continue
@@ -277,6 +297,19 @@ func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (stri
 
 		if event.Type == "response.output_text.delta" && event.Delta != "" {
 			sb.WriteString(event.Delta)
+		}
+
+		// Extract usage from the response.completed event
+		if event.Type == "response.completed" && event.Response != nil {
+			var respData map[string]interface{}
+			if err := json.Unmarshal(event.Response, &respData); err == nil {
+				if usage := client.ParseOpenAIUsage(respData); usage != nil {
+					c.usageState.StoreUsage(usage)
+				}
+				if status, ok := respData["status"].(string); ok && status != "" {
+					c.usageState.StoreStopReason(status)
+				}
+			}
 		}
 	}
 

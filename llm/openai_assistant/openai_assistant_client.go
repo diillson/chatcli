@@ -18,6 +18,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -50,7 +51,14 @@ type OpenAIAssistantClient struct {
 	activeThreads   map[string]time.Time
 	mu              sync.RWMutex
 	fileUploadSem   chan struct{} // Semáforo para limitar uploads paralelos
+	usageState      client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *OpenAIAssistantClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *OpenAIAssistantClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // FileRegistry gerencia o cache de arquivos já enviados para a OpenAI
 type FileRegistry struct {
@@ -571,6 +579,17 @@ func (c *OpenAIAssistantClient) waitForRunCompletion(ctx context.Context, thread
 
 		if err := json.Unmarshal(resp, &runStatus); err != nil {
 			return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.decode_status"), err)
+		}
+
+		// Extract usage from the run object
+		var rawRun map[string]interface{}
+		if err := json.Unmarshal(resp, &rawRun); err == nil {
+			if usage := client.ParseOpenAIUsage(rawRun); usage != nil {
+				c.usageState.StoreUsage(usage)
+			}
+			if status, ok := rawRun["status"].(string); ok && status != "" {
+				c.usageState.StoreStopReason(status)
+			}
 		}
 
 		switch runStatus.Status {

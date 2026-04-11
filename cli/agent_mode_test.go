@@ -135,3 +135,52 @@ func TestSanitizeAndParse_EscapedExecCommand(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"exec", "--cmd", "mkdir -p testeapi"}, args)
 }
+
+// Regression tests for escaped quotes inside JSON args.
+// These exact commands failed before the fix to removeBogusBackslashSpace.
+
+func TestSanitize_JSON_PreservesEscapedQuotesInDockerFormat(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	// Model sends: docker version --format "{{.Server.Version}}"
+	// JSON-escaped as: --format \"{{.Server.Version}}\"
+	raw := `{"cmd":"exec","args":{"cmd":"sleep 5 && docker version --format \"{{.Server.Version}}\""}}`
+
+	sanitized := sanitizeToolCallArgs(raw, logger, "@coder", true)
+	args, err := parseToolArgsWithJSON(sanitized)
+	assert.NoError(t, err, "JSON with escaped quotes in docker --format should parse")
+	assert.Contains(t, args, "exec")
+}
+
+func TestSanitize_JSON_PreservesEscapedQuotesInEchoAndPipes(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	// Model sends: echo "Docker is running" && exit 0
+	// JSON-escaped: echo \"Docker is running\" && exit 0
+	raw := `{"cmd":"exec","args":{"cmd":"open -a Docker && (for i in $(seq 1 60); do docker info >/dev/null 2>&1 && echo \"Docker is running\" && exit 0; sleep 2; done; echo \"Docker did not become ready in time\"; exit 1)","dir":"."}}`
+
+	sanitized := sanitizeToolCallArgs(raw, logger, "@coder", true)
+	args, err := parseToolArgsWithJSON(sanitized)
+	assert.NoError(t, err, "JSON with escaped quotes in shell commands should parse")
+	assert.Contains(t, args, "exec")
+}
+
+func TestSanitize_JSON_PreservesEscapedQuotesInGrepPattern(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	// grep -E "Server Version|ERROR"
+	raw := `{"cmd":"exec","args":{"cmd":"docker info 2>&1 | grep -E \"Server Version|ERROR\""}}`
+
+	sanitized := sanitizeToolCallArgs(raw, logger, "@coder", true)
+	args, err := parseToolArgsWithJSON(sanitized)
+	assert.NoError(t, err, "JSON with escaped quotes in grep should parse")
+	assert.Contains(t, args, "exec")
+}
+
+func TestSanitize_CLI_StillStripsBackslashSpace(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	// CLI-style args: bogus "\ " (backslash-space) should still be stripped
+	raw := `exec --cmd echo \ hello`
+
+	sanitized := sanitizeToolCallArgs(raw, logger, "@coder", true)
+	// Backslash-space should be removed, leaving just the space
+	assert.NotContains(t, sanitized, `\ `)
+	assert.Contains(t, sanitized, "echo hello")
+}

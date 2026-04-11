@@ -320,14 +320,27 @@ func parseClaudeToolResponse(body string, logger *zap.Logger) (*models.LLMRespon
 
 	// Extract usage
 	if usage, ok := result["usage"].(map[string]interface{}); ok {
-		response.Usage = &models.UsageInfo{}
+		response.Usage = &models.UsageInfo{IsReal: true}
 		if it, ok := usage["input_tokens"].(float64); ok {
 			response.Usage.PromptTokens = int(it)
 		}
 		if ot, ok := usage["output_tokens"].(float64); ok {
 			response.Usage.CompletionTokens = int(ot)
 		}
+		if cc, ok := usage["cache_creation_input_tokens"].(float64); ok {
+			response.Usage.CacheCreationInputTokens = int(cc)
+		}
+		if cr, ok := usage["cache_read_input_tokens"].(float64); ok {
+			response.Usage.CacheReadInputTokens = int(cr)
+		}
 		response.Usage.TotalTokens = response.Usage.PromptTokens + response.Usage.CompletionTokens
+		// Store in global tracker so LastUsage() works
+		RecordClaudeUsage(response.Usage)
+	}
+
+	// Extract stop_reason
+	if sr, ok := result["stop_reason"].(string); ok && sr != "" {
+		RecordClaudeStopReason(sr)
 	}
 
 	return response, nil

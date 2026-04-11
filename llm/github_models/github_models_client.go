@@ -37,7 +37,14 @@ type GitHubModelsClient struct {
 	client      *http.Client
 	maxAttempts int
 	backoff     time.Duration
+	usageState  client.UsageState
 }
+
+// LastUsage returns the token usage from the most recent API call.
+func (c *GitHubModelsClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsage() }
+
+// LastStopReason returns the stop reason from the most recent API call.
+func (c *GitHubModelsClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewGitHubModelsClient creates a new GitHub Models client.
 func NewGitHubModelsClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *GitHubModelsClient {
@@ -149,6 +156,16 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 		if err := json.Unmarshal(bodyBytes, &result); err != nil {
 			return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "GitHub Models"), err)
 		}
+
+		// Extract usage and stop reason
+		var rawResult map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &rawResult); err == nil {
+			if usage := client.ParseOpenAIUsage(rawResult); usage != nil {
+				c.usageState.StoreUsage(usage)
+			}
+			c.usageState.StoreStopReason(client.ParseOpenAIFinishReason(rawResult))
+		}
+
 		if len(result.Choices) == 0 {
 			return "", fmt.Errorf("%s", i18n.T("llm.error.no_choices", "GitHub Models"))
 		}
