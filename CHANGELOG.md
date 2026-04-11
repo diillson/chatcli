@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.99.0](https://github.com/diillson/chatcli/compare/v1.98.0...v1.99.0) (2026-04-11)
+
+
+### Features
+
+* **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
+
 ## [1.98.0](https://github.com/diillson/chatcli/compare/v1.97.4...v1.98.0) (2026-04-08)
 
 
