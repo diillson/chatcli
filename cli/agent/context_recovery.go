@@ -19,8 +19,8 @@
 package agent
 
 import (
-	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/models"
@@ -54,13 +54,19 @@ func DefaultContextRecoveryConfig() ContextRecoveryConfig {
 	}
 
 	if v := os.Getenv("CHATCLI_MAX_RECOVERY_ATTEMPTS"); v != "" {
-		_, _ = fmt.Sscanf(v, "%d", &cfg.MaxRecoveryAttempts)
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.MaxRecoveryAttempts = n
+		}
 	}
 	if v := os.Getenv("CHATCLI_MAX_TOKEN_ESCALATIONS"); v != "" {
-		_, _ = fmt.Sscanf(v, "%d", &cfg.MaxTokenEscalations)
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.MaxTokenEscalations = n
+		}
 	}
 	if v := os.Getenv("CHATCLI_EMERGENCY_KEEP_MESSAGES"); v != "" {
-		_, _ = fmt.Sscanf(v, "%d", &cfg.EmergencyKeepMessages)
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.EmergencyKeepMessages = n
+		}
 	}
 
 	return cfg

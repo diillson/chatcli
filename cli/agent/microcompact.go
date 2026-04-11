@@ -22,6 +22,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/models"
@@ -59,10 +60,14 @@ func DefaultMicrocompactConfig() MicrocompactConfig {
 		MinContentSize:       3000,
 	}
 	if v := os.Getenv("CHATCLI_MICROCOMPACT_TRUNCATE_TURNS"); v != "" {
-		_, _ = fmt.Sscanf(v, "%d", &cfg.TurnsBeforeTruncate)
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.TurnsBeforeTruncate = n
+		}
 	}
 	if v := os.Getenv("CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS"); v != "" {
-		_, _ = fmt.Sscanf(v, "%d", &cfg.TurnsBeforeSummarize)
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.TurnsBeforeSummarize = n
+		}
 	}
 	return cfg
 }

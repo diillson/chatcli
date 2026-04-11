@@ -38,7 +38,9 @@ var (
 func getResultDir() string {
 	resultDirOnce.Do(func() {
 		dir := filepath.Join(os.TempDir(), "chatcli-tool-results")
-		_ = os.MkdirAll(dir, 0o700)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return
+		}
 		resultDir = dir
 	})
 	return resultDir
@@ -91,7 +93,7 @@ func CleanupResultFiles() {
 // ReadStoredResult reads a previously stored result file.
 // Returns the content or an error message if the file is not found.
 func ReadStoredResult(path string) string {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return fmt.Sprintf("[ERROR] Could not read stored result: %v", err)
 	}

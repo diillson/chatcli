@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -45,10 +46,14 @@ var (
 
 func init() {
 	if v := os.Getenv("CHATCLI_TOOL_RESULT_BUDGET_CHARS"); v != "" {
-		_, _ = fmt.Sscanf(v, "%d", &DefaultTurnBudgetChars)
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			DefaultTurnBudgetChars = n
+		}
 	}
 	if v := os.Getenv("CHATCLI_TOOL_RESULT_MAX_CHARS"); v != "" {
-		_, _ = fmt.Sscanf(v, "%d", &DefaultPerResultMaxChars)
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			DefaultPerResultMaxChars = n
+		}
 	}
 }
 
@@ -208,7 +213,12 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 
 	// Save full content to disk
 	dir := budgetResultDir()
-	_ = os.MkdirAll(dir, 0o700)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		if logger != nil {
+			logger.Warn("Failed to create budget result directory", zap.Error(err))
+		}
+		return content[:maxSize] + "\n... [output truncated — dir creation failed]"
+	}
 
 	n := atomic.AddUint64(&budgetFileCounter, 1)
 	sanitizedID := strings.ReplaceAll(toolCallID, "/", "_")

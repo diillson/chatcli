@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -98,12 +99,16 @@ type CostTracker struct {
 func NewCostTracker() *CostTracker {
 	budgetLimit := 0.0
 	if v := os.Getenv("CHATCLI_SESSION_BUDGET_USD"); v != "" {
-		_, _ = fmt.Sscanf(v, "%f", &budgetLimit)
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			budgetLimit = f
+		}
 	}
 
 	warningPct := 0.80
 	if v := os.Getenv("CHATCLI_BUDGET_WARNING_PCT"); v != "" {
-		_, _ = fmt.Sscanf(v, "%f", &warningPct)
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			warningPct = f
+		}
 	}
 
 	return &CostTracker{
@@ -324,7 +329,7 @@ func (ct *CostTracker) SaveSession() error {
 // RestoreSession loads a previous session's cost data.
 func (ct *CostTracker) RestoreSession(sessionID string) error {
 	path := filepath.Join(costSessionDir(), sessionID+".json")
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return err
 	}

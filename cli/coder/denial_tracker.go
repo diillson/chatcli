@@ -15,8 +15,8 @@
 package coder
 
 import (
-	"fmt"
 	"os"
+	"strconv"
 	"sync"
 )
 
@@ -52,14 +52,13 @@ func DefaultDenialTrackerConfig() DenialTrackerConfig {
 		MaxTotalDenials:       20,
 	}
 	if v := os.Getenv("CHATCLI_MAX_CONSECUTIVE_DENIALS"); v != "" {
-		if _, err := fmt.Sscanf(v, "%d", &cfg.MaxConsecutiveDenials); err != nil {
-			// ignore invalid env value, keep default
-			_ = err
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.MaxConsecutiveDenials = n
 		}
 	}
 	if v := os.Getenv("CHATCLI_MAX_TOTAL_DENIALS"); v != "" {
-		if _, err := fmt.Sscanf(v, "%d", &cfg.MaxTotalDenials); err != nil {
-			_ = err
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.MaxTotalDenials = n
 		}
 	}
 	return cfg

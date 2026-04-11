@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -65,7 +66,7 @@ func (t *FileStalenessTracker) RecordRead(path string) error {
 		return fmt.Errorf("stat file for staleness tracking: %w", err)
 	}
 
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return fmt.Errorf("read file for staleness tracking: %w", err)
 	}
@@ -127,7 +128,7 @@ func (t *FileStalenessTracker) CheckStaleness(path string) StalenessResult {
 	}
 
 	// Step 2: Mtime or size changed — do full content hash comparison
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		result.IsStale = true
 		result.Reason = "mtime changed and file unreadable"
