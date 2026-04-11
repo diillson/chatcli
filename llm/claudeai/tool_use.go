@@ -73,6 +73,18 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		reqBody["tools"] = toolDefs
 	}
 
+	// Skill effort hint → extended thinking (tool-use path).
+	if budget := client.ThinkingBudgetForEffort(client.EffortFromContext(ctx)); budget > 0 && supportsExtendedThinking(c.model) {
+		required := budget + 1024
+		if v, ok := reqBody["max_tokens"].(int); ok && v < required {
+			reqBody["max_tokens"] = required
+		}
+		reqBody["thinking"] = map[string]interface{}{
+			"type":          "enabled",
+			"budget_tokens": budget,
+		}
+	}
+
 	jsonValue, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.tool.error.marshaling_payload"), err)

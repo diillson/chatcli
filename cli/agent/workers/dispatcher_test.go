@@ -69,6 +69,8 @@ func (a *mockAgent) SystemPrompt() string      { return "You are a mock agent." 
 func (a *mockAgent) Skills() *SkillSet         { return NewSkillSet() }
 func (a *mockAgent) AllowedCommands() []string { return []string{"read"} }
 func (a *mockAgent) IsReadOnly() bool          { return true }
+func (a *mockAgent) Model() string             { return "" }
+func (a *mockAgent) Effort() string            { return "" }
 func (a *mockAgent) Execute(ctx context.Context, task string, deps *WorkerDeps) (*AgentResult, error) {
 	atomic.AddInt64(&a.execCount, 1)
 	if a.sleepTime > 0 {
@@ -264,6 +266,8 @@ func (a *concurrencyTracker) SystemPrompt() string      { return "" }
 func (a *concurrencyTracker) Skills() *SkillSet         { return NewSkillSet() }
 func (a *concurrencyTracker) AllowedCommands() []string { return nil }
 func (a *concurrencyTracker) IsReadOnly() bool          { return true }
+func (a *concurrencyTracker) Model() string             { return "" }
+func (a *concurrencyTracker) Effort() string            { return "" }
 func (a *concurrencyTracker) Execute(ctx context.Context, task string, deps *WorkerDeps) (*AgentResult, error) {
 	c := atomic.AddInt64(a.current, 1)
 	// Update max

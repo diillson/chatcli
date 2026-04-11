@@ -31,6 +31,7 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/openai_assistant"
+	"github.com/diillson/chatcli/pkg/persona"
 
 	"github.com/diillson/chatcli/models"
 
@@ -217,6 +218,13 @@ type ChatCLI struct {
 
 	// Multiline input buffer (--- delimiter toggle)
 	multilineBuf MultilineBuffer
+
+	// Pending manual skill invocation set by `/<skill-name>` routing.
+	// Consumed (and cleared) by processLLMRequest to inject the skill
+	// content into the system prompt for a single turn. See Fase 2 of the
+	// advanced skill frontmatter support.
+	pendingManualSkill     *persona.Skill
+	pendingManualSkillArgs string
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
@@ -466,6 +474,13 @@ func (cli *ChatCLI) executor(in string) {
 	}
 
 	if strings.HasPrefix(in, "/run") {
+		// Guard against entering agent mode with an empty task — that
+		// would ship an empty user message to the LLM. Mirrors the
+		// /agent fix: show a usage hint and stay in chat mode.
+		if strings.TrimSpace(strings.TrimPrefix(in, "/run")) == "" {
+			fmt.Println(colorize("  "+i18n.T("agent.usage.hint"), ColorYellow))
+			return
+		}
 		cli.pendingAction = "agent"
 		panic(agentModeRequest)
 	}
@@ -839,6 +854,14 @@ func (cli *ChatCLI) runAgentLogic() {
 		query = strings.TrimSpace(strings.TrimPrefix(lastCommand, "/run"))
 	} else {
 		fmt.Println(i18n.T("error.agent_query_extraction"))
+		return
+	}
+	if query == "" {
+		// Defense-in-depth: the /agent and /run entry points already
+		// refuse empty inputs, but if some upstream change bypasses
+		// them we still don't want to ship an empty user message to
+		// the LLM.
+		fmt.Println(colorize("  "+i18n.T("agent.usage.hint"), ColorYellow))
 		return
 	}
 

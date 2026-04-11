@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"go.uber.org/zap"
 )
@@ -266,15 +267,59 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 		}
 	}
 
-	// Create a fresh LLM client for this worker
-	llmClient, err := d.llmMgr.GetClient(d.config.Provider, d.config.Model)
-	if err != nil {
-		return AgentResult{
-			CallID:   call.ID,
-			Agent:    call.Agent,
-			Task:     call.Task,
-			Error:    fmt.Errorf("failed to create LLM client for worker: %w", err),
-			Duration: time.Since(startTime),
+	// Resolve the effective client+effort for this worker:
+	//   - agent.Model() non-empty → route through the shared model
+	//     resolver (API cache → catalog → family heuristic → optimistic);
+	//     cross-provider swaps are honored when the target provider is
+	//     configured, otherwise the worker stays on the dispatcher's
+	//     default model and the UserMessage is logged.
+	//   - agent.Effort() non-empty → attached to ctx via WithEffortHint,
+	//     so the provider's SendPrompt opts into extended thinking /
+	//     reasoning_effort for every LLM call in this worker's ReAct loop.
+	//
+	// The dispatcher's config.Provider/Model are NOT mutated — swap is
+	// scoped to this single worker invocation.
+	effProvider := d.config.Provider
+	effModel := d.config.Model
+
+	var llmClient client.LLMClient
+	if hint := strings.TrimSpace(agent.Model()); hint != "" {
+		resolution := client.ResolveModelRouting(client.ResolveModelRoutingInput{
+			Router:       d.llmMgr,
+			UserProvider: d.config.Provider,
+			UserModel:    d.config.Model,
+			Hint:         hint,
+			Logger:       d.logger,
+		})
+		if resolution.Changed {
+			llmClient = resolution.Client
+			effProvider = resolution.Provider
+			effModel = resolution.Model
+			d.logger.Info("worker model hint honored",
+				zap.String("agent", string(call.Agent)),
+				zap.String("note", resolution.Note),
+				zap.String("from_provider", d.config.Provider),
+				zap.String("to_provider", effProvider),
+				zap.String("from_model", d.config.Model),
+				zap.String("to_model", effModel))
+		} else if resolution.UserMessage != "" {
+			d.logger.Warn("worker model hint fell back",
+				zap.String("agent", string(call.Agent)),
+				zap.String("note", resolution.Note),
+				zap.String("user_message", resolution.UserMessage))
+		}
+	}
+	if llmClient == nil {
+		var err error
+		llmClient, err = d.llmMgr.GetClient(effProvider, effModel)
+		if err != nil {
+			return AgentResult{
+				CallID:   call.ID,
+				Agent:    call.Agent,
+				Task:     call.Task,
+				Error:    fmt.Errorf("failed to create LLM client for worker: %w", err),
+				Duration: time.Since(startTime),
+			}
 		}
 	}
 
@@ -282,6 +327,11 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 	// meaningful context (agent name, task description) in security prompts.
 	agentCtx := context.WithValue(ctx, CtxKeyAgentName, string(call.Agent))
 	agentCtx = context.WithValue(agentCtx, CtxKeyAgentTask, call.Task)
+
+	// Attach effort hint to ctx (no-op when agent.Effort() is empty).
+	if effort := client.NormalizeEffort(agent.Effort()); effort != client.EffortUnset {
+		agentCtx = client.WithEffortHint(agentCtx, effort)
+	}
 
 	// Create worker context with timeout
 	workerCtx, cancel := context.WithTimeout(agentCtx, d.config.WorkerTimeout)

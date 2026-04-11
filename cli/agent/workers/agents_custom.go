@@ -29,6 +29,19 @@ var builtinAgentTypes = map[AgentType]bool{
 
 // CustomAgent adapts a persona.Agent into a WorkerAgent for multi-agent orchestration.
 // It wraps persona expertise content + skills into a full worker with ReAct loop access.
+//
+// Per-agent model/effort preferences are sourced directly from the backing
+// persona.Agent frontmatter — so a user can declare in their .md file:
+//
+//	---
+//	name: "my-reviewer"
+//	model: "claude-opus-4-6"
+//	effort: "high"
+//	tools: Read, Grep, Glob
+//	---
+//
+// and the dispatcher will route this agent's turns through Opus with
+// extended thinking enabled, regardless of the user's active /switch model.
 type CustomAgent struct {
 	agentType    AgentType
 	name         string
@@ -37,6 +50,8 @@ type CustomAgent struct {
 	commands     []string
 	readOnly     bool
 	skills       *SkillSet
+	modelHint    string
+	effortHint   string
 }
 
 // NewCustomAgent creates a CustomAgent from a persona Agent and its resolved skills.
@@ -59,6 +74,8 @@ func NewCustomAgent(pa *persona.Agent, personaSkills []*persona.Skill) *CustomAg
 		commands:     commands,
 		readOnly:     readOnly,
 		skills:       skillSet,
+		modelHint:    strings.TrimSpace(pa.Model),
+		effortHint:   strings.ToLower(strings.TrimSpace(pa.Effort)),
 	}
 }
 
@@ -69,6 +86,8 @@ func (a *CustomAgent) SystemPrompt() string      { return a.systemPrompt }
 func (a *CustomAgent) Skills() *SkillSet         { return a.skills }
 func (a *CustomAgent) AllowedCommands() []string { return a.commands }
 func (a *CustomAgent) IsReadOnly() bool          { return a.readOnly }
+func (a *CustomAgent) Model() string             { return a.modelHint }
+func (a *CustomAgent) Effort() string            { return a.effortHint }
 
 func (a *CustomAgent) Execute(ctx context.Context, task string, deps *WorkerDeps) (*AgentResult, error) {
 	config := WorkerReActConfig{

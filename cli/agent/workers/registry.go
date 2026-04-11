@@ -81,6 +81,20 @@ func (r *Registry) CatalogString() string {
 		if a.IsReadOnly() {
 			b.WriteString("Access: READ-ONLY (cannot modify files)\n")
 		}
+		// Advertise the per-agent LLM preference to the orchestrator so it
+		// can make informed routing decisions (e.g., prefer Planner for
+		// deep reasoning, Formatter for cheap mechanical work). Only
+		// non-empty hints are shown — the default "inherit" case stays
+		// invisible to avoid noise.
+		if effort := a.Effort(); effort != "" {
+			fmt.Fprintf(&b, "LLM profile: effort=%s", effort)
+			if model := a.Model(); model != "" {
+				fmt.Fprintf(&b, ", model=%s", model)
+			}
+			b.WriteString("\n")
+		} else if model := a.Model(); model != "" {
+			fmt.Fprintf(&b, "LLM profile: model=%s\n", model)
+		}
 		fmt.Fprintf(&b, "Allowed commands: %s\n", strings.Join(a.AllowedCommands(), ", "))
 		skills := a.Skills()
 		if skills != nil {

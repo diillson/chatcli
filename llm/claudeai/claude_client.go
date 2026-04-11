@@ -150,6 +150,18 @@ func (c *ClaudeClient) getMaxTokens() int {
 	return catalog.GetMaxTokens(catalog.ProviderClaudeAI, c.model, 0)
 }
 
+// supportsExtendedThinking reports whether the given Anthropic model id
+// advertises the extended-thinking feature. The check is substring-based so
+// that dated variants (e.g. "claude-sonnet-4-5-20251001") and future 4.x
+// releases keep working without a catalog update.
+func supportsExtendedThinking(model string) bool {
+	m := strings.ToLower(model)
+	return strings.Contains(m, "opus-4") ||
+		strings.Contains(m, "sonnet-4") ||
+		strings.Contains(m, "3-7-sonnet") ||
+		strings.Contains(m, "3.7-sonnet")
+}
+
 // SendPrompt com exponential backoff usando utils.Retry
 func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	effectiveMaxTokens := maxTokens
@@ -177,6 +189,24 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	}
 	if isOAuth {
 		reqBody["stream"] = true
+	}
+
+	// Skill effort hint → extended thinking.
+	// Only enabled for models that actually support it, otherwise the API
+	// rejects the request. max_tokens must be strictly greater than
+	// budget_tokens, so we raise it when necessary.
+	if budget := client.ThinkingBudgetForEffort(client.EffortFromContext(ctx)); budget > 0 && supportsExtendedThinking(c.model) {
+		required := budget + 1024
+		if v, ok := reqBody["max_tokens"].(int); ok && v < required {
+			reqBody["max_tokens"] = required
+		}
+		reqBody["thinking"] = map[string]interface{}{
+			"type":          "enabled",
+			"budget_tokens": budget,
+		}
+		c.logger.Debug("claudeai: enabling extended thinking from skill effort hint",
+			zap.Int("budget_tokens", budget),
+			zap.String("model", c.model))
 	}
 
 	jsonValue, err := json.Marshal(reqBody)

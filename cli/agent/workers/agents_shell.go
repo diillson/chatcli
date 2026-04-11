@@ -10,13 +10,20 @@ import (
 )
 
 // ShellAgent is the specialized agent for executing commands, building, and testing.
+//
+// Default effort: "low" — shelling out is mechanical.
+// Override with CHATCLI_AGENT_SHELL_{MODEL,EFFORT}.
 type ShellAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewShellAgent creates a ShellAgent with its pre-built skills.
 func NewShellAgent() *ShellAgent {
-	a := &ShellAgent{skills: NewSkillSet()}
+	a := &ShellAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("SHELL", "", "low"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

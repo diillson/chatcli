@@ -351,6 +351,21 @@ message AgentInfo {
   string model = 5;             // preferred model for this agent
   string content = 6;           // markdown body (system prompt content)
   string frontmatter = 7;       // raw YAML frontmatter for client-side parsing
+
+  // Per-agent LLM profile (Fase: multi-agent parity with skills).
+  // effort drives extended thinking / reasoning_effort on providers
+  // that support it. model already exists above as field 5. Both are
+  // honored by the dispatcher's model router when this agent runs as a
+  // worker — empty string means "inherit user's active model / send no
+  // effort hint".
+  string effort = 8;            // "low" | "medium" | "high" | "max" | ""
+
+  // Optional metadata mirroring skill frontmatter — useful for
+  // `/agent list`, catalog display, and future registry search.
+  string category = 9;
+  string version = 10;
+  string author = 11;
+  repeated string tags = 12;
 }
 
 message ListRemoteAgentsRequest {}

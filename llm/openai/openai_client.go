@@ -76,6 +76,17 @@ func (c *OpenAIClient) getMaxTokens() int {
 }
 
 // SendPrompt envia um prompt para o modelo de linguagem e retorna a resposta.
+// supportsOpenAIReasoningEffort reports whether the chat-completions model id
+// accepts the `reasoning_effort` field (o-series / GPT-5 reasoning models).
+func supportsOpenAIReasoningEffort(model string) bool {
+	m := strings.ToLower(model)
+	return strings.HasPrefix(m, "o1") ||
+		strings.HasPrefix(m, "o3") ||
+		strings.HasPrefix(m, "o4") ||
+		strings.HasPrefix(m, "gpt-5") ||
+		strings.Contains(m, "-reasoning")
+}
+
 func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
@@ -114,6 +125,13 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		"model":      c.model,
 		"messages":   messages,
 		"max_tokens": effectiveMaxTokens,
+	}
+
+	// Skill effort hint → reasoning_effort (only for reasoning-capable models).
+	if eff := client.ReasoningEffortForOpenAI(client.EffortFromContext(ctx)); eff != "" && supportsOpenAIReasoningEffort(c.model) {
+		payload["reasoning_effort"] = eff
+		c.logger.Debug("openai: applying reasoning_effort from skill hint",
+			zap.String("effort", eff), zap.String("model", c.model))
 	}
 
 	jsonValue, err := json.Marshal(payload)
@@ -306,6 +324,11 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		"messages":   messages,
 		"max_tokens": effectiveMaxTokens,
 		"stream":     true,
+	}
+
+	// Skill effort hint → reasoning_effort (reasoning-capable models only).
+	if eff := client.ReasoningEffortForOpenAI(client.EffortFromContext(ctx)); eff != "" && supportsOpenAIReasoningEffort(c.model) {
+		payload["reasoning_effort"] = eff
 	}
 
 	jsonValue, err := json.Marshal(payload)

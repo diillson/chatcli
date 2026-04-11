@@ -137,6 +137,13 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		ch.cli.forceRefreshPrompt()
 		return false
 	default:
+		// Fallback: treat "/<name> [args]" as a manual skill invocation
+		// when <name> resolves to an installed skill with
+		// `user-invocable: true`. Reserved built-in command names are
+		// filtered out by tryInvokeUserSkill itself.
+		if ch.tryInvokeUserSkill(userInput) {
+			return false
+		}
 		fmt.Println(i18n.T("error.unknown_command"))
 		return false
 	}

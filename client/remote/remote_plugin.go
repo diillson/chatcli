@@ -123,6 +123,12 @@ func (c *Client) ListRemotePlugins(ctx context.Context) ([]RemotePluginInfo, err
 }
 
 // RemoteAgentInfo holds agent metadata from the server.
+//
+// Mirrors the advanced frontmatter supported by persona.Agent so remote
+// custom agents inherit the same model/effort routing as local ones. When
+// the server is older and does not populate these fields they arrive as
+// zero values — clients treat that the same as "inherit user active
+// provider/model and send no effort hint".
 type RemoteAgentInfo struct {
 	Name        string
 	Description string
@@ -130,6 +136,30 @@ type RemoteAgentInfo struct {
 	Plugins     []string
 	Model       string
 	Content     string
+	Effort      string
+	Category    string
+	Version     string
+	Author      string
+	Tags        []string
+}
+
+// protoToRemoteAgentInfo maps pb.AgentInfo → local DTO in one place so the
+// Get/List call sites cannot drift. Added-field-safe: fields absent on the
+// server deserialize as empty strings / nil slices.
+func protoToRemoteAgentInfo(a *pb.AgentInfo) RemoteAgentInfo {
+	return RemoteAgentInfo{
+		Name:        a.Name,
+		Description: a.Description,
+		Skills:      a.Skills,
+		Plugins:     a.Plugins,
+		Model:       a.Model,
+		Content:     a.Content,
+		Effort:      a.Effort,
+		Category:    a.Category,
+		Version:     a.Version,
+		Author:      a.Author,
+		Tags:        a.Tags,
+	}
 }
 
 // ListRemoteAgents lists all agents available on the server.
@@ -142,14 +172,7 @@ func (c *Client) ListRemoteAgents(ctx context.Context) ([]RemoteAgentInfo, error
 
 	var result []RemoteAgentInfo
 	for _, a := range resp.Agents {
-		result = append(result, RemoteAgentInfo{
-			Name:        a.Name,
-			Description: a.Description,
-			Skills:      a.Skills,
-			Plugins:     a.Plugins,
-			Model:       a.Model,
-			Content:     a.Content,
-		})
+		result = append(result, protoToRemoteAgentInfo(a))
 	}
 	return result, nil
 }
@@ -193,15 +216,8 @@ func (c *Client) GetAgentDefinition(ctx context.Context, name string) (*RemoteAg
 	if err != nil {
 		return nil, fmt.Errorf("remote GetAgentDefinition failed: %w", err)
 	}
-	a := resp.Agent
-	return &RemoteAgentInfo{
-		Name:        a.Name,
-		Description: a.Description,
-		Skills:      a.Skills,
-		Plugins:     a.Plugins,
-		Model:       a.Model,
-		Content:     a.Content,
-	}, nil
+	info := protoToRemoteAgentInfo(resp.Agent)
+	return &info, nil
 }
 
 // GetSkillContent fetches the full content of a remote skill.

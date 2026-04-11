@@ -10,13 +10,20 @@ import (
 )
 
 // DepsAgent is the specialized agent for dependency management and auditing.
+//
+// Default effort: "low" — dep queries are mostly tool output interpretation.
+// Override with CHATCLI_AGENT_DEPS_{MODEL,EFFORT}.
 type DepsAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewDepsAgent creates a DepsAgent with its pre-built skills.
 func NewDepsAgent() *DepsAgent {
-	a := &DepsAgent{skills: NewSkillSet()}
+	a := &DepsAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("DEPS", "", "low"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

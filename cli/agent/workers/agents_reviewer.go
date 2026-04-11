@@ -10,13 +10,20 @@ import (
 )
 
 // ReviewerAgent is the specialized agent for code quality analysis and review.
+//
+// Default effort: "high" — reviews find real issues only with thorough
+// reasoning. Override with CHATCLI_AGENT_REVIEWER_{MODEL,EFFORT}.
 type ReviewerAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewReviewerAgent creates a ReviewerAgent with its pre-built skills.
 func NewReviewerAgent() *ReviewerAgent {
-	a := &ReviewerAgent{skills: NewSkillSet()}
+	a := &ReviewerAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("REVIEWER", "", "high"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

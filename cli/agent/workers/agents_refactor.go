@@ -13,13 +13,20 @@ import (
 )
 
 // RefactorAgent is the specialized agent for safe structural code transformations.
+//
+// Default effort: "high" — renames and extracts need semantic understanding
+// of references and side effects. Override with CHATCLI_AGENT_REFACTOR_{MODEL,EFFORT}.
 type RefactorAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewRefactorAgent creates a RefactorAgent with its pre-built skills.
 func NewRefactorAgent() *RefactorAgent {
-	a := &RefactorAgent{skills: NewSkillSet()}
+	a := &RefactorAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("REFACTOR", "", "high"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

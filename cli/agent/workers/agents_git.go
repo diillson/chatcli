@@ -10,13 +10,20 @@ import (
 )
 
 // GitAgent is the specialized agent for version control operations.
+//
+// Default effort: "low" — git commands are mechanical.
+// Override with CHATCLI_AGENT_GIT_{MODEL,EFFORT}.
 type GitAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewGitAgent creates a GitAgent with its pre-built skills.
 func NewGitAgent() *GitAgent {
-	a := &GitAgent{skills: NewSkillSet()}
+	a := &GitAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("GIT", "", "low"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }

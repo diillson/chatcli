@@ -5,13 +5,20 @@ import (
 )
 
 // CoderAgent is the specialized agent for writing, patching, and creating code.
+//
+// Default effort: "medium" — safe diffs benefit from some thinking but
+// don't need extreme budgets. Override with CHATCLI_AGENT_CODER_{MODEL,EFFORT}.
 type CoderAgent struct {
+	BuiltinAgentMeta
 	skills *SkillSet
 }
 
 // NewCoderAgent creates a CoderAgent with its pre-built skills.
 func NewCoderAgent() *CoderAgent {
-	a := &CoderAgent{skills: NewSkillSet()}
+	a := &CoderAgent{
+		BuiltinAgentMeta: NewBuiltinAgentMeta("CODER", "", "medium"),
+		skills:           NewSkillSet(),
+	}
 	a.registerSkills()
 	return a
 }
