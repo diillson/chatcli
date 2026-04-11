@@ -4,6 +4,14 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.99.0](https://github.com/diillson/chatcli/compare/v1.98.0...v1.99.0) (2026-04-11)
+
+
+### Features
+
+* **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
+* **operator:** patch libcrypto3/libssl3 CVEs abased 1.98.0 ([#772](https://github.com/diillson/chatcli/issues/772)) ([97c0e92](https://github.com/diillson/chatcli/commit/97c0e92adc7f1afe426883e3c119829ae1513beb))
+
 ## [1.98.0](https://github.com/diillson/chatcli/compare/v1.97.4...v1.98.0) (2026-04-08)
 
 
