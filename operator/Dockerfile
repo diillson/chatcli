@@ -33,7 +33,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -a -o manager main.go
 # Pinned to exact patch version; Dependabot keeps this updated.
 FROM alpine:3.23.3 AS runtime
 RUN apk update && apk upgrade --no-cache && \
-    apk add --no-cache git ca-certificates tzdata && \
+    apk add --no-cache \
+        "libcrypto3>=3.5.6-r0" \
+        "libssl3>=3.5.6-r0" \
+        git ca-certificates tzdata && \
     adduser -D -u 65532 -g 65532 nonroot
 WORKDIR /
 COPY --from=builder /workspace/operator/manager .
