@@ -70,6 +70,7 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 		var jsonArgs map[string]interface{}
 		if err := json.Unmarshal([]byte(args[0]), &jsonArgs); err == nil {
 			if cmd, ok := jsonArgs["cmd"].(string); ok && cmd == "fetch" {
+				// Format: {"cmd":"fetch","args":{"url":"..."}}
 				if a, ok := jsonArgs["args"].(map[string]interface{}); ok {
 					if u, ok := a["url"].(string); ok {
 						url = u
@@ -80,6 +81,18 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 					if m, ok := a["maxLength"].(float64); ok {
 						maxLength = int(m)
 					}
+				}
+			} else if u, ok := jsonArgs["url"].(string); ok && u != "" {
+				// Flat format from native tool calling: {"url":"...","raw":true}
+				url = u
+				if r, ok := jsonArgs["raw"].(bool); ok {
+					rawHTML = r
+				}
+				if m, ok := jsonArgs["max_length"].(float64); ok && m > 0 {
+					maxLength = int(m)
+				}
+				if m, ok := jsonArgs["maxLength"].(float64); ok && m > 0 {
+					maxLength = int(m)
 				}
 			}
 		}

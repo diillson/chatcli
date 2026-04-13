@@ -49,9 +49,16 @@ type InstallResult struct {
 	WasDuplicate bool
 }
 
+// SnapshotFile represents a single file in a skills.sh download snapshot.
+type SnapshotFile struct {
+	Path     string // relative path, e.g. "SKILL.md", "scripts/deploy.sh"
+	Contents string // file contents
+}
+
 // InstalledSkillInfo describes a locally installed skill.
 type InstalledSkillInfo struct {
 	Name        string
+	BaseName    string // skill name without source prefix (e.g. "frontend-design")
 	Description string
 	Version     string
 	Source      string // registry name or "local"

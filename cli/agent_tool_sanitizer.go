@@ -638,7 +638,16 @@ func buildArgvFromJSONMap(m map[string]any) ([]string, bool, error) {
 	}
 
 	if cmd == "" {
-		return nil, true, fmt.Errorf("JSON args requer campo 'cmd' ou 'argv'")
+		// No "cmd" or "argv" found, but the JSON has other fields.
+		// Pass the entire JSON as a single argument so the plugin can parse
+		// it directly. This supports flat argument formats like
+		// {"query":"..."} from native tool calling without requiring the
+		// {"cmd":"search","args":{...}} wrapper.
+		raw, err := json.Marshal(m)
+		if err != nil {
+			return nil, true, fmt.Errorf("JSON args requer campo 'cmd' ou 'argv'")
+		}
+		return []string{string(raw)}, true, nil
 	}
 
 	argv := []string{cmd}

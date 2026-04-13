@@ -108,11 +108,30 @@ func (l *Loader) ListAgents() ([]*Agent, error) {
 	return agents, nil
 }
 
-// ListSkills returns all available skills (names only for listing purposes)
+// ListSkills returns all available skills (names only for listing purposes).
 // It performs a shallow scan of both project-local and global directories.
+//
+// When multiple skills share the same base name (e.g. a local "frontend-design"
+// and a skills.sh "anthropics-skills--frontend-design"), dedup uses the skill's
+// frontmatter name — NOT the directory name — so only one instance is returned.
+// User preferences from skill-preferences.yaml are honored: if the user prefers
+// the skills.sh version, that one wins even if a local version exists.
 func (l *Loader) ListSkills() ([]*Skill, error) {
 	var skills []*Skill
+	// seen tracks by frontmatter name (e.g. "frontend-design"), not directory name.
+	// This prevents loading duplicate skills from different sources.
 	seen := make(map[string]bool)
+
+	// Load user preferences to resolve conflicts
+	prefs := l.loadSkillPreferences()
+
+	// deferred holds skills that were skipped because a same-name skill was
+	// already loaded, but the user might prefer this one instead.
+	type deferredSkill struct {
+		skill  *Skill
+		source string // source from frontmatter (e.g. "skills.sh", "local")
+	}
+	var deferred []deferredSkill
 
 	// Helper to scan a directory
 	scanDir := func(basePath string) {
@@ -127,32 +146,40 @@ func (l *Loader) ListSkills() ([]*Skill, error) {
 		}
 
 		for _, entry := range entries {
-			name := strings.TrimSuffix(entry.Name(), ".md")
-			fullPath := filepath.Join(basePath, entry.Name())
-
-			// Skip if already loaded (Project overrides Global)
-			if seen[name] {
+			if strings.HasPrefix(entry.Name(), ".") {
 				continue
 			}
+			fullPath := filepath.Join(basePath, entry.Name())
 
 			var skill *Skill
 			var loadErr error
 
 			if entry.IsDir() {
-				// Try to load as a Package (V2)
 				skill, loadErr = l.loadSkillFromPackage(fullPath)
 			} else if strings.HasSuffix(entry.Name(), ".md") {
-				// Try to load as a File (V1)
 				skill, loadErr = l.loadSkillFile(fullPath)
 			}
 
-			if loadErr == nil && skill != nil {
-				skills = append(skills, skill)
-				seen[skill.Name] = true
-			} else if loadErr != nil {
-				// Only log warning if it looked like a skill (has SKILL.md or is .md)
+			if loadErr != nil {
 				l.logger.Debug("Skipping entry in skills dir", zap.String("entry", entry.Name()), zap.Error(loadErr))
+				continue
 			}
+			if skill == nil || skill.Name == "" {
+				continue
+			}
+
+			if seen[skill.Name] {
+				// Same base name already loaded — defer for preference check
+				source := l.extractSourceFromFrontmatter(fullPath)
+				if source == "" {
+					source = "local"
+				}
+				deferred = append(deferred, deferredSkill{skill: skill, source: source})
+				continue
+			}
+
+			skills = append(skills, skill)
+			seen[skill.Name] = true
 		}
 	}
 
@@ -164,6 +191,27 @@ func (l *Loader) ListSkills() ([]*Skill, error) {
 
 	// 2. Load from global directory
 	scanDir(l.skillsDir)
+
+	// 3. Apply user preferences: if a deferred skill matches a preference,
+	// swap it in place of the default-priority version.
+	if len(prefs) > 0 && len(deferred) > 0 {
+		for _, d := range deferred {
+			preferred := prefs[d.skill.Name]
+			if preferred == "" || preferred != d.source {
+				continue
+			}
+			// User prefers this deferred version — swap it in
+			for i, s := range skills {
+				if s.Name == d.skill.Name {
+					skills[i] = d.skill
+					l.logger.Debug("skill preference applied",
+						zap.String("name", d.skill.Name),
+						zap.String("preferred_source", d.source))
+					break
+				}
+			}
+		}
+	}
 
 	return skills, nil
 }
@@ -221,19 +269,25 @@ func (l *Loader) GetAgent(name string) (*Agent, error) {
 	return nil, fmt.Errorf("agent not found: %s (checked local and global)", name)
 }
 
+// qualifiedSep is the separator between source prefix and base name in
+// qualified skill directory names. Mirrors registry.qualifiedSeparator.
+const qualifiedSep = "--"
+
 // GetSkill locates and loads a skill by name.
 // It prioritizes:
-// 1. Project-local Package (Folder with SKILL.md)
-// 2. Project-local File (.md)
-// 3. Global Package
-// 4. Global File
+//  1. Project-local Package (Folder with SKILL.md) — exact name
+//  2. Project-local File (.md) — exact name
+//  3. Global Package — exact name
+//  4. Global File — exact name
+//  5. Fallback: search by base name across qualified directories
+//     (e.g. "frontend-design" matches "anthropics-skills--frontend-design")
 func (l *Loader) GetSkill(name string) (*Skill, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("skill name cannot be empty")
 	}
 
-	// Helper to check package vs file
+	// Helper to check package vs file by exact directory/file name
 	checkLocation := func(basePath string) (*Skill, error) {
 		// Check Package (Folder)
 		packagePath := filepath.Join(basePath, name)
@@ -254,7 +308,89 @@ func (l *Loader) GetSkill(name string) (*Skill, error) {
 		return nil, os.ErrNotExist
 	}
 
-	// 1. Check Project Directory
+	// Helper to search for qualified names matching a base name.
+	// Scans directory entries for "{prefix}--{name}" patterns.
+	// When multiple matches exist, checks user preferences to pick the right one.
+	// Falls back to first match found if no preference is set.
+	findByBaseName := func(basePath string) (*Skill, error) {
+		entries, err := os.ReadDir(basePath)
+		if err != nil {
+			return nil, os.ErrNotExist
+		}
+
+		// Collect all qualified matches
+		type candidate struct {
+			dirName string
+			path    string
+		}
+		var candidates []candidate
+
+		for _, entry := range entries {
+			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			dirName := entry.Name()
+			sepIdx := strings.LastIndex(dirName, qualifiedSep)
+			if sepIdx <= 0 {
+				continue
+			}
+			basePart := dirName[sepIdx+len(qualifiedSep):]
+			if basePart == name {
+				packagePath := filepath.Join(basePath, dirName)
+				if _, err := os.Stat(filepath.Join(packagePath, "SKILL.md")); err == nil {
+					candidates = append(candidates, candidate{dirName: dirName, path: packagePath})
+				}
+			}
+		}
+
+		if len(candidates) == 0 {
+			return nil, os.ErrNotExist
+		}
+
+		// If only one match, use it directly
+		if len(candidates) == 1 {
+			return l.loadSkillFromPackage(candidates[0].path)
+		}
+
+		// Multiple matches — check user preference
+		prefs := l.loadSkillPreferences()
+		preferred := prefs[name]
+		if preferred != "" {
+			for _, c := range candidates {
+				// Load to check source field
+				skill, err := l.loadSkillFromPackage(c.path)
+				if err == nil && skill != nil {
+					source := l.extractSourceFromFrontmatter(c.path)
+					if source == preferred {
+						return skill, nil
+					}
+				}
+			}
+		}
+
+		// No preference or preference didn't match — use first candidate
+		return l.loadSkillFromPackage(candidates[0].path)
+	}
+
+	// 0. Check if user has a preference for this skill name.
+	// If so, try to honor it FIRST — overriding the default priority order.
+	prefs := l.loadSkillPreferences()
+	preferredSource := prefs[name]
+
+	if preferredSource != "" && preferredSource != "local" {
+		// User prefers a registry version — try qualified dirs first
+		dirsToSearch := []string{l.skillsDir}
+		if l.projectDir != "" {
+			dirsToSearch = append([]string{filepath.Join(l.projectDir, ".agent", "skills")}, dirsToSearch...)
+		}
+		for _, dir := range dirsToSearch {
+			if skill, err := findByBaseName(dir); err == nil {
+				return skill, nil
+			}
+		}
+	}
+
+	// 1. Check Project Directory (exact name)
 	if l.projectDir != "" {
 		projectSkillsDir := filepath.Join(l.projectDir, ".agent", "skills")
 		if skill, err := checkLocation(projectSkillsDir); err == nil {
@@ -262,8 +398,20 @@ func (l *Loader) GetSkill(name string) (*Skill, error) {
 		}
 	}
 
-	// 2. Check Global Directory
+	// 2. Check Global Directory (exact name)
 	if skill, err := checkLocation(l.skillsDir); err == nil {
+		return skill, nil
+	}
+
+	// 3. Fallback: search by base name in qualified directories.
+	// Project-local first, then global — so local skills always win.
+	if l.projectDir != "" {
+		projectSkillsDir := filepath.Join(l.projectDir, ".agent", "skills")
+		if skill, err := findByBaseName(projectSkillsDir); err == nil {
+			return skill, nil
+		}
+	}
+	if skill, err := findByBaseName(l.skillsDir); err == nil {
 		return skill, nil
 	}
 
@@ -271,6 +419,53 @@ func (l *Loader) GetSkill(name string) (*Skill, error) {
 }
 
 // loadSkillFromPackage loads a V2 skill structure (Directory based)
+// loadSkillPreferences reads the skill preferences file and returns
+// a map of base-name → preferred-source. Cached per call (no file watch).
+func (l *Loader) loadSkillPreferences() map[string]string {
+	prefsPath := filepath.Clean(filepath.Join(filepath.Dir(l.skillsDir), "skill-preferences.yaml"))
+
+	data, err := os.ReadFile(prefsPath) // #nosec G304 -- path derived from skillsDir (user home)
+	if err != nil {
+		return nil
+	}
+
+	var prefs struct {
+		Preferences map[string]string `yaml:"preferences"`
+	}
+	if err := yaml.Unmarshal(data, &prefs); err != nil {
+		return nil
+	}
+	return prefs.Preferences
+}
+
+// extractSourceFromFrontmatter reads the "source" field from a SKILL.md in a directory.
+func (l *Loader) extractSourceFromFrontmatter(dirPath string) string {
+	data, err := os.ReadFile(filepath.Clean(filepath.Join(dirPath, "SKILL.md"))) // #nosec G304 -- dirPath from skillsDir scan
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(string(data), "\n")
+	inFrontmatter := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			if !inFrontmatter {
+				inFrontmatter = true
+				continue
+			}
+			break
+		}
+		if inFrontmatter && strings.HasPrefix(trimmed, "source:") {
+			val := strings.TrimPrefix(trimmed, "source:")
+			val = strings.TrimSpace(val)
+			val = strings.Trim(val, "\"'")
+			return val
+		}
+	}
+	return ""
+}
+
 func (l *Loader) loadSkillFromPackage(dirPath string) (*Skill, error) {
 	mainSkillFile := filepath.Join(dirPath, "SKILL.md")
 

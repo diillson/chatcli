@@ -83,16 +83,21 @@ func TestManagerSearchAllFanOut(t *testing.T) {
 		t.Fatalf("expected 2 search results, got %d", len(results))
 	}
 
-	// Should have 3 unique skills (golang deduplicated)
-	if len(merged) != 3 {
-		t.Fatalf("expected 3 merged skills, got %d", len(merged))
+	// Should have 4 skills: same-name skills from different registries are NOT
+	// deduplicated (golang appears from both registry-a and registry-b).
+	if len(merged) != 4 {
+		t.Fatalf("expected 4 merged skills (no cross-registry dedup), got %d", len(merged))
 	}
 
-	// First registry wins for dedup — golang should be from registry-a
+	// Both golang entries should be present, from different registries
+	golangCount := 0
 	for _, s := range merged {
-		if s.Name == "golang" && s.RegistryName != "registry-a" {
-			t.Errorf("expected golang from registry-a, got from %s", s.RegistryName)
+		if s.Name == "golang" {
+			golangCount++
 		}
+	}
+	if golangCount != 2 {
+		t.Errorf("expected 2 golang entries (one per registry), got %d", golangCount)
 	}
 }
 
@@ -245,25 +250,30 @@ func TestManagerInstallAndUninstall(t *testing.T) {
 		logger:        logger,
 	}
 
-	// Install
+	// Install — qualified name should be "test-reg--installable"
 	result, err := rm.Install(context.Background(), "installable")
 	if err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
-	if result.Name != "installable" {
-		t.Errorf("expected name 'installable', got %q", result.Name)
+	expectedName := "test-reg--installable"
+	if result.Name != expectedName {
+		t.Errorf("expected name %q, got %q", expectedName, result.Name)
 	}
 
-	// Verify installed
-	if !rm.IsInstalled("installable") {
-		t.Error("expected skill to be installed")
+	// Verify installed by qualified name
+	if !rm.IsInstalled(expectedName) {
+		t.Error("expected skill to be installed by qualified name")
+	}
+	// Also findable by base name
+	if !rm.IsInstalledAny("installable") {
+		t.Error("expected skill to be findable by base name")
 	}
 
-	// Uninstall
-	if err := rm.Uninstall("installable"); err != nil {
+	// Uninstall by qualified name
+	if err := rm.Uninstall(expectedName); err != nil {
 		t.Fatalf("uninstall failed: %v", err)
 	}
-	if rm.IsInstalled("installable") {
+	if rm.IsInstalled(expectedName) {
 		t.Error("expected skill to be uninstalled")
 	}
 }

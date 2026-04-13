@@ -7,13 +7,16 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"golang.org/x/net/html"
 )
 
-// BuiltinWebSearchPlugin provides web search functionality using DuckDuckGo.
+// BuiltinWebSearchPlugin provides web search functionality with multiple backends.
+// Uses Google Custom Search API when configured (GOOGLE_SEARCH_API_KEY + GOOGLE_SEARCH_CX),
+// falls back to DuckDuckGo HTML scraping when no API key is set.
 type BuiltinWebSearchPlugin struct{}
 
 func NewBuiltinWebSearchPlugin() *BuiltinWebSearchPlugin {
@@ -23,7 +26,7 @@ func NewBuiltinWebSearchPlugin() *BuiltinWebSearchPlugin {
 func (p *BuiltinWebSearchPlugin) Name() string        { return "@websearch" }
 func (p *BuiltinWebSearchPlugin) Description() string { return "Searches the web and returns results" }
 func (p *BuiltinWebSearchPlugin) Usage() string       { return "@websearch <query>" }
-func (p *BuiltinWebSearchPlugin) Version() string     { return "1.0.0" }
+func (p *BuiltinWebSearchPlugin) Version() string     { return "1.1.0" }
 func (p *BuiltinWebSearchPlugin) Path() string        { return "[builtin]" }
 
 func (p *BuiltinWebSearchPlugin) Schema() string {
@@ -65,6 +68,7 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 		var jsonArgs map[string]interface{}
 		if err := json.Unmarshal([]byte(args[0]), &jsonArgs); err == nil {
 			if cmd, ok := jsonArgs["cmd"].(string); ok && cmd == "search" {
+				// Format: {"cmd":"search","args":{"query":"..."}}
 				if a, ok := jsonArgs["args"].(map[string]interface{}); ok {
 					if q, ok := a["query"].(string); ok {
 						query = q
@@ -72,6 +76,15 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 					if m, ok := a["maxResults"].(float64); ok {
 						maxResults = int(m)
 					}
+				}
+			} else if q, ok := jsonArgs["query"].(string); ok && q != "" {
+				// Flat format from native tool calling: {"query":"...","max_results":10}
+				query = q
+				if m, ok := jsonArgs["max_results"].(float64); ok && m > 0 {
+					maxResults = int(m)
+				}
+				if m, ok := jsonArgs["maxResults"].(float64); ok && m > 0 {
+					maxResults = int(m)
 				}
 			}
 		}
@@ -111,11 +124,36 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 		return "", fmt.Errorf("query required")
 	}
 
-	if onOutput != nil {
-		onOutput(fmt.Sprintf("Searching: %s...", query))
+	// Select search provider: Google if configured, DuckDuckGo as fallback
+	var results []searchResult
+	var err error
+	var provider string
+
+	googleAPIKey := os.Getenv("GOOGLE_SEARCH_API_KEY")
+	googleCX := os.Getenv("GOOGLE_SEARCH_CX")
+
+	if googleAPIKey != "" && googleCX != "" {
+		provider = "Google"
+		if onOutput != nil {
+			onOutput(fmt.Sprintf("Searching Google: %s...", query))
+		}
+		results, err = searchGoogle(ctx, query, maxResults, googleAPIKey, googleCX)
+		if err != nil {
+			// Fallback to DuckDuckGo on Google failure
+			if onOutput != nil {
+				onOutput(fmt.Sprintf("Google search failed (%v), falling back to DuckDuckGo...", err))
+			}
+			provider = "DuckDuckGo"
+			results, err = searchDuckDuckGo(ctx, query, maxResults)
+		}
+	} else {
+		provider = "DuckDuckGo"
+		if onOutput != nil {
+			onOutput(fmt.Sprintf("Searching DuckDuckGo: %s...", query))
+		}
+		results, err = searchDuckDuckGo(ctx, query, maxResults)
 	}
 
-	results, err := searchDuckDuckGo(ctx, query, maxResults)
 	if err != nil {
 		return "", err
 	}
@@ -125,7 +163,7 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Search results for: %q\n\n", query))
+	sb.WriteString(fmt.Sprintf("Search results for: %q (via %s)\n\n", query, provider))
 	for i, r := range results {
 		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, r.Title))
 		sb.WriteString(fmt.Sprintf("   URL: %s\n", r.URL))
@@ -148,7 +186,80 @@ type searchResult struct {
 	Snippet string
 }
 
+// --- Google Custom Search API ---
+
+// googleSearchResponse is the JSON response from Google Custom Search API.
+type googleSearchResponse struct {
+	Items []googleSearchItem `json:"items"`
+}
+
+type googleSearchItem struct {
+	Title   string `json:"title"`
+	Link    string `json:"link"`
+	Snippet string `json:"snippet"`
+}
+
+// searchGoogle uses the Google Custom Search JSON API.
+// Requires GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_CX environment variables.
+// Free tier: 100 queries/day. See: https://developers.google.com/custom-search/v1/overview
+func searchGoogle(ctx context.Context, query string, maxResults int, apiKey string, cx string) ([]searchResult, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	if maxResults > 10 {
+		maxResults = 10 // Google API max per request
+	}
+
+	params := url.Values{}
+	params.Set("key", apiKey)
+	params.Set("cx", cx)
+	params.Set("q", query)
+	params.Set("num", fmt.Sprintf("%d", maxResults))
+
+	endpoint := "https://www.googleapis.com/customsearch/v1?" + params.Encode()
+
+	req, err := http.NewRequestWithContext(reqCtx, "GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating Google search request: %w", err)
+	}
+	req.Header.Set("User-Agent", "chatcli-websearch/1.1")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Google search request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("reading Google response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Google API returned %d: %s", resp.StatusCode, truncate(string(body), 200))
+	}
+
+	var googleResp googleSearchResponse
+	if err := json.Unmarshal(body, &googleResp); err != nil {
+		return nil, fmt.Errorf("parsing Google response: %w", err)
+	}
+
+	results := make([]searchResult, 0, len(googleResp.Items))
+	for _, item := range googleResp.Items {
+		results = append(results, searchResult{
+			Title:   item.Title,
+			URL:     item.Link,
+			Snippet: item.Snippet,
+		})
+	}
+
+	return results, nil
+}
+
+// --- DuckDuckGo HTML scraping (fallback) ---
+
 // searchDuckDuckGo uses DuckDuckGo's HTML-only interface to get search results.
+// No API key required. Used as fallback when Google is not configured.
 func searchDuckDuckGo(ctx context.Context, query string, maxResults int) ([]searchResult, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -159,7 +270,7 @@ func searchDuckDuckGo(ctx context.Context, query string, maxResults int) ([]sear
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("User-Agent", "chatcli-websearch/1.0 (compatible)")
+	req.Header.Set("User-Agent", "chatcli-websearch/1.1 (compatible)")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -236,6 +347,8 @@ func extractResultFromBody(body *html.Node) searchResult {
 	return r
 }
 
+// --- HTML helpers ---
+
 // hasClass checks if an HTML node has a specific CSS class.
 func hasClass(n *html.Node, class string) bool {
 	for _, attr := range n.Attr {
@@ -287,4 +400,12 @@ func cleanDDGURL(rawURL string) string {
 		}
 	}
 	return rawURL
+}
+
+// truncate returns the first n characters of a string.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
