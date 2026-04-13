@@ -23,14 +23,15 @@ func TestInstallerInstallAndUninstall(t *testing.T) {
 
 	content := []byte("# Test Skill\n\nThis is a test skill content.")
 
-	// Install
+	// Install — qualified name should be "chatcli--test-skill"
 	result, err := inst.Install(meta, content)
 	if err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
 
-	if result.Name != "test-skill" {
-		t.Errorf("expected name 'test-skill', got %q", result.Name)
+	expectedName := "chatcli--test-skill"
+	if result.Name != expectedName {
+		t.Errorf("expected name %q, got %q", expectedName, result.Name)
 	}
 	if result.Version != "1.0.0" {
 		t.Errorf("expected version '1.0.0', got %q", result.Version)
@@ -39,8 +40,8 @@ func TestInstallerInstallAndUninstall(t *testing.T) {
 		t.Error("expected WasDuplicate=false for first install")
 	}
 
-	// Verify SKILL.md exists
-	skillFile := filepath.Join(tmpDir, "test-skill", "SKILL.md")
+	// Verify SKILL.md exists at qualified path
+	skillFile := filepath.Join(tmpDir, expectedName, "SKILL.md")
 	data, err := os.ReadFile(skillFile)
 	if err != nil {
 		t.Fatalf("SKILL.md not found: %v", err)
@@ -57,9 +58,17 @@ func TestInstallerInstallAndUninstall(t *testing.T) {
 		t.Error("SKILL.md missing content body")
 	}
 
-	// IsInstalled
-	if !inst.IsInstalled("test-skill") {
-		t.Error("IsInstalled should return true")
+	// IsInstalled — exact qualified name should work
+	if !inst.IsInstalled(expectedName) {
+		t.Error("IsInstalled should return true for qualified name")
+	}
+	// FindInstalled by base name should also find it
+	matches := inst.FindInstalled("test-skill")
+	if len(matches) != 1 {
+		t.Errorf("FindInstalled should return 1 match, got %d", len(matches))
+	}
+	if len(matches) > 0 && matches[0].BaseName != "test-skill" {
+		t.Errorf("expected BaseName 'test-skill', got %q", matches[0].BaseName)
 	}
 	if inst.IsInstalled("nonexistent") {
 		t.Error("IsInstalled should return false for nonexistent")
@@ -74,13 +83,89 @@ func TestInstallerInstallAndUninstall(t *testing.T) {
 		t.Error("expected WasDuplicate=true for second install")
 	}
 
-	// Uninstall
-	if err := inst.Uninstall("test-skill"); err != nil {
+	// Uninstall by qualified name
+	if err := inst.Uninstall(expectedName); err != nil {
 		t.Fatalf("uninstall failed: %v", err)
 	}
 
-	if inst.IsInstalled("test-skill") {
+	if inst.IsInstalled(expectedName) {
 		t.Error("IsInstalled should return false after uninstall")
+	}
+}
+
+func TestInstallerInstallLocalSkill(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger := zap.NewNop()
+	inst := NewInstaller(tmpDir, logger)
+
+	// Local skill (no registry) — should use plain name
+	meta := &SkillMeta{
+		Name:    "my-local-skill",
+		Version: "1.0.0",
+	}
+
+	result, err := inst.Install(meta, []byte("local content"))
+	if err != nil {
+		t.Fatalf("install failed: %v", err)
+	}
+
+	if result.Name != "my-local-skill" {
+		t.Errorf("local skill should use plain name, got %q", result.Name)
+	}
+
+	if !inst.IsInstalled("my-local-skill") {
+		t.Error("should be installed")
+	}
+}
+
+func TestInstallerNamespaceCollision(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger := zap.NewNop()
+	inst := NewInstaller(tmpDir, logger)
+
+	// Install local version
+	localMeta := &SkillMeta{Name: "frontend-design"}
+	if _, err := inst.Install(localMeta, []byte("local version")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Install registry version — should NOT overwrite local
+	registryMeta := &SkillMeta{
+		Name:         "frontend-design",
+		Slug:         "anthropics/skills/frontend-design",
+		RegistryName: "skills.sh",
+	}
+	if _, err := inst.Install(registryMeta, []byte("registry version")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both should exist
+	matches := inst.FindInstalled("frontend-design")
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 installs, got %d", len(matches))
+	}
+
+	// Check sources
+	sources := map[string]bool{}
+	for _, m := range matches {
+		sources[m.Source] = true
+	}
+	if !sources["local"] {
+		t.Error("should have local version")
+	}
+	if !sources["skills.sh"] {
+		t.Error("should have skills.sh version")
+	}
+
+	// IsInstalledFromSource should distinguish
+	if !inst.IsInstalledFromSource("frontend-design", "local") {
+		t.Error("should find local version")
+	}
+	if !inst.IsInstalledFromSource("frontend-design", "skills.sh") {
+		t.Error("should find skills.sh version")
+	}
+	if inst.IsInstalledFromSource("frontend-design", "clawhub") {
+		t.Error("should NOT find clawhub version")
 	}
 }
 
@@ -129,7 +214,7 @@ func TestInstallerListInstalled(t *testing.T) {
 	logger := zap.NewNop()
 	inst := NewInstaller(tmpDir, logger)
 
-	// Install two skills
+	// Install two skills from registries
 	meta1 := &SkillMeta{Name: "alpha", Version: "1.0", RegistryName: "chatcli"}
 	meta2 := &SkillMeta{Name: "beta", Version: "2.0", RegistryName: "clawhub"}
 
@@ -147,6 +232,13 @@ func TestInstallerListInstalled(t *testing.T) {
 
 	if len(installed) != 2 {
 		t.Fatalf("expected 2 installed skills, got %d", len(installed))
+	}
+
+	// Verify base names are populated
+	for _, s := range installed {
+		if s.BaseName == "" {
+			t.Errorf("BaseName should not be empty for skill %q", s.Name)
+		}
 	}
 }
 
@@ -178,6 +270,74 @@ func TestSanitizeName(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("sanitizeName(%q): got %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+}
+
+func TestQualifiedInstallName(t *testing.T) {
+	tests := []struct {
+		name     string
+		meta     *SkillMeta
+		expected string
+	}{
+		{
+			"local skill — no prefix",
+			&SkillMeta{Name: "my-skill"},
+			"my-skill",
+		},
+		{
+			"local source — no prefix",
+			&SkillMeta{Name: "my-skill", RegistryName: "local"},
+			"my-skill",
+		},
+		{
+			"skills.sh with slug",
+			&SkillMeta{Name: "frontend-design", Slug: "anthropics/skills/frontend-design", RegistryName: "skills.sh"},
+			"anthropics-skills--frontend-design",
+		},
+		{
+			"clawhub registry",
+			&SkillMeta{Name: "code-review", RegistryName: "clawhub"},
+			"clawhub--code-review",
+		},
+		{
+			"chatcli registry",
+			&SkillMeta{Name: "my-tool", RegistryName: "chatcli"},
+			"chatcli--my-tool",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := qualifiedInstallName(tt.meta)
+			if got != tt.expected {
+				t.Errorf("qualifiedInstallName: got %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseQualifiedName(t *testing.T) {
+	tests := []struct {
+		input    string
+		prefix   string
+		baseName string
+	}{
+		{"frontend-design", "", "frontend-design"},
+		{"anthropics-skills--frontend-design", "anthropics-skills", "frontend-design"},
+		{"clawhub--code-review", "clawhub", "code-review"},
+		{"skills.sh--my-skill", "skills.sh", "my-skill"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			prefix, baseName := parseQualifiedName(tt.input)
+			if prefix != tt.prefix {
+				t.Errorf("prefix: got %q, want %q", prefix, tt.prefix)
+			}
+			if baseName != tt.baseName {
+				t.Errorf("baseName: got %q, want %q", baseName, tt.baseName)
+			}
+		})
 	}
 }
 
