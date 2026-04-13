@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.101.2](https://github.com/diillson/chatcli/compare/v1.101.1...v1.101.2) (2026-04-13)
+
+
+### Bug Fixes
+
+* **openai:** improve model listing for API keys and skip for OAuth ([#791](https://github.com/diillson/chatcli/issues/791)) ([a5c98a9](https://github.com/diillson/chatcli/commit/a5c98a9d7216e86d5226e3c0be732d50f046353e))
+
 ## [1.101.1](https://github.com/diillson/chatcli/compare/v1.101.0...v1.101.1) (2026-04-13)
 
 
