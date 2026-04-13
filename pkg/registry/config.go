@@ -51,6 +51,13 @@ func DefaultConfig() RegistriesConfig {
 				CacheTTL: 5 * time.Minute,
 				Type:     "clawhub",
 			},
+			{
+				Name:     "skills.sh",
+				URL:      "https://skills.sh",
+				IsActive: true,
+				CacheTTL: 10 * time.Minute,
+				Type:     "skillssh",
+			},
 		},
 		InstallDir:      filepath.Join(homeDir, ".chatcli", "skills"),
 		MaxConcurrent:   3,
@@ -98,6 +105,11 @@ func LoadConfig() (RegistriesConfig, error) {
 	if cfg.SearchCacheSize <= 0 {
 		cfg.SearchCacheSize = 50
 	}
+
+	// Merge default registries: add any built-in registries that are missing
+	// from the user's config. This ensures new registries (like skills.sh)
+	// appear automatically after an upgrade without requiring manual edits.
+	cfg = mergeDefaultRegistries(cfg)
 
 	// Apply environment variable overrides
 	cfg = applyEnvOverrides(cfg)
@@ -168,6 +180,34 @@ func applyEnvOverrides(cfg RegistriesConfig) RegistriesConfig {
 	// CHATCLI_SKILL_INSTALL_DIR: override install directory
 	if dir := os.Getenv("CHATCLI_SKILL_INSTALL_DIR"); dir != "" {
 		cfg.InstallDir = dir
+	}
+
+	return cfg
+}
+
+// mergeDefaultRegistries adds any built-in default registries that are not
+// already present in the user's config. This allows new registries introduced
+// in upgrades (e.g. skills.sh) to appear automatically without requiring
+// users to manually edit registries.yaml. Existing entries are never modified.
+func mergeDefaultRegistries(cfg RegistriesConfig) RegistriesConfig {
+	defaults := DefaultConfig()
+
+	existing := make(map[string]bool, len(cfg.Registries))
+	for _, r := range cfg.Registries {
+		existing[r.Name] = true
+	}
+
+	changed := false
+	for _, def := range defaults.Registries {
+		if !existing[def.Name] {
+			cfg.Registries = append(cfg.Registries, def)
+			changed = true
+		}
+	}
+
+	// Persist the merged config so it only happens once
+	if changed {
+		_ = SaveConfig(cfg)
 	}
 
 	return cfg
