@@ -422,9 +422,9 @@ func (l *Loader) GetSkill(name string) (*Skill, error) {
 // loadSkillPreferences reads the skill preferences file and returns
 // a map of base-name → preferred-source. Cached per call (no file watch).
 func (l *Loader) loadSkillPreferences() map[string]string {
-	prefsPath := filepath.Join(filepath.Dir(l.skillsDir), "skill-preferences.yaml")
+	prefsPath := filepath.Clean(filepath.Join(filepath.Dir(l.skillsDir), "skill-preferences.yaml"))
 
-	data, err := os.ReadFile(prefsPath)
+	data, err := os.ReadFile(prefsPath) // #nosec G304 -- path derived from skillsDir (user home)
 	if err != nil {
 		return nil
 	}
@@ -440,7 +440,7 @@ func (l *Loader) loadSkillPreferences() map[string]string {
 
 // extractSourceFromFrontmatter reads the "source" field from a SKILL.md in a directory.
 func (l *Loader) extractSourceFromFrontmatter(dirPath string) string {
-	data, err := os.ReadFile(filepath.Join(dirPath, "SKILL.md"))
+	data, err := os.ReadFile(filepath.Clean(filepath.Join(dirPath, "SKILL.md"))) // #nosec G304 -- dirPath from skillsDir scan
 	if err != nil {
 		return ""
 	}
