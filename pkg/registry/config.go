@@ -74,9 +74,9 @@ func ConfigPath() string {
 // LoadConfig reads the registries config from disk.
 // If the file doesn't exist, it creates it with defaults.
 func LoadConfig() (RegistriesConfig, error) {
-	configPath := ConfigPath()
+	configPath := filepath.Clean(ConfigPath())
 
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) // #nosec G304 -- path from ConfigPath (user home dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			cfg := DefaultConfig()
@@ -121,7 +121,7 @@ func LoadConfig() (RegistriesConfig, error) {
 func SaveConfig(cfg RegistriesConfig) error {
 	configPath := ConfigPath()
 
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o750); err != nil {
 		return err
 	}
 
@@ -130,7 +130,7 @@ func SaveConfig(cfg RegistriesConfig) error {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0o644)
+	return os.WriteFile(configPath, data, 0o600)
 }
 
 // applyEnvOverrides applies environment variable overrides to the config.

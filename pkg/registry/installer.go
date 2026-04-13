@@ -38,7 +38,7 @@ func (inst *Installer) Install(meta *SkillMeta, content []byte) (*InstallResult,
 	}
 
 	// Ensure install directory exists
-	if err := os.MkdirAll(inst.installDir, 0o755); err != nil {
+	if err := os.MkdirAll(inst.installDir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating install directory: %w", err)
 	}
 
@@ -58,7 +58,7 @@ func (inst *Installer) Install(meta *SkillMeta, content []byte) (*InstallResult,
 
 	// Write to temp directory first (atomic)
 	tmpDir := filepath.Join(inst.installDir, fmt.Sprintf(".tmp-%s-%s", skillName, uuid.New().String()[:8]))
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating temp directory: %w", err)
 	}
 	defer os.RemoveAll(tmpDir) // cleanup temp on failure
@@ -66,7 +66,7 @@ func (inst *Installer) Install(meta *SkillMeta, content []byte) (*InstallResult,
 	// Build SKILL.md with frontmatter
 	skillContent := buildSkillMD(meta, content)
 	skillFile := filepath.Join(tmpDir, "SKILL.md")
-	if err := os.WriteFile(skillFile, []byte(skillContent), 0o644); err != nil {
+	if err := os.WriteFile(skillFile, []byte(skillContent), 0o600); err != nil {
 		return nil, fmt.Errorf("writing SKILL.md: %w", err)
 	}
 
@@ -103,7 +103,7 @@ func (inst *Installer) InstallFromSnapshot(meta *SkillMeta, files []SnapshotFile
 	}
 
 	// Ensure install directory exists
-	if err := os.MkdirAll(inst.installDir, 0o755); err != nil {
+	if err := os.MkdirAll(inst.installDir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating install directory: %w", err)
 	}
 
@@ -122,7 +122,7 @@ func (inst *Installer) InstallFromSnapshot(meta *SkillMeta, files []SnapshotFile
 
 	// Write to temp directory first (atomic)
 	tmpDir := filepath.Join(inst.installDir, fmt.Sprintf(".tmp-%s-%s", skillName, uuid.New().String()[:8]))
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating temp directory: %w", err)
 	}
 	defer os.RemoveAll(tmpDir) // cleanup temp on failure
@@ -132,32 +132,33 @@ func (inst *Installer) InstallFromSnapshot(meta *SkillMeta, files []SnapshotFile
 		if f.Path == "" {
 			continue
 		}
-		targetPath := filepath.Join(tmpDir, filepath.FromSlash(f.Path))
+		// Path already validated by ParseSnapshotFiles (rejects ".." and absolute paths)
+		targetPath := filepath.Clean(filepath.Join(tmpDir, filepath.FromSlash(f.Path))) // #nosec G304 -- path validated upstream
 
 		// Create parent directories as needed
 		parentDir := filepath.Dir(targetPath)
-		if err := os.MkdirAll(parentDir, 0o755); err != nil {
+		if err := os.MkdirAll(parentDir, 0o750); err != nil {
 			return nil, fmt.Errorf("creating directory for %s: %w", f.Path, err)
 		}
 
 		// Determine file permissions: scripts get executable bit
-		perm := os.FileMode(0o644)
+		perm := os.FileMode(0o600)
 		if isScriptFile(f.Path) {
-			perm = 0o755
+			perm = 0o750
 		}
 
-		if err := os.WriteFile(targetPath, []byte(f.Contents), perm); err != nil {
+		if err := os.WriteFile(targetPath, []byte(f.Contents), perm); err != nil { // #nosec G306 -- perm set by isScriptFile
 			return nil, fmt.Errorf("writing %s: %w", f.Path, err)
 		}
 	}
 
 	// Inject source metadata into SKILL.md frontmatter if not already present,
 	// so we can track provenance on the installed skill.
-	skillMDPath := filepath.Join(tmpDir, "SKILL.md")
-	if data, err := os.ReadFile(skillMDPath); err == nil {
+	skillMDPath := filepath.Clean(filepath.Join(tmpDir, "SKILL.md"))
+	if data, err := os.ReadFile(skillMDPath); err == nil { // #nosec G304 -- path is constructed from sanitized skill name
 		patched := injectSourceField(string(data), meta.RegistryName, snapshotHash)
 		if patched != string(data) {
-			_ = os.WriteFile(skillMDPath, []byte(patched), 0o644)
+			_ = os.WriteFile(skillMDPath, []byte(patched), 0o600) // #nosec G703 -- path constructed from sanitized name + tmpDir
 		}
 	}
 
@@ -170,7 +171,7 @@ func (inst *Installer) InstallFromSnapshot(meta *SkillMeta, files []SnapshotFile
 	version := meta.Version
 	if version == "" {
 		info := InstalledSkillInfo{Name: skillName}
-		if data, err := os.ReadFile(filepath.Join(finalDir, "SKILL.md")); err == nil {
+		if data, err := os.ReadFile(filepath.Clean(filepath.Join(finalDir, "SKILL.md"))); err == nil { // #nosec G304 -- path from sanitized installDir
 			parseInstalledMeta(&info, string(data))
 			version = info.Version
 		}
@@ -361,8 +362,8 @@ func (inst *Installer) FindInstalled(baseName string) []InstalledSkillInfo {
 				BaseName: entryBase,
 				Path:     filepath.Join(inst.installDir, dirName),
 			}
-			skillFile := filepath.Join(inst.installDir, dirName, "SKILL.md")
-			if data, err := os.ReadFile(skillFile); err == nil {
+			skillFile := filepath.Clean(filepath.Join(inst.installDir, dirName, "SKILL.md"))
+			if data, err := os.ReadFile(skillFile); err == nil { // #nosec G304 -- installDir + dir entry name
 				parseInstalledMeta(&info, string(data))
 			}
 			if info.Source == "" {
@@ -402,7 +403,7 @@ func (inst *Installer) ListInstalled() ([]InstalledSkillInfo, error) {
 		}
 
 		if entry.IsDir() {
-			skillFile := filepath.Join(inst.installDir, entry.Name(), "SKILL.md")
+			skillFile := filepath.Clean(filepath.Join(inst.installDir, entry.Name(), "SKILL.md"))
 			_, baseName := parseQualifiedName(entry.Name())
 			info := InstalledSkillInfo{
 				Name:     entry.Name(),
@@ -410,7 +411,7 @@ func (inst *Installer) ListInstalled() ([]InstalledSkillInfo, error) {
 				Path:     filepath.Join(inst.installDir, entry.Name()),
 			}
 			// Try to read metadata from SKILL.md frontmatter
-			if data, err := os.ReadFile(skillFile); err == nil {
+			if data, err := os.ReadFile(skillFile); err == nil { // #nosec G304 -- installDir + directory entry
 				parseInstalledMeta(&info, string(data))
 			}
 			skills = append(skills, info)
@@ -445,7 +446,7 @@ func (inst *Installer) GetInstalledInfo(name string) *InstalledSkillInfo {
 			BaseName: baseName,
 			Path:     skillDir,
 		}
-		if data, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md")); err == nil {
+		if data, err := os.ReadFile(filepath.Clean(filepath.Join(skillDir, "SKILL.md"))); err == nil { // #nosec G304 -- skillDir from sanitized name
 			parseInstalledMeta(&info, string(data))
 		}
 		if info.Source == "" {
