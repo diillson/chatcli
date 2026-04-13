@@ -56,7 +56,7 @@
 | **Agentes autônomos** | 12 agentes especializados com motor ReAct (Reason + Act) e execução em paralelo. |
 | **Production-ready** | gRPC + TLS, JWT + RBAC, AES-256-GCM, rate limiting, audit logging, Prometheus metrics. |
 | **Kubernetes-native** | Operador com 17 CRDs e pipeline AIOps autônomo: 54+ ações de remediação automatizada. |
-| **Extensível** | Plugins com verificação de assinatura, skills com busca fuzzy, hooks de lifecycle, MCP. |
+| **Extensível** | Plugins com verificação de assinatura, skills multi-registry (skills.sh, ClawHub), hooks de lifecycle, MCP. |
 
 ---
 
@@ -348,16 +348,16 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 | **Tool calling nativo** | Chamadas estruturadas via API da OpenAI, Anthropic, Google, ZAI, MiniMax e OpenRouter. Cache `ephemeral` para Anthropic. XML fallback automático para providers sem suporte nativo. |
 | **MCP (Model Context Protocol)** | Integração com servidores MCP via stdio e SSE para contexto expandido. |
 | **Contextos persistentes** | `/context create`, `/context attach` — injeta projetos inteiros no system prompt com cache hints. |
-| **Bootstrap e Memoria** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + memoria de longo prazo com facts e decay. |
+| **Bootstrap e Memória** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + memória de longo prazo com facts e decay. |
 | **Plugins** | Sistema extensível com auto-detecção, schema validation, verificação de assinatura e plugins remotos. |
-| **Skills** | Registry multi-source com busca fuzzy, moderação e instalação atomica. |
-| **Agentes customizaveis** | Personas em Markdown com frontmatter YAML (model, tools, skills). |
+| **Skills** | Registry multi-source (skills.sh, ClawHub, ChatCLI.dev) com busca fuzzy, auditorias de segurança, preferências de source e instalação atômica. |
+| **Agentes customizáveis** | Personas em Markdown com frontmatter YAML (model, tools, skills). |
 | **Hooks** | Lifecycle events (PreToolUse, PostToolUse, SessionStart) com shell commands e webhooks. |
-| **WebFetch / WebSearch** | Busca DuckDuckGo e fetch de paginas com extração de texto. |
+| **WebFetch / WebSearch** | Busca DuckDuckGo e fetch de páginas com extração de texto. |
 | **Cost tracking** | Custo por sessão com pricing tables por provider. |
 | **Git Worktrees** | Trabalho isolado em branches paralelas. |
 | **K8s Watcher** | Monitoramento multi-target com métricas, logs, events e Prometheus scraping. |
-| **i18n** | Interface em Portugues e Ingles com detecção automática. |
+| **i18n** | Interface em Português e Inglês com detecção automática. |
 | **Session management** | Save, load, fork e export de conversas. |
 
 <details>
@@ -392,6 +392,8 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 chatcli/
   cli/            Interface TUI (Bubble Tea), modo agente, multi-agent workers
   llm/            12 providers, registry auto-registro, fallback chain, catalog
+  pkg/registry/   Skill registries multi-source (skills.sh, ClawHub, custom), instalação atômica
+  pkg/persona/    Skills, agentes customizáveis, resolução por preferência
   server/         Servidor gRPC com TLS, JWT auth, metrics e MCP
   operator/       Kubernetes Operator — 17 CRDs, pipeline AIOps autônomo
   k8s/            Watcher (collectors, store, summarizer)
@@ -401,13 +403,13 @@ chatcli/
   i18n/           Internacionalização (embed.FS + golang.org/x/text)
 ```
 
-> **Principio de design:** cada pacote define suas interfaces e se auto-registra no sistema. O `llm/` registry permite adicionar um novo provider implementando uma única interface. O `operator/` coordena CRDs independentes via controller pattern.
+> **Princípio de design:** cada pacote define suas interfaces e se auto-registra no sistema. O `llm/` registry permite adicionar um novo provider implementando uma única interface. O `operator/` coordena CRDs independentes via controller pattern.
 
 ---
 
 ## Contribuição
 
-1. Fork o repositorio
+1. Fork o repositório
 2. Crie uma branch a partir da `main`: `git checkout -b feature/minha-feature`
 3. Commit e push
 4. Abra um Pull Request

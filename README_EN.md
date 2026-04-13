@@ -30,7 +30,7 @@
 <br>
 
 <p align="center">
-  <a href="README.md">Portugues</a> &bull;
+  <a href="README.md">Português</a> &bull;
   <a href="https://chatcli.edilsonfreitas.com">Full documentation and all functions</a>
 </p>
 
@@ -260,7 +260,7 @@ Error classification (rate limit, timeout, auth, context overflow), exponential 
 | **Persistent contexts** | `/context create`, `/context attach` -- inject entire projects into the system prompt with cache hints |
 | **Bootstrap & Memory** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + long-term memory with facts and decay |
 | **Plugins** | Extensible system with auto-detection, schema validation, and remote plugins |
-| **Skills** | Multi-source registry with fuzzy search, moderation, and atomic installation |
+| **Skills** | Multi-registry (skills.sh, ClawHub, ChatCLI.dev) with fuzzy search, security audits, source preferences, and atomic installation |
 | **Custom agents** | Markdown personas with YAML frontmatter (model, tools, skills) |
 | **Hooks** | Lifecycle events (PreToolUse, PostToolUse, SessionStart) with shell commands and webhooks |
 | **WebFetch / WebSearch** | DuckDuckGo search and page fetch with text extraction |
@@ -314,6 +314,8 @@ Error classification (rate limit, timeout, auth, context overflow), exponential 
 chatcli/
   cli/            TUI interface (Bubble Tea), agent mode, multi-agent workers
   llm/            12 providers, auto-register registry, fallback chain, catalog
+  pkg/registry/   Multi-source skill registries (skills.sh, ClawHub, custom), atomic installation
+  pkg/persona/    Skills, custom agents, preference-based resolution
   server/         gRPC server with TLS, auth, metrics, and MCP
   operator/       Kubernetes Operator -- 17 CRDs, autonomous AIOps pipeline
   k8s/            Watcher (collectors, store, summarizer)
