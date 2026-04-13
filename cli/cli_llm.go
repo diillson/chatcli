@@ -691,7 +691,7 @@ func (cli *ChatCLI) listAvailableModels() {
 // and caches them for autocomplete suggestions.
 func (cli *ChatCLI) refreshModelCache() {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
 		models, err := cli.manager.ListModelsForProvider(ctx, cli.Provider)
