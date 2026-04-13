@@ -102,7 +102,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Open or reuse PR develop -> main
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           AI_RESPONSE_CONTENT: ${{ steps.generate-pr-content.outputs.ai_response }}
         with:
