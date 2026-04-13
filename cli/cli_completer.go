@@ -921,13 +921,20 @@ func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "list", Description: "List installed skills"},
 			{Text: "info", Description: "Show skill metadata from registry"},
 			{Text: "registries", Description: "Show configured registries"},
+			{Text: "registry", Description: "Enable/disable a registry"},
+			{Text: "prefer", Description: "Set preferred source for a skill"},
 			{Text: "help", Description: "Show skill command help"},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
 
+	sub := ""
+	if len(args) >= 2 {
+		sub = strings.ToLower(args[1])
+	}
+
 	// For "uninstall", suggest installed skill names
-	if len(args) >= 2 && (args[1] == "uninstall" || args[1] == "remove") {
+	if sub == "uninstall" || sub == "remove" {
 		if cli.skillHandler != nil && cli.skillHandler.registryMgr != nil {
 			installed, err := cli.skillHandler.registryMgr.ListInstalled()
 			if err == nil {
@@ -947,7 +954,90 @@ func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
 		}
 	}
 
+	// For "install" and "info": suggest --from after skill name, then registry names
+	if sub == "install" || sub == "info" {
+		if cli.skillHandler != nil && cli.skillHandler.registryMgr != nil {
+			// After "--from" or "-f", suggest registry names
+			lastArg := args[len(args)-1]
+			prevArg := ""
+			if len(args) >= 2 {
+				prevArg = args[len(args)-1]
+				if strings.HasSuffix(line, " ") {
+					prevArg = args[len(args)-1]
+				} else if len(args) >= 3 {
+					prevArg = args[len(args)-2]
+				}
+			}
+			if strings.HasSuffix(line, " ") && (lastArg == "--from" || lastArg == "-f") {
+				return cli.getRegistryNameSuggestions(d)
+			}
+			if !strings.HasSuffix(line, " ") && (prevArg == "--from" || prevArg == "-f") {
+				return cli.getRegistryNameSuggestions(d)
+			}
+
+			// After the skill name (3+ args), suggest --from
+			if len(args) >= 3 && strings.HasSuffix(line, " ") {
+				return prompt.FilterHasPrefix([]prompt.Suggest{
+					{Text: "--from", Description: "Specify registry source"},
+				}, d.GetWordBeforeCursor(), true)
+			}
+			if len(args) >= 4 && !strings.HasSuffix(line, " ") {
+				return prompt.FilterHasPrefix([]prompt.Suggest{
+					{Text: "--from", Description: "Specify registry source"},
+				}, d.GetWordBeforeCursor(), true)
+			}
+		}
+	}
+
+	// For "registry": suggest enable/disable, then registry names
+	if sub == "registry" {
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return prompt.FilterHasPrefix([]prompt.Suggest{
+				{Text: "enable", Description: "Enable a registry"},
+				{Text: "disable", Description: "Disable a registry"},
+			}, d.GetWordBeforeCursor(), true)
+		}
+		if len(args) >= 3 {
+			return cli.getRegistryNameSuggestions(d)
+		}
+	}
+
+	// For "prefer": suggest installed skill base names, then sources
+	if sub == "prefer" {
+		if cli.skillHandler != nil && cli.skillHandler.registryMgr != nil {
+			if len(args) >= 4 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
+				// After skill name, suggest sources + --reset
+				suggestions := []prompt.Suggest{
+					{Text: "--reset", Description: "Remove preference (use default order)"},
+				}
+				suggestions = append(suggestions, cli.getRegistryNameSuggestions(d)...)
+				suggestions = append(suggestions, prompt.Suggest{Text: "local", Description: "Prefer local version"})
+				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+			}
+		}
+	}
+
 	return []prompt.Suggest{}
+}
+
+// getRegistryNameSuggestions returns autocomplete suggestions with registry names.
+func (cli *ChatCLI) getRegistryNameSuggestions(d prompt.Document) []prompt.Suggest {
+	if cli.skillHandler == nil || cli.skillHandler.registryMgr == nil {
+		return nil
+	}
+	regs := cli.skillHandler.registryMgr.GetRegistries()
+	suggestions := make([]prompt.Suggest, 0, len(regs))
+	for _, r := range regs {
+		status := "enabled"
+		if !r.Enabled {
+			status = "disabled"
+		}
+		suggestions = append(suggestions, prompt.Suggest{
+			Text:        r.Name,
+			Description: status,
+		})
+	}
+	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 }
 
 // getSwitchSuggestions returns autocomplete suggestions for /switch command.

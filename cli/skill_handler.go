@@ -86,7 +86,13 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 			fmt.Println(colorize(" "+i18n.T("skill.usage.install"), ColorYellow))
 			return
 		}
-		sh.Install(args[2])
+		// Parse optional --from <registry> flag
+		skillName, fromRegistry := parseInstallArgs(args[2:])
+		if skillName == "" {
+			fmt.Println(colorize(" "+i18n.T("skill.usage.install"), ColorYellow))
+			return
+		}
+		sh.Install(skillName, fromRegistry)
 
 	case "uninstall", "remove":
 		if len(args) < 3 {
@@ -99,6 +105,18 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 		sh.List()
 
 	case "registries", "registry":
+		if len(args) >= 4 {
+			action := strings.ToLower(args[2])
+			regName := args[3]
+			switch action {
+			case "enable":
+				sh.SetRegistryEnabled(regName, true)
+				return
+			case "disable":
+				sh.SetRegistryEnabled(regName, false)
+				return
+			}
+		}
 		sh.ShowRegistries()
 
 	case "info":
@@ -106,7 +124,15 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 			fmt.Println(colorize(" "+i18n.T("skill.usage.info"), ColorYellow))
 			return
 		}
-		sh.Info(args[2])
+		infoName, infoFrom := parseInstallArgs(args[2:])
+		if infoName == "" {
+			fmt.Println(colorize(" "+i18n.T("skill.usage.info"), ColorYellow))
+			return
+		}
+		sh.Info(infoName, infoFrom)
+
+	case "prefer":
+		sh.Prefer(args[2:])
 
 	case "help":
 		sh.ShowHelp()
@@ -170,6 +196,12 @@ func (sh *SkillHandler) Search(query string) {
 		// Registry tag
 		regTag := fmt.Sprintf("[%s]", skill.RegistryName)
 
+		// Install count (formatted for skills.sh)
+		installStr := ""
+		if skill.Downloads > 0 {
+			installStr = registry.FormatInstallCount(skill.Downloads)
+		}
+
 		// Moderation tag
 		modTag := ""
 		modStr := registry.FormatModerationTag(skill.Moderation)
@@ -177,16 +209,21 @@ func (sh *SkillHandler) Search(query string) {
 			modTag = " " + modStr
 		}
 
-		// Installed marker
+		// Installed marker — check by source to avoid false positives
 		installed := ""
-		if sh.registryMgr.IsInstalled(skill.Name) {
+		if sh.registryMgr.IsInstalledFromSource(skill.Name, skill.RegistryName) {
 			installed = " " + colorize("["+i18n.T("skill.installed")+"]", ColorGreen)
+		} else if sh.registryMgr.IsInstalledAny(skill.Name) {
+			installed = " " + colorize("["+i18n.T("skill.installed_other")+"]", ColorYellow)
 		}
 
 		// Build the line
 		line := fmt.Sprintf("    %d. %s", i+1, colorize(paddedName, ColorCyan))
 		if versionStr != "" {
 			line += "  " + colorize(versionStr, ColorGray)
+		}
+		if installStr != "" {
+			line += "  " + colorize(fmt.Sprintf("(%s installs)", installStr), ColorGray)
 		}
 		if skill.Author != "" {
 			line += "  by " + skill.Author
@@ -203,8 +240,19 @@ func (sh *SkillHandler) Search(query string) {
 		line += installed
 		fmt.Println(line)
 
+		// Show source repo for skills.sh skills
+		descLine := ""
 		if skill.Description != "" {
-			fmt.Printf("       %s\n", colorize(skill.Description, ColorGray))
+			descLine = skill.Description
+		}
+		if registry.IsSkillsShSource(skill.RegistryName) && skill.Slug != "" && skill.Slug != skill.Name {
+			if descLine != "" {
+				descLine += "  "
+			}
+			descLine += fmt.Sprintf("(%s)", skill.Slug)
+		}
+		if descLine != "" {
+			fmt.Printf("       %s\n", colorize(descLine, ColorGray))
 		}
 	}
 
@@ -213,25 +261,96 @@ func (sh *SkillHandler) Search(query string) {
 }
 
 // Install downloads and installs a skill from a registry.
-func (sh *SkillHandler) Install(name string) {
+// If fromRegistry is non-empty, only that registry is used.
+// If multiple registries have the skill, the user is prompted to choose.
+//
+// Supported invocations:
+//
+//	/skill install frontend-design                    → auto-detect or disambiguate
+//	/skill install frontend-design --from skills.sh   → explicit registry
+//	/skill install anthropics/skills/frontend-design   → skills.sh slug (unambiguous)
+func (sh *SkillHandler) Install(name string, fromRegistry string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// First, get skill metadata to check moderation
-	meta, err := sh.registryMgr.GetSkillMeta(ctx, name)
-	if err != nil {
-		// Try installing directly (search + download)
-		fmt.Printf("\n  %s %s...\n", i18n.T("skill.install.installing"), colorize(name, ColorCyan))
+	// Gather metadata from all registries
+	allMeta := sh.registryMgr.GetAllSkillMeta(ctx, name)
 
+	// Filter by --from registry if specified
+	if fromRegistry != "" {
+		var filtered []*registry.SkillMeta
+		for _, m := range allMeta {
+			if m.RegistryName == fromRegistry {
+				filtered = append(filtered, m)
+			}
+		}
+		if len(filtered) == 0 {
+			fmt.Printf("\n  %s %q %s %q\n",
+				colorize(i18n.T("skill.install.not_found_in")+":", ColorYellow),
+				name, i18n.T("skill.install.in_registry"), fromRegistry)
+			if len(allMeta) > 0 {
+				fmt.Printf("  %s:", i18n.T("skill.install.available_in"))
+				for _, m := range allMeta {
+					fmt.Printf(" %s", colorize(m.RegistryName, ColorCyan))
+				}
+				fmt.Println()
+			}
+			fmt.Println()
+			return
+		}
+		allMeta = filtered
+	}
+
+	// If no metadata found at all, try direct install as fallback
+	if len(allMeta) == 0 {
+		fmt.Printf("\n  %s %s...\n", i18n.T("skill.install.installing"), colorize(name, ColorCyan))
 		result, installErr := sh.registryMgr.Install(ctx, name)
 		if installErr != nil {
 			fmt.Printf("  %s %s\n\n", colorize(i18n.T("skill.error")+":", ColorRed), installErr.Error())
 			return
 		}
-
 		sh.showInstallResult(result)
 		return
 	}
+
+	// If multiple registries have it and no --from was specified, disambiguate
+	if len(allMeta) > 1 && fromRegistry == "" {
+		// Check if registries are actually different
+		registries := make(map[string]bool)
+		for _, m := range allMeta {
+			registries[m.RegistryName] = true
+		}
+		if len(registries) > 1 {
+			fmt.Printf("\n  %s %q %s:\n\n",
+				i18n.T("skill.install.found_in_multiple"),
+				name,
+				i18n.T("skill.install.registries_label"))
+			for i, m := range allMeta {
+				installStr := ""
+				if m.Downloads > 0 {
+					installStr = fmt.Sprintf("  (%s installs)", registry.FormatInstallCount(m.Downloads))
+				}
+				fmt.Printf("    %d. %s%s\n", i+1,
+					colorize(fmt.Sprintf("[%s]", m.RegistryName), ColorCyan),
+					colorize(installStr, ColorGray))
+				if m.Description != "" {
+					desc := m.Description
+					if len(desc) > 100 {
+						desc = desc[:97] + "..."
+					}
+					fmt.Printf("       %s\n", colorize(desc, ColorGray))
+				}
+			}
+			fmt.Printf("\n  %s\n",
+				i18n.T("skill.install.use_from",
+					colorize(fmt.Sprintf("/skill install %s --from <registry>", name), ColorCyan)))
+			fmt.Println()
+			return
+		}
+	}
+
+	// Single match (or all from same registry) — proceed with install
+	meta := allMeta[0]
 
 	// Check moderation
 	warning := registry.CheckModeration(meta)
@@ -240,7 +359,6 @@ func (sh *SkillHandler) Install(name string) {
 			fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.install.blocked")+":", ColorRed), warning)
 			return
 		}
-		// Suspicious — ask for confirmation
 		fmt.Printf("\n  %s %s\n", colorize(i18n.T("skill.install.warning")+":", ColorYellow), warning)
 		fmt.Print("  " + i18n.T("skill.install.confirm") + " (y/N): ")
 
@@ -257,15 +375,32 @@ func (sh *SkillHandler) Install(name string) {
 	if meta.Version != "" {
 		fmt.Printf(" v%s", meta.Version)
 	}
-	fmt.Printf(" from %s...\n", colorize(meta.RegistryName, ColorGray))
+	fmt.Printf(" %s %s...\n", i18n.T("skill.install.from"), colorize(meta.RegistryName, ColorGray))
 
-	result, err := sh.registryMgr.Install(ctx, name)
+	result, err := sh.registryMgr.InstallFrom(ctx, name, meta.RegistryName)
 	if err != nil {
 		fmt.Printf("  %s %s\n\n", colorize(i18n.T("skill.error")+":", ColorRed), err.Error())
 		return
 	}
 
 	sh.showInstallResult(result)
+}
+
+// parseInstallArgs extracts the skill name and optional --from flag from install args.
+// "/skill install frontend-design --from skills.sh" → ("frontend-design", "skills.sh")
+// "/skill install frontend-design"                  → ("frontend-design", "")
+func parseInstallArgs(args []string) (skillName string, fromRegistry string) {
+	if len(args) == 0 {
+		return "", ""
+	}
+	skillName = args[0]
+	for i := 1; i < len(args); i++ {
+		if (args[i] == "--from" || args[i] == "-f") && i+1 < len(args) {
+			fromRegistry = args[i+1]
+			i++ // skip the value
+		}
+	}
+	return
 }
 
 func (sh *SkillHandler) showInstallResult(result *registry.InstallResult) {
@@ -292,12 +427,44 @@ func (sh *SkillHandler) showInstallResult(result *registry.InstallResult) {
 }
 
 // Uninstall removes an installed skill.
+// Supports both exact names ("anthropics-skills--frontend-design") and
+// base names ("frontend-design"). When multiple installs match a base name,
+// lists them and asks the user to specify which one to remove.
 func (sh *SkillHandler) Uninstall(name string) {
-	if !sh.registryMgr.IsInstalled(name) {
+	// Try exact name first
+	if sh.registryMgr.IsInstalled(name) {
+		sh.doUninstall(name)
+		return
+	}
+
+	// Try base name lookup
+	matches := sh.registryMgr.GetAllInstalledInfo(name)
+	if len(matches) == 0 {
 		fmt.Printf("\n  %s\n\n", i18n.T("skill.uninstall.not_installed", name))
 		return
 	}
 
+	if len(matches) == 1 {
+		// Single match — uninstall it
+		sh.doUninstall(matches[0].Name)
+		return
+	}
+
+	// Multiple matches — ask user to specify
+	fmt.Printf("\n  %s %q %s:\n\n",
+		i18n.T("skill.uninstall.multiple"),
+		name,
+		i18n.T("skill.uninstall.specify"))
+	for i, m := range matches {
+		fmt.Printf("    %d. %s  %s\n", i+1,
+			colorize(m.Name, ColorCyan),
+			colorize(fmt.Sprintf("[%s]", m.Source), ColorGray))
+	}
+	fmt.Printf("\n  %s\n\n",
+		i18n.T("skill.uninstall.use_full_name"))
+}
+
+func (sh *SkillHandler) doUninstall(name string) {
 	fmt.Printf("\n  %s %s...\n", i18n.T("skill.uninstall.removing"), colorize(name, ColorCyan))
 
 	if err := sh.registryMgr.Uninstall(name); err != nil {
@@ -397,17 +564,44 @@ func (sh *SkillHandler) List() {
 }
 
 // Info shows metadata about a skill, checking local installed first, then registries.
-func (sh *SkillHandler) Info(name string) {
-	// 1. Check local installed
-	local := sh.registryMgr.GetInstalledInfo(name)
+// If fromRegistry is non-empty, only that registry is queried for remote metadata.
+func (sh *SkillHandler) Info(name string, fromRegistry string) {
+	// 1. Check local installed (any matching base name)
+	localMatches := sh.registryMgr.GetAllInstalledInfo(name)
+	var local *registry.InstalledSkillInfo
+	if len(localMatches) > 0 {
+		local = &localMatches[0]
+	}
 
-	// 2. Try registry (short timeout)
+	// 2. Try registries for remote metadata.
 	var remote *registry.SkillMeta
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	meta, err := sh.registryMgr.GetSkillMeta(ctx, name)
-	if err == nil && meta != nil && meta.Name != "" {
-		remote = meta
+
+	if fromRegistry != "" {
+		// Specific registry requested
+		meta, err := sh.registryMgr.GetSkillMetaFrom(ctx, name, fromRegistry)
+		if err == nil && meta != nil && meta.Name != "" {
+			remote = meta
+		}
+	} else {
+		// Try ALL registries, pick the richest result
+		allRemote := sh.registryMgr.GetAllSkillMeta(ctx, name)
+		if len(allRemote) > 0 {
+			remote = allRemote[0]
+			for _, m := range allRemote {
+				if registry.IsSkillsShSource(m.RegistryName) {
+					remote = m
+					break
+				}
+				if m.Downloads > remote.Downloads {
+					remote = m
+				}
+				if remote.Description == "" && m.Description != "" {
+					remote = m
+				}
+			}
+		}
 	}
 
 	// Nothing found anywhere
@@ -471,9 +665,33 @@ func (sh *SkillHandler) Info(name string) {
 			colorize(strings.Join(remote.Tags, ", "), ColorGray))
 	}
 
-	// Downloads
+	// Downloads / Installs
 	if remote != nil && remote.Downloads > 0 {
-		fmt.Printf("  %s  %d\n", colorize(i18n.T("skill.info.downloads")+":", ColorCyan), remote.Downloads)
+		installLabel := i18n.T("skill.info.downloads")
+		if registry.IsSkillsShSource(remote.RegistryName) {
+			installLabel = i18n.T("skill.info.installs")
+		}
+		fmt.Printf("  %s  %s\n", colorize(installLabel+":", ColorCyan),
+			registry.FormatInstallCount(remote.Downloads))
+	}
+
+	// Source repo (for skills.sh, show the GitHub source)
+	if remote != nil && registry.IsSkillsShSource(remote.RegistryName) && remote.Slug != "" {
+		// Extract owner/repo from slug
+		parts := strings.SplitN(remote.Slug, "/", 3)
+		if len(parts) >= 2 {
+			repo := strings.Join(parts[:2], "/")
+			fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.repo")+":", ColorCyan),
+				colorize(fmt.Sprintf("https://github.com/%s", repo), ColorGray))
+		}
+		// Show skills.sh page
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.page")+":", ColorCyan),
+			colorize(fmt.Sprintf("https://skills.sh/%s", remote.Slug), ColorGray))
+	}
+
+	// Security Audits (skills.sh only — fetch from partner audit API)
+	if remote != nil && registry.IsSkillsShSource(remote.RegistryName) && remote.Slug != "" {
+		sh.showSecurityAudits(ctx, remote)
 	}
 
 	// Moderation
@@ -485,17 +703,235 @@ func (sh *SkillHandler) Info(name string) {
 		}
 	}
 
-	// Install status and path
-	if local != nil {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.status")+":", ColorCyan),
-			colorize(i18n.T("skill.installed"), ColorGreen))
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.path")+":", ColorCyan),
-			colorize(local.Path, ColorGray))
-	} else {
+	// Install status — show ALL installed versions (local + registry) to surface conflicts
+	allInstalled := sh.registryMgr.GetAllInstalledInfo(name)
+	if len(allInstalled) == 0 {
 		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.status")+":", ColorCyan), i18n.T("skill.not_installed"))
+	} else if len(allInstalled) == 1 {
+		inst := allInstalled[0]
+		fmt.Printf("  %s  %s  %s\n", colorize(i18n.T("skill.info.status")+":", ColorCyan),
+			colorize(i18n.T("skill.installed"), ColorGreen),
+			colorize(fmt.Sprintf("[%s]", inst.Source), ColorGray))
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.path")+":", ColorCyan),
+			colorize(inst.Path, ColorGray))
+	} else {
+		// Multiple installs with the same base name from different sources
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.status")+":", ColorCyan),
+			colorize(fmt.Sprintf("%s (%d %s)", i18n.T("skill.installed"), len(allInstalled), i18n.T("skill.info.sources")), ColorYellow))
+		for _, inst := range allInstalled {
+			srcTag := fmt.Sprintf("[%s]", inst.Source)
+			fmt.Printf("    %s  %s  %s\n",
+				colorize(inst.Name, ColorCyan),
+				colorize(srcTag, ColorGray),
+				colorize(inst.Path, ColorGray))
+		}
 	}
 
 	fmt.Println()
+}
+
+// Prefer manages source preferences for skills with name conflicts.
+// Usage:
+//
+//	/skill prefer                              → list all preferences
+//	/skill prefer frontend-design              → show current preference
+//	/skill prefer frontend-design skills.sh    → prefer the skills.sh version
+//	/skill prefer frontend-design local        → prefer the local version
+//	/skill prefer frontend-design --reset      → remove preference (use default order)
+func (sh *SkillHandler) Prefer(args []string) {
+	prefs := registry.LoadPreferences()
+
+	// No args: list all preferences
+	if len(args) == 0 {
+		all := prefs.ListPreferences()
+		if len(all) == 0 {
+			fmt.Printf("\n  %s\n", i18n.T("skill.prefer.none"))
+			fmt.Printf("  %s\n\n", i18n.T("skill.prefer.hint",
+				colorize("/skill prefer <name> <source>", ColorCyan)))
+			return
+		}
+
+		fmt.Printf("\n  %s:\n\n", colorize(i18n.T("skill.prefer.header"), ColorCyan))
+		for baseName, source := range all {
+			fmt.Printf("    %s  →  %s\n",
+				colorize(baseName, ColorCyan),
+				colorize(source, ColorGreen))
+		}
+		fmt.Println()
+		return
+	}
+
+	baseName := args[0]
+
+	// Single arg: show current preference and available sources
+	if len(args) == 1 {
+		current := prefs.GetPreference(baseName)
+		matches := sh.registryMgr.GetAllInstalledInfo(baseName)
+
+		if len(matches) == 0 {
+			fmt.Printf("\n  %s\n\n", i18n.T("skill.prefer.not_installed", baseName))
+			return
+		}
+
+		fmt.Println()
+		if current != "" {
+			fmt.Printf("  %s %s → %s\n",
+				colorize(i18n.T("skill.prefer.current")+":", ColorCyan),
+				colorize(baseName, ColorCyan),
+				colorize(current, ColorGreen))
+		} else {
+			fmt.Printf("  %s %s (%s)\n",
+				colorize(i18n.T("skill.prefer.current")+":", ColorCyan),
+				colorize(baseName, ColorCyan),
+				i18n.T("skill.prefer.default_order"))
+		}
+
+		fmt.Printf("\n  %s:\n", i18n.T("skill.prefer.available"))
+		for _, m := range matches {
+			marker := ""
+			if m.Source == current {
+				marker = " " + colorize("← "+i18n.T("skill.prefer.active"), ColorGreen)
+			}
+			fmt.Printf("    %s  %s%s\n",
+				colorize(m.Name, ColorCyan),
+				colorize(fmt.Sprintf("[%s]", m.Source), ColorGray),
+				marker)
+		}
+		fmt.Println()
+		return
+	}
+
+	// Two args: set or reset preference
+	source := args[1]
+
+	if source == "--reset" || source == "reset" || source == "--clear" {
+		if err := prefs.RemovePreference(baseName); err != nil {
+			fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.error")+":", ColorRed), err.Error())
+			return
+		}
+		fmt.Printf("\n  %s %s\n\n",
+			colorize(i18n.T("skill.prefer.reset"), ColorGreen),
+			colorize(baseName, ColorCyan))
+		return
+	}
+
+	// Validate that the source exists for this skill
+	matches := sh.registryMgr.GetAllInstalledInfo(baseName)
+	found := false
+	for _, m := range matches {
+		if m.Source == source {
+			found = true
+			break
+		}
+	}
+	if !found && len(matches) > 0 {
+		fmt.Printf("\n  %s %q %s %q.\n",
+			colorize(i18n.T("skill.prefer.source_not_found")+":", ColorYellow),
+			source, i18n.T("skill.prefer.for_skill"), baseName)
+		fmt.Printf("  %s:", i18n.T("skill.prefer.available"))
+		for _, m := range matches {
+			fmt.Printf(" %s", colorize(m.Source, ColorCyan))
+		}
+		fmt.Print("\n\n")
+		return
+	}
+
+	if err := prefs.SetPreference(baseName, source); err != nil {
+		fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.error")+":", ColorRed), err.Error())
+		return
+	}
+
+	fmt.Printf("\n  %s %s → %s\n",
+		colorize(i18n.T("skill.prefer.set"), ColorGreen),
+		colorize(baseName, ColorCyan),
+		colorize(source, ColorGreen))
+	fmt.Printf("  %s\n\n", i18n.T("skill.prefer.effect"))
+}
+
+// showSecurityAudits fetches and displays security risk assessments from
+// the skills.sh partner audit API (Gen Agent Trust Hub, Socket, Snyk).
+// This is best-effort with a short timeout — failures are silently ignored.
+func (sh *SkillHandler) showSecurityAudits(ctx context.Context, meta *registry.SkillMeta) {
+	// Extract source (owner/repo) and skill slug from the full ID
+	parts := strings.SplitN(meta.Slug, "/", 3)
+	if len(parts) < 3 {
+		return
+	}
+	source := strings.Join(parts[:2], "/")
+	skillSlug := parts[2]
+
+	auditData, err := registry.FetchAuditData(ctx, source, []string{skillSlug})
+	if err != nil {
+		sh.logger.Debug("failed to fetch audit data", zap.Error(err))
+		return
+	}
+
+	// Look up the audit for our skill
+	data, ok := auditData[skillSlug]
+	if !ok {
+		// Try with the full name as fallback
+		data, ok = auditData[meta.Name]
+		if !ok {
+			return
+		}
+	}
+
+	fmt.Printf("  %s\n", colorize(i18n.T("skill.info.security")+":", ColorCyan))
+
+	// Gen Agent Trust Hub (ATH)
+	athLabel := "--"
+	athColor := ColorGray
+	if data.ATH != nil {
+		athLabel = registry.FormatRiskLevel(data.ATH.Risk)
+		athColor = riskColor(data.ATH.Risk)
+	}
+	fmt.Printf("    %-22s %s\n",
+		colorize("Gen Agent Trust Hub:", ColorGray),
+		colorize(athLabel, athColor))
+
+	// Socket
+	socketLabel := "--"
+	socketColor := ColorGray
+	if data.Socket != nil {
+		socketLabel = registry.FormatSocketAlerts(data.Socket)
+		if data.Socket.Alerts > 0 {
+			socketColor = ColorRed
+		} else {
+			socketColor = ColorGreen
+		}
+	}
+	fmt.Printf("    %-22s %s\n",
+		colorize("Socket:", ColorGray),
+		colorize(socketLabel, socketColor))
+
+	// Snyk
+	snykLabel := "--"
+	snykColor := ColorGray
+	if data.Snyk != nil {
+		snykLabel = registry.FormatRiskLevel(data.Snyk.Risk)
+		snykColor = riskColor(data.Snyk.Risk)
+	}
+	fmt.Printf("    %-22s %s\n",
+		colorize("Snyk:", ColorGray),
+		colorize(snykLabel, snykColor))
+}
+
+// riskColor returns the appropriate color for a risk level.
+func riskColor(risk string) string {
+	switch strings.ToLower(risk) {
+	case "safe":
+		return ColorGreen
+	case "low":
+		return ColorGreen
+	case "medium":
+		return ColorYellow
+	case "high":
+		return ColorRed
+	case "critical":
+		return ColorRed
+	default:
+		return ColorGray
+	}
 }
 
 // ShowRegistries displays all configured registries.
@@ -519,7 +955,61 @@ func (sh *SkillHandler) ShowRegistries() {
 	}
 
 	fmt.Printf("\n  %s: %s\n", i18n.T("skill.registries.config"), colorize(sh.registryMgr.GetConfigPath(), ColorGray))
-	fmt.Println("  " + i18n.T("skill.registries.edit_hint"))
+	fmt.Printf("  %s\n", i18n.T("skill.registries.toggle_hint",
+		colorize("/skill registry enable|disable <name>", ColorCyan)))
+	fmt.Println()
+}
+
+// SetRegistryEnabled enables or disables a registry by name, persists the change,
+// and hot-reloads the registry manager so the change takes effect immediately.
+func (sh *SkillHandler) SetRegistryEnabled(name string, enabled bool) {
+	cfg, err := registry.LoadConfig()
+	if err != nil {
+		fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.error")+":", ColorRed), err.Error())
+		return
+	}
+
+	found := false
+	for i := range cfg.Registries {
+		if strings.EqualFold(cfg.Registries[i].Name, name) {
+			cfg.Registries[i].IsActive = enabled
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		fmt.Printf("\n  %s %q\n", colorize(i18n.T("skill.registry.not_found")+":", ColorYellow), name)
+		fmt.Printf("  %s:", i18n.T("skill.registry.available"))
+		for _, r := range cfg.Registries {
+			fmt.Printf(" %s", colorize(r.Name, ColorCyan))
+		}
+		fmt.Print("\n\n")
+		return
+	}
+
+	if err := registry.SaveConfig(cfg); err != nil {
+		fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.error")+":", ColorRed), err.Error())
+		return
+	}
+
+	// Hot-reload: recreate the manager with the updated config
+	newMgr, err := registry.NewRegistryManager(cfg, sh.logger)
+	if err != nil {
+		sh.logger.Warn("Failed to reload registry manager", zap.Error(err))
+		fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.error")+":", ColorRed), err.Error())
+		return
+	}
+	sh.registryMgr = newMgr
+
+	action := i18n.T("skill.registry.enabled")
+	actionColor := ColorGreen
+	if !enabled {
+		action = i18n.T("skill.registry.disabled")
+		actionColor = ColorYellow
+	}
+
+	fmt.Printf("\n  %s %s\n", colorize(action, actionColor), colorize(name, ColorCyan))
 	fmt.Println()
 }
 
@@ -534,11 +1024,13 @@ func (sh *SkillHandler) ShowHelp() {
 		desc string
 	}{
 		{"/skill search <query>", i18n.T("skill.help.search")},
-		{"/skill install <name>", i18n.T("skill.help.install")},
+		{"/skill install <name> [--from <reg>]", i18n.T("skill.help.install")},
 		{"/skill uninstall <name>", i18n.T("skill.help.uninstall")},
 		{"/skill list", i18n.T("skill.help.list")},
-		{"/skill info <name>", i18n.T("skill.help.info")},
+		{"/skill info <name> [--from <reg>]", i18n.T("skill.help.info")},
 		{"/skill registries", i18n.T("skill.help.registries")},
+		{"/skill registry enable|disable <name>", i18n.T("skill.help.registry_toggle")},
+		{"/skill prefer [name] [source]", i18n.T("skill.help.prefer")},
 		{"/skill help", i18n.T("skill.help.show_help")},
 	}
 
