@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.101.0](https://github.com/diillson/chatcli/compare/v1.100.0...v1.101.0) (2026-04-13)
+
+
+### Features
+
+* **registry:** native skills.sh integration with multi-registry support ([#776](https://github.com/diillson/chatcli/issues/776)) ([5055a5d](https://github.com/diillson/chatcli/commit/5055a5d23af362767158a6b12d72dff11073f198))
+
 ## [1.100.0](https://github.com/diillson/chatcli/compare/v1.99.0...v1.100.0) (2026-04-11)
 
 
