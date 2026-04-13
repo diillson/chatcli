@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.101.1](https://github.com/diillson/chatcli/compare/v1.101.0...v1.101.1) (2026-04-13)
+
+
+### Bug Fixes
+
+* sync operator go.mod/go.sum with root module dependencies ([#789](https://github.com/diillson/chatcli/issues/789)) ([2932351](https://github.com/diillson/chatcli/commit/29323511f6730a085618fa1eea8dcde7e1e76ef9))
+
 ## [1.101.0](https://github.com/diillson/chatcli/compare/v1.100.0...v1.101.0) (2026-04-13)
 
 
