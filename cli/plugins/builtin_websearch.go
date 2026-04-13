@@ -65,6 +65,7 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 		var jsonArgs map[string]interface{}
 		if err := json.Unmarshal([]byte(args[0]), &jsonArgs); err == nil {
 			if cmd, ok := jsonArgs["cmd"].(string); ok && cmd == "search" {
+				// Format: {"cmd":"search","args":{"query":"..."}}
 				if a, ok := jsonArgs["args"].(map[string]interface{}); ok {
 					if q, ok := a["query"].(string); ok {
 						query = q
@@ -72,6 +73,15 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 					if m, ok := a["maxResults"].(float64); ok {
 						maxResults = int(m)
 					}
+				}
+			} else if q, ok := jsonArgs["query"].(string); ok && q != "" {
+				// Flat format from native tool calling: {"query":"...","max_results":10}
+				query = q
+				if m, ok := jsonArgs["max_results"].(float64); ok && m > 0 {
+					maxResults = int(m)
+				}
+				if m, ok := jsonArgs["maxResults"].(float64); ok && m > 0 {
+					maxResults = int(m)
 				}
 			}
 		}
