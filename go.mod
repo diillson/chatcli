@@ -8,7 +8,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
-	github.com/mattn/go-runewidth v0.0.22
+	github.com/mattn/go-runewidth v0.0.23
 	github.com/prometheus/client_golang v1.23.2
 	github.com/refraction-networking/utls v1.8.2
 	github.com/stretchr/testify v1.11.1
