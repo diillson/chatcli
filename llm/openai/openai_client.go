@@ -248,7 +248,14 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OpenAI /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+		body := string(bodyBytes)
+		// Detect missing scopes error and provide actionable message
+		if resp.StatusCode == http.StatusForbidden && strings.Contains(body, "api.model.read") {
+			c.logger.Warn(i18n.T("llm.responses.missing_scope"),
+				zap.String("scope", "api.model.read"))
+			return nil, fmt.Errorf("%s", i18n.T("llm.responses.missing_scope_detail"))
+		}
+		return nil, fmt.Errorf("OpenAI /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(body))
 	}
 
 	var result struct {
@@ -265,8 +272,8 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 	for _, m := range result.Data {
 		// Filter to chat-capable models (gpt, o1, o3, o4, chatgpt)
 		id := strings.ToLower(m.ID)
-		if !strings.HasPrefix(id, "gpt-") && !strings.HasPrefix(id, "o1-") &&
-			!strings.HasPrefix(id, "o3-") && !strings.HasPrefix(id, "o4-") &&
+		if !strings.HasPrefix(id, "gpt-") && !strings.HasPrefix(id, "o1") &&
+			!strings.HasPrefix(id, "o3") && !strings.HasPrefix(id, "o4") &&
 			!strings.HasPrefix(id, "chatgpt-") {
 			continue
 		}

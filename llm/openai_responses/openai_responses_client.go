@@ -385,124 +385,16 @@ func buildOAuthPayload(history []models.Message, prompt string) (string, []map[s
 	return inst, input
 }
 
-// ListModels fetches available models. For OAuth tokens it uses the ChatGPT
-// backend endpoint; for API keys it uses the standard OpenAI /v1/models.
+// ListModels fetches available models from the OpenAI platform API.
+// For OAuth tokens this returns nil — the ChatGPT backend model listing is
+// not reliable for the Codex API (different slugs, plan-specific availability,
+// Cloudflare challenges). The LLMManager merges with the static catalog, so
+// OAuth users still see all known Codex-compatible models.
 func (c *OpenAIResponsesClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
-	isOAuth := strings.HasPrefix(c.apiKey, "oauth:")
-
-	if isOAuth {
-		models, err := c.listModelsOAuth(ctx)
-		if err != nil {
-			c.logger.Warn(i18n.T("llm.responses.oauth_listing_failed"),
-				zap.Error(err))
-			// Fallback: try standard OpenAI /v1/models with the OAuth token
-			return c.listModelsAPIKey(ctx)
-		}
-		return models, nil
+	if strings.HasPrefix(c.apiKey, "oauth:") {
+		return nil, nil
 	}
 	return c.listModelsAPIKey(ctx)
-}
-
-// listModelsOAuth fetches models from the ChatGPT backend (chatgpt.com).
-func (c *OpenAIResponsesClient) listModelsOAuth(ctx context.Context) ([]client.ModelInfo, error) {
-	// ChatGPT backend models endpoint
-	baseURL := utils.GetEnvOrDefault("OPENAI_RESPONSES_API_URL", config.OpenAIOAuthResponsesURL)
-	// Derive backend-api/models from the codex/responses URL
-	modelsURL := strings.TrimSuffix(baseURL, "/codex/responses") + "/models"
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "OpenAI"), err)
-	}
-	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.responses.fetch_chatgpt_models_failed"), err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.read_response_for", "OpenAI"), err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s", i18n.T("llm.error.api_error_code", "ChatGPT", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes))))
-	}
-
-	// ChatGPT backend returns {"models": [{"slug": "gpt-4o", "title": "GPT-4o", ...}]}
-	// or {"categories": [..., {"default_model": "...", "browsing_model": "..."}]}
-	var result struct {
-		Models []struct {
-			Slug  string `json:"slug"`
-			Title string `json:"title"`
-		} `json:"models"`
-		// Alternative format with categories
-		Categories []struct {
-			DefaultModel string `json:"default_model"`
-			HumanName    string `json:"human_category_name"`
-		} `json:"categories"`
-	}
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenAI"), err)
-	}
-
-	seen := make(map[string]bool)
-	var modelList []client.ModelInfo
-
-	// Parse models array
-	for _, m := range result.Models {
-		if m.Slug == "" || seen[m.Slug] {
-			continue
-		}
-		seen[m.Slug] = true
-		displayName := m.Title
-		if displayName == "" {
-			displayName = m.Slug
-		}
-		modelList = append(modelList, client.ModelInfo{
-			ID:          m.Slug,
-			DisplayName: displayName,
-			Source:      client.ModelSourceAPI,
-		})
-		if _, ok := catalog.Resolve(catalog.ProviderOpenAI, m.Slug); !ok {
-			catalog.Register(catalog.ModelMeta{
-				ID:           m.Slug,
-				Aliases:      []string{m.Slug},
-				DisplayName:  displayName,
-				Provider:     catalog.ProviderOpenAI,
-				PreferredAPI: catalog.APIResponses,
-			})
-		}
-	}
-
-	// Parse categories (alternative format)
-	for _, cat := range result.Categories {
-		slug := cat.DefaultModel
-		if slug == "" || seen[slug] {
-			continue
-		}
-		seen[slug] = true
-		modelList = append(modelList, client.ModelInfo{
-			ID:          slug,
-			DisplayName: slug,
-			Source:      client.ModelSourceAPI,
-		})
-		if _, ok := catalog.Resolve(catalog.ProviderOpenAI, slug); !ok {
-			catalog.Register(catalog.ModelMeta{
-				ID:           slug,
-				Aliases:      []string{slug},
-				DisplayName:  slug,
-				Provider:     catalog.ProviderOpenAI,
-				PreferredAPI: catalog.APIResponses,
-			})
-		}
-	}
-
-	c.logger.Info(i18n.T("llm.responses.fetch_models_oauth"), zap.Int("count", len(modelList)))
-	return modelList, nil
 }
 
 // listModelsAPIKey fetches models from the standard OpenAI /v1/models endpoint.
@@ -528,7 +420,14 @@ func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s", i18n.T("llm.error.api_error_code", "OpenAI", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes))))
+		body := string(bodyBytes)
+		// Detect missing scopes error and provide actionable message
+		if resp.StatusCode == http.StatusForbidden && strings.Contains(body, "api.model.read") {
+			c.logger.Warn(i18n.T("llm.responses.missing_scope"),
+				zap.String("scope", "api.model.read"))
+			return nil, fmt.Errorf("%s", i18n.T("llm.responses.missing_scope_detail"))
+		}
+		return nil, fmt.Errorf("%s", i18n.T("llm.error.api_error_code", "OpenAI", resp.StatusCode, utils.SanitizeSensitiveText(body)))
 	}
 
 	var result struct {
@@ -543,8 +442,8 @@ func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.
 	var modelList []client.ModelInfo
 	for _, m := range result.Data {
 		id := strings.ToLower(m.ID)
-		if !strings.HasPrefix(id, "gpt-") && !strings.HasPrefix(id, "o1-") &&
-			!strings.HasPrefix(id, "o3-") && !strings.HasPrefix(id, "o4-") &&
+		if !strings.HasPrefix(id, "gpt-") && !strings.HasPrefix(id, "o1") &&
+			!strings.HasPrefix(id, "o3") && !strings.HasPrefix(id, "o4") &&
 			!strings.HasPrefix(id, "chatgpt-") {
 			continue
 		}
