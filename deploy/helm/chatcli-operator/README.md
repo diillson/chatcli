@@ -420,6 +420,166 @@ helm uninstall chatcli-operator -n aiops-system
 > kubectl get crd -o name | grep platform.chatcli.io | xargs kubectl delete
 > ```
 
+## TLS Cookbook — connecting the operator to a self-signed gRPC server
+
+This is the flow most production clusters actually use: the `chatcli` server exposes gRPC over TLS with a self-signed certificate, and the operator's `WatcherBridge` must dial it over an in-cluster DNS name. Two things must be right or the connection fails silently.
+
+### 1. The TLS Secret must include SANs for the in-cluster DNS names
+
+`openssl req -x509` without a config emits a cert with **no** `subjectAltName`, and modern gRPC/TLS clients reject it with:
+
+```
+transport: authentication handshake failed: x509: certificate is not valid for any names, but wanted to match chatcli-prod.chatcli-system.svc.cluster.local
+```
+
+Create the cert with SANs that match how the operator dials the service (see `instance.spec.server.address`):
+
+```bash
+cat > openssl.cnf <<'EOF'
+[req]
+distinguished_name = req_dn
+x509_extensions    = v_ext
+prompt             = no
+
+[req_dn]
+CN = chatcli-prod.chatcli-system.svc.cluster.local
+
+[v_ext]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = chatcli-prod.chatcli-system.svc.cluster.local
+DNS.2 = chatcli-prod.chatcli-system.svc
+DNS.3 = chatcli-prod
+DNS.4 = localhost
+EOF
+
+openssl req -x509 -newkey rsa:4096 -sha256 -days 825 -nodes \
+  -keyout tls.key -out tls.crt -config openssl.cnf -extensions v_ext
+```
+
+### 2. The Secret must also carry `ca.crt` so the operator can trust the self-signed cert
+
+For self-signed certs (issuer == subject), the `tls.crt` *is* its own CA. The operator reads the CA from the **`ca.crt` key of the same TLS Secret referenced by the Instance CR** and uses it as the trust root (see `WatcherBridge.buildConnectionOpts`). If `ca.crt` is missing, you get:
+
+```
+transport: authentication handshake failed: x509: certificate signed by unknown authority
+```
+
+Fix — create the Secret with all three keys:
+
+```bash
+kubectl -n chatcli-system create secret generic chatcli-tls \
+  --from-file=tls.crt=tls.crt \
+  --from-file=tls.key=tls.key \
+  --from-file=ca.crt=tls.crt   # self-signed: cert is its own CA
+```
+
+Then reference it from the Instance CR:
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Instance
+metadata:
+  name: chatcli-prod
+  namespace: chatcli-system
+spec:
+  server:
+    address: chatcli-prod.chatcli-system.svc.cluster.local:50051
+    tls:
+      enabled: true
+      secretName: chatcli-tls
+```
+
+No `SSL_CERT_FILE` / `CHATCLI_GRPC_TLS_CA` env or volume mount is needed on the operator when you take this path — the CA travels with the Instance's TLS Secret.
+
+> Using `CHATCLI_GRPC_TLS_CA` is a secondary path for cases where multiple Instances share a CA. It requires `extraEnv` + your own volume/volumeMount; the Helm chart does not mount a CA file automatically.
+
+### What if the cert is issued by cert-manager or ACM?
+
+The self-signed flow above is the fragile case. With cert-manager or AWS ACM the setup is simpler, but each issuer has its own gotcha:
+
+| Issuer | `ca.crt` in Secret? | Where SAN must match | `spec.server.address` points to... |
+|---|---|---|---|
+| cert-manager + Let's Encrypt / public ACME | No — CA already in system trust store | Public FQDN | Public FQDN via Ingress/NLB with gRPC passthrough |
+| cert-manager + internal ClusterIssuer (CA) | Yes — cert-manager writes `ca.crt` automatically | `dnsNames` in the `Certificate` CR | In-cluster Service |
+| AWS ACM Public | N/A — private key not exportable | Public FQDN | Public FQDN via ALB/NLB |
+| AWS ACM Private CA | Yes — include the Private CA bundle as `ca.crt` | Set at issuance | In-cluster Service |
+| Self-signed (manual openssl) | Yes — `ca.crt=tls.crt` | `subjectAltName` in `openssl.cnf` | In-cluster Service |
+
+**Notes:**
+
+- Publicly trusted certs need no `ca.crt` — `grpc_client.go` falls back to Go's system trust store when no CA is provided. The catch is `spec.server.address` must match the public FQDN (which has SANs), not the in-cluster Service.
+- cert-manager with an internal CA is the cleanest K8s path. Using `Certificate.issuerRef.kind: CA` emits a Secret that already contains `ca.crt` — the `WatcherBridge` picks it up automatically. Example:
+
+  ```yaml
+  apiVersion: cert-manager.io/v1
+  kind: Certificate
+  metadata:
+    name: chatcli-tls
+    namespace: chatcli-system
+  spec:
+    secretName: chatcli-tls
+    issuerRef:
+      name: internal-ca
+      kind: ClusterIssuer
+    commonName: chatcli-prod.chatcli-system.svc.cluster.local
+    dnsNames:
+      - chatcli-prod.chatcli-system.svc.cluster.local
+      - chatcli-prod.chatcli-system.svc
+      - chatcli-prod
+    duration: 8760h
+    renewBefore: 720h
+  ```
+
+- ACM Public does not fit pod-to-pod gRPC (private key is not exportable). ACM Private CA does — export the CA bundle via `aws acm-pca get-certificate-authority-certificate` and ship it as `ca.crt` in the Secret.
+
+### Troubleshooting
+
+| Error (operator logs) | Cause | Fix |
+|---|---|---|
+| `x509: certificate is not valid for any names` | Server cert has no SAN matching `spec.server.address` | Regenerate cert with `openssl.cnf` + `subjectAltName` covering the in-cluster FQDN |
+| `x509: certificate signed by unknown authority` | Self-signed cert, no CA trust on operator | Add `ca.crt` key to the `chatcli-tls` Secret referenced by the Instance |
+| `connection refused` after fixing TLS | Service selector mismatch or server not listening on 50051 | `kubectl get endpoints chatcli-prod -n chatcli-system` — must list pod IPs |
+
+### Production checklist (TLS delta)
+
+In addition to the main checklist, verify:
+
+- [ ] `chatcli-tls` Secret exists in the same namespace as the Instance and contains **`tls.crt`, `tls.key`, and `ca.crt`**
+- [ ] `tls.crt` has `subjectAltName` entries for `<instance>.<ns>.svc.cluster.local`, `<instance>.<ns>.svc`, and `<instance>` (verify with `openssl x509 -in tls.crt -noout -text | grep -A1 'Subject Alternative Name'`)
+- [ ] `instance.spec.server.address` exactly matches one of the SANs
+- [ ] Operator logs show `Connected to Instance` (no `x509:` errors) within ~30s of the Instance becoming `Ready`
+
+## Exposing the Web Dashboard via Ingress
+
+The operator chart does **not** ship an Ingress — the dashboard is reachable via `kubectl port-forward svc/<release>-chatcli-operator 8090:8090`. To expose it cluster-externally, add your own Ingress pointing at the operator Service:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chatcli-dashboard
+  namespace: aiops-system
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: chatcli.example.com
+      http:
+        paths:
+          - path: /chatcli(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: chatcli-operator
+                port:
+                  number: 8090
+```
+
+The `rewrite-target` + capture group is required when mounting the dashboard under a sub-path — the dashboard's static assets are served from `/` and would 404 otherwise.
+
 ## Documentation
 
 For full documentation including cookbook recipes, architecture deep-dives, and production setup guides, visit [chatcli.edilsonfreitas.com](https://chatcli.edilsonfreitas.com).
