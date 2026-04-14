@@ -437,11 +437,11 @@ Create the cert with SANs that match how the operator dials the service (see `in
 ```bash
 cat > openssl.cnf <<'EOF'
 [req]
-distinguished_name = req
+distinguished_name = req_dn
 x509_extensions    = v_ext
 prompt             = no
 
-[req]
+[req_dn]
 CN = chatcli-prod.chatcli-system.svc.cluster.local
 
 [v_ext]
