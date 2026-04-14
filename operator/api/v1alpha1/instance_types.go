@@ -236,6 +236,10 @@ type TLSSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
 
 	// SecretName is the name of the Secret containing tls.crt and tls.key.
+	// If the Secret also contains a ca.crt key, the operator will use it as
+	// the trust root when dialing the gRPC server — required for self-signed
+	// certificates, otherwise the connection fails with
+	// "certificate signed by unknown authority".
 	SecretName string `json:"secretName,omitempty"`
 }
 
