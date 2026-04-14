@@ -495,6 +495,45 @@ No `SSL_CERT_FILE` / `CHATCLI_GRPC_TLS_CA` env or volume mount is needed on the 
 
 > Using `CHATCLI_GRPC_TLS_CA` is a secondary path for cases where multiple Instances share a CA. It requires `extraEnv` + your own volume/volumeMount; the Helm chart does not mount a CA file automatically.
 
+### What if the cert is issued by cert-manager or ACM?
+
+The self-signed flow above is the fragile case. With cert-manager or AWS ACM the setup is simpler, but each issuer has its own gotcha:
+
+| Issuer | `ca.crt` in Secret? | Where SAN must match | `spec.server.address` points to... |
+|---|---|---|---|
+| cert-manager + Let's Encrypt / public ACME | No — CA already in system trust store | Public FQDN | Public FQDN via Ingress/NLB with gRPC passthrough |
+| cert-manager + internal ClusterIssuer (CA) | Yes — cert-manager writes `ca.crt` automatically | `dnsNames` in the `Certificate` CR | In-cluster Service |
+| AWS ACM Public | N/A — private key not exportable | Public FQDN | Public FQDN via ALB/NLB |
+| AWS ACM Private CA | Yes — include the Private CA bundle as `ca.crt` | Set at issuance | In-cluster Service |
+| Self-signed (manual openssl) | Yes — `ca.crt=tls.crt` | `subjectAltName` in `openssl.cnf` | In-cluster Service |
+
+**Notes:**
+
+- Publicly trusted certs need no `ca.crt` — `grpc_client.go` falls back to Go's system trust store when no CA is provided. The catch is `spec.server.address` must match the public FQDN (which has SANs), not the in-cluster Service.
+- cert-manager with an internal CA is the cleanest K8s path. Using `Certificate.issuerRef.kind: CA` emits a Secret that already contains `ca.crt` — the `WatcherBridge` picks it up automatically. Example:
+
+  ```yaml
+  apiVersion: cert-manager.io/v1
+  kind: Certificate
+  metadata:
+    name: chatcli-tls
+    namespace: chatcli-system
+  spec:
+    secretName: chatcli-tls
+    issuerRef:
+      name: internal-ca
+      kind: ClusterIssuer
+    commonName: chatcli-prod.chatcli-system.svc.cluster.local
+    dnsNames:
+      - chatcli-prod.chatcli-system.svc.cluster.local
+      - chatcli-prod.chatcli-system.svc
+      - chatcli-prod
+    duration: 8760h
+    renewBefore: 720h
+  ```
+
+- ACM Public does not fit pod-to-pod gRPC (private key is not exportable). ACM Private CA does — export the CA bundle via `aws acm-pca get-certificate-authority-certificate` and ship it as `ca.crt` in the Secret.
+
 ### Troubleshooting
 
 | Error (operator logs) | Cause | Fix |
