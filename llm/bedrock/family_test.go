@@ -56,7 +56,7 @@ func TestResolveFamily(t *testing.T) {
 
 func TestIsSupportedBedrockFamily(t *testing.T) {
 	cases := map[string]bool{
-		"anthropic.claude-3-5-sonnet-20241022-v2:0":       true,
+		"anthropic.claude-3-5-sonnet-20241022-v2:0":        true,
 		"global.anthropic.claude-sonnet-4-5-20250929-v1:0": true,
 		"openai.gpt-oss-120b-1:0":                          true,
 		"us.openai.gpt-oss-120b-1:0":                       true,

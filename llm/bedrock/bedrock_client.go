@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	bedrocksvc "github.com/aws/aws-sdk-go-v2/service/bedrock"
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -341,6 +341,10 @@ func buildCorporateHTTPClient(logger *zap.Logger) (aws.HTTPClient, string) {
 		if err != nil || pool == nil {
 			pool = x509.NewCertPool()
 		}
+		// The CA bundle path is intentionally operator-supplied via env var —
+		// this is the documented way to trust a corporate proxy's CA. The
+		// file is read as-is; we don't mount it or open relative to a root.
+		// #nosec G304 G703 -- user-controlled path by design (CHATCLI_BEDROCK_CA_BUNDLE)
 		pem, err := os.ReadFile(bundlePath)
 		if err != nil {
 			logger.Warn("Bedrock: failed to read CHATCLI_BEDROCK_CA_BUNDLE", zap.String("path", bundlePath), zap.Error(err))
