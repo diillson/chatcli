@@ -115,7 +115,9 @@
           "enum": [
             "",
             "OPENAI",
+            "OPENAI_ASSISTANT",
             "CLAUDEAI",
+            "BEDROCK",
             "GOOGLEAI",
             "XAI",
             "ZAI",
@@ -300,6 +302,34 @@
         "openrouterApiKey": {
           "type": "string",
           "description": "OpenRouter API key for accessing multiple LLM providers through a single endpoint."
+        },
+        "awsAccessKeyId": {
+          "type": "string",
+          "description": "AWS access key id for the BEDROCK provider. Leave empty to rely on IRSA (serviceAccount.annotations) or an IAM instance profile."
+        },
+        "awsSecretAccessKey": {
+          "type": "string",
+          "description": "AWS secret access key paired with awsAccessKeyId."
+        },
+        "awsSessionToken": {
+          "type": "string",
+          "description": "Optional AWS session token for STS / assumed-role credentials."
+        },
+        "bedrockRegion": {
+          "type": "string",
+          "description": "AWS region for Bedrock calls (takes precedence over awsRegion)."
+        },
+        "awsRegion": {
+          "type": "string",
+          "description": "Standard AWS_REGION for the SDK (fallback when bedrockRegion is empty)."
+        },
+        "chatcliBedrockCaBundle": {
+          "type": "string",
+          "description": "Path inside the pod to a PEM CA bundle for corporate TLS proxies (Bedrock-specific)."
+        },
+        "chatcliBedrockInsecureSkipVerify": {
+          "type": "string",
+          "description": "Set to 'true' to disable TLS verification for Bedrock calls. Insecure; troubleshooting only."
         }
       }
     },

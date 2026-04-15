@@ -24,6 +24,10 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 		"OLLAMA_ENABLED", "OLLAMA_BASE_URL",
 		"STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
 		"CHATCLI_AUTH_DIR",
+		"AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_REGION", "BEDROCK_REGION",
+		"AWS_WEB_IDENTITY_TOKEN_FILE",
+		"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+		"AWS_CONTAINER_CREDENTIALS_FULL_URI",
 	}
 
 	for _, key := range keysToClear {
@@ -36,6 +40,11 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 	// Isolate auth store: point to empty temp dir so disk credentials don't leak
 	tmpDir := t.TempDir()
 	os.Setenv("CHATCLI_AUTH_DIR", tmpDir)
+	// Isolate HOME so ~/.aws/{credentials,config} on the dev machine don't
+	// trigger the Bedrock provider auto-detection.
+	originalHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	t.Cleanup(func() { os.Setenv("HOME", originalHome) })
 	auth.InvalidateCache()
 
 	for key, value := range envs {

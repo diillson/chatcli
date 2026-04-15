@@ -57,6 +57,13 @@ const (
 	DefaultOpenRouterModel = "openai/gpt-5.2"
 	OpenRouterAPIURL       = "https://openrouter.ai/api/v1/chat/completions"
 
+	// Valores padrão para AWS Bedrock (modelos Anthropic Claude)
+	// Model ids seguem o formato Bedrock (ex.: "anthropic.claude-3-5-sonnet-20241022-v2:0").
+	// Para inference profiles regionais, use o prefixo apropriado (ex.: "us.anthropic.claude-sonnet-4-20250514-v1:0").
+	// Default usa inference profile global (exigido por modelos 3.7+ / 4.x+).
+	DefaultBedrockModel  = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+	DefaultBedrockRegion = "us-east-1"
+
 	// Valores padrão para Ollama
 	DefaultOllamaModel          = "gpt-oss:20b"
 	OllamaDefaultBaseURL        = "http://localhost:11434"
