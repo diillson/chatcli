@@ -962,6 +962,32 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIAnthropicMessages,
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
+
+	// ── AWS Bedrock — OpenAI GPT-OSS (open-weights) ──────────────────
+	// Modelos OpenAI open-weights hospedados no Bedrock. Usam schema
+	// OpenAI Chat Completions (distinto do Anthropic Messages).
+	// O ChatCLI auto-detecta pelo prefixo "openai." do model id, ou
+	// força via BEDROCK_PROVIDER=openai.
+	{
+		ID:              "openai.gpt-oss-120b-1:0",
+		Aliases:         []string{"bedrock-gpt-oss-120b", "gpt-oss-120b"},
+		DisplayName:     "GPT-OSS 120B (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+	{
+		ID:              "openai.gpt-oss-20b-1:0",
+		Aliases:         []string{"bedrock-gpt-oss-20b", "gpt-oss-20b"},
+		DisplayName:     "GPT-OSS 20B (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   128000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
 }
 
 // Resolve procura metadados por provedor e string de modelo (case-insensitive),

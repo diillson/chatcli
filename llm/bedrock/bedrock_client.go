@@ -33,7 +33,40 @@ import (
 	"go.uber.org/zap"
 )
 
-// BedrockClient invokes Anthropic Claude models hosted on AWS Bedrock.
+// modelFamily identifies the request/response body schema a Bedrock model
+// expects. Each family has a distinct InvokeModel payload.
+type modelFamily string
+
+const (
+	familyAnthropic modelFamily = "anthropic"
+	familyOpenAI    modelFamily = "openai"
+)
+
+// resolveFamily picks the body schema to use. Precedence:
+//  1. BEDROCK_PROVIDER env var (explicit override: "anthropic" | "openai")
+//  2. Model ID prefix: "openai.*" → OpenAI; "anthropic.*", "global.anthropic.*",
+//     "us.anthropic.*", "eu.anthropic.*", "apac.anthropic.*" → Anthropic.
+//  3. Default: Anthropic (preserves existing behavior).
+func resolveFamily(model string) modelFamily {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEDROCK_PROVIDER"))) {
+	case "openai", "gpt":
+		return familyOpenAI
+	case "anthropic", "claude":
+		return familyAnthropic
+	}
+	m := strings.ToLower(model)
+	if strings.HasPrefix(m, "openai.") || strings.Contains(m, ".openai.") {
+		return familyOpenAI
+	}
+	return familyAnthropic
+}
+
+// BedrockClient invokes foundation models hosted on AWS Bedrock.
+// Currently supports two body schemas via auto-dispatch (model-id prefix)
+// or explicit selection through BEDROCK_PROVIDER:
+//   - Anthropic Messages schema (Claude 3/3.5/3.7/4/4.5/4.6) — default
+//   - OpenAI Chat Completions schema (openai.gpt-oss-*)
+//
 // Authentication uses the default AWS credentials chain:
 //   - Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN)
 //   - Shared credentials file (~/.aws/credentials) — selected by AWS_PROFILE
@@ -114,13 +147,27 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	return nil
 }
 
-// SendPrompt sends the prompt using Bedrock's InvokeModel API with the
-// Anthropic Messages body schema. Retries are delegated to utils.Retry.
+// SendPrompt dispatches to the correct body schema based on the resolved
+// model family (Anthropic Messages vs. OpenAI Chat Completions).
+// Retries are delegated to utils.Retry inside each family-specific path.
 func (c *BedrockClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	if err := c.ensureRuntime(ctx); err != nil {
 		return "", err
 	}
 
+	family := resolveFamily(c.model)
+	c.logger.Debug("bedrock: dispatching request", zap.String("model", c.model), zap.String("family", string(family)))
+
+	switch family {
+	case familyOpenAI:
+		return c.sendPromptOpenAI(ctx, prompt, history, maxTokens)
+	default:
+		return c.sendPromptAnthropic(ctx, prompt, history, maxTokens)
+	}
+}
+
+// sendPromptAnthropic uses the Anthropic Messages body schema on Bedrock.
+func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
 		effectiveMaxTokens = c.getMaxTokens()
@@ -339,9 +386,9 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 	seen := make(map[string]bool)
 	var result []client.ModelInfo
 
-	// 1) Foundation models (on-demand capable)
+	// 1) Foundation models (on-demand capable) — all providers whose
+	//    body schema we currently support (Anthropic + OpenAI).
 	fm, err := c.control.ListFoundationModels(ctx, &bedrocksvc.ListFoundationModelsInput{
-		ByProvider:       stringPtr("anthropic"),
 		ByOutputModality: bedrocktypes.ModelModalityText,
 	})
 	if err != nil {
@@ -349,7 +396,7 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 	} else {
 		for _, s := range fm.ModelSummaries {
 			id, displayName := derefModelSummary(s.ModelId, s.ModelName)
-			if id == "" || seen[id] {
+			if id == "" || seen[id] || !isSupportedBedrockFamily(id) {
 				continue
 			}
 			seen[id] = true
@@ -362,8 +409,8 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 		}
 	}
 
-	// 2) Inference profiles (required for Claude 3.7, 4.x, 4.5, 4.6)
-	// Use a paginator because accounts often have >50 profiles.
+	// 2) Inference profiles (required for Claude 3.7, 4.x, 4.5, 4.6
+	//    and also used by some newer cross-region OpenAI profiles).
 	paginator := bedrocksvc.NewListInferenceProfilesPaginator(c.control, &bedrocksvc.ListInferenceProfilesInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
@@ -376,8 +423,7 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 			if p.InferenceProfileId != nil {
 				id = *p.InferenceProfileId
 			}
-			// Only surface Anthropic profiles — the prefix is stripped region code.
-			if id == "" || seen[id] || !strings.Contains(strings.ToLower(id), "anthropic") {
+			if id == "" || seen[id] || !isSupportedBedrockFamily(id) {
 				continue
 			}
 			displayName := id
@@ -396,6 +442,14 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 
 	c.logger.Info(i18n.T("llm.info.fetched_models", "Bedrock"), zap.Int("count", len(result)))
 	return result, nil
+}
+
+// isSupportedBedrockFamily filters ListFoundation/InferenceProfile output to
+// families whose body schema the client knows how to encode. Expand this when
+// new families (Llama, Nova, Mistral, etc.) get first-class support.
+func isSupportedBedrockFamily(id string) bool {
+	m := strings.ToLower(id)
+	return strings.Contains(m, "anthropic") || strings.Contains(m, "openai")
 }
 
 func derefModelSummary(id, name *string) (string, string) {
