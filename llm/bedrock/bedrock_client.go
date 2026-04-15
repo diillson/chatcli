@@ -326,51 +326,101 @@ func buildCorporateHTTPClient(logger *zap.Logger) (aws.HTTPClient, string) {
 // See: https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html
 const anthropicBedrockVersion = "bedrock-2023-05-31"
 
-// ListModels queries Bedrock's control plane for foundation models available
-// in the configured region, filtered to Anthropic. Implements client.ModelLister
-// so that `/switch --model` can suggest live models from the user's account.
+// ListModels queries Bedrock's control plane for Anthropic models the account
+// has access to. Returns both foundation models (direct on-demand, e.g. Claude
+// 3.x) AND inference profiles (global./us./eu./apac., required for Claude 3.7
+// and newer). Implements client.ModelLister so `/switch --model` suggests IDs
+// that are actually invokable.
 func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	if err := c.ensureRuntime(ctx); err != nil {
 		return nil, err
 	}
-	out, err := c.control.ListFoundationModels(ctx, &bedrocksvc.ListFoundationModelsInput{
+
+	seen := make(map[string]bool)
+	var result []client.ModelInfo
+
+	// 1) Foundation models (on-demand capable)
+	fm, err := c.control.ListFoundationModels(ctx, &bedrocksvc.ListFoundationModelsInput{
 		ByProvider:       stringPtr("anthropic"),
 		ByOutputModality: bedrocktypes.ModelModalityText,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("bedrock: ListFoundationModels: %w", err)
-	}
-	var result []client.ModelInfo
-	for _, s := range out.ModelSummaries {
-		id := ""
-		if s.ModelId != nil {
-			id = *s.ModelId
-		}
-		if id == "" {
-			continue
-		}
-		displayName := id
-		if s.ModelName != nil && *s.ModelName != "" {
-			displayName = *s.ModelName + " (Bedrock)"
-		}
-		result = append(result, client.ModelInfo{
-			ID:          id,
-			DisplayName: displayName,
-			Source:      client.ModelSourceAPI,
-		})
-
-		if _, ok := catalog.Resolve(catalog.ProviderBedrock, id); !ok {
-			catalog.Register(catalog.ModelMeta{
-				ID:           id,
-				Aliases:      []string{id},
-				DisplayName:  displayName,
-				Provider:     catalog.ProviderBedrock,
-				PreferredAPI: catalog.APIAnthropicMessages,
+		c.logger.Warn("bedrock: ListFoundationModels failed", zap.Error(err))
+	} else {
+		for _, s := range fm.ModelSummaries {
+			id, displayName := derefModelSummary(s.ModelId, s.ModelName)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			result = append(result, client.ModelInfo{
+				ID:          id,
+				DisplayName: displayName,
+				Source:      client.ModelSourceAPI,
 			})
+			registerBedrockModel(id, displayName)
 		}
 	}
+
+	// 2) Inference profiles (required for Claude 3.7, 4.x, 4.5, 4.6)
+	// Use a paginator because accounts often have >50 profiles.
+	paginator := bedrocksvc.NewListInferenceProfilesPaginator(c.control, &bedrocksvc.ListInferenceProfilesInput{})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			c.logger.Warn("bedrock: ListInferenceProfiles failed", zap.Error(err))
+			break
+		}
+		for _, p := range page.InferenceProfileSummaries {
+			id := ""
+			if p.InferenceProfileId != nil {
+				id = *p.InferenceProfileId
+			}
+			// Only surface Anthropic profiles — the prefix is stripped region code.
+			if id == "" || seen[id] || !strings.Contains(strings.ToLower(id), "anthropic") {
+				continue
+			}
+			displayName := id
+			if p.InferenceProfileName != nil && *p.InferenceProfileName != "" {
+				displayName = *p.InferenceProfileName + " (Bedrock profile)"
+			}
+			seen[id] = true
+			result = append(result, client.ModelInfo{
+				ID:          id,
+				DisplayName: displayName,
+				Source:      client.ModelSourceAPI,
+			})
+			registerBedrockModel(id, displayName)
+		}
+	}
+
 	c.logger.Info(i18n.T("llm.info.fetched_models", "Bedrock"), zap.Int("count", len(result)))
 	return result, nil
+}
+
+func derefModelSummary(id, name *string) (string, string) {
+	idStr := ""
+	if id != nil {
+		idStr = *id
+	}
+	display := idStr
+	if name != nil && *name != "" {
+		display = *name + " (Bedrock)"
+	}
+	return idStr, display
+}
+
+func registerBedrockModel(id, displayName string) {
+	if _, ok := catalog.Resolve(catalog.ProviderBedrock, id); ok {
+		return
+	}
+	catalog.Register(catalog.ModelMeta{
+		ID:           id,
+		Aliases:      []string{id},
+		DisplayName:  displayName,
+		Provider:     catalog.ProviderBedrock,
+		PreferredAPI: catalog.APIAnthropicMessages,
+	})
 }
 
 // Ensure BedrockClient satisfies the LLMClient and ModelLister interfaces.

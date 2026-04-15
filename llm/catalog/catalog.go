@@ -774,11 +774,145 @@ var registry = []ModelMeta{
 	},
 
 	// ── AWS Bedrock — Anthropic Claude ───────────────────────────────
-	// IDs seguem o formato Bedrock. Inference profiles regionais podem
-	// ser usados com prefixo de região (ex.: "us.", "eu.", "apac.").
+	// Modelos recentes (3.7, 4.x, 4.5, 4.6) NÃO aceitam invocação on-demand
+	// pelo ID base — exigem um inference profile ID ("global.", "us.", "eu.",
+	// "apac."). Por isso os IDs primários abaixo já vêm com o prefixo de
+	// profile. Os IDs base ficam como aliases para ressolução por prefixo.
+	// A listagem dinâmica via `bedrock:ListInferenceProfiles` complementa
+	// este catálogo com o que a conta AWS realmente tem acesso.
+
+	// Claude 4.6 (abr 2026 — mais recentes)
+	{
+		ID:              "global.anthropic.claude-sonnet-4-6-20260115-v1:0",
+		Aliases:         []string{"bedrock-sonnet-4-6", "anthropic.claude-sonnet-4-6-20260115-v1:0", "claude-sonnet-4-6"},
+		DisplayName:     "Claude Sonnet 4.6 (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   400000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "global.anthropic.claude-opus-4-6-20260115-v1:0",
+		Aliases:         []string{"bedrock-opus-4-6", "anthropic.claude-opus-4-6-20260115-v1:0", "claude-opus-4-6"},
+		DisplayName:     "Claude Opus 4.6 (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   400000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+		Aliases:         []string{"bedrock-haiku-4-5", "anthropic.claude-haiku-4-5-20251001-v1:0", "claude-haiku-4-5"},
+		DisplayName:     "Claude Haiku 4.5 (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+
+	// Claude 4.5
+	{
+		ID:              "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+		Aliases:         []string{"bedrock-sonnet-4-5", "anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5"},
+		DisplayName:     "Claude Sonnet 4.5 (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+		Aliases:         []string{"bedrock-sonnet-4-5-us"},
+		DisplayName:     "Claude Sonnet 4.5 (Bedrock, us)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "global.anthropic.claude-opus-4-5-20251001-v1:0",
+		Aliases:         []string{"bedrock-opus-4-5", "anthropic.claude-opus-4-5-20251001-v1:0", "claude-opus-4-5"},
+		DisplayName:     "Claude Opus 4.5 (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+
+	// Claude 4 / 4.1
+	{
+		ID:              "us.anthropic.claude-sonnet-4-20250514-v1:0",
+		Aliases:         []string{"bedrock-sonnet-4", "anthropic.claude-sonnet-4-20250514-v1:0", "claude-sonnet-4"},
+		DisplayName:     "Claude Sonnet 4 (Bedrock, us)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "eu.anthropic.claude-sonnet-4-20250514-v1:0",
+		Aliases:         []string{"bedrock-sonnet-4-eu"},
+		DisplayName:     "Claude Sonnet 4 (Bedrock, eu)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "us.anthropic.claude-opus-4-20250514-v1:0",
+		Aliases:         []string{"bedrock-opus-4", "anthropic.claude-opus-4-20250514-v1:0", "claude-opus-4"},
+		DisplayName:     "Claude Opus 4 (Bedrock, us)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 32000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "us.anthropic.claude-opus-4-1-20250805-v1:0",
+		Aliases:         []string{"bedrock-opus-4-1", "anthropic.claude-opus-4-1-20250805-v1:0", "claude-opus-4-1"},
+		DisplayName:     "Claude Opus 4.1 (Bedrock, us)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 32000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+
+	// Claude 3.7 Sonnet
+	{
+		ID:              "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+		Aliases:         []string{"bedrock-sonnet-3-7", "anthropic.claude-3-7-sonnet-20250219-v1:0", "claude-3-7-sonnet"},
+		DisplayName:     "Claude 3.7 Sonnet (Bedrock, us)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
+		Aliases:         []string{"bedrock-sonnet-3-7-eu"},
+		DisplayName:     "Claude 3.7 Sonnet (Bedrock, eu)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+
+	// Claude 3.5 — aceitam on-demand direto (sem prefixo)
 	{
 		ID:              "anthropic.claude-3-5-sonnet-20241022-v2:0",
-		Aliases:         []string{"bedrock-claude-3-5-sonnet-v2", "bedrock-sonnet-3-5"},
+		Aliases:         []string{"bedrock-sonnet-3-5-v2", "claude-3-5-sonnet-v2"},
 		DisplayName:     "Claude 3.5 Sonnet v2 (Bedrock)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   200000,
@@ -788,7 +922,7 @@ var registry = []ModelMeta{
 	},
 	{
 		ID:              "anthropic.claude-3-5-sonnet-20240620-v1:0",
-		Aliases:         []string{"bedrock-claude-3-5-sonnet-v1"},
+		Aliases:         []string{"bedrock-sonnet-3-5-v1"},
 		DisplayName:     "Claude 3.5 Sonnet v1 (Bedrock)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   200000,
@@ -798,7 +932,7 @@ var registry = []ModelMeta{
 	},
 	{
 		ID:              "anthropic.claude-3-5-haiku-20241022-v1:0",
-		Aliases:         []string{"bedrock-claude-3-5-haiku"},
+		Aliases:         []string{"bedrock-haiku-3-5", "claude-3-5-haiku"},
 		DisplayName:     "Claude 3.5 Haiku (Bedrock)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   200000,
@@ -806,9 +940,11 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIAnthropicMessages,
 		Capabilities:    []string{"tools", "json_mode"},
 	},
+
+	// Claude 3 — legado (ainda suportado on-demand)
 	{
 		ID:              "anthropic.claude-3-opus-20240229-v1:0",
-		Aliases:         []string{"bedrock-claude-3-opus"},
+		Aliases:         []string{"bedrock-opus-3", "claude-3-opus"},
 		DisplayName:     "Claude 3 Opus (Bedrock)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   200000,
@@ -817,52 +953,12 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
 	{
-		ID:              "anthropic.claude-3-sonnet-20240229-v1:0",
-		Aliases:         []string{"bedrock-claude-3-sonnet"},
-		DisplayName:     "Claude 3 Sonnet (Bedrock)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
-	{
 		ID:              "anthropic.claude-3-haiku-20240307-v1:0",
-		Aliases:         []string{"bedrock-claude-3-haiku"},
+		Aliases:         []string{"bedrock-haiku-3", "claude-3-haiku"},
 		DisplayName:     "Claude 3 Haiku (Bedrock)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   200000,
 		MaxOutputTokens: 4096,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
-	{
-		ID:              "anthropic.claude-3-7-sonnet-20250219-v1:0",
-		Aliases:         []string{"bedrock-claude-3-7-sonnet"},
-		DisplayName:     "Claude 3.7 Sonnet (Bedrock)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
-	{
-		ID:              "anthropic.claude-sonnet-4-20250514-v1:0",
-		Aliases:         []string{"bedrock-claude-sonnet-4", "us.anthropic.claude-sonnet-4-20250514-v1:0"},
-		DisplayName:     "Claude Sonnet 4 (Bedrock)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
-	{
-		ID:              "anthropic.claude-opus-4-20250514-v1:0",
-		Aliases:         []string{"bedrock-claude-opus-4", "us.anthropic.claude-opus-4-20250514-v1:0"},
-		DisplayName:     "Claude Opus 4 (Bedrock)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 32000,
 		PreferredAPI:    APIAnthropicMessages,
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
