@@ -241,6 +241,85 @@ stringData:
 
 > **Note:** GitHub Copilot tokens obtained via Device Flow (`/auth login github-copilot`) are persistent and do not expire. For server/operator usage, extract the token from `~/.chatcli/auth-profiles.json` after local authentication.
 
+#### Instance with AWS Bedrock
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Instance
+metadata:
+  name: chatcli-bedrock
+spec:
+  provider: BEDROCK
+  # Modern Claude on Bedrock requires an inference profile id
+  # (prefix global./us./eu./apac.). For Claude 3/3.5 the base id also works.
+  model: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+  replicas: 1
+  apiKeys:
+    name: chatcli-bedrock-keys
+  server:
+    port: 50051
+```
+
+Two authentication modes — pick one:
+
+**IRSA (recommended on EKS)** — annotate the ServiceAccount with the IAM role ARN. The operator's `reconcileServiceAccount` only updates labels, so external annotations survive reconciliation:
+
+```bash
+kubectl annotate serviceaccount chatcli-bedrock -n <ns> \
+  eks.amazonaws.com/role-arn=arn:aws:iam::123456789012:role/chatcli-bedrock
+```
+
+The Secret then only needs the region:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: chatcli-bedrock-keys
+type: Opaque
+stringData:
+  BEDROCK_REGION: "us-east-1"
+```
+
+**Static IAM user keys** — full credentials in the Secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: chatcli-bedrock-keys
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: "AKIA..."
+  AWS_SECRET_ACCESS_KEY: "..."
+  # AWS_SESSION_TOKEN: "..."                   # optional, for STS
+  BEDROCK_REGION: "us-east-1"
+  # Corporate proxy / private CA (optional):
+  # CHATCLI_BEDROCK_CA_BUNDLE: "/etc/ssl/corp-ca-bundle.pem"
+```
+
+Minimum IAM policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:ListFoundationModels",
+        "bedrock:ListInferenceProfiles"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+See the [Bedrock feature docs](https://chatcli.edilsonfreitas.com/features/bedrock) for model ids, inference profiles, and corporate-proxy troubleshooting.
+
 ### Anomaly (Auto-created by WatcherBridge)
 
 ```yaml

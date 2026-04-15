@@ -34,7 +34,9 @@ tls:
 
 # LLM Provider configuration
 llm:
-  # Default provider: OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, OPENROUTER
+  # Default provider: OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI,
+  # MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER
+  # For BEDROCK: use IRSA via serviceAccount.annotations, or static AWS keys in secrets.*
   provider: ""
   model: ""
 
@@ -101,6 +103,16 @@ secrets:
   githubCopilotToken: ""
   # OpenRouter
   openrouterApiKey: ""
+  # AWS Bedrock — leave empty and use IRSA (serviceAccount.annotations) for IAM-based auth,
+  # or set the static credentials below. Region is required either way (BEDROCK_REGION or AWS_REGION).
+  awsAccessKeyId: ""
+  awsSecretAccessKey: ""
+  awsSessionToken: ""      # optional, only for STS/assumed-role credentials
+  bedrockRegion: ""        # e.g. "us-east-1" (falls back to AWS_REGION)
+  awsRegion: ""            # alternative to BEDROCK_REGION; picked up natively by the AWS SDK
+  # Corporate proxy / private CA (optional):
+  chatcliBedrockCaBundle: ""           # path INSIDE the pod to a mounted PEM bundle
+  chatcliBedrockInsecureSkipVerify: "" # "true" disables TLS verification (insecure, troubleshooting only)
 
 # GitHub Copilot configuration (if using COPILOT provider)
 # Authenticate via /auth login github-copilot (Device Flow OAuth)

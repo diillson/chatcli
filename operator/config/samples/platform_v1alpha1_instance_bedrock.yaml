@@ -1,0 +1,75 @@
+# Sample: ChatCLI Instance using AWS Bedrock (Anthropic Claude on Bedrock).
+#
+# Two auth modes — pick ONE:
+#   (a) IRSA (recommended on EKS): no static keys; annotate the ServiceAccount
+#       with eks.amazonaws.com/role-arn after the Instance is reconciled.
+#       The operator's reconcileServiceAccount preserves external annotations.
+#   (b) Static IAM user keys: place AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+#       in the Secret referenced by spec.apiKeys (as shown below).
+#
+# Required IAM policy for the role/user (see docs/features/bedrock):
+#   bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream,
+#   bedrock:ListFoundationModels, bedrock:ListInferenceProfiles
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chatcli
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: chatcli-bedrock-keys
+  namespace: chatcli
+type: Opaque
+stringData:
+  # Mode (b) — static keys. Leave empty if using IRSA.
+  AWS_ACCESS_KEY_ID: "<your-access-key-id>"
+  AWS_SECRET_ACCESS_KEY: "<your-secret-access-key>"
+  # Optional for STS / assumed-role:
+  # AWS_SESSION_TOKEN: "<your-session-token>"
+
+  # Region (required either way):
+  BEDROCK_REGION: "us-east-1"
+
+  # Corporate proxy / private CA (optional):
+  # CHATCLI_BEDROCK_CA_BUNDLE: "/etc/ssl/corp-ca-bundle.pem"
+  # CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY: "true"   # INSECURE — troubleshooting only
+---
+apiVersion: platform.chatcli.io/v1alpha1
+kind: Instance
+metadata:
+  name: chatcli-bedrock
+  namespace: chatcli
+spec:
+  replicas: 1
+  provider: BEDROCK
+  # Default model already uses a global inference profile required for modern Claude.
+  # For older models (3, 3.5) the base id works; for 3.7+/4.x/4.5/4.6 you MUST use
+  # a prefix like "global.", "us.", "eu.", or "apac.".
+  model: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+  image:
+    repository: ghcr.io/diillson/chatcli
+    tag: latest
+    pullPolicy: IfNotPresent
+  server:
+    port: 50051
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  apiKeys:
+    name: chatcli-bedrock-keys
+# ──────────────────────────────────────────────────────────────────────────────
+# IRSA (mode a): after the Instance is created, annotate its ServiceAccount
+# with the IAM role ARN. The operator reconciles labels but preserves
+# annotations, so this survives subsequent reconciles:
+#
+#   kubectl -n chatcli annotate serviceaccount chatcli-bedrock \
+#     eks.amazonaws.com/role-arn=arn:aws:iam::123456789012:role/chatcli-bedrock
+#
+# Then delete the static keys from the Secret above — the AWS SDK picks up the
+# role via the webidentity token file injected by EKS automatically.
+# ──────────────────────────────────────────────────────────────────────────────
