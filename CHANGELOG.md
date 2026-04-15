@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.103.0](https://github.com/diillson/chatcli/compare/v1.102.0...v1.103.0) (2026-04-15)
+
+
+### Features
+
+* AWS Bedrock provider (Claude + GPT-OSS) with operator/helm support ([#796](https://github.com/diillson/chatcli/issues/796)) ([88145d5](https://github.com/diillson/chatcli/commit/88145d5156c37fcf9fca47b093cb1886513e445e))
+
 ## [1.102.0](https://github.com/diillson/chatcli/compare/v1.101.2...v1.102.0) (2026-04-15)
 
 
