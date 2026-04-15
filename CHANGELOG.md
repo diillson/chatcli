@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.102.0](https://github.com/diillson/chatcli/compare/v1.101.2...v1.102.0) (2026-04-15)
+
+
+### Features
+
+* **agent:** session sandbox, delegate subagent, webfetch filters ([#794](https://github.com/diillson/chatcli/issues/794)) ([84dc3a4](https://github.com/diillson/chatcli/commit/84dc3a4dfe19f8e7ff372a5c01a5cc68e747d2f6))
+
 ## [1.101.2](https://github.com/diillson/chatcli/compare/v1.101.1...v1.101.2) (2026-04-13)
 
 
