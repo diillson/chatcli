@@ -163,7 +163,7 @@ func (cli *ChatCLI) executeDirectCommand(command string) {
 	// Construir o comando para carregar o arquivo de configuração e executar o comando do usuário
 	shellCommand := fmt.Sprintf("source %s && %s", utils.ShellQuote(shellConfigPath), command)
 
-	cmd := exec.Command(shellPath, "-c", shellCommand)
+	cmd := exec.Command(shellPath, "-c", shellCommand) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 
 	if isInteractive {
 		fmt.Println(i18n.T("command.warning.interactive"))

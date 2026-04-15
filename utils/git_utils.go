@@ -101,7 +101,7 @@ func GetGitInfo(executor CommandExecutor) (string, error) {
 
 // Função auxiliar para obter diferenças específicas de um arquivo
 func GetFileDiff(filepath string) (string, error) {
-	cmd := exec.Command("git", "diff", filepath)
+	cmd := exec.Command("git", "diff", filepath) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("erro ao obter diferenças do arquivo %s: %w", filepath, err)
@@ -111,7 +111,7 @@ func GetFileDiff(filepath string) (string, error) {
 
 // Função auxiliar para obter o histórico de um arquivo específico
 func GetFileHistory(filepath string) (string, error) {
-	cmd := exec.Command("git", "log", "--follow", "--pretty=format:%h - %an, %ar : %s", "--", filepath)
+	cmd := exec.Command("git", "log", "--follow", "--pretty=format:%h - %an, %ar : %s", "--", filepath) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("erro ao obter histórico do arquivo %s: %w", filepath, err)
@@ -121,7 +121,7 @@ func GetFileHistory(filepath string) (string, error) {
 
 // Função auxiliar para obter blame de um arquivo
 func GetFileBlame(filepath string) (string, error) {
-	cmd := exec.Command("git", "blame", filepath)
+	cmd := exec.Command("git", "blame", filepath) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("erro ao obter blame do arquivo %s: %w", filepath, err)

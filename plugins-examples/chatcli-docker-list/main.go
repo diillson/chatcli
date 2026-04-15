@@ -54,7 +54,7 @@ type Network struct {
 
 func logf(format string, v ...interface{}) {
 	fmt.Fprintf(os.Stderr, format, v...)
-	os.Stderr.Sync()
+	os.Stderr.Sync() //#nosec G104 -- example plugin / dev tool — best-effort cleanup
 }
 
 func fatalf(format string, v ...interface{}) {
@@ -538,7 +538,7 @@ func runCommand(name string, timeout time.Duration, args ...string) (string, err
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) //#nosec G204 -- example plugin / dev tool — subprocess invocation is the entire purpose
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

@@ -13,7 +13,7 @@ import (
 // across /mcp, /hooks, /cost, /channel, /worktree, etc.
 
 func uiTermWidth() int {
-	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	w, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
 	if err != nil || w <= 0 {
 		return 80
 	}

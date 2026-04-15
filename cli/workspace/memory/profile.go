@@ -205,7 +205,7 @@ func (ps *UserProfileStore) persist() {
 		ps.logger.Warn("failed to marshal user profile", zap.Error(err))
 		return
 	}
-	if err := os.WriteFile(ps.path, data, 0o644); err != nil {
+	if err := os.WriteFile(ps.path, data, 0o600); err != nil {
 		ps.logger.Warn("failed to write user profile", zap.Error(err))
 	}
 }

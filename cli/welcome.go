@@ -113,8 +113,8 @@ func wrapStringWithColor(text string, maxWidth int) []string {
 // --- caixa de dica (agora traduzida) ---
 func printTipBox() {
 	// 3. SORTEIA UMA CHAVE E TRADUZ O TEXTO DA DICA E O TÍTULO
-	tipKey := tipKeys[rand.Intn(len(tipKeys))]
-	tip := i18n.T(tipKey) // Traduz a dica sorteada
+	tipKey := tipKeys[rand.Intn(len(tipKeys))] //#nosec G404 -- non-cryptographic: picks a welcome-screen tip
+	tip := i18n.T(tipKey)                      // Traduz a dica sorteada
 
 	width := screenWidth
 	innerContent := width - 4

@@ -287,7 +287,7 @@ func VisibleLen(s string) int {
 // RenderTimelineEvent desenha um "card" estilizado ajustado à largura do terminal
 func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
 	// 1. Obter largura do terminal
-	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	width, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
 	if err != nil || width <= 0 {
 		width = 80 // Fallback seguro
 	}
@@ -534,7 +534,7 @@ func cleanArgsForDisplay(args string) string {
 
 // RenderBatchHeader exibe um cabeçalho indicando o início de um lote
 func (r *UIRenderer) RenderBatchHeader(totalActions int) {
-	width, _, _ := term.GetSize(int(os.Stdout.Fd()))
+	width, _, _ := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
 	if width <= 0 {
 		width = 80
 	}
@@ -614,7 +614,7 @@ func (r *UIRenderer) RenderStreamBoxStart(icon, title, color string) {
 
 // desenha APENAS o rodapé
 func (r *UIRenderer) RenderStreamBoxEnd(color string) {
-	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	width, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
 	if err != nil || width <= 0 {
 		width = 80
 	}

@@ -236,5 +236,5 @@ func (pt *ProjectTracker) persist() {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(pt.path, data, 0o644)
+	_ = os.WriteFile(pt.path, data, 0o600)
 }

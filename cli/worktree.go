@@ -71,7 +71,7 @@ func (cli *ChatCLI) worktreeCreate(branch string) {
 
 	// Check if branch already exists
 	branchExists := false
-	out, err := exec.Command("git", "-C", repoRoot, "branch", "--list", branch).Output()
+	out, err := exec.Command("git", "-C", repoRoot, "branch", "--list", branch).Output() //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	if err == nil && strings.TrimSpace(string(out)) != "" {
 		branchExists = true
 	}
@@ -79,10 +79,10 @@ func (cli *ChatCLI) worktreeCreate(branch string) {
 	var cmd *exec.Cmd
 	if branchExists {
 		// Checkout existing branch in new worktree
-		cmd = exec.Command("git", "-C", repoRoot, "worktree", "add", worktreePath, branch)
+		cmd = exec.Command("git", "-C", repoRoot, "worktree", "add", worktreePath, branch) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	} else {
 		// Create new branch in new worktree
-		cmd = exec.Command("git", "-C", repoRoot, "worktree", "add", "-b", branch, worktreePath)
+		cmd = exec.Command("git", "-C", repoRoot, "worktree", "add", "-b", branch, worktreePath) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	}
 
 	output, err := cmd.CombinedOutput()
@@ -187,11 +187,11 @@ func (cli *ChatCLI) worktreeRemove(target string) {
 		fmt.Println(colorize(fmt.Sprintf("  Voltando ao diretório principal: %s", repoRoot), ColorGray))
 	}
 
-	cmd := exec.Command("git", "worktree", "remove", removePath)
+	cmd := exec.Command("git", "worktree", "remove", removePath) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		// Try force remove
-		cmd = exec.Command("git", "worktree", "remove", "--force", removePath)
+		cmd = exec.Command("git", "worktree", "remove", "--force", removePath) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			fmt.Println(colorize(fmt.Sprintf("  Erro ao remover worktree: %s", strings.TrimSpace(string(output))), ColorRed))

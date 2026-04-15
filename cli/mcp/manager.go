@@ -47,7 +47,7 @@ func (m *Manager) Channels() *ChannelManager {
 
 // LoadConfig loads MCP server configurations from a JSON file.
 func (m *Manager) LoadConfig(configPath string) error {
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // No config is fine

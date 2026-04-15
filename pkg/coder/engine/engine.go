@@ -38,6 +38,73 @@ var sensitivePaths = []string{
 	"/boot/", "/sbin/",
 }
 
+// auxAllowedPaths is a package-level registry of directories that the engine
+// treats as inside the boundary for read/write/exec, in addition to the
+// configured WorkspaceRoot. Callers (e.g. the CLI session bootstrap) register
+// paths like the session scratch dir and the tool-result overflow dir.
+//
+// This avoids threading an allowlist through every NewEngine() call site
+// (there are 25+) while keeping the security model explicit: only code in
+// the same process can extend the allowlist — untrusted input never touches
+// these functions.
+var (
+	auxAllowedPaths   []string
+	auxAllowedPathsMu sync.RWMutex
+)
+
+// RegisterAuxPath adds path to the aux allowlist. No-op if already registered
+// or path is empty. The path is resolved to its absolute form; symlinks are
+// resolved on first use by validatePath.
+func RegisterAuxPath(path string) {
+	if path == "" {
+		return
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return
+	}
+	auxAllowedPathsMu.Lock()
+	defer auxAllowedPathsMu.Unlock()
+	for _, existing := range auxAllowedPaths {
+		if existing == abs {
+			return
+		}
+	}
+	auxAllowedPaths = append(auxAllowedPaths, abs)
+}
+
+// UnregisterAuxPath removes path from the aux allowlist.
+func UnregisterAuxPath(path string) {
+	if path == "" {
+		return
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return
+	}
+	auxAllowedPathsMu.Lock()
+	defer auxAllowedPathsMu.Unlock()
+	filtered := auxAllowedPaths[:0]
+	for _, existing := range auxAllowedPaths {
+		if existing != abs {
+			filtered = append(filtered, existing)
+		}
+	}
+	auxAllowedPaths = filtered
+}
+
+// auxAllowedPathsSnapshot returns a copy for safe iteration during validation.
+func auxAllowedPathsSnapshot() []string {
+	auxAllowedPathsMu.RLock()
+	defer auxAllowedPathsMu.RUnlock()
+	if len(auxAllowedPaths) == 0 {
+		return nil
+	}
+	out := make([]string, len(auxAllowedPaths))
+	copy(out, auxAllowedPaths)
+	return out
+}
+
 // systemBinPaths are allowed for read/execute operations.
 var systemBinPaths = []string{
 	"/usr/bin/", "/usr/local/bin/", "/bin/", "/usr/sbin/",
@@ -103,6 +170,17 @@ func (e *Engine) validatePath(target string) error {
 		}
 
 		if !isSystemBin && resolved != boundary && !strings.HasPrefix(resolved, boundary+"/") {
+			// Check aux allowlist (e.g. session scratch dir, tool-result
+			// overflow). These are registered only by the CLI itself, so
+			// they're trusted.
+			for _, aux := range auxAllowedPathsSnapshot() {
+				if evalAux, err := filepath.EvalSymlinks(aux); err == nil {
+					aux = evalAux
+				}
+				if resolved == aux || strings.HasPrefix(resolved, aux+string(filepath.Separator)) {
+					return nil
+				}
+			}
 			return fmt.Errorf("path %q is outside workspace boundary %q", target, e.WorkspaceRoot)
 		}
 	}

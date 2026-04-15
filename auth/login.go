@@ -56,7 +56,7 @@ func doTokenExchange(hc *http.Client, req *http.Request) (*OAuthTokenResponse, e
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", "chatcli/1.0")
 	}
-	resp, err := hc.Do(req)
+	resp, err := hc.Do(req) //#nosec G704 -- OAuth token exchange to provider-defined URLs (Anthropic/OpenAI/GitHub), not user-controlled
 	if err != nil {
 		return nil, err
 	}

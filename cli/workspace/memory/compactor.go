@@ -133,7 +133,7 @@ func (c *Compactor) CleanupDailyNotes() (int, error) {
 func (c *Compactor) regenerateMemoryMD() {
 	content := c.facts.GenerateMarkdown(c.config.MaxMemoryMDSize)
 	path := c.memDir + "/MEMORY.md"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		c.logger.Warn("Failed to regenerate MEMORY.md", zap.Error(err))
 	}
 }

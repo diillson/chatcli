@@ -21,7 +21,7 @@ const (
 	// GitHub Copilot OAuth Device Flow (RFC 8628)
 	defaultCopilotOAuthClientID = "Ov23lifEydOk2Non90tJ"
 	CopilotDeviceCodeURL        = "https://github.com/login/device/code"
-	CopilotTokenURL             = "https://github.com/login/oauth/access_token"
+	CopilotTokenURL             = "https://github.com/login/oauth/access_token" //#nosec G101 -- public OAuth endpoint URL
 	CopilotScope                = "read:user"
 
 	// Polling defaults per GitHub docs

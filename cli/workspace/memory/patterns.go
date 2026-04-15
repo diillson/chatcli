@@ -305,7 +305,7 @@ func (pd *PatternDetector) persist() {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(pd.path, data, 0o644)
+	_ = os.WriteFile(pd.path, data, 0o600)
 }
 
 func min(a, b int) int {

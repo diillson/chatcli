@@ -170,7 +170,7 @@ func (e *Engine) handlePatch(args []string) error {
 		e.errorf("WARN: backup falhou para %s: %v\n", *file, err)
 	}
 	newContent := strings.Replace(content, searchStr, replaceStr, 1)
-	if err := os.WriteFile(*file, []byte(newContent), 0600); err != nil {
+	if err := os.WriteFile(*file, []byte(newContent), 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 		return fmt.Errorf("erro escrita: %v", err)
 	}
 	e.printf("✅ Patch aplicado em '%s'.\n", *file)
@@ -193,7 +193,7 @@ func (e *Engine) handleRollback(args []string) error {
 	if err != nil {
 		return fmt.Errorf("backup error: %v", err)
 	}
-	if err := os.WriteFile(*file, c, 0600); err != nil {
+	if err := os.WriteFile(*file, c, 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 		return fmt.Errorf("erro ao restaurar arquivo: %v", err)
 	}
 	e.println("✅ Rollback ok.")

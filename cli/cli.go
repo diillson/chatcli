@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/paste"
@@ -241,6 +242,18 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		executionProfile: ProfileNormal,
 	}
 
+	// Initialize the per-session scratch workspace. This makes
+	// $CHATCLI_AGENT_TMPDIR available to every tool and registers the
+	// scratch + tool-results dirs with the engine / read validator so the
+	// agent can read and write inside them.
+	if _, err := agent.InitSessionWorkspace(logger); err != nil {
+		// Fatal in the sense of "the sandbox is broken" — but we only log
+		// and continue. The agent falls back to the old /tmp/chatcli-*
+		// shared dirs without read-on-demand access, which is the legacy
+		// behaviour.
+		logger.Warn("Failed to initialize session workspace — large tool outputs will not be readable", zap.Error(err))
+	}
+
 	pluginMgr, err := plugins.NewManager(logger)
 	if err != nil {
 		// Logamos o erro, mas a aplicação continua. O pluginManager será um objeto válido, mas vazio.
@@ -347,7 +360,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	}
 	// Auto-enable if config file exists (even without env var)
 	if !mcpEnabled {
-		if _, err := os.Stat(mcpConfigPath); err == nil {
+		if _, err := os.Stat(mcpConfigPath); err == nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 			mcpEnabled = true
 		}
 	}
@@ -1067,6 +1080,12 @@ func (cli *ChatCLI) cleanup() {
 	}
 	if cli.pluginManager != nil {
 		cli.pluginManager.Close()
+	}
+
+	// Tear down the session scratch workspace. Respects
+	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).
+	if ws := agent.GetSessionWorkspace(); ws != nil {
+		ws.Cleanup()
 	}
 	if err := cli.logger.Sync(); err != nil {
 		msg := err.Error()

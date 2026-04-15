@@ -237,7 +237,7 @@ func (fi *FactIndex) ArchiveFacts(facts []*Fact, archivePath string) error {
 
 	// Read existing archive
 	var archive []*Fact
-	if data, err := os.ReadFile(archivePath); err == nil {
+	if data, err := os.ReadFile(archivePath); err == nil { //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		_ = json.Unmarshal(data, &archive)
 	}
 	archive = append(archive, facts...)
@@ -246,7 +246,7 @@ func (fi *FactIndex) ArchiveFacts(facts []*Fact, archivePath string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(archivePath, data, 0o644); err != nil {
+	if err := os.WriteFile(archivePath, data, 0o600); err != nil {
 		return err
 	}
 
@@ -410,7 +410,7 @@ func (fi *FactIndex) persistLocked() {
 		return
 	}
 
-	if err := os.WriteFile(fi.path, data, 0o644); err != nil {
+	if err := os.WriteFile(fi.path, data, 0o600); err != nil {
 		fi.logger.Warn("failed to write fact index", zap.Error(err))
 	}
 }

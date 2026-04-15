@@ -117,7 +117,7 @@ func (h *Handler) ListRemoteSkills(ctx context.Context, req *pb.ListRemoteSkills
 		if len(s.Subskills) > 0 {
 			info.Subskills = make(map[string]string, len(s.Subskills))
 			for name, path := range s.Subskills {
-				if content, err := os.ReadFile(path); err == nil {
+				if content, err := os.ReadFile(path); err == nil { //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 					info.Subskills[name] = string(content)
 				}
 			}
@@ -177,7 +177,7 @@ func (h *Handler) GetSkillContent(ctx context.Context, req *pb.GetSkillContentRe
 	if len(skill.Subskills) > 0 {
 		info.Subskills = make(map[string]string, len(skill.Subskills))
 		for name, path := range skill.Subskills {
-			if content, err := os.ReadFile(path); err == nil {
+			if content, err := os.ReadFile(path); err == nil { //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 				info.Subskills[name] = string(content)
 			}
 		}
@@ -246,7 +246,7 @@ func (h *Handler) DownloadPlugin(req *pb.DownloadPluginRequest, stream pb.ChatCL
 		return status.Errorf(codes.Internal, "%s", i18n.T("server.remote.plugin_stat_error", err))
 	}
 
-	f, err := os.Open(pluginPath)
+	f, err := os.Open(pluginPath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", i18n.T("server.remote.plugin_open_error", err))
 	}

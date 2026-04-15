@@ -65,7 +65,7 @@ func collectFiles(primary string, extras []string) []string {
 }
 
 func readFileWithLimit(path string, maxBytes int) (string, bool, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		return "", false, err
 	}
@@ -106,14 +106,14 @@ func computeLineRange(total, start, end, head, tail int) (int, int) {
 }
 
 func createBackup(path string) error {
-	input, err := os.ReadFile(path)
+	input, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if os.IsNotExist(err) {
 		return nil // no file to back up
 	}
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path+".bak", input, 0600)
+	return os.WriteFile(path+".bak", input, 0600) //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 }
 
 func parseCSVSet(input string) map[string]bool {

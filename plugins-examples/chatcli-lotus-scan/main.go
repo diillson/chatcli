@@ -43,7 +43,7 @@ func main() {
 	var builder strings.Builder
 	builder.WriteString("Estrutura da Documentação Atual:\n")
 
-	walkErr := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error { //#nosec G703 -- example plugin / dev tool — path validation is the user's responsibility
 		if err != nil {
 			// Retorna o erro para parar o Walk, mas loga para o usuário saber onde falhou.
 			fmt.Fprintf(os.Stderr, "Aviso: não foi possível acessar o caminho '%s': %v\n", path, err)
@@ -88,7 +88,7 @@ func main() {
 
 // getTitleFromFrontMatter lê um arquivo .md e extrai o título do front matter.
 func getTitleFromFrontMatter(path string) string {
-	file, err := os.Open(path)
+	file, err := os.Open(path) //#nosec G304 -- example plugin / dev tool — accepts user-supplied path by design
 	if err != nil {
 		return ""
 	}

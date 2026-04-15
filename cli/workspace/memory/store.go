@@ -33,7 +33,7 @@ type Manager struct {
 // NewManager creates a new memory manager. The memoryDir should be the
 // base memory directory (e.g., ~/.chatcli/memory/).
 func NewManager(memoryDir string, config Config, logger *zap.Logger) *Manager {
-	if err := os.MkdirAll(memoryDir, 0o755); err != nil {
+	if err := os.MkdirAll(memoryDir, 0o750); err != nil {
 		logger.Warn("failed to create memory dir", zap.Error(err))
 	}
 
@@ -155,7 +155,7 @@ func (m *Manager) TodayNotePath() string {
 
 // EnsureDirectories creates the memory directory structure.
 func (m *Manager) EnsureDirectories() error {
-	return os.MkdirAll(m.baseDir, 0o755)
+	return os.MkdirAll(m.baseDir, 0o750)
 }
 
 // --- Enhanced API ---

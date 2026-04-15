@@ -201,7 +201,7 @@ func loadCredentials(registryURL string) (string, string) {
 	}
 
 	configPath := filepath.Join(homeDir, ".docker", "config.json")
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) //#nosec G304 -- example plugin / dev tool — accepts user-supplied path by design
 	if err != nil {
 		return "", ""
 	}

@@ -341,6 +341,40 @@ func CoderToolDefinitions(allowedCmds []string) []models.ToolDefinition {
 				},
 			},
 		},
+		"delegate": {
+			Type: "function",
+			Function: models.ToolFunctionDef{
+				Name:        "delegate_subagent",
+				Description: "Delegate a focused sub-task to a subagent with ISOLATED context. Use when a task would flood the main context with raw data — large metrics endpoints, verbose log analysis, exhaustive repo search. The subagent uses its own context window; only its final summary returns to you. Prefer this over reading enormous outputs directly when you only need a distilled answer.",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"description": map[string]interface{}{
+							"type":        "string",
+							"description": "One-line human-readable label for what the subagent is doing (e.g. \"analyze Go runtime metrics\"). Shown in logs.",
+						},
+						"prompt": map[string]interface{}{
+							"type":        "string",
+							"description": "Full task instructions for the subagent. Be explicit about what output you expect back (e.g. \"Summarize top-3 memory hotspots with numbers.\").",
+						},
+						"tools": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]interface{}{"type": "string"},
+							"description": "Subcommand allowlist for the subagent (e.g. [\"read\",\"search\",\"tree\"]). Defaults to read-only tools.",
+						},
+						"read_only": map[string]interface{}{
+							"type":        "boolean",
+							"description": "If true (default), subagent cannot write/exec. Set false to grant full toolset.",
+						},
+						"max_turns": map[string]interface{}{
+							"type":        "integer",
+							"description": "Maximum ReAct iterations the subagent may take (default 15).",
+						},
+					},
+					"required": []string{"prompt"},
+				},
+			},
+		},
 	}
 
 	// nativeToolToSubcmd maps native tool function names back to engine subcommands.
@@ -365,20 +399,21 @@ func CoderToolDefinitions(allowedCmds []string) []models.ToolDefinition {
 
 // nativeToolNameMap maps native function names to engine subcommand names.
 var nativeToolNameMap = map[string]string{
-	"read_file":      "read",
-	"write_file":     "write",
-	"patch_file":     "patch",
-	"list_directory": "tree",
-	"search_files":   "search",
-	"run_command":    "exec",
-	"git_status":     "git-status",
-	"git_diff":       "git-diff",
-	"git_log":        "git-log",
-	"git_changed":    "git-changed",
-	"git_branch":     "git-branch",
-	"run_tests":      "test",
-	"rollback_file":  "rollback",
-	"clean_backups":  "clean",
+	"read_file":         "read",
+	"write_file":        "write",
+	"patch_file":        "patch",
+	"list_directory":    "tree",
+	"search_files":      "search",
+	"run_command":       "exec",
+	"git_status":        "git-status",
+	"git_diff":          "git-diff",
+	"git_log":           "git-log",
+	"git_changed":       "git-changed",
+	"git_branch":        "git-branch",
+	"run_tests":         "test",
+	"rollback_file":     "rollback",
+	"clean_backups":     "clean",
+	"delegate_subagent": "delegate",
 }
 
 // NativeToolNameToSubcmd converts a native tool function name to an engine subcommand.

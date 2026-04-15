@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/diillson/chatcli/models"
@@ -58,6 +59,23 @@ func init() {
 }
 
 var budgetFileCounter uint64
+
+// budgetResultDirOverride is set by the session workspace so overflow files
+// land inside the session scratch area (which is on the read allowlist for
+// the agent) instead of a shared global dir. Empty = fall back to default.
+var (
+	budgetResultDirOverride   string
+	budgetResultDirOverrideMu sync.RWMutex
+)
+
+// SetBudgetResultDir overrides the directory where EnforceToolResultBudget
+// persists overflow files. Pass an empty string to reset to default.
+// This is wired by cli/agent.InitSessionWorkspace.
+func SetBudgetResultDir(dir string) {
+	budgetResultDirOverrideMu.Lock()
+	defer budgetResultDirOverrideMu.Unlock()
+	budgetResultDirOverride = dir
+}
 
 // BudgetReport describes what the budget enforcement did.
 type BudgetReport struct {
@@ -270,6 +288,12 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 }
 
 func budgetResultDir() string {
+	budgetResultDirOverrideMu.RLock()
+	override := budgetResultDirOverride
+	budgetResultDirOverrideMu.RUnlock()
+	if override != "" {
+		return override
+	}
 	return filepath.Join(os.TempDir(), "chatcli-tool-results")
 }
 

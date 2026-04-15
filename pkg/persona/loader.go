@@ -588,7 +588,7 @@ func (l *Loader) loadAgentFile(path string) (*Agent, error) {
 // parseMarkdownFile extracts YAML frontmatter and content from a markdown file.
 // Robust to different line endings and whitespace.
 func (l *Loader) parseMarkdownFile(path string) (string, string, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		return "", "", err
 	}

@@ -131,7 +131,7 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return false
 	case userInput == "/reset" || userInput == "/redraw" || userInput == "/clear":
 		fmt.Print("\033[0m")
-		os.Stdout.Sync()
+		_ = os.Stdout.Sync()
 		ch.cli.restoreTerminal()
 		time.Sleep(50 * time.Millisecond)
 		ch.cli.forceRefreshPrompt()

@@ -93,7 +93,7 @@ func (cli *ChatCLI) showDayNotes(date time.Time) {
 	memDir := filepath.Dir(dir) // go up from YYYYMM to memory/
 	path := filepath.Join(memDir, date.Format("200601"), date.Format("20060102")+".md")
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		fmt.Printf("  %s %s\n", colorize(i18n.T("memory.no_notes_for"), ColorGray), colorize(dateStr, ColorCyan))
 		return

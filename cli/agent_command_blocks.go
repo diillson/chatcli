@@ -684,7 +684,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 				lastError = werr.Error()
 			}
 			_ = tmpFile.Close()
-			_ = os.Chmod(scriptPath, 0700)
+			_ = os.Chmod(scriptPath, 0o700) //#nosec G302 -- intentional: script must be owner-executable to run
 
 			header := i18n.T("agent.status.executing_script", shell) + "\n"
 			fmt.Print(header)
@@ -950,7 +950,7 @@ func (a *AgentMode) editCommandBlock(block agent.CommandBlock) ([]string, error)
 		return nil, err
 	}
 
-	cmd := exec.Command(editor, tmpfile.Name())
+	cmd := exec.Command(editor, tmpfile.Name()) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

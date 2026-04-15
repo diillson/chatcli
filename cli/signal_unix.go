@@ -20,7 +20,7 @@ import (
 func (cli *ChatCLI) forceRefreshPrompt() {
 	// Limpar buffer e resetar terminal antes do refresh
 	fmt.Print("\r\033[K\033[0m") // Carriage return + Clear line + Reset colors
-	os.Stdout.Sync()
+	_ = os.Stdout.Sync()
 
 	// Pequena pausa para o terminal processar
 	time.Sleep(10 * time.Millisecond)

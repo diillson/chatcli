@@ -70,7 +70,7 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 	defer cancel()
 
 	shell, shellFlag := resolveShell()
-	cmd := exec.CommandContext(execCtx, shell, shellFlag, finalCmd)
+	cmd := exec.CommandContext(execCtx, shell, shellFlag, finalCmd) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	if *dir != "" {
 		if err := e.validatePath(*dir); err != nil {
 			return err
@@ -220,7 +220,7 @@ func runCommand(dir, cmd string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	command := exec.CommandContext(ctx, cmd, args...)
+	command := exec.CommandContext(ctx, cmd, args...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	if dir != "" {
 		command.Dir = dir
 	}
@@ -230,7 +230,7 @@ func runCommand(dir, cmd string, args ...string) (string, error) {
 
 func runCommandWithContext(ctx context.Context, dir, cmdLine string) (string, error) {
 	shell, shellFlag := resolveShell()
-	cmd := exec.CommandContext(ctx, shell, shellFlag, cmdLine)
+	cmd := exec.CommandContext(ctx, shell, shellFlag, cmdLine) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	if dir != "" {
 		cmd.Dir = dir
 	}

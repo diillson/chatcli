@@ -166,7 +166,7 @@ func collectResourceStatus(ctx context.Context, clientset kubernetes.Interface, 
 			return rs, fmt.Errorf("failed to get CronJob: %w", err)
 		}
 		rs.Schedule = obj.Spec.Schedule
-		rs.Active = int32(len(obj.Status.Active))
+		rs.Active = int32(len(obj.Status.Active)) //#nosec G115 -- value bounded by domain
 		if obj.Spec.Suspend != nil {
 			rs.Suspended = *obj.Spec.Suspend
 		}
@@ -472,7 +472,7 @@ func (c *LogCollector) Collect(ctx context.Context) ([]LogEntry, error) {
 			}
 
 			entries := c.parseLogs(stream, pod.Name, container.Name)
-			stream.Close()
+			_ = stream.Close()
 			result = append(result, entries...)
 		}
 	}
@@ -724,7 +724,7 @@ func (nc *NodeCollector) Collect(ctx context.Context, pods []PodStatus) []NodeSt
 			MemoryCapacity:    node.Status.Capacity.Memory().String(),
 			CPUAllocatable:    node.Status.Allocatable.Cpu().String(),
 			MemoryAllocatable: node.Status.Allocatable.Memory().String(),
-			PodCapacity:       int32(node.Status.Capacity.Pods().Value()),
+			PodCapacity:       int32(node.Status.Capacity.Pods().Value()), //#nosec G115 -- value bounded by domain (counts/versions/fd)
 		}
 
 		// Parse conditions

@@ -472,7 +472,7 @@ func loadIgnorePatterns(rootDir string, logger *zap.Logger) (excludeDirs []strin
 // readIgnoreFile lê um único arquivo de ignore e retorna os padrões de exclusão.
 // Retorna slices nulos se o arquivo não existir ou não puder ser lido.
 func readIgnoreFile(filePath string, logger *zap.Logger) (excludeDirs []string, excludePatterns []string) {
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //#nosec G304 G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 	if err != nil {
 		if !os.IsNotExist(err) {
 			logger.Warn("Não foi possível abrir o arquivo de ignore, pulando.", zap.String("path", filePath), zap.Error(err))

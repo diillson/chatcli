@@ -75,7 +75,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 			cli.interactionState = StateProcessing
 
 			fmt.Print("\033[0m")
-			os.Stdout.Sync()
+			_ = os.Stdout.Sync()
 			if remaining > 0 {
 				fmt.Printf("\n  %s\n", colorize(i18n.T("queue.processing_remaining", remaining), ColorGray))
 			} else {
@@ -92,7 +92,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 		// Limpar terminal antes de refresh
 		fmt.Print("\033[0m") // Reset ANSI
-		os.Stdout.Sync()
+		_ = os.Stdout.Sync()
 
 		cli.forceRefreshPrompt()
 	}()

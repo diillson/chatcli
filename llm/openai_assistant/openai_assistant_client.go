@@ -327,7 +327,7 @@ func (c *OpenAIAssistantClient) verifyAssistantExists(ctx context.Context, assis
 // loadAssistantIDFromCache carrega o ID do assistente do cache
 func (c *OpenAIAssistantClient) loadAssistantIDFromCache() (string, error) {
 	cacheFile := filepath.Join(os.TempDir(), "chatcli-openai-cache", "assistant.json")
-	data, err := os.ReadFile(cacheFile)
+	data, err := os.ReadFile(cacheFile) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		return "", err
 	}

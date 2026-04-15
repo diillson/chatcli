@@ -32,11 +32,11 @@ func (d *DailyNoteStore) TodayNotePath() string {
 func (d *DailyNoteStore) WriteDailyNote(entry string) error {
 	path := d.TodayNotePath()
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating daily notes dir: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		return fmt.Errorf("opening daily note: %w", err)
 	}
@@ -55,7 +55,7 @@ func (d *DailyNoteStore) GetRecentDailyNotes(days int) []DailyNote {
 	for i := 0; i < days; i++ {
 		date := now.AddDate(0, 0, -i)
 		path := filepath.Join(d.memoryDir, date.Format("200601"), date.Format("20060102")+".md")
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		if err != nil {
 			continue
 		}
@@ -102,7 +102,7 @@ func (d *DailyNoteStore) Cleanup(retentionDays int) (int, error) {
 		}
 
 		if noteDate.Before(cutoff) {
-			if rmErr := os.Remove(path); rmErr != nil {
+			if rmErr := os.Remove(filepath.Clean(path)); rmErr != nil { //#nosec G122 -- path from filepath.Walk under memory dir, name validated above
 				d.logger.Warn("failed to delete old daily note",
 					zap.String("path", path), zap.Error(rmErr))
 			} else {

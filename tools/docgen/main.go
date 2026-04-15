@@ -42,10 +42,10 @@ func main() {
 
 	// E gravar também na doc do ghpages para manter sempre atualizado
 	outFile := filepath.Join("ghpages", "content", "docs", "reference", "command-reference.md")
-	if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil { //#nosec G301 -- example plugin / dev tool — directory perms appropriate for the example
 		panic(fmt.Errorf("falha ao criar diretório de saída do docgen: %w", err))
 	}
-	if err := os.WriteFile(outFile, []byte(out), 0644); err != nil {
+	if err := os.WriteFile(outFile, []byte(out), 0644); err != nil { //#nosec G306 -- example plugin / dev tool — file perms appropriate for the example
 		panic(fmt.Errorf("falha ao gravar a referência de comandos: %w", err))
 	}
 }

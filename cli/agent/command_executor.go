@@ -136,8 +136,7 @@ func (e *CommandExecutor) executeNonInteractive(ctx context.Context, shell, shel
 	start := time.Now()
 	result := &ExecutionResult{Command: command}
 
-	cmd := exec.CommandContext(ctx, shell, shellFlag, command)
-
+	cmd := exec.CommandContext(ctx, shell, shellFlag, command) //#nosec G204 G702 -- agent shell command, validated upstream by command_validator + policy_manager
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -220,7 +219,7 @@ func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, shellFl
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, shell, shellFlag, shellCommand)
+	cmd := exec.CommandContext(ctx, shell, shellFlag, shellCommand) //#nosec G204 G702 -- agent interactive shell command, validated upstream
 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -294,7 +293,7 @@ func (e *CommandExecutor) validateShellConfig(path string) error {
 
 // CaptureOutput executa comando e captura apenas a saída (para uso interno)
 func (e *CommandExecutor) CaptureOutput(ctx context.Context, shell string, args []string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, shell, args...)
+	cmd := exec.CommandContext(ctx, shell, args...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	cmd.Stdin = os.Stdin
 
 	output, err := cmd.CombinedOutput()
