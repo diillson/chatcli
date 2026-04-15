@@ -24,6 +24,7 @@ const (
 	ProviderCopilot         = "COPILOT"
 	ProviderGitHubModels    = "GITHUB_MODELS"
 	ProviderOpenRouter      = "OPENROUTER"
+	ProviderBedrock         = "BEDROCK"
 )
 
 // PreferredAPI define qual API é preferida para o modelo
@@ -770,6 +771,100 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 32768,
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools", "json_mode"},
+	},
+
+	// ── AWS Bedrock — Anthropic Claude ───────────────────────────────
+	// IDs seguem o formato Bedrock. Inference profiles regionais podem
+	// ser usados com prefixo de região (ex.: "us.", "eu.", "apac.").
+	{
+		ID:              "anthropic.claude-3-5-sonnet-20241022-v2:0",
+		Aliases:         []string{"bedrock-claude-3-5-sonnet-v2", "bedrock-sonnet-3-5"},
+		DisplayName:     "Claude 3.5 Sonnet v2 (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 8192,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "anthropic.claude-3-5-sonnet-20240620-v1:0",
+		Aliases:         []string{"bedrock-claude-3-5-sonnet-v1"},
+		DisplayName:     "Claude 3.5 Sonnet v1 (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 8192,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "anthropic.claude-3-5-haiku-20241022-v1:0",
+		Aliases:         []string{"bedrock-claude-3-5-haiku"},
+		DisplayName:     "Claude 3.5 Haiku (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 8192,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+	{
+		ID:              "anthropic.claude-3-opus-20240229-v1:0",
+		Aliases:         []string{"bedrock-claude-3-opus"},
+		DisplayName:     "Claude 3 Opus (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 4096,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "anthropic.claude-3-sonnet-20240229-v1:0",
+		Aliases:         []string{"bedrock-claude-3-sonnet"},
+		DisplayName:     "Claude 3 Sonnet (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 4096,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "anthropic.claude-3-haiku-20240307-v1:0",
+		Aliases:         []string{"bedrock-claude-3-haiku"},
+		DisplayName:     "Claude 3 Haiku (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 4096,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "anthropic.claude-3-7-sonnet-20250219-v1:0",
+		Aliases:         []string{"bedrock-claude-3-7-sonnet"},
+		DisplayName:     "Claude 3.7 Sonnet (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "anthropic.claude-sonnet-4-20250514-v1:0",
+		Aliases:         []string{"bedrock-claude-sonnet-4", "us.anthropic.claude-sonnet-4-20250514-v1:0"},
+		DisplayName:     "Claude Sonnet 4 (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "anthropic.claude-opus-4-20250514-v1:0",
+		Aliases:         []string{"bedrock-claude-opus-4", "us.anthropic.claude-opus-4-20250514-v1:0"},
+		DisplayName:     "Claude Opus 4 (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 32000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
 }
 

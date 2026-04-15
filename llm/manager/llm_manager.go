@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/bedrock"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
@@ -107,8 +109,64 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarCopilotClient(maxRetries, initialBackoff)
 	manager.configurarGitHubModelsClient(maxRetries, initialBackoff)
 	manager.configurarOpenRouterClient(maxRetries, initialBackoff)
+	manager.configurarBedrockClient(maxRetries, initialBackoff)
 
 	return manager, nil
+}
+
+// configurarBedrockClient registra o provedor AWS Bedrock quando há sinal de
+// configuração AWS (env vars, AWS_PROFILE, ou ~/.aws/credentials). A resolução
+// real das credenciais acontece apenas na primeira chamada (credentials chain
+// padrão: env → shared config → IAM role).
+func (m *LLMManagerImpl) configurarBedrockClient(maxRetries int, initialBackoff time.Duration) {
+	if !bedrockCredentialsAvailable() {
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "AWS credentials", "BEDROCK"))
+		return
+	}
+	m.logger.Info(i18n.T("llm.info.configuring_provider", "AWS Bedrock"))
+	m.clients["BEDROCK"] = func(model string) (client.LLMClient, error) {
+		if model == "" {
+			model = config.DefaultBedrockModel
+		}
+		region := firstNonEmptyEnv("BEDROCK_REGION", "AWS_REGION")
+		if region == "" {
+			region = config.DefaultBedrockRegion
+		}
+		profile := os.Getenv("AWS_PROFILE")
+		return bedrock.NewBedrockClient(model, region, profile, m.logger, maxRetries, initialBackoff), nil
+	}
+}
+
+func bedrockCredentialsAvailable() bool {
+	if os.Getenv("AWS_ACCESS_KEY_ID") != "" ||
+		os.Getenv("AWS_PROFILE") != "" ||
+		os.Getenv("AWS_REGION") != "" ||
+		os.Getenv("BEDROCK_REGION") != "" ||
+		os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE") != "" ||
+		os.Getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") != "" ||
+		os.Getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	if _, err := os.Stat(home + "/.aws/credentials"); err == nil {
+		return true
+	}
+	if _, err := os.Stat(home + "/.aws/config"); err == nil {
+		return true
+	}
+	return false
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // configurarGoogleAIClient configura o cliente Google AI (Gemini)
@@ -680,6 +738,16 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 			model = config.DefaultOpenRouterModel
 		}
 		return openrouter.NewOpenRouterClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "BEDROCK":
+		if model == "" {
+			model = config.DefaultBedrockModel
+		}
+		region := firstNonEmptyEnv("BEDROCK_REGION", "AWS_REGION")
+		if region == "" {
+			region = config.DefaultBedrockRegion
+		}
+		return bedrock.NewBedrockClient(model, region, os.Getenv("AWS_PROFILE"), m.logger, maxRetries, initialBackoff), nil
 
 	default:
 		return nil, fmt.Errorf("%s", i18n.T("llm.manager.create_client_unsupported", provider))
