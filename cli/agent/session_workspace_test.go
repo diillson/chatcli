@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,7 +97,7 @@ func TestSessionWorkspace_EngineWriteAllowlist(t *testing.T) {
 	eng := engine.NewEngine(&discardOut, &discardErr, fakeRepo)
 
 	target := filepath.Join(ws.ScratchDir, "patch.sh")
-	if err := eng.Execute(nil, "write", []string{"--file", target, "--content", "#!/bin/sh\necho hi"}); err != nil {
+	if err := eng.Execute(context.TODO(), "write", []string{"--file", target, "--content", "#!/bin/sh\necho hi"}); err != nil {
 		t.Fatalf("write to session scratch should succeed; got %v", err)
 	}
 	data, err := os.ReadFile(target)

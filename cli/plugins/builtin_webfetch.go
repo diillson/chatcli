@@ -145,17 +145,29 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 		if scratch == "" {
 			scratch = os.TempDir()
 		}
-		name := parsed.SavePath
-		if name == "" {
-			name = fmt.Sprintf("webfetch_%d.txt", time.Now().UnixNano())
+		// Always keep writes inside the scratch dir. Take only the base name
+		// of whatever the caller supplied so we can't be talked into writing
+		// /etc/passwd via an absolute path — this matches gosec G703
+		// guidance and is consistent with how the coder engine validates
+		// paths for the agent.
+		baseName := filepath.Base(strings.TrimSpace(parsed.SavePath))
+		if baseName == "" || baseName == "." || baseName == string(filepath.Separator) {
+			baseName = fmt.Sprintf("webfetch_%d.txt", time.Now().UnixNano())
 		}
-		if !filepath.IsAbs(name) {
-			name = filepath.Join(scratch, filepath.Base(name))
+		target := filepath.Join(scratch, baseName)
+		// Defence-in-depth: resolve and double-check we stayed under scratch
+		// (Clean collapses any surviving ../ segments introduced by exotic
+		// basenames on platforms where Base keeps them).
+		cleaned := filepath.Clean(target)
+		absScratch, _ := filepath.Abs(scratch)
+		absCleaned, _ := filepath.Abs(cleaned)
+		if !strings.HasPrefix(absCleaned, absScratch+string(filepath.Separator)) && absCleaned != absScratch {
+			return "", fmt.Errorf("save_path %q escapes the session scratch directory", parsed.SavePath)
 		}
-		if err := os.WriteFile(name, []byte(fullContent), 0o600); err != nil {
-			return "", fmt.Errorf("saving response to %s: %w", name, err)
+		if err := os.WriteFile(cleaned, []byte(fullContent), 0o600); err != nil { //nolint:gosec // path confined to scratch dir above
+			return "", fmt.Errorf("saving response to %s: %w", cleaned, err)
 		}
-		savedPath = name
+		savedPath = cleaned
 	}
 
 	// Final output returned to the agent. Apply max_length as the last step.
@@ -228,7 +240,7 @@ func parseFetchArgs(args []string) (fetchArgs, error) {
 			out.Raw = true
 		case a == "--max_length" || a == "--maxLength" || a == "--max-length":
 			if i+1 < len(args) {
-				fmt.Sscanf(args[i+1], "%d", &out.MaxLength)
+				_, _ = fmt.Sscanf(args[i+1], "%d", &out.MaxLength)
 				i++
 			}
 		case a == "--filter":
@@ -243,12 +255,12 @@ func parseFetchArgs(args []string) (fetchArgs, error) {
 			}
 		case a == "--from_line" || a == "--from-line":
 			if i+1 < len(args) {
-				fmt.Sscanf(args[i+1], "%d", &out.FromLine)
+				_, _ = fmt.Sscanf(args[i+1], "%d", &out.FromLine)
 				i++
 			}
 		case a == "--to_line" || a == "--to-line":
 			if i+1 < len(args) {
-				fmt.Sscanf(args[i+1], "%d", &out.ToLine)
+				_, _ = fmt.Sscanf(args[i+1], "%d", &out.ToLine)
 				i++
 			}
 		case a == "--save_to_file" || a == "--save-to-file":

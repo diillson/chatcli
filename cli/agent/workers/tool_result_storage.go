@@ -113,7 +113,9 @@ func CleanupResultFiles() {
 	}
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "result_") && strings.HasSuffix(e.Name(), ".txt") {
-			os.Remove(filepath.Join(dir, e.Name()))
+			// Ignore errors — this is best-effort cleanup; if a file is
+			// locked or already gone, the next session cleanup will retry.
+			_ = os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
 }
