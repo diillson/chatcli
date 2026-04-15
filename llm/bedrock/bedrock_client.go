@@ -19,6 +19,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	bedrocksvc "github.com/aws/aws-sdk-go-v2/service/bedrock"
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -306,16 +307,19 @@ func buildCorporateHTTPClient(logger *zap.Logger) (aws.HTTPClient, string) {
 		logger.Info("Bedrock: using CHATCLI_BEDROCK_CA_BUNDLE for TLS trust", zap.String("path", bundlePath))
 	}
 
-	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		TLSClientConfig:       tlsCfg,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 0,
-		IdleConnTimeout:       90 * time.Second,
-		MaxIdleConns:          100,
-		ForceAttemptHTTP2:     true,
-	}
-	return &http.Client{Transport: transport, Timeout: 10 * time.Minute}, note
+	// Use awshttp.BuildableClient so the AWS SDK can still layer in its own
+	// transport options (e.g. AWS_CA_BUNDLE merging) on top of ours.
+	client := awshttp.NewBuildableClient().
+		WithTimeout(10 * time.Minute).
+		WithTransportOptions(func(t *http.Transport) {
+			t.Proxy = http.ProxyFromEnvironment
+			t.TLSClientConfig = tlsCfg
+			t.TLSHandshakeTimeout = 10 * time.Second
+			t.IdleConnTimeout = 90 * time.Second
+			t.MaxIdleConns = 100
+			t.ForceAttemptHTTP2 = true
+		})
+	return client, note
 }
 
 // anthropicBedrockVersion is the required body field for Claude on Bedrock.
