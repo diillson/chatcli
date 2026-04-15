@@ -207,7 +207,7 @@ func (t *sseTransport) Call(method string, params interface{}) (json.RawMessage,
 	}
 	// Read and discard body (response comes via SSE)
 	_, _ = io.Copy(io.Discard, httpResp.Body)
-	httpResp.Body.Close()
+	_ = httpResp.Body.Close()
 
 	if httpResp.StatusCode >= 400 {
 		return nil, fmt.Errorf("MCP POST returned %d", httpResp.StatusCode)

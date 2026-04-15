@@ -73,7 +73,7 @@ func (p *ExecutablePlugin) ExecuteWithStream(ctx context.Context, args []string,
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(execCtx, p.path, args...)
+	cmd := exec.CommandContext(execCtx, p.path, args...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

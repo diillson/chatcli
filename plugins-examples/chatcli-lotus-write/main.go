@@ -52,7 +52,7 @@ func main() {
 
 	// Cria o diretório pai, se não existir
 	dir := filepath.Dir(*filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil { //#nosec G301 -- example plugin / dev tool — directory perms appropriate for the example
 		fmt.Fprintf(os.Stderr, "Erro ao criar diretório '%s': %v", dir, err)
 		os.Exit(1)
 	}
@@ -70,7 +70,7 @@ func main() {
 	finalContent := frontMatter.String() + string(content)
 
 	// Escreve o arquivo final
-	if err := os.WriteFile(*filePath, []byte(finalContent), 0644); err != nil {
+	if err := os.WriteFile(*filePath, []byte(finalContent), 0644); err != nil { //#nosec G306 -- example plugin / dev tool — file perms appropriate for the example
 		fmt.Fprintf(os.Stderr, "Erro ao escrever o arquivo '%s': %v", *filePath, err)
 		os.Exit(1)
 	}

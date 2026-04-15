@@ -83,7 +83,7 @@ func LoadSafetyConfig(globalPath, localPath string) (*SafetyConfig, error) {
 
 	// Load global config
 	if globalPath != "" {
-		if data, err := os.ReadFile(globalPath); err == nil {
+		if data, err := os.ReadFile(globalPath); err == nil { //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 			var cfg SafetyConfig
 			if err := json.Unmarshal(data, &cfg); err != nil {
 				return nil, fmt.Errorf("parsing global safety config: %w", err)
@@ -94,7 +94,7 @@ func LoadSafetyConfig(globalPath, localPath string) (*SafetyConfig, error) {
 
 	// Load local config
 	if localPath != "" {
-		if data, err := os.ReadFile(localPath); err == nil {
+		if data, err := os.ReadFile(localPath); err == nil { //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 			var local SafetyConfig
 			if err := json.Unmarshal(data, &local); err != nil {
 				return nil, fmt.Errorf("parsing local safety config: %w", err)

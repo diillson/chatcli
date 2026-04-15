@@ -52,7 +52,7 @@ func (cli *ChatCLI) typewriterEffect(text string, delay time.Duration) {
 		}
 
 		fmt.Printf("%c", char)
-		os.Stdout.Sync()
+		_ = os.Stdout.Sync()
 
 		if inEscapeSequence {
 			if char == 'm' {

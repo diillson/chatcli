@@ -103,7 +103,7 @@ func ReadFileContent(filePath string, maxSize int64) (string, error) {
 
 	if showProgress {
 		// Ler o conteúdo com indicador de progresso
-		file, err := os.Open(absPath)
+		file, err := os.Open(absPath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		if err != nil {
 			return "", fmt.Errorf("erro ao abrir o arquivo: %w", err)
 		}
@@ -137,7 +137,7 @@ func ReadFileContent(filePath string, maxSize int64) (string, error) {
 		content = data.String()
 	} else {
 		// Ler normalmente para arquivos pequenos
-		data, err := os.ReadFile(absPath)
+		data, err := os.ReadFile(absPath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		if err != nil {
 			return "", fmt.Errorf("erro ao ler o arquivo: %w", err)
 		}

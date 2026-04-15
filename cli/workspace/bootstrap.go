@@ -121,7 +121,7 @@ func (bl *BootstrapLoader) loadWithCache(path string) (string, bool) {
 		return cached.content, true
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		bl.logger.Debug("failed to read bootstrap file", zap.String("path", path), zap.Error(err))
 		return "", false

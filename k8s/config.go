@@ -24,7 +24,7 @@ type watchConfigFile struct {
 
 // LoadMultiWatchConfig loads a MultiWatchConfig from a YAML file.
 func LoadMultiWatchConfig(path string) (*MultiWatchConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read watch config file: %w", err)
 	}

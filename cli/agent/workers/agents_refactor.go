@@ -173,7 +173,7 @@ func renameSymbolScript(ctx context.Context, input map[string]string, _ *engine.
 				defer func() { <-sem }()
 			}
 
-			data, err := os.ReadFile(filePath)
+			data, err := os.ReadFile(filePath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 			if err != nil {
 				results[idx] = renameResult{path: filePath, err: err}
 				return

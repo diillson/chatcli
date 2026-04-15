@@ -288,7 +288,7 @@ func chunkText(text string, maxChars int) []string {
 }
 
 func processFile(absPath, relPath string, cfg config, log *logger, chunkIndex *int, repoURL, commit string) ([]Chunk, error) {
-	f, err := os.Open(absPath)
+	f, err := os.Open(absPath) //#nosec G304 -- example plugin / dev tool — accepts user-supplied path by design
 	if err != nil {
 		return nil, err
 	}
@@ -677,7 +677,7 @@ func printSchema() {
 
 func gitClone(repoURL, branch, dest string, log *logger) error {
 	args := []string{"clone", "--depth", "1", "--branch", branch, repoURL, dest}
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //#nosec G204 -- example plugin / dev tool — subprocess invocation is the entire purpose
 
 	var errBuf bytes.Buffer
 	cmd.Stdout = io.Discard
@@ -690,7 +690,7 @@ func gitClone(repoURL, branch, dest string, log *logger) error {
 }
 
 func gitGetCommit(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD")
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD") //#nosec G204 -- example plugin / dev tool — subprocess invocation is the entire purpose
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("falha ao obter commit HEAD: %v", err)
@@ -809,7 +809,7 @@ func run(log *logger) error {
 
 	var out io.Writer = os.Stdout
 	if cfg.OutputPath != "" {
-		if err := os.MkdirAll(filepath.Dir(cfg.OutputPath), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(cfg.OutputPath), 0o755); err != nil { //#nosec G301 -- example plugin / dev tool — directory perms appropriate for the example
 			return fmt.Errorf("falha ao criar diretório de saída: %v", err)
 		}
 		f, err := os.Create(cfg.OutputPath)

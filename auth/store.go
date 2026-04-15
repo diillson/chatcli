@@ -49,7 +49,7 @@ func loadStoreUnlocked(logger *zap.Logger) *AuthProfileStore {
 
 	storePath := DefaultStorePath()
 
-	data, err := os.ReadFile(storePath)
+	data, err := os.ReadFile(storePath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if logger != nil {

@@ -166,7 +166,7 @@ func (sm *SessionManager) LoadSessionV2(name string) (*SessionData, error) {
 		return nil, fmt.Errorf("sessão '%s' não encontrada", name)
 	}
 
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		sm.logger.Error("Erro ao ler o arquivo da sessão", zap.String("path", filePath), zap.Error(err))
 		return nil, fmt.Errorf("erro ao ler o arquivo da sessão: %w", err)

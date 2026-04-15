@@ -65,7 +65,7 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 			case <-am.done:
 				// Limpar a linha E resetar cores ANSI
 				fmt.Print("\r\033[K\033[0m")
-				os.Stdout.Sync() // Força flush do buffer
+				_ = os.Stdout.Sync() // Força flush do buffer
 				return
 			default:
 				// Acesso seguro à mensagem atual
@@ -75,7 +75,7 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 
 				// Usar sequências ANSI completas com reset no final
 				fmt.Printf("\r\033[K\033[35m%s...\033[0m %s", currentMsg, spinner[i%len(spinner)])
-				os.Stdout.Sync() // Força flush
+				_ = os.Stdout.Sync() // Força flush
 
 				time.Sleep(100 * time.Millisecond)
 				i++
@@ -118,7 +118,7 @@ func (am *AnimationManager) StopThinkingAnimation() {
 
 	// Garantir limpeza completa do terminal após parar
 	fmt.Print("\033[0m") // Reset de cores
-	os.Stdout.Sync()
+	_ = os.Stdout.Sync()
 
 	// Adiciona uma nova linha para garantir espaçamento adequado
 	fmt.Println()

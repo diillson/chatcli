@@ -87,7 +87,7 @@ func main() {
 	// Log para depuração (vai para stderr)
 	fmt.Fprintf(os.Stderr, "Debug: Executando comando: docker %s\n", strings.Join(args, " "))
 
-	cmd := exec.Command("docker", args...)
+	cmd := exec.Command("docker", args...) //#nosec G204 -- example plugin / dev tool — subprocess invocation is the entire purpose
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Erro ao executar 'docker run': %v\n%s", err, string(output))

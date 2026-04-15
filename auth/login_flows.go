@@ -23,14 +23,14 @@ const (
 	// The only registered redirect is console.anthropic.com which displays the code for the user to copy.
 	AnthropicOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	AnthropicAuthURL       = "https://claude.ai/oauth/authorize"
-	AnthropicTokenURL      = "https://console.anthropic.com/v1/oauth/token"
-	AnthropicRedirectURI   = "https://console.anthropic.com/oauth/code/callback"
+	AnthropicTokenURL      = "https://console.anthropic.com/v1/oauth/token"      //#nosec G101 -- public OAuth endpoint URL, not a credential
+	AnthropicRedirectURI   = "https://console.anthropic.com/oauth/code/callback" //#nosec G101 -- public OAuth redirect URI
 	AnthropicScopes        = "org:create_api_key user:profile user:inference"
 
 	// OpenAI Codex OAuth
 	defaultOpenAICodexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	OpenAIAuthURL              = "https://auth.openai.com/oauth/authorize"
-	OpenAITokenURL             = "https://auth.openai.com/oauth/token"
+	OpenAITokenURL             = "https://auth.openai.com/oauth/token" //#nosec G101 -- public OAuth endpoint URL
 	OpenAIRedirectURI          = "http://localhost:1455/auth/callback"
 	OpenAIScopes               = "openid profile email offline_access"
 	OpenAICallbackPort         = "1455"
@@ -283,11 +283,11 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 func openBrowser(rawURL string) error {
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("open", rawURL).Start()
+		return exec.Command("open", rawURL).Start() //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	case "linux":
-		return exec.Command("xdg-open", rawURL).Start()
+		return exec.Command("xdg-open", rawURL).Start() //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL).Start()
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL).Start() //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	default:
 		return fmt.Errorf("%s", i18n.T("auth.login.unsupported_platform"))
 	}

@@ -61,7 +61,7 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 func (m *Manager) Close() {
 	m.closeOnce.Do(func() {
 		if m.watcher != nil {
-			m.watcher.Close()
+			_ = m.watcher.Close()
 		}
 	})
 }

@@ -157,12 +157,12 @@ func (ch *CommandHandler) handleConnectCommand(userInput string) {
 	// Health check
 	healthy, ver, err := remoteClient.Health(ctx)
 	if err != nil {
-		remoteClient.Close()
+		_ = remoteClient.Close()
 		fmt.Println(colorize(i18n.T("connect.error.health_check_failed", err), ColorRed))
 		return
 	}
 	if !healthy {
-		remoteClient.Close()
+		_ = remoteClient.Close()
 		fmt.Println(colorize(i18n.T("connect.error.server_not_healthy"), ColorRed))
 		return
 	}
@@ -246,7 +246,7 @@ func (ch *CommandHandler) handleDisconnectCommand() {
 
 	// Close remote connection
 	if ch.cli.remoteConn != nil {
-		ch.cli.remoteConn.Close()
+		_ = ch.cli.remoteConn.Close()
 	}
 
 	// Restore local state

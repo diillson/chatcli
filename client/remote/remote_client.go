@@ -194,7 +194,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	resp, err := c.grpcClient.SendPrompt(ctx, &pb.SendPromptRequest{
 		Prompt:         prompt,
 		History:        protoHistory,
-		MaxTokens:      int32(maxTokens),
+		MaxTokens:      int32(maxTokens), //#nosec G115 -- value bounded by domain (counts/versions/fd)
 		Provider:       c.overProvider,
 		Model:          c.overModel,
 		ClientApiKey:   c.clientAPIKey,
@@ -313,7 +313,7 @@ func modelMessageToProto(m models.Message) *pb.ChatMessage {
 	if m.Meta != nil {
 		cm.Meta = &pb.MessageMeta{
 			IsSummary: m.Meta.IsSummary,
-			SummaryOf: int32(m.Meta.SummaryOf),
+			SummaryOf: int32(m.Meta.SummaryOf), //#nosec G115 -- value bounded by domain (counts/versions/fd)
 			Mode:      m.Meta.Mode,
 		}
 	}
@@ -353,7 +353,7 @@ func protoToModelsV2(msgs []*pb.ChatMessage) []models.Message {
 
 func modelsSessionDataToProto(sd *models.SessionData) *pb.SessionDataV2 {
 	return &pb.SessionDataV2{
-		Version:      int32(sd.Version),
+		Version:      int32(sd.Version), //#nosec G115 -- value bounded by domain (counts/versions/fd)
 		ChatHistory:  modelsToProtoV2(sd.ChatHistory),
 		AgentHistory: modelsToProtoV2(sd.AgentHistory),
 		CoderHistory: modelsToProtoV2(sd.CoderHistory),

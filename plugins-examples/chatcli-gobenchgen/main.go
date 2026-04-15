@@ -106,7 +106,7 @@ func main() {
 
 	// Constrói o nome do arquivo de benchmark (ex: main.go -> main_bench_test.go).
 	benchFilePath := strings.TrimSuffix(absFilePath, ".go") + "_bench_test.go"
-	if err := os.WriteFile(benchFilePath, formatted, 0644); err != nil {
+	if err := os.WriteFile(benchFilePath, formatted, 0644); err != nil { //#nosec G306 G703 -- example plugin / dev tool — path validation is the user's responsibility
 		fmt.Fprintf(os.Stderr, "Erro ao salvar o arquivo de benchmark '%s': %v", benchFilePath, err)
 		os.Exit(1)
 	}

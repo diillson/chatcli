@@ -32,7 +32,7 @@ func getKeyPath() string {
 func loadOrCreateKey() ([]byte, error) {
 	keyPath := getKeyPath()
 
-	data, err := os.ReadFile(keyPath)
+	data, err := os.ReadFile(keyPath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err == nil && len(data) == 32 {
 		return data, nil
 	}

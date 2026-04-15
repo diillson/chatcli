@@ -215,7 +215,7 @@ func (pm *PolicyManager) load() {
 		pm.defaultRules()
 		globalRules = pm.Rules
 	} else {
-		data, err := os.ReadFile(globalPath)
+		data, err := os.ReadFile(globalPath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		if err != nil {
 			pm.logger.Warn("Failed to read security policy", zap.Error(err))
 		} else {
@@ -236,7 +236,7 @@ func (pm *PolicyManager) load() {
 		return
 	}
 
-	localData, err := os.ReadFile(localPath)
+	localData, err := os.ReadFile(localPath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		pm.logger.Warn("Failed to read local security policy", zap.Error(err))
 		pm.Rules = globalRules

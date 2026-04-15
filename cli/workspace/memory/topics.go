@@ -198,5 +198,5 @@ func (tt *TopicTracker) persist() {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(tt.path, data, 0o644)
+	_ = os.WriteFile(tt.path, data, 0o600)
 }

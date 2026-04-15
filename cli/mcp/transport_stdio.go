@@ -33,7 +33,7 @@ type stdioTransport struct {
 // newStdioTransport spawns the MCP server process and starts the read loop.
 func newStdioTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger) (*stdioTransport, error) {
 	args := cfg.Args
-	cmd := exec.CommandContext(ctx, cfg.Command, args...)
+	cmd := exec.CommandContext(ctx, cfg.Command, args...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 
 	// Set environment variables
 	for k, v := range cfg.Env {

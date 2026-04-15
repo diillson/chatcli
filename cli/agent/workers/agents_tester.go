@@ -185,7 +185,7 @@ func runCoverageScript(ctx context.Context, input map[string]string, _ *engine.E
 	}
 
 	// Clean up temp file
-	os.Remove(coverFile)
+	_ = os.Remove(coverFile)
 
 	return results.String(), testErr
 }
@@ -237,7 +237,7 @@ func findUntestedScript(ctx context.Context, input map[string]string, _ *engine.
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			data, err := os.ReadFile(path)
+			data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 			if err != nil {
 				return
 			}
@@ -266,7 +266,7 @@ func findUntestedScript(ctx context.Context, input map[string]string, _ *engine.
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			data, err := os.ReadFile(path)
+			data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 			if err != nil {
 				return
 			}

@@ -258,7 +258,7 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 			pluginName += ".exe"
 		}
 
-		buildCmd := exec.Command("go", "build", "-o", filepath.Join(pluginManager.PluginsDir(), pluginName), ".")
+		buildCmd := exec.Command("go", "build", "-o", filepath.Join(pluginManager.PluginsDir(), pluginName), ".") //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 		buildCmd.Dir = buildDir
 		if output, err := buildCmd.CombinedOutput(); err != nil {
 			fmt.Println(i18n.T("plugin.install.error.build", err, string(output)))
@@ -266,7 +266,7 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 		}
 
 		// Torna o arquivo executável para garantir
-		if err := os.Chmod(filepath.Join(pluginManager.PluginsDir(), pluginName), 0755); err != nil {
+		if err := os.Chmod(filepath.Join(pluginManager.PluginsDir(), pluginName), 0o755); err != nil { //#nosec G302 -- plugin binary must be world-executable
 			fmt.Println(i18n.T("plugin.install.error.chmod", err))
 			return
 		}

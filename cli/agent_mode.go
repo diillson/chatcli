@@ -1537,7 +1537,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 
 				// UX: Força flush e pausa para leitura
-				os.Stdout.Sync()
+				_ = os.Stdout.Sync()
 				if !coderCompact {
 					time.Sleep(300 * time.Millisecond)
 				}

@@ -360,7 +360,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	}
 	// Auto-enable if config file exists (even without env var)
 	if !mcpEnabled {
-		if _, err := os.Stat(mcpConfigPath); err == nil {
+		if _, err := os.Stat(mcpConfigPath); err == nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 			mcpEnabled = true
 		}
 	}

@@ -243,7 +243,7 @@ func modelMessageToProto(m models.Message) *pb.ChatMessage {
 	if m.Meta != nil {
 		msg.Meta = &pb.MessageMeta{
 			IsSummary: m.Meta.IsSummary,
-			SummaryOf: int32(m.Meta.SummaryOf),
+			SummaryOf: int32(m.Meta.SummaryOf), //#nosec G115 -- value bounded by domain (counts/versions/fd)
 			Mode:      m.Meta.Mode,
 		}
 	}
@@ -283,7 +283,7 @@ func protoToModelsV2(msgs []*pb.ChatMessage) []models.Message {
 
 func modelsSessionDataToProto(sd *models.SessionData) *pb.SessionDataV2 {
 	return &pb.SessionDataV2{
-		Version:      int32(sd.Version),
+		Version:      int32(sd.Version), //#nosec G115 -- value bounded by domain (counts/versions/fd)
 		ChatHistory:  modelsToProtoV2(sd.ChatHistory),
 		AgentHistory: modelsToProtoV2(sd.AgentHistory),
 		CoderHistory: modelsToProtoV2(sd.CoderHistory),
@@ -336,14 +336,14 @@ func (h *Handler) GetServerInfo(ctx context.Context, req *pb.GetServerInfoReques
 
 	// Resource counts
 	if h.pluginManager != nil {
-		resp.PluginCount = int32(len(h.pluginManager.GetPlugins()))
+		resp.PluginCount = int32(len(h.pluginManager.GetPlugins())) //#nosec G115 -- value bounded by domain
 	}
 	if h.personaLoader != nil {
 		if agents, err := h.personaLoader.ListAgents(); err == nil {
-			resp.AgentCount = int32(len(agents))
+			resp.AgentCount = int32(len(agents)) //#nosec G115 -- value bounded by domain
 		}
 		if skills, err := h.personaLoader.ListSkills(); err == nil {
-			resp.SkillCount = int32(len(skills))
+			resp.SkillCount = int32(len(skills)) //#nosec G115 -- value bounded by domain
 		}
 	}
 
@@ -363,9 +363,9 @@ func (h *Handler) GetWatcherStatus(ctx context.Context, req *pb.GetWatcherStatus
 	}
 	if h.watcherStatsFunc != nil {
 		alertCount, snapshotCount, podCount := h.watcherStatsFunc()
-		resp.AlertCount = int32(alertCount)
-		resp.SnapshotCount = int32(snapshotCount)
-		resp.PodCount = int32(podCount)
+		resp.AlertCount = int32(alertCount)       //#nosec G115 -- value bounded by domain
+		resp.SnapshotCount = int32(snapshotCount) //#nosec G115 -- value bounded by domain
+		resp.PodCount = int32(podCount)           //#nosec G115 -- value bounded by domain
 	}
 
 	return resp, nil

@@ -19,7 +19,7 @@ import (
 // TTY file descriptors — unlike os.File.SetReadDeadline which silently fails
 // on macOS TTY stdin.
 func stdinPollReady(timeout time.Duration) bool {
-	fds := []unix.PollFd{{Fd: int32(os.Stdin.Fd()), Events: unix.POLLIN}}
+	fds := []unix.PollFd{{Fd: int32(os.Stdin.Fd()), Events: unix.POLLIN}} //#nosec G115 -- value bounded by domain (counts/versions/fd)
 	n, err := unix.Poll(fds, int(timeout.Milliseconds()))
 	return err == nil && n > 0
 }

@@ -14,13 +14,13 @@ type OSCommandExecutor struct{}
 
 // Run executa um comando e espera ele terminar.
 func (e *OSCommandExecutor) Run(name string, arg ...string) error {
-	cmd := exec.Command(name, arg...)
+	cmd := exec.Command(name, arg...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	return cmd.Run()
 }
 
 // Output executa um comando e retorna sua saída padrão.
 func (e *OSCommandExecutor) Output(name string, arg ...string) ([]byte, error) {
-	cmd := exec.Command(name, arg...)
+	cmd := exec.Command(name, arg...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	return cmd.Output()
 }
 

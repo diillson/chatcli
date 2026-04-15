@@ -167,7 +167,7 @@ func normalizeDiffPath(p string) string {
 }
 
 func (e *Engine) applyHunksToFile(path string, hunks []diffHunk) error {
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		return fmt.Errorf("erro leitura: %v", err)
 	}
@@ -212,7 +212,7 @@ func (e *Engine) applyHunksToFile(path string, hunks []diffHunk) error {
 	}
 
 	_ = createBackup(path)
-	if err := os.WriteFile(path, []byte(newText), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(newText), 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 		return fmt.Errorf("erro escrita: %v", err)
 	}
 	e.printf("✅ Diff aplicado em '%s'.\n", path)

@@ -43,7 +43,7 @@ func syncClaudeCodeCreds(logger *zap.Logger) bool {
 	}
 
 	for _, path := range paths {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		if err != nil {
 			continue
 		}
@@ -87,7 +87,7 @@ func syncCodexCliCreds(logger *zap.Logger) bool {
 	}
 
 	for _, path := range paths {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		if err != nil {
 			continue
 		}

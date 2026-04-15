@@ -172,7 +172,7 @@ func (e *Engine) fallbackSearch(term, dir string, useRegex, caseSensitive bool, 
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(filepath.Clean(path)) //#nosec G304 G122 -- path comes from filepath.Walk under a validated root
 		if err != nil {
 			return nil
 		}

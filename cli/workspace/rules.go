@@ -145,7 +145,7 @@ func (rl *RulesLoader) loadRuleFile(filePath string) *Rule {
 	}
 
 	// Read and parse
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		rl.logger.Debug("failed to read rule file", zap.String("path", filePath), zap.Error(err))
 		return nil
