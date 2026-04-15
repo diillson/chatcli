@@ -427,6 +427,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// Adiciona contexto de ferramentas (plugins) ao prompt
 	systemInstruction += a.getToolContextString()
 
+	// Session workspace + large-output handling hint.
+	// Tells the model about $CHATCLI_AGENT_TMPDIR (writable scratch dir it
+	// can stage temp scripts / data in) and the "full output saved to PATH"
+	// marker pattern used by tool_result_budget — so the model knows it
+	// should read_file on those paths instead of asking for the data again.
+	systemInstruction += buildSessionWorkspaceHint()
+
 	// Fase 5: Inject auto-activated skills (triggers + path globs) into the
 	// agent-mode system prompt. Also honors a `/<skill-name>` manual
 	// invocation that was staged right before Run() was called — that is
@@ -1733,7 +1740,27 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 							// Marca tarefa como em andamento ANTES de executar
 							agent.MarkTaskInProgress(a.taskTracker)
-							toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
+
+							// Delegate interception: if this is an @coder call with
+							// cmd=delegate, it's a subagent spawn — NOT a plugin
+							// invocation. Route to workers.RunDelegate with our
+							// LLM client so the subagent has its own isolated
+							// context.
+							if strings.EqualFold(strings.TrimSpace(toolName), "@coder") && isDelegateInvocation(normalizedArgsStr) {
+								nativeArgs, rawInner := extractDelegateArgs(normalizedArgsStr)
+								toolOutput, execErr = workers.RunDelegate(
+									ctx,
+									nativeArgs,
+									rawInner,
+									a.cli.Client,
+									nil, // no file lock manager at top level — subagent uses its own
+									nil, // no skills propagation for now
+									nil, // policy handled upstream already
+									a.logger,
+								)
+							} else {
+								toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
+							}
 
 							if !coderCompact {
 								renderer.RenderStreamBoxEnd(agent.ColorPurple)
@@ -2069,4 +2096,85 @@ func (a *AgentMode) initMultiAgent() bool {
 	)
 
 	return true
+}
+
+// buildSessionWorkspaceHint returns a compact prompt block that teaches the
+// model how to use the per-session scratch dir and how to recover data from
+// truncated tool results. Returns an empty string when the session workspace
+// hasn't been initialized (shouldn't happen during normal startup).
+func buildSessionWorkspaceHint() string {
+	ws := agent.GetSessionWorkspace()
+	if ws == nil {
+		return ""
+	}
+	return "\n\n## SESSION WORKSPACE & LARGE OUTPUTS\n" +
+		"\n" +
+		"You have an isolated scratch directory for this session, exposed via the\n" +
+		"environment variable `CHATCLI_AGENT_TMPDIR` (current value: `" + ws.ScratchDir + "`).\n" +
+		"Both read and write are ALLOWED in this directory and in its subtree —\n" +
+		"use it whenever you need to:\n" +
+		"- stage a temporary shell script before exec'ing it;\n" +
+		"- persist an intermediate artifact between tool calls;\n" +
+		"- avoid polluting the project tree with one-off files.\n" +
+		"\n" +
+		"Example: `exec { \"cmd\": \"cat > $CHATCLI_AGENT_TMPDIR/patch.sh <<'EOF' ...\" }`.\n" +
+		"\n" +
+		"### Truncated tool outputs\n" +
+		"\n" +
+		"When a tool result is large, ChatCLI automatically truncates it inline\n" +
+		"and saves the FULL output to a file in this session. You will see a\n" +
+		"marker like:\n" +
+		"\n" +
+		"    ... [N chars omitted — full output saved to /tmp/chatcli-agent-XXX/tool-results/budget_xxx.txt]\n" +
+		"    ... [full output saved to /tmp/chatcli-agent-XXX/tool-results/result_XXX.txt — N bytes total]\n" +
+		"\n" +
+		"When you see such a marker and the omitted portion matters, use the\n" +
+		"`read_file` tool with `start` / `end` line numbers to examine specific\n" +
+		"ranges of the saved file — do NOT re-run the original tool call.\n" +
+		"\n" +
+		"### Delegating heavy analysis\n" +
+		"\n" +
+		"For tasks that would otherwise flood your context with raw data (large\n" +
+		"metrics endpoints, verbose logs, wide-scope searches), use the\n" +
+		"`delegate_subagent` tool. The subagent runs with its OWN isolated\n" +
+		"context window; only its final summary returns to you. Example use\n" +
+		"cases: \"summarize memory hotspots from /metrics\", \"find all call\n" +
+		"sites of func X across the repo\".\n"
+}
+
+// isDelegateInvocation reports whether an @coder JSON args payload is a
+// delegate_subagent call rather than a normal engine subcommand.
+func isDelegateInvocation(argsJSON string) bool {
+	trimmed := strings.TrimSpace(argsJSON)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	var outer struct {
+		Cmd string `json:"cmd"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &outer); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(outer.Cmd), "delegate")
+}
+
+// extractDelegateArgs pulls the inner args map from an @coder delegate call.
+// Returns (nativeArgsMap, rawJSONString) — the map is preferred when non-nil,
+// and rawJSONString is a fallback for XML-style args.
+func extractDelegateArgs(argsJSON string) (map[string]interface{}, string) {
+	var outer struct {
+		Cmd  string          `json:"cmd"`
+		Args json.RawMessage `json:"args"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &outer); err != nil {
+		return nil, argsJSON
+	}
+	if len(outer.Args) == 0 {
+		return nil, ""
+	}
+	var inner map[string]interface{}
+	if err := json.Unmarshal(outer.Args, &inner); err == nil {
+		return inner, string(outer.Args)
+	}
+	return nil, string(outer.Args)
 }

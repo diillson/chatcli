@@ -76,13 +76,26 @@ func (s *SensitiveReadPaths) IsReadAllowed(path, workspace string) (bool, string
 				return true, ""
 			}
 
-			// Check extra allowed read paths
+			// Check extra allowed read paths from env
 			for _, extra := range s.extraReadPaths {
 				extraAbs, err := filepath.Abs(extra)
 				if err != nil {
 					continue
 				}
 				if strings.HasPrefix(resolvedPath, extraAbs+string(filepath.Separator)) || resolvedPath == extraAbs {
+					return true, ""
+				}
+			}
+
+			// Check aux read paths registered at runtime (e.g. session workspace,
+			// tool-result overflow dir). These are trusted because only the CLI
+			// itself registers them. Resolve symlinks so /tmp vs /private/tmp
+			// on macOS matches.
+			for _, aux := range auxReadPathsSnapshot() {
+				if evalAux, errEval := filepath.EvalSymlinks(aux); errEval == nil {
+					aux = evalAux
+				}
+				if strings.HasPrefix(resolvedPath, aux+string(filepath.Separator)) || resolvedPath == aux {
 					return true, ""
 				}
 			}

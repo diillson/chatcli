@@ -11,10 +11,22 @@
 package workers
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/diillson/chatcli/models"
 )
+
+// jsonMarshalForTool marshals v with compact encoding; the tool calls accept
+// single-line JSON only. Errors are silently swallowed (returning []byte{"{}"})
+// because the LLM will just re-try with corrected args.
+func jsonMarshalForTool(v interface{}) ([]byte, error) {
+	out, err := json.Marshal(v)
+	if err != nil {
+		return []byte(`{}`), err
+	}
+	return out, nil
+}
 
 // PluginToolDefinitions returns native tool definitions for built-in agent plugins.
 // These are used alongside CoderToolDefinitions when native tool calling is available.
@@ -45,7 +57,7 @@ func PluginToolDefinitions() []models.ToolDefinition {
 			Type: "function",
 			Function: models.ToolFunctionDef{
 				Name:        "web_fetch",
-				Description: "Fetch the content of a web page and return its text (HTML stripped). Use this to read documentation, articles, or any web content.",
+				Description: "Fetch a web page or HTTP endpoint and return its text (HTML stripped). Supports line-level regex filtering (filter, exclude) and line-range slicing (from_line, to_line) to handle large payloads like Prometheus /metrics without blowing up the context. For very large responses, set save_to_file=true to persist the full body to the session scratch dir and receive preview+path back — then use read_file to examine specific ranges on demand.",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -59,7 +71,31 @@ func PluginToolDefinitions() []models.ToolDefinition {
 						},
 						"max_length": map[string]interface{}{
 							"type":        "integer",
-							"description": "Maximum content length in characters (default: 50000)",
+							"description": "Maximum returned-inline length in characters (default: 50000).",
+						},
+						"filter": map[string]interface{}{
+							"type":        "string",
+							"description": "Keep only lines matching this regex (Go syntax). Example: '^chatcli_' to narrow a Prometheus metrics scrape.",
+						},
+						"exclude": map[string]interface{}{
+							"type":        "string",
+							"description": "Drop lines matching this regex. Applied after filter.",
+						},
+						"from_line": map[string]interface{}{
+							"type":        "integer",
+							"description": "Start at this line (1-based). Applied after filter/exclude.",
+						},
+						"to_line": map[string]interface{}{
+							"type":        "integer",
+							"description": "End at this line (1-based). Applied after filter/exclude.",
+						},
+						"save_to_file": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Save the FULL pre-filter response to the session scratch dir. Returns preview+path so you can read_file specific ranges later. Use for responses >50k chars.",
+						},
+						"save_path": map[string]interface{}{
+							"type":        "string",
+							"description": "Override save filename (relative path is placed under CHATCLI_AGENT_TMPDIR).",
 						},
 					},
 					"required": []string{"url"},
@@ -90,17 +126,11 @@ var nativePluginToolMap = map[string]struct {
 	"web_fetch": {
 		PluginName: "@webfetch",
 		BuildArgs: func(args map[string]interface{}) []string {
-			result := []string{"fetch"}
-			if u, ok := args["url"].(string); ok && u != "" {
-				result = append(result, "--url", u)
-			}
-			if raw, ok := args["raw"].(bool); ok && raw {
-				result = append(result, "--raw")
-			}
-			if ml, ok := args["max_length"].(float64); ok && ml > 0 {
-				result = append(result, "--maxLength", fmt.Sprintf("%d", int(ml)))
-			}
-			return result
+			// Use the single-JSON-arg form so the webfetch plugin sees the
+			// exact map the LLM sent (easier than threading every flag).
+			payload := map[string]interface{}{"cmd": "fetch", "args": args}
+			raw, _ := jsonMarshalForTool(payload)
+			return []string{string(raw)}
 		},
 	},
 }

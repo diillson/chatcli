@@ -7,7 +7,15 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/diillson/chatcli/cli/agent"
 )
+
+func init() {
+	// When the session workspace is initialized (or torn down), swap our
+	// overflow directory accordingly.
+	agent.RegisterResultDirSetter(SetResultDir)
+}
 
 const (
 	// MaxInlineResultBytes is the maximum size of a tool result that can be
@@ -29,13 +37,33 @@ const (
 )
 
 var (
-	resultDir     string
-	resultDirOnce sync.Once
-	resultCounter uint64
+	resultDir       string
+	resultDirMu     sync.RWMutex
+	resultDirOnce   sync.Once
+	resultCounter   uint64
+	resultDirCustom string // set by SetResultDir (session workspace)
 )
 
+// SetResultDir overrides the directory used for persisting large tool results.
+// Called by the session workspace so overflow lands inside the session scratch
+// area (which is on the read allowlist). Empty resets to default behaviour.
+func SetResultDir(dir string) {
+	resultDirMu.Lock()
+	resultDirCustom = dir
+	resultDirMu.Unlock()
+}
+
 // getResultDir returns (or creates) the temporary directory for large tool results.
+// If SetResultDir was called with a non-empty path, that path wins; otherwise
+// falls back to $TMPDIR/chatcli-tool-results (shared across sessions).
 func getResultDir() string {
+	resultDirMu.RLock()
+	custom := resultDirCustom
+	resultDirMu.RUnlock()
+	if custom != "" {
+		_ = os.MkdirAll(custom, 0o700)
+		return custom
+	}
 	resultDirOnce.Do(func() {
 		dir := filepath.Join(os.TempDir(), "chatcli-tool-results")
 		if err := os.MkdirAll(dir, 0o700); err != nil {

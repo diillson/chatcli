@@ -116,7 +116,21 @@ NEVER guess or assume values for information only the user can provide. Ask firs
 - If you hit a blocker, explain it concisely.
 
 ## AVAILABLE SUBCOMMANDS (@coder)
-tree, search, read, write, patch, exec, git-status, git-diff, git-log, git-changed, git-branch, test, rollback, clean.
+tree, search, read, write, patch, exec, git-status, git-diff, git-log, git-changed, git-branch, test, rollback, clean, delegate.
+
+### Delegating heavy analysis to a subagent
+
+When a tool call would return a large payload that you only need DISTILLED
+(Prometheus /metrics, verbose logs, huge search results), invoke the
+subagent — it runs with its OWN isolated context and only its final summary
+returns to you:
+
+<tool_call name="@coder" args='{"cmd":"delegate","args":{"description":"analyze metrics","prompt":"Fetch http://svc/metrics and return the top 3 memory hotspots with numbers.","tools":["read","search","tree"],"read_only":true}}' />
+
+Rules:
+- Always set read_only=true unless the subagent truly needs to write/exec.
+- Write an explicit prompt with the output format you expect back.
+- Prefer a narrow tools allowlist; omit to get the read-only default.
 
 ## OTHER TOOLS
 You also have access to ALL other registered tools (plugins). Use them when appropriate:

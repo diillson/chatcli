@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/paste"
@@ -239,6 +240,18 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		interactionState: StateNormal,
 		processingDone:   make(chan struct{}),
 		executionProfile: ProfileNormal,
+	}
+
+	// Initialize the per-session scratch workspace. This makes
+	// $CHATCLI_AGENT_TMPDIR available to every tool and registers the
+	// scratch + tool-results dirs with the engine / read validator so the
+	// agent can read and write inside them.
+	if _, err := agent.InitSessionWorkspace(logger); err != nil {
+		// Fatal in the sense of "the sandbox is broken" — but we only log
+		// and continue. The agent falls back to the old /tmp/chatcli-*
+		// shared dirs without read-on-demand access, which is the legacy
+		// behaviour.
+		logger.Warn("Failed to initialize session workspace — large tool outputs will not be readable", zap.Error(err))
 	}
 
 	pluginMgr, err := plugins.NewManager(logger)
@@ -1067,6 +1080,12 @@ func (cli *ChatCLI) cleanup() {
 	}
 	if cli.pluginManager != nil {
 		cli.pluginManager.Close()
+	}
+
+	// Tear down the session scratch workspace. Respects
+	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).
+	if ws := agent.GetSessionWorkspace(); ws != nil {
+		ws.Cleanup()
 	}
 	if err := cli.logger.Sync(); err != nil {
 		msg := err.Error()

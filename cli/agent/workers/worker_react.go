@@ -100,6 +100,20 @@ func RunWorkerReAct(
 		{Role: "user", Content: task},
 	}
 
+	// Attach the subagent context so a delegate tool call can recursively
+	// invoke RunWorkerReAct with the same dependencies. If the parent already
+	// set one (nested delegation), preserve its depth and overwrite the
+	// dependency handles to match this invocation.
+	parentSC := getSubagentContext(ctx)
+	ctx = withSubagentContext(ctx, subagentContext{
+		Depth:         parentSC.Depth,
+		LLMClient:     llmClient,
+		LockManager:   lockMgr,
+		Skills:        skills,
+		PolicyChecker: policyChecker,
+		Logger:        logger,
+	})
+
 	var allToolCalls []ToolCallRecord
 	var finalOutput strings.Builder
 	maxParallel := 0
@@ -288,6 +302,28 @@ func RunWorkerReAct(
 					}
 					return execResult{index: v.index, record: record, output: blockedMsg + "\n", failed: true, toolID: v.rtc.ID}
 				}
+			}
+
+			// Special-case: delegate is NOT an engine subcommand — it recursively
+			// spawns a subagent with isolated context. Handle it here before we
+			// build an engine.
+			if v.rtc.Subcmd == "delegate" {
+				dargs, perr := parseDelegateArgs(v.rtc.NativeArgs, v.rtc.RawArgs)
+				if perr != nil {
+					record := ToolCallRecord{Name: v.rtc.Subcmd, Args: v.rtc.RawArgs, Error: perr}
+					return execResult{index: v.index, record: record, output: fmt.Sprintf("[delegate] %v\n", perr), failed: true, toolID: v.rtc.ID}
+				}
+				subOut, subErr := runSubagent(ctx, dargs)
+				record := ToolCallRecord{Name: "delegate", Args: v.rtc.RawArgs, Output: subOut}
+				if subErr != nil {
+					record.Error = subErr
+					return execResult{index: v.index, record: record, output: fmt.Sprintf("[delegate] %v\n%s", subErr, subOut), failed: true, toolID: v.rtc.ID}
+				}
+				// Apply the same truncation policy as normal tool results so
+				// a chatty subagent doesn't blow up the parent context either.
+				subOut = TruncateToolResult("delegate", subOut)
+				record.Output = subOut
+				return execResult{index: v.index, record: record, output: fmt.Sprintf("[delegate] %s\n", subOut), failed: false, toolID: v.rtc.ID}
 			}
 
 			filePath := extractFilePathFromResolved(v.rtc)
