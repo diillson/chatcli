@@ -7,13 +7,17 @@ package bedrock
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	bedrocksvc "github.com/aws/aws-sdk-go-v2/service/bedrock"
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
@@ -86,6 +90,12 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	}
 	if c.profile != "" {
 		opts = append(opts, awsconfig.WithSharedConfigProfile(c.profile))
+	}
+	if httpClient, note := buildCorporateHTTPClient(c.logger); httpClient != nil {
+		opts = append(opts, awsconfig.WithHTTPClient(httpClient))
+		if note != "" {
+			c.logger.Warn(note)
+		}
 	}
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
@@ -249,6 +259,64 @@ func supportsExtendedThinking(model string) bool {
 }
 
 func stringPtr(s string) *string { return &s }
+
+// buildCorporateHTTPClient returns a custom *http.Client for AWS SDK when the
+// user has set chatcli-specific TLS overrides, meant for corporate proxies
+// performing TLS interception with a private CA.
+//
+//   - CHATCLI_BEDROCK_CA_BUNDLE=/path/to/pem
+//     Merges the PEM into the system cert pool and uses it as RootCAs.
+//     Takes precedence over AWS_CA_BUNDLE when set.
+//
+//   - CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY=true
+//     Disables TLS verification entirely (equivalent to NODE_TLS_REJECT_UNAUTHORIZED=0).
+//     INSECURE — use only to confirm a corporate-proxy issue, then fix the CA bundle.
+//
+// Returns (nil, "") when no override is set, so the SDK falls back to its
+// default HTTP client (which honours AWS_CA_BUNDLE, HTTPS_PROXY, etc.).
+func buildCorporateHTTPClient(logger *zap.Logger) (aws.HTTPClient, string) {
+	insecure := strings.EqualFold(strings.TrimSpace(os.Getenv("CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY")), "true")
+	bundlePath := strings.TrimSpace(os.Getenv("CHATCLI_BEDROCK_CA_BUNDLE"))
+
+	if !insecure && bundlePath == "" {
+		return nil, ""
+	}
+
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	var note string
+
+	if insecure {
+		tlsCfg.InsecureSkipVerify = true
+		note = "Bedrock: CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY=true — TLS verification is DISABLED. Do NOT use in production; configure CHATCLI_BEDROCK_CA_BUNDLE with your corporate CA instead."
+	} else {
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		pem, err := os.ReadFile(bundlePath)
+		if err != nil {
+			logger.Warn("Bedrock: failed to read CHATCLI_BEDROCK_CA_BUNDLE", zap.String("path", bundlePath), zap.Error(err))
+			return nil, ""
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			logger.Warn("Bedrock: no valid certificates found in CHATCLI_BEDROCK_CA_BUNDLE", zap.String("path", bundlePath))
+			return nil, ""
+		}
+		tlsCfg.RootCAs = pool
+		logger.Info("Bedrock: using CHATCLI_BEDROCK_CA_BUNDLE for TLS trust", zap.String("path", bundlePath))
+	}
+
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		TLSClientConfig:       tlsCfg,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 0,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          100,
+		ForceAttemptHTTP2:     true,
+	}
+	return &http.Client{Transport: transport, Timeout: 10 * time.Minute}, note
+}
 
 // anthropicBedrockVersion is the required body field for Claude on Bedrock.
 // See: https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html
