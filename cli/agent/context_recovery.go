@@ -275,6 +275,93 @@ func IsContextTooLongError(err error) bool {
 		strings.Contains(msg, "token limit")
 }
 
+// IsPayloadTooLargeError detects HTTP 413 responses and proxy-level body
+// size rejections — common in corporate environments where the egress
+// proxy or API gateway caps POST bodies at 1-5 MB, independently of the
+// model's context window. These are recoverable by compacting history
+// more aggressively and retrying, so we distinguish them from generic
+// "context too long" model errors (which typically return 400).
+func IsPayloadTooLargeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "413") ||
+		strings.Contains(msg, "431") || // header fields too large
+		strings.Contains(msg, "payload too large") ||
+		strings.Contains(msg, "request entity too large") ||
+		strings.Contains(msg, "body too large") ||
+		strings.Contains(msg, "content too large") ||
+		strings.Contains(msg, "request body exceeded") ||
+		strings.Contains(msg, "maximum request size") ||
+		strings.Contains(msg, "request header fields too large")
+}
+
+// IsProxyWAFRejection detects 403 Forbidden responses that come from a
+// corporate proxy / WAF / gateway rather than from the LLM provider's own
+// auth layer. LLM auth 403s say things like "permission_denied" or
+// "invalid_api_key"; WAF 403s cite firewall / policy / size / security
+// rules. Distinguishing them matters: auth 403 needs a token refresh,
+// WAF 403 needs a smaller payload. Never flags a plain unqualified 403.
+func IsProxyWAFRejection(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	// Must mention 403 / forbidden in some form.
+	is403 := strings.Contains(msg, "403") || strings.Contains(msg, "forbidden")
+	if !is403 {
+		return false
+	}
+	// Proxy/WAF/security signals — the presence of any of these alongside
+	// a 403 means this is not a normal auth failure.
+	return strings.Contains(msg, "firewall") ||
+		strings.Contains(msg, "waf") ||
+		strings.Contains(msg, "security policy") ||
+		strings.Contains(msg, "security rule") ||
+		strings.Contains(msg, "blocked by") ||
+		strings.Contains(msg, "cloudflare") ||
+		strings.Contains(msg, "cf-ray") ||
+		strings.Contains(msg, "mod_security") ||
+		strings.Contains(msg, "akamai") ||
+		strings.Contains(msg, "proxy denied") ||
+		strings.Contains(msg, "policy violation") ||
+		strings.Contains(msg, "request blocked")
+}
+
+// IsLikelyPayloadProblem combines strict payload-size errors with
+// ambiguous network errors that become highly suspect when the history is
+// large. Proxies occasionally close the TCP connection mid-POST when the
+// body exceeds a limit instead of returning a proper 413, which surfaces
+// as EOF / connection reset / broken pipe — indistinguishable from
+// transient network issues unless you know the request was huge.
+//
+// The historyChars threshold avoids false positives on small requests
+// where EOF is almost certainly a genuine transient failure.
+func IsLikelyPayloadProblem(err error, historyChars int) bool {
+	if err == nil {
+		return false
+	}
+	if IsPayloadTooLargeError(err) || IsProxyWAFRejection(err) {
+		return true
+	}
+
+	// Ambiguous network-layer signals — only treat as payload-related
+	// when the request was large enough to plausibly have hit a body cap.
+	// 500 KB of raw chars ≈ ~125 K tokens ≈ a reasonable "large enough"
+	// floor where proxy limits start to bite.
+	const suspectSizeThreshold = 500_000
+	if historyChars < suspectSizeThreshold {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unexpected eof") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "stream error") ||
+		(strings.Contains(msg, "eof") && !strings.Contains(msg, "request"))
+}
+
 // truncatePreservingEnd truncates text to maxLen, keeping the end portion.
 func truncatePreservingEnd(text string, maxLen int) string {
 	if len(text) <= maxLen {

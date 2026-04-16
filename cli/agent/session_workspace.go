@@ -141,6 +141,36 @@ func InitSessionWorkspace(logger *zap.Logger) (*SessionWorkspace, error) {
 	// Register with engine write/exec validator.
 	engine.RegisterAuxPath(root)
 
+	// System temp directories are allowlisted by default. Every major
+	// model defaults to writing throwaway scripts under /tmp ("cat >
+	// /tmp/check.sh && bash /tmp/check.sh"); blocking that forces the
+	// model to guess a safe path and usually fails. The risk is low —
+	// these dirs are user-owned on single-user machines. Users who
+	// need strict sandboxing can set CHATCLI_BLOCK_TMP_WRITES=true.
+	if !strings.EqualFold(os.Getenv("CHATCLI_BLOCK_TMP_WRITES"), "true") {
+		tmpPaths := []string{os.TempDir()}
+		// On macOS os.TempDir() returns a per-user /var/folders/... path,
+		// but models emit /tmp verbatim. On Linux they're the same. Add
+		// /tmp explicitly when it exists and differs.
+		if _, err := os.Stat("/tmp"); err == nil {
+			tmpPaths = append(tmpPaths, "/tmp")
+		}
+		seen := map[string]bool{}
+		for _, p := range tmpPaths {
+			if p == "" || seen[p] {
+				continue
+			}
+			seen[p] = true
+			engine.RegisterAuxPath(p)
+			RegisterAuxReadPath(p)
+		}
+		if logger != nil {
+			logger.Info("System temp dirs added to read/write allowlist",
+				zap.Strings("paths", tmpPaths),
+				zap.String("opt_out_env", "CHATCLI_BLOCK_TMP_WRITES=true"))
+		}
+	}
+
 	// Wire the tool-results dir into the budget system.
 	SetBudgetResultDir(toolResults)
 
