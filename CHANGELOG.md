@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.103.1](https://github.com/diillson/chatcli/compare/v1.103.0...v1.103.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* **bedrock:** stricter credential detection, IMDS control and SSO support ([#798](https://github.com/diillson/chatcli/issues/798)) ([8ea8c40](https://github.com/diillson/chatcli/commit/8ea8c40cfa395fd58e21d12bd891db83d0b47f03))
+
 ## [1.103.0](https://github.com/diillson/chatcli/compare/v1.102.0...v1.103.0) (2026-04-15)
 
 
