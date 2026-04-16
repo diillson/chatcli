@@ -143,6 +143,7 @@ type ChatCLI struct {
 	Model                string
 	history              []models.Message  // unified conversation history (all modes)
 	historyCompactor     *HistoryCompactor // manages history compaction
+	proxyPayloadWarned   bool              // one-shot flag: user already warned about large history vs corporate proxy caps
 	commandHistory       []string
 	newCommandsInSession []string
 	historyManager       *HistoryManager

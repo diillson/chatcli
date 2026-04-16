@@ -47,7 +47,14 @@ func (cli *ChatCLI) handleCompactCommand(userInput string) {
 		// Automatic compaction
 		cfg := DefaultCompactConfig(cli.Provider, cli.Model)
 		cfg.BudgetRatio = 0.50 // more aggressive for explicit /compact
+
+		// Live progress so the user knows what's happening, especially
+		// during the LLM-driven summarization (can take 30-90s).
+		cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
+			fmt.Printf("  %s %s\n", colorize("│", ColorCyan), colorize(msg, ColorGray))
+		})
 		compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
+		cli.historyCompactor.SetStatusCallback(nil)
 		if err != nil {
 			fmt.Println(colorize(fmt.Sprintf("  %s", i18n.T("compact.error.failed", err)), ColorYellow))
 			return

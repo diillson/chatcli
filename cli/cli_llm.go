@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -128,10 +129,39 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	userInput, additionalContext := cli.processSpecialCommands(in)
 
-	// Compact history if over budget (before building tempHistory)
+	// Compact history if over budget (before building tempHistory).
+	// Status callback feeds progress into the prompt-prefix animation so the
+	// user never stares at a silent terminal during a long summarization.
 	cfg := DefaultCompactConfig(cli.Provider, cli.Model)
+
+	// Pre-flight: warn once per session when history is large enough that a
+	// corporate proxy could start rejecting. Attached contexts (/context
+	// attach) in chat mode can silently balloon the payload.
+	if cfg.MaxPayloadBytes == 0 && !cli.proxyPayloadWarned {
+		totalChars := 0
+		for _, m := range cli.history {
+			totalChars += len(m.Content)
+		}
+		if totalChars > 2_500_000 {
+			cli.proxyPayloadWarned = true
+			cli.logger.Warn("Chat history exceeds 2.5 MB, no payload cap set",
+				zap.Int("total_chars", totalChars))
+			fmt.Printf("\r\033[K  ℹ %s\n",
+				i18n.T("agent.preflight.warn_no_cap", FormatPayloadSize(totalChars)))
+			_ = os.Stdout.Sync()
+		}
+	}
+
 	if cli.historyCompactor.NeedsCompaction(cli.history, cfg) {
-		if compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg); err == nil {
+		cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
+			// Overwrite prompt-prefix spinner line with a compaction update,
+			// keep cursor on a new line so the spinner resumes cleanly after.
+			fmt.Printf("\r\033[K  %s\n", msg)
+			_ = os.Stdout.Sync()
+		})
+		compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
+		cli.historyCompactor.SetStatusCallback(nil)
+		if err == nil {
 			cli.history = compacted
 		}
 	}
@@ -744,8 +774,17 @@ func (cli *ChatCLI) getTokenEstimatorForCurrentLLM() func(string) int {
 // refreshClientOnAuthError checks if the error is a 401/auth error from an OAuth provider.
 // If so, it invalidates the auth cache, refreshes credentials, and recreates the client.
 // Returns true if the client was refreshed and the caller should retry.
+//
+// A 403 that carries WAF / proxy / firewall signals is deliberately NOT
+// treated as an auth error — invalidating the user's OAuth cache there
+// would destroy valid credentials for no benefit (the token was fine;
+// the corporate proxy rejected the payload or URL). Such 403s fall
+// through for payload-recovery handling further up the call chain.
 func (cli *ChatCLI) refreshClientOnAuthError(err error) bool {
 	if err == nil {
+		return false
+	}
+	if agent.IsProxyWAFRejection(err) {
 		return false
 	}
 	var apiErr *utils.APIError

@@ -70,6 +70,12 @@ type AgentMode struct {
 	// duration of the agent loop. Cleared when the loop exits.
 	skillModelHint  string
 	skillEffortHint llmclient.SkillEffort
+
+	// Session-scoped flag: true once we have warned the user that the
+	// history is approaching likely corporate-proxy payload limits and
+	// no explicit CHATCLI_MAX_PAYLOAD is configured. Prevents the warning
+	// from being emitted every turn.
+	proxyPayloadWarned bool
 }
 
 // startStdinReader starts a goroutine that reads lines from stdin and sends
@@ -913,13 +919,75 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 		}
 
+		// Microcompact (Level 0): cheap, progressive compaction of OLD tool
+		// results in history. Pure Go, no LLM call. Often keeps us below
+		// budget so the expensive summarization path is never triggered.
+		mcCfg := agent.DefaultMicrocompactConfig()
+		if h, report := agent.ApplyMicrocompact(a.cli.history, turn, mcCfg, a.logger); report != nil && (report.Truncated > 0 || report.Summarized > 0) {
+			a.cli.history = h
+			fmt.Printf("\r\033[K  %s %s\n",
+				renderer.Colorize("🗜", agent.ColorGray),
+				renderer.Colorize(
+					i18n.T("agent.microcompact.applied",
+						report.Truncated, report.Summarized, FormatPayloadSize(int(report.CharsSaved))),
+					agent.ColorGray))
+		}
+
 		// Compact history if over budget (before building turn history)
 		cfg := DefaultCompactConfig(a.cli.Provider, a.cli.Model)
 		cfg.BudgetRatio = 0.60 // tighter budget — tool outputs are large
 		cfg.MinKeepRecent = 8  // ~4 tool call cycles
+
+		// Pre-flight: measure the current history and react BEFORE the
+		// request goes out. Two paths:
+		//   (a) User has CHATCLI_MAX_PAYLOAD set and we're above 85%
+		//       of it → force aggressive compaction this turn.
+		//   (b) No explicit cap but history is already > 2.5 MB → emit a
+		//       one-shot hint about the env var. Corporate proxies usually
+		//       cap at 5 MB and the error they return is obscure (403/EOF),
+		//       so flagging this early saves the user a painful surprise.
+		totalHistoryChars := 0
+		for _, m := range a.cli.history {
+			totalHistoryChars += len(m.Content)
+		}
+		if cfg.MaxPayloadBytes > 0 && totalHistoryChars > int(float64(cfg.MaxPayloadBytes)*0.85) {
+			cfg.BudgetRatio = 0.40 // force harder compaction
+			a.logger.Warn("Pre-flight: history near payload cap, forcing aggressive compact",
+				zap.Int("total_chars", totalHistoryChars),
+				zap.Int("cap_bytes", cfg.MaxPayloadBytes))
+			fmt.Printf("\r\033[K  %s %s\n",
+				renderer.Colorize("ℹ", agent.ColorGray),
+				renderer.Colorize(
+					i18n.T("agent.preflight.near_cap",
+						FormatPayloadSize(totalHistoryChars),
+						(totalHistoryChars*100)/cfg.MaxPayloadBytes,
+						FormatPayloadSize(cfg.MaxPayloadBytes)),
+					agent.ColorGray))
+		} else if cfg.MaxPayloadBytes == 0 && totalHistoryChars > 2_500_000 && !a.proxyPayloadWarned {
+			a.proxyPayloadWarned = true
+			a.logger.Warn("History exceeds 2.5 MB, no payload cap set — proxy 413/403 possible",
+				zap.Int("total_chars", totalHistoryChars))
+			fmt.Printf("\r\033[K  %s %s\n",
+				renderer.Colorize("ℹ", agent.ColorYellow),
+				renderer.Colorize(
+					i18n.T("agent.preflight.warn_no_cap", FormatPayloadSize(totalHistoryChars)),
+					agent.ColorYellow))
+		}
 		if a.cli.historyCompactor.NeedsCompaction(a.cli.history, cfg) {
-			if compacted, compactErr := a.cli.historyCompactor.Compact(ctx, a.cli.history, a.cli.Client, cfg); compactErr == nil {
+			// Emit live status during compaction so the terminal is never
+			// silent. Without this, Level 2 (LLM summarization) can block
+			// for 30-90s with zero feedback — users assume a freeze.
+			a.cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
+				fmt.Printf("\r\033[K  %s %s\n",
+					renderer.Colorize("│", agent.ColorCyan),
+					renderer.Colorize(msg, agent.ColorGray))
+			})
+			compacted, compactErr := a.cli.historyCompactor.Compact(ctx, a.cli.history, a.cli.Client, cfg)
+			a.cli.historyCompactor.SetStatusCallback(nil)
+			if compactErr == nil {
 				a.cli.history = compacted
+			} else if errors.Is(compactErr, context.Canceled) {
+				return compactErr
 			}
 		}
 
@@ -1031,14 +1099,77 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				return err
 			}
 
-			// Context-too-long recovery: try compaction + retry before giving up
-			if agent.IsContextTooLongError(err) && contextRecovery.CanRecoverContextOverflow() {
-				a.logger.Warn("Context too long — attempting recovery",
+			// Context overflow OR corporate-proxy payload rejection (413,
+			// WAF 403, 431, or EOF-on-large-payload): try to recover by
+			// aggressive compaction + retry. Proxy rejections are pernicious
+			// — the user has no way to know why their perfectly-sized-for-
+			// the-model request was rejected by a network middlebox.
+			isCtxTooLong := agent.IsContextTooLongError(err)
+			historyChars := 0
+			for _, m := range a.cli.history {
+				historyChars += len(m.Content)
+			}
+			isPayloadTooLarge := agent.IsLikelyPayloadProblem(err, historyChars)
+			if (isCtxTooLong || isPayloadTooLarge) && contextRecovery.CanRecoverContextOverflow() {
+				reason := i18n.T("agent.recovery.reason.ctx_too_long")
+				if isPayloadTooLarge {
+					switch {
+					case agent.IsPayloadTooLargeError(err):
+						reason = i18n.T("agent.recovery.reason.payload_413")
+					case agent.IsProxyWAFRejection(err):
+						reason = i18n.T("agent.recovery.reason.waf_403")
+					default:
+						reason = i18n.T("agent.recovery.reason.suspected_payload", FormatPayloadSize(historyChars))
+					}
+				}
+				a.logger.Warn("Recoverable request failure — attempting recovery",
+					zap.String("reason", reason),
 					zap.Int("turn", turn+1), zap.Error(err))
+
+				fmt.Printf("\r\033[K  %s %s\n",
+					renderer.Colorize("⚠", agent.ColorYellow),
+					renderer.Colorize(
+						i18n.T("agent.recovery.retrying", reason),
+						agent.ColorYellow))
+
+				// For payload-too-large: also force the compactor to use a
+				// hard byte cap on the next turn. Without a cap hint we would
+				// just retry with the same size and fail again.
+				if isPayloadTooLarge && os.Getenv("CHATCLI_MAX_PAYLOAD") == "" {
+					// Educated guess: assume a 4 MB proxy cap as a sane default
+					// when the user hasn't configured one. Err on the side of
+					// caution — easier to set a higher value than to hit this
+					// error repeatedly.
+					_ = os.Setenv("CHATCLI_MAX_PAYLOAD", "4MB")
+					fmt.Printf("  %s %s\n",
+						renderer.Colorize("ℹ", agent.ColorGray),
+						renderer.Colorize(
+							i18n.T("agent.recovery.assumed_cap"),
+							agent.ColorGray))
+				}
 
 				recoveredHistory, recovered := contextRecovery.RecoverContextOverflow(a.cli.history)
 				if recovered {
 					a.cli.history = recoveredHistory
+
+					// Post-recovery hint for payload-related failures: without
+					// this, the model tends to re-read the same huge file that
+					// triggered the limit, looping through recovery until
+					// MaxRecoveryAttempts is exhausted. A single user-role
+					// instruction steers it toward surgical, line-ranged reads
+					// that fit under the cap.
+					if isPayloadTooLarge {
+						a.cli.history = append(a.cli.history, models.Message{
+							Role: "user",
+							Content: "[SYSTEM NOTICE — PAYLOAD LIMIT HIT] A proxy/gateway rejected the previous request due to body size. History was compacted to recover. " +
+								"Going forward: " +
+								"(1) When reading files, prefer targeted reads with line ranges (e.g. sed -n '100,200p' file, or read_file with offset+limit) instead of reading entire files. " +
+								"(2) Prefer grep/ripgrep with specific patterns over full-file reads. " +
+								"(3) If you previously read a large file, its full content is persisted at the path shown in the tool-result preview — re-read specific ranges from that file rather than repeating the original read. " +
+								"(4) Summarize findings incrementally rather than accumulating raw tool output.",
+						})
+						a.logger.Info("Injected payload-recovery hint into history")
+					}
 					continue // retry the turn with compacted history
 				}
 			}

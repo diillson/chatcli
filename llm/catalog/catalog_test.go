@@ -22,6 +22,18 @@ func TestResolve(t *testing.T) {
 		{"GPT-5 Alias", ProviderOpenAI, "gpt-5-mini", "gpt-5", true},
 		{"Not Found", ProviderOpenAI, "gpt-nonexistent", "", false},
 		{"Wrong Provider", ProviderStackSpot, "gpt-4o", "", false},
+		// Regression: the bare "opus-4" alias on the 4.0 entry is a prefix
+		// of all opus-4-X shortcuts. Newer entries MUST be declared first
+		// in the registry so their exact-alias match wins over 4.0's
+		// loose prefix match. Each of these silently resolved to the 4.0
+		// entry (ctx=20K) before the fix.
+		{"Claude Opus 4.5 shortcut", ProviderClaudeAI, "opus-4-5", "claude-opus-4-5", true},
+		{"Claude Opus 4.6 shortcut", ProviderClaudeAI, "opus-4-6", "claude-opus-4-6", true},
+		{"Claude Opus 4.7 shortcut", ProviderClaudeAI, "opus-4-7", "claude-opus-4-7", true},
+		{"Claude Opus 4.7 full ID", ProviderClaudeAI, "claude-opus-4-7", "claude-opus-4-7", true},
+		{"Claude Sonnet 4.7 shortcut", ProviderClaudeAI, "sonnet-4-7", "claude-sonnet-4-7", true},
+		// Backward compat: bare "opus-4" still resolves to the 4.0 entry
+		{"Claude Opus 4 bare alias", ProviderClaudeAI, "opus-4", "claude-opus-4-20250514", true},
 	}
 
 	for _, tc := range testCases {
