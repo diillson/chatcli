@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -181,7 +182,7 @@ func bedrockCredentialsAvailable() bool {
 // contains at least one aws_access_key_id entry. An empty or region-only file
 // is not enough to activate Bedrock.
 func credentialsFileHasKey(path string) bool {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 — path built from os.UserHomeDir() + constant
 	if err != nil {
 		return false
 	}
@@ -205,15 +206,15 @@ func credentialsFileHasKey(path string) bool {
 // one profile that can produce credentials without IMDS: SSO, assume-role, or
 // credential_process. A config that only sets region/output does NOT count.
 func configFileHasUsableProfile(path string) bool {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 — path built from os.UserHomeDir() + constant
 	if err != nil {
 		return false
 	}
 	usableKeys := []string{
-		"sso_start_url",    // legacy SSO profile
-		"sso_session",      // new-style SSO (aws sso login)
-		"sso_account_id",   // ditto
-		"role_arn",         // assume-role profile (source_profile / web identity)
+		"sso_start_url",  // legacy SSO profile
+		"sso_session",    // new-style SSO (aws sso login)
+		"sso_account_id", // ditto
+		"role_arn",       // assume-role profile (source_profile / web identity)
 		"credential_process",
 	}
 	for _, line := range strings.Split(string(data), "\n") {
