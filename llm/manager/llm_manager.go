@@ -132,32 +132,136 @@ func (m *LLMManagerImpl) configurarBedrockClient(maxRetries int, initialBackoff 
 		if region == "" {
 			region = config.DefaultBedrockRegion
 		}
-		profile := os.Getenv("AWS_PROFILE")
+		profile := resolveAWSProfile()
 		return bedrock.NewBedrockClient(model, region, profile, m.logger, maxRetries, initialBackoff), nil
 	}
 }
 
+// bedrockCredentialsAvailable reports whether there is a credible signal that
+// AWS credentials are usable. It intentionally does NOT treat the mere existence
+// of ~/.aws/config as a credential (that file may hold only region/profile
+// metadata), nor does it treat an empty ~/.aws/credentials as valid — otherwise
+// the AWS SDK falls through to IMDS (169.254.169.254) and hangs with a
+// confusing timeout on non-EC2 machines.
+//
+// Accepted signals (any one is enough):
+//   - Static creds via env (AWS_ACCESS_KEY_ID)
+//   - Profile selection (AWS_PROFILE) — SSO, assume-role, credential_process, etc.
+//   - Web identity / container roles (EKS / ECS)
+//   - ~/.aws/credentials with a non-empty aws_access_key_id
+//   - ~/.aws/config declaring a usable profile: SSO (sso_start_url / sso_session),
+//     assume-role (role_arn), or credential_process
+//   - An active SSO token cache in ~/.aws/sso/cache/
 func bedrockCredentialsAvailable() bool {
 	if os.Getenv("AWS_ACCESS_KEY_ID") != "" ||
 		os.Getenv("AWS_PROFILE") != "" ||
-		os.Getenv("AWS_REGION") != "" ||
-		os.Getenv("BEDROCK_REGION") != "" ||
 		os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE") != "" ||
 		os.Getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") != "" ||
 		os.Getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" {
+		return true
+	}
+	// Also check .env-sourced config (godotenv doesn't export to os.Environ).
+	if config.Global != nil && config.Global.GetString("AWS_PROFILE") != "" {
 		return true
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false
 	}
-	if _, err := os.Stat(home + "/.aws/credentials"); err == nil {
+	if credentialsFileHasKey(home + "/.aws/credentials") {
 		return true
 	}
-	if _, err := os.Stat(home + "/.aws/config"); err == nil {
+	if configFileHasUsableProfile(home + "/.aws/config") {
 		return true
+	}
+	return hasActiveSSOCache(home + "/.aws/sso/cache")
+}
+
+// credentialsFileHasKey returns true only if the AWS shared credentials file
+// contains at least one aws_access_key_id entry. An empty or region-only file
+// is not enough to activate Bedrock.
+func credentialsFileHasKey(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(trimmed), "aws_access_key_id") {
+			if idx := strings.Index(trimmed, "="); idx >= 0 {
+				if strings.TrimSpace(trimmed[idx+1:]) != "" {
+					return true
+				}
+			}
+		}
 	}
 	return false
+}
+
+// configFileHasUsableProfile returns true if ~/.aws/config declares at least
+// one profile that can produce credentials without IMDS: SSO, assume-role, or
+// credential_process. A config that only sets region/output does NOT count.
+func configFileHasUsableProfile(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	usableKeys := []string{
+		"sso_start_url",    // legacy SSO profile
+		"sso_session",      // new-style SSO (aws sso login)
+		"sso_account_id",   // ditto
+		"role_arn",         // assume-role profile (source_profile / web identity)
+		"credential_process",
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		for _, key := range usableKeys {
+			if strings.HasPrefix(lower, key) {
+				if idx := strings.Index(trimmed, "="); idx >= 0 &&
+					strings.TrimSpace(trimmed[idx+1:]) != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// hasActiveSSOCache returns true if ~/.aws/sso/cache contains any JSON token
+// file. A stale/expired token will still be caught later at SDK call time, but
+// its presence means the user has at least run `aws sso login` at some point.
+func hasActiveSSOCache(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveAWSProfile returns the AWS profile name from the first available
+// source: env var AWS_PROFILE > .env file (via config.Global).
+func resolveAWSProfile() string {
+	if v := os.Getenv("AWS_PROFILE"); v != "" {
+		return v
+	}
+	if config.Global != nil {
+		if v := config.Global.GetString("AWS_PROFILE"); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func firstNonEmptyEnv(keys ...string) string {
@@ -747,7 +851,7 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 		if region == "" {
 			region = config.DefaultBedrockRegion
 		}
-		return bedrock.NewBedrockClient(model, region, os.Getenv("AWS_PROFILE"), m.logger, maxRetries, initialBackoff), nil
+		return bedrock.NewBedrockClient(model, region, resolveAWSProfile(), m.logger, maxRetries, initialBackoff), nil
 
 	default:
 		return nil, fmt.Errorf("%s", i18n.T("llm.manager.create_client_unsupported", provider))
