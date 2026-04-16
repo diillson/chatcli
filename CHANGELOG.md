@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.104.0](https://github.com/diillson/chatcli/compare/v1.103.1...v1.104.0) (2026-04-16)
+
+
+### Features
+
+* **cli:** compact UX feedback + corporate-proxy payload recovery ([#800](https://github.com/diillson/chatcli/issues/800)) ([ad5a308](https://github.com/diillson/chatcli/commit/ad5a308dca6db4494780b0496cf0082f77339422))
+
 ## [1.103.1](https://github.com/diillson/chatcli/compare/v1.103.0...v1.103.1) (2026-04-16)
 
 
