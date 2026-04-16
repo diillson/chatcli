@@ -20,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	bedrocksvc "github.com/aws/aws-sdk-go-v2/service/bedrock"
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -114,6 +115,31 @@ func (c *BedrockClient) getMaxTokens() int {
 	return catalog.GetMaxTokens(catalog.ProviderBedrock, c.model, 4096)
 }
 
+// shouldDisableIMDS returns true when the process is clearly NOT running on
+// EC2/ECS/EKS and thus should not waste time (and noisy errors) trying to
+// reach http://169.254.169.254. The user can force-enable the probe with
+// CHATCLI_BEDROCK_ENABLE_IMDS=1, or force-disable with
+// AWS_EC2_METADATA_DISABLED=true (standard AWS SDK env var).
+func shouldDisableIMDS() bool {
+	if v := strings.ToLower(os.Getenv("AWS_EC2_METADATA_DISABLED")); v == "true" || v == "1" {
+		return true
+	}
+	if v := os.Getenv("CHATCLI_BEDROCK_ENABLE_IMDS"); v == "1" || strings.EqualFold(v, "true") {
+		return false
+	}
+	// Running inside ECS/EKS — IMDS (or its container equivalent) is legit.
+	if os.Getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") != "" ||
+		os.Getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" ||
+		os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE") != "" ||
+		os.Getenv("ECS_CONTAINER_METADATA_URI") != "" ||
+		os.Getenv("ECS_CONTAINER_METADATA_URI_V4") != "" {
+		return false
+	}
+	// If static creds or a profile are set, IMDS won't be reached anyway,
+	// but disabling it costs nothing and guarantees no hang on misconfig.
+	return true
+}
+
 func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	if c.runtime != nil {
 		return nil
@@ -130,6 +156,9 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 		if note != "" {
 			c.logger.Warn(note)
 		}
+	}
+	if shouldDisableIMDS() {
+		opts = append(opts, awsconfig.WithEC2IMDSClientEnableState(imds.ClientDisabled))
 	}
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
