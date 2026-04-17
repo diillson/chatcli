@@ -28,7 +28,7 @@ type ContextHandler struct {
 func NewContextHandler(logger *zap.Logger) (*ContextHandler, error) {
 	manager, err := ctxmgr.NewManager(logger)
 	if err != nil {
-		return nil, fmt.Errorf("erro ao inicializar gerenciador de contextos: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("ctx.cmd.init_manager_error"), err)
 	}
 
 	return &ContextHandler{
@@ -317,7 +317,7 @@ func (h *ContextHandler) handleDelete(args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 	response, err := reader.ReadString('\n')
 	if err != nil {
-		return fmt.Errorf("erro ao ler resposta: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("ctx.cmd.read_response_error"), err)
 	}
 
 	if strings.ToLower(strings.TrimSpace(response)) != "s" &&

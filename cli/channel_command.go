@@ -5,15 +5,16 @@ import (
 	"strings"
 
 	prompt "github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 )
 
 func (cli *ChatCLI) handleChannelCommand(userInput string) {
 	if cli.mcpManager == nil {
 		fmt.Println()
-		fmt.Println(uiBox("📡", "MCP CHANNELS", ColorPurple))
+		fmt.Println(uiBox("📡", i18n.T("chan.cmd.box_title"), ColorPurple))
 		p := uiPrefix(ColorPurple)
-		fmt.Println(p + colorize("MCP não habilitado. Channels requerem MCP servers.", ColorYellow))
+		fmt.Println(p + colorize(i18n.T("chan.cmd.mcp_disabled"), ColorYellow))
 		fmt.Println(uiBoxEnd(ColorPurple))
 		fmt.Println()
 		return
@@ -31,14 +32,14 @@ func (cli *ChatCLI) handleChannelCommand(userInput string) {
 	case "inject":
 		promptText := ch.FormatForPrompt(10)
 		if promptText == "" {
-			fmt.Println(colorize("  Nenhuma mensagem para injetar.", ColorGray))
+			fmt.Println(colorize("  "+i18n.T("chan.cmd.inject_empty"), ColorGray))
 			return
 		}
 		cli.history = append(cli.history, models.Message{
 			Role:    "system",
 			Content: promptText,
 		})
-		fmt.Println(colorize("  ✓ Mensagens injetadas no contexto.", ColorGreen))
+		fmt.Println(colorize("  ✓ "+i18n.T("chan.cmd.inject_success"), ColorGreen))
 
 	default:
 		// List (optionally filtered by channel name)
@@ -73,9 +74,9 @@ func (cli *ChatCLI) handleChannelCommand(userInput string) {
 			}
 		}
 
-		title := "MCP CHANNELS"
+		title := i18n.T("chan.cmd.box_title")
 		if channelFilter != "" {
-			title = fmt.Sprintf("CHANNEL: %s", channelFilter)
+			title = fmt.Sprintf(i18n.T("chan.cmd.box_title_filtered"), channelFilter)
 		}
 
 		fmt.Println()
@@ -83,8 +84,8 @@ func (cli *ChatCLI) handleChannelCommand(userInput string) {
 		p := uiPrefix(ColorCyan)
 
 		if len(msgs) == 0 {
-			fmt.Println(p + colorize("Nenhuma mensagem recebida.", ColorGray))
-			fmt.Println(p + colorize("Channels são preenchidos quando MCP servers enviam push messages.", ColorGray))
+			fmt.Println(p + colorize(i18n.T("chan.cmd.no_messages"), ColorGray))
+			fmt.Println(p + colorize(i18n.T("chan.cmd.no_messages_hint"), ColorGray))
 		} else {
 			for _, m := range msgs {
 				fmt.Println(p + fmt.Sprintf("  %s%s%s %s%s%s/%s%s%s %s",
@@ -94,7 +95,7 @@ func (cli *ChatCLI) handleChannelCommand(userInput string) {
 					truncateStr(m.Content, 60)))
 			}
 			fmt.Println(p)
-			fmt.Println(p + fmt.Sprintf("  %sTotal:%s %d mensagens", ColorGray, ColorReset, ch.Count()))
+			fmt.Println(p + fmt.Sprintf("  %s%s:%s "+i18n.T("chan.cmd.total_messages"), ColorGray, i18n.T("chan.cmd.total_label"), ColorReset, ch.Count()))
 		}
 
 		fmt.Println(uiBoxEnd(ColorCyan))
@@ -104,8 +105,8 @@ func (cli *ChatCLI) handleChannelCommand(userInput string) {
 
 func (cli *ChatCLI) getChannelSuggestions(d prompt.Document) []prompt.Suggest {
 	suggestions := []prompt.Suggest{
-		{Text: "list", Description: "Lista mensagens recentes de channels"},
-		{Text: "inject", Description: "Injeta mensagens no contexto da conversa"},
+		{Text: "list", Description: i18n.T("chan.cmd.suggest_list")},
+		{Text: "inject", Description: i18n.T("chan.cmd.suggest_inject")},
 	}
 	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 }

@@ -129,14 +129,14 @@ func (h *PersonaHandler) ListAgents() {
 
 		skillCount := ""
 		if len(a.Skills) > 0 {
-			skillCount = colorize(fmt.Sprintf(" [%d skills]", len(a.Skills)), ColorGray)
+			skillCount = colorize(i18n.T("persona.cmd.skills_count", len(a.Skills)), ColorGray)
 		}
 
 		fmt.Printf("  %s%s - %s%s\n", status, name, desc, skillCount)
 	}
 
 	fmt.Println()
-	fmt.Printf(" 💡 %s\n", i18n.T("agent.persona.list.load_hint", colorize("/agent load <nome>", ColorCyan)))
+	fmt.Printf(" 💡 %s\n", i18n.T("agent.persona.list.load_hint", colorize("/agent load "+i18n.T("persona.cmd.arg_name"), ColorCyan)))
 }
 
 // ListSkills shows all available skills
@@ -212,9 +212,9 @@ func (h *PersonaHandler) LoadAgent(name string) {
 	fmt.Println(colorize("   "+i18n.T("agent.persona.load.ready"), ColorGray))
 	fmt.Printf("   %s: %s %s %s\n",
 		i18n.T("agent.persona.load.example"),
-		colorize("/agent crie um servidor HTTP", ColorCyan),
+		colorize("/agent "+i18n.T("persona.cmd.example_agent"), ColorCyan),
 		i18n.T("agent.persona.load.or"),
-		colorize("/coder refatore o código", ColorCyan))
+		colorize("/coder "+i18n.T("persona.cmd.example_coder"), ColorCyan))
 }
 
 // UnloadAgent deactivates the current agent
@@ -298,7 +298,7 @@ func (h *PersonaHandler) ShowAgentStatus() {
 			fmt.Printf("   %s\n", colorize(active.Description, ColorGray))
 		}
 		if len(active.Skills) > 0 {
-			fmt.Printf("   Skills: %s\n", strings.Join(active.Skills, ", "))
+			fmt.Printf("   %s: %s\n", i18n.T("persona.cmd.skills_label"), strings.Join(active.Skills, ", "))
 		}
 	} else {
 		fmt.Println(colorize(" ⚠ "+i18n.T("agent.persona.status.none"), ColorYellow))
@@ -313,7 +313,7 @@ func (h *PersonaHandler) ShowHelp() {
 	fmt.Println(colorize("📖 "+i18n.T("agent.persona.help.management_header"), ColorCyan))
 	fmt.Println()
 	fmt.Printf("   %s               - %s\n", colorize("/agent list", ColorCyan), i18n.T("agent.persona.help.list"))
-	fmt.Printf("   %s        - %s\n", colorize("/agent load <nome>", ColorCyan), i18n.T("agent.persona.help.load"))
+	fmt.Printf("   %s        - %s\n", colorize("/agent load "+i18n.T("persona.cmd.arg_name"), ColorCyan), i18n.T("agent.persona.help.load"))
 	fmt.Printf("   %s             - %s\n", colorize("/agent skills", ColorCyan), i18n.T("agent.persona.help.skills"))
 	fmt.Printf("   %s               - %s\n", colorize("/agent show [--full]", ColorCyan), i18n.T("agent.persona.help.show"))
 	fmt.Printf("   %s           - %s\n", colorize("/agent status", ColorCyan), i18n.T("agent.persona.help.status"))
@@ -322,12 +322,12 @@ func (h *PersonaHandler) ShowHelp() {
 	fmt.Println()
 	fmt.Println(colorize("🚀 "+i18n.T("agent.persona.help.exec_header"), ColorCyan))
 	fmt.Println()
-	fmt.Printf("   %s    - %s\n", colorize("/agent <tarefa>", ColorCyan), i18n.T("agent.persona.help.agent_task"))
-	fmt.Printf("   %s    - %s\n", colorize("/coder <tarefa>", ColorCyan), i18n.T("agent.persona.help.coder_task"))
+	fmt.Printf("   %s    - %s\n", colorize("/agent "+i18n.T("persona.cmd.arg_task"), ColorCyan), i18n.T("agent.persona.help.agent_task"))
+	fmt.Printf("   %s    - %s\n", colorize("/coder "+i18n.T("persona.cmd.arg_task"), ColorCyan), i18n.T("agent.persona.help.coder_task"))
 
 	fmt.Println()
 	fmt.Printf("   📂 %s: %s\n", i18n.T("agent.persona.help.agents_dir"), colorize(h.manager.GetAgentsDir(), ColorGray))
-	fmt.Printf("   📂 Skills:  %s\n", colorize(h.manager.GetSkillsDir(), ColorGray))
+	fmt.Printf("   📂 %s:  %s\n", i18n.T("persona.cmd.skills_label"), colorize(h.manager.GetSkillsDir(), ColorGray))
 }
 
 // AttachAgent adds an agent to active pool
@@ -362,7 +362,7 @@ func (h *PersonaHandler) ShowAttachedAgents() {
 	for i, a := range active {
 		fmt.Printf("  %d. %s - %s\n", i+1, colorize(a.Name, ColorGreen), a.Description)
 		if len(a.Skills) > 0 {
-			fmt.Printf("     Skills: %s\n", strings.Join(a.Skills, ", "))
+			fmt.Printf("     %s: %s\n", i18n.T("persona.cmd.skills_label"), strings.Join(a.Skills, ", "))
 		}
 	}
 	fmt.Println()

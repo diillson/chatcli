@@ -23,7 +23,7 @@ func (cli *ChatCLI) RunAgentOnce(ctx context.Context, input string, autoExecute 
 	} else if strings.HasPrefix(input, "/run ") {
 		query = strings.TrimPrefix(input, "/run ")
 	} else {
-		return fmt.Errorf("entrada inválida para o modo agente one-shot: %s", input)
+		return fmt.Errorf("%s", i18n.T("sess.cmd.invalid_one_shot_input", input))
 	}
 
 	// Processar contextos especiais como @file, @git, etc.
@@ -424,13 +424,13 @@ func (cli *ChatCLI) handleForkSession(newName string) {
 	// If the current session has a name (was loaded/saved), we can fork from file
 	if cli.currentSessionName != "" {
 		if err := cli.sessionManager.ForkSession(cli.currentSessionName, newName); err != nil {
-			fmt.Println(colorize(fmt.Sprintf("  Erro ao fork: %v", err), ColorRed))
+			fmt.Println(colorize(fmt.Sprintf("  %s", i18n.T("sess.cmd.fork_error", err)), ColorRed))
 			return
 		}
 	} else {
 		// Fork from in-memory state
 		if err := cli.sessionManager.ForkCurrentToNew(newName, sd); err != nil {
-			fmt.Println(colorize(fmt.Sprintf("  Erro ao fork: %v", err), ColorRed))
+			fmt.Println(colorize(fmt.Sprintf("  %s", i18n.T("sess.cmd.fork_error", err)), ColorRed))
 			return
 		}
 	}
@@ -438,17 +438,17 @@ func (cli *ChatCLI) handleForkSession(newName string) {
 	// Switch to the forked session
 	oldName := cli.currentSessionName
 	if oldName == "" {
-		oldName = "(unsaved)"
+		oldName = i18n.T("sess.cmd.fork_unsaved")
 	}
 	cli.currentSessionName = newName
 
 	fmt.Println()
-	fmt.Println(uiBox("✅", "SESSION FORKED", ColorGreen))
+	fmt.Println(uiBox("✅", i18n.T("sess.cmd.fork_header"), ColorGreen))
 	p := uiPrefix(ColorGreen)
-	fmt.Println(p + fmt.Sprintf("  %sDe:%s       %s", ColorGray, ColorReset, oldName))
-	fmt.Println(p + fmt.Sprintf("  %sPara:%s     %s", ColorGray, ColorReset, colorize(newName, ColorCyan)))
-	fmt.Println(p + fmt.Sprintf("  %sMensagens:%s %d", ColorGray, ColorReset, len(cli.history)))
-	fmt.Println(p + colorize("  Agora trabalhando no fork. O original permanece intacto.", ColorGray))
+	fmt.Println(p + fmt.Sprintf("  %s%s%s       %s", ColorGray, i18n.T("sess.cmd.fork_from"), ColorReset, oldName))
+	fmt.Println(p + fmt.Sprintf("  %s%s%s     %s", ColorGray, i18n.T("sess.cmd.fork_to"), ColorReset, colorize(newName, ColorCyan)))
+	fmt.Println(p + fmt.Sprintf("  %s%s%s %d", ColorGray, i18n.T("sess.cmd.fork_messages"), ColorReset, len(cli.history)))
+	fmt.Println(p + colorize("  "+i18n.T("sess.cmd.fork_footer"), ColorGray))
 	fmt.Println(uiBoxEnd(ColorGreen))
 	fmt.Println()
 }

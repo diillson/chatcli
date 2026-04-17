@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	prompt "github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/i18n"
 )
 
 // handleWorktreeCommand manages git worktrees for isolated work.
@@ -28,7 +29,7 @@ func (cli *ChatCLI) handleWorktreeCommand(userInput string) {
 	switch args[1] {
 	case "create", "new":
 		if len(args) < 3 {
-			fmt.Println(colorize("  Uso: /worktree create <branch-name>", ColorYellow))
+			fmt.Println(colorize("  "+i18n.T("wt.cmd.usage_create"), ColorYellow))
 			return
 		}
 		cli.worktreeCreate(args[2])
@@ -36,7 +37,7 @@ func (cli *ChatCLI) handleWorktreeCommand(userInput string) {
 		cli.worktreeList()
 	case "remove", "rm", "delete":
 		if len(args) < 3 {
-			fmt.Println(colorize("  Uso: /worktree remove <path-or-branch>", ColorYellow))
+			fmt.Println(colorize("  "+i18n.T("wt.cmd.usage_remove"), ColorYellow))
 			return
 		}
 		cli.worktreeRemove(args[2])
@@ -51,14 +52,14 @@ func (cli *ChatCLI) handleWorktreeCommand(userInput string) {
 func (cli *ChatCLI) worktreeCreate(branch string) {
 	// Check if we're in a git repo
 	if !isGitRepo() {
-		fmt.Println(colorize("  Erro: não estamos em um repositório git.", ColorRed))
+		fmt.Println(colorize("  "+i18n.T("wt.cmd.err_not_git_repo"), ColorRed))
 		return
 	}
 
 	// Get repo root
 	repoRoot := getGitRepoRoot()
 	if repoRoot == "" {
-		fmt.Println(colorize("  Erro: não foi possível determinar a raiz do repositório.", ColorRed))
+		fmt.Println(colorize("  "+i18n.T("wt.cmd.err_repo_root"), ColorRed))
 		return
 	}
 
@@ -87,19 +88,19 @@ func (cli *ChatCLI) worktreeCreate(branch string) {
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Println(colorize(fmt.Sprintf("  Erro ao criar worktree: %s", strings.TrimSpace(string(output))), ColorRed))
+		fmt.Println(colorize("  "+i18n.T("wt.cmd.err_create", strings.TrimSpace(string(output))), ColorRed))
 		return
 	}
 
 	// Change to the worktree directory
 	if err := os.Chdir(worktreePath); err != nil {
-		fmt.Println(colorize(fmt.Sprintf("  Worktree criado em %s mas falhou ao mudar diretório: %v", worktreePath, err), ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("wt.cmd.warn_chdir_after_create", worktreePath, err), ColorYellow))
 		return
 	}
 
-	fmt.Println(colorize("  Worktree criado e ativo:", ColorGreen))
-	fmt.Println(colorize(fmt.Sprintf("    Branch: %s", branch), ColorCyan))
-	fmt.Println(colorize(fmt.Sprintf("    Path:   %s", worktreePath), ColorGray))
+	fmt.Println(colorize("  "+i18n.T("wt.cmd.created_active"), ColorGreen))
+	fmt.Println(colorize("    "+i18n.T("wt.cmd.kv_branch", branch), ColorCyan))
+	fmt.Println(colorize("    "+i18n.T("wt.cmd.kv_path", worktreePath), ColorGray))
 	fmt.Println()
 
 	// Invalidate context builder cache since CWD changed
@@ -110,19 +111,19 @@ func (cli *ChatCLI) worktreeCreate(branch string) {
 
 func (cli *ChatCLI) worktreeList() {
 	if !isGitRepo() {
-		fmt.Println(colorize("  Não estamos em um repositório git.", ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("wt.cmd.not_in_git_repo"), ColorYellow))
 		return
 	}
 
 	cmd := exec.Command("git", "worktree", "list")
 	output, err := cmd.Output()
 	if err != nil {
-		fmt.Println(colorize(fmt.Sprintf("  Erro: %v", err), ColorRed))
+		fmt.Println(colorize("  "+i18n.T("wt.cmd.err_generic", err), ColorRed))
 		return
 	}
 
 	fmt.Println()
-	fmt.Println(colorize("  Git Worktrees", ColorCyan))
+	fmt.Println(colorize("  "+i18n.T("wt.cmd.title_list"), ColorCyan))
 	fmt.Println(colorize("  "+strings.Repeat("─", 50), ColorGray))
 
 	cwd, _ := os.Getwd()
@@ -143,7 +144,7 @@ func (cli *ChatCLI) worktreeList() {
 
 func (cli *ChatCLI) worktreeRemove(target string) {
 	if !isGitRepo() {
-		fmt.Println(colorize("  Não estamos em um repositório git.", ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("wt.cmd.not_in_git_repo"), ColorYellow))
 		return
 	}
 
@@ -173,7 +174,7 @@ func (cli *ChatCLI) worktreeRemove(target string) {
 	// Don't remove the main worktree
 	repoRoot := getGitRepoRoot()
 	if removePath == repoRoot {
-		fmt.Println(colorize("  Não é possível remover o worktree principal.", ColorRed))
+		fmt.Println(colorize("  "+i18n.T("wt.cmd.err_remove_main"), ColorRed))
 		return
 	}
 
@@ -181,10 +182,10 @@ func (cli *ChatCLI) worktreeRemove(target string) {
 	if cwd == removePath {
 		// We're in the worktree being removed, cd to repo root first
 		if err := os.Chdir(repoRoot); err != nil {
-			fmt.Println(colorize(fmt.Sprintf("  Erro ao mudar diretório: %v", err), ColorRed))
+			fmt.Println(colorize("  "+i18n.T("wt.cmd.err_chdir", err), ColorRed))
 			return
 		}
-		fmt.Println(colorize(fmt.Sprintf("  Voltando ao diretório principal: %s", repoRoot), ColorGray))
+		fmt.Println(colorize("  "+i18n.T("wt.cmd.back_to_main", repoRoot), ColorGray))
 	}
 
 	cmd := exec.Command("git", "worktree", "remove", removePath) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
@@ -194,12 +195,12 @@ func (cli *ChatCLI) worktreeRemove(target string) {
 		cmd = exec.Command("git", "worktree", "remove", "--force", removePath) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			fmt.Println(colorize(fmt.Sprintf("  Erro ao remover worktree: %s", strings.TrimSpace(string(output))), ColorRed))
+			fmt.Println(colorize("  "+i18n.T("wt.cmd.err_remove", strings.TrimSpace(string(output))), ColorRed))
 			return
 		}
 	}
 
-	fmt.Println(colorize(fmt.Sprintf("  Worktree removido: %s", removePath), ColorGreen))
+	fmt.Println(colorize("  "+i18n.T("wt.cmd.removed", removePath), ColorGreen))
 
 	if cli.contextBuilder != nil {
 		cli.contextBuilder.InvalidateCache()
@@ -208,7 +209,7 @@ func (cli *ChatCLI) worktreeRemove(target string) {
 
 func (cli *ChatCLI) worktreeStatus() {
 	if !isGitRepo() {
-		fmt.Println(colorize("  Não estamos em um repositório git.", ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("wt.cmd.not_in_git_repo"), ColorYellow))
 		return
 	}
 
@@ -217,24 +218,24 @@ func (cli *ChatCLI) worktreeStatus() {
 	repoRoot := getGitRepoRoot()
 
 	fmt.Println()
-	fmt.Println(colorize("  Worktree Status", ColorCyan))
+	fmt.Println(colorize("  "+i18n.T("wt.cmd.title_status"), ColorCyan))
 	fmt.Println(colorize("  "+strings.Repeat("─", 50), ColorGray))
-	fmt.Printf("  CWD:    %s\n", cwd)
-	fmt.Printf("  Branch: %s\n", colorize(branch, ColorGreen))
-	fmt.Printf("  Repo:   %s\n", repoRoot)
+	fmt.Printf("  %s    %s\n", i18n.T("wt.cmd.label_cwd"), cwd)
+	fmt.Printf("  %s %s\n", i18n.T("wt.cmd.label_branch"), colorize(branch, ColorGreen))
+	fmt.Printf("  %s   %s\n", i18n.T("wt.cmd.label_repo"), repoRoot)
 
 	isWorktree := cwd != repoRoot
 	if isWorktree {
-		fmt.Printf("  Type:   %s\n", colorize("worktree (linked)", ColorCyan))
+		fmt.Printf("  %s   %s\n", i18n.T("wt.cmd.label_type"), colorize(i18n.T("wt.cmd.type_linked"), ColorCyan))
 	} else {
-		fmt.Printf("  Type:   %s\n", colorize("main worktree", ColorGray))
+		fmt.Printf("  %s   %s\n", i18n.T("wt.cmd.label_type"), colorize(i18n.T("wt.cmd.type_main"), ColorGray))
 	}
 
 	// Count worktrees
 	cmd := exec.Command("git", "worktree", "list")
 	if out, err := cmd.Output(); err == nil {
 		count := len(strings.Split(strings.TrimSpace(string(out)), "\n"))
-		fmt.Printf("  Total:  %d worktrees\n", count)
+		fmt.Printf("  %s  %s\n", i18n.T("wt.cmd.label_total"), i18n.T("wt.cmd.total_count", count))
 	}
 	fmt.Println()
 }
@@ -272,10 +273,10 @@ func getCurrentBranch() string {
 // getWorktreeSuggestions returns autocomplete suggestions for /worktree.
 func (cli *ChatCLI) getWorktreeSuggestions(d prompt.Document) []prompt.Suggest {
 	suggestions := []prompt.Suggest{
-		{Text: "create", Description: "Cria um novo worktree com branch"},
-		{Text: "list", Description: "Lista worktrees ativos"},
-		{Text: "remove", Description: "Remove um worktree"},
-		{Text: "status", Description: "Mostra informações do worktree atual"},
+		{Text: "create", Description: i18n.T("wt.cmd.sugg_create")},
+		{Text: "list", Description: i18n.T("wt.cmd.sugg_list")},
+		{Text: "remove", Description: i18n.T("wt.cmd.sugg_remove")},
+		{Text: "status", Description: i18n.T("wt.cmd.sugg_status")},
 	}
 	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 }
