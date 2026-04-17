@@ -303,6 +303,13 @@ func IsPayloadTooLargeError(err error) bool {
 // "invalid_api_key"; WAF 403s cite firewall / policy / size / security
 // rules. Distinguishing them matters: auth 403 needs a token refresh,
 // WAF 403 needs a smaller payload. Never flags a plain unqualified 403.
+//
+// Also catches a second flavor: SDK-level decode failures where the upstream
+// returned HTML (a proxy block page) instead of JSON. The AWS SDK, for
+// example, surfaces this as "StatusCode: 403 ... deserialization failed ...
+// invalid character '<' looking for beginning of value" — a legitimate AWS
+// 403 would return well-formed JSON, so this pattern is an unambiguous
+// middlebox fingerprint.
 func IsProxyWAFRejection(err error) bool {
 	if err == nil {
 		return false
@@ -315,7 +322,7 @@ func IsProxyWAFRejection(err error) bool {
 	}
 	// Proxy/WAF/security signals — the presence of any of these alongside
 	// a 403 means this is not a normal auth failure.
-	return strings.Contains(msg, "firewall") ||
+	if strings.Contains(msg, "firewall") ||
 		strings.Contains(msg, "waf") ||
 		strings.Contains(msg, "security policy") ||
 		strings.Contains(msg, "security rule") ||
@@ -326,7 +333,14 @@ func IsProxyWAFRejection(err error) bool {
 		strings.Contains(msg, "akamai") ||
 		strings.Contains(msg, "proxy denied") ||
 		strings.Contains(msg, "policy violation") ||
-		strings.Contains(msg, "request blocked")
+		strings.Contains(msg, "request blocked") {
+		return true
+	}
+	// HTML-body-as-JSON signals: SDK tried to decode the response and found
+	// a `<` (HTML tag) or otherwise failed. Only meaningful paired with 403.
+	return strings.Contains(msg, "invalid character '<'") ||
+		strings.Contains(msg, "deserialization failed") ||
+		strings.Contains(msg, "failed to decode response body")
 }
 
 // IsLikelyPayloadProblem combines strict payload-size errors with
