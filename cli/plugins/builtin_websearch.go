@@ -14,9 +14,32 @@ import (
 	"golang.org/x/net/html"
 )
 
-// BuiltinWebSearchPlugin provides web search functionality with multiple backends.
-// Uses Google Custom Search API when configured (GOOGLE_SEARCH_API_KEY + GOOGLE_SEARCH_CX),
-// falls back to DuckDuckGo HTML scraping when no API key is set.
+// SearchProvider identifies a backend. Only backends that don't require
+// a third-party API key are supported — by design, to keep chatcli usable
+// in corporate environments without credential provisioning friction.
+type SearchProvider string
+
+const (
+	ProviderAuto       SearchProvider = "auto"
+	ProviderSearXNG    SearchProvider = "searxng"
+	ProviderDuckDuckGo SearchProvider = "duckduckgo"
+)
+
+// KnownSearchProviders is the canonical list for the /websearch CLI
+// command. Default order: DuckDuckGo first (zero config, always available),
+// SearxNG as secondary (used when the user has an instance configured).
+var KnownSearchProviders = []SearchProvider{
+	ProviderDuckDuckGo, ProviderSearXNG,
+}
+
+// BuiltinWebSearchPlugin provides web search with a pluggable backend chain.
+//
+// Default order (CHATCLI_WEBSEARCH_PROVIDER unset or "auto"):
+//  1. DuckDuckGo HTML — zero-config default
+//  2. SearxNG self-hosted (SEARXNG_URL) — used as fallback when configured
+//
+// Set CHATCLI_WEBSEARCH_PROVIDER=searxng to prefer SearxNG over DuckDuckGo.
+// On failure or empty results the chain falls through to the next backend.
 type BuiltinWebSearchPlugin struct{}
 
 func NewBuiltinWebSearchPlugin() *BuiltinWebSearchPlugin {
@@ -26,7 +49,7 @@ func NewBuiltinWebSearchPlugin() *BuiltinWebSearchPlugin {
 func (p *BuiltinWebSearchPlugin) Name() string        { return "@websearch" }
 func (p *BuiltinWebSearchPlugin) Description() string { return "Searches the web and returns results" }
 func (p *BuiltinWebSearchPlugin) Usage() string       { return "@websearch <query>" }
-func (p *BuiltinWebSearchPlugin) Version() string     { return "1.1.0" }
+func (p *BuiltinWebSearchPlugin) Version() string     { return "2.0.0" }
 func (p *BuiltinWebSearchPlugin) Path() string        { return "[builtin]" }
 
 func (p *BuiltinWebSearchPlugin) Schema() string {
@@ -124,41 +147,38 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 		return "", fmt.Errorf("query required")
 	}
 
-	// Select search provider: Google if configured, DuckDuckGo as fallback
-	var results []searchResult
-	var err error
-	var provider string
+	chain := SelectSearchChain()
+	var (
+		results  []searchResult
+		provider SearchProvider
+		lastErr  error
+	)
 
-	googleAPIKey := os.Getenv("GOOGLE_SEARCH_API_KEY")
-	googleCX := os.Getenv("GOOGLE_SEARCH_CX")
-
-	if googleAPIKey != "" && googleCX != "" {
-		provider = "Google"
+	for i, p := range chain {
 		if onOutput != nil {
-			onOutput(fmt.Sprintf("Searching Google: %s...", query))
+			onOutput(fmt.Sprintf("Searching %s: %s...", p.name, query))
 		}
-		results, err = searchGoogle(ctx, query, maxResults, googleAPIKey, googleCX)
-		if err != nil {
-			// Fallback to DuckDuckGo on Google failure
-			if onOutput != nil {
-				onOutput(fmt.Sprintf("Google search failed (%v), falling back to DuckDuckGo...", err))
+		res, err := p.search(ctx, query, maxResults)
+		if err == nil && len(res) > 0 {
+			results = res
+			provider = p.name
+			lastErr = nil
+			break
+		}
+		lastErr = err
+		if onOutput != nil && i < len(chain)-1 {
+			if err != nil {
+				onOutput(fmt.Sprintf("%s failed (%v), falling back to %s...", p.name, err, chain[i+1].name))
+			} else {
+				onOutput(fmt.Sprintf("%s returned no results, falling back to %s...", p.name, chain[i+1].name))
 			}
-			provider = "DuckDuckGo"
-			results, err = searchDuckDuckGo(ctx, query, maxResults)
 		}
-	} else {
-		provider = "DuckDuckGo"
-		if onOutput != nil {
-			onOutput(fmt.Sprintf("Searching DuckDuckGo: %s...", query))
-		}
-		results, err = searchDuckDuckGo(ctx, query, maxResults)
-	}
-
-	if err != nil {
-		return "", err
 	}
 
 	if len(results) == 0 {
+		if lastErr != nil {
+			return "", fmt.Errorf("all search backends failed; last error: %w", lastErr)
+		}
 		return "No results found.", nil
 	}
 
@@ -186,80 +206,155 @@ type searchResult struct {
 	Snippet string
 }
 
-// --- Google Custom Search API ---
+// --- Provider chain selection ---
 
-// googleSearchResponse is the JSON response from Google Custom Search API.
-type googleSearchResponse struct {
-	Items []googleSearchItem `json:"items"`
+// providerEntry binds a provider name to its search function.
+type providerEntry struct {
+	name   SearchProvider
+	search func(ctx context.Context, query string, max int) ([]searchResult, error)
 }
 
-type googleSearchItem struct {
-	Title   string `json:"title"`
-	Link    string `json:"link"`
-	Snippet string `json:"snippet"`
+// SelectSearchChain returns the ordered list of providers to try.
+// An unset override → auto mode (DDG first → SearxNG if configured).
+// An explicit override moves the named provider to the front and keeps the
+// rest as fallbacks — so even a forced choice degrades gracefully.
+func SelectSearchChain() []providerEntry {
+	return selectSearchChainFromEnv(
+		strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_WEBSEARCH_PROVIDER"))),
+		strings.TrimSpace(os.Getenv("SEARXNG_URL")),
+	)
 }
 
-// searchGoogle uses the Google Custom Search JSON API.
-// Requires GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_CX environment variables.
-// Free tier: 100 queries/day. See: https://developers.google.com/custom-search/v1/overview
-func searchGoogle(ctx context.Context, query string, maxResults int, apiKey string, cx string) ([]searchResult, error) {
+// SelectSearchChainNames returns just the provider names in chain order.
+// Exposed for display layers (e.g. /websearch status) that shouldn't touch
+// the internal provider-entry struct.
+func SelectSearchChainNames() []SearchProvider {
+	chain := SelectSearchChain()
+	out := make([]SearchProvider, 0, len(chain))
+	for _, p := range chain {
+		out = append(out, p.name)
+	}
+	return out
+}
+
+// selectSearchChainFromEnv is the pure-logic core, unit-testable without
+// touching process environment state.
+func selectSearchChainFromEnv(override, searxngURL string) []providerEntry {
+	var chain []providerEntry
+
+	addSearxNG := func() {
+		if searxngURL != "" {
+			chain = append(chain, providerEntry{
+				name: ProviderSearXNG,
+				search: func(ctx context.Context, q string, m int) ([]searchResult, error) {
+					return searchSearxNG(ctx, q, m, searxngURL)
+				},
+			})
+		}
+	}
+	addDDG := func() {
+		chain = append(chain, providerEntry{name: ProviderDuckDuckGo, search: searchDuckDuckGo})
+	}
+
+	switch SearchProvider(override) {
+	case ProviderSearXNG:
+		addSearxNG()
+		addDDG()
+	case ProviderDuckDuckGo:
+		addDDG()
+		addSearxNG()
+	default:
+		// "", "auto", or anything unrecognized → default order (DDG first).
+		addDDG()
+		addSearxNG()
+	}
+	return chain
+}
+
+// --- SearxNG self-hosted ---
+
+// searxngResponse matches the JSON output of SearxNG's /search?format=json.
+// The instance must have JSON enabled in settings.yml:
+//
+//	search:
+//	  formats: [html, json]
+type searxngResponse struct {
+	Results []struct {
+		Title   string `json:"title"`
+		URL     string `json:"url"`
+		Content string `json:"content"`
+	} `json:"results"`
+}
+
+// searchSearxNG queries a self-hosted SearxNG instance using its JSON API.
+// baseURL must point to the instance root (e.g. https://searx.internal.corp).
+// The function trims trailing slashes so either form is accepted.
+func searchSearxNG(ctx context.Context, query string, maxResults int, baseURL string) ([]searchResult, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	if maxResults > 10 {
-		maxResults = 10 // Google API max per request
-	}
-
+	baseURL = strings.TrimRight(baseURL, "/")
 	params := url.Values{}
-	params.Set("key", apiKey)
-	params.Set("cx", cx)
 	params.Set("q", query)
-	params.Set("num", fmt.Sprintf("%d", maxResults))
+	params.Set("format", "json")
 
-	endpoint := "https://www.googleapis.com/customsearch/v1?" + params.Encode()
+	endpoint := baseURL + "/search?" + params.Encode()
 
 	req, err := http.NewRequestWithContext(reqCtx, "GET", endpoint, nil)
 	if err != nil {
-		return nil, fmt.Errorf("creating Google search request: %w", err)
+		return nil, fmt.Errorf("creating SearxNG request: %w", err)
 	}
-	req.Header.Set("User-Agent", "chatcli-websearch/1.1")
+	req.Header.Set("User-Agent", "chatcli-websearch/2.0")
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Google search request failed: %w", err)
+		return nil, fmt.Errorf("SearxNG request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
 	if err != nil {
-		return nil, fmt.Errorf("reading Google response: %w", err)
+		return nil, fmt.Errorf("reading SearxNG response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Google API returned %d: %s", resp.StatusCode, truncate(string(body), 200))
+		return nil, fmt.Errorf("SearxNG returned %d: %s", resp.StatusCode, truncate(string(body), 200))
 	}
 
-	var googleResp googleSearchResponse
-	if err := json.Unmarshal(body, &googleResp); err != nil {
-		return nil, fmt.Errorf("parsing Google response: %w", err)
+	// If the instance hasn't enabled JSON, we'll get HTML back. Give a
+	// specific, actionable error instead of a cryptic decode failure.
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(strings.ToLower(ct), "application/json") {
+		return nil, fmt.Errorf("SearxNG did not return JSON (Content-Type=%q). Enable JSON in settings.yml: search.formats: [html, json]", ct)
 	}
 
-	results := make([]searchResult, 0, len(googleResp.Items))
-	for _, item := range googleResp.Items {
-		results = append(results, searchResult{
-			Title:   item.Title,
-			URL:     item.Link,
-			Snippet: item.Snippet,
+	var sxResp searxngResponse
+	if err := json.Unmarshal(body, &sxResp); err != nil {
+		return nil, fmt.Errorf("parsing SearxNG response: %w", err)
+	}
+
+	limit := maxResults
+	if limit <= 0 || limit > len(sxResp.Results) {
+		limit = len(sxResp.Results)
+	}
+	out := make([]searchResult, 0, limit)
+	for i := 0; i < limit; i++ {
+		r := sxResp.Results[i]
+		out = append(out, searchResult{
+			Title:   r.Title,
+			URL:     r.URL,
+			Snippet: r.Content,
 		})
 	}
-
-	return results, nil
+	return out, nil
 }
 
 // --- DuckDuckGo HTML scraping (fallback) ---
 
 // searchDuckDuckGo uses DuckDuckGo's HTML-only interface to get search results.
-// No API key required. Used as fallback when Google is not configured.
+// No API key required. DDG occasionally serves anti-bot interstitials — this
+// is why it's the fallback, not the default.
 func searchDuckDuckGo(ctx context.Context, query string, maxResults int) ([]searchResult, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -270,7 +365,7 @@ func searchDuckDuckGo(ctx context.Context, query string, maxResults int) ([]sear
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("User-Agent", "chatcli-websearch/1.1 (compatible)")
+	req.Header.Set("User-Agent", "chatcli-websearch/2.0 (compatible)")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -296,20 +391,18 @@ func parseDDGResults(htmlBody string, maxResults int) []searchResult {
 
 	var results []searchResult
 
-	// Walk the DOM tree looking for result containers
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
 		if len(results) >= maxResults {
 			return
 		}
 
-		// Look for result link divs: <div class="result__body">
 		if n.Type == html.ElementNode && n.Data == "div" && hasClass(n, "result__body") {
 			r := extractResultFromBody(n)
 			if r.Title != "" && r.URL != "" {
 				results = append(results, r)
 			}
-			return // Don't recurse into result body children again
+			return
 		}
 
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -329,11 +422,9 @@ func extractResultFromBody(body *html.Node) searchResult {
 	extract = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "a" {
 			if hasClass(n, "result__a") {
-				// Title link
 				r.URL = cleanDDGURL(getAttr(n, "href"))
 				r.Title = textContent(n)
 			} else if hasClass(n, "result__snippet") {
-				// Snippet link
 				r.Snippet = textContent(n)
 			}
 		}
@@ -349,7 +440,6 @@ func extractResultFromBody(body *html.Node) searchResult {
 
 // --- HTML helpers ---
 
-// hasClass checks if an HTML node has a specific CSS class.
 func hasClass(n *html.Node, class string) bool {
 	for _, attr := range n.Attr {
 		if attr.Key == "class" {
@@ -363,7 +453,6 @@ func hasClass(n *html.Node, class string) bool {
 	return false
 }
 
-// getAttr gets an attribute value from an HTML node.
 func getAttr(n *html.Node, key string) string {
 	for _, attr := range n.Attr {
 		if attr.Key == key {
@@ -373,7 +462,6 @@ func getAttr(n *html.Node, key string) string {
 	return ""
 }
 
-// textContent extracts all text from an HTML node and its children.
 func textContent(n *html.Node) string {
 	if n.Type == html.TextNode {
 		return n.Data
@@ -391,7 +479,6 @@ func cleanDDGURL(rawURL string) string {
 		if parts := strings.SplitN(rawURL, "uddg=", 2); len(parts) == 2 {
 			decoded, err := url.QueryUnescape(parts[1])
 			if err == nil {
-				// Remove trailing &rut=...
 				if idx := strings.Index(decoded, "&"); idx > 0 {
 					decoded = decoded[:idx]
 				}

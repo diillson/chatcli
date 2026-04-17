@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	prompt "github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 )
 
@@ -85,6 +86,16 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getChannelSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/websearch") {
+		return cli.getWebSearchSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/config") ||
+		strings.HasPrefix(lineBeforeCursor, "/status") ||
+		strings.HasPrefix(lineBeforeCursor, "/settings") {
+		return cli.getConfigSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -155,24 +166,24 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 					var desc string
 					// 1. Primeiro, procurar por descrições personalizadas
 					if flag == "--mode" {
-						desc = "Define o modo de processamento de arquivos (full, summary, chunked, smart)"
+						desc = i18n.T("complete.generic.flag_mode")
 					} else if flag == "--model" {
-						desc = "Troque o modelo (Runtime) baseado no provedor atual (grpt-5, grok-4, etc.)"
+						desc = i18n.T("complete.generic.flag_model")
 					} else if flag == "--max-tokens" {
-						desc = "Define o máximo de tokens para as próximas respostas (0 para padrão)"
+						desc = i18n.T("complete.generic.flag_max_tokens")
 					} else if flag == "--agent-id" {
-						desc = "Altera o agent em tempo de execução (Apenas para STACKSPOT)"
+						desc = i18n.T("complete.generic.flag_agent_id_stackspot")
 					} else if flag == "--realm" {
-						desc = "Altera o Realm/Tenant em tempo de execução (Apenas para STACKSPOT)"
+						desc = i18n.T("complete.generic.flag_realm_stackspot")
 					} else if flag == "-i" {
-						desc = "Ideal para comandos interativos evitando sensação de bloqueio do terminal"
+						desc = i18n.T("complete.generic.flag_i_interactive")
 					} else if flag == "--ai" {
-						desc = "Envia a saída do comando direto para a IA analisar, para contexto adicional digite ( @command --ai <comando> > <contexto>)"
+						desc = i18n.T("complete.generic.flag_ai")
 					} else {
 						// 2. Se não houver descrição personalizada, criar uma genérica
-						desc = fmt.Sprintf("Opção para %s", command)
+						desc = fmt.Sprintf(i18n.T("complete.generic.option_for"), command)
 						if len(values) > 0 {
-							desc += " (valores: " + strings.Join(extractTexts(values), ", ") + ")"
+							desc += " " + fmt.Sprintf(i18n.T("complete.generic.values_suffix"), strings.Join(extractTexts(values), ", "))
 						}
 					}
 					flagSuggests = append(flagSuggests, prompt.Suggest{Text: flag, Description: desc})
@@ -197,40 +208,41 @@ func extractTexts(suggests []prompt.Suggest) []string {
 
 func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 	return []prompt.Suggest{
-		{Text: "/exit", Description: "Sair do ChatCLI"},
-		{Text: "/quit", Description: "Alias de /exit - Sair do ChatCLI"},
-		{Text: "/switch", Description: "Trocar o provedor de LLM, seguido por --model troca o modelo"},
-		{Text: "/help", Description: "Mostrar ajuda"},
-		{Text: "/reload", Description: "Recarregar configurações do .env"},
-		{Text: "/config", Description: "Mostrar configuração atual"},
-		{Text: "/status", Description: "Alias de /config - Mostrar configuração atual"},
-		{Text: "/agent", Description: "Iniciar modo agente para executar tarefas"},
-		{Text: "/coder", Description: "Iniciar modo engenheiro (Criação e Edição de Código)"},
-		{Text: "/run", Description: "Alias para /agent - Iniciar modo agente para executar tarefas"},
-		{Text: "/newsession", Description: "Iniciar uma nova sessão de conversa"},
-		{Text: "/version", Description: "Verificar a versão do ChatCLI"},
-		{Text: "/nextchunk", Description: "Carregar o próximo chunk de arquivo"},
-		{Text: "/retry", Description: "Tentar novamente o último chunk que falhou"},
-		{Text: "/retryall", Description: "Tentar novamente todos os chunks que falharam"},
-		{Text: "/skipchunk", Description: "Pular um chunk de arquivo"},
-		{Text: "/session", Description: "Gerencia as sessões, new, save, list, load, delete"},
-		{Text: "/context", Description: "Gerencia contextos persistentes (create, attach, detach, list, show, etc)"},
-		{Text: "/plugin", Description: "Gerencia plugins (install, list, show, etc.)"},
-		{Text: "/skill", Description: "Gerencia skills de registries (search, install, uninstall, list)"},
-		{Text: "/clear", Description: "Força redesenho/limpeza da tela se o prompt estiver corrompido ou com artefatos visuais."},
-		{Text: "/auth", Description: "Gerencia credenciais OAuth (status, login, logout)"},
-		{Text: "/connect", Description: "Conectar a um servidor ChatCLI remoto (gRPC)"},
-		{Text: "/disconnect", Description: "Desconectar do servidor remoto e voltar ao modo local"},
-		{Text: "/watch", Description: "Exibe o status do K8s watcher (quando ativo)"},
-		{Text: "/metrics", Description: "Exibe métricas de runtime (provider, sessão, tokens, memória)"},
-		{Text: "/mcp", Description: "Gerencia servidores MCP (status, tools, restart)"},
-		{Text: "/hooks", Description: "Exibe hooks de lifecycle configurados"},
-		{Text: "/cost", Description: "Exibe custo estimado da sessão atual"},
-		{Text: "/worktree", Description: "Gerencia git worktrees para trabalho isolado em branches"},
-		{Text: "/channel", Description: "Gerencia MCP channels para push messages de servidores externos"},
-		{Text: "/compact", Description: "Compacta o histórico (use /compact <instrução> para guiar o que preservar)"},
-		{Text: "/rewind", Description: "Volta a um checkpoint anterior da conversa"},
-		{Text: "/memory", Description: "Ver/carregar anotações de memória (today, yesterday, week, load <data>, longterm, list)"},
+		{Text: "/exit", Description: i18n.T("complete.root.exit")},
+		{Text: "/quit", Description: i18n.T("complete.root.quit")},
+		{Text: "/switch", Description: i18n.T("complete.root.switch")},
+		{Text: "/help", Description: i18n.T("complete.root.help")},
+		{Text: "/reload", Description: i18n.T("complete.root.reload")},
+		{Text: "/config", Description: i18n.T("complete.config.root_desc")},
+		{Text: "/status", Description: i18n.T("complete.config.status_alias")},
+		{Text: "/agent", Description: i18n.T("complete.root.agent")},
+		{Text: "/coder", Description: i18n.T("complete.root.coder")},
+		{Text: "/run", Description: i18n.T("complete.root.run")},
+		{Text: "/newsession", Description: i18n.T("complete.root.newsession")},
+		{Text: "/version", Description: i18n.T("complete.root.version")},
+		{Text: "/nextchunk", Description: i18n.T("complete.root.nextchunk")},
+		{Text: "/retry", Description: i18n.T("complete.root.retry")},
+		{Text: "/retryall", Description: i18n.T("complete.root.retryall")},
+		{Text: "/skipchunk", Description: i18n.T("complete.root.skipchunk")},
+		{Text: "/session", Description: i18n.T("complete.root.session")},
+		{Text: "/context", Description: i18n.T("complete.root.context")},
+		{Text: "/plugin", Description: i18n.T("complete.root.plugin")},
+		{Text: "/skill", Description: i18n.T("complete.root.skill")},
+		{Text: "/clear", Description: i18n.T("complete.root.clear")},
+		{Text: "/auth", Description: i18n.T("complete.root.auth")},
+		{Text: "/connect", Description: i18n.T("complete.root.connect")},
+		{Text: "/disconnect", Description: i18n.T("complete.root.disconnect")},
+		{Text: "/watch", Description: i18n.T("complete.root.watch")},
+		{Text: "/metrics", Description: i18n.T("complete.root.metrics")},
+		{Text: "/mcp", Description: i18n.T("complete.root.mcp")},
+		{Text: "/hooks", Description: i18n.T("complete.root.hooks")},
+		{Text: "/cost", Description: i18n.T("complete.root.cost")},
+		{Text: "/worktree", Description: i18n.T("complete.root.worktree")},
+		{Text: "/channel", Description: i18n.T("complete.root.channel")},
+		{Text: "/compact", Description: i18n.T("complete.root.compact")},
+		{Text: "/rewind", Description: i18n.T("complete.root.rewind")},
+		{Text: "/memory", Description: i18n.T("complete.root.memory")},
+		{Text: "/websearch", Description: i18n.T("complete.websearch.root_desc")},
 	}
 }
 
@@ -267,7 +279,7 @@ func (cli *ChatCLI) getUserInvocableSkillSuggestions() []prompt.Suggest {
 			}
 		}
 		if desc == "" {
-			desc = "user-invocable skill"
+			desc = i18n.T("complete.skill.user_invocable_fallback")
 		}
 		out = append(out, prompt.Suggest{
 			Text:        "/" + s.Name,
@@ -283,18 +295,18 @@ func (cli *ChatCLI) getConnectSuggestions(d prompt.Document) []prompt.Suggest {
 
 	if strings.HasPrefix(wordBeforeCursor, "-") {
 		flags := []prompt.Suggest{
-			{Text: "--token", Description: "Token de autenticação do servidor"},
-			{Text: "--provider", Description: "Provedor LLM (OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER)"},
-			{Text: "--model", Description: "Modelo LLM (gpt-4, claude-3, etc.)"},
-			{Text: "--llm-key", Description: "API key/OAuth token para enviar ao servidor"},
-			{Text: "--use-local-auth", Description: "Usar credenciais OAuth locais (de /auth login)"},
-			{Text: "--tls", Description: "Habilitar conexão TLS"},
-			{Text: "--ca-cert", Description: "Arquivo de certificado CA para TLS"},
-			{Text: "--client-id", Description: "StackSpot: Client ID para autenticação"},
-			{Text: "--client-key", Description: "StackSpot: Client Key para autenticação"},
-			{Text: "--realm", Description: "StackSpot: Realm/Tenant"},
-			{Text: "--agent-id", Description: "StackSpot: Agent ID"},
-			{Text: "--ollama-url", Description: "Ollama: Base URL do servidor (ex: http://localhost:11434)"},
+			{Text: "--token", Description: i18n.T("complete.connect.token")},
+			{Text: "--provider", Description: i18n.T("complete.connect.provider")},
+			{Text: "--model", Description: i18n.T("complete.connect.model")},
+			{Text: "--llm-key", Description: i18n.T("complete.connect.llm_key")},
+			{Text: "--use-local-auth", Description: i18n.T("complete.connect.use_local_auth")},
+			{Text: "--tls", Description: i18n.T("complete.connect.tls")},
+			{Text: "--ca-cert", Description: i18n.T("complete.connect.ca_cert")},
+			{Text: "--client-id", Description: i18n.T("complete.connect.client_id")},
+			{Text: "--client-key", Description: i18n.T("complete.connect.client_key")},
+			{Text: "--realm", Description: i18n.T("complete.connect.realm")},
+			{Text: "--agent-id", Description: i18n.T("complete.connect.agent_id")},
+			{Text: "--ollama-url", Description: i18n.T("complete.connect.ollama_url")},
 		}
 		return prompt.FilterHasPrefix(flags, wordBeforeCursor, true)
 	}
@@ -310,21 +322,21 @@ func (cli *ChatCLI) getWatchSuggestions(d prompt.Document) []prompt.Suggest {
 	// Suggest flags after /watch start
 	if strings.Contains(lineBeforeCursor, "/watch start") && strings.HasPrefix(wordBeforeCursor, "-") {
 		flags := []prompt.Suggest{
-			{Text: "--deployment", Description: "Deployment K8s a monitorar (obrigatório)"},
-			{Text: "--namespace", Description: "Namespace do deployment (padrão: default)"},
-			{Text: "--interval", Description: "Intervalo de coleta (ex: 10s, 1m)"},
-			{Text: "--window", Description: "Janela de observação (ex: 1h, 4h)"},
-			{Text: "--max-log-lines", Description: "Máximo de linhas de log por pod"},
-			{Text: "--kubeconfig", Description: "Caminho do kubeconfig"},
+			{Text: "--deployment", Description: i18n.T("complete.watch.flag_deployment")},
+			{Text: "--namespace", Description: i18n.T("complete.watch.flag_namespace")},
+			{Text: "--interval", Description: i18n.T("complete.watch.flag_interval")},
+			{Text: "--window", Description: i18n.T("complete.watch.flag_window")},
+			{Text: "--max-log-lines", Description: i18n.T("complete.watch.flag_max_log_lines")},
+			{Text: "--kubeconfig", Description: i18n.T("complete.watch.flag_kubeconfig")},
 		}
 		return prompt.FilterHasPrefix(flags, wordBeforeCursor, true)
 	}
 
 	// Suggest subcommands
 	subcommands := []prompt.Suggest{
-		{Text: "start", Description: "Iniciar monitoramento K8s (ex: /watch start --deployment myapp)"},
-		{Text: "stop", Description: "Parar o monitoramento K8s"},
-		{Text: "status", Description: "Exibir status do watcher ativo"},
+		{Text: "start", Description: i18n.T("complete.watch.sub_start")},
+		{Text: "stop", Description: i18n.T("complete.watch.sub_stop")},
+		{Text: "status", Description: i18n.T("complete.watch.sub_status")},
 	}
 	return prompt.FilterHasPrefix(subcommands, wordBeforeCursor, true)
 }
@@ -444,27 +456,27 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 	// Se só digitou "/context" (sem espaço ou com espaço mas sem subcomando ainda)
 	if len(args) == 1 && !strings.HasSuffix(line, " ") {
 		return []prompt.Suggest{
-			{Text: "/context", Description: "📦 Gerencia contextos persistentes (create, attach, detach, list, show, inspect, etc)"},
+			{Text: "/context", Description: i18n.T("complete.context.root_desc")},
 		}
 	}
 
 	// Se digitou "/context " (com espaço) mas ainda não completou o subcomando
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		suggestions := []prompt.Suggest{
-			{Text: "create", Description: "Criar contexto de arquivos/diretórios (use --mode, --description, --tags)"},
-			{Text: "update", Description: "Atualizar contexto existente (use --mode, --description, --tags)"},
-			{Text: "attach", Description: "Anexar contexto existente à sessão atual (use --priority, --chunk, --chunks)"},
-			{Text: "detach", Description: "Desanexar contexto da sessão atual"},
-			{Text: "list", Description: "Listar todos os contextos salvos"},
-			{Text: "show", Description: "Ver detalhes completos de um contexto específico"},
-			{Text: "inspect", Description: "Análise estatística profunda de um contexto (use --chunk N para chunk específico)"},
-			{Text: "delete", Description: "Deletar contexto permanentemente (pede confirmação)"},
-			{Text: "merge", Description: "Mesclar múltiplos contextos em um novo"},
-			{Text: "attached", Description: "Ver quais contextos estão anexados à sessão"},
-			{Text: "export", Description: "Exportar contexto para arquivo JSON"},
-			{Text: "import", Description: "Importar contexto de arquivo JSON"},
-			{Text: "metrics", Description: "Ver estatísticas de uso de contextos"},
-			{Text: "help", Description: "Ajuda detalhada sobre o sistema de contextos"},
+			{Text: "create", Description: i18n.T("complete.context.sub_create")},
+			{Text: "update", Description: i18n.T("complete.context.sub_update")},
+			{Text: "attach", Description: i18n.T("complete.context.sub_attach")},
+			{Text: "detach", Description: i18n.T("complete.context.sub_detach")},
+			{Text: "list", Description: i18n.T("complete.context.sub_list")},
+			{Text: "show", Description: i18n.T("complete.context.sub_show")},
+			{Text: "inspect", Description: i18n.T("complete.context.sub_inspect")},
+			{Text: "delete", Description: i18n.T("complete.context.sub_delete")},
+			{Text: "merge", Description: i18n.T("complete.context.sub_merge")},
+			{Text: "attached", Description: i18n.T("complete.context.sub_attached")},
+			{Text: "export", Description: i18n.T("complete.context.sub_export")},
+			{Text: "import", Description: i18n.T("complete.context.sub_import")},
+			{Text: "metrics", Description: i18n.T("complete.context.sub_metrics")},
+			{Text: "help", Description: i18n.T("complete.context.sub_help")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -491,8 +503,8 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 			// Se está digitando uma flag
 			if strings.HasPrefix(word, "-") {
 				return []prompt.Suggest{
-					{Text: "--chunk", Description: "Inspecionar chunk específico (ex: --chunk 1)"},
-					{Text: "-c", Description: "Atalho para --chunk"},
+					{Text: "--chunk", Description: i18n.T("complete.context.flag_chunk_inspect")},
+					{Text: "-c", Description: i18n.T("complete.context.flag_chunk_short")},
 				}
 			}
 
@@ -512,12 +524,12 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 		// Se já digitou o nome e é attach, sugerir flags
 		if subcommand == "attach" && len(args) >= 3 && strings.HasPrefix(d.GetWordBeforeCursor(), "-") {
 			return []prompt.Suggest{
-				{Text: "--priority", Description: "Define prioridade (menor = primeiro a ser enviado)"},
-				{Text: "-p", Description: "Atalho para --priority"},
-				{Text: "--chunk", Description: "Anexar chunk específico (ex: --chunk 1)"},
-				{Text: "-c", Description: "Atalho para --chunk"},
-				{Text: "--chunks", Description: "Anexar múltiplos chunks (ex: --chunks 1,2,3)"},
-				{Text: "-C", Description: "Atalho para --chunks"},
+				{Text: "--priority", Description: i18n.T("complete.context.flag_priority")},
+				{Text: "-p", Description: i18n.T("complete.context.flag_priority_short")},
+				{Text: "--chunk", Description: i18n.T("complete.context.flag_chunk_attach")},
+				{Text: "-c", Description: i18n.T("complete.context.flag_chunk_short")},
+				{Text: "--chunks", Description: i18n.T("complete.context.flag_chunks")},
+				{Text: "-C", Description: i18n.T("complete.context.flag_chunks_short")},
 			}
 		}
 
@@ -533,15 +545,15 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 		// Se está digitando uma flag, mostrar flags disponíveis
 		if strings.HasPrefix(word, "-") {
 			return []prompt.Suggest{
-				{Text: "--mode", Description: "Modo de processamento: full, summary, chunked, smart"},
-				{Text: "-m", Description: "Atalho para --mode"},
-				{Text: "--description", Description: "Descrição textual do contexto"},
-				{Text: "--desc", Description: "Atalho para --description"},
-				{Text: "-d", Description: "Atalho para --description"},
-				{Text: "--tags", Description: "Tags separadas por vírgula (ex: api,golang)"},
-				{Text: "-t", Description: "Atalho para --tags"},
-				{Text: "--force", Description: "Sobrescreve se já existir (apenas create)"},
-				{Text: "-f", Description: "Atalho para --force (apenas create)"},
+				{Text: "--mode", Description: i18n.T("complete.context.flag_mode")},
+				{Text: "-m", Description: i18n.T("complete.context.flag_mode_short")},
+				{Text: "--description", Description: i18n.T("complete.context.flag_description")},
+				{Text: "--desc", Description: i18n.T("complete.context.flag_desc_short")},
+				{Text: "-d", Description: i18n.T("complete.context.flag_d_short")},
+				{Text: "--tags", Description: i18n.T("complete.context.flag_tags")},
+				{Text: "-t", Description: i18n.T("complete.context.flag_tags_short")},
+				{Text: "--force", Description: i18n.T("complete.context.flag_force")},
+				{Text: "-f", Description: i18n.T("complete.context.flag_force_short")},
 			}
 		}
 
@@ -555,10 +567,10 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 			// Se a flag anterior é --mode ou -m, sugerir modos
 			if prevArg == "--mode" || prevArg == "-m" {
 				return []prompt.Suggest{
-					{Text: "full", Description: "Conteúdo completo dos arquivos"},
-					{Text: "summary", Description: "Apenas estrutura de diretórios e metadados"},
-					{Text: "chunked", Description: "Divide em chunks gerenciáveis"},
-					{Text: "smart", Description: "IA seleciona arquivos relevantes ao prompt"},
+					{Text: "full", Description: i18n.T("complete.context.mode_full")},
+					{Text: "summary", Description: i18n.T("complete.context.mode_summary")},
+					{Text: "chunked", Description: i18n.T("complete.context.mode_chunked")},
+					{Text: "smart", Description: i18n.T("complete.context.mode_smart")},
 				}
 			}
 
@@ -572,7 +584,7 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 		// Para create: nome do contexto primeiro (se ainda não foi fornecido)
 		if subcommand == "create" && len(args) == 2 {
 			return []prompt.Suggest{
-				{Text: "", Description: "Digite o nome do contexto (ex: meu-projeto)"},
+				{Text: "", Description: i18n.T("complete.context.prompt_name")},
 			}
 		}
 
@@ -602,7 +614,7 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 	if subcommand == "merge" {
 		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
 			return []prompt.Suggest{
-				{Text: "", Description: "Digite o nome do novo contexto mesclado"},
+				{Text: "", Description: i18n.T("complete.context.prompt_merge_name")},
 			}
 		}
 		return cli.getContextNameSuggestions()
@@ -639,7 +651,7 @@ func (cli *ChatCLI) getChunkNumberSuggestions(contextName string) []prompt.Sugge
 	// Se não for chunked, retornar vazio
 	if !ctx.IsChunked || len(ctx.Chunks) == 0 {
 		return []prompt.Suggest{
-			{Text: "", Description: "⚠️  Este contexto não está dividido em chunks"},
+			{Text: "", Description: i18n.T("complete.context.not_chunked_warning")},
 		}
 	}
 
@@ -649,7 +661,7 @@ func (cli *ChatCLI) getChunkNumberSuggestions(contextName string) []prompt.Sugge
 	for _, chunk := range ctx.Chunks {
 		suggestions = append(suggestions, prompt.Suggest{
 			Text: fmt.Sprintf("%d", chunk.Index),
-			Description: fmt.Sprintf("Chunk %d/%d: %s (%d arquivos, %.2f KB)",
+			Description: fmt.Sprintf(i18n.T("complete.context.chunk_desc_fmt"),
 				chunk.Index,
 				chunk.TotalChunks,
 				chunk.Description,
@@ -674,13 +686,13 @@ func (cli *ChatCLI) getContextNameSuggestions() []prompt.Suggest {
 		var descParts []string
 
 		// Adicionar modo
-		descParts = append(descParts, fmt.Sprintf("modo:%s", ctx.Mode))
+		descParts = append(descParts, fmt.Sprintf(i18n.T("complete.context.name_mode_fmt"), ctx.Mode))
 
 		// Adicionar contagem de arquivos ou chunks
 		if ctx.IsChunked {
-			descParts = append(descParts, fmt.Sprintf("%d chunks", len(ctx.Chunks)))
+			descParts = append(descParts, fmt.Sprintf(i18n.T("complete.context.name_chunks_fmt"), len(ctx.Chunks)))
 		} else {
-			descParts = append(descParts, fmt.Sprintf("%d arquivos", ctx.FileCount))
+			descParts = append(descParts, fmt.Sprintf(i18n.T("complete.context.name_files_fmt"), ctx.FileCount))
 		}
 
 		// Adicionar tamanho
@@ -693,7 +705,7 @@ func (cli *ChatCLI) getContextNameSuggestions() []prompt.Suggest {
 
 		// Adicionar tags se houver
 		if len(ctx.Tags) > 0 {
-			descParts = append(descParts, fmt.Sprintf("tags:%s", strings.Join(ctx.Tags, ",")))
+			descParts = append(descParts, fmt.Sprintf(i18n.T("complete.context.name_tags_fmt"), strings.Join(ctx.Tags, ",")))
 		}
 
 		desc := strings.Join(descParts, " | ")
@@ -726,19 +738,19 @@ func (cli *ChatCLI) getSessionSuggestions(d prompt.Document) []prompt.Suggest {
 	// Se só digitou "/session" (sem espaço ou com espaço mas sem subcomando ainda)
 	if len(args) == 1 && !strings.HasSuffix(line, " ") {
 		return []prompt.Suggest{
-			{Text: "/session", Description: "Gerencia as sessões (new, save, list, load, delete)"},
+			{Text: "/session", Description: i18n.T("complete.session.root_desc")},
 		}
 	}
 
 	// Se digitou "/session " (com espaço) mas ainda não completou o subcomando
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		suggestions := []prompt.Suggest{
-			{Text: "new", Description: "Criar nova sessão (limpa histórico atual)"},
-			{Text: "save", Description: "Salvar sessão atual com um nome"},
-			{Text: "load", Description: "Carregar sessão salva anteriormente"},
-			{Text: "list", Description: "Listar todas as sessões salvas"},
-			{Text: "delete", Description: "Deletar uma sessão salva"},
-			{Text: "fork", Description: "Criar fork da sessão atual com novo nome"},
+			{Text: "new", Description: i18n.T("complete.session.sub_new")},
+			{Text: "save", Description: i18n.T("complete.session.sub_save")},
+			{Text: "load", Description: i18n.T("complete.session.sub_load")},
+			{Text: "list", Description: i18n.T("complete.session.sub_list")},
+			{Text: "delete", Description: i18n.T("complete.session.sub_delete")},
+			{Text: "fork", Description: i18n.T("complete.session.sub_fork")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -780,7 +792,7 @@ func (cli *ChatCLI) getSessionNameSuggestions() []prompt.Suggest {
 	for _, session := range sessions {
 		suggestions = append(suggestions, prompt.Suggest{
 			Text:        session,
-			Description: "Sessão salva",
+			Description: i18n.T("complete.session.saved_session"),
 		})
 	}
 
@@ -794,12 +806,12 @@ func (cli *ChatCLI) getPluginSuggestions(d prompt.Document) []prompt.Suggest {
 	// Sugerir subcomandos
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		suggestions := []prompt.Suggest{
-			{Text: "list", Description: "Lista todos os plugins instalados."},
-			{Text: "install", Description: "Instala um novo plugin a partir de um repositório Git."},
-			{Text: "reload", Description: "Força o recarregamento de todos os plugins instalados."},
-			{Text: "show", Description: "Mostra detalhes de um plugin específico."},
-			{Text: "inspect", Description: "Mostra informações de depuração de um plugin."},
-			{Text: "uninstall", Description: "Remove um plugin instalado."},
+			{Text: "list", Description: i18n.T("complete.plugin.sub_list")},
+			{Text: "install", Description: i18n.T("complete.plugin.sub_install")},
+			{Text: "reload", Description: i18n.T("complete.plugin.sub_reload")},
+			{Text: "show", Description: i18n.T("complete.plugin.sub_show")},
+			{Text: "inspect", Description: i18n.T("complete.plugin.sub_inspect")},
+			{Text: "uninstall", Description: i18n.T("complete.plugin.sub_uninstall")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -844,15 +856,15 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 	// Se já temos /agent e um espaço, sugerir subcomandos
 	if len(args) == 1 && strings.HasSuffix(line, " ") {
 		suggestions := []prompt.Suggest{
-			{Text: "list", Description: "Lista agentes disponíveis"},
-			{Text: "load", Description: "Carrega um agente específico"},
-			{Text: "attach", Description: "Adicionar múltiplo agente a sessão existente"},
-			{Text: "detach", Description: "Desanexar agente da sessão atual"},
-			{Text: "skills", Description: "Lista skills disponíveis"},
-			{Text: "show", Description: "Mostra o agente ativo"},
-			{Text: "status", Description: "Mostra os agente anexados, Alias{attached ou list-attached}"},
-			{Text: "off", Description: "Desativa o agente atual"},
-			{Text: "help", Description: "Ajuda do comando /agent"},
+			{Text: "list", Description: i18n.T("complete.agent.sub_list")},
+			{Text: "load", Description: i18n.T("complete.agent.sub_load")},
+			{Text: "attach", Description: i18n.T("complete.agent.sub_attach")},
+			{Text: "detach", Description: i18n.T("complete.agent.sub_detach")},
+			{Text: "skills", Description: i18n.T("complete.agent.sub_skills")},
+			{Text: "show", Description: i18n.T("complete.agent.sub_show")},
+			{Text: "status", Description: i18n.T("complete.agent.sub_status")},
+			{Text: "off", Description: i18n.T("complete.agent.sub_off")},
+			{Text: "help", Description: i18n.T("complete.agent.sub_help")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -860,15 +872,15 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 	// Se estamos digitando o subcomando
 	if len(args) == 2 && !strings.HasSuffix(line, " ") {
 		suggestions := []prompt.Suggest{
-			{Text: "list", Description: "Lista agentes disponíveis"},
-			{Text: "load", Description: "Carrega um agente específico"},
-			{Text: "attach", Description: "Adicionar múltiplo agente a sessão existente"},
-			{Text: "detach", Description: "Desanexar agente da sessão atual"},
-			{Text: "skills", Description: "Lista skills disponíveis"},
-			{Text: "show", Description: "Mostra o agente ativo"},
-			{Text: "status", Description: "Mostra os agente anexados, Alias{attached ou list-attached}"},
-			{Text: "off", Description: "Desativa o agente atual"},
-			{Text: "help", Description: "Ajuda do comando /agent"},
+			{Text: "list", Description: i18n.T("complete.agent.sub_list")},
+			{Text: "load", Description: i18n.T("complete.agent.sub_load")},
+			{Text: "attach", Description: i18n.T("complete.agent.sub_attach")},
+			{Text: "detach", Description: i18n.T("complete.agent.sub_detach")},
+			{Text: "skills", Description: i18n.T("complete.agent.sub_skills")},
+			{Text: "show", Description: i18n.T("complete.agent.sub_show")},
+			{Text: "status", Description: i18n.T("complete.agent.sub_status")},
+			{Text: "off", Description: i18n.T("complete.agent.sub_off")},
+			{Text: "help", Description: i18n.T("complete.agent.sub_help")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -896,7 +908,7 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 
 	if len(args) >= 2 && (args[1] == "show") {
 		return []prompt.Suggest{
-			{Text: "--full", Description: "Mostra detalhes completos do agente"},
+			{Text: "--full", Description: i18n.T("complete.agent.flag_full")},
 		}
 	}
 
@@ -915,15 +927,15 @@ func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
 	// Suggest subcommands
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		suggestions := []prompt.Suggest{
-			{Text: "search", Description: "Search for skills across registries"},
-			{Text: "install", Description: "Install a skill from a registry"},
-			{Text: "uninstall", Description: "Remove an installed skill"},
-			{Text: "list", Description: "List installed skills"},
-			{Text: "info", Description: "Show skill metadata from registry"},
-			{Text: "registries", Description: "Show configured registries"},
-			{Text: "registry", Description: "Enable/disable a registry"},
-			{Text: "prefer", Description: "Set preferred source for a skill"},
-			{Text: "help", Description: "Show skill command help"},
+			{Text: "search", Description: i18n.T("complete.skill.sub_search")},
+			{Text: "install", Description: i18n.T("complete.skill.sub_install")},
+			{Text: "uninstall", Description: i18n.T("complete.skill.sub_uninstall")},
+			{Text: "list", Description: i18n.T("complete.skill.sub_list")},
+			{Text: "info", Description: i18n.T("complete.skill.sub_info")},
+			{Text: "registries", Description: i18n.T("complete.skill.sub_registries")},
+			{Text: "registry", Description: i18n.T("complete.skill.sub_registry")},
+			{Text: "prefer", Description: i18n.T("complete.skill.sub_prefer")},
+			{Text: "help", Description: i18n.T("complete.skill.sub_help")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -978,12 +990,12 @@ func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
 			// After the skill name (3+ args), suggest --from
 			if len(args) >= 3 && strings.HasSuffix(line, " ") {
 				return prompt.FilterHasPrefix([]prompt.Suggest{
-					{Text: "--from", Description: "Specify registry source"},
+					{Text: "--from", Description: i18n.T("complete.skill.flag_from")},
 				}, d.GetWordBeforeCursor(), true)
 			}
 			if len(args) >= 4 && !strings.HasSuffix(line, " ") {
 				return prompt.FilterHasPrefix([]prompt.Suggest{
-					{Text: "--from", Description: "Specify registry source"},
+					{Text: "--from", Description: i18n.T("complete.skill.flag_from")},
 				}, d.GetWordBeforeCursor(), true)
 			}
 		}
@@ -993,8 +1005,8 @@ func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
 	if sub == "registry" {
 		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
 			return prompt.FilterHasPrefix([]prompt.Suggest{
-				{Text: "enable", Description: "Enable a registry"},
-				{Text: "disable", Description: "Disable a registry"},
+				{Text: "enable", Description: i18n.T("complete.skill.sub_registry_enable")},
+				{Text: "disable", Description: i18n.T("complete.skill.sub_registry_disable")},
 			}, d.GetWordBeforeCursor(), true)
 		}
 		if len(args) >= 3 {
@@ -1008,10 +1020,10 @@ func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
 			if len(args) >= 4 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
 				// After skill name, suggest sources + --reset
 				suggestions := []prompt.Suggest{
-					{Text: "--reset", Description: "Remove preference (use default order)"},
+					{Text: "--reset", Description: i18n.T("complete.skill.flag_reset")},
 				}
 				suggestions = append(suggestions, cli.getRegistryNameSuggestions(d)...)
-				suggestions = append(suggestions, prompt.Suggest{Text: "local", Description: "Prefer local version"})
+				suggestions = append(suggestions, prompt.Suggest{Text: "local", Description: i18n.T("complete.skill.prefer_local")})
 				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 			}
 		}
@@ -1049,7 +1061,7 @@ func (cli *ChatCLI) getSwitchSuggestions(d prompt.Document) []prompt.Suggest {
 	// Just typed "/switch" without space
 	if len(args) == 1 && !strings.HasSuffix(line, " ") {
 		return []prompt.Suggest{
-			{Text: "/switch", Description: "Trocar o provedor de LLM, seguido por --model troca o modelo"},
+			{Text: "/switch", Description: i18n.T("complete.switch.root_desc")},
 		}
 	}
 
@@ -1086,13 +1098,13 @@ func (cli *ChatCLI) getSwitchSuggestions(d prompt.Document) []prompt.Suggest {
 	// Suggest flags
 	if strings.HasPrefix(wordBeforeCursor, "-") {
 		flags := []prompt.Suggest{
-			{Text: "--model", Description: "Troque o modelo (Runtime) baseado no provedor atual"},
-			{Text: "--max-tokens", Description: "Define o máximo de tokens para as próximas respostas (0 para padrão)"},
+			{Text: "--model", Description: i18n.T("complete.switch.flag_model")},
+			{Text: "--max-tokens", Description: i18n.T("complete.switch.flag_max_tokens")},
 		}
 		if cli.Provider == "STACKSPOT" {
 			flags = append(flags,
-				prompt.Suggest{Text: "--realm", Description: "Altera o Realm/Tenant em tempo de execução"},
-				prompt.Suggest{Text: "--agent-id", Description: "Altera o agent em tempo de execução"},
+				prompt.Suggest{Text: "--realm", Description: i18n.T("complete.switch.flag_realm")},
+				prompt.Suggest{Text: "--agent-id", Description: i18n.T("complete.switch.flag_agent_id")},
 			)
 		}
 		return prompt.FilterHasPrefix(flags, wordBeforeCursor, true)
@@ -1101,13 +1113,13 @@ func (cli *ChatCLI) getSwitchSuggestions(d prompt.Document) []prompt.Suggest {
 	// After "/switch " with space, suggest flags
 	if len(args) == 1 && strings.HasSuffix(line, " ") {
 		flags := []prompt.Suggest{
-			{Text: "--model", Description: "Troque o modelo (Runtime) baseado no provedor atual"},
-			{Text: "--max-tokens", Description: "Define o máximo de tokens para as próximas respostas (0 para padrão)"},
+			{Text: "--model", Description: i18n.T("complete.switch.flag_model")},
+			{Text: "--max-tokens", Description: i18n.T("complete.switch.flag_max_tokens")},
 		}
 		if cli.Provider == "STACKSPOT" {
 			flags = append(flags,
-				prompt.Suggest{Text: "--realm", Description: "Altera o Realm/Tenant em tempo de execução"},
-				prompt.Suggest{Text: "--agent-id", Description: "Altera o agent em tempo de execução"},
+				prompt.Suggest{Text: "--realm", Description: i18n.T("complete.switch.flag_realm")},
+				prompt.Suggest{Text: "--agent-id", Description: i18n.T("complete.switch.flag_agent_id")},
 			)
 		}
 		return flags
@@ -1123,16 +1135,16 @@ func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
 	// Just typed "/auth" without space
 	if len(args) == 1 && !strings.HasSuffix(line, " ") {
 		return []prompt.Suggest{
-			{Text: "/auth", Description: "Gerencia credenciais OAuth (status, login, logout)"},
+			{Text: "/auth", Description: i18n.T("complete.auth.root_desc")},
 		}
 	}
 
 	// "/auth " — suggest subcommands
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		suggestions := []prompt.Suggest{
-			{Text: "status", Description: "Exibir status de autenticação de todos os provedores"},
-			{Text: "login", Description: "Autenticar com um provedor (anthropic, openai-codex, github-copilot, github-models)"},
-			{Text: "logout", Description: "Remover credenciais de um provedor (anthropic, openai-codex, github-copilot, github-models)"},
+			{Text: "status", Description: i18n.T("complete.auth.sub_status")},
+			{Text: "login", Description: i18n.T("complete.auth.sub_login")},
+			{Text: "logout", Description: i18n.T("complete.auth.sub_logout")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -1143,13 +1155,91 @@ func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
 		if sub == "login" || sub == "logout" {
 			if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
 				suggestions := []prompt.Suggest{
-					{Text: "anthropic", Description: "Anthropic (Claude)"},
-					{Text: "openai-codex", Description: "OpenAI (GPT Plus / Codex)"},
-					{Text: "github-copilot", Description: "GitHub Copilot"},
-					{Text: "github-models", Description: "GitHub Models (GPT-4o, Llama, Mistral, DeepSeek...)"},
+					{Text: "anthropic", Description: i18n.T("complete.auth.provider_anthropic")},
+					{Text: "openai-codex", Description: i18n.T("complete.auth.provider_openai_codex")},
+					{Text: "github-copilot", Description: i18n.T("complete.auth.provider_github_copilot")},
+					{Text: "github-models", Description: i18n.T("complete.auth.provider_github_models")},
 				}
 				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 			}
+		}
+	}
+
+	return []prompt.Suggest{}
+}
+
+// getConfigSuggestions returns autocomplete suggestions for /config, /status,
+// and /settings — all three share the same subsection routing.
+//
+//	/config <TAB>   → section names
+func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
+
+	// Just "/config" (or alias) with no trailing space
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{}
+	}
+
+	// Subsection slot
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		sections := []prompt.Suggest{
+			{Text: "all", Description: i18n.T("complete.config.all")},
+			{Text: "general", Description: i18n.T("complete.config.general")},
+			{Text: "providers", Description: i18n.T("complete.config.providers")},
+			{Text: "agent", Description: i18n.T("complete.config.agent")},
+			{Text: "resilience", Description: i18n.T("complete.config.resilience")},
+			{Text: "session", Description: i18n.T("complete.config.session")},
+			{Text: "integrations", Description: i18n.T("complete.config.integrations")},
+			{Text: "auth", Description: i18n.T("complete.config.auth")},
+			{Text: "security", Description: i18n.T("complete.config.security")},
+			{Text: "server", Description: i18n.T("complete.config.server")},
+		}
+		return prompt.FilterHasPrefix(sections, word, true)
+	}
+
+	return []prompt.Suggest{}
+}
+
+// getWebSearchSuggestions returns autocomplete suggestions for /websearch.
+//
+//	/websearch <TAB>                → subcommands
+//	/websearch provider <TAB>       → provider names (searxng|duckduckgo|auto)
+func (cli *ChatCLI) getWebSearchSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
+
+	// Just "/websearch" with no trailing space
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{
+			{Text: "/websearch", Description: i18n.T("complete.websearch.root_desc")},
+		}
+	}
+
+	// Subcommand slot
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		subs := []prompt.Suggest{
+			{Text: "status", Description: i18n.T("complete.websearch.sub_status")},
+			{Text: "list", Description: i18n.T("complete.websearch.sub_list")},
+			{Text: "provider", Description: i18n.T("complete.websearch.sub_provider")},
+			{Text: "reset", Description: i18n.T("complete.websearch.sub_reset")},
+		}
+		return prompt.FilterHasPrefix(subs, word, true)
+	}
+
+	sub := strings.ToLower(args[1])
+
+	// /websearch provider <TAB> → provider names
+	if sub == "provider" || sub == "set" || sub == "use" {
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			providers := []prompt.Suggest{
+				{Text: string(plugins.ProviderSearXNG), Description: i18n.T("complete.websearch.prov_searxng")},
+				{Text: string(plugins.ProviderDuckDuckGo), Description: i18n.T("complete.websearch.prov_duckduckgo")},
+				{Text: string(plugins.ProviderAuto), Description: i18n.T("complete.websearch.prov_auto")},
+			}
+			return prompt.FilterHasPrefix(providers, word, true)
 		}
 	}
 

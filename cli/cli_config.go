@@ -7,10 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
-	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/utils"
 	"github.com/diillson/chatcli/version"
@@ -380,131 +378,6 @@ func (cli *ChatCLI) getEnvFilePath() string {
 		return envFilePath // Retorna o original se falhar
 	}
 	return expanded
-}
-
-func (cli *ChatCLI) showConfig() {
-	printItem := func(key, value string) {
-		keyColor := ColorCyan
-		valueColor := ColorGray
-		if strings.Contains(value, "[SET]") {
-			valueColor = ColorGreen
-		} else if strings.Contains(value, "[NOT SET]") {
-			valueColor = ColorYellow
-		}
-		fmt.Printf("    %s    %s\n", colorize(fmt.Sprintf("%-25s", key+":"), keyColor), colorize(value, valueColor))
-	}
-
-	fmt.Println("\n" + colorize(ColorBold, i18n.T("cli.config.header")))
-	fmt.Println(colorize(i18n.T("cli.config.subtitle"), ColorGray))
-
-	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_general"), ColorLime))
-	printItem(i18n.T("cli.config.key_dotenv_file"), cli.getEnvFilePath())
-	printItem(i18n.T("cli.config.key_env"), os.Getenv("ENV"))
-	printItem(i18n.T("cli.config.key_log_level"), os.Getenv("LOG_LEVEL"))
-	printItem(i18n.T("cli.config.key_log_file"), os.Getenv("LOG_FILE"))
-	printItem(i18n.T("cli.config.key_log_max_size"), os.Getenv("LOG_MAX_SIZE"))
-	printItem(i18n.T("cli.config.key_history_max_size"), os.Getenv("HISTORY_MAX_SIZE"))
-	printItem(i18n.T("cli.config.key_history_file_directory"), cli.historyManager.GetHistoryFilePath())
-
-	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_coder_mode"), ColorLime))
-	coderUIRaw := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_UI")))
-	coderUIEffective := "full"
-	if coderUIRaw == "minimal" || coderUIRaw == "min" || coderUIRaw == "true" || coderUIRaw == "1" {
-		coderUIEffective = "minimal"
-	}
-	coderBannerRaw := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_BANNER")))
-	coderBannerEffective := "on"
-	if coderBannerRaw == "false" || coderBannerRaw == "0" || coderBannerRaw == "no" {
-		coderBannerEffective = "off"
-	}
-	printItem("CHATCLI_CODER_UI", os.Getenv("CHATCLI_CODER_UI"))
-	printItem("CHATCLI_CODER_UI (effective)", coderUIEffective)
-	printItem("CHATCLI_CODER_BANNER", os.Getenv("CHATCLI_CODER_BANNER"))
-	printItem("CHATCLI_CODER_BANNER (effective)", coderBannerEffective)
-
-	policyPath := "[unknown]"
-	localPath := "[none]"
-	localMerge := "off"
-	rulesCount := "0"
-	lastRule := "[none]"
-	if pm, err := coder.NewPolicyManager(cli.logger); err == nil {
-		policyPath = pm.ActivePolicyPath()
-		if lp := pm.LocalPolicyPath(); strings.TrimSpace(lp) != "" {
-			localPath = lp
-			if pm.LocalMergeEnabled() {
-				localMerge = "on"
-			}
-		}
-		rulesCount = fmt.Sprintf("%d", pm.RulesCount())
-	}
-	printItem("CODER_POLICY (active)", policyPath)
-	printItem("CODER_POLICY (local)", localPath)
-	printItem("CODER_POLICY (local merge)", localMerge)
-	printItem("CODER_POLICY (rules)", rulesCount)
-	if cli.agentMode != nil && cli.agentMode.lastPolicyMatch != nil {
-		lastRule = fmt.Sprintf("%s => %s", cli.agentMode.lastPolicyMatch.Pattern, cli.agentMode.lastPolicyMatch.Action)
-	}
-	printItem("CODER_POLICY (last match)", lastRule)
-
-	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_current_provider"), ColorLime))
-	printItem(i18n.T("cli.config.key_provider_runtime"), cli.Provider)
-	printItem(i18n.T("cli.config.key_model_runtime"), cli.Model)
-	if cli.Client != nil {
-		printItem(i18n.T("cli.config.key_model_name_client"), cli.Client.GetModelName())
-	} else {
-		printItem(i18n.T("cli.config.key_model_name_client"), "(no provider)")
-	}
-	printItem(i18n.T("cli.config.key_preferred_api"), string(catalog.GetPreferredAPI(cli.Provider, cli.Model)))
-	printItem(i18n.T("cli.config.key_effective_max_tokens"), fmt.Sprintf("%d", cli.getMaxTokensForCurrentLLM()))
-
-	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_max_tokens_overrides"), ColorLime))
-	printItem("OPENAI_MAX_TOKENS", os.Getenv("OPENAI_MAX_TOKENS"))
-	printItem("ANTHROPIC_MAX_TOKENS", os.Getenv("ANTHROPIC_MAX_TOKENS"))
-	printItem("GOOGLEAI_MAX_TOKENS", os.Getenv("GOOGLEAI_MAX_TOKENS"))
-	printItem("XAI_MAX_TOKENS", os.Getenv("XAI_MAX_TOKENS"))
-	printItem("OLLAMA_MAX_TOKENS", os.Getenv("OLLAMA_MAX_TOKENS"))
-	printItem("STACKSPOT_MAX_TOKENS", os.Getenv("STACKSPOT_MAX_TOKENS"))
-
-	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_sensitive_keys"), ColorLime))
-	printItem("OPENAI_API_KEY", presence(os.Getenv("OPENAI_API_KEY")))
-	printItem("ANTHROPIC_API_KEY", presence(os.Getenv("ANTHROPIC_API_KEY")))
-	printItem("GOOGLEAI_API_KEY", presence(os.Getenv("GOOGLEAI_API_KEY")))
-	printItem("XAI_API_KEY", presence(os.Getenv("XAI_API_KEY")))
-	printItem(i18n.T("cli.config.key_client_id_stackspot"), presence(os.Getenv("CLIENT_ID")))
-	printItem(i18n.T("cli.config.key_client_key_stackspot"), presence(os.Getenv("CLIENT_KEY")))
-
-	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_provider_settings"), ColorLime))
-	printItem("OPENAI_MODEL", os.Getenv("OPENAI_MODEL"))
-	printItem("OPENAI_ASSISTANT_MODEL", os.Getenv("OPENAI_ASSISTANT_MODEL"))
-	printItem("OPENAI_USE_RESPONSES", os.Getenv("OPENAI_USE_RESPONSES"))
-	printItem("ANTHROPIC_MODEL", os.Getenv("ANTHROPIC_MODEL"))
-	printItem("ANTHROPIC_API_VERSION", os.Getenv("ANTHROPIC_API_VERSION"))
-	printItem("GOOGLEAI_MODEL", os.Getenv("GOOGLEAI_MODEL"))
-	printItem("XAI_MODEL", os.Getenv("XAI_MODEL"))
-	printItem("OLLAMA_MODEL", os.Getenv("OLLAMA_MODEL"))
-	printItem("OLLAMA_BASE_URL", utils.GetEnvOrDefault("OLLAMA_BASE_URL", config.OllamaDefaultBaseURL))
-
-	isStackSpotAvailable := false
-	for _, p := range cli.manager.GetAvailableProviders() {
-		if p == "STACKSPOT" {
-			isStackSpotAvailable = true
-			break
-		}
-	}
-	if cli.Provider == "STACKSPOT" || isStackSpotAvailable {
-		printItem(i18n.T("cli.config.key_stackspot_realm"), cli.manager.GetStackSpotRealm())
-		printItem(i18n.T("cli.config.key_stackspot_agent_id"), cli.manager.GetStackSpotAgentID())
-	}
-
-	fmt.Printf("\n  %s\n", colorize(i18n.T("cli.config.section_available_providers"), ColorLime))
-	providers := cli.manager.GetAvailableProviders()
-	if len(providers) > 0 {
-		for i, p := range providers {
-			printItem(i18n.T("cli.config.key_provider_n", i+1), p)
-		}
-	} else {
-		printItem(i18n.T("cli.config.none"), i18n.T("cli.config.no_providers_configured"))
-	}
 }
 
 func (ch *CommandHandler) handleVersionCommand() {

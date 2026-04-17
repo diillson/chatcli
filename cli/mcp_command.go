@@ -7,16 +7,17 @@ import (
 	"time"
 
 	prompt "github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/i18n"
 )
 
 func (cli *ChatCLI) handleMCPCommand(userInput string) {
 	if cli.mcpManager == nil {
 		fmt.Println()
-		fmt.Println(uiBox("🔌", "MCP SERVERS", ColorPurple))
+		fmt.Println(uiBox("🔌", i18n.T("mcp.cmd.box_title"), ColorPurple))
 		p := uiPrefix(ColorPurple)
-		fmt.Println(p + colorize("MCP não está habilitado.", ColorYellow))
+		fmt.Println(p + colorize(i18n.T("mcp.cmd.not_enabled"), ColorYellow))
 		fmt.Println(p)
-		fmt.Println(p + colorize("Para habilitar, crie ~/.chatcli/mcp_servers.json:", ColorGray))
+		fmt.Println(p + colorize(i18n.T("mcp.cmd.enable_hint"), ColorGray))
 		fmt.Println(p)
 		fmt.Println(p + colorize(`  {`, ColorGray))
 		fmt.Println(p + colorize(`    "mcpServers": [{`, ColorGray))
@@ -47,7 +48,7 @@ func (cli *ChatCLI) handleMCPCommand(userInput string) {
 	case "status", "":
 		cli.mcpShowStatus()
 	default:
-		fmt.Println(colorize("  Uso: /mcp [status|tools|restart]", ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("mcp.cmd.usage"), ColorYellow))
 	}
 }
 
@@ -56,11 +57,11 @@ func (cli *ChatCLI) mcpShowStatus() {
 	tools := cli.mcpManager.GetTools()
 
 	fmt.Println()
-	fmt.Println(uiBox("🔌", "MCP SERVERS", ColorCyan))
+	fmt.Println(uiBox("🔌", i18n.T("mcp.cmd.box_title"), ColorCyan))
 	p := uiPrefix(ColorCyan)
 
 	if len(statuses) == 0 {
-		fmt.Println(p + colorize("Nenhum servidor configurado.", ColorGray))
+		fmt.Println(p + colorize(i18n.T("mcp.cmd.no_servers"), ColorGray))
 		fmt.Println(uiBoxEnd(ColorCyan))
 		return
 	}
@@ -68,11 +69,11 @@ func (cli *ChatCLI) mcpShowStatus() {
 	for _, s := range statuses {
 		icon := "●"
 		statusColor := ColorGreen
-		statusText := "conectado"
+		statusText := i18n.T("mcp.cmd.status_connected")
 		if !s.Connected {
 			icon = "○"
 			statusColor = ColorRed
-			statusText = "desconectado"
+			statusText = i18n.T("mcp.cmd.status_disconnected")
 		}
 
 		uptime := ""
@@ -80,11 +81,11 @@ func (cli *ChatCLI) mcpShowStatus() {
 			uptime = colorize(fmt.Sprintf(" (%s)", time.Since(s.StartedAt).Truncate(time.Second)), ColorGray)
 		}
 
-		fmt.Println(p + fmt.Sprintf("  %s%s%s %s%-15s%s %s%s%s  %s%d tools%s%s",
+		fmt.Println(p + fmt.Sprintf("  %s%s%s %s%-15s%s %s%s%s  %s%s%s%s",
 			statusColor, icon, ColorReset,
 			ColorBold, s.Name, ColorReset,
 			statusColor, statusText, ColorReset,
-			ColorCyan, s.ToolCount, ColorReset,
+			ColorCyan, i18n.T("mcp.cmd.tools_count", s.ToolCount), ColorReset,
 			uptime))
 
 		if s.LastError != nil {
@@ -93,9 +94,9 @@ func (cli *ChatCLI) mcpShowStatus() {
 	}
 
 	fmt.Println(p)
-	fmt.Println(p + fmt.Sprintf("  %sTotal:%s %d servidores, %s%d tools%s disponíveis",
-		ColorGray, ColorReset, len(statuses),
-		ColorLime, len(tools), ColorReset))
+	fmt.Println(p + fmt.Sprintf("  %s%s%s %s",
+		ColorGray, i18n.T("mcp.cmd.total_label")+":", ColorReset,
+		i18n.T("mcp.cmd.total_summary", len(statuses), fmt.Sprintf("%s%d%s", ColorLime, len(tools), ColorReset))))
 	fmt.Println(uiBoxEnd(ColorCyan))
 	fmt.Println()
 }
@@ -104,11 +105,11 @@ func (cli *ChatCLI) mcpShowTools() {
 	tools := cli.mcpManager.GetTools()
 
 	fmt.Println()
-	fmt.Println(uiBox("🔧", "MCP TOOLS", ColorCyan))
+	fmt.Println(uiBox("🔧", i18n.T("mcp.cmd.box_tools_title"), ColorCyan))
 	p := uiPrefix(ColorCyan)
 
 	if len(tools) == 0 {
-		fmt.Println(p + colorize("Nenhuma tool disponível.", ColorGray))
+		fmt.Println(p + colorize(i18n.T("mcp.cmd.no_tools"), ColorGray))
 		fmt.Println(uiBoxEnd(ColorCyan))
 		return
 	}
@@ -131,9 +132,9 @@ func (cli *ChatCLI) mcpShowTools() {
 
 func (cli *ChatCLI) mcpRestart() {
 	fmt.Println()
-	fmt.Println(uiBox("🔄", "MCP RESTART", ColorYellow))
+	fmt.Println(uiBox("🔄", i18n.T("mcp.cmd.box_restart_title"), ColorYellow))
 	p := uiPrefix(ColorYellow)
-	fmt.Println(p + colorize("Reiniciando servidores MCP...", ColorGray))
+	fmt.Println(p + colorize(i18n.T("mcp.cmd.restarting"), ColorGray))
 
 	cli.mcpManager.StopAll()
 	if cli.mcpCancel != nil {
@@ -142,7 +143,7 @@ func (cli *ChatCLI) mcpRestart() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := cli.mcpManager.StartAll(ctx); err != nil {
-		fmt.Println(p + colorize(fmt.Sprintf("Erro: %v", err), ColorRed))
+		fmt.Println(p + colorize(i18n.T("mcp.cmd.restart_error", err), ColorRed))
 		fmt.Println(uiBoxEnd(ColorYellow))
 		cancel()
 		return
@@ -151,17 +152,18 @@ func (cli *ChatCLI) mcpRestart() {
 	cli.mcpCancel = cancel
 	statuses := cli.mcpManager.GetServerStatus()
 	tools := cli.mcpManager.GetTools()
-	fmt.Println(p + fmt.Sprintf("%s✓%s %d servidores, %d tools",
-		ColorGreen, ColorReset, len(statuses), len(tools)))
+	fmt.Println(p + fmt.Sprintf("%s✓%s %s",
+		ColorGreen, ColorReset,
+		i18n.T("mcp.cmd.restart_success", len(statuses), len(tools))))
 	fmt.Println(uiBoxEnd(ColorYellow))
 	fmt.Println()
 }
 
 func (cli *ChatCLI) getMCPSuggestions(d prompt.Document) []prompt.Suggest {
 	suggestions := []prompt.Suggest{
-		{Text: "status", Description: "Mostra status dos servidores MCP conectados"},
-		{Text: "tools", Description: "Lista todas as tools MCP disponíveis"},
-		{Text: "restart", Description: "Reinicia todos os servidores MCP"},
+		{Text: "status", Description: i18n.T("mcp.cmd.sug_status")},
+		{Text: "tools", Description: i18n.T("mcp.cmd.sug_tools")},
+		{Text: "restart", Description: i18n.T("mcp.cmd.sug_restart")},
 	}
 	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 }

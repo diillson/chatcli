@@ -223,10 +223,10 @@ func (sh *SkillHandler) Search(query string) {
 			line += "  " + colorize(versionStr, ColorGray)
 		}
 		if installStr != "" {
-			line += "  " + colorize(fmt.Sprintf("(%s installs)", installStr), ColorGray)
+			line += "  " + colorize(fmt.Sprintf("(%s %s)", installStr, i18n.T("skill.cmd.installs_suffix")), ColorGray)
 		}
 		if skill.Author != "" {
-			line += "  by " + skill.Author
+			line += "  " + i18n.T("skill.cmd.by_author") + " " + skill.Author
 		}
 		line += "  " + colorize(regTag, ColorGray)
 		if modTag != "" {
@@ -328,7 +328,7 @@ func (sh *SkillHandler) Install(name string, fromRegistry string) {
 			for i, m := range allMeta {
 				installStr := ""
 				if m.Downloads > 0 {
-					installStr = fmt.Sprintf("  (%s installs)", registry.FormatInstallCount(m.Downloads))
+					installStr = fmt.Sprintf("  (%s %s)", registry.FormatInstallCount(m.Downloads), i18n.T("skill.cmd.installs_suffix"))
 				}
 				fmt.Printf("    %d. %s%s\n", i+1,
 					colorize(fmt.Sprintf("[%s]", m.RegistryName), ColorCyan),
@@ -552,11 +552,11 @@ func (sh *SkillHandler) List() {
 	regs := sh.registryMgr.GetRegistries()
 	fmt.Printf("\n  %s (%d):\n", i18n.T("skill.registries.header"), len(regs))
 	for _, r := range regs {
-		status := colorize("[enabled]", ColorGreen)
+		status := colorize("["+i18n.T("skill.cmd.status_enabled")+"]", ColorGreen)
 		if r.TempDisabled {
-			status = colorize("[paused]", ColorYellow)
+			status = colorize("["+i18n.T("skill.cmd.status_paused")+"]", ColorYellow)
 		} else if !r.Enabled {
-			status = colorize("[disabled]", ColorGray)
+			status = colorize("["+i18n.T("skill.cmd.status_disabled")+"]", ColorGray)
 		}
 		fmt.Printf("    %-12s  %s  %s\n", r.Name, colorize(r.URL, ColorGray), status)
 	}
@@ -941,15 +941,15 @@ func (sh *SkillHandler) ShowRegistries() {
 	fmt.Printf("\n  %s\n\n", colorize(i18n.T("skill.registries.configured")+":", ColorCyan))
 
 	for i, r := range regs {
-		status := colorize("[enabled]", ColorGreen)
+		status := colorize("["+i18n.T("skill.cmd.status_enabled")+"]", ColorGreen)
 		if r.TempDisabled {
 			remaining := ""
 			if r.DisabledUntil != nil {
 				remaining = fmt.Sprintf(" ~%ds", int(time.Until(*r.DisabledUntil).Seconds()))
 			}
-			status = colorize(fmt.Sprintf("[paused: %d failures%s]", r.FailureCount, remaining), ColorYellow)
+			status = colorize(fmt.Sprintf("[%s]", i18n.T("skill.cmd.status_paused_failures", r.FailureCount, remaining)), ColorYellow)
 		} else if !r.Enabled {
-			status = colorize("[disabled]", ColorGray)
+			status = colorize("["+i18n.T("skill.cmd.status_disabled")+"]", ColorGray)
 		}
 		fmt.Printf("    %d. %-12s  %s  %s\n", i+1, r.Name, colorize(r.URL, ColorGray), status)
 	}
@@ -1057,19 +1057,19 @@ func (sh *SkillHandler) ShowHelp() {
 func shortenRegistryError(err error) string {
 	msg := err.Error()
 	if strings.Contains(msg, "no such host") {
-		return "unavailable (DNS lookup failed)"
+		return i18n.T("skill.cmd.err_dns")
 	}
 	if strings.Contains(msg, "connection refused") {
-		return "unavailable (connection refused)"
+		return i18n.T("skill.cmd.err_conn_refused")
 	}
 	if strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "timeout") {
-		return "unavailable (timeout)"
+		return i18n.T("skill.cmd.err_timeout")
 	}
 	if strings.Contains(msg, "certificate") {
-		return "TLS certificate error"
+		return i18n.T("skill.cmd.err_tls")
 	}
 	if strings.Contains(msg, "not_found_error") || strings.Contains(msg, "Not Found") {
-		return "API endpoint not found"
+		return i18n.T("skill.cmd.err_not_found")
 	}
 	if len(msg) > 60 {
 		return msg[:57] + "..."

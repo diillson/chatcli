@@ -178,6 +178,7 @@ type ChatCLI struct {
 	localModel    string                     // saved local model name
 	remoteConn    interface{ Close() error } // remote connection (for cleanup on disconnect)
 	isRemote      bool                       // true when connected to a remote server
+	remoteAddress string                     // server address captured on /connect for /config display
 
 	// K8s watcher context injection
 	WatcherContextFunc func() string      // returns K8s context to prepend to LLM prompts

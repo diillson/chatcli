@@ -59,8 +59,13 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/help":
 		ch.cli.showHelp()
 		return false
-	case userInput == "/config" || userInput == "/status" || userInput == "/settings":
-		ch.cli.showConfig()
+	case userInput == "/config" || userInput == "/status" || userInput == "/settings" ||
+		strings.HasPrefix(userInput, "/config ") ||
+		strings.HasPrefix(userInput, "/status ") ||
+		strings.HasPrefix(userInput, "/settings "):
+		fields := strings.Fields(userInput)
+		// Drop the command token; the rest is the optional section name.
+		ch.cli.routeConfigCommand(fields[1:])
 		return false
 	case userInput == "/version" || userInput == "/v":
 		ch.handleVersionCommand()
@@ -128,6 +133,9 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return false
 	case strings.HasPrefix(userInput, "/channel"):
 		ch.cli.handleChannelCommand(userInput)
+		return false
+	case strings.HasPrefix(userInput, "/websearch"):
+		ch.cli.handleWebSearchCommand(userInput)
 		return false
 	case userInput == "/reset" || userInput == "/redraw" || userInput == "/clear":
 		fmt.Print("\033[0m")
@@ -207,7 +215,7 @@ func (ch *CommandHandler) handleSessionCommand(userInput string) {
 		fmt.Println(i18n.T("session.new_session_started"))
 	case "fork":
 		if name == "" {
-			fmt.Println(colorize("  Uso: /session fork <novo-nome>", ColorYellow))
+			fmt.Println(colorize("  "+i18n.T("cmd.core.session_fork_usage"), ColorYellow))
 			return
 		}
 		ch.cli.handleForkSession(name)

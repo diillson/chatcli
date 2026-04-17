@@ -179,7 +179,7 @@ func (cli *ChatCLI) loadMemoryIntoContext(dateStr string) {
 	}
 
 	if found == "" {
-		fmt.Printf("  %s %s\n", colorize("No notes found for", ColorGray), colorize(date.Format("2006-01-02"), ColorCyan))
+		fmt.Printf("  %s %s\n", colorize(i18n.T("mem.cmd.no_notes_found_for"), ColorGray), colorize(date.Format("2006-01-02"), ColorCyan))
 		return
 	}
 
@@ -211,35 +211,35 @@ func (cli *ChatCLI) showMemoryProfile() {
 	profile := mgr.Profile.Get()
 
 	fmt.Println()
-	fmt.Println(colorize("  User Profile", ColorCyan+ColorBold))
+	fmt.Println(colorize("  "+i18n.T("mem.cmd.profile.title"), ColorCyan+ColorBold))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
 	if profile.Name == "" && profile.Role == "" && profile.ExpertiseLevel == "" &&
 		profile.PreferredLang == "" && profile.CommStyle == "" &&
 		len(profile.TopCommands) == 0 && len(profile.Preferences) == 0 {
-		fmt.Println(colorize("  No profile data yet. Interact more and the system will learn about you.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("mem.cmd.profile.empty"), ColorGray))
 		fmt.Println()
 		return
 	}
 
 	if profile.Name != "" {
-		fmt.Printf("  %s  %s\n", colorize("Name:", ColorYellow), profile.Name)
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.name"), ColorYellow), profile.Name)
 	}
 	if profile.Role != "" {
-		fmt.Printf("  %s  %s\n", colorize("Role:", ColorYellow), profile.Role)
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.role"), ColorYellow), profile.Role)
 	}
 	if profile.ExpertiseLevel != "" {
-		fmt.Printf("  %s  %s\n", colorize("Expertise:", ColorYellow), profile.ExpertiseLevel)
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.expertise"), ColorYellow), profile.ExpertiseLevel)
 	}
 	if profile.PreferredLang != "" {
-		fmt.Printf("  %s  %s\n", colorize("Language:", ColorYellow), profile.PreferredLang)
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.language"), ColorYellow), profile.PreferredLang)
 	}
 	if profile.CommStyle != "" {
-		fmt.Printf("  %s  %s\n", colorize("Style:", ColorYellow), profile.CommStyle)
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.style"), ColorYellow), profile.CommStyle)
 	}
 
 	if len(profile.TopCommands) > 0 {
-		fmt.Printf("\n  %s\n", colorize("Top Commands:", ColorYellow))
+		fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.profile.top_commands"), ColorYellow))
 		type cmdCount struct {
 			cmd   string
 			count int
@@ -261,14 +261,14 @@ func (cli *ChatCLI) showMemoryProfile() {
 	}
 
 	if len(profile.Preferences) > 0 {
-		fmt.Printf("\n  %s\n", colorize("Preferences:", ColorYellow))
+		fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.profile.preferences"), ColorYellow))
 		for k, v := range profile.Preferences {
 			fmt.Printf("    %s: %s\n", k, v)
 		}
 	}
 
 	if !profile.LastUpdated.IsZero() {
-		fmt.Printf("\n  %s %s\n", colorize("Last updated:", ColorGray), profile.LastUpdated.Format("2006-01-02 15:04"))
+		fmt.Printf("\n  %s %s\n", colorize(i18n.T("mem.cmd.profile.last_updated"), ColorGray), profile.LastUpdated.Format("2006-01-02 15:04"))
 	}
 	fmt.Println()
 }
@@ -278,21 +278,20 @@ func (cli *ChatCLI) showMemoryTopics() {
 	topics := mgr.Topics.GetAll()
 
 	fmt.Println()
-	fmt.Println(colorize("  Tracked Topics", ColorCyan+ColorBold))
+	fmt.Println(colorize("  "+i18n.T("mem.cmd.topics.title"), ColorCyan+ColorBold))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
 	if len(topics) == 0 {
-		fmt.Println(colorize("  No topics tracked yet.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("mem.cmd.topics.empty"), ColorGray))
 		fmt.Println()
 		return
 	}
 
 	for _, t := range topics {
 		lastSeen := t.LastSeen.Format("2006-01-02")
-		fmt.Printf("  %s  (%d mentions, last: %s)\n",
+		fmt.Printf("  %s  %s\n",
 			colorize(t.Name, ColorYellow),
-			t.Mentions,
-			colorize(lastSeen, ColorGray))
+			colorize(i18n.T("mem.cmd.topics.mentions_last", t.Mentions, lastSeen), ColorGray))
 	}
 	fmt.Println()
 }
@@ -302,11 +301,11 @@ func (cli *ChatCLI) showMemoryProjects() {
 	projects := mgr.Projects.GetAll()
 
 	fmt.Println()
-	fmt.Println(colorize("  Tracked Projects", ColorCyan+ColorBold))
+	fmt.Println(colorize("  "+i18n.T("mem.cmd.projects.title"), ColorCyan+ColorBold))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
 	if len(projects) == 0 {
-		fmt.Println(colorize("  No projects tracked yet.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("mem.cmd.projects.empty"), ColorGray))
 		fmt.Println()
 		return
 	}
@@ -325,16 +324,16 @@ func (cli *ChatCLI) showMemoryProjects() {
 
 		fmt.Printf("  %s  [%s]\n", colorize(p.Name, ColorYellow), colorize(status, statusColor))
 		if p.Path != "" {
-			fmt.Printf("    Path: %s\n", p.Path)
+			fmt.Printf("    %s %s\n", i18n.T("mem.cmd.projects.path"), p.Path)
 		}
 		if p.Description != "" {
 			fmt.Printf("    %s\n", p.Description)
 		}
 		if len(p.Technologies) > 0 {
-			fmt.Printf("    Tech: %s\n", strings.Join(p.Technologies, ", "))
+			fmt.Printf("    %s %s\n", i18n.T("mem.cmd.projects.tech"), strings.Join(p.Technologies, ", "))
 		}
 		if !p.LastActive.IsZero() {
-			fmt.Printf("    Last active: %s\n", colorize(p.LastActive.Format("2006-01-02"), ColorGray))
+			fmt.Printf("    %s %s\n", i18n.T("mem.cmd.projects.last_active"), colorize(p.LastActive.Format("2006-01-02"), ColorGray))
 		}
 	}
 	fmt.Println()
@@ -345,19 +344,19 @@ func (cli *ChatCLI) showMemoryStats() {
 	stats := mgr.Patterns.GetStats()
 
 	fmt.Println()
-	fmt.Println(colorize("  Memory System Stats", ColorCyan+ColorBold))
+	fmt.Println(colorize("  "+i18n.T("mem.cmd.stats.title"), ColorCyan+ColorBold))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
-	fmt.Printf("  %s  %d\n", colorize("Facts stored:", ColorYellow), mgr.Facts.Count())
-	fmt.Printf("  %s  %d\n", colorize("Topics tracked:", ColorYellow), len(mgr.Topics.GetAll()))
-	fmt.Printf("  %s  %d\n", colorize("Projects tracked:", ColorYellow), len(mgr.Projects.GetAll()))
+	fmt.Printf("  %s  %d\n", colorize(i18n.T("mem.cmd.stats.facts_stored"), ColorYellow), mgr.Facts.Count())
+	fmt.Printf("  %s  %d\n", colorize(i18n.T("mem.cmd.stats.topics_tracked"), ColorYellow), len(mgr.Topics.GetAll()))
+	fmt.Printf("  %s  %d\n", colorize(i18n.T("mem.cmd.stats.projects_tracked"), ColorYellow), len(mgr.Projects.GetAll()))
 
-	fmt.Printf("\n  %s\n", colorize("Usage Patterns:", ColorYellow))
-	fmt.Printf("    Sessions: %d\n", stats.SessionCount)
-	fmt.Printf("    Total messages: %d\n", stats.TotalMessages)
+	fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.stats.usage_patterns"), ColorYellow))
+	fmt.Printf("    %s %d\n", i18n.T("mem.cmd.stats.sessions"), stats.SessionCount)
+	fmt.Printf("    %s %d\n", i18n.T("mem.cmd.stats.total_messages"), stats.TotalMessages)
 
 	if stats.AvgSessionSecs > 0 {
-		fmt.Printf("    Avg session: %.0f min\n", stats.AvgSessionSecs/60.0)
+		fmt.Printf("    %s\n", i18n.T("mem.cmd.stats.avg_session", stats.AvgSessionSecs/60.0))
 	}
 
 	// Peak hours
@@ -367,13 +366,13 @@ func (cli *ChatCLI) showMemoryStats() {
 		for _, h := range peakHours {
 			hourStrs = append(hourStrs, fmt.Sprintf("%02d:00", h))
 		}
-		fmt.Printf("    Peak hours: %s\n", strings.Join(hourStrs, ", "))
+		fmt.Printf("    %s %s\n", i18n.T("mem.cmd.stats.peak_hours"), strings.Join(hourStrs, ", "))
 	}
 
 	// Top commands
 	topCmds := mgr.Patterns.GetTopCommands(5)
 	if len(topCmds) > 0 {
-		fmt.Printf("    Top commands: %s\n", strings.Join(topCmds, ", "))
+		fmt.Printf("    %s %s\n", i18n.T("mem.cmd.stats.top_commands"), strings.Join(topCmds, ", "))
 	}
 
 	// Top features
@@ -382,26 +381,26 @@ func (cli *ChatCLI) showMemoryStats() {
 		for f, c := range stats.FeatureUsage {
 			features = append(features, fmt.Sprintf("%s(%d)", f, c))
 		}
-		fmt.Printf("    Features: %s\n", strings.Join(features, ", "))
+		fmt.Printf("    %s %s\n", i18n.T("mem.cmd.stats.features"), strings.Join(features, ", "))
 	}
 
 	// Common errors
 	if len(stats.CommonErrors) > 0 {
-		fmt.Printf("\n  %s\n", colorize("Common Errors:", ColorYellow))
+		fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.stats.common_errors"), ColorYellow))
 		limit := 5
 		if len(stats.CommonErrors) < limit {
 			limit = len(stats.CommonErrors)
 		}
 		for _, ep := range stats.CommonErrors[:limit] {
-			fmt.Printf("    %s (%d times)\n", ep.Pattern, ep.Count)
+			fmt.Printf("    %s\n", i18n.T("mem.cmd.stats.error_pattern", ep.Pattern, ep.Count))
 			if ep.Resolution != "" {
-				fmt.Printf("      Fix: %s\n", ep.Resolution)
+				fmt.Printf("      %s %s\n", i18n.T("mem.cmd.stats.fix"), ep.Resolution)
 			}
 		}
 	}
 
 	if !stats.LastSession.IsZero() {
-		fmt.Printf("\n  %s %s\n", colorize("Last session:", ColorGray), stats.LastSession.Format("2006-01-02 15:04"))
+		fmt.Printf("\n  %s %s\n", colorize(i18n.T("mem.cmd.stats.last_session"), ColorGray), stats.LastSession.Format("2006-01-02 15:04"))
 	}
 	fmt.Println()
 }
@@ -442,7 +441,7 @@ func (cli *ChatCLI) showMemoryFacts(category string) {
 	}
 
 	fmt.Println()
-	title := "Memory Facts"
+	title := i18n.T("mem.cmd.facts.title")
 	if category != "" {
 		title += " [" + category + "]"
 	}
@@ -450,7 +449,7 @@ func (cli *ChatCLI) showMemoryFacts(category string) {
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
 	if len(facts) == 0 {
-		fmt.Println(colorize("  No facts stored.", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("mem.cmd.facts.empty"), ColorGray))
 		fmt.Println()
 		return
 	}
@@ -463,23 +462,22 @@ func (cli *ChatCLI) showMemoryFacts(category string) {
 			scoreColor = ColorYellow
 		}
 
-		fmt.Printf("  %s %s [%s] (score: %s, accessed: %d)\n",
+		fmt.Printf("  %s %s [%s] %s\n",
 			colorize(fmt.Sprintf("%3d.", i+1), ColorGray),
 			f.Content,
 			colorize(f.Category, ColorCyan),
-			colorize(fmt.Sprintf("%.2f", f.Score), scoreColor),
-			f.Accessed,
+			i18n.T("mem.cmd.facts.score_access", colorize(fmt.Sprintf("%.2f", f.Score), scoreColor), f.Accessed),
 		)
 	}
 
-	fmt.Printf("\n  %s %d facts\n", colorize("Total:", ColorGray), len(facts))
+	fmt.Printf("\n  %s %s\n", colorize(i18n.T("mem.cmd.facts.total"), ColorGray), i18n.T("mem.cmd.facts.total_count", len(facts)))
 	fmt.Println()
 }
 
 func (cli *ChatCLI) runMemoryCompact() {
 	mgr := cli.memoryStore.Manager()
 
-	fmt.Println(colorize("  Running memory compaction...", ColorCyan))
+	fmt.Println(colorize("  "+i18n.T("mem.cmd.compact.running"), ColorCyan))
 
 	llmClient := cli.getClient()
 	var sendPrompt func(ctx context.Context, prompt string) (string, error)
@@ -499,7 +497,7 @@ func (cli *ChatCLI) runMemoryCompact() {
 	factsBefore := mgr.Facts.Count()
 
 	if err := mgr.RunCompaction(ctx, sendPrompt); err != nil {
-		fmt.Printf("  %s Compaction failed: %s\n", colorize("ERR", ColorRed), err.Error())
+		fmt.Printf("  %s %s %s\n", colorize("ERR", ColorRed), i18n.T("mem.cmd.compact.failed"), err.Error())
 		return
 	}
 
@@ -508,10 +506,10 @@ func (cli *ChatCLI) runMemoryCompact() {
 	// Also cleanup daily notes
 	deleted, _ := mgr.CleanupDailyNotes()
 
-	fmt.Printf("  %s Compaction complete\n", colorize("OK", ColorGreen))
-	fmt.Printf("    Facts: %d -> %d\n", factsBefore, factsAfter)
+	fmt.Printf("  %s %s\n", colorize("OK", ColorGreen), i18n.T("mem.cmd.compact.complete"))
+	fmt.Printf("    %s\n", i18n.T("mem.cmd.compact.facts_change", factsBefore, factsAfter))
 	if deleted > 0 {
-		fmt.Printf("    Old daily notes removed: %d\n", deleted)
+		fmt.Printf("    %s\n", i18n.T("mem.cmd.compact.notes_removed", deleted))
 	}
 	fmt.Println()
 }
@@ -547,9 +545,9 @@ func (cli *ChatCLI) listMemoryNotes() {
 
 	if longTerm != "" {
 		factCount := mgr.Facts.Count()
-		fmt.Printf("  %s  MEMORY.md (%d facts)\n", colorize("*", ColorGreen), factCount)
+		fmt.Printf("  %s  %s\n", colorize("*", ColorGreen), i18n.T("mem.cmd.list.memory_md_facts", factCount))
 	} else {
-		fmt.Printf("  %s  MEMORY.md (empty)\n", colorize("o", ColorGray))
+		fmt.Printf("  %s  %s\n", colorize("o", ColorGray), i18n.T("mem.cmd.list.memory_md_empty"))
 	}
 
 	// Show structured files
@@ -568,7 +566,7 @@ func (cli *ChatCLI) listMemoryNotes() {
 		start := 0
 		if len(files) > 10 {
 			start = len(files) - 10
-			fmt.Printf("       ... (%d earlier notes)\n", start)
+			fmt.Printf("       %s\n", i18n.T("mem.cmd.list.earlier_notes", start))
 		}
 		for _, f := range files[start:] {
 			fmt.Printf("       %s\n", f)
@@ -595,25 +593,25 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 	// "/memory" typed but no space yet — suggest the command itself
 	if len(args) == 1 && !strings.HasSuffix(line, " ") {
 		return []prompt.Suggest{
-			{Text: "/memory", Description: "Ver/carregar anotações de memória"},
+			{Text: "/memory", Description: i18n.T("mem.cmd.suggest.memory")},
 		}
 	}
 
 	// "/memory " — suggest subcommands
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		suggestions := []prompt.Suggest{
-			{Text: "today", Description: "Notas de hoje"},
-			{Text: "yesterday", Description: "Notas de ontem"},
-			{Text: "week", Description: "Notas dos últimos 7 dias"},
-			{Text: "longterm", Description: "Memória de longo prazo (MEMORY.md)"},
-			{Text: "list", Description: "Listar todos os arquivos de memória"},
-			{Text: "load", Description: "Carregar notas de uma data no contexto (ex: load yesterday)"},
-			{Text: "profile", Description: "Mostrar perfil do usuário"},
-			{Text: "topics", Description: "Mostrar tópicos rastreados"},
-			{Text: "projects", Description: "Mostrar projetos rastreados"},
-			{Text: "stats", Description: "Estatísticas do sistema de memória"},
-			{Text: "facts", Description: "Listar fatos armazenados (ex: facts architecture)"},
-			{Text: "compact", Description: "Forçar compactação da memória"},
+			{Text: "today", Description: i18n.T("mem.cmd.suggest.today")},
+			{Text: "yesterday", Description: i18n.T("mem.cmd.suggest.yesterday")},
+			{Text: "week", Description: i18n.T("mem.cmd.suggest.week")},
+			{Text: "longterm", Description: i18n.T("mem.cmd.suggest.longterm")},
+			{Text: "list", Description: i18n.T("mem.cmd.suggest.list")},
+			{Text: "load", Description: i18n.T("mem.cmd.suggest.load")},
+			{Text: "profile", Description: i18n.T("mem.cmd.suggest.profile")},
+			{Text: "topics", Description: i18n.T("mem.cmd.suggest.topics")},
+			{Text: "projects", Description: i18n.T("mem.cmd.suggest.projects")},
+			{Text: "stats", Description: i18n.T("mem.cmd.suggest.stats")},
+			{Text: "facts", Description: i18n.T("mem.cmd.suggest.facts")},
+			{Text: "compact", Description: i18n.T("mem.cmd.suggest.compact")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -622,8 +620,8 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) >= 2 && args[1] == "load" {
 		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
 			suggestions := []prompt.Suggest{
-				{Text: "today", Description: "Carregar notas de hoje"},
-				{Text: "yesterday", Description: "Carregar notas de ontem"},
+				{Text: "today", Description: i18n.T("mem.cmd.suggest.load_today")},
+				{Text: "yesterday", Description: i18n.T("mem.cmd.suggest.load_yesterday")},
 			}
 			if cli.memoryStore != nil {
 				notes := cli.memoryStore.GetRecentDailyNotes(7)
@@ -631,7 +629,7 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 					dateStr := note.Date.Format("2006-01-02")
 					suggestions = append(suggestions, prompt.Suggest{
 						Text:        dateStr,
-						Description: fmt.Sprintf("Notas de %s", note.Date.Format("02/Jan")),
+						Description: i18n.T("mem.cmd.suggest.load_date", note.Date.Format("02/Jan")),
 					})
 				}
 			}
@@ -643,13 +641,13 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) >= 2 && args[1] == "facts" {
 		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
 			suggestions := []prompt.Suggest{
-				{Text: "architecture", Description: "Decisões arquiteturais"},
-				{Text: "pattern", Description: "Padrões e convenções"},
-				{Text: "preference", Description: "Preferências do usuário"},
-				{Text: "gotcha", Description: "Armadilhas e bugs conhecidos"},
-				{Text: "project", Description: "Detalhes de projetos"},
-				{Text: "personal", Description: "Informações pessoais"},
-				{Text: "general", Description: "Fatos gerais"},
+				{Text: "architecture", Description: i18n.T("mem.cmd.suggest.cat_architecture")},
+				{Text: "pattern", Description: i18n.T("mem.cmd.suggest.cat_pattern")},
+				{Text: "preference", Description: i18n.T("mem.cmd.suggest.cat_preference")},
+				{Text: "gotcha", Description: i18n.T("mem.cmd.suggest.cat_gotcha")},
+				{Text: "project", Description: i18n.T("mem.cmd.suggest.cat_project")},
+				{Text: "personal", Description: i18n.T("mem.cmd.suggest.cat_personal")},
+				{Text: "general", Description: i18n.T("mem.cmd.suggest.cat_general")},
 			}
 			return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 		}

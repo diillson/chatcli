@@ -416,8 +416,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 			zap.String("to_model", resolution.Model))
 		if resolution.CrossProvider {
 			fmt.Printf("  %s\n", colorize(
-				fmt.Sprintf("skill requested %s/%s — swapping for this turn",
-					resolution.Provider, resolution.Model),
+				i18n.T("sw.cmd.skill_swap_provider", resolution.Provider, resolution.Model),
 				ColorGray))
 		}
 	} else if resolution.UserMessage != "" {
@@ -455,7 +454,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 			aiResponse = result.Text
 
 			if result.WasStalled {
-				fmt.Printf("\n%s\n", colorize("[Stream stalled — partial response shown]", ColorYellow))
+				fmt.Printf("\n%s\n", colorize(i18n.T("sw.cmd.stream_stalled"), ColorYellow))
 			}
 
 			// Store usage from streaming result against whichever
@@ -678,11 +677,11 @@ func (cli *ChatCLI) listAvailableModels() {
 
 	models, err := cli.manager.ListModelsForProvider(ctx, cli.Provider)
 	if err != nil {
-		fmt.Printf("  Could not list models for %s: %v\n", cli.Provider, err)
+		fmt.Printf("  %s\n", i18n.T("sw.cmd.could_not_list_models", cli.Provider, err))
 		return
 	}
 	if len(models) == 0 {
-		fmt.Printf("  No models found for %s\n", cli.Provider)
+		fmt.Printf("  %s\n", i18n.T("sw.cmd.no_models_found", cli.Provider))
 		return
 	}
 
@@ -702,7 +701,7 @@ func (cli *ChatCLI) listAvailableModels() {
 	} else if apiCount > 0 {
 		sourceInfo = "API"
 	}
-	fmt.Printf("\n  Available models for %s (%s):\n", cli.Provider, sourceInfo)
+	fmt.Printf("\n  %s\n", i18n.T("sw.cmd.available_models_header", cli.Provider, sourceInfo))
 	for i, m := range models {
 		tag := ""
 		if m.Source == client.ModelSourceAPI {

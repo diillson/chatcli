@@ -178,6 +178,7 @@ func (ch *CommandHandler) handleConnectCommand(userInput string) {
 	ch.cli.Model = remoteClient.GetModelName()
 	ch.cli.remoteConn = remoteClient
 	ch.cli.isRemote = true
+	ch.cli.remoteAddress = address
 	ch.cli.refreshModelCache()
 
 	connInfo := fmt.Sprintf("version: %s, provider: %s, model: %s", ver, ch.cli.Provider, ch.cli.Model)
@@ -255,6 +256,7 @@ func (ch *CommandHandler) handleDisconnectCommand() {
 	ch.cli.Model = ch.cli.localModel
 	ch.cli.remoteConn = nil
 	ch.cli.isRemote = false
+	ch.cli.remoteAddress = ""
 	ch.cli.localClient = nil
 	ch.cli.localProvider = ""
 	ch.cli.localModel = ""
