@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.105.0](https://github.com/diillson/chatcli/compare/v1.104.0...v1.105.0) (2026-04-17)
+
+
+### Features
+
+* **cli:** hierarchical /config, SearxNG web search, full i18n sweep ([#802](https://github.com/diillson/chatcli/issues/802)) ([a310a90](https://github.com/diillson/chatcli/commit/a310a90416443eadc54da9b7ae0a9d7d9f2cdfbb))
+
 ## [1.104.0](https://github.com/diillson/chatcli/compare/v1.103.1...v1.104.0) (2026-04-16)
 
 
