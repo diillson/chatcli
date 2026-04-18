@@ -270,22 +270,17 @@ func (r *InstanceReconciler) updateStatus(ctx context.Context, instance *platfor
 
 func (r *InstanceReconciler) cleanupResources(ctx context.Context, instance *platformv1alpha1.Instance) error {
 	// Owned namespaced resources are garbage-collected via OwnerReferences.
-	// Cluster-scoped resources (ClusterRole/ClusterRoleBinding) need manual cleanup.
+	// The per-Instance ClusterRoleBinding is cluster-scoped so has no owner ref — delete
+	// it manually. The referenced ClusterRole (chatcli-watcher) is shared and owned by
+	// the Helm/kustomize release, so it must NOT be deleted here.
 	log := log.FromContext(ctx)
 	log.Info("Cleaning up resources for Instance", "name", instance.Name)
 
-	clusterRoleName := instance.Namespace + "-" + instance.Name + "-watcher"
+	crbName := instance.Namespace + "-" + instance.Name + "-watcher"
 
 	crb := &rbacv1.ClusterRoleBinding{}
-	if err := r.Get(ctx, types.NamespacedName{Name: clusterRoleName}, crb); err == nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: crbName}, crb); err == nil {
 		if err := r.Delete(ctx, crb); err != nil && !errors.IsNotFound(err) {
-			return err
-		}
-	}
-
-	cr := &rbacv1.ClusterRole{}
-	if err := r.Get(ctx, types.NamespacedName{Name: clusterRoleName}, cr); err == nil {
-		if err := r.Delete(ctx, cr); err != nil && !errors.IsNotFound(err) {
 			return err
 		}
 	}

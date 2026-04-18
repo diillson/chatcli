@@ -11,6 +11,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// Platform role ClusterRole names. Pre-provisioned by the Helm chart / kustomize
+// overlay (deploy/helm/chatcli-operator/templates/rbac.yaml). The operator only creates
+// RoleBindings that reference these — it never creates or mutates the ClusterRoles
+// themselves at runtime (Security H5).
 const (
 	RoleViewer     = "chatcli-role-viewer"
 	RoleOperator   = "chatcli-role-operator"
@@ -24,74 +28,6 @@ type RBACManager struct {
 
 func NewRBACManager(c client.Client) *RBACManager {
 	return &RBACManager{client: c}
-}
-
-// EnsureRoles creates or updates all ChatCLI ClusterRoles.
-func (rm *RBACManager) EnsureRoles(ctx context.Context) error {
-	roles := map[string][]rbacv1.PolicyRule{
-		RoleViewer: {
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues", "anomalies", "aiinsights", "postmortems", "auditevents", "servicelevelobjectives", "incidentslas"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"remediationplans", "runbooks", "approvalrequests"}, Verbs: []string{"get", "list", "watch"}},
-		},
-		RoleOperator: {
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues", "anomalies", "aiinsights", "postmortems", "auditevents", "servicelevelobjectives", "incidentslas"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"remediationplans", "runbooks", "approvalrequests"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues"}, Verbs: []string{"update", "patch"}},
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"approvalrequests"}, Verbs: []string{"update", "patch"}},
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"postmortems"}, Verbs: []string{"update", "patch"}},
-		},
-		RoleAdmin: {
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"issues", "anomalies", "aiinsights", "postmortems", "auditevents", "servicelevelobjectives", "incidentslas", "remediationplans", "approvalrequests"}, Verbs: []string{"get", "list", "watch", "update", "patch"}},
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{"runbooks", "notificationpolicies", "servicelevelobjectives", "incidentslas"}, Verbs: []string{"get", "list", "watch", "create", "update", "patch", "delete"}},
-		},
-		RoleSuperAdmin: {
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{
-				"instances", "issues", "anomalies", "aiinsights", "remediationplans",
-				"runbooks", "postmortems", "sourcerepositories",
-				"notificationpolicies", "escalationpolicies",
-				"approvalpolicies", "approvalrequests",
-				"servicelevelobjectives", "incidentslas",
-				"auditevents", "chaosexperiments", "clusterregistrations",
-			}, Verbs: []string{"get", "list", "watch", "create", "update", "patch", "delete"}},
-			{APIGroups: []string{"platform.chatcli.io"}, Resources: []string{
-				"instances/status", "issues/status", "anomalies/status",
-				"aiinsights/status", "remediationplans/status", "postmortems/status",
-				"sourcerepositories/status", "notificationpolicies/status",
-				"escalationpolicies/status", "approvalpolicies/status",
-				"approvalrequests/status", "servicelevelobjectives/status",
-				"incidentslas/status", "auditevents/status",
-				"chaosexperiments/status", "clusterregistrations/status",
-			}, Verbs: []string{"get", "update", "patch"}},
-		},
-	}
-
-	for name, rules := range roles {
-		cr := &rbacv1.ClusterRole{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   name,
-				Labels: map[string]string{"app.kubernetes.io/managed-by": "chatcli-operator", "app.kubernetes.io/component": "rbac"},
-			},
-			Rules: rules,
-		}
-
-		existing := &rbacv1.ClusterRole{}
-		err := rm.client.Get(ctx, types.NamespacedName{Name: name}, existing)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				if err := rm.client.Create(ctx, cr); err != nil {
-					return fmt.Errorf("creating ClusterRole %s: %w", name, err)
-				}
-				continue
-			}
-			return err
-		}
-		existing.Rules = rules
-		existing.Labels = cr.Labels
-		if err := rm.client.Update(ctx, existing); err != nil {
-			return fmt.Errorf("updating ClusterRole %s: %w", name, err)
-		}
-	}
-	return nil
 }
 
 // GrantRole creates a RoleBinding for a user in a namespace.
