@@ -242,8 +242,14 @@ ADVANCED ACTIONS:
     Best for: applying pre-prepared fix manifests.
 
 19. ExecDiagnostic — runs a whitelisted diagnostic command in a pod.
-    Params: {"command": "df -h"} (only pre-approved commands allowed).
-    Best for: gathering diagnostic data before making changes.
+    Params: {"command": "<exact-string>"}. Approved commands (exact match, no
+    variations): env | whoami | id | uname -a | ps aux | ps -ef | df -h |
+    free -m | free -h | mount | uptime | netstat -tlnp | netstat -an |
+    ss -tlnp | ss -an | ip addr | ip route | ifconfig | cat /etc/hosts |
+    cat /etc/resolv.conf | nslookup kubernetes.default.svc.cluster.local |
+    curl -s localhost{,:8080,:9090}/{health,healthz,ready,readyz,metrics,-/ready}.
+    Any other command (including variations like "nslookup <custom-host>")
+    will be rejected. Best for: gathering diagnostic data before making changes.
 
 STATEFULSET ACTIONS (for StatefulSet resources):
 19. ScaleStatefulSet — scales StatefulSet replicas (ordered scaling). Params: {"replicas": "N"} (N >= 1).
@@ -502,7 +508,12 @@ NETWORKING:
 
 ADVANCED:
 17. ApplyManifest — apply fix from ConfigMap. Params: {"configmap": "fix-cm", "key": "manifest.yaml"}
-18. ExecDiagnostic — run diagnostic. Params: {"command": "df -h"} (whitelisted only).
+18. ExecDiagnostic — run diagnostic. Params: {"command": "<exact>"}. Allowed exactly:
+    env, whoami, id, uname -a, ps aux, ps -ef, df -h, free -m, free -h, mount,
+    uptime, netstat -tlnp, netstat -an, ss -tlnp, ss -an, ip addr, ip route,
+    ifconfig, cat /etc/hosts, cat /etc/resolv.conf,
+    nslookup kubernetes.default.svc.cluster.local, and curl -s localhost{,:8080,:9090}
+    on paths {health,healthz,ready,readyz,metrics,-/ready}. Any other string rejected.
 
 STATEFULSET:
 19. ScaleStatefulSet — scale replicas. Params: {"replicas": "N"}.
