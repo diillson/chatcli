@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.105.1](https://github.com/diillson/chatcli/compare/v1.105.0...v1.105.1) (2026-04-18)
+
+
+### Bug Fixes
+
+* **operator:** stop creating ClusterRoles at runtime (H5 hardening) ([#804](https://github.com/diillson/chatcli/issues/804)) ([a684407](https://github.com/diillson/chatcli/commit/a6844074e7bbaf94ba1942479f4a9ecb7fb2934f))
+
 ## [1.105.0](https://github.com/diillson/chatcli/compare/v1.104.0...v1.105.0) (2026-04-17)
 
 
