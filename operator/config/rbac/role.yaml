@@ -388,9 +388,10 @@ rules:
       - create
       - update
       - patch
-  # Security (H5): RBAC resources — read-only for monitoring.
-  # Removed patch/delete/create on ClusterRoles and ClusterRoleBindings
-  # to prevent privilege escalation if operator is compromised.
+  # Security (H5): RBAC resources — namespaced Role/RoleBinding writable (used by
+  # reconcileNamespacedRBAC), ClusterRole read-only to prevent privilege escalation.
+  # Shared ClusterRoles (chatcli-watcher, chatcli-role-*) are pre-provisioned below and
+  # referenced by per-Instance ClusterRoleBindings via the "bind" verb.
   - apiGroups:
       - rbac.authorization.k8s.io
     resources:
@@ -400,15 +401,44 @@ rules:
       - get
       - list
       - watch
+      - create
+      - update
+      - patch
+      - delete
   - apiGroups:
       - rbac.authorization.k8s.io
     resources:
       - clusterroles
+    verbs:
+      - get
+      - list
+      - watch
+  # "bind" is restricted to the whitelisted shared ClusterRoles. A compromised operator
+  # cannot reference a more-privileged ClusterRole in a new ClusterRoleBinding.
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+    resourceNames:
+      - chatcli-watcher
+      - chatcli-role-viewer
+      - chatcli-role-operator
+      - chatcli-role-admin
+      - chatcli-role-superadmin
+    verbs:
+      - bind
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
       - clusterrolebindings
     verbs:
       - get
       - list
       - watch
+      - create
+      - update
+      - patch
+      - delete
   # Events (emit + read for watcher)
   - apiGroups:
       - ""
@@ -475,3 +505,158 @@ subjects:
   - kind: ServiceAccount
     name: chatcli-operator
     namespace: chatcli-system
+---
+# Shared ClusterRole referenced by per-Instance ClusterRoleBindings when a Watcher spans
+# multiple namespaces. Pre-provisioned so the operator never needs escalate/create rights
+# on ClusterRoles (Security H5).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chatcli-watcher
+  labels:
+    app.kubernetes.io/name: chatcli-operator
+    app.kubernetes.io/component: watcher
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+---
+# Platform role ClusterRoles (viewer / operator / admin / superadmin). Referenced by
+# RoleBindings the operator creates when granting a user a platform role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chatcli-role-viewer
+  labels:
+    app.kubernetes.io/name: chatcli-operator
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: ["platform.chatcli.io"]
+    resources:
+      - issues
+      - anomalies
+      - aiinsights
+      - postmortems
+      - auditevents
+      - servicelevelobjectives
+      - incidentslas
+      - remediationplans
+      - runbooks
+      - approvalrequests
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chatcli-role-operator
+  labels:
+    app.kubernetes.io/name: chatcli-operator
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: ["platform.chatcli.io"]
+    resources:
+      - issues
+      - anomalies
+      - aiinsights
+      - postmortems
+      - auditevents
+      - servicelevelobjectives
+      - incidentslas
+      - remediationplans
+      - runbooks
+      - approvalrequests
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["platform.chatcli.io"]
+    resources: ["issues", "approvalrequests", "postmortems"]
+    verbs: ["update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chatcli-role-admin
+  labels:
+    app.kubernetes.io/name: chatcli-operator
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: ["platform.chatcli.io"]
+    resources:
+      - issues
+      - anomalies
+      - aiinsights
+      - postmortems
+      - auditevents
+      - servicelevelobjectives
+      - incidentslas
+      - remediationplans
+      - approvalrequests
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["platform.chatcli.io"]
+    resources:
+      - runbooks
+      - notificationpolicies
+      - servicelevelobjectives
+      - incidentslas
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chatcli-role-superadmin
+  labels:
+    app.kubernetes.io/name: chatcli-operator
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: ["platform.chatcli.io"]
+    resources:
+      - instances
+      - issues
+      - anomalies
+      - aiinsights
+      - remediationplans
+      - runbooks
+      - postmortems
+      - sourcerepositories
+      - notificationpolicies
+      - escalationpolicies
+      - approvalpolicies
+      - approvalrequests
+      - servicelevelobjectives
+      - incidentslas
+      - auditevents
+      - chaosexperiments
+      - clusterregistrations
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["platform.chatcli.io"]
+    resources:
+      - instances/status
+      - issues/status
+      - anomalies/status
+      - aiinsights/status
+      - remediationplans/status
+      - postmortems/status
+      - sourcerepositories/status
+      - notificationpolicies/status
+      - escalationpolicies/status
+      - approvalpolicies/status
+      - approvalrequests/status
+      - servicelevelobjectives/status
+      - incidentslas/status
+      - auditevents/status
+      - chaosexperiments/status
+      - clusterregistrations/status
+    verbs: ["get", "update", "patch"]

@@ -254,15 +254,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// RBAC Manager — ensure default roles exist
-	rbacMgr := controllers.NewRBACManager(mgr.GetClient())
-	go func() {
-		// Wait for cache sync then ensure roles
-		<-mgr.Elected()
-		if err := rbacMgr.EnsureRoles(context.Background()); err != nil {
-			setupLog.Error(err, "failed to ensure RBAC roles")
-		}
-	}()
+	// Platform role ClusterRoles (chatcli-role-viewer / -operator / -admin / -superadmin)
+	// and the shared chatcli-watcher ClusterRole are pre-provisioned by the Helm chart /
+	// kustomize overlay. The operator only creates RoleBindings/ClusterRoleBindings that
+	// reference them — it never creates or modifies ClusterRoles at runtime (Security H5).
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")

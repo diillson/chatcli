@@ -933,35 +933,27 @@ func (r *InstanceReconciler) reconcileNamespacedRBAC(ctx context.Context, instan
 	return err
 }
 
-// reconcileClusterRBAC creates ClusterRole + ClusterRoleBinding for multi-namespace watcher access.
+// SharedWatcherClusterRole is the name of the pre-provisioned ClusterRole used for
+// multi-namespace watcher access. It is deployed by the Helm chart / kustomize overlay
+// (see deploy/helm/chatcli-operator/templates/rbac.yaml) so the operator never needs
+// create/update/delete permissions on ClusterRoles (Security H5).
+const SharedWatcherClusterRole = "chatcli-watcher"
+
+// reconcileClusterRBAC creates a per-Instance ClusterRoleBinding that references the
+// pre-provisioned SharedWatcherClusterRole. The ClusterRole itself is NOT created here.
 func (r *InstanceReconciler) reconcileClusterRBAC(ctx context.Context, instance *platformv1alpha1.Instance) error {
-	clusterRole := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: instance.Namespace + "-" + instance.Name + "-watcher",
-		},
-	}
-
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, clusterRole, func() error {
-		clusterRole.Labels = labels(instance)
-		clusterRole.Rules = watcherPolicyRules()
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: instance.Namespace + "-" + instance.Name + "-watcher",
 		},
 	}
 
-	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, crb, func() error {
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, crb, func() error {
 		crb.Labels = labels(instance)
 		crb.RoleRef = rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
 			Kind:     "ClusterRole",
-			Name:     clusterRole.Name,
+			Name:     SharedWatcherClusterRole,
 		}
 		crb.Subjects = []rbacv1.Subject{
 			{
