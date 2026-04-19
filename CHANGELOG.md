@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.105.2](https://github.com/diillson/chatcli/compare/v1.105.1...v1.105.2) (2026-04-19)
+
+
+### Bug Fixes
+
+* **operator:** idempotent anomaly creation + broader diagnostic allowlist ([#806](https://github.com/diillson/chatcli/issues/806)) ([ea9dc9c](https://github.com/diillson/chatcli/commit/ea9dc9c5ccfee3491d52d1da232f1da7a7b039f0))
+
 ## [1.105.1](https://github.com/diillson/chatcli/compare/v1.105.0...v1.105.1) (2026-04-18)
 
 
