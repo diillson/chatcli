@@ -1912,3 +1912,78 @@ func TestMapActionType_NewActions(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateSafetyConstraints_ScaleZeroContainmentOptIn guards the narrow carve-out
+// that lets ScaleDeployment/ScaleStatefulSet replicas=0 through when the AI explicitly
+// marks the action as containment. Without the flag the destructive block still fires.
+func TestValidateSafetyConstraints_ScaleZeroContainmentOptIn(t *testing.T) {
+	r := &RemediationReconciler{}
+
+	tests := []struct {
+		name    string
+		actions []platformv1alpha1.RemediationAction
+		wantErr string // "" means valid
+	}{
+		{
+			name: "ScaleDeployment=0 without containment flag is blocked",
+			actions: []platformv1alpha1.RemediationAction{
+				{Type: platformv1alpha1.ActionScaleDeployment, Params: map[string]string{"replicas": "0"}},
+			},
+			wantErr: "scaling to 0 replicas is not allowed",
+		},
+		{
+			name: "ScaleDeployment=0 with containment=true is allowed",
+			actions: []platformv1alpha1.RemediationAction{
+				{Type: platformv1alpha1.ActionScaleDeployment, Params: map[string]string{"replicas": "0", "containment": "true"}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "ScaleDeployment=0 with containment=false is still blocked",
+			actions: []platformv1alpha1.RemediationAction{
+				{Type: platformv1alpha1.ActionScaleDeployment, Params: map[string]string{"replicas": "0", "containment": "false"}},
+			},
+			wantErr: "scaling to 0 replicas is not allowed",
+		},
+		{
+			name: "ScaleDeployment>0 needs no flag",
+			actions: []platformv1alpha1.RemediationAction{
+				{Type: platformv1alpha1.ActionScaleDeployment, Params: map[string]string{"replicas": "2"}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "ScaleStatefulSet=0 with containment=true is allowed",
+			actions: []platformv1alpha1.RemediationAction{
+				{Type: platformv1alpha1.ActionScaleStatefulSet, Params: map[string]string{"replicas": "0", "containment": "true"}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "ScaleStatefulSet=0 without containment flag is blocked",
+			actions: []platformv1alpha1.RemediationAction{
+				{Type: platformv1alpha1.ActionScaleStatefulSet, Params: map[string]string{"replicas": "0"}},
+			},
+			wantErr: "scaling StatefulSet to 0 replicas is not allowed",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := r.validateSafetyConstraints(tc.actions, nil)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Errorf("expected error containing %q, got nil", tc.wantErr)
+				return
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("expected error containing %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
