@@ -119,8 +119,11 @@ spec:
                 description: |-
                   APIKeys references a Secret containing provider API keys and config.
                   Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, XAI_API_KEY,
-                  ZAI_API_KEY, MINIMAX_API_KEY, MINIMAX_API_COMPAT, GITHUB_COPILOT_TOKEN, OPENROUTER_API_KEY, etc.
-                  All providers used in the fallback chain must have their API keys in this Secret.
+                  ZAI_API_KEY, MINIMAX_API_KEY, MINIMAX_API_COMPAT, GITHUB_COPILOT_TOKEN, OPENROUTER_API_KEY.
+                  For BEDROCK: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (+ optional AWS_SESSION_TOKEN),
+                  or leave unset and use IRSA by annotating the pod's ServiceAccount with
+                  eks.amazonaws.com/role-arn. Region is set via AWS_REGION or BEDROCK_REGION.
+                  All providers used in the fallback chain must have their credentials in this Secret.
                 properties:
                   name:
                     description: Name is the Secret name.
@@ -329,12 +332,13 @@ spec:
                           type: string
                         name:
                           description: Name is the provider name (OPENAI, OPENAI_ASSISTANT,
-                            CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA,
-                            COPILOT, GITHUB_MODELS, OPENROUTER).
+                            CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT,
+                            OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER).
                           enum:
                           - OPENAI
                           - OPENAI_ASSISTANT
                           - CLAUDEAI
+                          - BEDROCK
                           - GOOGLEAI
                           - XAI
                           - ZAI
@@ -365,8 +369,11 @@ spec:
                     description: Repository is the container image repository.
                     type: string
                   tag:
-                    default: latest
-                    description: Tag is the container image tag.
+                    description: |-
+                      Tag is the container image tag. When unset, the operator resolves it from the
+                      CHATCLI_OPERATOR_APP_VERSION env var (set by the Helm chart to the chart's
+                      appVersion), falling back to "latest". This lets a helm upgrade of the operator
+                      also roll managed server pods without patching each Instance.
                     type: string
                 type: object
               mcp:
@@ -471,9 +478,9 @@ spec:
                     type: string
                 type: object
               provider:
-                description: Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT,
-                  CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT,
-                  GITHUB_MODELS, OPENROUTER).
+                description: |-
+                  Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER).
+                  BEDROCK uses the AWS credentials chain (IAM role via IRSA, static keys in the Secret, or instance profile).
                 type: string
               replicas:
                 default: 1
@@ -863,8 +870,12 @@ spec:
                         description: Enabled enables TLS.
                         type: boolean
                       secretName:
-                        description: SecretName is the name of the Secret containing
-                          tls.crt and tls.key.
+                        description: |-
+                          SecretName is the name of the Secret containing tls.crt and tls.key.
+                          If the Secret also contains a ca.crt key, the operator will use it as
+                          the trust root when dialing the gRPC server — required for self-signed
+                          certificates, otherwise the connection fails with
+                          "certificate signed by unknown authority".
                         type: string
                     type: object
                   token:

@@ -41,6 +41,11 @@ spec:
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             - --health-probe-bind-address=:{{ .Values.health.port }}
           env:
+          # Carried to the operator so Instance specs that omit spec.image.tag
+          # inherit the chart version automatically. A helm upgrade of the
+          # operator then rolls the managed server pods in lockstep.
+            - name: CHATCLI_OPERATOR_APP_VERSION
+              value: {{ .Chart.AppVersion | quote }}
           {{- if .Values.prometheusUrl }}
             - name: PROMETHEUS_URL
               value: {{ .Values.prometheusUrl | quote }}

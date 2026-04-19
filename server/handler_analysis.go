@@ -242,14 +242,48 @@ ADVANCED ACTIONS:
     Best for: applying pre-prepared fix manifests.
 
 19. ExecDiagnostic — runs a whitelisted diagnostic command in a pod.
-    Params: {"command": "<exact-string>"}. Approved commands (exact match, no
-    variations): env | whoami | id | uname -a | ps aux | ps -ef | df -h |
-    free -m | free -h | mount | uptime | netstat -tlnp | netstat -an |
-    ss -tlnp | ss -an | ip addr | ip route | ifconfig | cat /etc/hosts |
-    cat /etc/resolv.conf | nslookup kubernetes.default.svc.cluster.local |
-    curl -s localhost{,:8080,:9090}/{health,healthz,ready,readyz,metrics,-/ready}.
-    Any other command (including variations like "nslookup <custom-host>")
-    will be rejected. Best for: gathering diagnostic data before making changes.
+    Params: {"command": "<exact-string>"}. Approved families (exact match, no
+    variations unless listed):
+      Process/shell: env | whoami | id | hostname | pwd | uname -a | uname -r |
+        ps aux | ps -ef | top -b -n1
+      Filesystem: df -h | df -i | free -m | free -h | mount | uptime |
+        ls -la / | ls -la /tmp | ls -la /var/log | du -sh /tmp | du -sh /var/log
+      Container limits (cgroups v1+v2, pick the path that exists in the pod):
+        cat /sys/fs/cgroup/memory.max | cat /sys/fs/cgroup/memory.current |
+        cat /sys/fs/cgroup/memory.events | cat /sys/fs/cgroup/memory.stat |
+        cat /sys/fs/cgroup/cpu.max | cat /sys/fs/cgroup/cpu.stat |
+        cat /sys/fs/cgroup/memory/memory.limit_in_bytes |
+        cat /sys/fs/cgroup/memory/memory.usage_in_bytes |
+        cat /sys/fs/cgroup/memory/memory.oom_control |
+        cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us |
+        cat /sys/fs/cgroup/cpu/cpu.cfs_period_us | cat /sys/fs/cgroup/cpu/cpu.stat
+      /proc introspection: cat /proc/1/{cgroup,status,limits,cmdline,environ} |
+        cat /proc/{meminfo,cpuinfo,loadavg,version} |
+        cat /proc/net/{tcp,udp,sockstat}
+      Networking: netstat {-tlnp,-an,-rn} | ss {-tlnp,-an,-s} |
+        ip addr | ip -s link | ip route | ip -6 route | ip neigh | ifconfig | arp -a
+      DNS: cat /etc/{hosts,resolv.conf,nsswitch.conf} |
+        nslookup {kubernetes.default.svc.cluster.local, kube-dns.kube-system.svc.cluster.local} |
+        getent hosts kubernetes.default.svc.cluster.local |
+        getent ahosts kubernetes.default.svc.cluster.local |
+        dig +short kubernetes.default.svc.cluster.local |
+        dig +short +search kubernetes.default |
+        host kubernetes.default.svc.cluster.local
+      Health/metrics/pprof:
+        curl -s localhost{,:8080}/{health,healthz,ready,readyz,live,livez} |
+        curl -s localhost:{8080,8081,9090,9091}/metrics |
+        curl -s localhost:9090/-/{ready,healthy} |
+        curl -s localhost:15000/ready (Envoy admin) |
+        curl -s localhost:{15020,15021}/healthz/ready (Istio sidecar) |
+        curl -s localhost:6060/debug/pprof/ |
+        curl -s localhost:6060/debug/pprof/{goroutine,heap}?debug=1
+      wget fallback (Alpine images): wget -qO- http://localhost{,:8080}/{health,healthz,metrics}
+      TCP reachability: nc -zv kubernetes.default.svc.cluster.local 443 |
+        nc -zv kube-dns.kube-system.svc.cluster.local 53
+    Any other command (including variations like "nslookup <custom-host>" or
+    "curl -s <external-url>") will be rejected. Best for: gathering diagnostic
+    data before making changes — pick the command that matches the suspected
+    symptom (OOM? read memory.current. DNS fail? getent/dig. app stuck? pprof goroutine).
 
 STATEFULSET ACTIONS (for StatefulSet resources):
 19. ScaleStatefulSet — scales StatefulSet replicas (ordered scaling). Params: {"replicas": "N"} (N >= 1).
@@ -367,7 +401,18 @@ Rules:
 - For DaemonSet issues, be aware of cluster-wide impact — prefer PauseDaemonSetRollout to stop bad rollouts
 - For Job failures, prefer SuspendJob to investigate, then RetryJob or AdjustJobResources
 - For CronJob missed schedules, check if suspended first (ResumeCronJob), then TriggerCronJob manually
-- Use resource-type-specific actions when available (e.g., ScaleStatefulSet instead of ScaleDeployment for StatefulSets)`)
+- Use resource-type-specific actions when available (e.g., ScaleStatefulSet instead of ScaleDeployment for StatefulSets)
+
+Root-cause → action heuristics:
+- OOMKilled: first confirm with a diagnostic (cat /sys/fs/cgroup/memory.events or memory.current), then AdjustResources increasing memory_limit by 50-100%. Avoid pure restart — pod will OOM again.
+- CPU throttling: AdjustResources increasing cpu_limit; verify first with cat /sys/fs/cgroup/cpu.stat (nr_throttled, throttled_time).
+- ImagePullBackOff / ErrImagePull: RollbackDeployment to healthy revision — new tag does not exist or registry is unreachable. Restart will not help.
+- CrashLoopBackOff with app-level bug (nil dereference, panic, unrecoverable startup error): if a prior healthy revision exists, RollbackDeployment. If revision 1 (no history) and the failure is deterministic (AIInsight identifies an app/config bug), prefer ScaleDeployment with replicas=0 to stop the crashloop and escalate — restarting or scaling up only amplifies noise and blocks the kubelet. Do NOT propose ExecDiagnostic + ScaleDeployment>0 in this case; the diagnostic cannot fix the bug.
+- Missing dependency (connection refused to a Service that does not exist): diagnostics (getent/dig/nc) only confirm; remediation is out of the operator's toolset (user must create the dep). Plan ScaleDeployment replicas=0 to stop the bleeding and escalate. Do not retry.
+- Pending pod (scheduling failure): diagnostic-only from the operator side — no action reliably fixes insufficient resources or node selector mismatch. Scale-to-0 if it is blocking a bigger rollout.
+- DNS failures: diagnose with getent/dig to a known-good name, then cat /etc/resolv.conf. Remediation is almost always a cluster-DNS fix outside the operator — escalate.
+- Stuck terminating pod: avoid DeletePod (no-op); use ForceDeleteStatefulSetPod or DeletePod with grace=0 semantics where exposed.
+- Rollback feasibility: RollbackDeployment only works when the Deployment has a prior ReplicaSet with a healthy image. For first-generation workloads (revision=1), rollback is not viable — pick ScaleDeployment=0 or AdjustResources instead.`)
 
 	return sb.String()
 }
@@ -508,12 +553,19 @@ NETWORKING:
 
 ADVANCED:
 17. ApplyManifest — apply fix from ConfigMap. Params: {"configmap": "fix-cm", "key": "manifest.yaml"}
-18. ExecDiagnostic — run diagnostic. Params: {"command": "<exact>"}. Allowed exactly:
-    env, whoami, id, uname -a, ps aux, ps -ef, df -h, free -m, free -h, mount,
-    uptime, netstat -tlnp, netstat -an, ss -tlnp, ss -an, ip addr, ip route,
-    ifconfig, cat /etc/hosts, cat /etc/resolv.conf,
-    nslookup kubernetes.default.svc.cluster.local, and curl -s localhost{,:8080,:9090}
-    on paths {health,healthz,ready,readyz,metrics,-/ready}. Any other string rejected.
+18. ExecDiagnostic — run diagnostic. Params: {"command": "<exact>"}. Allowed families
+    (exact match; list kept short here — see the analysis prompt for the full set):
+    process (env, whoami, id, hostname, uname -a, ps aux, top -b -n1);
+    fs (df -h, df -i, free -h, mount, uptime, ls -la /tmp, du -sh /var/log);
+    cgroups v1+v2 (cat /sys/fs/cgroup/memory.{max,current,events,stat},
+      cat /sys/fs/cgroup/cpu.{max,stat},
+      cat /sys/fs/cgroup/memory/memory.{limit_in_bytes,usage_in_bytes,oom_control},
+      cat /sys/fs/cgroup/cpu/cpu.{cfs_quota_us,cfs_period_us,stat});
+    /proc (cat /proc/1/{cgroup,status,limits,cmdline}, cat /proc/{meminfo,loadavg});
+    net (netstat {-tlnp,-an,-rn}, ss {-tlnp,-an,-s}, ip addr, ip route, ip neigh);
+    dns (cat /etc/{hosts,resolv.conf}, nslookup|getent|dig|host kubernetes.default.svc.cluster.local);
+    health/metrics/pprof on localhost and wget fallback; nc -zv to kubernetes/kube-dns.
+    Any other string rejected — including variations like "nslookup <custom-host>".
 
 STATEFULSET:
 19. ScaleStatefulSet — scale replicas. Params: {"replicas": "N"}.

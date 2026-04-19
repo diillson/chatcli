@@ -1211,3 +1211,78 @@ func TestDeepCopy_WatcherWithTargets(t *testing.T) {
 		t.Error("modifying copy's MaxLogLines affected the original")
 	}
 }
+
+// TestReconcileClusterRBAC_MigratesStaleRoleRef guards against an upgrade bug from
+// pre-1.105.1 operators, where reconcileClusterRBAC created the CRB with a per-Instance
+// roleRef. Kubernetes treats roleRef as immutable, so a plain CreateOrUpdate after the
+// upgrade fails with "cannot change roleRef" and blocks the Instance reconcile loop.
+// The reconciler must detect the stale name, delete the CRB, and let the create path
+// rebuild it against the shared chatcli-watcher ClusterRole.
+func TestReconcileClusterRBAC_MigratesStaleRoleRef(t *testing.T) {
+	instance := newInstance("chatcli-prod", "chatcli-system")
+	staleCRBName := instance.Namespace + "-" + instance.Name + "-watcher"
+	staleCRB := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: staleCRBName,
+			UID:  types.UID("stale-uid"),
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     staleCRBName,
+		},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: instance.Name, Namespace: instance.Namespace}},
+	}
+
+	r, c := setupFakeReconciler(instance, staleCRB)
+	ctx := context.Background()
+
+	if err := r.reconcileClusterRBAC(ctx, instance); err != nil {
+		t.Fatalf("reconcileClusterRBAC failed on stale CRB: %v", err)
+	}
+
+	var got rbacv1.ClusterRoleBinding
+	if err := c.Get(ctx, types.NamespacedName{Name: staleCRBName}, &got); err != nil {
+		t.Fatalf("expected CRB to be recreated, got error: %v", err)
+	}
+	if got.RoleRef.Name != SharedWatcherClusterRole {
+		t.Errorf("expected roleRef.name %q after migration, got %q", SharedWatcherClusterRole, got.RoleRef.Name)
+	}
+	if got.UID == "stale-uid" {
+		t.Error("expected CRB to be recreated (new UID), but stale UID survived — delete path didn't run")
+	}
+}
+
+// TestReconcileClusterRBAC_IdempotentWhenRoleRefAlreadyCorrect verifies the migration
+// code does not churn resources that are already on the new shape.
+func TestReconcileClusterRBAC_IdempotentWhenRoleRefAlreadyCorrect(t *testing.T) {
+	instance := newInstance("chatcli-prod", "chatcli-system")
+	crbName := instance.Namespace + "-" + instance.Name + "-watcher"
+	currentCRB := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: crbName,
+			UID:  types.UID("preserved-uid"),
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     SharedWatcherClusterRole,
+		},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: instance.Name, Namespace: instance.Namespace}},
+	}
+
+	r, c := setupFakeReconciler(instance, currentCRB)
+	ctx := context.Background()
+
+	if err := r.reconcileClusterRBAC(ctx, instance); err != nil {
+		t.Fatalf("reconcileClusterRBAC failed on current CRB: %v", err)
+	}
+
+	var got rbacv1.ClusterRoleBinding
+	if err := c.Get(ctx, types.NamespacedName{Name: crbName}, &got); err != nil {
+		t.Fatalf("expected CRB to still exist, got error: %v", err)
+	}
+	if got.UID != "preserved-uid" {
+		t.Errorf("CRB was unnecessarily recreated; UID should stay %q, got %q", "preserved-uid", got.UID)
+	}
+}
