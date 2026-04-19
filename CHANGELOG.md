@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.105.3](https://github.com/diillson/chatcli/compare/v1.105.2...v1.105.3) (2026-04-19)
+
+
+### Bug Fixes
+
+* **operator:** CRB migration + chart-driven image tag + expanded remediation toolkit ([#808](https://github.com/diillson/chatcli/issues/808)) ([4ae8db4](https://github.com/diillson/chatcli/commit/4ae8db4903de7db0d020038f29be1f6863a5bf5f))
+
 ## [1.105.2](https://github.com/diillson/chatcli/compare/v1.105.1...v1.105.2) (2026-04-19)
 
 
