@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
@@ -942,10 +943,29 @@ const SharedWatcherClusterRole = "chatcli-watcher"
 // reconcileClusterRBAC creates a per-Instance ClusterRoleBinding that references the
 // pre-provisioned SharedWatcherClusterRole. The ClusterRole itself is NOT created here.
 func (r *InstanceReconciler) reconcileClusterRBAC(ctx context.Context, instance *platformv1alpha1.Instance) error {
+	crbName := instance.Namespace + "-" + instance.Name + "-watcher"
+	log := log.FromContext(ctx)
+
+	// Migration from pre-1.105.1 operators: the old reconciler created the CRB with
+	// roleRef pointing at a per-Instance ClusterRole (same name as the CRB). Kubernetes
+	// makes roleRef immutable, so CreateOrUpdate fails with "cannot change roleRef".
+	// Detect and delete the stale CRB so the Create below rebuilds it against the
+	// shared chatcli-watcher ClusterRole.
+	existing := &rbacv1.ClusterRoleBinding{}
+	if err := r.Get(ctx, types.NamespacedName{Name: crbName}, existing); err == nil {
+		if existing.RoleRef.Name != SharedWatcherClusterRole {
+			log.Info("Stale ClusterRoleBinding detected (migration from pre-1.105.1), recreating",
+				"name", crbName, "oldRoleRef", existing.RoleRef.Name, "newRoleRef", SharedWatcherClusterRole)
+			if err := r.Delete(ctx, existing); err != nil && !errors.IsNotFound(err) {
+				return fmt.Errorf("deleting stale CRB %s for roleRef migration: %w", crbName, err)
+			}
+		}
+	} else if !errors.IsNotFound(err) {
+		return fmt.Errorf("getting CRB %s: %w", crbName, err)
+	}
+
 	crb := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: instance.Namespace + "-" + instance.Name + "-watcher",
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: crbName},
 	}
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, crb, func() error {
