@@ -148,8 +148,11 @@ type ImageSpec struct {
 	// +kubebuilder:default="ghcr.io/diillson/chatcli"
 	Repository string `json:"repository,omitempty"`
 
-	// Tag is the container image tag.
-	// +kubebuilder:default="latest"
+	// Tag is the container image tag. When unset, the operator resolves it from the
+	// CHATCLI_OPERATOR_APP_VERSION env var (set by the Helm chart to the chart's
+	// appVersion), falling back to "latest". This lets a helm upgrade of the operator
+	// also roll managed server pods without patching each Instance.
+	// +optional
 	Tag string `json:"tag,omitempty"`
 
 	// PullPolicy defines the image pull policy.

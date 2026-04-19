@@ -365,8 +365,11 @@ spec:
                     description: Repository is the container image repository.
                     type: string
                   tag:
-                    default: latest
-                    description: Tag is the container image tag.
+                    description: |-
+                      Tag is the container image tag. When unset, the operator resolves it from the
+                      CHATCLI_OPERATOR_APP_VERSION env var (set by the Helm chart to the chart's
+                      appVersion), falling back to "latest". This lets a helm upgrade of the operator
+                      also roll managed server pods without patching each Instance.
                     type: string
                 type: object
               mcp:

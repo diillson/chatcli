@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -117,7 +118,11 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 	// Build container args
 	args := r.buildContainerArgs(instance)
 
-	// Image
+	// Image — tag resolution order:
+	//   1. instance.Spec.Image.Tag (explicit user pin — honored verbatim)
+	//   2. CHATCLI_OPERATOR_APP_VERSION env var (set by the Helm chart to .Chart.AppVersion
+	//      so a helm upgrade of the operator rolls managed Instances automatically)
+	//   3. "latest" (final fallback when neither is present — e.g. make deploy without Helm)
 	repo := "ghcr.io/diillson/chatcli"
 	tag := "latest"
 	pullPolicy := corev1.PullIfNotPresent
@@ -126,6 +131,8 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 	}
 	if instance.Spec.Image.Tag != "" {
 		tag = instance.Spec.Image.Tag
+	} else if v := os.Getenv("CHATCLI_OPERATOR_APP_VERSION"); v != "" {
+		tag = v
 	}
 	if instance.Spec.Image.PullPolicy != "" {
 		pullPolicy = instance.Spec.Image.PullPolicy
