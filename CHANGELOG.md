@@ -4,6 +4,13 @@
 
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
+## [1.105.4](https://github.com/diillson/chatcli/compare/v1.105.3...v1.105.4) (2026-04-19)
+
+
+### Bug Fixes
+
+* **operator:** unblock ScaleDeployment=0 with containment opt-in ([#810](https://github.com/diillson/chatcli/issues/810)) ([86d290d](https://github.com/diillson/chatcli/commit/86d290d3321951947cfb1e5aeca368c397006762))
+
 ## [1.105.3](https://github.com/diillson/chatcli/compare/v1.105.2...v1.105.3) (2026-04-19)
 
 
