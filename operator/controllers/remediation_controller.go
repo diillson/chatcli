@@ -1306,8 +1306,8 @@ func (r *RemediationReconciler) validateSafetyConstraints(actions []platformv1al
 		case platformv1alpha1.ActionScaleDeployment:
 			if replicas, ok := action.Params["replicas"]; ok {
 				n, err := strconv.Atoi(replicas)
-				if err == nil && n == 0 {
-					return fmt.Errorf("scaling to 0 replicas is not allowed (destructive)")
+				if err == nil && n == 0 && action.Params["containment"] != "true" {
+					return fmt.Errorf("scaling to 0 replicas is not allowed (destructive) — set params.containment=\"true\" to opt in when this is a deliberate stop-the-bleeding action for an unrecoverable app-level bug")
 				}
 			}
 		case platformv1alpha1.ActionAdjustResources:
@@ -1334,8 +1334,8 @@ func (r *RemediationReconciler) validateSafetyConstraints(actions []platformv1al
 		case platformv1alpha1.ActionScaleStatefulSet:
 			if replicas, ok := action.Params["replicas"]; ok {
 				n, err := strconv.Atoi(replicas)
-				if err == nil && n == 0 {
-					return fmt.Errorf("scaling StatefulSet to 0 replicas is not allowed (destructive)")
+				if err == nil && n == 0 && action.Params["containment"] != "true" {
+					return fmt.Errorf("scaling StatefulSet to 0 replicas is not allowed (destructive) — set params.containment=\"true\" to opt in when this is a deliberate stop-the-bleeding action for an unrecoverable app-level bug")
 				}
 			}
 		case platformv1alpha1.ActionAdjustStatefulSetResources,
