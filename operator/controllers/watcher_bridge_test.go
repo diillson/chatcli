@@ -224,6 +224,41 @@ func TestWatcherBridge_CreateAnomaly(t *testing.T) {
 	}
 }
 
+// TestWatcherBridge_CreateAnomalyIdempotent exercises the path where the server
+// re-emits the same alert (deterministic name via type|deployment|namespace|timestamp)
+// after the operator's in-memory dedup map was flushed (restart / fresh bridge).
+// The second Create must return nil so the caller marks the hash as seen and the
+// poll loop stops logging "already exists" errors each 30s.
+func TestWatcherBridge_CreateAnomalyIdempotent(t *testing.T) {
+	wb := setupFakeWatcherBridge()
+	ctx := context.Background()
+
+	alert := &pb.WatcherAlert{
+		Type:          "PodNotReady",
+		Severity:      "WARNING",
+		Message:       "crash-demo has 0/2 ready pods",
+		Object:        "crash-demo",
+		Namespace:     "default",
+		Deployment:    "crash-demo",
+		TimestampUnix: 1776544660,
+	}
+
+	if err := wb.createAnomaly(ctx, alert); err != nil {
+		t.Fatalf("first createAnomaly failed: %v", err)
+	}
+	if err := wb.createAnomaly(ctx, alert); err != nil {
+		t.Fatalf("second createAnomaly must be idempotent, got: %v", err)
+	}
+
+	var anomalies platformv1alpha1.AnomalyList
+	if err := wb.client.List(ctx, &anomalies, client.InNamespace("default")); err != nil {
+		t.Fatalf("failed to list anomalies: %v", err)
+	}
+	if len(anomalies.Items) != 1 {
+		t.Fatalf("expected exactly 1 anomaly after idempotent retry, got %d", len(anomalies.Items))
+	}
+}
+
 func TestWatcherBridge_ResolveServerAddress(t *testing.T) {
 	// No ready instances
 	wb := setupFakeWatcherBridge()

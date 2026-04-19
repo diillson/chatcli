@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -232,6 +233,17 @@ func (wb *WatcherBridge) createAnomaly(ctx context.Context, alert *pb.WatcherAle
 	}
 
 	if err := wb.client.Create(ctx, anomaly); err != nil {
+		// Same (type, deployment, namespace, timestamp) produces a deterministic name.
+		// If the CR already exists (operator restart wiped the in-memory dedup map,
+		// or the server re-emits a still-active alert), treat it as a successful no-op
+		// so the caller marks the hash as seen and stops re-trying each poll.
+		if errors.IsAlreadyExists(err) {
+			wb.logger.Debug("Anomaly CR already exists, treating as idempotent success",
+				zap.String("name", name),
+				zap.String("signal", string(signalType)),
+				zap.String("deployment", alert.Deployment))
+			return nil
+		}
 		return fmt.Errorf("creating anomaly %s: %w", name, err)
 	}
 

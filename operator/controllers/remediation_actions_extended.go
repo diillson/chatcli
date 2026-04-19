@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -25,6 +27,79 @@ import (
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
+
+// Cached diagnostic allowlist — initialized once from env and reused per reconcile.
+var (
+	cachedDiagnosticAllowlist     map[string]bool
+	cachedDiagnosticAllowlistOnce sync.Once
+)
+
+// defaultDiagnosticAllowlist returns the read-only commands safe for ExecDiagnostic.
+// Each entry must be the exact command string the AI generates (including flags and
+// args). Matching is exact-string — no prefix or regex — to keep the attack surface
+// narrow. Extend via env var CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS (comma-separated).
+func defaultDiagnosticAllowlist() map[string]bool {
+	return map[string]bool{
+		// Process / shell introspection
+		"env":      true,
+		"whoami":   true,
+		"id":       true,
+		"uname -a": true,
+		"ps aux":   true,
+		"ps -ef":   true,
+
+		// Filesystem / resources
+		"df -h":   true,
+		"free -m": true,
+		"free -h": true,
+		"mount":   true,
+		"uptime":  true,
+
+		// Networking — listen/route state (read-only)
+		"netstat -tlnp": true,
+		"netstat -an":   true,
+		"ss -tlnp":      true,
+		"ss -an":        true,
+		"ip addr":       true,
+		"ip route":      true,
+		"ifconfig":      true,
+
+		// DNS / resolver (most common K8s debug need)
+		"cat /etc/hosts":       true,
+		"cat /etc/resolv.conf": true,
+		"nslookup kubernetes.default.svc.cluster.local": true,
+
+		// Local health probes — common K8s sidecar conventions
+		"curl -s localhost/health":       true,
+		"curl -s localhost/healthz":      true,
+		"curl -s localhost/ready":        true,
+		"curl -s localhost/readyz":       true,
+		"curl -s localhost:8080/health":  true,
+		"curl -s localhost:8080/healthz": true,
+		"curl -s localhost:8080/ready":   true,
+		"curl -s localhost:8080/readyz":  true,
+		"curl -s localhost:8080/metrics": true,
+		"curl -s localhost:9090/-/ready": true,
+		"curl -s localhost:9090/metrics": true,
+	}
+}
+
+// diagnosticAllowlist returns the effective allowlist (defaults + env overrides).
+func diagnosticAllowlist() map[string]bool {
+	cachedDiagnosticAllowlistOnce.Do(func() {
+		list := defaultDiagnosticAllowlist()
+		if extra := os.Getenv("CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS"); extra != "" {
+			for _, cmd := range strings.Split(extra, ",") {
+				cmd = strings.TrimSpace(cmd)
+				if cmd != "" {
+					list[cmd] = true
+				}
+			}
+		}
+		cachedDiagnosticAllowlist = list
+	})
+	return cachedDiagnosticAllowlist
+}
 
 // executeHelmRollback performs a Helm release rollback via the GitOps detector.
 func (r *RemediationReconciler) executeHelmRollback(ctx context.Context, resource platformv1alpha1.ResourceRef, params map[string]string) error {
@@ -386,23 +461,7 @@ func (r *RemediationReconciler) executeExecDiagnostic(ctx context.Context, resou
 		return fmt.Errorf("missing 'command' param")
 	}
 
-	// Whitelist of safe diagnostic commands
-	safeCommands := map[string]bool{
-		"env":                            true,
-		"whoami":                         true,
-		"df -h":                          true,
-		"free -m":                        true,
-		"cat /etc/hosts":                 true,
-		"ps aux":                         true,
-		"netstat -tlnp":                  true,
-		"ss -tlnp":                       true,
-		"curl -s localhost/health":       true,
-		"curl -s localhost/healthz":      true,
-		"curl -s localhost:8080/health":  true,
-		"curl -s localhost:8080/healthz": true,
-	}
-
-	if !safeCommands[command] {
+	if !diagnosticAllowlist()[command] {
 		return fmt.Errorf("command %q not in approved diagnostic commands whitelist", command)
 	}
 
