@@ -41,19 +41,19 @@ var (
 func defaultDiagnosticAllowlist() map[string]bool {
 	return map[string]bool{
 		// Process / shell introspection
-		"env":     true,
-		"whoami":  true,
-		"id":      true,
+		"env":      true,
+		"whoami":   true,
+		"id":       true,
 		"uname -a": true,
-		"ps aux":  true,
-		"ps -ef":  true,
+		"ps aux":   true,
+		"ps -ef":   true,
 
 		// Filesystem / resources
-		"df -h":    true,
-		"free -m":  true,
-		"free -h":  true,
-		"mount":    true,
-		"uptime":   true,
+		"df -h":   true,
+		"free -m": true,
+		"free -h": true,
+		"mount":   true,
+		"uptime":  true,
 
 		// Networking — listen/route state (read-only)
 		"netstat -tlnp": true,
@@ -70,17 +70,17 @@ func defaultDiagnosticAllowlist() map[string]bool {
 		"nslookup kubernetes.default.svc.cluster.local": true,
 
 		// Local health probes — common K8s sidecar conventions
-		"curl -s localhost/health":        true,
-		"curl -s localhost/healthz":       true,
-		"curl -s localhost/ready":         true,
-		"curl -s localhost/readyz":        true,
-		"curl -s localhost:8080/health":   true,
-		"curl -s localhost:8080/healthz":  true,
-		"curl -s localhost:8080/ready":    true,
-		"curl -s localhost:8080/readyz":   true,
-		"curl -s localhost:8080/metrics":  true,
-		"curl -s localhost:9090/-/ready":  true,
-		"curl -s localhost:9090/metrics":  true,
+		"curl -s localhost/health":       true,
+		"curl -s localhost/healthz":      true,
+		"curl -s localhost/ready":        true,
+		"curl -s localhost/readyz":       true,
+		"curl -s localhost:8080/health":  true,
+		"curl -s localhost:8080/healthz": true,
+		"curl -s localhost:8080/ready":   true,
+		"curl -s localhost:8080/readyz":  true,
+		"curl -s localhost:8080/metrics": true,
+		"curl -s localhost:9090/-/ready": true,
+		"curl -s localhost:9090/metrics": true,
 	}
 }
 
