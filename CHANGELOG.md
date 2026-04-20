@@ -1,7 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
 ### Features
 
+* **agents:** seven-pattern quality pipeline — ReAct, Plan-and-Solve/ReWOO, Reflexion, RAG+HyDE, Self-Refine, Chain-of-Verification (CoVe), and a cross-provider reasoning backbone. New slashes `/plan`, `/refine`, `/verify`, `/reflect`, `/thinking`. New `/config quality` section. New embedding providers (Voyage, OpenAI) with pure-Go cosine vector store. See `docs/AGENT_PATTERNS.md` for the full integration map.
 * **core:** enterprise tool calling, observability, and security hardening ([#768](https://github.com/diillson/chatcli/issues/768)) ([bbc6d76](https://github.com/diillson/chatcli/commit/bbc6d76e52e9aab225c17f5fb4c4b7bf4063c472))
 
 ## [1.105.4](https://github.com/diillson/chatcli/compare/v1.105.3...v1.105.4) (2026-04-19)

@@ -228,6 +228,31 @@ type ChatCLI struct {
 	// advanced skill frontmatter support.
 	pendingManualSkill     *persona.Skill
 	pendingManualSkillArgs string
+
+	// Session-level reasoning override set by /thinking. When override.set
+	// is true the value of override.effort wins over skill hints and
+	// per-agent defaults for the next chat-turn LLM call. EffortUnset
+	// inside an active override means "thinking explicitly off".
+	thinkingOverride thinkingOverrideState
+
+	// One-shot flag set by /plan that forces Plan-First on the next
+	// /agent or /coder run regardless of complexity heuristics. Cleared
+	// by AgentMode.runPlanFirstIfApplicable after the plan executes.
+	pendingPlanFirst bool
+
+	// /refine and /verify session toggles. nil pointers mean "no
+	// override — defer to /config quality"; *bool=true forces the
+	// hook on, *bool=false forces it off. Consumed by AgentMode
+	// when it builds qualityConfig.
+	qualityOverrides qualityOverridesState
+}
+
+// thinkingOverrideState carries the user's /thinking choice. set
+// distinguishes "no override" (auto behaviour) from "explicit off"
+// (effort = EffortUnset, skip the hint).
+type thinkingOverrideState struct {
+	set    bool
+	effort client.SkillEffort
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
