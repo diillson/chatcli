@@ -24,6 +24,10 @@ const (
 	AgentTypeDiagnostics AgentType = "diagnostics"
 	AgentTypeFormatter   AgentType = "formatter"
 	AgentTypeDeps        AgentType = "deps"
+	// Phase 5/6 quality agents — registered like any other worker so
+	// the orchestrator can also call them explicitly via <agent_call>.
+	AgentTypeRefiner  AgentType = "refiner"
+	AgentTypeVerifier AgentType = "verifier"
 )
 
 // AgentCall represents a parsed <agent_call> directive from the orchestrator.
@@ -35,6 +39,11 @@ type AgentCall struct {
 }
 
 // AgentResult is the output of a single agent execution.
+//
+// Metadata is the catch-all bag used by quality hooks to communicate
+// across the pipeline (e.g. Verifier sets "verified_with_discrepancy"
+// so Reflexion can react). Always lazy-allocated by SetMetadata so
+// pre-quality call sites stay zero-cost.
 type AgentResult struct {
 	CallID        string
 	Agent         AgentType
@@ -43,7 +52,29 @@ type AgentResult struct {
 	Error         error
 	Duration      time.Duration
 	ToolCalls     []ToolCallRecord
-	ParallelCalls int // number of tool calls that ran in parallel (0 = sequential)
+	ParallelCalls int               // number of tool calls that ran in parallel (0 = sequential)
+	Metadata      map[string]string `json:"metadata,omitempty"`
+}
+
+// SetMetadata stores a key on the result, allocating Metadata if nil.
+// Empty key is a no-op so callers don't need to nil-check the value.
+func (r *AgentResult) SetMetadata(key, value string) {
+	if r == nil || key == "" {
+		return
+	}
+	if r.Metadata == nil {
+		r.Metadata = make(map[string]string)
+	}
+	r.Metadata[key] = value
+}
+
+// MetadataFlag returns true when key is present and equals "true".
+// Convenience for the common boolean-flag pattern.
+func (r *AgentResult) MetadataFlag(key string) bool {
+	if r == nil || r.Metadata == nil {
+		return false
+	}
+	return r.Metadata[key] == "true"
 }
 
 // ToolCallRecord logs a tool call executed by a worker.
@@ -107,6 +138,16 @@ type WorkerAgent interface {
 	Effort() string
 	// Execute runs the agent on a task with the provided dependencies.
 	Execute(ctx context.Context, task string, deps *WorkerDeps) (*AgentResult, error)
+}
+
+// ExecutionPipeline wraps a worker.Execute call with optional pre/post
+// processing (Self-Refine, CoVe, Reflexion, etc.). The dispatcher invokes
+// it in place of agent.Execute when set; when nil, behavior is identical
+// to a direct call. The interface lives in the workers package so the
+// dispatcher can hold it without importing the quality package (which
+// would create an import cycle: quality already imports workers).
+type ExecutionPipeline interface {
+	Run(ctx context.Context, agent WorkerAgent, task string, deps *WorkerDeps) (*AgentResult, error)
 }
 
 // PolicyChecker abstracts security policy enforcement for worker tool calls.

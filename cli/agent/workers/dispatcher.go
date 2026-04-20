@@ -34,6 +34,7 @@ type Dispatcher struct {
 	llmMgr        manager.LLMManager
 	config        DispatcherConfig
 	policyChecker PolicyChecker
+	pipeline      ExecutionPipeline
 	logger        *zap.Logger
 }
 
@@ -75,6 +76,18 @@ func (d *Dispatcher) UpdateProviderModel(provider, model string) {
 // on tool calls executed by parallel workers.
 func (d *Dispatcher) SetPolicyChecker(pc PolicyChecker) {
 	d.policyChecker = pc
+}
+
+// SetPipeline wires an execution pipeline (quality.Pipeline et al). When
+// non-nil, executeAgent invokes pipeline.Run instead of agent.Execute. nil
+// restores the direct-call default.
+func (d *Dispatcher) SetPipeline(p ExecutionPipeline) {
+	d.pipeline = p
+}
+
+// Pipeline returns the currently wired pipeline (may be nil).
+func (d *Dispatcher) Pipeline() ExecutionPipeline {
+	return d.pipeline
 }
 
 // Dispatch executes a batch of agent calls, respecting parallelism settings.
@@ -344,8 +357,19 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 		Logger:        d.logger.With(zap.String("agent", string(call.Agent)), zap.String("callID", call.ID)),
 	}
 
-	// Execute the agent
-	result, execErr := agent.Execute(workerCtx, call.Task, deps)
+	// Execute the agent. When a quality pipeline is wired, route through
+	// it so registered pre/post hooks (Self-Refine, CoVe, Reflexion, …)
+	// can wrap the call. When nil, behavior is identical to a direct
+	// agent.Execute — the no-pipeline performance contract.
+	var (
+		result  *AgentResult
+		execErr error
+	)
+	if d.pipeline != nil {
+		result, execErr = d.pipeline.Run(workerCtx, agent, call.Task, deps)
+	} else {
+		result, execErr = agent.Execute(workerCtx, call.Task, deps)
+	}
 	if result == nil {
 		result = &AgentResult{}
 	}

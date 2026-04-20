@@ -69,6 +69,8 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 		cli.showConfigAuth()
 	case "security":
 		cli.showConfigSecurity()
+	case "quality":
+		cli.showConfigQuality()
 	case "server":
 		cli.showConfigServer()
 	default:
@@ -278,6 +280,7 @@ func (cli *ChatCLI) showConfigAll() {
 	cli.showConfigIntegrations()
 	cli.showConfigAuth()
 	cli.showConfigSecurity()
+	cli.showConfigQuality()
 	// server block is conditional (see its own guard)
 	cli.showConfigServer()
 }
