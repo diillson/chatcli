@@ -322,7 +322,7 @@ func (h *ContextHandler) handleDelete(args []string) error {
 
 	if strings.ToLower(strings.TrimSpace(response)) != "s" &&
 		strings.ToLower(strings.TrimSpace(response)) != "y" {
-		fmt.Println(i18n.T("context.delete.cancelled"))
+		fmt.Println(i18n.T("context.delete.canceled"))
 		return nil
 	}
 

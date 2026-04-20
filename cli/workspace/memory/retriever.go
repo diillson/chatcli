@@ -238,7 +238,7 @@ func ExtractKeywords(messages []string) []string {
 		"qual": true, "quando": true, "onde": true, "quem": true,
 		"sim": true, "aqui": true, "ali": true, "isso": true,
 		"isto": true, "esse": true, "esta": true, "eu": true,
-		"tu": true, "ele": true, "ela": true, "eles": true,
+		"tu": true, "ele": true, "ela": true, "eles": true, //nolint:misspell // "eles" is pt-BR for "they", not a typo
 		"voce": true, "meu": true, "seu": true, "sua": true,
 	}
 

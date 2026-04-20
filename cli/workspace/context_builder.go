@@ -65,7 +65,7 @@ func (cb *ContextBuilder) BuildSystemPromptPrefix() string {
 // query is the raw user message used to seed the hypothesis; hints
 // are the existing keyword set (typically from ExtractKeywords on
 // recent messages). When augmenter is nil and no vector index is
-// attached, behaviour matches BuildSystemPromptPrefixWithHints
+// attached, behavior matches BuildSystemPromptPrefixWithHints
 // exactly — the no-regression contract.
 func (cb *ContextBuilder) BuildSystemPromptPrefixWithHyDE(ctx context.Context, query string, hints []string, augmenter *memory.HyDEAugmenter) string {
 	if augmenter == nil && (cb.memory == nil || cb.memory.VectorIndex() == nil) {

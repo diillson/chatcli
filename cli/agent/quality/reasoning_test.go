@@ -79,7 +79,7 @@ func TestEffortForBudget(t *testing.T) {
 		budget int
 		want   client.SkillEffort
 	}{
-		{0, client.EffortHigh},   // sane default
+		{0, client.EffortHigh}, // sane default
 		{1000, client.EffortHigh},
 		{4096, client.EffortMedium},
 		{8192, client.EffortHigh},

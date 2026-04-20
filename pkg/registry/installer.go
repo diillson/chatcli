@@ -61,7 +61,7 @@ func (inst *Installer) Install(meta *SkillMeta, content []byte) (*InstallResult,
 	if err := os.MkdirAll(tmpDir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating temp directory: %w", err)
 	}
-	defer os.RemoveAll(tmpDir) // cleanup temp on failure
+	defer func() { _ = os.RemoveAll(tmpDir) }() // cleanup temp on failure
 
 	// Build SKILL.md with frontmatter
 	skillContent := buildSkillMD(meta, content)
@@ -125,7 +125,7 @@ func (inst *Installer) InstallFromSnapshot(meta *SkillMeta, files []SnapshotFile
 	if err := os.MkdirAll(tmpDir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating temp directory: %w", err)
 	}
-	defer os.RemoveAll(tmpDir) // cleanup temp on failure
+	defer func() { _ = os.RemoveAll(tmpDir) }() // cleanup temp on failure
 
 	// Write each file from the snapshot
 	for _, f := range files {

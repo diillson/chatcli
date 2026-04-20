@@ -115,12 +115,12 @@ func TestResolvePlaceholders(t *testing.T) {
 		"E2": "hello world",
 	}
 	cases := map[string]string{
-		"use #E1":              "use first line\nsecond line",
-		"use #E1.summary":      "use first line",
-		"use #E1.head=5":       "use first…",
-		"use #E2.last=5":       "use …world",
-		"use #E1 and #E2":      "use first line\nsecond line and hello world",
-		"unknown #E9":          "unknown #E9", // left intact
+		"use #E1":         "use first line\nsecond line",
+		"use #E1.summary": "use first line",
+		"use #E1.head=5":  "use first…",
+		"use #E2.last=5":  "use …world",
+		"use #E1 and #E2": "use first line\nsecond line and hello world",
+		"unknown #E9":     "unknown #E9", // left intact
 	}
 	for in, want := range cases {
 		got := ResolvePlaceholders(in, outputs)

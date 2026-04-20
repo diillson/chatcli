@@ -257,7 +257,7 @@ func (c *OpenAIAssistantClient) finishActiveRuns(ctx context.Context, threadID s
 					zap.String("runID", run.ID),
 					zap.Error(err))
 			} else {
-				c.logger.Info(i18n.T("llm.assistant.run_cancelled"), zap.String("runID", run.ID))
+				c.logger.Info(i18n.T("llm.assistant.run_canceled"), zap.String("runID", run.ID))
 			}
 		}
 	}
@@ -595,7 +595,7 @@ func (c *OpenAIAssistantClient) waitForRunCompletion(ctx context.Context, thread
 		switch runStatus.Status {
 		case "completed":
 			return "completed", nil
-		case "failed", "cancelled", "expired":
+		case "failed", "canceled", "expired":
 			return runStatus.Status, fmt.Errorf("%s", i18n.T("llm.assistant.execution_failed", runStatus.Status))
 		}
 

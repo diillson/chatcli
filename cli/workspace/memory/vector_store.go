@@ -270,12 +270,12 @@ func (v *VectorIndex) persist() error {
 		Entries:   v.entries,
 	}
 	v.mu.RUnlock()
-	if err := os.MkdirAll(filepath.Dir(v.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(v.path), 0o750); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(v.path, data, 0o644)
+	return os.WriteFile(v.path, data, 0o600)
 }

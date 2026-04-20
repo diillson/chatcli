@@ -53,7 +53,7 @@ func NewWatcherBridge(c client.Client, scheme *runtime.Scheme, sc *ServerClient,
 	}
 }
 
-// Start implements manager.Runnable. It runs a polling loop until the context is cancelled.
+// Start implements manager.Runnable. It runs a polling loop until the context is canceled.
 func (wb *WatcherBridge) Start(ctx context.Context) error {
 	wb.logger.Info("WatcherBridge started", zap.Duration("poll_interval", PollInterval))
 

@@ -19,7 +19,7 @@ type fakeProvider struct {
 	dim int
 }
 
-func (f *fakeProvider) Name() string  { return "fake" }
+func (f *fakeProvider) Name() string   { return "fake" }
 func (f *fakeProvider) Dimension() int { return f.dim }
 func (f *fakeProvider) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	out := make([][]float32, len(texts))

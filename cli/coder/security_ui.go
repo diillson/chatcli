@@ -22,7 +22,7 @@ const (
 	DecisionAllowAlways
 	DecisionDenyOnce
 	DecisionDenyForever
-	DecisionCancelled // user pressed Ctrl+C; action can be retried later
+	DecisionCanceled // user pressed Ctrl+C; action can be retried later
 )
 
 // SecurityContext provides optional metadata for richer security prompts.
@@ -139,8 +139,8 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	if inputCh != nil {
 		select {
 		case <-ctx.Done():
-			fmt.Println("\n" + red + " [" + i18n.T("coder.security.cancelled") + "]" + reset)
-			return DecisionCancelled
+			fmt.Println("\n" + red + " [" + i18n.T("coder.security.canceled") + "]" + reset)
+			return DecisionCanceled
 		case line := <-inputCh:
 			input = strings.TrimSpace(strings.ToLower(line))
 		}
@@ -157,8 +157,8 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 		select {
 		case <-ctx.Done():
 			_ = os.Stdin.SetReadDeadline(time.Now())
-			fmt.Println("\n" + red + " [" + i18n.T("coder.security.cancelled") + "]" + reset)
-			return DecisionCancelled
+			fmt.Println("\n" + red + " [" + i18n.T("coder.security.canceled") + "]" + reset)
+			return DecisionCanceled
 		case input = <-resultChan:
 		}
 	}

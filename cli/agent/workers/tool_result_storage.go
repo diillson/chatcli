@@ -46,7 +46,7 @@ var (
 
 // SetResultDir overrides the directory used for persisting large tool results.
 // Called by the session workspace so overflow lands inside the session scratch
-// area (which is on the read allowlist). Empty resets to default behaviour.
+// area (which is on the read allowlist). Empty resets to default behavior.
 func SetResultDir(dir string) {
 	resultDirMu.Lock()
 	resultDirCustom = dir

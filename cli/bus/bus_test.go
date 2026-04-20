@@ -203,7 +203,7 @@ func TestConcurrency(t *testing.T) {
 	}
 }
 
-func TestContextCancelled(t *testing.T) {
+func TestContextCanceled(t *testing.T) {
 	mb := New(64)
 	defer mb.Close()
 
@@ -212,6 +212,6 @@ func TestContextCancelled(t *testing.T) {
 
 	err := mb.PublishInbound(ctx, InboundMessage{Content: "x"})
 	if err == nil {
-		t.Error("expected error for cancelled context")
+		t.Error("expected error for canceled context")
 	}
 }

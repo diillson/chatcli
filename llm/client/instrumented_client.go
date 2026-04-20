@@ -127,7 +127,7 @@ func classifyError(err error) string {
 	case strings.Contains(msg, "500") || strings.Contains(msg, "502") || strings.Contains(msg, "503") || strings.Contains(msg, "server error"):
 		return "server_error"
 	case errors.Is(err, context.Canceled):
-		return "cancelled"
+		return "canceled"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
 	default:

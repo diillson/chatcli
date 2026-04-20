@@ -56,11 +56,11 @@ func NewPlanRunner(d StepDispatcher, logger *zap.Logger) *PlanRunner {
 // (Reflexion, Verifier, …) can attribute discrepancies back to the
 // specific worker that produced them.
 type PlanRunResult struct {
-	Plan         *Plan
-	StepResults  map[string]workers.AgentResult
-	StepOutputs  map[string]string
-	FinalReport  string
-	HadErrors    bool
+	Plan          *Plan
+	StepResults   map[string]workers.AgentResult
+	StepOutputs   map[string]string
+	FinalReport   string
+	HadErrors     bool
 	StepsExecuted int
 }
 

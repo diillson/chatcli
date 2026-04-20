@@ -21,7 +21,7 @@ import (
 // Required env vars per provider:
 //   - voyage: VOYAGE_API_KEY (model: CHATCLI_EMBED_MODEL or "voyage-3")
 //   - openai: OPENAI_API_KEY (model: CHATCLI_EMBED_MODEL or
-//             "text-embedding-3-small"; dim: CHATCLI_EMBED_DIMENSIONS)
+//     "text-embedding-3-small"; dim: CHATCLI_EMBED_DIMENSIONS)
 func NewByName(name string) (Provider, error) {
 	switch NormalizeName(name) {
 	case "", "null", "off":

@@ -35,7 +35,7 @@ import (
 // All exits are silent (the only side effect is appending to history)
 // because Plan-First is meant to be a behind-the-scenes accelerator,
 // not a UI feature. /config quality + the deterministic report in
-// history are the visible artefacts.
+// history are the visible artifacts.
 func (a *AgentMode) runPlanFirstIfApplicable(ctx context.Context, userQuery string) {
 	if a.agentDispatcher == nil || a.agentRegistry == nil {
 		return

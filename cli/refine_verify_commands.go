@@ -2,7 +2,7 @@
  * ChatCLI - /refine and /verify session toggles (Phases 5 & 6).
  *
  * The hooks are normally controlled by /config quality. These slashes
- * give the user a way to flip the next-turn behaviour without editing
+ * give the user a way to flip the next-turn behavior without editing
  * env vars: /refine on|off|once, /verify on|off|once. Bare /refine or
  * /verify show the current state.
  */
@@ -27,57 +27,58 @@ type qualityOverridesState struct {
 // boolPtr is a tiny helper to fit literal toggles into qualityOverridesState.
 func boolPtr(b bool) *bool { return &b }
 
-// handleRefineCommand implements /refine [on|off|once].
-func (cli *ChatCLI) handleRefineCommand(userInput string) {
-	parts := strings.Fields(strings.TrimSpace(userInput))
-	if len(parts) <= 1 {
-		cli.showQualityToggleState("refine", cli.qualityOverrides.Refine)
-		return
-	}
-	switch strings.ToLower(parts[1]) {
-	case "on":
-		cli.qualityOverrides.Refine = boolPtr(true)
-		fmt.Println(colorize("  "+i18n.T("refine.set_on"), ColorGreen))
-	case "off":
-		cli.qualityOverrides.Refine = boolPtr(false)
-		fmt.Println(colorize("  "+i18n.T("refine.set_off"), ColorYellow))
-	case "once", "next":
-		// Same as "on" for the next turn; the agent loop clears the
-		// override after consuming it. Today both /refine on and once
-		// behave the same (override stays until user clears or session
-		// ends); future evolution can split them.
-		cli.qualityOverrides.Refine = boolPtr(true)
-		fmt.Println(colorize("  "+i18n.T("refine.set_once"), ColorGreen))
-	case "auto", "clear":
-		cli.qualityOverrides.Refine = nil
-		fmt.Println(colorize("  "+i18n.T("refine.cleared"), ColorGreen))
-	default:
-		fmt.Println(colorize("  "+i18n.T("refine.usage"), ColorYellow))
-	}
+// qualityToggleSpec describes one session-level quality toggle
+// (/refine, /verify) so the two slashes share their parsing and
+// message-emission logic without duplicating the switch ladder.
+type qualityToggleSpec struct {
+	name    string // "refine" | "verify" (also the i18n prefix)
+	current **bool // pointer to the override field on ChatCLI
+	usage   string // i18n usage string key
 }
 
-// handleVerifyCommand implements /verify [on|off|once].
+// handleRefineCommand implements /refine [on|off|once|auto|clear].
+func (cli *ChatCLI) handleRefineCommand(userInput string) {
+	cli.handleQualityToggle(userInput, qualityToggleSpec{
+		name:    "refine",
+		current: &cli.qualityOverrides.Refine,
+		usage:   "refine.usage",
+	})
+}
+
+// handleVerifyCommand implements /verify [on|off|once|auto|clear].
 func (cli *ChatCLI) handleVerifyCommand(userInput string) {
+	cli.handleQualityToggle(userInput, qualityToggleSpec{
+		name:    "verify",
+		current: &cli.qualityOverrides.Verify,
+		usage:   "verify.usage",
+	})
+}
+
+// handleQualityToggle is the shared parser/emitter for /refine and
+// /verify. Each verb emits its own i18n key (e.g. "refine.set_on",
+// "verify.set_on") so localized messages remain faithful to the
+// slash the user typed.
+func (cli *ChatCLI) handleQualityToggle(userInput string, spec qualityToggleSpec) {
 	parts := strings.Fields(strings.TrimSpace(userInput))
 	if len(parts) <= 1 {
-		cli.showQualityToggleState("verify", cli.qualityOverrides.Verify)
+		cli.showQualityToggleState(spec.name, *spec.current)
 		return
 	}
 	switch strings.ToLower(parts[1]) {
 	case "on":
-		cli.qualityOverrides.Verify = boolPtr(true)
-		fmt.Println(colorize("  "+i18n.T("verify.set_on"), ColorGreen))
+		*spec.current = boolPtr(true)
+		fmt.Println(colorize("  "+i18n.T(spec.name+".set_on"), ColorGreen))
 	case "off":
-		cli.qualityOverrides.Verify = boolPtr(false)
-		fmt.Println(colorize("  "+i18n.T("verify.set_off"), ColorYellow))
+		*spec.current = boolPtr(false)
+		fmt.Println(colorize("  "+i18n.T(spec.name+".set_off"), ColorYellow))
 	case "once", "next":
-		cli.qualityOverrides.Verify = boolPtr(true)
-		fmt.Println(colorize("  "+i18n.T("verify.set_once"), ColorGreen))
+		*spec.current = boolPtr(true)
+		fmt.Println(colorize("  "+i18n.T(spec.name+".set_once"), ColorGreen))
 	case "auto", "clear":
-		cli.qualityOverrides.Verify = nil
-		fmt.Println(colorize("  "+i18n.T("verify.cleared"), ColorGreen))
+		*spec.current = nil
+		fmt.Println(colorize("  "+i18n.T(spec.name+".cleared"), ColorGreen))
 	default:
-		fmt.Println(colorize("  "+i18n.T("verify.usage"), ColorYellow))
+		fmt.Println(colorize("  "+i18n.T(spec.usage), ColorYellow))
 	}
 }
 

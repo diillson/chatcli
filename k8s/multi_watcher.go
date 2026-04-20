@@ -118,7 +118,7 @@ func (mw *MultiWatcher) createWatcher(target WatchTarget, cfg MultiWatchConfig) 
 	return w, store
 }
 
-// Start launches all watchers in parallel goroutines. Blocks until ctx is cancelled.
+// Start launches all watchers in parallel goroutines. Blocks until ctx is canceled.
 func (mw *MultiWatcher) Start(ctx context.Context) error {
 	mw.logger.Info("Starting multi-watcher", zap.Int("targets", len(mw.watchers)))
 

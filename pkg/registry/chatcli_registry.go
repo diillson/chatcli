@@ -158,7 +158,12 @@ func (r *ChatCLIRegistry) Search(ctx context.Context, query string) ([]SkillMeta
 	return skills, nil
 }
 
-// GetSkillMeta returns full metadata for a specific skill.
+// GetSkillMeta returns full metadata for a specific skill. The
+// ChatCLI and CustomRegistry variants share the HTTP shape but target
+// different endpoint semantics; keeping both sites flat is easier to
+// audit than a shared templated helper.
+//
+//nolint:dupl // near-duplicate of custom_registry.GetSkillMeta; see note above.
 func (r *ChatCLIRegistry) GetSkillMeta(ctx context.Context, nameOrSlug string) (*SkillMeta, error) {
 	endpoint := fmt.Sprintf("%s/skills/%s", r.baseURL, url.PathEscape(nameOrSlug))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)

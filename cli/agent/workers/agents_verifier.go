@@ -127,11 +127,10 @@ func (a *VerifierAgent) Execute(ctx context.Context, task string, deps *WorkerDe
 	startTime := time.Now()
 	callID := nextCallID()
 
-	body := task
 	originalTask := ""
 	draft := task
 	if strings.HasPrefix(task, VerifyDirective) {
-		body = strings.TrimSpace(strings.TrimPrefix(task, VerifyDirective))
+		body := strings.TrimSpace(strings.TrimPrefix(task, VerifyDirective))
 		originalTask, draft = parseRefineSections(body) // same Task:/Draft: layout
 	}
 	if originalTask == "" {

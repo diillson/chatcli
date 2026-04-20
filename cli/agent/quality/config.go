@@ -137,93 +137,103 @@ func Defaults() Config {
 // accepts: 1/0, true/false, yes/no, on/off (case-insensitive).
 func LoadFromEnv() Config {
 	cfg := Defaults()
-
 	if v := os.Getenv("CHATCLI_QUALITY_ENABLED"); v != "" {
 		cfg.Enabled = parseBool(v, cfg.Enabled)
 	}
+	loadRefineEnv(&cfg.Refine)
+	loadVerifyEnv(&cfg.Verify)
+	loadReflexionEnv(&cfg.Reflexion)
+	loadPlanFirstEnv(&cfg.PlanFirst)
+	loadHyDEEnv(&cfg.HyDE)
+	loadReasoningEnv(&cfg.Reasoning)
+	return cfg
+}
 
-	// Refine
+func loadRefineEnv(c *RefineConfig) {
 	if v := os.Getenv("CHATCLI_QUALITY_REFINE_ENABLED"); v != "" {
-		cfg.Refine.Enabled = parseBool(v, cfg.Refine.Enabled)
+		c.Enabled = parseBool(v, c.Enabled)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REFINE_MAX_PASSES"); v != "" {
-		cfg.Refine.MaxPasses = parseInt(v, cfg.Refine.MaxPasses)
+		c.MaxPasses = parseInt(v, c.MaxPasses)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REFINE_MIN_BYTES"); v != "" {
-		cfg.Refine.MinDraftBytes = parseInt(v, cfg.Refine.MinDraftBytes)
+		c.MinDraftBytes = parseInt(v, c.MinDraftBytes)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REFINE_EPSILON"); v != "" {
-		cfg.Refine.EpsilonChars = parseInt(v, cfg.Refine.EpsilonChars)
+		c.EpsilonChars = parseInt(v, c.EpsilonChars)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REFINE_EXCLUDE"); v != "" {
-		cfg.Refine.ExcludeAgents = parseList(v)
+		c.ExcludeAgents = parseList(v)
 	}
+}
 
-	// Verify
+func loadVerifyEnv(c *VerifyConfig) {
 	if v := os.Getenv("CHATCLI_QUALITY_VERIFY_ENABLED"); v != "" {
-		cfg.Verify.Enabled = parseBool(v, cfg.Verify.Enabled)
+		c.Enabled = parseBool(v, c.Enabled)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_VERIFY_NUM_QUESTIONS"); v != "" {
-		cfg.Verify.NumQuestions = parseInt(v, cfg.Verify.NumQuestions)
+		c.NumQuestions = parseInt(v, c.NumQuestions)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_VERIFY_REWRITE"); v != "" {
-		cfg.Verify.RewriteOnDiscrepancy = parseBool(v, cfg.Verify.RewriteOnDiscrepancy)
+		c.RewriteOnDiscrepancy = parseBool(v, c.RewriteOnDiscrepancy)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_VERIFY_EXCLUDE"); v != "" {
-		cfg.Verify.ExcludeAgents = parseList(v)
+		c.ExcludeAgents = parseList(v)
 	}
+}
 
-	// Reflexion
+func loadReflexionEnv(c *ReflexionConfig) {
 	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_ENABLED"); v != "" {
-		cfg.Reflexion.Enabled = parseBool(v, cfg.Reflexion.Enabled)
+		c.Enabled = parseBool(v, c.Enabled)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_ON_ERROR"); v != "" {
-		cfg.Reflexion.OnError = parseBool(v, cfg.Reflexion.OnError)
+		c.OnError = parseBool(v, c.OnError)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_ON_HALLUCINATION"); v != "" {
-		cfg.Reflexion.OnHallucination = parseBool(v, cfg.Reflexion.OnHallucination)
+		c.OnHallucination = parseBool(v, c.OnHallucination)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_ON_LOW_QUALITY"); v != "" {
-		cfg.Reflexion.OnLowQuality = parseBool(v, cfg.Reflexion.OnLowQuality)
+		c.OnLowQuality = parseBool(v, c.OnLowQuality)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_PERSIST"); v != "" {
-		cfg.Reflexion.Persist = parseBool(v, cfg.Reflexion.Persist)
+		c.Persist = parseBool(v, c.Persist)
 	}
+}
 
-	// PlanFirst
+func loadPlanFirstEnv(c *PlanFirstConfig) {
 	if v := os.Getenv("CHATCLI_QUALITY_PLAN_FIRST_MODE"); v != "" {
-		cfg.PlanFirst.Mode = normalizeMode(v, cfg.PlanFirst.Mode, []string{"off", "auto", "always"})
+		c.Mode = normalizeMode(v, c.Mode, []string{"off", "auto", "always"})
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_PLAN_FIRST_THRESHOLD"); v != "" {
-		cfg.PlanFirst.ComplexityThreshold = parseInt(v, cfg.PlanFirst.ComplexityThreshold)
+		c.ComplexityThreshold = parseInt(v, c.ComplexityThreshold)
 	}
+}
 
-	// HyDE
+func loadHyDEEnv(c *HyDEConfig) {
 	if v := os.Getenv("CHATCLI_QUALITY_HYDE_ENABLED"); v != "" {
-		cfg.HyDE.Enabled = parseBool(v, cfg.HyDE.Enabled)
+		c.Enabled = parseBool(v, c.Enabled)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_HYDE_USE_VECTORS"); v != "" {
-		cfg.HyDE.UseVectors = parseBool(v, cfg.HyDE.UseVectors)
+		c.UseVectors = parseBool(v, c.UseVectors)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_HYDE_PROVIDER"); v != "" {
-		cfg.HyDE.EmbedProvider = strings.ToLower(strings.TrimSpace(v))
+		c.EmbedProvider = strings.ToLower(strings.TrimSpace(v))
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_HYDE_NUM_KEYWORDS"); v != "" {
-		cfg.HyDE.NumKeywords = parseInt(v, cfg.HyDE.NumKeywords)
+		c.NumKeywords = parseInt(v, c.NumKeywords)
 	}
+}
 
-	// Reasoning
+func loadReasoningEnv(c *ReasoningConfig) {
 	if v := os.Getenv("CHATCLI_QUALITY_REASONING_MODE"); v != "" {
-		cfg.Reasoning.Mode = normalizeMode(v, cfg.Reasoning.Mode, []string{"off", "on", "auto"})
+		c.Mode = normalizeMode(v, c.Mode, []string{"off", "on", "auto"})
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REASONING_BUDGET"); v != "" {
-		cfg.Reasoning.Budget = parseInt(v, cfg.Reasoning.Budget)
+		c.Budget = parseInt(v, c.Budget)
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REASONING_AUTO_AGENTS"); v != "" {
-		cfg.Reasoning.AutoAgents = parseList(v)
+		c.AutoAgents = parseList(v)
 	}
-
-	return cfg
 }
 
 // AppliesToAgent reports whether a hook should run for a given agent type

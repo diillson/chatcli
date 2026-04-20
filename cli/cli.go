@@ -3,6 +3,11 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  */
+
+// Package cli implements the interactive terminal UI, command
+// handlers, and orchestration glue that binds every chatcli
+// subsystem together (LLM clients, workspace, memory, agents,
+// plugins, MCP, hooks, quality pipeline).
 package cli
 
 import (
@@ -54,10 +59,16 @@ type FileChunk struct {
 	Content string
 }
 
+// InteractionState tracks the current phase of the chat loop so the
+// prompt prefix, signal handlers, and spinner can coordinate.
 type InteractionState int
 
+// ExecutionProfile selects which mode-specific defaults apply to the
+// next LLM call (chat vs agent vs coder).
 type ExecutionProfile int
 
+// Interaction states and execution profiles (iota block shared for
+// legacy reasons; the integer values never cross paths in use).
 const (
 	StateNormal InteractionState = iota
 	StateSwitchingProvider
@@ -68,9 +79,17 @@ const (
 	ProfileCoder
 )
 
-var agentModeRequest = errors.New("request to enter agent mode")
-var coderModeRequest = errors.New("request to enter coder mode")
-var errExitRequest = errors.New("request to exit")
+// Sentinel errors used as panic values to unwind out of go-prompt's
+// input loop when the user asks to enter agent/coder mode or exit.
+var (
+	errAgentModeRequest = errors.New("request to enter agent mode")
+	errCoderModeRequest = errors.New("request to enter coder mode")
+	errExitRequest      = errors.New("request to exit")
+)
+
+// CommandFlags declares the completer suggestions for the flag layer
+// of every supported slash / @ command. See cli_completer.go for the
+// top-level suggestion list.
 var CommandFlags = map[string]map[string][]prompt.Suggest{
 	"@file": {
 		"--mode": {
@@ -248,7 +267,7 @@ type ChatCLI struct {
 }
 
 // thinkingOverrideState carries the user's /thinking choice. set
-// distinguishes "no override" (auto behaviour) from "explicit off"
+// distinguishes "no override" (auto behavior) from "explicit off"
 // (effort = EffortUnset, skip the hint).
 type thinkingOverrideState struct {
 	set    bool
@@ -277,7 +296,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// Fatal in the sense of "the sandbox is broken" — but we only log
 		// and continue. The agent falls back to the old /tmp/chatcli-*
 		// shared dirs without read-on-demand access, which is the legacy
-		// behaviour.
+		// behavior.
 		logger.Warn("Failed to initialize session workspace — large tool outputs will not be readable", zap.Error(err))
 	}
 
@@ -522,7 +541,7 @@ func (cli *ChatCLI) executor(in string) {
 			return
 		}
 		cli.pendingAction = "agent"
-		panic(agentModeRequest)
+		panic(errAgentModeRequest)
 	}
 
 	if in == "" {
@@ -624,8 +643,8 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 					// which replaces our original panic value. Use pendingAction as fallback.
 					action := cli.pendingAction
 					cli.pendingAction = ""
-					if r == agentModeRequest || action == "agent" {
-					} else if r == coderModeRequest || action == "coder" {
+					if r == errAgentModeRequest || action == "agent" {
+					} else if r == errCoderModeRequest || action == "coder" {
 						cli.restoreTerminal()
 					} else if r == errExitRequest || action == "exit" {
 						shouldContinue = false
@@ -871,7 +890,7 @@ func (cli *ChatCLI) runWithCancellation(taskName string, fn func(context.Context
 	// Tratamento de erro específico para cancelamento
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			fmt.Println(colorize("\n "+i18n.T("cli.status.operation_cancelled_returning"), ColorYellow))
+			fmt.Println(colorize("\n "+i18n.T("cli.status.operation_canceled_returning"), ColorYellow))
 		} else {
 			fmt.Println(colorize("\n "+i18n.T("cli.error.execution_failed", err), ColorRed))
 		}
@@ -968,7 +987,7 @@ func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 	if cli.multilineBuf.Active() {
 		cli.multilineBuf.Reset()
 		buf.DeleteBeforeCursor(len([]rune(buf.Text())))
-		fmt.Printf("\n  [%s]\n", i18n.T("multiline.cancelled"))
+		fmt.Printf("\n  [%s]\n", i18n.T("multiline.canceled"))
 		return
 	}
 

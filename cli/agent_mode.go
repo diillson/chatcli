@@ -271,7 +271,9 @@ func (a *AgentMode) drainStdinToQueue() string {
 	}
 }
 
-// Aliases de tipos para manter compatibilidade
+// CommandBlock and the other aliases below re-export the agent
+// package types so legacy callers can continue to import them from
+// cli without following the refactor chain.
 type (
 	CommandBlock       = agent.CommandBlock
 	CommandOutput      = agent.CommandOutput
@@ -359,7 +361,7 @@ func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClien
 				zap.String("to_model", resolution.Model))
 		}
 	}
-	// Honour /thinking session override before falling back to the skill
+	// Honor /thinking session override before falling back to the skill
 	// effort hint. EffortUnset inside an active override means "thinking
 	// explicitly off" → skip both branches so the provider sends no hint.
 	if eff, overridden := a.cli.applyThinkingOverride(a.skillEffortHint); overridden {
@@ -452,7 +454,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		// Phase 3 (#4): when HyDE is enabled in /config quality, use the
 		// HyDE-aware retrieval (hypothesis expansion + optional vector
 		// cosine). Falls through to the legacy keyword-only path
-		// otherwise to preserve byte-for-byte behaviour.
+		// otherwise to preserve byte-for-byte behavior.
 		var wsCtx string
 		if a.qualityConfig.HyDE.Enabled && a.qualityConfig.Enabled {
 			wsCtx = a.cli.hydeRetrieveContext(ctx, query, hints, a.qualityConfig)
@@ -893,6 +895,12 @@ func (a *AgentMode) getToolContextString() string {
 	return toolContext
 }
 
+// processAIResponseAndAct is the ReAct main loop. It is deliberately
+// large — it interleaves stdin draining, LLM streaming, tool parsing,
+// policy enforcement, compaction, and UI rendering — and a targeted
+// refactor is scoped as its own effort outside the seven-pattern PR.
+//
+//nolint:gocyclo // legacy main loop; split tracked separately.
 func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
 	// Start centralized stdin reader for type-ahead queue support
 	a.startStdinReader()
@@ -1628,11 +1636,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// 1. Renderiza cabeçalho do lote se houver mais de 1 ação
 			if totalActions > 1 {
-				if coderCompact {
-					// Compact mode: no batch header, just tool lines
-				} else if coderMinimal {
+				switch {
+				case coderCompact:
+					// Compact mode: no batch header, just tool lines.
+				case coderMinimal:
 					renderer.RenderTimelineEvent("📦", "LOTE", fmt.Sprintf("%d ações", totalActions), agent.ColorPurple)
-				} else {
+				default:
 					renderer.RenderBatchHeader(totalActions)
 				}
 			}
@@ -1677,7 +1686,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								renderError(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 								batchHasError = true
-							case coder.DecisionCancelled:
+							case coder.DecisionCanceled:
 								msg := "OPERAÇÃO CANCELADA (Ctrl+C)"
 								renderError(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})

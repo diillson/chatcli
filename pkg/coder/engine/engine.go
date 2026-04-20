@@ -225,15 +225,15 @@ func (e *Engine) Execute(ctx context.Context, cmd string, args []string) error {
 }
 
 func (e *Engine) printf(format string, a ...interface{}) {
-	fmt.Fprintf(e.Out, format, a...)
+	_, _ = fmt.Fprintf(e.Out, format, a...)
 }
 
 func (e *Engine) println(a ...interface{}) {
-	fmt.Fprintln(e.Out, a...)
+	_, _ = fmt.Fprintln(e.Out, a...)
 }
 
 func (e *Engine) errorf(format string, a ...interface{}) {
-	fmt.Fprintf(e.Err, format, a...)
+	_, _ = fmt.Fprintf(e.Err, format, a...)
 }
 
 func (e *Engine) printCommandOutput(out string, err error) error {

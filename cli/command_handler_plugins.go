@@ -213,7 +213,7 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 		reader := bufio.NewReader(os.Stdin)
 		confirm, _ := reader.ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(confirm)) != "s" {
-			fmt.Println(i18n.T("plugin.install.cancelled"))
+			fmt.Println(i18n.T("plugin.install.canceled"))
 			return
 		}
 
@@ -224,7 +224,7 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 			fmt.Println(i18n.T("plugin.install.error.tempdir", err))
 			return
 		}
-		defer os.RemoveAll(tempDir)
+		defer func() { _ = os.RemoveAll(tempDir) }()
 
 		// Build git clone args: use --branch if we parsed one from the URL.
 		cloneArgs := []string{"clone", "--depth=1"}

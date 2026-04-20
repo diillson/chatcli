@@ -25,7 +25,7 @@ import (
 
 // handleThinkingCommand's sibling for Plan-First. Returns true when the
 // caller should immediately enter agent mode (because /plan was given a
-// task) so command_handler can panic with agentModeRequest.
+// task) so command_handler can panic with errAgentModeRequest.
 func (cli *ChatCLI) handlePlanCommand(userInput string) bool {
 	cli.pendingPlanFirst = true
 
@@ -35,8 +35,8 @@ func (cli *ChatCLI) handlePlanCommand(userInput string) bool {
 		return false
 	}
 	// Inline form: /plan <task> → arm and immediately ask the agent
-	// loop to consume it. We mirror /agent's behaviour: pendingAction
-	// is set and the caller panics with agentModeRequest.
+	// loop to consume it. We mirror /agent's behavior: pendingAction
+	// is set and the caller panics with errAgentModeRequest.
 	cli.pendingAction = "agent"
 	return true
 }

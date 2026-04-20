@@ -113,11 +113,10 @@ func (a *RefinerAgent) Execute(ctx context.Context, task string, deps *WorkerDep
 	startTime := time.Now()
 	callID := nextCallID()
 
-	body := task
 	originalTask := ""
 	draft := task
 	if strings.HasPrefix(task, RefineDirective) {
-		body = strings.TrimSpace(strings.TrimPrefix(task, RefineDirective))
+		body := strings.TrimSpace(strings.TrimPrefix(task, RefineDirective))
 		originalTask, draft = parseRefineSections(body)
 	}
 	if originalTask == "" {

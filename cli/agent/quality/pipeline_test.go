@@ -24,15 +24,15 @@ type fakeAgent struct {
 	calls    int
 }
 
-func (f *fakeAgent) Type() workers.AgentType  { return workers.AgentType("fake") }
-func (f *fakeAgent) Name() string             { return "FakeAgent" }
-func (f *fakeAgent) Description() string      { return "fake" }
-func (f *fakeAgent) SystemPrompt() string     { return "" }
+func (f *fakeAgent) Type() workers.AgentType   { return workers.AgentType("fake") }
+func (f *fakeAgent) Name() string              { return "FakeAgent" }
+func (f *fakeAgent) Description() string       { return "fake" }
+func (f *fakeAgent) SystemPrompt() string      { return "" }
 func (f *fakeAgent) Skills() *workers.SkillSet { return nil }
 func (f *fakeAgent) AllowedCommands() []string { return nil }
-func (f *fakeAgent) IsReadOnly() bool         { return true }
-func (f *fakeAgent) Model() string            { return "" }
-func (f *fakeAgent) Effort() string           { return "" }
+func (f *fakeAgent) IsReadOnly() bool          { return true }
+func (f *fakeAgent) Model() string             { return "" }
+func (f *fakeAgent) Effort() string            { return "" }
 
 func (f *fakeAgent) Execute(_ context.Context, task string, _ *workers.WorkerDeps) (*workers.AgentResult, error) {
 	f.calls++
@@ -57,8 +57,10 @@ func (t *taskRewriter) PreRun(_ context.Context, hc *HookContext) (string, error
 // failingPre always errors. Pipeline must keep going.
 type failingPre struct{}
 
-func (failingPre) Name() string                                              { return "failing-pre" }
-func (failingPre) PreRun(_ context.Context, _ *HookContext) (string, error)  { return "", errors.New("boom") }
+func (failingPre) Name() string { return "failing-pre" }
+func (failingPre) PreRun(_ context.Context, _ *HookContext) (string, error) {
+	return "", errors.New("boom")
+}
 
 // outputRewriter is a PostHook that overwrites Output.
 type outputRewriter struct {
@@ -75,8 +77,10 @@ func (o *outputRewriter) PostRun(_ context.Context, _ *HookContext, r *workers.A
 // failingPost always errors. Pipeline must keep going.
 type failingPost struct{}
 
-func (failingPost) Name() string                                                              { return "failing-post" }
-func (failingPost) PostRun(_ context.Context, _ *HookContext, _ *workers.AgentResult) error   { return errors.New("boom") }
+func (failingPost) Name() string { return "failing-post" }
+func (failingPost) PostRun(_ context.Context, _ *HookContext, _ *workers.AgentResult) error {
+	return errors.New("boom")
+}
 
 func TestPipeline_DisabledShortCircuits(t *testing.T) {
 	cfg := Defaults()
@@ -252,7 +256,7 @@ func TestAppliesToAgent(t *testing.T) {
 		{"refiner", []string{}, true},
 		{"refiner", []string{"formatter"}, true},
 		{"refiner", []string{"formatter", "refiner"}, false},
-		{"REFINER", []string{"refiner"}, false}, // case-insensitive
+		{"REFINER", []string{"refiner"}, false},   // case-insensitive
 		{"refiner", []string{" refiner "}, false}, // trim
 	}
 	for i, c := range cases {

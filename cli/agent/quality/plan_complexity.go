@@ -48,20 +48,20 @@ var sequencers = []string{
 }
 
 // fileExtensionRE matches file path tokens like "main.go", "src/foo.ts",
-// "Dockerfile" — anything that looks like a concrete artefact the
+// "Dockerfile" — anything that looks like a concrete artifact the
 // orchestrator would need to coordinate.
 var fileExtensionRE = regexp.MustCompile(`\b[\w./-]+\.(go|ts|tsx|js|jsx|py|rb|rs|java|kt|c|cpp|h|hpp|cs|swift|md|json|yaml|yml|toml|sql|sh|bash|zsh)\b`)
 
-// dockerfilesRE catches the common no-extension artefacts so they count
+// dockerfilesRE catches the common no-extension artifacts so they count
 // as "concrete files" too.
 var dockerfilesRE = regexp.MustCompile(`\b(Dockerfile|Makefile|CHANGELOG|README|LICENSE|Procfile)\b`)
 
 // ComplexityScore returns a value in [0, 10] estimating how much a task
 // would benefit from up-front planning. The score blends three signals:
 //
-//  - distinct action verbs (capped at 5 contributions)
-//  - distinct file artefacts mentioned (capped at 3)
-//  - sequencer tokens that imply ordered sub-steps (capped at 2)
+//   - distinct action verbs (capped at 5 contributions)
+//   - distinct file artifacts mentioned (capped at 3)
+//   - sequencer tokens that imply ordered sub-steps (capped at 2)
 //
 // A short single-action task ("read main.go") scores ~1; a multi-file
 // refactor ("update auth.go and add tests/auth_test.go then run go test")
@@ -75,7 +75,7 @@ func ComplexityScore(task string) int {
 	// Action verbs (cap 5).
 	verbs := countDistinctVerbs(lower, 5)
 
-	// Concrete file artefacts (cap 3).
+	// Concrete file artifacts (cap 3).
 	files := countDistinctMatches(fileExtensionRE.FindAllString(task, -1), 3)
 	files += countDistinctMatches(dockerfilesRE.FindAllString(task, -1), 3-files)
 
@@ -116,7 +116,7 @@ func ShouldPlanFirst(cfg PlanFirstConfig, task string) bool {
 		return false
 	case "always":
 		return true
-	default: // "auto" or unknown → conservative auto behaviour
+	default: // "auto" or unknown → conservative auto behavior
 		return ComplexityScore(task) >= cfg.ComplexityThreshold
 	}
 }
@@ -124,30 +124,30 @@ func ShouldPlanFirst(cfg PlanFirstConfig, task string) bool {
 // countDistinctVerbs counts unique action verbs in lower (already
 // lower-cased), up to cap. Word boundaries are enforced via Fields,
 // which keeps the scorer simple and Unicode-safe.
-func countDistinctVerbs(lower string, cap int) int {
+func countDistinctVerbs(lower string, limit int) int {
 	seen := make(map[string]struct{})
 	for _, raw := range strings.Fields(lower) {
 		w := strings.Trim(raw, ".,;:!?()[]{}\"'`")
 		if _, ok := actionVerbs[w]; ok {
 			seen[w] = struct{}{}
-			if len(seen) >= cap {
-				return cap
+			if len(seen) >= limit {
+				return limit
 			}
 		}
 	}
 	return len(seen)
 }
 
-// countDistinctMatches dedupes a slice and returns count up to cap.
-func countDistinctMatches(matches []string, cap int) int {
-	if cap <= 0 || len(matches) == 0 {
+// countDistinctMatches dedupes a slice and returns count up to limit.
+func countDistinctMatches(matches []string, limit int) int {
+	if limit <= 0 || len(matches) == 0 {
 		return 0
 	}
 	seen := make(map[string]struct{})
 	for _, m := range matches {
 		seen[strings.ToLower(m)] = struct{}{}
-		if len(seen) >= cap {
-			return cap
+		if len(seen) >= limit {
+			return limit
 		}
 	}
 	return len(seen)

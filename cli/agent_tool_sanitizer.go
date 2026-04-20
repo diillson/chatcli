@@ -943,6 +943,8 @@ func stripXMLTagBlock(s, tag string) string {
 // normalizeShellLineContinuations lida com quebras de linha escapadas (\ + Enter).
 // - Fora de aspas: Substitui por espaço (para separar argumentos).
 // - Dentro de aspas: Remove a sequência (para unir a string, igual ao bash).
+//
+//nolint:unused // used by cli/agent_mode_test; run.tests=false hides the call site.
 func normalizeShellLineContinuations(input string) string {
 	var result strings.Builder
 	chars := []rune(input)

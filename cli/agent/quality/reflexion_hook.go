@@ -45,6 +45,14 @@ func (h *ReflexionHook) PostRun(ctx context.Context, hc *HookContext, result *wo
 	if h.llm == nil || h.persist == nil {
 		return nil
 	}
+	// Respect an already-canceled turn ctx: when the user has
+	// ctrl-c'd the whole /agent run, there's no point generating a
+	// lesson about it. The goroutine below still uses a fresh ctx
+	// (Background) so normal per-turn timeouts don't kill lesson
+	// generation mid-flight.
+	if err := ctx.Err(); err != nil {
+		return nil
+	}
 	cfg := hc.Config.Reflexion
 	if !cfg.Enabled {
 		return nil
@@ -64,7 +72,7 @@ func (h *ReflexionHook) PostRun(ctx context.Context, hc *HookContext, result *wo
 
 	// Background — never block the turn. Use a fresh context so the
 	// per-worker timeout doesn't kill the lesson call mid-flight.
-	go h.runReflexion(context.Background(), req)
+	go h.runReflexion(context.Background(), req) //#nosec G118 -- detached on purpose; lesson gen outlives the turn
 	return nil
 }
 

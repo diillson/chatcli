@@ -113,7 +113,7 @@ func TestPollForToken_ContextCancellation(t *testing.T) {
 
 	_, err := pollForToken(ctx, nil, "test-code", time.Millisecond, time.Now().Add(time.Hour))
 	if err == nil {
-		t.Error("expected error from cancelled context")
+		t.Error("expected error from canceled context")
 	}
 }
 

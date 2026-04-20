@@ -560,7 +560,12 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 	}
 }
 
-// configurarCopilotClient configura o cliente GitHub Copilot
+// configurarCopilotClient configura o cliente GitHub Copilot.
+//
+// closure targets different provider packages; shared boilerplate is
+// kept readable at the call site rather than abstracted.
+//
+//nolint:dupl // near-duplicate of configurarGitHubModelsClient but the
 func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff time.Duration) {
 	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubCopilot, m.logger)
 	if err != nil {
@@ -584,7 +589,9 @@ func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff 
 	}
 }
 
-// configurarGitHubModelsClient configura o cliente GitHub Models marketplace
+// configurarGitHubModelsClient configura o cliente GitHub Models marketplace.
+//
+//nolint:dupl // near-duplicate of configurarCopilotClient; see note there.
 func (m *LLMManagerImpl) configurarGitHubModelsClient(maxRetries int, initialBackoff time.Duration) {
 	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubModels, m.logger)
 	if err != nil {

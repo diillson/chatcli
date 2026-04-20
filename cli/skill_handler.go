@@ -366,7 +366,7 @@ func (sh *SkillHandler) Install(name string, fromRegistry string) {
 		answer, _ := reader.ReadString('\n')
 		answer = strings.TrimSpace(strings.ToLower(answer))
 		if answer != "y" && answer != "yes" {
-			fmt.Println("  " + i18n.T("skill.install.cancelled"))
+			fmt.Println("  " + i18n.T("skill.install.canceled"))
 			return
 		}
 	}

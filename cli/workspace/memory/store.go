@@ -116,7 +116,11 @@ func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, 
 					items[id] = f.Content
 				}
 			}
-			go func(items map[string]string) {
+			// Intentionally detached from the request context: the
+			// retrieve call returns in milliseconds; backfill must
+			// survive the turn's ctx cancellation so embeddings
+			// become available for the next retrieval.
+			go func(items map[string]string) { //#nosec G118 -- detached on purpose; see comment above
 				if err := m.vectors.BackfillFacts(context.Background(), items); err != nil {
 					m.logger.Warn("vector backfill failed", zap.Error(err))
 				}

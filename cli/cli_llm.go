@@ -203,7 +203,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 		// Phase 3 (#4): when HyDE is enabled in /config quality, hand
 		// off to the HyDE-aware builder. The non-HyDE branch is kept
-		// untouched to preserve byte-for-byte behaviour for users who
+		// untouched to preserve byte-for-byte behavior for users who
 		// never opt in.
 		var wsCtx string
 		if qcfg := quality.LoadFromEnv(); qcfg.HyDE.Enabled && qcfg.Enabled {
@@ -500,7 +500,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			fmt.Println(i18n.T("status.operation_cancelled"))
+			fmt.Println(i18n.T("status.operation_canceled"))
 		} else {
 			fmt.Println(i18n.T("error.generic", err.Error()))
 		}
