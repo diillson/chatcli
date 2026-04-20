@@ -307,10 +307,3 @@ func (pd *PatternDetector) persist() {
 	}
 	_ = os.WriteFile(pd.path, data, 0o600)
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

@@ -117,7 +117,7 @@ func TestClassifyError(t *testing.T) {
 		{"rate limit text", fmt.Errorf("rate limit exceeded"), "rate_limit"},
 		{"timeout text", fmt.Errorf("request timeout"), "timeout"},
 		{"deadline exceeded", context.DeadlineExceeded, "timeout"},
-		{"cancelled", context.Canceled, "cancelled"},
+		{"canceled", context.Canceled, "canceled"},
 		{"unauthorized text", fmt.Errorf("unauthorized access"), "auth_error"},
 		{"server error text", fmt.Errorf("500 internal server error"), "server_error"},
 		{"unknown", fmt.Errorf("something weird happened"), "unknown"},

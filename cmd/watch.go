@@ -164,7 +164,10 @@ type contextGenerator interface {
 }
 
 // runWatchOneShot sends a single prompt with K8s context and prints the response.
-func runWatchOneShot(ctx context.Context, opts *WatchOptions, cg contextGenerator, llmMgr manager.LLMManager, logger *zap.Logger) error {
+// The logger parameter is retained for signature symmetry with RunWatch — the
+// one-shot path stays terse and doesn't currently log, but it must match the
+// interactive path's shape for future evolution.
+func runWatchOneShot(ctx context.Context, opts *WatchOptions, cg contextGenerator, llmMgr manager.LLMManager, _ *zap.Logger) error {
 	provider := opts.Provider
 	if provider == "" {
 		available := llmMgr.GetAvailableProviders()

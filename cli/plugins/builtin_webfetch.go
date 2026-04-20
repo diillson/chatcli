@@ -155,7 +155,7 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 			baseName = fmt.Sprintf("webfetch_%d.txt", time.Now().UnixNano())
 		}
 		target := filepath.Join(scratch, baseName)
-		// Defence-in-depth: resolve and double-check we stayed under scratch
+		// Defense-in-depth: resolve and double-check we stayed under scratch
 		// (Clean collapses any surviving ../ segments introduced by exotic
 		// basenames on platforms where Base keeps them).
 		cleaned := filepath.Clean(target)

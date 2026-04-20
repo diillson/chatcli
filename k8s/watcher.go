@@ -90,7 +90,7 @@ func NewResourceWatcher(cfg WatchConfig, logger *zap.Logger) (*ResourceWatcher, 
 }
 
 // Start begins the watch loop, collecting data at the configured interval.
-// It blocks until the context is cancelled.
+// It blocks until the context is canceled.
 func (w *ResourceWatcher) Start(ctx context.Context) error {
 	w.logger.Info("Starting Kubernetes watcher",
 		zap.String("deployment", w.config.Deployment),

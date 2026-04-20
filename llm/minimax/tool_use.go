@@ -74,7 +74,7 @@ func (c *MiniMaxClient) SendPromptWithTools(ctx context.Context, prompt string, 
 		if err != nil {
 			return "", err
 		}
-		defer httpResp.Body.Close()
+		defer func() { _ = httpResp.Body.Close() }()
 
 		bodyBytes, err := io.ReadAll(httpResp.Body)
 		if err != nil {

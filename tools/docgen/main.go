@@ -1,3 +1,7 @@
+// Package main is the docgen helper: it introspects the CLI command
+// surface and writes the Markdown cheatsheet consumed by the docs
+// site. Runs as a standalone build-time tool, not part of the
+// chatcli binary.
 package main
 
 import (

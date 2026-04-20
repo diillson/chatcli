@@ -233,7 +233,7 @@ func TestSendPrompt_RetriesOnServerError(t *testing.T) {
 	}
 }
 
-func TestSendPrompt_CancelledContext(t *testing.T) {
+func TestSendPrompt_CanceledContext(t *testing.T) {
 	primary := &mockClient{model: "gpt-4", response: "should not see this"}
 
 	chain := NewChain(newTestLogger(), []FallbackEntry{
@@ -245,7 +245,7 @@ func TestSendPrompt_CancelledContext(t *testing.T) {
 
 	_, err := chain.SendPrompt(ctx, "hi", nil, 1000)
 	if err == nil {
-		t.Fatal("expected error on cancelled context")
+		t.Fatal("expected error on canceled context")
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got: %v", err)

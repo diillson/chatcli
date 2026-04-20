@@ -418,7 +418,7 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			confirmationInput := a.readLine()
 			confirmation := strings.ToLower(confirmationInput)
 			if confirmation != "s" && confirmation != "y" {
-				fmt.Println(i18n.T("agent.status.batch_cancelled"))
+				fmt.Println(i18n.T("agent.status.batch_canceled"))
 				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 				continue
 			}

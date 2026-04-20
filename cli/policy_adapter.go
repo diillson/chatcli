@@ -156,7 +156,7 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		case coder.DecisionDenyOnce:
 			return false, "AÇÃO NEGADA PELO USUÁRIO DESTA VEZ. Tente uma abordagem diferente ou pergunte ao usuário."
 
-		case coder.DecisionCancelled:
+		case coder.DecisionCanceled:
 			return false, "OPERAÇÃO CANCELADA PELO USUÁRIO (Ctrl+C). Pode tentar a mesma ação novamente se necessário."
 
 		default: // DecisionRunOnce

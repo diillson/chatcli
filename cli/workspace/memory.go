@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"path/filepath"
 	"time"
 
@@ -104,6 +105,23 @@ func (ms *MemoryStore) GetMemoryContext() string {
 // GetRelevantContext returns memory tailored to conversation hints.
 func (ms *MemoryStore) GetRelevantContext(hints []string) string {
 	return ms.manager.GetRelevantContext(hints)
+}
+
+// GetRelevantContextWithHyDE delegates to the manager's HyDE-aware
+// retrieval. See memory.Manager.GetRelevantContextWithHyDE.
+func (ms *MemoryStore) GetRelevantContextWithHyDE(ctx context.Context, query string, hints []string, augmenter *memory.HyDEAugmenter) string {
+	return ms.manager.GetRelevantContextWithHyDE(ctx, query, hints, augmenter)
+}
+
+// AttachVectorIndex attaches a vector index used by HyDE Phase 3b.
+// Pass nil to detach.
+func (ms *MemoryStore) AttachVectorIndex(v *memory.VectorIndex) {
+	ms.manager.AttachVectorIndex(v)
+}
+
+// VectorIndex returns the attached vector index (may be nil).
+func (ms *MemoryStore) VectorIndex() *memory.VectorIndex {
+	return ms.manager.VectorIndex()
 }
 
 // ProcessExtraction processes enhanced extraction output from the memory worker.

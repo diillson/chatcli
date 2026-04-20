@@ -43,16 +43,16 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		if !ch.handleAgentPersonaSubcommand(userInput) {
 			// Não é um subcomando, inicia modo agente
 			ch.cli.pendingAction = "agent"
-			panic(agentModeRequest)
+			panic(errAgentModeRequest)
 		}
 		return false
 	case strings.HasPrefix(userInput, "/run"):
 		// /run inicia o modo agente (com ou sem persona ativa)
 		ch.cli.pendingAction = "agent"
-		panic(agentModeRequest)
+		panic(errAgentModeRequest)
 	case strings.HasPrefix(userInput, "/coder"):
 		ch.cli.pendingAction = "coder"
-		panic(coderModeRequest)
+		panic(errCoderModeRequest)
 	case strings.HasPrefix(userInput, "/switch"):
 		ch.cli.handleSwitchCommand(userInput)
 		return false
@@ -127,6 +127,23 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		return false
 	case userInput == "/cost":
 		ch.cli.handleCostCommand()
+		return false
+	case userInput == "/thinking" || strings.HasPrefix(userInput, "/thinking "):
+		ch.cli.handleThinkingCommand(userInput)
+		return false
+	case userInput == "/plan" || strings.HasPrefix(userInput, "/plan "):
+		if ch.cli.handlePlanCommand(userInput) {
+			panic(errAgentModeRequest)
+		}
+		return false
+	case userInput == "/refine" || strings.HasPrefix(userInput, "/refine "):
+		ch.cli.handleRefineCommand(userInput)
+		return false
+	case userInput == "/verify" || strings.HasPrefix(userInput, "/verify "):
+		ch.cli.handleVerifyCommand(userInput)
+		return false
+	case userInput == "/reflect" || strings.HasPrefix(userInput, "/reflect "):
+		ch.cli.handleReflectCommand(userInput)
 		return false
 	case strings.HasPrefix(userInput, "/worktree"):
 		ch.cli.handleWorktreeCommand(userInput)

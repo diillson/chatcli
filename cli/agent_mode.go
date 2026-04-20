@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
@@ -59,6 +60,12 @@ type AgentMode struct {
 	fileLockMgr     *workers.FileLockManager
 	policyAdapter   *workerPolicyAdapter
 	parallelMode    bool
+	// Seven-pattern quality pipeline (Self-Refine, CoVe, Reflexion, …).
+	// qualityPipeline is wired into the dispatcher; qualityConfig holds
+	// the env-loaded snapshot so /config quality can render it without
+	// re-parsing env vars on every invocation.
+	qualityPipeline *quality.Pipeline
+	qualityConfig   quality.Config
 	// Centralized stdin reader for type-ahead queue support
 	stdinLines   chan string   // all stdin lines flow through here
 	stdinDone    chan struct{} // signals reader goroutine to stop
@@ -264,7 +271,9 @@ func (a *AgentMode) drainStdinToQueue() string {
 	}
 }
 
-// Aliases de tipos para manter compatibilidade
+// CommandBlock and the other aliases below re-export the agent
+// package types so legacy callers can continue to import them from
+// cli without following the refactor chain.
 type (
 	CommandBlock       = agent.CommandBlock
 	CommandOutput      = agent.CommandOutput
@@ -352,7 +361,14 @@ func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClien
 				zap.String("to_model", resolution.Model))
 		}
 	}
-	if a.skillEffortHint != llmclient.EffortUnset {
+	// Honor /thinking session override before falling back to the skill
+	// effort hint. EffortUnset inside an active override means "thinking
+	// explicitly off" → skip both branches so the provider sends no hint.
+	if eff, overridden := a.cli.applyThinkingOverride(a.skillEffortHint); overridden {
+		if eff != llmclient.EffortUnset {
+			ctx = llmclient.WithEffortHint(ctx, eff)
+		}
+	} else if a.skillEffortHint != llmclient.EffortUnset {
 		ctx = llmclient.WithEffortHint(ctx, a.skillEffortHint)
 	}
 	return turnClient, ctx
@@ -363,6 +379,19 @@ func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClien
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string, systemPromptOverride string) error {
 	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
 	maxTurns := AgentMaxTurns()
+
+	// Load the seven-pattern quality config eagerly so HyDE retrieval
+	// (built BEFORE initMultiAgent) sees the right toggles. The
+	// dispatcher pipeline wiring inside initMultiAgent re-reads the
+	// same env, so the two views stay consistent.
+	a.qualityConfig = quality.LoadFromEnv()
+	// Apply session-level /refine and /verify overrides on top of env.
+	if a.cli.qualityOverrides.Refine != nil {
+		a.qualityConfig.Refine.Enabled = *a.cli.qualityOverrides.Refine
+	}
+	if a.cli.qualityOverrides.Verify != nil {
+		a.qualityConfig.Verify.Enabled = *a.cli.qualityOverrides.Verify
+	}
 
 	// Save checkpoint before agent starts (for rewind support)
 	a.cli.saveCheckpoint()
@@ -422,7 +451,17 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 			}
 			hints = memory.ExtractKeywords(recentTexts)
 		}
-		if wsCtx := a.cli.contextBuilder.BuildSystemPromptPrefixWithHints(hints); wsCtx != "" {
+		// Phase 3 (#4): when HyDE is enabled in /config quality, use the
+		// HyDE-aware retrieval (hypothesis expansion + optional vector
+		// cosine). Falls through to the legacy keyword-only path
+		// otherwise to preserve byte-for-byte behavior.
+		var wsCtx string
+		if a.qualityConfig.HyDE.Enabled && a.qualityConfig.Enabled {
+			wsCtx = a.cli.hydeRetrieveContext(ctx, query, hints, a.qualityConfig)
+		} else {
+			wsCtx = a.cli.contextBuilder.BuildSystemPromptPrefixWithHints(hints)
+		}
+		if wsCtx != "" {
 			systemInstruction = wsCtx + "\n\n---\n\n" + systemInstruction
 		}
 		if dynCtx := a.cli.contextBuilder.BuildDynamicContext(); dynCtx != "" {
@@ -578,6 +617,14 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 
 	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery})
+
+	// Phase 2 (#2): Plan-and-Solve / ReWOO. When the quality config asks
+	// for it (mode=always, mode=auto + high complexity, or the user-set
+	// pendingPlanFirst flag from /plan), synthesize a structured plan
+	// and execute it deterministically before handing the conversation
+	// to the orchestrator. The plan execution report is injected as a
+	// system message so the ReAct loop can finalize with full context.
+	a.runPlanFirstIfApplicable(ctx, currentQuery)
 
 	// --- 2. O LOOP DE RACIOCÍNIO-AÇÃO (ReAct) ---
 	return a.processAIResponseAndAct(ctx, maxTurns)
@@ -848,6 +895,12 @@ func (a *AgentMode) getToolContextString() string {
 	return toolContext
 }
 
+// processAIResponseAndAct is the ReAct main loop. It is deliberately
+// large — it interleaves stdin draining, LLM streaming, tool parsing,
+// policy enforcement, compaction, and UI rendering — and a targeted
+// refactor is scoped as its own effort outside the seven-pattern PR.
+//
+//nolint:gocyclo // legacy main loop; split tracked separately.
 func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
 	// Start centralized stdin reader for type-ahead queue support
 	a.startStdinReader()
@@ -1583,11 +1636,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// 1. Renderiza cabeçalho do lote se houver mais de 1 ação
 			if totalActions > 1 {
-				if coderCompact {
-					// Compact mode: no batch header, just tool lines
-				} else if coderMinimal {
+				switch {
+				case coderCompact:
+					// Compact mode: no batch header, just tool lines.
+				case coderMinimal:
 					renderer.RenderTimelineEvent("📦", "LOTE", fmt.Sprintf("%d ações", totalActions), agent.ColorPurple)
-				} else {
+				default:
 					renderer.RenderBatchHeader(totalActions)
 				}
 			}
@@ -1632,7 +1686,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								renderError(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 								batchHasError = true
-							case coder.DecisionCancelled:
+							case coder.DecisionCanceled:
 								msg := "OPERAÇÃO CANCELADA (Ctrl+C)"
 								renderError(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
@@ -2216,6 +2270,45 @@ func (a *AgentMode) initMultiAgent() bool {
 	} else {
 		a.logger.Warn("Failed to initialize policy checker for parallel workers", zap.Error(err))
 	}
+
+	// Attach the seven-pattern quality pipeline (Self-Refine, CoVe,
+	// Reflexion, …). Pipeline starts with the hooks selected by the
+	// CHATCLI_QUALITY_* env, with /refine and /verify session toggles
+	// layered on top. With zero hooks (the default), Run is a thin
+	// pass-through to agent.Execute — no measurable overhead.
+	//
+	// dispatchOne lets quality hooks invoke other agents (Refiner,
+	// Verifier) without taking a direct dependency on the dispatcher.
+	// Built-in ExcludeAgents prevent the obvious infinite-recursion
+	// case (refining the refiner's output, verifying the verifier's).
+	a.qualityConfig = quality.LoadFromEnv()
+	if a.cli.qualityOverrides.Refine != nil {
+		a.qualityConfig.Refine.Enabled = *a.cli.qualityOverrides.Refine
+	}
+	if a.cli.qualityOverrides.Verify != nil {
+		a.qualityConfig.Verify.Enabled = *a.cli.qualityOverrides.Verify
+	}
+	dispatchOne := func(ctx context.Context, call workers.AgentCall) workers.AgentResult {
+		results := a.agentDispatcher.Dispatch(ctx, []workers.AgentCall{call})
+		if len(results) == 0 {
+			return workers.AgentResult{
+				CallID: call.ID, Agent: call.Agent, Task: call.Task,
+				Error: fmt.Errorf("dispatcher returned no result for quality hook"),
+			}
+		}
+		return results[0]
+	}
+	// Reflexion (Phase 4) needs an LLM call + a memory-persist
+	// callback. Both are wired here so the pipeline package stays
+	// independent of cli.ChatCLI internals.
+	lessonLLM := a.cli.makeLessonLLM()
+	persistLesson := a.cli.makeLessonPersister()
+	a.qualityPipeline = quality.BuildPipeline(a.qualityConfig, a.logger, quality.BuildPipelineDeps{
+		Dispatch:      dispatchOne,
+		LessonLLM:     lessonLLM,
+		PersistLesson: persistLesson,
+	})
+	a.agentDispatcher.SetPipeline(a.qualityPipeline)
 
 	a.parallelMode = true
 

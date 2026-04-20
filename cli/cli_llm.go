@@ -13,6 +13,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -200,7 +201,17 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 			hints = memory.ExtractKeywords(recentTexts)
 		}
 
-		if wsCtx := cli.contextBuilder.BuildSystemPromptPrefixWithHints(hints); wsCtx != "" {
+		// Phase 3 (#4): when HyDE is enabled in /config quality, hand
+		// off to the HyDE-aware builder. The non-HyDE branch is kept
+		// untouched to preserve byte-for-byte behavior for users who
+		// never opt in.
+		var wsCtx string
+		if qcfg := quality.LoadFromEnv(); qcfg.HyDE.Enabled && qcfg.Enabled {
+			wsCtx = cli.hydeRetrieveContext(ctx, userInput, hints, qcfg)
+		} else {
+			wsCtx = cli.contextBuilder.BuildSystemPromptPrefixWithHints(hints)
+		}
+		if wsCtx != "" {
 			dynCtx := cli.contextBuilder.BuildDynamicContext()
 			wsContent := wsCtx
 			if dynCtx != "" {
@@ -424,8 +435,18 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	}
 
 	// Attach effort hint to ctx so the provider's SendPrompt can opt into
-	// extended thinking / reasoning_effort for this turn.
-	ctx = client.WithEffortHint(ctx, skillEffort)
+	// extended thinking / reasoning_effort for this turn. /thinking
+	// (Phase 1 of the seven-pattern rollout) lets the user override the
+	// skill-derived hint for the next turn — when the override is set
+	// to EffortUnset, no hint is attached so the provider falls back to
+	// its no-thinking default.
+	if eff, overridden := cli.applyThinkingOverride(skillEffort); overridden {
+		if eff != client.EffortUnset {
+			ctx = client.WithEffortHint(ctx, eff)
+		}
+	} else {
+		ctx = client.WithEffortHint(ctx, skillEffort)
+	}
 
 	// Try streaming if supported, fall back to buffered request
 	var aiResponse string
@@ -479,7 +500,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			fmt.Println(i18n.T("status.operation_cancelled"))
+			fmt.Println(i18n.T("status.operation_canceled"))
 		} else {
 			fmt.Println(i18n.T("error.generic", err.Error()))
 		}

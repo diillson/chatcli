@@ -125,6 +125,8 @@ func SetupDefaultRegistry() *Registry {
 	r.Register(NewDiagnosticsAgent())
 	r.Register(NewFormatterAgent())
 	r.Register(NewDepsAgent())
+	r.Register(NewRefinerAgent())
+	r.Register(NewVerifierAgent())
 	return r
 }
 

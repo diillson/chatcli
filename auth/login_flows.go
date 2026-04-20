@@ -193,7 +193,7 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 		if receivedState != state {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprint(w, i18n.T("auth.login.openai_auth_failed_html"))
+			_, _ = fmt.Fprint(w, i18n.T("auth.login.openai_auth_failed_html"))
 			errCh <- fmt.Errorf("%s", i18n.T("auth.login.openai_csrf_error"))
 			return
 		}
@@ -201,12 +201,12 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 		if code == "" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, i18n.T("auth.login.openai_no_code_html"))
+			_, _ = fmt.Fprint(w, i18n.T("auth.login.openai_no_code_html"))
 			errCh <- fmt.Errorf("%s", i18n.T("auth.login.openai_no_code_error"))
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, i18n.T("auth.login.openai_success_html"))
+		_, _ = fmt.Fprint(w, i18n.T("auth.login.openai_success_html"))
 		codeCh <- code
 	})
 

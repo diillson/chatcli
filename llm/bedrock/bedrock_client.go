@@ -84,7 +84,7 @@ type BedrockClient struct {
 }
 
 // NewBedrockClient creates a client bound to a model id and region.
-// The AWS SDK is initialised lazily on the first call so that a missing
+// The AWS SDK is initialized lazily on the first call so that a missing
 // credentials chain does not break provider discovery.
 func NewBedrockClient(model, region, profile string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *BedrockClient {
 	return &BedrockClient{
@@ -350,7 +350,7 @@ func stringPtr(s string) *string { return &s }
 //     INSECURE — use only to confirm a corporate-proxy issue, then fix the CA bundle.
 //
 // Returns (nil, "") when no override is set, so the SDK falls back to its
-// default HTTP client (which honours AWS_CA_BUNDLE, HTTPS_PROXY, etc.).
+// default HTTP client (which honors AWS_CA_BUNDLE, HTTPS_PROXY, etc.).
 func buildCorporateHTTPClient(logger *zap.Logger) (aws.HTTPClient, string) {
 	insecure := strings.EqualFold(strings.TrimSpace(os.Getenv("CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY")), "true")
 	bundlePath := strings.TrimSpace(os.Getenv("CHATCLI_BEDROCK_CA_BUNDLE"))

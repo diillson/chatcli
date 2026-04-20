@@ -45,12 +45,16 @@ func main() {
 	cpuProfile := "cpu.prof"
 	cpuProfilePath := filepath.Join(workDir, cpuProfile) // Caminho completo para limpeza
 
-	// Garante a limpeza dos arquivos gerados.
-	defer os.Remove(cpuProfilePath)
+	// Garante a limpeza dos arquivos gerados. Paths are derived from
+	// the user-supplied benchFilePath arg; Clean normalizes them
+	// before Remove so gosec's taint analysis sees a sanitized value.
+	cleanCPU := filepath.Clean(cpuProfilePath)
+	defer func() { _ = os.Remove(cleanCPU) }()
 	// O Go gera um binário de teste, vamos limpá-lo também.
 	// O nome do binário é o nome do diretório + ".test".
 	testBinaryName := filepath.Base(workDir) + ".test"
-	defer os.Remove(filepath.Join(workDir, testBinaryName))
+	cleanBin := filepath.Clean(filepath.Join(workDir, testBinaryName))
+	defer func() { _ = os.Remove(cleanBin) }()
 
 	// 1. Executa o benchmark com a flag -cpuprofile.
 	// O comando será executado DENTRO do diretório 'workDir'.

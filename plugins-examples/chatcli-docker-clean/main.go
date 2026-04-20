@@ -49,7 +49,7 @@ type Network struct {
 
 func logf(format string, v ...interface{}) {
 	fmt.Fprintf(os.Stderr, format, v...)
-	os.Stderr.Sync() //#nosec G104 -- example plugin / dev tool — best-effort cleanup
+	_ = os.Stderr.Sync() //#nosec G104 -- example plugin / dev tool — best-effort cleanup
 }
 
 func fatalf(format string, v ...interface{}) {

@@ -151,7 +151,7 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: ${{ matrix.platform }}
@@ -190,7 +190,7 @@ jobs:
           sparse-checkout: .trivyignore.yaml
 
       - name: Download amd64 digest
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: chatcli-digest-amd64
           path: /tmp/digests
@@ -228,7 +228,7 @@ jobs:
       id-token: write
     steps:
       - name: Download all digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: chatcli-digest-*
           path: /tmp/digests
@@ -312,7 +312,7 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./operator/Dockerfile
@@ -352,7 +352,7 @@ jobs:
           sparse-checkout: .trivyignore.yaml
 
       - name: Download amd64 digest
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: operator-digest-amd64
           path: /tmp/digests
@@ -390,7 +390,7 @@ jobs:
       id-token: write
     steps:
       - name: Download all digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: operator-digest-*
           path: /tmp/digests

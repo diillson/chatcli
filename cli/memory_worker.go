@@ -338,6 +338,8 @@ func (mw *memoryWorker) clearStatus() {
 // Production code uses memory.Manager.ProcessExtraction() with the enhanced parser.
 
 // parseMemoryResponse splits the LLM response into daily notes and long-term facts.
+//
+//nolint:unused // used by memory_worker_test; golangci run.tests=false hides the call site.
 func parseMemoryResponse(response string) (daily string, longTerm string) {
 	upper := strings.ToUpper(response)
 
@@ -402,6 +404,7 @@ func isNothingNew(s string) bool {
 	return false
 }
 
+//nolint:unused // used by memory_worker_test via parseMemoryResponse.
 func findSectionIndex(upperResponse string, keyword string) int {
 	patterns := []string{
 		"## " + keyword,

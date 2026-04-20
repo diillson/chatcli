@@ -3,6 +3,10 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  */
+
+// Package cmd holds the subcommand implementations that main.go
+// dispatches to: /connect (remote server), /server (host mode),
+// /watch (K8s observer), and friends.
 package cmd
 
 import (
@@ -154,7 +158,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	if err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("cmd.connect.remote_failed"), err)
 	}
-	defer remoteClient.Close()
+	defer func() { _ = remoteClient.Close() }()
 
 	// Health check
 	healthy, ver, err := remoteClient.Health(ctx)

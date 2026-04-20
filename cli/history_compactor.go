@@ -235,7 +235,7 @@ func (hc *HistoryCompactor) Compact(
 		// through to emergency truncation — the user's own choice to abort
 		// must not mangle their history.
 		if ctx.Err() != nil {
-			hc.emitStatus(CompactStageDone, i18n.T("compact.status.cancelled"))
+			hc.emitStatus(CompactStageDone, i18n.T("compact.status.canceled"))
 			return nil, ctx.Err()
 		}
 		hc.logger.Warn("Level 2 (summarization) failed, falling back",

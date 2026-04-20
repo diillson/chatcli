@@ -104,7 +104,7 @@ func (cli *ChatCLI) showRewindMenu() bool {
 	input := strings.TrimSpace(rawInput)
 
 	if input == "q" || input == "" {
-		fmt.Println(colorize("  "+i18n.T("rewind.cancelled"), ColorGray))
+		fmt.Println(colorize("  "+i18n.T("rewind.canceled"), ColorGray))
 		return false
 	}
 
