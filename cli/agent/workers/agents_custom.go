@@ -25,6 +25,8 @@ var builtinAgentTypes = map[AgentType]bool{
 	AgentTypeDiagnostics: true,
 	AgentTypeFormatter:   true,
 	AgentTypeDeps:        true,
+	AgentTypeRefiner:     true,
+	AgentTypeVerifier:    true,
 }
 
 // CustomAgent adapts a persona.Agent into a WorkerAgent for multi-agent orchestration.

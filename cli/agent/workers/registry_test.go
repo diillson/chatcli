@@ -83,11 +83,15 @@ func TestRegistry_CatalogString_Empty(t *testing.T) {
 func TestSetupDefaultRegistry(t *testing.T) {
 	r := SetupDefaultRegistry()
 	all := r.All()
-	if len(all) != 12 {
-		t.Fatalf("expected 6 default agents, got %d", len(all))
+	// 12 original built-ins + 2 quality agents (refiner, verifier) = 14
+	if len(all) != 14 {
+		t.Fatalf("expected 14 default agents, got %d", len(all))
 	}
 
-	expectedTypes := []AgentType{AgentTypeFile, AgentTypeCoder, AgentTypeShell, AgentTypeGit, AgentTypeSearch, AgentTypePlanner}
+	expectedTypes := []AgentType{
+		AgentTypeFile, AgentTypeCoder, AgentTypeShell, AgentTypeGit,
+		AgentTypeSearch, AgentTypePlanner, AgentTypeRefiner, AgentTypeVerifier,
+	}
 	for _, at := range expectedTypes {
 		_, ok := r.Get(at)
 		if !ok {
