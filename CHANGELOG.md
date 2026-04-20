@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.106.0](https://github.com/diillson/chatcli/compare/v1.105.4...v1.106.0) (2026-04-20)
+
+
+### Features
+
+* **quality:** autocomplete + i18n for /thinking /refine /verify /plan /reflect ([#824](https://github.com/diillson/chatcli/issues/824)) ([4980c6b](https://github.com/diillson/chatcli/commit/4980c6b3b4f3bfd92d28f6eb8884e8ee936c62d0))
+* **quality:** seven-pattern agent pipeline + k8s deps bump ([#822](https://github.com/diillson/chatcli/issues/822)) ([2541a3e](https://github.com/diillson/chatcli/commit/2541a3ec5461aec29b93c50be0bdd4df9e32eb32))
+
 ## [Unreleased]
 
 ### Features
