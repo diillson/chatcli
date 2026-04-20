@@ -190,7 +190,7 @@ jobs:
           sparse-checkout: .trivyignore.yaml
 
       - name: Download amd64 digest
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: chatcli-digest-amd64
           path: /tmp/digests
@@ -228,7 +228,7 @@ jobs:
       id-token: write
     steps:
       - name: Download all digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: chatcli-digest-*
           path: /tmp/digests
@@ -352,7 +352,7 @@ jobs:
           sparse-checkout: .trivyignore.yaml
 
       - name: Download amd64 digest
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: operator-digest-amd64
           path: /tmp/digests
@@ -390,7 +390,7 @@ jobs:
       id-token: write
     steps:
       - name: Download all digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: operator-digest-*
           path: /tmp/digests
