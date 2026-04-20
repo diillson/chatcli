@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/models"
@@ -14,10 +15,23 @@ import (
 // Default effort: "high" — planning is the agent we most want to think hard
 // (no tool actions to pay for, all value comes from the quality of the
 // decomposition). Override with CHATCLI_AGENT_PLANNER_{MODEL,EFFORT}.
+//
+// Output mode: by default the planner produces the markdown plan
+// described in SystemPrompt(). When the task is prefixed with the
+// PlannerStructuredOutputDirective marker, it switches to a strict
+// JSON schema (see plan.Plan) so quality.PlanRunner can execute it.
 type PlannerAgent struct {
 	BuiltinAgentMeta
 	skills *SkillSet
 }
+
+// PlannerStructuredOutputDirective is the leading marker that, when
+// found in the task string, instructs the PlannerAgent to emit a
+// strictly-formatted JSON plan instead of the default markdown.
+//
+// quality.RunStructuredPlan prepends this so the contract stays
+// inside this file — callers don't need to know the exact prompt.
+const PlannerStructuredOutputDirective = "[STRUCTURED_PLAN_OUTPUT]"
 
 // NewPlannerAgent creates a PlannerAgent with its pre-built skills.
 func NewPlannerAgent() *PlannerAgent {
@@ -41,6 +55,43 @@ func (a *PlannerAgent) Description() string {
 		"Has NO direct file or shell access — pure reasoning only. " +
 		"Use this agent to decompose complex tasks into ordered subtasks before dispatching to other agents."
 }
+
+// structuredPlanSystemPrompt is used when the task carries
+// PlannerStructuredOutputDirective. The model is instructed to emit
+// JSON that matches quality.Plan exactly. Steps reference each other
+// via #E1, #E2 placeholders (ReWOO).
+const structuredPlanSystemPrompt = `You are a specialized PLANNING agent in ChatCLI.
+Your sole output for this turn is a single JSON object that matches the schema below.
+Do NOT include prose, markdown headers, or commentary outside the JSON.
+Wrap nothing — emit raw JSON.
+
+## Schema
+
+{
+  "task_summary": "<one-sentence summary of the user goal>",
+  "steps": [
+    {
+      "id": "E1",
+      "agent": "<one of: file|coder|shell|git|search|planner|reviewer|tester|refactor|diagnostics|formatter|deps>",
+      "task": "<imperative task. May reference earlier steps with #E1, #E1.summary, #E1.head=200>",
+      "deps": []
+    }
+  ],
+  "parallel_groups": [["E1"], ["E2","E3"]]
+}
+
+## Rules
+- Step ids are E1, E2, E3, … in declaration order.
+- Each step's deps must reference only earlier ids.
+- Use #E<n> in task text to inject a previous output (resolved at runtime).
+- Use #E<n>.head=N to inject only the first N chars; .summary for the first non-empty line.
+- Prefer the smallest plan that solves the task. 1-step plans are valid for trivial tasks.
+- "agent" must be one of the listed types. Do not invent agent names.
+- "parallel_groups" is optional — when present, ids in the same inner array can run together.
+
+## Output
+
+Return ONLY the JSON object. No backticks, no headings, no explanations.`
 
 func (a *PlannerAgent) SystemPrompt() string {
 	return `You are a specialized PLANNING agent in ChatCLI.
@@ -85,13 +136,24 @@ Brief summary of what needs to be done and why.
 func (a *PlannerAgent) Skills() *SkillSet { return a.skills }
 
 // Execute runs the PlannerAgent — a single LLM call with no tool execution.
+//
+// When task starts with PlannerStructuredOutputDirective the agent
+// switches to structuredPlanSystemPrompt and the directive is stripped
+// from the user message so the model only sees the actual task.
 func (a *PlannerAgent) Execute(ctx context.Context, task string, deps *WorkerDeps) (*AgentResult, error) {
 	startTime := time.Now()
 	callID := nextCallID()
 
+	systemPrompt := a.SystemPrompt()
+	userTask := task
+	if strings.HasPrefix(task, PlannerStructuredOutputDirective) {
+		systemPrompt = structuredPlanSystemPrompt
+		userTask = strings.TrimSpace(strings.TrimPrefix(task, PlannerStructuredOutputDirective))
+	}
+
 	history := []models.Message{
-		{Role: "system", Content: a.SystemPrompt()},
-		{Role: "user", Content: task},
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userTask},
 	}
 
 	response, err := deps.LLMClient.SendPrompt(ctx, "", history, 0)
