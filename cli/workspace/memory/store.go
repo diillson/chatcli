@@ -28,6 +28,12 @@ type Manager struct {
 	compactor *Compactor
 	retriever *RelevanceRetriever
 	migration *Migration
+
+	// HyDE Phase 3b: optional vector index. Attached lazily by the
+	// caller via AttachVectorIndex so the memory package never imports
+	// llm/embedding directly. nil → keyword-only retrieval (no
+	// regression).
+	vectors *VectorIndex
 }
 
 // NewManager creates a new memory manager. The memoryDir should be the
@@ -78,6 +84,59 @@ func (m *Manager) GetMemoryContext() string {
 // GetRelevantContext returns memory context tailored to conversation hints.
 func (m *Manager) GetRelevantContext(hints []string) string {
 	return m.retriever.Retrieve(hints)
+}
+
+// GetRelevantContextWithHyDE runs the full HyDE retrieval (Phase 3a +
+// Phase 3b) when an augmenter and/or vector index are configured.
+// Falls back to plain Retrieve(hints) when neither is provided so the
+// no-regression contract holds.
+//
+// query is the raw user question used to seed the hypothesis. Pass
+// "" to skip augmentation entirely.
+func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, hints []string, augmenter *HyDEAugmenter) string {
+	out := m.retriever.RetrieveWithHyDE(ctx, query, hints, augmenter, m.vectors)
+
+	// Lazy backfill: fire-and-forget embedding of any facts visible to
+	// the current scorer that lack a vector. Bounded to a reasonable
+	// number (top 25) so a cold cache doesn't bill the user $0.50.
+	if m.vectors != nil && m.vectors.Enabled() {
+		all := m.Facts.GetAll()
+		if len(all) > 25 {
+			all = all[:25]
+		}
+		ids := make([]string, 0, len(all))
+		for _, f := range all {
+			ids = append(ids, f.ID)
+		}
+		missing := m.vectors.MissingFor(ids)
+		if len(missing) > 0 {
+			items := make(map[string]string, len(missing))
+			for _, id := range missing {
+				if f, ok := m.Facts.GetByID(id); ok {
+					items[id] = f.Content
+				}
+			}
+			go func(items map[string]string) {
+				if err := m.vectors.BackfillFacts(context.Background(), items); err != nil {
+					m.logger.Warn("vector backfill failed", zap.Error(err))
+				}
+			}(items)
+		}
+	}
+
+	return out
+}
+
+// AttachVectorIndex wires a VectorIndex into the manager. Pass nil to
+// detach (returns retrieval to keyword-only mode). Safe to call
+// multiple times — only the most recent index is used.
+func (m *Manager) AttachVectorIndex(v *VectorIndex) {
+	m.vectors = v
+}
+
+// VectorIndex returns the attached vector index (may be nil).
+func (m *Manager) VectorIndex() *VectorIndex {
+	return m.vectors
 }
 
 // ReadLongTerm returns the rendered MEMORY.md content.

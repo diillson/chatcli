@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -41,6 +42,45 @@ func NewRelevanceRetriever(
 // SetWorkspaceDir updates the current workspace directory for disambiguation.
 func (r *RelevanceRetriever) SetWorkspaceDir(dir string) {
 	r.workspaceDir = dir
+}
+
+// RetrieveWithHyDE runs the full HyDE retrieval path — Phase 3a
+// (hypothesis-based keyword expansion) and Phase 3b (vector cosine
+// search) when both are wired. When augmenter and vectors are nil or
+// disabled, the call is byte-identical to a plain Retrieve(hints) —
+// the no-regression contract.
+//
+// query is the raw user question used to seed the hypothesis. Pass an
+// empty string to skip augmentation entirely (rare; callers usually
+// have at least one user message to feed in).
+func (r *RelevanceRetriever) RetrieveWithHyDE(ctx context.Context, query string, hints []string, augmenter *HyDEAugmenter, vectors *VectorIndex) string {
+	expanded := hints
+	if augmenter != nil {
+		expanded = augmenter.Augment(ctx, query, hints)
+	}
+
+	// Phase 3b: when a vector index is wired, embed the (augmented)
+	// query and union the cosine top-k fact ids with the keyword set.
+	// We surface vector hits by promoting them as additional keyword
+	// tokens (the fact id), but the truth is FactIndex.Search remains
+	// the canonical retriever — vectors only WIDEN the candidate set.
+	if vectors != nil && vectors.Enabled() && strings.TrimSpace(query) != "" {
+		if vec, err := vectors.EmbedQuery(ctx, query); err == nil {
+			// Top-K cosine hits become additional hint tokens via the
+			// fact's content. We resolve ids to content here so the
+			// existing keyword scorer can re-rank cohesively.
+			topIDs := vectors.SimilarFacts(vec, 8)
+			if len(topIDs) > 0 {
+				for _, id := range topIDs {
+					if f, ok := r.facts.GetByID(id); ok {
+						expanded = mergeUniqueLowercase(expanded, ExtractKeywords([]string{f.Content}))
+					}
+				}
+			}
+		}
+	}
+
+	return r.Retrieve(expanded)
 }
 
 // Retrieve returns memory context tailored to the current conversation.

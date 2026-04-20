@@ -1,10 +1,13 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/cli/workspace/memory"
 )
 
 // ContextBuilder assembles the full system prompt from workspace sources.
@@ -54,6 +57,55 @@ func (cb *ContextBuilder) WorkspaceDir() string {
 // Does NOT include mode-specific instructions (coder/agent prompts).
 func (cb *ContextBuilder) BuildSystemPromptPrefix() string {
 	return cb.BuildSystemPromptPrefixWithHints(nil)
+}
+
+// BuildSystemPromptPrefixWithHyDE returns workspace context with HyDE
+// (Hypothetical Document Embeddings) augmenting memory retrieval.
+//
+// query is the raw user message used to seed the hypothesis; hints
+// are the existing keyword set (typically from ExtractKeywords on
+// recent messages). When augmenter is nil and no vector index is
+// attached, behaviour matches BuildSystemPromptPrefixWithHints
+// exactly — the no-regression contract.
+func (cb *ContextBuilder) BuildSystemPromptPrefixWithHyDE(ctx context.Context, query string, hints []string, augmenter *memory.HyDEAugmenter) string {
+	if augmenter == nil && (cb.memory == nil || cb.memory.VectorIndex() == nil) {
+		return cb.BuildSystemPromptPrefixWithHints(hints)
+	}
+
+	var parts []string
+
+	bootstrapContent := cb.bootstrap.LoadBootstrapContent()
+	if bootstrapContent != "" {
+		parts = append(parts, bootstrapContent)
+	}
+
+	if cb.memory != nil {
+		memoryContent := cb.memory.GetRelevantContextWithHyDE(ctx, query, hints, augmenter)
+		if memoryContent != "" {
+			parts = append(parts, "# Memory\n\n"+memoryContent)
+		}
+	}
+
+	// Path-specific rules — same logic as the non-HyDE path.
+	if cb.rules != nil && len(hints) > 0 {
+		var pathHints []string
+		for _, h := range hints {
+			if strings.Contains(h, ".") || strings.Contains(h, "/") {
+				pathHints = append(pathHints, h)
+			}
+		}
+		if len(pathHints) > 0 {
+			rulesContent := cb.rules.LoadMatchingRules(pathHints)
+			if rulesContent != "" {
+				parts = append(parts, rulesContent)
+			}
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n\n---\n\n")
 }
 
 // BuildSystemPromptPrefixWithHints returns workspace context with memory

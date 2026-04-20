@@ -120,6 +120,17 @@ func (fi *FactIndex) GetAll() []*Fact {
 	return facts
 }
 
+// GetByID returns a single fact by its content-hash id. The boolean
+// signals presence so callers can distinguish "not stored" from a
+// zero-value fact. Used by the HyDE retriever to lift cosine hits
+// back into the keyword scorer.
+func (fi *FactIndex) GetByID(id string) (*Fact, bool) {
+	fi.mu.RLock()
+	defer fi.mu.RUnlock()
+	f, ok := fi.facts[id]
+	return f, ok
+}
+
 // GetByCategory returns facts filtered by category.
 func (fi *FactIndex) GetByCategory(category string) []*Fact {
 	fi.mu.RLock()
