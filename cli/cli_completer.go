@@ -96,6 +96,27 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getConfigSuggestions(d)
 	}
 
+	// Seven-pattern quality pipeline slashes.
+	if strings.HasPrefix(lineBeforeCursor, "/thinking") {
+		return cli.getThinkingSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/refine") {
+		return cli.getRefineSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/verify") {
+		return cli.getVerifySuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/plan") {
+		return cli.getPlanSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/reflect") {
+		return cli.getReflectSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -1194,6 +1215,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "general", Description: i18n.T("complete.config.general")},
 			{Text: "providers", Description: i18n.T("complete.config.providers")},
 			{Text: "agent", Description: i18n.T("complete.config.agent")},
+			{Text: "quality", Description: i18n.T("complete.config.quality")},
 			{Text: "resilience", Description: i18n.T("complete.config.resilience")},
 			{Text: "session", Description: i18n.T("complete.config.session")},
 			{Text: "integrations", Description: i18n.T("complete.config.integrations")},

@@ -1621,8 +1621,37 @@
   "complete.config.auth": "OAuth status per provider + keychain",
   "complete.config.security": "Command policy, workspace sandbox, TLS, redaction",
   "complete.config.server": "Server/operator env vars (only in server mode)",
-  "complete.config.root_desc": "Configuration panorama (sections: all, general, providers, agent, resilience, session, integrations, auth, security, server)",
+  "complete.config.quality": "Seven-pattern agent quality pipeline (Self-Refine, CoVe, Reflexion, Plan-First, HyDE, Reasoning)",
+  "complete.config.root_desc": "Configuration panorama (sections: all, general, providers, agent, quality, resilience, session, integrations, auth, security, server)",
   "complete.config.status_alias": "Alias of /config — configuration panorama",
+
+  "complete.thinking.auto": "Clear override — defer to skill hints + quality.reasoning auto-agents",
+  "complete.thinking.off": "Force NO thinking / reasoning_effort for next turn",
+  "complete.thinking.on": "Alias for /thinking high — enable high-tier reasoning next turn",
+  "complete.thinking.low": "Map to SkillEffort low (OpenAI reasoning.effort=low; no Anthropic thinking)",
+  "complete.thinking.medium": "Map to SkillEffort medium (Anthropic thinking_budget=4096; OpenAI reasoning.effort=medium)",
+  "complete.thinking.high": "Map to SkillEffort high (Anthropic thinking_budget=16384; OpenAI reasoning.effort=high)",
+  "complete.thinking.max": "Map to SkillEffort max (Anthropic thinking_budget=32768)",
+  "complete.thinking.budget_medium": "Tier closest to 4096 thinking tokens → medium",
+  "complete.thinking.budget_high": "Tier closest to 8000 thinking tokens → high (default)",
+  "complete.thinking.budget_max": "Tier closest to 16384 thinking tokens → max",
+
+  "complete.refine.on": "Force Self-Refine ON for this session (overrides /config quality)",
+  "complete.refine.off": "Force Self-Refine OFF for this session",
+  "complete.refine.once": "Arm Self-Refine for the next turn only",
+  "complete.refine.auto": "Clear session override — use /config quality setting",
+  "complete.refine.clear": "Alias for auto — clear session override",
+
+  "complete.verify.on": "Force Chain-of-Verification ON for this session",
+  "complete.verify.off": "Force Chain-of-Verification OFF for this session",
+  "complete.verify.once": "Arm CoVe for the next turn only",
+  "complete.verify.auto": "Clear session override — use /config quality setting",
+  "complete.verify.clear": "Alias for auto — clear session override",
+
+  "complete.plan.hint": "Free-text task. Without args, arms plan-first flag for the next /agent or /coder run.",
+
+  "complete.reflect.hint": "Free-text lesson. Persists directly to memory.Fact (category=lesson, trigger=manual) without LLM call.",
+
 
   "complete.websearch.root_desc": "Configure web search provider (list, provider, reset, status)",
   "complete.websearch.sub_status": "Show current provider + active fallback chain",

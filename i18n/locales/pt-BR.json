@@ -1621,8 +1621,37 @@
   "complete.config.auth": "Status OAuth por provider + keychain",
   "complete.config.security": "Política de comandos, workspace sandbox, TLS, redaction",
   "complete.config.server": "Vars de server/operator (só se estiver em server mode)",
-  "complete.config.root_desc": "Panorama da configuração (seções: all, general, providers, agent, resilience, session, integrations, auth, security, server)",
+  "complete.config.quality": "Pipeline de qualidade dos sete padrões (Self-Refine, CoVe, Reflexion, Plan-First, HyDE, Reasoning)",
+  "complete.config.root_desc": "Panorama da configuração (seções: all, general, providers, agent, quality, resilience, session, integrations, auth, security, server)",
   "complete.config.status_alias": "Alias de /config — panorama da configuração",
+
+  "complete.thinking.auto": "Limpa override — usa skill hints + quality.reasoning auto-agents",
+  "complete.thinking.off": "Força SEM thinking / reasoning_effort no próximo turno",
+  "complete.thinking.on": "Alias de /thinking high — ativa reasoning tier high no próximo turno",
+  "complete.thinking.low": "Mapeia para SkillEffort low (OpenAI reasoning.effort=low; sem Anthropic thinking)",
+  "complete.thinking.medium": "Mapeia para SkillEffort medium (Anthropic thinking_budget=4096; OpenAI reasoning.effort=medium)",
+  "complete.thinking.high": "Mapeia para SkillEffort high (Anthropic thinking_budget=16384; OpenAI reasoning.effort=high)",
+  "complete.thinking.max": "Mapeia para SkillEffort max (Anthropic thinking_budget=32768)",
+  "complete.thinking.budget_medium": "Tier mais próximo de 4096 tokens de thinking → medium",
+  "complete.thinking.budget_high": "Tier mais próximo de 8000 tokens de thinking → high (default)",
+  "complete.thinking.budget_max": "Tier mais próximo de 16384 tokens de thinking → max",
+
+  "complete.refine.on": "Força Self-Refine LIGADO nesta sessão (sobrescreve /config quality)",
+  "complete.refine.off": "Força Self-Refine DESLIGADO nesta sessão",
+  "complete.refine.once": "Arma Self-Refine só para o próximo turno",
+  "complete.refine.auto": "Limpa override de sessão — usa /config quality",
+  "complete.refine.clear": "Alias de auto — limpa override de sessão",
+
+  "complete.verify.on": "Força Chain-of-Verification LIGADO nesta sessão",
+  "complete.verify.off": "Força Chain-of-Verification DESLIGADO nesta sessão",
+  "complete.verify.once": "Arma CoVe só para o próximo turno",
+  "complete.verify.auto": "Limpa override de sessão — usa /config quality",
+  "complete.verify.clear": "Alias de auto — limpa override de sessão",
+
+  "complete.plan.hint": "Task livre. Sem args, arma plan-first flag para o próximo /agent ou /coder.",
+
+  "complete.reflect.hint": "Lição livre. Persiste direto em memory.Fact (category=lesson, trigger=manual) sem chamada LLM.",
+
 
   "complete.websearch.root_desc": "Configura provider de busca web (list, provider, reset, status)",
   "complete.websearch.sub_status": "Exibe provider atual + cadeia de fallback ativa",
