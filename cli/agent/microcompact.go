@@ -52,23 +52,20 @@ type MicrocompactConfig struct {
 
 // DefaultMicrocompactConfig returns the default configuration.
 //
-// Tuned for proactive compaction — tool results are kept verbatim for
-// exactly ONE turn (the turn they were produced in) and start shrinking
-// the moment the next assistant reply arrives. The model has already
-// consumed the output by then; the raw text is kept around only as
-// "cold evidence" and a head+tail preview is more than enough for the
-// model to cite back into its reasoning. This is the single biggest
-// win for multi-turn agent sessions after prompt caching.
-//
-// Overrides via env keep the escape hatch for workflows that need fatter
-// context (large diff reviews, etc.).
+// Defaults are intentionally gentle — two turns of full-fidelity tool
+// output, four turns before falling back to a one-line summary, and
+// generous head+tail previews. This protects multi-turn, cross-file
+// workflows (large refactors, review sessions, long debugging arcs)
+// where the model may need to re-consult content it read several turns
+// ago. Users chasing maximum token frugality can tighten every knob via
+// the CHATCLI_MICROCOMPACT_* env vars below.
 func DefaultMicrocompactConfig() MicrocompactConfig {
 	cfg := MicrocompactConfig{
-		TurnsBeforeTruncate:  1,
-		TurnsBeforeSummarize: 3,
-		TruncateHeadChars:    1200,
-		TruncateTailChars:    300,
-		MinContentSize:       2000,
+		TurnsBeforeTruncate:  2,
+		TurnsBeforeSummarize: 4,
+		TruncateHeadChars:    2000,
+		TruncateTailChars:    500,
+		MinContentSize:       3000,
 	}
 	if v := os.Getenv("CHATCLI_MICROCOMPACT_TRUNCATE_TURNS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

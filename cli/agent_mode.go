@@ -933,23 +933,28 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 	// Helper para construir o histórico com a "âncora" (System Prompt reforçado por turno).
 	//
-	// The anchor used to be a 150-200 token block repeating rules that are
-	// already in the (cached) core system prompt. That cost ~150 tokens
-	// per turn without teaching the model anything new. Now it's a
-	// single-line marker (≤ 25 tokens) that only exists so the model
-	// briefly re-sees "you are still in coder/agent mode" right before
-	// producing its next response — helpful when the preceding tool
-	// outputs were large enough to push the primary instructions out of
-	// the attention window.
+	// The anchor is deliberately verbose: tool results can be long enough
+	// to push the primary system instructions out of the model's
+	// attention window, especially for smaller / older models. Repeating
+	// the operational rules every turn meaningfully improves format
+	// compliance (tool_call batching, base64 writes, no loose code
+	// blocks in /coder) at the cost of ~150 tokens/turn — a trade we
+	// accept to protect quality across the full provider/model matrix.
 	buildTurnHistoryWithAnchor := func() []models.Message {
 		h := make([]models.Message, 0, len(a.cli.history)+1)
 		h = append(h, a.cli.history...)
 
 		var anchor string
 		if a.isCoderMode {
-			anchor = "[MODE: /coder — follow rules from system prompt; emit all independent tool_calls in one response]"
+			anchor = "REMINDER (/CODER MODE): You MUST respond with a short <reasoning> (2-6 lines) then emit one or more <tool_call name=\"@coder\" args=\"...\" />. " +
+				"CRITICAL: Emit ALL independent tool_calls in a SINGLE response. Do NOT split independent reads/searches/writes into separate turns. " +
+				"If you need to read 3 files, emit 3 tool_calls NOW, not one per turn. Use <agent_call> for 3+ independent tasks when available. " +
+				"Do NOT use code blocks (```). For write/patch: base64 encoding and single-line args are MANDATORY."
 		} else {
-			anchor = "[MODE: /agent — follow rules from system prompt; batch independent operations]"
+			anchor = "REMINDER (/AGENT MODE): You can use tools via <tool_call name=\"@tool\" args=\"...\" /> when appropriate. " +
+				"CRITICAL: Emit ALL independent operations in a SINGLE response. Do NOT waste turns on things that could run in parallel. " +
+				"For shell commands, use ```execute:<type>``` blocks (shell/git/docker/kubectl...). " +
+				"Avoid destructive commands without clear warnings and alternatives."
 		}
 
 		h = append(h, models.Message{Role: "system", Content: anchor})
