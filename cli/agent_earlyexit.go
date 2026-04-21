@@ -23,7 +23,7 @@ import (
 //
 // The detection is intentionally conservative: we only break out after the
 // same signature has been seen enough times to be statistically suspicious
-// (DefaultStagnationThreshold, 3 consecutive identical turns by default).
+// (defaultStagnationThreshold, 3 consecutive identical turns by default).
 // A single repeated call is fine — the model might just be re-trying after
 // a transient failure.
 type stagnationTracker struct {
@@ -37,11 +37,11 @@ type stagnationTracker struct {
 const stagnationExitEnv = "CHATCLI_AGENT_EARLY_EXIT"
 
 const (
-	// DefaultStagnationThreshold is how many consecutive turns must share
+	// defaultStagnationThreshold is how many consecutive turns must share
 	// the same tool_call fingerprint before we treat it as a stall.
-	DefaultStagnationThreshold = 3
-	// DefaultStagnationWindow caps the number of fingerprints we retain.
-	DefaultStagnationWindow = 6
+	defaultStagnationThreshold = 3
+	// defaultStagnationWindow caps the number of fingerprints we retain.
+	defaultStagnationWindow = 6
 )
 
 // earlyExitEnabled reports whether the stagnation detector is active for
@@ -64,13 +64,13 @@ func stagnationThreshold() int {
 			return n
 		}
 	}
-	return DefaultStagnationThreshold
+	return defaultStagnationThreshold
 }
 
 // newStagnationTracker builds a tracker with the configured threshold.
 func newStagnationTracker() *stagnationTracker {
 	t := stagnationThreshold()
-	w := DefaultStagnationWindow
+	w := defaultStagnationWindow
 	if w < t {
 		w = t
 	}

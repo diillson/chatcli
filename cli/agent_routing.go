@@ -15,22 +15,22 @@ import (
 	"go.uber.org/zap"
 )
 
-// TrivialQueryClassification is the output of IsTrivialAgentQuery. It tells
+// trivialQueryClassification is the output of isTrivialAgentQuery. It tells
 // the caller whether the query warrants the full ReAct loop (agent mode) or
 // can be answered by a single chat-mode turn.
 //
-// The classifier is conservative: when in doubt it returns Trivial=false so
+// The classifier is conservative: when in doubt it returns trivial=false so
 // the existing agent flow runs unchanged. That's the "do no harm" stance —
 // we'd rather burn a few extra tokens on a borderline question than refuse
 // to enter agent mode on a real task.
-type TrivialQueryClassification struct {
-	// Trivial reports whether the query looks like a conversational /
+type trivialQueryClassification struct {
+	// trivial reports whether the query looks like a conversational /
 	// factual question that chat mode can answer in one shot.
-	Trivial bool
-	// Reason is a short tag (for logs / telemetry) describing why the
-	// classifier reached its verdict. Useful when deciding whether to
+	trivial bool
+	// reason is a short tag (for logs / telemetry) describing why the
+	// classifier reached its verdict. Useful when deciding whether the
 	// downgrade behaviour is working as intended.
-	Reason string
+	reason string
 }
 
 const (
@@ -38,44 +38,44 @@ const (
 	smartRoutingMaxLenChar = 160 // queries longer than this are treated as non-trivial by default
 )
 
-// SmartRoutingMode is the operational mode for the chat/agent router.
+// smartRoutingMode is the operational mode for the chat/agent router.
 //
-//	SmartRoutingOff   — fully disabled, behave exactly as pre-feature.
-//	SmartRoutingHint  — detect trivial queries, print a short dev-visible
+//	smartRoutingOff   — fully disabled, behave exactly as pre-feature.
+//	smartRoutingHint  — detect trivial queries, print a short dev-visible
 //	                    hint on stdout, but still run agent mode as asked.
 //	                    Default: the user's intent is never second-guessed.
-//	SmartRoutingAuto  — redirect trivial queries to chat mode automatically.
+//	smartRoutingAuto  — redirect trivial queries to chat mode automatically.
 //	                    Use when you trust the classifier and want maximum
-//	                    token savings (the crítico's original ask).
-type SmartRoutingMode string
+//	                    token savings.
+type smartRoutingMode string
 
 const (
-	SmartRoutingOff  SmartRoutingMode = "off"
-	SmartRoutingHint SmartRoutingMode = "hint"
-	SmartRoutingAuto SmartRoutingMode = "auto"
+	smartRoutingOff  smartRoutingMode = "off"
+	smartRoutingHint smartRoutingMode = "hint"
+	smartRoutingAuto smartRoutingMode = "auto"
 )
 
-// SmartRouting reads CHATCLI_AGENT_SMART_ROUTE and returns the active mode.
-// Empty / unset defaults to SmartRoutingHint so users GET the money-saving
+// smartRouting reads CHATCLI_AGENT_SMART_ROUTE and returns the active mode.
+// Empty / unset defaults to smartRoutingHint so users GET the money-saving
 // advice without unexpected chat-mode redirects.
-func SmartRouting() SmartRoutingMode {
+func smartRouting() smartRoutingMode {
 	v := strings.TrimSpace(strings.ToLower(os.Getenv(smartRoutingEnv)))
 	switch v {
 	case "0", "false", "off", "no":
-		return SmartRoutingOff
+		return smartRoutingOff
 	case "auto", "redirect", "2":
-		return SmartRoutingAuto
+		return smartRoutingAuto
 	case "", "1", "hint", "on", "true", "yes":
-		return SmartRoutingHint
+		return smartRoutingHint
 	default:
-		return SmartRoutingHint
+		return smartRoutingHint
 	}
 }
 
 // smartRoutingEnabled reports whether the trivial-query detector should run.
-// False only in SmartRoutingOff; all other modes keep the classifier active.
+// False only in smartRoutingOff; all other modes keep the classifier active.
 func smartRoutingEnabled() bool {
-	return SmartRouting() != SmartRoutingOff
+	return smartRouting() != smartRoutingOff
 }
 
 // taskSignalRe matches any token that strongly indicates the user wants the
@@ -88,7 +88,7 @@ var taskSignalRe = regexp.MustCompile(`(?i)\b(create|crie|criar|build|compile|co
 // These are excluded from trivial classification even if short.
 var contextSignalRe = regexp.MustCompile(`(?:@file|@git|@command|@history|@env)\b|(?:\./|\.\./|~/)|\.(?:go|py|js|ts|tsx|jsx|rs|java|kt|swift|c|cpp|h|hpp|rb|php|md|json|yaml|yml|toml|sh|bash)\b`)
 
-// IsTrivialAgentQuery classifies a user query as conversational/factual
+// isTrivialAgentQuery classifies a user query as conversational/factual
 // (chat-suited) or task-oriented (agent-suited). See the type doc for the
 // "do no harm" policy — the classifier errs toward agent mode.
 //
@@ -100,30 +100,30 @@ var contextSignalRe = regexp.MustCompile(`(?:@file|@git|@command|@history|@env)\
 //     the classifier will be slightly more permissive about suggesting
 //     chat mode.
 //
-// The function is safe for empty input — returns Trivial=false with
-// Reason="empty" so the caller's existing guard rails kick in.
-func IsTrivialAgentQuery(query string, explicitAgentInvocation bool) TrivialQueryClassification {
+// The function is safe for empty input — returns trivial=false with
+// reason="empty" so the caller's existing guard rails kick in.
+func isTrivialAgentQuery(query string, explicitAgentInvocation bool) trivialQueryClassification {
 	q := strings.TrimSpace(query)
 	if q == "" {
-		return TrivialQueryClassification{Trivial: false, Reason: "empty"}
+		return trivialQueryClassification{trivial: false, reason: "empty"}
 	}
 	if !smartRoutingEnabled() {
-		return TrivialQueryClassification{Trivial: false, Reason: "disabled"}
+		return trivialQueryClassification{trivial: false, reason: "disabled"}
 	}
 
 	// Long queries usually carry enough specifics to need the agent.
 	if len(q) > smartRoutingMaxLenChar {
-		return TrivialQueryClassification{Trivial: false, Reason: "long"}
+		return trivialQueryClassification{trivial: false, reason: "long"}
 	}
 
 	// Any @file/@git/@command or path-looking token → agent territory.
 	if contextSignalRe.MatchString(q) {
-		return TrivialQueryClassification{Trivial: false, Reason: "has_context_signal"}
+		return trivialQueryClassification{trivial: false, reason: "has_context_signal"}
 	}
 
 	// Any obvious task verb → agent territory.
 	if taskSignalRe.MatchString(q) {
-		return TrivialQueryClassification{Trivial: false, Reason: "has_task_verb"}
+		return trivialQueryClassification{trivial: false, reason: "has_task_verb"}
 	}
 
 	// Mentions of tools or subcommands → agent territory.
@@ -131,7 +131,7 @@ func IsTrivialAgentQuery(query string, explicitAgentInvocation bool) TrivialQuer
 	if strings.Contains(lower, "<tool_call") ||
 		strings.Contains(lower, "<agent_call") ||
 		strings.Contains(lower, "```") {
-		return TrivialQueryClassification{Trivial: false, Reason: "has_tool_markup"}
+		return trivialQueryClassification{trivial: false, reason: "has_tool_markup"}
 	}
 
 	// Conversational question starters are a strong positive signal.
@@ -150,33 +150,33 @@ func IsTrivialAgentQuery(query string, explicitAgentInvocation bool) TrivialQuer
 	}
 	for _, lead := range questionLeads {
 		if strings.HasPrefix(lower, lead+" ") || strings.HasPrefix(lower, lead+"?") {
-			return TrivialQueryClassification{Trivial: true, Reason: "question_word"}
+			return trivialQueryClassification{trivial: true, reason: "question_word"}
 		}
 	}
 
 	// Very short (< ~8 words) + ends with a question mark → likely trivial.
 	if strings.HasSuffix(q, "?") && len(strings.Fields(q)) <= 10 {
-		return TrivialQueryClassification{Trivial: true, Reason: "short_question"}
+		return trivialQueryClassification{trivial: true, reason: "short_question"}
 	}
 
 	// When the user explicitly typed /agent or /run, respect that intent
 	// unless one of the strong positive signals above fired.
 	if explicitAgentInvocation {
-		return TrivialQueryClassification{Trivial: false, Reason: "explicit_invocation"}
+		return trivialQueryClassification{trivial: false, reason: "explicit_invocation"}
 	}
 
-	return TrivialQueryClassification{Trivial: false, Reason: "default_agent"}
+	return trivialQueryClassification{trivial: false, reason: "default_agent"}
 }
 
-// MaybeReroute applies the SmartRouting policy to a `/agent <task>` or
+// maybeReroute applies the smart-routing policy to a `/agent <task>` or
 // `/run <task>` invocation. It inspects `task` and:
 //
-//   - In SmartRoutingOff mode → no-op, returns false (caller proceeds
+//   - In smartRoutingOff mode → no-op, returns false (caller proceeds
 //     with the agent-mode panic as usual).
-//   - In SmartRoutingHint (default) → when the task looks conversational,
+//   - In smartRoutingHint (default) → when the task looks conversational,
 //     prints a one-line tip to stdout. Always returns false so the
 //     agent-mode path still runs. The user's explicit intent wins.
-//   - In SmartRoutingAuto → when the task looks conversational AND the
+//   - In smartRoutingAuto → when the task looks conversational AND the
 //     ChatCLI has a configured client, hands the query off to
 //     processLLMRequest (chat mode) and returns true. The caller MUST
 //     NOT proceed with the agent-mode panic when true is returned.
@@ -184,28 +184,28 @@ func IsTrivialAgentQuery(query string, explicitAgentInvocation bool) TrivialQuer
 // The function takes the full /run or /agent query string minus the
 // command token. Pass `label` (e.g. "/agent" or "/run") for user-facing
 // messaging only — it does not affect the classification.
-func (cli *ChatCLI) MaybeReroute(label, task string) bool {
+func (cli *ChatCLI) maybeReroute(label, task string) bool {
 	task = strings.TrimSpace(task)
 	if task == "" {
 		return false
 	}
-	mode := SmartRouting()
-	if mode == SmartRoutingOff {
+	mode := smartRouting()
+	if mode == smartRoutingOff {
 		return false
 	}
-	classification := IsTrivialAgentQuery(task, true)
-	if !classification.Trivial {
+	classification := isTrivialAgentQuery(task, true)
+	if !classification.trivial {
 		return false
 	}
 	cli.logger.Debug("smart-route: trivial query detected",
 		zap.String("mode", string(mode)),
 		zap.String("label", label),
-		zap.String("reason", classification.Reason))
+		zap.String("reason", classification.reason))
 
 	hint := i18n.T("agent.early_exit.chat_hint")
 	fmt.Printf("  %s %s\n", colorize("ℹ", ColorGray), colorize(hint, ColorGray))
 
-	if mode != SmartRoutingAuto {
+	if mode != smartRoutingAuto {
 		return false
 	}
 	// Auto: dispatch directly to chat mode. Mirrors the call graph used

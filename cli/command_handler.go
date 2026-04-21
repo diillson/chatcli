@@ -47,7 +47,7 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 			// "auto" mode redirects to chat and we return here without
 			// spinning up the ReAct loop.
 			task := strings.TrimSpace(strings.TrimPrefix(userInput, "/agent"))
-			if ch.cli.MaybeReroute("/agent", task) {
+			if ch.cli.maybeReroute("/agent", task) {
 				return false
 			}
 			ch.cli.pendingAction = "agent"

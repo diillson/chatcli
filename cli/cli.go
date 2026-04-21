@@ -556,7 +556,7 @@ func (cli *ChatCLI) executor(in string) {
 		// a single chat-mode turn instead of spinning up the agent loop.
 		// In default "hint" mode this only prints a tip and falls through.
 		// In "auto" mode the chat path is invoked and we return here.
-		if cli.MaybeReroute("/run", task) {
+		if cli.maybeReroute("/run", task) {
 			return
 		}
 		cli.pendingAction = "agent"
