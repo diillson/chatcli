@@ -547,8 +547,16 @@ func (cli *ChatCLI) executor(in string) {
 		// Guard against entering agent mode with an empty task — that
 		// would ship an empty user message to the LLM. Mirrors the
 		// /agent fix: show a usage hint and stay in chat mode.
-		if strings.TrimSpace(strings.TrimPrefix(in, "/run")) == "" {
+		task := strings.TrimSpace(strings.TrimPrefix(in, "/run"))
+		if task == "" {
 			fmt.Println(colorize("  "+i18n.T("agent.usage.hint"), ColorYellow))
+			return
+		}
+		// Smart-routing: trivial conversational queries may be answered by
+		// a single chat-mode turn instead of spinning up the agent loop.
+		// In default "hint" mode this only prints a tip and falls through.
+		// In "auto" mode the chat path is invoked and we return here.
+		if cli.MaybeReroute("/run", task) {
 			return
 		}
 		cli.pendingAction = "agent"

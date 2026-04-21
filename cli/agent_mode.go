@@ -398,46 +398,57 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	a.logger.Info("Modo Agente iniciado", zap.Int("max_turns_limit", maxTurns))
 
-	var systemInstruction string
 	isCoder := (systemPromptOverride == CoderSystemPrompt)
 	hasActivePersona := a.cli.personaHandler != nil && a.cli.personaHandler.GetManager().HasActiveAgent()
 
-	// Lógica de Composição de Prompt:
-	// 1. Se há persona ativa: Persona + Instruções de Formato (Coder ou Agent)
-	// 2. Se não há persona: Prompt completo padrão (Coder ou Agent)
+	// SYSTEM PROMPT COMPOSITION — structured for provider KV cache reuse.
+	//
+	// The agent system prompt is composed from four semantic blocks that
+	// are built here and surfaced both as:
+	//   • a flat string (systemInstruction) — used by providers without
+	//     native cache_control (OpenAI, Gemini, Ollama, …) and by all the
+	//     legacy accounting code that measures history by `len(Content)`.
+	//   • structured SystemParts []ContentBlock — Anthropic consumes these
+	//     directly, stamping cache_control:ephemeral on each boundary so
+	//     identical prefixes are served as cache reads on subsequent turns.
+	//
+	// Block layout (stable → volatile):
+	//   1. Core behavior (persona + format rules / CoderSystemPrompt /
+	//      default agent prompt + language hint). Virtually never changes
+	//      during a session → best cache candidate.
+	//   2. Tools context (plugin descriptions) + session workspace hint.
+	//      Changes only when plugins come/go or MCP shadows shift.
+	//   3. Workspace context (SOUL.md/MEMORY.md, HyDE retrieval, dynamic
+	//      context) — varies between runs but stable within one Run().
+	//   4. Skills injection (auto-activated + manual) + Orchestrator
+	//      catalog. Added further down after auto-activation is decided.
+	var coreText string
 	if hasActivePersona {
-		// Combina: Persona (quem a IA é) + Instruções de Formato (como responder)
 		personaPrompt := a.cli.personaHandler.GetManager().GetSystemPrompt()
 		activeAgent := a.cli.personaHandler.GetManager().GetActiveAgent()
-
 		if isCoder {
-			// Persona + Instruções do Coder (tool_call, base64, etc.)
-			systemInstruction = personaPrompt + "\n\n" + CoderFormatInstructions
+			coreText = personaPrompt + "\n\n" + CoderFormatInstructions
 			a.logger.Info("Usando persona ativa + modo coder", zap.String("agent", activeAgent.Name))
 		} else {
-			// Persona + Instruções do Agent (execute:shell, reasoning, etc.)
-			systemInstruction = personaPrompt + "\n\n" + AgentFormatInstructions
+			coreText = personaPrompt + "\n\n" + AgentFormatInstructions
 			a.logger.Info("Usando persona ativa + modo agent", zap.String("agent", activeAgent.Name))
 		}
 	} else if isCoder {
-		// Sem persona: Prompt completo do Coder
-		systemInstruction = CoderSystemPrompt
+		coreText = CoderSystemPrompt
 	} else {
-		// Sem persona: Prompt padrão do Agent (Admin de Sistema / Shell)
 		osName := runtime.GOOS
 		shellName := utils.GetUserShell()
 		currentDir, _ := os.Getwd()
-		systemInstruction = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
+		coreText = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
 	}
-
-	// Append language instruction so the AI responds in the user's locale
-	systemInstruction += "\n\n" + i18n.T("ai.response_language")
+	coreText += "\n\n" + i18n.T("ai.response_language")
 
 	a.isCoderMode = isCoder
 	a.isOneShot = false
 
-	// Prepend workspace context (SOUL.md, USER.md, IDENTITY.md, RULES.md, MEMORY.md)
-	// Extract hints from recent history for smart memory retrieval
+	// Block 3 — workspace / retrieval context. Built only when we actually
+	// have a context builder; empty string means "skip this block".
+	var workspaceText string
 	if a.cli.contextBuilder != nil {
 		var hints []string
 		hintWindow := 3
@@ -451,10 +462,6 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 			}
 			hints = memory.ExtractKeywords(recentTexts)
 		}
-		// Phase 3 (#4): when HyDE is enabled in /config quality, use the
-		// HyDE-aware retrieval (hypothesis expansion + optional vector
-		// cosine). Falls through to the legacy keyword-only path
-		// otherwise to preserve byte-for-byte behavior.
 		var wsCtx string
 		if a.qualityConfig.HyDE.Enabled && a.qualityConfig.Enabled {
 			wsCtx = a.cli.hydeRetrieveContext(ctx, query, hints, a.qualityConfig)
@@ -462,22 +469,19 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 			wsCtx = a.cli.contextBuilder.BuildSystemPromptPrefixWithHints(hints)
 		}
 		if wsCtx != "" {
-			systemInstruction = wsCtx + "\n\n---\n\n" + systemInstruction
+			workspaceText = wsCtx
 		}
 		if dynCtx := a.cli.contextBuilder.BuildDynamicContext(); dynCtx != "" {
-			systemInstruction += "\n\n" + dynCtx
+			if workspaceText != "" {
+				workspaceText += "\n\n"
+			}
+			workspaceText += dynCtx
 		}
 	}
 
-	// Adiciona contexto de ferramentas (plugins) ao prompt
-	systemInstruction += a.getToolContextString()
-
-	// Session workspace + large-output handling hint.
-	// Tells the model about $CHATCLI_AGENT_TMPDIR (writable scratch dir it
-	// can stage temp scripts / data in) and the "full output saved to PATH"
-	// marker pattern used by tool_result_budget — so the model knows it
-	// should read_file on those paths instead of asking for the data again.
-	systemInstruction += buildSessionWorkspaceHint()
+	// Block 2 — tool descriptions (plugins) + session workspace hint.
+	// Merged into one cacheable block since they're always emitted as a pair.
+	toolsText := a.getToolContextString() + buildSessionWorkspaceHint()
 
 	// Fase 5: Inject auto-activated skills (triggers + path globs) into the
 	// agent-mode system prompt. Also honors a `/<skill-name>` manual
@@ -491,17 +495,17 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// without an active skill does not inherit the old model/effort.
 	a.skillModelHint = ""
 	a.skillEffortHint = llmclient.EffortUnset
+	// Block 4 — skills (auto-activated + manual) and Orchestrator catalog.
+	// Built last because it's the most volatile (changes per query) and
+	// sits at the tail of the system prompt so earlier blocks stay cacheable.
+	var skillsText string
 	if a.cli.personaHandler != nil {
 		mgr := a.cli.personaHandler.GetManager()
 		if mgr != nil {
 			filePaths := extractFilePaths(query + " " + additionalContext)
 			activated := mgr.FindAutoActivatedSkills(query, filePaths)
 			if len(activated) > 0 {
-				systemInstruction += "\n\n" + buildSkillInjectionBlock(activated)
-				// Honor the first skill's model/effort hint for the worker
-				// by recording them onto the agent mode state. The ReAct
-				// loop reads them via contextual WithEffortHint wrappers
-				// in processAIResponseAndAct.
+				skillsText = buildSkillInjectionBlock(activated)
 				model, effort, _ := pickSkillModelAndEffort(activated)
 				if model != "" {
 					a.skillModelHint = model
@@ -522,7 +526,10 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		a.cli.pendingManualSkill = nil
 		a.cli.pendingManualSkillArgs = ""
 		if block := renderManualSkillBlock(manual, manualArgs); block != "" {
-			systemInstruction += "\n\n" + block
+			if skillsText != "" {
+				skillsText += "\n\n"
+			}
+			skillsText += block
 		}
 		if m := strings.TrimSpace(manual.Model); m != "" {
 			a.skillModelHint = m
@@ -550,8 +557,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// Multi-Agent Orchestration: sempre ativo nos modos /agent e /coder.
 	// A env CHATCLI_AGENT_PARALLEL_MODE pode desativar explicitamente (=false ou =0).
+	var orchestratorText string
 	if a.initMultiAgent() {
-		systemInstruction += workers.OrchestratorSystemPrompt(a.agentRegistry.CatalogString())
+		orchestratorText = workers.OrchestratorSystemPrompt(a.agentRegistry.CatalogString())
 	}
 
 	// Banner curto com cheat sheet no modo /coder (apenas para o usuário humano)
@@ -566,9 +574,16 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		a.coderBannerShown = true
 	}
 
+	// Assemble the system message — flat string for providers without
+	// cache_control (consumed via Message.Content) plus structured
+	// SystemParts for Anthropic-style KV cache. Each block ends on a
+	// cache boundary (ephemeral). The ordering matches the stability
+	// heuristic described above.
+	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText)
+
 	// Inicializa ou atualiza o histórico com o System Prompt correto
 	if len(a.cli.history) == 0 {
-		a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
+		a.cli.history = append(a.cli.history, sysMsg)
 	} else {
 		// Remove any mode-reset system messages injected when leaving previous sessions.
 		// These are mid-history system messages that would confuse the LLM on re-entry.
@@ -593,14 +608,14 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		foundSystem := false
 		for i, msg := range a.cli.history {
 			if msg.Role == "system" {
-				a.cli.history[i].Content = systemInstruction
+				a.cli.history[i] = sysMsg
 				foundSystem = true
 				break
 			}
 		}
 		if !foundSystem {
 			// Insere no início se não houver
-			a.cli.history = append([]models.Message{{Role: "system", Content: systemInstruction}}, a.cli.history...)
+			a.cli.history = append([]models.Message{sysMsg}, a.cli.history...)
 		}
 	}
 
@@ -916,22 +931,25 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 	renderer := agent.NewUIRenderer(a.logger)
 
-	// Helper para construir o histórico com a "âncora" (System Prompt reforçado por turno)
+	// Helper para construir o histórico com a "âncora" (System Prompt reforçado por turno).
+	//
+	// The anchor used to be a 150-200 token block repeating rules that are
+	// already in the (cached) core system prompt. That cost ~150 tokens
+	// per turn without teaching the model anything new. Now it's a
+	// single-line marker (≤ 25 tokens) that only exists so the model
+	// briefly re-sees "you are still in coder/agent mode" right before
+	// producing its next response — helpful when the preceding tool
+	// outputs were large enough to push the primary instructions out of
+	// the attention window.
 	buildTurnHistoryWithAnchor := func() []models.Message {
 		h := make([]models.Message, 0, len(a.cli.history)+1)
 		h = append(h, a.cli.history...)
 
 		var anchor string
 		if a.isCoderMode {
-			anchor = "REMINDER (/CODER MODE): You MUST respond with a short <reasoning> (2-6 lines) then emit one or more <tool_call name=\"@coder\" args=\"...\" />. " +
-				"CRITICAL: Emit ALL independent tool_calls in a SINGLE response. Do NOT split independent reads/searches/writes into separate turns. " +
-				"If you need to read 3 files, emit 3 tool_calls NOW, not one per turn. Use <agent_call> for 3+ independent tasks when available. " +
-				"Do NOT use code blocks (```). For write/patch: base64 encoding and single-line args are MANDATORY."
+			anchor = "[MODE: /coder — follow rules from system prompt; emit all independent tool_calls in one response]"
 		} else {
-			anchor = "REMINDER (/AGENT MODE): You can use tools via <tool_call name=\"@tool\" args=\"...\" /> when appropriate. " +
-				"CRITICAL: Emit ALL independent operations in a SINGLE response. Do NOT waste turns on things that could run in parallel. " +
-				"For shell commands, use ```execute:<type>``` blocks (shell/git/docker/kubectl...). " +
-				"Avoid destructive commands without clear warnings and alternatives."
+			anchor = "[MODE: /agent — follow rules from system prompt; batch independent operations]"
 		}
 
 		h = append(h, models.Message{Role: "system", Content: anchor})
@@ -958,6 +976,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	contextRecovery := agent.NewContextRecovery(agent.DefaultContextRecoveryConfig(), a.logger)
 	currentMaxTokens := 0           // 0 = use provider default
 	providerMaxTokensCap := 128_000 // conservative default; providers may support more
+
+	// Stagnation detector — breaks out of the ReAct loop when the model
+	// re-emits the SAME batch of tool_calls for N consecutive turns, which
+	// is the "reflection loop" failure mode that makes trivial queries
+	// burn tens of thousands of tokens. Gated by CHATCLI_AGENT_EARLY_EXIT.
+	var stagnation *stagnationTracker
+	if earlyExitEnabled() {
+		stagnation = newStagnationTracker()
+	}
 
 	// --- LOOP PRINCIPAL DO AGENTE (ReAct) ---
 	for turn := 0; turn < maxTurns; turn++ {
@@ -1309,6 +1336,43 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if parseErr != nil {
 				a.logger.Warn("Falha ao parsear tool_calls", zap.Error(parseErr))
 				toolCalls = nil
+			}
+		}
+
+		// Stagnation check: fingerprint this turn's tool_call batch and
+		// break if we've seen the SAME batch N turns in a row. The model
+		// is almost certainly looping on the same information — no amount
+		// of additional turns will converge it, and every extra turn
+		// burns the full system prompt + tool definitions.
+		//
+		// The detector is a no-op when the fingerprint is empty (zero
+		// tool_calls), so the existing "no tools = final answer / wait
+		// for user" paths further down are reached normally.
+		if stagnation != nil {
+			fp := toolCallFingerprint(toolCalls)
+			if stalled, repeats := stagnation.Observe(fp); stalled {
+				a.logger.Warn("ReAct stagnation detected — breaking out of loop",
+					zap.Int("repeated_turns", repeats),
+					zap.Int("turn", turn+1))
+				fmt.Printf("\r\033[K  %s %s\n",
+					renderer.Colorize("⚠", agent.ColorYellow),
+					renderer.Colorize(
+						i18n.T("agent.early_exit.stagnation", repeats),
+						agent.ColorYellow))
+				// Acknowledge the partial assistant text so a later
+				// manual continuation starts from a consistent state.
+				a.cli.history = append(a.cli.history, models.Message{
+					Role: "user",
+					Content: "[stagnation detected] The same tool call was emitted repeatedly without new information. " +
+						"Stopping the ReAct loop. If you need to continue, rephrase the request or provide more context.",
+				})
+				fmt.Println(metrics.FormatTurnInfo(turn+1, maxTurns, turnDuration, &metrics.TurnStats{
+					TurnAgents:       turnAgents,
+					TurnToolCalls:    turnToolCalls,
+					SessionAgents:    a.agentsLaunched,
+					SessionToolCalls: a.toolCallsExecd,
+				}))
+				return nil
 			}
 		}
 

@@ -228,9 +228,13 @@ func parseToolResponse(body string, logger *zap.Logger) (*models.LLMResponse, er
 		}
 	}
 
-	// Extract usage
+	// Extract usage. OpenAI reports the auto-caching hit through
+	// prompt_tokens_details.cached_tokens — surface it via
+	// UsageInfo.CacheReadInputTokens so the cost tracker and any
+	// user-facing metrics reflect the savings consistently with
+	// Anthropic's explicit cache_read_input_tokens.
 	if usage, ok := result["usage"].(map[string]interface{}); ok {
-		response.Usage = &models.UsageInfo{}
+		response.Usage = &models.UsageInfo{IsReal: true}
 		if pt, ok := usage["prompt_tokens"].(float64); ok {
 			response.Usage.PromptTokens = int(pt)
 		}
@@ -239,6 +243,11 @@ func parseToolResponse(body string, logger *zap.Logger) (*models.LLMResponse, er
 		}
 		if tt, ok := usage["total_tokens"].(float64); ok {
 			response.Usage.TotalTokens = int(tt)
+		}
+		if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+			if cached, ok := details["cached_tokens"].(float64); ok {
+				response.Usage.CacheReadInputTokens = int(cached)
+			}
 		}
 	}
 

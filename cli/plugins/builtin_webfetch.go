@@ -15,6 +15,23 @@ import (
 	"golang.org/x/net/html"
 )
 
+// Inline-size budget for web_fetch: pages bigger than this (AFTER line
+// filters) are considered too large to paste into the LLM context in
+// one shot. When the caller hasn't asked for any filter/range AND no
+// save_to_file was requested, the plugin ESCALATES to auto-save — the
+// full body is written to the session scratch dir and a short preview
+// (plus the absolute path) is returned, so the model can read_file a
+// specific range instead of paying for an entire page every time.
+//
+// 20_000 chars ≈ 5k tokens with standard BPE — roughly the point where
+// one fetch alone starts dwarfing the system prompt. The knob is
+// overridable via CHATCLI_WEBFETCH_AUTOSAVE_BYTES in case a user wants
+// looser or tighter behaviour.
+const (
+	defaultWebFetchMaxLength    = 20_000
+	defaultWebFetchAutoSaveSize = 10_000
+)
+
 // BuiltinWebFetchPlugin provides web page fetching functionality.
 type BuiltinWebFetchPlugin struct{}
 
@@ -40,7 +57,7 @@ func (p *BuiltinWebFetchPlugin) Schema() string {
 				"flags": []map[string]interface{}{
 					{"name": "url", "type": "string", "description": "URL to fetch", "required": true},
 					{"name": "raw", "type": "boolean", "description": "Return raw HTML instead of text", "default": "false"},
-					{"name": "max_length", "type": "integer", "description": "Max returned characters (default 50000). Output beyond this is truncated (or saved if save_to_file=true).", "default": "50000"},
+					{"name": "max_length", "type": "integer", "description": "Max returned characters (default 20000). Output beyond this is truncated (or saved if save_to_file=true). Bodies larger than ~10KB without a filter are auto-saved to the session scratch dir and a preview is returned.", "default": "20000"},
 					{"name": "filter", "type": "string", "description": "Keep only lines matching this regex (Go regexp syntax). Useful for large endpoints like Prometheus /metrics — e.g. filter='^chatcli_'."},
 					{"name": "exclude", "type": "string", "description": "Drop lines matching this regex. Applied AFTER filter."},
 					{"name": "from_line", "type": "integer", "description": "Start at this line (1-based, inclusive). Applied after filter/exclude."},
@@ -90,7 +107,7 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 		return "", fmt.Errorf("url required")
 	}
 	if parsed.MaxLength <= 0 {
-		parsed.MaxLength = 50000
+		parsed.MaxLength = defaultWebFetchMaxLength
 	}
 
 	if onOutput != nil {
@@ -136,6 +153,22 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 		return "", filterErr
 	}
 
+	// Auto-save escalation: if the caller did not explicitly ask for
+	// save_to_file, did not supply any line filter/range, and the body
+	// weighs more than the inline budget, force save_to_file anyway.
+	// Without this, a single naive @webfetch to a wiki page dumps 50 KB
+	// of HTML-stripped text straight into the LLM context — exactly the
+	// "23k tokens on a trivial query" symptom we're fighting.
+	autoSaveSize := webFetchAutoSaveThreshold()
+	autoSaved := false
+	if !parsed.SaveToFile &&
+		parsed.Filter == "" && parsed.Exclude == "" &&
+		parsed.FromLine <= 0 && parsed.ToLine <= 0 &&
+		len(fullContent) > autoSaveSize {
+		parsed.SaveToFile = true
+		autoSaved = true
+	}
+
 	// Persist full *pre-filter* content to the session scratch dir when asked.
 	// This gives the agent the option to re-slice later via read_file without
 	// re-fetching. We write the unfiltered text so the full data is available.
@@ -172,6 +205,20 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 
 	// Final output returned to the agent. Apply max_length as the last step.
 	output := filtered
+
+	// When we auto-saved to disk, ship only a compact preview back — full
+	// body is on disk and the model has been told where. Keeping the
+	// inline preview small is THE point of auto-save: otherwise we would
+	// be paying twice (inline bytes + disk) for the same content.
+	if autoSaved {
+		previewSize := parsed.MaxLength / 4
+		if previewSize < 2000 {
+			previewSize = 2000
+		}
+		if len(output) > previewSize {
+			output = output[:previewSize] + "\n...(auto-truncated — full body saved to disk)"
+		}
+	}
 	truncated := false
 	if len(output) > parsed.MaxLength {
 		output = output[:parsed.MaxLength] + "\n...(truncated)"
@@ -180,9 +227,17 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 
 	// If we saved the full body to disk, tell the agent exactly where.
 	if savedPath != "" {
-		prefix := fmt.Sprintf("[full response saved to %s — %d bytes. Use read_file with start/end to examine specific ranges.]\n\n", savedPath, len(fullContent))
-		if truncated {
-			prefix = fmt.Sprintf("[response truncated inline at %d chars; full response saved to %s — %d bytes. Use read_file with start/end to examine specific ranges.]\n\n", parsed.MaxLength, savedPath, len(fullContent))
+		var prefix string
+		switch {
+		case autoSaved:
+			prefix = fmt.Sprintf("[auto-saved: response was %d bytes — too large to inline. Full body is at %s. Preview below; use read_file with start/end or rerun with filter/from_line/to_line for specific ranges.]\n\n",
+				len(fullContent), savedPath)
+		case truncated:
+			prefix = fmt.Sprintf("[response truncated inline at %d chars; full response saved to %s — %d bytes. Use read_file with start/end to examine specific ranges.]\n\n",
+				parsed.MaxLength, savedPath, len(fullContent))
+		default:
+			prefix = fmt.Sprintf("[full response saved to %s — %d bytes. Use read_file with start/end to examine specific ranges.]\n\n",
+				savedPath, len(fullContent))
 		}
 		output = prefix + output
 	}
@@ -200,7 +255,7 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 
 // parseFetchArgs accepts either a single JSON arg or positional --flag args.
 func parseFetchArgs(args []string) (fetchArgs, error) {
-	out := fetchArgs{MaxLength: 50000}
+	out := fetchArgs{MaxLength: defaultWebFetchMaxLength}
 
 	// Single JSON-arg form (native tool call).
 	if len(args) == 1 {
@@ -319,6 +374,20 @@ func mapToFetchArgs(m map[string]interface{}, out *fetchArgs) {
 			out.SavePath = v
 		}
 	}
+}
+
+// webFetchAutoSaveThreshold returns the byte threshold above which an
+// unfiltered fetch triggers the auto-save-to-disk escalation. Honors
+// CHATCLI_WEBFETCH_AUTOSAVE_BYTES (power-user override); any non-parsable
+// value falls back to defaultWebFetchAutoSaveSize.
+func webFetchAutoSaveThreshold() int {
+	if v := os.Getenv("CHATCLI_WEBFETCH_AUTOSAVE_BYTES"); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultWebFetchAutoSaveSize
 }
 
 // applyLineFilters applies regex filter/exclude and line-range clipping.

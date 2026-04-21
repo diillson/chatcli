@@ -57,7 +57,7 @@ func PluginToolDefinitions() []models.ToolDefinition {
 			Type: "function",
 			Function: models.ToolFunctionDef{
 				Name:        "web_fetch",
-				Description: "Fetch a web page or HTTP endpoint and return its text (HTML stripped). Supports line-level regex filtering (filter, exclude) and line-range slicing (from_line, to_line) to handle large payloads like Prometheus /metrics without blowing up the context. For very large responses, set save_to_file=true to persist the full body to the session scratch dir and receive preview+path back — then use read_file to examine specific ranges on demand.",
+				Description: "Fetch a web page or HTTP endpoint and return its text (HTML stripped). Prefer filter/from_line/to_line to scope output when possible. Bodies larger than ~10KB without a filter are auto-saved to the session scratch dir; you'll get a short preview plus the absolute path and should use read_file with start/end (or rerun web_fetch with a filter) for specific ranges.",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -71,7 +71,7 @@ func PluginToolDefinitions() []models.ToolDefinition {
 						},
 						"max_length": map[string]interface{}{
 							"type":        "integer",
-							"description": "Maximum returned-inline length in characters (default: 50000).",
+							"description": "Maximum returned-inline length in characters (default: 20000). Larger bodies are auto-saved to disk.",
 						},
 						"filter": map[string]interface{}{
 							"type":        "string",
@@ -91,7 +91,7 @@ func PluginToolDefinitions() []models.ToolDefinition {
 						},
 						"save_to_file": map[string]interface{}{
 							"type":        "boolean",
-							"description": "Save the FULL pre-filter response to the session scratch dir. Returns preview+path so you can read_file specific ranges later. Use for responses >50k chars.",
+							"description": "Save the FULL pre-filter response to the session scratch dir. Returns preview+path so you can read_file specific ranges later. Use this explicitly when you know the body is large; otherwise the auto-save threshold triggers automatically.",
 						},
 						"save_path": map[string]interface{}{
 							"type":        "string",

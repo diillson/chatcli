@@ -51,13 +51,24 @@ type MicrocompactConfig struct {
 }
 
 // DefaultMicrocompactConfig returns the default configuration.
+//
+// Tuned for proactive compaction — tool results are kept verbatim for
+// exactly ONE turn (the turn they were produced in) and start shrinking
+// the moment the next assistant reply arrives. The model has already
+// consumed the output by then; the raw text is kept around only as
+// "cold evidence" and a head+tail preview is more than enough for the
+// model to cite back into its reasoning. This is the single biggest
+// win for multi-turn agent sessions after prompt caching.
+//
+// Overrides via env keep the escape hatch for workflows that need fatter
+// context (large diff reviews, etc.).
 func DefaultMicrocompactConfig() MicrocompactConfig {
 	cfg := MicrocompactConfig{
-		TurnsBeforeTruncate:  2,
-		TurnsBeforeSummarize: 4,
-		TruncateHeadChars:    2000,
-		TruncateTailChars:    500,
-		MinContentSize:       3000,
+		TurnsBeforeTruncate:  1,
+		TurnsBeforeSummarize: 3,
+		TruncateHeadChars:    1200,
+		TruncateTailChars:    300,
+		MinContentSize:       2000,
 	}
 	if v := os.Getenv("CHATCLI_MICROCOMPACT_TRUNCATE_TURNS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -67,6 +78,21 @@ func DefaultMicrocompactConfig() MicrocompactConfig {
 	if v := os.Getenv("CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.TurnsBeforeSummarize = n
+		}
+	}
+	if v := os.Getenv("CHATCLI_MICROCOMPACT_HEAD_CHARS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.TruncateHeadChars = n
+		}
+	}
+	if v := os.Getenv("CHATCLI_MICROCOMPACT_TAIL_CHARS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.TruncateTailChars = n
+		}
+	}
+	if v := os.Getenv("CHATCLI_MICROCOMPACT_MIN_CONTENT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.MinContentSize = n
 		}
 	}
 	return cfg

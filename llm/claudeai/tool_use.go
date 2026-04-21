@@ -49,13 +49,21 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	// Build messages (excluding system messages)
 	messages := buildClaudeToolMessages(prompt, history)
 
-	// Build tool definitions for Anthropic format
+	// Build tool definitions for Anthropic format.
+	// Mark the LAST tool with cache_control: ephemeral so the whole tool
+	// block becomes part of the Anthropic KV cache — identical tool
+	// definitions across turns are served as a cache read instead of a
+	// full re-tokenization (saves tens of thousands of tokens per turn
+	// in agent mode where 15-17 coder+plugin tools are re-sent).
 	toolDefs := make([]map[string]interface{}, 0, len(sortedTools))
-	for _, t := range sortedTools {
+	for i, t := range sortedTools {
 		toolDef := map[string]interface{}{
 			"name":         t.Function.Name,
 			"description":  t.Function.Description,
 			"input_schema": t.Function.Parameters,
+		}
+		if i == len(sortedTools)-1 {
+			toolDef["cache_control"] = map[string]string{"type": "ephemeral"}
 		}
 		toolDefs = append(toolDefs, toolDef)
 	}
