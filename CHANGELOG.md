@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.106.1](https://github.com/diillson/chatcli/compare/v1.106.0...v1.106.1) (2026-04-21)
+
+
+### Bug Fixes
+
+* **quality:** /plan dispatch, UX, Claude 4.6 compat, subcommands ([#825](https://github.com/diillson/chatcli/issues/825)) ([cdf79cc](https://github.com/diillson/chatcli/commit/cdf79cc93f68c2aa361b0d19e4878759f8c1ab7a))
+
 ## [1.106.0](https://github.com/diillson/chatcli/compare/v1.105.4...v1.106.0) (2026-04-20)
 
 
