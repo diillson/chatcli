@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.107.0](https://github.com/diillson/chatcli/compare/v1.106.1...v1.107.0) (2026-04-21)
+
+
+### Features
+
+* **agent,coder:** token efficiency pass — caching, early-exit, smart routing, slimmer prompts ([#827](https://github.com/diillson/chatcli/issues/827)) ([5e3ba2f](https://github.com/diillson/chatcli/commit/5e3ba2ff0dbc6fda8032f5a665b6f347f9ccdba5))
+
 ## [1.106.1](https://github.com/diillson/chatcli/compare/v1.106.0...v1.106.1) (2026-04-21)
 
 
