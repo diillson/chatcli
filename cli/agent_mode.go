@@ -626,6 +626,14 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// system message so the ReAct loop can finalize with full context.
 	a.runPlanFirstIfApplicable(ctx, currentQuery)
 
+	// Dry-run / preview: runPlanFirstIfApplicable rendered the plan and
+	// asked us to stop. Don't enter the ReAct loop — the user wanted to
+	// inspect the plan before committing to execution.
+	if a.cli.planDryRunHandled {
+		a.cli.planDryRunHandled = false
+		return nil
+	}
+
 	// --- 2. O LOOP DE RACIOCÍNIO-AÇÃO (ReAct) ---
 	return a.processAIResponseAndAct(ctx, maxTurns)
 }

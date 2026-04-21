@@ -259,6 +259,17 @@ type ChatCLI struct {
 	// by AgentMode.runPlanFirstIfApplicable after the plan executes.
 	pendingPlanFirst bool
 
+	// /plan preview (or /plan dry): when true, only the planner runs and
+	// its output is rendered — no execution, no orchestrator. Consumed
+	// together with pendingPlanFirst in runPlanFirstIfApplicable.
+	pendingPlanDryRun bool
+
+	// planDryRunHandled is set by runPlanFirstIfApplicable after rendering
+	// the dry-run preview. AgentMode.Run checks this to skip the ReAct
+	// loop so we don't burn a SendPrompt call on a request the user only
+	// wanted to preview.
+	planDryRunHandled bool
+
 	// /refine and /verify session toggles. nil pointers mean "no
 	// override — defer to /config quality"; *bool=true forces the
 	// hook on, *bool=false forces it off. Consumed by AgentMode
@@ -823,9 +834,11 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				lastCmd = cli.commandHistory[len(cli.commandHistory)-1]
 			}
 
-			if strings.HasPrefix(lastCmd, "/coder") {
+			// /plan coder <task> routes to coder; /plan [agent] <task> routes to agent.
+			planCoder := strings.HasPrefix(lastCmd, "/plan coder ") || lastCmd == "/plan coder"
+			if strings.HasPrefix(lastCmd, "/coder") || planCoder {
 				cli.runCoderLogic()
-			} else if strings.HasPrefix(lastCmd, "/run") || strings.HasPrefix(lastCmd, "/agent") {
+			} else if strings.HasPrefix(lastCmd, "/run") || strings.HasPrefix(lastCmd, "/agent") || strings.HasPrefix(lastCmd, "/plan") {
 				cli.runAgentLogic()
 			}
 		}
@@ -911,6 +924,15 @@ func (cli *ChatCLI) runAgentLogic() {
 		query = strings.TrimSpace(strings.TrimPrefix(lastCommand, "/agent"))
 	} else if strings.HasPrefix(lastCommand, "/run") {
 		query = strings.TrimSpace(strings.TrimPrefix(lastCommand, "/run"))
+	} else if strings.HasPrefix(lastCommand, "/plan") {
+		query = strings.TrimSpace(strings.TrimPrefix(lastCommand, "/plan"))
+		// Optional subcommands after /plan
+		for _, sub := range []string{"preview", "dry", "agent"} {
+			if strings.HasPrefix(query, sub+" ") || query == sub {
+				query = strings.TrimSpace(strings.TrimPrefix(query, sub))
+				break
+			}
+		}
 	} else {
 		fmt.Println(i18n.T("error.agent_query_extraction"))
 		return
@@ -954,7 +976,12 @@ func (cli *ChatCLI) runCoderLogic() {
 	}
 	lastCommand := cli.commandHistory[len(cli.commandHistory)-1]
 
-	query := strings.TrimSpace(strings.TrimPrefix(lastCommand, "/coder"))
+	var query string
+	if strings.HasPrefix(lastCommand, "/plan coder") {
+		query = strings.TrimSpace(strings.TrimPrefix(lastCommand, "/plan coder"))
+	} else {
+		query = strings.TrimSpace(strings.TrimPrefix(lastCommand, "/coder"))
+	}
 	if query == "" {
 		fmt.Println(i18n.T("error.agent_query_extraction"))
 		return

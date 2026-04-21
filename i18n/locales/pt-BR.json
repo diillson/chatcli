@@ -1444,6 +1444,14 @@
   "plan_first.with_errors": "(alguns passos tiveram erros — o orquestrador verá isso no relatório)",
   "plan_first.synth_plan_header": "Plano estruturado auto-gerado (Plan-and-Solve / ReWOO):",
   "plan_first.orchestrator_handoff": "Use o relatório acima como verdade absoluta para a resposta final; não re-execute passos já concluídos.",
+  "plan_first.spinner_planning": "planejando estrutura (Plan-and-Solve)...",
+  "plan_first.spinner_executing": "executando plano estruturado...",
+  "plan_first.preview_header": "Plano gerado (dry-run — nada será executado)",
+  "plan_first.preview_task": "Resumo",
+  "plan_first.preview_parallel": "Grupos paralelizáveis",
+  "plan_first.preview_parse_failed": "Não foi possível interpretar o JSON do plano — exibindo bruto:",
+  "plan_first.preview_footer": "Para executar este plano: /plan <mesma tarefa> (ou /plan coder <tarefa>)",
+  "plan.preview_usage": "uso: /plan preview <descrição da tarefa>",
   "thinking.cleared": "override de thinking limpo — usando skill hints + auto-agents da config quality",
   "thinking.disabled": "thinking desligado para o próximo turno (override ativo)",
   "thinking.set": "override de thinking definido para %s no próximo turno",
@@ -1649,6 +1657,10 @@
   "complete.verify.clear": "Alias de auto — limpa override de sessão",
 
   "complete.plan.hint": "Task livre. Sem args, arma plan-first flag para o próximo /agent ou /coder.",
+  "complete.plan.agent": "Explícito: plan-first + modo agent (igual a /plan <task>)",
+  "complete.plan.coder": "Plan-first + modo coder (engenheiro de software com tools)",
+  "complete.plan.preview": "Dry-run: gera e mostra o plano sem executar nada",
+  "complete.plan.dry": "Alias de preview — dry-run sem execução",
 
   "complete.reflect.hint": "Lição livre. Persiste direto em memory.Fact (category=lesson, trigger=manual) sem chamada LLM.",
 
