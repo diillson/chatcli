@@ -1481,6 +1481,7 @@
   "cfg.sub.prov.minimax": "── MiniMax",
   "cfg.sub.prov.stackspot": "── StackSpot",
   "cfg.sub.agent.parallelism": "── Parallelism & workers",
+  "cfg.sub.agent.token_efficiency": "── Token efficiency (early-exit & smart routing)",
   "cfg.sub.agent.execution": "── Execution",
   "cfg.sub.agent.coder_denial": "── Coder denial caps",
   "cfg.sub.agent.per_agent": "── Per-agent overrides (set any)",
