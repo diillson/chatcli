@@ -132,8 +132,11 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		ch.cli.handleThinkingCommand(userInput)
 		return false
 	case userInput == "/plan" || strings.HasPrefix(userInput, "/plan "):
-		if ch.cli.handlePlanCommand(userInput) {
+		switch ch.cli.handlePlanCommand(userInput) {
+		case planRouteAgent:
 			panic(errAgentModeRequest)
+		case planRouteCoder:
+			panic(errCoderModeRequest)
 		}
 		return false
 	case userInput == "/refine" || strings.HasPrefix(userInput, "/refine "):

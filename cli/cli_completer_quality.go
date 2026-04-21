@@ -119,18 +119,20 @@ func qualityToggleCompleter(d prompt.Document, slash, rootKey, prefix string) []
 
 // ─── /plan ─────────────────────────────────────────────────────────────────
 
-// getPlanSuggestions returns a usage-hint suggestion for /plan.
+// getPlanSuggestions returns suggestions for /plan (Plan-and-Solve #2).
 //
-// /plan accepts either:
+// Accepted forms (see cli.handlePlanCommand):
 //
-//	/plan                  arm plan-first flag; consumed by next /agent or /coder
-//	/plan <free task>      arm + enter agent mode with that task inline
-//
-// Since there are no enumerable subcommands, the completer shows a single
-// hint so the user understands the command form.
+//	/plan                        arm plan-first flag; consumed by next /agent or /coder
+//	/plan <free task>            arm + enter agent mode with that task inline
+//	/plan agent <task>           explicit agent mode (same as bare /plan <task>)
+//	/plan coder <task>           coder mode with plan-first armed
+//	/plan preview <task>         dry-run: generate plan and render it without executing
+//	/plan dry <task>             alias of preview
 func (cli *ChatCLI) getPlanSuggestions(d prompt.Document) []prompt.Suggest {
 	line := d.TextBeforeCursor()
 	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
 
 	if len(args) == 1 && !strings.HasSuffix(line, " ") {
 		return []prompt.Suggest{
@@ -138,11 +140,29 @@ func (cli *ChatCLI) getPlanSuggestions(d prompt.Document) []prompt.Suggest {
 		}
 	}
 
-	// After space: show usage hint (non-selectable placeholder; the user
-	// types free-form task).
+	// First argument slot: offer named subcommands alongside the
+	// free-form <task> hint. The subcommands are filterable by prefix so
+	// typing "c" narrows to /plan coder, "pr" to /plan preview, etc.
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
-		return []prompt.Suggest{
+		subs := []prompt.Suggest{
+			{Text: "agent", Description: i18n.T("complete.plan.agent")},
+			{Text: "coder", Description: i18n.T("complete.plan.coder")},
+			{Text: "preview", Description: i18n.T("complete.plan.preview")},
+			{Text: "dry", Description: i18n.T("complete.plan.dry")},
 			{Text: "<task>", Description: i18n.T("complete.plan.hint")},
+		}
+		return prompt.FilterHasPrefix(subs, word, true)
+	}
+
+	// After a known subcommand (e.g. "/plan coder "), show the task hint
+	// so the user knows free-form text is expected next.
+	if len(args) >= 2 {
+		first := args[1]
+		isSub := first == "agent" || first == "coder" || first == "preview" || first == "dry"
+		if isSub && (len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " "))) {
+			return []prompt.Suggest{
+				{Text: "<task>", Description: i18n.T("complete.plan.hint")},
+			}
 		}
 	}
 
