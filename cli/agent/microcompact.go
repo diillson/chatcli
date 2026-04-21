@@ -51,6 +51,14 @@ type MicrocompactConfig struct {
 }
 
 // DefaultMicrocompactConfig returns the default configuration.
+//
+// Defaults are intentionally gentle — two turns of full-fidelity tool
+// output, four turns before falling back to a one-line summary, and
+// generous head+tail previews. This protects multi-turn, cross-file
+// workflows (large refactors, review sessions, long debugging arcs)
+// where the model may need to re-consult content it read several turns
+// ago. Users chasing maximum token frugality can tighten every knob via
+// the CHATCLI_MICROCOMPACT_* env vars below.
 func DefaultMicrocompactConfig() MicrocompactConfig {
 	cfg := MicrocompactConfig{
 		TurnsBeforeTruncate:  2,
@@ -67,6 +75,21 @@ func DefaultMicrocompactConfig() MicrocompactConfig {
 	if v := os.Getenv("CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.TurnsBeforeSummarize = n
+		}
+	}
+	if v := os.Getenv("CHATCLI_MICROCOMPACT_HEAD_CHARS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.TruncateHeadChars = n
+		}
+	}
+	if v := os.Getenv("CHATCLI_MICROCOMPACT_TAIL_CHARS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.TruncateTailChars = n
+		}
+	}
+	if v := os.Getenv("CHATCLI_MICROCOMPACT_MIN_CONTENT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.MinContentSize = n
 		}
 	}
 	return cfg

@@ -485,6 +485,12 @@ func (cli *ChatCLI) showConfigAgent() {
 	kv(p, "CHATCLI_AGENT_SUBAGENT_MAX_TURNS", envOr("CHATCLI_AGENT_SUBAGENT_MAX_TURNS"))
 
 	fmt.Println(p)
+	subheader(p, "cfg.sub.agent.token_efficiency")
+	kv(p, "CHATCLI_AGENT_EARLY_EXIT", envOr("CHATCLI_AGENT_EARLY_EXIT"))
+	kv(p, "CHATCLI_AGENT_EARLY_EXIT_TURNS", envOr("CHATCLI_AGENT_EARLY_EXIT_TURNS"))
+	kv(p, "CHATCLI_AGENT_SMART_ROUTE", envOr("CHATCLI_AGENT_SMART_ROUTE"))
+
+	fmt.Println(p)
 	subheader(p, "cfg.sub.agent.execution")
 	kv(p, "CHATCLI_AGENT_CMD_TIMEOUT", envOr("CHATCLI_AGENT_CMD_TIMEOUT"))
 	kv(p, "CHATCLI_AGENT_SOURCE_SHELL_CONFIG", envBool("CHATCLI_AGENT_SOURCE_SHELL_CONFIG"))
@@ -583,6 +589,9 @@ func (cli *ChatCLI) showConfigResilience() {
 	subheader(p, "cfg.sub.resil.compaction")
 	kv(p, "CHATCLI_MICROCOMPACT_TRUNCATE_TURNS", envOr("CHATCLI_MICROCOMPACT_TRUNCATE_TURNS"))
 	kv(p, "CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS", envOr("CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS"))
+	kv(p, "CHATCLI_MICROCOMPACT_HEAD_CHARS", envOr("CHATCLI_MICROCOMPACT_HEAD_CHARS"))
+	kv(p, "CHATCLI_MICROCOMPACT_TAIL_CHARS", envOr("CHATCLI_MICROCOMPACT_TAIL_CHARS"))
+	kv(p, "CHATCLI_MICROCOMPACT_MIN_CONTENT", envOr("CHATCLI_MICROCOMPACT_MIN_CONTENT"))
 	kv(p, "CHATCLI_TOOL_RESULT_BUDGET_CHARS", envOr("CHATCLI_TOOL_RESULT_BUDGET_CHARS"))
 	kv(p, "CHATCLI_TOOL_RESULT_MAX_CHARS", envOr("CHATCLI_TOOL_RESULT_MAX_CHARS"))
 
@@ -784,6 +793,7 @@ func (cli *ChatCLI) showConfigIntegrations() {
 	subheader(p, "cfg.sub.integ.websearch")
 	kv(p, "CHATCLI_WEBSEARCH_PROVIDER", envOr("CHATCLI_WEBSEARCH_PROVIDER"))
 	kv(p, "SEARXNG_URL", envOr("SEARXNG_URL"))
+	kv(p, "CHATCLI_WEBFETCH_AUTOSAVE_BYTES", envOr("CHATCLI_WEBFETCH_AUTOSAVE_BYTES"))
 	chain := plugins.SelectSearchChainNames()
 	chainNames := make([]string, 0, len(chain))
 	for _, n := range chain {

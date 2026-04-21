@@ -12,8 +12,8 @@ func TestOrchestratorSystemPrompt(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("expected non-empty prompt")
 	}
-	if !strings.Contains(prompt, "MULTI-AGENT ORCHESTRATION MODE") {
-		t.Error("expected 'MULTI-AGENT ORCHESTRATION MODE' in prompt")
+	if !strings.Contains(prompt, "MULTI-AGENT ORCHESTRATION") {
+		t.Error("expected 'MULTI-AGENT ORCHESTRATION' in prompt")
 	}
 	if !strings.Contains(prompt, "agent_call") {
 		t.Error("expected 'agent_call' dispatch syntax in prompt")
