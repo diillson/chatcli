@@ -117,6 +117,18 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getReflectSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/schedule") {
+		return cli.getScheduleSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/wait") {
+		return cli.getWaitSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/jobs") {
+		return cli.getJobsSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
