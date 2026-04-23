@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.108.0](https://github.com/diillson/chatcli/compare/v1.107.0...v1.108.0) (2026-04-23)
+
+
+### Miscellaneous Chores
+
+* **release:** force release-please after unparseable commit body ([#830](https://github.com/diillson/chatcli/issues/830)) ([d8041d4](https://github.com/diillson/chatcli/commit/d8041d45097b3409bbdc0f02a7adc30d06a8eda3))
+
 ## [1.107.0](https://github.com/diillson/chatcli/compare/v1.106.1...v1.107.0) (2026-04-21)
 
 
