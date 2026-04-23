@@ -47,6 +47,15 @@ func (cli *ChatCLI) showConfigQuality() {
 	kv(p, "CHATCLI_QUALITY_REFINE_MIN_BYTES", fmt.Sprintf("%d", cfg.Refine.MinDraftBytes))
 	kv(p, "CHATCLI_QUALITY_REFINE_EPSILON", fmt.Sprintf("%d", cfg.Refine.EpsilonChars))
 	kv(p, "CHATCLI_QUALITY_REFINE_EXCLUDE", listLabel(cfg.Refine.ExcludeAgents))
+	// Semantic convergence cascade (char → jaccard → embedding). Off
+	// by default on the embedding layer to avoid surprise $$ costs
+	// when a provider is configured via CHATCLI_EMBED_PROVIDER.
+	kv(p, "CHATCLI_QUALITY_REFINE_CONVERGENCE_ENABLED", boolLabel(cfg.Refine.Convergence.Enabled))
+	kv(p, "CHATCLI_QUALITY_REFINE_CONVERGENCE_EMBEDDING", boolLabel(cfg.Refine.Convergence.EmbeddingEnabled))
+	kv(p, "CHATCLI_QUALITY_REFINE_CONVERGENCE_STRICT", boolLabel(cfg.Refine.Convergence.Strict))
+	kv(p, "CHATCLI_QUALITY_REFINE_CONVERGENCE_CHAR_HIGH", fmt.Sprintf("%.2f", cfg.Refine.Convergence.CharHighSim))
+	kv(p, "CHATCLI_QUALITY_REFINE_CONVERGENCE_JACCARD_HIGH", fmt.Sprintf("%.2f", cfg.Refine.Convergence.JaccardHighSim))
+	kv(p, "CHATCLI_QUALITY_REFINE_CONVERGENCE_EMBEDDING_SIM", fmt.Sprintf("%.2f", cfg.Refine.Convergence.EmbeddingConvergedAt))
 
 	// Verify
 	fmt.Println(p)
@@ -64,6 +73,23 @@ func (cli *ChatCLI) showConfigQuality() {
 	kv(p, "CHATCLI_QUALITY_REFLEXION_ON_HALLUCINATION", boolLabel(cfg.Reflexion.OnHallucination))
 	kv(p, "CHATCLI_QUALITY_REFLEXION_ON_LOW_QUALITY", boolLabel(cfg.Reflexion.OnLowQuality))
 	kv(p, "CHATCLI_QUALITY_REFLEXION_PERSIST", boolLabel(cfg.Reflexion.Persist))
+	// Durable lesson queue (WAL + worker pool + DLQ). Enabled by
+	// default so lessons survive process crashes. Disable to fall
+	// back to detached-goroutine legacy mode.
+	kv(p, "CHATCLI_QUALITY_REFLEXION_QUEUE_ENABLED", boolLabel(cfg.Reflexion.Queue.Enabled))
+	if cfg.Reflexion.Queue.Enabled {
+		kv(p, "CHATCLI_QUALITY_REFLEXION_QUEUE_WORKERS", fmt.Sprintf("%d", cfg.Reflexion.Queue.Workers))
+		kv(p, "CHATCLI_QUALITY_REFLEXION_QUEUE_CAPACITY", fmt.Sprintf("%d", cfg.Reflexion.Queue.Capacity))
+		kv(p, "CHATCLI_QUALITY_REFLEXION_QUEUE_MAX_ATTEMPTS", fmt.Sprintf("%d", cfg.Reflexion.Queue.MaxAttempts))
+		kv(p, "CHATCLI_QUALITY_REFLEXION_QUEUE_STALE_AFTER", cfg.Reflexion.Queue.StaleAfter.String())
+		cli.reflexionRunnerMu.Lock()
+		rnr := cli.reflexionRunner
+		cli.reflexionRunnerMu.Unlock()
+		if rnr != nil {
+			kv(p, i18n.T("cfg.kv.quality.reflexion_runtime"),
+				fmt.Sprintf("queue=%d dlq=%d", rnr.QueueDepth(), rnr.DLQCount()))
+		}
+	}
 
 	// PlanFirst
 	fmt.Println(p)

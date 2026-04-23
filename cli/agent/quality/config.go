@@ -16,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config bundles the knobs for every pattern handled by the pipeline.
@@ -38,8 +39,52 @@ type RefineConfig struct {
 	Enabled       bool
 	MaxPasses     int      // hard cap; default 1
 	MinDraftBytes int      // skip refine if draft is shorter than this
-	EpsilonChars  int      // convergence threshold (rewrite ≈ draft → stop)
+	EpsilonChars  int      // char-level fallback threshold (rewrite ≈ draft → stop)
 	ExcludeAgents []string // agents whose output is not refined (e.g. formatter)
+
+	// Convergence controls the semantic-convergence cascade that
+	// determines when refine stops early. When Convergence.Enabled is
+	// true (default) and an embedding provider is wired, refine uses
+	// a char → jaccard → embedding cascade to detect semantic
+	// stability — catching "same meaning, different words" cases that
+	// the char heuristic misses.
+	//
+	// When Convergence.Enabled is false, the hook falls back to the
+	// legacy char-level heuristic (EpsilonChars). Identical behavior
+	// to the pre-Convergence implementation.
+	Convergence RefineConvergenceConfig
+}
+
+// RefineConvergenceConfig tunes the semantic convergence cascade.
+// Zero values are ALL fine (defaults from DefaultRefineConvergence).
+type RefineConvergenceConfig struct {
+	Enabled              bool    // master switch for the cascade
+	EmbeddingEnabled     bool    // include the embedding scorer (costs $$)
+	Strict               bool    // refuse convergence when embedding unavailable
+	CharHighSim          float64 // char short-circuit "identical" threshold
+	CharLowSim           float64 // char short-circuit "diverged" threshold
+	JaccardHighSim       float64 // jaccard short-circuit threshold
+	EmbeddingConvergedAt float64 // final embedding similarity threshold
+	CacheSize            int     // embed cache size (LRU)
+	CacheTTLMinutes      int     // embed cache TTL in minutes
+	BreakerThreshold     int     // consecutive failures before breaker opens
+}
+
+// DefaultRefineConvergence returns production-ready convergence
+// thresholds.
+func DefaultRefineConvergence() RefineConvergenceConfig {
+	return RefineConvergenceConfig{
+		Enabled:              true,
+		EmbeddingEnabled:     false, // default off — requires explicit opt-in due to $ cost
+		Strict:               false,
+		CharHighSim:          0.99,
+		CharLowSim:           0.3,
+		JaccardHighSim:       0.95,
+		EmbeddingConvergedAt: 0.92,
+		CacheSize:            256,
+		CacheTTLMinutes:      5,
+		BreakerThreshold:     3,
+	}
 }
 
 // VerifyConfig controls Chain-of-Verification (#6).
@@ -57,6 +102,30 @@ type ReflexionConfig struct {
 	OnHallucination bool // trigger when verifier flags discrepancy
 	OnLowQuality    bool // trigger when refiner gives low score
 	Persist         bool // persist lessons to memory.Fact
+
+	// Queue governs the durable lesson queue (WAL + worker pool +
+	// DLQ). When Queue.Enabled is true, ReflexionHook routes triggers
+	// through lessonq.Runner instead of firing a detached goroutine;
+	// the runner survives crashes via WAL replay on boot.
+	Queue ReflexionQueueConfig
+}
+
+// ReflexionQueueConfig controls the durable reflexion queue. When
+// disabled, ReflexionHook falls back to the legacy detached-goroutine
+// path (non-durable, lessons lost on crash).
+type ReflexionQueueConfig struct {
+	Enabled             bool
+	Workers             int           // worker pool size (default 2)
+	Capacity            int           // bounded in-memory depth (default 1000)
+	OverflowDropOldest  bool          // true = drop oldest; false = block with timeout
+	EnqueueBlockTimeout time.Duration // wait budget when queue is full
+	MaxAttempts         int           // retry budget per job (default 5)
+	InitialDelay        time.Duration // first retry delay (default 1s)
+	MaxDelay            time.Duration // cap on retry back-off (default 5m)
+	JitterFraction      float64       // [0..0.5] uniform jitter on back-off
+	PerJobTimeout       time.Duration // bound on a single Processor call
+	StaleAfter          time.Duration // discard WAL records older than this on replay
+	BaseDir             string        // override for WAL/DLQ root; empty = derive from workspace
 }
 
 // PlanFirstConfig controls Plan-and-Solve / ReWOO (#2).
@@ -99,6 +168,7 @@ func Defaults() Config {
 			// loop on its own output (would be infinite recursion
 			// otherwise: refine → refine → refine …).
 			ExcludeAgents: []string{"formatter", "deps", "refiner", "verifier"},
+			Convergence:   DefaultRefineConvergence(),
 		},
 		Verify: VerifyConfig{
 			Enabled:              false,
@@ -112,6 +182,20 @@ func Defaults() Config {
 			OnHallucination: true,
 			OnLowQuality:    false,
 			Persist:         true,
+			Queue: ReflexionQueueConfig{
+				Enabled:             true,
+				Workers:             2,
+				Capacity:            1000,
+				OverflowDropOldest:  false,
+				EnqueueBlockTimeout: 5 * time.Second,
+				MaxAttempts:         5,
+				InitialDelay:        time.Second,
+				MaxDelay:            5 * time.Minute,
+				JitterFraction:      0.2,
+				PerJobTimeout:       2 * time.Minute,
+				StaleAfter:          7 * 24 * time.Hour,
+				BaseDir:             "",
+			},
 		},
 		PlanFirst: PlanFirstConfig{
 			Mode:                "auto",
@@ -165,6 +249,40 @@ func loadRefineEnv(c *RefineConfig) {
 	if v := os.Getenv("CHATCLI_QUALITY_REFINE_EXCLUDE"); v != "" {
 		c.ExcludeAgents = parseList(v)
 	}
+	loadRefineConvergenceEnv(&c.Convergence)
+}
+
+func loadRefineConvergenceEnv(c *RefineConvergenceConfig) {
+	if v := os.Getenv("CHATCLI_QUALITY_REFINE_CONVERGENCE_ENABLED"); v != "" {
+		c.Enabled = parseBool(v, c.Enabled)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFINE_CONVERGENCE_EMBEDDING"); v != "" {
+		c.EmbeddingEnabled = parseBool(v, c.EmbeddingEnabled)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFINE_CONVERGENCE_STRICT"); v != "" {
+		c.Strict = parseBool(v, c.Strict)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFINE_CONVERGENCE_CHAR_HIGH"); v != "" {
+		c.CharHighSim = parseFloat(v, c.CharHighSim)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFINE_CONVERGENCE_CHAR_LOW"); v != "" {
+		c.CharLowSim = parseFloat(v, c.CharLowSim)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFINE_CONVERGENCE_JACCARD_HIGH"); v != "" {
+		c.JaccardHighSim = parseFloat(v, c.JaccardHighSim)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFINE_CONVERGENCE_EMBEDDING_SIM"); v != "" {
+		c.EmbeddingConvergedAt = parseFloat(v, c.EmbeddingConvergedAt)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFINE_CONVERGENCE_CACHE_SIZE"); v != "" {
+		c.CacheSize = parseInt(v, c.CacheSize)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFINE_CONVERGENCE_CACHE_TTL_MIN"); v != "" {
+		c.CacheTTLMinutes = parseInt(v, c.CacheTTLMinutes)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFINE_CONVERGENCE_BREAKER_THRESHOLD"); v != "" {
+		c.BreakerThreshold = parseInt(v, c.BreakerThreshold)
+	}
 }
 
 func loadVerifyEnv(c *VerifyConfig) {
@@ -197,6 +315,48 @@ func loadReflexionEnv(c *ReflexionConfig) {
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_PERSIST"); v != "" {
 		c.Persist = parseBool(v, c.Persist)
+	}
+	loadReflexionQueueEnv(&c.Queue)
+}
+
+// loadReflexionQueueEnv reads the CHATCLI_QUALITY_REFLEXION_QUEUE_*
+// overrides. Every knob is optional — unset falls back to the Defaults.
+func loadReflexionQueueEnv(c *ReflexionQueueConfig) {
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_ENABLED"); v != "" {
+		c.Enabled = parseBool(v, c.Enabled)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_WORKERS"); v != "" {
+		c.Workers = parseInt(v, c.Workers)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_CAPACITY"); v != "" {
+		c.Capacity = parseInt(v, c.Capacity)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_DROP_OLDEST"); v != "" {
+		c.OverflowDropOldest = parseBool(v, c.OverflowDropOldest)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_BLOCK_TIMEOUT"); v != "" {
+		c.EnqueueBlockTimeout = parseDuration(v, c.EnqueueBlockTimeout)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_MAX_ATTEMPTS"); v != "" {
+		c.MaxAttempts = parseInt(v, c.MaxAttempts)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_INITIAL_DELAY"); v != "" {
+		c.InitialDelay = parseDuration(v, c.InitialDelay)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_MAX_DELAY"); v != "" {
+		c.MaxDelay = parseDuration(v, c.MaxDelay)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_JITTER"); v != "" {
+		c.JitterFraction = parseFloat(v, c.JitterFraction)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_JOB_TIMEOUT"); v != "" {
+		c.PerJobTimeout = parseDuration(v, c.PerJobTimeout)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_STALE_AFTER"); v != "" {
+		c.StaleAfter = parseDuration(v, c.StaleAfter)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_REFLEXION_QUEUE_BASE_DIR"); v != "" {
+		c.BaseDir = strings.TrimSpace(v)
 	}
 }
 
@@ -267,6 +427,28 @@ func parseBool(v string, fallback bool) bool {
 func parseInt(v string, fallback int) int {
 	if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 		return n
+	}
+	return fallback
+}
+
+// parseFloat accepts "0.2", "1", ".5"; unparseable values fall back.
+func parseFloat(v string, fallback float64) float64 {
+	if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+		return f
+	}
+	return fallback
+}
+
+// parseDuration accepts a Go duration string ("5s", "1m", "2h30m"); on
+// parse error returns fallback. An empty string returns fallback so
+// callers can pass os.Getenv output without guarding for "".
+func parseDuration(v string, fallback time.Duration) time.Duration {
+	s := strings.TrimSpace(v)
+	if s == "" {
+		return fallback
+	}
+	if d, err := time.ParseDuration(s); err == nil {
+		return d
 	}
 	return fallback
 }

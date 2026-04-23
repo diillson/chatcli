@@ -27,6 +27,7 @@ import (
 
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/agent/quality/lessonq"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/paste"
@@ -275,6 +276,14 @@ type ChatCLI struct {
 	// hook on, *bool=false forces it off. Consumed by AgentMode
 	// when it builds qualityConfig.
 	qualityOverrides qualityOverridesState
+
+	// reflexionRunner is the durable lesson queue (WAL + worker pool +
+	// DLQ) used by ReflexionHook in enterprise mode. Lazily constructed
+	// on first use by ensureReflexionRunner(); shut down by cleanup().
+	// nil means reflexion falls back to the legacy detached-goroutine
+	// path (non-durable, lessons lost on crash).
+	reflexionRunner   *lessonq.Runner
+	reflexionRunnerMu sync.Mutex
 }
 
 // thinkingOverrideState carries the user's /thinking choice. set
@@ -1139,6 +1148,15 @@ func (cli *ChatCLI) cleanup() {
 	// Stop background memory worker
 	if cli.memWorker != nil {
 		cli.memWorker.stop()
+	}
+
+	// Drain and shut down the durable reflexion queue. Pending jobs
+	// remain in the WAL and will be replayed on the next boot.
+	cli.reflexionRunnerMu.Lock()
+	rnr := cli.reflexionRunner
+	cli.reflexionRunnerMu.Unlock()
+	if rnr != nil {
+		rnr.DrainAndShutdown(30 * time.Second)
 	}
 
 	// Stop MCP servers

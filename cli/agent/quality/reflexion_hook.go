@@ -3,12 +3,24 @@
  *
  * Triggered after a worker run when the result hits a quality gate
  * (error, hallucination flagged by VerifyHook, low refine score) or
- * when /reflect explicitly arms reflexion. Generates a structured
+ * when /reflect explicitly arms reflexion. Produces a structured
  * Lesson via the LLM and persists it to long-term memory so future
  * RAG+HyDE retrievals surface it for similar tasks.
  *
- * Reflexion never blocks the user-facing turn: lesson generation is
- * async (best-effort), and persistence failures are logged.
+ * Reflexion never blocks the user-facing turn. Two delivery modes:
+ *
+ *   1. Durable queue (preferred, opt-out): the hook hands the
+ *      LessonRequest to a lessonq.Enqueuer which writes a WAL record
+ *      synchronously and returns. A worker pool picks the job up
+ *      asynchronously, retries transient failures with exponential
+ *      backoff, and moves hard failures to a DLQ. Process crashes
+ *      between trigger and persist are recovered via WAL replay on
+ *      the next boot.
+ *
+ *   2. Legacy detached goroutine (fallback when no enqueuer is wired):
+ *      the hook fires `go runReflexion(...)` exactly as before. This
+ *      preserves the original behavior for tests and for users who
+ *      disable the queue via config.
  */
 package quality
 
@@ -19,15 +31,31 @@ import (
 	"go.uber.org/zap"
 )
 
-// ReflexionHook is the PostHook that materializes lessons.
-type ReflexionHook struct {
-	llm     LessonLLM
-	persist PersistLessonFunc
-	logger  *zap.Logger
+// LessonEnqueuer is the minimal contract the hook needs to hand a
+// request off to a durable queue. The lessonq package implements this
+// on its Runner; tests can stub it freely.
+type LessonEnqueuer interface {
+	// Enqueue accepts a LessonRequest for durable processing. Returns
+	// nil on accept (including idempotent re-submit). Errors are
+	// logged by the hook but never propagated up — reflexion is
+	// best-effort from the turn's perspective.
+	Enqueue(ctx context.Context, req LessonRequest) error
 }
 
-// NewReflexionHook constructs the hook. Either llm or persist nil
-// degrades to a no-op (logged on first use).
+// ReflexionHook is the PostHook that materializes lessons.
+type ReflexionHook struct {
+	llm       LessonLLM
+	persist   PersistLessonFunc
+	enqueuer  LessonEnqueuer
+	logger    *zap.Logger
+}
+
+// NewReflexionHook constructs the hook with the legacy detached-
+// goroutine path (no durable queue). Either llm or persist nil
+// degrades to a no-op.
+//
+// Kept for backward compatibility with callers that don't (yet) wire
+// a lessonq.Runner. New callers should use NewReflexionHookWithQueue.
 func NewReflexionHook(llm LessonLLM, persist PersistLessonFunc, logger *zap.Logger) *ReflexionHook {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -35,14 +63,29 @@ func NewReflexionHook(llm LessonLLM, persist PersistLessonFunc, logger *zap.Logg
 	return &ReflexionHook{llm: llm, persist: persist, logger: logger}
 }
 
+// NewReflexionHookWithQueue returns a hook that routes every trigger
+// through the provided enqueuer. llm and persist are still needed so
+// a future Shutdown → next-boot replay can hand the Runner the same
+// callbacks; pass the same ones used in the Runner's Processor.
+//
+// When enqueuer is nil this behaves identically to NewReflexionHook
+// (legacy detached-goroutine mode).
+func NewReflexionHookWithQueue(enqueuer LessonEnqueuer, llm LessonLLM, persist PersistLessonFunc, logger *zap.Logger) *ReflexionHook {
+	h := NewReflexionHook(llm, persist, logger)
+	h.enqueuer = enqueuer
+	return h
+}
+
 // Name identifies the hook.
 func (h *ReflexionHook) Name() string { return "reflexion" }
 
-// PostRun fires when one of the configured triggers matches. It
-// schedules a background goroutine for lesson generation so the
-// user-facing turn is not slowed by an extra LLM call.
+// PostRun fires when one of the configured triggers matches. In queue
+// mode it writes a WAL record and returns; in legacy mode it spawns a
+// detached goroutine. Never blocks the user-facing turn.
 func (h *ReflexionHook) PostRun(ctx context.Context, hc *HookContext, result *workers.AgentResult) error {
-	if h.llm == nil || h.persist == nil {
+	// If enqueuer isn't wired AND the legacy callbacks are nil, nothing
+	// we can do — silently skip.
+	if h.enqueuer == nil && (h.llm == nil || h.persist == nil) {
 		return nil
 	}
 	// Respect an already-canceled turn ctx: when the user has
@@ -70,6 +113,22 @@ func (h *ReflexionHook) PostRun(ctx context.Context, hc *HookContext, result *wo
 		Trigger: trigger,
 	}
 
+	if h.enqueuer != nil {
+		// Durable path: synchronous WAL write inside Enqueue, then
+		// return. The enqueue call is sub-millisecond in practice
+		// (single fsync + rename), well under the user-noticeable
+		// latency budget for a turn.
+		if err := h.enqueuer.Enqueue(context.Background(), req); err != nil {
+			h.logger.Warn("reflexion: enqueue failed; lesson may be lost",
+				zap.String("trigger", trigger),
+				zap.Error(err))
+		}
+		return nil
+	}
+
+	// Legacy path — kept verbatim from the pre-queue behavior so
+	// turning the queue off is a zero-regression operation.
+	//
 	// Background — never block the turn. Use a fresh context so the
 	// per-worker timeout doesn't kill the lesson call mid-flight.
 	go h.runReflexion(context.Background(), req) //#nosec G118 -- detached on purpose; lesson gen outlives the turn
