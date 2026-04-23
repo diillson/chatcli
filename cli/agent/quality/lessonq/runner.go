@@ -166,7 +166,9 @@ func NewRunner(cfg RunnerConfig, logger *zap.Logger) (*Runner, error) {
 		queue:   q,
 		metrics: metrics,
 		logger:  logger,
-		rng:     rand.New(rand.NewSource(time.Now().UnixNano())),
+		// Seeded with wall-clock nanos; jitter doesn't need crypto
+		// randomness (see randFloat in retry.go for rationale).
+		rng: rand.New(rand.NewSource(time.Now().UnixNano())), // #nosec G404 -- jitter, not security
 	}, nil
 }
 

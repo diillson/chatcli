@@ -263,7 +263,6 @@ func (s *slowAgent) Execute(ctx context.Context, task string, deps *workers.Work
 }
 
 type captureOutputPost struct {
-	name string
 	seen string
 }
 

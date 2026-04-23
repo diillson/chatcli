@@ -80,9 +80,18 @@ func (p RetryPolicy) normalize() RetryPolicy {
 	return p
 }
 
+// randFloat returns a pseudorandom float64 in [0.0, 1.0) for backoff
+// jitter. We intentionally use math/rand (not crypto/rand) because:
+//
+//  1. Backoff jitter is a performance optimization to spread retries,
+//     not a security primitive. An attacker predicting our jitter
+//     gains nothing — they already know the backoff range from docs.
+//  2. crypto/rand would block on entropy exhaustion in constrained
+//     environments (containers, early boot), which would stall retry
+//     scheduling and compound the original failure.
 func randFloat(rng *rand.Rand) float64 {
 	if rng == nil {
-		return rand.Float64()
+		return rand.Float64() // #nosec G404 -- jitter is not security-sensitive; see comment above
 	}
 	return rng.Float64()
 }

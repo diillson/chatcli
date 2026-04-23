@@ -175,10 +175,10 @@ func (p *Pipeline) SetHookTimeout(d time.Duration) {
 // NOT cancel in-flight calls — the caller's ctx is the cancellation
 // mechanism; this just stops accepting new work.
 func (p *Pipeline) DrainAndClose(timeout time.Duration) {
-	if !p.state.transition(StateActive, StateDraining) {
-		// Already draining or closed — proceed to close anyway so
-		// double-calls are safe.
-	}
+	// Attempt Active → Draining transition. CAS failure means we're
+	// already in Draining or Closed; proceed to close anyway so
+	// double-calls are safe (idempotent by design).
+	_ = p.state.transition(StateActive, StateDraining)
 	p.logger.Info("quality pipeline: draining",
 		zap.Int64("in_flight", p.inFlight.Load()))
 
@@ -199,10 +199,10 @@ func (p *Pipeline) DrainAndClose(timeout time.Duration) {
 // Order:
 //  1. PreHooks (priority-ordered; each may rewrite task).
 //     - A hook returning ErrSkipExecution short-circuits the whole
-//       agent.Execute step and jumps to PostHooks with a synthesized
-//       result (output taken from HookContext.SetShortCircuit if set).
+//     agent.Execute step and jumps to PostHooks with a synthesized
+//     result (output taken from HookContext.SetShortCircuit if set).
 //     - A hook returning ErrSkipRemainingHooks stops further PreHooks
-//       but still runs agent.Execute and PostHooks.
+//     but still runs agent.Execute and PostHooks.
 //  2. agent.Execute(rewrittenTask)
 //  3. PostHooks (priority-ordered; each may mutate result).
 //     - ErrSkipRemainingHooks stops further PostHooks.

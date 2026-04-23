@@ -44,10 +44,10 @@ type LessonEnqueuer interface {
 
 // ReflexionHook is the PostHook that materializes lessons.
 type ReflexionHook struct {
-	llm       LessonLLM
-	persist   PersistLessonFunc
-	enqueuer  LessonEnqueuer
-	logger    *zap.Logger
+	llm      LessonLLM
+	persist  PersistLessonFunc
+	enqueuer LessonEnqueuer
+	logger   *zap.Logger
 }
 
 // NewReflexionHook constructs the hook with the legacy detached-

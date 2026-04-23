@@ -37,9 +37,9 @@ type ConvergenceChecker interface {
 // output. Opt-in via cfg.Refine.Enabled; skipped for any agent in
 // cfg.Refine.ExcludeAgents (Formatter, Deps by default).
 type RefineHook struct {
-	dispatch     DispatchOne
-	logger       *zap.Logger
-	convergence  ConvergenceChecker // nil → char-only fallback
+	dispatch    DispatchOne
+	logger      *zap.Logger
+	convergence ConvergenceChecker // nil → char-only fallback
 }
 
 // DispatchOne dispatches a single AgentCall and returns its result.

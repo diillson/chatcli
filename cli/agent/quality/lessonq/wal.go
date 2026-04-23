@@ -46,6 +46,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -100,7 +101,9 @@ func NewWAL(dir string, metrics *Metrics, logger *zap.Logger) (*WAL, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// 0o750: owner rwx, group rx, no world — WAL records are user-
+	// scoped session state, no read-access needed from other users.
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("lessonq wal: mkdir %s: %w", dir, err)
 	}
 	w := &WAL{dir: dir, logger: logger, m: metrics}
@@ -336,11 +339,24 @@ func (w *WAL) refreshSegmentGauge() {
 // frameRecord wraps payload in the WAL envelope:
 //
 //	magic | len | crc32(payload) | payload | crc32(payload)
+//
+// The caller (AppendNew) bounds payload length to 16 MiB before
+// invoking this function — well under the uint32 max of 4 GiB — so
+// the length cast is safe by construction. The guard below turns
+// that invariant into a runtime check in case a future caller forgets.
 func frameRecord(payload []byte) []byte {
+	if uint64(len(payload)) > uint64(math.MaxUint32) {
+		// Defensive: upstream AppendNew enforces a 16 MiB cap, but if
+		// this is ever called from elsewhere, refuse to produce a
+		// malformed record (callers of frameRecord get an empty
+		// buffer, which readRecord will reject on bad magic).
+		return nil
+	}
 	crc := crc32.ChecksumIEEE(payload)
 	var buf bytes.Buffer
 	buf.Grow(16 + len(payload))
 	buf.Write(magic4[:])
+	// #nosec G115 -- len bounded above by math.MaxUint32
 	_ = binary.Write(&buf, binary.BigEndian, uint32(len(payload)))
 	_ = binary.Write(&buf, binary.BigEndian, crc)
 	buf.Write(payload)
@@ -351,8 +367,12 @@ func frameRecord(payload []byte) []byte {
 // readRecord parses a .wal file and returns the LessonJob. Errors on
 // bad magic, length overflow, CRC mismatch (either leading or
 // trailing), or JSON parse failure.
+//
+// path is always a *.wal file inside our WAL dir (from filepath.Join of
+// the WAL base dir and a validated .wal suffix). Not user-supplied.
 func readRecord(path string) (LessonJob, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is WAL-scoped, not user-controlled
+
 	if err != nil {
 		return LessonJob{}, err
 	}
@@ -407,8 +427,13 @@ func readRecord(path string) (LessonJob, error) {
 
 // writeAndSync writes data to path and fsyncs the file. Caller must
 // rename into place afterwards.
+//
+// path is always a tmp file inside our WAL dir (constructed from the
+// JobID + pid + monotonic counter) — not user-controlled at this layer.
+// 0o600 restricts access to the owner: WAL records carry task text and
+// last-error messages that may contain tokens or PII.
 func writeAndSync(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- path is WAL-scoped, not user-controlled
 	if err != nil {
 		return fmt.Errorf("lessonq wal: create tmp: %w", err)
 	}
@@ -426,11 +451,14 @@ func writeAndSync(path string, data []byte) error {
 // syncDir fsyncs a directory so a preceding rename is durable. On
 // Windows this is a no-op (dir fsync is not supported and not needed
 // — NTFS provides rename atomicity through its journal).
+//
+// dir is the WAL base dir passed from NewWAL; scoped to our
+// subsystem and never user-supplied at call time.
 func syncDir(dir string) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	f, err := os.Open(dir)
+	f, err := os.Open(dir) // #nosec G304 -- dir is WAL-scoped, not user-controlled
 	if err != nil {
 		return err
 	}

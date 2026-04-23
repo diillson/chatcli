@@ -187,13 +187,13 @@ func (a runnerEnqueuerAdapter) Enqueue(ctx context.Context, req quality.LessonRe
 
 // handleReflectCommand implements /reflect and its subcommands.
 //
-//   /reflect                       — show status summary (queue depth, DLQ size)
-//   /reflect <free text>           — persist a user-supplied lesson directly
-//   /reflect list                  — list active + DLQ entries
-//   /reflect failed                — list DLQ entries with last errors
-//   /reflect retry <id>            — requeue a DLQ entry
-//   /reflect purge <id>            — permanently remove a DLQ entry
-//   /reflect drain                 — force replay of any WAL-pending jobs
+//	/reflect                       — show status summary (queue depth, DLQ size)
+//	/reflect <free text>           — persist a user-supplied lesson directly
+//	/reflect list                  — list active + DLQ entries
+//	/reflect failed                — list DLQ entries with last errors
+//	/reflect retry <id>            — requeue a DLQ entry
+//	/reflect purge <id>            — permanently remove a DLQ entry
+//	/reflect drain                 — force replay of any WAL-pending jobs
 func (cli *ChatCLI) handleReflectCommand(userInput string) {
 	rest := strings.TrimSpace(strings.TrimPrefix(userInput, "/reflect"))
 	parts := strings.Fields(rest)

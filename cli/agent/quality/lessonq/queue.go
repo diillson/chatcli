@@ -38,15 +38,15 @@ var ErrDuplicate = errors.New("lessonq: duplicate job")
 // Queue is a bounded, priority-scheduled (by NextAttemptAt) job queue.
 // Safe for concurrent use.
 type Queue struct {
-	mu         sync.Mutex
-	cond       *sync.Cond // signals on Enqueue or shutdown
-	heap       *scheduledHeap
-	byID       map[JobID]*heapEntry
-	cap        int
-	policy     OverflowPolicy
+	mu           sync.Mutex
+	cond         *sync.Cond // signals on Enqueue or shutdown
+	heap         *scheduledHeap
+	byID         map[JobID]*heapEntry
+	cap          int
+	policy       OverflowPolicy
 	blockTimeout time.Duration // max wait on OverflowBlock
-	closed     bool
-	m          *Metrics
+	closed       bool
+	m            *Metrics
 }
 
 // NewQueue builds a queue with the given capacity and overflow policy.

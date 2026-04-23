@@ -40,8 +40,8 @@ type CompositeConfig struct {
 	CharLowSim float64
 	// JaccardHighSim: jaccard above this + MinTokensForJaccard tokens
 	// short-circuits as "converged". Default 0.95.
-	JaccardHighSim        float64
-	MinTokensForJaccard   int
+	JaccardHighSim      float64
+	MinTokensForJaccard int
 	// EmbeddingConvergedAt: final embedding similarity threshold.
 	// Default 0.92.
 	EmbeddingConvergedAt float64
