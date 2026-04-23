@@ -336,14 +336,14 @@ func splitTopLevelArgs(s string) []string {
 
 // ParseActionDSL interprets a short string as an Action.
 //
-//   "/foo bar"              → slash_cmd command=/foo bar
-//   "shell: <cmd>"          → shell command=<cmd>
-//   "agent: <task>"         → agent_task task=<task>
-//   "worker <name>: <task>" → worker_dispatch
-//   "llm: <prompt>"         → llm_prompt prompt=<prompt>
-//   "POST https://...| body" → webhook
-//   "hook:<event>"          → hook event=<event>
-//   "noop"                  → noop
+//	"/foo bar"              → slash_cmd command=/foo bar
+//	"shell: <cmd>"          → shell command=<cmd>
+//	"agent: <task>"         → agent_task task=<task>
+//	"worker <name>: <task>" → worker_dispatch
+//	"llm: <prompt>"         → llm_prompt prompt=<prompt>
+//	"POST https://...| body" → webhook
+//	"hook:<event>"          → hook event=<event>
+//	"noop"                  → noop
 func ParseActionDSL(input string) (Action, error) {
 	in := strings.TrimSpace(input)
 	if in == "" {

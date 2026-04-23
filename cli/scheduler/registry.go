@@ -124,9 +124,9 @@ func (r *ConditionRegistry) Types() []string {
 
 // ActionResult is what an executor returns after a single invocation.
 type ActionResult struct {
-	Output  string
-	Tokens  int
-	Cost    float64
+	Output string
+	Tokens int
+	Cost   float64
 	// Transient mirrors EvalOutcome.Transient — retryable vs permanent.
 	Transient bool
 	Err       error

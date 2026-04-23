@@ -100,9 +100,9 @@ func (a *auditLogger) Path() string { return a.path }
 // nopAuditLogger is used when audit is disabled; avoids nil-check churn.
 type nopAuditLogger struct{}
 
-func (nopAuditLogger) Write(_ Event)  {}
-func (nopAuditLogger) Close() error   { return nil }
-func (nopAuditLogger) Path() string   { return "" }
+func (nopAuditLogger) Write(_ Event) {}
+func (nopAuditLogger) Close() error  { return nil }
+func (nopAuditLogger) Path() string  { return "" }
 
 // auditWriter abstracts the two implementations so Scheduler can hold
 // one interface-typed field.

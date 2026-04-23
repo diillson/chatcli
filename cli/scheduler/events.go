@@ -51,16 +51,16 @@ const (
 // Event is the payload fan-out. JSON-serialized for IPC + audit; bus
 // subscribers receive the struct directly.
 type Event struct {
-	Type      EventType              `json:"type"`
-	Timestamp time.Time              `json:"timestamp"`
-	JobID     JobID                  `json:"job_id,omitempty"`
-	Name      string                 `json:"name,omitempty"`
-	Owner     Owner                  `json:"owner,omitempty"`
-	Status    JobStatus              `json:"status,omitempty"`
-	Outcome   Outcome                `json:"outcome,omitempty"`
-	Message   string                 `json:"message,omitempty"`
-	Data      map[string]any         `json:"data,omitempty"`
-	Execution *ExecutionResult       `json:"execution,omitempty"`
+	Type      EventType        `json:"type"`
+	Timestamp time.Time        `json:"timestamp"`
+	JobID     JobID            `json:"job_id,omitempty"`
+	Name      string           `json:"name,omitempty"`
+	Owner     Owner            `json:"owner,omitempty"`
+	Status    JobStatus        `json:"status,omitempty"`
+	Outcome   Outcome          `json:"outcome,omitempty"`
+	Message   string           `json:"message,omitempty"`
+	Data      map[string]any   `json:"data,omitempty"`
+	Execution *ExecutionResult `json:"execution,omitempty"`
 }
 
 // NewEvent stamps the timestamp and returns a fresh Event value.

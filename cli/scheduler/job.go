@@ -207,18 +207,18 @@ func (j *Job) unlock() { j.mu.Unlock() }
 // JobSummary is the compact view returned by List and the status line.
 // Stripping history and transitions keeps the JSON small for IPC.
 type JobSummary struct {
-	ID          JobID      `json:"id"`
-	Name        string     `json:"name"`
-	Owner       Owner      `json:"owner"`
-	Status      JobStatus  `json:"status"`
-	Type        string     `json:"type"`
-	NextFireAt  time.Time  `json:"next_fire_at,omitempty"`
-	LastOutcome Outcome    `json:"last_outcome,omitempty"`
-	Attempts    int        `json:"attempts,omitempty"`
-	Description string     `json:"description,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	Tags        []string   `json:"tags,omitempty"`
+	ID          JobID     `json:"id"`
+	Name        string    `json:"name"`
+	Owner       Owner     `json:"owner"`
+	Status      JobStatus `json:"status"`
+	Type        string    `json:"type"`
+	NextFireAt  time.Time `json:"next_fire_at,omitempty"`
+	LastOutcome Outcome   `json:"last_outcome,omitempty"`
+	Attempts    int       `json:"attempts,omitempty"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Tags        []string  `json:"tags,omitempty"`
 }
 
 // Summary projects a Job to a JobSummary.

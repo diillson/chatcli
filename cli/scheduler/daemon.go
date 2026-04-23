@@ -39,6 +39,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var _ = syscall.EAGAIN // keep syscall import referenced on all platforms
+
 // Daemon is the long-lived server binding the scheduler to a UNIX
 // socket. Built from an existing Scheduler so tests can inject a mock.
 type Daemon struct {
@@ -187,13 +189,20 @@ func (d *Daemon) acceptLoop(ctx context.Context) {
 	for {
 		conn, err := d.listener.Accept()
 		if err != nil {
-			var nerr net.Error
-			if errors.As(err, &nerr) && nerr.Temporary() {
+			// net.Listener on Unix domain sockets returns one of:
+			//   - net.ErrClosed after Stop -> exit loop
+			//   - ctx-driven deadline errors that manifest as syscall.EAGAIN
+			//     wrapped in an OpError; these are transient and we back off
+			//   - os.ErrDeadlineExceeded on a set deadline (not used here
+			//     but covered for completeness)
+			// nerr.Temporary() was deprecated in Go 1.18; we check the
+			// specific transient errors directly.
+			if errors.Is(err, net.ErrClosed) || d.stopped.Load() {
+				return
+			}
+			if errors.Is(err, syscall.EAGAIN) || errors.Is(err, os.ErrDeadlineExceeded) {
 				time.Sleep(50 * time.Millisecond)
 				continue
-			}
-			if d.stopped.Load() {
-				return
 			}
 			d.logger.Warn("daemon: accept error", zap.Error(err))
 			return

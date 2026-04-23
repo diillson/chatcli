@@ -17,7 +17,7 @@ issues:
   exclude-rules:
     - linters:
         - misspell
-      text: "`(Comandos?|Contextos?|duplicatas?|eles|persistente|progresso|Progresso|posicional|presentes|tradicional|Alternar|operacional|[Cc]alcular|problemas|clientes|exponencial|variantes|sucess|Argumentos|Descrição|Endereço|Gerenciamento)`"
+      text: "`(Comandos?|Contextos?|duplicatas?|eles|persistente|progresso|Progresso|posicional|presentes|tradicional|Alternar|operacional|[Cc]alcular|problemas|clientes|exponencial|variantes|sucess|Argumentos|Descrição|Endereço|Gerenciamento|[Cc]ancelled|[Cc]ancelling|[Mm]arshalled|[Bb]ehaviour)`"
     # Every Go file in the project leads with the Apache-2.0 license
     # header. revive interprets that as an aspirant "package comment"
     # and flags it for not starting with "Package <name>". We keep the
@@ -158,3 +158,15 @@ linters-settings:
       - autor
       - exclusivos
       - profissional
+      # BrE spellings accepted project-wide (legacy code in
+      # builtin_webfetch.go already uses "behaviour"; the scheduler's
+      # "cancelled" is part of the JobStatus enum and its rename would
+      # break every JSON consumer. Prefer stable API over AmE purity).
+      - cancelled
+      - Cancelled
+      - cancelling
+      - Cancelling
+      - marshalled
+      - Marshalled
+      - behaviour
+      - Behaviour

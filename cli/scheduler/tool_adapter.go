@@ -39,21 +39,21 @@ type ToolInput struct {
 	Tags        map[string]string `json:"tags,omitempty"`
 
 	// Schedule.
-	When     string `json:"when,omitempty"`      // DSL string
+	When     string    `json:"when,omitempty"`     // DSL string
 	Schedule *Schedule `json:"schedule,omitempty"` // explicit
 	// Action.
 	Do     string  `json:"do,omitempty"`
 	Action *Action `json:"action,omitempty"`
 	// Wait.
-	Until string     `json:"until,omitempty"`
-	Wait  *WaitSpec  `json:"wait,omitempty"`
+	Until string    `json:"until,omitempty"`
+	Wait  *WaitSpec `json:"wait,omitempty"`
 	// Budget overrides.
-	Timeout       string `json:"timeout,omitempty"`
-	PollInterval  string `json:"poll,omitempty"`
-	MaxPolls      int    `json:"max_polls,omitempty"`
-	WaitTimeout   string `json:"wait_timeout,omitempty"`
-	MaxRetries    int    `json:"max_retries,omitempty"`
-	OnTimeout     string `json:"on_timeout,omitempty"`
+	Timeout      string `json:"timeout,omitempty"`
+	PollInterval string `json:"poll,omitempty"`
+	MaxPolls     int    `json:"max_polls,omitempty"`
+	WaitTimeout  string `json:"wait_timeout,omitempty"`
+	MaxRetries   int    `json:"max_retries,omitempty"`
+	OnTimeout    string `json:"on_timeout,omitempty"`
 	// DAG.
 	DependsOn []string `json:"depends_on,omitempty"`
 	Triggers  []string `json:"triggers,omitempty"`
@@ -70,15 +70,15 @@ type ToolInput struct {
 
 // ToolOutput is the normalized JSON shape returned to the ReAct loop.
 type ToolOutput struct {
-	OK      bool        `json:"ok"`
-	JobID   JobID       `json:"job_id,omitempty"`
-	Status  JobStatus   `json:"status,omitempty"`
-	Summary *JobSummary `json:"summary,omitempty"`
-	Job     *Job        `json:"job,omitempty"`
+	OK      bool         `json:"ok"`
+	JobID   JobID        `json:"job_id,omitempty"`
+	Status  JobStatus    `json:"status,omitempty"`
+	Summary *JobSummary  `json:"summary,omitempty"`
+	Job     *Job         `json:"job,omitempty"`
 	Jobs    []JobSummary `json:"jobs,omitempty"`
-	Outcome Outcome     `json:"outcome,omitempty"`
-	Details string      `json:"details,omitempty"`
-	Error   string      `json:"error,omitempty"`
+	Outcome Outcome      `json:"outcome,omitempty"`
+	Details string       `json:"details,omitempty"`
+	Error   string       `json:"error,omitempty"`
 }
 
 // ToolAdapter exposes the scheduler methods as JSON-in/JSON-out
@@ -225,31 +225,33 @@ func (t *ToolAdapter) CancelJob(_ context.Context, owner Owner, rawIn string) (s
 
 func buildJobFromInput(in *ToolInput, owner Owner) (*Job, error) {
 	// Schedule.
-	sched := Schedule{}
-	if in.Schedule != nil {
+	var sched Schedule
+	switch {
+	case in.Schedule != nil:
 		sched = *in.Schedule
-	} else if in.When != "" {
+	case in.When != "":
 		parsed, err := ParseScheduleDSL(in.When)
 		if err != nil {
 			return nil, fmt.Errorf("schedule parse: %w", err)
 		}
 		sched = parsed
-	} else {
+	default:
 		// Default: immediate one-shot.
 		sched = Schedule{Kind: ScheduleRelative, Relative: 0}
 	}
 
 	// Action.
-	act := Action{}
-	if in.Action != nil {
+	var act Action
+	switch {
+	case in.Action != nil:
 		act = *in.Action
-	} else if in.Do != "" {
+	case in.Do != "":
 		parsed, err := ParseActionDSL(in.Do)
 		if err != nil {
 			return nil, fmt.Errorf("action parse: %w", err)
 		}
 		act = parsed
-	} else {
+	default:
 		return nil, fmt.Errorf("action: do or action is required")
 	}
 

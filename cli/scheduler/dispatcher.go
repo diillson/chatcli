@@ -305,7 +305,7 @@ func (s *Scheduler) runAction(j *Job) {
 	duration := time.Since(startedAt)
 	release(res.Err == nil)
 
-	outcome := OutcomeSuccess
+	var outcome Outcome
 	switch {
 	case res.Err == nil:
 		outcome = OutcomeSuccess

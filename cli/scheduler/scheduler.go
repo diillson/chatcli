@@ -73,10 +73,10 @@ type Scheduler struct {
 	// Live job table (ID → *Job). The WAL is the truth on disk; jobs
 	// is its in-memory projection. Clones are handed to callers to
 	// prevent accidental mutation.
-	mu       sync.RWMutex
-	jobs     map[JobID]*Job
-	byName   map[string]JobID // name → live (non-terminal) JobID
-	version  atomic.Uint64    // bumped on every mutation; used by UI subscribers to poll cheaply.
+	mu      sync.RWMutex
+	jobs    map[JobID]*Job
+	byName  map[string]JobID // name → live (non-terminal) JobID
+	version atomic.Uint64    // bumped on every mutation; used by UI subscribers to poll cheaply.
 
 	// Event bus (optional — nil in headless tests).
 	eventBus *bus.MessageBus
@@ -84,20 +84,20 @@ type Scheduler struct {
 	hookManager *hooks.Manager
 
 	// Lifecycle.
-	startMu     sync.Mutex
-	started     bool
-	ctx         context.Context
-	cancel      context.CancelFunc
-	workers     sync.WaitGroup
-	pumpDone    chan struct{}
-	snapDone    chan struct{}
-	gcDone      chan struct{}
-	workCh      chan JobID
-	shutdownMu  sync.Mutex
-	draining    atomic.Bool
-	closed      atomic.Bool
-	rngMu       sync.Mutex
-	rng         *rand.Rand
+	startMu    sync.Mutex
+	started    bool
+	ctx        context.Context
+	cancel     context.CancelFunc
+	workers    sync.WaitGroup
+	pumpDone   chan struct{}
+	snapDone   chan struct{}
+	gcDone     chan struct{}
+	workCh     chan JobID
+	shutdownMu sync.Mutex
+	draining   atomic.Bool
+	closed     atomic.Bool
+	rngMu      sync.Mutex
+	rng        *rand.Rand
 }
 
 // SchedulerDeps bundles the optional external dependencies Scheduler
@@ -587,10 +587,10 @@ func (s *Scheduler) FindByName(name string) (*Job, bool) {
 
 // ListFilter is an OR-of-conjunctions filter for List.
 type ListFilter struct {
-	Owner      *Owner
-	Statuses   []JobStatus
-	Tag        string
-	NameSubstr string
+	Owner           *Owner
+	Statuses        []JobStatus
+	Tag             string
+	NameSubstr      string
 	IncludeTerminal bool
 }
 

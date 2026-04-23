@@ -95,6 +95,7 @@ func writeFrame(w io.Writer, mu *sync.Mutex, f Frame) error {
 		return fmt.Errorf("%w: frame too large (%d)", ErrIPCProtocol, len(payload))
 	}
 	var header [4]byte
+	// #nosec G115 -- len bounded above by maxFrameSize (16 MiB) guard
 	binary.BigEndian.PutUint32(header[:], uint32(len(payload)))
 
 	if mu != nil {
@@ -133,13 +134,13 @@ func readFrame(r io.Reader) (Frame, error) {
 
 // DaemonStats is returned for Kind=stats.
 type DaemonStats struct {
-	Version     string    `json:"version"`
-	Started     time.Time `json:"started_at"`
-	Uptime      string    `json:"uptime"`
-	JobsActive  int       `json:"jobs_active"`
-	QueueDepth  int       `json:"queue_depth"`
-	WALSegments int       `json:"wal_segments"`
-	Connections int       `json:"connections"`
+	Version     string                  `json:"version"`
+	Started     time.Time               `json:"started_at"`
+	Uptime      string                  `json:"uptime"`
+	JobsActive  int                     `json:"jobs_active"`
+	QueueDepth  int                     `json:"queue_depth"`
+	WALSegments int                     `json:"wal_segments"`
+	Connections int                     `json:"connections"`
 	Breakers    map[string]BreakerState `json:"breakers,omitempty"`
 }
 
@@ -159,7 +160,7 @@ func CheckDaemon(socketPath string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrNoDaemon, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 	if err := writeFrame(conn, nil, Frame{Kind: KindPing, ID: "ping-1"}); err != nil {
 		return err
@@ -182,6 +183,6 @@ type framedConn struct {
 
 func (f *framedConn) Write(frame Frame) error { return writeFrame(f.conn, &f.mu, frame) }
 func (f *framedConn) Read() (Frame, error)    { return readFrame(f.conn) }
-func (f *framedConn) Close() error             { return f.conn.Close() }
+func (f *framedConn) Close() error            { return f.conn.Close() }
 
 var _ atomic.Value // Keep import in case future metrics want atomic state.

@@ -247,6 +247,7 @@ func frameWALRecord(payload []byte) []byte {
 	var buf bytes.Buffer
 	buf.Grow(16 + len(payload))
 	buf.Write(walMagic[:])
+	// #nosec G115 -- len bounded above by math.MaxUint32 guard
 	_ = binary.Write(&buf, binary.BigEndian, uint32(len(payload)))
 	_ = binary.Write(&buf, binary.BigEndian, crc)
 	buf.Write(payload)

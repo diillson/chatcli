@@ -27,9 +27,9 @@ import (
 
 // snapshotEnvelope is the on-disk format.
 type snapshotEnvelope struct {
-	Version   int       `json:"v"`
+	Version    int       `json:"v"`
 	CapturedAt time.Time `json:"captured_at"`
-	Jobs      []*Job    `json:"jobs"`
+	Jobs       []*Job    `json:"jobs"`
 }
 
 // writeSnapshot persists the current scheduler state to

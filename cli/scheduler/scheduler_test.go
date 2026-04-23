@@ -14,8 +14,8 @@ type fakeEval struct {
 	hits atomic.Int32
 }
 
-func (f *fakeEval) Type() string                               { return "fake" }
-func (f *fakeEval) ValidateSpec(_ map[string]any) error        { return nil }
+func (f *fakeEval) Type() string                        { return "fake" }
+func (f *fakeEval) ValidateSpec(_ map[string]any) error { return nil }
 func (f *fakeEval) Evaluate(_ context.Context, _ Condition, _ *EvalEnv) EvalOutcome {
 	f.hits.Add(1)
 	return EvalOutcome{Satisfied: f.gate.Load() == 1, Details: "fake"}
@@ -25,8 +25,8 @@ type fakeAct struct {
 	calls atomic.Int32
 }
 
-func (f *fakeAct) Type() ActionType                         { return ActionType("fake_act") }
-func (f *fakeAct) ValidateSpec(_ map[string]any) error       { return nil }
+func (f *fakeAct) Type() ActionType                    { return ActionType("fake_act") }
+func (f *fakeAct) ValidateSpec(_ map[string]any) error { return nil }
 func (f *fakeAct) Execute(_ context.Context, _ Action, _ *ExecEnv) ActionResult {
 	f.calls.Add(1)
 	return ActionResult{Output: "ran"}

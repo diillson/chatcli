@@ -238,9 +238,12 @@ func (c *cronSchedule) Next(after time.Time) time.Time {
 	t := after.Add(1 * time.Minute).Truncate(time.Minute)
 	maxYear := t.Year() + 400
 
+	// Cron field values are bounded positives (0..59 minute, 0..23 hour,
+	// 1..31 dom, 1..12 month, 0..6 dow) so int→uint conversions below
+	// cannot overflow. gosec G115 silenced per-line with inline pragmas.
 	for t.Year() < maxYear {
 		// Month must match; advance if not.
-		if c.month&(1<<uint(t.Month())) == 0 {
+		if c.month&(1<<uint(t.Month())) == 0 { // #nosec G115 -- month ∈ [1,12]
 			// Jump to first day of next month.
 			year, month := t.Year(), t.Month()+1
 			if month > 12 {
@@ -252,8 +255,8 @@ func (c *cronSchedule) Next(after time.Time) time.Time {
 		}
 
 		// Day must match (with dom/dow OR semantics).
-		domOK := c.dayOfMonth&(1<<uint(t.Day())) != 0
-		dowOK := c.dayOfWeek&(1<<uint(t.Weekday())) != 0
+		domOK := c.dayOfMonth&(1<<uint(t.Day())) != 0    // #nosec G115 -- day ∈ [1,31]
+		dowOK := c.dayOfWeek&(1<<uint(t.Weekday())) != 0 // #nosec G115 -- weekday ∈ [0,6]
 		var dayMatches bool
 		switch {
 		case !c.domRestricted && !c.dowRestricted:
@@ -273,13 +276,13 @@ func (c *cronSchedule) Next(after time.Time) time.Time {
 		}
 
 		// Hour.
-		if c.hour&(1<<uint(t.Hour())) == 0 {
+		if c.hour&(1<<uint(t.Hour())) == 0 { // #nosec G115 -- hour ∈ [0,23]
 			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour()+1, 0, 0, 0, t.Location())
 			continue
 		}
 
 		// Minute.
-		if c.minute&(1<<uint(t.Minute())) == 0 {
+		if c.minute&(1<<uint(t.Minute())) == 0 { // #nosec G115 -- minute ∈ [0,59]
 			t = t.Add(1 * time.Minute)
 			continue
 		}
@@ -390,6 +393,7 @@ func parseCronField(raw string, lo, hi int, aliases map[string]int, restrictTrac
 		}
 
 		for i := start; i <= end; i += step {
+			// #nosec G115 -- i bounded above by end ≤ hi (max 59 for any field)
 			mask |= 1 << uint(i)
 		}
 	}

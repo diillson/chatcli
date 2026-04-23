@@ -36,7 +36,9 @@ func DeriveJobID(name string, owner Owner, nonce string) JobID {
 		nonce = uuid.New().String()
 	}
 	h := sha256.New()
-	fmt.Fprintf(h, "scheduler-v%d|%s|%s|%s|%s",
+	// sha256.Hash.Write never returns a non-nil error, so the errcheck
+	// warning would be pure noise — suppress explicitly.
+	_, _ = fmt.Fprintf(h, "scheduler-v%d|%s|%s|%s|%s",
 		SchemaVersion,
 		strings.TrimSpace(name),
 		owner.Kind,

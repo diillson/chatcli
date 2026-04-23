@@ -17,9 +17,9 @@ func TestParseCron_FiveFieldAndAliases(t *testing.T) {
 		{"0 0,12 * * mon-fri", false},
 		{"0 0 30 feb *", false}, // valid shape, vacuous match — no error at parse
 		{"bogus", true},
-		{"1 2 3 4", true},           // 4 fields
-		{"1 2 3 4 5 6", true},       // 6 fields
-		{"99 * * * *", true},        // out of range
+		{"1 2 3 4", true},     // 4 fields
+		{"1 2 3 4 5 6", true}, // 6 fields
+		{"99 * * * *", true},  // out of range
 	}
 	for _, c := range cases {
 		_, err := parseCron(c.expr)
@@ -109,9 +109,9 @@ func TestSchedule_Validate(t *testing.T) {
 
 func TestParseScheduleDSL(t *testing.T) {
 	cases := []struct {
-		in      string
+		in       string
 		wantKind ScheduleKind
-		wantErr bool
+		wantErr  bool
 	}{
 		{"in 5m", ScheduleRelative, false},
 		{"+30s", ScheduleRelative, false},

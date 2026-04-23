@@ -131,11 +131,8 @@ func (cli *ChatCLI) schedulerEnabled() bool {
 
 // markSchedulerDirty bumps an atomic so the prompt prefix refresh
 // knows to re-render. Called by scheduler events via the bridge.
+// The companion consumer lives inline inside changeLivePrefix — it
+// reads schedulerDirty directly via atomic.SwapInt32 at each tick.
 func (cli *ChatCLI) markSchedulerDirty() {
 	atomic.StoreInt32(&cli.schedulerDirty, 1)
-}
-
-// consumeSchedulerDirty returns and clears the dirty flag atomically.
-func (cli *ChatCLI) consumeSchedulerDirty() bool {
-	return atomic.SwapInt32(&cli.schedulerDirty, 0) == 1
 }

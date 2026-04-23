@@ -22,18 +22,18 @@ import (
 // obtain the package singleton — the counters are process-wide so a
 // single Scheduler per process is the normal case.
 type Metrics struct {
-	JobsCreated   *prometheus.CounterVec   // label: owner_kind, action_type
-	JobsFired     *prometheus.CounterVec   // label: outcome, action_type
-	WaitChecks    *prometheus.CounterVec   // label: condition_type, satisfied
-	WaitDuration  *prometheus.HistogramVec // label: condition_type
-	ActionDuration *prometheus.HistogramVec // label: action_type, outcome
-	QueueDepth    prometheus.Gauge
-	ActiveJobs    prometheus.Gauge
-	BreakerState  *prometheus.GaugeVec // label: kind, key
-	RetryCount    *prometheus.CounterVec // label: attempt (bucketed)
-	EnqueueErrors *prometheus.CounterVec // label: reason (rate_limited, full, invalid)
-	WALSegments   prometheus.Gauge
-	AuditWrites   prometheus.Counter
+	JobsCreated       *prometheus.CounterVec   // label: owner_kind, action_type
+	JobsFired         *prometheus.CounterVec   // label: outcome, action_type
+	WaitChecks        *prometheus.CounterVec   // label: condition_type, satisfied
+	WaitDuration      *prometheus.HistogramVec // label: condition_type
+	ActionDuration    *prometheus.HistogramVec // label: action_type, outcome
+	QueueDepth        prometheus.Gauge
+	ActiveJobs        prometheus.Gauge
+	BreakerState      *prometheus.GaugeVec   // label: kind, key
+	RetryCount        *prometheus.CounterVec // label: attempt (bucketed)
+	EnqueueErrors     *prometheus.CounterVec // label: reason (rate_limited, full, invalid)
+	WALSegments       prometheus.Gauge
+	AuditWrites       prometheus.Counter
 	DaemonConnections prometheus.Gauge
 }
 

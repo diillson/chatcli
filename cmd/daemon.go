@@ -112,7 +112,7 @@ func daemonStartDetached(socket string) error {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if err := scheduler.CheckDaemon(socket); err == nil {
-			fmt.Fprintf(os.Stdout, "chatcli daemon started (pid=%d, socket=%s, log=%s)\n",
+			_, _ = fmt.Fprintf(os.Stdout, "chatcli daemon started (pid=%d, socket=%s, log=%s)\n",
 				cmd.Process.Pid, socket, logPath)
 			return nil
 		}
@@ -157,7 +157,7 @@ func daemonStop(args []string, logger *zap.Logger) error {
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if scheduler.CheckDaemon(s) != nil {
-			fmt.Fprintln(os.Stdout, "chatcli daemon stopped")
+			_, _ = fmt.Fprintln(os.Stdout, "chatcli daemon stopped")
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -181,21 +181,21 @@ func daemonStatus(args []string) error {
 	}
 	sock := scheduler.DefaultSocketPath(cfg)
 	if err := scheduler.CheckDaemon(sock); err != nil {
-		fmt.Fprintln(os.Stdout, "chatcli daemon: not running")
+		_, _ = fmt.Fprintln(os.Stdout, "chatcli daemon: not running")
 		return nil
 	}
 	c, err := scheduler.Dial(sock)
 	if err != nil {
 		return err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	stats, err := c.Stats(ctx)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "chatcli daemon\n  socket   : %s\n  uptime   : %s\n  jobs     : %d active, queue=%d\n  wal segs : %d\n  clients  : %d\n",
+	_, _ = fmt.Fprintf(os.Stdout, "chatcli daemon\n  socket   : %s\n  uptime   : %s\n  jobs     : %d active, queue=%d\n  wal segs : %d\n  clients  : %d\n",
 		sock, stats.Uptime, stats.JobsActive, stats.QueueDepth, stats.WALSegments, stats.Connections)
 	return nil
 }
@@ -213,7 +213,7 @@ func daemonPing(args []string) error {
 	if err := scheduler.CheckDaemon(scheduler.DefaultSocketPath(cfg)); err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stdout, "pong")
+	_, _ = fmt.Fprintln(os.Stdout, "pong")
 	return nil
 }
 
