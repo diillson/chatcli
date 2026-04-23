@@ -264,8 +264,8 @@ func (cli *ChatCLI) reflectShowStatus() {
 		fmt.Println(colorize("  "+i18n.T("reflect.armed_blank"), ColorGray))
 		return
 	}
-	fmt.Println(colorize(fmt.Sprintf("  "+i18n.T("reflect.status_queue"), rnr.QueueDepth()), ColorCyan))
-	fmt.Println(colorize(fmt.Sprintf("  "+i18n.T("reflect.status_dlq"), rnr.DLQCount()), ColorCyan))
+	fmt.Println(colorize("  "+i18n.T("reflect.status_queue", rnr.QueueDepth()), ColorCyan))
+	fmt.Println(colorize("  "+i18n.T("reflect.status_dlq", rnr.DLQCount()), ColorCyan))
 	fmt.Println(colorize("  "+i18n.T("reflect.status_hint"), ColorGray))
 }
 
@@ -278,7 +278,7 @@ func (cli *ChatCLI) reflectList() {
 		return
 	}
 	pending := rnr.PendingSnapshot()
-	fmt.Println(colorize(fmt.Sprintf("  "+i18n.T("reflect.list_pending_header"), len(pending)), ColorCyan))
+	fmt.Println(colorize("  "+i18n.T("reflect.list_pending_header", len(pending)), ColorCyan))
 	for _, j := range pending {
 		fmt.Printf("    %s  [trigger=%s  attempts=%d  age=%s]\n",
 			j.ID, j.Request.Trigger, j.Attempts, time.Since(j.EnqueuedAt).Truncate(time.Second))
@@ -289,7 +289,7 @@ func (cli *ChatCLI) reflectList() {
 		fmt.Println(colorize(fmt.Sprintf("  ⚠  %s: %v", i18n.T("reflect.dlq_list_failed"), err), ColorYellow))
 		return
 	}
-	fmt.Println(colorize(fmt.Sprintf("  "+i18n.T("reflect.list_dlq_header"), len(failed)), ColorCyan))
+	fmt.Println(colorize("  "+i18n.T("reflect.list_dlq_header", len(failed)), ColorCyan))
 	for _, j := range failed {
 		fmt.Printf("    %s  [trigger=%s  attempts=%d]\n", j.ID, j.Request.Trigger, j.Attempts)
 		if j.LastError != "" {
@@ -315,7 +315,7 @@ func (cli *ChatCLI) reflectListFailed() {
 		fmt.Println(colorize("  "+i18n.T("reflect.dlq_empty"), ColorGreen))
 		return
 	}
-	fmt.Println(colorize(fmt.Sprintf("  "+i18n.T("reflect.list_dlq_header"), len(failed)), ColorCyan))
+	fmt.Println(colorize("  "+i18n.T("reflect.list_dlq_header", len(failed)), ColorCyan))
 	for _, j := range failed {
 		fmt.Printf("    %s  [trigger=%s  attempts=%d  enqueued=%s]\n",
 			j.ID, j.Request.Trigger, j.Attempts,
@@ -339,7 +339,7 @@ func (cli *ChatCLI) reflectRetry(id string) {
 		fmt.Println(colorize(fmt.Sprintf("  ⚠  %s: %v", i18n.T("reflect.retry_failed"), err), ColorYellow))
 		return
 	}
-	fmt.Println(colorize(fmt.Sprintf("  "+i18n.T("reflect.retry_ok"), id), ColorGreen))
+	fmt.Println(colorize("  "+i18n.T("reflect.retry_ok", id), ColorGreen))
 }
 
 func (cli *ChatCLI) reflectPurge(id string) {
@@ -354,7 +354,7 @@ func (cli *ChatCLI) reflectPurge(id string) {
 		fmt.Println(colorize(fmt.Sprintf("  ⚠  %s: %v", i18n.T("reflect.purge_failed"), err), ColorYellow))
 		return
 	}
-	fmt.Println(colorize(fmt.Sprintf("  "+i18n.T("reflect.purge_ok"), id), ColorGreen))
+	fmt.Println(colorize("  "+i18n.T("reflect.purge_ok", id), ColorGreen))
 }
 
 func (cli *ChatCLI) reflectDrain() {
@@ -370,7 +370,7 @@ func (cli *ChatCLI) reflectDrain() {
 		fmt.Println(colorize(fmt.Sprintf("  ⚠  %s: %v", i18n.T("reflect.drain_failed"), err), ColorYellow))
 		return
 	}
-	fmt.Println(colorize(fmt.Sprintf("  "+i18n.T("reflect.drain_ok"), n), ColorGreen))
+	fmt.Println(colorize("  "+i18n.T("reflect.drain_ok", n), ColorGreen))
 }
 
 // truncate clips s to n runes and appends "…" if truncation occurred.
