@@ -36,6 +36,10 @@ func main() {
 			runSubcommand(subcmd, os.Args[2:])
 			return
 		}
+		if subcmd == "daemon" {
+			runDaemonSubcommand(os.Args[2:])
+			return
+		}
 	}
 
 	args := cli.PreprocessArgs(os.Args[1:])
@@ -243,5 +247,48 @@ func runSubcommand(subcmd string, args []string) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
+	}
+}
+
+// runDaemonSubcommand handles the "daemon" subcommand. Standalone
+// because the scheduler daemon does not need an LLMManager (it doesn't
+// run agent tasks until a CLI attaches and delegates a bridge).
+func runDaemonSubcommand(args []string) {
+	i18n.Init()
+
+	envFilePath := os.Getenv("CHATCLI_DOTENV")
+	if envFilePath == "" {
+		envFilePath = ".env"
+	} else if expanded, err := utils.ExpandPath(envFilePath); err == nil {
+		envFilePath = expanded
+	}
+	_ = godotenv.Load(envFilePath)
+
+	logger, err := utils.InitializeLogger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			msg := err.Error()
+			if !strings.Contains(msg, "/dev/stdout") &&
+				!strings.Contains(msg, "/dev/stderr") &&
+				!strings.Contains(msg, "invalid argument") &&
+				!strings.Contains(msg, "inappropriate ioctl") {
+				fmt.Fprintf(os.Stderr, "Error closing logger: %v\n", err)
+			}
+		}
+	}()
+
+	config.InitGlobal(logger)
+	config.Global.Load()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := cmd.RunDaemon(ctx, args, logger); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 }

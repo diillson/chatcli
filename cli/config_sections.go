@@ -71,6 +71,8 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 		cli.showConfigSecurity()
 	case "quality":
 		cli.showConfigQuality()
+	case "scheduler", "schedule":
+		cli.showConfigScheduler()
 	case "server":
 		cli.showConfigServer()
 	default:
@@ -281,6 +283,7 @@ func (cli *ChatCLI) showConfigAll() {
 	cli.showConfigAuth()
 	cli.showConfigSecurity()
 	cli.showConfigQuality()
+	cli.showConfigScheduler()
 	// server block is conditional (see its own guard)
 	cli.showConfigServer()
 }
