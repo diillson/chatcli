@@ -2378,12 +2378,21 @@ func (a *AgentMode) initMultiAgent() bool {
 	// Reflexion (Phase 4) needs an LLM call + a memory-persist
 	// callback. Both are wired here so the pipeline package stays
 	// independent of cli.ChatCLI internals.
+	//
+	// When the durable lesson queue is enabled in config, we also
+	// build (lazily) a lessonq.Runner and inject its enqueuer. The
+	// Runner owns a WAL + worker pool + DLQ so reflexion triggers
+	// survive process crashes; see cli/reflexion_setup.go.
 	lessonLLM := a.cli.makeLessonLLM()
 	persistLesson := a.cli.makeLessonPersister()
+	enqueuer := a.cli.reflexionEnqueuer(a.qualityConfig.Reflexion.Queue)
+	convChecker := a.cli.buildRefineConvergence(a.qualityConfig)
 	a.qualityPipeline = quality.BuildPipeline(a.qualityConfig, a.logger, quality.BuildPipelineDeps{
-		Dispatch:      dispatchOne,
-		LessonLLM:     lessonLLM,
-		PersistLesson: persistLesson,
+		Dispatch:           dispatchOne,
+		LessonLLM:          lessonLLM,
+		PersistLesson:      persistLesson,
+		LessonEnqueuer:     enqueuer,
+		ConvergenceChecker: convChecker,
 	})
 	a.agentDispatcher.SetPipeline(a.qualityPipeline)
 

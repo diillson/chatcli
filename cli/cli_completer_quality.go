@@ -171,29 +171,117 @@ func (cli *ChatCLI) getPlanSuggestions(d prompt.Document) []prompt.Suggest {
 
 // ─── /reflect ──────────────────────────────────────────────────────────────
 
-// getReflectSuggestions returns a usage-hint suggestion for /reflect.
+// getReflectSuggestions returns suggestions for /reflect and its
+// subcommands.
 //
-// /reflect accepts:
+// Layout:
 //
-//	/reflect                  shows inline usage help
-//	/reflect <free lesson>    persists the lesson directly to memory.Fact
+//	/reflect                        → root + subcommand menu
+//	/reflect list|failed|drain      → terminal verbs, no further args
+//	/reflect retry|purge <id>       → second arg autocompletes from DLQ
+//	/reflect <free lesson>          → any other token is the lesson text
 //
-// Same design as /plan: no enumerable subs, just a hint placeholder.
+// The DLQ-ID autocomplete reaches into the live lessonq.Runner when
+// one is wired; when the queue is disabled or the runner hasn't been
+// built yet, it falls back to an ID placeholder.
 func (cli *ChatCLI) getReflectSuggestions(d prompt.Document) []prompt.Suggest {
 	line := d.TextBeforeCursor()
 	args := strings.Fields(line)
 
+	// Before any text: offer the root command.
 	if len(args) == 1 && !strings.HasSuffix(line, " ") {
 		return []prompt.Suggest{
 			{Text: "/reflect", Description: i18n.T("complete.root.reflect")},
 		}
 	}
 
-	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+	// After "/reflect ": show the subcommand menu + free-text fallback.
+	if len(args) == 1 && strings.HasSuffix(line, " ") {
+		return reflectSubcommandMenu()
+	}
+
+	// Partial subcommand token: prefix-filter the menu so typing "re"
+	// narrows to "retry" without losing discoverability.
+	if len(args) == 2 && !strings.HasSuffix(line, " ") {
+		partial := strings.ToLower(args[1])
+		filtered := filterSuggestions(reflectSubcommandMenu(), partial)
+		if len(filtered) > 0 {
+			return filtered
+		}
+		// No subcommand matched the prefix — treat it as free-text.
 		return []prompt.Suggest{
 			{Text: "<lesson>", Description: i18n.T("complete.reflect.hint")},
 		}
 	}
 
+	// Second argument for retry / purge → autocomplete DLQ IDs.
+	if len(args) >= 2 {
+		sub := strings.ToLower(args[1])
+		if sub == "retry" || sub == "purge" {
+			// Accept both "/reflect retry " and "/reflect retry ab".
+			if (len(args) == 2 && strings.HasSuffix(line, " ")) || len(args) == 3 {
+				return cli.reflectDLQIDSuggestions()
+			}
+		}
+	}
+
 	return []prompt.Suggest{}
+}
+
+// reflectSubcommandMenu is the static menu of subcommand verbs plus
+// the free-text hint. Keeping it static lets the completer stay
+// snappy even when the queue is live.
+func reflectSubcommandMenu() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "list", Description: i18n.T("complete.reflect.list")},
+		{Text: "failed", Description: i18n.T("complete.reflect.failed")},
+		{Text: "retry", Description: i18n.T("complete.reflect.retry")},
+		{Text: "purge", Description: i18n.T("complete.reflect.purge")},
+		{Text: "drain", Description: i18n.T("complete.reflect.drain")},
+		{Text: "<lesson>", Description: i18n.T("complete.reflect.hint")},
+	}
+}
+
+// reflectDLQIDSuggestions pulls live DLQ IDs from the runner when
+// available. Each suggestion shows the ID plus the task preview so
+// the user can pick the right one at a glance.
+func (cli *ChatCLI) reflectDLQIDSuggestions() []prompt.Suggest {
+	cli.reflexionRunnerMu.Lock()
+	rnr := cli.reflexionRunner
+	cli.reflexionRunnerMu.Unlock()
+	if rnr == nil {
+		return []prompt.Suggest{
+			{Text: "<job-id>", Description: i18n.T("complete.reflect.id_placeholder")},
+		}
+	}
+	dlq, err := rnr.DLQList()
+	if err != nil || len(dlq) == 0 {
+		return []prompt.Suggest{
+			{Text: "<job-id>", Description: i18n.T("complete.reflect.id_placeholder")},
+		}
+	}
+	out := make([]prompt.Suggest, 0, len(dlq))
+	for _, job := range dlq {
+		desc := truncate(job.Request.Task, 60)
+		if job.LastError != "" {
+			desc += " · " + truncate(job.LastError, 40)
+		}
+		out = append(out, prompt.Suggest{Text: string(job.ID), Description: desc})
+	}
+	return out
+}
+
+// filterSuggestions returns the subset of s whose Text starts with
+// prefix (case-insensitive). Used to narrow the menu as the user types.
+func filterSuggestions(s []prompt.Suggest, prefix string) []prompt.Suggest {
+	if prefix == "" {
+		return s
+	}
+	out := make([]prompt.Suggest, 0, len(s))
+	for _, sug := range s {
+		if strings.HasPrefix(strings.ToLower(sug.Text), prefix) {
+			out = append(out, sug)
+		}
+	}
+	return out
 }

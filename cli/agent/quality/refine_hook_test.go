@@ -152,13 +152,13 @@ func TestRefineHook_DispatchErrorKeepsOriginalDraft(t *testing.T) {
 }
 
 func TestConvergedRefine(t *testing.T) {
-	if !convergedRefine("hello world", "hello world", 5) {
+	if !convergedCharHeuristic("hello world", "hello world", 5) {
 		t.Error("identical strings must converge")
 	}
-	if convergedRefine("hello", "totally different and longer", 5) {
+	if convergedCharHeuristic("hello", "totally different and longer", 5) {
 		t.Error("very different strings must not converge")
 	}
-	if !convergedRefine("hello", "helloo", 2) {
+	if !convergedCharHeuristic("hello", "helloo", 2) {
 		t.Error("delta within epsilon must converge")
 	}
 }
