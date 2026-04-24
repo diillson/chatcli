@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.109.0](https://github.com/diillson/chatcli/compare/v1.108.0...v1.109.0) (2026-04-24)
+
+
+### Features
+
+* **scheduler:** durable chronos — /schedule, /wait, /jobs, daemon mode ([#832](https://github.com/diillson/chatcli/issues/832)) ([cb85ec7](https://github.com/diillson/chatcli/commit/cb85ec7a9e5af86534bee922bd11dd7bdab2ce89))
+* **scheduler:** preflight shell commands against CoderMode policy ([#834](https://github.com/diillson/chatcli/issues/834)) ([00b0bd4](https://github.com/diillson/chatcli/commit/00b0bd449be6ac6ee0cb315a5224e48af5633dfd))
+
 ## [1.108.0](https://github.com/diillson/chatcli/compare/v1.107.0...v1.108.0) (2026-04-23)
 
 
