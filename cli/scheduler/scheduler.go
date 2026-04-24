@@ -378,6 +378,18 @@ func (s *Scheduler) Enqueue(ctx context.Context, job *Job) (*Job, error) {
 		return nil, err
 	}
 
+	// Shell-policy preflight. Every shell command embedded in the
+	// Action or Wait condition is classified against CoderMode before
+	// the job is admitted. This is the single gate that prevents
+	// daemon-mode jobs from running a command that would normally
+	// prompt the user — the scheduler has no interactive channel at
+	// fire time, so approval has to happen now (via --i-know) or
+	// never.
+	if err := s.preflightShellPolicy(job); err != nil {
+		s.metrics.EnqueueErrors.WithLabelValues("policy").Inc()
+		return nil, err
+	}
+
 	// Capacity and uniqueness.
 	s.mu.Lock()
 	if len(s.jobs) >= s.cfg.MaxJobs {

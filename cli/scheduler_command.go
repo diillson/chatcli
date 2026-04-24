@@ -508,9 +508,11 @@ func parseScheduleArgs(args []string) (scheduler.ToolInput, error) {
 		case "--on-timeout":
 			in.OnTimeout, i = takeString(args, i)
 		case "--i-know":
-			// Used by the scheduler to mark jobs as dangerous-confirmed.
-			// Currently this flag tracks a Boolean tag.
-			in.Tags["dangerous_confirmed"] = "true"
+			// Pre-authorize ShellPolicyAsk commands at enqueue
+			// preflight. Propagates to Job.DangerousConfirmed via
+			// ToolInput.IKnow. Note: denylist rules are NOT
+			// overridable — --i-know cannot override a Deny.
+			in.IKnow = true
 		case "--async":
 			in.Async = true
 		default:
