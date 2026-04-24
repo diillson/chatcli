@@ -61,6 +61,7 @@
 | **Multi-provider with failover** | 13 LLM providers (OpenAI · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama · OpenAI Assistants) with intelligent error classification, exponential backoff, and per-provider cooldown. |
 | **Autonomous agents** | 14 specialized workers coordinated by a ReAct engine (Reason + Act), with parallel execution and a 7-pattern quality pipeline. |
 | **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), cross-provider reasoning backbone — all composed via a thread-safe state machine with circuit breakers and hot reload. |
+| **Scheduler (Chronos)** | Durable scheduling with cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + `@scheduler` tool for agents. CRC32 WAL, snapshots, rate limiter, circuit breakers, JSONL audit, 13 Prometheus metrics. Jobs survive crashes and CLI exit. |
 | **Durable Reflexion** | WAL-backed queue with worker pool, dead letter queue, boot replay, exponential retry with jitter — lessons survive process crashes. |
 | **Semantic convergence** | char → Jaccard → embedding cosine cascade for Self-Refine, with LRU/TTL cache and quality regression detection. |
 | **Production-ready** | gRPC + TLS 1.3, JWT + RBAC, AES-256-GCM, rate limiting, audit logging, 50+ Prometheus metrics. |
@@ -177,6 +178,35 @@ helm install chatcli-operator \
 </td>
 </tr>
 </table>
+
+### Autonomous scheduler (Chronos)
+
+The scheduler runs embedded in the CLI and optionally as a daemon. Jobs survive restarts via WAL + snapshot.
+
+```bash
+# Fire a command in 30s
+/schedule ping --when +30s --do "/run curl https://api.example.com/health"
+
+# Daily cron with retry
+/schedule backup --cron "0 2 * * *" --do "shell: ./backup.sh" --max-retries 3
+
+# Deploy + K8s wait + trigger smoke
+/schedule deploy --when +0s --do "shell: terraform apply -auto-approve" \
+  --wait "k8s:deployment/prod/api:Available" --timeout 15m \
+  --triggers smoke-tests
+
+# Daemon to keep running with the CLI closed
+chatcli daemon start --detach
+chatcli daemon status
+
+# List / inspect / cancel
+/jobs list
+/jobs show <id>
+/jobs tree
+/jobs cancel <id>
+```
+
+Agents get the `@scheduler` tool and can pause themselves waiting on conditions — see [Cookbook: scheduler automation](https://chatcli.edilsonfreitas.com/en/cookbook/scheduler-automations) and the [feature doc](https://chatcli.edilsonfreitas.com/en/features/scheduler).
 
 <details>
 <summary><strong>Context commands (CLI mode)</strong></summary>
@@ -483,6 +513,7 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 | **Extensibility** | `/mcp {init,list,invoke,config}` · `/plugin {list,load,unload}` · `/skill <name>` · `/hooks {list,enable,disable,test}` |
 | **Remote** | `/auth {login,logout,status}` · `/connect <server>` · `/disconnect` |
 | **Tools** | `/watch {pid\|file}` · `/worktree {create,list,remove}` · `/channel {create,switch}` · `/websearch <query>` |
+| **Scheduler** | `/schedule <name> --when <t> --do <a>` · `/wait --until <cond>` · `/jobs {list,show,tree,cancel,pause,resume,logs,daemon}` · `chatcli daemon {start,stop,status,ping,install}` |
 | **Diagnostics** | `/metrics` · `/cost` |
 
 ---
@@ -523,6 +554,10 @@ chatcli/
     hooks/                  Lifecycle events (shell/webhook)
     mcp/                    MCP client (stdio + SSE)
     plugins/                Plugin manager + signature verification
+    scheduler/              Chronos — durable scheduler (WAL + cron + DAG + daemon)
+      condition/            10 evaluators (shell, http, k8s, docker, tcp, llm, ...)
+      action/               8 executors (slash, shell, agent, webhook, ...)
+      builtins/             Aggregated registry for evaluators + executors
     workspace/memory/       Facts, topics, patterns, vector index (HyDE)
     tui/                    Bubble Tea adapters
   llm/
