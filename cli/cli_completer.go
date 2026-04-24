@@ -117,6 +117,18 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getReflectSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/schedule") {
+		return cli.getScheduleSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/wait") {
+		return cli.getWaitSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/jobs") {
+		return cli.getJobsSuggestions(d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -269,6 +281,9 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/rewind", Description: i18n.T("complete.root.rewind")},
 		{Text: "/memory", Description: i18n.T("complete.root.memory")},
 		{Text: "/websearch", Description: i18n.T("complete.websearch.root_desc")},
+		{Text: "/schedule", Description: i18n.T("help.command.schedule")},
+		{Text: "/wait", Description: i18n.T("help.command.wait")},
+		{Text: "/jobs", Description: i18n.T("help.command.jobs")},
 	}
 }
 

@@ -159,6 +159,15 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case strings.HasPrefix(userInput, "/worktree"):
 		ch.cli.handleWorktreeCommand(userInput)
 		return false
+	case strings.HasPrefix(userInput, "/schedule"):
+		ch.cli.handleScheduleCommand(userInput)
+		return false
+	case strings.HasPrefix(userInput, "/wait"):
+		ch.cli.handleWaitCommand(userInput)
+		return false
+	case strings.HasPrefix(userInput, "/jobs"):
+		ch.cli.handleJobsCommand(userInput)
+		return false
 	case strings.HasPrefix(userInput, "/channel"):
 		ch.cli.handleChannelCommand(userInput)
 		return false

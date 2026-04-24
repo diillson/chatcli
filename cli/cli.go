@@ -32,6 +32,7 @@ import (
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/cli/scheduler"
 	"github.com/diillson/chatcli/cli/workspace"
 	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/i18n"
@@ -284,6 +285,16 @@ type ChatCLI struct {
 	// path (non-durable, lessons lost on crash).
 	reflexionRunner   *lessonq.Runner
 	reflexionRunnerMu sync.Mutex
+
+	// Scheduler subsystem — /schedule, /wait, /jobs. One of scheduler
+	// or schedulerRemote is populated after initScheduler; never both.
+	// A nil pair means the scheduler is disabled for this session
+	// (CHATCLI_SCHEDULER_ENABLED=false or init failed).
+	scheduler       *scheduler.Scheduler
+	schedulerRemote *scheduler.RemoteClient
+	schedulerSocket string
+	schedulerCancel context.CancelFunc
+	schedulerDirty  int32 // atomic — bumped by scheduler events for prompt refresh
 }
 
 // thinkingOverrideState carries the user's /thinking choice. set
@@ -330,6 +341,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCoderPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebFetchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
 	}
 
 	cli.configureProviderAndModel()
@@ -487,6 +499,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 			WorkingDir: wd,
 		})
 	}
+
+	// Initialize scheduler subsystem (in-process or daemon client).
+	cli.initScheduler()
 
 	return cli, nil
 }
@@ -1122,8 +1137,21 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 		if cli.isWatching {
 			prefix = "[watch] " + prefix
 		}
+		if badge := cli.schedulerStatusLine(); badge != "" {
+			prefix = badge + " " + prefix
+		}
 		return prefix, true
 	}
+}
+
+// schedulerStatusLine returns a short badge like "[jobs: 2▶ 1⏳]"
+// suitable for the prompt prefix. Empty string when nothing is active.
+func (cli *ChatCLI) schedulerStatusLine() string {
+	if !cli.schedulerEnabled() {
+		return ""
+	}
+	summaries := cli.schedulerList(scheduler.ListFilter{})
+	return scheduler.StatusLine(summaries)
 }
 
 func (cli *ChatCLI) cleanup() {
@@ -1158,6 +1186,9 @@ func (cli *ChatCLI) cleanup() {
 	if rnr != nil {
 		rnr.DrainAndShutdown(30 * time.Second)
 	}
+
+	// Drain and shut down the scheduler subsystem.
+	cli.shutdownScheduler()
 
 	// Stop MCP servers
 	if cli.mcpManager != nil {

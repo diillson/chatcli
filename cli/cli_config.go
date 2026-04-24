@@ -300,6 +300,11 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/agent status", i18n.T("help.command.persona_status"))
 	printCommand("/agent off", i18n.T("help.command.persona_off"))
 
+	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.scheduler"), ColorLime))
+	printCommand("/schedule <nome> --when <t> --do <a>", i18n.T("help.command.schedule"))
+	printCommand("/wait --until <cond> [--then <a>]", i18n.T("help.command.wait"))
+	printCommand("/jobs {list|show|tree|cancel|logs|…}", i18n.T("help.command.jobs"))
+
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.sessions"), ColorLime))
 	printCommand("/session save <nome>", i18n.T("help.command.session_save"))
 	printCommand("/session load <nome>", i18n.T("help.command.session_load"))
