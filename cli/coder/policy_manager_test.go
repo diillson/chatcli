@@ -95,6 +95,63 @@ func TestAddRule_RejectsLongPattern(t *testing.T) {
 	assert.Contains(t, err.Error(), "too long")
 }
 
+func TestDeleteRule_RoundtripAndIdempotent(t *testing.T) {
+	tmp := t.TempDir()
+	pm := &PolicyManager{
+		Rules:      []Rule{},
+		configPath: tmp + "/policy.json",
+		logger:     zap.NewNop(),
+	}
+	// Add two rules, delete one, confirm persistence + snapshot.
+	if err := pm.AddRule("@coder exec my-tool", ActionAllow); err != nil {
+		t.Fatalf("add allow: %v", err)
+	}
+	if err := pm.AddRule("@coder exec rm -rf", ActionDeny); err != nil {
+		t.Fatalf("add deny: %v", err)
+	}
+	if n := len(pm.RulesSnapshot()); n != 2 {
+		t.Fatalf("expected 2 rules, got %d", n)
+	}
+
+	removed, err := pm.DeleteRule("@coder exec my-tool")
+	if err != nil {
+		t.Fatalf("delete existing: %v", err)
+	}
+	if !removed {
+		t.Fatal("expected removed=true for existing pattern")
+	}
+	if n := len(pm.RulesSnapshot()); n != 1 {
+		t.Fatalf("expected 1 rule after delete, got %d", n)
+	}
+
+	// Idempotent delete — same pattern again is a no-op.
+	removed, err = pm.DeleteRule("@coder exec my-tool")
+	if err != nil {
+		t.Fatalf("double-delete: %v", err)
+	}
+	if removed {
+		t.Error("expected removed=false on second delete")
+	}
+
+	// Empty pattern rejected.
+	if _, err := pm.DeleteRule("   "); err == nil {
+		t.Error("expected error on empty pattern")
+	}
+}
+
+func TestRulesSnapshot_IsCopy(t *testing.T) {
+	pm := &PolicyManager{
+		Rules:  []Rule{{Pattern: "@coder exec test", Action: ActionAllow}},
+		logger: zap.NewNop(),
+	}
+	snap := pm.RulesSnapshot()
+	// Mutating the returned slice must not affect the manager.
+	snap[0].Action = ActionDeny
+	if pm.Rules[0].Action != ActionAllow {
+		t.Error("snapshot aliasing: mutation leaked into PolicyManager")
+	}
+}
+
 func TestPolicyManager_Check_BoundaryMatching(t *testing.T) {
 	logger := zap.NewNop()
 

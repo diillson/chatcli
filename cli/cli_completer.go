@@ -8,9 +8,17 @@ import (
 	"strings"
 
 	prompt "github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 )
+
+// loadPolicyForCompleter is a thin wrapper around
+// coder.NewPolicyManager for the completer path. Isolated so tests
+// can replace it with a stub that does not touch disk.
+var loadPolicyForCompleter = func(cli *ChatCLI) (*coder.PolicyManager, error) {
+	return coder.NewPolicyManager(cli.logger)
+}
 
 func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 	// 1. Lidar com estados especiais primeiro (como a troca de provedor)
@@ -1236,12 +1244,69 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "integrations", Description: i18n.T("complete.config.integrations")},
 			{Text: "auth", Description: i18n.T("complete.config.auth")},
 			{Text: "security", Description: i18n.T("complete.config.security")},
+			{Text: "scheduler", Description: i18n.T("cfg.section.scheduler.title")},
 			{Text: "server", Description: i18n.T("complete.config.server")},
 		}
 		return prompt.FilterHasPrefix(sections, word, true)
 	}
 
+	// /config security <TAB> → mutating subcommands
+	if strings.ToLower(args[1]) == "security" {
+		return cli.getConfigSecuritySuggestions(d)
+	}
+
 	return []prompt.Suggest{}
+}
+
+// getConfigSecuritySuggestions drives the completer for the new
+// hierarchical /config security surface. It offers subcommand names
+// at position 3 and, for forget, a live list of existing patterns.
+func (cli *ChatCLI) getConfigSecuritySuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
+
+	// /config security <TAB>
+	if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+		subs := []prompt.Suggest{
+			{Text: "rules", Description: i18n.T("sec.cmd.rules_header")},
+			{Text: "allow", Description: i18n.T("sec.cmd.added_allow")},
+			{Text: "deny", Description: i18n.T("sec.cmd.added_deny")},
+			{Text: "forget", Description: i18n.T("sec.cmd.rules_word")},
+			{Text: "reload", Description: i18n.T("sec.cmd.reloaded")},
+			{Text: "help", Description: i18n.T("sec.cmd.usage_header")},
+		}
+		return prompt.FilterHasPrefix(subs, word, true)
+	}
+
+	// Subsequent slots — currently only `forget` has a live
+	// vocabulary (existing patterns). allow / deny take freeform
+	// patterns the user types by hand.
+	sub := strings.ToLower(args[2])
+	if sub == "forget" || sub == "remove" || sub == "rm" {
+		return cli.getConfigSecurityPatternSuggestions(word)
+	}
+	return []prompt.Suggest{}
+}
+
+// getConfigSecurityPatternSuggestions lists every rule pattern in the
+// live PolicyManager, suitable for `/config security forget <TAB>`.
+// Loading is cheap (single JSON read); doing it at completer time
+// keeps the list fresh even after a rule was just added.
+func (cli *ChatCLI) getConfigSecurityPatternSuggestions(word string) []prompt.Suggest {
+	pm, err := loadPolicyForCompleter(cli)
+	if err != nil {
+		return nil
+	}
+	rules := pm.RulesSnapshot()
+	out := make([]prompt.Suggest, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, prompt.Suggest{
+			Text:        r.Pattern,
+			Description: string(r.Action),
+		})
+	}
+	return prompt.FilterHasPrefix(out, word, true)
 }
 
 // getWebSearchSuggestions returns autocomplete suggestions for /websearch.
