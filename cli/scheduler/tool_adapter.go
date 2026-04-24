@@ -62,6 +62,17 @@ type ToolInput struct {
 	// async for wait_until.
 	Async bool `json:"async,omitempty"`
 
+	// IKnow pre-authorizes shell commands that would normally hit
+	// ShellPolicyAsk at enqueue time. When true, the resulting Job
+	// has DangerousConfirmed=true and passes preflight even on
+	// Ask classifications. Denylist rules still bloquean — IKnow
+	// cannot override Deny. Both the user (`--i-know` flag) and
+	// agents (`i_know` field in the @scheduler tool call) may set
+	// this; the authorization decision already happened at a higher
+	// layer (the user ran /agent to spawn the agent, or the user
+	// ran /schedule directly).
+	IKnow bool `json:"i_know,omitempty"`
+
 	// query/list/cancel inputs.
 	ID     string     `json:"id,omitempty"`
 	Filter ListFilter `json:"filter,omitempty"`
@@ -279,6 +290,9 @@ func buildJobFromInput(in *ToolInput, owner Owner) (*Job, error) {
 	job.Wait = wait
 	job.Description = in.Description
 	job.Tags = in.Tags
+	// --i-know / i_know pre-authorizes ShellPolicyAsk commands at
+	// preflight. Denylist is NOT overridable here.
+	job.DangerousConfirmed = in.IKnow
 	if in.TTL != "" {
 		if d, err := time.ParseDuration(in.TTL); err == nil {
 			job.TTL = d

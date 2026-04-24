@@ -58,7 +58,28 @@ type CLIBridge interface {
 	// (same allowlist the agent mode enforces). When coderSafetyBypass
 	// is true and the operator has explicitly granted it, the command
 	// runs without the allowlist — reserved for trusted automation.
+	//
+	// Defense in depth: even though Enqueue already preflight-checked
+	// every shell command via ClassifyShellCommand, RunShell re-checks
+	// at fire time so policy changes between schedule and execution
+	// propagate — a command that was Allowed when enqueued but that
+	// now hits a new Deny rule must fail instead of running.
 	RunShell(ctx context.Context, cmd string, envOverrides map[string]string, coderSafetyBypass bool) (stdout string, stderr string, exitCode int, err error)
+
+	// ClassifyShellCommand asks the host's CoderMode policy whether a
+	// raw shell command would be allowed, denied, or require
+	// interactive approval. Called by Scheduler.Enqueue to pre-flight
+	// every shell command in a Job (action + wait condition + nested
+	// composites) before the job is even admitted — so daemon-mode
+	// jobs can never hit an interactive prompt downstream.
+	//
+	// The scheduler never itself prompts the user; this method is the
+	// one chance to classify. Returning ShellPolicyAsk means "would
+	// normally prompt" and causes the scheduler to reject the enqueue
+	// unless the job is explicitly marked DangerousConfirmed (user
+	// passed --i-know, or the agent passed i_know:true in its tool
+	// call with explicit user blessing upstream).
+	ClassifyShellCommand(cmd string) ShellPolicy
 
 	// KubeconfigPath returns the path the K8s evaluator should use
 	// (honors CHATCLI_KUBECONFIG, KUBECONFIG, or the watcher's config).
@@ -116,3 +137,8 @@ func (noopBridge) WorkspaceDir() string           { return "" }
 func (noopBridge) LLMClient() client.LLMClient    { return nil }
 func (noopBridge) AppendHistory(_ models.Message) {}
 func (noopBridge) PublishEvent(_ Event)           {}
+
+// Without a real bridge (daemon pre-attach, test stubs), classify as
+// Ask so every shell preflight rejects unless the job is explicitly
+// DangerousConfirmed. Fail-closed default.
+func (noopBridge) ClassifyShellCommand(_ string) ShellPolicy { return ShellPolicyAsk }

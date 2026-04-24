@@ -102,6 +102,22 @@ var (
 	// matches a pattern flagged by the shell safety filter and the
 	// job was not submitted with the explicit --i-know flag.
 	ErrDangerousShell = errors.New("scheduler: dangerous shell command requires explicit confirmation")
+
+	// ErrShellPolicyDeny is returned when a shell command (in an
+	// action or wait condition) is on the CoderMode denylist.
+	// Unlike ErrDangerousShell, this cannot be overridden by --i-know
+	// — denylist beats user confirmation. The job is rejected at
+	// enqueue time and never admitted to the WAL.
+	ErrShellPolicyDeny = errors.New("scheduler: shell command denied by policy")
+
+	// ErrShellPolicyAsk is returned when a shell command would
+	// normally require interactive approval under CoderMode. The
+	// scheduler has no interactive channel at fire time, so the
+	// command is rejected unless the job was created with --i-know
+	// (which sets Job.DangerousConfirmed=true). When re-checked at
+	// fire time (policy may have changed since enqueue), the same
+	// error is returned if the classification drifted to Ask.
+	ErrShellPolicyAsk = errors.New("scheduler: shell command requires approval; use --i-know to pre-authorize or add to /config security allowlist")
 )
 
 // Persistence.

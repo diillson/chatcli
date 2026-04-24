@@ -207,6 +207,52 @@ func (pm *PolicyManager) AddRule(pattern string, action Action) error {
 	return pm.save()
 }
 
+// DeleteRule removes the rule whose Pattern matches exactly. Returns
+// (true, nil) when a rule was removed, (false, nil) when no rule
+// matched (so callers can distinguish "nothing to do" from an error),
+// and (false, err) on persistence failure.
+//
+// Used by the /config security forget subcommand so operators can
+// retract an Allow / Deny without hand-editing coder_policy.json.
+func (pm *PolicyManager) DeleteRule(pattern string) (bool, error) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false, fmt.Errorf("empty policy pattern")
+	}
+
+	filtered := pm.Rules[:0]
+	removed := false
+	for _, r := range pm.Rules {
+		if r.Pattern == pattern {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	pm.Rules = filtered
+	pm.lastRule = nil
+
+	if !removed {
+		return false, nil
+	}
+	pm.logger.Info("Removed security policy rule", zap.String("pattern", pattern))
+	return true, pm.save()
+}
+
+// RulesSnapshot returns a copy of the current rule set. Safe to show
+// to UI code or write to disk without holding the PolicyManager lock
+// (each caller gets its own slice).
+func (pm *PolicyManager) RulesSnapshot() []Rule {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	out := make([]Rule, len(pm.Rules))
+	copy(out, pm.Rules)
+	return out
+}
+
 func (pm *PolicyManager) load() {
 	globalPath := pm.configPath
 	globalRules := []Rule{}

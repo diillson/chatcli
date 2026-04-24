@@ -68,7 +68,14 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 	case "auth":
 		cli.showConfigAuth()
 	case "security":
-		cli.showConfigSecurity()
+		// /config security is now hierarchical: the bare form still
+		// dumps the read-only panorama, but rules/allow/deny/forget/
+		// reload subcommands mutate the coder PolicyManager live.
+		if len(args) == 1 {
+			cli.showConfigSecurity()
+		} else {
+			cli.routeConfigSecurity(args[1:])
+		}
 	case "quality":
 		cli.showConfigQuality()
 	case "scheduler", "schedule":

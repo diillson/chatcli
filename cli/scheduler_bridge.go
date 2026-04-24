@@ -15,6 +15,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,20 +25,132 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/scheduler"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"go.uber.org/zap"
 )
 
 // schedulerBridge is the CLIBridge implementation.
 type schedulerBridge struct {
 	cli *ChatCLI
 	mu  sync.Mutex
+
+	// policyMu guards policyMgr; it's loaded lazily on the first
+	// ClassifyShellCommand / RunShell call so an auth-only session
+	// that never agendas shell jobs pays zero cost.
+	policyMu  sync.RWMutex
+	policyMgr *coder.PolicyManager
 }
 
 func newSchedulerBridge(cli *ChatCLI) *schedulerBridge {
 	return &schedulerBridge{cli: cli}
+}
+
+// getPolicyManager returns a PolicyManager, lazy-loading the coder
+// policy from disk on first use. A nil return means the manager
+// failed to load (missing config, unreadable home dir) — callers MUST
+// treat that as fail-closed (classify every command as Ask).
+func (b *schedulerBridge) getPolicyManager() *coder.PolicyManager {
+	b.policyMu.RLock()
+	pm := b.policyMgr
+	b.policyMu.RUnlock()
+	if pm != nil {
+		return pm
+	}
+
+	b.policyMu.Lock()
+	defer b.policyMu.Unlock()
+	if b.policyMgr != nil {
+		return b.policyMgr
+	}
+	newPM, err := coder.NewPolicyManager(b.cli.logger)
+	if err != nil {
+		if b.cli.logger != nil {
+			b.cli.logger.Warn("scheduler: failed to load coder policy manager; every shell command will be classified as Ask (fail-closed)",
+				zap.Error(err))
+		}
+		return nil
+	}
+	b.policyMgr = newPM
+	return newPM
+}
+
+// reloadPolicyManager forces a re-read of the on-disk policy. Used
+// before the fire-time re-check so a policy update since the Enqueue
+// is picked up (the user may have added a Deny rule minutes ago).
+func (b *schedulerBridge) reloadPolicyManager() *coder.PolicyManager {
+	b.policyMu.Lock()
+	defer b.policyMu.Unlock()
+	newPM, err := coder.NewPolicyManager(b.cli.logger)
+	if err != nil {
+		if b.cli.logger != nil {
+			b.cli.logger.Warn("scheduler: failed to reload coder policy manager", zap.Error(err))
+		}
+		return b.policyMgr
+	}
+	b.policyMgr = newPM
+	return newPM
+}
+
+// classifyCommand is the shared classification pipeline used by both
+// ClassifyShellCommand (enqueue preflight) and RunShell (fire-time
+// re-check). It wraps the raw shell command in the @coder exec
+// envelope the PolicyManager expects — the same envelope
+// agent_mode.go uses for its own tool-call checks — so scheduler
+// allowlist/denylist behavior is identical to interactive coder
+// mode.
+func (b *schedulerBridge) classifyCommand(pm *coder.PolicyManager, cmd string) scheduler.ShellPolicy {
+	if pm == nil {
+		return scheduler.ShellPolicyAsk
+	}
+	args := buildCoderExecArgs(cmd)
+	switch pm.Check("@coder", args) {
+	case coder.ActionAllow:
+		return scheduler.ShellPolicyAllow
+	case coder.ActionDeny:
+		return scheduler.ShellPolicyDeny
+	case coder.ActionAsk:
+		return scheduler.ShellPolicyAsk
+	default:
+		return scheduler.ShellPolicyAsk
+	}
+}
+
+// buildCoderExecArgs serializes a raw shell command into the JSON
+// envelope the coder PolicyManager normalizes against. Matching this
+// shape is what lets the scheduler inherit the exact same
+// allowlist/denylist the user has configured for /coder.
+func buildCoderExecArgs(cmd string) string {
+	payload := map[string]any{
+		"cmd": "exec",
+		"args": map[string]any{
+			"cmd": cmd,
+		},
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		// Unreachable in practice (payload is a static shape);
+		// return a syntactically valid empty envelope so Check can
+		// still run its deny rules against the tool name.
+		return "{}"
+	}
+	return string(b)
+}
+
+// ClassifyShellCommand is the enqueue-time preflight hook. See
+// scheduler.CLIBridge for the contract.
+func (b *schedulerBridge) ClassifyShellCommand(cmd string) scheduler.ShellPolicy {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		// Empty string cannot be executed anyway; treat as Allow so
+		// upstream validation (which catches empties) produces the
+		// clearer error instead of a surprising policy rejection.
+		return scheduler.ShellPolicyAllow
+	}
+	return b.classifyCommand(b.getPolicyManager(), cmd)
 }
 
 // ExecuteSlashCommand runs a slash command as if the user typed it,
@@ -155,6 +268,13 @@ func (b *schedulerBridge) FireHook(event hooks.HookEvent) *hooks.HookResult {
 // coderSafetyBypass is true and the operator permitted it via
 // CHATCLI_SCHEDULER_SHELL_ALLOW_BYPASS=true, the command runs without
 // the coder policy allowlist.
+//
+// Defense-in-depth: even though Enqueue already preflight-checked this
+// command via ClassifyShellCommand, we reload the on-disk policy here
+// and re-check. This catches the case where the operator adds a deny
+// rule (or removes an allow) between a cron job's schedule and its
+// fire — the job fails instead of running something that's now
+// disallowed.
 func (b *schedulerBridge) RunShell(ctx context.Context, cmd string, envOverrides map[string]string, coderSafetyBypass bool) (string, string, int, error) {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
@@ -165,13 +285,34 @@ func (b *schedulerBridge) RunShell(ctx context.Context, cmd string, envOverrides
 		return "", "", -1, fmt.Errorf("scheduler shell: bypass_safety requires CHATCLI_SCHEDULER_SHELL_ALLOW_BYPASS=true")
 	}
 
+	// Fire-time policy re-check (skipped only when an operator
+	// explicitly authorized the bypass above).
+	if !coderSafetyBypass {
+		switch b.classifyCommand(b.reloadPolicyManager(), cmd) {
+		case scheduler.ShellPolicyDeny:
+			return "", "", -1, fmt.Errorf("%w: policy denies %q at fire time",
+				scheduler.ErrShellPolicyDeny, truncateBridge(cmd, 120))
+		case scheduler.ShellPolicyAsk:
+			// A command that passed enqueue (either Allow or
+			// Ask + DangerousConfirmed) but whose classification
+			// has since drifted to Ask still fails here. The
+			// bridge does not see DangerousConfirmed at this
+			// layer, so the safe choice is to refuse and let
+			// the scheduler record the failure.
+			return "", "", -1, fmt.Errorf("%w: policy requires approval for %q at fire time",
+				scheduler.ErrShellPolicyAsk, truncateBridge(cmd, 120))
+		case scheduler.ShellPolicyAllow:
+			// proceed
+		}
+	}
+
 	shellCmd := "/bin/sh"
 	shellFlag := "-c"
 	if runtime.GOOS == "windows" {
 		shellCmd = "cmd.exe"
 		shellFlag = "/C"
 	}
-	execCmd := exec.CommandContext(ctx, shellCmd, shellFlag, cmd) //#nosec G204 -- operator-scheduled; gated by action allowlist and safety bypass flag
+	execCmd := exec.CommandContext(ctx, shellCmd, shellFlag, cmd) //#nosec G204 -- operator-scheduled; preflight + fire-time policy checks gate arbitrary input
 	if len(envOverrides) > 0 {
 		env := os.Environ()
 		for k, v := range envOverrides {
@@ -248,4 +389,13 @@ func (b *schedulerBridge) PublishEvent(evt scheduler.Event) {
 	b.cli.markSchedulerDirty()
 	_ = evt
 	_ = time.Now
+}
+
+// truncateBridge mirrors scheduler.truncate but lives here so we
+// don't export a helper from the scheduler package for one caller.
+func truncateBridge(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
