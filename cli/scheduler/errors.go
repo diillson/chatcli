@@ -117,7 +117,10 @@ var (
 	// (which sets Job.DangerousConfirmed=true). When re-checked at
 	// fire time (policy may have changed since enqueue), the same
 	// error is returned if the classification drifted to Ask.
-	ErrShellPolicyAsk = errors.New("scheduler: shell command requires approval; use --i-know to pre-authorize or add to /config security allowlist")
+	ErrShellPolicyAsk = errors.New(`scheduler: shell command requires approval. Pre-authorize with one of: ` +
+		`(slash command) /schedule ... --i-know  ` +
+		`(@scheduler tool) {"cmd":"schedule","args":{...,"i_know":true}}  ` +
+		`(persist for future jobs) /config security allow "<pattern>"`)
 )
 
 // Persistence.

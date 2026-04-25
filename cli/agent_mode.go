@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
@@ -46,10 +47,18 @@ type AgentMode struct {
 	contextManager      *agent.ContextManager
 	taskTracker         *agent.TaskTracker
 	executeCommandsFunc func(ctx context.Context, block agent.CommandBlock) (string, string)
-	isCoderMode         bool
-	isOneShot           bool
-	coderBannerShown    bool
-	lastPolicyMatch     *coder.Rule
+	// runInflight is set to true while Run() is executing on this
+	// instance. AgentMode mutates per-instance state heavily (history,
+	// taskTracker, isCoderMode, isOneShot, qualityConfig, …) and grabs
+	// the terminal/TUI in interactive mode, so concurrent Run() calls
+	// race or deadlock. The scheduler bridge inspects this flag with
+	// atomic.Bool.CompareAndSwap to fail-fast instead of deadlocking
+	// when the user is mid-session in /agent or /coder.
+	runInflight      atomic.Bool
+	isCoderMode      bool
+	isOneShot        bool
+	coderBannerShown bool
+	lastPolicyMatch  *coder.Rule
 	// Métricas
 	turnTimer      *metrics.Timer
 	agentsLaunched int // total de sub-agents lançados na sessão
@@ -377,6 +386,15 @@ func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClien
 // Run inicia o modo agente com uma consulta do usuário, utilizando um loop de Raciocínio-Ação (ReAct).
 // Agora aceita systemPromptOverride para definir personas específicas (ex: Coder).
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string, systemPromptOverride string) error {
+	// Reentrancy guard. AgentMode is not safe to Run concurrently on the
+	// same instance — see runInflight comment in the struct. We CAS so
+	// that any caller stepping on an in-flight Run gets a clean error
+	// instead of corrupting shared state (taskTracker, history, TUI).
+	if !a.runInflight.CompareAndSwap(false, true) {
+		return fmt.Errorf("agent: another Run is already in flight on this AgentMode instance")
+	}
+	defer a.runInflight.Store(false)
+
 	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
 	maxTurns := AgentMaxTurns()
 

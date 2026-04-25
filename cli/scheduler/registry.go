@@ -65,6 +65,12 @@ type EvalEnv struct {
 	// into the host ChatCLI (for example to read a K8s kubeconfig path).
 	// See CLIBridge in tool_adapter.go for the current contract.
 	Bridge CLIBridge
+	// DangerousConfirmed mirrors Job.DangerousConfirmed. Wait
+	// conditions that shell out (k8s/llm/regex/shell_exit) must
+	// forward it to Bridge.RunShell so a job admitted with --i-know
+	// at enqueue passes its fire-time recheck on the wait predicate
+	// too — not just on the action.
+	DangerousConfirmed bool
 }
 
 // ConditionRegistry holds the set of registered evaluators.

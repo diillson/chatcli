@@ -619,7 +619,14 @@ func (s *Scheduler) List(filter ListFilter) []JobSummary {
 	out := make([]JobSummary, 0, len(jobs))
 	for _, j := range jobs {
 		sum := j.Summary()
-		if !filter.IncludeTerminal && sum.Status.IsTerminal() {
+		// IncludeTerminal is a default for "show non-terminal only".
+		// An explicit Statuses filter is a stronger signal — the user
+		// asked for those exact statuses, even when terminal — so it
+		// overrides the default. Without this, `/jobs list --status
+		// failed` returned an empty table because the IncludeTerminal
+		// gate (default false) skipped every terminal entry before
+		// the Statuses filter could match.
+		if len(filter.Statuses) == 0 && !filter.IncludeTerminal && sum.Status.IsTerminal() {
 			continue
 		}
 		if filter.Owner != nil && !sum.Owner.Equal(*filter.Owner) {
@@ -892,6 +899,103 @@ func sortJobSummaries(in []JobSummary) {
 			in[j-1], in[j] = in[j], in[j-1]
 		}
 	}
+}
+
+// PruneFilter narrows which terminal jobs Prune deletes. Zero value
+// matches every terminal job (succeeded + failed + cancelled +
+// timed_out + skipped). Combine fields to narrow further.
+type PruneFilter struct {
+	Statuses   []JobStatus // empty = every terminal status
+	Owner      *Owner      // nil = any owner
+	OlderThan  time.Duration
+	NameSubstr string
+}
+
+// Prune removes terminal jobs that match the filter. Returns the
+// list of removed job IDs. Active jobs (pending/running/waiting/paused)
+// are never touched — use Cancel for those.
+//
+// Locking: matching is done under s.mu, deletion is done in-place
+// inside the same critical section to keep the WAL ack consistent
+// with the in-memory map. WAL acks happen outside the map lock to
+// avoid blocking other operations on slow disks.
+func (s *Scheduler) Prune(filter PruneFilter) ([]JobID, error) {
+	if s.closed.Load() {
+		return nil, ErrSchedulerClosed
+	}
+	now := time.Now()
+
+	// First pass: collect candidates under read-lock.
+	s.mu.RLock()
+	type cand struct {
+		id JobID
+		j  *Job
+	}
+	cands := make([]cand, 0, len(s.jobs))
+	for id, j := range s.jobs {
+		sum := j.Summary()
+		if !sum.Status.IsTerminal() {
+			continue
+		}
+		if len(filter.Statuses) > 0 {
+			match := false
+			for _, st := range filter.Statuses {
+				if sum.Status == st {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		if filter.Owner != nil && !sum.Owner.Equal(*filter.Owner) {
+			continue
+		}
+		if filter.NameSubstr != "" && !strings.Contains(strings.ToLower(sum.Name), strings.ToLower(filter.NameSubstr)) {
+			continue
+		}
+		if filter.OlderThan > 0 && now.Sub(sum.UpdatedAt) < filter.OlderThan {
+			continue
+		}
+		cands = append(cands, cand{id: id, j: j})
+	}
+	s.mu.RUnlock()
+
+	if len(cands) == 0 {
+		return nil, nil
+	}
+
+	// Second pass: delete from the in-memory map under write-lock.
+	removed := make([]JobID, 0, len(cands))
+	s.mu.Lock()
+	for _, c := range cands {
+		// Re-check under write-lock — a job could have been re-enqueued
+		// or transitioned (theoretically impossible for terminal, but
+		// belt-and-suspenders).
+		if cur, ok := s.jobs[c.id]; ok && cur == c.j {
+			delete(s.jobs, c.id)
+			removed = append(removed, c.id)
+		}
+	}
+	s.mu.Unlock()
+
+	// Third pass: ack the WAL records outside the map lock.
+	for _, id := range removed {
+		if err := s.wal.Ack(id); err != nil && s.logger != nil {
+			s.logger.Warn("scheduler prune: wal ack failed",
+				zap.String("job", string(id)), zap.Error(err))
+		}
+	}
+
+	if len(removed) > 0 {
+		s.version.Add(1)
+		// Persist a fresh snapshot so a restart doesn't resurrect
+		// the pruned records from a stale snapshot.
+		_ = s.writeSnapshotNow()
+	}
+
+	return removed, nil
 }
 
 // Guard against silently discarding errors in future refactors.

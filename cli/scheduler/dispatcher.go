@@ -148,7 +148,7 @@ func (s *Scheduler) runWait(j *Job) bool {
 		}
 
 		pollStart := time.Now()
-		out := eval.Evaluate(pollCtx, wait.Condition, &EvalEnv{Logger: s.logger, Bridge: s.bridge})
+		out := eval.Evaluate(pollCtx, wait.Condition, &EvalEnv{Logger: s.logger, Bridge: s.bridge, DangerousConfirmed: j.DangerousConfirmed})
 		pollCancel()
 		pollDur := time.Since(pollStart)
 		s.metrics.WaitDuration.WithLabelValues(wait.Condition.Type).Observe(pollDur.Seconds())

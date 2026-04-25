@@ -62,7 +62,7 @@ func (RegexMatch) Evaluate(ctx context.Context, cond scheduler.Condition, env *s
 	if env == nil || env.Bridge == nil {
 		return scheduler.EvalOutcome{Err: fmt.Errorf("regex_match: no CLI bridge wired")}
 	}
-	stdout, stderr, code, runErr := env.Bridge.RunShell(ctx, cmd, envOverrides, bypass)
+	stdout, stderr, code, runErr := env.Bridge.RunShell(ctx, cmd, envOverrides, bypass, env.DangerousConfirmed)
 	if runErr != nil {
 		return scheduler.EvalOutcome{Err: runErr, Details: fmt.Sprintf("exit=%d", code)}
 	}

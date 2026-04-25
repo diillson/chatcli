@@ -32,10 +32,10 @@ func (b *policyStubBridge) ClassifyShellCommand(cmd string) ShellPolicy {
 	return ShellPolicyAsk
 }
 
-func (b *policyStubBridge) ExecuteSlashCommand(context.Context, string) (string, bool, error) {
+func (b *policyStubBridge) ExecuteSlashCommand(context.Context, string, bool) (string, bool, error) {
 	return "", false, nil
 }
-func (b *policyStubBridge) RunAgentTask(context.Context, string, string) (string, error) {
+func (b *policyStubBridge) RunAgentTask(context.Context, string, string, bool) (string, error) {
 	return "", nil
 }
 func (b *policyStubBridge) DispatchWorker(context.Context, string, string) (string, error) {
@@ -45,7 +45,7 @@ func (b *policyStubBridge) SendLLMPrompt(context.Context, string, string, int) (
 	return "", 0, 0, nil
 }
 func (b *policyStubBridge) FireHook(hooks.HookEvent) *hooks.HookResult { return nil }
-func (b *policyStubBridge) RunShell(context.Context, string, map[string]string, bool) (string, string, int, error) {
+func (b *policyStubBridge) RunShell(context.Context, string, map[string]string, bool, bool) (string, string, int, error) {
 	return "", "", 0, nil
 }
 func (b *policyStubBridge) KubeconfigPath() string       { return "" }

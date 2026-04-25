@@ -89,7 +89,7 @@ func (K8sReady) Evaluate(ctx context.Context, cond scheduler.Condition, env *sch
 		}
 		listArgs = append(listArgs, "-o", "json")
 		cmd := strings.Join(listArgs, " ")
-		stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, envOverrides, false)
+		stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, envOverrides, false, env.DangerousConfirmed)
 		if err != nil || code != 0 {
 			transient := code != 0 && (strings.Contains(stderr, "connection refused") || strings.Contains(stderr, "i/o timeout"))
 			return scheduler.EvalOutcome{
@@ -157,7 +157,7 @@ func (K8sReady) Evaluate(ctx context.Context, cond scheduler.Condition, env *sch
 	}
 	args = append(args, "-o", "jsonpath="+path)
 	cmd := strings.Join(args, " ")
-	stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, envOverrides, false)
+	stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, envOverrides, false, env.DangerousConfirmed)
 	if err != nil || code != 0 {
 		transient := code != 0 && (strings.Contains(stderr, "connection refused") || strings.Contains(stderr, "i/o timeout") || strings.Contains(stderr, "ContainerCreating") || strings.Contains(stderr, "not found"))
 		return scheduler.EvalOutcome{

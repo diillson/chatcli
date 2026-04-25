@@ -60,7 +60,7 @@ func (ShellExit) Evaluate(ctx context.Context, cond scheduler.Condition, env *sc
 			Transient: false,
 		}
 	}
-	stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, envOverrides, bypass)
+	stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, envOverrides, bypass, env.DangerousConfirmed)
 	details := fmt.Sprintf("exit=%d expected=%d\nstdout:\n%s\nstderr:\n%s",
 		code, expected, truncate(stdout, 1024), truncate(stderr, 1024))
 

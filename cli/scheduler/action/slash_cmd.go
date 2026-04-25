@@ -42,7 +42,12 @@ func (SlashCmd) Execute(ctx context.Context, action scheduler.Action, env *sched
 	if env == nil || env.Bridge == nil {
 		return scheduler.ActionResult{Err: fmt.Errorf("slash_cmd: no bridge wired")}
 	}
-	output, _, err := env.Bridge.ExecuteSlashCommand(ctx, cmd)
+	// Forward Job.DangerousConfirmed so the scheduler's headless
+	// policy checker can admit "Ask" classifications for jobs that
+	// pre-authorized via --i-know / i_know:true. Without this, the
+	// LLM-driven /run|/agent|/coder paths see ShellPolicyAsk → reject
+	// even though the user explicitly opted in at enqueue.
+	output, _, err := env.Bridge.ExecuteSlashCommand(ctx, cmd, env.Job.DangerousConfirmed)
 	return scheduler.ActionResult{
 		Output: output,
 		Err:    err,
