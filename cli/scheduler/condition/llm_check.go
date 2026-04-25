@@ -66,7 +66,7 @@ func (LLMCheck) Evaluate(ctx context.Context, cond scheduler.Condition, env *sch
 
 	full := prompt
 	if ctxCmd != "" {
-		stdout, stderr, _, err := env.Bridge.RunShell(ctx, ctxCmd, nil, false)
+		stdout, stderr, _, err := env.Bridge.RunShell(ctx, ctxCmd, nil, false, env.DangerousConfirmed)
 		if err != nil {
 			return scheduler.EvalOutcome{Err: err, Details: "context_cmd failed"}
 		}

@@ -32,13 +32,17 @@ import (
 type CLIBridge interface {
 	// ExecuteSlashCommand runs a /foo command as if the user typed it.
 	// Returns the output captured and whether the command asked to
-	// exit the CLI loop.
-	ExecuteSlashCommand(ctx context.Context, line string) (output string, exit bool, err error)
+	// exit the CLI loop. dangerousConfirmed mirrors
+	// Job.DangerousConfirmed so the scheduler's headless policy
+	// checker can admit "Ask" classifications when the job was
+	// pre-authorized via --i-know / i_know:true.
+	ExecuteSlashCommand(ctx context.Context, line string, dangerousConfirmed bool) (output string, exit bool, err error)
 
 	// RunAgentTask boots a ReAct loop with the given task + system
 	// prompt hint (same API as ChatCLI.agentMode.Run). Returns the
-	// final assistant message.
-	RunAgentTask(ctx context.Context, task, systemHint string) (string, error)
+	// final assistant message. dangerousConfirmed has the same
+	// semantics as on ExecuteSlashCommand.
+	RunAgentTask(ctx context.Context, task, systemHint string, dangerousConfirmed bool) (string, error)
 
 	// DispatchWorker runs a single worker (see cli/agent/workers) with
 	// the named agent type and task. Useful as a lightweight action
@@ -59,12 +63,20 @@ type CLIBridge interface {
 	// is true and the operator has explicitly granted it, the command
 	// runs without the allowlist — reserved for trusted automation.
 	//
+	// dangerousConfirmed mirrors Job.DangerousConfirmed (set by
+	// --i-know on /schedule or i_know:true on @scheduler). When true,
+	// the fire-time recheck admits "Ask" classifications — the user
+	// already pre-authorized at enqueue. Denylist still rejects (deny
+	// always beats --i-know). Action executors that hold an env.Job
+	// (e.g. action/shell.go) MUST pass env.Job.DangerousConfirmed
+	// here; otherwise jobs admitted via i_know fail their re-check.
+	//
 	// Defense in depth: even though Enqueue already preflight-checked
 	// every shell command via ClassifyShellCommand, RunShell re-checks
 	// at fire time so policy changes between schedule and execution
 	// propagate — a command that was Allowed when enqueued but that
 	// now hits a new Deny rule must fail instead of running.
-	RunShell(ctx context.Context, cmd string, envOverrides map[string]string, coderSafetyBypass bool) (stdout string, stderr string, exitCode int, err error)
+	RunShell(ctx context.Context, cmd string, envOverrides map[string]string, coderSafetyBypass, dangerousConfirmed bool) (stdout string, stderr string, exitCode int, err error)
 
 	// ClassifyShellCommand asks the host's CoderMode policy whether a
 	// raw shell command would be allowed, denied, or require
@@ -115,10 +127,10 @@ type noopBridge struct{}
 // in tests and by the daemon when no CLI is attached.
 func NewNoopBridge() CLIBridge { return noopBridge{} }
 
-func (noopBridge) ExecuteSlashCommand(_ context.Context, _ string) (string, bool, error) {
+func (noopBridge) ExecuteSlashCommand(_ context.Context, _ string, _ bool) (string, bool, error) {
 	return "", false, ErrNoDaemon
 }
-func (noopBridge) RunAgentTask(_ context.Context, _, _ string) (string, error) {
+func (noopBridge) RunAgentTask(_ context.Context, _, _ string, _ bool) (string, error) {
 	return "", ErrNoDaemon
 }
 func (noopBridge) DispatchWorker(_ context.Context, _, _ string) (string, error) {
@@ -128,7 +140,7 @@ func (noopBridge) SendLLMPrompt(_ context.Context, _, _ string, _ int) (string, 
 	return "", 0, 0, ErrNoDaemon
 }
 func (noopBridge) FireHook(_ hooks.HookEvent) *hooks.HookResult { return nil }
-func (noopBridge) RunShell(_ context.Context, _ string, _ map[string]string, _ bool) (string, string, int, error) {
+func (noopBridge) RunShell(_ context.Context, _ string, _ map[string]string, _, _ bool) (string, string, int, error) {
 	return "", "", -1, ErrNoDaemon
 }
 func (noopBridge) KubeconfigPath() string         { return "" }

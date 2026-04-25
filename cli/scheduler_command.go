@@ -161,6 +161,8 @@ func (cli *ChatCLI) handleJobsCommand(input string) {
 		cli.jobsDaemon(args[1:])
 	case "gc":
 		cli.jobsGC()
+	case "clear", "clean", "prune":
+		cli.jobsClear(args[1:])
 	default:
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.unknown", args[0]), ColorYellow))
 		cli.printJobsUsage()
@@ -361,6 +363,190 @@ func (cli *ChatCLI) jobsDaemon(args []string) {
 	default:
 		fmt.Println(colorize("  "+i18n.T("scheduler.daemon.unknown", sub), ColorYellow))
 	}
+}
+
+// jobsClear removes terminal jobs from the in-memory store and the WAL
+// so /jobs history stops growing forever. Default scope: every terminal
+// status. Filter flags narrow the scope:
+//
+//	--failed        — only failed jobs
+//	--succeeded     — only succeeded jobs
+//	--cancelled     — only cancelled jobs
+//	--timed-out     — only timed-out jobs
+//	--status <S>    — repeatable; explicit status list
+//	--older-than <D> — only jobs whose UpdatedAt is older than D
+//	--name <substr> — only names containing substr (case-insensitive)
+//	--mine          — only jobs owned by the current session
+//	--yes / -y      — skip the confirmation prompt
+//
+// Active jobs (pending/running/waiting/paused) are NEVER pruned — use
+// /jobs cancel <id> to stop them first.
+func (cli *ChatCLI) jobsClear(args []string) {
+	if cli.scheduler == nil && cli.schedulerRemote == nil {
+		fmt.Println(colorize("  "+i18n.T("scheduler.disabled"), ColorYellow))
+		return
+	}
+	// Remote scheduler doesn't expose a Prune RPC yet — surface a
+	// clear "not implemented" instead of silently doing nothing.
+	if cli.schedulerRemote != nil {
+		fmt.Println(colorize("  /jobs clear is not yet supported against a remote daemon — run on the local scheduler instead.", ColorYellow))
+		return
+	}
+
+	var (
+		statuses    []scheduler.JobStatus
+		olderThan   time.Duration
+		nameSubstr  string
+		ownerFilter *scheduler.Owner
+		skipConfirm bool
+	)
+	addStatus := func(s scheduler.JobStatus) {
+		for _, existing := range statuses {
+			if existing == s {
+				return
+			}
+		}
+		statuses = append(statuses, s)
+	}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--failed":
+			addStatus(scheduler.StatusFailed)
+		case "--succeeded", "--success", "--completed":
+			addStatus(scheduler.StatusCompleted)
+		case "--cancelled", "--canceled":
+			addStatus(scheduler.StatusCancelled)
+		case "--timed-out", "--timedout":
+			addStatus(scheduler.StatusTimedOut)
+		case "--status":
+			if i+1 < len(args) {
+				addStatus(scheduler.JobStatus(args[i+1]))
+				i++
+			}
+		case "--older-than":
+			if i+1 < len(args) {
+				if d, err := time.ParseDuration(args[i+1]); err == nil {
+					olderThan = d
+				} else {
+					fmt.Println(colorize("  ❌ invalid --older-than value: "+args[i+1], ColorRed))
+					return
+				}
+				i++
+			}
+		case "--name":
+			if i+1 < len(args) {
+				nameSubstr = args[i+1]
+				i++
+			}
+		case "--mine":
+			o := cli.currentSchedulerOwner()
+			ownerFilter = &o
+		case "--yes", "-y":
+			skipConfirm = true
+		default:
+			fmt.Println(colorize("  ❌ unknown flag: "+args[i], ColorRed))
+			return
+		}
+	}
+
+	// Two-step destructive UX: first call shows what would be removed
+	// and instructs the user to re-run with --yes. Second call (with
+	// --yes) actually deletes. We do NOT prompt mid-executor for stdin
+	// confirmation because go-prompt holds the terminal in raw mode
+	// during executor execution — fmt.Scanln / bufio readers there
+	// either lock up the terminal or silently swallow keystrokes
+	// (reported by user 2026-04-24). The two-step pattern mirrors
+	// kubectl/terraform, dodges the stdin race entirely, and stays
+	// scriptable (the agent can schedule cleanup with --yes inline).
+	previewFilter := scheduler.ListFilter{
+		IncludeTerminal: true,
+		Statuses:        statuses,
+		Owner:           ownerFilter,
+		NameSubstr:      nameSubstr,
+	}
+	preview := cli.scheduler.List(previewFilter)
+	preview = filterTerminal(preview, olderThan)
+	if len(preview) == 0 {
+		fmt.Println(colorize("  (no terminal jobs match the filter — nothing to clear)", ColorGray))
+		return
+	}
+
+	if !skipConfirm {
+		desc := jobsClearDescription(statuses, olderThan, nameSubstr, ownerFilter)
+		fmt.Println(colorize(fmt.Sprintf("  Would delete %d terminal job(s)%s:", len(preview), desc), ColorYellow))
+		max := 10
+		if len(preview) < max {
+			max = len(preview)
+		}
+		for i := 0; i < max; i++ {
+			s := preview[i]
+			fmt.Printf("    %s  %s  %s\n",
+				colorize(string(s.Status), ColorGray),
+				colorize(string(s.ID), ColorGray),
+				s.Name)
+		}
+		if len(preview) > max {
+			fmt.Println(colorize(fmt.Sprintf("    … and %d more", len(preview)-max), ColorGray))
+		}
+		fmt.Println(colorize("  Re-run the same command with --yes (or -y) to actually delete.", ColorYellow))
+		return
+	}
+
+	removed, err := cli.scheduler.Prune(scheduler.PruneFilter{
+		Statuses:   statuses,
+		Owner:      ownerFilter,
+		OlderThan:  olderThan,
+		NameSubstr: nameSubstr,
+	})
+	if err != nil {
+		fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
+		return
+	}
+	fmt.Println(colorize(fmt.Sprintf("  ✔ removed %d terminal job(s) from history", len(removed)), ColorGreen))
+}
+
+// filterTerminal narrows a List preview to terminal entries that also
+// satisfy an OlderThan duration. List() already enforces Statuses /
+// Owner / NameSubstr; this is the post-filter for OlderThan since
+// PruneFilter handles it but ListFilter doesn't.
+func filterTerminal(in []scheduler.JobSummary, olderThan time.Duration) []scheduler.JobSummary {
+	out := make([]scheduler.JobSummary, 0, len(in))
+	now := time.Now()
+	for _, s := range in {
+		if !s.Status.IsTerminal() {
+			continue
+		}
+		if olderThan > 0 && now.Sub(s.UpdatedAt) < olderThan {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// jobsClearDescription renders a short human-readable filter summary
+// for the confirmation prompt.
+func jobsClearDescription(statuses []scheduler.JobStatus, olderThan time.Duration, nameSubstr string, owner *scheduler.Owner) string {
+	parts := []string{}
+	if len(statuses) == 0 {
+		parts = append(parts, "all terminal statuses")
+	} else {
+		labels := make([]string, len(statuses))
+		for i, s := range statuses {
+			labels[i] = string(s)
+		}
+		parts = append(parts, "status="+strings.Join(labels, "|"))
+	}
+	if owner != nil {
+		parts = append(parts, fmt.Sprintf("owner=%s:%s", owner.Kind, owner.ID))
+	}
+	if olderThan > 0 {
+		parts = append(parts, "older-than="+olderThan.String())
+	}
+	if nameSubstr != "" {
+		parts = append(parts, "name~="+nameSubstr)
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 func (cli *ChatCLI) jobsGC() {
@@ -606,7 +792,7 @@ func (cli *ChatCLI) printWaitUsage() {
 
 func (cli *ChatCLI) printJobsUsage() {
 	fmt.Println(colorize(i18n.T("scheduler.jobs.usage_header"), ColorCyan+ColorBold))
-	fmt.Println("  /jobs list [--all | --status X | --owner Y | --tag k=v]")
+	fmt.Println("  /jobs list [--all | --status X | --owner Y | --tag k=v | --name N]")
 	fmt.Println("  /jobs show <id>")
 	fmt.Println("  /jobs tree")
 	fmt.Println("  /jobs cancel <id> [reason...]")
@@ -614,6 +800,8 @@ func (cli *ChatCLI) printJobsUsage() {
 	fmt.Println("  /jobs resume <id>")
 	fmt.Println("  /jobs logs <id>")
 	fmt.Println("  /jobs history")
+	fmt.Println("  /jobs clear [--failed | --succeeded | --cancelled | --timed-out | --status S | --older-than D | --name N | --mine | --yes]")
+	fmt.Println("              (aliases: clean, prune)")
 	fmt.Println("  /jobs daemon {status}")
 	fmt.Println("  /jobs gc")
 }

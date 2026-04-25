@@ -57,7 +57,7 @@ func (DockerRunning) Evaluate(ctx context.Context, cond scheduler.Condition, env
 			return []string{container}, nil
 		}
 		cmd := binary + " ps --format {{.Names}}"
-		stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, envOverrides, false)
+		stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, envOverrides, false, env.DangerousConfirmed)
 		if err != nil || code != 0 {
 			return nil, nonNilErr(err, fmt.Errorf("docker ps failed: %s", stderr))
 		}
@@ -87,7 +87,7 @@ func (DockerRunning) Evaluate(ctx context.Context, cond scheduler.Condition, env
 	for _, name := range names {
 		format := "{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}"
 		cmd := fmt.Sprintf("%s inspect %s -f %q", binary, name, format)
-		stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, envOverrides, false)
+		stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, envOverrides, false, env.DangerousConfirmed)
 		if err != nil || code != 0 {
 			details = append(details, fmt.Sprintf("%s: %s", name, strings.TrimSpace(stderr)))
 			allReady = false

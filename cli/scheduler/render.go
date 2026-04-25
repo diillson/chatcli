@@ -24,25 +24,25 @@ import (
 func StatusBadge(s JobStatus) string {
 	switch s {
 	case StatusPending:
-		return "⏳"
+		return " ⏳"
 	case StatusBlocked:
-		return "⛓"
+		return " ⛓"
 	case StatusWaiting:
-		return "👁"
+		return " 👁"
 	case StatusRunning:
-		return "▶"
+		return " ▶"
 	case StatusPaused:
-		return "❚❚"
+		return " ❚❚"
 	case StatusCompleted:
-		return "✔"
+		return " ✔"
 	case StatusFailed:
-		return "✗"
+		return " ✗"
 	case StatusCancelled:
-		return "⊘"
+		return " ⊘"
 	case StatusTimedOut:
-		return "⏱"
+		return " ⏱"
 	case StatusSkipped:
-		return "↷"
+		return " ↷"
 	}
 	return "?"
 }

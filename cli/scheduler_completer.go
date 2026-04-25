@@ -258,6 +258,9 @@ var jobsSubcommandSuggestions = []prompt.Suggest{
 	{Text: "resume", Description: i18n.T("sched.jobs.sub.resume")},
 	{Text: "logs", Description: i18n.T("sched.jobs.sub.logs")},
 	{Text: "history", Description: i18n.T("sched.jobs.sub.history")},
+	{Text: "clear", Description: i18n.T("sched.jobs.sub.clear")},
+	{Text: "clean", Description: i18n.T("sched.jobs.sub.clear")},
+	{Text: "prune", Description: i18n.T("sched.jobs.sub.clear")},
 	{Text: "daemon", Description: i18n.T("sched.jobs.sub.daemon")},
 	{Text: "gc", Description: i18n.T("sched.jobs.sub.gc")},
 	{Text: "help", Description: i18n.T("sched.complete.help")},
@@ -269,6 +272,32 @@ var jobsListFlagSuggestions = []prompt.Suggest{
 	{Text: "--owner", Description: i18n.T("sched.jobs.flag.owner")},
 	{Text: "--tag", Description: i18n.T("sched.jobs.flag.tag")},
 	{Text: "--name", Description: i18n.T("sched.jobs.flag.name")},
+}
+
+// jobsClearFlagSuggestions are the flags accepted by /jobs clear (and
+// its aliases /jobs clean / /jobs prune). Status shortcuts appear
+// before the more verbose --status to keep the dropdown ergonomic.
+var jobsClearFlagSuggestions = []prompt.Suggest{
+	{Text: "--failed", Description: i18n.T("sched.jobs.clear.flag.failed")},
+	{Text: "--succeeded", Description: i18n.T("sched.jobs.clear.flag.succeeded")},
+	{Text: "--cancelled", Description: i18n.T("sched.jobs.clear.flag.cancelled")},
+	{Text: "--timed-out", Description: i18n.T("sched.jobs.clear.flag.timed_out")},
+	{Text: "--status", Description: i18n.T("sched.jobs.clear.flag.status")},
+	{Text: "--older-than", Description: i18n.T("sched.jobs.clear.flag.older_than")},
+	{Text: "--name", Description: i18n.T("sched.jobs.clear.flag.name")},
+	{Text: "--mine", Description: i18n.T("sched.jobs.clear.flag.mine")},
+	{Text: "--yes", Description: i18n.T("sched.jobs.clear.flag.yes")},
+}
+
+// jobsClearStatusValues lists only terminal statuses since /jobs clear
+// won't ever match active jobs (Prune ignores non-terminal). Surfacing
+// non-terminals would just frustrate the user.
+var jobsClearStatusValues = []prompt.Suggest{
+	{Text: "completed", Description: i18n.T("sched.status.completed")},
+	{Text: "failed", Description: i18n.T("sched.status.failed")},
+	{Text: "cancelled", Description: i18n.T("sched.status.cancelled")},
+	{Text: "timed_out", Description: i18n.T("sched.status.timed_out")},
+	{Text: "skipped", Description: i18n.T("sched.status.skipped")},
 }
 
 var jobsDaemonSubcommands = []prompt.Suggest{
@@ -328,6 +357,25 @@ func (cli *ChatCLI) getJobsSuggestions(d prompt.Document) []prompt.Suggest {
 	if sub == "daemon" {
 		if len(args) == 1 || (len(args) == 2 && !trailingSpace) {
 			return prompt.FilterHasPrefix(jobsDaemonSubcommands, current, true)
+		}
+		return nil
+	}
+
+	// /jobs clear|clean|prune — flag-based subcommand. Surface flags
+	// after subcommand, value vocabularies after --status / --older-than.
+	if sub == "clear" || sub == "clean" || sub == "prune" {
+		prevFlag := lastFlag(args[1:], trailingSpace)
+		switch prevFlag {
+		case "--status":
+			return prompt.FilterHasPrefix(jobsClearStatusValues, current, true)
+		case "--name", "--older-than":
+			// Free-form values; let the user type. Could surface
+			// duration hints here but keeping the dropdown empty
+			// is less noisy.
+			return nil
+		}
+		if strings.HasPrefix(current, "-") || trailingSpace {
+			return prompt.FilterHasPrefix(jobsClearFlagSuggestions, current, true)
 		}
 		return nil
 	}

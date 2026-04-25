@@ -219,6 +219,13 @@ type JobSummary struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	Tags        []string  `json:"tags,omitempty"`
+	// DangerousConfirmed mirrors Job.DangerousConfirmed so action
+	// executors (notably action/shell.go) can pass it through to
+	// CLIBridge.RunShell at fire time. Without this, a job that was
+	// admitted to the queue with --i-know / i_know:true still failed
+	// its fire-time policy re-check because the bridge had no way to
+	// see the per-job authorization.
+	DangerousConfirmed bool `json:"dangerous_confirmed,omitempty"`
 }
 
 // Summary projects a Job to a JobSummary.
@@ -242,18 +249,19 @@ func (j *Job) Summary() JobSummary {
 		}
 	}
 	return JobSummary{
-		ID:          j.ID,
-		Name:        j.Name,
-		Owner:       j.Owner,
-		Status:      j.Status,
-		Type:        kind,
-		NextFireAt:  j.NextFireAt,
-		LastOutcome: lastOut,
-		Attempts:    j.Attempts,
-		Description: j.Description,
-		CreatedAt:   j.CreatedAt,
-		UpdatedAt:   j.UpdatedAt,
-		Tags:        tags,
+		ID:                 j.ID,
+		Name:               j.Name,
+		Owner:              j.Owner,
+		Status:             j.Status,
+		Type:               kind,
+		NextFireAt:         j.NextFireAt,
+		LastOutcome:        lastOut,
+		Attempts:           j.Attempts,
+		Description:        j.Description,
+		CreatedAt:          j.CreatedAt,
+		UpdatedAt:          j.UpdatedAt,
+		Tags:               tags,
+		DangerousConfirmed: j.DangerousConfirmed,
 	}
 }
 

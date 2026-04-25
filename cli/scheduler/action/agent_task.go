@@ -39,7 +39,7 @@ func (AgentTask) Execute(ctx context.Context, action scheduler.Action, env *sche
 	if env == nil || env.Bridge == nil {
 		return scheduler.ActionResult{Err: fmt.Errorf("agent_task: no bridge wired")}
 	}
-	out, err := env.Bridge.RunAgentTask(ctx, task, system)
+	out, err := env.Bridge.RunAgentTask(ctx, task, system, env.Job.DangerousConfirmed)
 	return scheduler.ActionResult{
 		Output: truncate(out, 1<<15),
 		Err:    err,

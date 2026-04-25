@@ -54,7 +54,12 @@ func (Shell) Execute(ctx context.Context, action scheduler.Action, env *schedule
 	if env == nil || env.Bridge == nil {
 		return scheduler.ActionResult{Err: fmt.Errorf("shell: no bridge wired")}
 	}
-	stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, overrides, bypass)
+	// Thread the per-job dangerous-confirmed flag (mirrored on the
+	// JobSummary) through to RunShell so the fire-time policy re-check
+	// can admit "Ask" classifications when the job was enqueued with
+	// --i-know / i_know:true. Without this, every Ask shell command
+	// fails its recheck even after explicit pre-authorization.
+	stdout, stderr, code, err := env.Bridge.RunShell(ctx, cmd, overrides, bypass, env.Job.DangerousConfirmed)
 	output := fmt.Sprintf("$ %s\nexit=%d\n--- stdout ---\n%s\n--- stderr ---\n%s",
 		cmd, code, stdout, stderr)
 	if err != nil {

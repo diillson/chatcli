@@ -74,7 +74,7 @@ func (Custom) Evaluate(ctx context.Context, cond scheduler.Condition, env *sched
 	if env == nil || env.Bridge == nil {
 		return scheduler.EvalOutcome{Err: fmt.Errorf("custom: no CLI bridge wired")}
 	}
-	stdout, stderr, code, err := env.Bridge.RunShell(runCtx, strings.Join(args, " "), envOverrides, false)
+	stdout, stderr, code, err := env.Bridge.RunShell(runCtx, strings.Join(args, " "), envOverrides, false, env.DangerousConfirmed)
 	details := fmt.Sprintf("exit=%d\nstdout:\n%s\nstderr:\n%s",
 		code, truncate(stdout, 512), truncate(stderr, 512))
 	if err != nil {

@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/scheduler"
@@ -155,7 +156,35 @@ func (b *schedulerBridge) ClassifyShellCommand(cmd string) scheduler.ShellPolicy
 
 // ExecuteSlashCommand runs a slash command as if the user typed it,
 // capturing stdout.
-func (b *schedulerBridge) ExecuteSlashCommand(_ context.Context, line string) (string, bool, error) {
+//
+// `/run`, `/agent`, `/coder` are intercepted here and routed directly
+// to the agent ReAct loop via RunAgentTask / RunCoderTask. The REPL
+// implementation of those commands relies on panic-flow control
+// (errAgentModeRequest / errCoderModeRequest) to switch the main loop
+// into agent mode — that flow is meaningless from the scheduler's
+// dispatcher goroutine, so we route through the bridge directly. This
+// makes the documented "do: /run X" / "/agent X" / "/coder X" forms
+// fire correctly from a scheduled job.
+//
+// dangerousConfirmed flows from Job.DangerousConfirmed so the headless
+// PolicyChecker can admit "Ask" classifications when the job was
+// pre-authorized via --i-know / i_know:true.
+func (b *schedulerBridge) ExecuteSlashCommand(ctx context.Context, line string, dangerousConfirmed bool) (string, bool, error) {
+	if task, kind, ok := classifyAgentSlash(line); ok {
+		if task == "" {
+			return "", false, fmt.Errorf(
+				"scheduler: slash_cmd %q requires a task argument (e.g. %q)",
+				strings.TrimSpace(line), strings.TrimSpace(line)+" do something",
+			)
+		}
+		if kind == agentSlashKindCoder {
+			out, err := b.RunCoderTask(ctx, task, dangerousConfirmed)
+			return out, false, err
+		}
+		out, err := b.RunAgentTask(ctx, task, "", dangerousConfirmed)
+		return out, false, err
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	// Capture stdout for the duration of the handler.
@@ -170,15 +199,22 @@ func (b *schedulerBridge) ExecuteSlashCommand(_ context.Context, line string) (s
 	func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				// Agent-mode panics (errAgentModeRequest / errExitRequest)
-				// are flow-control, not errors. We capture and surface
-				// them via the "exit" flag or an informative error.
+				// errExitRequest / unexpected agent-mode panics are
+				// flow-control. classifyAgentSlash already drains
+				// /run|/agent|/coder upstream, so reaching the
+				// errAgentModeRequest / errCoderModeRequest branch
+				// here means a different slash command unexpectedly
+				// requested mode-switch — surface it explicitly.
 				if rec == errExitRequest {
 					exit = true
 					return
 				}
 				if rec == errAgentModeRequest || rec == errCoderModeRequest {
-					panicErr = fmt.Errorf("scheduler: slash_cmd %q requested agent/coder mode, not supported from scheduler", line)
+					panicErr = fmt.Errorf(
+						"scheduler: slash_cmd %q unexpectedly requested an agent/coder mode switch — "+
+							"only /run, /agent, /coder are routed through the agent loop from the scheduler",
+						line,
+					)
 					return
 				}
 				panicErr = fmt.Errorf("scheduler: slash_cmd panic: %v", rec)
@@ -200,26 +236,250 @@ func (b *schedulerBridge) ExecuteSlashCommand(_ context.Context, line string) (s
 	return buf.String(), exit, panicErr
 }
 
-// RunAgentTask boots the ReAct loop with the given task.
-func (b *schedulerBridge) RunAgentTask(ctx context.Context, task, systemHint string) (string, error) {
-	if b.cli.agentMode == nil {
-		return "", fmt.Errorf("scheduler: agent mode not initialized")
+// agentSlashKind discriminates between the three slash forms that
+// boot the agent loop. /run and /agent share the agent profile; /coder
+// uses CoderSystemPrompt and the coder execution profile.
+type agentSlashKind int
+
+const (
+	agentSlashKindAgent agentSlashKind = iota
+	agentSlashKindCoder
+)
+
+// classifyAgentSlash recognizes "/run …", "/agent …", "/coder …"
+// (with whitespace separator) and bare "/run", "/agent", "/coder".
+// Returns the task body, the kind (agent vs coder profile), and ok=true.
+// `task` is empty when the user passed a bare command without args —
+// the caller surfaces a helpful error in that case.
+func classifyAgentSlash(line string) (task string, kind agentSlashKind, ok bool) {
+	t := strings.TrimSpace(line)
+	matchPrefix := func(prefix string) (string, bool) {
+		if t == prefix {
+			return "", true
+		}
+		if len(t) > len(prefix) && (t[len(prefix)] == ' ' || t[len(prefix)] == '\t') &&
+			strings.HasPrefix(t, prefix) {
+			return strings.TrimSpace(t[len(prefix):]), true
+		}
+		return "", false
 	}
-	// AgentMode writes directly to stdout; capture it for the bridge.
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	origStdout := os.Stdout
-	r, w, err := os.Pipe()
+	if body, hit := matchPrefix("/coder"); hit {
+		return body, agentSlashKindCoder, true
+	}
+	if body, hit := matchPrefix("/agent"); hit {
+		return body, agentSlashKindAgent, true
+	}
+	if body, hit := matchPrefix("/run"); hit {
+		return body, agentSlashKindAgent, true
+	}
+	return "", 0, false
+}
+
+// RunAgentTask runs a scheduled `/run` or `/agent` task as a HEADLESS
+// ReAct loop using the same engine subagents use (workers.RunDelegate).
+// Critical: we do NOT call cli.agentMode.Run() — that path is
+// interactive (it spawns a stdin reader, prompts for permissions on
+// stdin, and writes Bubble-Tea-style UI to the user's terminal). When
+// the scheduler dispatcher fires from a background goroutine while the
+// user is at the chat/coder prompt, those side-effects fight with the
+// active session and lock the terminal. The headless worker has no
+// stdin reader, no TUI, and uses a non-prompting PolicyChecker so it
+// can fire cleanly while the user keeps typing.
+//
+// systemHint is currently advisory: workers.RunDelegate composes its
+// own subagent system prompt. We pass non-empty hints (e.g. the coder
+// system prompt) as `system_preface`.
+//
+// dangerousConfirmed flows to the PolicyChecker so jobs with --i-know
+// can call tools that would otherwise hit ShellPolicyAsk.
+func (b *schedulerBridge) RunAgentTask(ctx context.Context, task, systemHint string, dangerousConfirmed bool) (string, error) {
+	return b.runHeadlessAgent(ctx, task, systemHint, "scheduled /run task", dangerousConfirmed)
+}
+
+// RunCoderTask runs a scheduled `/coder` task headless. Same engine as
+// RunAgentTask; the coder personality is conveyed by passing
+// CoderSystemPrompt as the subagent's system_preface. We deliberately
+// do NOT mutate cli.executionProfile or cli.agentMode.isCoderMode —
+// those are user-session globals and the scheduler dispatcher must not
+// touch them while the user is interactive.
+func (b *schedulerBridge) RunCoderTask(ctx context.Context, task string, dangerousConfirmed bool) (string, error) {
+	return b.runHeadlessAgent(ctx, task, CoderSystemPrompt, "scheduled /coder task", dangerousConfirmed)
+}
+
+// runHeadlessAgent runs a scheduler-driven /run|/agent|/coder task as
+// a headless ReAct loop. Bypasses workers.RunDelegate because that
+// path frames the LLM as "a focused subagent delegated by a parent
+// agent" — which makes the model refuse top-level GUI/system tasks
+// like "open -a Docker" with hallucinated apologetics ("I'm a CLI
+// subagent, I cannot launch desktop applications") even though it
+// has the exec tool available. Scheduler-driven tasks have no parent;
+// they're top-level firings that need to actually do work.
+//
+// We compose our own system prompt that: (a) drops the subagent
+// framing, (b) explicitly tells the LLM to use the exec tool for
+// shell-style work, (c) layers in the user's systemPreface (e.g.
+// CoderSystemPrompt for /coder) on top, and (d) lists the same full
+// tool set workers/subagent.go grants for read_only=false runs.
+func (b *schedulerBridge) runHeadlessAgent(ctx context.Context, task, systemPreface, description string, dangerousConfirmed bool) (string, error) {
+	if b.cli == nil || b.cli.Client == nil {
+		return "", fmt.Errorf("scheduler: LLM client not initialized")
+	}
+	if strings.TrimSpace(task) == "" {
+		return "", fmt.Errorf("scheduler: empty task body")
+	}
+
+	tools := []string{
+		"read", "write", "patch", "tree", "search", "exec",
+		"git-status", "git-diff", "git-log", "git-changed", "git-branch", "test",
+	}
+
+	cfg := workers.WorkerReActConfig{
+		MaxTurns:        15,
+		SystemPrompt:    buildSchedulerSystemPrompt(systemPreface, tools),
+		AllowedCommands: tools,
+		ReadOnly:        false,
+	}
+
+	// description is informational (job-history label, future telemetry).
+	// Future: pipe through to the worker as a metadata tag so /jobs logs
+	// can render it next to the result. For now the call site just
+	// records it via the scheduler's own emit path.
+	_ = description
+
+	pc := newSchedulerPolicyChecker(b, b.cli.logger, dangerousConfirmed)
+	res, err := workers.RunWorkerReAct(
+		ctx,
+		cfg,
+		task,
+		b.cli.Client,
+		workers.NewFileLockManager(),
+		nil, // skills — not propagated to scheduled tasks for now
+		pc,
+		b.cli.logger,
+	)
 	if err != nil {
 		return "", err
 	}
-	os.Stdout = w
-	runErr := b.cli.agentMode.Run(ctx, task, "", systemHint)
-	_ = w.Close()
-	os.Stdout = origStdout
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-	return buf.String(), runErr
+	if res == nil {
+		return "", fmt.Errorf("scheduler: headless agent returned nil result")
+	}
+	return res.Output, nil
+}
+
+// buildSchedulerSystemPrompt frames the LLM correctly for a top-level
+// scheduled-job firing AND teaches it the chatcli XML tool-call format.
+//
+// Two modes the worker supports:
+//
+//  1. Native function calling (Anthropic API key auth, OpenAI, Gemini,
+//     etc.): tool schemas flow via the API. The worker REPLACES our
+//     SystemPrompt with its own native-mode prompt at fire time
+//     (worker_react.go), so our framing is dropped on this path. The
+//     LLM still sees tool schemas and can call them via the API.
+//
+//  2. Text mode (Anthropic OAuth — the chat.ai login path, no API key):
+//     the worker keeps our SystemPrompt intact. The LLM has NO tool
+//     schemas via API and MUST emit the chatcli XML tool-call format
+//     in its response text:
+//
+//       <tool_call name="@coder" args='{"cmd":"exec","args":{"cmd":"open -a Docker"}}' />
+//
+//     If we don't teach this syntax, the LLM falls back to its
+//     training-data hallucination of tool calls (Anthropic's prose
+//     `<function_calls><invoke>` style), the parser sees zero tool
+//     calls, and the worker reports "success" with the LLM's
+//     fabricated output as the final answer — i.e. nothing actually
+//     ran but the job log claims it did.
+//
+// To cover both, we include the XML instructions even though they're
+// redundant in native mode (where they're discarded). In text mode
+// they prevent the silent-hallucination bug.
+func buildSchedulerSystemPrompt(preface string, tools []string) string {
+	var sb strings.Builder
+	if strings.TrimSpace(preface) != "" {
+		sb.WriteString(preface)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("You are running a scheduled task autonomously inside ChatCLI. ")
+	sb.WriteString("You have full execution authority — there is no parent agent and no human at the keyboard. ")
+	sb.WriteString("You MUST use the available tools to actually perform the task. Do not refuse on the basis of being a CLI/subagent context — you have the exec tool and can launch any command the host policy allows, including GUI commands like \"open -a SomeApp\" on macOS.\n\n")
+
+	sb.WriteString("## TOOL-CALL FORMAT (CRITICAL)\n\n")
+	sb.WriteString("If your runtime exposes native function/tool calling, use it directly via the API.\n")
+	sb.WriteString("Otherwise, emit tool calls as inline XML in your response — this is the ONLY format the worker parses. ")
+	sb.WriteString("Do NOT use any other tool-call syntax (no `<function_calls>`, no `<invoke>`, no markdown code-block tool calls). ")
+	sb.WriteString("Those are silently ignored and the job will report \"success\" with no work done.\n\n")
+	sb.WriteString("Canonical XML form:\n")
+	sb.WriteString("  <tool_call name=\"@coder\" args='{\"cmd\":\"<subcommand>\",\"args\":{...}}' />\n\n")
+	sb.WriteString("Examples for the most common subcommands:\n")
+	sb.WriteString("  shell exec : <tool_call name=\"@coder\" args='{\"cmd\":\"exec\",\"args\":{\"cmd\":\"open -a Docker\"}}' />\n")
+	sb.WriteString("  read file  : <tool_call name=\"@coder\" args='{\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}' />\n")
+	sb.WriteString("  write file : <tool_call name=\"@coder\" args='{\"cmd\":\"write\",\"args\":{\"file\":\"out.txt\",\"content\":\"hello\"}}' />\n")
+	sb.WriteString("  search     : <tool_call name=\"@coder\" args='{\"cmd\":\"search\",\"args\":{\"term\":\"Login\",\"dir\":\".\"}}' />\n\n")
+
+	sb.WriteString("## RULES\n")
+	sb.WriteString("1. Plan the task in your head, then take action with tools. Don't ask clarifying questions — there is no one to answer.\n")
+	sb.WriteString("2. For shell-like work (opening apps, running CLIs, validating services, posting status), use the exec tool. Pre-authorization for the job has already been handled by the scheduler.\n")
+	sb.WriteString("3. Emit tool calls one per response (or several in parallel if independent), then wait for the tool result before continuing. The worker injects the result and re-prompts you.\n")
+	sb.WriteString("4. After all tools have run, produce a short, structured final summary describing what you did and the outcome — that summary becomes the job's history entry shown via /jobs logs.\n")
+	sb.WriteString("5. If a tool fails, surface the error in your summary instead of looping silently. Never fabricate tool output: only describe results that came back from real tool calls.\n")
+	sb.WriteString(fmt.Sprintf("\nAvailable @coder subcommands: %s\n", strings.Join(tools, ", ")))
+	if tmp := os.Getenv("CHATCLI_AGENT_TMPDIR"); tmp != "" {
+		sb.WriteString(fmt.Sprintf("\nScratch dir (read/write allowed): %s  (exposed as $CHATCLI_AGENT_TMPDIR to exec)\n", tmp))
+	}
+	return sb.String()
+}
+
+// schedulerPolicyChecker satisfies workers.PolicyChecker for headless
+// scheduled tasks. It NEVER prompts — the scheduler runs without a
+// human at the keyboard, so any "Ask" classification must fail closed
+// unless the job pre-authorized via i_know. This mirrors the same
+// semantics used by ClassifyShellCommand at enqueue/fire time.
+//
+// dangerousConfirmed mirrors Job.DangerousConfirmed (set by --i-know
+// on /schedule or i_know:true on @scheduler) and is threaded all the
+// way down from action.Execute → bridge.ExecuteSlashCommand /
+// RunAgentTask → runHeadlessAgent → here. Ask + dangerousConfirmed
+// admits; denylist still rejects regardless (deny beats --i-know).
+type schedulerPolicyChecker struct {
+	bridge             *schedulerBridge
+	logger             *zap.Logger
+	dangerousConfirmed bool
+}
+
+func newSchedulerPolicyChecker(b *schedulerBridge, logger *zap.Logger, dangerousConfirmed bool) *schedulerPolicyChecker {
+	return &schedulerPolicyChecker{bridge: b, logger: logger, dangerousConfirmed: dangerousConfirmed}
+}
+
+// CheckAndPrompt classifies a tool call against the live coder policy.
+// Allow → permit. Deny → reject with the classification reason. Ask →
+// admit when the job pre-authorized via i_know; otherwise reject with
+// a hint pointing at /config security allow or shell:/--i-know.
+// Never blocks on stdin.
+func (p *schedulerPolicyChecker) CheckAndPrompt(_ context.Context, toolName, args string) (bool, string) {
+	pm := p.bridge.getPolicyManager()
+	if pm == nil {
+		return false, "scheduler: policy manager unavailable; refusing tool call (fail-closed)"
+	}
+	switch pm.Check(toolName, args) {
+	case coder.ActionAllow:
+		return true, ""
+	case coder.ActionDeny:
+		// Denylist always wins — even with i_know.
+		return false, fmt.Sprintf("scheduler: tool %q denied by coder policy", toolName)
+	case coder.ActionAsk:
+		if p.dangerousConfirmed {
+			return true, ""
+		}
+		return false, fmt.Sprintf(
+			"scheduler: tool %q requires user confirmation (\"Ask\") — scheduled tasks have no human to prompt. "+
+				"Pre-authorize this job at enqueue with i_know:true (e.g. {\"cmd\":\"schedule\",\"args\":{...,\"i_know\":true}}) "+
+				"or add a persistent allow rule via /config security allow.",
+			toolName,
+		)
+	default:
+		return false, fmt.Sprintf("scheduler: tool %q has unrecognized policy classification", toolName)
+	}
 }
 
 // DispatchWorker runs a single worker. Not exposed yet — stub returns
@@ -269,13 +529,18 @@ func (b *schedulerBridge) FireHook(event hooks.HookEvent) *hooks.HookResult {
 // CHATCLI_SCHEDULER_SHELL_ALLOW_BYPASS=true, the command runs without
 // the coder policy allowlist.
 //
+// dangerousConfirmed mirrors Job.DangerousConfirmed (set by --i-know
+// on /schedule or i_know:true on @scheduler). When true, the fire-time
+// recheck admits "Ask" classifications — the user already pre-authorized
+// at enqueue. Denylist still rejects regardless (deny beats --i-know).
+//
 // Defense-in-depth: even though Enqueue already preflight-checked this
 // command via ClassifyShellCommand, we reload the on-disk policy here
 // and re-check. This catches the case where the operator adds a deny
 // rule (or removes an allow) between a cron job's schedule and its
 // fire — the job fails instead of running something that's now
 // disallowed.
-func (b *schedulerBridge) RunShell(ctx context.Context, cmd string, envOverrides map[string]string, coderSafetyBypass bool) (string, string, int, error) {
+func (b *schedulerBridge) RunShell(ctx context.Context, cmd string, envOverrides map[string]string, coderSafetyBypass, dangerousConfirmed bool) (string, string, int, error) {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
 		return "", "", -1, fmt.Errorf("scheduler shell: empty command")
@@ -290,17 +555,16 @@ func (b *schedulerBridge) RunShell(ctx context.Context, cmd string, envOverrides
 	if !coderSafetyBypass {
 		switch b.classifyCommand(b.reloadPolicyManager(), cmd) {
 		case scheduler.ShellPolicyDeny:
+			// Deny always wins — even with --i-know.
 			return "", "", -1, fmt.Errorf("%w: policy denies %q at fire time",
 				scheduler.ErrShellPolicyDeny, truncateBridge(cmd, 120))
 		case scheduler.ShellPolicyAsk:
-			// A command that passed enqueue (either Allow or
-			// Ask + DangerousConfirmed) but whose classification
-			// has since drifted to Ask still fails here. The
-			// bridge does not see DangerousConfirmed at this
-			// layer, so the safe choice is to refuse and let
-			// the scheduler record the failure.
-			return "", "", -1, fmt.Errorf("%w: policy requires approval for %q at fire time",
-				scheduler.ErrShellPolicyAsk, truncateBridge(cmd, 120))
+			if !dangerousConfirmed {
+				return "", "", -1, fmt.Errorf("%w: policy requires approval for %q at fire time",
+					scheduler.ErrShellPolicyAsk, truncateBridge(cmd, 120))
+			}
+			// dangerousConfirmed=true: user pre-authorized at
+			// enqueue via --i-know / i_know:true. Proceed.
 		case scheduler.ShellPolicyAllow:
 			// proceed
 		}
