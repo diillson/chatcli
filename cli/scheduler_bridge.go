@@ -382,7 +382,7 @@ func (b *schedulerBridge) runHeadlessAgent(ctx context.Context, task, systemPref
 //     schemas via API and MUST emit the chatcli XML tool-call format
 //     in its response text:
 //
-//       <tool_call name="@coder" args='{"cmd":"exec","args":{"cmd":"open -a Docker"}}' />
+//     <tool_call name="@coder" args='{"cmd":"exec","args":{"cmd":"open -a Docker"}}' />
 //
 //     If we don't teach this syntax, the LLM falls back to its
 //     training-data hallucination of tool calls (Anthropic's prose

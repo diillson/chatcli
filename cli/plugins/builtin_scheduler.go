@@ -213,12 +213,6 @@ func (*BuiltinSchedulerPlugin) Schema() string {
 	return string(data)
 }
 
-// schedulerArgs decodes the canonical JSON envelope.
-type schedulerArgs struct {
-	Cmd  string          `json:"cmd"`
-	Args json.RawMessage `json:"args"`
-}
-
 // Execute parses the args and dispatches to the adapter.
 func (p *BuiltinSchedulerPlugin) Execute(ctx context.Context, args []string) (string, error) {
 	return p.ExecuteWithStream(ctx, args, nil)

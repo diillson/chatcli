@@ -905,10 +905,10 @@ func sortJobSummaries(in []JobSummary) {
 // matches every terminal job (succeeded + failed + cancelled +
 // timed_out + skipped). Combine fields to narrow further.
 type PruneFilter struct {
-	Statuses    []JobStatus // empty = every terminal status
-	Owner       *Owner      // nil = any owner
-	OlderThan   time.Duration
-	NameSubstr  string
+	Statuses   []JobStatus // empty = every terminal status
+	Owner      *Owner      // nil = any owner
+	OlderThan  time.Duration
+	NameSubstr string
 }
 
 // Prune removes terminal jobs that match the filter. Returns the
