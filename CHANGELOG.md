@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.109.1](https://github.com/diillson/chatcli/compare/v1.109.0...v1.109.1) (2026-04-25)
+
+
+### Bug Fixes
+
+* **scheduler:** headless agent for /run, /agent, /coder + /jobs clear ([#835](https://github.com/diillson/chatcli/issues/835)) ([a5cf8fe](https://github.com/diillson/chatcli/commit/a5cf8fe29a37d1f678c22c22d00a5f4fb546a99d))
+
 ## [1.109.0](https://github.com/diillson/chatcli/compare/v1.108.0...v1.109.0) (2026-04-24)
 
 
