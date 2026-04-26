@@ -149,7 +149,7 @@ Levar o chatcli de "ReAct + multi-agente" para **suite completa de 7 padrões de
        Verify        VerifyConfig   // {Enabled bool, NumQuestions int, RewriteOnDiscrepancy bool}
        Reflexion     ReflexionConfig // {Enabled bool, OnError bool, OnHallucination bool, Persist bool}
        PlanFirst     PlanFirstConfig // {Mode "off"|"auto"|"always", ComplexityThreshold int}
-       HyDE          HyDEConfig      // {Enabled bool, UseVectors bool, EmbedProvider string, NumKeywords int}
+       HyDE          HyDEConfig      // {Enabled bool, UseVectors bool, NumKeywords int} — provider via CHATCLI_EMBED_PROVIDER
        Reasoning     ReasoningConfig // {Mode "off"|"on"|"auto", Budget int, AutoAgents []string}
    }
    ```

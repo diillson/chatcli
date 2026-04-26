@@ -21,9 +21,23 @@ import (
 
 const (
 	openaiDefaultModel = "text-embedding-3-small"
-	openaiDefaultDim   = 1536
 	openaiEndpoint     = "https://api.openai.com/v1/embeddings"
 )
+
+// openaiNativeDim returns the dimension OpenAI emits when the request
+// omits the `dimensions` field. text-embedding-3-large defaults to 3072,
+// not 1536 — relying on a single constant silently breaks the store
+// when users switch models without setting CHATCLI_EMBED_DIMENSIONS.
+func openaiNativeDim(model string) int {
+	switch model {
+	case "text-embedding-3-large":
+		return 3072
+	case "text-embedding-3-small", "text-embedding-ada-002":
+		return 1536
+	default:
+		return 1536
+	}
+}
 
 // OpenAI is the OpenAI embeddings provider.
 type OpenAI struct {
@@ -45,7 +59,7 @@ func NewOpenAI(apiKey, model string, dim int) (*OpenAI, error) {
 		model = openaiDefaultModel
 	}
 	if dim <= 0 {
-		dim = openaiDefaultDim
+		dim = openaiNativeDim(model)
 	}
 	return &OpenAI{
 		apiKey:   apiKey,
@@ -89,7 +103,7 @@ func (o *OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error)
 		Model:          o.model,
 		EncodingFormat: "float",
 	}
-	if o.dim != openaiDefaultDim {
+	if o.dim != openaiNativeDim(o.model) {
 		body.Dimensions = o.dim
 	}
 	payload, err := json.Marshal(body)
