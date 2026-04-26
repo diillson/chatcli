@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.109.2](https://github.com/diillson/chatcli/compare/v1.109.1...v1.109.2) (2026-04-26)
+
+
+### Bug Fixes
+
+* **rag-hyde:** correct openai dim, raise backfill cap, drop dead var ([#837](https://github.com/diillson/chatcli/issues/837)) ([27f4068](https://github.com/diillson/chatcli/commit/27f4068a51b866cba3ca78e826f6e84ee6c3bf70))
+
 ## [1.109.1](https://github.com/diillson/chatcli/compare/v1.109.0...v1.109.1) (2026-04-25)
 
 
