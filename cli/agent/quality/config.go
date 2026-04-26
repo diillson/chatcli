@@ -135,11 +135,16 @@ type PlanFirstConfig struct {
 }
 
 // HyDEConfig controls Hypothetical Document Embeddings retrieval (#4).
+//
+// Provider selection lives in CHATCLI_EMBED_PROVIDER (read by the
+// embedding factory, not this struct) — there is intentionally no
+// EmbedProvider field here. An older CHATCLI_QUALITY_HYDE_PROVIDER var
+// was removed because it only annotated the display and never wired
+// the actual provider, which made it a silent footgun.
 type HyDEConfig struct {
-	Enabled       bool
-	UseVectors    bool   // if true, use embedding provider for cosine search
-	EmbedProvider string // "voyage" | "openai" | ""
-	NumKeywords   int    // top-N keywords extracted from hypothesis
+	Enabled     bool
+	UseVectors  bool // if true, use embedding provider for cosine search
+	NumKeywords int  // top-N keywords extracted from hypothesis
 }
 
 // ReasoningConfig controls cross-provider reasoning backbone wiring (#7).
@@ -202,10 +207,9 @@ func Defaults() Config {
 			ComplexityThreshold: 6,
 		},
 		HyDE: HyDEConfig{
-			Enabled:       false,
-			UseVectors:    false,
-			EmbedProvider: "",
-			NumKeywords:   5,
+			Enabled:     false,
+			UseVectors:  false,
+			NumKeywords: 5,
 		},
 		Reasoning: ReasoningConfig{
 			Mode:       "auto",
@@ -375,9 +379,6 @@ func loadHyDEEnv(c *HyDEConfig) {
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_HYDE_USE_VECTORS"); v != "" {
 		c.UseVectors = parseBool(v, c.UseVectors)
-	}
-	if v := os.Getenv("CHATCLI_QUALITY_HYDE_PROVIDER"); v != "" {
-		c.EmbedProvider = strings.ToLower(strings.TrimSpace(v))
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_HYDE_NUM_KEYWORDS"); v != "" {
 		c.NumKeywords = parseInt(v, c.NumKeywords)

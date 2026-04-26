@@ -102,11 +102,6 @@ func (cli *ChatCLI) showConfigQuality() {
 	subheader(p, "cfg.sub.quality.hyde")
 	kv(p, "CHATCLI_QUALITY_HYDE_ENABLED", boolLabel(cfg.HyDE.Enabled))
 	kv(p, "CHATCLI_QUALITY_HYDE_USE_VECTORS", boolLabel(cfg.HyDE.UseVectors))
-	provider := cfg.HyDE.EmbedProvider
-	if provider == "" {
-		provider = i18n.T("cfg.val.none")
-	}
-	kv(p, "CHATCLI_QUALITY_HYDE_PROVIDER", provider)
 	kv(p, "CHATCLI_EMBED_PROVIDER", envOr("CHATCLI_EMBED_PROVIDER"))
 	kv(p, "CHATCLI_EMBED_MODEL", envOr("CHATCLI_EMBED_MODEL"))
 	kv(p, "CHATCLI_QUALITY_HYDE_NUM_KEYWORDS", fmt.Sprintf("%d", cfg.HyDE.NumKeywords))

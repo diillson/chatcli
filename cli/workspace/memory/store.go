@@ -97,12 +97,13 @@ func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, 
 	out := m.retriever.RetrieveWithHyDE(ctx, query, hints, augmenter, m.vectors)
 
 	// Lazy backfill: fire-and-forget embedding of any facts visible to
-	// the current scorer that lack a vector. Bounded to a reasonable
-	// number (top 25) so a cold cache doesn't bill the user $0.50.
+	// the current scorer that lack a vector. Bounded so a cold cache
+	// doesn't bill more than a few cents — at Voyage's $0.05/M tokens
+	// and ~50 tokens/fact average, 500 facts ≈ $0.001.
 	if m.vectors != nil && m.vectors.Enabled() {
 		all := m.Facts.GetAll()
-		if len(all) > 25 {
-			all = all[:25]
+		if len(all) > 500 {
+			all = all[:500]
 		}
 		ids := make([]string, 0, len(all))
 		for _, f := range all {
