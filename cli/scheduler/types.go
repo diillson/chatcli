@@ -143,6 +143,10 @@ const (
 // result (from an on_condition schedule) or an action execution.
 // Stored in Job.History as a ring buffer.
 type ExecutionResult struct {
+	// CycleNum is the recurring-schedule cycle this execution belongs
+	// to (1 = first cycle). Always 0 for one-shot jobs. Lets /jobs logs
+	// group attempts within a cycle and separate cycles visually.
+	CycleNum   int           `json:"cycle,omitempty"`
 	AttemptNum int           `json:"attempt"`
 	StartedAt  time.Time     `json:"started_at"`
 	FinishedAt time.Time     `json:"finished_at"`

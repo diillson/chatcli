@@ -35,6 +35,18 @@ import (
 )
 
 // handleJob drives one fire of the given job ID.
+//
+// For recurring schedules the dispatcher reuses ONE Job record across
+// every cycle (Running→Pending re-arm in runAction's success branch).
+// This keeps Job count and WAL footprint bounded even for short-
+// interval schedules (e.g. every 30s would otherwise create thousands
+// of records/day) and gives the queue a natural anti-overlap property
+// — a JobID can only sit in the queue once, so if the action takes
+// longer than the interval the next fire window is skipped via
+// Schedule.Next instead of stacking concurrent runs.
+//
+// Each cycle gets its own CycleNum on the resulting ExecutionResult so
+// /jobs logs can render them as distinct entries.
 func (s *Scheduler) handleJob(id JobID, workerID int) {
 	s.mu.RLock()
 	j, ok := s.jobs[id]
@@ -54,6 +66,20 @@ func (s *Scheduler) handleJob(id JobID, workerID int) {
 		zap.Int("worker_id", workerID),
 	)
 
+	// Recurring schedules: a fresh fire window means a new cycle.
+	// Bump CycleCount only on the first attempt of the cycle so that
+	// retries (which re-enter handleJob via scheduleRetryOrFail) don't
+	// inflate the counter. A cycle = one logical run; retries within
+	// it share a CycleNum.
+	if j.Schedule.IsRecurring() {
+		j.lock()
+		if j.Attempts == 0 {
+			j.CycleCount++
+			_ = s.wal.Write(j)
+		}
+		j.unlock()
+	}
+
 	// Emit "fired" and run the wait + action pipeline.
 	s.emit(NewEvent(EventJobFired).WithJob(j).WithMessage("job fire window reached"))
 
@@ -64,12 +90,54 @@ func (s *Scheduler) handleJob(id JobID, workerID int) {
 		}
 	}
 
-	// Action phase.
+	// Action phase. runAction handles recurring re-arm inline on the
+	// success path so a Running→Pending transition is taken before the
+	// (terminal) Completed state is reached.
 	s.runAction(j)
+}
 
-	// Recurring re-enqueue (outside the action section so a terminal
-	// transition by the action doesn't double-schedule).
-	s.maybeReschedule(j)
+// rearmRecurring closes one cycle of a recurring schedule and queues
+// the next fire on the same Job record. Called from runAction's success
+// branch when j.Schedule.IsRecurring() — the dispatcher takes the
+// Running→Pending edge so the JobID, WAL record, name index, and DAG
+// edges all keep flowing across cycles.
+//
+// Resets Attempts to 0 so retry budget applies per cycle, not across
+// the lifetime of the job. CycleCount is NOT reset; the next cycle
+// will increment it in handleJob.
+//
+// If Schedule.Next returns the zero time (cron/interval somehow
+// exhausted), we fall through to markCompleted so the job terminates
+// cleanly instead of dangling forever in Running.
+func (s *Scheduler) rearmRecurring(j *Job, r ExecutionResult) {
+	j.lock()
+	if j.Status.IsTerminal() {
+		j.unlock()
+		return
+	}
+	next := j.Schedule.Next(time.Now(), j.CreatedAt)
+	if next.IsZero() {
+		j.unlock()
+		s.markCompleted(j, r)
+		return
+	}
+	if err := j.transition(StatusPending, "recurring re-arm", s.logger); err != nil {
+		j.unlock()
+		s.logger.Warn("scheduler: recurring re-arm transition failed",
+			zap.String("job_id", string(j.ID)),
+			zap.String("name", j.Name),
+			zap.Error(err))
+		return
+	}
+	j.NextFireAt = next
+	j.Attempts = 0
+	_ = s.wal.Write(j)
+	j.unlock()
+
+	s.emit(NewEvent(EventJobCompleted).WithJob(j).WithExecution(r).
+		WithMessage(fmt.Sprintf("cycle %d completed; re-armed", r.CycleNum)))
+	s.queue.Enqueue(j.ID, next)
+	s.version.Add(1)
 }
 
 // ─── Wait phase ───────────────────────────────────────────────
@@ -262,6 +330,7 @@ func (s *Scheduler) runAction(j *Job) {
 	}
 	j.Attempts++
 	attempt := j.Attempts
+	cycleNum := j.CycleCount
 	action := j.Action
 	budget := j.Budget
 	_ = s.wal.Write(j)
@@ -320,6 +389,7 @@ func (s *Scheduler) runAction(j *Job) {
 	s.metrics.ActionDuration.WithLabelValues(string(action.Type), string(outcome)).Observe(duration.Seconds())
 
 	exec := ExecutionResult{
+		CycleNum:   cycleNum,
 		AttemptNum: attempt,
 		StartedAt:  startedAt,
 		FinishedAt: startedAt.Add(duration),
@@ -333,6 +403,13 @@ func (s *Scheduler) runAction(j *Job) {
 	s.recordActionResult(j, attempt, exec)
 
 	if res.Err == nil {
+		// Recurring schedules re-arm here, BEFORE the (terminal)
+		// Completed transition. Non-recurring jobs go straight to
+		// Completed and run unblockDependents / fireTriggers.
+		if j.Schedule.IsRecurring() {
+			s.rearmRecurring(j, exec)
+			return
+		}
 		s.markCompleted(j, exec)
 		return
 	}
@@ -433,42 +510,6 @@ func (s *Scheduler) scheduleRetryOrFail(j *Job, err error) {
 		WithData("attempt", attempts).
 		WithData("delay", delay.String()).
 		WithMessage(errString(err)))
-}
-
-// maybeReschedule handles recurring schedules and DAG fan-out on the
-// non-terminal path. Terminal jobs are left alone — completion
-// handling already runs unblockDependents / fireTriggers.
-func (s *Scheduler) maybeReschedule(j *Job) {
-	j.lock()
-	if j.Status.IsTerminal() {
-		j.unlock()
-		return
-	}
-	if j.Status != StatusCompleted {
-		// Non-completion paths (retry, fail) manage their own re-enqueue.
-		j.unlock()
-		return
-	}
-	sched := j.Schedule
-	createdAt := j.CreatedAt
-	j.unlock()
-	if !sched.IsRecurring() {
-		return
-	}
-	next := sched.Next(time.Now(), createdAt)
-	if next.IsZero() {
-		return
-	}
-	j.lock()
-	// Reset state for a fresh occurrence, but we stay on the same Job
-	// record — the JobID + WAL record are reused. History carries the
-	// prior executions.
-	_ = j.transition(StatusPending, "recurring re-arm", s.logger)
-	j.NextFireAt = next
-	j.Attempts = 0
-	_ = s.wal.Write(j)
-	j.unlock()
-	s.queue.Enqueue(j.ID, next)
 }
 
 // unblockDependents scans for any Blocked jobs that had this one in

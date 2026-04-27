@@ -73,6 +73,11 @@ type Job struct {
 	History      []ExecutionResult `json:"history,omitempty"`
 	HistoryLimit int               `json:"history_limit,omitempty"`
 	Attempts     int               `json:"attempts,omitempty"`
+	// CycleCount is incremented on a recurring template every time it
+	// spawns a child cycle. Always zero on a non-recurring or one-shot
+	// (cycle) Job — it identifies templates and gives /jobs show a
+	// cheap count of how many fires have happened so far.
+	CycleCount int `json:"cycle_count,omitempty"`
 
 	// ─── Flags ─────────────────────────────────────────────
 	// DangerousConfirmed marks a job whose action is otherwise filtered
@@ -138,6 +143,7 @@ func (j *Job) cloneLocked() *Job {
 		CancelReason:       j.CancelReason,
 		HistoryLimit:       j.HistoryLimit,
 		Attempts:           j.Attempts,
+		CycleCount:         j.CycleCount,
 		DangerousConfirmed: j.DangerousConfirmed,
 		Description:        j.Description,
 	}

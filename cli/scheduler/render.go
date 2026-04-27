@@ -195,10 +195,21 @@ func RenderShow(j *Job) string {
 		fmt.Fprintf(&b, "  Tags     : %s\n", strings.Join(tags, ", "))
 	}
 	if n := len(j.History); n > 0 {
-		fmt.Fprintf(&b, "  History (%d):\n", n)
+		header := fmt.Sprintf("  History (%d", n)
+		if j.CycleCount > 0 {
+			header += fmt.Sprintf(", %d cycles", j.CycleCount)
+		}
+		header += "):\n"
+		fmt.Fprint(&b, header)
 		for i := len(j.History) - 1; i >= 0 && i >= len(j.History)-10; i-- {
 			r := j.History[i]
-			fmt.Fprintf(&b, "    #%d %s %s (%s)", r.AttemptNum, r.StartedAt.Format(time.RFC3339), r.Outcome, compactDuration(r.Duration))
+			// For recurring jobs, render "#cycle.attempt"; for one-shot
+			// jobs keep the existing "#attempt" form unchanged.
+			tag := fmt.Sprintf("#%d", r.AttemptNum)
+			if r.CycleNum > 0 {
+				tag = fmt.Sprintf("#%d.%d", r.CycleNum, r.AttemptNum)
+			}
+			fmt.Fprintf(&b, "    %s %s %s (%s)", tag, r.StartedAt.Format(time.RFC3339), r.Outcome, compactDuration(r.Duration))
 			if r.Error != "" {
 				fmt.Fprintf(&b, "  err=%s", truncRender(r.Error, 80))
 			}
