@@ -29,6 +29,10 @@ const (
 	AnthropicScopes        = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 	AnthropicCallbackPath  = "/callback"
 	AnthropicProfileURL    = "https://api.anthropic.com/api/oauth/profile" //#nosec G101 -- public OAuth profile endpoint
+	// AnthropicSuccessRedirectURL is the branded post-login page Claude Code redirects
+	// the browser to after the loopback callback receives the code. Mirroring it gives
+	// users a familiar landing page instead of a blank localhost response.
+	AnthropicSuccessRedirectURL = "https://platform.claude.com/oauth/code/success?app=claude-code"
 
 	// Legacy paste-mode constants (fallback only).
 	AnthropicAuthURLLegacy     = "https://claude.ai/oauth/authorize"
@@ -144,8 +148,8 @@ func loginAnthropicLocalhost(ctx context.Context, logger *zap.Logger) (string, e
 			errCh <- fmt.Errorf("%s", i18n.T("auth.login.anthropic_no_code_error"))
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = fmt.Fprint(w, i18n.T("auth.login.anthropic_success_html"))
+		// Redirect to Anthropic's branded success page (matches Claude Code).
+		http.Redirect(w, r, AnthropicSuccessRedirectURL, http.StatusFound)
 		codeCh <- code
 	})
 

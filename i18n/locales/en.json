@@ -1298,7 +1298,6 @@
   "auth.login.anthropic_no_code_error": "no code in callback",
   "auth.login.anthropic_auth_failed_html": "<html><body><h2>Authentication failed</h2><p>Invalid state parameter (possible CSRF attack). You can close this tab.</p></body></html>",
   "auth.login.anthropic_no_code_html": "<html><body><h2>Authentication failed</h2><p>No authorization code received. You can close this tab.</p></body></html>",
-  "auth.login.anthropic_success_html": "<html><body><h2>Authentication successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>",
   "auth.login.anthropic_fallback_paste": "Could not start local callback server; falling back to legacy paste flow.",
   "auth.login.openai_opening": "\nAUTH [OpenAI Codex] Opening browser for authentication...",
   "auth.login.openai_state_failed": "failed to generate OAuth state: %w",

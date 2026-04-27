@@ -1298,7 +1298,6 @@
   "auth.login.anthropic_no_code_error": "callback sem código",
   "auth.login.anthropic_auth_failed_html": "<html><body><h2>Falha na autenticação</h2><p>State inválido (possível CSRF). Você pode fechar esta aba.</p></body></html>",
   "auth.login.anthropic_no_code_html": "<html><body><h2>Falha na autenticação</h2><p>Nenhum código de autorização recebido. Você pode fechar esta aba.</p></body></html>",
-  "auth.login.anthropic_success_html": "<html><body><h2>Autenticação concluída!</h2><p>Você pode fechar esta aba e voltar ao terminal.</p></body></html>",
   "auth.login.anthropic_fallback_paste": "Não foi possível abrir o servidor local de callback; usando o fluxo legado de paste.",
   "auth.login.openai_opening": "\nAUTH [OpenAI Codex] Opening browser for authentication...",
   "auth.login.openai_state_failed": "failed to generate OAuth state: %w",
