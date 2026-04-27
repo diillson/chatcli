@@ -353,4 +353,3 @@ func TestScheduler_RecurringInterval_CancelStopsRearm(t *testing.T) {
 		t.Errorf("cycles kept firing after cancel: before=%d after=%d", stableCount, got)
 	}
 }
-

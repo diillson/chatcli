@@ -512,7 +512,6 @@ func (s *Scheduler) scheduleRetryOrFail(j *Job, err error) {
 		WithMessage(errString(err)))
 }
 
-
 // unblockDependents scans for any Blocked jobs that had this one in
 // their DependsOn list; if all their deps are now terminal-successful,
 // they become Pending. Event emission and queue enqueue happen after
