@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.110.1](https://github.com/diillson/chatcli/compare/v1.110.0...v1.110.1) (2026-04-27)
+
+
+### Bug Fixes
+
+* **scheduler:** /schedule quote parser + recurring re-arm with cycle tracking ([#853](https://github.com/diillson/chatcli/issues/853)) ([a26cec4](https://github.com/diillson/chatcli/commit/a26cec4f88b4ad07766f8f3dd600ed1a57049bdb))
+* **scheduler:** take per-job lock when snapshotting ([#855](https://github.com/diillson/chatcli/issues/855)) ([67d3d24](https://github.com/diillson/chatcli/commit/67d3d24fc3b243c0d3332253d82e98c6b17c294d))
+
 ## [1.110.0](https://github.com/diillson/chatcli/compare/v1.109.2...v1.110.0) (2026-04-27)
 
 
