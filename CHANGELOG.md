@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.110.0](https://github.com/diillson/chatcli/compare/v1.109.2...v1.110.0) (2026-04-27)
+
+
+### Features
+
+* **auth:** loopback OAuth callback for Anthropic w/ branded success redirect ([#841](https://github.com/diillson/chatcli/issues/841)) ([a91f768](https://github.com/diillson/chatcli/commit/a91f768259be797ba1ebb6bef60e9a846a0e9eca))
+
+
+### Bug Fixes
+
+* **claudeai:** coalesce cache_control markers to fit Anthropic 4-block cap ([#839](https://github.com/diillson/chatcli/issues/839)) ([8c02374](https://github.com/diillson/chatcli/commit/8c0237419b572082231070ea05c4835a879aa1c1))
+
 ## [1.109.2](https://github.com/diillson/chatcli/compare/v1.109.1...v1.109.2) (2026-04-26)
 
 
