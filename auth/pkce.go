@@ -32,8 +32,10 @@ func GeneratePKCE() (*PKCE, error) {
 }
 
 // GenerateState gera um state aleatório para OAuth.
+// Usa 32 bytes para corresponder ao formato esperado pelos endpoints OAuth da Anthropic
+// (o claude.ai rejeita states mais curtos com "Invalid request format").
 func GenerateState() (string, error) {
-	bytes := make([]byte, 16)
+	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
 	}

@@ -3,6 +3,7 @@ package auth
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -18,14 +19,22 @@ import (
 )
 
 const (
-	// Anthropic (Claude)
-	// NOTE: Anthropic's OAuth does not support localhost redirect URIs.
-	// The only registered redirect is console.anthropic.com which displays the code for the user to copy.
+	// Anthropic (Claude) — localhost callback flow (default).
+	// The Claude Code CLI uses an ephemeral local HTTP server on http://localhost:<port>/callback.
+	// The legacy paste flow (console.anthropic.com) is kept as a fallback when the local
+	// listener cannot bind, or when CHATCLI_ANTHROPIC_LEGACY_OAUTH=1 is set.
 	AnthropicOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	AnthropicAuthURL       = "https://claude.ai/oauth/authorize"
-	AnthropicTokenURL      = "https://console.anthropic.com/v1/oauth/token"      //#nosec G101 -- public OAuth endpoint URL, not a credential
-	AnthropicRedirectURI   = "https://console.anthropic.com/oauth/code/callback" //#nosec G101 -- public OAuth redirect URI
-	AnthropicScopes        = "org:create_api_key user:profile user:inference"
+	AnthropicAuthURL       = "https://claude.com/cai/oauth/authorize"
+	AnthropicTokenURL      = "https://platform.claude.com/v1/oauth/token" //#nosec G101 -- public OAuth endpoint URL, not a credential
+	AnthropicScopes        = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+	AnthropicCallbackPath  = "/callback"
+	AnthropicProfileURL    = "https://api.anthropic.com/api/oauth/profile" //#nosec G101 -- public OAuth profile endpoint
+
+	// Legacy paste-mode constants (fallback only).
+	AnthropicAuthURLLegacy     = "https://claude.ai/oauth/authorize"
+	AnthropicTokenURLLegacy    = "https://console.anthropic.com/v1/oauth/token"      //#nosec G101 -- public OAuth endpoint URL, not a credential
+	AnthropicRedirectURILegacy = "https://console.anthropic.com/oauth/code/callback" //#nosec G101 -- public OAuth redirect URI
+	AnthropicLegacyScopes      = "org:create_api_key user:profile user:inference"
 
 	// OpenAI Codex OAuth
 	defaultOpenAICodexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -48,9 +57,174 @@ func OpenAICodexClientID() string {
 }
 
 // LoginAnthropicOAuth authenticates via OAuth with Anthropic.
-// Anthropic's OAuth does not support localhost redirect URIs, so the flow opens the browser
-// and the user copies the authorization code displayed on the Anthropic console page.
+//
+// Default flow uses an ephemeral local HTTP server on http://localhost:<port>/callback
+// to receive the authorization code automatically (mirrors Claude Code's behavior).
+//
+// Fallback paste flow (legacy console.anthropic.com redirect) is used when:
+//   - the local listener cannot bind (port blocked, sandboxed env), or
+//   - CHATCLI_ANTHROPIC_LEGACY_OAUTH=1 is set.
 func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID string, err error) {
+	if os.Getenv("CHATCLI_ANTHROPIC_LEGACY_OAUTH") == "1" {
+		return loginAnthropicLegacyPaste(ctx, logger)
+	}
+
+	// Try localhost callback flow; fall back to paste if listener fails.
+	id, err := loginAnthropicLocalhost(ctx, logger)
+	if err == nil {
+		return id, nil
+	}
+	if !isListenerBindError(err) {
+		return "", err
+	}
+	logger.Warn("anthropic localhost callback failed, falling back to paste mode", zap.Error(err))
+	fmt.Println(i18n.T("auth.login.anthropic_fallback_paste"))
+	return loginAnthropicLegacyPaste(ctx, logger)
+}
+
+// loginAnthropicLocalhost runs the localhost callback flow.
+func loginAnthropicLocalhost(ctx context.Context, logger *zap.Logger) (string, error) {
+	pkce, err := GeneratePKCE()
+	if err != nil {
+		return "", err
+	}
+	state, err := GenerateState()
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", i18n.T("auth.login.anthropic_state_failed"), err)
+	}
+
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		return "", listenerBindErr(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	redirectURI := fmt.Sprintf("http://localhost:%d%s", port, AnthropicCallbackPath)
+
+	q := url.Values{}
+	q.Set("code", "true")
+	q.Set("client_id", AnthropicOAuthClientID)
+	q.Set("response_type", "code")
+	q.Set("redirect_uri", redirectURI)
+	q.Set("scope", AnthropicScopes)
+	q.Set("code_challenge", pkce.Challenge)
+	q.Set("code_challenge_method", "S256")
+	q.Set("state", state)
+	authURL := AnthropicAuthURL + "?" + q.Encode()
+
+	codeCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+
+	srv := &http.Server{
+		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       oauthCallbackTimeout,
+	}
+	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'")
+		w.Header().Set("Cache-Control", "no-store")
+
+		if r.URL.Path != AnthropicCallbackPath {
+			http.NotFound(w, r)
+			return
+		}
+		receivedState := r.URL.Query().Get("state")
+		if receivedState != state {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = fmt.Fprint(w, i18n.T("auth.login.anthropic_auth_failed_html"))
+			errCh <- fmt.Errorf("%s", i18n.T("auth.login.anthropic_csrf_error"))
+			return
+		}
+		code := r.URL.Query().Get("code")
+		if code == "" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, i18n.T("auth.login.anthropic_no_code_html"))
+			errCh <- fmt.Errorf("%s", i18n.T("auth.login.anthropic_no_code_error"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprint(w, i18n.T("auth.login.anthropic_success_html"))
+		codeCh <- code
+	})
+
+	go func() {
+		if serveErr := srv.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
+			errCh <- serveErr
+		}
+	}()
+
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+
+	fmt.Println(i18n.T("auth.login.anthropic_opening"))
+	if openErr := openBrowser(authURL); openErr != nil {
+		fmt.Println(i18n.T("auth.login.anthropic_browser_failed"))
+		fmt.Println(authURL)
+	} else {
+		fmt.Println(i18n.T("auth.login.anthropic_browser_ok_callback"))
+		fmt.Println(i18n.T("auth.login.anthropic_browser_hint"))
+		fmt.Println(authURL)
+	}
+	fmt.Println(i18n.T("auth.login.anthropic_waiting"))
+
+	timeoutTimer := time.NewTimer(oauthCallbackTimeout)
+	defer timeoutTimer.Stop()
+
+	var code string
+	select {
+	case code = <-codeCh:
+	case cbErr := <-errCh:
+		return "", fmt.Errorf("%s: %w", i18n.T("auth.login.anthropic_callback_error"), cbErr)
+	case <-timeoutTimer.C:
+		return "", fmt.Errorf("%s", i18n.T("auth.login.anthropic_timeout", oauthCallbackTimeout))
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+
+	tr, err := exchangeAnthropicToken(ctx, AnthropicTokenURL, map[string]any{
+		"grant_type":    "authorization_code",
+		"client_id":     AnthropicOAuthClientID,
+		"code":          code,
+		"state":         state,
+		"redirect_uri":  redirectURI,
+		"code_verifier": pkce.Verifier,
+	})
+	if err != nil {
+		return "", err
+	}
+	if tr.AccessToken == "" {
+		return "", fmt.Errorf("OAuth token exchange returned empty access token")
+	}
+	if tr.ExpiresIn <= 0 {
+		logger.Warn("OAuth token has no expiry set, using default 3600s")
+		tr.ExpiresIn = 3600
+	}
+
+	email := fetchAnthropicEmail(ctx, tr.AccessToken, logger)
+
+	profileID := "anthropic:default"
+	cred := &AuthProfileCredential{
+		CredType: CredentialOAuth,
+		Provider: ProviderAnthropic,
+		Access:   tr.AccessToken,
+		Refresh:  tr.RefreshToken,
+		Expires:  calcExpiresAtMilli(tr.ExpiresIn),
+		ClientID: AnthropicOAuthClientID,
+		Email:    email,
+	}
+	if err := UpsertProfile(profileID, cred, logger); err != nil {
+		return "", err
+	}
+	return profileID, nil
+}
+
+// loginAnthropicLegacyPaste runs the legacy paste flow (console.anthropic.com redirect).
+func loginAnthropicLegacyPaste(ctx context.Context, logger *zap.Logger) (string, error) {
 	pkce, err := GeneratePKCE()
 	if err != nil {
 		return "", err
@@ -60,14 +234,13 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 	q.Set("code", "true")
 	q.Set("client_id", AnthropicOAuthClientID)
 	q.Set("response_type", "code")
-	q.Set("redirect_uri", AnthropicRedirectURI)
-	q.Set("scope", AnthropicScopes)
+	q.Set("redirect_uri", AnthropicRedirectURILegacy)
+	q.Set("scope", AnthropicLegacyScopes)
 	q.Set("code_challenge", pkce.Challenge)
 	q.Set("code_challenge_method", "S256")
 	q.Set("state", pkce.Verifier)
-	authURL := AnthropicAuthURL + "?" + q.Encode()
+	authURL := AnthropicAuthURLLegacy + "?" + q.Encode()
 
-	// Try to open browser automatically for convenience
 	fmt.Println(i18n.T("auth.login.anthropic_opening"))
 	if openErr := openBrowser(authURL); openErr != nil {
 		fmt.Println(i18n.T("auth.login.browser_failed"))
@@ -77,7 +250,6 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 	}
 	fmt.Println(authURL)
 
-	// L5: Only run stty on Unix systems
 	if runtime.GOOS != "windows" {
 		cmd := exec.Command("stty", "sane")
 		cmd.Stdin = os.Stdin
@@ -104,18 +276,17 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 		return "", fmt.Errorf("%s", i18n.T("auth.login.anthropic_code_required"))
 	}
 
-	tr, err := exchangeAnthropicToken(ctx, AnthropicTokenURL, map[string]any{
+	tr, err := exchangeAnthropicToken(ctx, AnthropicTokenURLLegacy, map[string]any{
 		"grant_type":    "authorization_code",
 		"client_id":     AnthropicOAuthClientID,
 		"code":          code,
 		"state":         state,
-		"redirect_uri":  AnthropicRedirectURI,
+		"redirect_uri":  AnthropicRedirectURILegacy,
 		"code_verifier": pkce.Verifier,
 	})
 	if err != nil {
 		return "", err
 	}
-	// Security (M12): Validate OAuth response fields
 	if tr.AccessToken == "" {
 		return "", fmt.Errorf("OAuth token exchange returned empty access token")
 	}
@@ -124,7 +295,9 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 		tr.ExpiresIn = 3600
 	}
 
-	profileID = "anthropic:default"
+	email := fetchAnthropicEmail(ctx, tr.AccessToken, logger)
+
+	profileID := "anthropic:default"
 	cred := &AuthProfileCredential{
 		CredType: CredentialOAuth,
 		Provider: ProviderAnthropic,
@@ -132,12 +305,26 @@ func LoginAnthropicOAuth(ctx context.Context, logger *zap.Logger) (profileID str
 		Refresh:  tr.RefreshToken,
 		Expires:  calcExpiresAtMilli(tr.ExpiresIn),
 		ClientID: AnthropicOAuthClientID,
-		Email:    "",
+		Email:    email,
 	}
 	if err := UpsertProfile(profileID, cred, logger); err != nil {
 		return "", err
 	}
 	return profileID, nil
+}
+
+// listenerBindErr wraps an error indicating the local listener could not bind,
+// so callers can detect it via isListenerBindError and fall back to paste mode.
+type listenerBindError struct{ err error }
+
+func (e *listenerBindError) Error() string { return e.err.Error() }
+func (e *listenerBindError) Unwrap() error { return e.err }
+
+func listenerBindErr(err error) error { return &listenerBindError{err: err} }
+
+func isListenerBindError(err error) bool {
+	var lbe *listenerBindError
+	return errors.As(err, &lbe)
 }
 
 func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID string, err error) {
