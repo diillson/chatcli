@@ -435,7 +435,7 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 				"text": part,
 			})
 		}
-		return messages, systemBlocks
+		return messages, coalesceCacheControl(systemBlocks, anthropicMaxCacheBreakpoints)
 	}
 
 	if len(plainSystemParts) > 0 {
@@ -448,7 +448,7 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []models.Message) ([]map[string]interface{}, []interface{}) {
 	var messages []map[string]interface{}
 	var systemParts []string
-	var structuredParts []interface{}
+	var structuredParts []map[string]interface{}
 
 	for _, msg := range history {
 		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
@@ -497,7 +497,10 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 	}
 	// Prefer structured blocks with cache_control
 	if len(structuredParts) > 0 {
-		systemObjs = append(systemObjs, structuredParts...)
+		structuredParts = coalesceCacheControl(structuredParts, anthropicMaxCacheBreakpoints)
+		for _, p := range structuredParts {
+			systemObjs = append(systemObjs, p)
+		}
 	}
 	if len(systemParts) > 0 {
 		joined := strings.Join(systemParts, "\n\n")
