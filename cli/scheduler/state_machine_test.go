@@ -35,8 +35,9 @@ func TestJob_Transition_RecordsReason(t *testing.T) {
 	if len(j.Transitions) != 1 || j.Transitions[0].Message != "start" {
 		t.Errorf("transitions not recorded: %+v", j.Transitions)
 	}
-	// Illegal: pending → pending (already left pending).
-	if err := j.transition(StatusPending, "should fail", zap.NewNop()); err == nil {
+	// Illegal: running → waiting (no edge — recurring re-arm uses
+	// running → pending, but waiting always reaches via pending).
+	if err := j.transition(StatusWaiting, "should fail", zap.NewNop()); err == nil {
 		t.Error("expected error on illegal transition")
 	}
 }

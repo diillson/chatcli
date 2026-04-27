@@ -19,13 +19,20 @@
  *   Pending   → Blocked, Waiting, Running, Paused, Cancelled, Skipped
  *   Blocked   → Pending, Cancelled
  *   Waiting   → Running, TimedOut, Cancelled, Failed
- *   Running   → Completed, Failed, TimedOut, Cancelled
+ *   Running   → Completed, Failed, TimedOut, Cancelled, Pending (recurring re-arm)
  *   Paused    → Pending, Cancelled
  *   (terminal) Completed / Failed / Cancelled / TimedOut / Skipped
  *
- * The scheduler never resurrects terminal jobs. A recurring cron job
- * doesn't "go back to pending" on the same Job record — it spawns a
- * fresh occurrence (sibling Job) with a new ID.
+ * The scheduler never resurrects terminal jobs. A recurring cron or
+ * interval schedule re-arms BEFORE the Running→Completed transition:
+ * after a successful action the dispatcher takes the Running→Pending
+ * edge so the same Job record (and JobID) keeps cycling. This keeps
+ * Job count, WAL footprint, and queue depth bounded — a critical
+ * property when intervals are short (e.g. health-check every 30s
+ * would otherwise grow 2880 records/day). History entries carry a
+ * CycleNum so /jobs logs separates cycles cleanly even though they
+ * share one Job. Terminal statuses remain a one-way door for non-
+ * recurring work.
  */
 package scheduler
 
@@ -63,6 +70,9 @@ var transitionTable = map[JobStatus]map[JobStatus]struct{}{
 		StatusFailed:    {},
 		StatusTimedOut:  {},
 		StatusCancelled: {},
+		// Recurring schedules re-arm via Running→Pending after a
+		// successful action so the same JobID keeps cycling.
+		StatusPending: {},
 	},
 	StatusPaused: {
 		StatusPending:   {},
