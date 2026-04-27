@@ -78,6 +78,44 @@ func doTokenExchange(hc *http.Client, req *http.Request) (*OAuthTokenResponse, e
 	return &tr, nil
 }
 
+// fetchAnthropicEmail calls the OAuth profile endpoint to retrieve the user's
+// email. Best-effort: returns "" on any failure (logged at debug level).
+func fetchAnthropicEmail(ctx context.Context, accessToken string, logger *zap.Logger) string {
+	if accessToken == "" {
+		return ""
+	}
+	hc := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, AnthropicProfileURL, nil)
+	if err != nil {
+		logger.Debug("anthropic profile fetch: request build failed", zap.Error(err))
+		return ""
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "claude-cli/2.1.2 (external, cli)")
+
+	resp, err := hc.Do(req) //#nosec G704 -- public Anthropic profile endpoint
+	if err != nil {
+		logger.Debug("anthropic profile fetch: http error", zap.Error(err))
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logger.Debug("anthropic profile fetch: non-2xx", zap.String("status", resp.Status))
+		return ""
+	}
+	var payload struct {
+		Account struct {
+			Email string `json:"email"`
+		} `json:"account"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		logger.Debug("anthropic profile fetch: decode failed", zap.Error(err))
+		return ""
+	}
+	return payload.Account.Email
+}
+
 func calcExpiresAtMilli(expiresIn int64) int64 {
 	now := time.Now()
 	if expiresIn <= 0 {

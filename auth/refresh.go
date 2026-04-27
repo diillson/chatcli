@@ -46,12 +46,23 @@ func RefreshOAuth(ctx context.Context, cred *AuthProfileCredential, logger *zap.
 	var err error
 
 	if cred.Provider == ProviderAnthropic {
-		// Use plain HTTP client for Anthropic to avoid Cloudflare issues
-		tr, err = exchangeAnthropicToken(ctx, tokenURL, map[string]any{
+		// Use plain HTTP client for Anthropic to avoid Cloudflare issues.
+		payload := map[string]any{
 			"grant_type":    "refresh_token",
 			"client_id":     clientID,
 			"refresh_token": refresh,
-		})
+		}
+		tr, err = exchangeAnthropicToken(ctx, tokenURL, payload)
+		// Fallback: refresh tokens issued by the legacy console.anthropic.com
+		// endpoint may not be accepted by platform.claude.com yet. Try legacy
+		// endpoint if the primary one returns auth/invalid-request errors.
+		if err != nil && tokenURL != AnthropicTokenURLLegacy {
+			logger.Warn("anthropic refresh failed on primary endpoint, retrying on legacy",
+				zap.String("primary", tokenURL),
+				zap.Error(err),
+			)
+			tr, err = exchangeAnthropicToken(ctx, AnthropicTokenURLLegacy, payload)
+		}
 	} else {
 		tr, err = exchangeOAuthToken(ctx, logger, tokenURL, map[string]any{
 			"grant_type":    "refresh_token",
