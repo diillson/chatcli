@@ -154,11 +154,17 @@ func (s *Scheduler) replay() error {
 }
 
 // writeSnapshotNow captures state. Exposed for Shutdown and test helpers.
+//
+// Uses Clone (which takes each Job's mutex) rather than cloneLocked
+// because the caller only holds s.mu — not the per-Job lock. With
+// cloneLocked the race detector flagged a data race against any
+// concurrent transition (most easily triggered by a recurring job
+// re-arming during DrainAndShutdown).
 func (s *Scheduler) writeSnapshotNow() error {
 	s.mu.RLock()
 	jobs := make([]*Job, 0, len(s.jobs))
 	for _, j := range s.jobs {
-		jobs = append(jobs, j.cloneLocked())
+		jobs = append(jobs, j.Clone())
 	}
 	s.mu.RUnlock()
 	return writeSnapshot(s.cfg.DataDir, jobs, s.logger)
