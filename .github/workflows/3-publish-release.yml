@@ -19,12 +19,51 @@ jobs:
   release_please:
     name: Release Please (create PR and release)
     runs-on: ubuntu-latest
+    # release-please-action queries GitHub's GraphQL API to fetch merge
+    # commits and existing releases. That endpoint is occasionally flaky
+    # ("Something went wrong while executing your query"), and a single
+    # failure here aborts the whole release pipeline (build, docker,
+    # helm, homebrew, docs sync). Retry up to three times, sleeping
+    # between attempts, before giving up. The action is idempotent, so
+    # a partial run that already created the release simply reports
+    # release_created=false on the next attempt and we still flow into
+    # the build job using the resolved tag.
     outputs:
-      tag_name: ${{ steps.rp.outputs.tag_name }}
-      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp1.outputs.tag_name || steps.rp2.outputs.tag_name || steps.rp3.outputs.tag_name }}
+      release_created: ${{ steps.rp1.outputs.release_created || steps.rp2.outputs.release_created || steps.rp3.outputs.release_created }}
     steps:
-      - name: Release Please
-        id: rp
+      - name: Release Please (attempt 1/3)
+        id: rp1
+        continue-on-error: true
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+          target-branch: ${{ github.ref_name }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Backoff before retry 2
+        if: steps.rp1.outcome == 'failure'
+        run: sleep 30
+
+      - name: Release Please (attempt 2/3)
+        id: rp2
+        if: steps.rp1.outcome == 'failure'
+        continue-on-error: true
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+          target-branch: ${{ github.ref_name }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Backoff before retry 3
+        if: steps.rp1.outcome == 'failure' && steps.rp2.outcome == 'failure'
+        run: sleep 60
+
+      - name: Release Please (attempt 3/3)
+        id: rp3
+        if: steps.rp1.outcome == 'failure' && steps.rp2.outcome == 'failure'
         uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.GH_RELEASE_TOKEN }}
