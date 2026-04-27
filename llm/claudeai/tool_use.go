@@ -43,8 +43,10 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	// Sort tools for KV cache stability
 	sortedTools := client.SortToolDefinitions(tools)
 
-	// Build system prompt with cache control
-	systemBlocks := buildSystemBlocks(history)
+	// Build system prompt with cache control. The tool path reserves 1
+	// breakpoint for the tool definitions block below, so system markers
+	// are capped at anthropicMaxCacheBreakpoints-1.
+	systemBlocks := coalesceCacheControl(buildSystemBlocks(history), anthropicMaxCacheBreakpoints-1)
 
 	// Build messages (excluding system messages)
 	messages := buildClaudeToolMessages(prompt, history)
