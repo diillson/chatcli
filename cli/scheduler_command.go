@@ -25,7 +25,11 @@ func (cli *ChatCLI) handleScheduleCommand(input string) {
 		fmt.Println(colorize("  "+i18n.T("scheduler.disabled"), ColorYellow))
 		return
 	}
-	args := strings.Fields(strings.TrimPrefix(input, "/schedule"))
+	args, err := tokenizeSchedulerInput(strings.TrimPrefix(input, "/schedule"))
+	if err != nil {
+		fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
+		return
+	}
 	if len(args) == 0 {
 		cli.printScheduleUsage()
 		return
@@ -76,7 +80,11 @@ func (cli *ChatCLI) handleWaitCommand(input string) {
 		fmt.Println(colorize("  "+i18n.T("scheduler.disabled"), ColorYellow))
 		return
 	}
-	args := strings.Fields(strings.TrimPrefix(input, "/wait"))
+	args, err := tokenizeSchedulerInput(strings.TrimPrefix(input, "/wait"))
+	if err != nil {
+		fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
+		return
+	}
 	if len(args) == 0 || args[0] == "help" {
 		cli.printWaitUsage()
 		return
@@ -134,7 +142,11 @@ func (cli *ChatCLI) handleJobsCommand(input string) {
 		fmt.Println(colorize("  "+i18n.T("scheduler.disabled"), ColorYellow))
 		return
 	}
-	args := strings.Fields(strings.TrimPrefix(input, "/jobs"))
+	args, err := tokenizeSchedulerInput(strings.TrimPrefix(input, "/jobs"))
+	if err != nil {
+		fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
+		return
+	}
 	if len(args) == 0 {
 		args = []string{"list"}
 	}
@@ -319,16 +331,34 @@ func (cli *ChatCLI) jobsLogs(args []string) {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.logs_empty"), ColorGray))
 		return
 	}
+	// Render history with a cycle separator so recurring jobs don't
+	// look like one big blur. Cycle 0 = non-recurring (no separator).
+	// Within a cycle, attempts (retries) print indented under the
+	// cycle header so the relation is obvious.
+	prevCycle := -1
 	for _, h := range j.History {
-		fmt.Printf("  #%d %s %s (%s)\n", h.AttemptNum, h.StartedAt.Format(time.RFC3339), h.Outcome, h.Duration)
+		if h.CycleNum > 0 && h.CycleNum != prevCycle {
+			fmt.Println(colorize(fmt.Sprintf("  ── cycle #%d ──", h.CycleNum), ColorCyan))
+			prevCycle = h.CycleNum
+		}
+		header := fmt.Sprintf("  #%d %s %s (%s)", h.AttemptNum, h.StartedAt.Format(time.RFC3339), h.Outcome, h.Duration)
+		if h.CycleNum > 0 {
+			// Indent attempts under their cycle header.
+			header = "    #" + strconv.Itoa(h.AttemptNum) + " " + h.StartedAt.Format(time.RFC3339) + " " + string(h.Outcome) + " (" + h.Duration.String() + ")"
+		}
+		fmt.Println(header)
+		pref := "      "
+		if h.CycleNum == 0 {
+			pref = "    "
+		}
 		if h.Output != "" {
-			fmt.Println(colorize(indent("    ", h.Output), ColorGray))
+			fmt.Println(colorize(indent(pref, h.Output), ColorGray))
 		}
 		if h.Error != "" {
-			fmt.Println(colorize(indent("    ", "err: "+h.Error), ColorRed))
+			fmt.Println(colorize(indent(pref, "err: "+h.Error), ColorRed))
 		}
 		if h.ConditionDetails != "" {
-			fmt.Println(colorize(indent("    ", "cond: "+h.ConditionDetails), ColorGray))
+			fmt.Println(colorize(indent(pref, "cond: "+h.ConditionDetails), ColorGray))
 		}
 	}
 }
@@ -705,6 +735,12 @@ func parseScheduleArgs(args []string) (scheduler.ToolInput, error) {
 			if strings.HasPrefix(args[i], "--") {
 				return in, fmt.Errorf("schedule: unknown flag %s", args[i])
 			}
+			// Bare positional after the name is almost always a quoting
+			// mistake (e.g. --do /run X Y instead of --do "/run X Y").
+			// Surfacing the offending token lets the user fix it instead
+			// of silently dropping it and getting a downstream parse
+			// error like "action: cannot parse".
+			return in, fmt.Errorf("schedule: unexpected positional %q (did you forget to quote a multi-word value?)", args[i])
 		}
 	}
 	if in.When == "" {
@@ -740,6 +776,11 @@ func parseWaitArgs(args []string) (scheduler.ToolInput, error) {
 			in.OnTimeout, i = takeString(args, i)
 		case "--name":
 			in.Name, i = takeString(args, i)
+		default:
+			if strings.HasPrefix(args[i], "--") {
+				return in, fmt.Errorf("wait: unknown flag %s", args[i])
+			}
+			return in, fmt.Errorf("wait: unexpected positional %q (did you forget to quote a multi-word value?)", args[i])
 		}
 	}
 	if in.Until == "" {
@@ -763,6 +804,81 @@ func takeString(args []string, i int) (string, int) {
 		return "", i
 	}
 	return args[i+1], i + 1
+}
+
+// tokenizeSchedulerInput splits a /schedule, /wait, or /jobs argument
+// string into tokens while respecting single- and double-quoted spans
+// so that flag values like --do "/run X Y" or --tag 'k=v with space'
+// arrive as a single token. Backslash escapes the next character inside
+// a quoted span; outside quotes it is taken literally.
+//
+// strings.Fields cannot do this because it splits on every whitespace
+// run, which truncates --do "/run X Y" to --do "/run and leaks the
+// rest as bare positionals — silently dropping them and producing a
+// confusing "action: cannot parse" error downstream.
+//
+// Returns an error only when a quote is left unterminated, so callers
+// can surface a precise message to the user.
+func tokenizeSchedulerInput(input string) ([]string, error) {
+	var (
+		out     []string
+		buf     strings.Builder
+		inQuote rune // 0 = none, '"' or '\''
+		escaped bool
+		hasTok  bool
+	)
+	flush := func() {
+		if hasTok {
+			out = append(out, buf.String())
+			buf.Reset()
+			hasTok = false
+		}
+	}
+	for _, r := range input {
+		if escaped {
+			buf.WriteRune(r)
+			hasTok = true
+			escaped = false
+			continue
+		}
+		if inQuote != 0 {
+			if r == '\\' && inQuote == '"' {
+				// Backslash only escapes within double quotes; inside
+				// single quotes it is literal (POSIX-ish).
+				escaped = true
+				continue
+			}
+			if r == inQuote {
+				inQuote = 0
+				// An empty "" or '' still counts as a token.
+				hasTok = true
+				continue
+			}
+			buf.WriteRune(r)
+			hasTok = true
+			continue
+		}
+		switch r {
+		case '"', '\'':
+			inQuote = r
+			hasTok = true
+		case '\\':
+			escaped = true
+		case ' ', '\t', '\n', '\r':
+			flush()
+		default:
+			buf.WriteRune(r)
+			hasTok = true
+		}
+	}
+	if inQuote != 0 {
+		return nil, fmt.Errorf("unterminated %c-quoted argument", inQuote)
+	}
+	if escaped {
+		return nil, fmt.Errorf("trailing backslash with nothing to escape")
+	}
+	flush()
+	return out, nil
 }
 
 func indent(pref, s string) string {
