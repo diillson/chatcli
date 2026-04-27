@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Release Please
         id: rp
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.GH_RELEASE_TOKEN }}
           target-branch: ${{ github.ref_name }}
