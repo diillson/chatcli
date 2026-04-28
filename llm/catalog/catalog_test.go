@@ -57,13 +57,18 @@ func TestGetMaxTokens(t *testing.T) {
 	tokens := GetMaxTokens(ProviderOpenAI, "gpt-4o", 12345)
 	assert.Equal(t, 12345, tokens, "Override should have the highest priority")
 
-	// Caso 2: Valor do catálogo
+	// Caso 2: Valor do catálogo. Haiku 3 expõe 4096 tokens de output
+	// (limite real publicado pela Anthropic, não o número conservador
+	// inflado de 42K que o catálogo carregava antes da auditoria).
 	tokens = GetMaxTokens(ProviderClaudeAI, "claude-3-haiku", 0)
-	assert.Equal(t, 42000, tokens, "Should get value from catalog for claude-3-haiku")
+	assert.Equal(t, 4096, tokens, "Should get value from catalog for claude-3-haiku")
 
-	// Caso 3: Fallback para modelo desconhecido
+	// Caso 3: Fallback para modelo desconhecido. Após a auditoria de
+	// catálogo (Abr 2026) os fallbacks foram alinhados com os limites
+	// oficiais — 16384 é o piso "OpenAI gpt-* genérico" para modelos
+	// fora do registry, coerente com o cap real de gpt-4o (16K).
 	tokens = GetMaxTokens(ProviderOpenAI, "unknown-model", 0)
-	assert.Equal(t, 40000, tokens, "Should use fallback value for unknown OpenAI model")
+	assert.Equal(t, 16384, tokens, "Should use fallback value for unknown OpenAI model")
 
 	// Caso 4: Fallback para provider desconhecido
 	tokens = GetMaxTokens("UNKNOWN_PROVIDER", "some-model", 0)

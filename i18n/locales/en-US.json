@@ -1377,6 +1377,7 @@
   "cfg.route.hint": "Sections: all, general, providers, agent, resilience, session, integrations, auth, security, server",
 
   "cfg.val.default": "(default)",
+  "cfg.val.default_tag": "(default)",
   "cfg.val.not_set": "(not set)",
   "cfg.val.none": "(none)",
   "cfg.val.empty": "(empty)",
