@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.111.0](https://github.com/diillson/chatcli/compare/v1.110.2...v1.111.0) (2026-04-28)
+
+
+### Features
+
+* **catalog,config:** real model windows + env defaults registry for /config ([#859](https://github.com/diillson/chatcli/issues/859)) ([dde952f](https://github.com/diillson/chatcli/commit/dde952fd119718583a245afdc04d8536e4e661e4))
+
 ## [1.110.2](https://github.com/diillson/chatcli/compare/v1.110.1...v1.110.2) (2026-04-28)
 
 
