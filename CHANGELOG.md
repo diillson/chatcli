@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.110.2](https://github.com/diillson/chatcli/compare/v1.110.1...v1.110.2) (2026-04-28)
+
+
+### Bug Fixes
+
+* **llm:** final cache_control boundary + INFO request logs across providers ([#857](https://github.com/diillson/chatcli/issues/857)) ([e767a2a](https://github.com/diillson/chatcli/commit/e767a2ade4ab9ac5a1c155c006e2886df4c75a3d))
+
 ## [1.110.1](https://github.com/diillson/chatcli/compare/v1.110.0...v1.110.1) (2026-04-27)
 
 
