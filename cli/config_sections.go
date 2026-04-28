@@ -101,14 +101,45 @@ func sectionEnd(color string) {
 	fmt.Println(uiBoxEnd(color))
 }
 
+// defaultMarker is a zero-width sentinel prefix that envOr/envBool use
+// to flag a value as "this is the runtime default, the env var is unset".
+// kv() detects the marker, strips it for display, and renders the line
+// in a distinct color with a "(default)" suffix so the operator sees at
+// a glance whether the value comes from their environment or from the
+// code's fallback. Using an ASCII control character (U+0001) keeps the
+// channel out-of-band from any legitimate env value the user could set.
+const defaultMarker = "\x01"
+
 // kv prints a key/value line inside a section with automatic coloring.
 // key is an i18n-translated label (the caller passes i18n.T(...)) or a
 // literal env var name when no translation applies.
+//
+// Coloring rules:
+//   - "[SET]" / enabled / on     → green (explicitly configured truthy)
+//   - "[NOT SET]" / disabled     → yellow (off OR unconfigured w/ no fallback)
+//   - defaultMarker prefix       → cyan + "(default)" suffix (the runtime
+//     fallback from the env-default registry)
+//   - everything else            → gray (user-set value)
 func kv(prefix, key, value string) {
 	valueColor := ColorGray
 	display := strings.TrimSpace(value)
 	enabledLabel := i18n.T("cfg.val.enabled")
 	disabledLabel := i18n.T("cfg.val.disabled")
+	defaultTag := i18n.T("cfg.val.default_tag")
+
+	// Default-value path: strip the sentinel, render in cyan with a
+	// trailing "(default)" tag so the line visibly distinguishes from
+	// user-set values without losing the actual value.
+	if strings.HasPrefix(display, defaultMarker) {
+		display = strings.TrimPrefix(display, defaultMarker)
+		fmt.Printf("%s%s  %s %s\n",
+			prefix,
+			colorize(fmt.Sprintf("%-32s", key+":"), ColorCyan),
+			colorize(display, ColorCyan),
+			colorize(defaultTag, ColorGray))
+		return
+	}
+
 	switch {
 	case display == "":
 		display = i18n.T("cfg.val.default")
@@ -127,16 +158,29 @@ func kv(prefix, key, value string) {
 		colorize(display, valueColor))
 }
 
-// envOr returns the env value or the localized "(not set)" placeholder.
+// envOr returns the env value, or the registered runtime default tagged
+// with defaultMarker so kv() can color it as "(default)", or the
+// localized "(not set)" placeholder when neither source has a value.
+//
+// The default registry is consulted only when the env is unset — an
+// explicitly-set empty string still goes through the not_set branch
+// (matching pre-registry behavior).
 func envOr(name string) string {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		return v
+	}
+	if d, ok := lookupEnvDefault(name); ok && !d.IsBool {
+		return defaultMarker + formatDefaultValue(d.Value)
 	}
 	return i18n.T("cfg.val.not_set")
 }
 
 // envBool renders the localized enabled/disabled/default labels for boolean
-// envs (accepts 1/true/yes).
+// envs (accepts 1/true/yes). When the var is unset and the default
+// registry has a known boolean fallback, the rendered line is the
+// localized enabled/disabled label tagged with defaultMarker so kv()
+// reports e.g. "enabled (default)" instead of a bare "(default)" with
+// no truth value attached.
 func envBool(name string) string {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 	switch v {
@@ -145,6 +189,13 @@ func envBool(name string) string {
 	case "0", "false", "no", "off":
 		return i18n.T("cfg.val.disabled")
 	case "":
+		if d, ok := lookupEnvDefault(name); ok && d.IsBool {
+			label := i18n.T("cfg.val.disabled")
+			if strings.EqualFold(d.Value, "true") {
+				label = i18n.T("cfg.val.enabled")
+			}
+			return defaultMarker + label
+		}
 		return i18n.T("cfg.val.default")
 	default:
 		return v
