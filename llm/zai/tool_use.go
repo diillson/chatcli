@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
@@ -68,6 +69,15 @@ func (c *ZAIClient) SendPromptWithTools(ctx context.Context, prompt string, hist
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.tool.error.marshaling_payload"), err)
 	}
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "ZAI", c.model,
+		zap.String("path", "tool_use"),
+		zap.Int("payload_bytes", len(jsonValue)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+		zap.Int("tool_count", len(tools)),
+	)
+
 	resp, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		httpResp, err := c.sendRequest(ctx, jsonValue)
 		if err != nil {
@@ -85,9 +95,16 @@ func (c *ZAIClient) SendPromptWithTools(ctx context.Context, prompt string, hist
 		return string(bodyBytes), nil
 	})
 	if err != nil {
+		client.LogRequestFinish(c.logger, "ZAI", c.model, "error", time.Since(start),
+			zap.String("path", "tool_use"),
+		)
 		return nil, err
 	}
 
+	client.LogRequestFinish(c.logger, "ZAI", c.model, "success", time.Since(start),
+		zap.String("path", "tool_use"),
+		zap.Int("response_chars", len(resp)),
+	)
 	return parseToolResponse(resp, c.logger)
 }
 

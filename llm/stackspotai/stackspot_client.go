@@ -65,6 +65,13 @@ func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history
 	conversationHistory := formatConversationHistory(history)
 	fullPrompt := fmt.Sprintf("%sUsuário: %s", conversationHistory, prompt)
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "STACKSPOT", c.GetModelName(),
+		zap.Int("payload_bytes", len(fullPrompt)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", maxTokens),
+	)
+
 	llmResponse, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		return c.executeWithTokenRetry(ctx, func(token string) (string, error) {
 			return c.sendChatRequest(ctx, fullPrompt, token)
@@ -72,10 +79,14 @@ func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history
 	})
 
 	if err != nil {
+		client.LogRequestFinish(c.logger, "STACKSPOT", c.GetModelName(), "error", time.Since(start))
 		c.logger.Error(i18n.T("llm.stackspot.get_response_error"), zap.Error(err))
 		return "", err
 	}
 
+	client.LogRequestFinish(c.logger, "STACKSPOT", c.GetModelName(), "success", time.Since(start),
+		zap.Int("response_chars", len(llmResponse)),
+	)
 	return llmResponse, nil
 }
 

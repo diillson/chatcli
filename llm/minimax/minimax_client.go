@@ -133,6 +133,14 @@ func (c *MiniMaxClient) SendPrompt(ctx context.Context, prompt string, history [
 		processFunc = c.processAnthropicResponse
 	}
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "MINIMAX", c.model,
+		zap.Int("payload_bytes", len(jsonValue)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+		zap.Bool("anthropic_compat", c.anthropicCompat),
+	)
+
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		resp, err := c.sendRequest(ctx, jsonValue)
 		if err != nil {
@@ -142,10 +150,14 @@ func (c *MiniMaxClient) SendPrompt(ctx context.Context, prompt string, history [
 	})
 
 	if err != nil {
+		client.LogRequestFinish(c.logger, "MINIMAX", c.model, "error", time.Since(start))
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "MiniMax"), zap.Error(err))
 		return "", err
 	}
 
+	client.LogRequestFinish(c.logger, "MINIMAX", c.model, "success", time.Since(start),
+		zap.Int("response_chars", len(response)),
+	)
 	return response, nil
 }
 

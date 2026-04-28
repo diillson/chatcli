@@ -55,8 +55,49 @@ type ModelMeta struct {
 }
 
 // registry: lista plana para facilitar matching por provedor + id/alias
+//
+// IMPORTANT ordering rule: newer entries MUST be declared BEFORE older
+// ones whose aliases share a prefix. Resolve() walks the registry in
+// order and the first exact-or-alias hit wins; an older entry placed
+// first will silently shadow newer variants whose IDs happen to start
+// with the older entry's alias prefix. The covered_by tests in
+// catalog_test.go pin this contract for the Claude Opus 4.x line and
+// the same applies to GPT-5.x — gpt-5.5 must be listed before gpt-5.4
+// before gpt-5.3-codex before gpt-5 (whose alias list includes "gpt-5.1"
+// and other prefix-y strings).
 var registry = []ModelMeta{
 	// ── OpenAI GPT-5 family ──────────────────────────────────────────
+	{
+		// gpt-5.5 — released Apr 23, 2026. 1,050,000-token context with
+		// 128,000 max output, Responses + Chat Completions + Assistants.
+		// Capabilities: vision (input), function calling, structured
+		// outputs. The codex/pro/mini/nano fan-out the previous
+		// generations had is replaced by the single base model + a
+		// distinct gpt-5.5-pro entry; OpenAI did not publish mini/nano
+		// variants for 5.5 at launch.
+		ID:              "gpt-5.5",
+		Aliases:         []string{"gpt-5.5"},
+		DisplayName:     "GPT-5.5",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		// gpt-5.5-pro — same window/output ceiling as 5.5 but no
+		// streaming; intended for the highest-quality, batch-style
+		// responses. Function calling and structured outputs are still
+		// supported, vision is input-only.
+		ID:              "gpt-5.5-pro",
+		Aliases:         []string{"gpt-5.5-pro"},
+		DisplayName:     "GPT-5.5 Pro",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		ID:              "gpt-5.4",
 		Aliases:         []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"},

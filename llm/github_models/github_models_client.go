@@ -123,6 +123,13 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.marshal_payload_for", "GitHub Models"), err)
 	}
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "GITHUB_MODELS", c.model,
+		zap.Int("payload_bytes", len(jsonValue)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+	)
+
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.getAPIURL(), utils.NewJSONReader(jsonValue))
 		if err != nil {
@@ -172,7 +179,14 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 		return result.Choices[0].Message.Content, nil
 	})
 
-	return response, err
+	if err != nil {
+		client.LogRequestFinish(c.logger, "GITHUB_MODELS", c.model, "error", time.Since(start))
+		return response, err
+	}
+	client.LogRequestFinish(c.logger, "GITHUB_MODELS", c.model, "success", time.Since(start),
+		zap.Int("response_chars", len(response)),
+	)
+	return response, nil
 }
 
 // ListModels fetches available models from the GitHub Models API.

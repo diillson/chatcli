@@ -142,6 +142,13 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.copilot.prepare_request_failed"), err)
 	}
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "COPILOT", c.model,
+		zap.Int("payload_bytes", len(jsonValue)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+	)
+
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		resp, err := c.sendRequest(ctx, jsonValue)
 		if err != nil {
@@ -149,8 +156,14 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		}
 		return c.processResponse(resp)
 	})
-
-	return response, err
+	if err != nil {
+		client.LogRequestFinish(c.logger, "COPILOT", c.model, "error", time.Since(start))
+		return response, err
+	}
+	client.LogRequestFinish(c.logger, "COPILOT", c.model, "success", time.Since(start),
+		zap.Int("response_chars", len(response)),
+	)
+	return response, nil
 }
 
 // sendRequest sends the HTTP request to the Copilot API with required headers.

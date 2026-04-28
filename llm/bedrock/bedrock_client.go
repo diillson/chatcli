@@ -224,10 +224,21 @@ func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, 
 		}
 	}
 
+	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
+
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
+
+	start := time.Now()
+	client.LogRequestStart(c.logger, "BEDROCK", c.model,
+		zap.String("family", string(familyAnthropic)),
+		zap.Int("payload_bytes", len(payload)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+		zap.Int("cache_markers", client.CountAnthropicCacheMarkers(reqBody)),
+	)
 
 	responseText, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		out, err := c.runtime.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
@@ -243,9 +254,16 @@ func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, 
 	})
 
 	if err != nil {
+		client.LogRequestFinish(c.logger, "BEDROCK", c.model, "error", time.Since(start),
+			zap.String("family", string(familyAnthropic)),
+		)
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Bedrock"), zap.Error(err))
 		return "", err
 	}
+	client.LogRequestFinish(c.logger, "BEDROCK", c.model, "success", time.Since(start),
+		zap.String("family", string(familyAnthropic)),
+		zap.Int("response_chars", len(responseText)),
+	)
 	return responseText, nil
 }
 

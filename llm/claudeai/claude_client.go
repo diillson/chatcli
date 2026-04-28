@@ -209,11 +209,28 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 			zap.String("model", c.model))
 	}
 
+	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
+
 	jsonValue, err := json.Marshal(reqBody)
 	if err != nil {
 		c.logger.Error(i18n.T("llm.error.marshal_payload"), zap.Error(err))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
+
+	authMode := "apikey"
+	if isOAuth {
+		authMode = "oauth"
+	} else if strings.HasPrefix(c.apiKey, "token:") {
+		authMode = "token"
+	}
+	start := time.Now()
+	client.LogRequestStart(c.logger, "CLAUDEAI", c.model,
+		zap.String("auth", authMode),
+		zap.Int("payload_bytes", len(jsonValue)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+		zap.Int("cache_markers", client.CountAnthropicCacheMarkers(reqBody)),
+	)
 
 	if isOAuth {
 		if err := c.sendOAuthTitleRequest(ctx, oauthTitleUserPrefix+prompt); err != nil {
@@ -259,9 +276,16 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	})
 
 	if err != nil {
+		client.LogRequestFinish(c.logger, "CLAUDEAI", c.model, "error", time.Since(start),
+			zap.String("auth", authMode),
+		)
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Claude AI"), zap.Error(err))
 		return "", err
 	}
+	client.LogRequestFinish(c.logger, "CLAUDEAI", c.model, "success", time.Since(start),
+		zap.String("auth", authMode),
+		zap.Int("response_chars", len(responseText)),
+	)
 
 	if isOAuth {
 		if err := c.sendOAuthTitleRequest(ctx, fmt.Sprintf(oauthTitleUserWrapTmpl, prompt)); err != nil {
