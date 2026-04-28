@@ -150,6 +150,13 @@ func (c *ZAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "ZAI", c.model,
+		zap.Int("payload_bytes", len(jsonValue)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+	)
+
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		resp, err := c.sendRequest(ctx, jsonValue)
 		if err != nil {
@@ -159,10 +166,14 @@ func (c *ZAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 	})
 
 	if err != nil {
+		client.LogRequestFinish(c.logger, "ZAI", c.model, "error", time.Since(start))
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "ZAI"), zap.Error(err))
 		return "", err
 	}
 
+	client.LogRequestFinish(c.logger, "ZAI", c.model, "success", time.Since(start),
+		zap.Int("response_chars", len(response)),
+	)
 	return response, nil
 }
 

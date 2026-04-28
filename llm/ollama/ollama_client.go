@@ -117,6 +117,13 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.ollama.prepare_payload"), err)
 	}
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "OLLAMA", c.model,
+		zap.Int("payload_bytes", len(body)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+	)
+
 	// Agora use Retry para encapsular a lógica de requisição e parsing
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		url := c.baseURL + "/api/chat"
@@ -180,9 +187,14 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	})
 
 	if err != nil {
+		client.LogRequestFinish(c.logger, "OLLAMA", c.model, "error", time.Since(start))
 		c.logger.Error(i18n.T("llm.ollama.get_response_error"), zap.Error(err))
 		return "", err
 	}
+
+	client.LogRequestFinish(c.logger, "OLLAMA", c.model, "success", time.Since(start),
+		zap.Int("response_chars", len(response)),
+	)
 
 	// Aplicar filtro se ENV OLLAMA_FILTER_THINKING = "true"
 	if strings.EqualFold(os.Getenv("OLLAMA_FILTER_THINKING"), config.OllamaFilterThinkingDefault) {

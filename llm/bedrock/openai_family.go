@@ -12,10 +12,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -48,6 +50,14 @@ func (c *BedrockClient) sendPromptOpenAI(ctx context.Context, prompt string, his
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "BEDROCK", c.model,
+		zap.String("family", string(familyOpenAI)),
+		zap.Int("payload_bytes", len(payload)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+	)
+
 	responseText, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		out, err := c.runtime.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
 			ModelId:     stringPtr(c.model),
@@ -61,9 +71,16 @@ func (c *BedrockClient) sendPromptOpenAI(ctx context.Context, prompt string, his
 		return parseOpenAIBody(out.Body)
 	})
 	if err != nil {
+		client.LogRequestFinish(c.logger, "BEDROCK", c.model, "error", time.Since(start),
+			zap.String("family", string(familyOpenAI)),
+		)
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Bedrock"), zap.Error(err))
 		return "", err
 	}
+	client.LogRequestFinish(c.logger, "BEDROCK", c.model, "success", time.Since(start),
+		zap.String("family", string(familyOpenAI)),
+		zap.Int("response_chars", len(responseText)),
+	)
 	return responseText, nil
 }
 

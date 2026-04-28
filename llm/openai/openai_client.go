@@ -140,6 +140,13 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "OPENAI", c.model,
+		zap.Int("payload_bytes", len(jsonValue)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+	)
+
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		resp, err := c.sendRequest(ctx, jsonValue)
 		if err != nil {
@@ -147,8 +154,14 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		}
 		return c.processResponse(resp)
 	})
-
-	return response, err
+	if err != nil {
+		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start))
+		return response, err
+	}
+	client.LogRequestFinish(c.logger, "OPENAI", c.model, "success", time.Since(start),
+		zap.Int("response_chars", len(response)),
+	)
+	return response, nil
 }
 
 // sendRequest envia a requisição para a API da OpenAI
@@ -343,16 +356,35 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		return nil, fmt.Errorf("marshal stream request: %w", err)
 	}
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "OPENAI", c.model,
+		zap.Int("payload_bytes", len(jsonValue)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+		zap.String("kind", "stream"),
+	)
+
 	resp, err := c.sendRequest(ctx, jsonValue)
 	if err != nil {
+		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start),
+			zap.String("kind", "stream"),
+		)
 		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start),
+			zap.String("kind", "stream"),
+			zap.Int("status_code", resp.StatusCode),
+		)
 		return nil, &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(raw))}
 	}
+
+	client.LogRequestFinish(c.logger, "OPENAI", c.model, "success", time.Since(start),
+		zap.String("kind", "stream_started"),
+	)
 
 	chunks := make(chan client.StreamChunk, 64)
 

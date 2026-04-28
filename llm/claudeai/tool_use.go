@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -95,10 +96,22 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		}
 	}
 
+	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
+
 	jsonValue, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.tool.error.marshaling_payload"), err)
 	}
+
+	start := time.Now()
+	client.LogRequestStart(c.logger, "CLAUDEAI", c.model,
+		zap.String("path", "tool_use"),
+		zap.Int("payload_bytes", len(jsonValue)),
+		zap.Int("history_len", len(history)),
+		zap.Int("tool_count", len(sortedTools)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+		zap.Int("cache_markers", client.CountAnthropicCacheMarkers(reqBody)),
+	)
 
 	respBody, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		req, err := c.buildToolRequest(ctx, jsonValue)
@@ -133,8 +146,15 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		return string(bodyBytes), nil
 	})
 	if err != nil {
+		client.LogRequestFinish(c.logger, "CLAUDEAI", c.model, "error", time.Since(start),
+			zap.String("path", "tool_use"),
+		)
 		return nil, err
 	}
+	client.LogRequestFinish(c.logger, "CLAUDEAI", c.model, "success", time.Since(start),
+		zap.String("path", "tool_use"),
+		zap.Int("response_bytes", len(respBody)),
+	)
 
 	return parseClaudeToolResponse(respBody, c.logger)
 }

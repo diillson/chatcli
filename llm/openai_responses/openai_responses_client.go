@@ -149,6 +149,14 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.responses.prepare_payload"), err)
 	}
 
+	start := time.Now()
+	client.LogRequestStart(c.logger, "OPENAI", c.model,
+		zap.String("path", "responses"),
+		zap.Int("payload_bytes", len(jsonValue)),
+		zap.Int("history_len", len(history)),
+		zap.Int("max_tokens", effectiveMaxTokens),
+	)
+
 	// Retry para encapsular a lógica de requisição e parsing
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		resp, err := c.sendRequest(ctx, jsonValue)
@@ -162,10 +170,17 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 	})
 
 	if err != nil {
+		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start),
+			zap.String("path", "responses"),
+		)
 		c.logger.Error(i18n.T("llm.responses.get_response_error"), zap.Error(err))
 		return "", err
 	}
 
+	client.LogRequestFinish(c.logger, "OPENAI", c.model, "success", time.Since(start),
+		zap.String("path", "responses"),
+		zap.Int("response_chars", len(response)),
+	)
 	return response, nil
 }
 
