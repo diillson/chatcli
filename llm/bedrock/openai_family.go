@@ -66,7 +66,7 @@ func (c *BedrockClient) sendPromptOpenAI(ctx context.Context, prompt string, his
 			Body:        payload,
 		})
 		if err != nil {
-			return "", err
+			return "", wrapBedrockInferenceProfileError(c.model, err)
 		}
 		return parseOpenAIBody(out.Body)
 	})
