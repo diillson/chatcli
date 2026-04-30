@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.111.1](https://github.com/diillson/chatcli/compare/v1.111.0...v1.111.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* **bedrock:** list and dispatch every model the AWS account has access to ([#861](https://github.com/diillson/chatcli/issues/861)) ([7c1e0f7](https://github.com/diillson/chatcli/commit/7c1e0f78168aecbe85b6a408874924aef3fbd6f8))
+
 ## [1.111.0](https://github.com/diillson/chatcli/compare/v1.110.2...v1.111.0) (2026-04-28)
 
 
