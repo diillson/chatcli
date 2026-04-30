@@ -16,7 +16,7 @@ import (
 func init() {
 	registry.Register(registry.ProviderInfo{
 		Name:         "BEDROCK",
-		DisplayName:  "AWS Bedrock (Anthropic Claude)",
+		DisplayName:  "AWS Bedrock (all text models available to your account)",
 		RequiresAuth: false, // Auth comes from AWS credential chain, not a string APIKey
 		EnvKeys:      []string{"BEDROCK_REGION", "AWS_REGION", "AWS_PROFILE"},
 		Factory: func(cfg registry.ProviderConfig) (client.LLMClient, error) {

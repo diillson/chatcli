@@ -2,7 +2,10 @@ package bedrock
 
 import (
 	"os"
+	"strings"
 	"testing"
+
+	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
 )
 
 func TestResolveFamily(t *testing.T) {
@@ -20,8 +23,15 @@ func TestResolveFamily(t *testing.T) {
 		{"openai gpt-oss 20b", "", "openai.gpt-oss-20b-1:0", familyOpenAI},
 		{"openai via regional profile", "", "us.openai.gpt-oss-120b-1:0", familyOpenAI},
 
-		// Unknown prefix falls back to default (anthropic)
-		{"unknown prefix defaults to anthropic", "", "meta.llama3-70b-instruct-v1:0", familyAnthropic},
+		// Unknown / non-Anthropic / non-OpenAI prefixes route to Converse —
+		// one schema covers Llama, Nova, Mistral, Cohere, AI21, DeepSeek,
+		// Stability, and any future provider.
+		{"meta llama defaults to converse", "", "meta.llama3-70b-instruct-v1:0", familyConverse},
+		{"amazon nova defaults to converse", "", "amazon.nova-pro-v1:0", familyConverse},
+		{"mistral defaults to converse", "", "mistral.mistral-large-2407-v1:0", familyConverse},
+		{"cohere defaults to converse", "", "cohere.command-r-plus-v1:0", familyConverse},
+		{"ai21 defaults to converse", "", "ai21.jamba-1-5-large-v1:0", familyConverse},
+		{"deepseek defaults to converse", "", "us.deepseek.r1-v1:0", familyConverse},
 
 		// Env override takes precedence
 		{"env override openai", "openai", "anthropic.claude-3-5-sonnet-20241022-v2:0", familyOpenAI},
@@ -29,6 +39,8 @@ func TestResolveFamily(t *testing.T) {
 		{"env override anthropic", "anthropic", "openai.gpt-oss-120b-1:0", familyAnthropic},
 		{"env override claude alias", "claude", "openai.gpt-oss-120b-1:0", familyAnthropic},
 		{"env override case insensitive", "OpenAI", "anthropic.claude-3-5-sonnet-20241022-v2:0", familyOpenAI},
+		{"env override converse", "converse", "anthropic.claude-3-5-sonnet-20241022-v2:0", familyConverse},
+		{"env override auto alias", "auto", "openai.gpt-oss-120b-1:0", familyConverse},
 		{"env invalid value ignored", "bogus", "openai.gpt-oss-120b-1:0", familyOpenAI},
 	}
 	for _, tc := range tests {
@@ -54,20 +66,57 @@ func TestResolveFamily(t *testing.T) {
 	}
 }
 
-func TestIsSupportedBedrockFamily(t *testing.T) {
-	cases := map[string]bool{
-		"anthropic.claude-3-5-sonnet-20241022-v2:0":        true,
-		"global.anthropic.claude-sonnet-4-5-20250929-v1:0": true,
-		"openai.gpt-oss-120b-1:0":                          true,
-		"us.openai.gpt-oss-120b-1:0":                       true,
-		"meta.llama3-70b-instruct-v1:0":                    false,
-		"amazon.nova-pro-v1:0":                             false,
-		"mistral.mistral-large-2407-v1:0":                  false,
-		"":                                                 false,
+// TestSupportsOnDemand pins the only listing-side gate we keep:
+// foundation models that don't expose ON_DEMAND aren't directly invokable
+// by their bare ID and would fail with ValidationException at first call.
+// We rely on the matching ListInferenceProfiles entry to surface them.
+func TestSupportsOnDemand(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []bedrocktypes.InferenceType
+		want bool
+	}{
+		{"empty list", nil, false},
+		{"only provisioned", []bedrocktypes.InferenceType{bedrocktypes.InferenceTypeProvisioned}, false},
+		{"on-demand only", []bedrocktypes.InferenceType{bedrocktypes.InferenceTypeOnDemand}, true},
+		{"both", []bedrocktypes.InferenceType{
+			bedrocktypes.InferenceTypeOnDemand,
+			bedrocktypes.InferenceTypeProvisioned,
+		}, true},
 	}
-	for id, want := range cases {
-		if got := isSupportedBedrockFamily(id); got != want {
-			t.Errorf("isSupportedBedrockFamily(%q) = %v, want %v", id, got, want)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := supportsOnDemand(tc.in); got != tc.want {
+				t.Errorf("supportsOnDemand(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSuggestInferenceProfilePrefix(t *testing.T) {
+	cases := []struct {
+		model string
+		// substrings every suggestion must contain so users see a copy-paste
+		// hint regardless of the exact format.
+		mustContain []string
+	}{
+		{"anthropic.claude-3-7-sonnet-20250219-v1:0",
+			[]string{"global.anthropic.claude-3-7-sonnet-20250219-v1:0",
+				"us.anthropic.claude-3-7-sonnet-20250219-v1:0"}},
+		{"meta.llama3-70b-instruct-v1:0",
+			[]string{"global.meta.llama3-70b-instruct-v1:0"}},
+		// Already-prefixed IDs should not get a re-suggestion that wraps
+		// them again.
+		{"global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+			[]string{"different inference profile"}},
+		{"", []string{"inference profile"}},
+	}
+	for _, tc := range cases {
+		got := suggestInferenceProfilePrefix(tc.model)
+		for _, want := range tc.mustContain {
+			if !strings.Contains(got, want) {
+				t.Errorf("suggestInferenceProfilePrefix(%q) = %q, missing %q", tc.model, got, want)
+			}
 		}
 	}
 }

@@ -34,39 +34,55 @@ import (
 	"go.uber.org/zap"
 )
 
-// modelFamily identifies the request/response body schema a Bedrock model
-// expects. Each family has a distinct InvokeModel payload.
+// modelFamily identifies which dispatch path a Bedrock model uses.
+// Anthropic and OpenAI keep dedicated InvokeModel paths (preserving cache
+// markers, extended thinking and the existing wire formats). Everything
+// else routes through the unified Converse API, which supports Llama,
+// Amazon Nova, Mistral, Cohere, AI21 Jamba, DeepSeek, Stability and any
+// future provider Bedrock onboards without a per-provider body schema.
 type modelFamily string
 
 const (
 	familyAnthropic modelFamily = "anthropic"
 	familyOpenAI    modelFamily = "openai"
+	familyConverse  modelFamily = "converse"
 )
 
-// resolveFamily picks the body schema to use. Precedence:
-//  1. BEDROCK_PROVIDER env var (explicit override: "anthropic" | "openai")
-//  2. Model ID prefix: "openai.*" → OpenAI; "anthropic.*", "global.anthropic.*",
-//     "us.anthropic.*", "eu.anthropic.*", "apac.anthropic.*" → Anthropic.
-//  3. Default: Anthropic (preserves existing behavior).
+// resolveFamily picks the dispatch path. Precedence:
+//  1. BEDROCK_PROVIDER env var ("anthropic"/"claude", "openai"/"gpt",
+//     "converse"/"auto").
+//  2. Model ID prefix: "openai.*" → OpenAI; any "anthropic" segment
+//     (bare or behind a global./us./eu./apac. profile prefix) → Anthropic.
+//  3. Default: Converse — covers Llama, Nova, Mistral, Cohere, AI21,
+//     DeepSeek, Stability and any unknown provider through the unified
+//     Bedrock Converse API.
 func resolveFamily(model string) modelFamily {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEDROCK_PROVIDER"))) {
 	case "openai", "gpt":
 		return familyOpenAI
 	case "anthropic", "claude":
 		return familyAnthropic
+	case "converse", "auto":
+		return familyConverse
 	}
 	m := strings.ToLower(model)
 	if strings.HasPrefix(m, "openai.") || strings.Contains(m, ".openai.") {
 		return familyOpenAI
 	}
-	return familyAnthropic
+	if strings.HasPrefix(m, "anthropic.") || strings.Contains(m, ".anthropic.") {
+		return familyAnthropic
+	}
+	return familyConverse
 }
 
 // BedrockClient invokes foundation models hosted on AWS Bedrock.
-// Currently supports two body schemas via auto-dispatch (model-id prefix)
-// or explicit selection through BEDROCK_PROVIDER:
-//   - Anthropic Messages schema (Claude 3/3.5/3.7/4/4.5/4.6) — default
-//   - OpenAI Chat Completions schema (openai.gpt-oss-*)
+// Three dispatch paths via auto-detection (model-id prefix) or explicit
+// selection through BEDROCK_PROVIDER:
+//   - Anthropic Messages schema (Claude 3/3.5/3.7/4/4.5/4.6/4.7) — preserves
+//     cache_control markers and extended-thinking knobs.
+//   - OpenAI Chat Completions schema (openai.gpt-oss-*).
+//   - Converse API (default for everything else: Llama, Nova, Mistral,
+//     Cohere, AI21 Jamba, DeepSeek, Stability) — one schema for all.
 //
 // Authentication uses the default AWS credentials chain:
 //   - Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN)
@@ -144,36 +160,43 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	if c.runtime != nil {
 		return nil
 	}
+	runtime, resolvedRegion, err := LoadBedrockRuntime(ctx, c.region, c.profile, c.logger)
+	if err != nil {
+		return err
+	}
+	// The control-plane client is only used by the chat client (ListModels);
+	// the embedding provider doesn't need it, which is why LoadBedrockRuntime
+	// returns just the runtime. We rebuild the AWS config locally here only
+	// to construct the bedrock control client with the same credential chain.
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, controlPlaneConfigOptions(c.region, c.profile)...)
+	if err != nil {
+		return fmt.Errorf("bedrock: failed to load control-plane AWS config: %w", err)
+	}
+	c.region = resolvedRegion
+	c.runtime = runtime
+	c.control = bedrocksvc.NewFromConfig(cfg)
+	c.logger.Info(i18n.T("llm.info.configuring_provider", "Bedrock"),
+		zap.String("region", c.region),
+		zap.String("endpoint", RuntimeEndpointURL(c.region)),
+		zap.String("model", c.model))
+	return nil
+}
+
+// controlPlaneConfigOptions mirrors the LoadOptions used by the runtime
+// helper so the bedrock control-plane client (used for ListModels) sees
+// the same region/profile/IMDS settings as the runtime client.
+func controlPlaneConfigOptions(region, profile string) []func(*awsconfig.LoadOptions) error {
 	opts := []func(*awsconfig.LoadOptions) error{}
-	if c.region != "" {
-		opts = append(opts, awsconfig.WithRegion(c.region))
+	if region != "" {
+		opts = append(opts, awsconfig.WithRegion(region))
 	}
-	if c.profile != "" {
-		opts = append(opts, awsconfig.WithSharedConfigProfile(c.profile))
-	}
-	if httpClient, note := buildCorporateHTTPClient(c.logger); httpClient != nil {
-		opts = append(opts, awsconfig.WithHTTPClient(httpClient))
-		if note != "" {
-			c.logger.Warn(note)
-		}
+	if profile != "" {
+		opts = append(opts, awsconfig.WithSharedConfigProfile(profile))
 	}
 	if shouldDisableIMDS() {
 		opts = append(opts, awsconfig.WithEC2IMDSClientEnableState(imds.ClientDisabled))
 	}
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
-	if err != nil {
-		return fmt.Errorf("bedrock: failed to load AWS config: %w", err)
-	}
-	if cfg.Region == "" {
-		return fmt.Errorf("bedrock: AWS region not configured (set AWS_REGION, BEDROCK_REGION, or configure ~/.aws/config)")
-	}
-	c.region = cfg.Region
-	c.runtime = bedrockruntime.NewFromConfig(cfg)
-	c.control = bedrocksvc.NewFromConfig(cfg)
-	c.logger.Info(i18n.T("llm.info.configuring_provider", "Bedrock"),
-		zap.String("region", c.region),
-		zap.String("model", c.model))
-	return nil
+	return opts
 }
 
 // SendPrompt dispatches to the correct body schema based on the resolved
@@ -190,6 +213,8 @@ func (c *BedrockClient) SendPrompt(ctx context.Context, prompt string, history [
 	switch family {
 	case familyOpenAI:
 		return c.sendPromptOpenAI(ctx, prompt, history, maxTokens)
+	case familyConverse:
+		return c.sendPromptConverse(ctx, prompt, history, maxTokens)
 	default:
 		return c.sendPromptAnthropic(ctx, prompt, history, maxTokens)
 	}
@@ -234,6 +259,8 @@ func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, 
 	start := time.Now()
 	client.LogRequestStart(c.logger, "BEDROCK", c.model,
 		zap.String("family", string(familyAnthropic)),
+		zap.String("region", c.region),
+		zap.String("endpoint", RuntimeEndpointURL(c.region)),
 		zap.Int("payload_bytes", len(payload)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", effectiveMaxTokens),
@@ -248,7 +275,7 @@ func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, 
 			Body:        payload,
 		})
 		if err != nil {
-			return "", err
+			return "", wrapBedrockInferenceProfileError(c.model, err)
 		}
 		return parseAnthropicBody(out.Body)
 	})
@@ -437,8 +464,25 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 	seen := make(map[string]bool)
 	var result []client.ModelInfo
 
-	// 1) Foundation models (on-demand capable) — all providers whose
-	//    body schema we currently support (Anthropic + OpenAI).
+	// 1) Foundation models — text-output, on-demand-invokable.
+	//
+	// We deliberately do NOT maintain a hardcoded provider allowlist here.
+	// AWS continuously onboards new providers (Moonshot, MiniMax, Qwen,
+	// Z.AI, Google Gemma, NVIDIA Nemotron, TwelveLabs, …) and any
+	// provider-name allowlist would silently hide them until we ship a
+	// release. Two AWS-side signals do the gating instead:
+	//
+	//   - ByOutputModality: ModelModalityText excludes embedding-only and
+	//     image-only models server-side.
+	//   - supportsOnDemand(InferenceTypesSupported) drops models whose
+	//     bare ID isn't invokable directly — those are exposed via the
+	//     matching inference profile in the next loop, which avoids the
+	//     "user picks anthropic.claude-3-7-... and gets ValidationException"
+	//     trap.
+	//
+	// If a listed ID happens to be incompatible with our dispatch (rare),
+	// wrapBedrockInferenceProfileError surfaces a helpful message instead
+	// of a cryptic AWS error.
 	fm, err := c.control.ListFoundationModels(ctx, &bedrocksvc.ListFoundationModelsInput{
 		ByOutputModality: bedrocktypes.ModelModalityText,
 	})
@@ -446,8 +490,14 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 		c.logger.Warn("bedrock: ListFoundationModels failed", zap.Error(err))
 	} else {
 		for _, s := range fm.ModelSummaries {
-			id, displayName := derefModelSummary(s.ModelId, s.ModelName)
-			if id == "" || seen[id] || !isSupportedBedrockFamily(id) {
+			id, displayName := derefModelSummary(s.ModelId, s.ModelName, s.ProviderName)
+			if id == "" || seen[id] {
+				continue
+			}
+			if !supportsOnDemand(s.InferenceTypesSupported) {
+				c.logger.Debug("bedrock: skipping foundation model without ON_DEMAND inference",
+					zap.String("model_id", id),
+					zap.Any("inference_types", s.InferenceTypesSupported))
 				continue
 			}
 			seen[id] = true
@@ -460,8 +510,8 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 		}
 	}
 
-	// 2) Inference profiles (required for Claude 3.7, 4.x, 4.5, 4.6
-	//    and also used by some newer cross-region OpenAI profiles).
+	// 2) Inference profiles — needed for Claude 3.7, 4.x, 4.5, 4.6, 4.7
+	//    and any cross-region-only profile across other providers.
 	paginator := bedrocksvc.NewListInferenceProfilesPaginator(c.control, &bedrocksvc.ListInferenceProfilesInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
@@ -474,7 +524,7 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 			if p.InferenceProfileId != nil {
 				id = *p.InferenceProfileId
 			}
-			if id == "" || seen[id] || !isSupportedBedrockFamily(id) {
+			if id == "" || seen[id] {
 				continue
 			}
 			displayName := id
@@ -495,21 +545,29 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 	return result, nil
 }
 
-// isSupportedBedrockFamily filters ListFoundation/InferenceProfile output to
-// families whose body schema the client knows how to encode. Expand this when
-// new families (Llama, Nova, Mistral, etc.) get first-class support.
-func isSupportedBedrockFamily(id string) bool {
-	m := strings.ToLower(id)
-	return strings.Contains(m, "anthropic") || strings.Contains(m, "openai")
+// supportsOnDemand returns true when ON_DEMAND is one of the inference
+// types declared by the foundation model. Models without ON_DEMAND require
+// an inference profile to be invoked and would fail with ValidationException
+// if selected by the bare model ID.
+func supportsOnDemand(types []bedrocktypes.InferenceType) bool {
+	for _, t := range types {
+		if t == bedrocktypes.InferenceTypeOnDemand {
+			return true
+		}
+	}
+	return false
 }
 
-func derefModelSummary(id, name *string) (string, string) {
+func derefModelSummary(id, name, provider *string) (string, string) {
 	idStr := ""
 	if id != nil {
 		idStr = *id
 	}
 	display := idStr
-	if name != nil && *name != "" {
+	switch {
+	case name != nil && *name != "" && provider != nil && *provider != "":
+		display = *provider + " " + *name + " (Bedrock)"
+	case name != nil && *name != "":
 		display = *name + " (Bedrock)"
 	}
 	return idStr, display
@@ -524,8 +582,22 @@ func registerBedrockModel(id, displayName string) {
 		Aliases:      []string{id},
 		DisplayName:  displayName,
 		Provider:     catalog.ProviderBedrock,
-		PreferredAPI: catalog.APIAnthropicMessages,
+		PreferredAPI: preferredAPIFor(id),
 	})
+}
+
+// preferredAPIFor matches the dispatch family to a catalog PreferredAPI so
+// downstream code (token sizing, capability lookups) does the right thing
+// for the provider we just discovered. Anthropic keeps its messages API
+// hint; OpenAI gets chat-completions; everything else marks itself as
+// chat-completions-compatible too — Converse normalizes onto that shape.
+func preferredAPIFor(id string) catalog.PreferredAPI {
+	switch resolveFamily(id) {
+	case familyAnthropic:
+		return catalog.APIAnthropicMessages
+	default:
+		return catalog.APIChatCompletions
+	}
 }
 
 // Ensure BedrockClient satisfies the LLMClient and ModelLister interfaces.

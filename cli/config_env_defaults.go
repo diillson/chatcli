@@ -129,6 +129,15 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY": {Value: "false", IsBool: true, Source: "bedrock client"},
 	"CHATCLI_BEDROCK_ENABLE_IMDS":          {Value: "false", IsBool: true, Source: "bedrock client"},
 
+	// ─── Embeddings (HyDE / RAG) ─────────────────────────────────
+	// Defaults are described in llm/embedding/factory.go. CHATCLI_EMBED_PROVIDER
+	// is purely opt-in (empty == null provider, no embeddings); we register
+	// the model/dimensions defaults so /config can show what each provider
+	// would use if selected.
+	"CHATCLI_EMBED_PROVIDER":   {Value: "(off)", Source: "llm/embedding/factory.go (empty == null)"},
+	"CHATCLI_EMBED_MODEL":      {Value: "(provider-specific)", Source: "voyage-3 / text-embedding-3-small / amazon.titan-embed-text-v2:0"},
+	"CHATCLI_EMBED_DIMENSIONS": {Value: "(provider-default)", Source: "openai 1536, titan-v2 1024 (256/512/1024), titan-v1 1536, cohere-v3 1024"},
+
 	// ─── Cost / budget ───────────────────────────────────────────
 	"CHATCLI_SESSION_BUDGET_USD": {Value: "(no budget)", Source: "cost_tracker.go"},
 	"CHATCLI_BUDGET_WARNING_PCT": {Value: "0.80", Source: "cost_tracker.go"},

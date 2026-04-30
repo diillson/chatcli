@@ -454,6 +454,7 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "BEDROCK_PROVIDER", envOr("BEDROCK_PROVIDER"))
 	kv(p, "BEDROCK_MAX_TOKENS", envOr("BEDROCK_MAX_TOKENS"))
 	kv(p, "BEDROCK_TEMPERATURE", envOr("BEDROCK_TEMPERATURE"))
+	kv(p, "BEDROCK_TOP_P", envOr("BEDROCK_TOP_P"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.prov.copilot")
