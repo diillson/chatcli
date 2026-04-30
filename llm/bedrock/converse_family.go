@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -53,7 +54,7 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 		Messages: messages,
 		System:   system,
 		InferenceConfig: &bedrockruntimetypes.InferenceConfiguration{
-			MaxTokens: aws.Int32(int32(effectiveMaxTokens)),
+			MaxTokens: aws.Int32(clampInt32(effectiveMaxTokens)),
 		},
 	}
 	if t := os.Getenv("BEDROCK_TEMPERATURE"); t != "" {
@@ -70,6 +71,8 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 	start := time.Now()
 	client.LogRequestStart(c.logger, "BEDROCK", c.model,
 		zap.String("family", string(familyConverse)),
+		zap.String("region", c.region),
+		zap.String("endpoint", RuntimeEndpointURL(c.region)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", effectiveMaxTokens),
 	)
@@ -93,6 +96,21 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 		zap.Int("response_chars", len(responseText)),
 	)
 	return responseText, nil
+}
+
+// clampInt32 narrows an int into the int32 range Bedrock's Converse API
+// expects for MaxTokens. Practical maxima for any model are well under
+// the int32 ceiling, but the explicit clamp silences gosec G115 and
+// keeps the conversion safe even if a misconfigured caller passes a
+// truly huge value.
+func clampInt32(v int) int32 {
+	if v < 0 {
+		return 0
+	}
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(v)
 }
 
 func (c *BedrockClient) getMaxTokensConverse() int {

@@ -70,9 +70,10 @@ type Bedrock struct {
 	family  embedFamily
 	logger  *zap.Logger
 
-	once    sync.Once
-	runtime *bedrockruntime.Client
-	initErr error
+	once     sync.Once
+	runtime  *bedrockruntime.Client
+	endpoint string
+	initErr  error
 }
 
 // NewBedrock constructs the provider. region/profile follow the same
@@ -119,6 +120,13 @@ func (b *Bedrock) Embed(ctx context.Context, texts []string) ([][]float32, error
 	if err := b.ensureRuntime(ctx); err != nil {
 		return nil, err
 	}
+	b.logger.Debug("bedrock embeddings: request",
+		zap.String("model", b.model),
+		zap.String("family", string(b.family)),
+		zap.String("region", b.region),
+		zap.String("endpoint", b.endpoint),
+		zap.Int("batch_size", len(texts)),
+	)
 	switch b.family {
 	case embedFamilyCohere:
 		return b.embedCohere(ctx, texts)
@@ -136,6 +144,14 @@ func (b *Bedrock) ensureRuntime(ctx context.Context) error {
 		}
 		b.runtime = runtime
 		b.region = resolvedRegion
+		b.endpoint = bedrock.RuntimeEndpointURL(resolvedRegion)
+		b.logger.Info("bedrock embeddings: configured",
+			zap.String("region", b.region),
+			zap.String("endpoint", b.endpoint),
+			zap.String("model", b.model),
+			zap.String("family", string(b.family)),
+			zap.Int("dim", b.dim),
+		)
 	})
 	return b.initErr
 }

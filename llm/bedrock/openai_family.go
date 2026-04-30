@@ -53,6 +53,8 @@ func (c *BedrockClient) sendPromptOpenAI(ctx context.Context, prompt string, his
 	start := time.Now()
 	client.LogRequestStart(c.logger, "BEDROCK", c.model,
 		zap.String("family", string(familyOpenAI)),
+		zap.String("region", c.region),
+		zap.String("endpoint", RuntimeEndpointURL(c.region)),
 		zap.Int("payload_bytes", len(payload)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", effectiveMaxTokens),

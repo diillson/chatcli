@@ -15,6 +15,21 @@ import (
 	"go.uber.org/zap"
 )
 
+// RuntimeEndpointURL returns the standard AWS Bedrock runtime endpoint
+// for a given region. The SDK resolves this internally through the
+// service-default endpoint resolver, but we expose it explicitly so it
+// can land in structured logs — every other LLM client in the project
+// logs the URL it talks to, and Bedrock used to be the odd one out.
+//
+// Returns an empty string for an empty region so callers can decide
+// whether to log the field at all.
+func RuntimeEndpointURL(region string) string {
+	if region == "" {
+		return ""
+	}
+	return "https://bedrock-runtime." + region + ".amazonaws.com"
+}
+
 // LoadBedrockRuntime builds a bedrockruntime.Client using the same
 // credential chain, region resolution, IMDS gating and corporate-CA
 // support that the chat client (BedrockClient) uses. Exported so other
