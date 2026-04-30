@@ -16,12 +16,17 @@ import (
 )
 
 // NewByName returns a provider by short name. Supported names: "voyage",
-// "openai", "null", "" (== "null"). Unknown names return ErrUnknownProvider.
+// "openai", "bedrock", "null", "" (== "null"). Unknown names return
+// ErrUnknownProvider.
 //
 // Required env vars per provider:
 //   - voyage: VOYAGE_API_KEY (model: CHATCLI_EMBED_MODEL or "voyage-3")
 //   - openai: OPENAI_API_KEY (model: CHATCLI_EMBED_MODEL or
 //     "text-embedding-3-small"; dim: CHATCLI_EMBED_DIMENSIONS)
+//   - bedrock: AWS credential chain (AWS_PROFILE / AWS_ACCESS_KEY_ID /
+//     IAM role); model: CHATCLI_EMBED_MODEL or "amazon.titan-embed-text-v2:0";
+//     dim: CHATCLI_EMBED_DIMENSIONS (Titan v2: 256/512/1024); region:
+//     BEDROCK_REGION or AWS_REGION; profile: AWS_PROFILE.
 func NewByName(name string) (Provider, error) {
 	switch NormalizeName(name) {
 	case "", "null", "off":
@@ -36,9 +41,28 @@ func NewByName(name string) (Provider, error) {
 			}
 		}
 		return NewOpenAI(os.Getenv("OPENAI_API_KEY"), os.Getenv("CHATCLI_EMBED_MODEL"), dim)
+	case "bedrock":
+		dim := 0
+		if v := os.Getenv("CHATCLI_EMBED_DIMENSIONS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				dim = n
+			}
+		}
+		region := firstNonEmpty(os.Getenv("BEDROCK_REGION"), os.Getenv("AWS_REGION"))
+		profile := os.Getenv("AWS_PROFILE")
+		return NewBedrock(os.Getenv("CHATCLI_EMBED_MODEL"), region, profile, dim, nil)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownProvider, name)
 	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // NewFromEnv reads CHATCLI_EMBED_PROVIDER and dispatches via NewByName.

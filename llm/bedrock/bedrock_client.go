@@ -160,36 +160,42 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	if c.runtime != nil {
 		return nil
 	}
-	opts := []func(*awsconfig.LoadOptions) error{}
-	if c.region != "" {
-		opts = append(opts, awsconfig.WithRegion(c.region))
-	}
-	if c.profile != "" {
-		opts = append(opts, awsconfig.WithSharedConfigProfile(c.profile))
-	}
-	if httpClient, note := buildCorporateHTTPClient(c.logger); httpClient != nil {
-		opts = append(opts, awsconfig.WithHTTPClient(httpClient))
-		if note != "" {
-			c.logger.Warn(note)
-		}
-	}
-	if shouldDisableIMDS() {
-		opts = append(opts, awsconfig.WithEC2IMDSClientEnableState(imds.ClientDisabled))
-	}
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	runtime, resolvedRegion, err := LoadBedrockRuntime(ctx, c.region, c.profile, c.logger)
 	if err != nil {
-		return fmt.Errorf("bedrock: failed to load AWS config: %w", err)
+		return err
 	}
-	if cfg.Region == "" {
-		return fmt.Errorf("bedrock: AWS region not configured (set AWS_REGION, BEDROCK_REGION, or configure ~/.aws/config)")
+	// The control-plane client is only used by the chat client (ListModels);
+	// the embedding provider doesn't need it, which is why LoadBedrockRuntime
+	// returns just the runtime. We rebuild the AWS config locally here only
+	// to construct the bedrock control client with the same credential chain.
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, controlPlaneConfigOptions(c.region, c.profile)...)
+	if err != nil {
+		return fmt.Errorf("bedrock: failed to load control-plane AWS config: %w", err)
 	}
-	c.region = cfg.Region
-	c.runtime = bedrockruntime.NewFromConfig(cfg)
+	c.region = resolvedRegion
+	c.runtime = runtime
 	c.control = bedrocksvc.NewFromConfig(cfg)
 	c.logger.Info(i18n.T("llm.info.configuring_provider", "Bedrock"),
 		zap.String("region", c.region),
 		zap.String("model", c.model))
 	return nil
+}
+
+// controlPlaneConfigOptions mirrors the LoadOptions used by the runtime
+// helper so the bedrock control-plane client (used for ListModels) sees
+// the same region/profile/IMDS settings as the runtime client.
+func controlPlaneConfigOptions(region, profile string) []func(*awsconfig.LoadOptions) error {
+	opts := []func(*awsconfig.LoadOptions) error{}
+	if region != "" {
+		opts = append(opts, awsconfig.WithRegion(region))
+	}
+	if profile != "" {
+		opts = append(opts, awsconfig.WithSharedConfigProfile(profile))
+	}
+	if shouldDisableIMDS() {
+		opts = append(opts, awsconfig.WithEC2IMDSClientEnableState(imds.ClientDisabled))
+	}
+	return opts
 }
 
 // SendPrompt dispatches to the correct body schema based on the resolved
