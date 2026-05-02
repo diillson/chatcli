@@ -1,0 +1,329 @@
+name: Image Refresh (drift remediation)
+
+# Re-scans the last 3 stable image tags published to GHCR (chatcli + chatcli-operator)
+# and rebuilds them in-place when fixable HIGH/CRITICAL OS vulns are detected.
+# The semver tag is preserved; only the underlying digest changes.
+#
+# Triggers:
+#   - schedule: weekly Monday 06:00 UTC (aligned with security-scan.yml)
+#   - workflow_dispatch: manual run with optional `tags` and `force` inputs
+#   - repository_dispatch (type: image-refresh-request): external triggers (e.g. ArtifactHub webhook)
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Comma-separated semver tags to refresh (e.g. "1.111.1,1.110.0"). Empty = last 3 stable.'
+        required: false
+        type: string
+      force:
+        description: 'Refresh even if scan is clean'
+        required: false
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [image-refresh-request]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  issues: write
+
+concurrency:
+  group: image-refresh
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: Discover target tags
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.compute.outputs.matrix }}
+      tag_list: ${{ steps.compute.outputs.tag_list }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve target matrix
+        id: compute
+        env:
+          INPUT_TAGS: ${{ github.event.inputs.tags }}
+          DISPATCH_TAGS: ${{ github.event.client_payload.tags }}
+        run: |
+          set -euo pipefail
+          INPUT="${INPUT_TAGS:-${DISPATCH_TAGS:-}}"
+          if [ -n "$INPUT" ]; then
+            TAGS=$(echo "$INPUT" | tr ',' '\n' | sed 's/^v//' | sed '/^$/d')
+          else
+            TAGS=$(git tag -l 'v*' --sort=-v:refname | head -3 | sed 's/^v//')
+          fi
+          if [ -z "$TAGS" ]; then
+            echo "::error::No semver tags resolved"
+            exit 1
+          fi
+          echo "Resolved tags:"
+          echo "$TAGS"
+          INCLUDES=$(echo "$TAGS" | jq -R -s -c '
+            split("\n") | map(select(length > 0)) | map(. as $t | [
+              {image: "chatcli",          tag: $t, dockerfile: "Dockerfile",          context: "."},
+              {image: "chatcli-operator", tag: $t, dockerfile: "operator/Dockerfile", context: "."}
+            ]) | flatten
+          ')
+          {
+            echo "matrix={\"include\":$INCLUDES}"
+            echo "tag_list<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  refresh:
+    name: "${{ matrix.image }}:${{ matrix.tag }}"
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    steps:
+      - name: Checkout source at tag
+        uses: actions/checkout@v6
+        with:
+          ref: "v${{ matrix.tag }}"
+          fetch-depth: 1
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scan currently-published image
+        id: scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "ghcr.io/diillson/${{ matrix.image }}:${{ matrix.tag }}"
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+          scanners: vuln
+          exit-code: '1'
+
+      - name: Decide whether to refresh
+        id: decide
+        env:
+          FORCE_INPUT: ${{ github.event.inputs.force }}
+          FORCE_DISPATCH: ${{ github.event.client_payload.force }}
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+        run: |
+          set -euo pipefail
+          FORCE="${FORCE_INPUT:-${FORCE_DISPATCH:-false}}"
+          if [ "$FORCE" = "true" ] || [ "$SCAN_OUTCOME" = "failure" ]; then
+            REASON=$([ "$FORCE" = "true" ] && echo "forced" || echo "vulnerabilities-detected")
+            echo "refresh=true"  >> "$GITHUB_OUTPUT"
+            echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+            echo "::notice::Refresh required for ${{ matrix.image }}:${{ matrix.tag }} (reason: $REASON)"
+          else
+            echo "refresh=false" >> "$GITHUB_OUTPUT"
+            echo "reason=clean"  >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ matrix.image }}:${{ matrix.tag }} is clean — skipping refresh"
+          fi
+
+      - name: Set up QEMU
+        if: steps.decide.outputs.refresh == 'true'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        if: steps.decide.outputs.refresh == 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build & push refreshed multi-arch image
+        if: steps.decide.outputs.refresh == 'true'
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          no-cache: true
+          tags: "ghcr.io/diillson/${{ matrix.image }}:${{ matrix.tag }}"
+          provenance: true
+          sbom: true
+
+      - name: Trivy gate on rebuilt digest
+        if: steps.decide.outputs.refresh == 'true'
+        id: gate
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "ghcr.io/diillson/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+          scanners: vuln
+          exit-code: '1'
+
+      - name: Install Cosign
+        if: steps.decide.outputs.refresh == 'true' && steps.gate.outcome == 'success'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign refreshed manifest (keyless OIDC)
+        if: steps.decide.outputs.refresh == 'true' && steps.gate.outcome == 'success'
+        run: |
+          cosign sign --yes --recursive \
+            "ghcr.io/diillson/${{ matrix.image }}:${{ matrix.tag }}"
+
+      - name: Record result
+        if: always()
+        env:
+          IMAGE: ${{ matrix.image }}
+          TAG: ${{ matrix.tag }}
+          REFRESH: ${{ steps.decide.outputs.refresh }}
+          REASON: ${{ steps.decide.outputs.reason }}
+          GATE: ${{ steps.gate.outcome }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          if [ "$REFRESH" != "true" ]; then
+            STATUS="clean"
+          elif [ "$GATE" = "success" ]; then
+            STATUS="refreshed"
+          else
+            STATUS="gate_failed"
+          fi
+          jq -nc \
+            --arg image   "$IMAGE" \
+            --arg tag     "$TAG" \
+            --arg status  "$STATUS" \
+            --arg reason  "${REASON:-unknown}" \
+            --arg digest  "${DIGEST:-}" \
+            '{image:$image, tag:$tag, status:$status, reason:$reason, digest:$digest}' \
+            > "results/${IMAGE}-${TAG}.json"
+          {
+            echo "## ${IMAGE}:${TAG}"
+            echo ""
+            echo "- Status: \`${STATUS}\`"
+            echo "- Reason: \`${REASON:-unknown}\`"
+            [ -n "${DIGEST:-}" ] && echo "- Digest: \`${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload result artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: refresh-result-${{ matrix.image }}-${{ matrix.tag }}
+          path: results/*.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  report:
+    name: Aggregate results & open issue
+    needs: refresh
+    if: always() && needs.refresh.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download all results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: refresh-result-*
+          path: /tmp/results
+          merge-multiple: true
+
+      - name: Aggregate
+        id: agg
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FILES=(/tmp/results/*.json)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "::warning::No result artifacts found"
+            echo "any_action=false" >> "$GITHUB_OUTPUT"
+            echo "any_failure=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ALL=$(jq -s '.' "${FILES[@]}")
+          REFRESHED=$(echo "$ALL" | jq '[.[] | select(.status=="refreshed")]')
+          FAILED=$(echo   "$ALL" | jq '[.[] | select(.status=="gate_failed")]')
+          CLEAN=$(echo    "$ALL" | jq '[.[] | select(.status=="clean")]')
+          ANY_ACTION=$([ "$(echo "$REFRESHED" | jq 'length')" -gt 0 ] || [ "$(echo "$FAILED" | jq 'length')" -gt 0 ] && echo true || echo false)
+          ANY_FAILURE=$([ "$(echo "$FAILED" | jq 'length')" -gt 0 ] && echo true || echo false)
+          {
+            echo "any_action=$ANY_ACTION"
+            echo "any_failure=$ANY_FAILURE"
+            echo "refreshed_count=$(echo "$REFRESHED" | jq 'length')"
+            echo "failed_count=$(echo   "$FAILED"    | jq 'length')"
+            echo "clean_count=$(echo    "$CLEAN"     | jq 'length')"
+          } >> "$GITHUB_OUTPUT"
+          echo "$ALL" > /tmp/all.json
+          # Render markdown body
+          {
+            echo "## Image refresh report — $(date -u +%Y-%m-%d)"
+            echo ""
+            echo "Triggered by: \`${{ github.event_name }}\` (run [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}))"
+            echo ""
+            if [ "$(echo "$FAILED" | jq 'length')" -gt 0 ]; then
+              echo "### Gate failures (manual triage required)"
+              echo ""
+              echo "| Image | Tag | Reason |"
+              echo "| --- | --- | --- |"
+              echo "$FAILED" | jq -r '.[] | "| `\(.image)` | `\(.tag)` | `\(.reason)` |"'
+              echo ""
+            fi
+            if [ "$(echo "$REFRESHED" | jq 'length')" -gt 0 ]; then
+              echo "### Refreshed"
+              echo ""
+              echo "| Image | Tag | Reason | New digest |"
+              echo "| --- | --- | --- | --- |"
+              echo "$REFRESHED" | jq -r '.[] | "| `\(.image)` | `\(.tag)` | `\(.reason)` | `\(.digest // "n/a")` |"'
+              echo ""
+            fi
+            if [ "$(echo "$CLEAN" | jq 'length')" -gt 0 ]; then
+              echo "### Clean (no action)"
+              echo ""
+              echo "$CLEAN" | jq -r '.[] | "- `\(.image):\(.tag)`"'
+              echo ""
+            fi
+          } > /tmp/body.md
+          cat /tmp/body.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Ensure tracking labels exist
+        if: steps.agg.outputs.any_action == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create image-refresh   --color 1d76db --description "Automated image refresh runs" --force
+          gh label create security        --color d93f0b --description "Security-related"             --force
+          gh label create priority/p1     --color b60205 --description "P1 — manual triage required"  --force
+
+      - name: Open or comment tracking issue
+        if: steps.agg.outputs.any_action == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANY_FAILURE: ${{ steps.agg.outputs.any_failure }}
+        run: |
+          set -euo pipefail
+          TITLE="chore(security): image refresh report — $(date -u +%Y-%m-%d)"
+          BODY=$(cat /tmp/body.md)
+          LABELS="image-refresh,security"
+          if [ "$ANY_FAILURE" = "true" ]; then
+            LABELS="$LABELS,priority/p1"
+          fi
+          # Reuse open issue from the same UTC day if present, otherwise create
+          EXISTING=$(gh issue list --label image-refresh --state open --json number,title --jq \
+            ".[] | select(.title==\"$TITLE\") | .number" | head -1)
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+            echo "Commented on issue #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body "$BODY" --label "$LABELS"
+          fi
