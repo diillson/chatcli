@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -61,17 +62,39 @@ func injectTTYLine(line string) error {
 	}
 	defer closer()
 
-	// In raw-mode terminals (which is what go-prompt puts the TTY in),
-	// the Enter key delivers \r (carriage return), NOT \n. Sending \n
-	// only inserts a literal byte the line editor stores but does not
-	// treat as submit, so the user still has to press Enter to fire
-	// the injected command. Sending \r matches what the keyboard emits
-	// and triggers go-prompt's submit handler the same way.
-	payload := append([]byte(line), '\r')
-	for _, b := range payload {
+	// go-prompt parses each Read() call as a single key event, mapping
+	// the WHOLE byte slice via bytes.Equal against its ASCII table. A
+	// multi-byte read does not match any control sequence, so the entry
+	// hits the default branch and gets inserted as text. That means
+	// dumping "/resume <token>\r" all at once via TIOCSTI lands on the
+	// prompt as literal characters — including the trailing \r — and
+	// the line is never submitted.
+	//
+	// Workaround: split the injection into two TIOCSTI bursts.
+	//
+	//   1. The command body. go-prompt reads it as a single multi-byte
+	//      buffer, falls into the default branch, and InsertText writes
+	//      the chars into the line editor.
+	//
+	//   2. A 15 ms pause — go-prompt's readBuffer goroutine sleeps 10 ms
+	//      between Read() calls, so 15 ms guarantees the next read sees
+	//      a fresh single-byte buffer.
+	//
+	//   3. A lone \r byte. With len(b)==1 and b[0]==0x0d, GetKey
+	//      classifies it as ControlM, which feed() routes to the
+	//      submit branch (case Enter, ControlJ, ControlM).
+	//
+	// Net effect: the same UX as a real key press, achieved without
+	// modifying go-prompt.
+	body := []byte(line)
+	for _, b := range body {
 		if err := writeOneByte(fd, b); err != nil {
 			return err
 		}
+	}
+	time.Sleep(15 * time.Millisecond)
+	if err := writeOneByte(fd, '\r'); err != nil {
+		return err
 	}
 	return nil
 }
