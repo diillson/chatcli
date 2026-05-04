@@ -2058,20 +2058,22 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								return ctx.Err()
 							}
 
-							// Park sentinel: a tool (@park) asked the loop
-							// to suspend. We snapshot at this exact point —
-							// the assistant message with the @park tool_use
-							// is already in history (line 1318/1324) — and
-							// enqueue the scheduler-driven resume. The
-							// sentinel bubbles out of the loop; Run() reads
-							// it via errors.Is and returns nil to the user.
+							// Park sentinel: a tool (@park) asked the loop to
+							// suspend. We snapshot at this exact point — the
+							// assistant message with the @park tool_use is
+							// already in history (line 1318/1324) — and enqueue
+							// the scheduler-driven resume. The sentinel bubbles
+							// out of the loop; Run() reads it via errors.Is
+							// and returns nil to the user.
+							//
+							// The box footer was already rendered above (line
+							// 2053). Don't repeat it here — that produced the
+							// double-close that landed in the user's terminal
+							// as two `╰────╮` rows.
 							if req, parked := park.AsParkError(execErr); parked {
 								var pendingID string
 								if i < len(nativeToolCalls) {
 									pendingID = nativeToolCalls[i].ID
-								}
-								if !coderCompact {
-									renderer.RenderStreamBoxEnd(agent.ColorPurple)
 								}
 								return a.handleAgentPark(ctx, req, pendingID, toolName)
 							}

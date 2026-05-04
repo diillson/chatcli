@@ -98,14 +98,23 @@ func (a *AgentMode) handleAgentPark(
 			zap.String("token", snap.Token), zap.Error(err))
 	}
 
-	// Banner — informs user via stdout. The dispatch loop's trailing
-	// stdout writes have already cleared, so this stands out.
-	fmt.Println()
-	fmt.Println(colorize("  🅿️  "+i18n.T("park.banner.scheduled",
-		snap.Token, parkRequestETA(req), describeParkRequest(req)),
-		ColorCyan+ColorBold))
-	fmt.Println(colorize("     "+i18n.T("park.banner.hint", snap.Token, snap.Token), ColorGray))
-	fmt.Println()
+	// Banner — a compact two-block box that gives the user the resume
+	// time front-and-center and the management hints below.
+	//
+	// Layout:
+	//   ╭── 🅿️  Agent estacionado
+	//   │   token  3e06f8d5
+	//   │   modo   delay 10s
+	//   │   nota   <user note>
+	//   │   retoma 20:39:00  (em ~10s)
+	//   ├── 💡 Controle
+	//   │   /resume 3e06f8d5         retomar agora
+	//   │   /cancel-park 3e06f8d5    abortar
+	//   ╰──
+	//
+	// The box uses the same Unicode rounded-box characters as the agent
+	// renderer for visual consistency with the rest of the /coder UI.
+	renderParkBanner(snap, req)
 
 	// Bus event so /jobs and /parked stay coherent (the scheduler bridge
 	// owns publication; we route through it instead of the scheduler
@@ -363,6 +372,94 @@ func buildParkResumeMessage(req park.Request, outcome, detail string) string {
 	}
 	sb.WriteString("\n\nContinue from where you stopped. Use the detail above to inform your next step.")
 	return sb.String()
+}
+
+// renderParkBanner draws the structured park banner. Kept separate
+// from handleAgentPark so the layout can evolve without touching the
+// state-machine code, and so unit tests can render-only against a
+// captured snapshot.
+//
+// All user-visible strings flow through i18n.T to honor the project's
+// i18n-required policy. Field labels are localized; tokens, durations
+// and timestamps are not (they are identity values).
+func renderParkBanner(snap *park.Snapshot, req park.Request) {
+	short := snap.Token
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	now := time.Now()
+	resumeAt, eta := parkResumeETA(req, now)
+
+	headerColor := ColorCyan + ColorBold
+	frameColor := ColorCyan
+	labelColor := ColorGray
+	valueColor := ""
+	hintColor := ColorYellow
+
+	pad := func(s string) string {
+		return s + strings.Repeat(" ", maxLabelWidth-runeLen(s))
+	}
+	row := func(label, value, valColor string) {
+		fmt.Println(
+			colorize("  │  ", frameColor) +
+				colorize(pad(label), labelColor) +
+				"  " +
+				colorize(value, valColor),
+		)
+	}
+
+	fmt.Println()
+	fmt.Println(colorize("  ╭── 🅿️  ", frameColor) + colorize(i18n.T("park.box.title"), headerColor))
+	row(i18n.T("park.box.token"), short+colorize("  ("+snap.Token+")", labelColor), valueColor)
+	row(i18n.T("park.box.mode"), describeParkRequest(req), valueColor)
+	if req.Note != "" {
+		row(i18n.T("park.box.note"), req.Note, valueColor)
+	}
+	row(i18n.T("park.box.resume_at"), fmt.Sprintf("%s  %s", resumeAt, colorize("("+eta+")", labelColor)), valueColor)
+	fmt.Println(colorize("  ├── 💡 ", frameColor) + colorize(i18n.T("park.box.controls"), hintColor))
+	row("/resume "+short, i18n.T("park.box.controls.resume_now"), labelColor)
+	row("/cancel-park "+short, i18n.T("park.box.controls.cancel"), labelColor)
+	fmt.Println(colorize("  ╰──", frameColor))
+	fmt.Println()
+}
+
+// maxLabelWidth keeps the box columns visually aligned. Set to fit the
+// longest localized label (Portuguese "/cancel-park <8-char>" + slack).
+const maxLabelWidth = 22
+
+// runeLen counts visible runes (not bytes), so emoji and accented
+// characters don't break the column padding.
+func runeLen(s string) int { return len([]rune(s)) }
+
+// parkResumeETA returns ("HH:MM:SS", "in 10s" / "deadline 5m") tuple
+// suitable for rendering. The first component is wallclock; the second
+// is a relative-time hint to remove ambiguity for short delays.
+func parkResumeETA(r park.Request, now time.Time) (string, string) {
+	switch r.Mode {
+	case park.ModeDelay:
+		t := now.Add(r.Delay)
+		return t.Format("15:04:05"), "em " + formatShortDuration(r.Delay)
+	case park.ModeUntil:
+		return r.Until.Format("15:04:05"), "em " + formatShortDuration(time.Until(r.Until))
+	case park.ModeForURL, park.ModeForCmd:
+		return r.Deadline.Format("15:04:05"), "deadline em " + formatShortDuration(time.Until(r.Deadline))
+	}
+	return "—", "—"
+}
+
+// formatShortDuration writes a human-friendly duration with second
+// precision for sub-minute values, otherwise minutes/hours.
+func formatShortDuration(d time.Duration) string {
+	if d < 0 {
+		return "agora"
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // quietColorize is a thin alias so this file does not depend on private
