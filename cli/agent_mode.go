@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
@@ -668,7 +669,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 
 	// --- 2. O LOOP DE RACIOCÍNIO-AÇÃO (ReAct) ---
-	return a.processAIResponseAndAct(ctx, maxTurns)
+	err := a.processAIResponseAndAct(ctx, maxTurns)
+	// Park is a successful suspension, not an error. The user is back at
+	// the prompt; the scheduler will fire the resume in due time.
+	if errors.Is(err, errAgentParkedRequested) {
+		return nil
+	}
+	return err
 }
 
 // RunCoderOnce executa o modo coder de forma não-interativa (one-shot),
@@ -2050,6 +2057,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							if ctx.Err() != nil {
 								return ctx.Err()
 							}
+
+							// Park sentinel: a tool (@park) asked the loop
+							// to suspend. We snapshot at this exact point —
+							// the assistant message with the @park tool_use
+							// is already in history (line 1318/1324) — and
+							// enqueue the scheduler-driven resume. The
+							// sentinel bubbles out of the loop; Run() reads
+							// it via errors.Is and returns nil to the user.
+							if req, parked := park.AsParkError(execErr); parked {
+								var pendingID string
+								if i < len(nativeToolCalls) {
+									pendingID = nativeToolCalls[i].ID
+								}
+								if !coderCompact {
+									renderer.RenderStreamBoxEnd(agent.ColorPurple)
+								}
+								return a.handleAgentPark(ctx, req, pendingID, toolName)
+							}
 						}
 					}
 				}
@@ -2258,7 +2283,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 func (a *AgentMode) continueWithNewAIResponse(ctx context.Context) {
 	turns := AgentMaxTurns()
 
-	if err := a.processAIResponseAndAct(ctx, turns); err != nil {
+	err := a.processAIResponseAndAct(ctx, turns)
+	// Park is success, not an error to surface to the user.
+	if errors.Is(err, errAgentParkedRequested) {
+		return
+	}
+	if err != nil {
 		fmt.Println(colorize(
 			i18n.T("agent.error.continuation_failed", err),
 			ColorYellow,

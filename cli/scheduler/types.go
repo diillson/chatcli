@@ -390,6 +390,15 @@ const (
 	ActionHook ActionType = "hook"
 	// ActionNoop — do nothing (testing, placeholders).
 	ActionNoop ActionType = "noop"
+	// ActionAgentResume — load a parked agent snapshot and re-enter the
+	// interactive ReAct loop. Fired by single-shot timer parks
+	// (delay/until) and by the polling driver when the probe matches.
+	ActionAgentResume ActionType = "agent_resume"
+	// ActionParkPoll — drives the polling loop for @park for_url /
+	// for_cmd. Re-enqueues itself at every interval until the probe
+	// matches success_when (transitions to AgentResume) or the deadline
+	// elapses (also transitions to AgentResume with timeout outcome).
+	ActionParkPoll ActionType = "park_poll"
 )
 
 // Action describes what to execute when the schedule fires (and the

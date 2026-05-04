@@ -369,7 +369,12 @@ func (s *Scheduler) runAction(j *Job) {
 	}
 
 	startedAt := time.Now()
-	env := &ExecEnv{Logger: s.logger, Bridge: s.bridge, Job: j.Summary()}
+	env := &ExecEnv{
+		Logger:  s.logger,
+		Bridge:  s.bridge,
+		Job:     j.Summary(),
+		Enqueue: s.Enqueue,
+	}
 	res := execFn.Execute(execCtx, action, env)
 	duration := time.Since(startedAt)
 	release(res.Err == nil)

@@ -295,6 +295,34 @@ type ChatCLI struct {
 	schedulerSocket string
 	schedulerCancel context.CancelFunc
 	schedulerDirty  int32 // atomic — bumped by scheduler events for prompt refresh
+	// schedulerBridge is the in-process CLIBridge implementation. The
+	// agent loop reaches it via ChatCLI when handling @park parking
+	// (snapshot enqueue) and resume notifications. Nil when the
+	// scheduler subsystem is disabled or running remote-only.
+	schedulerBridge *schedulerBridge
+
+	// pendingResumeQueue holds park tokens whose resume jobs fired
+	// while the user was at the chat prompt. The outer Run() loop
+	// dequeues them before re-entering the prompt. Guarded by
+	// pendingResumeMu — the bridge writes from the scheduler
+	// dispatcher goroutine; cli.go reads from the main loop.
+	pendingResumeMu    sync.Mutex
+	pendingResumeQueue []string
+
+	// parkOutcomes carries the (outcome, detail) tuple from the
+	// NotifyParkComplete call to the consumer that runs RunResumed,
+	// without forcing the consumer to re-read scheduler state. The map
+	// is keyed by token; entries are deleted on consumption.
+	parkOutcomeMu sync.Mutex
+	parkOutcomes  map[string]parkOutcome
+}
+
+// parkOutcome carries the resume-time payload from the bridge's
+// NotifyParkComplete to the cli.go consumer. Kept tiny and value-typed
+// so the map stays cheap to copy.
+type parkOutcome struct {
+	Outcome string
+	Detail  string
 }
 
 // thinkingOverrideState carries the user's /thinking choice. set
@@ -342,6 +370,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebFetchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
 	}
 
 	cli.configureProviderAndModel()
@@ -872,6 +901,22 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				cli.runCoderLogic()
 			} else if strings.HasPrefix(lastCmd, "/run") || strings.HasPrefix(lastCmd, "/agent") || strings.HasPrefix(lastCmd, "/plan") {
 				cli.runAgentLogic()
+			}
+
+			// Auto-resume any parked agents whose scheduler-driven wait
+			// has been satisfied since the user was last at the prompt.
+			// The drain runs AFTER the foreground dispatch returns so a
+			// resume cannot interrupt active agent work; it runs BEFORE
+			// the next prompt iteration so the user sees their parked
+			// agent continue without manual intervention.
+			//
+			// Drain is iterative because a resumed agent may itself emit
+			// a new @park, which queues the next token while we're still
+			// processing the previous one — keep draining until the
+			// queue is empty for one full cycle.
+			for cli.drainPendingResumes() {
+				// loop body intentionally empty; drainPendingResumes
+				// returns false when the queue is exhausted.
 			}
 		}
 	}

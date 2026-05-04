@@ -54,6 +54,12 @@ func (b *policyStubBridge) WorkspaceDir() string         { return "" }
 func (b *policyStubBridge) LLMClient() client.LLMClient  { return nil }
 func (b *policyStubBridge) AppendHistory(models.Message) {}
 func (b *policyStubBridge) PublishEvent(Event)           {}
+func (b *policyStubBridge) NotifyParkComplete(context.Context, string, string, string) error {
+	return nil
+}
+func (b *policyStubBridge) RunHTTPProbe(context.Context, string, string, map[string]string, time.Duration) (int, string, error) {
+	return 0, "", nil
+}
 
 func TestEnumerateShellCommands_ActionAndWait(t *testing.T) {
 	j := &Job{

@@ -168,6 +168,15 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case strings.HasPrefix(userInput, "/jobs"):
 		ch.cli.handleJobsCommand(userInput)
 		return false
+	case userInput == "/parked" || strings.HasPrefix(userInput, "/parked "):
+		ch.cli.handleParkedCommand(userInput)
+		return false
+	case strings.HasPrefix(userInput, "/resume"):
+		ch.cli.handleResumeCommand(userInput)
+		return false
+	case strings.HasPrefix(userInput, "/cancel-park"):
+		ch.cli.handleCancelParkCommand(userInput)
+		return false
 	case strings.HasPrefix(userInput, "/channel"):
 		ch.cli.handleChannelCommand(userInput)
 		return false
