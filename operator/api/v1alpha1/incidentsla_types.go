@@ -133,7 +133,3 @@ type IncidentSLAList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []IncidentSLA `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&IncidentSLA{}, &IncidentSLAList{})
-}

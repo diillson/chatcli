@@ -553,7 +553,3 @@ type InstanceList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Instance `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&Instance{}, &InstanceList{})
-}

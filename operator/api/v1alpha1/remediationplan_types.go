@@ -381,7 +381,3 @@ type RemediationPlanList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []RemediationPlan `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&RemediationPlan{}, &RemediationPlanList{})
-}

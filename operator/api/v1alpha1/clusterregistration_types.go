@@ -100,7 +100,3 @@ type ClusterRegistrationList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ClusterRegistration `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&ClusterRegistration{}, &ClusterRegistrationList{})
-}

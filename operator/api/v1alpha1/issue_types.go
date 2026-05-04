@@ -133,7 +133,3 @@ type IssueList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Issue `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&Issue{}, &IssueList{})
-}

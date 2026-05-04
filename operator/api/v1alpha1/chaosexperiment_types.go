@@ -185,7 +185,3 @@ type ChaosExperimentList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ChaosExperiment `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&ChaosExperiment{}, &ChaosExperimentList{})
-}

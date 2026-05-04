@@ -122,7 +122,3 @@ type EscalationPolicyList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []EscalationPolicy `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&EscalationPolicy{}, &EscalationPolicyList{})
-}

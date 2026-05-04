@@ -88,7 +88,3 @@ type AuditEventList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []AuditEvent `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&AuditEvent{}, &AuditEventList{})
-}
