@@ -27,7 +27,33 @@ import (
 // status of their scheduler jobs (when reachable). The output is a
 // compact table; users with many parks can run /jobs list for the full
 // scheduler view.
-func (cli *ChatCLI) handleParkedCommand(_ string) {
+//
+// Subcommands:
+//
+//	/parked          — list (default)
+//	/parked prune    — remove snapshots whose scheduler job is in a
+//	                   terminal state (completed, failed, cancelled,
+//	                   timed_out). Useful to clean up after the resume
+//	                   fired but the snapshot was kept for forensics.
+//	/parked gc <dur> — remove snapshots older than <dur> regardless of
+//	                   job state, e.g. "/parked gc 24h".
+func (cli *ChatCLI) handleParkedCommand(userInput string) {
+	args := strings.Fields(strings.TrimSpace(userInput))
+	if len(args) >= 2 {
+		switch args[1] {
+		case "prune":
+			cli.parkPrune()
+			return
+		case "gc":
+			cli.parkGC(args[2:])
+			return
+		case "help", "-h", "--help":
+			fmt.Println(colorize("  /parked          — list parked agents", ColorGray))
+			fmt.Println(colorize("  /parked prune    — remove snapshots whose scheduler job is terminal", ColorGray))
+			fmt.Println(colorize("  /parked gc <dur> — remove snapshots older than <dur> (e.g. 24h)", ColorGray))
+			return
+		}
+	}
 	snaps, errs := park.List()
 	if len(errs) > 0 {
 		for _, e := range errs {
@@ -252,10 +278,70 @@ func (cli *ChatCLI) dropPendingResume(token string) {
 	cli.parkOutcomeMu.Unlock()
 }
 
+// parkPrune removes on-disk snapshots whose scheduler job has reached
+// a terminal state (completed / failed / cancelled / timed_out). The
+// scheduler keeps terminal jobs around for the audit window, but the
+// snapshot file is dead weight — the agent has either resumed (and
+// the snapshot was kept for forensics) or the job will never fire.
+func (cli *ChatCLI) parkPrune() {
+	snaps, _ := park.List()
+	if len(snaps) == 0 {
+		fmt.Println(colorize("  "+i18n.T("park.list.empty"), ColorGray))
+		return
+	}
+	removed := 0
+	kept := 0
+	for _, s := range snaps {
+		terminal := false
+		if cli.scheduler != nil && s.SchedulerJobID != "" {
+			j, err := cli.scheduler.Query(scheduler.JobID(s.SchedulerJobID))
+			if err != nil || j == nil {
+				// Missing job means the snapshot is orphaned — prune it.
+				terminal = true
+			} else {
+				terminal = j.Status.IsTerminal()
+			}
+		} else {
+			// No scheduler reference → treat as orphaned.
+			terminal = true
+		}
+		if terminal {
+			if err := park.Delete(s.Token); err == nil {
+				removed++
+			}
+		} else {
+			kept++
+		}
+	}
+	fmt.Printf("  %s: %d removed, %d still pending\n",
+		colorize("✓ parked prune", ColorGreen), removed, kept)
+}
+
+// parkGC removes snapshots older than a Go duration regardless of
+// scheduler state. /parked gc 24h is the typical invocation.
+func (cli *ChatCLI) parkGC(args []string) {
+	if len(args) == 0 {
+		fmt.Println(colorize("  Usage: /parked gc <duration>   (e.g. /parked gc 24h)", ColorYellow))
+		return
+	}
+	d, err := time.ParseDuration(args[0])
+	if err != nil {
+		fmt.Println(colorize("  invalid duration: "+err.Error(), ColorYellow))
+		return
+	}
+	cutoff := time.Now().Add(-d)
+	removed, errs := SweepStaleParks(cutoff)
+	for _, e := range errs {
+		fmt.Println(colorize("  ⚠ "+e.Error(), ColorYellow))
+	}
+	fmt.Printf("  %s: %d removed (older than %s)\n",
+		colorize("✓ parked gc", ColorGreen), removed, d)
+}
+
 // SweepStaleParks deletes snapshots whose CreatedAt is older than the
 // cutoff. Returns the count removed and any per-file errors. Suitable
 // for a background goroutine; we don't wire one yet but expose the
-// helper so /parked --gc can call it on demand.
+// helper so /parked gc can call it on demand.
 func SweepStaleParks(cutoff time.Time) (int, []error) {
 	snaps, errs := park.List()
 	removed := 0

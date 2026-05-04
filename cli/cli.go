@@ -562,6 +562,19 @@ func detectProjectDir() string {
 func (cli *ChatCLI) executor(in string) {
 	in = strings.TrimSpace(in)
 
+	// Drain any pending park resumes BEFORE processing the user's
+	// command. Slash commands like /parked, /jobs and chat input all
+	// route through this executor without ever exiting p.Run(); without
+	// this hook a resume that fires during interactive use would only
+	// trigger when the user later runs /coder or /agent. The drain runs
+	// foreground and may take a while (it re-enters the agent loop) —
+	// that is exactly the desired UX: the user sees the agent continue,
+	// then their original input is processed afterwards.
+	if cli.drainPendingResumes() {
+		// Flush any cosmetic state the resume left behind.
+		_ = os.Stdout.Sync()
+	}
+
 	// Handle paste: replace placeholder with real content and show notification
 	if cli.lastPasteInfo != nil {
 		info := cli.lastPasteInfo
@@ -1184,6 +1197,18 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 		}
 		if badge := cli.schedulerStatusLine(); badge != "" {
 			prefix = badge + " " + prefix
+		}
+		// Park resume badge: alerts the user that a parked agent has a
+		// resume queued and is waiting for the next executor tick to
+		// drain. Without this, the user might keep idle-pressing Enter
+		// and never see the resume fire (empty Enter doesn't reach the
+		// executor in go-prompt). Typing any command — including a
+		// no-op like a single character — drains the queue.
+		cli.pendingResumeMu.Lock()
+		n := len(cli.pendingResumeQueue)
+		cli.pendingResumeMu.Unlock()
+		if n > 0 {
+			prefix = fmt.Sprintf("[🅿️  resume ready: %d] ", n) + prefix
 		}
 		return prefix, true
 	}
