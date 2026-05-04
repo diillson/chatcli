@@ -693,14 +693,13 @@ func (b *schedulerBridge) NotifyParkComplete(_ context.Context, token, outcome, 
 	b.cli.parkOutcomes[token] = parkOutcome{Outcome: outcome, Detail: detail}
 	b.cli.parkOutcomeMu.Unlock()
 
-	// Print a banner so the user sees the readiness immediately even
-	// before the auto-resume kicks in. fmt.Println is safe here because
-	// the user is at the chat prompt (or running another agent loop);
-	// either way the line lands above the cursor and is visible.
+	// Print a banner so the user sees the readiness immediately. fmt
+	// writes from this goroutine appear above the go-prompt input line
+	// — go-prompt redraws the prompt at the bottom on its next tick.
 	fmt.Println()
 	fmt.Println(colorize("  🔔 "+
-		fmt.Sprintf("park ready: token=%s outcome=%s — will auto-resume on the next idle prompt (or type /resume %s)",
-			token, outcome, token),
+		fmt.Sprintf("park ready: token=%s outcome=%s — auto-resuming…",
+			token, outcome),
 		ColorCyan+ColorBold))
 	fmt.Println()
 
@@ -708,6 +707,22 @@ func (b *schedulerBridge) NotifyParkComplete(_ context.Context, token, outcome, 
 	b.cli.logger.Info("park: notified ready",
 		zap.String("token", token),
 		zap.String("outcome", outcome))
+
+	// Foreground takeover: inject "/resume <token>\n" into the
+	// controlling TTY so go-prompt reads it as if the user typed it.
+	// This breaks out of p.Run() naturally — its read returns the
+	// synthesized line, the executor fires, drainPendingResumes
+	// consumes the queue, and the resume runs in foreground with full
+	// terminal control (just like /coder does).
+	//
+	// On platforms where TIOCSTI is unavailable or restricted (macOS
+	// since Ventura without legacy_pty_emulation, sandboxed envs), the
+	// inject silently no-ops; the executor-hook + outer-loop drain
+	// still consume the queue when the user types any character.
+	if err := injectTTYLine("/resume " + token); err != nil {
+		b.cli.logger.Debug("park: TTY inject failed (auto-resume requires user keypress)",
+			zap.String("token", token), zap.Error(err))
+	}
 	return nil
 }
 

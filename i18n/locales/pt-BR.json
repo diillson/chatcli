@@ -2244,6 +2244,9 @@
   "sched.jobs.daemon.stop": "(use o binário: chatcli daemon stop)",
   "sched.jobs.daemon.restart": "(use o binário: chatcli daemon stop && start)",
 
+  "help.command.parked": "lista agents estacionados (/parked prune | gc <dur>)",
+  "help.command.resume": "força resume de um agent estacionado: /resume <token>",
+  "help.command.cancel_park": "cancela agent estacionado: /cancel-park <token>",
   "park.banner.scheduled": "Agent estacionado: token=%s retoma_em=%s — %s",
   "park.banner.hint": "Terminal liberado. O agent retoma sozinho quando a espera terminar. Use /resume %s para forçar agora, ou /cancel-park %s para abortar.",
   "park.banner.resumed": "Agent retomado (token=%s, outcome=%s) — continuando de onde parou.",
