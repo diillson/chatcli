@@ -122,10 +122,20 @@ func lastResumeBadge(s *park.Snapshot) string {
 // resume runner. The token may be a unique prefix (matches the same way
 // `git checkout abc123` resolves a SHA prefix). On ambiguity we list
 // the candidates and bail.
+//
+// Idempotency: when drainPendingResumes consumes a token (via the
+// auto-resume path or the executor hook), it stamps recentlyResumed.
+// A subsequent /resume <token> for the same token within the TTL is
+// silently no-op'd — that is the typical race when NotifyParkComplete
+// auto-injects the command right after the drain has already run it.
 func (cli *ChatCLI) handleResumeCommand(userInput string) {
 	parts := strings.Fields(strings.TrimSpace(userInput))
 	if len(parts) < 2 {
 		fmt.Println(colorize("  "+i18n.T("park.resume.usage"), ColorYellow))
+		return
+	}
+	if cli.wasRecentlyResumed(parts[1]) {
+		// The auto-resume already consumed this token. Silently no-op.
 		return
 	}
 	token, err := cli.resolveParkToken(parts[1])
@@ -134,6 +144,48 @@ func (cli *ChatCLI) handleResumeCommand(userInput string) {
 		return
 	}
 	cli.runResumeForToken(token, "manual", "")
+}
+
+// markRecentlyResumed records that drainPendingResumes consumed a
+// token. The auto-injected /resume <token> command lands shortly after;
+// handleResumeCommand reads this map to short-circuit cleanly.
+func (cli *ChatCLI) markRecentlyResumed(token string) {
+	cli.recentlyResumedMu.Lock()
+	defer cli.recentlyResumedMu.Unlock()
+	if cli.recentlyResumedTokens == nil {
+		cli.recentlyResumedTokens = make(map[string]time.Time)
+	}
+	now := time.Now()
+	cli.recentlyResumedTokens[token] = now
+	// Sweep stale entries on every write so the map can't grow without
+	// bound. 30 s TTL is generous; the auto-injection lands within ms.
+	cutoff := now.Add(-30 * time.Second)
+	for k, ts := range cli.recentlyResumedTokens {
+		if ts.Before(cutoff) {
+			delete(cli.recentlyResumedTokens, k)
+		}
+	}
+}
+
+// wasRecentlyResumed returns true when the given token (full or 8-char
+// prefix) was consumed by drainPendingResumes within the TTL.
+func (cli *ChatCLI) wasRecentlyResumed(input string) bool {
+	cli.recentlyResumedMu.Lock()
+	defer cli.recentlyResumedMu.Unlock()
+	if len(cli.recentlyResumedTokens) == 0 {
+		return false
+	}
+	cutoff := time.Now().Add(-30 * time.Second)
+	for full, ts := range cli.recentlyResumedTokens {
+		if ts.Before(cutoff) {
+			delete(cli.recentlyResumedTokens, full)
+			continue
+		}
+		if full == input || strings.HasPrefix(full, input) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleCancelParkCommand parses /cancel-park <token> and removes both
@@ -253,6 +305,7 @@ func (cli *ChatCLI) drainPendingResumes() bool {
 			detail = out.Detail
 		}
 		cli.runResumeForToken(token, outcome, detail)
+		cli.markRecentlyResumed(token)
 		processed = true
 	}
 	return processed

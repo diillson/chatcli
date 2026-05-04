@@ -708,17 +708,20 @@ func (b *schedulerBridge) NotifyParkComplete(_ context.Context, token, outcome, 
 		zap.String("token", token),
 		zap.String("outcome", outcome))
 
-	// Foreground takeover: inject "/resume <token>\n" into the
-	// controlling TTY so go-prompt reads it as if the user typed it.
-	// This breaks out of p.Run() naturally — its read returns the
-	// synthesized line, the executor fires, drainPendingResumes
-	// consumes the queue, and the resume runs in foreground with full
-	// terminal control (just like /coder does).
+	// Foreground takeover: inject "/resume <token>\r" into the
+	// controlling TTY so go-prompt sees a real submit and the executor
+	// fires. The executor calls drainPendingResumes() first — which
+	// consumes the token we already queued above, runs RunResumed, and
+	// deletes the snapshot — and only then routes the user's typed
+	// command. handleResumeCommand checks recentlyResumedTokens and
+	// silently no-ops when the drain already won the race, so the
+	// injection is not double-fired and the user does not see a
+	// "snapshot not found" error.
 	//
 	// On platforms where TIOCSTI is unavailable or restricted (macOS
 	// since Ventura without legacy_pty_emulation, sandboxed envs), the
-	// inject silently no-ops; the executor-hook + outer-loop drain
-	// still consume the queue when the user types any character.
+	// inject returns errTTYInjectUnsupported; the executor-hook drain
+	// still consumes the queue when the user types any character.
 	if err := injectTTYLine("/resume " + token); err != nil {
 		b.cli.logger.Debug("park: TTY inject failed (auto-resume requires user keypress)",
 			zap.String("token", token), zap.Error(err))

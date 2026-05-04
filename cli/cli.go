@@ -315,6 +315,18 @@ type ChatCLI struct {
 	// is keyed by token; entries are deleted on consumption.
 	parkOutcomeMu sync.Mutex
 	parkOutcomes  map[string]parkOutcome
+
+	// recentlyResumedTokens tracks tokens that drainPendingResumes
+	// just consumed, so the auto-injected "/resume <token>" command
+	// (fired by NotifyParkComplete via TTY inject) can short-circuit
+	// when it lands a moment later. Without this, handleResumeCommand
+	// would re-resolve the same token, find the snapshot already
+	// deleted, and surface a confusing "snapshot not found" error to
+	// the user. Entries TTL out after 30 s — long enough to cover any
+	// scheduling pause between drain and the slash command, short
+	// enough to never hide a legitimate stale-token error.
+	recentlyResumedMu     sync.Mutex
+	recentlyResumedTokens map[string]time.Time
 }
 
 // parkOutcome carries the resume-time payload from the bridge's
