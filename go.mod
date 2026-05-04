@@ -11,7 +11,7 @@ require (
 	github.com/aws/smithy-go v1.25.1
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/charmbracelet/glamour v1.0.0
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-runewidth v0.0.23
