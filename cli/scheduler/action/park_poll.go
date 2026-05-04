@@ -267,11 +267,15 @@ func matchNumberOrRange(actual int, spec string) bool {
 // fireResume queues a one-shot AgentResume job that the scheduler will
 // fire immediately. Returns a successful ActionResult so the polling
 // chain itself records as completed.
+//
+// Schedule must be positive — Schedule.Validate rejects Relative=0 — so
+// we use 1ms which the dispatcher rounds to "due now" on the next tick
+// of the queue (typically <100ms). Effectively immediate.
 func (ParkPoll) fireResume(ctx context.Context, env *scheduler.ExecEnv, token, outcome, detail string) scheduler.ActionResult {
 	job := scheduler.NewJob(
 		"park-resume:"+token,
 		env.Job.Owner,
-		scheduler.Schedule{Kind: scheduler.ScheduleRelative, Relative: 0},
+		scheduler.Schedule{Kind: scheduler.ScheduleRelative, Relative: time.Millisecond},
 		scheduler.Action{
 			Type: scheduler.ActionAgentResume,
 			Payload: map[string]any{
