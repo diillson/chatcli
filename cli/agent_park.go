@@ -104,7 +104,7 @@ func (a *AgentMode) handleAgentPark(
 	fmt.Println(colorize("  🅿️  "+i18n.T("park.banner.scheduled",
 		snap.Token, parkRequestETA(req), describeParkRequest(req)),
 		ColorCyan+ColorBold))
-	fmt.Println(colorize("     "+i18n.T("park.banner.hint", snap.Token), ColorGray))
+	fmt.Println(colorize("     "+i18n.T("park.banner.hint", snap.Token, snap.Token), ColorGray))
 	fmt.Println()
 
 	// Bus event so /jobs and /parked stay coherent (the scheduler bridge
@@ -172,9 +172,19 @@ func (a *AgentMode) enqueueParkJob(ctx context.Context, snap *park.Snapshot) (st
 			scheduler.Schedule{Kind: scheduler.ScheduleRelative, Relative: req.Interval},
 			scheduler.Action{Type: scheduler.ActionParkPoll, Payload: payload},
 		)
-		// Polling shell parks need DangerousConfirmed parity with the
-		// session's isCoderMode (the coder policy decides at fire time).
-		// We don't have an explicit i_know flag here; default false.
+		// Park is interactively user-approved before this code runs:
+		// the agent's security check at cli/agent_mode.go fired the
+		// [y]/[a]/[n]/[d] prompt with the FULL @park args (including
+		// the embedded url / cmd) on screen. A 'y' there is the user
+		// pre-authorizing the polling probe to run the command they
+		// just saw. Propagate as DangerousConfirmed so the fire-time
+		// re-check in RunShell admits the cmd without a second prompt
+		// (which would never come through — the scheduler dispatcher
+		// has no human attached). Denylist still wins; an Ask-classed
+		// command the user approved interactively still runs because
+		// they explicitly said yes; a Deny-classed one is rejected at
+		// fire time regardless.
+		job.DangerousConfirmed = true
 		job.Description = "agent park polling — " + describeParkRequest(req)
 		out, err := a.cli.scheduler.Enqueue(ctx, job)
 		if err != nil {
