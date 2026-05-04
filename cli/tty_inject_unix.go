@@ -61,7 +61,14 @@ func injectTTYLine(line string) error {
 	}
 	defer closer()
 
-	for _, b := range append([]byte(line), '\n') {
+	// In raw-mode terminals (which is what go-prompt puts the TTY in),
+	// the Enter key delivers \r (carriage return), NOT \n. Sending \n
+	// only inserts a literal byte the line editor stores but does not
+	// treat as submit, so the user still has to press Enter to fire
+	// the injected command. Sending \r matches what the keyboard emits
+	// and triggers go-prompt's submit handler the same way.
+	payload := append([]byte(line), '\r')
+	for _, b := range payload {
 		if err := writeOneByte(fd, b); err != nil {
 			return err
 		}
