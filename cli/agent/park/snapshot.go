@@ -53,9 +53,9 @@ type Snapshot struct {
 
 	// Provider/Model/Skill hints capture which client to use at resume.
 	// If empty, the CLI's current selection wins.
-	Provider        string `json:"provider,omitempty"`
-	Model           string `json:"model,omitempty"`
-	SkillModelHint  string              `json:"skill_model_hint,omitempty"`
+	Provider        string                `json:"provider,omitempty"`
+	Model           string                `json:"model,omitempty"`
+	SkillModelHint  string                `json:"skill_model_hint,omitempty"`
 	SkillEffortHint llmclient.SkillEffort `json:"skill_effort_hint,omitempty"`
 
 	// OriginalQuery is the user's original /coder or /agent prompt,
@@ -154,17 +154,20 @@ func (s *Snapshot) Save() error {
 		return fmt.Errorf("park: marshal snapshot: %w", err)
 	}
 
+	// #nosec G304 -- tmp path is built from s.Token which is validated
+	// against tokenRegexp ([a-zA-Z0-9._-]{8,128}) before reaching here;
+	// directory traversal is not possible.
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("park: open tmp: %w", err)
 	}
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		_ = f.Close()
 		_ = os.Remove(tmp)
 		return fmt.Errorf("park: write: %w", err)
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		_ = os.Remove(tmp)
 		return fmt.Errorf("park: fsync: %w", err)
 	}
@@ -189,6 +192,8 @@ func Load(token string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	// #nosec G304 -- path is built from token which is validated against
+	// tokenRegexp ([a-zA-Z0-9._-]{8,128}) before reaching here.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

@@ -47,8 +47,9 @@ var errTTYInjectUnsupported = errors.New("tty inject: TIOCSTI not permitted on t
 // raw stdin reader) sees the bytes as if the user had typed them.
 //
 // We pick the file descriptor in this priority:
-//   1. /dev/tty (always the controlling TTY when one exists)
-//   2. os.Stdin (covers the rare case where /dev/tty is unavailable)
+//  1. /dev/tty (always the controlling TTY when one exists)
+//  2. os.Stdin (covers the rare case where /dev/tty is unavailable)
+//
 // /dev/tty is preferred because it bypasses any stdin redirection
 // the user may have applied (e.g. running chatcli inside a wrapper
 // that pipes stdin).

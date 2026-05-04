@@ -233,10 +233,10 @@ func TestParkPoll_Cmd_ExitMatcher(t *testing.T) {
 
 func TestMatchSuccessWhen(t *testing.T) {
 	cases := []struct {
-		expr        string
-		summary     probeSummary
-		dflt        bool
-		want        bool
+		expr    string
+		summary probeSummary
+		dflt    bool
+		want    bool
 	}{
 		{"", probeSummary{HTTPStatus: 200}, true, true},
 		{"", probeSummary{HTTPStatus: 500}, false, false},
