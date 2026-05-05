@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.112.1](https://github.com/diillson/chatcli/compare/v1.112.0...v1.112.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* **park:** restore typing and termios after auto-resume ([#883](https://github.com/diillson/chatcli/issues/883)) ([b6942b4](https://github.com/diillson/chatcli/commit/b6942b4c5f493b535f807f6a3b1bf66fc213cea0))
+
 ## [1.112.0](https://github.com/diillson/chatcli/compare/v1.111.1...v1.112.0) (2026-05-05)
 
 
