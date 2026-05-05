@@ -42,9 +42,9 @@ import (
 var errTTYInjectUnsupported = errors.New("tty inject: WriteConsoleInputW not available in this session")
 
 var (
-	kernel32                = syscall.NewLazyDLL("kernel32.dll")
-	procWriteConsoleInputW  = kernel32.NewProc("WriteConsoleInputW")
-	procGetStdHandle        = kernel32.NewProc("GetStdHandle")
+	kernel32               = syscall.NewLazyDLL("kernel32.dll")
+	procWriteConsoleInputW = kernel32.NewProc("WriteConsoleInputW")
+	procGetStdHandle       = kernel32.NewProc("GetStdHandle")
 )
 
 const (
@@ -96,10 +96,17 @@ func injectTTYLine(line string) error {
 	}
 
 	// UTF-16 encode the line so multibyte characters survive the round
-	// trip. ASCII passes through unchanged.
-	utf16Line := syscall.StringToUTF16(line)
-	// Drop the trailing nul terminator — it would inject as a literal
-	// 0-byte event the line editor stores as a control char.
+	// trip. ASCII passes through unchanged. UTF16FromString returns an
+	// error only on a NUL embedded in the input string, which cannot
+	// happen for our /resume <hex-token> payload — but we honor it
+	// anyway as defense in depth.
+	utf16Line, err := syscall.UTF16FromString(line)
+	if err != nil {
+		return fmt.Errorf("UTF16 encode: %w", err)
+	}
+	// Drop the trailing nul terminator UTF16FromString appends — it
+	// would inject as a literal 0-byte event the line editor stores
+	// as a control char.
 	if n := len(utf16Line); n > 0 && utf16Line[n-1] == 0 {
 		utf16Line = utf16Line[:n-1]
 	}
