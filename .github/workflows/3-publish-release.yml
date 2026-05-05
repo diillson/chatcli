@@ -188,6 +188,14 @@ jobs:
         with:
           images: ghcr.io/diillson/chatcli
 
+      # no-cache + fresh apk metadata: GHA layer caching reused stale OS
+      # packages between releases (e.g. CVE-2026-27135 nghttp2-libs slipped
+      # through because the cached layer's `apk add` ran before the fix
+      # landed in the Alpine mirror). Image-Refresh already runs without
+      # cache and emits provenance/SBOM; we mirror those flags here so a
+      # release publishes the same hardened image instead of leaving it
+      # to the next drift-remediation cycle. Trade-off: ~2-5 min slower
+      # per arch, acceptable for a tag-triggered job.
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v7
@@ -196,8 +204,9 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=ghcr.io/diillson/chatcli,push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=chatcli-${{ matrix.arch }}
-          cache-to: type=gha,scope=chatcli-${{ matrix.arch }},mode=max
+          no-cache: true
+          provenance: true
+          sbom: true
 
       - name: Export digest
         run: |
@@ -349,6 +358,10 @@ jobs:
         with:
           images: ghcr.io/diillson/chatcli-operator
 
+      # See chatcli build above: no-cache+provenance+SBOM matches the
+      # Image-Refresh path so the operator image (Alpine-based, exposed
+      # to OS-package CVEs) ships fresh apk versions on every release
+      # instead of inheriting whatever the GHA cache layer captured.
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v7
@@ -358,8 +371,9 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=ghcr.io/diillson/chatcli-operator,push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=operator-${{ matrix.arch }}
-          cache-to: type=gha,scope=operator-${{ matrix.arch }},mode=max
+          no-cache: true
+          provenance: true
+          sbom: true
 
       - name: Export digest
         run: |
