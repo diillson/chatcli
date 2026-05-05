@@ -43,6 +43,34 @@ var sttyPath = func() string {
 	return ""
 }()
 
+// resetTTYToSane restores the controlling terminal to canonical mode with
+// echo on. We invoke `stty sane` against /dev/tty (NOT the parent process's
+// stdin, which exec.Command silently rewires to /dev/null when cmd.Stdin is
+// nil — making stty a no-op against the wrong fd). This matters after the
+// park auto-resume path, where go-prompt's Setup/TearDown cycle around the
+// TIOCSTI-injected line can leave the terminal in raw or echo-off state,
+// causing the next security prompt to silently swallow the user's keys.
+//
+// Returns true when the reset was applied. Errors are intentionally
+// swallowed: the prompt is best-effort UX and any failure here just
+// degrades to the previous (broken-on-resume) behavior.
+func resetTTYToSane() bool {
+	if runtime.GOOS == "windows" || sttyPath == "" {
+		return false
+	}
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = tty.Close() }()
+
+	cmd := exec.Command(sttyPath, "sane")
+	cmd.Stdin = tty
+	cmd.Stdout = tty
+	cmd.Stderr = tty
+	return cmd.Run() == nil
+}
+
 // PromptSecurityCheck prompts the user for a security decision (no agent context).
 func PromptSecurityCheck(ctx context.Context, toolName, args string, inputCh <-chan string) SecurityDecision {
 	return PromptSecurityCheckWithContext(ctx, toolName, args, nil, inputCh)
@@ -54,9 +82,7 @@ func PromptSecurityCheck(ctx context.Context, toolName, args string, inputCh <-c
 // goroutine with bufio.Scanner on stdin. This avoids orphaned goroutines that steal
 // stdin from go-prompt after agent mode exits (e.g., on Ctrl+C).
 func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, secCtx *SecurityContext, inputCh <-chan string) SecurityDecision {
-	if runtime.GOOS != "windows" && sttyPath != "" {
-		_ = exec.Command(sttyPath, "sane").Run()
-	}
+	resetTTYToSane()
 
 	purple := "\u001b[35m"
 	cyan := "\u001b[36m"

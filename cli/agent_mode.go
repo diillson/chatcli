@@ -95,6 +95,33 @@ type AgentMode struct {
 	proxyPayloadWarned bool
 }
 
+// splitStdinChunk consumes raw bytes from a stdin Read() call and returns
+// the complete lines found (each terminated with a trailing '\n'). Bytes
+// that don't yet form a full line are appended to lineBuf for the next
+// chunk to finish.
+//
+// Both '\n' and '\r' end a line. Cooked TTYs deliver '\n' (ICRNL converts
+// the user's CR), but a raw-mode TTY — or one left in a transient state
+// after a TIOCSTI inject for park auto-resume — delivers '\r'. Recognising
+// both keeps the security prompt responsive in either mode. CRLF pairs are
+// collapsed into a single line (the trailing '\n' is consumed).
+func splitStdinChunk(chunk []byte, lineBuf *strings.Builder) []string {
+	var lines []string
+	for i := 0; i < len(chunk); i++ {
+		b := chunk[i]
+		if b != '\n' && b != '\r' {
+			lineBuf.WriteByte(b)
+			continue
+		}
+		lines = append(lines, lineBuf.String()+"\n")
+		lineBuf.Reset()
+		if b == '\r' && i+1 < len(chunk) && chunk[i+1] == '\n' {
+			i++
+		}
+	}
+	return lines
+}
+
 // startStdinReader starts a goroutine that reads lines from stdin and sends
 // them to the stdinLines channel. This centralizes all stdin reads in agent
 // mode, enabling type-ahead queue support.
@@ -132,31 +159,25 @@ func (a *AgentMode) startStdinReader() {
 				return
 			}
 
-			for i := 0; i < n; i++ {
-				if buf[i] == '\n' {
-					rawLine := lineBuf.String() + "\n"
-					lineBuf.Reset()
-
-					// Detect and clean paste content
-					cleaned, pasteInfo := paste.DetectInLine(rawLine)
-					if pasteInfo != nil {
-						if pasteInfo.LineCount > 1 {
-							fmt.Printf("  %s\n", i18n.T("paste.detected", pasteInfo.CharCount, pasteInfo.LineCount))
-						} else {
-							fmt.Printf("  %s\n", i18n.T("paste.detected.short", pasteInfo.CharCount))
-						}
-						rawLine = cleaned
+			lines := splitStdinChunk(buf[:n], &lineBuf)
+			for _, rawLine := range lines {
+				// Detect and clean paste content
+				cleaned, pasteInfo := paste.DetectInLine(rawLine)
+				if pasteInfo != nil {
+					if pasteInfo.LineCount > 1 {
+						fmt.Printf("  %s\n", i18n.T("paste.detected", pasteInfo.CharCount, pasteInfo.LineCount))
+					} else {
+						fmt.Printf("  %s\n", i18n.T("paste.detected.short", pasteInfo.CharCount))
 					}
+					rawLine = cleaned
+				}
 
-					line := strings.TrimSpace(rawLine)
+				line := strings.TrimSpace(rawLine)
 
-					select {
-					case <-a.stdinDone:
-						return
-					case a.stdinLines <- line:
-					}
-				} else {
-					lineBuf.WriteByte(buf[i])
+				select {
+				case <-a.stdinDone:
+					return
+				case a.stdinLines <- line:
 				}
 			}
 		}
