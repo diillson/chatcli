@@ -663,3 +663,86 @@ func truncateBridge(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+// NotifyParkComplete is called by the AgentResume scheduler action when
+// a parked agent's wait condition is satisfied. The bridge enqueues the
+// resume token onto the CLI's pending queue and prints a banner; the
+// outer Run() loop in cli.go consumes the queue between user prompts
+// and re-enters the agent loop via AgentMode.RunResumed.
+//
+// The implementation is deliberately decoupled from any synchronous
+// agent invocation — the scheduler dispatcher must not block waiting
+// on the user's interactive loop.
+func (b *schedulerBridge) NotifyParkComplete(_ context.Context, token, outcome, detail string) error {
+	if b.cli == nil {
+		return fmt.Errorf("park: bridge not bound to CLI")
+	}
+	b.cli.pendingResumeMu.Lock()
+	b.cli.pendingResumeQueue = append(b.cli.pendingResumeQueue, token)
+	b.cli.pendingResumeMu.Unlock()
+
+	// Stash the outcome+detail on a per-token map so the resume code
+	// (cli.go consumer) can pass them to AgentMode.RunResumed without
+	// re-reading the scheduler job. This is in-memory only — if the
+	// process restarts before the resume runs, the snapshot's stored
+	// LastResumeAt + scheduler audit log carry the forensic record.
+	b.cli.parkOutcomeMu.Lock()
+	if b.cli.parkOutcomes == nil {
+		b.cli.parkOutcomes = map[string]parkOutcome{}
+	}
+	b.cli.parkOutcomes[token] = parkOutcome{Outcome: outcome, Detail: detail}
+	b.cli.parkOutcomeMu.Unlock()
+
+	// Print a banner so the user sees the readiness immediately. fmt
+	// writes from this goroutine appear above the go-prompt input line
+	// — go-prompt redraws the prompt at the bottom on its next tick.
+	fmt.Println()
+	fmt.Println(colorize("  🔔 "+
+		fmt.Sprintf("park ready: token=%s outcome=%s — auto-resuming…",
+			token, outcome),
+		ColorCyan+ColorBold))
+	fmt.Println()
+
+	b.cli.markSchedulerDirty()
+	b.cli.logger.Info("park: notified ready",
+		zap.String("token", token),
+		zap.String("outcome", outcome))
+
+	// Foreground takeover: inject "/resume <token>\r" into the
+	// controlling TTY so go-prompt sees a real submit and the executor
+	// fires. The executor calls drainPendingResumes() first — which
+	// consumes the token we already queued above, runs RunResumed, and
+	// deletes the snapshot — and only then routes the user's typed
+	// command. handleResumeCommand checks recentlyResumedTokens and
+	// silently no-ops when the drain already won the race, so the
+	// injection is not double-fired and the user does not see a
+	// "snapshot not found" error.
+	//
+	// On platforms where TIOCSTI is unavailable or restricted (macOS
+	// since Ventura without legacy_pty_emulation, sandboxed envs), the
+	// inject returns errTTYInjectUnsupported; the executor-hook drain
+	// still consumes the queue when the user types any character.
+	if err := injectTTYLine("/resume " + token); err != nil {
+		b.cli.logger.Debug("park: TTY inject failed (auto-resume requires user keypress)",
+			zap.String("token", token), zap.Error(err))
+	}
+	return nil
+}
+
+// RunHTTPProbe performs the HTTP request used by ActionParkPoll. It
+// keeps the per-action executor thin and centralizes timeout / TLS /
+// redirect policy so future hardening lands in one place. The body is
+// length-capped to keep snapshot/event payloads bounded.
+func (b *schedulerBridge) RunHTTPProbe(ctx context.Context, url, method string, headers map[string]string, timeout time.Duration) (int, string, error) {
+	if strings.TrimSpace(url) == "" {
+		return 0, "", fmt.Errorf("park_poll: empty url")
+	}
+	if method == "" {
+		method = "GET"
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	hc := &httpProbeClient{Timeout: timeout}
+	return hc.Do(ctx, method, url, headers)
+}

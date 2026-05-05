@@ -295,6 +295,46 @@ type ChatCLI struct {
 	schedulerSocket string
 	schedulerCancel context.CancelFunc
 	schedulerDirty  int32 // atomic — bumped by scheduler events for prompt refresh
+	// schedulerBridge is the in-process CLIBridge implementation. The
+	// agent loop reaches it via ChatCLI when handling @park parking
+	// (snapshot enqueue) and resume notifications. Nil when the
+	// scheduler subsystem is disabled or running remote-only.
+	schedulerBridge *schedulerBridge
+
+	// pendingResumeQueue holds park tokens whose resume jobs fired
+	// while the user was at the chat prompt. The outer Run() loop
+	// dequeues them before re-entering the prompt. Guarded by
+	// pendingResumeMu — the bridge writes from the scheduler
+	// dispatcher goroutine; cli.go reads from the main loop.
+	pendingResumeMu    sync.Mutex
+	pendingResumeQueue []string
+
+	// parkOutcomes carries the (outcome, detail) tuple from the
+	// NotifyParkComplete call to the consumer that runs RunResumed,
+	// without forcing the consumer to re-read scheduler state. The map
+	// is keyed by token; entries are deleted on consumption.
+	parkOutcomeMu sync.Mutex
+	parkOutcomes  map[string]parkOutcome
+
+	// recentlyResumedTokens tracks tokens that drainPendingResumes
+	// just consumed, so the auto-injected "/resume <token>" command
+	// (fired by NotifyParkComplete via TTY inject) can short-circuit
+	// when it lands a moment later. Without this, handleResumeCommand
+	// would re-resolve the same token, find the snapshot already
+	// deleted, and surface a confusing "snapshot not found" error to
+	// the user. Entries TTL out after 30 s — long enough to cover any
+	// scheduling pause between drain and the slash command, short
+	// enough to never hide a legitimate stale-token error.
+	recentlyResumedMu     sync.Mutex
+	recentlyResumedTokens map[string]time.Time
+}
+
+// parkOutcome carries the resume-time payload from the bridge's
+// NotifyParkComplete to the cli.go consumer. Kept tiny and value-typed
+// so the map stays cheap to copy.
+type parkOutcome struct {
+	Outcome string
+	Detail  string
 }
 
 // thinkingOverrideState carries the user's /thinking choice. set
@@ -342,6 +382,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebFetchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
 	}
 
 	cli.configureProviderAndModel()
@@ -532,6 +573,19 @@ func detectProjectDir() string {
 
 func (cli *ChatCLI) executor(in string) {
 	in = strings.TrimSpace(in)
+
+	// Drain any pending park resumes BEFORE processing the user's
+	// command. Slash commands like /parked, /jobs and chat input all
+	// route through this executor without ever exiting p.Run(); without
+	// this hook a resume that fires during interactive use would only
+	// trigger when the user later runs /coder or /agent. The drain runs
+	// foreground and may take a while (it re-enters the agent loop) —
+	// that is exactly the desired UX: the user sees the agent continue,
+	// then their original input is processed afterwards.
+	if cli.drainPendingResumes() {
+		// Flush any cosmetic state the resume left behind.
+		_ = os.Stdout.Sync()
+	}
 
 	// Handle paste: replace placeholder with real content and show notification
 	if cli.lastPasteInfo != nil {
@@ -873,6 +927,22 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			} else if strings.HasPrefix(lastCmd, "/run") || strings.HasPrefix(lastCmd, "/agent") || strings.HasPrefix(lastCmd, "/plan") {
 				cli.runAgentLogic()
 			}
+
+			// Auto-resume any parked agents whose scheduler-driven wait
+			// has been satisfied since the user was last at the prompt.
+			// The drain runs AFTER the foreground dispatch returns so a
+			// resume cannot interrupt active agent work; it runs BEFORE
+			// the next prompt iteration so the user sees their parked
+			// agent continue without manual intervention.
+			//
+			// Drain is iterative because a resumed agent may itself emit
+			// a new @park, which queues the next token while we're still
+			// processing the previous one — keep draining until the
+			// queue is empty for one full cycle.
+			for cli.drainPendingResumes() {
+				// loop body intentionally empty; drainPendingResumes
+				// returns false when the queue is exhausted.
+			}
 		}
 	}
 }
@@ -1139,6 +1209,18 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 		}
 		if badge := cli.schedulerStatusLine(); badge != "" {
 			prefix = badge + " " + prefix
+		}
+		// Park resume badge: alerts the user that a parked agent has a
+		// resume queued and is waiting for the next executor tick to
+		// drain. Without this, the user might keep idle-pressing Enter
+		// and never see the resume fire (empty Enter doesn't reach the
+		// executor in go-prompt). Typing any command — including a
+		// no-op like a single character — drains the queue.
+		cli.pendingResumeMu.Lock()
+		n := len(cli.pendingResumeQueue)
+		cli.pendingResumeMu.Unlock()
+		if n > 0 {
+			prefix = fmt.Sprintf("[🅿️  resume ready: %d] ", n) + prefix
 		}
 		return prefix, true
 	}

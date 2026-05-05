@@ -20,6 +20,7 @@ package scheduler
 
 import (
 	"context"
+	"time"
 
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/llm/client"
@@ -116,6 +117,25 @@ type CLIBridge interface {
 	// PublishEvent forwards a scheduler Event to the live cli.bus
 	// so the Ctrl+J overlay and the status line can react.
 	PublishEvent(evt Event)
+
+	// NotifyParkComplete is called by ActionAgentResume when a parked
+	// agent's wait condition is satisfied (timer elapsed, probe matched,
+	// or deadline reached). The bridge resolves the snapshot, restores
+	// the interactive agent loop, and injects parkResult as the synthetic
+	// tool-call result that the @park invocation would have returned.
+	//
+	// outcome is one of "elapsed", "matched", "timeout", "cancelled" —
+	// short tags driven by the action that fired this notify.
+	// detail carries the raw probe output (HTTP body, stdout) when
+	// relevant; passed through verbatim to the agent's system prompt.
+	NotifyParkComplete(ctx context.Context, token, outcome, detail string) error
+
+	// RunHTTPProbe issues a single HTTP request against url with the
+	// given method and headers, and returns the status code, body
+	// (capped to a sane size), and error. Used by ActionParkPoll. The
+	// bridge implementation centralizes timeout, redirect policy, TLS
+	// and proxy semantics so action executors stay terse.
+	RunHTTPProbe(ctx context.Context, url, method string, headers map[string]string, timeout time.Duration) (status int, body string, err error)
 }
 
 // noopBridge is used when scheduler runs without a host (daemon mode
@@ -149,6 +169,12 @@ func (noopBridge) WorkspaceDir() string           { return "" }
 func (noopBridge) LLMClient() client.LLMClient    { return nil }
 func (noopBridge) AppendHistory(_ models.Message) {}
 func (noopBridge) PublishEvent(_ Event)           {}
+func (noopBridge) NotifyParkComplete(_ context.Context, _, _, _ string) error {
+	return ErrNoDaemon
+}
+func (noopBridge) RunHTTPProbe(_ context.Context, _, _ string, _ map[string]string, _ time.Duration) (int, string, error) {
+	return 0, "", ErrNoDaemon
+}
 
 // Without a real bridge (daemon pre-attach, test stubs), classify as
 // Ask so every shell preflight rejects unless the job is explicitly

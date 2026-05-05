@@ -6,6 +6,9 @@ package action
 import (
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/diillson/chatcli/cli/scheduler"
 )
 
 func asString(m map[string]any, key string) string {
@@ -79,4 +82,45 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// payloadInt64 reads an int-shaped payload field with cross-encoding
+// tolerance (JSON numbers come back as float64; Go literals are int).
+func payloadInt64(action scheduler.Action, key string) int64 {
+	if action.Payload == nil {
+		return 0
+	}
+	v, ok := action.Payload[key]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	}
+	return 0
+}
+
+// payloadDuration parses a duration string field, falling back to def
+// when missing or unparseable.
+func payloadDuration(action scheduler.Action, key string, def time.Duration) time.Duration {
+	if action.Payload == nil {
+		return def
+	}
+	if s, ok := action.Payload[key].(string); ok {
+		if d, err := time.ParseDuration(s); err == nil {
+			return d
+		}
+	}
+	return def
+}
+
+// payloadStringMap reads an object-shaped payload field as
+// map[string]string with the same coercion rules as asStringMap.
+func payloadStringMap(action scheduler.Action, key string) map[string]string {
+	return asStringMap(action.Payload, key)
 }

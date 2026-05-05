@@ -154,6 +154,12 @@ type ExecEnv struct {
 	// Job is a read-only summary of the job being executed, useful for
 	// error messages ("action failed for job X").
 	Job JobSummary
+	// Enqueue lets an executor schedule follow-up jobs (e.g. ParkPoll
+	// re-enqueues itself on every tick, fans out to AgentResume on
+	// success/timeout). The dispatcher injects a closure bound to the
+	// live Scheduler so executors don't need to import it themselves.
+	// Nil in tests that don't exercise self-rescheduling.
+	Enqueue func(ctx context.Context, job *Job) (*Job, error)
 }
 
 // ActionRegistry mirrors ConditionRegistry.

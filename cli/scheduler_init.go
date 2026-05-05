@@ -83,6 +83,7 @@ func (cli *ChatCLI) initScheduler() {
 		return
 	}
 	cli.scheduler = s
+	cli.schedulerBridge = bridge
 	// Wire the @scheduler builtin plugin into the ReAct tool registry.
 	pluginsAdapter := &schedulerPluginAdapter{cli: cli}
 	pluginsSetAdapter(pluginsAdapter)

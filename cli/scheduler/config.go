@@ -145,6 +145,8 @@ func DefaultConfig() Config {
 			ActionNoop:           true,
 			ActionWebhook:        true,
 			ActionShell:          true, // gated by CoderMode
+			ActionAgentResume:    true,
+			ActionParkPoll:       true,
 		},
 
 		RateLimitGlobalRPS:   5.0,

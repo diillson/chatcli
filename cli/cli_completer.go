@@ -137,6 +137,18 @@ func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
 		return cli.getJobsSuggestions(d)
 	}
 
+	if strings.HasPrefix(lineBeforeCursor, "/parked") {
+		return cli.getParkedSuggestions(d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/resume") {
+		return cli.getParkTokenSuggestions("/resume", d)
+	}
+
+	if strings.HasPrefix(lineBeforeCursor, "/cancel-park") {
+		return cli.getParkTokenSuggestions("/cancel-park", d)
+	}
+
 	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
 	if len(args) > 0 {
 		var previousWord string
@@ -292,6 +304,9 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/schedule", Description: i18n.T("help.command.schedule")},
 		{Text: "/wait", Description: i18n.T("help.command.wait")},
 		{Text: "/jobs", Description: i18n.T("help.command.jobs")},
+		{Text: "/parked", Description: i18n.T("help.command.parked")},
+		{Text: "/resume", Description: i18n.T("help.command.resume")},
+		{Text: "/cancel-park", Description: i18n.T("help.command.cancel_park")},
 	}
 }
 

@@ -15,4 +15,6 @@ func RegisterAll(r *scheduler.ActionRegistry) {
 	r.MustRegister(NewWebhook())
 	r.MustRegister(NewHookAction())
 	r.MustRegister(NewNoop())
+	r.MustRegister(NewAgentResume())
+	r.MustRegister(NewParkPoll())
 }
