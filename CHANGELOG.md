@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.112.0](https://github.com/diillson/chatcli/compare/v1.111.1...v1.112.0) (2026-05-05)
+
+
+### Features
+
+* **agent:** non-blocking park and auto-resume for the ReAct loop ([#879](https://github.com/diillson/chatcli/issues/879)) ([defa2e6](https://github.com/diillson/chatcli/commit/defa2e6312faae8ee3bee6b26c5b8fd6b733910f))
+
+
+### Bug Fixes
+
+* **operator:** tidy go.sum after fsnotify 1.10.1 bump ([#876](https://github.com/diillson/chatcli/issues/876)) ([ba6bdbf](https://github.com/diillson/chatcli/commit/ba6bdbfe2ed642abb7df49c8754adeafed571702))
+
 ## [1.111.1](https://github.com/diillson/chatcli/compare/v1.111.0...v1.111.1) (2026-04-30)
 
 
