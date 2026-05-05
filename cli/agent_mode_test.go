@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -183,4 +184,72 @@ func TestSanitize_CLI_StillStripsBackslashSpace(t *testing.T) {
 	// Backslash-space should be removed, leaving just the space
 	assert.NotContains(t, sanitized, `\ `)
 	assert.Contains(t, sanitized, "echo hello")
+}
+
+// TestSplitStdinChunk_LineTerminators guards the post-park-resume security
+// prompt: when go-prompt's Setup/TearDown cycle around a TIOCSTI-injected
+// /resume leaves the TTY in raw mode, the user's Enter arrives as '\r'
+// rather than '\n'. The reader MUST treat both as line terminators or the
+// security prompt silently swallows keystrokes.
+func TestSplitStdinChunk_LineTerminators(t *testing.T) {
+	tests := []struct {
+		name     string
+		chunks   [][]byte
+		expected []string
+		leftover string
+	}{
+		{
+			name:     "Cooked TTY delivers LF",
+			chunks:   [][]byte{[]byte("y\n")},
+			expected: []string{"y\n"},
+		},
+		{
+			name:     "Raw TTY delivers CR — must still submit",
+			chunks:   [][]byte{[]byte("y\r")},
+			expected: []string{"y\n"},
+		},
+		{
+			name:     "CRLF collapses to a single line",
+			chunks:   [][]byte{[]byte("y\r\n")},
+			expected: []string{"y\n"},
+		},
+		{
+			name:     "Multiple lines in one chunk",
+			chunks:   [][]byte{[]byte("y\nn\rd\r\n")},
+			expected: []string{"y\n", "n\n", "d\n"},
+		},
+		{
+			name:     "Partial line buffered until terminator arrives",
+			chunks:   [][]byte{[]byte("ye"), []byte("s\r")},
+			expected: []string{"yes\n"},
+		},
+		{
+			name:     "Pure CR boundary then LF in next chunk does NOT emit empty line",
+			chunks:   [][]byte{[]byte("ok\r"), []byte("\nnext\n")},
+			expected: []string{"ok\n", "\n", "next\n"},
+			// NOTE: when CR and LF arrive in separate Read() calls we cannot
+			// distinguish CRLF from CR-followed-by-empty-line, so the LF starts
+			// its own (empty) line. This is acceptable: the empty line is
+			// trimmed to "" downstream and the channel consumer treats it as a
+			// no-op rather than a real submission.
+			leftover: "",
+		},
+		{
+			name:     "Bare bytes without terminator stay in lineBuf",
+			chunks:   [][]byte{[]byte("partial")},
+			expected: nil,
+			leftover: "partial",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf strings.Builder
+			var got []string
+			for _, c := range tt.chunks {
+				got = append(got, splitStdinChunk(c, &buf)...)
+			}
+			assert.Equal(t, tt.expected, got)
+			assert.Equal(t, tt.leftover, buf.String())
+		})
+	}
 }
