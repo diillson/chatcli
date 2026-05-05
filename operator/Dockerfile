@@ -32,10 +32,15 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -a -o manager main.go
 # needs git to clone and sync application repositories.
 # Pinned to exact patch version; Dependabot keeps this updated.
 FROM alpine:3.23.4 AS runtime
+# nghttp2-libs is pulled in transitively by git but the constraint
+# pins it to 1.68.0-r0 in alpine:3.23.4, which has CVE-2026-27135
+# (HTTP/2 frame parsing DoS). The apk upgrade above doesn't widen
+# the constraint, so we pin the patched version (1.68.1+) explicitly.
 RUN apk update && apk upgrade --no-cache && \
     apk add --no-cache \
         "libcrypto3>=3.5.6-r0" \
         "libssl3>=3.5.6-r0" \
+        "nghttp2-libs>=1.68.1-r0" \
         git ca-certificates tzdata && \
     adduser -D -u 65532 -g 65532 nonroot
 WORKDIR /
