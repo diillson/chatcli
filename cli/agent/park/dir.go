@@ -27,12 +27,25 @@ const envOverride = "CHATCLI_PARK_DIR"
 //
 // The directory is created with 0o700 if missing — snapshots embed the
 // chat history, so they must not leak to other users on the host.
+//
+// Trust model: CHATCLI_PARK_DIR is read from the calling process's own
+// environment. Whoever can set that variable is already running as the
+// chatcli user with full file-system access — no privilege boundary is
+// crossed by honoring it. We still apply filepath.Clean to normalize
+// the input so the on-disk layout matches user expectation.
 func Dir() (string, error) {
 	if override := os.Getenv(envOverride); override != "" {
-		if err := os.MkdirAll(override, 0o700); err != nil {
+		clean := filepath.Clean(override)
+		// #nosec G304 -- the override path comes from CHATCLI_PARK_DIR
+		// in the chatcli process's own environment; gosec's taint
+		// analysis cannot model that the variable is operator-supplied
+		// and stays inside the operator's trust boundary. The path is
+		// normalized via filepath.Clean above; no traversal escape is
+		// possible because there is no privileged target to escape to.
+		if err := os.MkdirAll(clean, 0o700); err != nil {
 			return "", err
 		}
-		return override, nil
+		return clean, nil
 	}
 	cfgDir, err := os.UserConfigDir()
 	if err != nil {
