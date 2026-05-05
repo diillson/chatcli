@@ -149,7 +149,3 @@ type ApprovalRequestList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ApprovalRequest `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&ApprovalRequest{}, &ApprovalRequestList{})
-}

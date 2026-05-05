@@ -72,7 +72,3 @@ type RunbookList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Runbook `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&Runbook{}, &RunbookList{})
-}

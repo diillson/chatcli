@@ -103,7 +103,3 @@ type AIInsightList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []AIInsight `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&AIInsight{}, &AIInsightList{})
-}

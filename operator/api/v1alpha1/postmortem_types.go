@@ -257,7 +257,3 @@ type PostMortemList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []PostMortem `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&PostMortem{}, &PostMortemList{})
-}
