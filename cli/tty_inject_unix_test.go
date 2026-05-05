@@ -93,98 +93,78 @@ func intToString(n int) string {
 
 // TestInjectTTYLine_PtyEndToEnd validates that the byte-split injection
 // (body → 15 ms pause → \r) appears on the slave's read side in the
-// same shape go-prompt's reader consumes it: a multi-byte read for the
-// body and a single-byte read for the trailing \r.
+// same shape go-prompt's reader consumes it.
 //
-// Hard-bounded with a wall-clock timeout so a TIOCSTI rejection (e.g.
-// container without a usable controlling tty, kernel hardening that
-// silently drops without errno) cannot hang the suite.
+// Synchronous structure (no goroutines sharing the slave file handle):
+// the kernel hardens against shared file access; the previous concurrent
+// version tripped the race detector under `go test -race`. Now the test
+// probes TIOCSTI once up front and t.Skip()s when the kernel restricts
+// it; on success the inject + read run sequentially in the test
+// goroutine using non-blocking reads.
 func TestInjectTTYLine_PtyEndToEnd(t *testing.T) {
 	master, slave := openPTYPair(t)
 	defer master.Close()
 	defer slave.Close()
 
+	slaveFd := int(slave.Fd())
+
 	// Put the slave in raw-ish mode so the line discipline does not
 	// echo or translate the injected bytes — that matches how go-prompt
 	// configures the user's controlling TTY at startup.
-	if termios, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS); err == nil {
+	if termios, err := unix.IoctlGetTermios(slaveFd, unix.TCGETS); err == nil {
 		termios.Lflag &^= unix.ICANON | unix.ECHO
 		termios.Iflag &^= unix.ICRNL
-		_ = unix.IoctlSetTermios(int(slave.Fd()), unix.TCSETS, termios)
+		_ = unix.IoctlSetTermios(slaveFd, unix.TCSETS, termios)
 	}
+
+	// Probe TIOCSTI before doing the real injection. On kernels that
+	// reject TIOCSTI (Linux 6.x+ default with legacy_tiocsti=1, Docker
+	// Desktop linuxkit, sandboxed CI runners), this surfaces as EPERM /
+	// ENOTTY and we skip the test with a clear message. The probe byte
+	// is drained right after via a non-blocking read so the real
+	// injection starts against a clean queue.
+	if err := tiocsti(slaveFd, '\x00'); err != nil {
+		t.Skipf("TIOCSTI restricted on this kernel/runtime: %v", err)
+	}
+	// Set non-blocking so the probe drain returns immediately even if
+	// the kernel didn't actually deliver the byte (some hardenings
+	// accept the ioctl but drop the byte). Skip if non-blocking
+	// can't be enabled — every modern Linux/BSD pty supports it.
+	if err := unix.SetNonblock(slaveFd, true); err != nil {
+		t.Skipf("SetNonblock on slave failed: %v", err)
+	}
+	defer func() { _ = unix.SetNonblock(slaveFd, false) }()
+	drainOnce(slaveFd)
 
 	const payload = "/resume abcdef12"
 
-	// Inject from a goroutine so we can race it against the read with
-	// a timeout. On kernels that silently drop TIOCSTI (older Linux
-	// rebuilds with TIOCSTI patched out, or sandboxed cgroups) the
-	// inject returns nil but no bytes arrive — that path becomes the
-	// "no data within deadline" branch below and we skip cleanly.
-	injectErr := make(chan error, 1)
-	go func() {
-		injectErr <- injectTTYLineOnFd(int(slave.Fd()), payload)
-	}()
-
-	// Read in a goroutine with a hard wall-clock deadline. This avoids
-	// relying on file-descriptor read deadlines, which not every pty
-	// kernel implementation honors.
-	type readResult struct {
-		buf []byte
-		err error
-	}
-	readDone := make(chan readResult, 1)
-	go func() {
-		buf := make([]byte, 0, 128)
-		tmp := make([]byte, 64)
-		for len(buf) < len(payload)+1 {
-			n, err := slave.Read(tmp)
-			if n > 0 {
-				buf = append(buf, tmp[:n]...)
-			}
-			if err != nil {
-				if errors.Is(err, io.EOF) || errors.Is(err, os.ErrClosed) {
-					break
-				}
-				readDone <- readResult{buf, err}
-				return
-			}
+	if err := injectTTYLineOnFd(slaveFd, payload); err != nil {
+		// Filter again here — concurrent kernel updates between the
+		// probe and the real injection could flip the policy.
+		if strings.Contains(err.Error(), "TIOCSTI") {
+			t.Skipf("TIOCSTI restricted: %v", err)
 		}
-		readDone <- readResult{buf, nil}
-	}()
-
-	// 3 s is plenty: the inject body sleeps 15 ms in the middle, and
-	// the kernel transit is sub-ms. If we don't have data by then,
-	// TIOCSTI is blocked — close the slave so the read goroutine
-	// unblocks and we skip with a clear message.
-	deadline := time.NewTimer(3 * time.Second)
-	defer deadline.Stop()
-
-	var (
-		buf     []byte
-		readErr error
-	)
-	select {
-	case res := <-readDone:
-		buf = res.buf
-		readErr = res.err
-	case <-deadline.C:
-		_ = slave.Close()
-		// Drain the inject goroutine before deciding the outcome.
-		injErr := <-injectErr
-		if injErr != nil && strings.Contains(injErr.Error(), "TIOCSTI") {
-			t.Skipf("TIOCSTI failed: %v (likely kernel hardening or restricted container)", injErr)
-		}
-		t.Skipf("no bytes appeared on slave within 3s; TIOCSTI silently dropped (kernel hardening or container restriction)")
+		t.Fatalf("injectTTYLineOnFd: %v", err)
 	}
 
-	if injErr := <-injectErr; injErr != nil {
-		if strings.Contains(injErr.Error(), "TIOCSTI") {
-			t.Skipf("TIOCSTI restricted on this kernel/platform: %v", injErr)
+	// Drain with a short wall-clock budget. Non-blocking Reads return
+	// EAGAIN when no data is queued; we sleep briefly to let the kernel
+	// publish the bytes and retry. Total budget is 1 s — orders of
+	// magnitude above the 15 ms inject pause + sub-ms kernel transit.
+	deadline := time.Now().Add(time.Second)
+	buf := make([]byte, 0, 128)
+	tmp := make([]byte, 64)
+	for time.Now().Before(deadline) && len(buf) < len(payload)+1 {
+		n, err := slave.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+			continue
 		}
-		t.Fatalf("injectTTYLineOnFd: %v", injErr)
-	}
-	if readErr != nil && !errors.Is(readErr, io.EOF) {
-		t.Fatalf("read slave: %v", readErr)
+		if err != nil && errors.Is(err, io.EOF) {
+			break
+		}
+		// EAGAIN / temporarily empty queue — sleep a few ms and retry.
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	got := string(buf)
@@ -193,6 +173,18 @@ func TestInjectTTYLine_PtyEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(got, "\r") {
 		t.Fatalf("expected \\r in stream after body; got=%q", got)
+	}
+}
+
+// drainOnce reads everything currently queued on a non-blocking fd.
+// Used to discard the TIOCSTI probe byte before the real test inject.
+func drainOnce(fd int) {
+	tmp := make([]byte, 64)
+	for {
+		n, err := unix.Read(fd, tmp)
+		if n <= 0 || err != nil {
+			return
+		}
 	}
 }
 

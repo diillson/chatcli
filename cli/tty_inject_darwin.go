@@ -23,10 +23,12 @@ import (
 // shell-injection attacks against TUIs that read from /dev/tty).
 func tiocsti(fd int, b byte) error {
 	const TIOCSTI = 0x80017472 // (BSD: 'I' << 8 | 0x72) | (1 << 31) | (1 << 30)
-	// #nosec G103 -- TIOCSTI ioctl signature requires a pointer-to-byte;
-	// b is a stack-allocated function parameter whose lifetime fully
-	// covers the syscall, and the kernel copies the byte synchronously
-	// before returning. No GC interaction.
+	// #nosec G103,G115 -- G103: TIOCSTI ioctl signature requires a
+	// pointer-to-byte; b is a stack-allocated function parameter
+	// whose lifetime fully covers the syscall, and the kernel copies
+	// the byte synchronously before returning. No GC interaction.
+	// G115: fd is a process-local FD number, always non-negative
+	// and within int range; conversion to uintptr cannot overflow.
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
 		uintptr(fd),

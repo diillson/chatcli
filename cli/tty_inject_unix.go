@@ -118,11 +118,19 @@ func injectTTYLineOnFd(fd int, line string) error {
 
 // openControllingTTY tries /dev/tty first, falling back to stdin.
 // Returns the fd, a closer (no-op when stdin is reused), or an error.
+//
+// File descriptors fit in int on every supported platform — kernel
+// FD numbers are bounded by RLIMIT_NOFILE which never exceeds INT_MAX
+// in practice; gosec's overflow check is a false positive here.
 func openControllingTTY() (int, func(), error) {
 	if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+		// #nosec G115 -- f.Fd() returns a process-local FD number,
+		// always within int range on every supported platform.
 		fd := int(f.Fd())
 		return fd, func() { _ = f.Close() }, nil
 	}
+	// #nosec G115 -- same: stdin's FD number is process-local and
+	// always within int range.
 	return int(os.Stdin.Fd()), func() {}, nil
 }
 
