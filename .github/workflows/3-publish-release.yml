@@ -706,6 +706,12 @@ jobs:
           repository: diillson/chatcli.ai
           token: ${{ secrets.GH_RELEASE_TOKEN }}
 
+      - name: Checkout chatcli source (for CHANGELOG.md)
+        uses: actions/checkout@v6
+        with:
+          path: _chatcli_src
+          fetch-depth: 1
+
       - name: Update version references
         env:
           TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
@@ -713,6 +719,7 @@ jobs:
           set -euo pipefail
           NEW_VERSION="${TAG_NAME#v}"
           OLD_VERSION=$(cat VERSION | tr -d '[:space:]')
+          MAJOR_MINOR="$(echo "$NEW_VERSION" | cut -d. -f1,2)"
 
           if [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
             echo "Versão já está atualizada ($NEW_VERSION). Nada a fazer."
@@ -721,11 +728,94 @@ jobs:
 
           echo "Atualizando versão: $OLD_VERSION -> $NEW_VERSION"
 
-          # Atualiza todas as referências de versão nos arquivos .mdx
+          # 1) Inline references in MDX (chatcli image tags, server,
+          #    operator, helm rows). Same behavior as before.
           find . -name "*.mdx" -exec sed -i "s/${OLD_VERSION}/${NEW_VERSION}/g" {} +
 
-          # Atualiza o arquivo VERSION
+          # 2) docs.json banner ('🚀 ChatCLI X.Y.Z — ...'). The banner
+          #    is in JSON (not MDX) and was a silent gap before — it
+          #    kept showing the old version on every page until a
+          #    human noticed. Use a tight regex anchored on the banner
+          #    string so we don't accidentally rewrite other JSON
+          #    fields that happen to contain a version-shaped token.
+          if [ -f docs.json ]; then
+            sed -i "s/🚀 ChatCLI [0-9][0-9.]*[0-9]/🚀 ChatCLI ${NEW_VERSION}/g" docs.json
+          fi
+
+          # 3) "Atualizações recentes" / "Recent updates" Update block
+          #    in introduction.mdx (PT-BR) and en/introduction.mdx (EN).
+          #    Driven by release-please's CHANGELOG.md from the chatcli
+          #    source repo (checked out above into _chatcli_src). We
+          #    extract the latest release section (between the first
+          #    two '## [' markers) and convert each bullet into the
+          #    Update component's bullet syntax.
+          CHANGELOG="_chatcli_src/CHANGELOG.md"
+          if [ ! -f "$CHANGELOG" ]; then
+            echo "::warning::CHANGELOG.md not found in chatcli source — skipping Update-block injection"
+          else
+            DATE_RAW="$(awk '/^## \[/{ print; exit }' "$CHANGELOG" | sed -E 's/.*\(([0-9]{4}-[0-9]{2}-[0-9]{2})\).*/\1/')"
+            BULLETS_PT="$(awk '
+              /^## \[/{ if (seen) exit; seen=1; next }
+              /^\* \*\*/{
+                # "* **scope:** message ([#PR](...)) ([sha](...))" → "- **scope** — message"
+                sub(/^\* /, "- ")
+                sub(/:\*\*/, "**", $0)
+                sub(/ — /, " — ", $0)
+                # Replace ":** " with " — " on the first occurrence
+                sub(/\*\* /, "** — ")
+                # Strip trailing PR/commit links
+                sub(/ \(\[#[0-9]+\].*\) \(\[[0-9a-f]+\].*\)$/, "")
+                sub(/ \(\[#[0-9]+\].*\)$/, "")
+                print "  " $0
+              }
+            ' "$CHANGELOG")"
+            BULLETS_EN="$BULLETS_PT" # Bullets are scope-prefixed and language-neutral
+
+            if [ -n "$DATE_RAW" ] && [ -n "$BULLETS_PT" ]; then
+              # Build the Update block. Done via temp file so the
+              # YAML parser does not see embedded newlines in a shell
+              # string literal — YAML re-interprets unindented lines
+              # as new top-level keys, which broke a previous version.
+              UPDATE_FILE="$(mktemp)"
+              {
+                printf '<Update label="%s" description="%s">\n' "$MAJOR_MINOR" "$DATE_RAW"
+                printf '%s\n' "$BULLETS_PT"
+                printf '</Update>\n\n'
+              } > "$UPDATE_FILE"
+
+              # Inject before the FIRST existing <Update label="..."> block.
+              # Idempotent: skip if a block with this label already exists.
+              for f in introduction.mdx en/introduction.mdx; do
+                if [ ! -f "$f" ]; then continue; fi
+                if grep -q "<Update label=\"${MAJOR_MINOR}\"" "$f"; then
+                  echo "  ${f}: already has Update label=${MAJOR_MINOR}, skipping"
+                  continue
+                fi
+                # Use awk to read UPDATE block from temp file and
+                # print it right before the first existing <Update>.
+                awk -v blockfile="$UPDATE_FILE" '
+                  BEGIN {
+                    while ((getline line < blockfile) > 0) {
+                      block = block line "\n"
+                    }
+                    close(blockfile)
+                  }
+                  /^<Update label=/ && !inserted { printf "%s", block; inserted=1 }
+                  { print }
+                ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+                echo "  ${f}: injected Update label=${MAJOR_MINOR}"
+              done
+              rm -f "$UPDATE_FILE"
+            else
+              echo "::warning::Could not parse CHANGELOG.md latest entry — skipping Update-block injection"
+            fi
+          fi
+
+          # 4) VERSION file
           echo "$NEW_VERSION" > VERSION
+
+          # 5) Cleanup the source checkout so it does not get committed
+          rm -rf _chatcli_src
 
           echo "Arquivos alterados:"
           git diff --name-only
