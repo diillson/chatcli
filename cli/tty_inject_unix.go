@@ -12,9 +12,15 @@
  *
  * Platform notes
  *
- *   - Linux: TIOCSTI works for the controlling user's TTY without
- *     elevated privileges. Returns EPERM only if the calling process
- *     is in a different session.
+ *   - Linux: TIOCSTI behavior depends on the kernel build and a
+ *     runtime sysctl introduced in 5.16:
+ *       /proc/sys/dev/tty/legacy_tiocsti
+ *     Default 0 (enabled) on older kernels and many server distros;
+ *     default 1 (restricted) on Linux 6.x+ desktop builds and the
+ *     Docker Desktop linuxkit kernel. When restricted, TIOCSTI
+ *     returns EPERM. Operators who need auto-resume injection can
+ *     toggle the flag with `sysctl -w dev.tty.legacy_tiocsti=0`
+ *     (root). The fallback path remains the executor-hook drain.
  *
  *   - macOS: TIOCSTI was deprecated in macOS Ventura and is gated
  *     behind kern.tiocsti_disable=0 on most modern installs. Calls
@@ -62,7 +68,17 @@ func injectTTYLine(line string) error {
 		return fmt.Errorf("tty inject: %w", err)
 	}
 	defer closer()
+	return injectTTYLineOnFd(fd, line)
+}
 
+// injectTTYLineOnFd is the testable kernel of injectTTYLine: caller
+// supplies the fd, this function does the byte-stream injection with
+// the body / pause / \r split that go-prompt's reader requires. Useful
+// for unit tests that drive a synthetic pty pair instead of /dev/tty.
+func injectTTYLineOnFd(fd int, line string) error {
+	if line == "" {
+		return nil
+	}
 	// go-prompt parses each Read() call as a single key event, mapping
 	// the WHOLE byte slice via bytes.Equal against its ASCII table. A
 	// multi-byte read does not match any control sequence, so the entry
