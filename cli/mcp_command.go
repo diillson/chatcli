@@ -24,7 +24,7 @@ func (cli *ChatCLI) handleMCPCommand(userInput string) {
 		fmt.Println(p + colorize(`      "name": "filesystem",`, ColorGray))
 		fmt.Println(p + colorize(`      "transport": "stdio",`, ColorGray))
 		fmt.Println(p + colorize(`      "command": "npx",`, ColorGray))
-		fmt.Println(p + colorize(`      "args": ["-y", "@anthropic/mcp-server-filesystem", "/workspace"],`, ColorGray))
+		fmt.Println(p + colorize(`      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],`, ColorGray))
 		fmt.Println(p + colorize(`      "enabled": true`, ColorGray))
 		fmt.Println(p + colorize(`    }]`, ColorGray))
 		fmt.Println(p + colorize(`  }`, ColorGray))
@@ -70,7 +70,14 @@ func (cli *ChatCLI) mcpShowStatus() {
 		icon := "●"
 		statusColor := ColorGreen
 		statusText := i18n.T("mcp.cmd.status_connected")
-		if !s.Connected {
+		switch {
+		case s.Connected:
+			// keep green/●
+		case s.Starting:
+			icon = "◌"
+			statusColor = ColorYellow
+			statusText = i18n.T("mcp.cmd.status_starting")
+		default:
 			icon = "○"
 			statusColor = ColorRed
 			statusText = i18n.T("mcp.cmd.status_disconnected")

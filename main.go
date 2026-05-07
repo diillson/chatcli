@@ -161,8 +161,13 @@ func main() {
 				logger.Info("Cancelando operação em andamento")
 				chatCLI.CancelOperation()
 			} else {
+				// Cancel the root context so chatCLI.Start() returns
+				// and the deferred cli.cleanup() runs — that's what
+				// stops MCP child processes, drains the scheduler and
+				// flushes history. os.Exit() would skip every defer
+				// and orphan the npx-spawned MCP servers.
 				logger.Info("Encerrando aplicação")
-				os.Exit(0)
+				cancel()
 			}
 		}
 	}()

@@ -40,6 +40,7 @@ import (
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/pkg/persona"
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/diillson/chatcli/models"
 
@@ -227,8 +228,12 @@ type ChatCLI struct {
 	sessionStartTime time.Time // for session duration tracking
 
 	// MCP (Model Context Protocol) servers for client mode
-	mcpManager *mcp.Manager
-	mcpCancel  context.CancelFunc // cancel function for MCP server lifecycle
+	mcpManager     *mcp.Manager
+	mcpCancel      context.CancelFunc // cancel function for MCP server lifecycle
+	mcpCtx         context.Context    // shared with mcpCancel; reused by hot-reload
+	mcpConfigPath  string             // resolved path to mcp_servers.json
+	mcpWatcher     *fsnotify.Watcher  // hot-reload watcher; nil when disabled
+	mcpWatcherDone chan struct{}      // closed to stop the watcher loop
 
 	// Hooks system for lifecycle events
 	hookManager *hooks.Manager
@@ -488,19 +493,27 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		if err := mcpMgr.LoadConfig(mcpConfigPath); err != nil {
 			logger.Warn("Failed to load MCP config", zap.String("path", mcpConfigPath), zap.Error(err))
 		} else {
+			// Register the manager up front so /mcp status, the agent
+			// system prompt and the tool dispatcher all see the configured
+			// servers immediately. Servers start in Status.Starting=true
+			// (set by LoadConfig) and transition to Connected/LastError as
+			// the background StartAll progresses — which keeps shell
+			// startup fast even when stdio servers need npx to fetch a
+			// package on first run.
 			mcpCtx, mcpCancelFn := context.WithCancel(context.Background())
-			if err := mcpMgr.StartAll(mcpCtx); err != nil {
-				logger.Warn("Failed to start MCP servers", zap.Error(err))
-				mcpCancelFn()
-			} else {
-				cli.mcpManager = mcpMgr
-				cli.mcpCancel = mcpCancelFn
+			cli.mcpManager = mcpMgr
+			cli.mcpCancel = mcpCancelFn
+			cli.mcpConfigPath = mcpConfigPath
+			cli.mcpCtx = mcpCtx
+			go func() {
+				_ = mcpMgr.StartAll(mcpCtx)
 				statuses := mcpMgr.GetServerStatus()
 				tools := mcpMgr.GetTools()
 				logger.Info("MCP manager initialized (client mode)",
 					zap.Int("servers", len(statuses)),
 					zap.Int("tools", len(tools)))
-			}
+			}()
+			cli.startMCPConfigWatcher()
 		}
 	}
 
@@ -1236,6 +1249,95 @@ func (cli *ChatCLI) schedulerStatusLine() string {
 	return scheduler.StatusLine(summaries)
 }
 
+// startMCPConfigWatcher boots an fsnotify watcher on the MCP config
+// file's directory and triggers Manager.Reload on edits, so changes
+// to mcp_servers.json take effect without restarting chatcli.
+//
+// We watch the directory rather than the file because most editors
+// rewrite via rename (write to tmp, rename over the target), which a
+// per-file watcher misses entirely. Events are debounced to avoid
+// reloading mid-write.
+func (cli *ChatCLI) startMCPConfigWatcher() {
+	if cli.mcpManager == nil || cli.mcpConfigPath == "" {
+		return
+	}
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		cli.logger.Warn("MCP config hot-reload disabled: cannot create watcher", zap.Error(err))
+		return
+	}
+	dir := filepath.Dir(cli.mcpConfigPath)
+	if err := w.Add(dir); err != nil {
+		cli.logger.Warn("MCP config hot-reload disabled: cannot watch dir",
+			zap.String("dir", dir), zap.Error(err))
+		_ = w.Close()
+		return
+	}
+	cli.mcpWatcher = w
+	cli.mcpWatcherDone = make(chan struct{})
+
+	go func() {
+		var debounce *time.Timer
+		fire := func() {
+			diff, err := cli.mcpManager.Reload(cli.mcpCtx, cli.mcpConfigPath)
+			if err != nil {
+				cli.logger.Warn("MCP config reload failed", zap.Error(err))
+				return
+			}
+			if len(diff.Started)+len(diff.Stopped)+len(diff.Updated) == 0 {
+				return
+			}
+			cli.logger.Info("MCP config hot-reloaded",
+				zap.Strings("started", diff.Started),
+				zap.Strings("stopped", diff.Stopped),
+				zap.Strings("updated", diff.Updated))
+		}
+		for {
+			select {
+			case <-cli.mcpWatcherDone:
+				return
+			case ev, ok := <-w.Events:
+				if !ok {
+					return
+				}
+				// Only react to events on the config file itself (the
+				// directory watcher sees siblings too).
+				if filepath.Clean(ev.Name) != filepath.Clean(cli.mcpConfigPath) {
+					continue
+				}
+				if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename|fsnotify.Remove) == 0 {
+					continue
+				}
+				if debounce != nil {
+					debounce.Stop()
+				}
+				debounce = time.AfterFunc(400*time.Millisecond, fire)
+			case err, ok := <-w.Errors:
+				if !ok {
+					return
+				}
+				cli.logger.Debug("MCP config watcher error", zap.Error(err))
+			}
+		}
+	}()
+}
+
+// stopMCPConfigWatcher tears down the hot-reload watcher. Safe to
+// call when no watcher was ever started.
+func (cli *ChatCLI) stopMCPConfigWatcher() {
+	if cli.mcpWatcherDone != nil {
+		select {
+		case <-cli.mcpWatcherDone:
+		default:
+			close(cli.mcpWatcherDone)
+		}
+	}
+	if cli.mcpWatcher != nil {
+		_ = cli.mcpWatcher.Close()
+		cli.mcpWatcher = nil
+	}
+}
+
 func (cli *ChatCLI) cleanup() {
 	// Fire SessionEnd hook
 	if cli.hookManager != nil {
@@ -1272,7 +1374,9 @@ func (cli *ChatCLI) cleanup() {
 	// Drain and shut down the scheduler subsystem.
 	cli.shutdownScheduler()
 
-	// Stop MCP servers
+	// Stop MCP servers (and the hot-reload watcher first so it can't
+	// fire a Reload mid-shutdown).
+	cli.stopMCPConfigWatcher()
 	if cli.mcpManager != nil {
 		cli.mcpManager.StopAll()
 	}

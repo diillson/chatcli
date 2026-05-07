@@ -67,7 +67,7 @@ func (m *Manager) LoadConfig(configPath string) error {
 			m.mu.Lock()
 			m.servers[cfg.Name] = &ServerConnection{
 				Config: cfg,
-				Status: ServerStatus{Name: cfg.Name},
+				Status: ServerStatus{Name: cfg.Name, Starting: true},
 			}
 			m.mu.Unlock()
 		}
@@ -84,18 +84,201 @@ func DefaultConfigPath() string {
 }
 
 // StartAll starts all configured MCP servers.
+//
+// Failures of individual servers are logged and recorded on
+// ServerStatus.LastError, but they never abort the loop — the manager
+// always returns nil so a single broken server does not poison the rest
+// of the session. Inspect /mcp status (or GetServerStatus) to see which
+// servers came up and which did not.
+//
+// The connection map is snapshotted under m.mu and iterated unlocked
+// so startServer (and the discoverTools call inside it, which takes
+// m.mu.Lock) can run without deadlocking against this loop and so that
+// /mcp status — which also takes m.mu — stays responsive while
+// servers are coming up in the background.
 func (m *Manager) StartAll(ctx context.Context) error {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	pending := make([]*ServerConnection, 0, len(m.servers))
+	for _, conn := range m.servers {
+		pending = append(pending, conn)
+	}
+	m.mu.RUnlock()
 
-	for name, conn := range m.servers {
+	for _, conn := range pending {
 		if err := m.startServer(ctx, conn); err != nil {
 			m.logger.Warn("failed to start MCP server",
-				zap.String("server", name),
+				zap.String("server", conn.Config.Name),
 				zap.Error(err))
+			conn.Status.LastError = err
+			conn.Status.Connected = false
+			conn.Status.Starting = false
 		}
 	}
 	return nil
+}
+
+// Reload reconciles the live server set with the on-disk config so
+// edits to mcp_servers.json take effect without restarting chatcli.
+//
+// Diff semantics:
+//   - Server present in file but not running   → start it.
+//   - Server running but no longer in file     → stop and forget.
+//   - Server in both, config bytes equal       → leave alone.
+//   - Server in both, config bytes differ      → stop, replace, start.
+//
+// `enabled: false` is treated as "not in file" — disabling a server
+// in the JSON stops it on the next reload.
+//
+// Returns the set of changes applied, empty when nothing changed.
+type ReloadDiff struct {
+	Started []string
+	Stopped []string
+	Updated []string
+}
+
+func (m *Manager) Reload(ctx context.Context, configPath string) (ReloadDiff, error) {
+	data, err := os.ReadFile(configPath) //#nosec G304 -- same trust boundary as LoadConfig
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File deleted: stop everything we have.
+			diff := ReloadDiff{}
+			m.mu.RLock()
+			for name := range m.servers {
+				diff.Stopped = append(diff.Stopped, name)
+			}
+			m.mu.RUnlock()
+			m.StopAll()
+			m.mu.Lock()
+			m.servers = make(map[string]*ServerConnection)
+			m.tools = make(map[string]*MCPTool)
+			m.mu.Unlock()
+			return diff, nil
+		}
+		return ReloadDiff{}, fmt.Errorf("reading MCP config: %w", err)
+	}
+
+	var parsed struct {
+		Servers []ServerConfig `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return ReloadDiff{}, fmt.Errorf("parsing MCP config: %w", err)
+	}
+
+	desired := make(map[string]ServerConfig)
+	for _, cfg := range parsed.Servers {
+		if cfg.Enabled {
+			desired[cfg.Name] = cfg
+		}
+	}
+
+	var diff ReloadDiff
+	var toStop []string
+	var toStart []*ServerConnection
+	var toReplace []*ServerConnection
+
+	m.mu.Lock()
+	for name := range m.servers {
+		if _, keep := desired[name]; !keep {
+			toStop = append(toStop, name)
+			diff.Stopped = append(diff.Stopped, name)
+		}
+	}
+	for name, cfg := range desired {
+		existing, present := m.servers[name]
+		if !present {
+			conn := &ServerConnection{
+				Config: cfg,
+				Status: ServerStatus{Name: name, Starting: true},
+			}
+			m.servers[name] = conn
+			toStart = append(toStart, conn)
+			diff.Started = append(diff.Started, name)
+			continue
+		}
+		if !serverConfigsEqual(existing.Config, cfg) {
+			toStop = append(toStop, name)
+			conn := &ServerConnection{
+				Config: cfg,
+				Status: ServerStatus{Name: name, Starting: true},
+			}
+			toReplace = append(toReplace, conn)
+			diff.Updated = append(diff.Updated, name)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, name := range toStop {
+		m.stopOne(name)
+	}
+	m.mu.Lock()
+	for _, conn := range toReplace {
+		m.servers[conn.Config.Name] = conn
+		toStart = append(toStart, conn)
+	}
+	m.mu.Unlock()
+
+	for _, conn := range toStart {
+		if err := m.startServer(ctx, conn); err != nil {
+			m.logger.Warn("failed to start MCP server during reload",
+				zap.String("server", conn.Config.Name),
+				zap.Error(err))
+			conn.Status.LastError = err
+			conn.Status.Connected = false
+			conn.Status.Starting = false
+		}
+	}
+
+	if len(diff.Started)+len(diff.Stopped)+len(diff.Updated) > 0 {
+		m.logger.Info("MCP config reloaded",
+			zap.Strings("started", diff.Started),
+			zap.Strings("stopped", diff.Stopped),
+			zap.Strings("updated", diff.Updated))
+	}
+	return diff, nil
+}
+
+// stopOne stops a single server, removes its tools and drops it from
+// the map. Used by Reload; safe to call without holding m.mu.
+func (m *Manager) stopOne(name string) {
+	m.mu.Lock()
+	conn, ok := m.servers[name]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	transport := conn.transport
+	process := conn.Process
+	conn.transport = nil
+	conn.Process = nil
+	conn.Status.Connected = false
+	conn.Status.Starting = false
+	for tn, t := range m.tools {
+		if t.ServerName == name {
+			delete(m.tools, tn)
+		}
+	}
+	delete(m.servers, name)
+	m.mu.Unlock()
+
+	if transport != nil {
+		_ = transport.Close()
+	}
+	if process != nil {
+		_ = process.Kill()
+	}
+	m.logger.Info("MCP server stopped (reload)", zap.String("server", name))
+}
+
+// serverConfigsEqual compares two ServerConfig values for byte-equal
+// JSON. Used by Reload to decide whether a server entry has changed
+// enough to warrant a restart.
+func serverConfigsEqual(a, b ServerConfig) bool {
+	aj, errA := json.Marshal(a)
+	bj, errB := json.Marshal(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return string(aj) == string(bj)
 }
 
 // StopAll stops all running MCP servers.
@@ -114,6 +297,7 @@ func (m *Manager) StopAll() {
 			conn.Process = nil
 		}
 		conn.Status.Connected = false
+		conn.Status.Starting = false
 	}
 }
 
@@ -241,6 +425,39 @@ func (m *Manager) GetShadowedBuiltins() []string {
 	return shadowed
 }
 
+// markDisconnected updates the named server's status to reflect that
+// its transport has died (process crash, EPIPE, EOF). Tools owned by
+// that server are also dropped so the agent prompt and native tool
+// list stop advertising calls that would fail. Safe to call from a
+// transport callback goroutine.
+func (m *Manager) markDisconnected(name string, reason error) {
+	m.mu.Lock()
+	conn, ok := m.servers[name]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	if !conn.Status.Connected && !conn.Status.Starting {
+		m.mu.Unlock()
+		return // already in a terminal state; don't clobber
+	}
+	conn.Status.Connected = false
+	conn.Status.Starting = false
+	if reason != nil {
+		conn.Status.LastError = reason
+	}
+	for tn, t := range m.tools {
+		if t.ServerName == name {
+			delete(m.tools, tn)
+		}
+	}
+	m.mu.Unlock()
+
+	m.logger.Warn("MCP server disconnected",
+		zap.String("server", name),
+		zap.Error(reason))
+}
+
 // startServer starts a single MCP server via the configured transport.
 func (m *Manager) startServer(ctx context.Context, conn *ServerConnection) error {
 	switch conn.Config.Transport {
@@ -264,6 +481,16 @@ func (m *Manager) startStdioServer(ctx context.Context, conn *ServerConnection) 
 		return fmt.Errorf("failed to start stdio transport: %w", err)
 	}
 
+	// Mark the server as disconnected the moment the child process or
+	// pipe goes away — covers a server that crashes mid-session, a
+	// `kill -9 npx`, or just stdin EPIPE on the next Call. Without
+	// this, /mcp status would keep showing "connected" against a dead
+	// process and only /mcp restart could recover.
+	srvName := conn.Config.Name
+	transport.onClose = func(reason error) {
+		m.markDisconnected(srvName, reason)
+	}
+
 	conn.transport = transport
 	conn.Process = transport.cmd.Process
 
@@ -283,6 +510,8 @@ func (m *Manager) startStdioServer(ctx context.Context, conn *ServerConnection) 
 	}
 
 	conn.Status.Connected = true
+	conn.Status.Starting = false
+	conn.Status.LastError = nil
 	conn.Status.StartedAt = time.Now()
 	m.logger.Info("MCP stdio server connected",
 		zap.String("server", conn.Config.Name),
@@ -319,6 +548,8 @@ func (m *Manager) startSSEServer(ctx context.Context, conn *ServerConnection) er
 	}
 
 	conn.Status.Connected = true
+	conn.Status.Starting = false
+	conn.Status.LastError = nil
 	conn.Status.StartedAt = time.Now()
 	m.logger.Info("MCP SSE server connected",
 		zap.String("server", conn.Config.Name),

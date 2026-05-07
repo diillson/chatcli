@@ -253,3 +253,38 @@ func TestSplitStdinChunk_LineTerminators(t *testing.T) {
 		})
 	}
 }
+
+func TestMcpToolHasRequiredParams(t *testing.T) {
+	tests := []struct {
+		name   string
+		schema map[string]interface{}
+		want   bool
+	}{
+		{"nil schema", nil, false},
+		{"empty schema", map[string]interface{}{}, false},
+		{"properties only, no required", map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{"x": map[string]interface{}{"type": "string"}},
+		}, false},
+		{"required empty list", map[string]interface{}{
+			"type":     "object",
+			"required": []interface{}{},
+		}, false},
+		{"required with one entry", map[string]interface{}{
+			"type":     "object",
+			"required": []interface{}{"path"},
+		}, true},
+		{"list_allowed_directories shape", map[string]interface{}{
+			"$schema":    "http://json-schema.org/draft-07/schema#",
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mcpToolHasRequiredParams(tt.schema); got != tt.want {
+				t.Errorf("mcpToolHasRequiredParams() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
