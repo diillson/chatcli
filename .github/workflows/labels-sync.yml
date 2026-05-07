@@ -1,0 +1,30 @@
+name: Sync Labels
+
+# Reconciles the labels defined in .github/labels.yml with the repository.
+# Runs on pushes to main that touch the manifest (so renames/recolors apply
+# without a manual sync) and via workflow_dispatch for ad-hoc reruns.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.yml
+      - .github/workflows/labels-sync.yml
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  sync:
+    name: Sync .github/labels.yml -> repo labels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Apply labels (non-destructive)
+        uses: EndBug/label-sync@v2
+        with:
+          config-file: .github/labels.yml
+          delete-other-labels: false
