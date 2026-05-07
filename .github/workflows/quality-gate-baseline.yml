@@ -1,0 +1,67 @@
+name: Quality Gate · Baseline
+
+# Publishes the total coverage % of main/develop as a GitHub commit status
+# (`quality-gate/coverage`). The Quality Gate ratchet job in
+# quality-gate.yml reads this status to compute the regression delta on a PR.
+#
+# Why a commit status? It is the cheapest authoritative store: no external
+# service, no S3, no codecov dependency. Statuses are first-class GitHub
+# objects and `gh api repos/.../commits/<sha>/statuses` is one call.
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: quality-gate-baseline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-baseline:
+    name: Publish coverage baseline
+    runs-on: ubuntu-latest
+    if: github.actor != 'release-please[bot]'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests with coverage
+        run: |
+          go test -race -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -n 1
+
+      - name: Compute total coverage
+        id: cov
+        run: |
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/,"",$3); print $3 }')
+          echo "pct=$pct" >> "$GITHUB_OUTPUT"
+
+      - name: Publish commit status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PCT: ${{ steps.cov.outputs.pct }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+            -f context='quality-gate/coverage' \
+            -f state='success' \
+            -f description="coverage ${PCT}%"
+
+      - name: Step summary
+        run: |
+          {
+            echo "## Coverage baseline updated"
+            echo ""
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Total coverage: **${{ steps.cov.outputs.pct }}%**"
+          } >> "$GITHUB_STEP_SUMMARY"

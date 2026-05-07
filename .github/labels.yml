@@ -1,0 +1,29 @@
+# Labels managed by .github/workflows/labels-sync.yml
+#
+# These are the bypass / contextual labels honored by the Quality Gate.
+# Anything else in the repo is left untouched (the action runs in
+# non-destructive mode).
+
+- name: large-pr-approved
+  color: "fbca04"
+  description: Bypass Quality Gate LOC threshold (PR is intentionally large)
+
+- name: wide-pr-approved
+  color: "fbca04"
+  description: Bypass Quality Gate file-count threshold (PR touches many files intentionally)
+
+- name: deps:approved
+  color: "0e8a16"
+  description: New dependencies in this PR have been reviewed and approved
+
+- name: breaking-change
+  color: "b60205"
+  description: This PR removes or changes exported APIs intentionally
+
+- name: refactor-only
+  color: "5319e7"
+  description: Pure refactor — patch coverage threshold relaxed
+
+- name: quality-gate-skip
+  color: "d93f0b"
+  description: Nuclear bypass — skips the entire Quality Gate (use sparingly)
