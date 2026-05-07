@@ -1,0 +1,150 @@
+# Quality Gate — versioned configuration
+#
+# All thresholds the Quality Gate workflow honors live here so they can be
+# tuned without touching workflow YAML or shell scripts. Read by
+# scripts/qg/lib.sh via yq.
+#
+# Phase rollout: every floor below is enforced (blocking) by default.
+# Setting `enforcement: warn` on a floor flips it to advisory-only — useful
+# while introducing a new check without surprising contributors.
+
+version: 1
+
+# Branches the Quality Gate runs against (mirrors workflow `on.pull_request.branches`).
+target_branches:
+  - main
+  - develop
+
+# Bot actors whose PRs skip the gate entirely. Release-please reshuffles
+# changelogs and version bumps; running coverage ratchet against those is noise.
+skip_actors:
+  - release-please[bot]
+  - github-actions[bot]
+  - dependabot[bot]
+
+# Floor 1 — Build / static analysis. Already covered by 1-ci.yml; the
+# Quality Gate re-runs them so the single required check is self-contained
+# (a future cleanup of 1-ci.yml does not silently widen the gate).
+build:
+  enforcement: blocking
+  go_vet: true
+  gofmt: true
+  golangci_lint:
+    version: v1.64.8
+    timeout: 5m
+
+# Floor 2 — Total coverage ratchet vs. main. Baseline is stored as a commit
+# status `quality-gate/coverage` on every push to main by
+# quality-gate-baseline.yml. First run (no baseline) bootstraps and passes.
+coverage_total:
+  enforcement: blocking
+  # Floor below which we never go even if main regressed.
+  hard_floor_pct: 27.0
+  # Tolerance to absorb flake (line-count drift on retries, etc.).
+  tolerance_pct: 0.1
+
+# Floor 3 — Patch coverage on the diff. Computed via gocover-cobertura +
+# diff-cover comparing to origin/<base>. Excludes generated and test files.
+coverage_patch:
+  enforcement: blocking
+  threshold_pct: 60
+  # PRs labelled `refactor-only` use a relaxed threshold (move-don't-add).
+  refactor_threshold_pct: 30
+  exclude:
+    - "**/*_test.go"
+    - "**/*.pb.go"
+    - "proto/**"
+    - "tools/docgen/**"
+
+# Floor 4 — AI / hand-rolled code smells scanned in the diff (Go non-test only).
+ai_smells:
+  enforcement: blocking
+  checks:
+    todo_fixme_xxx: true
+    panic_in_new_code: true
+    interface_any_in_public_api: true
+    hardcoded_user_strings: true   # heuristic, runs on cli/ handlers only
+    obvious_secrets: true
+    new_dependency_without_label: true   # bypass: deps:approved
+    removed_exports_without_label: true  # bypass: breaking-change
+  # Paths excluded from smells scan (noise reduction).
+  exclude:
+    - "**/*_test.go"
+    - "**/*.pb.go"
+    - "proto/**"
+    - "vendor/**"
+    - "scripts/qg/**"
+
+# Floor 5 — Scope discipline. Bypassed via labels for legitimate large PRs.
+scope_budget:
+  enforcement: blocking
+  loc:
+    warn: 800
+    block: 2000
+    bypass_label: large-pr-approved
+  files:
+    warn: 25
+    block: 50
+    bypass_label: wide-pr-approved
+  # Paths counted as "tooling" — they still count toward LOC, but the warning
+  # explicitly notes the tooling share so reviewers see signal vs. noise.
+  tooling_paths:
+    - ".github/**"
+    - "scripts/**"
+    - "Makefile"
+    - "**/*.md"
+
+# Floor 6 — E2E + race. Runs the e2e/ package which builds the binary itself.
+e2e:
+  enforcement: blocking
+  timeout_minutes: 15
+
+# Floor 7 — Commit hygiene. Catches the two release-please/repo conventions
+# that have bitten this repo before (see feedback_no_coauthor.md and
+# feedback_no_code_in_commit_body.md in user memory).
+commit_lint:
+  enforcement: blocking
+  forbid_co_authored_by: true
+  forbid_nested_parens_in_body: true
+  # Conventional Commits prefix on the FIRST commit of the PR (release-please
+  # uses the merge commit subject; we still want PR-level discipline).
+  require_conventional_commits: true
+  allowed_types:
+    - feat
+    - fix
+    - refactor
+    - perf
+    - docs
+    - test
+    - build
+    - ci
+    - chore
+    - revert
+    - style
+
+# Floor 8 — Cyclomatic complexity on changed files only. Existing code is
+# grandfathered (project-wide gocyclo is 70); new code is held to 30.
+cyclo_new:
+  enforcement: blocking
+  max_complexity: 30
+  # Files whose path matches any of these are exempt (legacy hot spots that
+  # are intentionally large; splitting them is its own refactor).
+  exempt:
+    - "cli/agent_mode.go"
+    - "cli/cli.go"
+    - "cli/commands.go"
+
+# Floor 9 — Secrets scan via gitleaks on the PR diff.
+secrets_scan:
+  enforcement: blocking
+
+# Bypass labels — applied manually by maintainers when an exception is
+# legitimate. The gate logs which bypass was used so it shows up in the
+# sticky comment.
+bypass_labels:
+  - large-pr-approved
+  - wide-pr-approved
+  - deps:approved
+  - breaking-change
+  - refactor-only
+  - quality-gate-skip   # nuclear option; logs prominently in summary
