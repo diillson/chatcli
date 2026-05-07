@@ -1,9 +1,15 @@
 package cli
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/diillson/chatcli/cli/mcp"
+	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
@@ -287,4 +293,98 @@ func TestMcpToolHasRequiredParams(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildMCPToolsSection(t *testing.T) {
+	tools := []models.ToolDefinition{
+		{Function: models.ToolFunctionDef{Name: "mcp_read_file", Description: "[MCP:fs] read"}},
+		{Function: models.ToolFunctionDef{Name: "mcp_list_dir", Description: "[MCP:fs] list"}},
+	}
+	coder := buildMCPToolsSection(tools, true)
+	agent := buildMCPToolsSection(tools, false)
+
+	for _, s := range []string{coder, agent} {
+		if !strings.Contains(s, "MCP Tools (external):") {
+			t.Errorf("missing header in section:\n%s", s)
+		}
+		if !strings.Contains(s, "mcp_read_file") || !strings.Contains(s, "mcp_list_dir") {
+			t.Errorf("missing tool entry in section:\n%s", s)
+		}
+	}
+	// Coder mode must reference @coder fallback; agent mode must not.
+	if !strings.Contains(coder, "@coder") {
+		t.Errorf("coder section missing @coder fallback hint:\n%s", coder)
+	}
+	if strings.Contains(agent, "@coder") {
+		t.Errorf("agent section should not reference @coder:\n%s", agent)
+	}
+}
+
+func TestBuildMCPEmptyNote(t *testing.T) {
+	if got := buildMCPEmptyNote(nil); got != "" {
+		t.Errorf("no servers should yield empty note, got %q", got)
+	}
+	if got := buildMCPEmptyNote([]mcp.ServerStatus{}); got != "" {
+		t.Errorf("empty slice should yield empty note, got %q", got)
+	}
+	starting := buildMCPEmptyNote([]mcp.ServerStatus{
+		{Name: "a", Starting: true},
+		{Name: "b", Connected: false},
+	})
+	// Both locales must surface that the server is not ready yet
+	// (en: "not ready yet" / "launching"; pt-BR: "ainda não está pronto").
+	if !strings.Contains(starting, "not ready") && !strings.Contains(starting, "launching") &&
+		!strings.Contains(starting, "ainda não está pronto") && !strings.Contains(starting, "iniciando") {
+		t.Errorf("starting note missing keyword:\n%s", starting)
+	}
+	failed := buildMCPEmptyNote([]mcp.ServerStatus{
+		{Name: "a", Connected: false},
+	})
+	// en: "no server is connected"; pt-BR: "nenhum servidor está conectado".
+	if !strings.Contains(failed, "no server is connected") && !strings.Contains(failed, "nenhum servidor está conectado") {
+		t.Errorf("unavailable note missing keyword:\n%s", failed)
+	}
+}
+
+func TestMCPConfigWatcherFiresOnFileWrite(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "mcp_servers.json")
+	// Initial config: srv1 enabled, transport unsupported so startServer
+	// fails fast — we only care that Reload is invoked.
+	if err := os.WriteFile(cfgPath, []byte(`{"mcpServers":[{"name":"srv1","transport":"x","enabled":true}]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := mcp.NewManager(zap.NewNop())
+	if err := mgr.LoadConfig(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cli := &ChatCLI{
+		logger:        zap.NewNop(),
+		mcpManager:    mgr,
+		mcpCtx:        ctx,
+		mcpConfigPath: cfgPath,
+	}
+	cli.startMCPConfigWatcher()
+	defer cli.stopMCPConfigWatcher()
+	if cli.mcpWatcher == nil {
+		t.Fatal("watcher did not start")
+	}
+	// Edit the file: add srv2 — Reload should pick it up.
+	if err := os.WriteFile(cfgPath, []byte(`{"mcpServers":[
+		{"name":"srv1","transport":"x","enabled":true},
+		{"name":"srv2","transport":"x","enabled":true}
+	]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Watcher debounces 400ms; allow a bit more for fsnotify delivery.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(mgr.GetServerStatus()) == 2 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("watcher did not propagate edit; got %d servers, want 2", len(mgr.GetServerStatus()))
 }

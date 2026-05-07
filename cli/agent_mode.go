@@ -27,6 +27,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
+	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/metrics"
 	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -943,39 +944,15 @@ func (a *AgentMode) getToolContextString() string {
 	if a.cli.mcpManager != nil {
 		mcpTools := a.cli.mcpManager.GetToolsSummary()
 		if len(mcpTools) > 0 {
-			var mcpSection strings.Builder
-			mcpSection.WriteString("MCP Tools (external):\n")
-			mcpSection.WriteString("  Para invocar: <tool_call name=\"mcp_<tool>\" args='{\"param\":\"value\"}' />\n")
-			mcpSection.WriteString("  Se precisar dos parâmetros exatos, invoque e o sistema retornará o schema.\n")
-			if a.isCoderMode {
-				mcpSection.WriteString("\n  " + i18n.T("agent.mcp.routing_hint_coder") + "\n")
-			} else {
-				mcpSection.WriteString("\n  " + i18n.T("agent.mcp.routing_hint_agent") + "\n")
-			}
-			mcpSection.WriteString("\n")
-			for _, t := range mcpTools {
-				mcpSection.WriteString(fmt.Sprintf("  - %s: %s\n", t.Function.Name, t.Function.Description))
-			}
-			toolDescriptions = append(toolDescriptions, mcpSection.String())
+			toolDescriptions = append(toolDescriptions, buildMCPToolsSection(mcpTools, a.isCoderMode))
 		} else {
 			// MCP is configured but no tools are usable right now: either a
 			// background launch is still in progress or every server failed
 			// to start. Tell the model explicitly so it does not fabricate
 			// `mcp_*` calls and instead falls back to the listed tools.
 			statuses := a.cli.mcpManager.GetServerStatus()
-			anyStarting := false
-			for _, s := range statuses {
-				if s.Starting {
-					anyStarting = true
-					break
-				}
-			}
-			if len(statuses) > 0 {
-				if anyStarting {
-					toolDescriptions = append(toolDescriptions, i18n.T("agent.mcp.note_starting")+"\n")
-				} else {
-					toolDescriptions = append(toolDescriptions, i18n.T("agent.mcp.note_unavailable")+"\n")
-				}
+			if note := buildMCPEmptyNote(statuses); note != "" {
+				toolDescriptions = append(toolDescriptions, note)
 			}
 		}
 	}
@@ -2518,6 +2495,44 @@ func (a *AgentMode) initMultiAgent() bool {
 }
 
 // buildSessionWorkspaceHint returns a compact prompt block that teaches the
+// buildMCPToolsSection renders the system-prompt block listing MCP
+// tools available this turn, plus the routing hint that biases the
+// model toward `mcp_*` when an MCP server covers the requested op.
+// Pure function so the rendering can be tested without spinning up an
+// AgentMode instance and a live LLM client.
+func buildMCPToolsSection(tools []models.ToolDefinition, isCoderMode bool) string {
+	var b strings.Builder
+	b.WriteString("MCP Tools (external):\n")
+	b.WriteString("  Para invocar: <tool_call name=\"mcp_<tool>\" args='{\"param\":\"value\"}' />\n")
+	b.WriteString("  Se precisar dos parâmetros exatos, invoque e o sistema retornará o schema.\n")
+	if isCoderMode {
+		b.WriteString("\n  " + i18n.T("agent.mcp.routing_hint_coder") + "\n")
+	} else {
+		b.WriteString("\n  " + i18n.T("agent.mcp.routing_hint_agent") + "\n")
+	}
+	b.WriteString("\n")
+	for _, t := range tools {
+		b.WriteString(fmt.Sprintf("  - %s: %s\n", t.Function.Name, t.Function.Description))
+	}
+	return b.String()
+}
+
+// buildMCPEmptyNote returns the system-prompt note shown to the model
+// when MCP is configured but no tool is usable yet — either still
+// starting or every server failed to start. Returns empty string when
+// no server is configured at all (so callers can append unconditionally).
+func buildMCPEmptyNote(statuses []mcp.ServerStatus) string {
+	if len(statuses) == 0 {
+		return ""
+	}
+	for _, s := range statuses {
+		if s.Starting {
+			return i18n.T("agent.mcp.note_starting") + "\n"
+		}
+	}
+	return i18n.T("agent.mcp.note_unavailable") + "\n"
+}
+
 // mcpToolHasRequiredParams reports whether a JSON schema declares any
 // required input parameter. Used to distinguish a tool that legitimately
 // accepts {} (e.g. list_allowed_directories) from one whose call lost
