@@ -36,6 +36,7 @@ jobs:
     outputs:
       skip: ${{ steps.decide.outputs.skip }}
       docs_only: ${{ steps.decide.outputs.docs_only }}
+      release_please: ${{ steps.decide.outputs.release_please }}
       labels: ${{ steps.decide.outputs.labels }}
       base_ref: ${{ steps.decide.outputs.base_ref }}
     steps:
@@ -81,11 +82,22 @@ jobs:
           docs_only="false"
           if qg_is_docs_only; then docs_only="true"; fi
 
+          # release-please PR detection: branch is deterministic
+          # ("release-please--branches--<base>"). The PR only bumps versions
+          # and CHANGELOG, so the heavy floors are noise — we keep
+          # commit-lint running as a sanity check and skip the rest.
+          release_please="false"
+          head_ref='${{ github.head_ref }}'
+          if [[ "$head_ref" == release-please--* ]]; then
+            release_please="true"
+          fi
+
           labels=$(qg_pr_labels | xargs)
 
           {
             echo "skip=$skip"
             echo "docs_only=$docs_only"
+            echo "release_please=$release_please"
             echo "labels=$labels"
             echo "base_ref=$base_ref"
           } >> "$GITHUB_OUTPUT"
@@ -96,7 +108,7 @@ jobs:
   build-static:
     name: Floor 1 · Build & Static
     needs: meta
-    if: needs.meta.outputs.skip != 'true'
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -134,7 +146,7 @@ jobs:
   test-coverage:
     name: Floor 2 · Coverage ratchet
     needs: meta
-    if: needs.meta.outputs.skip != 'true'
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     outputs:
       passed: ${{ steps.ratchet.outputs.passed }}
@@ -181,7 +193,7 @@ jobs:
   patch-coverage:
     name: Floor 3 · Patch coverage
     needs: [meta, test-coverage]
-    if: needs.meta.outputs.skip != 'true'
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     outputs:
       passed: ${{ steps.patch.outputs.passed }}
@@ -223,7 +235,7 @@ jobs:
   ai-smells:
     name: Floor 4 · AI smells
     needs: meta
-    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true'
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     outputs:
       passed: ${{ steps.scan.outputs.passed }}
@@ -249,7 +261,7 @@ jobs:
   scope-budget:
     name: Floor 5 · Scope budget
     needs: meta
-    if: needs.meta.outputs.skip != 'true'
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     outputs:
       passed: ${{ steps.scope.outputs.passed }}
@@ -279,7 +291,7 @@ jobs:
   e2e:
     name: Floor 6 · E2E
     needs: meta
-    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true'
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -323,7 +335,7 @@ jobs:
   cyclo-new:
     name: Floor 8 · Cyclo (new code)
     needs: meta
-    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true'
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     outputs:
       passed: ${{ steps.cyclo.outputs.passed }}
@@ -354,7 +366,7 @@ jobs:
   secrets-scan:
     name: Floor 9 · Secrets scan
     needs: meta
-    if: needs.meta.outputs.skip != 'true'
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -402,6 +414,7 @@ jobs:
           R_CYCLO: ${{ needs.cyclo-new.result }}
           R_SEC: ${{ needs.secrets-scan.result }}
           DOCS_ONLY: ${{ needs.meta.outputs.docs_only }}
+          RELEASE_PLEASE: ${{ needs.meta.outputs.release_please }}
           SKIP: ${{ needs.meta.outputs.skip }}
           COV_CURRENT: ${{ needs.test-coverage.outputs.current }}
           COV_BASELINE: ${{ needs.test-coverage.outputs.baseline }}
@@ -430,6 +443,17 @@ jobs:
           if [[ "$SKIP" == "true" ]]; then
             verdict="bypassed"
             body="### Quality Gate · Bypassed%0AThis PR was skipped (bot actor or \`quality-gate-skip\` label)."
+          elif [[ "$RELEASE_PLEASE" == "true" ]]; then
+            # release-please PRs run only commit-lint; the heavy floors
+            # are intentionally skipped and reported as ⏭️ in the body.
+            failed=()
+            if [[ "$R_LINT" != "success" && "$R_LINT" != "skipped" && -n "$R_LINT" ]]; then
+              failed+=("commit-lint")
+            fi
+            verdict="pass"
+            if [[ ${#failed[@]} -gt 0 ]]; then
+              verdict="fail"
+            fi
           else
             # Treat skipped as success (e.g. ai-smells skipped on docs-only PRs).
             failed=()
