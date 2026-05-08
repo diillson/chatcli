@@ -109,12 +109,23 @@ func (m *Manager) StartAll(ctx context.Context) error {
 			m.logger.Warn("failed to start MCP server",
 				zap.String("server", conn.Config.Name),
 				zap.Error(err))
-			conn.Status.LastError = err
-			conn.Status.Connected = false
-			conn.Status.Starting = false
+			m.recordStartFailure(conn, err)
 		}
 	}
 	return nil
+}
+
+// recordStartFailure stamps a failed start onto conn.Status under
+// the manager's write lock so concurrent GetServerStatus callers
+// don't race against the post-failure update. Used by StartAll and
+// Reload — the success path (set inside startStdioServer / startSSEServer)
+// is single-writer per server and not contended.
+func (m *Manager) recordStartFailure(conn *ServerConnection, err error) {
+	m.mu.Lock()
+	conn.Status.LastError = err
+	conn.Status.Connected = false
+	conn.Status.Starting = false
+	m.mu.Unlock()
 }
 
 // Reload reconciles the live server set with the on-disk config so
@@ -222,9 +233,7 @@ func (m *Manager) Reload(ctx context.Context, configPath string) (ReloadDiff, er
 			m.logger.Warn("failed to start MCP server during reload",
 				zap.String("server", conn.Config.Name),
 				zap.Error(err))
-			conn.Status.LastError = err
-			conn.Status.Connected = false
-			conn.Status.Starting = false
+			m.recordStartFailure(conn, err)
 		}
 	}
 
