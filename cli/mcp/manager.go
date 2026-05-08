@@ -3,9 +3,11 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -28,7 +30,49 @@ type ServerConnection struct {
 	Status    ServerStatus
 	Process   *os.Process
 	transport mcpTransport // real transport (stdio or SSE)
+	logs      *logRing     // recent stderr/event lines for /mcp logs
 }
+
+// logRing is a tiny bounded ring buffer for a server's recent log
+// lines. Older lines drop off the front when capacity is reached so
+// memory stays constant regardless of how chatty a server is. Used
+// by /mcp logs <name> to show what's been happening on that server's
+// stderr without forcing the user to dig through a debug logfile.
+type logRing struct {
+	mu    sync.Mutex
+	lines []string
+	cap   int
+}
+
+func newLogRing(cap int) *logRing {
+	return &logRing{cap: cap}
+}
+
+func (r *logRing) append(line string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.lines) >= r.cap {
+		// Drop the oldest line. Single-shift is fine here: cap is
+		// small (~200) and stderr lines arrive at human-readable
+		// rates, not in tight loops.
+		r.lines = append(r.lines[:0], r.lines[1:]...)
+	}
+	r.lines = append(r.lines, line)
+}
+
+func (r *logRing) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.lines))
+	copy(out, r.lines)
+	return out
+}
+
+// mcpLogRingCapacity caps the per-server log buffer. Tuned for the
+// "tail what just happened on this server" use case — large enough
+// to span a typical npx cold-start or a panic stack, small enough
+// that 50 disabled-but-noisy servers don't dominate memory.
+const mcpLogRingCapacity = 200
 
 // NewManager creates a new MCP manager.
 func NewManager(logger *zap.Logger) *Manager {
@@ -68,6 +112,7 @@ func (m *Manager) LoadConfig(configPath string) error {
 			m.servers[cfg.Name] = &ServerConnection{
 				Config: cfg,
 				Status: ServerStatus{Name: cfg.Name, Starting: true},
+				logs:   newLogRing(mcpLogRingCapacity),
 			}
 			m.mu.Unlock()
 		}
@@ -200,6 +245,7 @@ func (m *Manager) Reload(ctx context.Context, configPath string) (ReloadDiff, er
 			conn := &ServerConnection{
 				Config: cfg,
 				Status: ServerStatus{Name: name, Starting: true},
+				logs:   newLogRing(mcpLogRingCapacity),
 			}
 			m.servers[name] = conn
 			toStart = append(toStart, conn)
@@ -211,6 +257,7 @@ func (m *Manager) Reload(ctx context.Context, configPath string) (ReloadDiff, er
 			conn := &ServerConnection{
 				Config: cfg,
 				Status: ServerStatus{Name: name, Starting: true},
+				logs:   newLogRing(mcpLogRingCapacity),
 			}
 			toReplace = append(toReplace, conn)
 			diff.Updated = append(diff.Updated, name)
@@ -288,6 +335,124 @@ func serverConfigsEqual(a, b ServerConfig) bool {
 		return false
 	}
 	return string(aj) == string(bj)
+}
+
+// Sentinel errors returned by StartOne / StopOne. The manager keeps
+// the messages in English (Go convention for library errors) but the
+// CLI handler wraps them with errors.Is and translates via i18n
+// before printing — that keeps user-facing text out of this layer
+// while still letting external callers detect "unknown server" /
+// "already running" cases programmatically.
+var (
+	ErrServerNotConfigured  = errors.New("MCP server is not configured")
+	ErrServerAlreadyRunning = errors.New("MCP server is already running")
+)
+
+// StartOne starts a single configured server by name. The server
+// must already be in m.servers (loaded by LoadConfig/Reload or left
+// behind by a previous StopOne) — StartOne does not invent a config
+// from thin air. Returns ErrServerNotConfigured / ErrServerAlreadyRunning
+// (wrapped with the server name) so callers can branch on the cause
+// via errors.Is and translate user-facing messages.
+func (m *Manager) StartOne(ctx context.Context, name string) error {
+	m.mu.RLock()
+	conn, ok := m.servers[name]
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrServerNotConfigured, name)
+	}
+	if conn.Status.Connected {
+		return fmt.Errorf("%w: %q", ErrServerAlreadyRunning, name)
+	}
+	// Reset transient state so a retry after a previous failure
+	// shows up correctly in /mcp status while startup is in flight.
+	m.mu.Lock()
+	conn.Status.Starting = true
+	conn.Status.LastError = nil
+	m.mu.Unlock()
+
+	if err := m.startServer(ctx, conn); err != nil {
+		m.recordStartFailure(conn, err)
+		return err
+	}
+	return nil
+}
+
+// StopOne stops a single running server but keeps its entry in the
+// configured set so /mcp start <name> can revive it later. This is
+// the public counterpart to the internal stopOne (which Reload uses
+// to drop servers that vanished from the config file). Returns an
+// error if the server name isn't known.
+func (m *Manager) StopOne(name string) error {
+	m.mu.Lock()
+	conn, ok := m.servers[name]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("%w: %q", ErrServerNotConfigured, name)
+	}
+	transport := conn.transport
+	process := conn.Process
+	conn.transport = nil
+	conn.Process = nil
+	conn.Status.Connected = false
+	conn.Status.Starting = false
+	conn.Status.ToolCount = 0
+	for tn, t := range m.tools {
+		if t.ServerName == name {
+			delete(m.tools, tn)
+		}
+	}
+	m.mu.Unlock()
+
+	if transport != nil {
+		_ = transport.Close()
+	}
+	if process != nil {
+		_ = process.Kill()
+	}
+	m.logger.Info("MCP server stopped", zap.String("server", name))
+	return nil
+}
+
+// ServerNames returns the names of all configured servers in
+// alphabetical order. Used by the /mcp completer to suggest valid
+// targets and by callers that need to iterate the configured set
+// without holding any internal locks.
+func (m *Manager) ServerNames() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	names := make([]string, 0, len(m.servers))
+	for name := range m.servers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// RecentLogs returns up to mcpLogRingCapacity recent log lines for
+// the named server, oldest first. Returns nil if the server is not
+// configured. The slice is a copy and safe to mutate.
+func (m *Manager) RecentLogs(name string) []string {
+	m.mu.RLock()
+	conn, ok := m.servers[name]
+	m.mu.RUnlock()
+	if !ok || conn.logs == nil {
+		return nil
+	}
+	return conn.logs.snapshot()
+}
+
+// appendLog pushes a line into the named server's log ring. Used by
+// the transport layer (stdio drainStderr, SSE event handlers) via
+// the connection callback set in startServer.
+func (m *Manager) appendLog(name, line string) {
+	m.mu.RLock()
+	conn, ok := m.servers[name]
+	m.mu.RUnlock()
+	if !ok || conn.logs == nil {
+		return
+	}
+	conn.logs.append(line)
 }
 
 // StopAll stops all running MCP servers.
@@ -498,6 +663,12 @@ func (m *Manager) startStdioServer(ctx context.Context, conn *ServerConnection) 
 	srvName := conn.Config.Name
 	transport.onClose = func(reason error) {
 		m.markDisconnected(srvName, reason)
+	}
+	// Tee stderr into the per-server log ring so /mcp logs can show
+	// recent output (npm 404s, panics, the server's own info chatter)
+	// without the user having to crank up --debug logging.
+	transport.onLog = func(line string) {
+		m.appendLog(srvName, line)
 	}
 
 	conn.transport = transport

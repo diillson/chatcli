@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1446,5 +1447,205 @@ func TestMarkDisconnectedFlipsStatusAndDropsTools(t *testing.T) {
 	m.markDisconnected("srv", fmt.Errorf("second"))
 	if conn.Status.LastError.Error() != "boom" {
 		t.Errorf("LastError clobbered on second call: %v", conn.Status.LastError)
+	}
+}
+
+// --- per-server command tests ----------------------------------------------
+// These pin the contract /mcp start|stop|logs depend on: StopOne keeps
+// the entry alive (so a later StartOne can revive it), StartOne refuses
+// unknown/duplicate starts, and the log ring is bounded and snapshotted
+// safely.
+
+func TestStopOneKeepsEntryAndDropsTools(t *testing.T) {
+	m := NewManager(testLogger())
+	m.servers["srv"] = &ServerConnection{
+		Config: ServerConfig{Name: "srv", Transport: TransportStdio},
+		Status: ServerStatus{Name: "srv", Connected: true, ToolCount: 2},
+		logs:   newLogRing(mcpLogRingCapacity),
+	}
+	m.tools["t1"] = &MCPTool{Name: "t1", ServerName: "srv"}
+	m.tools["t2"] = &MCPTool{Name: "t2", ServerName: "srv"}
+
+	if err := m.StopOne("srv"); err != nil {
+		t.Fatalf("StopOne: %v", err)
+	}
+
+	// Entry must still exist so /mcp start can revive it.
+	if _, ok := m.servers["srv"]; !ok {
+		t.Error("StopOne should keep the entry in m.servers")
+	}
+	if m.servers["srv"].Status.Connected {
+		t.Error("Status.Connected should be false after StopOne")
+	}
+	if m.servers["srv"].Status.ToolCount != 0 {
+		t.Errorf("ToolCount = %d, want 0 after StopOne", m.servers["srv"].Status.ToolCount)
+	}
+	// Tools attributed to srv must be dropped so the LLM doesn't try
+	// to invoke them while the server is down.
+	if _, still := m.tools["t1"]; still {
+		t.Error("tool t1 should be dropped after StopOne")
+	}
+	if _, still := m.tools["t2"]; still {
+		t.Error("tool t2 should be dropped after StopOne")
+	}
+}
+
+func TestStopOneUnknownServerErrors(t *testing.T) {
+	m := NewManager(testLogger())
+	if err := m.StopOne("ghost"); err == nil {
+		t.Error("expected error stopping unknown server")
+	}
+}
+
+func TestStartOneUnknownServerErrors(t *testing.T) {
+	m := NewManager(testLogger())
+	if err := m.StartOne(context.Background(), "ghost"); err == nil {
+		t.Error("expected error starting unknown server")
+	}
+}
+
+func TestStartOneAlreadyRunningErrors(t *testing.T) {
+	m := NewManager(testLogger())
+	m.servers["srv"] = &ServerConnection{
+		Config: ServerConfig{Name: "srv", Transport: TransportStdio},
+		Status: ServerStatus{Name: "srv", Connected: true},
+	}
+	err := m.StartOne(context.Background(), "srv")
+	if err == nil {
+		t.Fatal("expected error starting an already-running server")
+	}
+	if !errors.Is(err, ErrServerAlreadyRunning) {
+		t.Errorf("expected ErrServerAlreadyRunning, got: %v", err)
+	}
+}
+
+func TestStartOneUnknownErrorIsSentinel(t *testing.T) {
+	// Pin the sentinel-error contract so callers can branch on
+	// errors.Is(err, ErrServerNotConfigured) without parsing strings.
+	m := NewManager(testLogger())
+	err := m.StartOne(context.Background(), "ghost")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrServerNotConfigured) {
+		t.Errorf("expected ErrServerNotConfigured, got: %v", err)
+	}
+}
+
+func TestStopOneUnknownErrorIsSentinel(t *testing.T) {
+	m := NewManager(testLogger())
+	err := m.StopOne("ghost")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrServerNotConfigured) {
+		t.Errorf("expected ErrServerNotConfigured, got: %v", err)
+	}
+}
+
+func TestStartOneRetryClearsLastError(t *testing.T) {
+	// Verify that StartOne resets transient state on a previously
+	// failed server before attempting the start. We use an
+	// unsupported transport so startServer fails predictably, then
+	// confirm Status reflects the new failure rather than the old
+	// one. This pins the "retry shows current state" contract for
+	// the /mcp start command.
+	m := NewManager(testLogger())
+	m.servers["srv"] = &ServerConnection{
+		Config: ServerConfig{Name: "srv", Transport: "bogus"},
+		Status: ServerStatus{Name: "srv", LastError: fmt.Errorf("previous failure")},
+	}
+	err := m.StartOne(context.Background(), "srv")
+	if err == nil {
+		t.Fatal("expected error starting with bogus transport")
+	}
+	if m.servers["srv"].Status.LastError == nil {
+		t.Fatal("LastError should record the new failure")
+	}
+	// We cleared it before startServer ran, then startServer +
+	// recordStartFailure stamped the new error. So the new error
+	// must NOT be the literal "previous failure" string.
+	if m.servers["srv"].Status.LastError.Error() == "previous failure" {
+		t.Errorf("LastError still holds stale value: %v", m.servers["srv"].Status.LastError)
+	}
+}
+
+func TestServerNamesSorted(t *testing.T) {
+	m := NewManager(testLogger())
+	m.servers["zulu"] = &ServerConnection{Config: ServerConfig{Name: "zulu"}}
+	m.servers["alpha"] = &ServerConnection{Config: ServerConfig{Name: "alpha"}}
+	m.servers["mike"] = &ServerConnection{Config: ServerConfig{Name: "mike"}}
+
+	got := m.ServerNames()
+	want := []string{"alpha", "mike", "zulu"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("ServerNames()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRecentLogsUnknownServerReturnsNil(t *testing.T) {
+	m := NewManager(testLogger())
+	if got := m.RecentLogs("ghost"); got != nil {
+		t.Errorf("RecentLogs(unknown) = %v, want nil", got)
+	}
+}
+
+func TestAppendLogAndRecentLogs(t *testing.T) {
+	m := NewManager(testLogger())
+	m.servers["srv"] = &ServerConnection{
+		Config: ServerConfig{Name: "srv"},
+		logs:   newLogRing(mcpLogRingCapacity),
+	}
+	m.appendLog("srv", "first")
+	m.appendLog("srv", "second")
+	m.appendLog("srv", "third")
+
+	got := m.RecentLogs("srv")
+	want := []string{"first", "second", "third"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("logs[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestLogRingDropsOldestAtCapacity(t *testing.T) {
+	r := newLogRing(3)
+	r.append("a")
+	r.append("b")
+	r.append("c")
+	r.append("d") // should drop "a"
+	r.append("e") // should drop "b"
+
+	got := r.snapshot()
+	want := []string{"c", "d", "e"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("ring[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestLogRingSnapshotIsCopy(t *testing.T) {
+	// The snapshot must be safe to mutate without corrupting the
+	// ring's internal state — UI code that prints lines may decorate
+	// them in-place and we don't want the next call to see surprises.
+	r := newLogRing(5)
+	r.append("hello")
+	snap := r.snapshot()
+	snap[0] = "MUTATED"
+	if got := r.snapshot()[0]; got != "hello" {
+		t.Errorf("ring corrupted by snapshot mutation: got %q, want %q", got, "hello")
 	}
 }
