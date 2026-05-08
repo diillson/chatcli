@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.113.0](https://github.com/diillson/chatcli/compare/v1.112.2...v1.113.0) (2026-05-08)
+
+
+### Features
+
+* **mcp:** per-server commands + logs ring + manual reload ([#894](https://github.com/diillson/chatcli/issues/894)) ([258ad0d](https://github.com/diillson/chatcli/commit/258ad0db8d8a0474634f45eaf80093be2fe4b6de))
+
+
+### Bug Fixes
+
+* **coder:** use go-prompt for iteration input (paste + full width) ([#893](https://github.com/diillson/chatcli/issues/893)) ([86f4333](https://github.com/diillson/chatcli/commit/86f4333225a92d29d30d628aec2b290e814ede9d))
+* **mcp:** inherit parent env, expand ${VAR}, and hot-reload from empty state ([#892](https://github.com/diillson/chatcli/issues/892)) ([2179c29](https://github.com/diillson/chatcli/commit/2179c29fad0522f158c736849dea7d1c02447b70))
+
 ## [1.112.2](https://github.com/diillson/chatcli/compare/v1.112.1...v1.112.2) (2026-05-08)
 
 
