@@ -133,6 +133,7 @@ cyclo_new:
     - "cli/agent_mode.go"
     - "cli/cli.go"
     - "cli/commands.go"
+    - "main.go"
 
 # Floor 9 — Secrets scan via gitleaks on the PR diff.
 secrets_scan:

@@ -45,6 +45,7 @@ type MCPToolResult struct {
 type ServerStatus struct {
 	Name      string
 	Connected bool
+	Starting  bool // true while the server is being launched in background
 	ToolCount int
 	LastPing  time.Time
 	LastError error

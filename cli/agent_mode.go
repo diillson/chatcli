@@ -27,6 +27,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
+	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/metrics"
 	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -943,14 +944,16 @@ func (a *AgentMode) getToolContextString() string {
 	if a.cli.mcpManager != nil {
 		mcpTools := a.cli.mcpManager.GetToolsSummary()
 		if len(mcpTools) > 0 {
-			var mcpSection strings.Builder
-			mcpSection.WriteString("MCP Tools (external):\n")
-			mcpSection.WriteString("  Para invocar: <tool_call name=\"mcp_<tool>\" args='{\"param\":\"value\"}' />\n")
-			mcpSection.WriteString("  Se precisar dos parâmetros exatos, invoque e o sistema retornará o schema.\n\n")
-			for _, t := range mcpTools {
-				mcpSection.WriteString(fmt.Sprintf("  - %s: %s\n", t.Function.Name, t.Function.Description))
+			toolDescriptions = append(toolDescriptions, buildMCPToolsSection(mcpTools, a.isCoderMode))
+		} else {
+			// MCP is configured but no tools are usable right now: either a
+			// background launch is still in progress or every server failed
+			// to start. Tell the model explicitly so it does not fabricate
+			// `mcp_*` calls and instead falls back to the listed tools.
+			statuses := a.cli.mcpManager.GetServerStatus()
+			if note := buildMCPEmptyNote(statuses); note != "" {
+				toolDescriptions = append(toolDescriptions, note)
 			}
-			toolDescriptions = append(toolDescriptions, mcpSection.String())
 		}
 	}
 
@@ -1168,14 +1171,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Get tool definitions for native mode.
 		// In coder mode: coder tools + plugin tools (websearch, webfetch)
 		// In agent mode: plugin tools only (websearch, webfetch)
+		// MCP tools from any connected server are exposed in both modes so
+		// the model can call them via the provider's native tool API rather
+		// than relying on text-only XML dispatch.
 		var nativeToolDefs []models.ToolDefinition
 		if canUseNativeTools {
 			if a.isCoderMode {
 				nativeToolDefs = workers.CoderToolDefinitions(nil)
 			}
-			// Always include plugin tools (websearch, webfetch) for all modes.
-			// This eliminates phantom tool call detection issues from XML parsing.
 			nativeToolDefs = append(nativeToolDefs, workers.PluginToolDefinitions()...)
+			if a.cli.mcpManager != nil && a.cli.mcpManager.ToolCount() > 0 {
+				nativeToolDefs = append(nativeToolDefs, a.cli.mcpManager.GetTools()...)
+			}
 		}
 
 		// Chamada à LLM (native tools or text)
@@ -1900,15 +1907,23 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							_ = json.Unmarshal([]byte(normalizedArgsStr), &mcpArgs)
 						}
 
-						// Deferred schema: if model invoked with empty args, return the full schema
+						// Deferred schema: when the model invokes with empty args we
+						// either fall through and execute (the tool legitimately takes
+						// no input — e.g. list_allowed_directories) or, if the tool
+						// declares required parameters we have not received, we return
+						// the full schema so the model can re-invoke with the right
+						// arguments.
+						needsSchema := false
 						if len(mcpArgs) == 0 {
 							schema := a.cli.mcpManager.GetToolSchema(mcpToolName)
-							if schema != nil {
+							if mcpToolHasRequiredParams(schema) {
 								schemaJSON, _ := json.MarshalIndent(schema, "", "  ")
 								toolOutput = fmt.Sprintf("MCP tool '%s' requires parameters. Here is the schema:\n%s\n\nPlease invoke again with the correct arguments.", mcpToolName, string(schemaJSON))
-							} else {
-								toolOutput = fmt.Sprintf("MCP tool '%s' requires arguments in JSON format: {\"param\": \"value\"}", mcpToolName)
+								needsSchema = true
 							}
+						}
+						if needsSchema {
+							// schema returned to the model; skip execution this turn
 						} else {
 							a.cli.animation.StopThinkingAnimation()
 							if !coderCompact {
@@ -2480,6 +2495,59 @@ func (a *AgentMode) initMultiAgent() bool {
 }
 
 // buildSessionWorkspaceHint returns a compact prompt block that teaches the
+// buildMCPToolsSection renders the system-prompt block listing MCP
+// tools available this turn, plus the routing hint that biases the
+// model toward `mcp_*` when an MCP server covers the requested op.
+// Pure function so the rendering can be tested without spinning up an
+// AgentMode instance and a live LLM client.
+func buildMCPToolsSection(tools []models.ToolDefinition, isCoderMode bool) string {
+	var b strings.Builder
+	b.WriteString("MCP Tools (external):\n")
+	b.WriteString("  Para invocar: <tool_call name=\"mcp_<tool>\" args='{\"param\":\"value\"}' />\n")
+	b.WriteString("  Se precisar dos parâmetros exatos, invoque e o sistema retornará o schema.\n")
+	if isCoderMode {
+		b.WriteString("\n  " + i18n.T("agent.mcp.routing_hint_coder") + "\n")
+	} else {
+		b.WriteString("\n  " + i18n.T("agent.mcp.routing_hint_agent") + "\n")
+	}
+	b.WriteString("\n")
+	for _, t := range tools {
+		b.WriteString(fmt.Sprintf("  - %s: %s\n", t.Function.Name, t.Function.Description))
+	}
+	return b.String()
+}
+
+// buildMCPEmptyNote returns the system-prompt note shown to the model
+// when MCP is configured but no tool is usable yet — either still
+// starting or every server failed to start. Returns empty string when
+// no server is configured at all (so callers can append unconditionally).
+func buildMCPEmptyNote(statuses []mcp.ServerStatus) string {
+	if len(statuses) == 0 {
+		return ""
+	}
+	for _, s := range statuses {
+		if s.Starting {
+			return i18n.T("agent.mcp.note_starting") + "\n"
+		}
+	}
+	return i18n.T("agent.mcp.note_unavailable") + "\n"
+}
+
+// mcpToolHasRequiredParams reports whether a JSON schema declares any
+// required input parameter. Used to distinguish a tool that legitimately
+// accepts {} (e.g. list_allowed_directories) from one whose call lost
+// its arguments and needs the schema sent back to the model.
+func mcpToolHasRequiredParams(schema map[string]interface{}) bool {
+	if schema == nil {
+		return false
+	}
+	required, ok := schema["required"].([]interface{})
+	if !ok || len(required) == 0 {
+		return false
+	}
+	return true
+}
+
 // model how to use the per-session scratch dir and how to recover data from
 // truncated tool results. Returns an empty string when the session workspace
 // hasn't been initialized (shouldn't happen during normal startup).

@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -284,6 +286,55 @@ func TestLoadConfigValid(t *testing.T) {
 	}
 	if m.servers["srv3"].Config.Transport != TransportSSE {
 		t.Errorf("srv3 transport = %q, want sse", m.servers["srv3"].Config.Transport)
+	}
+	// Servers should be registered as Starting=true so /mcp status shows
+	// "iniciando…" while StartAll runs in the background.
+	for name, conn := range m.servers {
+		if !conn.Status.Starting {
+			t.Errorf("server %q: Status.Starting=false, want true after LoadConfig", name)
+		}
+		if conn.Status.Connected {
+			t.Errorf("server %q: Status.Connected=true before StartAll", name)
+		}
+	}
+}
+
+// TestStartAllRecordsLastError verifies that a server failing to start
+// surfaces the error on Status.LastError (not just in logs) so /mcp
+// status can show why a server is disconnected. The contract is also
+// what config_sections.go relies on to print the error inline.
+func TestStartAllRecordsLastError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "mcp.json")
+	cfg := `{
+		"mcpServers": [
+			{"name":"bogus","transport":"unsupported-transport","enabled":true}
+		]
+	}`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(testLogger())
+	if err := m.LoadConfig(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.StartAll(context.Background()); err != nil {
+		t.Fatalf("StartAll must not return error for individual server failures: %v", err)
+	}
+
+	conn, ok := m.servers["bogus"]
+	if !ok {
+		t.Fatal("server bogus missing")
+	}
+	if conn.Status.LastError == nil {
+		t.Error("LastError not set after StartAll failure")
+	}
+	if conn.Status.Connected {
+		t.Error("Connected=true after failed start")
+	}
+	if conn.Status.Starting {
+		t.Error("Starting=true after StartAll terminated")
 	}
 }
 
@@ -1114,4 +1165,184 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	}
 
 	<-done
+}
+
+// --- stdio framing regression tests --------------------------------------
+// MCP stdio transport spec mandates newline-delimited JSON. An earlier
+// implementation used LSP-style Content-Length headers, which silently
+// hung against any standard MCP server (initialize timed out). These
+// tests pin the on-the-wire framing so the bug cannot regress.
+
+func TestStdioSendWritesNewlineDelimitedJSON(t *testing.T) {
+	pr, pw := io.Pipe()
+	tr := &stdioTransport{
+		stdin:   pw,
+		pending: make(map[int64]chan *jsonRPCResponse),
+		logger:  testLogger(),
+		done:    make(chan struct{}),
+	}
+
+	read := make(chan []byte, 1)
+	go func() {
+		buf := make([]byte, 1024)
+		n, _ := pr.Read(buf)
+		read <- buf[:n]
+	}()
+
+	if err := tr.send(jsonRPCRequest{JSONRPC: "2.0", ID: 7, Method: "initialize"}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	select {
+	case got := <-read:
+		s := string(got)
+		if strings.Contains(s, "Content-Length") {
+			t.Errorf("send produced LSP-style frame, want newline-delimited JSON: %q", s)
+		}
+		if !strings.HasSuffix(s, "\n") {
+			t.Errorf("send did not terminate with '\\n': %q", s)
+		}
+		var probe map[string]interface{}
+		if err := json.Unmarshal([]byte(strings.TrimRight(s, "\n")), &probe); err != nil {
+			t.Errorf("frame is not a single JSON object: %v (%q)", err, s)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for send to write")
+	}
+}
+
+func TestStdioReadLoopDispatchesNDJSON(t *testing.T) {
+	stdoutR, stdoutW := io.Pipe()
+	tr := &stdioTransport{
+		stdout:  bufio.NewReaderSize(stdoutR, 4096),
+		pending: make(map[int64]chan *jsonRPCResponse),
+		logger:  testLogger(),
+		done:    make(chan struct{}),
+	}
+
+	ch := make(chan *jsonRPCResponse, 1)
+	tr.pendMu.Lock()
+	tr.pending[42] = ch
+	tr.pendMu.Unlock()
+
+	go tr.readLoop()
+
+	// Simulate a server that prints a banner before the protocol stream
+	// (some MCP servers do this) followed by the response line.
+	if _, err := io.WriteString(stdoutW, "MCP server starting...\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(stdoutW, "{\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{\"ok\":true}}\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case resp := <-ch:
+		if resp.ID != 42 {
+			t.Errorf("dispatched ID = %d, want 42", resp.ID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("readLoop did not dispatch NDJSON response")
+	}
+
+	_ = stdoutW.Close()
+}
+
+func TestReloadAddsRemovesAndUpdatesServers(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "mcp.json")
+	write := func(body string) {
+		if err := os.WriteFile(cfgPath, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Initial: srv1 only. Use unsupported transport so startServer
+	// fails fast — we care about Reload diff semantics, not the spawn.
+	write(`{"mcpServers":[{"name":"srv1","transport":"x","enabled":true}]}`)
+	m := NewManager(testLogger())
+	if err := m.LoadConfig(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	_ = m.StartAll(context.Background())
+
+	// 1) Add srv2, keep srv1 unchanged.
+	write(`{"mcpServers":[
+		{"name":"srv1","transport":"x","enabled":true},
+		{"name":"srv2","transport":"x","enabled":true}
+	]}`)
+	diff, err := m.Reload(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(diff.Started) != 1 || diff.Started[0] != "srv2" {
+		t.Errorf("expected srv2 started, got %+v", diff)
+	}
+	if len(diff.Stopped) != 0 || len(diff.Updated) != 0 {
+		t.Errorf("expected no stopped/updated, got %+v", diff)
+	}
+
+	// 2) Remove srv1, change srv2's args (update).
+	write(`{"mcpServers":[
+		{"name":"srv2","transport":"x","args":["--changed"],"enabled":true}
+	]}`)
+	diff, err = m.Reload(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	stopped := strings.Join(diff.Stopped, ",")
+	if !strings.Contains(stopped, "srv1") {
+		t.Errorf("expected srv1 stopped, got %+v", diff)
+	}
+	if len(diff.Updated) != 1 || diff.Updated[0] != "srv2" {
+		t.Errorf("expected srv2 updated, got %+v", diff)
+	}
+
+	// 3) Disable srv2 → effectively a removal.
+	write(`{"mcpServers":[
+		{"name":"srv2","transport":"x","enabled":false}
+	]}`)
+	diff, err = m.Reload(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(diff.Stopped) != 1 || diff.Stopped[0] != "srv2" {
+		t.Errorf("expected srv2 stopped on disable, got %+v", diff)
+	}
+
+	// 4) No file at all → stop everything (already empty, just must not error).
+	if err := os.Remove(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Reload(context.Background(), cfgPath); err != nil {
+		t.Fatalf("reload after delete: %v", err)
+	}
+}
+
+func TestMarkDisconnectedFlipsStatusAndDropsTools(t *testing.T) {
+	m := NewManager(testLogger())
+	conn := &ServerConnection{
+		Config: ServerConfig{Name: "srv", Transport: TransportStdio},
+		Status: ServerStatus{Name: "srv", Connected: true, ToolCount: 1},
+	}
+	m.servers["srv"] = conn
+	m.tools["srv_tool"] = &MCPTool{Name: "srv_tool", ServerName: "srv"}
+
+	m.markDisconnected("srv", fmt.Errorf("boom"))
+
+	if conn.Status.Connected {
+		t.Error("Status.Connected should be false after markDisconnected")
+	}
+	if conn.Status.LastError == nil || conn.Status.LastError.Error() != "boom" {
+		t.Errorf("LastError = %v, want \"boom\"", conn.Status.LastError)
+	}
+	if _, still := m.tools["srv_tool"]; still {
+		t.Error("tool from disconnected server should have been dropped")
+	}
+
+	// Idempotent: second call must not clobber LastError.
+	m.markDisconnected("srv", fmt.Errorf("second"))
+	if conn.Status.LastError.Error() != "boom" {
+		t.Errorf("LastError clobbered on second call: %v", conn.Status.LastError)
+	}
 }
