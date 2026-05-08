@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.113.1](https://github.com/diillson/chatcli/compare/v1.113.0...v1.113.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **coder:** restore terminal state after go-prompt so multiline (---) works ([#896](https://github.com/diillson/chatcli/issues/896)) ([316eb88](https://github.com/diillson/chatcli/commit/316eb88a7305b6276a30fc822d9c9be92b1c0963))
+
 ## [1.113.0](https://github.com/diillson/chatcli/compare/v1.112.2...v1.113.0) (2026-05-08)
 
 
