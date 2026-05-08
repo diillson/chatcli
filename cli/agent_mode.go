@@ -245,20 +245,36 @@ func (a *AgentMode) readLineWithEditing() (string, error) {
 		return readLinePlainFromReader(bufio.NewReader(os.Stdin)), nil
 	}
 
-	return a.processInteractiveLine(a.readLineFromGoPrompt, bufio.NewReader(os.Stdin))
+	// Snapshot the current cooked-mode terminal state BEFORE go-prompt
+	// runs. go-prompt switches stdin to raw mode internally and tries
+	// to restore on tearDown, but on macOS that cleanup is not
+	// 100% reliable — `icanon`/`icrnl` sometimes stay off, so the
+	// bufio reader used for multiline continuation lines below would
+	// hang forever (Enter delivers '\r' which never satisfies a
+	// `ReadString('\n')`). Force-restoring this snapshot after go-prompt
+	// returns guarantees a cooked terminal for any subsequent
+	// line-buffered read in this turn.
+	cookedState, _ := term.GetState(fd)
+	line := a.readLineFromGoPrompt()
+	if cookedState != nil {
+		_ = term.Restore(fd, cookedState)
+	}
+
+	return a.processInteractiveLine(line, bufio.NewReader(os.Stdin))
 }
 
-// processInteractiveLine is the TTY-side pipeline: read one line via
-// the supplied source, replay any captured bracketed-paste content,
-// and either return the trimmed line or — if the user typed a
-// multiline trigger — drain continuation lines from `multilineReader`
-// until the matching delimiter. Pulled into its own function so the
-// post-prompt logic (paste replay, multiline dispatch) is unit-
-// testable with a stub readRaw, without spinning up a real terminal
-// or go-prompt instance.
-func (a *AgentMode) processInteractiveLine(readRaw func() string, multilineReader *bufio.Reader) (string, error) {
-	line := readRaw()
-
+// processInteractiveLine is the TTY-side post-prompt pipeline: take
+// the line that go-prompt already returned, replay any captured
+// bracketed-paste content, and either return the trimmed line or —
+// if the user typed a multiline trigger — drain continuation lines
+// from `multilineReader` until the matching delimiter.
+//
+// Kept as a separate function so paste replay and multiline dispatch
+// are unit-testable without spinning up a real terminal. The function
+// no longer reads anything itself — readLineWithEditing is the single
+// point that touches stdin/go-prompt, which keeps the terminal-mode
+// dance contained in one place.
+func (a *AgentMode) processInteractiveLine(line string, multilineReader *bufio.Reader) (string, error) {
 	// Mirror the chat-mode paste handling: when a large paste was
 	// captured behind a placeholder, swap it back in. Always clear
 	// lastPasteInfo so the next chat-mode prompt doesn't see a stale

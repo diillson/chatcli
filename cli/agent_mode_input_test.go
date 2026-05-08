@@ -172,16 +172,16 @@ func TestRunMultilineSessionWithBacktickFence(t *testing.T) {
 	}
 }
 
-// processInteractiveLine is the TTY-side pipeline that runs after
-// the go-prompt readline returns. We can't drive go-prompt itself
-// in unit tests, but we can stub the line source — that's the whole
-// point of the readRaw injection. These tests pin every post-prompt
-// behavior the function is responsible for.
+// processInteractiveLine is the TTY-side post-prompt pipeline. The
+// function takes the line go-prompt already returned and decides
+// what to do with it (paste replay, multiline dispatch, plain
+// pass-through). Pure post-processing — no stdin reads of its own —
+// so tests can drive every branch directly with a string input.
 
 func TestProcessInteractiveLinePassesThroughTrimmed(t *testing.T) {
 	a := &AgentMode{cli: &ChatCLI{}}
 	got, err := a.processInteractiveLine(
-		func() string { return "  hello world  " },
+		"  hello world  ",
 		bufio.NewReader(strings.NewReader("")),
 	)
 	if err != nil {
@@ -204,7 +204,7 @@ func TestProcessInteractiveLineReplaysPasteContent(t *testing.T) {
 	}
 	a := &AgentMode{cli: cli}
 	got, err := a.processInteractiveLine(
-		func() string { return "before <<PASTE>> after" },
+		"before <<PASTE>> after",
 		bufio.NewReader(strings.NewReader("")),
 	)
 	if err != nil {
@@ -224,10 +224,7 @@ func TestProcessInteractiveLineDispatchesMultiline(t *testing.T) {
 	// reader. Pins the wiring between trigger detector and accumulator.
 	a := &AgentMode{cli: &ChatCLI{}}
 	cont := bufio.NewReader(strings.NewReader("line A\nline B\n---\n"))
-	got, err := a.processInteractiveLine(
-		func() string { return "---" },
-		cont,
-	)
+	got, err := a.processInteractiveLine("---", cont)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
