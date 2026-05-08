@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.112.2](https://github.com/diillson/chatcli/compare/v1.112.1...v1.112.2) (2026-05-08)
+
+
+### Bug Fixes
+
+* **mcp:** conserta lifecycle, framing stdio e integração com agent ([#889](https://github.com/diillson/chatcli/issues/889)) ([f625968](https://github.com/diillson/chatcli/commit/f62596807f0decda68d11d0f0dc24d3599e4813b))
+
 ## [1.112.1](https://github.com/diillson/chatcli/compare/v1.112.0...v1.112.1) (2026-05-05)
 
 
