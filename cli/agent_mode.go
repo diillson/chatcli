@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/cli/agent/quality"
@@ -226,35 +227,56 @@ func (a *AgentMode) readLine() string {
 	return strings.TrimSpace(line)
 }
 
-// stdinStdout is an io.ReadWriter that reads from stdin and writes to stdout.
-// Required by term.NewTerminal which needs a single ReadWriter.
-type stdinStdout struct{}
-
-func (stdinStdout) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
-func (stdinStdout) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
-
-// readLineWithEditing reads a single line with full terminal line-editing support
-// (arrow keys, Home, End, Ctrl+A/E, backspace, delete, etc.) using golang.org/x/term.
-// This is used for coder mode interactive input where the user needs to edit text.
+// readLineWithEditing reads a single line of user input for coder
+// mode iteration. It delegates to go-prompt — the same readline used
+// by chat mode — so behavior is identical: full terminal width,
+// bracketed-paste handling (multi-line paste preserved instead of
+// submitting on the first newline), arrow-key navigation, Ctrl+A/E,
+// word movement, history-free single-shot input. Reusing the chat
+// stack here is a deliberate UX choice: users should not have to
+// learn a second editing model when the agent waits for their reply.
+//
+// Falls back to plain bufio.Reader when stdin isn't a TTY (piped
+// input, CI), where go-prompt's raw-mode setup would fail.
 func (a *AgentMode) readLineWithEditing() (string, error) {
 	fd := int(os.Stdin.Fd()) // #nosec G115 -- Fd() returns uintptr, safe on all supported platforms
 
-	// Put terminal into raw mode so term.Terminal can handle escape sequences
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		// Fallback to simple read if raw mode fails (e.g., piped input)
+	if !term.IsTerminal(fd) {
 		reader := bufio.NewReader(os.Stdin)
 		line, _ := reader.ReadString('\n')
 		return strings.TrimSpace(line), nil
 	}
-	defer func() { _ = term.Restore(fd, oldState) }()
 
-	// term.NewTerminal provides full readline: arrow keys, Ctrl+A/E, word
-	// movement, backspace, delete — all processed correctly.
-	t := term.NewTerminal(stdinStdout{}, "  > ")
-	line, err := t.ReadLine()
-	if err != nil {
-		return "", err
+	// BracketedPasteParser is what makes multi-line paste survive
+	// without each embedded newline being interpreted as Enter. Same
+	// parser the main chat REPL uses (cli/cli.go).
+	pasteParser := paste.NewBracketedPasteParser(
+		prompt.NewStandardInputParser(),
+		func(info paste.Info) {
+			a.cli.lastPasteInfo = &info
+		},
+	)
+
+	noopCompleter := func(prompt.Document) []prompt.Suggest { return nil }
+
+	line := prompt.Input(
+		"  > ",
+		noopCompleter,
+		prompt.OptionParser(pasteParser),
+		prompt.OptionPrefixTextColor(prompt.Green),
+		prompt.OptionInputTextColor(prompt.White),
+	)
+
+	// Mirror the chat-mode paste handling: when a large paste was
+	// captured behind a placeholder, swap it back in. Always clear
+	// lastPasteInfo so the next chat-mode prompt doesn't see a stale
+	// notification from this coder iteration.
+	if a.cli.lastPasteInfo != nil {
+		info := a.cli.lastPasteInfo
+		a.cli.lastPasteInfo = nil
+		if info.Placeholder != "" && strings.Contains(line, info.Placeholder) {
+			line = strings.Replace(line, info.Placeholder, info.Content, 1)
+		}
 	}
 
 	trimmed := strings.TrimSpace(line)
@@ -262,7 +284,6 @@ func (a *AgentMode) readLineWithEditing() (string, error) {
 	// Support multiline delimiter: if the user types "---", enter multiline mode
 	// using the standard multilineBuf accumulator.
 	if trimmed == "---" || trimmed == "```" {
-		_ = term.Restore(fd, oldState) // restore terminal for multiline input
 		a.multilineBuf.ProcessLine(trimmed)
 		fmt.Printf("\n  \033[90m📝 %s\033[0m\n", i18n.T("multiline.hint", a.multilineBuf.Delimiter()))
 		reader := bufio.NewReader(os.Stdin)
