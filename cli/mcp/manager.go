@@ -344,7 +344,7 @@ func serverConfigsEqual(a, b ServerConfig) bool {
 // while still letting external callers detect "unknown server" /
 // "already running" cases programmatically.
 var (
-	ErrServerNotConfigured = errors.New("MCP server is not configured")
+	ErrServerNotConfigured  = errors.New("MCP server is not configured")
 	ErrServerAlreadyRunning = errors.New("MCP server is already running")
 )
 
