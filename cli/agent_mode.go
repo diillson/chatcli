@@ -245,7 +245,19 @@ func (a *AgentMode) readLineWithEditing() (string, error) {
 		return readLinePlainFromReader(bufio.NewReader(os.Stdin)), nil
 	}
 
-	line := a.readLineFromGoPrompt()
+	return a.processInteractiveLine(a.readLineFromGoPrompt, bufio.NewReader(os.Stdin))
+}
+
+// processInteractiveLine is the TTY-side pipeline: read one line via
+// the supplied source, replay any captured bracketed-paste content,
+// and either return the trimmed line or — if the user typed a
+// multiline trigger — drain continuation lines from `multilineReader`
+// until the matching delimiter. Pulled into its own function so the
+// post-prompt logic (paste replay, multiline dispatch) is unit-
+// testable with a stub readRaw, without spinning up a real terminal
+// or go-prompt instance.
+func (a *AgentMode) processInteractiveLine(readRaw func() string, multilineReader *bufio.Reader) (string, error) {
+	line := readRaw()
 
 	// Mirror the chat-mode paste handling: when a large paste was
 	// captured behind a placeholder, swap it back in. Always clear
@@ -258,7 +270,7 @@ func (a *AgentMode) readLineWithEditing() (string, error) {
 	// Support multiline delimiter: if the user types "---", enter
 	// multiline mode and accumulate until the matching delimiter.
 	if isMultilineTrigger(trimmed) {
-		return a.runMultilineSession(trimmed, bufio.NewReader(os.Stdin))
+		return a.runMultilineSession(trimmed, multilineReader)
 	}
 
 	return trimmed, nil

@@ -171,3 +171,69 @@ func TestRunMultilineSessionWithBacktickFence(t *testing.T) {
 		t.Errorf("backtick fence didn't capture content: %q", got)
 	}
 }
+
+// processInteractiveLine is the TTY-side pipeline that runs after
+// the go-prompt readline returns. We can't drive go-prompt itself
+// in unit tests, but we can stub the line source — that's the whole
+// point of the readRaw injection. These tests pin every post-prompt
+// behavior the function is responsible for.
+
+func TestProcessInteractiveLinePassesThroughTrimmed(t *testing.T) {
+	a := &AgentMode{cli: &ChatCLI{}}
+	got, err := a.processInteractiveLine(
+		func() string { return "  hello world  " },
+		bufio.NewReader(strings.NewReader("")),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "hello world" {
+		t.Errorf("got %q, want %q", got, "hello world")
+	}
+}
+
+func TestProcessInteractiveLineReplaysPasteContent(t *testing.T) {
+	// The chat REPL uses the same placeholder swap; if a coder
+	// iteration receives a placeholder without replay, the user
+	// would see the placeholder submitted as their actual prompt.
+	cli := &ChatCLI{
+		lastPasteInfo: &paste.Info{
+			Placeholder: "<<PASTE>>",
+			Content:     "actual pasted content",
+		},
+	}
+	a := &AgentMode{cli: cli}
+	got, err := a.processInteractiveLine(
+		func() string { return "before <<PASTE>> after" },
+		bufio.NewReader(strings.NewReader("")),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "before actual pasted content after" {
+		t.Errorf("placeholder not replayed: %q", got)
+	}
+	if cli.lastPasteInfo != nil {
+		t.Error("lastPasteInfo must be drained after processing")
+	}
+}
+
+func TestProcessInteractiveLineDispatchesMultiline(t *testing.T) {
+	// When the user types the multiline trigger, the function must
+	// hand off to runMultilineSession and feed the continuation
+	// reader. Pins the wiring between trigger detector and accumulator.
+	a := &AgentMode{cli: &ChatCLI{}}
+	cont := bufio.NewReader(strings.NewReader("line A\nline B\n---\n"))
+	got, err := a.processInteractiveLine(
+		func() string { return "---" },
+		cont,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"line A", "line B"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("multiline output missing %q: %q", want, got)
+		}
+	}
+}
