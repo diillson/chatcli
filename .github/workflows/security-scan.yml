@@ -17,6 +17,11 @@ jobs:
   govulncheck:
     name: Go Vulnerability Check
     runs-on: ubuntu-latest
+    # Skip on release-please PRs (deterministic version bumps don't need
+    # a fresh vuln scan — the underlying go.mod was already gated on the
+    # PR that introduced the change). Schedule + workflow_dispatch keep
+    # running for drift detection.
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     steps:
       - uses: actions/checkout@v6
 
@@ -33,6 +38,7 @@ jobs:
   gosec:
     name: Go Security Analysis
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     steps:
       - uses: actions/checkout@v6
 
@@ -67,6 +73,7 @@ jobs:
   trivy-image-chatcli:
     name: Trivy — ChatCLI Image
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     steps:
       - uses: actions/checkout@v6
 
@@ -113,6 +120,7 @@ jobs:
   trivy-image-operator:
     name: Trivy — Operator Image
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     steps:
       - uses: actions/checkout@v6
 
