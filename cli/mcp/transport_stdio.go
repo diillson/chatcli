@@ -42,6 +42,10 @@ type stdioTransport struct {
 	// user having to /mcp restart.
 	onClose     func(error)
 	onCloseOnce sync.Once
+	// onLog forwards each stderr line into the per-server log ring
+	// so /mcp logs <name> can show recent output without tailing the
+	// debug log. Optional — left nil when no consumer is interested.
+	onLog func(string)
 }
 
 // newStdioTransport spawns the MCP server process and starts the read loop.
@@ -227,14 +231,20 @@ func (t *stdioTransport) tryDispatch(line string) {
 
 // drainStderr forwards the server's stderr to the debug log so
 // failures like "npm 404", missing executable or a panic are visible
-// when the user runs with --debug.
+// when the user runs with --debug, and tees each line into the
+// per-server log ring (via onLog) so /mcp logs <name> can show the
+// same content without forcing the user to enable debug logging.
 func (t *stdioTransport) drainStderr(name string, r io.ReadCloser) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 4096), 1<<20)
 	for scanner.Scan() {
+		line := scanner.Text()
 		t.logger.Debug("MCP stderr",
 			zap.String("server", name),
-			zap.String("line", scanner.Text()))
+			zap.String("line", line))
+		if t.onLog != nil {
+			t.onLog(line)
+		}
 	}
 }
 
