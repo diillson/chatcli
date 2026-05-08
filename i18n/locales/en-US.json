@@ -1759,6 +1759,7 @@
   "mcp.cmd.sug_reload": "Re-read mcp_servers.json and reconcile",
   "mcp.cmd.sug_logs": "Show recent stderr lines for a server",
   "mcp.cmd.unknown_server": "MCP server %q is not configured.",
+  "mcp.cmd.already_running": "MCP server %q is already running.",
   "mcp.cmd.no_tools_for_server": "No tools registered for server %q yet.",
   "mcp.cmd.restarting_one": "Restarting MCP server %q...",
   "mcp.cmd.restart_one_success": "MCP server %q restarted.",

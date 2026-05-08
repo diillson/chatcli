@@ -1759,6 +1759,7 @@
   "mcp.cmd.sug_reload": "Relê mcp_servers.json e reconcilia os servidores",
   "mcp.cmd.sug_logs": "Mostra as últimas linhas de stderr de um servidor",
   "mcp.cmd.unknown_server": "Servidor MCP %q não está configurado.",
+  "mcp.cmd.already_running": "Servidor MCP %q já está rodando.",
   "mcp.cmd.no_tools_for_server": "Nenhuma tool registrada para o servidor %q ainda.",
   "mcp.cmd.restarting_one": "Reiniciando servidor MCP %q...",
   "mcp.cmd.restart_one_success": "Servidor MCP %q reiniciado.",

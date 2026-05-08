@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -336,20 +337,32 @@ func serverConfigsEqual(a, b ServerConfig) bool {
 	return string(aj) == string(bj)
 }
 
+// Sentinel errors returned by StartOne / StopOne. The manager keeps
+// the messages in English (Go convention for library errors) but the
+// CLI handler wraps them with errors.Is and translates via i18n
+// before printing — that keeps user-facing text out of this layer
+// while still letting external callers detect "unknown server" /
+// "already running" cases programmatically.
+var (
+	ErrServerNotConfigured = errors.New("MCP server is not configured")
+	ErrServerAlreadyRunning = errors.New("MCP server is already running")
+)
+
 // StartOne starts a single configured server by name. The server
 // must already be in m.servers (loaded by LoadConfig/Reload or left
 // behind by a previous StopOne) — StartOne does not invent a config
-// from thin air. Returns an error if the server is unknown or
-// already running so callers can show actionable feedback.
+// from thin air. Returns ErrServerNotConfigured / ErrServerAlreadyRunning
+// (wrapped with the server name) so callers can branch on the cause
+// via errors.Is and translate user-facing messages.
 func (m *Manager) StartOne(ctx context.Context, name string) error {
 	m.mu.RLock()
 	conn, ok := m.servers[name]
 	m.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("MCP server %q is not configured", name)
+		return fmt.Errorf("%w: %q", ErrServerNotConfigured, name)
 	}
 	if conn.Status.Connected {
-		return fmt.Errorf("MCP server %q is already running", name)
+		return fmt.Errorf("%w: %q", ErrServerAlreadyRunning, name)
 	}
 	// Reset transient state so a retry after a previous failure
 	// shows up correctly in /mcp status while startup is in flight.
@@ -375,7 +388,7 @@ func (m *Manager) StopOne(name string) error {
 	conn, ok := m.servers[name]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("MCP server %q is not configured", name)
+		return fmt.Errorf("%w: %q", ErrServerNotConfigured, name)
 	}
 	transport := conn.transport
 	process := conn.Process

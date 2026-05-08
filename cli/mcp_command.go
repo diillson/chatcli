@@ -2,13 +2,36 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	prompt "github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/i18n"
 )
+
+// translateMCPError maps the manager's sentinel errors to localized
+// user-facing messages. Anything that isn't a known sentinel passes
+// through with its raw text so unexpected failures still surface
+// (translated only by the surrounding "%v" template) without being
+// silently swallowed.
+func translateMCPError(err error) string {
+	switch {
+	case errors.Is(err, mcp.ErrServerNotConfigured):
+		// Recover the server name from the wrapped sentinel rather
+		// than re-receiving it from the caller — keeps each handler
+		// to a single error format string.
+		name := strings.TrimSpace(strings.TrimPrefix(err.Error(), mcp.ErrServerNotConfigured.Error()+": "))
+		return i18n.T("mcp.cmd.unknown_server", strings.Trim(name, `"`))
+	case errors.Is(err, mcp.ErrServerAlreadyRunning):
+		name := strings.TrimSpace(strings.TrimPrefix(err.Error(), mcp.ErrServerAlreadyRunning.Error()+": "))
+		return i18n.T("mcp.cmd.already_running", strings.Trim(name, `"`))
+	default:
+		return err.Error()
+	}
+}
 
 func (cli *ChatCLI) handleMCPCommand(userInput string) {
 	if cli.mcpManager == nil {
@@ -227,12 +250,12 @@ func (cli *ChatCLI) mcpRestartOne(name string) {
 	fmt.Println(p + colorize(i18n.T("mcp.cmd.restarting_one", name), ColorGray))
 
 	if err := cli.mcpManager.StopOne(name); err != nil {
-		fmt.Println(p + colorize(i18n.T("mcp.cmd.restart_error", err), ColorRed))
+		fmt.Println(p + colorize(i18n.T("mcp.cmd.restart_error", translateMCPError(err)), ColorRed))
 		fmt.Println(uiBoxEnd(ColorYellow))
 		return
 	}
 	if err := cli.mcpManager.StartOne(cli.mcpCtx, name); err != nil {
-		fmt.Println(p + colorize(i18n.T("mcp.cmd.restart_error", err), ColorRed))
+		fmt.Println(p + colorize(i18n.T("mcp.cmd.restart_error", translateMCPError(err)), ColorRed))
 		fmt.Println(uiBoxEnd(ColorYellow))
 		return
 	}
@@ -247,7 +270,7 @@ func (cli *ChatCLI) mcpStart(name string) {
 		return
 	}
 	if err := cli.mcpManager.StartOne(cli.mcpCtx, name); err != nil {
-		fmt.Println(colorize("  "+i18n.T("mcp.cmd.start_error", err), ColorRed))
+		fmt.Println(colorize("  "+i18n.T("mcp.cmd.start_error", translateMCPError(err)), ColorRed))
 		return
 	}
 	fmt.Println(colorize("  "+i18n.T("mcp.cmd.start_success", name), ColorGreen))
@@ -259,7 +282,7 @@ func (cli *ChatCLI) mcpStop(name string) {
 		return
 	}
 	if err := cli.mcpManager.StopOne(name); err != nil {
-		fmt.Println(colorize("  "+i18n.T("mcp.cmd.stop_error", err), ColorRed))
+		fmt.Println(colorize("  "+i18n.T("mcp.cmd.stop_error", translateMCPError(err)), ColorRed))
 		return
 	}
 	fmt.Println(colorize("  "+i18n.T("mcp.cmd.stop_success", name), ColorGreen))

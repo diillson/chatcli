@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1408,8 +1409,35 @@ func TestStartOneAlreadyRunningErrors(t *testing.T) {
 		Status: ServerStatus{Name: "srv", Connected: true},
 	}
 	err := m.StartOne(context.Background(), "srv")
-	if err == nil || !strings.Contains(err.Error(), "already running") {
-		t.Errorf("expected 'already running' error, got: %v", err)
+	if err == nil {
+		t.Fatal("expected error starting an already-running server")
+	}
+	if !errors.Is(err, ErrServerAlreadyRunning) {
+		t.Errorf("expected ErrServerAlreadyRunning, got: %v", err)
+	}
+}
+
+func TestStartOneUnknownErrorIsSentinel(t *testing.T) {
+	// Pin the sentinel-error contract so callers can branch on
+	// errors.Is(err, ErrServerNotConfigured) without parsing strings.
+	m := NewManager(testLogger())
+	err := m.StartOne(context.Background(), "ghost")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrServerNotConfigured) {
+		t.Errorf("expected ErrServerNotConfigured, got: %v", err)
+	}
+}
+
+func TestStopOneUnknownErrorIsSentinel(t *testing.T) {
+	m := NewManager(testLogger())
+	err := m.StopOne("ghost")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrServerNotConfigured) {
+		t.Errorf("expected ErrServerNotConfigured, got: %v", err)
 	}
 }
 
