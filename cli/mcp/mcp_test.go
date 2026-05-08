@@ -1319,6 +1319,108 @@ func TestReloadAddsRemovesAndUpdatesServers(t *testing.T) {
 	}
 }
 
+// --- buildProcessEnv tests -------------------------------------------------
+// MCP stdio servers (npx, uvx, docker, ...) need PATH/HOME/etc. to
+// find their binaries, and users want to keep secrets in shell env
+// instead of plaintext in mcp_servers.json. These tests pin both
+// behaviors.
+
+func TestBuildProcessEnvInheritsParentWhenNoOverrides(t *testing.T) {
+	parent := []string{"PATH=/usr/bin", "HOME=/home/me"}
+	got := buildProcessEnv(parent, nil)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 entries, got %d (%v)", len(got), got)
+	}
+	if got[0] != "PATH=/usr/bin" || got[1] != "HOME=/home/me" {
+		t.Errorf("parent entries not preserved: %v", got)
+	}
+}
+
+func TestBuildProcessEnvAppendsOverrides(t *testing.T) {
+	parent := []string{"PATH=/usr/bin"}
+	got := buildProcessEnv(parent, map[string]string{"API_KEY": "secret"})
+	hasPath, hasKey := false, false
+	for _, e := range got {
+		if e == "PATH=/usr/bin" {
+			hasPath = true
+		}
+		if e == "API_KEY=secret" {
+			hasKey = true
+		}
+	}
+	if !hasPath {
+		t.Error("PATH from parent missing")
+	}
+	if !hasKey {
+		t.Errorf("API_KEY override missing: %v", got)
+	}
+}
+
+func TestBuildProcessEnvOverrideWinsOverParent(t *testing.T) {
+	parent := []string{"FOO=parent-value"}
+	got := buildProcessEnv(parent, map[string]string{"FOO": "override"})
+	// Last assignment wins on both Unix and Windows: ensure the
+	// override entry sits after the parent's so it takes effect.
+	parentIdx, overrideIdx := -1, -1
+	for i, e := range got {
+		if e == "FOO=parent-value" {
+			parentIdx = i
+		}
+		if e == "FOO=override" {
+			overrideIdx = i
+		}
+	}
+	if parentIdx < 0 {
+		t.Fatal("parent FOO entry missing")
+	}
+	if overrideIdx < 0 {
+		t.Fatal("override FOO entry missing")
+	}
+	if overrideIdx <= parentIdx {
+		t.Errorf("override must come after parent; got parentIdx=%d overrideIdx=%d (%v)", parentIdx, overrideIdx, got)
+	}
+}
+
+func TestBuildProcessEnvExpandsVariables(t *testing.T) {
+	parent := []string{"GH_TOKEN=ghp_abc123", "DB_HOST=localhost"}
+	got := buildProcessEnv(parent, map[string]string{
+		"GITHUB_TOKEN": "${GH_TOKEN}",
+		"DSN":          "postgres://user:pass@$DB_HOST:5432/db",
+	})
+
+	want := map[string]string{
+		"GITHUB_TOKEN": "ghp_abc123",
+		"DSN":          "postgres://user:pass@localhost:5432/db",
+	}
+	for k, v := range want {
+		needle := k + "=" + v
+		found := false
+		for _, e := range got {
+			if e == needle {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %q in env, got %v", needle, got)
+		}
+	}
+}
+
+func TestBuildProcessEnvUnresolvedExpandsToEmpty(t *testing.T) {
+	// os.Expand resolves unknown vars to empty string, matching
+	// shell behavior. Document it explicitly so a typo doesn't
+	// silently leak the literal "${TYPO}" into the child.
+	parent := []string{"PATH=/usr/bin"}
+	got := buildProcessEnv(parent, map[string]string{"TOKEN": "${MISSING_VAR}"})
+	for _, e := range got {
+		if e == "TOKEN=" {
+			return
+		}
+	}
+	t.Errorf("expected TOKEN= (empty) in env, got %v", got)
+}
+
 func TestMarkDisconnectedFlipsStatusAndDropsTools(t *testing.T) {
 	m := NewManager(testLogger())
 	conn := &ServerConnection{

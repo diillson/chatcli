@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -49,10 +50,13 @@ func newStdioTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger
 	args := cfg.Args
 	cmd := exec.CommandContext(ctx, cfg.Command, args...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 
-	// Set environment variables
-	for k, v := range cfg.Env {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
-	}
+	// Inherit the parent environment (PATH, HOME, npm cache, etc.) so
+	// launchers like `npx`, `uvx` and `docker` can find their binaries
+	// and caches, then layer the user-configured Env on top. Values
+	// support ${VAR}/$VAR expansion against the parent environment so
+	// users can keep secrets in shell env (or a sourced .env) instead
+	// of plaintext in mcp_servers.json.
+	cmd.Env = buildProcessEnv(os.Environ(), cfg.Env)
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
@@ -236,6 +240,41 @@ func (t *stdioTransport) drainStderr(name string, r io.ReadCloser) {
 			zap.String("server", name),
 			zap.String("line", scanner.Text()))
 	}
+}
+
+// buildProcessEnv merges the parent process environment with the
+// user-configured overrides. Override values are expanded against the
+// parent environment so a config like {"GITHUB_TOKEN": "${GH_TOKEN}"}
+// resolves at spawn time. If the same key appears in both, the
+// override wins (last assignment in cmd.Env takes precedence on Unix
+// and Windows).
+func buildProcessEnv(parent []string, overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		// Return the parent slice as-is — exec.Cmd treats nil as
+		// "inherit", but we want explicit inheritance regardless of
+		// whether overrides exist.
+		out := make([]string, len(parent))
+		copy(out, parent)
+		return out
+	}
+
+	lookup := func(key string) string {
+		needle := key + "="
+		for i := len(parent) - 1; i >= 0; i-- {
+			if strings.HasPrefix(parent[i], needle) {
+				return parent[i][len(needle):]
+			}
+		}
+		return ""
+	}
+
+	out := make([]string, 0, len(parent)+len(overrides))
+	out = append(out, parent...)
+	for k, v := range overrides {
+		expanded := os.Expand(v, lookup)
+		out = append(out, fmt.Sprintf("%s=%s", k, expanded))
+	}
+	return out
 }
 
 // Close kills the MCP server process and cleans up.
