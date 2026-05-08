@@ -476,45 +476,64 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	// Initialize cost tracker
 	cli.costTracker = NewCostTracker()
 
-	// Initialize MCP servers for client mode
+	// Initialize MCP servers for client mode.
+	//
+	// Auto-enable rules (any one is enough):
+	//   1. CHATCLI_MCP_ENABLED=true (explicit opt-in).
+	//   2. The config file already exists.
+	//   3. The config file's parent directory exists.
+	//
+	// Rule 3 is what keeps hot-reload working when the user starts
+	// chatcli with ~/.chatcli/mcp_servers.json missing or empty and
+	// later creates/edits it: we still spin up the manager and the
+	// fsnotify watcher on ~/.chatcli/, so the Create event for the
+	// new file fires Reload as expected. Without it, the whole MCP
+	// subsystem would be skipped at startup and no watcher would
+	// ever see the file appear.
 	mcpEnabled := os.Getenv("CHATCLI_MCP_ENABLED") == "true"
 	mcpConfigPath := os.Getenv("CHATCLI_MCP_CONFIG")
 	if mcpConfigPath == "" {
 		mcpConfigPath = mcp.DefaultConfigPath()
 	}
-	// Auto-enable if config file exists (even without env var)
 	if !mcpEnabled {
 		if _, err := os.Stat(mcpConfigPath); err == nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
+			mcpEnabled = true
+		} else if info, err := os.Stat(filepath.Dir(mcpConfigPath)); err == nil && info.IsDir() {
 			mcpEnabled = true
 		}
 	}
 	if mcpEnabled {
 		mcpMgr := mcp.NewManager(logger)
+		// LoadConfig is tolerant of a missing file (returns nil with
+		// zero servers). A 0-byte or malformed file errors here — we
+		// log it but still register the manager and start the watcher
+		// so the user can fix the file in place and have it picked up
+		// on save without restarting chatcli.
 		if err := mcpMgr.LoadConfig(mcpConfigPath); err != nil {
-			logger.Warn("Failed to load MCP config", zap.String("path", mcpConfigPath), zap.Error(err))
-		} else {
-			// Register the manager up front so /mcp status, the agent
-			// system prompt and the tool dispatcher all see the configured
-			// servers immediately. Servers start in Status.Starting=true
-			// (set by LoadConfig) and transition to Connected/LastError as
-			// the background StartAll progresses — which keeps shell
-			// startup fast even when stdio servers need npx to fetch a
-			// package on first run.
-			mcpCtx, mcpCancelFn := context.WithCancel(context.Background())
-			cli.mcpManager = mcpMgr
-			cli.mcpCancel = mcpCancelFn
-			cli.mcpConfigPath = mcpConfigPath
-			cli.mcpCtx = mcpCtx
-			go func() {
-				_ = mcpMgr.StartAll(mcpCtx)
-				statuses := mcpMgr.GetServerStatus()
-				tools := mcpMgr.GetTools()
-				logger.Info("MCP manager initialized (client mode)",
-					zap.Int("servers", len(statuses)),
-					zap.Int("tools", len(tools)))
-			}()
-			cli.startMCPConfigWatcher()
+			logger.Warn("Failed to load MCP config (will retry on file change)",
+				zap.String("path", mcpConfigPath), zap.Error(err))
 		}
+		// Register the manager up front so /mcp status, the agent
+		// system prompt and the tool dispatcher all see the configured
+		// servers immediately. Servers start in Status.Starting=true
+		// (set by LoadConfig) and transition to Connected/LastError as
+		// the background StartAll progresses — which keeps shell
+		// startup fast even when stdio servers need npx to fetch a
+		// package on first run.
+		mcpCtx, mcpCancelFn := context.WithCancel(context.Background())
+		cli.mcpManager = mcpMgr
+		cli.mcpCancel = mcpCancelFn
+		cli.mcpConfigPath = mcpConfigPath
+		cli.mcpCtx = mcpCtx
+		go func() {
+			_ = mcpMgr.StartAll(mcpCtx)
+			statuses := mcpMgr.GetServerStatus()
+			tools := mcpMgr.GetTools()
+			logger.Info("MCP manager initialized (client mode)",
+				zap.Int("servers", len(statuses)),
+				zap.Int("tools", len(tools)))
+		}()
+		cli.startMCPConfigWatcher()
 	}
 
 	// Initialize persona handler

@@ -388,3 +388,49 @@ func TestMCPConfigWatcherFiresOnFileWrite(t *testing.T) {
 	}
 	t.Fatalf("watcher did not propagate edit; got %d servers, want 2", len(mgr.GetServerStatus()))
 }
+
+// TestMCPConfigWatcherFiresOnFileCreation pins the hot-reload
+// behavior for the "empty start" case: chatcli boots with the config
+// directory present but the mcp_servers.json file missing, the user
+// then creates the file. The watcher must trigger Reload so the new
+// server set is picked up without a restart.
+func TestMCPConfigWatcherFiresOnFileCreation(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "mcp_servers.json")
+	// File deliberately absent at watcher start time.
+	mgr := mcp.NewManager(zap.NewNop())
+	// LoadConfig on a missing file is a no-op (returns nil with zero
+	// servers) — we mirror what cli.go does on a fresh setup.
+	if err := mgr.LoadConfig(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cli := &ChatCLI{
+		logger:        zap.NewNop(),
+		mcpManager:    mgr,
+		mcpCtx:        ctx,
+		mcpConfigPath: cfgPath,
+	}
+	cli.startMCPConfigWatcher()
+	defer cli.stopMCPConfigWatcher()
+	if cli.mcpWatcher == nil {
+		t.Fatal("watcher did not start with missing config file")
+	}
+
+	// Now create the file — the Create event must trigger Reload.
+	if err := os.WriteFile(cfgPath, []byte(`{"mcpServers":[
+		{"name":"late","transport":"x","enabled":true}
+	]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(mgr.GetServerStatus()) == 1 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("watcher did not pick up newly-created config; got %d servers, want 1", len(mgr.GetServerStatus()))
+}
