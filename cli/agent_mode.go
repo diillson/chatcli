@@ -245,22 +245,32 @@ func (a *AgentMode) readLineWithEditing() (string, error) {
 		return readLinePlainFromReader(bufio.NewReader(os.Stdin)), nil
 	}
 
-	// Snapshot the current cooked-mode terminal state BEFORE go-prompt
-	// runs. go-prompt switches stdin to raw mode internally and tries
-	// to restore on tearDown, but on macOS that cleanup is not
-	// 100% reliable — `icanon`/`icrnl` sometimes stay off, so the
-	// bufio reader used for multiline continuation lines below would
-	// hang forever (Enter delivers '\r' which never satisfies a
-	// `ReadString('\n')`). Force-restoring this snapshot after go-prompt
-	// returns guarantees a cooked terminal for any subsequent
-	// line-buffered read in this turn.
-	cookedState, _ := term.GetState(fd)
-	line := a.readLineFromGoPrompt()
-	if cookedState != nil {
-		_ = term.Restore(fd, cookedState)
-	}
-
+	line := runWithCookedTerminalRestore(fd, a.readLineFromGoPrompt)
 	return a.processInteractiveLine(line, bufio.NewReader(os.Stdin))
+}
+
+// runWithCookedTerminalRestore invokes fn while preserving the
+// terminal's cooked-mode state across go-prompt's raw-mode usage.
+//
+// go-prompt switches stdin to raw mode internally and tries to
+// restore on tearDown, but on macOS that cleanup is not 100%
+// reliable — `icanon`/`icrnl` sometimes stay off, which makes any
+// subsequent line-buffered read (e.g. the bufio reader used for
+// multiline continuation lines) hang forever because Enter delivers
+// '\r' instead of '\n'. Snapshotting before fn runs and forcing
+// term.Restore afterwards is the cinto-+-suspensório fix.
+//
+// On non-TTY stdin (pipes, GetState error) the snapshot fails
+// silently and fn still runs — there's nothing to restore. Extracted
+// so the snapshot/invoke/restore dance is unit-testable with a pipe
+// fd, without spinning up a real PTY.
+func runWithCookedTerminalRestore(fd int, fn func() string) string {
+	state, _ := term.GetState(fd)
+	out := fn()
+	if state != nil {
+		_ = term.Restore(fd, state)
+	}
+	return out
 }
 
 // processInteractiveLine is the TTY-side post-prompt pipeline: take

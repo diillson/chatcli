@@ -218,6 +218,42 @@ func TestProcessInteractiveLineReplaysPasteContent(t *testing.T) {
 	}
 }
 
+func TestRunWithCookedTerminalRestoreInvokesFnAndReturnsValue(t *testing.T) {
+	// Non-TTY fd path: term.GetState returns (nil, error), so the
+	// Restore branch is skipped and fn still runs. This is the
+	// behavior we depend on in CI / piped contexts.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer func() { _ = r.Close(); _ = w.Close() }()
+
+	called := false
+	got := runWithCookedTerminalRestore(int(r.Fd()), func() string {
+		called = true
+		return "delivered"
+	})
+	if !called {
+		t.Error("fn was not invoked")
+	}
+	if got != "delivered" {
+		t.Errorf("got %q, want %q", got, "delivered")
+	}
+}
+
+func TestRunWithCookedTerminalRestorePropagatesEmpty(t *testing.T) {
+	// Pin that an empty return (e.g. user typed nothing and hit
+	// Enter) flows through unchanged — no nil-coalescing or "default"
+	// surprises in the helper.
+	r, w, _ := os.Pipe()
+	defer func() { _ = r.Close(); _ = w.Close() }()
+
+	got := runWithCookedTerminalRestore(int(r.Fd()), func() string { return "" })
+	if got != "" {
+		t.Errorf("expected empty pass-through, got %q", got)
+	}
+}
+
 func TestProcessInteractiveLineDispatchesMultiline(t *testing.T) {
 	// When the user types the multiline trigger, the function must
 	// hand off to runMultilineSession and feed the continuation
