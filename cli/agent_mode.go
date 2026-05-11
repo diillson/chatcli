@@ -639,50 +639,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// cacheable. Pinned skills go before auto-activated so they win on
 	// model/effort ties via pickSkillModelAndEffort's "first non-empty wins"
 	// rule.
-	var skillsText string
-	if a.cli.personaHandler != nil {
-		mgr := a.cli.personaHandler.GetManager()
-		if mgr != nil {
-			var pinned []*persona.Skill
-			if a.cli.skillHandler != nil {
-				pinned = a.cli.skillHandler.GetPinnedSkills()
-			}
-			if len(pinned) > 0 {
-				if block := buildPinnedSkillInjectionBlock(pinned); block != "" {
-					skillsText = block
-				}
-			}
-
-			filePaths := extractFilePaths(query + " " + additionalContext)
-			autoActivated := mgr.FindAutoActivatedSkills(query, filePaths)
-			autoActivated = dedupAutoAgainstPinned(autoActivated, pinned)
-			if len(autoActivated) > 0 {
-				if block := buildSkillInjectionBlock(autoActivated); block != "" {
-					if skillsText != "" {
-						skillsText += "\n\n"
-					}
-					skillsText += block
-				}
-			}
-
-			merged := append([]*persona.Skill(nil), pinned...)
-			merged = append(merged, autoActivated...)
-			if len(merged) > 0 {
-				model, effort, _ := pickSkillModelAndEffort(merged)
-				if model != "" {
-					a.skillModelHint = model
-				}
-				if effort != "" {
-					a.skillEffortHint = llmclient.NormalizeEffort(effort)
-				}
-				a.logger.Info("agent mode: skills injected",
-					zap.Int("pinned", len(pinned)),
-					zap.Int("auto", len(autoActivated)),
-					zap.String("model_hint", a.skillModelHint),
-					zap.String("effort_hint", string(a.skillEffortHint)))
-			}
-		}
-	}
+	skillsText := a.buildAgentSkillBlocks(query, additionalContext)
 	if a.cli.pendingManualSkill != nil {
 		manual := a.cli.pendingManualSkill
 		manualArgs := a.cli.pendingManualSkillArgs
@@ -2727,6 +2684,74 @@ func isDelegateInvocation(argsJSON string) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(outer.Cmd), "delegate")
+}
+
+// buildAgentSkillBlocks composes the agent-mode skill prompt block: pinned
+// skills first (stable across turns), auto-activated skills next (volatile
+// by query). The function also mutates a.skillModelHint and
+// a.skillEffortHint when any skill set carries those frontmatter hints.
+//
+// Returns the assembled prompt text. Empty when no skills fire.
+func (a *AgentMode) buildAgentSkillBlocks(query, additionalContext string) string {
+	if a.cli.personaHandler == nil {
+		return ""
+	}
+	mgr := a.cli.personaHandler.GetManager()
+	if mgr == nil {
+		return ""
+	}
+
+	var pinned []*persona.Skill
+	if a.cli.skillHandler != nil {
+		pinned = a.cli.skillHandler.GetPinnedSkills()
+	}
+
+	filePaths := extractFilePaths(query + " " + additionalContext)
+	autoActivated := mgr.FindAutoActivatedSkills(query, filePaths)
+	autoActivated = dedupAutoAgainstPinned(autoActivated, pinned)
+
+	skillsText := concatSkillBlocks(pinned, autoActivated)
+
+	merged := append([]*persona.Skill(nil), pinned...)
+	merged = append(merged, autoActivated...)
+	if len(merged) > 0 {
+		model, effort, _ := pickSkillModelAndEffort(merged)
+		if model != "" {
+			a.skillModelHint = model
+		}
+		if effort != "" {
+			a.skillEffortHint = llmclient.NormalizeEffort(effort)
+		}
+		a.logger.Info("agent mode: skills injected",
+			zap.Int("pinned", len(pinned)),
+			zap.Int("auto", len(autoActivated)),
+			zap.String("model_hint", a.skillModelHint),
+			zap.String("effort_hint", string(a.skillEffortHint)))
+	}
+	return skillsText
+}
+
+// concatSkillBlocks renders pinned skills (with the pinned-skill header)
+// followed by auto-activated skills (with the auto-loaded header), joined
+// by a blank line when both fire. Returns "" when neither slice produces
+// content. Pure — extracted so callers in chat and agent mode share the
+// concatenation rule and so tests can drive it without a ChatCLI fixture.
+func concatSkillBlocks(pinned, autoActivated []*persona.Skill) string {
+	var out string
+	if len(pinned) > 0 {
+		if block := buildPinnedSkillInjectionBlock(pinned); block != "" {
+			out = block
+		}
+	}
+	if len(autoActivated) > 0 {
+		if block := buildSkillInjectionBlock(autoActivated); block != "" {
+			if out != "" {
+				out += "\n\n"
+			}
+			out += block
+		}
+	}
+	return out
 }
 
 // extractDelegateArgs pulls the inner args map from an @coder delegate call.

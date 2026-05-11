@@ -13,30 +13,63 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/cli/agent"
-	"github.com/diillson/chatcli/cli/agent/quality"
-	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/cli/hooks"
-	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
-	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
+// processLLMRequest is the chat-mode turn entrypoint. It owns the
+// animation/spinner lifecycle and the typed-ahead message queue; the
+// per-turn pipeline phases (system-prompt assembly, history splicing,
+// model/effort resolution, LLM execution, response handling) live in
+// chat_pipeline.go so each step can be read and tested in isolation.
 func (cli *ChatCLI) processLLMRequest(in string) {
-	// Suppress animation so the spinner goroutine doesn't conflict with
-	// go-prompt's rendering. The go-prompt prefix (changeLivePrefix) shows
-	// processing status instead.
-	cli.animation.SetSuppressed(true)
-	defer cli.animation.SetSuppressed(false)
+	stopSpinner := cli.startProcessingLifecycle()
+	defer cli.endProcessingLifecycle(stopSpinner)
 
-	// Animate the go-prompt prefix: a goroutine increments the spinner index
-	// and sends SIGWINCH so go-prompt redraws with the updated prefix.
-	// stopSpinner is safe to call multiple times.
+	ctx, releaseCtx := cli.acquireOperationContext()
+	defer releaseCtx()
+
+	cli.saveCheckpoint()
+	cli.fireUserPromptSubmitHook(in)
+	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
+
+	userInput, additionalContext := cli.processSpecialCommands(in)
+	cli.compactHistoryIfNeeded(ctx)
+
+	assembly := cli.assembleChatSystemPrompt(ctx, userInput, additionalContext)
+	tempHistory := cli.buildChatTempHistory(assembly.parts, userInput, additionalContext)
+	userMessage := models.Message{Role: "user", Content: userInput + additionalContext}
+
+	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
+	cli.ensureModelCacheWarm()
+	resolution := cli.resolveSkillClient(assembly.modelHint)
+	cli.noticeSkillResolution(resolution)
+	ctx = cli.applyChatEffortHint(ctx, assembly.effort)
+
+	aiResponse, llmErr := cli.executeLLMTurn(
+		ctx, resolution.Client, userInput, additionalContext,
+		tempHistory, effectiveMaxTokens, resolution, stopSpinner,
+	)
+	cli.handleChatTurnResult(
+		llmErr, userMessage, aiResponse, resolution.Client, resolution,
+		userInput, additionalContext,
+	)
+}
+
+// startProcessingLifecycle suppresses the foreground animation (so it never
+// fights go-prompt's prefix), starts the prompt-prefix spinner goroutine,
+// and flips the executing flag. The returned stopSpinner closure is safe to
+// call multiple times and must be invoked once the LLM acknowledges the
+// request so the prefix stops animating before we render output.
+func (cli *ChatCLI) startProcessingLifecycle() func() {
+	cli.animation.SetSuppressed(true)
+
 	spinnerDone := make(chan struct{})
 	var spinnerStopped atomic.Bool
 	stopSpinner := func() {
@@ -46,532 +79,140 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		}
 	}
 	if runtime.GOOS != "windows" {
-		go func() {
-			ticker := time.NewTicker(250 * time.Millisecond)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-spinnerDone:
-					return
-				case <-ticker.C:
-					atomic.AddInt32(&cli.prefixSpinnerIdx, 1)
-					cli.forceRefreshPrompt()
-				}
-			}
-		}()
+		go cli.runPrefixSpinner(spinnerDone)
 	}
-
 	cli.isExecuting.Store(true)
+	return stopSpinner
+}
 
-	defer func() {
-		// Stop prefix spinner (idempotent — may already be stopped before response)
-		stopSpinner()
-
-		// Check queue before going idle: process next queued message if any
-		if nextMsg := cli.dequeueMessage(); nextMsg != "" {
-			cli.messageQueueMu.Lock()
-			remaining := len(cli.messageQueue)
-			cli.messageQueueMu.Unlock()
-
-			// Re-enter processing state for the queued message
-			cli.interactionState = StateProcessing
-
-			fmt.Print("\033[0m")
-			_ = os.Stdout.Sync()
-			if remaining > 0 {
-				fmt.Printf("\n  %s\n", colorize(i18n.T("queue.processing_remaining", remaining), ColorGray))
-			} else {
-				fmt.Printf("\n  %s\n", colorize(i18n.T("queue.processing"), ColorGray))
-			}
-
-			// Recursive call: isExecuting stays true, bounded by queue cap (10)
-			cli.processLLMRequest(nextMsg)
+// runPrefixSpinner ticks the prefix-spinner counter and forces a prompt
+// redraw at ~4 Hz until spinnerDone closes. Exits cleanly on shutdown.
+func (cli *ChatCLI) runPrefixSpinner(spinnerDone <-chan struct{}) {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-spinnerDone:
 			return
+		case <-ticker.C:
+			atomic.AddInt32(&cli.prefixSpinnerIdx, 1)
+			cli.forceRefreshPrompt()
 		}
+	}
+}
 
-		cli.isExecuting.Store(false)
-		cli.interactionState = StateNormal
+// endProcessingLifecycle reverses startProcessingLifecycle, then drains any
+// message the user queued while the prior turn was running. The recursive
+// re-entry is bounded by the queue cap (10 messages); when the queue is
+// empty it restores the idle prompt.
+func (cli *ChatCLI) endProcessingLifecycle(stopSpinner func()) {
+	defer cli.animation.SetSuppressed(false)
+	stopSpinner()
 
-		// Limpar terminal antes de refresh
-		fmt.Print("\033[0m") // Reset ANSI
-		_ = os.Stdout.Sync()
+	if nextMsg := cli.dequeueMessage(); nextMsg != "" {
+		cli.announceQueueDrain()
+		cli.processLLMRequest(nextMsg)
+		return
+	}
+	cli.isExecuting.Store(false)
+	cli.interactionState = StateNormal
+	fmt.Print("\033[0m")
+	_ = os.Stdout.Sync()
+	cli.forceRefreshPrompt()
+}
 
-		cli.forceRefreshPrompt()
-	}()
+// announceQueueDrain prints either the "processing remaining N" or
+// "processing" notice before recursing into the queued turn.
+func (cli *ChatCLI) announceQueueDrain() {
+	cli.messageQueueMu.Lock()
+	remaining := len(cli.messageQueue)
+	cli.messageQueueMu.Unlock()
+	cli.interactionState = StateProcessing
+	fmt.Print("\033[0m")
+	_ = os.Stdout.Sync()
+	if remaining > 0 {
+		fmt.Printf("\n  %s\n", colorize(i18n.T("queue.processing_remaining", remaining), ColorGray))
+		return
+	}
+	fmt.Printf("\n  %s\n", colorize(i18n.T("queue.processing"), ColorGray))
+}
 
+// acquireOperationContext creates the cancellable context that drives the
+// turn and stashes its cancel func in cli.operationCancel so /reset can
+// interrupt mid-turn. The returned release closure clears the slot and
+// fires cancel exactly once.
+func (cli *ChatCLI) acquireOperationContext() (context.Context, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cli.mu.Lock()
 	cli.operationCancel = cancel
 	cli.mu.Unlock()
-
-	defer func() {
+	return ctx, func() {
 		cli.mu.Lock()
 		cli.operationCancel = nil
 		cli.mu.Unlock()
 		cancel()
-	}()
-
-	// Save checkpoint before processing (for rewind support)
-	cli.saveCheckpoint()
-
-	// Fire UserPromptSubmit hook
-	if cli.hookManager != nil {
-		wd, _ := os.Getwd()
-		cli.hookManager.FireAsync(hooks.HookEvent{
-			Type:       hooks.EventUserPromptSubmit,
-			Timestamp:  time.Now(),
-			UserPrompt: in,
-			SessionID:  cli.currentSessionName,
-			WorkingDir: wd,
-		})
 	}
+}
 
-	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
-
-	userInput, additionalContext := cli.processSpecialCommands(in)
-
-	// Compact history if over budget (before building tempHistory).
-	// Status callback feeds progress into the prompt-prefix animation so the
-	// user never stares at a silent terminal during a long summarization.
-	cfg := DefaultCompactConfig(cli.Provider, cli.Model)
-
-	// Pre-flight: warn once per session when history is large enough that a
-	// corporate proxy could start rejecting. Attached contexts (/context
-	// attach) in chat mode can silently balloon the payload.
-	if cfg.MaxPayloadBytes == 0 && !cli.proxyPayloadWarned {
-		totalChars := 0
-		for _, m := range cli.history {
-			totalChars += len(m.Content)
-		}
-		if totalChars > 2_500_000 {
-			cli.proxyPayloadWarned = true
-			cli.logger.Warn("Chat history exceeds 2.5 MB, no payload cap set",
-				zap.Int("total_chars", totalChars))
-			fmt.Printf("\r\033[K  ℹ %s\n",
-				i18n.T("agent.preflight.warn_no_cap", FormatPayloadSize(totalChars)))
-			_ = os.Stdout.Sync()
-		}
+// fireUserPromptSubmitHook publishes the UserPromptSubmit event when the
+// hook manager is enabled. Best-effort: hooks run asynchronously and any
+// failure logs internally without blocking the turn.
+func (cli *ChatCLI) fireUserPromptSubmitHook(in string) {
+	if cli.hookManager == nil {
+		return
 	}
-
-	if cli.historyCompactor.NeedsCompaction(cli.history, cfg) {
-		cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
-			// Overwrite prompt-prefix spinner line with a compaction update,
-			// keep cursor on a new line so the spinner resumes cleanly after.
-			fmt.Printf("\r\033[K  %s\n", msg)
-			_ = os.Stdout.Sync()
-		})
-		compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
-		cli.historyCompactor.SetStatusCallback(nil)
-		if err == nil {
-			cli.history = compacted
-		}
-	}
-
-	// Build unified system prompt: bootstrap + memory + attached contexts + K8s watcher
-	// All stable context goes into a single system message for provider-level prompt caching
-	// (Anthropic cache_control:ephemeral, OpenAI automatic prompt caching).
-	sessionID := cli.currentSessionName
-	if sessionID == "" {
-		sessionID = "default"
-	}
-
-	var systemParts []models.ContentBlock
-
-	// Part 0: Mode awareness + language instruction
-	modeAndLang := ChatModeSystemHint + "\n" + i18n.T("ai.response_language")
-	systemParts = append(systemParts, models.ContentBlock{
-		Type:         "text",
-		Text:         modeAndLang,
-		CacheControl: &models.CacheControl{Type: "ephemeral"},
+	wd, _ := os.Getwd()
+	cli.hookManager.FireAsync(hooks.HookEvent{
+		Type:       hooks.EventUserPromptSubmit,
+		Timestamp:  time.Now(),
+		UserPrompt: in,
+		SessionID:  cli.currentSessionName,
+		WorkingDir: wd,
 	})
+}
 
-	// Part 1: Workspace context (SOUL.md, USER.md, IDENTITY.md, RULES.md, MEMORY.md)
-	// Extract hints from recent messages for smart memory retrieval
-	if cli.contextBuilder != nil {
-		var hints []string
-		hintWindow := 3
-		if len(cli.history) < hintWindow {
-			hintWindow = len(cli.history)
-		}
-		if hintWindow > 0 {
-			var recentTexts []string
-			for _, msg := range cli.history[len(cli.history)-hintWindow:] {
-				recentTexts = append(recentTexts, msg.Content)
-			}
-			hints = memory.ExtractKeywords(recentTexts)
-		}
-
-		// Phase 3 (#4): when HyDE is enabled in /config quality, hand
-		// off to the HyDE-aware builder. The non-HyDE branch is kept
-		// untouched to preserve byte-for-byte behavior for users who
-		// never opt in.
-		var wsCtx string
-		if qcfg := quality.LoadFromEnv(); qcfg.HyDE.Enabled && qcfg.Enabled {
-			wsCtx = cli.hydeRetrieveContext(ctx, userInput, hints, qcfg)
-		} else {
-			wsCtx = cli.contextBuilder.BuildSystemPromptPrefixWithHints(hints)
-		}
-		if wsCtx != "" {
-			dynCtx := cli.contextBuilder.BuildDynamicContext()
-			wsContent := wsCtx
-			if dynCtx != "" {
-				wsContent += "\n\n" + dynCtx
-			}
-			systemParts = append(systemParts, models.ContentBlock{
-				Type:         "text",
-				Text:         wsContent,
-				CacheControl: &models.CacheControl{Type: "ephemeral"},
-			})
-		}
+// compactHistoryIfNeeded runs the proxy-payload pre-flight warning and
+// triggers history compaction when the current chat history exceeds the
+// configured budget. Compaction errors leave cli.history untouched so the
+// turn can still proceed with the un-compacted history.
+func (cli *ChatCLI) compactHistoryIfNeeded(ctx context.Context) {
+	cfg := DefaultCompactConfig(cli.Provider, cli.Model)
+	cli.warnIfHistoryExceedsProxyCap(cfg)
+	if !cli.historyCompactor.NeedsCompaction(cli.history, cfg) {
+		return
 	}
-
-	// Part 2: Attached contexts → system prompt (cacheable, not user messages)
-	contextMessages, err := cli.contextHandler.GetManager().BuildPromptMessages(
-		sessionID,
-		ctxmgr.FormatOptions{
-			IncludeMetadata:  true,
-			IncludeTimestamp: false,
-			Compact:          false,
-			Role:             "system",
-		},
-	)
-	if err != nil {
-		cli.logger.Warn("Erro ao construir mensagens de contexto", zap.Error(err))
+	cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
+		fmt.Printf("\r\033[K  %s\n", msg)
+		_ = os.Stdout.Sync()
+	})
+	compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
+	cli.historyCompactor.SetStatusCallback(nil)
+	if err == nil {
+		cli.history = compacted
 	}
-	for _, msg := range contextMessages {
-		systemParts = append(systemParts, models.ContentBlock{
-			Type:         "text",
-			Text:         msg.Content,
-			CacheControl: &models.CacheControl{Type: "ephemeral"},
-		})
+}
+
+// warnIfHistoryExceedsProxyCap fires a once-per-session notice when the
+// uncompacted history is large enough that a corporate proxy could start
+// rejecting requests. Only meaningful when the user has not set an explicit
+// payload cap via DefaultCompactConfig.
+func (cli *ChatCLI) warnIfHistoryExceedsProxyCap(cfg CompactConfig) {
+	if cfg.MaxPayloadBytes != 0 || cli.proxyPayloadWarned {
+		return
 	}
-
-	// Part 2.5: Manually invoked skill via `/<skill-name>` (Fase 2).
-	// Consumed once — cleared right after reading so it only affects this
-	// turn. Goes BEFORE the auto-activated block so manual intent has
-	// precedence when both happen simultaneously.
-	var manualSkill *persona.Skill
-	var manualSkillArgs string
-	if cli.pendingManualSkill != nil {
-		manualSkill = cli.pendingManualSkill
-		manualSkillArgs = cli.pendingManualSkillArgs
-		cli.pendingManualSkill = nil
-		cli.pendingManualSkillArgs = ""
-		if block := renderManualSkillBlock(manualSkill, manualSkillArgs); block != "" {
-			systemParts = append(systemParts, models.ContentBlock{
-				Type: "text",
-				Text: block,
-			})
-		}
+	totalChars := 0
+	for _, m := range cli.history {
+		totalChars += len(m.Content)
 	}
-
-	// Part 3: Pinned + auto-activated skills.
-	//
-	// Pinned skills come from `/skill pin <name>` and apply to every turn for
-	// the session — their block sits on its own ContentBlock so cache stays
-	// warm across turns (only mutations to the pin set invalidate it).
-	//
-	// Auto-activation honors the advanced frontmatter contract:
-	//  - `triggers:` → keyword match against userInput
-	//  - `paths:`    → glob match against file tokens extracted from userInput
-	//                  and @file commands (supports `*`, `**`, basename match)
-	//  - `disable-model-invocation` → skill is excluded from auto-activation
-	//  - `model:` / `effort:` → forwarded to provider for this single turn
-	//                           (see skillEffort / skillModelHint below)
-	//
-	// Precedence for model/effort hints: pinned first, then auto-activated.
-	// The first non-empty value wins (see pickSkillModelAndEffort). Manual
-	// invocation (Part 2.5) overrides both right after this block.
-	var skillEffort client.SkillEffort
-	var skillModelHint string
-	if cli.personaHandler != nil {
-		mgr := cli.personaHandler.GetManager()
-		if mgr != nil {
-			var pinned []*persona.Skill
-			if cli.skillHandler != nil {
-				pinned = cli.skillHandler.GetPinnedSkills()
-			}
-			if len(pinned) > 0 {
-				if block := buildPinnedSkillInjectionBlock(pinned); block != "" {
-					systemParts = append(systemParts, models.ContentBlock{
-						Type:         "text",
-						Text:         block,
-						CacheControl: &models.CacheControl{Type: "ephemeral"},
-					})
-				}
-			}
-
-			filePaths := extractFilePaths(userInput + " " + additionalContext)
-			autoActivated := mgr.FindAutoActivatedSkills(userInput, filePaths)
-			autoActivated = dedupAutoAgainstPinned(autoActivated, pinned)
-			if len(autoActivated) > 0 {
-				block := buildSkillInjectionBlock(autoActivated)
-				if block != "" {
-					systemParts = append(systemParts, models.ContentBlock{
-						Type: "text",
-						Text: block,
-					})
-				}
-			}
-
-			// Merge for hint resolution: pinned first → wins on tie.
-			merged := append([]*persona.Skill(nil), pinned...)
-			merged = append(merged, autoActivated...)
-			if len(merged) > 0 {
-				model, effort, conflict := pickSkillModelAndEffort(merged)
-				skillModelHint = model
-				skillEffort = client.NormalizeEffort(effort)
-				if conflict != "" {
-					cli.logger.Warn("multiple skills disagree on model; using the first",
-						zap.String("losing_skill", conflict),
-						zap.String("chosen_model", skillModelHint))
-				}
-				cli.logger.Debug("skills injected (pinned + auto)",
-					zap.Int("pinned", len(pinned)),
-					zap.Int("auto", len(autoActivated)),
-					zap.Strings("file_paths", filePaths),
-					zap.String("skill_model", skillModelHint),
-					zap.String("skill_effort", string(skillEffort)))
-			}
-		}
+	if totalChars <= 2_500_000 {
+		return
 	}
-
-	// Manual invocation hints override auto-activation hints (explicit
-	// user intent wins), but only when the manual skill actually sets them.
-	if manualSkill != nil {
-		if m := strings.TrimSpace(manualSkill.Model); m != "" {
-			skillModelHint = m
-		}
-		if e := strings.TrimSpace(manualSkill.Effort); e != "" {
-			skillEffort = client.NormalizeEffort(e)
-		}
-	}
-
-	// Part 5: MCP Channel messages (recent push messages from servers)
-	if cli.mcpManager != nil {
-		channelCtx := cli.mcpManager.Channels().FormatForPrompt(5)
-		if channelCtx != "" {
-			systemParts = append(systemParts, models.ContentBlock{
-				Type: "text",
-				Text: channelCtx,
-			})
-		}
-	}
-
-	// Part 6: MCP tools context (deferred — name+description only, saves tokens)
-	if cli.mcpManager != nil {
-		// Sync MCP shadow state: hide built-ins overridden by connected MCP servers
-		if cli.pluginManager != nil {
-			cli.pluginManager.SetShadowedBuiltins(cli.mcpManager.GetShadowedBuiltins())
-		}
-
-		mcpTools := cli.mcpManager.GetToolsSummary()
-		if len(mcpTools) > 0 {
-			var mcpCtx strings.Builder
-			mcpCtx.WriteString("# Available MCP Tools\n\n")
-			mcpCtx.WriteString("The following external tools are available via MCP servers. ")
-			mcpCtx.WriteString("In agent/coder mode they can be invoked directly.\n\n")
-			for _, t := range mcpTools {
-				mcpCtx.WriteString(fmt.Sprintf("- **%s**: %s\n", t.Function.Name, t.Function.Description))
-			}
-			systemParts = append(systemParts, models.ContentBlock{
-				Type: "text",
-				Text: mcpCtx.String(),
-			})
-		}
-	}
-
-	// Part 4: K8s watcher context (small, changes often — no cache hint)
-	if cli.WatcherContextFunc != nil {
-		if k8sCtx := cli.WatcherContextFunc(); k8sCtx != "" {
-			systemParts = append(systemParts, models.ContentBlock{
-				Type: "text",
-				Text: k8sCtx,
-			})
-		}
-	}
-
-	// Build tempHistory with unified system message.
-	// SystemParts carries structured blocks with cache hints (used by Anthropic tool_use).
-	// Content carries the same text concatenated (used by all other providers/flows).
-	tempHistory := make([]models.Message, 0, len(cli.history)+4)
-
-	if len(systemParts) > 0 {
-		var combined strings.Builder
-		for i, part := range systemParts {
-			if i > 0 {
-				combined.WriteString("\n\n---\n\n")
-			}
-			combined.WriteString(part.Text)
-		}
-		tempHistory = append(tempHistory, models.Message{
-			Role:        "system",
-			Content:     combined.String(),
-			SystemParts: systemParts,
-		})
-	}
-
-	// 1. Copiar mensagens do sistema existentes do histórico
-	for _, msg := range cli.history {
-		if msg.Role == "system" {
-			tempHistory = append(tempHistory, msg)
-		}
-	}
-
-	// 2. Adicionar restante do histórico (user/assistant)
-	for _, msg := range cli.history {
-		if msg.Role != "system" {
-			tempHistory = append(tempHistory, msg)
-		}
-	}
-
-	// 3. Adicionar mensagem atual do usuário
-	userMessage := models.Message{
-		Role:    "user",
-		Content: userInput + additionalContext,
-	}
-	tempHistory = append(tempHistory, userMessage)
-
-	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
-
-	// Resolve the per-turn client from any skill model hint. The resolver
-	// tries (in order):
-	//   1. the user provider's API-cached model list,
-	//   2. the static catalog (exact, alias, prefix),
-	//   3. a family-prefix heuristic (claude-*, gpt-*, gemini-*, ...),
-	//   4. an optimistic same-provider attempt.
-	// Cross-provider swaps are honored when the target provider has an API
-	// key configured; otherwise we stay on the user's client and surface a
-	// user-visible notice so the skill's preference is never silently
-	// dropped. cli.Client / cli.Provider / cli.Model are NOT mutated.
-	cli.ensureModelCacheWarm()
-	resolution := cli.resolveSkillClient(skillModelHint)
-	activeClient := resolution.Client
-	if resolution.Changed {
-		cli.logger.Info("skill model hint honored",
-			zap.String("note", resolution.Note),
-			zap.String("from_provider", cli.Provider),
-			zap.String("to_provider", resolution.Provider),
-			zap.String("from_model", cli.Model),
-			zap.String("to_model", resolution.Model))
-		if resolution.CrossProvider {
-			fmt.Printf("  %s\n", colorize(
-				i18n.T("sw.cmd.skill_swap_provider", resolution.Provider, resolution.Model),
-				ColorGray))
-		}
-	} else if resolution.UserMessage != "" {
-		fmt.Printf("  %s\n", colorize("⚠ "+resolution.UserMessage, ColorYellow))
-	}
-
-	// Attach effort hint to ctx so the provider's SendPrompt can opt into
-	// extended thinking / reasoning_effort for this turn. /thinking
-	// (Phase 1 of the seven-pattern rollout) lets the user override the
-	// skill-derived hint for the next turn — when the override is set
-	// to EffortUnset, no hint is attached so the provider falls back to
-	// its no-thinking default.
-	if eff, overridden := cli.applyThinkingOverride(skillEffort); overridden {
-		if eff != client.EffortUnset {
-			ctx = client.WithEffortHint(ctx, eff)
-		}
-	} else {
-		ctx = client.WithEffortHint(ctx, skillEffort)
-	}
-
-	// Try streaming if supported, fall back to buffered request
-	var aiResponse string
-
-	if sc, ok := client.AsStreamingClient(activeClient); ok {
-		// Real-time streaming: display chunks as they arrive
-		chunks, streamErr := sc.SendPromptStream(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
-		if streamErr != nil && cli.refreshClientOnAuthError(streamErr) {
-			chunks, streamErr = sc.SendPromptStream(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
-		}
-
-		cli.animation.StopThinkingAnimation()
-		stopSpinner()
-		cli.interactionState = StateNormal
-		cli.forceRefreshPrompt()
-		time.Sleep(50 * time.Millisecond)
-
-		if streamErr != nil {
-			err = streamErr
-		} else {
-			modelName := activeClient.GetModelName()
-			fmt.Printf("%s\n", colorize(modelName+":", ColorPurple))
-
-			// Stream chunks with watchdog protection
-			result := client.WatchStream(ctx, chunks, client.DefaultWatchdogConfig(), cli.logger)
-			aiResponse = result.Text
-
-			if result.WasStalled {
-				fmt.Printf("\n%s\n", colorize(i18n.T("sw.cmd.stream_stalled"), ColorYellow))
-			}
-
-			// Store usage from streaming result against whichever
-			// provider+model actually served the turn.
-			if result.Usage != nil {
-				cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, result.Usage)
-			}
-		}
-	} else {
-		// Non-streaming: buffered request
-		aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
-		if cli.refreshClientOnAuthError(err) {
-			aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
-		}
-
-		cli.animation.StopThinkingAnimation()
-		stopSpinner()
-		cli.interactionState = StateNormal
-		cli.forceRefreshPrompt()
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			fmt.Println(i18n.T("status.operation_canceled"))
-		} else {
-			fmt.Println(i18n.T("error.generic", err.Error()))
-		}
-	} else {
-		cli.history = append(cli.history, userMessage)
-		cli.history = append(cli.history, models.Message{
-			Role:    "assistant",
-			Content: aiResponse,
-		})
-
-		// Track cost for non-streaming path (streaming path tracks above)
-		if cli.costTracker != nil {
-			if !client.IsStreamingCapable(activeClient) {
-				usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
-				cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)
-			}
-		}
-
-		// Display response (streaming path already displayed inline)
-		if !client.IsStreamingCapable(activeClient) {
-			modelName := activeClient.GetModelName()
-			fmt.Printf("%s\n", colorize(modelName+":", ColorPurple))
-
-			renderedResponse := cli.renderMarkdown(aiResponse)
-			renderedResponse = ensureANSIReset(renderedResponse)
-			cli.typewriterEffect(renderedResponse, 2*time.Millisecond)
-		} else {
-			// For streaming, render the final markdown (streaming showed raw text)
-			renderedResponse := cli.renderMarkdown(aiResponse)
-			renderedResponse = ensureANSIReset(renderedResponse)
-			// Overwrite streaming output with markdown-rendered version
-			fmt.Print("\033[2K\r") // clear current line
-			fmt.Print(renderedResponse)
-		}
-		fmt.Print("\033[0m")
-		fmt.Println()
-		fmt.Println()
-
-		if cli.memWorker != nil {
-			cli.memWorker.nudge()
-		}
-	}
+	cli.proxyPayloadWarned = true
+	cli.logger.Warn("Chat history exceeds 2.5 MB, no payload cap set",
+		zap.Int("total_chars", totalChars))
+	fmt.Printf("\r\033[K  ℹ %s\n",
+		i18n.T("agent.preflight.warn_no_cap", FormatPayloadSize(totalChars)))
+	_ = os.Stdout.Sync()
 }
 
 func (cli *ChatCLI) handleProviderSelection(in string) {
@@ -863,76 +504,60 @@ func (cli *ChatCLI) getClient() client.LLMClient {
 	return c
 }
 
+// providerMaxTokensEnv maps each known provider (canonical, upper-cased name)
+// to its operator-facing override env var. Keeping this as a table rather
+// than a long if/else chain lets a new provider plug in with a single line
+// and keeps the lookup function inside the project's cyclomatic budget.
+var providerMaxTokensEnv = map[string]string{
+	"OPENAI":        "OPENAI_MAX_TOKENS",
+	"CLAUDEAI":      "ANTHROPIC_MAX_TOKENS",
+	"GOOGLEAI":      "GOOGLEAI_MAX_TOKENS",
+	"XAI":           "XAI_MAX_TOKENS",
+	"ZAI":           "ZAI_MAX_TOKENS",
+	"MINIMAX":       "MINIMAX_MAX_TOKENS",
+	"OLLAMA":        "OLLAMA_MAX_TOKENS",
+	"STACKSPOT":     "STACKSPOT_MAX_TOKENS",
+	"COPILOT":       "COPILOT_MAX_TOKENS",
+	"GITHUB_MODELS": "GITHUB_MODELS_MAX_TOKENS",
+}
+
+// getMaxTokensForCurrentLLM picks the per-turn `max_tokens` for the active
+// LLM by walking the precedence chain:
+//
+//  1. session override set by `/switch --max-tokens` (cli.UserMaxTokens),
+//  2. provider-specific env var (see providerMaxTokensEnv) — operational
+//     escape hatch when an operator needs to force a value at process start,
+//  3. the static catalog's recommended ceiling for (provider, model).
+//
+// Returns the catalog default whenever none of the override sources resolve
+// to a positive integer.
 func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
-	// 1. Prioridade máxima para o override do usuário via flag
 	if cli.UserMaxTokens > 0 {
 		return cli.UserMaxTokens
 	}
-
-	// Overrides por ENV têm precedência e dão flexibilidade operacional
-	var override int
-	if strings.ToUpper(cli.Provider) == "OPENAI" {
-		if v := os.Getenv("OPENAI_MAX_TOKENS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				override = n
-			}
-		}
-	} else if strings.ToUpper(cli.Provider) == "CLAUDEAI" {
-		if v := os.Getenv("ANTHROPIC_MAX_TOKENS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				override = n
-			}
-		}
-	} else if strings.ToUpper(cli.Provider) == "GOOGLEAI" {
-		if v := os.Getenv("GOOGLEAI_MAX_TOKENS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				override = n
-			}
-		}
-	} else if strings.ToUpper(cli.Provider) == "XAI" {
-		if v := os.Getenv("XAI_MAX_TOKENS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				override = n
-			}
-		}
-	} else if strings.ToUpper(cli.Provider) == "ZAI" {
-		if v := os.Getenv("ZAI_MAX_TOKENS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				override = n
-			}
-		}
-	} else if strings.ToUpper(cli.Provider) == "MINIMAX" {
-		if v := os.Getenv("MINIMAX_MAX_TOKENS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				override = n
-			}
-		}
-	} else if strings.ToUpper(cli.Provider) == "OLLAMA" {
-		if v := os.Getenv("OLLAMA_MAX_TOKENS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				override = n
-			}
-		}
-	} else if strings.ToUpper(cli.Provider) == "STACKSPOT" {
-		if v := os.Getenv("STACKSPOT_MAX_TOKENS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				override = n
-			}
-		}
-	} else if strings.ToUpper(cli.Provider) == "COPILOT" {
-		if v := os.Getenv("COPILOT_MAX_TOKENS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				override = n
-			}
-		}
-	} else if strings.ToUpper(cli.Provider) == "GITHUB_MODELS" {
-		if v := os.Getenv("GITHUB_MODELS_MAX_TOKENS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				override = n
-			}
-		}
-	}
+	override := providerMaxTokensOverride(cli.Provider)
 	return catalog.GetMaxTokens(cli.Provider, cli.Model, override)
+}
+
+// providerMaxTokensOverride reads the configured env var for the provider
+// and returns its positive-integer value, or 0 when the env is unset,
+// empty, non-numeric, or non-positive. Unknown providers (or providers
+// without a registered env var) silently yield 0 so the caller falls back
+// to the catalog default.
+func providerMaxTokensOverride(provider string) int {
+	envName, ok := providerMaxTokensEnv[strings.ToUpper(provider)]
+	if !ok {
+		return 0
+	}
+	raw := os.Getenv(envName)
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // estimateBytesFromTokens estima a quantidade de bytes baseada em tokens
