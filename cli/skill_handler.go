@@ -563,171 +563,272 @@ func (sh *SkillHandler) List() {
 	fmt.Println()
 }
 
-// Info shows metadata about a skill, checking local installed first, then registries.
-// If fromRegistry is non-empty, only that registry is queried for remote metadata.
+// Info shows metadata about a skill, checking local installed first, then
+// registries. If fromRegistry is non-empty, only that registry is queried
+// for remote metadata. The function is a thin orchestrator — each row of
+// the output (name, description, version, …) is rendered by a focused
+// helper so the function stays under the project's complexity budget and
+// each row can be exercised independently in tests.
 func (sh *SkillHandler) Info(name string, fromRegistry string) {
-	// 1. Check local installed (any matching base name)
-	localMatches := sh.registryMgr.GetAllInstalledInfo(name)
-	var local *registry.InstalledSkillInfo
-	if len(localMatches) > 0 {
-		local = &localMatches[0]
-	}
-
-	// 2. Try registries for remote metadata.
-	var remote *registry.SkillMeta
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if fromRegistry != "" {
-		// Specific registry requested
-		meta, err := sh.registryMgr.GetSkillMetaFrom(ctx, name, fromRegistry)
-		if err == nil && meta != nil && meta.Name != "" {
-			remote = meta
-		}
-	} else {
-		// Try ALL registries, pick the richest result
-		allRemote := sh.registryMgr.GetAllSkillMeta(ctx, name)
-		if len(allRemote) > 0 {
-			remote = allRemote[0]
-			for _, m := range allRemote {
-				if registry.IsSkillsShSource(m.RegistryName) {
-					remote = m
-					break
-				}
-				if m.Downloads > remote.Downloads {
-					remote = m
-				}
-				if remote.Description == "" && m.Description != "" {
-					remote = m
-				}
-			}
-		}
-	}
+	local := sh.findBestLocalInfo(name)
+	remote := sh.resolveRemoteSkillMeta(ctx, name, fromRegistry)
 
-	// Nothing found anywhere
 	if local == nil && remote == nil {
 		fmt.Printf("\n  %s\n\n", i18n.T("skill.info.not_found", name))
 		return
 	}
 
 	fmt.Println()
+	sh.printSkillInfoHeader(name, local, remote)
+	sh.printSkillInfoDetails(local, remote)
+	sh.printSkillSourceLinks(remote)
 
-	// Name
-	displayName := name
-	if remote != nil && remote.Name != "" {
-		displayName = remote.Name
-	} else if local != nil && local.Name != "" {
-		displayName = local.Name
-	}
-	fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.name")+":", ColorCyan), displayName)
-
-	// Description
-	desc := ""
-	if remote != nil && remote.Description != "" {
-		desc = remote.Description
-	} else if local != nil && local.Description != "" {
-		desc = local.Description
-	}
-	if desc != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.desc")+":", ColorCyan), desc)
-	}
-
-	// Version
-	ver := ""
-	if remote != nil && remote.Version != "" {
-		ver = remote.Version
-	} else if local != nil && local.Version != "" {
-		ver = local.Version
-	}
-	if ver != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.version")+":", ColorCyan), ver)
-	}
-
-	// Author
-	if remote != nil && remote.Author != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.author")+":", ColorCyan), remote.Author)
-	}
-
-	// Source / Registry
-	source := ""
-	if remote != nil && remote.RegistryName != "" {
-		source = remote.RegistryName
-	} else if local != nil && local.Source != "" {
-		source = local.Source
-	}
-	if source != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.source")+":", ColorCyan), source)
-	}
-
-	// Tags
-	if remote != nil && len(remote.Tags) > 0 {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.tags")+":", ColorCyan),
-			colorize(strings.Join(remote.Tags, ", "), ColorGray))
-	}
-
-	// Downloads / Installs
-	if remote != nil && remote.Downloads > 0 {
-		installLabel := i18n.T("skill.info.downloads")
-		if registry.IsSkillsShSource(remote.RegistryName) {
-			installLabel = i18n.T("skill.info.installs")
-		}
-		fmt.Printf("  %s  %s\n", colorize(installLabel+":", ColorCyan),
-			registry.FormatInstallCount(remote.Downloads))
-	}
-
-	// Source repo (for skills.sh, show the GitHub source)
-	if remote != nil && registry.IsSkillsShSource(remote.RegistryName) && remote.Slug != "" {
-		// Extract owner/repo from slug
-		parts := strings.SplitN(remote.Slug, "/", 3)
-		if len(parts) >= 2 {
-			repo := strings.Join(parts[:2], "/")
-			fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.repo")+":", ColorCyan),
-				colorize(fmt.Sprintf("https://github.com/%s", repo), ColorGray))
-		}
-		// Show skills.sh page
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.page")+":", ColorCyan),
-			colorize(fmt.Sprintf("https://skills.sh/%s", remote.Slug), ColorGray))
-	}
-
-	// Security Audits (skills.sh only — fetch from partner audit API)
 	if remote != nil && registry.IsSkillsShSource(remote.RegistryName) && remote.Slug != "" {
 		sh.showSecurityAudits(ctx, remote)
 	}
+	printSkillModeration(remote)
+	sh.printSkillInstallStatus(name)
+	fmt.Println()
+}
 
-	// Moderation
-	if remote != nil {
-		modTag := registry.FormatModerationTag(remote.Moderation)
-		if modTag != "" {
-			fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.moderation")+":", ColorCyan),
-				colorize(modTag, ColorYellow))
+// findBestLocalInfo returns the first local install record matching the
+// (base) name, or nil when nothing local exists.
+func (sh *SkillHandler) findBestLocalInfo(name string) *registry.InstalledSkillInfo {
+	matches := sh.registryMgr.GetAllInstalledInfo(name)
+	if len(matches) == 0 {
+		return nil
+	}
+	return &matches[0]
+}
+
+// resolveRemoteSkillMeta returns the best registry-side metadata for the
+// skill. When `fromRegistry` is set the query is limited to that registry.
+// Otherwise every configured registry is consulted and the richest result
+// wins under selectRichestRemote's rules.
+func (sh *SkillHandler) resolveRemoteSkillMeta(
+	ctx context.Context, name, fromRegistry string,
+) *registry.SkillMeta {
+	if fromRegistry != "" {
+		meta, err := sh.registryMgr.GetSkillMetaFrom(ctx, name, fromRegistry)
+		if err != nil || meta == nil || meta.Name == "" {
+			return nil
+		}
+		return meta
+	}
+	allRemote := sh.registryMgr.GetAllSkillMeta(ctx, name)
+	return selectRichestRemote(allRemote)
+}
+
+// selectRichestRemote picks the most useful remote-meta entry from a slice
+// of candidates. Preference order:
+//
+//  1. any skills.sh-sourced entry (canonical registry — wins outright),
+//  2. the entry with the highest install count,
+//  3. an entry with a non-empty description when the current pick has none.
+//
+// Returns nil when the slice is empty.
+func selectRichestRemote(candidates []*registry.SkillMeta) *registry.SkillMeta {
+	if len(candidates) == 0 {
+		return nil
+	}
+	best := candidates[0]
+	for _, m := range candidates {
+		if registry.IsSkillsShSource(m.RegistryName) {
+			return m
+		}
+		if m.Downloads > best.Downloads {
+			best = m
+			continue
+		}
+		if best.Description == "" && m.Description != "" {
+			best = m
 		}
 	}
+	return best
+}
 
-	// Install status — show ALL installed versions (local + registry) to surface conflicts
+// printSkillInfoHeader prints the always-present Name line, preferring the
+// remote-meta name when both sides know it.
+func (sh *SkillHandler) printSkillInfoHeader(name string, local *registry.InstalledSkillInfo, remote *registry.SkillMeta) {
+	displayName := pickFirstNonEmpty(
+		remoteName(remote),
+		localName(local),
+		name,
+	)
+	fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.name")+":", ColorCyan), displayName)
+}
+
+// printSkillInfoDetails prints the description/version/author/source/tags/
+// downloads rows. Each row is its own helper so the dispatcher stays linear.
+func (sh *SkillHandler) printSkillInfoDetails(local *registry.InstalledSkillInfo, remote *registry.SkillMeta) {
+	printInfoRow("skill.info.desc",
+		pickFirstNonEmpty(remoteDescription(remote), localDescription(local)),
+		ColorCyan)
+	printInfoRow("skill.info.version",
+		pickFirstNonEmpty(remoteVersion(remote), localVersion(local)),
+		ColorCyan)
+	if remote != nil {
+		printInfoRow("skill.info.author", remote.Author, ColorCyan)
+	}
+	printInfoRow("skill.info.source",
+		pickFirstNonEmpty(remoteRegistryName(remote), localSource(local)),
+		ColorCyan)
+	if remote != nil && len(remote.Tags) > 0 {
+		fmt.Printf("  %s  %s\n",
+			colorize(i18n.T("skill.info.tags")+":", ColorCyan),
+			colorize(strings.Join(remote.Tags, ", "), ColorGray))
+	}
+	if remote != nil && remote.Downloads > 0 {
+		label := i18n.T("skill.info.downloads")
+		if registry.IsSkillsShSource(remote.RegistryName) {
+			label = i18n.T("skill.info.installs")
+		}
+		fmt.Printf("  %s  %s\n",
+			colorize(label+":", ColorCyan),
+			registry.FormatInstallCount(remote.Downloads))
+	}
+}
+
+// printSkillSourceLinks renders the GitHub source repo URL and the
+// skills.sh detail page URL when the remote meta carries a slug from the
+// skills.sh registry. Silent for any other registry.
+func (sh *SkillHandler) printSkillSourceLinks(remote *registry.SkillMeta) {
+	if remote == nil || !registry.IsSkillsShSource(remote.RegistryName) || remote.Slug == "" {
+		return
+	}
+	if parts := strings.SplitN(remote.Slug, "/", 3); len(parts) >= 2 {
+		repo := strings.Join(parts[:2], "/")
+		fmt.Printf("  %s  %s\n",
+			colorize(i18n.T("skill.info.repo")+":", ColorCyan),
+			colorize(fmt.Sprintf("https://github.com/%s", repo), ColorGray))
+	}
+	fmt.Printf("  %s  %s\n",
+		colorize(i18n.T("skill.info.page")+":", ColorCyan),
+		colorize(fmt.Sprintf("https://skills.sh/%s", remote.Slug), ColorGray))
+}
+
+// printSkillModeration shows the moderation tag (BLOCKED/QUARANTINED/…)
+// when the registry has classified the skill. Silent when the meta is nil
+// or the tag is empty.
+func printSkillModeration(remote *registry.SkillMeta) {
+	if remote == nil {
+		return
+	}
+	modTag := registry.FormatModerationTag(remote.Moderation)
+	if modTag == "" {
+		return
+	}
+	fmt.Printf("  %s  %s\n",
+		colorize(i18n.T("skill.info.moderation")+":", ColorCyan),
+		colorize(modTag, ColorYellow))
+}
+
+// printSkillInstallStatus surfaces every local install of the skill so the
+// user can spot duplicate installs from multiple sources at a glance.
+func (sh *SkillHandler) printSkillInstallStatus(name string) {
 	allInstalled := sh.registryMgr.GetAllInstalledInfo(name)
-	if len(allInstalled) == 0 {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.status")+":", ColorCyan), i18n.T("skill.not_installed"))
-	} else if len(allInstalled) == 1 {
+	switch len(allInstalled) {
+	case 0:
+		fmt.Printf("  %s  %s\n",
+			colorize(i18n.T("skill.info.status")+":", ColorCyan),
+			i18n.T("skill.not_installed"))
+	case 1:
 		inst := allInstalled[0]
-		fmt.Printf("  %s  %s  %s\n", colorize(i18n.T("skill.info.status")+":", ColorCyan),
+		fmt.Printf("  %s  %s  %s\n",
+			colorize(i18n.T("skill.info.status")+":", ColorCyan),
 			colorize(i18n.T("skill.installed"), ColorGreen),
 			colorize(fmt.Sprintf("[%s]", inst.Source), ColorGray))
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.path")+":", ColorCyan),
+		fmt.Printf("  %s  %s\n",
+			colorize(i18n.T("skill.info.path")+":", ColorCyan),
 			colorize(inst.Path, ColorGray))
-	} else {
-		// Multiple installs with the same base name from different sources
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("skill.info.status")+":", ColorCyan),
-			colorize(fmt.Sprintf("%s (%d %s)", i18n.T("skill.installed"), len(allInstalled), i18n.T("skill.info.sources")), ColorYellow))
+	default:
+		fmt.Printf("  %s  %s\n",
+			colorize(i18n.T("skill.info.status")+":", ColorCyan),
+			colorize(fmt.Sprintf("%s (%d %s)",
+				i18n.T("skill.installed"), len(allInstalled), i18n.T("skill.info.sources")),
+				ColorYellow))
 		for _, inst := range allInstalled {
-			srcTag := fmt.Sprintf("[%s]", inst.Source)
 			fmt.Printf("    %s  %s  %s\n",
 				colorize(inst.Name, ColorCyan),
-				colorize(srcTag, ColorGray),
+				colorize(fmt.Sprintf("[%s]", inst.Source), ColorGray),
 				colorize(inst.Path, ColorGray))
 		}
 	}
+}
 
-	fmt.Println()
+// printInfoRow renders a "label: value" row when value is non-empty; no-op
+// otherwise. Centralizes the prefix/colorize/i18n boilerplate.
+func printInfoRow(labelKey, value, labelColor string) {
+	if value == "" {
+		return
+	}
+	fmt.Printf("  %s  %s\n", colorize(i18n.T(labelKey)+":", labelColor), value)
+}
+
+// pickFirstNonEmpty returns the first non-empty string from its arguments,
+// or "" when every argument is empty. Lets row helpers express
+// "remote wins, else local, else fallback" without nested ternaries.
+func pickFirstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// remote*/local* helpers turn nil-safe field reads into one-line calls so
+// callers don't have to interleave `if remote != nil` everywhere.
+func remoteName(r *registry.SkillMeta) string {
+	if r == nil {
+		return ""
+	}
+	return r.Name
+}
+func remoteDescription(r *registry.SkillMeta) string {
+	if r == nil {
+		return ""
+	}
+	return r.Description
+}
+func remoteVersion(r *registry.SkillMeta) string {
+	if r == nil {
+		return ""
+	}
+	return r.Version
+}
+func remoteRegistryName(r *registry.SkillMeta) string {
+	if r == nil {
+		return ""
+	}
+	return r.RegistryName
+}
+func localName(l *registry.InstalledSkillInfo) string {
+	if l == nil {
+		return ""
+	}
+	return l.Name
+}
+func localDescription(l *registry.InstalledSkillInfo) string {
+	if l == nil {
+		return ""
+	}
+	return l.Description
+}
+func localVersion(l *registry.InstalledSkillInfo) string {
+	if l == nil {
+		return ""
+	}
+	return l.Version
+}
+func localSource(l *registry.InstalledSkillInfo) string {
+	if l == nil {
+		return ""
+	}
+	return l.Source
 }
 
 // Prefer manages source preferences for skills with name conflicts.

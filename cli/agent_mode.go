@@ -632,31 +632,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// without an active skill does not inherit the old model/effort.
 	a.skillModelHint = ""
 	a.skillEffortHint = llmclient.EffortUnset
-	// Block 4 — skills (auto-activated + manual) and Orchestrator catalog.
-	// Built last because it's the most volatile (changes per query) and
-	// sits at the tail of the system prompt so earlier blocks stay cacheable.
-	var skillsText string
-	if a.cli.personaHandler != nil {
-		mgr := a.cli.personaHandler.GetManager()
-		if mgr != nil {
-			filePaths := extractFilePaths(query + " " + additionalContext)
-			activated := mgr.FindAutoActivatedSkills(query, filePaths)
-			if len(activated) > 0 {
-				skillsText = buildSkillInjectionBlock(activated)
-				model, effort, _ := pickSkillModelAndEffort(activated)
-				if model != "" {
-					a.skillModelHint = model
-				}
-				if effort != "" {
-					a.skillEffortHint = llmclient.NormalizeEffort(effort)
-				}
-				a.logger.Info("agent mode: auto-activated skills injected",
-					zap.Int("count", len(activated)),
-					zap.String("model_hint", a.skillModelHint),
-					zap.String("effort_hint", string(a.skillEffortHint)))
-			}
-		}
-	}
+	// Block 4 — skills (pinned + auto-activated + manual) and Orchestrator
+	// catalog. Built last because it's the most volatile (changes per query)
+	// and sits at the tail of the system prompt so earlier blocks stay
+	// cacheable. Pinned skills go before auto-activated so they win on
+	// model/effort ties via pickSkillModelAndEffort's "first non-empty wins"
+	// rule.
+	skillsText := a.buildAgentSkillBlocks(query, additionalContext)
 	if a.cli.pendingManualSkill != nil {
 		manual := a.cli.pendingManualSkill
 		manualArgs := a.cli.pendingManualSkillArgs
@@ -2701,6 +2683,43 @@ func isDelegateInvocation(argsJSON string) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(outer.Cmd), "delegate")
+}
+
+// buildAgentSkillBlocks composes the agent-mode skill prompt block from the
+// auto-activated skill set for the current turn. The function also mutates
+// a.skillModelHint and a.skillEffortHint when any matched skill carries
+// those frontmatter hints.
+//
+// Returns the assembled prompt text. Empty when no skills fire.
+func (a *AgentMode) buildAgentSkillBlocks(query, additionalContext string) string {
+	if a.cli.personaHandler == nil {
+		return ""
+	}
+	mgr := a.cli.personaHandler.GetManager()
+	if mgr == nil {
+		return ""
+	}
+
+	filePaths := extractFilePaths(query + " " + additionalContext)
+	autoActivated := mgr.FindAutoActivatedSkills(query, filePaths)
+	if len(autoActivated) == 0 {
+		return ""
+	}
+
+	skillsText := buildSkillInjectionBlock(autoActivated)
+
+	model, effort, _ := pickSkillModelAndEffort(autoActivated)
+	if model != "" {
+		a.skillModelHint = model
+	}
+	if effort != "" {
+		a.skillEffortHint = llmclient.NormalizeEffort(effort)
+	}
+	a.logger.Info("agent mode: auto-activated skills injected",
+		zap.Int("count", len(autoActivated)),
+		zap.String("model_hint", a.skillModelHint),
+		zap.String("effort_hint", string(a.skillEffortHint)))
+	return skillsText
 }
 
 // extractDelegateArgs pulls the inner args map from an @coder delegate call.
