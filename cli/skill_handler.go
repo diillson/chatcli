@@ -12,7 +12,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
@@ -27,6 +29,13 @@ type SkillHandler struct {
 	personaMgr  *persona.Manager
 	logger      *zap.Logger
 	initErr     error // stores initialization error for lazy display
+
+	// Session-scoped pinned skill names. Pinned skills are injected into the
+	// system prompt of every turn (chat + agent) regardless of whether the
+	// user input matches their triggers/paths. Resolution is lazy (re-loaded
+	// each turn via personaMgr) so uninstalled/renamed skills drop silently.
+	pinnedSkillNames map[string]struct{}
+	pinnedSkillsMu   sync.RWMutex
 }
 
 // NewSkillHandler creates a new skill handler with registry manager.
@@ -41,16 +50,18 @@ func NewSkillHandler(logger *zap.Logger, personaMgr *persona.Manager) *SkillHand
 	if err != nil {
 		logger.Warn("Failed to initialize registry manager", zap.Error(err))
 		return &SkillHandler{
-			personaMgr: personaMgr,
-			logger:     logger,
-			initErr:    err,
+			personaMgr:       personaMgr,
+			logger:           logger,
+			initErr:          err,
+			pinnedSkillNames: make(map[string]struct{}),
 		}
 	}
 
 	return &SkillHandler{
-		registryMgr: mgr,
-		personaMgr:  personaMgr,
-		logger:      logger,
+		registryMgr:      mgr,
+		personaMgr:       personaMgr,
+		logger:           logger,
+		pinnedSkillNames: make(map[string]struct{}),
 	}
 }
 
@@ -133,6 +144,23 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 
 	case "prefer":
 		sh.Prefer(args[2:])
+
+	case "pin":
+		if len(args) < 3 {
+			fmt.Println(colorize(" "+i18n.T("skill.usage.pin"), ColorYellow))
+			return
+		}
+		sh.Pin(args[2])
+
+	case "unpin":
+		if len(args) < 3 {
+			fmt.Println(colorize(" "+i18n.T("skill.usage.unpin"), ColorYellow))
+			return
+		}
+		sh.Unpin(args[2])
+
+	case "pinned":
+		sh.ShowPinned()
 
 	case "help":
 		sh.ShowHelp()
@@ -542,10 +570,16 @@ func (sh *SkillHandler) List() {
 		}
 		srcTag := fmt.Sprintf("[%s]", src)
 
-		fmt.Printf("    %s  %s  %s\n",
+		pinMarker := ""
+		if sh.IsPinned(s.Name) {
+			pinMarker = "  " + colorize(i18n.T("skill.list.pinned_marker"), ColorGreen)
+		}
+
+		fmt.Printf("    %s  %s  %s%s\n",
 			colorize(paddedName, ColorCyan),
 			colorize(paddedVer, ColorGray),
-			colorize(srcTag, ColorGray))
+			colorize(srcTag, ColorGray),
+			pinMarker)
 	}
 
 	// Show registries summary
@@ -1031,6 +1065,9 @@ func (sh *SkillHandler) ShowHelp() {
 		{"/skill registries", i18n.T("skill.help.registries")},
 		{"/skill registry enable|disable <name>", i18n.T("skill.help.registry_toggle")},
 		{"/skill prefer [name] [source]", i18n.T("skill.help.prefer")},
+		{"/skill pin <name>", i18n.T("skill.help.pin")},
+		{"/skill unpin <name>", i18n.T("skill.help.unpin")},
+		{"/skill pinned", i18n.T("skill.help.pinned")},
 		{"/skill help", i18n.T("skill.help.show_help")},
 	}
 
@@ -1051,6 +1088,168 @@ func (sh *SkillHandler) ShowHelp() {
 		i18n.T("skill.help.skills_dir"), colorize(sh.registryMgr.GetInstallDir(), ColorGray))
 	fmt.Printf("  %s:     %s\n\n",
 		i18n.T("skill.registries.config"), colorize(sh.registryMgr.GetConfigPath(), ColorGray))
+}
+
+// Pin marks a skill to be auto-injected into every turn for the rest of the
+// session, regardless of triggers/paths. Pinning is rejected for skills with
+// `disable-model-invocation: true` (the flag exists precisely to forbid
+// automatic injection; manual invocation via `/<skill-name>` remains the
+// supported path for those).
+func (sh *SkillHandler) Pin(name string) {
+	if sh.personaMgr == nil {
+		fmt.Printf("\n  %s\n\n", colorize(i18n.T("skill.pin.no_manager"), ColorRed))
+		return
+	}
+	skill, err := sh.personaMgr.GetSkillByName(name)
+	if err != nil || skill == nil {
+		fmt.Printf("\n  %s %s\n", colorize(i18n.T("skill.pin.not_found")+":", ColorYellow), colorize(name, ColorCyan))
+		fmt.Printf("  %s\n\n", i18n.T("skill.pin.search_hint", colorize("/skill search <query>", ColorCyan)))
+		return
+	}
+	if skill.DisableModelInvocation {
+		fmt.Printf("\n  %s %s\n", colorize(i18n.T("skill.pin.disabled_invocation")+":", ColorYellow), colorize(skill.Name, ColorCyan))
+		fmt.Printf("  %s\n\n", i18n.T("skill.pin.use_manual_hint", colorize("/"+skill.Name, ColorCyan)))
+		return
+	}
+
+	sh.pinnedSkillsMu.Lock()
+	_, already := sh.pinnedSkillNames[skill.Name]
+	sh.pinnedSkillNames[skill.Name] = struct{}{}
+	count := len(sh.pinnedSkillNames)
+	sh.pinnedSkillsMu.Unlock()
+
+	if already {
+		fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.pin.already"), ColorGray), colorize(skill.Name, ColorCyan))
+		return
+	}
+
+	sh.logger.Info("skill pinned",
+		zap.String("skill", skill.Name),
+		zap.Int("total_pinned", count))
+
+	fmt.Printf("\n  %s %s\n",
+		colorize(i18n.T("skill.pin.success"), ColorGreen),
+		colorize(skill.Name, ColorCyan))
+	fmt.Printf("  %s\n\n", colorize(i18n.T("skill.pin.effect"), ColorGray))
+}
+
+// Unpin removes a skill from the pinned set. No-op (with a friendly notice)
+// when the skill wasn't pinned to begin with.
+func (sh *SkillHandler) Unpin(name string) {
+	sh.pinnedSkillsMu.Lock()
+	_, was := sh.pinnedSkillNames[name]
+	if was {
+		delete(sh.pinnedSkillNames, name)
+	}
+	sh.pinnedSkillsMu.Unlock()
+
+	if !was {
+		fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.unpin.not_pinned"), ColorGray), colorize(name, ColorCyan))
+		return
+	}
+
+	sh.logger.Info("skill unpinned", zap.String("skill", name))
+	fmt.Printf("\n  %s %s\n\n",
+		colorize(i18n.T("skill.unpin.success"), ColorGreen),
+		colorize(name, ColorCyan))
+}
+
+// ShowPinned lists all currently pinned skills for the session.
+func (sh *SkillHandler) ShowPinned() {
+	skills := sh.GetPinnedSkills()
+
+	fmt.Println()
+	if len(skills) == 0 {
+		fmt.Printf("  %s\n", colorize(i18n.T("skill.pinned.empty"), ColorYellow))
+		fmt.Printf("  %s\n\n", i18n.T("skill.pinned.hint", colorize("/skill pin <name>", ColorCyan)))
+		return
+	}
+
+	fmt.Printf("  %s (%d):\n\n",
+		colorize(i18n.T("skill.pinned.header"), ColorCyan), len(skills))
+
+	maxNameLen := 0
+	for _, s := range skills {
+		if len(s.Name) > maxNameLen {
+			maxNameLen = len(s.Name)
+		}
+	}
+
+	for _, s := range skills {
+		paddedName := fmt.Sprintf("%-*s", maxNameLen, s.Name)
+		desc := s.Description
+		if desc == "" {
+			desc = "—"
+		}
+		fmt.Printf("    %s  %s\n",
+			colorize(paddedName, ColorCyan),
+			colorize(desc, ColorGray))
+	}
+	fmt.Println()
+}
+
+// IsPinned reports whether the named skill is currently pinned. Used by
+// /skill list to render the pin marker.
+func (sh *SkillHandler) IsPinned(name string) bool {
+	sh.pinnedSkillsMu.RLock()
+	defer sh.pinnedSkillsMu.RUnlock()
+	_, ok := sh.pinnedSkillNames[name]
+	return ok
+}
+
+// PinnedNames returns a snapshot of currently pinned skill names sorted
+// alphabetically. Exposed for the completer.
+func (sh *SkillHandler) PinnedNames() []string {
+	sh.pinnedSkillsMu.RLock()
+	names := make([]string, 0, len(sh.pinnedSkillNames))
+	for n := range sh.pinnedSkillNames {
+		names = append(names, n)
+	}
+	sh.pinnedSkillsMu.RUnlock()
+	sort.Strings(names)
+	return names
+}
+
+// GetPinnedSkills resolves every pinned name against the persona manager and
+// returns the matching skills sorted alphabetically (stable order keeps the
+// system-prompt injection block cache-friendly). Stale pins — skills that
+// were uninstalled or renamed — are pruned silently from the set.
+func (sh *SkillHandler) GetPinnedSkills() []*persona.Skill {
+	if sh.personaMgr == nil {
+		return nil
+	}
+	sh.pinnedSkillsMu.RLock()
+	names := make([]string, 0, len(sh.pinnedSkillNames))
+	for n := range sh.pinnedSkillNames {
+		names = append(names, n)
+	}
+	sh.pinnedSkillsMu.RUnlock()
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+
+	out := make([]*persona.Skill, 0, len(names))
+	var stale []string
+	for _, n := range names {
+		s, err := sh.personaMgr.GetSkillByName(n)
+		if err != nil || s == nil {
+			stale = append(stale, n)
+			continue
+		}
+		out = append(out, s)
+	}
+
+	if len(stale) > 0 {
+		sh.pinnedSkillsMu.Lock()
+		for _, n := range stale {
+			delete(sh.pinnedSkillNames, n)
+		}
+		sh.pinnedSkillsMu.Unlock()
+		sh.logger.Info("pruned stale pinned skills",
+			zap.Strings("skills", stale))
+	}
+	return out
 }
 
 // shortenRegistryError returns a concise error description for display.

@@ -999,6 +999,9 @@ func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "registries", Description: i18n.T("complete.skill.sub_registries")},
 			{Text: "registry", Description: i18n.T("complete.skill.sub_registry")},
 			{Text: "prefer", Description: i18n.T("complete.skill.sub_prefer")},
+			{Text: "pin", Description: i18n.T("complete.skill.sub_pin")},
+			{Text: "unpin", Description: i18n.T("complete.skill.sub_unpin")},
+			{Text: "pinned", Description: i18n.T("complete.skill.sub_pinned")},
 			{Text: "help", Description: i18n.T("complete.skill.sub_help")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
@@ -1076,6 +1079,57 @@ func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
 		if len(args) >= 3 {
 			return cli.getRegistryNameSuggestions(d)
 		}
+	}
+
+	// For "pin": suggest installed skill base names that are not yet pinned
+	// and not flagged disable-model-invocation.
+	if sub == "pin" {
+		if cli.skillHandler == nil || cli.personaHandler == nil {
+			return []prompt.Suggest{}
+		}
+		mgr := cli.personaHandler.GetManager()
+		if mgr == nil {
+			return []prompt.Suggest{}
+		}
+		allSkills := mgr.ListAllSkills()
+		pinnedSet := make(map[string]struct{})
+		for _, n := range cli.skillHandler.PinnedNames() {
+			pinnedSet[n] = struct{}{}
+		}
+		suggestions := make([]prompt.Suggest, 0, len(allSkills))
+		for _, s := range allSkills {
+			if s.DisableModelInvocation {
+				continue
+			}
+			if _, already := pinnedSet[s.Name]; already {
+				continue
+			}
+			desc := s.Description
+			if desc == "" {
+				desc = i18n.T("complete.skill.sub_pin")
+			}
+			suggestions = append(suggestions, prompt.Suggest{
+				Text:        s.Name,
+				Description: desc,
+			})
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	// For "unpin": only suggest skills currently pinned.
+	if sub == "unpin" {
+		if cli.skillHandler == nil {
+			return []prompt.Suggest{}
+		}
+		pinned := cli.skillHandler.PinnedNames()
+		suggestions := make([]prompt.Suggest, 0, len(pinned))
+		for _, name := range pinned {
+			suggestions = append(suggestions, prompt.Suggest{
+				Text:        name,
+				Description: i18n.T("complete.skill.unpin_desc"),
+			})
+		}
+		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
 
 	// For "prefer": suggest installed skill base names, then sources

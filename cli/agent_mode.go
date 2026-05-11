@@ -36,6 +36,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 	"golang.org/x/term"
@@ -632,26 +633,51 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// without an active skill does not inherit the old model/effort.
 	a.skillModelHint = ""
 	a.skillEffortHint = llmclient.EffortUnset
-	// Block 4 — skills (auto-activated + manual) and Orchestrator catalog.
-	// Built last because it's the most volatile (changes per query) and
-	// sits at the tail of the system prompt so earlier blocks stay cacheable.
+	// Block 4 — skills (pinned + auto-activated + manual) and Orchestrator
+	// catalog. Built last because it's the most volatile (changes per query)
+	// and sits at the tail of the system prompt so earlier blocks stay
+	// cacheable. Pinned skills go before auto-activated so they win on
+	// model/effort ties via pickSkillModelAndEffort's "first non-empty wins"
+	// rule.
 	var skillsText string
 	if a.cli.personaHandler != nil {
 		mgr := a.cli.personaHandler.GetManager()
 		if mgr != nil {
+			var pinned []*persona.Skill
+			if a.cli.skillHandler != nil {
+				pinned = a.cli.skillHandler.GetPinnedSkills()
+			}
+			if len(pinned) > 0 {
+				if block := buildPinnedSkillInjectionBlock(pinned); block != "" {
+					skillsText = block
+				}
+			}
+
 			filePaths := extractFilePaths(query + " " + additionalContext)
-			activated := mgr.FindAutoActivatedSkills(query, filePaths)
-			if len(activated) > 0 {
-				skillsText = buildSkillInjectionBlock(activated)
-				model, effort, _ := pickSkillModelAndEffort(activated)
+			autoActivated := mgr.FindAutoActivatedSkills(query, filePaths)
+			autoActivated = dedupAutoAgainstPinned(autoActivated, pinned)
+			if len(autoActivated) > 0 {
+				if block := buildSkillInjectionBlock(autoActivated); block != "" {
+					if skillsText != "" {
+						skillsText += "\n\n"
+					}
+					skillsText += block
+				}
+			}
+
+			merged := append([]*persona.Skill(nil), pinned...)
+			merged = append(merged, autoActivated...)
+			if len(merged) > 0 {
+				model, effort, _ := pickSkillModelAndEffort(merged)
 				if model != "" {
 					a.skillModelHint = model
 				}
 				if effort != "" {
 					a.skillEffortHint = llmclient.NormalizeEffort(effort)
 				}
-				a.logger.Info("agent mode: auto-activated skills injected",
-					zap.Int("count", len(activated)),
+				a.logger.Info("agent mode: skills injected",
+					zap.Int("pinned", len(pinned)),
+					zap.Int("auto", len(autoActivated)),
 					zap.String("model_hint", a.skillModelHint),
 					zap.String("effort_hint", string(a.skillEffortHint)))
 			}

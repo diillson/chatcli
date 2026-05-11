@@ -265,41 +265,70 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		}
 	}
 
-	// Part 3: Auto-activated skills (triggers + path globs).
+	// Part 3: Pinned + auto-activated skills.
 	//
-	// Honors the full advanced frontmatter contract from the docs:
+	// Pinned skills come from `/skill pin <name>` and apply to every turn for
+	// the session — their block sits on its own ContentBlock so cache stays
+	// warm across turns (only mutations to the pin set invalidate it).
+	//
+	// Auto-activation honors the advanced frontmatter contract:
 	//  - `triggers:` → keyword match against userInput
 	//  - `paths:`    → glob match against file tokens extracted from userInput
 	//                  and @file commands (supports `*`, `**`, basename match)
 	//  - `disable-model-invocation` → skill is excluded from auto-activation
 	//  - `model:` / `effort:` → forwarded to provider for this single turn
 	//                           (see skillEffort / skillModelHint below)
+	//
+	// Precedence for model/effort hints: pinned first, then auto-activated.
+	// The first non-empty value wins (see pickSkillModelAndEffort). Manual
+	// invocation (Part 2.5) overrides both right after this block.
 	var skillEffort client.SkillEffort
 	var skillModelHint string
 	if cli.personaHandler != nil {
 		mgr := cli.personaHandler.GetManager()
 		if mgr != nil {
+			var pinned []*persona.Skill
+			if cli.skillHandler != nil {
+				pinned = cli.skillHandler.GetPinnedSkills()
+			}
+			if len(pinned) > 0 {
+				if block := buildPinnedSkillInjectionBlock(pinned); block != "" {
+					systemParts = append(systemParts, models.ContentBlock{
+						Type:         "text",
+						Text:         block,
+						CacheControl: &models.CacheControl{Type: "ephemeral"},
+					})
+				}
+			}
+
 			filePaths := extractFilePaths(userInput + " " + additionalContext)
-			activated := mgr.FindAutoActivatedSkills(userInput, filePaths)
-			if len(activated) > 0 {
-				block := buildSkillInjectionBlock(activated)
+			autoActivated := mgr.FindAutoActivatedSkills(userInput, filePaths)
+			autoActivated = dedupAutoAgainstPinned(autoActivated, pinned)
+			if len(autoActivated) > 0 {
+				block := buildSkillInjectionBlock(autoActivated)
 				if block != "" {
 					systemParts = append(systemParts, models.ContentBlock{
 						Type: "text",
 						Text: block,
 					})
 				}
-				// Resolve model/effort hints from the activated set.
-				model, effort, conflict := pickSkillModelAndEffort(activated)
+			}
+
+			// Merge for hint resolution: pinned first → wins on tie.
+			merged := append([]*persona.Skill(nil), pinned...)
+			merged = append(merged, autoActivated...)
+			if len(merged) > 0 {
+				model, effort, conflict := pickSkillModelAndEffort(merged)
 				skillModelHint = model
 				skillEffort = client.NormalizeEffort(effort)
 				if conflict != "" {
-					cli.logger.Warn("multiple auto-activated skills disagree on model; using the first",
+					cli.logger.Warn("multiple skills disagree on model; using the first",
 						zap.String("losing_skill", conflict),
 						zap.String("chosen_model", skillModelHint))
 				}
-				cli.logger.Debug("auto-activated skills",
-					zap.Int("count", len(activated)),
+				cli.logger.Debug("skills injected (pinned + auto)",
+					zap.Int("pinned", len(pinned)),
+					zap.Int("auto", len(autoActivated)),
 					zap.Strings("file_paths", filePaths),
 					zap.String("skill_model", skillModelHint),
 					zap.String("skill_effort", string(skillEffort)))
