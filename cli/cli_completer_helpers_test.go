@@ -82,10 +82,10 @@ func TestIsFromFlag(t *testing.T) {
 
 func TestIsAtRegistryValuePosition(t *testing.T) {
 	cases := []struct {
-		name       string
-		args       []string
-		endsSpace  bool
-		want       bool
+		name      string
+		args      []string
+		endsSpace bool
+		want      bool
 	}{
 		{
 			name:      "after --from with space",

@@ -94,7 +94,7 @@ func TestResolveSkillsForTurn_PinnedAndAutoSeparated(t *testing.T) {
 	cli, _ := newPipelineCLI(t, map[string]string{
 		"alpha": `---
 name: alpha
-description: trigger on word `+ "`alpha`" + `
+description: trigger on word ` + "`alpha`" + `
 triggers: ["alpha"]
 ---
 body
@@ -227,4 +227,3 @@ func TestFireUserPromptSubmitHook_NoManagerIsNoop(t *testing.T) {
 	cli := &ChatCLI{}
 	cli.fireUserPromptSubmitHook("hello")
 }
-
