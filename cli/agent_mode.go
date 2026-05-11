@@ -36,6 +36,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 	"golang.org/x/term"
@@ -2685,10 +2686,10 @@ func isDelegateInvocation(argsJSON string) bool {
 	return strings.EqualFold(strings.TrimSpace(outer.Cmd), "delegate")
 }
 
-// buildAgentSkillBlocks composes the agent-mode skill prompt block from the
-// auto-activated skill set for the current turn. The function also mutates
-// a.skillModelHint and a.skillEffortHint when any matched skill carries
-// those frontmatter hints.
+// buildAgentSkillBlocks composes the agent-mode skill prompt block: pinned
+// skills first (stable across turns), auto-activated skills next (volatile
+// by query). The function also mutates a.skillModelHint and
+// a.skillEffortHint when any skill set carries those frontmatter hints.
 //
 // Returns the assembled prompt text. Empty when no skills fire.
 func (a *AgentMode) buildAgentSkillBlocks(query, additionalContext string) string {
@@ -2700,26 +2701,57 @@ func (a *AgentMode) buildAgentSkillBlocks(query, additionalContext string) strin
 		return ""
 	}
 
+	var pinned []*persona.Skill
+	if a.cli.skillHandler != nil {
+		pinned = a.cli.skillHandler.GetPinnedSkills()
+	}
+
 	filePaths := extractFilePaths(query + " " + additionalContext)
 	autoActivated := mgr.FindAutoActivatedSkills(query, filePaths)
-	if len(autoActivated) == 0 {
-		return ""
-	}
+	autoActivated = dedupAutoAgainstPinned(autoActivated, pinned)
 
-	skillsText := buildSkillInjectionBlock(autoActivated)
+	skillsText := concatSkillBlocks(pinned, autoActivated)
 
-	model, effort, _ := pickSkillModelAndEffort(autoActivated)
-	if model != "" {
-		a.skillModelHint = model
+	merged := append([]*persona.Skill(nil), pinned...)
+	merged = append(merged, autoActivated...)
+	if len(merged) > 0 {
+		model, effort, _ := pickSkillModelAndEffort(merged)
+		if model != "" {
+			a.skillModelHint = model
+		}
+		if effort != "" {
+			a.skillEffortHint = llmclient.NormalizeEffort(effort)
+		}
+		a.logger.Info("agent mode: skills injected",
+			zap.Int("pinned", len(pinned)),
+			zap.Int("auto", len(autoActivated)),
+			zap.String("model_hint", a.skillModelHint),
+			zap.String("effort_hint", string(a.skillEffortHint)))
 	}
-	if effort != "" {
-		a.skillEffortHint = llmclient.NormalizeEffort(effort)
-	}
-	a.logger.Info("agent mode: auto-activated skills injected",
-		zap.Int("count", len(autoActivated)),
-		zap.String("model_hint", a.skillModelHint),
-		zap.String("effort_hint", string(a.skillEffortHint)))
 	return skillsText
+}
+
+// concatSkillBlocks renders pinned skills (with the pinned-skill header)
+// followed by auto-activated skills (with the auto-loaded header), joined
+// by a blank line when both fire. Returns "" when neither slice produces
+// content. Pure — extracted so callers in chat and agent mode share the
+// concatenation rule and so tests can drive it without a ChatCLI fixture.
+func concatSkillBlocks(pinned, autoActivated []*persona.Skill) string {
+	var out string
+	if len(pinned) > 0 {
+		if block := buildPinnedSkillInjectionBlock(pinned); block != "" {
+			out = block
+		}
+	}
+	if len(autoActivated) > 0 {
+		if block := buildSkillInjectionBlock(autoActivated); block != "" {
+			if out != "" {
+				out += "\n\n"
+			}
+			out += block
+		}
+	}
+	return out
 }
 
 // extractDelegateArgs pulls the inner args map from an @coder delegate call.

@@ -11,6 +11,7 @@ import (
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/persona"
 )
 
 // loadPolicyForCompleter is a thin wrapper around
@@ -1000,6 +1001,9 @@ func skillSubcommandSuggestions() []prompt.Suggest {
 		{Text: "registries", Description: i18n.T("complete.skill.sub_registries")},
 		{Text: "registry", Description: i18n.T("complete.skill.sub_registry")},
 		{Text: "prefer", Description: i18n.T("complete.skill.sub_prefer")},
+		{Text: "pin", Description: i18n.T("complete.skill.sub_pin")},
+		{Text: "unpin", Description: i18n.T("complete.skill.sub_unpin")},
+		{Text: "pinned", Description: i18n.T("complete.skill.sub_pinned")},
 		{Text: "help", Description: i18n.T("complete.skill.sub_help")},
 	}
 }
@@ -1015,6 +1019,10 @@ func (cli *ChatCLI) skillSubcommandHandler(sub string) func(prompt.Document) []p
 		return cli.suggestInstallOrInfoArgs
 	case "registry":
 		return cli.suggestRegistrySubcommand
+	case "pin":
+		return cli.suggestPinCandidates
+	case "unpin":
+		return cli.suggestPinnedNames
 	case "prefer":
 		return cli.suggestPreferArgs
 	}
@@ -1127,6 +1135,61 @@ func (cli *ChatCLI) suggestRegistrySubcommand(d prompt.Document) []prompt.Sugges
 		}, d.GetWordBeforeCursor(), true)
 	}
 	return cli.getRegistryNameSuggestions(d)
+}
+
+// suggestPinCandidates powers `/skill pin` — installed skills that are not
+// already pinned and do not carry `disable-model-invocation: true`.
+func (cli *ChatCLI) suggestPinCandidates(d prompt.Document) []prompt.Suggest {
+	if cli.skillHandler == nil || cli.personaHandler == nil {
+		return nil
+	}
+	mgr := cli.personaHandler.GetManager()
+	if mgr == nil {
+		return nil
+	}
+	pinnedSet := make(map[string]struct{})
+	for _, n := range cli.skillHandler.PinnedNames() {
+		pinnedSet[n] = struct{}{}
+	}
+	all := mgr.ListAllSkills()
+	suggestions := make([]prompt.Suggest, 0, len(all))
+	for _, s := range all {
+		if !isPinCandidate(s, pinnedSet) {
+			continue
+		}
+		desc := s.Description
+		if desc == "" {
+			desc = i18n.T("complete.skill.sub_pin")
+		}
+		suggestions = append(suggestions, prompt.Suggest{Text: s.Name, Description: desc})
+	}
+	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+}
+
+// isPinCandidate reports whether a skill is eligible to be offered as a pin
+// completion suggestion.
+func isPinCandidate(s *persona.Skill, pinned map[string]struct{}) bool {
+	if s == nil || s.DisableModelInvocation {
+		return false
+	}
+	_, already := pinned[s.Name]
+	return !already
+}
+
+// suggestPinnedNames powers `/skill unpin` — only skills currently pinned.
+func (cli *ChatCLI) suggestPinnedNames(d prompt.Document) []prompt.Suggest {
+	if cli.skillHandler == nil {
+		return nil
+	}
+	pinned := cli.skillHandler.PinnedNames()
+	suggestions := make([]prompt.Suggest, 0, len(pinned))
+	for _, name := range pinned {
+		suggestions = append(suggestions, prompt.Suggest{
+			Text:        name,
+			Description: i18n.T("complete.skill.unpin_desc"),
+		})
+	}
+	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 }
 
 // suggestPreferArgs powers `/skill prefer <name> <source>`.

@@ -7,6 +7,7 @@
  * bring it under the project's cyclomatic budget:
  *   - previousToken / isFromFlag
  *   - isAtRegistryValuePosition / isAtFromFlagPosition
+ *   - isPinCandidate
  *   - describeFlag / buildFlagSuggestions
  *   - contextFlagValueSuggestions
  *
@@ -20,6 +21,7 @@ import (
 	"testing"
 
 	prompt "github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/pkg/persona"
 )
 
 func TestPreviousToken(t *testing.T) {
@@ -153,6 +155,43 @@ func TestIsAtFromFlagPosition(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isAtFromFlagPosition(tc.args, tc.endsSpace); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsPinCandidate(t *testing.T) {
+	pinned := map[string]struct{}{"already-pinned": {}}
+	cases := []struct {
+		name  string
+		skill *persona.Skill
+		want  bool
+	}{
+		{
+			name:  "nil → not candidate",
+			skill: nil,
+			want:  false,
+		},
+		{
+			name:  "disabled invocation → not candidate",
+			skill: &persona.Skill{Name: "manual-only", DisableModelInvocation: true},
+			want:  false,
+		},
+		{
+			name:  "already pinned → not candidate",
+			skill: &persona.Skill{Name: "already-pinned"},
+			want:  false,
+		},
+		{
+			name:  "ordinary skill → candidate",
+			skill: &persona.Skill{Name: "fresh"},
+			want:  true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isPinCandidate(tc.skill, pinned); got != tc.want {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})

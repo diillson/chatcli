@@ -122,6 +122,62 @@ func buildSkillInjectionBlock(skills []*persona.Skill) string {
 	return b.String()
 }
 
+// buildPinnedSkillInjectionBlock formats user-pinned skills (via `/skill pin`)
+// into a dedicated system-prompt block. Kept separate from the auto-activated
+// block so:
+//   - the LLM can tell explicit user intent (pin) apart from heuristic activation;
+//   - the pin block stays stable across turns (only pin/unpin invalidate cache)
+//     while the auto block churns with user input.
+//
+// Caller must pass a slice already sorted by Name for cache stability.
+func buildPinnedSkillInjectionBlock(skills []*persona.Skill) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Pinned Skills\n\n")
+	b.WriteString("The user pinned the following skills for this session via ")
+	b.WriteString("`/skill pin <name>`. They apply to every turn regardless of ")
+	b.WriteString("input triggers or file paths — treat them as standing instructions.\n\n")
+	for _, skill := range skills {
+		fmt.Fprintf(&b, "## Skill: %s", skill.Name)
+		if skill.Version != "" {
+			fmt.Fprintf(&b, " (v%s)", skill.Version)
+		}
+		b.WriteString("\n\n")
+		if skill.Description != "" {
+			b.WriteString(skill.Description)
+			b.WriteString("\n\n")
+		}
+		if strings.TrimSpace(skill.Content) != "" {
+			b.WriteString(skill.Content)
+			b.WriteString("\n\n")
+		}
+	}
+	return b.String()
+}
+
+// dedupAutoAgainstPinned filters an auto-activated skill slice to exclude any
+// skill whose Name is already in the pinned set, preventing the same skill
+// from being injected twice (once under "Pinned" and once under "Auto-loaded").
+func dedupAutoAgainstPinned(autoSkills, pinnedSkills []*persona.Skill) []*persona.Skill {
+	if len(pinnedSkills) == 0 || len(autoSkills) == 0 {
+		return autoSkills
+	}
+	pinned := make(map[string]struct{}, len(pinnedSkills))
+	for _, s := range pinnedSkills {
+		pinned[s.Name] = struct{}{}
+	}
+	out := make([]*persona.Skill, 0, len(autoSkills))
+	for _, s := range autoSkills {
+		if _, dup := pinned[s.Name]; dup {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 // pickSkillModelAndEffort selects a model/effort hint from the auto-activated
 // skills for a single turn. Rules:
 //
