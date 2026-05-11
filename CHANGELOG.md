@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.114.0](https://github.com/diillson/chatcli/compare/v1.113.1...v1.114.0) (2026-05-11)
+
+
+### Features
+
+* **skills:** session-scoped pin for multi-turn auto-injection ([#907](https://github.com/diillson/chatcli/issues/907)) ([512dde9](https://github.com/diillson/chatcli/commit/512dde99a75e4581a4373bc5fbff553ccc14b1bd))
+
 ## [1.113.1](https://github.com/diillson/chatcli/compare/v1.113.0...v1.113.1) (2026-05-08)
 
 
