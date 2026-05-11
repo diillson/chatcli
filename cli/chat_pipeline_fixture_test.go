@@ -104,7 +104,7 @@ body
 	if len(auto) != 1 || auto[0].Name != "alpha" {
 		t.Errorf("expected auto=[alpha]; got %v", auto)
 	}
-	if paths != nil && len(paths) != 0 {
+	if len(paths) != 0 {
 		t.Errorf("no file mentions → paths should be empty; got %v", paths)
 	}
 }
