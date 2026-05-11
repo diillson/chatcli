@@ -4,9 +4,13 @@
  * License: Apache-2.0
  *
  * Targets the pure / near-pure helpers extracted out of processLLMRequest:
- *   - applyManualSkillHints   (manual > auto precedence)
- *   - skillContentBlocks      (auto block rendering)
+ *   - applyManualSkillHints   (manual > pinned > auto precedence)
+ *   - skillContentBlocks      (pinned block before auto block, cache hint)
+ *   - dedupAutoAgainstPinned  (no duplicate skill injection)
+ *   - buildPinnedSkillInjectionBlock (header + per-skill rendering)
  *   - combinedSystemMessage   (flattening for non-Anthropic providers)
+ *   - buildChatTempHistory    (system-first ordering invariant)
+ *   - applyChatEffortHint     (thinking override precedence)
  *   - providerMaxTokensOverride (env-var fallback table)
  *
  * Helpers that own user-visible side effects (animation, spinner, terminal
@@ -74,26 +78,126 @@ func TestApplyManualSkillHints_OverridesOnlyDefinedFields(t *testing.T) {
 	}
 }
 
-func TestSkillContentBlocks_EmptyInputReturnsNil(t *testing.T) {
-	if got := skillContentBlocks(nil); got != nil {
-		t.Fatalf("nil → nil; got %v", got)
+func TestSkillContentBlocks_EmptyInputs(t *testing.T) {
+	if got := skillContentBlocks(nil, nil); len(got) != 0 {
+		t.Fatalf("both nil → no blocks; got %d", len(got))
 	}
 }
 
-func TestSkillContentBlocks_RendersAutoBlock(t *testing.T) {
+func TestSkillContentBlocks_PinnedFirstWithCache(t *testing.T) {
+	pinned := []*persona.Skill{
+		{Name: "pinA", Description: "p", Content: "pinned body"},
+	}
 	auto := []*persona.Skill{
 		{Name: "autoB", Description: "a", Content: "auto body"},
 	}
-	blocks := skillContentBlocks(auto)
+	blocks := skillContentBlocks(pinned, auto)
+	if len(blocks) != 2 {
+		t.Fatalf("len blocks = %d, want 2", len(blocks))
+	}
+	if !strings.Contains(blocks[0].Text, "# Pinned Skills") {
+		t.Errorf("pinned block must come first; first text was: %s", blocks[0].Text[:40])
+	}
+	if blocks[0].CacheControl == nil || blocks[0].CacheControl.Type != "ephemeral" {
+		t.Errorf("pinned block missing cache_control:ephemeral hint")
+	}
+	if !strings.Contains(blocks[1].Text, "# Auto-loaded Skills") {
+		t.Errorf("auto block expected second; got: %s", blocks[1].Text[:40])
+	}
+	// Auto block intentionally has no cache hint — it changes per turn.
+	if blocks[1].CacheControl != nil {
+		t.Errorf("auto block should NOT carry a cache hint")
+	}
+}
+
+func TestSkillContentBlocks_OnlyPinned(t *testing.T) {
+	pinned := []*persona.Skill{{Name: "p1", Description: "d", Content: "c"}}
+	blocks := skillContentBlocks(pinned, nil)
+	if len(blocks) != 1 {
+		t.Fatalf("len = %d, want 1", len(blocks))
+	}
+	if !strings.Contains(blocks[0].Text, "# Pinned Skills") {
+		t.Errorf("expected pinned-only block")
+	}
+}
+
+func TestSkillContentBlocks_OnlyAuto(t *testing.T) {
+	auto := []*persona.Skill{{Name: "a1", Description: "d", Content: "c"}}
+	blocks := skillContentBlocks(nil, auto)
 	if len(blocks) != 1 {
 		t.Fatalf("len = %d, want 1", len(blocks))
 	}
 	if !strings.Contains(blocks[0].Text, "# Auto-loaded Skills") {
-		t.Errorf("expected auto-loaded header; got: %s", blocks[0].Text[:40])
+		t.Errorf("expected auto-only block")
 	}
-	// Auto block intentionally has no cache hint — it changes per turn.
-	if blocks[0].CacheControl != nil {
-		t.Errorf("auto block should NOT carry a cache hint")
+}
+
+func TestDedupAutoAgainstPinned_RemovesDuplicates(t *testing.T) {
+	pinned := []*persona.Skill{
+		{Name: "alpha"},
+		{Name: "bravo"},
+	}
+	auto := []*persona.Skill{
+		{Name: "alpha"}, // dup
+		{Name: "charlie"},
+		{Name: "bravo"}, // dup
+		{Name: "delta"},
+	}
+	out := dedupAutoAgainstPinned(auto, pinned)
+	wantNames := []string{"charlie", "delta"}
+	if len(out) != len(wantNames) {
+		t.Fatalf("len out = %d, want %d. out=%v", len(out), len(wantNames), out)
+	}
+	for i, w := range wantNames {
+		if out[i].Name != w {
+			t.Errorf("out[%d].Name = %q, want %q", i, out[i].Name, w)
+		}
+	}
+}
+
+func TestDedupAutoAgainstPinned_NoOpWhenPinnedEmpty(t *testing.T) {
+	auto := []*persona.Skill{{Name: "a"}, {Name: "b"}}
+	out := dedupAutoAgainstPinned(auto, nil)
+	if len(out) != 2 {
+		t.Fatalf("dedup against empty pinned must be a no-op; got len=%d", len(out))
+	}
+}
+
+func TestDedupAutoAgainstPinned_NoOpWhenAutoEmpty(t *testing.T) {
+	pinned := []*persona.Skill{{Name: "x"}}
+	if out := dedupAutoAgainstPinned(nil, pinned); out != nil {
+		t.Fatalf("dedup of nil auto should stay nil; got %v", out)
+	}
+}
+
+func TestBuildPinnedSkillInjectionBlock_EmptyReturnsBlank(t *testing.T) {
+	if buildPinnedSkillInjectionBlock(nil) != "" {
+		t.Fatal("nil → empty")
+	}
+	if buildPinnedSkillInjectionBlock([]*persona.Skill{}) != "" {
+		t.Fatal("empty slice → empty")
+	}
+}
+
+func TestBuildPinnedSkillInjectionBlock_FormatAndMetadata(t *testing.T) {
+	skills := []*persona.Skill{
+		{Name: "alpha", Description: "alpha desc", Content: "alpha body", Version: "1.0"},
+		{Name: "bravo", Description: "", Content: "bravo body"},
+	}
+	out := buildPinnedSkillInjectionBlock(skills)
+	for _, sub := range []string{
+		"# Pinned Skills",
+		"`/skill pin <name>`",
+		"## Skill: alpha",
+		"(v1.0)",
+		"alpha desc",
+		"alpha body",
+		"## Skill: bravo",
+		"bravo body",
+	} {
+		if !strings.Contains(out, sub) {
+			t.Errorf("pinned block missing %q\nfull:\n%s", sub, out)
+		}
 	}
 }
 

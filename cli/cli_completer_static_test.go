@@ -20,7 +20,7 @@ func TestSkillSubcommandSuggestions_MembershipAndDescriptions(t *testing.T) {
 	want := map[string]bool{
 		"search": true, "install": true, "uninstall": true, "list": true,
 		"info": true, "registries": true, "registry": true, "prefer": true,
-		"help": true,
+		"pin": true, "unpin": true, "pinned": true, "help": true,
 	}
 	if len(got) != len(want) {
 		t.Errorf("len = %d, want %d (extra/missing entries silently change the UX)", len(got), len(want))
@@ -157,13 +157,13 @@ func TestSkillSubcommandHandler_AllExpectedRoutesNonNil(t *testing.T) {
 	// non-nil handler. We do NOT invoke the handlers here — that's a
 	// different test concern in cli_completer_dispatch_test.go.
 	cli := &ChatCLI{}
-	wantNonNil := []string{"uninstall", "remove", "install", "info", "registry", "prefer"}
+	wantNonNil := []string{"uninstall", "remove", "install", "info", "registry", "pin", "unpin", "prefer"}
 	for _, sub := range wantNonNil {
 		if h := cli.skillSubcommandHandler(sub); h == nil {
 			t.Errorf("expected non-nil handler for %q", sub)
 		}
 	}
-	wantNil := []string{"unknown", "list", "search", "help", "pin", "unpin", "pinned", ""}
+	wantNil := []string{"unknown", "list", "search", "help", ""}
 	for _, sub := range wantNil {
 		if h := cli.skillSubcommandHandler(sub); h != nil {
 			t.Errorf("expected nil handler for %q (no contextual suggestion)", sub)

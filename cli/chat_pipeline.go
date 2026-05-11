@@ -13,7 +13,7 @@
  * through, in order:
  *
  *   1. assembleChatSystemPrompt — build the structured system prompt
- *      (workspace, contexts, manual + auto skills, MCP, K8s),
+ *      (workspace, contexts, manual + pinned + auto skills, MCP, K8s),
  *      and the model/effort hints derived from the active skills.
  *   2. buildChatTempHistory     — splice the new system message into the
  *      conversation history without mutating cli.history.
@@ -52,6 +52,7 @@ type chatSystemAssembly struct {
 	parts     []models.ContentBlock
 	modelHint string
 	effort    client.SkillEffort
+	pinnedHit int
 	autoHit   int
 	manualHit bool
 	filePaths []string
@@ -68,7 +69,8 @@ type chatSystemAssembly struct {
 //	Part 1  — workspace context (SOUL/USER/IDENTITY/RULES/MEMORY + dynamic)
 //	Part 2  — attached `/context` entries (per session)
 //	Part 2.5 — manually invoked skill (`/<skill-name>`) — consumed once
-//	Part 3  — auto-activated skills (triggers + path globs)
+//	Part 3a — pinned skills (`/skill pin`) — stable across turns
+//	Part 3b — auto-activated skills (triggers + path globs)
 //	Part 5  — MCP channel messages
 //	Part 6  — MCP tools catalog (name+description only)
 //	Part 4  — K8s watcher context
@@ -94,12 +96,13 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 		}
 	}
 
-	autoActivated, filePaths := cli.resolveSkillsForTurn(userInput, additionalContext)
+	pinned, autoActivated, filePaths := cli.resolveSkillsForTurn(userInput, additionalContext)
+	out.pinnedHit = len(pinned)
 	out.autoHit = len(autoActivated)
 	out.filePaths = filePaths
-	out.parts = append(out.parts, skillContentBlocks(autoActivated)...)
+	out.parts = append(out.parts, skillContentBlocks(pinned, autoActivated)...)
 
-	out.modelHint, out.effort = cli.pickSkillHints(autoActivated, filePaths)
+	out.modelHint, out.effort = cli.pickSkillHints(pinned, autoActivated, filePaths)
 
 	if manualSkill != nil {
 		applyManualSkillHints(manualSkill, &out.modelHint, &out.effort)
@@ -222,56 +225,74 @@ func (cli *ChatCLI) consumePendingManualSkill() (*persona.Skill, string) {
 	return skill, args
 }
 
-// resolveSkillsForTurn loads the auto-activated skill set for the given
-// input. Returns the extracted file paths for diagnostics. Personas with
-// `disable-model-invocation: true` are filtered upstream by the manager.
+// resolveSkillsForTurn loads pinned and auto-activated skills for the given
+// input. Auto-activated skills are deduplicated against the pinned set so
+// nothing is injected twice. Returns the extracted file paths for diagnostics.
 func (cli *ChatCLI) resolveSkillsForTurn(
 	userInput, additionalContext string,
-) (autoActivated []*persona.Skill, filePaths []string) {
+) (pinned, autoActivated []*persona.Skill, filePaths []string) {
 	if cli.personaHandler == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	mgr := cli.personaHandler.GetManager()
 	if mgr == nil {
-		return nil, nil
+		return nil, nil, nil
+	}
+	if cli.skillHandler != nil {
+		pinned = cli.skillHandler.GetPinnedSkills()
 	}
 	filePaths = extractFilePaths(userInput + " " + additionalContext)
 	autoActivated = mgr.FindAutoActivatedSkills(userInput, filePaths)
-	return autoActivated, filePaths
+	autoActivated = dedupAutoAgainstPinned(autoActivated, pinned)
+	return pinned, autoActivated, filePaths
 }
 
-// skillContentBlocks emits the auto-activated skill block (volatile,
-// no cache hint — it changes per turn).
-func skillContentBlocks(autoActivated []*persona.Skill) []models.ContentBlock {
-	if len(autoActivated) == 0 {
-		return nil
+// skillContentBlocks emits the pinned-skills block (cache-friendly, stable)
+// followed by the auto-activated block (volatile, no cache hint). Either may
+// be omitted when its source slice is empty.
+func skillContentBlocks(pinned, autoActivated []*persona.Skill) []models.ContentBlock {
+	var blocks []models.ContentBlock
+	if len(pinned) > 0 {
+		if block := buildPinnedSkillInjectionBlock(pinned); block != "" {
+			blocks = append(blocks, models.ContentBlock{
+				Type:         "text",
+				Text:         block,
+				CacheControl: &models.CacheControl{Type: "ephemeral"},
+			})
+		}
 	}
-	block := buildSkillInjectionBlock(autoActivated)
-	if block == "" {
-		return nil
+	if len(autoActivated) > 0 {
+		if block := buildSkillInjectionBlock(autoActivated); block != "" {
+			blocks = append(blocks, models.ContentBlock{Type: "text", Text: block})
+		}
 	}
-	return []models.ContentBlock{{Type: "text", Text: block}}
+	return blocks
 }
 
-// pickSkillHints resolves model/effort hints from the auto-activated set.
-// filePaths is forwarded only to the diagnostic Debug log so operators can
-// see why a path-matched skill fired without rerunning the request with
-// --verbose.
+// pickSkillHints resolves model/effort hints across pinned + auto-activated
+// skills. Pinned skills come first so they win ties under the
+// "first non-empty wins" rule from pickSkillModelAndEffort. filePaths is
+// forwarded only to the diagnostic Debug log so operators can see why a
+// path-matched skill fired without rerunning the request with --verbose.
 func (cli *ChatCLI) pickSkillHints(
-	activated []*persona.Skill, filePaths []string,
+	pinned, autoActivated []*persona.Skill,
+	filePaths []string,
 ) (modelHint string, effort client.SkillEffort) {
-	if len(activated) == 0 {
+	merged := append([]*persona.Skill(nil), pinned...)
+	merged = append(merged, autoActivated...)
+	if len(merged) == 0 {
 		return "", client.SkillEffort("")
 	}
-	model, effortRaw, conflict := pickSkillModelAndEffort(activated)
+	model, effortRaw, conflict := pickSkillModelAndEffort(merged)
 	if conflict != "" {
 		cli.logger.Warn("multiple skills disagree on model; using the first",
 			zap.String("losing_skill", conflict),
 			zap.String("chosen_model", model))
 	}
 	normalized := client.NormalizeEffort(effortRaw)
-	cli.logger.Debug("auto-activated skills",
-		zap.Int("count", len(activated)),
+	cli.logger.Debug("skills injected (pinned + auto)",
+		zap.Int("pinned", len(pinned)),
+		zap.Int("auto", len(autoActivated)),
 		zap.Strings("file_paths", filePaths),
 		zap.String("skill_model", model),
 		zap.String("skill_effort", string(normalized)))
@@ -279,8 +300,9 @@ func (cli *ChatCLI) pickSkillHints(
 }
 
 // applyManualSkillHints lets manual `/<skill-name>` invocation override any
-// auto hint for the current turn. Empty fields on the manual skill leave
-// the existing values alone, so the precedence is manual > auto > base.
+// pinned/auto hint for the current turn. Empty fields on the manual skill
+// leave the existing values alone, so the precedence is
+// manual > pinned > auto > base.
 func applyManualSkillHints(manualSkill *persona.Skill, modelHint *string, effort *client.SkillEffort) {
 	if manualSkill == nil {
 		return

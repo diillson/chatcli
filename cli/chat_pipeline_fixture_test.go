@@ -23,9 +23,9 @@ import (
 )
 
 // newPipelineCLI builds a minimal ChatCLI with the personaHandler,
-// skillHandler, and logger wired up. Used by tests that drive
-// resolveSkillsForTurn / consumePendingManualSkill / pickSkillHints. tmpDir
-// hosts a project skills directory that the persona Manager points at.
+// skillHandler, and logger wired up. Used by tests that drive resolveSkillsForTurn /
+// consumePendingManualSkill / pickSkillHints. tmpDir hosts a project skills
+// directory that the persona Manager points at.
 func newPipelineCLI(t *testing.T, skills map[string]string) (*ChatCLI, *persona.Manager) {
 	t.Helper()
 	tmp := t.TempDir()
@@ -84,13 +84,13 @@ func TestConsumePendingManualSkill_DrainsAndClears(t *testing.T) {
 
 func TestResolveSkillsForTurn_NilPersonaHandler(t *testing.T) {
 	cli := &ChatCLI{}
-	auto, paths := cli.resolveSkillsForTurn("anything", "")
-	if auto != nil || paths != nil {
-		t.Errorf("nil personaHandler must short-circuit; got (%v, %v)", auto, paths)
+	pinned, auto, paths := cli.resolveSkillsForTurn("anything", "")
+	if pinned != nil || auto != nil || paths != nil {
+		t.Errorf("nil personaHandler must short-circuit; got (%v, %v, %v)", pinned, auto, paths)
 	}
 }
 
-func TestResolveSkillsForTurn_TriggerMatchesAutoActivate(t *testing.T) {
+func TestResolveSkillsForTurn_PinnedAndAutoSeparated(t *testing.T) {
 	cli, _ := newPipelineCLI(t, map[string]string{
 		"alpha": `---
 name: alpha
@@ -99,8 +99,20 @@ triggers: ["alpha"]
 ---
 body
 `,
+		"bravo": `---
+name: bravo
+description: pinned skill
+---
+body
+`,
 	})
-	auto, paths := cli.resolveSkillsForTurn("hello alpha world", "")
+	// Pin bravo. alpha will fire by trigger.
+	cli.skillHandler.Pin("bravo")
+
+	pinned, auto, paths := cli.resolveSkillsForTurn("hello alpha world", "")
+	if len(pinned) != 1 || pinned[0].Name != "bravo" {
+		t.Errorf("expected pinned=[bravo]; got %v", pinned)
+	}
 	if len(auto) != 1 || auto[0].Name != "alpha" {
 		t.Errorf("expected auto=[alpha]; got %v", auto)
 	}
@@ -109,26 +121,56 @@ body
 	}
 }
 
+func TestResolveSkillsForTurn_DedupAutoAgainstPinned(t *testing.T) {
+	// Skill 'echo' is both pinned AND a trigger match; it must appear
+	// in pinned and be filtered out of auto.
+	cli, _ := newPipelineCLI(t, map[string]string{
+		"echo": `---
+name: echo
+description: echoes
+triggers: ["echo"]
+---
+body
+`,
+	})
+	cli.skillHandler.Pin("echo")
+
+	pinned, auto, _ := cli.resolveSkillsForTurn("please echo this", "")
+	if len(pinned) != 1 || pinned[0].Name != "echo" {
+		t.Errorf("expected pinned=[echo]; got %v", pinned)
+	}
+	if len(auto) != 0 {
+		t.Errorf("expected auto=[] after dedup; got %v", auto)
+	}
+}
+
 func TestPickSkillHints_NoSkillsReturnsEmpty(t *testing.T) {
 	cli := &ChatCLI{logger: zap.NewNop()}
-	model, eff := cli.pickSkillHints(nil, nil)
+	model, eff := cli.pickSkillHints(nil, nil, nil)
 	if model != "" || eff != client.SkillEffort("") {
 		t.Errorf("empty input → empty hints; got (%q, %q)", model, eff)
 	}
 }
 
-func TestPickSkillHints_FirstNonEmptyWins(t *testing.T) {
+func TestPickSkillHints_PinnedWinsTie(t *testing.T) {
 	cli := &ChatCLI{logger: zap.NewNop()}
-	skills := []*persona.Skill{
-		{Name: "a", Model: "sonnet", Effort: "low"},
-		{Name: "b", Model: "opus", Effort: "high"},
+	pinned := []*persona.Skill{{Name: "p", Model: "opus", Effort: "high"}}
+	auto := []*persona.Skill{{Name: "a", Model: "sonnet", Effort: "low"}}
+	model, eff := cli.pickSkillHints(pinned, auto, nil)
+	if model != "opus" {
+		t.Errorf("model = %q, want opus", model)
 	}
-	model, eff := cli.pickSkillHints(skills, nil)
+	if eff != client.EffortHigh {
+		t.Errorf("effort = %q, want high", eff)
+	}
+}
+
+func TestPickSkillHints_AutoFillsWhenPinnedEmpty(t *testing.T) {
+	cli := &ChatCLI{logger: zap.NewNop()}
+	auto := []*persona.Skill{{Name: "a", Model: "sonnet"}}
+	model, _ := cli.pickSkillHints(nil, auto, nil)
 	if model != "sonnet" {
 		t.Errorf("model = %q, want sonnet", model)
-	}
-	if eff != client.EffortLow {
-		t.Errorf("effort = %q, want low", eff)
 	}
 }
 
@@ -169,6 +211,7 @@ func TestBuildChatTempHistory_NoSystemParts(t *testing.T) {
 		history: []models.Message{{Role: "user", Content: "u1"}},
 	}
 	out := cli.buildChatTempHistory(nil, "u2", "")
+	// No parts → no new system message; history is just [u1, u2].
 	if len(out) != 2 {
 		t.Fatalf("len = %d, want 2", len(out))
 	}
