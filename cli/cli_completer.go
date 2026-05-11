@@ -20,234 +20,221 @@ var loadPolicyForCompleter = func(cli *ChatCLI) (*coder.PolicyManager, error) {
 	return coder.NewPolicyManager(cli.logger)
 }
 
+// slashPrefixRoute pairs a `/cmd` prefix with the suggestion handler that
+// powers it. Centralizing the table lets `completer` stay a thin dispatcher
+// while new slash commands plug in without growing the function.
+type slashPrefixRoute struct {
+	prefix  string
+	handler func(*ChatCLI, prompt.Document) []prompt.Suggest
+}
+
+// slashPrefixRoutes is the ordered routing table consulted by `completer`.
+// Order matters when one prefix shadows another (e.g. "/cancel-park" before
+// any future "/cancel" prefix); the first matching entry wins.
+var slashPrefixRoutes = []slashPrefixRoute{
+	{"/context", (*ChatCLI).getContextSuggestions},
+	{"/session", (*ChatCLI).getSessionSuggestions},
+	{"/plugin ", (*ChatCLI).getPluginSuggestions},
+	{"/skill", (*ChatCLI).getSkillSuggestions},
+	{"/memory", (*ChatCLI).getMemorySuggestions},
+	{"/agent", (*ChatCLI).getAgentSuggestions},
+	{"/switch", (*ChatCLI).getSwitchSuggestions},
+	{"/auth", (*ChatCLI).getAuthSuggestions},
+	{"/connect ", (*ChatCLI).getConnectSuggestions},
+	{"/watch", (*ChatCLI).getWatchSuggestions},
+	{"/mcp", (*ChatCLI).getMCPSuggestions},
+	{"/hooks ", (*ChatCLI).getHooksSuggestions},
+	{"/worktree ", (*ChatCLI).getWorktreeSuggestions},
+	{"/channel ", (*ChatCLI).getChannelSuggestions},
+	{"/websearch", (*ChatCLI).getWebSearchSuggestions},
+	{"/config", (*ChatCLI).getConfigSuggestions},
+	{"/status", (*ChatCLI).getConfigSuggestions},
+	{"/settings", (*ChatCLI).getConfigSuggestions},
+	{"/thinking", (*ChatCLI).getThinkingSuggestions},
+	{"/refine", (*ChatCLI).getRefineSuggestions},
+	{"/verify", (*ChatCLI).getVerifySuggestions},
+	{"/plan", (*ChatCLI).getPlanSuggestions},
+	{"/reflect", (*ChatCLI).getReflectSuggestions},
+	{"/schedule", (*ChatCLI).getScheduleSuggestions},
+	{"/wait", (*ChatCLI).getWaitSuggestions},
+	{"/jobs", (*ChatCLI).getJobsSuggestions},
+	{"/parked", (*ChatCLI).getParkedSuggestions},
+	{"/cancel-park", func(c *ChatCLI, d prompt.Document) []prompt.Suggest {
+		return c.getParkTokenSuggestions("/cancel-park", d)
+	}},
+	{"/resume", func(c *ChatCLI, d prompt.Document) []prompt.Suggest {
+		return c.getParkTokenSuggestions("/resume", d)
+	}},
+}
+
+// flagDescriptionKeys maps well-known flag names to their i18n description
+// keys. Falls back to a generic "option for <command>" sentence when absent.
+var flagDescriptionKeys = map[string]string{
+	"--mode":       "complete.generic.flag_mode",
+	"--model":      "complete.generic.flag_model",
+	"--max-tokens": "complete.generic.flag_max_tokens",
+	"--agent-id":   "complete.generic.flag_agent_id_stackspot",
+	"--realm":      "complete.generic.flag_realm_stackspot",
+	"-i":           "complete.generic.flag_i_interactive",
+	"--ai":         "complete.generic.flag_ai",
+}
+
 func (cli *ChatCLI) completer(d prompt.Document) []prompt.Suggest {
-	// 1. Lidar com estados especiais primeiro (como a troca de provedor)
 	if cli.interactionState == StateSwitchingProvider {
-		providers := cli.manager.GetAvailableProviders()
-		s := make([]prompt.Suggest, len(providers))
-		for i, p := range providers {
-			s[i] = prompt.Suggest{Text: strconv.Itoa(i + 1), Description: p}
-		}
-		return prompt.FilterHasPrefix(s, d.GetWordBeforeCursor(), true)
+		return cli.providerPickSuggestions(d)
 	}
 
-	// 2. Extrair informações do documento atual
-	lineBeforeCursor := d.TextBeforeCursor()
-	wordBeforeCursor := d.GetWordBeforeCursor()
-	args := strings.Fields(lineBeforeCursor)
+	line := d.TextBeforeCursor()
+	word := d.GetWordBeforeCursor()
+	args := strings.Fields(line)
 
-	// --- Lógica de Autocomplete Contextual ---
-
-	// 2.5. Detectar comandos /context e /session mesmo após espaço
-	if strings.HasPrefix(lineBeforeCursor, "/context") {
-		return cli.getContextSuggestions(d)
+	if out, matched := cli.routeSlashPrefix(line, d); matched {
+		return out
 	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/session") {
-		return cli.getSessionSuggestions(d)
+	if out, matched := cli.completeAtTokenArgs(args, line, word); matched {
+		return out
 	}
-	if strings.HasPrefix(lineBeforeCursor, "/plugin ") {
-		return cli.getPluginSuggestions(d)
+	if out, matched := cli.completeBareSlash(line, word); matched {
+		return out
 	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/skill") {
-		return cli.getSkillSuggestions(d)
+	if strings.HasPrefix(word, "@") {
+		return prompt.FilterHasPrefix(cli.GetContextCommands(), word, true)
 	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/memory") {
-		return cli.getMemorySuggestions(d)
+	if out, matched := cli.completeCommandFlags(args, line, d); matched {
+		return out
 	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/agent") {
-		return cli.getAgentSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/switch") {
-		return cli.getSwitchSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/auth") {
-		return cli.getAuthSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/connect ") {
-		return cli.getConnectSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/watch") {
-		return cli.getWatchSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/mcp") {
-		return cli.getMCPSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/hooks ") {
-		return cli.getHooksSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/worktree ") {
-		return cli.getWorktreeSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/channel ") {
-		return cli.getChannelSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/websearch") {
-		return cli.getWebSearchSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/config") ||
-		strings.HasPrefix(lineBeforeCursor, "/status") ||
-		strings.HasPrefix(lineBeforeCursor, "/settings") {
-		return cli.getConfigSuggestions(d)
-	}
-
-	// Seven-pattern quality pipeline slashes.
-	if strings.HasPrefix(lineBeforeCursor, "/thinking") {
-		return cli.getThinkingSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/refine") {
-		return cli.getRefineSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/verify") {
-		return cli.getVerifySuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/plan") {
-		return cli.getPlanSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/reflect") {
-		return cli.getReflectSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/schedule") {
-		return cli.getScheduleSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/wait") {
-		return cli.getWaitSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/jobs") {
-		return cli.getJobsSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/parked") {
-		return cli.getParkedSuggestions(d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/resume") {
-		return cli.getParkTokenSuggestions("/resume", d)
-	}
-
-	if strings.HasPrefix(lineBeforeCursor, "/cancel-park") {
-		return cli.getParkTokenSuggestions("/cancel-park", d)
-	}
-
-	// 3. Autocomplete para argumentos de comandos @ (como caminhos para @file)
-	if len(args) > 0 {
-		var previousWord string
-		if strings.HasSuffix(lineBeforeCursor, " ") {
-			previousWord = args[len(args)-1]
-		} else if len(args) > 1 {
-			previousWord = args[len(args)-2]
-		}
-
-		// Apenas autocompletar caminhos se a palavra atual NÃO for uma flag
-		if previousWord == "@file" && !strings.HasPrefix(wordBeforeCursor, "-") {
-			return cli.filePathCompleter(wordBeforeCursor)
-		}
-
-		if previousWord == "@command" && !strings.HasPrefix(wordBeforeCursor, "-") {
-			suggestions := cli.systemCommandCompleter(wordBeforeCursor)
-			suggestions = append(suggestions, cli.filePathCompleter(wordBeforeCursor)...)
-			return suggestions
-		}
-	}
-
-	// 4. Autocomplete para iniciar comandos
-	if !strings.Contains(lineBeforeCursor, " ") {
-		if strings.HasPrefix(wordBeforeCursor, "/") {
-			suggestions := cli.GetInternalCommands()
-			// Merge user-invocable skills so the user can discover and run
-			// them by just typing "/" — names that collide with a built-in
-			// are not added because tryInvokeUserSkill would refuse them
-			// anyway (reservedSlashCommands guard).
-			if skillSuggestions := cli.getUserInvocableSkillSuggestions(); len(skillSuggestions) > 0 {
-				existing := make(map[string]bool, len(suggestions))
-				for _, s := range suggestions {
-					existing[s.Text] = true
-				}
-				for _, s := range skillSuggestions {
-					if !existing[s.Text] {
-						suggestions = append(suggestions, s)
-					}
-				}
-			}
-			return prompt.FilterHasPrefix(suggestions, wordBeforeCursor, true)
-		}
-	}
-
-	if strings.HasPrefix(wordBeforeCursor, "@") {
-		return prompt.FilterHasPrefix(cli.GetContextCommands(), wordBeforeCursor, true)
-	}
-
-	// 5. Sugestões de flags e valores
-	if len(args) > 1 {
-		command := args[0]
-		prevWord := args[len(args)-1]
-		if !strings.HasSuffix(lineBeforeCursor, " ") && len(args) > 1 {
-			prevWord = args[len(args)-2]
-		}
-		currWord := d.GetWordBeforeCursor()
-
-		if flagsForCommand, commandExists := CommandFlags[command]; commandExists {
-			// Cenário 1: O usuário digitou uma flag (ex: "--mode ") e agora quer ver os valores.
-			if values, flagHasValues := flagsForCommand[prevWord]; flagHasValues && len(values) > 0 {
-				return prompt.FilterHasPrefix(values, currWord, true)
-			}
-
-			// Cenário 2: O usuário está digitando uma flag (ex: "--m").
-			if strings.HasPrefix(currWord, "-") {
-				var flagSuggests []prompt.Suggest
-				for flag, values := range flagsForCommand {
-					var desc string
-					// 1. Primeiro, procurar por descrições personalizadas
-					if flag == "--mode" {
-						desc = i18n.T("complete.generic.flag_mode")
-					} else if flag == "--model" {
-						desc = i18n.T("complete.generic.flag_model")
-					} else if flag == "--max-tokens" {
-						desc = i18n.T("complete.generic.flag_max_tokens")
-					} else if flag == "--agent-id" {
-						desc = i18n.T("complete.generic.flag_agent_id_stackspot")
-					} else if flag == "--realm" {
-						desc = i18n.T("complete.generic.flag_realm_stackspot")
-					} else if flag == "-i" {
-						desc = i18n.T("complete.generic.flag_i_interactive")
-					} else if flag == "--ai" {
-						desc = i18n.T("complete.generic.flag_ai")
-					} else {
-						// 2. Se não houver descrição personalizada, criar uma genérica
-						desc = fmt.Sprintf(i18n.T("complete.generic.option_for"), command)
-						if len(values) > 0 {
-							desc += " " + fmt.Sprintf(i18n.T("complete.generic.values_suffix"), strings.Join(extractTexts(values), ", "))
-						}
-					}
-					flagSuggests = append(flagSuggests, prompt.Suggest{Text: flag, Description: desc})
-				}
-				return prompt.FilterHasPrefix(flagSuggests, currWord, true)
-			}
-		}
-	}
-
-	// 6. Se nenhum dos casos acima se aplicar, não sugira nada.
 	return []prompt.Suggest{}
+}
+
+// providerPickSuggestions builds the numbered list shown while the user is
+// in the StateSwitchingProvider modal.
+func (cli *ChatCLI) providerPickSuggestions(d prompt.Document) []prompt.Suggest {
+	providers := cli.manager.GetAvailableProviders()
+	s := make([]prompt.Suggest, len(providers))
+	for i, p := range providers {
+		s[i] = prompt.Suggest{Text: strconv.Itoa(i + 1), Description: p}
+	}
+	return prompt.FilterHasPrefix(s, d.GetWordBeforeCursor(), true)
+}
+
+// routeSlashPrefix walks the routing table and returns the first match.
+// The boolean return distinguishes "matched but no suggestions" from "no
+// route applies — try the next strategy".
+func (cli *ChatCLI) routeSlashPrefix(line string, d prompt.Document) ([]prompt.Suggest, bool) {
+	for _, r := range slashPrefixRoutes {
+		if strings.HasPrefix(line, r.prefix) {
+			return r.handler(cli, d), true
+		}
+	}
+	return nil, false
+}
+
+// completeAtTokenArgs handles `@file <path>` and `@command <cmd>` argument
+// completion. Returns matched=false when the previous token is unrelated.
+func (cli *ChatCLI) completeAtTokenArgs(args []string, line, word string) ([]prompt.Suggest, bool) {
+	if len(args) == 0 {
+		return nil, false
+	}
+	previous := previousToken(args, line)
+	if previous == "" || strings.HasPrefix(word, "-") {
+		return nil, false
+	}
+	switch previous {
+	case "@file":
+		return cli.filePathCompleter(word), true
+	case "@command":
+		out := cli.systemCommandCompleter(word)
+		out = append(out, cli.filePathCompleter(word)...)
+		return out, true
+	}
+	return nil, false
+}
+
+// previousToken returns the word immediately before the cursor — either the
+// last completed token (when the line ends in whitespace) or the
+// second-to-last token otherwise.
+func previousToken(args []string, line string) string {
+	if strings.HasSuffix(line, " ") {
+		return args[len(args)-1]
+	}
+	if len(args) > 1 {
+		return args[len(args)-2]
+	}
+	return ""
+}
+
+// completeBareSlash powers the "/" → list of slash commands flow, merging
+// user-invocable skills so they surface alongside built-ins.
+func (cli *ChatCLI) completeBareSlash(line, word string) ([]prompt.Suggest, bool) {
+	if strings.Contains(line, " ") || !strings.HasPrefix(word, "/") {
+		return nil, false
+	}
+	suggestions := cli.GetInternalCommands()
+	skillSuggestions := cli.getUserInvocableSkillSuggestions()
+	if len(skillSuggestions) > 0 {
+		existing := make(map[string]bool, len(suggestions))
+		for _, s := range suggestions {
+			existing[s.Text] = true
+		}
+		for _, s := range skillSuggestions {
+			if !existing[s.Text] {
+				suggestions = append(suggestions, s)
+			}
+		}
+	}
+	return prompt.FilterHasPrefix(suggestions, word, true), true
+}
+
+// completeCommandFlags drives the value-then-flag suggestion flow for any
+// command whose flag set is declared in CommandFlags.
+func (cli *ChatCLI) completeCommandFlags(args []string, line string, d prompt.Document) ([]prompt.Suggest, bool) {
+	if len(args) < 2 {
+		return nil, false
+	}
+	command := args[0]
+	flagsForCommand, ok := CommandFlags[command]
+	if !ok {
+		return nil, false
+	}
+	currWord := d.GetWordBeforeCursor()
+	prevWord := previousToken(args, line)
+
+	if values, hasValues := flagsForCommand[prevWord]; hasValues && len(values) > 0 {
+		return prompt.FilterHasPrefix(values, currWord, true), true
+	}
+	if strings.HasPrefix(currWord, "-") {
+		return prompt.FilterHasPrefix(buildFlagSuggestions(command, flagsForCommand), currWord, true), true
+	}
+	return nil, false
+}
+
+// buildFlagSuggestions renders the prompt.Suggest list for every flag of a
+// given command. Descriptions come from flagDescriptionKeys when available;
+// otherwise a generic "option for <command>" line is generated, listing the
+// known values for that flag.
+func buildFlagSuggestions(command string, flagsForCommand map[string][]prompt.Suggest) []prompt.Suggest {
+	out := make([]prompt.Suggest, 0, len(flagsForCommand))
+	for flag, values := range flagsForCommand {
+		out = append(out, prompt.Suggest{
+			Text:        flag,
+			Description: describeFlag(command, flag, values),
+		})
+	}
+	return out
+}
+
+// describeFlag returns the i18n description for a flag, or a synthesized
+// "option for <command>" line listing its known values.
+func describeFlag(command, flag string, values []prompt.Suggest) string {
+	if key, ok := flagDescriptionKeys[flag]; ok {
+		return i18n.T(key)
+	}
+	desc := fmt.Sprintf(i18n.T("complete.generic.option_for"), command)
+	if len(values) > 0 {
+		desc += " " + fmt.Sprintf(i18n.T("complete.generic.values_suffix"),
+			strings.Join(extractTexts(values), ", "))
+	}
+	return desc
 }
 
 // Helper para extrair só os Texts de um []Suggest (para descrições de flags)
@@ -513,195 +500,216 @@ func (cli *ChatCLI) completeSystemCommands(prefix string) []string {
 }
 
 // getContextSuggestions - Sugestões melhoradas para /context
+// contextSubcommands is the static list of `/context <sub>` verbs.
+func contextSubcommands() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "create", Description: i18n.T("complete.context.sub_create")},
+		{Text: "update", Description: i18n.T("complete.context.sub_update")},
+		{Text: "attach", Description: i18n.T("complete.context.sub_attach")},
+		{Text: "detach", Description: i18n.T("complete.context.sub_detach")},
+		{Text: "list", Description: i18n.T("complete.context.sub_list")},
+		{Text: "show", Description: i18n.T("complete.context.sub_show")},
+		{Text: "inspect", Description: i18n.T("complete.context.sub_inspect")},
+		{Text: "delete", Description: i18n.T("complete.context.sub_delete")},
+		{Text: "merge", Description: i18n.T("complete.context.sub_merge")},
+		{Text: "attached", Description: i18n.T("complete.context.sub_attached")},
+		{Text: "export", Description: i18n.T("complete.context.sub_export")},
+		{Text: "import", Description: i18n.T("complete.context.sub_import")},
+		{Text: "metrics", Description: i18n.T("complete.context.sub_metrics")},
+		{Text: "help", Description: i18n.T("complete.context.sub_help")},
+	}
+}
+
+// contextSubcommandsNeedingName is the set of `/context <sub>` verbs whose
+// first positional argument is the name of an existing context.
+var contextSubcommandsNeedingName = map[string]bool{
+	"attach": true, "detach": true, "show": true,
+	"delete": true, "export": true, "inspect": true,
+}
+
 func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 	line := d.TextBeforeCursor()
 	args := strings.Fields(line)
+	endsWithSpace := strings.HasSuffix(line, " ")
 
-	// Se só digitou "/context" (sem espaço ou com espaço mas sem subcomando ainda)
-	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+	if len(args) == 1 && !endsWithSpace {
 		return []prompt.Suggest{
 			{Text: "/context", Description: i18n.T("complete.context.root_desc")},
 		}
 	}
-
-	// Se digitou "/context " (com espaço) mas ainda não completou o subcomando
-	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
-		suggestions := []prompt.Suggest{
-			{Text: "create", Description: i18n.T("complete.context.sub_create")},
-			{Text: "update", Description: i18n.T("complete.context.sub_update")},
-			{Text: "attach", Description: i18n.T("complete.context.sub_attach")},
-			{Text: "detach", Description: i18n.T("complete.context.sub_detach")},
-			{Text: "list", Description: i18n.T("complete.context.sub_list")},
-			{Text: "show", Description: i18n.T("complete.context.sub_show")},
-			{Text: "inspect", Description: i18n.T("complete.context.sub_inspect")},
-			{Text: "delete", Description: i18n.T("complete.context.sub_delete")},
-			{Text: "merge", Description: i18n.T("complete.context.sub_merge")},
-			{Text: "attached", Description: i18n.T("complete.context.sub_attached")},
-			{Text: "export", Description: i18n.T("complete.context.sub_export")},
-			{Text: "import", Description: i18n.T("complete.context.sub_import")},
-			{Text: "metrics", Description: i18n.T("complete.context.sub_metrics")},
-			{Text: "help", Description: i18n.T("complete.context.sub_help")},
-		}
-		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	if len(args) == 1 || (len(args) == 2 && !endsWithSpace) {
+		return prompt.FilterHasPrefix(contextSubcommands(), d.GetWordBeforeCursor(), true)
 	}
 
-	// A partir daqui, já temos subcomando definido (len(args) >= 2)
-	subcommand := args[1]
-
-	// Subcomandos que precisam de nome de contexto como próximo argumento
-	needsContextName := map[string]bool{
-		"attach": true, "detach": true, "show": true,
-		"delete": true, "export": true, "inspect": true,
+	sub := args[1]
+	if contextSubcommandsNeedingName[sub] {
+		return cli.contextNameOrFlagSuggestions(sub, args, line, d)
 	}
-
-	if needsContextName[subcommand] {
-		// Se ainda não digitou o nome do contexto (ou está digitando)
-		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
-			return cli.getContextNameSuggestions()
-		}
-
-		// Sugestões específicas para /context inspect
-		if subcommand == "inspect" && len(args) >= 3 {
-			word := d.GetWordBeforeCursor()
-
-			// Se está digitando uma flag
-			if strings.HasPrefix(word, "-") {
-				return []prompt.Suggest{
-					{Text: "--chunk", Description: i18n.T("complete.context.flag_chunk_inspect")},
-					{Text: "-c", Description: i18n.T("complete.context.flag_chunk_short")},
-				}
-			}
-
-			// Se o argumento anterior era --chunk ou -c, sugerir números de chunks
-			if len(args) >= 4 {
-				prevArg := args[len(args)-1]
-				if !strings.HasSuffix(line, " ") && len(args) >= 2 {
-					prevArg = args[len(args)-2]
-				}
-
-				if prevArg == "--chunk" || prevArg == "-c" {
-					return cli.getChunkNumberSuggestions(args[2])
-				}
-			}
-		}
-
-		// Se já digitou o nome e é attach, sugerir flags
-		if subcommand == "attach" && len(args) >= 3 && strings.HasPrefix(d.GetWordBeforeCursor(), "-") {
-			return []prompt.Suggest{
-				{Text: "--priority", Description: i18n.T("complete.context.flag_priority")},
-				{Text: "-p", Description: i18n.T("complete.context.flag_priority_short")},
-				{Text: "--chunk", Description: i18n.T("complete.context.flag_chunk_attach")},
-				{Text: "-c", Description: i18n.T("complete.context.flag_chunk_short")},
-				{Text: "--chunks", Description: i18n.T("complete.context.flag_chunks")},
-				{Text: "-C", Description: i18n.T("complete.context.flag_chunks_short")},
-			}
-		}
-
-		return []prompt.Suggest{}
+	switch sub {
+	case "create", "update":
+		return cli.contextCreateOrUpdateSuggestions(sub, args, line, d)
+	case "merge":
+		return cli.contextMergeSuggestions(args, endsWithSpace)
+	case "export":
+		return cli.contextExportSuggestions(args, endsWithSpace, d)
+	case "import":
+		return cli.contextImportSuggestions(args, d)
 	}
+	return []prompt.Suggest{}
+}
 
-	// ===================================================================
-	// Autocompletar paths para /context create e /context update
-	// ===================================================================
-	if subcommand == "create" || subcommand == "update" {
-		word := d.GetWordBeforeCursor()
-
-		// Se está digitando uma flag, mostrar flags disponíveis
-		if strings.HasPrefix(word, "-") {
-			return []prompt.Suggest{
-				{Text: "--mode", Description: i18n.T("complete.context.flag_mode")},
-				{Text: "-m", Description: i18n.T("complete.context.flag_mode_short")},
-				{Text: "--description", Description: i18n.T("complete.context.flag_description")},
-				{Text: "--desc", Description: i18n.T("complete.context.flag_desc_short")},
-				{Text: "-d", Description: i18n.T("complete.context.flag_d_short")},
-				{Text: "--tags", Description: i18n.T("complete.context.flag_tags")},
-				{Text: "-t", Description: i18n.T("complete.context.flag_tags_short")},
-				{Text: "--force", Description: i18n.T("complete.context.flag_force")},
-				{Text: "-f", Description: i18n.T("complete.context.flag_force_short")},
-			}
-		}
-
-		// Detectar se a palavra anterior é uma flag que espera valor
-		if len(args) >= 2 {
-			prevArg := args[len(args)-1]
-			if !strings.HasSuffix(line, " ") && len(args) >= 2 {
-				prevArg = args[len(args)-2]
-			}
-
-			// Se a flag anterior é --mode ou -m, sugerir modos
-			if prevArg == "--mode" || prevArg == "-m" {
-				return []prompt.Suggest{
-					{Text: "full", Description: i18n.T("complete.context.mode_full")},
-					{Text: "summary", Description: i18n.T("complete.context.mode_summary")},
-					{Text: "chunked", Description: i18n.T("complete.context.mode_chunked")},
-					{Text: "smart", Description: i18n.T("complete.context.mode_smart")},
-				}
-			}
-
-			// Se a flag anterior espera texto (description, tags), não autocompletar paths
-			if prevArg == "--description" || prevArg == "--desc" || prevArg == "-d" ||
-				prevArg == "--tags" || prevArg == "-t" {
-				return []prompt.Suggest{} // Deixar usuário digitar livremente
-			}
-		}
-
-		// Para create: nome do contexto primeiro (se ainda não foi fornecido)
-		if subcommand == "create" && len(args) == 2 {
-			return []prompt.Suggest{
-				{Text: "", Description: i18n.T("complete.context.prompt_name")},
-			}
-		}
-
-		// Para update: nome do contexto (sugerir existentes)
-		if subcommand == "update" && (len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " "))) {
-			return cli.getContextNameSuggestions()
-		}
-
-		// Agora, autocompletar paths se não for flag e já passou pelos argumentos obrigatórios
-		if !strings.HasPrefix(word, "-") {
-			// Para create: após o nome (args >= 3)
-			// Para update: após o nome e possivelmente flags (args >= 3)
-			minArgsForPath := 3
-			if subcommand == "update" {
-				minArgsForPath = 3 // Nome do contexto é o primeiro argumento após update
-			}
-
-			if len(args) >= minArgsForPath {
-				return cli.filePathCompleter(word)
-			}
-		}
-
-		return []prompt.Suggest{}
-	}
-
-	// Para merge, precisa de: novo_nome + contextos existentes
-	if subcommand == "merge" {
-		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
-			return []prompt.Suggest{
-				{Text: "", Description: i18n.T("complete.context.prompt_merge_name")},
-			}
-		}
+// contextNameOrFlagSuggestions powers verbs whose first arg is a context
+// name, plus the per-verb flag completions (attach has its own flags;
+// inspect has --chunk).
+func (cli *ChatCLI) contextNameOrFlagSuggestions(
+	sub string, args []string, line string, d prompt.Document,
+) []prompt.Suggest {
+	endsWithSpace := strings.HasSuffix(line, " ")
+	wantsName := len(args) == 2 || (len(args) == 3 && !endsWithSpace)
+	if wantsName {
 		return cli.getContextNameSuggestions()
 	}
-
-	// Para export, precisa de: nome_contexto + caminho_arquivo
-	if subcommand == "export" {
-		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
-			return cli.getContextNameSuggestions()
-		}
-		if len(args) >= 3 {
-			return cli.filePathCompleter(d.GetWordBeforeCursor())
-		}
+	if sub == "inspect" && len(args) >= 3 {
+		return cli.contextInspectFlagSuggestions(args, line, d)
 	}
-
-	// Para import, sugerir path de arquivo
-	if subcommand == "import" {
-		if len(args) >= 2 {
-			return cli.filePathCompleter(d.GetWordBeforeCursor())
-		}
+	if sub == "attach" && len(args) >= 3 && strings.HasPrefix(d.GetWordBeforeCursor(), "-") {
+		return contextAttachFlagSuggestions()
 	}
-
 	return []prompt.Suggest{}
+}
+
+func contextInspectFlags() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "--chunk", Description: i18n.T("complete.context.flag_chunk_inspect")},
+		{Text: "-c", Description: i18n.T("complete.context.flag_chunk_short")},
+	}
+}
+
+func contextAttachFlagSuggestions() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "--priority", Description: i18n.T("complete.context.flag_priority")},
+		{Text: "-p", Description: i18n.T("complete.context.flag_priority_short")},
+		{Text: "--chunk", Description: i18n.T("complete.context.flag_chunk_attach")},
+		{Text: "-c", Description: i18n.T("complete.context.flag_chunk_short")},
+		{Text: "--chunks", Description: i18n.T("complete.context.flag_chunks")},
+		{Text: "-C", Description: i18n.T("complete.context.flag_chunks_short")},
+	}
+}
+
+// contextInspectFlagSuggestions handles `--chunk` flag offerings plus chunk
+// number completion when the previous token was `--chunk`/`-c`.
+func (cli *ChatCLI) contextInspectFlagSuggestions(
+	args []string, line string, d prompt.Document,
+) []prompt.Suggest {
+	word := d.GetWordBeforeCursor()
+	if strings.HasPrefix(word, "-") {
+		return contextInspectFlags()
+	}
+	if len(args) < 4 {
+		return nil
+	}
+	prev := previousToken(args, line)
+	if prev == "--chunk" || prev == "-c" {
+		return cli.getChunkNumberSuggestions(args[2])
+	}
+	return nil
+}
+
+func contextCreateUpdateFlagSuggestions() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "--mode", Description: i18n.T("complete.context.flag_mode")},
+		{Text: "-m", Description: i18n.T("complete.context.flag_mode_short")},
+		{Text: "--description", Description: i18n.T("complete.context.flag_description")},
+		{Text: "--desc", Description: i18n.T("complete.context.flag_desc_short")},
+		{Text: "-d", Description: i18n.T("complete.context.flag_d_short")},
+		{Text: "--tags", Description: i18n.T("complete.context.flag_tags")},
+		{Text: "-t", Description: i18n.T("complete.context.flag_tags_short")},
+		{Text: "--force", Description: i18n.T("complete.context.flag_force")},
+		{Text: "-f", Description: i18n.T("complete.context.flag_force_short")},
+	}
+}
+
+func contextModeValueSuggestions() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "full", Description: i18n.T("complete.context.mode_full")},
+		{Text: "summary", Description: i18n.T("complete.context.mode_summary")},
+		{Text: "chunked", Description: i18n.T("complete.context.mode_chunked")},
+		{Text: "smart", Description: i18n.T("complete.context.mode_smart")},
+	}
+}
+
+// contextCreateOrUpdateSuggestions covers the flag-heavy create/update verbs.
+func (cli *ChatCLI) contextCreateOrUpdateSuggestions(
+	sub string, args []string, line string, d prompt.Document,
+) []prompt.Suggest {
+	word := d.GetWordBeforeCursor()
+	if strings.HasPrefix(word, "-") {
+		return contextCreateUpdateFlagSuggestions()
+	}
+	if out, matched := contextFlagValueSuggestions(args, line); matched {
+		return out
+	}
+	if sub == "create" && len(args) == 2 {
+		return []prompt.Suggest{{Text: "", Description: i18n.T("complete.context.prompt_name")}}
+	}
+	endsWithSpace := strings.HasSuffix(line, " ")
+	if sub == "update" && (len(args) == 2 || (len(args) == 3 && !endsWithSpace)) {
+		return cli.getContextNameSuggestions()
+	}
+	if len(args) >= 3 {
+		return cli.filePathCompleter(word)
+	}
+	return []prompt.Suggest{}
+}
+
+// contextFlagValueSuggestions returns value suggestions for flags whose
+// position is immediately after `--mode`/`-m` (mode list), or signals that
+// the previous flag expects free text (description/tags) and the completer
+// should bail out silently.
+func contextFlagValueSuggestions(args []string, line string) ([]prompt.Suggest, bool) {
+	if len(args) < 2 {
+		return nil, false
+	}
+	prev := previousToken(args, line)
+	switch prev {
+	case "--mode", "-m":
+		return contextModeValueSuggestions(), true
+	case "--description", "--desc", "-d", "--tags", "-t":
+		return []prompt.Suggest{}, true
+	}
+	return nil, false
+}
+
+// contextMergeSuggestions: prompt for the new name first, then existing
+// context names to merge.
+func (cli *ChatCLI) contextMergeSuggestions(args []string, endsWithSpace bool) []prompt.Suggest {
+	if len(args) == 2 || (len(args) == 3 && !endsWithSpace) {
+		return []prompt.Suggest{{Text: "", Description: i18n.T("complete.context.prompt_merge_name")}}
+	}
+	return cli.getContextNameSuggestions()
+}
+
+// contextExportSuggestions: existing context name first, then a file path.
+func (cli *ChatCLI) contextExportSuggestions(
+	args []string, endsWithSpace bool, d prompt.Document,
+) []prompt.Suggest {
+	if len(args) == 2 || (len(args) == 3 && !endsWithSpace) {
+		return cli.getContextNameSuggestions()
+	}
+	if len(args) >= 3 {
+		return cli.filePathCompleter(d.GetWordBeforeCursor())
+	}
+	return nil
+}
+
+// contextImportSuggestions: always a file path once the verb is set.
+func (cli *ChatCLI) contextImportSuggestions(
+	args []string, d prompt.Document,
+) []prompt.Suggest {
+	if len(args) >= 2 {
+		return cli.filePathCompleter(d.GetWordBeforeCursor())
+	}
+	return nil
 }
 
 // getChunkNumberSuggestions - Sugestões de números de chunks para um contexto
@@ -979,121 +987,167 @@ func (cli *ChatCLI) getAgentSuggestions(d prompt.Document) []prompt.Suggest {
 	return []prompt.Suggest{}
 }
 
+// skillSubcommandSuggestions returns the static catalog of `/skill <sub>`
+// suggestions. Kept package-level so its cyclomatic weight does not bleed
+// into getSkillSuggestions.
+func skillSubcommandSuggestions() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "search", Description: i18n.T("complete.skill.sub_search")},
+		{Text: "install", Description: i18n.T("complete.skill.sub_install")},
+		{Text: "uninstall", Description: i18n.T("complete.skill.sub_uninstall")},
+		{Text: "list", Description: i18n.T("complete.skill.sub_list")},
+		{Text: "info", Description: i18n.T("complete.skill.sub_info")},
+		{Text: "registries", Description: i18n.T("complete.skill.sub_registries")},
+		{Text: "registry", Description: i18n.T("complete.skill.sub_registry")},
+		{Text: "prefer", Description: i18n.T("complete.skill.sub_prefer")},
+		{Text: "help", Description: i18n.T("complete.skill.sub_help")},
+	}
+}
+
+// skillSubcommandHandler returns the suggestion function for a /skill
+// subcommand, or nil when the subcommand has no contextual suggestions.
+// Centralizing this dispatch keeps getSkillSuggestions a thin router.
+func (cli *ChatCLI) skillSubcommandHandler(sub string) func(prompt.Document) []prompt.Suggest {
+	switch sub {
+	case "uninstall", "remove":
+		return cli.suggestInstalledSkills
+	case "install", "info":
+		return cli.suggestInstallOrInfoArgs
+	case "registry":
+		return cli.suggestRegistrySubcommand
+	case "prefer":
+		return cli.suggestPreferArgs
+	}
+	return nil
+}
+
 func (cli *ChatCLI) getSkillSuggestions(d prompt.Document) []prompt.Suggest {
 	line := d.TextBeforeCursor()
 	args := strings.Fields(line)
+	endsWithSpace := strings.HasSuffix(line, " ")
 
-	// Just typed "/skill" without space
-	if len(args) <= 1 && !strings.HasSuffix(line, " ") {
+	// "/skill" without a space — wait for one.
+	if len(args) <= 1 && !endsWithSpace {
 		return []prompt.Suggest{}
 	}
 
-	// Suggest subcommands
-	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
-		suggestions := []prompt.Suggest{
-			{Text: "search", Description: i18n.T("complete.skill.sub_search")},
-			{Text: "install", Description: i18n.T("complete.skill.sub_install")},
-			{Text: "uninstall", Description: i18n.T("complete.skill.sub_uninstall")},
-			{Text: "list", Description: i18n.T("complete.skill.sub_list")},
-			{Text: "info", Description: i18n.T("complete.skill.sub_info")},
-			{Text: "registries", Description: i18n.T("complete.skill.sub_registries")},
-			{Text: "registry", Description: i18n.T("complete.skill.sub_registry")},
-			{Text: "prefer", Description: i18n.T("complete.skill.sub_prefer")},
-			{Text: "help", Description: i18n.T("complete.skill.sub_help")},
-		}
-		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	// Show the subcommand catalog when the user is still typing the verb.
+	typingSubcommand := len(args) == 1 || (len(args) == 2 && !endsWithSpace)
+	if typingSubcommand {
+		return prompt.FilterHasPrefix(skillSubcommandSuggestions(), d.GetWordBeforeCursor(), true)
 	}
 
-	sub := ""
-	if len(args) >= 2 {
-		sub = strings.ToLower(args[1])
+	sub := strings.ToLower(args[1])
+	if handler := cli.skillSubcommandHandler(sub); handler != nil {
+		return handler(d)
 	}
-
-	// For "uninstall", suggest installed skill names
-	if sub == "uninstall" || sub == "remove" {
-		if cli.skillHandler != nil && cli.skillHandler.registryMgr != nil {
-			installed, err := cli.skillHandler.registryMgr.ListInstalled()
-			if err == nil {
-				suggestions := make([]prompt.Suggest, 0, len(installed))
-				for _, s := range installed {
-					desc := s.Description
-					if desc == "" {
-						desc = s.Source
-					}
-					suggestions = append(suggestions, prompt.Suggest{
-						Text:        s.Name,
-						Description: desc,
-					})
-				}
-				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
-			}
-		}
-	}
-
-	// For "install" and "info": suggest --from after skill name, then registry names
-	if sub == "install" || sub == "info" {
-		if cli.skillHandler != nil && cli.skillHandler.registryMgr != nil {
-			// After "--from" or "-f", suggest registry names
-			lastArg := args[len(args)-1]
-			prevArg := ""
-			if len(args) >= 2 {
-				prevArg = args[len(args)-1]
-				if strings.HasSuffix(line, " ") {
-					prevArg = args[len(args)-1]
-				} else if len(args) >= 3 {
-					prevArg = args[len(args)-2]
-				}
-			}
-			if strings.HasSuffix(line, " ") && (lastArg == "--from" || lastArg == "-f") {
-				return cli.getRegistryNameSuggestions(d)
-			}
-			if !strings.HasSuffix(line, " ") && (prevArg == "--from" || prevArg == "-f") {
-				return cli.getRegistryNameSuggestions(d)
-			}
-
-			// After the skill name (3+ args), suggest --from
-			if len(args) >= 3 && strings.HasSuffix(line, " ") {
-				return prompt.FilterHasPrefix([]prompt.Suggest{
-					{Text: "--from", Description: i18n.T("complete.skill.flag_from")},
-				}, d.GetWordBeforeCursor(), true)
-			}
-			if len(args) >= 4 && !strings.HasSuffix(line, " ") {
-				return prompt.FilterHasPrefix([]prompt.Suggest{
-					{Text: "--from", Description: i18n.T("complete.skill.flag_from")},
-				}, d.GetWordBeforeCursor(), true)
-			}
-		}
-	}
-
-	// For "registry": suggest enable/disable, then registry names
-	if sub == "registry" {
-		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
-			return prompt.FilterHasPrefix([]prompt.Suggest{
-				{Text: "enable", Description: i18n.T("complete.skill.sub_registry_enable")},
-				{Text: "disable", Description: i18n.T("complete.skill.sub_registry_disable")},
-			}, d.GetWordBeforeCursor(), true)
-		}
-		if len(args) >= 3 {
-			return cli.getRegistryNameSuggestions(d)
-		}
-	}
-
-	// For "prefer": suggest installed skill base names, then sources
-	if sub == "prefer" {
-		if cli.skillHandler != nil && cli.skillHandler.registryMgr != nil {
-			if len(args) >= 4 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
-				// After skill name, suggest sources + --reset
-				suggestions := []prompt.Suggest{
-					{Text: "--reset", Description: i18n.T("complete.skill.flag_reset")},
-				}
-				suggestions = append(suggestions, cli.getRegistryNameSuggestions(d)...)
-				suggestions = append(suggestions, prompt.Suggest{Text: "local", Description: i18n.T("complete.skill.prefer_local")})
-				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
-			}
-		}
-	}
-
 	return []prompt.Suggest{}
+}
+
+// suggestInstalledSkills powers `/skill uninstall|remove`.
+func (cli *ChatCLI) suggestInstalledSkills(d prompt.Document) []prompt.Suggest {
+	if cli.skillHandler == nil || cli.skillHandler.registryMgr == nil {
+		return nil
+	}
+	installed, err := cli.skillHandler.registryMgr.ListInstalled()
+	if err != nil {
+		return nil
+	}
+	suggestions := make([]prompt.Suggest, 0, len(installed))
+	for _, s := range installed {
+		desc := s.Description
+		if desc == "" {
+			desc = s.Source
+		}
+		suggestions = append(suggestions, prompt.Suggest{Text: s.Name, Description: desc})
+	}
+	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+}
+
+// suggestInstallOrInfoArgs powers `/skill install|info` — handles `--from`
+// flag completion plus registry name completion after the flag value.
+func (cli *ChatCLI) suggestInstallOrInfoArgs(d prompt.Document) []prompt.Suggest {
+	if cli.skillHandler == nil || cli.skillHandler.registryMgr == nil {
+		return nil
+	}
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	endsWithSpace := strings.HasSuffix(line, " ")
+
+	if isAtRegistryValuePosition(args, endsWithSpace) {
+		return cli.getRegistryNameSuggestions(d)
+	}
+	if isAtFromFlagPosition(args, endsWithSpace) {
+		return prompt.FilterHasPrefix(
+			[]prompt.Suggest{{Text: "--from", Description: i18n.T("complete.skill.flag_from")}},
+			d.GetWordBeforeCursor(), true)
+	}
+	return nil
+}
+
+// isAtRegistryValuePosition reports whether the cursor sits right after a
+// `--from`/`-f` flag and should suggest a registry name.
+func isAtRegistryValuePosition(args []string, endsWithSpace bool) bool {
+	if len(args) == 0 {
+		return false
+	}
+	last := args[len(args)-1]
+	if endsWithSpace && isFromFlag(last) {
+		return true
+	}
+	if !endsWithSpace && len(args) >= 2 && isFromFlag(args[len(args)-2]) {
+		return true
+	}
+	return false
+}
+
+// isAtFromFlagPosition reports whether the cursor sits right after the skill
+// name and should suggest the `--from` flag.
+func isAtFromFlagPosition(args []string, endsWithSpace bool) bool {
+	if endsWithSpace {
+		return len(args) >= 3
+	}
+	return len(args) >= 4
+}
+
+func isFromFlag(s string) bool { return s == "--from" || s == "-f" }
+
+// suggestRegistrySubcommand powers `/skill registry` — enable/disable verb
+// then a registry name.
+func (cli *ChatCLI) suggestRegistrySubcommand(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	endsWithSpace := strings.HasSuffix(line, " ")
+
+	wantsVerb := len(args) == 2 || (len(args) == 3 && !endsWithSpace)
+	if wantsVerb {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "enable", Description: i18n.T("complete.skill.sub_registry_enable")},
+			{Text: "disable", Description: i18n.T("complete.skill.sub_registry_disable")},
+		}, d.GetWordBeforeCursor(), true)
+	}
+	return cli.getRegistryNameSuggestions(d)
+}
+
+// suggestPreferArgs powers `/skill prefer <name> <source>`.
+func (cli *ChatCLI) suggestPreferArgs(d prompt.Document) []prompt.Suggest {
+	if cli.skillHandler == nil || cli.skillHandler.registryMgr == nil {
+		return nil
+	}
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	endsWithSpace := strings.HasSuffix(line, " ")
+
+	// Only suggest sources once we are past the skill-name token.
+	if len(args) < 4 && !(len(args) == 4 && !endsWithSpace) {
+		return nil
+	}
+	suggestions := []prompt.Suggest{
+		{Text: "--reset", Description: i18n.T("complete.skill.flag_reset")},
+	}
+	suggestions = append(suggestions, cli.getRegistryNameSuggestions(d)...)
+	suggestions = append(suggestions, prompt.Suggest{Text: "local", Description: i18n.T("complete.skill.prefer_local")})
+	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 }
 
 // getRegistryNameSuggestions returns autocomplete suggestions with registry names.
