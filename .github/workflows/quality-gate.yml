@@ -546,7 +546,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Sticky comment on PR
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: quality-gate
           message: ${{ steps.verdict.outputs.body }}
