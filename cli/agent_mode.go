@@ -2009,6 +2009,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								renderer.RenderStreamBoxStart("🔌", fmt.Sprintf("MCP: %s", mcpToolName), agent.ColorPurple)
 							}
 
+							// Audit trail: emit an info-level log line so operators
+							// can grep the chatcli log for every auto-approved MCP
+							// call (autoApprove / alwaysAllow / Trust=true). The
+							// invocation still happens unconditionally — this
+							// preserves the prior "MCP tools execute autonomously
+							// in agent mode" contract while making the decision
+							// visible. When an explicit MCP approval gate is
+							// added, callers should branch on this same helper.
+							if a.cli.mcpManager.ShouldAutoApprove(mcpToolName) {
+								a.logger.Info("MCP tool auto-approved by config",
+									zap.String("tool", mcpToolName),
+									zap.Bool("coder_mode", a.isCoderMode))
+							}
+
 							result, mcpErr := a.cli.mcpManager.ExecuteTool(ctx, mcpToolName, mcpArgs)
 							if mcpErr != nil {
 								execErr = mcpErr

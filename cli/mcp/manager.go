@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -476,12 +477,21 @@ func (m *Manager) StopAll() {
 }
 
 // GetTools returns all discovered MCP tools as ToolDefinitions.
+//
+// Tools hidden by their server's EnabledTools/DisabledTools config
+// are filtered out before the slice is returned, so the LLM never
+// sees a tool the operator has masked. The filter consults the
+// owning server's config — m.serverConfigUnlocked must run under the
+// read lock we already hold.
 func (m *Manager) GetTools() []models.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	defs := make([]models.ToolDefinition, 0, len(m.tools))
 	for _, tool := range m.tools {
+		if !m.isToolVisibleUnlocked(tool) {
+			continue
+		}
 		defs = append(defs, models.ToolDefinition{
 			Type: "function",
 			Function: models.ToolFunctionDef{
@@ -496,12 +506,19 @@ func (m *Manager) GetTools() []models.ToolDefinition {
 
 // GetToolsSummary returns lightweight tool descriptions (name + description only).
 // This saves tokens in the system prompt by deferring full schemas until invocation.
+//
+// EnabledTools/DisabledTools are honored here too — keeping the
+// summary and the full schema list in sync prevents the LLM from
+// asking about a tool we'd refuse to invoke anyway.
 func (m *Manager) GetToolsSummary() []models.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	defs := make([]models.ToolDefinition, 0, len(m.tools))
 	for _, tool := range m.tools {
+		if !m.isToolVisibleUnlocked(tool) {
+			continue
+		}
 		defs = append(defs, models.ToolDefinition{
 			Type: "function",
 			Function: models.ToolFunctionDef{
@@ -526,11 +543,84 @@ func (m *Manager) GetToolSchema(toolName string) map[string]interface{} {
 	return nil
 }
 
-// ToolCount returns the number of discovered MCP tools.
+// ToolCount returns the number of discovered MCP tools, counting only
+// the tools that are currently visible to the LLM (i.e. not hidden by
+// their server's EnabledTools/DisabledTools config). Matches what the
+// LLM actually sees via GetTools / GetToolsSummary.
 func (m *Manager) ToolCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return len(m.tools)
+	count := 0
+	for _, tool := range m.tools {
+		if m.isToolVisibleUnlocked(tool) {
+			count++
+		}
+	}
+	return count
+}
+
+// isToolVisibleUnlocked reports whether the LLM should see `tool`.
+// Must be called with m.mu held (read or write) — it walks m.servers
+// to find the owning server's config. The "Unlocked" suffix means
+// "the caller owns the lock", not "no lock taken".
+func (m *Manager) isToolVisibleUnlocked(tool *MCPTool) bool {
+	cfg, ok := m.serverConfigUnlocked(tool.ServerName)
+	if !ok {
+		// Unknown server — fail open so a momentary lookup gap during
+		// reload does not silently hide every tool. The discoverTools
+		// path always populates m.servers first.
+		return true
+	}
+	return cfg.IsToolVisible(tool.Name)
+}
+
+// serverConfigUnlocked returns the ServerConfig for the named server,
+// or false when no such connection is registered. Must be called with
+// m.mu held.
+func (m *Manager) serverConfigUnlocked(serverName string) (ServerConfig, bool) {
+	conn, ok := m.servers[serverName]
+	if !ok {
+		return ServerConfig{}, false
+	}
+	return conn.Config, true
+}
+
+// GetServerConfig returns a snapshot of the configured ServerConfig
+// for the named server. Returns the zero value plus false when no
+// such server is registered. Used by /mcp status to render metadata
+// (description, tags, category, trust flag) without exposing the
+// internal *ServerConnection.
+func (m *Manager) GetServerConfig(serverName string) (ServerConfig, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.serverConfigUnlocked(serverName)
+}
+
+// ShouldAutoApprove reports whether the agent loop may execute `toolName`
+// without prompting the user. The check honors:
+//
+//   - Trust=true on the owning server (every tool auto-approved)
+//   - "*" wildcard in AutoApprove or AlwaysAllow
+//   - exact name match (with or without the "mcp_" prefix that the
+//     agent loop uses internally)
+//
+// Tools whose owning server is unknown or disconnected default to
+// "do not auto-approve" so a stale agent reference never side-steps
+// the user.
+func (m *Manager) ShouldAutoApprove(toolName string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	bare := strings.TrimPrefix(toolName, "mcp_")
+	tool, ok := m.tools[bare]
+	if !ok {
+		return false
+	}
+	cfg, ok := m.serverConfigUnlocked(tool.ServerName)
+	if !ok {
+		return false
+	}
+	return cfg.MatchesAutoApprove(bare)
 }
 
 // ExecuteTool executes an MCP tool by name.
@@ -696,8 +786,25 @@ func (m *Manager) startStdioServer(ctx context.Context, conn *ServerConnection) 
 	m.logger.Info("MCP stdio server connected",
 		zap.String("server", conn.Config.Name),
 		zap.Int("tools", conn.Status.ToolCount))
+	m.logTrustModeIfEnabled(conn.Config)
 
 	return nil
+}
+
+// logTrustModeIfEnabled emits a warning when a server is configured
+// with Trust=true. The bypass-everything posture is intentional —
+// operators ask for it on servers they have separately vetted — but
+// the warning ensures the choice is visible in logs so an unexpected
+// Trust=true (e.g. from a checked-in mcp_servers.json) does not slip
+// in silently.
+func (m *Manager) logTrustModeIfEnabled(cfg ServerConfig) {
+	if !cfg.Trust {
+		return
+	}
+	m.logger.Warn("MCP server running in TRUST mode — every tool will be auto-approved",
+		zap.String("server", cfg.Name),
+		zap.Strings("autoApprove", cfg.AutoApprove),
+		zap.Strings("alwaysAllow", cfg.AlwaysAllow))
 }
 
 // startSSEServer connects to an MCP server via Server-Sent Events.
@@ -734,6 +841,7 @@ func (m *Manager) startSSEServer(ctx context.Context, conn *ServerConnection) er
 	m.logger.Info("MCP SSE server connected",
 		zap.String("server", conn.Config.Name),
 		zap.Int("tools", conn.Status.ToolCount))
+	m.logTrustModeIfEnabled(conn.Config)
 
 	return nil
 }

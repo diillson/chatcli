@@ -13,29 +13,25 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
-
-// stdioCallTimeout caps how long Call() waits for a JSON-RPC response.
-// 60s covers the worst case of an `npx -y <pkg>` cold start that has to
-// download the MCP server package on its first invocation; subsequent
-// runs hit the npm cache and respond in milliseconds.
-const stdioCallTimeout = 60 * time.Second
 
 // stdioTransport implements mcpTransport over stdin/stdout using
 // newline-delimited JSON-RPC 2.0, as required by the MCP stdio
 // transport spec. Each JSON message is written and read as a single
 // line terminated by '\n' — no LSP-style Content-Length headers.
 type stdioTransport struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  *bufio.Reader
-	mu      sync.Mutex // protects stdin writes
-	nextID  int64
-	pending map[int64]chan *jsonRPCResponse
-	pendMu  sync.Mutex
-	logger  *zap.Logger
-	done    chan struct{}
+	cmd         *exec.Cmd
+	stdin       io.WriteCloser
+	stdout      *bufio.Reader
+	mu          sync.Mutex // protects stdin writes
+	nextID      int64
+	pending     map[int64]chan *jsonRPCResponse
+	pendMu      sync.Mutex
+	logger      *zap.Logger
+	done        chan struct{}
+	callTimeout time.Duration // resolved from ServerConfig.RequestTimeout()
 	// onClose fires exactly once when the transport's read loop or
 	// stdin write detects the process has gone away (EOF, EPIPE,
 	// killed). The Manager registers it to flip Status.Connected back
@@ -53,6 +49,21 @@ type stdioTransport struct {
 func newStdioTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger) (*stdioTransport, error) {
 	args := cfg.Args
 	cmd := exec.CommandContext(ctx, cfg.Command, args...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
+
+	// Working directory: when Cwd is set, expand env / leading ~ and
+	// fail closed if the resolved path does not exist as a directory.
+	// Unset Cwd leaves cmd.Dir empty, which makes the child inherit
+	// the parent's working directory — matching prior behavior.
+	if cwd := cfg.ResolveCwd(); cwd != "" {
+		info, err := os.Stat(cwd)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", i18n.T("mcp.transport.cwd_invalid", cwd), err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("%s", i18n.T("mcp.transport.cwd_not_directory", cwd))
+		}
+		cmd.Dir = cwd
+	}
 
 	// Inherit the parent environment (PATH, HOME, npm cache, etc.) so
 	// launchers like `npx`, `uvx` and `docker` can find their binaries
@@ -85,12 +96,13 @@ func newStdioTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger
 	}
 
 	t := &stdioTransport{
-		cmd:     cmd,
-		stdin:   stdinPipe,
-		stdout:  bufio.NewReaderSize(stdoutPipe, 64*1024),
-		pending: make(map[int64]chan *jsonRPCResponse),
-		logger:  logger,
-		done:    make(chan struct{}),
+		cmd:         cmd,
+		stdin:       stdinPipe,
+		stdout:      bufio.NewReaderSize(stdoutPipe, 64*1024),
+		pending:     make(map[int64]chan *jsonRPCResponse),
+		logger:      logger,
+		done:        make(chan struct{}),
+		callTimeout: cfg.RequestTimeout(),
 	}
 
 	go t.readLoop()
@@ -132,8 +144,8 @@ func (t *stdioTransport) Call(method string, params interface{}) (json.RawMessag
 			return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
 		}
 		return resp.Result, nil
-	case <-time.After(stdioCallTimeout):
-		return nil, fmt.Errorf("MCP call %q timed out", method)
+	case <-time.After(t.callTimeout):
+		return nil, fmt.Errorf("%s", i18n.T("mcp.transport.call_timeout", method, t.callTimeout))
 	case <-t.done:
 		return nil, fmt.Errorf("MCP transport closed")
 	}
