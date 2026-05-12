@@ -31,22 +31,38 @@ type sseTransport struct {
 	ready       chan struct{}   // closed when messagesURL is discovered
 	channelMgr  *ChannelManager // receives push notifications
 	serverName  string          // for channel routing
+	callTimeout time.Duration   // resolved from ServerConfig.RequestTimeout()
+	initTimeout time.Duration   // resolved from ServerConfig.InitializeTimeout()
+	headers     map[string]string
+	auth        *AuthConfig
 }
 
 // newSSETransport connects to the MCP server SSE endpoint and starts listening.
 func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger, channelMgr *ChannelManager, serverName string) (*sseTransport, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
+	callTimeout := cfg.RequestTimeout()
+	initTimeout := cfg.InitializeTimeout()
+
 	t := &sseTransport{
-		baseURL:    strings.TrimSuffix(cfg.URL, "/"),
-		httpClient: &http.Client{Timeout: 60 * time.Second},
-		pending:    make(map[int64]chan *jsonRPCResponse),
-		logger:     logger,
-		cancel:     cancel,
-		done:       make(chan struct{}),
-		ready:      make(chan struct{}),
-		channelMgr: channelMgr,
-		serverName: serverName,
+		baseURL: strings.TrimSuffix(cfg.URL, "/"),
+		// The HTTP client timeout caps individual POSTs. We deliberately
+		// keep it generous (max of the configured call and init values)
+		// so the SSE listener — which holds the GET open for the lifetime
+		// of the connection — does not get killed mid-stream by a short
+		// per-server Timeout.
+		httpClient:  &http.Client{Timeout: maxDuration(callTimeout, initTimeout)},
+		pending:     make(map[int64]chan *jsonRPCResponse),
+		logger:      logger,
+		cancel:      cancel,
+		done:        make(chan struct{}),
+		ready:       make(chan struct{}),
+		channelMgr:  channelMgr,
+		serverName:  serverName,
+		callTimeout: callTimeout,
+		initTimeout: initTimeout,
+		headers:     cfg.ResolveHeaders(),
+		auth:        cfg.Auth,
 	}
 
 	// Connect to SSE endpoint
@@ -56,15 +72,35 @@ func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger, 
 	select {
 	case <-t.ready:
 		// good — messages URL discovered
-	case <-time.After(10 * time.Second):
+	case <-time.After(initTimeout):
 		cancel()
-		return nil, fmt.Errorf("SSE server did not send endpoint event within 10s")
+		return nil, fmt.Errorf("SSE server did not send endpoint event within %s", initTimeout)
 	case <-ctx.Done():
 		cancel()
 		return nil, ctx.Err()
 	}
 
 	return t, nil
+}
+
+// applyHeaders attaches the configured custom headers and auth to a
+// request. Safe on nil receivers — used for both the initial SSE GET
+// and the per-call POST so users only declare the header set once.
+func (t *sseTransport) applyHeaders(req *http.Request) {
+	for k, v := range t.headers {
+		req.Header.Set(k, v)
+	}
+	t.auth.ApplyAuth(req)
+}
+
+// maxDuration returns the greater of a and b. Helper kept private to
+// this package because we only need it for the http.Client timeout
+// floor above.
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // connectSSE connects to the SSE stream and processes events.
@@ -78,6 +114,7 @@ func (t *sseTransport) connectSSE(ctx context.Context) {
 		return
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	t.applyHeaders(req)
 
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
@@ -200,6 +237,7 @@ func (t *sseTransport) Call(method string, params interface{}) (json.RawMessage,
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	t.applyHeaders(httpReq)
 
 	httpResp, err := t.httpClient.Do(httpReq)
 	if err != nil {
@@ -220,8 +258,8 @@ func (t *sseTransport) Call(method string, params interface{}) (json.RawMessage,
 			return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
 		}
 		return resp.Result, nil
-	case <-time.After(30 * time.Second):
-		return nil, fmt.Errorf("MCP call %q timed out", method)
+	case <-time.After(t.callTimeout):
+		return nil, fmt.Errorf("MCP call %q timed out after %s", method, t.callTimeout)
 	case <-t.done:
 		return nil, fmt.Errorf("SSE transport closed")
 	}
