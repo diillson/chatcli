@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -74,7 +75,7 @@ func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger, 
 		// good — messages URL discovered
 	case <-time.After(initTimeout):
 		cancel()
-		return nil, fmt.Errorf("SSE server did not send endpoint event within %s", initTimeout)
+		return nil, fmt.Errorf("%s", i18n.T("mcp.transport.sse_endpoint_timeout", initTimeout))
 	case <-ctx.Done():
 		cancel()
 		return nil, ctx.Err()
@@ -259,7 +260,7 @@ func (t *sseTransport) Call(method string, params interface{}) (json.RawMessage,
 		}
 		return resp.Result, nil
 	case <-time.After(t.callTimeout):
-		return nil, fmt.Errorf("MCP call %q timed out after %s", method, t.callTimeout)
+		return nil, fmt.Errorf("%s", i18n.T("mcp.transport.call_timeout", method, t.callTimeout))
 	case <-t.done:
 		return nil, fmt.Errorf("SSE transport closed")
 	}

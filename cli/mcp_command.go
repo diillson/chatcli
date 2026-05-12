@@ -430,11 +430,11 @@ func mcpSubcommandTakesServerName(sub string) bool {
 //
 // Layout (each line conditionally present):
 //
-//	  • description text wrapped to one line
-//	  • [category]  #tag1 #tag2 ...
-//	  • ⚠ TRUST mode active — every tool auto-approved
-//	  • auto-approve: N tools
-//	  • hidden tools: N
+//   - description text wrapped to one line
+//   - [category]  #tag1 #tag2 ...
+//   - ⚠ TRUST mode active — every tool auto-approved
+//   - auto-approve: N tools
+//   - hidden tools: N
 func (cli *ChatCLI) renderMCPServerMetadata(prefix string, cfg mcp.ServerConfig) {
 	if desc := strings.TrimSpace(cfg.Description); desc != "" {
 		fmt.Println(prefix + fmt.Sprintf("    %s%s%s", ColorGray, desc, ColorReset))

@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -56,10 +57,10 @@ func newStdioTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger
 	if cwd := cfg.ResolveCwd(); cwd != "" {
 		info, err := os.Stat(cwd)
 		if err != nil {
-			return nil, fmt.Errorf("MCP cwd %q: %w", cwd, err)
+			return nil, fmt.Errorf("%s: %w", i18n.T("mcp.transport.cwd_invalid", cwd), err)
 		}
 		if !info.IsDir() {
-			return nil, fmt.Errorf("MCP cwd %q is not a directory", cwd)
+			return nil, fmt.Errorf("%s", i18n.T("mcp.transport.cwd_not_directory", cwd))
 		}
 		cmd.Dir = cwd
 	}
@@ -144,7 +145,7 @@ func (t *stdioTransport) Call(method string, params interface{}) (json.RawMessag
 		}
 		return resp.Result, nil
 	case <-time.After(t.callTimeout):
-		return nil, fmt.Errorf("MCP call %q timed out after %s", method, t.callTimeout)
+		return nil, fmt.Errorf("%s", i18n.T("mcp.transport.call_timeout", method, t.callTimeout))
 	case <-t.done:
 		return nil, fmt.Errorf("MCP transport closed")
 	}

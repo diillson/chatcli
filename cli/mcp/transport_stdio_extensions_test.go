@@ -20,17 +20,21 @@ import (
 )
 
 func TestNewStdioTransport_CwdMustExist(t *testing.T) {
+	bogus := "/this/path/should/not/exist/c7d1f9"
 	cfg := ServerConfig{
 		Name:    "fs",
 		Command: "/usr/bin/true",
-		Cwd:     "/this/path/should/not/exist/c7d1f9",
+		Cwd:     bogus,
 	}
 	_, err := newStdioTransport(context.Background(), cfg, zap.NewNop())
 	if err == nil {
 		t.Fatal("expected error for non-existent cwd")
 	}
-	if !strings.Contains(err.Error(), "MCP cwd") {
-		t.Errorf("error message should call out the cwd field; got %q", err)
+	// The error wraps the offending path via %q so it survives any
+	// i18n catalog the user has loaded (the key text itself can change
+	// per locale).
+	if !strings.Contains(err.Error(), bogus) {
+		t.Errorf("error should reference the bad path %q; got %q", bogus, err)
 	}
 }
 
@@ -47,8 +51,11 @@ func TestNewStdioTransport_CwdMustBeDirectory(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for cwd pointing at a regular file")
 	}
-	if !strings.Contains(err.Error(), "not a directory") {
-		t.Errorf("error should explain the kind of failure; got %q", err)
+	// The error references the offending path; the exact prose comes
+	// from the i18n catalog so we don't pin the wording, only the
+	// invariant that the offending path appears.
+	if !strings.Contains(err.Error(), file) {
+		t.Errorf("error should reference the bad cwd %q; got %q", file, err)
 	}
 }
 
