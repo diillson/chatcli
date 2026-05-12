@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.115.0](https://github.com/diillson/chatcli/compare/v1.114.0...v1.115.0) (2026-05-12)
+
+
+### Features
+
+* **mcp:** tier 1-3 server config extensions + autoApprove audit ([#909](https://github.com/diillson/chatcli/issues/909)) ([4086a6f](https://github.com/diillson/chatcli/commit/4086a6f4c6d0d3dfd41914fd3dcad35692803f07))
+
 ## [1.114.0](https://github.com/diillson/chatcli/compare/v1.113.1...v1.114.0) (2026-05-11)
 
 
