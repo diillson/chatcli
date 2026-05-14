@@ -59,6 +59,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 		"XAI_API_KEY", "XAI_MODEL", "XAI_MAX_TOKENS",
 		"ZAI_API_KEY", "ZAI_MODEL", "ZAI_MAX_TOKENS",
 		"MINIMAX_API_KEY", "MINIMAX_MODEL", "MINIMAX_MAX_TOKENS", "MINIMAX_API_COMPAT",
+		"MOONSHOT_API_KEY", "MOONSHOT_MODEL", "MOONSHOT_MAX_TOKENS", "MOONSHOT_THINKING", "MOONSHOT_API_URL",
 		"OLLAMA_ENABLED", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "OLLAMA_MAX_TOKENS",
 		"CLIENT_ID", "CLIENT_KEY", "STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
 		"COPILOT_MODEL", "COPILOT_MAX_TOKENS", "GITHUB_COPILOT_TOKEN",
@@ -153,6 +154,12 @@ func (cli *ChatCLI) configureProviderAndModel() {
 		cli.Model = os.Getenv("MINIMAX_MODEL")
 		if cli.Model == "" {
 			cli.Model = config.DefaultMiniMaxModel
+		}
+	}
+	if cli.Provider == "MOONSHOT" {
+		cli.Model = os.Getenv("MOONSHOT_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultMoonshotModel
 		}
 	}
 	if cli.Provider == "OLLAMA" {

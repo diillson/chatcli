@@ -88,6 +88,7 @@ func (cm *ConfigManager) loadDefaults() {
 	cm.values["ZAI_MODEL"] = DefaultZAIModel
 	cm.values["MINIMAX_MODEL"] = DefaultMiniMaxModel
 	cm.values["MINIMAX_API_COMPAT"] = ""
+	cm.values["MOONSHOT_MODEL"] = DefaultMoonshotModel
 	cm.values["OLLAMA_MODEL"] = DefaultOllamaModel
 	cm.values["OLLAMA_BASE_URL"] = OllamaDefaultBaseURL
 	cm.values["COPILOT_MODEL"] = DefaultCopilotModel

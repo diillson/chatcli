@@ -246,6 +246,9 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	if newProvider == "MINIMAX" {
 		newModel = utils.GetEnvOrDefault("MINIMAX_MODEL", config.DefaultMiniMaxModel)
 	}
+	if newProvider == "MOONSHOT" {
+		newModel = utils.GetEnvOrDefault("MOONSHOT_MODEL", config.DefaultMoonshotModel)
+	}
 	if newProvider == "OLLAMA" {
 		newModel = utils.GetEnvOrDefault("OLLAMA_MODEL", config.DefaultOllamaModel)
 	}
@@ -515,6 +518,7 @@ var providerMaxTokensEnv = map[string]string{
 	"XAI":           "XAI_MAX_TOKENS",
 	"ZAI":           "ZAI_MAX_TOKENS",
 	"MINIMAX":       "MINIMAX_MAX_TOKENS",
+	"MOONSHOT":      "MOONSHOT_MAX_TOKENS",
 	"OLLAMA":        "OLLAMA_MAX_TOKENS",
 	"STACKSPOT":     "STACKSPOT_MAX_TOKENS",
 	"COPILOT":       "COPILOT_MAX_TOKENS",

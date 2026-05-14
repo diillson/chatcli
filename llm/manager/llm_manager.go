@@ -29,6 +29,7 @@ import (
 	github_models "github.com/diillson/chatcli/llm/github_models"
 	"github.com/diillson/chatcli/llm/googleai"
 	"github.com/diillson/chatcli/llm/minimax"
+	"github.com/diillson/chatcli/llm/moonshot"
 	"github.com/diillson/chatcli/llm/ollama"
 	"github.com/diillson/chatcli/llm/openai"
 	"github.com/diillson/chatcli/llm/openai_assistant"
@@ -106,6 +107,7 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarXAIClient(maxRetries, initialBackoff)
 	manager.configurarZAIClient(maxRetries, initialBackoff)
 	manager.configurarMiniMaxClient(maxRetries, initialBackoff)
+	manager.configurarMoonshotClient(maxRetries, initialBackoff)
 	manager.configurarOllamaClient(maxRetries, initialBackoff)
 	manager.configurarCopilotClient(maxRetries, initialBackoff)
 	manager.configurarGitHubModelsClient(maxRetries, initialBackoff)
@@ -462,6 +464,27 @@ func (m *LLMManagerImpl) configurarZAIClient(maxRetries int, initialBackoff time
 	}
 }
 
+func (m *LLMManagerImpl) configurarMoonshotClient(maxRetries int, initialBackoff time.Duration) {
+	apiKey := config.Global.GetString("MOONSHOT_API_KEY")
+	if apiKey != "" {
+		m.logger.Info(i18n.T("llm.info.configuring_provider", "Moonshot (Kimi)"))
+		m.clients["MOONSHOT"] = func(model string) (client.LLMClient, error) {
+			if model == "" {
+				model = config.DefaultMoonshotModel
+			}
+			return moonshot.NewMoonshotClient(
+				apiKey,
+				model,
+				m.logger,
+				maxRetries,
+				initialBackoff,
+			), nil
+		}
+	} else {
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "MOONSHOT_API_KEY", "MOONSHOT"))
+	}
+}
+
 func (m *LLMManagerImpl) configurarMiniMaxClient(maxRetries int, initialBackoff time.Duration) {
 	apiKey := config.Global.GetString("MINIMAX_API_KEY")
 	if apiKey != "" {
@@ -782,12 +805,14 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	m.configurarGitHubModelsClient(maxRetries, initialBackoff)
 	m.configurarZAIClient(maxRetries, initialBackoff)
 	m.configurarMiniMaxClient(maxRetries, initialBackoff)
+	m.configurarMoonshotClient(maxRetries, initialBackoff)
 	m.configurarOpenRouterClient(maxRetries, initialBackoff)
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key
 // instead of the server's default credentials. Supports OPENAI, CLAUDEAI,
-// GOOGLEAI, XAI, ZAI, MINIMAX, and COPILOT providers. Returns an error for unsupported providers.
+// GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, and COPILOT providers. Returns an
+// error for unsupported providers.
 func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (client.LLMClient, error) {
 	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
 	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
@@ -838,6 +863,12 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 			model = config.DefaultMiniMaxModel
 		}
 		return minimax.NewMiniMaxClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "MOONSHOT":
+		if model == "" {
+			model = config.DefaultMoonshotModel
+		}
+		return moonshot.NewMoonshotClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "COPILOT":
 		if model == "" {

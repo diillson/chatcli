@@ -514,6 +514,15 @@ func getModelPricing(provider, model string) (inputCost, outputCost float64) {
 		return 0.50, 0.50
 	}
 
+	// Moonshot (Kimi) — K2.6 public list price as of 2026-05.
+	// kimi-k2.6: $0.95/M input (cache miss), $4.00/M output. Cache-hit input is
+	// $0.16/M but cost_tracker only models a single tier — we charge the miss
+	// price so accounting stays conservative. K2.5 and moonshot-v1-* sit below
+	// K2.6; we approximate with K2.6 numbers to avoid under-reporting.
+	if strings.Contains(provider, "moonshot") || strings.HasPrefix(model, "kimi") || strings.HasPrefix(model, "moonshot") {
+		return 0.95, 4.00
+	}
+
 	// Copilot (uses OpenAI models under the hood)
 	if strings.Contains(strings.ToLower(provider), "copilot") {
 		return 2.50, 10.0

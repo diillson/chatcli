@@ -103,6 +103,11 @@ func (ct *CostTracker) getTokenPricing(ctx context.Context, namespace, provider 
 		return tokenPricing{InputPerMillion: 1.0, OutputPerMillion: 4.0}
 	case provider == "MINIMAX" || provider == "minimax":
 		return tokenPricing{InputPerMillion: 0.3, OutputPerMillion: 1.2}
+	case provider == "MOONSHOT" || provider == "moonshot":
+		// kimi-k2.6 public list as of 2026-05: $0.95/M input (cache miss),
+		// $4.00/M output. Cache-hit is $0.16/M but operator cost tracking
+		// uses a single tier — pick the miss price to stay conservative.
+		return tokenPricing{InputPerMillion: 0.95, OutputPerMillion: 4.0}
 	case provider == "COPILOT" || provider == "copilot":
 		return tokenPricing{InputPerMillion: 10.0, OutputPerMillion: 30.0}
 	case provider == "OPENROUTER" || provider == "openrouter":

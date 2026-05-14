@@ -45,6 +45,10 @@ const (
 	MiniMaxAPIURL          = "https://api.minimax.io/v1/text/chatcompletion_v2"
 	MiniMaxAnthropicAPIURL = "https://api.minimax.io/anthropic/v1/messages"
 
+	// Valores padrão para Moonshot (Kimi)
+	DefaultMoonshotModel = "kimi-k2.6"
+	MoonshotAPIURL       = "https://api.moonshot.ai/v1/chat/completions"
+
 	// Valores padrão para GitHub Copilot
 	DefaultCopilotModel = "gpt-4o"
 	CopilotAPIURL       = "https://api.githubcopilot.com/chat/completions"

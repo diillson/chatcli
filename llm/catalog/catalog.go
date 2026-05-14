@@ -20,6 +20,7 @@ const (
 	ProviderXAI             = "XAI"
 	ProviderZAI             = "ZAI"
 	ProviderMiniMax         = "MINIMAX"
+	ProviderMoonshot        = "MOONSHOT"
 	ProviderOllama          = "OLLAMA"
 	ProviderCopilot         = "COPILOT"
 	ProviderGitHubModels    = "GITHUB_MODELS"
@@ -878,6 +879,93 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"json_mode"},
 	},
 
+	// Moonshot (Kimi) Models.
+	// Native multimodal MoE family from Moonshot AI. K2.6 is the flagship
+	// (released Apr 2026): 1T total / 32B active params, 256K context, vision +
+	// agent swarm + thinking mode. K2.5 is the previous generation, still
+	// supported. moonshot-v1-* are the classic chat models split by context.
+	// Ordering: newest IDs first so generic aliases don't shadow specific tags.
+	{
+		ID:              "kimi-k2.6",
+		Aliases:         []string{"kimi-k2.6", "kimi-k2-6", "k2.6", "k2-6"},
+		DisplayName:     "Kimi K2.6",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   262144,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "thinking", "json_mode"},
+	},
+	{
+		ID:              "kimi-k2.5",
+		Aliases:         []string{"kimi-k2.5", "kimi-k2-5", "k2.5", "k2-5"},
+		DisplayName:     "Kimi K2.5",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   262144,
+		MaxOutputTokens: 98304,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "thinking", "json_mode"},
+	},
+	{
+		ID:              "kimi-latest",
+		Aliases:         []string{"kimi-latest"},
+		DisplayName:     "Kimi (latest)",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   262144,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "thinking", "json_mode"},
+	},
+	{
+		ID:              "kimi-k2-turbo-preview",
+		Aliases:         []string{"kimi-k2-turbo-preview", "kimi-k2-turbo"},
+		DisplayName:     "Kimi K2 Turbo (preview)",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   262144,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+	{
+		ID:              "kimi-thinking-preview",
+		Aliases:         []string{"kimi-thinking-preview"},
+		DisplayName:     "Kimi Thinking (preview)",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   131072,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "thinking", "json_mode"},
+	},
+	{
+		ID:              "moonshot-v1-128k",
+		Aliases:         []string{"moonshot-v1-128k"},
+		DisplayName:     "Moonshot v1 (128k)",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   131072,
+		MaxOutputTokens: 32768,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+	{
+		ID:              "moonshot-v1-32k",
+		Aliases:         []string{"moonshot-v1-32k"},
+		DisplayName:     "Moonshot v1 (32k)",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   32768,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+	{
+		ID:              "moonshot-v1-8k",
+		Aliases:         []string{"moonshot-v1-8k"},
+		DisplayName:     "Moonshot v1 (8k)",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   8192,
+		MaxOutputTokens: 4096,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+
 	// OpenRouter Models (multi-provider gateway)
 	// Models use provider/model-name format. Only popular defaults are listed;
 	// the full catalog is fetched dynamically via ListModels.
@@ -1320,6 +1408,8 @@ func GetMaxTokens(provider, model string, override int) int {
 		return 65535
 	case ProviderMiniMax:
 		return 131072
+	case ProviderMoonshot:
+		return 131072
 	case ProviderOllama:
 		return 8192
 	case ProviderCopilot:
@@ -1352,6 +1442,8 @@ func GetContextWindow(provider, model string) int {
 		return 202752
 	case ProviderMiniMax:
 		return 204800
+	case ProviderMoonshot:
+		return 262144
 	case ProviderOllama:
 		return 8192
 	case ProviderCopilot:
