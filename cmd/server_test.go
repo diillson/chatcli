@@ -21,11 +21,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/fallback"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/token"
-	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -65,13 +65,13 @@ func (f *fakeLLMManager) GetClient(provider, _ string) (client.LLMClient, error)
 	}
 	return nil, errors.New("unknown provider")
 }
-func (f *fakeLLMManager) GetAvailableProviders() []string         { return nil }
-func (f *fakeLLMManager) GetTokenManager() (token.Manager, bool)  { return nil, false }
-func (f *fakeLLMManager) SetStackSpotRealm(string)                {}
-func (f *fakeLLMManager) SetStackSpotAgentID(string)              {}
-func (f *fakeLLMManager) GetStackSpotRealm() string               { return "" }
-func (f *fakeLLMManager) GetStackSpotAgentID() string             { return "" }
-func (f *fakeLLMManager) RefreshProviders()                       {}
+func (f *fakeLLMManager) GetAvailableProviders() []string        { return nil }
+func (f *fakeLLMManager) GetTokenManager() (token.Manager, bool) { return nil, false }
+func (f *fakeLLMManager) SetStackSpotRealm(string)               {}
+func (f *fakeLLMManager) SetStackSpotAgentID(string)             {}
+func (f *fakeLLMManager) GetStackSpotRealm() string              { return "" }
+func (f *fakeLLMManager) GetStackSpotAgentID() string            { return "" }
+func (f *fakeLLMManager) RefreshProviders()                      {}
 func (f *fakeLLMManager) CreateClientWithKey(_, _, _ string) (client.LLMClient, error) {
 	return nil, errors.New("not implemented in test")
 }
