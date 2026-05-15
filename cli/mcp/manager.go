@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -866,9 +867,9 @@ func (m *Manager) startHTTPServer(ctx context.Context, conn *ServerConnection) e
 	conn.transport = transport
 
 	if err := m.initializeServer(conn); err != nil {
-		_ = transport.Close()
+		_ = transport.Close() //nolint:contextcheck // mcpTransport.Close is a sync cleanup op shared with stdio/sse; no ctx by design
 		conn.transport = nil
-		return fmt.Errorf("MCP initialize failed: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("mcp.transport.http_initialize_failed"), err)
 	}
 
 	if err := m.discoverTools(conn); err != nil {

@@ -175,7 +175,7 @@ func (t *httpTransport) Call(method string, params interface{}) (json.RawMessage
 		if reqCtx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("%s", i18n.T("mcp.transport.call_timeout", method, deadline))
 		}
-		return nil, fmt.Errorf("MCP HTTP POST failed: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("mcp.transport.http_post_failed"), err)
 	}
 	defer resp.Body.Close()
 
@@ -228,7 +228,7 @@ func (t *httpTransport) readJSONResponse(body io.Reader, expectedID int64) (json
 		return nil, fmt.Errorf("parse MCP HTTP response: %w", err)
 	}
 	if resp.Error != nil {
-		return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
+		return nil, fmt.Errorf("%s", i18n.T("mcp.transport.rpc_error", resp.Error.Code, resp.Error.Message))
 	}
 	if resp.ID != expectedID {
 		t.logger.Debug("MCP HTTP response id mismatch",
@@ -246,7 +246,7 @@ func (t *httpTransport) readJSONResponse(body io.Reader, expectedID int64) (json
 //
 // The deadline is enforced by the per-call context the caller wired
 // into the request, so we don't need a separate timer here — when
-// the deadline fires the scanner observes EOF on the cancelled body.
+// the deadline fires the scanner observes EOF on the canceled body.
 func (t *httpTransport) readSSEResponse(body io.Reader, expectedID int64, method string, deadline time.Duration) (json.RawMessage, error) {
 	scanner := bufio.NewScanner(body)
 	// Generous buffer so a single large JSON payload encoded as one
@@ -281,7 +281,7 @@ func (t *httpTransport) readSSEResponse(body io.Reader, expectedID int64, method
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("MCP HTTP SSE read: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("mcp.transport.http_sse_read_failed"), err)
 	}
 	// Stream closed before we saw the response for our ID.
 	return nil, fmt.Errorf("%s", i18n.T("mcp.transport.http_stream_closed", method, deadline))
@@ -315,7 +315,7 @@ func (t *httpTransport) dispatchSSEEvent(eventType, data string, expectedID int6
 	}
 	if resp.ID == expectedID {
 		if resp.Error != nil {
-			return sseResult{Err: fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)}, true
+			return sseResult{Err: fmt.Errorf("%s", i18n.T("mcp.transport.rpc_error", resp.Error.Code, resp.Error.Message))}, true
 		}
 		return sseResult{Result: resp.Result}, true
 	}
@@ -375,19 +375,21 @@ func (t *httpTransport) Close() error {
 	sid := t.sessionID
 	t.sessionMu.RUnlock()
 	if sid != "" {
-		t.sendSessionDelete(sid)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		t.sendSessionDelete(ctx, sid)
 	}
 	return nil
 }
 
 // sendSessionDelete fires a DELETE with the session header so the
-// server can release per-session state immediately. Runs against a
-// fresh short-lived context (Close() already cancelled the main
-// one) and ignores every error — this is purely a courtesy to the
-// remote side.
-func (t *httpTransport) sendSessionDelete(sid string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+// server can release per-session state immediately. Takes the
+// context as a parameter — the caller (Close) provides a fresh
+// background-derived ctx so this courtesy DELETE survives even
+// though Close has already canceled the transport's main context.
+// All errors are ignored on purpose; the server-side session times
+// out anyway.
+func (t *httpTransport) sendSessionDelete(ctx context.Context, sid string) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, t.endpoint, nil)
 	if err != nil {
 		return
