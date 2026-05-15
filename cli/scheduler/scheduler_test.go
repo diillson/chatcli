@@ -246,9 +246,27 @@ func TestScheduler_RecurringInterval_RearmsInPlace(t *testing.T) {
 		t.Fatalf("recurring job fired only %d times in %s, want >=%d", got, 3*time.Second, wantFires)
 	}
 
-	q, err := s.Query(created.ID)
-	if err != nil {
-		t.Fatalf("query: %v", err)
+	// Poll briefly for the scheduler's post-fire bookkeeping to settle.
+	// fa.calls is incremented inside the action callback BEFORE the
+	// scheduler advances NextFireAt for the next cycle, so a query that
+	// runs immediately after `fa.calls.Load() >= wantFires` can race the
+	// re-arm path and observe a stale NextFireAt. On Ubuntu CI with the
+	// race detector the gap can exceed 200ms, which used to flake the
+	// assertion below. The poll preserves the invariant (NextFireAt
+	// must be within 200ms of now) while waiting up to 1s for it to
+	// become observable; if it never settles, the post-loop assertion
+	// still surfaces the failure.
+	var q *Job
+	var queryErr error
+	for end := time.Now().Add(1 * time.Second); time.Now().Before(end); {
+		q, queryErr = s.Query(created.ID)
+		if queryErr == nil && !q.NextFireAt.Before(time.Now().Add(-200*time.Millisecond)) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if queryErr != nil {
+		t.Fatalf("query: %v", queryErr)
 	}
 
 	// Same JobID, alive (not terminal), and re-armed for another cycle.
