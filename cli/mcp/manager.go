@@ -729,6 +729,8 @@ func (m *Manager) startServer(ctx context.Context, conn *ServerConnection) error
 		return m.startStdioServer(ctx, conn)
 	case TransportSSE:
 		return m.startSSEServer(ctx, conn)
+	case TransportStreamableHTTP:
+		return m.startHTTPServer(ctx, conn)
 	default:
 		return fmt.Errorf("unsupported transport: %s", conn.Config.Transport)
 	}
@@ -839,6 +841,47 @@ func (m *Manager) startSSEServer(ctx context.Context, conn *ServerConnection) er
 	conn.Status.LastError = nil
 	conn.Status.StartedAt = time.Now()
 	m.logger.Info("MCP SSE server connected",
+		zap.String("server", conn.Config.Name),
+		zap.Int("tools", conn.Status.ToolCount))
+	m.logTrustModeIfEnabled(conn.Config)
+
+	return nil
+}
+
+// startHTTPServer connects to an MCP server via the 2025-03-26
+// Streamable HTTP transport. Symmetric with startSSEServer — the
+// only difference is that the transport itself has no upfront
+// handshake, so connection-level errors surface during the
+// initialize call rather than at construction time.
+func (m *Manager) startHTTPServer(ctx context.Context, conn *ServerConnection) error {
+	m.logger.Info("connecting to MCP HTTP server",
+		zap.String("server", conn.Config.Name),
+		zap.String("url", conn.Config.URL))
+
+	transport, err := newHTTPTransport(ctx, conn.Config, m.logger, m.channels, conn.Config.Name)
+	if err != nil {
+		return fmt.Errorf("failed to construct HTTP transport: %w", err)
+	}
+
+	conn.transport = transport
+
+	if err := m.initializeServer(conn); err != nil {
+		_ = transport.Close()
+		conn.transport = nil
+		return fmt.Errorf("MCP initialize failed: %w", err)
+	}
+
+	if err := m.discoverTools(conn); err != nil {
+		m.logger.Warn("MCP tool discovery failed",
+			zap.String("server", conn.Config.Name),
+			zap.Error(err))
+	}
+
+	conn.Status.Connected = true
+	conn.Status.Starting = false
+	conn.Status.LastError = nil
+	conn.Status.StartedAt = time.Now()
+	m.logger.Info("MCP HTTP server connected",
 		zap.String("server", conn.Config.Name),
 		zap.Int("tools", conn.Status.ToolCount))
 	m.logTrustModeIfEnabled(conn.Config)

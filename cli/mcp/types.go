@@ -141,8 +141,9 @@ type AuthConfig struct {
 type TransportType string
 
 const (
-	TransportStdio TransportType = "stdio"
-	TransportSSE   TransportType = "sse"
+	TransportStdio          TransportType = "stdio"
+	TransportSSE            TransportType = "sse"
+	TransportStreamableHTTP TransportType = "http"
 )
 
 // MCPTool represents a tool discovered from an MCP server.
