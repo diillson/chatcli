@@ -168,9 +168,14 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - name: go test -race -coverprofile
+      - name: go test -race -coverpkg=./... -coverprofile
+        # -coverpkg=./... is REQUIRED for patch-coverage correctness: it
+        # forces the profile to include every package in the module, even
+        # those without _test.go files. Without it, brand-new packages
+        # added in a PR have zero profile entries and look like "100%
+        # covered" to diff-cover. See tools/qg/diffcover/compute.go.
         run: |
-          go test -race -coverprofile=coverage.out ./...
+          go test -race -coverpkg=./... -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tail -n 1
 
       - name: Upload coverage profile
@@ -209,10 +214,6 @@ jobs:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
       - name: Install yq
         run: |
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
@@ -227,6 +228,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_LABELS: ${{ needs.meta.outputs.labels }}
           QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+        # qg-diffcover is built on demand by scripts/qg/patch-coverage.sh;
+        # the Go toolchain layer above is the only system dep it needs.
         run: bash scripts/qg/patch-coverage.sh coverage.out
 
   # ---------------------------------------------------------------------

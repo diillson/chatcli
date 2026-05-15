@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 # scripts/qg/patch-coverage.sh — patch coverage on the PR diff.
 #
-# Pipeline:
-#   1. Convert coverage.out -> coverage.xml via gocover-cobertura.
-#   2. Run diff-cover against the XML, comparing to origin/<base>.
-#   3. Threshold from .github/quality-gate.yml; relaxed when the PR carries
-#      the `refactor-only` label.
-#   4. PRs that touch zero non-test Go files are auto-passed (docs/CI only).
+# Delegates to tools/qg/cmd/qg-diffcover (Go-native). Replaces the previous
+# Python pipeline (gocover-cobertura -> diff-cover) whose silent failure
+# modes were masking patch-coverage regressions — the Floor 3 result on a
+# real PR showed `0% (≥ 60% required)` and still passed, because the parser
+# defaulted to 0 when its input file was empty.
 #
-# Exit codes: 0 pass, 1 fail. Sets outputs: percent, threshold, files_count.
+# Behaviour now:
+#   * Auto-skip when the PR touches zero non-test Go files (docs/CI only).
+#   * `refactor-only` label relaxes the threshold (move-don't-add).
+#   * Hard failure when an in-diff Go file has zero coverage profile entries
+#     — that indicates the test invocation forgot `-coverpkg=./...` and we
+#     cannot certify what the gate didn't measure.
+#
+# Exit codes: 0 pass, 1 fail. Sets outputs: percent, covered, total,
+# threshold, files_count, uninstrumented, passed.
 
 set -euo pipefail
 
@@ -33,7 +40,10 @@ if qg_has_label refactor-only; then
   qg_log "refactor-only label detected, relaxing threshold to ${threshold}%"
 fi
 
-# Docs-only short-circuit — count non-test, non-generated Go files
+mapfile -t exclude_patterns < <(qg_yq '.coverage_patch.exclude[]?' 2>/dev/null || true)
+
+# Auto-skip when no Go non-test files changed. This keeps docs/CI-only PRs
+# from re-running coverage computation for nothing.
 go_changed=$(git diff "$QG_BASE_REF"...HEAD --name-only --diff-filter=AM \
               -- '*.go' \
                  ':(exclude)*_test.go' \
@@ -48,43 +58,49 @@ qg_set_output threshold "$threshold"
 if [[ "$go_changed" == "0" ]]; then
   qg_log "no Go non-test files changed — patch coverage N/A"
   qg_set_output percent "100"
+  qg_set_output covered "0"
+  qg_set_output total "0"
   qg_set_output passed true
   qg_set_summary_line "✅ **Patch coverage**: N/A (no Go non-test files changed)"
   exit 0
 fi
 
-# Tools — install if missing (Actions runners cache between steps via setup-go)
-if ! command -v gocover-cobertura >/dev/null 2>&1; then
-  go install github.com/boumenot/gocover-cobertura@v1.2.0
-fi
-if ! command -v diff-cover >/dev/null 2>&1; then
-  pip install --quiet --no-input 'diff_cover>=9.0.0,<10'
-fi
+# Build the qg-diffcover binary. Cached by setup-go between runs.
+binary="$(mktemp -d)/qg-diffcover"
+( cd "$QG_REPO_ROOT" && go build -o "$binary" ./tools/qg/cmd/qg-diffcover )
 
-XML=coverage.xml
-gocover-cobertura < "$PROFILE" > "$XML"
+# Compose exclude flags. Defaults are baked into the script so the Go tool
+# can be invoked standalone too; quality-gate.yml extras add to that list.
+default_excludes=( "*_test.go" "*.pb.go" "proto/**" "tools/docgen/**" )
 
-# diff-cover writes a Markdown report; capture it for the sticky comment.
-report_md="diff-cover-report.md"
-: > "$report_md"
+args=(
+  -coverage "$PROFILE"
+  -base "$QG_BASE_REF"
+  -threshold "$threshold"
+  -markdown "/tmp/qg-patch-coverage.md"
+  -strip-prefix "github.com/diillson/chatcli/operator"
+  -strip-prefix "github.com/diillson/chatcli"
+  -include "*.go"
+)
+for p in "${default_excludes[@]}"; do args+=( -exclude "$p" ); done
+for p in "${exclude_patterns[@]}"; do args+=( -exclude "$p" ); done
 
 set +e
-diff-cover "$XML" \
-  --compare-branch="$QG_BASE_REF" \
-  --fail-under "$threshold" \
-  --markdown-report "$report_md" \
-  --quiet
+output=$( "$binary" "${args[@]}" 2>&1 )
 rc=$?
 set -e
 
-# Extract overall % (diff-cover prints "Coverage: NN.N%" to the report)
-percent=$(grep -oE 'Coverage:\s*[0-9]+(\.[0-9]+)?%' "$report_md" \
-            | head -n1 \
-            | grep -oE '[0-9]+(\.[0-9]+)?' \
-            | head -n1 \
-            || echo "0")
+# Forward key=value lines from the tool to GitHub Outputs verbatim.
+while IFS='=' read -r k v; do
+  case "$k" in
+    percent|covered|total|threshold|files_changed|uninstrumented)
+      qg_set_output "$k" "$v"
+      ;;
+  esac
+done <<< "$output"
 
-qg_set_output percent "$percent"
+percent=$(awk -F= '/^percent=/ { print $2; exit }' <<< "$output")
+percent="${percent:-0}"
 
 if [[ $rc -eq 0 ]]; then
   qg_set_output passed true
@@ -92,18 +108,24 @@ if [[ $rc -eq 0 ]]; then
   exit 0
 fi
 
-msg="patch coverage ${percent}% < ${threshold}% required"
+# rc != 0 — fail with the tool's error message. The Go tool itself decides
+# what failure means (below threshold OR uninstrumented files in diff).
 qg_set_output passed false
-qg_set_summary_line "❌ **Patch coverage**: ${msg}"
+qg_set_summary_line "❌ **Patch coverage**: ${percent}% < ${threshold}% required"
 qg_set_summary_line ""
-qg_set_summary_line "<details><summary>diff-cover report</summary>"
+qg_set_summary_line "<details><summary>Coverage report</summary>"
 qg_set_summary_line ""
-qg_set_summary_line "$(cat "$report_md")"
+if [[ -s /tmp/qg-patch-coverage.md ]]; then
+  qg_set_summary_line "$(cat /tmp/qg-patch-coverage.md)"
+fi
 qg_set_summary_line ""
 qg_set_summary_line "</details>"
 
+# Surface the tool's error text in the workflow log too.
+printf '%s\n' "$output" >&2
+
 if [[ "$enforcement" == "blocking" ]]; then
-  qg_fail "$msg"
+  qg_fail "patch coverage gate failed (see step summary)"
   exit 1
 fi
-qg_warn "$msg"
+qg_warn "patch coverage gate failed (warn-only mode)"
