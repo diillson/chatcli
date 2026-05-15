@@ -163,7 +163,15 @@ func (t *httpTransport) Call(method string, params interface{}) (json.RawMessage
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json, text/event-stream")
+	// Order matters in the wild. The 2025-03-26 spec just requires
+	// both media types to be listed and a substring/`includes` check
+	// on the server is enough — but several real implementations
+	// (FastMCP, some Cloudflare Workers MCP gateways) interpret the
+	// FIRST listed type as the client's preference and return HTTP
+	// 406 / JSON-RPC -32600 when text/event-stream is not first.
+	// Putting SSE first is compatible with both naive first-match
+	// and spec-correct includes-match servers.
+	httpReq.Header.Set("Accept", "text/event-stream, application/json")
 	t.applyHeaders(httpReq)
 	t.attachSession(httpReq)
 
