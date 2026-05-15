@@ -32,7 +32,14 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
-      - name: Run govulncheck
+      - name: Run govulncheck (root)
+        run: govulncheck ./...
+
+      - name: Run govulncheck (operator)
+        # Operator is a separate Go module with its own go.sum, so
+        # govulncheck has to be re-run inside it. The root scan does NOT
+        # transitively cover the operator's dependencies.
+        working-directory: operator
         run: govulncheck ./...
 
   gosec:
@@ -49,14 +56,26 @@ jobs:
       - name: Install gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
 
-      - name: Run gosec
-        run: gosec -exclude-generated -fmt sarif -out gosec-results.sarif ./... || true
+      - name: Run gosec (root)
+        run: gosec -exclude-generated -fmt sarif -out gosec-root.sarif ./... || true
 
-      - name: Upload SARIF results
+      - name: Run gosec (operator)
+        working-directory: operator
+        run: gosec -exclude-generated -fmt sarif -out gosec-operator.sarif ./... || true
+
+      - name: Upload SARIF results (root)
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: gosec-results.sarif
+          sarif_file: gosec-root.sarif
+          category: gosec-root
+
+      - name: Upload SARIF results (operator)
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: operator/gosec-operator.sarif
+          category: gosec-operator
 
   dependency-review:
     name: Dependency Review

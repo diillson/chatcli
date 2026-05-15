@@ -162,6 +162,29 @@ func parseLineCol(s string) (int, error) {
 	return strconv.Atoi(s[:dot])
 }
 
+// TotalCoverage returns the (covered, total, percent) triple computed
+// directly from the profile, without invoking `go tool cover`. Source
+// resolution is not needed: each block already carries its NumStmts, so
+// we sum statements weighted by execution status.
+//
+// This matches the percentage `go tool cover -func | grep total:` would
+// print when run from the right module root, but works on profiles that
+// merge multiple modules — which `go tool cover -func` cannot resolve.
+func (p *Profile) TotalCoverage() (covered, total int, percent float64) {
+	for _, blocks := range p.Blocks {
+		for _, b := range blocks {
+			total += b.NumStmts
+			if b.Count > 0 {
+				covered += b.NumStmts
+			}
+		}
+	}
+	if total == 0 {
+		return 0, 0, 0
+	}
+	return covered, total, 100 * float64(covered) / float64(total)
+}
+
 // StripPrefixes returns a copy of the profile with module prefixes removed
 // from file paths so the result matches `git diff` output. Each prefix is
 // stripped only if the path starts with it; the LONGEST matching prefix

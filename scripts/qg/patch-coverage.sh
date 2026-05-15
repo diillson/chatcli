@@ -78,7 +78,10 @@ args=(
   -base "$QG_BASE_REF"
   -threshold "$threshold"
   -markdown "/tmp/qg-patch-coverage.md"
-  -strip-prefix "github.com/diillson/chatcli/operator"
+  # Strip only the root module prefix. Operator entries already include
+  # "operator/" after the strip, so they match `git diff` paths verbatim.
+  # Stripping the operator prefix as well would leave bare "controllers/"
+  # which would not match.
   -strip-prefix "github.com/diillson/chatcli"
   -include "*.go"
 )

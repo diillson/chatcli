@@ -116,6 +116,39 @@ func TestCoverBlock_Covers(t *testing.T) {
 	}
 }
 
+func TestTotalCoverage(t *testing.T) {
+	p := &Profile{
+		Mode: "atomic",
+		Blocks: map[string][]CoverBlock{
+			"a.go": {
+				{StartLine: 1, EndLine: 2, NumStmts: 3, Count: 1}, // covered
+				{StartLine: 5, EndLine: 6, NumStmts: 2, Count: 0}, // uncovered
+			},
+			"b.go": {
+				{StartLine: 1, EndLine: 1, NumStmts: 5, Count: 10}, // covered
+			},
+		},
+	}
+	cov, tot, pct := p.TotalCoverage()
+	if tot != 10 {
+		t.Errorf("total stmts = %d, want 10", tot)
+	}
+	if cov != 8 {
+		t.Errorf("covered stmts = %d, want 8", cov)
+	}
+	if pct < 79.9 || pct > 80.1 {
+		t.Errorf("percent = %.2f, want ~80", pct)
+	}
+}
+
+func TestTotalCoverage_Empty(t *testing.T) {
+	p := &Profile{Mode: "set", Blocks: map[string][]CoverBlock{}}
+	cov, tot, pct := p.TotalCoverage()
+	if cov != 0 || tot != 0 || pct != 0 {
+		t.Errorf("empty profile = (%d, %d, %.2f), want (0, 0, 0)", cov, tot, pct)
+	}
+}
+
 func TestStripPrefixes_LongestWins(t *testing.T) {
 	p := &Profile{
 		Mode: "atomic",

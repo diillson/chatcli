@@ -104,6 +104,10 @@ jobs:
 
   # ---------------------------------------------------------------------
   # Floor 1 — build, vet, gofmt, golangci-lint
+  #
+  # Runs the same checks twice: once at the repo root (chatcli main module)
+  # and once inside operator/ (separate Go module). gofmt is run repo-wide
+  # because the formatter doesn't care about module boundaries.
   # ---------------------------------------------------------------------
   build-static:
     name: Floor 1 · Build & Static
@@ -117,13 +121,21 @@ jobs:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
 
-      - name: go build
+      - name: go build (root)
         run: go build ./...
 
-      - name: go vet
+      - name: go build (operator)
+        working-directory: operator
+        run: go build ./...
+
+      - name: go vet (root)
         run: go vet ./...
 
-      - name: gofmt
+      - name: go vet (operator)
+        working-directory: operator
+        run: go vet ./...
+
+      - name: gofmt (repo-wide)
         run: |
           out=$(gofmt -l .)
           if [[ -n "$out" ]]; then
@@ -132,11 +144,19 @@ jobs:
             exit 1
           fi
 
-      - name: golangci-lint
+      - name: golangci-lint (root)
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.8
           install-mode: goinstall
+          args: --timeout=5m
+
+      - name: golangci-lint (operator)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+          install-mode: goinstall
+          working-directory: operator
           args: --timeout=5m
 
   # ---------------------------------------------------------------------
@@ -168,14 +188,23 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - name: go test -race -coverpkg=./... -coverprofile
+      - name: go test root + operator (merged profile)
         # -coverpkg=./... is REQUIRED for patch-coverage correctness: it
         # forces the profile to include every package in the module, even
         # those without _test.go files. Without it, brand-new packages
-        # added in a PR have zero profile entries and look like "100%
+        # added in a PR have zero profile entries and look like "100 percent
         # covered" to diff-cover. See tools/qg/diffcover/compute.go.
+        #
+        # Both modules contribute to a single coverage.out so Floors 2 and
+        # 3 see the unified picture. Merging by concatenating records
+        # (with one mode header) is safe: -race forces atomic mode in both
+        # modules, and tools/qg/diffcover dedupes overlapping ranges.
         run: |
-          go test -race -coverpkg=./... -coverprofile=coverage.out ./...
+          go test -race -coverpkg=./... -coverprofile=coverage-root.out ./...
+          ( cd operator && go test -race -coverpkg=./... -coverprofile=../coverage-operator.out ./... )
+          head -1 coverage-root.out > coverage.out
+          tail -n +2 coverage-root.out >> coverage.out
+          tail -n +2 coverage-operator.out >> coverage.out
           go tool cover -func=coverage.out | tail -n 1
 
       - name: Upload coverage profile
