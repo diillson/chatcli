@@ -43,8 +43,15 @@ coverage_total:
   # Tolerance to absorb flake (line-count drift on retries, etc.).
   tolerance_pct: 0.1
 
-# Floor 3 — Patch coverage on the diff. Computed via gocover-cobertura +
-# diff-cover comparing to origin/<base>. Excludes generated and test files.
+# Floor 3 — Patch coverage on the diff. Computed by tools/qg/cmd/qg-diffcover
+# (Go-native, no Python dep) comparing to origin/<base>. Excludes generated
+# and test files.
+#
+# per_path applies stricter thresholds to security- and quality-critical
+# paths. Hot or fragile areas (LLM clients, auth, the gate tooling itself)
+# carry higher floors than the global default. Any file in the diff that
+# matches one of these patterns counts toward both the global and the
+# per-path metric; the gate fails if EITHER is breached.
 coverage_patch:
   enforcement: blocking
   threshold_pct: 60
@@ -55,6 +62,15 @@ coverage_patch:
     - "**/*.pb.go"
     - "proto/**"
     - "tools/docgen/**"
+  per_path:
+    - path: "auth/**"
+      threshold_pct: 80
+    - path: "llm/**"
+      threshold_pct: 70
+    - path: "tools/qg/**"
+      threshold_pct: 75
+    - path: "operator/controllers/**"
+      threshold_pct: 70
 
 # Floor 4 — AI / hand-rolled code smells scanned in the diff (Go non-test only).
 ai_smells:

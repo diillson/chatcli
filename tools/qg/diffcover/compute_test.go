@@ -128,6 +128,45 @@ func TestCompute_FilesWithOnlyNonExecAreDropped(t *testing.T) {
 	}
 }
 
+func TestComputePathThresholds_BreachOnHotPath(t *testing.T) {
+	files := []FileResult{
+		// auth/ — security-sensitive, requires 80%; 1 of 4 covered = 25%.
+		{Path: "auth/login.go", Total: 4, Covered: 1},
+		// cli/ — global default applies; this 100% passes a global 60.
+		{Path: "cli/oneshot.go", Total: 10, Covered: 10},
+	}
+	thresholds := []PathThreshold{
+		{Pattern: "auth/**", Threshold: 80},
+		{Pattern: "cli/**", Threshold: 50},
+	}
+	breaches := ComputePathThresholds(files, thresholds)
+	if len(breaches) != 1 {
+		t.Fatalf("expected 1 breach, got %d: %+v", len(breaches), breaches)
+	}
+	if breaches[0].Pattern != "auth/**" {
+		t.Errorf("breach pattern = %q, want auth/**", breaches[0].Pattern)
+	}
+}
+
+func TestComputePathThresholds_NoMatchingFilesPassesVacuously(t *testing.T) {
+	files := []FileResult{{Path: "cli/foo.go", Total: 10, Covered: 10}}
+	thresholds := []PathThreshold{{Pattern: "auth/**", Threshold: 95}}
+	breaches := ComputePathThresholds(files, thresholds)
+	if len(breaches) != 0 {
+		t.Errorf("expected no breach when no files match the pattern, got %+v", breaches)
+	}
+}
+
+func TestResult_PassedRequiresPathThresholds(t *testing.T) {
+	r := Result{
+		Total: 10, Covered: 10, Threshold: 60,
+		PathBreaches: []PathBreach{{Pattern: "auth/**"}},
+	}
+	if r.Passed() {
+		t.Error("Result with a path breach must not Pass even if overall is 100%")
+	}
+}
+
 func TestResult_PercentEmpty(t *testing.T) {
 	r := Result{Threshold: 60}
 	if r.Percent() != 100 {

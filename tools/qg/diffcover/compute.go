@@ -36,12 +36,31 @@ func (f FileResult) Percent() float64 {
 	return 100 * float64(f.Covered) / float64(f.Total)
 }
 
+// PathThreshold pairs a glob pattern with a coverage threshold higher
+// than the global floor. Used to enforce stricter coverage on hot or
+// security-sensitive paths (auth, llm clients, the gate tooling itself).
+type PathThreshold struct {
+	Pattern   string
+	Threshold float64
+}
+
+// PathBreach records a per-path threshold that the gate failed.
+type PathBreach struct {
+	Pattern   string
+	Threshold float64
+	Percent   float64
+	Covered   int
+	Total     int
+	Files     []string
+}
+
 // Result aggregates patch coverage across the diff.
 type Result struct {
-	Files     []FileResult
-	Total     int
-	Covered   int
-	Threshold float64
+	Files       []FileResult
+	Total       int
+	Covered     int
+	Threshold   float64
+	PathBreaches []PathBreach
 }
 
 // Percent returns the overall patch coverage.
@@ -52,9 +71,47 @@ func (r Result) Percent() float64 {
 	return 100 * float64(r.Covered) / float64(r.Total)
 }
 
-// Passed reports whether the overall percent clears the threshold.
+// Passed reports whether the overall percent clears the threshold AND
+// every configured per-path threshold is also met.
 func (r Result) Passed() bool {
-	return r.Percent()+1e-9 >= r.Threshold
+	if r.Percent()+1e-9 < r.Threshold {
+		return false
+	}
+	return len(r.PathBreaches) == 0
+}
+
+// ComputePathThresholds evaluates each per-path threshold against the
+// subset of FileResults whose path matches it. A path that has no
+// matching files is silently treated as passing (vacuously true).
+func ComputePathThresholds(files []FileResult, thresholds []PathThreshold) []PathBreach {
+	var breaches []PathBreach
+	for _, pt := range thresholds {
+		var subTotal, subCovered int
+		var matched []string
+		for _, f := range files {
+			if !matchPattern(f.Path, pt.Pattern) {
+				continue
+			}
+			subTotal += f.Total
+			subCovered += f.Covered
+			matched = append(matched, f.Path)
+		}
+		if subTotal == 0 {
+			continue
+		}
+		percent := 100 * float64(subCovered) / float64(subTotal)
+		if percent+1e-9 < pt.Threshold {
+			breaches = append(breaches, PathBreach{
+				Pattern:   pt.Pattern,
+				Threshold: pt.Threshold,
+				Percent:   percent,
+				Covered:   subCovered,
+				Total:     subTotal,
+				Files:     matched,
+			})
+		}
+	}
+	return breaches
 }
 
 // Compute joins a profile (already prefix-stripped to repo-relative paths)

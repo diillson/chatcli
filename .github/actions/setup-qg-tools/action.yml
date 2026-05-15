@@ -80,7 +80,7 @@ runs:
       shell: bash
       run: |
         mkdir -p "$HOME/.qg-bin"
-        for cmd in qg-diffcover qg-cover-total qg-i18n-parity qg-provider-parity qg-verdict; do
+        for cmd in qg-diffcover qg-cover-total qg-i18n-parity qg-provider-parity qg-verdict qg-fan-in; do
           if [[ -d "tools/qg/cmd/$cmd" ]]; then
             go build -o "$HOME/.qg-bin/$cmd" "./tools/qg/cmd/$cmd"
           fi

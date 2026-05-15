@@ -88,6 +88,16 @@ args=(
 for p in "${default_excludes[@]}"; do args+=( -exclude "$p" ); done
 for p in "${exclude_patterns[@]}"; do args+=( -exclude "$p" ); done
 
+# Per-path thresholds from .github/quality-gate.yml — each entry becomes
+# one `-path-threshold pattern=PCT` argument. refactor-only PRs skip the
+# stricter per-path bars too; the global relaxation already trusts them.
+if ! qg_has_label refactor-only; then
+  while IFS=$'\t' read -r p pct; do
+    [[ -z "$p" || -z "$pct" ]] && continue
+    args+=( -path-threshold "${p}=${pct}" )
+  done < <(qg_yq '.coverage_patch.per_path[]? | [.path, .threshold_pct] | @tsv' 2>/dev/null || true)
+fi
+
 set +e
 output=$( "$binary" "${args[@]}" 2>&1 )
 rc=$?

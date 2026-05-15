@@ -51,6 +51,25 @@ qg_set_output loc "$loc"
 qg_set_output code_loc "$code_loc"
 qg_set_output tooling_loc "$tooling_loc"
 
+# Blast radius — how many packages in the module import the packages the
+# diff touches. Surfaced as informational metric; a 200 LOC change to a
+# package imported by 30 others is a wider risk than a 1000 LOC leaf
+# change. qg-fan-in is best-effort; failure is non-fatal because the
+# tool needs `go list` and a clean go.mod state.
+blast_radius=0
+if command -v qg-fan-in >/dev/null 2>&1 || [[ -x "$(qg_tool qg-fan-in 2>/dev/null)" ]]; then
+  blast_input=$(git diff "$QG_BASE_REF"...HEAD --name-only -- '*.go' ':(exclude)*_test.go')
+  if [[ -n "$blast_input" ]]; then
+    blast_radius=$(
+      printf '%s\n' "$blast_input" \
+        | ( cd "$QG_REPO_ROOT" && "$(qg_tool qg-fan-in)" -files - 2>/dev/null ) \
+        | awk -F'\t' '$1=="TOTAL" { print $2; exit }'
+    )
+    [[ -z "$blast_radius" ]] && blast_radius=0
+  fi
+fi
+qg_set_output blast_radius "$blast_radius"
+
 bypass_loc=false
 bypass_files=false
 qg_has_label "$loc_label" && bypass_loc=true
@@ -64,7 +83,7 @@ if (( files > files_block )) && ! $bypass_files; then
   reasons+=("files ${files} > ${files_block} block (bypass with label '${files_label}')")
 fi
 
-summary="**Scope**: ${files} files (${code_files} code + ${tooling_files} tooling), ${loc} LOC (${code_loc} code + ${tooling_loc} tooling)"
+summary="**Scope**: ${files} files (${code_files} code + ${tooling_files} tooling), ${loc} LOC (${code_loc} code + ${tooling_loc} tooling), blast radius ${blast_radius}"
 
 if [[ ${#reasons[@]} -gt 0 ]]; then
   qg_set_output passed false

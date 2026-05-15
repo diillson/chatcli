@@ -44,6 +44,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/tools/qg/diffcover"
@@ -66,17 +67,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 
 	var (
-		coveragePath = fs.String("coverage", "coverage.out", "path to go coverprofile")
-		baseRef      = fs.String("base", "origin/main", "base git ref for the diff")
-		threshold    = fs.Float64("threshold", 60, "minimum patch coverage % to pass")
-		markdownOut  = fs.String("markdown", "", "optional markdown report output path")
-		includes     stringSliceFlag
-		excludes     stringSliceFlag
-		strips       stringSliceFlag
+		coveragePath   = fs.String("coverage", "coverage.out", "path to go coverprofile")
+		baseRef        = fs.String("base", "origin/main", "base git ref for the diff")
+		threshold      = fs.Float64("threshold", 60, "minimum patch coverage % to pass")
+		markdownOut    = fs.String("markdown", "", "optional markdown report output path")
+		includes       stringSliceFlag
+		excludes       stringSliceFlag
+		strips         stringSliceFlag
+		pathThresholds stringSliceFlag
 	)
 	fs.Var(&includes, "include", "include path glob (may repeat)")
 	fs.Var(&excludes, "exclude", "exclude path glob (may repeat)")
 	fs.Var(&strips, "strip-prefix", "module-path prefix to strip from cover profile entries (may repeat)")
+	fs.Var(&pathThresholds, "path-threshold", "per-path coverage requirement `pattern=PCT` (may repeat, e.g. `auth/**=80`)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -118,11 +121,21 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	result, uninstr := diffcover.Compute(profile, diff, include, *threshold)
 
+	// Apply per-path thresholds AFTER the global computation. Each
+	// `-path-threshold "pattern=PCT"` flag becomes one (Pattern, Threshold)
+	// pair; any breach makes Result.Passed() return false.
+	pathTs, perr := parsePathThresholds(pathThresholds)
+	if perr != nil {
+		return perr
+	}
+	result.PathBreaches = diffcover.ComputePathThresholds(result.Files, pathTs)
+
 	emitKV(stdout, "percent", fmt.Sprintf("%.1f", result.Percent()))
 	emitKV(stdout, "covered", fmt.Sprintf("%d", result.Covered))
 	emitKV(stdout, "total", fmt.Sprintf("%d", result.Total))
 	emitKV(stdout, "threshold", fmt.Sprintf("%.0f", *threshold))
 	emitKV(stdout, "files_changed", fmt.Sprintf("%d", len(result.Files)))
+	emitKV(stdout, "path_breaches", fmt.Sprintf("%d", len(result.PathBreaches)))
 	if len(uninstr) > 0 {
 		emitKV(stdout, "uninstrumented", strings.Join(uninstr, ","))
 	}
@@ -149,11 +162,36 @@ func run(args []string, stdout, stderr io.Writer) error {
 			strings.Join(uninstr, ", "))
 	}
 
+	if len(result.PathBreaches) > 0 {
+		parts := make([]string, 0, len(result.PathBreaches))
+		for _, b := range result.PathBreaches {
+			parts = append(parts, fmt.Sprintf("%s: %.1f%% < %.0f%%", b.Pattern, b.Percent, b.Threshold))
+		}
+		return fmt.Errorf("per-path coverage breaches: %s", strings.Join(parts, "; "))
+	}
 	if !result.Passed() {
 		return fmt.Errorf("patch coverage %.1f%% below threshold %.0f%%",
 			result.Percent(), *threshold)
 	}
 	return nil
+}
+
+// parsePathThresholds parses `pattern=PCT` strings into PathThresholds.
+// The PCT is read as a float so callers can ask for "80.5" if needed.
+func parsePathThresholds(args []string) ([]diffcover.PathThreshold, error) {
+	out := make([]diffcover.PathThreshold, 0, len(args))
+	for _, a := range args {
+		idx := strings.LastIndex(a, "=")
+		if idx <= 0 || idx == len(a)-1 {
+			return nil, fmt.Errorf("path-threshold %q: want `pattern=PCT`", a)
+		}
+		pct, err := strconv.ParseFloat(a[idx+1:], 64)
+		if err != nil {
+			return nil, fmt.Errorf("path-threshold %q: parse pct: %w", a, err)
+		}
+		out = append(out, diffcover.PathThreshold{Pattern: a[:idx], Threshold: pct})
+	}
+	return out, nil
 }
 
 func emitKV(w io.Writer, k, v string) { fmt.Fprintf(w, "%s=%s\n", k, v) }
