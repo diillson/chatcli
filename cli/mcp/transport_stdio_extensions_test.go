@@ -73,7 +73,7 @@ func TestNewStdioTransport_EmptyCwdInheritsParent(t *testing.T) {
 		t.Fatalf("empty cwd should not error: %v", err)
 	}
 	// Clean up the launched process so the test stays hermetic.
-	defer func() { _ = tp.Close() }()
+	defer func() { _ = tp.Close(context.Background()) }()
 
 	if tp.cmd.Dir != "" {
 		t.Errorf("cmd.Dir should remain unset when Cwd is empty; got %q", tp.cmd.Dir)
@@ -90,7 +90,7 @@ func TestNewStdioTransport_CustomTimeoutPropagates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("transport setup: %v", err)
 	}
-	defer func() { _ = tp.Close() }()
+	defer func() { _ = tp.Close(context.Background()) }()
 
 	if tp.callTimeout.Seconds() != 7 {
 		t.Errorf("callTimeout = %s, want 7s", tp.callTimeout)
@@ -106,7 +106,7 @@ func TestNewStdioTransport_DefaultTimeoutPropagates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("transport setup: %v", err)
 	}
-	defer func() { _ = tp.Close() }()
+	defer func() { _ = tp.Close(context.Background()) }()
 
 	if tp.callTimeout != DefaultRequestTimeout {
 		t.Errorf("callTimeout = %s, want %s", tp.callTimeout, DefaultRequestTimeout)

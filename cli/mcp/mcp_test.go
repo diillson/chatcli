@@ -49,7 +49,7 @@ func (m *mockTransport) Call(method string, _ interface{}) (json.RawMessage, err
 	return c.result, c.err
 }
 
-func (m *mockTransport) Close() error {
+func (m *mockTransport) Close(_ context.Context) error {
 	m.closed = true
 	return nil
 }
@@ -750,7 +750,7 @@ func TestStopAll(t *testing.T) {
 		transport: mt2,
 	}
 
-	m.StopAll()
+	m.StopAll(context.Background())
 
 	if !mt1.closed {
 		t.Error("expected transport 1 to be closed")
@@ -776,7 +776,7 @@ func TestStopAllWithNilTransport(t *testing.T) {
 		transport: nil,
 	}
 	// Should not panic
-	m.StopAll()
+	m.StopAll(context.Background())
 }
 
 // --- startServer unsupported transport ------------------------------------
@@ -982,7 +982,7 @@ func TestSSETransportCallWithHTTPServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newSSETransport: %v", err)
 	}
-	defer tr.Close()
+	defer func() { _ = tr.Close(context.Background()) }()
 
 	if tr.messagesURL != server.URL+"/messages" {
 		t.Errorf("messagesURL = %q, want %s/messages", tr.messagesURL, server.URL)
@@ -1466,7 +1466,7 @@ func TestStopOneKeepsEntryAndDropsTools(t *testing.T) {
 	m.tools["t1"] = &MCPTool{Name: "t1", ServerName: "srv"}
 	m.tools["t2"] = &MCPTool{Name: "t2", ServerName: "srv"}
 
-	if err := m.StopOne("srv"); err != nil {
+	if err := m.StopOne(context.Background(), "srv"); err != nil {
 		t.Fatalf("StopOne: %v", err)
 	}
 
@@ -1492,7 +1492,7 @@ func TestStopOneKeepsEntryAndDropsTools(t *testing.T) {
 
 func TestStopOneUnknownServerErrors(t *testing.T) {
 	m := NewManager(testLogger())
-	if err := m.StopOne("ghost"); err == nil {
+	if err := m.StopOne(context.Background(), "ghost"); err == nil {
 		t.Error("expected error stopping unknown server")
 	}
 }
@@ -1534,7 +1534,7 @@ func TestStartOneUnknownErrorIsSentinel(t *testing.T) {
 
 func TestStopOneUnknownErrorIsSentinel(t *testing.T) {
 	m := NewManager(testLogger())
-	err := m.StopOne("ghost")
+	err := m.StopOne(context.Background(), "ghost")
 	if err == nil {
 		t.Fatal("expected error")
 	}

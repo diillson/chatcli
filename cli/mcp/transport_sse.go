@@ -267,8 +267,19 @@ func (t *sseTransport) Call(method string, params interface{}) (json.RawMessage,
 }
 
 // Close cancels the SSE connection.
-func (t *sseTransport) Close() error {
+//
+// ctx bounds how long we wait for the listener goroutine to drain
+// after cancellation. A well-behaved server tears down within a
+// few milliseconds; we honor ctx so a hung TCP connection during
+// shutdown cannot stall the whole CLI exit path.
+func (t *sseTransport) Close(ctx context.Context) error {
 	t.cancel()
-	<-t.done
-	return nil
+	select {
+	case <-t.done:
+		return nil
+	case <-ctx.Done():
+		t.logger.Warn("MCP SSE Close: ctx fired before listener drained",
+			zap.Error(ctx.Err()))
+		return ctx.Err()
+	}
 }

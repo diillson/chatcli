@@ -1406,10 +1406,13 @@ func (cli *ChatCLI) cleanup() {
 	cli.shutdownScheduler()
 
 	// Stop MCP servers (and the hot-reload watcher first so it can't
-	// fire a Reload mid-shutdown).
+	// fire a Reload mid-shutdown). Bound the whole MCP teardown at
+	// 5s so a stuck transport cannot stall the CLI's exit path.
 	cli.stopMCPConfigWatcher()
 	if cli.mcpManager != nil {
-		cli.mcpManager.StopAll()
+		stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+		cli.mcpManager.StopAll(stopCtx)
+		cancelStop()
 	}
 	if cli.mcpCancel != nil {
 		cli.mcpCancel()

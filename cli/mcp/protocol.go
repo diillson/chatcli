@@ -1,6 +1,9 @@
 package mcp
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
 
 // JSON-RPC 2.0 types for MCP protocol communication.
 
@@ -85,8 +88,15 @@ type toolContent struct {
 	Data     string `json:"data,omitempty"`
 }
 
-// mcpTransport is the interface for MCP server communication (stdio or SSE).
+// mcpTransport is the interface for MCP server communication
+// (stdio, SSE, or Streamable HTTP).
+//
+// Close takes a context so callers can bound the shutdown window —
+// stdio waits for the child process to exit, SSE waits for the
+// listener goroutine to drain, HTTP fires a courtesy DELETE for the
+// session. Each implementation honors ctx so the manager can keep
+// total shutdown time bounded even when one server is uncooperative.
 type mcpTransport interface {
 	Call(method string, params interface{}) (json.RawMessage, error)
-	Close() error
+	Close(ctx context.Context) error
 }

@@ -49,7 +49,7 @@ func newTestTransport(t *testing.T, srv *httptest.Server, mutate func(*ServerCon
 	if err != nil {
 		t.Fatalf("newHTTPTransport: %v", err)
 	}
-	t.Cleanup(func() { _ = tr.Close() })
+	t.Cleanup(func() { _ = tr.Close(context.Background()) })
 	return tr
 }
 
@@ -301,10 +301,11 @@ func TestHTTPTransport_CloseIsIdempotent(t *testing.T) {
 	defer srv.Close()
 
 	tr := newTestTransport(t, srv, nil)
-	if err := tr.Close(); err != nil {
+	ctx := context.Background()
+	if err := tr.Close(ctx); err != nil {
 		t.Fatalf("first Close: %v", err)
 	}
-	if err := tr.Close(); err != nil {
+	if err := tr.Close(ctx); err != nil {
 		t.Fatalf("second Close: %v", err)
 	}
 	if _, err := tr.Call("ping", nil); err == nil {

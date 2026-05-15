@@ -211,7 +211,11 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 				logger.Warn(i18n.T("cmd.server.mcp_start_failed"), zap.Error(err))
 			} else {
 				srv.SetMCPManager(mcpMgr)
-				defer mcpMgr.StopAll()
+				defer func() {
+					stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+					mcpMgr.StopAll(stopCtx)
+					cancelStop()
+				}()
 				logger.Info(i18n.T("cmd.server.mcp_init_success"),
 					zap.Int("servers", len(mcpMgr.GetServerStatus())),
 					zap.Int("tools", len(mcpMgr.GetTools())),

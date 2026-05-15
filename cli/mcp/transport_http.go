@@ -363,32 +363,36 @@ func (t *httpTransport) setSession(sid string) {
 // Close cancels in-flight requests and marks the transport as
 // closed. Idempotent — safe to call from manager teardown plus a
 // deferred cleanup in startHTTPServer's error path.
-func (t *httpTransport) Close() error {
+//
+// ctx scopes the courtesy DELETE that releases the server-side
+// session. The caller's ctx may already be canceled (it usually
+// is during shutdown), so we derive a fresh deadline from it via
+// context.WithoutCancel + WithTimeout — that preserves request-
+// scoped values (auth, tracing) while giving the DELETE a real
+// chance to land. We cap the DELETE at 2 seconds regardless of
+// caller-supplied deadline; this is cleanup, not a payload call.
+func (t *httpTransport) Close(ctx context.Context) error {
 	if !t.closed.CompareAndSwap(false, true) {
 		return nil
 	}
 	t.cancel()
-	// If the server gave us a session ID, send a DELETE to release
-	// it. Best-effort: failure here doesn't matter because the
-	// session will time out server-side anyway.
 	t.sessionMu.RLock()
 	sid := t.sessionID
 	t.sessionMu.RUnlock()
-	if sid != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		t.sendSessionDelete(ctx, sid)
+	if sid == "" {
+		return nil
 	}
+	delCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	t.sendSessionDelete(delCtx, sid)
 	return nil
 }
 
 // sendSessionDelete fires a DELETE with the session header so the
 // server can release per-session state immediately. Takes the
-// context as a parameter — the caller (Close) provides a fresh
-// background-derived ctx so this courtesy DELETE survives even
-// though Close has already canceled the transport's main context.
+// context as a parameter so the deadline is callsite-controlled.
 // All errors are ignored on purpose; the server-side session times
-// out anyway.
+// out anyway and this is purely a courtesy to the remote side.
 func (t *httpTransport) sendSessionDelete(ctx context.Context, sid string) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, t.endpoint, nil)
 	if err != nil {
