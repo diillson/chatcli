@@ -266,10 +266,26 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	return srv.Start()
 }
 
+// fallbackChainSink is the slice of server.Server's API that
+// initFallbackChain actually needs. Narrowing the parameter type
+// keeps the helper trivially mockable and documents that no other
+// server method is touched here.
+type fallbackChainSink interface {
+	SetFallbackChain(chain *fallback.Chain)
+}
+
+// mcpSink is the slice of server.Server's API that initMCPManager
+// uses. Same motivation as fallbackChainSink — accept the narrowest
+// interface so the success/failure paths are exercised by tests
+// without standing up a real *server.Server.
+type mcpSink interface {
+	SetMCPManager(mgr *mcp.Manager)
+}
+
 // initFallbackChain wires the optional provider-fallback chain into
-// srv. Extracted from RunServer so the cyclo budget on the parent
-// function stays in line with the project-wide gate.
-func initFallbackChain(opts *ServerOptions, llmMgr manager.LLMManager, srv *server.Server, logger *zap.Logger) {
+// the sink. Extracted from RunServer so the cyclo budget on the
+// parent function stays in line with the project-wide gate.
+func initFallbackChain(opts *ServerOptions, llmMgr manager.LLMManager, srv fallbackChainSink, logger *zap.Logger) {
 	if opts.FallbackProviders == "" {
 		return
 	}
@@ -322,7 +338,7 @@ func initFallbackChain(opts *ServerOptions, llmMgr manager.LLMManager, srv *serv
 //
 // Returns a stop closure to be deferred by the caller; nil when
 // MCP was not configured or did not come up.
-func initMCPManager(opts *ServerOptions, srv *server.Server, logger *zap.Logger) func() {
+func initMCPManager(opts *ServerOptions, srv mcpSink, logger *zap.Logger) func() {
 	if opts.MCPConfigPath == "" && os.Getenv("CHATCLI_MCP_ENABLED") != "true" {
 		return nil
 	}
