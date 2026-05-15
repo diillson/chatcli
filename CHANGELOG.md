@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.116.0](https://github.com/diillson/chatcli/compare/v1.115.0...v1.116.0) (2026-05-15)
+
+
+### Features
+
+* **moonshot:** add Moonshot (Kimi) provider with thinking-mode support ([#911](https://github.com/diillson/chatcli/issues/911)) ([bfbf1f1](https://github.com/diillson/chatcli/commit/bfbf1f1a20cb610ea0e575af5374422d45b2c84e))
+* **qg:** 15-floor Quality Gate overhaul — fix Floor 3, add 6 floors, redesign table ([#912](https://github.com/diillson/chatcli/issues/912)) ([b698508](https://github.com/diillson/chatcli/commit/b698508e1507dfa418c47c3904c155e4f9baa551))
+
 ## [1.115.0](https://github.com/diillson/chatcli/compare/v1.114.0...v1.115.0) (2026-05-12)
 
 
