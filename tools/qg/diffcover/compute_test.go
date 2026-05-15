@@ -151,17 +151,35 @@ func TestMatchAny(t *testing.T) {
 }
 
 func TestMatchNone(t *testing.T) {
-	if !MatchNone("foo.go", []string{"*.txt"}) {
-		t.Error("exclude *.txt should not exclude foo.go")
+	cases := []struct {
+		name     string
+		path     string
+		patterns []string
+		want     bool // true means NOT excluded
+	}{
+		// Suffix globs must reach nested paths (the bug Floor 3 caught locally).
+		{"_test suffix nested", "tools/qg/diffcover/compute_test.go", []string{"*_test.go"}, false},
+		{"_test suffix root", "compute_test.go", []string{"*_test.go"}, false},
+		{".go does not match .txt", "foo.txt", []string{"*.go"}, true},
+		// Recursive prefix.
+		{"proto/** matches descendant", "proto/x.go", []string{"proto/**"}, false},
+		{"proto/** matches dir itself", "proto", []string{"proto/**"}, false},
+		{"proto/** does not match sibling", "protocol.go", []string{"proto/**"}, true},
+		// Anywhere-by-basename.
+		{"**/foo.pb.go nested", "a/b/foo.pb.go", []string{"**/foo.pb.go"}, false},
+		{"**/foo.pb.go basename only", "foo.pb.go", []string{"**/foo.pb.go"}, false},
+		{"**/foo.pb.go not a match", "foo.pb.go.bak", []string{"**/foo.pb.go"}, true},
+		// Combined patterns — only one needs to match for exclusion.
+		{"multi-pattern hits last", "tools/docgen/main.go", []string{"*_test.go", "tools/docgen/**"}, false},
+		// No patterns means no exclusion.
+		{"empty patterns include", "anything.go", nil, true},
 	}
-	if MatchNone("foo_test.go", []string{"*_test.go"}) {
-		t.Error("exclude *_test.go should exclude foo_test.go")
-	}
-	if MatchNone("a/b/foo.pb.go", []string{"**/foo.pb.go"}) {
-		t.Error("**/foo.pb.go should exclude nested foo.pb.go")
-	}
-	if MatchNone("proto/x.go", []string{"proto/**"}) {
-		t.Error("proto/** should exclude proto/x.go")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MatchNone(tc.path, tc.patterns); got != tc.want {
+				t.Errorf("MatchNone(%q, %v) = %v, want %v", tc.path, tc.patterns, got, tc.want)
+			}
+		})
 	}
 }
 

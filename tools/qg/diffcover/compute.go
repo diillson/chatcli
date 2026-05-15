@@ -134,20 +134,21 @@ func findCovering(blocks []CoverBlock, line int) (CoverBlock, bool) {
 }
 
 // MatchAny reports whether path matches at least one of the include patterns.
-// Patterns use filepath.Match semantics on each path segment ("**" not
-// supported); callers should pass simple prefixes or suffixes.
+//
+// Glob semantics (kept deliberately small — only what the Quality Gate
+// configs use):
+//
+//   - `*<suffix>` — pure suffix glob ("*.go", "*_test.go"). Matches anywhere
+//     in the path tree, unlike filepath.Match which treats `/` as a separator.
+//   - `<prefix>/**` — recursive prefix ("proto/**", "tools/docgen/**").
+//   - `**/<name>` — anywhere by basename ("**/foo.pb.go").
+//   - anything else — passes through to filepath.Match as a fallback.
 func MatchAny(path string, patterns []string) bool {
 	if len(patterns) == 0 {
 		return true
 	}
 	for _, p := range patterns {
-		ok, _ := filepath.Match(p, path)
-		if ok {
-			return true
-		}
-		// Convenience: bare suffix glob like "*.go" should also match
-		// nested paths (filepath.Match treats "/" as separator).
-		if strings.HasPrefix(p, "*.") && strings.HasSuffix(path, p[1:]) {
+		if matchPattern(path, p) {
 			return true
 		}
 	}
@@ -155,31 +156,40 @@ func MatchAny(path string, patterns []string) bool {
 }
 
 // MatchNone reports whether path does NOT match any of the exclude patterns.
-// Supports the same primitives as MatchAny plus a `**/` prefix to match at
-// any depth (interpreted as "ignore the prefix and match the rest").
+// Uses the same semantics as MatchAny.
 func MatchNone(path string, patterns []string) bool {
 	for _, p := range patterns {
-		if strings.HasPrefix(p, "**/") {
-			if strings.HasSuffix(path, strings.TrimPrefix(p, "**/")) ||
-				strings.Contains(path, "/"+strings.TrimPrefix(p, "**/")) {
-				return false
-			}
-			continue
-		}
-		if ok, _ := filepath.Match(p, path); ok {
+		if matchPattern(path, p) {
 			return false
-		}
-		if strings.HasPrefix(p, "*.") && strings.HasSuffix(path, p[1:]) {
-			return false
-		}
-		if strings.HasSuffix(p, "/**") {
-			prefix := strings.TrimSuffix(p, "/**")
-			if strings.HasPrefix(path, prefix+"/") || path == prefix {
-				return false
-			}
 		}
 	}
 	return true
+}
+
+// matchPattern is the shared kernel: explicit handling for the three glob
+// shapes we support, plus filepath.Match as a fallback for literal patterns.
+func matchPattern(path, pattern string) bool {
+	// Suffix glob: "*<suffix>" with no other wildcards. Must match anywhere
+	// in the tree, so we compare the path's tail not just its basename.
+	if strings.HasPrefix(pattern, "*") &&
+		!strings.ContainsAny(pattern[1:], "*/") {
+		return strings.HasSuffix(path, pattern[1:])
+	}
+	// Recursive prefix: "<dir>/**" matches the directory itself or any
+	// descendant.
+	if strings.HasSuffix(pattern, "/**") {
+		prefix := strings.TrimSuffix(pattern, "/**")
+		return path == prefix || strings.HasPrefix(path, prefix+"/")
+	}
+	// Anywhere-by-basename: "**/<name>" matches any path ending in /<name>
+	// or equal to <name>.
+	if strings.HasPrefix(pattern, "**/") {
+		tail := strings.TrimPrefix(pattern, "**/")
+		return path == tail || strings.HasSuffix(path, "/"+tail)
+	}
+	// Fallback to filepath.Match for literal patterns (no globs).
+	ok, _ := filepath.Match(pattern, path)
+	return ok
 }
 
 // FormatMarkdown renders a sticky-comment-friendly markdown table. The

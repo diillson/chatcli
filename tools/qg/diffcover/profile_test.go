@@ -56,6 +56,33 @@ func TestParseProfile_IgnoresBlankLines(t *testing.T) {
 	}
 }
 
+func TestParseProfile_MergesDuplicateEntriesMaxWins(t *testing.T) {
+	// `go test -coverpkg=./... ./...` emits the same block multiple times
+	// (one per test binary). The merge must keep "covered" (count>0) over
+	// any subsequent "uncovered" (count=0) entry — otherwise files
+	// measured by a tangential test binary look entirely uncovered to us.
+	in := `mode: atomic
+github.com/diillson/chatcli/foo.go:10.1,12.2 2 5
+github.com/diillson/chatcli/foo.go:10.1,12.2 2 0
+github.com/diillson/chatcli/foo.go:20.1,22.2 1 0
+github.com/diillson/chatcli/foo.go:20.1,22.2 1 7
+`
+	p, err := ParseProfile(strings.NewReader(in))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	blocks := p.Blocks["github.com/diillson/chatcli/foo.go"]
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 unique blocks after merge, got %d", len(blocks))
+	}
+	// Both unique blocks must be marked covered.
+	for _, b := range blocks {
+		if b.Count == 0 {
+			t.Errorf("merge failed: block %+v has count=0", b)
+		}
+	}
+}
+
 func TestParseProfile_MalformedRecord(t *testing.T) {
 	cases := []string{
 		"mode: set\nno-colon-here garbage\n",
