@@ -28,8 +28,8 @@ import (
 
 // MoonshotClient implementa o cliente para a API Moonshot (Kimi).
 // A API é OpenAI-compatible (chat/completions) com extensões opcionais:
-//   - extra_body.thinking.type = "enabled"|"disabled" para alternar entre
-//     o modo "Thinking" (reasoning explícito) e o modo "Instant".
+//   - `extra_body.thinking.type` aceita "enabled"/"disabled" para chavear
+//     entre o modo "Thinking" (reasoning explícito) e o modo "Instant".
 //   - cache automático de contexto (cache_hit reflete no preço, não no payload).
 //
 // Modelo default: kimi-k2.6 (256K contexto, multimodal, thinking).
@@ -158,6 +158,8 @@ func (c *MoonshotClient) SendPrompt(ctx context.Context, prompt string, history 
 	)
 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
+		//nolint:bodyclose // processResponse takes ownership of resp
+		// and defers Body.Close(); closing here would double-close.
 		resp, err := c.sendRequest(ctx, jsonValue)
 		if err != nil {
 			return "", err
@@ -296,7 +298,7 @@ func (c *MoonshotClient) ListModels(ctx context.Context) ([]client.ModelInfo, er
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "MOONSHOT"), err)
 	}
 
-	var modelsList []client.ModelInfo
+	modelsList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
 		id := strings.ToLower(m.ID)
 		if !strings.HasPrefix(id, "kimi") && !strings.HasPrefix(id, "moonshot") {
