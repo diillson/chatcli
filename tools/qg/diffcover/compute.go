@@ -56,10 +56,10 @@ type PathBreach struct {
 
 // Result aggregates patch coverage across the diff.
 type Result struct {
-	Files       []FileResult
-	Total       int
-	Covered     int
-	Threshold   float64
+	Files        []FileResult
+	Total        int
+	Covered      int
+	Threshold    float64
 	PathBreaches []PathBreach
 }
 

@@ -60,13 +60,13 @@ func icon(s status) string {
 
 // Floor captures one row of the sticky-comment table.
 type Floor struct {
-	Num     int
-	Name    string
-	Status  status
-	Result  string // human-friendly outcome ("81% (1278/1572)", "clean", "0 leaks")
-	Delta   string // optional change vs base ("+0.4 pp")
-	Budget  string // optional budget cell ("≥ 60%", "≤ 30", "100MB")
-	Warn    bool   // ⚠️ intermediate state — passing but near-threshold
+	Num    int
+	Name   string
+	Status status
+	Result string // human-friendly outcome ("81% (1278/1572)", "clean", "0 leaks")
+	Delta  string // optional change vs base ("+0.4 pp")
+	Budget string // optional budget cell ("≥ 60%", "≤ 30", "100MB")
+	Warn   bool   // ⚠️ intermediate state — passing but near-threshold
 }
 
 // verdict is the aggregate gate result.
