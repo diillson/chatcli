@@ -34,14 +34,15 @@ if [[ "$changed_api" == "0" && "$changed_crd" == "0" ]]; then
   exit 0
 fi
 
-# Install controller-gen on demand. Pin the version that matches what the
-# operator's Makefile uses so locally-run drift checks agree with CI.
-CONTROLLER_GEN_VERSION="v0.16.5"
-if ! command -v controller-gen >/dev/null 2>&1; then
-  GOBIN="$(go env GOPATH)/bin"
-  go install "sigs.k8s.io/controller-tools/cmd/controller-gen@${CONTROLLER_GEN_VERSION}"
-  export PATH="$GOBIN:$PATH"
-fi
+# Always reinstall the pinned controller-gen version. The previous
+# command -v shortcut let any preinstalled binary win, which silently
+# produced different YAML on dev machines vs CI when versions diverged
+# (e.g. v0.17 vs v0.16). The script's job is deterministic drift, so we
+# pay the few seconds of `go install` to guarantee a known version.
+CONTROLLER_GEN_VERSION="v0.17.2"
+GOBIN="$(go env GOPATH)/bin"
+go install "sigs.k8s.io/controller-tools/cmd/controller-gen@${CONTROLLER_GEN_VERSION}"
+export PATH="$GOBIN:$PATH"
 
 # Re-generate into the checked-in path. controller-gen overwrites files
 # in place so a `git diff --exit-code` afterwards is the verdict.
