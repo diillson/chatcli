@@ -73,6 +73,47 @@ func TestGetMaxTokens(t *testing.T) {
 	// Caso 4: Fallback para provider desconhecido
 	tokens = GetMaxTokens("UNKNOWN_PROVIDER", "some-model", 0)
 	assert.Equal(t, 50000, tokens, "Should use the default fallback value")
+
+	// Caso 5: Moonshot lookup hits the explicit catalog entry for kimi-k2.6.
+	tokens = GetMaxTokens(ProviderMoonshot, "kimi-k2.6", 0)
+	assert.Equal(t, 131072, tokens, "kimi-k2.6 must report its catalog max_output_tokens")
+
+	// Caso 6: Moonshot generic fallback when the model is absent from the catalog.
+	tokens = GetMaxTokens(ProviderMoonshot, "kimi-future-model", 0)
+	assert.Equal(t, 131072, tokens, "Moonshot fallback must come from the provider switch")
+}
+
+func TestGetContextWindow(t *testing.T) {
+	// Known model hits the catalog entry.
+	assert.Equal(t, 262144, GetContextWindow(ProviderMoonshot, "kimi-k2.6"))
+
+	// Unknown moonshot model falls through the provider switch.
+	assert.Equal(t, 262144, GetContextWindow(ProviderMoonshot, "kimi-future-v9"))
+
+	// Unknown provider falls back to the conservative default.
+	assert.Equal(t, 50000, GetContextWindow("UNKNOWN_PROVIDER", "x"))
+}
+
+func TestMoonshotCatalogEntries(t *testing.T) {
+	// Pin the public specs of the Kimi K2.6/K2.5 entries so silent drift on
+	// the model card (e.g. catalog edits during a refactor) shows up here
+	// instead of at runtime.
+	for _, id := range []string{"kimi-k2.6", "kimi-k2.5", "kimi-latest"} {
+		meta, ok := Resolve(ProviderMoonshot, id)
+		assert.True(t, ok, "expected %s to resolve", id)
+		assert.Equal(t, 262144, meta.ContextWindow, "%s context window", id)
+		assert.Contains(t, meta.Capabilities, "tools", "%s should advertise tools", id)
+		assert.Contains(t, meta.Capabilities, "thinking", "%s should advertise thinking", id)
+	}
+
+	// moonshot-v1-* family is the classic split — verify both ends.
+	v18k, ok := Resolve(ProviderMoonshot, "moonshot-v1-8k")
+	assert.True(t, ok)
+	assert.Equal(t, 8192, v18k.ContextWindow)
+
+	v1128k, ok := Resolve(ProviderMoonshot, "moonshot-v1-128k")
+	assert.True(t, ok)
+	assert.Equal(t, 131072, v1128k.ContextWindow)
 }
 
 func TestGetPreferredAPI(t *testing.T) {
