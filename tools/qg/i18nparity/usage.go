@@ -147,7 +147,7 @@ func UnknownUsages(usages []UsageRef, locales []Locale) []UsageRef {
 			known[k] = struct{}{}
 		}
 	}
-	var out []UsageRef
+	out := make([]UsageRef, 0, len(usages))
 	for _, u := range usages {
 		if _, ok := known[u.Key]; ok {
 			continue

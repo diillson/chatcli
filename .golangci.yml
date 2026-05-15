@@ -1,0 +1,121 @@
+# golangci-lint config for chatcli.
+#
+# Strategy: enable the linters whose findings have caught real bugs in
+# the past (errcheck/govet/staticcheck/revive) plus a few quality-of-life
+# ones (misspell, unconvert, prealloc). Existing legacy code is
+# grandfathered via the workflow's `--new-from-rev=origin/main` flag —
+# every linter listed here runs on PRs, but only flags lines the PR
+# actually added or modified. The Quality Gate Floor 1 calls this file
+# without --new-from-rev for new branches off main to ensure the
+# baseline is enforceable.
+
+run:
+  timeout: 5m
+  go: "1.26"
+  # The project still has files that predate gosec / new lint rules.
+  # Diff-only enforcement (via workflow flag) prevents the gate from
+  # blocking PRs over pre-existing violations.
+
+linters:
+  # Disable defaults explicitly so the enabled set is auditable.
+  disable-all: true
+  enable:
+    # Defaults — proven worth across the codebase.
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - gosimple
+    - unused
+    # Doc-comments on exported identifiers (revive's `exported` rule).
+    # Most legacy code does not have them; --new-from-rev keeps the
+    # gate from blocking pre-existing functions.
+    - revive
+    # Catches misspellings in identifiers, strings and comments. Cheap
+    # and surprisingly effective on AI-generated code.
+    - misspell
+    # Detects useless type conversions (`int(int(x))`, etc.). Tiny
+    # readability win, surfaces lazy generic instantiations.
+    - unconvert
+    # Suggests pre-allocating slices when the size is known. The
+    # streaming hot paths in cli/agent_mode.go and llm/* push enough
+    # bytes that this is worth catching.
+    - prealloc
+    # Forces error wrapping with %w instead of %s/%v, which preserves
+    # errors.Is/As at the call site.
+    - errorlint
+    # Catches http.Response.Body left open — common LLM client mistake.
+    - bodyclose
+    # Detects context.Context not being propagated correctly into
+    # downstream calls. Several recent provider clients had this issue.
+    - contextcheck
+    # Cyclomatic complexity at the linter level (Floor 8 is finer-grained
+    # diff-only; keep this here as a defense-in-depth signal).
+    - gocyclo
+
+linters-settings:
+  revive:
+    severity: warning
+    rules:
+      - name: exported
+        # Require doc comments on exported funcs/types. Disabled
+        # initialisms check (Go's acronym-aware Pascal is enough).
+        arguments:
+          - "checkPrivateReceivers"
+          - "disableStutteringCheck"
+      - name: package-comments
+      - name: var-naming
+      - name: indent-error-flow
+      - name: redefines-builtin-id
+      - name: empty-block
+      - name: superfluous-else
+      - name: confusing-naming
+      - name: error-naming
+      - name: error-return
+      - name: error-strings
+      - name: receiver-naming
+      - name: unreachable-code
+      - name: blank-imports
+
+  gocyclo:
+    # Match the Floor 8 budget. Anything above this is a refactor target
+    # the linter surfaces inline (Floor 8 still blocks the gate).
+    min-complexity: 30
+
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: false
+
+  misspell:
+    locale: US
+    # Some pt-BR/portuguese strings in i18n bodies might trip
+    # misspell — keep US dictionary and rely on golangci to skip
+    # JSON-encoded blobs.
+
+issues:
+  # Don't enforce on generated files.
+  exclude-dirs:
+    - vendor
+    - tools/docgen
+    - proto
+  exclude-rules:
+    # Test code: relax the docstring rule and let table-driven tests
+    # use anonymous structs freely.
+    - path: _test\.go
+      linters:
+        - revive
+        - prealloc
+        - gocyclo
+    # Generated coverage helpers do not need docstrings.
+    - path: tools/qg/cmd/.*main\.go
+      linters:
+        - revive
+      text: "package-comments"
+  max-issues-per-linter: 0
+  max-same-issues: 0

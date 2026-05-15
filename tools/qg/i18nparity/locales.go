@@ -37,7 +37,7 @@ func LoadLocales(dir string) ([]Locale, error) {
 		return nil, fmt.Errorf("i18nparity: read dir %s: %w", dir, err)
 	}
 
-	var locales []Locale
+	locales := make([]Locale, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue

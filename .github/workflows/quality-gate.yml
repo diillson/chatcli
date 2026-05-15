@@ -144,20 +144,23 @@ jobs:
             exit 1
           fi
 
-      - name: golangci-lint (root)
+      - name: golangci-lint (root, diff-only)
+        # --new-from-rev gates the stricter linters in .golangci.yml to
+        # lines this PR touched. Without it, enabling `revive` would
+        # block every PR over pre-existing doc-comment violations.
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.8
           install-mode: goinstall
-          args: --timeout=5m
+          args: --timeout=5m --new-from-rev=origin/${{ github.base_ref }}
 
-      - name: golangci-lint (operator)
+      - name: golangci-lint (operator, diff-only)
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.8
           install-mode: goinstall
           working-directory: operator
-          args: --timeout=5m
+          args: --timeout=5m --new-from-rev=origin/${{ github.base_ref }}
 
   # ---------------------------------------------------------------------
   # Floor 2 — total coverage ratchet (unit tests with -race)

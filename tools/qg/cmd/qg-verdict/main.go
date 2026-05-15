@@ -30,13 +30,18 @@ import (
 	"strings"
 )
 
-// status models GitHub Actions job result strings (`success`,
-// `skipped`, `cancelled`, `failure`, plus empty for never-ran).
+// status models GitHub Actions job result strings.
+//
+// The job-cancellation value uses GitHub's double-l spelling because the
+// constant is a contract with the workflow runtime — not a free string
+// our code chose. The misspell linter prefers the US single-l form;
+// nolint silences it locally.
 type status string
 
 const (
-	statusSuccess   status = "success"
-	statusSkipped   status = "skipped"
+	statusSuccess status = "success"
+	statusSkipped status = "skipped"
+	//nolint:misspell // GHA `needs.*.result` returns "cancelled" verbatim.
 	statusCancelled status = "cancelled"
 )
 
