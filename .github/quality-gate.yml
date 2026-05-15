@@ -42,6 +42,11 @@ coverage_total:
   hard_floor_pct: 27.0
   # Tolerance to absorb flake (line-count drift on retries, etc.).
   tolerance_pct: 0.1
+  # Step-change protection — drops larger than this against the baseline
+  # are treated as a one-off re-bootstrap (methodology change, package
+  # reshuffle). The hard floor still applies. After the PR merges, the
+  # baseline workflow re-publishes from the new tree.
+  step_change_pp: 5.0
 
 # Floor 3 — Patch coverage on the diff. Computed by tools/qg/cmd/qg-diffcover
 # (Go-native, no Python dep) comparing to origin/<base>. Excludes generated

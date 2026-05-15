@@ -45,9 +45,15 @@ fi
 
 # Re-generate into the checked-in path. controller-gen overwrites files
 # in place so a `git diff --exit-code` afterwards is the verdict.
+#
+# `crd:allowDangerousTypes=true` is required because operator/api/v1alpha1
+# carries a float field (slo_types.go's burn-rate budget); without the
+# flag controller-gen refuses to emit and the gate fails for the wrong
+# reason. The operator team owns whether to keep the float — until that
+# is resolved, allow it through so the gate measures REAL drift.
 ( cd "$QG_REPO_ROOT/operator" && \
     controller-gen \
-      crd \
+      'crd:allowDangerousTypes=true' \
       paths=./api/... \
       output:crd:dir=config/crd/bases ) >/dev/null
 
