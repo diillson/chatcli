@@ -20,6 +20,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -125,7 +126,10 @@ func Check(rootDir string, providers []Provider, points []TouchPoint, ex Exempti
 		if data, ok := cache[path]; ok {
 			return data, nil
 		}
-		data, err := os.ReadFile(rootDir + "/" + path)
+		// #nosec G304 -- rootDir is the CI-controlled repo root passed via
+		// flag and path is a TouchPoint.Path from a static matrix defined
+		// in DefaultTouchPoints(); neither comes from untrusted input.
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(rootDir, path)))
 		if err != nil {
 			return nil, err
 		}

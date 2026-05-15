@@ -149,7 +149,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 				md += "> - `" + p + "`\n"
 			}
 		}
-		if err := os.WriteFile(*markdownOut, []byte(md), 0o644); err != nil {
+		if err := os.WriteFile(*markdownOut, []byte(md), 0o600); err != nil {
 			return fmt.Errorf("write markdown: %w", err)
 		}
 	}

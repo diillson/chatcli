@@ -83,7 +83,9 @@ func loadFiles(src string) ([]string, error) {
 		}
 		return out, sc.Err()
 	}
-	data, err := os.ReadFile(src)
+	// #nosec G304 -- src is the operator-controlled -files flag of a CI tool;
+	// reading the caller-supplied path is the tool's purpose.
+	data, err := os.ReadFile(filepath.Clean(src))
 	if err != nil {
 		return nil, err
 	}

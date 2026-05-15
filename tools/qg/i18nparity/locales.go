@@ -43,7 +43,9 @@ func LoadLocales(dir string) ([]Locale, error) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
-		data, err := os.ReadFile(path)
+		// #nosec G304 -- path is dir (caller-controlled at the CLI flag)
+		// plus a directory entry returned by os.ReadDir; cannot escape dir.
+		data, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
 			return nil, fmt.Errorf("i18nparity: read %s: %w", path, err)
 		}
