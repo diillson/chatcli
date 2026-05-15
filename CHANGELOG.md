@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.117.2](https://github.com/diillson/chatcli/compare/v1.117.1...v1.117.2) (2026-05-15)
+
+
+### Bug Fixes
+
+* **mcp:** preserve trailing slash on Streamable HTTP endpoint URL ([#918](https://github.com/diillson/chatcli/issues/918)) ([6ba1a19](https://github.com/diillson/chatcli/commit/6ba1a19b21579c6b0205d02b4347d475483769b9))
+
 ## [1.117.1](https://github.com/diillson/chatcli/compare/v1.117.0...v1.117.1) (2026-05-15)
 
 
