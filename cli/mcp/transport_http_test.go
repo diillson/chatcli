@@ -60,6 +60,51 @@ func TestHTTPTransport_RequiresURL(t *testing.T) {
 	}
 }
 
+// TestHTTPTransport_PreservesTrailingSlashInURL locks in the fact
+// that a trailing slash in the configured URL survives unchanged
+// to the wire. FastMCP and other Starlette/FastAPI-mounted servers
+// only answer on the slashed path and 307-redirect the other, which
+// some corporate proxies break across — the only safe behavior is
+// to never normalize the path here.
+func TestHTTPTransport_PreservesTrailingSlashInURL(t *testing.T) {
+	cases := []struct {
+		name, configured, wantPath string
+	}{
+		{"slashed", "/mcp/", "/mcp/"},
+		{"bare", "/mcp", "/mcp"},
+		{"root-slash", "/", "/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var seenPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seenPath = r.URL.Path
+				w.Header().Set("Content-Type", "application/json")
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				_ = json.NewEncoder(w).Encode(jsonRPCResponse{
+					JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{}`),
+				})
+			}))
+			defer srv.Close()
+
+			cfg := newTestServerConfig(srv.URL + tc.configured)
+			tr, err := newHTTPTransport(context.Background(), cfg, zap.NewNop(), nil, "test")
+			if err != nil {
+				t.Fatalf("newHTTPTransport: %v", err)
+			}
+			t.Cleanup(func() { _ = tr.Close(context.Background()) })
+
+			if _, err := tr.Call("ping", nil); err != nil {
+				t.Fatalf("Call: %v", err)
+			}
+			if seenPath != tc.wantPath {
+				t.Errorf("server saw path %q, want %q (URL must be preserved verbatim)", seenPath, tc.wantPath)
+			}
+		})
+	}
+}
+
 func TestHTTPTransport_JSONOneShotResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
