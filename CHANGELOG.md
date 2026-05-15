@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.117.1](https://github.com/diillson/chatcli/compare/v1.117.0...v1.117.1) (2026-05-15)
+
+
+### Bug Fixes
+
+* **mcp:** list text/event-stream first in Accept header ([#916](https://github.com/diillson/chatcli/issues/916)) ([8071ea5](https://github.com/diillson/chatcli/commit/8071ea54168802d9016344b25fccb59635be5641))
+
 ## [1.117.0](https://github.com/diillson/chatcli/compare/v1.116.0...v1.117.0) (2026-05-15)
 
 
