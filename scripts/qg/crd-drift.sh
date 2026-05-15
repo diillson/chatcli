@@ -34,20 +34,27 @@ if [[ "$changed_api" == "0" && "$changed_crd" == "0" ]]; then
   exit 0
 fi
 
-# Install controller-gen on demand. Pin the version that matches what the
-# operator's Makefile uses so locally-run drift checks agree with CI.
-CONTROLLER_GEN_VERSION="v0.16.5"
-if ! command -v controller-gen >/dev/null 2>&1; then
-  GOBIN="$(go env GOPATH)/bin"
-  go install "sigs.k8s.io/controller-tools/cmd/controller-gen@${CONTROLLER_GEN_VERSION}"
-  export PATH="$GOBIN:$PATH"
-fi
+# Always reinstall the pinned controller-gen version. The previous
+# command -v shortcut let any preinstalled binary win, which silently
+# produced different YAML on dev machines vs CI when versions diverged
+# (e.g. v0.17 vs v0.16). The script's job is deterministic drift, so we
+# pay the few seconds of `go install` to guarantee a known version.
+CONTROLLER_GEN_VERSION="v0.17.2"
+GOBIN="$(go env GOPATH)/bin"
+go install "sigs.k8s.io/controller-tools/cmd/controller-gen@${CONTROLLER_GEN_VERSION}"
+export PATH="$GOBIN:$PATH"
 
 # Re-generate into the checked-in path. controller-gen overwrites files
 # in place so a `git diff --exit-code` afterwards is the verdict.
+#
+# `crd:allowDangerousTypes=true` is required because operator/api/v1alpha1
+# carries a float field (slo_types.go's burn-rate budget); without the
+# flag controller-gen refuses to emit and the gate fails for the wrong
+# reason. The operator team owns whether to keep the float — until that
+# is resolved, allow it through so the gate measures REAL drift.
 ( cd "$QG_REPO_ROOT/operator" && \
     controller-gen \
-      crd \
+      'crd:allowDangerousTypes=true' \
       paths=./api/... \
       output:crd:dir=config/crd/bases ) >/dev/null
 
@@ -76,7 +83,11 @@ qg_set_output drifted_files "${drifted% }"
   echo "<details><summary>Diff</summary>"
   echo
   echo '```diff'
-  git -C "$QG_REPO_ROOT" diff -- 'operator/config/crd/bases/' | head -120
+  # awk reads the whole stream and prints the first 120 lines without
+  # closing stdin early; using `head` here triggers SIGPIPE on git diff
+  # under `set -o pipefail` and kills the script before the summary is
+  # written (exit 141, no diagnostics in the workflow log).
+  git -C "$QG_REPO_ROOT" diff -- 'operator/config/crd/bases/' | awk 'NR<=120'
   echo '```'
   echo
   echo "</details>"

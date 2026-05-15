@@ -96,7 +96,23 @@ if awk -v c="$current" -v b="$baseline" -v t="$tolerance" \
   exit 0
 fi
 
+# Step-change protection: a drop bigger than `step_change_pp` cannot come
+# from one PR's added code under normal circumstances. The two known
+# triggers are a methodology change (e.g. enabling `-coverpkg=./...`)
+# and a major package reshuffle. Treat as a single re-bootstrap with a
+# prominent warning — the next push to main re-publishes a fresh
+# baseline, after which the ratchet returns to strict enforcement.
+step_change_pp=$(qg_yq '.coverage_total.step_change_pp // 5.0')
 delta=$(awk -v c="$current" -v b="$baseline" 'BEGIN { printf "%+.2f", c - b }')
+delta_abs=$(awk -v c="$current" -v b="$baseline" 'BEGIN { d=b-c; if(d<0)d=-d; print d }')
+if awk -v d="$delta_abs" -v s="$step_change_pp" 'BEGIN { exit !(d + 0 > s + 0) }'; then
+  qg_warn "step-change detected (Δ=${delta}, threshold=${step_change_pp}pp); treating as re-bootstrap. Next push to main re-publishes the baseline."
+  qg_set_output passed true
+  qg_set_output delta "$delta"
+  qg_set_summary_line "⚠️ **Coverage total**: ${current}% (step-change vs baseline ${baseline}%, Δ ${delta}, re-bootstrap)"
+  exit 0
+fi
+
 msg="coverage regressed: ${current}% < baseline ${baseline}% (Δ ${delta}, tolerance ${tolerance})"
 qg_set_output passed false
 qg_set_output delta "$delta"

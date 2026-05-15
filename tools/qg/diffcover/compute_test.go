@@ -80,6 +80,30 @@ func TestCompute_NonExecutableLinesIgnored(t *testing.T) {
 	}
 }
 
+func TestCompute_DeclarationOnlyFileSkippedNotUninstrumented(t *testing.T) {
+	// config/defaults.go is pure `const ( ... )` — it has zero profile
+	// entries even under -coverpkg=./..., because there's nothing
+	// executable to instrument. Treating it as "uninstrumented" would
+	// be wrong: the package was measured (via config/manager.go), it
+	// just has no executable code of its own. The check uses package-
+	// directory membership to tell these apart.
+	p := &Profile{Mode: "set", Blocks: map[string][]CoverBlock{
+		"config/manager.go": {{StartLine: 50, EndLine: 60, NumStmts: 5, Count: 1}},
+	}}
+	d := &Diff{Files: map[string]*FileDiff{
+		"config/defaults.go": {Path: "config/defaults.go", AddedLines: map[int]struct{}{
+			1: {}, 2: {}, 3: {},
+		}},
+	}}
+	res, uninstr := Compute(p, d, includeAll, 60)
+	if len(uninstr) != 0 {
+		t.Errorf("declaration-only file in measured package should NOT be uninstrumented; got %v", uninstr)
+	}
+	if res.Total != 0 {
+		t.Errorf("declaration-only file should contribute 0 to total; got %d", res.Total)
+	}
+}
+
 func TestCompute_UninstrumentedFileIsReported(t *testing.T) {
 	// A Go file in the diff with NO profile entries means the test
 	// invocation didn't measure that package. We must NOT silently treat

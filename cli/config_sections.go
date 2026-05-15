@@ -496,6 +496,14 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "MINIMAX_MAX_TOKENS", envOr("MINIMAX_MAX_TOKENS"))
 
 	fmt.Println(p)
+	subheader(p, "cfg.sub.prov.moonshot")
+	kv(p, "MOONSHOT_API_KEY", presence(os.Getenv("MOONSHOT_API_KEY")))
+	kv(p, "MOONSHOT_MODEL", envOr("MOONSHOT_MODEL"))
+	kv(p, "MOONSHOT_MAX_TOKENS", envOr("MOONSHOT_MAX_TOKENS"))
+	kv(p, "MOONSHOT_THINKING", envOr("MOONSHOT_THINKING"))
+	kv(p, "MOONSHOT_API_URL", envOr("MOONSHOT_API_URL"))
+
+	fmt.Println(p)
 	subheader(p, "cfg.sub.prov.stackspot")
 	kv(p, "CLIENT_ID", presence(os.Getenv("CLIENT_ID")))
 	kv(p, "CLIENT_KEY", presence(os.Getenv("CLIENT_KEY")))

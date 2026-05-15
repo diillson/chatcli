@@ -15,7 +15,7 @@ type InstanceSpec struct {
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER).
+	// Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER).
 	// BEDROCK uses the AWS credentials chain (IAM role via IRSA, static keys in the Secret, or instance profile).
 	Provider string `json:"provider"`
 
@@ -60,7 +60,7 @@ type InstanceSpec struct {
 
 	// APIKeys references a Secret containing provider API keys and config.
 	// Expected keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLEAI_API_KEY, XAI_API_KEY,
-	// ZAI_API_KEY, MINIMAX_API_KEY, MINIMAX_API_COMPAT, GITHUB_COPILOT_TOKEN, OPENROUTER_API_KEY.
+	// ZAI_API_KEY, MINIMAX_API_KEY, MINIMAX_API_COMPAT, MOONSHOT_API_KEY, GITHUB_COPILOT_TOKEN, OPENROUTER_API_KEY.
 	// For BEDROCK: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (+ optional AWS_SESSION_TOKEN),
 	// or leave unset and use IRSA by annotating the pod's ServiceAccount with
 	// eks.amazonaws.com/role-arn. Region is set via AWS_REGION or BEDROCK_REGION.
@@ -404,8 +404,8 @@ type FallbackSpec struct {
 
 // FallbackProviderEntry defines a single provider in the fallback chain.
 type FallbackProviderEntry struct {
-	// Name is the provider name (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER).
-	// +kubebuilder:validation:Enum=OPENAI;OPENAI_ASSISTANT;CLAUDEAI;BEDROCK;GOOGLEAI;XAI;ZAI;MINIMAX;STACKSPOT;OLLAMA;COPILOT;GITHUB_MODELS;OPENROUTER
+	// Name is the provider name (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER).
+	// +kubebuilder:validation:Enum=OPENAI;OPENAI_ASSISTANT;CLAUDEAI;BEDROCK;GOOGLEAI;XAI;ZAI;MINIMAX;MOONSHOT;STACKSPOT;OLLAMA;COPILOT;GITHUB_MODELS;OPENROUTER
 	Name string `json:"name"`
 
 	// Model is the LLM model to use for this provider.

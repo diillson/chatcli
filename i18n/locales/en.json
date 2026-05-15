@@ -1531,6 +1531,7 @@
   "cfg.sub.prov.openrouter": "── OpenRouter",
   "cfg.sub.prov.zai": "── ZAI (Zhipu)",
   "cfg.sub.prov.minimax": "── MiniMax",
+  "cfg.sub.prov.moonshot": "── Moonshot (Kimi)",
   "cfg.sub.prov.stackspot": "── StackSpot",
   "cfg.sub.agent.parallelism": "── Parallelism & workers",
   "cfg.sub.agent.token_efficiency": "── Token efficiency (early-exit & smart routing)",
@@ -1934,7 +1935,7 @@
   "complete.skill.prefer_local": "Prefer local version",
 
   "complete.connect.token": "Server authentication token",
-  "complete.connect.provider": "LLM provider (OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER)",
+  "complete.connect.provider": "LLM provider (OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER)",
   "complete.connect.model": "LLM model (gpt-4, claude-3, etc.)",
   "complete.connect.llm_key": "API key/OAuth token to send to the server",
   "complete.connect.use_local_auth": "Use local OAuth credentials (from /auth login)",

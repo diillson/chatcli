@@ -118,9 +118,15 @@ func ComputePathThresholds(files []FileResult, thresholds []PathThreshold) []Pat
 // with a diff to produce patch coverage. Files outside the cover profile
 // are treated as "had no measurable executable content" — they contribute
 // nothing to Total. If a Go non-test file in the diff has zero matches in
-// the profile, that's an explicit signal of uninstrumented coverage (the
-// caller's test invocation likely missed `-coverpkg=./...`); we report it
-// via the returned set so the wrapper can refuse to pass the gate.
+// the profile AND its package was never measured (no other file in the
+// same directory appears in the profile), that's an explicit signal of
+// uninstrumented coverage and the wrapper refuses to pass the gate.
+//
+// Declaration-only files (`config/defaults.go` is pure `const ( ... )`,
+// for example) generate no profile entries even when `-coverpkg=./...`
+// is set — they have no executable statements. Package-level membership
+// detection lets us tell those apart from genuinely uninstrumented
+// packages without parsing every file's AST.
 func Compute(p *Profile, d *Diff, includeFile func(path string) bool, threshold float64) (Result, []string) {
 	var (
 		results    []FileResult
@@ -128,6 +134,15 @@ func Compute(p *Profile, d *Diff, includeFile func(path string) bool, threshold 
 		totalAll   int
 		coveredAll int
 	)
+
+	// Index which package directories the profile actually measured.
+	// A file with no entries whose package IS in this set is just
+	// declaration-only (no executable statements); a file whose package
+	// is NOT in this set means the whole package was skipped.
+	measuredDirs := make(map[string]struct{}, len(p.Blocks))
+	for file := range p.Blocks {
+		measuredDirs[filepath.Dir(file)] = struct{}{}
+	}
 
 	paths := make([]string, 0, len(d.Files))
 	for path := range d.Files {
@@ -143,6 +158,11 @@ func Compute(p *Profile, d *Diff, includeFile func(path string) bool, threshold 
 		blocks, hasProfile := p.Blocks[path]
 
 		if !hasProfile && len(fd.AddedLines) > 0 {
+			if _, packageMeasured := measuredDirs[filepath.Dir(path)]; packageMeasured {
+				// Package was instrumented but this file produced no
+				// entries — declaration-only, vacuously covered, skip.
+				continue
+			}
 			uninstr = append(uninstr, path)
 			continue
 		}

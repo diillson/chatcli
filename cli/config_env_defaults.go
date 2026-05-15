@@ -85,6 +85,9 @@ var envDefaults = map[string]envDefault{
 	"GITHUB_MODELS_MODEL":        {Value: config.DefaultGitHubModelsModel, Source: "config.DefaultGitHubModelsModel"},
 	"ZAI_MODEL":                  {Value: config.DefaultZAIModel, Source: "config.DefaultZAIModel"},
 	"MINIMAX_MODEL":              {Value: config.DefaultMiniMaxModel, Source: "config.DefaultMiniMaxModel"},
+	"MOONSHOT_MODEL":             {Value: config.DefaultMoonshotModel, Source: "config.DefaultMoonshotModel"},
+	"MOONSHOT_API_URL":           {Value: config.MoonshotAPIURL, Source: "config.MoonshotAPIURL"},
+	"MOONSHOT_THINKING":          {Value: "auto", Source: "moonshot client default"},
 	"OPENROUTER_FALLBACK_MODELS": {Value: "(none)", Source: "openrouter client"},
 	"OPENROUTER_PROVIDER_ORDER":  {Value: "(none)", Source: "openrouter client"},
 

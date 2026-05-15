@@ -429,111 +429,136 @@ func formatTokenCount64(tokens int64) string {
 
 // getModelPricing returns input and output cost per 1M tokens for known models.
 // Prices in USD per 1M tokens.
+//
+// Dispatches to per-family helpers so each family can evolve independently
+// without the function blowing past the project's cyclomatic budget. The
+// helpers are tried in priority order: model-id heuristics first (model is
+// authoritative for cloud providers), then provider-string fallbacks for
+// wrappers and self-hosted backends.
 func getModelPricing(provider, model string) (inputCost, outputCost float64) {
 	model = strings.ToLower(model)
+	provider = strings.ToLower(provider)
 
-	// Anthropic Claude models
-	if strings.Contains(model, "claude") {
-		switch {
-		case strings.Contains(model, "opus"):
-			return 15.0, 75.0
-		case strings.Contains(model, "sonnet"):
-			return 3.0, 15.0
-		case strings.Contains(model, "haiku"):
-			return 0.25, 1.25
+	for _, fn := range []func(string) (float64, float64, bool){
+		claudePricing,
+		openAIPricing,
+		googlePricing,
+		grokPricing,
+		deepseekPricing,
+	} {
+		if in, out, ok := fn(model); ok {
+			return in, out
 		}
 	}
+	return providerFallbackPricing(provider, model)
+}
 
-	// OpenAI models (order matters — more specific first)
+func claudePricing(model string) (float64, float64, bool) {
+	if !strings.Contains(model, "claude") {
+		return 0, 0, false
+	}
+	switch {
+	case strings.Contains(model, "opus"):
+		return 15.0, 75.0, true
+	case strings.Contains(model, "sonnet"):
+		return 3.0, 15.0, true
+	case strings.Contains(model, "haiku"):
+		return 0.25, 1.25, true
+	}
+	return 0, 0, false
+}
+
+// openAIPricing covers both the GPT-* and o-* reasoning families. Ordering
+// matters: more specific tags ("gpt-4o-mini") must come before their parents
+// ("gpt-4o").
+func openAIPricing(model string) (float64, float64, bool) {
 	switch {
 	case strings.Contains(model, "gpt-4o-mini"):
-		return 0.15, 0.60
+		return 0.15, 0.60, true
 	case strings.Contains(model, "gpt-4o"):
-		return 2.50, 10.0
+		return 2.50, 10.0, true
 	case strings.Contains(model, "gpt-4-turbo"):
-		return 10.0, 30.0
+		return 10.0, 30.0, true
 	case strings.Contains(model, "gpt-4.1"):
-		return 2.0, 8.0
+		return 2.0, 8.0, true
 	case strings.Contains(model, "gpt-4"):
-		return 30.0, 60.0
+		return 30.0, 60.0, true
 	case strings.Contains(model, "gpt-3.5"):
-		return 0.50, 1.50
-	case strings.Contains(model, "o3-mini"):
-		return 1.10, 4.40
+		return 0.50, 1.50, true
+	case strings.Contains(model, "o3-mini"), strings.Contains(model, "o4-mini"):
+		return 1.10, 4.40, true
 	case strings.Contains(model, "o3"):
-		return 10.0, 40.0
+		return 10.0, 40.0, true
 	case strings.Contains(model, "o1-mini"):
-		return 3.0, 12.0
+		return 3.0, 12.0, true
 	case strings.Contains(model, "o1"):
-		return 15.0, 60.0
-	case strings.Contains(model, "o4-mini"):
-		return 1.10, 4.40
+		return 15.0, 60.0, true
 	}
+	return 0, 0, false
+}
 
-	// Google models
+func googlePricing(model string) (float64, float64, bool) {
 	switch {
 	case strings.Contains(model, "gemini-2.5-pro"):
-		return 1.25, 10.0
+		return 1.25, 10.0, true
 	case strings.Contains(model, "gemini-2.5-flash"):
-		return 0.15, 0.60
+		return 0.15, 0.60, true
 	case strings.Contains(model, "gemini-2.0"):
-		return 0.075, 0.30
+		return 0.075, 0.30, true
 	case strings.Contains(model, "gemini-1.5-pro"):
-		return 1.25, 5.0
+		return 1.25, 5.0, true
 	case strings.Contains(model, "gemini-1.5-flash"):
-		return 0.075, 0.30
+		return 0.075, 0.30, true
 	}
+	return 0, 0, false
+}
 
-	// xAI Grok
+func grokPricing(model string) (float64, float64, bool) {
 	switch {
 	case strings.Contains(model, "grok-3"):
-		return 3.0, 15.0
+		return 3.0, 15.0, true
 	case strings.Contains(model, "grok-2"):
-		return 2.0, 10.0
+		return 2.0, 10.0, true
 	case strings.Contains(model, "grok"):
-		return 5.0, 15.0
+		return 5.0, 15.0, true
 	}
+	return 0, 0, false
+}
 
-	// DeepSeek (via OpenRouter or direct)
+func deepseekPricing(model string) (float64, float64, bool) {
 	switch {
-	case strings.Contains(model, "deepseek-v3"):
-		return 0.27, 1.10
 	case strings.Contains(model, "deepseek-r1"):
-		return 0.55, 2.19
+		return 0.55, 2.19, true
 	case strings.Contains(model, "deepseek"):
-		return 0.27, 1.10
+		return 0.27, 1.10, true
 	}
+	return 0, 0, false
+}
 
-	// MiniMax
-	if strings.Contains(model, "minimax") || strings.Contains(provider, "minimax") {
+// providerFallbackPricing handles families whose model IDs are ambiguous
+// or where the provider name is the most reliable signal (proprietary
+// wrappers like Copilot, local backends like Ollama).
+//
+// Moonshot (Kimi) — kimi-k2.6 public list price as of 2026-05 is $0.95/M
+// input (cache miss) and $4.00/M output. Cache-hit input is $0.16/M but
+// cost_tracker only models a single tier — we charge the miss price so
+// accounting stays conservative. K2.5 and moonshot-v1-* sit below K2.6;
+// we approximate with K2.6 numbers to avoid under-reporting.
+func providerFallbackPricing(provider, model string) (float64, float64) {
+	switch {
+	case strings.Contains(model, "minimax"), strings.Contains(provider, "minimax"):
 		return 0.20, 1.10
-	}
-
-	// Zhipu (ZAI)
-	if strings.Contains(provider, "zai") || strings.Contains(model, "glm") {
+	case strings.Contains(provider, "zai"), strings.Contains(model, "glm"):
 		return 0.50, 0.50
-	}
-
-	// Copilot (uses OpenAI models under the hood)
-	if strings.Contains(strings.ToLower(provider), "copilot") {
+	case strings.Contains(provider, "moonshot"), strings.HasPrefix(model, "kimi"), strings.HasPrefix(model, "moonshot"):
+		return 0.95, 4.00
+	case strings.Contains(provider, "copilot"):
 		return 2.50, 10.0
-	}
-
-	// OpenRouter (try model-specific pricing, else generic)
-	if strings.Contains(strings.ToLower(provider), "openrouter") {
+	case strings.Contains(provider, "openrouter"):
 		return getOpenRouterModelPricing(model)
-	}
-
-	// Ollama (local — zero cost)
-	if strings.Contains(strings.ToLower(provider), "ollama") {
+	case strings.Contains(provider, "ollama"), strings.Contains(provider, "stackspot"):
 		return 0, 0
 	}
-
-	// StackSpot (proprietary — no public pricing)
-	if strings.Contains(strings.ToLower(provider), "stackspot") {
-		return 0, 0
-	}
-
 	return 0, 0
 }
 
