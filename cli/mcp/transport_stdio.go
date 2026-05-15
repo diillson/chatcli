@@ -300,7 +300,13 @@ func buildProcessEnv(parent []string, overrides map[string]string) []string {
 }
 
 // Close kills the MCP server process and cleans up.
-func (t *stdioTransport) Close() error {
+//
+// ctx bounds the shutdown window: after Kill we wait for the
+// process to reap, but if ctx fires first we return — the process
+// is already terminated, so the only thing we'd be waiting on is
+// the OS-level reaper draining the exit status, and dragging the
+// whole CLI shutdown for a uncooperative child isn't worth it.
+func (t *stdioTransport) Close(ctx context.Context) error {
 	t.mu.Lock()
 	_ = t.stdin.Close()
 	t.mu.Unlock()
@@ -308,6 +314,19 @@ func (t *stdioTransport) Close() error {
 	if t.cmd.Process != nil {
 		_ = t.cmd.Process.Kill()
 	}
-	_ = t.cmd.Wait()
-	return nil
+
+	waitDone := make(chan struct{})
+	go func() {
+		_ = t.cmd.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		return nil
+	case <-ctx.Done():
+		t.logger.Warn("MCP stdio Close: ctx fired before child process reaped",
+			zap.Error(ctx.Err()))
+		return ctx.Err()
+	}
 }

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -204,7 +205,7 @@ func (m *Manager) Reload(ctx context.Context, configPath string) (ReloadDiff, er
 				diff.Stopped = append(diff.Stopped, name)
 			}
 			m.mu.RUnlock()
-			m.StopAll()
+			m.StopAll(ctx)
 			m.mu.Lock()
 			m.servers = make(map[string]*ServerConnection)
 			m.tools = make(map[string]*MCPTool)
@@ -267,7 +268,7 @@ func (m *Manager) Reload(ctx context.Context, configPath string) (ReloadDiff, er
 	m.mu.Unlock()
 
 	for _, name := range toStop {
-		m.stopOne(name)
+		m.removeServer(ctx, name)
 	}
 	m.mu.Lock()
 	for _, conn := range toReplace {
@@ -294,9 +295,17 @@ func (m *Manager) Reload(ctx context.Context, configPath string) (ReloadDiff, er
 	return diff, nil
 }
 
-// stopOne stops a single server, removes its tools and drops it from
-// the map. Used by Reload; safe to call without holding m.mu.
-func (m *Manager) stopOne(name string) {
+// removeServer stops a single server, removes its tools and drops
+// it from the configured set. Distinct from StopOne, which keeps
+// the entry around so /mcp start <name> can revive it: removeServer
+// is what Reload invokes when a server vanishes from the on-disk
+// config file. Safe to call without holding m.mu.
+//
+// ctx bounds the transport shutdown — Reload passes through the
+// long-lived manager ctx, which keeps the per-server cleanup
+// honest about cancellation propagation while staying responsive
+// to caller cancellation if the whole CLI is shutting down.
+func (m *Manager) removeServer(ctx context.Context, name string) {
 	m.mu.Lock()
 	conn, ok := m.servers[name]
 	if !ok {
@@ -318,7 +327,7 @@ func (m *Manager) stopOne(name string) {
 	m.mu.Unlock()
 
 	if transport != nil {
-		_ = transport.Close()
+		_ = transport.Close(ctx)
 	}
 	if process != nil {
 		_ = process.Kill()
@@ -384,7 +393,12 @@ func (m *Manager) StartOne(ctx context.Context, name string) error {
 // the public counterpart to the internal stopOne (which Reload uses
 // to drop servers that vanished from the config file). Returns an
 // error if the server name isn't known.
-func (m *Manager) StopOne(name string) error {
+//
+// ctx scopes the transport teardown so callers can either keep
+// shutdown bounded under load or pass a cancellable context they
+// also use elsewhere (typical: cli.mcpCtx, the long-lived MCP
+// subsystem context held by the CLI).
+func (m *Manager) StopOne(ctx context.Context, name string) error {
 	m.mu.Lock()
 	conn, ok := m.servers[name]
 	if !ok {
@@ -406,7 +420,7 @@ func (m *Manager) StopOne(name string) error {
 	m.mu.Unlock()
 
 	if transport != nil {
-		_ = transport.Close()
+		_ = transport.Close(ctx)
 	}
 	if process != nil {
 		_ = process.Kill()
@@ -457,14 +471,20 @@ func (m *Manager) appendLog(name, line string) {
 }
 
 // StopAll stops all running MCP servers.
-func (m *Manager) StopAll() {
+//
+// ctx bounds the total shutdown window across every transport.
+// Each per-server Close call honors the same ctx, so on a hard
+// timeout the manager surfaces ctx.Err() to its caller but every
+// transport still gets a real chance to drain — they exit early
+// instead of hanging on a stuck pipe or TCP read.
+func (m *Manager) StopAll(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for name, conn := range m.servers {
 		if conn.transport != nil {
 			m.logger.Info("stopping MCP server", zap.String("server", name))
-			_ = conn.transport.Close()
+			_ = conn.transport.Close(ctx)
 			conn.transport = nil
 		}
 		if conn.Process != nil {
@@ -729,6 +749,8 @@ func (m *Manager) startServer(ctx context.Context, conn *ServerConnection) error
 		return m.startStdioServer(ctx, conn)
 	case TransportSSE:
 		return m.startSSEServer(ctx, conn)
+	case TransportStreamableHTTP:
+		return m.startHTTPServer(ctx, conn)
 	default:
 		return fmt.Errorf("unsupported transport: %s", conn.Config.Transport)
 	}
@@ -766,7 +788,7 @@ func (m *Manager) startStdioServer(ctx context.Context, conn *ServerConnection) 
 
 	// Initialize the MCP protocol
 	if err := m.initializeServer(conn); err != nil {
-		_ = transport.Close()
+		_ = transport.Close(ctx)
 		conn.transport = nil
 		conn.Process = nil
 		return fmt.Errorf("MCP initialize failed: %w", err)
@@ -822,7 +844,7 @@ func (m *Manager) startSSEServer(ctx context.Context, conn *ServerConnection) er
 
 	// Initialize the MCP protocol
 	if err := m.initializeServer(conn); err != nil {
-		_ = transport.Close()
+		_ = transport.Close(ctx)
 		conn.transport = nil
 		return fmt.Errorf("MCP initialize failed: %w", err)
 	}
@@ -839,6 +861,47 @@ func (m *Manager) startSSEServer(ctx context.Context, conn *ServerConnection) er
 	conn.Status.LastError = nil
 	conn.Status.StartedAt = time.Now()
 	m.logger.Info("MCP SSE server connected",
+		zap.String("server", conn.Config.Name),
+		zap.Int("tools", conn.Status.ToolCount))
+	m.logTrustModeIfEnabled(conn.Config)
+
+	return nil
+}
+
+// startHTTPServer connects to an MCP server via the 2025-03-26
+// Streamable HTTP transport. Symmetric with startSSEServer — the
+// only difference is that the transport itself has no upfront
+// handshake, so connection-level errors surface during the
+// initialize call rather than at construction time.
+func (m *Manager) startHTTPServer(ctx context.Context, conn *ServerConnection) error {
+	m.logger.Info("connecting to MCP HTTP server",
+		zap.String("server", conn.Config.Name),
+		zap.String("url", conn.Config.URL))
+
+	transport, err := newHTTPTransport(ctx, conn.Config, m.logger, m.channels, conn.Config.Name)
+	if err != nil {
+		return fmt.Errorf("failed to construct HTTP transport: %w", err)
+	}
+
+	conn.transport = transport
+
+	if err := m.initializeServer(conn); err != nil {
+		_ = transport.Close(ctx)
+		conn.transport = nil
+		return fmt.Errorf("%s: %w", i18n.T("mcp.transport.http_initialize_failed"), err)
+	}
+
+	if err := m.discoverTools(conn); err != nil {
+		m.logger.Warn("MCP tool discovery failed",
+			zap.String("server", conn.Config.Name),
+			zap.Error(err))
+	}
+
+	conn.Status.Connected = true
+	conn.Status.Starting = false
+	conn.Status.LastError = nil
+	conn.Status.StartedAt = time.Now()
+	m.logger.Info("MCP HTTP server connected",
 		zap.String("server", conn.Config.Name),
 		zap.Int("tools", conn.Status.ToolCount))
 	m.logTrustModeIfEnabled(conn.Config)

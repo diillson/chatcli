@@ -148,76 +148,14 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		)
 	}
 
-	// Initialize fallback chain if configured
-	if opts.FallbackProviders != "" {
-		providers := strings.Split(opts.FallbackProviders, ",")
-		var entries []fallback.FallbackEntry
-		for i, p := range providers {
-			p = strings.TrimSpace(p)
-			if p == "" {
-				continue
-			}
-			// Resolve model from env (CHATCLI_FALLBACK_MODEL_<PROVIDER>) or use default
-			model := os.Getenv("CHATCLI_FALLBACK_MODEL_" + strings.ToUpper(p))
-			if model == "" {
-				model = opts.Model
-			}
-			c, err := llmMgr.GetClient(p, model)
-			if err != nil {
-				logger.Warn(i18n.T("cmd.server.fallback_unavailable"),
-					zap.String("provider", p), zap.Error(err))
-				continue
-			}
-			entries = append(entries, fallback.FallbackEntry{
-				Provider: p,
-				Model:    model,
-				Client:   c,
-				Priority: i,
-			})
-		}
-		if len(entries) > 1 {
-			chain := fallback.NewChain(logger, entries,
-				fallback.WithMaxRetries(opts.FallbackMaxRetries),
-				fallback.WithCooldown(opts.FallbackCooldownBase, opts.FallbackCooldownMax, 2.0),
-			)
-			srv.SetFallbackChain(chain)
-			logger.Info(i18n.T("cmd.server.fallback_init_success"),
-				zap.Int("providers", len(entries)),
-				zap.Strings("chain", func() []string {
-					names := make([]string, len(entries))
-					for i, e := range entries {
-						names[i] = e.Provider
-					}
-					return names
-				}()),
-			)
-		}
-	}
+	// Initialize fallback chain if configured.
+	initFallbackChain(opts, llmMgr, srv, logger)
 
-	// Initialize MCP manager if configured
-	if opts.MCPConfigPath != "" || os.Getenv("CHATCLI_MCP_ENABLED") == "true" {
-		mcpMgr := mcp.NewManager(logger)
-		configPath := opts.MCPConfigPath
-		if configPath == "" {
-			configPath = mcp.DefaultConfigPath()
-		}
-		if err := mcpMgr.LoadConfig(configPath); err != nil {
-			logger.Warn(i18n.T("cmd.server.mcp_config_failed"),
-				zap.String("config", configPath), zap.Error(err))
-		} else {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			if err := mcpMgr.StartAll(ctx); err != nil {
-				logger.Warn(i18n.T("cmd.server.mcp_start_failed"), zap.Error(err))
-			} else {
-				srv.SetMCPManager(mcpMgr)
-				defer mcpMgr.StopAll()
-				logger.Info(i18n.T("cmd.server.mcp_init_success"),
-					zap.Int("servers", len(mcpMgr.GetServerStatus())),
-					zap.Int("tools", len(mcpMgr.GetTools())),
-				)
-			}
-		}
+	// Initialize MCP manager if configured. The helper returns a
+	// stop closure (nil when MCP did not come up) that the caller
+	// defers so the server-mode shutdown path stays a one-liner.
+	if stopMCP := initMCPManager(opts, srv, logger); stopMCP != nil {
+		defer stopMCP()
 	}
 
 	// Start K8s watcher(s) if configured
@@ -326,6 +264,115 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	}
 
 	return srv.Start()
+}
+
+// fallbackChainSink is the slice of server.Server's API that
+// initFallbackChain actually needs. Narrowing the parameter type
+// keeps the helper trivially mockable and documents that no other
+// server method is touched here.
+type fallbackChainSink interface {
+	SetFallbackChain(chain *fallback.Chain)
+}
+
+// mcpSink is the slice of server.Server's API that initMCPManager
+// uses. Same motivation as fallbackChainSink — accept the narrowest
+// interface so the success/failure paths are exercised by tests
+// without standing up a real *server.Server.
+type mcpSink interface {
+	SetMCPManager(mgr *mcp.Manager)
+}
+
+// initFallbackChain wires the optional provider-fallback chain into
+// the sink. Extracted from RunServer so the cyclo budget on the
+// parent function stays in line with the project-wide gate.
+func initFallbackChain(opts *ServerOptions, llmMgr manager.LLMManager, srv fallbackChainSink, logger *zap.Logger) {
+	if opts.FallbackProviders == "" {
+		return
+	}
+	providers := strings.Split(opts.FallbackProviders, ",")
+	entries := make([]fallback.FallbackEntry, 0, len(providers))
+	for i, p := range providers {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		model := os.Getenv("CHATCLI_FALLBACK_MODEL_" + strings.ToUpper(p))
+		if model == "" {
+			model = opts.Model
+		}
+		c, err := llmMgr.GetClient(p, model)
+		if err != nil {
+			logger.Warn(i18n.T("cmd.server.fallback_unavailable"),
+				zap.String("provider", p), zap.Error(err))
+			continue
+		}
+		entries = append(entries, fallback.FallbackEntry{
+			Provider: p,
+			Model:    model,
+			Client:   c,
+			Priority: i,
+		})
+	}
+	if len(entries) <= 1 {
+		return
+	}
+	chain := fallback.NewChain(logger, entries,
+		fallback.WithMaxRetries(opts.FallbackMaxRetries),
+		fallback.WithCooldown(opts.FallbackCooldownBase, opts.FallbackCooldownMax, 2.0),
+	)
+	srv.SetFallbackChain(chain)
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Provider
+	}
+	logger.Info(i18n.T("cmd.server.fallback_init_success"),
+		zap.Int("providers", len(entries)),
+		zap.Strings("chain", names),
+	)
+}
+
+// initMCPManager wires the optional MCP subsystem into srv. Lives
+// outside RunServer so the long flag-parsing function stays under
+// the cyclo budget and so the success/failure ladder reads as a
+// single sequence of guards instead of nested else-branches.
+//
+// Returns a stop closure to be deferred by the caller; nil when
+// MCP was not configured or did not come up.
+func initMCPManager(opts *ServerOptions, srv mcpSink, logger *zap.Logger) func() {
+	if opts.MCPConfigPath == "" && os.Getenv("CHATCLI_MCP_ENABLED") != "true" {
+		return nil
+	}
+
+	mcpMgr := mcp.NewManager(logger)
+	configPath := opts.MCPConfigPath
+	if configPath == "" {
+		configPath = mcp.DefaultConfigPath()
+	}
+	if err := mcpMgr.LoadConfig(configPath); err != nil {
+		logger.Warn(i18n.T("cmd.server.mcp_config_failed"),
+			zap.String("config", configPath), zap.Error(err))
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := mcpMgr.StartAll(ctx); err != nil {
+		logger.Warn(i18n.T("cmd.server.mcp_start_failed"), zap.Error(err))
+		cancel()
+		return nil
+	}
+
+	srv.SetMCPManager(mcpMgr)
+	logger.Info(i18n.T("cmd.server.mcp_init_success"),
+		zap.Int("servers", len(mcpMgr.GetServerStatus())),
+		zap.Int("tools", len(mcpMgr.GetTools())),
+	)
+
+	return func() {
+		stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+		mcpMgr.StopAll(stopCtx)
+		cancelStop()
+		cancel()
+	}
 }
 
 func getEnvInt(key string, defaultVal int) int {

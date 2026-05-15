@@ -223,7 +223,9 @@ func (cli *ChatCLI) mcpRestart(name string) {
 	p := uiPrefix(ColorYellow)
 	fmt.Println(p + colorize(i18n.T("mcp.cmd.restarting"), ColorGray))
 
-	cli.mcpManager.StopAll()
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+	cli.mcpManager.StopAll(stopCtx)
+	cancelStop()
 	if cli.mcpCancel != nil {
 		cli.mcpCancel()
 	}
@@ -257,7 +259,7 @@ func (cli *ChatCLI) mcpRestartOne(name string) {
 	p := uiPrefix(ColorYellow)
 	fmt.Println(p + colorize(i18n.T("mcp.cmd.restarting_one", name), ColorGray))
 
-	if err := cli.mcpManager.StopOne(name); err != nil {
+	if err := cli.mcpManager.StopOne(cli.mcpCtx, name); err != nil {
 		fmt.Println(p + colorize(i18n.T("mcp.cmd.restart_error", translateMCPError(err)), ColorRed))
 		fmt.Println(uiBoxEnd(ColorYellow))
 		return
@@ -289,7 +291,7 @@ func (cli *ChatCLI) mcpStop(name string) {
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.usage_stop"), ColorYellow))
 		return
 	}
-	if err := cli.mcpManager.StopOne(name); err != nil {
+	if err := cli.mcpManager.StopOne(cli.mcpCtx, name); err != nil {
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.stop_error", translateMCPError(err)), ColorRed))
 		return
 	}
