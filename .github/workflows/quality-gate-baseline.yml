@@ -33,9 +33,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run tests with coverage
+      - name: Run tests with coverage (root + operator merged)
+        # -coverpkg=./... is intentional: the baseline must match the PR
+        # ratchet methodology in quality-gate.yml. Without it the two
+        # numbers measure different denominators and the ratchet would
+        # ratchet against a moving target. See tools/qg/diffcover.
+        #
+        # Both modules merged into a single coverage.out so the published
+        # baseline reflects the unified codebase.
         run: |
-          go test -race -coverprofile=coverage.out ./...
+          go test -race -coverpkg=./... -coverprofile=coverage-root.out ./...
+          ( cd operator && go test -race -coverpkg=./... -coverprofile=../coverage-operator.out ./... )
+          head -1 coverage-root.out > coverage.out
+          tail -n +2 coverage-root.out >> coverage.out
+          tail -n +2 coverage-operator.out >> coverage.out
           go tool cover -func=coverage.out | tail -n 1
 
       - name: Compute total coverage

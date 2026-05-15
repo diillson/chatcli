@@ -1,0 +1,88 @@
+name: Setup Quality Gate tools
+description: |
+  Installs the binaries every Quality Gate floor depends on (yq, gocyclo,
+  apidiff, controller-gen, govulncheck) and pre-builds the in-repo
+  tools/qg/cmd/* helpers. Centralising the installs means each floor
+  pays once for `go install` rather than re-downloading on every job,
+  and a version bump on a tool lands in one place.
+
+inputs:
+  with-cyclo:
+    description: Install fzipp/gocyclo (Floor 8)
+    required: false
+    default: 'false'
+  with-apidiff:
+    description: Install golang.org/x/exp/cmd/apidiff (Floor 13)
+    required: false
+    default: 'false'
+  with-controller-gen:
+    description: Install sigs.k8s.io/controller-tools/cmd/controller-gen (Floor 11)
+    required: false
+    default: 'false'
+  with-govulncheck:
+    description: Install golang.org/x/vuln/cmd/govulncheck (security-scan)
+    required: false
+    default: 'false'
+  with-qg-binaries:
+    description: |
+      Pre-build the in-repo tools/qg/cmd/* binaries (qg-diffcover,
+      qg-cover-total, qg-i18n-parity, qg-provider-parity) so the wrappers
+      do not pay per-run build cost.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Install yq
+      shell: bash
+      run: |
+        if ! command -v yq >/dev/null 2>&1; then
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+        fi
+        yq --version
+
+    - name: Install gocyclo
+      if: inputs.with-cyclo == 'true'
+      shell: bash
+      run: |
+        if ! command -v gocyclo >/dev/null 2>&1; then
+          go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
+        fi
+
+    - name: Install apidiff
+      if: inputs.with-apidiff == 'true'
+      shell: bash
+      run: |
+        if ! command -v apidiff >/dev/null 2>&1; then
+          go install golang.org/x/exp/cmd/apidiff@latest
+        fi
+
+    - name: Install controller-gen
+      if: inputs.with-controller-gen == 'true'
+      shell: bash
+      run: |
+        if ! command -v controller-gen >/dev/null 2>&1; then
+          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5
+        fi
+
+    - name: Install govulncheck
+      if: inputs.with-govulncheck == 'true'
+      shell: bash
+      run: |
+        if ! command -v govulncheck >/dev/null 2>&1; then
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+        fi
+
+    - name: Pre-build tools/qg/cmd/* binaries
+      if: inputs.with-qg-binaries == 'true'
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.qg-bin"
+        for cmd in qg-diffcover qg-cover-total qg-i18n-parity qg-provider-parity qg-verdict qg-fan-in; do
+          if [[ -d "tools/qg/cmd/$cmd" ]]; then
+            go build -o "$HOME/.qg-bin/$cmd" "./tools/qg/cmd/$cmd"
+          fi
+        done
+        echo "$HOME/.qg-bin" >> "$GITHUB_PATH"

@@ -147,3 +147,29 @@ qg_require_jq() {
   qg_fail "jq is required but not installed"
   return 1
 }
+
+# qg_tool <name> — echoes the absolute path of an in-repo qg helper binary.
+#
+# Resolution order:
+#   1. $PATH (the composite .github/actions/setup-qg-tools pre-builds the
+#      binaries into $HOME/.qg-bin and prepends it to GITHUB_PATH).
+#   2. A cached build under $QG_REPO_ROOT/.qg-cache, rebuilt only when
+#      the binary is missing.
+#
+# Each wrapper script that needs a Go helper calls this once and relies
+# on the path it returns. Avoids the "every floor pays for go build"
+# tax on every CI run.
+qg_tool() {
+  local name="$1"
+  if command -v "$name" >/dev/null 2>&1; then
+    command -v "$name"
+    return 0
+  fi
+  local cache_dir="${QG_REPO_ROOT}/.qg-cache"
+  mkdir -p "$cache_dir"
+  local out="$cache_dir/$name"
+  if [[ ! -x "$out" ]]; then
+    ( cd "$QG_REPO_ROOT" && go build -o "$out" "./tools/qg/cmd/$name" ) >&2
+  fi
+  echo "$out"
+}

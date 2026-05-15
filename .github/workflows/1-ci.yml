@@ -17,6 +17,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          # Deep clone so --new-from-rev can resolve origin/<base>.
+          # Without this, golangci-lint cannot enumerate the diff and
+          # would fail to apply diff-only enforcement.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -24,12 +29,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: golangci-lint
+      - name: golangci-lint (diff-only)
+        # The stricter .golangci.yml introduced in feat/quality-gate-overhaul
+        # would flag thousands of pre-existing violations across legacy code.
+        # --new-from-rev keeps enforcement scoped to lines this PR adds or
+        # modifies, matching what the Quality Gate Floor 1 does.
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.8
           install-mode: goinstall
-          args: --timeout=5m
+          args: --timeout=5m --new-from-rev=origin/${{ github.base_ref }}
 
       - name: Check gofmt
         run: |

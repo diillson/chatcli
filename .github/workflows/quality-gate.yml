@@ -104,6 +104,10 @@ jobs:
 
   # ---------------------------------------------------------------------
   # Floor 1 — build, vet, gofmt, golangci-lint
+  #
+  # Runs the same checks twice: once at the repo root (chatcli main module)
+  # and once inside operator/ (separate Go module). gofmt is run repo-wide
+  # because the formatter doesn't care about module boundaries.
   # ---------------------------------------------------------------------
   build-static:
     name: Floor 1 · Build & Static
@@ -112,18 +116,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Deep clone — golangci-lint --new-from-rev needs origin/<base>
+          # available locally to compute the diff. Default checkout is
+          # shallow (depth=1) and the linter falls back to flagging the
+          # whole tree, which would block on legacy code.
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
 
-      - name: go build
+      - name: go build (root)
         run: go build ./...
 
-      - name: go vet
+      - name: go build (operator)
+        working-directory: operator
+        run: go build ./...
+
+      - name: go vet (root)
         run: go vet ./...
 
-      - name: gofmt
+      - name: go vet (operator)
+        working-directory: operator
+        run: go vet ./...
+
+      - name: gofmt (repo-wide)
         run: |
           out=$(gofmt -l .)
           if [[ -n "$out" ]]; then
@@ -132,12 +150,23 @@ jobs:
             exit 1
           fi
 
-      - name: golangci-lint
+      - name: golangci-lint (root, diff-only)
+        # --new-from-rev gates the stricter linters in .golangci.yml to
+        # lines this PR touched. Without it, enabling `revive` would
+        # block every PR over pre-existing doc-comment violations.
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.8
           install-mode: goinstall
-          args: --timeout=5m
+          args: --timeout=5m --new-from-rev=origin/${{ github.base_ref }}
+
+      - name: golangci-lint (operator, diff-only)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+          install-mode: goinstall
+          working-directory: operator
+          args: --timeout=5m --new-from-rev=origin/${{ github.base_ref }}
 
   # ---------------------------------------------------------------------
   # Floor 2 — total coverage ratchet (unit tests with -race)
@@ -168,9 +197,23 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - name: go test -race -coverprofile
+      - name: go test root + operator (merged profile)
+        # -coverpkg=./... is REQUIRED for patch-coverage correctness: it
+        # forces the profile to include every package in the module, even
+        # those without _test.go files. Without it, brand-new packages
+        # added in a PR have zero profile entries and look like "100 percent
+        # covered" to diff-cover. See tools/qg/diffcover/compute.go.
+        #
+        # Both modules contribute to a single coverage.out so Floors 2 and
+        # 3 see the unified picture. Merging by concatenating records
+        # (with one mode header) is safe: -race forces atomic mode in both
+        # modules, and tools/qg/diffcover dedupes overlapping ranges.
         run: |
-          go test -race -coverprofile=coverage.out ./...
+          go test -race -coverpkg=./... -coverprofile=coverage-root.out ./...
+          ( cd operator && go test -race -coverpkg=./... -coverprofile=../coverage-operator.out ./... )
+          head -1 coverage-root.out > coverage.out
+          tail -n +2 coverage-root.out >> coverage.out
+          tail -n +2 coverage-operator.out >> coverage.out
           go tool cover -func=coverage.out | tail -n 1
 
       - name: Upload coverage profile
@@ -209,10 +252,6 @@ jobs:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
       - name: Install yq
         run: |
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
@@ -227,6 +266,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_LABELS: ${{ needs.meta.outputs.labels }}
           QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+        # qg-diffcover is built on demand by scripts/qg/patch-coverage.sh;
+        # the Go toolchain layer above is the only system dep it needs.
         run: bash scripts/qg/patch-coverage.sh coverage.out
 
   # ---------------------------------------------------------------------
@@ -381,6 +422,168 @@ jobs:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
 
   # ---------------------------------------------------------------------
+  # Floor 10 — i18n parity (cross-locale keys + Go usage coverage)
+  # ---------------------------------------------------------------------
+  i18n-parity:
+    name: Floor 10 · i18n parity
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.parity.outputs.passed }}
+      missing_keys: ${{ steps.parity.outputs.missing_keys }}
+      unknown_usages: ${{ steps.parity.outputs.unknown_usages }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: parity
+        env:
+          QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+        run: bash scripts/qg/i18n-parity.sh
+
+  # ---------------------------------------------------------------------
+  # Floor 11 — CRD drift (controller-gen vs checked-in YAML)
+  # ---------------------------------------------------------------------
+  crd-drift:
+    name: Floor 11 · CRD drift
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.drift.outputs.passed }}
+      drifted_files: ${{ steps.drift.outputs.drifted_files }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: drift
+        env:
+          QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+        run: bash scripts/qg/crd-drift.sh
+
+  # ---------------------------------------------------------------------
+  # Floor 12 — License headers on new Go files
+  # ---------------------------------------------------------------------
+  license-headers:
+    name: Floor 12 · License headers
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.headers.outputs.passed }}
+      missing_count: ${{ steps.headers.outputs.missing_count }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: headers
+        env:
+          QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+        run: bash scripts/qg/license-headers.sh
+
+  # ---------------------------------------------------------------------
+  # Floor 13 — apidiff against base ref
+  # ---------------------------------------------------------------------
+  api-breaking:
+    name: Floor 13 · API breaking changes
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.apidiff.outputs.passed }}
+      incompatible_count: ${{ steps.apidiff.outputs.incompatible_count }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: apidiff
+        env:
+          QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+          PR_LABELS: ${{ needs.meta.outputs.labels }}
+        run: bash scripts/qg/api-breaking.sh
+
+  # ---------------------------------------------------------------------
+  # Floor 14 — binary size budget
+  # ---------------------------------------------------------------------
+  binary-size:
+    name: Floor 14 · Binary size
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.size.outputs.passed }}
+      chatcli_bytes: ${{ steps.size.outputs.chatcli_bytes }}
+      operator_bytes: ${{ steps.size.outputs.operator_bytes }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: size
+        env:
+          QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+        run: bash scripts/qg/binary-size.sh
+
+  # ---------------------------------------------------------------------
+  # Floor 15 — LLM provider parity matrix
+  # ---------------------------------------------------------------------
+  provider-parity:
+    name: Floor 15 · Provider parity
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.parity.outputs.passed }}
+      violations: ${{ steps.parity.outputs.violations }}
+      providers: ${{ steps.parity.outputs.providers }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: parity
+        run: bash scripts/qg/provider-parity.sh
+
+  # ---------------------------------------------------------------------
   # Aggregator — the single status check that branch protection requires.
   # Posts a sticky comment with the per-floor verdict.
   # ---------------------------------------------------------------------
@@ -397,149 +600,78 @@ jobs:
       - commit-lint
       - cyclo-new
       - secrets-scan
+      - i18n-parity
+      - crd-drift
+      - license-headers
+      - api-breaking
+      - binary-size
+      - provider-parity
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Compose verdict
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+
+      - uses: ./.github/actions/setup-qg-tools
+        with:
+          with-qg-binaries: 'true'
+
+      - name: Render verdict (qg-verdict)
         id: verdict
         shell: bash
         env:
-          R_BUILD: ${{ needs.build-static.result }}
-          R_COV: ${{ needs.test-coverage.result }}
-          R_PATCH: ${{ needs.patch-coverage.result }}
-          R_SMELLS: ${{ needs.ai-smells.result }}
-          R_SCOPE: ${{ needs.scope-budget.result }}
-          R_E2E: ${{ needs.e2e.result }}
-          R_LINT: ${{ needs.commit-lint.result }}
-          R_CYCLO: ${{ needs.cyclo-new.result }}
-          R_SEC: ${{ needs.secrets-scan.result }}
-          DOCS_ONLY: ${{ needs.meta.outputs.docs_only }}
-          RELEASE_PLEASE: ${{ needs.meta.outputs.release_please }}
-          SKIP: ${{ needs.meta.outputs.skip }}
-          COV_CURRENT: ${{ needs.test-coverage.outputs.current }}
-          COV_BASELINE: ${{ needs.test-coverage.outputs.baseline }}
-          COV_DELTA: ${{ needs.test-coverage.outputs.delta }}
-          PATCH_PCT: ${{ needs.patch-coverage.outputs.percent }}
-          PATCH_THR: ${{ needs.patch-coverage.outputs.threshold }}
-          SCOPE_FILES: ${{ needs.scope-budget.outputs.files }}
-          SCOPE_LOC: ${{ needs.scope-budget.outputs.loc }}
-          SCOPE_CODE_LOC: ${{ needs.scope-budget.outputs.code_loc }}
-          SCOPE_TOOL_LOC: ${{ needs.scope-budget.outputs.tooling_loc }}
-          CYCLO_CHECKED: ${{ needs.cyclo-new.outputs.checked }}
-          PR_LABELS: ${{ needs.meta.outputs.labels }}
+          # Floor result statuses.
+          R_BUILD:      ${{ needs.build-static.result }}
+          R_COV:        ${{ needs.test-coverage.result }}
+          R_PATCH:      ${{ needs.patch-coverage.result }}
+          R_SMELLS:     ${{ needs.ai-smells.result }}
+          R_SCOPE:      ${{ needs.scope-budget.result }}
+          R_E2E:        ${{ needs.e2e.result }}
+          R_LINT:       ${{ needs.commit-lint.result }}
+          R_CYCLO:      ${{ needs.cyclo-new.result }}
+          R_SEC:        ${{ needs.secrets-scan.result }}
+          R_I18N:       ${{ needs.i18n-parity.result }}
+          R_CRD:        ${{ needs.crd-drift.result }}
+          R_LICENSE:    ${{ needs.license-headers.result }}
+          R_APIDIFF:    ${{ needs.api-breaking.result }}
+          R_BINSIZE:    ${{ needs.binary-size.result }}
+          R_PROVPARITY: ${{ needs.provider-parity.result }}
+          # Floor outputs.
+          COV_CURRENT:     ${{ needs.test-coverage.outputs.current }}
+          COV_BASELINE:    ${{ needs.test-coverage.outputs.baseline }}
+          COV_DELTA:       ${{ needs.test-coverage.outputs.delta }}
+          PATCH_PCT:       ${{ needs.patch-coverage.outputs.percent }}
+          PATCH_THR:       ${{ needs.patch-coverage.outputs.threshold }}
+          SCOPE_FILES:     ${{ needs.scope-budget.outputs.files }}
+          SCOPE_LOC:       ${{ needs.scope-budget.outputs.loc }}
+          SCOPE_CODE_LOC:  ${{ needs.scope-budget.outputs.code_loc }}
+          SCOPE_TOOL_LOC:  ${{ needs.scope-budget.outputs.tooling_loc }}
+          CYCLO_CHECKED:   ${{ needs.cyclo-new.outputs.checked }}
+          I18N_MISSING:    ${{ needs.i18n-parity.outputs.missing_keys }}
+          I18N_UNKNOWN:    ${{ needs.i18n-parity.outputs.unknown_usages }}
+          CRD_DRIFTED:     ${{ needs.crd-drift.outputs.drifted_files }}
+          LICENSE_MISSING: ${{ needs.license-headers.outputs.missing_count }}
+          API_INCOMPAT:    ${{ needs.api-breaking.outputs.incompatible_count }}
+          BIN_CHATCLI:     ${{ needs.binary-size.outputs.chatcli_bytes }}
+          BIN_OPERATOR:    ${{ needs.binary-size.outputs.operator_bytes }}
+          PROV_COUNT:      ${{ needs.provider-parity.outputs.providers }}
+          PROV_VIOLATIONS: ${{ needs.provider-parity.outputs.violations }}
+          # Meta flags.
+          DOCS_ONLY:       ${{ needs.meta.outputs.docs_only }}
+          RELEASE_PLEASE:  ${{ needs.meta.outputs.release_please }}
+          SKIP:            ${{ needs.meta.outputs.skip }}
+          PR_LABELS:       ${{ needs.meta.outputs.labels }}
         run: |
           set -euo pipefail
-
-          icon() {
-            case "$1" in
-              success) echo "✅";;
-              skipped) echo "⏭️";;
-              cancelled) echo "🚫";;
-              "") echo "⏭️";;
-              *) echo "❌";;
-            esac
-          }
-
-          if [[ "$SKIP" == "true" ]]; then
-            verdict="bypassed"
-            body="### Quality Gate · Bypassed%0AThis PR was skipped (bot actor or \`quality-gate-skip\` label)."
-          elif [[ "$RELEASE_PLEASE" == "true" ]]; then
-            # release-please PRs run only commit-lint; the heavy floors
-            # are intentionally skipped and reported as ⏭️ in the body.
-            failed=()
-            if [[ "$R_LINT" != "success" && "$R_LINT" != "skipped" && -n "$R_LINT" ]]; then
-              failed+=("commit-lint")
-            fi
-            verdict="pass"
-            if [[ ${#failed[@]} -gt 0 ]]; then
-              verdict="fail"
-            fi
-          else
-            # Treat skipped as success (e.g. ai-smells skipped on docs-only PRs).
-            failed=()
-            for pair in \
-              "build-static:$R_BUILD" \
-              "coverage:$R_COV" \
-              "patch-coverage:$R_PATCH" \
-              "ai-smells:$R_SMELLS" \
-              "scope:$R_SCOPE" \
-              "e2e:$R_E2E" \
-              "commit-lint:$R_LINT" \
-              "cyclo:$R_CYCLO" \
-              "secrets:$R_SEC"; do
-                name=${pair%%:*}; res=${pair##*:}
-                if [[ "$res" != "success" && "$res" != "skipped" && -n "$res" ]]; then
-                  failed+=("$name")
-                fi
-            done
-
-            verdict="pass"
-            if [[ ${#failed[@]} -gt 0 ]]; then
-              verdict="fail"
-            fi
-          fi
-
-          # Build markdown body for sticky comment.
+          # qg-verdict was pre-built by setup-qg-tools; render the body and
+          # forward the verdict line into $GITHUB_OUTPUT. Body is loaded as
+          # a heredoc-style multi-line output so the sticky-comment action
+          # can interpolate it verbatim.
+          qg-verdict -body body.md >> "$GITHUB_OUTPUT"
           {
-            echo "### Quality Gate"
-            echo ""
-            if [[ "$verdict" == "pass" ]]; then
-              echo "**Result:** ✅ all floors passed"
-            elif [[ "$verdict" == "bypassed" ]]; then
-              echo "**Result:** ⏭️ bypassed"
-            else
-              echo "**Result:** ❌ ${#failed[@]} floor(s) failed: ${failed[*]}"
-            fi
-            echo ""
-            echo "| Floor | Status | Detail |"
-            echo "|---|---|---|"
-            echo "| 1 · Build & Static       | $(icon "$R_BUILD")   | go build / vet / fmt / golangci-lint |"
-
-            if [[ -n "$COV_BASELINE" ]]; then
-              echo "| 2 · Coverage ratchet     | $(icon "$R_COV")     | ${COV_CURRENT}% (baseline ${COV_BASELINE}%, Δ ${COV_DELTA}) |"
-            else
-              echo "| 2 · Coverage ratchet     | $(icon "$R_COV")     | ${COV_CURRENT}% (bootstrap) |"
-            fi
-
-            if [[ "$DOCS_ONLY" == "true" ]]; then
-              echo "| 3 · Patch coverage       | ⏭️                  | docs/CI only |"
-            else
-              echo "| 3 · Patch coverage       | $(icon "$R_PATCH")   | ${PATCH_PCT}% (≥ ${PATCH_THR}% required) |"
-            fi
-
-            if [[ "$DOCS_ONLY" == "true" ]]; then
-              echo "| 4 · AI smells            | ⏭️                  | docs/CI only |"
-            else
-              echo "| 4 · AI smells            | $(icon "$R_SMELLS")  | scanned diff |"
-            fi
-
-            echo "| 5 · Scope budget         | $(icon "$R_SCOPE")   | ${SCOPE_FILES} files, ${SCOPE_LOC} LOC (${SCOPE_CODE_LOC} code + ${SCOPE_TOOL_LOC} tooling) |"
-
-            if [[ "$DOCS_ONLY" == "true" ]]; then
-              echo "| 6 · E2E                  | ⏭️                  | docs/CI only |"
-            else
-              echo "| 6 · E2E                  | $(icon "$R_E2E")     | go test -race ./e2e/... |"
-            fi
-
-            echo "| 7 · Commit lint          | $(icon "$R_LINT")    | conventional commits + project rules |"
-
-            if [[ "$DOCS_ONLY" == "true" ]]; then
-              echo "| 8 · Cyclo (new code)     | ⏭️                  | docs/CI only |"
-            else
-              echo "| 8 · Cyclo (new code)     | $(icon "$R_CYCLO")   | ${CYCLO_CHECKED} file(s) checked |"
-            fi
-
-            echo "| 9 · Secrets scan         | $(icon "$R_SEC")     | gitleaks |"
-            echo ""
-            if [[ -n "${PR_LABELS// /}" ]]; then
-              echo "_Labels:_ \`${PR_LABELS// / }\`"
-            fi
-            echo ""
-            echo "_Config: [.github/quality-gate.yml](../blob/${{ github.head_ref }}/.github/quality-gate.yml)_"
-          } > body.md
-
-          {
-            echo "verdict=$verdict"
             echo 'body<<__QG_EOF__'
             cat body.md
             echo '__QG_EOF__'

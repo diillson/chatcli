@@ -43,8 +43,15 @@ coverage_total:
   # Tolerance to absorb flake (line-count drift on retries, etc.).
   tolerance_pct: 0.1
 
-# Floor 3 — Patch coverage on the diff. Computed via gocover-cobertura +
-# diff-cover comparing to origin/<base>. Excludes generated and test files.
+# Floor 3 — Patch coverage on the diff. Computed by tools/qg/cmd/qg-diffcover
+# (Go-native, no Python dep) comparing to origin/<base>. Excludes generated
+# and test files.
+#
+# per_path applies stricter thresholds to security- and quality-critical
+# paths. Hot or fragile areas (LLM clients, auth, the gate tooling itself)
+# carry higher floors than the global default. Any file in the diff that
+# matches one of these patterns counts toward both the global and the
+# per-path metric; the gate fails if EITHER is breached.
 coverage_patch:
   enforcement: blocking
   threshold_pct: 60
@@ -55,6 +62,21 @@ coverage_patch:
     - "**/*.pb.go"
     - "proto/**"
     - "tools/docgen/**"
+    # CLI mains under tools/qg/cmd are thin flag-parsing glue; the
+    # tested logic lives in the sibling packages (diffcover, i18nparity,
+    # providerparity, ...) which the per-path bar below holds at 75 percent.
+    # Excluding the mains keeps the gate from punishing CLI wrappers that
+    # do not have a meaningful coverage target.
+    - "tools/qg/cmd/**"
+  per_path:
+    - path: "auth/**"
+      threshold_pct: 80
+    - path: "llm/**"
+      threshold_pct: 70
+    - path: "tools/qg/**"
+      threshold_pct: 75
+    - path: "operator/controllers/**"
+      threshold_pct: 70
 
 # Floor 4 — AI / hand-rolled code smells scanned in the diff (Go non-test only).
 ai_smells:
@@ -137,6 +159,39 @@ cyclo_new:
 
 # Floor 9 — Secrets scan via gitleaks on the PR diff.
 secrets_scan:
+  enforcement: blocking
+
+# Floor 10 — i18n cross-locale + Go-source key parity. Runs against
+# the whole repo; locale parity is a global invariant.
+i18n_parity:
+  enforcement: blocking
+
+# Floor 11 — controller-gen CRD drift detection. Only runs when the
+# diff touches operator/api/ or operator/config/crd/.
+crd_drift:
+  enforcement: blocking
+
+# Floor 12 — license header presence on NEW Go files. Existing files
+# are grandfathered (most of the tree predates this gate).
+license_headers:
+  enforcement: blocking
+
+# Floor 13 — apidiff against the base ref for every package whose
+# Go files changed. Bypass label: `breaking-change`.
+api_breaking:
+  enforcement: blocking
+
+# Floor 14 — binary size budget for the final release binaries.
+# Tune when intentional growth is announced.
+binary_size:
+  enforcement: blocking
+  chatcli_mb: 100
+  operator_mb: 100
+
+# Floor 15 — LLM provider parity matrix. Every catalog provider
+# must be wired through tools/qg/providerparity touch points
+# modulo documented exemptions.
+provider_parity:
   enforcement: blocking
 
 # Bypass labels — applied manually by maintainers when an exception is

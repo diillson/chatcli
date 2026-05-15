@@ -27,7 +27,11 @@ if [[ ! -f "$PROFILE" ]]; then
   exit 1
 fi
 
-current=$(go tool cover -func="$PROFILE" | awk '/^total:/ { gsub(/%/,"",$3); print $3 }')
+# Use the in-house qg-cover-total tool instead of `go tool cover -func` so
+# this works against merged profiles spanning multiple Go modules
+# (root + operator). `go tool cover` needs every package resolvable from
+# the current go.mod and errors out otherwise without emitting `total:`.
+current=$( "$(qg_tool qg-cover-total)" -profile "$PROFILE" )
 if [[ -z "$current" ]]; then
   qg_fail "could not parse coverage from $PROFILE"
   exit 1
