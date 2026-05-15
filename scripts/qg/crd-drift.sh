@@ -82,7 +82,11 @@ qg_set_output drifted_files "${drifted% }"
   echo "<details><summary>Diff</summary>"
   echo
   echo '```diff'
-  git -C "$QG_REPO_ROOT" diff -- 'operator/config/crd/bases/' | head -120
+  # awk reads the whole stream and prints the first 120 lines without
+  # closing stdin early; using `head` here triggers SIGPIPE on git diff
+  # under `set -o pipefail` and kills the script before the summary is
+  # written (exit 141, no diagnostics in the workflow log).
+  git -C "$QG_REPO_ROOT" diff -- 'operator/config/crd/bases/' | awk 'NR<=120'
   echo '```'
   echo
   echo "</details>"
