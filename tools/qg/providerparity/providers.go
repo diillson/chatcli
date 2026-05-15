@@ -4,8 +4,9 @@
  * License: Apache-2.0
  */
 // Package providerparity verifies that every LLM provider declared in
-// llm/catalog/catalog.go (as `ProviderXxx = "XXX"` constants) is wired
-// across every touch point the project requires.
+// llm/catalog/catalog.go (as ProviderName-style string constants, e.g.
+// ProviderOpenAI = "OPENAI") is wired across every touch point the
+// project requires.
 //
 // Each touch point has a stable ID. Providers can declare exemptions
 // (e.g. BEDROCK uses AWS credentials, not BEDROCK_API_KEY) and the gate

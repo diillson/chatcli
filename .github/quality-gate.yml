@@ -62,6 +62,12 @@ coverage_patch:
     - "**/*.pb.go"
     - "proto/**"
     - "tools/docgen/**"
+    # CLI mains under tools/qg/cmd are thin flag-parsing glue; the
+    # tested logic lives in the sibling packages (diffcover, i18nparity,
+    # providerparity, ...) which the per-path bar below holds at 75 percent.
+    # Excluding the mains keeps the gate from punishing CLI wrappers that
+    # do not have a meaningful coverage target.
+    - "tools/qg/cmd/**"
   per_path:
     - path: "auth/**"
       threshold_pct: 80

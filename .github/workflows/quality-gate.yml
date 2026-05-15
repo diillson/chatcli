@@ -116,6 +116,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Deep clone — golangci-lint --new-from-rev needs origin/<base>
+          # available locally to compute the diff. Default checkout is
+          # shallow (depth=1) and the linter falls back to flagging the
+          # whole tree, which would block on legacy code.
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
