@@ -101,7 +101,19 @@ func newHTTPTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger,
 	initTimeout := cfg.InitializeTimeout()
 
 	t := &httpTransport{
-		endpoint: strings.TrimRight(cfg.URL, "/"),
+		// Preserve the URL path exactly as configured (whitespace
+		// trimmed). Trailing slash is SIGNIFICANT in HTTP path
+		// semantics — some MCP servers (FastMCP, ASGI mounts behind
+		// Starlette/FastAPI routers) answer only on /mcp/ and
+		// 307-redirect /mcp → /mcp/. Go's http.Client does follow
+		// 307 with POST when GetBody is set, but corporate proxies
+		// that sit between the client and the server frequently
+		// drop the body or custom headers across the redirect,
+		// manifesting as a 10s deadline hang on initialize.
+		// Stripping the slash here would force that redirect path
+		// on every call; preserving it lets the operator point
+		// straight at the canonical URL.
+		endpoint: strings.TrimSpace(cfg.URL),
 		// The http.Client timeout caps the entire request lifetime
 		// including streaming SSE bodies. We size it at max(call,
 		// init) so a slow tools/call doesn't get killed by a short
