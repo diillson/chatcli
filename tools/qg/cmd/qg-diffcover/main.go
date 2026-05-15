@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 // qg-diffcover computes patch coverage for the Quality Gate Floor 3.
 //
 // Usage:

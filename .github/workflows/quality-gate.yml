@@ -413,6 +413,168 @@ jobs:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
 
   # ---------------------------------------------------------------------
+  # Floor 10 — i18n parity (cross-locale keys + Go usage coverage)
+  # ---------------------------------------------------------------------
+  i18n-parity:
+    name: Floor 10 · i18n parity
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.parity.outputs.passed }}
+      missing_keys: ${{ steps.parity.outputs.missing_keys }}
+      unknown_usages: ${{ steps.parity.outputs.unknown_usages }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: parity
+        env:
+          QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+        run: bash scripts/qg/i18n-parity.sh
+
+  # ---------------------------------------------------------------------
+  # Floor 11 — CRD drift (controller-gen vs checked-in YAML)
+  # ---------------------------------------------------------------------
+  crd-drift:
+    name: Floor 11 · CRD drift
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.drift.outputs.passed }}
+      drifted_files: ${{ steps.drift.outputs.drifted_files }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: drift
+        env:
+          QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+        run: bash scripts/qg/crd-drift.sh
+
+  # ---------------------------------------------------------------------
+  # Floor 12 — License headers on new Go files
+  # ---------------------------------------------------------------------
+  license-headers:
+    name: Floor 12 · License headers
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.headers.outputs.passed }}
+      missing_count: ${{ steps.headers.outputs.missing_count }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: headers
+        env:
+          QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+        run: bash scripts/qg/license-headers.sh
+
+  # ---------------------------------------------------------------------
+  # Floor 13 — apidiff against base ref
+  # ---------------------------------------------------------------------
+  api-breaking:
+    name: Floor 13 · API breaking changes
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.apidiff.outputs.passed }}
+      incompatible_count: ${{ steps.apidiff.outputs.incompatible_count }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: apidiff
+        env:
+          QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+          PR_LABELS: ${{ needs.meta.outputs.labels }}
+        run: bash scripts/qg/api-breaking.sh
+
+  # ---------------------------------------------------------------------
+  # Floor 14 — binary size budget
+  # ---------------------------------------------------------------------
+  binary-size:
+    name: Floor 14 · Binary size
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.docs_only != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.size.outputs.passed }}
+      chatcli_bytes: ${{ steps.size.outputs.chatcli_bytes }}
+      operator_bytes: ${{ steps.size.outputs.operator_bytes }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: size
+        env:
+          QG_BASE_REF: ${{ needs.meta.outputs.base_ref }}
+        run: bash scripts/qg/binary-size.sh
+
+  # ---------------------------------------------------------------------
+  # Floor 15 — LLM provider parity matrix
+  # ---------------------------------------------------------------------
+  provider-parity:
+    name: Floor 15 · Provider parity
+    needs: meta
+    if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.parity.outputs.passed }}
+      violations: ${{ steps.parity.outputs.violations }}
+      providers: ${{ steps.parity.outputs.providers }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - id: parity
+        run: bash scripts/qg/provider-parity.sh
+
+  # ---------------------------------------------------------------------
   # Aggregator — the single status check that branch protection requires.
   # Posts a sticky comment with the per-floor verdict.
   # ---------------------------------------------------------------------
@@ -429,6 +591,12 @@ jobs:
       - commit-lint
       - cyclo-new
       - secrets-scan
+      - i18n-parity
+      - crd-drift
+      - license-headers
+      - api-breaking
+      - binary-size
+      - provider-parity
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -445,6 +613,21 @@ jobs:
           R_LINT: ${{ needs.commit-lint.result }}
           R_CYCLO: ${{ needs.cyclo-new.result }}
           R_SEC: ${{ needs.secrets-scan.result }}
+          R_I18N: ${{ needs.i18n-parity.result }}
+          R_CRD: ${{ needs.crd-drift.result }}
+          R_LICENSE: ${{ needs.license-headers.result }}
+          R_APIDIFF: ${{ needs.api-breaking.result }}
+          R_BINSIZE: ${{ needs.binary-size.result }}
+          R_PROVPARITY: ${{ needs.provider-parity.result }}
+          I18N_MISSING: ${{ needs.i18n-parity.outputs.missing_keys }}
+          I18N_UNKNOWN: ${{ needs.i18n-parity.outputs.unknown_usages }}
+          CRD_DRIFTED: ${{ needs.crd-drift.outputs.drifted_files }}
+          LICENSE_MISSING: ${{ needs.license-headers.outputs.missing_count }}
+          API_INCOMPAT: ${{ needs.api-breaking.outputs.incompatible_count }}
+          BIN_CHATCLI: ${{ needs.binary-size.outputs.chatcli_bytes }}
+          BIN_OPERATOR: ${{ needs.binary-size.outputs.operator_bytes }}
+          PROV_VIOLATIONS: ${{ needs.provider-parity.outputs.violations }}
+          PROV_COUNT: ${{ needs.provider-parity.outputs.providers }}
           DOCS_ONLY: ${{ needs.meta.outputs.docs_only }}
           RELEASE_PLEASE: ${{ needs.meta.outputs.release_please }}
           SKIP: ${{ needs.meta.outputs.skip }}
@@ -498,7 +681,13 @@ jobs:
               "e2e:$R_E2E" \
               "commit-lint:$R_LINT" \
               "cyclo:$R_CYCLO" \
-              "secrets:$R_SEC"; do
+              "secrets:$R_SEC" \
+              "i18n-parity:$R_I18N" \
+              "crd-drift:$R_CRD" \
+              "license-headers:$R_LICENSE" \
+              "api-breaking:$R_APIDIFF" \
+              "binary-size:$R_BINSIZE" \
+              "provider-parity:$R_PROVPARITY"; do
                 name=${pair%%:*}; res=${pair##*:}
                 if [[ "$res" != "success" && "$res" != "skipped" && -n "$res" ]]; then
                   failed+=("$name")

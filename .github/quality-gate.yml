@@ -139,6 +139,39 @@ cyclo_new:
 secrets_scan:
   enforcement: blocking
 
+# Floor 10 — i18n cross-locale + Go-source key parity. Runs against
+# the whole repo; locale parity is a global invariant.
+i18n_parity:
+  enforcement: blocking
+
+# Floor 11 — controller-gen CRD drift detection. Only runs when the
+# diff touches operator/api/ or operator/config/crd/.
+crd_drift:
+  enforcement: blocking
+
+# Floor 12 — license header presence on NEW Go files. Existing files
+# are grandfathered (most of the tree predates this gate).
+license_headers:
+  enforcement: blocking
+
+# Floor 13 — apidiff against the base ref for every package whose
+# Go files changed. Bypass label: `breaking-change`.
+api_breaking:
+  enforcement: blocking
+
+# Floor 14 — binary size budget for the final release binaries.
+# Tune when intentional growth is announced.
+binary_size:
+  enforcement: blocking
+  chatcli_mb: 100
+  operator_mb: 100
+
+# Floor 15 — LLM provider parity matrix. Every catalog provider
+# must be wired through tools/qg/providerparity touch points
+# modulo documented exemptions.
+provider_parity:
+  enforcement: blocking
+
 # Bypass labels — applied manually by maintainers when an exception is
 # legitimate. The gate logs which bypass was used so it shows up in the
 # sticky comment.

@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 // Package diffcover computes patch (diff) coverage for Go projects from a
 // `go test -coverprofile` output and a unified git diff. It exists because
 // the previous quality-gate pipeline relied on a Python toolchain

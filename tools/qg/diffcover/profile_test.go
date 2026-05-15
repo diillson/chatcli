@@ -153,9 +153,9 @@ func TestStripPrefixes_LongestWins(t *testing.T) {
 	p := &Profile{
 		Mode: "atomic",
 		Blocks: map[string][]CoverBlock{
-			"github.com/diillson/chatcli/cli/cli.go":              {{StartLine: 1, EndLine: 2}},
-			"github.com/diillson/chatcli/operator/main.go":        {{StartLine: 1, EndLine: 2}},
-			"github.com/diillson/chatcli/operator/api/types.go":   {{StartLine: 5, EndLine: 6}},
+			"github.com/diillson/chatcli/cli/cli.go":            {{StartLine: 1, EndLine: 2}},
+			"github.com/diillson/chatcli/operator/main.go":      {{StartLine: 1, EndLine: 2}},
+			"github.com/diillson/chatcli/operator/api/types.go": {{StartLine: 5, EndLine: 6}},
 		},
 	}
 	out := p.StripPrefixes([]string{
@@ -164,10 +164,10 @@ func TestStripPrefixes_LongestWins(t *testing.T) {
 	})
 
 	want := map[string]bool{
-		"cli/cli.go":          true,
-		"operator/main.go":    false, // operator prefix is LONGER, must win
-		"main.go":             true,
-		"api/types.go":        true,
+		"cli/cli.go":       true,
+		"operator/main.go": false, // operator prefix is LONGER, must win
+		"main.go":          true,
+		"api/types.go":     true,
 	}
 	for k, wantPresent := range want {
 		if _, ok := out.Blocks[k]; ok != wantPresent {

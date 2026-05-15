@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 // qg-cover-total prints the total coverage percentage of a Go cover
 // profile, computed purely from the profile data (no source resolution).
 //

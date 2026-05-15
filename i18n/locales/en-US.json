@@ -449,6 +449,7 @@
   "help.command.persona_load": "Loads a specific agent with its skills.",
   "help.command.persona_skills": "Lists all available skills.",
   "help.command.persona_show": "Shows details of the active agent and its prompt.",
+  "help.command.persona_status": "Shows the active agent's status, including session pinning.",
   "help.command.persona_off": "Deactivates the current agent, returning to default behavior.",
   "remote.resources.available": "Server has %d plugins, %d agents, %d skills available",
   "paste.detected": "📋 Pasted (%d chars, %d lines)",
