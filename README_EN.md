@@ -58,7 +58,7 @@
 
 | | |
 |---|---|
-| **Multi-provider with failover** | 13 LLM providers (OpenAI · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama · OpenAI Assistants) with intelligent error classification, exponential backoff, and per-provider cooldown. |
+| **Multi-provider with failover** | 14 LLM providers (OpenAI · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama · OpenAI Assistants) with intelligent error classification, exponential backoff, and per-provider cooldown. |
 | **Autonomous agents** | 14 specialized workers coordinated by a ReAct engine (Reason + Act), with parallel execution and a 7-pattern quality pipeline. |
 | **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), cross-provider reasoning backbone — all composed via a thread-safe state machine with circuit breakers and hot reload. |
 | **Scheduler (Chronos)** | Durable scheduling with cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + `@scheduler` tool for agents. CRC32 WAL, snapshots, rate limiter, circuit breakers, JSONL audit, 13 Prometheus metrics. Jobs survive crashes and CLI exit. |
@@ -102,7 +102,7 @@ go build -ldflags "-X github.com/diillson/chatcli/version.Version=${VERSION}" -o
 ## Quick Setup
 
 ```bash
-LLM_PROVIDER=OPENAI    # OPENAI, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX,
+LLM_PROVIDER=OPENAI    # OPENAI, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT,
                        # COPILOT, GITHUB_MODELS, OLLAMA, STACKSPOT, OPENROUTER
 OPENAI_API_KEY=sk-xxx
 ```
@@ -119,6 +119,7 @@ OPENAI_API_KEY=sk-xxx
 | xAI | `XAI_API_KEY` | `XAI_MODEL` | `XAI_MAX_TOKENS` |
 | ZAI | `ZAI_API_KEY` | `ZAI_MODEL` | `ZAI_MAX_TOKENS` |
 | MiniMax | `MINIMAX_API_KEY` | `MINIMAX_MODEL` | `MINIMAX_MAX_TOKENS` |
+| Moonshot (Kimi) | `MOONSHOT_API_KEY` | `MOONSHOT_MODEL` | `MOONSHOT_MAX_TOKENS`, `MOONSHOT_THINKING` |
 | GitHub Copilot | `GITHUB_COPILOT_TOKEN` | `COPILOT_MODEL` | or `/auth login github-copilot` |
 | GitHub Models | `GITHUB_TOKEN` | `GITHUB_MODELS_MODEL` | `GH_TOKEN`, `GITHUB_MODELS_TOKEN` |
 | StackSpot | `CLIENT_ID`, `CLIENT_KEY` | — | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
@@ -256,7 +257,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 
 ## Supported Providers
 
-> 13 providers with a unified interface. Automatic failover with intelligent error classification, cross-provider extended thinking, and prompt caching where available.
+> 14 providers with a unified interface. Automatic failover with intelligent error classification, cross-provider extended thinking, and prompt caching where available.
 
 | Provider | Default Model | Tool Calling | Vision | Reasoning / Thinking |
 |---|---|---|---|---|
@@ -267,6 +268,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 | **xAI (Grok)** | grok-4-1 | XML fallback | — | — |
 | **ZAI (Zhipu AI)** | glm-5 | Native | Yes | — |
 | **MiniMax** | MiniMax-M2.7 | Native | Yes | — |
+| **Moonshot (Kimi)** | kimi-k2.6 | Native | Yes | `MOONSHOT_THINKING=enabled\|disabled\|auto` |
 | **GitHub Copilot** | gpt-4o | Native | Yes | — |
 | **GitHub Models** | gpt-4o | Native | Yes | — |
 | **StackSpot AI** | StackSpotAI | — | — | — |
@@ -276,7 +278,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 
 ```bash
 # Configurable fallback chain
-CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,BEDROCK,ZAI,MINIMAX,OPENROUTER
+CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,BEDROCK,ZAI,MINIMAX,MOONSHOT,OPENROUTER
 ```
 
 `/thinking on|off|auto` enables extended thinking / reasoning_effort on any provider that supports it — the cross-provider mapping is automatic.
@@ -524,7 +526,7 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 
 | Feature | Description |
 |---|---|
-| **Native tool calling** | Native APIs from OpenAI, Anthropic, Bedrock, Google, ZAI, MiniMax, OpenRouter. `ephemeral` cache for Anthropic. Automatic XML fallback for providers without native support. |
+| **Native tool calling** | Native APIs from OpenAI, Anthropic, Bedrock, Google, ZAI, MiniMax, Moonshot, OpenRouter. `ephemeral` cache for Anthropic. Automatic XML fallback for providers without native support. |
 | **MCP (Model Context Protocol)** | Client via stdio and SSE for expanded context. |
 | **Persistent contexts** | `/context create`, `/context attach` — inject whole projects into the system prompt with cache hints. |
 | **Bootstrap & Memory** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + long-term memory with facts and decay. |
