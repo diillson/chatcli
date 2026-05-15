@@ -65,9 +65,9 @@ if [[ "$go_changed" == "0" ]]; then
   exit 0
 fi
 
-# Build the qg-diffcover binary. Cached by setup-go between runs.
-binary="$(mktemp -d)/qg-diffcover"
-( cd "$QG_REPO_ROOT" && go build -o "$binary" ./tools/qg/cmd/qg-diffcover )
+# Resolve qg-diffcover from PATH (pre-built by setup-qg-tools) or
+# build-on-demand into .qg-cache/.
+binary=$(qg_tool qg-diffcover)
 
 # Compose exclude flags. Defaults are baked into the script so the Go tool
 # can be invoked standalone too; quality-gate.yml extras add to that list.

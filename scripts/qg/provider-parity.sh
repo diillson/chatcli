@@ -23,8 +23,7 @@ qg_require_yq
 
 enforcement=$(qg_enforcement provider_parity)
 
-binary="$(mktemp -d)/qg-provider-parity"
-( cd "$QG_REPO_ROOT" && go build -o "$binary" ./tools/qg/cmd/qg-provider-parity )
+binary=$(qg_tool qg-provider-parity)
 
 set +e
 output=$( "$binary" \

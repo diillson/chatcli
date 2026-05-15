@@ -600,167 +600,69 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Compose verdict
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+
+      - uses: ./.github/actions/setup-qg-tools
+        with:
+          with-qg-binaries: 'true'
+
+      - name: Render verdict (qg-verdict)
         id: verdict
         shell: bash
         env:
-          R_BUILD: ${{ needs.build-static.result }}
-          R_COV: ${{ needs.test-coverage.result }}
-          R_PATCH: ${{ needs.patch-coverage.result }}
-          R_SMELLS: ${{ needs.ai-smells.result }}
-          R_SCOPE: ${{ needs.scope-budget.result }}
-          R_E2E: ${{ needs.e2e.result }}
-          R_LINT: ${{ needs.commit-lint.result }}
-          R_CYCLO: ${{ needs.cyclo-new.result }}
-          R_SEC: ${{ needs.secrets-scan.result }}
-          R_I18N: ${{ needs.i18n-parity.result }}
-          R_CRD: ${{ needs.crd-drift.result }}
-          R_LICENSE: ${{ needs.license-headers.result }}
-          R_APIDIFF: ${{ needs.api-breaking.result }}
-          R_BINSIZE: ${{ needs.binary-size.result }}
+          # Floor result statuses.
+          R_BUILD:      ${{ needs.build-static.result }}
+          R_COV:        ${{ needs.test-coverage.result }}
+          R_PATCH:      ${{ needs.patch-coverage.result }}
+          R_SMELLS:     ${{ needs.ai-smells.result }}
+          R_SCOPE:      ${{ needs.scope-budget.result }}
+          R_E2E:        ${{ needs.e2e.result }}
+          R_LINT:       ${{ needs.commit-lint.result }}
+          R_CYCLO:      ${{ needs.cyclo-new.result }}
+          R_SEC:        ${{ needs.secrets-scan.result }}
+          R_I18N:       ${{ needs.i18n-parity.result }}
+          R_CRD:        ${{ needs.crd-drift.result }}
+          R_LICENSE:    ${{ needs.license-headers.result }}
+          R_APIDIFF:    ${{ needs.api-breaking.result }}
+          R_BINSIZE:    ${{ needs.binary-size.result }}
           R_PROVPARITY: ${{ needs.provider-parity.result }}
-          I18N_MISSING: ${{ needs.i18n-parity.outputs.missing_keys }}
-          I18N_UNKNOWN: ${{ needs.i18n-parity.outputs.unknown_usages }}
-          CRD_DRIFTED: ${{ needs.crd-drift.outputs.drifted_files }}
+          # Floor outputs.
+          COV_CURRENT:     ${{ needs.test-coverage.outputs.current }}
+          COV_BASELINE:    ${{ needs.test-coverage.outputs.baseline }}
+          COV_DELTA:       ${{ needs.test-coverage.outputs.delta }}
+          PATCH_PCT:       ${{ needs.patch-coverage.outputs.percent }}
+          PATCH_THR:       ${{ needs.patch-coverage.outputs.threshold }}
+          SCOPE_FILES:     ${{ needs.scope-budget.outputs.files }}
+          SCOPE_LOC:       ${{ needs.scope-budget.outputs.loc }}
+          SCOPE_CODE_LOC:  ${{ needs.scope-budget.outputs.code_loc }}
+          SCOPE_TOOL_LOC:  ${{ needs.scope-budget.outputs.tooling_loc }}
+          CYCLO_CHECKED:   ${{ needs.cyclo-new.outputs.checked }}
+          I18N_MISSING:    ${{ needs.i18n-parity.outputs.missing_keys }}
+          I18N_UNKNOWN:    ${{ needs.i18n-parity.outputs.unknown_usages }}
+          CRD_DRIFTED:     ${{ needs.crd-drift.outputs.drifted_files }}
           LICENSE_MISSING: ${{ needs.license-headers.outputs.missing_count }}
-          API_INCOMPAT: ${{ needs.api-breaking.outputs.incompatible_count }}
-          BIN_CHATCLI: ${{ needs.binary-size.outputs.chatcli_bytes }}
-          BIN_OPERATOR: ${{ needs.binary-size.outputs.operator_bytes }}
+          API_INCOMPAT:    ${{ needs.api-breaking.outputs.incompatible_count }}
+          BIN_CHATCLI:     ${{ needs.binary-size.outputs.chatcli_bytes }}
+          BIN_OPERATOR:    ${{ needs.binary-size.outputs.operator_bytes }}
+          PROV_COUNT:      ${{ needs.provider-parity.outputs.providers }}
           PROV_VIOLATIONS: ${{ needs.provider-parity.outputs.violations }}
-          PROV_COUNT: ${{ needs.provider-parity.outputs.providers }}
-          DOCS_ONLY: ${{ needs.meta.outputs.docs_only }}
-          RELEASE_PLEASE: ${{ needs.meta.outputs.release_please }}
-          SKIP: ${{ needs.meta.outputs.skip }}
-          COV_CURRENT: ${{ needs.test-coverage.outputs.current }}
-          COV_BASELINE: ${{ needs.test-coverage.outputs.baseline }}
-          COV_DELTA: ${{ needs.test-coverage.outputs.delta }}
-          PATCH_PCT: ${{ needs.patch-coverage.outputs.percent }}
-          PATCH_THR: ${{ needs.patch-coverage.outputs.threshold }}
-          SCOPE_FILES: ${{ needs.scope-budget.outputs.files }}
-          SCOPE_LOC: ${{ needs.scope-budget.outputs.loc }}
-          SCOPE_CODE_LOC: ${{ needs.scope-budget.outputs.code_loc }}
-          SCOPE_TOOL_LOC: ${{ needs.scope-budget.outputs.tooling_loc }}
-          CYCLO_CHECKED: ${{ needs.cyclo-new.outputs.checked }}
-          PR_LABELS: ${{ needs.meta.outputs.labels }}
+          # Meta flags.
+          DOCS_ONLY:       ${{ needs.meta.outputs.docs_only }}
+          RELEASE_PLEASE:  ${{ needs.meta.outputs.release_please }}
+          SKIP:            ${{ needs.meta.outputs.skip }}
+          PR_LABELS:       ${{ needs.meta.outputs.labels }}
         run: |
           set -euo pipefail
-
-          icon() {
-            case "$1" in
-              success) echo "✅";;
-              skipped) echo "⏭️";;
-              cancelled) echo "🚫";;
-              "") echo "⏭️";;
-              *) echo "❌";;
-            esac
-          }
-
-          if [[ "$SKIP" == "true" ]]; then
-            verdict="bypassed"
-            body="### Quality Gate · Bypassed%0AThis PR was skipped (bot actor or \`quality-gate-skip\` label)."
-          elif [[ "$RELEASE_PLEASE" == "true" ]]; then
-            # release-please PRs run only commit-lint; the heavy floors
-            # are intentionally skipped and reported as ⏭️ in the body.
-            failed=()
-            if [[ "$R_LINT" != "success" && "$R_LINT" != "skipped" && -n "$R_LINT" ]]; then
-              failed+=("commit-lint")
-            fi
-            verdict="pass"
-            if [[ ${#failed[@]} -gt 0 ]]; then
-              verdict="fail"
-            fi
-          else
-            # Treat skipped as success (e.g. ai-smells skipped on docs-only PRs).
-            failed=()
-            for pair in \
-              "build-static:$R_BUILD" \
-              "coverage:$R_COV" \
-              "patch-coverage:$R_PATCH" \
-              "ai-smells:$R_SMELLS" \
-              "scope:$R_SCOPE" \
-              "e2e:$R_E2E" \
-              "commit-lint:$R_LINT" \
-              "cyclo:$R_CYCLO" \
-              "secrets:$R_SEC" \
-              "i18n-parity:$R_I18N" \
-              "crd-drift:$R_CRD" \
-              "license-headers:$R_LICENSE" \
-              "api-breaking:$R_APIDIFF" \
-              "binary-size:$R_BINSIZE" \
-              "provider-parity:$R_PROVPARITY"; do
-                name=${pair%%:*}; res=${pair##*:}
-                if [[ "$res" != "success" && "$res" != "skipped" && -n "$res" ]]; then
-                  failed+=("$name")
-                fi
-            done
-
-            verdict="pass"
-            if [[ ${#failed[@]} -gt 0 ]]; then
-              verdict="fail"
-            fi
-          fi
-
-          # Build markdown body for sticky comment.
+          # qg-verdict was pre-built by setup-qg-tools; render the body and
+          # forward the verdict line into $GITHUB_OUTPUT. Body is loaded as
+          # a heredoc-style multi-line output so the sticky-comment action
+          # can interpolate it verbatim.
+          qg-verdict -body body.md >> "$GITHUB_OUTPUT"
           {
-            echo "### Quality Gate"
-            echo ""
-            if [[ "$verdict" == "pass" ]]; then
-              echo "**Result:** ✅ all floors passed"
-            elif [[ "$verdict" == "bypassed" ]]; then
-              echo "**Result:** ⏭️ bypassed"
-            else
-              echo "**Result:** ❌ ${#failed[@]} floor(s) failed: ${failed[*]}"
-            fi
-            echo ""
-            echo "| Floor | Status | Detail |"
-            echo "|---|---|---|"
-            echo "| 1 · Build & Static       | $(icon "$R_BUILD")   | go build / vet / fmt / golangci-lint |"
-
-            if [[ -n "$COV_BASELINE" ]]; then
-              echo "| 2 · Coverage ratchet     | $(icon "$R_COV")     | ${COV_CURRENT}% (baseline ${COV_BASELINE}%, Δ ${COV_DELTA}) |"
-            else
-              echo "| 2 · Coverage ratchet     | $(icon "$R_COV")     | ${COV_CURRENT}% (bootstrap) |"
-            fi
-
-            if [[ "$DOCS_ONLY" == "true" ]]; then
-              echo "| 3 · Patch coverage       | ⏭️                  | docs/CI only |"
-            else
-              echo "| 3 · Patch coverage       | $(icon "$R_PATCH")   | ${PATCH_PCT}% (≥ ${PATCH_THR}% required) |"
-            fi
-
-            if [[ "$DOCS_ONLY" == "true" ]]; then
-              echo "| 4 · AI smells            | ⏭️                  | docs/CI only |"
-            else
-              echo "| 4 · AI smells            | $(icon "$R_SMELLS")  | scanned diff |"
-            fi
-
-            echo "| 5 · Scope budget         | $(icon "$R_SCOPE")   | ${SCOPE_FILES} files, ${SCOPE_LOC} LOC (${SCOPE_CODE_LOC} code + ${SCOPE_TOOL_LOC} tooling) |"
-
-            if [[ "$DOCS_ONLY" == "true" ]]; then
-              echo "| 6 · E2E                  | ⏭️                  | docs/CI only |"
-            else
-              echo "| 6 · E2E                  | $(icon "$R_E2E")     | go test -race ./e2e/... |"
-            fi
-
-            echo "| 7 · Commit lint          | $(icon "$R_LINT")    | conventional commits + project rules |"
-
-            if [[ "$DOCS_ONLY" == "true" ]]; then
-              echo "| 8 · Cyclo (new code)     | ⏭️                  | docs/CI only |"
-            else
-              echo "| 8 · Cyclo (new code)     | $(icon "$R_CYCLO")   | ${CYCLO_CHECKED} file(s) checked |"
-            fi
-
-            echo "| 9 · Secrets scan         | $(icon "$R_SEC")     | gitleaks |"
-            echo ""
-            if [[ -n "${PR_LABELS// /}" ]]; then
-              echo "_Labels:_ \`${PR_LABELS// / }\`"
-            fi
-            echo ""
-            echo "_Config: [.github/quality-gate.yml](../blob/${{ github.head_ref }}/.github/quality-gate.yml)_"
-          } > body.md
-
-          {
-            echo "verdict=$verdict"
             echo 'body<<__QG_EOF__'
             cat body.md
             echo '__QG_EOF__'

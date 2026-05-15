@@ -25,8 +25,7 @@ qg_require_yq
 
 enforcement=$(qg_enforcement i18n_parity)
 
-binary="$(mktemp -d)/qg-i18n-parity"
-( cd "$QG_REPO_ROOT" && go build -o "$binary" ./tools/qg/cmd/qg-i18n-parity )
+binary=$(qg_tool qg-i18n-parity)
 
 set +e
 output=$( "$binary" \
