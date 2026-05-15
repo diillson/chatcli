@@ -65,11 +65,20 @@ func TestHTTPTransport_JSONOneShotResponse(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
 		}
-		if !strings.Contains(r.Header.Get("Accept"), "application/json") {
-			t.Errorf("Accept missing application/json: %q", r.Header.Get("Accept"))
+		accept := r.Header.Get("Accept")
+		if !strings.Contains(accept, "application/json") {
+			t.Errorf("Accept missing application/json: %q", accept)
 		}
-		if !strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
-			t.Errorf("Accept missing text/event-stream: %q", r.Header.Get("Accept"))
+		if !strings.Contains(accept, "text/event-stream") {
+			t.Errorf("Accept missing text/event-stream: %q", accept)
+		}
+		// Strict-first servers (FastMCP, some Workers MCP gateways)
+		// return HTTP 406 / JSON-RPC -32600 when text/event-stream is
+		// not the first listed type. Lock the order in so a future
+		// "simplification" of the header cannot silently reintroduce
+		// the bug.
+		if idxSSE, idxJSON := strings.Index(accept, "text/event-stream"), strings.Index(accept, "application/json"); idxSSE > idxJSON {
+			t.Errorf("Accept must list text/event-stream before application/json; got %q", accept)
 		}
 		var req jsonRPCRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
