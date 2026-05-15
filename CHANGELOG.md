@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.117.0](https://github.com/diillson/chatcli/compare/v1.116.0...v1.117.0) (2026-05-15)
+
+
+### Features
+
+* **mcp:** add Streamable HTTP transport (MCP 2025-03-26) ([#914](https://github.com/diillson/chatcli/issues/914)) ([7fde7a1](https://github.com/diillson/chatcli/commit/7fde7a1876de79b7161eee3a3d9f2adb7de7a2fe))
+
 ## [1.116.0](https://github.com/diillson/chatcli/compare/v1.115.0...v1.116.0) (2026-05-15)
 
 
