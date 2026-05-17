@@ -29,6 +29,13 @@ func (p *BuiltinTreePlugin) DescribeCall(args []string) string {
 	return i18n.T("plugins.tree.describe", dir)
 }
 
+// MaxResultChars raises the per-call truncation cap for @tree.
+// Directory listings for monorepos can easily exceed 30k chars; the
+// LLM uses the tree to navigate, so cutting the tail leaves it blind
+// to deep subtrees. 50k strikes the balance between context budget
+// and information density.
+func (p *BuiltinTreePlugin) MaxResultChars() int { return 50_000 }
+
 // JSONSchema returns the draft-2020-12 schema for @tree input. All
 // fields are optional — bare {} defaults to listing the current
 // workspace.

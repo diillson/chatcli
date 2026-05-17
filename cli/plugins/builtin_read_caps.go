@@ -33,6 +33,14 @@ func (p *BuiltinReadPlugin) DescribeCall(args []string) string {
 	return i18n.T("plugins.read.describe", parsed.File)
 }
 
+// MaxResultChars raises the per-call truncation cap for @read.
+// File reads are the primary way the model learns code structure;
+// truncating at 30k loses crucial context for large files (e.g. a
+// 1500-line model definition). 80k chars (~20k tokens) is the
+// upper bound — beyond that the caller should request a line range
+// via the from_line/to_line flags.
+func (p *BuiltinReadPlugin) MaxResultChars() int { return 80_000 }
+
 // JSONSchema returns the draft-2020-12 schema for @read input. The
 // plugin layer validates the LLM-emitted args against this before
 // dispatch — bad payloads short-circuit with InvalidArgs instead of

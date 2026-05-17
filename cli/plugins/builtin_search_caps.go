@@ -30,6 +30,13 @@ func (p *BuiltinSearchPlugin) DescribeCall(args []string) string {
 	return i18n.T("plugins.search.describe", t)
 }
 
+// MaxResultChars raises the per-call truncation cap for @search.
+// grep output is structured (file:line:match) and the LLM needs
+// breadth more than depth; cutting at the global 30k blocks many
+// repository-wide investigations. 60k chars (~15k tokens with
+// standard BPE) is a pragmatic upper bound for one search call.
+func (p *BuiltinSearchPlugin) MaxResultChars() int { return 60_000 }
+
 // JSONSchema returns the draft-2020-12 schema for @search input.
 func (p *BuiltinSearchPlugin) JSONSchema() string {
 	return `{

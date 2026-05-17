@@ -2340,12 +2340,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					batchHasError = true
 					break // Fail-Fast: Para a execução do lote
 				} else {
-					// Truncamento opcional para economizar tokens no contexto da LLM (não na tela)
-					if len(toolOutput) > 30000 {
-						preview := toolOutput[:5000]
-						suffix := toolOutput[len(toolOutput)-1000:]
-						toolOutput = fmt.Sprintf("%s\n\n... [CONTEÚDO CENTRAL OMITIDO (%d chars) PARA ECONOMIZAR TOKENS] ...\n\n%s", preview, len(toolOutput)-6000, suffix)
+					// Per-tool truncation (Item 6). Plugins that
+					// implement plugins.TruncationAware get their own
+					// per-call cap; the rest use the global default.
+					// We look the plugin up again here because the
+					// inner-scope `plugin` variable from the dispatch
+					// block is no longer in scope at this site.
+					maxChars := plugins.DefaultMaxResultChars
+					if p, ok := a.cli.pluginManager.GetPlugin(tc.Name); ok && p != nil {
+						maxChars = plugins.EffectiveMaxResultChars(p)
 					}
+					toolOutput = plugins.TruncateForLLM(toolOutput, maxChars)
 
 					batchOutputBuilder.WriteString(toolOutput)
 					batchOutputBuilder.WriteString("\n\n")
