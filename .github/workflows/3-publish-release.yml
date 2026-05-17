@@ -731,6 +731,12 @@ jobs:
           TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
         run: |
           set -euo pipefail
+          # Always remove the embedded chatcli checkout, even on early-exit
+          # paths. Without this, an early "exit 0" below leaves _chatcli_src
+          # in the work tree and the next "git add -A" step commits it as
+          # a stray gitlink (mode 160000).
+          trap 'rm -rf _chatcli_src' EXIT
+
           NEW_VERSION="${TAG_NAME#v}"
           OLD_VERSION=$(cat VERSION | tr -d '[:space:]')
           MAJOR_MINOR="$(echo "$NEW_VERSION" | cut -d. -f1,2)"
@@ -768,22 +774,35 @@ jobs:
             echo "::warning::CHANGELOG.md not found in chatcli source — skipping Update-block injection"
           else
             DATE_RAW="$(awk '/^## \[/{ print; exit }' "$CHANGELOG" | sed -E 's/.*\(([0-9]{4}-[0-9]{2}-[0-9]{2})\).*/\1/')"
+            # Handle BOTH bullet formats release-please can emit:
+            #   "* **scope:** message ..."  (conventional commit with scope)
+            #   "* message ..."             (no scope; e.g. plain `feat: …`)
+            # The previous version only matched the scoped form and
+            # silently emitted no bullets for unscoped releases (which
+            # is what broke the 1.118.0 docs injection — both commits
+            # in that release used `feat:` without a scope).
             BULLETS_PT="$(awk '
               /^## \[/{ if (seen) exit; seen=1; next }
-              /^\* \*\*/{
-                # "* **scope:** message ([#PR](...)) ([sha](...))" → "- **scope** — message"
-                sub(/^\* /, "- ")
-                sub(/:\*\*/, "**", $0)
-                sub(/ — /, " — ", $0)
-                # Replace ":** " with " — " on the first occurrence
-                sub(/\*\* /, "** — ")
-                # Strip trailing PR/commit links
+              /^\* /{
+                # Strip trailing release-please link blocks first.
+                # Format with PR + commit: " ([#NNN](...)) ([hex](...))"
+                # Format with PR only:     " ([#NNN](...))"
                 sub(/ \(\[#[0-9]+\].*\) \(\[[0-9a-f]+\].*\)$/, "")
                 sub(/ \(\[#[0-9]+\].*\)$/, "")
+
+                if (/^\* \*\*[^*]+:\*\* /) {
+                  # Scoped: "* **scope:** msg" -> "  - **scope** — msg"
+                  sub(/^\* /, "- ")
+                  sub(/:\*\*/, "**")
+                  sub(/\*\* /, "** — ")
+                } else {
+                  # Unscoped: "* msg" -> "  - msg"
+                  sub(/^\* /, "- ")
+                }
                 print "  " $0
               }
-            ' "$CHANGELOG")"
-            BULLETS_EN="$BULLETS_PT" # Bullets are scope-prefixed and language-neutral
+            ' "$CHANGELOG" | sed -E 's/\[(@[A-Za-z0-9_-]+)\]\([^)]*\)/\1/g')"
+            BULLETS_EN="$BULLETS_PT" # Bullets are language-neutral
 
             if [ -n "$DATE_RAW" ] && [ -n "$BULLETS_PT" ]; then
               # Build the Update block. Done via temp file so the
