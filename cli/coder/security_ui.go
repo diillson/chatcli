@@ -55,6 +55,17 @@ var sttyPath = func() string {
 // swallowed: the prompt is best-effort UX and any failure here just
 // degrades to the previous (broken-on-resume) behavior.
 func resetTTYToSane() bool {
+	return ResetTTYToSane()
+}
+
+// ResetTTYToSane is the exported counterpart of resetTTYToSane. Called
+// from cli/agent_mode at the start of a ReAct turn so that any prior
+// go-prompt setup/teardown cycle that left the terminal in raw mode
+// (no echo, ICRNL off) gets recovered before the user starts typing
+// mid-spinner. Returns true when the reset was applied; failures are
+// silent because this is best-effort UX and any error degrades to
+// the previous behavior.
+func ResetTTYToSane() bool {
 	if runtime.GOOS == "windows" || sttyPath == "" {
 		return false
 	}

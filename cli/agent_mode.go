@@ -529,6 +529,15 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 	defer a.runInflight.Store(false)
 
+	// Item 8: defeat typeahead-in-the-dark. The user may have just
+	// pressed Enter on /coder or /agent — go-prompt's teardown can
+	// leave the controlling TTY in raw mode (no echo, ICRNL off),
+	// meaning any character typed during the spinner doesn't appear
+	// on screen even though the kernel IS capturing it. Resetting to
+	// sane terminal state up front ensures the user SEES what they
+	// type while the LLM streams.
+	coder.ResetTTYToSane()
+
 	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
 	maxTurns := AgentMaxTurns()
 
@@ -1242,15 +1251,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		turnToolCalls := 0
 
 		// Inicia o timer do turno (substitui a animação de "Pensando...").
-		// Quando há mensagens enfileiradas (usuário digitou enquanto o LLM
-		// streamava em turn anterior), expõe contador para o usuário saber
-		// que sua entrada foi capturada e será processada após este turn.
+		// Item 8: indicator reflete TANTO as linhas já drenadas para a
+		// messageQueue QUANTO as linhas em trânsito no channel
+		// stdinLines (Enter foi pressionado mas o turn atual ainda não
+		// fechou para drenar). Sem essa soma, o usuário pressiona Enter
+		// e nada muda visualmente no spinner — só vê (1 na fila) na
+		// próxima iteração do turn.
 		modelName := a.cli.Client.GetModelName()
 		a.turnTimer.Start(ctx, func(d time.Duration) {
 			msg := "Processando..."
 			a.cli.messageQueueMu.Lock()
 			queued := len(a.cli.messageQueue)
 			a.cli.messageQueueMu.Unlock()
+			if a.stdinLines != nil {
+				queued += len(a.stdinLines)
+			}
 			if queued > 0 {
 				msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
 			}
