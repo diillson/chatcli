@@ -8,6 +8,7 @@ package plugins
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
@@ -82,6 +83,40 @@ func stringFromMap(m map[string]json.RawMessage, keys []string) string {
 		}
 	}
 	return ""
+}
+
+// jsonString is the shorthand used by atomic-tool plugins (@read,
+// @search, @tree, @todo, …) that own the parsed JSON object directly.
+// Tries each alias in order and returns the first non-empty string
+// value. Numbers/booleans/null are ignored — atomic-tool string fields
+// (file, term, dir, …) must be strings, never coerced.
+func jsonString(raw map[string]json.RawMessage, keys ...string) string {
+	return stringFromMap(raw, keys)
+}
+
+// jsonInt mirrors jsonString for integer fields. Tries each alias,
+// returns the first parseable int. Strings that contain a valid int
+// (e.g. "10") are coerced — the LLM occasionally emits stringified
+// numbers and we don't want to reject those.
+func jsonInt(raw map[string]json.RawMessage, keys ...string) int {
+	for _, k := range keys {
+		val, ok := raw[k]
+		if !ok {
+			continue
+		}
+		var n int
+		if err := json.Unmarshal(val, &n); err == nil {
+			return n
+		}
+		// Fallback: stringified integer.
+		var s string
+		if err := json.Unmarshal(val, &s); err == nil {
+			if parsed, perr := strconv.Atoi(strings.TrimSpace(s)); perr == nil {
+				return parsed
+			}
+		}
+	}
+	return 0
 }
 
 // stringFromFlagArgs scans positional args for `--key value` pairs. The

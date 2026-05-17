@@ -31,6 +31,7 @@ import (
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/metrics"
 	"github.com/diillson/chatcli/cli/paste"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
@@ -527,6 +528,15 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		return fmt.Errorf("agent: another Run is already in flight on this AgentMode instance")
 	}
 	defer a.runInflight.Store(false)
+
+	// Item 8: defeat typeahead-in-the-dark. The user may have just
+	// pressed Enter on /coder or /agent — go-prompt's teardown can
+	// leave the controlling TTY in raw mode (no echo, ICRNL off),
+	// meaning any character typed during the spinner doesn't appear
+	// on screen even though the kernel IS capturing it. Restoring
+	// cooked terminal state up front ensures the user SEES what they
+	// type while the LLM streams.
+	coder.RestoreCookedMode()
 
 	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
 	maxTurns := AgentMaxTurns()
@@ -1241,15 +1251,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		turnToolCalls := 0
 
 		// Inicia o timer do turno (substitui a animação de "Pensando...").
-		// Quando há mensagens enfileiradas (usuário digitou enquanto o LLM
-		// streamava em turn anterior), expõe contador para o usuário saber
-		// que sua entrada foi capturada e será processada após este turn.
+		// Item 8: indicator reflete TANTO as linhas já drenadas para a
+		// messageQueue QUANTO as linhas em trânsito no channel
+		// stdinLines (Enter foi pressionado mas o turn atual ainda não
+		// fechou para drenar). Sem essa soma, o usuário pressiona Enter
+		// e nada muda visualmente no spinner — só vê (1 na fila) na
+		// próxima iteração do turn.
 		modelName := a.cli.Client.GetModelName()
 		a.turnTimer.Start(ctx, func(d time.Duration) {
 			msg := "Processando..."
 			a.cli.messageQueueMu.Lock()
 			queued := len(a.cli.messageQueue)
 			a.cli.messageQueueMu.Unlock()
+			if a.stdinLines != nil {
+				queued += len(a.stdinLines)
+			}
 			if queued > 0 {
 				msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
 			}
@@ -2178,15 +2194,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						}
 
 						if !batchHasError {
-							// UX: Animação durante a execução
-							subCmd := "ação"
-							if len(toolArgs) > 0 {
-								subCmd = toolArgs[0]
-							}
+							// Per-call spinner label (Item 7): use the
+							// plugin's DescribeCall to surface the actual
+							// target (file, URL, regex, …) instead of the
+							// generic "EXECUTANDO: @tool subcmd". Falls back
+							// to the legacy shape for plugins that don't
+							// implement DescriberWithInput or when the args
+							// can't be parsed.
 							a.cli.animation.StopThinkingAnimation()
 
+							boxLabel := defaultSpinnerLabel(toolName, toolArgs)
+							if p, ok := a.cli.pluginManager.GetPlugin(tc.Name); ok && p != nil {
+								if d := plugins.DescribeCall(p, toolArgs); d != "" {
+									boxLabel = d
+								}
+							}
+
 							if !coderCompact {
-								renderer.RenderStreamBoxStart("🔨", fmt.Sprintf("EXECUTANDO: %s %s", toolName, subCmd), agent.ColorPurple)
+								renderer.RenderStreamBoxStart("🔨", boxLabel, agent.ColorPurple)
 							}
 
 							streamCallback := func(line string) {
@@ -2216,7 +2241,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									a.logger,
 								)
 							} else {
-								toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
+								// Schema validation gate (Item 5): if the plugin
+								// implements JSONSchemaAware, validate the args
+								// envelope before dispatch. A failure becomes a
+								// fast InvalidArgs IsError so the model sees the
+								// schema violation cleanly instead of a panic
+								// or empty-string-return deep inside the plugin.
+								// Plugins that do not implement the interface
+								// bypass this gate entirely — purely additive.
+								if vErr := plugins.ValidateArgs(plugin, normalizedArgsStr); vErr != nil {
+									toolOutput = vErr.Error()
+									execErr = vErr
+								} else {
+									toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
+								}
 							}
 
 							if !coderCompact {
@@ -2326,12 +2364,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					batchHasError = true
 					break // Fail-Fast: Para a execução do lote
 				} else {
-					// Truncamento opcional para economizar tokens no contexto da LLM (não na tela)
-					if len(toolOutput) > 30000 {
-						preview := toolOutput[:5000]
-						suffix := toolOutput[len(toolOutput)-1000:]
-						toolOutput = fmt.Sprintf("%s\n\n... [CONTEÚDO CENTRAL OMITIDO (%d chars) PARA ECONOMIZAR TOKENS] ...\n\n%s", preview, len(toolOutput)-6000, suffix)
+					// Per-tool truncation (Item 6). Plugins that
+					// implement plugins.TruncationAware get their own
+					// per-call cap; the rest use the global default.
+					// We look the plugin up again here because the
+					// inner-scope `plugin` variable from the dispatch
+					// block is no longer in scope at this site.
+					maxChars := plugins.DefaultMaxResultChars
+					if p, ok := a.cli.pluginManager.GetPlugin(tc.Name); ok && p != nil {
+						maxChars = plugins.EffectiveMaxResultChars(p)
 					}
+					toolOutput = plugins.TruncateForLLM(toolOutput, maxChars)
 
 					batchOutputBuilder.WriteString(toolOutput)
 					batchOutputBuilder.WriteString("\n\n")

@@ -254,6 +254,127 @@ func (t *TaskTracker) ResetPlanFromReasoning(reasoningText string, preserveCompl
 	return nil
 }
 
+// TaskSpec is the LLM-friendly view of a planned task. It is what the
+// @todo plugin uses to talk to the tracker — a flat structure decoupled
+// from the internal *Task type's bookkeeping fields (attempts, timestamps).
+type TaskSpec struct {
+	Description string
+	Status      TaskStatus
+}
+
+// SetTasks replaces the entire plan with the supplied list. Used by
+// the @todo plugin to mirror Claude Code's TodoWrite semantics: the
+// LLM emits the full updated list every call; the tracker reconciles
+// without preserving prior state.
+//
+// This is the only public path that lets a caller set per-task status
+// explicitly. MarkCurrentAs is for the per-turn ReAct flow (one task
+// at a time); SetTasks is for the LLM-driven plan overwrite.
+func (t *TaskTracker) SetTasks(specs []TaskSpec) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	tasks := make([]*Task, 0, len(specs))
+	currentTask := 0
+	for i, s := range specs {
+		status := s.Status
+		if status == "" {
+			status = TaskPending
+		}
+		tk := &Task{
+			ID:          i + 1,
+			Description: strings.TrimSpace(s.Description),
+			Status:      status,
+		}
+		switch status {
+		case TaskInProgress:
+			tk.StartedAt = time.Now()
+			currentTask = i
+		case TaskCompleted:
+			tk.CompletedAt = time.Now()
+		}
+		tasks = append(tasks, tk)
+	}
+
+	// Advance current marker past any prefix of completed tasks if no
+	// task was explicitly marked in_progress. This matches the ReAct
+	// loop's intuition that "next pending" is the current focus.
+	allInProgress := false
+	for _, s := range specs {
+		if s.Status == TaskInProgress {
+			allInProgress = true
+			break
+		}
+	}
+	if !allInProgress {
+		currentTask = 0
+		for i, tk := range tasks {
+			if tk.Status != TaskCompleted {
+				currentTask = i
+				break
+			}
+		}
+	}
+
+	sig := strings.Join(func() []string {
+		parts := make([]string, 0, len(tasks))
+		for _, tk := range tasks {
+			parts = append(parts, strings.ToLower(strings.TrimSpace(tk.Description)))
+		}
+		return parts
+	}(), "|")
+
+	t.plan = &TaskPlan{
+		Tasks:         tasks,
+		CurrentTask:   currentTask,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		PlanSignature: sig,
+	}
+}
+
+// MarkByID updates the status of the task with the given 1-indexed ID.
+// Returns false when no such task exists. Used by the @todo plugin's
+// partial-update path when the LLM wants to flip a single status
+// without resending the whole list.
+//
+// The CurrentTask cursor advances if the marked task was the current
+// one and the new status is Completed, mirroring MarkCurrentAs.
+func (t *TaskTracker) MarkByID(id int, status TaskStatus, errorMsg string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.plan == nil {
+		return false
+	}
+	idx := id - 1
+	if idx < 0 || idx >= len(t.plan.Tasks) {
+		return false
+	}
+	tk := t.plan.Tasks[idx]
+	tk.Status = status
+	tk.Attempts++
+	switch status {
+	case TaskInProgress:
+		if tk.StartedAt.IsZero() {
+			tk.StartedAt = time.Now()
+		}
+	case TaskCompleted:
+		tk.CompletedAt = time.Now()
+		if idx == t.plan.CurrentTask {
+			t.plan.CurrentTask++
+		}
+	case TaskFailed:
+		tk.Error = errorMsg
+		t.plan.FailureCount++
+		if t.plan.FailureCount >= 3 {
+			t.plan.NeedsReplan = true
+		}
+	}
+	t.plan.UpdatedAt = time.Now()
+	return true
+}
+
 func (t *TaskTracker) FormatProgress() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()

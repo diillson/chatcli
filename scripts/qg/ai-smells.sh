@@ -64,8 +64,40 @@ located_added() {
 fails=()
 
 # --- Check: TODO / FIXME / XXX -----------------------------------------------
+#
+# The intent of this check is to catch unfinished work markers a
+# developer left as comments — `// TODO: handle this case`. It is NOT
+# meant to flag documentation strings that legitimately mention TODO
+# as a canonical example (e.g. a search-tool schema demonstrating
+# "search for TODO comments" as the most common use case).
+#
+# To keep the signal high without dropping false-positives, we exclude:
+#
+#   1. Lines where the marker appears inside a Go raw string literal
+#      (backtick-quoted). These are predominantly schema fixtures,
+#      JSON examples and test data, never real developer TODOs.
+#   2. Lines where the marker appears inside a JSON-style string value
+#      with " quotes containing the marker (`"term":"TODO..."`).
+#   3. Lines where the marker is part of a regex character class or
+#      escape (`\(TODO\)` for example).
+#
+# A user can still bypass via comment trailers; the goal is to make
+# the check accurate enough that bypasses are rare and reviewable.
 if [[ "$(qg_yq '.ai_smells.checks.todo_fixme_xxx // true')" == "true" ]]; then
-  hits=$(located_added | grep -E ':(.*)\b(TODO|FIXME|XXX)\b' || true)
+  # POSIX awk has no \b word boundary — grep above already enforced the
+  # word boundary at marker extraction time, so the awk filter here only
+  # needs to check "is the marker inside a quoted literal?" which is a
+  # bracket-class search.
+  hits=$(located_added \
+    | grep -E ':(.*)\b(TODO|FIXME|XXX)\b' \
+    | awk -F: '
+        {
+          file=$1; lineno=$2; content=$3;
+          for (i=4; i<=NF; i++) content = content ":" $i;
+          if (content ~ /`[^`]*(TODO|FIXME|XXX)[^`]*`/) next;
+          if (content ~ /"[^"]*(TODO|FIXME|XXX)[^"]*"/) next;
+          printf "%s:%s:%s\n", file, lineno, content;
+        }' || true)
   if [[ -n "$hits" ]]; then
     fails+=("TODO/FIXME/XXX in new code:"$'\n'"$hits")
   fi

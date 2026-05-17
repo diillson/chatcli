@@ -395,6 +395,22 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
+		// Atomic read-only tools (Claude Code parity, Item 1). Narrow,
+		// flat-schema tools that route into the same engine as @coder
+		// read/search/tree but give the LLM a dedicated entry point —
+		// the model picks @read instead of remembering the @coder
+		// envelope, and the orchestrator can fan them out in parallel
+		// because each declares IsConcurrencySafe.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinReadPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSearchPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTreePlugin())
+
+		// @todo (Claude Code TodoWrite parity, Item 2). Lets the LLM
+		// own its plan: write the full list each turn (canonical TodoWrite
+		// semantics), list the current state, or mark a single item by
+		// id. Adapter wired below routes into the live AgentMode's
+		// TaskTracker.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTodoPlugin())
 
 		// Slash-as-tool: register the curated subset of slash commands
 		// (currently /help and /version) as plugins so the LLM can invoke
@@ -513,6 +529,40 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)
 	cli.agentMode = NewAgentMode(cli, logger)
+
+	// Wire the @todo plugin adapter (Item 2). The getter returns the
+	// CURRENT agentMode's tracker on every call so re-creations of the
+	// AgentMode (line 1066 etc.) are transparent — the plugin sees the
+	// most recent instance, never a stale pointer.
+	plugins.SetTodoAdapter(newLiveTodoAdapter(func() *agent.TaskTracker {
+		if cli.agentMode == nil {
+			return nil
+		}
+		return cli.agentMode.taskTracker
+	}))
+
+	// Wire the policy_manager's capability resolver (Item 4). When a
+	// tool call hits no explicit policy rule AND the plugin advertises
+	// IsReadOnly for those args, auto-allow instead of defaulting to
+	// ActionAsk. @websearch, @webfetch GET, @read, @search, @tree,
+	// @scheduler query/list, @coder read/search/tree all benefit.
+	coder.SetPluginCapabilityResolver(func(toolName, rawArgs string) coder.PluginCapabilityResult {
+		if cli.pluginManager == nil {
+			return coder.PluginCapabilityResult{}
+		}
+		plugin, ok := cli.pluginManager.GetPlugin(toolName)
+		if !ok || plugin == nil {
+			return coder.PluginCapabilityResult{}
+		}
+		// The resolver feeds the args as a single-element slice (the JSON
+		// envelope) so the plugin's IsReadOnly helper sees the same shape
+		// it would see at Execute time.
+		args := []string{rawArgs}
+		return coder.PluginCapabilityResult{
+			Known:    true,
+			ReadOnly: plugins.IsReadOnly(plugin, args),
+		}
+	})
 
 	history, err := cli.historyManager.LoadHistory()
 	if err != nil {
