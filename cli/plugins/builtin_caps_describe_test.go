@@ -21,10 +21,10 @@ import (
 func TestBuiltinPark_DescribeCall_AllSubcommands(t *testing.T) {
 	p := NewBuiltinParkPlugin()
 	cases := []struct {
-		name      string
-		args      []string
-		mustHave  string
-		fallback  bool // when no specific identifier is parseable
+		name     string
+		args     []string
+		mustHave string
+		fallback bool // when no specific identifier is parseable
 	}{
 		{"delay with duration",
 			[]string{`{"cmd":"delay","args":{"duration":"5m"}}`},

@@ -160,10 +160,10 @@ func TestTrimQuotes_BoundaryCases(t *testing.T) {
 		{`"`, `"`}, // single char
 		{`"x"`, "x"},
 		{"'x'", "x"},
-		{`"unclosed`, `"unclosed`},   // no closing quote
-		{`unclosed"`, `unclosed"`},   // no opening quote
-		{`"x'`, `"x'`},               // mismatched
-		{`""`, ""},                    // empty quoted
+		{`"unclosed`, `"unclosed`}, // no closing quote
+		{`unclosed"`, `unclosed"`}, // no opening quote
+		{`"x'`, `"x'`},             // mismatched
+		{`""`, ""},                 // empty quoted
 		{`'something'`, "something"},
 		{`"with spaces"`, "with spaces"},
 	}

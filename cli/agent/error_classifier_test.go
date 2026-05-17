@@ -200,7 +200,7 @@ func TestCapitalize_BoundaryCases(t *testing.T) {
 		{"", ""},
 		{"a", "A"},
 		{"abc", "Abc"},
-		{"Abc", "Abc"}, // already capitalized
+		{"Abc", "Abc"},   // already capitalized
 		{"1abc", "1abc"}, // non-letter first byte
 		{"_abc", "_abc"},
 	}
