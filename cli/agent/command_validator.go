@@ -16,22 +16,42 @@ import (
 	"go.uber.org/zap"
 )
 
-// CommandValidator valida comandos antes da execução
+// CommandValidator valida comandos antes da execução.
+//
+// Estratégia em camadas (do mais barato pro mais caro):
+//
+//  1. inlineCodeAnalyzer — para invocações como `python -c <code>`,
+//     `node -e <code>`, etc., classifica dinamicamente o código inline.
+//     Substitui as antigas regex `\bpython[23]?\s+-c\b` que falsavam-
+//     positivo em `python -c "print(1)"`.
+//  2. dangerousPatterns — regex tradicional aplicada à linha completa.
+//     Catch-all para padrões que envolvem múltiplos segmentos (curl|sh,
+//     base64|bash) ou que detectam um comando perigoso isolado (rm -rf,
+//     mkfs, sudo, etc).
+//  3. extraDenyPatterns — denylist customizada via CHATCLI_AGENT_DENYLIST.
+//
+// A camada de parsing shell (ShellSegment) é usada como input pra (1) e
+// pode no futuro alimentar uma camada (4) de análise per-segmento. Hoje
+// preserva o comportamento legado (regex on full line) pra zero regressão.
 type CommandValidator struct {
-	logger            *zap.Logger
-	dangerousPatterns []*regexp.Regexp
-	extraDenyPatterns []*regexp.Regexp
-	allowSudo         bool
+	logger             *zap.Logger
+	dangerousPatterns  []*regexp.Regexp
+	extraDenyPatterns  []*regexp.Regexp
+	inlineCodeAnalyzer *InlineCodeRiskAnalyzer
+	allowSudo          bool
 }
 
-// NewCommandValidator cria uma nova instância do validador
+// NewCommandValidator cria uma nova instância do validador.
 func NewCommandValidator(logger *zap.Logger) *CommandValidator {
 	validator := &CommandValidator{
-		logger:    logger,
-		allowSudo: strings.EqualFold(os.Getenv("CHATCLI_AGENT_ALLOW_SUDO"), "true"),
+		logger:             logger,
+		allowSudo:          strings.EqualFold(os.Getenv("CHATCLI_AGENT_ALLOW_SUDO"), "true"),
+		inlineCodeAnalyzer: NewInlineCodeRiskAnalyzer(),
 	}
 
-	// Padrões perigosos padrão
+	// Padrões perigosos padrão. Removidos os patterns de inline-code que
+	// agora são classificados dinamicamente pelo analyzer — `python -c
+	// "print(1)"` é seguro, `python -c "import os; os.system(...)"` não é.
 	defaultPatterns := []string{
 		`(?i)rm\s+-rf\s+`,
 		`(?i)rm\s+--no-preserve-root`,
@@ -49,47 +69,41 @@ func NewCommandValidator(logger *zap.Logger) *CommandValidator {
 		`(?i)\bmkfs\b`,
 		`(?i)\buserdel\b`,
 		`(?i)\bchmod\s+777\s+/.*`,
-		// M3: Additional bypass detection patterns
-		`(?i)\bbase64\b.*\|\s*(sh|bash|zsh|dash)`, // base64 decode piped to shell
-		`(?i)\bpython[23]?\s+-c\b`,                // python inline execution
-		`(?i)\bperl\s+-e\b`,                       // perl inline execution
-		`(?i)\bruby\s+-e\b`,                       // ruby inline execution
-		`(?i)\bnode\s+-e\b`,                       // node inline execution
-		`(?i)\bphp\s+-r\b`,                        // php inline execution
-		`(?i)\beval\s+`,                           // shell eval
-		`(?i)\$\(\s*curl`,                         // command substitution with curl
-		`(?i)\$\(\s*wget`,                         // command substitution with wget
-		"(?i)`\\s*curl",                           // backtick substitution with curl
-		"(?i)`\\s*wget",                           // backtick substitution with wget
-		`(?i)\bchown\s+-R\s+.*\s+/`,               // recursive chown on root paths
-		`(?i)>\s*/etc/`,                           // writing to /etc
-		`(?i)>\s*/dev/[sh]d`,                      // writing to block devices
-		`(?i)\bsource\s+/dev/tcp`,                 // bash reverse shell via /dev/tcp
-		`(?i)/dev/tcp/`,                           // /dev/tcp access
-		`(?i)\bexport\s+.*PATH\s*=`,               // PATH manipulation
-		`(?i)\bnc\b.*-[el]`,                       // netcat listen/exec
-		`(?i)\bncat\b.*-[el]`,                     // ncat listen/exec
-		`(?i)\bxargs\b.*\b(rm|del|shutdown|reboot|mkfs)\b`,  // xargs with dangerous commands
-		`(?i)\bfind\b.*-exec\b.*(rm|del|shutdown|reboot)\b`, // find -exec with dangerous commands
-		`(?i)\bcrontab\s+-r\b`,                              // remove crontab
-		`(?i)\biptables\s+-F\b`,                             // flush firewall rules
-		`(?i)\bsysctl\s+-w\b`,                               // kernel parameter modification
-		`(?i)\bkillall\b`,                                   // kill all processes by name
-		`(?i)\bpkill\s+-9\b`,                                // force kill by pattern
-		`(?i)\bexec\s+\d*[<>]`,                              // exec with redirection
-		`(?i)>\s*/proc/`,                                    // writing to /proc
-		`(?i)\btee\s+/etc/`,                                 // tee to /etc files
-		`(?i)\bsource\s+/dev/`,                              // source from /dev
-		`(?i)\benv\b.*\|\s*(sh|bash)`,                       // env piped to shell
-		`\$\{[^}]*[;|&][^}]*\}`,                             // dangerous variable expansion with commands
-		`(?i)\$\(\s*(bash|sh|zsh|dash)\b`,                   // subprocess shell via command substitution
-		`<\(`,                                               // process substitution (input)
-		`>\(`,                                               // process substitution (output)
-		`(?i)\binsmod\b`,                                    // kernel module insertion
-		`(?i)\bmodprobe\b`,                                  // kernel module loading
-		`(?i)\brmmod\b`,                                     // kernel module removal
-		`(?i)\bumount\s+-[lf]`,                              // forced/lazy unmount
-		`(?i)\b[A-Z_]+=.*;\s*(sh|bash|zsh)\b`,               // var assignment hiding shell invocation
+		`(?i)\bbase64\b.*\|\s*(sh|bash|zsh|dash)`,
+		`(?i)\beval\s+`,
+		`(?i)\$\(\s*curl`,
+		`(?i)\$\(\s*wget`,
+		"(?i)`\\s*curl",
+		"(?i)`\\s*wget",
+		`(?i)\bchown\s+-R\s+.*\s+/`,
+		`(?i)>\s*/etc/`,
+		`(?i)>\s*/dev/[sh]d`,
+		`(?i)\bsource\s+/dev/tcp`,
+		`(?i)/dev/tcp/`,
+		`(?i)\bexport\s+.*PATH\s*=`,
+		`(?i)\bnc\b.*-[el]`,
+		`(?i)\bncat\b.*-[el]`,
+		`(?i)\bxargs\b.*\b(rm|del|shutdown|reboot|mkfs)\b`,
+		`(?i)\bfind\b.*-exec\b.*(rm|del|shutdown|reboot)\b`,
+		`(?i)\bcrontab\s+-r\b`,
+		`(?i)\biptables\s+-F\b`,
+		`(?i)\bsysctl\s+-w\b`,
+		`(?i)\bkillall\b`,
+		`(?i)\bpkill\s+-9\b`,
+		`(?i)\bexec\s+\d*[<>]`,
+		`(?i)>\s*/proc/`,
+		`(?i)\btee\s+/etc/`,
+		`(?i)\bsource\s+/dev/`,
+		`(?i)\benv\b.*\|\s*(sh|bash)`,
+		`\$\{[^}]*[;|&][^}]*\}`,
+		`(?i)\$\(\s*(bash|sh|zsh|dash)\b`,
+		`<\(`,
+		`>\(`,
+		`(?i)\binsmod\b`,
+		`(?i)\bmodprobe\b`,
+		`(?i)\brmmod\b`,
+		`(?i)\bumount\s+-[lf]`,
+		`(?i)\b[A-Z_]+=.*;\s*(sh|bash|zsh)\b`,
 	}
 
 	for _, pattern := range defaultPatterns {
@@ -114,28 +128,66 @@ func NewCommandValidator(logger *zap.Logger) *CommandValidator {
 	return validator
 }
 
-// IsDangerous verifica se um comando é potencialmente perigoso
+// IsDangerous verifica se um comando é potencialmente perigoso.
+//
+// Pipeline de avaliação:
+//
+//  1. Inline-code analysis — para cada segmento do shell que invoca um
+//     interpretador via -c/-e/-r, classifica o código inline. Se o
+//     classifier diz RiskHigh, é dangerous imediatamente. Se diz RiskSafe,
+//     a chamada não é dangerous *por causa* desse segmento (mas o resto
+//     da linha ainda é avaliado pelas camadas seguintes).
+//  2. dangerousPatterns — regex tradicional aplicada à linha completa.
+//  3. extraDenyPatterns — denylist do usuário.
+//  4. sudo guard.
+//
+// O critério "safe inline -c suprime o falso-positivo" funciona porque
+// removemos as regex `\bpython[23]?\s+-c\b` da lista da camada 2: o
+// classifier é a fonte da verdade pra essa classe de comandos.
 func (v *CommandValidator) IsDangerous(cmd string) bool {
-	// Verificar padrões padrão
+	if v.inlineCodeAnalyzer != nil {
+		for _, segment := range ParseShellSegments(cmd) {
+			lang, flagPos, isInline := segment.IsInlineCodeInvocation()
+			if !isInline {
+				continue
+			}
+			source := segment.InlineSource(flagPos)
+			if v.inlineCodeAnalyzer.IsHighRisk(lang, source) {
+				v.logger.Debug("inline code classified as high-risk",
+					zap.String("lang", lang),
+					zap.String("source_preview", truncateForLog(source, 64)))
+				return true
+			}
+		}
+	}
+
 	for _, pattern := range v.dangerousPatterns {
 		if pattern.MatchString(cmd) {
 			return true
 		}
 	}
 
-	// Verificar denylist extra
 	for _, pattern := range v.extraDenyPatterns {
 		if pattern.MatchString(cmd) {
 			return true
 		}
 	}
 
-	// Verificar sudo se não permitido
 	if !v.allowSudo && regexp.MustCompile(`(?i)\bsudo\b`).MatchString(cmd) {
 		return true
 	}
 
 	return false
+}
+
+// truncateForLog returns a short, single-line excerpt safe for zap fields.
+// Newlines are replaced with spaces and oversize values get an ellipsis.
+func truncateForLog(s string, max int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
 
 // ValidateCommand valida um comando antes da execução
