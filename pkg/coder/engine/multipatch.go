@@ -176,7 +176,14 @@ func (e *Engine) handleMultipatch(args []string) error {
 		}
 		modes[abs] = info.Mode().Perm()
 
-		raw, err := os.ReadFile(abs)
+		// abs was already produced by filepath.Abs() (which Cleans
+		// internally) and survived e.validatePath above, so this
+		// filepath.Clean is functionally a no-op. We keep it as an
+		// explicit barrier in the dataflow path so gosec G304's static
+		// analysis can see the sanitization step — the project
+		// convention (qg-fan-in/main.go, providerparity, i18nparity)
+		// uses the same pattern for the same reason.
+		raw, err := os.ReadFile(filepath.Clean(abs))
 		if err != nil {
 			return fmt.Errorf("read %s: %w", abs, err)
 		}
