@@ -197,6 +197,8 @@ func (e *Engine) Execute(ctx context.Context, cmd string, args []string) error {
 		return e.handleWrite(args)
 	case "patch":
 		return e.handlePatch(args)
+	case "multipatch":
+		return e.handleMultipatch(args)
 	case "tree":
 		return e.handleTree(args)
 	case "search":

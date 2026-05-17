@@ -103,6 +103,13 @@ func GetSchema() string {
 				},
 			},
 			{
+				Name:        "multipatch",
+				Description: "Aplica multiplas edicoes search/replace em multiplos arquivos como uma transacao atomica (all-or-nothing rollback).",
+				Flags: []FlagDefinition{
+					{Name: "--edits", Type: "string", Required: true, Description: "Array JSON de {file,search,replace,encoding?}. Edicoes sao validadas todas antes de qualquer escrita; falha em qualquer uma restaura todos os arquivos tocados."},
+				},
+			},
+			{
 				Name:        "search",
 				Description: "Busca por termo/regex com contexto e limites.",
 				Flags: []FlagDefinition{
