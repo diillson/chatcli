@@ -395,6 +395,15 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
+		// Atomic read-only tools (Claude Code parity, Item 1). Narrow,
+		// flat-schema tools that route into the same engine as @coder
+		// read/search/tree but give the LLM a dedicated entry point —
+		// the model picks @read instead of remembering the @coder
+		// envelope, and the orchestrator can fan them out in parallel
+		// because each declares IsConcurrencySafe.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinReadPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSearchPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTreePlugin())
 
 		// Slash-as-tool: register the curated subset of slash commands
 		// (currently /help and /version) as plugins so the LLM can invoke
