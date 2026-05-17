@@ -18,8 +18,8 @@ import (
 
 // helpText produces a compact, LLM-friendly summary of the available
 // slash commands and context modifiers. We deliberately do not return
-// the full coloured / boxed help that /help prints to the user — the
-// model gets a plain-text catalogue it can paraphrase or reference.
+// the full colored / boxed help that /help prints to the user — the
+// model gets a plain-text catalog it can paraphrase or reference.
 //
 // Keeping this distinct from showHelp() lets the human-facing UX evolve
 // (colors, sectioning, ASCII art) without polluting the model's prompt
@@ -61,13 +61,13 @@ func (cli *ChatCLI) helpText() string {
 }
 
 // versionText returns a one-shot string describing the running build
-// and whether an update is available. Uses a tight 2s timeout for the
-// update probe so an LLM-triggered /version doesn't stall the turn on
-// a slow network — humans wait up to 5s via the legacy handler, but
-// the agent loop is more time-sensitive.
-func (cli *ChatCLI) versionText() string {
+// and whether an update is available. The caller's ctx caps the update
+// probe so an LLM-triggered /version doesn't stall the turn on a slow
+// network; we layer an extra 2s timeout on top in case the caller's ctx
+// is the long-lived agent loop ctx.
+func (cli *ChatCLI) versionText(parent context.Context) string {
 	versionInfo := version.GetCurrentVersion()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	latest, hasUpdate, err := version.CheckLatestVersionWithContext(ctx)
 	return version.FormatVersionInfo(versionInfo, latest, hasUpdate, err)

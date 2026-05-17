@@ -13,32 +13,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/mattn/go-runewidth"
-	"go.uber.org/zap"
 )
-
-// promptInputGuard is the package-level guard shared by every confirmation
-// prompt. It is initialized lazily on first use to avoid coupling logger
-// availability to package init order. Logger replacement (test hook) is
-// done via SetSecurityPromptLogger.
-var (
-	promptInputGuard       *InputGuard
-	promptInputGuardLogger *zap.Logger
-)
-
-// SetSecurityPromptLogger wires a zap logger into the package-level input
-// guard. Callers that have a logger (the CLI initializer) should set this
-// at startup; otherwise the guard falls back to a no-op logger.
-func SetSecurityPromptLogger(logger *zap.Logger) {
-	promptInputGuardLogger = logger
-	promptInputGuard = NewInputGuard(logger)
-}
-
-func getPromptInputGuard() *InputGuard {
-	if promptInputGuard == nil {
-		promptInputGuard = NewInputGuard(promptInputGuardLogger)
-	}
-	return promptInputGuard
-}
 
 type SecurityDecision int
 
@@ -108,14 +83,6 @@ func PromptSecurityCheck(ctx context.Context, toolName, args string, inputCh <-c
 // stdin from go-prompt after agent mode exits (e.g., on Ctrl+C).
 func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, secCtx *SecurityContext, inputCh <-chan string) SecurityDecision {
 	resetTTYToSane()
-
-	// Defeat typeahead: flush the kernel TTY input buffer and drain any lines
-	// already enqueued by the centralized stdin reader before painting the
-	// UI. Without this, characters the user typed while the LLM was streaming
-	// would be consumed by the first <-inputCh below as if they were the y/n
-	// answer. Post-render debounce happens just before we actually read input.
-	guard := getPromptInputGuard()
-	guard.Guard(inputCh)
 
 	purple := "\u001b[35m"
 	cyan := "\u001b[36m"
@@ -190,13 +157,6 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	}
 
 	fmt.Print("\n" + purple + " > " + reset)
-
-	// Post-render debounce: discard any input that arrives during the brief
-	// window after the UI was painted (catches keystrokes that were in flight
-	// while the guard ran above, plus keystrokes from a user who has not yet
-	// noticed that the prompt appeared). The exact window is tuned for human
-	// reaction time without being noticeable during deliberate interaction.
-	guard.IntentDebounce(ctx, inputCh)
 
 	// Read user input either from the centralized stdin channel (if provided)
 	// or via a fallback goroutine. Using inputCh avoids orphaned goroutines

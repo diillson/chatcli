@@ -1916,7 +1916,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							break
 						}
 						if action == coder.ActionAsk {
-							decision := coder.PromptSecurityCheck(ctx, tc.Name, tc.Args, a.stdinLines)
+							decision := coder.PromptSecurityCheckGuarded(ctx, tc.Name, tc.Args, a.stdinLines)
 							pattern := coder.GetSuggestedPattern(tc.Name, tc.Args)
 							switch decision {
 							case coder.DecisionAllowAlways:

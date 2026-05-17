@@ -185,9 +185,9 @@ func TestRunBatch_ResultsIndexAlignedDespiteParallelism(t *testing.T) {
 	batch := ToolBatch{
 		Concurrent: true,
 		Calls: []ToolCall{
-			{Name: "slow"},  // 80ms
-			{Name: "fast"},  // 10ms
-			{Name: "mid"},   // 40ms
+			{Name: "slow"}, // 80ms
+			{Name: "fast"}, // 10ms
+			{Name: "mid"},  // 40ms
 		},
 	}
 	exec := func(_ context.Context, c ToolCall) (ToolResult, error) {

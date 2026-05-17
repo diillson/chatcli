@@ -114,7 +114,7 @@ var dangerousInlineMarkers = map[string][]*regexp.Regexp{
 	"perl": compileAll([]string{
 		`(?i)\bsystem\s*[\(\"]`,
 		`(?i)\bexec\s*[\(\"]`,
-		`\` + "`",                        // backticks in perl
+		`\` + "`",                         // backticks in perl
 		`(?i)\bopen\s*\([^)]*['"]\s*[>+]`, // perl open with write
 		`(?i)\bIO::Socket\b`,
 		`(?i)\bLWP::\w+`,
@@ -126,8 +126,8 @@ var dangerousInlineMarkers = map[string][]*regexp.Regexp{
 		`(?i)\bsystem\s*\(`,
 		`(?i)\bexec\s*\(`,
 		`(?i)\bspawn\s*\(`,
-		"`",                  // backticks
-		`(?i)%x\{`,           // %x{} shell
+		"`",        // backticks
+		`(?i)%x\{`, // %x{} shell
 		`(?i)\bIO\.popen\b`,
 		`(?i)\bFile\.open\([^)]*['"]\s*[wax]`,
 		`(?i)\bFile\.delete\b`,

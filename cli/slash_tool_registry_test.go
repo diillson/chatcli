@@ -66,7 +66,7 @@ func TestRegisterSlashTool_RejectsEmpty(t *testing.T) {
 }
 
 // TestAllSlashTools_StableOrder confirms the snapshot is sorted by
-// Name so the tool catalogue emitted to the model is reproducible
+// Name so the tool catalog emitted to the model is reproducible
 // across turns (important for prompt caching).
 func TestAllSlashTools_StableOrder(t *testing.T) {
 	resetSlashRegistry(t)

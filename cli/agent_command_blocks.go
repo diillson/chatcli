@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
-	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/models"
@@ -843,14 +842,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 	return allOutput.String(), lastError
 }
 
-// getCriticalInput obtém entrada para decisões críticas.
-//
-// Aplica o input guard (drain do channel + flush TTY + intent debounce) para
-// evitar que digitação acidental durante o stream do LLM seja consumida como
-// resposta da confirmação. Sem isso, qualquer tecla pressionada enquanto o
-// modelo gerava tokens viraria a resposta de "sim, quero executar
-// conscientemente" — exatamente o vetor de execução não-intencional que
-// queremos eliminar.
+// getCriticalInput obtém entrada para decisões críticas
 func (a *AgentMode) getCriticalInput(prompt string) string {
 	if runtime.GOOS != "windows" {
 		cmd := exec.Command(sttyPath, "sane")
@@ -858,13 +850,8 @@ func (a *AgentMode) getCriticalInput(prompt string) string {
 		_ = cmd.Run()
 	}
 
-	guard := coder.NewInputGuard(a.cli.logger)
-	guard.Guard(a.stdinLines)
-
 	fmt.Print("\n")
 	fmt.Print(prompt)
-
-	guard.IntentDebounce(context.Background(), a.stdinLines)
 
 	return a.readLine()
 }

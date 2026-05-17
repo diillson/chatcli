@@ -47,33 +47,6 @@ func (p *BuiltinWebFetchPlugin) Usage() string   { return "@webfetch <url>" }
 func (p *BuiltinWebFetchPlugin) Version() string { return "1.1.0" }
 func (p *BuiltinWebFetchPlugin) Path() string    { return "[builtin]" }
 
-// IsReadOnly reports true whenever the invocation is a plain fetch
-// (HTTP GET). When the caller asks the plugin to save the body to the
-// session scratch dir via save_to_file, that is still a side-effect-only-
-// in-scratch operation — read-only with respect to the user's working
-// tree but not strictly idempotent. We report true: scratch writes are
-// what the agent's session workspace exists for, and the orchestrator's
-// concurrency partition treats them as benign.
-func (p *BuiltinWebFetchPlugin) IsReadOnly(_ []string) bool { return true }
-
-// IsConcurrencySafe reports true: each fetch opens an independent HTTP
-// connection. Two parallel fetches don't conflict, and net/http handles
-// connection pooling under the hood with goroutine-safe semantics.
-func (p *BuiltinWebFetchPlugin) IsConcurrencySafe(_ []string) bool { return true }
-
-// DescribeCall shows the URL being fetched so the spinner reports
-// "Fetching https://x.example/..." instead of the generic description.
-func (p *BuiltinWebFetchPlugin) DescribeCall(args []string) string {
-	u := extractURLArg(args)
-	if u == "" {
-		return p.Description()
-	}
-	if len(u) > 70 {
-		u = u[:70] + "..."
-	}
-	return fmt.Sprintf("Fetching: %s", u)
-}
-
 func (p *BuiltinWebFetchPlugin) Schema() string {
 	schema := map[string]interface{}{
 		"argsFormat": "JSON or positional",

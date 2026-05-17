@@ -16,23 +16,23 @@ import (
 	"go.uber.org/zap"
 )
 
-// CommandValidator valida comandos antes da execução.
+// CommandValidator validates shell-level requests before execution.
 //
-// Estratégia em camadas (do mais barato pro mais caro):
+// Layered strategy (cheapest to most expensive):
 //
-//  1. inlineCodeAnalyzer — para invocações como `python -c <code>`,
-//     `node -e <code>`, etc., classifica dinamicamente o código inline.
-//     Substitui as antigas regex `\bpython[23]?\s+-c\b` que falsavam-
-//     positivo em `python -c "print(1)"`.
-//  2. dangerousPatterns — regex tradicional aplicada à linha completa.
-//     Catch-all para padrões que envolvem múltiplos segmentos (curl|sh,
-//     base64|bash) ou que detectam um comando perigoso isolado (rm -rf,
+//  1. inlineCodeAnalyzer — for invocations like `python -c <code>`,
+//     `node -e <code>`, etc., dynamically classifies the inline source.
+//     Replaces the older `\bpython[23]?\s+-c\b` regex that produced
+//     false positives on benign one-liners like `python -c "print(1)"`.
+//  2. dangerousPatterns — traditional regex over the full line.
+//     Catch-all for patterns that span multiple segments (curl|sh,
+//     base64|bash) or that flag a single dangerous invocation (rm -rf,
 //     mkfs, sudo, etc).
-//  3. extraDenyPatterns — denylist customizada via CHATCLI_AGENT_DENYLIST.
+//  3. extraDenyPatterns — user-supplied denylist via CHATCLI_AGENT_DENYLIST.
 //
-// A camada de parsing shell (ShellSegment) é usada como input pra (1) e
-// pode no futuro alimentar uma camada (4) de análise per-segmento. Hoje
-// preserva o comportamento legado (regex on full line) pra zero regressão.
+// The shell parsing layer (ShellSegment) feeds (1). The legacy
+// full-line regex pass in (2) is preserved verbatim for zero behavioural
+// regression on the existing dangerous-command corpus.
 type CommandValidator struct {
 	logger             *zap.Logger
 	dangerousPatterns  []*regexp.Regexp
@@ -41,7 +41,7 @@ type CommandValidator struct {
 	allowSudo          bool
 }
 
-// NewCommandValidator cria uma nova instância do validador.
+// NewCommandValidator builds a validator with default rules.
 func NewCommandValidator(logger *zap.Logger) *CommandValidator {
 	validator := &CommandValidator{
 		logger:             logger,
@@ -49,9 +49,10 @@ func NewCommandValidator(logger *zap.Logger) *CommandValidator {
 		inlineCodeAnalyzer: NewInlineCodeRiskAnalyzer(),
 	}
 
-	// Padrões perigosos padrão. Removidos os patterns de inline-code que
-	// agora são classificados dinamicamente pelo analyzer — `python -c
-	// "print(1)"` é seguro, `python -c "import os; os.system(...)"` não é.
+	// Default dangerous patterns. The inline-code regex set has been
+	// removed: those invocations are now classified dynamically by the
+	// analyzer — `python -c "print(1)"` is safe, `python -c "import os;
+	// os.system(...)"` is not.
 	defaultPatterns := []string{
 		`(?i)rm\s+-rf\s+`,
 		`(?i)rm\s+--no-preserve-root`,
@@ -128,22 +129,22 @@ func NewCommandValidator(logger *zap.Logger) *CommandValidator {
 	return validator
 }
 
-// IsDangerous verifica se um comando é potencialmente perigoso.
+// IsDangerous checks whether a request is potentially harmful.
 //
-// Pipeline de avaliação:
+// Evaluation pipeline:
 //
-//  1. Inline-code analysis — para cada segmento do shell que invoca um
-//     interpretador via -c/-e/-r, classifica o código inline. Se o
-//     classifier diz RiskHigh, é dangerous imediatamente. Se diz RiskSafe,
-//     a chamada não é dangerous *por causa* desse segmento (mas o resto
-//     da linha ainda é avaliado pelas camadas seguintes).
-//  2. dangerousPatterns — regex tradicional aplicada à linha completa.
-//  3. extraDenyPatterns — denylist do usuário.
-//  4. sudo guard.
+//  1. Inline-code analysis — for each shell segment that invokes an
+//     interpreter via -c/-e/-r, classify the inline source. RiskHigh
+//     short-circuits to dangerous immediately. RiskSafe does not make
+//     this segment dangerous (the rest of the line is still scored by
+//     the next layers).
+//  2. dangerousPatterns — traditional regex over the full line.
+//  3. extraDenyPatterns — user-supplied denylist.
+//  4. Sudo guard.
 //
-// O critério "safe inline -c suprime o falso-positivo" funciona porque
-// removemos as regex `\bpython[23]?\s+-c\b` da lista da camada 2: o
-// classifier é a fonte da verdade pra essa classe de comandos.
+// The "safe inline -c suppresses the false positive" property holds
+// because the `\bpython[23]?\s+-c\b` family was removed from layer 2:
+// the classifier is the single source of truth for that class.
 func (v *CommandValidator) IsDangerous(cmd string) bool {
 	if v.inlineCodeAnalyzer != nil {
 		for _, segment := range ParseShellSegments(cmd) {

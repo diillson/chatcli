@@ -129,7 +129,7 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		secCtx := buildSecurityContext(ctx)
 
 		// Prompt the user with full context
-		decision := coder.PromptSecurityCheckWithContext(ctx, toolName, args, secCtx, a.stdinCh)
+		decision := coder.PromptSecurityCheckWithContextGuarded(ctx, toolName, args, secCtx, a.stdinCh)
 		pattern := coder.GetSuggestedPattern(toolName, args)
 
 		// Clear the prompt area and resume spinner

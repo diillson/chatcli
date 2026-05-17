@@ -145,9 +145,9 @@ type fakeCarrier struct {
 	meta      map[string]any
 }
 
-func (f fakeCarrier) GetOutput() string         { return f.output }
-func (f fakeCarrier) GetIsError() bool          { return f.isError }
-func (f fakeCarrier) GetErrorCode() string      { return f.errorCode }
+func (f fakeCarrier) GetOutput() string          { return f.output }
+func (f fakeCarrier) GetIsError() bool           { return f.isError }
+func (f fakeCarrier) GetErrorCode() string       { return f.errorCode }
 func (f fakeCarrier) GetMCPMeta() map[string]any { return f.meta }
 
 // TestWrapStructuredResult_PassesThroughFields confirms a plugin-supplied

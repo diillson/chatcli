@@ -213,64 +213,6 @@ func (*BuiltinSchedulerPlugin) Schema() string {
 	return string(data)
 }
 
-// IsReadOnly reports true for query/list operations; schedule/wait/cancel
-// mutate the scheduler's persistent state. We look at the first arg
-// (subcommand) which is the stable @scheduler schema entry point.
-func (p *BuiltinSchedulerPlugin) IsReadOnly(args []string) bool {
-	sub := schedulerSubcommand(args)
-	return sub == "query" || sub == "list"
-}
-
-// IsConcurrencySafe matches IsReadOnly: two queries or two lists can run
-// in parallel against the durable store without conflict (the store uses
-// a per-job lock). Mutators stay serial to preserve causal ordering of
-// the schedule/cancel chain.
-func (p *BuiltinSchedulerPlugin) IsConcurrencySafe(args []string) bool {
-	return p.IsReadOnly(args)
-}
-
-// DescribeCall surfaces the subcommand and, when available, the job
-// identifier or schedule name being acted on.
-func (p *BuiltinSchedulerPlugin) DescribeCall(args []string) string {
-	sub := schedulerSubcommand(args)
-	switch sub {
-	case "schedule":
-		if n := extractStringArg(args, "name"); n != "" {
-			return fmt.Sprintf("Scheduling: %s", n)
-		}
-	case "query", "cancel":
-		if id := extractStringArg(args, "id"); id != "" {
-			return fmt.Sprintf("@scheduler %s: %s", sub, id)
-		}
-	case "wait":
-		if u := extractStringArg(args, "until"); u != "" {
-			return fmt.Sprintf("Waiting until: %s", u)
-		}
-	case "list":
-		return "Listing scheduled jobs"
-	}
-	if sub != "" {
-		return fmt.Sprintf("@scheduler %s", sub)
-	}
-	return p.Description()
-}
-
-// schedulerSubcommand pulls the subcommand from either the JSON
-// envelope or the positional argv form, matching the parser logic in
-// parseSchedulerInvocation.
-func schedulerSubcommand(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-	first := strings.TrimSpace(args[0])
-	if strings.HasPrefix(first, "{") {
-		if v := extractStringArg([]string{first}, "cmd", "command"); v != "" {
-			return v
-		}
-	}
-	return first
-}
-
 // Execute parses the args and dispatches to the adapter.
 func (p *BuiltinSchedulerPlugin) Execute(ctx context.Context, args []string) (string, error) {
 	return p.ExecuteWithStream(ctx, args, nil)

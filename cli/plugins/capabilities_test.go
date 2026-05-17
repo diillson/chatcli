@@ -18,12 +18,12 @@ import (
 // that don't opt into the new capabilities.
 type minimalPlugin struct{}
 
-func (minimalPlugin) Name() string                                   { return "minimal" }
-func (minimalPlugin) Description() string                            { return "minimal plugin" }
-func (minimalPlugin) Usage() string                                  { return "minimal" }
-func (minimalPlugin) Version() string                                { return "0.0.0" }
-func (minimalPlugin) Path() string                                   { return "[test]" }
-func (minimalPlugin) Schema() string                                 { return "{}" }
+func (minimalPlugin) Name() string        { return "minimal" }
+func (minimalPlugin) Description() string { return "minimal plugin" }
+func (minimalPlugin) Usage() string       { return "minimal" }
+func (minimalPlugin) Version() string     { return "0.0.0" }
+func (minimalPlugin) Path() string        { return "[test]" }
+func (minimalPlugin) Schema() string      { return "{}" }
 func (minimalPlugin) Execute(ctx context.Context, args []string) (string, error) {
 	return "", nil
 }

@@ -44,7 +44,7 @@ type SlashToolEntry struct {
 	ReadOnly bool
 }
 
-// slashToolRegistry is the in-process catalogue of slash commands
+// slashToolRegistry is the in-process catalog of slash commands
 // exposed to the LLM as tools. Populated by RegisterSlashTool at init
 // time; resolved by the plugin manager at agent-mode startup.
 var (
@@ -207,8 +207,8 @@ func (cli *ChatCLI) registerBuiltinSlashTools() {
 		Name:        "/version",
 		Description: i18n.T("slash.version.description"),
 		ReadOnly:    true,
-		Handler: func(_ context.Context, _ map[string]any) (string, error) {
-			return cli.versionText(), nil
+		Handler: func(ctx context.Context, _ map[string]any) (string, error) {
+			return cli.versionText(ctx), nil
 		},
 	})
 }

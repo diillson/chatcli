@@ -54,8 +54,8 @@ type ConcurrencySafeAware interface {
 // DescriberWithInput supplements the static Description() with a
 // contextual one-liner for the spinner / progress UI. Example:
 //
-//   Read("/etc/hosts") -> "Reading /etc/hosts"
-//   Search("Login")    -> "Searching for 'Login'"
+//	Read("/etc/hosts") -> "Reading /etc/hosts"
+//	Search("Login")    -> "Searching for 'Login'"
 //
 // The returned text MUST already be i18n-resolved by the plugin (it
 // owns the locale lookup). Callers display it verbatim.
