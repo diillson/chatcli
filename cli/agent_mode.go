@@ -2179,15 +2179,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						}
 
 						if !batchHasError {
-							// UX: Animação durante a execução
-							subCmd := "ação"
-							if len(toolArgs) > 0 {
-								subCmd = toolArgs[0]
-							}
+							// Per-call spinner label (Item 7): use the
+							// plugin's DescribeCall to surface the actual
+							// target (file, URL, regex, …) instead of the
+							// generic "EXECUTANDO: @tool subcmd". Falls back
+							// to the legacy shape for plugins that don't
+							// implement DescriberWithInput or when the args
+							// can't be parsed.
 							a.cli.animation.StopThinkingAnimation()
 
+							boxLabel := defaultSpinnerLabel(toolName, toolArgs)
+							if p, ok := a.cli.pluginManager.GetPlugin(tc.Name); ok && p != nil {
+								if d := plugins.DescribeCall(p, toolArgs); d != "" {
+									boxLabel = d
+								}
+							}
+
 							if !coderCompact {
-								renderer.RenderStreamBoxStart("🔨", fmt.Sprintf("EXECUTANDO: %s %s", toolName, subCmd), agent.ColorPurple)
+								renderer.RenderStreamBoxStart("🔨", boxLabel, agent.ColorPurple)
 							}
 
 							streamCallback := func(line string) {
