@@ -885,6 +885,8 @@
   "agent.microcompact.applied": "microcompact: %d truncados, %d resumidos, %s liberados",
   "agent.queue.new_user_instruction": "Nova instrução do usuário recebida",
   "agent.queue.indicator": "(%d na fila)",
+  "slash.help.description": "Retorna o catálogo de comandos do chatcli (slash e @-modificadores).",
+  "slash.version.description": "Retorna a versão do chatcli em execução e se há atualização disponível.",
   "agent.early_exit.stagnation": "loop ReAct interrompido: mesma tool_call repetida %d turnos seguidos (estagnação). Defina CHATCLI_AGENT_EARLY_EXIT=0 para desativar.",
   "agent.early_exit.chat_hint": "Dica: essa pergunta parece conversacional — o loop /agent foi ignorado. Use /chat ou digite a pergunta direto para forçar chat, ou /run para forçar o agente.",
   "agent.webfetch.auto_saved": "web_fetch: resposta grande demais para inlinear (%d bytes); salva em %s — use read_file ou repita com filter/from_line/to_line.",

@@ -395,6 +395,19 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
+
+		// Slash-as-tool: register the curated subset of slash commands
+		// (currently /help and /version) as plugins so the LLM can invoke
+		// them via the same native tool dispatch path used by @coder,
+		// @websearch, etc. The bindings live in slash_tool_registry.go +
+		// slash_tool_handlers.go; expanding the set is a deliberate
+		// review-gated decision (see registerBuiltinSlashTools doc).
+		cli.registerBuiltinSlashTools()
+		for _, entry := range AllSlashTools() {
+			if plugin := NewSlashToolPlugin(entry); plugin != nil {
+				pluginMgr.RegisterBuiltinPlugin(plugin)
+			}
+		}
 	}
 
 	cli.configureProviderAndModel()

