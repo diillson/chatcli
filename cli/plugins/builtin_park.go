@@ -139,6 +139,58 @@ func (*BuiltinParkPlugin) Schema() string {
 	return string(data)
 }
 
+// IsReadOnly returns false: @park mutates scheduler state (it parks the
+// agent and registers an auto-resume callback). Even though the
+// "observation" subcommands (for_cmd, for_url) are mostly read-only at
+// the user level, they still create durable scheduler entries.
+func (p *BuiltinParkPlugin) IsReadOnly(_ []string) bool { return false }
+
+// IsConcurrencySafe returns false: parking is a process-wide event that
+// suspends the agent loop. It cannot meaningfully run in parallel with
+// another tool — it IS the way the agent surrenders the turn.
+func (p *BuiltinParkPlugin) IsConcurrencySafe(_ []string) bool { return false }
+
+// DescribeCall reports which park flavor is being requested. The cmd
+// vocabulary is delay / until / for_url / for_cmd; each gets its own
+// human-readable prefix.
+func (p *BuiltinParkPlugin) DescribeCall(args []string) string {
+	if len(args) == 0 {
+		return p.Description()
+	}
+	first := strings.TrimSpace(args[0])
+	sub := first
+	if strings.HasPrefix(first, "{") {
+		if v := extractStringArg([]string{first}, "cmd"); v != "" {
+			sub = v
+		}
+	}
+	switch sub {
+	case "delay":
+		if d := extractStringArg(args, "duration"); d != "" {
+			return fmt.Sprintf("Parking for: %s", d)
+		}
+	case "until":
+		if t := extractStringArg(args, "deadline", "when"); t != "" {
+			return fmt.Sprintf("Parking until: %s", t)
+		}
+	case "for_url":
+		if u := extractStringArg(args, "url"); u != "" {
+			if len(u) > 60 {
+				u = u[:60] + "..."
+			}
+			return fmt.Sprintf("Polling URL: %s", u)
+		}
+	case "for_cmd":
+		if c := extractStringArg(args, "cmd", "command"); c != "" {
+			if len(c) > 60 {
+				c = c[:60] + "..."
+			}
+			return fmt.Sprintf("Polling cmd: %s", c)
+		}
+	}
+	return fmt.Sprintf("@park %s", sub)
+}
+
 // Execute is the legacy entry-point; defers to ExecuteWithStream.
 func (p *BuiltinParkPlugin) Execute(ctx context.Context, args []string) (string, error) {
 	return p.ExecuteWithStream(ctx, args, nil)

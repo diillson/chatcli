@@ -52,6 +52,31 @@ func (p *BuiltinWebSearchPlugin) Usage() string       { return "@websearch <quer
 func (p *BuiltinWebSearchPlugin) Version() string     { return "2.0.0" }
 func (p *BuiltinWebSearchPlugin) Path() string        { return "[builtin]" }
 
+// IsReadOnly reports true for every invocation: web search is a GET over
+// HTTPS, never mutates local state. Skipping the security prompt for
+// read-only searches is part of the UX win in Fase 2.1.
+func (p *BuiltinWebSearchPlugin) IsReadOnly(_ []string) bool { return true }
+
+// IsConcurrencySafe reports true: each search opens its own HTTP
+// connection and writes only to the returned string. Two parallel
+// searches do not interfere — they may share connection pools but that
+// is goroutine-safe at the net/http layer.
+func (p *BuiltinWebSearchPlugin) IsConcurrencySafe(_ []string) bool { return true }
+
+// DescribeCall returns a contextual one-liner showing the query the
+// user is searching for. Falls back to the static description when the
+// query cannot be parsed out of the args.
+func (p *BuiltinWebSearchPlugin) DescribeCall(args []string) string {
+	q := extractQueryArg(args)
+	if q == "" {
+		return p.Description()
+	}
+	if len(q) > 60 {
+		q = q[:60] + "..."
+	}
+	return fmt.Sprintf("Searching: %s", q)
+}
+
 func (p *BuiltinWebSearchPlugin) Schema() string {
 	schema := map[string]interface{}{
 		"argsFormat": "JSON or positional",
