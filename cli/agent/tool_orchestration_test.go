@@ -301,7 +301,7 @@ func TestRunBatch_CancelSiblingsFalse(t *testing.T) {
 		MaxConcurrency: 3,
 		CancelSiblings: false,
 	})
-	assert.Error(t, err, "RunBatch surfaces the first infra error even when not cancelling siblings")
+	assert.Error(t, err, "RunBatch surfaces the first infra error even when not canceling siblings")
 	require.Len(t, results, 3)
 	_, ok1 := completed.Load("ok-1")
 	_, ok2 := completed.Load("ok-2")

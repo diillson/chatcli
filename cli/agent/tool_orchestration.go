@@ -287,11 +287,16 @@ func RunBatch(ctx context.Context, batch ToolBatch, exec ExecuteFunc, opts Batch
 	return results, finalErr
 }
 
-// safeCall wraps the user-supplied ExecuteFunc with panic recovery and
-// nil-ctx defense so the orchestrator never crashes on a bad callback.
+// safeCall wraps the user-supplied ExecuteFunc with panic recovery so
+// a buggy plugin can't crash the orchestrator. Callers are required to
+// pass a non-nil ctx (the orchestrator always passes ctx or gctx from
+// errgroup); a nil ctx is treated as a programming error and short-
+// circuits as a cancellation rather than silently creating a new root
+// context.
 func safeCall(ctx context.Context, call ToolCall, exec ExecuteFunc) (res ToolResult, err error) {
 	if ctx == nil {
-		ctx = context.Background()
+		return ToolResult{IsError: true, ErrorCode: "InvalidContext", Output: "nil context"},
+			errors.New("safeCall: nil context")
 	}
 	defer func() {
 		if r := recover(); r != nil {

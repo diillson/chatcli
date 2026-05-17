@@ -35,10 +35,9 @@ const DefaultIntentDebounce = 250 * time.Millisecond
 // continues. The worst case if every layer fails is the legacy behavior
 // (which is what we are improving), not a security regression.
 type InputGuard struct {
-	logger          *zap.Logger
-	debounceWindow  time.Duration
-	flushTTYFn      func() error
-	skipFlushForTLS bool
+	logger         *zap.Logger
+	debounceWindow time.Duration
+	flushTTYFn     func() error
 }
 
 // NewInputGuard constructs a guard with sensible defaults. A nil logger is
@@ -150,14 +149,14 @@ func (g *InputGuard) Guard(ch <-chan string) bool {
 // preview returns a short, escape-stripped excerpt of an input line for
 // safe logging. We never want to dump full user input to the log.
 func preview(s string) string {
-	const max = 24
-	out := make([]rune, 0, max)
+	const maxLen = 24
+	out := make([]rune, 0, maxLen)
 	for _, r := range s {
 		if r < 0x20 || r == 0x7f {
 			continue
 		}
 		out = append(out, r)
-		if len(out) >= max {
+		if len(out) >= maxLen {
 			out = append(out, '…')
 			break
 		}
