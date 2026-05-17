@@ -59,7 +59,10 @@ func (p *BuiltinParkPlugin) DescribeCall(args []string) string {
 			return i18n.T("plugins.park.describe.for_url", u)
 		}
 	case "for_cmd":
-		if c := extractStringArg(args, "cmd", "command"); c != "" {
+		// Use extractNestedArg so we read args.cmd (the user-supplied
+		// command), not the outer cmd field (which is just the subcommand
+		// name "for_cmd" — collides with the same key at the inner level).
+		if c := extractNestedArg(args, "cmd", "command"); c != "" {
 			if len(c) > 60 {
 				c = c[:60] + "..."
 			}
