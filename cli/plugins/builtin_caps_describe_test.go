@@ -7,6 +7,7 @@
 package plugins
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -234,7 +235,7 @@ func TestStructuredResult_Getters_ZeroValue(t *testing.T) {
 // legacy path; the result has IsError set when the call returned an error.
 func TestRunStructured_LegacyFallback(t *testing.T) {
 	p := minimalPlugin{}
-	res, err := RunStructured(nil, p, []string{"x"}, nil)
+	res, err := RunStructured(context.TODO(), p, []string{"x"}, nil)
 	assert.NoError(t, err)
 	assert.Empty(t, res.Output)
 	assert.False(t, res.IsError)
@@ -242,6 +243,6 @@ func TestRunStructured_LegacyFallback(t *testing.T) {
 
 // TestRunStructured_NilPluginReturnsError pins the safe-failure contract.
 func TestRunStructured_NilPluginReturnsError(t *testing.T) {
-	_, err := RunStructured(nil, nil, nil, nil)
+	_, err := RunStructured(context.TODO(), nil, nil, nil)
 	assert.Error(t, err)
 }
