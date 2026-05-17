@@ -405,6 +405,13 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSearchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTreePlugin())
 
+		// @todo (Claude Code TodoWrite parity, Item 2). Lets the LLM
+		// own its plan: write the full list each turn (canonical TodoWrite
+		// semantics), list the current state, or mark a single item by
+		// id. Adapter wired below routes into the live AgentMode's
+		// TaskTracker.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTodoPlugin())
+
 		// Slash-as-tool: register the curated subset of slash commands
 		// (currently /help and /version) as plugins so the LLM can invoke
 		// them via the same native tool dispatch path used by @coder,
@@ -522,6 +529,17 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)
 	cli.agentMode = NewAgentMode(cli, logger)
+
+	// Wire the @todo plugin adapter (Item 2). The getter returns the
+	// CURRENT agentMode's tracker on every call so re-creations of the
+	// AgentMode (line 1066 etc.) are transparent — the plugin sees the
+	// most recent instance, never a stale pointer.
+	plugins.SetTodoAdapter(newLiveTodoAdapter(func() *agent.TaskTracker {
+		if cli.agentMode == nil {
+			return nil
+		}
+		return cli.agentMode.taskTracker
+	}))
 
 	history, err := cli.historyManager.LoadHistory()
 	if err != nil {
