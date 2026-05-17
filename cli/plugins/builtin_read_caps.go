@@ -32,3 +32,33 @@ func (p *BuiltinReadPlugin) DescribeCall(args []string) string {
 	}
 	return i18n.T("plugins.read.describe", parsed.File)
 }
+
+// JSONSchema returns the draft-2020-12 schema for @read input. The
+// plugin layer validates the LLM-emitted args against this before
+// dispatch — bad payloads short-circuit with InvalidArgs instead of
+// failing inside parseReadArgs with an unhelpful message.
+func (p *BuiltinReadPlugin) JSONSchema() string {
+	return `{
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"type": "object",
+		"properties": {
+			"file": {"type": "string", "minLength": 1},
+			"path": {"type": "string", "minLength": 1},
+			"filepath": {"type": "string", "minLength": 1},
+			"from_line": {"type": "integer", "minimum": 1},
+			"start": {"type": "integer", "minimum": 1},
+			"to_line": {"type": "integer", "minimum": 1},
+			"end": {"type": "integer", "minimum": 1},
+			"head": {"type": "integer", "minimum": 0},
+			"tail": {"type": "integer", "minimum": 0},
+			"max_bytes": {"type": "integer", "minimum": 1},
+			"maxBytes": {"type": "integer", "minimum": 1},
+			"encoding": {"type": "string", "enum": ["text", "base64"]}
+		},
+		"anyOf": [
+			{"required": ["file"]},
+			{"required": ["path"]},
+			{"required": ["filepath"]}
+		]
+	}`
+}

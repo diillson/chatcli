@@ -31,6 +31,7 @@ import (
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/metrics"
 	"github.com/diillson/chatcli/cli/paste"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
@@ -2216,7 +2217,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									a.logger,
 								)
 							} else {
-								toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
+								// Schema validation gate (Item 5): if the plugin
+								// implements JSONSchemaAware, validate the args
+								// envelope before dispatch. A failure becomes a
+								// fast InvalidArgs IsError so the model sees the
+								// schema violation cleanly instead of a panic
+								// or empty-string-return deep inside the plugin.
+								// Plugins that do not implement the interface
+								// bypass this gate entirely — purely additive.
+								if vErr := plugins.ValidateArgs(plugin, normalizedArgsStr); vErr != nil {
+									toolOutput = vErr.Error()
+									execErr = vErr
+								} else {
+									toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
+								}
 							}
 
 							if !coderCompact {

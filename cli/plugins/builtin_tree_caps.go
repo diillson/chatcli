@@ -28,3 +28,22 @@ func (p *BuiltinTreePlugin) DescribeCall(args []string) string {
 	}
 	return i18n.T("plugins.tree.describe", dir)
 }
+
+// JSONSchema returns the draft-2020-12 schema for @tree input. All
+// fields are optional — bare {} defaults to listing the current
+// workspace.
+func (p *BuiltinTreePlugin) JSONSchema() string {
+	return `{
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"type": "object",
+		"properties": {
+			"dir": {"type": "string"},
+			"path": {"type": "string"},
+			"directory": {"type": "string"},
+			"depth": {"type": "integer", "minimum": 1, "maximum": 20},
+			"maxDepth": {"type": "integer", "minimum": 1, "maximum": 20},
+			"exclude": {"type": "string"},
+			"skip": {"type": "string"}
+		}
+	}`
+}

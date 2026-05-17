@@ -29,3 +29,31 @@ func (p *BuiltinSearchPlugin) DescribeCall(args []string) string {
 	}
 	return i18n.T("plugins.search.describe", t)
 }
+
+// JSONSchema returns the draft-2020-12 schema for @search input.
+func (p *BuiltinSearchPlugin) JSONSchema() string {
+	return `{
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"type": "object",
+		"properties": {
+			"term": {"type": "string", "minLength": 1},
+			"pattern": {"type": "string", "minLength": 1},
+			"query": {"type": "string", "minLength": 1},
+			"regex": {"type": "string", "minLength": 1},
+			"dir": {"type": "string"},
+			"path": {"type": "string"},
+			"directory": {"type": "string"},
+			"max_results": {"type": "integer", "minimum": 1},
+			"maxResults": {"type": "integer", "minimum": 1},
+			"limit": {"type": "integer", "minimum": 1},
+			"include": {"type": "string"},
+			"glob": {"type": "string"}
+		},
+		"anyOf": [
+			{"required": ["term"]},
+			{"required": ["pattern"]},
+			{"required": ["query"]},
+			{"required": ["regex"]}
+		]
+	}`
+}

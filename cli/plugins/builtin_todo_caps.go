@@ -70,3 +70,70 @@ func todoSubcommand(args []string) string {
 	}
 	return first
 }
+
+// JSONSchema returns the draft-2020-12 schema for @todo input. Three
+// subcommand shapes are enumerated via oneOf so the validator rejects
+// {"cmd":"write"} without args (the LLM's most common mistake when
+// learning the tool).
+func (p *BuiltinTodoPlugin) JSONSchema() string {
+	return `{
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"oneOf": [
+			{
+				"type": "object",
+				"properties": {
+					"cmd": {"const": "list"}
+				},
+				"required": ["cmd"],
+				"additionalProperties": true
+			},
+			{
+				"type": "object",
+				"properties": {
+					"cmd": {"const": "write"},
+					"args": {
+						"type": "object",
+						"properties": {
+							"todos": {
+								"type": "array",
+								"minItems": 1,
+								"items": {
+									"type": "object",
+									"properties": {
+										"description": {"type": "string", "minLength": 1},
+										"status": {
+											"type": "string",
+											"enum": ["", "pending", "in_progress", "completed", "failed"]
+										}
+									},
+									"required": ["description"]
+								}
+							}
+						},
+						"required": ["todos"]
+					}
+				},
+				"required": ["cmd", "args"]
+			},
+			{
+				"type": "object",
+				"properties": {
+					"cmd": {"const": "mark"},
+					"args": {
+						"type": "object",
+						"properties": {
+							"id": {"type": "integer", "minimum": 1},
+							"status": {
+								"type": "string",
+								"enum": ["pending", "in_progress", "completed", "failed"]
+							},
+							"error": {"type": "string"}
+						},
+						"required": ["id", "status"]
+					}
+				},
+				"required": ["cmd", "args"]
+			}
+		]
+	}`
+}
