@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/toolshim"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -101,9 +102,13 @@ func (c *OpenRouterClient) buildMessages(prompt string, history []models.Message
 			"content": msg.Content,
 		}
 
-		// Preserve tool_call_id for tool response messages
+		// Preserve tool_call_id for tool response messages and prefix
+		// the content with the [ERROR:<code>] marker when the agent
+		// layer flagged this result as an error — OpenRouter routes
+		// to OpenAI-compatible backends that don't carry is_error.
 		if role == "tool" && msg.ToolCallID != "" {
 			msgMap["tool_call_id"] = msg.ToolCallID
+			msgMap["content"] = toolshim.MarkOpenAICompatibleToolError(msg)
 		}
 
 		messages = append(messages, msgMap)

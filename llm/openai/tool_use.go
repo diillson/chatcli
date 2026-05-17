@@ -15,6 +15,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/toolshim"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -116,11 +117,15 @@ func buildToolMessages(prompt string, history []models.Message) []interface{} {
 
 		switch role {
 		case "tool":
-			// Tool result message
+			// Tool result message. OpenAI's Chat Completions API does
+			// not have a dedicated is_error field on tool messages,
+			// so the marker helper prepends [ERROR:<code>] when the
+			// agent layer flagged the result as an error. Shared with
+			// every other OpenAI-compatible provider via toolshim.
 			messages = append(messages, map[string]interface{}{
 				"role":         "tool",
 				"tool_call_id": msg.ToolCallID,
-				"content":      msg.Content,
+				"content":      toolshim.MarkOpenAICompatibleToolError(msg),
 			})
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {

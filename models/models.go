@@ -17,6 +17,36 @@ type Message struct {
 	ToolCalls   []ToolCall     `json:"tool_calls,omitempty"`   // Tool calls from assistant (native API).
 	ToolCallID  string         `json:"tool_call_id,omitempty"` // ID when this message is a tool result.
 	SystemParts []ContentBlock `json:"system_parts,omitempty"` // Structured system prompt parts (for cache control).
+
+	// IsError marks this tool-result message as a business-level
+	// failure (the tool ran, but reported an error: command exit code,
+	// HTTP 4xx, missing file). Provider adapters use it to set the
+	// native is_error wire field (Anthropic) or prefix the content
+	// with a marker the model can read (OpenAI-family).
+	//
+	// Only meaningful when Role == "tool". Default false (success).
+	IsError bool `json:"is_error,omitempty"`
+
+	// ErrorCode is the stable, locale-independent classification of
+	// the failure (ENOENT, EACCES, Timeout, ExitCode:2, NetworkError,
+	// etc). Surfaced to the LLM so it can reason about retryability
+	// without parsing English. Empty when IsError is false; carried
+	// inside the content marker for providers without native support.
+	ErrorCode string `json:"error_code,omitempty"`
+}
+
+// NewToolResultMessage builds a properly-shaped tool-result message
+// from the agent layer. Centralizing the construction here keeps every
+// caller in lock-step: ToolCallID always set, role always "tool",
+// IsError/ErrorCode coherent with whatever the executor reported.
+func NewToolResultMessage(toolCallID, content string, isError bool, errorCode string) Message {
+	return Message{
+		Role:       "tool",
+		Content:    content,
+		ToolCallID: toolCallID,
+		IsError:    isError,
+		ErrorCode:  errorCode,
+	}
 }
 
 // IsValid valida se a mensagem tem um papel e conteúdo válidos.

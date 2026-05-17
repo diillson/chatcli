@@ -2379,15 +2379,54 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				continue
 			}
 
-			// Caso contrário (sucesso ou erro de execução no meio), enviamos o output acumulado.
-			feedbackForAI := i18n.T("agent.feedback.tool_output", "batch_execution", batchOutputBuilder.String())
+			// Provider-agnostic tool_result emission: when the assistant
+			// produced native tool_calls in this turn AND every call has
+			// a matching structured result, emit one models.Message with
+			// Role="tool" per call (ToolCallID + IsError + ErrorCode
+			// flowing through). Each provider adapter
+			// (claudeai, openai, moonshot, minimax, zai, openrouter)
+			// already knows how to translate role="tool" into its
+			// native shape — Anthropic tool_result with is_error,
+			// OpenAI-family tool message with [ERROR:<code>] marker.
+			//
+			// We keep the legacy concatenated user message ONLY when
+			// the assistant did not produce native tool_calls (text-
+			// mode XML dispatch path), so providers that don't carry
+			// tool_use IDs still see the batch output for context.
+			useStructured := len(nativeToolCalls) > 0 &&
+				len(turnToolResults) == len(nativeToolCalls) &&
+				!batchHasError // mid-batch infra error doesn't produce a full result slice
 
-			// Verifica se precisa de replanejamento
-			if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
-				feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores."
+			if useStructured {
+				for i, res := range turnToolResults {
+					content := res.Output
+					// Per-tool truncation already applied in the loop.
+					a.cli.history = append(a.cli.history,
+						models.NewToolResultMessage(
+							nativeToolCalls[i].ID,
+							content,
+							res.IsError,
+							res.ErrorCode,
+						))
+				}
+				// Optional replanning hint as a side note, kept as a
+				// system-style nudge rather than a malformed user message.
+				if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
+					a.cli.history = append(a.cli.history, models.Message{
+						Role:    "user",
+						Content: "ATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores.",
+					})
+				}
+			} else {
+				// Legacy path: text-mode dispatch or partially-failed batch.
+				// One user message carries everything; provider adapters
+				// see plain text without tool_result block semantics.
+				feedbackForAI := i18n.T("agent.feedback.tool_output", "batch_execution", batchOutputBuilder.String())
+				if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
+					feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores."
+				}
+				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 			}
-
-			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
 			showTurnStats()
 			continue

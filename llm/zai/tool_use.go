@@ -16,6 +16,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/toolshim"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -117,11 +118,12 @@ func buildToolMessages(prompt string, history []models.Message) []interface{} {
 
 		switch role {
 		case "tool":
-			// Tool result message
+			// Tool result message — [ERROR:<code>] marker prepended via
+			// toolshim when the agent layer flagged the result as an error.
 			messages = append(messages, map[string]interface{}{
 				"role":         "tool",
 				"tool_call_id": msg.ToolCallID,
-				"content":      msg.Content,
+				"content":      toolshim.MarkOpenAICompatibleToolError(msg),
 			})
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
