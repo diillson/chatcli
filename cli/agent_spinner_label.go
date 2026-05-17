@@ -6,20 +6,21 @@
 
 package cli
 
-import "fmt"
+import "github.com/diillson/chatcli/i18n"
 
-// defaultSpinnerLabel produces the legacy spinner label shape
-// "EXECUTANDO: <toolName> <subcmd>" used before Item 7. The agent
-// loop falls back to it when the plugin doesn't ship DescriberWithInput
-// (legacy/external plugins) or when DescribeCall returns an empty string
-// for some unusual args shape.
+// defaultSpinnerLabel produces the legacy spinner label used before
+// Item 7. The agent loop falls back to it when the plugin doesn't
+// ship DescriberWithInput (legacy / external plugins) or when
+// DescribeCall returns an empty string for some unusual args shape.
 //
-// Kept as a standalone helper so the spinner-label decision logic can
-// be unit-tested without spinning up an AgentMode.
+// Both the verb and the placeholder for an unknown subcommand are
+// i18n-resolved so the user's locale wins. Kept as a standalone
+// helper so the spinner-label decision logic is unit-testable
+// without spinning up an AgentMode.
 func defaultSpinnerLabel(toolName string, args []string) string {
-	subCmd := "ação"
+	subCmd := i18n.T("agent.spinner.action_placeholder")
 	if len(args) > 0 {
 		subCmd = args[0]
 	}
-	return fmt.Sprintf("EXECUTANDO: %s %s", toolName, subCmd)
+	return i18n.T("agent.spinner.executing", toolName, subCmd)
 }

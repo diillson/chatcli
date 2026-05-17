@@ -885,6 +885,8 @@
   "agent.microcompact.applied": "microcompact: %d truncated, %d summarized, %s freed",
   "agent.queue.new_user_instruction": "New user instruction received",
   "agent.queue.indicator": "(%d queued)",
+  "agent.spinner.executing": "RUNNING: %s %s",
+  "agent.spinner.action_placeholder": "action",
   "slash.help.description": "Returns the chatcli command catalog (slash and @-modifiers).",
   "slash.version.description": "Returns the running chatcli build version and whether an update is available.",
   "plugins.todo.description": "Manage the agent task plan: write the full plan, list current state, or mark one task by id (Claude Code TodoWrite parity)",
