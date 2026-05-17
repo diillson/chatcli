@@ -1128,16 +1128,25 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		default:
 		}
 
-		// In agent mode (not coder), check for type-ahead messages from user
-		if !a.isCoderMode {
-			if userMsg := a.drainStdinToQueue(); userMsg != "" {
-				fmt.Printf("\n  %s\n\n",
-					renderer.Colorize("📨 Nova instrução do usuário recebida", agent.ColorCyan))
-				a.cli.history = append(a.cli.history, models.Message{
-					Role:    "user",
-					Content: userMsg,
-				})
-			}
+		// Check for type-ahead messages from user (works in both /agent and
+		// /coder modes). Lines typed while the LLM was streaming or while a
+		// tool was running get drained into the conversation as a fresh user
+		// instruction on the next turn boundary. The previous behavior gated
+		// this behind !a.isCoderMode, which meant /coder users had no way to
+		// add a follow-up without waiting for the agent to finish — and any
+		// keystrokes they emitted accidentally accumulated in the kernel TTY
+		// buffer waiting to be consumed at the worst possible moment (the
+		// next security prompt). The input guard (Fase 1.1) is what makes it
+		// safe to enable this in /coder: typeahead caught BEFORE a security
+		// prompt is now discarded, so the only thing reaching the queue is
+		// input the user typed clearly between LLM turns.
+		if userMsg := a.drainStdinToQueue(); userMsg != "" {
+			label := i18n.T("agent.queue.new_user_instruction")
+			fmt.Printf("\n  %s\n\n", renderer.Colorize("📨 "+label, agent.ColorCyan))
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: userMsg,
+			})
 		}
 
 		// Microcompact (Level 0): cheap, progressive compaction of OLD tool
@@ -1218,10 +1227,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		turnAgents := 0
 		turnToolCalls := 0
 
-		// Inicia o timer do turno (substitui a animação de "Pensando...")
+		// Inicia o timer do turno (substitui a animação de "Pensando...").
+		// Quando há mensagens enfileiradas (usuário digitou enquanto o LLM
+		// streamava em turn anterior), expõe contador para o usuário saber
+		// que sua entrada foi capturada e será processada após este turn.
 		modelName := a.cli.Client.GetModelName()
 		a.turnTimer.Start(ctx, func(d time.Duration) {
-			fmt.Print(metrics.FormatTimerStatus(d, modelName, "Processando..."))
+			msg := "Processando..."
+			a.cli.messageQueueMu.Lock()
+			queued := len(a.cli.messageQueue)
+			a.cli.messageQueueMu.Unlock()
+			if queued > 0 {
+				msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
+			}
+			fmt.Print(metrics.FormatTimerStatus(d, modelName, msg))
 		})
 
 		turnHistory := buildTurnHistoryWithAnchor()
