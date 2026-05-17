@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.118.0](https://github.com/diillson/chatcli/compare/v1.117.2...v1.118.0) (2026-05-17)
+
+
+### Features
+
+* Claude Code parity tool layer (atomic tools, [@todo](https://github.com/todo), multipatch, schema validation, per-tool policies) ([#922](https://github.com/diillson/chatcli/issues/922)) ([c82ed63](https://github.com/diillson/chatcli/commit/c82ed633fc4a361cc4a4a85b1f69393f08fd4a19))
+* tool layer enterprise refactor (security UX + parallel orchestration + provider-agnostic tool_result) ([#920](https://github.com/diillson/chatcli/issues/920)) ([9da4abf](https://github.com/diillson/chatcli/commit/9da4abfb059c604cc08890b8cdb31fc2b8d51402))
+
 ## [1.117.2](https://github.com/diillson/chatcli/compare/v1.117.1...v1.117.2) (2026-05-15)
 
 
