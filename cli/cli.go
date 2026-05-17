@@ -541,6 +541,29 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		return cli.agentMode.taskTracker
 	}))
 
+	// Wire the policy_manager's capability resolver (Item 4). When a
+	// tool call hits no explicit policy rule AND the plugin advertises
+	// IsReadOnly for those args, auto-allow instead of defaulting to
+	// ActionAsk. @websearch, @webfetch GET, @read, @search, @tree,
+	// @scheduler query/list, @coder read/search/tree all benefit.
+	coder.SetPluginCapabilityResolver(func(toolName, rawArgs string) coder.PluginCapabilityResult {
+		if cli.pluginManager == nil {
+			return coder.PluginCapabilityResult{}
+		}
+		plugin, ok := cli.pluginManager.GetPlugin(toolName)
+		if !ok || plugin == nil {
+			return coder.PluginCapabilityResult{}
+		}
+		// The resolver feeds the args as a single-element slice (the JSON
+		// envelope) so the plugin's IsReadOnly helper sees the same shape
+		// it would see at Execute time.
+		args := []string{rawArgs}
+		return coder.PluginCapabilityResult{
+			Known:    true,
+			ReadOnly: plugins.IsReadOnly(plugin, args),
+		}
+	})
+
 	history, err := cli.historyManager.LoadHistory()
 	if err != nil {
 		cli.logger.Error("Erro ao carregar o histórico", zap.Error(err))

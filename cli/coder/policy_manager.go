@@ -146,6 +146,20 @@ func (pm *PolicyManager) Check(toolName, args string) Action {
 		}
 	}
 
+	// Priority 5: capability gate. When the plugin manager has declared
+	// the tool read-only (via plugins.ReadOnlyAware), auto-allow. This
+	// lets @websearch, @webfetch GET, @read, @search, @tree,
+	// @scheduler query/list run without a security prompt while keeping
+	// every other plugin gated. Failing closed: an unknown plugin or
+	// nil resolver falls through to ActionAsk.
+	if r := currentPluginCapabilityResolver(); r != nil {
+		cap := r(toolName, args)
+		if cap.Known && cap.ReadOnly {
+			pm.lastRule = nil
+			return ActionAllow
+		}
+	}
+
 	pm.lastRule = nil
 	return ActionAsk
 }
