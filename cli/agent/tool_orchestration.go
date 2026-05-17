@@ -22,16 +22,16 @@ import (
 // defaultMaxToolConcurrency caps the number of read-only / concurrency-safe
 // tools that run in parallel within a single batch. Anthropic's reference
 // implementation uses 10; we mirror that as a sane default. Operators can
-// override via CHATCLI_MAX_TOOL_CONCURRENCY.
+// override via CHATCLI_AGENT_MAX_TOOL_CONCURRENCY.
 const defaultMaxToolConcurrency = 10
 
 // MaxToolConcurrency returns the active concurrency budget, reading the
-// CHATCLI_MAX_TOOL_CONCURRENCY environment variable on every call so a
+// CHATCLI_AGENT_MAX_TOOL_CONCURRENCY environment variable on every call so a
 // /config security mutation takes effect immediately. Values <=0 fall back
 // to the default; the upper bound is intentionally not enforced — operators
 // who want 64 concurrent fetches can have them.
 func MaxToolConcurrency() int {
-	if v := strings.TrimSpace(os.Getenv("CHATCLI_MAX_TOOL_CONCURRENCY")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_AGENT_MAX_TOOL_CONCURRENCY")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
@@ -41,14 +41,14 @@ func MaxToolConcurrency() int {
 
 // ParallelToolsEnabled reports whether the orchestrator should partition
 // the batch and run concurrency-safe tools in parallel. Opt-in via
-// CHATCLI_PARALLEL_TOOLS=true while the feature bakes in production
+// CHATCLI_AGENT_PARALLEL_TOOLS=true while the feature bakes in production
 // usage. When false, every tool runs sequentially regardless of its
 // capability flags — preserving the legacy behavior bit-for-bit.
 //
 // Default ON for new installs after Fase 7 acceptance; until then the
 // env var gates the rollout.
 func ParallelToolsEnabled() bool {
-	v := strings.TrimSpace(os.Getenv("CHATCLI_PARALLEL_TOOLS"))
+	v := strings.TrimSpace(os.Getenv("CHATCLI_AGENT_PARALLEL_TOOLS"))
 	if v == "" {
 		return false
 	}

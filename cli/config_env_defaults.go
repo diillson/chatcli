@@ -92,12 +92,15 @@ var envDefaults = map[string]envDefault{
 	"OPENROUTER_PROVIDER_ORDER":  {Value: "(none)", Source: "openrouter client"},
 
 	// ─── Agent: parallelism / orchestration ──────────────────────
-	"CHATCLI_AGENT_PARALLEL_MODE":      {Value: "true", IsBool: true, Source: "agent_mode.go:initMultiAgent"},
-	"CHATCLI_AGENT_MAX_WORKERS":        {Value: "4", Source: "workers.DefaultMaxWorkers"},
-	"CHATCLI_AGENT_WORKER_TIMEOUT":     {Value: "10m", Source: "workers.DefaultWorkerTimeout"},
-	"CHATCLI_AGENT_WORKER_MAX_TURNS":   {Value: "30", Source: "workers.DefaultWorkerMaxTurns"},
-	"CHATCLI_AGENT_SUBAGENT_MAX_DEPTH": {Value: "2", Source: "workers.DefaultSubagentMaxDepth"},
-	"CHATCLI_AGENT_SUBAGENT_MAX_TURNS": {Value: "15", Source: "workers.DefaultSubagentMaxTurns"},
+	"CHATCLI_AGENT_PARALLEL_MODE":        {Value: "true", IsBool: true, Source: "agent_mode.go:initMultiAgent"},
+	"CHATCLI_AGENT_MAX_WORKERS":          {Value: "4", Source: "workers.DefaultMaxWorkers"},
+	"CHATCLI_AGENT_WORKER_TIMEOUT":       {Value: "10m", Source: "workers.DefaultWorkerTimeout"},
+	"CHATCLI_AGENT_WORKER_MAX_TURNS":     {Value: "30", Source: "workers.DefaultWorkerMaxTurns"},
+	"CHATCLI_AGENT_SUBAGENT_MAX_DEPTH":   {Value: "2", Source: "workers.DefaultSubagentMaxDepth"},
+	"CHATCLI_AGENT_SUBAGENT_MAX_TURNS":   {Value: "15", Source: "workers.DefaultSubagentMaxTurns"},
+	"CHATCLI_AGENT_PARALLEL_TOOLS":       {Value: "false", IsBool: true, Source: "agent.ParallelToolsEnabled (Fase 3)"},
+	"CHATCLI_AGENT_MAX_TOOL_CONCURRENCY": {Value: "10", Source: "agent.defaultMaxToolConcurrency (Fase 3)"},
+	"CHATCLI_AGENT_INLINE_CODE_STRICT":   {Value: "false", IsBool: true, Source: "agent.InlineCodeRiskAnalyzer (Fase 1.3)"},
 
 	// ─── Agent: token efficiency ─────────────────────────────────
 	"CHATCLI_AGENT_EARLY_EXIT":       {Value: "true", IsBool: true, Source: "agent_earlyexit.earlyExitEnabled"},

@@ -100,7 +100,7 @@ func TestPartitionToolCalls_ContiguousSafeMerged(t *testing.T) {
 // concurrent-safe calls than the budget allows are split into multiple
 // back-to-back concurrent batches rather than running unbounded.
 func TestPartitionToolCalls_SplitsAtMaxConcurrency(t *testing.T) {
-	t.Setenv("CHATCLI_MAX_TOOL_CONCURRENCY", "3")
+	t.Setenv("CHATCLI_AGENT_MAX_TOOL_CONCURRENCY", "3")
 	safe := PartitionPolicyFunc(func(_ ToolCall) bool { return true })
 
 	var calls []ToolCall
@@ -362,25 +362,25 @@ func TestRunBatch_EmptyCallsReturnsNil(t *testing.T) {
 
 // TestMaxToolConcurrency_EnvOverride confirms the env-var knob.
 func TestMaxToolConcurrency_EnvOverride(t *testing.T) {
-	t.Setenv("CHATCLI_MAX_TOOL_CONCURRENCY", "42")
+	t.Setenv("CHATCLI_AGENT_MAX_TOOL_CONCURRENCY", "42")
 	assert.Equal(t, 42, MaxToolConcurrency())
 }
 
 // TestMaxToolConcurrency_InvalidFallsBack documents that bogus values
 // fall back to the default rather than panicking or yielding 0.
 func TestMaxToolConcurrency_InvalidFallsBack(t *testing.T) {
-	t.Setenv("CHATCLI_MAX_TOOL_CONCURRENCY", "abc")
+	t.Setenv("CHATCLI_AGENT_MAX_TOOL_CONCURRENCY", "abc")
 	assert.Equal(t, defaultMaxToolConcurrency, MaxToolConcurrency())
-	t.Setenv("CHATCLI_MAX_TOOL_CONCURRENCY", "0")
+	t.Setenv("CHATCLI_AGENT_MAX_TOOL_CONCURRENCY", "0")
 	assert.Equal(t, defaultMaxToolConcurrency, MaxToolConcurrency())
-	t.Setenv("CHATCLI_MAX_TOOL_CONCURRENCY", "-5")
+	t.Setenv("CHATCLI_AGENT_MAX_TOOL_CONCURRENCY", "-5")
 	assert.Equal(t, defaultMaxToolConcurrency, MaxToolConcurrency())
 }
 
 // TestParallelToolsEnabled_OffByDefault is the rollout safety net: the
 // feature must default to OFF until Fase 7 acceptance.
 func TestParallelToolsEnabled_OffByDefault(t *testing.T) {
-	t.Setenv("CHATCLI_PARALLEL_TOOLS", "")
+	t.Setenv("CHATCLI_AGENT_PARALLEL_TOOLS", "")
 	assert.False(t, ParallelToolsEnabled())
 }
 
@@ -389,7 +389,7 @@ func TestParallelToolsEnabled_OffByDefault(t *testing.T) {
 func TestParallelToolsEnabled_OnVariants(t *testing.T) {
 	for _, v := range []string{"true", "TRUE", "1", "on", "yes", "YES"} {
 		t.Run(v, func(t *testing.T) {
-			t.Setenv("CHATCLI_PARALLEL_TOOLS", v)
+			t.Setenv("CHATCLI_AGENT_PARALLEL_TOOLS", v)
 			assert.True(t, ParallelToolsEnabled())
 		})
 	}
