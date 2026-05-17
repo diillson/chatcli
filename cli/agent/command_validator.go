@@ -31,7 +31,7 @@ import (
 //  3. extraDenyPatterns — user-supplied denylist via CHATCLI_AGENT_DENYLIST.
 //
 // The shell parsing layer (ShellSegment) feeds (1). The legacy
-// full-line regex pass in (2) is preserved verbatim for zero behavioural
+// full-line regex pass in (2) is preserved verbatim for zero behavioral
 // regression on the existing dangerous-command corpus.
 type CommandValidator struct {
 	logger             *zap.Logger
@@ -183,12 +183,12 @@ func (v *CommandValidator) IsDangerous(cmd string) bool {
 
 // truncateForLog returns a short, single-line excerpt safe for zap fields.
 // Newlines are replaced with spaces and oversize values get an ellipsis.
-func truncateForLog(s string, max int) string {
+func truncateForLog(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= max {
+	if len(s) <= maxLen {
 		return s
 	}
-	return s[:max] + "..."
+	return s[:maxLen] + "..."
 }
 
 // ValidateCommand valida um comando antes da execução
