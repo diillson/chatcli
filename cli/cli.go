@@ -28,6 +28,7 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/quality/lessonq"
+	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/paste"
@@ -364,6 +365,12 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		executionProfile: ProfileNormal,
 	}
 
+	// Wire the security prompt's package-level input guard with our zap
+	// logger so dropped typeahead is logged at DEBUG. Calling this here
+	// (before any tool can fire a confirmation) guarantees every prompt in
+	// the process lifetime uses a logger-aware guard.
+	coder.SetSecurityPromptLogger(logger)
+
 	// Initialize the per-session scratch workspace. This makes
 	// $CHATCLI_AGENT_TMPDIR available to every tool and registers the
 	// scratch + tool-results dirs with the engine / read validator so the
@@ -388,6 +395,19 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
+
+		// Slash-as-tool: register the curated subset of slash commands
+		// (currently /help and /version) as plugins so the LLM can invoke
+		// them via the same native tool dispatch path used by @coder,
+		// @websearch, etc. The bindings live in slash_tool_registry.go +
+		// slash_tool_handlers.go; expanding the set is a deliberate
+		// review-gated decision (see registerBuiltinSlashTools doc).
+		cli.registerBuiltinSlashTools()
+		for _, entry := range AllSlashTools() {
+			if plugin := NewSlashToolPlugin(entry); plugin != nil {
+				pluginMgr.RegisterBuiltinPlugin(plugin)
+			}
+		}
 	}
 
 	cli.configureProviderAndModel()

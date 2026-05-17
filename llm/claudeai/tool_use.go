@@ -209,16 +209,30 @@ func buildClaudeToolMessages(prompt string, history []models.Message) []interfac
 			continue // Handled separately via system blocks
 
 		case "tool":
-			// Tool results in Anthropic format: user message with tool_result content block
+			// Tool results in Anthropic format: user message with a
+			// tool_result content block. When the agent layer marked the
+			// result as IsError, we forward Anthropic's native is_error
+			// field so the model can reason about retryability without
+			// parsing English. ErrorCode is carried as a structured
+			// marker prefix inside content (Anthropic doesn't have a
+			// dedicated error_code wire field, but the model picks up
+			// the [ERROR:<code>] tag reliably as part of caching too).
+			toolResultBlock := map[string]interface{}{
+				"type":        "tool_result",
+				"tool_use_id": msg.ToolCallID,
+				"content":     msg.Content,
+			}
+			if msg.IsError {
+				toolResultBlock["is_error"] = true
+				if msg.ErrorCode != "" {
+					// Prepend a stable marker so the model can detect
+					// the error class even if it ignores is_error.
+					toolResultBlock["content"] = "[ERROR:" + msg.ErrorCode + "] " + msg.Content
+				}
+			}
 			messages = append(messages, map[string]interface{}{
-				"role": "user",
-				"content": []map[string]interface{}{
-					{
-						"type":        "tool_result",
-						"tool_use_id": msg.ToolCallID,
-						"content":     msg.Content,
-					},
-				},
+				"role":    "user",
+				"content": []map[string]interface{}{toolResultBlock},
 			})
 
 		case "assistant":

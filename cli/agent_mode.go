@@ -96,6 +96,19 @@ type AgentMode struct {
 	// no explicit CHATCLI_MAX_PAYLOAD is configured. Prevents the warning
 	// from being emitted every turn.
 	proxyPayloadWarned bool
+
+	// lastTurnToolResults holds the structured outcome of every tool
+	// call executed in the most recent ReAct turn. Populated by the
+	// batch loop alongside the legacy concatenation. Consumed by:
+	//
+	//   - Fase 3 orchestrator: feeds back into the next turn's partition.
+	//   - Fase 5 provider adapters: emit tool_result blocks with
+	//     is_error / errno per call instead of one fused user message.
+	//   - Telemetry: per-tool duration and error_code aggregation.
+	//
+	// Kept on the struct (not a local) so debug commands and tests can
+	// inspect it after a turn completes.
+	lastTurnToolResults []agent.ToolResult
 }
 
 // splitStdinChunk consumes raw bytes from a stdin Read() call and returns
@@ -1128,16 +1141,25 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		default:
 		}
 
-		// In agent mode (not coder), check for type-ahead messages from user
-		if !a.isCoderMode {
-			if userMsg := a.drainStdinToQueue(); userMsg != "" {
-				fmt.Printf("\n  %s\n\n",
-					renderer.Colorize("📨 Nova instrução do usuário recebida", agent.ColorCyan))
-				a.cli.history = append(a.cli.history, models.Message{
-					Role:    "user",
-					Content: userMsg,
-				})
-			}
+		// Check for type-ahead messages from user (works in both /agent and
+		// /coder modes). Lines typed while the LLM was streaming or while a
+		// tool was running get drained into the conversation as a fresh user
+		// instruction on the next turn boundary. The previous behavior gated
+		// this behind !a.isCoderMode, which meant /coder users had no way to
+		// add a follow-up without waiting for the agent to finish — and any
+		// keystrokes they emitted accidentally accumulated in the kernel TTY
+		// buffer waiting to be consumed at the worst possible moment (the
+		// next security prompt). The input guard (Fase 1.1) is what makes it
+		// safe to enable this in /coder: typeahead caught BEFORE a security
+		// prompt is now discarded, so the only thing reaching the queue is
+		// input the user typed clearly between LLM turns.
+		if userMsg := a.drainStdinToQueue(); userMsg != "" {
+			label := i18n.T("agent.queue.new_user_instruction")
+			fmt.Printf("\n  %s\n\n", renderer.Colorize("📨 "+label, agent.ColorCyan))
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: userMsg,
+			})
 		}
 
 		// Microcompact (Level 0): cheap, progressive compaction of OLD tool
@@ -1218,10 +1240,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		turnAgents := 0
 		turnToolCalls := 0
 
-		// Inicia o timer do turno (substitui a animação de "Pensando...")
+		// Inicia o timer do turno (substitui a animação de "Pensando...").
+		// Quando há mensagens enfileiradas (usuário digitou enquanto o LLM
+		// streamava em turn anterior), expõe contador para o usuário saber
+		// que sua entrada foi capturada e será processada após este turn.
 		modelName := a.cli.Client.GetModelName()
 		a.turnTimer.Start(ctx, func(d time.Duration) {
-			fmt.Print(metrics.FormatTimerStatus(d, modelName, "Processando..."))
+			msg := "Processando..."
+			a.cli.messageQueueMu.Lock()
+			queued := len(a.cli.messageQueue)
+			a.cli.messageQueueMu.Unlock()
+			if queued > 0 {
+				msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
+			}
+			fmt.Print(metrics.FormatTimerStatus(d, modelName, msg))
 		})
 
 		turnHistory := buildTurnHistoryWithAnchor()
@@ -1832,6 +1864,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			successCount := 0
 			totalActions := len(toolCalls)
 
+			// turnToolResults captures the per-tool structured outcome
+			// alongside the legacy batchOutputBuilder concatenation. Today
+			// only telemetry consumes it; Fase 3 (parallel orchestration)
+			// and Fase 5 (provider-aware tool_result block emission) will
+			// route this slice through their respective layers. Keeping it
+			// populated unconditionally now means future phases can flip on
+			// without a second pass through this critical loop.
+			turnToolResults := make([]agent.ToolResult, 0, totalActions)
+
 			// Helper: render error message respecting compact mode
 			renderError := func(msg string) {
 				if coderCompact {
@@ -1875,7 +1916,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							break
 						}
 						if action == coder.ActionAsk {
-							decision := coder.PromptSecurityCheck(ctx, tc.Name, tc.Args, a.stdinLines)
+							decision := coder.PromptSecurityCheckGuarded(ctx, tc.Name, tc.Args, a.stdinLines)
 							pattern := coder.GetSuggestedPattern(tc.Name, tc.Args)
 							switch decision {
 							case coder.DecisionAllowAlways:
@@ -2267,6 +2308,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 				renderPlanProgress()
 
+				// Capture the structured outcome for downstream phases.
+				// Duration is wall-clock for this single tool — Fase 3 will
+				// also use it to size the per-batch concurrency budget.
+				structured := agent.WrapLegacyOutput(toolOutput, execErr)
+				structured.Duration = time.Since(toolStartTime)
+				turnToolResults = append(turnToolResults, structured)
+
 				// Acumula o resultado para a LLM
 				batchOutputBuilder.WriteString(fmt.Sprintf("--- Resultado da Ação %d (%s) ---\n", i+1, toolName))
 
@@ -2293,6 +2341,28 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 			}
 
+			// Log per-batch structured outcome at DEBUG so operators can
+			// trace error-code distribution and timing without parsing the
+			// LLM-facing concatenation. The slice is also surfaced via
+			// a.lastTurnToolResults for in-process consumers (the provider
+			// adapter pipeline in Fase 5).
+			a.lastTurnToolResults = turnToolResults
+			if a.logger != nil && len(turnToolResults) > 0 {
+				var errCodes []string
+				var totalDur time.Duration
+				for _, r := range turnToolResults {
+					if r.IsError {
+						errCodes = append(errCodes, r.ErrorCode)
+					}
+					totalDur += r.Duration
+				}
+				a.logger.Debug("tool batch completed",
+					zap.Int("total", len(turnToolResults)),
+					zap.Int("success", successCount),
+					zap.Strings("error_codes", errCodes),
+					zap.Duration("total_duration", totalDur))
+			}
+
 			// 4. Renderiza rodapé do lote
 			if totalActions > 1 {
 				if coderCompact {
@@ -2309,15 +2379,54 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				continue
 			}
 
-			// Caso contrário (sucesso ou erro de execução no meio), enviamos o output acumulado.
-			feedbackForAI := i18n.T("agent.feedback.tool_output", "batch_execution", batchOutputBuilder.String())
+			// Provider-agnostic tool_result emission: when the assistant
+			// produced native tool_calls in this turn AND every call has
+			// a matching structured result, emit one models.Message with
+			// Role="tool" per call (ToolCallID + IsError + ErrorCode
+			// flowing through). Each provider adapter
+			// (claudeai, openai, moonshot, minimax, zai, openrouter)
+			// already knows how to translate role="tool" into its
+			// native shape — Anthropic tool_result with is_error,
+			// OpenAI-family tool message with [ERROR:<code>] marker.
+			//
+			// We keep the legacy concatenated user message ONLY when
+			// the assistant did not produce native tool_calls (text-
+			// mode XML dispatch path), so providers that don't carry
+			// tool_use IDs still see the batch output for context.
+			useStructured := len(nativeToolCalls) > 0 &&
+				len(turnToolResults) == len(nativeToolCalls) &&
+				!batchHasError // mid-batch infra error doesn't produce a full result slice
 
-			// Verifica se precisa de replanejamento
-			if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
-				feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores."
+			if useStructured {
+				for i, res := range turnToolResults {
+					content := res.Output
+					// Per-tool truncation already applied in the loop.
+					a.cli.history = append(a.cli.history,
+						models.NewToolResultMessage(
+							nativeToolCalls[i].ID,
+							content,
+							res.IsError,
+							res.ErrorCode,
+						))
+				}
+				// Optional replanning hint as a side note, kept as a
+				// system-style nudge rather than a malformed user message.
+				if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
+					a.cli.history = append(a.cli.history, models.Message{
+						Role:    "user",
+						Content: "ATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores.",
+					})
+				}
+			} else {
+				// Legacy path: text-mode dispatch or partially-failed batch.
+				// One user message carries everything; provider adapters
+				// see plain text without tool_result block semantics.
+				feedbackForAI := i18n.T("agent.feedback.tool_output", "batch_execution", batchOutputBuilder.String())
+				if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
+					feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores."
+				}
+				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 			}
-
-			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
 
 			showTurnStats()
 			continue
