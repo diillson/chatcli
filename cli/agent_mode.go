@@ -96,6 +96,19 @@ type AgentMode struct {
 	// no explicit CHATCLI_MAX_PAYLOAD is configured. Prevents the warning
 	// from being emitted every turn.
 	proxyPayloadWarned bool
+
+	// lastTurnToolResults holds the structured outcome of every tool
+	// call executed in the most recent ReAct turn. Populated by the
+	// batch loop alongside the legacy concatenation. Consumed by:
+	//
+	//   - Fase 3 orchestrator: feeds back into the next turn's partition.
+	//   - Fase 5 provider adapters: emit tool_result blocks with
+	//     is_error / errno per call instead of one fused user message.
+	//   - Telemetry: per-tool duration and error_code aggregation.
+	//
+	// Kept on the struct (not a local) so debug commands and tests can
+	// inspect it after a turn completes.
+	lastTurnToolResults []agent.ToolResult
 }
 
 // splitStdinChunk consumes raw bytes from a stdin Read() call and returns
@@ -1851,6 +1864,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			successCount := 0
 			totalActions := len(toolCalls)
 
+			// turnToolResults captures the per-tool structured outcome
+			// alongside the legacy batchOutputBuilder concatenation. Today
+			// only telemetry consumes it; Fase 3 (parallel orchestration)
+			// and Fase 5 (provider-aware tool_result block emission) will
+			// route this slice through their respective layers. Keeping it
+			// populated unconditionally now means future phases can flip on
+			// without a second pass through this critical loop.
+			turnToolResults := make([]agent.ToolResult, 0, totalActions)
+
 			// Helper: render error message respecting compact mode
 			renderError := func(msg string) {
 				if coderCompact {
@@ -2286,6 +2308,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 				renderPlanProgress()
 
+				// Capture the structured outcome for downstream phases.
+				// Duration is wall-clock for this single tool — Fase 3 will
+				// also use it to size the per-batch concurrency budget.
+				structured := agent.WrapLegacyOutput(toolOutput, execErr)
+				structured.Duration = time.Since(toolStartTime)
+				turnToolResults = append(turnToolResults, structured)
+
 				// Acumula o resultado para a LLM
 				batchOutputBuilder.WriteString(fmt.Sprintf("--- Resultado da Ação %d (%s) ---\n", i+1, toolName))
 
@@ -2310,6 +2339,28 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					a.toolCallsExecd++
 					turnToolCalls++
 				}
+			}
+
+			// Log per-batch structured outcome at DEBUG so operators can
+			// trace error-code distribution and timing without parsing the
+			// LLM-facing concatenation. The slice is also surfaced via
+			// a.lastTurnToolResults for in-process consumers (the provider
+			// adapter pipeline in Fase 5).
+			a.lastTurnToolResults = turnToolResults
+			if a.logger != nil && len(turnToolResults) > 0 {
+				var errCodes []string
+				var totalDur time.Duration
+				for _, r := range turnToolResults {
+					if r.IsError {
+						errCodes = append(errCodes, r.ErrorCode)
+					}
+					totalDur += r.Duration
+				}
+				a.logger.Debug("tool batch completed",
+					zap.Int("total", len(turnToolResults)),
+					zap.Int("success", successCount),
+					zap.Strings("error_codes", errCodes),
+					zap.Duration("total_duration", totalDur))
 			}
 
 			// 4. Renderiza rodapé do lote
