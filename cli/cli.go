@@ -28,6 +28,7 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/quality/lessonq"
+	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/paste"
@@ -363,6 +364,12 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		processingDone:   make(chan struct{}),
 		executionProfile: ProfileNormal,
 	}
+
+	// Wire the security prompt's package-level input guard with our zap
+	// logger so dropped typeahead is logged at DEBUG. Calling this here
+	// (before any tool can fire a confirmation) guarantees every prompt in
+	// the process lifetime uses a logger-aware guard.
+	coder.SetSecurityPromptLogger(logger)
 
 	// Initialize the per-session scratch workspace. This makes
 	// $CHATCLI_AGENT_TMPDIR available to every tool and registers the
