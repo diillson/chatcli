@@ -153,8 +153,9 @@ func (pm *PolicyManager) Check(toolName, args string) Action {
 	// every other plugin gated. Failing closed: an unknown plugin or
 	// nil resolver falls through to ActionAsk.
 	if r := currentPluginCapabilityResolver(); r != nil {
-		cap := r(toolName, args)
-		if cap.Known && cap.ReadOnly {
+		// capRes (not cap) to avoid shadowing Go's builtin cap function.
+		capRes := r(toolName, args)
+		if capRes.Known && capRes.ReadOnly {
 			pm.lastRule = nil
 			return ActionAllow
 		}

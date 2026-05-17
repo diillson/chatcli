@@ -91,7 +91,11 @@ func ValidateArgs(plugin Plugin, rawJSON string) error {
 
 	var parsed interface{}
 	if err := json.Unmarshal([]byte(rawJSON), &parsed); err != nil {
-		return fmt.Errorf("%w: malformed JSON: %v", ErrInvalidArgs, err)
+		// Wrap both ErrInvalidArgs (for errors.Is classification) AND the
+		// underlying json error (so the operator/LLM sees the parse
+		// position). errorlint requires %w (not %v) on the second
+		// wrapped error too.
+		return fmt.Errorf("%w: malformed JSON: %w", ErrInvalidArgs, err)
 	}
 
 	if err := compiled.Validate(parsed); err != nil {

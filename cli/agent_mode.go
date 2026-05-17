@@ -533,10 +533,10 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// pressed Enter on /coder or /agent — go-prompt's teardown can
 	// leave the controlling TTY in raw mode (no echo, ICRNL off),
 	// meaning any character typed during the spinner doesn't appear
-	// on screen even though the kernel IS capturing it. Resetting to
-	// sane terminal state up front ensures the user SEES what they
+	// on screen even though the kernel IS capturing it. Restoring
+	// cooked terminal state up front ensures the user SEES what they
 	// type while the LLM streams.
-	coder.ResetTTYToSane()
+	coder.RestoreCookedMode()
 
 	// --- 1. CONFIGURAÇÃO E PREPARAÇÃO DO AGENTE ---
 	maxTurns := AgentMaxTurns()
