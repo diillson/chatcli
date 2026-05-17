@@ -73,7 +73,7 @@ func (p *BuiltinSearchPlugin) Schema() string {
 				},
 				"examples": []string{
 					`{"term":"Login","dir":"./src"}`,
-					`{"term":"NewHandler\\(.*\\)","include":"*.go"}`,
+					`{"term":"TODO\\(.*\\)","include":"*.go"}`,
 				},
 			},
 		},
