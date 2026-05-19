@@ -636,25 +636,33 @@ func (r *UIRenderer) RenderStreamBoxEnd(color string) {
 // CompactToolStart renders a tool call start in compact format:
 //
 //	↻ Read(main.go)
+//
+// Tool label in cyan (was gray) so the tool identity stands out from
+// the surrounding plain-gray prose. Without this, a "↻ Read(main.go)"
+// looked identical to a free-text note in the timeline.
 func (r *UIRenderer) CompactToolStart(toolLabel string) {
 	fmt.Printf("  %s %s\n",
 		r.Colorize("↻", ColorCyan),
-		r.Colorize(toolLabel, ColorGray))
+		r.Colorize(toolLabel, ColorCyan))
 }
 
 // CompactToolDone renders a completed tool call in compact format:
 //
 //	✓ Read(main.go) 1.2s
+//
+// Tool label in cyan to match CompactToolStart; the green check + cyan
+// duration already mark this as a result so the label color reinforces
+// the tool identity rather than competing with the success signal.
 func (r *UIRenderer) CompactToolDone(toolLabel string, duration string, isError bool) {
 	if isError {
 		fmt.Printf("  %s %s %s\n",
 			r.Colorize("✗", ColorYellow),
-			r.Colorize(toolLabel, ColorGray),
+			r.Colorize(toolLabel, ColorCyan),
 			r.Colorize(duration, ColorYellow))
 	} else {
 		fmt.Printf("  %s %s %s\n",
 			r.Colorize("✓", ColorGreen+ColorBold),
-			r.Colorize(toolLabel, ColorGray),
+			r.Colorize(toolLabel, ColorCyan),
 			r.Colorize(duration, ColorCyan))
 	}
 }
@@ -722,6 +730,49 @@ func (r *UIRenderer) CompactMultiLine(icon, label, text string, color string, ma
 		fmt.Printf("    %s\n", r.Colorize(trimmed, ColorGray))
 		shown++
 	}
+}
+
+// CompactAssistantText renders the assistant's free-form text in the
+// compact timeline. Distinct from CompactLine: the text uses the
+// terminal's default foreground (ColorReset) so the assistant's actual
+// answer stands out from the surrounding gray tool prose. Without
+// this, in coder-compact mode the answer was visually indistinguishable
+// from "Read(main.go)" lines and tool result excerpts — all the same
+// ColorGray weight. Multi-line answers are wrapped, preserving the
+// timeline indentation and dropping empty lines at the edges.
+func (r *UIRenderer) CompactAssistantText(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	icon := r.Colorize("◆", ColorCyan)
+	for i, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimRight(line, " \t")
+		if i == 0 {
+			fmt.Printf("  %s %s\n", icon, r.Colorize(trimmed, ColorReset))
+			continue
+		}
+		// continuation: align under the first line's text column
+		fmt.Printf("    %s\n", r.Colorize(trimmed, ColorReset))
+	}
+}
+
+// EchoUserInput re-prints a line the user just submitted at the coder-
+// mode interactive prompt, in green with a ❯ marker. The kernel echo
+// during line-editing is uncolored, and once the line is committed it
+// scrolls into history alongside gray tool lines and gray reasoning
+// summaries — making it hard to tell at a glance where the user's
+// instruction was. This persistent echo gives the user's directives a
+// distinct visual lane.
+func (r *UIRenderer) EchoUserInput(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	fmt.Printf("  %s %s\n",
+		r.Colorize("❯", ColorGreen+ColorBold),
+		r.Colorize(text, ColorGreen),
+	)
 }
 
 // CompactError renders an error inline.
