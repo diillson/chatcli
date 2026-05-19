@@ -95,41 +95,48 @@ func TestEnd_IsIdempotent(t *testing.T) {
 	require.NoError(t, u.End(), "second End after Begin/End is a no-op")
 }
 
-// TestUpdateStatus_DrawsAtStatusRow walks the redraw sequence on a
-// captured buffer. The status row for a 24-row terminal is 23, and
-// the sequence must be: save cursor, move to (23,1), clear line,
-// write the message, restore cursor — in that order. Order matters
-// because a misplaced save would capture the post-redraw cursor
-// position and the restore would land in the wrong band.
-func TestUpdateStatus_DrawsAtStatusRow(t *testing.T) {
+// TestUpdateStatus_DrawsAtStatusRowThenSnapsToInputRow walks the
+// new redraw sequence: move to status row, clear, write message,
+// then move to the input row at the column PaintInput last
+// recorded. Earlier versions used ESC 7 / ESC 8 save/restore but
+// the xterm.js-based Hyper terminal honors those inconsistently;
+// the explicit MoveCursor approach works everywhere CUP works
+// (which is every VT100-derived emulator).
+func TestUpdateStatus_DrawsAtStatusRowThenSnapsToInputRow(t *testing.T) {
 	var buf bytes.Buffer
 	u := New(&buf)
 	require.NoError(t, u.Begin(24, 80))
+
+	// Simulate a PaintInput having recorded a cursor column.
+	// Without this, UpdateStatus falls back to "prompt + 1" which
+	// is the right default but not what we want to assert here.
+	u.lastInputCol.Store(7)
+
 	buf.Reset() // discard the Begin bytes; we only care about the status redraw
 
 	require.NoError(t, u.UpdateStatus("⠹ working"))
 
 	got := buf.String()
-	// Save → Move → Clear → Message → Restore. Asserting indexes
-	// instead of an exact-string match keeps the test robust to
-	// future additions to the status sequence (e.g. an attribute
-	// reset prefix) while still locking the protocol order.
-	saveIdx := strings.Index(got, "\x1b7")
-	moveIdx := strings.Index(got, "\x1b[23;1H")
+	moveStatus := strings.Index(got, "\x1b[23;1H")  // status row = rows-1
 	clearIdx := strings.Index(got, "\x1b[2K")
 	msgIdx := strings.Index(got, "⠹ working")
-	restoreIdx := strings.Index(got, "\x1b8")
+	moveBack := strings.Index(got, "\x1b[24;7H") // input row = rows, col from lastInputCol
 
-	require.NotEqual(t, -1, saveIdx, "missing SaveCursor")
-	require.NotEqual(t, -1, moveIdx, "missing MoveCursor to status row")
+	require.NotEqual(t, -1, moveStatus, "missing MoveCursor to status row")
 	require.NotEqual(t, -1, clearIdx, "missing ClearLine")
 	require.NotEqual(t, -1, msgIdx, "missing status message body")
-	require.NotEqual(t, -1, restoreIdx, "missing RestoreCursor")
+	require.NotEqual(t, -1, moveBack, "missing MoveCursor back to input row")
 
-	assert.Less(t, saveIdx, moveIdx)
-	assert.Less(t, moveIdx, clearIdx)
+	// Order: move to status → clear → write → move back to input.
+	assert.Less(t, moveStatus, clearIdx)
 	assert.Less(t, clearIdx, msgIdx)
-	assert.Less(t, msgIdx, restoreIdx)
+	assert.Less(t, msgIdx, moveBack)
+
+	// Crucially, NO save/restore sequences in the wire output.
+	// If ESC 7 / 8 leak back in, terminals that ignore them would
+	// regress to the cascading-spinner behavior we just fixed.
+	assert.NotContains(t, got, "\x1b7", "must not emit ESC 7 (DECSC) — unreliable on xterm.js")
+	assert.NotContains(t, got, "\x1b8", "must not emit ESC 8 (DECRC) — unreliable on xterm.js")
 }
 
 // TestUpdateStatus_NoOpWhenInactive matches the documented "drop
@@ -195,11 +202,15 @@ func TestUpdateStatus_ConcurrentCallsAreSerialized(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Every paint emits exactly one SaveCursor (\x1b7) followed by
-	// one RestoreCursor (\x1b8). If serialization is broken the
-	// counts diverge — a missing pair would mean a paint stomped
-	// on another mid-sequence.
+	// Every paint emits exactly one move-to-status (CUP to row
+	// 23 col 1) and one move-back-to-input (CUP to row 24). If
+	// serialization is broken the counts diverge — a missing
+	// move-back would mean a paint stomped on another mid-
+	// sequence, leaving subsequent agent output to land on the
+	// status row.
 	got := buf.String()
-	assert.Equal(t, strings.Count(got, "\x1b7"), strings.Count(got, "\x1b8"),
-		"every save must be matched by a restore — broken serialization corrupts that 1:1")
+	statusMoves := strings.Count(got, "\x1b[23;1H")
+	inputMoves := strings.Count(got, "\x1b[24;")
+	assert.Equal(t, statusMoves, inputMoves,
+		"every move-to-status must be matched by a move-back-to-input — broken serialization corrupts that 1:1")
 }

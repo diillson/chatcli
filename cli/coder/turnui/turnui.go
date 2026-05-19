@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 )
 
 // TurnUI is the lifecycle handle for one /coder turn. It owns the
@@ -68,6 +69,17 @@ type TurnUI struct {
 	// terminal session.
 	raw   *rawState
 	rawFd int
+
+	// lastInputCol is the visual column where the input cursor
+	// last landed (1-based, including the InputPrompt width and
+	// the buffer cursor offset). Updated by PaintInput every time
+	// it repaints; read by UpdateStatus so the post-status
+	// redraw can reposition the cursor explicitly via MoveCursor
+	// instead of relying on ESC 7 / ESC 8 (DECSC/DECRC), which
+	// the xterm.js-based Hyper terminal honors inconsistently.
+	// Atomic so the readline goroutine (PaintInput writer) and
+	// the timer goroutine (UpdateStatus reader) don't race.
+	lastInputCol atomic.Int32
 }
 
 // New constructs a TurnUI bound to the given writer. The writer is
@@ -271,11 +283,16 @@ type RunConfig struct {
 // fallback is in effect (the timer callback can blindly call
 // UpdateStatus without first checking IsActive).
 //
-// The redraw sequence saves the cursor, jumps to the status row,
-// clears the line, writes the message, and restores the cursor.
-// SaveCursor/RestoreCursor uses the DEC ESC 7 / ESC 8 pair (see
-// region.go) because the CSI s/u variants are unreliable on the
-// terminals where this branch was first reported broken.
+// The redraw sequence is "explicit cursor": jump to the status row,
+// clear the line, write the message, then jump back to the input
+// row at the column PaintInput last left it in. Earlier versions
+// used ESC 7 / ESC 8 (DEC save/restore cursor) but the xterm.js-
+// based Hyper terminal honors those inconsistently — the cursor
+// would not snap back to the input, leaving every subsequent
+// agent print landing on the status row and creating the "overlap
+// and gap" symptoms reported in the field. Tracking the input
+// position ourselves and reissuing MoveCursor is portable to every
+// terminal that supports CUP (which is all of them).
 func (t *TurnUI) UpdateStatus(msg string) error {
 	t.stateMu.Lock()
 	if !t.active {
@@ -289,7 +306,17 @@ func (t *TurnUI) UpdateStatus(msg string) error {
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
 
-	return paintStatus(t.out, layout, msg)
+	if err := paintStatusInline(t.out, layout, msg); err != nil {
+		return err
+	}
+	col := int(t.lastInputCol.Load())
+	if col <= 0 {
+		// No PaintInput has fired yet — park at the prompt
+		// column (just past "❯ ") so the input row at least has
+		// the cursor in a sensible default position.
+		col = len(InputPrompt) + 1
+	}
+	return MoveCursor(t.out, layout.InputRow, col)
 }
 
 // Refresh repaints the cached status message. Used after a SIGWINCH
@@ -313,7 +340,17 @@ func (t *TurnUI) Refresh() error {
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
 
-	return paintStatus(t.out, layout, msg)
+	if err := paintStatusInline(t.out, layout, msg); err != nil {
+		return err
+	}
+	// Move cursor back to where PaintInput last left it. See the
+	// long-form comment in UpdateStatus for why this is explicit
+	// (lastInputCol) rather than ESC 7 / 8 save/restore.
+	col := int(t.lastInputCol.Load())
+	if col <= 0 {
+		col = len(InputPrompt) + 1
+	}
+	return MoveCursor(t.out, layout.InputRow, col)
 }
 
 // IsActive reports whether Begin has succeeded and End has not yet
@@ -516,25 +553,32 @@ func (t *TurnUI) PaintInput(buf *LineBuffer) error {
 	// when the user navigated mid-line, and Insert would appear
 	// to add characters at the end instead of where the cursor
 	// logically is.
-	return MoveCursor(t.out, layout.InputRow, 2+buf.Cursor()+1)
-}
-
-// paintStatus is the bare-bytes status redraw. Pulled out so tests
-// can exercise the sequence without juggling locks. The function
-// assumes the caller holds writeMu — concurrent callers would
-// interleave save/restore and corrupt the cursor state.
-func paintStatus(w io.Writer, layout Layout, msg string) error {
-	if err := SaveCursor(w); err != nil {
+	col := 2 + buf.Cursor() + 1
+	if err := MoveCursor(t.out, layout.InputRow, col); err != nil {
 		return err
 	}
+	// Record where we left the cursor so UpdateStatus (which
+	// runs on the timer goroutine) can snap back here after
+	// repainting the status row, without relying on ESC 7 / 8
+	// save/restore — which the xterm.js-based Hyper terminal
+	// honors inconsistently.
+	t.lastInputCol.Store(int32(col)) // #nosec G115 -- bounded by terminal width.
+	return nil
+}
+
+// paintStatusInline writes the status content at the dedicated row
+// and leaves the cursor at the end of that line. UpdateStatus is
+// responsible for moving the cursor back to the input row (via
+// MoveCursor + lastInputCol) after this returns. Pulled out so
+// tests can exercise the wire format independently of the cursor-
+// restore step.
+func paintStatusInline(w io.Writer, layout Layout, msg string) error {
 	if err := MoveCursor(w, layout.StatusRow, 1); err != nil {
 		return err
 	}
 	if err := ClearLine(w); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprint(w, msg); err != nil {
-		return err
-	}
-	return RestoreCursor(w)
+	_, err := fmt.Fprint(w, msg)
+	return err
 }

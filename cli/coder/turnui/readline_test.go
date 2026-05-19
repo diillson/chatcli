@@ -284,11 +284,13 @@ func TestRunReadLine_RejectsMissingDeps(t *testing.T) {
 	assert.Contains(t, err.Error(), "Reader and Painter")
 }
 
-// TestPaintInput_DrawsPromptOnInputRow asserts the live painter
-// (TurnUI.PaintInput) writes the expected sequence: move to input
-// row, clear it, write prompt + buffer. No save/restore — the
-// cursor is supposed to live on the input row.
-func TestPaintInput_DrawsPromptOnInputRow(t *testing.T) {
+// TestPaintInput_DrawsPromptOnInputRowAndRecordsCursor asserts the
+// live painter (TurnUI.PaintInput) writes the expected sequence:
+// move to input row, clear it, write prompt + buffer, then move the
+// cursor to the buffer's logical insertion column AND record that
+// column in lastInputCol so UpdateStatus can snap back to it later
+// without depending on ESC 7 / 8 save/restore.
+func TestPaintInput_DrawsPromptOnInputRowAndRecordsCursor(t *testing.T) {
 	var buf bytes.Buffer
 	u := New(&buf)
 	require.NoError(t, u.Begin(24, 80))
@@ -306,6 +308,12 @@ func TestPaintInput_DrawsPromptOnInputRow(t *testing.T) {
 	assert.Contains(t, got, InputPrompt+"fix bar.go", "prompt + buffer contents written")
 	assert.NotContains(t, got, "\x1b7", "input paint must NOT save the cursor")
 	assert.NotContains(t, got, "\x1b8", "input paint must NOT restore the cursor")
+
+	// "❯ " is 2 visible columns; buffer "fix bar.go" is 10
+	// runes; final cursor column is 2 + 10 + 1 = 13 (1-based
+	// past the last glyph, where the next keystroke inserts).
+	assert.Equal(t, int32(13), u.lastInputCol.Load(),
+		"lastInputCol must reflect promptWidth + cursorOffset + 1 so UpdateStatus can restore the cursor")
 }
 
 // TestPaintInput_NoOpWhenInactive matches paintStatus's behavior.
