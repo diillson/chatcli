@@ -7,7 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.23.2
 	go.uber.org/zap v1.28.0
-	google.golang.org/grpc v1.81.0
+	google.golang.org/grpc v1.81.1
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.36.1
 	k8s.io/apimachinery v0.36.1
