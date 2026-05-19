@@ -7,16 +7,20 @@
 package turnui
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 )
 
 // TurnUI is the lifecycle handle for one /coder turn. It owns the
-// terminal's scroll region, status row, and (in later phases) the raw
-// stdin loop. Phase A wires only the scroll-region machinery — the
-// content band and the status row are usable, but input still goes
-// through the cooked-mode kernel echo on the input row.
+// terminal's scroll region, status row, and the raw stdin input
+// loop. The split-pane UX comes from three coordinated layers:
+// DECSTBM scroll region confines agent output to the upper band,
+// raw-mode stdin lets the mini-readline own the input row without
+// kernel echo interference, and a save/restore cursor dance keeps
+// the spinner updates from disturbing the input cursor.
 //
 // Construction is always cheap and side-effect free; Begin is what
 // actually touches the terminal. End is idempotent and safe to call
@@ -56,6 +60,14 @@ type TurnUI struct {
 	// requiring the caller to re-send the current text. Mutated
 	// under stateMu, read under stateMu by Refresh.
 	lastStatus string
+
+	// raw holds the cooked-mode termios snapshot captured when
+	// BeginInteractive enters raw mode. Restored on End so the
+	// terminal returns to its pre-/coder state — leaving raw mode
+	// set would break every subsequent command in the same
+	// terminal session.
+	raw   *rawState
+	rawFd int
 }
 
 // New constructs a TurnUI bound to the given writer. The writer is
@@ -107,12 +119,46 @@ func (t *TurnUI) Begin(rows, cols int) error {
 	return nil
 }
 
-// End restores the default scroll region and parks the cursor on a
-// fresh line below the input row. Safe to call when the TurnUI is
+// BeginInteractive is the full-featured entry point: it does what
+// Begin does AND puts the given file descriptor into raw mode so the
+// mini-readline can own keystrokes. Use this when the agent loop
+// actually wants the split UI; use Begin alone in tests that only
+// exercise the region/status machinery.
+//
+// On any failure (invalid layout, MakeRaw error) the TurnUI is left
+// inert with no terminal traffic emitted, mirroring Begin's contract.
+// The caller can fall back to the legacy renderer without a cleanup
+// step. A nil return from BeginInteractive establishes the invariant
+// that End MUST be called to restore both the region and raw mode.
+func (t *TurnUI) BeginInteractive(rows, cols, fd int) error {
+	if err := t.Begin(rows, cols); err != nil {
+		return err
+	}
+	raw, err := enterRawMode(fd)
+	if err != nil {
+		// Unwind the region so the terminal is whole again.
+		_ = t.End()
+		return fmt.Errorf("turnui: enter raw mode: %w", err)
+	}
+	t.stateMu.Lock()
+	t.raw = raw
+	t.rawFd = fd
+	t.stateMu.Unlock()
+	return nil
+}
+
+// End restores the default scroll region, parks the cursor on a
+// fresh line below the input row, and restores the cooked-mode TTY
+// if BeginInteractive set raw mode. Safe to call when the TurnUI is
 // not active (returns nil immediately) — this lets callers defer
 // End right after construction without checking whether Begin ever
 // succeeded. End never returns an error from "already ended"; only
-// terminal write failures are surfaced.
+// terminal write failures and TTY restore failures are surfaced.
+//
+// The TWO cleanups run unconditionally in sequence: even if the
+// region restore fails, raw mode is still restored. Leaking raw mode
+// is the worse failure mode by far — the user's next bash command
+// would have no echo and no line editing.
 //
 // After End the TurnUI may be re-Begin'd for a subsequent turn. The
 // instance is reusable; nothing in TurnUI assumes single-shot.
@@ -123,14 +169,71 @@ func (t *TurnUI) End() error {
 		return nil
 	}
 	layout := t.layout
+	raw := t.raw
+	rawFd := t.rawFd
 	t.active = false
 	t.lastStatus = ""
+	t.raw = nil
+	t.rawFd = 0
 	t.stateMu.Unlock()
 
 	t.writeMu.Lock()
-	defer t.writeMu.Unlock()
+	regionErr := ExitRegion(t.out, layout)
+	t.writeMu.Unlock()
 
-	return ExitRegion(t.out, layout)
+	rawErr := raw.restore(rawFd)
+
+	// Raw mode failure is the higher-severity miss — surface it
+	// first so the caller sees the worst thing that happened.
+	if rawErr != nil {
+		return fmt.Errorf("turnui: restore raw mode: %w", rawErr)
+	}
+	return regionErr
+}
+
+// Run is the convenience entry point that wires BeginInteractive +
+// RunReadLine + End together for the typical agent-loop usage:
+//
+//	ui := turnui.New(os.Stdout)
+//	err := ui.Run(ctx, turnui.RunConfig{
+//	    Rows: h, Cols: w,
+//	    OnSubmit: func(line string) { … push to agent queue … },
+//	})
+//
+// The function blocks until the input loop ends (Ctrl+D, ctx cancel,
+// or read error) and guarantees End fires exactly once via defer.
+// Errors from any phase are wrapped so the caller can distinguish
+// activation failures (fall back) from runtime failures (already in
+// the split UI, must restore before reporting).
+func (t *TurnUI) Run(ctx context.Context, cfg RunConfig) error {
+	if err := t.BeginInteractive(cfg.Rows, cfg.Cols, cfg.StdinFD); err != nil {
+		return err
+	}
+	defer func() { _ = t.End() }()
+
+	reader := cfg.Reader
+	if reader == nil {
+		reader = os.Stdin
+	}
+
+	return RunReadLine(ctx, ReadLineConfig{
+		Reader:   reader,
+		Painter:  t,
+		OnSubmit: cfg.OnSubmit,
+		OnCancel: cfg.OnCancel,
+	})
+}
+
+// RunConfig bundles the inputs Run needs. The Reader field is
+// optional and defaults to os.Stdin — tests inject a scripted reader
+// to drive the loop without a TTY.
+type RunConfig struct {
+	Rows     int
+	Cols     int
+	StdinFD  int
+	Reader   io.Reader
+	OnSubmit func(line string)
+	OnCancel func()
 }
 
 // UpdateStatus paints msg on the dedicated status row. If the TurnUI
@@ -201,6 +304,43 @@ func (t *TurnUI) Layout() Layout {
 	t.stateMu.Lock()
 	defer t.stateMu.Unlock()
 	return t.layout
+}
+
+// InputPrompt is the prefix that appears on the input row before the
+// user's typed text. Hard-coded for Phase B; future phases may make
+// it user-configurable. Chosen to match the visual idiom used by chat
+// mode's go-prompt prefix so users do not have to context-switch.
+const InputPrompt = "❯ "
+
+// paintInput repaints the input row: cursor to (InputRow, 1), clear,
+// write prompt + buffer contents, leave cursor at the end so the next
+// keystroke echoes immediately after the last visible glyph. Required
+// by the inputPainter interface that RunReadLine uses.
+//
+// Unlike paintStatus, paintInput does NOT save/restore the cursor —
+// the input row IS the cursor's home in the split UI. After this
+// returns the cursor is exactly where the user expects it to be: at
+// the end of their typed text on the input row.
+func (t *TurnUI) paintInput(buf *LineBuffer) error {
+	t.stateMu.Lock()
+	if !t.active {
+		t.stateMu.Unlock()
+		return nil
+	}
+	layout := t.layout
+	t.stateMu.Unlock()
+
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
+
+	if err := MoveCursor(t.out, layout.InputRow, 1); err != nil {
+		return err
+	}
+	if err := ClearLine(t.out); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(t.out, "%s%s", InputPrompt, buf.String())
+	return err
 }
 
 // paintStatus is the bare-bytes status redraw. Pulled out so tests
