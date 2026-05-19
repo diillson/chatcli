@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.118.1](https://github.com/diillson/chatcli/compare/v1.118.0...v1.118.1) (2026-05-19)
+
+
+### Bug Fixes
+
+* **coder:** distinct colors for user input and assistant text in compact UI ([#936](https://github.com/diillson/chatcli/issues/936)) ([671421f](https://github.com/diillson/chatcli/commit/671421fde8ba2e731bc667e0d47d4c3e55f37f0c))
+
 ## [1.118.0](https://github.com/diillson/chatcli/compare/v1.117.2...v1.118.0) (2026-05-17)
 
 
