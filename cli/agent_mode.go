@@ -290,6 +290,41 @@ func (a *AgentMode) stopStdinReader() {
 // split-UI path fall back to legacy automatically — the user gets
 // the old experience instead of a broken terminal.
 func (a *AgentMode) setupInputAndUI(ctx context.Context) func() {
+	// SPLIT UI DISABLED. The DECSTBM + raw-mode approach in
+	// cli/coder/turnui cannot coexist with the agent's existing
+	// rendering: card boxes (╭───╮│  │╰───╯), the security-prompt
+	// confirmation dialog, the multi-line agent dispatch progress
+	// — all of them assume full-screen scroll, write multi-row
+	// content with their own cursor positioning, and break when
+	// clamped inside a scroll region. Every emulator we tried
+	// (Hyper, Terminal.app, iTerm2, GoLand integrated) reproduced
+	// some flavor of "overlap + gap + status sumindo".
+	//
+	// Path forward: a true TUI rewrite (bubbletea, the migration
+	// branch tracked in docs/TUI_MIGRATION_PLAN.md) that owns the
+	// rendering loop end-to-end instead of injecting alt-screen
+	// + region under code that pre-dates it. Until that lands,
+	// every /coder session falls back to the legacy single-line
+	// renderer that has shipped since v1.0.
+	//
+	// The cli/coder/turnui package stays in the tree because the
+	// primitives (region, raw mode, key decoder, line buffer with
+	// cursor, history, alt-screen entry) are still useful inputs
+	// for the bubbletea port. They are buildable, race-clean, and
+	// fully unit-tested in isolation — just nothing in production
+	// calls Begin / Run today.
+	_ = ctx       // accepted for signature stability; unused in legacy path
+	_ = turnui.DetectEnvironment
+	a.startStdinReader()
+	return a.stopStdinReader
+}
+
+// setupInputAndUI_turnui_DISABLED was the activation gate for the
+// split UI. Kept as a separate (dead) function so the diff is small
+// when the bubbletea-based rewrite is ready to wire it back in.
+//
+//nolint:unused // intentionally retained for the future TUI port.
+func (a *AgentMode) setupInputAndUI_turnui_DISABLED(ctx context.Context) func() {
 	env := turnui.DetectEnvironment()
 	if !turnui.ShouldActivate(env) {
 		a.startStdinReader()
