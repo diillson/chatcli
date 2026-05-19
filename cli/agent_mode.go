@@ -1636,7 +1636,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		renderPlanProgress()
 		if strings.TrimSpace(remaining) != "" {
 			if coderCompactGlobal {
-				renderer.CompactLine("◆", "", remaining, agent.ColorGray)
+				// CompactAssistantText (not CompactLine with ColorGray)
+				// so the assistant's answer renders in the terminal's
+				// default foreground, visually distinct from the gray
+				// tool prose around it. Wire-through is intentional
+				// even when remaining is multi-line — the helper does
+				// its own line splitting with indentation.
+				renderer.CompactAssistantText(remaining)
 			} else if coderMinimal {
 				renderer.RenderTimelineEvent("💬", "RESUMO", compactText(remaining, 2, 220), agent.ColorGray)
 			} else {
@@ -2542,6 +2548,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if userInput == "" || strings.EqualFold(userInput, "exit") || strings.EqualFold(userInput, "quit") || strings.EqualFold(userInput, "sair") {
 				fmt.Println(renderer.Colorize("\n"+i18n.T("agent.status.task_completed"), agent.ColorGreen+agent.ColorBold))
 				return nil
+			}
+
+			// Persistent echo in green/❯: the kernel echo during
+			// line-editing is uncolored, and once the line commits it
+			// scrolls between gray tool prose. The echo gives the
+			// user's directive a distinct lane so it's findable when
+			// scrolling back through the timeline.
+			if a.isCoderMode && isCoderCompactUI() {
+				renderer.EchoUserInput(userInput)
 			}
 
 			a.cli.history = append(a.cli.history, models.Message{
