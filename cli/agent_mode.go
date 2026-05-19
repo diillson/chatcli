@@ -1299,6 +1299,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	teardown := a.setupInputAndUI(ctx)
 	defer teardown()
 
+	// SIGWINCH handler. No-op when turnUI is nil (legacy mode) or
+	// on Windows (different resize mechanism). The handler's
+	// teardown closure is deferred BEFORE teardown above so the
+	// resize goroutine exits before the TurnUI is dismantled.
+	stopResize := a.installResizeHandler(ctx)
+	defer stopResize()
+
 	renderer := agent.NewUIRenderer(a.logger)
 
 	// Helper para construir o histórico com a "âncora" (System Prompt reforçado por turno).

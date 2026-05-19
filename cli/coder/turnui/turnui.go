@@ -313,6 +313,120 @@ func (t *TurnUI) Layout() Layout {
 // returned value is the TurnUI itself; nothing is allocated.
 func (t *TurnUI) Painter() InputPainter { return t }
 
+// Resize recomputes the layout for new terminal dimensions and re-
+// enters the scroll region so subsequent agent output respects the
+// new bounds. Called by the SIGWINCH handler when the user drags the
+// terminal window. The cached status is repainted on the new status
+// row; the input row is NOT repainted here (the readline loop owns
+// the input buffer and will repaint on the next keystroke or via an
+// explicit Refresh from the caller).
+//
+// On invalid new dimensions (too small after the resize) Resize
+// returns an error WITHOUT touching the terminal — the agent loop is
+// expected to either keep the previous layout or fall back to legacy
+// rendering. Half-applying a too-small layout would leave the user
+// staring at overlapping bands.
+func (t *TurnUI) Resize(rows, cols int) error {
+	newLayout := NewLayout(rows, cols)
+	if !newLayout.Valid() {
+		return fmt.Errorf("turnui: post-resize layout too small (%dx%d)", rows, cols)
+	}
+
+	t.stateMu.Lock()
+	if !t.active {
+		t.stateMu.Unlock()
+		return nil
+	}
+	cachedStatus := t.lastStatus
+	t.layout = newLayout
+	t.stateMu.Unlock()
+
+	t.writeMu.Lock()
+	if err := EnterRegion(t.out, newLayout); err != nil {
+		t.writeMu.Unlock()
+		return fmt.Errorf("turnui: re-enter region after resize: %w", err)
+	}
+	t.writeMu.Unlock()
+
+	if cachedStatus != "" {
+		if err := t.UpdateStatus(cachedStatus); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Suspend tears down the split-UI state (raw mode + scroll region)
+// WITHOUT clearing the cached status. Used by the security-prompt
+// path: the user is about to see a "allow / deny / always" dialog
+// that wants cooked-mode line editing — running it inside the split
+// UI would force the dialog to fight turnui for keystrokes and
+// duplicate the bottom row.
+//
+// After Suspend the TurnUI is no longer active, but the cached
+// status survives so Resume can repaint without the caller having
+// to remember it. Suspend is idempotent: a second call is a no-op.
+//
+// The caller is responsible for stopping any readline goroutine it
+// spawned before calling Suspend — TurnUI itself does not own the
+// goroutine; that lives in the caller's setup code.
+func (t *TurnUI) Suspend() error {
+	t.stateMu.Lock()
+	if !t.active {
+		t.stateMu.Unlock()
+		return nil
+	}
+	layout := t.layout
+	raw := t.raw
+	rawFd := t.rawFd
+	t.active = false
+	t.raw = nil
+	t.rawFd = 0
+	// Keep lastStatus intact for Resume to repaint.
+	t.stateMu.Unlock()
+
+	t.writeMu.Lock()
+	regionErr := ExitRegion(t.out, layout)
+	t.writeMu.Unlock()
+
+	rawErr := raw.restore(rawFd)
+
+	if rawErr != nil {
+		return fmt.Errorf("turnui: suspend raw mode restore: %w", rawErr)
+	}
+	return regionErr
+}
+
+// Resume re-enters the split UI after a Suspend / cooked-mode
+// excursion. Re-runs BeginInteractive with the original dimensions
+// and repaints the cached status. The input row is NOT repainted
+// here — the caller is expected to re-spawn the readline goroutine,
+// whose initial PaintInput call will draw the empty input row.
+//
+// On a failed Resume the TurnUI stays inactive and returns the
+// error; the caller can fall back to legacy mode for the rest of
+// the session. Half-resumed state is not a thing — either Resume
+// succeeds and the UI is whole, or it fails and the caller knows.
+func (t *TurnUI) Resume(rows, cols, fd int) error {
+	t.stateMu.Lock()
+	if t.active {
+		t.stateMu.Unlock()
+		return fmt.Errorf("turnui: Resume called while still active")
+	}
+	cachedStatus := t.lastStatus
+	t.stateMu.Unlock()
+
+	if err := t.BeginInteractive(rows, cols, fd); err != nil {
+		return err
+	}
+	if cachedStatus != "" {
+		if err := t.UpdateStatus(cachedStatus); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // InputPrompt is the prefix that appears on the input row before the
 // user's typed text. Hard-coded for Phase B; future phases may make
 // it user-configurable. Chosen to match the visual idiom used by chat
