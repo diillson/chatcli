@@ -887,6 +887,7 @@
   "agent.queue.indicator": "(%d queued)",
   "agent.queue.echo": "queued #%d · \"%s\"",
   "agent.queue.next_up": "next (+%d queued):",
+  "agent.queue.runaway_paused": "⏸ %d turns with no action — pausing drain of %d queued msgs (type to resume)",
   "agent.status.processing": "Processing...",
   "agent.spinner.executing": "RUNNING: %s %s",
   "agent.spinner.action_placeholder": "action",

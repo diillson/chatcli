@@ -887,6 +887,7 @@
   "agent.queue.indicator": "(%d na fila)",
   "agent.queue.echo": "enfileirado #%d · \"%s\"",
   "agent.queue.next_up": "próxima (+%d na fila):",
+  "agent.queue.runaway_paused": "⏸ %d turns sem ação — pausando drain de %d msgs na fila (digite pra continuar)",
   "agent.status.processing": "Processando...",
   "agent.spinner.executing": "EXECUTANDO: %s %s",
   "agent.spinner.action_placeholder": "ação",

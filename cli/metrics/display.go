@@ -26,35 +26,30 @@ const (
 func FormatDurationShort(d time.Duration) string { return d.Round(time.Second).String() }
 func FormatDuration(d time.Duration) string      { return d.Round(time.Second).String() }
 
-// FormatTimerStatus renders the spinner status line. The escape
-// sequence (\033[s save, \033[1A up, \r\033[K clear, …, \033[u restore)
-// makes the redraw target the line ABOVE the cursor instead of the
-// cursor's own line. This is what lets the user keep typing on the
-// current line while the spinner updates 10x/second on the line above:
-// the kernel-cooked echo on the input line is no longer overwritten by
-// the spinner's \r. Callers must print a blank line BEFORE the first
-// tick (see agent_mode.go around turnTimer.Start) so the climb-up
-// lands on a row reserved for the spinner — otherwise the spinner
-// overwrites the previous line of real output.
+// FormatTimerStatus renders the spinner status line in-place using a
+// carriage return (\r) + clear-to-EOL. A previous version used
+// \033[s/\033[u (DECSC/DECRC save/restore cursor) to draw on the line
+// ABOVE the input cursor, but those sequences are not honored by every
+// terminal the user might run in (GoLand integrated terminal,
+// non-VT100-strict emulators, some tmux configs) — when ignored, the
+// cursor doesn't restore and every spinner tick lands on a fresh line,
+// producing a vertical waterfall of stale frames. The \r-based redraw
+// is portable: it works everywhere a TTY echoes input. The price is
+// that the cooked-mode kernel echo of the user's keystrokes shares the
+// spinner's line; the agent loop's callback compensates by skipping
+// the redraw while a keystroke was recently observed (see
+// AgentMode.lastKeystrokeNano).
 func FormatTimerStatus(d time.Duration, model, msg string) string {
 	spinner := GetSpinnerFrame()
 	dots := GetDotsAnimation()
 	return fmt.Sprintf(
-		"\033[s\033[1A\r\033[K%s%s%s [%s%s%s%s] %s[%s]%s %s|%s %s%s%s%s\033[u",
+		"\r\033[K%s%s%s [%s%s%s%s] %s[%s]%s %s|%s %s%s%s%s",
 		ColorCyan, spinner, ColorReset,
 		ColorBold, ColorCyan, model, ColorReset,
 		ColorGray, FormatDurationShort(d), ColorReset,
 		ColorGray, ColorReset,
 		ColorGray, msg, dots, ColorReset,
 	)
-}
-
-// ClearTimerArea clears both the current line (cursor row, often empty
-// or used for kernel-cooked input echo) and the row above it (where
-// FormatTimerStatus draws). Use this after Timer.Stop to wipe both
-// rows in one shot so subsequent output starts on a clean canvas.
-func ClearTimerArea() string {
-	return "\r\033[K\033[1A\r\033[K"
 }
 func FormatTimerComplete(d time.Duration) string {
 	return fmt.Sprintf("%s%s %s", ColorGray, FormatDuration(d), ColorReset)

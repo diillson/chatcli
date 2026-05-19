@@ -96,6 +96,21 @@ type AgentMode struct {
 	statusMsg     string
 	statusExpires time.Time
 
+	// UnixNano of the most recent os.Stdin.Read that returned bytes.
+	// Read by the timer callback to suppress the spinner's \r redraw
+	// while the user is actively typing. Atomic because the reader
+	// goroutine writes and the timer goroutine reads without holding
+	// any lock. Zero means "no keystroke observed yet."
+	lastKeystrokeNano atomic.Int64
+
+	// Counts consecutive turns where the LLM produced neither tool
+	// calls nor execute blocks (a pure-text response). The agent loop
+	// uses this to detect runaway behavior — e.g. a model that keeps
+	// saying "ok will do" without doing anything — and to pause re-
+	// entry from the queue before a flood of empty turns fills the
+	// terminal with stale spinners.
+	noToolTurnStreak int
+
 	// Skill hints captured at the start of Run() from auto-activated or
 	// manually invoked skills. Applied to each LLM turn via ctx for the
 	// duration of the agent loop. Cleared when the loop exits.
@@ -184,6 +199,15 @@ func (a *AgentMode) startStdinReader() {
 			n, err := os.Stdin.Read(buf)
 			if err != nil {
 				return
+			}
+			if n > 0 {
+				// Heartbeat for the timer callback's suppression
+				// window: while keystrokes are fresh, the spinner
+				// skips its \r redraw so the kernel cooked-mode echo
+				// of the user's typing remains visible. Recorded
+				// before splitStdinChunk so even partial lines (no
+				// terminator yet) count as activity.
+				a.lastKeystrokeNano.Store(time.Now().UnixNano())
 			}
 
 			lines := splitStdinChunk(buf[:n], &lineBuf)
@@ -1399,13 +1423,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// e nada muda visualmente no spinner — só vê (1 na fila) na
 		// próxima iteração do turn.
 		modelName := a.cli.Client.GetModelName()
-		// Reserve a screen row for the spinner: the FormatTimerStatus
-		// escape sequence saves the cursor, climbs one line, redraws,
-		// and restores. If we don't print a blank line first, the
-		// "climb up" lands on the previous output (often the agent's
-		// last message) and the spinner overwrites real content. The
-		// matching teardown is metrics.ClearTimerArea below.
-		fmt.Println()
 		a.turnTimer.Start(ctx, func(d time.Duration) {
 			// Each tick is a good moment to drain the channel into the
 			// durable slice. Without this, stdin lines typed during a
@@ -1414,6 +1431,23 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// the user's keystrokes and the "📥 enfileirado" echo
 			// wouldn't fire until the LLM finished.
 			a.consolidateStdinIntoQueue()
+
+			// Suppress redraw when the user typed within the last
+			// 1500ms. FormatTimerStatus uses \r + clear-to-EOL so it
+			// owns the whole current line — redrawing on top of the
+			// kernel cooked-mode echo would wipe the keystrokes the
+			// user can see being typed. The reader updates
+			// lastKeystrokeNano on every os.Stdin.Read that returns
+			// bytes; while activity is fresh we yield the line to
+			// the user. 1500ms is the gap at which a thoughtful typist
+			// is most likely "between words", not "done"; shorter
+			// windows make the spinner steal the line back too
+			// quickly and wipe in-progress input.
+			if last := a.lastKeystrokeNano.Load(); last > 0 {
+				if time.Since(time.Unix(0, last)) < 1500*time.Millisecond {
+					return
+				}
+			}
 
 			a.cli.messageQueueMu.Lock()
 			queued := len(a.cli.messageQueue)
@@ -1516,11 +1550,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		// Para o timer e obtém a duração
 		turnDuration := a.turnTimer.Stop()
-		// ClearTimerArea wipes both the cursor row and the row above
-		// (where FormatTimerStatus draws). The Println below lands on
-		// a clean line — without it, the spinner's stale glyphs leak
-		// into the next agent output.
-		fmt.Print(metrics.ClearTimerArea())
+		// ClearLine wipes the spinner's row. The Println below lands
+		// on a clean line — without it, the spinner's stale glyphs
+		// leak into the next agent output, or trailing keystrokes the
+		// user typed during the suppression window (which the spinner
+		// did not redraw over) would sit beside the next render.
+		fmt.Print(metrics.ClearLine())
 		fmt.Println()
 
 		// Helper para exibir métricas ao final do turno (após execução)
@@ -2045,6 +2080,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// PRIORIDADE 1: EXECUTAR TOOL_CALL(s) EM LOTE (BATCH)
 		// =========================================================
 		if len(toolCalls) > 0 {
+			// Reset the runaway counter: a turn that actually did
+			// something breaks the "AI keeps saying ok without acting"
+			// streak that triggers the queue-reentry cap below.
+			a.noToolTurnStreak = 0
 			coderMinimal := a.isCoderMode && isCoderMinimalUI()
 			coderCompact := a.isCoderMode && isCoderCompactUI()
 			var batchOutputBuilder strings.Builder
@@ -2688,6 +2727,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			showTurnStats()
 			fmt.Println()
 
+			// Runaway guard: an LLM that answers without tool calls
+			// turn after turn — saying "ok will do" while never
+			// acting — would otherwise burn through the entire queue
+			// in seconds, each empty turn re-firing the spinner and
+			// piling up output. After 3 consecutive empty turns we
+			// stop the auto-drain and surface the prompt so the user
+			// can correct course (or just press Enter to consume the
+			// next queued line manually).
+			a.noToolTurnStreak++
+			autoDrainAllowed := a.noToolTurnStreak < 3
+
 			// Type-ahead drain: if the user typed something while the LLM
 			// was producing this final answer (or during any earlier turn
 			// of this run), prefer that over blocking on a fresh prompt.
@@ -2696,13 +2746,29 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// would see (N na fila) in the spinner and then nothing would
 			// happen when the agent reached this branch. Mirrors the chat
 			// mode endProcessingLifecycle → dequeueMessage flow.
-			if queuedMsg := a.drainStdinToQueue(); queuedMsg != "" {
-				a.announceQueueDrain(queuedMsg)
-				a.cli.history = append(a.cli.history, models.Message{
-					Role:    "user",
-					Content: queuedMsg,
-				})
-				continue
+			if autoDrainAllowed {
+				if queuedMsg := a.drainStdinToQueue(); queuedMsg != "" {
+					a.announceQueueDrain(queuedMsg)
+					a.cli.history = append(a.cli.history, models.Message{
+						Role:    "user",
+						Content: queuedMsg,
+					})
+					continue
+				}
+			} else {
+				a.cli.messageQueueMu.Lock()
+				stalled := len(a.cli.messageQueue)
+				a.cli.messageQueueMu.Unlock()
+				if stalled > 0 {
+					fmt.Printf("  %s%s%s\n",
+						agent.ColorYellow,
+						i18n.T("agent.queue.runaway_paused", a.noToolTurnStreak, stalled),
+						agent.ColorReset,
+					)
+				}
+				// Reset so the user's next deliberate input restarts
+				// the auto-drain cycle from scratch.
+				a.noToolTurnStreak = 0
 			}
 
 			fmt.Print(renderer.Colorize("  ⏳ "+i18n.T("coder.waiting_for_input"), agent.ColorCyan))
@@ -2752,18 +2818,39 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		showTurnStats()
 
+		// Same runaway guard as the coder waiting branch: if the LLM
+		// is on a streak of empty turns, stop auto-draining the queue
+		// so the user can intervene instead of watching a flood of
+		// no-op turns scroll by.
+		a.noToolTurnStreak++
+		autoDrainAllowed := a.noToolTurnStreak < 3
+
 		// Mirror the coder-mode drain: type-ahead queued during the final
 		// turn must not be silently discarded just because the agent
 		// declared itself done. If the user typed a follow-up while the
 		// last turn was running, treat it as a new directive and keep
 		// the loop alive instead of returning to the chat prompt.
-		if queuedMsg := a.drainStdinToQueue(); queuedMsg != "" {
-			a.announceQueueDrain(queuedMsg)
-			a.cli.history = append(a.cli.history, models.Message{
-				Role:    "user",
-				Content: queuedMsg,
-			})
-			continue
+		if autoDrainAllowed {
+			if queuedMsg := a.drainStdinToQueue(); queuedMsg != "" {
+				a.announceQueueDrain(queuedMsg)
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: queuedMsg,
+				})
+				continue
+			}
+		} else {
+			a.cli.messageQueueMu.Lock()
+			stalled := len(a.cli.messageQueue)
+			a.cli.messageQueueMu.Unlock()
+			if stalled > 0 {
+				fmt.Printf("  %s%s%s\n",
+					agent.ColorYellow,
+					i18n.T("agent.queue.runaway_paused", a.noToolTurnStreak, stalled),
+					agent.ColorReset,
+				)
+			}
+			a.noToolTurnStreak = 0
 		}
 
 		fmt.Println(renderer.Colorize("\n"+i18n.T("agent.status.task_completed"), agent.ColorGreen+agent.ColorBold))
