@@ -86,6 +86,16 @@ type AgentMode struct {
 	stdinWg      sync.WaitGroup
 	multilineBuf MultilineBuffer // ``` delimited multiline input
 
+	// Transient status message shown in the spinner's status slot. Set
+	// when a line is consolidated into the queue (so the user sees what
+	// got queued without a separate stdout line that would fight the
+	// spinner's redraw), and cleared by the spinner callback once the
+	// expiry passes. Protected by statusMu so the consolidation goroutine
+	// and the timer callback don't race.
+	statusMu      sync.Mutex
+	statusMsg     string
+	statusExpires time.Time
+
 	// Skill hints captured at the start of Run() from auto-activated or
 	// manually invoked skills. Applied to each LLM turn via ctx for the
 	// duration of the agent loop. Cleared when the loop exits.
@@ -391,27 +401,159 @@ func (a *AgentMode) runMultilineSession(trigger string, reader *bufio.Reader) (s
 	}
 }
 
-// drainStdinToQueue moves any pending stdin lines into the message queue.
-// Returns the first message if any, for immediate injection into conversation.
-func (a *AgentMode) drainStdinToQueue() string {
-	var first string
+// consolidateStdinIntoQueue moves every line currently waiting in the
+// stdinLines channel into the persistent cli.messageQueue slice and
+// echoes a "📥 enfileirado #N" line for each one. It is non-blocking
+// and idempotent — when the channel is empty it returns immediately.
+//
+// Why the echo lives here, not in startStdinReader: the InputGuard
+// (cli/coder/input_guard.go) drains the channel directly before any
+// security prompt. If we echoed at the reader, those guard-discarded
+// lines would leave orphan "📥" lines on screen with no matching
+// queued message. By echoing on consolidation, the guard's drain path
+// silently discards before we ever announce — preserving the contract
+// that every "enfileirado #N" corresponds to a slot the user can see
+// in the queue depth indicator.
+//
+// The slice is the canonical store; the channel is only a transport
+// between the reader goroutine and this consolidation step. This is
+// what allows messages typed mid-turn to survive across turn
+// boundaries (the channel buffer is short, the slice is durable).
+func (a *AgentMode) consolidateStdinIntoQueue() {
+	if a.stdinLines == nil {
+		return
+	}
 	for {
 		select {
 		case line := <-a.stdinLines:
 			if line == "" {
 				continue // skip empty lines (bare Enter presses)
 			}
-			if first == "" {
-				first = line
-			} else {
-				a.cli.messageQueueMu.Lock()
-				a.cli.messageQueue = append(a.cli.messageQueue, line)
-				a.cli.messageQueueMu.Unlock()
-			}
+			a.echoQueuedLine(line)
+			a.cli.messageQueueMu.Lock()
+			a.cli.messageQueue = append(a.cli.messageQueue, line)
+			a.cli.messageQueueMu.Unlock()
 		default:
-			return first
+			return
 		}
 	}
+}
+
+// drainStdinToQueue consolidates pending stdin lines into the message
+// queue, then pops and returns the first queued message. Returns "" when
+// nothing is queued. The previous version only drained the channel and
+// returned the first line directly, leaving any entries that had already
+// been pushed to the slice (by skill_invoke, by a prior turn's overflow,
+// or by chat mode pre-load) unreachable — the slice grew but was never
+// consumed by the agent loop. Reading slice-first makes the queue work
+// identically to chat mode's dequeueMessage / endProcessingLifecycle
+// pattern.
+func (a *AgentMode) drainStdinToQueue() string {
+	a.consolidateStdinIntoQueue()
+
+	a.cli.messageQueueMu.Lock()
+	defer a.cli.messageQueueMu.Unlock()
+	if len(a.cli.messageQueue) == 0 {
+		return ""
+	}
+	first := a.cli.messageQueue[0]
+	a.cli.messageQueue = a.cli.messageQueue[1:]
+	return first
+}
+
+// announceQueueDrain renders the "📨 new instruction" banner including
+// the message body and a preview of the next item still in the queue,
+// so the user can see exactly what is being injected and what comes
+// after. The agent-loop callers previously only printed a generic label
+// — the body and the queue-tail were both invisible.
+//
+// ANSI codes inlined instead of going through UIRenderer.Colorize:
+// renderer is a turn-local variable inside processAIResponseAndAct
+// and is not in scope for top-level methods on AgentMode.
+func (a *AgentMode) announceQueueDrain(userMsg string) {
+	a.cli.messageQueueMu.Lock()
+	remaining := len(a.cli.messageQueue)
+	var next string
+	if remaining > 0 {
+		next = a.cli.messageQueue[0]
+	}
+	a.cli.messageQueueMu.Unlock()
+
+	label := i18n.T("agent.queue.new_user_instruction")
+	fmt.Printf("\n  %s📨 %s%s\n  %s└─%s %s\n",
+		agent.ColorCyan, label, agent.ColorReset,
+		agent.ColorGray, agent.ColorReset,
+		truncateQueuePreview(userMsg),
+	)
+	if next != "" {
+		fmt.Printf("  %s⏭ %s %s%s\n",
+			agent.ColorGray,
+			i18n.T("agent.queue.next_up", remaining),
+			truncateQueuePreview(next),
+			agent.ColorReset,
+		)
+	}
+	fmt.Println()
+}
+
+// echoQueuedLine flashes "📥 enfileirado #N · <preview>" in the
+// spinner's status slot for a short window, so the user gets immediate
+// visual confirmation that Enter was registered. Without this, the
+// only signal while the LLM is mid-turn is the "(N na fila)" count
+// buried in the spinner — and on a terminal where the spinner's \r
+// redraw eats the kernel echo, users can't even tell that the
+// keystroke registered.
+//
+// The previous version printed a fresh stdout line, which fought the
+// spinner's cursor save/restore: the line drifted behind the spinner
+// every tick and produced a stuttering display. Routing the echo
+// through the spinner's status slot avoids that — the spinner is the
+// single owner of that screen region.
+func (a *AgentMode) echoQueuedLine(line string) {
+	// Queue depth = slice length BEFORE this line is pushed, plus 1.
+	// Counts the slot this line is about to occupy ("you just queued #2"),
+	// not the slot it occupied after — intuitive for the user.
+	a.cli.messageQueueMu.Lock()
+	idx := len(a.cli.messageQueue) + 1
+	a.cli.messageQueueMu.Unlock()
+
+	msg := i18n.T("agent.queue.echo", idx, truncateQueuePreview(line))
+	a.statusMu.Lock()
+	a.statusMsg = "📥 " + msg
+	a.statusExpires = time.Now().Add(2 * time.Second)
+	a.statusMu.Unlock()
+}
+
+// currentStatusMsg returns the transient status to show in the spinner,
+// or "" when the previous echo has expired. Called by the timer callback
+// on every tick; the spinner falls back to its default status when this
+// returns empty.
+func (a *AgentMode) currentStatusMsg() string {
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
+	if a.statusMsg == "" {
+		return ""
+	}
+	if time.Now().After(a.statusExpires) {
+		a.statusMsg = ""
+		return ""
+	}
+	return a.statusMsg
+}
+
+// truncateQueuePreview shortens a queued message for inline display.
+// 80 visible columns is enough for a typical follow-up question while
+// keeping the banner within a single terminal line on common widths.
+// Operates on runes (not bytes) so multibyte input doesn't blow the
+// column budget or split a codepoint mid-glyph.
+func truncateQueuePreview(s string) string {
+	const maxRunes = 80
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }
 
 // CommandBlock and the other aliases below re-export the agent
@@ -1164,8 +1306,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// prompt is now discarded, so the only thing reaching the queue is
 		// input the user typed clearly between LLM turns.
 		if userMsg := a.drainStdinToQueue(); userMsg != "" {
-			label := i18n.T("agent.queue.new_user_instruction")
-			fmt.Printf("\n  %s\n\n", renderer.Colorize("📨 "+label, agent.ColorCyan))
+			a.announceQueueDrain(userMsg)
 			a.cli.history = append(a.cli.history, models.Message{
 				Role:    "user",
 				Content: userMsg,
@@ -1258,16 +1399,37 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// e nada muda visualmente no spinner — só vê (1 na fila) na
 		// próxima iteração do turn.
 		modelName := a.cli.Client.GetModelName()
+		// Reserve a screen row for the spinner: the FormatTimerStatus
+		// escape sequence saves the cursor, climbs one line, redraws,
+		// and restores. If we don't print a blank line first, the
+		// "climb up" lands on the previous output (often the agent's
+		// last message) and the spinner overwrites real content. The
+		// matching teardown is metrics.ClearTimerArea below.
+		fmt.Println()
 		a.turnTimer.Start(ctx, func(d time.Duration) {
-			msg := "Processando..."
+			// Each tick is a good moment to drain the channel into the
+			// durable slice. Without this, stdin lines typed during a
+			// long turn would only consolidate at the next turn
+			// boundary — which means the (N na fila) counter would lag
+			// the user's keystrokes and the "📥 enfileirado" echo
+			// wouldn't fire until the LLM finished.
+			a.consolidateStdinIntoQueue()
+
 			a.cli.messageQueueMu.Lock()
 			queued := len(a.cli.messageQueue)
 			a.cli.messageQueueMu.Unlock()
 			if a.stdinLines != nil {
 				queued += len(a.stdinLines)
 			}
-			if queued > 0 {
-				msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
+
+			msg := a.currentStatusMsg()
+			if msg == "" {
+				msg = i18n.T("agent.status.processing")
+				if queued > 0 {
+					msg += " " + i18n.T("agent.queue.indicator", queued)
+				}
+			} else if queued > 0 {
+				msg += " · " + i18n.T("agent.queue.indicator", queued)
 			}
 			fmt.Print(metrics.FormatTimerStatus(d, modelName, msg))
 		})
@@ -1354,7 +1516,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		// Para o timer e obtém a duração
 		turnDuration := a.turnTimer.Stop()
-		fmt.Print(metrics.ClearLine()) // Limpa a linha do timer
+		// ClearTimerArea wipes both the cursor row and the row above
+		// (where FormatTimerStatus draws). The Println below lands on
+		// a clean line — without it, the spinner's stale glyphs leak
+		// into the next agent output.
+		fmt.Print(metrics.ClearTimerArea())
 		fmt.Println()
 
 		// Helper para exibir métricas ao final do turno (após execução)
@@ -2515,6 +2681,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		if a.isCoderMode && !a.isOneShot {
 			showTurnStats()
 			fmt.Println()
+
+			// Type-ahead drain: if the user typed something while the LLM
+			// was producing this final answer (or during any earlier turn
+			// of this run), prefer that over blocking on a fresh prompt.
+			// Without this, queued messages were silently appended to the
+			// slice by drainStdinToQueue but never consumed — the user
+			// would see (N na fila) in the spinner and then nothing would
+			// happen when the agent reached this branch. Mirrors the chat
+			// mode endProcessingLifecycle → dequeueMessage flow.
+			if queuedMsg := a.drainStdinToQueue(); queuedMsg != "" {
+				a.announceQueueDrain(queuedMsg)
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: queuedMsg,
+				})
+				continue
+			}
+
 			fmt.Print(renderer.Colorize("  ⏳ "+i18n.T("coder.waiting_for_input"), agent.ColorCyan))
 			fmt.Println() // newline before input for clean cursor positioning
 
@@ -2552,6 +2736,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		}
 
 		showTurnStats()
+
+		// Mirror the coder-mode drain: type-ahead queued during the final
+		// turn must not be silently discarded just because the agent
+		// declared itself done. If the user typed a follow-up while the
+		// last turn was running, treat it as a new directive and keep
+		// the loop alive instead of returning to the chat prompt.
+		if queuedMsg := a.drainStdinToQueue(); queuedMsg != "" {
+			a.announceQueueDrain(queuedMsg)
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: queuedMsg,
+			})
+			continue
+		}
+
 		fmt.Println(renderer.Colorize("\n"+i18n.T("agent.status.task_completed"), agent.ColorGreen+agent.ColorBold))
 		return nil
 	}

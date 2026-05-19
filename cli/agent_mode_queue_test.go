@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -105,6 +106,137 @@ func mustReadFile(t *testing.T, name string) string {
 	data, err := os.ReadFile(name)
 	require.NoError(t, err, "read sibling source %s", name)
 	return string(data)
+}
+
+// TestDrainStdinToQueue_ReadsSliceFirst is the regression test for the
+// bug that left coder mode without follow-up support: even after a
+// message landed in cli.messageQueue (via skill_invoke or a prior
+// turn's overflow), drainStdinToQueue was only reading from the
+// stdinLines channel. With no new channel activity the slice was
+// invisible to the agent loop and the user's queued instructions sat
+// there forever. The fix consolidates the channel into the slice and
+// pops from the slice — so a message pre-loaded into the slice must
+// surface on the very next drain.
+func TestDrainStdinToQueue_ReadsSliceFirst(t *testing.T) {
+	cli := &ChatCLI{
+		messageQueue: []string{"pre-queued from skill_invoke"},
+	}
+	a := &AgentMode{cli: cli}
+	a.stdinLines = make(chan string, 4) // empty channel — only the slice has data
+
+	first := a.drainStdinToQueue()
+	assert.Equal(t, "pre-queued from skill_invoke", first,
+		"a slice-only entry must be returned even when the channel is empty")
+}
+
+// TestDrainStdinToQueue_SlicePrecedesChannel verifies FIFO ordering
+// across both backing stores. Pre-existing slice entries must be
+// served before whatever the user just typed (in the channel),
+// otherwise a follow-up typed mid-turn would jump ahead of a
+// skill_invoke-queued directive.
+func TestDrainStdinToQueue_SlicePrecedesChannel(t *testing.T) {
+	cli := &ChatCLI{
+		messageQueue: []string{"slice-1", "slice-2"},
+	}
+	a := &AgentMode{cli: cli}
+	a.stdinLines = make(chan string, 4)
+	a.stdinLines <- "channel-1"
+	a.stdinLines <- "channel-2"
+
+	got := []string{
+		a.drainStdinToQueue(),
+		a.drainStdinToQueue(),
+		a.drainStdinToQueue(),
+		a.drainStdinToQueue(),
+	}
+	assert.Equal(t, []string{"slice-1", "slice-2", "channel-1", "channel-2"}, got,
+		"FIFO across both stores: slice first, then channel arrivals in order")
+
+	cli.messageQueueMu.Lock()
+	defer cli.messageQueueMu.Unlock()
+	assert.Empty(t, cli.messageQueue, "everything must drain to empty")
+}
+
+// TestConsolidateStdinIntoQueue_NonBlocking is the contract used by the
+// spinner callback: every tick the consolidation runs to move channel
+// arrivals into the durable slice. It must never block — otherwise the
+// timer callback would freeze the spinner.
+func TestConsolidateStdinIntoQueue_NonBlocking(t *testing.T) {
+	cli := &ChatCLI{}
+	a := &AgentMode{cli: cli}
+	a.stdinLines = make(chan string, 4)
+	a.stdinLines <- "one"
+	a.stdinLines <- "two"
+
+	done := make(chan struct{})
+	go func() {
+		a.consolidateStdinIntoQueue()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("consolidateStdinIntoQueue blocked — would freeze spinner ticks")
+	}
+
+	cli.messageQueueMu.Lock()
+	defer cli.messageQueueMu.Unlock()
+	assert.Equal(t, []string{"one", "two"}, cli.messageQueue)
+}
+
+// TestConsolidateStdinIntoQueue_NilChannelSafe handles the lifecycle
+// edge where the reader goroutine is stopped (stdinLines = nil) but a
+// timer tick still fires before the timer is paused/stopped. Must be a
+// no-op, never a nil-channel panic.
+func TestConsolidateStdinIntoQueue_NilChannelSafe(t *testing.T) {
+	cli := &ChatCLI{}
+	a := &AgentMode{cli: cli} // stdinLines stays nil
+	assert.NotPanics(t, func() {
+		a.consolidateStdinIntoQueue()
+	})
+}
+
+// TestCurrentStatusMsg_ExpiresAfterWindow proves the spinner status
+// echo self-clears after the configured TTL — important because the
+// spinner falls back to the default "Processing..." line once the
+// transient "📥 enfileirado" flash expires.
+func TestCurrentStatusMsg_ExpiresAfterWindow(t *testing.T) {
+	cli := &ChatCLI{}
+	a := &AgentMode{cli: cli}
+	a.statusMu.Lock()
+	a.statusMsg = "📥 something"
+	a.statusExpires = time.Now().Add(20 * time.Millisecond)
+	a.statusMu.Unlock()
+
+	assert.Equal(t, "📥 something", a.currentStatusMsg())
+	time.Sleep(40 * time.Millisecond)
+	assert.Equal(t, "", a.currentStatusMsg(), "must clear after expiry")
+}
+
+// TestTruncateQueuePreview_LongString keeps the preview within a
+// readable single-line budget so the "📨 next" banner doesn't wrap.
+// Counted in runes — the function operates on codepoints so multibyte
+// glyphs don't blow the column budget.
+func TestTruncateQueuePreview_LongString(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	got := truncateQueuePreview(long)
+	assert.LessOrEqual(t, len([]rune(got)), 80, "preview must fit in 80 runes")
+	assert.True(t, strings.HasSuffix(got, "…"), "long inputs must be ellipsized")
+
+	short := "short message"
+	assert.Equal(t, short, truncateQueuePreview(short),
+		"short inputs must round-trip unchanged")
+
+	// Unicode must not be split mid-rune. 100 Ω (2-byte codepoints)
+	// would overflow a byte-counting truncator but stay safe under
+	// the rune-based one.
+	omega := strings.Repeat("Ω", 100)
+	gotOmega := truncateQueuePreview(omega)
+	assert.LessOrEqual(t, len([]rune(gotOmega)), 80)
+	for _, r := range gotOmega {
+		assert.NotEqual(t, '�', r, "no replacement char from mid-rune split")
+	}
 }
 
 // TestMessageQueueConcurrency simulates the real call site: one writer
