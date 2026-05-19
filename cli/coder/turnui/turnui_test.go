@@ -16,22 +16,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestBegin_EntersRegionAndMarksActive is the happy path: a Begin
-// against a typical terminal must succeed, leave the TurnUI in the
-// active state, and have already written the DECSTBM + CUP sequence
-// to the byte stream. End must produce the matching teardown.
-func TestBegin_EntersRegionAndMarksActive(t *testing.T) {
+// TestBegin_EntersAltScreenThenRegionAndMarksActive is the happy
+// path: a Begin against a typical terminal must succeed, leave the
+// TurnUI in the active state, and have already written the alt-
+// screen entry + DECSTBM + CUP sequence to the byte stream in that
+// order. End must produce the matching teardown in the reverse
+// order: region reset before alt-screen exit, so the swap-back
+// does not carry a clamped region into the main screen.
+func TestBegin_EntersAltScreenThenRegionAndMarksActive(t *testing.T) {
 	var buf bytes.Buffer
 	u := New(&buf)
 
 	require.NoError(t, u.Begin(24, 80))
 	assert.True(t, u.IsActive())
-	assert.Contains(t, buf.String(), "\x1b[1;22r", "DECSTBM written on Begin")
+
+	got := buf.String()
+	altIdx := strings.Index(got, "\x1b[?1049h")
+	regionIdx := strings.Index(got, "\x1b[1;22r")
+	require.NotEqual(t, -1, altIdx, "alt-screen entry missing on Begin")
+	require.NotEqual(t, -1, regionIdx, "DECSTBM missing on Begin")
+	assert.Less(t, altIdx, regionIdx,
+		"alt-screen MUST be entered before the region is defined — defining the region first would clamp the user's main screen")
 
 	buf.Reset()
 	require.NoError(t, u.End())
 	assert.False(t, u.IsActive())
-	assert.Contains(t, buf.String(), "\x1b[r", "region reset written on End")
+
+	got = buf.String()
+	regionResetIdx := strings.Index(got, "\x1b[r")
+	altExitIdx := strings.Index(got, "\x1b[?1049l")
+	require.NotEqual(t, -1, regionResetIdx, "region reset missing on End")
+	require.NotEqual(t, -1, altExitIdx, "alt-screen exit missing on End")
+	assert.Less(t, regionResetIdx, altExitIdx,
+		"region reset MUST come before alt-screen exit — otherwise DECSTBM persists into the user's main screen after swap-back")
 }
 
 // TestBegin_RejectsTooSmallTerminal pins the contract: undersized

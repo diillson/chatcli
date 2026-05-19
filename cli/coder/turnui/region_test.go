@@ -137,6 +137,32 @@ func TestClearLine_EmitsCSI2K(t *testing.T) {
 	assert.Equal(t, "\x1b[2K", buf.String())
 }
 
+// TestEnterAltScreen_EmitsDEC1049AndClear pins the alt-screen entry
+// sequence. The 1049h variant is what saves the cursor + scrollback
+// in one atomic operation; using the legacy 47h instead would leave
+// the user's screen visible underneath when we draw, defeating the
+// whole point of the migration. The trailing 2J+H makes the canvas
+// reliably blank — a small minority of terminals (some tmux setups)
+// honor 1049h's swap without auto-clearing.
+func TestEnterAltScreen_EmitsDEC1049AndClear(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, EnterAltScreen(&buf))
+	got := buf.String()
+	assert.Equal(t, "\x1b[?1049h\x1b[2J\x1b[H", got,
+		"alt-screen entry must be 1049h followed by clear + cursor-home")
+}
+
+// TestExitAltScreen_EmitsDEC1049l locks the matching exit. The l
+// variant restores cursor + scrollback. Pairing 1049h with anything
+// other than 1049l leaves the alt buffer set; the user would lose
+// their pre-/coder scrollback the moment they typed `clear` or any
+// command that re-enters cooked mode.
+func TestExitAltScreen_EmitsDEC1049l(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, ExitAltScreen(&buf))
+	assert.Equal(t, "\x1b[?1049l", buf.String())
+}
+
 // TestEnterRegion_PropagatesWriteError ensures a half-written DECSTBM
 // does not silently succeed. If the writer fails after the margin set
 // but before the cursor home, the terminal would be left clamped with

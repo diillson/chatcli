@@ -511,6 +511,32 @@ func (a *AgentMode) teardownInputAndUI() {
 	a.turnUIInputReady = nil
 }
 
+// printCoderBannerIfNeeded emits the /coder quick-tip cheat sheet
+// once per session. Pulled out of Run() so it can be invoked AFTER
+// setupInputAndUI hands the terminal to turnui — without that
+// ordering, the banner would print in the user's main scrollback
+// just before alt-screen swap, flash for one frame, then vanish
+// under the alt buffer until /coder exits. Inside the split UI
+// the banner lands on the alt-screen canvas where the agent's
+// subsequent output will join it.
+//
+// The function honors the same three preconditions Run() used:
+// only in coder mode, only once per session, only when the
+// CHATCLI_CODER_BANNER env var hasn't explicitly disabled it.
+func (a *AgentMode) printCoderBannerIfNeeded() {
+	if !a.isCoderMode || a.coderBannerShown || !isCoderBannerEnabled() {
+		return
+	}
+	fmt.Println()
+	fmt.Println(i18n.T("coder.quick_tip.header"))
+	fmt.Println(i18n.T("coder.quick_tip.read"))
+	fmt.Println(i18n.T("coder.quick_tip.search"))
+	fmt.Println(i18n.T("coder.quick_tip.write"))
+	fmt.Println(i18n.T("coder.quick_tip.exec"))
+	fmt.Println()
+	a.coderBannerShown = true
+}
+
 // waitForInput blocks until something lands on the turnUIInputReady
 // signal channel or ctx is canceled. Used by the coder-waiting branch
 // in the split-UI mode to park instead of calling readLineWithEditing
@@ -1003,17 +1029,14 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		orchestratorText = workers.OrchestratorSystemPrompt(a.agentRegistry.CatalogString())
 	}
 
-	// Banner curto com cheat sheet no modo /coder (apenas para o usuário humano)
-	if isCoder && !a.coderBannerShown && isCoderBannerEnabled() {
-		fmt.Println()
-		fmt.Println(i18n.T("coder.quick_tip.header"))
-		fmt.Println(i18n.T("coder.quick_tip.read"))
-		fmt.Println(i18n.T("coder.quick_tip.search"))
-		fmt.Println(i18n.T("coder.quick_tip.write"))
-		fmt.Println(i18n.T("coder.quick_tip.exec"))
-		fmt.Println()
-		a.coderBannerShown = true
-	}
+	// The /coder quick-tip banner used to print here, but the
+	// split UI (turnui) takes over the terminal via alt-screen
+	// AFTER this function returns and into processAIResponseAndAct
+	// — printing the banner before that swap would leave it
+	// briefly visible and then hide it inside the alt buffer.
+	// Moved to printCoderBannerIfNeeded(), called once inside
+	// processAIResponseAndAct right after setupInputAndUI, so the
+	// banner always lands on the same canvas the agent will run on.
 
 	// Assemble the system message — flat string for providers without
 	// cache_control (consumed via Message.Content) plus structured
@@ -1381,6 +1404,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	// so this defer cleans up whichever path activated.
 	teardown := a.setupInputAndUI(ctx)
 	defer teardown()
+
+	// /coder quick-tip banner. Printed AFTER setupInputAndUI so that
+	// when the split UI is active, the banner lands on the alt-
+	// screen canvas instead of the user's main terminal (where it
+	// would flash briefly and then get hidden under the alt-screen
+	// swap). When the legacy path is active, this prints in the
+	// same place it always did.
+	a.printCoderBannerIfNeeded()
 
 	// SIGWINCH handler. No-op when turnUI is nil (legacy mode) or
 	// on Windows (different resize mechanism). The handler's

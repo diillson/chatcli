@@ -137,6 +137,49 @@ func ExitRegion(w io.Writer, l Layout) error {
 	return nil
 }
 
+// EnterAltScreen switches the terminal into the alternate screen
+// buffer (DEC private mode 1049). This is the same trick `less`,
+// `vim`, `top`, and the Claude Code Ink renderer all use: the
+// terminal swaps to a fresh blank screen, saves the cursor + the
+// previous screen contents, and any output the program emits stays
+// confined to this alt buffer. When ExitAltScreen runs, the original
+// screen + scroll history snap back as if nothing happened.
+//
+// Why this matters for the split UI: without alt-screen, DECSTBM
+// applied on top of whatever output preceded /coder produced two
+// real bugs in the field — banner content above the region created
+// a visual gap, and cursor positioning into the region overlapped
+// the user's scrollback. Alt-screen gives turnui a private canvas
+// to own completely, then hands the user's terminal back untouched.
+//
+// The 1049 mode is the modern form: it does save-cursor + clear +
+// switch in one sequence and works on every terminal that ships
+// today (xterm, iTerm2, Terminal.app, Hyper, Alacritty, Windows
+// Terminal, kitty, mintty). The legacy 47/1047 forms are not used
+// here — they require a separate save-cursor sequence and have
+// uneven scrollback-preservation semantics across emulators.
+func EnterAltScreen(w io.Writer) error {
+	if _, err := fmt.Fprint(w, "\x1b[?1049h"); err != nil {
+		return err
+	}
+	// Clear screen + home cursor. The 1049h sequence itself does
+	// clear on most terminals, but a small handful (notably some
+	// old tmux configs) only switch the buffer without clearing.
+	// The explicit clear costs nothing and removes that variance.
+	_, err := fmt.Fprint(w, "\x1b[2J\x1b[H")
+	return err
+}
+
+// ExitAltScreen swaps back to the original screen, restoring the
+// cursor position and scroll history. Pair every EnterAltScreen
+// with exactly one ExitAltScreen; nesting is not portable. Safe to
+// emit even if we were not in alt-screen — the terminal just
+// no-ops the sequence.
+func ExitAltScreen(w io.Writer) error {
+	_, err := fmt.Fprint(w, "\x1b[?1049l")
+	return err
+}
+
 // MoveCursor parks the cursor at (row, col) using the CUP sequence.
 // Rows and cols are 1-based to match every other ANSI tool the user
 // might compare against (tput, terminfo, the DEC manuals).

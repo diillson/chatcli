@@ -106,7 +106,25 @@ func (t *TurnUI) Begin(rows, cols int) error {
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
 
+	// Alt-screen FIRST. We want the user's scrollback (everything
+	// they had on screen before /coder started — the chat banner,
+	// the welcome tip, previous turns) preserved untouched. Alt-
+	// screen swaps to a fresh blank canvas; on End we swap back
+	// and the user sees their pre-/coder state restored as if
+	// nothing happened. Without this, EnterRegion's cursor-home
+	// would have to compete with whatever was already on screen
+	// and the agent's banner would visually overlap or create
+	// gaps — both bugs reported in the field.
+	if err := EnterAltScreen(t.out); err != nil {
+		return fmt.Errorf("turnui: EnterAltScreen: %w", err)
+	}
+
 	if err := EnterRegion(t.out, layout); err != nil {
+		// Unwind alt-screen so we don't leave the terminal in a
+		// half-state. The defer at the call site can't help here
+		// because Begin returned an error and the caller assumes
+		// nothing was applied.
+		_ = ExitAltScreen(t.out)
 		return fmt.Errorf("turnui: EnterRegion: %w", err)
 	}
 
@@ -179,6 +197,14 @@ func (t *TurnUI) End() error {
 
 	t.writeMu.Lock()
 	regionErr := ExitRegion(t.out, layout)
+	// Always exit alt-screen, even on a region restore failure.
+	// Leaving the alt buffer set would hide the user's scrollback
+	// forever; that is the highest-severity miss and must run
+	// unconditionally. The order is: region first (lifts DECSTBM
+	// inside the alt buffer, so the swap-back doesn't carry a
+	// clamped region back to the main screen), then alt-screen
+	// swap-back.
+	altErr := ExitAltScreen(t.out)
 	t.writeMu.Unlock()
 
 	rawErr := raw.restore(rawFd)
@@ -187,6 +213,9 @@ func (t *TurnUI) End() error {
 	// first so the caller sees the worst thing that happened.
 	if rawErr != nil {
 		return fmt.Errorf("turnui: restore raw mode: %w", rawErr)
+	}
+	if altErr != nil {
+		return fmt.Errorf("turnui: exit alt-screen: %w", altErr)
 	}
 	return regionErr
 }
@@ -387,12 +416,20 @@ func (t *TurnUI) Suspend() error {
 
 	t.writeMu.Lock()
 	regionErr := ExitRegion(t.out, layout)
+	// Exit alt-screen so the security prompt renders on the
+	// original screen the user is used to (with their cooked-mode
+	// echo and visible scrollback). Resume re-enters alt-screen,
+	// re-applies the region, and repaints the cached status.
+	altErr := ExitAltScreen(t.out)
 	t.writeMu.Unlock()
 
 	rawErr := raw.restore(rawFd)
 
 	if rawErr != nil {
 		return fmt.Errorf("turnui: suspend raw mode restore: %w", rawErr)
+	}
+	if altErr != nil {
+		return fmt.Errorf("turnui: suspend alt-screen exit: %w", altErr)
 	}
 	return regionErr
 }
