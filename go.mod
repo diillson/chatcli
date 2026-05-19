@@ -34,7 +34,7 @@ require (
 	k8s.io/api v0.36.1
 	k8s.io/apimachinery v0.36.1
 	k8s.io/client-go v0.36.1
-	k8s.io/metrics v0.35.4
+	k8s.io/metrics v0.36.1
 	mvdan.cc/sh/v3 v3.13.1
 )
 
