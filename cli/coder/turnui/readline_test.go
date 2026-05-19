@@ -27,7 +27,7 @@ type fakePainter struct {
 	frames []string
 }
 
-func (p *fakePainter) paintInput(buf *LineBuffer) error {
+func (p *fakePainter) PaintInput(buf *LineBuffer) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.frames = append(p.frames, buf.String())
@@ -285,7 +285,7 @@ func TestRunReadLine_RejectsMissingDeps(t *testing.T) {
 }
 
 // TestPaintInput_DrawsPromptOnInputRow asserts the live painter
-// (TurnUI.paintInput) writes the expected sequence: move to input
+// (TurnUI.PaintInput) writes the expected sequence: move to input
 // row, clear it, write prompt + buffer. No save/restore — the
 // cursor is supposed to live on the input row.
 func TestPaintInput_DrawsPromptOnInputRow(t *testing.T) {
@@ -298,7 +298,7 @@ func TestPaintInput_DrawsPromptOnInputRow(t *testing.T) {
 	for _, r := range "fix bar.go" {
 		lb.Append(r)
 	}
-	require.NoError(t, u.paintInput(lb))
+	require.NoError(t, u.PaintInput(lb))
 
 	got := buf.String()
 	assert.Contains(t, got, "\x1b[24;1H", "moved to input row (24,1)")
@@ -309,12 +309,12 @@ func TestPaintInput_DrawsPromptOnInputRow(t *testing.T) {
 }
 
 // TestPaintInput_NoOpWhenInactive matches paintStatus's behavior.
-// The reader loop can fire paintInput from its own goroutine after
+// The reader loop can fire PaintInput from its own goroutine after
 // End has fired without producing stray writes to the terminal.
 func TestPaintInput_NoOpWhenInactive(t *testing.T) {
 	var buf bytes.Buffer
 	u := New(&buf)
-	require.NoError(t, u.paintInput(NewLineBuffer()))
+	require.NoError(t, u.PaintInput(NewLineBuffer()))
 	assert.Empty(t, buf.String())
 }
 
@@ -335,6 +335,6 @@ func TestRunReadLine_PaintErrorBubblesUp(t *testing.T) {
 
 type erroringPainter struct{}
 
-func (e *erroringPainter) paintInput(_ *LineBuffer) error {
+func (e *erroringPainter) PaintInput(_ *LineBuffer) error {
 	return io.ErrShortWrite
 }

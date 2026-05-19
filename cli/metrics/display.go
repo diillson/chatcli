@@ -31,6 +31,19 @@ func FormatTimerStatus(d time.Duration, model, msg string) string {
 	dots := GetDotsAnimation()
 	return fmt.Sprintf("\r%s%s%s [%s%s%s%s] %s[%s]%s %s|%s %s%s%s%s", ColorCyan, spinner, ColorReset, ColorBold, ColorCyan, model, ColorReset, ColorGray, FormatDurationShort(d), ColorReset, ColorGray, ColorReset, ColorGray, msg, dots, ColorReset)
 }
+
+// FormatTimerStatusInline returns the same content as FormatTimerStatus
+// minus the leading \r (carriage return) and trailing ClearLine that
+// the legacy renderer needs to redraw in place. Use this when the
+// caller (e.g. turnui.UpdateStatus) is already positioning the cursor
+// on a dedicated row and clearing the line itself — the \r would
+// otherwise cancel the cursor positioning by snapping back to column 1
+// of whatever row the cursor happens to be on.
+func FormatTimerStatusInline(d time.Duration, model, msg string) string {
+	spinner := GetSpinnerFrame()
+	dots := GetDotsAnimation()
+	return fmt.Sprintf("%s%s%s [%s%s%s%s] %s[%s]%s %s|%s %s%s%s%s", ColorCyan, spinner, ColorReset, ColorBold, ColorCyan, model, ColorReset, ColorGray, FormatDurationShort(d), ColorReset, ColorGray, ColorReset, ColorGray, msg, dots, ColorReset)
+}
 func FormatTimerComplete(d time.Duration) string {
 	return fmt.Sprintf("%s%s %s", ColorGray, FormatDuration(d), ColorReset)
 }

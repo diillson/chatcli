@@ -306,22 +306,29 @@ func (t *TurnUI) Layout() Layout {
 	return t.layout
 }
 
+// Painter exposes the TurnUI as an InputPainter for callers that
+// spawn their own readline goroutine after BeginInteractive (the
+// agent loop does this so it can wire the OnSubmit callback into
+// its own queue plumbing without going through TurnUI.Run). The
+// returned value is the TurnUI itself; nothing is allocated.
+func (t *TurnUI) Painter() InputPainter { return t }
+
 // InputPrompt is the prefix that appears on the input row before the
 // user's typed text. Hard-coded for Phase B; future phases may make
 // it user-configurable. Chosen to match the visual idiom used by chat
 // mode's go-prompt prefix so users do not have to context-switch.
 const InputPrompt = "❯ "
 
-// paintInput repaints the input row: cursor to (InputRow, 1), clear,
+// PaintInput repaints the input row: cursor to (InputRow, 1), clear,
 // write prompt + buffer contents, leave cursor at the end so the next
 // keystroke echoes immediately after the last visible glyph. Required
 // by the inputPainter interface that RunReadLine uses.
 //
-// Unlike paintStatus, paintInput does NOT save/restore the cursor —
+// Unlike paintStatus, PaintInput does NOT save/restore the cursor —
 // the input row IS the cursor's home in the split UI. After this
 // returns the cursor is exactly where the user expects it to be: at
 // the end of their typed text on the input row.
-func (t *TurnUI) paintInput(buf *LineBuffer) error {
+func (t *TurnUI) PaintInput(buf *LineBuffer) error {
 	t.stateMu.Lock()
 	if !t.active {
 		t.stateMu.Unlock()

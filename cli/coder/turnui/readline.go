@@ -45,15 +45,18 @@ const (
 	InputEOF
 )
 
-// inputPainter is the abstraction the loop uses to repaint the input
+// InputPainter is the abstraction the loop uses to repaint the input
 // row after every buffer change. The TurnUI implements it; tests
 // supply a mock that records the redraws so we can assert on the
-// echo behavior without a real terminal.
-type inputPainter interface {
-	// paintInput moves the cursor to the input row, clears it,
+// echo behavior without a real terminal. Exported so packages outside
+// turnui (notably cli, where the agent loop spawns its own readline
+// goroutine after BeginInteractive) can plug in a custom painter or
+// reference the contract from a struct field.
+type InputPainter interface {
+	// PaintInput moves the cursor to the input row, clears it,
 	// writes the prompt and the buffer's current contents. Called
 	// after every state change in the line buffer.
-	paintInput(buf *LineBuffer) error
+	PaintInput(buf *LineBuffer) error
 }
 
 // ReadLineConfig bundles the dependencies the input loop needs.
@@ -66,7 +69,7 @@ type ReadLineConfig struct {
 	Reader io.Reader
 
 	// Painter repaints the input row on buffer changes. Required.
-	Painter inputPainter
+	Painter InputPainter
 
 	// OnSubmit is invoked when the user presses Enter with a non-
 	// empty buffer. The line is delivered already trimmed.
@@ -100,7 +103,7 @@ func RunReadLine(ctx context.Context, cfg ReadLineConfig) error {
 	}
 
 	buf := NewLineBuffer()
-	if err := cfg.Painter.paintInput(buf); err != nil {
+	if err := cfg.Painter.PaintInput(buf); err != nil {
 		return fmt.Errorf("turnui: initial input paint: %w", err)
 	}
 
@@ -141,14 +144,14 @@ func RunReadLine(ctx context.Context, cfg ReadLineConfig) error {
 
 			submit, exitLoop, repaint := applyKey(key, buf)
 			if repaint {
-				if err := cfg.Painter.paintInput(buf); err != nil {
+				if err := cfg.Painter.PaintInput(buf); err != nil {
 					return fmt.Errorf("turnui: paint after key: %w", err)
 				}
 			}
 			if submit && cfg.OnSubmit != nil {
 				line := buf.Trim()
 				buf.Reset()
-				if err := cfg.Painter.paintInput(buf); err != nil {
+				if err := cfg.Painter.PaintInput(buf); err != nil {
 					return fmt.Errorf("turnui: paint after submit: %w", err)
 				}
 				if line != "" {
@@ -160,7 +163,7 @@ func RunReadLine(ctx context.Context, cfg ReadLineConfig) error {
 					cfg.OnCancel()
 				}
 				buf.Reset()
-				if err := cfg.Painter.paintInput(buf); err != nil {
+				if err := cfg.Painter.PaintInput(buf); err != nil {
 					return fmt.Errorf("turnui: paint after cancel: %w", err)
 				}
 			}

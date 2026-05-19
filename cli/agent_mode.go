@@ -27,6 +27,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
+	"github.com/diillson/chatcli/cli/coder/turnui"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/metrics"
@@ -85,6 +86,20 @@ type AgentMode struct {
 	stdinDone    chan struct{} // signals reader goroutine to stop
 	stdinWg      sync.WaitGroup
 	multilineBuf MultilineBuffer // ``` delimited multiline input
+
+	// Split-pane UI (turnui). When non-nil and active, status updates
+	// go to the dedicated status row, agent output scrolls in the
+	// upper region, and keystrokes are owned by the mini-readline.
+	// The wait group lets defer cleanup synchronize on the input
+	// goroutine exiting before we tear down the terminal state.
+	// inputReady is signaled by the readline OnSubmit callback so
+	// the coder-waiting branch can park on a channel select instead
+	// of busy-polling drainStdinToQueue.
+	turnUI         *turnui.TurnUI
+	turnUIWg       sync.WaitGroup
+	turnUICancel   context.CancelFunc
+	turnUIActive   bool
+	turnUIInputReady chan struct{}
 
 	// Skill hints captured at the start of Run() from auto-activated or
 	// manually invoked skills. Applied to each LLM turn via ctx for the
@@ -227,6 +242,206 @@ func (a *AgentMode) stopStdinReader() {
 
 		a.stdinLines = nil
 		a.stdinDone = nil
+	}
+}
+
+// setupInputAndUI decides between the new split-pane (turnui) and the
+// legacy single-line spinner + cooked-mode stdin reader. The split UI
+// activates only when ShouldActivate returns true — non-TTY, dumb
+// terminals, undersized windows, the legacy Windows console, and the
+// CHATCLI_TURNUI=off escape hatch all route to the legacy path so a
+// terminal that cannot host the split UI is never wedged by it.
+//
+// In split-UI mode this function:
+//   - Allocates the inputReady signal channel and the stdinLines mirror.
+//     OnSubmit fills both: the channel wakes a parked coder-waiting
+//     loop, and the slice keeps drainStdinToQueue's contract intact.
+//   - Calls TurnUI.BeginInteractive to enter the scroll region and raw
+//     mode.
+//   - Spawns the readline goroutine and tracks it in turnUIWg so
+//     teardownInputAndUI can synchronize on its exit before returning.
+//
+// In legacy mode it just delegates to startStdinReader and leaves the
+// turnUI fields nil so every call site can check turnUIActive once
+// and pick the right code path.
+//
+// Returns a teardown function the caller MUST defer. Errors from the
+// split-UI path fall back to legacy automatically — the user gets
+// the old experience instead of a broken terminal.
+func (a *AgentMode) setupInputAndUI(ctx context.Context) func() {
+	env := turnui.DetectEnvironment()
+	if !turnui.ShouldActivate(env) {
+		a.startStdinReader()
+		return a.stopStdinReader
+	}
+
+	// Allocate signaling structures BEFORE TurnUI activation so the
+	// OnSubmit callback (which fires inside the readline goroutine)
+	// never races on a nil channel during the first few keystrokes.
+	a.turnUIInputReady = make(chan struct{}, 1)
+	a.stdinLines = make(chan string, 10) // legacy mirror — drainStdinToQueue still consumes from here
+
+	ui := turnui.New(os.Stdout)
+	loopCtx, cancel := context.WithCancel(ctx)
+
+	cfg := turnui.RunConfig{
+		Rows:    env.Rows,
+		Cols:    env.Cols,
+		StdinFD: env.StdinFD,
+		OnSubmit: func(line string) {
+			// Mirror the legacy splitStdinChunk -> stdinLines flow
+			// so consolidateStdinIntoQueue, the drainStdinToQueue
+			// slice promotion, and the echoQueuedLine status flash
+			// keep working unchanged. The agent loop does not need
+			// to know whether the line came from raw mode or cooked
+			// mode — only that it landed where it always has.
+			select {
+			case a.stdinLines <- line:
+			default:
+				// Channel full — drop oldest semantics would mean
+				// reordering; instead we lock-append directly to
+				// the durable slice and let the next drain pick it
+				// up. The 10-slot buffer is sized to never hit this
+				// path under realistic typing speeds.
+				a.cli.messageQueueMu.Lock()
+				a.cli.messageQueue = append(a.cli.messageQueue, line)
+				a.cli.messageQueueMu.Unlock()
+			}
+			// Wake any goroutine blocked in waitForInput. Non-
+			// blocking send so a missed wake (already pending) is
+			// fine — the consumer will see the queued line on its
+			// next drain.
+			select {
+			case a.turnUIInputReady <- struct{}{}:
+			default:
+			}
+		},
+		OnCancel: func() {
+			// In split-UI mode, Ctrl+C inside the input row clears
+			// the buffer but does NOT abort the agent loop — that
+			// matches the chat-mode handleCtrlC behavior of "first
+			// Ctrl+C clears, second exits". The hard-cancel path
+			// still runs via the OS signal handler.
+			a.logger.Debug("turnui OnCancel: input cleared")
+		},
+	}
+
+	// Begin first; if it fails the user has not seen any UI yet so
+	// we silently fall back to the legacy reader.
+	if err := ui.BeginInteractive(env.Rows, env.Cols, env.StdinFD); err != nil {
+		a.logger.Warn("turnui BeginInteractive failed, falling back to legacy", zap.Error(err))
+		cancel()
+		a.stdinLines = nil
+		a.turnUIInputReady = nil
+		a.startStdinReader()
+		return a.stopStdinReader
+	}
+
+	a.turnUI = ui
+	a.turnUICancel = cancel
+	a.turnUIActive = true
+
+	a.turnUIWg.Add(1)
+	go func() {
+		defer a.turnUIWg.Done()
+		// We re-use ui.RunReadLine equivalent via ui.Run, but
+		// Begin was already called above so we hand-roll the
+		// loop instead of letting Run call BeginInteractive a
+		// second time (which would error on "already active").
+		err := turnui.RunReadLine(loopCtx, turnui.ReadLineConfig{
+			Reader:   os.Stdin,
+			Painter:  ui.Painter(),
+			OnSubmit: cfg.OnSubmit,
+			OnCancel: cfg.OnCancel,
+		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			a.logger.Warn("turnui readline loop ended with error", zap.Error(err))
+		}
+	}()
+
+	return a.teardownInputAndUI
+}
+
+// teardownInputAndUI is the cleanup paired with setupInputAndUI. Safe
+// to call multiple times and from any goroutine; the second call is
+// a no-op. The function:
+//   1. Cancels the loop context so the readline goroutine exits its
+//      next read with a context.Canceled error.
+//   2. Waits on turnUIWg so we know the goroutine has finished its
+//      cleanup before we touch terminal state.
+//   3. Calls TurnUI.End to restore the scroll region and raw mode.
+//   4. Closes the legacy stdinLines mirror so drainStdinToQueue
+//      observes a closed channel as "nothing to drain".
+//
+// Order matters: ending the TurnUI BEFORE the readline goroutine
+// exits would race on the painter, and closing stdinLines before the
+// goroutine exits would cause a send-on-closed-channel panic in
+// OnSubmit.
+func (a *AgentMode) teardownInputAndUI() {
+	if !a.turnUIActive {
+		// Legacy mode: stopStdinReader is the only teardown step.
+		// Callers that received teardownInputAndUI from the legacy
+		// branch should never reach this path (they got
+		// a.stopStdinReader directly), but the guard makes the
+		// double-defer-safe contract explicit.
+		return
+	}
+	a.turnUIActive = false
+
+	if a.turnUICancel != nil {
+		a.turnUICancel()
+		a.turnUICancel = nil
+	}
+	a.turnUIWg.Wait()
+
+	if a.turnUI != nil {
+		if err := a.turnUI.End(); err != nil {
+			a.logger.Warn("turnui End failed", zap.Error(err))
+		}
+		a.turnUI = nil
+	}
+
+	if a.stdinLines != nil {
+		// Drain any remaining mirror entries into the durable slice
+		// so they survive into the next /coder session. Then nil
+		// the channel so drainStdinToQueue's nil-check skips it.
+		for {
+			select {
+			case line, ok := <-a.stdinLines:
+				if !ok {
+					a.stdinLines = nil
+					goto done
+				}
+				if line != "" {
+					a.cli.messageQueueMu.Lock()
+					a.cli.messageQueue = append(a.cli.messageQueue, line)
+					a.cli.messageQueueMu.Unlock()
+				}
+			default:
+				a.stdinLines = nil
+				goto done
+			}
+		}
+	done:
+	}
+
+	a.turnUIInputReady = nil
+}
+
+// waitForInput blocks until something lands on the turnUIInputReady
+// signal channel or ctx is canceled. Used by the coder-waiting branch
+// in the split-UI mode to park instead of calling readLineWithEditing
+// (which uses go-prompt and would conflict with the raw-mode TTY the
+// turnui already owns). Returns true when a new input arrived.
+func (a *AgentMode) waitForInput(ctx context.Context) bool {
+	if a.turnUIInputReady == nil {
+		return false
+	}
+	select {
+	case <-a.turnUIInputReady:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -1076,9 +1291,13 @@ func (a *AgentMode) getToolContextString() string {
 //
 //nolint:gocyclo // legacy main loop; split tracked separately.
 func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
-	// Start centralized stdin reader for type-ahead queue support
-	a.startStdinReader()
-	defer a.stopStdinReader()
+	// Set up input + UI: either the split-pane turnui (scroll region,
+	// dedicated status row, raw-mode mini-readline) or the legacy
+	// cooked-mode reader + single-line spinner, depending on what the
+	// terminal can host. setupInputAndUI returns the matching teardown
+	// so this defer cleans up whichever path activated.
+	teardown := a.setupInputAndUI(ctx)
+	defer teardown()
 
 	renderer := agent.NewUIRenderer(a.logger)
 
@@ -1269,7 +1488,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if queued > 0 {
 				msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
 			}
-			fmt.Print(metrics.FormatTimerStatus(d, modelName, msg))
+			// Route the status update through whichever renderer is
+			// active. In split-UI mode the message lands on the
+			// dedicated status row (no \r — the row position is
+			// owned by turnui's MoveCursor). In legacy mode the \r
+			// + clear-line redraw lives on the cursor's current
+			// row, with all the input-overwrite caveats the legacy
+			// renderer has always had.
+			if a.turnUIActive && a.turnUI != nil {
+				_ = a.turnUI.UpdateStatus(metrics.FormatTimerStatusInline(d, modelName, msg))
+			} else {
+				fmt.Print(metrics.FormatTimerStatus(d, modelName, msg))
+			}
 		})
 
 		turnHistory := buildTurnHistoryWithAnchor()
@@ -2515,6 +2745,44 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		if a.isCoderMode && !a.isOneShot {
 			showTurnStats()
 			fmt.Println()
+
+			// Split-UI mode: the readline goroutine is already
+			// running and the input row is always visible. Park
+			// on the inputReady signal until something lands in
+			// the queue, then drain it. We do NOT call
+			// readLineWithEditing here because that would try to
+			// start go-prompt in raw mode while turnui already
+			// owns the TTY — both would race for keystrokes.
+			if a.turnUIActive {
+				// Drain anything the user already typed BEFORE
+				// blocking — otherwise a fast-typing user who
+				// queued multiple lines during the LLM stream
+				// would see the spinner park while there's input
+				// waiting right in the slice.
+				if msg := a.drainStdinToQueue(); msg != "" {
+					a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
+					continue
+				}
+				// Update the status row to a "waiting" indicator
+				// instead of the spinner so it's obvious the
+				// agent is parked, not stuck.
+				if a.turnUI != nil {
+					_ = a.turnUI.UpdateStatus(i18n.T("coder.waiting_for_input"))
+				}
+				if !a.waitForInput(ctx) {
+					return ctx.Err()
+				}
+				if msg := a.drainStdinToQueue(); msg != "" {
+					a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
+					continue
+				}
+				// inputReady fired but the line was empty/whitespace
+				// (already discarded by drainStdinToQueue): loop
+				// back and park again instead of injecting an
+				// empty user message.
+				continue
+			}
+
 			fmt.Print(renderer.Colorize("  ⏳ "+i18n.T("coder.waiting_for_input"), agent.ColorCyan))
 			fmt.Println() // newline before input for clean cursor positioning
 
