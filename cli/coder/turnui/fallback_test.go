@@ -14,8 +14,9 @@ import (
 
 // TestShouldActivate_Truthy enumerates the environment shapes that
 // are expected to enable the split UI. Each "true" answer here is a
-// promise to the user: when these conditions hold, /coder uses the
-// split layout. Regressing any of them flags as a test failure.
+// promise to the user: when these conditions hold AND they have
+// opted in, /coder uses the split layout. Regressing any of them
+// flags as a test failure.
 func TestShouldActivate_Truthy(t *testing.T) {
 	env := Environment{
 		StdinFD:     0,
@@ -25,8 +26,27 @@ func TestShouldActivate_Truthy(t *testing.T) {
 		Cols:        120,
 		GOOS:        "linux",
 		TermType:    "xterm-256color",
+		OptIn:       true,
 	}
 	assert.True(t, ShouldActivate(env))
+}
+
+// TestShouldActivate_DefaultOff is the post-cascading-spinner-bug
+// invariant: with everything else looking perfect, a user who has
+// NOT set CHATCLI_TURNUI=on still gets the legacy renderer. The
+// split UI is opt-in until terminal cooperation is proven per host.
+func TestShouldActivate_DefaultOff(t *testing.T) {
+	env := Environment{
+		IsStdinTTY:  true,
+		IsStdoutTTY: true,
+		Rows:        40,
+		Cols:        120,
+		GOOS:        "linux",
+		TermType:    "xterm-256color",
+		// OptIn: false (zero value)
+	}
+	assert.False(t, ShouldActivate(env),
+		"opt-in gate must veto every activation when CHATCLI_TURNUI is not 'on'")
 }
 
 // TestShouldActivate_Veto walks every fallback branch and confirms
@@ -42,13 +62,14 @@ func TestShouldActivate_Veto(t *testing.T) {
 		Cols:        120,
 		GOOS:        "linux",
 		TermType:    "xterm-256color",
+		OptIn:       true,
 	}
 
 	tests := []struct {
 		name string
 		mut  func(*Environment)
 	}{
-		{"CHATCLI_TURNUI=off pinned", func(e *Environment) { e.ForceDisabled = true }},
+		{"CHATCLI_TURNUI unset", func(e *Environment) { e.OptIn = false }},
 		{"stdin is a pipe", func(e *Environment) { e.IsStdinTTY = false }},
 		{"stdout is redirected", func(e *Environment) { e.IsStdoutTTY = false }},
 		{"TERM=dumb (Emacs M-x shell)", func(e *Environment) { e.TermType = "dumb" }},
@@ -66,21 +87,22 @@ func TestShouldActivate_Veto(t *testing.T) {
 	}
 }
 
-// TestShouldActivate_ForceDisabledBeatsEverything makes the escape
-// hatch explicit. A user who sets CHATCLI_TURNUI=off has decided the
-// split UI is broken on their setup; we honor that no matter how good
-// every other signal looks.
-func TestShouldActivate_ForceDisabledBeatsEverything(t *testing.T) {
+// TestShouldActivate_OptInRespectsOtherGates ensures that even an
+// explicit CHATCLI_TURNUI=on cannot override a non-TTY or dumb-TERM
+// veto. The opt-in is "I want it IF possible", not "force it even
+// when broken".
+func TestShouldActivate_OptInRespectsOtherGates(t *testing.T) {
 	env := Environment{
-		IsStdinTTY:    true,
-		IsStdoutTTY:   true,
-		Rows:          200,
-		Cols:          400,
-		GOOS:          "linux",
-		TermType:      "xterm-256color",
-		ForceDisabled: true,
+		IsStdinTTY:  false, // pipe — fatal regardless of OptIn
+		IsStdoutTTY: true,
+		Rows:        40,
+		Cols:        120,
+		GOOS:        "linux",
+		TermType:    "xterm-256color",
+		OptIn:       true,
 	}
-	assert.False(t, ShouldActivate(env))
+	assert.False(t, ShouldActivate(env),
+		"OptIn cannot override the non-TTY gate — escape sequences would corrupt the pipe")
 }
 
 // TestMinSizes_AreConservative is a tripwire: if a future change tries

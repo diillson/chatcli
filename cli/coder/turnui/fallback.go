@@ -78,11 +78,16 @@ type Environment struct {
 	// even when off, so we honor that signal as a fallback hint.
 	NoColor bool
 
-	// ForceDisabled lets the user pin the legacy renderer via the
-	// CHATCLI_TURNUI=off escape hatch, regardless of every other
-	// signal. The opposite ("force on") is intentionally NOT
-	// supported — if the environment says "no", we trust it.
-	ForceDisabled bool
+	// OptIn is the user's explicit "yes, please use the split UI"
+	// vote — set when CHATCLI_TURNUI=on. The split renderer is
+	// opt-in (not auto-detect) because terminals vary widely in
+	// how they honor DECSTBM + cursor save/restore; bad behavior
+	// in a non-cooperative emulator looks like cascading spinner
+	// lines and is far worse than the legacy renderer it would
+	// replace. Off-by-default is conservative — opt-in here, not
+	// opt-out, is intentional after a real-world cascading-spinner
+	// bug surfaced on a popular IDE-integrated terminal.
+	OptIn bool
 }
 
 // DetectEnvironment snapshots the live process state into an
@@ -91,13 +96,13 @@ type Environment struct {
 // state once and rely on SIGWINCH-driven re-evaluation for resize.
 func DetectEnvironment() Environment {
 	env := Environment{
-		StdinFD:       int(os.Stdin.Fd()), // #nosec G115 -- Fd() is uintptr; values fit int on every supported platform.
-		IsStdinTTY:    term.IsTerminal(int(os.Stdin.Fd())),
-		IsStdoutTTY:   term.IsTerminal(int(os.Stdout.Fd())),
-		GOOS:          runtime.GOOS,
-		TermType:      os.Getenv("TERM"),
-		NoColor:       os.Getenv("NO_COLOR") != "",
-		ForceDisabled: os.Getenv("CHATCLI_TURNUI") == "off",
+		StdinFD:     int(os.Stdin.Fd()), // #nosec G115 -- Fd() is uintptr; values fit int on every supported platform.
+		IsStdinTTY:  term.IsTerminal(int(os.Stdin.Fd())),
+		IsStdoutTTY: term.IsTerminal(int(os.Stdout.Fd())),
+		GOOS:        runtime.GOOS,
+		TermType:    os.Getenv("TERM"),
+		NoColor:     os.Getenv("NO_COLOR") != "",
+		OptIn:       os.Getenv("CHATCLI_TURNUI") == "on",
 	}
 	if env.IsStdoutTTY {
 		if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
@@ -109,19 +114,25 @@ func DetectEnvironment() Environment {
 }
 
 // ShouldActivate returns true when every prerequisite for the split UI
-// is satisfied and the legacy fallback should be skipped. The function
-// is pure: same Environment in, same answer out — so the agent loop
-// can call it once at Begin and trust the result for the turn (modulo
-// SIGWINCH-triggered re-evaluation).
+// is satisfied AND the user has explicitly opted in via
+// CHATCLI_TURNUI=on. The function is pure: same Environment in, same
+// answer out — so the agent loop can call it once at Begin and trust
+// the result for the turn (modulo SIGWINCH-triggered re-evaluation).
 //
-// The order of checks mirrors blast radius. ForceDisabled is first
-// because it's the user's explicit veto; non-TTY is second because
-// drawing escape codes into a non-terminal corrupts logs; dumb-TERM is
-// third because it's the loudest "I don't speak ANSI" signal; size is
-// last because it's the most likely transient failure (a small split
-// pane that the user might resize).
+// The opt-in gate is first: even on a perfectly-suitable terminal,
+// the split renderer stays disabled until the user asks for it. This
+// is a deliberate conservatism — DECSTBM + cursor save/restore behave
+// inconsistently across emulators (a popular IDE-integrated terminal
+// produced a cascading-spinner failure mode) and the legacy renderer
+// is the safer default. Once the user knows their terminal cooperates
+// they can flip the env var per session.
+//
+// The remaining gates are tripwires for known-bad shapes: non-TTY
+// would corrupt logs with escape sequences, dumb-TERM cannot honor
+// the cursor commands, and an undersized terminal would render the
+// split layout overlapping.
 func ShouldActivate(env Environment) bool {
-	if env.ForceDisabled {
+	if !env.OptIn {
 		return false
 	}
 	if !env.IsStdinTTY || !env.IsStdoutTTY {
