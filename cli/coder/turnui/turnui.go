@@ -434,14 +434,21 @@ func (t *TurnUI) Resume(rows, cols, fd int) error {
 const InputPrompt = "❯ "
 
 // PaintInput repaints the input row: cursor to (InputRow, 1), clear,
-// write prompt + buffer contents, leave cursor at the end so the next
-// keystroke echoes immediately after the last visible glyph. Required
-// by the inputPainter interface that RunReadLine uses.
+// write prompt + buffer contents, then position the cursor at the
+// column matching the buffer's logical cursor (which can be anywhere
+// in the buffer after Phase G's arrow-key navigation, not just at
+// the end). Required by the InputPainter interface that RunReadLine
+// uses.
 //
 // Unlike paintStatus, PaintInput does NOT save/restore the cursor —
 // the input row IS the cursor's home in the split UI. After this
-// returns the cursor is exactly where the user expects it to be: at
-// the end of their typed text on the input row.
+// returns the cursor sits at the column where the next keystroke
+// will insert / overwrite.
+//
+// Cursor column math: InputPrompt is two visible columns ("❯ ") plus
+// the buffer cursor offset. Both are 1-based on the wire (CUP uses
+// 1 for the leftmost column), so the final column is
+// promptWidth + buf.Cursor() + 1.
 func (t *TurnUI) PaintInput(buf *LineBuffer) error {
 	t.stateMu.Lock()
 	if !t.active {
@@ -460,8 +467,19 @@ func (t *TurnUI) PaintInput(buf *LineBuffer) error {
 	if err := ClearLine(t.out); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(t.out, "%s%s", InputPrompt, buf.String())
-	return err
+	if _, err := fmt.Fprintf(t.out, "%s%s", InputPrompt, buf.String()); err != nil {
+		return err
+	}
+	// Position the cursor at the logical insertion point. The
+	// prompt "❯ " is two visible columns; the buffer cursor adds
+	// its rune offset. CUP is 1-based, so the final col is
+	// promptWidth (2) + cursorOffset + 1. The MoveCursor here is
+	// what makes arrow-key navigation visible — without it the
+	// terminal cursor would sit after the last rune painted even
+	// when the user navigated mid-line, and Insert would appear
+	// to add characters at the end instead of where the cursor
+	// logically is.
+	return MoveCursor(t.out, layout.InputRow, 2+buf.Cursor()+1)
 }
 
 // paintStatus is the bare-bytes status redraw. Pulled out so tests

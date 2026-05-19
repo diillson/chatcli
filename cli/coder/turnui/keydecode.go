@@ -64,9 +64,37 @@ const (
 	// the previous word".
 	KeyCtrlW
 
-	// KeyUnknown covers escape sequences (arrows, function keys),
-	// mouse events, and anything else Phase B does not handle. The
-	// loop discards it so the user's terminal does not see a stray
+	// KeyCtrlA is SOH (0x01) — move cursor to beginning of line.
+	// Readline / bash muscle memory.
+	KeyCtrlA
+
+	// KeyCtrlE is ENQ (0x05) — move cursor to end of line.
+	// Companion to KeyCtrlA.
+	KeyCtrlE
+
+	// KeyArrowLeft / Right move the cursor one rune within the
+	// buffer. Decoded from the standard CSI A/B/C/D sequences plus
+	// the modern application-mode SS3 variants some terminals
+	// emit. Up/Down are reserved for history navigation.
+	KeyArrowLeft
+	KeyArrowRight
+	KeyArrowUp
+	KeyArrowDown
+
+	// KeyHome / KeyEnd are the dedicated keys on most keyboards.
+	// Distinct from Ctrl+A / Ctrl+E because some users have one
+	// and not the other; supporting both costs almost nothing.
+	KeyHome
+	KeyEnd
+
+	// KeyDelete is forward delete (the "Delete" key, not Backspace).
+	// Decoded from CSI 3 ~ which is the canonical sequence on
+	// every terminal that has the key.
+	KeyDelete
+
+	// KeyUnknown covers escape sequences (function keys, mouse
+	// events) and anything else the loop does not handle. The loop
+	// discards it so the user's terminal does not see a stray
 	// escape sequence appear inline.
 	KeyUnknown
 )
@@ -98,10 +126,14 @@ func DecodeOne(buf []byte) (Key, int) {
 	b := buf[0]
 
 	switch b {
+	case 0x01:
+		return Key{Kind: KeyCtrlA}, 1
 	case 0x03:
 		return Key{Kind: KeyCtrlC}, 1
 	case 0x04:
 		return Key{Kind: KeyCtrlD}, 1
+	case 0x05:
+		return Key{Kind: KeyCtrlE}, 1
 	case 0x08, 0x7f:
 		return Key{Kind: KeyBackspace}, 1
 	case 0x0a, 0x0d:
@@ -150,16 +182,25 @@ func DecodeOne(buf []byte) (Key, int) {
 	return Key{Kind: KeyChar, Rune: r}, size
 }
 
-// decodeEscape consumes the bytes belonging to an unrecognized escape
-// sequence starting with ESC. It returns KeyUnknown so the input loop
-// drops the sequence rather than letting the terminal render it as
-// literals. The lengths handled here mirror the most common short
-// sequences:
+// decodeEscape consumes the bytes belonging to an escape sequence
+// starting with ESC and identifies arrows, Home, End, Delete, and
+// other navigation keys. Unknown sequences are consumed (so they
+// don't leak into the buffer as garbage) and reported as KeyUnknown.
 //
-//	ESC alone       → 1 byte  (user pressed Esc; treated as unknown)
-//	ESC [ X         → 3 bytes (CSI + final byte: arrow keys, etc.)
-//	ESC [ N ~       → 4 bytes (CSI + digit + tilde: page up, etc.)
-//	ESC O X         → 3 bytes (SS3: F1..F4 on some terminals)
+// Recognized sequences:
+//
+//	ESC [ A / B / C / D    arrow Up / Down / Right / Left (CSI)
+//	ESC [ H / F            Home / End (CSI, xterm convention)
+//	ESC [ 1 ~ / 7 ~        Home (alternate forms)
+//	ESC [ 4 ~ / 8 ~        End (alternate forms)
+//	ESC [ 3 ~              Delete (forward delete)
+//	ESC O A / B / C / D    arrows (SS3, application mode)
+//	ESC O H / F            Home / End (SS3)
+//
+// CSI variants with modifiers (e.g. ESC [ 1 ; 5 D for Ctrl+Left)
+// are consumed as KeyUnknown — the buffer doesn't need them yet, but
+// they MUST be swallowed so the modifier prefix doesn't end up
+// echoed as literal text.
 //
 // Anything longer (mouse events, OSC, DCS) falls into a generous
 // catch-all of "skip until a final byte in 0x40..0x7e" capped at 16
@@ -178,10 +219,37 @@ func decodeEscape(buf []byte) (Key, int) {
 		if len(buf) < 3 {
 			return Key{Kind: KeyUnknown}, 0
 		}
-		// CSI sequences end on a byte in 0x40..0x7e. Scan ahead
-		// up to 16 bytes; that comfortably covers arrow keys,
-		// page nav, and SGR mouse reports (which we don't act on
-		// but must consume to keep them out of the buffer).
+		// Short forms: ESC [ X where X is the final byte.
+		switch buf[2] {
+		case 'A':
+			return Key{Kind: KeyArrowUp}, 3
+		case 'B':
+			return Key{Kind: KeyArrowDown}, 3
+		case 'C':
+			return Key{Kind: KeyArrowRight}, 3
+		case 'D':
+			return Key{Kind: KeyArrowLeft}, 3
+		case 'H':
+			return Key{Kind: KeyHome}, 3
+		case 'F':
+			return Key{Kind: KeyEnd}, 3
+		}
+		// Longer forms: ESC [ <param(s)> <final>. We hand-decode
+		// the few we care about and fall back to "swallow up to
+		// the final byte" for the rest.
+		if len(buf) >= 4 && buf[3] == '~' {
+			switch buf[2] {
+			case '1', '7':
+				return Key{Kind: KeyHome}, 4
+			case '3':
+				return Key{Kind: KeyDelete}, 4
+			case '4', '8':
+				return Key{Kind: KeyEnd}, 4
+			}
+		}
+		// Generic CSI consume: scan to a final byte (0x40..0x7e)
+		// up to 16 bytes. Covers modified arrows (ESC [ 1;5 D),
+		// SGR mouse reports, etc. — all dropped as KeyUnknown.
 		end := 2
 		for end < len(buf) && end < 16 {
 			if buf[end] >= 0x40 && buf[end] <= 0x7e {
@@ -189,11 +257,24 @@ func decodeEscape(buf []byte) (Key, int) {
 			}
 			end++
 		}
-		// Incomplete: wait for more bytes.
 		return Key{Kind: KeyUnknown}, 0
-	case 'O': // SS3
+	case 'O': // SS3 (application mode)
 		if len(buf) < 3 {
 			return Key{Kind: KeyUnknown}, 0
+		}
+		switch buf[2] {
+		case 'A':
+			return Key{Kind: KeyArrowUp}, 3
+		case 'B':
+			return Key{Kind: KeyArrowDown}, 3
+		case 'C':
+			return Key{Kind: KeyArrowRight}, 3
+		case 'D':
+			return Key{Kind: KeyArrowLeft}, 3
+		case 'H':
+			return Key{Kind: KeyHome}, 3
+		case 'F':
+			return Key{Kind: KeyEnd}, 3
 		}
 		return Key{Kind: KeyUnknown}, 3
 	default:

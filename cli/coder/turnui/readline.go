@@ -78,6 +78,12 @@ type ReadLineConfig struct {
 	// OnCancel is invoked on Ctrl+C. The loop continues; it is up
 	// to the agent to translate cancel into "abort the LLM turn".
 	OnCancel func()
+
+	// History is the ↑/↓ navigation stack. Optional — when nil
+	// the arrow keys for history are dropped silently. The loop
+	// appends submitted lines automatically; the caller does not
+	// need to manage history population.
+	History *History
 }
 
 // RunReadLine drives the read-decode-paint loop until ctx is canceled
@@ -142,6 +148,31 @@ func RunReadLine(ctx context.Context, cfg ReadLineConfig) error {
 			}
 			stream = stream[consumed:]
 
+			// History keys are handled BEFORE applyKey because
+			// they need access to the History (not the buffer
+			// alone) and they replace the entire buffer rather
+			// than mutating it incrementally. applyKey stays a
+			// pure function over (Key, *LineBuffer) for its own
+			// unit tests; history is a loop-level concern.
+			if key.Kind == KeyArrowUp || key.Kind == KeyArrowDown {
+				if cfg.History != nil {
+					var recalled string
+					var ok bool
+					if key.Kind == KeyArrowUp {
+						recalled, ok = cfg.History.Up(buf.String())
+					} else {
+						recalled, ok = cfg.History.Down()
+					}
+					if ok {
+						buf.SetContents(recalled)
+						if err := cfg.Painter.PaintInput(buf); err != nil {
+							return fmt.Errorf("turnui: paint after history: %w", err)
+						}
+					}
+				}
+				continue
+			}
+
 			submit, exitLoop, repaint := applyKey(key, buf)
 			if repaint {
 				if err := cfg.Painter.PaintInput(buf); err != nil {
@@ -155,6 +186,9 @@ func RunReadLine(ctx context.Context, cfg ReadLineConfig) error {
 					return fmt.Errorf("turnui: paint after submit: %w", err)
 				}
 				if line != "" {
+					if cfg.History != nil {
+						cfg.History.Append(line)
+					}
 					cfg.OnSubmit(line)
 				}
 			}
@@ -163,6 +197,9 @@ func RunReadLine(ctx context.Context, cfg ReadLineConfig) error {
 					cfg.OnCancel()
 				}
 				buf.Reset()
+				if cfg.History != nil {
+					cfg.History.Reset()
+				}
 				if err := cfg.Painter.PaintInput(buf); err != nil {
 					return fmt.Errorf("turnui: paint after cancel: %w", err)
 				}
@@ -189,13 +226,21 @@ const (
 // what the loop should do next. Pure function over (Key, buffer); no
 // IO, no terminal writes — those happen in the loop. Pulled out so
 // the per-key behavior table has its own focused unit tests.
+//
+// History keys (KeyArrowUp / KeyArrowDown) are intentionally NOT
+// handled here — they need access to the History stack, which lives
+// in the loop closure. The loop dispatches them before calling
+// applyKey; this function only sees the navigation-within-buffer
+// keys (arrows left/right, Home/End/Ctrl+A/Ctrl+E, Delete).
 func applyKey(key Key, buf *LineBuffer) (submit bool, exit exitKind, repaint bool) {
 	switch key.Kind {
 	case KeyChar:
-		buf.Append(key.Rune)
+		buf.Insert(key.Rune)
 		return false, exitNone, true
 	case KeyBackspace:
 		return false, exitNone, buf.Backspace()
+	case KeyDelete:
+		return false, exitNone, buf.Delete()
 	case KeyEnter:
 		return true, exitNone, false
 	case KeyCtrlC:
@@ -212,6 +257,14 @@ func applyKey(key Key, buf *LineBuffer) (submit bool, exit exitKind, repaint boo
 		return false, exitNone, buf.KillLine()
 	case KeyCtrlW:
 		return false, exitNone, buf.KillWord()
+	case KeyArrowLeft:
+		return false, exitNone, buf.MoveLeft()
+	case KeyArrowRight:
+		return false, exitNone, buf.MoveRight()
+	case KeyHome, KeyCtrlA:
+		return false, exitNone, buf.MoveStart()
+	case KeyEnd, KeyCtrlE:
+		return false, exitNone, buf.MoveEnd()
 	default:
 		return false, exitNone, false
 	}

@@ -114,6 +114,14 @@ type AgentMode struct {
 	turnUIEnvCols  int
 	turnUIEnvFD    int
 
+	// turnUIHistory is the ↑/↓ navigation stack shared by every
+	// readline goroutine spawned across the lifetime of a single
+	// /coder run. Created once in setupInputAndUI and reused on
+	// Suspend/Resume (so a security prompt does not clear history)
+	// and across turn boundaries (so the user can ↑ to recall a
+	// follow-up they typed three turns ago).
+	turnUIHistory *turnui.History
+
 	// Skill hints captured at the start of Run() from auto-activated or
 	// manually invoked skills. Applied to each LLM turn via ctx for the
 	// duration of the agent loop. Cleared when the loop exits.
@@ -335,6 +343,7 @@ func (a *AgentMode) setupInputAndUI(ctx context.Context) func() {
 	a.turnUIEnvRows = env.Rows
 	a.turnUIEnvCols = env.Cols
 	a.turnUIEnvFD = env.StdinFD
+	a.turnUIHistory = turnui.NewHistory(turnui.DefaultHistoryCap)
 
 	a.spawnReadlineGoroutine()
 
@@ -369,6 +378,7 @@ func (a *AgentMode) spawnReadlineGoroutine() {
 			Painter:  a.turnUI.Painter(),
 			OnSubmit: a.turnUIOnSubmit,
 			OnCancel: a.turnUIOnCancel,
+			History:  a.turnUIHistory,
 		})
 		if err != nil && !errors.Is(err, context.Canceled) {
 			a.logger.Warn("turnui readline loop ended with error", zap.Error(err))

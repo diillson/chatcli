@@ -338,3 +338,145 @@ type erroringPainter struct{}
 func (e *erroringPainter) PaintInput(_ *LineBuffer) error {
 	return io.ErrShortWrite
 }
+
+// TestApplyKey_NavigationKeysMutateCursor covers the keys Phase G
+// added: ←/→/Home/End/Ctrl+A/Ctrl+E move the buffer cursor, Delete
+// removes forward. Each behaves as a no-op when the cursor cannot
+// move (start/end of line) — the bool return is the paint signal.
+func TestApplyKey_NavigationKeysMutateCursor(t *testing.T) {
+	tests := []struct {
+		name      string
+		seed      string
+		startPos  int
+		key       Key
+		wantBuf   string
+		wantCur   int
+		wantPaint bool
+	}{
+		{"left moves cursor back", "abc", 3, Key{KeyArrowLeft, 0}, "abc", 2, true},
+		{"left no-op at col 0", "abc", 0, Key{KeyArrowLeft, 0}, "abc", 0, false},
+		{"right moves cursor forward", "abc", 0, Key{KeyArrowRight, 0}, "abc", 1, true},
+		{"right no-op at end", "abc", 3, Key{KeyArrowRight, 0}, "abc", 3, false},
+		{"home jumps to start", "abc", 3, Key{KeyHome, 0}, "abc", 0, true},
+		{"ctrl+a jumps to start", "abc", 3, Key{KeyCtrlA, 0}, "abc", 0, true},
+		{"end jumps to end", "abc", 0, Key{KeyEnd, 0}, "abc", 3, true},
+		{"ctrl+e jumps to end", "abc", 0, Key{KeyCtrlE, 0}, "abc", 3, true},
+		{"delete removes at cursor", "abc", 1, Key{KeyDelete, 0}, "ac", 1, true},
+		{"delete no-op at end", "abc", 3, Key{KeyDelete, 0}, "abc", 3, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := NewLineBuffer()
+			for _, r := range tc.seed {
+				buf.Append(r)
+			}
+			// Move cursor to the start position via MoveStart +
+			// N×MoveRight so the test does not depend on internal
+			// representation.
+			buf.MoveStart()
+			for i := 0; i < tc.startPos; i++ {
+				buf.MoveRight()
+			}
+			_, _, repaint := applyKey(tc.key, buf)
+			assert.Equal(t, tc.wantBuf, buf.String())
+			assert.Equal(t, tc.wantCur, buf.Cursor())
+			assert.Equal(t, tc.wantPaint, repaint)
+		})
+	}
+}
+
+// TestRunReadLine_HistoryUpAndDown wires the History through the
+// loop and exercises ↑↓ navigation end-to-end. The scripted reader
+// submits "first" and "second", then ↑ recalls "second", ↑ recalls
+// "first", ↓ goes back to "second", ↓ restores the empty draft.
+// The frame snapshot captures the buffer contents after each paint.
+func TestRunReadLine_HistoryUpAndDown(t *testing.T) {
+	painter := &fakePainter{}
+	hist := NewHistory(10)
+	hist.Append("first")
+	hist.Append("second")
+
+	var submissions []string
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	reader := &scriptedReader{chunks: [][]byte{
+		{0x1b, '[', 'A'},                                          // ↑ → "second"
+		{0x1b, '[', 'A'},                                          // ↑ → "first"
+		{0x1b, '[', 'B'},                                          // ↓ → "second"
+		{0x1b, '[', 'B'},                                          // ↓ → restore empty draft
+		[]byte("hi"),                                              // type
+		{0x0d},                                                    // Enter
+	}}
+
+	cfg := ReadLineConfig{
+		Reader:  reader,
+		Painter: painter,
+		History: hist,
+		OnSubmit: func(line string) {
+			mu.Lock()
+			submissions = append(submissions, line)
+			mu.Unlock()
+			wg.Done()
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- RunReadLine(ctx, cfg) }()
+	wg.Wait()
+	cancel()
+	require.NoError(t, <-errCh)
+
+	assert.Equal(t, []string{"hi"}, submissions)
+
+	// History should now contain first, second, hi (the most
+	// recent submission was appended).
+	assert.Equal(t, 3, hist.Len())
+
+	// Frames should include the recalled entries.
+	frames := painter.framesSnapshot()
+	assert.Contains(t, frames, "second")
+	assert.Contains(t, frames, "first")
+	assert.Contains(t, frames, "hi")
+}
+
+// TestRunReadLine_ArrowsMoveCursorInBuffer is the integration test
+// for inline navigation. Type "ad", ←, insert "bc", Enter →
+// submission is "abcd" (not "adbc" or "bcad"). Without the cursor-
+// aware Insert path the test fails with the latter strings.
+func TestRunReadLine_ArrowsMoveCursorInBuffer(t *testing.T) {
+	painter := &fakePainter{}
+	var submitted string
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	reader := &scriptedReader{chunks: [][]byte{
+		[]byte("ad"),
+		{0x1b, '[', 'D'}, // ←
+		[]byte("bc"),
+		{0x0d}, // Enter
+	}}
+
+	cfg := ReadLineConfig{
+		Reader:  reader,
+		Painter: painter,
+		OnSubmit: func(line string) {
+			submitted = line
+			wg.Done()
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- RunReadLine(ctx, cfg) }()
+	wg.Wait()
+	cancel()
+	require.NoError(t, <-errCh)
+
+	assert.Equal(t, "abcd", submitted, "← + Insert places chars at cursor, not at end")
+}

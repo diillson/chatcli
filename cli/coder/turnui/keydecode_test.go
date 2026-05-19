@@ -105,21 +105,80 @@ func TestDecodeOne_InvalidUTF8ByteIsDropped(t *testing.T) {
 	assert.Equal(t, 1, n)
 }
 
-// TestDecodeOne_EscapeSequencesAreSwallowed makes sure arrow keys
-// and other escape sequences do not leak into the input buffer as
-// literal "[A" / "[B" garbage. Phase B does not act on them, but it
-// MUST consume them — Phase A's tests asserted nothing about input,
-// so this is the first chance to lock the swallow-don't-leak contract.
+// TestDecodeOne_NavigationKeys covers the keys Phase G added support
+// for: arrows (both CSI and SS3 forms), Home, End, Delete. These
+// MUST be recognized as named keys so the buffer can act on them;
+// dropping them as Unknown would mean the user's ↑/↓ for history
+// and ←/→ for cursor movement silently fail.
+func TestDecodeOne_NavigationKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []byte
+		want KeyKind
+		size int
+	}{
+		{"up arrow CSI A", []byte{0x1b, '[', 'A'}, KeyArrowUp, 3},
+		{"down arrow CSI B", []byte{0x1b, '[', 'B'}, KeyArrowDown, 3},
+		{"right arrow CSI C", []byte{0x1b, '[', 'C'}, KeyArrowRight, 3},
+		{"left arrow CSI D", []byte{0x1b, '[', 'D'}, KeyArrowLeft, 3},
+		{"home CSI H", []byte{0x1b, '[', 'H'}, KeyHome, 3},
+		{"end CSI F", []byte{0x1b, '[', 'F'}, KeyEnd, 3},
+		{"home alternate CSI 1 ~", []byte{0x1b, '[', '1', '~'}, KeyHome, 4},
+		{"home alternate CSI 7 ~", []byte{0x1b, '[', '7', '~'}, KeyHome, 4},
+		{"end alternate CSI 4 ~", []byte{0x1b, '[', '4', '~'}, KeyEnd, 4},
+		{"end alternate CSI 8 ~", []byte{0x1b, '[', '8', '~'}, KeyEnd, 4},
+		{"delete CSI 3 ~", []byte{0x1b, '[', '3', '~'}, KeyDelete, 4},
+		{"arrow Up SS3 (application mode)", []byte{0x1b, 'O', 'A'}, KeyArrowUp, 3},
+		{"arrow Down SS3", []byte{0x1b, 'O', 'B'}, KeyArrowDown, 3},
+		{"home SS3", []byte{0x1b, 'O', 'H'}, KeyHome, 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			k, n := DecodeOne(tc.in)
+			assert.Equal(t, tc.want, k.Kind)
+			assert.Equal(t, tc.size, n)
+		})
+	}
+}
+
+// TestDecodeOne_CtrlAandE matches the Ctrl+A / Ctrl+E readline
+// muscle memory for jumping to line start/end. The byte values
+// (0x01 / 0x05) are non-obvious; the test pins them so a future
+// "control byte cleanup" pass cannot silently break the muscle
+// memory.
+func TestDecodeOne_CtrlAandE(t *testing.T) {
+	tests := []struct {
+		name string
+		b    byte
+		want KeyKind
+	}{
+		{"Ctrl+A (SOH 0x01)", 0x01, KeyCtrlA},
+		{"Ctrl+E (ENQ 0x05)", 0x05, KeyCtrlE},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			k, n := DecodeOne([]byte{tc.b})
+			assert.Equal(t, tc.want, k.Kind)
+			assert.Equal(t, 1, n)
+		})
+	}
+}
+
+// TestDecodeOne_EscapeSequencesAreSwallowed pins the swallow-don't-
+// leak contract for escape sequences Phase G does NOT recognize:
+// function keys, modifier-prefixed arrows, page navigation. The
+// decoder must consume them so they don't appear as literal "[5~"
+// in the input buffer, but it does NOT surface them as named keys.
 func TestDecodeOne_EscapeSequencesAreSwallowed(t *testing.T) {
 	tests := []struct {
 		name string
 		in   []byte
 		size int
 	}{
-		{"up arrow CSI A", []byte{0x1b, '[', 'A'}, 3},
-		{"down arrow CSI B", []byte{0x1b, '[', 'B'}, 3},
 		{"F1 SS3 P", []byte{0x1b, 'O', 'P'}, 3},
 		{"page-up CSI 5 ~", []byte{0x1b, '[', '5', '~'}, 4},
+		{"page-down CSI 6 ~", []byte{0x1b, '[', '6', '~'}, 4},
+		{"Ctrl+Left CSI 1;5 D", []byte{0x1b, '[', '1', ';', '5', 'D'}, 6},
 		{"bare Esc", []byte{0x1b}, 1},
 	}
 	for _, tc := range tests {
