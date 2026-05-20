@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.119.0](https://github.com/diillson/chatcli/compare/v1.118.1...v1.119.0) (2026-05-20)
+
+
+### Features
+
+* **ui:** cross-mode UI polish — i18n, red errors, lipgloss cards, unified banners ([#938](https://github.com/diillson/chatcli/issues/938)) ([2a47bdf](https://github.com/diillson/chatcli/commit/2a47bdf0f01b5a36e3444a219d7197616b8e8ac8))
+
 ## [1.118.1](https://github.com/diillson/chatcli/compare/v1.118.0...v1.118.1) (2026-05-19)
 
 
