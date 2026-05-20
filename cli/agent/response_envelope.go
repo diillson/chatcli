@@ -124,8 +124,8 @@ type ResponseEnvelopeOptions struct {
 // RenderResponseEnvelope paints the assistant's reply in a bordered
 // box. Mechanics:
 //
-//  1. Resolve the cap (caller-pinned Width, otherwise live terminal).
-//  2. Wrap body to inner = cap − borders (2) − padding (4).
+//  1. Resolve the max width (caller-pinned Width, otherwise live terminal).
+//  2. Wrap body to inner = maxWidth − borders (2) − padding (4).
 //  3. Measure the widest wrapped body line.
 //  4. Grow the card so it also fits the header & footer labels with
 //     at least 2 dashes of breathing room on each side. Without this
@@ -145,17 +145,17 @@ type ResponseEnvelopeOptions struct {
 // the terminal. Thanks to the init() normalization, they now usually
 // agree with the terminal too.
 func (r *UIRenderer) RenderResponseEnvelope(opts ResponseEnvelopeOptions) {
-	cap := opts.Width
-	if cap <= 0 {
-		cap = EnvelopeWidth()
+	maxWidth := opts.Width
+	if maxWidth <= 0 {
+		maxWidth = EnvelopeWidth()
 	}
-	if cap < 24 {
-		cap = 24
+	if maxWidth < 24 {
+		maxWidth = 24
 	}
 
 	// innerOverhead: 2 borders + 4 horizontal padding (Padding(0,2)).
 	const innerOverhead = 6
-	maxInner := cap - innerOverhead
+	maxInner := maxWidth - innerOverhead
 	if maxInner < 16 {
 		maxInner = 16
 	}
@@ -272,7 +272,7 @@ func (r *UIRenderer) RenderResponseEnvelope(opts ResponseEnvelopeOptions) {
 // labels alone exceed targetWidth falls back to a minimal border (the
 // labels survive; the fill goes to zero).
 func buildBilateralBorder(lc, rc rune, leftLabel, rightLabel string, targetWidth int, color string, r *UIRenderer) string {
-	const cornerCols = 1   // lc / rc themselves
+	const cornerCols = 1    // lc / rc themselves
 	const dashCornerPad = 1 // the "─" that hugs each corner
 
 	leftBlock := string(lc) + "─"
