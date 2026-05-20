@@ -1124,6 +1124,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		renderer.RenderMarkdownTimelineEvent(icon, title, rendered, color)
 	}
 
+	// Helper local: card de RESPOSTA final do assistente com efeito de
+	// máquina de escrever — restaura a sensação de "vivo" que se perdeu
+	// quando a UI passou a pintar tudo num bloco lipgloss estático.
+	renderAssistantMDCard := func(icon, title, md, color string) {
+		md = strings.TrimSpace(md)
+		if md == "" {
+			return
+		}
+		rendered := a.cli.renderMarkdown(md)
+		renderer.RenderAssistantResponseTimelineEvent(icon, title, rendered, color)
+	}
+
 	// Context recovery state for the session
 	contextRecovery := agent.NewContextRecovery(agent.DefaultContextRecoveryConfig(), a.logger)
 	currentMaxTokens := 0           // 0 = use provider default
@@ -1653,7 +1665,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			case isMinimal:
 				renderer.RenderTimelineEvent("💬", "RESUMO", compactText(remaining, 2, 220), agent.ColorGray)
 			default:
-				renderMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
+				renderAssistantMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
 			}
 		}
 
