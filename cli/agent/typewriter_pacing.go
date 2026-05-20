@@ -52,56 +52,125 @@ const (
 	// existing tests / muscle memory are preserved for short bodies.
 	defaultDelay = 2 * time.Millisecond
 
-	// minDelay floors the per-rune sleep at 200μs so the budget path
-	// doesn't degenerate into a fixed-overhead syscall storm. Sleeps
-	// below ~100μs are mostly noise on macOS/Linux scheduling anyway.
-	minDelay = 200 * time.Microsecond
+	// tickInterval is the wall-clock cadence used when the renderer
+	// switches into chunked mode for long bodies. 10ms = 100 ticks per
+	// second is fast enough to still read as animation but slow enough
+	// that scheduler noise (1-2ms on Linux/macOS) becomes negligible.
+	// This is why long-body timing tests stay deterministic — every
+	// sleep call is well above the OS scheduler's granularity.
+	tickInterval = 10 * time.Millisecond
 
 	// hardSkipChars: bodies with more visible runes than this skip
-	// the animation outright. 8k chars × even 200μs is already 1.6s
-	// of cursor sweep, and most replies that large are dumps of code
-	// where the animation adds zero value.
+	// the animation outright. 8k chars worth of animation feels like
+	// latency, and most replies that large are dumps of code where
+	// the animation adds zero value.
 	hardSkipChars = 8000
 )
 
-// PaceText prints text with an adaptive typewriter cadence. The
-// requested delay is used as a ceiling — the actual per-rune sleep
-// may be scaled down to fit the configured budget on long bodies, or
-// zeroed out entirely when the body exceeds hardSkipChars or the
-// user disabled the effect via CHATCLI_NO_TYPEWRITER.
+// PaceText prints text with an adaptive typewriter cadence. Short
+// bodies use rune-by-rune animation at the requested delay (the
+// effect reads as animation); long bodies switch to a chunked mode
+// where multiple runes paint per ~10ms tick so the total animation
+// completes within the configured budget; very long bodies skip the
+// animation entirely.
 //
-// ANSI escape sequences embedded in text are emitted instantly (no
-// sleep between escape bytes) so color transitions never pause the
-// eye — the same behavior typewriterPrint had before this refactor.
+// Why two modes instead of one: a naive "scale down per-rune delay"
+// approach degenerates below the OS scheduler's granularity (~1-2ms
+// on Linux/macOS). With 2 000 runes and an 800ms budget the per-rune
+// math says 400μs/rune but the actual wall-clock can balloon to 4s on
+// CI under noise. Chunking sidesteps that: each sleep is a full 10ms,
+// well above scheduler granularity, and we just emit more runes per
+// tick to hit the same total time. The result is deterministically
+// bounded by the budget regardless of how the host schedules sleeps.
+//
+// ANSI escape sequences embedded in text are emitted as part of the
+// chunk they land in — they don't trigger sleeps or count toward the
+// printable budget so color transitions never pause the eye.
 func PaceText(text string, requested time.Duration) {
 	if typewriterDisabled() {
 		fmt.Print(text)
 		return
 	}
 
-	budget := resolveBudget()
 	requested = resolveDelay(requested)
+	budget := resolveBudget()
 
 	printable := countPrintableRunes(text)
+	if printable == 0 || requested <= 0 {
+		fmt.Print(text)
+		return
+	}
 	if printable >= hardSkipChars {
 		fmt.Print(text)
 		return
 	}
 
-	effective := requested
-	if budget > 0 && printable > 0 {
-		// Scale down so total animation ≤ budget. Never scale UP — the
-		// requested delay is a ceiling; if a caller asked for slow,
-		// they get slow (for short bodies).
-		if perChar := budget / time.Duration(printable); perChar < effective {
-			effective = perChar
-		}
-	}
-	if effective < minDelay {
-		effective = minDelay
+	// Path A — short body: requested cadence fits the budget, so we
+	// keep the per-rune animation. Most chat replies live here.
+	requestedTotal := time.Duration(printable) * requested
+	if budget <= 0 || requestedTotal <= budget {
+		typewriterPrint(text, requested)
+		return
 	}
 
-	typewriterPrint(text, effective)
+	// Path B — long body: switch to chunked mode. Spread the printable
+	// runes evenly across the budget at tickInterval cadence.
+	totalTicks := int(budget / tickInterval)
+	if totalTicks < 1 {
+		totalTicks = 1
+	}
+	runesPerTick := (printable + totalTicks - 1) / totalTicks
+	if runesPerTick < 1 {
+		runesPerTick = 1
+	}
+	chunkedTypewriterPrint(text, runesPerTick, tickInterval)
+}
+
+// chunkedTypewriterPrint walks text writing runesPerTick visible runes
+// per pass and sleeping interval between passes. ANSI escape sequences
+// are emitted with the printable rune that triggered the chunk to keep
+// color transitions atomic — splitting a CSI sequence across a sleep
+// would render as a visible flicker.
+//
+// Compared to typewriterPrint (one sleep per rune), this caps the
+// total number of sleeps at budget/interval, making the wall-clock
+// time predictable even on slow CI runners. The trade-off is that
+// the eye sees small bursts of text instead of single characters, but
+// at ~10ms intervals it still reads as fluid animation.
+func chunkedTypewriterPrint(text string, runesPerTick int, interval time.Duration) {
+	var buf strings.Builder
+	inEsc := false
+	chunkRunes := 0
+
+	flush := func() {
+		if buf.Len() == 0 {
+			return
+		}
+		fmt.Print(buf.String())
+		_ = os.Stdout.Sync()
+		buf.Reset()
+		chunkRunes = 0
+	}
+
+	for _, ch := range text {
+		buf.WriteRune(ch)
+		if ch == '\033' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if ch == 'm' {
+				inEsc = false
+			}
+			continue
+		}
+		chunkRunes++
+		if chunkRunes >= runesPerTick {
+			flush()
+			time.Sleep(interval)
+		}
+	}
+	flush()
 }
 
 // resolveBudget reads CHATCLI_TYPEWRITER_BUDGET_MS (a non-negative

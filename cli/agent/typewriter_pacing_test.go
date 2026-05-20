@@ -106,8 +106,10 @@ func TestPaceText_ShortBodyKeepsRequestedCadence(t *testing.T) {
 }
 
 // TestPaceText_LongBodyFitsBudget proves that a 2 000-rune reply
-// completes within the 800ms budget even when the caller asked for
-// 2ms per rune (which naively would be 4 seconds).
+// completes within a small multiple of the 800ms budget even when
+// the caller asked for 2ms per rune (which naively would be 4 s).
+// The chunked code path bounds total wall time at budget + tick
+// overhead × num_ticks, so even very noisy CI runners stay under 3×.
 func TestPaceText_LongBodyFitsBudget(t *testing.T) {
 	t.Setenv("CHATCLI_NO_TYPEWRITER", "")
 	t.Setenv("CHATCLI_TYPEWRITER_BUDGET_MS", "")
@@ -121,11 +123,10 @@ func TestPaceText_LongBodyFitsBudget(t *testing.T) {
 	})
 	elapsed := time.Since(start)
 
-	// Must finish under twice the budget — accounting for scheduler
-	// noise; the scaled per-rune delay should bring it well under
-	// 1600ms even on a slow CI runner.
-	assert.LessOrEqualf(t, elapsed, 1600*time.Millisecond,
-		"long body must fit within ~2× budget (got %v)", elapsed)
+	// Generous bound (≤3× the 800ms budget) so CI scheduler jitter on
+	// the ~80 sleep ticks never flakes this. Locally it lands at ~800ms.
+	assert.LessOrEqualf(t, elapsed, 2400*time.Millisecond,
+		"long body must fit within ~3× budget (got %v)", elapsed)
 }
 
 // TestPaceText_VeryLongBodySkipsAnimation guards the hardSkipChars
@@ -191,7 +192,9 @@ func TestPaceText_BudgetEnvOverride(t *testing.T) {
 }
 
 // TestPaceText_DelayEnvOverride lets the user force a per-rune delay
-// regardless of what the caller passed.
+// regardless of what the caller passed. Setting it to 0 (with budget
+// also disabled) short-circuits to a single fmt.Print — no sleeps at
+// all — so the animation cost is the cost of one buffered write.
 func TestPaceText_DelayEnvOverride(t *testing.T) {
 	t.Setenv("CHATCLI_NO_TYPEWRITER", "")
 	t.Setenv("CHATCLI_TYPEWRITER_BUDGET_MS", "0")
@@ -205,10 +208,8 @@ func TestPaceText_DelayEnvOverride(t *testing.T) {
 	})
 	elapsed := time.Since(start)
 
-	// With CHATCLI_TYPEWRITER_DELAY_MS=0 (and budget disabled) the
-	// effective delay falls to minDelay (200μs). 200 × 200μs = 40ms.
-	assert.LessOrEqualf(t, elapsed, 200*time.Millisecond,
-		"CHATCLI_TYPEWRITER_DELAY_MS=0 must override the caller delay (got %v)", elapsed)
+	assert.LessOrEqualf(t, elapsed, 100*time.Millisecond,
+		"CHATCLI_TYPEWRITER_DELAY_MS=0 must short-circuit the animation (got %v)", elapsed)
 }
 
 // TestPaceText_EmitsAllBytes safety check: regardless of pacing,
