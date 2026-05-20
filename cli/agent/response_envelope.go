@@ -124,41 +124,104 @@ type ResponseEnvelopeOptions struct {
 // RenderResponseEnvelope paints the assistant's reply in a bordered
 // box. Mechanics:
 //
-//  1. Resolve target card width (caller override or live terminal).
-//  2. Wrap body to inner width = card width − borders (2) − padding (4).
-//  3. Render body with lipgloss (left + right border only) so widths
-//     are computed in one place.
-//  4. Paint a bilateral top border whose visible width matches the
-//     lipgloss-measured body.
-//  5. Optionally typewriter the body; otherwise paint instantly.
-//  6. Paint a bilateral bottom border at the same measured width.
+//  1. Resolve the cap (caller-pinned Width, otherwise live terminal).
+//  2. Wrap body to inner = cap − borders (2) − padding (4).
+//  3. Measure the widest wrapped body line.
+//  4. Grow the card so it also fits the header & footer labels with
+//     at least 2 dashes of breathing room on each side. Without this
+//     step a short body + long header (model name + metrics) painted
+//     a top border wider than the body+bottom and the box read as
+//     broken — exactly the regression the user reported on 2026-05-20.
+//  5. Pad every wrapped line to the chosen inner width so lipgloss
+//     produces a rectangular block (no Width() needed, no surprises
+//     from lipgloss's "minimum width" semantics).
+//  6. Render body with lipgloss left + right borders only, then paint
+//     bilateral top and bottom borders at the measured card width.
+//  7. Optionally typewriter the body.
 //
 // The whole point of routing every border through lipgloss.Width is
-// that emoji width disagreements stop mattering: both edges agree
-// with each other, even when they disagree with the terminal — and
-// thanks to the init() normalization above, they now usually agree
-// with the terminal too.
+// that emoji width disagreements stop mattering: every border row
+// agrees with every other border row, even when they disagree with
+// the terminal. Thanks to the init() normalization, they now usually
+// agree with the terminal too.
 func (r *UIRenderer) RenderResponseEnvelope(opts ResponseEnvelopeOptions) {
-	width := opts.Width
-	if width <= 0 {
-		width = EnvelopeWidth()
+	cap := opts.Width
+	if cap <= 0 {
+		cap = EnvelopeWidth()
 	}
-	if width < 24 {
-		width = 24
+	if cap < 24 {
+		cap = 24
 	}
 
-	// Inner = card width − 2 borders − 4 padding (Padding(0,2)).
-	const innerOverhead = 2 + 4
-	innerWrap := width - innerOverhead
-	if innerWrap < 20 {
-		innerWrap = 20
+	// innerOverhead: 2 borders + 4 horizontal padding (Padding(0,2)).
+	const innerOverhead = 6
+	maxInner := cap - innerOverhead
+	if maxInner < 16 {
+		maxInner = 16
 	}
 
 	body := strings.Trim(opts.Body, "\n\r")
 	if body == "" {
 		body = " " // lipgloss collapses fully-empty content; keep the box drawable
 	}
-	wrapped := strings.Join(wrapText(body, innerWrap), "\n")
+	wrapped := wrapText(body, maxInner)
+
+	bodyMax := 0
+	for _, ln := range wrapped {
+		if w := lipgloss.Width(ln); w > bodyMax {
+			bodyMax = w
+		}
+	}
+
+	// minLabelFill: dashes of breathing room around the header/footer
+	// labels. Without this, a header that just barely fits would render
+	// flush against both corners ("╭─Label─╮"), which reads as cramped.
+	const minLabelFill = 2
+
+	leftW := lipgloss.Width(opts.HeaderLeft)
+	rightW := lipgloss.Width(opts.HeaderRight)
+	hdrFloor := 0
+	if leftW > 0 || rightW > 0 {
+		hdrFloor = leftW + rightW + minLabelFill
+	}
+
+	flw := lipgloss.Width(opts.FooterLeft)
+	frw := lipgloss.Width(opts.FooterRight)
+	ftrFloor := 0
+	if flw > 0 || frw > 0 {
+		ftrFloor = flw + frw + minLabelFill
+	}
+
+	// chosenInner = max(bodyMax, header floor, footer floor), capped at
+	// maxInner. This is the contract that fixes the "top wider than
+	// body" bug: when header labels need more room than the body, the
+	// card grows to fit them; the body just pads out to match.
+	chosenInner := bodyMax
+	if chosenInner < hdrFloor {
+		chosenInner = hdrFloor
+	}
+	if chosenInner < ftrFloor {
+		chosenInner = ftrFloor
+	}
+	if chosenInner > maxInner {
+		chosenInner = maxInner
+	}
+	if chosenInner < 16 {
+		chosenInner = 16
+	}
+
+	// Pad every wrapped line to chosenInner so lipgloss renders a
+	// rectangular block. Skipping this and relying on lipgloss .Width()
+	// is tempting but lipgloss's width semantics make the math fragile
+	// once Padding is in the mix; padding here keeps it explicit.
+	padded := make([]string, 0, len(wrapped))
+	for _, ln := range wrapped {
+		gap := chosenInner - lipgloss.Width(ln)
+		if gap < 0 {
+			gap = 0
+		}
+		padded = append(padded, ln+strings.Repeat(" ", gap))
+	}
 
 	bodyStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -167,13 +230,12 @@ func (r *UIRenderer) RenderResponseEnvelope(opts ResponseEnvelopeOptions) {
 		BorderForeground(ansiColorToLip(opts.Color)).
 		Padding(0, 2)
 
-	bodyRendered := bodyStyle.Render(wrapped)
+	bodyRendered := bodyStyle.Render(strings.Join(padded, "\n"))
 	bodyRendered = trimBlankBoxBodyRows(bodyRendered)
 
-	// Final card width measured AFTER lipgloss rendered the body.
-	// Anchoring both borders to this number is what keeps the visible
-	// box square even when runewidth and the terminal disagree on a
-	// glyph.
+	// Anchoring both borders to lipgloss.Width(bodyRendered) keeps
+	// every row in agreement on visible width, even under emoji-width
+	// drift.
 	cardWidth := lipgloss.Width(bodyRendered)
 
 	topLine := buildBilateralBorder('╭', '╮', opts.HeaderLeft, opts.HeaderRight, cardWidth, opts.Color, r)

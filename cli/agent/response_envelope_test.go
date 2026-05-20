@@ -209,6 +209,41 @@ func TestRenderResponseEnvelope_LongLineWraps(t *testing.T) {
 	}
 }
 
+// TestRenderResponseEnvelope_ShortBodyLongHeader is the regression
+// test for the bug the user reported on 2026-05-20: when the header
+// bilateral labels (model + latency · tokens) measured wider than the
+// body content, the top border painted wider than the body+bottom and
+// the box read as broken. The envelope must now grow the card to fit
+// the header, padding the body out to match.
+func TestRenderResponseEnvelope_ShortBodyLongHeader(t *testing.T) {
+	r := NewUIRendererWithStyle(zap.NewNop(), UIStyleFull)
+	out := captureEnvStdout(t, func() {
+		r.RenderResponseEnvelope(ResponseEnvelopeOptions{
+			HeaderLeft:  " Claude sonnet 4.6 (1M context) ",
+			HeaderRight: " 3.3s · 2↑ 12↓ ",
+			Body:        "Boa tarde, Edilson! Tudo certo?\nComo posso ajudar?",
+			Color:       ColorGray,
+			Width:       192,
+		})
+	})
+	plain := stripANSIEnv(out)
+
+	var widths []int
+	for _, row := range strings.Split(plain, "\n") {
+		if startsWithBorder(row) {
+			widths = append(widths, lipgloss.Width(row))
+		}
+	}
+	if len(widths) < 4 {
+		t.Fatalf("expected top + 2 body rows + bottom, got %d rows", len(widths))
+	}
+	first := widths[0]
+	for _, got := range widths {
+		assert.Equal(t, first, got,
+			"short body + long header must produce a closed box — every row same width")
+	}
+}
+
 // TestRenderResponseEnvelope_NoLabels covers the minimal-call shape:
 // no labels, just a body and a color. The envelope must still draw a
 // valid closed box (corners + sides + bottom).
