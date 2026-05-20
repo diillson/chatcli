@@ -27,9 +27,21 @@ var tipKeys = []string{ // <-- 2. ALTERADO DE 'tips' PARA 'tipKeys'
 	"tip.agent_last_result",
 }
 
-const screenWidth = 87 // largura global para tudo
+// screenWidth is the anchor width used to center welcome-screen
+// content (logo, tip box, active-model card, footer). It is a fixed
+// 87 columns by design: anchoring at the terminal width left the
+// banner pushed far to the right on wide terminals and read as
+// awkward — the welcome reads more naturally hugging the left edge
+// like the rest of the prompt does. Keeping a const here means tip
+// box and model card stay centered relative to the logo regardless
+// of how the user has sized their terminal.
+const screenWidth = 87
 
-// printLogo exibe o novo logo do ChatCLI em ASCII art.
+// printLogo exibe o novo logo do ChatCLI em ASCII art, centralizado
+// num bloco virtual de 80 colunas (mesma largura usada antes da
+// refatoração de envelope). Esse bloco fica na borda esquerda do
+// terminal, por preferência do usuário — uma centralização no
+// terminal inteiro empurra o banner pra direita em telas largas.
 func printLogo() {
 	logo := `
            ██████╗ ██╗  ██╗ █████╗ ████████╗ ██████╗██╗     ██╗
@@ -160,7 +172,7 @@ func printTipBox() {
 		Render(titleLine + "\n\n" + body)
 
 	// Center the card on the configured screenWidth so the overall
-	// welcome layout stays balanced even on wider terminals.
+	// welcome layout stays balanced.
 	fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center, card))
 }
 
