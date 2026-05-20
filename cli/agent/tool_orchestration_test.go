@@ -240,6 +240,16 @@ func TestRunBatch_RespectsSemaphore(t *testing.T) {
 // TestRunBatch_CancelSiblingsAbortsOnInfraError is the contract for the
 // fail-fast option. When one tool returns an infra error and
 // CancelSiblings=true, the others observe ctx cancellation and bail.
+//
+// We synchronize the "fail" call against its siblings with a WaitGroup
+// so the test is deterministic regardless of how the Go scheduler
+// picks up the goroutines: on a noisy single-core CI runner the
+// "fail" goroutine could otherwise return its error before the
+// scheduler ever scheduled ok-1 / ok-2, leaving canceledCount at 0
+// and flaking the assertion. With the wait in place, "fail" only
+// returns after both siblings have entered their select — at which
+// point the ctx cancellation triggered by RunBatch is guaranteed to
+// land on them.
 func TestRunBatch_CancelSiblingsAbortsOnInfraError(t *testing.T) {
 	batch := ToolBatch{
 		Concurrent: true,
@@ -250,10 +260,17 @@ func TestRunBatch_CancelSiblingsAbortsOnInfraError(t *testing.T) {
 		},
 	}
 	var canceledCount int32
+	var siblingsReady sync.WaitGroup
+	siblingsReady.Add(2)
 	exec := func(ctx context.Context, c ToolCall) (ToolResult, error) {
 		if c.Name == "fail" {
+			// Block until both siblings have entered their select. This
+			// removes the start-order race between the failing goroutine
+			// and the ok-* goroutines that the test used to flake on.
+			siblingsReady.Wait()
 			return ToolResult{}, errors.New("kaboom")
 		}
+		siblingsReady.Done()
 		select {
 		case <-time.After(500 * time.Millisecond):
 			return ToolResult{Output: c.Name}, nil
@@ -272,8 +289,8 @@ func TestRunBatch_CancelSiblingsAbortsOnInfraError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Less(t, elapsed, 300*time.Millisecond,
 		"siblings must abort early on first infra error — not run to their full 500ms timeout")
-	assert.GreaterOrEqual(t, atomic.LoadInt32(&canceledCount), int32(1),
-		"at least one sibling observed ctx cancellation")
+	assert.GreaterOrEqual(t, atomic.LoadInt32(&canceledCount), int32(2),
+		"both siblings must observe ctx cancellation now that the start-order race is gone")
 }
 
 // TestRunBatch_CancelSiblingsFalse keeps siblings running even when one
