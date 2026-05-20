@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.119.1](https://github.com/diillson/chatcli/compare/v1.119.0...v1.119.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* **ui:** restore typewriter effect on assistant responses across chat/agent/coder ([#940](https://github.com/diillson/chatcli/issues/940)) ([f494ca9](https://github.com/diillson/chatcli/commit/f494ca996e32daf49361ab483b5835a6e4c340cc))
+
 ## [1.119.0](https://github.com/diillson/chatcli/compare/v1.118.1...v1.119.0) (2026-05-20)
 
 
