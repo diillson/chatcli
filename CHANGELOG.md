@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.119.3](https://github.com/diillson/chatcli/compare/v1.119.2...v1.119.3) (2026-05-20)
+
+
+### Bug Fixes
+
+* **ui:** adaptive typewriter pacing so long replies do not crawl ([#944](https://github.com/diillson/chatcli/issues/944)) ([3e9d60e](https://github.com/diillson/chatcli/commit/3e9d60e6f2d7d86b82d926a276fc3aa63270123b))
+
 ## [1.119.2](https://github.com/diillson/chatcli/compare/v1.119.1...v1.119.2) (2026-05-20)
 
 
