@@ -7,6 +7,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -38,5 +39,28 @@ func TestTypewriterPrint_PreservesAllBytes(t *testing.T) {
 				t.Fatalf("typewriterPrint mangled bytes:\n  input:  %q\n  output: %q", tc.input, got)
 			}
 		})
+	}
+}
+
+// TestRenderAssistantResponseTimelineEvent_TypesBodyContent guards the
+// happy path of the assistant-response card: the typewriter variant
+// must still produce the title, content, and a bottom border so the
+// card visually closes. Char-by-char ordering is already covered by
+// TestTypewriterPrint_PreservesAllBytes; here we only assert that
+// content flows through and the card frame is intact.
+func TestRenderAssistantResponseTimelineEvent_TypesBodyContent(t *testing.T) {
+	r := NewUIRenderer(nil)
+	out := captureStdout(t, func() {
+		r.RenderAssistantResponseTimelineEvent("💬", "RESPOSTA", "Hello from the assistant.", ColorGray)
+	})
+
+	if !strings.Contains(out, "RESPOSTA") {
+		t.Errorf("expected card title 'RESPOSTA' in output, got: %q", out)
+	}
+	if !strings.Contains(out, "Hello from the assistant.") {
+		t.Errorf("expected body text in output, got: %q", out)
+	}
+	if !strings.Contains(out, "╰") {
+		t.Errorf("expected bottom-border glyph in output (card must visually close), got: %q", out)
 	}
 }
