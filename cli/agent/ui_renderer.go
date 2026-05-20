@@ -448,92 +448,186 @@ func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
 		termWidth = 80
 	}
 
-	// Quanto o card pode ocupar no máximo. Mantemos 2 colunas de respiro
-	// na borda direita para que terminais com scrollbar nativo (iTerm,
-	// VSCode) não cortem o rodapé do card.
+	// Reserve 2 cols on the right edge for terminals with native
+	// scrollbars (iTerm, VSCode) so the box border never gets clipped.
 	maxCardWidth := termWidth - 2
 	if maxCardWidth < 24 {
 		maxCardWidth = 24
 	}
 
-	// Largura útil de conteúdo: subtrai borda esquerda "│  " (3) e borda
-	// direita " │" (2). Isso é o limite para wrap.
-	const sideLeft = 3  // "│  "
-	const sideRight = 2 // " │"
-	contentWrap := maxCardWidth - sideLeft - sideRight
-	if contentWrap < 20 {
-		contentWrap = 20
-	}
-
-	// Glamour-rendered markdown frequently bookends the output with
-	// blank lines (one above the first paragraph, one or two below
-	// the last). Without trimming, the card showed a leading `│   │`
-	// row right after the ╭── header and a stack of empty rows
-	// before the ╰── footer — read as if the box were "broken open"
-	// at the top and bottom. Strip the surrounding newlines BEFORE
-	// wrap so the wrapped slice starts and ends on real content.
+	// Trim glamour-style bookend newlines so the card opens on real
+	// content. See trimBlankBorderRows() for the in-body equivalent.
 	content = strings.Trim(content, "\n\r")
-	wrappedLines := wrapText(content, contentWrap)
-	wrappedLines = trimBlankBorderRows(wrappedLines)
+	if content == "" {
+		content = " " // lipgloss collapses fully-empty content; keep a placeholder so the box still draws
+	}
 
-	// Maior largura visível entre todas as linhas wrapped + header.
+	// Pre-wrap content to the inner width lipgloss will allow. lipgloss
+	// would happily truncate on overflow rather than wrap, so we own
+	// the wrap math here using the same ANSI-aware helper the previous
+	// renderer used. Inner = card max − borders (2) − padding (4).
+	const innerOverhead = 2 /* borders */ + 4 /* Padding(0,2) */
+	innerWrap := maxCardWidth - innerOverhead
+	if innerWrap < 20 {
+		innerWrap = 20
+	}
+	wrapped := strings.Join(wrapText(content, innerWrap), "\n")
+
+	// Build the body box with lipgloss using a CLOSED border on three
+	// sides (no top — we overwrite it below with the titled variant).
+	// Delegating width math + side+bottom drawing to lipgloss is what
+	// fixes the long-standing emoji misalignment bug (`🧠` rendering
+	// as 2 cols via runewidth but 1 col on some terminals): both edges
+	// agree with each other regardless of the terminal's actual emoji
+	// handling, so the box always reads as balanced.
+	bodyStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderTop(false).
+		BorderForeground(ansiColorToLip(color)).
+		Padding(0, 2)
+
+	bodyRendered := bodyStyle.Render(wrapped)
+
+	// Drop empty rows from the in-body sequence so paragraph-style
+	// blanks at the edges don't show as ghost rows. We keep middle
+	// blanks intact (author-intended paragraph breaks survive).
+	bodyRendered = trimBlankBoxBodyRows(bodyRendered)
+
+	// cardWidth is whatever lipgloss measured for the rendered body.
+	// Crucially, ANY width drift in the top header below is computed
+	// against this same number, so the visible widths line up even
+	// when emoji rendering disagrees with runewidth.
+	cardWidth := lipgloss.Width(bodyRendered)
+
 	header := fmt.Sprintf("%s %s", icon, title)
-	headerVisible := VisibleLen(header) + 4 // "╭── " prefix
-	maxContent := 0
-	for _, line := range wrappedLines {
-		if w := VisibleLen(line); w > maxContent {
-			maxContent = w
-		}
-	}
-	innerWidth := maxContent
-	headerInner := headerVisible - sideLeft
-	if headerInner > innerWidth {
-		innerWidth = headerInner
-	}
-	// Pelo menos 24 colunas internas para não ficar grudado.
-	if innerWidth < 24 {
-		innerWidth = 24
-	}
-	// Limita ao espaço útil real.
-	if innerWidth > contentWrap {
-		innerWidth = contentWrap
-	}
-
-	cardWidth := innerWidth + sideLeft + sideRight
-	if cardWidth > maxCardWidth {
-		cardWidth = maxCardWidth
-	}
+	topLine := buildTitledTopBorder(header, cardWidth, color, r)
 
 	fmt.Println()
+	fmt.Println(topLine)
+	fmt.Println(bodyRendered)
+}
 
-	// Top: "╭── icon title " + traços + "╮"
-	topUsed := 4 + VisibleLen(header) // "╭── " + header
-	topPad := cardWidth - topUsed - 1 // -1 for the closing "╮"
-	if topPad < 1 {
-		topPad = 1
+// buildTitledTopBorder produces a `╭── icon title ─────╮` line whose
+// VISIBLE width equals targetWidth (as measured by lipgloss.Width on
+// the matching body). The two padding rules cover the two ways the
+// header can fall short of the card width:
+//   - normal case: title fits, fill with dashes
+//   - title longer than card: truncate dashes to fit (header may overflow
+//     by 1-2 cols on extreme widths; acceptable degradation)
+func buildTitledTopBorder(header string, targetWidth int, color string, r *UIRenderer) string {
+	// Visible cols reserved: `╭── ` (4) + header (lipgloss) + ` ` (1) + dashes + `╮` (1)
+	usedNoFill := 4 + lipgloss.Width(header) + 1 + 1
+	fill := targetWidth - usedNoFill
+	if fill < 0 {
+		// Header doesn't fit — emit a minimal top without filling.
+		// The card will still close at the right cardWidth because we
+		// honor lipgloss's body measurement.
+		return r.Colorize("╭── "+header+" ╮", color+ColorBold)
 	}
-	topLine := "╭── " + header + " " + strings.Repeat("─", topPad-1) + "╮"
-	fmt.Println(r.Colorize(topLine, color+ColorBold))
+	line := "╭── " + header + " " + strings.Repeat("─", fill) + "╮"
+	return r.Colorize(line, color+ColorBold)
+}
 
-	// Bordas laterais coloridas, conteúdo no foreground default.
-	borderL := r.Colorize("│", color) + "  "
-	borderR := " " + r.Colorize("│", color)
-	for _, line := range wrappedLines {
-		w := VisibleLen(line)
-		pad := innerWidth - w
-		if pad < 0 {
-			pad = 0
+// trimBlankBoxBodyRows removes fully-empty content rows directly
+// adjacent to the top or bottom border of a lipgloss-rendered box.
+// An empty row looks like "│         │" — same width as the sides
+// but zero printable content between them. The Padding(0,2) on the
+// body style already adds breathing space, so additional blank rows
+// from glamour or wrapped paragraphs would stack up and break the
+// "card opens on real content" invariant.
+func trimBlankBoxBodyRows(rendered string) string {
+	rows := strings.Split(rendered, "\n")
+	if len(rows) <= 2 {
+		return rendered
+	}
+	isBlankRow := func(s string) bool {
+		plain := stripANSIForCard(s)
+		// Empty body rows are "│  ...spaces...  │". Anything else
+		// counts as real content (including a ╰── bottom border).
+		if !strings.HasPrefix(plain, "│") || !strings.HasSuffix(plain, "│") {
+			return false
 		}
-		fmt.Println(borderL + line + strings.Repeat(" ", pad) + borderR)
+		inner := strings.TrimSuffix(strings.TrimPrefix(plain, "│"), "│")
+		return strings.TrimSpace(inner) == ""
 	}
+	// We do NOT touch the first row (it could be a border) or the
+	// last (always the bottom border). Trim only the body slice in
+	// between.
+	start := 0
+	end := len(rows)
+	// Find content boundaries: skip leading empties, then trailing.
+	for start < end && rows[start] != "" && !isBlankRow(rows[start]) {
+		// Non-blank, real row — leave start where it is.
+		break
+	}
+	// Trim trailing empty body rows that sit right before the bottom border.
+	// Bottom border is always the last line (no trailing newline preserved).
+	bottomIdx := end - 1
+	cut := bottomIdx - 1
+	for cut > start && isBlankRow(rows[cut]) {
+		cut--
+	}
+	if cut+1 < bottomIdx {
+		rows = append(rows[:cut+1], rows[bottomIdx])
+	}
+	// Trim leading empty body rows that sit right after the (absent) top
+	// border. Since BorderTop is false, rows[0] is the first content row.
+	leading := 0
+	for leading < len(rows)-1 && isBlankRow(rows[leading]) {
+		leading++
+	}
+	if leading > 0 {
+		rows = rows[leading:]
+	}
+	return strings.Join(rows, "\n")
+}
 
-	// Bottom: "╰" + traços + "╯"
-	bottomInner := cardWidth - 2
-	if bottomInner < 1 {
-		bottomInner = 1
+// stripANSIForCard removes CSI color escapes so width and emptiness
+// checks see plain text. Inlined to avoid a regex dependency on the
+// hot card-rendering path.
+func stripANSIForCard(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && (s[i] < 0x40 || s[i] > 0x7e) {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
 	}
-	bottom := "╰" + strings.Repeat("─", bottomInner) + "╯"
-	fmt.Println(r.Colorize(bottom, color))
+	return b.String()
+}
+
+// ansiColorToLip maps the package-local ANSI color constants used by
+// the rest of the renderer into a lipgloss.Color. This keeps callers
+// passing the same "\x1b[36m" strings they always have, while the
+// lipgloss body-renderer needs structured colors. Unknown values fall
+// back to the terminal default so a typo doesn't make the border
+// disappear.
+func ansiColorToLip(ansiCode string) lipgloss.Color {
+	switch ansiCode {
+	case ColorGreen:
+		return lipgloss.Color("2")
+	case ColorLime:
+		return lipgloss.Color("10")
+	case ColorCyan:
+		return lipgloss.Color("6")
+	case ColorGray:
+		return lipgloss.Color("8")
+	case ColorPurple:
+		return lipgloss.Color("5")
+	case ColorYellow:
+		return lipgloss.Color("3")
+	case ColorRed:
+		return lipgloss.Color("1")
+	case ColorBlue:
+		return lipgloss.Color("4")
+	default:
+		return lipgloss.Color("")
+	}
 }
 
 // RenderMarkdownTimelineEvent renderiza markdown (já convertido para ANSI fora) dentro do card.

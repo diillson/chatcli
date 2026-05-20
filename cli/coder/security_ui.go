@@ -11,8 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/diillson/chatcli/i18n"
-	"github.com/mattn/go-runewidth"
+	"golang.org/x/term"
 )
 
 type SecurityDecision int
@@ -42,6 +43,34 @@ var sttyPath = func() string {
 	}
 	return ""
 }()
+
+// detectTerminalWidth returns the live terminal column count by
+// probing /dev/tty (the controlling terminal) when stdin/stdout are
+// piped or otherwise non-tty. Falls back to 80 cols. We need this
+// because the security prompt runs at a point where stdout may have
+// been wrapped by another layer (animation, captured-pipe debug)
+// and term.GetSize on the wrong fd returns 0.
+func detectTerminalWidth() int {
+	if runtime.GOOS == "windows" {
+		if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+			return w
+		}
+		return 80
+	}
+	for _, fd := range []uintptr{os.Stdin.Fd(), os.Stdout.Fd(), os.Stderr.Fd()} {
+		if w, _, err := term.GetSize(int(fd)); err == nil && w > 0 {
+			return w
+		}
+	}
+	// Last resort: open /dev/tty directly.
+	if tty, err := os.Open("/dev/tty"); err == nil {
+		defer func() { _ = tty.Close() }()
+		if w, _, err := term.GetSize(int(tty.Fd())); err == nil && w > 0 {
+			return w
+		}
+	}
+	return 80
+}
 
 // resetTTYToSane restores the controlling terminal to canonical mode with
 // echo on. We invoke `stty sane` against /dev/tty (NOT the parent process's
@@ -94,69 +123,90 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	white := "\u001b[37m"
 	reset := "\u001b[0m"
 
-	fmt.Println()
-	boxWidth := 58 // inner width between ║ borders
-	headerText := "🔒 " + i18n.T("coder.security.header")
-	// Calculate visible width using go-runewidth (handles emojis, CJK, etc.)
-	visLen := runewidth.StringWidth(headerText)
-	padTotal := boxWidth - visLen
-	if padTotal < 0 {
-		padTotal = 0
-	}
-	padLeft := padTotal / 2
-	padRight := padTotal - padLeft
-	paddedHeader := strings.Repeat(" ", padLeft) + headerText + strings.Repeat(" ", padRight)
+	// --- Parse the action up front so the box knows what to display ---
+	sub, _ := NormalizeCoderArgs(args)
+	actionLabel, details := formatActionDetails(sub, toolName, args)
+	pattern := GetSuggestedPattern(toolName, args)
+	isExecCmd := pattern == ""
 
-	fmt.Println(purple + bold + "╔" + strings.Repeat("═", boxWidth) + "╗" + reset)
-	fmt.Println(purple + bold + "║" + paddedHeader + "║" + reset)
-	fmt.Println(purple + bold + "╚" + strings.Repeat("═", boxWidth) + "╝" + reset)
+	// Build the entire prompt body INSIDE a single bordered card so
+	// title, agent context, action, rule, and choices all read as
+	// one cohesive panel. The previous design drew a separate ╔══╗
+	// banner just for the title and then left every detail line as
+	// loose text below the box, which the user (rightly) called
+	// "disorganized". One card, one visual statement.
+	var b strings.Builder
+	b.WriteString(bold + purple + "🔒 " + i18n.T("coder.security.header") + reset + "\n")
+	b.WriteString("\n")
 
 	// --- Agent context (parallel mode) ---
 	if secCtx != nil && secCtx.AgentName != "" {
-		fmt.Printf(" %s🤖 Agent:%s  %s%s%s\n", gray, reset, cyan+bold, secCtx.AgentName, reset)
+		b.WriteString(fmt.Sprintf("%s🤖 Agent%s  %s%s%s%s\n",
+			gray, reset, gray+"·  "+reset, cyan+bold, secCtx.AgentName, reset))
 		if secCtx.TaskDesc != "" {
 			taskDisplay := secCtx.TaskDesc
 			if len(taskDisplay) > 120 {
 				taskDisplay = taskDisplay[:120] + "..."
 			}
-			fmt.Printf(" %s📋 %s:%s %s%s%s\n", gray, i18n.T("coder.security.task"), reset, white, taskDisplay, reset)
+			b.WriteString(fmt.Sprintf("%s📋 %s%s  %s%s%s%s\n",
+				gray, i18n.T("coder.security.task"), reset, gray+"·  "+reset, white, taskDisplay, reset))
 		}
-		fmt.Println(gray + " " + strings.Repeat("─", 58) + reset)
+		b.WriteString("\n")
 	}
 
-	// --- Parse and display the action in human-readable form ---
-	sub, _ := NormalizeCoderArgs(args)
-	actionLabel, details := formatActionDetails(sub, toolName, args)
-
-	fmt.Printf(" %s⚡ %s:%s   %s%s%s\n", gray, i18n.T("coder.security.action"), reset, yellow+bold, actionLabel, reset)
+	// --- Action + details ---
+	b.WriteString(fmt.Sprintf("%s⚡ %s%s  %s%s%s%s\n",
+		gray, i18n.T("coder.security.action"), reset, gray+"·  "+reset, yellow+bold, actionLabel, reset))
 	for _, d := range details {
-		fmt.Printf("           %s%s%s\n", cyan, d, reset)
+		b.WriteString(fmt.Sprintf("              %s%s%s\n", cyan, d, reset))
 	}
 
 	// --- Policy rule info ---
-	pattern := GetSuggestedPattern(toolName, args)
-	isExecCmd := pattern == ""
-
+	var ruleVal string
 	if isExecCmd {
-		fmt.Printf(" %s📜 %s:%s  %s%s%s\n", gray, i18n.T("coder.security.rule"), reset, gray, i18n.T("coder.security.exec_requires_approval"), reset)
+		ruleVal = i18n.T("coder.security.exec_requires_approval")
 	} else {
-		fmt.Printf(" %s📜 %s:%s  %s%s%s\n", gray, i18n.T("coder.security.rule"), reset, gray, i18n.T("coder.security.no_rule_for", pattern), reset)
+		ruleVal = i18n.T("coder.security.no_rule_for", pattern)
 	}
+	b.WriteString(fmt.Sprintf("%s📜 %s%s  %s%s%s%s\n",
+		gray, i18n.T("coder.security.rule"), reset, gray+"·  "+reset, gray, ruleVal, reset))
 
-	fmt.Println(gray + " " + strings.Repeat("─", 58) + reset)
+	b.WriteString("\n")
 
 	// --- Choices ---
-	fmt.Println(bold + " " + i18n.T("coder.security.choose") + ":" + reset)
-	fmt.Printf("   [%s] %s\n", green+"y"+reset, i18n.T("coder.security.yes_once"))
+	b.WriteString(bold + i18n.T("coder.security.choose") + ":" + reset + "\n")
+	b.WriteString(fmt.Sprintf("  [%s] %s\n", green+"y"+reset, i18n.T("coder.security.yes_once")))
 	if !isExecCmd {
-		fmt.Printf("   [%s] %s\n", green+"a"+reset, i18n.T("coder.security.allow_always", pattern))
+		b.WriteString(fmt.Sprintf("  [%s] %s\n", green+"a"+reset, i18n.T("coder.security.allow_always", pattern)))
 	}
-	fmt.Printf("   [%s] %s\n", red+"n"+reset, i18n.T("coder.security.no_skip"))
+	b.WriteString(fmt.Sprintf("  [%s] %s\n", red+"n"+reset, i18n.T("coder.security.no_skip")))
 	if !isExecCmd {
-		fmt.Printf("   [%s] %s\n", red+"d"+reset, i18n.T("coder.security.deny_always", pattern))
+		b.WriteString(fmt.Sprintf("  [%s] %s", red+"d"+reset, i18n.T("coder.security.deny_always", pattern)))
 	}
+	// No final "\n" intentionally: trailing newline would force lipgloss
+	// to render an empty padding row before the bottom border.
 
-	fmt.Print("\n" + purple + " > " + reset)
+	// Render the body in a single rounded box. Purple = the security
+	// channel color across the renderer; matches the prompt arrow on
+	// the next line. We cap width to the live terminal so a long
+	// command like `cp /Users/.../foo.go /Users/.../bar.go` doesn't
+	// blow the box past the right edge — lipgloss wraps inside the
+	// box at the configured width.
+	termWidth := detectTerminalWidth()
+	maxBox := termWidth - 2
+	if maxBox < 40 {
+		maxBox = 40
+	}
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("5")).
+		Padding(0, 2).
+		Width(maxBox - 2). // -2 for the border chars (lipgloss includes them in Width)
+		Render(strings.TrimRight(b.String(), "\n"))
+
+	fmt.Println()
+	fmt.Println(box)
+	fmt.Print(purple + " > " + reset)
 
 	// Read user input either from the centralized stdin channel (if provided)
 	// or via a fallback goroutine. Using inputCh avoids orphaned goroutines
