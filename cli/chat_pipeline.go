@@ -376,16 +376,25 @@ func (cli *ChatCLI) watcherContextPart() (models.ContentBlock, bool) {
 func (cli *ChatCLI) buildChatTempHistory(
 	parts []models.ContentBlock, userInput, additionalContext string,
 ) []models.Message {
-	tempHistory := make([]models.Message, 0, len(cli.history)+4)
+	// Purge stale `[ACTIVE MODE: …]` system messages left behind by a
+	// previous /agent or /coder run in the same session. Without this,
+	// the chat LLM call would receive the fresh ChatModeSystemHint in
+	// slot 0 AND the leftover CoderSystemPrompt / agent system prompt
+	// further down — contradictory format rules ("don't emit tool_call"
+	// next to "you MUST emit tool_call"), which historically caused
+	// smaller models to vacillate mid-response.
+	filtered := purgeStaleModeSystems(cli.history, ModeChat)
+
+	tempHistory := make([]models.Message, 0, len(filtered)+4)
 	if len(parts) > 0 {
 		tempHistory = append(tempHistory, combinedSystemMessage(parts))
 	}
-	for _, msg := range cli.history {
+	for _, msg := range filtered {
 		if msg.Role == "system" {
 			tempHistory = append(tempHistory, msg)
 		}
 	}
-	for _, msg := range cli.history {
+	for _, msg := range filtered {
 		if msg.Role != "system" {
 			tempHistory = append(tempHistory, msg)
 		}

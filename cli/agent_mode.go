@@ -724,40 +724,36 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// heuristic described above.
 	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText)
 
-	// Inicializa ou atualiza o histórico com o System Prompt correto
+	// Inicializa ou atualiza o histórico com o System Prompt correto.
+	//
+	// Strategy: purge every stale `[ACTIVE MODE: …]` system message left
+	// over from a previous /chat, /agent, or /coder turn — keeping any
+	// non-mode system messages (e.g. /context attach blocks) untouched —
+	// then prepend the current mode's sysMsg. This is the same filter
+	// used by the chat pipeline; centralizing it in mode_transition.go
+	// means a future change to the marker syntax has exactly one site
+	// to edit.
+	currentModeName := ModeAgent
+	if isCoder {
+		currentModeName = ModeCoder
+	}
+	a.cli.history = purgeStaleModeSystems(a.cli.history, currentModeName)
+
 	if len(a.cli.history) == 0 {
 		a.cli.history = append(a.cli.history, sysMsg)
 	} else {
-		// Remove any mode-reset system messages injected when leaving previous sessions.
-		// These are mid-history system messages that would confuse the LLM on re-entry.
-		cleaned := make([]models.Message, 0, len(a.cli.history))
-		firstSystem := true
-		for _, msg := range a.cli.history {
-			if msg.Role == "system" {
-				if firstSystem {
-					// Keep the first system message (will be updated below)
-					cleaned = append(cleaned, msg)
-					firstSystem = false
-				}
-				// Drop any additional system messages (mode-reset markers)
-				continue
-			}
-			cleaned = append(cleaned, msg)
-		}
-		a.cli.history = cleaned
-
-		// Se já existe histórico (ex: uma sessão carregada), forçamos a atualização do system prompt
-		// para garantir que a IA mude de comportamento se trocarmos de /agent para /coder
+		// Replace any surviving system message of the CURRENT mode with
+		// the freshly-built sysMsg (workspace/skills/orchestrator blocks
+		// may have changed across turns). Otherwise prepend.
 		foundSystem := false
 		for i, msg := range a.cli.history {
-			if msg.Role == "system" {
+			if msg.Role == "system" && modeOfSystemMessage(msg) == currentModeName {
 				a.cli.history[i] = sysMsg
 				foundSystem = true
 				break
 			}
 		}
 		if !foundSystem {
-			// Insere no início se não houver
 			a.cli.history = append([]models.Message{sysMsg}, a.cli.history...)
 		}
 	}
@@ -1643,13 +1639,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		if strings.TrimSpace(remaining) != "" {
 			switch {
 			case isCompact:
-				// CompactAssistantText (not CompactLine with ColorGray)
-				// so the assistant's answer renders in the terminal's
-				// default foreground, visually distinct from the gray
-				// tool prose around it. Wire-through is intentional
-				// even when remaining is multi-line — the helper does
-				// its own line splitting with indentation.
-				renderer.CompactAssistantText(remaining)
+				// Compact mode now also runs the assistant's answer
+				// through glamour before printing, matching the full-
+				// mode card. Without this, markdown tables and **bold**
+				// arrived raw in the timeline (the user could see the
+				// pipes and asterisks as literal characters) and the
+				// compact "answer" line looked broken compared to the
+				// full-mode card. Trim the glamour bookend newlines so
+				// CompactAssistantText doesn't reserve a leading ◆ row
+				// for an empty line.
+				renderedMD := strings.Trim(a.cli.renderMarkdown(remaining), "\n\r")
+				renderer.CompactAssistantText(renderedMD)
 			case isMinimal:
 				renderer.RenderTimelineEvent("💬", "RESUMO", compactText(remaining, 2, 220), agent.ColorGray)
 			default:
