@@ -465,7 +465,16 @@ func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
 		contentWrap = 20
 	}
 
+	// Glamour-rendered markdown frequently bookends the output with
+	// blank lines (one above the first paragraph, one or two below
+	// the last). Without trimming, the card showed a leading `│   │`
+	// row right after the ╭── header and a stack of empty rows
+	// before the ╰── footer — read as if the box were "broken open"
+	// at the top and bottom. Strip the surrounding newlines BEFORE
+	// wrap so the wrapped slice starts and ends on real content.
+	content = strings.Trim(content, "\n\r")
 	wrappedLines := wrapText(content, contentWrap)
+	wrappedLines = trimBlankBorderRows(wrappedLines)
 
 	// Maior largura visível entre todas as linhas wrapped + header.
 	header := fmt.Sprintf("%s %s", icon, title)
@@ -534,6 +543,28 @@ func (r *UIRenderer) RenderMarkdownTimelineEvent(icon, title, renderedMarkdownAN
 		return
 	}
 	r.RenderTimelineEvent(icon, title, renderedMarkdownANSI, color)
+}
+
+// trimBlankBorderRows drops fully-blank rows from the leading and
+// trailing edges of a wrapped-text slice. A row is "blank" when it
+// has zero visible width — color codes alone don't count as visible
+// content (lipgloss/glamour emit ANSI-only lines for some markdown
+// constructs, and we don't want those drawing as ghost rows inside
+// the card). Blank rows in the MIDDLE are preserved so paragraph
+// breaks the author put in markdown survive.
+func trimBlankBorderRows(rows []string) []string {
+	start := 0
+	for start < len(rows) && VisibleLen(rows[start]) == 0 {
+		start++
+	}
+	end := len(rows)
+	for end > start && VisibleLen(rows[end-1]) == 0 {
+		end--
+	}
+	if start == 0 && end == len(rows) {
+		return rows
+	}
+	return rows[start:end]
 }
 
 // wrapText quebra o texto em linhas que não excedem o limite.

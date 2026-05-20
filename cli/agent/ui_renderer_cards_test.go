@@ -82,3 +82,60 @@ func TestRenderTimelineEvent_WrapsLongContent(t *testing.T) {
 // visibleLenTest is a shim over the package-private VisibleLen so the
 // test file can call it without exporting an extra symbol.
 func visibleLenTest(s string) int { return VisibleLen(s) }
+
+// TestRenderTimelineEvent_TrimsLeadingTrailingBlanks reproduces the
+// "blank row glued to the top" bug reported on /coder REASONING and
+// /coder RESPOSTA cards. glamour-rendered markdown often arrives with
+// leading and trailing newlines; without the trim, the card opens
+// with a ghost `│        │` row before any real content (and a
+// matching empty row before the ╰── footer).
+//
+// We assert that the FIRST and LAST content rows (rows starting with
+// │) actually carry visible text. Any blank row sandwiched between
+// the borders proves the regression came back.
+func TestRenderTimelineEvent_TrimsLeadingTrailingBlanks(t *testing.T) {
+	r := NewUIRendererWithStyle(nil, UIStyleFull)
+
+	body := "\n\n  Olá! Tudo certo? Como posso ajudar?  \n\n"
+	out := captureStdout(t, func() {
+		r.RenderTimelineEvent("💬", "RESPOSTA", body, ColorGray)
+	})
+
+	var contentRows []string
+	for _, ln := range strings.Split(out, "\n") {
+		plain := stripANSI(ln)
+		if !strings.HasPrefix(plain, "│") {
+			continue
+		}
+		contentRows = append(contentRows, plain)
+	}
+
+	assert.NotEmpty(t, contentRows, "card must have at least one content row")
+	firstInner := strings.TrimSpace(strings.Trim(contentRows[0], "│ "))
+	lastInner := strings.TrimSpace(strings.Trim(contentRows[len(contentRows)-1], "│ "))
+	assert.NotEmpty(t, firstInner,
+		"first content row must carry visible text — leading blank survived the trim")
+	assert.NotEmpty(t, lastInner,
+		"last content row must carry visible text — trailing blank survived the trim")
+}
+
+// TestTrimBlankBorderRows_PreservesMiddleBlanks proves the helper
+// only touches the edges. A paragraph break the user wrote in
+// markdown lives as a blank line in wrapText output; that intentional
+// break must NOT be eaten by the trim or we destroy the author's
+// formatting decision.
+func TestTrimBlankBorderRows_PreservesMiddleBlanks(t *testing.T) {
+	got := trimBlankBorderRows([]string{"", "", "head", "", "", "tail", "", ""})
+	want := []string{"head", "", "", "tail"}
+	assert.Equal(t, want, got)
+}
+
+// TestTrimBlankBorderRows_NoOpWhenClean is a fast-path check: when
+// there's nothing to trim, the helper must return the input slice
+// unchanged (same address would be ideal, but Go slice identity is
+// brittle to test — value equality is the practical contract).
+func TestTrimBlankBorderRows_NoOpWhenClean(t *testing.T) {
+	input := []string{"alpha", "beta", "gamma"}
+	got := trimBlankBorderRows(input)
+	assert.Equal(t, input, got)
+}

@@ -59,7 +59,15 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 	case "providers", "provider":
 		cli.showConfigProviders()
 	case "agent":
-		cli.showConfigAgent()
+		// /config agent is also hierarchical now: bare form dumps the
+		// read-only panorama; ui (and future subcommands) mutate the
+		// runtime style. Mirrors the security routing immediately
+		// below so behavior is uniform across sections.
+		if len(args) == 1 {
+			cli.showConfigAgent()
+		} else {
+			cli.routeConfigAgent(args[1:])
+		}
 	case "resilience", "proxy":
 		cli.showConfigResilience()
 	case "session":

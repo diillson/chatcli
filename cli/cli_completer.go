@@ -1387,6 +1387,43 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 		return cli.getConfigSecuritySuggestions(d)
 	}
 
+	// /config agent <TAB> → mutating subcommands (ui style)
+	if strings.ToLower(args[1]) == "agent" {
+		return cli.getConfigAgentSuggestions(d)
+	}
+
+	return []prompt.Suggest{}
+}
+
+// getConfigAgentSuggestions drives the completer for `/config agent`.
+// Slot 3 lists the available subcommands; slot 4 lists the ui style
+// values when the user typed `ui`. Empty for any deeper slot.
+func (cli *ChatCLI) getConfigAgentSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
+
+	// /config agent <TAB>
+	if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+		subs := []prompt.Suggest{
+			{Text: "ui", Description: i18n.T("complete.config.agent.ui")},
+			{Text: "help", Description: i18n.T("cfg.agent.usage_header")},
+		}
+		return prompt.FilterHasPrefix(subs, word, true)
+	}
+
+	// /config agent ui <TAB> → enumerated style values
+	sub := strings.ToLower(args[2])
+	if sub == "ui" || sub == "style" {
+		if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
+			vals := []prompt.Suggest{
+				{Text: "full", Description: i18n.T("cfg.agent.ui_desc_full")},
+				{Text: "compact", Description: i18n.T("cfg.agent.ui_desc_compact")},
+				{Text: "minimal", Description: i18n.T("cfg.agent.ui_desc_minimal")},
+			}
+			return prompt.FilterHasPrefix(vals, word, true)
+		}
+	}
 	return []prompt.Suggest{}
 }
 
