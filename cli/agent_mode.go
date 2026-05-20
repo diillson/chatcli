@@ -724,40 +724,36 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// heuristic described above.
 	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText)
 
-	// Inicializa ou atualiza o histórico com o System Prompt correto
+	// Inicializa ou atualiza o histórico com o System Prompt correto.
+	//
+	// Strategy: purge every stale `[ACTIVE MODE: …]` system message left
+	// over from a previous /chat, /agent, or /coder turn — keeping any
+	// non-mode system messages (e.g. /context attach blocks) untouched —
+	// then prepend the current mode's sysMsg. This is the same filter
+	// used by the chat pipeline; centralizing it in mode_transition.go
+	// means a future change to the marker syntax has exactly one site
+	// to edit.
+	currentModeName := ModeAgent
+	if isCoder {
+		currentModeName = ModeCoder
+	}
+	a.cli.history = purgeStaleModeSystems(a.cli.history, currentModeName)
+
 	if len(a.cli.history) == 0 {
 		a.cli.history = append(a.cli.history, sysMsg)
 	} else {
-		// Remove any mode-reset system messages injected when leaving previous sessions.
-		// These are mid-history system messages that would confuse the LLM on re-entry.
-		cleaned := make([]models.Message, 0, len(a.cli.history))
-		firstSystem := true
-		for _, msg := range a.cli.history {
-			if msg.Role == "system" {
-				if firstSystem {
-					// Keep the first system message (will be updated below)
-					cleaned = append(cleaned, msg)
-					firstSystem = false
-				}
-				// Drop any additional system messages (mode-reset markers)
-				continue
-			}
-			cleaned = append(cleaned, msg)
-		}
-		a.cli.history = cleaned
-
-		// Se já existe histórico (ex: uma sessão carregada), forçamos a atualização do system prompt
-		// para garantir que a IA mude de comportamento se trocarmos de /agent para /coder
+		// Replace any surviving system message of the CURRENT mode with
+		// the freshly-built sysMsg (workspace/skills/orchestrator blocks
+		// may have changed across turns). Otherwise prepend.
 		foundSystem := false
 		for i, msg := range a.cli.history {
-			if msg.Role == "system" {
+			if msg.Role == "system" && modeOfSystemMessage(msg) == currentModeName {
 				a.cli.history[i] = sysMsg
 				foundSystem = true
 				break
 			}
 		}
 		if !foundSystem {
-			// Insere no início se não houver
 			a.cli.history = append([]models.Message{sysMsg}, a.cli.history...)
 		}
 	}
@@ -1589,16 +1585,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		remaining = stripToolCallTags(remaining)
 		remaining = strings.TrimSpace(removeXMLTags(remaining))
 
-		coderMinimal := a.isCoderMode && isCoderMinimalUI()
-		coderCompactGlobal := a.isCoderMode && isCoderCompactUI()
+		// Style flags now sourced from the renderer (env-driven), not
+		// gated by isCoderMode — the CHATCLI_CODER_UI variable controls
+		// both /coder and /agent surfaces after the cross-mode unification.
+		isCompact := renderer.IsCompact()
+		isMinimal := renderer.IsMinimal()
 
 		if strings.TrimSpace(reasoning) != "" {
-			if coderCompactGlobal {
+			switch {
+			case isCompact:
 				renderer.CompactMultiLine("●", "PLANO", reasoning, agent.ColorCyan, 5)
-			} else if coderMinimal {
+			case isMinimal:
 				renderer.RenderTimelineEvent("🧭", "PLANO", compactText(reasoning, 3, 260), agent.ColorCyan)
-			} else {
-				renderMDCard("🧠", "RACIOCÍNIO", reasoning, agent.ColorCyan)
+			default:
+				renderMDCard("🧠", i18n.T("agent.ui.reasoning_title"), reasoning, agent.ColorCyan)
 			}
 			// Integração de Task Tracking (somente no modo /coder)
 			if a.isCoderMode {
@@ -1606,11 +1606,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 		}
 		if strings.TrimSpace(explanation) != "" {
-			if coderCompactGlobal {
+			switch {
+			case isCompact:
 				renderer.CompactLine("◆", "NOTA", explanation, agent.ColorLime)
-			} else if coderMinimal {
+			case isMinimal:
 				renderer.RenderTimelineEvent("📝", "NOTA", compactText(explanation, 2, 220), agent.ColorLime)
-			} else {
+			default:
 				renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
 			}
 		}
@@ -1623,11 +1624,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if strings.TrimSpace(progress) == "" {
 				return
 			}
-			if coderCompactGlobal {
+			switch {
+			case isCompact:
 				renderer.CompactMultiLine("◇", "STATUS", progress, agent.ColorLime, 4)
-			} else if coderMinimal {
+			case isMinimal:
 				renderer.RenderTimelineEvent("🧩", "STATUS", compactText(progress, 2, 220), agent.ColorLime)
-			} else {
+			default:
 				renderMDCard("🧩", "PLANO DE AÇÃO", progress, agent.ColorLime)
 			}
 		}
@@ -1635,17 +1637,22 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Renderizar progresso inicial das tarefas (somente no modo /coder)
 		renderPlanProgress()
 		if strings.TrimSpace(remaining) != "" {
-			if coderCompactGlobal {
-				// CompactAssistantText (not CompactLine with ColorGray)
-				// so the assistant's answer renders in the terminal's
-				// default foreground, visually distinct from the gray
-				// tool prose around it. Wire-through is intentional
-				// even when remaining is multi-line — the helper does
-				// its own line splitting with indentation.
-				renderer.CompactAssistantText(remaining)
-			} else if coderMinimal {
+			switch {
+			case isCompact:
+				// Compact mode now also runs the assistant's answer
+				// through glamour before printing, matching the full-
+				// mode card. Without this, markdown tables and **bold**
+				// arrived raw in the timeline (the user could see the
+				// pipes and asterisks as literal characters) and the
+				// compact "answer" line looked broken compared to the
+				// full-mode card. Trim the glamour bookend newlines so
+				// CompactAssistantText doesn't reserve a leading ◆ row
+				// for an empty line.
+				renderedMD := strings.Trim(a.cli.renderMarkdown(remaining), "\n\r")
+				renderer.CompactAssistantText(renderedMD)
+			case isMinimal:
 				renderer.RenderTimelineEvent("💬", "RESUMO", compactText(remaining, 2, 220), agent.ColorGray)
-			} else {
+			default:
 				renderMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
 			}
 		}
@@ -1717,22 +1724,23 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		if a.parallelMode && a.agentDispatcher != nil {
 			agentCalls, _ := workers.ParseAgentCalls(aiResponse)
 			if len(agentCalls) > 0 {
-				coderMinUI := a.isCoderMode && isCoderMinimalUI()
-				coderCompactUI := a.isCoderMode && isCoderCompactUI()
+				isCompactUI := renderer.IsCompact()
+				isMinimalUI := renderer.IsMinimal()
 				n := len(agentCalls)
 				agentWord := "agent"
 				if n > 1 {
 					agentWord = "agents"
 				}
-				if coderCompactUI {
+				switch {
+				case isCompactUI:
 					renderer.CompactLine("●", "AGENTS", fmt.Sprintf("%d %s", n, agentWord), agent.ColorPurple)
-				} else if coderMinUI {
+				case isMinimalUI:
 					renderer.RenderTimelineEvent("🚀", "AGENTS", fmt.Sprintf("%d %s dispatched", n, agentWord), agent.ColorPurple)
-				} else {
+				default:
 					renderer.RenderTimelineEvent("🚀", "MULTI-AGENT DISPATCH", fmt.Sprintf("Dispatching %d %s", n, agentWord), agent.ColorPurple)
 				}
 
-				if !coderCompactUI {
+				if !isCompactUI {
 					for i, ac := range agentCalls {
 						renderer.RenderTimelineEvent("🤖", fmt.Sprintf("[%s] #%d", ac.Agent, i+1), truncateForUI(ac.Task, 120), agent.ColorCyan)
 					}
@@ -1817,14 +1825,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					totalParallelCalls += ar.ParallelCalls
 					totalDuration += ar.Duration
 					if ar.Error != nil {
-						if coderCompactUI {
+						if isCompactUI {
 							renderer.CompactToolDone(string(ar.Agent), ar.Duration.Round(time.Millisecond).String(), true)
 						} else {
 							renderer.RenderTimelineEvent("❌", fmt.Sprintf("[%s] FAILED", ar.Agent), ar.Error.Error(), agent.ColorYellow)
 						}
 					} else {
 						successCount++
-						if coderCompactUI {
+						if isCompactUI {
 							renderer.CompactToolDone(fmt.Sprintf("%s(%d calls)", ar.Agent, tcCount), ar.Duration.Round(time.Millisecond).String(), false)
 						} else {
 							summary := truncateForUI(ar.Output, 200)
@@ -1844,7 +1852,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				a.toolCallsExecd += totalAgentToolCalls
 				turnToolCalls += totalAgentToolCalls
 
-				if !coderCompactUI {
+				if !isCompactUI {
 					// Resumo compacto do dispatch
 					tcWord := "tool calls"
 					if totalAgentToolCalls == 1 {
@@ -1879,8 +1887,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// PRIORIDADE 1: EXECUTAR TOOL_CALL(s) EM LOTE (BATCH)
 		// =========================================================
 		if len(toolCalls) > 0 {
-			coderMinimal := a.isCoderMode && isCoderMinimalUI()
-			coderCompact := a.isCoderMode && isCoderCompactUI()
+			// isCompact / isMinimal already resolved at the top of this
+			// for-iteration via renderer.IsCompact()/IsMinimal() — reuse
+			// them instead of re-reading the env, so a future caller can
+			// override the style for a single iteration if needed.
 			var batchOutputBuilder strings.Builder
 			var batchHasError bool
 			successCount := 0
@@ -1897,9 +1907,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// Helper: render error message respecting compact mode
 			renderError := func(msg string) {
-				if coderCompact {
+				if isCompact {
 					renderer.CompactError(msg)
-				} else if coderMinimal {
+				} else if isMinimal {
 					renderer.RenderToolResultMinimal(msg, true)
 				} else {
 					renderer.RenderToolResult(msg, true)
@@ -1909,9 +1919,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// 1. Renderiza cabeçalho do lote se houver mais de 1 ação
 			if totalActions > 1 {
 				switch {
-				case coderCompact:
+				case isCompact:
 					// Compact mode: no batch header, just tool lines.
-				case coderMinimal:
+				case isMinimal:
 					renderer.RenderTimelineEvent("📦", "LOTE", fmt.Sprintf("%d ações", totalActions), agent.ColorPurple)
 				default:
 					renderer.RenderBatchHeader(totalActions)
@@ -1980,14 +1990,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				toolStartTime := time.Now()
 
 				// UX: Pequena pausa para separar visualmente o pensamento da ação
-				if !coderCompact {
+				if !isCompact {
 					time.Sleep(200 * time.Millisecond)
 				}
 
 				// 2. Renderiza a BOX de ação IMEDIATAMENTE (antes de processar)
-				if coderCompact {
+				if isCompact {
 					renderer.CompactToolStart(compactLabel)
-				} else if coderMinimal {
+				} else if isMinimal {
 					renderer.RenderToolCallMinimal(toolName, toolArgsStr, i+1, totalActions)
 				} else {
 					renderer.RenderToolCallWithProgress(toolName, toolArgsStr, i+1, totalActions)
@@ -1995,7 +2005,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 				// UX: Força flush e pausa para leitura
 				_ = os.Stdout.Sync()
-				if !coderCompact {
+				if !isCompact {
 					time.Sleep(300 * time.Millisecond)
 				}
 
@@ -2068,7 +2078,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// schema returned to the model; skip execution this turn
 						} else {
 							a.cli.animation.StopThinkingAnimation()
-							if !coderCompact {
+							if !isCompact {
 								renderer.RenderStreamBoxStart("🔌", fmt.Sprintf("MCP: %s", mcpToolName), agent.ColorPurple)
 							}
 
@@ -2097,7 +2107,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								}
 							}
 
-							if !coderCompact {
+							if !isCompact {
 								renderer.RenderStreamBoxEnd(agent.ColorPurple)
 							}
 						}
@@ -2216,12 +2226,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								}
 							}
 
-							if !coderCompact {
+							if !isCompact {
 								renderer.RenderStreamBoxStart("🔨", boxLabel, agent.ColorPurple)
 							}
 
 							streamCallback := func(line string) {
-								if !coderCompact {
+								if !isCompact {
 									renderer.StreamOutput(line)
 								}
 							}
@@ -2263,7 +2273,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								}
 							}
 
-							if !coderCompact {
+							if !isCompact {
 								renderer.RenderStreamBoxEnd(agent.ColorPurple)
 							}
 
@@ -2305,14 +2315,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						displayForHuman = displayForHuman + "\n\n--- ERRO ---\n" + errText
 					}
 				}
-				if coderCompact {
+				if isCompact {
 					elapsed := time.Since(toolStartTime)
 					durationStr := ""
 					if elapsed >= 500*time.Millisecond {
 						durationStr = fmt.Sprintf("%.1fs", elapsed.Seconds())
 					}
 					renderer.CompactToolDone(compactLabel, durationStr, execErr != nil)
-				} else if coderMinimal {
+				} else if isMinimal {
 					renderer.RenderToolResultMinimal(displayForHuman, execErr != nil)
 				} else {
 					renderer.RenderToolResult(displayForHuman, execErr != nil)
@@ -2414,7 +2424,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// 4. Renderiza rodapé do lote
 			if totalActions > 1 {
-				if coderCompact {
+				if isCompact {
 					renderer.CompactBatchSummary(successCount, totalActions, batchHasError)
 				} else {
 					renderer.RenderBatchSummary(successCount, totalActions, batchHasError)
@@ -2554,8 +2564,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// line-editing is uncolored, and once the line commits it
 			// scrolls between gray tool prose. The echo gives the
 			// user's directive a distinct lane so it's findable when
-			// scrolling back through the timeline.
-			if a.isCoderMode && isCoderCompactUI() {
+			// scrolling back through the timeline. Coder-only because
+			// /agent uses single-letter menu input that the prompt
+			// already highlights.
+			if a.isCoderMode && renderer.IsCompact() {
 				renderer.EchoUserInput(userInput)
 			}
 

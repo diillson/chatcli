@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/version"
 	"github.com/mattn/go-runewidth"
@@ -110,85 +111,125 @@ func wrapStringWithColor(text string, maxWidth int) []string {
 	return lines
 }
 
-// --- caixa de dica (agora traduzida) ---
+// tipBoxBorderStyle is the rounded gray border used for the welcome
+// tip box and the active-model card. Defined once so future palette
+// changes touch one spot. lipgloss.Color("8") maps to the terminal's
+// "bright black" ANSI slot — same color the rest of the welcome
+// screen uses for chrome, so it stays themable.
+var tipBoxBorderStyle = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("8"))
+
+// printTipBox renders a centered "Did you know?" tip card. lipgloss
+// owns the border drawing and width math so a future change to the
+// box style (different border, padding tweak, color) is a one-liner
+// instead of a fistful of strings.Repeat calls.
 func printTipBox() {
-	// 3. SORTEIA UMA CHAVE E TRADUZ O TEXTO DA DICA E O TÍTULO
 	tipKey := tipKeys[rand.Intn(len(tipKeys))] //#nosec G404 -- non-cryptographic: picks a welcome-screen tip
-	tip := i18n.T(tipKey)                      // Traduz a dica sorteada
+	tip := i18n.T(tipKey)
+	title := i18n.T("welcome.tip.title")
 
-	width := screenWidth
-	innerContent := width - 4
-	title := i18n.T("welcome.tip.title") // Traduz o título da caixa
+	// Inner content width = card width − 2 borders − 2 of padding.
+	innerWidth := screenWidth - 4
 
-	titleWithSpaces := " " + title + " "
-	tl := visibleLen(titleWithSpaces)
-	dash := width - 2 - tl
-	left := dash / 2
-	right := dash - left
+	// Title line: " ─── Did you know? ─── " centered above the body.
+	// We bake the title into the body so it appears INSIDE the box at
+	// the top, separated from the tip by a blank line. lipgloss's
+	// default border doesn't natively accept a "title within the top
+	// edge" yet, so this is the cleanest workaround.
+	titleLine := lipgloss.NewStyle().
+		Width(innerWidth).
+		Align(lipgloss.Center).
+		Bold(true).
+		Foreground(lipgloss.Color("15")).
+		Render(title)
 
-	fmt.Println(
-		colorize("╭", ColorGray) +
-			strings.Repeat("─", left) +
-			titleWithSpaces +
-			strings.Repeat("─", right) +
-			colorize("╮", ColorGray),
-	)
+	// Wrap the tip body to the inner width using the existing visible-
+	// length-aware helper. lipgloss's word-wrap is also ANSI-aware but
+	// our wrapStringWithColor already handles the edge cases (color
+	// codes mid-word) so we reuse it.
+	wrapped := strings.Join(wrapStringWithColor(tip, innerWidth), "\n")
+	body := lipgloss.NewStyle().
+		Width(innerWidth).
+		Align(lipgloss.Center).
+		Foreground(lipgloss.Color("7")).
+		Render(wrapped)
 
-	// linha em branco
-	fmt.Println(colorize("│", ColorGray) + strings.Repeat(" ", width-2) + colorize("│", ColorGray))
+	card := tipBoxBorderStyle.
+		Padding(1, 1).
+		Render(titleLine + "\n\n" + body)
 
-	// conteúdo centralizado
-	for _, line := range wrapStringWithColor(tip, innerContent) {
-		l := visibleLen(line)
-		left := (innerContent - l) / 2
-		right := innerContent - l - left
-		fmt.Println(
-			colorize("│", ColorGray) +
-				" " + strings.Repeat(" ", left) + line + strings.Repeat(" ", right) + " " +
-				colorize("│", ColorGray),
-		)
-	}
-
-	fmt.Println(colorize("│", ColorGray) + strings.Repeat(" ", width-2) + colorize("│", ColorGray))
-	fmt.Println(colorize("╰"+strings.Repeat("─", width-2)+"╯", ColorGray))
+	// Center the card on the configured screenWidth so the overall
+	// welcome layout stays balanced even on wider terminals.
+	fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center, card))
 }
 
 // PrintWelcomeScreen exibe a tela de boas-vindas completa e traduzida.
+//
+// Layout (todos centrados em screenWidth):
+//
+//	<ASCII logo>
+//	v1.2.3 · commit abc123
+//	╭── Did you know? ──╮
+//	│   <tip>           │
+//	╰───────────────────╯
+//	╭── Active model ────╮
+//	│ ◆ name · provider │
+//	╰────────────────────╯
+//	/help · /exit · /switch
+//
+// The shift to centered + boxed Active-model block came with PR3:
+// before it was left-aligned plain text while everything else was
+// centered, which read as "two screens spliced together".
 func (cli *ChatCLI) PrintWelcomeScreen() {
 	printLogo()
 
 	v, c, _ := version.GetBuildInfo()
 	if v != "" && v != "dev" && v != "unknown" {
 		versionStr := i18n.T("version.label", v, c)
-		padding := (screenWidth - visibleLen(versionStr)) / 2
-		fmt.Printf("%s%s\n\n", strings.Repeat(" ", padding), colorize(versionStr, ColorGray))
+		fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center,
+			colorize(versionStr, ColorGray)))
+		fmt.Println()
 	}
 
 	printTipBox()
 
-	footer := colorize(i18n.T("welcome.footer.help.cmd"), ColorGreen) +
-		colorize(" "+i18n.T("welcome.footer.help.desc"), ColorGray) +
-		colorize("  •  ", ColorGray) +
-		colorize(i18n.T("welcome.footer.exit.cmd"), ColorGreen) +
-		colorize(" "+i18n.T("welcome.footer.exit.desc"), ColorGray) +
-		colorize("  •  ", ColorGray) +
-		colorize(i18n.T("welcome.footer.switch_model.cmd"), ColorGreen) +
-		colorize(" "+i18n.T("welcome.footer.switch_model.desc"), ColorGray)
-
-	separator := colorize(strings.Repeat("━", screenWidth), ColorGray)
-
-	fmt.Println()
-	// footer alinhado à esquerda
-	fmt.Println(footer)
-	fmt.Println(separator)
-
-	// model info alinhado à esquerda
+	// Active-model card. Same border style as the tip box so the two
+	// sit visually balanced on the screen. Falls back to a "no model"
+	// state with a hint when no provider is wired up.
+	var modelLine string
 	if cli.Client != nil {
-		modelInfo := i18n.T("welcome.current_model", cli.Client.GetModelName(), cli.Provider)
-		fmt.Println(colorize(modelInfo, ColorLime))
+		modelLine = lipgloss.JoinHorizontal(lipgloss.Top,
+			colorize("◆ ", ColorLime),
+			colorize(cli.Client.GetModelName(), ColorLime+ColorBold),
+			colorize(" · ", ColorGray),
+			colorize(cli.Provider, ColorGray),
+		)
 	} else {
-		fmt.Println(colorize(i18n.T("welcome.current_model", "(none)", "No provider"), ColorYellow))
-		fmt.Println(colorize("  Use /auth login anthropic | openai-codex | github-copilot to authenticate.", ColorGray))
+		modelLine = lipgloss.JoinVertical(lipgloss.Left,
+			colorize("◆ "+i18n.T("welcome.current_model", "(none)", "No provider"), ColorYellow),
+			colorize(i18n.T("welcome.auth_hint"), ColorGray),
+		)
 	}
+	modelCard := tipBoxBorderStyle.
+		Padding(0, 2).
+		Render(modelLine)
+	fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center, modelCard))
+
+	// Footer of quick commands, centered to match the rest of the
+	// layout. Plain Bullet (·) instead of the heavier "  •  " for a
+	// lighter look that pairs better with the lipgloss-rendered cards.
+	footer := lipgloss.JoinHorizontal(lipgloss.Top,
+		colorize(i18n.T("welcome.footer.help.cmd"), ColorGreen),
+		colorize(" "+i18n.T("welcome.footer.help.desc"), ColorGray),
+		colorize("  ·  ", ColorGray),
+		colorize(i18n.T("welcome.footer.exit.cmd"), ColorGreen),
+		colorize(" "+i18n.T("welcome.footer.exit.desc"), ColorGray),
+		colorize("  ·  ", ColorGray),
+		colorize(i18n.T("welcome.footer.switch_model.cmd"), ColorGreen),
+		colorize(" "+i18n.T("welcome.footer.switch_model.desc"), ColorGray),
+	)
+	fmt.Println()
+	fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center, footer))
 	fmt.Println()
 }
