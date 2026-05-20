@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.119.2](https://github.com/diillson/chatcli/compare/v1.119.1...v1.119.2) (2026-05-20)
+
+
+### Bug Fixes
+
+* **ui:** unified bordered response envelope and responsive welcome ([#942](https://github.com/diillson/chatcli/issues/942)) ([d1a3d39](https://github.com/diillson/chatcli/commit/d1a3d39f8f14e2f0e25008dca6eabdc01a661ca3))
+
 ## [1.119.1](https://github.com/diillson/chatcli/compare/v1.119.0...v1.119.1) (2026-05-20)
 
 
