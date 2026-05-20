@@ -272,143 +272,197 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 // formatActionDetails parses the raw tool args and returns a human-readable
 // action label and detail lines for the security prompt.
 // toolName is the plugin name (e.g. "@coder", "@webfetch", "@websearch", "mcp_tool").
+// formatActionDetails dispatches an incoming tool call into a (label,
+// details) pair suitable for the security prompt. The historical
+// implementation was one ~120-line switch with cyclomatic complexity
+// 34; the rewrite below routes through three small helpers
+// (non-@coder, mcp_*, @coder subcmd) so the top-level function stays
+// under 15 branches and each subcommand carries its own clearly
+// scoped formatter. Adding a new @coder subcmd is now a one-line
+// entry in coderSubcmdFormatters instead of another switch arm.
 func formatActionDetails(subcmd, toolName, rawArgs string) (label string, details []string) {
-	// Try parsing JSON args (flat or nested @coder format)
-	var parsed struct {
+	parsed, argsMap := parseToolCallArgs(rawArgs)
+	if parsed != "" {
+		subcmd = parsed
+	}
+
+	toolLower := strings.ToLower(strings.TrimSpace(toolName))
+
+	// Non-@coder plugins: dispatch by tool name.
+	if l, d, ok := formatNonCoderTool(toolLower, argsMap, rawArgs); ok {
+		return l, d
+	}
+
+	// MCP tools have a common shape: label = "MCP: <name>", details = raw args.
+	if strings.HasPrefix(toolLower, "mcp_") {
+		return formatMCPTool(toolLower, rawArgs)
+	}
+
+	// @coder subcommands: look up the formatter and apply it. Unknown
+	// subcommands fall through to formatFallback so the user still sees
+	// something useful instead of a blank label.
+	if spec, ok := coderSubcmdFormatters[subcmd]; ok {
+		label = i18n.T(spec.labelKey)
+		details = spec.format(argsMap, rawArgs)
+	} else {
+		label, details = formatFallback(subcmd, toolName, toolLower, rawArgs)
+	}
+
+	// Last-resort fallback: every prompt has at least one detail row.
+	if len(details) == 0 {
+		details = append(details, truncate150(rawArgs))
+	}
+	return label, details
+}
+
+// parseToolCallArgs splits the raw args JSON into (subcmd, argsMap),
+// supporting both the nested @coder form `{"cmd":"...","args":{…}}`
+// and the flat plugin form `{"url":"…","query":"…"}`. Returns "" for
+// subcmd when the input didn't carry one.
+func parseToolCallArgs(rawArgs string) (subcmd string, argsMap map[string]interface{}) {
+	var nested struct {
 		Cmd  string          `json:"cmd"`
 		Args json.RawMessage `json:"args"`
 	}
-	var argsMap map[string]interface{}
-
-	if err := json.Unmarshal([]byte(rawArgs), &parsed); err == nil && parsed.Cmd != "" {
-		subcmd = parsed.Cmd
-		_ = json.Unmarshal(parsed.Args, &argsMap)
-	} else {
-		// Flat JSON args (non-@coder plugins): {"url":"...", "query":"..."}
-		_ = json.Unmarshal([]byte(rawArgs), &argsMap)
+	if err := json.Unmarshal([]byte(rawArgs), &nested); err == nil && nested.Cmd != "" {
+		_ = json.Unmarshal(nested.Args, &argsMap)
+		return nested.Cmd, argsMap
 	}
+	_ = json.Unmarshal([]byte(rawArgs), &argsMap)
+	return "", argsMap
+}
 
-	// --- Non-@coder plugins: display by toolName ---
-	toolLower := strings.ToLower(strings.TrimSpace(toolName))
-
+// formatNonCoderTool handles the curated set of built-in non-@coder
+// plugins. The (_, _, false) return is the signal "I don't recognize
+// this tool, let the caller try other dispatch paths".
+func formatNonCoderTool(toolLower string, argsMap map[string]interface{}, rawArgs string) (string, []string, bool) {
 	switch toolLower {
 	case "@webfetch":
-		label = "Web Fetch"
+		details := []string{}
 		if url := extractField(argsMap, rawArgs, "url"); url != "" {
 			details = append(details, "URL: "+url)
 		}
 		if raw := extractField(argsMap, "", "raw"); raw == "true" {
 			details = append(details, "mode: raw HTML")
 		}
-		return
-
+		return "Web Fetch", details, true
 	case "@websearch":
-		label = "Web Search"
+		details := []string{}
 		if q := extractField(argsMap, rawArgs, "query", "q", "term"); q != "" {
 			details = append(details, "query: "+q)
 		}
-		return
+		return "Web Search", details, true
 	}
+	return "", nil, false
+}
 
-	// MCP tools
-	if strings.HasPrefix(toolLower, "mcp_") {
-		mcpName := strings.TrimPrefix(toolLower, "mcp_")
-		label = "MCP: " + mcpName
-		display := rawArgs
-		if len(display) > 150 {
-			display = display[:150] + "..."
-		}
-		if display != "" {
-			details = append(details, display)
-		}
-		return
+// formatMCPTool renders MCP plugin invocations. The raw args are
+// truncated rather than parsed because MCP tool schemas are arbitrary
+// — we'd need a per-tool formatter to do better.
+func formatMCPTool(toolLower, rawArgs string) (string, []string) {
+	mcpName := strings.TrimPrefix(toolLower, "mcp_")
+	display := truncate150(rawArgs)
+	var details []string
+	if display != "" {
+		details = []string{display}
 	}
+	return "MCP: " + mcpName, details
+}
 
-	// --- @coder subcommands ---
-	switch subcmd {
-	case "exec":
-		label = i18n.T("coder.security.action.exec")
-		cmd := extractField(argsMap, rawArgs, "cmd", "command")
-		if cmd != "" {
-			details = append(details, "$ "+cmd)
-		}
-		if dir := extractField(argsMap, "", "cwd", "dir", "workdir"); dir != "" {
-			details = append(details, "dir: "+dir)
-		}
-
-	case "test":
-		label = i18n.T("coder.security.action.test")
-		cmd := extractField(argsMap, rawArgs, "cmd", "command")
-		if cmd != "" {
-			details = append(details, "$ "+cmd)
-		}
-		if dir := extractField(argsMap, "", "dir", "cwd", "workdir"); dir != "" {
-			details = append(details, "dir: "+dir)
-		}
-
-	case "write":
-		label = i18n.T("coder.security.action.write")
-		file := extractField(argsMap, rawArgs, "file", "path", "filepath")
-		if file != "" {
-			details = append(details, i18n.T("coder.security.detail.file")+": "+file)
-		}
-
-	case "patch":
-		label = i18n.T("coder.security.action.patch")
-		file := extractField(argsMap, rawArgs, "file", "path", "filepath")
-		if file != "" {
-			details = append(details, i18n.T("coder.security.detail.file")+": "+file)
-		}
-
-	case "read":
-		label = i18n.T("coder.security.action.read")
-		file := extractField(argsMap, rawArgs, "file", "path", "filepath")
-		if file != "" {
-			details = append(details, i18n.T("coder.security.detail.file")+": "+file)
-		}
-
-	case "search":
-		label = i18n.T("coder.security.action.search")
-		term := extractField(argsMap, rawArgs, "term", "pattern", "query")
-		if term != "" {
-			details = append(details, i18n.T("coder.security.detail.term")+": "+term)
-		}
-		if dir := extractField(argsMap, "", "dir"); dir != "" {
-			details = append(details, "dir: "+dir)
-		}
-
-	case "tree":
-		label = i18n.T("coder.security.action.tree")
-		if dir := extractField(argsMap, rawArgs, "dir", "path"); dir != "" {
-			details = append(details, "dir: "+dir)
-		}
-
+// formatFallback handles unknown @coder subcommands and bare tool
+// invocations. Splits the label-decision out of formatActionDetails
+// so the top function never has to think about "what's the right
+// label" — only "do I have a formatter for this subcmd or not".
+func formatFallback(subcmd, toolName, toolLower, rawArgs string) (string, []string) {
+	switch {
+	case toolName != "" && toolLower != "@coder":
+		return toolName, []string{truncate150(rawArgs)}
+	case subcmd != "":
+		return subcmd, []string{truncate150(rawArgs)}
 	default:
-		// For unknown tools, use the tool name as label
-		if toolName != "" && toolLower != "@coder" {
-			label = toolName
-		} else if subcmd != "" {
-			label = subcmd
-		} else {
-			label = i18n.T("coder.security.action.unknown")
-		}
-		display := rawArgs
-		if len(display) > 150 {
-			display = display[:150] + "..."
-		}
-		details = append(details, display)
+		return i18n.T("coder.security.action.unknown"), []string{truncate150(rawArgs)}
 	}
+}
 
-	if len(details) == 0 {
-		// Fallback: show truncated raw args
-		display := rawArgs
-		if len(display) > 150 {
-			display = display[:150] + "..."
-		}
-		details = append(details, display)
+// truncate150 caps a string at 150 chars + ellipsis. The 150 limit
+// keeps the security prompt from spilling past the terminal width
+// when a raw-args dump carries a long command line; 150 is the
+// historical cap, so we preserve it byte-for-byte.
+func truncate150(s string) string {
+	if len(s) > 150 {
+		return s[:150] + "..."
 	}
+	return s
+}
 
-	return label, details
+// coderSubcmdFormatter is the table-driven spec for one @coder
+// subcommand. labelKey is the i18n key that produces the human-
+// readable verb; format builds the detail rows from the parsed args.
+type coderSubcmdFormatter struct {
+	labelKey string
+	format   func(args map[string]interface{}, raw string) []string
+}
+
+// coderSubcmdFormatters owns the @coder-subcmd dispatch table. Adding
+// a new subcommand is one entry here; deleting one is one removal.
+// The previous design grew the parent switch by 8-12 lines per
+// subcmd, which is what pushed it past the cyclo budget.
+var coderSubcmdFormatters = map[string]coderSubcmdFormatter{
+	"exec":   {labelKey: "coder.security.action.exec", format: detailsExec},
+	"test":   {labelKey: "coder.security.action.test", format: detailsTest},
+	"write":  {labelKey: "coder.security.action.write", format: detailsFile},
+	"patch":  {labelKey: "coder.security.action.patch", format: detailsFile},
+	"read":   {labelKey: "coder.security.action.read", format: detailsFile},
+	"search": {labelKey: "coder.security.action.search", format: detailsSearch},
+	"tree":   {labelKey: "coder.security.action.tree", format: detailsTree},
+}
+
+func detailsExec(args map[string]interface{}, raw string) []string {
+	return cmdWithOptionalDir(args, raw, []string{"cwd", "dir", "workdir"})
+}
+
+func detailsTest(args map[string]interface{}, raw string) []string {
+	return cmdWithOptionalDir(args, raw, []string{"dir", "cwd", "workdir"})
+}
+
+// cmdWithOptionalDir factors the exec/test detail layout: a `$ <cmd>`
+// row plus an optional `dir: <dir>` row. The exec and test arms used
+// to be near-duplicates in the parent switch; sharing this helper is
+// what keeps the cyclo budget tight even as the @coder surface grows.
+func cmdWithOptionalDir(args map[string]interface{}, raw string, dirKeys []string) []string {
+	var out []string
+	if cmd := extractField(args, raw, "cmd", "command"); cmd != "" {
+		out = append(out, "$ "+cmd)
+	}
+	if dir := extractField(args, "", dirKeys...); dir != "" {
+		out = append(out, "dir: "+dir)
+	}
+	return out
+}
+
+func detailsFile(args map[string]interface{}, raw string) []string {
+	if file := extractField(args, raw, "file", "path", "filepath"); file != "" {
+		return []string{i18n.T("coder.security.detail.file") + ": " + file}
+	}
+	return nil
+}
+
+func detailsSearch(args map[string]interface{}, raw string) []string {
+	var out []string
+	if term := extractField(args, raw, "term", "pattern", "query"); term != "" {
+		out = append(out, i18n.T("coder.security.detail.term")+": "+term)
+	}
+	if dir := extractField(args, "", "dir"); dir != "" {
+		out = append(out, "dir: "+dir)
+	}
+	return out
+}
+
+func detailsTree(args map[string]interface{}, raw string) []string {
+	if dir := extractField(args, raw, "dir", "path"); dir != "" {
+		return []string{"dir: " + dir}
+	}
+	return nil
 }
 
 // extractField tries to get a string value from the parsed args map using

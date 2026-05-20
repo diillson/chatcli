@@ -1,5 +1,7 @@
 /*
  * ChatCLI - Mode transition cleanup.
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
  *
  * Single source of truth for the rule "exactly one ACTIVE MODE marker
  * may exist in the system slot at any time". When the user moves

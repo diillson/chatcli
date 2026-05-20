@@ -47,7 +47,6 @@ func resolveEditor() (string, error) {
 	return resolved, nil
 }
 
-
 // extractSubcmdFromArgs extracts the coder subcommand from raw tool call args.
 // Works with both JSON ({"cmd":"read",...}) and CLI-style ("read --file main.go") args.
 func extractSubcmdFromArgs(argsStr string) string {

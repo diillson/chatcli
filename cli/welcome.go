@@ -168,15 +168,15 @@ func printTipBox() {
 //
 // Layout (todos centrados em screenWidth):
 //
-//	   <ASCII logo>
-//	   v1.2.3 · commit abc123
-//	   ╭── Did you know? ──╮
-//	   │   <tip>           │
-//	   ╰───────────────────╯
-//	   ╭── Active model ────╮
-//	   │ ◆ name · provider │
-//	   ╰────────────────────╯
-//	   /help · /exit · /switch
+//	<ASCII logo>
+//	v1.2.3 · commit abc123
+//	╭── Did you know? ──╮
+//	│   <tip>           │
+//	╰───────────────────╯
+//	╭── Active model ────╮
+//	│ ◆ name · provider │
+//	╰────────────────────╯
+//	/help · /exit · /switch
 //
 // The shift to centered + boxed Active-model block came with PR3:
 // before it was left-aligned plain text while everything else was

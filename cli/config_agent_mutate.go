@@ -1,5 +1,7 @@
 /*
  * ChatCLI - /config agent mutator.
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
  *
  * Closes the gap where /config agent was read-only: switching the
  * timeline UI (full / compact / minimal) required restarting the

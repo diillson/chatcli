@@ -1313,3 +1313,22 @@ func LocalizedStatusPhrases() []string {
 	}
 	return out
 }
+
+// StatusPhrases is the original English fallback list, retained for
+// backward-compat with code outside this package that imported the
+// package-level slice. New code should call LocalizedStatusPhrases()
+// so locale changes are honored at call time.
+//
+// Deprecated: use LocalizedStatusPhrases().
+var StatusPhrases = []string{
+	"Thinking...",
+	"Analyzing...",
+	"Processing...",
+	"Reasoning...",
+	"Planning...",
+	"Exploring...",
+	"Connecting dots...",
+	"Crafting solution...",
+	"Reading code...",
+	"Mapping structure...",
+}
