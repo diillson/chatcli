@@ -34,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -584,11 +585,19 @@ func (cli *ChatCLI) handleChatTurnResult(
 }
 
 // renderAssistantResponse draws the assistant message wrapped in a
-// lipgloss envelope:
+// fully bordered, responsive envelope:
 //
 //	╭─ <model> ─────────── <latency> · <tokens> ─╮
-//	│  <markdown body>                           │
+//	│  <wrapped markdown body>                   │
+//	│  …                                         │
 //	╰────────────────────────────────────────────╯
+//
+// All width math is delegated to agent.RenderResponseEnvelope, which:
+//   - reads the live terminal width (no hardcoded columns),
+//   - wraps the body to the inner width preserving ANSI escapes,
+//   - normalizes emoji width so the right border never drifts,
+//   - paints both vertical borders so long lines stay inside the box,
+//   - drives the typewriter effect on the body.
 //
 // Streaming clients already painted raw chunks inline during the call;
 // we clear that line and overwrite with the markdown-rendered version
@@ -605,58 +614,37 @@ func (cli *ChatCLI) renderAssistantResponse(
 		fmt.Print("\033[2K\r")
 	}
 
-	header := cli.buildChatEnvelopeHeader(activeClient, elapsed, usage)
-	footer := cli.buildChatEnvelopeFooter(header)
-
-	fmt.Println()
-	fmt.Println(header)
-	// Indent body so it visually sits inside the envelope. The body
-	// already contains its own glamour-rendered formatting, which we
-	// preserve as-is — we only add a left gutter. Typewriter the body
-	// so the response feels alive instead of pasted; ANSI escape
-	// sequences embedded in the markdown are streamed without delay.
-	indented := "  " + strings.ReplaceAll(strings.TrimRight(rendered, "\n"), "\n", "\n  ") + "\n"
-	cli.typewriterEffect(indented, 2*time.Millisecond)
-	fmt.Println(footer)
+	left, right := chatEnvelopeLabels(activeClient, elapsed, usage)
+	renderer := agent.NewUIRendererWithStyle(cli.logger, agent.UIStyleFull)
+	renderer.RenderResponseEnvelope(agent.ResponseEnvelopeOptions{
+		HeaderLeft:  left,
+		HeaderRight: right,
+		Body:        rendered,
+		Color:       agent.ColorGray,
+		Typewriter:  true,
+	})
 	fmt.Println()
 }
 
-// buildChatEnvelopeHeader produces the top border line:
+// chatEnvelopeLabels builds the bilateral labels for the chat reply
+// envelope: model name on the left (purple + bold), latency · tokens
+// on the right (gray). Each label includes the leading/trailing space
+// the envelope renderer expects so the dash fill bites cleanly into
+// the labels instead of sitting flush against the text.
 //
-//	╭─ claude-opus-4-7 ──────────── 1.4s · 312↑ 1.8k↓ ─╮
-//
-// The model name lives on the left in purple+bold; the latency/token
-// summary sits on the right in gray. The dashes in between expand to
-// fill the configured screen width.
-func (cli *ChatCLI) buildChatEnvelopeHeader(activeClient client.LLMClient, elapsed time.Duration, usage *models.UsageInfo) string {
+// Returning the two strings separately (instead of a pre-built header
+// line) lets the unified envelope renderer own the border math while
+// the chat path still owns its content. Locale-aware token formatting
+// flows through formatTokenSummary, which respects the active i18n
+// locale (en/pt) for the digit grouping separator.
+func chatEnvelopeLabels(activeClient client.LLMClient, elapsed time.Duration, usage *models.UsageInfo) (string, string) {
 	model := activeClient.GetModelName()
 	latency := formatLatency(elapsed)
 	tokens := formatTokenSummary(usage)
 
-	leftLabel := colorize(" "+model+" ", ColorPurple+ColorBold)
-	rightLabel := colorize(" "+latency+" · "+tokens+" ", ColorGray)
-
-	target := screenWidth - 2 // leave room for "╭" + "╮"
-	leftLen := visibleLen(leftLabel)
-	rightLen := visibleLen(rightLabel)
-	pad := target - leftLen - rightLen
-	if pad < 4 {
-		pad = 4
-	}
-	fill := colorize(strings.Repeat("─", pad), ColorGray)
-	return colorize("╭─", ColorGray) + leftLabel + fill + rightLabel + colorize("─╮", ColorGray)
-}
-
-// buildChatEnvelopeFooter mirrors the header's width so the envelope
-// reads as a balanced box. We measure the header's visible width and
-// produce a footer of the same total length.
-func (cli *ChatCLI) buildChatEnvelopeFooter(header string) string {
-	width := visibleLen(header)
-	if width < 4 {
-		width = 4
-	}
-	inner := width - 2
-	return colorize("╰"+strings.Repeat("─", inner)+"╯", ColorGray)
+	left := colorize(" "+model+" ", ColorPurple+ColorBold)
+	right := colorize(" "+latency+" · "+tokens+" ", ColorGray)
+	return left, right
 }
 
 // formatLatency renders a duration in a human-friendly shape:

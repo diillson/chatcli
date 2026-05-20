@@ -18,7 +18,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/diillson/chatcli/i18n"
-	"github.com/mattn/go-runewidth"
 	"go.uber.org/zap"
 	"golang.org/x/term"
 )
@@ -447,11 +446,17 @@ func (r *UIRenderer) PrintPrompt() string {
 }
 
 // VisibleLen calcula comprimento visível em colunas do terminal (sem ANSI codes).
-// Usa runewidth para tratar emojis e caracteres wide corretamente.
+//
+// Delegates to lipgloss.Width — the same function the bordered box
+// renderer uses to size top/bottom borders. Sharing one measurement
+// path is what keeps wrap math and border math in agreement when the
+// content has emoji presentation sequences (e.g. "🏟️" = stadium + VS-16
+// = U+1F3DF + U+FE0F) that pure runewidth.StringWidth reports as 1 col
+// while every modern terminal renders as 2. Mismatch there used to
+// drift the right border outside the visible box; routing both sides
+// through lipgloss.Width removes the disagreement entirely.
 func VisibleLen(s string) int {
-	ansiRe := regexp.MustCompile(`\x1b\[[0-9;]*m`)
-	cleaned := ansiRe.ReplaceAllString(s, "")
-	return runewidth.StringWidth(cleaned)
+	return lipgloss.Width(s)
 }
 
 // RenderTimelineEvent desenha um "card" estilizado com:

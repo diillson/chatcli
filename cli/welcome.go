@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/version"
 	"github.com/mattn/go-runewidth"
@@ -27,9 +28,46 @@ var tipKeys = []string{ // <-- 2. ALTERADO DE 'tips' PARA 'tipKeys'
 	"tip.agent_last_result",
 }
 
-const screenWidth = 87 // largura global para tudo
+// cardMaxWidth caps the inner width of welcome-screen cards (tip box,
+// active-model card). The number was tuned around the original 87-col
+// global constant and matches the layout the welcome screen was
+// originally designed around. On wider terminals we keep the cards at
+// this width and center them so the layout stays balanced; on narrower
+// terminals the cards shrink to fit.
+const cardMaxWidth = 87
 
-// printLogo exibe o novo logo do ChatCLI em ASCII art.
+// screenWidth reports the live terminal width — the surface we center
+// the welcome content over. Falls back to cardMaxWidth when stdout is
+// not a TTY (CI / piped runs) so the layout still looks sane outside
+// an interactive shell. Reads at call time so a window resize between
+// PrintWelcomeScreen invocations is picked up automatically.
+func screenWidth() int {
+	w := agent.TerminalWidth()
+	if w <= 0 {
+		return cardMaxWidth
+	}
+	return w
+}
+
+// cardWidth returns the inner card width clamped to [40, cardMaxWidth].
+// Used by the tip box and active-model card so they keep a comfortable
+// reading width regardless of the terminal size, while remaining
+// centered on screenWidth().
+func cardWidth() int {
+	w := screenWidth() - 2
+	if w > cardMaxWidth {
+		return cardMaxWidth
+	}
+	if w < 40 {
+		return 40
+	}
+	return w
+}
+
+// printLogo exibe o novo logo do ChatCLI em ASCII art, centralizado na
+// largura real do terminal. Quando o terminal é mais estreito que o
+// logo, imprimimos sem padding (o terminal cuida do wrap, melhor que
+// truncarmos cegamente).
 func printLogo() {
 	logo := `
            ██████╗ ██╗  ██╗ █████╗ ████████╗ ██████╗██╗     ██╗
@@ -48,15 +86,14 @@ func printLogo() {
 	coloredLogo = strings.ReplaceAll(coloredLogo, "═", colorize("═", ColorGray))
 	coloredLogo = strings.ReplaceAll(coloredLogo, "║", colorize("║", ColorGray))
 
-	width := 80
+	target := screenWidth()
 	for _, line := range strings.Split(coloredLogo, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		// calcula padding
 		visible := visibleLen(line)
-		if visible < width {
-			left := (width - visible) / 2
+		if visible < target {
+			left := (target - visible) / 2
 			fmt.Println(strings.Repeat(" ", left) + line)
 		} else {
 			fmt.Println(line)
@@ -129,8 +166,12 @@ func printTipBox() {
 	tip := i18n.T(tipKey)
 	title := i18n.T("welcome.tip.title")
 
+	card := cardWidth()
 	// Inner content width = card width − 2 borders − 2 of padding.
-	innerWidth := screenWidth - 4
+	innerWidth := card - 4
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
 
 	// Title line: " ─── Did you know? ─── " centered above the body.
 	// We bake the title into the body so it appears INSIDE the box at
@@ -155,13 +196,14 @@ func printTipBox() {
 		Foreground(lipgloss.Color("7")).
 		Render(wrapped)
 
-	card := tipBoxBorderStyle.
+	rendered := tipBoxBorderStyle.
 		Padding(1, 1).
 		Render(titleLine + "\n\n" + body)
 
-	// Center the card on the configured screenWidth so the overall
-	// welcome layout stays balanced even on wider terminals.
-	fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center, card))
+	// Center the rendered card on the live terminal width so the
+	// overall welcome layout stays balanced regardless of how the
+	// user has sized their terminal.
+	fmt.Println(lipgloss.PlaceHorizontal(screenWidth(), lipgloss.Center, rendered))
 }
 
 // PrintWelcomeScreen exibe a tela de boas-vindas completa e traduzida.
@@ -184,10 +226,12 @@ func printTipBox() {
 func (cli *ChatCLI) PrintWelcomeScreen() {
 	printLogo()
 
+	target := screenWidth()
+
 	v, c, _ := version.GetBuildInfo()
 	if v != "" && v != "dev" && v != "unknown" {
 		versionStr := i18n.T("version.label", v, c)
-		fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center,
+		fmt.Println(lipgloss.PlaceHorizontal(target, lipgloss.Center,
 			colorize(versionStr, ColorGray)))
 		fmt.Println()
 	}
@@ -214,7 +258,7 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 	modelCard := tipBoxBorderStyle.
 		Padding(0, 2).
 		Render(modelLine)
-	fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center, modelCard))
+	fmt.Println(lipgloss.PlaceHorizontal(target, lipgloss.Center, modelCard))
 
 	// Footer of quick commands, centered to match the rest of the
 	// layout. Plain Bullet (·) instead of the heavier "  •  " for a
@@ -230,6 +274,6 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 		colorize(" "+i18n.T("welcome.footer.switch_model.desc"), ColorGray),
 	)
 	fmt.Println()
-	fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center, footer))
+	fmt.Println(lipgloss.PlaceHorizontal(target, lipgloss.Center, footer))
 	fmt.Println()
 }
