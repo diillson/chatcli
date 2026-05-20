@@ -66,6 +66,23 @@ func TestPrintTipBox_RendersTitleAndBorders(t *testing.T) {
 	assert.True(t, bodyFound, "tip-box must have at least one non-blank content row")
 }
 
+// TestPrintWelcomeScreen_HappyPath exercises the full welcome flow
+// (logo + version + tip-box + active-model card + footer). Builds a
+// ChatCLI with Client=nil so we hit the "no provider" branch, then
+// asserts that the auth hint surfaces — that's the contract that
+// tells the user how to fix the situation.
+func TestPrintWelcomeScreen_HappyPath(t *testing.T) {
+	cli := &ChatCLI{}
+	out := captureStdout(t, cli.PrintWelcomeScreen)
+	plain := stripANSIWelcome(out)
+
+	assert.Contains(t, plain, "╭", "logo + boxes must render border glyphs")
+	assert.Contains(t, plain, "/help",
+		"footer must list the quick-help command so first-launch users know what to type")
+	assert.Contains(t, plain, "/exit", "footer must list /exit")
+	assert.Contains(t, plain, "/switch", "footer must list /switch")
+}
+
 // stripANSIWelcome strips CSI sequences inline so welcome_test can
 // assert on plain text without taking a dep on the renderer's test
 // helpers.

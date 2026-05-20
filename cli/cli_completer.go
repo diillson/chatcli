@@ -1412,7 +1412,16 @@ func (cli *ChatCLI) getConfigAgentSuggestions(d prompt.Document) []prompt.Sugges
 		return prompt.FilterHasPrefix(subs, word, true)
 	}
 
-	// /config agent ui <TAB> → enumerated style values
+	// /config agent ui <TAB> → enumerated style values.
+	// Guard against args with fewer than 3 elements (happens during
+	// the brief windows where the completer fires before any token
+	// after `agent` is materialized — observed when the cursor is at
+	// column 0 of a freshly-typed line, before go-prompt has flushed
+	// the buffer). Without the guard, args[2] panics with
+	// "index out of range".
+	if len(args) < 3 {
+		return []prompt.Suggest{}
+	}
 	sub := strings.ToLower(args[2])
 	if sub == "ui" || sub == "style" {
 		if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
