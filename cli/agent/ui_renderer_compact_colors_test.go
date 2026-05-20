@@ -104,9 +104,13 @@ func TestCompactToolDone_LabelIsCyan(t *testing.T) {
 	// Success-specific glyph + green icon.
 	assert.Contains(t, successOut, "✓")
 	assert.Contains(t, successOut, ColorGreen)
-	// Error-specific glyph + yellow duration.
+	// Error-specific glyph + red duration. The PR1 cross-mode polish
+	// migrated all error surfaces from purple/yellow to a true red so
+	// failures read as failures even on themes where yellow was used
+	// for warnings. If a future cleanup regresses this back to yellow,
+	// it must update RenderToolResult/Minimal + CompactError together.
 	assert.Contains(t, failOut, "✗")
-	assert.Contains(t, failOut, ColorYellow)
+	assert.Contains(t, failOut, ColorRed)
 }
 
 // TestCompactAssistantText_UsesDefaultForeground proves the new

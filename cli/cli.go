@@ -1092,8 +1092,11 @@ func (cli *ChatCLI) runAgentLogic() {
 		return
 	}
 
-	fmt.Println(i18n.T("status.agent_mode_enter", query))
-	fmt.Println(i18n.T("status.agent_mode_description"))
+	rendererAgent := agent.NewUIRenderer(cli.logger)
+	rendererAgent.RenderModeBanner("🤖", i18n.T("agent.banner.title"), agent.ColorLime, [][2]string{
+		{i18n.T("agent.banner.task"), query},
+		{i18n.T("agent.banner.mode"), i18n.T("agent.banner.mode_value")},
+	})
 
 	query, additionalContext := cli.processSpecialCommands(query)
 
@@ -1133,9 +1136,13 @@ func (cli *ChatCLI) runCoderLogic() {
 		return
 	}
 
-	fmt.Println(colorize("\n"+i18n.T("coder.header"), ColorCyan+ColorBold))
-	fmt.Printf("%s: \"%s\"\n\n", i18n.T("coder.objective"), query)
-	fmt.Println(colorize(i18n.T("coder.hint.ctrl_c"), ColorGray))
+	wd, _ := os.Getwd()
+	renderer := agent.NewUIRenderer(cli.logger)
+	renderer.RenderModeBanner("🛠 ", i18n.T("coder.banner.title"), agent.ColorCyan, [][2]string{
+		{i18n.T("coder.banner.objective"), query},
+		{i18n.T("coder.banner.workspace"), wd},
+		{i18n.T("coder.banner.policy"), i18n.T("coder.banner.policy_value")},
+	})
 
 	query, additionalContext := cli.processSpecialCommands(query)
 
@@ -1241,18 +1248,27 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 	case StateAgentMode:
 		return "", true
 	default:
-		prefix := "❯ "
-		if cli.currentSessionName != "" {
-			prefix = fmt.Sprintf("%s ❯ ", cli.currentSessionName)
-		}
+		// Single grouped badge holds all the status icons that used to
+		// pile up as separate `[remote]`, `[watch]`, `[jobs: 2▶ 1⏳]`,
+		// `[🅿️ resume: 1]` prefixes. Empty when no badge is active so
+		// the bare `❯` stays minimal.
+		var icons []string
 		if cli.isRemote {
-			prefix = "[remote] " + prefix
+			icons = append(icons, "🌐")
 		}
 		if cli.isWatching {
-			prefix = "[watch] " + prefix
+			icons = append(icons, "⏵")
 		}
 		if badge := cli.schedulerStatusLine(); badge != "" {
-			prefix = badge + " " + prefix
+			// Schedulerline already comes formatted as "[jobs: 2▶ 1⏳]";
+			// strip the wrapping brackets so the grouped badge stays
+			// consistent ("▶2⏳1" is enough inside the unified [..]).
+			trimmed := strings.TrimSuffix(strings.TrimPrefix(badge, "["), "]")
+			trimmed = strings.TrimPrefix(trimmed, "jobs:")
+			trimmed = strings.TrimSpace(trimmed)
+			if trimmed != "" {
+				icons = append(icons, trimmed)
+			}
 		}
 		// Park resume badge: alerts the user that a parked agent has a
 		// resume queued and is waiting for the next executor tick to
@@ -1264,8 +1280,17 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 		n := len(cli.pendingResumeQueue)
 		cli.pendingResumeMu.Unlock()
 		if n > 0 {
-			prefix = fmt.Sprintf("[🅿️  resume ready: %d] ", n) + prefix
+			icons = append(icons, fmt.Sprintf("🅿%d", n))
 		}
+
+		var prefix string
+		if len(icons) > 0 {
+			prefix = "[" + strings.Join(icons, " ") + "] "
+		}
+		if cli.currentSessionName != "" {
+			prefix += cli.currentSessionName + " "
+		}
+		prefix += "❯ "
 		return prefix, true
 	}
 }

@@ -52,13 +52,14 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	cli.noticeSkillResolution(resolution)
 	ctx = cli.applyChatEffortHint(ctx, assembly.effort)
 
+	turnStart := time.Now()
 	aiResponse, llmErr := cli.executeLLMTurn(
 		ctx, resolution.Client, userInput, additionalContext,
 		tempHistory, effectiveMaxTokens, resolution, stopSpinner,
 	)
 	cli.handleChatTurnResult(
 		llmErr, userMessage, aiResponse, resolution.Client, resolution,
-		userInput, additionalContext,
+		userInput, additionalContext, time.Since(turnStart),
 	)
 }
 

@@ -540,6 +540,8 @@ func (cli *ChatCLI) executeBufferedTurn(
 // handleChatTurnResult is the post-execution branch. On error it surfaces
 // the error to the user; on success it appends the user+assistant pair to
 // history, tracks cost (buffered path), and renders the assistant message.
+// elapsed is measured from just before executeLLMTurn so it covers both
+// latency to first byte and full streaming time.
 func (cli *ChatCLI) handleChatTurnResult(
 	err error,
 	userMessage models.Message,
@@ -547,6 +549,7 @@ func (cli *ChatCLI) handleChatTurnResult(
 	activeClient client.LLMClient,
 	resolution SkillClientResolution,
 	userInput, additionalContext string,
+	elapsed time.Duration,
 ) {
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -560,32 +563,107 @@ func (cli *ChatCLI) handleChatTurnResult(
 	cli.history = append(cli.history, userMessage)
 	cli.history = append(cli.history, models.Message{Role: "assistant", Content: aiResponse})
 
+	usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
 	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) {
-		usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
 		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)
 	}
-
-	cli.renderAssistantResponse(activeClient, aiResponse)
+	cli.renderAssistantResponse(activeClient, aiResponse, elapsed, usage)
 
 	if cli.memWorker != nil {
 		cli.memWorker.nudge()
 	}
 }
 
-// renderAssistantResponse draws the assistant message. Streaming clients
-// already painted raw chunks inline; we overwrite that line with the
-// markdown-rendered version so the final output is formatted consistently
-// with the buffered path.
-func (cli *ChatCLI) renderAssistantResponse(activeClient client.LLMClient, aiResponse string) {
+// renderAssistantResponse draws the assistant message wrapped in a
+// lipgloss envelope:
+//
+//	╭─ <model> ─────────── <latency> · <tokens> ─╮
+//	│  <markdown body>                           │
+//	╰────────────────────────────────────────────╯
+//
+// Streaming clients already painted raw chunks inline during the call;
+// we clear that line and overwrite with the markdown-rendered version
+// so the user sees the same boxed output regardless of transport.
+func (cli *ChatCLI) renderAssistantResponse(
+	activeClient client.LLMClient,
+	aiResponse string,
+	elapsed time.Duration,
+	usage *models.UsageInfo,
+) {
 	rendered := ensureANSIReset(cli.renderMarkdown(aiResponse))
 	if client.IsStreamingCapable(activeClient) {
+		// Clear the in-progress stream line so the envelope draws cleanly.
 		fmt.Print("\033[2K\r")
-		fmt.Print(rendered)
-	} else {
-		fmt.Printf("%s\n", colorize(activeClient.GetModelName()+":", ColorPurple))
-		cli.typewriterEffect(rendered, 2*time.Millisecond)
 	}
-	fmt.Print("\033[0m")
+
+	header := cli.buildChatEnvelopeHeader(activeClient, elapsed, usage)
+	footer := cli.buildChatEnvelopeFooter(header)
+
 	fmt.Println()
+	fmt.Println(header)
+	// Indent body so it visually sits inside the envelope. The body
+	// already contains its own glamour-rendered formatting, which we
+	// preserve as-is — we only add a left gutter.
+	for _, ln := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
+		fmt.Println("  " + ln)
+	}
+	fmt.Println(footer)
 	fmt.Println()
+}
+
+// buildChatEnvelopeHeader produces the top border line:
+//
+//	╭─ claude-opus-4-7 ──────────── 1.4s · 312↑ 1.8k↓ ─╮
+//
+// The model name lives on the left in purple+bold; the latency/token
+// summary sits on the right in gray. The dashes in between expand to
+// fill the configured screen width.
+func (cli *ChatCLI) buildChatEnvelopeHeader(activeClient client.LLMClient, elapsed time.Duration, usage *models.UsageInfo) string {
+	model := activeClient.GetModelName()
+	latency := formatLatency(elapsed)
+	tokens := formatTokenSummary(usage)
+
+	leftLabel := colorize(" "+model+" ", ColorPurple+ColorBold)
+	rightLabel := colorize(" "+latency+" · "+tokens+" ", ColorGray)
+
+	target := screenWidth - 2 // leave room for "╭" + "╮"
+	leftLen := visibleLen(leftLabel)
+	rightLen := visibleLen(rightLabel)
+	pad := target - leftLen - rightLen
+	if pad < 4 {
+		pad = 4
+	}
+	fill := colorize(strings.Repeat("─", pad), ColorGray)
+	return colorize("╭─", ColorGray) + leftLabel + fill + rightLabel + colorize("─╮", ColorGray)
+}
+
+// buildChatEnvelopeFooter mirrors the header's width so the envelope
+// reads as a balanced box. We measure the header's visible width and
+// produce a footer of the same total length.
+func (cli *ChatCLI) buildChatEnvelopeFooter(header string) string {
+	width := visibleLen(header)
+	if width < 4 {
+		width = 4
+	}
+	inner := width - 2
+	return colorize("╰"+strings.Repeat("─", inner)+"╯", ColorGray)
+}
+
+// formatLatency renders a duration in a human-friendly shape:
+// 380ms / 1.4s / 12.3s. Picked over time.Duration.String() so the
+// header stays compact at any latency.
+func formatLatency(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+// formatTokenSummary renders usage as "312↑ 1.8k↓". Returns the i18n
+// placeholder when usage is unreported (provider didn't return counts).
+func formatTokenSummary(u *models.UsageInfo) string {
+	if u == nil || (u.PromptTokens == 0 && u.CompletionTokens == 0) {
+		return i18n.T("chat.envelope.no_tokens")
+	}
+	return i18n.T("chat.envelope.tokens", u.PromptTokens, u.CompletionTokens)
 }

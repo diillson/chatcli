@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
@@ -529,19 +530,18 @@ func (cli *ChatCLI) showConfigAgent() {
 	sectionHeader("🤖", "cfg.section.agent.title", ColorLime)
 	p := uiPrefix(ColorLime)
 
-	// Coder UI
-	coderUI := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_UI")))
-	coderUIEffective := "full"
-	if coderUI == "minimal" || coderUI == "min" || coderUI == "true" || coderUI == "1" {
-		coderUIEffective = "minimal"
-	}
+	// UI style — now drives both /coder and /agent timelines. Resolved
+	// through agent.DefaultUIStyleFromEnv so the same parsing rules apply
+	// everywhere (legacy name "CHATCLI_CODER_UI" retained for back-compat
+	// after the cross-mode unification).
+	coderUIEffective := agent.DefaultUIStyleFromEnv().String()
 	coderBanner := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_BANNER")))
 	coderBannerEffective := i18n.T("cfg.val.on")
 	if coderBanner == "false" || coderBanner == "0" || coderBanner == "no" {
 		coderBannerEffective = i18n.T("cfg.val.off")
 	}
 	kv(p, "CHATCLI_CODER_UI", envOr("CHATCLI_CODER_UI"))
-	kv(p, "CHATCLI_CODER_UI (effective)", coderUIEffective)
+	kv(p, "CHATCLI_CODER_UI (effective)", coderUIEffective+" — applies to /coder AND /agent")
 	kv(p, "CHATCLI_CODER_BANNER", envOr("CHATCLI_CODER_BANNER"))
 	kv(p, "CHATCLI_CODER_BANNER (effective)", coderBannerEffective)
 

@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/mattn/go-runewidth"
 	"go.uber.org/zap"
@@ -31,21 +32,94 @@ const (
 	ColorPurple = "\033[35m"
 	ColorBold   = "\033[1m"
 	ColorYellow = "\033[33m"
+	ColorRed    = "\033[31m"
+	ColorBlue   = "\033[34m"
 )
+
+// UIStyle selects how the renderer dispatches tool-call output across
+// the timeline. The same enum drives both /coder and /agent paths; the
+// env var CHATCLI_CODER_UI feeds it (legacy name kept on purpose — it
+// now controls both modes, see DefaultUIStyleFromEnv).
+type UIStyle int
+
+const (
+	// UIStyleFull renders every tool call inside a bordered card,
+	// every reasoning block in its own panel. Best for supervised
+	// /agent runs where the user reviews each action.
+	UIStyleFull UIStyle = iota
+	// UIStyleCompact renders one-line tool calls (↻/✓) so a long
+	// /coder session with dozens of tool invocations stays scannable.
+	UIStyleCompact
+	// UIStyleMinimal renders boxed tool calls with truncated reasoning.
+	// Sits between Full and Compact: lighter than Full, more context
+	// than Compact.
+	UIStyleMinimal
+)
+
+func (s UIStyle) String() string {
+	switch s {
+	case UIStyleCompact:
+		return "compact"
+	case UIStyleMinimal:
+		return "minimal"
+	default:
+		return "full"
+	}
+}
+
+// DefaultUIStyleFromEnv reads CHATCLI_CODER_UI and maps it to a UIStyle.
+// Unset / "full" / "false" / "0" → Full. "compact" → Compact.
+// "minimal" / "min" / "true" / "1" → Minimal. Legacy: "compact" used to
+// imply Minimal in some call sites — kept as Compact here because that
+// matches the explicit user intent of typing "compact".
+func DefaultUIStyleFromEnv() UIStyle {
+	val := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_CODER_UI")))
+	switch val {
+	case "compact":
+		return UIStyleCompact
+	case "minimal", "min", "true", "1":
+		return UIStyleMinimal
+	default:
+		return UIStyleFull
+	}
+}
 
 // UIRenderer gerencia a renderização da interface do modo agente
 type UIRenderer struct {
 	logger              *zap.Logger
 	skipClearOnNextDraw bool
+	style               UIStyle
 }
 
-// NewUIRenderer cria uma nova instância do renderizador de UI
+// NewUIRenderer cria uma nova instância do renderizador de UI; o estilo
+// é detectado a partir do ambiente. Para testes ou para forçar um
+// estilo, use NewUIRendererWithStyle.
 func NewUIRenderer(logger *zap.Logger) *UIRenderer {
+	return NewUIRendererWithStyle(logger, DefaultUIStyleFromEnv())
+}
+
+// NewUIRendererWithStyle constrói um renderer com estilo explícito.
+// Usado por testes e por callers que precisam forçar um estilo
+// independentemente do ambiente (ex: relatórios offline).
+func NewUIRendererWithStyle(logger *zap.Logger, style UIStyle) *UIRenderer {
 	return &UIRenderer{
 		logger:              logger,
 		skipClearOnNextDraw: true,
+		style:               style,
 	}
 }
+
+// Style returns the resolved UI style for this renderer.
+func (r *UIRenderer) Style() UIStyle { return r.style }
+
+// IsFull reports whether tool calls render as full bordered cards.
+func (r *UIRenderer) IsFull() bool { return r.style == UIStyleFull }
+
+// IsCompact reports whether tool calls render as one-line ↻/✓ entries.
+func (r *UIRenderer) IsCompact() bool { return r.style == UIStyleCompact }
+
+// IsMinimal reports whether tool calls render as boxed-but-truncated cards.
+func (r *UIRenderer) IsMinimal() bool { return r.style == UIStyleMinimal }
 
 // imprime a linha COM A BARRA LATERAL para parecer que está dentro
 func (r *UIRenderer) StreamOutput(line string) {
@@ -251,24 +325,98 @@ func (r *UIRenderer) PrintHeader() {
 	fmt.Println(r.Colorize(i18n.T("agent.header.description"), ColorGray))
 }
 
-// PrintMenu imprime o menu de opções
+// PrintMenu renders the agent-mode action menu in three vertical
+// columns grouped by intent (Execution / Edit & Context / View). The
+// previous single-column layout produced a 12-row wall of `[1..N]: …`
+// entries that scrolled past the user's tool output every turn — the
+// columnar layout fits the same information in 6 rows while still
+// keeping the key + description pairing readable.
+//
+// Columns are built with lipgloss.JoinHorizontal so a long description
+// in any column does not push the other columns out of alignment.
 func (r *UIRenderer) PrintMenu() {
-	fmt.Println("\n" + r.Colorize(strings.Repeat("-", 60), ColorGray))
+	type entry struct{ key, desc string }
+
+	execution := []entry{
+		{"[1..N]", i18n.T("agent.menu.exec_n")},
+		{"a", i18n.T("agent.menu.exec_all")},
+		{"cN", i18n.T("agent.menu.continue")},
+	}
+	editContext := []entry{
+		{"eN", i18n.T("agent.menu.edit")},
+		{"tN", i18n.T("agent.menu.dry_run")},
+		{"pcN", i18n.T("agent.menu.pre_context")},
+		{"acN", i18n.T("agent.menu.post_context")},
+	}
+	view := []entry{
+		{"vN", i18n.T("agent.menu.view")},
+		{"wN", i18n.T("agent.menu.save")},
+		{"p", i18n.T("agent.menu.toggle_plan")},
+		{"r", i18n.T("agent.menu.redraw")},
+		{"q", i18n.T("agent.menu.quit")},
+	}
+
+	// renderColumn turns a slice of {key, desc} entries into a single
+	// multi-line string with the column header on top. Key column is
+	// fixed width so descriptions stay vertically aligned.
+	renderColumn := func(title string, entries []entry) string {
+		const keyWidth = 6
+		head := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")).Render(title)
+		sep := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(strings.Repeat("─", lipgloss.Width(head)))
+		rows := []string{head, sep}
+		for _, e := range entries {
+			key := r.Colorize(fmt.Sprintf("%-*s", keyWidth, e.key), ColorYellow)
+			rows = append(rows, key+" "+e.desc)
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	}
+
+	// Each column padded right so the next column starts at a clean offset.
+	padCol := lipgloss.NewStyle().PaddingRight(3)
+	col1 := padCol.Render(renderColumn(i18n.T("agent.menu.col.execution"), execution))
+	col2 := padCol.Render(renderColumn(i18n.T("agent.menu.col.edit_context"), editContext))
+	col3 := renderColumn(i18n.T("agent.menu.col.view"), view)
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, col1, col2, col3)
+
+	fmt.Println()
 	fmt.Println(r.Colorize(i18n.T("agent.menu.header"), ColorLime+ColorBold))
-	fmt.Println(r.Colorize(strings.Repeat("-", 60), ColorGray))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "[1..N]"), ColorYellow), i18n.T("agent.menu.exec_n"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "a"), ColorYellow), i18n.T("agent.menu.exec_all"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "eN"), ColorYellow), i18n.T("agent.menu.edit"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "tN"), ColorYellow), i18n.T("agent.menu.dry_run"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "cN"), ColorYellow), i18n.T("agent.menu.continue"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "pcN"), ColorYellow), i18n.T("agent.menu.pre_context"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "acN"), ColorYellow), i18n.T("agent.menu.post_context"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "vN"), ColorYellow), i18n.T("agent.menu.view"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "wN"), ColorYellow), i18n.T("agent.menu.save"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "p"), ColorYellow), i18n.T("agent.menu.toggle_plan"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "r"), ColorYellow), i18n.T("agent.menu.redraw"))
-	fmt.Printf("  %s: %s\n", r.Colorize(fmt.Sprintf("%-6s", "q"), ColorYellow), i18n.T("agent.menu.quit"))
-	fmt.Println(r.Colorize(strings.Repeat("-", 60), ColorGray))
+	fmt.Println(r.Colorize(strings.Repeat("─", 60), ColorGray))
+	fmt.Println(body)
+	fmt.Println(r.Colorize(strings.Repeat("─", 60), ColorGray))
+}
+
+// RenderModeBanner draws the entry-banner used by /coder and /agent.
+// Layout:
+//
+//	╭── 🛠  CODER MODE ─────────────────────────────╮
+//	│  Objective  · <query>                         │
+//	│  Workspace  · <wd>                            │
+//	│  Policy     · read-only por padrão · …        │
+//	╰───────────────────────────────────────────────╯
+//
+// Fields is a slice of (label, value) pairs so callers can pass any
+// mode-specific metadata without growing the function signature. The
+// label is dimmed (gray) and the value rendered in the default
+// foreground so the eye lands on the value first.
+func (r *UIRenderer) RenderModeBanner(icon, title string, color string, fields [][2]string) {
+	// Compute the widest label so the values align in a column. Uses
+	// runewidth via lipgloss.Width to handle emoji/CJK correctly.
+	maxLabel := 0
+	for _, f := range fields {
+		if w := lipgloss.Width(f[0]); w > maxLabel {
+			maxLabel = w
+		}
+	}
+
+	rows := make([]string, 0, len(fields))
+	for _, f := range fields {
+		label := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
+			fmt.Sprintf("%-*s", maxLabel, f[0]),
+		)
+		rows = append(rows, label+r.Colorize("  ·  ", ColorGray)+f[1])
+	}
+	r.RenderTimelineEvent(icon, title, strings.Join(rows, "\n"), color)
 }
 
 // PrintPrompt imprime o prompt de entrada
@@ -284,50 +432,99 @@ func VisibleLen(s string) int {
 	return runewidth.StringWidth(cleaned)
 }
 
-// RenderTimelineEvent desenha um "card" estilizado ajustado à largura do terminal
+// RenderTimelineEvent desenha um "card" estilizado com:
+//   - cabeçalho `╭── icon title ─────╮` que se estende até a largura do conteúdo,
+//   - bordas laterais `│  …  │` em cada linha,
+//   - rodapé `╰──────────────────╯` do TAMANHO DO CONTEÚDO (não da tela).
+//
+// Antes, o rodapé ia até a borda direita do terminal, dando uma sensação de
+// "vazamento" quando o conteúdo era pequeno. A nova versão calcula a largura
+// alvo como o maior entre (a) maior linha de conteúdo + padding e
+// (b) largura do header — limitada pelo terminal. Lipgloss faz o cálculo de
+// largura visível corretamente (ANSI-aware) via lipgloss.Width.
 func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
-	// 1. Obter largura do terminal
-	width, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
-	if err != nil || width <= 0 {
-		width = 80 // Fallback seguro
+	termWidth, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
+	if err != nil || termWidth <= 0 {
+		termWidth = 80
 	}
 
-	// Definir margens
-	// "│  " ocupa 3 colunas visuais
-	const borderPrefixLen = 3
-	// Largura útil para o texto = Largura total - borda esq - borda dir (aprox)
-	textWidth := width - borderPrefixLen - 2
-	if textWidth < 20 {
-		textWidth = 20
-	} // Segurança para telas muito pequenas
+	// Quanto o card pode ocupar no máximo. Mantemos 2 colunas de respiro
+	// na borda direita para que terminais com scrollbar nativo (iTerm,
+	// VSCode) não cortem o rodapé do card.
+	maxCardWidth := termWidth - 2
+	if maxCardWidth < 24 {
+		maxCardWidth = 24
+	}
 
-	// Limpa formatação anterior
+	// Largura útil de conteúdo: subtrai borda esquerda "│  " (3) e borda
+	// direita " │" (2). Isso é o limite para wrap.
+	const sideLeft = 3  // "│  "
+	const sideRight = 2 // " │"
+	contentWrap := maxCardWidth - sideLeft - sideRight
+	if contentWrap < 20 {
+		contentWrap = 20
+	}
+
+	wrappedLines := wrapText(content, contentWrap)
+
+	// Maior largura visível entre todas as linhas wrapped + header.
+	header := fmt.Sprintf("%s %s", icon, title)
+	headerVisible := VisibleLen(header) + 4 // "╭── " prefix
+	maxContent := 0
+	for _, line := range wrappedLines {
+		if w := VisibleLen(line); w > maxContent {
+			maxContent = w
+		}
+	}
+	innerWidth := maxContent
+	headerInner := headerVisible - sideLeft
+	if headerInner > innerWidth {
+		innerWidth = headerInner
+	}
+	// Pelo menos 24 colunas internas para não ficar grudado.
+	if innerWidth < 24 {
+		innerWidth = 24
+	}
+	// Limita ao espaço útil real.
+	if innerWidth > contentWrap {
+		innerWidth = contentWrap
+	}
+
+	cardWidth := innerWidth + sideLeft + sideRight
+	if cardWidth > maxCardWidth {
+		cardWidth = maxCardWidth
+	}
+
 	fmt.Println()
 
-	// Cabeçalho do Card
-	header := fmt.Sprintf("%s %s", icon, title)
-	fmt.Println(r.Colorize("╭── "+header, color+ColorBold))
+	// Top: "╭── icon title " + traços + "╮"
+	topUsed := 4 + VisibleLen(header) // "╭── " + header
+	topPad := cardWidth - topUsed - 1 // -1 for the closing "╮"
+	if topPad < 1 {
+		topPad = 1
+	}
+	topLine := "╭── " + header + " " + strings.Repeat("─", topPad-1) + "╮"
+	fmt.Println(r.Colorize(topLine, color+ColorBold))
 
-	// Prefixo lateral colorido
-	prefix := r.Colorize("│", color) + "  "
-
-	// 2. Quebrar o texto manualmente para caber na caixa
-	wrappedLines := wrapText(content, textWidth)
-
-	// 3. Imprimir cada linha com a borda
+	// Bordas laterais coloridas, conteúdo no foreground default.
+	borderL := r.Colorize("│", color) + "  "
+	borderR := " " + r.Colorize("│", color)
 	for _, line := range wrappedLines {
-		fmt.Println(prefix + line)
+		w := VisibleLen(line)
+		pad := innerWidth - w
+		if pad < 0 {
+			pad = 0
+		}
+		fmt.Println(borderL + line + strings.Repeat(" ", pad) + borderR)
 	}
 
-	// Rodapé do Card (ajustado à largura se quiser, ou fixo)
-	// Vamos fazer uma linha que vai até o final da tela para ficar bonito
-	footerLen := width - 2 // -2 para compensar a curva
-	if footerLen < 0 {
-		footerLen = 10
+	// Bottom: "╰" + traços + "╯"
+	bottomInner := cardWidth - 2
+	if bottomInner < 1 {
+		bottomInner = 1
 	}
-	footer := "╰" + strings.Repeat("─", footerLen)
-
-	fmt.Println(r.Colorize(footer, color))
+	bottom := "╰" + strings.Repeat("─", bottomInner) + "╯"
+	fmt.Println(r.Colorize(bottom, color))
 }
 
 // RenderMarkdownTimelineEvent renderiza markdown (já convertido para ANSI fora) dentro do card.
@@ -433,7 +630,7 @@ func (r *UIRenderer) RenderThinking(thought string) {
 		return
 	}
 	// Usa cor cinza/ciano para pensamento
-	r.RenderTimelineEvent("🧠", "RACIOCÍNIO", thought, ColorCyan)
+	r.RenderTimelineEvent("🧠", i18n.T("agent.ui.reasoning_title"), thought, ColorCyan)
 }
 
 // RenderToolCall exibe a chamada da ferramenta de forma limpa (escondendo Base64 e sujeira HTML)
@@ -453,30 +650,32 @@ func (r *UIRenderer) RenderToolCall(toolName, rawArgs string) {
 	// 4. Limpar argumentos específicos (esconder base64 gigante) - Função existente
 	displayArgs := cleanArgsForDisplay(cleanArgs)
 
-	content := fmt.Sprintf("Ferramenta: %s\nArgs: %s",
+	content := fmt.Sprintf("%s: %s\n%s: %s",
+		i18n.T("agent.ui.tool_label"),
 		r.Colorize(toolName, ColorYellow+ColorBold),
+		i18n.T("agent.ui.tool_args"),
 		displayArgs)
 
-	r.RenderTimelineEvent("🔨", "EXECUTAR AÇÃO", content, ColorYellow)
+	r.RenderTimelineEvent("🔨", i18n.T("agent.ui.action_title"), content, ColorYellow)
 }
 
 // RenderToolResult exibe o resultado da execução
 func (r *UIRenderer) RenderToolResult(output string, isError bool) {
 	icon := "✅"
-	title := "SUCESSO"
+	title := i18n.T("agent.ui.result_success")
 	color := ColorGreen
 
 	if isError {
 		icon = "❌"
-		title = "FALHA NA EXECUÇÃO"
-		color = ColorPurple // Vermelho seria melhor, mas usando Purple da sua lib
+		title = i18n.T("agent.ui.result_failure")
+		color = ColorRed
 	}
 
 	// Truncar output muito grande para não poluir a timeline visualmente
 	// O agente recebe tudo, mas o humano vê um resumo se for gigante
 	displayOutput := output
 	if len(output) > 2000 {
-		displayOutput = output[:2000] + "\n... [saída truncada visualmente, agente recebeu tudo] ..."
+		displayOutput = output[:2000] + i18n.T("agent.ui.result_truncated")
 	}
 
 	r.RenderTimelineEvent(icon, title, displayOutput, color)
@@ -491,7 +690,7 @@ func (r *UIRenderer) RenderToolCallMinimal(toolName, rawArgs string, current, to
 	displayArgs = spaceRe.ReplaceAllString(strings.TrimSpace(displayArgs), " ")
 	displayArgs = cleanArgsForDisplay(displayArgs)
 
-	title := fmt.Sprintf("AÇÃO %d/%d", current, total)
+	title := i18n.T("agent.ui.action_title_short", current, total)
 	content := fmt.Sprintf("%s %s",
 		r.Colorize(toolName, ColorYellow+ColorBold),
 		r.Colorize(displayArgs, ColorCyan))
@@ -502,13 +701,13 @@ func (r *UIRenderer) RenderToolCallMinimal(toolName, rawArgs string, current, to
 // RenderToolResultMinimal exibe o resultado em modo compacto
 func (r *UIRenderer) RenderToolResultMinimal(output string, isError bool) {
 	icon := "✅"
-	title := "OK"
+	title := i18n.T("agent.ui.result_ok")
 	color := ColorGreen
 
 	if isError {
 		icon = "❌"
-		title = "ERRO"
-		color = ColorPurple
+		title = i18n.T("agent.ui.result_error")
+		color = ColorRed
 	}
 
 	display := strings.TrimSpace(output)
@@ -519,7 +718,7 @@ func (r *UIRenderer) RenderToolResultMinimal(output string, isError bool) {
 		display = display[:240] + "..."
 	}
 	if display == "" {
-		display = "-"
+		display = i18n.T("agent.ui.result_empty")
 	}
 
 	r.RenderTimelineEvent(icon, title, display, color)
@@ -539,7 +738,7 @@ func (r *UIRenderer) RenderBatchHeader(totalActions int) {
 		width = 80
 	}
 
-	msg := fmt.Sprintf(" 📦 INICIANDO EXECUÇÃO EM LOTE: %d AÇÕES ", totalActions)
+	msg := i18n.T("agent.ui.batch_started", totalActions)
 	line := strings.Repeat("═", width)
 
 	// Centralizar visualmente
@@ -574,18 +773,14 @@ func (r *UIRenderer) RenderToolCallWithProgress(toolName, rawArgs string, curren
 	// Aplica a limpeza de segurança (esconder base64 gigante)
 	displayArgs = cleanArgsForDisplay(displayArgs)
 
-	// 2. Monta o conteúdo do Card
-	// Formato:
-	// Ferramenta: @coder
-	// Args: ...
-	content := fmt.Sprintf("Ferramenta: %s\nComando: %s",
+	content := fmt.Sprintf("%s: %s\n%s: %s",
+		i18n.T("agent.ui.tool_label"),
 		r.Colorize(toolName, ColorYellow+ColorBold),
+		i18n.T("agent.ui.tool_command"),
 		r.Colorize(displayArgs, ColorCyan))
 
-	// 3. Título com progresso
-	title := fmt.Sprintf("EXECUTAR AÇÃO (%d/%d)", current, total)
+	title := i18n.T("agent.ui.action_title_progress", current, total)
 
-	// 4. Renderiza usando o sistema de cards existente
 	r.RenderTimelineEvent("🔨", title, content, ColorYellow)
 }
 
@@ -593,38 +788,61 @@ func (r *UIRenderer) RenderToolCallWithProgress(toolName, rawArgs string, curren
 func (r *UIRenderer) RenderBatchSummary(successCount, total int, hasError bool) {
 	fmt.Println()
 	if hasError {
-		msg := fmt.Sprintf(" ⚠️ LOTE INTERROMPIDO: %d de %d ações executadas com sucesso.", successCount, total)
+		msg := i18n.T("agent.ui.batch_interrupted", successCount, total)
 		fmt.Println(r.Colorize(msg, ColorYellow))
 	} else {
-		msg := fmt.Sprintf(" ✅ LOTE CONCLUÍDO: Todas as %d ações foram executadas.", total)
+		msg := i18n.T("agent.ui.batch_completed", total)
 		fmt.Println(r.Colorize(msg, ColorGreen))
 	}
 	fmt.Println(r.Colorize(strings.Repeat("─", 60), ColorGray))
 }
 
-// desenha APENAS o cabeçalho do card
-func (r *UIRenderer) RenderStreamBoxStart(icon, title, color string) {
+// streamBoxHeaderWidth captures the visible width of the header drawn by
+// RenderStreamBoxStart so RenderStreamBoxEnd can produce a footer of the
+// same length instead of stretching to the terminal edge. It is package-
+// level because the start/end pair runs on the same goroutine inside a
+// tool-execution loop; concurrent streaming boxes are not supported in
+// this renderer, so a sync.Mutex would be ceremonial overhead.
+var streamBoxHeaderWidth int
 
+// RenderStreamBoxStart draws the top edge of an open card whose contents
+// will be streamed in via StreamOutput. The bottom edge is closed by
+// RenderStreamBoxEnd. Header width is recorded so the footer matches it.
+func (r *UIRenderer) RenderStreamBoxStart(icon, title, color string) {
 	header := fmt.Sprintf("%s %s", icon, title)
 
-	fmt.Println() // Pula linha inicial
-	// Desenha a curva superior: ╭── ICON TITULO
-	fmt.Println(r.Colorize("╭── "+header, color+ColorBold))
+	termWidth, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
+	if err != nil || termWidth <= 0 {
+		termWidth = 80
+	}
+
+	// "╭── " (4) + header + " " + minimum 6 dashes for visual weight.
+	const minTail = 6
+	headerLine := "╭── " + header + " " + strings.Repeat("─", minTail)
+	visible := VisibleLen(headerLine)
+	// Extend to a reasonable middle width when the header is short, but
+	// never wider than the terminal minus a 2-col right gutter.
+	target := termWidth - 2
+	if target < visible {
+		target = visible
+	}
+	if extra := target - visible; extra > 0 {
+		headerLine += strings.Repeat("─", extra)
+	}
+	streamBoxHeaderWidth = VisibleLen(headerLine)
+
+	fmt.Println()
+	fmt.Println(r.Colorize(headerLine, color+ColorBold))
 }
 
-// desenha APENAS o rodapé
+// RenderStreamBoxEnd closes the streaming card. Footer length mirrors
+// the header so the box reads as a balanced shape regardless of how
+// many lines the stream produced.
 func (r *UIRenderer) RenderStreamBoxEnd(color string) {
-	width, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
-	if err != nil || width <= 0 {
-		width = 80
-	}
-
-	// Calcula tamanho da linha de baixo: ╰──────...
-	footerLen := width - 2
-	if footerLen < 0 {
+	footerLen := streamBoxHeaderWidth - 1
+	if footerLen < 10 {
 		footerLen = 10
 	}
-
 	footer := "╰" + strings.Repeat("─", footerLen)
 	fmt.Println(r.Colorize(footer, color))
 }
@@ -656,9 +874,9 @@ func (r *UIRenderer) CompactToolStart(toolLabel string) {
 func (r *UIRenderer) CompactToolDone(toolLabel string, duration string, isError bool) {
 	if isError {
 		fmt.Printf("  %s %s %s\n",
-			r.Colorize("✗", ColorYellow),
+			r.Colorize("✗", ColorRed+ColorBold),
 			r.Colorize(toolLabel, ColorCyan),
-			r.Colorize(duration, ColorYellow))
+			r.Colorize(duration, ColorRed))
 	} else {
 		fmt.Printf("  %s %s %s\n",
 			r.Colorize("✓", ColorGreen+ColorBold),
@@ -784,8 +1002,8 @@ func (r *UIRenderer) CompactError(msg string) {
 		msg = msg[:117] + "..."
 	}
 	fmt.Printf("  %s %s\n",
-		r.Colorize("✗", ColorYellow),
-		r.Colorize(msg, ColorYellow))
+		r.Colorize("✗", ColorRed+ColorBold),
+		r.Colorize(msg, ColorRed))
 }
 
 // CompactBatchSummary renders a one-line batch summary.
@@ -795,12 +1013,12 @@ func (r *UIRenderer) CompactError(msg string) {
 func (r *UIRenderer) CompactBatchSummary(successCount, total int, hasError bool) {
 	if hasError {
 		fmt.Printf("\n  %s %s\n",
-			r.Colorize("✗", ColorYellow),
-			r.Colorize(fmt.Sprintf("%d/%d concluídas (com erros)", successCount, total), ColorYellow))
+			r.Colorize("✗", ColorRed),
+			r.Colorize(i18n.T("agent.ui.batch_summary_errors", successCount, total), ColorRed))
 	} else if total > 1 {
 		fmt.Printf("\n  %s %s\n",
 			r.Colorize("✓", ColorGreen+ColorBold),
-			r.Colorize(fmt.Sprintf("%d/%d concluídas", successCount, total), ColorGreen))
+			r.Colorize(i18n.T("agent.ui.batch_summary_success", successCount, total), ColorGreen))
 	}
 }
 
@@ -943,16 +1161,30 @@ func extractPrimaryArg(subcmd string, rawArgs string) string {
 
 // ─── Status phrases (rotating while thinking) ──────────────────────────────
 
-// StatusPhrases are fun rotating messages shown while the LLM is thinking.
-var StatusPhrases = []string{
-	"Thinking...",
-	"Analyzing...",
-	"Processing...",
-	"Reasoning...",
-	"Planning...",
-	"Exploring...",
-	"Connecting dots...",
-	"Crafting solution...",
-	"Reading code...",
-	"Mapping structure...",
+// statusPhraseKeys is the i18n key list backing LocalizedStatusPhrases.
+// Adding a new phrase requires both a new key here and the matching
+// agent.thinking.phrase_<N> entry in every locale file.
+var statusPhraseKeys = []string{
+	"agent.thinking.phrase_1",
+	"agent.thinking.phrase_2",
+	"agent.thinking.phrase_3",
+	"agent.thinking.phrase_4",
+	"agent.thinking.phrase_5",
+	"agent.thinking.phrase_6",
+	"agent.thinking.phrase_7",
+	"agent.thinking.phrase_8",
+	"agent.thinking.phrase_9",
+	"agent.thinking.phrase_10",
+}
+
+// LocalizedStatusPhrases returns the rotating "thinking" messages in the
+// currently active locale. Resolved at call time (not at package init)
+// because i18n.Init may not have run yet when var-level initializers
+// fire — calling it eagerly would freeze the slice to the raw keys.
+func LocalizedStatusPhrases() []string {
+	out := make([]string, 0, len(statusPhraseKeys))
+	for _, k := range statusPhraseKeys {
+		out = append(out, i18n.T(k))
+	}
+	return out
 }
