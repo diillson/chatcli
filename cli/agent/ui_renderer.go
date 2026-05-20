@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/diillson/chatcli/i18n"
@@ -21,6 +22,27 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/term"
 )
+
+// typewriterPrint emits text rune-by-rune with a small delay between
+// printable runes so the line "types" onto the screen. ANSI escape
+// sequences are flushed instantly so colors/styles never pause the eye.
+func typewriterPrint(text string, delay time.Duration) {
+	inEsc := false
+	for _, ch := range text {
+		if ch == '\033' {
+			inEsc = true
+		}
+		fmt.Printf("%c", ch)
+		_ = os.Stdout.Sync()
+		if inEsc {
+			if ch == 'm' {
+				inEsc = false
+			}
+			continue
+		}
+		time.Sleep(delay)
+	}
+}
 
 // ANSI Color codes exportados
 const (
@@ -443,6 +465,19 @@ func VisibleLen(s string) int {
 // (b) largura do header — limitada pelo terminal. Lipgloss faz o cálculo de
 // largura visível corretamente (ANSI-aware) via lipgloss.Width.
 func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
+	r.renderTimelineEventInner(icon, title, content, color, false)
+}
+
+// RenderAssistantResponseTimelineEvent draws the same card as
+// RenderTimelineEvent but types the body progressively so the final
+// assistant message feels alive instead of a single paste. Reserved for
+// the model's "RESPOSTA/RESUMO" card — tool calls and reasoning still use
+// the instant path because typing those would slow the agent loop down.
+func (r *UIRenderer) RenderAssistantResponseTimelineEvent(icon, title, content, color string) {
+	r.renderTimelineEventInner(icon, title, content, color, true)
+}
+
+func (r *UIRenderer) renderTimelineEventInner(icon, title, content, color string, typewrite bool) {
 	termWidth, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
 	if err != nil || termWidth <= 0 {
 		termWidth = 80
@@ -504,7 +539,12 @@ func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
 
 	fmt.Println()
 	fmt.Println(topLine)
-	fmt.Println(bodyRendered)
+	if typewrite {
+		typewriterPrint(bodyRendered, 2*time.Millisecond)
+		fmt.Println()
+	} else {
+		fmt.Println(bodyRendered)
+	}
 }
 
 // buildTitledTopBorder produces a `╭── icon title ─────╮` line whose
@@ -1091,12 +1131,15 @@ func (r *UIRenderer) CompactAssistantText(text string) {
 	icon := r.Colorize("◆", ColorCyan)
 	for i, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimRight(line, " \t")
+		var prefix string
 		if i == 0 {
-			fmt.Printf("  %s %s\n", icon, r.Colorize(trimmed, ColorReset))
-			continue
+			prefix = "  " + icon + " "
+		} else {
+			prefix = "    "
 		}
-		// continuation: align under the first line's text column
-		fmt.Printf("    %s\n", r.Colorize(trimmed, ColorReset))
+		fmt.Print(prefix)
+		typewriterPrint(r.Colorize(trimmed, ColorReset), 2*time.Millisecond)
+		fmt.Println()
 	}
 }
 

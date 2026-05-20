@@ -612,10 +612,11 @@ func (cli *ChatCLI) renderAssistantResponse(
 	fmt.Println(header)
 	// Indent body so it visually sits inside the envelope. The body
 	// already contains its own glamour-rendered formatting, which we
-	// preserve as-is — we only add a left gutter.
-	for _, ln := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
-		fmt.Println("  " + ln)
-	}
+	// preserve as-is — we only add a left gutter. Typewriter the body
+	// so the response feels alive instead of pasted; ANSI escape
+	// sequences embedded in the markdown are streamed without delay.
+	indented := "  " + strings.ReplaceAll(strings.TrimRight(rendered, "\n"), "\n", "\n  ") + "\n"
+	cli.typewriterEffect(indented, 2*time.Millisecond)
 	fmt.Println(footer)
 	fmt.Println()
 }
