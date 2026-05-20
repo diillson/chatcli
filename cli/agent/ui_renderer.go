@@ -545,7 +545,7 @@ func (r *UIRenderer) renderTimelineEventInner(icon, title, content, color string
 	fmt.Println()
 	fmt.Println(topLine)
 	if typewrite {
-		typewriterPrint(bodyRendered, 2*time.Millisecond)
+		PaceText(bodyRendered, defaultDelay)
 		fmt.Println()
 	} else {
 		fmt.Println(bodyRendered)
@@ -1143,7 +1143,7 @@ func (r *UIRenderer) CompactAssistantText(text string) {
 			prefix = "    "
 		}
 		fmt.Print(prefix)
-		typewriterPrint(r.Colorize(trimmed, ColorReset), 2*time.Millisecond)
+		PaceText(r.Colorize(trimmed, ColorReset), defaultDelay)
 		fmt.Println()
 	}
 }

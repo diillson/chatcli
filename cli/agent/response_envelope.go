@@ -243,13 +243,13 @@ func (r *UIRenderer) RenderResponseEnvelope(opts ResponseEnvelopeOptions) {
 
 	delay := opts.TypewriterDelay
 	if delay == 0 {
-		delay = 2 * time.Millisecond
+		delay = defaultDelay
 	}
 
 	fmt.Println()
 	fmt.Println(topLine)
 	if opts.Typewriter {
-		typewriterPrint(bodyRendered, delay)
+		PaceText(bodyRendered, delay)
 		fmt.Println()
 	} else {
 		fmt.Println(bodyRendered)
