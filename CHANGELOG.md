@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.120.0](https://github.com/diillson/chatcli/compare/v1.119.3...v1.120.0) (2026-05-21)
+
+
+### Features
+
+* **mcp:** complete channel push delivery, reactive triggers and persistence ([#946](https://github.com/diillson/chatcli/issues/946)) ([5a33b1e](https://github.com/diillson/chatcli/commit/5a33b1e6d6a95cdfc71418ca4c8c4c23ff685fea))
+
 ## [1.119.3](https://github.com/diillson/chatcli/compare/v1.119.2...v1.119.3) (2026-05-20)
 
 
