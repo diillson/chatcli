@@ -236,6 +236,11 @@ type ChatCLI struct {
 	mcpWatcher     *fsnotify.Watcher  // hot-reload watcher; nil when disabled
 	mcpWatcherDone chan struct{}      // closed to stop the watcher loop
 
+	// MCP channel reactive triggers — engine, pending queues, and the
+	// consumer goroutine that fans Actions out into them. Initialized
+	// after mcpManager when MCP is enabled.
+	channelTriggers *channelTriggerState
+
 	// Hooks system for lifecycle events
 	hookManager *hooks.Manager
 
@@ -630,6 +635,17 @@ func (cli *ChatCLI) executor(in string) {
 		// Flush any cosmetic state the resume left behind.
 		_ = os.Stdout.Sync()
 	}
+
+	// Auto-triggered agent runs queued by the MCP channel trigger
+	// engine fire here, BEFORE the user's command. Symmetric with
+	// park resume — the user sees the agent investigate the event,
+	// then their typed input is processed. Notify/confirm banners
+	// are rendered separately below so they appear even on turns
+	// that have no queued auto-trigger.
+	if cli.drainPendingAutoTriggers() {
+		_ = os.Stdout.Sync()
+	}
+	cli.renderChannelTriggerBanner()
 
 	// Handle paste: replace placeholder with real content and show notification
 	if cli.lastPasteInfo != nil {
@@ -1373,6 +1389,7 @@ func (cli *ChatCLI) bootstrapMCP(logger *zap.Logger) {
 			zap.Int("tools", len(tools)))
 	}()
 	cli.startMCPConfigWatcher()
+	cli.initChannelTriggers()
 }
 
 // startMCPConfigWatcher boots an fsnotify watcher on the MCP config
@@ -1504,9 +1521,11 @@ func (cli *ChatCLI) cleanup() {
 	// fire a Reload mid-shutdown). Bound the whole MCP teardown at
 	// 5s so a stuck transport cannot stall the CLI's exit path.
 	cli.stopMCPConfigWatcher()
+	cli.shutdownChannelTriggers()
 	if cli.mcpManager != nil {
 		stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
 		cli.mcpManager.StopAll(stopCtx)
+		_ = cli.mcpManager.CloseChannels()
 		cancelStop()
 	}
 	if cli.mcpCancel != nil {

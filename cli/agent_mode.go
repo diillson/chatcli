@@ -722,7 +722,16 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// SystemParts for Anthropic-style KV cache. Each block ends on a
 	// cache boundary (ephemeral). The ordering matches the stability
 	// heuristic described above.
-	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText)
+	// Volatile MCP channel context — most recent push messages from
+	// connected servers. Surfaces CI alerts, monitoring events, etc.
+	// in agent/coder mode so the agent's plan can react to them.
+	// Empty when MCP is disabled or no events have been received.
+	var channelsText string
+	if a.cli.mcpManager != nil {
+		channelsText = a.cli.mcpManager.Channels().FormatForPrompt(5)
+	}
+
+	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText, channelsText)
 
 	// Inicializa ou atualiza o histórico com o System Prompt correto.
 	//

@@ -77,13 +77,66 @@ func (r *logRing) snapshot() []string {
 const mcpLogRingCapacity = 200
 
 // NewManager creates a new MCP manager.
+//
+// Persistence for the channel ring is enabled by default at
+// ~/.chatcli/mcp/. If HOME is unresolvable (extremely rare on the
+// platforms we ship to, but possible in containerized CI) the
+// manager falls back to an in-memory-only ChannelManager so a
+// degraded environment does not block startup.
 func NewManager(logger *zap.Logger) *Manager {
-	return &Manager{
+	opts := ChannelManagerOptions{}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		opts.PersistDir = filepath.Join(home, ".chatcli", "mcp")
+	}
+	channels := NewChannelManagerWithOptions(logger, opts)
+	m := &Manager{
 		servers:  make(map[string]*ServerConnection),
 		tools:    make(map[string]*MCPTool),
-		channels: NewChannelManager(logger),
+		channels: channels,
 		logger:   logger,
 	}
+	channels.SetSubscriptionResolver(m.isChannelSubscribed)
+	return m
+}
+
+// NewManagerWithOptions is the test-friendly constructor — callers
+// pass an explicit PersistDir (typically t.TempDir()) so test runs
+// stay hermetic.
+func NewManagerWithOptions(logger *zap.Logger, opts ChannelManagerOptions) *Manager {
+	channels := NewChannelManagerWithOptions(logger, opts)
+	m := &Manager{
+		servers:  make(map[string]*ServerConnection),
+		tools:    make(map[string]*MCPTool),
+		channels: channels,
+		logger:   logger,
+	}
+	channels.SetSubscriptionResolver(m.isChannelSubscribed)
+	return m
+}
+
+// isChannelSubscribed implements ChannelSubscriptionResolver. Unknown
+// servers (e.g. a notification arriving during teardown after the
+// connection has been dropped) fail OPEN so the message reaches the
+// ring — losing it would be worse than the small risk of recording a
+// stale event. Known servers consult their ServerConfig.Channels list.
+func (m *Manager) isChannelSubscribed(serverName, channel string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	conn, ok := m.servers[serverName]
+	if !ok {
+		return true
+	}
+	return conn.Config.IsChannelSubscribed(channel)
+}
+
+// CloseChannels releases the channel manager's persistence handle.
+// Called from the CLI shutdown path so the JSONL file is flushed
+// before the process exits.
+func (m *Manager) CloseChannels() error {
+	if m.channels == nil {
+		return nil
+	}
+	return m.channels.Close()
 }
 
 // Channels returns the channel manager for push message handling.
@@ -762,7 +815,7 @@ func (m *Manager) startStdioServer(ctx context.Context, conn *ServerConnection) 
 		zap.String("server", conn.Config.Name),
 		zap.String("command", conn.Config.Command))
 
-	transport, err := newStdioTransport(ctx, conn.Config, m.logger)
+	transport, err := newStdioTransport(ctx, conn.Config, m.logger, m.channels)
 	if err != nil {
 		return fmt.Errorf("failed to start stdio transport: %w", err)
 	}
@@ -905,6 +958,12 @@ func (m *Manager) startHTTPServer(ctx context.Context, conn *ServerConnection) e
 		zap.String("server", conn.Config.Name),
 		zap.Int("tools", conn.Status.ToolCount))
 	m.logTrustModeIfEnabled(conn.Config)
+
+	// Kick off the optional server-initiated push listener. Idempotent
+	// inside the transport so a future Reload that lands on the same
+	// transport instance is safe. A server that does not implement
+	// push will get a 405/404/501 and the listener exits cleanly.
+	transport.StartPushListener()
 
 	return nil
 }

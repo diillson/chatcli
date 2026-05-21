@@ -26,10 +26,13 @@
  *     echo it on every subsequent request so the server can route
  *     to the same session.
  *
- * Server-initiated push (GET on the same endpoint, optional per
- * spec) is NOT implemented yet — most servers in the wild don't
- * support it, and adding it would require a long-lived listener
- * goroutine analogous to the SSE transport. Filed as a follow-up.
+ * Server-initiated push (GET on the same endpoint) is implemented:
+ * a supervised goroutine holds a long-lived GET open with
+ * Accept: text/event-stream, attaches the Mcp-Session-Id header
+ * when known, and forwards every JSON-RPC notification to the
+ * ChannelManager. A 405 / 501 / 404 response signals the server
+ * does not support push and the listener exits cleanly without
+ * retry storms; transient errors back off with full jitter, capped.
  */
 package mcp
 
@@ -40,6 +43,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"sync"
@@ -56,6 +60,14 @@ import (
 // MCP payload while still preventing a misbehaving server from
 // driving us OOM.
 const maxHTTPResponseBody = 10 << 20
+
+// Backoff bounds for the push listener supervisor. The listener
+// reconnects on transient errors with full-jitter exponential
+// backoff so a server in a crash loop does not get hammered.
+const (
+	httpListenBackoffInitial = 1 * time.Second
+	httpListenBackoffMax     = 30 * time.Second
+)
 
 // httpTransport implements mcpTransport over the MCP 2025-03-26
 // Streamable HTTP transport. Each Call is a self-contained POST,
@@ -85,6 +97,14 @@ type httpTransport struct {
 	auth        *AuthConfig
 
 	closed atomic.Bool
+
+	// pushOnce and pushDone coordinate the optional push listener.
+	// StartPushListener is idempotent — the first call kicks off the
+	// supervisor goroutine and every subsequent call is a no-op. The
+	// done channel closes when the listener exits so Close can wait
+	// for clean teardown before returning.
+	pushOnce sync.Once
+	pushDone chan struct{}
 }
 
 // newHTTPTransport constructs the transport. Unlike SSE, there is no
@@ -398,6 +418,19 @@ func (t *httpTransport) Close(ctx context.Context) error {
 		return nil
 	}
 	t.cancel()
+
+	// Wait for the push listener to drain (if it was ever started).
+	// pushDone is nil when StartPushListener was never called —
+	// happens on a server that does not advertise the push capability.
+	if t.pushDone != nil {
+		select {
+		case <-t.pushDone:
+		case <-ctx.Done():
+			t.logger.Warn("MCP HTTP Close: ctx fired before push listener drained",
+				zap.Error(ctx.Err()))
+		}
+	}
+
 	t.sessionMu.RLock()
 	sid := t.sessionID
 	t.sessionMu.RUnlock()
@@ -408,6 +441,162 @@ func (t *httpTransport) Close(ctx context.Context) error {
 	defer cancel()
 	t.sendSessionDelete(delCtx, sid)
 	return nil
+}
+
+// StartPushListener launches the long-lived GET listener that
+// implements the 2025-03-26 spec's "Listening for messages from
+// the server" surface. Idempotent — safe to call from any
+// post-initialize hook. No-op when the transport is already closed.
+//
+// The listener stops permanently on any of:
+//   - ctx canceled (Close called)
+//   - HTTP 405 / 404 / 501 — server does not implement push
+//   - the listener loop has returned for any reason while closed
+//
+// Transient network errors back off with full-jitter exponential
+// and the loop re-establishes the connection.
+func (t *httpTransport) StartPushListener() {
+	if t.closed.Load() {
+		return
+	}
+	t.pushOnce.Do(func() {
+		t.pushDone = make(chan struct{})
+		go t.pushSupervisor()
+	})
+}
+
+// pushSupervisor runs the connect/read/wait-and-retry loop for the
+// server-initiated GET stream. Honors context cancellation, treats
+// "not implemented" status codes as terminal, and never panics on a
+// nil ChannelManager.
+func (t *httpTransport) pushSupervisor() {
+	defer close(t.pushDone)
+
+	backoff := httpListenBackoffInitial
+	for {
+		if err := t.ctx.Err(); err != nil {
+			return
+		}
+		stop, err := t.pushRunOnce(t.ctx)
+		if t.ctx.Err() != nil {
+			return
+		}
+		if stop {
+			t.logger.Info("MCP HTTP push listener stopped (server does not support push)",
+				zap.String("server", t.serverName),
+				zap.Error(err))
+			return
+		}
+		if err != nil {
+			t.logger.Debug("MCP HTTP push stream ended; reconnecting",
+				zap.String("server", t.serverName),
+				zap.Duration("backoff", backoff),
+				zap.Error(err))
+		}
+		wait := time.Duration(rand.Int64N(int64(backoff))) //#nosec G404 -- jitter, not security
+		select {
+		case <-time.After(wait):
+		case <-t.ctx.Done():
+			return
+		}
+		backoff *= 2
+		if backoff > httpListenBackoffMax {
+			backoff = httpListenBackoffMax
+		}
+	}
+}
+
+// pushRunOnce opens one GET stream and drains it. Returns (stop, err)
+// where stop=true signals the listener should not retry — used for
+// terminal "server does not support push" responses so we do not
+// hammer the endpoint forever.
+func (t *httpTransport) pushRunOnce(ctx context.Context) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.endpoint, nil)
+	if err != nil {
+		return false, fmt.Errorf("push request build: %w", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	t.applyHeaders(req)
+	t.attachSession(req)
+
+	// Dedicated client without a Timeout so the long-held GET stays
+	// open as long as the server wants it to. Share the underlying
+	// Transport so the connection pool, proxy settings, and TLS
+	// config match the POST path.
+	c := &http.Client{Transport: t.httpClient.Transport}
+	resp, err := c.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("push connect: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // streamed body, drained by scanner
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// fall through to streaming path
+	case http.StatusMethodNotAllowed, http.StatusNotImplemented, http.StatusNotFound:
+		// Server does not support server-initiated push. Common on
+		// minimal MCP implementations — bail without retry storms.
+		return true, fmt.Errorf("server returned %d on GET %s", resp.StatusCode, t.endpoint)
+	default:
+		// Anything else is transient: 5xx, 429, network-mediated
+		// "Bad Gateway", etc. Let the supervisor back off and retry.
+		return false, fmt.Errorf("push GET status %d", resp.StatusCode)
+	}
+
+	// Capture session ID on the response (spec lets the server
+	// announce or rotate the session ID at any time, not just on
+	// initialize). Mirrors Call's behavior.
+	if sid := strings.TrimSpace(resp.Header.Get("Mcp-Session-Id")); sid != "" {
+		t.setSession(sid)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxHTTPResponseBody)
+
+	var eventType, eventData string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			if eventData != "" {
+				t.handlePushEvent(eventType, eventData)
+			}
+			eventType, eventData = "", ""
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			eventType = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			if eventData == "" {
+				eventData = strings.TrimPrefix(line, "data: ")
+			} else {
+				eventData += "\n" + strings.TrimPrefix(line, "data: ")
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return false, fmt.Errorf("push stream read: %w", err)
+	}
+	return false, io.EOF
+}
+
+// handlePushEvent routes one SSE event from the push stream to the
+// channel manager. Server-initiated notifications never carry a
+// request ID, so there is no Call() to wake up here — everything
+// goes to the channel ring.
+func (t *httpTransport) handlePushEvent(eventType, data string) {
+	if t.channelMgr == nil || data == "" {
+		return
+	}
+	// Honor the event-type prefix when present, otherwise let
+	// ProcessSSENotification do its own routing based on the JSON-RPC
+	// "method" field.
+	if eventType != "" && eventType != "message" {
+		t.logger.Debug("MCP HTTP push event",
+			zap.String("server", t.serverName),
+			zap.String("event", eventType))
+	}
+	t.channelMgr.ProcessSSENotification(t.serverName, []byte(data))
 }
 
 // sendSessionDelete fires a DELETE with the session header so the
