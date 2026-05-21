@@ -2,8 +2,8 @@ apiVersion: v2
 name: chatcli
 description: ChatCLI - CLI for LLM interaction with gRPC server mode
 type: application
-version: 1.119.3
-appVersion: 1.119.3
+version: 1.120.0
+appVersion: 1.120.0
 home: https://chatcli.edilsonfreitas.com
 sources:
   - https://github.com/diillson/chatcli
