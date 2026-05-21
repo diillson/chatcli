@@ -41,6 +41,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// manualRunPromptFmt is the agent prompt used by `/channel run <seq>`
+// when the user manually fires the agent on a stored message that
+// has no rule attached. English on purpose — LLMs follow English
+// instructions more reliably than translations.
+const manualRunPromptFmt = "Investigate this MCP channel event from %s/%s:\n\n%s"
+
 // channelTriggerState holds the runtime state for MCP channel
 // reactive triggers. Lives on *ChatCLI as cli.channelTriggers.
 //
@@ -53,10 +59,10 @@ type channelTriggerState struct {
 	rulesPath string
 
 	mu             sync.Mutex
-	pendingNotify  []triggers.Action            // FIFO, drained by /channel ack
-	pendingConfirm map[uint64]triggers.Action   // keyed by action ID
-	pendingAuto    []triggers.Action            // drained by the executor tick
-	processedIDs   map[uint64]struct{}          // dedup against double-drain
+	pendingNotify  []triggers.Action          // FIFO, drained by /channel ack
+	pendingConfirm map[uint64]triggers.Action // keyed by action ID
+	pendingAuto    []triggers.Action          // drained by the executor tick
+	processedIDs   map[uint64]struct{}        // dedup against double-drain
 }
 
 // initChannelTriggers boots the trigger engine for the active session.
@@ -380,8 +386,7 @@ func (cli *ChatCLI) channelTriggerRun(seq uint64) error {
 		},
 		Mode:     triggers.ModeAuto,
 		IssuedAt: time.Now().UTC(),
-		Prompt: fmt.Sprintf("Investigate this MCP channel event from %s/%s:\n\n%s",
-			msg.ServerName, msg.Channel, msg.Content),
+		Prompt:   fmt.Sprintf(manualRunPromptFmt, msg.ServerName, msg.Channel, msg.Content),
 	}
 	cli.runAutoTriggerAction(action)
 	return nil
@@ -444,4 +449,3 @@ func (cli *ChatCLI) shutdownChannelTriggers() {
 	}
 	cli.channelTriggers.engine.Close()
 }
-

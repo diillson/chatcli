@@ -38,6 +38,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// defaultInvestigatePromptFmt is the agent prompt template used when
+// a Rule omits its own Prompt. Kept as a package-level constant so
+// the fallback can be tested independently and so the default
+// stays in English — LLMs follow English instructions more reliably
+// than translated copies.
+const defaultInvestigatePromptFmt = "Investigate this %s/%s event:\n\n%s"
+
 // Mode declares how the CLI should surface a fired trigger to the user.
 type Mode string
 
@@ -405,7 +412,7 @@ func (r Rule) renderPrompt(event ChannelEvent) string {
 	if r.Prompt == "" {
 		// Default prompt: ask the agent to investigate. Mode and
 		// tool filter still apply.
-		return fmt.Sprintf("Investigate this %s/%s event:\n\n%s",
+		return fmt.Sprintf(defaultInvestigatePromptFmt,
 			event.ServerName, event.Channel, event.Content)
 	}
 	replacer := strings.NewReplacer(

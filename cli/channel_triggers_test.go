@@ -6,6 +6,9 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,5 +172,166 @@ func TestChannelTriggers_ReloadRulesFromPath(t *testing.T) {
 	}
 	if got := cli.channelTriggerRules(); len(got) != 2 {
 		t.Fatalf("expected 2 rules, got %d", len(got))
+	}
+}
+
+func TestChannelTriggers_LoadRulesFromDisk(t *testing.T) {
+	cli := newTestCLIWithMCP(t)
+	dir := t.TempDir()
+	rulesPath := filepath.Join(dir, "triggers.json")
+	contents := `{"rules":[{"name":"disk-rule","channel":"ci","mode":"notify"}]}`
+	if err := os.WriteFile(rulesPath, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write rules: %v", err)
+	}
+
+	// Override the rules path to point at the temp file, then reload.
+	cli.channelTriggers.rulesPath = rulesPath
+	n, err := cli.reloadChannelTriggerRules()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 rule loaded, got %d", n)
+	}
+	rules := cli.channelTriggerRules()
+	if rules[0].Name != "disk-rule" {
+		t.Errorf("Rules[0].Name = %q, want disk-rule", rules[0].Name)
+	}
+}
+
+func TestChannelTriggers_LoadRulesMissingFileIsClean(t *testing.T) {
+	cli := newTestCLIWithMCP(t)
+	cli.channelTriggers.rulesPath = filepath.Join(t.TempDir(), "nonexistent.json")
+	n, err := cli.reloadChannelTriggerRules()
+	if err != nil {
+		t.Fatalf("missing file should be silent, got err: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("missing file → expected 0 rules, got %d", n)
+	}
+}
+
+func TestChannelTriggers_LoadRulesBadSchema(t *testing.T) {
+	cli := newTestCLIWithMCP(t)
+	dir := t.TempDir()
+	rulesPath := filepath.Join(dir, "triggers.json")
+	contents := `{"rules":[{"name":"bad","mode":"auto"}]}` // auto without tools
+	if err := os.WriteFile(rulesPath, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write rules: %v", err)
+	}
+	cli.channelTriggers.rulesPath = rulesPath
+	if _, err := cli.reloadChannelTriggerRules(); err == nil {
+		t.Fatalf("expected validation error for auto without tools")
+	}
+}
+
+func TestChannelTriggers_LoadRulesInvalidJSON(t *testing.T) {
+	cli := newTestCLIWithMCP(t)
+	dir := t.TempDir()
+	rulesPath := filepath.Join(dir, "triggers.json")
+	if err := os.WriteFile(rulesPath, []byte("not json"), 0o600); err != nil {
+		t.Fatalf("write rules: %v", err)
+	}
+	cli.channelTriggers.rulesPath = rulesPath
+	if _, err := cli.reloadChannelTriggerRules(); err == nil {
+		t.Fatalf("expected parse error")
+	}
+}
+
+func TestChannelTriggers_ConfirmInvalidID(t *testing.T) {
+	cli := newTestCLIWithMCP(t)
+	if err := cli.channelTriggerConfirm(9999, true); err == nil {
+		t.Fatalf("expected error for nonexistent confirm id")
+	}
+}
+
+func TestChannelTriggers_RunMissingSeq(t *testing.T) {
+	cli := newTestCLIWithMCP(t)
+	if err := cli.channelTriggerRun(9999); err == nil {
+		t.Fatalf("expected error for nonexistent seq")
+	}
+}
+
+func TestChannelTriggers_RenderTriggerLineHasContent(t *testing.T) {
+	a := triggers.Action{
+		Rule: triggers.Rule{Name: "rule-x"},
+		Event: triggers.ChannelEvent{
+			ServerName: "srv", Channel: "ch", Content: "hello world",
+		},
+	}
+	line := renderTriggerLine(a)
+	if !strings.Contains(line, "srv/ch") || !strings.Contains(line, "rule-x") || !strings.Contains(line, "hello world") {
+		t.Errorf("line missing pieces: %q", line)
+	}
+}
+
+func TestChannelTriggers_RenderBannerWithUnreadAndPending(t *testing.T) {
+	cli := newTestCLIWithMCP(t)
+	if err := cli.channelTriggers.engine.SetRules([]triggers.Rule{
+		{Name: "n", Channel: "ci", Mode: triggers.ModeNotify},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cli.mcpManager.Channels().Push(mcp.ChannelMessage{
+		ServerName: "s", Channel: "ci", Content: "hello",
+	})
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		cli.channelTriggers.mu.Lock()
+		got := len(cli.channelTriggers.pendingNotify)
+		cli.channelTriggers.mu.Unlock()
+		if got > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !cli.renderChannelTriggerBanner() {
+		t.Errorf("renderChannelTriggerBanner returned false despite pending notify")
+	}
+}
+
+func TestChannelTriggers_RenderBannerEmptyReturnsFalse(t *testing.T) {
+	cli := newTestCLIWithMCP(t)
+	if cli.renderChannelTriggerBanner() {
+		t.Errorf("renderChannelTriggerBanner with empty state should return false")
+	}
+}
+
+func TestChannelTriggers_DrainPendingAutoEmptyReturnsFalse(t *testing.T) {
+	cli := newTestCLIWithMCP(t)
+	if cli.drainPendingAutoTriggers() {
+		t.Errorf("drainPendingAutoTriggers with empty queue should return false")
+	}
+}
+
+func TestChannelTriggers_NilGuards(t *testing.T) {
+	cli := &ChatCLI{logger: zap.NewNop()}
+
+	// All nil-safe accessors must not panic when channelTriggers/mcpManager are nil.
+	if cli.channelTriggerIsPaused() {
+		t.Errorf("nil triggers → IsPaused must be false")
+	}
+	if cli.channelTriggerRules() != nil {
+		t.Errorf("nil triggers → Rules must be nil")
+	}
+	if cli.drainPendingAutoTriggers() {
+		t.Errorf("nil triggers → drain must return false")
+	}
+	if cli.renderChannelTriggerBanner() {
+		t.Errorf("nil mcp → banner must return false")
+	}
+	cli.channelTriggerPause()     // no panic
+	cli.channelTriggerResume()    // no panic
+	cli.shutdownChannelTriggers() // no panic
+	cli.initChannelTriggers()     // no mcp manager → no-op, no panic
+
+	if _, err := cli.reloadChannelTriggerRules(); err == nil {
+		t.Errorf("nil triggers → reload must return error")
+	}
+	if err := cli.channelTriggerConfirm(1, true); err == nil {
+		t.Errorf("nil triggers → confirm must return error")
+	}
+	if err := cli.channelTriggerRun(1); err == nil {
+		t.Errorf("nil mcp → run must return error")
 	}
 }

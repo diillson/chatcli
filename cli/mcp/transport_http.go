@@ -599,7 +599,6 @@ func (t *httpTransport) handlePushEvent(eventType, data string) {
 	t.channelMgr.ProcessSSENotification(t.serverName, []byte(data))
 }
 
-
 // sendSessionDelete fires a DELETE with the session header so the
 // server can release per-session state immediately. Takes the
 // context as a parameter so the deadline is callsite-controlled.
