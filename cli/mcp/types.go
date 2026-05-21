@@ -103,6 +103,17 @@ type ServerConfig struct {
 	// stay clean.
 	Trust bool `json:"trust,omitempty"`
 
+	// Channels is the allow-list of MCP push-channel names that this
+	// server is subscribed to. Empty list means "accept every channel
+	// the server emits"; a non-empty list drops messages whose channel
+	// name is not in the slice. Useful when a noisy server emits many
+	// channel kinds but the workflow only cares about a few.
+	//
+	// The literal "*" matches every channel — same semantics as
+	// AutoApprove — so users can mix specific channels with the
+	// wildcard without breaking the list.
+	Channels []string `json:"channels,omitempty"`
+
 	// --- Tier 3: catch-all for unknown keys ---
 
 	// Extensions preserves every JSON key that the typed fields above

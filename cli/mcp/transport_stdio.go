@@ -32,6 +32,15 @@ type stdioTransport struct {
 	logger      *zap.Logger
 	done        chan struct{}
 	callTimeout time.Duration // resolved from ServerConfig.RequestTimeout()
+	// channelMgr receives server-initiated notifications — JSON-RPC
+	// messages without an `id` field, which the spec reserves for
+	// "we want to tell the client something" pushes. nil-safe because
+	// the transport is exercised by unit tests without a manager.
+	channelMgr *ChannelManager
+	// serverName is captured for channel routing so notifications
+	// stay attributable when the user has multiple stdio servers
+	// connected at once.
+	serverName string
 	// onClose fires exactly once when the transport's read loop or
 	// stdin write detects the process has gone away (EOF, EPIPE,
 	// killed). The Manager registers it to flip Status.Connected back
@@ -46,7 +55,12 @@ type stdioTransport struct {
 }
 
 // newStdioTransport spawns the MCP server process and starts the read loop.
-func newStdioTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger) (*stdioTransport, error) {
+//
+// channelMgr is optional — pass nil from tests that do not care about
+// server-initiated notifications. The transport routes every
+// notification (JSON-RPC message without an id) to channelMgr if
+// non-nil; otherwise the notification is logged at debug and dropped.
+func newStdioTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger, channelMgr *ChannelManager) (*stdioTransport, error) {
 	args := cfg.Args
 	cmd := exec.CommandContext(ctx, cfg.Command, args...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 
@@ -103,6 +117,8 @@ func newStdioTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger
 		logger:      logger,
 		done:        make(chan struct{}),
 		callTimeout: cfg.RequestTimeout(),
+		channelMgr:  channelMgr,
+		serverName:  cfg.Name,
 	}
 
 	go t.readLoop()
@@ -224,15 +240,36 @@ func (t *stdioTransport) readLoop() {
 	}
 }
 
-// tryDispatch attempts to parse a line as a JSON-RPC response and
-// route it to the waiting Call(). Non-JSON or unparseable lines are
-// logged and dropped.
+// tryDispatch attempts to parse a line as a JSON-RPC envelope and
+// route it. Three cases:
+//
+//  1. Response (has id, no method) → match to a pending Call.
+//  2. Notification (has method, no id) → forward to channelMgr.
+//  3. Unparseable / unrecognized → log at debug and drop.
+//
+// The two-pass decode (try response, then peek at method) keeps the
+// hot path — every Call's response — a single unmarshal. Only when
+// the response is unrouteable do we re-examine the line.
 func (t *stdioTransport) tryDispatch(line string) {
 	var resp jsonRPCResponse
 	if err := json.Unmarshal([]byte(line), &resp); err != nil {
 		t.logger.Debug("MCP non-JSON line on stdout",
 			zap.String("line", line),
 			zap.Error(err))
+		return
+	}
+
+	// Notification: messages without an id are routed by method
+	// name (see ChannelManager.ProcessSSENotification). Spec §
+	// "Notifications" — clients MUST NOT respond.
+	if resp.ID == 0 {
+		if t.channelMgr != nil {
+			t.channelMgr.ProcessSSENotification(t.serverName, []byte(line))
+		} else {
+			t.logger.Debug("MCP stdio notification dropped (no channel manager)",
+				zap.String("server", t.serverName),
+				zap.String("line", line))
+		}
 		return
 	}
 

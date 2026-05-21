@@ -170,6 +170,27 @@ func (c ServerConfig) MatchesAutoApprove(toolName string) bool {
 	return false
 }
 
+// IsChannelSubscribed reports whether the named channel should be
+// delivered into the ring for this server. Empty/missing Channels
+// list means "accept everything"; otherwise the entry must appear
+// in the list (with "*" matching any channel). Whitespace is
+// trimmed so users editing JSON by hand can be sloppy.
+func (c ServerConfig) IsChannelSubscribed(channel string) bool {
+	if len(c.Channels) == 0 {
+		return true
+	}
+	for _, entry := range c.Channels {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if entry == Wildcard || entry == channel {
+			return true
+		}
+	}
+	return false
+}
+
 // IsToolVisible reports whether a tool should be exposed to the LLM.
 // EnabledTools is an allowlist with strict precedence: when non-empty,
 // only listed tools are visible. Otherwise DisabledTools acts as a

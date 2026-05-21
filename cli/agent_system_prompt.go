@@ -12,9 +12,10 @@ import (
 )
 
 // buildAgentSystemMessage composes the agent-mode system message from the
-// four semantic blocks used by Run(): core behavior, tools context,
-// workspace context, and (skills + orchestrator) — trailing in stability
-// order so the most stable content sits at the front of the cached prefix.
+// semantic blocks used by Run(): core behavior, tools context, workspace
+// context, (skills + orchestrator), and the volatile MCP channels block —
+// trailing in stability order so the most stable content sits at the front
+// of the cached prefix.
 //
 // Two representations are produced and kept in sync:
 //
@@ -23,27 +24,29 @@ import (
 //     (OpenAI, Gemini, Ollama, StackSpot, etc.) and by all the accounting
 //     code that measures history payload via len(Content).
 //
-//   - Message.SystemParts — one ContentBlock per non-empty block, each
-//     stamped with CacheControl{Type:"ephemeral"}. Anthropic reads these
-//     directly and serves identical prefixes as cache reads on subsequent
-//     turns. Empty blocks are dropped so we never waste a cache breakpoint
-//     on whitespace.
+//   - Message.SystemParts — one ContentBlock per non-empty block. Stable
+//     blocks (core/tools/workspace + the skills+orchestrator tail) are
+//     stamped with CacheControl{Type:"ephemeral"} so Anthropic serves
+//     identical prefixes as cache reads on subsequent turns. The volatile
+//     MCP channels block has NO cache hint — it changes every turn and
+//     caching it would just thrash the breakpoint.
 //
-// The number of breakpoints stays within Anthropic's limit of 4: the
-// five input blocks collapse whenever one is empty, and when all five
-// are present we intentionally merge (skills + orchestrator) into the
-// last block so the full set fits.
-func buildAgentSystemMessage(core, tools, workspace, skills, orchestrator string) models.Message {
+// Cache budget: Anthropic allows up to 4 cache_control breakpoints. The
+// five stable inputs collapse whenever one is empty; when all are present
+// we intentionally merge skills+orchestrator into a single tail block so
+// the full set fits in 4 boundaries. The channels block is appended
+// AFTER the cached tail without consuming a breakpoint.
+func buildAgentSystemMessage(core, tools, workspace, skills, orchestrator, channels string) models.Message {
 	core = strings.TrimSpace(core)
 	tools = strings.TrimSpace(tools)
 	workspace = strings.TrimSpace(workspace)
 	skills = strings.TrimSpace(skills)
 	orchestrator = strings.TrimSpace(orchestrator)
+	channels = strings.TrimSpace(channels)
 
-	// Merge the two most volatile blocks into a single trailing block.
-	// Anthropic allows up to 4 cache_control breakpoints; keeping the
-	// skills+orchestrator on one boundary leaves room for core/tools/
-	// workspace to each have their own stable breakpoint.
+	// Merge the two most volatile cached blocks into a single trailing
+	// block. Keeping skills+orchestrator on one boundary leaves room
+	// for core/tools/workspace to each have their own stable breakpoint.
 	tail := skills
 	if orchestrator != "" {
 		if tail != "" {
@@ -52,11 +55,11 @@ func buildAgentSystemMessage(core, tools, workspace, skills, orchestrator string
 		tail += orchestrator
 	}
 
-	ordered := []string{core, tools, workspace, tail}
+	cached := []string{core, tools, workspace, tail}
 
 	var parts []models.ContentBlock
 	var sb strings.Builder
-	for _, text := range ordered {
+	for _, text := range cached {
 		if text == "" {
 			continue
 		}
@@ -68,6 +71,20 @@ func buildAgentSystemMessage(core, tools, workspace, skills, orchestrator string
 			Type:         "text",
 			Text:         text,
 			CacheControl: &models.CacheControl{Type: "ephemeral"},
+		})
+	}
+
+	// Append the volatile MCP channels block last and without a cache
+	// hint. The user sees the latest push messages on every turn,
+	// while everything cacheable stays cacheable.
+	if channels != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(channels)
+		parts = append(parts, models.ContentBlock{
+			Type: "text",
+			Text: channels,
 		})
 	}
 

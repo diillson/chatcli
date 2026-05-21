@@ -26,7 +26,7 @@ func TestNewStdioTransport_CwdMustExist(t *testing.T) {
 		Command: "/usr/bin/true",
 		Cwd:     bogus,
 	}
-	_, err := newStdioTransport(context.Background(), cfg, zap.NewNop())
+	_, err := newStdioTransport(context.Background(), cfg, zap.NewNop(), nil)
 	if err == nil {
 		t.Fatal("expected error for non-existent cwd")
 	}
@@ -47,7 +47,7 @@ func TestNewStdioTransport_CwdMustBeDirectory(t *testing.T) {
 		Command: "/usr/bin/true",
 		Cwd:     file,
 	}
-	_, err := newStdioTransport(context.Background(), cfg, zap.NewNop())
+	_, err := newStdioTransport(context.Background(), cfg, zap.NewNop(), nil)
 	if err == nil {
 		t.Fatal("expected error for cwd pointing at a regular file")
 	}
@@ -68,7 +68,7 @@ func TestNewStdioTransport_EmptyCwdInheritsParent(t *testing.T) {
 		Command: "/usr/bin/true",
 		Cwd:     "",
 	}
-	tp, err := newStdioTransport(context.Background(), cfg, zap.NewNop())
+	tp, err := newStdioTransport(context.Background(), cfg, zap.NewNop(), nil)
 	if err != nil {
 		t.Fatalf("empty cwd should not error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestNewStdioTransport_CustomTimeoutPropagates(t *testing.T) {
 		Command: "/usr/bin/true",
 		Timeout: 7,
 	}
-	tp, err := newStdioTransport(context.Background(), cfg, zap.NewNop())
+	tp, err := newStdioTransport(context.Background(), cfg, zap.NewNop(), nil)
 	if err != nil {
 		t.Fatalf("transport setup: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestNewStdioTransport_DefaultTimeoutPropagates(t *testing.T) {
 		Name:    "fs",
 		Command: "/usr/bin/true",
 	}
-	tp, err := newStdioTransport(context.Background(), cfg, zap.NewNop())
+	tp, err := newStdioTransport(context.Background(), cfg, zap.NewNop(), nil)
 	if err != nil {
 		t.Fatalf("transport setup: %v", err)
 	}
