@@ -193,6 +193,27 @@ func TestSendPrompt_EmptyChoices(t *testing.T) {
 	}
 }
 
+func TestCopilotClient_ListModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer t" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o","name":"GPT-4o","model_picker_enabled":true}]}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(testProvider("t"), "gpt-4o", testLogger(), 1, 0)
+	c.baseURL = server.URL
+
+	list, err := c.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(list) != 1 {
+		t.Errorf("got %d models, want 1", len(list))
+	}
+}
+
 func TestCopilotAPIConstants(t *testing.T) {
 	if CopilotAPIBaseURL != "https://api.githubcopilot.com" {
 		t.Errorf("unexpected base URL: %s", CopilotAPIBaseURL)

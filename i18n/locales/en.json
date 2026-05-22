@@ -1445,6 +1445,7 @@
   "auth.login.status_not_connected": "not connected",
   "auth.login.status_no_expiry": "type=%s expiry=no expiry (persistent)",
   "auth.login.status_format": "type=%s expiry=%s",
+  "auth.login.status_env": "via %s (env fallback)",
   "auth.login.status_display": "Anthropic: %s\nOpenAI Codex: %s\nGitHub Copilot: %s\nGitHub Models: %s",
   "auth.copilot.device_code_failed": "failed to request device code: %w",
   "auth.copilot.opening": "\nAUTH [GitHub Copilot] Device authentication required.",

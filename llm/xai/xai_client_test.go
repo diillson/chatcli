@@ -62,3 +62,19 @@ func TestXAIClient_SendPrompt_RetryOnTemporaryError(t *testing.T) {
 	assert.Equal(t, "Success on retry", resp)
 	assert.Equal(t, 2, attempt, "Should have made two attempts")
 }
+
+func TestXAIClient_ListModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-xai-key" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"grok-4","owned_by":"xai"}]}`))
+	}))
+	defer server.Close()
+	logger, _ := zap.NewDevelopment()
+	client := NewXAIClient(testProvider("test-xai-key"), "grok-4", logger, 1, 0)
+	client.apiURL = server.URL + "/chat/completions"
+	list, err := client.ListModels(context.Background())
+	assert.NoError(t, err)
+	assert.NotEmpty(t, list)
+}
