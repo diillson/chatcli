@@ -149,6 +149,7 @@ func (c *MiniMaxClient) SendPrompt(ctx context.Context, prompt string, history [
 		if err != nil {
 			return "", err
 		}
+		defer func() { _ = resp.Body.Close() }()
 		return processFunc(resp)
 	})
 

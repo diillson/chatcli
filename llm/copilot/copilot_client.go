@@ -156,6 +156,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		if err != nil {
 			return "", err
 		}
+		defer func() { _ = resp.Body.Close() }()
 		return c.processResponse(resp)
 	})
 	if err != nil {

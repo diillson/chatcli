@@ -172,6 +172,7 @@ func (c *ZAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 		if err != nil {
 			return "", err
 		}
+		defer func() { _ = resp.Body.Close() }()
 		return c.processResponse(resp)
 	})
 
