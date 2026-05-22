@@ -6,6 +6,7 @@
 package openrouter
 
 import (
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/registry"
@@ -22,7 +23,8 @@ func init() {
 			if model == "" {
 				model = config.DefaultOpenRouterModel
 			}
-			return NewOpenRouterClient(cfg.APIKey, model, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
+			provider := auth.NewStaticTokenProviderFromResolved(cfg.APIKey, "")
+			return NewOpenRouterClient(provider, model, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
 		},
 	})
 }

@@ -8,15 +8,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
+func testProvider(key string) auth.TokenProvider {
+	return auth.NewStaticTokenProvider(key, auth.AuthModeAPIKey, "")
+}
+
 func newTestClient(url string) *ZAIClient {
 	logger, _ := zap.NewDevelopment()
-	c := NewZAIClient("test-zai-key", "glm-4.7", logger, 1, 0)
+	c := NewZAIClient(testProvider("test-zai-key"), "glm-4.7", logger, 1, 0)
 	c.apiURL = url
 	return c
 }
@@ -59,7 +64,7 @@ func TestZAIClient_SendPrompt_RetryOnTemporaryError(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	c := NewZAIClient("test-zai-key", "glm-4.7", logger, 2, 10*time.Millisecond)
+	c := NewZAIClient(testProvider("test-zai-key"), "glm-4.7", logger, 2, 10*time.Millisecond)
 	c.apiURL = server.URL
 
 	resp, err := c.SendPrompt(context.Background(), "Test", []models.Message{{Role: "user", Content: "Test"}}, 0)
@@ -316,7 +321,7 @@ func TestZAIClient_ListModels_Success(t *testing.T) {
 
 func TestZAIClient_GetModelName(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	c := NewZAIClient("key", "glm-4.7", logger, 1, 0)
+	c := NewZAIClient(testProvider("key"), "glm-4.7", logger, 1, 0)
 	name := c.GetModelName()
 	// Should return display name from catalog or the model id itself
 	assert.NotEmpty(t, name)

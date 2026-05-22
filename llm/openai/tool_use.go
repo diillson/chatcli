@@ -10,9 +10,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/toolshim"
@@ -79,7 +81,9 @@ func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	)
 
 	resp, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		httpResp, err := c.sendRequest(ctx, jsonValue)
+		httpResp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			return c.sendRequest(ctx, jsonValue, token)
+		})
 		if err != nil {
 			return "", err
 		}

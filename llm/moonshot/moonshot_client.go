@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -34,7 +35,7 @@ import (
 //
 // Modelo default: kimi-k2.6 (256K contexto, multimodal, thinking).
 type MoonshotClient struct {
-	apiKey       string
+	provider     auth.TokenProvider
 	model        string
 	logger       *zap.Logger
 	client       *http.Client
@@ -52,10 +53,10 @@ func (c *MoonshotClient) LastUsage() *models.UsageInfo { return c.usageState.Las
 func (c *MoonshotClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewMoonshotClient cria uma nova instância de MoonshotClient.
-func NewMoonshotClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *MoonshotClient {
+func NewMoonshotClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *MoonshotClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 	return &MoonshotClient{
-		apiKey:       apiKey,
+		provider:     provider,
 		model:        strings.ToLower(model),
 		logger:       logger,
 		client:       httpClient,
@@ -160,7 +161,9 @@ func (c *MoonshotClient) SendPrompt(ctx context.Context, prompt string, history 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		//nolint:bodyclose // processResponse takes ownership of resp
 		// and defers Body.Close(); closing here would double-close.
-		resp, err := c.sendRequest(ctx, jsonValue)
+		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			return c.sendRequest(ctx, jsonValue, token)
+		})
 		if err != nil {
 			return "", err
 		}
@@ -180,7 +183,7 @@ func (c *MoonshotClient) SendPrompt(ctx context.Context, prompt string, history 
 }
 
 // sendRequest envia a requisição para a API Moonshot.
-func (c *MoonshotClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
+func (c *MoonshotClient) sendRequest(ctx context.Context, jsonValue []byte, token string) (*http.Response, error) {
 	apiURL := utils.GetEnvOrDefault("MOONSHOT_API_URL", c.apiURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
@@ -189,7 +192,7 @@ func (c *MoonshotClient) sendRequest(ctx context.Context, jsonValue []byte) (*ht
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	return c.client.Do(req)
 }
@@ -267,13 +270,14 @@ func (c *MoonshotClient) ListModels(ctx context.Context) ([]client.ModelInfo, er
 	apiURL := utils.GetEnvOrDefault("MOONSHOT_API_URL", c.apiURL)
 	modelsURL := strings.TrimSuffix(apiURL, "/chat/completions") + "/models"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.client.Do(req)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		return c.client.Do(req)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "MOONSHOT"), err)
 	}

@@ -1,6 +1,7 @@
 package googleai
 
 import (
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/registry"
@@ -17,7 +18,8 @@ func init() {
 			if model == "" {
 				model = config.DefaultGoogleAIModel
 			}
-			return NewGeminiClient(cfg.APIKey, model, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
+			provider := auth.NewStaticTokenProvider(cfg.APIKey, auth.AuthModeAPIKey, "")
+			return NewGeminiClient(provider, model, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
 		},
 	})
 }

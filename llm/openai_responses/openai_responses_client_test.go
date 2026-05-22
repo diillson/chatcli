@@ -9,11 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+func testProvider(key string) auth.TokenProvider {
+	return auth.NewStaticTokenProvider(key, auth.AuthModeAPIKey, "")
+}
 
 func TestOpenAIResponsesClient_SendPrompt_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +34,7 @@ func TestOpenAIResponsesClient_SendPrompt_Success(t *testing.T) {
 	defer os.Setenv("OPENAI_RESPONSES_API_URL", originalURL)
 
 	logger, _ := zap.NewDevelopment()
-	client := NewOpenAIResponsesClient("test-api-key", "gpt-5", logger, 1, 0)
+	client := NewOpenAIResponsesClient(testProvider("test-api-key"), "gpt-5", logger, 1, 0)
 
 	history := []models.Message{{Role: "user", Content: "Hi"}}
 	resp, err := client.SendPrompt(context.Background(), "Hi", history, 0)
@@ -57,7 +62,7 @@ func TestOpenAIResponsesClient_SendPrompt_RetryOnTemporaryError(t *testing.T) {
 	defer os.Setenv("OPENAI_RESPONSES_API_URL", originalURL)
 
 	logger, _ := zap.NewDevelopment()
-	client := NewOpenAIResponsesClient("test-api-key", "gpt-5", logger, 2, 10*time.Millisecond)
+	client := NewOpenAIResponsesClient(testProvider("test-api-key"), "gpt-5", logger, 2, 10*time.Millisecond)
 
 	history := []models.Message{{Role: "user", Content: "Test"}}
 	resp, err := client.SendPrompt(context.Background(), "Test", history, 0)

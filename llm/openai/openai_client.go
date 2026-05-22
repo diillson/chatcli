@@ -30,7 +30,7 @@ import (
 
 // OpenAIClient implementa o cliente para interagir com a API da OpenAI
 type OpenAIClient struct {
-	apiKey      string
+	provider    auth.TokenProvider
 	model       string
 	logger      *zap.Logger
 	client      *http.Client
@@ -46,11 +46,11 @@ func (c *OpenAIClient) LastUsage() *models.UsageInfo { return c.usageState.LastU
 func (c *OpenAIClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewOpenAIClient cria uma nova instância de OpenAIClient.
-func NewOpenAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenAIClient {
+func NewOpenAIClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenAIClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 
 	return &OpenAIClient{
-		apiKey:      apiKey,
+		provider:    provider,
 		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
@@ -148,7 +148,9 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 	)
 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		resp, err := c.sendRequest(ctx, jsonValue)
+		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			return c.sendRequest(ctx, jsonValue, token)
+		})
 		if err != nil {
 			return "", err
 		}
@@ -165,7 +167,7 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 }
 
 // sendRequest envia a requisição para a API da OpenAI
-func (c *OpenAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
+func (c *OpenAIClient) sendRequest(ctx context.Context, jsonValue []byte, token string) (*http.Response, error) {
 	apiURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
@@ -174,14 +176,9 @@ func (c *OpenAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
+	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
+	return c.client.Do(req)
 }
 
 // processResponse processa a resposta da API da OpenAI
@@ -243,13 +240,14 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 	apiURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
 	modelsURL := strings.TrimSuffix(apiURL, "/chat/completions") + "/models"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
-	}
-	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
-
-	resp, err := c.client.Do(req)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		return c.client.Do(req)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "OpenAI"), err)
 	}
@@ -364,7 +362,9 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		zap.String("kind", "stream"),
 	)
 
-	resp, err := c.sendRequest(ctx, jsonValue)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		return c.sendRequest(ctx, jsonValue, token)
+	})
 	if err != nil {
 		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start),
 			zap.String("kind", "stream"),

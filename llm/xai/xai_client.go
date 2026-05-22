@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -27,7 +28,7 @@ import (
 )
 
 type XAIClient struct {
-	apiKey      string
+	provider    auth.TokenProvider
 	model       string
 	logger      *zap.Logger
 	client      *http.Client
@@ -44,10 +45,10 @@ func (c *XAIClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsag
 func (c *XAIClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewXAIClient cria uma nova instância de XAIClient.
-func NewXAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *XAIClient {
+func NewXAIClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *XAIClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 	return &XAIClient{
-		apiKey:      apiKey,
+		provider:    provider,
 		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
@@ -110,7 +111,9 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 
 	// Agora use Retry para encapsular a lógica de requisição e parsing
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		resp, err := c.sendRequest(ctx, jsonValue)
+		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			return c.sendRequest(ctx, jsonValue, token)
+		})
 		if err != nil {
 			return "", err
 		}
@@ -129,13 +132,13 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 	return response, nil
 }
 
-func (c *XAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
+func (c *XAIClient) sendRequest(ctx context.Context, jsonValue []byte, token string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, utils.NewJSONReader(jsonValue))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+token)
 	return c.client.Do(req)
 }
 
@@ -210,13 +213,14 @@ func (c *XAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) 
 	// Derive models URL from the chat completions URL
 	modelsURL := strings.TrimSuffix(c.apiURL, "/chat/completions") + "/models"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.client.Do(req)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		return c.client.Do(req)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "xAI"), err)
 	}

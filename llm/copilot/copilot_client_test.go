@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -17,13 +18,21 @@ func testLogger() *zap.Logger {
 	return logger
 }
 
+func testProvider(token string) auth.TokenProvider {
+	return auth.NewStaticTokenProvider(token, auth.AuthModeToken, auth.ProviderGitHubCopilot)
+}
+
 func TestNewClient(t *testing.T) {
-	c := NewClient("test-token", "gpt-4o", testLogger(), 3, 0)
+	c := NewClient(testProvider("test-token"), "gpt-4o", testLogger(), 3, 0)
 	if c == nil {
 		t.Fatal("NewClient returned nil")
 	}
-	if c.token != "test-token" {
-		t.Errorf("expected token 'test-token', got '%s'", c.token)
+	got, err := c.provider.Token(context.Background())
+	if err != nil {
+		t.Fatalf("provider.Token failed: %v", err)
+	}
+	if got != "test-token" {
+		t.Errorf("expected token 'test-token', got '%s'", got)
 	}
 	if c.model != "gpt-4o" {
 		t.Errorf("expected model 'gpt-4o', got '%s'", c.model)
@@ -37,14 +46,14 @@ func TestNewClient_CustomBaseURL(t *testing.T) {
 	_ = os.Setenv("COPILOT_API_BASE_URL", "https://copilot-api.example.com")
 	defer func() { _ = os.Unsetenv("COPILOT_API_BASE_URL") }()
 
-	c := NewClient("token", "gpt-4o", testLogger(), 3, 0)
+	c := NewClient(testProvider("token"), "gpt-4o", testLogger(), 3, 0)
 	if c.baseURL != "https://copilot-api.example.com" {
 		t.Errorf("expected custom base URL, got '%s'", c.baseURL)
 	}
 }
 
 func TestGetModelName(t *testing.T) {
-	c := NewClient("token", "gpt-4o", testLogger(), 3, 0)
+	c := NewClient(testProvider("token"), "gpt-4o", testLogger(), 3, 0)
 	name := c.GetModelName()
 	if name == "" {
 		t.Error("GetModelName returned empty string")
@@ -95,7 +104,7 @@ func TestSendPrompt_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient("test-token", "gpt-4o", testLogger(), 1, 0)
+	c := NewClient(testProvider("test-token"), "gpt-4o", testLogger(), 1, 0)
 	c.baseURL = server.URL
 
 	result, err := c.SendPrompt(context.Background(), "Hello", nil, 0)
@@ -133,7 +142,7 @@ func TestSendPrompt_WithHistory(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient("token", "gpt-4o", testLogger(), 1, 0)
+	c := NewClient(testProvider("token"), "gpt-4o", testLogger(), 1, 0)
 	c.baseURL = server.URL
 
 	history := []models.Message{
@@ -154,7 +163,7 @@ func TestSendPrompt_403Forbidden(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient("expired-token", "gpt-4o", testLogger(), 1, 0)
+	c := NewClient(testProvider("expired-token"), "gpt-4o", testLogger(), 1, 0)
 	c.baseURL = server.URL
 
 	_, err := c.SendPrompt(context.Background(), "Hello", nil, 0)
@@ -175,7 +184,7 @@ func TestSendPrompt_EmptyChoices(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient("token", "gpt-4o", testLogger(), 1, 0)
+	c := NewClient(testProvider("token"), "gpt-4o", testLogger(), 1, 0)
 	c.baseURL = server.URL
 
 	_, err := c.SendPrompt(context.Background(), "Hello", nil, 0)

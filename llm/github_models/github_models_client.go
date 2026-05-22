@@ -31,7 +31,7 @@ import (
 // GitHubModelsClient implements an LLM client for the GitHub Models marketplace.
 // It uses the OpenAI-compatible API at models.inference.ai.azure.com.
 type GitHubModelsClient struct {
-	apiKey      string
+	provider    auth.TokenProvider
 	model       string
 	logger      *zap.Logger
 	client      *http.Client
@@ -47,11 +47,11 @@ func (c *GitHubModelsClient) LastUsage() *models.UsageInfo { return c.usageState
 func (c *GitHubModelsClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewGitHubModelsClient creates a new GitHub Models client.
-func NewGitHubModelsClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *GitHubModelsClient {
+func NewGitHubModelsClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *GitHubModelsClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 
 	return &GitHubModelsClient{
-		apiKey:      apiKey,
+		provider:    provider,
 		model:       model,
 		logger:      logger,
 		client:      httpClient,
@@ -131,14 +131,15 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 	)
 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.getAPIURL(), utils.NewJSONReader(jsonValue))
-		if err != nil {
-			return "", fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "GitHub Models"), err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
-
-		resp, err := c.client.Do(req)
+		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.getAPIURL(), utils.NewJSONReader(jsonValue))
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "GitHub Models"), err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+			return c.client.Do(req)
+		})
 		if err != nil {
 			return "", err
 		}
@@ -198,13 +199,14 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 func (c *GitHubModelsClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	modelsURL := c.getModelsURL()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "GitHub Models"), err)
-	}
-	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
-
-	resp, err := c.client.Do(req)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "GitHub Models"), err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		return c.client.Do(req)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "GitHub Models"), err)
 	}

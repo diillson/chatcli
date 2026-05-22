@@ -8,15 +8,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
+func testProvider(key string) auth.TokenProvider {
+	return auth.NewStaticTokenProvider(key, auth.AuthModeAPIKey, "")
+}
+
 func newTestClient(url string) *MiniMaxClient {
 	logger, _ := zap.NewDevelopment()
-	c := NewMiniMaxClient("test-minimax-key", "MiniMax-M2.7", logger, 1, 0)
+	c := NewMiniMaxClient(testProvider("test-minimax-key"), "MiniMax-M2.7", logger, 1, 0)
 	c.apiURL = url
 	return c
 }
@@ -59,7 +64,7 @@ func TestMiniMaxClient_SendPrompt_RetryOnTemporaryError(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	c := NewMiniMaxClient("test-minimax-key", "MiniMax-M2.7", logger, 2, 10*time.Millisecond)
+	c := NewMiniMaxClient(testProvider("test-minimax-key"), "MiniMax-M2.7", logger, 2, 10*time.Millisecond)
 	c.apiURL = server.URL
 
 	resp, err := c.SendPrompt(context.Background(), "Test", []models.Message{{Role: "user", Content: "Test"}}, 0)
@@ -374,7 +379,7 @@ func TestMiniMaxClient_ListModels_Success(t *testing.T) {
 
 func TestMiniMaxClient_GetModelName(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	c := NewMiniMaxClient("key", "MiniMax-M2.7", logger, 1, 0)
+	c := NewMiniMaxClient(testProvider("key"), "MiniMax-M2.7", logger, 1, 0)
 	name := c.GetModelName()
 	assert.NotEmpty(t, name)
 }
@@ -464,7 +469,7 @@ func TestMiniMaxClient_ModelCaseSensitive(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	// MiniMax model IDs are case-sensitive: "MiniMax-M2.7" not "minimax-m2.7"
-	c := NewMiniMaxClient("key", "MiniMax-M2.7", logger, 1, 0)
+	c := NewMiniMaxClient(testProvider("key"), "MiniMax-M2.7", logger, 1, 0)
 	c.apiURL = server.URL
 
 	_, err := c.SendPrompt(context.Background(), "test", []models.Message{{Role: "user", Content: "test"}}, 100)
@@ -501,7 +506,7 @@ func TestMiniMaxClient_AnthropicCompat_SendPrompt(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	c := &MiniMaxClient{
-		apiKey:          "test-minimax-key",
+		provider:        testProvider("test-minimax-key"),
 		model:           "MiniMax-M2.7",
 		logger:          logger,
 		client:          http.DefaultClient,
@@ -535,7 +540,7 @@ func TestMiniMaxClient_AnthropicCompat_Headers(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	c := &MiniMaxClient{
-		apiKey:          "test-key-abc",
+		provider:        testProvider("test-key-abc"),
 		model:           "MiniMax-M2.7",
 		logger:          logger,
 		client:          http.DefaultClient,
@@ -565,7 +570,7 @@ func TestMiniMaxClient_AnthropicCompat_ErrorResponse(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	c := &MiniMaxClient{
-		apiKey:          "test-key",
+		provider:        testProvider("test-key"),
 		model:           "MiniMax-M2.7",
 		logger:          logger,
 		client:          http.DefaultClient,

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -32,7 +33,7 @@ import (
 
 // ClaudeClient é uma estrutura que contém o cliente de ClaudeAI com suas configurações
 type ClaudeClient struct {
-	apiKey      string
+	provider    auth.TokenProvider
 	model       string
 	logger      *zap.Logger
 	client      *http.Client
@@ -107,9 +108,9 @@ Your output must be:
 `
 
 // NewClaudeClient cria um novo cliente ClaudeAI com configurações personalizáveis.
-func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ClaudeClient {
+func NewClaudeClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ClaudeClient {
 	var httpClient *http.Client
-	if strings.HasPrefix(apiKey, "oauth:") {
+	if provider.Mode() == auth.AuthModeOAuth {
 		// OAuth requests may be rejected by Cloudflare when using Go's standard TLS fingerprint.
 		// Use Chrome-like TLS fingerprint via uTLS, matching the approach in openai_responses.
 		httpClient = utils.NewHTTPClientWithTransport(logger, 900*time.Second, utils.NewChromeTLSTransport())
@@ -124,7 +125,7 @@ func NewClaudeClient(apiKey string, model string, logger *zap.Logger, maxAttempt
 	}
 
 	return &ClaudeClient{
-		apiKey:      apiKey,
+		provider:    provider,
 		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
@@ -169,7 +170,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		effectiveMaxTokens = c.getMaxTokens()
 	}
 
-	isOAuth := strings.HasPrefix(c.apiKey, "oauth:")
+	isOAuth := c.provider.Mode() == auth.AuthModeOAuth
 	var messages interface{}
 	var systemObj interface{}
 	if isOAuth {
@@ -217,12 +218,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.prepare_request"), err)
 	}
 
-	authMode := "apikey"
-	if isOAuth {
-		authMode = "oauth"
-	} else if strings.HasPrefix(c.apiKey, "token:") {
-		authMode = "token"
-	}
+	authMode := string(c.provider.Mode())
 	start := time.Now()
 	client.LogRequestStart(c.logger, "CLAUDEAI", c.model,
 		zap.String("auth", authMode),
@@ -243,32 +239,19 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		if isOAuth {
 			reqURL = withBetaQuery(reqURL)
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
-		if err != nil {
-			return "", fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
-		}
-		req = req.WithContext(context.WithValue(req.Context(), oauthModelKey{}, c.model))
-
-		req.Header.Add("Content-Type", oauthContentType)
-
-		if isOAuth {
-			applyOAuthHeaders(req, c.apiKey)
-		} else if strings.HasPrefix(c.apiKey, "token:") {
-			req.Header.Add("Authorization", "Bearer "+strings.TrimPrefix(c.apiKey, "token:"))
-			req.Header.Add("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
-		} else if strings.HasPrefix(c.apiKey, "apikey:") {
-			req.Header.Add("x-api-key", strings.TrimPrefix(c.apiKey, "apikey:"))
-			req.Header.Add("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
-		} else {
-			req.Header.Add("x-api-key", c.apiKey)
-			req.Header.Add("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
-		}
-
-		resp, err := c.client.Do(req)
+		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
+			}
+			req = req.WithContext(context.WithValue(req.Context(), oauthModelKey{}, c.model))
+			req.Header.Add("Content-Type", oauthContentType)
+			c.applyAuthHeaders(req, token)
+			return c.client.Do(req)
+		})
 		if err != nil {
 			return "", err
 		}
-
 		if isOAuth {
 			return c.processStreamResponse(resp)
 		}
@@ -561,20 +544,37 @@ func (c *ClaudeClient) sendOAuthTitleRequest(ctx context.Context, userText strin
 	}
 
 	reqURL := withBetaQuery(c.apiURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req = req.WithContext(context.WithValue(req.Context(), oauthModelKey{}, oauthTitleModel))
-	req.Header.Add("Content-Type", oauthContentType)
-	applyOAuthHeaders(req, c.apiKey)
-
-	resp, err := c.client.Do(req)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(payload))
+		if err != nil {
+			return nil, err
+		}
+		req = req.WithContext(context.WithValue(req.Context(), oauthModelKey{}, oauthTitleModel))
+		req.Header.Add("Content-Type", oauthContentType)
+		applyOAuthHeaders(req, token)
+		return c.client.Do(req)
+	})
 	if err != nil {
 		return err
 	}
 	_, err = c.processStreamResponse(resp)
 	return err
+}
+
+// applyAuthHeaders sets the Authorization-style headers required by the
+// Anthropic Messages API for the active credential mode. The token argument
+// is the raw access token (no "oauth:"/"token:"/"apikey:" prefix).
+func (c *ClaudeClient) applyAuthHeaders(req *http.Request, token string) {
+	switch c.provider.Mode() {
+	case auth.AuthModeOAuth:
+		applyOAuthHeaders(req, token)
+	case auth.AuthModeToken:
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+	default:
+		req.Header.Set("x-api-key", token)
+		req.Header.Set("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+	}
 }
 
 func oauthTextBlock(text string) map[string]interface{} {
@@ -587,7 +587,7 @@ func oauthTextBlock(text string) map[string]interface{} {
 	}
 }
 
-func applyOAuthHeaders(req *http.Request, apiKey string) {
+func applyOAuthHeaders(req *http.Request, token string) {
 	req.Header.Set("Accept", oauthAcceptHeader)
 	req.Header.Set("Accept-Encoding", oauthAcceptEncoding)
 	req.Header.Set("Connection", oauthConnectionHeader)
@@ -600,7 +600,7 @@ func applyOAuthHeaders(req *http.Request, apiKey string) {
 	}
 	req.Header.Set("anthropic-beta", betas)
 	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("Authorization", "Bearer "+strings.TrimPrefix(apiKey, "oauth:"))
+	req.Header.Set("Authorization", "Bearer "+token)
 }
 
 type oauthModelKey struct{}
@@ -623,7 +623,7 @@ func (m *multiCloser) Close() error               { return m.close() }
 // ListModels fetches available models from the Anthropic /v1/models endpoint.
 // Supports both API key and OAuth authentication modes.
 func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
-	isOAuth := strings.HasPrefix(c.apiKey, "oauth:")
+	isOAuth := c.provider.Mode() == auth.AuthModeOAuth
 
 	// Derive models URL from the messages URL
 	modelsURL := strings.TrimSuffix(c.apiURL, "/messages") + "/models"
@@ -631,25 +631,14 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		modelsURL = withBetaQuery(modelsURL)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
-	}
-
-	if isOAuth {
-		applyOAuthHeaders(req, c.apiKey)
-	} else if strings.HasPrefix(c.apiKey, "token:") {
-		req.Header.Set("Authorization", "Bearer "+strings.TrimPrefix(c.apiKey, "token:"))
-		req.Header.Set("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
-	} else if strings.HasPrefix(c.apiKey, "apikey:") {
-		req.Header.Set("x-api-key", strings.TrimPrefix(c.apiKey, "apikey:"))
-		req.Header.Set("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
-	} else {
-		req.Header.Set("x-api-key", c.apiKey)
-		req.Header.Set("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
-	}
-
-	resp, err := c.client.Do(req)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
+		}
+		c.applyAuthHeaders(req, token)
+		return c.client.Do(req)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "Anthropic"), err)
 	}

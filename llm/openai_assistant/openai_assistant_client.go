@@ -38,7 +38,7 @@ const (
 
 // OpenAIAssistantClient implementa a interface LLMClient usando a API de Assistentes da OpenAI
 type OpenAIAssistantClient struct {
-	apiKey          string
+	provider        auth.TokenProvider
 	model           string
 	assistantID     string
 	currentThreadID string
@@ -70,17 +70,25 @@ type FileRegistry struct {
 	assistantID string
 }
 
-// NewOpenAIAssistantClient cria uma nova instância de OpenAIAssistantClient
-func NewOpenAIAssistantClient(apiKey, model string, logger *zap.Logger) (*OpenAIAssistantClient, error) {
+// NewOpenAIAssistantClient cria uma nova instância de OpenAIAssistantClient.
+// The Assistants API only speaks the API-key dialect; the provider must be in
+// AuthModeAPIKey. The token is snapshotted at construction since OpenAI
+// platform API keys do not expire.
+func NewOpenAIAssistantClient(provider auth.TokenProvider, model string, logger *zap.Logger) (*OpenAIAssistantClient, error) {
 	if model == "" {
 		model = DefaultAssistantModel
+	}
+
+	token, err := provider.Token(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.assistant.create_cache_dir_error"), err)
 	}
 
 	client := utils.NewAPIClient(
 		logger,
 		AssistantAPIBaseURL,
 		map[string]string{
-			"Authorization": "Bearer " + auth.StripAuthPrefix(apiKey),
+			"Authorization": "Bearer " + token,
 			"Content-Type":  "application/json",
 			"OpenAI-Beta":   "assistants=v2",
 		},
@@ -93,7 +101,7 @@ func NewOpenAIAssistantClient(apiKey, model string, logger *zap.Logger) (*OpenAI
 	}
 
 	assistantClient := &OpenAIAssistantClient{
-		apiKey:          apiKey,
+		provider:        provider,
 		model:           model,
 		assistantID:     "",
 		currentThreadID: "",

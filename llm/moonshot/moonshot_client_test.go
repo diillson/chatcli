@@ -8,15 +8,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
+func testProvider(key string) auth.TokenProvider {
+	return auth.NewStaticTokenProvider(key, auth.AuthModeAPIKey, "")
+}
+
 func newTestClient(url string) *MoonshotClient {
 	logger, _ := zap.NewDevelopment()
-	c := NewMoonshotClient("test-moonshot-key", "kimi-k2.6", logger, 1, 0)
+	c := NewMoonshotClient(testProvider("test-moonshot-key"), "kimi-k2.6", logger, 1, 0)
 	c.apiURL = url
 	return c
 }
@@ -66,7 +71,7 @@ func TestMoonshotClient_SendPrompt_RetryOnTemporaryError(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	c := NewMoonshotClient("test-moonshot-key", "kimi-k2.6", logger, 2, 10*time.Millisecond)
+	c := NewMoonshotClient(testProvider("test-moonshot-key"), "kimi-k2.6", logger, 2, 10*time.Millisecond)
 	c.apiURL = server.URL
 
 	resp, err := c.SendPrompt(context.Background(), "Test", []models.Message{{Role: "user", Content: "Test"}}, 0)
@@ -228,7 +233,7 @@ func TestMoonshotClient_ThinkingMode_IgnoredOnNonThinkingModel(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	c := NewMoonshotClient("k", "moonshot-v1-8k", logger, 1, 0)
+	c := NewMoonshotClient(testProvider("k"), "moonshot-v1-8k", logger, 1, 0)
 	c.apiURL = server.URL
 	c.thinkingMode = "enabled"
 
@@ -243,7 +248,7 @@ func TestMoonshotClient_GetMaxTokens_EnvOverride(t *testing.T) {
 	t.Setenv("MOONSHOT_MAX_TOKENS", "12345")
 
 	logger, _ := zap.NewDevelopment()
-	c := NewMoonshotClient("k", "kimi-k2.6", logger, 1, 0)
+	c := NewMoonshotClient(testProvider("k"), "kimi-k2.6", logger, 1, 0)
 	assert.Equal(t, 12345, c.getMaxTokens())
 }
 
@@ -251,14 +256,14 @@ func TestMoonshotClient_GetMaxTokens_FromCatalog(t *testing.T) {
 	t.Setenv("MOONSHOT_MAX_TOKENS", "")
 
 	logger, _ := zap.NewDevelopment()
-	c := NewMoonshotClient("k", "kimi-k2.6", logger, 1, 0)
+	c := NewMoonshotClient(testProvider("k"), "kimi-k2.6", logger, 1, 0)
 	tokens := c.getMaxTokens()
 	assert.Greater(t, tokens, 0, "must fall back to catalog max")
 }
 
 func TestMoonshotClient_GetModelName(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	c := NewMoonshotClient("k", "kimi-k2.6", logger, 1, 0)
+	c := NewMoonshotClient(testProvider("k"), "kimi-k2.6", logger, 1, 0)
 	name := c.GetModelName()
 	assert.NotEmpty(t, name)
 }
@@ -571,6 +576,6 @@ func TestRegister_FactoryRegistered(t *testing.T) {
 	// O registry é populado por init() de cada package importado.
 	// Apenas instanciar via factory para garantir o caminho feliz.
 	logger, _ := zap.NewDevelopment()
-	c := NewMoonshotClient("k", "", logger, 1, 0) // model vazio dispara default via factory; aqui só validamos construtor
+	c := NewMoonshotClient(testProvider("k"), "", logger, 1, 0) // model vazio dispara default via factory; aqui só validamos construtor
 	assert.NotNil(t, c)
 }

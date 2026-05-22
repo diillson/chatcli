@@ -7,10 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
+
+func testProvider(key string) auth.TokenProvider {
+	return auth.NewStaticTokenProvider(key, auth.AuthModeAPIKey, "")
+}
 
 func TestXAIClient_SendPrompt_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,7 +28,7 @@ func TestXAIClient_SendPrompt_Success(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	client := NewXAIClient("test-xai-key", "grok-4", logger, 1, 0)
+	client := NewXAIClient(testProvider("test-xai-key"), "grok-4", logger, 1, 0)
 	client.apiURL = server.URL
 
 	history := []models.Message{{Role: "user", Content: "Hi"}}
@@ -48,7 +53,7 @@ func TestXAIClient_SendPrompt_RetryOnTemporaryError(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	client := NewXAIClient("test-xai-key", "grok-4", logger, 2, 10*time.Millisecond)
+	client := NewXAIClient(testProvider("test-xai-key"), "grok-4", logger, 2, 10*time.Millisecond)
 	client.apiURL = server.URL
 
 	resp, err := client.SendPrompt(context.Background(), "Test", []models.Message{{Role: "user", Content: "Test"}}, 0)

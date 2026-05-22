@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -30,7 +31,7 @@ import (
 // A API é compatível com o formato OpenAI (chat/completions).
 // When anthropicCompat is true, uses the Anthropic Messages API compatible endpoint.
 type MiniMaxClient struct {
-	apiKey          string
+	provider        auth.TokenProvider
 	model           string
 	logger          *zap.Logger
 	client          *http.Client
@@ -48,7 +49,7 @@ func (c *MiniMaxClient) LastUsage() *models.UsageInfo { return c.usageState.Last
 func (c *MiniMaxClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewMiniMaxClient cria uma nova instância de MiniMaxClient.
-func NewMiniMaxClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *MiniMaxClient {
+func NewMiniMaxClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *MiniMaxClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 
 	apiURL := config.MiniMaxAPIURL
@@ -60,7 +61,7 @@ func NewMiniMaxClient(apiKey, model string, logger *zap.Logger, maxAttempts int,
 	}
 
 	return &MiniMaxClient{
-		apiKey:          apiKey,
+		provider:        provider,
 		model:           model, // MiniMax model IDs são case-sensitive (ex: MiniMax-M2.7)
 		logger:          logger,
 		client:          httpClient,
@@ -142,7 +143,9 @@ func (c *MiniMaxClient) SendPrompt(ctx context.Context, prompt string, history [
 	)
 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		resp, err := c.sendRequest(ctx, jsonValue)
+		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			return c.sendRequest(ctx, jsonValue, token)
+		})
 		if err != nil {
 			return "", err
 		}
@@ -162,7 +165,7 @@ func (c *MiniMaxClient) SendPrompt(ctx context.Context, prompt string, history [
 }
 
 // sendRequest envia a requisição para a API da MiniMax.
-func (c *MiniMaxClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
+func (c *MiniMaxClient) sendRequest(ctx context.Context, jsonValue []byte, token string) (*http.Response, error) {
 	apiURL := utils.GetEnvOrDefault("MINIMAX_API_URL", c.apiURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
@@ -171,17 +174,12 @@ func (c *MiniMaxClient) sendRequest(ctx context.Context, jsonValue []byte) (*htt
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+token)
 	if c.anthropicCompat {
 		req.Header.Set("anthropic-version", "2023-06-01")
 	}
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
+	return c.client.Do(req)
 }
 
 // processResponse processa a resposta da API da MiniMax.
@@ -368,13 +366,14 @@ func (c *MiniMaxClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 	}
 	modelsURL := base + "/models"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.client.Do(req)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		return c.client.Do(req)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "MiniMax"), err)
 	}

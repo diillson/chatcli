@@ -40,7 +40,7 @@ const (
 
 // Client implements the LLMClient interface for GitHub Copilot.
 type Client struct {
-	token       string
+	provider    auth.TokenProvider
 	model       string
 	logger      *zap.Logger
 	client      *http.Client
@@ -57,7 +57,7 @@ func (c *Client) LastUsage() *models.UsageInfo { return c.usageState.LastUsage()
 func (c *Client) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewClient creates a new GitHub Copilot client.
-func NewClient(token, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *Client {
+func NewClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *Client {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 
 	baseURL := CopilotAPIBaseURL
@@ -66,7 +66,7 @@ func NewClient(token, model string, logger *zap.Logger, maxAttempts int, backoff
 	}
 
 	return &Client{
-		token:       token,
+		provider:    provider,
 		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
@@ -150,7 +150,9 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	)
 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		resp, err := c.sendRequest(ctx, jsonValue)
+		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			return c.sendRequest(ctx, jsonValue, token)
+		})
 		if err != nil {
 			return "", err
 		}
@@ -167,7 +169,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 }
 
 // sendRequest sends the HTTP request to the Copilot API with required headers.
-func (c *Client) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
+func (c *Client) sendRequest(ctx context.Context, jsonValue []byte, token string) (*http.Response, error) {
 	apiURL := c.baseURL + CopilotChatCompletionsPath
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
@@ -177,7 +179,6 @@ func (c *Client) sendRequest(ctx context.Context, jsonValue []byte) (*http.Respo
 	}
 
 	// Required headers for Copilot API
-	token := auth.StripAuthPrefix(c.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Openai-Intent", "conversation-edits")
@@ -191,12 +192,7 @@ func (c *Client) sendRequest(ctx context.Context, jsonValue []byte) (*http.Respo
 	req.Header.Set("Editor-Version", "chatcli/"+ver)
 	req.Header.Set("Editor-Plugin-Version", "chatcli/"+ver)
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
+	return c.client.Do(req)
 }
 
 // processResponse processes the Copilot API response (OpenAI-compatible format).
@@ -254,13 +250,12 @@ func (c *Client) processResponse(resp *http.Response) (string, error) {
 }
 
 // newAuthenticatedRequest creates an HTTP request with Copilot auth headers.
-func (c *Client) newAuthenticatedRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+func (c *Client) newAuthenticatedRequest(ctx context.Context, method, path string, body io.Reader, token string) (*http.Request, error) {
 	apiURL := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, apiURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.copilot.create_request_failed"), err)
 	}
-	token := auth.StripAuthPrefix(c.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Openai-Intent", "conversation-edits")
@@ -275,12 +270,13 @@ func (c *Client) newAuthenticatedRequest(ctx context.Context, method, path strin
 // ListModels fetches available models from the Copilot API's /models endpoint.
 // It also dynamically registers discovered models in the catalog.
 func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
-	req, err := c.newAuthenticatedRequest(ctx, http.MethodGet, CopilotModelsPath, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.client.Do(req)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		req, err := c.newAuthenticatedRequest(ctx, http.MethodGet, CopilotModelsPath, nil, token)
+		if err != nil {
+			return nil, err
+		}
+		return c.client.Do(req)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.copilot.fetch_models_failed"), err)
 	}
