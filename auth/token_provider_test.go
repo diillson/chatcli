@@ -291,36 +291,42 @@ func TestOAuthTokenProvider_RefreshErrorSurfacesToCallers(t *testing.T) {
 }
 
 func TestOAuthTokenProvider_BackgroundRefreshFires(t *testing.T) {
-	if testing.Short() {
-		t.Skip("background refresh exercises real timer; skip in -short")
-	}
-	// Set expiry close enough that the background loop fires the minimum-wait
-	// timer immediately.
+	// Build a provider with shrunk timing knobs so the test runs in tens of
+	// milliseconds even under -race. Set them BEFORE spawning the goroutine.
 	cred := &AuthProfileCredential{
 		Provider: ProviderAnthropic,
 		Access:   "v1",
 		Refresh:  "rt",
-		Expires:  time.Now().Add(2 * time.Second).UnixMilli(),
+		Expires:  time.Now().Add(200 * time.Millisecond).UnixMilli(),
 	}
 	refreshed := make(chan struct{}, 4)
-	p := newOAuthTokenProvider(cred, "", "test", zap.NewNop())
-	p.refreshFn = func(_ context.Context, c *AuthProfileCredential, _ *zap.Logger) (*AuthProfileCredential, error) {
-		out := *c
-		out.Access = "renewed"
-		// Push expiry forward so the loop sleeps the full min-wait
-		// (otherwise we'd hammer the refreshFn repeatedly).
-		out.Expires = time.Now().Add(10 * time.Minute).UnixMilli()
-		select {
-		case refreshed <- struct{}{}:
-		default:
-		}
-		return &out, nil
+	p := &oauthTokenProvider{
+		cred:                *cred,
+		logger:              zap.NewNop(),
+		refreshLead:         10 * time.Millisecond,
+		refreshMinWait:      50 * time.Millisecond,
+		refreshErrorBackoff: 50 * time.Millisecond,
+		refreshFn: func(_ context.Context, c *AuthProfileCredential, _ *zap.Logger) (*AuthProfileCredential, error) {
+			out := *c
+			out.Access = "renewed"
+			// Push expiry forward so the loop sleeps the full min-wait between
+			// refreshes (otherwise we hammer refreshFn repeatedly).
+			out.Expires = time.Now().Add(10 * time.Minute).UnixMilli()
+			select {
+			case refreshed <- struct{}{}:
+			default:
+			}
+			return &out, nil
+		},
 	}
+	p.bgCtx, p.bgCancel = context.WithCancel(context.Background())
+	p.bgDone = make(chan struct{})
+	go p.backgroundLoop()
 	defer p.Close()
 
 	select {
 	case <-refreshed:
-	case <-time.After(backgroundRefreshMinWait + 5*time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("background refresh did not fire within expected window")
 	}
 }

@@ -150,19 +150,23 @@ func (s *staticTokenProvider) Email() string        { return s.email }
 func (s *staticTokenProvider) Invalidate()          {}
 func (s *staticTokenProvider) Close()               {}
 
-// backgroundRefreshLead is how long before the stored expiry the proactive
-// loop attempts to refresh. The stored expiry already carries a 5-minute
-// safety margin (calcExpiresAtMilli), so 1 minute lead leaves ~4 minutes of
-// real-world headroom before the upstream token actually dies.
-const backgroundRefreshLead = 1 * time.Minute
-
-// backgroundRefreshMinWait is the minimum wait between proactive refresh
-// attempts. Caps loop frequency when expiry is in the past or unset.
-const backgroundRefreshMinWait = 30 * time.Second
-
-// backgroundRefreshErrorBackoff delays the next attempt after a failed
-// proactive refresh.
-const backgroundRefreshErrorBackoff = 60 * time.Second
+// Background refresh tunables. The provider captures these into its struct
+// at construction time so the background goroutine never races with test
+// substitutions of the defaults.
+//
+// refreshLead is how long before the stored expiry the proactive loop fires.
+// The stored expiry already carries a 5-minute safety margin
+// (calcExpiresAtMilli), so 1 minute lead leaves ~4 minutes of real-world
+// headroom before the upstream token actually dies.
+//
+// refreshMinWait caps loop frequency when expiry is in the past.
+//
+// refreshErrorBackoff delays the next attempt after a failure.
+const (
+	defaultRefreshLead         = 1 * time.Minute
+	defaultRefreshMinWait      = 30 * time.Second
+	defaultRefreshErrorBackoff = 60 * time.Second
+)
 
 // oauthRefreshFn performs the actual OAuth refresh round-trip. Pluggable so
 // tests can substitute a fake.
@@ -182,6 +186,10 @@ type oauthTokenProvider struct {
 	lastErr     error
 	invalidated bool
 
+	refreshLead         time.Duration
+	refreshMinWait      time.Duration
+	refreshErrorBackoff time.Duration
+
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 	bgDone   chan struct{}
@@ -194,11 +202,14 @@ type oauthTokenProvider struct {
 // goroutine.
 func newOAuthTokenProvider(cred *AuthProfileCredential, profileID, source string, logger *zap.Logger) *oauthTokenProvider {
 	p := &oauthTokenProvider{
-		cred:      *cred,
-		profileID: profileID,
-		source:    source,
-		logger:    logger,
-		refreshFn: RefreshOAuth,
+		cred:                *cred,
+		profileID:           profileID,
+		source:              source,
+		logger:              logger,
+		refreshFn:           RefreshOAuth,
+		refreshLead:         defaultRefreshLead,
+		refreshMinWait:      defaultRefreshMinWait,
+		refreshErrorBackoff: defaultRefreshErrorBackoff,
 	}
 	if cred.Refresh != "" && cred.Expires > 0 {
 		p.bgCtx, p.bgCancel = context.WithCancel(context.Background())
@@ -315,9 +326,9 @@ func (p *oauthTokenProvider) backgroundLoop() {
 			return
 		}
 
-		wait := time.Until(time.UnixMilli(expires)) - backgroundRefreshLead
-		if wait < backgroundRefreshMinWait {
-			wait = backgroundRefreshMinWait
+		wait := time.Until(time.UnixMilli(expires)) - p.refreshLead
+		if wait < p.refreshMinWait {
+			wait = p.refreshMinWait
 		}
 
 		timer := time.NewTimer(wait)
@@ -337,7 +348,7 @@ func (p *oauthTokenProvider) backgroundLoop() {
 			select {
 			case <-p.bgCtx.Done():
 				return
-			case <-time.After(backgroundRefreshErrorBackoff):
+			case <-time.After(p.refreshErrorBackoff):
 			}
 		}
 	}
