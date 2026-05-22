@@ -239,12 +239,12 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		if isOAuth {
 			reqURL = withBetaQuery(reqURL)
 		}
-		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
+		reqCtx := context.WithValue(ctx, oauthModelKey{}, c.model)
+		resp, err := auth.DoWithRefresh(reqCtx, c.provider, func(token string) (*http.Response, error) {
+			req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 			}
-			req = req.WithContext(context.WithValue(req.Context(), oauthModelKey{}, c.model))
 			req.Header.Add("Content-Type", oauthContentType)
 			c.applyAuthHeaders(req, token)
 			return c.client.Do(req)
@@ -252,6 +252,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		if err != nil {
 			return "", err
 		}
+		defer func() { _ = resp.Body.Close() }()
 		if isOAuth {
 			return c.processStreamResponse(resp)
 		}
@@ -544,12 +545,12 @@ func (c *ClaudeClient) sendOAuthTitleRequest(ctx context.Context, userText strin
 	}
 
 	reqURL := withBetaQuery(c.apiURL)
-	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(payload))
+	reqCtx := context.WithValue(ctx, oauthModelKey{}, oauthTitleModel)
+	resp, err := auth.DoWithRefresh(reqCtx, c.provider, func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, reqURL, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}
-		req = req.WithContext(context.WithValue(req.Context(), oauthModelKey{}, oauthTitleModel))
 		req.Header.Add("Content-Type", oauthContentType)
 		applyOAuthHeaders(req, token)
 		return c.client.Do(req)
@@ -557,6 +558,7 @@ func (c *ClaudeClient) sendOAuthTitleRequest(ctx context.Context, userText strin
 	if err != nil {
 		return err
 	}
+	defer func() { _ = resp.Body.Close() }()
 	_, err = c.processStreamResponse(resp)
 	return err
 }

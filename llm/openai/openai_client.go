@@ -154,6 +154,7 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		if err != nil {
 			return "", err
 		}
+		defer func() { _ = resp.Body.Close() }()
 		return c.processResponse(resp)
 	})
 	if err != nil {
@@ -362,9 +363,7 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		zap.String("kind", "stream"),
 	)
 
-	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
-		return c.sendRequest(ctx, jsonValue, token)
-	})
+	resp, err := c.openStream(ctx, jsonValue)
 	if err != nil {
 		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start),
 			zap.String("kind", "stream"),
@@ -386,6 +385,40 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		zap.String("kind", "stream_started"),
 	)
 
+	return c.consumeStream(resp), nil
+}
+
+// openStream issues the streaming POST, retrying once on 401/403 when the
+// provider is in OAuth mode. The returned response body belongs to the caller
+// (typically passed to consumeStream which owns lifetime).
+func (c *OpenAIClient) openStream(ctx context.Context, jsonValue []byte) (*http.Response, error) {
+	token, err := c.provider.Token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.sendRequest(ctx, jsonValue, token)
+	if err != nil {
+		return nil, err
+	}
+	if c.provider.Mode() != auth.AuthModeOAuth {
+		return resp, nil
+	}
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		return resp, nil
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	c.provider.Invalidate()
+	token, err = c.provider.Token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.sendRequest(ctx, jsonValue, token)
+}
+
+// consumeStream takes ownership of resp.Body and emits SSE chunks on the
+// returned channel, closing the body when the stream ends.
+func (c *OpenAIClient) consumeStream(resp *http.Response) <-chan client.StreamChunk {
 	chunks := make(chan client.StreamChunk, 64)
 
 	go func() {
@@ -443,5 +476,5 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		}
 	}()
 
-	return chunks, nil
+	return chunks
 }

@@ -165,6 +165,7 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 		if err != nil {
 			return "", err
 		}
+		defer func() { _ = resp.Body.Close() }()
 		if isOAuth {
 			return c.processStreamResponse(resp)
 		}
