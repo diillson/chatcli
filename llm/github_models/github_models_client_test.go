@@ -2,6 +2,7 @@ package github_models
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -55,7 +56,8 @@ func TestGitHubModelsClient_SendPrompt_HTTPError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 401")
 	}
-	if _, ok := err.(*utils.APIError); !ok {
+	var apiErr *utils.APIError
+	if !errors.As(err, &apiErr) {
 		t.Errorf("expected *utils.APIError, got %T", err)
 	}
 }

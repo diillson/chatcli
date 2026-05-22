@@ -3,6 +3,7 @@ package claudeai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -89,7 +90,8 @@ func TestClaudeClient_SendPrompt_HTTPError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 400 response")
 	}
-	if _, ok := err.(*utils.APIError); !ok {
+	var apiErr *utils.APIError
+	if !errors.As(err, &apiErr) {
 		t.Errorf("expected *utils.APIError, got %T", err)
 	}
 }
