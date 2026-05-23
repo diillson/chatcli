@@ -433,7 +433,11 @@ type AIOpsSpec struct {
 
 	// DedupTTLMinutes is how long (in minutes) the bridge dedup cache retains alert hashes.
 	// After this period, the same alert can create a new Anomaly CR.
-	// +kubebuilder:default=60
+	// Lowered from 60 to 30 in GAP-02 fix (chaos test report 2026-05-23): 60+ minutes
+	// penalized legitimate resource recreation (GitOps re-deploys, rollbacks).
+	// Re-creation is now also handled structurally via UID-aware hashing — TTL is
+	// the secondary safety net for genuinely persisting issues.
+	// +kubebuilder:default=30
 	// +kubebuilder:validation:Minimum=5
 	// +kubebuilder:validation:Maximum=1440
 	// +optional
@@ -479,12 +483,12 @@ func (a *AIOpsSpec) GetResolutionCooldown() time.Duration {
 	return 10 * time.Minute
 }
 
-// GetDedupTTL returns the configured dedup TTL or the default (60 minutes).
+// GetDedupTTL returns the configured dedup TTL or the default (30 minutes).
 func (a *AIOpsSpec) GetDedupTTL() time.Duration {
 	if a != nil && a.DedupTTLMinutes > 0 {
 		return time.Duration(a.DedupTTLMinutes) * time.Minute
 	}
-	return 60 * time.Minute
+	return 30 * time.Minute
 }
 
 // IsAutoResolveEnabled returns whether auto-resolve is enabled (default: true).

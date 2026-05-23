@@ -53,6 +53,21 @@ type PostMortemSpec struct {
 
 	// Severity of the original issue.
 	Severity IssueSeverity `json:"severity"`
+
+	// RequiresHumanAction marks PostMortems for incidents that were only
+	// contained (e.g., scaled to 0) rather than truly resolved — the underlying
+	// bug is still present and an operator must intervene to restore service.
+	// When true, the PostMortemReconciler refuses to transition the PostMortem
+	// to Closed unless the human-action acknowledgement annotation is set.
+	// GAP-03 fix (chaos test report 2026-05-23).
+	// +optional
+	RequiresHumanAction bool `json:"requiresHumanAction,omitempty"`
+
+	// RequiredAction describes the concrete action a human needs to take when
+	// RequiresHumanAction is true (e.g., "Roll back image to vX.Y.Z and scale
+	// replicas back to N"). Surfaced in notifications and PostMortem rendering.
+	// +optional
+	RequiredAction string `json:"requiredAction,omitempty"`
 }
 
 // MetricSnapshot captures a metric value at a point in time.

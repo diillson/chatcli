@@ -307,6 +307,13 @@ message AgenticStepRequest {
   repeated AgenticHistoryEntry history = 12;   // full conversation history
   int32 max_steps = 13;                        // step budget
   int32 current_step = 14;                     // step number being computed now
+  // Primary guidance from the prior AIInsight analysis. Injected as authoritative
+  // context so the agentic loop cannot silently contradict its own root-cause analysis.
+  // GAP-01 fix (chaos test report 2026-05-23).
+  string insight_analysis = 15;                // AIInsight.Status.Analysis text
+  float insight_confidence = 16;               // 0.0–1.0 confidence from AIInsight
+  repeated string insight_recommendations = 17;
+  repeated SuggestedAction insight_suggested_actions = 18;
 }
 
 message AgenticStepResponse {
@@ -319,6 +326,12 @@ message AgenticStepResponse {
   string impact = 6;
   repeated string lessons_learned = 7;
   repeated string prevention_actions = 8;
+  // Divergence signal: set true when next_action contradicts the AIInsight's
+  // primary suggested action without an explicit justification. The operator
+  // logs this and (when divergence_reason is empty) may decline to execute.
+  // GAP-01 fix.
+  bool diverges_from_insight = 9;
+  string divergence_reason = 10;               // LLM-provided justification when intentionally diverging
 }
 
 // =============================================================================

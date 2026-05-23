@@ -11,7 +11,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -26,7 +28,17 @@ const (
 	PollInterval = 30 * time.Second
 
 	// DefaultDedupTTL is the default dedup TTL when no Instance AIOps config is set.
-	DefaultDedupTTL = 60 * time.Minute
+	// Lowered from 60 to 30 minutes (GAP-02 fix, 2026-05-23): UID-aware hashing
+	// now handles resource recreation deterministically, so TTL only needs to be
+	// long enough to suppress flapping during a single ongoing incident.
+	DefaultDedupTTL = 30 * time.Minute
+
+	// missingUIDSentinel is used in the dedup hash when the K8s resource named
+	// by the alert can't be looked up (deleted, wrong kind, transient API error).
+	// It ensures that "alert for a no-longer-existing resource" gets a stable
+	// hash distinct from any existing resource's UID — so a recreated resource
+	// (which gets a fresh UID) never collides with the missing-resource hash.
+	missingUIDSentinel = "uid:missing"
 )
 
 // WatcherBridge polls the ChatCLI server's GetAlerts RPC and creates Anomaly CRs.
@@ -38,8 +50,18 @@ type WatcherBridge struct {
 	logger       *zap.Logger
 
 	mu                sync.Mutex
-	seen              map[string]time.Time       // hash → first-seen timestamp for dedup
+	seen              map[string]dedupEntry      // hash → entry (timestamp + resource ref for invalidation)
 	connectedInstance *platformv1alpha1.Instance // Instance we're connected to (for OwnerRef)
+}
+
+// dedupEntry tracks the resource the hash referred to so InvalidateDedupForResource
+// can invalidate by name+namespace without having to brute-force every known
+// alert type and UID combination. GAP-02 fix: required because the hash now
+// includes the UID, which the invalidation caller doesn't know.
+type dedupEntry struct {
+	seenAt     time.Time
+	deployment string
+	namespace  string
 }
 
 // NewWatcherBridge creates a new WatcherBridge.
@@ -49,7 +71,7 @@ func NewWatcherBridge(c client.Client, scheme *runtime.Scheme, sc *ServerClient,
 		scheme:       scheme,
 		serverClient: sc,
 		logger:       logger.Named("watcher-bridge"),
-		seen:         make(map[string]time.Time),
+		seen:         make(map[string]dedupEntry),
 	}
 }
 
@@ -92,7 +114,7 @@ func (wb *WatcherBridge) poll(ctx context.Context) {
 	wb.logger.Info("Received alerts from server", zap.Int("count", len(resp.Alerts)))
 
 	for _, alert := range resp.Alerts {
-		hash := alertHash(alert)
+		hash := wb.computeAlertHash(ctx, alert)
 		if wb.isDuplicate(hash) {
 			continue
 		}
@@ -101,7 +123,11 @@ func (wb *WatcherBridge) poll(ctx context.Context) {
 			wb.logger.Error("Failed to create Anomaly CR", zap.Error(err), zap.String("alert_type", alert.Type))
 			continue
 		}
-		wb.markSeen(hash)
+		ns := alert.Namespace
+		if ns == "" {
+			ns = "default"
+		}
+		wb.markSeen(hash, alert.Deployment, ns)
 	}
 
 	wb.pruneDedup()
@@ -362,15 +388,111 @@ func MapAlertTypeToSignal(alertType string) platformv1alpha1.AnomalySignalType {
 	}
 }
 
-// alertHash generates a dedup hash for an alert using type|deployment|namespace.
-// Time is intentionally excluded: the same ongoing problem (e.g. CrashLoopBackOff)
-// produces one Anomaly, not one per poll cycle. The dedup TTL (configurable via
-// Instance AIOps, default 60m) ensures that if the problem resolves and recurs
-// later, a fresh Anomaly is created.
-func alertHash(alert *pb.WatcherAlert) string {
-	data := fmt.Sprintf("%s|%s|%s", alert.Type, alert.Deployment, alert.Namespace)
+// alertHash generates a dedup hash for an alert using type|deployment|namespace|uid.
+// The pure-function form is preserved so callers can pass any UID value (including
+// the missing-UID sentinel). The bridge's computeAlertHash wrapper handles the
+// live K8s lookup for the UID.
+//
+// GAP-02 fix (chaos test report 2026-05-23): the prior hash used only
+// type|deployment|namespace, which made the operator blind to recreated resources
+// for the full dedup TTL window (a common GitOps / rollback pattern). Including
+// the UID makes the hash naturally change on resource recreation.
+func alertHash(alert *pb.WatcherAlert, uid string) string {
+	if uid == "" {
+		uid = missingUIDSentinel
+	}
+	data := fmt.Sprintf("%s|%s|%s|%s", alert.Type, alert.Deployment, alert.Namespace, uid)
 	h := sha256.Sum256([]byte(data))
 	return fmt.Sprintf("%x", h[:8])
+}
+
+// computeAlertHash looks up the resource UID from the K8s API and returns the
+// final dedup hash. Best-effort: when the resource can't be located, the sentinel
+// UID is used (which is still a stable, distinct hash for the "resource gone"
+// case — UID-bearing alerts for any existing resource will not collide with it).
+func (wb *WatcherBridge) computeAlertHash(ctx context.Context, alert *pb.WatcherAlert) string {
+	return alertHash(alert, wb.lookupResourceUID(ctx, alert))
+}
+
+// lookupResourceUID fetches the K8s UID of the resource referenced by the alert.
+// Returns "" when the resource can't be located — the caller substitutes a
+// sentinel in that case. The function tries the inferred kind first; on miss it
+// falls back to other workload kinds because some watchers don't tag the kind
+// explicitly. Errors other than NotFound are logged at Debug level only — this
+// path runs on every poll cycle and must stay quiet under transient failures.
+func (wb *WatcherBridge) lookupResourceUID(ctx context.Context, alert *pb.WatcherAlert) string {
+	if alert.Deployment == "" {
+		return ""
+	}
+	ns := alert.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+	name := alert.Deployment
+	key := types.NamespacedName{Name: name, Namespace: ns}
+
+	kind := inferResourceKind(alert)
+
+	// Try the inferred kind first.
+	if uid := wb.fetchUIDForKind(ctx, key, kind); uid != "" {
+		return uid
+	}
+
+	// Fallback to other workload kinds (some watchers don't tag the kind).
+	fallbacks := []string{"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}
+	for _, fk := range fallbacks {
+		if fk == kind {
+			continue
+		}
+		if uid := wb.fetchUIDForKind(ctx, key, fk); uid != "" {
+			return uid
+		}
+	}
+	return ""
+}
+
+// fetchUIDForKind returns the UID for a workload of the given kind, or "" if not
+// found. Uses unstructured to avoid pulling in apps/v1 + batch/v1 type registrations.
+func (wb *WatcherBridge) fetchUIDForKind(ctx context.Context, key types.NamespacedName, kind string) string {
+	gvk, ok := workloadGVKForKind(kind)
+	if !ok {
+		return ""
+	}
+
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(gvk)
+	if err := wb.client.Get(ctx, key, obj); err != nil {
+		if !errors.IsNotFound(err) {
+			wb.logger.Debug("UID lookup failed",
+				zap.String("kind", kind),
+				zap.String("name", key.Name),
+				zap.String("namespace", key.Namespace),
+				zap.Error(err))
+		}
+		return ""
+	}
+	return string(obj.GetUID())
+}
+
+// workloadGVKForKind returns the GroupVersionKind for the workload kinds the
+// watcher emits alerts for. Adding a new kind here also requires the operator's
+// RBAC to include get/list on that resource (see config/rbac).
+func workloadGVKForKind(kind string) (schema.GroupVersionKind, bool) {
+	switch kind {
+	case "Deployment":
+		return schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, true
+	case "StatefulSet":
+		return schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "StatefulSet"}, true
+	case "DaemonSet":
+		return schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "DaemonSet"}, true
+	case "Job":
+		return schema.GroupVersionKind{Group: "batch", Version: "v1", Kind: "Job"}, true
+	case "CronJob":
+		return schema.GroupVersionKind{Group: "batch", Version: "v1", Kind: "CronJob"}, true
+	case "Node":
+		return schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Node"}, true
+	}
+	return schema.GroupVersionKind{}, false
 }
 
 func (wb *WatcherBridge) isDuplicate(hash string) bool {
@@ -380,10 +502,14 @@ func (wb *WatcherBridge) isDuplicate(hash string) bool {
 	return exists
 }
 
-func (wb *WatcherBridge) markSeen(hash string) {
+func (wb *WatcherBridge) markSeen(hash, deployment, namespace string) {
 	wb.mu.Lock()
 	defer wb.mu.Unlock()
-	wb.seen[hash] = time.Now()
+	wb.seen[hash] = dedupEntry{
+		seenAt:     time.Now(),
+		deployment: deployment,
+		namespace:  namespace,
+	}
 }
 
 func (wb *WatcherBridge) pruneDedup() {
@@ -394,33 +520,31 @@ func (wb *WatcherBridge) pruneDedup() {
 		ttl = wb.connectedInstance.Spec.AIOps.GetDedupTTL()
 	}
 	cutoff := time.Now().Add(-ttl)
-	for hash, ts := range wb.seen {
-		if ts.Before(cutoff) {
+	for hash, entry := range wb.seen {
+		if entry.seenAt.Before(cutoff) {
 			delete(wb.seen, hash)
 		}
 	}
 }
 
-// InvalidateDedupForResource removes all dedup entries for a specific deployment+namespace,
-// allowing new anomalies to be detected immediately. Called when an Issue reaches a terminal
-// state (Resolved/Escalated/Failed) so that genuine new problems are detected without delay.
+// InvalidateDedupForResource removes all dedup entries for a specific
+// deployment+namespace, allowing new anomalies to be detected immediately.
+// Called when an Issue reaches a terminal state (Resolved/Escalated/Failed) so
+// that genuine new problems are detected without delay.
+//
+// GAP-02 fix: prior implementation brute-forced the hash by trying every known
+// alert type, which broke after we added UID into the hash. The dedup map now
+// carries the resource ref alongside the hash, so we can match by name+namespace
+// directly — and it covers ALL alert types, not just the original five.
 func (wb *WatcherBridge) InvalidateDedupForResource(deployment, namespace string) {
 	wb.mu.Lock()
 	defer wb.mu.Unlock()
 
-	for hash := range wb.seen {
-		for _, alertType := range knownAlertTypes {
-			candidate := fmt.Sprintf("%s|%s|%s", alertType, deployment, namespace)
-			h := sha256.Sum256([]byte(candidate))
-			if hash == fmt.Sprintf("%x", h[:8]) {
-				delete(wb.seen, hash)
-			}
+	for hash, entry := range wb.seen {
+		if entry.deployment == deployment && entry.namespace == namespace {
+			delete(wb.seen, hash)
 		}
 	}
-}
-
-var knownAlertTypes = []string{
-	"HighRestartCount", "OOMKilled", "PodNotReady", "DeploymentFailing", "CrashLoopBackOff",
 }
 
 func sanitizeK8sName(name string) string {

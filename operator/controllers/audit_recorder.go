@@ -104,6 +104,24 @@ func (ar *AuditRecorder) RecordIssueEscalated(ctx context.Context, issue *platfo
 	})
 }
 
+// RecordIssueContained writes an audit trail entry when an Issue is moved to
+// Contained — the workload is silenced but a human must restore service.
+// Recorded at warning severity (NOT info) because the platform has not actually
+// resolved the incident; reporting it as info would mask the unresolved bug.
+// GAP-03 fix (chaos test report 2026-05-23).
+func (ar *AuditRecorder) RecordIssueContained(ctx context.Context, issue *platformv1alpha1.Issue, requiredAction string) error {
+	return ar.Record(ctx, AuditEventParams{
+		EventType: "issue_contained", ActorType: "controller", ActorName: "IssueReconciler", ActorController: "issue-controller",
+		ResourceKind: "Issue", ResourceName: issue.Name, ResourceNamespace: issue.Namespace, ResourceUID: string(issue.UID),
+		Details: map[string]string{
+			"severity":        string(issue.Spec.Severity),
+			"attempts":        fmt.Sprintf("%d", issue.Status.RemediationAttempts),
+			"required_action": truncate(requiredAction, 300),
+		},
+		Severity: "warning", CorrelationID: issue.Name,
+	})
+}
+
 func (ar *AuditRecorder) RecordRemediationStarted(ctx context.Context, plan *platformv1alpha1.RemediationPlan, issue *platformv1alpha1.Issue) error {
 	return ar.Record(ctx, AuditEventParams{
 		EventType: "remediation_started", ActorType: "controller", ActorName: "RemediationReconciler", ActorController: "remediation-controller",

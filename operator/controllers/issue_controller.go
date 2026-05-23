@@ -136,6 +136,8 @@ func (r *IssueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return r.handleAnalyzing(ctx, &issue)
 	case platformv1alpha1.IssueStateRemediating:
 		return r.handleRemediating(ctx, &issue)
+	case platformv1alpha1.IssueStateContained:
+		return r.handleContained(ctx, &issue)
 	case platformv1alpha1.IssueStateEscalated:
 		return r.handleEscalated(ctx, &issue)
 	case platformv1alpha1.IssueStateResolved, platformv1alpha1.IssueStateFailed:
@@ -415,23 +417,60 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 
 	switch plan.Status.State {
 	case platformv1alpha1.RemediationStateCompleted:
-		// Resolved!
+		// GAP-03 fix: distinguish containment from true resolution. When the plan
+		// executed a containment action (e.g., ScaleDeployment replicas=0 with
+		// containment=true), the workload is silenced but NOT fixed — a human must
+		// roll back the bad image, restore replicas, or apply a config fix to
+		// restore service. Marking it as Resolved would mask real downtime.
+		contained, requiredAction := planAppliedContainment(plan)
+
 		now := metav1.Now()
-		issue.Status.State = platformv1alpha1.IssueStateResolved
-		issue.Status.Resolution = plan.Status.Result
-		issue.Status.ResolvedAt = &now
+		if contained {
+			issue.Status.State = platformv1alpha1.IssueStateContained
+			issue.Status.Resolution = fmt.Sprintf("CONTAINED — service stopped to prevent further impact. Human action required: %s", requiredAction)
+			meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
+				Type:               "Contained",
+				Status:             metav1.ConditionTrue,
+				Reason:             "ContainmentApplied",
+				Message:            fmt.Sprintf("Workload silenced via containment on attempt %d. Human action required to restore service: %s", issue.Status.RemediationAttempts, requiredAction),
+				LastTransitionTime: metav1.Now(),
+			})
+			meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
+				Type:               "RequiresHumanAction",
+				Status:             metav1.ConditionTrue,
+				Reason:             "ServiceSilencedNotFixed",
+				Message:            requiredAction,
+				LastTransitionTime: metav1.Now(),
+			})
+			issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateContained)).Inc()
+			log.Info("Issue transitioned to Contained (requires human action)",
+				"issue", issue.Name, "required_action", requiredAction)
+			if r.AuditRecorder != nil {
+				if err := r.AuditRecorder.RecordIssueContained(ctx, issue, requiredAction); err != nil {
+					log.Error(err, "Failed to record audit event for contained issue")
+				}
+			}
+		} else {
+			issue.Status.State = platformv1alpha1.IssueStateResolved
+			issue.Status.Resolution = plan.Status.Result
+			issue.Status.ResolvedAt = &now
 
-		meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
-			Type:               "Resolved",
-			Status:             metav1.ConditionTrue,
-			Reason:             "RemediationSucceeded",
-			Message:            fmt.Sprintf("Issue resolved on attempt %d: %s", issue.Status.RemediationAttempts, plan.Status.Result),
-			LastTransitionTime: metav1.Now(),
-		})
+			meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
+				Type:               "Resolved",
+				Status:             metav1.ConditionTrue,
+				Reason:             "RemediationSucceeded",
+				Message:            fmt.Sprintf("Issue resolved on attempt %d: %s", issue.Status.RemediationAttempts, plan.Status.Result),
+				LastTransitionTime: metav1.Now(),
+			})
 
-		issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateResolved)).Inc()
-		if issue.Status.DetectedAt != nil {
-			issueResolutionDuration.Observe(now.Sub(issue.Status.DetectedAt.Time).Seconds())
+			issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateResolved)).Inc()
+			// GAP-04 fix: exclude chaos-induced Issues from production MTTD/MTTR
+			// metrics. They still get observability via issuesTotal (labeled by
+			// state), but we don't let drill data pollute the latency histogram
+			// that backs SLO dashboards.
+			if issue.Status.DetectedAt != nil && !IsChaosInduced(issue) {
+				issueResolutionDuration.Observe(now.Sub(issue.Status.DetectedAt.Time).Seconds())
+			}
 		}
 
 		// Generate PostMortem for ALL remediation modes (not just agentic)
@@ -958,6 +997,143 @@ func (r *IssueReconciler) retryWithExistingRunbook(ctx context.Context, issue *p
 	return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 }
 
+// handleContained reconciles Issues that the operator silenced via a containment
+// action (typically ScaleDeployment replicas=0 with containment=true). The state
+// auto-resolves IF and ONLY IF a human has restored the workload to a healthy
+// state (replicas > 0 AND all replicas ready). Mere "0 desired = 0 ready" does
+// NOT count as healthy here — that would let the platform declare victory
+// because no one fixed anything.
+//
+// GAP-03 fix (chaos test report 2026-05-23).
+func (r *IssueReconciler) handleContained(ctx context.Context, issue *platformv1alpha1.Issue) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	aiops := r.getAIOpsConfig(ctx)
+	if !aiops.IsAutoResolveEnabled() {
+		log.Info("Auto-resolve disabled, issue remains Contained", "name", issue.Name)
+		return ctrl.Result{}, nil
+	}
+
+	resource := issue.Spec.Resource
+	restored, err := r.isResourceRestored(ctx, resource)
+	if err != nil {
+		log.Error(err, "Failed to check resource restoration for Contained issue", "name", issue.Name)
+		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	}
+	if !restored {
+		// Still silenced — keep checking. Slow cadence: a human needs to act
+		// here and we don't want to hammer the API server while waiting.
+		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	}
+
+	log.Info("Human action observed (replicas restored healthy) — transitioning Contained → Resolved",
+		"name", issue.Name, "resource", resource.Name)
+	now := metav1.Now()
+	issue.Status.State = platformv1alpha1.IssueStateResolved
+	issue.Status.Resolution = "Auto-resolved: human restored the workload to a healthy state"
+	issue.Status.ResolvedAt = &now
+	meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
+		Type:               string(platformv1alpha1.IssueStateResolved),
+		Status:             metav1.ConditionTrue,
+		Reason:             "HumanActionRestoredService",
+		Message:            "Resource scaled back up and reports all replicas ready.",
+		LastTransitionTime: now,
+	})
+	if err := r.Status().Update(ctx, issue); err != nil {
+		return ctrl.Result{}, err
+	}
+	if issue.Annotations == nil {
+		issue.Annotations = make(map[string]string)
+	}
+	issue.Annotations["aiops.chatcli.io/resolved-by"] = "human-action-after-containment"
+	if err := r.Update(ctx, issue); err != nil {
+		log.Error(err, "Failed to update resolved-by annotation", "name", issue.Name)
+	}
+	r.invalidateDedup(issue)
+	if r.AuditRecorder != nil {
+		r.AuditRecorder.RecordIssueResolved(ctx, issue)
+	}
+	issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateResolved)).Inc()
+	return ctrl.Result{}, nil
+}
+
+// isResourceRestored is a stricter form of isResourceHealthy: it only returns
+// true when desired replicas > 0 AND all replicas are ready AND none are
+// unavailable. The "desired > 0" gate is essential for the Contained state
+// transition — a workload with replicas=0 is trivially "healthy" (0 ready of 0
+// desired) but is still silenced and unresolved.
+func (r *IssueReconciler) isResourceRestored(ctx context.Context, resource platformv1alpha1.ResourceRef) (bool, error) {
+	switch resource.Kind {
+	case "Deployment":
+		var deploy appsv1.Deployment
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &deploy); err != nil {
+			return false, err
+		}
+		desired := int32(0)
+		if deploy.Spec.Replicas != nil {
+			desired = *deploy.Spec.Replicas
+		}
+		if desired == 0 {
+			return false, nil
+		}
+		return deploy.Status.ReadyReplicas >= desired && deploy.Status.UnavailableReplicas == 0, nil
+	case "StatefulSet":
+		var sts appsv1.StatefulSet
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &sts); err != nil {
+			return false, err
+		}
+		desired := int32(0)
+		if sts.Spec.Replicas != nil {
+			desired = *sts.Spec.Replicas
+		}
+		if desired == 0 {
+			return false, nil
+		}
+		return sts.Status.ReadyReplicas >= desired, nil
+	default:
+		// Fall back to the looser check for resource kinds that don't have a
+		// meaningful "desired replicas" semantic (DaemonSet, Job, etc.).
+		return r.isResourceHealthy(ctx, resource)
+	}
+}
+
+// planAppliedContainment reports whether the remediation plan executed an action
+// with params["containment"]="true". Used to distinguish a "stop the bleeding"
+// outcome from a true fix. Inspects both runbook-style Actions and AgenticHistory.
+// Returns a short human-readable description of the required follow-up action.
+func planAppliedContainment(plan *platformv1alpha1.RemediationPlan) (bool, string) {
+	describe := func(a platformv1alpha1.RemediationAction) string {
+		switch a.Type {
+		case platformv1alpha1.ActionScaleDeployment:
+			return "restore the deployment's replicas to the desired count after fixing the root cause (image rollback, config correction, etc.)"
+		case platformv1alpha1.ActionScaleStatefulSet:
+			return "restore the StatefulSet's replicas after fixing the root cause"
+		default:
+			return fmt.Sprintf("review the action %q and restore service manually", string(a.Type))
+		}
+	}
+
+	for _, a := range plan.Spec.Actions {
+		if a.Params["containment"] == "true" {
+			return true, describe(a)
+		}
+	}
+	for _, step := range plan.Spec.AgenticHistory {
+		if step.Action == nil {
+			continue
+		}
+		// Only count steps that actually succeeded — failed containment is not
+		// containment, the workload is still serving traffic.
+		if !strings.HasPrefix(step.Observation, "SUCCESS") {
+			continue
+		}
+		if step.Action.Params["containment"] == "true" {
+			return true, describe(*step.Action)
+		}
+	}
+	return false, ""
+}
+
 // handleEscalated checks if an escalated issue's resource has recovered and auto-resolves it.
 func (r *IssueReconciler) handleEscalated(ctx context.Context, issue *platformv1alpha1.Issue) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
@@ -1286,6 +1462,26 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 			IssueRef: platformv1alpha1.IssueRef{Name: issue.Name},
 			Resource: issue.Spec.Resource,
 			Severity: issue.Spec.Severity,
+		}
+		// GAP-04 fix: label PostMortems for chaos-induced Issues so dashboards
+		// and exports can filter them out of "real production incidents". The
+		// PostMortem still carries the timeline and actions — it's just clearly
+		// tagged so it doesn't pollute trend analysis.
+		if IsChaosInduced(issue) {
+			pm.Labels[LabelSource] = SourceChaosExperiment
+			if expName := issue.Labels["platform.chatcli.io/chaos-experiment"]; expName != "" {
+				pm.Labels["platform.chatcli.io/chaos-experiment"] = expName
+			}
+		}
+		// GAP-03 fix: when the parent issue is in Contained state, the workload
+		// is silenced but the underlying bug is unresolved. Marking the PostMortem
+		// accordingly prevents it from being prematurely closed and surfaces the
+		// concrete follow-up in tooling and notifications.
+		if issue.Status.State == platformv1alpha1.IssueStateContained {
+			pm.Spec.RequiresHumanAction = true
+			if _, action := planAppliedContainment(plan); action != "" {
+				pm.Spec.RequiredAction = action
+			}
 		}
 		return nil
 	})

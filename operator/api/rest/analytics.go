@@ -38,6 +38,12 @@ func (s *APIServer) computeSummary(ctx context.Context, tr timeRangeParams) (*An
 		switch iss.Status.State {
 		case v1alpha1.IssueStateResolved:
 			summary.ResolvedIssues++
+		case v1alpha1.IssueStateContained:
+			// GAP-03 fix: Contained is NOT Resolved — count it separately and
+			// also as "open" because customer impact persists until a human
+			// restores the workload.
+			summary.ContainedIssues++
+			summary.OpenIssues++
 		case v1alpha1.IssueStateFailed:
 			// count as open since it failed remediation
 			summary.OpenIssues++
@@ -47,6 +53,12 @@ func (s *APIServer) computeSummary(ctx context.Context, tr timeRangeParams) (*An
 
 		if iss.Spec.Severity == v1alpha1.IssueSeverityCritical {
 			summary.CriticalIssues++
+		}
+
+		// GAP-04 fix: track chaos-induced issues separately so production
+		// dashboards can subtract them from "real" incident counts.
+		if iss.Labels["platform.chatcli.io/source"] == "chaos-experiment" {
+			summary.ChaosInducedIssues++
 		}
 	}
 	if summary.TotalIssues > 0 {
@@ -107,12 +119,21 @@ func (s *APIServer) computeSummary(ctx context.Context, tr timeRangeParams) (*An
 		return nil, err
 	}
 	var filteredPMs int
+	var pmsRequiringHumanAction int
 	for _, pm := range postmortems.Items {
-		if inTimeRange(pm.CreationTimestamp.Time, tr) {
-			filteredPMs++
+		if !inTimeRange(pm.CreationTimestamp.Time, tr) {
+			continue
+		}
+		filteredPMs++
+		// GAP-03 fix: count PostMortems that are still pending a human follow-up.
+		// These must NOT be lumped together with truly closed PostMortems in
+		// dashboard "incident closure" widgets.
+		if pm.Spec.RequiresHumanAction && pm.Status.State != v1alpha1.PostMortemStateClosed {
+			pmsRequiringHumanAction++
 		}
 	}
 	summary.TotalPostMortems = filteredPMs
+	summary.PostMortemsRequiringHumanAction = pmsRequiringHumanAction
 
 	// Fetch runbooks.
 	var runbooks v1alpha1.RunbookList

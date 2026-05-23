@@ -732,22 +732,53 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 	// Resolve provider/model from the connected Instance CR
 	provider, model := resolveInstanceProvider(ctx, r.Client)
 
+	// GAP-01 fix: load the AIInsight associated with this issue (best-effort) so we
+	// can pass its primary conclusion to the agentic prompt. The loop should not be
+	// allowed to silently contradict its own root-cause analysis.
+	var insightAnalysis string
+	var insightRecommendations []string
+	var insightActions []*pb.SuggestedAction
+	var insightConfidence float32
+	{
+		var insight platformv1alpha1.AIInsight
+		insightName := issue.Name + "-insight"
+		if getErr := r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: issue.Namespace}, &insight); getErr == nil {
+			insightAnalysis = insight.Status.Analysis
+			insightRecommendations = insight.Status.Recommendations
+			insightConfidence = float32(insight.Status.Confidence)
+			for _, sa := range insight.Status.SuggestedActions {
+				insightActions = append(insightActions, &pb.SuggestedAction{
+					Name:        sa.Name,
+					Action:      string(sa.Action),
+					Description: sa.Description,
+					Params:      sa.Params,
+				})
+			}
+		} else if !errors.IsNotFound(getErr) {
+			log.Info("Failed to load AIInsight for agentic context (continuing without)", "error", getErr)
+		}
+	}
+
 	// Call AgenticStep RPC
 	resp, err := r.ServerClient.AgenticStep(ctx, &pb.AgenticStepRequest{
-		IssueName:         issue.Name,
-		Namespace:         issue.Namespace,
-		ResourceKind:      resource.Kind,
-		ResourceName:      resource.Name,
-		SignalType:        issue.Spec.SignalType,
-		Severity:          string(issue.Spec.Severity),
-		Description:       issue.Spec.Description,
-		RiskScore:         issue.Spec.RiskScore,
-		Provider:          provider,
-		Model:             model,
-		KubernetesContext: kubeCtx,
-		History:           history,
-		MaxSteps:          maxSteps,
-		CurrentStep:       currentStep,
+		IssueName:               issue.Name,
+		Namespace:               issue.Namespace,
+		ResourceKind:            resource.Kind,
+		ResourceName:            resource.Name,
+		SignalType:              issue.Spec.SignalType,
+		Severity:                string(issue.Spec.Severity),
+		Description:             issue.Spec.Description,
+		RiskScore:               issue.Spec.RiskScore,
+		Provider:                provider,
+		Model:                   model,
+		KubernetesContext:       kubeCtx,
+		History:                 history,
+		MaxSteps:                maxSteps,
+		CurrentStep:             currentStep,
+		InsightAnalysis:         insightAnalysis,
+		InsightConfidence:       insightConfidence,
+		InsightRecommendations:  insightRecommendations,
+		InsightSuggestedActions: insightActions,
 	})
 	if err != nil {
 		log.Error(err, "AgenticStep RPC failed, requeuing")
@@ -827,6 +858,46 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	// GAP-01 fix: when the server flags the next_action as diverging from the
+	// AIInsight's primary suggested action AND the LLM did not provide a written
+	// justification, refuse to execute. We still record the step so the divergence
+	// shows up in PostMortem / audit, but we skip the action and let the next
+	// reconcile cycle ask for a different proposal. This prevents the "ignore the
+	// insight conclusion and try ExecDiagnostic anyway" loop seen in chaos test
+	// Cycle 1 (2026-05-23), which exhausted maxRemediationAttempts without
+	// actually remediating.
+	if resp.DivergesFromInsight && strings.TrimSpace(resp.DivergenceReason) == "" {
+		log.Info("Rejecting agentic action: diverges from AIInsight without justification",
+			"plan", plan.Name, "step", currentStep,
+			"proposed_action", resp.NextAction.Action)
+		remediationsTotal.WithLabelValues(resp.NextAction.Action, "rejected_divergence").Inc()
+
+		plan.Spec.AgenticHistory = append(plan.Spec.AgenticHistory, platformv1alpha1.AgenticStep{
+			StepNumber:  currentStep,
+			AIMessage:   resp.Reasoning,
+			Observation: fmt.Sprintf("REJECTED: proposed action %q diverges from AIInsight primary action without divergence_reason", resp.NextAction.Action),
+			Timestamp:   metav1.Now(),
+		})
+
+		agenticStepCount := int32(len(plan.Spec.AgenticHistory))
+		needStartedAt := plan.Status.AgenticStartedAt == nil
+		if err := r.Update(ctx, plan); err != nil {
+			if errors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			return ctrl.Result{}, err
+		}
+		plan.Status.AgenticStepCount = agenticStepCount
+		if needStartedAt {
+			now := metav1.Now()
+			plan.Status.AgenticStartedAt = &now
+		}
+		if err := r.Status().Update(ctx, plan); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
 	// Map next_action to RemediationAction
 	nextAction := &platformv1alpha1.RemediationAction{
 		Type:   mapActionType(resp.NextAction.Action),
@@ -836,6 +907,12 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 	// Execute the action
 	log.Info("Agentic executing action", "plan", plan.Name, "step", currentStep,
 		"action", nextAction.Type)
+
+	if resp.DivergesFromInsight {
+		log.Info("Agentic action diverges from AIInsight (justified)",
+			"plan", plan.Name, "step", currentStep,
+			"reason", resp.DivergenceReason)
+	}
 
 	observation := ""
 	execErr := r.executeAction(ctx, resource, nextAction)

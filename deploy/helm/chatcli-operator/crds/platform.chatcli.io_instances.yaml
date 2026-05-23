@@ -82,10 +82,14 @@ spec:
                     minimum: 3
                     type: integer
                   dedupTTLMinutes:
-                    default: 60
+                    default: 30
                     description: |-
                       DedupTTLMinutes is how long (in minutes) the bridge dedup cache retains alert hashes.
                       After this period, the same alert can create a new Anomaly CR.
+                      Lowered from 60 to 30 in GAP-02 fix (chaos test report 2026-05-23): 60+ minutes
+                      penalized legitimate resource recreation (GitOps re-deploys, rollbacks).
+                      Re-creation is now also handled structurally via UID-aware hashing — TTL is
+                      the secondary safety net for genuinely persisting issues.
                     format: int32
                     maximum: 1440
                     minimum: 5

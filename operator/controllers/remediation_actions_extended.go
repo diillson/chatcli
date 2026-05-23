@@ -177,6 +177,42 @@ func diagnosticAllowlist() map[string]bool {
 	return cachedDiagnosticAllowlist
 }
 
+// DiagnosticAllowlistSummary describes the effective ExecDiagnostic allowlist
+// after applying env-var customization. Returned at operator startup so
+// operators can audit what their pipeline can run without dumping the full
+// list of commands into logs. GAP-05 fix (chaos test report 2026-05-23).
+type DiagnosticAllowlistSummary struct {
+	DefaultCount int      // number of built-in default commands
+	CustomCount  int      // number of additional commands from CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS
+	TotalCount   int      // total in the effective allowlist
+	Custom       []string // sorted list of custom additions (env-provided)
+}
+
+// GetDiagnosticAllowlistSummary returns the effective allowlist's summary plus
+// the list of custom additions. The full default list is intentionally NOT
+// included — it has ~90 entries and would dwarf the rest of the startup log.
+// Operators can read it directly from defaultDiagnosticAllowlist() or
+// remediation_actions_extended.go if they need the literal contents.
+func GetDiagnosticAllowlistSummary() DiagnosticAllowlistSummary {
+	defaults := defaultDiagnosticAllowlist()
+	effective := diagnosticAllowlist()
+
+	var custom []string
+	for cmd := range effective {
+		if !defaults[cmd] {
+			custom = append(custom, cmd)
+		}
+	}
+	sort.Strings(custom)
+
+	return DiagnosticAllowlistSummary{
+		DefaultCount: len(defaults),
+		CustomCount:  len(custom),
+		TotalCount:   len(effective),
+		Custom:       custom,
+	}
+}
+
 // executeHelmRollback performs a Helm release rollback via the GitOps detector.
 func (r *RemediationReconciler) executeHelmRollback(ctx context.Context, resource platformv1alpha1.ResourceRef, params map[string]string) error {
 	detector := NewGitOpsDetector(r.Client)

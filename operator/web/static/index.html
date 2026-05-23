@@ -170,6 +170,14 @@ body {
   transition: border-color 0.2s;
 }
 .stat-card:hover { border-color: var(--accent); }
+/* GAP-03 fix: alert-styled stat card for the "Contained" / "needs human" cards.
+   Subtle border highlight + glow so it stands out without being obnoxious. */
+.stat-card-alert {
+  border-color: rgba(155, 89, 182, 0.7);
+  box-shadow: 0 0 0 1px rgba(155, 89, 182, 0.25), 0 4px 12px rgba(155, 89, 182, 0.15);
+  background: linear-gradient(180deg, var(--bg-card) 0%, rgba(155, 89, 182, 0.06) 100%);
+}
+.stat-card-alert:hover { border-color: rgba(155, 89, 182, 1); }
 .stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem; }
 .stat-value { font-size: 1.75rem; font-weight: 700; }
 .stat-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
@@ -282,12 +290,53 @@ tr.expandable { cursor: pointer; }
   font-size: 0.7rem;
   font-weight: 600;
 }
-.state-open, .state-firing, .state-pending { background: rgba(255,71,87,0.15); color: var(--sev-critical); }
-.state-acknowledged, .state-investigating, .state-inreview { background: rgba(255,165,2,0.15); color: var(--sev-medium); }
+.state-open, .state-firing, .state-pending, .state-detected, .state-failed { background: rgba(255,71,87,0.15); color: var(--sev-critical); }
+.state-acknowledged, .state-investigating, .state-inreview, .state-analyzing, .state-remediating { background: rgba(255,165,2,0.15); color: var(--sev-medium); }
 .state-resolved, .state-closed, .state-approved, .state-healthy { background: rgba(46,213,115,0.15); color: var(--sev-low); }
 .state-rejected { background: rgba(255,71,87,0.15); color: var(--sev-critical); }
 .state-snoozed { background: rgba(0,180,216,0.15); color: var(--success); }
 .state-unknown, .state-draft { background: rgba(136,146,164,0.15); color: var(--text-muted); }
+/* GAP-03 fix: distinctive purple for Contained — neither red (firing) nor green
+   (resolved). Pulsing animation draws the eye because Contained means a human
+   action is owed. */
+.state-contained {
+  background: rgba(155, 89, 182, 0.25);
+  color: #d3a4f5;
+  border: 1px solid rgba(155, 89, 182, 0.5);
+  animation: contained-pulse 2.2s ease-in-out infinite;
+}
+.state-escalated { background: rgba(255,99,72,0.20); color: var(--sev-high); }
+@keyframes contained-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(155, 89, 182, 0.4); }
+  50%      { box-shadow: 0 0 0 5px rgba(155, 89, 182, 0); }
+}
+/* Inline badges for the chaos-induced and requires-human-action callouts. */
+.badge-chaos {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  background: rgba(0,180,216,0.15);
+  color: var(--success);
+  border: 1px solid rgba(0,180,216,0.4);
+  margin-left: 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.badge-needs-human {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  background: rgba(255, 71, 87, 0.18);
+  color: var(--sev-critical);
+  border: 1px solid rgba(255, 71, 87, 0.5);
+  margin-left: 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 
 /* ===== PIE CHART (CSS only) ===== */
 .pie-container { display: flex; align-items: center; gap: 2rem; padding: 1rem 0; }
@@ -651,11 +700,13 @@ tr.expandable { cursor: pointer; }
       </select>
       <select class="filter-select" id="incStateFilter">
         <option value="">All States</option>
-        <option value="Open">Open</option>
-        <option value="Acknowledged">Acknowledged</option>
-        <option value="Investigating">Investigating</option>
+        <option value="Detected">Detected</option>
+        <option value="Analyzing">Analyzing</option>
+        <option value="Remediating">Remediating</option>
+        <option value="Contained">Contained (needs human action)</option>
         <option value="Resolved">Resolved</option>
-        <option value="Snoozed">Snoozed</option>
+        <option value="Escalated">Escalated</option>
+        <option value="Failed">Failed</option>
       </select>
       <select class="filter-select" id="incKindFilter">
         <option value="">All Kinds</option>
@@ -664,6 +715,12 @@ tr.expandable { cursor: pointer; }
         <option value="DaemonSet">DaemonSet</option>
         <option value="Job">Job</option>
         <option value="CronJob">CronJob</option>
+      </select>
+      <!-- GAP-04 fix: filter to hide/show chaos-induced incidents -->
+      <select class="filter-select" id="incChaosFilter" title="Filter chaos engineering incidents">
+        <option value="exclude">Hide chaos drills</option>
+        <option value="">All sources</option>
+        <option value="only">Only chaos drills</option>
       </select>
       <input class="filter-input" id="incNamespaceFilter" placeholder="Namespace..." style="width:150px">
       <button class="btn btn-primary" onclick="loadIncidents()">Apply</button>
@@ -1320,16 +1377,22 @@ async function loadOverviewStats() {
     const data = await apiFetch('/analytics/summary?' + getTimeRangeQuery());
     const s = data.spec || {};
     const successRate = s.remediatedIssues > 0 ? (s.resolvedByRemediation / s.remediatedIssues) : 0;
+    // GAP-03/04 fix: Contained, NeedsHumanAction and ChaosInduced are surfaced
+    // as first-class cards. Contained gets a purple accent to match the state
+    // badge and to set it apart visually from the red "Active" card — same
+    // family (open work) but different urgency profile.
     const cards = [
       { label: 'Active Issues', value: s.openIssues ?? 0, color: 'var(--sev-critical)' },
+      { label: 'Contained (needs human)', value: s.containedIssues ?? 0, color: '#d3a4f5', emphasis: (s.containedIssues ?? 0) > 0 },
       { label: 'Resolved', value: s.resolvedIssues ?? 0, color: 'var(--sev-low)' },
       { label: 'Remediations', value: `${s.resolvedByRemediation ?? 0}/${s.remediatedIssues ?? 0}`, color: 'var(--success)' },
       { label: 'Success Rate', value: (successRate * 100).toFixed(1) + '%', color: 'var(--sev-low)' },
-      { label: 'PostMortems', value: s.totalPostMortems ?? 0, color: 'var(--sev-medium)' },
+      { label: 'PostMortems (open)', value: `${s.totalPostMortems ?? 0}${(s.postMortemsRequiringHumanAction ?? 0) > 0 ? ` (${s.postMortemsRequiringHumanAction} pending action)` : ''}`, color: 'var(--sev-medium)' },
       { label: 'Pending Approvals', value: s.pendingApprovals ?? 0, color: 'var(--warning)' },
+      { label: 'Chaos drills (excluded from MTTD/MTTR)', value: s.chaosInducedIssues ?? 0, color: 'var(--success)' },
     ];
     el.innerHTML = cards.map(c => `
-      <div class="stat-card">
+      <div class="stat-card${c.emphasis ? ' stat-card-alert' : ''}">
         <div class="stat-label">${c.label}</div>
         <div class="stat-value" style="color:${c.color}">${c.value}</div>
       </div>
@@ -1580,7 +1643,16 @@ async function loadIncidents() {
     if (kindFilter) {
       items = items.filter(i => (i.resource || {}).kind === kindFilter);
     }
-    const total = (data.metadata || {}).totalCount || items.length;
+    // GAP-04 fix: filter chaos drills client-side (default: hide them so
+    // production dashboards stay free of drill noise; toggleable in the
+    // chaos filter dropdown).
+    const chaosFilter = ($('#incChaosFilter') || {}).value || 'exclude';
+    if (chaosFilter === 'exclude') {
+      items = items.filter(i => !i.chaosInduced);
+    } else if (chaosFilter === 'only') {
+      items = items.filter(i => i.chaosInduced);
+    }
+    const total = items.length;
     $('#incidentCount').textContent = `${total} incident(s)`;
     if (items.length === 0) { showEmpty(el, 'No incidents match the filters'); return; }
     el.innerHTML = `<table>
@@ -1596,9 +1668,15 @@ async function loadIncidents() {
       const mainRow = document.createElement('tr');
       mainRow.className = 'expandable';
       mainRow.dataset.rowId = id;
+      const chaosBadge = item.chaosInduced
+        ? `<span class="badge-chaos" title="Chaos drill — correlated with ${escapeHtml(item.chaosExperiment || 'a ChaosExperiment')}">CHAOS</span>`
+        : '';
+      const humanBadge = item.requiresHumanAction
+        ? `<span class="badge-needs-human" title="Workload silenced via containment — human action required to restore service">NEEDS HUMAN</span>`
+        : '';
       mainRow.innerHTML = `
         <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
-        <td>${escapeHtml(item.name)}</td>
+        <td>${escapeHtml(item.name)}${chaosBadge}${humanBadge}</td>
         <td>${severityBadge(item.severity)}</td>
         <td>${stateBadge(item.state)}</td>
         <td>${resourceKindBadge((item.resource||{}).kind)} ${escapeHtml((item.resource||{}).name)}</td>
@@ -1606,9 +1684,9 @@ async function loadIncidents() {
         <td data-sort-value="${item.riskScore || 0}">${item.riskScore != null ? item.riskScore.toFixed(1) : '-'}</td>
         <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
         <td class="btn-group">
-          ${item.state !== 'Resolved' ? `<button class="btn btn-success" onclick="event.stopPropagation(); ackIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Ack</button>` : ''}
-          ${item.state !== 'Resolved' ? `<button class="btn" onclick="event.stopPropagation(); snoozeIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Snooze</button>` : ''}
-          ${item.state === 'Escalated' ? `<button class="btn" style="background:var(--sev-low);color:#000;font-weight:700" onclick="event.stopPropagation(); resolveIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Resolve</button>` : ''}
+          ${item.state !== 'Resolved' && item.state !== 'Contained' ? `<button class="btn btn-success" onclick="event.stopPropagation(); ackIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Ack</button>` : ''}
+          ${item.state !== 'Resolved' && item.state !== 'Contained' ? `<button class="btn" onclick="event.stopPropagation(); snoozeIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Snooze</button>` : ''}
+          ${(item.state === 'Escalated' || item.state === 'Contained') ? `<button class="btn" style="background:var(--sev-low);color:#000;font-weight:700" onclick="event.stopPropagation(); resolveIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Resolve</button>` : ''}
         </td>
       `;
       mainRow.addEventListener('click', () => toggleIncidentExpand(id, item, mainRow));
@@ -2010,9 +2088,15 @@ async function loadPostMortems() {
       const mainRow = document.createElement('tr');
       mainRow.className = 'expandable';
       mainRow.dataset.rowId = id;
+      const pmChaosBadge = item.chaosInduced
+        ? `<span class="badge-chaos" title="Chaos drill — correlated with ${escapeHtml(item.chaosExperiment || 'a ChaosExperiment')}">CHAOS</span>`
+        : '';
+      const pmHumanBadge = item.requiresHumanAction
+        ? `<span class="badge-needs-human" title="${escapeHtml(item.requiredAction || 'Workload contained — human action required')}">NEEDS HUMAN</span>`
+        : '';
       mainRow.innerHTML = `
         <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
-        <td>${escapeHtml(item.name)}</td>
+        <td>${escapeHtml(item.name)}${pmChaosBadge}${pmHumanBadge}</td>
         <td>${severityBadge(item.severity)}</td>
         <td>${stateBadge(item.state)}</td>
         <td>${resourceKindBadge((item.resource||{}).kind)} ${escapeHtml((item.resource||{}).name || '-')}</td>
@@ -2021,7 +2105,8 @@ async function loadPostMortems() {
         <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
         <td class="btn-group">
           ${item.state !== 'Closed' ? `<button class="btn" onclick="event.stopPropagation(); reviewPM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Review</button>` : ''}
-          ${item.state === 'InReview' ? `<button class="btn btn-success" onclick="event.stopPropagation(); closePM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Close</button>` : ''}
+          ${item.state === 'InReview' && !item.requiresHumanAction ? `<button class="btn btn-success" onclick="event.stopPropagation(); closePM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Close</button>` : ''}
+          ${item.requiresHumanAction ? `<button class="btn" style="background:#9b59b6;color:#fff;font-weight:700" onclick="event.stopPropagation(); ackHumanAction('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')" title="Acknowledge that the required action has been performed">Ack Human Action</button>` : ''}
         </td>
       `;
       mainRow.addEventListener('click', () => togglePMExpand(id, item, mainRow));
@@ -2134,6 +2219,23 @@ async function closePM(name, ns) {
     loadPostMortems();
   } catch (e) {
     toast(`Failed to close: ${e.message}`, 'error');
+  }
+}
+
+// GAP-03 fix: acknowledge that the human follow-up for a Contained incident
+// has been completed (the workload is back up, the bad image was rolled back,
+// etc.). Sets the operator-side annotation that lifts the close-block on the
+// PostMortem.
+async function ackHumanAction(name, ns) {
+  const note = prompt('Optional note describing the action you took (rollback target, config change, etc.):', '');
+  if (note === null) return; // user cancelled
+  try {
+    await apiPost(`/postmortems/${name}/ack-human-action?namespace=${encodeURIComponent(ns)}`,
+      { acknowledgedBy: 'web-ui', note: note });
+    toast(`Human action acknowledged for ${name} — PostMortem is now closeable`, 'success');
+    loadPostMortems();
+  } catch (e) {
+    toast(`Failed to acknowledge: ${e.message}`, 'error');
   }
 }
 

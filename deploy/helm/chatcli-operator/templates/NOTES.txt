@@ -1,0 +1,66 @@
+{{- /*
+NOTES.txt — printed after `helm install` / `helm upgrade`.
+Use it to highlight post-install checklist items the operator MUST review.
+*/ -}}
+Thank you for installing {{ .Chart.Name }} {{ .Chart.AppVersion }}.
+
+The ChatCLI AIOps operator is now reconciling Anomaly / Issue / RemediationPlan /
+PostMortem CRs in your cluster.
+
+==================================================================================
+ Post-install checklist (GAP-05 fix, chaos test report 2026-05-23)
+==================================================================================
+
+1. REVIEW THE EXECDIAGNOSTIC ALLOWLIST
+   The agentic remediation loop can only execute diagnostic commands that exactly
+   match an entry in the ExecDiagnostic allowlist. The default list ships with
+   ~90 read-only commands targeting health/metrics/pprof endpoints on the
+   standard ports (8080, 9090, 9091, 15000, 15020, 15021, 6060).
+
+   Workloads using non-standard ports (e.g. localhost:5678/health) will have
+   their diagnostics REJECTED, which wastes remediation attempts and can leave
+   real issues unremediated. See chaos test Cycle 1 evidence in the 2026-05-23
+   report for the regression this guards against.
+
+   Extend the allowlist via the env var CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS in
+   your Instance CR. Example values block:
+
+       env:
+         - name: CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS
+           value: "curl -s localhost:5678/health,curl -s localhost:7000/healthz"
+
+   Inspect the EFFECTIVE allowlist after the operator starts:
+
+       kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "chatcli-operator.fullname" . }} \
+         | grep "Effective ExecDiagnostic allowlist loaded"
+
+   The startup log line includes total/default/custom counts and lists every
+   custom entry — no need to dump every CR to confirm.
+
+2. CONFIRM DEDUP TTL FOR YOUR DEPLOYMENT CADENCE
+   The default Instance.spec.aiops.dedupTTLMinutes is 30. If you re-deploy the
+   same resource (GitOps rollouts, rollbacks) more often than that and rely on
+   the AIOps platform to re-detect issues, lower it further. UID-aware hashing
+   (GAP-02 fix) handles the recreate-with-same-name case automatically; TTL is
+   only the secondary safety net for genuinely persistent incidents.
+
+3. CONFIGURE NotificationPolicy FOR THE Contained STATE
+   A new IssueState `Contained` is emitted when a remediation silenced the
+   workload (e.g., scaled it to 0) without truly fixing the root cause — a
+   human must intervene. Add a NotificationRule that matches state `Contained`
+   so on-call gets paged when the platform contains an incident but doesn't
+   resolve it:
+
+       rules:
+         - name: contained-needs-human
+           severities: [critical, high]
+           states: [Contained]
+           channels: [pagerduty-primary]
+
+4. (Optional) PAUSE NOTIFICATIONS DURING CHAOS DRILLS
+   Issues that correlate with an active ChaosExperiment are labeled
+   `platform.chatcli.io/source=chaos-experiment` and skipped from escalation
+   automatically. If you want them filtered out of regular alert channels too,
+   add an exclusion rule on the source label in your NotificationPolicy.
+
+For full upgrade notes: https://chatcli.ai/docs/aiops/upgrade

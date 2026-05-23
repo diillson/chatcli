@@ -22,6 +22,46 @@ func NewCorrelationEngine(c client.Client) *CorrelationEngine {
 	return &CorrelationEngine{client: c}
 }
 
+// FindActiveChaosExperiment returns an in-flight ChaosExperiment whose target
+// matches the given resource. Used to label Issues that fire DURING a chaos
+// experiment so the platform can suppress escalation, simplify PostMortems,
+// and keep chaos noise out of production MTTD/MTTR metrics.
+//
+// "Active" means the experiment is in Running state OR it transitioned out of
+// Running in the last 2 minutes (post-experiment grace window — recovery can
+// trigger transient alerts after the chaos formally ends). Only experiments in
+// the same namespace are considered.
+//
+// GAP-04 fix (chaos test report 2026-05-23).
+func (ce *CorrelationEngine) FindActiveChaosExperiment(ctx context.Context, resource platformv1alpha1.ResourceRef) (*platformv1alpha1.ChaosExperiment, error) {
+	var list platformv1alpha1.ChaosExperimentList
+	if err := ce.client.List(ctx, &list, client.InNamespace(resource.Namespace)); err != nil {
+		return nil, fmt.Errorf("listing chaos experiments: %w", err)
+	}
+
+	now := time.Now()
+	const postChaosGrace = 2 * time.Minute
+
+	for i := range list.Items {
+		exp := &list.Items[i]
+		if exp.Spec.Target.Kind != resource.Kind ||
+			exp.Spec.Target.Name != resource.Name ||
+			exp.Spec.Target.Namespace != resource.Namespace {
+			continue
+		}
+		switch exp.Status.State {
+		case platformv1alpha1.ChaosStateRunning:
+			return exp, nil
+		case platformv1alpha1.ChaosStateCompleted, platformv1alpha1.ChaosStateAborted:
+			// Within the post-chaos recovery window, alerts are still chaos-induced.
+			if exp.Status.CompletedAt != nil && now.Sub(exp.Status.CompletedAt.Time) <= postChaosGrace {
+				return exp, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
 // FindExistingIssue returns an active (non-terminal) Issue for the given resource, if one exists.
 func (ce *CorrelationEngine) FindExistingIssue(ctx context.Context, resource platformv1alpha1.ResourceRef) (*platformv1alpha1.Issue, error) {
 	var list platformv1alpha1.IssueList
