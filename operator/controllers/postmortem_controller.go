@@ -39,7 +39,7 @@ func (r *PostMortemReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// marked it Closed without the acknowledgement annotation, revert to Open
 	// to keep the incident visible in dashboards and metrics.
 	if pm.Status.State == platformv1alpha1.PostMortemStateClosed {
-		if pm.Spec.RequiresHumanAction && !humanActionAcknowledged(&pm) {
+		if pm.Status.RequiresHumanAction && !humanActionAcknowledged(&pm) {
 			log.Info("Reverting PostMortem from Closed to Open: requires human action and acknowledgement is missing",
 				"name", pm.Name, "issue", pm.Spec.IssueRef.Name)
 			pm.Status.State = platformv1alpha1.PostMortemStateOpen

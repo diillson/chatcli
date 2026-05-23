@@ -119,9 +119,12 @@ func TestComputeSummary_EndToEnd(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "pm-1", Namespace: "default", CreationTimestamp: now},
 			Spec: v1alpha1.PostMortemSpec{
 				IssueRef: v1alpha1.IssueRef{Name: "i1"}, Resource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "web", Namespace: "default"}, Severity: v1alpha1.IssueSeverityCritical,
+			},
+			// GAP-07: RequiresHumanAction lives in Status now.
+			Status: v1alpha1.PostMortemStatus{
+				State:               v1alpha1.PostMortemStateOpen,
 				RequiresHumanAction: true,
 			},
-			Status: v1alpha1.PostMortemStatus{State: v1alpha1.PostMortemStateOpen},
 		},
 		&v1alpha1.Runbook{ObjectMeta: metav1.ObjectMeta{Name: "rb-1", Namespace: "default"}},
 	}
@@ -174,9 +177,12 @@ func TestAckHumanActionEndpoint_HappyPath(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pm-needs-human", Namespace: "default"},
 		Spec: v1alpha1.PostMortemSpec{
 			IssueRef: v1alpha1.IssueRef{Name: "i1"}, Resource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "web", Namespace: "default"}, Severity: v1alpha1.IssueSeverityHigh,
+		},
+		// GAP-07: RequiresHumanAction lives in Status now.
+		Status: v1alpha1.PostMortemStatus{
+			State:               v1alpha1.PostMortemStateOpen,
 			RequiresHumanAction: true,
 		},
-		Status: v1alpha1.PostMortemStatus{State: v1alpha1.PostMortemStateOpen},
 	}
 	c := fake.NewClientBuilder().
 		WithScheme(s).
@@ -219,8 +225,8 @@ func TestAckHumanActionEndpoint_RejectsNonContained(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pm-normal", Namespace: "default"},
 		Spec: v1alpha1.PostMortemSpec{
 			IssueRef: v1alpha1.IssueRef{Name: "i1"}, Resource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "web", Namespace: "default"}, Severity: v1alpha1.IssueSeverityMedium,
-			RequiresHumanAction: false,
 		},
+		// GAP-07: RequiresHumanAction lives in Status now. Default false here.
 	}
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(pm).Build()
 	api := NewAPIServer(c, ":0")

@@ -1341,7 +1341,7 @@ func (s *APIServer) handlePostMortemAckHumanAction(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if !pm.Spec.RequiresHumanAction {
+	if !pm.Status.RequiresHumanAction {
 		writeError(w, http.StatusBadRequest, "postmortem does not require human action — nothing to acknowledge")
 		return
 	}
@@ -1932,18 +1932,26 @@ func issueToIncidentItem(iss v1alpha1.Issue) IncidentItem {
 		item.ChaosExperiment = iss.Labels["platform.chatcli.io/chaos-experiment"]
 	}
 
-	// GAP-03 fix: mirror the operator's RequiresHumanAction condition into a
-	// dedicated field. Two signals:
-	//   1. State == Contained (set by issue_controller after a containment action),
-	//   2. RequiresHumanAction status condition (set in the same transition).
-	// Either suffices, so dashboards can light up the badge as soon as one is set.
-	if iss.Status.State == "Contained" {
-		item.RequiresHumanAction = true
-	} else {
-		for _, c := range iss.Status.Conditions {
-			if c.Type == "RequiresHumanAction" && c.Status == "True" {
-				item.RequiresHumanAction = true
-				break
+	// GAP-07 fix: prefer the typed status field over the previous
+	// derive-from-state-or-condition heuristic. The Issue controller now
+	// persists RequiresHumanAction/RequiredAction as first-class status
+	// fields when a containment fires. We still fall back to the
+	// state/condition shape for backwards compat with PostMortems written
+	// by 1.122.x operators that predate the typed fields.
+	item.RequiresHumanAction = iss.Status.RequiresHumanAction
+	item.RequiredAction = iss.Status.RequiredAction
+	if !item.RequiresHumanAction {
+		if iss.Status.State == "Contained" {
+			item.RequiresHumanAction = true
+		} else {
+			for _, c := range iss.Status.Conditions {
+				if c.Type == "RequiresHumanAction" && c.Status == "True" {
+					item.RequiresHumanAction = true
+					if c.Message != "" && item.RequiredAction == "" {
+						item.RequiredAction = c.Message
+					}
+					break
+				}
 			}
 		}
 	}
@@ -2053,8 +2061,8 @@ func postmortemToItem(pm v1alpha1.PostMortem) PostMortemItem {
 	// GAP-03 fix: surface the human-action requirement so dashboards can lead
 	// with it. Even a fully-rendered PostMortem with timeline and lessons is
 	// misleading without this flag — it would imply the incident is closed.
-	item.RequiresHumanAction = pm.Spec.RequiresHumanAction
-	item.RequiredAction = pm.Spec.RequiredAction
+	item.RequiresHumanAction = pm.Status.RequiresHumanAction
+	item.RequiredAction = pm.Status.RequiredAction
 
 	// GAP-04 fix: chaos drills carry a label that lets dashboards filter them
 	// out of production PostMortem trend lists.
