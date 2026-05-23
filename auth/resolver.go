@@ -23,18 +23,16 @@ func isProviderMatch(credProvider, requestedProvider ProviderID) bool {
 	return false
 }
 
-// ResolveAuth resolves a chave a usar (um apikey OU access token) para um provedor.
-// Ordem:
-// 1) auth-profiles store (first match for provider)
-// 2) env vars
+// ResolveAuthProvider resolves credentials for the given provider and returns a
+// TokenProvider that refreshes OAuth tokens transparently. Lookup order:
+//  1. Auth-profiles store (first match by provider).
+//  2. Environment variables.
 //
-// Nota: para manter backward compatibility com seus clients atuais,
-// retornamos uma string "oauth:eaxxxx" quando for token OAuth,
-// e uma string "apikey:exxxxx" quando for API key.
-func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (*ResolvedAuth, error) {
-	// Best-effort sync external CLI creds on load
-	// (sync disabled: cli_sync.go fix pending)
-
+// The returned provider is alive: callers that retain it across requests get
+// proactive background refresh and refresh-on-401 behavior automatically.
+// Caller is responsible for calling Close() when discarding the provider
+// (typically the LLMManager owns and closes them).
+func ResolveAuthProvider(ctx context.Context, provider ProviderID, logger *zap.Logger) (TokenProvider, error) {
 	store := LoadStore(logger)
 	for id, c := range store.Profiles {
 		if c == nil {
@@ -43,89 +41,110 @@ func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (
 		if !isProviderMatch(c.Provider, provider) {
 			continue
 		}
-		if c.CredType == CredentialOAuth {
-			if c.IsExpired() {
-				if _, err := RefreshOAuth(ctx, c, logger); err != nil {
-					if logger != nil {
-						logger.Warn(i18n.T("auth.resolver.oauth_refresh_failed"),
-							zap.String("provider", string(c.Provider)),
-							zap.Error(err))
-					}
-				} else {
-					if saveErr := SaveStore(store, logger); saveErr != nil && logger != nil {
-						logger.Warn(i18n.T("auth.resolver.oauth_save_failed"),
-							zap.String("provider", string(c.Provider)),
-							zap.Error(saveErr))
-					}
-				}
-			}
-			key := strings.TrimSpace(c.Access)
-			if key != "" {
-				return &ResolvedAuth{
-					APIKey:    "oauth:" + key,
-					ProfileID: id,
-					Source:    "auth-store",
-					Mode:      AuthModeOAuth,
-					Provider:  provider,
-					Email:     c.Email,
-				}, nil
-			}
-		}
-		if c.CredType == CredentialToken {
+		switch c.CredType {
+		case CredentialOAuth:
+			tp := newOAuthTokenProvider(c, id, "auth-store", logger)
+			return tp, nil
+		case CredentialToken:
 			key := strings.TrimSpace(c.Token)
-			if key != "" {
-				return &ResolvedAuth{
-					APIKey:    "token:" + key,
-					ProfileID: id,
-					Source:    "auth-store",
-					Mode:      AuthModeToken,
-					Provider:  provider,
-					Email:     c.Email,
-				}, nil
+			if key == "" {
+				continue
 			}
-		}
-		if c.CredType == CredentialAPIKey {
+			return &staticTokenProvider{
+				token:     key,
+				mode:      AuthModeToken,
+				provider:  provider,
+				profileID: id,
+				source:    "auth-store",
+				email:     c.Email,
+			}, nil
+		case CredentialAPIKey:
 			key := strings.TrimSpace(c.Key)
-			if key != "" {
-				return &ResolvedAuth{
-					APIKey:    "apikey:" + key,
-					ProfileID: id,
-					Source:    "auth-store",
-					Mode:      AuthModeAPIKey,
-					Provider:  provider,
-					Email:     c.Email,
-				}, nil
+			if key == "" {
+				continue
 			}
+			return &staticTokenProvider{
+				token:     key,
+				mode:      AuthModeAPIKey,
+				provider:  provider,
+				profileID: id,
+				source:    "auth-store",
+				email:     c.Email,
+			}, nil
 		}
 	}
 
-	// env fallback
-	switch provider {
-	case ProviderAnthropic:
-		if v := strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_TOKEN")); v != "" {
-			return &ResolvedAuth{APIKey: "oauth:" + v, Source: "env:ANTHROPIC_OAUTH_TOKEN", Mode: AuthModeOAuth, Provider: provider}, nil
-		}
-		if v := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); v != "" {
-			return &ResolvedAuth{APIKey: "apikey:" + v, Source: "env:ANTHROPIC_API_KEY", Mode: AuthModeAPIKey, Provider: provider}, nil
-		}
-
-	case ProviderOpenAI, ProviderOpenAICodex:
-		if v := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); v != "" {
-			return &ResolvedAuth{APIKey: "apikey:" + v, Source: "env:OPENAI_API_KEY", Mode: AuthModeAPIKey, Provider: provider}, nil
-		}
-
-	case ProviderGitHubCopilot:
-		if v := strings.TrimSpace(os.Getenv("GITHUB_COPILOT_TOKEN")); v != "" {
-			return &ResolvedAuth{APIKey: "token:" + v, Source: "env:GITHUB_COPILOT_TOKEN", Mode: AuthModeToken, Provider: provider}, nil
-		}
-
-	case ProviderGitHubModels:
-		for _, envKey := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_MODELS_TOKEN"} {
-			if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
-				return &ResolvedAuth{APIKey: "token:" + v, Source: "env:" + envKey, Mode: AuthModeToken, Provider: provider}, nil
-			}
-		}
+	if tp := envFallbackProvider(provider); tp != nil {
+		return tp, nil
 	}
 
 	return nil, fmt.Errorf("%s", i18n.T("auth.resolver.no_credentials", provider))
+}
+
+func envFallbackProvider(provider ProviderID) TokenProvider {
+	switch provider {
+	case ProviderAnthropic:
+		if v := strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_TOKEN")); v != "" {
+			return &staticTokenProvider{token: v, mode: AuthModeOAuth, provider: provider, source: "env:ANTHROPIC_OAUTH_TOKEN"}
+		}
+		if v := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); v != "" {
+			return &staticTokenProvider{token: v, mode: AuthModeAPIKey, provider: provider, source: "env:ANTHROPIC_API_KEY"}
+		}
+	case ProviderOpenAI, ProviderOpenAICodex:
+		if v := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); v != "" {
+			return &staticTokenProvider{token: v, mode: AuthModeAPIKey, provider: provider, source: "env:OPENAI_API_KEY"}
+		}
+	case ProviderGitHubCopilot:
+		if v := strings.TrimSpace(os.Getenv("GITHUB_COPILOT_TOKEN")); v != "" {
+			return &staticTokenProvider{token: v, mode: AuthModeToken, provider: provider, source: "env:GITHUB_COPILOT_TOKEN"}
+		}
+	case ProviderGitHubModels:
+		for _, envKey := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_MODELS_TOKEN"} {
+			if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+				return &staticTokenProvider{token: v, mode: AuthModeToken, provider: provider, source: "env:" + envKey}
+			}
+		}
+	}
+	return nil
+}
+
+// ResolveAuth retains the legacy contract: it returns a prefixed-string
+// representation ("oauth:...", "token:...", "apikey:...") plus metadata.
+// New code should call ResolveAuthProvider directly. This wrapper exists for
+// callers that forward the credential across a process boundary (remote/server
+// mode) where a live TokenProvider cannot be used.
+//
+// The returned key is a one-shot snapshot: it is the current access token at
+// resolution time. No background refresh occurs.
+func ResolveAuth(ctx context.Context, provider ProviderID, logger *zap.Logger) (*ResolvedAuth, error) {
+	tp, err := ResolveAuthProvider(ctx, provider, logger)
+	if err != nil {
+		return nil, err
+	}
+	// Snapshot the token. For OAuth providers this may trigger an in-place
+	// refresh when the credential is expired, matching the previous behavior.
+	token, err := tp.Token(ctx)
+	tp.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	prefix := ""
+	switch tp.Mode() {
+	case AuthModeOAuth:
+		prefix = "oauth:"
+	case AuthModeToken:
+		prefix = "token:"
+	case AuthModeAPIKey:
+		prefix = "apikey:"
+	}
+
+	return &ResolvedAuth{
+		APIKey:    prefix + token,
+		ProfileID: tp.ProfileID(),
+		Source:    tp.Source(),
+		Mode:      tp.Mode(),
+		Provider:  provider,
+		Email:     tp.Email(),
+	}, nil
 }

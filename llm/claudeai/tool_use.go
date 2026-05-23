@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
-	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -31,7 +31,7 @@ var _ client.ToolAwareClient = (*ClaudeClient)(nil)
 // and requires streaming — tool calling via native API is not compatible.
 // OAuth users fall back to XML-based tool parsing which works reliably.
 func (c *ClaudeClient) SupportsNativeTools() bool {
-	return !strings.HasPrefix(c.apiKey, "oauth:")
+	return c.provider.Mode() != auth.AuthModeOAuth
 }
 
 // SendPromptWithTools sends a prompt with tool definitions via Anthropic's native tool use API.
@@ -114,12 +114,13 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	)
 
 	respBody, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		req, err := c.buildToolRequest(ctx, jsonValue)
-		if err != nil {
-			return "", err
-		}
-
-		resp, err := c.client.Do(req)
+		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			req, err := c.buildToolRequest(ctx, jsonValue, token)
+			if err != nil {
+				return nil, err
+			}
+			return c.client.Do(req)
+		})
 		if err != nil {
 			return "", err
 		}
@@ -291,10 +292,12 @@ func buildClaudeToolMessages(prompt string, history []models.Message) []interfac
 	return messages
 }
 
-// buildToolRequest creates the HTTP request for tool use calls.
-func (c *ClaudeClient) buildToolRequest(ctx context.Context, jsonValue []byte) (*http.Request, error) {
+// buildToolRequest creates the HTTP request for tool use calls. The token
+// argument is the raw access token (no prefix); the provider's mode picks
+// the auth header style.
+func (c *ClaudeClient) buildToolRequest(ctx context.Context, jsonValue []byte, token string) (*http.Request, error) {
 	reqURL := c.apiURL
-	if strings.HasPrefix(c.apiKey, "oauth:") {
+	if c.provider.Mode() == auth.AuthModeOAuth {
 		reqURL = withBetaQuery(reqURL)
 	}
 
@@ -304,23 +307,7 @@ func (c *ClaudeClient) buildToolRequest(ctx context.Context, jsonValue []byte) (
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-
-	version := catalog.GetAnthropicAPIVersion(c.model)
-	if version == "" {
-		version = "2023-06-01"
-	}
-	req.Header.Set("anthropic-version", version)
-
-	if strings.HasPrefix(c.apiKey, "oauth:") {
-		applyOAuthHeaders(req, c.apiKey)
-	} else if strings.HasPrefix(c.apiKey, "token:") {
-		req.Header.Set("Authorization", "Bearer "+strings.TrimPrefix(c.apiKey, "token:"))
-	} else if strings.HasPrefix(c.apiKey, "apikey:") {
-		req.Header.Set("x-api-key", strings.TrimPrefix(c.apiKey, "apikey:"))
-	} else {
-		req.Header.Set("x-api-key", c.apiKey)
-	}
-
+	c.applyAuthHeaders(req, token)
 	return req, nil
 }
 

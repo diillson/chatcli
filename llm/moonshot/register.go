@@ -6,6 +6,7 @@
 package moonshot
 
 import (
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/registry"
@@ -22,7 +23,8 @@ func init() {
 			if model == "" {
 				model = config.DefaultMoonshotModel
 			}
-			return NewMoonshotClient(cfg.APIKey, model, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
+			provider := auth.NewStaticTokenProvider(cfg.APIKey, auth.AuthModeAPIKey, "")
+			return NewMoonshotClient(provider, model, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
 		},
 	})
 }

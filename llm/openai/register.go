@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/registry"
@@ -17,7 +18,8 @@ func init() {
 			if model == "" {
 				model = config.DefaultOpenAIModel
 			}
-			return NewOpenAIClient(cfg.APIKey, model, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
+			provider := auth.NewStaticTokenProviderFromResolved(cfg.APIKey, auth.ProviderOpenAI)
+			return NewOpenAIClient(provider, model, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
 		},
 	})
 }

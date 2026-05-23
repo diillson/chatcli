@@ -7,10 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
+
+func testProvider(key string) auth.TokenProvider {
+	return auth.NewStaticTokenProvider(key, auth.AuthModeAPIKey, "")
+}
 
 func TestGeminiClient_SendPrompt_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,7 +28,7 @@ func TestGeminiClient_SendPrompt_Success(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	client := NewGeminiClient("test-api-key", "gemini-pro", logger, 1, 0)
+	client := NewGeminiClient(testProvider("test-api-key"), "gemini-pro", logger, 1, 0)
 	client.baseURL = server.URL
 
 	history := []models.Message{{Role: "user", Content: "Hi"}}
@@ -48,7 +53,7 @@ func TestGeminiClient_SendPrompt_RetryOnRateLimit(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	client := NewGeminiClient("test-api-key", "gemini-pro", logger, 2, 10*time.Millisecond)
+	client := NewGeminiClient(testProvider("test-api-key"), "gemini-pro", logger, 2, 10*time.Millisecond)
 	client.baseURL = server.URL
 
 	resp, err := client.SendPrompt(context.Background(), "Test", []models.Message{{Role: "user", Content: "Test"}}, 0)
@@ -56,4 +61,22 @@ func TestGeminiClient_SendPrompt_RetryOnRateLimit(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "Success on retry", resp)
 	assert.Equal(t, 2, attempt, "Should have made two attempts")
+}
+
+func TestGeminiClient_ListModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-goog-api-key") != "test-api-key" {
+			t.Errorf("x-goog-api-key = %q", r.Header.Get("x-goog-api-key"))
+		}
+		_, _ = w.Write([]byte(`{"models":[{"name":"models/gemini-pro","displayName":"Gemini Pro","supportedGenerationMethods":["generateContent"]}]}`))
+	}))
+	defer server.Close()
+
+	logger, _ := zap.NewDevelopment()
+	client := NewGeminiClient(testProvider("test-api-key"), "gemini-pro", logger, 1, 0)
+	client.baseURL = server.URL
+
+	list, err := client.ListModels(context.Background())
+	assert.NoError(t, err)
+	assert.NotEmpty(t, list)
 }

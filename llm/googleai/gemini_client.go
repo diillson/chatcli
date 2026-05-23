@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -28,7 +29,7 @@ import (
 
 // GeminiClient implementa o cliente para interagir com a API do Google Gemini
 type GeminiClient struct {
-	apiKey      string
+	provider    auth.TokenProvider
 	model       string
 	logger      *zap.Logger
 	client      *http.Client
@@ -46,7 +47,7 @@ func (c *GeminiClient) LastStopReason() string { return c.usageState.LastStopRea
 
 // NewGeminiClient cria uma nova instância de GeminiClient.
 // Agora sem fallback interno: usa apenas os params passados (vindos do manager/ENVs).
-func NewGeminiClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *GeminiClient {
+func NewGeminiClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *GeminiClient {
 	httpClient := utils.NewHTTPClient(logger, config.DefaultGoogleAITimeout)
 
 	if model == "" {
@@ -59,10 +60,10 @@ func NewGeminiClient(apiKey, model string, logger *zap.Logger, maxAttempts int, 
 		zap.Int("max_attempts", maxAttempts),
 		zap.Duration("backoff", backoff),
 		zap.String("base_url", config.GoogleAIAPIURL),
-		zap.Bool("api_key_configured", apiKey != ""))
+		zap.Bool("api_key_configured", true))
 
 	return &GeminiClient{
-		apiKey:      apiKey,
+		provider:    provider,
 		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
@@ -202,6 +203,11 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 		zap.String("url", url),
 		zap.String("model", c.model))
 
+	token, err := c.provider.Token(ctx)
+	if err != nil {
+		return "", err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(jsonValue)))
 	if err != nil {
 		c.logger.Error(i18n.T("llm.error.create_request_for", "Google AI"),
@@ -211,7 +217,7 @@ func (c *GeminiClient) executeRequest(ctx context.Context, jsonValue []byte) (st
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", c.apiKey)
+	req.Header.Set("x-goog-api-key", token)
 
 	startTime := time.Now()
 	resp, err := c.client.Do(req)
@@ -413,11 +419,16 @@ func (c *GeminiClient) getMaxTokens() int {
 func (c *GeminiClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	modelsURL := fmt.Sprintf("%s/models", c.baseURL)
 
+	token, err := c.provider.Token(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
-	req.Header.Set("x-goog-api-key", c.apiKey)
+	req.Header.Set("x-goog-api-key", token)
 
 	resp, err := c.client.Do(req)
 	if err != nil {

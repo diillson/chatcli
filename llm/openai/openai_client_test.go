@@ -7,11 +7,16 @@ import (
 	"os"
 	"testing"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
+
+func testProvider(key string) auth.TokenProvider {
+	return auth.NewStaticTokenProvider(key, auth.AuthModeAPIKey, "")
+}
 
 func TestOpenAIClient_SendPrompt_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -24,7 +29,7 @@ func TestOpenAIClient_SendPrompt_Success(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	client := NewOpenAIClient("test-api-key", "gpt-4o", logger, 1, 0)
+	client := NewOpenAIClient(testProvider("test-api-key"), "gpt-4o", logger, 1, 0)
 
 	// Injetar a URL do servidor mock
 	// Precisamos refatorar o cliente para permitir isso, como fizemos com Claude.

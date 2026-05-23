@@ -113,6 +113,11 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			fmt.Println(i18n.T("auth.logout.failed", err))
 			return
 		}
+		// Mirror /auth login: drop the manager's cached TokenProvider so the
+		// next request re-resolves from the now-empty store (or env fallback)
+		// instead of serving from the in-memory OAuth provider whose background
+		// refresh would keep running against the upstream server.
+		ch.cli.manager.RefreshProviders()
 		fmt.Println(i18n.T("auth.logout.success"))
 		return
 	default:

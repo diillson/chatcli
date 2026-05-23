@@ -486,20 +486,47 @@ func openBrowser(rawURL string) error {
 
 func FormatAuthStatus(logger *zap.Logger) string {
 	store := LoadStore(logger)
-	a := store.Profiles["anthropic:default"]
-	o := store.Profiles["openai-codex:default"]
-	g := store.Profiles["github-copilot:default"]
-	gm := store.Profiles["github-models:default"]
-	fmtAuth := func(c *AuthProfileCredential) string {
-		if c == nil {
-			return i18n.T("auth.login.status_not_connected")
+
+	// pickProfile returns the most user-relevant profile for a provider:
+	// prefer ":default" (created by /auth login), otherwise the first match.
+	// This catches synced profiles (anthropic-oauth-sync, anthropic:claude-cli)
+	// that the legacy hardcoded lookup missed.
+	pickProfile := func(p ProviderID) *AuthProfileCredential {
+		var fallback *AuthProfileCredential
+		for id, c := range store.Profiles {
+			if c == nil || c.Provider != p {
+				continue
+			}
+			if strings.HasSuffix(id, ":default") {
+				return c
+			}
+			if fallback == nil {
+				fallback = c
+			}
 		}
-		if c.Expires == 0 {
-			return i18n.T("auth.login.status_no_expiry", c.CredType)
-		}
-		return i18n.T("auth.login.status_format", c.CredType, FormatExpiry(c.Expires))
+		return fallback
 	}
-	return i18n.T("auth.login.status_display", fmtAuth(a), fmtAuth(o), fmtAuth(g), fmtAuth(gm))
+
+	fmtProvider := func(p ProviderID) string {
+		if c := pickProfile(p); c != nil {
+			if c.Expires == 0 {
+				return i18n.T("auth.login.status_no_expiry", c.CredType)
+			}
+			return i18n.T("auth.login.status_format", c.CredType, FormatExpiry(c.Expires))
+		}
+		// No store profile: surface the env fallback the runtime would use,
+		// so /auth status matches what message sends actually resolve to.
+		if tp := envFallbackProvider(p); tp != nil {
+			return i18n.T("auth.login.status_env", tp.Source())
+		}
+		return i18n.T("auth.login.status_not_connected")
+	}
+
+	return i18n.T("auth.login.status_display",
+		fmtProvider(ProviderAnthropic),
+		fmtProvider(ProviderOpenAICodex),
+		fmtProvider(ProviderGitHubCopilot),
+		fmtProvider(ProviderGitHubModels))
 }
 
 func Logout(provider ProviderID, logger *zap.Logger) error {

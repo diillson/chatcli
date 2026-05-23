@@ -82,6 +82,48 @@ type LLMManagerImpl struct {
 	mu               sync.RWMutex
 	stackspotRealm   string
 	stackspotAgentID string
+
+	tpMu           sync.Mutex
+	tokenProviders map[auth.ProviderID]auth.TokenProvider
+}
+
+// tokenProviderFor returns a cached TokenProvider for the given auth provider,
+// resolving it on first use. The returned provider owns a background refresh
+// goroutine that lives for the lifetime of the manager (closed on
+// RefreshProviders or Close).
+func (m *LLMManagerImpl) tokenProviderFor(provider auth.ProviderID) (auth.TokenProvider, error) {
+	m.tpMu.Lock()
+	defer m.tpMu.Unlock()
+	if m.tokenProviders == nil {
+		m.tokenProviders = make(map[auth.ProviderID]auth.TokenProvider)
+	}
+	if tp, ok := m.tokenProviders[provider]; ok {
+		return tp, nil
+	}
+	tp, err := auth.ResolveAuthProvider(context.Background(), provider, m.logger)
+	if err != nil {
+		return nil, err
+	}
+	m.tokenProviders[provider] = tp
+	return tp, nil
+}
+
+// closeTokenProviders releases every cached TokenProvider. Called when
+// credentials change at runtime (RefreshProviders) so the next resolve picks
+// up the new store contents.
+func (m *LLMManagerImpl) closeTokenProviders() {
+	m.tpMu.Lock()
+	for _, tp := range m.tokenProviders {
+		tp.Close()
+	}
+	m.tokenProviders = make(map[auth.ProviderID]auth.TokenProvider)
+	m.tpMu.Unlock()
+}
+
+// Close releases all resources owned by the manager (background refresh
+// goroutines, etc.). Safe to call multiple times.
+func (m *LLMManagerImpl) Close() {
+	m.closeTokenProviders()
 }
 
 // NewLLMManager cria uma nova instância de LLMManagerImpl.
@@ -98,6 +140,7 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 		logger:           logger,
 		stackspotRealm:   config.Global.GetString("STACKSPOT_REALM"),
 		stackspotAgentID: config.Global.GetString("STACKSPOT_AGENT_ID"),
+		tokenProviders:   make(map[auth.ProviderID]auth.TokenProvider),
 	}
 
 	manager.configurarOpenAIClient(maxRetries, initialBackoff)
@@ -288,8 +331,9 @@ func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff
 			if model == "" {
 				model = config.DefaultGoogleAIModel
 			}
+			provider := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
 			return googleai.NewGeminiClient(
-				apiKey,
+				provider,
 				model,
 				m.logger,
 				maxRetries,
@@ -302,29 +346,25 @@ func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff
 }
 
 // configurarOpenAIClient configura o cliente OpenAI se a variável de ambiente OPENAI_API_KEY estiver definida.
+// The factory picks `openai_responses` (ChatGPT backend) for OAuth tokens and
+// falls back to chat-completions for API keys; both flavors share the same
+// cached TokenProvider so the OAuth refresh loop runs only once.
 func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff time.Duration) {
-	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderOpenAI, m.logger)
-	if err != nil {
+	if _, err := m.tokenProviderFor(auth.ProviderOpenAI); err != nil {
 		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "OPENAI_API_KEY", "OPENAI"), zap.Error(err))
 		return
 	}
-	if resolved.APIKey == "" {
-		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "OPENAI_API_KEY", "OPENAI"))
-		return
-	}
 	m.clients["OPENAI"] = func(model string) (client.LLMClient, error) {
-		// Re-resolve auth on each client creation to pick up refreshed tokens
-		res, err := auth.ResolveAuth(context.Background(), auth.ProviderOpenAI, m.logger)
+		tp, err := m.tokenProviderFor(auth.ProviderOpenAI)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "OpenAI"), err)
 		}
-		apiKey := res.APIKey
 		if model == "" {
 			model = config.DefaultOpenAIModel
 		}
 
 		// OAuth tokens always use the Responses API (ChatGPT backend only speaks Responses format)
-		isOAuth := strings.HasPrefix(apiKey, "oauth:")
+		isOAuth := tp.Mode() == auth.AuthModeOAuth
 
 		useResponses := isOAuth || config.Global.GetBool("OPENAI_USE_RESPONSES", false)
 
@@ -335,25 +375,25 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 		if useResponses {
 			m.logger.Info(i18n.T("llm.manager.using_responses_api"), zap.String("model", model), zap.Bool("oauth", isOAuth))
 			return openai_responses.NewOpenAIResponsesClient(
-				apiKey, model, m.logger,
+				tp, model, m.logger,
 				maxRetries,
 				initialBackoff,
 			), nil
 		}
 
 		m.logger.Info(i18n.T("llm.manager.using_chat_completions"), zap.String("model", model))
-		return openai.NewOpenAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		return openai.NewOpenAIClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 	}
 
 	m.clients["OPENAI_ASSISTANT"] = func(model string) (client.LLMClient, error) {
-		res, err := auth.ResolveAuth(context.Background(), auth.ProviderOpenAI, m.logger)
+		tp, err := m.tokenProviderFor(auth.ProviderOpenAI)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "OpenAI"), err)
 		}
 		if model == "" {
 			model = config.DefaultOpenAiAssistModel
 		}
-		return openai_assistant.NewOpenAIAssistantClient(res.APIKey, model, m.logger)
+		return openai_assistant.NewOpenAIAssistantClient(tp, model, m.logger)
 	}
 }
 
@@ -393,18 +433,12 @@ func (m *LLMManagerImpl) configurarStackSpotClient(maxRetries int, initialBackof
 
 // configurarClaudeAIClient configura o cliente ClaudeAI
 func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff time.Duration) {
-	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderAnthropic, m.logger)
-	if err != nil {
+	if _, err := m.tokenProviderFor(auth.ProviderAnthropic); err != nil {
 		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "ANTHROPIC_API_KEY", "CLAUDEAI"), zap.Error(err))
 		return
 	}
-	if resolved.APIKey == "" {
-		m.logger.Warn(i18n.T("llm.warn.provider_not_available", "ANTHROPIC_API_KEY", "ClaudeAI"))
-		return
-	}
 	m.clients["CLAUDEAI"] = func(model string) (client.LLMClient, error) {
-		// Re-resolve auth on each client creation to pick up refreshed tokens
-		res, err := auth.ResolveAuth(context.Background(), auth.ProviderAnthropic, m.logger)
+		tp, err := m.tokenProviderFor(auth.ProviderAnthropic)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "Anthropic"), err)
 		}
@@ -412,7 +446,7 @@ func (m *LLMManagerImpl) configurarClaudeAIClient(maxRetries int, initialBackoff
 			model = config.DefaultClaudeAIModel
 		}
 		return claudeai.NewClaudeClient(
-			res.APIKey,
+			tp,
 			model,
 			m.logger,
 			maxRetries,
@@ -430,8 +464,9 @@ func (m *LLMManagerImpl) configurarXAIClient(maxRetries int, initialBackoff time
 			if model == "" {
 				model = config.DefaultXAIModel
 			}
+			provider := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
 			return xai.NewXAIClient(
-				apiKey,
+				provider,
 				model,
 				m.logger,
 				maxRetries,
@@ -451,8 +486,9 @@ func (m *LLMManagerImpl) configurarZAIClient(maxRetries int, initialBackoff time
 			if model == "" {
 				model = config.DefaultZAIModel
 			}
+			provider := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
 			return zai.NewZAIClient(
-				apiKey,
+				provider,
 				model,
 				m.logger,
 				maxRetries,
@@ -472,8 +508,9 @@ func (m *LLMManagerImpl) configurarMoonshotClient(maxRetries int, initialBackoff
 			if model == "" {
 				model = config.DefaultMoonshotModel
 			}
+			provider := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
 			return moonshot.NewMoonshotClient(
-				apiKey,
+				provider,
 				model,
 				m.logger,
 				maxRetries,
@@ -493,8 +530,9 @@ func (m *LLMManagerImpl) configurarMiniMaxClient(maxRetries int, initialBackoff 
 			if model == "" {
 				model = config.DefaultMiniMaxModel
 			}
+			provider := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
 			return minimax.NewMiniMaxClient(
-				apiKey,
+				provider,
 				model,
 				m.logger,
 				maxRetries,
@@ -590,25 +628,20 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 //
 //nolint:dupl // near-duplicate of configurarGitHubModelsClient but the
 func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff time.Duration) {
-	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubCopilot, m.logger)
-	if err != nil {
+	if _, err := m.tokenProviderFor(auth.ProviderGitHubCopilot); err != nil {
 		m.logger.Info(i18n.T("llm.warn.provider_not_configured", "GitHub Copilot", "COPILOT"), zap.Error(err))
-		return
-	}
-	if resolved.APIKey == "" {
 		return
 	}
 	m.logger.Info(i18n.T("llm.info.configuring_provider", "GitHub Copilot"))
 	m.clients["COPILOT"] = func(model string) (client.LLMClient, error) {
-		// Re-resolve auth on each client creation to pick up refreshed tokens
-		res, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubCopilot, m.logger)
+		tp, err := m.tokenProviderFor(auth.ProviderGitHubCopilot)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "GitHub Copilot"), err)
 		}
 		if model == "" {
 			model = config.DefaultCopilotModel
 		}
-		return copilot.NewClient(res.APIKey, model, m.logger, maxRetries, initialBackoff), nil
+		return copilot.NewClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 	}
 }
 
@@ -616,24 +649,20 @@ func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff 
 //
 //nolint:dupl // near-duplicate of configurarCopilotClient; see note there.
 func (m *LLMManagerImpl) configurarGitHubModelsClient(maxRetries int, initialBackoff time.Duration) {
-	resolved, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubModels, m.logger)
-	if err != nil {
+	if _, err := m.tokenProviderFor(auth.ProviderGitHubModels); err != nil {
 		m.logger.Info(i18n.T("llm.warn.provider_not_configured", "GitHub Models", "GITHUB_MODELS"), zap.Error(err))
-		return
-	}
-	if resolved.APIKey == "" {
 		return
 	}
 	m.logger.Info(i18n.T("llm.info.configuring_provider", "GitHub Models"))
 	m.clients["GITHUB_MODELS"] = func(model string) (client.LLMClient, error) {
-		res, err := auth.ResolveAuth(context.Background(), auth.ProviderGitHubModels, m.logger)
+		tp, err := m.tokenProviderFor(auth.ProviderGitHubModels)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "GitHub Models"), err)
 		}
 		if model == "" {
 			model = config.DefaultGitHubModelsModel
 		}
-		return github_models.NewGitHubModelsClient(res.APIKey, model, m.logger, maxRetries, initialBackoff), nil
+		return github_models.NewGitHubModelsClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 	}
 }
 
@@ -646,8 +675,9 @@ func (m *LLMManagerImpl) configurarOpenRouterClient(maxRetries int, initialBacko
 			if model == "" {
 				model = config.DefaultOpenRouterModel
 			}
+			provider := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
 			return openrouter.NewOpenRouterClient(
-				apiKey,
+				provider,
 				model,
 				m.logger,
 				maxRetries,
@@ -789,16 +819,18 @@ func (m *LLMManagerImpl) GetStackSpotAgentID() string {
 
 // RefreshProviders re-checks auth credentials and registers/updates providers.
 // Called after an OAuth login or token refresh at runtime.
-// Safe to call multiple times — only overwrites a factory if new credentials are available.
+// Closes the cached TokenProviders so the next call resolves from the fresh
+// store contents and starts a new background refresh goroutine.
 func (m *LLMManagerImpl) RefreshProviders() {
 	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
 	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
 
+	m.closeTokenProviders()
 	auth.InvalidateCache()
 
 	// Re-configure OAuth providers. configurar* only registers the factory
-	// if ResolveAuth succeeds, so an existing working factory is preserved
-	// when the new resolve fails (e.g. refresh token also expired).
+	// if the TokenProvider resolves, so an existing working factory is
+	// preserved when the new resolve fails (e.g. refresh token also expired).
 	m.configurarOpenAIClient(maxRetries, initialBackoff)
 	m.configurarClaudeAIClient(maxRetries, initialBackoff)
 	m.configurarCopilotClient(maxRetries, initialBackoff)
@@ -810,9 +842,9 @@ func (m *LLMManagerImpl) RefreshProviders() {
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key
-// instead of the server's default credentials. Supports OPENAI, CLAUDEAI,
-// GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, and COPILOT providers. Returns an
-// error for unsupported providers.
+// instead of the server's default credentials. The key is wrapped in a
+// non-refreshing TokenProvider — refresh-on-401 is handled by the originating
+// (remote) client, not the server forwarding the credential.
 func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (client.LLMClient, error) {
 	maxRetries := config.Global.GetInt("MAX_RETRIES", config.DefaultMaxRetries)
 	initialBackoff := config.Global.GetDuration("INITIAL_BACKOFF", config.DefaultInitialBackoff)
@@ -824,63 +856,72 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 		if model == "" {
 			model = config.DefaultOpenAIModel
 		}
-		isOAuth := strings.HasPrefix(apiKey, "oauth:")
+		tp := auth.NewStaticTokenProviderFromResolved(apiKey, auth.ProviderOpenAI)
+		isOAuth := tp.Mode() == auth.AuthModeOAuth
 		useResponses := isOAuth || config.Global.GetBool("OPENAI_USE_RESPONSES", false)
 		if !useResponses && catalog.GetPreferredAPI(catalog.ProviderOpenAI, model) == catalog.APIResponses {
 			useResponses = true
 		}
 		if useResponses {
-			return openai_responses.NewOpenAIResponsesClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+			return openai_responses.NewOpenAIResponsesClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 		}
-		return openai.NewOpenAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		return openai.NewOpenAIClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "CLAUDEAI":
 		if model == "" {
 			model = config.DefaultClaudeAIModel
 		}
-		return claudeai.NewClaudeClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		tp := auth.NewStaticTokenProviderFromResolved(apiKey, auth.ProviderAnthropic)
+		return claudeai.NewClaudeClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "GOOGLEAI":
 		if model == "" {
 			model = config.DefaultGoogleAIModel
 		}
-		return googleai.NewGeminiClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		tp := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
+		return googleai.NewGeminiClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "XAI":
 		if model == "" {
 			model = config.DefaultXAIModel
 		}
-		return xai.NewXAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		tp := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
+		return xai.NewXAIClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "ZAI":
 		if model == "" {
 			model = config.DefaultZAIModel
 		}
-		return zai.NewZAIClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		tp := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
+		return zai.NewZAIClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "MINIMAX":
 		if model == "" {
 			model = config.DefaultMiniMaxModel
 		}
-		return minimax.NewMiniMaxClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		tp := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
+		return minimax.NewMiniMaxClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "MOONSHOT":
 		if model == "" {
 			model = config.DefaultMoonshotModel
 		}
-		return moonshot.NewMoonshotClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		tp := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
+		return moonshot.NewMoonshotClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "COPILOT":
 		if model == "" {
 			model = config.DefaultCopilotModel
 		}
-		return copilot.NewClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		tp := auth.NewStaticTokenProviderFromResolved(apiKey, auth.ProviderGitHubCopilot)
+		return copilot.NewClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "OPENROUTER":
 		if model == "" {
 			model = config.DefaultOpenRouterModel
 		}
-		return openrouter.NewOpenRouterClient(apiKey, model, m.logger, maxRetries, initialBackoff), nil
+		tp := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
+		return openrouter.NewOpenRouterClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "BEDROCK":
 		if model == "" {

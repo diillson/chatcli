@@ -3,6 +3,7 @@ package claudeai
 import (
 	"testing"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -10,9 +11,9 @@ import (
 func newTestClient() *ClaudeClient {
 	logger, _ := zap.NewDevelopment()
 	return &ClaudeClient{
-		apiKey: "test-key",
-		model:  "claude-sonnet-4-20250514",
-		logger: logger,
+		provider: auth.NewStaticTokenProvider("test-key", auth.AuthModeAPIKey, auth.ProviderAnthropic),
+		model:    "claude-sonnet-4-20250514",
+		logger:   logger,
 	}
 }
 

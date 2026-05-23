@@ -32,7 +32,7 @@ import (
 // OpenRouter is an OpenAI-compatible gateway that routes requests to
 // multiple LLM providers (OpenAI, Anthropic, Google, Meta, etc.).
 type OpenRouterClient struct {
-	apiKey      string
+	provider    auth.TokenProvider
 	model       string
 	logger      *zap.Logger
 	client      *http.Client
@@ -48,11 +48,11 @@ func (c *OpenRouterClient) LastUsage() *models.UsageInfo { return c.usageState.L
 func (c *OpenRouterClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewOpenRouterClient creates a new OpenRouter client instance.
-func NewOpenRouterClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenRouterClient {
+func NewOpenRouterClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenRouterClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 
 	return &OpenRouterClient{
-		apiKey:      apiKey,
+		provider:    provider,
 		model:       model,
 		logger:      logger,
 		client:      httpClient,
@@ -231,10 +231,13 @@ func (c *OpenRouterClient) SendPrompt(ctx context.Context, prompt string, histor
 	)
 
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		resp, err := c.sendRequest(ctx, jsonValue)
+		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			return c.sendRequest(ctx, jsonValue, token)
+		})
 		if err != nil {
 			return "", err
 		}
+		defer func() { _ = resp.Body.Close() }()
 		return c.processResponse(resp)
 	})
 
@@ -251,7 +254,7 @@ func (c *OpenRouterClient) SendPrompt(ctx context.Context, prompt string, histor
 }
 
 // sendRequest sends the HTTP request to the OpenRouter API with proper headers.
-func (c *OpenRouterClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
+func (c *OpenRouterClient) sendRequest(ctx context.Context, jsonValue []byte, token string) (*http.Response, error) {
 	apiURL := c.getAPIURL()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
@@ -261,7 +264,7 @@ func (c *OpenRouterClient) sendRequest(ctx context.Context, jsonValue []byte) (*
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	// OpenRouter-specific headers for attribution and analytics
 	if referer := os.Getenv("OPENROUTER_HTTP_REFERER"); referer != "" {
@@ -271,12 +274,7 @@ func (c *OpenRouterClient) sendRequest(ctx context.Context, jsonValue []byte) (*
 		req.Header.Set("X-Title", title)
 	}
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
+	return c.client.Do(req)
 }
 
 // processResponse parses the OpenRouter API response, handling both
@@ -366,14 +364,15 @@ func (c *OpenRouterClient) ListModels(ctx context.Context) ([]client.ModelInfo, 
 	baseURL := c.getAPIURL()
 	modelsURL := strings.TrimSuffix(baseURL, "/chat/completions") + "/models"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
-	}
-	// Auth is optional for /models but included for consistency
-	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
-
-	resp, err := c.client.Do(req)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
+		}
+		// Auth is optional for /models but included for consistency
+		req.Header.Set("Authorization", "Bearer "+token)
+		return c.client.Do(req)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "OpenRouter"), err)
 	}

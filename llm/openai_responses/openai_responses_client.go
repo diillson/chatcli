@@ -30,7 +30,7 @@ import (
 
 // OpenAIResponsesClient implementa o cliente para a API /v1/responses
 type OpenAIResponsesClient struct {
-	apiKey      string
+	provider    auth.TokenProvider
 	model       string
 	logger      *zap.Logger
 	httpClient  *http.Client
@@ -47,16 +47,16 @@ func (c *OpenAIResponsesClient) LastStopReason() string { return c.usageState.La
 
 // NewOpenAIResponsesClient cria uma nova instância de OpenAIResponsesClient.
 // Agora sem fallback interno: usa apenas os params passados (vindos do manager/ENVs).
-func NewOpenAIResponsesClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenAIResponsesClient {
+func NewOpenAIResponsesClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *OpenAIResponsesClient {
 	var httpClient *http.Client
-	if strings.HasPrefix(apiKey, "oauth:") {
+	if provider.Mode() == auth.AuthModeOAuth {
 		// OAuth requests go to chatgpt.com which requires a browser-like TLS fingerprint
 		httpClient = utils.NewHTTPClientWithTransport(logger, 900*time.Second, utils.NewChromeTLSTransport())
 	} else {
 		httpClient = utils.NewHTTPClient(logger, 900*time.Second)
 	}
 	return &OpenAIResponsesClient{
-		apiKey:      apiKey,
+		provider:    provider,
 		model:       strings.ToLower(model),
 		logger:      logger,
 		httpClient:  httpClient,
@@ -99,7 +99,7 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 		effectiveMaxTokens = c.getMaxTokens()
 	}
 
-	isOAuth := strings.HasPrefix(c.apiKey, "oauth:")
+	isOAuth := c.provider.Mode() == auth.AuthModeOAuth
 
 	var reqBody map[string]interface{}
 
@@ -159,10 +159,13 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 
 	// Retry para encapsular a lógica de requisição e parsing
 	response, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		resp, err := c.sendRequest(ctx, jsonValue)
+		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+			return c.sendRequest(ctx, jsonValue, token)
+		})
 		if err != nil {
 			return "", err
 		}
+		defer func() { _ = resp.Body.Close() }()
 		if isOAuth {
 			return c.processStreamResponse(resp)
 		}
@@ -184,10 +187,10 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 	return response, nil
 }
 
-func (c *OpenAIResponsesClient) sendRequest(ctx context.Context, body []byte) (*http.Response, error) {
+func (c *OpenAIResponsesClient) sendRequest(ctx context.Context, body []byte, token string) (*http.Response, error) {
 	// OAuth tokens use the ChatGPT backend; API keys use the platform API
 	var apiURL string
-	if strings.HasPrefix(c.apiKey, "oauth:") {
+	if c.provider.Mode() == auth.AuthModeOAuth {
 		apiURL = utils.GetEnvOrDefault("OPENAI_RESPONSES_API_URL", config.OpenAIOAuthResponsesURL)
 	} else {
 		apiURL = utils.GetEnvOrDefault("OPENAI_RESPONSES_API_URL", config.OpenAIResponsesAPIURL)
@@ -198,13 +201,9 @@ func (c *OpenAIResponsesClient) sendRequest(ctx context.Context, body []byte) (*
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.responses.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
+	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
+	return c.httpClient.Do(req)
 }
 
 func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, error) {
@@ -406,7 +405,7 @@ func buildOAuthPayload(history []models.Message, prompt string) (string, []map[s
 // Cloudflare challenges). The LLMManager merges with the static catalog, so
 // OAuth users still see all known Codex-compatible models.
 func (c *OpenAIResponsesClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
-	if strings.HasPrefix(c.apiKey, "oauth:") {
+	if c.provider.Mode() == auth.AuthModeOAuth {
 		return nil, nil
 	}
 	return c.listModelsAPIKey(ctx)
@@ -417,13 +416,14 @@ func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.
 	modelsURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
 	modelsURL = strings.TrimSuffix(modelsURL, "/chat/completions") + "/models"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "OpenAI"), err)
-	}
-	req.Header.Set("Authorization", "Bearer "+auth.StripAuthPrefix(c.apiKey))
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request_for", "OpenAI"), err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		return c.httpClient.Do(req)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.request_failed", "OpenAI"), err)
 	}

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -29,7 +30,7 @@ import (
 // ZAIClient implementa o cliente para interagir com a API da ZAI (Zhipu AI / z.ai).
 // A API é compatível com o formato OpenAI (chat/completions).
 type ZAIClient struct {
-	apiKey      string
+	provider    auth.TokenProvider
 	model       string
 	logger      *zap.Logger
 	client      *http.Client
@@ -48,10 +49,12 @@ func (c *ZAIClient) LastUsage() *models.UsageInfo { return c.usageState.LastUsag
 func (c *ZAIClient) LastStopReason() string { return c.usageState.LastStopReason() }
 
 // NewZAIClient cria uma nova instância de ZAIClient.
-func NewZAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ZAIClient {
+// ZAI doesn't use OAuth; the provider yields either a raw API key or an
+// `id.secret` pair that the client compiles into a JWT on each request.
+func NewZAIClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ZAIClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 	c := &ZAIClient{
-		apiKey:      apiKey,
+		provider:    provider,
 		model:       strings.ToLower(model),
 		logger:      logger,
 		client:      httpClient,
@@ -60,9 +63,11 @@ func NewZAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, bac
 		apiURL:      config.ZAIAPIURL,
 	}
 
-	// Enable JWT auth if the API key is in id.secret format
-	if strings.Contains(apiKey, ".") {
-		parts := strings.SplitN(apiKey, ".", 2)
+	// Detect the id.secret JWT format from the current token. ZAI keys are
+	// static, so a one-shot probe is sufficient.
+	probe, _ := provider.Token(context.Background())
+	if strings.Contains(probe, ".") {
+		parts := strings.SplitN(probe, ".", 2)
 		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
 			c.useJWT = true
 			c.jwtAuth = &jwtCache{}
@@ -74,10 +79,15 @@ func NewZAIClient(apiKey, model string, logger *zap.Logger, maxAttempts int, bac
 
 // getAuthToken returns the appropriate auth token for the Authorization header.
 // If JWT auth is enabled, it returns a cached JWT or generates a new one.
-// Otherwise, it returns the raw API key.
-func (c *ZAIClient) getAuthToken() string {
+// Otherwise, it returns the raw API key supplied by the TokenProvider.
+func (c *ZAIClient) getAuthToken(ctx context.Context) string {
+	raw, err := c.provider.Token(ctx)
+	if err != nil {
+		c.logger.Warn(i18n.T("llm.zai.jwt_invalid_key"), zap.Error(err))
+		return ""
+	}
 	if !c.useJWT {
-		return c.apiKey
+		return raw
 	}
 
 	// Check cache first (with 5-minute safety margin)
@@ -87,10 +97,10 @@ func (c *ZAIClient) getAuthToken() string {
 	}
 
 	// Generate new JWT
-	token, expiresAt, err := generateZAIJWT(c.apiKey, config.DefaultZAIJWTTTL)
+	token, expiresAt, err := generateZAIJWT(raw, config.DefaultZAIJWTTTL)
 	if err != nil {
 		c.logger.Warn(i18n.T("llm.zai.jwt_invalid_key"), zap.Error(err))
-		return c.apiKey
+		return raw
 	}
 
 	c.jwtAuth.setToken(token, expiresAt)
@@ -162,6 +172,7 @@ func (c *ZAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 		if err != nil {
 			return "", err
 		}
+		defer func() { _ = resp.Body.Close() }()
 		return c.processResponse(resp)
 	})
 
@@ -187,14 +198,9 @@ func (c *ZAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Re
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.getAuthToken())
+	req.Header.Set("Authorization", "Bearer "+c.getAuthToken(ctx))
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
+	return c.client.Do(req)
 }
 
 // processResponse processa a resposta da API da ZAI.
@@ -271,7 +277,7 @@ func (c *ZAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) 
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.getAuthToken())
+	req.Header.Set("Authorization", "Bearer "+c.getAuthToken(ctx))
 
 	resp, err := c.client.Do(req)
 	if err != nil {
