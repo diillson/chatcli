@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.122.0](https://github.com/diillson/chatcli/compare/v1.121.0...v1.122.0) (2026-05-23)
+
+
+### Features
+
+* **aiops:** close 5 gaps surfaced by 2026-05-23 chaos test ([#950](https://github.com/diillson/chatcli/issues/950)) ([68a4751](https://github.com/diillson/chatcli/commit/68a4751fba5172cbc246c6c301d623660334a969))
+
 ## [1.121.0](https://github.com/diillson/chatcli/compare/v1.120.0...v1.121.0) (2026-05-23)
 
 
