@@ -59,9 +59,65 @@ export PATH="$GOBIN:$PATH"
       output:crd:dir=config/crd/bases ) >/dev/null
 
 if git -C "$QG_REPO_ROOT" diff --quiet -- 'operator/config/crd/bases/'; then
-  qg_set_output passed true
-  qg_set_output drifted_files 0
-  qg_set_summary_line "✅ **CRD drift**: regenerated YAML matches commit"
+  # Generator-vs-checked-in YAML is clean — but the chart copies under
+  # deploy/helm/*/crds/ must also match. This is GAP-06 territory: the
+  # 1.122.0 release shipped controller logic that wrote new fields and an
+  # enum value the chart CRDs did NOT carry, and runtime rejections went
+  # silently undetected by the gate. Below we diff the canonical
+  # operator/config/crd/bases/ against each chart's crds/ directory file-by-file.
+  chart_drifted=""
+  for chart_crds in "$QG_REPO_ROOT/deploy/helm/chatcli-operator/crds" "$QG_REPO_ROOT/deploy/helm/chatcli/crds"; do
+    if [[ ! -d "$chart_crds" ]]; then
+      continue
+    fi
+    for src in "$QG_REPO_ROOT/operator/config/crd/bases/"*.yaml; do
+      name=$(basename "$src")
+      dst="$chart_crds/$name"
+      if [[ ! -f "$dst" ]]; then
+        chart_drifted+="$chart_crds/$name (missing) "
+        continue
+      fi
+      if ! diff -q "$src" "$dst" >/dev/null 2>&1; then
+        chart_drifted+="$chart_crds/$name "
+      fi
+    done
+  done
+
+  if [[ -z "$chart_drifted" ]]; then
+    qg_set_output passed true
+    qg_set_output drifted_files 0
+    qg_set_summary_line "✅ **CRD drift**: regenerated YAML matches commit AND chart copies in sync"
+    exit 0
+  fi
+
+  qg_set_output passed false
+  qg_set_output drifted_files "${chart_drifted% }"
+  {
+    echo "## CRD drift detected (chart copies out of sync — GAP-06 class)"
+    echo
+    echo "The canonical CRDs under \`operator/config/crd/bases/\` match the Go"
+    echo "types, but one or more Helm chart copies diverge. Users upgrading the"
+    echo "chart will run the new controller binary against a stale CRD schema"
+    echo "(exactly the GAP-06 regression from the 2026-05-23 chaos test)."
+    echo
+    echo "Drifted chart copies:"
+    echo '```'
+    echo "${chart_drifted% }"
+    echo '```'
+    echo
+    echo "Sync them locally:"
+    echo '```bash'
+    echo "cp operator/config/crd/bases/*.yaml deploy/helm/chatcli-operator/crds/"
+    echo "cp operator/config/crd/bases/*.yaml deploy/helm/chatcli/crds/"
+    echo '```'
+  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+  msg="CRD drift (chart copies): ${chart_drifted% }"
+  if [[ "$enforcement" == "blocking" ]]; then
+    qg_fail "$msg"
+    exit 1
+  fi
+  qg_warn "$msg"
   exit 0
 fi
 

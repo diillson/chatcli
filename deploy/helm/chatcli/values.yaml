@@ -170,6 +170,35 @@ rbac:
   # Additional rules beyond the defaults
   additionalRules: []
 
+# CRD lifecycle management.
+#
+# Helm only applies files from the chart's crds/ directory on first install —
+# `helm upgrade` skips them by design (Helm 3 hard restriction). That leaves
+# users upgrading between chart versions running the new chatcli binary
+# against the OLD CRD schema, which surfaced as GAP-06 in the 2026-05-23 chaos
+# test (chart 1.121.0 -> 1.122.0 added IssueState Contained and the
+# PostMortemSpec.RequiresHumanAction/RequiredAction fields).
+#
+# This block controls the pre-install/pre-upgrade hook that re-applies every
+# CRD shipped with the chart so the schema is always in sync with the binary.
+# Disable only if you manage CRDs out of band (separate cert-manager-crds-style
+# chart, GitOps with explicit CRD application, etc.).
+crdUpgrade:
+  enabled: true
+  image:
+    repository: bitnami/kubectl
+    tag: "1.31"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  tolerations: []
+  nodeSelector: {}
+
 service:
   type: ClusterIP
   port: 50051
