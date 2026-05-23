@@ -714,7 +714,7 @@ func (r *RemediationReconciler) loadIssueForAgenticStep(ctx context.Context, pla
 
 // callAgenticStepRPC composes the AgenticStep request — including the GAP-01
 // AIInsight context — and invokes the server. RPC errors are non-terminal
-// (the loop simply retries on the next reconcile), signalled by returning a
+// (the loop simply retries on the next reconcile), signaled by returning a
 // nil response and a non-zero RequeueAfter.
 func (r *RemediationReconciler) callAgenticStepRPC(ctx context.Context, plan *platformv1alpha1.RemediationPlan, issue *platformv1alpha1.Issue, maxSteps, currentStep int32, log logr.Logger) (*pb.AgenticStepResponse, ctrl.Result) {
 	resource := issue.Spec.Resource
@@ -833,7 +833,7 @@ func (r *RemediationReconciler) handleAgenticObservation(ctx context.Context, pl
 		Observation: "Observation step — no action taken",
 		Timestamp:   metav1.Now(),
 	})
-	if res, err := r.persistAgenticStep(ctx, plan); err != nil || res.Requeue || res.RequeueAfter > 0 {
+	if res, err := r.persistAgenticStep(ctx, plan); err != nil || res.RequeueAfter > 0 {
 		return res, err
 	}
 	log.Info("Agentic observation step", "plan", plan.Name, "step", currentStep)
@@ -864,7 +864,7 @@ func (r *RemediationReconciler) executeAgenticAction(ctx context.Context, plan *
 		Timestamp:   metav1.Now(),
 	})
 
-	if res, err := r.persistAgenticStep(ctx, plan); err != nil || res.Requeue || res.RequeueAfter > 0 {
+	if res, err := r.persistAgenticStep(ctx, plan); err != nil || res.RequeueAfter > 0 {
 		return res, err
 	}
 	log.Info("Agentic step completed", "plan", plan.Name, "step", currentStep,
@@ -895,7 +895,11 @@ func (r *RemediationReconciler) persistAgenticStep(ctx context.Context, plan *pl
 
 	if err := r.Update(ctx, plan); err != nil {
 		if errors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			// Silent fast retry on optimistic-locking conflict. RequeueAfter
+			// (controller-runtime's non-deprecated equivalent of Requeue=true)
+			// pairs with nil err so the controller doesn't log the conflict
+			// at Error severity — concurrent reconciles are normal under load.
+			return ctrl.Result{RequeueAfter: conflictRetryDelay}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -910,6 +914,12 @@ func (r *RemediationReconciler) persistAgenticStep(ctx context.Context, plan *pl
 	}
 	return ctrl.Result{}, nil
 }
+
+// conflictRetryDelay is the small wait we apply when an optimistic-locking
+// conflict bounces us out of a spec Update. The default controller-runtime
+// rate limiter would back off much harder; this short jitter lets us pick
+// up the next reconcile attempt quickly under normal load.
+const conflictRetryDelay = 250 * time.Millisecond
 
 // loadAIInsightForAgenticContext fetches the AIInsight CR associated with the
 // issue (best-effort) and converts its conclusion into the fields that get
@@ -931,7 +941,7 @@ func (r *RemediationReconciler) loadAIInsightForAgenticContext(ctx context.Conte
 	for _, sa := range insight.Status.SuggestedActions {
 		actions = append(actions, &pb.SuggestedAction{
 			Name:        sa.Name,
-			Action:      string(sa.Action),
+			Action:      sa.Action,
 			Description: sa.Description,
 			Params:      sa.Params,
 		})
@@ -1465,7 +1475,7 @@ func chainValidators(vs ...actionValidator) actionValidator {
 // stop-the-bleeding signal — see AnalyzeIssue prompt rules in handler_analysis.go.
 //
 // The error message preserves the pre-existing user-visible wording verbatim
-// (Deployment: no label; StatefulSet: labelled). Tests, runbooks and operator
+// (Deployment: no label; StatefulSet: labeled). Tests, runbooks and operator
 // log parsers grep for those exact substrings, so this asymmetry is held
 // stable on purpose — uniformising the wording is its own future change.
 func scaleToZeroRequiresContainment(errorMsg string) actionValidator {
@@ -1491,7 +1501,7 @@ const (
 )
 
 // requireConfirm enforces an explicit "confirm=true" param on highly destructive
-// actions (PVC recreation). Modelled after kubectl --force semantics.
+// actions (PVC recreation). Modeled after kubectl --force semantics.
 func requireConfirm(action platformv1alpha1.RemediationAction, _ []platformv1alpha1.RemediationAction) error {
 	if action.Params["confirm"] != "true" {
 		return fmt.Errorf("%s requires confirm=true (destructive)", action.Type)

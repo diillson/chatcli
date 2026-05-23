@@ -343,7 +343,7 @@ func TestPostMortemReconciler_RevertsPrematureClose(t *testing.T) {
 }
 
 // TestHumanActionAcknowledged covers the predicate that gates the PostMortem
-// close-revert behaviour. Accepts a small set of truthy values so manual
+// close-revert behavior. Accepts a small set of truthy values so manual
 // `kubectl annotate` users don't get tripped up.
 func TestHumanActionAcknowledged(t *testing.T) {
 	cases := []struct {
@@ -413,11 +413,17 @@ func TestAlertHash_DifferentUIDs(t *testing.T) {
 
 // TestAlertHash_StableWithinUID guards the inverse: the same alert with the
 // same UID must produce the same hash on every poll cycle, otherwise an
-// ongoing CrashLoopBackOff would create one Anomaly per 30s poll.
+// ongoing CrashLoopBackOff would create one Anomaly per 30s poll. Calls the
+// hash function on two independently-constructed alerts so the equality
+// check is testing the function's determinism, not Go's evaluator.
 func TestAlertHash_StableWithinUID(t *testing.T) {
-	alert := &pb.WatcherAlert{Type: "CrashLoopBackOff", Deployment: "web", Namespace: "default"}
-	if alertHash(alert, "uid-X") != alertHash(alert, "uid-X") {
-		t.Fatalf("alertHash must be deterministic for a (type, deployment, namespace, uid) tuple")
+	mkAlert := func() *pb.WatcherAlert {
+		return &pb.WatcherAlert{Type: "CrashLoopBackOff", Deployment: "web", Namespace: "default"}
+	}
+	first := alertHash(mkAlert(), "uid-X")
+	second := alertHash(mkAlert(), "uid-X")
+	if first != second {
+		t.Fatalf("alertHash must be deterministic for a (type, deployment, namespace, uid) tuple, got %q vs %q", first, second)
 	}
 }
 

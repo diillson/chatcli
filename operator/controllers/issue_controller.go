@@ -1012,7 +1012,9 @@ func (r *IssueReconciler) handleContained(ctx context.Context, issue *platformv1
 	}
 	r.invalidateDedup(issue)
 	if r.AuditRecorder != nil {
-		r.AuditRecorder.RecordIssueResolved(ctx, issue)
+		if recErr := r.AuditRecorder.RecordIssueResolved(ctx, issue); recErr != nil {
+			log.Error(recErr, "Failed to record audit event for resolved issue after containment")
+		}
 	}
 	issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateResolved)).Inc()
 	return ctrl.Result{}, nil
@@ -1429,7 +1431,7 @@ func buildPostMortemActions(plan *platformv1alpha1.RemediationPlan, now metav1.T
 // agenticHistoryToActionRecords extracts action records from agentic history,
 // skipping observation-only steps (Action == nil).
 func agenticHistoryToActionRecords(history []platformv1alpha1.AgenticStep) []platformv1alpha1.ActionRecord {
-	var records []platformv1alpha1.ActionRecord
+	records := make([]platformv1alpha1.ActionRecord, 0, len(history))
 	for _, step := range history {
 		if step.Action == nil {
 			continue
