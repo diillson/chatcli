@@ -501,8 +501,8 @@
           "description": "Container image for the kubectl-apply Job that ships with the hook.",
           "additionalProperties": false,
           "properties": {
-            "repository": {"type": "string", "description": "Image repository.", "default": "bitnami/kubectl"},
-            "tag": {"type": "string", "description": "Image tag.", "default": "1.31"},
+            "repository": {"type": "string", "description": "Image repository. Defaults to the official Kubernetes-project distroless kubectl image at registry.k8s.io.", "default": "registry.k8s.io/kubectl"},
+            "tag": {"type": "string", "description": "Image tag. Must be a fully-qualified patch tag (e.g. v1.31.10) — major-minor stubs like v1.31 are NOT resolvable on registry.k8s.io.", "default": "v1.31.10"},
             "pullPolicy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"], "description": "Image pull policy.", "default": "IfNotPresent"}
           }
         },
