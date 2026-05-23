@@ -2104,9 +2104,9 @@ async function loadPostMortems() {
         <td>${escapeHtml(item.issueRef || '-')}</td>
         <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
         <td class="btn-group">
-          ${item.state !== 'Closed' ? `<button class="btn" onclick="event.stopPropagation(); reviewPM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Review</button>` : ''}
-          ${item.state === 'InReview' && !item.requiresHumanAction ? `<button class="btn btn-success" onclick="event.stopPropagation(); closePM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Close</button>` : ''}
-          ${item.requiresHumanAction ? `<button class="btn" style="background:#9b59b6;color:#fff;font-weight:700" onclick="event.stopPropagation(); ackHumanAction('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')" title="Acknowledge that the required action has been performed">Ack Human Action</button>` : ''}
+          ${item.state !== 'Closed' && !item.requiresHumanAction ? `<button class="btn" onclick="event.stopPropagation(); reviewPM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Review</button>` : ''}
+          ${item.state !== 'Closed' && !item.requiresHumanAction ? `<button class="btn btn-success" onclick="event.stopPropagation(); closePM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Close</button>` : ''}
+          ${item.requiresHumanAction ? `<button class="btn" style="background:#9b59b6;color:#fff;font-weight:700" onclick="event.stopPropagation(); ackHumanAction('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')" title="Acknowledge that the required action has been performed (clears requiresHumanAction and unblocks Close)">Ack Human Action</button>` : ''}
         </td>
       `;
       mainRow.addEventListener('click', () => togglePMExpand(id, item, mainRow));
