@@ -986,7 +986,9 @@ func (r *RemediationReconciler) executeScaleStatefulSet(ctx context.Context, res
 	return r.Update(ctx, &sts)
 }
 
-func (r *RemediationReconciler) executeRestartStatefulSet(ctx context.Context, resource platformv1alpha1.ResourceRef) error {
+// executeRestartStatefulSet triggers an ordered rolling restart of all pods.
+// Conforms to the uniform actionExecutor signature; params is unused.
+func (r *RemediationReconciler) executeRestartStatefulSet(ctx context.Context, resource platformv1alpha1.ResourceRef, _ map[string]string) error {
 	var sts appsv1.StatefulSet
 	if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &sts); err != nil {
 		return fmt.Errorf("failed to get StatefulSet %s/%s: %w", resource.Namespace, resource.Name, err)
@@ -1179,7 +1181,9 @@ func (r *RemediationReconciler) executePartitionStatefulSetUpdate(ctx context.Co
 // DaemonSet Actions (7)
 // ============================================================================
 
-func (r *RemediationReconciler) executeRestartDaemonSet(ctx context.Context, resource platformv1alpha1.ResourceRef) error {
+// executeRestartDaemonSet triggers a cluster-wide rolling restart of the
+// DaemonSet's pods. Conforms to the uniform actionExecutor signature; params is unused.
+func (r *RemediationReconciler) executeRestartDaemonSet(ctx context.Context, resource platformv1alpha1.ResourceRef, _ map[string]string) error {
 	var ds appsv1.DaemonSet
 	if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &ds); err != nil {
 		return fmt.Errorf("failed to get DaemonSet %s/%s: %w", resource.Namespace, resource.Name, err)
@@ -1310,7 +1314,9 @@ func (r *RemediationReconciler) executeUpdateDaemonSetStrategy(ctx context.Conte
 	return r.Update(ctx, &ds)
 }
 
-func (r *RemediationReconciler) executePauseDaemonSetRollout(ctx context.Context, resource platformv1alpha1.ResourceRef) error {
+// executePauseDaemonSetRollout sets maxUnavailable=0 to halt an in-flight roll-out.
+// Conforms to the uniform actionExecutor signature; params is unused.
+func (r *RemediationReconciler) executePauseDaemonSetRollout(ctx context.Context, resource platformv1alpha1.ResourceRef, _ map[string]string) error {
 	var ds appsv1.DaemonSet
 	if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &ds); err != nil {
 		return fmt.Errorf("failed to get DaemonSet: %w", err)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -531,235 +532,197 @@ func (r *RemediationReconciler) handleVerifying(ctx context.Context, plan *platf
 }
 
 // executeAction dispatches a single remediation action to the appropriate handler.
+// actionExecutor is the canonical signature every per-action executor satisfies.
+// The dispatcher table maps RemediationActionType to one of these method values,
+// which keeps executeAction at constant cyclomatic complexity regardless of how
+// many action kinds the platform supports. Executors that do not consume params
+// declare the parameter as `_ map[string]string` to make that intent explicit.
+type actionExecutor func(*RemediationReconciler, context.Context, platformv1alpha1.ResourceRef, map[string]string) error
+
+// actionExecutors is the dispatch table: RemediationActionType → executor.
+// Adding a new action requires (1) defining the enum constant, (2) implementing
+// the executor method on RemediationReconciler with the actionExecutor signature,
+// (3) adding the entry here, and (4) registering the name → enum mapping in
+// actionTypeByName (issue_controller.go).
+var actionExecutors = map[platformv1alpha1.RemediationActionType]actionExecutor{
+	// Core workload actions
+	platformv1alpha1.ActionScaleDeployment:       (*RemediationReconciler).executeScaleDeployment,
+	platformv1alpha1.ActionRollbackDeployment:    (*RemediationReconciler).executeRollbackDeployment,
+	platformv1alpha1.ActionRestartDeployment:     (*RemediationReconciler).executeRestartDeployment,
+	platformv1alpha1.ActionPatchConfig:           (*RemediationReconciler).executePatchConfig,
+	platformv1alpha1.ActionAdjustResources:       (*RemediationReconciler).executeAdjustResources,
+	platformv1alpha1.ActionDeletePod:             (*RemediationReconciler).executeDeletePod,
+	platformv1alpha1.ActionHelmRollback:          (*RemediationReconciler).executeHelmRollback,
+	platformv1alpha1.ActionArgoSyncApp:           (*RemediationReconciler).executeArgoSyncApp,
+	platformv1alpha1.ActionAdjustHPA:             (*RemediationReconciler).executeAdjustHPA,
+	platformv1alpha1.ActionRestartStatefulSetPod: (*RemediationReconciler).executeRestartStatefulSetPod,
+	platformv1alpha1.ActionCordonNode:            (*RemediationReconciler).executeCordonNode,
+	platformv1alpha1.ActionUncordonNode:          (*RemediationReconciler).executeUncordonNode,
+	platformv1alpha1.ActionDrainNode:             (*RemediationReconciler).executeDrainNode,
+	platformv1alpha1.ActionResizePVC:             (*RemediationReconciler).executeResizePVC,
+	platformv1alpha1.ActionRotateSecret:          (*RemediationReconciler).executeRotateSecret,
+	platformv1alpha1.ActionExecDiagnostic:        (*RemediationReconciler).executeExecDiagnostic,
+	platformv1alpha1.ActionUpdateIngress:         (*RemediationReconciler).executeUpdateIngress,
+	platformv1alpha1.ActionPatchNetworkPolicy:    (*RemediationReconciler).executePatchNetworkPolicy,
+	platformv1alpha1.ActionApplyManifest:         (*RemediationReconciler).executeApplyManifest,
+
+	// StatefulSet
+	platformv1alpha1.ActionScaleStatefulSet:           (*RemediationReconciler).executeScaleStatefulSet,
+	platformv1alpha1.ActionRestartStatefulSet:         (*RemediationReconciler).executeRestartStatefulSet,
+	platformv1alpha1.ActionRollbackStatefulSet:        (*RemediationReconciler).executeRollbackStatefulSet,
+	platformv1alpha1.ActionAdjustStatefulSetResources: (*RemediationReconciler).executeAdjustStatefulSetResources,
+	platformv1alpha1.ActionDeleteStatefulSetPod:       (*RemediationReconciler).executeDeleteStatefulSetPod,
+	platformv1alpha1.ActionForceDeleteStatefulSetPod:  (*RemediationReconciler).executeForceDeleteStatefulSetPod,
+	platformv1alpha1.ActionUpdateStatefulSetStrategy:  (*RemediationReconciler).executeUpdateStatefulSetStrategy,
+	platformv1alpha1.ActionRecreateStatefulSetPVC:     (*RemediationReconciler).executeRecreateStatefulSetPVC,
+	platformv1alpha1.ActionPartitionStatefulSetUpdate: (*RemediationReconciler).executePartitionStatefulSetUpdate,
+
+	// DaemonSet
+	platformv1alpha1.ActionRestartDaemonSet:            (*RemediationReconciler).executeRestartDaemonSet,
+	platformv1alpha1.ActionRollbackDaemonSet:           (*RemediationReconciler).executeRollbackDaemonSet,
+	platformv1alpha1.ActionAdjustDaemonSetResources:    (*RemediationReconciler).executeAdjustDaemonSetResources,
+	platformv1alpha1.ActionDeleteDaemonSetPod:          (*RemediationReconciler).executeDeleteDaemonSetPod,
+	platformv1alpha1.ActionUpdateDaemonSetStrategy:     (*RemediationReconciler).executeUpdateDaemonSetStrategy,
+	platformv1alpha1.ActionPauseDaemonSetRollout:       (*RemediationReconciler).executePauseDaemonSetRollout,
+	platformv1alpha1.ActionCordonAndDeleteDaemonSetPod: (*RemediationReconciler).executeCordonAndDeleteDaemonSetPod,
+
+	// Job
+	platformv1alpha1.ActionRetryJob:              (*RemediationReconciler).executeRetryJob,
+	platformv1alpha1.ActionAdjustJobResources:    (*RemediationReconciler).executeAdjustJobResources,
+	platformv1alpha1.ActionDeleteFailedJob:       (*RemediationReconciler).executeDeleteFailedJob,
+	platformv1alpha1.ActionSuspendJob:            (*RemediationReconciler).executeSuspendJob,
+	platformv1alpha1.ActionResumeJob:             (*RemediationReconciler).executeResumeJob,
+	platformv1alpha1.ActionAdjustJobParallelism:  (*RemediationReconciler).executeAdjustJobParallelism,
+	platformv1alpha1.ActionAdjustJobDeadline:     (*RemediationReconciler).executeAdjustJobDeadline,
+	platformv1alpha1.ActionAdjustJobBackoffLimit: (*RemediationReconciler).executeAdjustJobBackoffLimit,
+	platformv1alpha1.ActionForceDeleteJobPods:    (*RemediationReconciler).executeForceDeleteJobPods,
+
+	// CronJob
+	platformv1alpha1.ActionSuspendCronJob:           (*RemediationReconciler).executeSuspendCronJob,
+	platformv1alpha1.ActionResumeCronJob:            (*RemediationReconciler).executeResumeCronJob,
+	platformv1alpha1.ActionTriggerCronJob:           (*RemediationReconciler).executeTriggerCronJob,
+	platformv1alpha1.ActionAdjustCronJobResources:   (*RemediationReconciler).executeAdjustCronJobResources,
+	platformv1alpha1.ActionAdjustCronJobSchedule:    (*RemediationReconciler).executeAdjustCronJobSchedule,
+	platformv1alpha1.ActionAdjustCronJobDeadline:    (*RemediationReconciler).executeAdjustCronJobDeadline,
+	platformv1alpha1.ActionAdjustCronJobHistory:     (*RemediationReconciler).executeAdjustCronJobHistory,
+	platformv1alpha1.ActionAdjustCronJobConcurrency: (*RemediationReconciler).executeAdjustCronJobConcurrency,
+	platformv1alpha1.ActionDeleteCronJobActiveJobs:  (*RemediationReconciler).executeDeleteCronJobActiveJobs,
+	platformv1alpha1.ActionReplaceCronJobTemplate:   (*RemediationReconciler).executeReplaceCronJobTemplate,
+}
+
+// executeAction dispatches a remediation action to its registered executor.
+// Unsupported types return a structured error so callers can record the failure
+// and skip (the agentic loop turns this into an observation and requeues).
 func (r *RemediationReconciler) executeAction(ctx context.Context, resource platformv1alpha1.ResourceRef, action *platformv1alpha1.RemediationAction) error {
-	switch action.Type {
-	case platformv1alpha1.ActionScaleDeployment:
-		return r.executeScaleDeployment(ctx, resource, action.Params)
-	case platformv1alpha1.ActionRollbackDeployment:
-		return r.executeRollbackDeployment(ctx, resource, action.Params)
-	case platformv1alpha1.ActionRestartDeployment:
-		return r.executeRestartDeployment(ctx, resource)
-	case platformv1alpha1.ActionPatchConfig:
-		return r.executePatchConfig(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustResources:
-		return r.executeAdjustResources(ctx, resource, action.Params)
-	case platformv1alpha1.ActionDeletePod:
-		return r.executeDeletePod(ctx, resource, action.Params)
-	case platformv1alpha1.ActionHelmRollback:
-		return r.executeHelmRollback(ctx, resource, action.Params)
-	case platformv1alpha1.ActionArgoSyncApp:
-		return r.executeArgoSyncApp(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustHPA:
-		return r.executeAdjustHPA(ctx, resource, action.Params)
-	case platformv1alpha1.ActionRestartStatefulSetPod:
-		return r.executeRestartStatefulSetPod(ctx, resource, action.Params)
-	case platformv1alpha1.ActionCordonNode:
-		return r.executeCordonNode(ctx, resource, action.Params)
-	case platformv1alpha1.ActionUncordonNode:
-		return r.executeUncordonNode(ctx, resource, action.Params)
-	case platformv1alpha1.ActionDrainNode:
-		return r.executeDrainNode(ctx, resource, action.Params)
-	case platformv1alpha1.ActionResizePVC:
-		return r.executeResizePVC(ctx, resource, action.Params)
-	case platformv1alpha1.ActionRotateSecret:
-		return r.executeRotateSecret(ctx, resource, action.Params)
-	case platformv1alpha1.ActionExecDiagnostic:
-		return r.executeExecDiagnostic(ctx, resource, action.Params)
-	case platformv1alpha1.ActionUpdateIngress:
-		return r.executeUpdateIngress(ctx, resource, action.Params)
-	case platformv1alpha1.ActionPatchNetworkPolicy:
-		return r.executePatchNetworkPolicy(ctx, resource, action.Params)
-	case platformv1alpha1.ActionApplyManifest:
-		return r.executeApplyManifest(ctx, resource, action.Params)
-
-	// --- StatefulSet Actions ---
-	case platformv1alpha1.ActionScaleStatefulSet:
-		return r.executeScaleStatefulSet(ctx, resource, action.Params)
-	case platformv1alpha1.ActionRestartStatefulSet:
-		return r.executeRestartStatefulSet(ctx, resource)
-	case platformv1alpha1.ActionRollbackStatefulSet:
-		return r.executeRollbackStatefulSet(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustStatefulSetResources:
-		return r.executeAdjustStatefulSetResources(ctx, resource, action.Params)
-	case platformv1alpha1.ActionDeleteStatefulSetPod:
-		return r.executeDeleteStatefulSetPod(ctx, resource, action.Params)
-	case platformv1alpha1.ActionForceDeleteStatefulSetPod:
-		return r.executeForceDeleteStatefulSetPod(ctx, resource, action.Params)
-	case platformv1alpha1.ActionUpdateStatefulSetStrategy:
-		return r.executeUpdateStatefulSetStrategy(ctx, resource, action.Params)
-	case platformv1alpha1.ActionRecreateStatefulSetPVC:
-		return r.executeRecreateStatefulSetPVC(ctx, resource, action.Params)
-	case platformv1alpha1.ActionPartitionStatefulSetUpdate:
-		return r.executePartitionStatefulSetUpdate(ctx, resource, action.Params)
-
-	// --- DaemonSet Actions ---
-	case platformv1alpha1.ActionRestartDaemonSet:
-		return r.executeRestartDaemonSet(ctx, resource)
-	case platformv1alpha1.ActionRollbackDaemonSet:
-		return r.executeRollbackDaemonSet(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustDaemonSetResources:
-		return r.executeAdjustDaemonSetResources(ctx, resource, action.Params)
-	case platformv1alpha1.ActionDeleteDaemonSetPod:
-		return r.executeDeleteDaemonSetPod(ctx, resource, action.Params)
-	case platformv1alpha1.ActionUpdateDaemonSetStrategy:
-		return r.executeUpdateDaemonSetStrategy(ctx, resource, action.Params)
-	case platformv1alpha1.ActionPauseDaemonSetRollout:
-		return r.executePauseDaemonSetRollout(ctx, resource)
-	case platformv1alpha1.ActionCordonAndDeleteDaemonSetPod:
-		return r.executeCordonAndDeleteDaemonSetPod(ctx, resource, action.Params)
-
-	// --- Job Actions ---
-	case platformv1alpha1.ActionRetryJob:
-		return r.executeRetryJob(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustJobResources:
-		return r.executeAdjustJobResources(ctx, resource, action.Params)
-	case platformv1alpha1.ActionDeleteFailedJob:
-		return r.executeDeleteFailedJob(ctx, resource, action.Params)
-	case platformv1alpha1.ActionSuspendJob:
-		return r.executeSuspendJob(ctx, resource, action.Params)
-	case platformv1alpha1.ActionResumeJob:
-		return r.executeResumeJob(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustJobParallelism:
-		return r.executeAdjustJobParallelism(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustJobDeadline:
-		return r.executeAdjustJobDeadline(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustJobBackoffLimit:
-		return r.executeAdjustJobBackoffLimit(ctx, resource, action.Params)
-	case platformv1alpha1.ActionForceDeleteJobPods:
-		return r.executeForceDeleteJobPods(ctx, resource, action.Params)
-
-	// --- CronJob Actions ---
-	case platformv1alpha1.ActionSuspendCronJob:
-		return r.executeSuspendCronJob(ctx, resource, action.Params)
-	case platformv1alpha1.ActionResumeCronJob:
-		return r.executeResumeCronJob(ctx, resource, action.Params)
-	case platformv1alpha1.ActionTriggerCronJob:
-		return r.executeTriggerCronJob(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustCronJobResources:
-		return r.executeAdjustCronJobResources(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustCronJobSchedule:
-		return r.executeAdjustCronJobSchedule(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustCronJobDeadline:
-		return r.executeAdjustCronJobDeadline(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustCronJobHistory:
-		return r.executeAdjustCronJobHistory(ctx, resource, action.Params)
-	case platformv1alpha1.ActionAdjustCronJobConcurrency:
-		return r.executeAdjustCronJobConcurrency(ctx, resource, action.Params)
-	case platformv1alpha1.ActionDeleteCronJobActiveJobs:
-		return r.executeDeleteCronJobActiveJobs(ctx, resource, action.Params)
-	case platformv1alpha1.ActionReplaceCronJobTemplate:
-		return r.executeReplaceCronJobTemplate(ctx, resource, action.Params)
-
-	default:
+	exec, ok := actionExecutors[action.Type]
+	if !ok {
 		return fmt.Errorf("unsupported action type: %s", action.Type)
 	}
+	return exec(r, ctx, resource, action.Params)
 }
 
 // handleAgenticExecuting runs one step of the AI-driven agentic remediation loop.
 // Each reconcile: ask AI → execute action → record observation → requeue for next step.
+// defaultAgenticMaxSteps caps the loop when the plan doesn't override it.
+const defaultAgenticMaxSteps int32 = 10
+
+// handleAgenticExecuting runs one iteration of the AI-driven agentic remediation
+// loop. The body is intentionally a thin orchestrator over focused helpers:
+// each branch of the loop (safety, RPC, resolved / observation / action / reject)
+// lives in its own method, which makes the control flow easy to follow and
+// keeps cyclomatic complexity bounded.
 func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	// Safety: check max steps
 	maxSteps := plan.Spec.AgenticMaxSteps
 	if maxSteps == 0 {
-		maxSteps = 10
+		maxSteps = defaultAgenticMaxSteps
 	}
 	currentStep := int32(len(plan.Spec.AgenticHistory)) + 1
-	if currentStep > maxSteps {
-		now := metav1.Now()
-		plan.Status.State = platformv1alpha1.RemediationStateFailed
-		plan.Status.Result = fmt.Sprintf("Agentic loop exceeded max steps (%d)", maxSteps)
-		plan.Status.CompletedAt = &now
-		return ctrl.Result{}, r.Status().Update(ctx, plan)
+
+	if res, terminal, err := r.applyAgenticSafetyGuards(ctx, plan, maxSteps, currentStep); terminal {
+		return res, err
 	}
 
-	// Safety: check timeout
-	if plan.Status.AgenticStartedAt != nil {
-		if time.Since(plan.Status.AgenticStartedAt.Time) > agenticTimeout {
-			now := metav1.Now()
-			plan.Status.State = platformv1alpha1.RemediationStateFailed
-			plan.Status.Result = "Agentic loop timed out (10 minutes)"
-			plan.Status.CompletedAt = &now
-			return ctrl.Result{}, r.Status().Update(ctx, plan)
-		}
+	issue, res, err := r.loadIssueForAgenticStep(ctx, plan)
+	if err != nil || issue == nil {
+		return res, err
 	}
 
-	// Get parent issue for resource context
-	var issue platformv1alpha1.Issue
-	if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &issue); err != nil {
-		if errors.IsNotFound(err) {
-			plan.Status.State = platformv1alpha1.RemediationStateFailed
-			plan.Status.Result = "Parent issue not found"
-			return ctrl.Result{}, r.Status().Update(ctx, plan)
-		}
-		return ctrl.Result{}, err
-	}
-
-	resource := issue.Spec.Resource
-
-	// Refresh K8s context
-	kubeCtx := ""
-	if r.ContextBuilder != nil {
-		var err error
-		kubeCtx, err = r.ContextBuilder.BuildContext(ctx, resource)
-		if err != nil {
-			log.Info("Failed to build K8s context for agentic step", "error", err)
-		}
-	}
-
-	// Check server connectivity
 	if r.ServerClient == nil || !r.ServerClient.IsConnected() {
 		log.Info("Server not connected, requeuing agentic step")
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	// Build history for RPC
-	var history []*pb.AgenticHistoryEntry
-	for _, step := range plan.Spec.AgenticHistory {
-		entry := &pb.AgenticHistoryEntry{
-			StepNumber:  step.StepNumber,
-			AiMessage:   step.AIMessage,
-			Observation: step.Observation,
-		}
-		if step.Action != nil {
-			entry.Action = string(step.Action.Type)
-			entry.Params = step.Action.Params
-		}
-		history = append(history, entry)
+	resp, requeue := r.callAgenticStepRPC(ctx, plan, issue, maxSteps, currentStep, log)
+	if resp == nil {
+		return requeue, nil
 	}
 
-	// Resolve provider/model from the connected Instance CR
+	switch {
+	case resp.Resolved:
+		return r.handleAgenticResolved(ctx, plan, resp, currentStep, log)
+	case resp.NextAction == nil || resp.NextAction.Action == "":
+		return r.handleAgenticObservation(ctx, plan, resp, currentStep, log)
+	case resp.DivergesFromInsight && strings.TrimSpace(resp.DivergenceReason) == "":
+		// GAP-01 fix: refuse divergent actions without a written justification.
+		return r.rejectDivergentAgenticAction(ctx, plan, resp, currentStep, log)
+	default:
+		return r.executeAgenticAction(ctx, plan, issue, resp, currentStep, log)
+	}
+}
+
+// applyAgenticSafetyGuards enforces the loop's hard limits: max steps and the
+// wall-clock timeout. When a guard fires it transitions the plan to Failed and
+// signals the caller via terminal=true. The Status update error (if any) is
+// propagated so the controller manager re-queues.
+func (r *RemediationReconciler) applyAgenticSafetyGuards(ctx context.Context, plan *platformv1alpha1.RemediationPlan, maxSteps, currentStep int32) (ctrl.Result, bool, error) {
+	if currentStep > maxSteps {
+		return r.failAgenticPlan(ctx, plan, fmt.Sprintf("Agentic loop exceeded max steps (%d)", maxSteps))
+	}
+	if plan.Status.AgenticStartedAt != nil && time.Since(plan.Status.AgenticStartedAt.Time) > agenticTimeout {
+		return r.failAgenticPlan(ctx, plan, "Agentic loop timed out (10 minutes)")
+	}
+	return ctrl.Result{}, false, nil
+}
+
+// failAgenticPlan transitions the plan to Failed with the given result message
+// and persists the status. Used by safety-guard and missing-issue paths.
+func (r *RemediationReconciler) failAgenticPlan(ctx context.Context, plan *platformv1alpha1.RemediationPlan, reason string) (ctrl.Result, bool, error) {
+	now := metav1.Now()
+	plan.Status.State = platformv1alpha1.RemediationStateFailed
+	plan.Status.Result = reason
+	plan.Status.CompletedAt = &now
+	return ctrl.Result{}, true, r.Status().Update(ctx, plan)
+}
+
+// loadIssueForAgenticStep fetches the parent Issue and refreshes the K8s
+// context attached to it for the next agentic step. When the Issue has been
+// deleted out from under the plan we fail the plan rather than spinning.
+// Returns (nil, result, err) when the caller should return immediately.
+func (r *RemediationReconciler) loadIssueForAgenticStep(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (*platformv1alpha1.Issue, ctrl.Result, error) {
+	var issue platformv1alpha1.Issue
+	if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &issue); err != nil {
+		if errors.IsNotFound(err) {
+			res, _, statusErr := r.failAgenticPlan(ctx, plan, "Parent issue not found")
+			return nil, res, statusErr
+		}
+		return nil, ctrl.Result{}, err
+	}
+	return &issue, ctrl.Result{}, nil
+}
+
+// callAgenticStepRPC composes the AgenticStep request — including the GAP-01
+// AIInsight context — and invokes the server. RPC errors are non-terminal
+// (the loop simply retries on the next reconcile), signalled by returning a
+// nil response and a non-zero RequeueAfter.
+func (r *RemediationReconciler) callAgenticStepRPC(ctx context.Context, plan *platformv1alpha1.RemediationPlan, issue *platformv1alpha1.Issue, maxSteps, currentStep int32, log logr.Logger) (*pb.AgenticStepResponse, ctrl.Result) {
+	resource := issue.Spec.Resource
+	kubeCtx := r.buildAgenticKubeContext(ctx, resource, log)
+	history := buildAgenticHistoryEntries(plan.Spec.AgenticHistory)
 	provider, model := resolveInstanceProvider(ctx, r.Client)
+	insightAnalysis, insightConfidence, insightRecs, insightActions := r.loadAIInsightForAgenticContext(ctx, issue, log)
 
-	// GAP-01 fix: load the AIInsight associated with this issue (best-effort) so we
-	// can pass its primary conclusion to the agentic prompt. The loop should not be
-	// allowed to silently contradict its own root-cause analysis.
-	var insightAnalysis string
-	var insightRecommendations []string
-	var insightActions []*pb.SuggestedAction
-	var insightConfidence float32
-	{
-		var insight platformv1alpha1.AIInsight
-		insightName := issue.Name + "-insight"
-		if getErr := r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: issue.Namespace}, &insight); getErr == nil {
-			insightAnalysis = insight.Status.Analysis
-			insightRecommendations = insight.Status.Recommendations
-			insightConfidence = float32(insight.Status.Confidence)
-			for _, sa := range insight.Status.SuggestedActions {
-				insightActions = append(insightActions, &pb.SuggestedAction{
-					Name:        sa.Name,
-					Action:      string(sa.Action),
-					Description: sa.Description,
-					Params:      sa.Params,
-				})
-			}
-		} else if !errors.IsNotFound(getErr) {
-			log.Info("Failed to load AIInsight for agentic context (continuing without)", "error", getErr)
-		}
-	}
-
-	// Call AgenticStep RPC
 	resp, err := r.ServerClient.AgenticStep(ctx, &pb.AgenticStepRequest{
 		IssueName:               issue.Name,
 		Namespace:               issue.Namespace,
@@ -777,154 +740,122 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 		CurrentStep:             currentStep,
 		InsightAnalysis:         insightAnalysis,
 		InsightConfidence:       insightConfidence,
-		InsightRecommendations:  insightRecommendations,
+		InsightRecommendations:  insightRecs,
 		InsightSuggestedActions: insightActions,
 	})
 	if err != nil {
 		log.Error(err, "AgenticStep RPC failed, requeuing")
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return nil, ctrl.Result{RequeueAfter: 30 * time.Second}
+	}
+	return resp, ctrl.Result{}
+}
+
+// buildAgenticKubeContext returns the freshly-built K8s context for the agentic
+// prompt, or an empty string when the context builder is unset or fails.
+func (r *RemediationReconciler) buildAgenticKubeContext(ctx context.Context, resource platformv1alpha1.ResourceRef, log logr.Logger) string {
+	if r.ContextBuilder == nil {
+		return ""
+	}
+	kubeCtx, err := r.ContextBuilder.BuildContext(ctx, resource)
+	if err != nil {
+		log.Info("Failed to build K8s context for agentic step", "error", err)
+		return ""
+	}
+	return kubeCtx
+}
+
+// buildAgenticHistoryEntries converts internal AgenticStep records into the
+// proto wire form for the AgenticStep RPC. Observation-only steps (no Action)
+// are still included so the server can see the loop's full chain of thought.
+func buildAgenticHistoryEntries(steps []platformv1alpha1.AgenticStep) []*pb.AgenticHistoryEntry {
+	history := make([]*pb.AgenticHistoryEntry, 0, len(steps))
+	for _, step := range steps {
+		entry := &pb.AgenticHistoryEntry{
+			StepNumber:  step.StepNumber,
+			AiMessage:   step.AIMessage,
+			Observation: step.Observation,
+		}
+		if step.Action != nil {
+			entry.Action = string(step.Action.Type)
+			entry.Params = step.Action.Params
+		}
+		history = append(history, entry)
+	}
+	return history
+}
+
+// handleAgenticResolved transitions the plan to Verifying after the loop's AI
+// declared victory, persisting its postmortem narrative as annotations for
+// downstream generatePostMortem.
+func (r *RemediationReconciler) handleAgenticResolved(ctx context.Context, plan *platformv1alpha1.RemediationPlan, resp *pb.AgenticStepResponse, currentStep int32, log logr.Logger) (ctrl.Result, error) {
+	log.Info("AI determined issue resolved", "plan", plan.Name, "step", currentStep)
+
+	if plan.Annotations == nil {
+		plan.Annotations = make(map[string]string)
+	}
+	plan.Annotations["platform.chatcli.io/postmortem-summary"] = resp.PostmortemSummary
+	plan.Annotations["platform.chatcli.io/root-cause"] = resp.RootCause
+	plan.Annotations["platform.chatcli.io/impact"] = resp.Impact
+	if len(resp.LessonsLearned) > 0 {
+		plan.Annotations["platform.chatcli.io/lessons-learned"] = strings.Join(resp.LessonsLearned, "\n---\n")
+	}
+	if len(resp.PreventionActions) > 0 {
+		plan.Annotations["platform.chatcli.io/prevention-actions"] = strings.Join(resp.PreventionActions, "\n---\n")
 	}
 
-	// If resolved — transition to Verifying
-	if resp.Resolved {
-		log.Info("AI determined issue resolved", "plan", plan.Name, "step", currentStep)
+	plan.Spec.AgenticHistory = append(plan.Spec.AgenticHistory, platformv1alpha1.AgenticStep{
+		StepNumber: currentStep,
+		AIMessage:  resp.Reasoning,
+		Timestamp:  metav1.Now(),
+	})
 
-		// Store postmortem data in annotations
-		if plan.Annotations == nil {
-			plan.Annotations = make(map[string]string)
+	if err := r.Update(ctx, plan); err != nil {
+		if errors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
 		}
-		plan.Annotations["platform.chatcli.io/postmortem-summary"] = resp.PostmortemSummary
-		plan.Annotations["platform.chatcli.io/root-cause"] = resp.RootCause
-		plan.Annotations["platform.chatcli.io/impact"] = resp.Impact
-		if len(resp.LessonsLearned) > 0 {
-			plan.Annotations["platform.chatcli.io/lessons-learned"] = strings.Join(resp.LessonsLearned, "\n---\n")
-		}
-		if len(resp.PreventionActions) > 0 {
-			plan.Annotations["platform.chatcli.io/prevention-actions"] = strings.Join(resp.PreventionActions, "\n---\n")
-		}
-
-		// Record final reasoning step (no action)
-		plan.Spec.AgenticHistory = append(plan.Spec.AgenticHistory, platformv1alpha1.AgenticStep{
-			StepNumber: currentStep,
-			AIMessage:  resp.Reasoning,
-			Timestamp:  metav1.Now(),
-		})
-
-		if err := r.Update(ctx, plan); err != nil {
-			if errors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
-			}
-			return ctrl.Result{}, err
-		}
-
-		now := metav1.Now()
-		plan.Status.State = platformv1alpha1.RemediationStateVerifying
-		plan.Status.ActionsCompletedAt = &now
-		plan.Status.AgenticStepCount = int32(len(plan.Spec.AgenticHistory))
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.Status().Update(ctx, plan)
+		return ctrl.Result{}, err
 	}
 
-	// If next_action is nil but not resolved — AI is observing or stuck
-	if resp.NextAction == nil || resp.NextAction.Action == "" {
-		// Record observation step
-		plan.Spec.AgenticHistory = append(plan.Spec.AgenticHistory, platformv1alpha1.AgenticStep{
-			StepNumber:  currentStep,
-			AIMessage:   resp.Reasoning,
-			Observation: "Observation step — no action taken",
-			Timestamp:   metav1.Now(),
-		})
+	now := metav1.Now()
+	plan.Status.State = platformv1alpha1.RemediationStateVerifying
+	plan.Status.ActionsCompletedAt = &now
+	plan.Status.AgenticStepCount = int32(len(plan.Spec.AgenticHistory))
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, r.Status().Update(ctx, plan)
+}
 
-		agenticStepCount := int32(len(plan.Spec.AgenticHistory))
-		needStartedAt := plan.Status.AgenticStartedAt == nil
-
-		if err := r.Update(ctx, plan); err != nil {
-			if errors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
-			}
-			return ctrl.Result{}, err
-		}
-
-		// Set status fields AFTER r.Update() — spec update resets in-memory status
-		plan.Status.AgenticStepCount = agenticStepCount
-		if needStartedAt {
-			now := metav1.Now()
-			plan.Status.AgenticStartedAt = &now
-		}
-		if err := r.Status().Update(ctx, plan); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		log.Info("Agentic observation step", "plan", plan.Name, "step", currentStep)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+// handleAgenticObservation records a "no action this turn" step. The AI uses
+// this when it wants to wait for the effect of a previous action to settle
+// (e.g. give a deployment rollout time to converge) before deciding again.
+func (r *RemediationReconciler) handleAgenticObservation(ctx context.Context, plan *platformv1alpha1.RemediationPlan, resp *pb.AgenticStepResponse, currentStep int32, log logr.Logger) (ctrl.Result, error) {
+	plan.Spec.AgenticHistory = append(plan.Spec.AgenticHistory, platformv1alpha1.AgenticStep{
+		StepNumber:  currentStep,
+		AIMessage:   resp.Reasoning,
+		Observation: "Observation step — no action taken",
+		Timestamp:   metav1.Now(),
+	})
+	if res, err := r.persistAgenticStep(ctx, plan); err != nil || res.Requeue || res.RequeueAfter > 0 {
+		return res, err
 	}
+	log.Info("Agentic observation step", "plan", plan.Name, "step", currentStep)
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
 
-	// GAP-01 fix: when the server flags the next_action as diverging from the
-	// AIInsight's primary suggested action AND the LLM did not provide a written
-	// justification, refuse to execute. We still record the step so the divergence
-	// shows up in PostMortem / audit, but we skip the action and let the next
-	// reconcile cycle ask for a different proposal. This prevents the "ignore the
-	// insight conclusion and try ExecDiagnostic anyway" loop seen in chaos test
-	// Cycle 1 (2026-05-23), which exhausted maxRemediationAttempts without
-	// actually remediating.
-	if resp.DivergesFromInsight && strings.TrimSpace(resp.DivergenceReason) == "" {
-		log.Info("Rejecting agentic action: diverges from AIInsight without justification",
-			"plan", plan.Name, "step", currentStep,
-			"proposed_action", resp.NextAction.Action)
-		remediationsTotal.WithLabelValues(resp.NextAction.Action, "rejected_divergence").Inc()
-
-		plan.Spec.AgenticHistory = append(plan.Spec.AgenticHistory, platformv1alpha1.AgenticStep{
-			StepNumber:  currentStep,
-			AIMessage:   resp.Reasoning,
-			Observation: fmt.Sprintf("REJECTED: proposed action %q diverges from AIInsight primary action without divergence_reason", resp.NextAction.Action),
-			Timestamp:   metav1.Now(),
-		})
-
-		agenticStepCount := int32(len(plan.Spec.AgenticHistory))
-		needStartedAt := plan.Status.AgenticStartedAt == nil
-		if err := r.Update(ctx, plan); err != nil {
-			if errors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
-			}
-			return ctrl.Result{}, err
-		}
-		plan.Status.AgenticStepCount = agenticStepCount
-		if needStartedAt {
-			now := metav1.Now()
-			plan.Status.AgenticStartedAt = &now
-		}
-		if err := r.Status().Update(ctx, plan); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
-
-	// Map next_action to RemediationAction
+// executeAgenticAction dispatches the proposed remediation, records its
+// outcome onto AgenticHistory, and emits the Prometheus counter.
+func (r *RemediationReconciler) executeAgenticAction(ctx context.Context, plan *platformv1alpha1.RemediationPlan, issue *platformv1alpha1.Issue, resp *pb.AgenticStepResponse, currentStep int32, log logr.Logger) (ctrl.Result, error) {
 	nextAction := &platformv1alpha1.RemediationAction{
 		Type:   mapActionType(resp.NextAction.Action),
 		Params: resp.NextAction.Params,
 	}
 
-	// Execute the action
-	log.Info("Agentic executing action", "plan", plan.Name, "step", currentStep,
-		"action", nextAction.Type)
-
+	log.Info("Agentic executing action", "plan", plan.Name, "step", currentStep, "action", nextAction.Type)
 	if resp.DivergesFromInsight {
 		log.Info("Agentic action diverges from AIInsight (justified)",
-			"plan", plan.Name, "step", currentStep,
-			"reason", resp.DivergenceReason)
+			"plan", plan.Name, "step", currentStep, "reason", resp.DivergenceReason)
 	}
 
-	observation := ""
-	execErr := r.executeAction(ctx, resource, nextAction)
-	if execErr != nil {
-		observation = fmt.Sprintf("FAILED: %v", execErr)
-		remediationsTotal.WithLabelValues(string(nextAction.Type), "failed").Inc()
-	} else {
-		observation = fmt.Sprintf("SUCCESS: %s executed successfully", nextAction.Type)
-		remediationsTotal.WithLabelValues(string(nextAction.Type), "success").Inc()
-	}
+	observation := r.runAgenticAction(ctx, issue.Spec.Resource, nextAction)
 
-	// Record the step
 	plan.Spec.AgenticHistory = append(plan.Spec.AgenticHistory, platformv1alpha1.AgenticStep{
 		StepNumber:  currentStep,
 		AIMessage:   resp.Reasoning,
@@ -933,10 +864,35 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 		Timestamp:   metav1.Now(),
 	})
 
+	if res, err := r.persistAgenticStep(ctx, plan); err != nil || res.Requeue || res.RequeueAfter > 0 {
+		return res, err
+	}
+	log.Info("Agentic step completed", "plan", plan.Name, "step", currentStep,
+		"action", nextAction.Type, "observation", observation)
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+}
+
+// runAgenticAction executes the action and returns the observation string
+// recorded into AgenticHistory. The Prometheus counter is incremented as a
+// side-effect so the success/failure breakdown surfaces in /metrics.
+func (r *RemediationReconciler) runAgenticAction(ctx context.Context, resource platformv1alpha1.ResourceRef, action *platformv1alpha1.RemediationAction) string {
+	if err := r.executeAction(ctx, resource, action); err != nil {
+		remediationsTotal.WithLabelValues(string(action.Type), "failed").Inc()
+		return fmt.Sprintf("FAILED: %v", err)
+	}
+	remediationsTotal.WithLabelValues(string(action.Type), "success").Inc()
+	return fmt.Sprintf("SUCCESS: %s executed successfully", action.Type)
+}
+
+// persistAgenticStep saves the appended AgenticHistory entry and then the
+// updated status fields, handling the two-stage spec/status split correctly:
+// r.Update() resets the in-memory status, so AgenticStepCount and
+// AgenticStartedAt are set AFTER the spec write. Returns a non-zero Requeue
+// on conflict so the controller manager retries.
+func (r *RemediationReconciler) persistAgenticStep(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
 	agenticStepCount := int32(len(plan.Spec.AgenticHistory))
 	needStartedAt := plan.Status.AgenticStartedAt == nil
 
-	// Persist spec (history) then status
 	if err := r.Update(ctx, plan); err != nil {
 		if errors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
@@ -944,7 +900,6 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 		return ctrl.Result{}, err
 	}
 
-	// Set status fields AFTER r.Update() — spec update resets in-memory status
 	plan.Status.AgenticStepCount = agenticStepCount
 	if needStartedAt {
 		now := metav1.Now()
@@ -953,10 +908,73 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 	if err := r.Status().Update(ctx, plan); err != nil {
 		return ctrl.Result{}, err
 	}
+	return ctrl.Result{}, nil
+}
 
-	log.Info("Agentic step completed", "plan", plan.Name, "step", currentStep,
-		"action", nextAction.Type, "observation", observation)
+// loadAIInsightForAgenticContext fetches the AIInsight CR associated with the
+// issue (best-effort) and converts its conclusion into the fields that get
+// passed as PRIMARY GUIDANCE to the agentic prompt. Returns zero values when
+// the insight is missing, which is fine — the prompt simply skips the guidance
+// section. GAP-01 fix (extracted from handleAgenticExecuting to keep its
+// cyclomatic complexity below the Floor 8 threshold).
+func (r *RemediationReconciler) loadAIInsightForAgenticContext(ctx context.Context, issue *platformv1alpha1.Issue, logger logr.Logger) (string, float32, []string, []*pb.SuggestedAction) {
+	var insight platformv1alpha1.AIInsight
+	insightName := issue.Name + "-insight"
+	if err := r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: issue.Namespace}, &insight); err != nil {
+		if !errors.IsNotFound(err) {
+			logger.Info("Failed to load AIInsight for agentic context (continuing without)", "error", err)
+		}
+		return "", 0, nil, nil
+	}
 
+	actions := make([]*pb.SuggestedAction, 0, len(insight.Status.SuggestedActions))
+	for _, sa := range insight.Status.SuggestedActions {
+		actions = append(actions, &pb.SuggestedAction{
+			Name:        sa.Name,
+			Action:      string(sa.Action),
+			Description: sa.Description,
+			Params:      sa.Params,
+		})
+	}
+	return insight.Status.Analysis, float32(insight.Status.Confidence), insight.Status.Recommendations, actions
+}
+
+// rejectDivergentAgenticAction handles the GAP-01 fix path where the server
+// flagged the proposed next_action as diverging from the AIInsight's primary
+// suggested action AND the LLM did not populate divergence_reason. We record
+// the step as REJECTED so the divergence shows up in PostMortem / audit, then
+// requeue to ask for a different proposal. Without this guard the agentic loop
+// can exhaust maxRemediationAttempts proposing the same blocked action
+// repeatedly (chaos test Cycle 1, 2026-05-23).
+func (r *RemediationReconciler) rejectDivergentAgenticAction(ctx context.Context, plan *platformv1alpha1.RemediationPlan, resp *pb.AgenticStepResponse, currentStep int32, logger logr.Logger) (ctrl.Result, error) {
+	logger.Info("Rejecting agentic action: diverges from AIInsight without justification",
+		"plan", plan.Name, "step", currentStep,
+		"proposed_action", resp.NextAction.Action)
+	remediationsTotal.WithLabelValues(resp.NextAction.Action, "rejected_divergence").Inc()
+
+	plan.Spec.AgenticHistory = append(plan.Spec.AgenticHistory, platformv1alpha1.AgenticStep{
+		StepNumber:  currentStep,
+		AIMessage:   resp.Reasoning,
+		Observation: fmt.Sprintf("REJECTED: proposed action %q diverges from AIInsight primary action without divergence_reason", resp.NextAction.Action),
+		Timestamp:   metav1.Now(),
+	})
+
+	agenticStepCount := int32(len(plan.Spec.AgenticHistory))
+	needStartedAt := plan.Status.AgenticStartedAt == nil
+	if err := r.Update(ctx, plan); err != nil {
+		if errors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, err
+	}
+	plan.Status.AgenticStepCount = agenticStepCount
+	if needStartedAt {
+		now := metav1.Now()
+		plan.Status.AgenticStartedAt = &now
+	}
+	if err := r.Status().Update(ctx, plan); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
@@ -1092,7 +1110,10 @@ func (r *RemediationReconciler) executeRollbackDeployment(ctx context.Context, r
 }
 
 // executeRestartDeployment adds a restart annotation to trigger rolling restart.
-func (r *RemediationReconciler) executeRestartDeployment(ctx context.Context, resource platformv1alpha1.ResourceRef) error {
+// Conforms to the uniform actionExecutor signature; params is unused — the
+// rolling restart always uses the standard kubectl.kubernetes.io/restartedAt
+// timestamp, which the deployment controller picks up automatically.
+func (r *RemediationReconciler) executeRestartDeployment(ctx context.Context, resource platformv1alpha1.ResourceRef, _ map[string]string) error {
 	var deploy appsv1.Deployment
 	if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &deploy); err != nil {
 		return fmt.Errorf("failed to get deployment %s/%s: %w", resource.Namespace, resource.Name, err)
@@ -1376,116 +1397,150 @@ func (r *RemediationReconciler) capturePreflightSnapshot(ctx context.Context, re
 	}, nil
 }
 
-// validateSafetyConstraints checks that actions don't violate safety rules.
+// actionValidator runs a per-action-type safety check. `all` is the full plan
+// action list, needed by validators that enforce "at most N of this type per
+// plan" semantics. Returns nil when the action is acceptable.
+type actionValidator func(action platformv1alpha1.RemediationAction, all []platformv1alpha1.RemediationAction) error
+
+// resourceParamKeys are the keys an Adjust*Resources action must populate at
+// least one of. Shared by every workload kind that supports resource tuning.
+var resourceParamKeys = []string{"memory_limit", "memory_request", "cpu_limit", "cpu_request"}
+
+// requireResourceParams enforces that an Adjust*Resources action specifies at
+// least one of the standard resource keys. The action.Type is interpolated in
+// the error message so the AI's failure-context loop receives a precise hint.
+func requireResourceParams(action platformv1alpha1.RemediationAction, _ []platformv1alpha1.RemediationAction) error {
+	for _, key := range resourceParamKeys {
+		if _, ok := action.Params[key]; ok {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s requires at least one of: %s", action.Type, strings.Join(resourceParamKeys, ", "))
+}
+
+// atMostOneValidator returns a validator that fails when more than one action
+// of the same type appears in the plan. Used for destructive actions where
+// repeating the operation amplifies blast radius (DeletePod, ForceDelete*).
+func atMostOneValidator(label string) actionValidator {
+	return func(action platformv1alpha1.RemediationAction, all []platformv1alpha1.RemediationAction) error {
+		count := 0
+		for _, a := range all {
+			if a.Type == action.Type {
+				count++
+			}
+		}
+		if count > 1 {
+			return fmt.Errorf("only one %s action is allowed per remediation plan", label)
+		}
+		return nil
+	}
+}
+
+// requireParam returns a validator that fails when the named param is missing.
+func requireParam(name string) actionValidator {
+	return func(action platformv1alpha1.RemediationAction, _ []platformv1alpha1.RemediationAction) error {
+		if _, ok := action.Params[name]; !ok {
+			return fmt.Errorf("%s requires '%s' param", action.Type, name)
+		}
+		return nil
+	}
+}
+
+// chainValidators executes validators in order and returns the first error.
+// Lets a single action type compose multiple independent checks (e.g.
+// ForceDeleteStatefulSetPod needs both a pod param AND at-most-one in the plan).
+func chainValidators(vs ...actionValidator) actionValidator {
+	return func(action platformv1alpha1.RemediationAction, all []platformv1alpha1.RemediationAction) error {
+		for _, v := range vs {
+			if err := v(action, all); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+// scaleToZeroRequiresContainment is the safety guard that blocks accidental
+// destructive scale-downs. The "containment=true" opt-in is the deliberate
+// stop-the-bleeding signal — see AnalyzeIssue prompt rules in handler_analysis.go.
+//
+// The error message preserves the pre-existing user-visible wording verbatim
+// (Deployment: no label; StatefulSet: labelled). Tests, runbooks and operator
+// log parsers grep for those exact substrings, so this asymmetry is held
+// stable on purpose — uniformising the wording is its own future change.
+func scaleToZeroRequiresContainment(errorMsg string) actionValidator {
+	return func(action platformv1alpha1.RemediationAction, _ []platformv1alpha1.RemediationAction) error {
+		replicas, ok := action.Params["replicas"]
+		if !ok {
+			return nil
+		}
+		n, err := strconv.Atoi(replicas)
+		if err != nil || n != 0 {
+			return nil
+		}
+		if action.Params["containment"] != "true" {
+			return fmt.Errorf("%s", errorMsg)
+		}
+		return nil
+	}
+}
+
+const (
+	errScaleDeploymentToZero  = `scaling to 0 replicas is not allowed (destructive) — set params.containment="true" to opt in when this is a deliberate stop-the-bleeding action for an unrecoverable app-level bug`
+	errScaleStatefulSetToZero = `scaling StatefulSet to 0 replicas is not allowed (destructive) — set params.containment="true" to opt in when this is a deliberate stop-the-bleeding action for an unrecoverable app-level bug`
+)
+
+// requireConfirm enforces an explicit "confirm=true" param on highly destructive
+// actions (PVC recreation). Modelled after kubectl --force semantics.
+func requireConfirm(action platformv1alpha1.RemediationAction, _ []platformv1alpha1.RemediationAction) error {
+	if action.Params["confirm"] != "true" {
+		return fmt.Errorf("%s requires confirm=true (destructive)", action.Type)
+	}
+	return nil
+}
+
+// rejectCustom blocks Custom actions from being auto-approved — they always
+// require manual review via the approval workflow.
+func rejectCustom(_ platformv1alpha1.RemediationAction, _ []platformv1alpha1.RemediationAction) error {
+	return fmt.Errorf("custom actions require manual approval")
+}
+
+// safetyValidators maps an action type to its safety check. Actions absent
+// from the table need no per-plan validation (e.g. RestartDeployment is
+// inherently safe). Adding a new validator here keeps the dispatcher in
+// validateSafetyConstraints at O(1) cyclomatic complexity.
+var safetyValidators = map[platformv1alpha1.RemediationActionType]actionValidator{
+	platformv1alpha1.ActionScaleDeployment:             scaleToZeroRequiresContainment(errScaleDeploymentToZero),
+	platformv1alpha1.ActionScaleStatefulSet:            scaleToZeroRequiresContainment(errScaleStatefulSetToZero),
+	platformv1alpha1.ActionAdjustResources:             requireResourceParams,
+	platformv1alpha1.ActionAdjustStatefulSetResources:  requireResourceParams,
+	platformv1alpha1.ActionAdjustDaemonSetResources:    requireResourceParams,
+	platformv1alpha1.ActionAdjustJobResources:          requireResourceParams,
+	platformv1alpha1.ActionAdjustCronJobResources:      requireResourceParams,
+	platformv1alpha1.ActionDeletePod:                   atMostOneValidator("DeletePod"),
+	platformv1alpha1.ActionDeleteStatefulSetPod:        atMostOneValidator("DeleteStatefulSetPod"),
+	platformv1alpha1.ActionDeleteDaemonSetPod:          atMostOneValidator("DeleteDaemonSetPod"),
+	platformv1alpha1.ActionForceDeleteJobPods:          atMostOneValidator("ForceDeleteJobPods"),
+	platformv1alpha1.ActionDeleteCronJobActiveJobs:     atMostOneValidator("DeleteCronJobActiveJobs"),
+	platformv1alpha1.ActionForceDeleteStatefulSetPod:   chainValidators(requireParam("pod"), atMostOneValidator("ForceDeleteStatefulSetPod")),
+	platformv1alpha1.ActionRecreateStatefulSetPVC:      requireConfirm,
+	platformv1alpha1.ActionCordonAndDeleteDaemonSetPod: requireParam("node"),
+	platformv1alpha1.ActionReplaceCronJobTemplate:      requireParam("configmap"),
+	platformv1alpha1.ActionCustom:                      rejectCustom,
+}
+
+// validateSafetyConstraints runs each action through its registered safety
+// validator (if any) and returns the first violation. The validator registry
+// pattern keeps this dispatcher trivial regardless of how many action kinds
+// the platform supports.
 func (r *RemediationReconciler) validateSafetyConstraints(actions []platformv1alpha1.RemediationAction, constraints []string) error {
 	for _, action := range actions {
-		switch action.Type {
-		case platformv1alpha1.ActionScaleDeployment:
-			if replicas, ok := action.Params["replicas"]; ok {
-				n, err := strconv.Atoi(replicas)
-				if err == nil && n == 0 && action.Params["containment"] != "true" {
-					return fmt.Errorf("scaling to 0 replicas is not allowed (destructive) — set params.containment=\"true\" to opt in when this is a deliberate stop-the-bleeding action for an unrecoverable app-level bug")
-				}
-			}
-		case platformv1alpha1.ActionAdjustResources:
-			hasResource := false
-			for _, key := range []string{"memory_limit", "memory_request", "cpu_limit", "cpu_request"} {
-				if _, ok := action.Params[key]; ok {
-					hasResource = true
-					break
-				}
-			}
-			if !hasResource {
-				return fmt.Errorf("AdjustResources requires at least one of: memory_limit, memory_request, cpu_limit, cpu_request")
-			}
-		case platformv1alpha1.ActionDeletePod:
-			deletePodCount := 0
-			for _, a := range actions {
-				if a.Type == platformv1alpha1.ActionDeletePod {
-					deletePodCount++
-				}
-			}
-			if deletePodCount > 1 {
-				return fmt.Errorf("only one DeletePod action is allowed per remediation plan")
-			}
-		case platformv1alpha1.ActionScaleStatefulSet:
-			if replicas, ok := action.Params["replicas"]; ok {
-				n, err := strconv.Atoi(replicas)
-				if err == nil && n == 0 && action.Params["containment"] != "true" {
-					return fmt.Errorf("scaling StatefulSet to 0 replicas is not allowed (destructive) — set params.containment=\"true\" to opt in when this is a deliberate stop-the-bleeding action for an unrecoverable app-level bug")
-				}
-			}
-		case platformv1alpha1.ActionAdjustStatefulSetResources,
-			platformv1alpha1.ActionAdjustDaemonSetResources,
-			platformv1alpha1.ActionAdjustJobResources,
-			platformv1alpha1.ActionAdjustCronJobResources:
-			hasResource := false
-			for _, key := range []string{"memory_limit", "memory_request", "cpu_limit", "cpu_request"} {
-				if _, ok := action.Params[key]; ok {
-					hasResource = true
-					break
-				}
-			}
-			if !hasResource {
-				return fmt.Errorf("%s requires at least one of: memory_limit, memory_request, cpu_limit, cpu_request", action.Type)
-			}
-		case platformv1alpha1.ActionDeleteStatefulSetPod, platformv1alpha1.ActionDeleteDaemonSetPod:
-			deleteCount := 0
-			for _, a := range actions {
-				if a.Type == action.Type {
-					deleteCount++
-				}
-			}
-			if deleteCount > 1 {
-				return fmt.Errorf("only one %s action is allowed per remediation plan", action.Type)
-			}
-		case platformv1alpha1.ActionForceDeleteStatefulSetPod:
-			if _, ok := action.Params["pod"]; !ok {
-				return fmt.Errorf("ForceDeleteStatefulSetPod requires 'pod' param")
-			}
-			forceCount := 0
-			for _, a := range actions {
-				if a.Type == platformv1alpha1.ActionForceDeleteStatefulSetPod {
-					forceCount++
-				}
-			}
-			if forceCount > 1 {
-				return fmt.Errorf("only one ForceDeleteStatefulSetPod is allowed per plan")
-			}
-		case platformv1alpha1.ActionRecreateStatefulSetPVC:
-			if action.Params["confirm"] != "true" {
-				return fmt.Errorf("RecreateStatefulSetPVC requires confirm=true (destructive)")
-			}
-		case platformv1alpha1.ActionCordonAndDeleteDaemonSetPod:
-			if _, ok := action.Params["node"]; !ok {
-				return fmt.Errorf("CordonAndDeleteDaemonSetPod requires 'node' param")
-			}
-		case platformv1alpha1.ActionForceDeleteJobPods:
-			forceCount := 0
-			for _, a := range actions {
-				if a.Type == platformv1alpha1.ActionForceDeleteJobPods {
-					forceCount++
-				}
-			}
-			if forceCount > 1 {
-				return fmt.Errorf("only one ForceDeleteJobPods is allowed per plan")
-			}
-		case platformv1alpha1.ActionDeleteCronJobActiveJobs:
-			deleteCount := 0
-			for _, a := range actions {
-				if a.Type == platformv1alpha1.ActionDeleteCronJobActiveJobs {
-					deleteCount++
-				}
-			}
-			if deleteCount > 1 {
-				return fmt.Errorf("only one DeleteCronJobActiveJobs is allowed per plan")
-			}
-		case platformv1alpha1.ActionReplaceCronJobTemplate:
-			if _, ok := action.Params["configmap"]; !ok {
-				return fmt.Errorf("ReplaceCronJobTemplate requires 'configmap' param")
-			}
-		case platformv1alpha1.ActionCustom:
-			return fmt.Errorf("custom actions require manual approval")
+		v, ok := safetyValidators[action.Type]
+		if !ok {
+			continue
+		}
+		if err := v(action, actions); err != nil {
+			return err
 		}
 	}
 	return nil

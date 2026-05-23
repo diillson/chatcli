@@ -747,123 +747,84 @@ func sanitizeRunbookName(name string) string {
 }
 
 // mapActionType converts a string action name to RemediationActionType.
-func mapActionType(action string) platformv1alpha1.RemediationActionType {
-	switch action {
-	case "ScaleDeployment":
-		return platformv1alpha1.ActionScaleDeployment
-	case "RollbackDeployment":
-		return platformv1alpha1.ActionRollbackDeployment
-	case "RestartDeployment":
-		return platformv1alpha1.ActionRestartDeployment
-	case "PatchConfig":
-		return platformv1alpha1.ActionPatchConfig
-	case "AdjustResources":
-		return platformv1alpha1.ActionAdjustResources
-	case "DeletePod":
-		return platformv1alpha1.ActionDeletePod
-	case "HelmRollback":
-		return platformv1alpha1.ActionHelmRollback
-	case "ArgoSyncApp":
-		return platformv1alpha1.ActionArgoSyncApp
-	case "AdjustHPA":
-		return platformv1alpha1.ActionAdjustHPA
-	case "RestartStatefulSetPod":
-		return platformv1alpha1.ActionRestartStatefulSetPod
-	case "CordonNode":
-		return platformv1alpha1.ActionCordonNode
-	case "UncordonNode":
-		return platformv1alpha1.ActionUncordonNode
-	case "DrainNode":
-		return platformv1alpha1.ActionDrainNode
-	case "ResizePVC":
-		return platformv1alpha1.ActionResizePVC
-	case "RotateSecret":
-		return platformv1alpha1.ActionRotateSecret
-	case "ExecDiagnostic":
-		return platformv1alpha1.ActionExecDiagnostic
-	case "UpdateIngress":
-		return platformv1alpha1.ActionUpdateIngress
-	case "PatchNetworkPolicy":
-		return platformv1alpha1.ActionPatchNetworkPolicy
-	case "ApplyManifest":
-		return platformv1alpha1.ActionApplyManifest
+// actionTypeByName maps the string name the AI uses for an action (sent over
+// the gRPC SuggestedAction.action field) to the corresponding RemediationActionType
+// enum value. Lookup-by-map keeps mapActionType at constant cyclomatic complexity
+// regardless of how many action kinds the platform supports.
+var actionTypeByName = map[string]platformv1alpha1.RemediationActionType{
+	// Core workload actions
+	"ScaleDeployment":       platformv1alpha1.ActionScaleDeployment,
+	"RollbackDeployment":    platformv1alpha1.ActionRollbackDeployment,
+	"RestartDeployment":     platformv1alpha1.ActionRestartDeployment,
+	"PatchConfig":           platformv1alpha1.ActionPatchConfig,
+	"AdjustResources":       platformv1alpha1.ActionAdjustResources,
+	"DeletePod":             platformv1alpha1.ActionDeletePod,
+	"HelmRollback":          platformv1alpha1.ActionHelmRollback,
+	"ArgoSyncApp":           platformv1alpha1.ActionArgoSyncApp,
+	"AdjustHPA":             platformv1alpha1.ActionAdjustHPA,
+	"RestartStatefulSetPod": platformv1alpha1.ActionRestartStatefulSetPod,
+	"CordonNode":            platformv1alpha1.ActionCordonNode,
+	"UncordonNode":          platformv1alpha1.ActionUncordonNode,
+	"DrainNode":             platformv1alpha1.ActionDrainNode,
+	"ResizePVC":             platformv1alpha1.ActionResizePVC,
+	"RotateSecret":          platformv1alpha1.ActionRotateSecret,
+	"ExecDiagnostic":        platformv1alpha1.ActionExecDiagnostic,
+	"UpdateIngress":         platformv1alpha1.ActionUpdateIngress,
+	"PatchNetworkPolicy":    platformv1alpha1.ActionPatchNetworkPolicy,
+	"ApplyManifest":         platformv1alpha1.ActionApplyManifest,
+
 	// StatefulSet
-	case "ScaleStatefulSet":
-		return platformv1alpha1.ActionScaleStatefulSet
-	case "RestartStatefulSet":
-		return platformv1alpha1.ActionRestartStatefulSet
-	case "RollbackStatefulSet":
-		return platformv1alpha1.ActionRollbackStatefulSet
-	case "AdjustStatefulSetResources":
-		return platformv1alpha1.ActionAdjustStatefulSetResources
-	case "DeleteStatefulSetPod":
-		return platformv1alpha1.ActionDeleteStatefulSetPod
-	case "ForceDeleteStatefulSetPod":
-		return platformv1alpha1.ActionForceDeleteStatefulSetPod
-	case "UpdateStatefulSetStrategy":
-		return platformv1alpha1.ActionUpdateStatefulSetStrategy
-	case "RecreateStatefulSetPVC":
-		return platformv1alpha1.ActionRecreateStatefulSetPVC
-	case "PartitionStatefulSetUpdate":
-		return platformv1alpha1.ActionPartitionStatefulSetUpdate
+	"ScaleStatefulSet":           platformv1alpha1.ActionScaleStatefulSet,
+	"RestartStatefulSet":         platformv1alpha1.ActionRestartStatefulSet,
+	"RollbackStatefulSet":        platformv1alpha1.ActionRollbackStatefulSet,
+	"AdjustStatefulSetResources": platformv1alpha1.ActionAdjustStatefulSetResources,
+	"DeleteStatefulSetPod":       platformv1alpha1.ActionDeleteStatefulSetPod,
+	"ForceDeleteStatefulSetPod":  platformv1alpha1.ActionForceDeleteStatefulSetPod,
+	"UpdateStatefulSetStrategy":  platformv1alpha1.ActionUpdateStatefulSetStrategy,
+	"RecreateStatefulSetPVC":     platformv1alpha1.ActionRecreateStatefulSetPVC,
+	"PartitionStatefulSetUpdate": platformv1alpha1.ActionPartitionStatefulSetUpdate,
+
 	// DaemonSet
-	case "RestartDaemonSet":
-		return platformv1alpha1.ActionRestartDaemonSet
-	case "RollbackDaemonSet":
-		return platformv1alpha1.ActionRollbackDaemonSet
-	case "AdjustDaemonSetResources":
-		return platformv1alpha1.ActionAdjustDaemonSetResources
-	case "DeleteDaemonSetPod":
-		return platformv1alpha1.ActionDeleteDaemonSetPod
-	case "UpdateDaemonSetStrategy":
-		return platformv1alpha1.ActionUpdateDaemonSetStrategy
-	case "PauseDaemonSetRollout":
-		return platformv1alpha1.ActionPauseDaemonSetRollout
-	case "CordonAndDeleteDaemonSetPod":
-		return platformv1alpha1.ActionCordonAndDeleteDaemonSetPod
+	"RestartDaemonSet":            platformv1alpha1.ActionRestartDaemonSet,
+	"RollbackDaemonSet":           platformv1alpha1.ActionRollbackDaemonSet,
+	"AdjustDaemonSetResources":    platformv1alpha1.ActionAdjustDaemonSetResources,
+	"DeleteDaemonSetPod":          platformv1alpha1.ActionDeleteDaemonSetPod,
+	"UpdateDaemonSetStrategy":     platformv1alpha1.ActionUpdateDaemonSetStrategy,
+	"PauseDaemonSetRollout":       platformv1alpha1.ActionPauseDaemonSetRollout,
+	"CordonAndDeleteDaemonSetPod": platformv1alpha1.ActionCordonAndDeleteDaemonSetPod,
+
 	// Job
-	case "RetryJob":
-		return platformv1alpha1.ActionRetryJob
-	case "AdjustJobResources":
-		return platformv1alpha1.ActionAdjustJobResources
-	case "DeleteFailedJob":
-		return platformv1alpha1.ActionDeleteFailedJob
-	case "SuspendJob":
-		return platformv1alpha1.ActionSuspendJob
-	case "ResumeJob":
-		return platformv1alpha1.ActionResumeJob
-	case "AdjustJobParallelism":
-		return platformv1alpha1.ActionAdjustJobParallelism
-	case "AdjustJobDeadline":
-		return platformv1alpha1.ActionAdjustJobDeadline
-	case "AdjustJobBackoffLimit":
-		return platformv1alpha1.ActionAdjustJobBackoffLimit
-	case "ForceDeleteJobPods":
-		return platformv1alpha1.ActionForceDeleteJobPods
+	"RetryJob":              platformv1alpha1.ActionRetryJob,
+	"AdjustJobResources":    platformv1alpha1.ActionAdjustJobResources,
+	"DeleteFailedJob":       platformv1alpha1.ActionDeleteFailedJob,
+	"SuspendJob":            platformv1alpha1.ActionSuspendJob,
+	"ResumeJob":             platformv1alpha1.ActionResumeJob,
+	"AdjustJobParallelism":  platformv1alpha1.ActionAdjustJobParallelism,
+	"AdjustJobDeadline":     platformv1alpha1.ActionAdjustJobDeadline,
+	"AdjustJobBackoffLimit": platformv1alpha1.ActionAdjustJobBackoffLimit,
+	"ForceDeleteJobPods":    platformv1alpha1.ActionForceDeleteJobPods,
+
 	// CronJob
-	case "SuspendCronJob":
-		return platformv1alpha1.ActionSuspendCronJob
-	case "ResumeCronJob":
-		return platformv1alpha1.ActionResumeCronJob
-	case "TriggerCronJob":
-		return platformv1alpha1.ActionTriggerCronJob
-	case "AdjustCronJobResources":
-		return platformv1alpha1.ActionAdjustCronJobResources
-	case "AdjustCronJobSchedule":
-		return platformv1alpha1.ActionAdjustCronJobSchedule
-	case "AdjustCronJobDeadline":
-		return platformv1alpha1.ActionAdjustCronJobDeadline
-	case "AdjustCronJobHistory":
-		return platformv1alpha1.ActionAdjustCronJobHistory
-	case "AdjustCronJobConcurrency":
-		return platformv1alpha1.ActionAdjustCronJobConcurrency
-	case "DeleteCronJobActiveJobs":
-		return platformv1alpha1.ActionDeleteCronJobActiveJobs
-	case "ReplaceCronJobTemplate":
-		return platformv1alpha1.ActionReplaceCronJobTemplate
-	default:
-		return platformv1alpha1.ActionCustom
+	"SuspendCronJob":           platformv1alpha1.ActionSuspendCronJob,
+	"ResumeCronJob":            platformv1alpha1.ActionResumeCronJob,
+	"TriggerCronJob":           platformv1alpha1.ActionTriggerCronJob,
+	"AdjustCronJobResources":   platformv1alpha1.ActionAdjustCronJobResources,
+	"AdjustCronJobSchedule":    platformv1alpha1.ActionAdjustCronJobSchedule,
+	"AdjustCronJobDeadline":    platformv1alpha1.ActionAdjustCronJobDeadline,
+	"AdjustCronJobHistory":     platformv1alpha1.ActionAdjustCronJobHistory,
+	"AdjustCronJobConcurrency": platformv1alpha1.ActionAdjustCronJobConcurrency,
+	"DeleteCronJobActiveJobs":  platformv1alpha1.ActionDeleteCronJobActiveJobs,
+	"ReplaceCronJobTemplate":   platformv1alpha1.ActionReplaceCronJobTemplate,
+}
+
+// mapActionType resolves the AI-produced action name to the typed enum. Unknown
+// names map to ActionCustom, which downstream executors treat as "no-op /
+// requires manual intervention".
+func mapActionType(action string) platformv1alpha1.RemediationActionType {
+	if t, ok := actionTypeByName[action]; ok {
+		return t
 	}
+	return platformv1alpha1.ActionCustom
 }
 
 // findLatestRemediationPlan finds the most recent RemediationPlan for an issue.
@@ -1097,6 +1058,33 @@ func (r *IssueReconciler) isResourceRestored(ctx context.Context, resource platf
 	}
 }
 
+// applyPostMortemContextLabels marks the PostMortem with chaos-correlation
+// labels (GAP-04) and the containment human-action fields (GAP-03) based on
+// the parent Issue and the executed remediation plan. Extracted from
+// generatePostMortem to keep that function's cyclomatic complexity bounded.
+func applyPostMortemContextLabels(pm *platformv1alpha1.PostMortem, issue *platformv1alpha1.Issue, plan *platformv1alpha1.RemediationPlan) {
+	// GAP-04 fix: label PostMortems for chaos-induced Issues so dashboards and
+	// exports can filter them out of "real production incidents". The PostMortem
+	// still carries the timeline and actions — it's just clearly tagged so it
+	// doesn't pollute trend analysis.
+	if IsChaosInduced(issue) {
+		pm.Labels[LabelSource] = SourceChaosExperiment
+		if expName := issue.Labels["platform.chatcli.io/chaos-experiment"]; expName != "" {
+			pm.Labels["platform.chatcli.io/chaos-experiment"] = expName
+		}
+	}
+	// GAP-03 fix: when the parent issue is in Contained state, the workload is
+	// silenced but the underlying bug is unresolved. Marking the PostMortem
+	// accordingly prevents it from being prematurely closed and surfaces the
+	// concrete follow-up in tooling and notifications.
+	if issue.Status.State == platformv1alpha1.IssueStateContained {
+		pm.Spec.RequiresHumanAction = true
+		if _, action := planAppliedContainment(plan); action != "" {
+			pm.Spec.RequiredAction = action
+		}
+	}
+}
+
 // planAppliedContainment reports whether the remediation plan executed an action
 // with params["containment"]="true". Used to distinguish a "stop the bleeding"
 // outcome from a true fix. Inspects both runbook-style Actions and AgenticHistory.
@@ -1295,14 +1283,59 @@ func (r *IssueReconciler) createAgenticRemediationPlan(ctx context.Context, issu
 }
 
 // generatePostMortem creates a PostMortem CR from an agentic remediation plan.
+// generatePostMortem creates (or updates) the PostMortem CR for a successfully
+// resolved or contained incident. The function orchestrates a pipeline of
+// focused stages — each stage is a pure helper or a single-responsibility
+// method — so adding or changing one section (timeline, narrative, enrichment)
+// stays local to that stage.
 func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platformv1alpha1.Issue, plan *platformv1alpha1.RemediationPlan) error {
-	pmName := "pm-" + issue.Name
-	if len(pmName) > 63 {
-		pmName = pmName[:63]
-	}
 	now := metav1.Now()
+	pmName := postMortemName(issue)
+	timeline := buildPostMortemTimeline(issue, plan, now)
+	actions := buildPostMortemActions(plan, now)
+	narrative := r.readPostMortemNarrative(ctx, issue, plan)
+	duration := postMortemDuration(issue, now)
 
-	// Build timeline
+	pm, err := r.createOrUpdatePostMortem(ctx, issue, plan, pmName)
+	if err != nil {
+		return err
+	}
+
+	apply := func(pm *platformv1alpha1.PostMortem) {
+		applyPostMortemStatusFields(pm, narrative, timeline, actions, duration, &now)
+		pm.Status.Trending = r.buildTrendingInfo(ctx, issue)
+	}
+	apply(pm)
+	r.enrichPostMortemContext(ctx, pm, issue)
+
+	return r.persistPostMortemStatus(ctx, pm, apply)
+}
+
+// postMortemName builds the CR name, truncated to the RFC 1123 subdomain limit.
+func postMortemName(issue *platformv1alpha1.Issue) string {
+	name := "pm-" + issue.Name
+	if len(name) > 63 {
+		name = name[:63]
+	}
+	return name
+}
+
+// postMortemDuration returns the human-readable duration between detection and
+// resolution. Empty when DetectedAt was never set (defensive: should always be
+// populated by handleDetected, but the PostMortem path is reachable from edge
+// cases like manual resolution).
+func postMortemDuration(issue *platformv1alpha1.Issue, now metav1.Time) string {
+	if issue.Status.DetectedAt == nil {
+		return ""
+	}
+	return now.Sub(issue.Status.DetectedAt.Time).Round(time.Second).String()
+}
+
+// buildPostMortemTimeline assembles the chronological event list. Picks
+// agentic-history events when the plan ran in agentic mode, plan.Spec.Actions
+// otherwise. A "detected" event opens the timeline and a "resolved" event
+// closes it so the reader can read the full incident in one pass.
+func buildPostMortemTimeline(issue *platformv1alpha1.Issue, plan *platformv1alpha1.RemediationPlan, now metav1.Time) []platformv1alpha1.TimelineEvent {
 	var timeline []platformv1alpha1.TimelineEvent
 	if issue.Status.DetectedAt != nil {
 		timeline = append(timeline, platformv1alpha1.TimelineEvent{
@@ -1312,84 +1345,13 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 		})
 	}
 
-	// Build action records — from agentic history or standard plan actions
-	var actions []platformv1alpha1.ActionRecord
-
 	if len(plan.Spec.AgenticHistory) > 0 {
-		// Agentic mode: build from step history
 		for _, step := range plan.Spec.AgenticHistory {
-			evType := "action_executed"
-			if strings.HasPrefix(step.Observation, "FAILED:") {
-				evType = "action_failed"
-			}
-			actionStr := "(observation)"
-			if step.Action != nil {
-				actionStr = string(step.Action.Type)
-			}
-			// Include AI reasoning in timeline for full audit trail
-			detail := fmt.Sprintf("Step %d: %s — %s", step.StepNumber, actionStr, step.Observation)
-			if step.AIMessage != "" {
-				detail = fmt.Sprintf("Step %d [AI reasoning: %s] Action: %s — %s", step.StepNumber, step.AIMessage, actionStr, step.Observation)
-			}
-			timeline = append(timeline, platformv1alpha1.TimelineEvent{
-				Timestamp: step.Timestamp,
-				Type:      evType,
-				Detail:    detail,
-			})
-			if step.Action != nil {
-				result := "success"
-				if strings.HasPrefix(step.Observation, "FAILED:") {
-					result = "failed"
-				}
-				// Include AI reasoning in action detail for audit
-				actionDetail := step.Observation
-				if step.AIMessage != "" {
-					actionDetail = fmt.Sprintf("[AI: %s] %s", step.AIMessage, step.Observation)
-				}
-				actions = append(actions, platformv1alpha1.ActionRecord{
-					Action:    string(step.Action.Type),
-					Params:    step.Action.Params,
-					Result:    result,
-					Detail:    actionDetail,
-					Timestamp: step.Timestamp,
-				})
-			}
+			timeline = append(timeline, agenticHistoryToTimelineEvent(step))
 		}
 	} else {
-		// Standard mode: build from plan actions + checkpoints/evidence
 		for i, action := range plan.Spec.Actions {
-			result := "success"
-			detail := fmt.Sprintf("Action %s executed", action.Type)
-
-			// Check checkpoint for this action
-			for _, cp := range plan.Status.ActionCheckpoints {
-				if cp.ActionIndex == int32(i) {
-					if !cp.Success {
-						result = "failed"
-						detail = fmt.Sprintf("Action %s failed", action.Type)
-					}
-					break
-				}
-			}
-
-			ts := now
-			if plan.Status.StartedAt != nil {
-				ts = *plan.Status.StartedAt
-			}
-
-			actions = append(actions, platformv1alpha1.ActionRecord{
-				Action:    string(action.Type),
-				Params:    action.Params,
-				Result:    result,
-				Detail:    detail,
-				Timestamp: ts,
-			})
-
-			timeline = append(timeline, platformv1alpha1.TimelineEvent{
-				Timestamp: ts,
-				Type:      "action_executed",
-				Detail:    fmt.Sprintf("%s: %s", action.Type, detail),
-			})
+			timeline = append(timeline, planActionToTimelineEvent(action, i, plan, now))
 		}
 	}
 
@@ -1398,57 +1360,188 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 		Type:      "resolved",
 		Detail:    plan.Status.Result,
 	})
+	return timeline
+}
 
-	// Duration
-	duration := ""
-	if issue.Status.DetectedAt != nil {
-		duration = now.Sub(issue.Status.DetectedAt.Time).Round(time.Second).String()
+// agenticHistoryToTimelineEvent renders a single agentic step into the
+// timeline. Embeds the AI reasoning when present so the rendered PostMortem
+// reads like a transcript of the loop's decisions.
+func agenticHistoryToTimelineEvent(step platformv1alpha1.AgenticStep) platformv1alpha1.TimelineEvent {
+	evType := "action_executed"
+	if strings.HasPrefix(step.Observation, "FAILED:") {
+		evType = "action_failed"
 	}
-
-	// Read postmortem data — from plan annotations (agentic) or AIInsight (standard)
-	summary := plan.Annotations["platform.chatcli.io/postmortem-summary"]
-	rootCause := plan.Annotations["platform.chatcli.io/root-cause"]
-	impact := plan.Annotations["platform.chatcli.io/impact"]
-
-	var lessonsLearned []string
-	if raw := plan.Annotations["platform.chatcli.io/lessons-learned"]; raw != "" {
-		lessonsLearned = strings.Split(raw, "\n---\n")
+	actionStr := "(observation)"
+	if step.Action != nil {
+		actionStr = string(step.Action.Type)
 	}
-
-	var preventionActions []string
-	if raw := plan.Annotations["platform.chatcli.io/prevention-actions"]; raw != "" {
-		preventionActions = strings.Split(raw, "\n---\n")
+	detail := fmt.Sprintf("Step %d: %s — %s", step.StepNumber, actionStr, step.Observation)
+	if step.AIMessage != "" {
+		detail = fmt.Sprintf("Step %d [AI reasoning: %s] Action: %s — %s", step.StepNumber, step.AIMessage, actionStr, step.Observation)
 	}
+	return platformv1alpha1.TimelineEvent{
+		Timestamp: step.Timestamp,
+		Type:      evType,
+		Detail:    detail,
+	}
+}
 
-	// For standard mode: if annotations are empty, populate from AIInsight
-	if summary == "" || rootCause == "" {
-		insightName := issue.Name + "-insight"
-		var insight platformv1alpha1.AIInsight
-		if err := r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: issue.Namespace}, &insight); err == nil {
-			if summary == "" && insight.Status.Analysis != "" {
-				summary = insight.Status.Analysis
-			}
-			if rootCause == "" && insight.Status.Analysis != "" {
-				rootCause = insight.Status.Analysis
-			}
-			if len(lessonsLearned) == 0 && len(insight.Status.Recommendations) > 0 {
-				lessonsLearned = insight.Status.Recommendations
-			}
-			if impact == "" {
-				impact = fmt.Sprintf("Issue %s on %s/%s (severity: %s, risk: %d)",
-					issue.Spec.SignalType, issue.Spec.Resource.Kind, issue.Spec.Resource.Name,
-					issue.Spec.Severity, issue.Spec.RiskScore)
-			}
+// planActionToTimelineEvent renders a runbook-style action into the timeline,
+// consulting plan.Status.ActionCheckpoints to determine success/failure.
+func planActionToTimelineEvent(action platformv1alpha1.RemediationAction, idx int, plan *platformv1alpha1.RemediationPlan, now metav1.Time) platformv1alpha1.TimelineEvent {
+	_, detail := planActionOutcome(action, idx, plan)
+	ts := planActionTimestamp(plan, now)
+	return platformv1alpha1.TimelineEvent{
+		Timestamp: ts,
+		Type:      "action_executed",
+		Detail:    fmt.Sprintf("%s: %s", action.Type, detail),
+	}
+}
+
+// planActionTimestamp returns the timestamp to attribute to a plan action.
+// Falls back to "now" when StartedAt was never set.
+func planActionTimestamp(plan *platformv1alpha1.RemediationPlan, now metav1.Time) metav1.Time {
+	if plan.Status.StartedAt != nil {
+		return *plan.Status.StartedAt
+	}
+	return now
+}
+
+// planActionOutcome returns (result, detail) for a plan action by index.
+func planActionOutcome(action platformv1alpha1.RemediationAction, idx int, plan *platformv1alpha1.RemediationPlan) (string, string) {
+	for _, cp := range plan.Status.ActionCheckpoints {
+		if cp.ActionIndex == int32(idx) && !cp.Success {
+			return "failed", fmt.Sprintf("Action %s failed", action.Type)
 		}
 	}
+	return "success", fmt.Sprintf("Action %s executed", action.Type)
+}
 
+// buildPostMortemActions returns the ActionRecord list for the PostMortem.
+// Mirrors the timeline source: agentic history or runbook actions, never both.
+func buildPostMortemActions(plan *platformv1alpha1.RemediationPlan, now metav1.Time) []platformv1alpha1.ActionRecord {
+	if len(plan.Spec.AgenticHistory) > 0 {
+		return agenticHistoryToActionRecords(plan.Spec.AgenticHistory)
+	}
+	return planActionsToActionRecords(plan, now)
+}
+
+// agenticHistoryToActionRecords extracts action records from agentic history,
+// skipping observation-only steps (Action == nil).
+func agenticHistoryToActionRecords(history []platformv1alpha1.AgenticStep) []platformv1alpha1.ActionRecord {
+	var records []platformv1alpha1.ActionRecord
+	for _, step := range history {
+		if step.Action == nil {
+			continue
+		}
+		result := "success"
+		if strings.HasPrefix(step.Observation, "FAILED:") {
+			result = "failed"
+		}
+		detail := step.Observation
+		if step.AIMessage != "" {
+			detail = fmt.Sprintf("[AI: %s] %s", step.AIMessage, step.Observation)
+		}
+		records = append(records, platformv1alpha1.ActionRecord{
+			Action:    string(step.Action.Type),
+			Params:    step.Action.Params,
+			Result:    result,
+			Detail:    detail,
+			Timestamp: step.Timestamp,
+		})
+	}
+	return records
+}
+
+// planActionsToActionRecords extracts action records from a runbook-style plan.
+func planActionsToActionRecords(plan *platformv1alpha1.RemediationPlan, now metav1.Time) []platformv1alpha1.ActionRecord {
+	records := make([]platformv1alpha1.ActionRecord, 0, len(plan.Spec.Actions))
+	ts := planActionTimestamp(plan, now)
+	for i, action := range plan.Spec.Actions {
+		result, detail := planActionOutcome(action, i, plan)
+		records = append(records, platformv1alpha1.ActionRecord{
+			Action:    string(action.Type),
+			Params:    action.Params,
+			Result:    result,
+			Detail:    detail,
+			Timestamp: ts,
+		})
+	}
+	return records
+}
+
+// postMortemNarrative carries the AI-generated prose fields. Pulled out as a
+// struct so the PostMortem builder can pass it through enrichment stages
+// without growing a long parameter list.
+type postMortemNarrative struct {
+	Summary           string
+	RootCause         string
+	Impact            string
+	LessonsLearned    []string
+	PreventionActions []string
+}
+
+// readPostMortemNarrative composes the AI-generated prose, preferring agentic
+// plan annotations (richer — they carry the loop's own postmortem_summary,
+// root_cause, impact and lessons) and falling back to the AIInsight analysis
+// for runbook-style plans.
+func (r *IssueReconciler) readPostMortemNarrative(ctx context.Context, issue *platformv1alpha1.Issue, plan *platformv1alpha1.RemediationPlan) postMortemNarrative {
+	n := postMortemNarrative{
+		Summary:           plan.Annotations["platform.chatcli.io/postmortem-summary"],
+		RootCause:         plan.Annotations["platform.chatcli.io/root-cause"],
+		Impact:            plan.Annotations["platform.chatcli.io/impact"],
+		LessonsLearned:    splitAnnotation(plan.Annotations["platform.chatcli.io/lessons-learned"]),
+		PreventionActions: splitAnnotation(plan.Annotations["platform.chatcli.io/prevention-actions"]),
+	}
+	if n.Summary != "" && n.RootCause != "" {
+		return n
+	}
+	r.fillNarrativeFromInsight(ctx, &n, issue)
+	return n
+}
+
+// splitAnnotation splits a multi-value annotation on the standard separator.
+func splitAnnotation(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, "\n---\n")
+}
+
+// fillNarrativeFromInsight populates empty narrative fields from the AIInsight.
+// Best-effort: when the insight CR is missing we simply leave the gaps.
+func (r *IssueReconciler) fillNarrativeFromInsight(ctx context.Context, n *postMortemNarrative, issue *platformv1alpha1.Issue) {
+	var insight platformv1alpha1.AIInsight
+	insightName := issue.Name + "-insight"
+	if err := r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: issue.Namespace}, &insight); err != nil {
+		return
+	}
+	if n.Summary == "" && insight.Status.Analysis != "" {
+		n.Summary = insight.Status.Analysis
+	}
+	if n.RootCause == "" && insight.Status.Analysis != "" {
+		n.RootCause = insight.Status.Analysis
+	}
+	if len(n.LessonsLearned) == 0 && len(insight.Status.Recommendations) > 0 {
+		n.LessonsLearned = insight.Status.Recommendations
+	}
+	if n.Impact == "" {
+		n.Impact = fmt.Sprintf("Issue %s on %s/%s (severity: %s, risk: %d)",
+			issue.Spec.SignalType, issue.Spec.Resource.Kind, issue.Spec.Resource.Name,
+			issue.Spec.Severity, issue.Spec.RiskScore)
+	}
+}
+
+// createOrUpdatePostMortem performs the upsert of the PostMortem CR and seeds
+// its labels and spec. Returns the live CR (with the OwnerReference set) ready
+// for status enrichment.
+func (r *IssueReconciler) createOrUpdatePostMortem(ctx context.Context, issue *platformv1alpha1.Issue, plan *platformv1alpha1.RemediationPlan, pmName string) (*platformv1alpha1.PostMortem, error) {
 	pm := &platformv1alpha1.PostMortem{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pmName,
 			Namespace: issue.Namespace,
 		},
 	}
-
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, pm, func() error {
 		if err := controllerutil.SetControllerReference(issue, pm, r.Scheme); err != nil {
 			return err
@@ -1463,97 +1556,104 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 			Resource: issue.Spec.Resource,
 			Severity: issue.Spec.Severity,
 		}
-		// GAP-04 fix: label PostMortems for chaos-induced Issues so dashboards
-		// and exports can filter them out of "real production incidents". The
-		// PostMortem still carries the timeline and actions — it's just clearly
-		// tagged so it doesn't pollute trend analysis.
-		if IsChaosInduced(issue) {
-			pm.Labels[LabelSource] = SourceChaosExperiment
-			if expName := issue.Labels["platform.chatcli.io/chaos-experiment"]; expName != "" {
-				pm.Labels["platform.chatcli.io/chaos-experiment"] = expName
-			}
-		}
-		// GAP-03 fix: when the parent issue is in Contained state, the workload
-		// is silenced but the underlying bug is unresolved. Marking the PostMortem
-		// accordingly prevents it from being prematurely closed and surfaces the
-		// concrete follow-up in tooling and notifications.
-		if issue.Status.State == platformv1alpha1.IssueStateContained {
-			pm.Spec.RequiresHumanAction = true
-			if _, action := planAppliedContainment(plan); action != "" {
-				pm.Spec.RequiredAction = action
-			}
-		}
+		applyPostMortemContextLabels(pm, issue, plan)
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return pm, nil
+}
 
-	// Apply all status fields
-	applyPostMortemStatus := func(pm *platformv1alpha1.PostMortem) {
-		pm.Status.State = platformv1alpha1.PostMortemStateOpen
-		pm.Status.Summary = summary
-		pm.Status.RootCause = rootCause
-		pm.Status.Impact = impact
-		pm.Status.Timeline = timeline
-		pm.Status.ActionsExecuted = actions
-		pm.Status.LessonsLearned = lessonsLearned
-		pm.Status.PreventionActions = preventionActions
-		pm.Status.Duration = duration
-		pm.Status.GeneratedAt = &now
-		pm.Status.Trending = r.buildTrendingInfo(ctx, issue)
+// applyPostMortemStatusFields writes the core narrative + chronology fields
+// onto the PostMortem status. Pure function: idempotent and called both on
+// initial apply and on conflict-retry, which is why it lives outside the
+// orchestration method.
+func applyPostMortemStatusFields(pm *platformv1alpha1.PostMortem, n postMortemNarrative, timeline []platformv1alpha1.TimelineEvent, actions []platformv1alpha1.ActionRecord, duration string, generatedAt *metav1.Time) {
+	pm.Status.State = platformv1alpha1.PostMortemStateOpen
+	pm.Status.Summary = n.Summary
+	pm.Status.RootCause = n.RootCause
+	pm.Status.Impact = n.Impact
+	pm.Status.LessonsLearned = n.LessonsLearned
+	pm.Status.PreventionActions = n.PreventionActions
+	pm.Status.Timeline = timeline
+	pm.Status.ActionsExecuted = actions
+	pm.Status.Duration = duration
+	pm.Status.GeneratedAt = generatedAt
+}
+
+// enrichPostMortemContext attaches the optional cross-system enrichments
+// (cascade chain, GitOps context, Git correlation). Each stage is best-effort
+// — a failure in one enrichment never blocks the PostMortem from being saved.
+func (r *IssueReconciler) enrichPostMortemContext(ctx context.Context, pm *platformv1alpha1.PostMortem, issue *platformv1alpha1.Issue) {
+	r.attachCascadeChain(ctx, pm, issue)
+	r.attachGitOpsContext(ctx, pm, issue)
+	r.attachGitCorrelation(ctx, pm, issue)
+}
+
+// attachCascadeChain runs the cascade analyzer and records the service chain
+// when the failure spans two or more services.
+func (r *IssueReconciler) attachCascadeChain(ctx context.Context, pm *platformv1alpha1.PostMortem, issue *platformv1alpha1.Issue) {
+	cascade, err := NewCascadeAnalyzer(r.Client).AnalyzeCascade(ctx, issue)
+	if err != nil || len(cascade.Chain) < 2 {
+		return
 	}
-
-	applyPostMortemStatus(pm)
-
-	// Enrich with cascade chain
-	cascadeAnalyzer := NewCascadeAnalyzer(r.Client)
-	if cascadeResult, err := cascadeAnalyzer.AnalyzeCascade(ctx, issue); err == nil && len(cascadeResult.Chain) >= 2 {
-		var chain []string
-		for _, n := range cascadeResult.Chain {
-			chain = append(chain, fmt.Sprintf("%s/%s(%s)", n.Namespace, n.ServiceName, n.Role))
-		}
-		pm.Status.CascadeChain = chain
+	chain := make([]string, 0, len(cascade.Chain))
+	for _, n := range cascade.Chain {
+		chain = append(chain, fmt.Sprintf("%s/%s(%s)", n.Namespace, n.ServiceName, n.Role))
 	}
+	pm.Status.CascadeChain = chain
+}
 
-	// Enrich with GitOps context
-	gitopsDetector := NewGitOpsDetector(r.Client)
-	if gitopsCtx, err := gitopsDetector.DetectGitOpsContext(ctx, issue.Spec.Resource); err == nil {
-		pm.Status.GitOpsContext = gitopsCtx.Summary
+// attachGitOpsContext records whether the resource is managed by Helm/Argo/Flux.
+func (r *IssueReconciler) attachGitOpsContext(ctx context.Context, pm *platformv1alpha1.PostMortem, issue *platformv1alpha1.Issue) {
+	gitopsCtx, err := NewGitOpsDetector(r.Client).DetectGitOpsContext(ctx, issue.Spec.Resource)
+	if err != nil {
+		return
 	}
+	pm.Status.GitOpsContext = gitopsCtx.Summary
+}
 
-	// Enrich with git correlation from SourceRepository
-	srcAnalyzer := NewSourceCodeAnalyzer(r.Client)
+// attachGitCorrelation surfaces the suspected commit (image bump, config
+// change) that likely introduced the regression, based on the linked
+// SourceRepository CR.
+func (r *IssueReconciler) attachGitCorrelation(ctx context.Context, pm *platformv1alpha1.PostMortem, issue *platformv1alpha1.Issue) {
 	detectedAt := issue.CreationTimestamp.Time
 	if issue.Status.DetectedAt != nil {
 		detectedAt = issue.Status.DetectedAt.Time
 	}
-	if srcCtx, err := srcAnalyzer.BuildSourceContext(ctx, issue.Spec.Resource, detectedAt, nil); err == nil && srcCtx != nil && srcCtx.SuspectedCommit != nil {
-		c := srcCtx.SuspectedCommit
-		pm.Status.GitCorrelation = &platformv1alpha1.GitCorrelation{
-			CommitSHA:     c.SHA,
-			CommitMessage: c.Message,
-			Author:        c.Author,
-			Timestamp:     c.Timestamp,
-			Confidence:    0.7,
-			FilesChanged:  c.FilesChanged,
-		}
+	srcCtx, err := NewSourceCodeAnalyzer(r.Client).BuildSourceContext(ctx, issue.Spec.Resource, detectedAt, nil)
+	if err != nil || srcCtx == nil || srcCtx.SuspectedCommit == nil {
+		return
 	}
+	c := srcCtx.SuspectedCommit
+	pm.Status.GitCorrelation = &platformv1alpha1.GitCorrelation{
+		CommitSHA:     c.SHA,
+		CommitMessage: c.Message,
+		Author:        c.Author,
+		Timestamp:     c.Timestamp,
+		Confidence:    0.7,
+		FilesChanged:  c.FilesChanged,
+	}
+}
 
-	// Try Status().Update() with retry on conflict (PostMortemReconciler may race).
-	if err := r.Status().Update(ctx, pm); err != nil {
-		// Conflict: re-fetch and re-apply
-		if errors.IsConflict(err) || errors.IsNotFound(err) {
-			time.Sleep(500 * time.Millisecond)
-			if fetchErr := r.Get(ctx, types.NamespacedName{Name: pm.Name, Namespace: pm.Namespace}, pm); fetchErr != nil {
-				return fmt.Errorf("re-fetching PostMortem after conflict: %w", fetchErr)
-			}
-			applyPostMortemStatus(pm)
-			return r.Status().Update(ctx, pm)
-		}
+// persistPostMortemStatus writes the PostMortem status, with one conflict-retry
+// because the PostMortemReconciler may have already started its own Update on
+// the freshly-created CR. The retry re-fetches and re-applies via the same
+// pure-function path, which avoids re-running the enrichment stages twice.
+func (r *IssueReconciler) persistPostMortemStatus(ctx context.Context, pm *platformv1alpha1.PostMortem, apply func(*platformv1alpha1.PostMortem)) error {
+	if err := r.Status().Update(ctx, pm); err == nil {
+		return nil
+	} else if !errors.IsConflict(err) && !errors.IsNotFound(err) {
 		return err
 	}
-	return nil
+
+	time.Sleep(500 * time.Millisecond)
+	if err := r.Get(ctx, types.NamespacedName{Name: pm.Name, Namespace: pm.Namespace}, pm); err != nil {
+		return fmt.Errorf("re-fetching PostMortem after conflict: %w", err)
+	}
+	apply(pm)
+	return r.Status().Update(ctx, pm)
 }
 
 // generateAgenticRunbook creates a Runbook from the successful actions of an agentic session.
