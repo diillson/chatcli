@@ -52,7 +52,7 @@ jobs:
     outputs:
       scan_matrix: ${{ steps.compute.outputs.scan_matrix }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -92,7 +92,7 @@ jobs:
       matrix: ${{ fromJson(needs.discover.outputs.scan_matrix) }}
     steps:
       - name: Checkout source at tag (for .trivyignore.yaml)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v5
         with:
           ref: "v${{ matrix.tag }}"
           fetch-depth: 1
@@ -220,7 +220,7 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.arch_matrix) }}
     steps:
       - name: Checkout source at tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v5
         with:
           ref: "v${{ matrix.tag }}"
           fetch-depth: 1
@@ -271,7 +271,7 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.merge_matrix) }}
     steps:
       - name: Checkout source at tag (for .trivyignore.yaml)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v5
         with:
           ref: "v${{ matrix.tag }}"
           fetch-depth: 1
@@ -375,7 +375,7 @@ jobs:
     if: always() && needs.scan.result != 'skipped'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v5
 
       - name: Download decisions
         uses: actions/download-artifact@v8
