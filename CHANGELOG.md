@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.121.0](https://github.com/diillson/chatcli/compare/v1.120.0...v1.121.0) (2026-05-23)
+
+
+### Features
+
+* **auth:** TokenProvider with proactive OAuth refresh and retry-on-401 ([#948](https://github.com/diillson/chatcli/issues/948)) ([37af298](https://github.com/diillson/chatcli/commit/37af298ac71c1483785831536e9ee3ad52d27365))
+
 ## [1.120.0](https://github.com/diillson/chatcli/compare/v1.119.3...v1.120.0) (2026-05-21)
 
 
