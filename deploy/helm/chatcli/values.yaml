@@ -185,9 +185,14 @@ rbac:
 # chart, GitOps with explicit CRD application, etc.).
 crdUpgrade:
   enabled: true
+  # Image used by the pre-upgrade Job to run `kubectl apply`. Defaults to the
+  # OFFICIAL Kubernetes-project kubectl image at registry.k8s.io — versioned
+  # in lockstep with the Kubernetes release, distroless (no shell, no package
+  # manager), and signed/SBOM'd by the project. Avoid pinning to a major-minor
+  # stub like "v1.31" — only fully-qualified patch tags like "v1.31.10" resolve.
   image:
-    repository: bitnami/kubectl
-    tag: "1.31"
+    repository: registry.k8s.io/kubectl
+    tag: "v1.31.10"
     pullPolicy: IfNotPresent
   resources:
     requests:

@@ -143,35 +143,48 @@ spec:
         - name: kubectl-apply
           image: "{{ .Values.crdUpgrade.image.repository }}:{{ .Values.crdUpgrade.image.tag }}"
           imagePullPolicy: {{ .Values.crdUpgrade.image.pullPolicy }}
+          # The official registry.k8s.io/kubectl image is distroless: no shell,
+          # no package manager, single entrypoint = /bin/kubectl. We invoke it
+          # with bare args (no /bin/sh -c wrapper) so the same template works
+          # against alternative kubectl images people might pin too. The image
+          # ships as USER 0; we override to 65532 (nobody) via securityContext.
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
-            runAsUser: 1001
+            runAsUser: 65532
+            runAsGroup: 65532
             capabilities:
               drop: ["ALL"]
           # kubectl apply on every CRD in the bundled ConfigMap. Server-side
           # apply (--server-side) handles concurrent edits cleanly and lets
           # kubectl reconcile field ownership instead of blanket overwriting.
-          # --force-conflicts is needed in case a prior client owned the
-          # field set (e.g. controller-gen output from a previous chart
-          # version). Without it, server-side apply errors out on conflict.
-          command:
-            - /bin/sh
-            - -c
-            - |
-              set -euo pipefail
-              echo "Applying $(ls /crds | wc -l) CRD(s) from chart {{ .Chart.Name }}-{{ .Chart.Version }}"
-              kubectl apply --server-side --force-conflicts -f /crds
-              echo "CRD upgrade complete"
+          # --force-conflicts is needed in case a prior client owned the field
+          # set (e.g. controller-gen output from a previous chart version).
+          args:
+            - apply
+            - --server-side
+            - --force-conflicts
+            - -f
+            - /crds
+          env:
+            # Distroless kubectl writes the discovery cache under $HOME/.kube/
+            # cache; with readOnlyRootFilesystem we redirect HOME to a writable
+            # emptyDir mounted at /tmp.
+            - name: HOME
+              value: /tmp
           volumeMounts:
             - name: crds
               mountPath: /crds
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.crdUpgrade.resources | nindent 12 }}
       volumes:
         - name: crds
           configMap:
             name: {{ include "chatcli-operator.fullname" . }}-crd-bundle
+        - name: tmp
+          emptyDir: {}
 {{- end }}

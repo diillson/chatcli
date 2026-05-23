@@ -62,13 +62,16 @@ rbac:
 # chart, GitOps with explicit CRD application, etc.).
 crdUpgrade:
   enabled: true
-  # Image used by the pre-upgrade Job to run `kubectl apply -f`. The default
-  # is the bitnami/kubectl image because it's the only minimal kubectl image
-  # without ImageMagick / curl / shell-utility bloat. Override when running in
-  # an air-gapped environment.
+  # Image used by the pre-upgrade Job to run `kubectl apply`. Defaults to the
+  # OFFICIAL Kubernetes-project kubectl image at registry.k8s.io — versioned
+  # in lockstep with the Kubernetes release, distroless (no shell, no package
+  # manager), and signed/SBOM'd by the project. Avoid pinning the tag to a
+  # major-minor stub like "v1.31" — that is NOT a valid manifest reference;
+  # the registry only resolves fully-qualified patch tags like "v1.31.10".
+  # Override only for air-gapped mirrors.
   image:
-    repository: bitnami/kubectl
-    tag: "1.31"
+    repository: registry.k8s.io/kubectl
+    tag: "v1.31.10"
     pullPolicy: IfNotPresent
   # Pod resource limits for the hook Job. Defaults keep it lightweight — the
   # job is short-lived (typically <30s) and only runs kubectl apply.
