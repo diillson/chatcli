@@ -97,7 +97,7 @@ annotations:
       kind: ApprovalPolicy
       metadata:
         name: production-approval
-        namespace: aiops-system
+        namespace: chatcli-system
       spec:
         enabled: true
         defaultMode: manual

@@ -172,7 +172,7 @@ Pipeline AIOps autônomo com 17 CRDs, 54+ ações de remediação, SLO monitorin
 ```bash
 helm install chatcli-operator \
   oci://ghcr.io/diillson/charts/chatcli-operator \
-  --namespace aiops-system \
+  --namespace chatcli-system \
   --create-namespace
 ```
 

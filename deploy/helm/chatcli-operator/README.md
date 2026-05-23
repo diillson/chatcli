@@ -38,7 +38,7 @@ A production-grade, security-hardened Kubernetes operator for **autonomous incid
 
 ```bash
 helm install chatcli-operator oci://ghcr.io/diillson/charts/chatcli-operator \
-  --namespace aiops-system --create-namespace
+  --namespace chatcli-system --create-namespace
 ```
 
 ### From Source
@@ -46,7 +46,7 @@ helm install chatcli-operator oci://ghcr.io/diillson/charts/chatcli-operator \
 ```bash
 git clone https://github.com/diillson/chatcli.git
 helm install chatcli-operator deploy/helm/chatcli-operator \
-  --namespace aiops-system --create-namespace
+  --namespace chatcli-system --create-namespace
 ```
 
 ### Verify Signature
@@ -69,7 +69,7 @@ cosign verify ghcr.io/diillson/chatcli-operator:<version> \
 
 ```bash
 helm install chatcli-operator oci://ghcr.io/diillson/charts/chatcli-operator \
-  --namespace aiops-system --create-namespace \
+  --namespace chatcli-system --create-namespace \
   --set prometheusUrl=http://prometheus-server.monitoring.svc:9090 \
   --set serviceMonitor.enabled=true
 ```
@@ -405,14 +405,14 @@ spec:
 
 ```bash
 helm upgrade chatcli-operator oci://ghcr.io/diillson/charts/chatcli-operator \
-  --namespace aiops-system \
+  --namespace chatcli-system \
   --reuse-values
 ```
 
 ## Uninstalling
 
 ```bash
-helm uninstall chatcli-operator -n aiops-system
+helm uninstall chatcli-operator -n chatcli-system
 ```
 
 > **Note:** CRDs are not removed automatically by Helm. To remove them:
@@ -560,7 +560,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: chatcli-dashboard
-  namespace: aiops-system
+  namespace: chatcli-system
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
