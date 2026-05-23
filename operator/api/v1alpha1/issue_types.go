@@ -14,16 +14,23 @@ const (
 )
 
 // IssueState represents the lifecycle state of an issue.
-// +kubebuilder:validation:Enum=Detected;Analyzing;Remediating;Resolved;Escalated;Failed
+// +kubebuilder:validation:Enum=Detected;Analyzing;Remediating;Contained;Resolved;Escalated;Failed
 type IssueState string
 
 const (
 	IssueStateDetected    IssueState = "Detected"
 	IssueStateAnalyzing   IssueState = "Analyzing"
 	IssueStateRemediating IssueState = "Remediating"
-	IssueStateResolved    IssueState = "Resolved"
-	IssueStateEscalated   IssueState = "Escalated"
-	IssueStateFailed      IssueState = "Failed"
+	// IssueStateContained indicates the operator silenced the immediate impact
+	// (e.g., scaled the workload to 0 replicas with containment=true) but the
+	// underlying bug is still present and a human must restore service.
+	// Distinguished from Resolved so PostMortem stays open, notifications fire
+	// with elevated severity, and the platform does not declare false victory.
+	// GAP-03 fix (chaos test report 2026-05-23).
+	IssueStateContained IssueState = "Contained"
+	IssueStateResolved  IssueState = "Resolved"
+	IssueStateEscalated IssueState = "Escalated"
+	IssueStateFailed    IssueState = "Failed"
 )
 
 // IssueSource represents where the issue signal originated.

@@ -9,63 +9,87 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// computeSummary calculates an overview of all AIOps metrics, optionally filtered by time range.
+// computeSummary calculates an overview of all AIOps metrics, optionally
+// filtered by time range. Each contributing dataset (issues, remediations,
+// postmortems, runbooks, SLOs, approvals) is folded by a dedicated helper so
+// the orchestration here stays a flat sequence of named steps. Early-exit on
+// list errors propagates the failure to the caller — the partial summary is
+// never returned, which prevents dashboards from rendering misleading totals.
 func (s *APIServer) computeSummary(ctx context.Context, tr timeRangeParams) (*AnalyticsSummary, error) {
-	summary := &AnalyticsSummary{
-		SeverityBreakdown: make(map[string]int),
-	}
+	summary := &AnalyticsSummary{SeverityBreakdown: make(map[string]int)}
 
-	// Fetch all issues.
-	var issues v1alpha1.IssueList
-	if err := s.client.List(ctx, &issues); err != nil {
+	issues, err := s.listIssues(ctx)
+	if err != nil {
 		return nil, err
 	}
+	foldIssueSummary(summary, issues, tr)
 
-	// Filter by time range
-	var filtered []v1alpha1.Issue
-	for _, iss := range issues.Items {
-		if inTimeRange(iss.CreationTimestamp.Time, tr) {
-			filtered = append(filtered, iss)
-		}
+	plans, err := s.listRemediationPlans(ctx)
+	if err != nil {
+		return nil, err
 	}
+	foldRemediationSummary(summary, plans, issues, tr)
 
-	summary.TotalIssues = len(filtered)
+	if err := s.foldPostMortemSummary(ctx, summary, tr); err != nil {
+		return nil, err
+	}
+	if err := s.foldRunbookSummary(ctx, summary); err != nil {
+		return nil, err
+	}
+	s.foldSLOSummary(ctx, summary)
+	s.foldApprovalSummary(ctx, summary)
+
+	return summary, nil
+}
+
+// listIssues returns every Issue in the cluster. Splitting the list call from
+// the folding step keeps computeSummary linear and lets the issue list be
+// reused for orphan-detection in foldRemediationSummary.
+func (s *APIServer) listIssues(ctx context.Context) ([]v1alpha1.Issue, error) {
+	var list v1alpha1.IssueList
+	if err := s.client.List(ctx, &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// listRemediationPlans returns every RemediationPlan in the cluster.
+func (s *APIServer) listRemediationPlans(ctx context.Context) ([]v1alpha1.RemediationPlan, error) {
+	var list v1alpha1.RemediationPlanList
+	if err := s.client.List(ctx, &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// foldIssueSummary accumulates the issue-driven counters (totals, severity
+// breakdown, risk score average, and the GAP-03/04 Contained / chaos-induced
+// buckets) into the running summary.
+func foldIssueSummary(summary *AnalyticsSummary, issues []v1alpha1.Issue, tr timeRangeParams) {
 	var totalRisk int64
-	for _, iss := range filtered {
+	for i := range issues {
+		iss := issues[i]
+		if !inTimeRange(iss.CreationTimestamp.Time, tr) {
+			continue
+		}
+		summary.TotalIssues++
 		summary.SeverityBreakdown[string(iss.Spec.Severity)]++
 		totalRisk += int64(iss.Spec.RiskScore)
-
-		switch iss.Status.State {
-		case v1alpha1.IssueStateResolved:
-			summary.ResolvedIssues++
-		case v1alpha1.IssueStateFailed:
-			// count as open since it failed remediation
-			summary.OpenIssues++
-		default:
-			summary.OpenIssues++
-		}
-
-		if iss.Spec.Severity == v1alpha1.IssueSeverityCritical {
-			summary.CriticalIssues++
-		}
+		accumulateIssueCounters(summary, &iss)
 	}
 	if summary.TotalIssues > 0 {
 		summary.AvgRiskScore = float64(totalRisk) / float64(summary.TotalIssues)
 	}
+}
 
-	// Fetch all remediations.
-	var remediations v1alpha1.RemediationPlanList
-	if err := s.client.List(ctx, &remediations); err != nil {
-		return nil, err
-	}
-	var filteredPlans []v1alpha1.RemediationPlan
-	for _, rp := range remediations.Items {
-		if inTimeRange(rp.CreationTimestamp.Time, tr) {
-			filteredPlans = append(filteredPlans, rp)
-		}
-	}
-	summary.TotalRemediations = len(filteredPlans)
-	for _, rp := range filteredPlans {
+// foldRemediationSummary accumulates remediation-plan counters: totals, success/
+// failure split, plus the "did remediation actually resolve the parent Issue"
+// dimension (RemediatedIssues / ResolvedByRemediation) used by the dashboard's
+// Success Rate card.
+func foldRemediationSummary(summary *AnalyticsSummary, plans []v1alpha1.RemediationPlan, allIssues []v1alpha1.Issue, tr timeRangeParams) {
+	plansInRange := filterPlansByRange(plans, tr)
+	summary.TotalRemediations = len(plansInRange)
+	for _, rp := range plansInRange {
 		switch rp.Status.State {
 		case v1alpha1.RemediationStateCompleted:
 			summary.SuccessfulRemediations++
@@ -74,86 +98,135 @@ func (s *APIServer) computeSummary(ctx context.Context, tr timeRangeParams) (*An
 		}
 	}
 
-	// Success rate based on remediation activity (Issue outcome).
-	// Use ALL issues (not time-filtered) for the state map so that plans
-	// whose parent Issue falls outside the time range are not penalized.
-	allIssueStateMap := make(map[string]v1alpha1.IssueState)
-	for _, iss := range issues.Items {
-		allIssueStateMap[iss.Name] = iss.Status.State
+	// Issue-outcome view: use ALL issues (not time-filtered) so plans whose
+	// parent Issue falls outside the time range are not falsely penalized.
+	stateByIssue := make(map[string]v1alpha1.IssueState, len(allIssues))
+	for _, iss := range allIssues {
+		stateByIssue[iss.Name] = iss.Status.State
 	}
-	remediatedIssues := make(map[string]bool)
-	for _, rp := range filteredPlans {
-		issName := rp.Spec.IssueRef.Name
-		if _, found := allIssueStateMap[issName]; !found {
-			continue // skip orphaned plans (Issue deleted)
-		}
-		if _, seen := remediatedIssues[issName]; !seen {
-			remediatedIssues[issName] = false
-		}
-		if allIssueStateMap[issName] == v1alpha1.IssueStateResolved {
-			remediatedIssues[issName] = true
-		}
-	}
-	for _, resolved := range remediatedIssues {
+	resolvedByIssue := remediationOutcomesByIssue(plansInRange, stateByIssue)
+	for _, resolved := range resolvedByIssue {
 		summary.RemediatedIssues++
 		if resolved {
 			summary.ResolvedByRemediation++
 		}
 	}
+}
 
-	// Fetch postmortems.
-	var postmortems v1alpha1.PostMortemList
-	if err := s.client.List(ctx, &postmortems); err != nil {
-		return nil, err
-	}
-	var filteredPMs int
-	for _, pm := range postmortems.Items {
-		if inTimeRange(pm.CreationTimestamp.Time, tr) {
-			filteredPMs++
+// filterPlansByRange returns plans created within the requested window.
+func filterPlansByRange(plans []v1alpha1.RemediationPlan, tr timeRangeParams) []v1alpha1.RemediationPlan {
+	out := make([]v1alpha1.RemediationPlan, 0, len(plans))
+	for _, rp := range plans {
+		if inTimeRange(rp.CreationTimestamp.Time, tr) {
+			out = append(out, rp)
 		}
 	}
-	summary.TotalPostMortems = filteredPMs
+	return out
+}
 
-	// Fetch runbooks.
-	var runbooks v1alpha1.RunbookList
-	if err := s.client.List(ctx, &runbooks); err != nil {
-		return nil, err
-	}
-	summary.TotalRunbooks = len(runbooks.Items)
-
-	// SLOs — use unstructured since the CRD may not be registered yet.
-	sloItems, err := s.listUnstructured(ctx, "servicelevelobjectives", "")
-	if err == nil {
-		summary.TotalSLOs = len(sloItems)
-		for _, item := range sloItems {
-			statusMap, _ := item["status"].(map[string]interface{})
-			if statusMap != nil {
-				state, _ := statusMap["state"].(string)
-				if state == "AtRisk" || state == "Breached" {
-					summary.SLOsAtRisk++
-				}
-			}
+// remediationOutcomesByIssue collapses plans into per-Issue outcomes: the map
+// value is true when the parent Issue reached Resolved, false otherwise.
+// Orphaned plans (Issue deleted) are skipped — counting them would distort the
+// success rate.
+func remediationOutcomesByIssue(plans []v1alpha1.RemediationPlan, stateByIssue map[string]v1alpha1.IssueState) map[string]bool {
+	out := make(map[string]bool)
+	for _, rp := range plans {
+		issName := rp.Spec.IssueRef.Name
+		state, ok := stateByIssue[issName]
+		if !ok {
+			continue
+		}
+		if _, seen := out[issName]; !seen {
+			out[issName] = false
+		}
+		if state == v1alpha1.IssueStateResolved {
+			out[issName] = true
 		}
 	}
+	return out
+}
 
-	// Approvals — use unstructured.
-	approvalItems, err := s.listUnstructured(ctx, "approvalrequests", "")
-	if err == nil {
-		for _, item := range approvalItems {
-			statusMap, _ := item["status"].(map[string]interface{})
-			if statusMap != nil {
-				state, _ := statusMap["state"].(string)
-				if state == "Pending" || state == "" {
-					summary.PendingApprovals++
-				}
-			} else {
-				// No status yet means pending.
-				summary.PendingApprovals++
-			}
+// foldPostMortemSummary fills TotalPostMortems plus the GAP-03 counter that
+// tracks PostMortems still pending a human follow-up.
+func (s *APIServer) foldPostMortemSummary(ctx context.Context, summary *AnalyticsSummary, tr timeRangeParams) error {
+	var list v1alpha1.PostMortemList
+	if err := s.client.List(ctx, &list); err != nil {
+		return err
+	}
+	for _, pm := range list.Items {
+		if !inTimeRange(pm.CreationTimestamp.Time, tr) {
+			continue
+		}
+		summary.TotalPostMortems++
+		if pm.Spec.RequiresHumanAction && pm.Status.State != v1alpha1.PostMortemStateClosed {
+			summary.PostMortemsRequiringHumanAction++
 		}
 	}
+	return nil
+}
 
-	return summary, nil
+// foldRunbookSummary fills TotalRunbooks.
+func (s *APIServer) foldRunbookSummary(ctx context.Context, summary *AnalyticsSummary) error {
+	var list v1alpha1.RunbookList
+	if err := s.client.List(ctx, &list); err != nil {
+		return err
+	}
+	summary.TotalRunbooks = len(list.Items)
+	return nil
+}
+
+// foldSLOSummary counts total SLOs and how many are at risk or breached.
+// Uses the unstructured client because the SLO CRD may not be registered with
+// the operator's scheme yet (the analytics endpoint must keep working before
+// the SLO controller starts).
+func (s *APIServer) foldSLOSummary(ctx context.Context, summary *AnalyticsSummary) {
+	items, err := s.listUnstructured(ctx, "servicelevelobjectives", "")
+	if err != nil {
+		return
+	}
+	summary.TotalSLOs = len(items)
+	for _, item := range items {
+		if isUnstructuredStateOneOf(item, "AtRisk", "Breached") {
+			summary.SLOsAtRisk++
+		}
+	}
+}
+
+// foldApprovalSummary counts ApprovalRequest CRs that are still pending. An
+// empty status block is treated as pending so the dashboard surfaces freshly-
+// created approvals immediately.
+func (s *APIServer) foldApprovalSummary(ctx context.Context, summary *AnalyticsSummary) {
+	items, err := s.listUnstructured(ctx, "approvalrequests", "")
+	if err != nil {
+		return
+	}
+	for _, item := range items {
+		statusMap, _ := item["status"].(map[string]interface{})
+		if statusMap == nil {
+			summary.PendingApprovals++
+			continue
+		}
+		state, _ := statusMap["state"].(string)
+		if state == "Pending" || state == "" {
+			summary.PendingApprovals++
+		}
+	}
+}
+
+// isUnstructuredStateOneOf checks whether item.status.state matches any of the
+// supplied values. Safe with missing or non-string state fields.
+func isUnstructuredStateOneOf(item map[string]interface{}, states ...string) bool {
+	statusMap, _ := item["status"].(map[string]interface{})
+	if statusMap == nil {
+		return false
+	}
+	state, _ := statusMap["state"].(string)
+	for _, s := range states {
+		if s == state {
+			return true
+		}
+	}
+	return false
 }
 
 // computeMTTD calculates Mean Time to Detect over time, grouped by day.
@@ -554,6 +627,33 @@ func inTimeRange(t time.Time, tr timeRangeParams) bool {
 		return false
 	}
 	return true
+}
+
+// accumulateIssueCounters folds a single Issue into the rolling summary
+// counters. Extracted from computeSummary to keep the latter's cyclomatic
+// complexity below the Floor 8 threshold while preserving the GAP-03/04
+// counter semantics:
+//   - Contained is counted both in its own bucket and as Open (customer impact
+//     persists until a human restores the workload),
+//   - chaos-induced Issues are tracked separately so production dashboards can
+//     subtract them from "real" incident counts.
+func accumulateIssueCounters(summary *AnalyticsSummary, iss *v1alpha1.Issue) {
+	switch iss.Status.State {
+	case v1alpha1.IssueStateResolved:
+		summary.ResolvedIssues++
+	case v1alpha1.IssueStateContained:
+		summary.ContainedIssues++
+		summary.OpenIssues++
+	default:
+		// Detected, Analyzing, Remediating, Escalated, Failed all count as open.
+		summary.OpenIssues++
+	}
+	if iss.Spec.Severity == v1alpha1.IssueSeverityCritical {
+		summary.CriticalIssues++
+	}
+	if iss.Labels["platform.chatcli.io/source"] == "chaos-experiment" {
+		summary.ChaosInducedIssues++
+	}
 }
 
 // listUnstructured queries for unstructured resources by plural name.

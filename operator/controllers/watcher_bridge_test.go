@@ -71,13 +71,14 @@ func TestAlertHash_Deterministic(t *testing.T) {
 		TimestampUnix: 1700000000,
 	}
 
-	h1 := alertHash(alert)
-	h2 := alertHash(alert)
+	const uid = "abc-uid-1"
+	h1 := alertHash(alert, uid)
+	h2 := alertHash(alert, uid)
 	if h1 != h2 {
 		t.Errorf("hash should be deterministic: %q != %q", h1, h2)
 	}
 
-	// Hash is based on type|deployment|namespace only (not timestamp),
+	// Hash is based on type|deployment|namespace|uid (not timestamp),
 	// so different timestamps for the same resource produce the same hash.
 	alert2 := &pb.WatcherAlert{
 		Type:          "HighRestartCount",
@@ -86,9 +87,9 @@ func TestAlertHash_Deterministic(t *testing.T) {
 		Namespace:     "default",
 		TimestampUnix: 1700000000 + 120, // 2 minutes later
 	}
-	h3 := alertHash(alert2)
+	h3 := alertHash(alert2, uid)
 	if h1 != h3 {
-		t.Error("same type/deployment/namespace should produce same hash regardless of timestamp")
+		t.Error("same type/deployment/namespace/uid should produce same hash regardless of timestamp")
 	}
 
 	// Different deployment should produce different hash
@@ -99,9 +100,23 @@ func TestAlertHash_Deterministic(t *testing.T) {
 		Namespace:     "default",
 		TimestampUnix: 1700000000,
 	}
-	h4 := alertHash(alert3)
+	h4 := alertHash(alert3, uid)
 	if h1 == h4 {
 		t.Error("different deployments should produce different hashes")
+	}
+
+	// GAP-02 fix: same name+namespace but DIFFERENT UID (resource recreated)
+	// must produce a different hash, otherwise the operator stays blind to the
+	// recreated resource for the full TTL window.
+	h5 := alertHash(alert, "abc-uid-2-recreated")
+	if h1 == h5 {
+		t.Error("same name but different UID must produce different hashes (resource recreate scenario)")
+	}
+
+	// Missing UID also must not collide with any real UID.
+	hMissing := alertHash(alert, "")
+	if h1 == hMissing {
+		t.Error("missing-UID sentinel must not collide with a real UID hash")
 	}
 }
 
@@ -123,7 +138,8 @@ func TestAlertHash_SameMinuteBucket(t *testing.T) {
 		TimestampUnix: baseMinute + 30, // same minute
 	}
 
-	if alertHash(alert1) != alertHash(alert2) {
+	const uid = "stable-uid"
+	if alertHash(alert1, uid) != alertHash(alert2, uid) {
 		t.Error("alerts in the same minute bucket with same fields should have same hash")
 	}
 }
@@ -136,7 +152,7 @@ func TestWatcherBridge_Dedup(t *testing.T) {
 		t.Error("should not be duplicate before marking")
 	}
 
-	wb.markSeen(hash)
+	wb.markSeen(hash, "web", "default")
 	if !wb.isDuplicate(hash) {
 		t.Error("should be duplicate after marking")
 	}
@@ -147,8 +163,8 @@ func TestWatcherBridge_PruneDedup(t *testing.T) {
 
 	// Add an old entry
 	wb.mu.Lock()
-	wb.seen["old-hash"] = time.Now().Add(-3 * time.Hour) // older than DedupTTL
-	wb.seen["new-hash"] = time.Now()
+	wb.seen["old-hash"] = dedupEntry{seenAt: time.Now().Add(-3 * time.Hour)} // older than DedupTTL
+	wb.seen["new-hash"] = dedupEntry{seenAt: time.Now()}
 	wb.mu.Unlock()
 
 	wb.pruneDedup()

@@ -21,6 +21,15 @@ import (
 const (
 	// CorrelationTimeWindow is the time window used to find related anomalies.
 	CorrelationTimeWindow = 10 * time.Minute
+
+	// SourceChaosExperiment is the label value used to mark Issues that fired
+	// while a ChaosExperiment was running against the same target. GAP-04 fix.
+	SourceChaosExperiment = "chaos-experiment"
+
+	// LabelSource is the Issue label that identifies the high-level source of
+	// the incident (e.g. "chaos-experiment", "production"). Empty/absent means
+	// production (default). GAP-04 fix.
+	LabelSource = "platform.chatcli.io/source"
 )
 
 var (
@@ -160,15 +169,35 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	sanitizedSignal := strings.ReplaceAll(string(anomaly.Spec.SignalType), "_", "-")
 	issueName := fmt.Sprintf("%s-%s-%d", resource.Name, sanitizedSignal, time.Now().Unix())
 
+	labels := map[string]string{
+		"platform.chatcli.io/inc-id":   incID,
+		"platform.chatcli.io/resource": resource.Name,
+		"platform.chatcli.io/signal":   string(anomaly.Spec.SignalType),
+	}
+
+	// GAP-04 fix (chaos test report 2026-05-23): when the Anomaly fires for a
+	// resource that has an in-flight ChaosExperiment targeting it, label the
+	// Issue as chaos-induced. Downstream controllers use the label to:
+	//   • suppress L1→L2 escalation (no humans paged for chaos drills),
+	//   • emit a simplified PostMortem,
+	//   • exclude the incident from production MTTD/MTTR metrics.
+	//
+	// We only label — we still create the Issue and let the standard AIOps
+	// pipeline run, so the experiment's recovery is still validated end-to-end.
+	if chaosExp, chaosErr := r.CorrelationEngine.FindActiveChaosExperiment(ctx, resource); chaosErr != nil {
+		log.Info("Failed to look up active chaos experiment for anomaly (continuing)", "error", chaosErr)
+	} else if chaosExp != nil {
+		labels["platform.chatcli.io/source"] = SourceChaosExperiment
+		labels["platform.chatcli.io/chaos-experiment"] = chaosExp.Name
+		log.Info("Issue correlated with active chaos experiment",
+			"issue", issueName, "experiment", chaosExp.Name, "experiment_type", chaosExp.Spec.ExperimentType)
+	}
+
 	newIssue := &platformv1alpha1.Issue{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      issueName,
 			Namespace: anomaly.Namespace,
-			Labels: map[string]string{
-				"platform.chatcli.io/inc-id":   incID,
-				"platform.chatcli.io/resource": resource.Name,
-				"platform.chatcli.io/signal":   string(anomaly.Spec.SignalType),
-			},
+			Labels:    labels,
 		},
 		Spec: platformv1alpha1.IssueSpec{
 			Severity:    severity,
@@ -211,6 +240,20 @@ func (r *AnomalyReconciler) getResolutionCooldown(ctx context.Context) time.Dura
 		return instances.Items[0].Spec.AIOps.GetResolutionCooldown()
 	}
 	return 10 * time.Minute // default
+}
+
+// IsChaosInduced reports whether the Issue was created in the context of an
+// active ChaosExperiment. Used by:
+//   - issue_controller to skip the production MTTD/MTTR histogram on resolution,
+//   - notification_controller to suppress L1→L2 escalation paging,
+//   - PostMortem generation to emit a simplified report.
+//
+// GAP-04 fix.
+func IsChaosInduced(issue *platformv1alpha1.Issue) bool {
+	if issue == nil {
+		return false
+	}
+	return issue.Labels[LabelSource] == SourceChaosExperiment
 }
 
 // SetupWithManager sets up the controller with the Manager.

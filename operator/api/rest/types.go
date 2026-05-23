@@ -64,6 +64,17 @@ type IncidentItem struct {
 	CreationTimestamp      string            `json:"creationTimestamp"`
 	Labels                 map[string]string `json:"labels,omitempty"`
 	Annotations            map[string]string `json:"annotations,omitempty"`
+
+	// GAP-04 fix: derived flag from labels for easy dashboard filtering.
+	// True when the Issue was correlated with an active ChaosExperiment at
+	// creation time. ChaosExperiment carries the experiment CR's name.
+	ChaosInduced    bool   `json:"chaosInduced,omitempty"`
+	ChaosExperiment string `json:"chaosExperiment,omitempty"`
+
+	// GAP-03 fix: explicit flag for the Contained state's "human action
+	// required" condition. True when the operator silenced the workload via
+	// containment and the parent Issue is waiting on a human to restore it.
+	RequiresHumanAction bool `json:"requiresHumanAction,omitempty"`
 }
 
 // ResourceRefItem is the REST representation of a ResourceRef.
@@ -116,6 +127,17 @@ type PostMortemItem struct {
 	GeneratedAt       *string            `json:"generatedAt,omitempty"`
 	ReviewedAt        *string            `json:"reviewedAt,omitempty"`
 	CreationTimestamp string             `json:"creationTimestamp"`
+
+	// GAP-03 fix: surface containment outcomes so dashboards can distinguish
+	// "service silenced, human action pending" from "incident truly resolved".
+	RequiresHumanAction bool   `json:"requiresHumanAction,omitempty"`
+	RequiredAction      string `json:"requiredAction,omitempty"`
+
+	// GAP-04 fix: when the parent Issue was correlated with a ChaosExperiment,
+	// expose it explicitly so dashboards can filter chaos drills out of
+	// production incident lists.
+	ChaosInduced    bool   `json:"chaosInduced,omitempty"`
+	ChaosExperiment string `json:"chaosExperiment,omitempty"`
 }
 
 // DevFeedbackItem is the REST representation of developer feedback on a PostMortem.
@@ -335,22 +357,33 @@ type AgenticStepItem struct {
 
 // AnalyticsSummary provides an overview of AIOps metrics.
 type AnalyticsSummary struct {
-	TotalIssues            int            `json:"totalIssues"`
-	OpenIssues             int            `json:"openIssues"`
-	ResolvedIssues         int            `json:"resolvedIssues"`
-	CriticalIssues         int            `json:"criticalIssues"`
-	TotalRemediations      int            `json:"totalRemediations"`
-	SuccessfulRemediations int            `json:"successfulRemediations"`
-	FailedRemediations     int            `json:"failedRemediations"`
-	RemediatedIssues       int            `json:"remediatedIssues"`
-	ResolvedByRemediation  int            `json:"resolvedByRemediation"`
-	TotalPostMortems       int            `json:"totalPostMortems"`
-	TotalRunbooks          int            `json:"totalRunbooks"`
-	TotalSLOs              int            `json:"totalSLOs"`
-	SLOsAtRisk             int            `json:"slosAtRisk"`
-	PendingApprovals       int            `json:"pendingApprovals"`
-	AvgRiskScore           float64        `json:"avgRiskScore"`
-	SeverityBreakdown      map[string]int `json:"severityBreakdown"`
+	TotalIssues    int `json:"totalIssues"`
+	OpenIssues     int `json:"openIssues"`
+	ResolvedIssues int `json:"resolvedIssues"`
+	// GAP-03 fix: Contained is distinct from Resolved — the workload was
+	// silenced but the underlying bug is unresolved. Dashboards should display
+	// this count prominently because it represents active customer impact that
+	// requires human action.
+	ContainedIssues int `json:"containedIssues"`
+	CriticalIssues  int `json:"criticalIssues"`
+	// GAP-04 fix: chaos-induced incidents are tracked separately so production
+	// MTTD/MTTR widgets can exclude them without scanning every Issue's labels.
+	ChaosInducedIssues     int `json:"chaosInducedIssues"`
+	TotalRemediations      int `json:"totalRemediations"`
+	SuccessfulRemediations int `json:"successfulRemediations"`
+	FailedRemediations     int `json:"failedRemediations"`
+	RemediatedIssues       int `json:"remediatedIssues"`
+	ResolvedByRemediation  int `json:"resolvedByRemediation"`
+	TotalPostMortems       int `json:"totalPostMortems"`
+	// GAP-03 fix: PostMortems waiting on human action are surfaced separately
+	// so they don't get lost in the total count.
+	PostMortemsRequiringHumanAction int            `json:"postMortemsRequiringHumanAction"`
+	TotalRunbooks                   int            `json:"totalRunbooks"`
+	TotalSLOs                       int            `json:"totalSLOs"`
+	SLOsAtRisk                      int            `json:"slosAtRisk"`
+	PendingApprovals                int            `json:"pendingApprovals"`
+	AvgRiskScore                    float64        `json:"avgRiskScore"`
+	SeverityBreakdown               map[string]int `json:"severityBreakdown"`
 }
 
 // MTTMetric represents a mean-time metric data point.

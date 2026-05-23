@@ -73,6 +73,20 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 
 	analysis := parseAnalysisResponse(response)
 
+	// GAP-01 fix: detect when the analysis text describes a containment scenario
+	// ("scale to 0", "stop the bleeding", "containment", "unrecoverable") but the
+	// first proposed action is a diagnostic. The chaos test (2026-05-23) showed
+	// this exact divergence: AIInsight said "Scaling to 0 is the only correct
+	// containment action" while actions[0] was ExecDiagnostic. Logging it as a
+	// warning preserves the LLM's autonomy while making the regression visible
+	// in operator logs; reordering happens downstream via the agentic guard.
+	if firstActionDivergesFromAnalysis(analysis) {
+		h.logger.Warn(i18n.T("server.analysis.action_diverges_from_analysis"),
+			zap.String("issue", req.IssueName),
+			zap.String("analysis_preview", truncate(analysis.Analysis, 200)),
+			zap.String("first_action", firstActionType(analysis.Actions)))
+	}
+
 	provider := req.Provider
 	if provider == "" {
 		provider = h.defaultProvider
@@ -97,6 +111,52 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 		Provider:         provider,
 		SuggestedActions: suggestedActions,
 	}, nil
+}
+
+// containmentKeywords match analysis prose that asserts a stop-the-bleeding
+// outcome. When any of these appear, the corresponding first action should be
+// ScaleDeployment/ScaleStatefulSet with containment="true", or RollbackDeployment
+// to a healthy revision — not a diagnostic. Keywords are lowercased before match.
+var containmentKeywords = []string{
+	"scale to 0", "scale to zero", "scaling to 0", "scaling to zero",
+	"replicas=0", "replicas to 0", "stop the bleeding", "containment",
+	"unrecoverable", "no rollback target", "out of the operator's toolset",
+}
+
+// firstActionDivergesFromAnalysis reports whether the analysis prose describes a
+// containment scenario while the first proposed action is a diagnostic (or some
+// other action that won't actually contain the issue). Conservative by design:
+// only fires when the prose contains a containment keyword AND the first action
+// is ExecDiagnostic — that's the exact pattern observed in chaos test Cycle 1.
+func firstActionDivergesFromAnalysis(a analysisResult) bool {
+	if len(a.Actions) == 0 {
+		return false
+	}
+	first := a.Actions[0].Action
+	if first != "ExecDiagnostic" {
+		return false
+	}
+	lower := strings.ToLower(a.Analysis)
+	for _, kw := range containmentKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstActionType(actions []actionEntry) string {
+	if len(actions) == 0 {
+		return ""
+	}
+	return actions[0].Action
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // sanitizeForPrompt escapes user-provided text to prevent prompt injection.
@@ -495,7 +555,58 @@ func (h *Handler) AgenticStep(ctx context.Context, req *pb.AgenticStepRequest) (
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.agentic.llm_error", err))
 	}
 
-	return parseAgenticStepResponse(response), nil
+	parsed := parseAgenticStepResponse(response)
+
+	// GAP-01 fix: detect when the agentic loop's next_action contradicts the
+	// AIInsight's primary suggested action. The LLM is asked to populate
+	// divergence_reason in this case; if it doesn't, we still flag the
+	// divergence so the operator can refuse to execute and log the conflict.
+	annotateInsightDivergence(parsed, req)
+
+	if parsed.DivergesFromInsight {
+		h.logger.Warn(i18n.T("server.agentic.diverges_from_insight"),
+			zap.String("issue", req.IssueName),
+			zap.Int32("step", req.CurrentStep),
+			zap.String("divergence_reason", parsed.DivergenceReason))
+	}
+
+	return parsed, nil
+}
+
+// annotateInsightDivergence compares the agentic step's chosen next_action against
+// the first AIInsight suggested action. When they differ in action type or in the
+// containment flag — both materially change behavior — the response is marked as
+// diverging. The LLM-provided divergence_reason is preserved so the operator can
+// decide whether to honor the divergence or block it (see GAP-01).
+func annotateInsightDivergence(resp *pb.AgenticStepResponse, req *pb.AgenticStepRequest) {
+	if resp == nil || resp.Resolved || resp.NextAction == nil || resp.NextAction.Action == "" {
+		return
+	}
+	if len(req.InsightSuggestedActions) == 0 {
+		return
+	}
+	primary := req.InsightSuggestedActions[0]
+	if primary == nil || primary.Action == "" {
+		return
+	}
+
+	if !sameActionIntent(primary, resp.NextAction) {
+		resp.DivergesFromInsight = true
+		// DivergenceReason is preserved as-is — empty means "no justification given",
+		// which the operator treats as an automatic reject signal.
+	}
+}
+
+// sameActionIntent treats two SuggestedActions as equivalent when both the action
+// type and the containment flag match. Replicas count, container name, and other
+// params are intentionally ignored — they shift with live cluster state and don't
+// represent a strategy change. Containment IS compared because flipping it turns
+// a stop-the-bleeding action into a destructive one (or vice versa).
+func sameActionIntent(a, b *pb.SuggestedAction) bool {
+	if a.Action != b.Action {
+		return false
+	}
+	return a.Params["containment"] == b.Params["containment"]
 }
 
 func buildAgenticStepPrompt(req *pb.AgenticStepRequest) string {
@@ -513,6 +624,40 @@ Incident Details:
 - Risk Score: %d/100`,
 		req.IssueName, req.Namespace, req.ResourceKind, req.ResourceName,
 		req.SignalType, req.Severity, req.Description, req.RiskScore))
+
+	// GAP-01 fix: inject AIInsight's prior conclusion as PRIMARY guidance, so the
+	// agentic loop cannot silently contradict its own root-cause analysis. The
+	// chaos test (2026-05-23) showed the loop ignoring "scale to 0" insights and
+	// proposing diagnostics that got blocked by the allowlist, wasting attempts.
+	if req.InsightAnalysis != "" || len(req.InsightSuggestedActions) > 0 {
+		sb.WriteString("\n\nPRIMARY GUIDANCE FROM PRIOR AIInsight ANALYSIS")
+		sb.WriteString(" (authoritative — follow unless new live evidence directly contradicts it):")
+		if req.InsightConfidence > 0 {
+			sb.WriteString(fmt.Sprintf("\n- Confidence: %.2f", req.InsightConfidence))
+		}
+		if req.InsightAnalysis != "" {
+			sb.WriteString(fmt.Sprintf("\n- Root-cause analysis:\n<DATA>\n%s\n</DATA>", sanitizeForPrompt(req.InsightAnalysis)))
+		}
+		if len(req.InsightRecommendations) > 0 {
+			sb.WriteString("\n- Recommendations:")
+			for _, rec := range req.InsightRecommendations {
+				sb.WriteString(fmt.Sprintf("\n  - %s", sanitizeForPrompt(rec)))
+			}
+		}
+		if len(req.InsightSuggestedActions) > 0 {
+			sb.WriteString("\n- Suggested actions (in priority order):")
+			for i, a := range req.InsightSuggestedActions {
+				sb.WriteString(fmt.Sprintf("\n  %d. %s", i+1, sanitizeForPrompt(a.Action)))
+				if a.Description != "" {
+					sb.WriteString(fmt.Sprintf(" — %s", sanitizeForPrompt(a.Description)))
+				}
+				if len(a.Params) > 0 {
+					sb.WriteString(fmt.Sprintf(" %v", a.Params))
+				}
+			}
+			sb.WriteString("\n\nIf your next_action deviates from the first suggested action above, you MUST populate `divergence_reason` in the response with a concrete justification (new evidence that invalidates the prior analysis). An empty divergence_reason while diverging will cause the operator to reject the action.")
+		}
+	}
 
 	if req.KubernetesContext != "" {
 		sb.WriteString(fmt.Sprintf(`
@@ -665,6 +810,14 @@ If you need to observe (wait for effect of previous action):
   "next_action": null
 }
 
+If you must deviate from the PRIMARY GUIDANCE above (when it was provided):
+{
+  "reasoning": "...",
+  "resolved": false,
+  "next_action": { ... },
+  "divergence_reason": "Concrete new evidence that contradicts the prior AIInsight (e.g. 'live context now shows pods running; insight assumed CrashLoopBackOff')"
+}
+
 If the problem IS resolved (cluster is healthy):
 {
   "reasoning": "Final assessment of what happened and how it was fixed",
@@ -685,7 +838,8 @@ Rules:
 - For CrashLoopBackOff after a recent deploy, prefer RollbackDeployment with toRevision.
 - Prefer targeted fixes over broad actions.
 - If you cannot determine what to do, set next_action to null (will escalate).
-- When resolved, provide thorough postmortem data — you have the full context.`)
+- When resolved, provide thorough postmortem data — you have the full context.
+- If PRIMARY GUIDANCE FROM PRIOR AIInsight ANALYSIS was provided, your first action MUST match its first suggested action UNLESS you populate divergence_reason with concrete new evidence. Deviating without divergence_reason will be rejected by the operator.`)
 
 	return sb.String()
 }
@@ -699,6 +853,7 @@ type agenticStepResult struct {
 	Impact            string       `json:"impact"`
 	LessonsLearned    []string     `json:"lessons_learned"`
 	PreventionActions []string     `json:"prevention_actions"`
+	DivergenceReason  string       `json:"divergence_reason"`
 }
 
 func parseAgenticStepResponse(response string) *pb.AgenticStepResponse {
@@ -733,6 +888,7 @@ func parseAgenticStepResponse(response string) *pb.AgenticStepResponse {
 		Impact:            result.Impact,
 		LessonsLearned:    result.LessonsLearned,
 		PreventionActions: result.PreventionActions,
+		DivergenceReason:  result.DivergenceReason,
 	}
 
 	if result.NextAction != nil {

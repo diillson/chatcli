@@ -140,10 +140,16 @@ func (r *NotificationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Handle escalation initiation when issue reaches Escalated state.
-	if issue.Status.State == platformv1alpha1.IssueStateEscalated {
+	// GAP-04 fix: chaos-induced Issues skip escalation entirely — chaos drills
+	// must not page on-call engineers. The PostMortem still records the timeline
+	// for audit, but no human gets a Slack/PagerDuty ping.
+	if issue.Status.State == platformv1alpha1.IssueStateEscalated && !IsChaosInduced(&issue) {
 		if err := r.initiateEscalation(ctx, &issue); err != nil {
 			logger.Error(err, "failed to initiate escalation")
 		}
+	} else if issue.Status.State == platformv1alpha1.IssueStateEscalated {
+		logger.Info("Skipping escalation: issue is chaos-induced", "issue", issue.Name,
+			"experiment", issue.Labels["platform.chatcli.io/chaos-experiment"])
 	}
 
 	// Update the last-notified-state annotation.

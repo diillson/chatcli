@@ -1073,6 +1073,18 @@ func (s *APIServer) routePostMortems(w http.ResponseWriter, r *http.Request, res
 		}
 		s.handlePostMortemFeedback(w, r, rest[0])
 
+	// GAP-03 fix: dedicated endpoint to acknowledge a contained incident's
+	// required follow-up. Sets the platform.chatcli.io annotation that the
+	// PostMortemReconciler watches for; once set, the PostMortem becomes
+	// closeable. Operator role required because this directly affects incident
+	// closure metrics.
+	case len(rest) == 2 && rest[1] == "ack-human-action" && r.Method == http.MethodPost:
+		if !hasMinRole(roleFromContext(r.Context()), "operator") {
+			writeError(w, http.StatusForbidden, "insufficient permissions")
+			return
+		}
+		s.handlePostMortemAckHumanAction(w, r, rest[0])
+
 	default:
 		writeError(w, http.StatusNotFound, "unknown postmortems endpoint")
 	}
@@ -1294,6 +1306,73 @@ func (s *APIServer) handlePostMortemFeedback(w http.ResponseWriter, r *http.Requ
 			Labels:            pm.Labels,
 			Annotations:       pm.Annotations,
 		},
+	})
+}
+
+// handlePostMortemAckHumanAction sets the human-action-acknowledged annotation
+// on the PostMortem so the PostMortemReconciler stops blocking its closure.
+// Optional JSON body: { "acknowledgedBy": "<name>", "note": "<free text>" } —
+// both are recorded as annotations for audit. GAP-03 fix.
+func (s *APIServer) handlePostMortemAckHumanAction(w http.ResponseWriter, r *http.Request, name string) {
+	ctx := r.Context()
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		ns = "default"
+	}
+
+	var body struct {
+		AcknowledgedBy string `json:"acknowledgedBy,omitempty"`
+		Note           string `json:"note,omitempty"`
+	}
+	// Body is optional — ignore decode error when empty.
+	_ = readJSON(r, &body)
+	if len(body.AcknowledgedBy) > 253 {
+		writeError(w, http.StatusBadRequest, "acknowledgedBy must be at most 253 characters")
+		return
+	}
+	if len(body.Note) > 1024 {
+		writeError(w, http.StatusBadRequest, "note must be at most 1024 characters")
+		return
+	}
+
+	var pm v1alpha1.PostMortem
+	if err := s.client.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &pm); err != nil {
+		writeError(w, http.StatusNotFound, "postmortem not found: "+err.Error())
+		return
+	}
+
+	if !pm.Spec.RequiresHumanAction {
+		writeError(w, http.StatusBadRequest, "postmortem does not require human action — nothing to acknowledge")
+		return
+	}
+
+	if pm.Annotations == nil {
+		pm.Annotations = make(map[string]string)
+	}
+	pm.Annotations["aiops.chatcli.io/human-action-acknowledged"] = "true"
+	pm.Annotations["aiops.chatcli.io/human-action-acknowledged-at"] = time.Now().UTC().Format(time.RFC3339)
+	if body.AcknowledgedBy != "" {
+		pm.Annotations["aiops.chatcli.io/human-action-acknowledged-by"] = body.AcknowledgedBy
+	}
+	if body.Note != "" {
+		pm.Annotations["aiops.chatcli.io/human-action-note"] = body.Note
+	}
+
+	if err := s.client.Update(ctx, &pm); err != nil {
+		if apierrors.IsConflict(err) {
+			writeError(w, http.StatusConflict, "postmortem was modified concurrently, please retry")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to acknowledge human action: "+err.Error())
+		return
+	}
+
+	item := postmortemToItem(pm)
+	writeJSON(w, http.StatusOK, APIResponse{
+		APIVersion: "v1",
+		Kind:       "PostMortem",
+		Spec:       item,
+		Status:     item,
 	})
 }
 
@@ -1844,6 +1923,31 @@ func issueToIncidentItem(iss v1alpha1.Issue) IncidentItem {
 		t := iss.Status.ResolvedAt.Format(time.RFC3339)
 		item.ResolvedAt = &t
 	}
+
+	// GAP-04 fix: surface chaos correlation as a derived top-level field so
+	// dashboards don't have to inspect labels to filter chaos drills out of
+	// production incident counts. The raw label is preserved in item.Labels.
+	if iss.Labels["platform.chatcli.io/source"] == "chaos-experiment" {
+		item.ChaosInduced = true
+		item.ChaosExperiment = iss.Labels["platform.chatcli.io/chaos-experiment"]
+	}
+
+	// GAP-03 fix: mirror the operator's RequiresHumanAction condition into a
+	// dedicated field. Two signals:
+	//   1. State == Contained (set by issue_controller after a containment action),
+	//   2. RequiresHumanAction status condition (set in the same transition).
+	// Either suffices, so dashboards can light up the badge as soon as one is set.
+	if iss.Status.State == "Contained" {
+		item.RequiresHumanAction = true
+	} else {
+		for _, c := range iss.Status.Conditions {
+			if c.Type == "RequiresHumanAction" && c.Status == "True" {
+				item.RequiresHumanAction = true
+				break
+			}
+		}
+	}
+
 	return item
 }
 
@@ -1945,6 +2049,20 @@ func postmortemToItem(pm v1alpha1.PostMortem) PostMortemItem {
 			Timestamp: ar.Timestamp.Format(time.RFC3339),
 		})
 	}
+
+	// GAP-03 fix: surface the human-action requirement so dashboards can lead
+	// with it. Even a fully-rendered PostMortem with timeline and lessons is
+	// misleading without this flag — it would imply the incident is closed.
+	item.RequiresHumanAction = pm.Spec.RequiresHumanAction
+	item.RequiredAction = pm.Spec.RequiredAction
+
+	// GAP-04 fix: chaos drills carry a label that lets dashboards filter them
+	// out of production PostMortem trend lists.
+	if pm.Labels["platform.chatcli.io/source"] == "chaos-experiment" {
+		item.ChaosInduced = true
+		item.ChaosExperiment = pm.Labels["platform.chatcli.io/chaos-experiment"]
+	}
+
 	return item
 }
 

@@ -52,6 +52,18 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	// GAP-05 fix (chaos test report 2026-05-23): log the effective ExecDiagnostic
+	// allowlist at startup so operators can audit what their pipeline is allowed
+	// to run without having to inspect every Instance CR. Custom additions from
+	// CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS are listed in full; the ~90 built-in
+	// defaults are summarized by count.
+	allowlistSummary := controllers.GetDiagnosticAllowlistSummary()
+	setupLog.Info("Effective ExecDiagnostic allowlist loaded",
+		"total", allowlistSummary.TotalCount,
+		"defaults", allowlistSummary.DefaultCount,
+		"custom_count", allowlistSummary.CustomCount,
+		"custom", allowlistSummary.Custom)
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
