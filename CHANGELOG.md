@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.122.3](https://github.com/diillson/chatcli/compare/v1.122.2...v1.122.3) (2026-05-23)
+
+
+### Bug Fixes
+
+* **aiops:** dashboard PostMortem Close button missing and Ack does nothing ([#957](https://github.com/diillson/chatcli/issues/957)) ([7d7bcf2](https://github.com/diillson/chatcli/commit/7d7bcf24e8f62d4f683bf8ee75d51208fc67f50e))
+
 ## [1.122.2](https://github.com/diillson/chatcli/compare/v1.122.1...v1.122.2) (2026-05-23)
 
 
