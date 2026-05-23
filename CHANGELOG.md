@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.122.2](https://github.com/diillson/chatcli/compare/v1.122.1...v1.122.2) (2026-05-23)
+
+
+### Bug Fixes
+
+* **aiops:** close GAP-07 — populate human-action status fields on Issue and PostMortem ([#955](https://github.com/diillson/chatcli/issues/955)) ([2a72471](https://github.com/diillson/chatcli/commit/2a724715e1276572cf136a7b3a184a3376b267c2))
+* **helm:** swap broken bitnami/kubectl image to registry.k8s.io kubectl ([#954](https://github.com/diillson/chatcli/issues/954)) ([9ae4764](https://github.com/diillson/chatcli/commit/9ae47648858652547d02cfb7ebff8866f9af66b2))
+
 ## [1.122.1](https://github.com/diillson/chatcli/compare/v1.122.0...v1.122.1) (2026-05-23)
 
 
