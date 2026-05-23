@@ -178,10 +178,13 @@ func TestAckHumanActionEndpoint_HappyPath(t *testing.T) {
 		Spec: v1alpha1.PostMortemSpec{
 			IssueRef: v1alpha1.IssueRef{Name: "i1"}, Resource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "web", Namespace: "default"}, Severity: v1alpha1.IssueSeverityHigh,
 		},
-		// GAP-07: RequiresHumanAction lives in Status now.
+		// GAP-07: RequiresHumanAction lives in Status now. RequiredAction
+		// is populated so the post-ack assertion can verify it is preserved
+		// as historical context (not cleared along with RequiresHumanAction).
 		Status: v1alpha1.PostMortemStatus{
 			State:               v1alpha1.PostMortemStateOpen,
 			RequiresHumanAction: true,
+			RequiredAction:      "restore the deployment's replicas after fixing the root cause",
 		},
 	}
 	c := fake.NewClientBuilder().
@@ -214,6 +217,17 @@ func TestAckHumanActionEndpoint_HappyPath(t *testing.T) {
 	}
 	if got.Annotations["aiops.chatcli.io/human-action-note"] != "rolled back to v1.2.3" {
 		t.Fatalf("note annotation must reflect the request body")
+	}
+	// Dashboard UX fix: Status.RequiresHumanAction MUST be cleared the
+	// moment the ack lands so the dashboard re-render shows the Close
+	// button (and the Ack button hides). Without this the operator
+	// clicks Ack, sees the toast, but the buttons do not change — and
+	// the symptom reported as "the button does not do anything" returns.
+	if got.Status.RequiresHumanAction {
+		t.Fatalf("Status.RequiresHumanAction must be cleared on successful ack — dashboard buttons key off this field")
+	}
+	if got.Status.RequiredAction == "" {
+		t.Fatalf("Status.RequiredAction must be preserved as historical context; cleared by mistake")
 	}
 }
 

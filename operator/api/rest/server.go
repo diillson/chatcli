@@ -1367,6 +1367,28 @@ func (s *APIServer) handlePostMortemAckHumanAction(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Dashboard UX fix: clear Status.RequiresHumanAction the moment the ack
+	// lands so the dashboard re-render shows the "Close" button immediately
+	// (and the "Ack Human Action" button disappears). Without this, the
+	// status field stayed true until the next PostMortemReconciler tick,
+	// leaving operators staring at an unchanged UI after clicking Ack —
+	// the bug surfaced as "the button does not do anything".
+	//
+	// We keep Status.RequiredAction populated as historical context for the
+	// rendered PostMortem; the action HAS been performed, but operators
+	// reading the CR later still want to see what was required.
+	if pm.Status.RequiresHumanAction {
+		pm.Status.RequiresHumanAction = false
+		if err := s.client.Status().Update(ctx, &pm); err != nil {
+			if apierrors.IsConflict(err) {
+				writeError(w, http.StatusConflict, "postmortem status was modified concurrently, please retry")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to clear requiresHumanAction after ack: "+err.Error())
+			return
+		}
+	}
+
 	item := postmortemToItem(pm)
 	writeJSON(w, http.StatusOK, APIResponse{
 		APIVersion: "v1",
