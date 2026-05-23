@@ -293,9 +293,10 @@ func TestPlanActionTimestamp(t *testing.T) {
 	})
 }
 
-// TestApplyPostMortemContextLabels covers the GAP-03 + GAP-04 enrichment that
-// stamps the PostMortem with chaos correlation labels and the human-action
-// flag when the parent Issue was Contained.
+// TestApplyPostMortemContextLabels covers the GAP-04 chaos enrichment that
+// stamps the PostMortem with chaos correlation labels. After GAP-07 the
+// human-action fields moved from Spec to Status and are written by
+// applyPostMortemStatusFields, not by this helper.
 func TestApplyPostMortemContextLabels(t *testing.T) {
 	t.Run("chaos-induced Issue: PostMortem gets source + experiment labels", func(t *testing.T) {
 		issue := &platformv1alpha1.Issue{
@@ -312,38 +313,14 @@ func TestApplyPostMortemContextLabels(t *testing.T) {
 		if pm.Labels["platform.chatcli.io/chaos-experiment"] != "kill-pod-1" {
 			t.Fatalf("experiment name must propagate, got %v", pm.Labels)
 		}
-		if pm.Spec.RequiresHumanAction {
-			t.Fatalf("non-Contained issue must not set RequiresHumanAction")
-		}
-	})
-
-	t.Run("Contained Issue: PostMortem RequiresHumanAction + RequiredAction populated", func(t *testing.T) {
-		issue := &platformv1alpha1.Issue{
-			Status: platformv1alpha1.IssueStatus{State: platformv1alpha1.IssueStateContained},
-		}
-		plan := &platformv1alpha1.RemediationPlan{
-			Spec: platformv1alpha1.RemediationPlanSpec{
-				Actions: []platformv1alpha1.RemediationAction{
-					{Type: platformv1alpha1.ActionScaleDeployment, Params: map[string]string{"replicas": "0", "containment": "true"}},
-				},
-			},
-		}
-		pm := &platformv1alpha1.PostMortem{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{}}}
-		applyPostMortemContextLabels(pm, issue, plan)
-		if !pm.Spec.RequiresHumanAction {
-			t.Fatalf("Contained Issue must set RequiresHumanAction")
-		}
-		if !strings.Contains(pm.Spec.RequiredAction, "restore the deployment") {
-			t.Fatalf("RequiredAction must describe the follow-up, got %q", pm.Spec.RequiredAction)
-		}
 	})
 
 	t.Run("Resolved Issue without chaos label: nothing extra is set", func(t *testing.T) {
 		issue := &platformv1alpha1.Issue{Status: platformv1alpha1.IssueStatus{State: platformv1alpha1.IssueStateResolved}}
 		pm := &platformv1alpha1.PostMortem{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{}}}
 		applyPostMortemContextLabels(pm, issue, &platformv1alpha1.RemediationPlan{})
-		if pm.Spec.RequiresHumanAction || len(pm.Labels) != 0 {
-			t.Fatalf("normal Resolved issue must not be enriched, got Spec=%+v Labels=%v", pm.Spec, pm.Labels)
+		if len(pm.Labels) != 0 {
+			t.Fatalf("normal Resolved issue must not be enriched, got Labels=%v", pm.Labels)
 		}
 	})
 }

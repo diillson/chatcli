@@ -158,7 +158,7 @@ func (s *APIServer) foldPostMortemSummary(ctx context.Context, summary *Analytic
 			continue
 		}
 		summary.TotalPostMortems++
-		if pm.Spec.RequiresHumanAction && pm.Status.State != v1alpha1.PostMortemStateClosed {
+		if pm.Status.RequiresHumanAction && pm.Status.State != v1alpha1.PostMortemStateClosed {
 			summary.PostMortemsRequiringHumanAction++
 		}
 	}

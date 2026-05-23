@@ -113,6 +113,25 @@ type IssueStatus struct {
 	// Conditions represent the latest available observations.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// RequiresHumanAction is true while the Issue is in (or returning from) the
+	// Contained state — the workload was silenced via a containment action and
+	// a human must intervene to restore service. Surfaced as a top-level
+	// status field (in addition to the equivalent condition) so dashboards and
+	// kubectl one-liners can query the field directly without parsing
+	// conditions. GAP-07 fix (chaos test 2026-05-23 round 2): the original
+	// 1.122.1 ship only populated the condition, which left
+	// `kubectl get issue -o jsonpath='{.status.requiresHumanAction}'` returning
+	// null — forcing operators to grep operator logs for the required action.
+	// +optional
+	RequiresHumanAction bool `json:"requiresHumanAction,omitempty"`
+
+	// RequiredAction is the concrete follow-up an operator needs to perform
+	// when RequiresHumanAction is true (e.g., "restore the deployment's
+	// replicas to the desired count after fixing the root cause"). Populated
+	// together with RequiresHumanAction. GAP-07 fix.
+	// +optional
+	RequiredAction string `json:"requiredAction,omitempty"`
 }
 
 // +kubebuilder:object:root=true

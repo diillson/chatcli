@@ -283,10 +283,13 @@ func TestPostMortemReconciler_RevertsPrematureClose(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "pm-2", Namespace: "default"},
 				Spec: platformv1alpha1.PostMortemSpec{
 					IssueRef: platformv1alpha1.IssueRef{Name: "iss"}, Resource: platformv1alpha1.ResourceRef{Kind: "Deployment", Name: "web", Namespace: "default"}, Severity: platformv1alpha1.IssueSeverityHigh,
+				},
+				// GAP-07: RequiresHumanAction / RequiredAction live in Status now.
+				Status: platformv1alpha1.PostMortemStatus{
+					State:               platformv1alpha1.PostMortemStateClosed,
 					RequiresHumanAction: true,
 					RequiredAction:      "restore replicas",
 				},
-				Status: platformv1alpha1.PostMortemStatus{State: platformv1alpha1.PostMortemStateClosed},
 			},
 			wantState: platformv1alpha1.PostMortemStateOpen,
 		},
@@ -300,9 +303,11 @@ func TestPostMortemReconciler_RevertsPrematureClose(t *testing.T) {
 				},
 				Spec: platformv1alpha1.PostMortemSpec{
 					IssueRef: platformv1alpha1.IssueRef{Name: "iss"}, Resource: platformv1alpha1.ResourceRef{Kind: "Deployment", Name: "web", Namespace: "default"}, Severity: platformv1alpha1.IssueSeverityHigh,
+				},
+				Status: platformv1alpha1.PostMortemStatus{
+					State:               platformv1alpha1.PostMortemStateClosed,
 					RequiresHumanAction: true,
 				},
-				Status: platformv1alpha1.PostMortemStatus{State: platformv1alpha1.PostMortemStateClosed},
 			},
 			wantState: platformv1alpha1.PostMortemStateClosed,
 		},

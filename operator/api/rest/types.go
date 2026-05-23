@@ -75,6 +75,13 @@ type IncidentItem struct {
 	// required" condition. True when the operator silenced the workload via
 	// containment and the parent Issue is waiting on a human to restore it.
 	RequiresHumanAction bool `json:"requiresHumanAction,omitempty"`
+
+	// GAP-07 fix: the concrete follow-up action the operator must perform
+	// when RequiresHumanAction is true (e.g., "restore the deployment's
+	// replicas to the desired count after fixing the root cause"). Mirrors
+	// Issue.Status.RequiredAction so dashboards don't need a separate
+	// PostMortem fetch to render the action.
+	RequiredAction string `json:"requiredAction,omitempty"`
 }
 
 // ResourceRefItem is the REST representation of a ResourceRef.

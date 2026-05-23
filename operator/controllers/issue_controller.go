@@ -428,6 +428,14 @@ func (r *IssueReconciler) handleRemediating(ctx context.Context, issue *platform
 		if contained {
 			issue.Status.State = platformv1alpha1.IssueStateContained
 			issue.Status.Resolution = fmt.Sprintf("CONTAINED — service stopped to prevent further impact. Human action required: %s", requiredAction)
+			// GAP-07 fix (chaos test 2026-05-23 round 2): persist the
+			// human-action signal as first-class status fields, not only as
+			// conditions. `kubectl get issue -o jsonpath='{.status.requiredAction}'`
+			// used to return null even though the controller logged the action —
+			// operators had to grep logs for the required follow-up. With these
+			// two fields the action surfaces directly on the CR.
+			issue.Status.RequiresHumanAction = true
+			issue.Status.RequiredAction = requiredAction
 			meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
 				Type:               "Contained",
 				Status:             metav1.ConditionTrue,
@@ -993,11 +1001,23 @@ func (r *IssueReconciler) handleContained(ctx context.Context, issue *platformv1
 	issue.Status.State = platformv1alpha1.IssueStateResolved
 	issue.Status.Resolution = "Auto-resolved: human restored the workload to a healthy state"
 	issue.Status.ResolvedAt = &now
+	// GAP-07 fix: clear the human-action flags now that the operator has
+	// observed the resource back to healthy. Leaving them set would lie about
+	// the current state — the action HAS been taken, that's why we're here.
+	issue.Status.RequiresHumanAction = false
+	issue.Status.RequiredAction = ""
 	meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
 		Type:               string(platformv1alpha1.IssueStateResolved),
 		Status:             metav1.ConditionTrue,
 		Reason:             "HumanActionRestoredService",
 		Message:            "Resource scaled back up and reports all replicas ready.",
+		LastTransitionTime: now,
+	})
+	meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
+		Type:               "RequiresHumanAction",
+		Status:             metav1.ConditionFalse,
+		Reason:             "HumanActionCompleted",
+		Message:            "Resource restored to healthy state; required action no longer pending.",
 		LastTransitionTime: now,
 	})
 	if err := r.Status().Update(ctx, issue); err != nil {
@@ -1061,9 +1081,10 @@ func (r *IssueReconciler) isResourceRestored(ctx context.Context, resource platf
 }
 
 // applyPostMortemContextLabels marks the PostMortem with chaos-correlation
-// labels (GAP-04) and the containment human-action fields (GAP-03) based on
-// the parent Issue and the executed remediation plan. Extracted from
-// generatePostMortem to keep that function's cyclomatic complexity bounded.
+// labels (GAP-04) based on the parent Issue. The containment human-action
+// fields used to be written to spec here, but GAP-07 (chaos test round 2,
+// 2026-05-23) revealed they were never being persisted at runtime — they
+// live in Status now and are written by applyPostMortemStatusFields below.
 func applyPostMortemContextLabels(pm *platformv1alpha1.PostMortem, issue *platformv1alpha1.Issue, plan *platformv1alpha1.RemediationPlan) {
 	// GAP-04 fix: label PostMortems for chaos-induced Issues so dashboards and
 	// exports can filter them out of "real production incidents". The PostMortem
@@ -1075,16 +1096,9 @@ func applyPostMortemContextLabels(pm *platformv1alpha1.PostMortem, issue *platfo
 			pm.Labels["platform.chatcli.io/chaos-experiment"] = expName
 		}
 	}
-	// GAP-03 fix: when the parent issue is in Contained state, the workload is
-	// silenced but the underlying bug is unresolved. Marking the PostMortem
-	// accordingly prevents it from being prematurely closed and surfaces the
-	// concrete follow-up in tooling and notifications.
-	if issue.Status.State == platformv1alpha1.IssueStateContained {
-		pm.Spec.RequiresHumanAction = true
-		if _, action := planAppliedContainment(plan); action != "" {
-			pm.Spec.RequiredAction = action
-		}
-	}
+	// plan is intentionally accepted (and ignored here) so future contextual
+	// labels derived from the plan can be added without changing the signature.
+	_ = plan
 }
 
 // planAppliedContainment reports whether the remediation plan executed an action
@@ -1298,6 +1312,18 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 	narrative := r.readPostMortemNarrative(ctx, issue, plan)
 	duration := postMortemDuration(issue, now)
 
+	// GAP-07 fix: read containment outcome here so the status helper below
+	// can persist it. The previous round wrote these to Spec inside the
+	// CreateOrUpdate mutator, which silently lost the values because the
+	// Issue reading the CR back via JSON saw null on .status.requiresHumanAction
+	// (they were on Spec, not Status). Compute them once, pass to the status
+	// helper, and persist via Status().Update — the K8s-idiomatic path.
+	requiresHumanAction, requiredAction := false, ""
+	if issue.Status.State == platformv1alpha1.IssueStateContained {
+		requiresHumanAction = true
+		_, requiredAction = planAppliedContainment(plan)
+	}
+
 	pm, err := r.createOrUpdatePostMortem(ctx, issue, plan, pmName)
 	if err != nil {
 		return err
@@ -1305,6 +1331,8 @@ func (r *IssueReconciler) generatePostMortem(ctx context.Context, issue *platfor
 
 	apply := func(pm *platformv1alpha1.PostMortem) {
 		applyPostMortemStatusFields(pm, narrative, timeline, actions, duration, &now)
+		pm.Status.RequiresHumanAction = requiresHumanAction
+		pm.Status.RequiredAction = requiredAction
 		pm.Status.Trending = r.buildTrendingInfo(ctx, issue)
 	}
 	apply(pm)
