@@ -1,0 +1,177 @@
+{{- /*
+  CRD upgrade hook — GAP-06 fix (chaos test 2026-05-23).
+
+  Helm 3 only applies CRDs from the chart's crds/ directory on first install;
+  helm upgrade leaves them untouched. That asymmetry caused the 1.122.0 chaos
+  test regression where users upgrading from 1.121.0 ran the new controller
+  binary (which writes status.state=Contained and PostMortemSpec.RequiresHumanAction)
+  against the still-1.121.0 CRD schema in the cluster, and the API server
+  rejected every reconcile with "Unsupported value: Contained" and
+  "unknown field spec.requiresHumanAction".
+
+  This template ships the CRDs a SECOND time as a pre-install / pre-upgrade
+  Helm hook: a ConfigMap bundles every YAML from the chart's crds/ directory
+  (via .Files.Glob), and a Job uses kubectl apply -f to push them into the
+  cluster before the controller Deployment rolls out. The hook is idempotent
+  (kubectl apply) and short-lived (typically <30s on a Helm rollout).
+
+  The Job, ServiceAccount, ClusterRole and ClusterRoleBinding are all hook
+  resources (helm.sh/hook annotations below). Helm cleans them up after the
+  release succeeds — except the CRDs themselves, which stay in the cluster.
+
+  Disabling the hook (.Values.crdUpgrade.enabled=false) is supported for
+  installations that manage CRDs out of band (e.g. a separate CRDs chart or
+  GitOps with explicit CRD application).
+*/}}
+{{- if .Values.crdUpgrade.enabled }}
+{{- $crdData := .Files.Glob "crds/*.yaml" }}
+{{- if not $crdData }}
+{{- fail "crdUpgrade is enabled but the chart's crds/ directory is empty — refuse to apply an empty CRD bundle and silently regress GAP-06" }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "chatcli-operator.fullname" . }}-crd-upgrade
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chatcli-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "chatcli-operator.fullname" . }}-crd-upgrade
+  labels:
+    {{- include "chatcli-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  # CRD lifecycle. update + patch + create cover the apply path; get + list
+  # let kubectl detect when no diff exists and short-circuit. delete is NOT
+  # granted — the hook should never destroy CRDs even on a botched rollout.
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "chatcli-operator.fullname" . }}-crd-upgrade
+  labels:
+    {{- include "chatcli-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "chatcli-operator.fullname" . }}-crd-upgrade
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "chatcli-operator.fullname" . }}-crd-upgrade
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chatcli-operator.fullname" . }}-crd-bundle
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chatcli-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-9"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  {{- /* AsConfig embeds every CRD YAML as a key under data. ~236 KiB total,
+         well under the 1 MiB ConfigMap limit. */ -}}
+  {{- ($crdData).AsConfig | nindent 2 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "chatcli-operator.fullname" . }}-crd-upgrade
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chatcli-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  # Bound the job aggressively: a stuck hook would block every upgrade.
+  activeDeadlineSeconds: 300
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "chatcli-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: crd-upgrade-hook
+    spec:
+      serviceAccountName: {{ include "chatcli-operator.fullname" . }}-crd-upgrade
+      restartPolicy: OnFailure
+      {{- with .Values.crdUpgrade.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.crdUpgrade.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubectl-apply
+          image: "{{ .Values.crdUpgrade.image.repository }}:{{ .Values.crdUpgrade.image.tag }}"
+          imagePullPolicy: {{ .Values.crdUpgrade.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop: ["ALL"]
+          # kubectl apply on every CRD in the bundled ConfigMap. Server-side
+          # apply (--server-side) handles concurrent edits cleanly and lets
+          # kubectl reconcile field ownership instead of blanket overwriting.
+          # --force-conflicts is needed in case a prior client owned the
+          # field set (e.g. controller-gen output from a previous chart
+          # version). Without it, server-side apply errors out on conflict.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              echo "Applying $(ls /crds | wc -l) CRD(s) from chart {{ .Chart.Name }}-{{ .Chart.Version }}"
+              kubectl apply --server-side --force-conflicts -f /crds
+              echo "CRD upgrade complete"
+          volumeMounts:
+            - name: crds
+              mountPath: /crds
+              readOnly: true
+          resources:
+            {{- toYaml .Values.crdUpgrade.resources | nindent 12 }}
+      volumes:
+        - name: crds
+          configMap:
+            name: {{ include "chatcli-operator.fullname" . }}-crd-bundle
+{{- end }}

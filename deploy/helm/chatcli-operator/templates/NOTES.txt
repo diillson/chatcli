@@ -7,6 +7,25 @@ Thank you for installing {{ .Chart.Name }} {{ .Chart.AppVersion }}.
 The ChatCLI AIOps operator is now reconciling Anomaly / Issue / RemediationPlan /
 PostMortem CRs in your cluster.
 
+{{- if .Values.crdUpgrade.enabled }}
+A pre-install/pre-upgrade Helm hook already re-applied every CRD shipped with
+this chart (GAP-06 fix). You don't need to run any manual `kubectl apply -f`
+to refresh the CRD schema — that is handled automatically on every
+`helm upgrade`. Disable via `--set crdUpgrade.enabled=false` if you manage
+CRDs out of band.
+{{- else }}
+
+⚠️  CRD UPGRADE HOOK DISABLED — you opted out of the GAP-06 fix.
+   Helm 3 does not refresh CRDs on `helm upgrade` by design. If you bump
+   the chart version, run this BEFORE upgrading the binary so the API
+   server accepts the new fields and enum values:
+
+       kubectl apply -f https://github.com/diillson/chatcli/raw/main/deploy/helm/chatcli-operator/crds/
+
+   Otherwise the new controller logic will be silently rejected at runtime
+   (Issue.status.state=Contained, PostMortemSpec.RequiresHumanAction, etc.).
+{{- end }}
+
 ==================================================================================
  Post-install checklist (GAP-05 fix, chaos test report 2026-05-23)
 ==================================================================================

@@ -45,6 +45,46 @@ serviceAccount:
 rbac:
   create: true
 
+# CRD lifecycle management.
+#
+# Helm only applies files from the chart's crds/ directory on first install —
+# `helm upgrade` skips them by design (Helm 3 hard restriction). That leaves
+# operators upgrading between chart versions running the new controller binary
+# against the OLD CRD schema, which surfaced as GAP-06 in the 2026-05-23 chaos
+# test (chart 1.121.0 -> 1.122.0 introduced the IssueState Contained and the
+# PostMortemSpec.RequiresHumanAction/RequiredAction fields in the binary but
+# users upgrading saw "Unsupported value: Contained" rejections from the API
+# server because the cluster still carried the 1.121.0 CRD schema).
+#
+# This block controls the pre-install/pre-upgrade hook that re-applies every
+# CRD shipped with the chart so the schema is always in sync with the binary.
+# Disable only if you manage CRDs out of band (separate cert-manager-crds-style
+# chart, GitOps with explicit CRD application, etc.).
+crdUpgrade:
+  enabled: true
+  # Image used by the pre-upgrade Job to run `kubectl apply -f`. The default
+  # is the bitnami/kubectl image because it's the only minimal kubectl image
+  # without ImageMagick / curl / shell-utility bloat. Override when running in
+  # an air-gapped environment.
+  image:
+    repository: bitnami/kubectl
+    tag: "1.31"
+    pullPolicy: IfNotPresent
+  # Pod resource limits for the hook Job. Defaults keep it lightweight — the
+  # job is short-lived (typically <30s) and only runs kubectl apply.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  # Tolerations on the hook Job so it can run on tainted control-plane nodes
+  # during cluster-wide chart upgrades. Empty by default.
+  tolerations: []
+  # NodeSelector for the hook Job. Empty by default.
+  nodeSelector: {}
+
 service:
   type: ClusterIP
 

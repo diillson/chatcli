@@ -147,6 +147,43 @@
         }
       }
     },
+    "crdUpgrade": {
+      "type": "object",
+      "description": "GAP-06 fix: pre-install/pre-upgrade hook that re-applies CRDs on every Helm upgrade. Helm 3 only applies files from the chart's crds/ directory on first install; this hook closes that gap so the CRD schema stays in sync with the controller binary across version bumps.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether to install the CRD upgrade hook. Disable only when managing CRDs out of band (separate chart, GitOps, etc.).",
+          "default": true
+        },
+        "image": {
+          "type": "object",
+          "description": "Container image for the kubectl-apply Job that ships with the hook.",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {"type": "string", "description": "Image repository.", "default": "bitnami/kubectl"},
+            "tag": {"type": "string", "description": "Image tag.", "default": "1.31"},
+            "pullPolicy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"], "description": "Image pull policy.", "default": "IfNotPresent"}
+          }
+        },
+        "resources": {
+          "type": "object",
+          "description": "Resource requests/limits for the hook Job pod.",
+          "additionalProperties": true
+        },
+        "tolerations": {
+          "type": "array",
+          "description": "Tolerations for the hook Job pod.",
+          "items": {"type": "object"}
+        },
+        "nodeSelector": {
+          "type": "object",
+          "description": "NodeSelector for the hook Job pod.",
+          "additionalProperties": {"type": "string"}
+        }
+      }
+    },
     "service": {
       "type": "object",
       "description": "Kubernetes Service configuration.",

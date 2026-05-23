@@ -1,0 +1,157 @@
+{{- /*
+  CRD upgrade hook — GAP-06 fix (chaos test 2026-05-23).
+
+  Mirror of the chatcli-operator chart's hook. Helm 3 only applies CRDs from
+  the chart's crds/ directory on first install; helm upgrade leaves them
+  untouched. That asymmetry caused the 1.122.0 chaos test regression where
+  the new chatcli binary writes status.state=Contained and
+  PostMortemSpec.RequiresHumanAction but cluster CRDs were still 1.121.0,
+  yielding API-server "Unsupported value: Contained" rejections.
+
+  This template bundles every YAML from the chart's crds/ directory into a
+  ConfigMap and runs kubectl apply -f as a pre-install/pre-upgrade hook.
+  The job is idempotent (kubectl apply --server-side) and short-lived.
+
+  Disable via .Values.crdUpgrade.enabled=false when CRDs are managed out of
+  band (separate CRD chart, GitOps, etc.).
+*/}}
+{{- if .Values.crdUpgrade.enabled }}
+{{- $crdData := .Files.Glob "crds/*.yaml" }}
+{{- if not $crdData }}
+{{- fail "crdUpgrade is enabled but the chart's crds/ directory is empty — refuse to apply an empty CRD bundle and silently regress GAP-06" }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "chatcli.fullname" . }}-crd-upgrade
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "chatcli.fullname" . }}-crd-upgrade
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "chatcli.fullname" . }}-crd-upgrade
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "chatcli.fullname" . }}-crd-upgrade
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "chatcli.fullname" . }}-crd-upgrade
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chatcli.fullname" . }}-crd-bundle
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-9"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  {{- ($crdData).AsConfig | nindent 2 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "chatcli.fullname" . }}-crd-upgrade
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 300
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "chatcli.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: crd-upgrade-hook
+    spec:
+      serviceAccountName: {{ include "chatcli.fullname" . }}-crd-upgrade
+      restartPolicy: OnFailure
+      {{- with .Values.crdUpgrade.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.crdUpgrade.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubectl-apply
+          image: "{{ .Values.crdUpgrade.image.repository }}:{{ .Values.crdUpgrade.image.tag }}"
+          imagePullPolicy: {{ .Values.crdUpgrade.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              echo "Applying $(ls /crds | wc -l) CRD(s) from chart {{ .Chart.Name }}-{{ .Chart.Version }}"
+              kubectl apply --server-side --force-conflicts -f /crds
+              echo "CRD upgrade complete"
+          volumeMounts:
+            - name: crds
+              mountPath: /crds
+              readOnly: true
+          resources:
+            {{- toYaml .Values.crdUpgrade.resources | nindent 12 }}
+      volumes:
+        - name: crds
+          configMap:
+            name: {{ include "chatcli.fullname" . }}-crd-bundle
+{{- end }}
