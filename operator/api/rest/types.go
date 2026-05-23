@@ -136,8 +136,8 @@ type PostMortemItem struct {
 	// GAP-04 fix: when the parent Issue was correlated with a ChaosExperiment,
 	// expose it explicitly so dashboards can filter chaos drills out of
 	// production incident lists.
-	ChaosInduced     bool   `json:"chaosInduced,omitempty"`
-	ChaosExperiment  string `json:"chaosExperiment,omitempty"`
+	ChaosInduced    bool   `json:"chaosInduced,omitempty"`
+	ChaosExperiment string `json:"chaosExperiment,omitempty"`
 }
 
 // DevFeedbackItem is the REST representation of developer feedback on a PostMortem.
@@ -357,9 +357,9 @@ type AgenticStepItem struct {
 
 // AnalyticsSummary provides an overview of AIOps metrics.
 type AnalyticsSummary struct {
-	TotalIssues            int            `json:"totalIssues"`
-	OpenIssues             int            `json:"openIssues"`
-	ResolvedIssues         int            `json:"resolvedIssues"`
+	TotalIssues    int `json:"totalIssues"`
+	OpenIssues     int `json:"openIssues"`
+	ResolvedIssues int `json:"resolvedIssues"`
 	// GAP-03 fix: Contained is distinct from Resolved — the workload was
 	// silenced but the underlying bug is unresolved. Dashboards should display
 	// this count prominently because it represents active customer impact that
@@ -368,13 +368,13 @@ type AnalyticsSummary struct {
 	CriticalIssues  int `json:"criticalIssues"`
 	// GAP-04 fix: chaos-induced incidents are tracked separately so production
 	// MTTD/MTTR widgets can exclude them without scanning every Issue's labels.
-	ChaosInducedIssues     int            `json:"chaosInducedIssues"`
-	TotalRemediations      int            `json:"totalRemediations"`
-	SuccessfulRemediations int            `json:"successfulRemediations"`
-	FailedRemediations     int            `json:"failedRemediations"`
-	RemediatedIssues       int            `json:"remediatedIssues"`
-	ResolvedByRemediation  int            `json:"resolvedByRemediation"`
-	TotalPostMortems       int            `json:"totalPostMortems"`
+	ChaosInducedIssues     int `json:"chaosInducedIssues"`
+	TotalRemediations      int `json:"totalRemediations"`
+	SuccessfulRemediations int `json:"successfulRemediations"`
+	FailedRemediations     int `json:"failedRemediations"`
+	RemediatedIssues       int `json:"remediatedIssues"`
+	ResolvedByRemediation  int `json:"resolvedByRemediation"`
+	TotalPostMortems       int `json:"totalPostMortems"`
 	// GAP-03 fix: PostMortems waiting on human action are surfaced separately
 	// so they don't get lost in the total count.
 	PostMortemsRequiringHumanAction int            `json:"postMortemsRequiringHumanAction"`

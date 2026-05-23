@@ -161,6 +161,7 @@ spec:
                         - Detected
                         - Analyzing
                         - Remediating
+                        - Contained
                         - Resolved
                         - Escalated
                         - Failed

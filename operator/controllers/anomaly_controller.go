@@ -247,6 +247,7 @@ func (r *AnomalyReconciler) getResolutionCooldown(ctx context.Context) time.Dura
 //   - issue_controller to skip the production MTTD/MTTR histogram on resolution,
 //   - notification_controller to suppress L1→L2 escalation paging,
 //   - PostMortem generation to emit a simplified report.
+//
 // GAP-04 fix.
 func IsChaosInduced(issue *platformv1alpha1.Issue) bool {
 	if issue == nil {
