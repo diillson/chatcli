@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.122.1](https://github.com/diillson/chatcli/compare/v1.122.0...v1.122.1) (2026-05-23)
+
+
+### Bug Fixes
+
+* **aiops:** close GAP-06 — Helm CRD upgrade hook and parity tests ([#952](https://github.com/diillson/chatcli/issues/952)) ([bd30ad9](https://github.com/diillson/chatcli/commit/bd30ad9cfe9b166376def11760847d9fe112d11a))
+
 ## [1.122.0](https://github.com/diillson/chatcli/compare/v1.121.0...v1.122.0) (2026-05-23)
 
 
