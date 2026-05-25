@@ -40,7 +40,7 @@ jobs:
       labels: ${{ steps.decide.outputs.labels }}
       base_ref: ${{ steps.decide.outputs.base_ref }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -115,7 +115,7 @@ jobs:
     if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           # Deep clone — golangci-lint --new-from-rev needs origin/<base>
           # available locally to compute the diff. Default checkout is
@@ -183,7 +183,7 @@ jobs:
       baseline: ${{ steps.ratchet.outputs.baseline }}
       delta: ${{ steps.ratchet.outputs.delta }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -243,7 +243,7 @@ jobs:
       percent: ${{ steps.patch.outputs.percent }}
       threshold: ${{ steps.patch.outputs.threshold }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -281,7 +281,7 @@ jobs:
     outputs:
       passed: ${{ steps.scan.outputs.passed }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -311,7 +311,7 @@ jobs:
       code_loc: ${{ steps.scope.outputs.code_loc }}
       tooling_loc: ${{ steps.scope.outputs.tooling_loc }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -336,7 +336,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
@@ -356,7 +356,7 @@ jobs:
     outputs:
       passed: ${{ steps.lint.outputs.passed }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -382,7 +382,7 @@ jobs:
       passed: ${{ steps.cyclo.outputs.passed }}
       checked: ${{ steps.cyclo.outputs.checked }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -410,7 +410,7 @@ jobs:
     if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -434,7 +434,7 @@ jobs:
       missing_keys: ${{ steps.parity.outputs.missing_keys }}
       unknown_usages: ${{ steps.parity.outputs.unknown_usages }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
@@ -460,7 +460,7 @@ jobs:
       passed: ${{ steps.drift.outputs.passed }}
       drifted_files: ${{ steps.drift.outputs.drifted_files }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v6
@@ -488,7 +488,7 @@ jobs:
       passed: ${{ steps.headers.outputs.passed }}
       missing_count: ${{ steps.headers.outputs.missing_count }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Install yq
@@ -512,7 +512,7 @@ jobs:
       passed: ${{ steps.apidiff.outputs.passed }}
       incompatible_count: ${{ steps.apidiff.outputs.incompatible_count }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v6
@@ -542,7 +542,7 @@ jobs:
       chatcli_bytes: ${{ steps.size.outputs.chatcli_bytes }}
       operator_bytes: ${{ steps.size.outputs.operator_bytes }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v6
@@ -571,7 +571,7 @@ jobs:
       violations: ${{ steps.parity.outputs.violations }}
       providers: ${{ steps.parity.outputs.providers }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
@@ -609,7 +609,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
