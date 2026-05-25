@@ -541,7 +541,7 @@ func VisibleLen(s string) int {
 // (b) largura do header — limitada pelo terminal. Lipgloss faz o cálculo de
 // largura visível corretamente (ANSI-aware) via lipgloss.Width.
 func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
-	r.renderTimelineEventInner(icon, title, content, color, false)
+	r.renderTimelineEventInner(icon, title, content, color, false, wrapText)
 }
 
 // RenderAssistantResponseTimelineEvent draws the same card as
@@ -550,10 +550,15 @@ func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
 // the model's "RESPOSTA/RESUMO" card — tool calls and reasoning still use
 // the instant path because typing those would slow the agent loop down.
 func (r *UIRenderer) RenderAssistantResponseTimelineEvent(icon, title, content, color string) {
-	r.renderTimelineEventInner(icon, title, content, color, true)
+	r.renderTimelineEventInner(icon, title, content, color, true, wrapText)
 }
 
-func (r *UIRenderer) renderTimelineEventInner(icon, title, content, color string, typewrite bool) {
+// renderTimelineEventInner draws a titled card. wrapFn owns how the body is
+// fit to the inner width: wrapText for prose (reasoning / responses, where
+// collapsing whitespace into word-wrap reads best) and wrapPreserve for raw
+// tool output (YAML/JSON/tables, where indentation and column alignment must
+// survive).
+func (r *UIRenderer) renderTimelineEventInner(icon, title, content, color string, typewrite bool, wrapFn func(string, int) []string) {
 	termWidth, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
 	if err != nil || termWidth <= 0 {
 		termWidth = 80
@@ -582,7 +587,7 @@ func (r *UIRenderer) renderTimelineEventInner(icon, title, content, color string
 	if innerWrap < 20 {
 		innerWrap = 20
 	}
-	wrapped := strings.Join(wrapText(content, innerWrap), "\n")
+	wrapped := strings.Join(wrapFn(content, innerWrap), "\n")
 
 	// Build the body box with lipgloss using a CLOSED border on three
 	// sides (no top — we overwrite it below with the titled variant).
@@ -813,11 +818,32 @@ func wrapText(text string, limit int) []string {
 			curLen = 0
 		}
 
+		// emitLongWord quebra uma palavra maior que o limite em pedaços
+		// (rune-aware), empurra os pedaços completos para finalLines e
+		// deixa o último pedaço como início da linha corrente.
+		emitLongWord := func(w string) {
+			chunks := hardBreakWord(w, limit)
+			for i := 0; i < len(chunks)-1; i++ {
+				finalLines = append(finalLines, chunks[i])
+			}
+			last := chunks[len(chunks)-1]
+			line.WriteString(last)
+			curLen = VisibleLen(last)
+		}
+
 		for _, w := range words {
 			wLen := VisibleLen(w)
 			if curLen == 0 {
-				line.WriteString(w)
-				curLen = wLen
+				// Palavra única maior que o limite (ex.: o JSON de
+				// `last-applied-configuration` sem espaços) precisa ser
+				// quebrada aqui também — caso contrário ela é escrita
+				// inteira e estoura a largura do box.
+				if wLen > limit {
+					emitLongWord(w)
+				} else {
+					line.WriteString(w)
+					curLen = wLen
+				}
 				continue
 			}
 
@@ -829,8 +855,8 @@ func wrapText(text string, limit int) []string {
 				continue
 			}
 
-			// Se a palavra isolada estoura, quebra "na marra" por runas,
-			// respeitando ANSI (aproximação: fatia por bytes, mas valida pela VisibleLen)
+			// Não cabe na linha atual: fecha e recoloca a palavra,
+			// quebrando "na marra" se ela sozinha já estoura o limite.
 			flushLine()
 
 			if wLen <= limit {
@@ -839,22 +865,7 @@ func wrapText(text string, limit int) []string {
 				continue
 			}
 
-			// quebra a palavra grande em pedaços
-			rest := w
-			for VisibleLen(rest) > limit {
-				cut := 1
-				for cut < len(rest) && VisibleLen(rest[:cut]) < limit {
-					cut++
-				}
-				// cut passou, volta 1
-				if cut > 1 {
-					cut--
-				}
-				finalLines = append(finalLines, rest[:cut])
-				rest = rest[cut:]
-			}
-			line.WriteString(rest)
-			curLen = VisibleLen(rest)
+			emitLongWord(w)
 		}
 
 		if line.Len() > 0 {
@@ -863,6 +874,54 @@ func wrapText(text string, limit int) []string {
 	}
 
 	return finalLines
+}
+
+// hardBreakWord parte uma palavra (sem espaços) em pedaços cuja largura
+// visível não excede limit. A quebra é por runa, medindo com lipgloss.Width,
+// para não cortar sequências UTF-8 / wide-runes no meio — diferente do
+// fatiamento por bytes anterior. Retorna ao menos um elemento.
+func hardBreakWord(w string, limit int) []string {
+	if limit <= 0 {
+		return []string{w}
+	}
+
+	var out []string
+	var cur strings.Builder
+	curW := 0
+	for _, rr := range w {
+		rw := lipgloss.Width(string(rr))
+		if rw < 1 {
+			rw = 1
+		}
+		if curW+rw > limit && cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+			curW = 0
+		}
+		cur.WriteRune(rr)
+		curW += rw
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	if len(out) == 0 {
+		out = append(out, "")
+	}
+	return out
+}
+
+// wrapPreserve quebra texto preservando a estrutura: cada linha que cabe no
+// limite é mantida exatamente como está (indentação e espaçamento de colunas
+// intactos) e só as que estouram são quebradas, repetindo a indentação nas
+// continuações. É a mesma lógica da streaming box (wrapStreamLine), aplicada
+// linha a linha — usada no card de resultado de tool (YAML/JSON/tabelas),
+// onde colapsar whitespace como o word-wrap de prosa destruiria o layout.
+func wrapPreserve(text string, limit int) []string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		out = append(out, wrapStreamLine(line, limit)...)
+	}
+	return out
 }
 
 // RenderThinking exibe o pensamento da IA
@@ -919,7 +978,10 @@ func (r *UIRenderer) RenderToolResult(output string, isError bool) {
 		displayOutput = output[:2000] + i18n.T("agent.ui.result_truncated")
 	}
 
-	r.RenderTimelineEvent(icon, title, displayOutput, color)
+	// Tool output cru (YAML/JSON/tabelas) usa o wrap que preserva
+	// indentação e alinhamento de colunas — o mesmo da streaming box —
+	// em vez do word-wrap de prosa que colapsaria a estrutura.
+	r.renderTimelineEventInner(icon, title, displayOutput, color, false, wrapPreserve)
 }
 
 // RenderToolCallMinimal exibe a chamada de ferramenta em modo compacto
