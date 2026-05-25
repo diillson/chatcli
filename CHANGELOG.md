@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.122.4](https://github.com/diillson/chatcli/compare/v1.122.3...v1.122.4) (2026-05-25)
+
+
+### Bug Fixes
+
+* **agent:** wrap streamed tool output to box width ([#965](https://github.com/diillson/chatcli/issues/965)) ([b78e7de](https://github.com/diillson/chatcli/commit/b78e7de062d9daa65c5a267269fc010b3c46931b))
+
 ## [1.122.3](https://github.com/diillson/chatcli/compare/v1.122.2...v1.122.3) (2026-05-23)
 
 
