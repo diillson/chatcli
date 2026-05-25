@@ -63,3 +63,50 @@ func utf8ValidWholeRunes(s string) bool {
 	}
 	return true
 }
+
+// TestWrapPreserveKeepsIndentAndColumns garante que o wrap do card de
+// resultado preserva indentação de YAML e espaçamento de colunas (linhas que
+// cabem ficam idênticas), diferente do word-wrap de prosa que colapsava tudo.
+func TestWrapPreserveKeepsIndentAndColumns(t *testing.T) {
+	const limit = 80
+	yaml := "metadata:\n" +
+		"  annotations:\n" +
+		"    deployment.kubernetes.io/revision: \"1\""
+	table := "NAME            CPU(cores)   MEMORY(bytes)\n" +
+		"pod-lvw77       1m           26Mi"
+
+	for _, in := range []string{yaml, table} {
+		got := wrapPreserve(in, limit)
+		want := strings.Split(in, "\n")
+		if len(got) != len(want) {
+			t.Fatalf("contagem de linhas mudou: got %d want %d", len(got), len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("linha %d alterada:\n got:  %q\n want: %q", i, got[i], want[i])
+			}
+		}
+	}
+}
+
+// TestWrapPreserveStillWrapsOverlongLine confirma que linhas que estouram o
+// limite continuam sendo quebradas (o box não pode esticar), preservando a
+// indentação inicial nas continuações.
+func TestWrapPreserveStillWrapsOverlongLine(t *testing.T) {
+	const limit = 40
+	const indent = "      "
+	in := indent + strings.Repeat("x", 300)
+
+	got := wrapPreserve(in, limit)
+	if len(got) < 2 {
+		t.Fatalf("esperava quebra em múltiplas linhas, got %d", len(got))
+	}
+	for i, ln := range got {
+		if w := VisibleLen(ln); w > limit {
+			t.Errorf("linha %d excedeu limit %d (got %d)", i, limit, w)
+		}
+		if !strings.HasPrefix(ln, indent) {
+			t.Errorf("linha %d perdeu a indentação: %q", i, ln)
+		}
+	}
+}
