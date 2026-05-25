@@ -5,6 +5,42 @@ import (
 	"testing"
 )
 
+// TestStreamOutputWrapsAndPrefixesEveryLine exercita o caminho de streaming
+// ao vivo: toda linha emitida tem que carregar a borda lateral "│" e nenhuma
+// pode exceder a largura do terminal (fallback 80 fora de tty), garantindo
+// que o box não reflui com YAML largo.
+func TestStreamOutputWrapsAndPrefixesEveryLine(t *testing.T) {
+	r := NewUIRendererWithStyle(nil, UIStyleFull)
+
+	out := captureStdout(t, func() {
+		r.StreamOutput("kubectl get pods")                 // linha curta
+		r.StreamOutput("    annotations: " + longRun(400)) // YAML largo, indentado
+		r.StreamOutput("ERR: something failed " + longRun(300))
+		r.StreamOutput("first\nsecond") // bloco com \n embutido
+	})
+
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) == 0 {
+		t.Fatal("StreamOutput não emitiu nada")
+	}
+	for i, ln := range lines {
+		plain := stripANSI(ln)
+		if !strings.HasPrefix(plain, "│") {
+			t.Errorf("linha %d sem borda lateral: %q", i, plain)
+		}
+		if w := VisibleLen(plain); w > 80 {
+			t.Errorf("linha %d excedeu 80 cols (got %d): %q", i, w, plain)
+		}
+	}
+	// Garante que o bloco multi-linha gerou as duas linhas lógicas.
+	joined := stripANSI(out)
+	if !strings.Contains(joined, "first") || !strings.Contains(joined, "second") {
+		t.Errorf("bloco com \\n não foi dividido: %q", joined)
+	}
+}
+
+func longRun(n int) string { return strings.Repeat("x", n) }
+
 // TestWrapStreamLineNeverExceedsWidth garante que nenhuma linha quebrada
 // ultrapassa a largura útil do box — é exatamente isso que evita o reflow
 // do terminal que rasgava a borda em outputs largos (ex.: kubectl -o yaml).
@@ -14,9 +50,9 @@ func TestWrapStreamLineNeverExceedsWidth(t *testing.T) {
 	cases := []string{
 		strings.Repeat("a", 500),                       // palavra única gigante, sem espaços
 		"    annotations: " + strings.Repeat("x", 300), // YAML indentado, valor enorme
-		"short line",                                    // cabe sem quebrar
-		"",                                              // vazio
-		strings.Repeat("日", 100),                        // wide runes (2 cols cada)
+		"short line",             // cabe sem quebrar
+		"",                       // vazio
+		strings.Repeat("日", 100), // wide runes (2 cols cada)
 	}
 
 	for _, in := range cases {
