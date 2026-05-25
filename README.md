@@ -7,7 +7,7 @@
 <h1 align="center">ChatCLI</h1>
 <p align="center">
   <strong>Plataforma de IA unificada para terminal, servidor gRPC e Kubernetes.</strong><br>
-  <sub>13 provedores · 14 agentes autônomos · pipeline de qualidade em 7 padrões · um único binário.</sub>
+  <sub>14 provedores · 14 agentes autônomos · pipeline de qualidade em 7 padrões · um único binário.</sub>
 </p>
 
 <div align="center">
@@ -263,7 +263,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 |---|---|---|---|---|
 | **OpenAI** | gpt-5.4 | Nativo | Sim | `reasoning_effort` (o-series / gpt-5) |
 | **Anthropic (Claude)** | claude-sonnet-4-6 | Nativo | Sim | Extended thinking com cache |
-| **AWS Bedrock** | claude-sonnet-4-6 | Nativo | Sim | Thinking budget (Anthropic models) |
+| **AWS Bedrock** | claude-sonnet-4-5 | Nativo | Sim | Thinking budget (Anthropic models) |
 | **Google Gemini** | gemini-2.5-flash | Nativo | Sim | — |
 | **xAI (Grok)** | grok-4-1 | XML fallback | — | — |
 | **ZAI (Zhipu AI)** | glm-5 | Nativo | Sim | — |
@@ -272,7 +272,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 | **GitHub Copilot** | gpt-4o | Nativo | Sim | — |
 | **GitHub Models** | gpt-4o | Nativo | Sim | — |
 | **StackSpot AI** | StackSpotAI | — | — | — |
-| **OpenRouter** | openai/gpt-4o | Nativo | Sim | Passthrough |
+| **OpenRouter** | openai/gpt-5.2 | Nativo | Sim | Passthrough |
 | **Ollama** | (local) | XML fallback | — | Tags `<thinking>` normalizadas |
 | **OpenAI Assistants** | gpt-4o | Assistants API | — | — |
 
