@@ -7,7 +7,7 @@
 <h1 align="center">ChatCLI</h1>
 <p align="center">
   <strong>Plataforma de IA unificada para terminal, servidor gRPC e Kubernetes.</strong><br>
-  <sub>13 provedores · 14 agentes autônomos · pipeline de qualidade em 7 padrões · um único binário.</sub>
+  <sub>14 provedores · 14 agentes autônomos · pipeline de qualidade em 7 padrões · um único binário.</sub>
 </p>
 
 <div align="center">

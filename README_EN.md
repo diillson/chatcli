@@ -7,7 +7,7 @@
 <h1 align="center">ChatCLI</h1>
 <p align="center">
   <strong>Unified AI platform for terminal, gRPC server, and Kubernetes.</strong><br>
-  <sub>13 providers · 14 autonomous agents · 7-pattern quality pipeline · one binary.</sub>
+  <sub>14 providers · 14 autonomous agents · 7-pattern quality pipeline · one binary.</sub>
 </p>
 
 <div align="center">
