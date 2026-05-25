@@ -263,7 +263,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 |---|---|---|---|---|
 | **OpenAI** | gpt-5.4 | Native | Yes | `reasoning_effort` (o-series / gpt-5) |
 | **Anthropic (Claude)** | claude-sonnet-4-6 | Native | Yes | Extended thinking with cache |
-| **AWS Bedrock** | claude-sonnet-4-6 | Native | Yes | Thinking budget (Anthropic models) |
+| **AWS Bedrock** | claude-sonnet-4-5 | Native | Yes | Thinking budget (Anthropic models) |
 | **Google Gemini** | gemini-2.5-flash | Native | Yes | — |
 | **xAI (Grok)** | grok-4-1 | XML fallback | — | — |
 | **ZAI (Zhipu AI)** | glm-5 | Native | Yes | — |
@@ -272,7 +272,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 | **GitHub Copilot** | gpt-4o | Native | Yes | — |
 | **GitHub Models** | gpt-4o | Native | Yes | — |
 | **StackSpot AI** | StackSpotAI | — | — | — |
-| **OpenRouter** | openai/gpt-4o | Native | Yes | Passthrough |
+| **OpenRouter** | openai/gpt-5.2 | Native | Yes | Passthrough |
 | **Ollama** | (local) | XML fallback | — | `<thinking>` tag normalization |
 | **OpenAI Assistants** | gpt-4o | Assistants API | — | — |
 
