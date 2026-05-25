@@ -16,7 +16,7 @@ jobs:
     if: github.actor != 'release-please[bot]' && github.actor != 'github-actions[bot]'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           # Deep clone so --new-from-rev can resolve origin/<base>.
           # Without this, golangci-lint cannot enumerate the diff and
