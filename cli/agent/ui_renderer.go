@@ -813,11 +813,32 @@ func wrapText(text string, limit int) []string {
 			curLen = 0
 		}
 
+		// emitLongWord quebra uma palavra maior que o limite em pedaços
+		// (rune-aware), empurra os pedaços completos para finalLines e
+		// deixa o último pedaço como início da linha corrente.
+		emitLongWord := func(w string) {
+			chunks := hardBreakWord(w, limit)
+			for i := 0; i < len(chunks)-1; i++ {
+				finalLines = append(finalLines, chunks[i])
+			}
+			last := chunks[len(chunks)-1]
+			line.WriteString(last)
+			curLen = VisibleLen(last)
+		}
+
 		for _, w := range words {
 			wLen := VisibleLen(w)
 			if curLen == 0 {
-				line.WriteString(w)
-				curLen = wLen
+				// Palavra única maior que o limite (ex.: o JSON de
+				// `last-applied-configuration` sem espaços) precisa ser
+				// quebrada aqui também — caso contrário ela é escrita
+				// inteira e estoura a largura do box.
+				if wLen > limit {
+					emitLongWord(w)
+				} else {
+					line.WriteString(w)
+					curLen = wLen
+				}
 				continue
 			}
 
@@ -829,8 +850,8 @@ func wrapText(text string, limit int) []string {
 				continue
 			}
 
-			// Se a palavra isolada estoura, quebra "na marra" por runas,
-			// respeitando ANSI (aproximação: fatia por bytes, mas valida pela VisibleLen)
+			// Não cabe na linha atual: fecha e recoloca a palavra,
+			// quebrando "na marra" se ela sozinha já estoura o limite.
 			flushLine()
 
 			if wLen <= limit {
@@ -839,22 +860,7 @@ func wrapText(text string, limit int) []string {
 				continue
 			}
 
-			// quebra a palavra grande em pedaços
-			rest := w
-			for VisibleLen(rest) > limit {
-				cut := 1
-				for cut < len(rest) && VisibleLen(rest[:cut]) < limit {
-					cut++
-				}
-				// cut passou, volta 1
-				if cut > 1 {
-					cut--
-				}
-				finalLines = append(finalLines, rest[:cut])
-				rest = rest[cut:]
-			}
-			line.WriteString(rest)
-			curLen = VisibleLen(rest)
+			emitLongWord(w)
 		}
 
 		if line.Len() > 0 {
@@ -863,6 +869,40 @@ func wrapText(text string, limit int) []string {
 	}
 
 	return finalLines
+}
+
+// hardBreakWord parte uma palavra (sem espaços) em pedaços cuja largura
+// visível não excede limit. A quebra é por runa, medindo com lipgloss.Width,
+// para não cortar sequências UTF-8 / wide-runes no meio — diferente do
+// fatiamento por bytes anterior. Retorna ao menos um elemento.
+func hardBreakWord(w string, limit int) []string {
+	if limit <= 0 {
+		return []string{w}
+	}
+
+	var out []string
+	var cur strings.Builder
+	curW := 0
+	for _, rr := range w {
+		rw := lipgloss.Width(string(rr))
+		if rw < 1 {
+			rw = 1
+		}
+		if curW+rw > limit && cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+			curW = 0
+		}
+		cur.WriteRune(rr)
+		curW += rw
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	if len(out) == 0 {
+		out = append(out, "")
+	}
+	return out
 }
 
 // RenderThinking exibe o pensamento da IA
