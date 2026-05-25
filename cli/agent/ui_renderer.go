@@ -147,25 +147,96 @@ func (r *UIRenderer) StreamOutput(line string) {
 	// A borda lateral tem que ter a mesma cor do Header (ColorPurple geralmente)
 	prefix := r.Colorize("│", ColorPurple) + "  "
 
-	// Lógica de ícones (mantive a sua lógica de cores)
-	if strings.HasPrefix(line, "ERR: ") {
-		cleanLine := strings.TrimPrefix(line, "ERR: ")
-		fmt.Println(r.Colorize(prefix+"⚠️  "+cleanLine, ColorYellow))
-	} else {
-		icon := "  " // indentação padrão
-		//lower := strings.ToLower(line)
-		//
-		//if strings.Contains(lower, "sucesso") || strings.Contains(line, "✅") {
-		//	icon = " ✅ "
-		//} else if strings.Contains(lower, "erro") || strings.Contains(lower, "falha") {
-		//	icon = " ❌ "
-		//} else if strings.HasPrefix(strings.TrimSpace(line), "$") {
-		//	icon = "💲 "
-		//}
-
-		// Imprime: │  ICON Texto...
-		fmt.Println(prefix + r.Colorize(icon+line, ColorGray))
+	// Descobre a largura útil do box para quebrar linhas muito longas
+	// (ex.: `kubectl ... -o yaml` com annotations gigantes / blocos
+	// `last-applied-configuration`). Sem isso, uma linha que estoura a
+	// largura do terminal faz reflow e rasga a borda lateral/rodapé do box.
+	termWidth, err := terminalWidthForStream()
+	if err != nil || termWidth <= 0 {
+		termWidth = 80
 	}
+
+	// Cada linha emitida é: prefix("│  ") + icon + conteúdo. A largura
+	// visível total precisa caber em termWidth-2 (mesma gutter de 2 cols
+	// que o resto do renderer reserva pra scrollbar nativa de terminais).
+	emit := func(icon, text, color string) {
+		avail := termWidth - 2 - VisibleLen("│  ") - VisibleLen(icon)
+		if avail < 20 {
+			avail = 20
+		}
+		for _, seg := range wrapStreamLine(text, avail) {
+			fmt.Println(prefix + r.Colorize(icon+seg, color))
+		}
+	}
+
+	// O callback normalmente entrega uma linha por vez, mas defendemos
+	// contra blocos com \n embutido para nunca emitir uma linha sem prefixo.
+	for _, sub := range strings.Split(line, "\n") {
+		if strings.HasPrefix(sub, "ERR: ") {
+			emit("⚠️  ", strings.TrimPrefix(sub, "ERR: "), ColorYellow)
+		} else {
+			emit("  ", sub, ColorGray) // indentação padrão
+		}
+	}
+}
+
+// terminalWidthForStream retorna a largura atual do terminal (cols).
+func terminalWidthForStream() (int, error) {
+	w, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
+	return w, err
+}
+
+// wrapStreamLine quebra UMA linha de output cru de tool na largura visível
+// informada. Diferente de wrapText, NÃO colapsa espaços em branco: a
+// indentação inicial é preservada (e repetida nas continuações) para que
+// YAML/JSON estruturado continue legível dentro do box. A quebra é por
+// runa (ANSI/wide-rune aware via lipgloss.Width), evitando cortar
+// sequências multibyte no meio.
+func wrapStreamLine(line string, width int) []string {
+	if width <= 0 || VisibleLen(line) <= width {
+		return []string{line}
+	}
+
+	trimmed := strings.TrimLeft(line, " \t")
+	indent := line[:len(line)-len(trimmed)]
+	indentW := VisibleLen(indent)
+	if indentW >= width-1 {
+		// Indentação maior que o box: desiste de preservá-la.
+		indent = ""
+		indentW = 0
+	}
+	chunkW := width - indentW
+	if chunkW < 1 {
+		chunkW = 1
+	}
+
+	var out []string
+	var cur strings.Builder
+	curW := 0
+	flush := func() {
+		out = append(out, indent+cur.String())
+		cur.Reset()
+		curW = 0
+	}
+
+	for _, rr := range trimmed {
+		rw := lipgloss.Width(string(rr))
+		if rw < 1 {
+			rw = 1
+		}
+		if curW+rw > chunkW && cur.Len() > 0 {
+			flush()
+		}
+		cur.WriteRune(rr)
+		curW += rw
+	}
+	if cur.Len() > 0 {
+		flush()
+	}
+	if len(out) == 0 {
+		out = append(out, indent)
+	}
+	return out
 }
 
 // Colorize aplica cores ANSI (exportada com C maiúsculo)
