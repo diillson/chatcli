@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.122.5](https://github.com/diillson/chatcli/compare/v1.122.4...v1.122.5) (2026-05-25)
+
+
+### Bug Fixes
+
+* **agent:** hard-break overlong words in result card wrap ([#968](https://github.com/diillson/chatcli/issues/968)) ([8750078](https://github.com/diillson/chatcli/commit/8750078fd63bf254da4490ae74ff4a80d94983ec))
+
 ## [1.122.4](https://github.com/diillson/chatcli/compare/v1.122.3...v1.122.4) (2026-05-25)
 
 
