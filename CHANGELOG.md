@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.123.0](https://github.com/diillson/chatcli/compare/v1.122.5...v1.123.0) (2026-05-27)
+
+
+### Features
+
+* **gateway:** messaging gateway — Telegram, Slack, Discord, WhatsApp, Webhook ([#971](https://github.com/diillson/chatcli/issues/971)) ([7b4633a](https://github.com/diillson/chatcli/commit/7b4633a54a38c0181a9d48bfec1dcb74433cea91))
+* **hub:** cross-channel conversation continuity via shared hub ([#975](https://github.com/diillson/chatcli/issues/975)) ([ee7c479](https://github.com/diillson/chatcli/commit/ee7c4791d79ba4bd64c7715aac740c8916e11a8f))
+* **lsp:** language server diagnostics via /lsp ([#973](https://github.com/diillson/chatcli/issues/973)) ([77fb610](https://github.com/diillson/chatcli/commit/77fb610f478d030e77c9a179252ad6c3c569b2f5))
+* memory hybrid capture, security & multi-provider robustness (Tiers A+B+partial C) ([#970](https://github.com/diillson/chatcli/issues/970)) ([fbee1b9](https://github.com/diillson/chatcli/commit/fbee1b942fa7e9eb205cae628fdf2c4d9e9f183c))
+* **rpcserve:** MCP server + ACP agent over stdio ([#972](https://github.com/diillson/chatcli/issues/972)) ([3232ed0](https://github.com/diillson/chatcli/commit/3232ed0b49b302203a465119f0713d3f124d3c4d))
+
 ## [1.122.5](https://github.com/diillson/chatcli/compare/v1.122.4...v1.122.5) (2026-05-25)
 
 
