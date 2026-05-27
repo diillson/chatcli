@@ -33,7 +33,7 @@ func main() {
 	if len(os.Args) > 1 {
 		subcmd := os.Args[1]
 		if subcmd == "server" || subcmd == "serve" || subcmd == "connect" || subcmd == "watch" ||
-			subcmd == "mcp-server" || subcmd == "mcp-serve" || subcmd == "acp" {
+			subcmd == "mcp-server" || subcmd == "mcp-serve" || subcmd == "acp" || subcmd == "gateway" {
 			runSubcommand(subcmd, os.Args[2:])
 			return
 		}
@@ -260,6 +260,10 @@ func runSubcommand(subcmd string, args []string) {
 	case "acp":
 		if err := cmd.RunACP(args, llmMgr, logger); err != nil {
 			logger.Fatal("ACP server failed", zap.Error(err))
+		}
+	case "gateway":
+		if err := cmd.RunGateway(args, llmMgr, logger); err != nil {
+			logger.Fatal("Gateway failed", zap.Error(err))
 		}
 	}
 }

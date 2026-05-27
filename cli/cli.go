@@ -177,6 +177,8 @@ type ChatCLI struct {
 	failedChunks         []FileChunk // Chunks que falharam no processamento
 	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
 	agentMode            *AgentMode  // Modo de agente
+	unattended           bool        // when true, the agent runs without any interactive confirmation (gateway daemon)
+	lastAgentReply       string      // last one-shot agent prose answer (command blocks stripped), captured for unattended callers
 	interactionState     InteractionState
 	mu                   sync.Mutex
 	operationCancel      context.CancelFunc

@@ -231,9 +231,19 @@ func (a *AgentMode) stopStdinReader() {
 	}
 }
 
+// unattendedConfirmAnswer is what readLine returns in unattended mode (the
+// gateway daemon). It is the explicit phrase the dangerous-command guard in
+// executeCommandsWithOutput expects, so confirmations auto-approve without any
+// human or stdin. It also starts with "s", satisfying the lighter [s/y] prompts.
+const unattendedConfirmAnswer = "sim, quero executar conscientemente"
+
 // readLine reads a single line from the centralized stdin reader.
-// Falls back to direct stdin read if the reader is not active.
+// Falls back to direct stdin read if the reader is not active. In unattended
+// mode there is no human/stdin, so every confirmation auto-approves.
 func (a *AgentMode) readLine() string {
+	if a.cli != nil && a.cli.unattended {
+		return unattendedConfirmAnswer
+	}
 	if a.stdinLines != nil {
 		return <-a.stdinLines
 	}
@@ -880,7 +890,13 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 	}
 
 	commandBlocks := a.extractCommandBlocks(aiResponse)
-	a.displayResponseWithoutCommands(aiResponse, commandBlocks)
+	if a.cli.unattended {
+		// No terminal to paint to; capture the clean prose so the gateway can
+		// deliver it as the final answer, and keep stdout to the action feed.
+		a.cli.lastAgentReply = stripCommandBlocksText(aiResponse, commandBlocks)
+	} else {
+		a.displayResponseWithoutCommands(aiResponse, commandBlocks)
+	}
 
 	if len(commandBlocks) == 0 {
 		fmt.Println(i18n.T("agent.oneshot.no_command"))
@@ -907,11 +923,15 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 
 	blockToExecute := commandBlocks[0]
 
-	for _, cmd := range blockToExecute.Commands {
-		if a.validator.IsDangerous(cmd) {
-			errMsg := i18n.T("agent.oneshot.auto_exec_aborted", cmd)
-			fmt.Printf("⚠️ %s\n", errMsg)
-			return errors.New(errMsg)
+	// Unattended runs (gateway daemon, full-autonomy) skip the danger gate —
+	// the operator opted in and access is controlled at the gateway edge.
+	if !a.cli.unattended {
+		for _, cmd := range blockToExecute.Commands {
+			if a.validator.IsDangerous(cmd) {
+				errMsg := i18n.T("agent.oneshot.auto_exec_aborted", cmd)
+				fmt.Printf("⚠️ %s\n", errMsg)
+				return errors.New(errMsg)
+			}
 		}
 	}
 
@@ -924,6 +944,19 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 	}
 
 	return nil
+}
+
+// stripCommandBlocksText returns the model response with its ```execute blocks
+// replaced by compact [Comando #N] placeholders — the clean prose delivered as
+// the unattended (gateway) final answer. Mirrors displayResponseWithoutCommands.
+func stripCommandBlocksText(response string, blocks []CommandBlock) string {
+	out := response
+	for i, block := range blocks {
+		original := fmt.Sprintf("```execute:%s\n%s```", block.Language, strings.Join(block.Commands, "\n"))
+		replacement := fmt.Sprintf("\n[Comando #%d: %s]\n", i+1, block.Description)
+		out = strings.Replace(out, original, replacement, 1)
+	}
+	return strings.TrimSpace(out)
 }
 
 // getToolContextString centraliza a geração do contexto de ferramentas.

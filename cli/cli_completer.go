@@ -87,6 +87,7 @@ func (cli *ChatCLI) getGatewaySuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		return prompt.FilterHasPrefix([]prompt.Suggest{
 			{Text: "start", Description: i18n.T("complete.gateway.start")},
+			{Text: "stop", Description: i18n.T("complete.gateway.stop")},
 			{Text: "status", Description: i18n.T("complete.gateway.status")},
 		}, d.GetWordBeforeCursor(), true)
 	}
