@@ -56,13 +56,31 @@ type Adapter interface {
 }
 
 // AgentFunc turns an inbound user message into a final reply. It receives the
-// whole InboundMessage so the implementation can scope per-conversation context
-// (SessionKey) and resolve the sender's identity (Platform/UserID) for
-// cross-channel continuity. To stream progress while it works, it can pull a
-// throttled emitter from ctx via Progress(ctx) and call it zero or more times;
-// the returned string is the final reply delivered after the work finishes.
-// Implementations must be safe for concurrent calls across sessions.
-type AgentFunc func(ctx context.Context, msg InboundMessage) (string, error)
+// session key so the implementation can keep per-conversation context. To
+// stream progress while it works, it can pull a throttled emitter from ctx via
+// Progress(ctx) and call it zero or more times; the returned string is the
+// final reply delivered after the work finishes. Implementations must be safe
+// for concurrent calls across sessions.
+//
+// The full InboundMessage (Platform/UserID, for cross-channel identity) is
+// carried on ctx — use InboundFromContext(ctx) to recover it.
+type AgentFunc func(ctx context.Context, session string, text string) (string, error)
+
+// inboundKey scopes the originating InboundMessage carried on a context, so an
+// AgentFunc can recover the sender's Platform/UserID without a signature change.
+type inboundKey struct{}
+
+// WithInbound returns a context carrying the originating message. The Runner
+// installs it per inbound message before invoking the AgentFunc.
+func WithInbound(ctx context.Context, msg InboundMessage) context.Context {
+	return context.WithValue(ctx, inboundKey{}, msg)
+}
+
+// InboundFromContext returns the originating message on ctx, if any.
+func InboundFromContext(ctx context.Context) (InboundMessage, bool) {
+	m, ok := ctx.Value(inboundKey{}).(InboundMessage)
+	return m, ok
+}
 
 // progressKey scopes the streamed-progress emitter carried on a context.
 type progressKey struct{}

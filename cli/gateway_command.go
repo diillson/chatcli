@@ -262,13 +262,22 @@ func (cli *ChatCLI) teeLoggerToGatewayLog() func() {
 // lastAgentReply) and redirects os.Stdout for capture.
 func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 	var mu sync.Mutex
-	return func(ctx context.Context, msg gateway.InboundMessage) (string, error) {
+	return func(ctx context.Context, session, text string) (string, error) {
 		if cli.Client == nil {
 			return "", fmt.Errorf("no active model")
 		}
 
 		mu.Lock()
 		defer mu.Unlock()
+
+		// Recover the originating message (Platform/UserID drive cross-channel
+		// identity). The Runner always installs it; the fallback derives a best-
+		// effort identity from the session key so the agent still works.
+		msg, ok := gateway.InboundFromContext(ctx)
+		if !ok {
+			platform, chatID, _ := strings.Cut(session, ":")
+			msg = gateway.InboundMessage{Platform: platform, ChatID: chatID, UserID: chatID, Text: text}
+		}
 
 		// Resolve the sender's shared conversation and record the incoming turn
 		// before running, so the message survives even if the run fails. preamble

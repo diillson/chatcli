@@ -75,7 +75,7 @@ func TestRunner_AgentErrorAndSendFailure(t *testing.T) {
 		name: "fake",
 		emit: []InboundMessage{{Platform: "fake", ChatID: "1", UserID: "u", Text: "x"}},
 	}}
-	agent := func(context.Context, InboundMessage) (string, error) {
+	agent := func(context.Context, string, string) (string, error) {
 		return "", fmt.Errorf("agent boom")
 	}
 	r := NewRunner([]Adapter{fa}, agent, zap.NewNop(), 1)
