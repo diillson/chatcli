@@ -573,6 +573,12 @@ func (cli *ChatCLI) handleChatTurnResult(
 	cli.history = append(cli.history, userMessage)
 	cli.history = append(cli.history, models.Message{Role: "assistant", Content: aiResponse})
 
+	// Mirror the turn onto the shared cross-channel conversation so other
+	// channels (Telegram/Slack) and future sessions continue from here.
+	if cli.hubSync != nil {
+		cli.hubSync.afterChatTurn(context.Background(), userMessage.Content, aiResponse)
+	}
+
 	usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
 	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) {
 		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)

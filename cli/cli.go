@@ -204,6 +204,7 @@ type ChatCLI struct {
 	remoteConn    interface{ Close() error } // remote connection (for cleanup on disconnect)
 	isRemote      bool                       // true when connected to a remote server
 	remoteAddress string                     // server address captured on /connect for /config display
+	hubSync       *HubSync                   // cross-channel conversation sync (set on /connect when the hub is available)
 
 	// K8s watcher context injection
 	WatcherContextFunc func() string      // returns K8s context to prepend to LLM prompts
@@ -810,6 +811,7 @@ func (cli *ChatCLI) dequeueMessage() string {
 func (cli *ChatCLI) Start(ctx context.Context) {
 	defer cli.cleanup()
 	cli.PrintWelcomeScreen()
+	cli.startHubSync(ctx) // resume the shared cross-channel conversation, if connected
 
 	shouldContinue := true
 	for shouldContinue {

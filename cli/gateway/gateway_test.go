@@ -53,8 +53,8 @@ func TestRunner_RoutesAndReplies(t *testing.T) {
 			{Platform: "fake", ChatID: "2", UserID: "u", Text: "world"},
 		},
 	}
-	agent := func(_ context.Context, session, text string) (string, error) {
-		return "echo:" + text, nil
+	agent := func(_ context.Context, msg InboundMessage) (string, error) {
+		return "echo:" + msg.Text, nil
 	}
 	r := NewRunner([]Adapter{fa}, agent, zap.NewNop(), 2)
 
@@ -96,7 +96,7 @@ func TestRunner_StreamsProgress(t *testing.T) {
 	}
 	// The agent streams two progress lines (via the ctx emitter), then returns
 	// a final reply.
-	agent := func(ctx context.Context, _, _ string) (string, error) {
+	agent := func(ctx context.Context, _ InboundMessage) (string, error) {
 		emit := Progress(ctx)
 		emit("step 1")
 		emit("step 2")
@@ -138,7 +138,7 @@ func TestRunner_StreamsProgress(t *testing.T) {
 }
 
 func TestRunner_NoAdapters(t *testing.T) {
-	r := NewRunner(nil, func(context.Context, string, string) (string, error) { return "", nil }, zap.NewNop(), 1)
+	r := NewRunner(nil, func(context.Context, InboundMessage) (string, error) { return "", nil }, zap.NewNop(), 1)
 	if err := r.Run(context.Background()); err == nil {
 		t.Error("expected error with no adapters")
 	}

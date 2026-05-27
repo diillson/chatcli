@@ -91,6 +91,8 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 		cli.showConfigScheduler()
 	case "server":
 		cli.showConfigServer()
+	case "hub":
+		cli.showConfigHub()
 	default:
 		fmt.Println(colorize("  "+i18n.T("cfg.route.unknown_section", args[0]), ColorYellow))
 		fmt.Println(colorize("  "+i18n.T("cfg.route.hint"), ColorGray))
@@ -1101,6 +1103,38 @@ func (cli *ChatCLI) showConfigServer() {
 	kv(p, "CHATCLI_AIOPS_TLS_KEY", presence(os.Getenv("CHATCLI_AIOPS_TLS_KEY")))
 
 	sectionEnd(ColorGray)
+}
+
+// showConfigHub renders the conversation-hub settings (cross-channel
+// continuity) and the live sync state of the current connection. The hub lets a
+// thread started on one channel (Telegram/Slack) continue on the notebook CLI
+// and vice-versa, until /newsession.
+func (cli *ChatCLI) showConfigHub() {
+	sectionHeader("🔗", "cfg.section.hub.title", ColorBlue)
+	p := uiPrefix(ColorBlue)
+
+	enabled := i18n.T("cfg.val.enabled")
+	if strings.EqualFold(os.Getenv("CHATCLI_HUB_ENABLED"), "false") {
+		enabled = i18n.T("cfg.val.disabled")
+	}
+	subheader(p, "cfg.sub.hub.server")
+	kv(p, "CHATCLI_HUB_ENABLED", enabled)
+	kv(p, "CHATCLI_HUB_DB", envOr("CHATCLI_HUB_DB"))
+	kv(p, "CHATCLI_HUB_TAIL_BUFFER", envOr("CHATCLI_HUB_TAIL_BUFFER"))
+	kv(p, "CHATCLI_HUB_BINDINGS", presence(os.Getenv("CHATCLI_HUB_BINDINGS")))
+
+	fmt.Println(p)
+	subheader(p, "cfg.sub.hub.session")
+	if cli.hubSync != nil {
+		convID, principal := cli.hubSync.status()
+		kv(p, i18n.T("cfg.hub.state"), i18n.T("cfg.hub.connected"))
+		kv(p, i18n.T("cfg.hub.principal"), principal)
+		kv(p, i18n.T("cfg.hub.conversation"), convID)
+	} else {
+		kv(p, i18n.T("cfg.hub.state"), i18n.T("cfg.hub.not_connected"))
+	}
+
+	sectionEnd(ColorBlue)
 }
 
 // renderCoderPolicy prints coder policy state: active policy file, local

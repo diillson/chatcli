@@ -203,6 +203,12 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	chatCLI.Provider = remoteClient.GetProvider()
 	chatCLI.Model = remoteClient.GetModelName()
 
+	// Join the shared cross-channel conversation: the CLI hydrates the active
+	// thread, live-tails turns from other channels, and mirrors its own turns.
+	// If the server has the hub disabled, startHubSync degrades to a fresh
+	// local session.
+	chatCLI.EnableHubSync(remoteClient)
+
 	chatCLI.Start(ctx)
 	return nil
 }

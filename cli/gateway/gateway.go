@@ -56,12 +56,13 @@ type Adapter interface {
 }
 
 // AgentFunc turns an inbound user message into a final reply. It receives the
-// session key so the implementation can keep per-conversation context. To
-// stream progress while it works, it can pull a throttled emitter from ctx via
-// Progress(ctx) and call it zero or more times; the returned string is the
-// final reply delivered after the work finishes. Implementations must be safe
-// for concurrent calls across sessions.
-type AgentFunc func(ctx context.Context, session string, text string) (string, error)
+// whole InboundMessage so the implementation can scope per-conversation context
+// (SessionKey) and resolve the sender's identity (Platform/UserID) for
+// cross-channel continuity. To stream progress while it works, it can pull a
+// throttled emitter from ctx via Progress(ctx) and call it zero or more times;
+// the returned string is the final reply delivered after the work finishes.
+// Implementations must be safe for concurrent calls across sessions.
+type AgentFunc func(ctx context.Context, msg InboundMessage) (string, error)
 
 // progressKey scopes the streamed-progress emitter carried on a context.
 type progressKey struct{}

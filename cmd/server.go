@@ -263,6 +263,29 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		fmt.Println(i18n.T("cmd.server.watch_active", mw.TargetCount(), multiCfg.Interval))
 	}
 
+	// Co-locate the messaging gateway in this process when requested, sharing
+	// the server's hub broker. Because the live-tail fan-out is in-memory,
+	// running both here is what makes a Telegram/Slack message push to a
+	// connected notebook CLI in real time (cross-process only syncs on
+	// connect/resync). Requires the gateway platform tokens to be configured.
+	if strings.EqualFold(os.Getenv("CHATCLI_GATEWAY_IN_SERVER"), "true") {
+		if broker := srv.Hub(); broker == nil {
+			logger.Warn(i18n.T("cmd.server.gateway_hub_disabled"))
+		} else if gwCLI, gwErr := cli.NewChatCLI(llmMgr, logger); gwErr != nil {
+			logger.Warn(i18n.T("cmd.server.gateway_init_failed"), zap.Error(gwErr))
+		} else {
+			gwCtx, gwCancel := context.WithCancel(context.Background())
+			defer gwCancel()
+			go func() {
+				if err := gwCLI.RunGatewayWithBroker(gwCtx, broker); err != nil && gwCtx.Err() == nil {
+					logger.Error(i18n.T("cmd.server.gateway_stopped"), zap.Error(err))
+				}
+			}()
+			logger.Info(i18n.T("cmd.server.gateway_colocated"))
+			fmt.Println(i18n.T("cmd.server.gateway_colocated"))
+		}
+	}
+
 	return srv.Start()
 }
 

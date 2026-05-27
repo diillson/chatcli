@@ -152,7 +152,7 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 	}
 
 	sink := newProgressSink(func(s string) { send("progress", s) })
-	reply, err := r.agent(WithProgress(ctx, sink.emit), msg.SessionKey(), msg.Text)
+	reply, err := r.agent(WithProgress(ctx, sink.emit), msg)
 	sink.flush() // deliver any progress buffered since the last flush
 	if err != nil {
 		r.logger.Warn("gateway: agent run failed",

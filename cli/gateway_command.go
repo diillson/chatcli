@@ -33,6 +33,8 @@ import (
 
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/server/hub"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -153,7 +155,11 @@ func (cli *ChatCLI) gatewayStop() {
 
 // RunGatewayForeground builds the configured adapters and runs the messaging
 // runner in the foreground until ctx is canceled. It is the body of the
-// detached `chatcli gateway` subcommand; the agent runs fully unattended.
+// detached `chatcli gateway` subcommand; the agent runs fully unattended. It
+// opens its own hub database — durable and cross-channel, but live-tail push to
+// a remote CLI only spans processes via DB-on-connect/resync. For real-time
+// cross-process push, co-locate the gateway in the server via
+// RunGatewayWithBroker (see CHATCLI_GATEWAY_IN_SERVER).
 func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 	cli.SetUnattended(true)
 
@@ -166,6 +172,34 @@ func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 		defer closeTee()
 	}
 
+	// Cross-channel continuity: back conversations with the shared hub so a
+	// thread started on Telegram continues on the notebook (and vice versa). If
+	// the hub can't be opened, degrade gracefully to per-message handling rather
+	// than failing the daemon. A typed-nil must not reach newHubSessions, so we
+	// only assign broker on success.
+	var broker hub.Store
+	if m, err := hub.OpenDefault(cli.logger); err != nil {
+		cli.logger.Warn("gateway: conversation hub unavailable; continuing without cross-channel continuity", zap.Error(err))
+	} else {
+		broker = m
+		defer func() { _ = m.Close() }()
+	}
+	return cli.runGateway(ctx, broker)
+}
+
+// RunGatewayWithBroker runs the gateway sharing an existing hub broker (the gRPC
+// server's). Because the fan-out Manager is in-memory, sharing one broker in a
+// single process is what makes a Telegram message push live to a connected
+// notebook in real time. The caller owns the broker's lifecycle.
+func (cli *ChatCLI) RunGatewayWithBroker(ctx context.Context, broker hub.Broker) error {
+	cli.SetUnattended(true)
+	return cli.runGateway(ctx, broker)
+}
+
+// runGateway builds the configured adapters and runs the messaging runner until
+// ctx is canceled, backing conversations with the given hub store (nil = no
+// cross-channel continuity).
+func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	adapters, err := gateway.BuildConfigured()
 	if err != nil {
 		return err
@@ -185,10 +219,12 @@ func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 	}
 	// Startup line so gateway.log is never empty while the daemon is live —
 	// immediate proof the advertised log is the one actually being written.
-	cli.logger.Info("gateway daemon started",
+	cli.logger.Info("gateway started",
 		zap.Strings("platforms", names), zap.Int("adapters", len(adapters)))
 
-	sessions := newGatewaySessions(5)
+	sessions := newHubSessions(broker, cli.logger)
+	sessions.loadBindings(ctx)
+
 	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions), cli.logger, 0)
 	return runner.Run(ctx)
 }
@@ -224,9 +260,9 @@ func (cli *ChatCLI) teeLoggerToGatewayLog() func() {
 // while the gateway persona keeps the reply concise and chat-friendly. Runs
 // serialize because the loop mutates shared ChatCLI state (history,
 // lastAgentReply) and redirects os.Stdout for capture.
-func (cli *ChatCLI) gatewayAgentFunc(sessions *gatewaySessions) gateway.AgentFunc {
+func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 	var mu sync.Mutex
-	return func(ctx context.Context, session, text string) (string, error) {
+	return func(ctx context.Context, msg gateway.InboundMessage) (string, error) {
 		if cli.Client == nil {
 			return "", fmt.Errorf("no active model")
 		}
@@ -234,9 +270,13 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *gatewaySessions) gateway.AgentFun
 		mu.Lock()
 		defer mu.Unlock()
 
-		task := text
-		if pre := sessions.preamble(session); pre != "" {
-			task = pre + "\n\nCurrent request: " + text
+		// Resolve the sender's shared conversation and record the incoming turn
+		// before running, so the message survives even if the run fails. preamble
+		// carries the prior dialogue (across every channel) as context.
+		conv := sessions.begin(ctx, msg)
+		task := msg.Text
+		if pre := conv.preamble; pre != "" {
+			task = pre + "\n\nCurrent request: " + msg.Text
 		}
 
 		emit := gateway.Progress(ctx)
@@ -253,13 +293,13 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *gatewaySessions) gateway.AgentFun
 			return "", err
 		}
 
-		sessions.remember(session, text)
-
 		// The clean prose answer was captured (and not printed) during the run.
-		if reply := strings.TrimSpace(cli.lastAgentReply); reply != "" {
-			return reply, nil
+		reply := strings.TrimSpace(cli.lastAgentReply)
+		if reply == "" {
+			reply = "✅ " + i18n.T("gateway.task_done")
 		}
-		return "✅ " + i18n.T("gateway.task_done"), nil
+		conv.finish(ctx, reply)
+		return reply, nil
 	}
 }
 
@@ -319,51 +359,155 @@ func gatewayRunningPID() (int, bool) {
 	return pid, true
 }
 
-// gatewaySessions keeps a small rolling list of recent user requests per
-// conversation, so a long-lived daemon does not grow unbounded while still
-// giving the agent continuity across turns.
-type gatewaySessions struct {
-	mu       sync.Mutex
-	maxItems int
-	recent   map[string][]string
+// gatewayContextTurns bounds how many prior dialogue turns are fed back as
+// context per run, keeping the prompt bounded on a long-lived daemon.
+const gatewayContextTurns = 12
+
+// hubSessions backs gateway conversations with the shared conversation hub, so
+// a thread is the same across Telegram/Slack/WhatsApp and the notebook CLI. A
+// sender (platform,userID) is mapped to a principal: an explicit binding merges
+// channels into one named identity (shared with the connected CLI), while an
+// unbound sender falls back to an isolated per-channel principal — the daemon
+// still works for everyone, and no message leaks across identities.
+type hubSessions struct {
+	store  hub.Store // nil when the hub could not be opened (degrade to no continuity)
+	logger *zap.Logger
 }
 
-func newGatewaySessions(maxItems int) *gatewaySessions {
-	if maxItems <= 0 {
-		maxItems = 5
+func newHubSessions(store hub.Store, logger *zap.Logger) *hubSessions {
+	if logger == nil {
+		logger = zap.NewNop()
 	}
-	return &gatewaySessions{maxItems: maxItems, recent: map[string][]string{}}
+	return &hubSessions{store: store, logger: logger}
 }
 
-// preamble renders the recent user requests as context for the next run, or ""
-// when the conversation is new.
-func (s *gatewaySessions) preamble(session string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	items := s.recent[session]
-	if len(items) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("Earlier in this conversation the user asked:")
-	for _, it := range items {
-		b.WriteString("\n- ")
-		b.WriteString(it)
-	}
-	return b.String()
-}
-
-// remember records a user request, keeping only the most recent maxItems.
-func (s *gatewaySessions) remember(session, text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
+// loadBindings seeds the store with explicit channel→principal bindings from
+// CHATCLI_HUB_BINDINGS, formatted as "telegram:123=alice;slack:U1=alice"
+// (entries separated by ';' or ','). Malformed entries are skipped with a warn.
+func (s *hubSessions) loadBindings(ctx context.Context) {
+	if s.store == nil {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	items := append(s.recent[session], text)
-	if len(items) > s.maxItems {
-		items = items[len(items)-s.maxItems:]
+	raw := strings.TrimSpace(os.Getenv("CHATCLI_HUB_BINDINGS"))
+	if raw == "" {
+		return
 	}
-	s.recent[session] = items
+	for _, entry := range strings.FieldsFunc(raw, func(r rune) bool { return r == ';' || r == ',' }) {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		left, principal, ok := strings.Cut(entry, "=")
+		platform, userID, ok2 := strings.Cut(strings.TrimSpace(left), ":")
+		principal = strings.TrimSpace(principal)
+		if !ok || !ok2 || platform == "" || userID == "" || principal == "" {
+			s.logger.Warn("gateway: skipping malformed hub binding", zap.String("entry", entry))
+			continue
+		}
+		if err := s.store.Bind(ctx, platform, userID, principal); err != nil {
+			s.logger.Warn("gateway: failed to apply hub binding", zap.String("entry", entry), zap.Error(err))
+		}
+	}
+}
+
+// principalFor maps a sender to its principal: the bound identity when one
+// exists, else an isolated per-channel principal.
+func (s *hubSessions) principalFor(ctx context.Context, platform, userID string) string {
+	if s.store != nil {
+		if p, err := s.store.ResolvePrincipal(ctx, platform, userID); err == nil {
+			return p
+		}
+	}
+	return platform + ":" + userID
+}
+
+// gatewayTurn is the per-message handle returned by begin: it carries the
+// preamble to feed the run and knows where to record the assistant reply.
+type gatewayTurn struct {
+	sessions  *hubSessions
+	convID    string
+	principal string
+	channel   string
+	preamble  string
+}
+
+// begin resolves the sender's shared conversation, records the incoming user
+// turn, and builds the preamble from prior dialogue. It never fails the run:
+// hub errors degrade to an empty preamble.
+func (s *hubSessions) begin(ctx context.Context, msg gateway.InboundMessage) *gatewayTurn {
+	turn := &gatewayTurn{sessions: s, channel: msg.Platform}
+	if s.store == nil {
+		return turn
+	}
+	turn.principal = s.principalFor(ctx, msg.Platform, msg.UserID)
+	convID, err := s.store.Resolve(ctx, turn.principal)
+	if err != nil {
+		s.logger.Warn("gateway: hub resolve failed; no continuity this turn", zap.Error(err))
+		return turn
+	}
+	turn.convID = convID
+
+	// Context first, from the dialogue so far (before this message lands).
+	recent, err := s.store.Read(ctx, convID, 0, 0)
+	if err != nil {
+		s.logger.Warn("gateway: hub read failed", zap.Error(err))
+	}
+	turn.preamble = renderGatewayPreamble(recent)
+
+	if _, err := s.store.Append(ctx, models.ConversationEvent{
+		ConvID:    convID,
+		Principal: turn.principal,
+		Channel:   msg.Platform,
+		Role:      models.ConvRoleUser,
+		Content:   msg.Text,
+	}); err != nil {
+		s.logger.Warn("gateway: hub append (user) failed", zap.Error(err))
+	}
+	return turn
+}
+
+// finish records the assistant reply on the shared conversation.
+func (t *gatewayTurn) finish(ctx context.Context, reply string) {
+	if t.sessions == nil || t.sessions.store == nil || t.convID == "" || reply == "" {
+		return
+	}
+	if _, err := t.sessions.store.Append(ctx, models.ConversationEvent{
+		ConvID:    t.convID,
+		Principal: t.principal,
+		Channel:   t.channel,
+		Role:      models.ConvRoleAssistant,
+		Content:   reply,
+	}); err != nil {
+		t.sessions.logger.Warn("gateway: hub append (assistant) failed", zap.Error(err))
+	}
+}
+
+// renderGatewayPreamble turns the most recent dialogue turns into a compact
+// context block, or "" when the conversation is new. tool_summary/checkpoint
+// events are surfaced as system context (see ConversationEvent.ToMessage).
+func renderGatewayPreamble(events []models.ConversationEvent) string {
+	if len(events) == 0 {
+		return ""
+	}
+	if len(events) > gatewayContextTurns {
+		events = events[len(events)-gatewayContextTurns:]
+	}
+	var b strings.Builder
+	b.WriteString("Earlier in this conversation (across all channels):")
+	for _, ev := range events {
+		text := strings.TrimSpace(ev.Content)
+		if text == "" {
+			continue
+		}
+		switch ev.Role {
+		case models.ConvRoleUser:
+			b.WriteString("\n- user: ")
+		case models.ConvRoleAssistant:
+			b.WriteString("\n- assistant: ")
+		default:
+			b.WriteString("\n- note: ")
+		}
+		b.WriteString(text)
+	}
+	return b.String()
 }

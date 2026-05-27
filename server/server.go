@@ -24,6 +24,7 @@ import (
 	"github.com/diillson/chatcli/metrics"
 	"github.com/diillson/chatcli/pkg/persona"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
+	"github.com/diillson/chatcli/server/hub"
 	"github.com/diillson/chatcli/version"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -53,6 +54,7 @@ type Server struct {
 	metricsServer *metrics.Server
 	rateLimiter   *PerClientRateLimiter // for cleanup on shutdown
 	auditLogger   *AuditLogger          // for cleanup on shutdown
+	hubBroker     hub.Broker            // conversation hub, closed on shutdown (nil when disabled)
 }
 
 // New creates a new ChatCLI gRPC server.
@@ -168,6 +170,20 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 		handler.sessionMetrics = sessionMetrics
 	}
 
+	// Conversation Hub (cross-channel continuity). Enabled by default; opt out
+	// with CHATCLI_HUB_ENABLED=false. A failure to open the DB degrades to "hub
+	// disabled" rather than blocking the whole server.
+	var hubBroker hub.Broker
+	if !strings.EqualFold(os.Getenv("CHATCLI_HUB_ENABLED"), "false") {
+		if broker, err := openServerHub(logger); err != nil {
+			logger.Warn(i18n.T("server.hub.init_failed", err))
+		} else {
+			hubBroker = broker
+			handler.SetHub(broker)
+			logger.Info(i18n.T("server.hub.enabled"))
+		}
+	}
+
 	pb.RegisterChatCLIServiceServer(grpcServer, handler)
 
 	// Security (M9): gRPC reflection requires BOTH config flag AND env var.
@@ -189,8 +205,19 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 		metricsServer: metricsServer,
 		rateLimiter:   rateLimiter,
 		auditLogger:   auditLogger,
+		hubBroker:     hubBroker,
 	}
 }
+
+// openServerHub opens the conversation hub database (see hub.OpenDefault).
+func openServerHub(logger *zap.Logger) (hub.Broker, error) {
+	return hub.OpenDefault(logger)
+}
+
+// Hub returns the server's conversation hub broker, or nil when the hub is
+// disabled. Used to co-locate the gateway in the server process so adapter
+// appends publish to live subscribers through the same in-memory fan-out.
+func (s *Server) Hub() hub.Broker { return s.hubBroker }
 
 // Start begins listening and serving gRPC requests.
 // It blocks until the server is stopped via signal or Stop().
@@ -265,6 +292,9 @@ func (s *Server) Stop() {
 	}
 	if s.auditLogger != nil {
 		s.auditLogger.Close()
+	}
+	if s.hubBroker != nil {
+		_ = s.hubBroker.Close()
 	}
 	s.grpcServer.GracefulStop()
 }

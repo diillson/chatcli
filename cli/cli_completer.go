@@ -301,6 +301,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/retryall", Description: i18n.T("complete.root.retryall")},
 		{Text: "/skipchunk", Description: i18n.T("complete.root.skipchunk")},
 		{Text: "/session", Description: i18n.T("complete.root.session")},
+		{Text: "/hub", Description: i18n.T("complete.root.hub")},
 		{Text: "/context", Description: i18n.T("complete.root.context")},
 		{Text: "/plugin", Description: i18n.T("complete.root.plugin")},
 		{Text: "/skill", Description: i18n.T("complete.root.skill")},
@@ -1419,6 +1420,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "security", Description: i18n.T("complete.config.security")},
 			{Text: "scheduler", Description: i18n.T("cfg.section.scheduler.title")},
 			{Text: "server", Description: i18n.T("complete.config.server")},
+			{Text: "hub", Description: i18n.T("cfg.section.hub.title")},
 		}
 		return prompt.FilterHasPrefix(sections, word, true)
 	}

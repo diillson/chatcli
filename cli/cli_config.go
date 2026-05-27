@@ -318,6 +318,7 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/session list", i18n.T("help.command.session_list"))
 	printCommand("/session delete <nome>", i18n.T("help.command.session_delete"))
 	printCommand("/session new", i18n.T("help.command.session_new"))
+	printCommand("/hub", i18n.T("help.command.hub"))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.oneshot"), ColorLime))
 	printCommand("chatcli -p \"<prompt>\"", i18n.T("help.command.oneshot_p"))
