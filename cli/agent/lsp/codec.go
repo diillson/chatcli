@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * Package lsp is a minimal Language Server Protocol client. It spawns a
  * language server (gopls, pyright, ...), performs the initialize handshake,
  * opens a document, and collects the diagnostics the server publishes — so
@@ -19,8 +24,8 @@ import (
 	"strings"
 )
 
-// WriteMessage marshals v and writes it with an LSP Content-Length header.
-func WriteMessage(w io.Writer, v interface{}) error {
+// writeMessage marshals v and writes it with an LSP Content-Length header.
+func writeMessage(w io.Writer, v interface{}) error {
 	body, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -32,8 +37,8 @@ func WriteMessage(w io.Writer, v interface{}) error {
 	return err
 }
 
-// ReadMessage reads one Content-Length-framed message body from r.
-func ReadMessage(r *bufio.Reader) ([]byte, error) {
+// readMessage reads one Content-Length-framed message body from r.
+func readMessage(r *bufio.Reader) ([]byte, error) {
 	contentLength := -1
 	for {
 		line, err := r.ReadString('\n')

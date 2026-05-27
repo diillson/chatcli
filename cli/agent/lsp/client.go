@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 package lsp
 
 import (
@@ -114,7 +119,7 @@ func Spawn(ctx context.Context, spec ServerSpec, logger *zap.Logger) (*Client, e
 func (c *Client) readLoop() {
 	defer close(c.done)
 	for {
-		body, err := ReadMessage(c.r)
+		body, err := readMessage(c.r)
 		if err != nil {
 			return
 		}
@@ -194,7 +199,7 @@ func (c *Client) notify(method string, params interface{}) error {
 func (c *Client) writeRaw(v interface{}) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	return WriteMessage(c.w, v)
+	return writeMessage(c.w, v)
 }
 
 // Initialize performs the LSP initialize/initialized handshake.

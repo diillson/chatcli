@@ -14,14 +14,14 @@ import (
 func TestCodecRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	in := map[string]interface{}{"jsonrpc": "2.0", "method": "x", "params": map[string]int{"n": 1}}
-	if err := WriteMessage(&buf, in); err != nil {
+	if err := writeMessage(&buf, in); err != nil {
 		t.Fatal(err)
 	}
 	// Header must be Content-Length framed.
 	if !bytes.Contains(buf.Bytes(), []byte("Content-Length:")) {
 		t.Fatalf("missing header: %q", buf.String())
 	}
-	body, err := ReadMessage(bufio.NewReader(&buf))
+	body, err := readMessage(bufio.NewReader(&buf))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func fakeServer(t *testing.T, serverIn io.Reader, serverOut io.Writer, diagURI s
 	t.Helper()
 	r := bufio.NewReader(serverIn)
 	for {
-		body, err := ReadMessage(r)
+		body, err := readMessage(r)
 		if err != nil {
 			return
 		}
@@ -69,11 +69,11 @@ func fakeServer(t *testing.T, serverIn io.Reader, serverOut io.Writer, diagURI s
 		}
 		switch {
 		case m.Method == "initialize":
-			_ = WriteMessage(serverOut, map[string]interface{}{"jsonrpc": "2.0", "id": m.ID, "result": map[string]interface{}{"capabilities": map[string]interface{}{}}})
+			_ = writeMessage(serverOut, map[string]interface{}{"jsonrpc": "2.0", "id": m.ID, "result": map[string]interface{}{"capabilities": map[string]interface{}{}}})
 		case m.Method == "shutdown":
-			_ = WriteMessage(serverOut, map[string]interface{}{"jsonrpc": "2.0", "id": m.ID, "result": nil})
+			_ = writeMessage(serverOut, map[string]interface{}{"jsonrpc": "2.0", "id": m.ID, "result": nil})
 		case m.Method == "textDocument/didOpen":
-			_ = WriteMessage(serverOut, map[string]interface{}{
+			_ = writeMessage(serverOut, map[string]interface{}{
 				"jsonrpc": "2.0",
 				"method":  "textDocument/publishDiagnostics",
 				"params": map[string]interface{}{
