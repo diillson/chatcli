@@ -139,6 +139,9 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 	case userInput == "/ratelimit" || userInput == "/limits":
 		ch.cli.handleRateLimitCommand()
 		return false
+	case userInput == "/export" || strings.HasPrefix(userInput, "/export "):
+		ch.cli.handleExportCommand(userInput)
+		return false
 	case userInput == "/thinking" || strings.HasPrefix(userInput, "/thinking "):
 		ch.cli.handleThinkingCommand(userInput)
 		return false
