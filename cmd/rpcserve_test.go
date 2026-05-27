@@ -39,6 +39,22 @@ func TestFirstNonEmpty(t *testing.T) {
 	}
 }
 
+func TestRPCBackend_NoCLI(t *testing.T) {
+	b := &rpcBackend{mgr: &fakeManager{client: &fakeClient{}}, sessions: map[string][]models.Message{}} // cli is nil
+	if _, err := b.Agent(context.Background(), "s", "t"); err == nil {
+		t.Error("Agent should error when ChatCLI is unavailable")
+	}
+	if _, err := b.Coder(context.Background(), "s", "t"); err == nil {
+		t.Error("Coder should error when ChatCLI is unavailable")
+	}
+	if _, err := b.CallBuiltin(context.Background(), "read", "x"); err == nil {
+		t.Error("CallBuiltin should error when ChatCLI is unavailable")
+	}
+	if b.BuiltinTools() != nil {
+		t.Error("BuiltinTools should be nil when ChatCLI is unavailable")
+	}
+}
+
 func TestRPCBackendPrompt(t *testing.T) {
 	fc := &fakeClient{reply: "answer"}
 	b := &rpcBackend{

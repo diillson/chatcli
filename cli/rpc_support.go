@@ -1,5 +1,11 @@
 /*
- * ChatCLI - rpc_support.go
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+
+/*
+ * rpc_support.go
  *
  * Exposes ChatCLI capabilities to the MCP/ACP servers (cmd/rpcserve.go) so an
  * MCP client can drive the real agent/coder loops and the built-in tools — not
