@@ -223,6 +223,7 @@ func (ch *CommandHandler) handleSessionCommand(userInput string) {
 		fmt.Println(i18n.T("session.usage_save"))
 		fmt.Println(i18n.T("session.usage_load"))
 		fmt.Println(i18n.T("session.usage_list"))
+		fmt.Println(i18n.T("session.usage_search"))
 		fmt.Println(i18n.T("session.usage_delete"))
 		fmt.Println(i18n.T("session.usage_new"))
 		return
@@ -249,6 +250,15 @@ func (ch *CommandHandler) handleSessionCommand(userInput string) {
 		ch.cli.handleLoadSession(name)
 	case "list":
 		ch.cli.handleListSessions()
+	case "search":
+		// Everything after "search" is the query (may contain spaces).
+		query := strings.TrimSpace(strings.TrimPrefix(userInput, args[0]))
+		query = strings.TrimSpace(strings.TrimPrefix(query, "search"))
+		if query == "" {
+			fmt.Println(colorize("  "+i18n.T("session.search.usage"), ColorYellow))
+			return
+		}
+		ch.cli.handleSearchSessions(query)
 	case "delete":
 		if name == "" {
 			fmt.Println(i18n.T("session.error_name_required_delete"))

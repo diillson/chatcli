@@ -239,6 +239,34 @@ func (cli *ChatCLI) restoreSessionData(sd *SessionData) {
 	cli.checkpoints = nil
 }
 
+// handleSearchSessions runs a full-text search across saved sessions and
+// prints the matching sessions with context snippets. It reuses the existing
+// JSON session store — no separate index.
+func (cli *ChatCLI) handleSearchSessions(query string) {
+	hits, err := cli.sessionManager.SearchSessions(query, 3)
+	if err != nil {
+		fmt.Println(i18n.T("session.search.error", err))
+		return
+	}
+	if len(hits) == 0 {
+		fmt.Println(colorize("  "+i18n.T("session.search.none", query), ColorGray))
+		return
+	}
+
+	fmt.Println()
+	fmt.Println(colorize("  "+i18n.T("session.search.header", query), ColorCyan+ColorBold))
+	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
+	for _, h := range hits {
+		fmt.Printf("  %s  %s\n",
+			colorize(h.Session, ColorYellow),
+			colorize(i18n.T("session.search.match_count", h.Matches), ColorGray))
+		for _, snip := range h.Snippets {
+			fmt.Printf("      %s\n", colorize(snip, ColorGray))
+		}
+	}
+	fmt.Println()
+}
+
 func (cli *ChatCLI) handleListSessions() {
 	if cli.isRemote {
 		rc := cli.getRemoteClient()
