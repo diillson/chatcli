@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * Package gateway lets ChatCLI run as a long-lived daemon that talks to the
  * user from messaging platforms (Telegram today; Discord/Slack/etc. plug in
  * through the same Adapter interface). It is intentionally dependency-free:

@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 package gateway
 
 import (
@@ -30,6 +35,7 @@ type SlackAdapter struct {
 	signingSecret string
 	addr          string
 	path          string
+	apiBase       string // overridable for tests; defaults to https://slack.com/api
 	http          *http.Client
 	logger        *zap.Logger
 }
@@ -44,6 +50,7 @@ func NewSlackAdapter(botToken, signingSecret, addr, path string, logger *zap.Log
 		signingSecret: signingSecret,
 		addr:          addr,
 		path:          path,
+		apiBase:       "https://slack.com/api",
 		http:          &http.Client{Timeout: 15 * time.Second},
 		logger:        logger,
 	}
@@ -52,10 +59,10 @@ func NewSlackAdapter(botToken, signingSecret, addr, path string, logger *zap.Log
 // Name implements Adapter.
 func (s *SlackAdapter) Name() string { return slackPlatform }
 
-// Start runs the Events API HTTP server until ctx is cancelled.
-func (s *SlackAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc(s.path, func(rw http.ResponseWriter, r *http.Request) {
+// eventsHandler builds the HTTP handler for the Slack Events API. Extracted
+// from Start so it can be exercised directly via httptest.
+func (s *SlackAdapter) eventsHandler(ctx context.Context, inbound chan<- InboundMessage) http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			rw.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -89,7 +96,13 @@ func (s *SlackAdapter) Start(ctx context.Context, inbound chan<- InboundMessage)
 			case <-ctx.Done():
 			}
 		}
-	})
+	}
+}
+
+// Start runs the Events API HTTP server until ctx is cancelled.
+func (s *SlackAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc(s.path, s.eventsHandler(ctx, inbound))
 
 	srv := &http.Server{Addr: s.addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
@@ -109,7 +122,7 @@ func (s *SlackAdapter) Start(ctx context.Context, inbound chan<- InboundMessage)
 // Send posts a reply via chat.postMessage.
 func (s *SlackAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	payload, _ := json.Marshal(map[string]string{"channel": msg.ChatID, "text": msg.Text})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://slack.com/api/chat.postMessage", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.apiBase+"/chat.postMessage", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}

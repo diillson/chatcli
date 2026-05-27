@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 package gateway
 
 import (
@@ -60,13 +65,10 @@ type webhookInbound struct {
 	Text   string `json:"text"`
 }
 
-// Start runs the HTTP server until ctx is cancelled.
-func (w *WebhookAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
-	if w.secret == "" {
-		w.logger.Warn("gateway/webhook: no CHATCLI_WEBHOOK_SECRET set — inbound endpoint is unauthenticated")
-	}
-	mux := http.NewServeMux()
-	mux.HandleFunc(w.path, func(rw http.ResponseWriter, r *http.Request) {
+// inboundHandler builds the HTTP handler. Extracted from Start so it can be
+// exercised directly via httptest.
+func (w *WebhookAdapter) inboundHandler(ctx context.Context, inbound chan<- InboundMessage) http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			rw.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -87,7 +89,16 @@ func (w *WebhookAdapter) Start(ctx context.Context, inbound chan<- InboundMessag
 		case <-ctx.Done():
 			rw.WriteHeader(http.StatusServiceUnavailable)
 		}
-	})
+	}
+}
+
+// Start runs the HTTP server until ctx is cancelled.
+func (w *WebhookAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
+	if w.secret == "" {
+		w.logger.Warn("gateway/webhook: no CHATCLI_WEBHOOK_SECRET set — inbound endpoint is unauthenticated")
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc(w.path, w.inboundHandler(ctx, inbound))
 
 	srv := &http.Server{Addr: w.addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {

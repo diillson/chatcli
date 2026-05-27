@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 package gateway
 
 import (
@@ -51,10 +56,10 @@ func NewWhatsAppAdapter(accessToken, phoneID, verifyToken, addr, path string, lo
 // Name implements Adapter.
 func (a *WhatsAppAdapter) Name() string { return whatsappPlatform }
 
-// Start runs the webhook HTTP server until ctx is cancelled.
-func (a *WhatsAppAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc(a.path, func(rw http.ResponseWriter, r *http.Request) {
+// webhookHandler builds the Cloud API webhook handler (GET verification +
+// POST messages). Extracted from Start so it can be exercised via httptest.
+func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- InboundMessage) http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			// Meta verification handshake.
@@ -79,7 +84,13 @@ func (a *WhatsAppAdapter) Start(ctx context.Context, inbound chan<- InboundMessa
 		default:
 			rw.WriteHeader(http.StatusMethodNotAllowed)
 		}
-	})
+	}
+}
+
+// Start runs the webhook HTTP server until ctx is cancelled.
+func (a *WhatsAppAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc(a.path, a.webhookHandler(ctx, inbound))
 
 	srv := &http.Server{Addr: a.addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
