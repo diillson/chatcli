@@ -67,6 +67,20 @@ var slashPrefixRoutes = []slashPrefixRoute{
 		return c.getParkTokenSuggestions("/resume", d)
 	}},
 	{"/export", (*ChatCLI).getExportSuggestions},
+	{"/gateway", (*ChatCLI).getGatewaySuggestions},
+}
+
+// getGatewaySuggestions completes the /gateway subcommands.
+func (cli *ChatCLI) getGatewaySuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "start", Description: i18n.T("complete.gateway.start")},
+			{Text: "status", Description: i18n.T("complete.gateway.status")},
+		}, d.GetWordBeforeCursor(), true)
+	}
+	return nil
 }
 
 // getExportSuggestions completes the optional output path of /export.
@@ -291,6 +305,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/ratelimit", Description: i18n.T("complete.root.ratelimit")},
 		{Text: "/export", Description: i18n.T("complete.root.export")},
 		{Text: "/moa", Description: i18n.T("complete.root.moa")},
+		{Text: "/gateway", Description: i18n.T("complete.root.gateway")},
 		{Text: "/thinking", Description: i18n.T("complete.root.thinking")},
 		{Text: "/plan", Description: i18n.T("complete.root.plan")},
 		{Text: "/refine", Description: i18n.T("complete.root.refine")},
