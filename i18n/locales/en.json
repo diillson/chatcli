@@ -160,6 +160,8 @@
   "complete.root.export": "Export the conversation as a JSONL trajectory",
   "complete.root.moa": "Mixture-of-Agents: query several models and synthesize",
   "complete.root.gateway": "Run as a messaging daemon (Telegram, etc.)",
+  "complete.gateway.start": "Start the messaging daemon",
+  "complete.gateway.status": "List registered/configured platforms",
   "gateway.usage": "Usage: /gateway [start|status]",
   "gateway.no_platforms": "No messaging platform configured. Set e.g. CHATCLI_TELEGRAM_BOT_TOKEN.",
   "gateway.registered": "Registered platforms:",
