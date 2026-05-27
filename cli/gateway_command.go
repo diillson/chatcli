@@ -8,9 +8,14 @@
  *
  * /gateway [start|status] runs ChatCLI as a messaging daemon. Configured
  * platform adapters (e.g. Telegram via CHATCLI_TELEGRAM_BOT_TOKEN) receive
- * messages, each conversation gets its own bounded history, and replies are
- * produced by the current model and delivered back. Runs in the foreground
- * until interrupted (Ctrl+C).
+ * messages, each one is run through the real agent loop (tools, shell and file
+ * edits — auto-executed), its progress is streamed back to the chat as it
+ * works, and a completion notice closes the turn. Runs in the foreground until
+ * interrupted (Ctrl+C).
+ *
+ * Because the agent auto-executes, gate who can reach the bot: Telegram
+ * allow-list (CHATCLI_TELEGRAM_ALLOWED_USERS), Slack signing secret, webhook
+ * secret, plus the agent security mode (CHATCLI_AGENT_SECURITY_MODE).
  */
 package cli
 
@@ -22,10 +27,10 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"unicode"
 
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/i18n"
-	"github.com/diillson/chatcli/models"
 )
 
 func (cli *ChatCLI) handleGatewayCommand(input string) {
@@ -59,7 +64,7 @@ func (cli *ChatCLI) startGateway() {
 		names = append(names, a.Name())
 	}
 
-	sessions := newGatewaySessions(20)
+	sessions := newGatewaySessions(5)
 	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions), cli.logger, 0)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -72,56 +77,99 @@ func (cli *ChatCLI) startGateway() {
 	fmt.Printf("  %s\n", colorize(i18n.T("gateway.stopped"), ColorGray))
 }
 
-// gatewayAgentFunc returns an AgentFunc backed by the current model, with
-// per-conversation history kept by sessions.
+// gatewayAgentFunc returns an AgentFunc that runs each inbound message through
+// the real agent loop, streaming the agent's rendered progress back to the
+// chat (decorative-only lines filtered out) and returning a completion notice.
+// A light per-conversation context (recent user requests) is prepended so the
+// agent keeps continuity across turns; durable state otherwise lives in the
+// workspace files the agent operates on.
 func (cli *ChatCLI) gatewayAgentFunc(sessions *gatewaySessions) gateway.AgentFunc {
 	return func(ctx context.Context, session, text string) (string, error) {
 		if cli.Client == nil {
 			return "", fmt.Errorf("no active model")
 		}
-		hist := sessions.get(session)
-		hist = append(hist, models.Message{Role: "user", Content: text})
-		reply, err := cli.Client.SendPrompt(ctx, text, hist, 0)
-		if err != nil {
+
+		task := text
+		if pre := sessions.preamble(session); pre != "" {
+			task = pre + "\n\nCurrent request: " + text
+		}
+
+		emit := gateway.Progress(ctx)
+		stream := func(line string) {
+			if s := gatewayCleanLine(line); s != "" {
+				emit(s)
+			}
+		}
+		if _, err := cli.RunAgentStreaming(ctx, task, stream); err != nil {
 			return "", err
 		}
-		hist = append(hist, models.Message{Role: "assistant", Content: reply})
-		sessions.set(session, hist)
-		return reply, nil
+
+		sessions.remember(session, text)
+		return "✅ " + i18n.T("gateway.task_done"), nil
 	}
 }
 
-// gatewaySessions holds per-conversation history, capped to the most recent
-// maxMessages entries so a long-lived daemon does not grow unbounded.
+// gatewayCleanLine trims a streamed line and drops purely decorative output
+// (box-drawing rules, spinners) that has no letters or digits, so the chat sees
+// substantive progress instead of UI chrome.
+func gatewayCleanLine(line string) string {
+	s := strings.TrimSpace(line)
+	if s == "" {
+		return ""
+	}
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return s
+		}
+	}
+	return ""
+}
+
+// gatewaySessions keeps a small rolling list of recent user requests per
+// conversation, so a long-lived daemon does not grow unbounded while still
+// giving the agent continuity across turns.
 type gatewaySessions struct {
-	mu          sync.Mutex
-	maxMessages int
-	hist        map[string][]models.Message
+	mu       sync.Mutex
+	maxItems int
+	recent   map[string][]string
 }
 
-func newGatewaySessions(maxMessages int) *gatewaySessions {
-	if maxMessages <= 0 {
-		maxMessages = 20
+func newGatewaySessions(maxItems int) *gatewaySessions {
+	if maxItems <= 0 {
+		maxItems = 5
 	}
-	return &gatewaySessions{maxMessages: maxMessages, hist: map[string][]models.Message{}}
+	return &gatewaySessions{maxItems: maxItems, recent: map[string][]string{}}
 }
 
-func (s *gatewaySessions) get(session string) []models.Message {
+// preamble renders the recent user requests as context for the next run, or ""
+// when the conversation is new.
+func (s *gatewaySessions) preamble(session string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	src := s.hist[session]
-	out := make([]models.Message, len(src))
-	copy(out, src)
-	return out
+	items := s.recent[session]
+	if len(items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Earlier in this conversation the user asked:")
+	for _, it := range items {
+		b.WriteString("\n- ")
+		b.WriteString(it)
+	}
+	return b.String()
 }
 
-func (s *gatewaySessions) set(session string, msgs []models.Message) {
+// remember records a user request, keeping only the most recent maxItems.
+func (s *gatewaySessions) remember(session, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(msgs) > s.maxMessages {
-		msgs = msgs[len(msgs)-s.maxMessages:]
+	items := append(s.recent[session], text)
+	if len(items) > s.maxItems {
+		items = items[len(items)-s.maxItems:]
 	}
-	stored := make([]models.Message, len(msgs))
-	copy(stored, msgs)
-	s.hist[session] = stored
+	s.recent[session] = items
 }

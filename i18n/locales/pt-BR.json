@@ -176,6 +176,7 @@
   "gateway.configured": "Adapters configurados (prontos):",
   "gateway.running": "Gateway rodando em: %s. Pressione Ctrl+C para parar.",
   "gateway.stopped": "Gateway parado.",
+  "gateway.task_done": "Tarefa concluída.",
   "moa.usage": "Uso: /moa <prompt> (defina CHATCLI_MOA_MODELS=\"provider:model,...\")",
   "moa.no_models": "Nenhum modelo MoA configurado. Defina CHATCLI_MOA_MODELS=\"openai:gpt-5,claudeai:claude-opus-4-7\".",
   "moa.running": "Consultando %d modelos em paralelo e sintetizando...",

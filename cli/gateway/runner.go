@@ -8,13 +8,24 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 )
 
 // DefaultMaxConcurrent bounds how many messages are processed in parallel.
 const DefaultMaxConcurrent = 4
+
+// progressFlushInterval throttles streamed progress so a chatty agent does not
+// flood the platform's send API (Telegram/WhatsApp rate-limit per chat). Lines
+// emitted within a window are coalesced into a single message.
+const progressFlushInterval = 3 * time.Second
+
+// maxMessageRunes caps an outbound message to stay under platform limits
+// (Telegram is 4096; WhatsApp ~4096). Longer messages are clipped.
+const maxMessageRunes = 3500
 
 // Runner wires adapters to the agent: it fans inbound messages out to the
 // AgentFunc (bounded concurrency) and delivers replies through the adapter
@@ -101,9 +112,24 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-// handle runs the agent for one message and delivers the reply.
+// handle runs the agent for one message, streaming throttled progress back to
+// the originating chat, then delivers the final reply.
 func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
-	reply, err := r.agent(ctx, msg.SessionKey(), msg.Text)
+	adapter, ok := r.adapters[msg.Platform]
+	if !ok {
+		r.logger.Error("gateway: no adapter to reply on", zap.String("platform", msg.Platform))
+		return
+	}
+	send := func(text string) {
+		if err := adapter.Send(ctx, OutboundMessage{ChatID: msg.ChatID, Text: clip(text, maxMessageRunes)}); err != nil {
+			r.logger.Warn("gateway: failed to send",
+				zap.String("platform", msg.Platform), zap.Error(err))
+		}
+	}
+
+	sink := newProgressSink(send)
+	reply, err := r.agent(WithProgress(ctx, sink.emit), msg.SessionKey(), msg.Text)
+	sink.flush() // deliver any progress buffered since the last flush
 	if err != nil {
 		r.logger.Warn("gateway: agent error",
 			zap.String("session", msg.SessionKey()), zap.Error(err))
@@ -112,15 +138,56 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 	if reply == "" {
 		return
 	}
-	adapter, ok := r.adapters[msg.Platform]
-	if !ok {
-		r.logger.Error("gateway: no adapter to reply on", zap.String("platform", msg.Platform))
+	send(reply)
+}
+
+// progressSink coalesces streamed progress lines and flushes them as a single
+// message at most once per progressFlushInterval, so the platform send API is
+// not flooded. It is safe for concurrent emit calls (the capture reader runs in
+// its own goroutine).
+type progressSink struct {
+	mu        sync.Mutex
+	buf       []string
+	lastFlush time.Time
+	send      func(string)
+}
+
+func newProgressSink(send func(string)) *progressSink {
+	return &progressSink{lastFlush: time.Now(), send: send}
+}
+
+// emit buffers a progress line and flushes if the throttle window has elapsed.
+func (p *progressSink) emit(line string) {
+	p.mu.Lock()
+	p.buf = append(p.buf, line)
+	due := time.Since(p.lastFlush) >= progressFlushInterval
+	p.mu.Unlock()
+	if due {
+		p.flush()
+	}
+}
+
+// flush sends any buffered progress as one message and resets the window.
+func (p *progressSink) flush() {
+	p.mu.Lock()
+	if len(p.buf) == 0 {
+		p.mu.Unlock()
 		return
 	}
-	if err := adapter.Send(ctx, OutboundMessage{ChatID: msg.ChatID, Text: reply}); err != nil {
-		r.logger.Warn("gateway: failed to send reply",
-			zap.String("platform", msg.Platform), zap.Error(err))
+	text := strings.Join(p.buf, "\n")
+	p.buf = p.buf[:0]
+	p.lastFlush = time.Now()
+	p.mu.Unlock()
+	p.send(text)
+}
+
+// clip truncates s to at most maxRunes runes, appending an ellipsis when cut.
+func clip(s string, maxRunes int) string {
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
 	}
+	return string(r[:maxRunes-1]) + "…"
 }
 
 func (r *Runner) firstErr(errCh chan error) error {

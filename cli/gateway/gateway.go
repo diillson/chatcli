@@ -55,10 +55,35 @@ type Adapter interface {
 	Send(ctx context.Context, msg OutboundMessage) error
 }
 
-// AgentFunc turns an inbound user message into a reply. It receives the
-// session key so the implementation can maintain per-conversation history.
-// Implementations must be safe for concurrent calls across sessions.
+// AgentFunc turns an inbound user message into a final reply. It receives the
+// session key so the implementation can keep per-conversation context. To
+// stream progress while it works, it can pull a throttled emitter from ctx via
+// Progress(ctx) and call it zero or more times; the returned string is the
+// final reply delivered after the work finishes. Implementations must be safe
+// for concurrent calls across sessions.
 type AgentFunc func(ctx context.Context, session string, text string) (string, error)
+
+// progressKey scopes the streamed-progress emitter carried on a context.
+type progressKey struct{}
+
+// WithProgress returns a context carrying a progress emitter that an AgentFunc
+// may call to stream intermediate updates back to the user. The Runner installs
+// one per inbound message and throttles delivery; a nil emit leaves ctx as-is.
+func WithProgress(ctx context.Context, emit func(string)) context.Context {
+	if emit == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, progressKey{}, emit)
+}
+
+// Progress returns the progress emitter on ctx, or a no-op when none is set, so
+// callers can always emit unconditionally.
+func Progress(ctx context.Context) func(string) {
+	if emit, ok := ctx.Value(progressKey{}).(func(string)); ok && emit != nil {
+		return emit
+	}
+	return func(string) {}
+}
 
 // --- adapter registry (for discovery/config) ---
 

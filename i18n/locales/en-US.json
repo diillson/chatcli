@@ -176,6 +176,7 @@
   "gateway.configured": "Configured (ready) adapters:",
   "gateway.running": "Gateway running on: %s. Press Ctrl+C to stop.",
   "gateway.stopped": "Gateway stopped.",
+  "gateway.task_done": "Task completed.",
   "moa.usage": "Usage: /moa <prompt> (set CHATCLI_MOA_MODELS=\"provider:model,...\")",
   "moa.no_models": "No MoA models configured. Set CHATCLI_MOA_MODELS=\"openai:gpt-5,claudeai:claude-opus-4-7\".",
   "moa.running": "Querying %d models in parallel, then synthesizing...",

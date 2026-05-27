@@ -19,23 +19,40 @@
 package cli
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/diillson/chatcli/cli/plugins"
 )
 
 var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
-// captureRPCStdout runs fn with os.Stdout redirected to a buffer and returns the
-// captured (ANSI-stripped) output. The pipe is always restored.
+// rpcStdoutMu serializes os.Stdout redirection. os.Stdout is process-global and
+// the agent/coder loops mutate shared ChatCLI state (e.g. cli.history), so only
+// one captured run may be in flight at a time. Concurrent callers (e.g. the
+// gateway fanning out messages) block here rather than corrupting each other.
+var rpcStdoutMu sync.Mutex
+
+// captureRPCStdout runs fn with os.Stdout redirected and returns the captured
+// (ANSI-stripped) output. The pipe is always restored.
 func captureRPCStdout(fn func() error) (string, error) {
+	return captureStreaming(nil, fn)
+}
+
+// captureStreaming runs fn with os.Stdout redirected to a pipe. As fn writes
+// lines, each is ANSI-stripped, appended to the returned transcript, and — when
+// emit is non-nil — forwarded to emit so callers can stream progress live. The
+// original stdout is always restored. Runs are serialized via rpcStdoutMu.
+func captureStreaming(emit func(string), fn func() error) (string, error) {
+	rpcStdoutMu.Lock()
+	defer rpcStdoutMu.Unlock()
+
 	orig := os.Stdout
 	r, w, perr := os.Pipe()
 	if perr != nil {
@@ -43,11 +60,26 @@ func captureRPCStdout(fn func() error) (string, error) {
 	}
 	os.Stdout = w
 
-	var buf bytes.Buffer
+	var buf strings.Builder
 	done := make(chan struct{})
 	go func() {
-		_, _ = io.Copy(&buf, r)
-		close(done)
+		defer close(done)
+		br := bufio.NewReader(r)
+		for {
+			line, err := br.ReadString('\n')
+			if line != "" {
+				clean := ansiSeq.ReplaceAllString(line, "")
+				buf.WriteString(clean)
+				if emit != nil {
+					if s := strings.TrimSpace(clean); s != "" {
+						emit(s)
+					}
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
 	}()
 
 	runErr := fn()
@@ -57,13 +89,30 @@ func captureRPCStdout(fn func() error) (string, error) {
 	<-done
 	_ = r.Close()
 
-	return strings.TrimSpace(ansiSeq.ReplaceAllString(buf.String(), "")), runErr
+	return strings.TrimSpace(buf.String()), runErr
 }
 
 // RunAgentCaptured runs the full agent (ReAct) loop one-shot on task with
 // auto-execute, capturing its transcript. Used by the MCP agent_task tool.
 func (cli *ChatCLI) RunAgentCaptured(ctx context.Context, task string) (string, error) {
 	out, err := captureRPCStdout(func() error {
+		return cli.RunAgentOnce(ctx, "/agent "+task, true)
+	})
+	if err != nil {
+		return out, err
+	}
+	if out == "" {
+		out = "(agent produced no textual output)"
+	}
+	return out, nil
+}
+
+// RunAgentStreaming runs the full agent (ReAct) loop one-shot on task with
+// auto-execute, forwarding the agent's rendered progress to emit line by line
+// as it works, and returning the full transcript. Used by the messaging
+// gateway to narrate task execution back to the chat platform.
+func (cli *ChatCLI) RunAgentStreaming(ctx context.Context, task string, emit func(string)) (string, error) {
+	out, err := captureStreaming(emit, func() error {
 		return cli.RunAgentOnce(ctx, "/agent "+task, true)
 	})
 	if err != nil {
