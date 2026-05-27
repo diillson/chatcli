@@ -66,6 +66,16 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/resume", func(c *ChatCLI, d prompt.Document) []prompt.Suggest {
 		return c.getParkTokenSuggestions("/resume", d)
 	}},
+	{"/export", (*ChatCLI).getExportSuggestions},
+}
+
+// getExportSuggestions completes the optional output path of /export.
+func (cli *ChatCLI) getExportSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	if len(strings.Fields(line)) <= 1 && !strings.HasSuffix(line, " ") {
+		return nil // still typing the command name itself
+	}
+	return cli.filePathCompleter(d.GetWordBeforeCursor())
 }
 
 // flagDescriptionKeys maps well-known flag names to their i18n description

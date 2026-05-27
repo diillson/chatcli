@@ -2314,6 +2314,7 @@
   "mem.cmd.suggest.list": "List all memory files",
   "mem.cmd.suggest.load": "Load notes from a date into context (e.g. load yesterday)",
   "mem.cmd.suggest.profile": "Show user profile",
+  "mem.cmd.suggest.profile_set": "Set a profile field (e.g. set certifications=AWS SAA)",
   "mem.cmd.suggest.topics": "Show tracked topics",
   "mem.cmd.suggest.projects": "Show tracked projects",
   "mem.cmd.suggest.stats": "Memory system statistics",

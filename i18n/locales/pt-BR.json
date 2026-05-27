@@ -2314,6 +2314,7 @@
   "mem.cmd.suggest.list": "Listar todos os arquivos de memória",
   "mem.cmd.suggest.load": "Carregar notas de uma data no contexto (ex: load yesterday)",
   "mem.cmd.suggest.profile": "Mostrar perfil do usuário",
+  "mem.cmd.suggest.profile_set": "Define um campo do perfil (ex.: set certifications=AWS SAA)",
   "mem.cmd.suggest.topics": "Mostrar tópicos rastreados",
   "mem.cmd.suggest.projects": "Mostrar projetos rastreados",
   "mem.cmd.suggest.stats": "Estatísticas do sistema de memória",

@@ -753,6 +753,40 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 		}
 	}
 
+	// "/memory remember " — suggest the optional [category] tag
+	if len(args) >= 2 && args[1] == "remember" {
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			suggestions := []prompt.Suggest{
+				{Text: "[personal]", Description: i18n.T("mem.cmd.suggest.cat_personal")},
+				{Text: "[preference]", Description: i18n.T("mem.cmd.suggest.cat_preference")},
+				{Text: "[gotcha]", Description: i18n.T("mem.cmd.suggest.cat_gotcha")},
+				{Text: "[architecture]", Description: i18n.T("mem.cmd.suggest.cat_architecture")},
+				{Text: "[pattern]", Description: i18n.T("mem.cmd.suggest.cat_pattern")},
+				{Text: "[project]", Description: i18n.T("mem.cmd.suggest.cat_project")},
+				{Text: "[general]", Description: i18n.T("mem.cmd.suggest.cat_general")},
+			}
+			return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+		}
+	}
+
+	// "/memory profile " — suggest "set"; "/memory profile set " — suggest keys
+	if len(args) >= 2 && args[1] == "profile" {
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ") && args[2] != "set") {
+			return prompt.FilterHasPrefix(
+				[]prompt.Suggest{{Text: "set", Description: i18n.T("mem.cmd.suggest.profile_set")}},
+				d.GetWordBeforeCursor(), true)
+		}
+		if len(args) >= 3 && args[2] == "set" && (len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " "))) {
+			keys := []string{"name=", "role=", "expertise_level=", "preferred_language=",
+				"communication_style=", "company=", "location=", "certifications=", "skills=", "goals="}
+			var suggestions []prompt.Suggest
+			for _, k := range keys {
+				suggestions = append(suggestions, prompt.Suggest{Text: k})
+			}
+			return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+		}
+	}
+
 	return nil
 }
 
