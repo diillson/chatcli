@@ -124,6 +124,25 @@ func (cli *ChatCLI) RunAgentStreaming(ctx context.Context, task string, emit fun
 	return out, nil
 }
 
+// RunGatewayCoderStreaming runs the coder ReAct loop one-shot on task with the
+// gateway persona, forwarding the rendered progress to emit line by line and
+// returning the full transcript. Used by the messaging gateway: it keeps the
+// coder engine's full capability (create/edit files, run commands, iterate)
+// while answering as concise chat prose. The clean final answer is captured
+// into cli.lastAgentReply during the run.
+func (cli *ChatCLI) RunGatewayCoderStreaming(ctx context.Context, task string, emit func(string)) (string, error) {
+	out, err := captureStreaming(emit, func() error {
+		return cli.RunGatewayCoderOnce(ctx, task)
+	})
+	if err != nil {
+		return out, err
+	}
+	if out == "" {
+		out = "(coder produced no textual output)"
+	}
+	return out, nil
+}
+
 // RunCoderCaptured runs the coder loop one-shot on task, capturing output.
 func (cli *ChatCLI) RunCoderCaptured(ctx context.Context, task string) (string, error) {
 	out, err := captureRPCStdout(func() error {

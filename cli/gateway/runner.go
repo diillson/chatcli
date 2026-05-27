@@ -113,32 +113,63 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 // handle runs the agent for one message, streaming throttled progress back to
-// the originating chat, then delivers the final reply.
+// the originating chat, then delivers the final reply. Each step is logged so
+// the operator has a full trace of the conversation: inbound receipt, run
+// outcome + latency, and every outbound delivery.
 func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 	adapter, ok := r.adapters[msg.Platform]
 	if !ok {
 		r.logger.Error("gateway: no adapter to reply on", zap.String("platform", msg.Platform))
 		return
 	}
-	send := func(text string) {
-		if err := adapter.Send(ctx, OutboundMessage{ChatID: msg.ChatID, Text: clip(text, maxMessageRunes)}); err != nil {
-			r.logger.Warn("gateway: failed to send",
-				zap.String("platform", msg.Platform), zap.Error(err))
+
+	start := time.Now()
+	r.logger.Info("gateway: message received",
+		zap.String("platform", msg.Platform),
+		zap.String("session", msg.SessionKey()),
+		zap.String("user", msg.UserName),
+		zap.Int("chars", len(msg.Text)))
+
+	// send delivers one outbound message and logs the result. kind is
+	// "progress" (a streamed action-feed chunk) or "final" (the answer).
+	send := func(kind, text string) {
+		t0 := time.Now()
+		clipped := clip(text, maxMessageRunes)
+		if err := adapter.Send(ctx, OutboundMessage{ChatID: msg.ChatID, Text: clipped}); err != nil {
+			r.logger.Warn("gateway: send failed",
+				zap.String("platform", msg.Platform),
+				zap.String("session", msg.SessionKey()),
+				zap.String("kind", kind),
+				zap.Error(err))
+			return
 		}
+		r.logger.Info("gateway: reply sent",
+			zap.String("platform", msg.Platform),
+			zap.String("session", msg.SessionKey()),
+			zap.String("kind", kind),
+			zap.Int("chars", len(clipped)),
+			zap.Duration("dur", time.Since(t0)))
 	}
 
-	sink := newProgressSink(send)
+	sink := newProgressSink(func(s string) { send("progress", s) })
 	reply, err := r.agent(WithProgress(ctx, sink.emit), msg.SessionKey(), msg.Text)
 	sink.flush() // deliver any progress buffered since the last flush
 	if err != nil {
-		r.logger.Warn("gateway: agent error",
-			zap.String("session", msg.SessionKey()), zap.Error(err))
+		r.logger.Warn("gateway: agent run failed",
+			zap.String("session", msg.SessionKey()),
+			zap.Duration("dur", time.Since(start)),
+			zap.Error(err))
 		reply = "⚠️ " + err.Error()
+	} else {
+		r.logger.Info("gateway: agent run done",
+			zap.String("session", msg.SessionKey()),
+			zap.Duration("dur", time.Since(start)),
+			zap.Int("reply_chars", len(reply)))
 	}
 	if reply == "" {
 		return
 	}
-	send(reply)
+	send("final", reply)
 }
 
 // progressSink coalesces streamed progress lines and flushes them as a single

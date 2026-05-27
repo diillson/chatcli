@@ -68,12 +68,48 @@ func TestGatewayAgentFunc_NoClient(t *testing.T) {
 	}
 }
 
+// TestRunCoderOnce_InvalidInput pins the CutPrefix refactor: only "/coder <q>"
+// is a valid one-shot invocation; bare "/coder" or anything without the prefix
+// must error before touching the (nil) LLM client.
+func TestRunCoderOnce_InvalidInput(t *testing.T) {
+	c := &ChatCLI{}
+	for _, in := range []string{"/coder", "no prefix", "/coderx hi", ""} {
+		if err := c.RunCoderOnce(context.Background(), in); err == nil {
+			t.Errorf("RunCoderOnce(%q) should error on invalid input", in)
+		}
+	}
+}
+
 func TestSetUnattended(t *testing.T) {
 	c := &ChatCLI{}
 	c.SetUnattended(true)
 	if !c.unattended {
 		t.Error("SetUnattended(true) should set the flag")
 	}
+}
+
+// TestSetUnattended_SuppressesSpinner pins the root-cause fix: in the gateway
+// daemon stdout is a captured pipe, and the thinking-spinner frames
+// (`model... |/-\`) carry alphanumerics so they slip past gatewayCleanLine and
+// flood the action feed. SetUnattended must suppress the animation at the
+// source so no frame is ever produced. A nil animation must be tolerated.
+func TestSetUnattended_SuppressesSpinner(t *testing.T) {
+	c := &ChatCLI{animation: NewAnimationManager()}
+	c.SetUnattended(true)
+	if !c.animation.suppressed {
+		t.Error("SetUnattended(true) should suppress the thinking animation")
+	}
+	// Suppressed: ShowThinkingAnimation must not start the spinner goroutine.
+	c.animation.ShowThinkingAnimation("Claude sonnet 4.6 (1M context)")
+	if c.animation.isRunning {
+		t.Error("suppressed animation must not start the spinner goroutine")
+	}
+	c.SetUnattended(false)
+	if c.animation.suppressed {
+		t.Error("SetUnattended(false) should re-enable the animation")
+	}
+	// Nil animation (bare struct) must not panic.
+	(&ChatCLI{}).SetUnattended(true)
 }
 
 func TestGatewayProcessAlive(t *testing.T) {
@@ -136,6 +172,31 @@ func TestGatewayCommands_NoPanic(t *testing.T) {
 	}
 }
 
+func TestHandleGatewayCommand_Dispatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, e := range []string{"CHATCLI_TELEGRAM_BOT_TOKEN", "CHATCLI_DISCORD_BOT_TOKEN", "CHATCLI_SLACK_ADDR", "CHATCLI_WHATSAPP_ADDR", "CHATCLI_WEBHOOK_ADDR"} {
+		t.Setenv(e, "")
+	}
+	c := &ChatCLI{logger: zap.NewNop()}
+	// Each branch must dispatch without panicking.
+	c.handleGatewayCommand("/gateway")        // -> start (no adapters)
+	c.handleGatewayCommand("/gateway status") // -> status
+	c.handleGatewayCommand("/gateway stop")   // -> stop (not running)
+	c.handleGatewayCommand("/gateway nope")   // -> usage
+}
+
+func TestGatewayStartDetached_AlreadyRunning(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	_ = os.MkdirAll(filepath.Join(tmp, ".chatcli"), 0o750)
+	// A live pidfile (ourselves) makes start short-circuit on "already running".
+	if err := os.WriteFile(gatewayStatePath("gateway.pid"), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := &ChatCLI{logger: zap.NewNop()}
+	c.gatewayStartDetached() // must not spawn; just reports already running
+}
+
 func TestStripCommandBlocksText(t *testing.T) {
 	blocks := []CommandBlock{{Language: "shell", Commands: []string{"ls"}, Description: "list"}}
 	in := "Here is the plan.\n```execute:shell\nls```\nDone."
@@ -145,6 +206,18 @@ func TestStripCommandBlocksText(t *testing.T) {
 	}
 	if !strings.Contains(out, "[Comando #1: list]") || !strings.Contains(out, "Here is the plan.") {
 		t.Errorf("placeholder/prose missing: %q", out)
+	}
+
+	// Realistic model output: the closing fence sits on its own line, so there
+	// is a newline before ```. The old literal-reconstruction strip missed this
+	// and leaked the raw block into the gateway reply. Regex strip must catch it.
+	in2 := "Tudo em paz!\n```execute:shell\necho \"Em paz! 🕊️\"\n```\n"
+	out2 := stripCommandBlocksText(in2, []CommandBlock{{Language: "shell", Description: "greet"}})
+	if strings.Contains(out2, "```") || strings.Contains(out2, "echo") {
+		t.Errorf("trailing-newline execute block should be stripped: %q", out2)
+	}
+	if !strings.Contains(out2, "[Comando #1: greet]") || !strings.Contains(out2, "Tudo em paz!") {
+		t.Errorf("placeholder/prose missing: %q", out2)
 	}
 }
 

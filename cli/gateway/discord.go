@@ -66,6 +66,13 @@ func NewDiscordAdapter(token string, logger *zap.Logger) *DiscordAdapter {
 // Name implements Adapter.
 func (d *DiscordAdapter) Name() string { return discordPlatform }
 
+// SetLogger implements LoggerAware: inject the daemon logger and trace the
+// HTTP client's calls to the Discord API.
+func (d *DiscordAdapter) SetLogger(l *zap.Logger) {
+	d.logger = l
+	d.http = newLoggingClient(d.http, l, discordPlatform)
+}
+
 // Start connects to the gateway and streams messages until ctx is canceled,
 // reconnecting with backoff on transient failures.
 func (d *DiscordAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {

@@ -178,6 +178,7 @@
   "gateway.running": "Gateway rodando em: %s. Pressione Ctrl+C para parar.",
   "gateway.stopped": "Gateway parado.",
   "gateway.task_done": "Tarefa concluída.",
+  "gateway.persona_prompt": "You are answering through a messaging gateway: your reply is delivered as a chat message (Telegram, WhatsApp, Discord, Slack, …). Keep the final answer short, direct and in plain text — no tables, no banners, no ASCII art, and avoid long code blocks unless the user explicitly asked for code. Use your tools normally to read, create or edit files and run commands; the user only sees a brief action feed plus your final answer, so let the prose be a concise summary of what you did and the result.",
   "gateway.status_running": "Daemon do gateway rodando (pid=%d).",
   "gateway.status_stopped": "Daemon do gateway não está rodando.",
   "gateway.already_running": "Gateway já está rodando (pid=%d). Rode /gateway stop primeiro.",

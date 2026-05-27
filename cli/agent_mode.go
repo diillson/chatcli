@@ -64,7 +64,13 @@ type AgentMode struct {
 	isCoderMode      bool
 	isOneShot        bool
 	coderBannerShown bool
-	lastPolicyMatch  *coder.Rule
+	// gatewayPersona layers a messaging-gateway directive on top of the coder
+	// system prompt: keep the coder engine's full tool capability (create/edit
+	// files, run commands, iterate) but answer concisely in plain chat-friendly
+	// text. Set by the gateway daemon's one-shot runs; never by interactive
+	// /coder.
+	gatewayPersona  bool
+	lastPolicyMatch *coder.Rule
 	// Métricas
 	turnTimer      *metrics.Timer
 	agentsLaunched int // total de sub-agents lançados na sessão
@@ -615,8 +621,20 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 	coreText += "\n\n" + i18n.T("ai.response_language")
 
+	// Gateway persona: same coder engine and tools, but the answer is bound for
+	// a chat platform (Telegram/WhatsApp/…), so steer the model toward concise,
+	// plain-text replies without decorative formatting. Appended to the stable
+	// core block so it stays cacheable across turns.
+	if a.gatewayPersona {
+		coreText += "\n\n" + i18n.T("gateway.persona_prompt")
+	}
+
 	a.isCoderMode = isCoder
-	a.isOneShot = false
+	// isOneShot is set by the caller before Run (false for the interactive
+	// /agent and /coder entries, true for the one-shot RunCoderOnce / gateway
+	// paths). Run no longer resets it: doing so silently clobbered the one-shot
+	// intent, leaving coder one-shot to escape only via EOF on the
+	// wait-for-input branch — which a stdin-less daemon can't rely on.
 
 	// Block 3 — workspace / retrieval context. Built only when we actually
 	// have a context builder; empty string means "skip this block".
@@ -821,17 +839,29 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 // RunCoderOnce executa o modo coder de forma não-interativa (one-shot),
 // mas mantendo o loop ReAct do AgentMode (com tool_calls/plugins).
 func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
-	cli.setExecutionProfile(ProfileCoder)
-	defer cli.setExecutionProfile(ProfileNormal)
-
-	var query string
-	if strings.HasPrefix(input, "/coder ") {
-		query = strings.TrimPrefix(input, "/coder ")
-	} else if input == "/coder" {
-		return fmt.Errorf("entrada inválida para o modo coder one-shot: %s", input)
-	} else {
+	query, ok := strings.CutPrefix(input, "/coder ")
+	if !ok {
 		return fmt.Errorf("entrada inválida para o modo coder one-shot: %s", input)
 	}
+	return cli.runCoderQuery(ctx, query, false)
+}
+
+// RunGatewayCoderOnce runs the coder ReAct loop one-shot on a raw task for the
+// messaging gateway: same engine and tools (create/edit files, run commands,
+// iterate) but with the gateway persona layered on the system prompt so the
+// answer is concise, chat-friendly prose. The caller is expected to have set
+// cli.unattended so every confirmation auto-approves — the gateway must never
+// block on a stdin prompt the daemon has no way to answer.
+func (cli *ChatCLI) RunGatewayCoderOnce(ctx context.Context, task string) error {
+	return cli.runCoderQuery(ctx, task, true)
+}
+
+// runCoderQuery is the shared body for the coder one-shot entries. It runs the
+// AgentMode ReAct loop under the coder profile and system prompt; gatewayPersona
+// toggles the messaging-gateway directive (see AgentMode.gatewayPersona).
+func (cli *ChatCLI) runCoderQuery(ctx context.Context, query string, gatewayPersona bool) error {
+	cli.setExecutionProfile(ProfileCoder)
+	defer cli.setExecutionProfile(ProfileNormal)
 
 	// Processar contextos especiais como @file, @git, etc.
 	query, additionalContext := cli.processSpecialCommands(query)
@@ -847,12 +877,11 @@ func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
 
 	cli.agentMode.isCoderMode = true
 	cli.agentMode.isOneShot = true
+	cli.agentMode.gatewayPersona = gatewayPersona
+	defer func() { cli.agentMode.gatewayPersona = false }()
 
-	// Executa o AgentMode no "perfil coder" (system prompt override)
-	// Isso mantém exatamente o fluxo atual do /coder interativo:
-	// - timeline
-	// - tool_call
-	// - execução automática de plugins
+	// Executa o AgentMode no "perfil coder" (system prompt override):
+	// timeline, tool_calls e execução automática de plugins.
 	return cli.agentMode.Run(ctx, fullQuery, "", CoderSystemPrompt)
 }
 
@@ -946,16 +975,27 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 	return nil
 }
 
+// executeBlockRe matches a whole ```execute:<lang> … ``` fence. It mirrors the
+// extraction regex in extractCommandBlocks so stripping can't drift from what
+// was parsed — rebuilding the literal from the (trimmed) commands missed the
+// newline before the closing fence, leaving raw blocks in the gateway reply.
+var executeBlockRe = regexp.MustCompile("(?s)```execute:\\s*[a-zA-Z0-9_-]+\\s*\n.*?```")
+
 // stripCommandBlocksText returns the model response with its ```execute blocks
 // replaced by compact [Comando #N] placeholders — the clean prose delivered as
 // the unattended (gateway) final answer. Mirrors displayResponseWithoutCommands.
+// Replacing by regex (not by reconstructing each block's literal text) ensures
+// every fence is removed regardless of internal whitespace.
 func stripCommandBlocksText(response string, blocks []CommandBlock) string {
-	out := response
-	for i, block := range blocks {
-		original := fmt.Sprintf("```execute:%s\n%s```", block.Language, strings.Join(block.Commands, "\n"))
-		replacement := fmt.Sprintf("\n[Comando #%d: %s]\n", i+1, block.Description)
-		out = strings.Replace(out, original, replacement, 1)
-	}
+	n := 0
+	out := executeBlockRe.ReplaceAllStringFunc(response, func(string) string {
+		desc := ""
+		if n < len(blocks) {
+			desc = blocks[n].Description
+		}
+		n++
+		return fmt.Sprintf("\n[Comando #%d: %s]\n", n, desc)
+	})
 	return strings.TrimSpace(out)
 }
 
@@ -1420,6 +1460,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		// Helper para exibir métricas ao final do turno (após execução)
 		showTurnStats := func() {
+			// Gateway/unattended: per-turn stats ("Turn 1/100 8s") are operator
+			// telemetry, not chat content — the action feed already conveys
+			// progress. Skip them so the feed stays concise.
+			if a.cli.unattended {
+				return
+			}
 			fmt.Println(metrics.FormatTurnInfo(turn+1, maxTurns, turnDuration, &metrics.TurnStats{
 				TurnAgents:       turnAgents,
 				TurnToolCalls:    turnToolCalls,
@@ -1702,7 +1748,19 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Renderizar progresso inicial das tarefas (somente no modo /coder)
 		renderPlanProgress()
 		if strings.TrimSpace(remaining) != "" {
+			// Capture the clean prose for non-interactive callers (the gateway
+			// delivers cli.lastAgentReply as the final chat answer). Last-wins:
+			// each turn's prose overwrites the previous, so the value left
+			// standing after the loop is the model's final answer. Only the
+			// ReAct/coder path sets this here; the legacy agent one-shot sets it
+			// in RunOnce. Harmless for interactive runs, which never read it.
+			a.cli.lastAgentReply = strings.TrimSpace(remaining)
 			switch {
+			case a.cli.unattended:
+				// Gateway/unattended: the captured lastAgentReply is delivered
+				// once as the clean final chat answer, so don't also render the
+				// prose into the action feed — doing both made the reply arrive
+				// twice (the raw 💬 RESPOSTA card and then the polished send).
 			case isCompact:
 				// Compact mode now also runs the assistant's answer
 				// through glamour before printing, matching the full-
@@ -2016,7 +2074,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							batchHasError = true
 							break
 						}
-						if action == coder.ActionAsk {
+						if action == coder.ActionAsk && a.cli.unattended {
+							// Gateway/unattended: there is no human to answer the
+							// security prompt, and PromptSecurityCheck blocks on a
+							// dead stdin forever — which silently hung the run (the
+							// "started Docker but nothing happened" report). The
+							// operator opted into full autonomy (access is gated at
+							// the messaging edge), so an "ask" rule auto-approves
+							// here. An explicit ActionDeny above still blocks.
+							a.logger.Info("coder policy: 'ask' auto-approved (unattended gateway)",
+								zap.String("tool", tc.Name))
+						} else if action == coder.ActionAsk {
 							decision := coder.PromptSecurityCheckGuarded(ctx, tc.Name, tc.Args, a.stdinLines)
 							pattern := coder.GetSuggestedPattern(tc.Name, tc.Args)
 							switch decision {
@@ -2670,7 +2738,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		}
 
 		showTurnStats()
-		fmt.Println(renderer.Colorize("\n"+i18n.T("agent.status.task_completed"), agent.ColorGreen+agent.ColorBold))
+		// Gateway/unattended: the clean final reply is the completion signal,
+		// so skip the "TAREFA CONCLUÍDA" banner that would otherwise precede it
+		// as feed noise. (The max-turns banner below is kept — it's an
+		// exceptional outcome the operator should still see.)
+		if !a.cli.unattended {
+			fmt.Println(renderer.Colorize("\n"+i18n.T("agent.status.task_completed"), agent.ColorGreen+agent.ColorBold))
+		}
 		return nil
 	}
 
@@ -2790,6 +2864,7 @@ func (a *AgentMode) initMultiAgent() bool {
 
 	// Attach policy enforcement so parallel workers respect security rules
 	if pa, err := newWorkerPolicyAdapter(a.logger); err == nil {
+		pa.unattended = a.cli.unattended // gateway: auto-approve "ask" instead of blocking on stdin
 		a.policyAdapter = pa
 		a.agentDispatcher.SetPolicyChecker(pa)
 		a.logger.Info("Policy enforcement enabled for parallel workers")

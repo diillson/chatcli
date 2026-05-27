@@ -33,11 +33,22 @@ import (
 
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/i18n"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // SetUnattended toggles fully non-interactive agent execution (used by the
-// gateway daemon). When set, the agent never prompts for confirmation.
-func (cli *ChatCLI) SetUnattended(v bool) { cli.unattended = v }
+// gateway daemon). When set, the agent never prompts for confirmation and the
+// "thinking" spinner is suppressed — its frames (`model... |/-\`) carry
+// alphanumerics, so they slip past gatewayCleanLine and flood the action feed
+// when stdout is a captured pipe rather than a TTY. Suppressing at the source
+// kills the noise outright instead of trying to filter it downstream.
+func (cli *ChatCLI) SetUnattended(v bool) {
+	cli.unattended = v
+	if cli.animation != nil {
+		cli.animation.SetSuppressed(v)
+	}
+}
 
 func (cli *ChatCLI) handleGatewayCommand(input string) {
 	sub := strings.TrimSpace(strings.TrimPrefix(input, "/gateway"))
@@ -146,6 +157,15 @@ func (cli *ChatCLI) gatewayStop() {
 func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 	cli.SetUnattended(true)
 
+	// /gateway start advertises ~/.chatcli/gateway.log, but the structured (zap)
+	// logs go to app.log — so the advertised file sat empty (a false positive).
+	// Tee the daemon's logger into gateway.log so the place we point the operator
+	// at actually carries the gateway's activity. Done before adapters/runner/
+	// agent are built so they all inherit the teed logger.
+	if closeTee := cli.teeLoggerToGatewayLog(); closeTee != nil {
+		defer closeTee()
+	}
+
 	adapters, err := gateway.BuildConfigured()
 	if err != nil {
 		return err
@@ -153,16 +173,57 @@ func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 	if len(adapters) == 0 {
 		return fmt.Errorf("%s", i18n.T("gateway.no_platforms"))
 	}
+	names := make([]string, 0, len(adapters))
+	for _, a := range adapters {
+		names = append(names, a.Name())
+		// Builders create adapters with a no-op logger (they run at import
+		// time). Inject the daemon's real logger now so adapter events and
+		// every external API request land in the log.
+		if la, ok := a.(gateway.LoggerAware); ok {
+			la.SetLogger(cli.logger)
+		}
+	}
+	// Startup line so gateway.log is never empty while the daemon is live —
+	// immediate proof the advertised log is the one actually being written.
+	cli.logger.Info("gateway daemon started",
+		zap.Strings("platforms", names), zap.Int("adapters", len(adapters)))
+
 	sessions := newGatewaySessions(5)
 	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions), cli.logger, 0)
 	return runner.Run(ctx)
 }
 
+// teeLoggerToGatewayLog adds a JSON sink at gatewayStatePath("gateway.log") to
+// cli.logger so the daemon's structured logs land in the file /gateway start
+// advertises (in addition to app.log). Returns a closer for the file, or nil
+// when it can't be opened (logging then stays app.log-only — no false promise
+// is broken because the tee simply didn't attach).
+func (cli *ChatCLI) teeLoggerToGatewayLog() func() {
+	path := gatewayStatePath("gateway.log")
+	_ = os.MkdirAll(filepath.Dir(path), 0o750)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- daemon-scoped
+	if err != nil {
+		cli.logger.Warn("gateway: could not open gateway.log for tee", zap.Error(err))
+		return nil
+	}
+	encCfg := zap.NewProductionEncoderConfig()
+	encCfg.EncodeTime = zapcore.ISO8601TimeEncoder
+	enc := zapcore.NewJSONEncoder(encCfg)
+	extra := zapcore.NewCore(enc, zapcore.AddSync(f), zapcore.InfoLevel)
+	cli.logger = cli.logger.WithOptions(zap.WrapCore(func(c zapcore.Core) zapcore.Core {
+		return zapcore.NewTee(c, extra)
+	}))
+	return func() { _ = f.Close() }
+}
+
 // gatewayAgentFunc returns an AgentFunc that runs each inbound message through
-// the real (unattended) agent loop, streaming a short filtered action feed via
-// the ctx emitter and returning the model's clean prose answer. Runs serialize
-// because the agent mutates shared ChatCLI state (history, lastAgentReply) and
-// redirects os.Stdout for capture.
+// the real (unattended) coder ReAct loop, streaming a short filtered action
+// feed via the ctx emitter and returning the model's clean prose answer. The
+// coder engine — not the legacy ```execute one-shot — gives the daemon real
+// tool capability: it can read/create/edit files, run commands and iterate,
+// while the gateway persona keeps the reply concise and chat-friendly. Runs
+// serialize because the loop mutates shared ChatCLI state (history,
+// lastAgentReply) and redirects os.Stdout for capture.
 func (cli *ChatCLI) gatewayAgentFunc(sessions *gatewaySessions) gateway.AgentFunc {
 	var mu sync.Mutex
 	return func(ctx context.Context, session, text string) (string, error) {
@@ -188,7 +249,7 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *gatewaySessions) gateway.AgentFun
 			lastSent = s
 			emit(s)
 		}
-		if _, err := cli.RunAgentStreaming(ctx, task, stream); err != nil {
+		if _, err := cli.RunGatewayCoderStreaming(ctx, task, stream); err != nil {
 			return "", err
 		}
 

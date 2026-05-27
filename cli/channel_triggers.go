@@ -320,6 +320,7 @@ func (cli *ChatCLI) runAutoTriggerAction(action triggers.Action) {
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
+	cli.agentMode.isOneShot = false // preserve prior behavior (Run used to force this)
 	cli.runWithCancellation("MCP Auto-Trigger", func(ctx context.Context) error {
 		// Auto triggers always run in agent mode (CoderSystemPrompt
 		// would constrain too heavily for free-form investigation).

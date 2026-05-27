@@ -1140,6 +1140,7 @@ func (cli *ChatCLI) runAgentLogic() {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
+	cli.agentMode.isOneShot = false // interactive /agent: keep the loop conversational
 	cli.runWithCancellation("Agent Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, "")
 	})
@@ -1186,6 +1187,7 @@ func (cli *ChatCLI) runCoderLogic() {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
+	cli.agentMode.isOneShot = false // interactive /coder: wait for input between turns
 	cli.runWithCancellation("Coder Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)
 	})
