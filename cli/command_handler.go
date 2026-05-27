@@ -68,6 +68,43 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		}
 	}
 
+	// Mode-switch commands raise a sentinel to unwind out of the go-prompt
+	// loop (a plain return cannot escape it), so they stay as explicit cases
+	// rather than table entries.
+	switch {
+	case strings.HasPrefix(userInput, "/agent"):
+		// /agent pode ser gerenciamento de personas OU iniciar modo agente
+		if !ch.handleAgentPersonaSubcommand(userInput) {
+			// Não é um subcomando, inicia modo agente.
+			// Smart-routing: if the query looks conversational, the
+			// default "hint" mode prints a tip and falls through;
+			// "auto" mode redirects to chat and we return here without
+			// spinning up the ReAct loop.
+			task := strings.TrimSpace(strings.TrimPrefix(userInput, "/agent"))
+			if ch.cli.maybeReroute("/agent", task) {
+				return false
+			}
+			ch.cli.pendingAction = "agent"
+			panic(errAgentModeRequest)
+		}
+		return false
+	case strings.HasPrefix(userInput, "/run"):
+		// /run inicia o modo agente (com ou sem persona ativa)
+		ch.cli.pendingAction = "agent"
+		panic(errAgentModeRequest)
+	case strings.HasPrefix(userInput, "/coder"):
+		ch.cli.pendingAction = "coder"
+		panic(errCoderModeRequest)
+	case userInput == "/plan" || strings.HasPrefix(userInput, "/plan "):
+		switch ch.cli.handlePlanCommand(userInput) {
+		case planRouteAgent:
+			panic(errAgentModeRequest)
+		case planRouteCoder:
+			panic(errCoderModeRequest)
+		}
+		return false
+	}
+
 	if fn, ok := ch.lookup(userInput); ok {
 		return fn(userInput)
 	}
@@ -134,9 +171,6 @@ func (ch *CommandHandler) buildRoutes() {
 	// Order preserved from the historical switch. word=true entries match
 	// "exact or +space"; word=false entries are raw-prefix sub-command groups.
 	ch.routes.prefixes = []prefixRoute{
-		{"/agent", false, ch.cmdAgent},
-		{"/run", false, func(string) bool { c.pendingAction = "agent"; panic(errAgentModeRequest) }},
-		{"/coder", false, func(string) bool { c.pendingAction = "coder"; panic(errCoderModeRequest) }},
 		{"/switch", false, func(in string) bool { c.handleSwitchCommand(in); return false }},
 		{"/config", true, ch.cmdConfig},
 		{"/status", true, ch.cmdConfig},
@@ -157,7 +191,6 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/export", true, func(in string) bool { c.handleExportCommand(in); return false }},
 		{"/moa", true, func(in string) bool { c.handleMoACommand(in); return false }},
 		{"/thinking", true, func(in string) bool { c.handleThinkingCommand(in); return false }},
-		{"/plan", true, ch.cmdPlan},
 		{"/refine", true, func(in string) bool { c.handleRefineCommand(in); return false }},
 		{"/verify", true, func(in string) bool { c.handleVerifyCommand(in); return false }},
 		{"/reflect", true, func(in string) bool { c.handleReflectCommand(in); return false }},
@@ -173,36 +206,10 @@ func (ch *CommandHandler) buildRoutes() {
 	}
 }
 
-// cmdAgent handles /agent: either a persona sub-command or starting agent mode.
-func (ch *CommandHandler) cmdAgent(userInput string) bool {
-	if ch.handleAgentPersonaSubcommand(userInput) {
-		return false
-	}
-	// Not a sub-command — start agent mode unless smart-routing reroutes a
-	// conversational query back to chat.
-	task := strings.TrimSpace(strings.TrimPrefix(userInput, "/agent"))
-	if ch.cli.maybeReroute("/agent", task) {
-		return false
-	}
-	ch.cli.pendingAction = "agent"
-	panic(errAgentModeRequest)
-}
-
 // cmdConfig routes /config, /status and /settings to the config sections.
 func (ch *CommandHandler) cmdConfig(userInput string) bool {
 	fields := strings.Fields(userInput)
 	ch.cli.routeConfigCommand(fields[1:])
-	return false
-}
-
-// cmdPlan handles /plan, which may route into agent or coder mode.
-func (ch *CommandHandler) cmdPlan(userInput string) bool {
-	switch ch.cli.handlePlanCommand(userInput) {
-	case planRouteAgent:
-		panic(errAgentModeRequest)
-	case planRouteCoder:
-		panic(errCoderModeRequest)
-	}
 	return false
 }
 
