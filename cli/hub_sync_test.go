@@ -223,16 +223,34 @@ func TestHubCommandWiring(t *testing.T) {
 	c := &ChatCLI{logger: zap.NewNop()}
 	c.handleHubCommand("/hub whoami") // hubSync nil → not-connected path
 
-	// With a fake hub, /hub bind drives SetBinding through HubSync.
+	// With a fake hub, drive each subcommand branch.
 	fc := newFakeHubClient()
 	c.hubSync = newHubSync(fc, zap.NewNop(), c.renderTailedEvent)
+	_, _ = c.hubSync.hydrate(context.Background()) // populate convID/principal for whoami
+	c.handleHubCommand("/hub whoami")
 	c.handleHubCommand("/hub bind telegram 123 alice")
+	c.handleHubCommand("/hub bind")        // usage branch
+	c.handleHubCommand("/hub bindings")    // list branch
+	c.handleHubCommand("/hub bogus")       // default/usage branch
 
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 	if len(fc.bindings) != 1 || fc.bindings[0].UserID != "123" || fc.bindings[0].Principal != "alice" {
 		t.Fatalf("/hub bind did not persist: %+v", fc.bindings)
 	}
+}
+
+func TestShowConfigHub(t *testing.T) {
+	// Without a connection.
+	c := &ChatCLI{logger: zap.NewNop()}
+	c.showConfigHub()
+
+	// With a live sync (covers the connected branch).
+	fc := newFakeHubClient()
+	c.hubSync = newHubSync(fc, zap.NewNop(), c.renderTailedEvent)
+	_, _ = c.hubSync.hydrate(context.Background())
+	t.Setenv("CHATCLI_HUB_ENABLED", "false") // exercise the disabled-label path
+	c.showConfigHub()
 }
 
 func TestHubSyncNewSessionRotates(t *testing.T) {
