@@ -159,8 +159,9 @@ func (b *rpcBackend) BuiltinTools() []rpcserve.ToolInfo {
 	if b.cli == nil {
 		return nil
 	}
-	var out []rpcserve.ToolInfo
-	for _, t := range b.cli.ListBuiltinTools() {
+	tools := b.cli.ListBuiltinTools()
+	out := make([]rpcserve.ToolInfo, 0, len(tools))
+	for _, t := range tools {
 		out = append(out, rpcserve.ToolInfo{Name: t.Name, Description: t.Description})
 	}
 	return out

@@ -86,7 +86,7 @@ func NewServer(in io.Reader, out io.Writer, handler handlerFunc) *Server {
 	return &Server{in: in, out: out, handler: handler}
 }
 
-// Serve reads and dispatches messages until ctx is cancelled or in hits EOF.
+// Serve reads and dispatches messages until ctx is canceled or in hits EOF.
 func (s *Server) Serve(ctx context.Context) error {
 	scanner := bufio.NewScanner(s.in)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024) // allow large payloads
