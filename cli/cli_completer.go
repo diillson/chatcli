@@ -280,6 +280,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/cost", Description: i18n.T("complete.root.cost")},
 		{Text: "/ratelimit", Description: i18n.T("complete.root.ratelimit")},
 		{Text: "/export", Description: i18n.T("complete.root.export")},
+		{Text: "/moa", Description: i18n.T("complete.root.moa")},
 		{Text: "/thinking", Description: i18n.T("complete.root.thinking")},
 		{Text: "/plan", Description: i18n.T("complete.root.plan")},
 		{Text: "/refine", Description: i18n.T("complete.root.refine")},
