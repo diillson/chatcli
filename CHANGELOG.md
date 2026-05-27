@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.123.1](https://github.com/diillson/chatcli/compare/v1.123.0...v1.123.1) (2026-05-27)
+
+
+### Bug Fixes
+
+* **scheduler:** translate /jobs render output (i18n) ([#976](https://github.com/diillson/chatcli/issues/976)) ([07c38f5](https://github.com/diillson/chatcli/commit/07c38f5e34fa8f552421b39c24bfebc945aba4b2))
+
 ## [1.123.0](https://github.com/diillson/chatcli/compare/v1.122.5...v1.123.0) (2026-05-27)
 
 
