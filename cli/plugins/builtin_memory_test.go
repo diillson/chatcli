@@ -6,6 +6,92 @@ import (
 	"testing"
 )
 
+func TestBuiltinMemory_Metadata(t *testing.T) {
+	p := NewBuiltinMemoryPlugin()
+	if p.Name() != "@memory" {
+		t.Errorf("name = %q", p.Name())
+	}
+	if p.Description() == "" || p.Usage() == "" || p.Version() == "" {
+		t.Error("metadata strings must be non-empty")
+	}
+	if p.Path() != "" {
+		t.Errorf("builtin path should be empty, got %q", p.Path())
+	}
+	schema := p.Schema()
+	for _, want := range []string{"remember", "profile", "forget", "recall", "subcommands"} {
+		if !strings.Contains(schema, want) {
+			t.Errorf("schema missing %q", want)
+		}
+	}
+}
+
+func TestBuiltinMemory_MoreDispatch(t *testing.T) {
+	fake := &fakeMemAdapter{}
+	SetMemoryAdapter(fake)
+	t.Cleanup(func() { SetMemoryAdapter(nil) })
+
+	p := NewBuiltinMemoryPlugin()
+	ctx := context.Background()
+
+	// recall
+	if _, err := p.Execute(ctx, []string{`{"cmd":"recall","args":{"query":"certs"}}`}); err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if fake.lastRecall != "certs" {
+		t.Errorf("recall query not propagated: %q", fake.lastRecall)
+	}
+
+	// profile with the bare (no "fields" wrapper) form
+	if _, err := p.Execute(ctx, []string{`{"cmd":"profile","args":{"role":"SRE"}}`}); err != nil {
+		t.Fatalf("profile bare: %v", err)
+	}
+	if fake.lastProfile["role"] != "SRE" {
+		t.Errorf("bare profile form not parsed: %v", fake.lastProfile)
+	}
+
+	// argv (flag) form instead of JSON envelope
+	if _, err := p.Execute(ctx, []string{"remember", "--content", "argv fact"}); err != nil {
+		t.Fatalf("argv form: %v", err)
+	}
+	if fake.lastRemember[0] != "argv fact" {
+		t.Errorf("argv form not parsed: %v", fake.lastRemember)
+	}
+
+	// unknown cmd -> error
+	if _, err := p.Execute(ctx, []string{`{"cmd":"bogus","args":{}}`}); err == nil {
+		t.Error("expected error for unknown cmd")
+	}
+	// forget without match -> error
+	if _, err := p.Execute(ctx, []string{`{"cmd":"forget","args":{}}`}); err == nil {
+		t.Error("expected error for forget without match")
+	}
+}
+
+func TestCanonicalMemoryCmdAliases(t *testing.T) {
+	cases := map[string]string{
+		"add": "remember", "store": "remember", "note": "remember",
+		"user": "profile", "remove": "forget", "delete": "forget",
+		"read": "recall", "get": "recall", "bogus": "",
+	}
+	for in, want := range cases {
+		if got := canonicalMemoryCmd(in); got != want {
+			t.Errorf("canonicalMemoryCmd(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestStringifyMap(t *testing.T) {
+	out := stringifyMap(map[string]interface{}{
+		"a": "x", "n": float64(3), "b": true, "list": []interface{}{"p", "q"}, "skip": nil,
+	})
+	if out["a"] != "x" || out["n"] != "3" || out["b"] != "true" || out["list"] != "p, q" {
+		t.Errorf("stringifyMap wrong: %v", out)
+	}
+	if _, ok := out["skip"]; ok {
+		t.Error("nil values should be skipped")
+	}
+}
+
 func TestParseMemoryInvocation_Envelope(t *testing.T) {
 	cmd, inner, err := parseMemoryInvocation([]string{`{"cmd":"remember","args":{"content":"x","category":"personal"}}`})
 	if err != nil {
