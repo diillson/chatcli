@@ -6,10 +6,10 @@
 /*
  * Package cmd — rpcserve.go
  *
- * Implements the `chatcli mcp-serve` and `chatcli acp` subcommands, which run
+ * Implements the `chatcli mcp-server` and `chatcli acp` subcommands, which run
  * ChatCLI as a JSON-RPC server over stdio:
  *
- *   mcp-serve : exposes ChatCLI as an MCP server (tools for any MCP client).
+ *   mcp-server : exposes ChatCLI as an MCP server (tools for any MCP client).
  *   acp       : exposes ChatCLI over the Agent Client Protocol (editors).
  *
  * stdin/stdout carry the protocol, so all logging goes to the file logger —
@@ -61,7 +61,7 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	default: // mcp
 		m := rpcserve.NewMCP(backend, "chatcli", ver)
 		srv := rpcserve.NewServer(os.Stdin, os.Stdout, m.Handle)
-		logger.Info("mcp-serve: serving over stdio")
+		logger.Info("mcp-server: serving over stdio")
 		return srv.Serve(ctx)
 	}
 }
