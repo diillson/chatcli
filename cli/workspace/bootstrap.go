@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/workspace/threatscan"
 	"go.uber.org/zap"
 )
 
@@ -59,7 +60,20 @@ func (bl *BootstrapLoader) LoadBootstrapContent() string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return strings.Join(parts, "\n\n---\n\n")
+	content := strings.Join(parts, "\n\n---\n\n")
+
+	// Neutralize blatant prompt-injection directives that may have been
+	// planted in a bootstrap file (e.g. a cloned repo's AGENTS.md) before
+	// the text reaches the model. Conservative, line-level — legitimate
+	// shell snippets in context files are left untouched (ScopeContext).
+	if threatscan.Enabled() {
+		if sanitized, blocked := threatscan.Sanitize(content, threatscan.ScopeContext); blocked > 0 {
+			bl.logger.Warn("threatscan: neutralized lines in bootstrap context",
+				zap.Int("blocked", blocked))
+			content = sanitized
+		}
+	}
+	return content
 }
 
 // LoadFile loads a single bootstrap file (workspace first, then global).

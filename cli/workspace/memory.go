@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/workspace/memory"
+	"github.com/diillson/chatcli/cli/workspace/threatscan"
 	"go.uber.org/zap"
 )
 
@@ -99,18 +100,34 @@ func (ms *MemoryStore) GetRecentDailyNotes(days int) []DailyNote {
 // GetMemoryContext builds the memory section for the system prompt.
 // Uses smart retrieval when no hints are provided.
 func (ms *MemoryStore) GetMemoryContext() string {
-	return ms.manager.GetMemoryContext()
+	return ms.sanitizeForPrompt(ms.manager.GetMemoryContext())
 }
 
 // GetRelevantContext returns memory tailored to conversation hints.
 func (ms *MemoryStore) GetRelevantContext(hints []string) string {
-	return ms.manager.GetRelevantContext(hints)
+	return ms.sanitizeForPrompt(ms.manager.GetRelevantContext(hints))
 }
 
 // GetRelevantContextWithHyDE delegates to the manager's HyDE-aware
 // retrieval. See memory.Manager.GetRelevantContextWithHyDE.
 func (ms *MemoryStore) GetRelevantContextWithHyDE(ctx context.Context, query string, hints []string, augmenter *memory.HyDEAugmenter) string {
-	return ms.manager.GetRelevantContextWithHyDE(ctx, query, hints, augmenter)
+	return ms.sanitizeForPrompt(ms.manager.GetRelevantContextWithHyDE(ctx, query, hints, augmenter))
+}
+
+// sanitizeForPrompt neutralizes prompt-injection / exec / persistence
+// payloads in memory before it is injected into the system prompt. Memory
+// is auto-curated and should never carry shell scripts, so it uses the
+// stricter ScopeMemory. The on-disk store is never modified.
+func (ms *MemoryStore) sanitizeForPrompt(s string) string {
+	if s == "" || !threatscan.Enabled() {
+		return s
+	}
+	sanitized, blocked := threatscan.Sanitize(s, threatscan.ScopeMemory)
+	if blocked > 0 && ms.logger != nil {
+		ms.logger.Warn("threatscan: neutralized lines in memory context",
+			zap.Int("blocked", blocked))
+	}
+	return sanitized
 }
 
 // AttachVectorIndex attaches a vector index used by HyDE Phase 3b.
