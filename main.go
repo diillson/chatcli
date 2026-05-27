@@ -32,7 +32,8 @@ func main() {
 	// These subcommands have their own flag sets and should not go through cli.Parse().
 	if len(os.Args) > 1 {
 		subcmd := os.Args[1]
-		if subcmd == "server" || subcmd == "serve" || subcmd == "connect" || subcmd == "watch" {
+		if subcmd == "server" || subcmd == "serve" || subcmd == "connect" || subcmd == "watch" ||
+			subcmd == "mcp-server" || subcmd == "mcp-serve" || subcmd == "acp" {
 			runSubcommand(subcmd, os.Args[2:])
 			return
 		}
@@ -251,6 +252,14 @@ func runSubcommand(subcmd string, args []string) {
 		if err := cmd.RunWatch(ctx, args, llmMgr, logger); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
+		}
+	case "mcp-server", "mcp-serve": // mcp-serve kept as a back-compat alias
+		if err := cmd.RunMCPServe(args, llmMgr, logger); err != nil {
+			logger.Fatal("MCP server failed", zap.Error(err))
+		}
+	case "acp":
+		if err := cmd.RunACP(args, llmMgr, logger); err != nil {
+			logger.Fatal("ACP server failed", zap.Error(err))
 		}
 	}
 }
