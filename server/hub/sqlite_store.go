@@ -99,9 +99,9 @@ func OpenSQLiteStore(ctx context.Context, path string, logger *zap.Logger) (*SQL
 func (s *SQLiteStore) Close() error { return s.db.Close() }
 
 // Resolve returns the active conversation for a principal, creating one on
-// first contact. The read fast-path needs no lock; creation re-checks under
-// the write lock so two concurrent first-time resolves can't fork two
-// conversations.
+// first contact. The read fast-path needs no lock; creation is safe across
+// processes sharing the database (the local CLI and the gateway daemon), since
+// the write lock only serializes within one process — see resolveCreateLocked.
 func (s *SQLiteStore) Resolve(ctx context.Context, principal string) (string, error) {
 	if principal == "" {
 		return "", errors.New("hub: empty principal")
@@ -114,12 +114,49 @@ func (s *SQLiteStore) Resolve(ctx context.Context, principal string) (string, er
 
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
-	if convID, err := s.activePointer(ctx, principal); err == nil {
-		return convID, nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return "", err
+	return s.resolveCreateLocked(ctx, principal)
+}
+
+// resolveCreateLocked lazily creates the principal's first conversation. The
+// pointer insert uses ON CONFLICT DO NOTHING so that if another process created
+// the pointer first, we adopt theirs instead of forking a second conversation —
+// the pointer row is the single, atomically-enforced source of truth. Caller
+// must hold wmu.
+func (s *SQLiteStore) resolveCreateLocked(ctx context.Context, principal string) (string, error) {
+	convID := uuid.New().String()
+	now := time.Now().UTC().UnixMilli()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("hub: begin resolve: %w", err)
 	}
-	return s.createConversationLocked(ctx, principal)
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO pointers(principal, active_conv_id, updated_at) VALUES(?,?,?)
+         ON CONFLICT(principal) DO NOTHING`, principal, convID, now)
+	if err != nil {
+		return "", fmt.Errorf("hub: insert pointer: %w", err)
+	}
+	won, err := res.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("hub: pointer rows affected: %w", err)
+	}
+	if won == 1 {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO conversations(conv_id, principal, created_at) VALUES(?,?,?)`,
+			convID, principal, now); err != nil {
+			return "", fmt.Errorf("hub: insert conversation: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("hub: commit resolve: %w", err)
+	}
+	if won == 1 {
+		return convID, nil
+	}
+	// Another process won the race (or the pointer already existed): adopt it.
+	return s.activePointer(ctx, principal)
 }
 
 // NewConversation always rotates the pointer to a fresh conversation.

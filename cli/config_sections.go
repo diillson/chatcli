@@ -1124,6 +1124,11 @@ func (cli *ChatCLI) showConfigHub() {
 	kv(p, "CHATCLI_HUB_BINDINGS", presence(os.Getenv("CHATCLI_HUB_BINDINGS")))
 
 	fmt.Println(p)
+	subheader(p, "cfg.sub.hub.local")
+	kv(p, "CHATCLI_HUB_PRINCIPAL", envOr("CHATCLI_HUB_PRINCIPAL"))
+	kv(p, "CHATCLI_HUB_POLL_MS", envOr("CHATCLI_HUB_POLL_MS"))
+
+	fmt.Println(p)
 	subheader(p, "cfg.sub.hub.session")
 	if cli.hubSync != nil {
 		convID, principal := cli.hubSync.status()

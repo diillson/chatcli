@@ -419,13 +419,18 @@ func (s *hubSessions) loadBindings(ctx context.Context) {
 	}
 }
 
-// principalFor maps a sender to its principal: the bound identity when one
-// exists, else an isolated per-channel principal.
+// principalFor maps a sender to its principal: an explicit binding wins; then,
+// in single-user mode (CHATCLI_HUB_PRINCIPAL set), all unbound senders collapse
+// to that shared principal so the bot and the local CLI share one conversation
+// with zero per-channel config; otherwise the sender stays isolated per channel.
 func (s *hubSessions) principalFor(ctx context.Context, platform, userID string) string {
 	if s.store != nil {
 		if p, err := s.store.ResolvePrincipal(ctx, platform, userID); err == nil {
 			return p
 		}
+	}
+	if shared := LocalHubPrincipal(); shared != "" {
+		return shared
 	}
 	return platform + ":" + userID
 }

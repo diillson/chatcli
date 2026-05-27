@@ -1619,6 +1619,7 @@
   "cfg.section.security.title": "SEGURANÇA & SANDBOX",
   "cfg.section.quality.title": "PIPELINE DE QUALIDADE DO AGENTE",
   "cfg.section.hub.title": "Hub de Conversa (continuidade cross-channel)",
+  "cfg.sub.hub.local": "Modo local (mesma máquina, sem /connect)",
   "cfg.sub.hub.server": "Servidor / armazenamento",
   "cfg.sub.hub.session": "Sessão atual",
   "cfg.hub.state": "estado",

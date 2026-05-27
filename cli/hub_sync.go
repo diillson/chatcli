@@ -232,6 +232,11 @@ func (cli *ChatCLI) EnableHubSync(client HubClient) {
 // failures degrade to a fresh local session (the hub may simply be disabled
 // server-side).
 func (cli *ChatCLI) startHubSync(ctx context.Context) {
+	// A standalone CLI (no /connect) joins the on-disk hub when local mode is
+	// enabled, so it shares the conversation with a co-running gateway daemon.
+	if cli.hubSync == nil {
+		cli.hubLocalClose = cli.maybeEnableLocalHub(ctx)
+	}
 	if cli.hubSync == nil {
 		return
 	}

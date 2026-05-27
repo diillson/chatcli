@@ -204,7 +204,8 @@ type ChatCLI struct {
 	remoteConn    interface{ Close() error } // remote connection (for cleanup on disconnect)
 	isRemote      bool                       // true when connected to a remote server
 	remoteAddress string                     // server address captured on /connect for /config display
-	hubSync       *HubSync                   // cross-channel conversation sync (set on /connect when the hub is available)
+	hubSync       *HubSync                   // cross-channel conversation sync (set on /connect or in local hub mode)
+	hubLocalClose func()                     // closes the on-disk hub opened by local mode (nil otherwise)
 
 	// K8s watcher context injection
 	WatcherContextFunc func() string      // returns K8s context to prepend to LLM prompts
@@ -1506,6 +1507,12 @@ func (cli *ChatCLI) stopMCPConfigWatcher() {
 }
 
 func (cli *ChatCLI) cleanup() {
+	// Close the on-disk hub opened by local mode, if any.
+	if cli.hubLocalClose != nil {
+		cli.hubLocalClose()
+		cli.hubLocalClose = nil
+	}
+
 	// Fire SessionEnd hook
 	if cli.hookManager != nil {
 		wd, _ := os.Getwd()
