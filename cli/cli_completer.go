@@ -68,6 +68,16 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	}},
 	{"/export", (*ChatCLI).getExportSuggestions},
 	{"/gateway", (*ChatCLI).getGatewaySuggestions},
+	{"/lsp", (*ChatCLI).getLSPSuggestions},
+}
+
+// getLSPSuggestions completes the file path argument of /lsp.
+func (cli *ChatCLI) getLSPSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	if len(strings.Fields(line)) <= 1 && !strings.HasSuffix(line, " ") {
+		return nil // still typing the command name itself
+	}
+	return cli.filePathCompleter(d.GetWordBeforeCursor())
 }
 
 // getGatewaySuggestions completes the /gateway subcommands.
