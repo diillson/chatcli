@@ -104,6 +104,33 @@ func (fi *FactIndex) RemoveFact(id string) bool {
 	return true
 }
 
+// ForgetMatching removes every fact whose content contains substr
+// (case-insensitive) and returns the removed facts. It is the
+// deterministic counterpart to AddFact, used by the /memory forget
+// command and the @memory tool so the user/agent can correct or retract
+// a learned fact without hand-editing JSON.
+func (fi *FactIndex) ForgetMatching(substr string) []*Fact {
+	substr = strings.ToLower(strings.TrimSpace(substr))
+	if substr == "" {
+		return nil
+	}
+
+	fi.mu.Lock()
+	defer fi.mu.Unlock()
+
+	var removed []*Fact
+	for id, f := range fi.facts {
+		if strings.Contains(strings.ToLower(f.Content), substr) {
+			removed = append(removed, f)
+			delete(fi.facts, id)
+		}
+	}
+	if len(removed) > 0 {
+		fi.persistLocked()
+	}
+	return removed
+}
+
 // GetAll returns all facts sorted by score (descending).
 func (fi *FactIndex) GetAll() []*Fact {
 	fi.mu.RLock()

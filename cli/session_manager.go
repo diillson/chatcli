@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -208,6 +209,103 @@ func (sm *SessionManager) ListSessions() ([]string, error) {
 		}
 	}
 	return sessions, nil
+}
+
+// SessionSearchHit is one session that matched a search, with the strongest
+// snippets for context.
+type SessionSearchHit struct {
+	Session  string
+	Matches  int
+	Snippets []string
+}
+
+// SearchSessions performs a full-text search across all persisted sessions,
+// reusing the existing JSON store (no separate index). A message matches
+// when every whitespace-separated query term appears in its content
+// (case-insensitive AND). Results are sorted by match count, descending.
+// maxSnippetsPerSession caps how many context snippets each hit carries.
+func (sm *SessionManager) SearchSessions(query string, maxSnippetsPerSession int) ([]SessionSearchHit, error) {
+	terms := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
+	if len(terms) == 0 {
+		return nil, fmt.Errorf("empty query")
+	}
+	if maxSnippetsPerSession <= 0 {
+		maxSnippetsPerSession = 3
+	}
+
+	names, err := sm.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	var hits []SessionSearchHit
+	for _, name := range names {
+		sd, err := sm.LoadSessionV2(name)
+		if err != nil || sd == nil {
+			continue // skip unreadable sessions rather than abort the search
+		}
+
+		matches := 0
+		var snippets []string
+		for _, hist := range [][]models.Message{sd.ChatHistory, sd.AgentHistory, sd.CoderHistory, sd.SharedMemory} {
+			for _, msg := range hist {
+				if msg.Content == "" {
+					continue
+				}
+				lower := strings.ToLower(msg.Content)
+				if !containsAllTerms(lower, terms) {
+					continue
+				}
+				matches++
+				if len(snippets) < maxSnippetsPerSession {
+					snippets = append(snippets, msg.Role+": "+snippetAround(msg.Content, lower, terms[0]))
+				}
+			}
+		}
+
+		if matches > 0 {
+			hits = append(hits, SessionSearchHit{Session: name, Matches: matches, Snippets: snippets})
+		}
+	}
+
+	sort.Slice(hits, func(i, j int) bool { return hits[i].Matches > hits[j].Matches })
+	return hits, nil
+}
+
+// containsAllTerms reports whether lowerText contains every term.
+func containsAllTerms(lowerText string, terms []string) bool {
+	for _, t := range terms {
+		if !strings.Contains(lowerText, t) {
+			return false
+		}
+	}
+	return true
+}
+
+// snippetAround returns a trimmed, single-line window of content centered on
+// the first occurrence of term, capped to keep search output compact.
+func snippetAround(content, lowerContent, term string) string {
+	const window = 120
+	idx := strings.Index(lowerContent, term)
+	if idx < 0 {
+		idx = 0
+	}
+	start := idx - window/2
+	if start < 0 {
+		start = 0
+	}
+	end := idx + window/2
+	if end > len(content) {
+		end = len(content)
+	}
+	s := strings.TrimSpace(strings.ReplaceAll(content[start:end], "\n", " "))
+	if start > 0 {
+		s = "…" + s
+	}
+	if end < len(content) {
+		s += "…"
+	}
+	return s
 }
 
 // ForkSession creates a copy of an existing session with a new name.

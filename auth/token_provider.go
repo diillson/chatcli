@@ -53,6 +53,21 @@ type TokenProvider interface {
 	Close()
 }
 
+// ResponseObserver, when set, is invoked with the provider id and response
+// headers after every HTTP response routed through DoWithRefresh. It is the
+// single, provider-agnostic seam used to record rate-limit headers
+// (x-ratelimit-*) for ALL HTTP providers without each client wiring it
+// individually. Kept as a plain hook so the low-level auth package never
+// depends on higher-level packages (no import cycle). nil = disabled.
+var ResponseObserver func(provider string, header http.Header)
+
+func observeResponse(p TokenProvider, resp *http.Response) {
+	if ResponseObserver == nil || resp == nil || p == nil {
+		return
+	}
+	ResponseObserver(string(p.Provider()), resp.Header)
+}
+
 // DoWithRefresh executes buildAndSend, automatically refreshing the token and
 // retrying once when the response is 401 or 403 and the provider runs in OAuth
 // mode. The callback receives the current access token and must construct a
@@ -68,6 +83,7 @@ func DoWithRefresh(ctx context.Context, p TokenProvider, buildAndSend func(token
 	if err != nil {
 		return resp, err
 	}
+	observeResponse(p, resp)
 	if p.Mode() != AuthModeOAuth {
 		return resp, nil
 	}
@@ -84,7 +100,11 @@ func DoWithRefresh(ctx context.Context, p TokenProvider, buildAndSend func(token
 	if err != nil {
 		return nil, err
 	}
-	return buildAndSend(token)
+	resp, err = buildAndSend(token)
+	if err == nil {
+		observeResponse(p, resp)
+	}
+	return resp, err
 }
 
 // staticTokenProvider wraps a non-refreshable credential (API key, env var,

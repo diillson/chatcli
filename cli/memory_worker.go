@@ -184,7 +184,7 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 
 	// Build enhanced prompt with existing context
 	var fullPrompt strings.Builder
-	fullPrompt.WriteString(memory.EnhancedExtractionPrompt)
+	fullPrompt.WriteString(memory.EnhancedExtractionPromptV2)
 	fullPrompt.WriteString("\n\n---\n\n")
 
 	// Include current workspace so the extraction LLM can distinguish session context
@@ -209,7 +209,7 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 
 	// Pass prompt as both the prompt param and the last user message in history.
 	history := []models.Message{
-		{Role: "system", Content: memory.EnhancedExtractionPrompt},
+		{Role: "system", Content: memory.EnhancedExtractionPromptV2},
 		{Role: "user", Content: prompt},
 	}
 
@@ -234,10 +234,19 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 		zap.String("response_preview", truncateForLog(response, 200)),
 	)
 
-	// Use enhanced processing that populates profile, topics, projects
-	mw.cli.memoryStore.ProcessExtraction(response)
+	// Use enhanced processing that populates profile, topics, projects.
+	// A non-empty summary becomes a visible one-line notice so the user
+	// can tell the system actually learned something this turn.
+	summary := mw.cli.memoryStore.ProcessExtractionResult(response)
+	if !summary.IsEmpty() {
+		mw.cli.pushMemoryNotice(formatMemoryNotice(summary))
+	}
 
-	mw.logger.Debug("Memory worker: enhanced extraction complete")
+	mw.logger.Debug("Memory worker: enhanced extraction complete",
+		zap.Int("facts_added", summary.FactsAdded),
+		zap.Bool("profile_updated", summary.ProfileUpdated),
+		zap.Int("topics", summary.TopicsRecorded),
+	)
 	return nil
 }
 

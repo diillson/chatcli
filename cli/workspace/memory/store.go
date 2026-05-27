@@ -179,13 +179,23 @@ func (m *Manager) WriteLongTerm(content string) error {
 
 // AppendLongTerm adds new content to long-term memory.
 func (m *Manager) AppendLongTerm(entry string) error {
+	_, err := m.appendLongTermCounted(entry)
+	return err
+}
+
+// appendLongTermCounted is the workhorse behind AppendLongTerm. It parses
+// an optional "[category]" prefix on each line (the extraction prompt asks
+// for it) and falls back to content classification, so facts land in the
+// right bucket instead of all collapsing into "general". It returns the
+// number of genuinely new facts added (duplicates don't count).
+func (m *Manager) appendLongTermCounted(entry string) (int, error) {
 	entry = strings.TrimSpace(entry)
 	if entry == "" {
-		return nil
+		return 0, nil
 	}
 
-	lines := strings.Split(entry, "\n")
-	for _, line := range lines {
+	added := 0
+	for _, line := range strings.Split(entry, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "---") {
 			continue
@@ -193,13 +203,56 @@ func (m *Manager) AppendLongTerm(entry string) error {
 		factContent := strings.TrimPrefix(trimmed, "- ")
 		factContent = strings.TrimPrefix(factContent, "* ")
 		factContent = strings.TrimSpace(factContent)
+
+		category, factContent := splitCategoryPrefix(factContent)
+		if category == "" {
+			category = classifyFactContent(factContent)
+		}
 		if len(factContent) >= 5 {
-			m.Facts.AddFactWithSource(factContent, "general", extractTags(factContent), m.workspaceDir)
+			if m.Facts.AddFactWithSource(factContent, category, extractTags(factContent), m.workspaceDir) {
+				added++
+			}
 		}
 	}
 
+	if added > 0 {
+		m.compactor.RegenerateMemoryMD()
+	}
+	return added, nil
+}
+
+// RememberFact stores a single fact deterministically — no LLM, no
+// throttling. category may be empty (or unrecognized) to auto-classify.
+// Returns true when a new fact was added (false on duplicate/empty).
+// Backs the /memory remember command and the @memory tool.
+func (m *Manager) RememberFact(content, category string) bool {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return false
+	}
+	cat := strings.ToLower(strings.TrimSpace(category))
+	if !isKnownCategory(cat) {
+		cat = classifyFactContent(content)
+	}
+	added := m.Facts.AddFactWithSource(content, cat, extractTags(content), m.workspaceDir)
 	m.compactor.RegenerateMemoryMD()
-	return nil
+	return added
+}
+
+// UpdateProfile applies deterministic profile updates and returns whether
+// anything changed. Backs /memory profile set and the @memory tool.
+func (m *Manager) UpdateProfile(updates map[string]string) bool {
+	return m.Profile.Update(updates)
+}
+
+// ForgetFacts removes every fact whose content matches substr
+// (case-insensitive) and returns how many were removed.
+func (m *Manager) ForgetFacts(substr string) int {
+	removed := m.Facts.ForgetMatching(substr)
+	if len(removed) > 0 {
+		m.compactor.RegenerateMemoryMD()
+	}
+	return len(removed)
 }
 
 // WriteDailyNote delegates to the daily note store.
@@ -224,33 +277,71 @@ func (m *Manager) EnsureDirectories() error {
 
 // --- Enhanced API ---
 
-// ProcessExtraction processes the output from the memory extraction LLM.
-// This replaces the old AppendLongTerm + WriteDailyNote pattern with
-// structured extraction that populates profile, topics, and projects.
+// ExtractionSummary reports what a single ProcessExtraction call persisted.
+// The memory worker turns a non-empty summary into a one-line terminal
+// notice, so the user can see the system is actually learning instead of
+// memory updating silently (the prior behavior, which made it impossible to
+// tell whether anything was captured).
+type ExtractionSummary struct {
+	DailyWritten     bool
+	FactsAdded       int
+	ProfileUpdated   bool
+	TopicsRecorded   int
+	ProjectsUpserted int
+}
+
+// IsEmpty reports whether nothing was persisted.
+func (s ExtractionSummary) IsEmpty() bool {
+	return !s.DailyWritten && s.FactsAdded == 0 && !s.ProfileUpdated &&
+		s.TopicsRecorded == 0 && s.ProjectsUpserted == 0
+}
+
+// ProcessExtraction processes the output from the memory extraction LLM,
+// populating profile, topics, and projects. Kept with its original (void)
+// signature for API compatibility; callers that need the summary use
+// ProcessExtractionResult.
 func (m *Manager) ProcessExtraction(response string) {
+	m.ProcessExtractionResult(response)
+}
+
+// ProcessExtractionResult is ProcessExtraction with a summary of what changed.
+func (m *Manager) ProcessExtractionResult(response string) ExtractionSummary {
 	daily, longTerm, profileUpdates, topics, projects := parseEnhancedResponse(response)
+
+	var sum ExtractionSummary
 
 	if daily != "" {
 		if err := m.Daily.WriteDailyNote(daily); err != nil {
 			m.logger.Warn("failed to write daily note", zap.Error(err))
+		} else {
+			sum.DailyWritten = true
 		}
 	}
 
 	if longTerm != "" {
-		_ = m.AppendLongTerm(longTerm)
+		if n, _ := m.appendLongTermCounted(longTerm); n > 0 {
+			sum.FactsAdded = n
+		}
 	}
 
 	if len(profileUpdates) > 0 {
-		m.Profile.Update(profileUpdates)
+		if m.Profile.Update(profileUpdates) {
+			sum.ProfileUpdated = true
+		}
 	}
 
 	if len(topics) > 0 {
 		m.Topics.Record(topics)
+		sum.TopicsRecorded = len(topics)
 	}
 
 	if len(projects) > 0 {
-		m.Projects.Upsert(projects)
+		if m.Projects.Upsert(projects) {
+			sum.ProjectsUpserted = 1
+		}
 	}
+
+	return sum
 }
 
 // RecordInteraction records a usage event.
@@ -489,7 +580,79 @@ func parseCSV(content string) []string {
 	return items
 }
 
-// EnhancedExtractionPrompt is the updated prompt for the memory worker.
+// knownCategories is the fixed set of fact buckets shared by the migration
+// heuristic, the extraction parser, and the manual commands.
+var knownCategories = map[string]struct{}{
+	"architecture": {}, "pattern": {}, "preference": {},
+	"gotcha": {}, "project": {}, "personal": {}, "general": {},
+}
+
+// isKnownCategory reports whether cat is one of the recognized buckets.
+func isKnownCategory(cat string) bool {
+	_, ok := knownCategories[cat]
+	return ok
+}
+
+// splitCategoryPrefix extracts a leading "[category]" tag from a fact line,
+// e.g. "[personal] Earned AWS SAA" -> ("personal", "Earned AWS SAA"). The
+// extraction prompt asks the model to tag LONGTERM lines this way; when the
+// tag is absent or unrecognized the line is returned unchanged with an
+// empty category so the caller can classify by content.
+func splitCategoryPrefix(line string) (category, rest string) {
+	if !strings.HasPrefix(line, "[") {
+		return "", line
+	}
+	end := strings.Index(line, "]")
+	if end <= 1 {
+		return "", line
+	}
+	cat := strings.ToLower(strings.TrimSpace(line[1:end]))
+	if !isKnownCategory(cat) {
+		return "", line
+	}
+	return cat, strings.TrimSpace(line[end+1:])
+}
+
+// classifyFactContent assigns a category to an untagged fact by scanning its
+// text. It mirrors detectCategory's vocabulary but works on the whole fact
+// rather than a markdown header, so live extraction stops collapsing
+// everything into "general". Order matters: more specific personal/
+// preference signals are checked before generic ones.
+func classifyFactContent(content string) string {
+	lower := strings.ToLower(content)
+	switch {
+	case containsAny(lower, "i prefer", "prefers", "prefiro", "preference", "always use", "never use", "communication style", "estilo de"):
+		return "preference"
+	case containsAny(lower, "my name is", "meu nome", "i am a", "i'm a", "sou ", "certification", "certified", "certificaç", "certificado", "skill", "expertise", "i work as", "trabalho como"):
+		return "personal"
+	case containsAny(lower, "architecture", "arquitetura", "design decision", "system design", "module structure"):
+		return "architecture"
+	case containsAny(lower, "convention", "idiom", "best practice", "pattern", "padrão", "padrao"):
+		return "pattern"
+	case containsAny(lower, "gotcha", "pitfall", "workaround", "caveat", "bug ", "fails when", "broken", " error"):
+		return "gotcha"
+	case containsAny(lower, "project", "projeto", "repository", "repo ", "codebase", "/users/"):
+		return "project"
+	default:
+		return "general"
+	}
+}
+
+// containsAny reports whether s contains any of subs.
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// EnhancedExtractionPrompt is the original memory-extraction prompt.
+//
+// Deprecated: kept for API compatibility; the worker uses
+// EnhancedExtractionPromptV2, which adds typed/free-form profile fields and
+// per-line category tagging for long-term facts.
 const EnhancedExtractionPrompt = `You are a memory annotation system. Analyze this conversation segment and extract structured annotations.
 
 OUTPUT FORMAT — use EXACTLY these section headers:
@@ -516,6 +679,74 @@ role=...
 expertise_level=beginner|intermediate|expert
 preferred_language=...
 communication_style=...
+(Only include fields that have new information. Skip this section if nothing new.)
+
+## TOPICS
+List technical topics discussed in this segment (comma-separated):
+Go, Bubble Tea, memory systems, ...
+(Skip if no clear technical topics.)
+
+## PROJECTS
+If a specific project was worked on, output KEY=VALUE pairs:
+project_name=...
+project_path=...
+project_status=active|paused|completed
+project_description=...
+project_technologies=Go, React, ...
+(Skip if no project context.)
+
+RULES:
+- If nothing new was learned for a section, write "NOTHING_NEW" in that section
+- If the conversation is trivial (greetings, simple questions), respond with just: NOTHING_NEW
+- Keep each bullet to ONE line
+- Use exact file paths, never paraphrase
+- Do NOT repeat facts already in EXISTING LONG-TERM MEMORY
+- Write in the same language the user is using in the conversation
+- Be concise — this is metadata, not prose`
+
+// EnhancedExtractionPromptV2 is the active extraction prompt. It expands
+// PROFILE_UPDATE with typed and free-form user fields and asks for per-line
+// category tags on LONGTERM facts so they are filed correctly.
+const EnhancedExtractionPromptV2 = `You are a memory annotation system. Analyze this conversation segment and extract structured annotations.
+
+OUTPUT FORMAT — use EXACTLY these section headers:
+
+## DAILY
+Write a brief log of what was done in this segment. Use bullet points. Include:
+- Files read, modified or created (with paths)
+- Commands executed and their outcomes
+- Errors encountered and how they were resolved
+- Tasks completed or in progress
+
+## LONGTERM
+Write ONLY genuinely new facts that should be remembered permanently.
+Tag EACH line with a category in brackets so it is filed correctly:
+- [architecture] decisions about system/module design
+- [pattern] conventions, idioms, best practices established
+- [preference] how the user likes things done
+- [gotcha] bugs, pitfalls, workarounds learned
+- [project] project paths, structure, technologies
+- [personal] durable facts about the user (see also PROFILE_UPDATE)
+- [general] anything else worth keeping
+Example: - [gotcha] embed.FS requires '/' separators, never filepath.Join
+
+## PROFILE_UPDATE
+If the user revealed new durable information about THEMSELVES, output KEY=VALUE pairs.
+Known fields (use these exact keys when they apply):
+name=...
+role=...
+expertise_level=beginner|intermediate|expert
+preferred_language=...
+communication_style=...
+company=...
+location=...
+certifications=...      (comma-separated; e.g. AWS SAA, CKA)
+skills=...              (comma-separated)
+goals=...               (comma-separated)
+You MAY also emit any other relevant key=value about the user even if it is
+not listed above (e.g. github=..., years_experience=..., favorite_editor=...).
+Unknown keys are preserved as profile preferences — never drop a stable fact
+about the user just because it has no predefined field.
 (Only include fields that have new information. Skip this section if nothing new.)
 
 ## TOPICS

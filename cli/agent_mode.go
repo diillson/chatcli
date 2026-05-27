@@ -25,6 +25,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/cli/agent/quality"
+	"github.com/diillson/chatcli/cli/agent/toolguard"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
@@ -1159,6 +1160,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		stagnation = newStagnationTracker()
 	}
 
+	// Per-tool failure guard: complements the batch-level stagnation
+	// tracker by catching a single tool that keeps failing (identical or
+	// drifting args) and feeding the model targeted guidance to break the
+	// cycle. Advisory only — it never alters control flow.
+	// CHATCLI_AGENT_TOOLGUARD=false disables it.
+	var toolGuard *toolguard.Guard
+	if toolGuardEnabled() {
+		toolGuard = toolguard.New(toolguard.Config{})
+	}
+
 	// --- LOOP PRINCIPAL DO AGENTE (ReAct) ---
 	for turn := 0; turn < maxTurns; turn++ {
 		// Verificar cancelamento pelo usuário (Ctrl+C)
@@ -1926,6 +1937,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// without a second pass through this critical loop.
 			turnToolResults := make([]agent.ToolResult, 0, totalActions)
 
+			// guardGuidance collects any tool-loop hints produced this turn;
+			// appended to history once, after the tool results.
+			var guardGuidance []string
+
 			// Helper: render error message respecting compact mode
 			renderError := func(msg string) {
 				if isCompact {
@@ -2390,6 +2405,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				structured.Duration = time.Since(toolStartTime)
 				turnToolResults = append(turnToolResults, structured)
 
+				// Feed the per-tool failure guard. Guidance (if any) is
+				// injected into history after the batch results below.
+				if toolGuard != nil {
+					errMsg := ""
+					if execErr != nil {
+						errMsg = execErr.Error()
+					}
+					if d := toolGuard.Observe(toolName, normalizedArgsStr, errMsg, execErr != nil); d.Guidance != "" {
+						guardGuidance = append(guardGuidance, d.Guidance)
+					}
+				}
+
 				// Acumula o resultado para a LLM
 				batchOutputBuilder.WriteString(fmt.Sprintf("--- Resultado da Ação %d (%s) ---\n", i+1, toolName))
 
@@ -2506,6 +2533,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores."
 				}
 				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
+			}
+
+			// Inject tool-loop guidance (if the guard fired this turn) so the
+			// model can change approach instead of retrying the same failing
+			// call until it exhausts the turn budget.
+			if len(guardGuidance) > 0 {
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: strings.Join(guardGuidance, "\n"),
+				})
 			}
 
 			showTurnStats()

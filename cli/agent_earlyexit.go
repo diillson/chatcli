@@ -56,6 +56,18 @@ func earlyExitEnabled() bool {
 	}
 }
 
+// toolGuardEnabled reports whether the per-tool failure guard is active.
+// Honors CHATCLI_AGENT_TOOLGUARD=0|false. On by default — it is advisory and
+// only adds guidance to history, so it is safe to leave enabled.
+func toolGuardEnabled() bool {
+	switch strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_AGENT_TOOLGUARD"))) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
 // stagnationThreshold returns the configured threshold, honoring
 // CHATCLI_AGENT_EARLY_EXIT_TURNS for power users. Clamped to [2, 10].
 func stagnationThreshold() int {

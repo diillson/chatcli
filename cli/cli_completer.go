@@ -66,6 +66,16 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/resume", func(c *ChatCLI, d prompt.Document) []prompt.Suggest {
 		return c.getParkTokenSuggestions("/resume", d)
 	}},
+	{"/export", (*ChatCLI).getExportSuggestions},
+}
+
+// getExportSuggestions completes the optional output path of /export.
+func (cli *ChatCLI) getExportSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	if len(strings.Fields(line)) <= 1 && !strings.HasSuffix(line, " ") {
+		return nil // still typing the command name itself
+	}
+	return cli.filePathCompleter(d.GetWordBeforeCursor())
 }
 
 // flagDescriptionKeys maps well-known flag names to their i18n description
@@ -278,6 +288,9 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/mcp", Description: i18n.T("complete.root.mcp")},
 		{Text: "/hooks", Description: i18n.T("complete.root.hooks")},
 		{Text: "/cost", Description: i18n.T("complete.root.cost")},
+		{Text: "/ratelimit", Description: i18n.T("complete.root.ratelimit")},
+		{Text: "/export", Description: i18n.T("complete.root.export")},
+		{Text: "/moa", Description: i18n.T("complete.root.moa")},
 		{Text: "/thinking", Description: i18n.T("complete.root.thinking")},
 		{Text: "/plan", Description: i18n.T("complete.root.plan")},
 		{Text: "/refine", Description: i18n.T("complete.root.refine")},
@@ -822,6 +835,7 @@ func (cli *ChatCLI) getSessionSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "save", Description: i18n.T("complete.session.sub_save")},
 			{Text: "load", Description: i18n.T("complete.session.sub_load")},
 			{Text: "list", Description: i18n.T("complete.session.sub_list")},
+			{Text: "search", Description: i18n.T("complete.session.sub_search")},
 			{Text: "delete", Description: i18n.T("complete.session.sub_delete")},
 			{Text: "fork", Description: i18n.T("complete.session.sub_fork")},
 		}
