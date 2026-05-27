@@ -338,7 +338,7 @@ func (cli *ChatCLI) jobsLogs(args []string) {
 	prevCycle := -1
 	for _, h := range j.History {
 		if h.CycleNum > 0 && h.CycleNum != prevCycle {
-			fmt.Println(colorize(fmt.Sprintf("  ── cycle #%d ──", h.CycleNum), ColorCyan))
+			fmt.Println(colorize("  "+i18n.T("scheduler.jobs.cycle_header", h.CycleNum), ColorCyan))
 			prevCycle = h.CycleNum
 		}
 		header := fmt.Sprintf("  #%d %s %s (%s)", h.AttemptNum, h.StartedAt.Format(time.RFC3339), h.Outcome, h.Duration)
@@ -355,10 +355,10 @@ func (cli *ChatCLI) jobsLogs(args []string) {
 			fmt.Println(colorize(indent(pref, h.Output), ColorGray))
 		}
 		if h.Error != "" {
-			fmt.Println(colorize(indent(pref, "err: "+h.Error), ColorRed))
+			fmt.Println(colorize(indent(pref, i18n.T("scheduler.jobs.err_prefix")+h.Error), ColorRed))
 		}
 		if h.ConditionDetails != "" {
-			fmt.Println(colorize(indent(pref, "cond: "+h.ConditionDetails), ColorGray))
+			fmt.Println(colorize(indent(pref, i18n.T("scheduler.jobs.cond_prefix")+h.ConditionDetails), ColorGray))
 		}
 	}
 }

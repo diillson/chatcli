@@ -17,7 +17,18 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/i18n"
 )
+
+// padRight pads s with spaces to w runes (rune-aware, unlike %-*s which counts
+// bytes and misaligns accented labels like "Ação").
+func padRight(s string, w int) string {
+	if n := len([]rune(s)); n < w {
+		return s + strings.Repeat(" ", w-n)
+	}
+	return s
+}
 
 // StatusBadge returns a fixed-width one-glyph label for a JobStatus.
 // Used by the status line prefix and the tree view.
@@ -86,7 +97,7 @@ func StatusLine(summaries []JobSummary) string {
 // Columns: STATUS | ID | NAME | OWNER | TYPE | NEXT FIRE | LAST
 func RenderList(summaries []JobSummary) string {
 	if len(summaries) == 0 {
-		return "  (no jobs)\n"
+		return "  " + i18n.T("scheduler.jobs.empty") + "\n"
 	}
 	type row struct {
 		cols [7]string
@@ -98,9 +109,9 @@ func RenderList(summaries []JobSummary) string {
 		if !s.NextFireAt.IsZero() {
 			d := s.NextFireAt.Sub(now)
 			if d < 0 {
-				nextFire = "overdue"
+				nextFire = i18n.T("scheduler.render.overdue")
 			} else {
-				nextFire = "in " + compactDuration(d)
+				nextFire = i18n.T("scheduler.render.in", compactDuration(d))
 			}
 		}
 		lastCol := "—"
@@ -118,7 +129,15 @@ func RenderList(summaries []JobSummary) string {
 		}})
 	}
 	widths := [7]int{8, 18, 22, 18, 18, 14, 10}
-	header := []string{"STATUS", "ID", "NAME", "OWNER", "TYPE", "NEXT FIRE", "LAST"}
+	header := []string{
+		i18n.T("scheduler.render.col_status"),
+		i18n.T("scheduler.render.col_id"),
+		i18n.T("scheduler.render.col_name"),
+		i18n.T("scheduler.render.col_owner"),
+		i18n.T("scheduler.render.col_type"),
+		i18n.T("scheduler.render.col_next_fire"),
+		i18n.T("scheduler.render.col_last"),
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "  %s\n", rowLine(widths, header))
 	fmt.Fprintf(&b, "  %s\n", rowLineSep(widths))
@@ -151,36 +170,40 @@ func rowLineSep(widths [7]int) string {
 // RenderShow emits the detailed `/jobs show <id>` view.
 func RenderShow(j *Job) string {
 	if j == nil {
-		return "(no job)\n"
+		return i18n.T("scheduler.jobs.empty") + "\n"
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Job %s (%s)\n", j.Name, j.ID)
-	fmt.Fprintf(&b, "  Owner    : %s\n", j.Owner)
-	fmt.Fprintf(&b, "  Status   : %s %s\n", j.Status, StatusBadge(j.Status))
-	fmt.Fprintf(&b, "  Type     : %s\n", j.Schedule.Kind)
-	fmt.Fprintf(&b, "  Created  : %s\n", j.CreatedAt.Format(time.RFC3339))
+
+	// Build the labeled rows, then align the colons to the widest (translated)
+	// label so the column lines up in any language.
+	type kv struct{ label, value string }
+	rows := []kv{
+		{i18n.T("scheduler.render.owner"), j.Owner.String()},
+		{i18n.T("scheduler.render.status"), fmt.Sprintf("%s %s", j.Status, StatusBadge(j.Status))},
+		{i18n.T("scheduler.render.type"), string(j.Schedule.Kind)},
+		{i18n.T("scheduler.render.created"), j.CreatedAt.Format(time.RFC3339)},
+	}
 	if !j.NextFireAt.IsZero() {
-		fmt.Fprintf(&b, "  NextFire : %s (%s)\n", j.NextFireAt.Format(time.RFC3339), compactDuration(time.Until(j.NextFireAt)))
+		rows = append(rows, kv{i18n.T("scheduler.render.next_fire"), fmt.Sprintf("%s (%s)", j.NextFireAt.Format(time.RFC3339), compactDuration(time.Until(j.NextFireAt)))})
 	}
 	if !j.FinishedAt.IsZero() {
-		fmt.Fprintf(&b, "  Finished : %s\n", j.FinishedAt.Format(time.RFC3339))
+		rows = append(rows, kv{i18n.T("scheduler.render.finished"), j.FinishedAt.Format(time.RFC3339)})
 	}
-	fmt.Fprintf(&b, "  Attempts : %d\n", j.Attempts)
-	fmt.Fprintf(&b, "  Action   : %s\n", j.Action.Type)
+	rows = append(rows, kv{i18n.T("scheduler.render.attempts"), fmt.Sprintf("%d", j.Attempts)})
+	rows = append(rows, kv{i18n.T("scheduler.render.action"), string(j.Action.Type)})
 	if cmd, ok := j.Action.Payload["command"].(string); ok {
-		fmt.Fprintf(&b, "    command: %s\n", cmd)
+		rows = append(rows, kv{i18n.T("scheduler.render.command"), cmd})
 	}
 	if j.Wait != nil {
-		fmt.Fprintf(&b, "  Wait     : %s\n", j.Wait.Condition.Type)
+		rows = append(rows, kv{i18n.T("scheduler.render.wait"), j.Wait.Condition.Type})
 	}
 	if len(j.DependsOn) > 0 {
-		fmt.Fprintf(&b, "  DependsOn: %v\n", j.DependsOn)
+		rows = append(rows, kv{i18n.T("scheduler.render.depends_on"), fmt.Sprintf("%v", j.DependsOn)})
 	}
 	if len(j.Triggers) > 0 {
-		fmt.Fprintf(&b, "  Triggers : %v\n", j.Triggers)
+		rows = append(rows, kv{i18n.T("scheduler.render.triggers"), fmt.Sprintf("%v", j.Triggers)})
 	}
 	if j.Description != "" {
-		fmt.Fprintf(&b, "  Description: %s\n", j.Description)
+		rows = append(rows, kv{i18n.T("scheduler.render.description"), j.Description})
 	}
 	if len(j.Tags) > 0 {
 		tags := make([]string, 0, len(j.Tags))
@@ -192,14 +215,28 @@ func RenderShow(j *Job) string {
 			}
 		}
 		sort.Strings(tags)
-		fmt.Fprintf(&b, "  Tags     : %s\n", strings.Join(tags, ", "))
+		rows = append(rows, kv{i18n.T("scheduler.render.tags"), strings.Join(tags, ", ")})
 	}
-	if n := len(j.History); n > 0 {
-		header := fmt.Sprintf("  History (%d", n)
-		if j.CycleCount > 0 {
-			header += fmt.Sprintf(", %d cycles", j.CycleCount)
+
+	labelW := 0
+	for _, r := range rows {
+		if n := len([]rune(r.label)); n > labelW {
+			labelW = n
 		}
-		header += "):\n"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Job %s (%s)\n", j.Name, j.ID)
+	for _, r := range rows {
+		fmt.Fprintf(&b, "  %s : %s\n", padRight(r.label, labelW), r.value)
+	}
+
+	if n := len(j.History); n > 0 {
+		header := "  " + i18n.T("scheduler.render.history", n)
+		if j.CycleCount > 0 {
+			header += i18n.T("scheduler.render.cycles", j.CycleCount)
+		}
+		header += ":\n"
 		fmt.Fprint(&b, header)
 		for i := len(j.History) - 1; i >= 0 && i >= len(j.History)-10; i-- {
 			r := j.History[i]
@@ -220,7 +257,7 @@ func RenderShow(j *Job) string {
 		}
 	}
 	if n := len(j.Transitions); n > 0 && n <= 16 {
-		fmt.Fprintf(&b, "  Transitions:\n")
+		fmt.Fprintf(&b, "  %s:\n", i18n.T("scheduler.render.transitions"))
 		for _, t := range j.Transitions {
 			fmt.Fprintf(&b, "    %s  %s → %s  %s\n", t.At.Format(time.RFC3339), t.From, t.To, t.Message)
 		}

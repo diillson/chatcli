@@ -27,87 +27,101 @@ import (
 
 // ─── Shared value vocabularies ─────────────────────────────────
 
-// scheduleStatusValues are the JobStatus strings the user may filter
+// scheduleStatusValues() are the JobStatus strings the user may filter
 // on via --status. Terminal statuses appear after the active ones so
 // the dropdown ordering matches mental model.
-var scheduleStatusValues = []prompt.Suggest{
-	{Text: "pending", Description: i18n.T("sched.status.pending")},
-	{Text: "blocked", Description: i18n.T("sched.status.blocked")},
-	{Text: "waiting", Description: i18n.T("sched.status.waiting")},
-	{Text: "running", Description: i18n.T("sched.status.running")},
-	{Text: "paused", Description: i18n.T("sched.status.paused")},
-	{Text: "completed", Description: i18n.T("sched.status.completed")},
-	{Text: "failed", Description: i18n.T("sched.status.failed")},
-	{Text: "cancelled", Description: i18n.T("sched.status.cancelled")},
-	{Text: "timed_out", Description: i18n.T("sched.status.timed_out")},
-	{Text: "skipped", Description: i18n.T("sched.status.skipped")},
+func scheduleStatusValues() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "pending", Description: i18n.T("sched.status.pending")},
+		{Text: "blocked", Description: i18n.T("sched.status.blocked")},
+		{Text: "waiting", Description: i18n.T("sched.status.waiting")},
+		{Text: "running", Description: i18n.T("sched.status.running")},
+		{Text: "paused", Description: i18n.T("sched.status.paused")},
+		{Text: "completed", Description: i18n.T("sched.status.completed")},
+		{Text: "failed", Description: i18n.T("sched.status.failed")},
+		{Text: string(scheduler.StatusCancelled), Description: i18n.T("sched.status.cancelled")},
+		{Text: "timed_out", Description: i18n.T("sched.status.timed_out")},
+		{Text: "skipped", Description: i18n.T("sched.status.skipped")},
+	}
 }
 
-var scheduleOwnerValues = []prompt.Suggest{
-	{Text: "me", Description: i18n.T("sched.owner.me")},
-	{Text: "user", Description: i18n.T("sched.owner.user")},
-	{Text: "agent", Description: i18n.T("sched.owner.agent")},
-	{Text: "worker", Description: i18n.T("sched.owner.worker")},
-	{Text: "system", Description: i18n.T("sched.owner.system")},
-	{Text: "hook", Description: i18n.T("sched.owner.hook")},
+func scheduleOwnerValues() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "me", Description: i18n.T("sched.owner.me")},
+		{Text: "user", Description: i18n.T("sched.owner.user")},
+		{Text: "agent", Description: i18n.T("sched.owner.agent")},
+		{Text: "worker", Description: i18n.T("sched.owner.worker")},
+		{Text: "system", Description: i18n.T("sched.owner.system")},
+		{Text: "hook", Description: i18n.T("sched.owner.hook")},
+	}
 }
 
-var scheduleOnTimeoutValues = []prompt.Suggest{
-	{Text: "fail", Description: i18n.T("sched.ontimeout.fail")},
-	{Text: "fire_anyway", Description: i18n.T("sched.ontimeout.fire_anyway")},
-	{Text: "fallback", Description: i18n.T("sched.ontimeout.fallback")},
+func scheduleOnTimeoutValues() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "fail", Description: i18n.T("sched.ontimeout.fail")},
+		{Text: "fire_anyway", Description: i18n.T("sched.ontimeout.fire_anyway")},
+		{Text: "fallback", Description: i18n.T("sched.ontimeout.fallback")},
+	}
 }
 
-// scheduleWhenHints are DSL templates the user can pick as a starting
+// scheduleWhenHints() are DSL templates the user can pick as a starting
 // point for --when. Values are copy-pasteable literals.
-var scheduleWhenHints = []prompt.Suggest{
-	{Text: "+5m", Description: i18n.T("sched.when.relative_5m")},
-	{Text: "+30s", Description: i18n.T("sched.when.relative_30s")},
-	{Text: "in 2h", Description: i18n.T("sched.when.relative_in_2h")},
-	{Text: "every 30s", Description: i18n.T("sched.when.every_30s")},
-	{Text: "every 5m", Description: i18n.T("sched.when.every_5m")},
-	{Text: "every 1h", Description: i18n.T("sched.when.every_1h")},
-	{Text: "@hourly", Description: i18n.T("sched.when.at_hourly")},
-	{Text: "@daily", Description: i18n.T("sched.when.at_daily")},
-	{Text: "@weekly", Description: i18n.T("sched.when.at_weekly")},
-	{Text: "cron:0 2 * * *", Description: i18n.T("sched.when.cron_0_2")},
-	{Text: "when-ready", Description: i18n.T("sched.when.when_ready")},
-	{Text: "manual", Description: i18n.T("sched.when.manual")},
+func scheduleWhenHints() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "+5m", Description: i18n.T("sched.when.relative_5m")},
+		{Text: "+30s", Description: i18n.T("sched.when.relative_30s")},
+		{Text: "in 2h", Description: i18n.T("sched.when.relative_in_2h")},
+		{Text: "every 30s", Description: i18n.T("sched.when.every_30s")},
+		{Text: "every 5m", Description: i18n.T("sched.when.every_5m")},
+		{Text: "every 1h", Description: i18n.T("sched.when.every_1h")},
+		{Text: "@hourly", Description: i18n.T("sched.when.at_hourly")},
+		{Text: "@daily", Description: i18n.T("sched.when.at_daily")},
+		{Text: "@weekly", Description: i18n.T("sched.when.at_weekly")},
+		{Text: "cron:0 2 * * *", Description: i18n.T("sched.when.cron_0_2")},
+		{Text: "when-ready", Description: i18n.T("sched.when.when_ready")},
+		{Text: "manual", Description: i18n.T("sched.when.manual")},
+	}
 }
 
-var scheduleUntilHints = []prompt.Suggest{
-	{Text: "http://localhost:8080/health==200", Description: i18n.T("sched.until.http_200")},
-	{Text: "tcp://localhost:5432", Description: i18n.T("sched.until.tcp_port")},
-	{Text: "k8s:pod/prod/api:Ready", Description: i18n.T("sched.until.k8s_pod")},
-	{Text: "k8s:deployment/prod/api:Available", Description: i18n.T("sched.until.k8s_deploy")},
-	{Text: "docker:container-name:healthy", Description: i18n.T("sched.until.docker_healthy")},
-	{Text: "file:/tmp/done", Description: i18n.T("sched.until.file_exists")},
-	{Text: "shell: test -f /tmp/done", Description: i18n.T("sched.until.shell_exit")},
-	{Text: "llm: is the deploy healthy?", Description: i18n.T("sched.until.llm_check")},
+func scheduleUntilHints() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "http://localhost:8080/health==200", Description: i18n.T("sched.until.http_200")},
+		{Text: "tcp://localhost:5432", Description: i18n.T("sched.until.tcp_port")},
+		{Text: "k8s:pod/prod/api:Ready", Description: i18n.T("sched.until.k8s_pod")},
+		{Text: "k8s:deployment/prod/api:Available", Description: i18n.T("sched.until.k8s_deploy")},
+		{Text: "docker:container-name:healthy", Description: i18n.T("sched.until.docker_healthy")},
+		{Text: "file:/tmp/done", Description: i18n.T("sched.until.file_exists")},
+		{Text: "shell: test -f /tmp/done", Description: i18n.T("sched.until.shell_exit")},
+		{Text: "llm: is the deploy healthy?", Description: i18n.T("sched.until.llm_check")},
+	}
 }
 
-var scheduleDoHints = []prompt.Suggest{
-	{Text: "/run ", Description: i18n.T("sched.do.slash_run")},
-	{Text: "shell: ", Description: i18n.T("sched.do.shell")},
-	{Text: "agent: ", Description: i18n.T("sched.do.agent")},
-	{Text: "llm: ", Description: i18n.T("sched.do.llm")},
-	{Text: "noop", Description: i18n.T("sched.do.noop")},
-	{Text: "POST https://", Description: i18n.T("sched.do.webhook")},
-	{Text: "hook:PostToolUse", Description: i18n.T("sched.do.hook")},
+func scheduleDoHints() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "/run ", Description: i18n.T("sched.do.slash_run")},
+		{Text: "shell: ", Description: i18n.T("sched.do.shell")},
+		{Text: "agent: ", Description: i18n.T("sched.do.agent")},
+		{Text: "llm: ", Description: i18n.T("sched.do.llm")},
+		{Text: "noop", Description: i18n.T("sched.do.noop")},
+		{Text: "POST https://", Description: i18n.T("sched.do.webhook")},
+		{Text: "hook:PostToolUse", Description: i18n.T("sched.do.hook")},
+	}
 }
 
-// scheduleDurationHints offers reasonable defaults for duration-valued
+// scheduleDurationHints() offers reasonable defaults for duration-valued
 // flags (--timeout, --poll, --every, --ttl, --wait-timeout).
-var scheduleDurationHints = []prompt.Suggest{
-	{Text: "5s", Description: ""},
-	{Text: "30s", Description: ""},
-	{Text: "1m", Description: ""},
-	{Text: "5m", Description: ""},
-	{Text: "10m", Description: ""},
-	{Text: "30m", Description: ""},
-	{Text: "1h", Description: ""},
-	{Text: "6h", Description: ""},
-	{Text: "24h", Description: ""},
+func scheduleDurationHints() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "5s", Description: ""},
+		{Text: "30s", Description: ""},
+		{Text: "1m", Description: ""},
+		{Text: "5m", Description: ""},
+		{Text: "10m", Description: ""},
+		{Text: "30m", Description: ""},
+		{Text: "1h", Description: ""},
+		{Text: "6h", Description: ""},
+		{Text: "24h", Description: ""},
+	}
 }
 
 // ─── /schedule ────────────────────────────────────────────────
@@ -135,19 +149,19 @@ func (cli *ChatCLI) getScheduleSuggestions(d prompt.Document) []prompt.Suggest {
 	switch prevFlag {
 	case "--when", "--cron", "--every":
 		if prevFlag == "--when" {
-			return prompt.FilterHasPrefix(scheduleWhenHints, current, true)
+			return prompt.FilterHasPrefix(scheduleWhenHints(), current, true)
 		}
 		if prevFlag == "--every" {
-			return prompt.FilterHasPrefix(scheduleDurationHints, current, true)
+			return prompt.FilterHasPrefix(scheduleDurationHints(), current, true)
 		}
 	case "--do":
-		return prompt.FilterHasPrefix(scheduleDoHints, current, true)
+		return prompt.FilterHasPrefix(scheduleDoHints(), current, true)
 	case "--wait", "--until":
-		return prompt.FilterHasPrefix(scheduleUntilHints, current, true)
+		return prompt.FilterHasPrefix(scheduleUntilHints(), current, true)
 	case "--timeout", "--wait-timeout", "--poll", "--ttl":
-		return prompt.FilterHasPrefix(scheduleDurationHints, current, true)
+		return prompt.FilterHasPrefix(scheduleDurationHints(), current, true)
 	case "--on-timeout":
-		return prompt.FilterHasPrefix(scheduleOnTimeoutValues, current, true)
+		return prompt.FilterHasPrefix(scheduleOnTimeoutValues(), current, true)
 	case "--depends-on", "--triggers":
 		return prompt.FilterHasPrefix(cli.schedulerJobIDSuggestions(true), current, true)
 	case "--tag":
@@ -206,13 +220,13 @@ func (cli *ChatCLI) getWaitSuggestions(d prompt.Document) []prompt.Suggest {
 	prevFlag := lastFlag(args, trailingSpace)
 	switch prevFlag {
 	case "--until":
-		return prompt.FilterHasPrefix(scheduleUntilHints, current, true)
+		return prompt.FilterHasPrefix(scheduleUntilHints(), current, true)
 	case "--then":
-		return prompt.FilterHasPrefix(scheduleDoHints, current, true)
+		return prompt.FilterHasPrefix(scheduleDoHints(), current, true)
 	case "--every", "--timeout":
-		return prompt.FilterHasPrefix(scheduleDurationHints, current, true)
+		return prompt.FilterHasPrefix(scheduleDurationHints(), current, true)
 	case "--on-timeout":
-		return prompt.FilterHasPrefix(scheduleOnTimeoutValues, current, true)
+		return prompt.FilterHasPrefix(scheduleOnTimeoutValues(), current, true)
 	case "--max-polls", "--name":
 		return nil
 	}
@@ -248,63 +262,73 @@ var jobsIDSubcommands = map[string]bool{
 	"logs":   true,
 }
 
-// jobsSubcommandSuggestions lists the top-level subcommand table.
-var jobsSubcommandSuggestions = []prompt.Suggest{
-	{Text: "list", Description: i18n.T("sched.jobs.sub.list")},
-	{Text: "show", Description: i18n.T("sched.jobs.sub.show")},
-	{Text: "tree", Description: i18n.T("sched.jobs.sub.tree")},
-	{Text: "cancel", Description: i18n.T("sched.jobs.sub.cancel")},
-	{Text: "pause", Description: i18n.T("sched.jobs.sub.pause")},
-	{Text: "resume", Description: i18n.T("sched.jobs.sub.resume")},
-	{Text: "logs", Description: i18n.T("sched.jobs.sub.logs")},
-	{Text: "history", Description: i18n.T("sched.jobs.sub.history")},
-	{Text: "clear", Description: i18n.T("sched.jobs.sub.clear")},
-	{Text: "clean", Description: i18n.T("sched.jobs.sub.clear")},
-	{Text: "prune", Description: i18n.T("sched.jobs.sub.clear")},
-	{Text: "daemon", Description: i18n.T("sched.jobs.sub.daemon")},
-	{Text: "gc", Description: i18n.T("sched.jobs.sub.gc")},
-	{Text: "help", Description: i18n.T("sched.complete.help")},
+// jobsSubcommandSuggestions() lists the top-level subcommand table.
+func jobsSubcommandSuggestions() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "list", Description: i18n.T("sched.jobs.sub.list")},
+		{Text: "show", Description: i18n.T("sched.jobs.sub.show")},
+		{Text: "tree", Description: i18n.T("sched.jobs.sub.tree")},
+		{Text: "cancel", Description: i18n.T("sched.jobs.sub.cancel")},
+		{Text: "pause", Description: i18n.T("sched.jobs.sub.pause")},
+		{Text: "resume", Description: i18n.T("sched.jobs.sub.resume")},
+		{Text: "logs", Description: i18n.T("sched.jobs.sub.logs")},
+		{Text: "history", Description: i18n.T("sched.jobs.sub.history")},
+		{Text: "clear", Description: i18n.T("sched.jobs.sub.clear")},
+		{Text: "clean", Description: i18n.T("sched.jobs.sub.clear")},
+		{Text: "prune", Description: i18n.T("sched.jobs.sub.clear")},
+		{Text: "daemon", Description: i18n.T("sched.jobs.sub.daemon")},
+		{Text: "gc", Description: i18n.T("sched.jobs.sub.gc")},
+		{Text: "help", Description: i18n.T("sched.complete.help")},
+	}
 }
 
-var jobsListFlagSuggestions = []prompt.Suggest{
-	{Text: "--all", Description: i18n.T("sched.jobs.flag.all")},
-	{Text: "--status", Description: i18n.T("sched.jobs.flag.status")},
-	{Text: "--owner", Description: i18n.T("sched.jobs.flag.owner")},
-	{Text: "--tag", Description: i18n.T("sched.jobs.flag.tag")},
-	{Text: "--name", Description: i18n.T("sched.jobs.flag.name")},
+func jobsListFlagSuggestions() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "--all", Description: i18n.T("sched.jobs.flag.all")},
+		{Text: "--status", Description: i18n.T("sched.jobs.flag.status")},
+		{Text: "--owner", Description: i18n.T("sched.jobs.flag.owner")},
+		{Text: "--tag", Description: i18n.T("sched.jobs.flag.tag")},
+		{Text: "--name", Description: i18n.T("sched.jobs.flag.name")},
+	}
 }
 
-// jobsClearFlagSuggestions are the flags accepted by /jobs clear (and
+// jobsClearFlagSuggestions() are the flags accepted by /jobs clear (and
 // its aliases /jobs clean / /jobs prune). Status shortcuts appear
 // before the more verbose --status to keep the dropdown ergonomic.
-var jobsClearFlagSuggestions = []prompt.Suggest{
-	{Text: "--failed", Description: i18n.T("sched.jobs.clear.flag.failed")},
-	{Text: "--succeeded", Description: i18n.T("sched.jobs.clear.flag.succeeded")},
-	{Text: "--cancelled", Description: i18n.T("sched.jobs.clear.flag.cancelled")},
-	{Text: "--timed-out", Description: i18n.T("sched.jobs.clear.flag.timed_out")},
-	{Text: "--status", Description: i18n.T("sched.jobs.clear.flag.status")},
-	{Text: "--older-than", Description: i18n.T("sched.jobs.clear.flag.older_than")},
-	{Text: "--name", Description: i18n.T("sched.jobs.clear.flag.name")},
-	{Text: "--mine", Description: i18n.T("sched.jobs.clear.flag.mine")},
-	{Text: "--yes", Description: i18n.T("sched.jobs.clear.flag.yes")},
+func jobsClearFlagSuggestions() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "--failed", Description: i18n.T("sched.jobs.clear.flag.failed")},
+		{Text: "--succeeded", Description: i18n.T("sched.jobs.clear.flag.succeeded")},
+		{Text: "--" + string(scheduler.StatusCancelled), Description: i18n.T("sched.jobs.clear.flag.cancelled")},
+		{Text: "--timed-out", Description: i18n.T("sched.jobs.clear.flag.timed_out")},
+		{Text: "--status", Description: i18n.T("sched.jobs.clear.flag.status")},
+		{Text: "--older-than", Description: i18n.T("sched.jobs.clear.flag.older_than")},
+		{Text: "--name", Description: i18n.T("sched.jobs.clear.flag.name")},
+		{Text: "--mine", Description: i18n.T("sched.jobs.clear.flag.mine")},
+		{Text: "--yes", Description: i18n.T("sched.jobs.clear.flag.yes")},
+	}
 }
 
-// jobsClearStatusValues lists only terminal statuses since /jobs clear
+// jobsClearStatusValues() lists only terminal statuses since /jobs clear
 // won't ever match active jobs (Prune ignores non-terminal). Surfacing
 // non-terminals would just frustrate the user.
-var jobsClearStatusValues = []prompt.Suggest{
-	{Text: "completed", Description: i18n.T("sched.status.completed")},
-	{Text: "failed", Description: i18n.T("sched.status.failed")},
-	{Text: "cancelled", Description: i18n.T("sched.status.cancelled")},
-	{Text: "timed_out", Description: i18n.T("sched.status.timed_out")},
-	{Text: "skipped", Description: i18n.T("sched.status.skipped")},
+func jobsClearStatusValues() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "completed", Description: i18n.T("sched.status.completed")},
+		{Text: "failed", Description: i18n.T("sched.status.failed")},
+		{Text: string(scheduler.StatusCancelled), Description: i18n.T("sched.status.cancelled")},
+		{Text: "timed_out", Description: i18n.T("sched.status.timed_out")},
+		{Text: "skipped", Description: i18n.T("sched.status.skipped")},
+	}
 }
 
-var jobsDaemonSubcommands = []prompt.Suggest{
-	{Text: "status", Description: i18n.T("sched.jobs.daemon.status")},
-	{Text: "start", Description: i18n.T("sched.jobs.daemon.start")},
-	{Text: "stop", Description: i18n.T("sched.jobs.daemon.stop")},
-	{Text: "restart", Description: i18n.T("sched.jobs.daemon.restart")},
+func jobsDaemonSubcommands() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "status", Description: i18n.T("sched.jobs.daemon.status")},
+		{Text: "start", Description: i18n.T("sched.jobs.daemon.start")},
+		{Text: "stop", Description: i18n.T("sched.jobs.daemon.stop")},
+		{Text: "restart", Description: i18n.T("sched.jobs.daemon.restart")},
+	}
 }
 
 func (cli *ChatCLI) getJobsSuggestions(d prompt.Document) []prompt.Suggest {
@@ -316,7 +340,7 @@ func (cli *ChatCLI) getJobsSuggestions(d prompt.Document) []prompt.Suggest {
 
 	// "/jobs" alone — suggest subcommand.
 	if len(args) == 0 || (len(args) == 1 && !trailingSpace) {
-		return prompt.FilterHasPrefix(jobsSubcommandSuggestions, current, true)
+		return prompt.FilterHasPrefix(jobsSubcommandSuggestions(), current, true)
 	}
 
 	sub := args[0]
@@ -338,14 +362,14 @@ func (cli *ChatCLI) getJobsSuggestions(d prompt.Document) []prompt.Suggest {
 		prevFlag := lastFlag(args[1:], trailingSpace)
 		switch prevFlag {
 		case "--status":
-			return prompt.FilterHasPrefix(scheduleStatusValues, current, true)
+			return prompt.FilterHasPrefix(scheduleStatusValues(), current, true)
 		case "--owner":
-			return prompt.FilterHasPrefix(scheduleOwnerValues, current, true)
+			return prompt.FilterHasPrefix(scheduleOwnerValues(), current, true)
 		case "--tag", "--name":
 			return nil
 		}
 		if strings.HasPrefix(current, "-") || trailingSpace {
-			return prompt.FilterHasPrefix(jobsListFlagSuggestions, current, true)
+			return prompt.FilterHasPrefix(jobsListFlagSuggestions(), current, true)
 		}
 		return nil
 	}
@@ -356,7 +380,7 @@ func (cli *ChatCLI) getJobsSuggestions(d prompt.Document) []prompt.Suggest {
 
 	if sub == "daemon" {
 		if len(args) == 1 || (len(args) == 2 && !trailingSpace) {
-			return prompt.FilterHasPrefix(jobsDaemonSubcommands, current, true)
+			return prompt.FilterHasPrefix(jobsDaemonSubcommands(), current, true)
 		}
 		return nil
 	}
@@ -367,7 +391,7 @@ func (cli *ChatCLI) getJobsSuggestions(d prompt.Document) []prompt.Suggest {
 		prevFlag := lastFlag(args[1:], trailingSpace)
 		switch prevFlag {
 		case "--status":
-			return prompt.FilterHasPrefix(jobsClearStatusValues, current, true)
+			return prompt.FilterHasPrefix(jobsClearStatusValues(), current, true)
 		case "--name", "--older-than":
 			// Free-form values; let the user type. Could surface
 			// duration hints here but keeping the dropdown empty
@@ -375,7 +399,7 @@ func (cli *ChatCLI) getJobsSuggestions(d prompt.Document) []prompt.Suggest {
 			return nil
 		}
 		if strings.HasPrefix(current, "-") || trailingSpace {
-			return prompt.FilterHasPrefix(jobsClearFlagSuggestions, current, true)
+			return prompt.FilterHasPrefix(jobsClearFlagSuggestions(), current, true)
 		}
 		return nil
 	}
