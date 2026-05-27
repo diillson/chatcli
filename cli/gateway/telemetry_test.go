@@ -75,9 +75,11 @@ func TestLoggingTransport_LogsAndSanitizes(t *testing.T) {
 
 	// A sendMessage call logs at Info with the token stripped from the path.
 	req, _ := http.NewRequest(http.MethodPost, "https://api.telegram.org/bot123:SECRET/sendMessage", nil)
-	if _, err := c.Transport.RoundTrip(req); err != nil {
-		t.Fatalf("RoundTrip: %v", err)
+	resp, rtErr := c.Transport.RoundTrip(req)
+	if rtErr != nil {
+		t.Fatalf("RoundTrip: %v", rtErr)
 	}
+	_ = resp.Body.Close()
 	entries := logs.FilterMessage("gateway: external request").All()
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 external-request log, got %d", len(entries))
@@ -92,9 +94,11 @@ func TestLoggingTransport_LogsAndSanitizes(t *testing.T) {
 
 	// A getUpdates poll logs at Debug (filtered out by the Info-level observer).
 	pollReq, _ := http.NewRequest(http.MethodGet, "https://api.telegram.org/bot123:SECRET/getUpdates", nil)
-	if _, err := c.Transport.RoundTrip(pollReq); err != nil {
-		t.Fatalf("RoundTrip poll: %v", err)
+	pollResp, rtErr := c.Transport.RoundTrip(pollReq)
+	if rtErr != nil {
+		t.Fatalf("RoundTrip poll: %v", rtErr)
 	}
+	_ = pollResp.Body.Close()
 	if n := logs.FilterMessage("gateway: external poll").Len(); n != 0 {
 		t.Errorf("poll should log at Debug (suppressed at Info), got %d Info entries", n)
 	}

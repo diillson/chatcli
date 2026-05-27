@@ -982,7 +982,7 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 var executeBlockRe = regexp.MustCompile("(?s)```execute:\\s*[a-zA-Z0-9_-]+\\s*\n.*?```")
 
 // stripCommandBlocksText returns the model response with its ```execute blocks
-// replaced by compact [Comando #N] placeholders — the clean prose delivered as
+// replaced by compact [Command #N] placeholders — the clean prose delivered as
 // the unattended (gateway) final answer. Mirrors displayResponseWithoutCommands.
 // Replacing by regex (not by reconstructing each block's literal text) ensures
 // every fence is removed regardless of internal whitespace.
@@ -994,7 +994,7 @@ func stripCommandBlocksText(response string, blocks []CommandBlock) string {
 			desc = blocks[n].Description
 		}
 		n++
-		return fmt.Sprintf("\n[Comando #%d: %s]\n", n, desc)
+		return fmt.Sprintf("\n[Command #%d: %s]\n", n, desc)
 	})
 	return strings.TrimSpace(out)
 }

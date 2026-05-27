@@ -152,7 +152,7 @@ func (cli *ChatCLI) gatewayStop() {
 }
 
 // RunGatewayForeground builds the configured adapters and runs the messaging
-// runner in the foreground until ctx is cancelled. It is the body of the
+// runner in the foreground until ctx is canceled. It is the body of the
 // detached `chatcli gateway` subcommand; the agent runs fully unattended.
 func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 	cli.SetUnattended(true)

@@ -204,7 +204,7 @@ func TestStripCommandBlocksText(t *testing.T) {
 	if strings.Contains(out, "```execute") {
 		t.Errorf("execute block should be replaced: %q", out)
 	}
-	if !strings.Contains(out, "[Comando #1: list]") || !strings.Contains(out, "Here is the plan.") {
+	if !strings.Contains(out, "[Command #1: list]") || !strings.Contains(out, "Here is the plan.") {
 		t.Errorf("placeholder/prose missing: %q", out)
 	}
 
@@ -216,7 +216,7 @@ func TestStripCommandBlocksText(t *testing.T) {
 	if strings.Contains(out2, "```") || strings.Contains(out2, "echo") {
 		t.Errorf("trailing-newline execute block should be stripped: %q", out2)
 	}
-	if !strings.Contains(out2, "[Comando #1: greet]") || !strings.Contains(out2, "Tudo em paz!") {
+	if !strings.Contains(out2, "[Command #1: greet]") || !strings.Contains(out2, "Tudo em paz!") {
 		t.Errorf("placeholder/prose missing: %q", out2)
 	}
 }
@@ -225,5 +225,27 @@ func TestReadLine_Unattended(t *testing.T) {
 	a := &AgentMode{cli: &ChatCLI{unattended: true}}
 	if got := a.readLine(); got != unattendedConfirmAnswer {
 		t.Errorf("unattended readLine should auto-confirm, got %q", got)
+	}
+}
+
+// TestTeeLoggerToGatewayLog verifies the daemon's logger is teed into the
+// advertised gateway.log so the file is not a false promise.
+func TestTeeLoggerToGatewayLog(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	c := &ChatCLI{logger: zap.NewNop()}
+	closeTee := c.teeLoggerToGatewayLog()
+	if closeTee == nil {
+		t.Fatal("expected a non-nil closer when gateway.log is writable")
+	}
+	c.logger.Info("hello-gateway-log")
+	closeTee()
+
+	data, err := os.ReadFile(filepath.Join(tmp, ".chatcli", "gateway.log"))
+	if err != nil {
+		t.Fatalf("gateway.log not written: %v", err)
+	}
+	if !strings.Contains(string(data), "hello-gateway-log") {
+		t.Errorf("gateway.log missing the teed entry: %s", data)
 	}
 }
