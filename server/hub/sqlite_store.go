@@ -73,7 +73,7 @@ type SQLiteStore struct {
 
 // OpenSQLiteStore opens (creating if needed) the Hub database at path with WAL
 // journaling and runs migrations. A nil logger is replaced with a no-op.
-func OpenSQLiteStore(path string, logger *zap.Logger) (*SQLiteStore, error) {
+func OpenSQLiteStore(ctx context.Context, path string, logger *zap.Logger) (*SQLiteStore, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -84,11 +84,11 @@ func OpenSQLiteStore(path string, logger *zap.Logger) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("hub: open sqlite at %s: %w", path, err)
 	}
-	if err := db.PingContext(context.Background()); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("hub: ping sqlite at %s: %w", path, err)
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.ExecContext(ctx, schema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("hub: migrate schema: %w", err)
 	}

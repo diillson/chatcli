@@ -19,7 +19,7 @@ import (
 
 func newTestHubSessions(t *testing.T) (*hubSessions, hub.Store) {
 	t.Helper()
-	store, err := hub.OpenSQLiteStore(filepath.Join(t.TempDir(), "hub.db"), nil)
+	store, err := hub.OpenSQLiteStore(context.Background(), filepath.Join(t.TempDir(), "hub.db"), nil)
 	if err != nil {
 		t.Fatalf("OpenSQLiteStore: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestHubSessionsBeginFinishPersists(t *testing.T) {
 	// A second turn must carry the first turn as preamble context.
 	turn2 := hs.begin(ctx, gateway.InboundMessage{Platform: "telegram", ChatID: "42", UserID: "u1", Text: "again"})
 	if !strings.Contains(turn2.preamble, "ping") || !strings.Contains(turn2.preamble, "pong") {
-		t.Fatalf("preamble missing prior dialogue: %q", turn2.preamble)
+		t.Fatalf("preamble missing prior dialog: %q", turn2.preamble)
 	}
 }
 
@@ -116,7 +116,7 @@ func TestHubSessionsLoadBindings(t *testing.T) {
 // records publishes live to a subscriber — i.e. a connected notebook sees a
 // Telegram message in real time.
 func TestGatewayCoLocationPublishesToSubscribers(t *testing.T) {
-	store, err := hub.OpenSQLiteStore(filepath.Join(t.TempDir(), "hub.db"), nil)
+	store, err := hub.OpenSQLiteStore(context.Background(), filepath.Join(t.TempDir(), "hub.db"), nil)
 	if err != nil {
 		t.Fatalf("OpenSQLiteStore: %v", err)
 	}

@@ -139,7 +139,7 @@ func (hs *HubSync) newSession(ctx context.Context) error {
 	return nil
 }
 
-// startTail runs the live-tail loop until ctx is cancelled, re-subscribing on
+// startTail runs the live-tail loop until ctx is canceled, re-subscribing on
 // stream end (server resync signal) and on conversation rotation. It renders
 // only events that arrived from other channels.
 func (hs *HubSync) startTail(ctx context.Context) {
@@ -190,7 +190,7 @@ func (hs *HubSync) startTail(ctx context.Context) {
 	}()
 }
 
-// sleepCtx sleeps for d, returning false if ctx is cancelled first.
+// sleepCtx sleeps for d, returning false if ctx is canceled first.
 func sleepCtx(ctx context.Context, d time.Duration) bool {
 	select {
 	case <-ctx.Done():

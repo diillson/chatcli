@@ -6,6 +6,7 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -210,8 +211,10 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 }
 
 // openServerHub opens the conversation hub database (see hub.OpenDefault).
+// server.New has no request context, so the hub is opened with a background
+// context — this is a process-lifetime resource, not a per-request one.
 func openServerHub(logger *zap.Logger) (hub.Broker, error) {
-	return hub.OpenDefault(logger)
+	return hub.OpenDefault(context.Background(), logger)
 }
 
 // Hub returns the server's conversation hub broker, or nil when the hub is

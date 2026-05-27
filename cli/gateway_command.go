@@ -178,7 +178,7 @@ func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 	// than failing the daemon. A typed-nil must not reach newHubSessions, so we
 	// only assign broker on success.
 	var broker hub.Store
-	if m, err := hub.OpenDefault(cli.logger); err != nil {
+	if m, err := hub.OpenDefault(ctx, cli.logger); err != nil {
 		cli.logger.Warn("gateway: conversation hub unavailable; continuing without cross-channel continuity", zap.Error(err))
 	} else {
 		broker = m
@@ -281,7 +281,7 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 
 		// Resolve the sender's shared conversation and record the incoming turn
 		// before running, so the message survives even if the run fails. preamble
-		// carries the prior dialogue (across every channel) as context.
+		// carries the prior dialog (across every channel) as context.
 		conv := sessions.begin(ctx, msg)
 		task := msg.Text
 		if pre := conv.preamble; pre != "" {
@@ -368,7 +368,7 @@ func gatewayRunningPID() (int, bool) {
 	return pid, true
 }
 
-// gatewayContextTurns bounds how many prior dialogue turns are fed back as
+// gatewayContextTurns bounds how many prior dialog turns are fed back as
 // context per run, keeping the prompt bounded on a long-lived daemon.
 const gatewayContextTurns = 12
 
@@ -441,7 +441,7 @@ type gatewayTurn struct {
 }
 
 // begin resolves the sender's shared conversation, records the incoming user
-// turn, and builds the preamble from prior dialogue. It never fails the run:
+// turn, and builds the preamble from prior dialog. It never fails the run:
 // hub errors degrade to an empty preamble.
 func (s *hubSessions) begin(ctx context.Context, msg gateway.InboundMessage) *gatewayTurn {
 	turn := &gatewayTurn{sessions: s, channel: msg.Platform}
@@ -456,7 +456,7 @@ func (s *hubSessions) begin(ctx context.Context, msg gateway.InboundMessage) *ga
 	}
 	turn.convID = convID
 
-	// Context first, from the dialogue so far (before this message lands).
+	// Context first, from the dialog so far (before this message lands).
 	recent, err := s.store.Read(ctx, convID, 0, 0)
 	if err != nil {
 		s.logger.Warn("gateway: hub read failed", zap.Error(err))
@@ -491,7 +491,7 @@ func (t *gatewayTurn) finish(ctx context.Context, reply string) {
 	}
 }
 
-// renderGatewayPreamble turns the most recent dialogue turns into a compact
+// renderGatewayPreamble turns the most recent dialog turns into a compact
 // context block, or "" when the conversation is new. tool_summary/checkpoint
 // events are surfaced as system context (see ConversationEvent.ToMessage).
 func renderGatewayPreamble(events []models.ConversationEvent) string {

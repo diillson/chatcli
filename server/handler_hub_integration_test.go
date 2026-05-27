@@ -33,7 +33,7 @@ func (s ctxStream) Context() context.Context { return s.ctx }
 // appended by one client is delivered live to another client tailing the same
 // conversation — exactly the Telegram→notebook continuity scenario.
 func TestHubGRPCEndToEndTail(t *testing.T) {
-	store, err := hub.OpenSQLiteStore(filepath.Join(t.TempDir(), "hub.db"), nil)
+	store, err := hub.OpenSQLiteStore(context.Background(), filepath.Join(t.TempDir(), "hub.db"), nil)
 	if err != nil {
 		t.Fatalf("OpenSQLiteStore: %v", err)
 	}

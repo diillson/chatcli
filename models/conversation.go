@@ -10,7 +10,7 @@ import "time"
 
 // Conversation event roles for the cross-channel conversation log held by
 // the Hub. They are intentionally distinct from Message.Role: a Hub event
-// describes a turn in the shared dialogue, not an executable LLM message.
+// describes a turn in the shared dialog, not an executable LLM message.
 const (
 	ConvRoleUser        = "user"         // a user message, from any channel
 	ConvRoleAssistant   = "assistant"    // an assistant final reply
@@ -32,7 +32,7 @@ type ConversationEvent struct {
 	Principal   string    `json:"principal"`               // owning principal (the identity shared across channels)
 	Channel     string    `json:"channel"`                 // origin channel: "telegram", "slack", "local", ...
 	Role        string    `json:"role"`                    // one of the ConvRole* constants
-	Content     string    `json:"content"`                 // the dialogue text (prose or tool summary)
+	Content     string    `json:"content"`                 // the dialog text (prose or tool summary)
 	ClientMsgID string    `json:"client_msg_id,omitempty"` // idempotency key: a repeat append with the same id is a no-op
 	Timestamp   time.Time `json:"timestamp"`
 }

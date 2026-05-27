@@ -19,7 +19,7 @@ import (
 
 func newHubHandler(t *testing.T) *Handler {
 	t.Helper()
-	store, err := hub.OpenSQLiteStore(filepath.Join(t.TempDir(), "hub.db"), nil)
+	store, err := hub.OpenSQLiteStore(context.Background(), filepath.Join(t.TempDir(), "hub.db"), nil)
 	if err != nil {
 		t.Fatalf("OpenSQLiteStore: %v", err)
 	}

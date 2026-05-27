@@ -38,7 +38,7 @@ func (c *Client) NewConversation(ctx context.Context, principal string) (string,
 	return resp.ConvId, nil
 }
 
-// AppendEvent appends one dialogue turn to the shared conversation and returns
+// AppendEvent appends one dialog turn to the shared conversation and returns
 // the stored event (with its server-assigned Seq).
 func (c *Client) AppendEvent(ctx context.Context, ev models.ConversationEvent) (models.ConversationEvent, error) {
 	ctx = c.withAuth(ctx)
@@ -75,7 +75,7 @@ func (c *Client) ReadConversation(ctx context.Context, convID string, sinceSeq i
 
 // SubscribeConversation live-tails a conversation: it returns a channel that
 // first yields the backlog after sinceSeq, then live events. The channel closes
-// when ctx is cancelled or the server ends the stream (e.g. an overflow resync
+// when ctx is canceled or the server ends the stream (e.g. an overflow resync
 // signal); callers should resubscribe from the last Seq they saw to catch up.
 func (c *Client) SubscribeConversation(ctx context.Context, convID string, sinceSeq int64) (<-chan models.ConversationEvent, error) {
 	authCtx := c.withAuth(ctx)

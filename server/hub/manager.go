@@ -20,7 +20,7 @@ type Broker interface {
 	Store
 	// Subscribe returns a stream of a conversation's events with Seq > sinceSeq:
 	// first the persisted backlog, then live events as they are appended. The
-	// stream closes when ctx is cancelled or when the consumer falls too far
+	// stream closes when ctx is canceled or when the consumer falls too far
 	// behind (see Manager overflow handling), at which point the caller should
 	// resubscribe with the last Seq it saw to resync.
 	Subscribe(ctx context.Context, convID string, sinceSeq int64) (<-chan models.ConversationEvent, error)

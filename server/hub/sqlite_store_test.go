@@ -14,7 +14,7 @@ import (
 func newTestStore(t *testing.T) *SQLiteStore {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "hub.db")
-	st, err := OpenSQLiteStore(path, nil)
+	st, err := OpenSQLiteStore(context.Background(), path, nil)
 	if err != nil {
 		t.Fatalf("OpenSQLiteStore: %v", err)
 	}

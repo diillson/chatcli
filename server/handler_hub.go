@@ -105,7 +105,7 @@ func (h *Handler) NewConversation(ctx context.Context, req *pb.NewConversationRe
 	return &pb.NewConversationResponse{ConvId: convID}, nil
 }
 
-// AppendEvent appends one dialogue turn to a conversation's shared log.
+// AppendEvent appends one dialog turn to a conversation's shared log.
 func (h *Handler) AppendEvent(ctx context.Context, req *pb.AppendEventRequest) (*pb.AppendEventResponse, error) {
 	if err := h.hubReady(); err != nil {
 		return nil, err

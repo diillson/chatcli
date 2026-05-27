@@ -7,6 +7,7 @@
 package hub
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -39,12 +40,12 @@ func DefaultDBPath() (string, error) {
 // same database file, so a conversation is shared across every channel; for
 // real-time cross-process push, co-locate the gateway in the hub server
 // process (one in-memory Manager).
-func OpenDefault(logger *zap.Logger) (*Manager, error) {
+func OpenDefault(ctx context.Context, logger *zap.Logger) (*Manager, error) {
 	dbPath, err := DefaultDBPath()
 	if err != nil {
 		return nil, err
 	}
-	store, err := OpenSQLiteStore(dbPath, logger)
+	store, err := OpenSQLiteStore(ctx, dbPath, logger)
 	if err != nil {
 		return nil, err
 	}
