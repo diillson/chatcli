@@ -23,26 +23,33 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChatCLIService_SendPrompt_FullMethodName          = "/chatcli.v1.ChatCLIService/SendPrompt"
-	ChatCLIService_StreamPrompt_FullMethodName        = "/chatcli.v1.ChatCLIService/StreamPrompt"
-	ChatCLIService_InteractiveSession_FullMethodName  = "/chatcli.v1.ChatCLIService/InteractiveSession"
-	ChatCLIService_ListSessions_FullMethodName        = "/chatcli.v1.ChatCLIService/ListSessions"
-	ChatCLIService_LoadSession_FullMethodName         = "/chatcli.v1.ChatCLIService/LoadSession"
-	ChatCLIService_SaveSession_FullMethodName         = "/chatcli.v1.ChatCLIService/SaveSession"
-	ChatCLIService_DeleteSession_FullMethodName       = "/chatcli.v1.ChatCLIService/DeleteSession"
-	ChatCLIService_GetServerInfo_FullMethodName       = "/chatcli.v1.ChatCLIService/GetServerInfo"
-	ChatCLIService_GetWatcherStatus_FullMethodName    = "/chatcli.v1.ChatCLIService/GetWatcherStatus"
-	ChatCLIService_Health_FullMethodName              = "/chatcli.v1.ChatCLIService/Health"
-	ChatCLIService_GetAlerts_FullMethodName           = "/chatcli.v1.ChatCLIService/GetAlerts"
-	ChatCLIService_AnalyzeIssue_FullMethodName        = "/chatcli.v1.ChatCLIService/AnalyzeIssue"
-	ChatCLIService_AgenticStep_FullMethodName         = "/chatcli.v1.ChatCLIService/AgenticStep"
-	ChatCLIService_ListRemotePlugins_FullMethodName   = "/chatcli.v1.ChatCLIService/ListRemotePlugins"
-	ChatCLIService_ListRemoteAgents_FullMethodName    = "/chatcli.v1.ChatCLIService/ListRemoteAgents"
-	ChatCLIService_ListRemoteSkills_FullMethodName    = "/chatcli.v1.ChatCLIService/ListRemoteSkills"
-	ChatCLIService_GetAgentDefinition_FullMethodName  = "/chatcli.v1.ChatCLIService/GetAgentDefinition"
-	ChatCLIService_GetSkillContent_FullMethodName     = "/chatcli.v1.ChatCLIService/GetSkillContent"
-	ChatCLIService_ExecuteRemotePlugin_FullMethodName = "/chatcli.v1.ChatCLIService/ExecuteRemotePlugin"
-	ChatCLIService_DownloadPlugin_FullMethodName      = "/chatcli.v1.ChatCLIService/DownloadPlugin"
+	ChatCLIService_SendPrompt_FullMethodName                = "/chatcli.v1.ChatCLIService/SendPrompt"
+	ChatCLIService_StreamPrompt_FullMethodName              = "/chatcli.v1.ChatCLIService/StreamPrompt"
+	ChatCLIService_InteractiveSession_FullMethodName        = "/chatcli.v1.ChatCLIService/InteractiveSession"
+	ChatCLIService_ListSessions_FullMethodName              = "/chatcli.v1.ChatCLIService/ListSessions"
+	ChatCLIService_LoadSession_FullMethodName               = "/chatcli.v1.ChatCLIService/LoadSession"
+	ChatCLIService_SaveSession_FullMethodName               = "/chatcli.v1.ChatCLIService/SaveSession"
+	ChatCLIService_DeleteSession_FullMethodName             = "/chatcli.v1.ChatCLIService/DeleteSession"
+	ChatCLIService_GetServerInfo_FullMethodName             = "/chatcli.v1.ChatCLIService/GetServerInfo"
+	ChatCLIService_GetWatcherStatus_FullMethodName          = "/chatcli.v1.ChatCLIService/GetWatcherStatus"
+	ChatCLIService_Health_FullMethodName                    = "/chatcli.v1.ChatCLIService/Health"
+	ChatCLIService_GetAlerts_FullMethodName                 = "/chatcli.v1.ChatCLIService/GetAlerts"
+	ChatCLIService_AnalyzeIssue_FullMethodName              = "/chatcli.v1.ChatCLIService/AnalyzeIssue"
+	ChatCLIService_AgenticStep_FullMethodName               = "/chatcli.v1.ChatCLIService/AgenticStep"
+	ChatCLIService_ListRemotePlugins_FullMethodName         = "/chatcli.v1.ChatCLIService/ListRemotePlugins"
+	ChatCLIService_ListRemoteAgents_FullMethodName          = "/chatcli.v1.ChatCLIService/ListRemoteAgents"
+	ChatCLIService_ListRemoteSkills_FullMethodName          = "/chatcli.v1.ChatCLIService/ListRemoteSkills"
+	ChatCLIService_GetAgentDefinition_FullMethodName        = "/chatcli.v1.ChatCLIService/GetAgentDefinition"
+	ChatCLIService_GetSkillContent_FullMethodName           = "/chatcli.v1.ChatCLIService/GetSkillContent"
+	ChatCLIService_ExecuteRemotePlugin_FullMethodName       = "/chatcli.v1.ChatCLIService/ExecuteRemotePlugin"
+	ChatCLIService_DownloadPlugin_FullMethodName            = "/chatcli.v1.ChatCLIService/DownloadPlugin"
+	ChatCLIService_ResolveActiveConversation_FullMethodName = "/chatcli.v1.ChatCLIService/ResolveActiveConversation"
+	ChatCLIService_NewConversation_FullMethodName           = "/chatcli.v1.ChatCLIService/NewConversation"
+	ChatCLIService_AppendEvent_FullMethodName               = "/chatcli.v1.ChatCLIService/AppendEvent"
+	ChatCLIService_ReadConversation_FullMethodName          = "/chatcli.v1.ChatCLIService/ReadConversation"
+	ChatCLIService_SubscribeConversation_FullMethodName     = "/chatcli.v1.ChatCLIService/SubscribeConversation"
+	ChatCLIService_SetBinding_FullMethodName                = "/chatcli.v1.ChatCLIService/SetBinding"
+	ChatCLIService_ListBindings_FullMethodName              = "/chatcli.v1.ChatCLIService/ListBindings"
 )
 
 // ChatCLIServiceClient is the client API for ChatCLIService service.
@@ -91,6 +98,24 @@ type ChatCLIServiceClient interface {
 	ExecuteRemotePlugin(ctx context.Context, in *ExecuteRemotePluginRequest, opts ...grpc.CallOption) (*ExecuteRemotePluginResponse, error)
 	// DownloadPlugin streams the plugin binary to the client for offline use.
 	DownloadPlugin(ctx context.Context, in *DownloadPluginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadPluginResponse], error)
+	// ResolveActiveConversation returns the principal's current conversation,
+	// creating one on first contact. All channels of the same principal resolve
+	// to the same conversation, giving continuity across Telegram/Slack/CLI.
+	ResolveActiveConversation(ctx context.Context, in *ResolveActiveConversationRequest, opts ...grpc.CallOption) (*ResolveActiveConversationResponse, error)
+	// NewConversation rotates the principal's active-conversation pointer to a
+	// fresh thread (what /newsession triggers); every channel follows.
+	NewConversation(ctx context.Context, in *NewConversationRequest, opts ...grpc.CallOption) (*NewConversationResponse, error)
+	// AppendEvent appends one dialogue turn to a conversation's shared log.
+	AppendEvent(ctx context.Context, in *AppendEventRequest, opts ...grpc.CallOption) (*AppendEventResponse, error)
+	// ReadConversation returns events with seq > since_seq (for hydration/resume).
+	ReadConversation(ctx context.Context, in *ReadConversationRequest, opts ...grpc.CallOption) (*ReadConversationResponse, error)
+	// SubscribeConversation live-tails a conversation: backlog after since_seq,
+	// then events as they are appended by any channel.
+	SubscribeConversation(ctx context.Context, in *SubscribeConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ConversationEvent], error)
+	// SetBinding maps a channel identity (platform,user_id) to a principal.
+	SetBinding(ctx context.Context, in *SetBindingRequest, opts ...grpc.CallOption) (*SetBindingResponse, error)
+	// ListBindings returns channel→principal bindings (optionally filtered).
+	ListBindings(ctx context.Context, in *ListBindingsRequest, opts ...grpc.CallOption) (*ListBindingsResponse, error)
 }
 
 type chatCLIServiceClient struct {
@@ -322,6 +347,85 @@ func (c *chatCLIServiceClient) DownloadPlugin(ctx context.Context, in *DownloadP
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ChatCLIService_DownloadPluginClient = grpc.ServerStreamingClient[DownloadPluginResponse]
 
+func (c *chatCLIServiceClient) ResolveActiveConversation(ctx context.Context, in *ResolveActiveConversationRequest, opts ...grpc.CallOption) (*ResolveActiveConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveActiveConversationResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_ResolveActiveConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) NewConversation(ctx context.Context, in *NewConversationRequest, opts ...grpc.CallOption) (*NewConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NewConversationResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_NewConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) AppendEvent(ctx context.Context, in *AppendEventRequest, opts ...grpc.CallOption) (*AppendEventResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppendEventResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_AppendEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) ReadConversation(ctx context.Context, in *ReadConversationRequest, opts ...grpc.CallOption) (*ReadConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReadConversationResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_ReadConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) SubscribeConversation(ctx context.Context, in *SubscribeConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ConversationEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[3], ChatCLIService_SubscribeConversation_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SubscribeConversationRequest, ConversationEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatCLIService_SubscribeConversationClient = grpc.ServerStreamingClient[ConversationEvent]
+
+func (c *chatCLIServiceClient) SetBinding(ctx context.Context, in *SetBindingRequest, opts ...grpc.CallOption) (*SetBindingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetBindingResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_SetBinding_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) ListBindings(ctx context.Context, in *ListBindingsRequest, opts ...grpc.CallOption) (*ListBindingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListBindingsResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_ListBindings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChatCLIServiceServer is the server API for ChatCLIService service.
 // All implementations must embed UnimplementedChatCLIServiceServer
 // for forward compatibility.
@@ -368,6 +472,24 @@ type ChatCLIServiceServer interface {
 	ExecuteRemotePlugin(context.Context, *ExecuteRemotePluginRequest) (*ExecuteRemotePluginResponse, error)
 	// DownloadPlugin streams the plugin binary to the client for offline use.
 	DownloadPlugin(*DownloadPluginRequest, grpc.ServerStreamingServer[DownloadPluginResponse]) error
+	// ResolveActiveConversation returns the principal's current conversation,
+	// creating one on first contact. All channels of the same principal resolve
+	// to the same conversation, giving continuity across Telegram/Slack/CLI.
+	ResolveActiveConversation(context.Context, *ResolveActiveConversationRequest) (*ResolveActiveConversationResponse, error)
+	// NewConversation rotates the principal's active-conversation pointer to a
+	// fresh thread (what /newsession triggers); every channel follows.
+	NewConversation(context.Context, *NewConversationRequest) (*NewConversationResponse, error)
+	// AppendEvent appends one dialogue turn to a conversation's shared log.
+	AppendEvent(context.Context, *AppendEventRequest) (*AppendEventResponse, error)
+	// ReadConversation returns events with seq > since_seq (for hydration/resume).
+	ReadConversation(context.Context, *ReadConversationRequest) (*ReadConversationResponse, error)
+	// SubscribeConversation live-tails a conversation: backlog after since_seq,
+	// then events as they are appended by any channel.
+	SubscribeConversation(*SubscribeConversationRequest, grpc.ServerStreamingServer[ConversationEvent]) error
+	// SetBinding maps a channel identity (platform,user_id) to a principal.
+	SetBinding(context.Context, *SetBindingRequest) (*SetBindingResponse, error)
+	// ListBindings returns channel→principal bindings (optionally filtered).
+	ListBindings(context.Context, *ListBindingsRequest) (*ListBindingsResponse, error)
 	mustEmbedUnimplementedChatCLIServiceServer()
 }
 
@@ -437,6 +559,27 @@ func (UnimplementedChatCLIServiceServer) ExecuteRemotePlugin(context.Context, *E
 }
 func (UnimplementedChatCLIServiceServer) DownloadPlugin(*DownloadPluginRequest, grpc.ServerStreamingServer[DownloadPluginResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method DownloadPlugin not implemented")
+}
+func (UnimplementedChatCLIServiceServer) ResolveActiveConversation(context.Context, *ResolveActiveConversationRequest) (*ResolveActiveConversationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResolveActiveConversation not implemented")
+}
+func (UnimplementedChatCLIServiceServer) NewConversation(context.Context, *NewConversationRequest) (*NewConversationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NewConversation not implemented")
+}
+func (UnimplementedChatCLIServiceServer) AppendEvent(context.Context, *AppendEventRequest) (*AppendEventResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AppendEvent not implemented")
+}
+func (UnimplementedChatCLIServiceServer) ReadConversation(context.Context, *ReadConversationRequest) (*ReadConversationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReadConversation not implemented")
+}
+func (UnimplementedChatCLIServiceServer) SubscribeConversation(*SubscribeConversationRequest, grpc.ServerStreamingServer[ConversationEvent]) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeConversation not implemented")
+}
+func (UnimplementedChatCLIServiceServer) SetBinding(context.Context, *SetBindingRequest) (*SetBindingResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetBinding not implemented")
+}
+func (UnimplementedChatCLIServiceServer) ListBindings(context.Context, *ListBindingsRequest) (*ListBindingsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListBindings not implemented")
 }
 func (UnimplementedChatCLIServiceServer) mustEmbedUnimplementedChatCLIServiceServer() {}
 func (UnimplementedChatCLIServiceServer) testEmbeddedByValue()                        {}
@@ -794,6 +937,125 @@ func _ChatCLIService_DownloadPlugin_Handler(srv interface{}, stream grpc.ServerS
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ChatCLIService_DownloadPluginServer = grpc.ServerStreamingServer[DownloadPluginResponse]
 
+func _ChatCLIService_ResolveActiveConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveActiveConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).ResolveActiveConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_ResolveActiveConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).ResolveActiveConversation(ctx, req.(*ResolveActiveConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_NewConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NewConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).NewConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_NewConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).NewConversation(ctx, req.(*NewConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_AppendEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppendEventRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).AppendEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_AppendEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).AppendEvent(ctx, req.(*AppendEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_ReadConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReadConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).ReadConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_ReadConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).ReadConversation(ctx, req.(*ReadConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_SubscribeConversation_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeConversationRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ChatCLIServiceServer).SubscribeConversation(m, &grpc.GenericServerStream[SubscribeConversationRequest, ConversationEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatCLIService_SubscribeConversationServer = grpc.ServerStreamingServer[ConversationEvent]
+
+func _ChatCLIService_SetBinding_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetBindingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).SetBinding(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_SetBinding_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).SetBinding(ctx, req.(*SetBindingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_ListBindings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBindingsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).ListBindings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_ListBindings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).ListBindings(ctx, req.(*ListBindingsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChatCLIService_ServiceDesc is the grpc.ServiceDesc for ChatCLIService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -869,6 +1131,30 @@ var ChatCLIService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ExecuteRemotePlugin",
 			Handler:    _ChatCLIService_ExecuteRemotePlugin_Handler,
 		},
+		{
+			MethodName: "ResolveActiveConversation",
+			Handler:    _ChatCLIService_ResolveActiveConversation_Handler,
+		},
+		{
+			MethodName: "NewConversation",
+			Handler:    _ChatCLIService_NewConversation_Handler,
+		},
+		{
+			MethodName: "AppendEvent",
+			Handler:    _ChatCLIService_AppendEvent_Handler,
+		},
+		{
+			MethodName: "ReadConversation",
+			Handler:    _ChatCLIService_ReadConversation_Handler,
+		},
+		{
+			MethodName: "SetBinding",
+			Handler:    _ChatCLIService_SetBinding_Handler,
+		},
+		{
+			MethodName: "ListBindings",
+			Handler:    _ChatCLIService_ListBindings_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -885,6 +1171,11 @@ var ChatCLIService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "DownloadPlugin",
 			Handler:       _ChatCLIService_DownloadPlugin_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "SubscribeConversation",
+			Handler:       _ChatCLIService_SubscribeConversation_Handler,
 			ServerStreams: true,
 		},
 	},

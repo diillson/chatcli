@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
+	"github.com/diillson/chatcli/server/hub"
 	"github.com/diillson/chatcli/version"
 	"go.uber.org/zap"
 )
@@ -67,6 +68,10 @@ type Handler struct {
 
 	// Security: SSRF validator for provider URL checking (H1)
 	ssrfValidator *SSRFValidator
+
+	// Conversation hub broker for cross-channel continuity (optional, nil when
+	// the hub is disabled). Set via SetHub.
+	hub hub.Broker
 }
 
 // SessionStore abstracts session persistence for testability.

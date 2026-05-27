@@ -71,6 +71,33 @@ service ChatCLIService {
 
   // DownloadPlugin streams the plugin binary to the client for offline use.
   rpc DownloadPlugin(DownloadPluginRequest) returns (stream DownloadPluginResponse);
+
+  // --- Conversation Hub (cross-channel continuity) ---
+
+  // ResolveActiveConversation returns the principal's current conversation,
+  // creating one on first contact. All channels of the same principal resolve
+  // to the same conversation, giving continuity across Telegram/Slack/CLI.
+  rpc ResolveActiveConversation(ResolveActiveConversationRequest) returns (ResolveActiveConversationResponse);
+
+  // NewConversation rotates the principal's active-conversation pointer to a
+  // fresh thread (what /newsession triggers); every channel follows.
+  rpc NewConversation(NewConversationRequest) returns (NewConversationResponse);
+
+  // AppendEvent appends one dialogue turn to a conversation's shared log.
+  rpc AppendEvent(AppendEventRequest) returns (AppendEventResponse);
+
+  // ReadConversation returns events with seq > since_seq (for hydration/resume).
+  rpc ReadConversation(ReadConversationRequest) returns (ReadConversationResponse);
+
+  // SubscribeConversation live-tails a conversation: backlog after since_seq,
+  // then events as they are appended by any channel.
+  rpc SubscribeConversation(SubscribeConversationRequest) returns (stream ConversationEvent);
+
+  // SetBinding maps a channel identity (platform,user_id) to a principal.
+  rpc SetBinding(SetBindingRequest) returns (SetBindingResponse);
+
+  // ListBindings returns channel→principal bindings (optionally filtered).
+  rpc ListBindings(ListBindingsRequest) returns (ListBindingsResponse);
 }
 
 // --- SendPrompt ---
@@ -449,4 +476,80 @@ message DownloadPluginResponse {
   string filename = 2;          // plugin filename (set in first chunk)
   int64 total_size = 3;         // total file size in bytes (set in first chunk)
   bool done = 4;                // true when download is complete
+}
+
+// --- Conversation Hub (cross-channel continuity) ---
+
+// ConversationEvent mirrors models.ConversationEvent: one turn in the shared,
+// append-only cross-channel conversation log.
+message ConversationEvent {
+  string conv_id = 1;
+  int64 seq = 2;                // server-assigned, monotonic per conversation
+  string principal = 3;
+  string channel = 4;           // "telegram", "slack", "local", ...
+  string role = 5;              // user | assistant | tool_summary | checkpoint
+  string content = 6;
+  string client_msg_id = 7;     // idempotency key
+  int64 ts = 8;                 // unix millis
+}
+
+message ResolveActiveConversationRequest {
+  string principal = 1;         // optional; server falls back to the authenticated principal
+}
+message ResolveActiveConversationResponse {
+  string conv_id = 1;
+  string principal = 2;
+}
+
+message NewConversationRequest {
+  string principal = 1;         // optional; defaults to authenticated principal
+}
+message NewConversationResponse {
+  string conv_id = 1;
+}
+
+message AppendEventRequest {
+  string conv_id = 1;
+  string channel = 2;
+  string role = 3;
+  string content = 4;
+  string client_msg_id = 5;     // optional idempotency key
+}
+message AppendEventResponse {
+  ConversationEvent event = 1;
+}
+
+message ReadConversationRequest {
+  string conv_id = 1;
+  int64 since_seq = 2;
+  int32 limit = 3;              // 0 = no limit
+}
+message ReadConversationResponse {
+  repeated ConversationEvent events = 1;
+}
+
+message SubscribeConversationRequest {
+  string conv_id = 1;
+  int64 since_seq = 2;
+}
+
+message SetBindingRequest {
+  string platform = 1;
+  string user_id = 2;
+  string principal = 3;
+}
+message SetBindingResponse {
+  bool success = 1;
+}
+
+message ListBindingsRequest {
+  string principal = 1;         // optional filter (empty = all)
+}
+message HubBinding {
+  string platform = 1;
+  string user_id = 2;
+  string principal = 3;
+}
+message ListBindingsResponse {
+  repeated HubBinding bindings = 1;
 }

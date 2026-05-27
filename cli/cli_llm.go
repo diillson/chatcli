@@ -40,6 +40,9 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
 	userInput, additionalContext := cli.processSpecialCommands(in)
+	// Pull turns that arrived on other channels (Telegram/…) into history so the
+	// model has cross-channel context. Silent — nothing is printed.
+	cli.syncHubContext(ctx)
 	cli.compactHistoryIfNeeded(ctx)
 
 	assembly := cli.assembleChatSystemPrompt(ctx, userInput, additionalContext)

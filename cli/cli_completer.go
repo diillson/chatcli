@@ -35,6 +35,7 @@ type slashPrefixRoute struct {
 var slashPrefixRoutes = []slashPrefixRoute{
 	{"/context", (*ChatCLI).getContextSuggestions},
 	{"/session", (*ChatCLI).getSessionSuggestions},
+	{"/hub", (*ChatCLI).getHubSuggestions},
 	{"/plugin ", (*ChatCLI).getPluginSuggestions},
 	{"/skill", (*ChatCLI).getSkillSuggestions},
 	{"/memory", (*ChatCLI).getMemorySuggestions},
@@ -301,6 +302,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/retryall", Description: i18n.T("complete.root.retryall")},
 		{Text: "/skipchunk", Description: i18n.T("complete.root.skipchunk")},
 		{Text: "/session", Description: i18n.T("complete.root.session")},
+		{Text: "/hub", Description: i18n.T("complete.root.hub")},
 		{Text: "/context", Description: i18n.T("complete.root.context")},
 		{Text: "/plugin", Description: i18n.T("complete.root.plugin")},
 		{Text: "/skill", Description: i18n.T("complete.root.skill")},
@@ -1419,6 +1421,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "security", Description: i18n.T("complete.config.security")},
 			{Text: "scheduler", Description: i18n.T("cfg.section.scheduler.title")},
 			{Text: "server", Description: i18n.T("complete.config.server")},
+			{Text: "hub", Description: i18n.T("cfg.section.hub.title")},
 		}
 		return prompt.FilterHasPrefix(sections, word, true)
 	}
@@ -1431,6 +1434,11 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 	// /config agent <TAB> → mutating subcommands (ui style)
 	if strings.ToLower(args[1]) == "agent" {
 		return cli.getConfigAgentSuggestions(d)
+	}
+
+	// /config hub <TAB> → mutating subcommands (set/reset)
+	if strings.ToLower(args[1]) == "hub" {
+		return cli.getConfigHubSuggestions(d)
 	}
 
 	return []prompt.Suggest{}
@@ -1475,6 +1483,107 @@ func (cli *ChatCLI) getConfigAgentSuggestions(d prompt.Document) []prompt.Sugges
 		}
 	}
 	return []prompt.Suggest{}
+}
+
+// getConfigHubSuggestions drives `/config hub set|reset <key> [value]` completion.
+func (cli *ChatCLI) getConfigHubSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
+
+	// /config hub <TAB> → set | reset
+	if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "set", Description: i18n.T("complete.confighub.set")},
+			{Text: "reset", Description: i18n.T("complete.confighub.reset")},
+		}, word, true)
+	}
+
+	sub := strings.ToLower(args[2])
+	if sub != "set" && sub != "reset" && sub != "unset" {
+		return nil
+	}
+
+	// /config hub set|reset <TAB> → setting keys
+	if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: hubKeyEnabled, Description: i18n.T("complete.confighub.enabled")},
+			{Text: hubKeyPrincipal, Description: i18n.T("complete.confighub.principal")},
+			{Text: hubKeyIsolate, Description: i18n.T("complete.confighub.isolate")},
+			{Text: hubKeyTTLHours, Description: i18n.T("complete.confighub.ttl")},
+		}, word, true)
+	}
+
+	// /config hub set <key> <TAB> → value suggestions per key
+	if sub == "set" && (len(args) == 4 || (len(args) == 5 && !strings.HasSuffix(line, " "))) {
+		switch strings.ToLower(args[3]) {
+		case hubKeyEnabled, hubKeyIsolate:
+			return prompt.FilterHasPrefix([]prompt.Suggest{
+				{Text: "on", Description: i18n.T("cfg.val.enabled")},
+				{Text: "off", Description: i18n.T("cfg.val.disabled")},
+			}, word, true)
+		case hubKeyPrincipal:
+			return prompt.FilterHasPrefix(cli.hubPrincipalSuggestions(), word, true)
+		case hubKeyTTLHours:
+			return prompt.FilterHasPrefix([]prompt.Suggest{
+				{Text: "6", Description: i18n.T("complete.confighub.ttl_6h")},
+				{Text: "24", Description: i18n.T("complete.confighub.ttl_24h")},
+				{Text: "72", Description: i18n.T("complete.confighub.ttl_72h")},
+				{Text: "168", Description: i18n.T("complete.confighub.ttl_168h")},
+				{Text: "0", Description: i18n.T("complete.confighub.ttl_0")},
+			}, word, true)
+		}
+	}
+	return nil
+}
+
+// hubPrincipalSuggestions turns the known principals into completer entries.
+func (cli *ChatCLI) hubPrincipalSuggestions() []prompt.Suggest {
+	ps := cli.knownHubPrincipals()
+	out := make([]prompt.Suggest, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, prompt.Suggest{Text: p, Description: i18n.T("complete.confighub.principal_known")})
+	}
+	return out
+}
+
+// getHubSuggestions drives `/hub whoami|bind|bindings` completion.
+func (cli *ChatCLI) getHubSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
+
+	// /hub <TAB> → subcommands
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "whoami", Description: i18n.T("complete.hub.whoami")},
+			{Text: "bind", Description: i18n.T("complete.hub.bind")},
+			{Text: "bindings", Description: i18n.T("complete.hub.bindings")},
+		}, word, true)
+	}
+
+	if strings.ToLower(args[1]) == "bind" {
+		// /hub bind <TAB> → platform names
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return prompt.FilterHasPrefix([]prompt.Suggest{
+				{Text: "telegram"},
+				{Text: "slack"},
+				{Text: "whatsapp"},
+				{Text: "discord"},
+				{Text: "webhook"},
+			}, word, true)
+		}
+		// /hub bind <platform> <userid> <TAB> → principal (known ones)
+		if len(args) == 4 || (len(args) == 5 && !strings.HasSuffix(line, " ")) {
+			return prompt.FilterHasPrefix(cli.hubPrincipalSuggestions(), word, true)
+		}
+	}
+
+	// /hub bindings <TAB> → filter by a known principal
+	if strings.ToLower(args[1]) == "bindings" && (len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " "))) {
+		return prompt.FilterHasPrefix(cli.hubPrincipalSuggestions(), word, true)
+	}
+	return nil
 }
 
 // getConfigSecuritySuggestions drives the completer for the new

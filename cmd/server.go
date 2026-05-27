@@ -263,7 +263,43 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		fmt.Println(i18n.T("cmd.server.watch_active", mw.TargetCount(), multiCfg.Interval))
 	}
 
+	// Co-locate the messaging gateway in this process when requested, sharing
+	// the server's hub broker for real-time cross-channel push.
+	if stopGW := startColocatedGateway(llmMgr, srv, logger); stopGW != nil {
+		defer stopGW()
+	}
+
 	return srv.Start()
+}
+
+// startColocatedGateway runs the messaging gateway inside the server process
+// when CHATCLI_GATEWAY_IN_SERVER=true, sharing the server's in-memory hub
+// broker so a Telegram/Slack message pushes to a connected notebook CLI in real
+// time (cross-process deployments only sync on connect/resync). It returns a
+// stop function to defer, or nil when co-location is disabled or unavailable.
+func startColocatedGateway(llmMgr manager.LLMManager, srv *server.Server, logger *zap.Logger) func() {
+	if !strings.EqualFold(os.Getenv("CHATCLI_GATEWAY_IN_SERVER"), "true") {
+		return nil
+	}
+	broker := srv.Hub()
+	if broker == nil {
+		logger.Warn(i18n.T("cmd.server.gateway_hub_disabled"))
+		return nil
+	}
+	gwCLI, err := cli.NewChatCLI(llmMgr, logger)
+	if err != nil {
+		logger.Warn(i18n.T("cmd.server.gateway_init_failed"), zap.Error(err))
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		if err := gwCLI.RunGatewayWithBroker(ctx, broker); err != nil && ctx.Err() == nil {
+			logger.Error(i18n.T("cmd.server.gateway_stopped"), zap.Error(err))
+		}
+	}()
+	logger.Info(i18n.T("cmd.server.gateway_colocated"))
+	fmt.Println(i18n.T("cmd.server.gateway_colocated"))
+	return cancel
 }
 
 // fallbackChainSink is the slice of server.Server's API that

@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -160,6 +161,13 @@ func (ch *CommandHandler) buildRoutes() {
 		"/newsession": func(string) bool {
 			c.clearAllHistories()
 			c.currentSessionName = ""
+			// Rotate the shared cross-channel conversation too, so the new
+			// session propagates to Telegram/Slack and any other connected CLI.
+			if c.hubSync != nil {
+				if err := c.hubSync.newSession(context.Background()); err != nil {
+					c.logger.Warn("hub sync: new session failed: " + err.Error())
+				}
+			}
 			fmt.Println(i18n.T("session.new_session_started"))
 			return false
 		},
@@ -181,6 +189,7 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/plugin", false, func(in string) bool { ch.handlePluginCommand(in); return false }},
 		{"/skill", false, func(in string) bool { ch.handleSkillCommand(in); return false }},
 		{"/connect", false, func(in string) bool { ch.handleConnectCommand(in); return false }},
+		{"/hub", false, func(in string) bool { c.handleHubCommand(in); return false }},
 		{"/watch", false, func(in string) bool { ch.handleWatchCommand(in); return false }},
 		{"/compact", false, func(in string) bool { c.handleCompactCommand(in); return false }},
 		{"/memory", false, func(in string) bool { c.handleMemoryCommand(in); return false }},
