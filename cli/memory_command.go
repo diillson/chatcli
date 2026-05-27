@@ -716,78 +716,99 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
 
-	// "/memory load " — suggest date options
-	if len(args) >= 2 && args[1] == "load" {
-		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
-			suggestions := []prompt.Suggest{
-				{Text: "today", Description: i18n.T("mem.cmd.suggest.load_today")},
-				{Text: "yesterday", Description: i18n.T("mem.cmd.suggest.load_yesterday")},
-			}
-			if cli.memoryStore != nil {
-				notes := cli.memoryStore.GetRecentDailyNotes(7)
-				for _, note := range notes {
-					dateStr := note.Date.Format("2006-01-02")
-					suggestions = append(suggestions, prompt.Suggest{
-						Text:        dateStr,
-						Description: i18n.T("mem.cmd.suggest.load_date", note.Date.Format("02/Jan")),
-					})
-				}
-			}
-			return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
-		}
-	}
+	// Argument-level completion for specific subcommands.
+	return cli.getMemoryArgSuggestions(d, args, line)
+}
 
-	// "/memory facts " — suggest categories
-	if len(args) >= 2 && args[1] == "facts" {
-		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
-			suggestions := []prompt.Suggest{
-				{Text: "architecture", Description: i18n.T("mem.cmd.suggest.cat_architecture")},
-				{Text: "pattern", Description: i18n.T("mem.cmd.suggest.cat_pattern")},
-				{Text: "preference", Description: i18n.T("mem.cmd.suggest.cat_preference")},
-				{Text: "gotcha", Description: i18n.T("mem.cmd.suggest.cat_gotcha")},
-				{Text: "project", Description: i18n.T("mem.cmd.suggest.cat_project")},
-				{Text: "personal", Description: i18n.T("mem.cmd.suggest.cat_personal")},
-				{Text: "general", Description: i18n.T("mem.cmd.suggest.cat_general")},
-			}
-			return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
-		}
-	}
+// atArg reports whether the cursor is positioned to complete the Nth argument
+// (1-based) of the command — i.e. "<cmd> <subN> <here>".
+func atArg(args []string, line string, n int) bool {
+	return len(args) == n || (len(args) == n+1 && !strings.HasSuffix(line, " "))
+}
 
-	// "/memory remember " — suggest the optional [category] tag
-	if len(args) >= 2 && args[1] == "remember" {
-		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
-			suggestions := []prompt.Suggest{
-				{Text: "[personal]", Description: i18n.T("mem.cmd.suggest.cat_personal")},
-				{Text: "[preference]", Description: i18n.T("mem.cmd.suggest.cat_preference")},
-				{Text: "[gotcha]", Description: i18n.T("mem.cmd.suggest.cat_gotcha")},
-				{Text: "[architecture]", Description: i18n.T("mem.cmd.suggest.cat_architecture")},
-				{Text: "[pattern]", Description: i18n.T("mem.cmd.suggest.cat_pattern")},
-				{Text: "[project]", Description: i18n.T("mem.cmd.suggest.cat_project")},
-				{Text: "[general]", Description: i18n.T("mem.cmd.suggest.cat_general")},
-			}
-			return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
-		}
+// getMemoryArgSuggestions provides the second-level completions for
+// /memory's subcommands (load dates, facts/remember categories, profile keys).
+func (cli *ChatCLI) getMemoryArgSuggestions(d prompt.Document, args []string, line string) []prompt.Suggest {
+	if len(args) < 2 {
+		return nil
 	}
+	word := d.GetWordBeforeCursor()
 
-	// "/memory profile " — suggest "set"; "/memory profile set " — suggest keys
-	if len(args) >= 2 && args[1] == "profile" {
-		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ") && args[2] != "set") {
+	switch args[1] {
+	case "load":
+		if !atArg(args, line, 2) {
+			return nil
+		}
+		suggestions := []prompt.Suggest{
+			{Text: "today", Description: i18n.T("mem.cmd.suggest.load_today")},
+			{Text: "yesterday", Description: i18n.T("mem.cmd.suggest.load_yesterday")},
+		}
+		if cli.memoryStore != nil {
+			for _, note := range cli.memoryStore.GetRecentDailyNotes(7) {
+				suggestions = append(suggestions, prompt.Suggest{
+					Text:        note.Date.Format("2006-01-02"),
+					Description: i18n.T("mem.cmd.suggest.load_date", note.Date.Format("02/Jan")),
+				})
+			}
+		}
+		return prompt.FilterHasPrefix(suggestions, word, true)
+
+	case "facts":
+		if !atArg(args, line, 2) {
+			return nil
+		}
+		return prompt.FilterHasPrefix(memoryCategorySuggestions(false), word, true)
+
+	case "remember":
+		if !atArg(args, line, 2) {
+			return nil
+		}
+		return prompt.FilterHasPrefix(memoryCategorySuggestions(true), word, true)
+
+	case "profile":
+		if (len(args) == 2 && strings.HasSuffix(line, " ")) || (len(args) == 3 && args[2] != "set" && !strings.HasSuffix(line, " ")) {
 			return prompt.FilterHasPrefix(
-				[]prompt.Suggest{{Text: "set", Description: i18n.T("mem.cmd.suggest.profile_set")}},
-				d.GetWordBeforeCursor(), true)
+				[]prompt.Suggest{{Text: "set", Description: i18n.T("mem.cmd.suggest.profile_set")}}, word, true)
 		}
-		if len(args) >= 3 && args[2] == "set" && (len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " "))) {
-			keys := []string{"name=", "role=", "expertise_level=", "preferred_language=",
-				"communication_style=", "company=", "location=", "certifications=", "skills=", "goals="}
-			var suggestions []prompt.Suggest
-			for _, k := range keys {
-				suggestions = append(suggestions, prompt.Suggest{Text: k})
-			}
-			return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+		if len(args) >= 3 && args[2] == "set" && atArg(args, line, 3) {
+			return prompt.FilterHasPrefix(memoryProfileKeySuggestions(), word, true)
 		}
 	}
-
 	return nil
+}
+
+// memoryCategorySuggestions returns the fact categories. When bracketed is
+// true they are wrapped as [category] tags (for /memory remember).
+func memoryCategorySuggestions(bracketed bool) []prompt.Suggest {
+	cats := []struct{ name, key string }{
+		{"personal", "mem.cmd.suggest.cat_personal"},
+		{"preference", "mem.cmd.suggest.cat_preference"},
+		{"gotcha", "mem.cmd.suggest.cat_gotcha"},
+		{"architecture", "mem.cmd.suggest.cat_architecture"},
+		{"pattern", "mem.cmd.suggest.cat_pattern"},
+		{"project", "mem.cmd.suggest.cat_project"},
+		{"general", "mem.cmd.suggest.cat_general"},
+	}
+	out := make([]prompt.Suggest, 0, len(cats))
+	for _, c := range cats {
+		text := c.name
+		if bracketed {
+			text = "[" + c.name + "]"
+		}
+		out = append(out, prompt.Suggest{Text: text, Description: i18n.T(c.key)})
+	}
+	return out
+}
+
+// memoryProfileKeySuggestions lists the profile keys for /memory profile set.
+func memoryProfileKeySuggestions() []prompt.Suggest {
+	keys := []string{"name=", "role=", "expertise_level=", "preferred_language=",
+		"communication_style=", "company=", "location=", "certifications=", "skills=", "goals="}
+	out := make([]prompt.Suggest, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, prompt.Suggest{Text: k})
+	}
+	return out
 }
 
 func parseFlexibleDate(s string) (time.Time, error) {
