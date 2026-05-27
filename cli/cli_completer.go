@@ -306,6 +306,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/export", Description: i18n.T("complete.root.export")},
 		{Text: "/moa", Description: i18n.T("complete.root.moa")},
 		{Text: "/gateway", Description: i18n.T("complete.root.gateway")},
+		{Text: "/lsp", Description: i18n.T("complete.root.lsp")},
 		{Text: "/thinking", Description: i18n.T("complete.root.thinking")},
 		{Text: "/plan", Description: i18n.T("complete.root.plan")},
 		{Text: "/refine", Description: i18n.T("complete.root.refine")},
