@@ -506,17 +506,18 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 | Category | Commands |
 |---|---|
 | **Core** | `/help` · `/version` · `/reload` · `/exit` · `/reset` |
-| **Sessions** | `/session {save,load,list,delete,new,fork}` · `/newsession` · `/rewind` |
+| **Sessions** | `/session {save,load,list,delete,new,fork,search}` · `/export` · `/newsession` · `/rewind` |
 | **Context** | `/context {create,attach,list,remove}` · `@git` · `@file` · `@env` · `@history` · `@command` |
 | **Config** | `/config [section]` · `/status` · `/settings` · `/switch <provider\|model>` |
-| **Agent mode** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` |
+| **Agent mode** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` · `/moa <prompt>` |
 | **Quality pipeline** | `/thinking [on\|off\|auto]` · `/refine [draft]` · `/verify [answer]` · `/reflect [list\|failed\|retry\|purge\|drain\|<text>]` |
-| **Memory** | `/memory {record,list,search,clear}` · `/compact [ratio]` |
+| **Memory** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (tool) · `/compact [ratio]` |
 | **Extensibility** | `/mcp {init,list,invoke,config}` · `/plugin {list,load,unload}` · `/skill <name>` · `/hooks {list,enable,disable,test}` |
+| **Messaging & Servers** | `/gateway {start,status}` (Telegram/Slack/Discord/WhatsApp/webhook) · `chatcli mcp-server` · `chatcli acp` |
 | **Remote** | `/auth {login,logout,status}` · `/connect <server>` · `/disconnect` |
-| **Tools** | `/watch {pid\|file}` · `/worktree {create,list,remove}` · `/channel {create,switch}` · `/websearch <query>` |
+| **Tools** | `/watch {pid\|file}` · `/worktree {create,list,remove}` · `/channel {create,switch}` · `/websearch <query>` · `/lsp <file>` |
 | **Scheduler** | `/schedule <name> --when <t> --do <a>` · `/wait --until <cond>` · `/jobs {list,show,tree,cancel,pause,resume,logs,daemon}` · `chatcli daemon {start,stop,status,ping,install}` |
-| **Diagnostics** | `/metrics` · `/cost` |
+| **Diagnostics** | `/metrics` · `/cost` · `/ratelimit` (`/limits`) |
 
 ---
 
@@ -527,7 +528,12 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 | Feature | Description |
 |---|---|
 | **Native tool calling** | Native APIs from OpenAI, Anthropic, Bedrock, Google, ZAI, MiniMax, Moonshot, OpenRouter. `ephemeral` cache for Anthropic. Automatic XML fallback for providers without native support. |
-| **MCP (Model Context Protocol)** | Client via stdio and SSE for expanded context. |
+| **MCP (Model Context Protocol)** | Client via stdio and SSE for expanded context. Server (`chatcli mcp-server`) exposes chat, agent, coder and built-in tools; ACP mode (`chatcli acp`) for editors. |
+| **Chat Gateway** | Runs as a messaging daemon (Telegram, Slack, Discord, WhatsApp, webhook): each message runs through the agent loop and progress is streamed back to the chat. |
+| **Mixture-of-Agents** | `/moa` — several models propose in parallel and an aggregator synthesizes (Wang et al., 2406.04692). |
+| **LSP diagnostics** | `/lsp <file>` — compiler errors/warnings via the Language Server Protocol (gopls, pyright, rust-analyzer, clangd, …). |
+| **Rate limits** | `/ratelimit` — provider limits parsed from `x-ratelimit-*` headers (requests/tokens, % used, reset). |
+| **Trajectory export** | `/export` — current conversation as ShareGPT JSONL for fine-tuning/analysis. |
 | **Persistent contexts** | `/context create`, `/context attach` — inject whole projects into the system prompt with cache hints. |
 | **Bootstrap & Memory** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + long-term memory with facts and decay. |
 | **Plugins** | Auto-detection, schema validation, Ed25519 signatures, remote plugins. |

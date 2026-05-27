@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -85,6 +86,54 @@ func TestRunner_RoutesAndReplies(t *testing.T) {
 	}
 	if got["1"] != "echo:hello" || got["2"] != "echo:world" {
 		t.Errorf("reply routing wrong: %v", got)
+	}
+}
+
+func TestRunner_StreamsProgress(t *testing.T) {
+	fa := &fakeAdapter{
+		name: "fake",
+		emit: []InboundMessage{{Platform: "fake", ChatID: "1", UserID: "u", Text: "do work"}},
+	}
+	// The agent streams two progress lines (via the ctx emitter), then returns
+	// a final reply.
+	agent := func(ctx context.Context, _, _ string) (string, error) {
+		emit := Progress(ctx)
+		emit("step 1")
+		emit("step 2")
+		return "all done", nil
+	}
+	r := NewRunner([]Adapter{fa}, agent, zap.NewNop(), 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = r.Run(ctx); close(done) }()
+
+	deadline := time.After(2 * time.Second)
+	for fa.sentCount() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out; got %d messages", fa.sentCount())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
+
+	fa.mu.Lock()
+	defer fa.mu.Unlock()
+	// Progress is coalesced into one message (flushed at end), then the reply.
+	last := fa.sent[len(fa.sent)-1]
+	if last.Text != "all done" {
+		t.Errorf("final reply should be last, got %q", last.Text)
+	}
+	var sawProgress bool
+	for _, m := range fa.sent {
+		if strings.Contains(m.Text, "step 1") && strings.Contains(m.Text, "step 2") {
+			sawProgress = true
+		}
+	}
+	if !sawProgress {
+		t.Errorf("expected coalesced progress message with both steps, got %+v", fa.sent)
 	}
 }
 

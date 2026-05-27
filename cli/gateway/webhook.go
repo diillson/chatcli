@@ -59,6 +59,13 @@ func NewWebhookAdapter(addr, path, secret, callbackURL string, logger *zap.Logge
 // Name implements Adapter.
 func (w *WebhookAdapter) Name() string { return webhookPlatform }
 
+// SetLogger implements LoggerAware: inject the daemon logger and trace the
+// HTTP client's calls to the configured callback URL.
+func (w *WebhookAdapter) SetLogger(l *zap.Logger) {
+	w.logger = l
+	w.http = newLoggingClient(w.http, l, webhookPlatform)
+}
+
 type webhookInbound struct {
 	ChatID string `json:"chat_id"`
 	UserID string `json:"user_id"`

@@ -59,6 +59,13 @@ func NewSlackAdapter(botToken, signingSecret, addr, path string, logger *zap.Log
 // Name implements Adapter.
 func (s *SlackAdapter) Name() string { return slackPlatform }
 
+// SetLogger implements LoggerAware: inject the daemon logger and trace the
+// HTTP client's calls to the Slack API.
+func (s *SlackAdapter) SetLogger(l *zap.Logger) {
+	s.logger = l
+	s.http = newLoggingClient(s.http, l, slackPlatform)
+}
+
 // eventsHandler builds the HTTP handler for the Slack Events API. Extracted
 // from Start so it can be exercised directly via httptest.
 func (s *SlackAdapter) eventsHandler(ctx context.Context, inbound chan<- InboundMessage) http.HandlerFunc {

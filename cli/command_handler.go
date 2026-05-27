@@ -191,6 +191,7 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/export", true, func(in string) bool { c.handleExportCommand(in); return false }},
 		{"/moa", true, func(in string) bool { c.handleMoACommand(in); return false }},
 		{"/gateway", true, func(in string) bool { c.handleGatewayCommand(in); return false }},
+		{"/lsp", true, func(in string) bool { c.handleLSPCommand(in); return false }},
 		{"/thinking", true, func(in string) bool { c.handleThinkingCommand(in); return false }},
 		{"/refine", true, func(in string) bool { c.handleRefineCommand(in); return false }},
 		{"/verify", true, func(in string) bool { c.handleVerifyCommand(in); return false }},

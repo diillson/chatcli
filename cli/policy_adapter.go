@@ -32,6 +32,12 @@ type workerPolicyAdapter struct {
 	// When set, security prompts read from this channel instead of spawning
 	// a goroutine on os.Stdin, avoiding orphaned readers after Ctrl+C.
 	stdinCh <-chan string
+
+	// unattended marks the gateway daemon: there is no human to answer an
+	// "ask" prompt and PromptSecurityCheck would block on a dead stdin
+	// forever, so "ask" auto-approves (the operator opted into full autonomy;
+	// access is gated at the messaging edge). ActionDeny still blocks.
+	unattended bool
 }
 
 // newWorkerPolicyAdapter creates a PolicyChecker backed by coder.PolicyManager.
@@ -101,6 +107,14 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		return false, "AÇÃO BLOQUEADA (Regra de Segurança). NÃO TENTE NOVAMENTE."
 
 	case coder.ActionAsk:
+		if a.unattended {
+			// Gateway: no human to answer; blocking on stdin would hang the
+			// worker silently. Auto-approve (see field doc).
+			a.logger.Info("Worker tool call auto-approved (unattended gateway)",
+				zap.String("tool", toolName))
+			return true, ""
+		}
+
 		// Serialize prompts: only one worker prompts the user at a time.
 		a.mu.Lock()
 		defer a.mu.Unlock()

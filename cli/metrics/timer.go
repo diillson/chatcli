@@ -7,8 +7,11 @@ package metrics
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // Timer representa um cronometro de execução com display em tempo real
@@ -37,7 +40,11 @@ func (t *Timer) Start(ctx context.Context, displayFunc func(duration time.Durati
 	t.running = true
 	t.displayFunc = displayFunc
 
-	if displayFunc != nil {
+	// Only animate when stdout is a real terminal. When it is a pipe or file
+	// (gateway capture, `mcp-server`, one-shot/piped runs), the \r repaint is
+	// just noise — skip the live ticker and let the final lines speak.
+	if displayFunc != nil && term.IsTerminal(int(os.Stdout.Fd())) { //#nosec G115 -- Fd() bounded
+
 		tickerCtx, cancel := context.WithCancel(ctx)
 		t.cancel = cancel
 		t.updateTicker = time.NewTicker(100 * time.Millisecond)

@@ -57,6 +57,13 @@ func NewWhatsAppAdapter(accessToken, phoneID, verifyToken, addr, path string, lo
 // Name implements Adapter.
 func (a *WhatsAppAdapter) Name() string { return whatsappPlatform }
 
+// SetLogger implements LoggerAware: inject the daemon logger and trace the
+// HTTP client's calls to the WhatsApp Cloud API.
+func (a *WhatsAppAdapter) SetLogger(l *zap.Logger) {
+	a.logger = l
+	a.http = newLoggingClient(a.http, l, whatsappPlatform)
+}
+
 // webhookHandler builds the Cloud API webhook handler (GET verification +
 // POST messages). Extracted from Start so it can be exercised via httptest.
 func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- InboundMessage) http.HandlerFunc {

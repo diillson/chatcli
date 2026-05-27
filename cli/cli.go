@@ -177,6 +177,8 @@ type ChatCLI struct {
 	failedChunks         []FileChunk // Chunks que falharam no processamento
 	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
 	agentMode            *AgentMode  // Modo de agente
+	unattended           bool        // when true, the agent runs without any interactive confirmation (gateway daemon)
+	lastAgentReply       string      // last one-shot agent prose answer (command blocks stripped), captured for unattended callers
 	interactionState     InteractionState
 	mu                   sync.Mutex
 	operationCancel      context.CancelFunc
@@ -1138,6 +1140,7 @@ func (cli *ChatCLI) runAgentLogic() {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
+	cli.agentMode.isOneShot = false // interactive /agent: keep the loop conversational
 	cli.runWithCancellation("Agent Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, "")
 	})
@@ -1184,6 +1187,7 @@ func (cli *ChatCLI) runCoderLogic() {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
+	cli.agentMode.isOneShot = false // interactive /coder: wait for input between turns
 	cli.runWithCancellation("Coder Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)
 	})

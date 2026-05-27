@@ -26,6 +26,28 @@ func TestCaptureRPCStdout(t *testing.T) {
 	}
 }
 
+func TestCaptureStreaming_ForwardsLines(t *testing.T) {
+	var got []string
+	out, err := captureStreaming(func(s string) { got = append(got, s) }, func() error {
+		fmt.Println("first line")
+		fmt.Print("\x1b[32msecond\x1b[0m line\n") // ANSI must be stripped
+		fmt.Println("   ")                        // whitespace-only: emitted? no
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "first line" || got[1] != "second line" {
+		t.Fatalf("expected two ANSI-stripped lines, got %#v", got)
+	}
+	if !strings.Contains(out, "first line") || !strings.Contains(out, "second line") {
+		t.Errorf("transcript missing lines: %q", out)
+	}
+	if strings.Contains(out, "\x1b") {
+		t.Error("transcript should be ANSI-stripped")
+	}
+}
+
 func TestRunBuiltinTool_Guards(t *testing.T) {
 	c := &ChatCLI{} // no plugin manager
 	if _, err := c.RunBuiltinTool(context.Background(), "read", "x"); err == nil {

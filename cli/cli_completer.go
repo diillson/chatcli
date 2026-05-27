@@ -68,6 +68,16 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	}},
 	{"/export", (*ChatCLI).getExportSuggestions},
 	{"/gateway", (*ChatCLI).getGatewaySuggestions},
+	{"/lsp", (*ChatCLI).getLSPSuggestions},
+}
+
+// getLSPSuggestions completes the file path argument of /lsp.
+func (cli *ChatCLI) getLSPSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	if len(strings.Fields(line)) <= 1 && !strings.HasSuffix(line, " ") {
+		return nil // still typing the command name itself
+	}
+	return cli.filePathCompleter(d.GetWordBeforeCursor())
 }
 
 // getGatewaySuggestions completes the /gateway subcommands.
@@ -77,6 +87,7 @@ func (cli *ChatCLI) getGatewaySuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		return prompt.FilterHasPrefix([]prompt.Suggest{
 			{Text: "start", Description: i18n.T("complete.gateway.start")},
+			{Text: "stop", Description: i18n.T("complete.gateway.stop")},
 			{Text: "status", Description: i18n.T("complete.gateway.status")},
 		}, d.GetWordBeforeCursor(), true)
 	}
@@ -306,6 +317,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/export", Description: i18n.T("complete.root.export")},
 		{Text: "/moa", Description: i18n.T("complete.root.moa")},
 		{Text: "/gateway", Description: i18n.T("complete.root.gateway")},
+		{Text: "/lsp", Description: i18n.T("complete.root.lsp")},
 		{Text: "/thinking", Description: i18n.T("complete.root.thinking")},
 		{Text: "/plan", Description: i18n.T("complete.root.plan")},
 		{Text: "/refine", Description: i18n.T("complete.root.refine")},

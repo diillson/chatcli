@@ -54,6 +54,13 @@ func NewTelegramAdapter(token string, allowedUserIDs []string, logger *zap.Logge
 // Name implements Adapter.
 func (t *TelegramAdapter) Name() string { return telegramPlatform }
 
+// SetLogger implements LoggerAware: the daemon injects its real logger and we
+// route the HTTP client through it so every Bot API call is traced.
+func (t *TelegramAdapter) SetLogger(l *zap.Logger) {
+	t.logger = l
+	t.http = newLoggingClient(t.http, l, telegramPlatform)
+}
+
 // Start long-polls getUpdates until ctx is canceled, pushing messages to
 // inbound. Transient errors are logged and retried with a short backoff.
 func (t *TelegramAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
