@@ -173,16 +173,18 @@ func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 	}
 
 	// Cross-channel continuity: back conversations with the shared hub so a
-	// thread started on Telegram continues on the notebook (and vice versa). If
-	// the hub can't be opened, degrade gracefully to per-message handling rather
-	// than failing the daemon. A typed-nil must not reach newHubSessions, so we
-	// only assign broker on success.
+	// thread started on Telegram continues on the notebook (and vice versa).
+	// Disabled by CHATCLI_HUB_ENABLED=false; otherwise a failure to open the DB
+	// degrades gracefully to per-message handling rather than failing the daemon.
+	// A typed-nil must not reach newHubSessions, so we only assign broker on success.
 	var broker hub.Store
-	if m, err := hub.OpenDefault(ctx, cli.logger); err != nil {
-		cli.logger.Warn("gateway: conversation hub unavailable; continuing without cross-channel continuity", zap.Error(err))
-	} else {
-		broker = m
-		defer func() { _ = m.Close() }()
+	if hubEnabled() {
+		if m, err := hub.OpenDefault(ctx, cli.logger); err != nil {
+			cli.logger.Warn("gateway: conversation hub unavailable; continuing without cross-channel continuity", zap.Error(err))
+		} else {
+			broker = m
+			defer func() { _ = m.Close() }()
+		}
 	}
 	return cli.runGateway(ctx, broker)
 }
@@ -419,20 +421,21 @@ func (s *hubSessions) loadBindings(ctx context.Context) {
 	}
 }
 
-// principalFor maps a sender to its principal: an explicit binding wins; then,
-// in single-user mode (CHATCLI_HUB_PRINCIPAL set), all unbound senders collapse
-// to that shared principal so the bot and the local CLI share one conversation
-// with zero per-channel config; otherwise the sender stays isolated per channel.
+// principalFor maps a sender to its principal. An explicit binding always wins.
+// By default (single-user), unbound senders collapse to the shared principal so
+// the bot and the local CLI share one conversation with zero config. A
+// multi-user or public bot sets CHATCLI_HUB_ISOLATE=true to keep each channel
+// identity in its own conversation, so one user never sees another's thread.
 func (s *hubSessions) principalFor(ctx context.Context, platform, userID string) string {
 	if s.store != nil {
 		if p, err := s.store.ResolvePrincipal(ctx, platform, userID); err == nil {
 			return p
 		}
 	}
-	if shared := LocalHubPrincipal(); shared != "" {
-		return shared
+	if hubIsolate() {
+		return platform + ":" + userID
 	}
-	return platform + ":" + userID
+	return LocalHubPrincipal()
 }
 
 // gatewayTurn is the per-message handle returned by begin: it carries the

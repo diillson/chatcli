@@ -1125,7 +1125,12 @@ func (cli *ChatCLI) showConfigHub() {
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.hub.local")
-	kv(p, "CHATCLI_HUB_PRINCIPAL", envOr("CHATCLI_HUB_PRINCIPAL"))
+	principalVal := os.Getenv("CHATCLI_HUB_PRINCIPAL")
+	if principalVal == "" {
+		principalVal = defaultMarker + LocalHubPrincipal()
+	}
+	kv(p, "CHATCLI_HUB_PRINCIPAL", principalVal)
+	kv(p, "CHATCLI_HUB_ISOLATE", envBool("CHATCLI_HUB_ISOLATE"))
 	kv(p, "CHATCLI_HUB_POLL_MS", envOr("CHATCLI_HUB_POLL_MS"))
 
 	fmt.Println(p)

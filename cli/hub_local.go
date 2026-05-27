@@ -22,6 +22,30 @@ import (
 // latency for I/O; tune with CHATCLI_HUB_POLL_MS.
 const defaultHubPollInterval = time.Second
 
+// defaultHubPrincipal is the single-user identity used when CHATCLI_HUB_PRINCIPAL
+// is unset. It makes cross-channel continuity work with zero configuration:
+// the local CLI and the gateway's unbound senders both resolve to it, so a
+// thread started in the CLI continues on Telegram/Slack/WhatsApp out of the box.
+// The hub database lives under the invoking user's ~/.chatcli, so this constant
+// is already scoped per OS user.
+const defaultHubPrincipal = "default"
+
+// hubEnabled reports whether the conversation hub is active. It is on by default
+// and disabled only by CHATCLI_HUB_ENABLED=false (the same switch the server
+// honors), so a user who wants the classic fresh-start CLI can opt out.
+func hubEnabled() bool {
+	return !strings.EqualFold(os.Getenv("CHATCLI_HUB_ENABLED"), "false")
+}
+
+// hubIsolate reports whether the gateway should keep conversations isolated per
+// channel identity instead of collapsing unbound senders into the shared
+// principal. Off by default (single-user convenience); set CHATCLI_HUB_ISOLATE=
+// true when running a multi-user or public bot so one user can't see another's
+// thread.
+func hubIsolate() bool {
+	return strings.EqualFold(os.Getenv("CHATCLI_HUB_ISOLATE"), "true")
+}
+
 // localHubClient implements HubClient against the on-disk hub database directly,
 // so a standalone CLI (no /connect) shares the conversation with the gateway
 // daemon running on the same machine. Both processes open the same hub.db.
@@ -123,25 +147,28 @@ func (l *localHubClient) principalOr(p string) string {
 	return p
 }
 
-// LocalHubPrincipal returns the principal for local hub mode, or "" when local
-// mode is disabled. Local mode is opt-in via CHATCLI_HUB_PRINCIPAL: setting it
-// declares "this machine is one user" — the standalone CLI and the gateway's
-// unbound senders all resolve to this principal, sharing one conversation.
+// LocalHubPrincipal returns the principal for local hub mode: CHATCLI_HUB_PRINCIPAL
+// when set, otherwise the shared default. It is never empty, so cross-channel
+// continuity works with zero configuration.
 func LocalHubPrincipal() string {
-	return strings.TrimSpace(os.Getenv("CHATCLI_HUB_PRINCIPAL"))
+	if p := strings.TrimSpace(os.Getenv("CHATCLI_HUB_PRINCIPAL")); p != "" {
+		return p
+	}
+	return defaultHubPrincipal
 }
 
-// maybeEnableLocalHub wires a standalone CLI to the on-disk hub when local mode
-// is enabled and the session is not already connected to a remote hub. It
-// returns a closer for the opened database, or nil when local mode is off.
+// maybeEnableLocalHub wires a standalone CLI to the on-disk hub (on by default,
+// off when CHATCLI_HUB_ENABLED=false) unless the session is already connected to
+// a remote hub. It returns a closer for the opened database, or nil when local
+// mode is off.
 func (cli *ChatCLI) maybeEnableLocalHub(ctx context.Context) func() {
 	if cli.hubSync != nil || cli.isRemote {
 		return nil // a /connect session already owns hub sync
 	}
-	principal := LocalHubPrincipal()
-	if principal == "" {
-		return nil // opt-in only
+	if !hubEnabled() {
+		return nil // opted out
 	}
+	principal := LocalHubPrincipal()
 	dbPath, err := hub.DefaultDBPath()
 	if err != nil {
 		cli.logger.Warn("local hub: cannot resolve db path; disabling", zap.Error(err))

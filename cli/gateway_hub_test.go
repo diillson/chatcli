@@ -82,17 +82,35 @@ func TestHubSessionsCrossChannelContinuityViaBinding(t *testing.T) {
 	}
 }
 
-func TestHubSessionsUnboundSendersAreIsolated(t *testing.T) {
+func TestHubSessionsUnboundSendersIsolatedWhenIsolateSet(t *testing.T) {
+	t.Setenv("CHATCLI_HUB_ISOLATE", "true")
 	hs, _ := newTestHubSessions(t)
 	ctx := context.Background()
 
 	a := hs.begin(ctx, gateway.InboundMessage{Platform: "telegram", ChatID: "1", UserID: "alice", Text: "hi"})
 	b := hs.begin(ctx, gateway.InboundMessage{Platform: "telegram", ChatID: "2", UserID: "bob", Text: "hi"})
 	if a.convID == b.convID {
-		t.Fatal("unbound senders must not share a conversation")
+		t.Fatal("with CHATCLI_HUB_ISOLATE, unbound senders must not share a conversation")
 	}
 	if a.principal == b.principal {
-		t.Fatal("unbound senders must get distinct per-channel principals")
+		t.Fatal("with CHATCLI_HUB_ISOLATE, unbound senders must get distinct per-channel principals")
+	}
+}
+
+func TestHubSessionsUnboundSendersCollapseByDefault(t *testing.T) {
+	// No CHATCLI_HUB_ISOLATE and no CHATCLI_HUB_PRINCIPAL: single-user default.
+	t.Setenv("CHATCLI_HUB_ISOLATE", "")
+	t.Setenv("CHATCLI_HUB_PRINCIPAL", "")
+	hs, _ := newTestHubSessions(t)
+	ctx := context.Background()
+
+	a := hs.begin(ctx, gateway.InboundMessage{Platform: "telegram", ChatID: "1", UserID: "alice", Text: "hi"})
+	b := hs.begin(ctx, gateway.InboundMessage{Platform: "whatsapp", ChatID: "2", UserID: "bob", Text: "hi"})
+	if a.convID != b.convID {
+		t.Fatal("by default, unbound senders should collapse into one shared conversation")
+	}
+	if a.principal != defaultHubPrincipal || b.principal != defaultHubPrincipal {
+		t.Fatalf("expected shared default principal, got %q and %q", a.principal, b.principal)
 	}
 }
 
@@ -122,13 +140,19 @@ func TestGatewayCoLocationPublishesToSubscribers(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
+	// Force single-user default (no isolation, default principal) so the
+	// telegram sender and the notebook share one conversation.
+	t.Setenv("CHATCLI_HUB_ISOLATE", "")
+	t.Setenv("CHATCLI_HUB_PRINCIPAL", "")
+
 	mgr := hub.NewManager(store, nil, 16)
 	hs := newHubSessions(mgr, zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// A connected notebook subscribes to the (unbound) sender's conversation.
-	conv, _ := mgr.Resolve(ctx, "telegram:u1")
+	// A connected notebook subscribes to the shared conversation (the default
+	// single-user principal that the unbound telegram sender also collapses to).
+	conv, _ := mgr.Resolve(ctx, LocalHubPrincipal())
 	stream, err := mgr.Subscribe(ctx, conv, 0)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
