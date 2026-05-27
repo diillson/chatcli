@@ -546,6 +546,11 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 	defer a.runInflight.Store(false)
 
+	// Pull turns that arrived on other channels (Telegram/…) into history so the
+	// agent/coder has cross-channel context. No-op outside local hub/connected
+	// mode (e.g. the gateway daemon, which manages its own context). Silent.
+	a.cli.syncHubContext(ctx)
+
 	// Item 8: defeat typeahead-in-the-dark. The user may have just
 	// pressed Enter on /coder or /agent — go-prompt's teardown can
 	// leave the controlling TTY in raw mode (no echo, ICRNL off),
@@ -832,6 +837,12 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// the prompt; the scheduler will fire the resume in due time.
 	if errors.Is(err, errAgentParkedRequested) {
 		return nil
+	}
+	// Mirror the user request + final answer onto the shared conversation so
+	// the turn shows up as context on other channels. No-op when hub sync is
+	// off; tool execution detail stays local.
+	if err == nil && strings.TrimSpace(a.cli.lastAgentReply) != "" {
+		a.cli.mirrorHubTurn(ctx, query, a.cli.lastAgentReply)
 	}
 	return err
 }

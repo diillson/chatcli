@@ -7,11 +7,8 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"sync"
-	"time"
 
-	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -35,60 +32,54 @@ type HubClient interface {
 }
 
 // HubSync keeps a connected CLI in lock-step with the shared cross-channel
-// conversation: it hydrates history on connect, appends each local turn, live-
-// tails turns that arrive from other channels (Telegram/Slack/…), and rotates
-// the conversation on /newsession. All methods are safe to call when the hub is
-// unavailable — they degrade to no-ops so the REPL never blocks on the hub.
+// conversation: it hydrates history on connect, mirrors each local turn, and
+// pulls turns that arrived on other channels (Telegram/Slack/…) into history at
+// the start of the next turn so the model has context — without printing them,
+// which would fight the prompt. /newsession rotates the conversation. All
+// methods are safe to call when the hub is unavailable (no-ops), so the REPL
+// never blocks on the hub.
 type HubSync struct {
 	client HubClient
 	logger *zap.Logger
-	render func(models.ConversationEvent) // prints a tailed event from another channel
 
 	mu        sync.Mutex
 	convID    string
 	principal string
 	lastSeq   int64
-	subCancel context.CancelFunc // cancels the in-flight subscription (used to restart on rotation)
 }
 
-func newHubSync(client HubClient, logger *zap.Logger, render func(models.ConversationEvent)) *HubSync {
+func newHubSync(client HubClient, logger *zap.Logger) *HubSync {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &HubSync{client: client, logger: logger, render: render}
+	return &HubSync{client: client, logger: logger}
 }
 
-// hydrate resolves the principal's active conversation and returns its history
-// as messages to seed cli.history. It records the conversation id and the
-// highest seq seen so the tail resumes from there.
-func (hs *HubSync) hydrate(ctx context.Context) ([]models.Message, error) {
-	convID, principal, err := hs.client.ResolveActiveConversation(ctx, "")
+// startFresh begins a new shared conversation for this CLI session (ephemeral
+// model): it rotates the principal to a fresh thread — which prunes the prior
+// one — so we never load an old conversation or let the database grow. The hub
+// is a momentary cross-channel bridge; long-term recall lives in the memory
+// system, not here.
+func (hs *HubSync) startFresh(ctx context.Context) error {
+	_, principal, err := hs.client.ResolveActiveConversation(ctx, "")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	events, err := hs.client.ReadConversation(ctx, convID, 0, 0)
+	convID, err := hs.client.NewConversation(ctx, "")
 	if err != nil {
-		return nil, err
+		return err
 	}
-
 	hs.mu.Lock()
 	hs.convID = convID
 	hs.principal = principal
 	hs.lastSeq = 0
-	msgs := make([]models.Message, 0, len(events))
-	for _, ev := range events {
-		if ev.Seq > hs.lastSeq {
-			hs.lastSeq = ev.Seq
-		}
-		msgs = append(msgs, ev.ToMessage())
-	}
 	hs.mu.Unlock()
-	return msgs, nil
+	return nil
 }
 
-// afterChatTurn records a completed local chat turn on the shared conversation
-// so other channels (and future sessions) see it.
-func (hs *HubSync) afterChatTurn(ctx context.Context, userText, assistantText string) {
+// mirrorTurn records a completed local turn (chat, agent or coder) on the shared
+// conversation so other channels — and future sessions — continue from it.
+func (hs *HubSync) mirrorTurn(ctx context.Context, userText, assistantText string) {
 	hs.mu.Lock()
 	convID := hs.convID
 	hs.mu.Unlock()
@@ -97,6 +88,38 @@ func (hs *HubSync) afterChatTurn(ctx context.Context, userText, assistantText st
 	}
 	hs.append(ctx, convID, models.ConvRoleUser, userText)
 	hs.append(ctx, convID, models.ConvRoleAssistant, assistantText)
+}
+
+// pull fetches turns appended since the last sync (by any channel except our
+// own local writes) so the caller can splice them into history before the next
+// turn. It advances the seen-sequence watermark. Safe to call on the turn's
+// goroutine; returns nil when nothing is new or the hub is idle.
+func (hs *HubSync) pull(ctx context.Context) []models.Message {
+	hs.mu.Lock()
+	convID := hs.convID
+	since := hs.lastSeq
+	hs.mu.Unlock()
+	if convID == "" {
+		return nil
+	}
+	events, err := hs.client.ReadConversation(ctx, convID, since, 0)
+	if err != nil {
+		hs.logger.Warn("hub sync: pull failed", zap.Error(err))
+		return nil
+	}
+	msgs := make([]models.Message, 0, len(events))
+	hs.mu.Lock()
+	for _, ev := range events {
+		if ev.Seq > hs.lastSeq {
+			hs.lastSeq = ev.Seq
+		}
+		if ev.Channel == hubChannelLocal {
+			continue // our own turns are already in local history
+		}
+		msgs = append(msgs, ev.ToMessage())
+	}
+	hs.mu.Unlock()
+	return msgs
 }
 
 func (hs *HubSync) append(ctx context.Context, convID, role, content string) {
@@ -121,8 +144,7 @@ func (hs *HubSync) append(ctx context.Context, convID, role, content string) {
 }
 
 // newSession rotates the shared conversation to a fresh thread, propagated to
-// every channel resolving the same principal. The live tail restarts on the new
-// conversation.
+// every channel resolving the same principal on their next turn.
 func (hs *HubSync) newSession(ctx context.Context) error {
 	convID, err := hs.client.NewConversation(ctx, "")
 	if err != nil {
@@ -131,73 +153,8 @@ func (hs *HubSync) newSession(ctx context.Context) error {
 	hs.mu.Lock()
 	hs.convID = convID
 	hs.lastSeq = 0
-	cancel := hs.subCancel
 	hs.mu.Unlock()
-	if cancel != nil {
-		cancel() // break the current subscription so the tail resubscribes on the new conversation
-	}
 	return nil
-}
-
-// startTail runs the live-tail loop until ctx is canceled, re-subscribing on
-// stream end (server resync signal) and on conversation rotation. It renders
-// only events that arrived from other channels.
-func (hs *HubSync) startTail(ctx context.Context) {
-	go func() {
-		for ctx.Err() == nil {
-			hs.mu.Lock()
-			convID := hs.convID
-			since := hs.lastSeq
-			subCtx, cancel := context.WithCancel(ctx)
-			hs.subCancel = cancel
-			hs.mu.Unlock()
-
-			if convID == "" {
-				cancel()
-				return
-			}
-
-			stream, err := hs.client.SubscribeConversation(subCtx, convID, since)
-			if err != nil {
-				cancel()
-				if !sleepCtx(ctx, 2*time.Second) {
-					return
-				}
-				continue
-			}
-
-			for ev := range stream {
-				hs.mu.Lock()
-				if ev.Seq > hs.lastSeq {
-					hs.lastSeq = ev.Seq
-				}
-				current := hs.convID
-				hs.mu.Unlock()
-				if ev.ConvID != current || ev.Channel == hubChannelLocal {
-					continue // stale (rotated) or our own local turn
-				}
-				if hs.render != nil {
-					hs.render(ev)
-				}
-			}
-			cancel()
-			// Stream ended: either ctx cancellation, rotation, or an overflow
-			// resync. A short pause avoids a hot loop before resubscribing.
-			if !sleepCtx(ctx, 200*time.Millisecond) {
-				return
-			}
-		}
-	}()
-}
-
-// sleepCtx sleeps for d, returning false if ctx is canceled first.
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case <-time.After(d):
-		return true
-	}
 }
 
 // status reports the live sync state for display in /config hub.
@@ -221,45 +178,47 @@ func (hs *HubSync) bindings(ctx context.Context, principal string) ([]models.Hub
 // --- ChatCLI integration ---
 
 // EnableHubSync wires a connected CLI to the shared conversation hub. Call it
-// after setting cli.Client to the remote client and before Start. A render
-// function prints tailed events from other channels.
+// after setting cli.Client to the remote client and before Start.
 func (cli *ChatCLI) EnableHubSync(client HubClient) {
-	cli.hubSync = newHubSync(client, cli.logger, cli.renderTailedEvent)
+	cli.hubSync = newHubSync(client, cli.logger)
 }
 
-// startHubSync hydrates the shared conversation into local history and starts
-// the live tail. Invoked from Start when hub sync is enabled. Hydration
-// failures degrade to a fresh local session (the hub may simply be disabled
-// server-side).
+// startHubSync establishes a fresh shared conversation for this CLI session.
+// Invoked from Start. A standalone CLI (no /connect) joins the on-disk hub when
+// local mode is enabled, sharing the conversation with a co-running gateway
+// daemon. The conversation is ephemeral per session: nothing old is loaded and
+// the previous thread is pruned, so the database stays bounded.
 func (cli *ChatCLI) startHubSync(ctx context.Context) {
-	// A standalone CLI (no /connect) joins the on-disk hub when local mode is
-	// enabled, so it shares the conversation with a co-running gateway daemon.
 	if cli.hubSync == nil {
 		cli.hubLocalClose = cli.maybeEnableLocalHub(ctx)
 	}
 	if cli.hubSync == nil {
 		return
 	}
-	msgs, err := cli.hubSync.hydrate(ctx)
-	if err != nil {
-		cli.logger.Warn("hub sync: hydrate failed; starting fresh", zap.Error(err))
-		cli.hubSync = nil // hub unavailable: disable sync for this session
-		return
+	if err := cli.hubSync.startFresh(ctx); err != nil {
+		cli.logger.Warn("hub sync: could not start shared session; disabling", zap.Error(err))
+		cli.hubSync = nil
 	}
-	if len(msgs) > 0 {
-		// Seed local history so the model has the cross-channel context.
-		cli.history = append(cli.history, msgs...)
-		fmt.Println(colorize("  "+i18n.T("hub.resumed", len(msgs)), ColorGray))
-	}
-	cli.hubSync.startTail(ctx)
 }
 
-// renderTailedEvent prints a conversation turn that arrived from another channel
-// while the user is at the local prompt, tagged with its origin.
-func (cli *ChatCLI) renderTailedEvent(ev models.ConversationEvent) {
-	cli.history = append(cli.history, ev.ToMessage())
-	label := i18n.T("hub.via_channel", ev.Channel)
-	role := ev.Role
-	fmt.Printf("\n%s %s\n", colorize(label, ColorYellow), colorize(role+":", ColorGray))
-	fmt.Println("  " + ev.Content)
+// syncHubContext pulls turns that arrived on other channels since the last turn
+// into local history, so the model has cross-channel context without anything
+// being printed. Called at the start of each local turn (chat/agent/coder) on
+// that turn's goroutine, so it never races the REPL.
+func (cli *ChatCLI) syncHubContext(ctx context.Context) {
+	if cli.hubSync == nil {
+		return
+	}
+	if msgs := cli.hubSync.pull(ctx); len(msgs) > 0 {
+		cli.history = append(cli.history, msgs...)
+	}
+}
+
+// mirrorHubTurn records a completed local turn on the shared conversation, so a
+// thread continued in the CLI shows up as context on Telegram/Slack/WhatsApp.
+func (cli *ChatCLI) mirrorHubTurn(ctx context.Context, userText, assistantText string) {
+	if cli.hubSync == nil {
+		return
+	}
+	cli.hubSync.mirrorTurn(ctx, userText, assistantText)
 }

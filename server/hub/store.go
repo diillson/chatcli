@@ -14,6 +14,7 @@ package hub
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/diillson/chatcli/models"
 )
@@ -72,6 +73,11 @@ type Store interface {
 	// OwnerOf returns the principal that owns a conversation, for authorization
 	// checks: a subscriber must own the conversation it tails.
 	OwnerOf(ctx context.Context, convID string) (principal string, err error)
+
+	// PurgeIdle deletes conversations idle longer than olderThan (and their
+	// events), keeping the hub bounded. The active conversation of each
+	// principal is never purged. Returns how many were removed.
+	PurgeIdle(ctx context.Context, olderThan time.Duration) (int, error)
 
 	// Close releases the underlying database.
 	Close() error

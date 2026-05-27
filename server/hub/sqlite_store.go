@@ -169,9 +169,12 @@ func (s *SQLiteStore) NewConversation(ctx context.Context, principal string) (st
 	return s.createConversationLocked(ctx, principal)
 }
 
-// createConversationLocked inserts a new conversation and points the principal
-// at it. Caller must hold wmu.
+// createConversationLocked rotates the principal to a fresh conversation and
+// prunes the one it replaces, so the hub stays a bounded cross-channel buffer
+// rather than a growing archive (long-term recall is the memory system's job).
+// Caller must hold wmu.
 func (s *SQLiteStore) createConversationLocked(ctx context.Context, principal string) (string, error) {
+	prior, _ := s.activePointer(ctx, principal) // "" on first contact
 	convID := uuid.New().String()
 	now := time.Now().UTC().UnixMilli()
 
@@ -192,10 +195,65 @@ func (s *SQLiteStore) createConversationLocked(ctx context.Context, principal st
 		principal, convID, now); err != nil {
 		return "", fmt.Errorf("hub: update pointer: %w", err)
 	}
+	if prior != "" && prior != convID {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE conv_id = ?`, prior); err != nil {
+			return "", fmt.Errorf("hub: prune prior events: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM conversations WHERE conv_id = ?`, prior); err != nil {
+			return "", fmt.Errorf("hub: prune prior conversation: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("hub: commit new conversation: %w", err)
 	}
 	return convID, nil
+}
+
+// PurgeIdle deletes conversations whose most recent activity is older than
+// olderThan (and their events), reclaiming space from abandoned threads. A
+// conversation with no events falls back to its creation time. Returns the
+// number of conversations removed.
+func (s *SQLiteStore) PurgeIdle(ctx context.Context, olderThan time.Duration) (int, error) {
+	if olderThan <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().Add(-olderThan).UTC().UnixMilli()
+
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+
+	// Never purge a principal's currently-active conversation.
+	const q = `
+SELECT c.conv_id FROM conversations c
+WHERE c.conv_id NOT IN (SELECT active_conv_id FROM pointers)
+  AND COALESCE((SELECT MAX(ts) FROM events e WHERE e.conv_id = c.conv_id), c.created_at) < ?`
+	rows, err := s.db.QueryContext(ctx, q, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("hub: scan idle conversations: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("hub: scan idle id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	for _, id := range ids {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM events WHERE conv_id = ?`, id); err != nil {
+			return 0, fmt.Errorf("hub: purge idle events: %w", err)
+		}
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM conversations WHERE conv_id = ?`, id); err != nil {
+			return 0, fmt.Errorf("hub: purge idle conversation: %w", err)
+		}
+	}
+	return len(ids), nil
 }
 
 func (s *SQLiteStore) activePointer(ctx context.Context, principal string) (string, error) {

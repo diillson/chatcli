@@ -37,6 +37,21 @@ func hubEnabled() bool {
 	return !strings.EqualFold(os.Getenv("CHATCLI_HUB_ENABLED"), "false")
 }
 
+// defaultHubTTL is how long an idle conversation lingers before PurgeIdle
+// reclaims it. The hub is a momentary bridge, not an archive, so abandoned
+// threads are swept; tune with CHATCLI_HUB_TTL_HOURS.
+const defaultHubTTL = 24 * time.Hour
+
+// hubTTL returns the idle-conversation retention window (0 disables purging).
+func hubTTL() time.Duration {
+	if v := os.Getenv("CHATCLI_HUB_TTL_HOURS"); v != "" {
+		if h, err := strconv.Atoi(v); err == nil && h >= 0 {
+			return time.Duration(h) * time.Hour
+		}
+	}
+	return defaultHubTTL
+}
+
 // hubIsolate reports whether the gateway should keep conversations isolated per
 // channel identity instead of collapsing unbound senders into the shared
 // principal. Off by default (single-user convenience); set CHATCLI_HUB_ISOLATE=
@@ -179,7 +194,12 @@ func (cli *ChatCLI) maybeEnableLocalHub(ctx context.Context) func() {
 		cli.logger.Warn("local hub: cannot open db; disabling", zap.Error(err))
 		return nil
 	}
-	cli.hubSync = newHubSync(newLocalHubClient(store, principal), cli.logger, cli.renderTailedEvent)
+	if n, err := store.PurgeIdle(ctx, hubTTL()); err != nil {
+		cli.logger.Warn("local hub: purge idle failed", zap.Error(err))
+	} else if n > 0 {
+		cli.logger.Info("local hub: purged idle conversations", zap.Int("count", n))
+	}
+	cli.hubSync = newHubSync(newLocalHubClient(store, principal), cli.logger)
 	cli.logger.Info("local hub mode enabled", zap.String("principal", principal), zap.String("db", dbPath))
 	return func() { _ = store.Close() }
 }

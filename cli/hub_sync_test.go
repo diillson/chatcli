@@ -7,9 +7,9 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
@@ -17,17 +17,18 @@ import (
 
 // fakeHubClient is an in-memory HubClient for exercising HubSync without gRPC.
 type fakeHubClient struct {
-	mu       sync.Mutex
-	convID   string
-	seq      int64
-	events   []models.ConversationEvent
-	subCh    chan models.ConversationEvent
-	appended []models.ConversationEvent
-	bindings []models.HubBinding
+	mu          sync.Mutex
+	convID      string
+	convCounter int
+	seq         int64
+	events      []models.ConversationEvent
+	subCh       chan models.ConversationEvent
+	appended    []models.ConversationEvent
+	bindings    []models.HubBinding
 }
 
 func newFakeHubClient() *fakeHubClient {
-	return &fakeHubClient{convID: "conv-1", subCh: make(chan models.ConversationEvent, 16)}
+	return &fakeHubClient{convID: "conv-1", convCounter: 1, subCh: make(chan models.ConversationEvent, 16)}
 }
 
 func (f *fakeHubClient) ResolveActiveConversation(_ context.Context, _ string) (string, string, error) {
@@ -39,8 +40,9 @@ func (f *fakeHubClient) ResolveActiveConversation(_ context.Context, _ string) (
 func (f *fakeHubClient) NewConversation(_ context.Context, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.convID = "conv-2"
-	f.events = nil
+	f.convCounter++
+	f.convID = fmt.Sprintf("conv-%d", f.convCounter)
+	f.events = nil // ephemeral: rotating prunes the prior thread
 	return f.convID, nil
 }
 
@@ -70,21 +72,7 @@ func (f *fakeHubClient) SubscribeConversation(ctx context.Context, _ string, _ i
 	out := make(chan models.ConversationEvent)
 	go func() {
 		defer close(out)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ev, ok := <-f.subCh:
-				if !ok {
-					return
-				}
-				select {
-				case out <- ev:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
+		<-ctx.Done()
 	}()
 	return out, nil
 }
@@ -102,6 +90,8 @@ func (f *fakeHubClient) ListBindings(_ context.Context, _ string) ([]models.HubB
 	return append([]models.HubBinding(nil), f.bindings...), nil
 }
 
+// seed appends events to the current conversation (used to simulate turns
+// written by another channel between local turns).
 func (f *fakeHubClient) seed(events ...models.ConversationEvent) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -112,34 +102,30 @@ func (f *fakeHubClient) seed(events ...models.ConversationEvent) {
 	}
 }
 
-func TestHubSyncHydrate(t *testing.T) {
+func TestHubSyncStartFreshRotates(t *testing.T) {
 	fc := newFakeHubClient()
-	fc.seed(
-		models.ConversationEvent{ConvID: "conv-1", Channel: "telegram", Role: models.ConvRoleUser, Content: "hi"},
-		models.ConversationEvent{ConvID: "conv-1", Channel: "telegram", Role: models.ConvRoleAssistant, Content: "hello"},
-	)
-	hs := newHubSync(fc, zap.NewNop(), nil)
+	hs := newHubSync(fc, zap.NewNop())
 
-	msgs, err := hs.hydrate(context.Background())
-	if err != nil {
-		t.Fatalf("hydrate: %v", err)
+	if err := hs.startFresh(context.Background()); err != nil {
+		t.Fatalf("startFresh: %v", err)
 	}
-	if len(msgs) != 2 || msgs[0].Content != "hi" || msgs[1].Role != "assistant" {
-		t.Fatalf("unexpected hydrated history: %+v", msgs)
+	// Ephemeral: a fresh conversation is created (rotated away from conv-1).
+	if hs.convID == "conv-1" || hs.convID == "" {
+		t.Fatalf("startFresh did not rotate to a fresh conversation: %q", hs.convID)
 	}
-	if hs.lastSeq != 2 {
-		t.Fatalf("lastSeq = %d, want 2", hs.lastSeq)
+	if hs.principal != "alice" || hs.lastSeq != 0 {
+		t.Fatalf("unexpected state principal=%q lastSeq=%d", hs.principal, hs.lastSeq)
 	}
 }
 
-func TestHubSyncAfterChatTurnAppendsLocalChannel(t *testing.T) {
+func TestHubSyncMirrorTurnAppendsLocalChannel(t *testing.T) {
 	fc := newFakeHubClient()
-	hs := newHubSync(fc, zap.NewNop(), nil)
-	if _, err := hs.hydrate(context.Background()); err != nil {
-		t.Fatalf("hydrate: %v", err)
+	hs := newHubSync(fc, zap.NewNop())
+	if err := hs.startFresh(context.Background()); err != nil {
+		t.Fatalf("startFresh: %v", err)
 	}
 
-	hs.afterChatTurn(context.Background(), "question", "answer")
+	hs.mirrorTurn(context.Background(), "question", "answer")
 
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
@@ -156,54 +142,32 @@ func TestHubSyncAfterChatTurnAppendsLocalChannel(t *testing.T) {
 	}
 }
 
-func TestHubSyncTailRendersOtherChannelsSkipsLocal(t *testing.T) {
+func TestHubSyncPullSkipsLocalReturnsOthers(t *testing.T) {
 	fc := newFakeHubClient()
-
-	var mu sync.Mutex
-	var rendered []models.ConversationEvent
-	render := func(ev models.ConversationEvent) {
-		mu.Lock()
-		rendered = append(rendered, ev)
-		mu.Unlock()
-	}
-	hs := newHubSync(fc, zap.NewNop(), render)
-	if _, err := hs.hydrate(context.Background()); err != nil {
-		t.Fatalf("hydrate: %v", err)
+	hs := newHubSync(fc, zap.NewNop())
+	if err := hs.startFresh(context.Background()); err != nil {
+		t.Fatalf("startFresh: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	hs.startTail(ctx)
+	// A local echo (skip) and a telegram turn (deliver) land on the conversation.
+	fc.seed(
+		models.ConversationEvent{Channel: hubChannelLocal, Role: models.ConvRoleUser, Content: "my own"},
+		models.ConversationEvent{Channel: "telegram", Role: models.ConvRoleUser, Content: "from phone"},
+	)
 
-	// A local echo (must be skipped) and a telegram message (must be rendered).
-	fc.subCh <- models.ConversationEvent{ConvID: "conv-1", Seq: 10, Channel: hubChannelLocal, Role: models.ConvRoleUser, Content: "my own"}
-	fc.subCh <- models.ConversationEvent{ConvID: "conv-1", Seq: 11, Channel: "telegram", Role: models.ConvRoleUser, Content: "from phone"}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		mu.Lock()
-		n := len(rendered)
-		mu.Unlock()
-		if n >= 1 {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("tail did not render the telegram event")
-		case <-time.After(10 * time.Millisecond):
-		}
+	msgs := hs.pull(context.Background())
+	if len(msgs) != 1 || msgs[0].Content != "from phone" {
+		t.Fatalf("pull should return only the telegram turn, got %+v", msgs)
 	}
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(rendered) != 1 || rendered[0].Content != "from phone" {
-		t.Fatalf("expected only the telegram event rendered, got %+v", rendered)
+	// A second pull returns nothing new (watermark advanced past both).
+	if more := hs.pull(context.Background()); len(more) != 0 {
+		t.Fatalf("second pull should be empty, got %+v", more)
 	}
 }
 
 func TestHubSyncBindAndList(t *testing.T) {
 	fc := newFakeHubClient()
-	hs := newHubSync(fc, zap.NewNop(), nil)
+	hs := newHubSync(fc, zap.NewNop())
 	ctx := context.Background()
 
 	if err := hs.bind(ctx, "telegram", "u1", "alice"); err != nil {
@@ -225,8 +189,8 @@ func TestHubCommandWiring(t *testing.T) {
 
 	// With a fake hub, drive each subcommand branch.
 	fc := newFakeHubClient()
-	c.hubSync = newHubSync(fc, zap.NewNop(), c.renderTailedEvent)
-	_, _ = c.hubSync.hydrate(context.Background()) // populate convID/principal for whoami
+	c.hubSync = newHubSync(fc, zap.NewNop())
+	_ = c.hubSync.startFresh(context.Background()) // populate convID/principal for whoami
 	c.handleHubCommand("/hub whoami")
 	c.handleHubCommand("/hub bind telegram 123 alice")
 	c.handleHubCommand("/hub bind")     // usage branch
@@ -247,25 +211,23 @@ func TestShowConfigHub(t *testing.T) {
 
 	// With a live sync (covers the connected branch).
 	fc := newFakeHubClient()
-	c.hubSync = newHubSync(fc, zap.NewNop(), c.renderTailedEvent)
-	_, _ = c.hubSync.hydrate(context.Background())
+	c.hubSync = newHubSync(fc, zap.NewNop())
+	_ = c.hubSync.startFresh(context.Background())
 	t.Setenv("CHATCLI_HUB_ENABLED", "false") // exercise the disabled-label path
 	c.showConfigHub()
 }
 
 func TestHubSyncNewSessionRotates(t *testing.T) {
 	fc := newFakeHubClient()
-	hs := newHubSync(fc, zap.NewNop(), nil)
-	if _, err := hs.hydrate(context.Background()); err != nil {
-		t.Fatalf("hydrate: %v", err)
+	hs := newHubSync(fc, zap.NewNop())
+	if err := hs.startFresh(context.Background()); err != nil {
+		t.Fatalf("startFresh: %v", err)
 	}
-	if hs.convID != "conv-1" {
-		t.Fatalf("pre-rotate convID = %q", hs.convID)
-	}
+	before := hs.convID
 	if err := hs.newSession(context.Background()); err != nil {
 		t.Fatalf("newSession: %v", err)
 	}
-	if hs.convID != "conv-2" || hs.lastSeq != 0 {
-		t.Fatalf("after rotate convID=%q lastSeq=%d, want conv-2/0", hs.convID, hs.lastSeq)
+	if hs.convID == before || hs.lastSeq != 0 {
+		t.Fatalf("after rotate convID=%q (was %q) lastSeq=%d", hs.convID, before, hs.lastSeq)
 	}
 }
