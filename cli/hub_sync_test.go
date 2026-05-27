@@ -229,9 +229,9 @@ func TestHubCommandWiring(t *testing.T) {
 	_, _ = c.hubSync.hydrate(context.Background()) // populate convID/principal for whoami
 	c.handleHubCommand("/hub whoami")
 	c.handleHubCommand("/hub bind telegram 123 alice")
-	c.handleHubCommand("/hub bind")        // usage branch
-	c.handleHubCommand("/hub bindings")    // list branch
-	c.handleHubCommand("/hub bogus")       // default/usage branch
+	c.handleHubCommand("/hub bind")     // usage branch
+	c.handleHubCommand("/hub bindings") // list branch
+	c.handleHubCommand("/hub bogus")    // default/usage branch
 
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
