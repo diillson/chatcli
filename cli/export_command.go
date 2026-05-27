@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * ChatCLI - export_command.go
  *
  * /export [path] writes the current conversation as a ShareGPT-style JSONL

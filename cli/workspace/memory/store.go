@@ -296,11 +296,16 @@ func (s ExtractionSummary) IsEmpty() bool {
 		s.TopicsRecorded == 0 && s.ProjectsUpserted == 0
 }
 
-// ProcessExtraction processes the output from the memory extraction LLM.
-// This replaces the old AppendLongTerm + WriteDailyNote pattern with
-// structured extraction that populates profile, topics, and projects, and
-// returns a summary of what changed.
-func (m *Manager) ProcessExtraction(response string) ExtractionSummary {
+// ProcessExtraction processes the output from the memory extraction LLM,
+// populating profile, topics, and projects. Kept with its original (void)
+// signature for API compatibility; callers that need the summary use
+// ProcessExtractionResult.
+func (m *Manager) ProcessExtraction(response string) {
+	m.ProcessExtractionResult(response)
+}
+
+// ProcessExtractionResult is ProcessExtraction with a summary of what changed.
+func (m *Manager) ProcessExtractionResult(response string) ExtractionSummary {
 	daily, longTerm, profileUpdates, topics, projects := parseEnhancedResponse(response)
 
 	var sum ExtractionSummary
@@ -643,8 +648,66 @@ func containsAny(s string, subs ...string) bool {
 	return false
 }
 
-// EnhancedExtractionPrompt is the updated prompt for the memory worker.
+// EnhancedExtractionPrompt is the original memory-extraction prompt.
+//
+// Deprecated: kept for API compatibility; the worker uses
+// EnhancedExtractionPromptV2, which adds typed/free-form profile fields and
+// per-line category tagging for long-term facts.
 const EnhancedExtractionPrompt = `You are a memory annotation system. Analyze this conversation segment and extract structured annotations.
+
+OUTPUT FORMAT — use EXACTLY these section headers:
+
+## DAILY
+Write a brief log of what was done in this segment. Use bullet points. Include:
+- Files read, modified or created (with paths)
+- Commands executed and their outcomes
+- Errors encountered and how they were resolved
+- Tasks completed or in progress
+
+## LONGTERM
+Write ONLY genuinely new facts that should be remembered permanently:
+- Architectural decisions made
+- Patterns or conventions discovered/established
+- User preferences expressed
+- Important file paths or project structure insights
+- Technical constraints or gotchas learned
+
+## PROFILE_UPDATE
+If the user revealed new information about themselves, output KEY=VALUE pairs:
+name=...
+role=...
+expertise_level=beginner|intermediate|expert
+preferred_language=...
+communication_style=...
+(Only include fields that have new information. Skip this section if nothing new.)
+
+## TOPICS
+List technical topics discussed in this segment (comma-separated):
+Go, Bubble Tea, memory systems, ...
+(Skip if no clear technical topics.)
+
+## PROJECTS
+If a specific project was worked on, output KEY=VALUE pairs:
+project_name=...
+project_path=...
+project_status=active|paused|completed
+project_description=...
+project_technologies=Go, React, ...
+(Skip if no project context.)
+
+RULES:
+- If nothing new was learned for a section, write "NOTHING_NEW" in that section
+- If the conversation is trivial (greetings, simple questions), respond with just: NOTHING_NEW
+- Keep each bullet to ONE line
+- Use exact file paths, never paraphrase
+- Do NOT repeat facts already in EXISTING LONG-TERM MEMORY
+- Write in the same language the user is using in the conversation
+- Be concise — this is metadata, not prose`
+
+// EnhancedExtractionPromptV2 is the active extraction prompt. It expands
+// PROFILE_UPDATE with typed and free-form user fields and asks for per-line
+// category tags on LONGTERM facts so they are filed correctly.
+const EnhancedExtractionPromptV2 = `You are a memory annotation system. Analyze this conversation segment and extract structured annotations.
 
 OUTPUT FORMAT — use EXACTLY these section headers:
 

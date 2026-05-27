@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * Package trajectory exports a conversation history to JSONL in the
  * ShareGPT-style {"from","value"} shape widely used to train tool-calling
  * models. It is provider-agnostic: it operates on the unified

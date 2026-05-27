@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * BuiltinMemoryPlugin — exposes long-term memory as an @memory ReAct tool
  * so the agent can persist knowledge DETERMINISTICALLY, the moment the user
  * reveals it, instead of relying on the throttled background extractor that

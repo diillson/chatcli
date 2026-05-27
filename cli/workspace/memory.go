@@ -142,9 +142,16 @@ func (ms *MemoryStore) VectorIndex() *memory.VectorIndex {
 }
 
 // ProcessExtraction processes enhanced extraction output from the memory
-// worker and returns a summary of what was persisted.
-func (ms *MemoryStore) ProcessExtraction(response string) memory.ExtractionSummary {
-	return ms.manager.ProcessExtraction(response)
+// worker. Void for API compatibility; use ProcessExtractionResult for the
+// summary.
+func (ms *MemoryStore) ProcessExtraction(response string) {
+	ms.manager.ProcessExtraction(response)
+}
+
+// ProcessExtractionResult is ProcessExtraction with a summary of what was
+// persisted.
+func (ms *MemoryStore) ProcessExtractionResult(response string) memory.ExtractionSummary {
+	return ms.manager.ProcessExtractionResult(response)
 }
 
 // RememberFact stores a single fact deterministically (no LLM). category

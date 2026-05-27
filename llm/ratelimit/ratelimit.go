@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * Package ratelimit parses provider rate-limit response headers
  * (the x-ratelimit-* family used by OpenAI/OpenRouter/Anthropic-compatible
  * APIs) into structured buckets and keeps the latest snapshot per provider.

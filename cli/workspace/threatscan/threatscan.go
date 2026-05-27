@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * Package threatscan neutralizes prompt-injection and obvious
  * command-and-control / exfiltration payloads in text that is about to be
  * injected into the LLM system prompt (long-term memory, user profile,

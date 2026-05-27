@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * Package moa implements Mixture-of-Agents: fan a prompt out to several
  * reference models in parallel, then synthesize their answers with an
  * aggregator model. Based on Wang et al. (arXiv:2406.04692).
@@ -53,8 +58,9 @@ func (r RefResult) OK() bool { return r.Err == nil && strings.TrimSpace(r.Output
 // ParseRefs parses "openai:gpt-5, claudeai:opus, googleai" into Refs.
 // A bare token (no colon) is treated as a provider with the default model.
 func ParseRefs(raw string) []Ref {
-	var refs []Ref
-	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' || r == ';' }) {
+	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' || r == ';' })
+	refs := make([]Ref, 0, len(parts))
+	for _, part := range parts {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue

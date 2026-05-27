@@ -111,7 +111,7 @@ Go, Memory
 project_name=chatcli
 project_status=active`
 
-	sum := mgr.ProcessExtraction(resp)
+	sum := mgr.ProcessExtractionResult(resp)
 	if sum.IsEmpty() {
 		t.Fatal("expected non-empty summary")
 	}

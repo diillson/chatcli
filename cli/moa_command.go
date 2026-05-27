@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * ChatCLI - moa_command.go
  *
  * /moa <prompt> runs Mixture-of-Agents: fan the prompt out to several
