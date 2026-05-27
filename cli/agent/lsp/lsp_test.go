@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,5 +119,32 @@ func TestSeverityLabel(t *testing.T) {
 		if d.SeverityLabel() != want {
 			t.Errorf("severity %d => %q, want %q", sev, d.SeverityLabel(), want)
 		}
+	}
+}
+
+func TestSupportedExtensions(t *testing.T) {
+	exts := SupportedExtensions()
+	if len(exts) == 0 {
+		t.Fatal("expected supported extensions")
+	}
+	found := false
+	for _, e := range exts {
+		if e == ".go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected .go among supported extensions")
+	}
+}
+
+func TestReadMessage_Errors(t *testing.T) {
+	// Missing Content-Length header.
+	if _, err := readMessage(bufio.NewReader(strings.NewReader("X-Foo: 1\r\n\r\nbody"))); err == nil {
+		t.Error("expected error for missing Content-Length")
+	}
+	// Invalid Content-Length value.
+	if _, err := readMessage(bufio.NewReader(strings.NewReader("Content-Length: abc\r\n\r\n"))); err == nil {
+		t.Error("expected error for invalid Content-Length")
 	}
 }
