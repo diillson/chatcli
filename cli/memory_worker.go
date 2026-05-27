@@ -234,10 +234,19 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 		zap.String("response_preview", truncateForLog(response, 200)),
 	)
 
-	// Use enhanced processing that populates profile, topics, projects
-	mw.cli.memoryStore.ProcessExtraction(response)
+	// Use enhanced processing that populates profile, topics, projects.
+	// A non-empty summary becomes a visible one-line notice so the user
+	// can tell the system actually learned something this turn.
+	summary := mw.cli.memoryStore.ProcessExtraction(response)
+	if !summary.IsEmpty() {
+		mw.cli.pushMemoryNotice(formatMemoryNotice(summary))
+	}
 
-	mw.logger.Debug("Memory worker: enhanced extraction complete")
+	mw.logger.Debug("Memory worker: enhanced extraction complete",
+		zap.Int("facts_added", summary.FactsAdded),
+		zap.Bool("profile_updated", summary.ProfileUpdated),
+		zap.Int("topics", summary.TopicsRecorded),
+	)
 	return nil
 }
 

@@ -124,9 +124,27 @@ func (ms *MemoryStore) VectorIndex() *memory.VectorIndex {
 	return ms.manager.VectorIndex()
 }
 
-// ProcessExtraction processes enhanced extraction output from the memory worker.
-func (ms *MemoryStore) ProcessExtraction(response string) {
-	ms.manager.ProcessExtraction(response)
+// ProcessExtraction processes enhanced extraction output from the memory
+// worker and returns a summary of what was persisted.
+func (ms *MemoryStore) ProcessExtraction(response string) memory.ExtractionSummary {
+	return ms.manager.ProcessExtraction(response)
+}
+
+// RememberFact stores a single fact deterministically (no LLM). category
+// may be empty to auto-classify. Returns true if newly added.
+func (ms *MemoryStore) RememberFact(content, category string) bool {
+	return ms.manager.RememberFact(content, category)
+}
+
+// UpdateProfile applies deterministic profile updates and returns whether
+// anything changed.
+func (ms *MemoryStore) UpdateProfile(updates map[string]string) bool {
+	return ms.manager.UpdateProfile(updates)
+}
+
+// ForgetFacts removes facts matching substr and returns how many were removed.
+func (ms *MemoryStore) ForgetFacts(substr string) int {
+	return ms.manager.ForgetFacts(substr)
 }
 
 // RecordInteraction records a usage event.

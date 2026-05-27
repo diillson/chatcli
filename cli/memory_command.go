@@ -57,8 +57,17 @@ func (cli *ChatCLI) handleMemoryCommand(input string) {
 	case args == "list":
 		cli.listMemoryNotes()
 
+	case strings.HasPrefix(args, "profile set "):
+		cli.setMemoryProfile(strings.TrimSpace(strings.TrimPrefix(args, "profile set ")))
+
 	case args == "profile":
 		cli.showMemoryProfile()
+
+	case strings.HasPrefix(args, "remember "):
+		cli.rememberMemoryFact(strings.TrimSpace(strings.TrimPrefix(args, "remember ")))
+
+	case strings.HasPrefix(args, "forget "):
+		cli.forgetMemoryFact(strings.TrimSpace(strings.TrimPrefix(args, "forget ")))
 
 	case args == "topics":
 		cli.showMemoryTopics()
@@ -214,9 +223,7 @@ func (cli *ChatCLI) showMemoryProfile() {
 	fmt.Println(colorize("  "+i18n.T("mem.cmd.profile.title"), ColorCyan+ColorBold))
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
-	if profile.Name == "" && profile.Role == "" && profile.ExpertiseLevel == "" &&
-		profile.PreferredLang == "" && profile.CommStyle == "" &&
-		len(profile.TopCommands) == 0 && len(profile.Preferences) == 0 {
+	if mgr.Profile.IsEmpty() && len(profile.TopCommands) == 0 {
 		fmt.Println(colorize("  "+i18n.T("mem.cmd.profile.empty"), ColorGray))
 		fmt.Println()
 		return
@@ -236,6 +243,21 @@ func (cli *ChatCLI) showMemoryProfile() {
 	}
 	if profile.CommStyle != "" {
 		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.style"), ColorYellow), profile.CommStyle)
+	}
+	if profile.Company != "" {
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.company"), ColorYellow), profile.Company)
+	}
+	if profile.Location != "" {
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.location"), ColorYellow), profile.Location)
+	}
+	if len(profile.Certifications) > 0 {
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.certifications"), ColorYellow), strings.Join(profile.Certifications, ", "))
+	}
+	if len(profile.Skills) > 0 {
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.skills"), ColorYellow), strings.Join(profile.Skills, ", "))
+	}
+	if len(profile.Goals) > 0 {
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.goals"), ColorYellow), strings.Join(profile.Goals, ", "))
 	}
 
 	if len(profile.TopCommands) > 0 {
@@ -271,6 +293,82 @@ func (cli *ChatCLI) showMemoryProfile() {
 		fmt.Printf("\n  %s %s\n", colorize(i18n.T("mem.cmd.profile.last_updated"), ColorGray), profile.LastUpdated.Format("2006-01-02 15:04"))
 	}
 	fmt.Println()
+}
+
+// rememberMemoryFact stores a fact deterministically via /memory remember.
+// Accepts an optional leading [category]: "/memory remember [gotcha] ...".
+func (cli *ChatCLI) rememberMemoryFact(rest string) {
+	category := ""
+	if strings.HasPrefix(rest, "[") {
+		if end := strings.Index(rest, "]"); end > 1 {
+			category = strings.TrimSpace(rest[1:end])
+			rest = strings.TrimSpace(rest[end+1:])
+		}
+	}
+	if rest == "" {
+		fmt.Println(colorize("  "+i18n.T("mem.cmd.remember.usage"), ColorGray))
+		return
+	}
+
+	added := cli.memoryStore.RememberFact(rest, category)
+	if cli.contextBuilder != nil {
+		cli.contextBuilder.InvalidateCache()
+	}
+	if added {
+		fmt.Printf("  %s %s\n", colorize("OK", ColorGreen), i18n.T("mem.cmd.remember.ok"))
+	} else {
+		fmt.Printf("  %s %s\n", colorize("!", ColorYellow), i18n.T("mem.cmd.remember.dup"))
+	}
+}
+
+// forgetMemoryFact removes facts matching a substring via /memory forget.
+func (cli *ChatCLI) forgetMemoryFact(rest string) {
+	if rest == "" {
+		fmt.Println(colorize("  "+i18n.T("mem.cmd.forget.usage"), ColorGray))
+		return
+	}
+	n := cli.memoryStore.ForgetFacts(rest)
+	if cli.contextBuilder != nil {
+		cli.contextBuilder.InvalidateCache()
+	}
+	if n > 0 {
+		fmt.Printf("  %s %s\n", colorize("OK", ColorGreen), i18n.T("mem.cmd.forget.removed", n))
+	} else {
+		fmt.Printf("  %s %s\n", colorize("!", ColorYellow), i18n.T("mem.cmd.forget.none"))
+	}
+}
+
+// setMemoryProfile applies a "key=value" (or "key: value") profile update
+// via /memory profile set.
+func (cli *ChatCLI) setMemoryProfile(rest string) {
+	key, value, ok := splitProfileKV(rest)
+	if !ok {
+		fmt.Println(colorize("  "+i18n.T("mem.cmd.profile.set.usage"), ColorGray))
+		return
+	}
+	changed := cli.memoryStore.UpdateProfile(map[string]string{key: value})
+	if cli.contextBuilder != nil {
+		cli.contextBuilder.InvalidateCache()
+	}
+	if changed {
+		fmt.Printf("  %s %s\n", colorize("OK", ColorGreen), i18n.T("mem.cmd.profile.set.ok", key))
+	} else {
+		fmt.Printf("  %s %s\n", colorize("!", ColorYellow), i18n.T("mem.cmd.profile.set.nochange"))
+	}
+}
+
+// splitProfileKV splits "key=value" or "key: value" into its parts.
+func splitProfileKV(s string) (key, value string, ok bool) {
+	for _, sep := range []string{"=", ":"} {
+		if idx := strings.Index(s, sep); idx > 0 {
+			key = strings.TrimSpace(s[:idx])
+			value = strings.TrimSpace(s[idx+len(sep):])
+			if key != "" && value != "" {
+				return key, value, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 func (cli *ChatCLI) showMemoryTopics() {
@@ -607,6 +705,8 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "list", Description: i18n.T("mem.cmd.suggest.list")},
 			{Text: "load", Description: i18n.T("mem.cmd.suggest.load")},
 			{Text: "profile", Description: i18n.T("mem.cmd.suggest.profile")},
+			{Text: "remember", Description: i18n.T("mem.cmd.suggest.remember")},
+			{Text: "forget", Description: i18n.T("mem.cmd.suggest.forget")},
 			{Text: "topics", Description: i18n.T("mem.cmd.suggest.topics")},
 			{Text: "projects", Description: i18n.T("mem.cmd.suggest.projects")},
 			{Text: "stats", Description: i18n.T("mem.cmd.suggest.stats")},

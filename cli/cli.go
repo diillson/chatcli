@@ -228,6 +228,13 @@ type ChatCLI struct {
 	memWorker        *memoryWorker
 	sessionStartTime time.Time // for session duration tracking
 
+	// Pending one-line memory notices produced by the background worker.
+	// They are flushed to the terminal at the next executor tick so the
+	// write never races with go-prompt's redraw (the worker runs on its
+	// own goroutine and must not touch stdout directly).
+	memNoticeMu sync.Mutex
+	memNotices  []string
+
 	// MCP (Model Context Protocol) servers for client mode
 	mcpManager     *mcp.Manager
 	mcpCancel      context.CancelFunc // cancel function for MCP server lifecycle
@@ -400,6 +407,10 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
+		// @memory — deterministic long-term memory writes/recall. The
+		// adapter is wired below once the memory store exists; until then
+		// the tool reports "memory not enabled" rather than panicking.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMemoryPlugin())
 		// Atomic read-only tools (Claude Code parity, Item 1). Narrow,
 		// flat-schema tools that route into the same engine as @coder
 		// read/search/tree but give the LLM a dedicated entry point —
@@ -496,6 +507,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	cli.memoryStore = memStore
 	if memStore != nil {
 		memStore.SetWorkspaceDir(workspaceDir)
+		// Wire the @memory tool to this session's store so the agent can
+		// persist facts deterministically.
+		plugins.SetMemoryAdapter(&memoryPluginAdapter{cli: cli})
 	}
 	cli.contextBuilder = workspace.NewContextBuilder(bootstrapLoader, memStore, workspaceDir)
 
@@ -646,6 +660,10 @@ func (cli *ChatCLI) executor(in string) {
 		_ = os.Stdout.Sync()
 	}
 	cli.renderChannelTriggerBanner()
+
+	// Flush any memory notices the background worker produced since the
+	// last tick, so "memory updated" feedback is visible instead of silent.
+	cli.drainMemoryNotices()
 
 	// Handle paste: replace placeholder with real content and show notification
 	if cli.lastPasteInfo != nil {

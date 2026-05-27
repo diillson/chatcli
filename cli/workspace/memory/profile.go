@@ -39,6 +39,24 @@ func (ps *UserProfileStore) Get() UserProfile {
 	return ps.profile
 }
 
+// IsEmpty reports whether the profile holds no user-supplied data yet
+// (command counts in TopCommands do not count as "data about the user").
+func (ps *UserProfileStore) IsEmpty() bool {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	return ps.isEmptyLocked()
+}
+
+// isEmptyLocked is the lock-free core of IsEmpty; callers must hold at
+// least a read lock.
+func (ps *UserProfileStore) isEmptyLocked() bool {
+	p := ps.profile
+	return p.Name == "" && p.Role == "" && p.ExpertiseLevel == "" &&
+		p.PreferredLang == "" && p.CommStyle == "" && p.Company == "" &&
+		p.Location == "" && len(p.Certifications) == 0 && len(p.Skills) == 0 &&
+		len(p.Goals) == 0 && len(p.Preferences) == 0
+}
+
 // Update applies partial updates to the profile.
 // Only non-empty fields in the update are applied.
 func (ps *UserProfileStore) Update(updates map[string]string) bool {
@@ -78,8 +96,32 @@ func (ps *UserProfileStore) Update(updates map[string]string) bool {
 				ps.profile.CommStyle = value
 				changed = true
 			}
+		case "company", "employer", "organization", "org":
+			if ps.profile.Company != value {
+				ps.profile.Company = value
+				changed = true
+			}
+		case "location", "city", "country", "timezone", "tz":
+			if ps.profile.Location != value {
+				ps.profile.Location = value
+				changed = true
+			}
+		case "certification", "certifications", "cert", "certs":
+			if appendUnique(&ps.profile.Certifications, value) {
+				changed = true
+			}
+		case "skill", "skills":
+			if appendUnique(&ps.profile.Skills, value) {
+				changed = true
+			}
+		case "goal", "goals", "objective", "objectives":
+			if appendUnique(&ps.profile.Goals, value) {
+				changed = true
+			}
 		default:
-			// Store as generic preference
+			// Store as generic preference. This is the escape hatch that
+			// keeps the profile open-ended: any personal fact the model
+			// reports with a novel key is preserved instead of dropped.
 			if ps.profile.Preferences == nil {
 				ps.profile.Preferences = make(map[string]string)
 			}
@@ -120,7 +162,7 @@ func (ps *UserProfileStore) FormatForPrompt() string {
 	defer ps.mu.RUnlock()
 
 	p := ps.profile
-	if p.Name == "" && p.Role == "" && p.ExpertiseLevel == "" && p.PreferredLang == "" {
+	if ps.isEmptyLocked() {
 		return ""
 	}
 
@@ -139,6 +181,21 @@ func (ps *UserProfileStore) FormatForPrompt() string {
 	}
 	if p.CommStyle != "" {
 		parts = append(parts, "Style: "+p.CommStyle)
+	}
+	if p.Company != "" {
+		parts = append(parts, "Company: "+p.Company)
+	}
+	if p.Location != "" {
+		parts = append(parts, "Location: "+p.Location)
+	}
+	if len(p.Certifications) > 0 {
+		parts = append(parts, "Certifications: "+strings.Join(p.Certifications, ", "))
+	}
+	if len(p.Skills) > 0 {
+		parts = append(parts, "Skills: "+strings.Join(p.Skills, ", "))
+	}
+	if len(p.Goals) > 0 {
+		parts = append(parts, "Goals: "+strings.Join(p.Goals, ", "))
 	}
 
 	// Top 5 commands
@@ -208,6 +265,34 @@ func (ps *UserProfileStore) persist() {
 	if err := os.WriteFile(ps.path, data, 0o600); err != nil {
 		ps.logger.Warn("failed to write user profile", zap.Error(err))
 	}
+}
+
+// appendUnique splits value on commas/semicolons and appends each item to
+// *list when not already present (case-insensitive). It returns true if the
+// list grew. The model often reports several items at once
+// ("AWS SAA, CKA, Terraform Associate"); splitting here keeps each as its
+// own entry rather than one mashed-together string.
+func appendUnique(list *[]string, value string) bool {
+	seen := make(map[string]struct{}, len(*list))
+	for _, existing := range *list {
+		seen[strings.ToLower(strings.TrimSpace(existing))] = struct{}{}
+	}
+
+	added := false
+	for _, raw := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ';' }) {
+		item := strings.TrimSpace(raw)
+		if item == "" {
+			continue
+		}
+		key := strings.ToLower(item)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		*list = append(*list, item)
+		added = true
+	}
+	return added
 }
 
 func normalizeExpertise(level string) string {

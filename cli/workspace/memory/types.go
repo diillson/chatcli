@@ -5,12 +5,24 @@ import (
 )
 
 // UserProfile tracks who the user is and how they interact.
+//
+// The scalar fields (Name, Role, …) are the "fast path" identity slots the
+// extraction prompt knows by name. The list fields (Certifications, Skills,
+// Goals) capture accreting personal facts that previously had nowhere to
+// live and were silently dropped. Anything the model reports that does not
+// match a typed field lands in Preferences (free-form key/value), so the
+// profile can grow without a schema change — see UserProfileStore.Update.
 type UserProfile struct {
 	Name           string            `json:"name,omitempty"`
 	Role           string            `json:"role,omitempty"`
 	ExpertiseLevel string            `json:"expertise_level,omitempty"` // beginner, intermediate, expert
 	PreferredLang  string            `json:"preferred_language,omitempty"`
 	CommStyle      string            `json:"communication_style,omitempty"`
+	Company        string            `json:"company,omitempty"`
+	Location       string            `json:"location,omitempty"`
+	Certifications []string          `json:"certifications,omitempty"`
+	Skills         []string          `json:"skills,omitempty"`
+	Goals          []string          `json:"goals,omitempty"`
 	TopCommands    map[string]int    `json:"top_commands,omitempty"`
 	Preferences    map[string]string `json:"preferences,omitempty"`
 	LastUpdated    time.Time         `json:"last_updated"`
