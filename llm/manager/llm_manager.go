@@ -35,6 +35,7 @@ import (
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/llm/openai_responses"
 	"github.com/diillson/chatcli/llm/openrouter"
+	"github.com/diillson/chatcli/llm/ratelimit"
 	"github.com/diillson/chatcli/llm/stackspotai"
 	"github.com/diillson/chatcli/llm/token"
 	"github.com/diillson/chatcli/llm/xai"
@@ -134,6 +135,10 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	logger.Info(i18n.T("llm.manager.retry_policy"),
 		zap.Int("max_retries", maxRetries),
 		zap.Duration("initial_backoff", initialBackoff))
+
+	// Record rate-limit headers for EVERY HTTP provider via the single
+	// auth.DoWithRefresh seam (provider-agnostic; no per-client wiring).
+	auth.ResponseObserver = ratelimit.Record
 
 	manager := &LLMManagerImpl{
 		clients:          make(map[string]func(string) (client.LLMClient, error)),

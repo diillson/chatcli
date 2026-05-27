@@ -278,6 +278,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/mcp", Description: i18n.T("complete.root.mcp")},
 		{Text: "/hooks", Description: i18n.T("complete.root.hooks")},
 		{Text: "/cost", Description: i18n.T("complete.root.cost")},
+		{Text: "/ratelimit", Description: i18n.T("complete.root.ratelimit")},
 		{Text: "/thinking", Description: i18n.T("complete.root.thinking")},
 		{Text: "/plan", Description: i18n.T("complete.root.plan")},
 		{Text: "/refine", Description: i18n.T("complete.root.refine")},
@@ -822,6 +823,7 @@ func (cli *ChatCLI) getSessionSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "save", Description: i18n.T("complete.session.sub_save")},
 			{Text: "load", Description: i18n.T("complete.session.sub_load")},
 			{Text: "list", Description: i18n.T("complete.session.sub_list")},
+			{Text: "search", Description: i18n.T("complete.session.sub_search")},
 			{Text: "delete", Description: i18n.T("complete.session.sub_delete")},
 			{Text: "fork", Description: i18n.T("complete.session.sub_fork")},
 		}
