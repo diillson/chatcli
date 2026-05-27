@@ -12,6 +12,9 @@ type fakeBackend struct {
 	lastSession string
 	reply       string
 	err         error
+	lastTask    string
+	lastTool    string
+	lastArgs    string
 }
 
 func (f *fakeBackend) Prompt(_ context.Context, session, text string) (string, error) {
@@ -23,6 +26,25 @@ func (f *fakeBackend) Prompt(_ context.Context, session, text string) (string, e
 		return f.reply, nil
 	}
 	return "echo:" + text, nil
+}
+
+func (f *fakeBackend) Agent(_ context.Context, session, task string) (string, error) {
+	f.lastSession, f.lastTask = session, task
+	return "agent-ran:" + task, nil
+}
+
+func (f *fakeBackend) Coder(_ context.Context, session, task string) (string, error) {
+	f.lastSession, f.lastTask = session, task
+	return "coder-ran:" + task, nil
+}
+
+func (f *fakeBackend) BuiltinTools() []ToolInfo {
+	return []ToolInfo{{Name: "read", Description: "Read a file"}, {Name: "search", Description: "Search files"}}
+}
+
+func (f *fakeBackend) CallBuiltin(_ context.Context, name, args string) (string, error) {
+	f.lastTool, f.lastArgs = name, args
+	return "tool:" + name + ":" + args, nil
 }
 
 // runOne feeds a single request line through a Server with the given handler
@@ -110,6 +132,46 @@ func TestMCP_ToolCall_MissingPrompt(t *testing.T) {
 	)
 	if len(resps) != 1 || resps[0].Error == nil || resps[0].Error.Code != CodeInvalidParams {
 		t.Fatalf("expected invalid params, got %+v", resps)
+	}
+}
+
+func TestMCP_AdvertisesAgentCoderAndBuiltins(t *testing.T) {
+	m := NewMCP(&fakeBackend{}, "chatcli", "1.0.0")
+	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+	body, _ := json.Marshal(resps[0].Result)
+	for _, want := range []string{"ask_chatcli", "agent_task", "coder_task", "read", "search"} {
+		if !strings.Contains(string(body), `"`+want+`"`) {
+			t.Errorf("tools/list missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestMCP_AgentCoderBuiltinDispatch(t *testing.T) {
+	be := &fakeBackend{}
+	m := NewMCP(be, "chatcli", "1.0.0")
+
+	// agent_task
+	r := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agent_task","arguments":{"task":"build X"}}}`)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "agent-ran:build X") {
+		t.Errorf("agent_task wrong: %s", b)
+	}
+	// coder_task
+	r = runLines(t, m.Handle, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"coder_task","arguments":{"task":"fix Y"}}}`)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "coder-ran:fix Y") {
+		t.Errorf("coder_task wrong: %s", b)
+	}
+	// builtin tool
+	r = runLines(t, m.Handle, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read","arguments":{"args":"main.go"}}}`)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "tool:read:main.go") {
+		t.Errorf("builtin dispatch wrong: %s", b)
+	}
+	if be.lastTool != "read" || be.lastArgs != "main.go" {
+		t.Errorf("builtin args not propagated: %q %q", be.lastTool, be.lastArgs)
+	}
+	// missing task -> error
+	r = runLines(t, m.Handle, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agent_task","arguments":{}}}`)
+	if r[0].Error == nil {
+		t.Error("expected error for agent_task without task")
 	}
 }
 
