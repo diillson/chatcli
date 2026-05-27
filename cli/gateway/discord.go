@@ -8,10 +8,11 @@ package gateway
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -65,7 +66,7 @@ func NewDiscordAdapter(token string, logger *zap.Logger) *DiscordAdapter {
 // Name implements Adapter.
 func (d *DiscordAdapter) Name() string { return discordPlatform }
 
-// Start connects to the gateway and streams messages until ctx is cancelled,
+// Start connects to the gateway and streams messages until ctx is canceled,
 // reconnecting with backoff on transient failures.
 func (d *DiscordAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
 	d.logger.Info("gateway/discord: starting")
@@ -92,10 +93,24 @@ func (d *DiscordAdapter) Start(ctx context.Context, inbound chan<- InboundMessag
 	}
 }
 
+// cryptoFloat64 returns a uniform float64 in [0,1) sourced from crypto/rand.
+// Used for heartbeat jitter so the weak-RNG check (gosec G404) stays satisfied
+// without importing math/rand.
+func cryptoFloat64() float64 {
+	var b [8]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		return 0.5 // jitter is best-effort; fall back to mid-interval
+	}
+	return float64(binary.BigEndian.Uint64(b[:])>>11) / float64(uint64(1)<<53)
+}
+
 // runSession runs one connection lifecycle: connect, hello, identify,
 // heartbeat, dispatch — returning when the connection drops or ctx ends.
 func (d *DiscordAdapter) runSession(ctx context.Context, inbound chan<- InboundMessage) error {
-	conn, _, err := d.dialer.DialContext(ctx, d.gatewayURL, nil)
+	conn, resp, err := d.dialer.DialContext(ctx, d.gatewayURL, nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close() // handshake response body; unused
+	}
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
@@ -135,7 +150,7 @@ func (d *DiscordAdapter) runSession(ctx context.Context, inbound chan<- InboundM
 		select {
 		case <-sessionCtx.Done():
 			return
-		case <-time.After(time.Duration(float64(hb)*rand.Float64()) * time.Millisecond):
+		case <-time.After(time.Duration(float64(hb)*cryptoFloat64()) * time.Millisecond):
 		}
 		for {
 			if err := writeJSON(map[string]interface{}{"op": dOpHeartbeat, "d": seq.get()}); err != nil {

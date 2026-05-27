@@ -99,7 +99,7 @@ func (s *SlackAdapter) eventsHandler(ctx context.Context, inbound chan<- Inbound
 	}
 }
 
-// Start runs the Events API HTTP server until ctx is cancelled.
+// Start runs the Events API HTTP server until ctx is canceled.
 func (s *SlackAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc(s.path, s.eventsHandler(ctx, inbound))
@@ -107,7 +107,10 @@ func (s *SlackAdapter) Start(ctx context.Context, inbound chan<- InboundMessage)
 	srv := &http.Server{Addr: s.addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Derive from ctx (preserving its values) but detach from its
+		// cancellation — it's already done — so the 5s graceful-shutdown
+		// window actually applies. Satisfies contextcheck / gosec G118.
+		shutCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
 	}()

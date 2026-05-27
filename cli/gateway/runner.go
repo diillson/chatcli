@@ -46,7 +46,7 @@ func NewRunner(adapters []Adapter, agent AgentFunc, logger *zap.Logger, maxConcu
 }
 
 // Run starts every adapter and processes inbound messages until ctx is
-// cancelled. It blocks until shutdown. Returns the first fatal adapter error,
+// canceled. It blocks until shutdown. Returns the first fatal adapter error,
 // or nil on clean ctx cancellation.
 func (r *Runner) Run(ctx context.Context) error {
 	if len(r.order) == 0 {

@@ -47,7 +47,7 @@ type OutboundMessage struct {
 }
 
 // Adapter is a platform integration. Implementations must be safe to Start
-// once; Start blocks until ctx is cancelled, pushing received messages to
+// once; Start blocks until ctx is canceled, pushing received messages to
 // inbound. Send delivers a reply. Name identifies the platform.
 type Adapter interface {
 	Name() string

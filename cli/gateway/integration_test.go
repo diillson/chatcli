@@ -47,11 +47,12 @@ func TestSlackEventsHandler(t *testing.T) {
 	}
 
 	// A message event reaches inbound.
-	_, err = http.Post(srv.URL, "application/json", strings.NewReader(
+	postResp, err := http.Post(srv.URL, "application/json", strings.NewReader(
 		`{"type":"event_callback","event":{"type":"message","channel":"C1","user":"U1","text":"hi slack"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = postResp.Body.Close()
 	if m := recvWithin(t, ch, time.Second); m.Text != "hi slack" || m.ChatID != "C1" {
 		t.Errorf("inbound wrong: %+v", m)
 	}
@@ -61,6 +62,7 @@ func TestSlackEventsHandler(t *testing.T) {
 	if r.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("GET should be 405, got %d", r.StatusCode)
 	}
+	_ = r.Body.Close()
 }
 
 func TestSlackEventsHandler_BadSignature(t *testing.T) {
@@ -73,6 +75,7 @@ func TestSlackEventsHandler_BadSignature(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401 for missing signature, got %d", resp.StatusCode)
 	}
+	_ = resp.Body.Close()
 }
 
 func TestSlackSend(t *testing.T) {
@@ -103,10 +106,10 @@ func TestWhatsAppHandler(t *testing.T) {
 	defer srv.Close()
 
 	// Verification handshake.
-	resp, _ := http.Get(srv.URL + "?hub.mode=subscribe&hub.verify_token=verifytok&hub.challenge=ping")
+	resp, _ := http.Get(srv.URL + "?hub.mode=subscribe&hub.verify_token=verifytok&hub.challenge=1158201444")
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if string(body) != "ping" {
+	if string(body) != "1158201444" {
 		t.Errorf("verify challenge not echoed: %q", body)
 	}
 	// Wrong token -> 403.
@@ -114,9 +117,11 @@ func TestWhatsAppHandler(t *testing.T) {
 	if r2.StatusCode != http.StatusForbidden {
 		t.Errorf("wrong verify token should be 403, got %d", r2.StatusCode)
 	}
+	_ = r2.Body.Close()
 	// Message event.
-	_, _ = http.Post(srv.URL, "application/json", strings.NewReader(
+	postResp, _ := http.Post(srv.URL, "application/json", strings.NewReader(
 		`{"entry":[{"changes":[{"value":{"messages":[{"from":"55119","type":"text","text":{"body":"ola"}}]}}]}]}`))
+	_ = postResp.Body.Close()
 	if m := recvWithin(t, ch, time.Second); m.Text != "ola" || m.ChatID != "55119" {
 		t.Errorf("inbound wrong: %+v", m)
 	}
@@ -164,6 +169,7 @@ func TestWebhookHandlerAndSend(t *testing.T) {
 	if r1.StatusCode != http.StatusUnauthorized {
 		t.Errorf("missing secret should be 401, got %d", r1.StatusCode)
 	}
+	_ = r1.Body.Close()
 	// With secret -> accepted + inbound.
 	req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(`{"chat_id":"c1","text":"hello hook"}`))
 	req.Header.Set("X-ChatCLI-Secret", "s3cret")
@@ -171,6 +177,7 @@ func TestWebhookHandlerAndSend(t *testing.T) {
 	if r2.StatusCode != http.StatusAccepted {
 		t.Errorf("expected 202, got %d", r2.StatusCode)
 	}
+	_ = r2.Body.Close()
 	if m := recvWithin(t, ch, time.Second); m.Text != "hello hook" {
 		t.Errorf("inbound wrong: %+v", m)
 	}
@@ -307,9 +314,11 @@ func TestSlackSignedPath(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(body))
 	req.Header.Set("X-Slack-Request-Timestamp", ts)
 	req.Header.Set("X-Slack-Signature", sig)
-	if _, err := http.DefaultClient.Do(req); err != nil {
+	doResp, err := http.DefaultClient.Do(req)
+	if err != nil {
 		t.Fatal(err)
 	}
+	_ = doResp.Body.Close()
 	if m := recvWithin(t, ch, time.Second); m.Text != "signed" {
 		t.Errorf("signed message not received: %+v", m)
 	}

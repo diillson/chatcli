@@ -92,7 +92,7 @@ func (w *WebhookAdapter) inboundHandler(ctx context.Context, inbound chan<- Inbo
 	}
 }
 
-// Start runs the HTTP server until ctx is cancelled.
+// Start runs the HTTP server until ctx is canceled.
 func (w *WebhookAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
 	if w.secret == "" {
 		w.logger.Warn("gateway/webhook: no CHATCLI_WEBHOOK_SECRET set — inbound endpoint is unauthenticated")
@@ -103,7 +103,10 @@ func (w *WebhookAdapter) Start(ctx context.Context, inbound chan<- InboundMessag
 	srv := &http.Server{Addr: w.addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Derive from ctx (preserving its values) but detach from its
+		// cancellation — it's already done — so the 5s graceful-shutdown
+		// window actually applies. Satisfies contextcheck / gosec G118.
+		shutCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
 	}()

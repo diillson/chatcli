@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,9 +67,16 @@ func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- Inb
 			q := r.URL.Query()
 			if q.Get("hub.mode") == "subscribe" &&
 				subtle.ConstantTimeCompare([]byte(q.Get("hub.verify_token")), []byte(a.verifyToken)) == 1 {
-				rw.WriteHeader(http.StatusOK)
-				_, _ = rw.Write([]byte(q.Get("hub.challenge")))
-				return
+				// Meta's verification handshake: hub.challenge is an integer the
+				// endpoint echoes back. Parsing it (and formatting it fresh)
+				// matches the spec and breaks the request→response taint flow
+				// that gosec flags as an XSS vector (G705). Served as plain text.
+				if ch, convErr := strconv.Atoi(strings.TrimSpace(q.Get("hub.challenge"))); convErr == nil {
+					rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
+					rw.WriteHeader(http.StatusOK)
+					_, _ = io.WriteString(rw, strconv.Itoa(ch))
+					return
+				}
 			}
 			rw.WriteHeader(http.StatusForbidden)
 		case http.MethodPost:
@@ -87,7 +95,7 @@ func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- Inb
 	}
 }
 
-// Start runs the webhook HTTP server until ctx is cancelled.
+// Start runs the webhook HTTP server until ctx is canceled.
 func (a *WhatsAppAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc(a.path, a.webhookHandler(ctx, inbound))
@@ -95,7 +103,10 @@ func (a *WhatsAppAdapter) Start(ctx context.Context, inbound chan<- InboundMessa
 	srv := &http.Server{Addr: a.addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Derive from ctx (preserving its values) but detach from its
+		// cancellation — it's already done — so the 5s graceful-shutdown
+		// window actually applies. Satisfies contextcheck / gosec G118.
+		shutCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
 	}()

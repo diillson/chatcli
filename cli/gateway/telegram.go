@@ -54,7 +54,7 @@ func NewTelegramAdapter(token string, allowedUserIDs []string, logger *zap.Logge
 // Name implements Adapter.
 func (t *TelegramAdapter) Name() string { return telegramPlatform }
 
-// Start long-polls getUpdates until ctx is cancelled, pushing messages to
+// Start long-polls getUpdates until ctx is canceled, pushing messages to
 // inbound. Transient errors are logged and retried with a short backoff.
 func (t *TelegramAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
 	if len(t.allowed) == 0 {
@@ -193,7 +193,7 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 	if !r.OK {
 		return nil, 0, fmt.Errorf("telegram response not ok")
 	}
-	var msgs []InboundMessage
+	msgs := make([]InboundMessage, 0, len(r.Result))
 	var maxID int64
 	for _, u := range r.Result {
 		if u.UpdateID > maxID {
