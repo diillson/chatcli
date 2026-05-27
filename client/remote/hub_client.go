@@ -10,11 +10,26 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	"github.com/diillson/chatcli/models"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 )
+
+// clampInt32 narrows a page size to the proto's int32 field without overflow:
+// negatives become 0 (treated as "no limit" server-side) and oversized values
+// saturate at MaxInt32.
+func clampInt32(n int) int32 {
+	switch {
+	case n < 0:
+		return 0
+	case n > math.MaxInt32:
+		return math.MaxInt32
+	default:
+		return int32(n)
+	}
+}
 
 // ResolveActiveConversation returns the principal's current shared conversation
 // (creating one on first contact). principal may be empty to use the
@@ -61,7 +76,7 @@ func (c *Client) ReadConversation(ctx context.Context, convID string, sinceSeq i
 	resp, err := c.grpcClient.ReadConversation(ctx, &pb.ReadConversationRequest{
 		ConvId:   convID,
 		SinceSeq: sinceSeq,
-		Limit:    int32(limit),
+		Limit:    clampInt32(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("remote ReadConversation failed: %w", err)
