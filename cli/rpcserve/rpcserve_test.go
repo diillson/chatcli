@@ -27,7 +27,7 @@ func (f *fakeBackend) Prompt(_ context.Context, session, text string) (string, e
 
 // runOne feeds a single request line through a Server with the given handler
 // and returns the decoded response lines.
-func runLines(t *testing.T, handler Handler, lines ...string) []Response {
+func runLines(t *testing.T, handler handlerFunc, lines ...string) []Response {
 	t.Helper()
 	in := strings.NewReader(strings.Join(lines, "\n") + "\n")
 	var out strings.Builder

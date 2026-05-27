@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 package rpcserve
 
 import (
@@ -27,7 +32,7 @@ func NewMCP(backend Backend, name, version string) *MCP {
 	return &MCP{backend: backend, name: name, version: version}
 }
 
-// Handle dispatches an MCP method. Wire it into Server via the Handler type.
+// Handle dispatches an MCP method. Wire it into Server via the handlerFunc type.
 func (m *MCP) Handle(ctx context.Context, method string, params json.RawMessage) (interface{}, *RPCError) {
 	switch method {
 	case "initialize":
@@ -45,7 +50,7 @@ func (m *MCP) Handle(ctx context.Context, method string, params json.RawMessage)
 	case "tools/call":
 		return m.callTool(ctx, params)
 	default:
-		return nil, Errf(CodeMethodNotFound, "unknown method %q", method)
+		return nil, errf(CodeMethodNotFound, "unknown method %q", method)
 	}
 }
 
@@ -78,13 +83,13 @@ type mcpToolCallParams struct {
 func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}, *RPCError) {
 	var p mcpToolCallParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, Errf(CodeInvalidParams, "invalid params: %v", err)
+		return nil, errf(CodeInvalidParams, "invalid params: %v", err)
 	}
 	if p.Name != "ask_chatcli" {
-		return nil, Errf(CodeInvalidParams, "unknown tool %q", p.Name)
+		return nil, errf(CodeInvalidParams, "unknown tool %q", p.Name)
 	}
 	if p.Arguments.Prompt == "" {
-		return nil, Errf(CodeInvalidParams, "prompt is required")
+		return nil, errf(CodeInvalidParams, "prompt is required")
 	}
 	session := p.Arguments.Session
 	if session == "" {

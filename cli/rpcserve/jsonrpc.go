@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * Package rpcserve implements newline-delimited JSON-RPC 2.0 over stdio and
  * builds two protocol servers on top of it:
  *
@@ -59,25 +64,25 @@ type RPCError struct {
 
 func (e *RPCError) Error() string { return fmt.Sprintf("jsonrpc %d: %s", e.Code, e.Message) }
 
-// Errf builds an RPCError.
-func Errf(code int, format string, args ...interface{}) *RPCError {
+// errf builds an RPCError.
+func errf(code int, format string, args ...interface{}) *RPCError {
 	return &RPCError{Code: code, Message: fmt.Sprintf(format, args...)}
 }
 
-// Handler processes a method call. For notifications the return values are
+// handlerFunc processes a method call. For notifications the return values are
 // ignored. Returning a non-nil *RPCError sends an error response.
-type Handler func(ctx context.Context, method string, params json.RawMessage) (interface{}, *RPCError)
+type handlerFunc func(ctx context.Context, method string, params json.RawMessage) (interface{}, *RPCError)
 
 // Server is a newline-delimited JSON-RPC server over an io pair.
 type Server struct {
 	in      io.Reader
 	out     io.Writer
-	handler Handler
+	handler handlerFunc
 	writeMu sync.Mutex
 }
 
 // NewServer builds a server reading requests from in and writing to out.
-func NewServer(in io.Reader, out io.Writer, handler Handler) *Server {
+func NewServer(in io.Reader, out io.Writer, handler handlerFunc) *Server {
 	return &Server{in: in, out: out, handler: handler}
 }
 
@@ -102,7 +107,7 @@ func (s *Server) Serve(ctx context.Context) error {
 func (s *Server) dispatch(ctx context.Context, line []byte) {
 	var req Request
 	if err := json.Unmarshal(line, &req); err != nil {
-		_ = s.write(Response{JSONRPC: "2.0", Error: Errf(CodeParseError, "parse error: %v", err)})
+		_ = s.write(Response{JSONRPC: "2.0", Error: errf(CodeParseError, "parse error: %v", err)})
 		return
 	}
 	result, rpcErr := s.handler(ctx, req.Method, req.Params)

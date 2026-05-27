@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 package rpcserve
 
 import (
@@ -56,7 +61,7 @@ func (a *ACP) Handle(ctx context.Context, method string, params json.RawMessage)
 	case "session/cancel":
 		return nil, nil // notification; best-effort no-op
 	default:
-		return nil, Errf(CodeMethodNotFound, "unknown method %q", method)
+		return nil, errf(CodeMethodNotFound, "unknown method %q", method)
 	}
 }
 
@@ -71,10 +76,10 @@ type acpPromptParams struct {
 func (a *ACP) prompt(ctx context.Context, params json.RawMessage) (interface{}, *RPCError) {
 	var p acpPromptParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, Errf(CodeInvalidParams, "invalid params: %v", err)
+		return nil, errf(CodeInvalidParams, "invalid params: %v", err)
 	}
 	if p.SessionID == "" {
-		return nil, Errf(CodeInvalidParams, "sessionId is required")
+		return nil, errf(CodeInvalidParams, "sessionId is required")
 	}
 
 	var sb strings.Builder

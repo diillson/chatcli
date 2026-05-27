@@ -1,4 +1,9 @@
 /*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
  * Package cmd — rpcserve.go
  *
  * Implements the `chatcli mcp-serve` and `chatcli acp` subcommands, which run
