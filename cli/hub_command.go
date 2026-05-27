@@ -8,11 +8,39 @@ package cli
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
 )
+
+// knownHubPrincipals returns distinct principals worth suggesting in
+// autocomplete: the shared default, the active session's principal, and every
+// principal already referenced by a binding. Best-effort and cheap.
+func (cli *ChatCLI) knownHubPrincipals() []string {
+	set := map[string]bool{defaultHubPrincipal: true}
+	if cli.hubSync != nil {
+		if _, p := cli.hubSync.status(); p != "" {
+			set[p] = true
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if bs, err := cli.hubSync.bindings(ctx, ""); err == nil {
+			for _, b := range bs {
+				if b.Principal != "" {
+					set[b.Principal] = true
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // handleHubCommand implements /hub — inspect and manage the shared cross-channel
 // conversation: who you are on the hub, the channel→principal bindings, and

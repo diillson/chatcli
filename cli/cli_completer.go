@@ -1514,7 +1514,7 @@ func (cli *ChatCLI) getConfigHubSuggestions(d prompt.Document) []prompt.Suggest 
 		}, word, true)
 	}
 
-	// /config hub set <bool-key> <TAB> → on | off
+	// /config hub set <key> <TAB> → value suggestions per key
 	if sub == "set" && (len(args) == 4 || (len(args) == 5 && !strings.HasSuffix(line, " "))) {
 		switch strings.ToLower(args[3]) {
 		case hubKeyEnabled, hubKeyIsolate:
@@ -1522,9 +1522,29 @@ func (cli *ChatCLI) getConfigHubSuggestions(d prompt.Document) []prompt.Suggest 
 				{Text: "on", Description: i18n.T("cfg.val.enabled")},
 				{Text: "off", Description: i18n.T("cfg.val.disabled")},
 			}, word, true)
+		case hubKeyPrincipal:
+			return prompt.FilterHasPrefix(cli.hubPrincipalSuggestions(), word, true)
+		case hubKeyTTLHours:
+			return prompt.FilterHasPrefix([]prompt.Suggest{
+				{Text: "6", Description: i18n.T("complete.confighub.ttl_6h")},
+				{Text: "24", Description: i18n.T("complete.confighub.ttl_24h")},
+				{Text: "72", Description: i18n.T("complete.confighub.ttl_72h")},
+				{Text: "168", Description: i18n.T("complete.confighub.ttl_168h")},
+				{Text: "0", Description: i18n.T("complete.confighub.ttl_0")},
+			}, word, true)
 		}
 	}
 	return nil
+}
+
+// hubPrincipalSuggestions turns the known principals into completer entries.
+func (cli *ChatCLI) hubPrincipalSuggestions() []prompt.Suggest {
+	ps := cli.knownHubPrincipals()
+	out := make([]prompt.Suggest, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, prompt.Suggest{Text: p, Description: i18n.T("complete.confighub.principal_known")})
+	}
+	return out
 }
 
 // getHubSuggestions drives `/hub whoami|bind|bindings` completion.
@@ -1542,15 +1562,26 @@ func (cli *ChatCLI) getHubSuggestions(d prompt.Document) []prompt.Suggest {
 		}, word, true)
 	}
 
-	// /hub bind <TAB> → platform names
-	if strings.ToLower(args[1]) == "bind" && (len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " "))) {
-		return prompt.FilterHasPrefix([]prompt.Suggest{
-			{Text: "telegram"},
-			{Text: "slack"},
-			{Text: "whatsapp"},
-			{Text: "discord"},
-			{Text: "webhook"},
-		}, word, true)
+	if strings.ToLower(args[1]) == "bind" {
+		// /hub bind <TAB> → platform names
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return prompt.FilterHasPrefix([]prompt.Suggest{
+				{Text: "telegram"},
+				{Text: "slack"},
+				{Text: "whatsapp"},
+				{Text: "discord"},
+				{Text: "webhook"},
+			}, word, true)
+		}
+		// /hub bind <platform> <userid> <TAB> → principal (known ones)
+		if len(args) == 4 || (len(args) == 5 && !strings.HasSuffix(line, " ")) {
+			return prompt.FilterHasPrefix(cli.hubPrincipalSuggestions(), word, true)
+		}
+	}
+
+	// /hub bindings <TAB> → filter by a known principal
+	if strings.ToLower(args[1]) == "bindings" && (len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " "))) {
+		return prompt.FilterHasPrefix(cli.hubPrincipalSuggestions(), word, true)
 	}
 	return nil
 }
