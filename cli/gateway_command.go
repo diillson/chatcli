@@ -174,17 +174,21 @@ func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 
 	// Cross-channel continuity: back conversations with the shared hub so a
 	// thread started on Telegram continues on the notebook (and vice versa).
-	// Disabled by CHATCLI_HUB_ENABLED=false; otherwise a failure to open the DB
-	// degrades gracefully to per-message handling rather than failing the daemon.
-	// A typed-nil must not reach newHubSessions, so we only assign broker on success.
+	// Disabled by the `enabled` setting / CHATCLI_HUB_ENABLED=false; otherwise a
+	// failure to open the DB degrades gracefully to per-message handling rather
+	// than failing the daemon. A typed-nil must not reach newHubSessions, so we
+	// only assign broker on success.
 	var broker hub.Store
-	if hubEnabled() {
-		if m, err := hub.OpenDefault(ctx, cli.logger); err != nil {
-			cli.logger.Warn("gateway: conversation hub unavailable; continuing without cross-channel continuity", zap.Error(err))
-		} else {
-			broker = m
-			defer func() { _ = m.Close() }()
+	if m, err := hub.OpenDefault(ctx, cli.logger); err != nil {
+		cli.logger.Warn("gateway: conversation hub unavailable; continuing without cross-channel continuity", zap.Error(err))
+	} else if !resolveHubEnabled(ctx, m) {
+		_ = m.Close() // hub turned off via setting/env
+	} else {
+		if n, e := m.PurgeIdle(ctx, resolveHubTTL(ctx, m)); e == nil && n > 0 {
+			cli.logger.Info("gateway: purged idle conversations", zap.Int("count", n))
 		}
+		broker = m
+		defer func() { _ = m.Close() }()
 	}
 	return cli.runGateway(ctx, broker)
 }
@@ -432,10 +436,10 @@ func (s *hubSessions) principalFor(ctx context.Context, platform, userID string)
 			return p
 		}
 	}
-	if hubIsolate() {
+	if resolveHubIsolate(ctx, s.store) {
 		return platform + ":" + userID
 	}
-	return LocalHubPrincipal()
+	return resolveHubPrincipal(ctx, s.store)
 }
 
 // gatewayTurn is the per-message handle returned by begin: it carries the

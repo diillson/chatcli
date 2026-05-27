@@ -28,9 +28,11 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -92,7 +94,13 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 	case "server":
 		cli.showConfigServer()
 	case "hub":
-		cli.showConfigHub()
+		// Hierarchical like security: bare form shows the panorama; set/reset
+		// mutate the live, db-backed hub settings (read by the gateway too).
+		if len(args) == 1 {
+			cli.showConfigHub()
+		} else {
+			cli.routeConfigHub(args[1:])
+		}
 	default:
 		fmt.Println(colorize("  "+i18n.T("cfg.route.unknown_section", args[0]), ColorYellow))
 		fmt.Println(colorize("  "+i18n.T("cfg.route.hint"), ColorGray))
@@ -1105,33 +1113,68 @@ func (cli *ChatCLI) showConfigServer() {
 	sectionEnd(ColorGray)
 }
 
-// showConfigHub renders the conversation-hub settings (cross-channel
-// continuity) and the live sync state of the current connection. The hub lets a
-// thread started on one channel (Telegram/Slack) continue on the notebook CLI
-// and vice-versa, until /newsession.
+// hubSettingMeta describes a mutable hub setting for display and `/config hub set`.
+type hubSettingMeta struct {
+	key  string
+	env  string
+	def  string
+	kind string // "bool" | "int" | "str"
+}
+
+var hubSettings = []hubSettingMeta{
+	{hubKeyEnabled, envHubEnabled, "true", "bool"},
+	{hubKeyPrincipal, envHubPrincipal, defaultHubPrincipal, "str"},
+	{hubKeyIsolate, envHubIsolate, "false", "bool"},
+	{hubKeyTTLHours, envHubTTLHours, strconv.Itoa(defaultHubTTLHours), "int"},
+}
+
+// hubEffective resolves a setting's value and where it came from, mirroring the
+// runtime precedence: db setting > env var > default.
+func hubEffective(settings map[string]string, m hubSettingMeta) (val, source string) {
+	if v, ok := settings[m.key]; ok && v != "" {
+		return v, "setting"
+	}
+	if v := strings.TrimSpace(os.Getenv(m.env)); v != "" {
+		return v, "env"
+	}
+	return m.def, "default"
+}
+
+// showConfigHub renders the conversation-hub settings (cross-channel continuity)
+// and the live sync state. Every setting shown can be changed live with
+// `/config hub set <key> <value>` (persisted in the shared db, read by the
+// gateway too); the value's source — setting/env/default — is shown so it's
+// clear where it came from.
 func (cli *ChatCLI) showConfigHub() {
 	sectionHeader("🔗", "cfg.section.hub.title", ColorBlue)
 	p := uiPrefix(ColorBlue)
 
-	enabled := i18n.T("cfg.val.enabled")
-	if strings.EqualFold(os.Getenv("CHATCLI_HUB_ENABLED"), "false") {
-		enabled = i18n.T("cfg.val.disabled")
+	var settings map[string]string
+	mutable := false
+	if cli.hubSync != nil {
+		if s, ok := cli.hubSync.allSettings(context.Background()); ok {
+			settings = s
+			mutable = true
+		}
 	}
-	subheader(p, "cfg.sub.hub.server")
-	kv(p, "CHATCLI_HUB_ENABLED", enabled)
-	kv(p, "CHATCLI_HUB_DB", envOr("CHATCLI_HUB_DB"))
-	kv(p, "CHATCLI_HUB_TAIL_BUFFER", envOr("CHATCLI_HUB_TAIL_BUFFER"))
-	kv(p, "CHATCLI_HUB_BINDINGS", presence(os.Getenv("CHATCLI_HUB_BINDINGS")))
+
+	subheader(p, "cfg.sub.hub.settings")
+	for _, m := range hubSettings {
+		val, source := hubEffective(settings, m)
+		if source == "default" {
+			val = defaultMarker + val // kv renders this cyan with a "(default)" tag
+		}
+		kv(p, m.key, val)
+	}
+	kv(p, "bindings", presence(os.Getenv("CHATCLI_HUB_BINDINGS")))
+	kv(p, "db", envOr("CHATCLI_HUB_DB"))
 
 	fmt.Println(p)
-	subheader(p, "cfg.sub.hub.local")
-	principalVal := os.Getenv("CHATCLI_HUB_PRINCIPAL")
-	if principalVal == "" {
-		principalVal = defaultMarker + LocalHubPrincipal()
+	if mutable {
+		fmt.Println(p + colorize(i18n.T("cfg.hub.mutable_hint"), ColorGray))
+	} else {
+		fmt.Println(p + colorize(i18n.T("cfg.hub.readonly_hint"), ColorGray))
 	}
-	kv(p, "CHATCLI_HUB_PRINCIPAL", principalVal)
-	kv(p, "CHATCLI_HUB_ISOLATE", envBool("CHATCLI_HUB_ISOLATE"))
-	kv(p, "CHATCLI_HUB_POLL_MS", envOr("CHATCLI_HUB_POLL_MS"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.hub.session")
@@ -1145,6 +1188,103 @@ func (cli *ChatCLI) showConfigHub() {
 	}
 
 	sectionEnd(ColorBlue)
+}
+
+// routeConfigHub handles `/config hub set|reset <key> [value]`, mutating the
+// live db-backed settings.
+func (cli *ChatCLI) routeConfigHub(args []string) {
+	if cli.hubSync == nil {
+		fmt.Println(colorize("  "+i18n.T("cfg.hub.no_session"), ColorYellow))
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	switch strings.ToLower(args[0]) {
+	case "set":
+		if len(args) < 3 {
+			fmt.Println(colorize("  "+i18n.T("cfg.hub.set_usage"), ColorGray))
+			return
+		}
+		key := strings.ToLower(args[1])
+		meta, ok := hubSettingMetaFor(key)
+		if !ok {
+			fmt.Println(colorize("  "+i18n.T("cfg.hub.unknown_key", key, hubSettingKeyList()), ColorYellow))
+			return
+		}
+		value, verr := normalizeHubValue(meta, strings.Join(args[2:], " "))
+		if verr != nil {
+			fmt.Println(colorize("  "+verr.Error(), ColorYellow))
+			return
+		}
+		if err := cli.hubSync.setSetting(ctx, key, value); err != nil {
+			fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
+			return
+		}
+		fmt.Println(colorize("  "+i18n.T("cfg.hub.set_ok", key, value), ColorGreen))
+		cli.showConfigHub()
+
+	case "reset", "unset":
+		if len(args) < 2 {
+			fmt.Println(colorize("  "+i18n.T("cfg.hub.set_usage"), ColorGray))
+			return
+		}
+		key := strings.ToLower(args[1])
+		if _, ok := hubSettingMetaFor(key); !ok {
+			fmt.Println(colorize("  "+i18n.T("cfg.hub.unknown_key", key, hubSettingKeyList()), ColorYellow))
+			return
+		}
+		if err := cli.hubSync.resetSetting(ctx, key); err != nil {
+			fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
+			return
+		}
+		fmt.Println(colorize("  "+i18n.T("cfg.hub.reset_ok", key), ColorGreen))
+		cli.showConfigHub()
+
+	default:
+		fmt.Println(colorize("  "+i18n.T("cfg.hub.set_usage"), ColorGray))
+	}
+}
+
+func hubSettingMetaFor(key string) (hubSettingMeta, bool) {
+	for _, m := range hubSettings {
+		if m.key == key {
+			return m, true
+		}
+	}
+	return hubSettingMeta{}, false
+}
+
+func hubSettingKeyList() string {
+	keys := make([]string, len(hubSettings))
+	for i, m := range hubSettings {
+		keys[i] = m.key
+	}
+	return strings.Join(keys, ", ")
+}
+
+// normalizeHubValue validates and canonicalizes a setting value by kind:
+// booleans accept on/off/true/false/1/0/yes/no → "true"/"false"; ints must parse.
+func normalizeHubValue(m hubSettingMeta, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	switch m.kind {
+	case "bool":
+		switch strings.ToLower(raw) {
+		case "true", "on", "1", "yes", "y":
+			return "true", nil
+		case "false", "off", "0", "no", "n":
+			return "false", nil
+		default:
+			return "", fmt.Errorf("%s", i18n.T("cfg.hub.bad_bool", m.key))
+		}
+	case "int":
+		if n, err := strconv.Atoi(raw); err != nil || n < 0 {
+			return "", fmt.Errorf("%s", i18n.T("cfg.hub.bad_int", m.key))
+		}
+		return raw, nil
+	default:
+		return raw, nil
+	}
 }
 
 // renderCoderPolicy prints coder policy state: active policy file, local

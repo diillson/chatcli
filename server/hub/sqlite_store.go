@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS bindings (
     created_at INTEGER NOT NULL,
     PRIMARY KEY (platform, user_id)
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 `
 
 // SQLiteStore is the WAL-backed implementation of Store. It is safe for
@@ -414,6 +419,62 @@ func (s *SQLiteStore) OwnerOf(ctx context.Context, convID string) (string, error
 		return "", fmt.Errorf("hub: owner of: %w", err)
 	}
 	return principal, nil
+}
+
+// GetSetting returns a runtime setting and whether it was present. Settings live
+// in the shared database, so a value set by the CLI is read live by the gateway
+// (and vice versa) without an env var or a restart.
+func (s *SQLiteStore) GetSetting(ctx context.Context, key string) (string, bool, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("hub: get setting %q: %w", key, err)
+	}
+	return v, true, nil
+}
+
+// SetSetting upserts a runtime setting.
+func (s *SQLiteStore) SetSetting(ctx context.Context, key, value string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO settings(key, value) VALUES(?,?)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	if err != nil {
+		return fmt.Errorf("hub: set setting %q: %w", key, err)
+	}
+	return nil
+}
+
+// DeleteSetting removes a runtime setting so resolution falls back to env/default.
+func (s *SQLiteStore) DeleteSetting(ctx context.Context, key string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, key); err != nil {
+		return fmt.Errorf("hub: delete setting %q: %w", key, err)
+	}
+	return nil
+}
+
+// AllSettings returns every stored runtime setting.
+func (s *SQLiteStore) AllSettings(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM settings`)
+	if err != nil {
+		return nil, fmt.Errorf("hub: list settings: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, fmt.Errorf("hub: scan setting: %w", err)
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
 }
 
 // scanner abstracts *sql.Row and *sql.Rows for scanEvent.

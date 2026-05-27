@@ -107,3 +107,80 @@ func TestGatewayPrincipalCollapseSingleUser(t *testing.T) {
 		t.Fatalf("LocalHubPrincipal = %q", LocalHubPrincipal())
 	}
 }
+
+func TestHubSettingsResolutionPrecedence(t *testing.T) {
+	store, err := hub.OpenSQLiteStore(context.Background(), filepath.Join(t.TempDir(), "hub.db"), nil)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+
+	// Defaults (no setting, no env).
+	t.Setenv(envHubPrincipal, "")
+	t.Setenv(envHubIsolate, "")
+	t.Setenv(envHubEnabled, "")
+	if !resolveHubEnabled(ctx, store) || resolveHubIsolate(ctx, store) || resolveHubPrincipal(ctx, store) != defaultHubPrincipal {
+		t.Fatal("unexpected defaults")
+	}
+
+	// Env layer.
+	t.Setenv(envHubPrincipal, "fromenv")
+	if resolveHubPrincipal(ctx, store) != "fromenv" {
+		t.Fatal("env not applied")
+	}
+
+	// Setting layer wins over env.
+	if err := store.SetSetting(ctx, hubKeyPrincipal, "fromsetting"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	if err := store.SetSetting(ctx, hubKeyIsolate, "true"); err != nil {
+		t.Fatalf("SetSetting isolate: %v", err)
+	}
+	if err := store.SetSetting(ctx, hubKeyEnabled, "false"); err != nil {
+		t.Fatalf("SetSetting enabled: %v", err)
+	}
+	if resolveHubPrincipal(ctx, store) != "fromsetting" {
+		t.Fatal("setting should win over env")
+	}
+	if !resolveHubIsolate(ctx, store) {
+		t.Fatal("isolate setting not applied")
+	}
+	if resolveHubEnabled(ctx, store) {
+		t.Fatal("enabled=false setting not applied")
+	}
+
+	// Reset falls back to env.
+	if err := store.DeleteSetting(ctx, hubKeyPrincipal); err != nil {
+		t.Fatalf("DeleteSetting: %v", err)
+	}
+	if resolveHubPrincipal(ctx, store) != "fromenv" {
+		t.Fatal("reset should fall back to env")
+	}
+}
+
+func TestHubSyncSettingsRoundTrip(t *testing.T) {
+	store, err := hub.OpenSQLiteStore(context.Background(), filepath.Join(t.TempDir(), "hub.db"), nil)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	hs := newHubSync(newLocalHubClient(store, "edilson"), zap.NewNop())
+	ctx := context.Background()
+
+	if err := hs.setSetting(ctx, hubKeyIsolate, "true"); err != nil {
+		t.Fatalf("setSetting: %v", err)
+	}
+	got, ok := hs.allSettings(ctx)
+	if !ok || got[hubKeyIsolate] != "true" {
+		t.Fatalf("allSettings = %v, ok=%v", got, ok)
+	}
+	if err := hs.resetSetting(ctx, hubKeyIsolate); err != nil {
+		t.Fatalf("resetSetting: %v", err)
+	}
+	got, _ = hs.allSettings(ctx)
+	if _, present := got[hubKeyIsolate]; present {
+		t.Fatalf("setting not reset: %v", got)
+	}
+}

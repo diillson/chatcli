@@ -7,6 +7,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/diillson/chatcli/models"
@@ -173,6 +174,51 @@ func (hs *HubSync) bind(ctx context.Context, platform, userID, principal string)
 // bindings returns the channel→principal bindings visible to the caller.
 func (hs *HubSync) bindings(ctx context.Context, principal string) ([]models.HubBinding, error) {
 	return hs.client.ListBindings(ctx, principal)
+}
+
+// errHubSettingsLocalOnly is returned when runtime settings are mutated on a
+// remote-connected session; settings live in the local/server db.
+var errHubSettingsLocalOnly = errors.New("hub settings can only be changed in local hub mode")
+
+// hubSettingsClient is the optional capability of a store-backed HubClient:
+// runtime settings persisted in the shared db (read live by the gateway). The
+// remote client does not implement it, so /config hub mutation is local-only.
+type hubSettingsClient interface {
+	GetSetting(ctx context.Context, key string) (string, bool, error)
+	SetSetting(ctx context.Context, key, value string) error
+	DeleteSetting(ctx context.Context, key string) error
+	AllSettings(ctx context.Context) (map[string]string, error)
+}
+
+// allSettings returns the stored runtime settings, or (nil,false) when the
+// session can't manage them (remote mode).
+func (hs *HubSync) allSettings(ctx context.Context) (map[string]string, bool) {
+	sc, ok := hs.client.(hubSettingsClient)
+	if !ok {
+		return nil, false
+	}
+	m, err := sc.AllSettings(ctx)
+	if err != nil {
+		hs.logger.Warn("hub: read settings failed", zap.Error(err))
+		return nil, false
+	}
+	return m, true
+}
+
+func (hs *HubSync) setSetting(ctx context.Context, key, value string) error {
+	sc, ok := hs.client.(hubSettingsClient)
+	if !ok {
+		return errHubSettingsLocalOnly
+	}
+	return sc.SetSetting(ctx, key, value)
+}
+
+func (hs *HubSync) resetSetting(ctx context.Context, key string) error {
+	sc, ok := hs.client.(hubSettingsClient)
+	if !ok {
+		return errHubSettingsLocalOnly
+	}
+	return sc.DeleteSetting(ctx, key)
 }
 
 // --- ChatCLI integration ---

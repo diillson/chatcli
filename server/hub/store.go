@@ -79,6 +79,14 @@ type Store interface {
 	// principal is never purged. Returns how many were removed.
 	PurgeIdle(ctx context.Context, olderThan time.Duration) (int, error)
 
+	// GetSetting / SetSetting / DeleteSetting / AllSettings manage runtime hub
+	// settings stored in the shared database, so changes made by one process
+	// (the CLI) are seen live by another (the gateway daemon).
+	GetSetting(ctx context.Context, key string) (value string, ok bool, err error)
+	SetSetting(ctx context.Context, key, value string) error
+	DeleteSetting(ctx context.Context, key string) error
+	AllSettings(ctx context.Context) (map[string]string, error)
+
 	// Close releases the underlying database.
 	Close() error
 }
