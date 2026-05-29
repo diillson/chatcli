@@ -238,14 +238,23 @@ func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, 
 		reqBody["system"] = systemObj
 	}
 
-	if budget := client.ThinkingBudgetForEffort(client.EffortFromContext(ctx)); budget > 0 && supportsExtendedThinking(c.model) {
-		required := budget + 1024
-		if v, ok := reqBody["max_tokens"].(int); ok && v < required {
-			reqBody["max_tokens"] = required
-		}
-		reqBody["thinking"] = map[string]interface{}{
-			"type":          "enabled",
-			"budget_tokens": budget,
+	// Skill effort hint → thinking. Opus 4.7+ (4.7, 4.8) advertise the
+	// "adaptive_thinking" capability and reject `budget_tokens` — they
+	// only accept `{type:"adaptive"}`. Older 4.x/3.7 still use the
+	// budgeted path. We use the catalog capability as the source of
+	// truth so adding adaptive-only models is a registry-only change.
+	if effort := client.EffortFromContext(ctx); effort != client.EffortUnset {
+		if catalog.HasCapability(catalog.ProviderBedrock, c.model, "adaptive_thinking") {
+			reqBody["thinking"] = map[string]interface{}{"type": "adaptive"}
+		} else if budget := client.ThinkingBudgetForEffort(effort); budget > 0 && supportsExtendedThinking(c.model) {
+			required := budget + 1024
+			if v, ok := reqBody["max_tokens"].(int); ok && v < required {
+				reqBody["max_tokens"] = required
+			}
+			reqBody["thinking"] = map[string]interface{}{
+				"type":          "enabled",
+				"budget_tokens": budget,
+			}
 		}
 	}
 

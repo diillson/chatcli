@@ -11,8 +11,8 @@
  * aggregator model. Provider-agnostic — any configured provider can be a
  * reference or the aggregator.
  *
- *   CHATCLI_MOA_MODELS="openai:gpt-5,claudeai:claude-opus-4-7,googleai:gemini-2.5-pro"
- *   CHATCLI_MOA_AGGREGATOR="claudeai:claude-opus-4-7"   (defaults to current model)
+ *   CHATCLI_MOA_MODELS="openai:gpt-5,claudeai:claude-opus-4-8,googleai:gemini-2.5-pro"
+ *   CHATCLI_MOA_AGGREGATOR="claudeai:claude-opus-4-8"   (defaults to current model)
  */
 package cli
 
