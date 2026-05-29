@@ -51,7 +51,7 @@ func TestColorSGR_DegradationLadder(t *testing.T) {
 	assert.Equal(t, "\033[38;2;56;189;248m", c.SGR(ProfileTrueColor), "truecolor → 24-bit")
 	assert.Equal(t, "\033[38;5;45m", c.SGR(ProfileANSI256), "256-color → 8-bit index")
 	assert.Equal(t, "\033[36m", c.SGR(ProfileANSI), "16-color → classic SGR")
-	assert.Equal(t, "", c.SGR(ProfileAscii), "ascii → no escape")
+	assert.Equal(t, "", c.SGR(ProfileASCII), "ascii → no escape")
 	assert.Equal(t, "", c.SGR(ProfileNoTTY), "no-tty → no escape")
 }
 
@@ -120,7 +120,7 @@ func TestLipFromANSI_SharesBasicTable(t *testing.T) {
 func TestProfile_HasColorAndString(t *testing.T) {
 	assert.True(t, ProfileTrueColor.HasColor())
 	assert.True(t, ProfileANSI.HasColor())
-	assert.False(t, ProfileAscii.HasColor())
+	assert.False(t, ProfileASCII.HasColor())
 	assert.False(t, ProfileNoTTY.HasColor())
 	assert.Equal(t, "truecolor", ProfileTrueColor.String())
 	assert.Equal(t, "no-tty", ProfileNoTTY.String())

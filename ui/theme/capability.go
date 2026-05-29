@@ -24,14 +24,16 @@ import (
 
 // Profile is a terminal's color capability, ordered from least to most
 // capable. The theme package owns this type so callers depend on a stable
-// local abstraction rather than a third-party enum.
-type Profile int
+// local abstraction rather than a third-party enum. The underlying type is
+// int32 so it round-trips through the atomic.Int32 that holds the active
+// profile without a widening/narrowing conversion (avoids gosec G115).
+type Profile int32
 
 const (
 	// ProfileNoTTY: output is not a terminal (pipe, file, CI). No styling.
 	ProfileNoTTY Profile = iota
-	// ProfileAscii: a terminal that should not be colored (NO_COLOR, dumb).
-	ProfileAscii
+	// ProfileASCII: a terminal that should not be colored (NO_COLOR, dumb).
+	ProfileASCII
 	// ProfileANSI: classic 16-color terminal (SGR 30–37 / 90–97).
 	ProfileANSI
 	// ProfileANSI256: 8-bit, 256-color terminal.
@@ -60,7 +62,7 @@ func (p Profile) String() string {
 		return "256-color"
 	case ProfileANSI:
 		return "16-color"
-	case ProfileAscii:
+	case ProfileASCII:
 		return "ascii"
 	default:
 		return "no-tty"
@@ -94,7 +96,7 @@ func fromColorProfile(p colorprofile.Profile) Profile {
 	case colorprofile.ANSI:
 		return ProfileANSI
 	case colorprofile.Ascii:
-		return ProfileAscii
+		return ProfileASCII
 	default:
 		return ProfileNoTTY
 	}

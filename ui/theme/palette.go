@@ -45,7 +45,7 @@ func (c Color) SGR(p Profile) string {
 		return fmt.Sprintf("\033[38;5;%dm", c.ANSI256)
 	case ProfileANSI:
 		return sgr16(c.ANSI16, false)
-	default: // ProfileAscii / ProfileNoTTY
+	default: // ProfileASCII / ProfileNoTTY
 		return ""
 	}
 }

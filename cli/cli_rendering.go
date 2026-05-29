@@ -90,11 +90,11 @@ func replaceChipSentinels(rendered string, prof theme.Profile) string {
 			continue
 		}
 		rest := ln[open+len(chipSentinelOpen):]
-		close := strings.Index(rest, chipSentinelClose)
-		if close < 0 {
+		closeIdx := strings.Index(rest, chipSentinelClose)
+		if closeIdx < 0 {
 			continue
 		}
-		lang := rest[:close]
+		lang := rest[:closeIdx]
 		lines[i] = codeLanguageChip(lang, prof)
 	}
 	return strings.Join(lines, "\n")
