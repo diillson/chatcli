@@ -103,9 +103,19 @@ type UsageInfo struct {
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
 
-	// Anthropic prompt caching (reduces cost for repeated prefixes)
+	// Anthropic prompt caching (reduces cost for repeated prefixes).
+	// OpenAI cached prompt tokens are also reported here under
+	// CacheReadInputTokens — semantically the same thing (repeated input
+	// served at a discount). CacheCreationInputTokens stays Anthropic-only.
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+
+	// Reasoning tokens emitted by o-series / GPT-5 reasoning models.
+	// Reported by OpenAI under usage.completion_tokens_details.reasoning_tokens
+	// (Chat Completions) or usage.output_tokens_details.reasoning_tokens
+	// (Responses API). Billed as output tokens and already counted in
+	// CompletionTokens — this field is informational only.
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 
 	// Whether these values came from the API (true) or were estimated (false).
 	// Callers can use this to decide display precision and cost accuracy.
@@ -123,6 +133,7 @@ func (u *UsageInfo) Merge(other *UsageInfo) {
 	u.TotalTokens += other.TotalTokens
 	u.CacheCreationInputTokens += other.CacheCreationInputTokens
 	u.CacheReadInputTokens += other.CacheReadInputTokens
+	u.ReasoningTokens += other.ReasoningTokens
 	if other.IsReal {
 		u.IsReal = true
 	}
