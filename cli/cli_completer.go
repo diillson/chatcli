@@ -12,6 +12,7 @@ import (
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/persona"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 // loadPolicyForCompleter is a thin wrapper around
@@ -1413,6 +1414,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "general", Description: i18n.T("complete.config.general")},
 			{Text: "providers", Description: i18n.T("complete.config.providers")},
 			{Text: "agent", Description: i18n.T("complete.config.agent")},
+			{Text: "ui", Description: i18n.T("cfg.section.ui.title")},
 			{Text: "quality", Description: i18n.T("complete.config.quality")},
 			{Text: "resilience", Description: i18n.T("complete.config.resilience")},
 			{Text: "session", Description: i18n.T("complete.config.session")},
@@ -1441,6 +1443,63 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 		return cli.getConfigHubSuggestions(d)
 	}
 
+	// /config ui <TAB> → theme subcommand + values
+	if strings.ToLower(args[1]) == "ui" {
+		return cli.getConfigUISuggestions(d)
+	}
+
+	// /config theme <TAB> → theme names (alias for `/config ui theme`).
+	if strings.ToLower(args[1]) == "theme" {
+		word := d.GetWordBeforeCursor()
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return prompt.FilterHasPrefix(themeNameSuggestions(), word, true)
+		}
+		return []prompt.Suggest{}
+	}
+
+	return []prompt.Suggest{}
+}
+
+// themeNameSuggestions lists the registry's theme names as completer entries,
+// so new themes appear automatically. Shared by `/config ui theme` and the
+// `/config theme` alias.
+func themeNameSuggestions() []prompt.Suggest {
+	names := theme.Names()
+	vals := make([]prompt.Suggest, 0, len(names))
+	for _, name := range names {
+		vals = append(vals, prompt.Suggest{
+			Text:        name,
+			Description: i18n.T("cfg.ui.theme_desc_" + name),
+		})
+	}
+	return vals
+}
+
+// getConfigUISuggestions drives the completer for `/config ui`. Slot 3 offers
+// the `theme` subcommand; slot 4 enumerates the available theme names from
+// the registry so new themes show up automatically.
+func (cli *ChatCLI) getConfigUISuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
+
+	// /config ui <TAB>
+	if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+		subs := []prompt.Suggest{
+			{Text: "theme", Description: i18n.T("complete.config.ui.theme")},
+			{Text: "help", Description: i18n.T("cfg.ui.usage_header")},
+		}
+		return prompt.FilterHasPrefix(subs, word, true)
+	}
+
+	if len(args) < 3 {
+		return []prompt.Suggest{}
+	}
+	if strings.ToLower(args[2]) == "theme" {
+		if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
+			return prompt.FilterHasPrefix(themeNameSuggestions(), word, true)
+		}
+	}
 	return []prompt.Suggest{}
 }
 

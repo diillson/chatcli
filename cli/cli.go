@@ -1272,9 +1272,14 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 	case StateSwitchingProvider:
 		return i18n.T("prompt.select_provider"), true
 	case StateProcessing:
-		spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		idx := atomic.LoadInt32(&cli.prefixSpinnerIdx)
-		s := spinner[int(idx)%len(spinner)]
+		// Shared braille frames (same set as the "thinking" animation) so the
+		// two spinners look identical. The glyph is left UNCOLORED on purpose:
+		// this string is go-prompt's live prefix, and go-prompt measures its
+		// width by counting runes — embedding ANSI escapes here would throw
+		// off the cursor column. Color lives only in surfaces we render
+		// ourselves (the thinking animation, cards).
+		s := spinnerFrames[int(idx)%len(spinnerFrames)]
 		if cli.Client != nil {
 			modelName := cli.Client.GetModelName()
 			cli.messageQueueMu.Lock()

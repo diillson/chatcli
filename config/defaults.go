@@ -117,4 +117,10 @@ const (
 	MemoryMaxFactsEnv     = "CHATCLI_MEMORY_MAX_FACTS"
 	MemoryRetrievalEnv    = "CHATCLI_MEMORY_RETRIEVAL_BUDGET"
 	MemoryCompactionHours = 24 // hours between compaction runs
+
+	// UI / theme configuration. ThemeEnv selects the color theme applied
+	// across chat, coder and agent surfaces (cards, borders, markdown,
+	// spinners). DefaultTheme is the value used when ThemeEnv is unset.
+	ThemeEnv     = "CHATCLI_THEME"
+	DefaultTheme = "dark"
 )

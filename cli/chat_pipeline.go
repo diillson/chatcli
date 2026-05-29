@@ -39,6 +39,7 @@ import (
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
@@ -619,15 +620,69 @@ func (cli *ChatCLI) renderAssistantResponse(
 	}
 
 	left, right := chatEnvelopeLabels(activeClient, elapsed, usage)
+	footerRight := cli.chatEnvelopeFooter(usage)
 	renderer := agent.NewUIRendererWithStyle(cli.logger, agent.UIStyleFull)
 	renderer.RenderResponseEnvelope(agent.ResponseEnvelopeOptions{
 		HeaderLeft:  left,
 		HeaderRight: right,
+		FooterRight: footerRight,
 		Body:        rendered,
 		Color:       agent.ColorGray,
 		Typewriter:  true,
 	})
 	fmt.Println()
+}
+
+// chatEnvelopeFooter builds the bottom-border telemetry shown on the right of
+// the chat reply: the estimated cost of THIS turn and how full the model's
+// context window is after it. Both derive from data already in hand — the
+// usage counts plus the model's pricing/context-window from the catalog — so
+// the footer adds no new bookkeeping. It returns "" (no footer drawn) when
+// usage is unreported, keeping the box clean for providers that omit counts.
+func (cli *ChatCLI) chatEnvelopeFooter(usage *models.UsageInfo) string {
+	if usage == nil || (usage.PromptTokens == 0 && usage.CompletionTokens == 0) {
+		return ""
+	}
+
+	inputCost, outputCost := getModelPricing(cli.Provider, cli.Model)
+	turnCost := float64(usage.PromptTokens)/1_000_000*inputCost +
+		float64(usage.CompletionTokens)/1_000_000*outputCost
+
+	parts := make([]string, 0, 2)
+	if turnCost > 0 {
+		parts = append(parts, formatTurnCost(turnCost))
+	}
+	if window := catalog.GetContextWindow(cli.Provider, cli.Model); window > 0 {
+		pct := float64(usage.PromptTokens) / float64(window) * 100
+		parts = append(parts, i18n.T("chat.envelope.context_pct", clampPct(pct)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return colorize(" "+strings.Join(parts, " · ")+" ", ColorGray)
+}
+
+// formatTurnCost renders a per-turn cost compactly: sub-cent costs keep four
+// decimals ($0.0004) so cheap turns are not all shown as "$0.00", while
+// larger costs use two ($0.12).
+func formatTurnCost(usd float64) string {
+	if usd < 0.01 {
+		return fmt.Sprintf("$%.4f", usd)
+	}
+	return fmt.Sprintf("$%.2f", usd)
+}
+
+// clampPct bounds a percentage to [0,100] so an over-window prompt (possible
+// with provider-side counting differences) never prints "ctx 103%".
+func clampPct(p float64) int {
+	switch {
+	case p < 0:
+		return 0
+	case p > 100:
+		return 100
+	default:
+		return int(p + 0.5)
+	}
 }
 
 // chatEnvelopeLabels builds the bilateral labels for the chat reply

@@ -164,7 +164,10 @@ func (r *UIRenderer) RenderResponseEnvelope(opts ResponseEnvelopeOptions) {
 	if body == "" {
 		body = " " // lipgloss collapses fully-empty content; keep the box drawable
 	}
-	wrapped := wrapText(body, maxInner)
+	// wrapStructured (não wrapText) preserva a indentação de YAML/JSON/código
+	// renderizado pelo glamour. wrapText colapsa whitespace via strings.Fields
+	// e era a causa do conteúdo estruturado perder a indentação no chat.
+	wrapped := wrapStructured(body, maxInner)
 
 	bodyMax := 0
 	for _, ln := range wrapped {

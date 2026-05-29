@@ -91,6 +91,9 @@ var envDefaults = map[string]envDefault{
 	"OPENROUTER_FALLBACK_MODELS": {Value: "(none)", Source: "openrouter client"},
 	"OPENROUTER_PROVIDER_ORDER":  {Value: "(none)", Source: "openrouter client"},
 
+	// ─── UI / theme ──────────────────────────────────────────────
+	"CHATCLI_THEME": {Value: config.DefaultTheme, Source: "config.DefaultTheme"},
+
 	// ─── Agent: parallelism / orchestration ──────────────────────
 	"CHATCLI_AGENT_PARALLEL_MODE":        {Value: "true", IsBool: true, Source: "agent_mode.go:initMultiAgent"},
 	"CHATCLI_AGENT_MAX_WORKERS":          {Value: "4", Source: "workers.DefaultMaxWorkers"},

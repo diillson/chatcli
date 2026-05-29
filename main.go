@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/utils"
 	"github.com/diillson/chatcli/version"
 	"github.com/joho/godotenv"
@@ -77,6 +78,10 @@ func main() {
 		// CORREÇÃO: Usar Println com i18n.T
 		fmt.Println(i18n.T("main.error_dotenv_not_found", envFilePath))
 	}
+
+	// Resolve the UI theme now that .env is loaded (CHATCLI_THEME may live
+	// only in the dotenv file, after the theme package's own init ran).
+	theme.InitFromEnv()
 
 	logger, err := utils.InitializeLogger()
 	if err != nil {
@@ -208,6 +213,7 @@ func runSubcommand(subcmd string, args []string) {
 		}
 	}
 	_ = godotenv.Load(envFilePath)
+	theme.InitFromEnv()
 
 	logger, err := utils.InitializeLogger()
 	if err != nil {
@@ -281,6 +287,7 @@ func runDaemonSubcommand(args []string) {
 		envFilePath = expanded
 	}
 	_ = godotenv.Load(envFilePath)
+	theme.InitFromEnv()
 
 	logger, err := utils.InitializeLogger()
 	if err != nil {

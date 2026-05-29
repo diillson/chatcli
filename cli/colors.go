@@ -1,6 +1,10 @@
 package cli
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/diillson/chatcli/ui/theme"
+)
 
 // ANSI Color Codes
 const (
@@ -16,7 +20,10 @@ const (
 	ColorBlue   = "\033[34m"
 )
 
-// colorize aplica uma cor a uma string para uso geral com fmt.Print.
+// colorize aplica uma cor a uma string para uso geral com fmt.Print. O
+// resultado passa por theme.Recolor: os códigos básicos legados adotam a hue
+// do tema ativo sob o profile de cor atual, e a saída perde todo ANSI quando
+// não há terminal colorido (pipe/CI) — tudo isso sem mudar os call sites.
 func colorize(text string, color string) string {
-	return fmt.Sprintf("%s%s%s", color, text, ColorReset)
+	return theme.Recolor(fmt.Sprintf("%s%s%s", color, text, ColorReset))
 }
