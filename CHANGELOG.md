@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.125.0](https://github.com/diillson/chatcli/compare/v1.124.0...v1.125.0) (2026-05-29)
+
+
+### Features
+
+* **ui:** unified color theme system + indentation-safe rendering ([#980](https://github.com/diillson/chatcli/issues/980)) ([10b11e9](https://github.com/diillson/chatcli/commit/10b11e96bd77b2d1ce57b8217e046d3ae1eb47e3))
+
 ## [1.124.0](https://github.com/diillson/chatcli/compare/v1.123.1...v1.124.0) (2026-05-29)
 
 
