@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.124.0](https://github.com/diillson/chatcli/compare/v1.123.1...v1.124.0) (2026-05-29)
+
+
+### Features
+
+* **catalog:** add Claude Opus 4.8 with adaptive thinking and fast mode ([#978](https://github.com/diillson/chatcli/issues/978)) ([79e6f7f](https://github.com/diillson/chatcli/commit/79e6f7f59cadf4e90ef7eb5d471e28cf5076a151))
+
 ## [1.123.1](https://github.com/diillson/chatcli/compare/v1.123.0...v1.123.1) (2026-05-27)
 
 
