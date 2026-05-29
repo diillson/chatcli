@@ -6,6 +6,7 @@
 package client
 
 import (
+	"encoding/json"
 	"sync"
 
 	"github.com/diillson/chatcli/models"
@@ -111,46 +112,69 @@ func ParseOpenAIUsage(result map[string]interface{}) *models.UsageInfo {
 	return info
 }
 
-// ParseOpenAIResponsesUsage extracts usage info from an OpenAI Responses
-// API response map. The Responses schema uses `input_tokens` /
-// `output_tokens` instead of `prompt_tokens` / `completion_tokens`, and
-// the nested detail objects are renamed accordingly. Calling
-// ParseOpenAIUsage on a Responses payload silently returns zeros — this
-// is the parser to use on /v1/responses bodies and the
-// `response.completed` streaming event.
-func ParseOpenAIResponsesUsage(result map[string]interface{}) *models.UsageInfo {
-	usage, ok := result["usage"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
+// openAIResponsesPayload mirrors the subset of OpenAI Responses API payload
+// fields the usage parser cares about. Keeping the shape typed (instead of
+// walking a generic map) eliminates runtime type assertions on every
+// field, narrows the public API surface (no `interface{}` leaking into
+// callers), and gives the JSON decoder a single error-reporting path.
+type openAIResponsesPayload struct {
+	Usage *struct {
+		InputTokens         int `json:"input_tokens"`
+		OutputTokens        int `json:"output_tokens"`
+		TotalTokens         int `json:"total_tokens"`
+		InputTokensDetails  *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"input_tokens_details"`
+		OutputTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"output_tokens_details"`
+	} `json:"usage"`
+}
 
-	info := &models.UsageInfo{IsReal: true}
-
-	if it, ok := usage["input_tokens"].(float64); ok {
-		info.PromptTokens = int(it)
+// ParseOpenAIResponsesUsage extracts usage info from a raw OpenAI Responses
+// API payload (the full /v1/responses body, or the `response` field of a
+// `response.completed` SSE event). The Responses schema uses
+// `input_tokens` / `output_tokens` instead of `prompt_tokens` /
+// `completion_tokens`, and the nested detail objects are renamed
+// accordingly — calling ParseOpenAIUsage on a Responses payload silently
+// returns zeros, so this is the parser to use here.
+//
+// Returns:
+//   - (nil, nil)  if the payload has no `usage` block (e.g. an
+//     incremental streaming event that isn't `response.completed`);
+//   - (nil, err)  if the bytes do not parse as JSON;
+//   - (info, nil) on success.
+//
+// Callers typically pass json.RawMessage from the SSE decoder or the raw
+// response body — no intermediate map[string]interface{} is needed.
+func ParseOpenAIResponsesUsage(data []byte) (*models.UsageInfo, error) {
+	if len(data) == 0 {
+		return nil, nil
 	}
-	if ot, ok := usage["output_tokens"].(float64); ok {
-		info.CompletionTokens = int(ot)
+	var payload openAIResponsesPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
 	}
-	if tt, ok := usage["total_tokens"].(float64); ok {
-		info.TotalTokens = int(tt)
+	if payload.Usage == nil {
+		return nil, nil
 	}
-	if details, ok := usage["input_tokens_details"].(map[string]interface{}); ok {
-		if cached, ok := details["cached_tokens"].(float64); ok {
-			info.CacheReadInputTokens = int(cached)
-		}
+	u := payload.Usage
+	info := &models.UsageInfo{
+		IsReal:           true,
+		PromptTokens:     u.InputTokens,
+		CompletionTokens: u.OutputTokens,
+		TotalTokens:      u.TotalTokens,
 	}
-	if details, ok := usage["output_tokens_details"].(map[string]interface{}); ok {
-		if reasoning, ok := details["reasoning_tokens"].(float64); ok {
-			info.ReasoningTokens = int(reasoning)
-		}
+	if u.InputTokensDetails != nil {
+		info.CacheReadInputTokens = u.InputTokensDetails.CachedTokens
 	}
-
+	if u.OutputTokensDetails != nil {
+		info.ReasoningTokens = u.OutputTokensDetails.ReasoningTokens
+	}
 	if info.TotalTokens == 0 && (info.PromptTokens > 0 || info.CompletionTokens > 0) {
 		info.TotalTokens = info.PromptTokens + info.CompletionTokens
 	}
-
-	return info
+	return info, nil
 }
 
 // ParseAnthropicUsage extracts usage info from an Anthropic response map.

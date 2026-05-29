@@ -87,10 +87,9 @@ func TestParseOpenAIResponsesUsage(t *testing.T) {
 			"total_tokens": 1261
 		}
 	}`
-	var raw map[string]interface{}
-	assert.NoError(t, json.Unmarshal([]byte(body), &raw))
 
-	got := ParseOpenAIResponsesUsage(raw)
+	got, err := ParseOpenAIResponsesUsage([]byte(body))
+	assert.NoError(t, err)
 	assert.NotNil(t, got, "Responses API usage block must parse")
 	assert.True(t, got.IsReal)
 	assert.Equal(t, 75, got.PromptTokens, "input_tokens → PromptTokens")
@@ -98,6 +97,21 @@ func TestParseOpenAIResponsesUsage(t *testing.T) {
 	assert.Equal(t, 1261, got.TotalTokens)
 	assert.Equal(t, 1024, got.CacheReadInputTokens, "input_tokens_details.cached_tokens → CacheReadInputTokens")
 	assert.Equal(t, 1024, got.ReasoningTokens, "output_tokens_details.reasoning_tokens → ReasoningTokens")
+}
+
+func TestParseOpenAIResponsesUsage_ComputesTotalWhenMissing(t *testing.T) {
+	got, err := ParseOpenAIResponsesUsage([]byte(`{"usage":{"input_tokens":8,"output_tokens":4}}`))
+	assert.NoError(t, err)
+	assert.NotNil(t, got)
+	assert.Equal(t, 12, got.TotalTokens, "total must fall back to input+output when API omits it")
+}
+
+func TestParseOpenAIResponsesUsage_DetailsAreOptional(t *testing.T) {
+	got, err := ParseOpenAIResponsesUsage([]byte(`{"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}`))
+	assert.NoError(t, err)
+	assert.NotNil(t, got)
+	assert.Zero(t, got.CacheReadInputTokens, "missing input_tokens_details must not break the parse")
+	assert.Zero(t, got.ReasoningTokens, "missing output_tokens_details must not break the parse")
 }
 
 // Regression: before the split, openai_responses_client.go called
@@ -117,7 +131,23 @@ func TestParseOpenAIUsage_ReturnsZerosOnResponsesPayload(t *testing.T) {
 }
 
 func TestParseOpenAIResponsesUsage_NoUsageBlockReturnsNil(t *testing.T) {
-	got := ParseOpenAIResponsesUsage(map[string]interface{}{"status": "completed"})
+	got, err := ParseOpenAIResponsesUsage([]byte(`{"status":"completed"}`))
+	assert.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+func TestParseOpenAIResponsesUsage_EmptyInputReturnsNil(t *testing.T) {
+	got, err := ParseOpenAIResponsesUsage(nil)
+	assert.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+func TestParseOpenAIResponsesUsage_InvalidJSONReturnsError(t *testing.T) {
+	// Invalid JSON must surface as an error rather than a silent nil —
+	// the caller (responses client) logs it at debug level so silent
+	// schema breakage shows up in support traces.
+	got, err := ParseOpenAIResponsesUsage([]byte(`{"usage": not-json`))
+	assert.Error(t, err)
 	assert.Nil(t, got)
 }
 

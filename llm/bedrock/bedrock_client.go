@@ -238,25 +238,7 @@ func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, 
 		reqBody["system"] = systemObj
 	}
 
-	// Skill effort hint → thinking. Opus 4.7+ (4.7, 4.8) advertise the
-	// "adaptive_thinking" capability and reject `budget_tokens` — they
-	// only accept `{type:"adaptive"}`. Older 4.x/3.7 still use the
-	// budgeted path. We use the catalog capability as the source of
-	// truth so adding adaptive-only models is a registry-only change.
-	if effort := client.EffortFromContext(ctx); effort != client.EffortUnset {
-		if catalog.HasCapability(catalog.ProviderBedrock, c.model, "adaptive_thinking") {
-			reqBody["thinking"] = map[string]interface{}{"type": "adaptive"}
-		} else if budget := client.ThinkingBudgetForEffort(effort); budget > 0 && supportsExtendedThinking(c.model) {
-			required := budget + 1024
-			if v, ok := reqBody["max_tokens"].(int); ok && v < required {
-				reqBody["max_tokens"] = required
-			}
-			reqBody["thinking"] = map[string]interface{}{
-				"type":          "enabled",
-				"budget_tokens": budget,
-			}
-		}
-	}
+	applyAnthropicThinkingForEffort(reqBody, c.model, ctx)
 
 	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
 
@@ -387,6 +369,47 @@ func supportsExtendedThinking(model string) bool {
 		strings.Contains(m, "sonnet-4") ||
 		strings.Contains(m, "3-7-sonnet") ||
 		strings.Contains(m, "claude-3-7")
+}
+
+// applyAnthropicThinkingForEffort routes the per-turn skill effort hint
+// onto the Anthropic Messages body sent through Bedrock.
+//
+// Dispatch matches the Claude API client by design — both paths converge
+// on the same schema and same models:
+//   - effort unset → no thinking block (caller respects user intent)
+//   - model has the catalog "adaptive_thinking" capability (Opus 4.7+)
+//     → `thinking:{type:"adaptive"}`. Budgeted thinking returns 400 on
+//     these models per Anthropic's 4.8 migration guide.
+//   - otherwise, if the model supports budgeted extended thinking →
+//     `thinking:{type:"enabled", budget_tokens:N}` with max_tokens raised
+//     to budget+1024 when necessary (max_tokens must strictly exceed
+//     budget_tokens or the API rejects the request).
+//   - non-thinking model with effort set → silently no-op.
+//
+// Returns true when a thinking block was attached, false otherwise.
+// Mutates reqBody in place.
+func applyAnthropicThinkingForEffort(reqBody map[string]interface{}, model string, ctx context.Context) bool {
+	effort := client.EffortFromContext(ctx)
+	if effort == client.EffortUnset {
+		return false
+	}
+	if catalog.HasCapability(catalog.ProviderBedrock, model, "adaptive_thinking") {
+		reqBody["thinking"] = map[string]interface{}{"type": "adaptive"}
+		return true
+	}
+	budget := client.ThinkingBudgetForEffort(effort)
+	if budget <= 0 || !supportsExtendedThinking(model) {
+		return false
+	}
+	required := budget + 1024
+	if v, ok := reqBody["max_tokens"].(int); ok && v < required {
+		reqBody["max_tokens"] = required
+	}
+	reqBody["thinking"] = map[string]interface{}{
+		"type":          "enabled",
+		"budget_tokens": budget,
+	}
+	return true
 }
 
 func stringPtr(s string) *string { return &s }
