@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/diillson/chatcli/ui/theme"
 	"go.uber.org/zap"
 )
 
@@ -60,6 +61,12 @@ func TestRenderMarkdownWithReset(t *testing.T) {
 }
 
 func TestAnimationManagerStopCleansTerminal(t *testing.T) {
+	// The spinner only animates on a terminal; force a color profile so this
+	// test exercises the on-terminal repaint path it asserts (off-terminal,
+	// the animation is intentionally a no-op — see TestAnimation_*).
+	t.Cleanup(func() { theme.SetProfile(theme.DetectProfile()) })
+	theme.SetProfile(theme.ProfileTrueColor)
+
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w

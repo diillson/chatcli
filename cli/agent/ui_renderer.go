@@ -18,6 +18,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/theme"
 	"go.uber.org/zap"
 	"golang.org/x/term"
 )
@@ -239,9 +240,13 @@ func wrapStreamLine(line string, width int) []string {
 	return out
 }
 
-// Colorize aplica cores ANSI (exportada com C maiúsculo)
+// Colorize aplica cores ANSI (exportada com C maiúsculo). O resultado passa
+// por theme.Recolor para que os códigos básicos legados (ColorCyan, ColorYellow,
+// …) adotem a hue do tema ativo sob o profile de cor atual — toda a UI
+// re-tematiza sem alterar os call sites, e a saída fica limpa (sem ANSI) quando
+// não há terminal colorido (pipe/CI).
 func (r *UIRenderer) Colorize(text string, color string) string {
-	return fmt.Sprintf("%s%s%s", color, text, ColorReset)
+	return theme.Recolor(fmt.Sprintf("%s%s%s", color, text, ColorReset))
 }
 
 // ClearScreen limpa a tela (se permitido)
@@ -549,8 +554,12 @@ func (r *UIRenderer) RenderTimelineEvent(icon, title, content, color string) {
 // assistant message feels alive instead of a single paste. Reserved for
 // the model's "RESPOSTA/RESUMO" card — tool calls and reasoning still use
 // the instant path because typing those would slow the agent loop down.
+//
+// The body is glamour-rendered markdown, so it wraps with wrapStructured
+// (not wrapText): replies that embed YAML/JSON/code keep their indentation
+// instead of collapsing flush-left.
 func (r *UIRenderer) RenderAssistantResponseTimelineEvent(icon, title, content, color string) {
-	r.renderTimelineEventInner(icon, title, content, color, true, wrapText)
+	r.renderTimelineEventInner(icon, title, content, color, true, wrapStructured)
 }
 
 // renderTimelineEventInner draws a titled card. wrapFn owns how the body is
@@ -723,41 +732,23 @@ func stripANSIForCard(s string) string {
 }
 
 // ansiColorToLip maps the package-local ANSI color constants used by
-// the rest of the renderer into a lipgloss.Color. This keeps callers
-// passing the same "\x1b[36m" strings they always have, while the
-// lipgloss body-renderer needs structured colors. Unknown values fall
-// back to the terminal default so a typo doesn't make the border
-// disappear.
+// the rest of the renderer into a lipgloss.Color. Callers keep passing
+// the same "\x1b[36m" strings they always have; resolution is delegated
+// to the active theme (theme.LipFromANSI), so a theme swap re-skins every
+// card border without touching a single call site. Unknown values fall
+// back to the terminal default so a typo doesn't make the border disappear.
 func ansiColorToLip(ansiCode string) lipgloss.Color {
-	switch ansiCode {
-	case ColorGreen:
-		return lipgloss.Color("2")
-	case ColorLime:
-		return lipgloss.Color("10")
-	case ColorCyan:
-		return lipgloss.Color("6")
-	case ColorGray:
-		return lipgloss.Color("8")
-	case ColorPurple:
-		return lipgloss.Color("5")
-	case ColorYellow:
-		return lipgloss.Color("3")
-	case ColorRed:
-		return lipgloss.Color("1")
-	case ColorBlue:
-		return lipgloss.Color("4")
-	default:
-		return lipgloss.Color("")
-	}
+	return theme.LipFromANSI(ansiCode)
 }
 
 // RenderMarkdownTimelineEvent renderiza markdown (já convertido para ANSI fora) dentro do card.
-// Ele só delega para RenderTimelineEvent, mas existe para explicitar intenção e padronizar chamadas.
+// Usa wrapStructured (não o wrapText de RenderTimelineEvent) para que YAML/JSON/código embutidos
+// no markdown preservem a indentação dentro do card — o mesmo fix aplicado ao envelope de chat.
 func (r *UIRenderer) RenderMarkdownTimelineEvent(icon, title, renderedMarkdownANSI, color string) {
 	if strings.TrimSpace(renderedMarkdownANSI) == "" {
 		return
 	}
-	r.RenderTimelineEvent(icon, title, renderedMarkdownANSI, color)
+	r.renderTimelineEventInner(icon, title, renderedMarkdownANSI, color, false, wrapStructured)
 }
 
 // trimBlankBorderRows drops fully-blank rows from the leading and
@@ -920,6 +911,111 @@ func wrapPreserve(text string, limit int) []string {
 	var out []string
 	for _, line := range strings.Split(text, "\n") {
 		out = append(out, wrapStreamLine(line, limit)...)
+	}
+	return out
+}
+
+// splitLeadingIndent separa a indentação inicial de uma linha do seu
+// conteúdo, de forma ANSI-aware. O glamour emite sequências de cor de
+// largura-zero ANTES (e entre) os espaços de indentação do markdown
+// renderizado — então um strings.TrimLeft(" \t") reportaria indentação
+// zero em YAML/JSON/código vindos do glamour, que é exatamente a causa do
+// bug de "perde a indentação" no modo chat. Retorna a largura visível do
+// indent em colunas, os códigos ANSI vistos na região inicial (re-anexados
+// ao conteúdo para que o primeiro token preserve a cor) e o conteúdo
+// restante.
+func splitLeadingIndent(line string) (indent int, codes string, content string) {
+	var cb strings.Builder
+	i := 0
+	for i < len(line) {
+		// Sequência CSI ANSI: preserva — pode colorir o conteúdo à frente.
+		if line[i] == 0x1b && i+1 < len(line) && line[i+1] == '[' {
+			j := i + 2
+			for j < len(line) && (line[j] < 0x40 || line[j] > 0x7e) {
+				j++
+			}
+			if j < len(line) {
+				j++ // inclui o byte final da sequência
+			}
+			cb.WriteString(line[i:j])
+			i = j
+			continue
+		}
+		if line[i] == ' ' || line[i] == '\t' {
+			indent++ // tab contado como 1 col (o glamour normaliza para espaços)
+			i++
+			continue
+		}
+		break
+	}
+	return indent, cb.String(), line[i:]
+}
+
+// wrapStructured quebra um corpo já renderizado pelo glamour para exibição
+// dentro do envelope de resposta. Diferente de wrapText (word-wrap de prosa,
+// que colapsa a indentação via strings.Fields), ele PRESERVA a indentação
+// inicial de cada linha — é o fix do bug em que YAML/JSON/código colados no
+// chat "ficam todos à esquerda e perdem a indentação". Mecânica, por linha:
+//
+//   - Detecta o indent inicial visível (ANSI-aware: o glamour emite cores
+//     ANTES dos espaços, então um TrimLeft simples não enxerga o indent).
+//   - Deslova (dedent) toda linha pela margem mínima comum — o glamour aplica
+//     uma margem de documento uniforme (tipicamente 2 cols) a prosa E código;
+//     como o próprio envelope já tem Padding(0,2), carregar a margem do
+//     glamour também empurraria tudo 2 cols para a direita.
+//   - Linhas que cabem na largura interna são emitidas verbatim (alinhamento
+//     de colunas intacto). Só as que estouram passam por word-wrap, repetindo
+//     o indent da linha em cada continuação.
+func wrapStructured(text string, limit int) []string {
+	if limit <= 0 {
+		return []string{text}
+	}
+	rawLines := strings.Split(text, "\n")
+
+	type lineSeg struct {
+		indent  int
+		payload string // códigos ANSI iniciais + conteúdo
+		blank   bool
+	}
+	segs := make([]lineSeg, 0, len(rawLines))
+	commonIndent := -1
+	for _, ln := range rawLines {
+		ind, codes, body := splitLeadingIndent(ln)
+		blank := strings.TrimSpace(stripANSIForCard(ln)) == ""
+		segs = append(segs, lineSeg{indent: ind, payload: codes + body, blank: blank})
+		if !blank && (commonIndent < 0 || ind < commonIndent) {
+			commonIndent = ind
+		}
+	}
+	if commonIndent < 0 {
+		commonIndent = 0
+	}
+
+	out := make([]string, 0, len(rawLines))
+	for _, s := range segs {
+		if s.blank {
+			out = append(out, "")
+			continue
+		}
+		rel := s.indent - commonIndent
+		if rel < 0 {
+			rel = 0
+		}
+		pad := strings.Repeat(" ", rel)
+		full := pad + s.payload
+		if VisibleLen(full) <= limit {
+			// Cabe: verbatim — preserva qualquer alinhamento interno.
+			out = append(out, full)
+			continue
+		}
+		// Estoura: word-wrap do conteúdo, repetindo o indent nas continuações.
+		avail := limit - rel
+		if avail < 1 {
+			avail = 1
+		}
+		for _, chunk := range wrapText(s.payload, avail) {
+			out = append(out, pad+chunk)
+		}
 	}
 	return out
 }

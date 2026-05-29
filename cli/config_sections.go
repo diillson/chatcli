@@ -70,6 +70,19 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 		} else {
 			cli.routeConfigAgent(args[1:])
 		}
+	case "ui":
+		// Hierarchical like security/hub: bare form shows the theme +
+		// color-profile panorama; `ui theme <name>` switches at runtime.
+		if len(args) == 1 {
+			cli.printConfigUIStatus()
+		} else {
+			cli.routeConfigUI(args[1:])
+		}
+	case "theme":
+		// Convenience alias so `/config theme dark` == `/config ui theme dark`.
+		// args already starts with "theme", which routeConfigUI reads as its
+		// subcommand, so pass it through unstripped.
+		cli.routeConfigUI(args)
 	case "resilience", "proxy":
 		cli.showConfigResilience()
 	case "session":
@@ -354,6 +367,7 @@ func (cli *ChatCLI) showConfigAll() {
 	cli.showConfigGeneral()
 	cli.showConfigProviders()
 	cli.showConfigAgent()
+	cli.showConfigUI()
 	cli.showConfigResilience()
 	cli.showConfigSession()
 	cli.showConfigIntegrations()

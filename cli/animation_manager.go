@@ -5,7 +5,15 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/ui/theme"
 )
+
+// spinnerFrames is the single source of the braille spinner animation, shared
+// by the "thinking" AnimationManager and the interactive prompt-prefix
+// spinner so both surfaces animate identically. Braille dots read as a smooth
+// rotation in every modern terminal font.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 type AnimationManager struct {
 	mu             sync.Mutex     // Para acesso seguro aos campos
@@ -40,8 +48,11 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 	// Atualiza a mensagem
 	am.currentMessage = message
 
-	// If suppressed, store message but don't start the goroutine
-	if am.suppressed {
+	// If suppressed, store message but don't start the goroutine. Also skip
+	// when stdout is not a terminal: the carriage-return repaints would be
+	// noise in a pipe / CI log (the message is still recorded for callers
+	// that surface it some other way).
+	if am.suppressed || !theme.ActiveProfile().IsTerminal() {
 		return
 	}
 
@@ -58,7 +69,6 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 	am.wg.Add(1)
 	go func() {
 		defer am.wg.Done()
-		spinner := []string{"|", "/", "-", "\\"}
 		i := 0
 		for {
 			select {
@@ -73,8 +83,14 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 				currentMsg := am.currentMessage
 				am.mu.Unlock()
 
-				// Usar sequências ANSI completas com reset no final
-				fmt.Printf("\r\033[K\033[35m%s...\033[0m %s", currentMsg, spinner[i%len(spinner)])
+				// Message tinted with the theme accent (matches reasoning
+				// cards); the glyph carries the same accent so the spinner
+				// reads as one themed unit. Reset closes the span so nothing
+				// bleeds into following output.
+				accent := theme.ANSI(theme.RoleReasoning)
+				reset := theme.Reset()
+				glyph := spinnerFrames[i%len(spinnerFrames)]
+				fmt.Printf("\r\033[K%s%s...%s %s%s%s", accent, currentMsg, reset, accent, glyph, reset)
 				_ = os.Stdout.Sync() // Força flush
 
 				time.Sleep(100 * time.Millisecond)

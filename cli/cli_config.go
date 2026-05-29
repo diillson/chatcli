@@ -10,6 +10,7 @@ import (
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/utils"
 	"github.com/diillson/chatcli/version"
 	"github.com/joho/godotenv"
@@ -74,6 +75,10 @@ func (cli *ChatCLI) reloadConfiguration() {
 	if err != nil && !os.IsNotExist(err) {
 		cli.logger.Error("Erro ao carregar o arquivo .env", zap.Error(err))
 	}
+
+	// Re-apply the UI theme so a CHATCLI_THEME change in .env takes effect on
+	// reload, mirroring how the provider/model are re-resolved below.
+	theme.InitFromEnv()
 
 	config.Global.Reload(cli.logger)
 
