@@ -100,6 +100,50 @@ func TestOpenAIResponsesClient_ListModels_OAuthSkips(t *testing.T) {
 	assert.Nil(t, list)
 }
 
+// Regression: the Responses API ships `input_tokens`/`output_tokens`,
+// not `prompt_tokens`/`completion_tokens`. Before the parser split, this
+// client called the Chat Completions parser on a Responses payload and
+// silently returned zeroed usage — the chat envelope then rendered the
+// "no tokens" placeholder for GPT instead of the input/output arrows.
+// This test pins that the Responses parser is the one in use and that
+// LastUsage() surfaces the parsed counts (and cache-hit count) verbatim.
+func TestOpenAIResponsesClient_SendPrompt_SurfacesUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{
+			"output_text": "ok",
+			"status": "completed",
+			"usage": {
+				"input_tokens": 75,
+				"input_tokens_details": {"cached_tokens": 32},
+				"output_tokens": 1186,
+				"output_tokens_details": {"reasoning_tokens": 1024},
+				"total_tokens": 1261
+			}
+		}`)
+	}))
+	defer server.Close()
+
+	require.NoError(t, os.Setenv("OPENAI_RESPONSES_API_URL", server.URL))
+	defer os.Unsetenv("OPENAI_RESPONSES_API_URL")
+
+	logger, _ := zap.NewDevelopment()
+	client := NewOpenAIResponsesClient(testProvider("test-api-key"), "gpt-5", logger, 1, 0)
+	_, err := client.SendPrompt(context.Background(), "Hi",
+		[]models.Message{{Role: "user", Content: "Hi"}}, 0)
+	require.NoError(t, err)
+
+	usage := client.LastUsage()
+	require.NotNil(t, usage, "Responses usage must reach LastUsage so the chat envelope renders arrows for GPT")
+	assert.Equal(t, 75, usage.PromptTokens)
+	assert.Equal(t, 1186, usage.CompletionTokens)
+	assert.Equal(t, 1261, usage.TotalTokens)
+	assert.Equal(t, 32, usage.CacheReadInputTokens)
+	assert.Equal(t, 1024, usage.ReasoningTokens)
+	assert.Equal(t, "completed", client.LastStopReason())
+}
+
 func TestOpenAIResponsesClient_buildTextFromHistory(t *testing.T) {
 	history := []models.Message{
 		{Role: "system", Content: "Be helpful."},

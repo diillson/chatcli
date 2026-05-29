@@ -163,6 +163,64 @@ func supportsExtendedThinking(model string) bool {
 		strings.Contains(m, "3.7-sonnet")
 }
 
+// usesAdaptiveThinkingOnly reports whether the model rejects budgeted
+// extended thinking. Opus 4.7 and 4.8 advertise the "adaptive_thinking"
+// capability in the catalog: passing `thinking:{type:"enabled",
+// budget_tokens:N}` to those returns a 400, only `thinking:{type:"adaptive"}`
+// is accepted. The capability flag is the source of truth so adding new
+// models that share this constraint is a registry-only change.
+func usesAdaptiveThinkingOnly(model string) bool {
+	return catalog.HasCapability(catalog.ProviderClaudeAI, model, "adaptive_thinking")
+}
+
+// applyThinkingForEffort mutates reqBody to attach the right `thinking`
+// block (and raise max_tokens when needed) for the per-turn effort hint.
+// Routing:
+//   - adaptive-only model + non-zero effort → thinking:{type:"adaptive"}
+//   - extended-thinking model + non-zero effort → thinking:{enabled,budget}
+//   - otherwise → no thinking block
+//
+// Returns true when a thinking block was attached.
+func applyThinkingForEffort(reqBody map[string]interface{}, model string, ctx context.Context) bool {
+	effort := client.EffortFromContext(ctx)
+	if effort == client.EffortUnset {
+		return false
+	}
+	if usesAdaptiveThinkingOnly(model) {
+		reqBody["thinking"] = map[string]interface{}{"type": "adaptive"}
+		return true
+	}
+	if budget := client.ThinkingBudgetForEffort(effort); budget > 0 && supportsExtendedThinking(model) {
+		required := budget + 1024
+		if v, ok := reqBody["max_tokens"].(int); ok && v < required {
+			reqBody["max_tokens"] = required
+		}
+		reqBody["thinking"] = map[string]interface{}{
+			"type":          "enabled",
+			"budget_tokens": budget,
+		}
+		return true
+	}
+	return false
+}
+
+// applyFastModeIfRequested attaches `speed: "fast"` for models that
+// advertise the fast_mode capability (currently Opus 4.8 only — research
+// preview). Opt-in via ANTHROPIC_SPEED=fast; otherwise the request goes
+// through standard mode at standard pricing. Silently ignored for models
+// that don't advertise the capability.
+func applyFastModeIfRequested(reqBody map[string]interface{}, model string) bool {
+	speed := strings.ToLower(strings.TrimSpace(os.Getenv("ANTHROPIC_SPEED")))
+	if speed != "fast" {
+		return false
+	}
+	if !catalog.HasCapability(catalog.ProviderClaudeAI, model, "fast_mode") {
+		return false
+	}
+	reqBody["speed"] = "fast"
+	return true
+}
+
 // SendPrompt com exponential backoff usando utils.Retry
 func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	effectiveMaxTokens := maxTokens
@@ -192,21 +250,18 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		reqBody["stream"] = true
 	}
 
-	// Skill effort hint → extended thinking.
-	// Only enabled for models that actually support it, otherwise the API
-	// rejects the request. max_tokens must be strictly greater than
-	// budget_tokens, so we raise it when necessary.
-	if budget := client.ThinkingBudgetForEffort(client.EffortFromContext(ctx)); budget > 0 && supportsExtendedThinking(c.model) {
-		required := budget + 1024
-		if v, ok := reqBody["max_tokens"].(int); ok && v < required {
-			reqBody["max_tokens"] = required
-		}
-		reqBody["thinking"] = map[string]interface{}{
-			"type":          "enabled",
-			"budget_tokens": budget,
-		}
-		c.logger.Debug("claudeai: enabling extended thinking from skill effort hint",
-			zap.Int("budget_tokens", budget),
+	// Skill effort hint → thinking. Opus 4.7+ only accepts adaptive
+	// thinking; older 4.x and Sonnet 3.7 accept budgeted extended
+	// thinking. applyThinkingForEffort routes by catalog capability.
+	if applyThinkingForEffort(reqBody, c.model, ctx) {
+		c.logger.Debug("claudeai: thinking enabled from skill effort hint",
+			zap.Any("thinking", reqBody["thinking"]),
+			zap.String("model", c.model))
+	}
+
+	// Opus 4.8 fast mode opt-in (research preview, premium pricing).
+	if applyFastModeIfRequested(reqBody, c.model) {
+		c.logger.Debug("claudeai: fast mode enabled (ANTHROPIC_SPEED=fast)",
 			zap.String("model", c.model))
 	}
 

@@ -31,6 +31,8 @@ func TestResolve(t *testing.T) {
 		{"Claude Opus 4.6 shortcut", ProviderClaudeAI, "opus-4-6", "claude-opus-4-6", true},
 		{"Claude Opus 4.7 shortcut", ProviderClaudeAI, "opus-4-7", "claude-opus-4-7", true},
 		{"Claude Opus 4.7 full ID", ProviderClaudeAI, "claude-opus-4-7", "claude-opus-4-7", true},
+		{"Claude Opus 4.8 shortcut", ProviderClaudeAI, "opus-4-8", "claude-opus-4-8", true},
+		{"Claude Opus 4.8 full ID", ProviderClaudeAI, "claude-opus-4-8", "claude-opus-4-8", true},
 		{"Claude Sonnet 4.7 shortcut", ProviderClaudeAI, "sonnet-4-7", "claude-sonnet-4-7", true},
 		// Backward compat: bare "opus-4" still resolves to the 4.0 entry
 		{"Claude Opus 4 bare alias", ProviderClaudeAI, "opus-4", "claude-opus-4-20250514", true},
@@ -124,6 +126,42 @@ func TestGetPreferredAPI(t *testing.T) {
 	assert.Equal(t, APIAnthropicMessages, GetPreferredAPI(ProviderClaudeAI, "claude-3-opus"))
 	assert.Equal(t, APIAssistants, GetPreferredAPI(ProviderOpenAIAssistant, "gpt-4o")) // Provider específico
 	assert.Equal(t, PreferredAPI("gemini_api"), GetPreferredAPI(ProviderGoogleAI, "gemini-2.5-pro"))
+}
+
+// TestClaudeOpus48Specs pins the May 28 2026 launch specs and the new
+// capability flags the client uses to drive feature dispatch:
+//   - adaptive_thinking → `thinking:{type:"adaptive"}` (no budget_tokens)
+//   - fast_mode → `speed:"fast"` research preview
+//   - mid_conversation_system → role:"system" allowed mid-conversation
+//   - low_cache_minimum → 1,024-token cache floor
+//
+// Drift in these advertised capabilities is a request-shape change that
+// the client cares about, so we pin them here.
+func TestClaudeOpus48Specs(t *testing.T) {
+	meta, ok := Resolve(ProviderClaudeAI, "claude-opus-4-8")
+	assert.True(t, ok, "claude-opus-4-8 must resolve on ProviderClaudeAI")
+	assert.Equal(t, 1000000, meta.ContextWindow, "Opus 4.8 default context window is 1M tokens")
+	assert.Equal(t, 128000, meta.MaxOutputTokens, "Opus 4.8 max output is 128K")
+	assert.Equal(t, APIAnthropicMessages, meta.PreferredAPI)
+
+	for _, capability := range []string{
+		"tools", "adaptive_thinking", "fast_mode",
+		"mid_conversation_system", "low_cache_minimum",
+	} {
+		assert.True(t,
+			HasCapability(ProviderClaudeAI, "claude-opus-4-8", capability),
+			"claude-opus-4-8 should advertise %q capability", capability)
+	}
+
+	// Bedrock mirror — inference-profile-prefixed id.
+	bedMeta, ok := Resolve(ProviderBedrock, "claude-opus-4-8")
+	assert.True(t, ok, "claude-opus-4-8 must resolve via Bedrock alias")
+	assert.Equal(t, "global.anthropic.claude-opus-4-8-20260528-v1:0", bedMeta.ID)
+	assert.Equal(t, 1000000, bedMeta.ContextWindow)
+	assert.Equal(t, 128000, bedMeta.MaxOutputTokens)
+	assert.True(t,
+		HasCapability(ProviderBedrock, "claude-opus-4-8", "adaptive_thinking"),
+		"Bedrock Opus 4.8 mirror should advertise adaptive_thinking")
 }
 
 // TestGPT55LimitsAndCapabilities pins the published Apr 23 2026 specs:

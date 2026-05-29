@@ -6,6 +6,7 @@
 package client
 
 import (
+	"encoding/json"
 	"sync"
 
 	"github.com/diillson/chatcli/models"
@@ -62,8 +63,19 @@ func (s *UsageState) LastStopReason() string {
 	return s.lastStop
 }
 
-// ParseOpenAIUsage extracts usage info from an OpenAI-compatible response map.
-// Works for OpenAI, XAI, Copilot, GitHub Models, OpenRouter, ZAI, MiniMax.
+// ParseOpenAIUsage extracts usage info from an OpenAI-compatible Chat
+// Completions response map. Works for OpenAI, XAI, Copilot, GitHub Models,
+// OpenRouter, ZAI, MiniMax — anything that mirrors the
+// `prompt_tokens` / `completion_tokens` / `total_tokens` schema.
+//
+// Also surfaces:
+//   - `prompt_tokens_details.cached_tokens` → CacheReadInputTokens
+//     (automatic prompt cache hit count; OpenAI semantics map to
+//     Anthropic's cache-read field — both are "input tokens served at a
+//     discount because the prefix matched")
+//   - `completion_tokens_details.reasoning_tokens` → ReasoningTokens
+//     (o-series / GPT-5; already counted inside completion_tokens, this
+//     is informational)
 func ParseOpenAIUsage(result map[string]interface{}) *models.UsageInfo {
 	usage, ok := result["usage"].(map[string]interface{})
 	if !ok {
@@ -81,6 +93,16 @@ func ParseOpenAIUsage(result map[string]interface{}) *models.UsageInfo {
 	if tt, ok := usage["total_tokens"].(float64); ok {
 		info.TotalTokens = int(tt)
 	}
+	if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+		if cached, ok := details["cached_tokens"].(float64); ok {
+			info.CacheReadInputTokens = int(cached)
+		}
+	}
+	if details, ok := usage["completion_tokens_details"].(map[string]interface{}); ok {
+		if reasoning, ok := details["reasoning_tokens"].(float64); ok {
+			info.ReasoningTokens = int(reasoning)
+		}
+	}
 
 	// Compute total if not provided
 	if info.TotalTokens == 0 && (info.PromptTokens > 0 || info.CompletionTokens > 0) {
@@ -88,6 +110,71 @@ func ParseOpenAIUsage(result map[string]interface{}) *models.UsageInfo {
 	}
 
 	return info
+}
+
+// openAIResponsesPayload mirrors the subset of OpenAI Responses API payload
+// fields the usage parser cares about. Keeping the shape typed (instead of
+// walking a generic map) eliminates runtime type assertions on every
+// field, narrows the public API surface (no `interface{}` leaking into
+// callers), and gives the JSON decoder a single error-reporting path.
+type openAIResponsesPayload struct {
+	Usage *struct {
+		InputTokens        int `json:"input_tokens"`
+		OutputTokens       int `json:"output_tokens"`
+		TotalTokens        int `json:"total_tokens"`
+		InputTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"input_tokens_details"`
+		OutputTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"output_tokens_details"`
+	} `json:"usage"`
+}
+
+// ParseOpenAIResponsesUsage extracts usage info from a raw OpenAI Responses
+// API payload (the full /v1/responses body, or the `response` field of a
+// `response.completed` SSE event). The Responses schema uses
+// `input_tokens` / `output_tokens` instead of `prompt_tokens` /
+// `completion_tokens`, and the nested detail objects are renamed
+// accordingly — calling ParseOpenAIUsage on a Responses payload silently
+// returns zeros, so this is the parser to use here.
+//
+// Returns:
+//   - (nil, nil)  if the payload has no `usage` block (e.g. an
+//     incremental streaming event that isn't `response.completed`);
+//   - (nil, err)  if the bytes do not parse as JSON;
+//   - (info, nil) on success.
+//
+// Callers typically pass json.RawMessage from the SSE decoder or the raw
+// response body — no intermediate map[string]interface{} is needed.
+func ParseOpenAIResponsesUsage(data []byte) (*models.UsageInfo, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var payload openAIResponsesPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	if payload.Usage == nil {
+		return nil, nil
+	}
+	u := payload.Usage
+	info := &models.UsageInfo{
+		IsReal:           true,
+		PromptTokens:     u.InputTokens,
+		CompletionTokens: u.OutputTokens,
+		TotalTokens:      u.TotalTokens,
+	}
+	if u.InputTokensDetails != nil {
+		info.CacheReadInputTokens = u.InputTokensDetails.CachedTokens
+	}
+	if u.OutputTokensDetails != nil {
+		info.ReasoningTokens = u.OutputTokensDetails.ReasoningTokens
+	}
+	if info.TotalTokens == 0 && (info.PromptTokens > 0 || info.CompletionTokens > 0) {
+		info.TotalTokens = info.PromptTokens + info.CompletionTokens
+	}
+	return info, nil
 }
 
 // ParseAnthropicUsage extracts usage info from an Anthropic response map.

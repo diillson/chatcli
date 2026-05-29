@@ -2,7 +2,9 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/models"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
 
@@ -91,6 +94,67 @@ func TestOpenAIClient_SupportsStreaming(t *testing.T) {
 	if !c.SupportsStreaming() {
 		t.Error("OpenAI client should support streaming")
 	}
+}
+
+// TestOpenAIClient_SendPromptStream_RequestsUsage pins two things:
+//   - the streaming payload includes `stream_options.include_usage: true`
+//     (without this, OpenAI silently omits the terminal usage chunk and
+//     the chat envelope falls back to the "no tokens" placeholder); and
+//   - when the server replies with the usage chunk (the one with
+//     `choices: []` before [DONE]), the client surfaces it on the
+//     terminal Done chunk so the envelope renders the input/output arrows.
+func TestOpenAIClient_SendPromptStream_RequestsUsage(t *testing.T) {
+	var capturedPayload map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &capturedPayload)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"hi"}}]}`+"\n\n")
+		// Terminal usage chunk: choices is empty, usage is populated.
+		fmt.Fprint(w, `data: {"choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49,"prompt_tokens_details":{"cached_tokens":32}}}`+"\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	originalURL := os.Getenv("OPENAI_API_URL")
+	t.Setenv("OPENAI_API_URL", server.URL)
+	t.Cleanup(func() { _ = os.Setenv("OPENAI_API_URL", originalURL) })
+
+	logger, _ := zap.NewDevelopment()
+	c := NewOpenAIClient(
+		auth.NewStaticTokenProvider("k", auth.AuthModeAPIKey, auth.ProviderOpenAI),
+		"gpt-4o", logger, 1, 0,
+	)
+
+	ch, err := c.SendPromptStream(context.Background(), "Hi",
+		[]models.Message{{Role: "user", Content: "Hi"}}, 100)
+	if err != nil {
+		t.Fatalf("SendPromptStream: %v", err)
+	}
+
+	var doneUsage *models.UsageInfo
+	for chunk := range ch {
+		if chunk.Done {
+			doneUsage = chunk.Usage
+		}
+	}
+
+	// Opt-in flag must be present in the request payload.
+	streamOpts, ok := capturedPayload["stream_options"].(map[string]interface{})
+	assert.True(t, ok, "streaming payload must carry stream_options")
+	assert.Equal(t, true, streamOpts["include_usage"], "must opt in to include_usage so usage arrives over SSE")
+
+	// Usage from the terminal chunk must be surfaced on Done so the envelope
+	// can render the input/output arrows for GPT (regression: without
+	// include_usage and without the terminal chunk handling, the envelope
+	// fell back to the i18n "no tokens" placeholder).
+	assert.NotNil(t, doneUsage, "Done chunk must carry the usage parsed from the terminal SSE event")
+	assert.Equal(t, 42, doneUsage.PromptTokens)
+	assert.Equal(t, 7, doneUsage.CompletionTokens)
+	assert.Equal(t, 49, doneUsage.TotalTokens)
+	assert.Equal(t, 32, doneUsage.CacheReadInputTokens, "cache-hit count flows through from prompt_tokens_details.cached_tokens")
 }
 
 func TestOpenAIClient_OAuthRetry(t *testing.T) {

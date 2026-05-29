@@ -209,7 +209,7 @@
   "gateway.started_detached": "Gateway started (pid=%d) on: %s. Logs: %s",
   "gateway.stopped_pid": "Gateway stopped (pid=%d).",
   "moa.usage": "Usage: /moa <prompt> (set CHATCLI_MOA_MODELS=\"provider:model,...\")",
-  "moa.no_models": "No MoA models configured. Set CHATCLI_MOA_MODELS=\"openai:gpt-5,claudeai:claude-opus-4-7\".",
+  "moa.no_models": "No MoA models configured. Set CHATCLI_MOA_MODELS=\"openai:gpt-5,claudeai:claude-opus-4-8\".",
   "moa.running": "Querying %d models in parallel, then synthesizing...",
   "session.usage_delete": "  /session delete <name>",
   "session.usage_new": "  /session new",

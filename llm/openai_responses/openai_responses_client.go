@@ -241,16 +241,24 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.responses.decode_response"), err)
 	}
 
-	// Extract usage and stop reason from the Responses API format
-	var rawResult map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &rawResult); err == nil {
-		if usage := client.ParseOpenAIUsage(rawResult); usage != nil {
-			c.usageState.StoreUsage(usage)
-		}
-		// Responses API uses "status" instead of choices[].finish_reason
-		if status, ok := rawResult["status"].(string); ok && status != "" {
-			c.usageState.StoreStopReason(status)
-		}
+	// Extract usage and stop reason from the Responses API format.
+	// Note: Responses uses input_tokens/output_tokens (NOT prompt_/completion_),
+	// so ParseOpenAIResponsesUsage is required — ParseOpenAIUsage silently
+	// returns zeros on this schema and the envelope ends up rendering the
+	// "no tokens" placeholder.
+	if usage, parseErr := client.ParseOpenAIResponsesUsage(bodyBytes); parseErr != nil {
+		c.logger.Debug("openai_responses: usage decode failed", zap.Error(parseErr))
+	} else if usage != nil {
+		c.usageState.StoreUsage(usage)
+	}
+	// Responses API uses "status" instead of choices[].finish_reason.
+	// A second targeted decode is cheaper than dragging a map[string]any
+	// through the public usage API just to read one field.
+	var statusEnvelope struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(bodyBytes, &statusEnvelope); err == nil && statusEnvelope.Status != "" {
+		c.usageState.StoreStopReason(statusEnvelope.Status)
 	}
 
 	// Tentar extrair do caminho simples primeiro (comum em mocks e respostas diretas)
@@ -338,16 +346,20 @@ func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (stri
 			sb.WriteString(event.Delta)
 		}
 
-		// Extract usage from the response.completed event
-		if event.Type == "response.completed" && event.Response != nil {
-			var respData map[string]interface{}
-			if err := json.Unmarshal(event.Response, &respData); err == nil {
-				if usage := client.ParseOpenAIUsage(respData); usage != nil {
-					c.usageState.StoreUsage(usage)
-				}
-				if status, ok := respData["status"].(string); ok && status != "" {
-					c.usageState.StoreStopReason(status)
-				}
+		// Extract usage from the response.completed event. Responses API
+		// schema (input_tokens / output_tokens) — must use the Responses
+		// parser, not the Chat Completions one.
+		if event.Type == "response.completed" && len(event.Response) > 0 {
+			if usage, parseErr := client.ParseOpenAIResponsesUsage(event.Response); parseErr != nil {
+				c.logger.Debug("openai_responses: stream usage decode failed", zap.Error(parseErr))
+			} else if usage != nil {
+				c.usageState.StoreUsage(usage)
+			}
+			var statusEnvelope struct {
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal(event.Response, &statusEnvelope); err == nil && statusEnvelope.Status != "" {
+				c.usageState.StoreStopReason(statusEnvelope.Status)
 			}
 		}
 	}

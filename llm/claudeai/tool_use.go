@@ -84,17 +84,12 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		reqBody["tools"] = toolDefs
 	}
 
-	// Skill effort hint → extended thinking (tool-use path).
-	if budget := client.ThinkingBudgetForEffort(client.EffortFromContext(ctx)); budget > 0 && supportsExtendedThinking(c.model) {
-		required := budget + 1024
-		if v, ok := reqBody["max_tokens"].(int); ok && v < required {
-			reqBody["max_tokens"] = required
-		}
-		reqBody["thinking"] = map[string]interface{}{
-			"type":          "enabled",
-			"budget_tokens": budget,
-		}
-	}
+	// Skill effort hint → thinking (tool-use path). Opus 4.7+ uses adaptive,
+	// older models use budgeted extended thinking — see applyThinkingForEffort.
+	applyThinkingForEffort(reqBody, c.model, ctx)
+
+	// Opus 4.8 fast mode opt-in via ANTHROPIC_SPEED=fast.
+	applyFastModeIfRequested(reqBody, c.model)
 
 	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
 

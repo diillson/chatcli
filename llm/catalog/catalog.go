@@ -295,13 +295,45 @@ var registry = []ModelMeta{
 	// NOTE: Claude 4.x entries are ordered newest-first below. The Resolve()
 	// tier-2 alias match iterates the registry in order and returns on first
 	// hit. Because the 4.0 entry carries the generic alias "opus-4", which
-	// is a prefix of "opus-4-5/6/7", the newer entries MUST be iterated
-	// first so their exact aliases (e.g. "opus-4-7") win before 4.0's
+	// is a prefix of "opus-4-5/6/7/8", the newer entries MUST be iterated
+	// first so their exact aliases (e.g. "opus-4-8") win before 4.0's
 	// loose prefix match fires. Reversing this order reintroduces a latent
 	// bug where "opus-4-6" silently resolves to the 4.0 entry (20K ctx).
 	{
-		// Opus 4.7: most capable GA model; 1M context, 128K max output.
-		// Previous catalog had output at 64K — corrected to match docs.
+		// Opus 4.8 (claude-opus-4-8, May 28 2026): 1M context by default on
+		// the Claude API, 128K max output. Same API constraints as 4.7
+		// (no temperature/top_p/top_k; adaptive thinking only — extended
+		// thinking budgets return 400). New capabilities at launch:
+		//   - "adaptive_thinking": only supported thinking mode
+		//   - "fast_mode": research-preview "speed":"fast" for ~2.5x output
+		//     tokens per second at premium pricing
+		//   - "mid_conversation_system": role:"system" messages accepted
+		//     after the first user turn without breaking prompt cache
+		//   - "low_cache_minimum": 1,024-token cacheable prompt floor
+		//     (down from Opus 4.7).
+		// Capability flags are read by the claudeai client + skill-router
+		// to decide whether to emit `speed`, `thinking:{type:"adaptive"}`,
+		// or mid-conversation system blocks.
+		ID:              "claude-opus-4-8",
+		Aliases:         []string{"claude-opus-4-8", "opus-4-8"},
+		DisplayName:     "Claude opus 4.8 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities: []string{
+			"json_mode", "tools",
+			"adaptive_thinking", "fast_mode",
+			"mid_conversation_system", "low_cache_minimum",
+		},
+	},
+	{
+		// Opus 4.7: 1M context, 128K max output. Same API constraints as
+		// 4.8 (adaptive thinking only; no temp/top_p/top_k). Older catalog
+		// did not flag adaptive_thinking explicitly — the claudeai client
+		// now uses the capability flag to route between budgeted thinking
+		// and the adaptive mode required by 4.7+.
 		ID:              "claude-opus-4-7",
 		Aliases:         []string{"claude-opus-4-7", "opus-4-7"},
 		DisplayName:     "Claude opus 4.7 (1M context)",
@@ -310,7 +342,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"json_mode", "tools", "adaptive_thinking"},
 	},
 	{
 		// Sonnet 4.7: NOT in the Anthropic GA matrix as of Apr 2026 (the
@@ -1095,6 +1127,25 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIAnthropicMessages,
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
+	// Claude 4.8 (May 28 2026 — newest). Opus 4.8 = 1M / 128K per Anthropic.
+	// Same on-demand restrictions as 4.7: needs an inference profile prefix
+	// (global./us./eu./apac.) — the bare id is kept as an alias for
+	// resolution by callers that pin the foundation-model name.
+	{
+		ID:              "global.anthropic.claude-opus-4-8-20260528-v1:0",
+		Aliases:         []string{"bedrock-opus-4-8", "anthropic.claude-opus-4-8-20260528-v1:0", "claude-opus-4-8"},
+		DisplayName:     "Claude Opus 4.8 (Bedrock, global, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities: []string{
+			"tools", "vision", "json_mode",
+			"adaptive_thinking", "fast_mode",
+			"mid_conversation_system", "low_cache_minimum",
+		},
+	},
+
 	// Claude 4.7. Sonnet 4.7 mirrors 4.6's profile (forward-projected),
 	// Opus 4.7 = 1M / 128K per Anthropic.
 	{
@@ -1115,7 +1166,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking"},
 	},
 	{
 		ID:              "global.anthropic.claude-haiku-4-5-20251001-v1:0",

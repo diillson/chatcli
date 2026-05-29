@@ -343,6 +343,12 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		"messages":   messages,
 		"max_tokens": effectiveMaxTokens,
 		"stream":     true,
+		// Opt in to the terminal usage chunk. Without this, OpenAI Chat
+		// Completions never emits the `usage` block over SSE — the chat
+		// envelope then renders the "no tokens" placeholder for GPT
+		// instead of the input/output arrows. The usage arrives in the
+		// last chunk (the one with `choices: []`) before `data: [DONE]`.
+		"stream_options": map[string]interface{}{"include_usage": true},
 	}
 
 	// Skill effort hint → reasoning_effort (reasoning-capable models only).
