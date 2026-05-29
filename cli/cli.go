@@ -1178,7 +1178,11 @@ func (cli *ChatCLI) runCoderLogic() {
 
 	wd, _ := os.Getwd()
 	renderer := agent.NewUIRenderer(cli.logger)
-	renderer.RenderModeBanner("🛠 ", i18n.T("coder.banner.title"), agent.ColorCyan, [][2]string{
+	// "🛠️" carries the VS-16 emoji-presentation selector so runewidth and the
+	// terminal agree it is 2 cells wide. The bare "🛠" (U+1F6E0) defaults to
+	// text presentation and is measured as 1 while most terminals render it as
+	// 2, which drifted the banner's top border. (No trailing-space hack now.)
+	renderer.RenderModeBanner("🛠️", i18n.T("coder.banner.title"), agent.ColorCyan, [][2]string{
 		{i18n.T("coder.banner.objective"), query},
 		{i18n.T("coder.banner.workspace"), wd},
 		{i18n.T("coder.banner.policy"), i18n.T("coder.banner.policy_value")},
