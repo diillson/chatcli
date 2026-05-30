@@ -38,8 +38,17 @@ var (
 // builtins maps theme names to their constructors. Adding a theme is a single
 // entry here plus its constructor — no other file needs to change.
 var builtins = map[string]func() Theme{
-	"dark":  DarkTheme,
-	"light": LightTheme,
+	"dark":             DarkTheme,
+	"light":            LightTheme,
+	"dracula":          DraculaTheme,
+	"nord":             NordTheme,
+	"tokyo-night":      TokyoNightTheme,
+	"solarized-dark":   SolarizedDarkTheme,
+	"solarized-light":  SolarizedLightTheme,
+	"gruvbox":          GruvboxTheme,
+	"catppuccin-mocha": CatppuccinMochaTheme,
+	"monokai":          MonokaiTheme,
+	"one-dark":         OneDarkTheme,
 }
 
 // init publishes a safe default (the configured default theme + the detected

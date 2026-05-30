@@ -116,6 +116,11 @@ func (cli *ChatCLI) gatewayStartDetached() {
 	}
 	defer func() { _ = logFile.Close() }()
 
+	// Snapshot the REPL's live model so the detached daemon boots on the model
+	// the operator is actually using — not the .env default. A later /switch (or
+	// /model) updates this file too, and the daemon re-reads it per message.
+	cli.writeRuntimeModelState()
+
 	cmd := exec.Command(exe, "gateway") // #nosec G204 -- exe is self, no user args
 	cmd.Stdin = nil
 	cmd.Stdout = logFile
@@ -206,6 +211,11 @@ func (cli *ChatCLI) RunGatewayWithBroker(ctx context.Context, broker hub.Broker)
 // ctx is canceled, backing conversations with the given hub store (nil = no
 // cross-channel continuity).
 func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
+	// Adopt the interactive session's live model before serving (the daemon is a
+	// separate process that snapshotted .env at boot). Per-message refresh in
+	// gatewayAgentFunc keeps it current after a /switch while the daemon runs.
+	cli.refreshGatewayModel()
+
 	adapters, err := gateway.BuildConfigured()
 	if err != nil {
 		return err
@@ -269,12 +279,17 @@ func (cli *ChatCLI) teeLoggerToGatewayLog() func() {
 func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 	var mu sync.Mutex
 	return func(ctx context.Context, session, text string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Mirror the operator's current model: a /switch (or /model) in the REPL
+		// while the daemon runs lands here as a runtime-state change. Done under
+		// the lock so the client swap can't race a concurrent run.
+		cli.refreshGatewayModel()
+
 		if cli.Client == nil {
 			return "", fmt.Errorf("no active model")
 		}
-
-		mu.Lock()
-		defer mu.Unlock()
 
 		// Recover the originating message (Platform/UserID drive cross-channel
 		// identity). The Runner always installs it; the fallback derives a best-

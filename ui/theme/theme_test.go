@@ -154,14 +154,21 @@ func TestGlamourStyleConfig_RendersAndIsThemed(t *testing.T) {
 // collapsing to the same 16-color index — e.g. status (Info) and tool-success
 // (Success) must stay distinguishable on a 16-color terminal in BOTH themes.
 func TestThemes_StateRoleDistinctOn16Color(t *testing.T) {
-	for _, mk := range []func() Theme{DarkTheme, LightTheme} {
-		th := mk()
+	// Iterate every registered theme (not just dark/light) so any new palette
+	// added to builtins is held to the same 16-color distinctness contract.
+	for _, name := range Names() {
+		if err := SetActive(name); err != nil {
+			t.Fatalf("SetActive(%q): %v", name, err)
+		}
+		th := Active()
 		info := th.ColorFor(RoleStatus).ANSI16
 		success := th.ColorFor(RoleToolSuccess).ANSI16
 		assert.NotEqualf(t, success, info,
 			"%s: Info(%d) and Success(%d) must differ on 16-color terminals",
 			th.Name, info, success)
 	}
+	// Restore the default so a later test never sees a leaked active theme.
+	_ = SetActive(config_defaultName)
 }
 
 // config_defaultName mirrors config.DefaultTheme without importing config in

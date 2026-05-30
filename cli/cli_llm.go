@@ -276,6 +276,35 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	fmt.Println(i18n.T("status.provider_switched", cli.Client.GetModelName(), cli.Provider))
 	fmt.Println()
 	cli.refreshModelCache()
+	// Mirror the live choice for a running/future gateway daemon (separate process).
+	cli.writeRuntimeModelState()
+}
+
+// handleMaxTokensCommand is a shorthand for `/switch --max-tokens <num>`: it
+// caps the model's output tokens for the session without the longer flag form.
+// With no argument it reports the current override. It delegates to
+// handleSwitchCommand so parsing, validation and messaging stay in one place.
+func (cli *ChatCLI) handleMaxTokensCommand(input string) {
+	rest := strings.TrimSpace(strings.TrimPrefix(input, "/max-tokens"))
+	if rest == "" {
+		fmt.Println(i18n.T("cli.maxtokens.current", cli.UserMaxTokens))
+		return
+	}
+	cli.handleSwitchCommand("/switch --max-tokens " + rest)
+}
+
+// handleModelCommand is a shorthand for `/switch --model <name>`: it changes
+// only the model of the current provider without the longer flag form. With no
+// argument it lists the available models (same as bare `/switch --model`). It
+// delegates to handleSwitchCommand so model-cache refresh, error handling and
+// the gateway runtime-state mirror all stay in one place.
+func (cli *ChatCLI) handleModelCommand(input string) {
+	rest := strings.TrimSpace(strings.TrimPrefix(input, "/model"))
+	if rest == "" {
+		cli.handleSwitchCommand("/switch --model")
+		return
+	}
+	cli.handleSwitchCommand("/switch --model " + rest)
 }
 
 func (cli *ChatCLI) handleSwitchCommand(userInput string) {
@@ -360,6 +389,8 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 			cli.Client = newClient
 			cli.Model = newModel
 			fmt.Println(i18n.T("cli.switch.change_model_success", cli.Client.GetModelName(), cli.Provider))
+			// Mirror the live choice for a running/future gateway daemon (separate process).
+			cli.writeRuntimeModelState()
 		}
 		return
 	}

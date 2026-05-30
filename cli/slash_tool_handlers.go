@@ -48,6 +48,8 @@ func (cli *ChatCLI) helpText() string {
 	})
 	emit(i18n.T("help.section.config"), [][2]string{
 		{"/switch", i18n.T("help.command.switch")},
+		{"/model <name>", i18n.T("help.command.model")},
+		{"/max-tokens <num>", i18n.T("help.command.maxtokens")},
 		{"/config | /status", i18n.T("help.command.config")},
 		{"/reload", i18n.T("help.command.reload")},
 	})
