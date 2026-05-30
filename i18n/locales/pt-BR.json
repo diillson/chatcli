@@ -197,7 +197,7 @@
   "lsp.no_response": "Nenhum diagnóstico recebido dentro do tempo limite.",
   "lsp.header": "Diagnósticos de %s",
   "lsp.clean": "Nenhum problema encontrado.",
-  "gateway.usage": "Uso: /gateway [start|status]",
+  "gateway.usage": "Uso: /gateway [start|status|stop]",
   "gateway.no_platforms": "Nenhuma plataforma de mensageria configurada. Defina ex. CHATCLI_TELEGRAM_BOT_TOKEN.",
   "gateway.registered": "Plataformas registradas:",
   "gateway.configured": "Adapters configurados (prontos):",

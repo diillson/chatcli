@@ -197,7 +197,7 @@
   "lsp.no_response": "No diagnostics received within the timeout.",
   "lsp.header": "Diagnostics for %s",
   "lsp.clean": "No problems found.",
-  "gateway.usage": "Usage: /gateway [start|status]",
+  "gateway.usage": "Usage: /gateway [start|status|stop]",
   "gateway.no_platforms": "No messaging platform configured. Set e.g. CHATCLI_TELEGRAM_BOT_TOKEN.",
   "gateway.registered": "Registered platforms:",
   "gateway.configured": "Configured (ready) adapters:",
