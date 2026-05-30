@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.126.0](https://github.com/diillson/chatcli/compare/v1.125.0...v1.126.0) (2026-05-30)
+
+
+### Features
+
+* **cli:** gateway runtime model, /model + /max-tokens, 9 new themes ([#982](https://github.com/diillson/chatcli/issues/982)) ([0b1711b](https://github.com/diillson/chatcli/commit/0b1711b3c69bb75ffc9375eda48e9175e30f794a))
+
+
+### Bug Fixes
+
+* **gateway:** list stop in the /gateway usage hint ([#984](https://github.com/diillson/chatcli/issues/984)) ([16c55f9](https://github.com/diillson/chatcli/commit/16c55f9e14e70d658492dae83c7c0ccfa1d66505))
+
 ## [1.125.0](https://github.com/diillson/chatcli/compare/v1.124.0...v1.125.0) (2026-05-29)
 
 
