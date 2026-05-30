@@ -180,6 +180,8 @@ func (ch *CommandHandler) buildRoutes() {
 	// "exact or +space"; word=false entries are raw-prefix sub-command groups.
 	ch.routes.prefixes = []prefixRoute{
 		{"/switch", false, func(in string) bool { c.handleSwitchCommand(in); return false }},
+		{"/model", false, func(in string) bool { c.handleModelCommand(in); return false }},
+		{"/max-tokens", false, func(in string) bool { c.handleMaxTokensCommand(in); return false }},
 		{"/config", true, ch.cmdConfig},
 		{"/status", true, ch.cmdConfig},
 		{"/settings", true, ch.cmdConfig},

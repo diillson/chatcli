@@ -42,6 +42,8 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/memory", (*ChatCLI).getMemorySuggestions},
 	{"/agent", (*ChatCLI).getAgentSuggestions},
 	{"/switch", (*ChatCLI).getSwitchSuggestions},
+	{"/model", (*ChatCLI).getModelSuggestions},
+	{"/max-tokens", (*ChatCLI).getMaxTokensSuggestions},
 	{"/auth", (*ChatCLI).getAuthSuggestions},
 	{"/connect ", (*ChatCLI).getConnectSuggestions},
 	{"/watch", (*ChatCLI).getWatchSuggestions},
@@ -289,6 +291,8 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/exit", Description: i18n.T("complete.root.exit")},
 		{Text: "/quit", Description: i18n.T("complete.root.quit")},
 		{Text: "/switch", Description: i18n.T("complete.root.switch")},
+		{Text: "/model", Description: i18n.T("complete.root.model")},
+		{Text: "/max-tokens", Description: i18n.T("complete.root.maxtokens")},
 		{Text: "/help", Description: i18n.T("complete.root.help")},
 		{Text: "/reload", Description: i18n.T("complete.root.reload")},
 		{Text: "/config", Description: i18n.T("complete.config.root_desc")},
@@ -1351,6 +1355,63 @@ func (cli *ChatCLI) getSwitchSuggestions(d prompt.Document) []prompt.Suggest {
 	}
 
 	return []prompt.Suggest{}
+}
+
+// getModelSuggestions autocompletes the `/model <name>` shorthand: after the
+// command it lists the current provider's models (same source as `/switch
+// --model`), filtered by the word being typed.
+func (cli *ChatCLI) getModelSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	wordBeforeCursor := d.GetWordBeforeCursor()
+
+	// Just typed "/model" without a trailing space.
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{
+			{Text: "/model", Description: i18n.T("complete.root.model")},
+		}
+	}
+
+	models := cli.getCachedModels()
+	suggestions := make([]prompt.Suggest, 0, len(models))
+	for _, m := range models {
+		desc := m.DisplayName
+		if desc == m.ID || desc == "" {
+			desc = cli.Provider
+		}
+		if m.Source == "api" {
+			desc += " [API]"
+		} else {
+			desc += " [catalog]"
+		}
+		suggestions = append(suggestions, prompt.Suggest{Text: m.ID, Description: desc})
+	}
+	return prompt.FilterHasPrefix(suggestions, wordBeforeCursor, true)
+}
+
+// getMaxTokensSuggestions autocompletes the `/max-tokens <num>` shorthand:
+// after the command it offers a few common caps (and 0 = provider default),
+// filtered by what's typed. The values are presets, not an exhaustive list.
+func (cli *ChatCLI) getMaxTokensSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	wordBeforeCursor := d.GetWordBeforeCursor()
+
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{
+			{Text: "/max-tokens", Description: i18n.T("complete.root.maxtokens")},
+		}
+	}
+
+	presets := []prompt.Suggest{
+		{Text: "0", Description: i18n.T("complete.maxtokens.default")},
+		{Text: "1024", Description: "1K"},
+		{Text: "4096", Description: "4K"},
+		{Text: "8192", Description: "8K"},
+		{Text: "16384", Description: "16K"},
+		{Text: "32768", Description: "32K"},
+	}
+	return prompt.FilterHasPrefix(presets, wordBeforeCursor, true)
 }
 
 func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
