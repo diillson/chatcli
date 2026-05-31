@@ -31,6 +31,7 @@ import (
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
+	"github.com/diillson/chatcli/cli/palette"
 	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/scheduler"
@@ -41,6 +42,7 @@ import (
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/openai_assistant"
 	"github.com/diillson/chatcli/pkg/persona"
+	"github.com/diillson/chatcli/ui/theme"
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/diillson/chatcli/models"
@@ -196,6 +198,10 @@ type ChatCLI struct {
 	skillHandler         *SkillHandler
 	executionProfile     ExecutionProfile
 	pendingAction        string // stores intended action before panic (for Windows go-prompt tearDown workaround)
+	replActive           bool   // true only inside the interactive Start() loop (gates the palette trigger)
+	paletteRequested     bool   // a handler asked to open the command palette; the executor runs it in place
+	paletteTarget        string // command to scope the palette to ("" opens the categorized root)
+	suppressPaletteOnce  bool   // skip the palette trigger for the next handled command (the palette's own selection)
 
 	// Remote connection state (for /connect and /disconnect)
 	localClient   client.LLMClient           // saved local client when connected to remote
@@ -740,7 +746,14 @@ func (cli *ChatCLI) executor(in string) {
 	}
 
 	if strings.HasPrefix(in, "/") || in == "exit" || in == "quit" {
-		if cli.commandHandler.HandleCommand(in) {
+		exit := cli.commandHandler.HandleCommand(in)
+		if !exit {
+			// If the handler asked to open the command palette, run it now —
+			// raw mode is already released while the executor runs — and
+			// execute whatever the user selects.
+			exit = cli.runRequestedPalette()
+		}
+		if exit {
 			cli.pendingAction = "exit"
 			panic(errExitRequest)
 		}
@@ -813,6 +826,12 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	defer cli.cleanup()
 	cli.PrintWelcomeScreen()
 	cli.startHubSync(ctx) // resume the shared cross-channel conversation, if connected
+
+	// Mark the interactive REPL as active so the command-palette trigger only
+	// fires here — never when HandleCommand is driven headless (scheduler,
+	// gateway, one-shot), where unwinding the prompt has no meaning.
+	cli.replActive = true
+	defer func() { cli.replActive = false }()
 
 	shouldContinue := true
 	for shouldContinue {
@@ -998,6 +1017,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 		if shouldContinue {
 			cli.restoreTerminal()
+
 			lastCmd := ""
 			if len(cli.commandHistory) > 0 {
 				lastCmd = cli.commandHistory[len(cli.commandHistory)-1]
@@ -1028,6 +1048,45 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// runRequestedPalette runs the command palette when a handler flagged it, then
+// executes the user's selection in place. It is called from the executor,
+// where go-prompt has already torn down raw mode, so the alt-screen overlay can
+// own the terminal and hand it back cleanly. Returns true when the selection
+// asks to exit the REPL. A no-op outside an interactive terminal.
+func (cli *ChatCLI) runRequestedPalette() bool {
+	if !cli.paletteRequested {
+		return false
+	}
+	cli.paletteRequested = false
+	target := cli.paletteTarget
+	cli.paletteTarget = ""
+	if !theme.ActiveProfile().IsTerminal() {
+		return false
+	}
+	var m palette.Model
+	if target == "" {
+		m = palette.NewRoot(cli.paletteSuggest)
+	} else {
+		m = palette.NewScoped(cli.paletteSuggest, target)
+	}
+	sel, err := palette.Run(context.Background(), m)
+	if err != nil {
+		cli.logger.Warn("command palette failed", zap.Error(err))
+		return false
+	}
+	if sel == "" {
+		return false // canceled
+	}
+	// Execute the selection as if typed. suppressPaletteOnce stops a bare,
+	// pickable selection (e.g. "/config", "/switch") from reopening the
+	// overlay; the trigger consumes and clears it on this very call.
+	cli.suppressPaletteOnce = true
+	exit := cli.commandHandler.HandleCommand(sel)
+	cli.suppressPaletteOnce = false
+	cli.paletteRequested = false // ignore any re-trigger raised during execution
+	return exit
 }
 
 func (cli *ChatCLI) restoreTerminal() {
