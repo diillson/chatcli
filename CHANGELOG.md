@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.127.0](https://github.com/diillson/chatcli/compare/v1.126.0...v1.127.0) (2026-05-31)
+
+
+### Features
+
+* **cli:** interactive command palette overlay ([#985](https://github.com/diillson/chatcli/issues/985)) ([233274a](https://github.com/diillson/chatcli/commit/233274ad8fbf6e272a8c55b4457050fa45fabba0))
+
 ## [1.126.0](https://github.com/diillson/chatcli/compare/v1.125.0...v1.126.0) (2026-05-30)
 
 
