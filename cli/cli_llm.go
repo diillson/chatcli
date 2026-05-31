@@ -226,48 +226,51 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 		fmt.Println(i18n.T("error.invalid_choice_normal_mode"))
 		return
 	}
+	_ = cli.applyProviderSwitch(availableProviders[choiceIndex-1])
+}
 
-	newProvider := availableProviders[choiceIndex-1]
-	var newModel string
-	if newProvider == "OPENAI" {
-		newModel = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel)
+// providerDefaultModel returns the model a provider should start on when no
+// explicit model is given — the configured env override, else the built-in
+// default. An unknown provider yields "", letting the client pick its own.
+func (cli *ChatCLI) providerDefaultModel(provider string) string {
+	switch provider {
+	case "OPENAI":
+		return utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel)
+	case "CLAUDEAI":
+		return utils.GetEnvOrDefault("ANTHROPIC_MODEL", config.DefaultClaudeAIModel)
+	case "OPENAI_ASSISTANT":
+		return utils.GetEnvOrDefault("OPENAI_ASSISTANT_MODEL", utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel))
+	case "GOOGLEAI":
+		return utils.GetEnvOrDefault("GOOGLEAI_MODEL", config.DefaultGoogleAIModel)
+	case "XAI":
+		return utils.GetEnvOrDefault("XAI_MODEL", config.DefaultXAIModel)
+	case "ZAI":
+		return utils.GetEnvOrDefault("ZAI_MODEL", config.DefaultZAIModel)
+	case "MINIMAX":
+		return utils.GetEnvOrDefault("MINIMAX_MODEL", config.DefaultMiniMaxModel)
+	case "MOONSHOT":
+		return utils.GetEnvOrDefault("MOONSHOT_MODEL", config.DefaultMoonshotModel)
+	case "OLLAMA":
+		return utils.GetEnvOrDefault("OLLAMA_MODEL", config.DefaultOllamaModel)
+	case "COPILOT":
+		return utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel)
+	case "GITHUB_MODELS":
+		return utils.GetEnvOrDefault("GITHUB_MODELS_MODEL", config.DefaultGitHubModelsModel)
 	}
-	if newProvider == "CLAUDEAI" {
-		newModel = utils.GetEnvOrDefault("ANTHROPIC_MODEL", config.DefaultClaudeAIModel)
-	}
-	if newProvider == "OPENAI_ASSISTANT" {
-		newModel = utils.GetEnvOrDefault("OPENAI_ASSISTANT_MODEL", utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel))
-	}
-	if newProvider == "GOOGLEAI" {
-		newModel = utils.GetEnvOrDefault("GOOGLEAI_MODEL", config.DefaultGoogleAIModel)
-	}
-	if newProvider == "XAI" {
-		newModel = utils.GetEnvOrDefault("XAI_MODEL", config.DefaultXAIModel)
-	}
-	if newProvider == "ZAI" {
-		newModel = utils.GetEnvOrDefault("ZAI_MODEL", config.DefaultZAIModel)
-	}
-	if newProvider == "MINIMAX" {
-		newModel = utils.GetEnvOrDefault("MINIMAX_MODEL", config.DefaultMiniMaxModel)
-	}
-	if newProvider == "MOONSHOT" {
-		newModel = utils.GetEnvOrDefault("MOONSHOT_MODEL", config.DefaultMoonshotModel)
-	}
-	if newProvider == "OLLAMA" {
-		newModel = utils.GetEnvOrDefault("OLLAMA_MODEL", config.DefaultOllamaModel)
-	}
-	if newProvider == "COPILOT" {
-		newModel = utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel)
-	}
-	if newProvider == "GITHUB_MODELS" {
-		newModel = utils.GetEnvOrDefault("GITHUB_MODELS_MODEL", config.DefaultGitHubModelsModel)
-	}
+	return ""
+}
 
+// applyProviderSwitch switches the active provider (and its default model),
+// updating the client, model cache and gateway runtime mirror. Shared by the
+// numbered /switch picker and the /provider command so both paths behave
+// identically.
+func (cli *ChatCLI) applyProviderSwitch(newProvider string) error {
+	newModel := cli.providerDefaultModel(newProvider)
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
 	if err != nil {
 		cli.logger.Error("Erro ao trocar de provedor", zap.Error(err))
 		fmt.Println(i18n.T("cli.error.switch_provider_failed"))
-		return
+		return err
 	}
 
 	cli.Client = newClient
@@ -278,6 +281,37 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 	cli.refreshModelCache()
 	// Mirror the live choice for a running/future gateway daemon (separate process).
 	cli.writeRuntimeModelState()
+	return nil
+}
+
+// handleProviderCommand switches the active LLM provider by name — the
+// single-command, navigable counterpart to the numbered /switch picker. Bare
+// it lists the available providers (marking the current one); with an argument
+// it switches to that provider, matched case-insensitively. The palette opens
+// it scoped to the provider list, giving the same shortcut UX as /model.
+func (cli *ChatCLI) handleProviderCommand(input string) {
+	available := cli.manager.GetAvailableProviders()
+	args := strings.Fields(input)
+	if len(args) < 2 {
+		fmt.Println(i18n.T("cli.provider.current", cli.Provider))
+		for _, p := range available {
+			marker := "  "
+			if p == cli.Provider {
+				marker = "→ "
+			}
+			fmt.Printf("%s%s\n", marker, p)
+		}
+		fmt.Println(i18n.T("cli.provider.hint"))
+		return
+	}
+	requested := args[1]
+	for _, p := range available {
+		if strings.EqualFold(p, requested) {
+			_ = cli.applyProviderSwitch(p)
+			return
+		}
+	}
+	fmt.Println(i18n.T("cli.provider.unknown", requested))
 }
 
 // handleMaxTokensCommand is a shorthand for `/switch --max-tokens <num>`: it

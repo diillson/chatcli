@@ -42,6 +42,7 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/memory", (*ChatCLI).getMemorySuggestions},
 	{"/agent", (*ChatCLI).getAgentSuggestions},
 	{"/switch", (*ChatCLI).getSwitchSuggestions},
+	{"/provider", (*ChatCLI).getProviderSuggestions},
 	{"/model", (*ChatCLI).getModelSuggestions},
 	{"/max-tokens", (*ChatCLI).getMaxTokensSuggestions},
 	{"/auth", (*ChatCLI).getAuthSuggestions},
@@ -291,9 +292,11 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/exit", Description: i18n.T("complete.root.exit")},
 		{Text: "/quit", Description: i18n.T("complete.root.quit")},
 		{Text: "/switch", Description: i18n.T("complete.root.switch")},
+		{Text: "/provider", Description: i18n.T("complete.root.provider")},
 		{Text: "/model", Description: i18n.T("complete.root.model")},
 		{Text: "/max-tokens", Description: i18n.T("complete.root.maxtokens")},
 		{Text: "/help", Description: i18n.T("complete.root.help")},
+		{Text: "/menu", Description: i18n.T("complete.root.menu")},
 		{Text: "/reload", Description: i18n.T("complete.root.reload")},
 		{Text: "/config", Description: i18n.T("complete.config.root_desc")},
 		{Text: "/status", Description: i18n.T("complete.config.status_alias")},
@@ -1387,6 +1390,40 @@ func (cli *ChatCLI) getModelSuggestions(d prompt.Document) []prompt.Suggest {
 		suggestions = append(suggestions, prompt.Suggest{Text: m.ID, Description: desc})
 	}
 	return prompt.FilterHasPrefix(suggestions, wordBeforeCursor, true)
+}
+
+// getProviderSuggestions autocompletes `/provider <NAME>` (and its /providers
+// alias) with the active providers. It offers options only for the single
+// argument slot — once a provider is chosen there is nothing more to complete —
+// so the palette treats a pick as terminal and switches immediately, matching
+// the /model shortcut UX.
+func (cli *ChatCLI) getProviderSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
+
+	// Just the command typed, no space yet → echo the root entry.
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{
+			{Text: args[0], Description: i18n.T("complete.root.provider")},
+		}
+	}
+
+	// First (and only) argument slot: list the providers.
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		providers := cli.manager.GetAvailableProviders()
+		out := make([]prompt.Suggest, 0, len(providers))
+		for _, p := range providers {
+			desc := i18n.T("complete.provider.item")
+			if p == cli.Provider {
+				desc = i18n.T("complete.provider.current")
+			}
+			out = append(out, prompt.Suggest{Text: p, Description: desc})
+		}
+		return prompt.FilterHasPrefix(out, word, true)
+	}
+
+	return []prompt.Suggest{}
 }
 
 // getMaxTokensSuggestions autocompletes the `/max-tokens <num>` shorthand:

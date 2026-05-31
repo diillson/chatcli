@@ -69,6 +69,18 @@ func (ch *CommandHandler) HandleCommand(userInput string) bool {
 		}
 	}
 
+	// Command palette. A bare "/" (or "/menu") opens the categorized root
+	// listing; a bare, pickable command (e.g. "/model", "/config") opens
+	// scoped to its own subcommands/flags/values. We only flag the request
+	// here: the executor runs the overlay in place once this handler returns,
+	// because go-prompt has already released raw mode by the time it calls the
+	// executor — no panic-based unwind is required.
+	if target, ok := ch.cli.paletteTrigger(userInput); ok {
+		ch.cli.paletteTarget = target
+		ch.cli.paletteRequested = true
+		return false
+	}
+
 	// Mode-switch commands raise a sentinel to unwind out of the go-prompt
 	// loop (a plain return cannot escape it), so they stay as explicit cases
 	// rather than table entries.
@@ -180,6 +192,7 @@ func (ch *CommandHandler) buildRoutes() {
 	// "exact or +space"; word=false entries are raw-prefix sub-command groups.
 	ch.routes.prefixes = []prefixRoute{
 		{"/switch", false, func(in string) bool { c.handleSwitchCommand(in); return false }},
+		{"/provider", false, func(in string) bool { c.handleProviderCommand(in); return false }},
 		{"/model", false, func(in string) bool { c.handleModelCommand(in); return false }},
 		{"/max-tokens", false, func(in string) bool { c.handleMaxTokensCommand(in); return false }},
 		{"/config", true, ch.cmdConfig},
