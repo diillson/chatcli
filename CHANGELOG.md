@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.128.0](https://github.com/diillson/chatcli/compare/v1.127.0...v1.128.0) (2026-06-01)
+
+
+### Features
+
+* add interactive ask_user tool for agent, coder and chat ([#987](https://github.com/diillson/chatcli/issues/987)) ([e07fb4d](https://github.com/diillson/chatcli/commit/e07fb4db7ad6e82e8bb19aecfe9b11c28cd003d2))
+
 ## [1.127.0](https://github.com/diillson/chatcli/compare/v1.126.0...v1.127.0) (2026-05-31)
 
 
