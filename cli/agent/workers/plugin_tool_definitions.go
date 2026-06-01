@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/diillson/chatcli/cli/agent/ask"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -102,6 +103,26 @@ func PluginToolDefinitions() []models.ToolDefinition {
 				},
 			},
 		},
+		AskUserToolDefinition(),
+	}
+}
+
+// AskUserToolDefinition is the native tool definition for ask_user (the @ask
+// plugin). It is also offered standalone in chat mode (the only tool chat is
+// allowed to use), so it lives in its own constructor.
+func AskUserToolDefinition() models.ToolDefinition {
+	var params map[string]interface{}
+	_ = json.Unmarshal(ask.ParametersJSON(), &params)
+	return models.ToolDefinition{
+		Type: "function",
+		Function: models.ToolFunctionDef{
+			Name: "ask_user",
+			Description: "Ask the user 1-6 multiple-choice questions and get their decisions. " +
+				"Use when you need the user to choose between options before proceeding. Each question " +
+				"has a header, options (label+description), single or multi-select, and an implicit " +
+				"free-text 'Other' choice. Returns the user's selections.",
+			Parameters: params,
+		},
 	}
 }
 
@@ -130,6 +151,15 @@ var nativePluginToolMap = map[string]struct {
 			// exact map the LLM sent (easier than threading every flag).
 			payload := map[string]interface{}{"cmd": "fetch", "args": args}
 			raw, _ := jsonMarshalForTool(payload)
+			return []string{string(raw)}
+		},
+	},
+	"ask_user": {
+		PluginName: "@ask",
+		BuildArgs: func(args map[string]interface{}) []string {
+			// Pass the {questions:[...]} object straight through as a single
+			// JSON arg; the @ask plugin / loop parse it with ask.ParseRequest.
+			raw, _ := jsonMarshalForTool(args)
 			return []string{string(raw)}
 		},
 	},

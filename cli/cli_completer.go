@@ -1519,6 +1519,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "integrations", Description: i18n.T("complete.config.integrations")},
 			{Text: "auth", Description: i18n.T("complete.config.auth")},
 			{Text: "security", Description: i18n.T("complete.config.security")},
+			{Text: "chat", Description: i18n.T("cfg.section.chat.title")},
 			{Text: "scheduler", Description: i18n.T("cfg.section.scheduler.title")},
 			{Text: "server", Description: i18n.T("complete.config.server")},
 			{Text: "hub", Description: i18n.T("cfg.section.hub.title")},
@@ -1539,6 +1540,11 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 	// /config hub <TAB> → mutating subcommands (set/reset)
 	if strings.ToLower(args[1]) == "hub" {
 		return cli.getConfigHubSuggestions(d)
+	}
+
+	// /config chat <TAB> → ask_user toggle subcommands
+	if strings.ToLower(args[1]) == "chat" {
+		return cli.getConfigChatSuggestions(d)
 	}
 
 	// /config ui <TAB> → theme subcommand + values

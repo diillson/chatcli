@@ -100,6 +100,14 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 		} else {
 			cli.routeConfigSecurity(args[1:])
 		}
+	case "chat":
+		// Hierarchical like security/agent: bare form shows the chat panorama;
+		// `chat ask on|off|toggle` flips the ask_user exception at runtime.
+		if len(args) == 1 {
+			cli.showConfigChat()
+		} else {
+			cli.routeConfigChat(args[1:])
+		}
 	case "quality":
 		cli.showConfigQuality()
 	case "scheduler", "schedule":
@@ -373,6 +381,7 @@ func (cli *ChatCLI) showConfigAll() {
 	cli.showConfigIntegrations()
 	cli.showConfigAuth()
 	cli.showConfigSecurity()
+	cli.showConfigChat()
 	cli.showConfigQuality()
 	cli.showConfigScheduler()
 	// server block is conditional (see its own guard)

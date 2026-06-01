@@ -478,6 +478,14 @@ func (cli *ChatCLI) executeLLMTurn(
 	resolution SkillClientResolution,
 	stopSpinner func(),
 ) (string, error) {
+	// Controlled chat exception: when CHATCLI_CHAT_ASK is on and the provider
+	// supports native tools, chat may use ONLY ask_user (no execution tools).
+	// Off by default, so chat keeps streaming on every turn.
+	if out, handled, err := cli.maybeChatAskTurn(ctx, activeClient, userInput, additionalContext,
+		tempHistory, effectiveMaxTokens, resolution, stopSpinner); handled {
+		return out, err
+	}
+
 	if sc, ok := client.AsStreamingClient(activeClient); ok {
 		return cli.executeStreamingTurn(ctx, sc, activeClient, userInput, additionalContext,
 			tempHistory, effectiveMaxTokens, resolution, stopSpinner)

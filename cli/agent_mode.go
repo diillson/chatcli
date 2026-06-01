@@ -23,6 +23,7 @@ import (
 
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/agent/ask"
 	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/agent/toolguard"
@@ -31,6 +32,7 @@ import (
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/metrics"
+	"github.com/diillson/chatcli/cli/palette"
 	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -235,6 +237,65 @@ func (a *AgentMode) stopStdinReader() {
 		a.stdinLines = nil
 		a.stdinDone = nil
 	}
+}
+
+// withInteractiveStdin runs fn while the terminal is exclusively owned by it
+// (e.g. a Bubble Tea overlay). The centralized stdin reader goroutine drains
+// os.Stdin continuously, which would steal keystrokes from a raw-mode program,
+// so we stop it for the duration and restart it afterwards. The cooked-mode
+// state is snapshotted and restored around fn — belt-and-suspenders against a
+// program that leaves the TTY in raw mode on a dirty exit (same rationale as
+// runWithCookedTerminalRestore).
+//
+// @ask is interactive precisely because the loop paused to ask the user, so the
+// reader is idle here and no type-ahead is lost.
+func (a *AgentMode) withInteractiveStdin(fn func() error) error {
+	fd := int(os.Stdin.Fd())
+	hadReader := a.stdinLines != nil
+	if hadReader {
+		a.stopStdinReader()
+	}
+	state, _ := term.GetState(fd)
+	err := fn()
+	if state != nil {
+		_ = term.Restore(fd, state)
+	}
+	if hadReader {
+		a.startStdinReader()
+	}
+	return err
+}
+
+// handleAgentAsk drives the @ask / ask_user tool: it parses the question spec,
+// renders the interactive overlay (pausing the stdin reader), and returns the
+// user's selections as the tool result string. In unattended/non-TTY contexts
+// it returns the non-interactive fallback so the daemon/gateway never blocks on
+// stdin that will never arrive.
+func (a *AgentMode) handleAgentAsk(ctx context.Context, argsJSON string) (string, error) {
+	qs, err := ask.ParseRequest(argsJSON)
+	if err != nil {
+		return ask.ErrorResult(err), err
+	}
+
+	// No interactive terminal: gateway/daemon (unattended) or piped one-shot.
+	if (a.cli != nil && a.cli.unattended) || !term.IsTerminal(int(os.Stdin.Fd())) {
+		return ask.FallbackResult(qs), nil
+	}
+
+	var answers []ask.Answer
+	var canceled bool
+	runErr := a.withInteractiveStdin(func() error {
+		var e error
+		answers, canceled, e = palette.RunAsk(ctx, palette.NewAsk(qs))
+		return e
+	})
+	if runErr != nil {
+		return ask.ErrorResult(runErr), runErr
+	}
+	if canceled {
+		return ask.CanceledResult(), nil
+	}
+	return ask.FormatResult(answers), nil
 }
 
 // unattendedConfirmAnswer is what readLine returns in unattended mode (the
@@ -2392,7 +2453,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// invocation. Route to workers.RunDelegate with our
 							// LLM client so the subagent has its own isolated
 							// context.
-							if strings.EqualFold(strings.TrimSpace(toolName), "@coder") && isDelegateInvocation(normalizedArgsStr) {
+							if strings.EqualFold(strings.TrimSpace(toolName), "@ask") {
+								// @ask interception: the loop owns the TTY and the
+								// stdin reader, so it (not the pure plugin) renders
+								// the interactive overlay and feeds the answers back
+								// synchronously as this turn's tool result.
+								toolOutput, execErr = a.handleAgentAsk(ctx, normalizedArgsStr)
+							} else if strings.EqualFold(strings.TrimSpace(toolName), "@coder") && isDelegateInvocation(normalizedArgsStr) {
 								nativeArgs, rawInner := extractDelegateArgs(normalizedArgsStr)
 								toolOutput, execErr = workers.RunDelegate(
 									ctx,

@@ -36,3 +36,6 @@ app.log
 testeclio
 testclio
 .qg-cache/
+
+# build output
+/bin/
