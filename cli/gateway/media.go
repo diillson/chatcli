@@ -37,9 +37,9 @@ func maxAudioBytes() int64 {
 }
 
 // fetchAudioBytes GETs url (optionally bearer-authenticated) and returns the
-// body and its Content-Type, refusing anything larger than max. It reads at
-// most max+1 bytes so an oversized payload is detected without buffering it all.
-func fetchAudioBytes(ctx context.Context, client *http.Client, url, bearer string, max int64) ([]byte, string, error) {
+// body and its Content-Type, refusing anything larger than limit. It reads at
+// most limit+1 bytes so an oversized payload is detected without buffering it all.
+func fetchAudioBytes(ctx context.Context, client *http.Client, url, bearer string, limit int64) ([]byte, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", err
@@ -55,12 +55,12 @@ func fetchAudioBytes(ctx context.Context, client *http.Client, url, bearer strin
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("download status %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, "", err
 	}
-	if int64(len(data)) > max {
-		return nil, "", fmt.Errorf("audio exceeds %d-byte limit", max)
+	if int64(len(data)) > limit {
+		return nil, "", fmt.Errorf("audio exceeds %d-byte limit", limit)
 	}
 	return data, resp.Header.Get("Content-Type"), nil
 }
