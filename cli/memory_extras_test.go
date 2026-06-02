@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -40,10 +41,10 @@ func TestMemoryPluginAdapter(t *testing.T) {
 	}
 
 	// Recall returns a string (empty-query path uses the general context).
-	if _, err := a.Recall(""); err != nil {
+	if _, err := a.Recall(context.Background(), ""); err != nil {
 		t.Errorf("recall: %v", err)
 	}
-	if _, err := a.Recall("certification"); err != nil {
+	if _, err := a.Recall(context.Background(), "certification"); err != nil {
 		t.Errorf("recall query: %v", err)
 	}
 }

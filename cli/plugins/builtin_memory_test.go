@@ -151,7 +151,10 @@ func (f *fakeMemAdapter) UpdateProfile(u map[string]string) (string, error) {
 	return "ok", nil
 }
 func (f *fakeMemAdapter) Forget(m string) (string, error) { f.lastForget = m; return "ok", nil }
-func (f *fakeMemAdapter) Recall(q string) (string, error) { f.lastRecall = q; return "ok", nil }
+func (f *fakeMemAdapter) Recall(_ context.Context, q string) (string, error) {
+	f.lastRecall = q
+	return "ok", nil
+}
 
 func TestBuiltinMemory_Dispatch(t *testing.T) {
 	fake := &fakeMemAdapter{}

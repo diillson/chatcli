@@ -40,7 +40,9 @@ type MemoryAdapter interface {
 	// Forget removes facts whose content matches the substring.
 	Forget(match string) (string, error)
 	// Recall returns relevant stored memory (profile + facts) for query.
-	Recall(query string) (string, error)
+	// ctx bounds the optional HyDE/embedding round-trips the implementation
+	// may run to widen recall semantically.
+	Recall(ctx context.Context, query string) (string, error)
 }
 
 // memAdapterHolder wraps the adapter so atomic.Value always receives a
@@ -160,7 +162,7 @@ func (p *BuiltinMemoryPlugin) Execute(ctx context.Context, args []string) (strin
 
 // ExecuteWithStream mirrors Execute — this plugin produces no incremental
 // output, so the stream callback is ignored.
-func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string, _ func(string)) (string, error) {
+func (p *BuiltinMemoryPlugin) ExecuteWithStream(ctx context.Context, args []string, _ func(string)) (string, error) {
 	adapter := currentMemoryAdapter()
 	if adapter == nil {
 		return "", errors.New("@memory: memory is not enabled in this session")
@@ -208,7 +210,7 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 			Query string `json:"query"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
-		return adapter.Recall(in.Query)
+		return adapter.Recall(ctx, in.Query)
 	default:
 		return "", fmt.Errorf(
 			"@memory: unknown cmd %q (valid: remember|profile|forget|recall)", cmd,
