@@ -10,7 +10,10 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestMaxAudioBytes(t *testing.T) {
@@ -159,5 +162,115 @@ func TestIsAudioMime(t *testing.T) {
 		if isAudioMime(m) {
 			t.Errorf("%q should not be audio", m)
 		}
+	}
+}
+
+func TestTelegramDownloadFile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/getFile"):
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"file_path":"voice/f9.ogg"}}`))
+		case strings.Contains(r.URL.Path, "/file/"):
+			w.Header().Set("Content-Type", "audio/ogg")
+			_, _ = w.Write([]byte("OGG-BYTES"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	ad := NewTelegramAdapter("TOKEN", nil, zap.NewNop())
+	ad.baseURL = srv.URL
+	data, mime, err := ad.downloadFile(context.Background(), "FID")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "OGG-BYTES" || mime != "audio/ogg" {
+		t.Errorf("data=%q mime=%q", data, mime)
+	}
+}
+
+func TestWhatsAppDownloadMedia(t *testing.T) {
+	var base string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer TOK" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/dl") {
+			w.Header().Set("Content-Type", "audio/ogg")
+			_, _ = w.Write([]byte("WA-AUDIO"))
+			return
+		}
+		// media-id lookup → returns the download URL
+		_, _ = w.Write([]byte(`{"url":"` + base + `/dl","mime_type":"audio/ogg"}`))
+	}))
+	defer srv.Close()
+	base = srv.URL
+
+	ad := NewWhatsAppAdapter("TOK", "PHONE", "verify", "", "", zap.NewNop())
+	ad.graphBase = srv.URL
+	data, mime, err := ad.downloadMedia(context.Background(), "MID")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "WA-AUDIO" || mime != "audio/ogg" {
+		t.Errorf("data=%q mime=%q", data, mime)
+	}
+}
+
+func TestSlackHydrateAudio_Bearer(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "audio/mp4")
+		_, _ = w.Write([]byte("SLACK-AUDIO"))
+	}))
+	defer srv.Close()
+
+	ad := NewSlackAdapter("xoxb-tok", "", "", "", zap.NewNop())
+	msg := InboundMessage{Audio: &InboundAudio{ref: srv.URL}}
+	ad.hydrateAudio(context.Background(), &msg)
+	if msg.Audio == nil || string(msg.Audio.Data) != "SLACK-AUDIO" {
+		t.Fatalf("audio not hydrated: %+v", msg.Audio)
+	}
+	if gotAuth != "Bearer xoxb-tok" {
+		t.Errorf("slack download must send the bot token; got %q", gotAuth)
+	}
+}
+
+func TestDiscordHydrateAudio(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "audio/ogg")
+		_, _ = w.Write([]byte("DISCORD-AUDIO"))
+	}))
+	defer srv.Close()
+
+	ad := NewDiscordAdapter("tok", zap.NewNop())
+	msg := InboundMessage{Audio: &InboundAudio{ref: srv.URL}}
+	ad.hydrateAudio(context.Background(), &msg)
+	if msg.Audio == nil || string(msg.Audio.Data) != "DISCORD-AUDIO" {
+		t.Fatalf("audio not hydrated: %+v", msg.Audio)
+	}
+}
+
+func TestWebhookHydrateAudio(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "audio/ogg")
+		_, _ = w.Write([]byte("WH-AUDIO"))
+	}))
+	defer srv.Close()
+
+	ad := NewWebhookAdapter("", "", "", "", zap.NewNop())
+	msg := InboundMessage{Audio: &InboundAudio{ref: srv.URL}}
+	ad.hydrateAudio(context.Background(), &msg)
+	if msg.Audio == nil || string(msg.Audio.Data) != "WH-AUDIO" {
+		t.Fatalf("audio not hydrated: %+v", msg.Audio)
+	}
+	// A failed download clears the attachment.
+	bad := InboundMessage{Audio: &InboundAudio{ref: "http://127.0.0.1:0/nope"}}
+	ad.hydrateAudio(context.Background(), &bad)
+	if bad.Audio != nil {
+		t.Error("a failed download must clear Audio")
 	}
 }

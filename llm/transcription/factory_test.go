@@ -19,6 +19,7 @@ func clearEnv(t *testing.T) {
 	for _, k := range []string{
 		"CHATCLI_TRANSCRIPTION_URL",
 		"CHATCLI_TRANSCRIPTION_KEY",
+		"CHATCLI_TRANSCRIPTION_CMD",
 		"CHATCLI_TRANSCRIPTION_PROVIDER",
 		"CHATCLI_TRANSCRIPTION_MODEL",
 		"CHATCLI_TRANSCRIPTION_LANG",
@@ -41,6 +42,34 @@ func TestNewFromEnv_Selection(t *testing.T) {
 		}
 		if !strings.HasPrefix(p.Name(), "selfhosted:") {
 			t.Errorf("Name = %q, want selfhosted:*", p.Name())
+		}
+	})
+
+	t.Run("local command is keyless and wins in auto", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("CHATCLI_TRANSCRIPTION_CMD", "whisper-cli -nt -f {input}")
+		t.Setenv("CHATCLI_TRANSCRIPTION_URL", "http://localhost:8080/v1")
+		t.Setenv("OPENAI_API_KEY", "sk-test")
+		p := NewFromEnv(log)
+		if IsNull(p) || !strings.HasPrefix(p.Name(), "command:") {
+			t.Errorf("command must win local-first; got null=%v name=%q", IsNull(p), name(p))
+		}
+	})
+
+	t.Run("explicit command needs the template", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("CHATCLI_TRANSCRIPTION_PROVIDER", "command")
+		if !IsNull(NewFromEnv(log)) {
+			t.Error("command without CHATCLI_TRANSCRIPTION_CMD must be null")
+		}
+	})
+
+	t.Run("auto prefers groq (free) over openai (paid)", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("GROQ_API_KEY", "gsk-test")
+		t.Setenv("OPENAI_API_KEY", "sk-test")
+		if p := NewFromEnv(log); IsNull(p) || !strings.HasPrefix(p.Name(), "groq:") {
+			t.Errorf("auto must prefer groq; got %q", name(p))
 		}
 	})
 

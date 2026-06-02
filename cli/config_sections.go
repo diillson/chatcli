@@ -926,6 +926,7 @@ func (cli *ChatCLI) showConfigIntegrations() {
 		voiceStatus = t.Name()
 	}
 	kv(p, i18n.T("cfg.kv.transcription"), voiceStatus)
+	kv(p, "CHATCLI_TRANSCRIPTION_CMD", envOr("CHATCLI_TRANSCRIPTION_CMD"))
 	kv(p, "CHATCLI_TRANSCRIPTION_URL", envOr("CHATCLI_TRANSCRIPTION_URL"))
 	kv(p, "CHATCLI_TRANSCRIPTION_PROVIDER", envOr("CHATCLI_TRANSCRIPTION_PROVIDER"))
 	kv(p, "CHATCLI_TRANSCRIPTION_MODEL", envOr("CHATCLI_TRANSCRIPTION_MODEL"))
