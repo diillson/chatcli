@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.128.1](https://github.com/diillson/chatcli/compare/v1.128.0...v1.128.1) (2026-06-02)
+
+
+### Performance Improvements
+
+* **prompt:** stable-first cache ordering + pull-first memory mode ([#989](https://github.com/diillson/chatcli/issues/989)) ([50346ef](https://github.com/diillson/chatcli/commit/50346ef19685059a27ae067a5e900f2d216547ea))
+
 ## [1.128.0](https://github.com/diillson/chatcli/compare/v1.127.0...v1.128.0) (2026-06-01)
 
 
