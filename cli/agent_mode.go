@@ -678,7 +678,10 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 			a.logger.Info("Usando persona ativa + modo agent", zap.String("agent", activeAgent.Name))
 		}
 	} else if isCoder {
-		coreText = CoderSystemPrompt
+		// The gateway answers through a chat app: use the dedicated
+		// conversational base (same tools, friendlier voice) instead of the
+		// terse coder prompt. Only when no persona owns the core text.
+		coreText = coderBaseSystemPrompt(a.gatewayPersona)
 	} else {
 		osName := runtime.GOOS
 		shellName := utils.GetUserShell()
@@ -687,11 +690,11 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 	coreText += "\n\n" + i18n.T("ai.response_language")
 
-	// Gateway persona: same coder engine and tools, but the answer is bound for
-	// a chat platform (Telegram/WhatsApp/…), so steer the model toward concise,
-	// plain-text replies without decorative formatting. Appended to the stable
-	// core block so it stays cacheable across turns.
-	if a.gatewayPersona {
+	// Gateway persona reinforcement: only needed when the core text is NOT
+	// already the dedicated GatewaySystemPrompt — i.e. when an active persona
+	// (or a non-coder profile) owns the core block. Steers those toward concise,
+	// plain-text chat replies. The GatewaySystemPrompt path already embeds this.
+	if a.gatewayPersona && (hasActivePersona || !isCoder) {
 		coreText += "\n\n" + i18n.T("gateway.persona_prompt")
 	}
 
