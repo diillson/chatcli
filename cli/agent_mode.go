@@ -704,7 +704,12 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// Block 3 — workspace / retrieval context. Built only when we actually
 	// have a context builder; empty string means "skip this block".
+	// dynamicText (wall-clock time + cwd disambiguation) is captured
+	// SEPARATELY from workspaceText: the timestamp changes every turn, so
+	// bundling it into the cacheable workspace block would bust the prefix
+	// cache. It is emitted as its own uncached trailing block instead.
 	var workspaceText string
+	var dynamicText string
 	if a.cli.contextBuilder != nil {
 		var hints []string
 		hintWindow := 3
@@ -727,12 +732,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		if wsCtx != "" {
 			workspaceText = wsCtx
 		}
-		if dynCtx := a.cli.contextBuilder.BuildDynamicContext(); dynCtx != "" {
-			if workspaceText != "" {
-				workspaceText += "\n\n"
-			}
-			workspaceText += dynCtx
-		}
+		dynamicText = a.cli.contextBuilder.BuildDynamicContext()
 	}
 
 	// Block 2 — tool descriptions (plugins) + session workspace hint.
@@ -814,9 +814,10 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// Assemble the system message — flat string for providers without
 	// cache_control (consumed via Message.Content) plus structured
-	// SystemParts for Anthropic-style KV cache. Each block ends on a
-	// cache boundary (ephemeral). The ordering matches the stability
-	// heuristic described above.
+	// SystemParts for Anthropic-style KV cache. buildAgentSystemMessage
+	// owns the stable-prefix / volatile-suffix split: only the stable
+	// blocks (core/tools/orchestrator) carry ephemeral breakpoints; the
+	// volatile blocks (workspace/skills/channels/dynamic) trail uncached.
 	// Volatile MCP channel context — most recent push messages from
 	// connected servers. Surfaces CI alerts, monitoring events, etc.
 	// in agent/coder mode so the agent's plan can react to them.
@@ -826,7 +827,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		channelsText = a.cli.mcpManager.Channels().FormatForPrompt(5)
 	}
 
-	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText, channelsText)
+	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText, channelsText, dynamicText)
 
 	// Inicializa ou atualiza o histórico com o System Prompt correto.
 	//

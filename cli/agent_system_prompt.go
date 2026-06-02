@@ -11,81 +11,78 @@ import (
 	"github.com/diillson/chatcli/models"
 )
 
-// buildAgentSystemMessage composes the agent-mode system message from the
-// semantic blocks used by Run(): core behavior, tools context, workspace
-// context, (skills + orchestrator), and the volatile MCP channels block —
-// trailing in stability order so the most stable content sits at the front
-// of the cached prefix.
+// buildAgentSystemMessage composes the agent/coder-mode system message from
+// the semantic blocks used by Run(), ordered most-stable-first so the
+// cache_control:ephemeral breakpoints land on a CONTIGUOUS prefix the provider
+// can serve as warm-cache reads. Every per-turn-volatile block is appended
+// AFTER the last cached breakpoint and carries NO hint, so it can never
+// invalidate a stable prefix above it.
+//
+// Anthropic caches by prefix: a breakpoint only hits when every byte before it
+// matches a prior request. A volatile block placed inside the cached region
+// (e.g. the hint-driven workspace/memory block, or the wall-clock timestamp)
+// poisons every cached block below it — paying cache-creation cost each turn
+// while never earning a read. Hence the stable/volatile split below.
+//
+// Stable across a session → cached prefix (each stamped ephemeral):
+//
+//	core         — persona / CoderSystemPrompt + format rules
+//	tools        — plugin tool catalog + session workspace hint
+//	orchestrator — agent registry catalog (multi-agent prompt)
+//
+// Volatile per turn → NO cache hint, appended after the cached prefix:
+//
+//	workspace    — bootstrap files + MEMORY retrieval (hint-driven)
+//	skills       — pinned + auto-activated + manual skills (query-driven)
+//	channels     — MCP push ring (newest messages each turn)
+//	dynamic      — wall-clock timestamp + cwd disambiguation
 //
 // Two representations are produced and kept in sync:
 //
-//   - Message.Content — flat string with "\n\n" separators. Consumed by
-//     every provider that does not interpret structured system blocks
-//     (OpenAI, Gemini, Ollama, StackSpot, etc.) and by all the accounting
-//     code that measures history payload via len(Content).
+//   - Message.Content — flat string with "\n\n" separators. Consumed by every
+//     provider that does not interpret structured system blocks (OpenAI,
+//     Gemini, Ollama, StackSpot, etc.) and by the accounting code that
+//     measures history payload via len(Content).
+//   - Message.SystemParts — one ContentBlock per non-empty block, with cache
+//     hints only on the stable prefix.
 //
-//   - Message.SystemParts — one ContentBlock per non-empty block. Stable
-//     blocks (core/tools/workspace + the skills+orchestrator tail) are
-//     stamped with CacheControl{Type:"ephemeral"} so Anthropic serves
-//     identical prefixes as cache reads on subsequent turns. The volatile
-//     MCP channels block has NO cache hint — it changes every turn and
-//     caching it would just thrash the breakpoint.
-//
-// Cache budget: Anthropic allows up to 4 cache_control breakpoints. The
-// five stable inputs collapse whenever one is empty; when all are present
-// we intentionally merge skills+orchestrator into a single tail block so
-// the full set fits in 4 boundaries. The channels block is appended
-// AFTER the cached tail without consuming a breakpoint.
-func buildAgentSystemMessage(core, tools, workspace, skills, orchestrator, channels string) models.Message {
-	core = strings.TrimSpace(core)
-	tools = strings.TrimSpace(tools)
-	workspace = strings.TrimSpace(workspace)
-	skills = strings.TrimSpace(skills)
-	orchestrator = strings.TrimSpace(orchestrator)
-	channels = strings.TrimSpace(channels)
-
-	// Merge the two most volatile cached blocks into a single trailing
-	// block. Keeping skills+orchestrator on one boundary leaves room
-	// for core/tools/workspace to each have their own stable breakpoint.
-	tail := skills
-	if orchestrator != "" {
-		if tail != "" {
-			tail += "\n\n"
-		}
-		tail += orchestrator
+// Cache budget: Anthropic allows up to 4 cache_control breakpoints; the three
+// stable blocks fit with one to spare, and any empty block simply collapses.
+func buildAgentSystemMessage(core, tools, workspace, skills, orchestrator, channels, dynamic string) models.Message {
+	stable := []string{
+		strings.TrimSpace(core),
+		strings.TrimSpace(tools),
+		strings.TrimSpace(orchestrator),
 	}
-
-	cached := []string{core, tools, workspace, tail}
+	volatile := []string{
+		strings.TrimSpace(workspace),
+		strings.TrimSpace(skills),
+		strings.TrimSpace(channels),
+		strings.TrimSpace(dynamic),
+	}
 
 	var parts []models.ContentBlock
 	var sb strings.Builder
-	for _, text := range cached {
+	appendBlock := func(text string, cached bool) {
 		if text == "" {
-			continue
+			return
 		}
 		if sb.Len() > 0 {
 			sb.WriteString("\n\n")
 		}
 		sb.WriteString(text)
-		parts = append(parts, models.ContentBlock{
-			Type:         "text",
-			Text:         text,
-			CacheControl: &models.CacheControl{Type: "ephemeral"},
-		})
+		block := models.ContentBlock{Type: "text", Text: text}
+		if cached {
+			block.CacheControl = &models.CacheControl{Type: "ephemeral"}
+		}
+		parts = append(parts, block)
 	}
 
-	// Append the volatile MCP channels block last and without a cache
-	// hint. The user sees the latest push messages on every turn,
-	// while everything cacheable stays cacheable.
-	if channels != "" {
-		if sb.Len() > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString(channels)
-		parts = append(parts, models.ContentBlock{
-			Type: "text",
-			Text: channels,
-		})
+	for _, text := range stable {
+		appendBlock(text, true)
+	}
+	for _, text := range volatile {
+		appendBlock(text, false)
 	}
 
 	return models.Message{

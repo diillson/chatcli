@@ -60,22 +60,31 @@ type chatSystemAssembly struct {
 	filePaths []string
 }
 
-// assembleChatSystemPrompt builds every structured system-prompt block for
-// a chat-mode turn in stable order. Caching hints (cache_control: ephemeral)
-// are attached on the blocks that are stable across turns so the provider
-// can hit warm-cache reads. Per-turn-volatile blocks omit the hint.
+// assembleChatSystemPrompt builds every structured system-prompt block for a
+// chat-mode turn, ordered most-stable-first so the cache_control:ephemeral
+// breakpoints sit on a CONTIGUOUS prefix the provider can serve as warm-cache
+// reads. Every per-turn-volatile block is pushed AFTER the last cached
+// breakpoint and carries NO hint, so it can never invalidate a stable prefix
+// above it.
 //
-// Block layout (top → bottom of system prompt):
+// Anthropic caches by prefix: a breakpoint only hits when every byte before
+// it is identical to a prior request. A volatile block placed early (e.g. the
+// hint-driven memory block, or the wall-clock timestamp) therefore poisons
+// every cached block below it — paying cache-creation cost each turn while
+// never earning a read. Hence the split:
 //
+//	── Stable cached prefix (warm-cache reads across turns) ──
 //	Part 0  — mode-awareness banner + language directive
-//	Part 1  — workspace context (SOUL/USER/IDENTITY/RULES/MEMORY + dynamic)
-//	Part 2  — attached `/context` entries (per session)
-//	Part 2.5 — manually invoked skill (`/<skill-name>`) — consumed once
-//	Part 3a — pinned skills (`/skill pin`) — stable across turns
-//	Part 3b — auto-activated skills (triggers + path globs)
-//	Part 5  — MCP channel messages
-//	Part 6  — MCP tools catalog (name+description only)
-//	Part 4  — K8s watcher context
+//	Part 1  — attached `/context` entries (per session)
+//	Part 2  — pinned skills (`/skill pin`) — stable across turns
+//	Part 3  — MCP tools catalog (name+description only)
+//	── Volatile suffix (no cache hint; changes per turn) ──
+//	Part 4  — workspace context (SOUL/USER/RULES + MEMORY, hint-driven)
+//	Part 5  — manually invoked skill (`/<skill-name>`) — consumed once
+//	Part 6  — auto-activated skills (triggers + path globs)
+//	Part 7  — MCP channel messages (push ring)
+//	Part 8  — K8s watcher context
+//	Part 9  — dynamic context (wall-clock time + cwd disambiguation)
 //
 // The function also captures the skill model/effort hints so the caller can
 // route the turn to the right provider/model.
@@ -83,40 +92,50 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	ctx context.Context, userInput, additionalContext string,
 ) chatSystemAssembly {
 	var out chatSystemAssembly
-	out.parts = append(out.parts, modeAndLanguagePart())
 
-	if part, ok := cli.workspaceContextPart(ctx, userInput); ok {
-		out.parts = append(out.parts, part)
-	}
-	out.parts = append(out.parts, cli.attachedContextParts()...)
-
+	// Resolve skills up front: this produces the model/effort hints AND the
+	// content blocks, which are emitted in different cache regions below
+	// (pinned in the stable prefix, manual + auto in the volatile suffix).
 	manualSkill, manualSkillArgs := cli.consumePendingManualSkill()
-	if manualSkill != nil {
-		out.manualHit = true
-		if block := renderManualSkillBlock(manualSkill, manualSkillArgs); block != "" {
-			out.parts = append(out.parts, models.ContentBlock{Type: "text", Text: block})
-		}
-	}
-
+	out.manualHit = manualSkill != nil
 	pinned, autoActivated, filePaths := cli.resolveSkillsForTurn(userInput, additionalContext)
 	out.pinnedHit = len(pinned)
 	out.autoHit = len(autoActivated)
 	out.filePaths = filePaths
-	out.parts = append(out.parts, skillContentBlocks(pinned, autoActivated)...)
-
 	out.modelHint, out.effort = cli.pickSkillHints(pinned, autoActivated, filePaths)
-
 	if manualSkill != nil {
 		applyManualSkillHints(manualSkill, &out.modelHint, &out.effort)
 	}
 
-	if part, ok := cli.mcpChannelPart(); ok {
+	// ── Stable cached prefix ──
+	out.parts = append(out.parts, modeAndLanguagePart())         // Part 0
+	out.parts = append(out.parts, cli.attachedContextParts()...) // Part 1
+	if block, ok := pinnedSkillBlock(pinned); ok {               // Part 2
+		out.parts = append(out.parts, block)
+	}
+	if part, ok := cli.mcpToolsPart(); ok { // Part 3
 		out.parts = append(out.parts, part)
 	}
-	if part, ok := cli.mcpToolsPart(); ok {
+
+	// ── Volatile suffix (no cache hints) ──
+	if part, ok := cli.workspaceContextPart(ctx, userInput); ok { // Part 4
 		out.parts = append(out.parts, part)
 	}
-	if part, ok := cli.watcherContextPart(); ok {
+	if manualSkill != nil { // Part 5
+		if block := renderManualSkillBlock(manualSkill, manualSkillArgs); block != "" {
+			out.parts = append(out.parts, models.ContentBlock{Type: "text", Text: block})
+		}
+	}
+	if block, ok := autoSkillBlock(autoActivated); ok { // Part 6
+		out.parts = append(out.parts, block)
+	}
+	if part, ok := cli.mcpChannelPart(); ok { // Part 7
+		out.parts = append(out.parts, part)
+	}
+	if part, ok := cli.watcherContextPart(); ok { // Part 8
+		out.parts = append(out.parts, part)
+	}
+	if part, ok := cli.dynamicContextPart(); ok { // Part 9
 		out.parts = append(out.parts, part)
 	}
 	return out
@@ -132,9 +151,17 @@ func modeAndLanguagePart() models.ContentBlock {
 	}
 }
 
-// workspaceContextPart builds Part 1 — bootstrap files plus the smart-memory
-// retrieval block. Returns (zero, false) when there is no workspace context
-// to inject (e.g. on a fresh repo with no SOUL.md / MEMORY.md).
+// workspaceContextPart builds the bootstrap-files-plus-smart-memory block.
+// Returns (zero, false) when there is no workspace context to inject (e.g. on
+// a fresh repo with no SOUL.md / MEMORY.md).
+//
+// VOLATILE: memory retrieval is hint-driven (recentHistoryHints changes every
+// turn), so this block's text varies turn to turn. It therefore carries NO
+// cache hint and lives in the volatile suffix — caching it would force a
+// cache-creation write each turn while never earning a read, and (worse) would
+// poison any cached block placed after it. The wall-clock timestamp that used
+// to be appended here now lives in its own trailing block (dynamicContextPart)
+// so it can't bust the prefix cache.
 func (cli *ChatCLI) workspaceContextPart(ctx context.Context, userInput string) (models.ContentBlock, bool) {
 	if cli.contextBuilder == nil {
 		return models.ContentBlock{}, false
@@ -144,14 +171,23 @@ func (cli *ChatCLI) workspaceContextPart(ctx context.Context, userInput string) 
 	if wsCtx == "" {
 		return models.ContentBlock{}, false
 	}
-	if dyn := cli.contextBuilder.BuildDynamicContext(); dyn != "" {
-		wsCtx += "\n\n" + dyn
+	return models.ContentBlock{Type: "text", Text: wsCtx}, true
+}
+
+// dynamicContextPart emits the time-sensitive context (current wall-clock time
+// plus the cwd disambiguation directive). It is the single most volatile block
+// — the timestamp changes on every turn by definition — so it is appended last
+// and never carries a cache hint. Keeping it out of every cached block is what
+// lets the stable prefix above produce warm-cache reads.
+func (cli *ChatCLI) dynamicContextPart() (models.ContentBlock, bool) {
+	if cli.contextBuilder == nil {
+		return models.ContentBlock{}, false
 	}
-	return models.ContentBlock{
-		Type:         "text",
-		Text:         wsCtx,
-		CacheControl: &models.CacheControl{Type: "ephemeral"},
-	}, true
+	dyn := cli.contextBuilder.BuildDynamicContext()
+	if dyn == "" {
+		return models.ContentBlock{}, false
+	}
+	return models.ContentBlock{Type: "text", Text: dyn}, true
 }
 
 // retrieveWorkspaceContext selects between the HyDE-aware retriever (when
@@ -249,26 +285,38 @@ func (cli *ChatCLI) resolveSkillsForTurn(
 	return pinned, autoActivated, filePaths
 }
 
-// skillContentBlocks emits the pinned-skills block (cache-friendly, stable)
-// followed by the auto-activated block (volatile, no cache hint). Either may
-// be omitted when its source slice is empty.
-func skillContentBlocks(pinned, autoActivated []*persona.Skill) []models.ContentBlock {
-	var blocks []models.ContentBlock
-	if len(pinned) > 0 {
-		if block := buildPinnedSkillInjectionBlock(pinned); block != "" {
-			blocks = append(blocks, models.ContentBlock{
-				Type:         "text",
-				Text:         block,
-				CacheControl: &models.CacheControl{Type: "ephemeral"},
-			})
-		}
+// pinnedSkillBlock renders the pinned-skills (`/skill pin`) block. Pinned
+// skills are stable across turns within a session, so the block lives in the
+// cached prefix and carries a cache_control:ephemeral hint. Returns ok=false
+// when there are no pinned skills (or they render empty).
+func pinnedSkillBlock(pinned []*persona.Skill) (models.ContentBlock, bool) {
+	if len(pinned) == 0 {
+		return models.ContentBlock{}, false
 	}
-	if len(autoActivated) > 0 {
-		if block := buildSkillInjectionBlock(autoActivated); block != "" {
-			blocks = append(blocks, models.ContentBlock{Type: "text", Text: block})
-		}
+	block := buildPinnedSkillInjectionBlock(pinned)
+	if block == "" {
+		return models.ContentBlock{}, false
 	}
-	return blocks
+	return models.ContentBlock{
+		Type:         "text",
+		Text:         block,
+		CacheControl: &models.CacheControl{Type: "ephemeral"},
+	}, true
+}
+
+// autoSkillBlock renders the auto-activated skills (triggers + path globs)
+// block. Auto-activation is query-driven, so the block is volatile: it carries
+// NO cache hint and belongs in the volatile suffix. Returns ok=false when no
+// skills auto-activated (or they render empty).
+func autoSkillBlock(autoActivated []*persona.Skill) (models.ContentBlock, bool) {
+	if len(autoActivated) == 0 {
+		return models.ContentBlock{}, false
+	}
+	block := buildSkillInjectionBlock(autoActivated)
+	if block == "" {
+		return models.ContentBlock{}, false
+	}
+	return models.ContentBlock{Type: "text", Text: block}, true
 }
 
 // pickSkillHints resolves model/effort hints across pinned + auto-activated
@@ -353,7 +401,13 @@ func (cli *ChatCLI) mcpToolsPart() (models.ContentBlock, bool) {
 	for _, t := range mcpTools {
 		fmt.Fprintf(&b, "- **%s**: %s\n", t.Function.Name, t.Function.Description)
 	}
-	return models.ContentBlock{Type: "text", Text: b.String()}, true
+	// Stable across a session (the catalog changes only on connect/disconnect),
+	// so it sits in the cached prefix and carries a cache hint.
+	return models.ContentBlock{
+		Type:         "text",
+		Text:         b.String(),
+		CacheControl: &models.CacheControl{Type: "ephemeral"},
+	}, true
 }
 
 // watcherContextPart returns the K8s watcher snapshot when an active watcher
