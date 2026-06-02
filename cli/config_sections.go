@@ -110,6 +110,8 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 		}
 	case "quality":
 		cli.showConfigQuality()
+	case "memory", "mem":
+		cli.showConfigMemory()
 	case "scheduler", "schedule":
 		cli.showConfigScheduler()
 	case "server":
@@ -791,6 +793,7 @@ func (cli *ChatCLI) showConfigSession() {
 	fmt.Println(p)
 	subheader(p, "cfg.sub.session.memory")
 	kv(p, "CHATCLI_MEMORY_ENABLED", envBool("CHATCLI_MEMORY_ENABLED"))
+	kv(p, "CHATCLI_MEMORY_MODE", envOr("CHATCLI_MEMORY_MODE"))
 	kv(p, "CHATCLI_BOOTSTRAP_ENABLED", envBool("CHATCLI_BOOTSTRAP_ENABLED"))
 	kv(p, "CHATCLI_BOOTSTRAP_DIR", envOr("CHATCLI_BOOTSTRAP_DIR"))
 	if cli.memoryStore != nil {

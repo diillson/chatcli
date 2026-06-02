@@ -108,6 +108,12 @@ func (ms *MemoryStore) GetRelevantContext(hints []string) string {
 	return ms.sanitizeForPrompt(ms.manager.GetRelevantContext(hints))
 }
 
+// GetMemoryIndex returns the compact, stable memory digest. See
+// memory.Manager.GetMemoryIndex.
+func (ms *MemoryStore) GetMemoryIndex(budget int) string {
+	return ms.sanitizeForPrompt(ms.manager.GetMemoryIndex(budget))
+}
+
 // GetRelevantContextWithHyDE delegates to the manager's HyDE-aware
 // retrieval. See memory.Manager.GetRelevantContextWithHyDE.
 func (ms *MemoryStore) GetRelevantContextWithHyDE(ctx context.Context, query string, hints []string, augmenter *memory.HyDEAugmenter) string {

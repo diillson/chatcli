@@ -5,7 +5,8 @@
  *
  * Targets the pure / near-pure helpers extracted out of processLLMRequest:
  *   - applyManualSkillHints   (manual > pinned > auto precedence)
- *   - skillContentBlocks      (pinned block before auto block, cache hint)
+ *   - pinnedSkillBlock        (stable block, ephemeral cache hint)
+ *   - autoSkillBlock          (volatile block, no cache hint)
  *   - dedupAutoAgainstPinned  (no duplicate skill injection)
  *   - buildPinnedSkillInjectionBlock (header + per-skill rendering)
  *   - combinedSystemMessage   (flattening for non-Anthropic providers)
@@ -78,57 +79,47 @@ func TestApplyManualSkillHints_OverridesOnlyDefinedFields(t *testing.T) {
 	}
 }
 
-func TestSkillContentBlocks_EmptyInputs(t *testing.T) {
-	if got := skillContentBlocks(nil, nil); len(got) != 0 {
-		t.Fatalf("both nil → no blocks; got %d", len(got))
+func TestPinnedSkillBlock_EmptyInput(t *testing.T) {
+	if _, ok := pinnedSkillBlock(nil); ok {
+		t.Fatal("nil pinned → ok=false")
 	}
 }
 
-func TestSkillContentBlocks_PinnedFirstWithCache(t *testing.T) {
+func TestPinnedSkillBlock_CachedHint(t *testing.T) {
 	pinned := []*persona.Skill{
 		{Name: "pinA", Description: "p", Content: "pinned body"},
 	}
-	auto := []*persona.Skill{
-		{Name: "autoB", Description: "a", Content: "auto body"},
+	block, ok := pinnedSkillBlock(pinned)
+	if !ok {
+		t.Fatal("pinned skills → ok=true")
 	}
-	blocks := skillContentBlocks(pinned, auto)
-	if len(blocks) != 2 {
-		t.Fatalf("len blocks = %d, want 2", len(blocks))
+	if !strings.Contains(block.Text, "# Pinned Skills") {
+		t.Errorf("missing pinned header; text was: %s", block.Text[:40])
 	}
-	if !strings.Contains(blocks[0].Text, "# Pinned Skills") {
-		t.Errorf("pinned block must come first; first text was: %s", blocks[0].Text[:40])
-	}
-	if blocks[0].CacheControl == nil || blocks[0].CacheControl.Type != "ephemeral" {
+	// Pinned skills are stable → must carry a cache hint so they cache.
+	if block.CacheControl == nil || block.CacheControl.Type != "ephemeral" {
 		t.Errorf("pinned block missing cache_control:ephemeral hint")
 	}
-	if !strings.Contains(blocks[1].Text, "# Auto-loaded Skills") {
-		t.Errorf("auto block expected second; got: %s", blocks[1].Text[:40])
-	}
-	// Auto block intentionally has no cache hint — it changes per turn.
-	if blocks[1].CacheControl != nil {
-		t.Errorf("auto block should NOT carry a cache hint")
+}
+
+func TestAutoSkillBlock_EmptyInput(t *testing.T) {
+	if _, ok := autoSkillBlock(nil); ok {
+		t.Fatal("nil auto → ok=false")
 	}
 }
 
-func TestSkillContentBlocks_OnlyPinned(t *testing.T) {
-	pinned := []*persona.Skill{{Name: "p1", Description: "d", Content: "c"}}
-	blocks := skillContentBlocks(pinned, nil)
-	if len(blocks) != 1 {
-		t.Fatalf("len = %d, want 1", len(blocks))
-	}
-	if !strings.Contains(blocks[0].Text, "# Pinned Skills") {
-		t.Errorf("expected pinned-only block")
-	}
-}
-
-func TestSkillContentBlocks_OnlyAuto(t *testing.T) {
+func TestAutoSkillBlock_Uncached(t *testing.T) {
 	auto := []*persona.Skill{{Name: "a1", Description: "d", Content: "c"}}
-	blocks := skillContentBlocks(nil, auto)
-	if len(blocks) != 1 {
-		t.Fatalf("len = %d, want 1", len(blocks))
+	block, ok := autoSkillBlock(auto)
+	if !ok {
+		t.Fatal("auto skills → ok=true")
 	}
-	if !strings.Contains(blocks[0].Text, "# Auto-loaded Skills") {
-		t.Errorf("expected auto-only block")
+	if !strings.Contains(block.Text, "# Auto-loaded Skills") {
+		t.Errorf("expected auto-loaded header; got: %s", block.Text[:40])
+	}
+	// Auto-activation is query-driven (volatile) → no cache hint.
+	if block.CacheControl != nil {
+		t.Errorf("auto block should NOT carry a cache hint")
 	}
 }
 

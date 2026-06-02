@@ -17,9 +17,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/diillson/chatcli/cli/agent/quality"
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/i18n"
 )
 
@@ -73,18 +77,44 @@ func (a *memoryPluginAdapter) Forget(match string) (string, error) {
 	return i18n.T("mem.tool.forget.result", n), nil
 }
 
+// Recall is the on-demand (pull) retrieval primitive behind `@memory recall`.
+// It mirrors the quality of the per-turn push retrieval rather than the old
+// naive whitespace split: keywords come from ExtractKeywords (stop-word
+// filtered), and when HyDE is enabled in /config quality the query is widened
+// through the same hypothesis + vector-cosine stack the system-prompt path
+// uses. An empty query falls back to the broad memory context.
 func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 	if a.cli.memoryStore == nil {
 		return "", fmt.Errorf("memory not enabled")
 	}
-	var ctx string
-	if q := strings.TrimSpace(query); q != "" {
-		ctx = a.cli.memoryStore.GetRelevantContext(strings.Fields(q))
-	} else {
-		ctx = a.cli.memoryStore.GetMemoryContext()
+
+	// @memory recall has no caller deadline of its own, so bound the optional
+	// HyDE hypothesis + embedding round-trips here.
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	q := strings.TrimSpace(query)
+	var out string
+	switch {
+	case q == "":
+		out = a.cli.memoryStore.GetMemoryContext()
+	default:
+		hints := memory.ExtractKeywords([]string{q})
+		if len(hints) == 0 {
+			// Very short / all-stop-word queries yield no keywords; fall
+			// back to the raw fields so recall still narrows by something.
+			hints = strings.Fields(q)
+		}
+		if qcfg := quality.LoadFromEnv(); qcfg.Enabled && qcfg.HyDE.Enabled {
+			a.cli.ensureHyDEVectors(qcfg)
+			out = a.cli.memoryStore.GetRelevantContextWithHyDE(ctx, q, hints, a.cli.hydeAugmenter(qcfg))
+		} else {
+			out = a.cli.memoryStore.GetRelevantContext(hints)
+		}
 	}
-	if strings.TrimSpace(ctx) == "" {
+
+	if strings.TrimSpace(out) == "" {
 		return i18n.T("mem.tool.recall.empty"), nil
 	}
-	return ctx, nil
+	return out, nil
 }

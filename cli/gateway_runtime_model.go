@@ -97,6 +97,12 @@ func (cli *ChatCLI) refreshGatewayModel() {
 	if s.Provider == cli.Provider && s.Model == cli.Model {
 		return
 	}
+	// No manager wired (e.g. a bare ChatCLI before LLM setup, or under unit
+	// tests) means there is nothing to rebuild the client with — keep the
+	// current model rather than panicking on a nil dereference.
+	if cli.manager == nil {
+		return
+	}
 	client, err := cli.manager.GetClient(s.Provider, s.Model)
 	if err != nil {
 		cli.logger.Warn("gateway: could not adopt runtime model; keeping current",

@@ -40,6 +40,8 @@ type MemoryAdapter interface {
 	// Forget removes facts whose content matches the substring.
 	Forget(match string) (string, error)
 	// Recall returns relevant stored memory (profile + facts) for query.
+	// The implementation may run HyDE/embedding round-trips to widen recall
+	// semantically; it bounds those internally.
 	Recall(query string) (string, error)
 }
 
