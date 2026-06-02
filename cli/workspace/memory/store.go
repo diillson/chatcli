@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"go.uber.org/zap"
@@ -84,6 +85,120 @@ func (m *Manager) GetMemoryContext() string {
 // GetRelevantContext returns memory context tailored to conversation hints.
 func (m *Manager) GetRelevantContext(hints []string) string {
 	return m.retriever.Retrieve(hints)
+}
+
+// GetMemoryIndex returns a COMPACT, STABLE digest of what memory knows: a
+// one-line user-profile summary, the names of the top topics and active
+// projects, and a fact tally by category. Unlike GetRelevantContext it is
+// NOT hint-driven, so its text is stable across turns and bounded in size
+// regardless of how large memory grows — the "map" half of the pull model.
+// The agent reads this to learn what exists, then pulls detail on demand via
+// the @memory recall tool.
+//
+// budget caps the returned size in characters (<=0 applies a default). The
+// digest degrades gracefully: empty sections are omitted, and an entirely
+// empty memory yields "".
+func (m *Manager) GetMemoryIndex(budget int) string {
+	if budget <= 0 {
+		budget = 600
+	}
+
+	var lines []string
+	if m.Profile != nil {
+		if s := profileOneLine(m.Profile.Get()); s != "" {
+			lines = append(lines, "Profile: "+s)
+		}
+	}
+	if m.Projects != nil {
+		var names []string
+		for _, p := range m.Projects.GetActive() {
+			if n := strings.TrimSpace(p.Name); n != "" {
+				names = append(names, n)
+			}
+		}
+		if len(names) > 0 {
+			lines = append(lines, "Projects: "+strings.Join(capStrings(names, 6), ", "))
+		}
+	}
+	if m.Topics != nil {
+		var names []string
+		for _, t := range m.Topics.GetTopTopics(8) {
+			if n := strings.TrimSpace(t.Name); n != "" {
+				names = append(names, n)
+			}
+		}
+		if len(names) > 0 {
+			lines = append(lines, "Topics: "+strings.Join(names, ", "))
+		}
+	}
+	if m.Facts != nil {
+		if all := m.Facts.GetAll(); len(all) > 0 {
+			lines = append(lines, "Facts: "+factTally(all))
+		}
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	out := "# Memory Index\n" + strings.Join(lines, "\n")
+	if r := []rune(out); len(r) > budget {
+		out = string(r[:budget])
+	}
+	return out
+}
+
+// profileOneLine renders the most identifying profile attributes as a single
+// compact line, omitting whatever is unset.
+func profileOneLine(p UserProfile) string {
+	var parts []string
+	name := strings.TrimSpace(p.Name)
+	role := strings.TrimSpace(p.Role)
+	switch {
+	case name != "" && role != "":
+		parts = append(parts, name+", "+role)
+	case name != "":
+		parts = append(parts, name)
+	case role != "":
+		parts = append(parts, role)
+	}
+	if exp := strings.TrimSpace(p.ExpertiseLevel); exp != "" {
+		parts = append(parts, "("+exp+")")
+	}
+	if co := strings.TrimSpace(p.Company); co != "" {
+		parts = append(parts, "@ "+co)
+	}
+	return strings.Join(parts, " ")
+}
+
+// factTally summarizes facts as "N stored (cat count, cat count, ...)" with
+// categories ordered by descending count.
+func factTally(facts []*Fact) string {
+	counts := map[string]int{}
+	var order []string
+	for _, f := range facts {
+		c := strings.TrimSpace(f.Category)
+		if c == "" {
+			c = "general"
+		}
+		if _, seen := counts[c]; !seen {
+			order = append(order, c)
+		}
+		counts[c]++
+	}
+	sort.SliceStable(order, func(i, j int) bool { return counts[order[i]] > counts[order[j]] })
+	parts := make([]string, 0, len(order))
+	for _, c := range order {
+		parts = append(parts, fmt.Sprintf("%s %d", c, counts[c]))
+	}
+	return fmt.Sprintf("%d stored (%s)", len(facts), strings.Join(parts, ", "))
+}
+
+// capStrings returns at most n elements of xs.
+func capStrings(xs []string, n int) []string {
+	if len(xs) <= n {
+		return xs
+	}
+	return xs[:n]
 }
 
 // GetRelevantContextWithHyDE runs the full HyDE retrieval (Phase 3a +

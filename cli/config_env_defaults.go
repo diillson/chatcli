@@ -156,6 +156,7 @@ var envDefaults = map[string]envDefault{
 
 	// ─── Memory / bootstrap ──────────────────────────────────────
 	"CHATCLI_MEMORY_ENABLED":    {Value: "true", IsBool: true, Source: "memory.go"},
+	"CHATCLI_MEMORY_MODE":       {Value: "index", Source: "memory_mode.go"},
 	"CHATCLI_BOOTSTRAP_ENABLED": {Value: "true", IsBool: true, Source: "bootstrap.go"},
 
 	// ─── Integrations ────────────────────────────────────────────

@@ -190,15 +190,23 @@ func (cli *ChatCLI) dynamicContextPart() (models.ContentBlock, bool) {
 	return models.ContentBlock{Type: "text", Text: dyn}, true
 }
 
-// retrieveWorkspaceContext selects between the HyDE-aware retriever (when
-// /config quality has HyDE enabled) and the plain bootstrap-prefix builder.
-// The non-HyDE branch matches the historical byte-for-byte behavior for
-// users who never opt in.
+// retrieveWorkspaceContext assembles the workspace context for a chat turn,
+// honoring the memory injection mode. Chat is tool-less by design, so it
+// cannot pull on demand: "index" degrades to "full" here, and only "off"
+// suppresses memory (bootstrap files still apply). HyDE augmentation is wired
+// when /config quality has it enabled, matching the historical behavior for
+// users on the default "full" mode.
 func (cli *ChatCLI) retrieveWorkspaceContext(ctx context.Context, userInput string, hints []string) string {
-	if qcfg := quality.LoadFromEnv(); qcfg.HyDE.Enabled && qcfg.Enabled {
-		return cli.hydeRetrieveContext(ctx, userInput, hints, qcfg)
+	mode := loadMemoryMode()
+	if mode == memModeIndex {
+		mode = memModeFull // chat cannot recall; fall back to the push model
 	}
-	return cli.contextBuilder.BuildSystemPromptPrefixWithHints(hints)
+	var aug *memory.HyDEAugmenter
+	if qcfg := quality.LoadFromEnv(); qcfg.HyDE.Enabled && qcfg.Enabled {
+		cli.ensureHyDEVectors(qcfg)
+		aug = cli.hydeAugmenter(qcfg)
+	}
+	return cli.contextBuilder.BuildWorkspaceContextMode(ctx, userInput, hints, aug, mode, "")
 }
 
 // recentHistoryHints returns up to three keyword hints extracted from the

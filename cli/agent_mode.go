@@ -723,15 +723,21 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 			}
 			hints = memory.ExtractKeywords(recentTexts)
 		}
-		var wsCtx string
+		// Memory injection mode: "index" (pull) keeps the per-turn payload
+		// bounded — a small stable digest plus the recall directive — while
+		// "full" (push) injects the whole hint-driven retrieval. Agent/coder
+		// can pull, so they honor the configured mode directly.
+		mode := loadMemoryMode()
+		var aug *memory.HyDEAugmenter
 		if a.qualityConfig.HyDE.Enabled && a.qualityConfig.Enabled {
-			wsCtx = a.cli.hydeRetrieveContext(ctx, query, hints, a.qualityConfig)
-		} else {
-			wsCtx = a.cli.contextBuilder.BuildSystemPromptPrefixWithHints(hints)
+			a.cli.ensureHyDEVectors(a.qualityConfig)
+			aug = a.cli.hydeAugmenter(a.qualityConfig)
 		}
-		if wsCtx != "" {
-			workspaceText = wsCtx
+		recallHint := ""
+		if mode == memModeIndex {
+			recallHint = memoryRecallHint
 		}
+		workspaceText = a.cli.contextBuilder.BuildWorkspaceContextMode(ctx, query, hints, aug, mode, recallHint)
 		dynamicText = a.cli.contextBuilder.BuildDynamicContext()
 	}
 

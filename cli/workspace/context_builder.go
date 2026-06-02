@@ -180,6 +180,70 @@ func (cb *ContextBuilder) BuildSystemPromptPrefixWithHints(hints []string) strin
 	return content
 }
 
+// BuildWorkspaceContextMode assembles the workspace context (bootstrap files
+// + memory + path rules) honoring a memory injection mode:
+//
+//	"full"  — hint-driven full memory retrieval (default; the push model)
+//	"index" — only the compact, stable memory index, paired with recallHint
+//	          so the agent knows to pull detail via the @memory recall tool
+//	"off"   — no memory at all (bootstrap + rules still injected)
+//
+// Bootstrap files and path rules are emitted in every mode; only the memory
+// portion changes. "full" reuses the existing retrieval methods verbatim so
+// that path stays byte-for-byte unchanged. recallHint (may be "") is appended
+// after the index in "index" mode only.
+func (cb *ContextBuilder) BuildWorkspaceContextMode(
+	ctx context.Context, query string, hints []string,
+	augmenter *memory.HyDEAugmenter, mode string, recallHint string,
+) string {
+	if mode == "" || mode == "full" {
+		if augmenter != nil || (cb.memory != nil && cb.memory.VectorIndex() != nil) {
+			return cb.BuildSystemPromptPrefixWithHyDE(ctx, query, hints, augmenter)
+		}
+		return cb.BuildSystemPromptPrefixWithHints(hints)
+	}
+
+	var parts []string
+	if bc := cb.bootstrap.LoadBootstrapContent(); bc != "" {
+		parts = append(parts, bc)
+	}
+	if mode == "index" && cb.memory != nil {
+		if idx := cb.memory.GetMemoryIndex(0); idx != "" {
+			block := idx
+			if strings.TrimSpace(recallHint) != "" {
+				block += "\n\n" + recallHint
+			}
+			parts = append(parts, block)
+		}
+	}
+	parts = appendMatchingRules(cb.rules, hints, parts)
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n\n---\n\n")
+}
+
+// appendMatchingRules appends path-specific rules for any file-like hints,
+// mirroring the rule-loading logic shared by the prefix builders.
+func appendMatchingRules(rules *RulesLoader, hints []string, parts []string) []string {
+	if rules == nil || len(hints) == 0 {
+		return parts
+	}
+	var pathHints []string
+	for _, h := range hints {
+		if strings.Contains(h, ".") || strings.Contains(h, "/") {
+			pathHints = append(pathHints, h)
+		}
+	}
+	if len(pathHints) == 0 {
+		return parts
+	}
+	if rc := rules.LoadMatchingRules(pathHints); rc != "" {
+		parts = append(parts, rc)
+	}
+	return parts
+}
+
 // BuildDynamicContext returns time-sensitive and session-aware context.
 // Includes current time, working directory, and disambiguation instructions
 // so the model never confuses paths from long-term memory with the current session.
