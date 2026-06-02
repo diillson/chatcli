@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -82,10 +83,15 @@ func (a *memoryPluginAdapter) Forget(match string) (string, error) {
 // filtered), and when HyDE is enabled in /config quality the query is widened
 // through the same hypothesis + vector-cosine stack the system-prompt path
 // uses. An empty query falls back to the broad memory context.
-func (a *memoryPluginAdapter) Recall(ctx context.Context, query string) (string, error) {
+func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 	if a.cli.memoryStore == nil {
 		return "", fmt.Errorf("memory not enabled")
 	}
+
+	// @memory recall has no caller deadline of its own, so bound the optional
+	// HyDE hypothesis + embedding round-trips here.
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
 
 	q := strings.TrimSpace(query)
 	var out string

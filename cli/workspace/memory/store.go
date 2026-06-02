@@ -116,19 +116,32 @@ func (m *Manager) GetMemoryIndex(budget int) string {
 				names = append(names, n)
 			}
 		}
+		// Sort deterministically: GetActive orders by LastActive, whose ties
+		// are not stable across calls. The digest must be byte-identical turn
+		// to turn to stay cache-friendly, so fold to alphabetical order.
+		sort.Strings(names)
 		if len(names) > 0 {
 			lines = append(lines, "Projects: "+strings.Join(capStrings(names, 6), ", "))
 		}
 	}
 	if m.Topics != nil {
+		topics := m.Topics.GetAll()
+		// Rank by mention count, breaking ties alphabetically so the order is
+		// deterministic regardless of map-iteration order in the tracker.
+		sort.SliceStable(topics, func(i, j int) bool {
+			if topics[i].Mentions != topics[j].Mentions {
+				return topics[i].Mentions > topics[j].Mentions
+			}
+			return topics[i].Name < topics[j].Name
+		})
 		var names []string
-		for _, t := range m.Topics.GetTopTopics(8) {
+		for _, t := range topics {
 			if n := strings.TrimSpace(t.Name); n != "" {
 				names = append(names, n)
 			}
 		}
 		if len(names) > 0 {
-			lines = append(lines, "Topics: "+strings.Join(names, ", "))
+			lines = append(lines, "Topics: "+strings.Join(capStrings(names, 8), ", "))
 		}
 	}
 	if m.Facts != nil {
@@ -185,7 +198,12 @@ func factTally(facts []*Fact) string {
 		}
 		counts[c]++
 	}
-	sort.SliceStable(order, func(i, j int) bool { return counts[order[i]] > counts[order[j]] })
+	sort.SliceStable(order, func(i, j int) bool {
+		if counts[order[i]] != counts[order[j]] {
+			return counts[order[i]] > counts[order[j]]
+		}
+		return order[i] < order[j] // alphabetical tie-break for determinism
+	})
 	parts := make([]string, 0, len(order))
 	for _, c := range order {
 		parts = append(parts, fmt.Sprintf("%s %d", c, counts[c]))
