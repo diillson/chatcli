@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,6 +71,11 @@ type webhookInbound struct {
 	ChatID string `json:"chat_id"`
 	UserID string `json:"user_id"`
 	Text   string `json:"text"`
+	// Optional audio: inline base64 (audio_b64, decoded here) or a URL
+	// (audio_url, fetched by the adapter). audio_mime is best-effort.
+	AudioB64  string `json:"audio_b64"`
+	AudioURL  string `json:"audio_url"`
+	AudioMime string `json:"audio_mime"`
 }
 
 // inboundHandler builds the HTTP handler. Extracted from Start so it can be
@@ -84,9 +90,14 @@ func (w *WebhookAdapter) inboundHandler(ctx context.Context, inbound chan<- Inbo
 			rw.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		body, _ := io.ReadAll(io.LimitReader(r.Body, maxAudioBytes()+(1<<20)))
 		msg, ok := parseWebhookInbound(body)
 		if !ok {
+			rw.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.hydrateAudio(ctx, &msg)
+		if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil {
 			rw.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -160,13 +171,31 @@ func (w *WebhookAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	return nil
 }
 
-// parseWebhookInbound validates and normalizes an inbound payload.
+// parseWebhookInbound validates and normalizes an inbound payload. Inline
+// base64 audio is decoded here (no network); an audio_url is recorded for the
+// adapter to fetch. A payload is valid with text, inline audio, or an audio URL.
 func parseWebhookInbound(body []byte) (InboundMessage, bool) {
 	var in webhookInbound
 	if err := json.Unmarshal(body, &in); err != nil {
 		return InboundMessage{}, false
 	}
-	if strings.TrimSpace(in.ChatID) == "" || strings.TrimSpace(in.Text) == "" {
+	if strings.TrimSpace(in.ChatID) == "" {
+		return InboundMessage{}, false
+	}
+
+	var audio *InboundAudio
+	switch {
+	case strings.TrimSpace(in.AudioB64) != "":
+		data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(in.AudioB64))
+		if err != nil || len(data) == 0 {
+			return InboundMessage{}, false
+		}
+		audio = &InboundAudio{Data: data, MimeType: in.AudioMime}
+	case strings.TrimSpace(in.AudioURL) != "":
+		audio = &InboundAudio{ref: strings.TrimSpace(in.AudioURL), MimeType: in.AudioMime}
+	}
+
+	if strings.TrimSpace(in.Text) == "" && audio == nil {
 		return InboundMessage{}, false
 	}
 	return InboundMessage{
@@ -174,7 +203,27 @@ func parseWebhookInbound(body []byte) (InboundMessage, bool) {
 		ChatID:   in.ChatID,
 		UserID:   in.UserID,
 		Text:     in.Text,
+		Audio:    audio,
 	}, true
+}
+
+// hydrateAudio fetches an audio_url attachment (no auth — the caller owns the
+// URL). Inline base64 audio already has Data and is left untouched. On failure
+// it clears Audio so the message is dropped downstream.
+func (w *WebhookAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) {
+	if msg.Audio == nil || len(msg.Audio.Data) > 0 {
+		return
+	}
+	data, mime, err := fetchAudioBytes(ctx, w.http, msg.Audio.ref, "", maxAudioBytes())
+	if err != nil {
+		w.logger.Warn("gateway/webhook: audio download failed", zap.String("user", msg.UserID), zap.Error(err))
+		msg.Audio = nil
+		return
+	}
+	msg.Audio.Data = data
+	if msg.Audio.MimeType == "" {
+		msg.Audio.MimeType = mime
+	}
 }
 
 func init() {

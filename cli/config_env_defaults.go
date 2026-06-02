@@ -159,6 +159,12 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MEMORY_MODE":       {Value: "index", Source: "memory_mode.go"},
 	"CHATCLI_BOOTSTRAP_ENABLED": {Value: "true", IsBool: true, Source: "bootstrap.go"},
 
+	// ─── Gateway: voice transcription ────────────────────────────
+	"CHATCLI_TRANSCRIPTION_PROVIDER":  {Value: "auto", Source: "transcription.NewFromEnv"},
+	"CHATCLI_TRANSCRIPTION_MODEL":     {Value: "whisper-1", Source: "transcription.defaultModel"},
+	"CHATCLI_TRANSCRIPTION_LANG":      {Value: "(auto)", Source: "transcription.NewFromEnv"},
+	"CHATCLI_GATEWAY_MAX_AUDIO_BYTES": {Value: "20971520", Source: "gateway.defaultMaxAudioBytes"},
+
 	// ─── Integrations ────────────────────────────────────────────
 	"CHATCLI_MCP_ENABLED":            {Value: "false", IsBool: true, Source: "mcp manager"},
 	"CHATCLI_ALLOW_UNSIGNED_PLUGINS": {Value: "false", IsBool: true, Source: "plugin manager"},

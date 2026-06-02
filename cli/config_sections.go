@@ -42,6 +42,7 @@ import (
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/transcription"
 )
 
 // ─── Routing ───────────────────────────────────────────────────
@@ -917,6 +918,18 @@ func (cli *ChatCLI) showConfigIntegrations() {
 		chainNames = append(chainNames, string(n))
 	}
 	kv(p, i18n.T("cfg.kv.active_chain"), strings.Join(chainNames, " → "))
+
+	fmt.Println(p)
+	subheader(p, "cfg.sub.integ.gateway_voice")
+	voiceStatus := i18n.T("cfg.val.transcription_off")
+	if t := transcription.NewFromEnv(cli.logger); !transcription.IsNull(t) {
+		voiceStatus = t.Name()
+	}
+	kv(p, i18n.T("cfg.kv.transcription"), voiceStatus)
+	kv(p, "CHATCLI_TRANSCRIPTION_URL", envOr("CHATCLI_TRANSCRIPTION_URL"))
+	kv(p, "CHATCLI_TRANSCRIPTION_PROVIDER", envOr("CHATCLI_TRANSCRIPTION_PROVIDER"))
+	kv(p, "CHATCLI_TRANSCRIPTION_MODEL", envOr("CHATCLI_TRANSCRIPTION_MODEL"))
+	kv(p, "CHATCLI_GATEWAY_MAX_AUDIO_BYTES", envOr("CHATCLI_GATEWAY_MAX_AUDIO_BYTES"))
 
 	if isGitRepo() {
 		fmt.Println(p)

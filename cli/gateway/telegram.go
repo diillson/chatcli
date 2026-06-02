@@ -135,7 +135,74 @@ func (t *TelegramAdapter) poll(ctx context.Context) ([]InboundMessage, int64, er
 	if resp.StatusCode != http.StatusOK {
 		return nil, 0, fmt.Errorf("telegram getUpdates status %d", resp.StatusCode)
 	}
-	return parseTelegramUpdates(body)
+	msgs, maxID, err := parseTelegramUpdates(body)
+	if err != nil {
+		return nil, 0, err
+	}
+	return t.hydrateAudio(ctx, msgs), maxID, nil
+}
+
+// hydrateAudio downloads the bytes for any voice/audio attachment and drops
+// attachments (or whole messages) that can't be fetched, so a failed download
+// degrades gracefully instead of dispatching an empty audio ref.
+func (t *TelegramAdapter) hydrateAudio(ctx context.Context, msgs []InboundMessage) []InboundMessage {
+	out := msgs[:0]
+	for _, m := range msgs {
+		if m.Audio != nil && len(m.Audio.Data) == 0 {
+			data, mime, err := t.downloadFile(ctx, m.Audio.ref)
+			if err != nil {
+				t.logger.Warn("gateway/telegram: voice download failed",
+					zap.String("user", m.UserID), zap.Error(err))
+				m.Audio = nil
+			} else {
+				m.Audio.Data = data
+				if m.Audio.MimeType == "" {
+					m.Audio.MimeType = mime
+				}
+			}
+		}
+		if strings.TrimSpace(m.Text) == "" && m.Audio == nil {
+			continue // download failed and there was no text — nothing to do
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// downloadFile resolves a Telegram file_id to its bytes: getFile returns the
+// storage path, then the file is fetched from the bot file endpoint.
+func (t *TelegramAdapter) downloadFile(ctx context.Context, fileID string) ([]byte, string, error) {
+	endpoint := fmt.Sprintf("%s/bot%s/getFile?file_id=%s", t.baseURL, t.token, url.QueryEscape(fileID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("telegram getFile status %d", resp.StatusCode)
+	}
+	var gf struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			FilePath string `json:"file_path"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &gf); err != nil {
+		return nil, "", err
+	}
+	if !gf.OK || gf.Result.FilePath == "" {
+		return nil, "", fmt.Errorf("telegram getFile: no file_path")
+	}
+	fileURL := fmt.Sprintf("%s/file/bot%s/%s", t.baseURL, t.token, gf.Result.FilePath)
+	return fetchAudioBytes(ctx, t.http, fileURL, "", maxAudioBytes())
 }
 
 // Send delivers a reply via sendMessage.
@@ -174,10 +241,33 @@ type tgChat struct {
 	ID int64 `json:"id"`
 }
 
+// tgFile is the shared shape of Telegram's voice/audio objects.
+type tgFile struct {
+	FileID   string `json:"file_id"`
+	MimeType string `json:"mime_type"`
+	FileName string `json:"file_name"`
+	FileSize int64  `json:"file_size"`
+}
+
 type tgMessage struct {
-	From *tgUser `json:"from"`
-	Chat *tgChat `json:"chat"`
-	Text string  `json:"text"`
+	From    *tgUser `json:"from"`
+	Chat    *tgChat `json:"chat"`
+	Text    string  `json:"text"`
+	Caption string  `json:"caption"` // text attached to a voice/audio note
+	Voice   *tgFile `json:"voice"`   // voice note (Opus/OGG)
+	Audio   *tgFile `json:"audio"`   // music / audio file
+}
+
+// audioFile returns the voice note or audio file on the message, if any.
+// Voice notes take precedence — they are the common "send a voice message" case.
+func (m *tgMessage) audioFile() *tgFile {
+	if m.Voice != nil && m.Voice.FileID != "" {
+		return m.Voice
+	}
+	if m.Audio != nil && m.Audio.FileID != "" {
+		return m.Audio
+	}
+	return nil
 }
 
 type tgUpdate struct {
@@ -206,7 +296,16 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 		if u.UpdateID > maxID {
 			maxID = u.UpdateID
 		}
-		if u.Message == nil || u.Message.Chat == nil || strings.TrimSpace(u.Message.Text) == "" {
+		if u.Message == nil || u.Message.Chat == nil {
+			continue
+		}
+		af := u.Message.audioFile()
+		text := u.Message.Text
+		if af != nil && strings.TrimSpace(text) == "" {
+			text = u.Message.Caption // a caption on a voice/audio note
+		}
+		// Skip only when there is nothing usable — neither text nor audio.
+		if strings.TrimSpace(text) == "" && af == nil {
 			continue
 		}
 		userID, userName := "", ""
@@ -217,12 +316,17 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 				userName = u.Message.From.FirstName
 			}
 		}
+		var audio *InboundAudio
+		if af != nil {
+			audio = &InboundAudio{ref: af.FileID, MimeType: af.MimeType, FileName: af.FileName}
+		}
 		msgs = append(msgs, InboundMessage{
 			Platform: telegramPlatform,
 			ChatID:   strconv.FormatInt(u.Message.Chat.ID, 10),
 			UserID:   userID,
 			UserName: userName,
-			Text:     u.Message.Text,
+			Text:     text,
+			Audio:    audio,
 		})
 	}
 	return msgs, maxID, nil

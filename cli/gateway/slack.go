@@ -98,6 +98,10 @@ func (s *SlackAdapter) eventsHandler(ctx context.Context, inbound chan<- Inbound
 		}
 		rw.WriteHeader(http.StatusOK) // ack fast; Slack retries on slow/!200
 		if hasMsg {
+			s.hydrateAudio(ctx, &msg)
+			if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil {
+				return // audio download failed and there was no text
+			}
 			select {
 			case inbound <- msg:
 			case <-ctx.Done():
@@ -180,6 +184,11 @@ type slackEventEnvelope struct {
 		Text    string `json:"text"`
 		BotID   string `json:"bot_id"`
 		SubType string `json:"subtype"`
+		Files   []struct {
+			Mimetype   string `json:"mimetype"`
+			URLPrivate string `json:"url_private"`
+			Name       string `json:"name"`
+		} `json:"files"`
 	} `json:"event"`
 }
 
@@ -196,7 +205,21 @@ func parseSlackEvent(body []byte) (challenge string, msg InboundMessage, hasMsg 
 		return env.Challenge, InboundMessage{}, false, nil
 	}
 	e := env.Event
-	if e.Type != "message" || e.BotID != "" || e.SubType != "" || strings.TrimSpace(e.Text) == "" {
+	if e.Type != "message" || e.BotID != "" {
+		return "", InboundMessage{}, false, nil
+	}
+	// A voice memo / audio file arrives as a "file_share" subtype carrying
+	// files[]; pick the first audio file. Its bytes are fetched later.
+	var audio *InboundAudio
+	for _, f := range e.Files {
+		if f.URLPrivate != "" && isAudioMime(f.Mimetype) {
+			audio = &InboundAudio{ref: f.URLPrivate, MimeType: f.Mimetype, FileName: f.Name}
+			break
+		}
+	}
+	// Reject other subtypes (edits, joins, …) and empty messages unless they
+	// carry audio.
+	if audio == nil && (e.SubType != "" || strings.TrimSpace(e.Text) == "") {
 		return "", InboundMessage{}, false, nil
 	}
 	return "", InboundMessage{
@@ -204,7 +227,26 @@ func parseSlackEvent(body []byte) (challenge string, msg InboundMessage, hasMsg 
 		ChatID:   e.Channel,
 		UserID:   e.User,
 		Text:     e.Text,
+		Audio:    audio,
 	}, true, nil
+}
+
+// hydrateAudio downloads a Slack file (url_private requires the bot token as a
+// bearer). On failure it clears Audio so the message is dropped downstream.
+func (s *SlackAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) {
+	if msg.Audio == nil || len(msg.Audio.Data) > 0 {
+		return
+	}
+	data, mime, err := fetchAudioBytes(ctx, s.http, msg.Audio.ref, s.botToken, maxAudioBytes())
+	if err != nil {
+		s.logger.Warn("gateway/slack: voice download failed", zap.String("user", msg.UserID), zap.Error(err))
+		msg.Audio = nil
+		return
+	}
+	msg.Audio.Data = data
+	if msg.Audio.MimeType == "" {
+		msg.Audio.MimeType = mime
+	}
 }
 
 func init() {
