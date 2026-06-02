@@ -3,12 +3,12 @@ module github.com/diillson/chatcli
 go 1.26.3
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.41.7
+	github.com/aws/aws-sdk-go-v2 v1.41.9
 	github.com/aws/aws-sdk-go-v2/config v1.32.18
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.23
 	github.com/aws/aws-sdk-go-v2/service/bedrock v1.61.0
-	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.52.0
-	github.com/aws/smithy-go v1.25.1
+	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.53.1
+	github.com/aws/smithy-go v1.26.0
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/charmbracelet/bubbletea v0.25.0
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc
@@ -47,10 +47,10 @@ require (
 require (
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.11 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.17 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.23 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.23 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.25 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.25 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.24 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.9 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.23 // indirect
