@@ -3,14 +3,14 @@ module github.com/diillson/chatcli
 go 1.26.3
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.41.7
-	github.com/aws/aws-sdk-go-v2/config v1.32.18
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.23
-	github.com/aws/aws-sdk-go-v2/service/bedrock v1.61.0
-	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.52.0
-	github.com/aws/smithy-go v1.25.1
+	github.com/aws/aws-sdk-go-v2 v1.41.9
+	github.com/aws/aws-sdk-go-v2/config v1.32.20
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.25
+	github.com/aws/aws-sdk-go-v2/service/bedrock v1.63.0
+	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.53.1
+	github.com/aws/smithy-go v1.26.0
 	github.com/c-bata/go-prompt v0.2.6
-	github.com/charmbracelet/bubbletea v0.25.0
+	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
@@ -18,7 +18,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/joho/godotenv v1.5.1
-	github.com/mattn/go-runewidth v0.0.23
+	github.com/mattn/go-runewidth v0.0.24
 	github.com/muesli/termenv v0.16.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/refraction-networking/utls v1.8.2
@@ -40,24 +40,24 @@ require (
 	k8s.io/apimachinery v0.36.1
 	k8s.io/client-go v0.36.1
 	k8s.io/metrics v0.36.1
-	modernc.org/sqlite v1.50.1
+	modernc.org/sqlite v1.51.0
 	mvdan.cc/sh/v3 v3.13.1
 )
 
 require (
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.17 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.23 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.23 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.24 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.9 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.23 // indirect
-	github.com/aws/aws-sdk-go-v2/service/signin v1.0.11 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.30.17 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.36.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.42.1 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.11 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.19 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.25 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.25 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.26 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.10 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.25 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.1.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.30.19 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.36.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.42.3 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -67,11 +67,11 @@ require (
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250327172914-2fdc97757edf // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/containerd/console v1.0.4-0.20230313162750-1ae8d489ac81 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
+	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
@@ -91,7 +91,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
-	github.com/muesli/ansi v0.0.0-20211018074035-2e021307bc4b // indirect
+	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
