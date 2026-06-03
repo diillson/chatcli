@@ -99,3 +99,44 @@ func TestFactory_AutoOpenAIFallback(t *testing.T) {
 		t.Fatalf("expected openai fallback, got %s", p.Name())
 	}
 }
+
+func TestFactory_GroqAndURLAndLocalEspeak(t *testing.T) {
+	clearTTSEnv(t)
+	t.Setenv("GROQ_API_KEY", "")
+	// groq pin without key → null
+	t.Setenv("CHATCLI_TTS_PROVIDER", "groq")
+	if !IsNull(NewFromEnv(zap.NewNop())) {
+		t.Fatal("groq pin without key should be Null")
+	}
+	// groq pin with key → openai-compatible (label groq)
+	t.Setenv("GROQ_API_KEY", "g")
+	if NewFromEnv(zap.NewNop()).Name() != "groq" {
+		t.Fatal("expected groq backend")
+	}
+	// url pin without url → null
+	clearTTSEnv(t)
+	t.Setenv("CHATCLI_TTS_PROVIDER", "url")
+	if !IsNull(NewFromEnv(zap.NewNop())) {
+		t.Fatal("url pin without URL should be Null")
+	}
+	// unknown provider → null
+	t.Setenv("CHATCLI_TTS_PROVIDER", "bogus")
+	if !IsNull(NewFromEnv(zap.NewNop())) {
+		t.Fatal("unknown provider should be Null")
+	}
+}
+
+func TestFactory_AutoLocalEspeakAndGroqFallback(t *testing.T) {
+	clearTTSEnv(t)
+	stubLookPath(t, map[string]string{"espeak-ng": "/usr/bin/espeak-ng"})
+	if _, ok := NewFromEnv(zap.NewNop()).(*CommandSynthesizer); !ok {
+		t.Fatal("expected local espeak-ng command backend")
+	}
+	// no local, groq key present → groq cloud fallback
+	clearTTSEnv(t)
+	stubLookPath(t, nil)
+	t.Setenv("GROQ_API_KEY", "g")
+	if NewFromEnv(zap.NewNop()).Name() != "groq" {
+		t.Fatal("expected groq fallback")
+	}
+}

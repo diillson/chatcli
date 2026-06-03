@@ -57,33 +57,7 @@ func (b *Bedrock) Generate(ctx context.Context, prompt string, opts Options) ([]
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("imagegen: empty prompt")
 	}
-	w, h := parseSize(opts.Size)
-	n := opts.N
-	if n <= 0 {
-		n = 1
-	}
-
-	// Nova Canvas / Titan share the TEXT_IMAGE shape; Stability models use a
-	// different request body. The response ({"images":["<b64>"]}) is shared.
-	var body []byte
-	if strings.HasPrefix(strings.ToLower(b.model), "stability.") {
-		body, _ = json.Marshal(map[string]interface{}{
-			"prompt":        prompt,
-			"mode":          "text-to-image",
-			"aspect_ratio":  aspectRatio(w, h),
-			"output_format": "png",
-		})
-	} else {
-		body, _ = json.Marshal(map[string]interface{}{
-			"taskType":          "TEXT_IMAGE",
-			"textToImageParams": map[string]interface{}{"text": prompt},
-			"imageGenerationConfig": map[string]interface{}{
-				"numberOfImages": n,
-				"width":          w,
-				"height":         h,
-			},
-		})
-	}
+	body := buildBedrockRequest(b.model, prompt, opts)
 
 	out, err := b.runtime.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
 		ModelId:     strPtr(b.model),
@@ -95,6 +69,36 @@ func (b *Bedrock) Generate(ctx context.Context, prompt string, opts Options) ([]
 		return nil, fmt.Errorf("imagegen: bedrock InvokeModel: %w", err)
 	}
 	return parseBedrockImages(out.Body)
+}
+
+// buildBedrockRequest builds the InvokeModel body per model family. Nova Canvas
+// and Titan share the TEXT_IMAGE shape; Stability models use a text-to-image
+// shape with an aspect ratio. The {"images":["<b64>"]} response is shared.
+func buildBedrockRequest(model, prompt string, opts Options) []byte {
+	w, h := parseSize(opts.Size)
+	n := opts.N
+	if n <= 0 {
+		n = 1
+	}
+	if strings.HasPrefix(strings.ToLower(model), "stability.") {
+		body, _ := json.Marshal(map[string]interface{}{
+			"prompt":        prompt,
+			"mode":          "text-to-image",
+			"aspect_ratio":  aspectRatio(w, h),
+			"output_format": "png",
+		})
+		return body
+	}
+	body, _ := json.Marshal(map[string]interface{}{
+		"taskType":          "TEXT_IMAGE",
+		"textToImageParams": map[string]interface{}{"text": prompt},
+		"imageGenerationConfig": map[string]interface{}{
+			"numberOfImages": n,
+			"width":          w,
+			"height":         h,
+		},
+	})
+	return body
 }
 
 // parseBedrockImages decodes the {"images":["<b64>"]} response shared by Nova

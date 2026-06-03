@@ -173,3 +173,113 @@ func TestKnownModels_NewIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildBedrockRequest(t *testing.T) {
+	nova := string(buildBedrockRequest("amazon.nova-canvas-v1:0", "a fox", Options{Size: "1024x1024"}))
+	if !strings.Contains(nova, "TEXT_IMAGE") || !strings.Contains(nova, "a fox") {
+		t.Fatalf("nova body wrong: %s", nova)
+	}
+	stab := string(buildBedrockRequest("stability.sd3-5-large-v1:0", "a fox", Options{Size: "1920x1080"}))
+	if !strings.Contains(stab, "text-to-image") || !strings.Contains(stab, "16:9") {
+		t.Fatalf("stability body wrong: %s", stab)
+	}
+}
+
+func TestBedrockEnvHelpers(t *testing.T) {
+	t.Setenv("BEDROCK_REGION", "")
+	t.Setenv("AWS_REGION", "us-west-2")
+	if bedrockImageRegion() != "us-west-2" {
+		t.Fatalf("region = %q", bedrockImageRegion())
+	}
+	t.Setenv("BEDROCK_PROFILE", "myprof")
+	if bedrockImageProfile() != "myprof" {
+		t.Fatalf("profile = %q", bedrockImageProfile())
+	}
+}
+
+func TestFetchOpenAIModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer k" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-image-1"},{"id":"gpt-5.5"},{"id":"text-embedding-3-small"},{"id":"dall-e-3"}]}`))
+	}))
+	defer srv.Close()
+	ids, err := FetchOpenAIModels(context.Background(), srv.URL, "k", zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// embedding filtered out; image-capable kept and sorted
+	joined := strings.Join(ids, ",")
+	if !strings.Contains(joined, "gpt-image-1") || !strings.Contains(joined, "gpt-5.5") || strings.Contains(joined, "embedding") {
+		t.Fatalf("unexpected filtered ids: %v", ids)
+	}
+	// keyless → nil
+	if got, _ := FetchOpenAIModels(context.Background(), srv.URL, "", zap.NewNop()); got != nil {
+		t.Fatalf("keyless should return nil, got %v", got)
+	}
+}
+
+func TestFetchOpenAIModels_ErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("nope"))
+	}))
+	defer srv.Close()
+	if _, err := FetchOpenAIModels(context.Background(), srv.URL, "k", zap.NewNop()); err == nil {
+		t.Fatal("expected error on 403")
+	}
+}
+
+func TestFactory_GoogleAndXaiAutoDetect(t *testing.T) {
+	for _, k := range []string{"CHATCLI_IMAGE_PROVIDER", "CHATCLI_IMAGE_URL", "CHATCLI_IMAGE_API", "OPENAI_API_KEY", "GOOGLEAI_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("GOOGLEAI_API_KEY", "g")
+	if NewFromEnv(zap.NewNop()).Name() != "google" {
+		t.Fatal("expected google auto-detect")
+	}
+	t.Setenv("GOOGLEAI_API_KEY", "")
+	t.Setenv("XAI_API_KEY", "x")
+	if NewFromEnv(zap.NewNop()).Name() != "xai" {
+		t.Fatal("expected xai auto-detect")
+	}
+}
+
+func TestFactory_DegradedToNull(t *testing.T) {
+	for _, k := range []string{"CHATCLI_IMAGE_PROVIDER", "CHATCLI_IMAGE_URL", "OPENAI_API_KEY", "GOOGLEAI_API_KEY", "XAI_API_KEY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "google") // pinned but no key
+	if !IsNull(NewFromEnv(zap.NewNop())) {
+		t.Fatal("google pin without key should be Null")
+	}
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "xai")
+	if !IsNull(NewFromEnv(zap.NewNop())) {
+		t.Fatal("xai pin without key should be Null")
+	}
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "bogus")
+	if !IsNull(NewFromEnv(zap.NewNop())) {
+		t.Fatal("unknown provider should be Null")
+	}
+}
+
+func TestOpenAICompatible_URLResponse(t *testing.T) {
+	// data[].url path: the API returns a URL; the backend downloads it.
+	var imgSrv *httptest.Server
+	imgSrv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/images/generations") {
+			_, _ = w.Write([]byte(`{"data":[{"url":"` + imgSrv.URL + `/img.png"}]}`))
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("DOWNLOADED"))
+	}))
+	defer imgSrv.Close()
+	p, _ := NewOpenAICompatible(imgSrv.URL, "", "m", "selfhosted", zap.NewNop())
+	imgs, err := p.Generate(context.Background(), "x", Options{})
+	if err != nil || len(imgs) != 1 || string(imgs[0].Data) != "DOWNLOADED" {
+		t.Fatalf("url-download path failed: %v err=%v", imgs, err)
+	}
+}
