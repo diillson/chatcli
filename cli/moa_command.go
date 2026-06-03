@@ -37,6 +37,11 @@ func (cli *ChatCLI) handleMoACommand(input string) {
 
 	refs := moa.ParseRefs(os.Getenv("CHATCLI_MOA_MODELS"))
 	if len(refs) == 0 {
+		// No env configured → behave like the @moa tool: use the configured
+		// providers (capped) so /moa works out of the box.
+		refs = cli.defaultMoaRefs()
+	}
+	if len(refs) == 0 {
 		fmt.Println(colorize("  "+i18n.T("moa.no_models"), ColorYellow))
 		return
 	}

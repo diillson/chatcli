@@ -2850,8 +2850,6 @@
   "plugins.moa.describe.ask": "🧠 Mixture-of-Agents…",
   "plugins.moa.describe.list": "🧠 Listando provedores",
   "plugins.moa.describe.default": "🧠 Mixture-of-Agents",
-  "plugins.image.progress": "🎨 Gerando imagem com %s… (pode levar alguns segundos)",
-  "plugins.speak.progress": "🔊 Sintetizando voz com %s…",
   "cfg.section.image.title": "Geração de Imagem (@image)",
   "cfg.image.set_ok": "%s definido como %s (efeito imediato; adicione ao .env para persistir).",
   "cfg.image.reset_ok": "Overrides de imagem resetados.",

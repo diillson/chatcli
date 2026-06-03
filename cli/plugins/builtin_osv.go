@@ -451,6 +451,9 @@ func parseOsvInvocation(args []string) (string, string, error) {
 		}
 		return canon, inner, nil
 	}
+	if len(args) == 0 {
+		return "", "", fmt.Errorf("empty args")
+	}
 	canon := canonicalOsvCmd(args[0])
 	if canon == "" {
 		return "", "", fmt.Errorf("expected JSON envelope or subcommand; got %q", args[0])

@@ -112,6 +112,25 @@ func (a *moaPluginAdapter) canonicalProvider(name string) string {
 	return a.cli.canonicalProviderName(name)
 }
 
+// defaultMoaRefs is the default participant set shared by /moa and @moa: the
+// configured providers (sorted, capped at maxMoaMembers), each with its default
+// model. Used when neither an explicit list nor CHATCLI_MOA_MODELS is given.
+func (cli *ChatCLI) defaultMoaRefs() []moa.Ref {
+	if cli.manager == nil {
+		return nil
+	}
+	providers := cli.manager.GetAvailableProviders()
+	sort.Strings(providers)
+	if len(providers) > maxMoaMembers {
+		providers = providers[:maxMoaMembers]
+	}
+	refs := make([]moa.Ref, 0, len(providers))
+	for _, p := range providers {
+		refs = append(refs, moa.Ref{Provider: p})
+	}
+	return refs
+}
+
 // resolveMembers builds the participant list. Explicit input wins; otherwise it
 // falls back to CHATCLI_MOA_MODELS (so the env controls both @moa and /moa) and
 // finally to up to maxMoaMembers configured providers.

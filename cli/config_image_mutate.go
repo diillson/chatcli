@@ -1,6 +1,7 @@
 /*
  * ChatCLI - /config image mutator.
  * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
  *
  * Exposes the @image backend on the /config surface — read-only panorama plus
  * runtime mutation. The imagegen factory reads os.Getenv on every call, so each

@@ -93,9 +93,9 @@ func (p *BuiltinImagePlugin) Execute(ctx context.Context, args []string) (string
 	return p.ExecuteWithStream(ctx, args, nil)
 }
 
-// ExecuteWithStream emits a progress line before the (slow) network call so the
-// UI box shows activity instead of feeling stuck.
-func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []string, stream func(string)) (string, error) {
+// ExecuteWithStream runs the generation. Progress feedback is the agent loop's
+// animated spinner (this tool is blocking, not streaming).
+func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []string, _ func(string)) (string, error) {
 	if len(args) == 0 {
 		return "", errors.New(`@image: empty args. Example: <tool_call name="@image" args='{"cmd":"gen","args":{"prompt":"..."}}' />`)
 	}
@@ -128,9 +128,9 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		if imagegen.IsNull(provider) {
 			return "", imagegen.ErrDisabled
 		}
-		if stream != nil {
-			stream(i18n.T("plugins.image.progress", provider.Name()))
-		}
+		// No progress line here: the agent loop runs an animated spinner during
+		// execution (a streamed line would stop it, then the blocking call would
+		// look frozen). The spinner's label already names the operation.
 		images, err := provider.Generate(ctx, in.Prompt, imagegen.Options{Size: in.Size, N: in.N})
 		if err != nil {
 			return "", fmt.Errorf("@image: %w", err)
@@ -212,6 +212,9 @@ func parseImageInvocation(args []string) (string, string, error) {
 			inner = string(b)
 		}
 		return canon, inner, nil
+	}
+	if len(args) == 0 {
+		return "", "", fmt.Errorf("empty args")
 	}
 	canon := canonicalImageCmd(args[0])
 	if canon == "" {
