@@ -424,6 +424,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// live platform credentials each call, so this works whether or
 		// not the gateway daemon is running.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSendPlugin())
+		// @moa — Mixture-of-Agents: fan a prompt out to several models and
+		// synthesize one best answer. Wired below to the LLM manager.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMoaPlugin())
 		// @memory — deterministic long-term memory writes/recall. The
 		// adapter is wired below once the memory store exists; until then
 		// the tool reports "memory not enabled" rather than panicking.
@@ -533,6 +536,10 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	// the memory store and of the gateway daemon lifecycle: adapters are
 	// (re)built from live credentials on each invocation.
 	plugins.SetSendAdapter(&sendPluginAdapter{cli: cli})
+
+	// Wire the @moa (Mixture-of-Agents) tool to the LLM manager so it can fan
+	// prompts across the configured providers and synthesize a best answer.
+	plugins.SetMoaAdapter(&moaPluginAdapter{cli: cli})
 	cli.contextBuilder = workspace.NewContextBuilder(bootstrapLoader, memStore, workspaceDir)
 
 	// Start background memory annotation worker
