@@ -439,6 +439,10 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// @image — text-to-image generation to a file (self-hosted/keyless
 		// first via Stable Diffusion WebUI). Self-contained via llm/imagegen.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinImagePlugin())
+		// @skill — self-authoring skills: the agent writes/evolves its own
+		// skills from what it learns, persisted to the global skills dir and
+		// auto-activated in future sessions. Self-contained.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSkillPlugin())
 		// @memory — deterministic long-term memory writes/recall. The
 		// adapter is wired below once the memory store exists; until then
 		// the tool reports "memory not enabled" rather than panicking.

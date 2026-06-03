@@ -1,0 +1,345 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
+ * BuiltinSkillPlugin — self-authoring skills as an @skill ReAct tool.
+ *
+ * It lets the agent CREATE and EVOLVE its own skills at runtime: when it learns
+ * a reusable procedure, a project convention, or a workflow the user repeats,
+ * it writes a SKILL.md into the user's global skills directory, where the loader
+ * auto-discovers it on the next turn (and on every future session). This is the
+ * "skills that get better over time" capability — inspired by hermes-agent's
+ * skill authoring/management, implemented natively against ChatCLI's own skill
+ * format.
+ *
+ * Division of labor with @memory: @memory stores FACTS ("the user prefers X");
+ * @skill stores reusable PROCEDURES/KNOWLEDGE with triggers ("how to deploy
+ * this project"). The skill is activated automatically when its triggers match
+ * a future request.
+ *
+ * Self-contained: it writes to ~/.chatcli/skills (the same global directory the
+ * loader scans and builtin.Seed populates), so no adapter wiring is required.
+ */
+package plugins
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// skillNameRe constrains skill names to a safe slug (no path traversal).
+var skillNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// skillsDirOverride lets tests redirect the skills directory.
+var skillsDirOverride string
+
+// BuiltinSkillPlugin is the @skill tool.
+type BuiltinSkillPlugin struct{}
+
+// NewBuiltinSkillPlugin returns a ready-to-register plugin.
+func NewBuiltinSkillPlugin() *BuiltinSkillPlugin { return &BuiltinSkillPlugin{} }
+
+// Name returns "@skill".
+func (*BuiltinSkillPlugin) Name() string { return "@skill" }
+
+// Description surfaces the tool.
+func (*BuiltinSkillPlugin) Description() string {
+	return "Author and evolve your own skills. When you learn a reusable procedure, a project convention, or a workflow the user repeats, save it as a skill so it auto-activates in future sessions. Use create/update/list/show/remove."
+}
+
+// Usage explains the canonical invocation.
+func (*BuiltinSkillPlugin) Usage() string {
+	return `<tool_call name="@skill" args='{"cmd":"create","args":{"name":"deploy-this-project","description":"How to deploy this project. Triggers on deploy requests.","triggers":["deploy","ship it"],"content":"# Deploy\n\nRun make release then ..."}}' />
+
+Subcommands (cmd + args):
+  create {name, description, content, triggers?, allowed_tools?}
+       name           kebab-case slug (a-z, 0-9, dash)
+       description    one line; this is what decides relevance — make it good
+       content        the skill body (markdown)
+       triggers       optional keywords that auto-activate the skill
+       allowed_tools  optional tool/capability list
+  update {name, ...}   same fields; the skill must already exist
+  list                 list saved skills
+  show {name}          print a skill's content
+  remove {name}        delete a skill`
+}
+
+// Version is semver.
+func (*BuiltinSkillPlugin) Version() string { return "1.0.0" }
+
+// Path is empty for builtin plugins.
+func (*BuiltinSkillPlugin) Path() string { return "" }
+
+// Schema describes the subcommands.
+func (*BuiltinSkillPlugin) Schema() string {
+	field := func(name, typ string, req bool, desc string) map[string]interface{} {
+		return map[string]interface{}{"name": name, "type": typ, "required": req, "description": desc}
+	}
+	schema := map[string]interface{}{
+		"argsFormat": "JSON envelope {cmd, args} preferred",
+		"subcommands": []map[string]interface{}{
+			{
+				"name":        "create",
+				"description": "Create a new skill that auto-activates on its triggers in future sessions.",
+				"flags": []map[string]interface{}{
+					field("name", "string", true, "kebab-case slug."),
+					field("description", "string", true, "One line; decides relevance."),
+					field("content", "string", true, "Skill body (markdown)."),
+					field("triggers", "array", false, "Keywords that auto-activate it."),
+					field("allowed_tools", "array", false, "Tools the skill may use."),
+				},
+				"examples": []string{`{"cmd":"create","args":{"name":"deploy-x","description":"How to deploy project X","content":"# Deploy\n...","triggers":["deploy x"]}}`},
+			},
+			{"name": "update", "description": "Update an existing skill (same fields as create).", "examples": []string{`{"cmd":"update","args":{"name":"deploy-x","content":"# Deploy (v2)\n..."}}`}},
+			{"name": "list", "description": "List saved skills.", "examples": []string{`{"cmd":"list"}`}},
+			{"name": "show", "description": "Print a skill's content.", "examples": []string{`{"cmd":"show","args":{"name":"deploy-x"}}`}},
+			{"name": "remove", "description": "Delete a skill.", "examples": []string{`{"cmd":"remove","args":{"name":"deploy-x"}}`}},
+		},
+	}
+	data, _ := json.Marshal(schema)
+	return string(data)
+}
+
+// Execute parses args and dispatches.
+func (p *BuiltinSkillPlugin) Execute(ctx context.Context, args []string) (string, error) {
+	return p.ExecuteWithStream(ctx, args, nil)
+}
+
+type skillInput struct {
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Content      string   `json:"content"`
+	Triggers     []string `json:"triggers"`
+	AllowedTools []string `json:"allowed_tools"`
+}
+
+// ExecuteWithStream ignores the stream callback.
+func (p *BuiltinSkillPlugin) ExecuteWithStream(_ context.Context, args []string, _ func(string)) (string, error) {
+	if len(args) == 0 {
+		return "", errors.New(`@skill: empty args. Example: <tool_call name="@skill" args='{"cmd":"list"}' />`)
+	}
+	cmd, inner, err := parseSkillInvocation(args)
+	if err != nil {
+		return "", fmt.Errorf("@skill: %w", err)
+	}
+	dir, err := resolveSkillsDir()
+	if err != nil {
+		return "", fmt.Errorf("@skill: %w", err)
+	}
+
+	switch cmd {
+	case "create", "update":
+		var in skillInput
+		_ = json.Unmarshal([]byte(inner), &in)
+		return writeSkill(dir, cmd == "update", in)
+	case "list":
+		return listSkills(dir)
+	case "show":
+		var in skillInput
+		_ = json.Unmarshal([]byte(inner), &in)
+		return showSkill(dir, in.Name)
+	case "remove":
+		var in skillInput
+		_ = json.Unmarshal([]byte(inner), &in)
+		return removeSkill(dir, in.Name)
+	default:
+		return "", fmt.Errorf("@skill: unknown cmd %q (valid: create|update|list|show|remove)", cmd)
+	}
+}
+
+func writeSkill(dir string, mustExist bool, in skillInput) (string, error) {
+	name := strings.TrimSpace(in.Name)
+	if !skillNameRe.MatchString(name) {
+		return "", fmt.Errorf("@skill: invalid name %q (use kebab-case: a-z, 0-9, dash)", in.Name)
+	}
+	if strings.TrimSpace(in.Description) == "" {
+		return "", errors.New(`@skill: "description" is required`)
+	}
+	if strings.TrimSpace(in.Content) == "" {
+		return "", errors.New(`@skill: "content" is required`)
+	}
+	skillDir := filepath.Join(dir, name)
+	file := filepath.Join(skillDir, "SKILL.md")
+	_, statErr := os.Stat(file)
+	exists := statErr == nil
+	if mustExist && !exists {
+		return "", fmt.Errorf("@skill update: %q does not exist (use create)", name)
+	}
+	if !mustExist && exists {
+		return "", fmt.Errorf("@skill create: %q already exists (use update to change it)", name)
+	}
+
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(file, []byte(renderSkill(name, in)), 0o600); err != nil {
+		return "", err
+	}
+	verb := "created"
+	if mustExist {
+		verb = "updated"
+	}
+	return fmt.Sprintf("Skill %q %s at %s. It will auto-activate on its triggers in future turns.", name, verb, file), nil
+}
+
+// renderSkill builds the SKILL.md text. Scalars are JSON-encoded, which is valid
+// YAML for double-quoted strings — safe for descriptions with colons/quotes.
+func renderSkill(name string, in skillInput) string {
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.WriteString("name: " + skillScalar(name) + "\n")
+	b.WriteString("description: " + skillScalar(in.Description) + "\n")
+	if len(in.AllowedTools) > 0 {
+		b.WriteString("allowed-tools: " + skillFlowList(in.AllowedTools) + "\n")
+	}
+	if len(in.Triggers) > 0 {
+		b.WriteString("triggers:\n")
+		for _, t := range in.Triggers {
+			if strings.TrimSpace(t) == "" {
+				continue
+			}
+			b.WriteString("  - " + skillScalar(t) + "\n")
+		}
+	}
+	b.WriteString("---\n\n")
+	body := strings.TrimRight(in.Content, "\n")
+	b.WriteString(body)
+	b.WriteString("\n")
+	return b.String()
+}
+
+func listSkills(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "No skills saved yet.", nil
+		}
+		return "", err
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, e.Name(), "SKILL.md")); err == nil {
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) == 0 {
+		return "No skills saved yet.", nil
+	}
+	return "Saved skills:\n  • " + strings.Join(names, "\n  • "), nil
+}
+
+func showSkill(dir, name string) (string, error) {
+	if !skillNameRe.MatchString(strings.TrimSpace(name)) {
+		return "", fmt.Errorf("@skill show: invalid name %q", name)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md")) // #nosec G304 -- name validated against slug regex
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("@skill show: %q not found", name)
+		}
+		return "", err
+	}
+	return string(data), nil
+}
+
+func removeSkill(dir, name string) (string, error) {
+	if !skillNameRe.MatchString(strings.TrimSpace(name)) {
+		return "", fmt.Errorf("@skill remove: invalid name %q", name)
+	}
+	skillDir := filepath.Join(dir, name)
+	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
+		return "", fmt.Errorf("@skill remove: %q not found", name)
+	}
+	if err := os.RemoveAll(skillDir); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Skill %q removed.", name), nil
+}
+
+// resolveSkillsDir returns the global skills directory (~/.chatcli/skills),
+// matching the persona loader and builtin.Seed.
+func resolveSkillsDir() (string, error) {
+	if skillsDirOverride != "" {
+		return skillsDirOverride, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve home directory: %w", err)
+	}
+	return filepath.Join(home, ".chatcli", "skills"), nil
+}
+
+func skillScalar(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+func skillFlowList(items []string) string {
+	b, _ := json.Marshal(items)
+	return string(b)
+}
+
+func parseSkillInvocation(args []string) (string, string, error) {
+	payload := strings.TrimSpace(strings.Join(args, " "))
+	if strings.HasPrefix(payload, "{") {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+			return "", "", fmt.Errorf("parse envelope: %w", err)
+		}
+		var cmdStr string
+		if rc, ok := raw["cmd"]; ok {
+			_ = json.Unmarshal(rc, &cmdStr)
+		}
+		canon := canonicalSkillCmd(cmdStr)
+		if canon == "" {
+			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: create|update|list|show|remove)", cmdStr)
+		}
+		var inner string
+		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {
+			inner = string(rargs)
+		} else {
+			delete(raw, "cmd")
+			b, _ := json.Marshal(raw)
+			inner = string(b)
+		}
+		return canon, inner, nil
+	}
+	canon := canonicalSkillCmd(args[0])
+	if canon == "" {
+		return "", "", fmt.Errorf("expected JSON envelope or subcommand; got %q", args[0])
+	}
+	// argv form: only list and show/remove <name> make sense.
+	rest := strings.TrimSpace(strings.TrimPrefix(payload, args[0]))
+	if rest != "" {
+		b, _ := json.Marshal(map[string]string{"name": rest})
+		return canon, string(b), nil
+	}
+	return canon, "{}", nil
+}
+
+func canonicalSkillCmd(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "create", "new", "add", "author", "learn":
+		return "create"
+	case "update", "edit", "evolve":
+		return "update"
+	case "list", "skills":
+		return "list"
+	case "show", "view", "get":
+		return "show"
+	case "remove", "delete", "rm":
+		return "remove"
+	}
+	return ""
+}
