@@ -688,7 +688,14 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		currentDir, _ := os.Getwd()
 		coreText = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
 	}
-	coreText += "\n\n" + i18n.T("ai.response_language")
+	// The daemon-locale "respond in X" directive is right for the interactive
+	// CLI, but WRONG for the gateway: there each user writes in their own
+	// language and the reply must mirror THAT, not the daemon's locale. The
+	// GatewaySystemPrompt already instructs the model to match the user's
+	// language, so skip the locale pin for the gateway.
+	if !a.gatewayPersona {
+		coreText += "\n\n" + i18n.T("ai.response_language")
+	}
 
 	// Gateway persona reinforcement: only needed when the core text is NOT
 	// already the dedicated GatewaySystemPrompt — i.e. when an active persona
