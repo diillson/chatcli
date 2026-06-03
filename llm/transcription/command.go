@@ -51,6 +51,19 @@ func NewCommandTranscriber(template, label string) (*CommandTranscriber, error) 
 	return &CommandTranscriber{argv: argv, label: label}, nil
 }
 
+// newCommandFromArgv builds a transcriber from an already-split argv (no
+// whitespace splitting). Use this when the command embeds paths that may
+// contain spaces (e.g. a Windows "Program Files" binary or a cache path under a
+// user dir with a space) — splitting those by whitespace would corrupt the
+// argv. {input}/{output_dir}/{lang} placeholders in individual elements are
+// still substituted.
+func newCommandFromArgv(argv []string, label string) *CommandTranscriber {
+	if strings.TrimSpace(label) == "" {
+		label = "command"
+	}
+	return &CommandTranscriber{argv: argv, label: label}
+}
+
 // usesOutputDir reports whether the template reads its transcript from a file
 // in {output_dir} rather than from stdout.
 func (c *CommandTranscriber) usesOutputDir() bool {
