@@ -8,7 +8,12 @@ package imagegen
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestNullProvider(t *testing.T) {
@@ -52,5 +57,78 @@ func TestConstructorValidation(t *testing.T) {
 	}
 	if _, err := NewAutomatic1111("ftp://x", 0, nil); err == nil {
 		t.Fatal("non-http baseURL should error")
+	}
+}
+
+func TestOpenAIResponses_Generate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/responses") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"output":[{"type":"reasoning"},{"type":"image_generation_call","result":"UE5HREFUQQ=="}]}`))
+	}))
+	defer srv.Close()
+	p, err := NewOpenAIResponses(srv.URL, "k", "gpt-5.5", zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	imgs, err := p.Generate(context.Background(), "a fox", Options{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(imgs) != 1 || string(imgs[0].Data) != "PNGDATA" {
+		t.Fatalf("unexpected image %+v", imgs)
+	}
+	if p.Name() != "openai-responses" {
+		t.Fatalf("name = %q", p.Name())
+	}
+}
+
+func TestKnownModels(t *testing.T) {
+	models := KnownModels()
+	if len(models) == 0 {
+		t.Fatal("empty catalog")
+	}
+	var hasGptImage, hasResponses bool
+	for _, m := range models {
+		if m.Name == "gpt-image-1" && m.API == "images" {
+			hasGptImage = true
+		}
+		if m.API == "responses" {
+			hasResponses = true
+		}
+	}
+	if !hasGptImage || !hasResponses {
+		t.Fatalf("catalog missing key entries: %+v", models)
+	}
+}
+
+func TestIsImageCapableID(t *testing.T) {
+	for _, id := range []string{"gpt-image-1", "dall-e-3", "gpt-5.5", "gpt-4.1", "gpt-4o"} {
+		if !isImageCapableID(id) {
+			t.Errorf("%q should be image-capable", id)
+		}
+	}
+	if isImageCapableID("text-embedding-3-small") {
+		t.Error("embedding model should not be image-capable")
+	}
+}
+
+func TestFactory_ResponsesSelection(t *testing.T) {
+	for _, k := range []string{"CHATCLI_IMAGE_PROVIDER", "CHATCLI_IMAGE_URL", "CHATCLI_IMAGE_API", "OPENAI_API_KEY", "GOOGLEAI_API_KEY", "XAI_API_KEY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "responses")
+	t.Setenv("OPENAI_API_KEY", "sk-x")
+	if _, ok := NewFromEnv(zap.NewNop()).(*OpenAIResponses); !ok {
+		t.Fatal("expected Responses backend for provider=responses")
+	}
+
+	// provider=openai + API=responses also routes to Responses
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "openai")
+	t.Setenv("CHATCLI_IMAGE_API", "responses")
+	if _, ok := NewFromEnv(zap.NewNop()).(*OpenAIResponses); !ok {
+		t.Fatal("expected Responses backend for openai + API=responses")
 	}
 }

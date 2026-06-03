@@ -50,8 +50,16 @@ func NewFromEnv(logger *zap.Logger) Provider {
 	case "url", "selfhosted":
 		return selfHostedOrNull(url, model, logger)
 	case "openai":
+		// CHATCLI_IMAGE_API=responses routes OpenAI through the Responses API
+		// (a chat model like gpt-5.5 generates the image) instead of the
+		// Images API (gpt-image-1).
+		if openAIWantsResponses() {
+			return responsesOrNull(model, logger, "CHATCLI_IMAGE_PROVIDER=openai + API=responses but OPENAI_API_KEY is empty")
+		}
 		return cloudOrNull(openAIBaseURL, os.Getenv("OPENAI_API_KEY"), model, "openai", logger,
 			"CHATCLI_IMAGE_PROVIDER=openai set but OPENAI_API_KEY is empty")
+	case "responses", "openai-responses":
+		return responsesOrNull(model, logger, "CHATCLI_IMAGE_PROVIDER=responses but OPENAI_API_KEY is empty")
 	case "google", "gemini", "imagen":
 		return googleOrNull(model, logger, "CHATCLI_IMAGE_PROVIDER=google set but no GOOGLEAI_API_KEY/GEMINI_API_KEY")
 	case "xai", "grok":
@@ -71,6 +79,9 @@ func NewFromEnv(logger *zap.Logger) Provider {
 	// back-compat, then Google (native Imagen) — so @image is not limited to a
 	// single provider.
 	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
+		if openAIWantsResponses() {
+			return responsesOrNull(model, logger, "")
+		}
 		return cloudOrNull(openAIBaseURL, key, model, "openai", logger, "")
 	}
 	if googleImageKey() != "" {
@@ -80,6 +91,31 @@ func NewFromEnv(logger *zap.Logger) Provider {
 		return xaiOrNull(model, logger, "")
 	}
 	return NewNull()
+}
+
+// openAIWantsResponses reports whether the OpenAI path should use the Responses
+// API (CHATCLI_IMAGE_API=responses) instead of the Images API.
+func openAIWantsResponses() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_API")))
+	return v == "responses" || v == "response"
+}
+
+// responsesOrNull builds the OpenAI Responses-API backend (a chat model
+// generates the image via the image_generation tool).
+func responsesOrNull(model string, logger *zap.Logger, missingMsg string) Provider {
+	key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if key == "" {
+		if missingMsg != "" {
+			logger.Warn("imagegen: " + missingMsg + "; image generation disabled")
+		}
+		return NewNull()
+	}
+	p, err := NewOpenAIResponses(openAIBaseURL, key, model, logger)
+	if err != nil {
+		logger.Warn("imagegen: Responses API init failed; image generation disabled", zap.Error(err))
+		return NewNull()
+	}
+	return p
 }
 
 // xaiOrNull builds the xAI grok-image backend (OpenAI-shaped, but the size

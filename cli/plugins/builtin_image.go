@@ -51,7 +51,8 @@ Subcommands (cmd + args):
        size    optional WxH (default 1024x1024)
        n       optional number of images (default 1)
        out     optional output file path (single image) or directory (multiple)
-  status  show the effective image backend`
+  status  show the effective image backend
+  models  list image-capable models (catalog + your OpenAI account)`
 }
 
 // Version is semver.
@@ -92,8 +93,9 @@ func (p *BuiltinImagePlugin) Execute(ctx context.Context, args []string) (string
 	return p.ExecuteWithStream(ctx, args, nil)
 }
 
-// ExecuteWithStream ignores the stream callback.
-func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []string, _ func(string)) (string, error) {
+// ExecuteWithStream emits a progress line before the (slow) network call so the
+// UI box shows activity instead of feeling stuck.
+func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []string, stream func(string)) (string, error) {
 	if len(args) == 0 {
 		return "", errors.New(`@image: empty args. Example: <tool_call name="@image" args='{"cmd":"gen","args":{"prompt":"..."}}' />`)
 	}
@@ -110,6 +112,8 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 			return "@image: no image backend configured. Set CHATCLI_IMAGE_PROVIDER=sdwebui (self-hosted Stable Diffusion), CHATCLI_IMAGE_URL, or OPENAI_API_KEY.", nil
 		}
 		return "@image backend: " + provider.Name(), nil
+	case "models":
+		return imageModelsList(ctx), nil
 	case "gen":
 		var in struct {
 			Prompt string `json:"prompt"`
@@ -123,6 +127,9 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		}
 		if imagegen.IsNull(provider) {
 			return "", imagegen.ErrDisabled
+		}
+		if stream != nil {
+			stream(i18n.T("plugins.image.progress", provider.Name()))
 		}
 		images, err := provider.Generate(ctx, in.Prompt, imagegen.Options{Size: in.Size, N: in.N})
 		if err != nil {
@@ -219,6 +226,25 @@ func canonicalImageCmd(s string) string {
 		return "gen"
 	case "status", "backend":
 		return "status"
+	case "models", "catalog", "list":
+		return "models"
 	}
 	return ""
+}
+
+// imageModelsList renders the static image-model catalog and, when an OpenAI key
+// is present, the live image-capable models from the account.
+func imageModelsList(ctx context.Context) string {
+	var b strings.Builder
+	b.WriteString("Image-capable models (catalog):\n")
+	for _, m := range imagegen.KnownModels() {
+		fmt.Fprintf(&b, "  • %-26s %-8s %-9s %s\n", m.Name, m.Provider, m.API, m.Note)
+	}
+	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
+		if ids, err := imagegen.FetchOpenAIModels(ctx, "", key, nil); err == nil && len(ids) > 0 {
+			b.WriteString("\nAvailable on your OpenAI account:\n  ")
+			b.WriteString(strings.Join(ids, ", "))
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

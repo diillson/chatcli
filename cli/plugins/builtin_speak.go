@@ -92,8 +92,9 @@ func (p *BuiltinSpeakPlugin) Execute(ctx context.Context, args []string) (string
 	return p.ExecuteWithStream(ctx, args, nil)
 }
 
-// ExecuteWithStream ignores the stream callback.
-func (p *BuiltinSpeakPlugin) ExecuteWithStream(ctx context.Context, args []string, _ func(string)) (string, error) {
+// ExecuteWithStream emits a progress line before synthesis so the UI box shows
+// activity instead of feeling stuck.
+func (p *BuiltinSpeakPlugin) ExecuteWithStream(ctx context.Context, args []string, stream func(string)) (string, error) {
 	if len(args) == 0 {
 		return "", errors.New(`@speak: empty args. Example: <tool_call name="@speak" args='{"cmd":"say","args":{"text":"hello"}}' />`)
 	}
@@ -123,6 +124,9 @@ func (p *BuiltinSpeakPlugin) ExecuteWithStream(ctx context.Context, args []strin
 		}
 		if tts.IsNull(provider) {
 			return "", tts.ErrDisabled
+		}
+		if stream != nil {
+			stream(i18n.T("plugins.speak.progress", provider.Name()))
 		}
 		audio, err := provider.Synthesize(ctx, in.Text, in.Voice, in.Format)
 		if err != nil {

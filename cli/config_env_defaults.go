@@ -173,8 +173,9 @@ var envDefaults = map[string]envDefault{
 
 	// ─── Image generation (@image) ───────────────────────────────
 	"CHATCLI_IMAGE_PROVIDER": {Value: "auto", Source: "imagegen.NewFromEnv"},
+	"CHATCLI_IMAGE_API":      {Value: "images", Source: "imagegen (images|responses)"},
 	"CHATCLI_IMAGE_URL":      {Value: "(none)", Source: "imagegen self-hosted endpoint"},
-	"CHATCLI_IMAGE_MODEL":    {Value: "dall-e-3", Source: "imagegen.defaultImageModel"},
+	"CHATCLI_IMAGE_MODEL":    {Value: "gpt-image-1", Source: "imagegen.defaultImageModel"},
 
 	// ─── Gateway: @send home channels (proactive outbound) ───────
 	"CHATCLI_TELEGRAM_HOME_CHANNEL": {Value: "(none)", Source: "send_adapter.go (@send default target)"},

@@ -112,6 +112,14 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 		} else {
 			cli.routeConfigChat(args[1:])
 		}
+	case "image", "img":
+		// Hierarchical: bare form shows the @image panorama; provider/api/
+		// model/url/models/reset mutate the backend at runtime.
+		if len(args) == 1 {
+			cli.showConfigImage()
+		} else {
+			cli.routeConfigImage(args[1:])
+		}
 	case "quality":
 		cli.showConfigQuality()
 	case "memory", "mem":
@@ -954,6 +962,8 @@ func (cli *ChatCLI) showConfigIntegrations() {
 	}
 	kv(p, i18n.T("cfg.kv.imagegen"), imgStatus)
 	kv(p, "CHATCLI_IMAGE_PROVIDER", envOr("CHATCLI_IMAGE_PROVIDER"))
+	kv(p, "CHATCLI_IMAGE_API", envOr("CHATCLI_IMAGE_API"))
+	kv(p, "CHATCLI_IMAGE_MODEL", envOr("CHATCLI_IMAGE_MODEL"))
 	kv(p, "CHATCLI_IMAGE_URL", envOr("CHATCLI_IMAGE_URL"))
 
 	fmt.Println(p)
