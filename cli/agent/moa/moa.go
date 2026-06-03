@@ -106,6 +106,13 @@ func Run(ctx context.Context, prompt string, refs []Ref, factory Factory, aggreg
 	wg.Wait()
 
 	if countOK(results) == 0 {
+		// Surface the first underlying error so the failure is diagnosable
+		// (provider not available, 401, etc.) instead of an opaque message.
+		for _, r := range results {
+			if r.Err != nil {
+				return "", results, fmt.Errorf("all %d reference models failed: %s: %w", len(refs), r.Ref.String(), r.Err)
+			}
+		}
 		return "", results, fmt.Errorf("all %d reference models failed", len(refs))
 	}
 

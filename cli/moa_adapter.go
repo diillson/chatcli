@@ -67,30 +67,47 @@ func parseMember(spec string) moaMember {
 	return moaMember{label: s, provider: s}
 }
 
-// clientFor returns an authenticated client for provider/model. When the target
-// matches the session's active provider (and model, if given), it REUSES the
-// live session client (a.cli.Client) — which already carries whatever auth the
-// session uses: OAuth tokens, client-forwarded tokens (server/gateway mode), or
-// an API key. Other targets go through the manager, which itself handles OAuth.
-func (a *moaPluginAdapter) clientFor(provider, model string) (client.LLMClient, error) {
-	if a.cli.Client != nil &&
-		strings.EqualFold(strings.TrimSpace(provider), strings.TrimSpace(a.cli.Provider)) &&
-		(strings.TrimSpace(model) == "" || strings.EqualFold(strings.TrimSpace(model), strings.TrimSpace(a.cli.Model))) {
-		return a.cli.Client, nil
+// canonicalProviderName maps a user-supplied provider name to the actual
+// registered key (case-insensitively), so "openai" → "OPENAI". GetClient does a
+// case-sensitive map lookup, so this prevents the "all models failed" class of
+// bug. Unknown names pass through so GetClient can surface a clear error. Shared
+// by the @moa tool and the /moa command.
+func (cli *ChatCLI) canonicalProviderName(name string) string {
+	if cli.manager == nil {
+		return name
 	}
-	return a.cli.manager.GetClient(provider, model)
-}
-
-// canonicalProvider maps a user-supplied provider name to the actual registered
-// key (case-insensitively), so "openai" resolves to "OPENAI". Unknown names are
-// returned unchanged so GetClient can surface a clear error.
-func (a *moaPluginAdapter) canonicalProvider(name string) string {
-	for _, p := range a.cli.manager.GetAvailableProviders() {
+	for _, p := range cli.manager.GetAvailableProviders() {
 		if strings.EqualFold(p, name) {
 			return p
 		}
 	}
 	return name
+}
+
+// moaClientFor returns an authenticated client for provider/model. When the
+// target matches the session's active provider (and model, if given), it REUSES
+// the live session client (cli.Client) — which carries whatever auth the session
+// uses: OAuth tokens (preferred over API keys when logged in), client-forwarded
+// tokens (server/gateway mode), or an API key. Other targets go through the
+// manager, which itself prefers OAuth. Shared by @moa and /moa.
+func (cli *ChatCLI) moaClientFor(provider, model string) (client.LLMClient, error) {
+	cp := cli.canonicalProviderName(provider)
+	if cli.Client != nil &&
+		strings.EqualFold(strings.TrimSpace(cp), strings.TrimSpace(cli.Provider)) &&
+		(strings.TrimSpace(model) == "" || strings.EqualFold(strings.TrimSpace(model), strings.TrimSpace(cli.Model))) {
+		return cli.Client, nil
+	}
+	return cli.manager.GetClient(cp, model)
+}
+
+// clientFor delegates to the shared session-aware resolver.
+func (a *moaPluginAdapter) clientFor(provider, model string) (client.LLMClient, error) {
+	return a.cli.moaClientFor(provider, model)
+}
+
+// canonicalProvider delegates to the shared resolver.
+func (a *moaPluginAdapter) canonicalProvider(name string) string {
+	return a.cli.canonicalProviderName(name)
 }
 
 // resolveMembers builds the participant list. Empty input → up to

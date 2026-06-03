@@ -47,7 +47,11 @@ func (cli *ChatCLI) handleMoACommand(input string) {
 	}
 
 	factory := func(provider, model string) (moa.Client, error) {
-		c, err := cli.manager.GetClient(provider, model)
+		// Shared resolver: case-insensitive provider match + reuse of the live
+		// session client so OAuth / forwarded-token auth is honored (same as the
+		// @moa tool). Plain GetClient here failed on lowercase env names like
+		// "openai" because the registry keys are upper-case.
+		c, err := cli.moaClientFor(provider, model)
 		if err != nil {
 			return nil, err
 		}
