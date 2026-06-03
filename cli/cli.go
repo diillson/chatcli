@@ -433,6 +433,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// @session — search past saved conversations. Wired below to the
 		// SessionManager.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSessionPlugin())
+		// @speak — text-to-speech to an audio file (local/keyless-first).
+		// Self-contained via llm/tts; no adapter wiring needed.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSpeakPlugin())
 		// @memory — deterministic long-term memory writes/recall. The
 		// adapter is wired below once the memory store exists; until then
 		// the tool reports "memory not enabled" rather than panicking.

@@ -56,11 +56,20 @@ type Runner struct {
 	thinkingNotice string        // text "working on it" notice for non-typing channels
 	thinkingDelay  time.Duration // 0 → defaultThinkingDelay (set by tests)
 	typingRefresh  time.Duration // 0 → defaultTypingRefresh (set by tests)
+	voice          func(ctx context.Context, text string) *OutboundAudio
 }
 
 // SetThinkingNotice sets the localized "the assistant is working" message used
 // on channels without a native typing indicator. Empty keeps a built-in default.
 func (r *Runner) SetThinkingNotice(s string) { r.thinkingNotice = s }
+
+// SetVoiceSynthesizer enables voice replies: the runner calls fn with the final
+// reply text and, when fn returns non-nil audio, attaches it to the outbound
+// message so audio-capable adapters speak it. A nil fn (the default) keeps
+// replies text-only.
+func (r *Runner) SetVoiceSynthesizer(fn func(ctx context.Context, text string) *OutboundAudio) {
+	r.voice = fn
+}
 
 // NewRunner builds a runner. maxConcurrent <= 0 uses DefaultMaxConcurrent.
 func NewRunner(adapters []Adapter, agent AgentFunc, logger *zap.Logger, maxConcurrent int) *Runner {
@@ -159,7 +168,15 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 	send := func(kind, text string) {
 		t0 := time.Now()
 		clipped := clip(text, maxMessageRunes)
-		if err := adapter.Send(ctx, OutboundMessage{ChatID: msg.ChatID, Text: clipped}); err != nil {
+		out := OutboundMessage{ChatID: msg.ChatID, Text: clipped}
+		// Attach a synthesized voice clip to the final answer when voice
+		// replies are enabled. Progress chunks stay text-only.
+		if kind == "final" && r.voice != nil {
+			if audio := r.voice(ctx, clipped); audio != nil {
+				out.Audio = audio
+			}
+		}
+		if err := adapter.Send(ctx, out); err != nil {
 			r.logger.Warn("gateway: send failed",
 				zap.String("platform", msg.Platform),
 				zap.String("session", msg.SessionKey()),

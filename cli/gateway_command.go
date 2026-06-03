@@ -35,6 +35,7 @@ import (
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/transcription"
+	"github.com/diillson/chatcli/llm/tts"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/server/hub"
 	"go.uber.org/zap"
@@ -245,7 +246,41 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 
 	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions), cli.logger, 0)
 	runner.SetThinkingNotice(i18n.T("gateway.thinking"))
+	cli.maybeEnableVoiceReplies(runner)
 	return runner.Run(ctx)
+}
+
+// maybeEnableVoiceReplies wires a TTS-backed voice synthesizer onto the runner
+// when CHATCLI_GATEWAY_VOICE_REPLY is enabled and a TTS backend is configured.
+// The clip is requested as ogg/opus so Telegram delivers a native voice note;
+// other formats degrade to an audio file, and text-only adapters ignore it.
+func (cli *ChatCLI) maybeEnableVoiceReplies(runner *gateway.Runner) {
+	if enabled, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("CHATCLI_GATEWAY_VOICE_REPLY"))); !enabled {
+		return
+	}
+	provider := tts.NewFromEnv(cli.logger)
+	if tts.IsNull(provider) {
+		cli.logger.Warn("gateway: voice reply requested but no TTS backend configured; replies stay text-only")
+		return
+	}
+	format := strings.TrimSpace(os.Getenv("CHATCLI_TTS_VOICE_FORMAT"))
+	if format == "" {
+		format = "ogg"
+	}
+	voice := strings.TrimSpace(os.Getenv("CHATCLI_TTS_VOICE"))
+	cli.logger.Info("gateway: voice replies enabled", zap.String("tts", provider.Name()), zap.String("format", format))
+
+	runner.SetVoiceSynthesizer(func(ctx context.Context, text string) *gateway.OutboundAudio {
+		if strings.TrimSpace(text) == "" {
+			return nil
+		}
+		audio, err := provider.Synthesize(ctx, text, voice, format)
+		if err != nil {
+			cli.logger.Warn("gateway: TTS synthesis failed; sending text", zap.Error(err))
+			return nil
+		}
+		return &gateway.OutboundAudio{Data: audio.Data, Mime: audio.Mime, FileName: "reply." + audio.Ext}
+	})
 }
 
 // teeLoggerToGatewayLog adds a JSON sink at gatewayStatePath("gateway.log") to

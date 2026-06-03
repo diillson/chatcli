@@ -165,6 +165,12 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_TRANSCRIPTION_LANG":      {Value: "(auto)", Source: "transcription.NewFromEnv"},
 	"CHATCLI_GATEWAY_MAX_AUDIO_BYTES": {Value: "20971520", Source: "gateway.defaultMaxAudioBytes"},
 
+	// ─── Text-to-speech (@speak + gateway voice replies) ─────────
+	"CHATCLI_TTS_PROVIDER":        {Value: "auto", Source: "tts.NewFromEnv"},
+	"CHATCLI_TTS_MODEL":           {Value: "tts-1", Source: "tts.defaultTTSModel"},
+	"CHATCLI_TTS_VOICE":           {Value: "alloy", Source: "tts.defaultVoice"},
+	"CHATCLI_GATEWAY_VOICE_REPLY": {Value: "false", IsBool: true, Source: "gateway voice reply"},
+
 	// ─── Gateway: @send home channels (proactive outbound) ───────
 	"CHATCLI_TELEGRAM_HOME_CHANNEL": {Value: "(none)", Source: "send_adapter.go (@send default target)"},
 	"CHATCLI_WHATSAPP_HOME_CHANNEL": {Value: "(none)", Source: "send_adapter.go (@send default target)"},

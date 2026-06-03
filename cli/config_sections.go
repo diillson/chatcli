@@ -44,6 +44,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/transcription"
+	"github.com/diillson/chatcli/llm/tts"
 )
 
 // ─── Routing ───────────────────────────────────────────────────
@@ -932,6 +933,17 @@ func (cli *ChatCLI) showConfigIntegrations() {
 	kv(p, "CHATCLI_TRANSCRIPTION_PROVIDER", envOr("CHATCLI_TRANSCRIPTION_PROVIDER"))
 	kv(p, "CHATCLI_TRANSCRIPTION_MODEL", envOr("CHATCLI_TRANSCRIPTION_MODEL"))
 	kv(p, "CHATCLI_GATEWAY_MAX_AUDIO_BYTES", envOr("CHATCLI_GATEWAY_MAX_AUDIO_BYTES"))
+
+	fmt.Println(p)
+	subheader(p, "cfg.sub.integ.gateway_tts")
+	ttsStatus := i18n.T("cfg.val.tts_off")
+	if s := tts.NewFromEnv(cli.logger); !tts.IsNull(s) {
+		ttsStatus = s.Name()
+	}
+	kv(p, i18n.T("cfg.kv.tts"), ttsStatus)
+	kv(p, "CHATCLI_TTS_PROVIDER", envOr("CHATCLI_TTS_PROVIDER"))
+	kv(p, "CHATCLI_TTS_VOICE", envOr("CHATCLI_TTS_VOICE"))
+	kv(p, "CHATCLI_GATEWAY_VOICE_REPLY", envOr("CHATCLI_GATEWAY_VOICE_REPLY"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.integ.gateway_send")

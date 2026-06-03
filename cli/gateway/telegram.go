@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -207,6 +208,16 @@ func (t *TelegramAdapter) downloadFile(ctx context.Context, fileID string) ([]by
 
 // Send delivers a reply via sendMessage.
 func (t *TelegramAdapter) Send(ctx context.Context, msg OutboundMessage) error {
+	// Voice reply: when audio is attached, deliver it as a Telegram voice
+	// message (ogg/opus) or an audio file, with the text as caption. Falls
+	// back to text on any failure so a reply is never lost.
+	if msg.Audio != nil && len(msg.Audio.Data) > 0 {
+		if err := t.sendVoice(ctx, msg); err == nil {
+			return nil
+		} else {
+			t.logger.Warn("telegram: voice send failed, falling back to text", zap.Error(err))
+		}
+	}
 	payload, _ := json.Marshal(map[string]interface{}{
 		"chat_id": msg.ChatID,
 		"text":    msg.Text,
@@ -225,6 +236,53 @@ func (t *TelegramAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("telegram sendMessage status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// sendVoice uploads the synthesized clip. OGG/Opus is delivered via sendVoice
+// (the native voice-note bubble); anything else via sendAudio. The text is
+// attached as the caption (clipped to Telegram's caption limit).
+func (t *TelegramAdapter) sendVoice(ctx context.Context, msg OutboundMessage) error {
+	method, field, filename := "sendAudio", "audio", msg.Audio.FileName
+	if strings.Contains(strings.ToLower(msg.Audio.Mime), "ogg") {
+		method, field = "sendVoice", "voice"
+	}
+	if filename == "" {
+		filename = "reply"
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("chat_id", msg.ChatID)
+	if caption := clip(msg.Text, 1024); strings.TrimSpace(caption) != "" {
+		_ = w.WriteField("caption", caption)
+	}
+	part, err := w.CreateFormFile(field, filename)
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(msg.Audio.Data); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	endpoint := fmt.Sprintf("%s/bot%s/%s", t.baseURL, t.token, method)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("telegram %s status %d", method, resp.StatusCode)
 	}
 	return nil
 }
