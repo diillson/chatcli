@@ -16,10 +16,12 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/diillson/chatcli/cli/agent/moa"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"go.uber.org/zap"
@@ -110,9 +112,22 @@ func (a *moaPluginAdapter) canonicalProvider(name string) string {
 	return a.cli.canonicalProviderName(name)
 }
 
-// resolveMembers builds the participant list. Empty input → up to
-// maxMoaMembers configured providers (each with its default model).
+// resolveMembers builds the participant list. Explicit input wins; otherwise it
+// falls back to CHATCLI_MOA_MODELS (so the env controls both @moa and /moa) and
+// finally to up to maxMoaMembers configured providers.
 func (a *moaPluginAdapter) resolveMembers(specs []string) []moaMember {
+	// Default to CHATCLI_MOA_MODELS when the call didn't name members, so the
+	// tool honors the same env the /moa command uses.
+	if len(specs) == 0 {
+		for _, r := range moa.ParseRefs(os.Getenv("CHATCLI_MOA_MODELS")) {
+			if r.Model != "" {
+				specs = append(specs, r.Provider+":"+r.Model)
+			} else {
+				specs = append(specs, r.Provider)
+			}
+		}
+	}
+
 	if len(specs) > 0 {
 		out := make([]moaMember, 0, len(specs))
 		for _, s := range specs {

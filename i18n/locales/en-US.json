@@ -2868,5 +2868,6 @@
   "complete.configimage.url": "Set the URL (SD WebUI / compatible endpoint)",
   "complete.configimage.models": "List the model catalog",
   "complete.configimage.reset": "Clear image overrides",
-  "complete.configimage.val": "value"
+  "complete.configimage.val": "value",
+  "agent.spinner.working": "working"
 }
