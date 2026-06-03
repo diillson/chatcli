@@ -10,10 +10,14 @@
  *   2. CHATCLI_IMAGE_URL              → an OpenAI-compatible /images/generations
  *      endpoint. Keyless (unless CHATCLI_IMAGE_KEY is set).
  *   3. OPENAI_API_KEY                 → OpenAI images (paid).
- *   4. otherwise                      → Null (image generation disabled).
+ *   4. GOOGLEAI_API_KEY/GEMINI_API_KEY → native Google Imagen.
+ *   5. XAI_API_KEY                    → native xAI grok-image.
+ *   6. otherwise                      → Null (image generation disabled).
  *
- * CHATCLI_IMAGE_PROVIDER pins a backend (sdwebui|url|openai); a pinned backend
- * whose config is missing degrades to Null rather than silently switching.
+ * CHATCLI_IMAGE_PROVIDER pins a backend (sdwebui|url|openai|google|xai); a
+ * pinned backend whose config is missing degrades to Null rather than silently
+ * switching. Beyond these, any provider speaking the OpenAI image shape works
+ * by pointing CHATCLI_IMAGE_URL at it.
  */
 package imagegen
 
@@ -25,7 +29,11 @@ import (
 	"go.uber.org/zap"
 )
 
-const openAIBaseURL = "https://api.openai.com/v1"
+const (
+	openAIBaseURL   = "https://api.openai.com/v1"
+	xaiBaseURL      = "https://api.x.ai/v1"
+	defaultXAIModel = "grok-2-image"
+)
 
 // NewFromEnv builds the configured provider, falling back to Null when none is
 // available. It never returns an error.
@@ -46,6 +54,8 @@ func NewFromEnv(logger *zap.Logger) Provider {
 			"CHATCLI_IMAGE_PROVIDER=openai set but OPENAI_API_KEY is empty")
 	case "google", "gemini", "imagen":
 		return googleOrNull(model, logger, "CHATCLI_IMAGE_PROVIDER=google set but no GOOGLEAI_API_KEY/GEMINI_API_KEY")
+	case "xai", "grok":
+		return xaiOrNull(model, logger, "CHATCLI_IMAGE_PROVIDER=xai set but XAI_API_KEY is empty")
 	case "", "auto":
 		// fall through
 	default:
@@ -66,7 +76,33 @@ func NewFromEnv(logger *zap.Logger) Provider {
 	if googleImageKey() != "" {
 		return googleOrNull(model, logger, "")
 	}
+	if strings.TrimSpace(os.Getenv("XAI_API_KEY")) != "" {
+		return xaiOrNull(model, logger, "")
+	}
 	return NewNull()
+}
+
+// xaiOrNull builds the xAI grok-image backend (OpenAI-shaped, but the size
+// field is omitted because xAI rejects it).
+func xaiOrNull(model string, logger *zap.Logger, missingMsg string) Provider {
+	key := strings.TrimSpace(os.Getenv("XAI_API_KEY"))
+	if key == "" {
+		if missingMsg != "" {
+			logger.Warn("imagegen: " + missingMsg + "; image generation disabled")
+		}
+		return NewNull()
+	}
+	m := model
+	if m == "" {
+		m = defaultXAIModel
+	}
+	p, err := NewOpenAICompatible(xaiBaseURL, key, m, "xai", logger)
+	if err != nil {
+		logger.Warn("imagegen: xAI init failed; image generation disabled", zap.Error(err))
+		return NewNull()
+	}
+	p.omitSize = true
+	return p
 }
 
 func googleOrNull(model string, logger *zap.Logger, missingMsg string) Provider {

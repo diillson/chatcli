@@ -33,11 +33,12 @@ const (
 
 // OpenAICompatible generates images against an OpenAI-shaped endpoint.
 type OpenAICompatible struct {
-	baseURL string
-	apiKey  string
-	model   string
-	label   string
-	client  *http.Client
+	baseURL  string
+	apiKey   string
+	model    string
+	label    string
+	omitSize bool // some servers (xAI grok-image) reject the "size" field
+	client   *http.Client
 }
 
 // NewOpenAICompatible builds the provider. baseURL is required; apiKey may be
@@ -85,13 +86,16 @@ func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, opts Opt
 		size = "1024x1024"
 	}
 
-	body, _ := json.Marshal(map[string]interface{}{
+	payload := map[string]interface{}{
 		"model":           o.model,
 		"prompt":          prompt,
 		"n":               n,
-		"size":            size,
 		"response_format": "b64_json",
-	})
+	}
+	if !o.omitSize {
+		payload["size"] = size
+	}
+	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+imagesPath, bytes.NewReader(body))
 	if err != nil {
 		return nil, err

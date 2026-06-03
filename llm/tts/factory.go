@@ -13,9 +13,12 @@
  *   3. a local TTS CLI on PATH (macOS `say`, espeak-ng, espeak) → used
  *      automatically with zero config — "local by default" when installed.
  *   4. OPENAI_API_KEY    → OpenAI TTS (paid).
- *   5. otherwise         → Null (voice output disabled).
+ *   5. GROQ_API_KEY      → Groq TTS (OpenAI-shaped).
+ *   6. GOOGLEAI_API_KEY/GEMINI_API_KEY → native Gemini TTS.
+ *   7. otherwise         → Null (voice output disabled).
  *
- * CHATCLI_TTS_PROVIDER pins a specific backend (command|url|openai); a pinned
+ * CHATCLI_TTS_PROVIDER pins a specific backend (command|url|openai|groq|google);
+ * a pinned
  * backend whose config is missing degrades to Null rather than silently
  * switching.
  */
@@ -59,6 +62,8 @@ func NewFromEnv(logger *zap.Logger) Provider {
 	case "groq":
 		return cloudOrNull(groqBaseURL, os.Getenv("GROQ_API_KEY"), model, "groq", logger,
 			"CHATCLI_TTS_PROVIDER=groq set but GROQ_API_KEY is empty")
+	case "google", "gemini":
+		return googleTTSOrNull(model, logger, "CHATCLI_TTS_PROVIDER=google set but no GOOGLEAI_API_KEY/GEMINI_API_KEY")
 	case "", "auto":
 		// fall through to local-first auto-detection
 	default:
@@ -89,7 +94,37 @@ func NewFromEnv(logger *zap.Logger) Provider {
 	if key := strings.TrimSpace(os.Getenv("GROQ_API_KEY")); key != "" {
 		return cloudOrNull(groqBaseURL, key, model, "groq", logger, "")
 	}
+	if googleTTSKey() != "" {
+		return googleTTSOrNull(model, logger, "")
+	}
 	return NewNull()
+}
+
+// googleTTSKey returns the user's Google API key from the usual env names.
+func googleTTSKey() string {
+	for _, k := range []string{"GOOGLEAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// googleTTSOrNull builds the native Gemini TTS backend.
+func googleTTSOrNull(model string, logger *zap.Logger, missingMsg string) Provider {
+	key := googleTTSKey()
+	if key == "" {
+		if missingMsg != "" {
+			logger.Warn("tts: " + missingMsg + "; voice output disabled")
+		}
+		return NewNull()
+	}
+	p, err := NewGoogle(key, model, logger)
+	if err != nil {
+		logger.Warn("tts: Google init failed; voice output disabled", zap.Error(err))
+		return NewNull()
+	}
+	return p
 }
 
 // detectLocalTTS returns a command-backed provider when a local TTS CLI is on

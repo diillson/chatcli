@@ -8,6 +8,8 @@ package imagegen
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -140,6 +142,40 @@ func TestFactory_GooglePin(t *testing.T) {
 	t.Setenv("GOOGLEAI_API_KEY", "gkey")
 	if _, ok := NewFromEnv(zap.NewNop()).(*Google); !ok {
 		t.Fatal("expected Google backend")
+	}
+}
+
+func TestXAI_OmitsSize(t *testing.T) {
+	var gotBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"` + b64png() + `"}]}`))
+	}))
+	defer srv.Close()
+
+	p, err := NewOpenAICompatible(srv.URL, "xkey", "grok-2-image", "xai", zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.omitSize = true
+	if _, err := p.Generate(context.Background(), "a fox", Options{Size: "1024x1024"}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if _, present := gotBody["size"]; present {
+		t.Fatalf("xAI request must not include 'size', got body %v", gotBody)
+	}
+}
+
+func TestFactory_XAIPin(t *testing.T) {
+	for _, k := range []string{"CHATCLI_IMAGE_PROVIDER", "CHATCLI_IMAGE_URL", "OPENAI_API_KEY", "GOOGLEAI_API_KEY", "XAI_API_KEY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "xai")
+	t.Setenv("XAI_API_KEY", "xkey")
+	p := NewFromEnv(zap.NewNop())
+	if p.Name() != "xai" {
+		t.Fatalf("expected xai backend, got %s", p.Name())
 	}
 }
 
