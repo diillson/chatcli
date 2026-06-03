@@ -211,3 +211,73 @@ func TestCanonicalSkillCmd(t *testing.T) {
 		t.Fatal("unknown should be empty")
 	}
 }
+
+func TestSkill_ExportAllAndErrors(t *testing.T) {
+	withSkillsDir(t)
+	p := NewBuiltinSkillPlugin()
+	// export with nothing → error
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"export"}`}); err == nil {
+		t.Fatal("export with no skills should error")
+	}
+	_, _ = p.Execute(context.Background(), []string{`{"cmd":"create","args":{"name":"one","description":"d","content":"c"}}`})
+	// export all (no names) to temp
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"export"}`})
+	if err != nil {
+		t.Fatalf("export all: %v", err)
+	}
+	if !strings.Contains(out, "skillpack") && !strings.Contains(out, "one") && !strings.Contains(out, ".json") {
+		t.Fatalf("export-all output unexpected: %q", out)
+	}
+}
+
+func TestSkill_ImportErrors(t *testing.T) {
+	withSkillsDir(t)
+	p := NewBuiltinSkillPlugin()
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"import","args":{}}`}); err == nil {
+		t.Fatal("import without path should error")
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"import","args":{"path":"/no/such/pack.json"}}`}); err == nil {
+		t.Fatal("import missing file should error")
+	}
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	_ = os.WriteFile(bad, []byte("not json"), 0o600)
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"import","args":{"path":"` + bad + `"}}`}); err == nil {
+		t.Fatal("import invalid json should error")
+	}
+}
+
+func TestSkill_ShowAndRemoveNotFound(t *testing.T) {
+	withSkillsDir(t)
+	p := NewBuiltinSkillPlugin()
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"show","args":{"name":"ghost"}}`}); err == nil {
+		t.Fatal("show missing should error")
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"remove","args":{"name":"ghost"}}`}); err == nil {
+		t.Fatal("remove missing should error")
+	}
+}
+
+func TestSkill_EmptyUnknownAndArgvList(t *testing.T) {
+	withSkillsDir(t)
+	p := NewBuiltinSkillPlugin()
+	if _, err := p.Execute(context.Background(), nil); err == nil {
+		t.Fatal("empty args should error")
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"explode"}`}); err == nil {
+		t.Fatal("unknown cmd should error")
+	}
+	out, err := p.Execute(context.Background(), []string{"list"})
+	if err != nil || !strings.Contains(out, "No skills") {
+		t.Fatalf("argv list: %q err=%v", out, err)
+	}
+}
+
+func TestSkill_Meta(t *testing.T) {
+	p := NewBuiltinSkillPlugin()
+	if p.Name() != "@skill" || p.Version() == "" || p.Path() != "" || p.Description() == "" {
+		t.Fatal("meta wrong")
+	}
+	if !strings.Contains(p.Schema(), "export") || !strings.Contains(p.Usage(), "import") {
+		t.Fatal("schema/usage missing export/import")
+	}
+}

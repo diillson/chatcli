@@ -85,3 +85,33 @@ func TestSpeak_ArgvSay(t *testing.T) {
 		t.Fatal("expected ErrDisabled with no backend")
 	}
 }
+
+func TestSpeak_StatusEnabledAndMeta(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX helper script")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "t.sh")
+	_ = os.WriteFile(script, []byte("#!/bin/sh\nprintf x > \"$2\"\n"), 0o700)
+	t.Setenv("CHATCLI_TTS_PROVIDER", "command")
+	t.Setenv("CHATCLI_TTS_CMD", script+" {text} {output}")
+
+	p := NewBuiltinSpeakPlugin()
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"status"}`})
+	if err != nil || !strings.Contains(out, "backend") {
+		t.Fatalf("status enabled wrong: %q err=%v", out, err)
+	}
+	if p.Name() != "@speak" || !strings.Contains(p.Schema(), "say") || p.Description() == "" || !strings.Contains(p.Usage(), "say") {
+		t.Fatal("meta wrong")
+	}
+}
+
+func TestSpeak_EmptyAndUnknown(t *testing.T) {
+	p := NewBuiltinSpeakPlugin()
+	if _, err := p.Execute(context.Background(), nil); err == nil {
+		t.Fatal("empty args should error")
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"explode"}`}); err == nil {
+		t.Fatal("unknown cmd should error")
+	}
+}
