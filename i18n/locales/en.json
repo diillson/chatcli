@@ -2459,6 +2459,8 @@
   "skill.tool.created": "Skill %q created at %s. It will auto-activate on its triggers in future turns.",
   "skill.tool.updated": "Skill %q updated at %s. It will auto-activate on its triggers in future turns.",
   "skill.tool.removed": "Skill %q removed.",
+  "skill.tool.exported": "Exported %d skill(s) to %s",
+  "skill.tool.imported": "Imported %d skill(s)",
   "speak.tool.spoke": "Spoke %d character(s) → %s (%s, %d bytes) via %s",
   "moa.tool.unavailable": "Mixture-of-Agents is not available in this session.",
   "moa.tool.no_members": "No models available to participate. Configure at least one provider.",

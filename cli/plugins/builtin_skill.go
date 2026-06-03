@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/persona/usage"
 )
 
 // skillNameRe constrains skill names to a safe slug (no path traversal).
@@ -71,7 +72,10 @@ Subcommands (cmd + args):
   update {name, ...}   same fields; the skill must already exist
   list                 list saved skills
   show {name}          print a skill's content
-  remove {name}        delete a skill`
+  remove {name}        delete a skill
+  stats                show activation analytics (which skills earn their keep)
+  export {names?, out} bundle skills into a shareable JSON pack
+  import {path}        install skills from a pack (overwrite optional)`
 }
 
 // Version is semver.
@@ -104,6 +108,25 @@ func (*BuiltinSkillPlugin) Schema() string {
 			{"name": "list", "description": "List saved skills.", "examples": []string{`{"cmd":"list"}`}},
 			{"name": "show", "description": "Print a skill's content.", "examples": []string{`{"cmd":"show","args":{"name":"deploy-x"}}`}},
 			{"name": "remove", "description": "Delete a skill.", "examples": []string{`{"cmd":"remove","args":{"name":"deploy-x"}}`}},
+			{"name": "stats", "description": "Show skill activation analytics.", "examples": []string{`{"cmd":"stats"}`}},
+			{
+				"name":        "export",
+				"description": "Bundle skills into a shareable JSON pack.",
+				"flags": []map[string]interface{}{
+					field("names", "array", false, "Skills to export (empty = all)."),
+					field("out", "string", false, "Output pack path (default temp)."),
+				},
+				"examples": []string{`{"cmd":"export","args":{"names":["deploy-x"],"out":"team-pack.json"}}`},
+			},
+			{
+				"name":        "import",
+				"description": "Install skills from a pack.",
+				"flags": []map[string]interface{}{
+					field("path", "string", true, "Pack file to import."),
+					field("overwrite", "boolean", false, "Overwrite existing skills."),
+				},
+				"examples": []string{`{"cmd":"import","args":{"path":"team-pack.json"}}`},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -121,6 +144,23 @@ type skillInput struct {
 	Content      string   `json:"content"`
 	Triggers     []string `json:"triggers"`
 	AllowedTools []string `json:"allowed_tools"`
+	// pack operations
+	Names     []string `json:"names"`     // export: which skills (empty = all)
+	Out       string   `json:"out"`       // export: output pack path
+	Path      string   `json:"path"`      // import: pack path to read
+	Overwrite bool     `json:"overwrite"` // import: overwrite existing skills
+}
+
+// skillPack is the export/import bundle: each entry carries the raw SKILL.md so
+// the round-trip is lossless (no frontmatter re-parsing).
+type skillPack struct {
+	Version int             `json:"version"`
+	Skills  []skillPackItem `json:"skills"`
+}
+
+type skillPackItem struct {
+	Name    string `json:"name"`
+	Content string `json:"content"` // raw SKILL.md
 }
 
 // ExecuteWithStream ignores the stream callback.
@@ -152,9 +192,162 @@ func (p *BuiltinSkillPlugin) ExecuteWithStream(_ context.Context, args []string,
 		var in skillInput
 		_ = json.Unmarshal([]byte(inner), &in)
 		return removeSkill(dir, in.Name)
+	case "stats":
+		return statsSkills(dir)
+	case "export":
+		var in skillInput
+		_ = json.Unmarshal([]byte(inner), &in)
+		return exportSkills(dir, in.Names, in.Out)
+	case "import":
+		var in skillInput
+		_ = json.Unmarshal([]byte(inner), &in)
+		return importSkills(dir, in.Path, in.Overwrite)
 	default:
-		return "", fmt.Errorf("@skill: unknown cmd %q (valid: create|update|list|show|remove)", cmd)
+		return "", fmt.Errorf("@skill: unknown cmd %q (valid: create|update|list|show|remove|stats|export|import)", cmd)
 	}
+}
+
+// statsSkills reports activation analytics, most-used first, and flags authored
+// skills that have never activated (candidates to evolve or remove).
+func statsSkills(dir string) (string, error) {
+	// The usage file is a sibling of the skills dir (~/.chatcli/skill-usage.json
+	// when skills live in ~/.chatcli/skills), so this matches what the manager
+	// records to in production and stays isolated under a test override.
+	ranking := usage.New(filepath.Join(filepath.Dir(dir), "skill-usage.json")).Ranking()
+	var b strings.Builder
+	if len(ranking) == 0 {
+		b.WriteString("No skill activations recorded yet.")
+	} else {
+		b.WriteString("Skill activations (most used first):\n")
+		used := map[string]bool{}
+		for _, r := range ranking {
+			used[r.Name] = true
+			last := r.LastUsed
+			if last == "" {
+				last = "—"
+			}
+			fmt.Fprintf(&b, "  • %s — %d (last: %s)\n", r.Name, r.Count, last)
+		}
+		// Authored skills with zero activations.
+		var unused []string
+		if entries, err := os.ReadDir(dir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				if _, statErr := os.Stat(filepath.Join(dir, e.Name(), "SKILL.md")); statErr == nil && !used[e.Name()] {
+					unused = append(unused, e.Name())
+				}
+			}
+		}
+		if len(unused) > 0 {
+			b.WriteString("\nNever activated (consider evolving or removing):\n  • " + strings.Join(unused, "\n  • "))
+		}
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+// exportSkills bundles the named skills (or all) into a JSON pack at out (or a
+// temp file), carrying each raw SKILL.md for a lossless round-trip.
+func exportSkills(dir string, names []string, out string) (string, error) {
+	var selected []string
+	if len(names) > 0 {
+		selected = names
+	} else {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return "", fmt.Errorf("@skill export: %w", err)
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				if _, statErr := os.Stat(filepath.Join(dir, e.Name(), "SKILL.md")); statErr == nil {
+					selected = append(selected, e.Name())
+				}
+			}
+		}
+	}
+	if len(selected) == 0 {
+		return "", errors.New("@skill export: no skills to export")
+	}
+
+	pack := skillPack{Version: 1}
+	for _, name := range selected {
+		if !skillNameRe.MatchString(strings.TrimSpace(name)) {
+			return "", fmt.Errorf("@skill export: invalid name %q", name)
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md")) // #nosec G304 -- name slug-validated
+		if err != nil {
+			return "", fmt.Errorf("@skill export: %q: %w", name, err)
+		}
+		pack.Skills = append(pack.Skills, skillPackItem{Name: name, Content: string(raw)})
+	}
+
+	data, err := json.MarshalIndent(pack, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	path := out
+	if strings.TrimSpace(path) == "" {
+		f, ferr := os.CreateTemp("", "chatcli-skillpack-*.json")
+		if ferr != nil {
+			return "", ferr
+		}
+		path = f.Name()
+		_ = f.Close()
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+	abs, _ := filepath.Abs(path)
+	return i18n.T("skill.tool.exported", len(pack.Skills), abs), nil
+}
+
+// importSkills installs skills from a JSON pack. Existing skills are skipped
+// unless overwrite is set.
+func importSkills(dir, path string, overwrite bool) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New(`@skill import: "path" is required`)
+	}
+	raw, err := os.ReadFile(path) // #nosec G304 -- user-supplied pack path
+	if err != nil {
+		return "", fmt.Errorf("@skill import: %w", err)
+	}
+	var pack skillPack
+	if err := json.Unmarshal(raw, &pack); err != nil {
+		return "", fmt.Errorf("@skill import: invalid pack: %w", err)
+	}
+	if len(pack.Skills) == 0 {
+		return "", errors.New("@skill import: pack contains no skills")
+	}
+
+	var installed, skipped []string
+	for _, item := range pack.Skills {
+		name := strings.TrimSpace(item.Name)
+		if !skillNameRe.MatchString(name) || strings.TrimSpace(item.Content) == "" {
+			skipped = append(skipped, item.Name+" (invalid)")
+			continue
+		}
+		file := filepath.Join(dir, name, "SKILL.md")
+		if _, statErr := os.Stat(file); statErr == nil && !overwrite {
+			skipped = append(skipped, name+" (exists)")
+			continue
+		}
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(file, []byte(item.Content), 0o600); err != nil {
+			return "", err
+		}
+		installed = append(installed, name)
+	}
+	msg := i18n.T("skill.tool.imported", len(installed))
+	if len(installed) > 0 {
+		msg += ": " + strings.Join(installed, ", ")
+	}
+	if len(skipped) > 0 {
+		msg += fmt.Sprintf("; skipped %d (%s)", len(skipped), strings.Join(skipped, ", "))
+	}
+	return msg, nil
 }
 
 func writeSkill(dir string, mustExist bool, in skillInput) (string, error) {
@@ -342,6 +535,12 @@ func canonicalSkillCmd(s string) string {
 		return "show"
 	case "remove", "delete", "rm":
 		return "remove"
+	case "stats", "usage", "analytics":
+		return "stats"
+	case "export", "pack":
+		return "export"
+	case "import", "install":
+		return "import"
 	}
 	return ""
 }

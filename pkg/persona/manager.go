@@ -10,6 +10,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/diillson/chatcli/pkg/persona/usage"
 	"go.uber.org/zap"
 )
 
@@ -23,6 +24,9 @@ type Manager struct {
 	activeAgents map[string]*Agent
 	activePrompt *ComposedPrompt
 	mu           sync.RWMutex
+
+	// usage records which skills get auto-activated, for analytics.
+	usage *usage.Store
 }
 
 // NewManager creates a new persona manager
@@ -33,6 +37,7 @@ func NewManager(logger *zap.Logger) *Manager {
 		loader:       loader,
 		builder:      NewBuilder(logger, loader),
 		activeAgents: make(map[string]*Agent),
+		usage:        usage.Default(),
 	}
 }
 
@@ -290,7 +295,23 @@ func (m *Manager) FindAutoActivatedSkills(text string, filePaths []string) []*Sk
 			out = append(out, s)
 		}
 	}
+	// Record activations asynchronously so analytics never slow a turn.
+	if m.usage != nil && len(out) > 0 {
+		names := make([]string, 0, len(out))
+		for _, s := range out {
+			names = append(names, s.Name)
+		}
+		go m.usage.Record(names...)
+	}
 	return out
+}
+
+// UsageRanking returns skill activation analytics, most-used first.
+func (m *Manager) UsageRanking() []usage.Ranked {
+	if m.usage == nil {
+		return nil
+	}
+	return m.usage.Ranking()
 }
 
 // GetSkillByName resolves a skill by its exact name, preferring project-local

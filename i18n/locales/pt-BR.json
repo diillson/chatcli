@@ -2459,6 +2459,8 @@
   "skill.tool.created": "Skill %q criada em %s. Será auto-ativada pelos triggers nas próximas rodadas.",
   "skill.tool.updated": "Skill %q atualizada em %s. Será auto-ativada pelos triggers nas próximas rodadas.",
   "skill.tool.removed": "Skill %q removida.",
+  "skill.tool.exported": "Exportada(s) %d skill(s) para %s",
+  "skill.tool.imported": "Importada(s) %d skill(s)",
   "speak.tool.spoke": "Falei %d caractere(s) → %s (%s, %d bytes) via %s",
   "moa.tool.unavailable": "Mixture-of-Agents indisponível nesta sessão.",
   "moa.tool.no_members": "Nenhum modelo disponível para participar. Configure ao menos um provedor.",
