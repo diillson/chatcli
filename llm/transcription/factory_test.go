@@ -6,14 +6,16 @@
 package transcription
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
 	"go.uber.org/zap"
 )
 
-// clearEnv neutralizes every env var the factory reads so a subtest starts from
-// a known-empty state regardless of the host environment.
+// clearEnv neutralizes every env var the factory reads AND stubs the PATH
+// lookup to "no local whisper", so a subtest starts from a known state
+// regardless of the host environment (e.g. a dev box with whisper-cli installed).
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
@@ -25,9 +27,13 @@ func clearEnv(t *testing.T) {
 		"CHATCLI_TRANSCRIPTION_LANG",
 		"OPENAI_API_KEY",
 		"GROQ_API_KEY",
+		"WHISPER_MODEL",
 	} {
 		t.Setenv(k, "")
 	}
+	orig := execLookPath
+	execLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	t.Cleanup(func() { execLookPath = orig })
 }
 
 func TestNewFromEnv_Selection(t *testing.T) {
@@ -61,6 +67,21 @@ func TestNewFromEnv_Selection(t *testing.T) {
 		t.Setenv("CHATCLI_TRANSCRIPTION_PROVIDER", "command")
 		if !IsNull(NewFromEnv(log)) {
 			t.Error("command without CHATCLI_TRANSCRIPTION_CMD must be null")
+		}
+	})
+
+	t.Run("local whisper on PATH is keyless and beats cloud", func(t *testing.T) {
+		clearEnv(t)
+		execLookPath = func(name string) (string, error) {
+			if name == "whisper-cli" {
+				return "/opt/homebrew/bin/whisper-cli", nil
+			}
+			return "", exec.ErrNotFound
+		}
+		t.Setenv("OPENAI_API_KEY", "sk-test") // must NOT be used: a local engine exists
+		p := NewFromEnv(log)
+		if IsNull(p) || !strings.HasPrefix(p.Name(), "local:") {
+			t.Errorf("local whisper must win over cloud; got %q", name(p))
 		}
 	})
 

@@ -138,6 +138,18 @@ func TestTranscribe_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestTranscribe_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"error":{"message":"boom"}}`)
+	}))
+	defer srv.Close()
+	p, _ := NewOpenAICompatible(srv.URL, "k", "whisper-1", "openai", zap.NewNop())
+	if _, err := p.Transcribe(context.Background(), []byte("a"), "audio/ogg", "", ""); err == nil {
+		t.Error("a 5xx response must surface an error")
+	}
+}
+
 func TestTranscribe_EmptyAudio(t *testing.T) {
 	p, _ := NewOpenAICompatible("http://x/v1", "", "", "selfhosted", zap.NewNop())
 	if _, err := p.Transcribe(context.Background(), nil, "", "", ""); err == nil {

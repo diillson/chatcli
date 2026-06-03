@@ -287,7 +287,7 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 	// being silently dropped.
 	transcriber := transcription.NewFromEnv(cli.logger)
 	transcribeLang := strings.TrimSpace(os.Getenv("CHATCLI_TRANSCRIPTION_LANG"))
-	if !transcription.IsNull(transcriber) {
+	if !transcription.IsNull(transcriber) && cli.logger != nil {
 		cli.logger.Info("gateway: voice transcription enabled", zap.String("provider", transcriber.Name()))
 	}
 

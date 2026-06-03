@@ -38,6 +38,10 @@ const (
 	groqDefaultModel = "whisper-large-v3"
 )
 
+// execLookPath is exec.LookPath, indirected so tests can simulate the presence
+// or absence of a local whisper CLI deterministically.
+var execLookPath = exec.LookPath
+
 // NewFromEnv builds the configured provider, falling back to Null when none is
 // available. It never returns an error: an unusable configuration degrades to
 // Null so the gateway daemon keeps running and can tell the user voice is off.
@@ -99,7 +103,7 @@ func NewFromEnv(logger *zap.Logger) Provider {
 // file (CHATCLI_TRANSCRIPTION_MODEL or WHISPER_MODEL), so it is used only when
 // one is configured.
 func detectLocalWhisper(model string, logger *zap.Logger) Provider {
-	if path, err := exec.LookPath("whisper"); err == nil && path != "" {
+	if path, err := execLookPath("whisper"); err == nil && path != "" {
 		size := model
 		if size == "" || strings.Contains(size, "/") {
 			size = "base" // a model size (base/small/medium/...), not a path
@@ -110,35 +114,11 @@ func detectLocalWhisper(model string, logger *zap.Logger) Provider {
 			return p
 		}
 	}
-	if path, err := exec.LookPath("whisper-cli"); err == nil && path != "" {
-		if mdl := strings.TrimSpace(firstNonEmpty(os.Getenv("WHISPER_MODEL"), modelFilePath(model))); mdl != "" {
-			tmpl := "whisper-cli -nt -m " + mdl + " -f {input}"
-			if p, e := NewCommandTranscriber(tmpl, "local"); e == nil {
-				logger.Info("transcription: using local whisper.cpp", zap.String("model", mdl))
-				return p
-			}
-		}
+	if path, err := execLookPath("whisper-cli"); err == nil && path != "" {
+		logger.Info("transcription: using local whisper.cpp (whisper-cli)")
+		return newLocalWhisperCpp(path, model, logger)
 	}
 	return nil
-}
-
-// modelFilePath returns model when it looks like a path to a whisper.cpp model
-// file (.bin / contains a slash), else "".
-func modelFilePath(model string) string {
-	if strings.HasSuffix(model, ".bin") || strings.Contains(model, "/") {
-		return model
-	}
-	return ""
-}
-
-// firstNonEmpty returns the first non-empty, trimmed value.
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if s := strings.TrimSpace(v); s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 // groqModel applies Groq's default whisper model when none is set.

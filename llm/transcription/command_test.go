@@ -58,6 +58,33 @@ func TestCommandTranscriber_CommandFails(t *testing.T) {
 	}
 }
 
+func TestCommandTranscriber_OutputDir(t *testing.T) {
+	// `cp {input} {output_dir}/transcript.txt` stands in for a file-output STT
+	// tool (openai-whisper): the transcript is read from the .txt it writes.
+	p, err := NewCommandTranscriber("cp {input} {output_dir}/transcript.txt", "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.usesOutputDir() {
+		t.Error("template with {output_dir} must use file-output mode")
+	}
+	out, err := p.Transcribe(context.Background(), []byte("hello from a file"), "audio/ogg", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "hello from a file" {
+		t.Errorf("transcript = %q", out)
+	}
+}
+
+func TestCommandTranscriber_OutputDirNoFile(t *testing.T) {
+	// `true` writes nothing into {output_dir} → must error.
+	p, _ := NewCommandTranscriber("true {input} {output_dir}", "local")
+	if _, err := p.Transcribe(context.Background(), []byte("x"), "", "", ""); err == nil {
+		t.Error("no output file must error")
+	}
+}
+
 func TestCommandTranscriber_NoOutput(t *testing.T) {
 	// `true` succeeds but prints nothing — must be treated as no transcript.
 	p, _ := NewCommandTranscriber("true {input}", "")
