@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/imagegen"
 )
@@ -94,6 +95,56 @@ func (cli *ChatCLI) showConfigImage() {
 
 func (cli *ChatCLI) printConfigImageUsage() {
 	fmt.Println(colorize("  "+i18n.T("cfg.image.usage"), ColorGray))
+}
+
+// getConfigImageSuggestions powers `/config image …` autocompletion:
+// subcommands, then per-subcommand values (provider names, api modes, model
+// catalog).
+func (cli *ChatCLI) getConfigImageSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
+
+	// Subcommand slot: `/config image <TAB>`
+	if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "provider", Description: i18n.T("complete.configimage.provider")},
+			{Text: "api", Description: i18n.T("complete.configimage.api")},
+			{Text: "model", Description: i18n.T("complete.configimage.model")},
+			{Text: "url", Description: i18n.T("complete.configimage.url")},
+			{Text: "models", Description: i18n.T("complete.configimage.models")},
+			{Text: "reset", Description: i18n.T("complete.configimage.reset")},
+		}, word, true)
+	}
+
+	// Value slot: `/config image <sub> <TAB>`
+	if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
+		switch strings.ToLower(args[2]) {
+		case "provider":
+			return prompt.FilterHasPrefix([]prompt.Suggest{
+				{Text: "auto", Description: i18n.T("complete.configimage.val")},
+				{Text: "sdwebui", Description: i18n.T("complete.configimage.val")},
+				{Text: "openai", Description: i18n.T("complete.configimage.val")},
+				{Text: "responses", Description: i18n.T("complete.configimage.val")},
+				{Text: "google", Description: i18n.T("complete.configimage.val")},
+				{Text: "xai", Description: i18n.T("complete.configimage.val")},
+				{Text: "bedrock", Description: i18n.T("complete.configimage.val")},
+				{Text: "url", Description: i18n.T("complete.configimage.val")},
+			}, word, true)
+		case "api":
+			return prompt.FilterHasPrefix([]prompt.Suggest{
+				{Text: "images", Description: i18n.T("complete.configimage.val")},
+				{Text: "responses", Description: i18n.T("complete.configimage.val")},
+			}, word, true)
+		case "model":
+			out := make([]prompt.Suggest, 0)
+			for _, m := range imagegen.KnownModels() {
+				out = append(out, prompt.Suggest{Text: m.Name, Description: m.Provider + " · " + m.API})
+			}
+			return prompt.FilterHasPrefix(out, word, true)
+		}
+	}
+	return nil
 }
 
 // imageModelsCatalog renders the static image-model catalog plus, when an

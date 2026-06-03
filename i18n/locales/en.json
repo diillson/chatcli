@@ -2861,5 +2861,12 @@
   "cfg.image.change_hint": "Use: /config image provider|api|model|url <value> · /config image models · /config image reset",
   "cfg.image.usage": "/config image [provider <name>|api images|responses|model <id>|url <url>|models|reset]",
   "cfg.image.catalog_header": "Image-capable models (catalog):",
-  "cfg.image.catalog_live": "Available on your OpenAI account:"
+  "cfg.image.catalog_live": "Available on your OpenAI account:",
+  "complete.configimage.provider": "Set the backend (sdwebui|openai|responses|google|xai|bedrock|url|auto)",
+  "complete.configimage.api": "OpenAI: Images API or Responses API",
+  "complete.configimage.model": "Set the image model",
+  "complete.configimage.url": "Set the URL (SD WebUI / compatible endpoint)",
+  "complete.configimage.models": "List the model catalog",
+  "complete.configimage.reset": "Clear image overrides",
+  "complete.configimage.val": "value"
 }

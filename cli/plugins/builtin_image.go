@@ -104,7 +104,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		return "", fmt.Errorf("@image: %w", err)
 	}
 
-	provider := imagegen.NewFromEnv(nil)
+	provider := imagegen.NewFromEnvContext(ctx, nil)
 
 	switch cmd {
 	case "status":

@@ -22,6 +22,7 @@
 package imagegen
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"strings"
@@ -36,8 +37,15 @@ const (
 )
 
 // NewFromEnv builds the configured provider, falling back to Null when none is
-// available. It never returns an error.
+// available. It never returns an error. Use NewFromEnvContext when a request
+// context is available (the Bedrock backend honors it during AWS config load).
 func NewFromEnv(logger *zap.Logger) Provider {
+	return NewFromEnvContext(context.Background(), logger)
+}
+
+// NewFromEnvContext is NewFromEnv with a caller-supplied context, threaded into
+// backends that perform setup I/O (Bedrock credential resolution).
+func NewFromEnvContext(ctx context.Context, logger *zap.Logger) Provider {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -64,6 +72,8 @@ func NewFromEnv(logger *zap.Logger) Provider {
 		return googleOrNull(model, logger, "CHATCLI_IMAGE_PROVIDER=google set but no GOOGLEAI_API_KEY/GEMINI_API_KEY")
 	case "xai", "grok":
 		return xaiOrNull(model, logger, "CHATCLI_IMAGE_PROVIDER=xai set but XAI_API_KEY is empty")
+	case "bedrock", "aws":
+		return bedrockOrNull(ctx, model, logger)
 	case "", "auto":
 		// fall through
 	default:
@@ -91,6 +101,17 @@ func NewFromEnv(logger *zap.Logger) Provider {
 		return xaiOrNull(model, logger, "")
 	}
 	return NewNull()
+}
+
+// bedrockOrNull builds the AWS Bedrock image backend (Nova Canvas / Titan),
+// loading credentials from the standard AWS chain.
+func bedrockOrNull(ctx context.Context, model string, logger *zap.Logger) Provider {
+	p, err := NewBedrock(ctx, bedrockImageRegion(), bedrockImageProfile(), model, logger)
+	if err != nil {
+		logger.Warn("imagegen: Bedrock init failed; image generation disabled", zap.Error(err))
+		return NewNull()
+	}
+	return p
 }
 
 // openAIWantsResponses reports whether the OpenAI path should use the Responses

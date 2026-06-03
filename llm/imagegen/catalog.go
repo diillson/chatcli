@@ -41,6 +41,8 @@ func KnownModels() []ModelInfo {
 		{Name: "gpt-4.1", Provider: "openai", API: "responses", Note: "Responses API image_generation."},
 		{Name: "imagen-3.0-generate-002", Provider: "google", API: "native", Note: "Google Imagen (predict)."},
 		{Name: "grok-2-image", Provider: "xai", API: "native", Note: "xAI grok image (OpenAI-shaped, no size)."},
+		{Name: "amazon.nova-canvas-v1:0", Provider: "bedrock", API: "native", Note: "AWS Bedrock Nova Canvas (InvokeModel)."},
+		{Name: "amazon.titan-image-generator-v2:0", Provider: "bedrock", API: "native", Note: "AWS Bedrock Titan Image."},
 	}
 }
 

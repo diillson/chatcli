@@ -1520,11 +1520,17 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "auth", Description: i18n.T("complete.config.auth")},
 			{Text: "security", Description: i18n.T("complete.config.security")},
 			{Text: "chat", Description: i18n.T("cfg.section.chat.title")},
+			{Text: "image", Description: i18n.T("cfg.section.image.title")},
 			{Text: "scheduler", Description: i18n.T("cfg.section.scheduler.title")},
 			{Text: "server", Description: i18n.T("complete.config.server")},
 			{Text: "hub", Description: i18n.T("cfg.section.hub.title")},
 		}
 		return prompt.FilterHasPrefix(sections, word, true)
+	}
+
+	// /config image <TAB> → mutating subcommands + values
+	if s := strings.ToLower(args[1]); s == "image" || s == "img" {
+		return cli.getConfigImageSuggestions(d)
 	}
 
 	// /config security <TAB> → mutating subcommands
