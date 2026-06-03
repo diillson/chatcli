@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -158,29 +159,43 @@ func sampleRateFromMime(mime string) int {
 }
 
 // pcmToWAV wraps signed-16-bit little-endian mono PCM in a 44-byte WAV header.
+// WAV size fields are 32-bit; safeU32 clamps the (always tiny) TTS sizes so the
+// int→uint32 conversions are provably overflow-free.
 func pcmToWAV(pcm []byte, sampleRate int) []byte {
 	const (
 		numChannels   = 1
 		bitsPerSample = 16
 	)
-	byteRate := sampleRate * numChannels * bitsPerSample / 8
-	blockAlign := numChannels * bitsPerSample / 8
-	dataLen := len(pcm)
+	dataLen := safeU32(len(pcm))
+	rate := safeU32(sampleRate)
+	byteRate := safeU32(sampleRate * numChannels * bitsPerSample / 8)
 
 	var b bytes.Buffer
 	b.WriteString("RIFF")
-	_ = binary.Write(&b, binary.LittleEndian, uint32(36+dataLen))
+	_ = binary.Write(&b, binary.LittleEndian, dataLen+36)
 	b.WriteString("WAVE")
 	b.WriteString("fmt ")
 	_ = binary.Write(&b, binary.LittleEndian, uint32(16))
 	_ = binary.Write(&b, binary.LittleEndian, uint16(1)) // PCM
 	_ = binary.Write(&b, binary.LittleEndian, uint16(numChannels))
-	_ = binary.Write(&b, binary.LittleEndian, uint32(sampleRate))
-	_ = binary.Write(&b, binary.LittleEndian, uint32(byteRate))
-	_ = binary.Write(&b, binary.LittleEndian, uint16(blockAlign))
+	_ = binary.Write(&b, binary.LittleEndian, rate)
+	_ = binary.Write(&b, binary.LittleEndian, byteRate)
+	_ = binary.Write(&b, binary.LittleEndian, uint16(numChannels*bitsPerSample/8)) // block align
 	_ = binary.Write(&b, binary.LittleEndian, uint16(bitsPerSample))
 	b.WriteString("data")
-	_ = binary.Write(&b, binary.LittleEndian, uint32(dataLen))
+	_ = binary.Write(&b, binary.LittleEndian, dataLen)
 	b.Write(pcm)
 	return b.Bytes()
+}
+
+// safeU32 converts a non-negative int to uint32 with explicit bounds, so the
+// conversion is provably overflow-free (satisfies gosec G115).
+func safeU32(n int) uint32 {
+	if n < 0 {
+		return 0
+	}
+	if n > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(n)
 }
