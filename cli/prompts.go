@@ -104,6 +104,14 @@ Other tools: @webfetch (fetch a URL), @websearch (search the web), and any MCP t
 - For a simple question that needs no action, just answer directly — no tools.
 `
 
+// GatewayLanguageDirective replaces the daemon-locale "respond in X" pin on the
+// gateway path. A messaging gateway serves many users in many languages, so the
+// reply must follow each incoming message rather than a fixed locale. English
+// (instruction to the model), prominent header like the locale directive it
+// replaces, and applied on every gateway path so language is never static.
+const GatewayLanguageDirective = `[RESPONSE LANGUAGE]
+Always write your reply in the SAME language as the user's MOST RECENT message — detect it fresh every turn (Portuguese → Portuguese, English → English, Spanish → Spanish, and so on). Never default to a fixed language. Only code, commands, file paths, and technical identifiers stay in their original form.`
+
 // coderBaseSystemPrompt picks the coder-engine base prompt: the conversational
 // GatewaySystemPrompt when answering through the messaging gateway, otherwise
 // the standard CoderSystemPrompt. Both expose the same tools; only the voice
