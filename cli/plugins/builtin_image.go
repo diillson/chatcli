@@ -141,7 +141,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 // writeImages saves the images. With one image and an out file path, it writes
 // there; otherwise it writes into out (a directory) or temp files.
 func writeImages(out string, images []imagegen.Image) ([]string, error) {
-	var paths []string
+	paths := make([]string, 0, len(images))
 	if len(images) == 1 && out != "" && !isDir(out) {
 		if err := os.WriteFile(out, images[0].Data, 0o600); err != nil {
 			return nil, err

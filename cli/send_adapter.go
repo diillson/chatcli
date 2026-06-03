@@ -47,7 +47,7 @@ func homeChannelEnv(platform string) string {
 }
 
 // splitTarget separates "platform:chat_id" into its parts. A bare "platform"
-// returns an empty chatID, signalling the home-channel lookup.
+// returns an empty chatID, signaling the home-channel lookup.
 func splitTarget(target string) (platform, chatID string) {
 	t := strings.TrimSpace(target)
 	if i := strings.IndexByte(t, ':'); i >= 0 {

@@ -320,7 +320,8 @@ func importSkills(dir, path string, overwrite bool) (string, error) {
 		return "", errors.New("@skill import: pack contains no skills")
 	}
 
-	var installed, skipped []string
+	installed := make([]string, 0, len(pack.Skills))
+	var skipped []string
 	for _, item := range pack.Skills {
 		name := strings.TrimSpace(item.Name)
 		if !skillNameRe.MatchString(name) || strings.TrimSpace(item.Content) == "" {

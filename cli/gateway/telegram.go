@@ -212,10 +212,10 @@ func (t *TelegramAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	// message (ogg/opus) or an audio file, with the text as caption. Falls
 	// back to text on any failure so a reply is never lost.
 	if msg.Audio != nil && len(msg.Audio.Data) > 0 {
-		if err := t.sendVoice(ctx, msg); err == nil {
-			return nil
-		} else {
+		if err := t.sendVoice(ctx, msg); err != nil {
 			t.logger.Warn("telegram: voice send failed, falling back to text", zap.Error(err))
+		} else {
+			return nil
 		}
 	}
 	payload, _ := json.Marshal(map[string]interface{}{

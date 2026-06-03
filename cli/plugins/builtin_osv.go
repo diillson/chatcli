@@ -402,7 +402,9 @@ func parseCargoLock(data []byte) []osvDep {
 		line := strings.TrimSpace(sc.Text())
 		switch {
 		case line == "[[package]]":
-			name, version = "", ""
+			// Only name needs resetting; version is always set by its own line
+			// before it is read in the append below.
+			name = ""
 		case strings.HasPrefix(line, "name = "):
 			name = strings.Trim(strings.TrimPrefix(line, "name = "), `"`)
 		case strings.HasPrefix(line, "version = "):

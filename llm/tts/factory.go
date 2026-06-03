@@ -73,11 +73,11 @@ func NewFromEnv(logger *zap.Logger) Provider {
 	}
 
 	if cmdTmpl != "" {
-		if p, err := NewCommandSynthesizer(cmdTmpl, ttsCmdExt(), "command"); err == nil {
+		p, err := NewCommandSynthesizer(cmdTmpl, ttsCmdExt(), "command")
+		if err == nil {
 			return p
-		} else {
-			logger.Warn("tts: invalid CHATCLI_TTS_CMD; ignoring", zap.Error(err))
 		}
+		logger.Warn("tts: invalid CHATCLI_TTS_CMD; ignoring", zap.Error(err))
 	}
 	if url != "" {
 		return selfHostedOrNull(url, model, logger)
