@@ -114,6 +114,20 @@ func Seed(skillsDir string, logger *zap.Logger) (*SeedResult, error) {
 	return res, nil
 }
 
+// EmbeddedNames returns the names of all skills bundled in the binary, sorted
+// is not guaranteed. Useful for tests and diagnostics.
+func EmbeddedNames() ([]string, error) {
+	m, err := embeddedSkills()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(m))
+	for name := range m {
+		out = append(out, name)
+	}
+	return out, nil
+}
+
 // embeddedSkills returns a map of skill name → SKILL.md bytes from the embed FS.
 func embeddedSkills() (map[string][]byte, error) {
 	out := map[string][]byte{}

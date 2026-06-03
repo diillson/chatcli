@@ -54,6 +54,26 @@ func TestBuiltinSkillsLoadThroughLoader(t *testing.T) {
 			t.Errorf("essential skill %q not loaded", want)
 		}
 	}
+
+	// Every embedded skill must parse and load — guards against a malformed
+	// frontmatter in any of the bundled skills shipping silently.
+	embedded, err := builtin.EmbeddedNames()
+	if err != nil {
+		t.Fatalf("EmbeddedNames: %v", err)
+	}
+	if len(embedded) == 0 {
+		t.Fatal("no embedded skills found")
+	}
+	for _, name := range embedded {
+		s, ok := byName[name]
+		if !ok {
+			t.Errorf("embedded skill %q did not load through the Loader", name)
+			continue
+		}
+		if s.Description == "" {
+			t.Errorf("embedded skill %q loaded with empty description (bad frontmatter?)", name)
+		}
+	}
 }
 
 func keysOf(m map[string]*Skill) []string {
