@@ -427,6 +427,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// @moa — Mixture-of-Agents: fan a prompt out to several models and
 		// synthesize one best answer. Wired below to the LLM manager.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMoaPlugin())
+		// @osv — keyless dependency vulnerability scanning via OSV.dev.
+		// Self-contained (HTTP + filesystem), no adapter wiring needed.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinOsvPlugin())
 		// @memory — deterministic long-term memory writes/recall. The
 		// adapter is wired below once the memory store exists; until then
 		// the tool reports "memory not enabled" rather than panicking.
