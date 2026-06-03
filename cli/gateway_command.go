@@ -29,10 +29,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/server/hub"
 	"go.uber.org/zap"
@@ -242,6 +244,7 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	sessions.loadBindings(ctx)
 
 	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions), cli.logger, 0)
+	runner.SetThinkingNotice(i18n.T("gateway.thinking"))
 	return runner.Run(ctx)
 }
 
@@ -278,6 +281,17 @@ func (cli *ChatCLI) teeLoggerToGatewayLog() func() {
 // lastAgentReply) and redirects os.Stdout for capture.
 func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 	var mu sync.Mutex
+
+	// Voice support: build the transcription provider once (self-hosted-first,
+	// per CHATCLI_TRANSCRIPTION_*). Null when nothing is configured — voice
+	// messages then get a friendly "enable transcription" reply instead of
+	// being silently dropped.
+	transcriber := transcription.NewFromEnv(cli.logger)
+	transcribeLang := strings.TrimSpace(os.Getenv("CHATCLI_TRANSCRIPTION_LANG"))
+	if !transcription.IsNull(transcriber) && cli.logger != nil {
+		cli.logger.Info("gateway: voice transcription enabled", zap.String("provider", transcriber.Name()))
+	}
+
 	return func(ctx context.Context, session, text string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -298,6 +312,16 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 		if !ok {
 			platform, chatID, _ := strings.Cut(session, ":")
 			msg = gateway.InboundMessage{Platform: platform, ChatID: chatID, UserID: chatID, Text: text}
+		}
+
+		// Voice message: transcribe to text before anything else, so the hub
+		// records the transcript and the engine sees a normal text request.
+		if msg.Audio != nil && len(msg.Audio.Data) > 0 {
+			transcript, handled, reply := cli.transcribeInbound(ctx, transcriber, transcribeLang, &msg)
+			if handled {
+				return reply, nil // disabled / failed / empty — answered directly
+			}
+			msg.Text = transcript
 		}
 
 		// Resolve the sender's shared conversation and record the incoming turn
@@ -331,6 +355,36 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 		conv.finish(ctx, reply)
 		return reply, nil
 	}
+}
+
+// transcribeInbound converts a voice message to text. It returns handled=true
+// with a user-facing reply when transcription is unavailable, fails, or yields
+// nothing — those cases are answered directly without running the engine.
+// Otherwise it returns the transcript, merged with any caption already on the
+// message, for the caller to use as the request text.
+func (cli *ChatCLI) transcribeInbound(ctx context.Context, t transcription.Provider, lang string, msg *gateway.InboundMessage) (transcript string, handled bool, reply string) {
+	if transcription.IsNull(t) {
+		return "", true, i18n.T("gateway.audio.disabled")
+	}
+	gateway.Progress(ctx)(i18n.T("gateway.audio.transcribing"))
+
+	tctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	out, err := t.Transcribe(tctx, msg.Audio.Data, msg.Audio.MimeType, msg.Audio.FileName, lang)
+	if err != nil {
+		cli.logger.Warn("gateway: transcription failed", zap.Error(err))
+		return "", true, i18n.T("gateway.audio.failed")
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return "", true, i18n.T("gateway.audio.empty")
+	}
+	cli.logger.Info("gateway: voice transcribed", zap.Int("chars", len(out)))
+
+	if caption := strings.TrimSpace(msg.Text); caption != "" {
+		return caption + "\n\n[voice transcript] " + out, false, ""
+	}
+	return out, false, ""
 }
 
 // gatewayCleanLine trims a streamed line, strips box-drawing/decorative runes,

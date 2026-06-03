@@ -191,6 +191,10 @@ func (d *DiscordAdapter) runSession(ctx context.Context, inbound chan<- InboundM
 		case dOpDispatch:
 			if t == "MESSAGE_CREATE" {
 				if msg, ok := parseDiscordMessage(dData); ok {
+					d.hydrateAudio(sessionCtx, &msg)
+					if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil {
+						continue // audio download failed and there was no text
+					}
 					select {
 					case inbound <- msg:
 					case <-sessionCtx.Done():
@@ -295,16 +299,32 @@ type discordMessageData struct {
 		Bot      bool   `json:"bot"`
 		Username string `json:"username"`
 	} `json:"author"`
+	Attachments []struct {
+		URL         string `json:"url"`
+		ContentType string `json:"content_type"`
+		Filename    string `json:"filename"`
+	} `json:"attachments"`
 }
 
 // parseDiscordMessage extracts a normalized message from a MESSAGE_CREATE
-// payload. Bot-authored and empty messages are skipped to prevent loops.
+// payload. Bot-authored messages are skipped to prevent loops. A message with
+// no text but an audio attachment is kept (the attachment is fetched later).
 func parseDiscordMessage(d json.RawMessage) (InboundMessage, bool) {
 	var m discordMessageData
 	if err := json.Unmarshal(d, &m); err != nil {
 		return InboundMessage{}, false
 	}
-	if m.Author.Bot || strings.TrimSpace(m.Content) == "" || m.ChannelID == "" {
+	if m.Author.Bot || m.ChannelID == "" {
+		return InboundMessage{}, false
+	}
+	var audio *InboundAudio
+	for _, at := range m.Attachments {
+		if at.URL != "" && isAudioMime(at.ContentType) {
+			audio = &InboundAudio{ref: at.URL, MimeType: at.ContentType, FileName: at.Filename}
+			break
+		}
+	}
+	if strings.TrimSpace(m.Content) == "" && audio == nil {
 		return InboundMessage{}, false
 	}
 	return InboundMessage{
@@ -313,7 +333,26 @@ func parseDiscordMessage(d json.RawMessage) (InboundMessage, bool) {
 		UserID:   m.Author.ID,
 		UserName: m.Author.Username,
 		Text:     m.Content,
+		Audio:    audio,
 	}, true
+}
+
+// hydrateAudio downloads a Discord audio attachment from its CDN URL (already
+// signed — no auth header needed). On failure it clears Audio.
+func (d *DiscordAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) {
+	if msg.Audio == nil || len(msg.Audio.Data) > 0 {
+		return
+	}
+	data, mime, err := fetchAudioBytes(ctx, d.http, msg.Audio.ref, "", maxAudioBytes())
+	if err != nil {
+		d.logger.Warn("gateway/discord: voice download failed", zap.String("user", msg.UserID), zap.Error(err))
+		msg.Audio = nil
+		return
+	}
+	msg.Audio.Data = data
+	if msg.Audio.MimeType == "" {
+		msg.Audio.MimeType = mime
+	}
 }
 
 func init() {

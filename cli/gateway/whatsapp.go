@@ -90,6 +90,10 @@ func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- Inb
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 			rw.WriteHeader(http.StatusOK) // ack fast; Meta retries on non-200
 			for _, msg := range parseWhatsAppInbound(body) {
+				a.hydrateAudio(ctx, &msg)
+				if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil {
+					continue // audio download failed and there was no text
+				}
 				select {
 				case inbound <- msg:
 				case <-ctx.Done():
@@ -152,7 +156,7 @@ func (a *WhatsAppAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	return nil
 }
 
-// whatsAppWebhook mirrors the Cloud API webhook payload (text messages only).
+// whatsAppWebhook mirrors the Cloud API webhook payload (text + audio).
 type whatsAppWebhook struct {
 	Entry []struct {
 		Changes []struct {
@@ -163,14 +167,20 @@ type whatsAppWebhook struct {
 					Text struct {
 						Body string `json:"body"`
 					} `json:"text"`
+					Audio *struct {
+						ID       string `json:"id"`
+						MimeType string `json:"mime_type"`
+					} `json:"audio"`
 				} `json:"messages"`
 			} `json:"value"`
 		} `json:"changes"`
 	} `json:"entry"`
 }
 
-// parseWhatsAppInbound extracts text messages from a Cloud API webhook body.
-// Non-text messages and status callbacks are ignored.
+// parseWhatsAppInbound extracts text and audio messages from a Cloud API
+// webhook body. Status callbacks and other message types are ignored. Audio
+// bytes are NOT fetched here (the parser stays network-free); the adapter
+// resolves the media id to bytes via hydrateAudio before dispatch.
 func parseWhatsAppInbound(body []byte) []InboundMessage {
 	var w whatsAppWebhook
 	if err := json.Unmarshal(body, &w); err != nil {
@@ -180,19 +190,88 @@ func parseWhatsAppInbound(body []byte) []InboundMessage {
 	for _, e := range w.Entry {
 		for _, c := range e.Changes {
 			for _, m := range c.Value.Messages {
-				if m.Type != "text" || strings.TrimSpace(m.Text.Body) == "" || m.From == "" {
+				if m.From == "" {
 					continue
 				}
-				out = append(out, InboundMessage{
-					Platform: whatsappPlatform,
-					ChatID:   m.From,
-					UserID:   m.From,
-					Text:     m.Text.Body,
-				})
+				switch {
+				case m.Type == "text" && strings.TrimSpace(m.Text.Body) != "":
+					out = append(out, InboundMessage{
+						Platform: whatsappPlatform,
+						ChatID:   m.From,
+						UserID:   m.From,
+						Text:     m.Text.Body,
+					})
+				case m.Type == "audio" && m.Audio != nil && m.Audio.ID != "":
+					out = append(out, InboundMessage{
+						Platform: whatsappPlatform,
+						ChatID:   m.From,
+						UserID:   m.From,
+						Audio:    &InboundAudio{ref: m.Audio.ID, MimeType: m.Audio.MimeType},
+					})
+				}
 			}
 		}
 	}
 	return out
+}
+
+// hydrateAudio resolves a WhatsApp media id to its bytes via the two-step Graph
+// flow (GET /{media-id} → media URL → GET URL), authenticated with the access
+// token. On failure it clears Audio so the message is dropped downstream.
+func (a *WhatsAppAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) {
+	if msg.Audio == nil || len(msg.Audio.Data) > 0 {
+		return
+	}
+	data, mime, err := a.downloadMedia(ctx, msg.Audio.ref)
+	if err != nil {
+		a.logger.Warn("gateway/whatsapp: voice download failed", zap.String("user", msg.UserID), zap.Error(err))
+		msg.Audio = nil
+		return
+	}
+	msg.Audio.Data = data
+	if msg.Audio.MimeType == "" {
+		msg.Audio.MimeType = mime
+	}
+}
+
+// downloadMedia performs the Graph media lookup then fetches the bytes.
+func (a *WhatsAppAdapter) downloadMedia(ctx context.Context, mediaID string) ([]byte, string, error) {
+	endpoint := fmt.Sprintf("%s/%s", a.graphBase, mediaID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+a.accessToken)
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("whatsapp media lookup status %d", resp.StatusCode)
+	}
+	var lookup struct {
+		URL      string `json:"url"`
+		MimeType string `json:"mime_type"`
+	}
+	if err := json.Unmarshal(body, &lookup); err != nil {
+		return nil, "", err
+	}
+	if lookup.URL == "" {
+		return nil, "", fmt.Errorf("whatsapp media lookup: empty url")
+	}
+	data, ctype, err := fetchAudioBytes(ctx, a.http, lookup.URL, a.accessToken, maxAudioBytes())
+	if err != nil {
+		return nil, "", err
+	}
+	if lookup.MimeType != "" {
+		ctype = lookup.MimeType
+	}
+	return data, ctype, nil
 }
 
 func init() {

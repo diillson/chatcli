@@ -32,7 +32,25 @@ type InboundMessage struct {
 	ChatID   string // platform-specific conversation id
 	UserID   string // platform-specific sender id
 	UserName string // display name, best-effort
-	Text     string // message body
+	Text     string // message body (may be empty for a voice-only message)
+
+	// Audio carries a voice/audio attachment when the message has one. The
+	// pure parser fills its metadata (and the unexported download handle); the
+	// owning adapter then downloads the bytes into Data before dispatch.
+	// Consumers read Data/MimeType/FileName only.
+	Audio *InboundAudio
+}
+
+// InboundAudio is a voice/audio attachment on an inbound message.
+type InboundAudio struct {
+	Data     []byte // the raw audio, populated by the adapter after download
+	MimeType string // e.g. "audio/ogg" — best-effort, may be empty
+	FileName string // best-effort original name, may be empty
+
+	// ref is a platform-opaque download handle (Telegram file_id, WhatsApp
+	// media id, Discord/Slack URL) that the owning adapter resolves to Data.
+	// It never leaves the gateway package.
+	ref string
 }
 
 // SessionKey is the stable conversation identity used to scope history.

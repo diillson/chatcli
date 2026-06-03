@@ -678,20 +678,33 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 			a.logger.Info("Usando persona ativa + modo agent", zap.String("agent", activeAgent.Name))
 		}
 	} else if isCoder {
-		coreText = CoderSystemPrompt
+		// The gateway answers through a chat app: use the dedicated
+		// conversational base (same tools, friendlier voice) instead of the
+		// terse coder prompt. Only when no persona owns the core text.
+		coreText = coderBaseSystemPrompt(a.gatewayPersona)
 	} else {
 		osName := runtime.GOOS
 		shellName := utils.GetUserShell()
 		currentDir, _ := os.Getwd()
 		coreText = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
 	}
-	coreText += "\n\n" + i18n.T("ai.response_language")
-
-	// Gateway persona: same coder engine and tools, but the answer is bound for
-	// a chat platform (Telegram/WhatsApp/…), so steer the model toward concise,
-	// plain-text replies without decorative formatting. Appended to the stable
-	// core block so it stays cacheable across turns.
+	// Language directive. The interactive CLI pins the daemon/user locale; the
+	// gateway must instead MIRROR each incoming message's language (every user
+	// writes in their own). Apply the dynamic directive on EVERY gateway path —
+	// including when an active persona owns the core text and the
+	// GatewaySystemPrompt (which also says this) isn't used — so the reply is
+	// never statically pinned to one language.
 	if a.gatewayPersona {
+		coreText += "\n\n" + GatewayLanguageDirective
+	} else {
+		coreText += "\n\n" + i18n.T("ai.response_language")
+	}
+
+	// Gateway persona reinforcement: only needed when the core text is NOT
+	// already the dedicated GatewaySystemPrompt — i.e. when an active persona
+	// (or a non-coder profile) owns the core block. Steers those toward concise,
+	// plain-text chat replies. The GatewaySystemPrompt path already embeds this.
+	if a.gatewayPersona && (hasActivePersona || !isCoder) {
 		coreText += "\n\n" + i18n.T("gateway.persona_prompt")
 	}
 

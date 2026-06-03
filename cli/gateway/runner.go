@@ -27,16 +27,40 @@ const progressFlushInterval = 3 * time.Second
 // (Telegram is 4096; WhatsApp ~4096). Longer messages are clipped.
 const maxMessageRunes = 3500
 
+// defaultThinkingDelay is how long the agent may run before a non-typing
+// channel gets a one-time "working on it" notice — so fast replies stay
+// clutter-free. defaultTypingRefresh re-sends the native typing indicator
+// before it expires (Telegram's lasts ~5s). Per-Runner fields override them
+// (tests shrink them) without a shared global the worker goroutines would race.
+const (
+	defaultThinkingDelay = 2 * time.Second
+	defaultTypingRefresh = 4 * time.Second
+)
+
+// TypingAware is an optional adapter capability: a platform that can show a
+// native "typing…" indicator implements it. The Runner refreshes it while the
+// agent works, so the user sees activity without message clutter.
+type TypingAware interface {
+	SendTyping(ctx context.Context, chatID string) error
+}
+
 // Runner wires adapters to the agent: it fans inbound messages out to the
 // AgentFunc (bounded concurrency) and delivers replies through the adapter
 // that received them.
 type Runner struct {
-	adapters      map[string]Adapter // by platform name, for reply routing
-	order         []Adapter          // start order
-	agent         AgentFunc
-	logger        *zap.Logger
-	maxConcurrent int
+	adapters       map[string]Adapter // by platform name, for reply routing
+	order          []Adapter          // start order
+	agent          AgentFunc
+	logger         *zap.Logger
+	maxConcurrent  int
+	thinkingNotice string        // text "working on it" notice for non-typing channels
+	thinkingDelay  time.Duration // 0 → defaultThinkingDelay (set by tests)
+	typingRefresh  time.Duration // 0 → defaultTypingRefresh (set by tests)
 }
+
+// SetThinkingNotice sets the localized "the assistant is working" message used
+// on channels without a native typing indicator. Empty keeps a built-in default.
+func (r *Runner) SetThinkingNotice(s string) { r.thinkingNotice = s }
 
 // NewRunner builds a runner. maxConcurrent <= 0 uses DefaultMaxConcurrent.
 func NewRunner(adapters []Adapter, agent AgentFunc, logger *zap.Logger, maxConcurrent int) *Runner {
@@ -151,8 +175,14 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 			zap.Duration("dur", time.Since(t0)))
 	}
 
+	// Let the user know the message landed and the assistant is working — a
+	// native typing indicator where supported, a one-time delayed notice
+	// otherwise. Stopped the moment the agent returns.
+	stopThinking := r.startThinking(ctx, adapter, msg, send)
+
 	sink := newProgressSink(func(s string) { send("progress", s) })
 	reply, err := r.agent(WithProgress(WithInbound(ctx, msg), sink.emit), msg.SessionKey(), msg.Text)
+	stopThinking()
 	sink.flush() // deliver any progress buffered since the last flush
 	if err != nil {
 		r.logger.Warn("gateway: agent run failed",
@@ -170,6 +200,54 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 		return
 	}
 	send("final", reply)
+}
+
+// startThinking signals that the assistant is working: a native typing
+// indicator on adapters that implement TypingAware (refreshed before it
+// expires), or a single delayed text notice otherwise. The returned stop func
+// ends the signal and must be called once the agent returns. Replies faster
+// than thinkingDelay send no text notice, so they stay clutter-free.
+func (r *Runner) startThinking(ctx context.Context, adapter Adapter, msg InboundMessage, send func(kind, text string)) func() {
+	delay := r.thinkingDelay
+	if delay <= 0 {
+		delay = defaultThinkingDelay
+	}
+	refresh := r.typingRefresh
+	if refresh <= 0 {
+		refresh = defaultTypingRefresh
+	}
+	done := make(chan struct{})
+	go func() {
+		if typer, ok := adapter.(TypingAware); ok {
+			if err := typer.SendTyping(ctx, msg.ChatID); err == nil {
+				ticker := time.NewTicker(refresh)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-done:
+						return
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						_ = typer.SendTyping(ctx, msg.ChatID)
+					}
+				}
+			}
+			// typing not deliverable → fall through to the text notice
+		}
+		notice := r.thinkingNotice
+		if notice == "" {
+			notice = "🤔"
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+		case <-time.After(delay):
+			send("thinking", notice)
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
 }
 
 // progressSink coalesces streamed progress lines and flushes them as a single
