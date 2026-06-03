@@ -190,3 +190,24 @@ func TestMoaRun_PreservesProviderCase(t *testing.T) {
 		t.Fatalf("expected synthesis, got %q", out)
 	}
 }
+
+// When the aggregator (or a member) matches the session's active provider, the
+// adapter must reuse the live session client so OAuth / forwarded-token auth is
+// honored — not build a fresh, possibly-unauthenticated client.
+func TestMoaRun_ReusesSessionClientForAuth(t *testing.T) {
+	mgr := &moaFakeManager{
+		minimalManager: &minimalManager{providers: []string{"a", "b"}},
+		answers:        map[string]string{"a": "ans a", "b": "ans b"}, // no "AGG" in manager
+	}
+	cli := newMoaCLI(mgr, "AGG", "m")
+	cli.Client = &moaFakeClient{answer: "SESSION-AUTH-SYNTH"} // the OAuth/forwarded session client
+	a := &moaPluginAdapter{cli: cli}
+
+	out, err := a.Run(context.Background(), "q", nil, "") // aggregator defaults to AGG == session
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !strings.Contains(out, "SESSION-AUTH-SYNTH") {
+		t.Fatalf("aggregator should reuse the session client, got %q", out)
+	}
+}

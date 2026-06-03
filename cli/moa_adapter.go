@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/client"
 	"go.uber.org/zap"
 )
 
@@ -64,6 +65,20 @@ func parseMember(spec string) moaMember {
 		return moaMember{label: s, provider: strings.TrimSpace(s[:i]), model: strings.TrimSpace(s[i+1:])}
 	}
 	return moaMember{label: s, provider: s}
+}
+
+// clientFor returns an authenticated client for provider/model. When the target
+// matches the session's active provider (and model, if given), it REUSES the
+// live session client (a.cli.Client) — which already carries whatever auth the
+// session uses: OAuth tokens, client-forwarded tokens (server/gateway mode), or
+// an API key. Other targets go through the manager, which itself handles OAuth.
+func (a *moaPluginAdapter) clientFor(provider, model string) (client.LLMClient, error) {
+	if a.cli.Client != nil &&
+		strings.EqualFold(strings.TrimSpace(provider), strings.TrimSpace(a.cli.Provider)) &&
+		(strings.TrimSpace(model) == "" || strings.EqualFold(strings.TrimSpace(model), strings.TrimSpace(a.cli.Model))) {
+		return a.cli.Client, nil
+	}
+	return a.cli.manager.GetClient(provider, model)
 }
 
 // canonicalProvider maps a user-supplied provider name to the actual registered
@@ -127,12 +142,12 @@ func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs [
 		wg.Add(1)
 		go func(i int, m moaMember) {
 			defer wg.Done()
-			client, err := a.cli.manager.GetClient(m.provider, m.model)
+			cl, err := a.clientFor(m.provider, m.model)
 			if err != nil {
 				results[i] = moaResult{label: m.label, err: err}
 				return
 			}
-			ans, err := client.SendPrompt(ctx, prompt, nil, 0)
+			ans, err := cl.SendPrompt(ctx, prompt, nil, 0)
 			results[i] = moaResult{label: m.label, answer: ans, err: err}
 		}(i, m)
 	}
@@ -168,7 +183,7 @@ func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs [
 
 	// Synthesize.
 	aggProvider, aggModel := a.resolveAggregator(aggregatorSpec)
-	aggClient, err := a.cli.manager.GetClient(aggProvider, aggModel)
+	aggClient, err := a.clientFor(aggProvider, aggModel)
 	if err != nil {
 		// Aggregator unavailable: fall back to the longest candidate rather
 		// than failing the whole call.
