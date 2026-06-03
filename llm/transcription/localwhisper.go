@@ -91,15 +91,20 @@ func (l *localWhisperCpp) Transcribe(ctx context.Context, audio []byte, mimeType
 		}
 	}
 
+	// whisper-cli defaults --language to "en" (NOT auto-detect), so a Portuguese
+	// voice note would be transcribed/translated as English. Pass "auto" when no
+	// language is configured so it detects the spoken language and transcribes in
+	// it — which is what makes replies mirror the user's language.
+	lang := strings.TrimSpace(language)
+	if lang == "" {
+		lang = "auto"
+	}
 	// Build argv explicitly (not a space-split template): l.bin and model can be
 	// absolute paths containing spaces (Windows "Program Files", user dirs), so
 	// splitting on whitespace would corrupt the command.
-	argv := []string{l.bin, "-m", model, "-nt", "-f", "{input}"}
-	if strings.TrimSpace(language) != "" {
-		argv = append(argv, "-l", "{lang}")
-	}
+	argv := []string{l.bin, "-m", model, "-nt", "-l", lang, "-f", "{input}"}
 	runner := newCommandFromArgv(argv, "local")
-	out, err := runner.Transcribe(ctx, data, mime, filename, language)
+	out, err := runner.Transcribe(ctx, data, mime, filename, lang)
 	if err != nil && !converted && strings.Contains(err.Error(), "no transcript") {
 		return "", fmt.Errorf("whisper.cpp produced no transcript — it cannot decode Opus voice notes (Telegram/WhatsApp). Install ffmpeg (e.g. brew install ffmpeg) for local Opus support, or use a cloud backend: %w", err)
 	}

@@ -120,6 +120,11 @@ func TestLocalWhisperCpp_Transcribe(t *testing.T) {
 	if out == "" {
 		t.Error("expected non-empty output from the echo stand-in")
 	}
+	// Regression guard: with no language configured, whisper-cli must be told to
+	// auto-detect (its built-in default is "en", which would force English).
+	if !strings.Contains(out, "-l auto") {
+		t.Errorf("expected '-l auto' in the whisper-cli args; got %q", out)
+	}
 	if !strings.HasPrefix(l.Name(), "local:echo/") {
 		t.Errorf("Name = %q", l.Name())
 	}
