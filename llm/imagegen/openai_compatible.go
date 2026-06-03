@@ -86,11 +86,14 @@ func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, opts Opt
 		size = "1024x1024"
 	}
 
+	// Note: response_format is intentionally omitted. Newer models (e.g.
+	// gpt-image-1) reject it and always return b64_json, while dall-e returns a
+	// URL by default — we handle both shapes in the response below. Sending the
+	// field would 400 on gpt-image-1.
 	payload := map[string]interface{}{
-		"model":           o.model,
-		"prompt":          prompt,
-		"n":               n,
-		"response_format": "b64_json",
+		"model":  o.model,
+		"prompt": prompt,
+		"n":      n,
 	}
 	if !o.omitSize {
 		payload["size"] = size
@@ -118,6 +121,7 @@ func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, opts Opt
 	var out struct {
 		Data []struct {
 			B64 string `json:"b64_json"`
+			URL string `json:"url"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -128,14 +132,45 @@ func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, opts Opt
 	}
 	images := make([]Image, 0, len(out.Data))
 	for _, d := range out.Data {
-		raw, err := base64.StdEncoding.DecodeString(d.B64)
-		if err != nil || len(raw) == 0 {
+		if d.B64 != "" {
+			if raw, derr := base64.StdEncoding.DecodeString(d.B64); derr == nil && len(raw) > 0 {
+				images = append(images, Image{Data: raw, Mime: "image/png", Ext: "png"})
+			}
 			continue
 		}
-		images = append(images, Image{Data: raw, Mime: "image/png", Ext: "png"})
+		if d.URL != "" {
+			if raw, mime, derr := o.fetchURL(ctx, d.URL); derr == nil && len(raw) > 0 {
+				ext := "png"
+				if strings.Contains(mime, "jpeg") {
+					ext = "jpg"
+				}
+				images = append(images, Image{Data: raw, Mime: mime, Ext: ext})
+			}
+		}
 	}
 	if len(images) == 0 {
 		return nil, fmt.Errorf("imagegen: %s returned no decodable images", o.label)
 	}
 	return images, nil
+}
+
+// fetchURL downloads an image the API returned by URL (dall-e default shape).
+func (o *OpenAICompatible) fetchURL(ctx context.Context, url string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("download status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, resp.Header.Get("Content-Type"), nil
 }

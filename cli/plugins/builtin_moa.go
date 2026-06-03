@@ -193,13 +193,7 @@ func parseMoaInvocation(args []string) (string, string, error) {
 			args[0],
 		)
 	}
-	// argv form: treat the remainder as the prompt for `ask`.
-	if canon == "ask" {
-		rest := strings.TrimSpace(strings.TrimPrefix(payload, args[0]))
-		b, _ := json.Marshal(map[string]string{"prompt": rest})
-		return canon, string(b), nil
-	}
-	return canon, "{}", nil
+	return canon, argvInner(args[1:], "prompt", map[string]bool{"models": true}, nil), nil
 }
 
 // canonicalMoaCmd folds aliases.

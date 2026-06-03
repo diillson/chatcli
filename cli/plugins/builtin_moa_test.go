@@ -115,3 +115,22 @@ func TestMoaSchema(t *testing.T) {
 		t.Fatal("schema/name wrong")
 	}
 }
+
+func TestMoa_FlattenedArgvFromAgent(t *testing.T) {
+	f := &fakeMoaAdapter{out: "ok"}
+	withMoaAdapter(t, f)
+	p := NewBuiltinMoaPlugin()
+	argv := []string{"ask", "--prompt", "why is the sky blue", "--models", "openai", "--models", "anthropic", "--aggregator", "googleai"}
+	if _, err := p.Execute(context.Background(), argv); err != nil {
+		t.Fatal(err)
+	}
+	if f.lastPrompt != "why is the sky blue" {
+		t.Fatalf("prompt = %q", f.lastPrompt)
+	}
+	if len(f.lastModels) != 2 || f.lastModels[0] != "openai" || f.lastModels[1] != "anthropic" {
+		t.Fatalf("models = %v", f.lastModels)
+	}
+	if f.lastAgg != "googleai" {
+		t.Fatalf("aggregator = %q", f.lastAgg)
+	}
+}

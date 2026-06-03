@@ -174,12 +174,7 @@ func parseSessionInvocation(args []string) (string, string, error) {
 	if canon == "" {
 		return "", "", fmt.Errorf("expected JSON envelope or subcommand; got %q", args[0])
 	}
-	if canon == "search" {
-		rest := strings.TrimSpace(strings.TrimPrefix(payload, args[0]))
-		b, _ := json.Marshal(map[string]string{"query": rest})
-		return canon, string(b), nil
-	}
-	return canon, "{}", nil
+	return canon, argvInner(args[1:], "query", nil, map[string]bool{"limit": true}), nil
 }
 
 func canonicalSessionCmd(s string) string {

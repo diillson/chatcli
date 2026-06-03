@@ -515,13 +515,14 @@ func parseSkillInvocation(args []string) (string, string, error) {
 	if canon == "" {
 		return "", "", fmt.Errorf("expected JSON envelope or subcommand; got %q", args[0])
 	}
-	// argv form: only list and show/remove <name> make sense.
-	rest := strings.TrimSpace(strings.TrimPrefix(payload, args[0]))
-	if rest != "" {
-		b, _ := json.Marshal(map[string]string{"name": rest})
-		return canon, string(b), nil
+	// argv form (flattened by the agent): "<cmd> --key value ..." with
+	// triggers/allowed_tools/names as repeated flags → arrays.
+	primary := "name"
+	if canon == "import" {
+		primary = "path"
 	}
-	return canon, "{}", nil
+	inner := argvInner(args[1:], primary, map[string]bool{"triggers": true, "allowed_tools": true, "names": true}, nil)
+	return canon, inner, nil
 }
 
 func canonicalSkillCmd(s string) string {

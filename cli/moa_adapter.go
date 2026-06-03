@@ -54,13 +54,28 @@ func (a *moaPluginAdapter) log() *zap.Logger {
 	return zap.NewNop()
 }
 
-// parseMember turns "provider" or "provider:model" into a moaMember.
+// parseMember turns "provider" or "provider:model" into a moaMember. The
+// provider case is preserved verbatim — GetClient does a case-sensitive lookup
+// against the registered provider keys (which are upper-case); canonicalProvider
+// reconciles user-typed case at resolve time.
 func parseMember(spec string) moaMember {
 	s := strings.TrimSpace(spec)
 	if i := strings.IndexByte(s, ':'); i >= 0 {
-		return moaMember{label: s, provider: strings.ToLower(strings.TrimSpace(s[:i])), model: strings.TrimSpace(s[i+1:])}
+		return moaMember{label: s, provider: strings.TrimSpace(s[:i]), model: strings.TrimSpace(s[i+1:])}
 	}
-	return moaMember{label: s, provider: strings.ToLower(s)}
+	return moaMember{label: s, provider: s}
+}
+
+// canonicalProvider maps a user-supplied provider name to the actual registered
+// key (case-insensitively), so "openai" resolves to "OPENAI". Unknown names are
+// returned unchanged so GetClient can surface a clear error.
+func (a *moaPluginAdapter) canonicalProvider(name string) string {
+	for _, p := range a.cli.manager.GetAvailableProviders() {
+		if strings.EqualFold(p, name) {
+			return p
+		}
+	}
+	return name
 }
 
 // resolveMembers builds the participant list. Empty input → up to
@@ -73,6 +88,7 @@ func (a *moaPluginAdapter) resolveMembers(specs []string) []moaMember {
 				continue
 			}
 			m := parseMember(s)
+			m.provider = a.canonicalProvider(m.provider)
 			if m.label == "" {
 				m.label = m.provider
 			}
@@ -88,7 +104,7 @@ func (a *moaPluginAdapter) resolveMembers(specs []string) []moaMember {
 	}
 	out := make([]moaMember, 0, len(providers))
 	for _, p := range providers {
-		out = append(out, moaMember{label: p, provider: strings.ToLower(p)})
+		out = append(out, moaMember{label: p, provider: p})
 	}
 	return out
 }
@@ -123,9 +139,13 @@ func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs [
 	wg.Wait()
 
 	var ok []moaResult
+	var firstErr error
 	for _, r := range results {
 		if r.err != nil {
 			a.log().Warn("@moa member failed", zap.String("member", r.label), zap.Error(r.err))
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", r.label, r.err)
+			}
 			continue
 		}
 		if strings.TrimSpace(r.answer) != "" {
@@ -133,6 +153,11 @@ func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs [
 		}
 	}
 	if len(ok) == 0 {
+		// Surface the underlying provider error so the failure is diagnosable
+		// instead of an opaque "all failed".
+		if firstErr != nil {
+			return "", fmt.Errorf("%s: %w", i18n.T("moa.tool.all_failed"), firstErr)
+		}
 		return "", fmt.Errorf("%s", i18n.T("moa.tool.all_failed"))
 	}
 
@@ -171,7 +196,7 @@ func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs [
 func (a *moaPluginAdapter) resolveAggregator(spec string) (provider, model string) {
 	if strings.TrimSpace(spec) != "" {
 		m := parseMember(spec)
-		return m.provider, m.model
+		return a.canonicalProvider(m.provider), m.model
 	}
 	return a.cli.Provider, a.cli.Model
 }

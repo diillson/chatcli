@@ -89,3 +89,15 @@ func TestCanonicalSessionCmd(t *testing.T) {
 		t.Fatal("canonicalSessionCmd mismatch")
 	}
 }
+
+func TestSession_FlattenedArgvFromAgent(t *testing.T) {
+	f := &fakeSessionAdapter{out: "hits"}
+	withSessionAdapter(t, f)
+	p := NewBuiltinSessionPlugin()
+	if _, err := p.Execute(context.Background(), []string{"search", "--query", "rate limiter design", "--limit", "5"}); err != nil {
+		t.Fatal(err)
+	}
+	if f.lastQuery != "rate limiter design" || f.lastLimit != 5 {
+		t.Fatalf("query=%q limit=%d", f.lastQuery, f.lastLimit)
+	}
+}

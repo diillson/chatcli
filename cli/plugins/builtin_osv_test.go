@@ -129,3 +129,15 @@ func TestCanonicalOsvCmd(t *testing.T) {
 		t.Fatal("canonicalOsvCmd mismatch")
 	}
 }
+
+func TestOsv_FlattenedArgvCheck(t *testing.T) {
+	defer mockOSV(t, "requests", "2.19.0")()
+	p := NewBuiltinOsvPlugin()
+	out, err := p.Execute(context.Background(), []string{"check", "--ecosystem", "PyPI", "--package", "requests", "--version", "2.19.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "GHSA-xxxx") {
+		t.Fatalf("flattened check failed: %q", out)
+	}
+}

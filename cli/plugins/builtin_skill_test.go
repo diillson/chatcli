@@ -281,3 +281,32 @@ func TestSkill_Meta(t *testing.T) {
 		t.Fatal("schema/usage missing export/import")
 	}
 }
+
+// Regression: the agent flattens {cmd,args} into "--flag value" argv. The whole
+// thing used to be treated as the name. This proves the flattened form parses.
+func TestSkill_FlattenedArgvFromAgent(t *testing.T) {
+	dir := withSkillsDir(t)
+	p := NewBuiltinSkillPlugin()
+	argv := []string{"create",
+		"--name", "deploy-x",
+		"--description", "How to deploy X",
+		"--content", "# Deploy\nrun make",
+		"--triggers", "deploy x",
+		"--triggers", "ship x",
+		"--allowed_tools", "@coder",
+		"--allowed_tools", "Bash",
+	}
+	if _, err := p.Execute(context.Background(), argv); err != nil {
+		t.Fatalf("flattened create: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "deploy-x", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("skill not created: %v", err)
+	}
+	s := string(data)
+	for _, want := range []string{`name: "deploy-x"`, `- "deploy x"`, `- "ship x"`, `allowed-tools: ["@coder","Bash"]`, "# Deploy"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+}

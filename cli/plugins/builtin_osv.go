@@ -447,12 +447,11 @@ func parseOsvInvocation(args []string) (string, string, error) {
 	if canon == "" {
 		return "", "", fmt.Errorf("expected JSON envelope or subcommand; got %q", args[0])
 	}
-	if canon == "scan" {
-		rest := strings.TrimSpace(strings.TrimPrefix(payload, args[0]))
-		b, _ := json.Marshal(map[string]string{"path": rest})
-		return canon, string(b), nil
+	primary := "path"
+	if canon == "check" {
+		primary = "package"
 	}
-	return canon, "{}", nil
+	return canon, argvInner(args[1:], primary, nil, nil), nil
 }
 
 func canonicalOsvCmd(s string) string {

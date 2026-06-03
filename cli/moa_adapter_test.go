@@ -151,8 +151,42 @@ func TestParseMember(t *testing.T) {
 	if m.provider != "anthropic" || m.model != "claude-opus-4-8" {
 		t.Fatalf("parseMember = %+v", m)
 	}
+	// Case is preserved (canonicalization happens at resolve time against the
+	// registered provider keys, which are case-sensitive).
 	m2 := parseMember("OpenAI")
-	if m2.provider != "openai" || m2.model != "" {
+	if m2.provider != "OpenAI" || m2.model != "" {
 		t.Fatalf("parseMember bare = %+v", m2)
+	}
+}
+
+func TestMoaCanonicalProvider(t *testing.T) {
+	mgr := &moaFakeManager{
+		minimalManager: &minimalManager{providers: []string{"OPENAI", "CLAUDEAI"}},
+		answers:        map[string]string{},
+	}
+	a := &moaPluginAdapter{cli: newMoaCLI(mgr, "OPENAI", "x")}
+	if got := a.canonicalProvider("openai"); got != "OPENAI" {
+		t.Fatalf("canonicalProvider(openai) = %q, want OPENAI", got)
+	}
+	if got := a.canonicalProvider("unknown"); got != "unknown" {
+		t.Fatalf("unknown should pass through, got %q", got)
+	}
+}
+
+// Members resolved from configured providers must keep the registry casing so
+// the case-sensitive GetClient lookup succeeds (regression: lowercasing them
+// made every member fail).
+func TestMoaRun_PreservesProviderCase(t *testing.T) {
+	mgr := &moaFakeManager{
+		minimalManager: &minimalManager{providers: []string{"OPENAI", "CLAUDEAI"}},
+		answers:        map[string]string{"OPENAI": "a1", "CLAUDEAI": "a2", "AGG": "FINAL"},
+	}
+	a := &moaPluginAdapter{cli: newMoaCLI(mgr, "AGG", "m")}
+	out, err := a.Run(context.Background(), "q", nil, "")
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !strings.Contains(out, "FINAL") {
+		t.Fatalf("expected synthesis, got %q", out)
 	}
 }
