@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/tts"
 )
 
@@ -131,7 +132,7 @@ func (p *BuiltinSpeakPlugin) ExecuteWithStream(ctx context.Context, args []strin
 		if err != nil {
 			return "", fmt.Errorf("@speak: %w", err)
 		}
-		return fmt.Sprintf("Spoke %d characters → %s (%s, %d bytes) via %s",
+		return i18n.T("speak.tool.spoke",
 			len([]rune(in.Text)), path, audio.Mime, len(audio.Data), provider.Name()), nil
 	default:
 		return "", fmt.Errorf("@speak: unknown cmd %q (valid: say|status)", cmd)

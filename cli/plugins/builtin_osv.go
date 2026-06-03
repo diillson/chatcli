@@ -260,7 +260,7 @@ func osvQuery(ctx context.Context, ecosystem, name, version string) ([]osvVuln, 
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OSV API status %d", resp.StatusCode)
+		return nil, fmt.Errorf("osv.dev API returned status %d", resp.StatusCode)
 	}
 	var out struct {
 		Vulns []osvVuln `json:"vulns"`

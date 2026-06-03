@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/imagegen"
 )
 
@@ -131,7 +132,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		if err != nil {
 			return "", fmt.Errorf("@image: %w", err)
 		}
-		return fmt.Sprintf("Generated %d image(s) via %s:\n  %s", len(paths), provider.Name(), strings.Join(paths, "\n  ")), nil
+		return i18n.T("image.tool.generated", len(paths), provider.Name(), strings.Join(paths, "\n  ")), nil
 	default:
 		return "", fmt.Errorf("@image: unknown cmd %q (valid: gen|status)", cmd)
 	}

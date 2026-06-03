@@ -33,6 +33,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/diillson/chatcli/i18n"
 )
 
 // skillNameRe constrains skill names to a safe slug (no path traversal).
@@ -183,11 +185,11 @@ func writeSkill(dir string, mustExist bool, in skillInput) (string, error) {
 	if err := os.WriteFile(file, []byte(renderSkill(name, in)), 0o600); err != nil {
 		return "", err
 	}
-	verb := "created"
+	key := "skill.tool.created"
 	if mustExist {
-		verb = "updated"
+		key = "skill.tool.updated"
 	}
-	return fmt.Sprintf("Skill %q %s at %s. It will auto-activate on its triggers in future turns.", name, verb, file), nil
+	return i18n.T(key, name, file), nil
 }
 
 // renderSkill builds the SKILL.md text. Scalars are JSON-encoded, which is valid
@@ -264,7 +266,7 @@ func removeSkill(dir, name string) (string, error) {
 	if err := os.RemoveAll(skillDir); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Skill %q removed.", name), nil
+	return i18n.T("skill.tool.removed", name), nil
 }
 
 // resolveSkillsDir returns the global skills directory (~/.chatcli/skills),
