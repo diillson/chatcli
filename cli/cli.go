@@ -430,6 +430,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// @osv — keyless dependency vulnerability scanning via OSV.dev.
 		// Self-contained (HTTP + filesystem), no adapter wiring needed.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinOsvPlugin())
+		// @session — search past saved conversations. Wired below to the
+		// SessionManager.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSessionPlugin())
 		// @memory — deterministic long-term memory writes/recall. The
 		// adapter is wired below once the memory store exists; until then
 		// the tool reports "memory not enabled" rather than panicking.
@@ -543,6 +546,10 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	// Wire the @moa (Mixture-of-Agents) tool to the LLM manager so it can fan
 	// prompts across the configured providers and synthesize a best answer.
 	plugins.SetMoaAdapter(&moaPluginAdapter{cli: cli})
+
+	// Wire the @session tool to the saved-session store so the agent can
+	// search past conversations.
+	plugins.SetSessionAdapter(&sessionPluginAdapter{cli: cli})
 	cli.contextBuilder = workspace.NewContextBuilder(bootstrapLoader, memStore, workspaceDir)
 
 	// Start background memory annotation worker
