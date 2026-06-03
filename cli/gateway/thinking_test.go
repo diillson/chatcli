@@ -38,10 +38,8 @@ func (t *typingStub) SendTyping(context.Context, string) error {
 }
 
 func TestStartThinking_NativeTyping(t *testing.T) {
-	defer swapDurations(5*time.Millisecond, 5*time.Millisecond)()
-
 	ts := &typingStub{}
-	r := &Runner{logger: zap.NewNop()}
+	r := &Runner{logger: zap.NewNop(), typingRefresh: 5 * time.Millisecond}
 	stop := r.startThinking(context.Background(), ts, InboundMessage{ChatID: "1"}, func(string, string) {
 		t.Error("native typing must not send a text notice")
 	})
@@ -53,11 +51,9 @@ func TestStartThinking_NativeTyping(t *testing.T) {
 }
 
 func TestStartThinking_TextFallback(t *testing.T) {
-	defer swapDurations(10*time.Millisecond, time.Second)()
-
 	var mu sync.Mutex
 	var got string
-	r := &Runner{logger: zap.NewNop()}
+	r := &Runner{logger: zap.NewNop(), thinkingDelay: 10 * time.Millisecond}
 	r.SetThinkingNotice("working…")
 	stop := r.startThinking(context.Background(), stubAdapter{}, InboundMessage{ChatID: "1"}, func(kind, text string) {
 		mu.Lock()
@@ -74,9 +70,7 @@ func TestStartThinking_TextFallback(t *testing.T) {
 }
 
 func TestStartThinking_FastReplyNoNotice(t *testing.T) {
-	defer swapDurations(time.Second, time.Second)()
-
-	r := &Runner{logger: zap.NewNop()}
+	r := &Runner{logger: zap.NewNop(), thinkingDelay: time.Second}
 	stop := r.startThinking(context.Background(), stubAdapter{}, InboundMessage{ChatID: "1"}, func(string, string) {
 		t.Error("a reply faster than thinkingDelay must send no notice")
 	})
@@ -101,11 +95,4 @@ func TestTelegramSendTyping(t *testing.T) {
 	if !strings.Contains(gotAction, "typing") {
 		t.Errorf("payload missing typing action: %q", gotAction)
 	}
-}
-
-// swapDurations temporarily overrides the thinking timers and returns a restore.
-func swapDurations(delay, refresh time.Duration) func() {
-	od, or := thinkingDelay, typingRefresh
-	thinkingDelay, typingRefresh = delay, refresh
-	return func() { thinkingDelay, typingRefresh = od, or }
 }

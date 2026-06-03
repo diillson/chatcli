@@ -27,13 +27,14 @@ const progressFlushInterval = 3 * time.Second
 // (Telegram is 4096; WhatsApp ~4096). Longer messages are clipped.
 const maxMessageRunes = 3500
 
-// thinkingDelay is how long the agent may run before a non-typing channel gets
-// a one-time "working on it" notice — so fast replies stay clutter-free.
-// typingRefresh re-sends the native typing indicator before it expires
-// (Telegram's lasts ~5s). Both are vars so tests can shrink them.
-var (
-	thinkingDelay = 2 * time.Second
-	typingRefresh = 4 * time.Second
+// defaultThinkingDelay is how long the agent may run before a non-typing
+// channel gets a one-time "working on it" notice — so fast replies stay
+// clutter-free. defaultTypingRefresh re-sends the native typing indicator
+// before it expires (Telegram's lasts ~5s). Per-Runner fields override them
+// (tests shrink them) without a shared global the worker goroutines would race.
+const (
+	defaultThinkingDelay = 2 * time.Second
+	defaultTypingRefresh = 4 * time.Second
 )
 
 // TypingAware is an optional adapter capability: a platform that can show a
@@ -52,7 +53,9 @@ type Runner struct {
 	agent          AgentFunc
 	logger         *zap.Logger
 	maxConcurrent  int
-	thinkingNotice string // text "working on it" notice for non-typing channels
+	thinkingNotice string        // text "working on it" notice for non-typing channels
+	thinkingDelay  time.Duration // 0 → defaultThinkingDelay (set by tests)
+	typingRefresh  time.Duration // 0 → defaultTypingRefresh (set by tests)
 }
 
 // SetThinkingNotice sets the localized "the assistant is working" message used
@@ -205,11 +208,19 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 // ends the signal and must be called once the agent returns. Replies faster
 // than thinkingDelay send no text notice, so they stay clutter-free.
 func (r *Runner) startThinking(ctx context.Context, adapter Adapter, msg InboundMessage, send func(kind, text string)) func() {
+	delay := r.thinkingDelay
+	if delay <= 0 {
+		delay = defaultThinkingDelay
+	}
+	refresh := r.typingRefresh
+	if refresh <= 0 {
+		refresh = defaultTypingRefresh
+	}
 	done := make(chan struct{})
 	go func() {
 		if typer, ok := adapter.(TypingAware); ok {
 			if err := typer.SendTyping(ctx, msg.ChatID); err == nil {
-				ticker := time.NewTicker(typingRefresh)
+				ticker := time.NewTicker(refresh)
 				defer ticker.Stop()
 				for {
 					select {
@@ -231,7 +242,7 @@ func (r *Runner) startThinking(ctx context.Context, adapter Adapter, msg Inbound
 		select {
 		case <-done:
 		case <-ctx.Done():
-		case <-time.After(thinkingDelay):
+		case <-time.After(delay):
 			send("thinking", notice)
 		}
 	}()
