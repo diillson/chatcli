@@ -418,6 +418,12 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAskPlugin())
+		// @send — proactive outbound messaging through the gateway
+		// platform adapters (Telegram/WhatsApp/Discord/Slack/webhook).
+		// The adapter is wired below; gateway.BuildConfigured() reads the
+		// live platform credentials each call, so this works whether or
+		// not the gateway daemon is running.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSendPlugin())
 		// @memory — deterministic long-term memory writes/recall. The
 		// adapter is wired below once the memory store exists; until then
 		// the tool reports "memory not enabled" rather than panicking.
@@ -522,6 +528,11 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// persist facts deterministically.
 		plugins.SetMemoryAdapter(&memoryPluginAdapter{cli: cli})
 	}
+
+	// Wire the @send tool to the gateway platform registry. Independent of
+	// the memory store and of the gateway daemon lifecycle: adapters are
+	// (re)built from live credentials on each invocation.
+	plugins.SetSendAdapter(&sendPluginAdapter{cli: cli})
 	cli.contextBuilder = workspace.NewContextBuilder(bootstrapLoader, memStore, workspaceDir)
 
 	// Start background memory annotation worker

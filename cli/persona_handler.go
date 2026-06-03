@@ -13,6 +13,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/persona"
+	"github.com/diillson/chatcli/pkg/persona/builtin"
 	"go.uber.org/zap"
 )
 
@@ -29,6 +30,16 @@ func NewPersonaHandler(logger *zap.Logger) *PersonaHandler {
 	// Initialize directories
 	if err := mgr.Initialize(); err != nil {
 		logger.Warn("Failed to initialize persona directories", zap.Error(err))
+	}
+
+	// Seed the essential skills bundled in the binary into the user's global
+	// skills directory. This is what makes the productivity skills
+	// (send-message/email/calendar/reminders) present for every install
+	// method — go install, Homebrew, a downloaded release — not only when
+	// running from a repo checkout. It is idempotent and never clobbers
+	// skills the user has edited.
+	if _, err := builtin.Seed(mgr.GetSkillsDir(), logger); err != nil {
+		logger.Warn("Failed to seed builtin skills", zap.Error(err))
 	}
 
 	return &PersonaHandler{

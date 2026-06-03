@@ -39,6 +39,7 @@ import (
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/coder"
+	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
@@ -931,6 +932,23 @@ func (cli *ChatCLI) showConfigIntegrations() {
 	kv(p, "CHATCLI_TRANSCRIPTION_PROVIDER", envOr("CHATCLI_TRANSCRIPTION_PROVIDER"))
 	kv(p, "CHATCLI_TRANSCRIPTION_MODEL", envOr("CHATCLI_TRANSCRIPTION_MODEL"))
 	kv(p, "CHATCLI_GATEWAY_MAX_AUDIO_BYTES", envOr("CHATCLI_GATEWAY_MAX_AUDIO_BYTES"))
+
+	fmt.Println(p)
+	subheader(p, "cfg.sub.integ.gateway_send")
+	if built, err := gateway.BuildConfigured(); err == nil && len(built) > 0 {
+		names := make([]string, 0, len(built))
+		for _, ad := range built {
+			names = append(names, ad.Name())
+		}
+		sort.Strings(names)
+		kv(p, i18n.T("cfg.kv.send_platforms"), strings.Join(names, ", "))
+		for _, n := range names {
+			env := "CHATCLI_" + strings.ToUpper(n) + "_HOME_CHANNEL"
+			kv(p, env, envOr(env))
+		}
+	} else {
+		kv(p, i18n.T("cfg.kv.send_platforms"), i18n.T("send.tool.list.empty"))
+	}
 
 	if isGitRepo() {
 		fmt.Println(p)
