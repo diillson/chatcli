@@ -37,10 +37,11 @@ const (
 
 // localWhisperCpp runs whisper-cli, auto-provisioning its ggml model.
 type localWhisperCpp struct {
-	bin     string // path to whisper-cli
-	size    string // model size keyword ("base", "small", …) or an explicit .bin path
-	baseURL string // model download base; overridable for tests
-	logger  *zap.Logger
+	bin      string // path to whisper-cli
+	size     string // model size keyword ("base", "small", …) or an explicit .bin path
+	baseURL  string // model download base; overridable for tests
+	cacheDir string // model cache dir; overridable for tests
+	logger   *zap.Logger
 
 	once     sync.Once
 	model    string
@@ -148,9 +149,12 @@ func (l *localWhisperCpp) resolveModel(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("transcription: model file not found: %s", l.size)
 	}
 
-	dir, err := modelCacheDir()
-	if err != nil {
-		return "", err
+	dir := l.cacheDir
+	if dir == "" {
+		var err error
+		if dir, err = modelCacheDir(); err != nil {
+			return "", err
+		}
 	}
 	path := filepath.Join(dir, "ggml-"+l.size+".bin")
 	if fi, statErr := os.Stat(path); statErr == nil && fi.Size() >= minModelBytes {

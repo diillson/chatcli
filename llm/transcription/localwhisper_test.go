@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -63,6 +64,64 @@ func TestResolveModel_ExplicitPath(t *testing.T) {
 	miss := newLocalWhisperCpp("whisper-cli", filepath.Join(dir, "nope.bin"), nil)
 	if _, err := miss.resolveModel(context.Background()); err == nil {
 		t.Error("missing explicit model must error")
+	}
+}
+
+func TestResolveModel_CacheHit(t *testing.T) {
+	l := newLocalWhisperCpp("whisper-cli", "", nil) // size → base
+	l.cacheDir = t.TempDir()
+	cached := filepath.Join(l.cacheDir, "ggml-base.bin")
+	if err := os.WriteFile(cached, bytes.Repeat([]byte("M"), minModelBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.resolveModel(context.Background())
+	if err != nil || got != cached {
+		t.Errorf("cache hit: got %q err %v, want %q", got, err, cached)
+	}
+}
+
+func TestResolveModel_Download(t *testing.T) {
+	payload := bytes.Repeat([]byte("M"), minModelBytes+5)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	l := newLocalWhisperCpp("whisper-cli", "", nil) // size → base
+	l.cacheDir = t.TempDir()
+	l.baseURL = srv.URL
+	got, err := l.resolveModel(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(l.cacheDir, "ggml-base.bin"); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if !fileExists(got) {
+		t.Error("model should have been downloaded to the cache")
+	}
+}
+
+func TestLocalWhisperCpp_Transcribe(t *testing.T) {
+	// Use `echo` as the engine and an explicit (existing) model so neither
+	// whisper-cli nor a download is needed: echo prints its args, standing in
+	// for a transcript. ffmpeg, if present, fails on the fake audio and the
+	// code falls back to the original — so this is deterministic either way.
+	dir := t.TempDir()
+	model := filepath.Join(dir, "m.bin")
+	if err := os.WriteFile(model, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l := newLocalWhisperCpp("echo", model, nil)
+	out, err := l.Transcribe(context.Background(), []byte("hello"), "audio/ogg", "", "")
+	if err != nil {
+		t.Fatalf("transcribe: %v", err)
+	}
+	if out == "" {
+		t.Error("expected non-empty output from the echo stand-in")
+	}
+	if !strings.HasPrefix(l.Name(), "local:echo/") {
+		t.Errorf("Name = %q", l.Name())
 	}
 }
 
