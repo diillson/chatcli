@@ -1,0 +1,110 @@
+/*
+ * ChatCLI - Stable Diffusion WebUI (AUTOMATIC1111) image provider.
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ *
+ * POST {base}/sdapi/v1/txt2img with {prompt, steps, width, height,
+ * batch_size} returning base64 PNGs in {images:[...]}. This is the keyless,
+ * local, self-hosted backend — the preferred option for privacy and cost.
+ */
+package imagegen
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/diillson/chatcli/utils"
+	"go.uber.org/zap"
+)
+
+const sdTxt2ImgPath = "/sdapi/v1/txt2img"
+
+// Automatic1111 generates images against a local Stable Diffusion WebUI.
+type Automatic1111 struct {
+	baseURL string
+	steps   int
+	client  *http.Client
+}
+
+// NewAutomatic1111 builds the provider. baseURL defaults to localhost:7860.
+func NewAutomatic1111(baseURL string, steps int, logger *zap.Logger) (*Automatic1111, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		baseURL = "http://localhost:7860"
+	}
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		return nil, fmt.Errorf("imagegen: base URL must be http(s): %q", baseURL)
+	}
+	if steps <= 0 {
+		steps = 25
+	}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &Automatic1111{baseURL: baseURL, steps: steps, client: utils.NewHTTPClient(logger, imageGenTimeout)}, nil
+}
+
+// Name returns "sdwebui".
+func (*Automatic1111) Name() string { return "sdwebui" }
+
+// Generate posts the prompt and decodes the returned base64 images.
+func (a *Automatic1111) Generate(ctx context.Context, prompt string, opts Options) ([]Image, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("imagegen: empty prompt")
+	}
+	w, h := parseSize(opts.Size)
+	n := opts.N
+	if n <= 0 {
+		n = 1
+	}
+	body, _ := json.Marshal(map[string]interface{}{
+		"prompt":     prompt,
+		"steps":      a.steps,
+		"width":      w,
+		"height":     h,
+		"batch_size": n,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+sdTxt2ImgPath, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("imagegen: request failed (is Stable Diffusion WebUI running with --api?): %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+		return nil, fmt.Errorf("imagegen: sdwebui returned %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+	}
+
+	var out struct {
+		Images []string `json:"images"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("imagegen: decode response: %w", err)
+	}
+	images := make([]Image, 0, len(out.Images))
+	for _, b64 := range out.Images {
+		// SD WebUI sometimes prefixes a data URI; strip it.
+		if i := strings.Index(b64, ","); strings.HasPrefix(b64, "data:") && i >= 0 {
+			b64 = b64[i+1:]
+		}
+		raw, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		images = append(images, Image{Data: raw, Mime: "image/png", Ext: "png"})
+	}
+	if len(images) == 0 {
+		return nil, fmt.Errorf("imagegen: sdwebui returned no decodable images")
+	}
+	return images, nil
+}

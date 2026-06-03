@@ -43,6 +43,7 @@ import (
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/imagegen"
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
 )
@@ -944,6 +945,16 @@ func (cli *ChatCLI) showConfigIntegrations() {
 	kv(p, "CHATCLI_TTS_PROVIDER", envOr("CHATCLI_TTS_PROVIDER"))
 	kv(p, "CHATCLI_TTS_VOICE", envOr("CHATCLI_TTS_VOICE"))
 	kv(p, "CHATCLI_GATEWAY_VOICE_REPLY", envOr("CHATCLI_GATEWAY_VOICE_REPLY"))
+
+	fmt.Println(p)
+	subheader(p, "cfg.sub.integ.imagegen")
+	imgStatus := i18n.T("cfg.val.imagegen_off")
+	if g := imagegen.NewFromEnv(cli.logger); !imagegen.IsNull(g) {
+		imgStatus = g.Name()
+	}
+	kv(p, i18n.T("cfg.kv.imagegen"), imgStatus)
+	kv(p, "CHATCLI_IMAGE_PROVIDER", envOr("CHATCLI_IMAGE_PROVIDER"))
+	kv(p, "CHATCLI_IMAGE_URL", envOr("CHATCLI_IMAGE_URL"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.integ.gateway_send")

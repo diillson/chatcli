@@ -171,6 +171,11 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_TTS_VOICE":           {Value: "alloy", Source: "tts.defaultVoice"},
 	"CHATCLI_GATEWAY_VOICE_REPLY": {Value: "false", IsBool: true, Source: "gateway voice reply"},
 
+	// ─── Image generation (@image) ───────────────────────────────
+	"CHATCLI_IMAGE_PROVIDER": {Value: "auto", Source: "imagegen.NewFromEnv"},
+	"CHATCLI_IMAGE_URL":      {Value: "(none)", Source: "imagegen self-hosted endpoint"},
+	"CHATCLI_IMAGE_MODEL":    {Value: "dall-e-3", Source: "imagegen.defaultImageModel"},
+
 	// ─── Gateway: @send home channels (proactive outbound) ───────
 	"CHATCLI_TELEGRAM_HOME_CHANNEL": {Value: "(none)", Source: "send_adapter.go (@send default target)"},
 	"CHATCLI_WHATSAPP_HOME_CHANNEL": {Value: "(none)", Source: "send_adapter.go (@send default target)"},

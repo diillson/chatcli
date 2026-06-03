@@ -29,7 +29,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const openAIBaseURL = "https://api.openai.com/v1"
+const (
+	openAIBaseURL = "https://api.openai.com/v1"
+	groqBaseURL   = "https://api.groq.com/openai/v1"
+)
 
 // execLookPath is exec.LookPath, indirected for deterministic tests.
 var execLookPath = exec.LookPath
@@ -53,6 +56,9 @@ func NewFromEnv(logger *zap.Logger) Provider {
 	case "openai":
 		return cloudOrNull(openAIBaseURL, os.Getenv("OPENAI_API_KEY"), model, "openai", logger,
 			"CHATCLI_TTS_PROVIDER=openai set but OPENAI_API_KEY is empty")
+	case "groq":
+		return cloudOrNull(groqBaseURL, os.Getenv("GROQ_API_KEY"), model, "groq", logger,
+			"CHATCLI_TTS_PROVIDER=groq set but GROQ_API_KEY is empty")
 	case "", "auto":
 		// fall through to local-first auto-detection
 	default:
@@ -74,8 +80,14 @@ func NewFromEnv(logger *zap.Logger) Provider {
 	if p := detectLocalTTS(logger); p != nil {
 		return p
 	}
+	// Cloud fallbacks (any provider whose key is present): OpenAI, then Groq —
+	// both speak the same /audio/speech shape, so voice output is not limited
+	// to a single provider.
 	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
 		return cloudOrNull(openAIBaseURL, key, model, "openai", logger, "")
+	}
+	if key := strings.TrimSpace(os.Getenv("GROQ_API_KEY")); key != "" {
+		return cloudOrNull(groqBaseURL, key, model, "groq", logger, "")
 	}
 	return NewNull()
 }

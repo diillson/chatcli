@@ -436,6 +436,9 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// @speak — text-to-speech to an audio file (local/keyless-first).
 		// Self-contained via llm/tts; no adapter wiring needed.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSpeakPlugin())
+		// @image — text-to-image generation to a file (self-hosted/keyless
+		// first via Stable Diffusion WebUI). Self-contained via llm/imagegen.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinImagePlugin())
 		// @memory — deterministic long-term memory writes/recall. The
 		// adapter is wired below once the memory store exists; until then
 		// the tool reports "memory not enabled" rather than panicking.
