@@ -173,7 +173,10 @@ func parseSpeakInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalSpeakCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: say|status)", cmdStr)
+			if !isFlatArgs(raw) {
+				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: say|status)", cmdStr)
+			}
+			canon = "say" // flat native args, e.g. {"text":"..."}
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {

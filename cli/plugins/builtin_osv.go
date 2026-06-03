@@ -431,7 +431,15 @@ func parseOsvInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalOsvCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: scan|check)", cmdStr)
+			if !isFlatArgs(raw) {
+				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: scan|check)", cmdStr)
+			}
+			// flat native args: {"package":...} → check; {"path":...} or {} → scan
+			if _, ok := raw["package"]; ok {
+				canon = "check"
+			} else {
+				canon = "scan"
+			}
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {

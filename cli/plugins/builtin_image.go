@@ -191,7 +191,10 @@ func parseImageInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalImageCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: gen|status)", cmdStr)
+			if !isFlatArgs(raw) {
+				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: gen|status)", cmdStr)
+			}
+			canon = "gen" // flat native args, e.g. {"prompt":"..."}
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {

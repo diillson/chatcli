@@ -80,6 +80,16 @@ func argvToInnerJSON(argv []string, arrayKeys, intKeys map[string]bool) (positio
 	return strings.Join(pos, " "), string(b)
 }
 
+// isFlatArgs reports whether a parsed JSON object is a flat native-tool-calling
+// arg object (no "cmd" field but carrying other fields), so the caller can apply
+// a default subcommand instead of rejecting it.
+func isFlatArgs(raw map[string]json.RawMessage) bool {
+	if _, ok := raw["cmd"]; ok {
+		return false
+	}
+	return len(raw) > 0
+}
+
 // argvInner is the common tail handler: given the args after the subcommand, it
 // returns the inner-args JSON. When there are no flags, the bare positional is
 // mapped to primaryKey (e.g. "name", "query", "prompt"); when there are flags,

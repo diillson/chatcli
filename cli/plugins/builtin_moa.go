@@ -173,7 +173,10 @@ func parseMoaInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalMoaCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: ask|list)", cmdStr)
+			if !isFlatArgs(raw) {
+				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: ask|list)", cmdStr)
+			}
+			canon = "ask" // flat native args, e.g. {"prompt":"..."}
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {

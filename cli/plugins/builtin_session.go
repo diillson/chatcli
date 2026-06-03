@@ -158,7 +158,10 @@ func parseSessionInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalSessionCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: search|list)", cmdStr)
+			if !isFlatArgs(raw) {
+				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: search|list)", cmdStr)
+			}
+			canon = "search" // flat native args, e.g. {"query":"..."}
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {

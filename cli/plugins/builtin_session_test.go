@@ -101,3 +101,16 @@ func TestSession_FlattenedArgvFromAgent(t *testing.T) {
 		t.Fatalf("query=%q limit=%d", f.lastQuery, f.lastLimit)
 	}
 }
+
+func TestSession_FlatNativeArgs(t *testing.T) {
+	f := &fakeSessionAdapter{out: "ok"}
+	withSessionAdapter(t, f)
+	p := NewBuiltinSessionPlugin()
+	// native tool calling may send a flat object with no "cmd"
+	if _, err := p.Execute(context.Background(), []string{`{"query":"rate limiter"}`}); err != nil {
+		t.Fatal(err)
+	}
+	if f.lastQuery != "rate limiter" {
+		t.Fatalf("flat native query = %q", f.lastQuery)
+	}
+}
