@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.129.0](https://github.com/diillson/chatcli/compare/v1.128.1...v1.129.0) (2026-06-03)
+
+
+### Features
+
+* **gateway:** voice messages (transcription) + conversational replies ([#1004](https://github.com/diillson/chatcli/issues/1004)) ([3690b78](https://github.com/diillson/chatcli/commit/3690b783c8fdb17a7fdef1b5a4a34b719d5696e6))
+
 ## [1.128.1](https://github.com/diillson/chatcli/compare/v1.128.0...v1.128.1) (2026-06-02)
 
 
