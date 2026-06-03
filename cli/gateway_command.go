@@ -244,6 +244,7 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	sessions.loadBindings(ctx)
 
 	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions), cli.logger, 0)
+	runner.SetThinkingNotice(i18n.T("gateway.thinking"))
 	return runner.Run(ctx)
 }
 

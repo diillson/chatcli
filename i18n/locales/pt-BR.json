@@ -227,6 +227,7 @@
   "gateway.running": "Gateway rodando em: %s. Pressione Ctrl+C para parar.",
   "gateway.stopped": "Gateway parado.",
   "gateway.task_done": "Tarefa concluída.",
+  "gateway.thinking": "🤔 Recebido — já estou processando…",
   "gateway.audio.transcribing": "🎙️ transcrevendo seu áudio…",
   "gateway.audio.disabled": "🎙️ Recebi um áudio, mas a transcrição não está habilitada. Instale um whisper local (ex.: pipx install openai-whisper) que ele é usado automaticamente — ou configure CHATCLI_TRANSCRIPTION_URL / CHATCLI_TRANSCRIPTION_PROVIDER. Por enquanto, envie seu pedido em texto, por favor.",
   "gateway.audio.failed": "🎙️ Não consegui transcrever esse áudio. Tente de novo ou envie em texto.",

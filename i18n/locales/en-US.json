@@ -227,6 +227,7 @@
   "gateway.running": "Gateway running on: %s. Press Ctrl+C to stop.",
   "gateway.stopped": "Gateway stopped.",
   "gateway.task_done": "Task completed.",
+  "gateway.thinking": "🤔 Got it — working on that…",
   "gateway.audio.transcribing": "🎙️ transcribing your voice message…",
   "gateway.audio.disabled": "🎙️ I received a voice message but transcription isn't enabled. Install a local whisper CLI (e.g. pipx install openai-whisper) and it's used automatically — or set CHATCLI_TRANSCRIPTION_URL / CHATCLI_TRANSCRIPTION_PROVIDER. Meanwhile, please send your request as text.",
   "gateway.audio.failed": "🎙️ I couldn't transcribe that voice message. Please try again or send it as text.",

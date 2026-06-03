@@ -229,6 +229,28 @@ func (t *TelegramAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	return nil
 }
 
+// SendTyping shows the native "typing…" indicator in the chat. It expires after
+// ~5s, so the Runner refreshes it while the agent works. Implements TypingAware.
+func (t *TelegramAdapter) SendTyping(ctx context.Context, chatID string) error {
+	payload, _ := json.Marshal(map[string]interface{}{"chat_id": chatID, "action": "typing"})
+	endpoint := fmt.Sprintf("%s/bot%s/sendChatAction", t.baseURL, t.token)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("telegram sendChatAction status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // --- pure parsing (unit-testable without network) ---
 
 type tgUser struct {
