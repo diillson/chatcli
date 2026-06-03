@@ -83,7 +83,7 @@ func (l *localWhisperCpp) Transcribe(ctx context.Context, audio []byte, mimeType
 	}
 
 	data, mime, converted := audio, mimeType, false
-	if ff, lookErr := exec.LookPath("ffmpeg"); lookErr == nil && ff != "" {
+	if ff := lookupFFmpeg(); ff != "" {
 		if wav, cErr := ffmpegToWAV(ctx, ff, audio, mimeType); cErr == nil {
 			data, mime, converted = wav, "audio/wav", true
 		} else {
@@ -247,4 +247,11 @@ func downloadModel(ctx context.Context, url, dest string) error {
 func fileExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
+}
+
+// lookupFFmpeg returns the ffmpeg binary path, or "" when not installed.
+// Indirected so tests can exercise the transcode path without a real ffmpeg.
+var lookupFFmpeg = func() string {
+	p, _ := exec.LookPath("ffmpeg")
+	return p
 }

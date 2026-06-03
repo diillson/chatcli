@@ -125,6 +125,34 @@ func TestLocalWhisperCpp_Transcribe(t *testing.T) {
 	}
 }
 
+func TestLocalWhisperCpp_FfmpegTranscode(t *testing.T) {
+	// Fake ffmpeg: write something to the last arg (the output path) so the
+	// transcode path runs end to end without a real ffmpeg. `echo` then stands
+	// in for whisper-cli, printing its args as the "transcript".
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "fakeffmpeg")
+	script := "#!/bin/sh\nfor a in \"$@\"; do out=\"$a\"; done\nprintf 'wavdata' > \"$out\"\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := lookupFFmpeg
+	lookupFFmpeg = func() string { return fake }
+	t.Cleanup(func() { lookupFFmpeg = orig })
+
+	model := filepath.Join(dir, "m.bin")
+	if err := os.WriteFile(model, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l := newLocalWhisperCpp("echo", model, nil)
+	out, err := l.Transcribe(context.Background(), []byte("opus-bytes"), "audio/ogg", "", "pt")
+	if err != nil {
+		t.Fatalf("transcribe with ffmpeg transcode: %v", err)
+	}
+	if out == "" {
+		t.Error("expected non-empty output after transcode")
+	}
+}
+
 func TestDownloadModel(t *testing.T) {
 	payload := bytes.Repeat([]byte("M"), minModelBytes+10) // pass the size floor
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
