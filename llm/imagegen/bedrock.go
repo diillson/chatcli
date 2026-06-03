@@ -62,17 +62,28 @@ func (b *Bedrock) Generate(ctx context.Context, prompt string, opts Options) ([]
 	if n <= 0 {
 		n = 1
 	}
-	body, _ := json.Marshal(map[string]interface{}{
-		"taskType": "TEXT_IMAGE",
-		"textToImageParams": map[string]interface{}{
-			"text": prompt,
-		},
-		"imageGenerationConfig": map[string]interface{}{
-			"numberOfImages": n,
-			"width":          w,
-			"height":         h,
-		},
-	})
+
+	// Nova Canvas / Titan share the TEXT_IMAGE shape; Stability models use a
+	// different request body. The response ({"images":["<b64>"]}) is shared.
+	var body []byte
+	if strings.HasPrefix(strings.ToLower(b.model), "stability.") {
+		body, _ = json.Marshal(map[string]interface{}{
+			"prompt":        prompt,
+			"mode":          "text-to-image",
+			"aspect_ratio":  aspectRatio(w, h),
+			"output_format": "png",
+		})
+	} else {
+		body, _ = json.Marshal(map[string]interface{}{
+			"taskType":          "TEXT_IMAGE",
+			"textToImageParams": map[string]interface{}{"text": prompt},
+			"imageGenerationConfig": map[string]interface{}{
+				"numberOfImages": n,
+				"width":          w,
+				"height":         h,
+			},
+		})
+	}
 
 	out, err := b.runtime.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
 		ModelId:     strPtr(b.model),
@@ -114,6 +125,31 @@ func parseBedrockImages(raw []byte) ([]Image, error) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// aspectRatio maps a width/height to the closest Stability-supported ratio
+// string. Stability takes an aspect_ratio, not explicit pixels.
+func aspectRatio(w, h int) string {
+	if w <= 0 || h <= 0 || w == h {
+		return "1:1"
+	}
+	r := float64(w) / float64(h)
+	switch {
+	case r >= 1.7:
+		return "16:9"
+	case r >= 1.4:
+		return "3:2"
+	case r >= 1.2:
+		return "5:4"
+	case r <= 0.58:
+		return "9:16"
+	case r <= 0.7:
+		return "2:3"
+	case r <= 0.85:
+		return "4:5"
+	default:
+		return "1:1"
+	}
+}
 
 // bedrockImageRegion / bedrockImageProfile read the same env the chat Bedrock
 // provider uses.

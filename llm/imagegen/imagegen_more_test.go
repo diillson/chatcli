@@ -132,3 +132,44 @@ func TestFactory_ResponsesSelection(t *testing.T) {
 		t.Fatal("expected Responses backend for openai + API=responses")
 	}
 }
+
+func TestParseBedrockImages(t *testing.T) {
+	imgs, err := parseBedrockImages([]byte(`{"images":["UE5HREFUQQ=="]}`)) // PNGDATA
+	if err != nil || len(imgs) != 1 || string(imgs[0].Data) != "PNGDATA" {
+		t.Fatalf("nova/titan parse: %v err=%v", imgs, err)
+	}
+	if _, err := parseBedrockImages([]byte(`{"error":"content filtered"}`)); err == nil {
+		t.Fatal("expected error when bedrock returns error field")
+	}
+	if _, err := parseBedrockImages([]byte(`{"images":[]}`)); err == nil {
+		t.Fatal("expected error for no images")
+	}
+}
+
+func TestAspectRatio(t *testing.T) {
+	cases := map[[2]int]string{
+		{1024, 1024}: "1:1",
+		{1920, 1080}: "16:9",
+		{1080, 1920}: "9:16",
+		{0, 0}:       "1:1",
+	}
+	for wh, want := range cases {
+		if got := aspectRatio(wh[0], wh[1]); got != want {
+			t.Errorf("aspectRatio(%d,%d)=%q want %q", wh[0], wh[1], got, want)
+		}
+	}
+}
+
+func TestKnownModels_NewIDs(t *testing.T) {
+	want := map[string]bool{"gpt-image-2": false, "gpt-image-1-mini": false, "grok-imagine-image-quality": false, "amazon.nova-canvas-v1:0": false, "stability.sd3-5-large-v1:0": false}
+	for _, m := range KnownModels() {
+		if _, ok := want[m.Name]; ok {
+			want[m.Name] = true
+		}
+	}
+	for id, found := range want {
+		if !found {
+			t.Errorf("catalog missing %q", id)
+		}
+	}
+}

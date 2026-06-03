@@ -31,18 +31,29 @@ type ModelInfo struct {
 }
 
 // KnownModels returns the curated static catalog of image-capable models.
+// Sourced from each provider's current docs (OpenAI image-generation guide,
+// xAI image models, AWS Bedrock model catalog).
 func KnownModels() []ModelInfo {
 	return []ModelInfo{
-		{Name: "gpt-image-1", Provider: "openai", API: "images", Note: "Current OpenAI image model (Images API)."},
+		// OpenAI Images API (gpt-image family). May require org verification.
+		{Name: "gpt-image-2", Provider: "openai", API: "images", Note: "Newest OpenAI image model (Images API)."},
+		{Name: "gpt-image-1.5", Provider: "openai", API: "images", Note: "OpenAI Images API."},
+		{Name: "gpt-image-1", Provider: "openai", API: "images", Note: "OpenAI Images API (broadly available; default)."},
+		{Name: "gpt-image-1-mini", Provider: "openai", API: "images", Note: "Smaller/cheaper OpenAI image model."},
 		{Name: "dall-e-3", Provider: "openai", API: "images", Note: "Legacy; not on all accounts."},
-		{Name: "dall-e-2", Provider: "openai", API: "images", Note: "Legacy."},
+		// OpenAI Responses API (a chat model generates via the image_generation tool).
 		{Name: "gpt-5.5", Provider: "openai", API: "responses", Note: "Chat model w/ image_generation tool (Responses API)."},
-		{Name: "gpt-5", Provider: "openai", API: "responses", Note: "Responses API image_generation."},
-		{Name: "gpt-4.1", Provider: "openai", API: "responses", Note: "Responses API image_generation."},
+		{Name: "gpt-5", Provider: "openai", API: "responses", Note: "gpt-5 and newer support the image_generation tool."},
+		// Google.
 		{Name: "imagen-3.0-generate-002", Provider: "google", API: "native", Note: "Google Imagen (predict)."},
-		{Name: "grok-2-image", Provider: "xai", API: "native", Note: "xAI grok image (OpenAI-shaped, no size)."},
-		{Name: "amazon.nova-canvas-v1:0", Provider: "bedrock", API: "native", Note: "AWS Bedrock Nova Canvas (InvokeModel)."},
-		{Name: "amazon.titan-image-generator-v2:0", Provider: "bedrock", API: "native", Note: "AWS Bedrock Titan Image."},
+		// xAI.
+		{Name: "grok-2-image", Provider: "xai", API: "native", Note: "xAI image (OpenAI-shaped /images/generations, no size)."},
+		{Name: "grok-imagine-image-quality", Provider: "xai", API: "imagine", Note: "xAI Imagine quality model (Imagine API)."},
+		// AWS Bedrock (InvokeModel; Nova Canvas / Titan share the TEXT_IMAGE shape).
+		{Name: "amazon.nova-canvas-v1:0", Provider: "bedrock", API: "native", Note: "Bedrock Nova Canvas (TEXT_IMAGE; default)."},
+		{Name: "amazon.titan-image-generator-v2:0", Provider: "bedrock", API: "native", Note: "Bedrock Titan Image v2 (TEXT_IMAGE)."},
+		{Name: "stability.sd3-5-large-v1:0", Provider: "bedrock", API: "stability", Note: "Bedrock Stability SD3.5 (different request shape)."},
+		{Name: "stability.stable-image-ultra-v1:1", Provider: "bedrock", API: "stability", Note: "Bedrock Stability Ultra (different request shape)."},
 	}
 }
 
