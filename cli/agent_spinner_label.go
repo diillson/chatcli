@@ -6,7 +6,22 @@
 
 package cli
 
-import "github.com/diillson/chatcli/i18n"
+import (
+	"strings"
+
+	"github.com/diillson/chatcli/i18n"
+)
+
+// spinnerMessage turns a tool box label into a spinner message: the animation
+// appends "... <glyph>", so trailing dots/ellipsis are trimmed to avoid
+// "Mixture-of-Agents…...". Falls back to a generic verb when empty.
+func spinnerMessage(label string) string {
+	s := strings.TrimRight(strings.TrimSpace(label), ".… ")
+	if s == "" {
+		return i18n.T("agent.spinner.working")
+	}
+	return s
+}
 
 // defaultSpinnerLabel produces the legacy spinner label used before
 // Item 7. The agent loop falls back to it when the plugin doesn't

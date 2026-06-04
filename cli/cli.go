@@ -418,6 +418,31 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAskPlugin())
+		// @send — proactive outbound messaging through the gateway
+		// platform adapters (Telegram/WhatsApp/Discord/Slack/webhook).
+		// The adapter is wired below; gateway.BuildConfigured() reads the
+		// live platform credentials each call, so this works whether or
+		// not the gateway daemon is running.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSendPlugin())
+		// @moa — Mixture-of-Agents: fan a prompt out to several models and
+		// synthesize one best answer. Wired below to the LLM manager.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMoaPlugin())
+		// @osv — keyless dependency vulnerability scanning via OSV.dev.
+		// Self-contained (HTTP + filesystem), no adapter wiring needed.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinOsvPlugin())
+		// @session — search past saved conversations. Wired below to the
+		// SessionManager.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSessionPlugin())
+		// @speak — text-to-speech to an audio file (local/keyless-first).
+		// Self-contained via llm/tts; no adapter wiring needed.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSpeakPlugin())
+		// @image — text-to-image generation to a file (self-hosted/keyless
+		// first via Stable Diffusion WebUI). Self-contained via llm/imagegen.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinImagePlugin())
+		// @skill — self-authoring skills: the agent writes/evolves its own
+		// skills from what it learns, persisted to the global skills dir and
+		// auto-activated in future sessions. Self-contained.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSkillPlugin())
 		// @memory — deterministic long-term memory writes/recall. The
 		// adapter is wired below once the memory store exists; until then
 		// the tool reports "memory not enabled" rather than panicking.
@@ -522,6 +547,19 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// persist facts deterministically.
 		plugins.SetMemoryAdapter(&memoryPluginAdapter{cli: cli})
 	}
+
+	// Wire the @send tool to the gateway platform registry. Independent of
+	// the memory store and of the gateway daemon lifecycle: adapters are
+	// (re)built from live credentials on each invocation.
+	plugins.SetSendAdapter(&sendPluginAdapter{cli: cli})
+
+	// Wire the @moa (Mixture-of-Agents) tool to the LLM manager so it can fan
+	// prompts across the configured providers and synthesize a best answer.
+	plugins.SetMoaAdapter(&moaPluginAdapter{cli: cli})
+
+	// Wire the @session tool to the saved-session store so the agent can
+	// search past conversations.
+	plugins.SetSessionAdapter(&sessionPluginAdapter{cli: cli})
 	cli.contextBuilder = workspace.NewContextBuilder(bootstrapLoader, memStore, workspaceDir)
 
 	// Start background memory annotation worker

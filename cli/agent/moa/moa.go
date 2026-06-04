@@ -80,7 +80,15 @@ func ParseRefs(raw string) []Ref {
 // error only when nothing usable was produced (no reference succeeded, or the
 // aggregator itself failed). Reference errors are otherwise tolerated — MoA
 // degrades gracefully to the models that did answer.
+// Run synthesizes an answer with no prior conversation context. Preserved for
+// API compatibility; delegates to RunWithHistory.
 func Run(ctx context.Context, prompt string, refs []Ref, factory Factory, aggregator Ref) (string, []RefResult, error) {
+	return RunWithHistory(ctx, prompt, nil, refs, factory, aggregator)
+}
+
+// RunWithHistory is Run with the prior conversation, passed to each proposer so
+// a follow-up MoA is context-aware.
+func RunWithHistory(ctx context.Context, prompt string, history []models.Message, refs []Ref, factory Factory, aggregator Ref) (string, []RefResult, error) {
 	if len(refs) == 0 {
 		return "", nil, fmt.Errorf("no reference models configured")
 	}
@@ -98,7 +106,7 @@ func Run(ctx context.Context, prompt string, refs []Ref, factory Factory, aggreg
 				results[i] = res
 				return
 			}
-			out, err := c.SendPrompt(ctx, prompt, nil, 0)
+			out, err := c.SendPrompt(ctx, prompt, history, 0)
 			res.Output, res.Err = out, err
 			results[i] = res
 		}(i, ref)
@@ -106,6 +114,13 @@ func Run(ctx context.Context, prompt string, refs []Ref, factory Factory, aggreg
 	wg.Wait()
 
 	if countOK(results) == 0 {
+		// Surface the first underlying error so the failure is diagnosable
+		// (provider not available, 401, etc.) instead of an opaque message.
+		for _, r := range results {
+			if r.Err != nil {
+				return "", results, fmt.Errorf("all %d reference models failed: %s: %w", len(refs), r.Ref.String(), r.Err)
+			}
+		}
 		return "", results, fmt.Errorf("all %d reference models failed", len(refs))
 	}
 

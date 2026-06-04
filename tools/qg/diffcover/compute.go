@@ -279,7 +279,17 @@ func matchPattern(path, pattern string) bool {
 // failure).
 func (r Result) FormatMarkdown() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "**Patch coverage:** %.1f%% (%d/%d executable lines covered)\n\n", r.Percent(), r.Covered, r.Total)
+	fmt.Fprintf(&b, "**Patch coverage:** %.1f%% (%d/%d executable lines covered) — global threshold %.0f%%\n\n", r.Percent(), r.Covered, r.Total, r.Threshold)
+	// Per-path bars are STRICTER than the global floor; surface them so a
+	// pass/fail is never confusing (e.g. global 60% but llm/** requires 70%).
+	if len(r.PathBreaches) > 0 {
+		b.WriteString("**⚠️ Per-path thresholds not met (stricter than the global floor):**\n\n")
+		b.WriteString("| Path | Required | Actual |\n|---|---:|---:|\n")
+		for _, pb := range r.PathBreaches {
+			fmt.Fprintf(&b, "| `%s` | %.0f%% | %.1f%% (%d/%d) |\n", pb.Pattern, pb.Threshold, pb.Percent, pb.Covered, pb.Total)
+		}
+		b.WriteString("\n")
+	}
 	if len(r.Files) == 0 {
 		b.WriteString("_No executable added lines in this diff._\n")
 		return b.String()

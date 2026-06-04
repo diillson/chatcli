@@ -58,10 +58,21 @@ func (m InboundMessage) SessionKey() string {
 	return m.Platform + ":" + m.ChatID
 }
 
-// OutboundMessage is a reply to deliver back to a conversation.
+// OutboundMessage is a reply to deliver back to a conversation. When Audio is
+// set, adapters that support voice replies send the clip (using Text as the
+// caption); adapters that don't simply send Text, so a reply is never lost.
 type OutboundMessage struct {
 	ChatID string
 	Text   string
+	Audio  *OutboundAudio
+}
+
+// OutboundAudio is a synthesized voice reply to deliver alongside/instead of
+// text on adapters that support it.
+type OutboundAudio struct {
+	Data     []byte
+	Mime     string // e.g. "audio/ogg", "audio/mpeg"
+	FileName string // e.g. "reply.ogg"
 }
 
 // Adapter is a platform integration. Implementations must be safe to Start

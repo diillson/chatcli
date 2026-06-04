@@ -2460,6 +2460,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							}
 
 							streamCallback := func(line string) {
+								// First real output ends the spinner so streamed
+								// lines don't clash with its carriage-return repaint.
+								a.cli.animation.StopThinkingAnimation()
 								if !isCompact {
 									renderer.StreamOutput(line)
 								}
@@ -2504,7 +2507,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									toolOutput = vErr.Error()
 									execErr = vErr
 								} else {
+									// Animated spinner during execution so blocking
+									// tools (network I/O: @moa, @image, @webfetch…)
+									// never feel frozen. Streaming tools stop it on
+									// their first line (see streamCallback); it's
+									// always stopped after the call returns.
+									if !isCompact {
+										a.cli.animation.ShowThinkingAnimation(spinnerMessage(boxLabel))
+									}
 									toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
+									a.cli.animation.StopThinkingAnimation()
 								}
 							}
 

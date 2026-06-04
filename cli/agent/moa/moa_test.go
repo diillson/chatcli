@@ -4,20 +4,52 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/diillson/chatcli/models"
 )
 
 type fakeClient struct {
-	reply string
-	err   error
-	seen  string // last prompt seen
+	reply       string
+	err         error
+	seen        string // last prompt seen
+	seenHistory int    // length of history passed to the last SendPrompt
 }
 
-func (f *fakeClient) SendPrompt(_ context.Context, prompt string, _ []models.Message, _ int) (string, error) {
+func (f *fakeClient) SendPrompt(_ context.Context, prompt string, history []models.Message, _ int) (string, error) {
 	f.seen = prompt
+	f.seenHistory = len(history)
 	return f.reply, f.err
+}
+
+// Run must pass the conversation history to each proposer so a follow-up MoA is
+// context-aware (regression: history was dropped, so a second /moa or a normal
+// message after /moa had no context).
+func TestRun_PassesHistoryToProposers(t *testing.T) {
+	var mu sync.Mutex
+	var clients []*fakeClient
+	factory := func(provider, model string) (Client, error) {
+		c := &fakeClient{reply: "ok"}
+		mu.Lock()
+		clients = append(clients, c)
+		mu.Unlock()
+		return c, nil
+	}
+	hist := []models.Message{{Role: "user", Content: "earlier"}, {Role: "assistant", Content: "reply"}}
+	_, _, err := RunWithHistory(context.Background(), "follow-up", hist, []Ref{{Provider: "a"}}, factory, Ref{Provider: "agg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawHistory bool
+	for _, c := range clients {
+		if c.seenHistory == 2 {
+			sawHistory = true
+		}
+	}
+	if !sawHistory {
+		t.Fatal("a proposer should receive the 2-message history")
+	}
 }
 
 func TestParseRefs(t *testing.T) {

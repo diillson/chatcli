@@ -293,3 +293,22 @@ func TestFormatMarkdown_IncludesPerFileRows(t *testing.T) {
 		t.Errorf("missing line range compaction: %s", md)
 	}
 }
+
+func TestFormatMarkdown_ShowsPerPathBreaches(t *testing.T) {
+	r := Result{
+		Files:     []FileResult{{Path: "llm/imagegen/bedrock.go", Covered: 28, Total: 105}},
+		Total:     105,
+		Covered:   28,
+		Threshold: 60,
+		PathBreaches: []PathBreach{
+			{Pattern: "llm/**", Threshold: 70, Percent: 63.6, Covered: 100, Total: 157},
+		},
+	}
+	md := r.FormatMarkdown()
+	if !strings.Contains(md, "global threshold 60%") {
+		t.Errorf("markdown should state the global threshold: %s", md)
+	}
+	if !strings.Contains(md, "llm/**") || !strings.Contains(md, "70%") || !strings.Contains(md, "63.6%") {
+		t.Errorf("markdown should surface the per-path breach (path/required/actual): %s", md)
+	}
+}

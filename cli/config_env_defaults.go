@@ -165,6 +165,25 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_TRANSCRIPTION_LANG":      {Value: "(auto)", Source: "transcription.NewFromEnv"},
 	"CHATCLI_GATEWAY_MAX_AUDIO_BYTES": {Value: "20971520", Source: "gateway.defaultMaxAudioBytes"},
 
+	// ─── Text-to-speech (@speak + gateway voice replies) ─────────
+	"CHATCLI_TTS_PROVIDER":        {Value: "auto", Source: "tts.NewFromEnv"},
+	"CHATCLI_TTS_MODEL":           {Value: "tts-1", Source: "tts.defaultTTSModel"},
+	"CHATCLI_TTS_VOICE":           {Value: "alloy", Source: "tts.defaultVoice"},
+	"CHATCLI_GATEWAY_VOICE_REPLY": {Value: "false", IsBool: true, Source: "gateway voice reply"},
+
+	// ─── Image generation (@image) ───────────────────────────────
+	"CHATCLI_IMAGE_PROVIDER": {Value: "auto", Source: "imagegen.NewFromEnv"},
+	"CHATCLI_IMAGE_API":      {Value: "images", Source: "imagegen (images|responses)"},
+	"CHATCLI_IMAGE_URL":      {Value: "(none)", Source: "imagegen self-hosted endpoint"},
+	"CHATCLI_IMAGE_MODEL":    {Value: "gpt-image-1", Source: "imagegen.defaultImageModel"},
+
+	// ─── Gateway: @send home channels (proactive outbound) ───────
+	"CHATCLI_TELEGRAM_HOME_CHANNEL": {Value: "(none)", Source: "send_adapter.go (@send default target)"},
+	"CHATCLI_WHATSAPP_HOME_CHANNEL": {Value: "(none)", Source: "send_adapter.go (@send default target)"},
+	"CHATCLI_DISCORD_HOME_CHANNEL":  {Value: "(none)", Source: "send_adapter.go (@send default target)"},
+	"CHATCLI_SLACK_HOME_CHANNEL":    {Value: "(none)", Source: "send_adapter.go (@send default target)"},
+	"CHATCLI_WEBHOOK_HOME_CHANNEL":  {Value: "(none)", Source: "send_adapter.go (@send default target)"},
+
 	// ─── Integrations ────────────────────────────────────────────
 	"CHATCLI_MCP_ENABLED":            {Value: "false", IsBool: true, Source: "mcp manager"},
 	"CHATCLI_ALLOW_UNSIGNED_PLUGINS": {Value: "false", IsBool: true, Source: "plugin manager"},
