@@ -37,7 +37,7 @@ func TestRun_PassesHistoryToProposers(t *testing.T) {
 		return c, nil
 	}
 	hist := []models.Message{{Role: "user", Content: "earlier"}, {Role: "assistant", Content: "reply"}}
-	_, _, err := Run(context.Background(), "follow-up", hist, []Ref{{Provider: "a"}}, factory, Ref{Provider: "agg"})
+	_, _, err := RunWithHistory(context.Background(), "follow-up", hist, []Ref{{Provider: "a"}}, factory, Ref{Provider: "agg"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestRun_Aggregates(t *testing.T) {
 		return &fakeClient{reply: "answer from " + provider}, nil
 	}
 	refs := []Ref{{Provider: "a"}, {Provider: "b"}}
-	out, results, err := Run(context.Background(), "question", nil, refs, factory, Ref{Provider: "agg"})
+	out, results, err := Run(context.Background(), "question", refs, factory, Ref{Provider: "agg"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestRun_ToleratesPartialFailure(t *testing.T) {
 			return &fakeClient{reply: "good answer"}, nil
 		}
 	}
-	out, _, err := Run(context.Background(), "q", nil, []Ref{{Provider: "bad"}, {Provider: "good"}}, factory, Ref{Provider: "agg"})
+	out, _, err := Run(context.Background(), "q", []Ref{{Provider: "bad"}, {Provider: "good"}}, factory, Ref{Provider: "agg"})
 	if err != nil {
 		t.Fatalf("should tolerate one failure, got %v", err)
 	}
@@ -114,13 +114,13 @@ func TestRun_AllFail(t *testing.T) {
 	factory := func(provider, model string) (Client, error) {
 		return &fakeClient{err: errors.New("down")}, nil
 	}
-	if _, _, err := Run(context.Background(), "q", nil, []Ref{{Provider: "a"}}, factory, Ref{Provider: "agg"}); err == nil {
+	if _, _, err := Run(context.Background(), "q", []Ref{{Provider: "a"}}, factory, Ref{Provider: "agg"}); err == nil {
 		t.Error("expected error when all references fail")
 	}
 }
 
 func TestRun_NoRefs(t *testing.T) {
-	if _, _, err := Run(context.Background(), "q", nil, nil, nil, Ref{}); err == nil {
+	if _, _, err := Run(context.Background(), "q", nil, nil, Ref{}); err == nil {
 		t.Error("expected error with no refs")
 	}
 }

@@ -80,9 +80,15 @@ func ParseRefs(raw string) []Ref {
 // error only when nothing usable was produced (no reference succeeded, or the
 // aggregator itself failed). Reference errors are otherwise tolerated — MoA
 // degrades gracefully to the models that did answer.
-// history (optional) is the prior conversation, passed to each proposer so a
-// follow-up MoA is context-aware.
-func Run(ctx context.Context, prompt string, history []models.Message, refs []Ref, factory Factory, aggregator Ref) (string, []RefResult, error) {
+// Run synthesizes an answer with no prior conversation context. Preserved for
+// API compatibility; delegates to RunWithHistory.
+func Run(ctx context.Context, prompt string, refs []Ref, factory Factory, aggregator Ref) (string, []RefResult, error) {
+	return RunWithHistory(ctx, prompt, nil, refs, factory, aggregator)
+}
+
+// RunWithHistory is Run with the prior conversation, passed to each proposer so
+// a follow-up MoA is context-aware.
+func RunWithHistory(ctx context.Context, prompt string, history []models.Message, refs []Ref, factory Factory, aggregator Ref) (string, []RefResult, error) {
 	if len(refs) == 0 {
 		return "", nil, fmt.Errorf("no reference models configured")
 	}

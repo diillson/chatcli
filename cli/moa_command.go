@@ -70,7 +70,7 @@ func (cli *ChatCLI) handleMoACommand(input string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	final, results, err := moa.Run(ctx, prompt, cli.history, refs, factory, aggregator)
+	final, results, err := moa.RunWithHistory(ctx, prompt, cli.history, refs, factory, aggregator)
 	if err != nil {
 		fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
 		return
