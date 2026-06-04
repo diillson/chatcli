@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.130.0](https://github.com/diillson/chatcli/compare/v1.129.0...v1.130.0) (2026-06-04)
+
+
+### Features
+
+* proactive messaging, productivity skills pack, and multimodal agent tools ([#1007](https://github.com/diillson/chatcli/issues/1007)) ([f5a23d5](https://github.com/diillson/chatcli/commit/f5a23d5b8d084d027fd6c6e07ea5618d5c30012a))
+
 ## [1.129.0](https://github.com/diillson/chatcli/compare/v1.128.1...v1.129.0) (2026-06-03)
 
 
