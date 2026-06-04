@@ -80,7 +80,9 @@ func ParseRefs(raw string) []Ref {
 // error only when nothing usable was produced (no reference succeeded, or the
 // aggregator itself failed). Reference errors are otherwise tolerated — MoA
 // degrades gracefully to the models that did answer.
-func Run(ctx context.Context, prompt string, refs []Ref, factory Factory, aggregator Ref) (string, []RefResult, error) {
+// history (optional) is the prior conversation, passed to each proposer so a
+// follow-up MoA is context-aware.
+func Run(ctx context.Context, prompt string, history []models.Message, refs []Ref, factory Factory, aggregator Ref) (string, []RefResult, error) {
 	if len(refs) == 0 {
 		return "", nil, fmt.Errorf("no reference models configured")
 	}
@@ -98,7 +100,7 @@ func Run(ctx context.Context, prompt string, refs []Ref, factory Factory, aggreg
 				results[i] = res
 				return
 			}
-			out, err := c.SendPrompt(ctx, prompt, nil, 0)
+			out, err := c.SendPrompt(ctx, prompt, history, 0)
 			res.Output, res.Err = out, err
 			results[i] = res
 		}(i, ref)

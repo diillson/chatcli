@@ -4,20 +4,52 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/diillson/chatcli/models"
 )
 
 type fakeClient struct {
-	reply string
-	err   error
-	seen  string // last prompt seen
+	reply       string
+	err         error
+	seen        string // last prompt seen
+	seenHistory int    // length of history passed to the last SendPrompt
 }
 
-func (f *fakeClient) SendPrompt(_ context.Context, prompt string, _ []models.Message, _ int) (string, error) {
+func (f *fakeClient) SendPrompt(_ context.Context, prompt string, history []models.Message, _ int) (string, error) {
 	f.seen = prompt
+	f.seenHistory = len(history)
 	return f.reply, f.err
+}
+
+// Run must pass the conversation history to each proposer so a follow-up MoA is
+// context-aware (regression: history was dropped, so a second /moa or a normal
+// message after /moa had no context).
+func TestRun_PassesHistoryToProposers(t *testing.T) {
+	var mu sync.Mutex
+	var clients []*fakeClient
+	factory := func(provider, model string) (Client, error) {
+		c := &fakeClient{reply: "ok"}
+		mu.Lock()
+		clients = append(clients, c)
+		mu.Unlock()
+		return c, nil
+	}
+	hist := []models.Message{{Role: "user", Content: "earlier"}, {Role: "assistant", Content: "reply"}}
+	_, _, err := Run(context.Background(), "follow-up", hist, []Ref{{Provider: "a"}}, factory, Ref{Provider: "agg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawHistory bool
+	for _, c := range clients {
+		if c.seenHistory == 2 {
+			sawHistory = true
+		}
+	}
+	if !sawHistory {
+		t.Fatal("a proposer should receive the 2-message history")
+	}
 }
 
 func TestParseRefs(t *testing.T) {
@@ -42,7 +74,7 @@ func TestRun_Aggregates(t *testing.T) {
 		return &fakeClient{reply: "answer from " + provider}, nil
 	}
 	refs := []Ref{{Provider: "a"}, {Provider: "b"}}
-	out, results, err := Run(context.Background(), "question", refs, factory, Ref{Provider: "agg"})
+	out, results, err := Run(context.Background(), "question", nil, refs, factory, Ref{Provider: "agg"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +101,7 @@ func TestRun_ToleratesPartialFailure(t *testing.T) {
 			return &fakeClient{reply: "good answer"}, nil
 		}
 	}
-	out, _, err := Run(context.Background(), "q", []Ref{{Provider: "bad"}, {Provider: "good"}}, factory, Ref{Provider: "agg"})
+	out, _, err := Run(context.Background(), "q", nil, []Ref{{Provider: "bad"}, {Provider: "good"}}, factory, Ref{Provider: "agg"})
 	if err != nil {
 		t.Fatalf("should tolerate one failure, got %v", err)
 	}
@@ -82,13 +114,13 @@ func TestRun_AllFail(t *testing.T) {
 	factory := func(provider, model string) (Client, error) {
 		return &fakeClient{err: errors.New("down")}, nil
 	}
-	if _, _, err := Run(context.Background(), "q", []Ref{{Provider: "a"}}, factory, Ref{Provider: "agg"}); err == nil {
+	if _, _, err := Run(context.Background(), "q", nil, []Ref{{Provider: "a"}}, factory, Ref{Provider: "agg"}); err == nil {
 		t.Error("expected error when all references fail")
 	}
 }
 
 func TestRun_NoRefs(t *testing.T) {
-	if _, _, err := Run(context.Background(), "q", nil, nil, Ref{}); err == nil {
+	if _, _, err := Run(context.Background(), "q", nil, nil, nil, Ref{}); err == nil {
 		t.Error("expected error with no refs")
 	}
 }

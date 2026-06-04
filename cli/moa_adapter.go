@@ -198,7 +198,9 @@ func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs [
 				results[i] = moaResult{label: m.label, err: err}
 				return
 			}
-			ans, err := cl.SendPrompt(ctx, prompt, nil, 0)
+			// Pass the session history so a context-dependent @moa is answered
+			// with the prior conversation (mirrors the /moa command).
+			ans, err := cl.SendPrompt(ctx, prompt, a.cli.history, 0)
 			results[i] = moaResult{label: m.label, answer: ans, err: err}
 		}(i, m)
 	}

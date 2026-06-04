@@ -26,6 +26,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/moa"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/models"
 )
 
 func (cli *ChatCLI) handleMoACommand(input string) {
@@ -69,7 +70,7 @@ func (cli *ChatCLI) handleMoACommand(input string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	final, results, err := moa.Run(ctx, prompt, refs, factory, aggregator)
+	final, results, err := moa.Run(ctx, prompt, cli.history, refs, factory, aggregator)
 	if err != nil {
 		fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
 		return
@@ -85,4 +86,10 @@ func (cli *ChatCLI) handleMoACommand(input string) {
 	}
 	fmt.Println()
 	fmt.Println(cli.renderMarkdown(final))
+
+	// Record the turn in history so a follow-up /moa or a normal message has the
+	// context — same as a regular chat turn. Mirror onto the cross-channel hub.
+	cli.history = append(cli.history, models.Message{Role: "user", Content: prompt})
+	cli.history = append(cli.history, models.Message{Role: "assistant", Content: final})
+	cli.mirrorHubTurn(context.Background(), prompt, final)
 }
