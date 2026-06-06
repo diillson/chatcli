@@ -18,7 +18,7 @@ func TestStripForSpeech(t *testing.T) {
 	}{
 		{"plain text untouched", "Tudo certo, senhor.", "Tudo certo, senhor."},
 		{"bold and italic", "isso é **muito** _importante_ mesmo", "isso é muito importante mesmo"},
-		{"heading", "## Status\nTudo operacional.", "Status\nTudo operacional."},
+		{"heading", "## Status\nTudo funcionando bem.", "Status\nTudo funcionando bem."},
 		{"link keeps label", "veja [a doc](https://example.com) agora", "veja a doc agora"},
 		{"image dropped", "antes ![diagrama](img.png) depois", "antes depois"},
 		{"inline code unwrapped", "rode `go build` no root", "rode go build no root"},

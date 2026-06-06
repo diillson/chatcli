@@ -10,17 +10,20 @@
  *   1. CHATCLI_TTS_CMD   → a local TTS command template. Keyless, serverless.
  *   2. CHATCLI_TTS_URL   → a self-hosted OpenAI-compatible /audio/speech
  *      endpoint. Keyless (unless CHATCLI_TTS_KEY is set).
- *   3. a local TTS CLI on PATH (macOS `say`, espeak-ng, espeak) → used
+ *   3. the embedded Kokoro engine, when already provisioned in the cache —
+ *      keyless and OS-agnostic; auto mode never triggers its one-time
+ *      download (pin CHATCLI_TTS_PROVIDER=embedded for that).
+ *   4. a local TTS CLI on PATH (macOS `say`, espeak-ng, espeak) → used
  *      automatically with zero config — "local by default" when installed.
- *   4. OPENAI_API_KEY    → OpenAI TTS (paid).
- *   5. GROQ_API_KEY      → Groq TTS (OpenAI-shaped).
- *   6. GOOGLEAI_API_KEY/GEMINI_API_KEY → native Gemini TTS.
- *   7. otherwise         → Null (voice output disabled).
+ *   5. OPENAI_API_KEY    → OpenAI TTS (paid).
+ *   6. GROQ_API_KEY      → Groq TTS (OpenAI-shaped).
+ *   7. GOOGLEAI_API_KEY/GEMINI_API_KEY → native Gemini TTS.
+ *   8. otherwise         → Null (voice output disabled).
  *
- * CHATCLI_TTS_PROVIDER pins a specific backend (command|url|openai|groq|google);
- * a pinned
- * backend whose config is missing degrades to Null rather than silently
- * switching.
+ * CHATCLI_TTS_PROVIDER pins a specific backend
+ * (command|url|embedded|openai|groq|google); a pinned backend whose config is
+ * missing degrades to Null rather than silently switching. Pinning embedded
+ * provisions its engine and model lazily on first synthesis.
  */
 package tts
 
@@ -56,6 +59,8 @@ func NewFromEnv(logger *zap.Logger) Provider {
 		return commandOrNull(cmdTmpl, logger, "CHATCLI_TTS_PROVIDER=command set but CHATCLI_TTS_CMD is empty")
 	case "url", "selfhosted":
 		return selfHostedOrNull(url, model, logger)
+	case "embedded", "kokoro":
+		return embeddedFromEnv(logger)
 	case "openai":
 		return cloudOrNull(openAIBaseURL, os.Getenv("OPENAI_API_KEY"), model, "openai", logger,
 			"CHATCLI_TTS_PROVIDER=openai set but OPENAI_API_KEY is empty")
@@ -127,9 +132,32 @@ func googleTTSOrNull(model string, logger *zap.Logger, missingMsg string) Provid
 	return p
 }
 
-// detectLocalTTS returns a command-backed provider when a local TTS CLI is on
-// PATH, or nil otherwise. macOS `say` is preferred; espeak-ng / espeak follow.
+// embeddedFromEnv builds the embedded Kokoro provider with voices from env.
+// CHATCLI_TTS_VOICE picks the English speaker, CHATCLI_TTS_VOICE_PT the
+// Portuguese one; empty values take the Jarvis-style defaults.
+func embeddedFromEnv(logger *zap.Logger) Provider {
+	return NewEmbedded(os.Getenv("CHATCLI_TTS_VOICE"), os.Getenv("CHATCLI_TTS_VOICE_PT"), logger)
+}
+
+// embeddedIfProvisioned returns the embedded provider only when its cache is
+// already complete. Auto-detection must never surprise the user with the
+// one-time ~150MB download — that requires an explicit provider pin.
+func embeddedIfProvisioned(logger *zap.Logger) Provider {
+	e := NewEmbedded(os.Getenv("CHATCLI_TTS_VOICE"), os.Getenv("CHATCLI_TTS_VOICE_PT"), logger)
+	if !e.isProvisioned() {
+		return nil
+	}
+	logger.Info("tts: using embedded kokoro voice from cache")
+	return e
+}
+
+// detectLocalTTS returns a keyless local provider: the embedded engine when
+// already provisioned, else a TTS CLI on PATH (macOS `say` preferred;
+// espeak-ng / espeak follow), or nil otherwise.
 func detectLocalTTS(logger *zap.Logger) Provider {
+	if p := embeddedIfProvisioned(logger); p != nil {
+		return p
+	}
 	if path, err := execLookPath("say"); err == nil && path != "" {
 		if p, e := NewCommandSynthesizer("say {text} -o {output}", "aiff", "local"); e == nil {
 			logger.Info("tts: using local macOS `say`")

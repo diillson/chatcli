@@ -18,6 +18,7 @@ import (
 	"archive/tar"
 	"compress/bzip2"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -86,8 +87,12 @@ func sherpaAsset(goos, goarch string) (string, bool) {
 }
 
 // embeddedCacheDir returns ~/.cache/chatcli/tts (or the OS cache equivalent),
-// sibling of the whisper model cache.
+// sibling of the whisper model cache. CHATCLI_TTS_CACHE_DIR relocates it —
+// useful for shared caches and air-gapped pre-seeding.
 func embeddedCacheDir() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv("CHATCLI_TTS_CACHE_DIR")); dir != "" {
+		return dir, nil
+	}
 	base, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
@@ -230,7 +235,7 @@ func extractTar(r io.Reader, destDir string) error {
 	var written int64
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {
@@ -298,7 +303,7 @@ func writeFileFromTar(target string, tr io.Reader, hdr *tar.Header, budget int64
 	}
 	n, copyErr := io.CopyN(out, tr, budget)
 	closeErr := out.Close()
-	if copyErr != nil && copyErr != io.EOF {
+	if copyErr != nil && !errors.Is(copyErr, io.EOF) {
 		return n, copyErr
 	}
 	if n == budget {
