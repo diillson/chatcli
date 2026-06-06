@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.132.0](https://github.com/diillson/chatcli/compare/v1.131.0...v1.132.0) (2026-06-06)
+
+
+### Features
+
+* **gateway:** voice replies, embedded TTS and memory resilience ([#1011](https://github.com/diillson/chatcli/issues/1011)) ([cc06611](https://github.com/diillson/chatcli/commit/cc066117c3941447600f69c345087364c932dc86))
+
 ## [1.131.0](https://github.com/diillson/chatcli/compare/v1.130.0...v1.131.0) (2026-06-06)
 
 
