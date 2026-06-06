@@ -2215,6 +2215,7 @@
   "complete.root.quit": "Alias de /exit - Sair do ChatCLI",
   "complete.root.switch": "Trocar o provedor de LLM, seguido por --model troca o modelo",
   "complete.root.model": "Atalho para /switch --model: troca o modelo do provedor atual",
+  "complete.root.model_image": "Atalho para /config image model: troca o modelo de geração de imagem (@image)",
   "complete.root.maxtokens": "Atalho para /switch --max-tokens: limita os tokens de saída da sessão",
   "complete.maxtokens.default": "0 = usar o padrão do provedor",
   "complete.root.help": "Mostrar ajuda",

@@ -193,6 +193,8 @@ func (ch *CommandHandler) buildRoutes() {
 	ch.routes.prefixes = []prefixRoute{
 		{"/switch", false, func(in string) bool { c.handleSwitchCommand(in); return false }},
 		{"/provider", false, func(in string) bool { c.handleProviderCommand(in); return false }},
+		// Must precede "/model" (raw-prefix) so it isn't shadowed by it.
+		{"/model-image", true, func(in string) bool { c.handleImageModelCommand(in); return false }},
 		{"/model", false, func(in string) bool { c.handleModelCommand(in); return false }},
 		{"/max-tokens", false, func(in string) bool { c.handleMaxTokensCommand(in); return false }},
 		{"/config", true, ch.cmdConfig},

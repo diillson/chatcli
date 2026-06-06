@@ -9,12 +9,15 @@
  * default (we never rewrite .env — user territory).
  *
  *   /config image                      # status
- *   /config image provider <name>      # sdwebui|url|openai|responses|google|xai|auto
+ *   /config image provider <name>      # sdwebui|url|openai|responses|google|xai|zai|minimax|bedrock|auto
  *   /config image api images|responses # OpenAI: Images API vs Responses API
  *   /config image model <id>           # CHATCLI_IMAGE_MODEL
  *   /config image url <url>            # CHATCLI_IMAGE_URL (self-hosted/SD WebUI)
  *   /config image models               # list the image-model catalog
  *   /config image reset                # clear the overrides above
+ *
+ * Shorthand: `/model-image [<id>]` mirrors `/config image model` (and lists the
+ * catalog when bare), the @image counterpart to `/model` for text models.
  */
 package cli
 
@@ -59,6 +62,42 @@ func (cli *ChatCLI) routeConfigImage(args []string) {
 		fmt.Println(colorize("  "+i18n.T("cfg.image.unknown_sub", args[0]), ColorYellow))
 		cli.printConfigImageUsage()
 	}
+}
+
+// handleImageModelCommand is the `/model-image [<id>]` shorthand for
+// `/config image model <id>`: it switches only the @image generation model
+// (CHATCLI_IMAGE_MODEL) without the longer /config path, mirroring how `/model`
+// shortcuts the text-model switch. With no argument it prints the image-model
+// catalog (same as `/config image models`). It deliberately does NOT touch the
+// text/chat model — image and text models are separate backends.
+func (cli *ChatCLI) handleImageModelCommand(input string) {
+	rest := strings.TrimSpace(strings.TrimPrefix(input, "/model-image"))
+	if rest == "" {
+		fmt.Println(cli.imageModelsCatalog())
+		return
+	}
+	cli.setImageEnv("CHATCLI_IMAGE_MODEL", []string{rest})
+}
+
+// getImageModelSuggestions autocompletes the `/model-image <id>` shorthand with
+// the image-model catalog — the same source as `/config image model`.
+func (cli *ChatCLI) getImageModelSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	word := d.GetWordBeforeCursor()
+
+	// Just typed "/model-image" without a trailing space.
+	if len(args) == 1 && !strings.HasSuffix(line, " ") {
+		return []prompt.Suggest{
+			{Text: "/model-image", Description: i18n.T("complete.root.model_image")},
+		}
+	}
+
+	out := make([]prompt.Suggest, 0, len(imagegen.KnownModels()))
+	for _, m := range imagegen.KnownModels() {
+		out = append(out, prompt.Suggest{Text: m.Name, Description: m.Provider + " · " + m.API})
+	}
+	return prompt.FilterHasPrefix(out, word, true)
 }
 
 // setImageEnv applies a single image env override at runtime.
@@ -129,6 +168,8 @@ func (cli *ChatCLI) getConfigImageSuggestions(d prompt.Document) []prompt.Sugges
 				{Text: "responses", Description: i18n.T("complete.configimage.val")},
 				{Text: "google", Description: i18n.T("complete.configimage.val")},
 				{Text: "xai", Description: i18n.T("complete.configimage.val")},
+				{Text: "zai", Description: i18n.T("complete.configimage.val")},
+				{Text: "minimax", Description: i18n.T("complete.configimage.val")},
 				{Text: "bedrock", Description: i18n.T("complete.configimage.val")},
 				{Text: "url", Description: i18n.T("complete.configimage.val")},
 			}, word, true)
