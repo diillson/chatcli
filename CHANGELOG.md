@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.131.0](https://github.com/diillson/chatcli/compare/v1.130.0...v1.131.0) (2026-06-06)
+
+
+### Features
+
+* **imagegen:** Z.AI + MiniMax image backends, model-aware auto, and /model-image ([#1009](https://github.com/diillson/chatcli/issues/1009)) ([f2ab283](https://github.com/diillson/chatcli/commit/f2ab283bb090699569c78795b9cede84879b5259))
+
 ## [1.130.0](https://github.com/diillson/chatcli/compare/v1.129.0...v1.130.0) (2026-06-04)
 
 
