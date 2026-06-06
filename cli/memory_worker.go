@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/workspace/memory"
+	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -23,6 +25,16 @@ type memoryWorker struct {
 	mu               sync.Mutex
 	running          atomic.Bool
 	stopCh           chan struct{}
+
+	// Resilience: segments that fail every provider are queued on disk at
+	// pendingDir and drained on later runs; consecutiveFails drives the
+	// user-visible "memory is failing" notice (sent once per failure streak).
+	pendingDir       string
+	consecutiveFails int  // guarded by mu
+	failNoticeSent   bool // guarded by mu
+	// lookupFallback resolves a fallback provider client; indirected so tests
+	// exercise the chain without a full LLM manager.
+	lookupFallback func(provider string) (client.LLMClient, error)
 }
 
 const (
@@ -39,11 +51,19 @@ const (
 )
 
 func newMemoryWorker(cli *ChatCLI) *memoryWorker {
-	return &memoryWorker{
-		cli:    cli,
-		logger: cli.logger,
-		stopCh: make(chan struct{}),
+	mw := &memoryWorker{
+		cli:        cli,
+		logger:     cli.logger,
+		stopCh:     make(chan struct{}),
+		pendingDir: defaultPendingDir(),
 	}
+	mw.lookupFallback = func(provider string) (client.LLMClient, error) {
+		if cli.manager == nil {
+			return nil, fmt.Errorf("no LLM manager")
+		}
+		return cli.manager.GetClient(provider, "")
+	}
+	return mw
 }
 
 // start begins the background memory worker loop.
@@ -139,34 +159,71 @@ func (mw *memoryWorker) maybeExtract() {
 	// Show subtle status
 	mw.showStatus("updating memory...")
 
+	// Queued segments first (oldest dialog wins on causality), then the live one.
+	mw.drainPending()
+
 	err := mw.extractAndSave(messagesToProcess)
 
 	if err != nil {
-		mw.logger.Warn("Memory worker: extraction failed", zap.Error(err))
-		// On failure, only update lastRunTime (cooldown) but NOT lastProcessedIdx,
-		// so these messages will be retried on the next run.
-		mw.mu.Lock()
-		mw.lastRunTime = time.Now()
-		mw.mu.Unlock()
+		mw.onExtractionFailure(err, messagesToProcess, historyLen)
 	} else {
-		mw.logger.Debug("Memory worker: annotations saved successfully")
-		mw.mu.Lock()
-		mw.lastProcessedIdx = historyLen
-		mw.lastRunTime = time.Now()
-		mw.mu.Unlock()
-		// Invalidate context builder cache so next prompt picks up new memory
-		if mw.cli.contextBuilder != nil {
-			mw.cli.contextBuilder.InvalidateCache()
-		}
+		mw.onExtractionSuccess(historyLen)
 	}
 
 	mw.clearStatus()
 }
 
+// onExtractionSuccess advances the watermark, resets the failure streak and
+// invalidates the prompt cache so the next turn sees the new memory.
+func (mw *memoryWorker) onExtractionSuccess(historyLen int) {
+	mw.logger.Debug("Memory worker: annotations saved successfully")
+	mw.mu.Lock()
+	mw.lastProcessedIdx = historyLen
+	mw.lastRunTime = time.Now()
+	mw.consecutiveFails = 0
+	mw.failNoticeSent = false
+	mw.mu.Unlock()
+	if mw.cli.contextBuilder != nil {
+		mw.cli.contextBuilder.InvalidateCache()
+	}
+}
+
+// onExtractionFailure persists the segment to the on-disk queue (advancing the
+// watermark — it is durably queued) and surfaces a one-line notice once the
+// failure streak crosses the threshold. If even persisting fails, the
+// watermark stays put so the in-memory retry path still covers the segment.
+func (mw *memoryWorker) onExtractionFailure(err error, segment []models.Message, historyLen int) {
+	mw.logger.Warn("Memory worker: extraction failed", zap.Error(err))
+
+	queued := false
+	if path, perr := mw.persistPending(segment); perr != nil {
+		mw.logger.Warn("Memory worker: could not queue segment; will retry in memory", zap.Error(perr))
+	} else {
+		queued = true
+		mw.logger.Info("Memory worker: segment queued for retry", zap.String("file", path))
+	}
+
+	mw.mu.Lock()
+	mw.lastRunTime = time.Now()
+	if queued {
+		mw.lastProcessedIdx = historyLen
+	}
+	mw.consecutiveFails++
+	notify := mw.consecutiveFails >= memoryFailNoticeThreshold && !mw.failNoticeSent
+	if notify {
+		mw.failNoticeSent = true
+	}
+	fails := mw.consecutiveFails
+	mw.mu.Unlock()
+
+	if notify {
+		mw.cli.pushMemoryNotice(i18n.T("mem.notice.failing", fails))
+	}
+}
+
 func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
-	llmClient := mw.cli.getClient()
-	if llmClient == nil || mw.cli.memoryStore == nil {
-		return fmt.Errorf("client or memory store not available")
+	if mw.cli.memoryStore == nil {
+		return fmt.Errorf("memory store not available")
 	}
 
 	mgr := mw.cli.memoryStore.Manager()
@@ -202,9 +259,6 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 	fullPrompt.WriteString("CONVERSATION SEGMENT TO ANALYZE:\n\n")
 	fullPrompt.WriteString(sb.String())
 
-	ctx, cancel := context.WithTimeout(context.Background(), memoryExtractTimeout)
-	defer cancel()
-
 	prompt := fullPrompt.String()
 
 	// Pass prompt as both the prompt param and the last user message in history.
@@ -213,12 +267,9 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 		{Role: "user", Content: prompt},
 	}
 
-	response, err := llmClient.SendPrompt(ctx, prompt, history, 0)
-	// Auto-retry on OAuth token expiration (401)
-	if mw.cli.refreshClientOnAuthError(err) {
-		llmClient = mw.cli.getClient()
-		response, err = llmClient.SendPrompt(ctx, prompt, history, 0)
-	}
+	// Walk the provider chain (active client first, then fallbacks) so one
+	// provider's outage does not cost the conversation its memory.
+	response, err := mw.callExtraction(prompt, history)
 	if err != nil {
 		return fmt.Errorf("memory extraction LLM call failed: %w", err)
 	}

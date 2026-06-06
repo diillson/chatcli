@@ -2440,6 +2440,7 @@
   "mem.notice.profile": "profile updated",
   "mem.notice.projects": "+%d project",
   "mem.notice.topics": "+%d topic(s)",
+  "mem.notice.failing": "memory: extraction failing (%d in a row) — recent facts are queued on disk and will be retried automatically",
   "mem.tool.remember.ok": "Remembered: %s",
   "mem.tool.remember.dup": "Already in memory (no change).",
   "mem.tool.profile.ok": "Profile updated: %s",
