@@ -41,6 +41,7 @@ type OpenAICompatible struct {
 	model    string
 	label    string
 	omitSize bool // some servers (xAI grok-image) reject the "size" field
+	omitN    bool // some servers (Z.AI CogView/GLM-Image) reject the "n" field
 	client   *http.Client
 }
 
@@ -96,7 +97,9 @@ func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, opts Opt
 	payload := map[string]interface{}{
 		"model":  o.model,
 		"prompt": prompt,
-		"n":      n,
+	}
+	if !o.omitN {
+		payload["n"] = n
 	}
 	if !o.omitSize {
 		payload["size"] = size

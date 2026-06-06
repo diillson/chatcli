@@ -3,12 +3,14 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  *
- * Bedrock generates images through its dedicated image models — Amazon Nova
- * Canvas and Amazon Titan Image Generator — via bedrock-runtime InvokeModel
- * (AWS SigV4), NOT through the OpenAI shape and NOT through the chat/gpt models.
- * Nova Canvas and Titan share the TEXT_IMAGE request/response shape, so one
- * backend covers both. Credentials reuse the same chain as the chat provider
- * (llm/bedrock.LoadBedrockRuntime: env / shared profile / IAM role).
+ * Bedrock generates images through its dedicated image models via bedrock-runtime
+ * InvokeModel (AWS SigV4), NOT through the OpenAI shape and NOT through the
+ * chat/gpt models. Two request families are covered: the current Stability AI
+ * models (Stable Image Core/Ultra, SD3.5 Large) use a text-to-image shape, while
+ * the legacy Amazon models (Nova Canvas, Titan Image Generator) share the
+ * TEXT_IMAGE shape. Both return {"images":["<b64>"]}. Credentials reuse the same
+ * chain as the chat provider (llm/bedrock.LoadBedrockRuntime: env / shared
+ * profile / IAM role).
  */
 package imagegen
 
@@ -25,7 +27,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultBedrockImageModel = "amazon.nova-canvas-v1:0"
+// defaultBedrockImageModel is a current (non-legacy) Stability model. Nova
+// Canvas — the previous default — is legacy with an EOL of 2026-09-30, so new
+// users default to Stable Image Core (broadly available, cheapest, fast).
+const defaultBedrockImageModel = "stability.stable-image-core-v1:1"
 
 // Bedrock generates images via bedrock-runtime InvokeModel.
 type Bedrock struct {
@@ -52,7 +57,8 @@ func NewBedrock(ctx context.Context, region, profile, model string, logger *zap.
 // Name returns "bedrock".
 func (*Bedrock) Name() string { return "bedrock" }
 
-// Generate invokes the Nova Canvas / Titan TEXT_IMAGE task.
+// Generate invokes the configured Bedrock image model (Stability text-to-image
+// or the legacy Amazon TEXT_IMAGE task, selected per model family).
 func (b *Bedrock) Generate(ctx context.Context, prompt string, opts Options) ([]Image, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("imagegen: empty prompt")
@@ -101,8 +107,8 @@ func buildBedrockRequest(model, prompt string, opts Options) []byte {
 	return body
 }
 
-// parseBedrockImages decodes the {"images":["<b64>"]} response shared by Nova
-// Canvas and Titan Image Generator.
+// parseBedrockImages decodes the {"images":["<b64>"]} response shared by the
+// Stability text-to-image models and the legacy Amazon Nova Canvas / Titan ones.
 func parseBedrockImages(raw []byte) ([]Image, error) {
 	var out struct {
 		Images []string `json:"images"`

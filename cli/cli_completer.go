@@ -43,6 +43,7 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/agent", (*ChatCLI).getAgentSuggestions},
 	{"/switch", (*ChatCLI).getSwitchSuggestions},
 	{"/provider", (*ChatCLI).getProviderSuggestions},
+	{"/model-image", (*ChatCLI).getImageModelSuggestions}, // before "/model" — it shadows this prefix
 	{"/model", (*ChatCLI).getModelSuggestions},
 	{"/max-tokens", (*ChatCLI).getMaxTokensSuggestions},
 	{"/auth", (*ChatCLI).getAuthSuggestions},
@@ -294,6 +295,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/switch", Description: i18n.T("complete.root.switch")},
 		{Text: "/provider", Description: i18n.T("complete.root.provider")},
 		{Text: "/model", Description: i18n.T("complete.root.model")},
+		{Text: "/model-image", Description: i18n.T("complete.root.model_image")},
 		{Text: "/max-tokens", Description: i18n.T("complete.root.maxtokens")},
 		{Text: "/help", Description: i18n.T("complete.root.help")},
 		{Text: "/menu", Description: i18n.T("complete.root.menu")},

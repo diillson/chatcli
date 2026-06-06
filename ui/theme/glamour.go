@@ -81,10 +81,14 @@ func (t Theme) GlamourStyleConfig() ansi.StyleConfig {
 		Emph:           ansi.StylePrimitive{Color: hexPtr(p.Text), Italic: boolPtr(true)},
 		Strikethrough:  ansi.StylePrimitive{CrossedOut: boolPtr(true)},
 		HorizontalRule: ansi.StylePrimitive{Color: hexPtr(p.Muted), Format: "\n──────\n"},
-		Item:           ansi.StylePrimitive{Color: hexPtr(p.Text)},
-		Enumeration:    ansi.StylePrimitive{Color: hexPtr(p.Muted)},
-		Link:           ansi.StylePrimitive{Color: hexPtr(p.Secondary), Underline: boolPtr(true)},
-		LinkText:       ansi.StylePrimitive{Color: hexPtr(p.Accent)},
+		// BlockPrefix carries the list marker glamour emits before each item's
+		// text ("• " for bullets, ". " right after the number for ordered lists).
+		// Overriding these styles without it produces "1Foo"/"Foo" — the marker
+		// vanishes. See glamour stock styles + ansi/listitem.go.
+		Item:        ansi.StylePrimitive{Color: hexPtr(p.Text), BlockPrefix: "• "},
+		Enumeration: ansi.StylePrimitive{Color: hexPtr(p.Muted), BlockPrefix: ". "},
+		Link:        ansi.StylePrimitive{Color: hexPtr(p.Secondary), Underline: boolPtr(true)},
+		LinkText:    ansi.StylePrimitive{Color: hexPtr(p.Accent)},
 		// Inline `code`: tinted and padded so it reads as a chip.
 		Code: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{
 			Color: hexPtr(p.Warning), Prefix: " ", Suffix: " "}},

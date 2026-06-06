@@ -36,11 +36,12 @@ type ModelInfo struct {
 func KnownModels() []ModelInfo {
 	return []ModelInfo{
 		// OpenAI Images API (gpt-image family). May require org verification.
-		{Name: "gpt-image-2", Provider: "openai", API: "images", Note: "Newest OpenAI image model (Images API)."},
+		// DALL-E 2/3 were retired (dall-e-3 on 2026-03-04; both shut down
+		// 2026-05-12) — removed, they only error now. Use the gpt-image family.
+		{Name: "gpt-image-2", Provider: "openai", API: "images", Note: "Newest OpenAI image model — adds reasoning (Images API)."},
 		{Name: "gpt-image-1.5", Provider: "openai", API: "images", Note: "OpenAI Images API."},
 		{Name: "gpt-image-1", Provider: "openai", API: "images", Note: "OpenAI Images API (broadly available; default)."},
 		{Name: "gpt-image-1-mini", Provider: "openai", API: "images", Note: "Smaller/cheaper OpenAI image model."},
-		{Name: "dall-e-3", Provider: "openai", API: "images", Note: "Legacy; not on all accounts."},
 		// OpenAI Responses API (a chat model generates via the image_generation tool).
 		{Name: "gpt-5.5", Provider: "openai", API: "responses", Note: "Chat model w/ image_generation tool (Responses API)."},
 		{Name: "gpt-5", Provider: "openai", API: "responses", Note: "gpt-5 and newer support the image_generation tool."},
@@ -49,11 +50,20 @@ func KnownModels() []ModelInfo {
 		// xAI.
 		{Name: "grok-2-image", Provider: "xai", API: "native", Note: "xAI image (OpenAI-shaped /images/generations, no size)."},
 		{Name: "grok-imagine-image-quality", Provider: "xai", API: "imagine", Note: "xAI Imagine quality model (Imagine API)."},
-		// AWS Bedrock (InvokeModel; Nova Canvas / Titan share the TEXT_IMAGE shape).
-		{Name: "amazon.nova-canvas-v1:0", Provider: "bedrock", API: "native", Note: "Bedrock Nova Canvas (TEXT_IMAGE; default)."},
-		{Name: "amazon.titan-image-generator-v2:0", Provider: "bedrock", API: "native", Note: "Bedrock Titan Image v2 (TEXT_IMAGE)."},
-		{Name: "stability.sd3-5-large-v1:0", Provider: "bedrock", API: "stability", Note: "Bedrock Stability SD3.5 (different request shape)."},
-		{Name: "stability.stable-image-ultra-v1:1", Provider: "bedrock", API: "stability", Note: "Bedrock Stability Ultra (different request shape)."},
+		// Z.AI (Zhipu) — OpenAI-shaped /images/generations, returns image URLs.
+		{Name: "glm-image", Provider: "zai", API: "images", Note: "Z.AI GLM-Image (newest; bilingual text-in-image; default)."},
+		{Name: "cogview-4-250304", Provider: "zai", API: "images", Note: "Z.AI CogView-4 flagship (bilingual)."},
+		{Name: "cogview-3-flash", Provider: "zai", API: "images", Note: "Z.AI CogView-3 Flash (free tier)."},
+		// MiniMax (Hailuo) — custom /v1/image_generation endpoint, base64 response.
+		{Name: "image-01", Provider: "minimax", API: "native", Note: "MiniMax Image-01 (text-to-image, up to 9 images)."},
+		// AWS Bedrock (InvokeModel). Current Stability models use the text-to-image
+		// shape; the Amazon TEXT_IMAGE models are legacy (AWS recommends migrating
+		// to Stability Core/Ultra/SD3.5 — Nova Canvas EOL 2026-09-30).
+		{Name: "stability.stable-image-core-v1:1", Provider: "bedrock", API: "stability", Note: "Bedrock Stability Stable Image Core (current; cheapest, fast; default)."},
+		{Name: "stability.stable-image-ultra-v1:1", Provider: "bedrock", API: "stability", Note: "Bedrock Stability Stable Image Ultra (current; highest quality)."},
+		{Name: "stability.sd3-5-large-v1:0", Provider: "bedrock", API: "stability", Note: "Bedrock Stability SD3.5 Large (current; flagship)."},
+		{Name: "amazon.nova-canvas-v1:0", Provider: "bedrock", API: "native", Note: "Bedrock Nova Canvas (TEXT_IMAGE; LEGACY, EOL 2026-09-30)."},
+		{Name: "amazon.titan-image-generator-v2:0", Provider: "bedrock", API: "native", Note: "Bedrock Titan Image v2 (TEXT_IMAGE; legacy)."},
 	}
 }
 
