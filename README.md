@@ -529,7 +529,8 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 |---|---|
 | **Tool calling nativo** | APIs nativas de OpenAI, Anthropic, Bedrock, Google, ZAI, MiniMax, Moonshot, OpenRouter. Cache `ephemeral` para Anthropic. XML fallback automático para providers sem suporte nativo. |
 | **MCP (Model Context Protocol)** | Client via stdio e SSE para contexto expandido. Server (`chatcli mcp-server`) expõe chat, agent, coder e built-in tools; modo ACP (`chatcli acp`) para editores. |
-| **Chat Gateway** | Roda como daemon de mensageria (Telegram, Slack, Discord, WhatsApp, webhook): cada mensagem passa pelo agent loop e o progresso é transmitido de volta ao chat. |
+| **Chat Gateway** | Roda como daemon de mensageria (Telegram, Slack, Discord, WhatsApp, webhook): cada mensagem passa pelo agent loop e o progresso é transmitido de volta ao chat. Mensagens de voz são transcritas (whisper local-first) e respondidas em voz por padrão (`CHATCLI_GATEWAY_VOICE_REPLY=auto\|always\|never`). |
+| **Voz embarcada (TTS)** | `CHATCLI_TTS_PROVIDER=embedded` — voz neural Kokoro offline, sem API key e sem cgo: baixa o engine sherpa-onnx + modelo uma única vez (~150MB) e funciona igual em Linux/macOS/Windows. Roteia pt-BR/inglês por idioma da resposta (`CHATCLI_TTS_VOICE=bm_george`, `CHATCLI_TTS_VOICE_PT=pm_alex`); demais backends (say/espeak, self-hosted, OpenAI/Groq/Gemini) seguem disponíveis. |
 | **Mixture-of-Agents** | `/moa` — vários modelos propõem em paralelo e um agregador sintetiza (Wang et al., 2406.04692). |
 | **Diagnósticos LSP** | `/lsp <arquivo>` — erros/avisos do compilador via Language Server Protocol (gopls, pyright, rust-analyzer, clangd, …). |
 | **Rate limits** | `/ratelimit` — limites do provider parseados dos headers `x-ratelimit-*` (requests/tokens, % usado, reset). |
