@@ -190,12 +190,20 @@ func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 	if m, err := hub.OpenDefault(ctx, cli.logger); err != nil {
 		cli.logger.Warn("gateway: conversation hub unavailable; continuing without cross-channel continuity", zap.Error(err))
 	} else if !resolveHubEnabled(ctx, m) {
-		_ = m.Close() // hub turned off via setting/env
+		// An explicitly disabled hub must never be silent: it kills
+		// cross-channel continuity for every conversation the daemon serves.
+		cli.logger.Warn("gateway: conversation hub DISABLED via setting/env; replies have no cross-channel continuity",
+			zap.String("source", hubEnabledSource(ctx, m)))
+		_ = m.Close()
 	} else {
 		if n, e := m.PurgeIdle(ctx, resolveHubTTL(ctx, m)); e == nil && n > 0 {
 			cli.logger.Info("gateway: purged idle conversations", zap.Int("count", n))
 		}
 		broker = m
+		cli.logger.Info("gateway: conversation hub active",
+			zap.String("principal", resolveHubPrincipal(ctx, m)),
+			zap.Bool("isolate", resolveHubIsolate(ctx, m)),
+			zap.Duration("idle_ttl", resolveHubTTL(ctx, m)))
 		defer func() { _ = m.Close() }()
 	}
 	return cli.runGateway(ctx, broker)
@@ -575,6 +583,10 @@ const gatewayContextTurns = 12
 type hubSessions struct {
 	store  hub.Store // nil when the hub could not be opened (degrade to no continuity)
 	logger *zap.Logger
+
+	// noStoreOnce rate-limits the "serving without hub" warning to one line
+	// per daemon run instead of one per message.
+	noStoreOnce sync.Once
 }
 
 func newHubSessions(store hub.Store, logger *zap.Logger) *hubSessions {
@@ -646,6 +658,9 @@ type gatewayTurn struct {
 func (s *hubSessions) begin(ctx context.Context, msg gateway.InboundMessage) *gatewayTurn {
 	turn := &gatewayTurn{sessions: s, channel: msg.Platform}
 	if s.store == nil {
+		s.noStoreOnce.Do(func() {
+			s.logger.Warn("gateway: serving WITHOUT conversation hub — replies have no dialog context and are not shared with the CLI")
+		})
 		return turn
 	}
 	turn.principal = s.principalFor(ctx, msg.Platform, msg.UserID)
