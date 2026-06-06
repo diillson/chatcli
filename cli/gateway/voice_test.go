@@ -132,6 +132,41 @@ func TestRunner_SessionPrefOutranksGlobalMode(t *testing.T) {
 	}
 }
 
+func TestVoiceDecision(t *testing.T) {
+	prefs := NewVoicePrefs("")
+	if err := prefs.Set("t:always", VoicePrefAlways); err != nil {
+		t.Fatal(err)
+	}
+	if err := prefs.Set("t:never", VoicePrefNever); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		session    string
+		globalMode string
+		audio      bool
+		want       bool
+	}{
+		{"in-kind voice in", "t:unset", VoiceModeInKind, true, true},
+		{"in-kind text in", "t:unset", VoiceModeInKind, false, false},
+		{"global always text in", "t:unset", VoiceModeAlways, false, true},
+		{"pref always beats in-kind", "t:always", VoiceModeInKind, false, true},
+		{"pref never beats global always", "t:never", VoiceModeAlways, true, false},
+		{"nil prefs falls back to mode", "t:always", VoiceModeInKind, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := prefs
+			if tt.name == "nil prefs falls back to mode" {
+				p = nil
+			}
+			if got := VoiceDecision(p, tt.session, tt.globalMode, tt.audio); got != tt.want {
+				t.Errorf("VoiceDecision = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunner_AlwaysModeSpeaksTextMessages(t *testing.T) {
 	rec := &recordingAdapter{}
 	r := newVoiceRunner(t, rec, "the answer")

@@ -31,6 +31,11 @@ func TestStripForSpeech(t *testing.T) {
 		{"html tags", "um <b>dois</b> três<br/>", "um dois três"},
 		{"only code returns empty", "```\nx := 1\n```", ""},
 		{"empty input", "   \n  ", ""},
+		{"emoji stripped", "Tudo certo ✅ pode seguir 🚀", "Tudo certo pode seguir"},
+		{"emoji with skin tone and zwj", "ok 👍🏽 família 👨‍👩‍👧 fim", "ok família fim"},
+		{"warning sign and arrows", "⚠️ atenção: a → b ⭐", "atenção: a b"},
+		{"only emoji returns empty", "🎉🎉🎉", ""},
+		{"accented text untouched", "ação concluída: é ótimo, não?", "ação concluída: é ótimo, não?"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

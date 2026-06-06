@@ -258,6 +258,15 @@ const (
 	voiceReplyNever  = "never"  // replies stay text-only
 )
 
+// speechReplyDirective is appended to the task when the answer will also be
+// delivered as synthesized audio, so the model writes for the ear. English on
+// purpose: models follow English instructions most reliably, and the reply
+// language is driven by the conversation, not by this note.
+const speechReplyDirective = "[voice] This reply will also be spoken aloud as synthesized audio. " +
+	"Write it to be heard: natural conversational prose in the user's language, short sentences, " +
+	"no emojis or emoticons, no markdown formatting, no bullet lists or tables, " +
+	"and avoid URLs or code unless the user explicitly asked for them."
+
 // voiceReplyMode parses CHATCLI_GATEWAY_VOICE_REPLY. Empty and "auto" reply in
 // kind; legacy boolean values keep their meaning: true → always, false → never.
 // Unrecognized values fall back to auto so a typo never silences the gateway.
@@ -377,6 +386,17 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 		cli.logger.Info("gateway: voice transcription enabled", zap.String("provider", transcriber.Name()))
 	}
 
+	// Voice output posture, resolved once: whether a synthesizer exists and the
+	// global mode. Per message this combines with the session preference so the
+	// model can be told its reply will be spoken (nil logger: the synthesizer
+	// wired in maybeEnableVoiceReplies already logged the backend).
+	globalVoiceMode := gateway.VoiceModeInKind
+	if voiceReplyMode(os.Getenv("CHATCLI_GATEWAY_VOICE_REPLY")) == voiceReplyAlways {
+		globalVoiceMode = gateway.VoiceModeAlways
+	}
+	voiceConfigured := voiceReplyMode(os.Getenv("CHATCLI_GATEWAY_VOICE_REPLY")) != voiceReplyNever &&
+		!tts.IsNull(tts.NewFromEnv(nil))
+
 	return func(ctx context.Context, session, text string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -423,6 +443,13 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 		task := msg.Text
 		if pre := conv.preamble; pre != "" {
 			task = pre + "\n\nCurrent request: " + msg.Text
+		}
+
+		// When this reply will be synthesized to audio, tell the model up
+		// front: emojis, bullet lists and tables read terribly out loud, and
+		// only the model can phrase for the ear.
+		if voiceConfigured && gateway.VoiceDecision(gateway.SharedVoicePrefs(), session, globalVoiceMode, msg.Audio != nil) {
+			task += "\n\n" + speechReplyDirective
 		}
 
 		emit := gateway.Progress(ctx)

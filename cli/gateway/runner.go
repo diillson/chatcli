@@ -90,22 +90,27 @@ func (r *Runner) SetVoiceMode(mode string) { r.voiceMode = mode }
 // choice (set by the user asking in the conversation) outranks the global mode.
 func (r *Runner) SetVoicePrefs(p *VoicePrefs) { r.voicePrefs = p }
 
-// wantsVoice reports whether the final answer to msg should carry audio: the
-// session's own preference first, then the global mode (always, or the
-// default in-kind — voice answers voice).
+// wantsVoice reports whether the final answer to msg should carry audio.
 func (r *Runner) wantsVoice(msg *InboundMessage) bool {
-	if r.voice == nil {
-		return false
-	}
-	if r.voicePrefs != nil {
-		switch r.voicePrefs.Get(msg.SessionKey()) {
+	return r.voice != nil &&
+		VoiceDecision(r.voicePrefs, msg.SessionKey(), r.voiceMode, msg.Audio != nil)
+}
+
+// VoiceDecision is the single rule for "should this reply be spoken": the
+// session's own preference (set via the @voice tool) first, then the global
+// mode — always, or the default in-kind where voice answers voice. Shared by
+// the Runner and by the gateway agent loop, which uses it to tell the model
+// up front that its reply will be heard, not read.
+func VoiceDecision(prefs *VoicePrefs, session, globalMode string, inboundAudio bool) bool {
+	if prefs != nil {
+		switch prefs.Get(session) {
 		case VoicePrefAlways:
 			return true
 		case VoicePrefNever:
 			return false
 		}
 	}
-	return r.voiceMode == VoiceModeAlways || msg.Audio != nil
+	return globalMode == VoiceModeAlways || inboundAudio
 }
 
 // NewRunner builds a runner. maxConcurrent <= 0 uses DefaultMaxConcurrent.
