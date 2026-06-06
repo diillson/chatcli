@@ -322,6 +322,12 @@ func (cli *ChatCLI) maybeEnableVoiceReplies(runner *gateway.Runner) {
 			cli.logger.Warn("gateway: TTS synthesis failed; sending text", zap.Error(err))
 			return nil
 		}
+		// Backends that ignore the format hint emit raw wav/aiff, which
+		// Telegram shows as a dead file. Convert to a playable OGG/Opus voice
+		// note whenever that is what was asked for.
+		if format == "ogg" || format == "opus" {
+			audio = tts.ToVoiceNote(ctx, audio, cli.logger)
+		}
 		return &gateway.OutboundAudio{Data: audio.Data, Mime: audio.Mime, FileName: "reply." + audio.Ext}
 	})
 }

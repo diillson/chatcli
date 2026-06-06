@@ -17,6 +17,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // lookupFFmpegTTS returns the ffmpeg binary path, or "" when not installed.
@@ -26,16 +28,51 @@ var lookupFFmpegTTS = func() string {
 	return p
 }
 
+// ToVoiceNote converts a synthesized clip into OGG/Opus when the backend
+// produced a raw format messengers cannot play inline — the local macOS `say`
+// engine emits aiff and espeak emits wav, both of which Telegram renders as a
+// dead file. Compressed formats pass through untouched, and without ffmpeg
+// the clip is returned unchanged so the reply still goes out.
+func ToVoiceNote(ctx context.Context, a Audio, logger *zap.Logger) Audio {
+	switch a.Ext {
+	case "wav", "aiff":
+		// raw PCM containers: worth transcoding
+	default:
+		return a
+	}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	ffmpeg := lookupFFmpegTTS()
+	if ffmpeg == "" {
+		logger.Warn("tts: ffmpeg not found; sending raw " + a.Ext + " audio that messengers may not play")
+		return a
+	}
+	ogg, err := toOpus(ctx, ffmpeg, a.Data, a.Ext)
+	if err != nil {
+		logger.Warn("tts: voice-note transcode failed; sending original audio", zap.Error(err))
+		return a
+	}
+	mime, ext := mimeFor("ogg")
+	return Audio{Data: ogg, Mime: mime, Ext: ext}
+}
+
 // wavToOpus transcodes a WAV clip to OGG/Opus tuned for speech: 48kHz mono at
 // 32kbps, the profile Telegram voice notes expect.
 func wavToOpus(ctx context.Context, ffmpeg string, wav []byte) ([]byte, error) {
-	in, err := os.CreateTemp("", "chatcli-tts-in-*.wav")
+	return toOpus(ctx, ffmpeg, wav, "wav")
+}
+
+// toOpus runs the actual ffmpeg transcode from srcExt (wav/aiff — ffmpeg
+// detects the container by content, the extension is a hint) to OGG/Opus.
+func toOpus(ctx context.Context, ffmpeg string, audio []byte, srcExt string) ([]byte, error) {
+	in, err := os.CreateTemp("", "chatcli-tts-in-*."+srcExt)
 	if err != nil {
 		return nil, fmt.Errorf("tts: temp input: %w", err)
 	}
 	inPath := in.Name()
 	defer func() { _ = os.Remove(inPath) }()
-	if _, err := in.Write(wav); err != nil {
+	if _, err := in.Write(audio); err != nil {
 		_ = in.Close()
 		return nil, fmt.Errorf("tts: write temp input: %w", err)
 	}
