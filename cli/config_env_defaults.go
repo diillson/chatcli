@@ -166,10 +166,12 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_GATEWAY_MAX_AUDIO_BYTES": {Value: "20971520", Source: "gateway.defaultMaxAudioBytes"},
 
 	// ─── Text-to-speech (@speak + gateway voice replies) ─────────
-	"CHATCLI_TTS_PROVIDER":        {Value: "auto", Source: "tts.NewFromEnv"},
+	"CHATCLI_TTS_PROVIDER":        {Value: "auto", Source: "tts.NewFromEnv: auto|embedded|command|url|openai|groq|google"},
 	"CHATCLI_TTS_MODEL":           {Value: "tts-1", Source: "tts.defaultTTSModel"},
-	"CHATCLI_TTS_VOICE":           {Value: "alloy", Source: "tts.defaultVoice"},
-	"CHATCLI_GATEWAY_VOICE_REPLY": {Value: "false", IsBool: true, Source: "gateway voice reply"},
+	"CHATCLI_TTS_VOICE":           {Value: "alloy", Source: "tts.defaultVoice; embedded default bm_george"},
+	"CHATCLI_TTS_VOICE_PT":        {Value: "pm_alex", Source: "tts embedded voice for Portuguese replies"},
+	"CHATCLI_TTS_CACHE_DIR":       {Value: "(os cache dir)", Source: "tts embedded engine/model cache"},
+	"CHATCLI_GATEWAY_VOICE_REPLY": {Value: "auto", Source: "gateway voice reply: auto|always|never"},
 
 	// ─── Image generation (@image) ───────────────────────────────
 	"CHATCLI_IMAGE_PROVIDER": {Value: "auto", Source: "imagegen.NewFromEnv"},

@@ -190,12 +190,20 @@ func (cli *ChatCLI) RunGatewayForeground(ctx context.Context) error {
 	if m, err := hub.OpenDefault(ctx, cli.logger); err != nil {
 		cli.logger.Warn("gateway: conversation hub unavailable; continuing without cross-channel continuity", zap.Error(err))
 	} else if !resolveHubEnabled(ctx, m) {
-		_ = m.Close() // hub turned off via setting/env
+		// An explicitly disabled hub must never be silent: it kills
+		// cross-channel continuity for every conversation the daemon serves.
+		cli.logger.Warn("gateway: conversation hub DISABLED via setting/env; replies have no cross-channel continuity",
+			zap.String("source", hubEnabledSource(ctx, m)))
+		_ = m.Close()
 	} else {
 		if n, e := m.PurgeIdle(ctx, resolveHubTTL(ctx, m)); e == nil && n > 0 {
 			cli.logger.Info("gateway: purged idle conversations", zap.Int("count", n))
 		}
 		broker = m
+		cli.logger.Info("gateway: conversation hub active",
+			zap.String("principal", resolveHubPrincipal(ctx, m)),
+			zap.Bool("isolate", resolveHubIsolate(ctx, m)),
+			zap.Duration("idle_ttl", resolveHubTTL(ctx, m)))
 		defer func() { _ = m.Close() }()
 	}
 	return cli.runGateway(ctx, broker)
@@ -246,21 +254,67 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 
 	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions), cli.logger, 0)
 	runner.SetThinkingNotice(i18n.T("gateway.thinking"))
+	runner.SetVoicePrefs(gateway.SharedVoicePrefs())
 	cli.maybeEnableVoiceReplies(runner)
 	return runner.Run(ctx)
 }
 
+// Voice reply policy values parsed from CHATCLI_GATEWAY_VOICE_REPLY.
+const (
+	voiceReplyAuto   = "auto"   // reply in kind: voice in → voice out (default)
+	voiceReplyAlways = "always" // every final reply carries audio
+	voiceReplyNever  = "never"  // replies stay text-only
+)
+
+// speechReplyDirective is appended to the task when the answer will also be
+// delivered as synthesized audio, so the model writes for the ear. English on
+// purpose: models follow English instructions most reliably, and the reply
+// language is driven by the conversation, not by this note.
+const speechReplyDirective = "[voice] This reply will also be spoken aloud as synthesized audio. " +
+	"Write it to be heard: natural conversational prose in the user's language, short sentences, " +
+	"no emojis or emoticons, no markdown formatting, no bullet lists or tables, " +
+	"and avoid URLs or code unless the user explicitly asked for them."
+
+// voiceReplyMode parses CHATCLI_GATEWAY_VOICE_REPLY. Empty and "auto" reply in
+// kind; legacy boolean values keep their meaning: true → always, false → never.
+// Unrecognized values fall back to auto so a typo never silences the gateway.
+func voiceReplyMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", voiceReplyAuto, "in-kind", "inkind":
+		return voiceReplyAuto
+	case voiceReplyAlways:
+		return voiceReplyAlways
+	case voiceReplyNever, "off":
+		return voiceReplyNever
+	}
+	if enabled, err := strconv.ParseBool(strings.TrimSpace(raw)); err == nil {
+		if enabled {
+			return voiceReplyAlways
+		}
+		return voiceReplyNever
+	}
+	return voiceReplyAuto
+}
+
 // maybeEnableVoiceReplies wires a TTS-backed voice synthesizer onto the runner
-// when CHATCLI_GATEWAY_VOICE_REPLY is enabled and a TTS backend is configured.
-// The clip is requested as ogg/opus so Telegram delivers a native voice note;
-// other formats degrade to an audio file, and text-only adapters ignore it.
+// according to CHATCLI_GATEWAY_VOICE_REPLY: auto (default) answers voice
+// messages with voice, always speaks every final reply, never keeps replies
+// text-only. Any configured TTS backend works — the synthesizer is provider
+// agnostic. The clip is requested as ogg/opus so Telegram delivers a native
+// voice note; other formats degrade to an audio file, and text-only adapters
+// ignore it.
 func (cli *ChatCLI) maybeEnableVoiceReplies(runner *gateway.Runner) {
-	if enabled, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("CHATCLI_GATEWAY_VOICE_REPLY"))); !enabled {
+	mode := voiceReplyMode(os.Getenv("CHATCLI_GATEWAY_VOICE_REPLY"))
+	if mode == voiceReplyNever {
 		return
 	}
 	provider := tts.NewFromEnv(cli.logger)
 	if tts.IsNull(provider) {
-		cli.logger.Warn("gateway: voice reply requested but no TTS backend configured; replies stay text-only")
+		// In auto mode the absence of a backend is the unconfigured default —
+		// stay quiet. Only an explicit "always" earns a warning.
+		if mode == voiceReplyAlways {
+			cli.logger.Warn("gateway: voice reply requested but no TTS backend configured; replies stay text-only")
+		}
 		return
 	}
 	format := strings.TrimSpace(os.Getenv("CHATCLI_TTS_VOICE_FORMAT"))
@@ -268,16 +322,29 @@ func (cli *ChatCLI) maybeEnableVoiceReplies(runner *gateway.Runner) {
 		format = "ogg"
 	}
 	voice := strings.TrimSpace(os.Getenv("CHATCLI_TTS_VOICE"))
-	cli.logger.Info("gateway: voice replies enabled", zap.String("tts", provider.Name()), zap.String("format", format))
+	cli.logger.Info("gateway: voice replies enabled",
+		zap.String("tts", provider.Name()), zap.String("mode", mode), zap.String("format", format))
 
+	if mode == voiceReplyAlways {
+		runner.SetVoiceMode(gateway.VoiceModeAlways)
+	}
 	runner.SetVoiceSynthesizer(func(ctx context.Context, text string) *gateway.OutboundAudio {
-		if strings.TrimSpace(text) == "" {
+		// Replies are markdown; flatten to plain prose so no backend reads
+		// asterisks and pipes out loud.
+		spoken := tts.StripForSpeech(text)
+		if spoken == "" {
 			return nil
 		}
-		audio, err := provider.Synthesize(ctx, text, voice, format)
+		audio, err := provider.Synthesize(ctx, spoken, voice, format)
 		if err != nil {
 			cli.logger.Warn("gateway: TTS synthesis failed; sending text", zap.Error(err))
 			return nil
+		}
+		// Backends that ignore the format hint emit raw wav/aiff, which
+		// Telegram shows as a dead file. Convert to a playable OGG/Opus voice
+		// note whenever that is what was asked for.
+		if format == "ogg" || format == "opus" {
+			audio = tts.ToVoiceNote(ctx, audio, cli.logger)
 		}
 		return &gateway.OutboundAudio{Data: audio.Data, Mime: audio.Mime, FileName: "reply." + audio.Ext}
 	})
@@ -327,9 +394,27 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 		cli.logger.Info("gateway: voice transcription enabled", zap.String("provider", transcriber.Name()))
 	}
 
+	// Voice output posture, resolved once: whether a synthesizer exists and the
+	// global mode. Per message this combines with the session preference so the
+	// model can be told its reply will be spoken (nil logger: the synthesizer
+	// wired in maybeEnableVoiceReplies already logged the backend).
+	globalVoiceMode := gateway.VoiceModeInKind
+	if voiceReplyMode(os.Getenv("CHATCLI_GATEWAY_VOICE_REPLY")) == voiceReplyAlways {
+		globalVoiceMode = gateway.VoiceModeAlways
+	}
+	voiceConfigured := voiceReplyMode(os.Getenv("CHATCLI_GATEWAY_VOICE_REPLY")) != voiceReplyNever &&
+		!tts.IsNull(tts.NewFromEnv(nil))
+
 	return func(ctx context.Context, session, text string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
+
+		// Stamp the session being served so the @voice tool knows which
+		// conversation asked to start/stop audio replies. Runs are serialized
+		// by mu, so exactly one session is active at a time.
+		prefs := gateway.SharedVoicePrefs()
+		prefs.SetActiveSession(session)
+		defer prefs.SetActiveSession("")
 
 		// Mirror the operator's current model: a /switch (or /model) in the REPL
 		// while the daemon runs lands here as a runtime-state change. Done under
@@ -366,6 +451,13 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 		task := msg.Text
 		if pre := conv.preamble; pre != "" {
 			task = pre + "\n\nCurrent request: " + msg.Text
+		}
+
+		// When this reply will be synthesized to audio, tell the model up
+		// front: emojis, bullet lists and tables read terribly out loud, and
+		// only the model can phrase for the ear.
+		if voiceConfigured && gateway.VoiceDecision(gateway.SharedVoicePrefs(), session, globalVoiceMode, msg.Audio != nil) {
+			task += "\n\n" + speechReplyDirective
 		}
 
 		emit := gateway.Progress(ctx)
@@ -491,6 +583,10 @@ const gatewayContextTurns = 12
 type hubSessions struct {
 	store  hub.Store // nil when the hub could not be opened (degrade to no continuity)
 	logger *zap.Logger
+
+	// noStoreOnce rate-limits the "serving without hub" warning to one line
+	// per daemon run instead of one per message.
+	noStoreOnce sync.Once
 }
 
 func newHubSessions(store hub.Store, logger *zap.Logger) *hubSessions {
@@ -562,6 +658,9 @@ type gatewayTurn struct {
 func (s *hubSessions) begin(ctx context.Context, msg gateway.InboundMessage) *gatewayTurn {
 	turn := &gatewayTurn{sessions: s, channel: msg.Platform}
 	if s.store == nil {
+		s.noStoreOnce.Do(func() {
+			s.logger.Warn("gateway: serving WITHOUT conversation hub — replies have no dialog context and are not shared with the CLI")
+		})
 		return turn
 	}
 	turn.principal = s.principalFor(ctx, msg.Platform, msg.UserID)

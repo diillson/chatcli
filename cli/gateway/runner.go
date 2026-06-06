@@ -44,6 +44,14 @@ type TypingAware interface {
 	SendTyping(ctx context.Context, chatID string) error
 }
 
+// Voice reply modes. VoiceModeInKind (the default) speaks only when spoken to:
+// the final answer carries audio when the inbound message itself was a voice
+// message. VoiceModeAlways attaches audio to every final answer.
+const (
+	VoiceModeInKind = "in-kind"
+	VoiceModeAlways = "always"
+)
+
 // Runner wires adapters to the agent: it fans inbound messages out to the
 // AgentFunc (bounded concurrency) and delivers replies through the adapter
 // that received them.
@@ -57,6 +65,8 @@ type Runner struct {
 	thinkingDelay  time.Duration // 0 → defaultThinkingDelay (set by tests)
 	typingRefresh  time.Duration // 0 → defaultTypingRefresh (set by tests)
 	voice          func(ctx context.Context, text string) *OutboundAudio
+	voiceMode      string      // VoiceModeInKind (default) or VoiceModeAlways
+	voicePrefs     *VoicePrefs // per-session overrides set via the @voice tool
 }
 
 // SetThinkingNotice sets the localized "the assistant is working" message used
@@ -69,6 +79,38 @@ func (r *Runner) SetThinkingNotice(s string) { r.thinkingNotice = s }
 // replies text-only.
 func (r *Runner) SetVoiceSynthesizer(fn func(ctx context.Context, text string) *OutboundAudio) {
 	r.voice = fn
+}
+
+// SetVoiceMode selects when the synthesizer runs: VoiceModeAlways speaks every
+// final reply; any other value (including empty) means VoiceModeInKind — the
+// reply carries audio only when the inbound message itself was voice.
+func (r *Runner) SetVoiceMode(mode string) { r.voiceMode = mode }
+
+// SetVoicePrefs attaches the per-session preference store. A session's stored
+// choice (set by the user asking in the conversation) outranks the global mode.
+func (r *Runner) SetVoicePrefs(p *VoicePrefs) { r.voicePrefs = p }
+
+// wantsVoice reports whether the final answer to msg should carry audio.
+func (r *Runner) wantsVoice(msg *InboundMessage) bool {
+	return r.voice != nil &&
+		VoiceDecision(r.voicePrefs, msg.SessionKey(), r.voiceMode, msg.Audio != nil)
+}
+
+// VoiceDecision is the single rule for "should this reply be spoken": the
+// session's own preference (set via the @voice tool) first, then the global
+// mode — always, or the default in-kind where voice answers voice. Shared by
+// the Runner and by the gateway agent loop, which uses it to tell the model
+// up front that its reply will be heard, not read.
+func VoiceDecision(prefs *VoicePrefs, session, globalMode string, inboundAudio bool) bool {
+	if prefs != nil {
+		switch prefs.Get(session) {
+		case VoicePrefAlways:
+			return true
+		case VoicePrefNever:
+			return false
+		}
+	}
+	return globalMode == VoiceModeAlways || inboundAudio
 }
 
 // NewRunner builds a runner. maxConcurrent <= 0 uses DefaultMaxConcurrent.
@@ -170,8 +212,10 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 		clipped := clip(text, maxMessageRunes)
 		out := OutboundMessage{ChatID: msg.ChatID, Text: clipped}
 		// Attach a synthesized voice clip to the final answer when voice
-		// replies are enabled. Progress chunks stay text-only.
-		if kind == "final" && r.voice != nil {
+		// replies are enabled for this exchange — every reply in always mode,
+		// or replies to voice messages in the default in-kind mode. Progress
+		// chunks stay text-only.
+		if kind == "final" && r.wantsVoice(&msg) {
 			if audio := r.voice(ctx, clipped); audio != nil {
 				out.Audio = audio
 			}

@@ -71,6 +71,22 @@ func resolveHubEnabled(ctx context.Context, store hub.Store) bool {
 	return !strings.EqualFold(settingStr(ctx, store, hubKeyEnabled, envHubEnabled, "true"), "false")
 }
 
+// hubEnabledSource reports WHERE the hub enabled/disabled decision came from —
+// "db setting", "env CHATCLI_HUB_ENABLED" or "default". Continuity silently
+// dying because a forgotten exported variable disabled the hub is exactly the
+// kind of failure that must name its source in the log.
+func hubEnabledSource(ctx context.Context, store hub.Store) string {
+	if store != nil {
+		if v, ok, err := store.GetSetting(ctx, hubKeyEnabled); err == nil && ok && v != "" {
+			return "db setting enabled=" + v
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv(envHubEnabled)); v != "" {
+		return "env " + envHubEnabled + "=" + v
+	}
+	return "default"
+}
+
 // resolveHubPrincipal returns the shared single-user principal.
 func resolveHubPrincipal(ctx context.Context, store hub.Store) string {
 	return settingStr(ctx, store, hubKeyPrincipal, envHubPrincipal, defaultHubPrincipal)
@@ -233,8 +249,12 @@ func (cli *ChatCLI) maybeEnableLocalHub(ctx context.Context) func() {
 		return nil
 	}
 	// The enabled setting lives in the db (so /config hub set enabled off reaches
-	// the gateway too); it can only be read once the store is open.
+	// the gateway too); it can only be read once the store is open. Disabling is
+	// a legitimate choice but never a silent one — it severs cross-channel
+	// continuity with the gateway.
 	if !resolveHubEnabled(ctx, store) {
+		cli.logger.Warn("local hub: conversation hub DISABLED via setting/env; this session will not share context with the gateway",
+			zap.String("source", hubEnabledSource(ctx, store)))
 		_ = store.Close()
 		return nil
 	}

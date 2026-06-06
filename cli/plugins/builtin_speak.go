@@ -108,7 +108,7 @@ func (p *BuiltinSpeakPlugin) ExecuteWithStream(ctx context.Context, args []strin
 	switch cmd {
 	case "status":
 		if tts.IsNull(provider) {
-			return "@speak: no TTS backend configured. Set CHATCLI_TTS_CMD (local), CHATCLI_TTS_URL (self-hosted), or install `say`/`espeak-ng`.", nil
+			return "@speak: no TTS backend configured. Set CHATCLI_TTS_PROVIDER=embedded (keyless, any OS), CHATCLI_TTS_CMD (local), CHATCLI_TTS_URL (self-hosted), or install `say`/`espeak-ng`.", nil
 		}
 		return "@speak backend: " + provider.Name(), nil
 	case "say":

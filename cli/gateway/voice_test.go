@@ -44,27 +44,143 @@ func newVoiceRunner(t *testing.T, rec *recordingAdapter, reply string) *Runner {
 	return r
 }
 
-func TestRunner_VoiceAttachedToFinal(t *testing.T) {
-	rec := &recordingAdapter{}
-	r := newVoiceRunner(t, rec, "the answer")
+// finalReply returns the outbound message whose text matches reply, or nil.
+func finalReply(rec *recordingAdapter, reply string) *OutboundMessage {
+	for _, m := range rec.finals() {
+		if m.Text == reply {
+			final := m
+			return &final
+		}
+	}
+	return nil
+}
+
+// setEchoSynthesizer attaches a synthesizer that wraps the reply text so tests
+// can assert exactly which text reached synthesis.
+func setEchoSynthesizer(r *Runner) {
 	r.SetVoiceSynthesizer(func(_ context.Context, text string) *OutboundAudio {
 		return &OutboundAudio{Data: []byte("AUDIO:" + text), Mime: "audio/ogg", FileName: "reply.ogg"}
 	})
+}
 
-	r.handle(context.Background(), InboundMessage{Platform: "rec", ChatID: "1", Text: "hi"})
+func TestRunner_InKindVoiceMessageGetsAudio(t *testing.T) {
+	rec := &recordingAdapter{}
+	r := newVoiceRunner(t, rec, "the answer")
+	setEchoSynthesizer(r) // default mode: in-kind
 
-	var final *OutboundMessage
-	for i := range rec.finals() {
-		m := rec.finals()[i]
-		if m.Text == "the answer" {
-			final = &m
-		}
-	}
+	r.handle(context.Background(), InboundMessage{
+		Platform: "rec", ChatID: "1", Text: "hi",
+		Audio: &InboundAudio{Data: []byte("voice-note"), MimeType: "audio/ogg"},
+	})
+
+	final := finalReply(rec, "the answer")
 	if final == nil {
 		t.Fatal("no final reply sent")
 	}
 	if final.Audio == nil || string(final.Audio.Data) != "AUDIO:the answer" {
 		t.Fatalf("expected audio attached, got %+v", final.Audio)
+	}
+}
+
+func TestRunner_InKindTextMessageStaysTextOnly(t *testing.T) {
+	rec := &recordingAdapter{}
+	r := newVoiceRunner(t, rec, "the answer")
+	setEchoSynthesizer(r) // default mode: in-kind
+
+	r.handle(context.Background(), InboundMessage{Platform: "rec", ChatID: "1", Text: "hi"})
+
+	final := finalReply(rec, "the answer")
+	if final == nil {
+		t.Fatal("no final reply sent")
+	}
+	if final.Audio != nil {
+		t.Fatalf("text inbound must not get audio in in-kind mode, got %+v", final.Audio)
+	}
+}
+
+func TestRunner_SessionPrefOutranksGlobalMode(t *testing.T) {
+	prefs := NewVoicePrefs("")
+
+	// Pref "always" speaks a text message even in default in-kind mode.
+	rec := &recordingAdapter{}
+	r := newVoiceRunner(t, rec, "the answer")
+	setEchoSynthesizer(r)
+	r.SetVoicePrefs(prefs)
+	if err := prefs.Set("rec:1", VoicePrefAlways); err != nil {
+		t.Fatal(err)
+	}
+	r.handle(context.Background(), InboundMessage{Platform: "rec", ChatID: "1", Text: "hi"})
+	if final := finalReply(rec, "the answer"); final == nil || final.Audio == nil {
+		t.Fatal("session pref always must attach audio to a text message")
+	}
+
+	// Pref "never" silences even a voice message under global always mode.
+	rec2 := &recordingAdapter{}
+	r2 := newVoiceRunner(t, rec2, "the answer")
+	setEchoSynthesizer(r2)
+	r2.SetVoiceMode(VoiceModeAlways)
+	r2.SetVoicePrefs(prefs)
+	if err := prefs.Set("rec:2", VoicePrefNever); err != nil {
+		t.Fatal(err)
+	}
+	r2.handle(context.Background(), InboundMessage{
+		Platform: "rec", ChatID: "2", Text: "hi",
+		Audio: &InboundAudio{Data: []byte("note"), MimeType: "audio/ogg"},
+	})
+	if final := finalReply(rec2, "the answer"); final == nil || final.Audio != nil {
+		t.Fatal("session pref never must keep the reply text-only")
+	}
+}
+
+func TestVoiceDecision(t *testing.T) {
+	prefs := NewVoicePrefs("")
+	if err := prefs.Set("t:always", VoicePrefAlways); err != nil {
+		t.Fatal(err)
+	}
+	if err := prefs.Set("t:never", VoicePrefNever); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		session    string
+		globalMode string
+		audio      bool
+		want       bool
+	}{
+		{"in-kind voice in", "t:unset", VoiceModeInKind, true, true},
+		{"in-kind text in", "t:unset", VoiceModeInKind, false, false},
+		{"global always text in", "t:unset", VoiceModeAlways, false, true},
+		{"pref always beats in-kind", "t:always", VoiceModeInKind, false, true},
+		{"pref never beats global always", "t:never", VoiceModeAlways, true, false},
+		{"nil prefs falls back to mode", "t:always", VoiceModeInKind, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := prefs
+			if tt.name == "nil prefs falls back to mode" {
+				p = nil
+			}
+			if got := VoiceDecision(p, tt.session, tt.globalMode, tt.audio); got != tt.want {
+				t.Errorf("VoiceDecision = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunner_AlwaysModeSpeaksTextMessages(t *testing.T) {
+	rec := &recordingAdapter{}
+	r := newVoiceRunner(t, rec, "the answer")
+	setEchoSynthesizer(r)
+	r.SetVoiceMode(VoiceModeAlways)
+
+	r.handle(context.Background(), InboundMessage{Platform: "rec", ChatID: "1", Text: "hi"})
+
+	final := finalReply(rec, "the answer")
+	if final == nil {
+		t.Fatal("no final reply sent")
+	}
+	if final.Audio == nil || string(final.Audio.Data) != "AUDIO:the answer" {
+		t.Fatalf("expected audio attached in always mode, got %+v", final.Audio)
 	}
 }
 

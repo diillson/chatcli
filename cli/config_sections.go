@@ -952,6 +952,7 @@ func (cli *ChatCLI) showConfigIntegrations() {
 	kv(p, i18n.T("cfg.kv.tts"), ttsStatus)
 	kv(p, "CHATCLI_TTS_PROVIDER", envOr("CHATCLI_TTS_PROVIDER"))
 	kv(p, "CHATCLI_TTS_VOICE", envOr("CHATCLI_TTS_VOICE"))
+	kv(p, "CHATCLI_TTS_VOICE_PT", envOr("CHATCLI_TTS_VOICE_PT"))
 	kv(p, "CHATCLI_GATEWAY_VOICE_REPLY", envOr("CHATCLI_GATEWAY_VOICE_REPLY"))
 
 	fmt.Println(p)

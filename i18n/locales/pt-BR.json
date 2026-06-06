@@ -2440,6 +2440,7 @@
   "mem.notice.profile": "perfil atualizado",
   "mem.notice.projects": "+%d projeto",
   "mem.notice.topics": "+%d tópico(s)",
+  "mem.notice.failing": "memória: extração falhando (%d seguidas) — fatos recentes estão enfileirados em disco e serão reprocessados automaticamente",
   "mem.tool.remember.ok": "Memorizado: %s",
   "mem.tool.remember.dup": "Já está na memória (sem alteração).",
   "mem.tool.profile.ok": "Perfil atualizado: %s",

@@ -15,6 +15,7 @@ import (
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/server/hub"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func newTestHubSessions(t *testing.T) (*hubSessions, hub.Store) {
@@ -183,4 +184,52 @@ func TestHubSessionsNilStoreDegradesGracefully(t *testing.T) {
 		t.Fatal("nil-store begin should yield an empty turn")
 	}
 	turn.finish(ctx, "reply") // must not panic
+}
+
+// TestHubSessionsBeginWithoutStoreWarnsOnce locks the observability contract:
+// a daemon serving without the hub must say so in the log — exactly once, not
+// per message, and never silently.
+func TestHubSessionsBeginWithoutStoreWarnsOnce(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	hs := newHubSessions(nil, zap.New(core))
+	ctx := context.Background()
+
+	msg := gateway.InboundMessage{Platform: "telegram", ChatID: "1", UserID: "u", Text: "oi"}
+	t1 := hs.begin(ctx, msg)
+	t2 := hs.begin(ctx, msg)
+	if t1 == nil || t2 == nil {
+		t.Fatal("begin must degrade gracefully without a store")
+	}
+	warns := logs.FilterMessageSnippet("WITHOUT conversation hub").Len()
+	if warns != 1 {
+		t.Fatalf("expected exactly 1 no-hub warning, got %d", warns)
+	}
+}
+
+// TestHubEnabledSource pins the provenance string for the hub on/off decision:
+// db setting beats env, env beats default — the log line must name the layer
+// that actually decided.
+func TestHubEnabledSource(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("CHATCLI_HUB_ENABLED", "")
+	if got := hubEnabledSource(ctx, nil); got != "default" {
+		t.Fatalf("no store, no env: source = %q, want default", got)
+	}
+
+	t.Setenv("CHATCLI_HUB_ENABLED", "false")
+	if got := hubEnabledSource(ctx, nil); got != "env CHATCLI_HUB_ENABLED=false" {
+		t.Fatalf("env source = %q", got)
+	}
+
+	store, err := hub.OpenSQLiteStore(ctx, filepath.Join(t.TempDir(), "hub.db"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.SetSetting(ctx, "enabled", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if got := hubEnabledSource(ctx, store); got != "db setting enabled=false" {
+		t.Fatalf("db source = %q (db must beat env)", got)
+	}
 }

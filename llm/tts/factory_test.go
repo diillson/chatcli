@@ -7,6 +7,9 @@ package tts
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"go.uber.org/zap"
@@ -26,9 +29,12 @@ func stubLookPath(t *testing.T, found map[string]string) {
 
 func clearTTSEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"CHATCLI_TTS_PROVIDER", "CHATCLI_TTS_CMD", "CHATCLI_TTS_URL", "CHATCLI_TTS_KEY", "CHATCLI_TTS_MODEL", "OPENAI_API_KEY"} {
+	for _, k := range []string{"CHATCLI_TTS_PROVIDER", "CHATCLI_TTS_CMD", "CHATCLI_TTS_URL", "CHATCLI_TTS_KEY", "CHATCLI_TTS_MODEL", "CHATCLI_TTS_VOICE", "CHATCLI_TTS_VOICE_PT", "OPENAI_API_KEY"} {
 		t.Setenv(k, "")
 	}
+	// Point the embedded cache at an empty dir so auto-detection never sees a
+	// developer machine's real provisioned engine.
+	t.Setenv("CHATCLI_TTS_CACHE_DIR", t.TempDir())
 }
 
 func TestFactory_NullWhenNothingConfigured(t *testing.T) {
@@ -68,6 +74,77 @@ func TestFactory_URLPin(t *testing.T) {
 	if _, ok := p.(*OpenAICompatible); !ok {
 		t.Fatalf("expected *OpenAICompatible, got %T", p)
 	}
+}
+
+func TestFactory_EmbeddedPin(t *testing.T) {
+	clearTTSEnv(t)
+	t.Setenv("CHATCLI_TTS_PROVIDER", "embedded")
+	p := NewFromEnv(zap.NewNop())
+	if IsNull(p) {
+		t.Fatal("embedded pin must build the provider for lazy provisioning, got Null")
+	}
+	if p.Name() != "embedded:kokoro/bm_george" {
+		t.Fatalf("Name = %q, want embedded:kokoro/bm_george", p.Name())
+	}
+
+	t.Setenv("CHATCLI_TTS_PROVIDER", "kokoro") // alias
+	if p := NewFromEnv(zap.NewNop()); IsNull(p) {
+		t.Fatal("kokoro alias must build the embedded provider")
+	}
+}
+
+func TestFactory_EmbeddedPinHonorsVoices(t *testing.T) {
+	clearTTSEnv(t)
+	t.Setenv("CHATCLI_TTS_PROVIDER", "embedded")
+	t.Setenv("CHATCLI_TTS_VOICE", "bm_lewis")
+	p := NewFromEnv(zap.NewNop())
+	if p.Name() != "embedded:kokoro/bm_lewis" {
+		t.Fatalf("Name = %q, want embedded:kokoro/bm_lewis", p.Name())
+	}
+}
+
+func TestFactory_AutoSkipsUnprovisionedEmbedded(t *testing.T) {
+	clearTTSEnv(t)
+	stubLookPath(t, nil)
+	// Empty cache: auto-detection must not pick embedded nor download anything.
+	if p := NewFromEnv(zap.NewNop()); !IsNull(p) {
+		t.Fatalf("expected Null with empty cache and no CLIs, got %s", p.Name())
+	}
+}
+
+func TestFactory_AutoPrefersProvisionedEmbeddedOverSay(t *testing.T) {
+	clearTTSEnv(t)
+	stubLookPath(t, map[string]string{"say": "/usr/bin/say"})
+
+	// An empty cache falls back to `say`.
+	p := NewFromEnv(zap.NewNop())
+	if _, ok := p.(*CommandSynthesizer); !ok {
+		t.Fatalf("expected *CommandSynthesizer fallback, got %T", p)
+	}
+
+	// A provisioned cache wins over `say`.
+	seedProvisionedCache(t, os.Getenv("CHATCLI_TTS_CACHE_DIR"))
+	p = NewFromEnv(zap.NewNop())
+	if _, ok := p.(*embeddedSynth); !ok {
+		t.Fatalf("expected *embeddedSynth from provisioned cache, got %T", p)
+	}
+}
+
+// seedProvisionedCache lays out the minimal artifacts isProvisionedDir checks.
+func seedProvisionedCache(t *testing.T, root string) {
+	t.Helper()
+	binName := sherpaBinName
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	mustWrite(t, filepath.Join(root, "sherpa-v"+sherpaVersion, "bin", binName), "bin")
+	mustWrite(t, filepath.Join(root, "kokoro", "voices.bin"), "v")
+	mustWrite(t, filepath.Join(root, "kokoro", "tokens.txt"), "t")
+	mustWrite(t, filepath.Join(root, "kokoro", "model.int8.onnx"), "m")
+	if err := os.MkdirAll(filepath.Join(root, "kokoro", "espeak-ng-data"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, readyMarker(root), "")
 }
 
 func TestFactory_OpenAIPinWithoutKeyIsNull(t *testing.T) {

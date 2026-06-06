@@ -696,6 +696,10 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// never statically pinned to one language.
 	if a.gatewayPersona {
 		coreText += "\n\n" + GatewayLanguageDirective
+		// The daemon answers strangers' questions about the user unless told
+		// the injected Memory Index is real knowledge — applied on every
+		// gateway path, including persona-owned core text.
+		coreText += "\n\n" + GatewayMemoryDirective
 	} else {
 		coreText += "\n\n" + i18n.T("ai.response_language")
 	}

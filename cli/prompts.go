@@ -104,6 +104,17 @@ Other tools: @webfetch (fetch a URL), @websearch (search the web), and any MCP t
 - For a simple question that needs no action, just answer directly — no tools.
 `
 
+// GatewayMemoryDirective is appended to the gateway core prompt (like
+// GatewayLanguageDirective) so the daemon treats the injected Memory Index as
+// real knowledge about the user instead of answering personal questions as a
+// stranger. A separate composable directive rather than an edit to
+// GatewaySystemPrompt: directives evolve independently of the base persona.
+const GatewayMemoryDirective = `[USER MEMORY]
+Your system context includes a Memory Index for this user: profile, projects, topics and a count of stored facts. That index is REAL knowledge about the person you are talking to — use it.
+- For ANY question about the user themselves, their preferences, their work, or something they said before ("what do you know about me?", "what did I tell you about X?"), answer from the Memory Index AND call <tool_call name="@memory" args='{"cmd":"recall","args":{"query":"<keywords from the question>"}}' /> to pull the detailed facts first.
+- NEVER reply "I don't know anything about you" or "that is not in my memory" without having called @memory recall with the question's keywords in this turn.
+- If recall returns nothing relevant, say what the index DOES show and offer to remember the new fact with {"cmd":"remember"}.`
+
 // GatewayLanguageDirective replaces the daemon-locale "respond in X" pin on the
 // gateway path. A messaging gateway serves many users in many languages, so the
 // reply must follow each incoming message rather than a fixed locale. English

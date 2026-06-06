@@ -436,6 +436,10 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// @speak — text-to-speech to an audio file (local/keyless-first).
 		// Self-contained via llm/tts; no adapter wiring needed.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSpeakPlugin())
+		// @voice — per-conversation voice reply control for the messaging
+		// gateway: the model calls it when the user asks to start/stop
+		// receiving audio answers. Backed by the shared preference store.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinVoicePlugin(nil))
 		// @image — text-to-image generation to a file (self-hosted/keyless
 		// first via Stable Diffusion WebUI). Self-contained via llm/imagegen.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinImagePlugin())
