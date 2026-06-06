@@ -65,7 +65,8 @@ type Runner struct {
 	thinkingDelay  time.Duration // 0 → defaultThinkingDelay (set by tests)
 	typingRefresh  time.Duration // 0 → defaultTypingRefresh (set by tests)
 	voice          func(ctx context.Context, text string) *OutboundAudio
-	voiceMode      string // VoiceModeInKind (default) or VoiceModeAlways
+	voiceMode      string      // VoiceModeInKind (default) or VoiceModeAlways
+	voicePrefs     *VoicePrefs // per-session overrides set via the @voice tool
 }
 
 // SetThinkingNotice sets the localized "the assistant is working" message used
@@ -85,10 +86,24 @@ func (r *Runner) SetVoiceSynthesizer(fn func(ctx context.Context, text string) *
 // reply carries audio only when the inbound message itself was voice.
 func (r *Runner) SetVoiceMode(mode string) { r.voiceMode = mode }
 
-// wantsVoice reports whether the final answer to msg should carry audio.
+// SetVoicePrefs attaches the per-session preference store. A session's stored
+// choice (set by the user asking in the conversation) outranks the global mode.
+func (r *Runner) SetVoicePrefs(p *VoicePrefs) { r.voicePrefs = p }
+
+// wantsVoice reports whether the final answer to msg should carry audio: the
+// session's own preference first, then the global mode (always, or the
+// default in-kind — voice answers voice).
 func (r *Runner) wantsVoice(msg *InboundMessage) bool {
 	if r.voice == nil {
 		return false
+	}
+	if r.voicePrefs != nil {
+		switch r.voicePrefs.Get(msg.SessionKey()) {
+		case VoicePrefAlways:
+			return true
+		case VoicePrefNever:
+			return false
+		}
 	}
 	return r.voiceMode == VoiceModeAlways || msg.Audio != nil
 }

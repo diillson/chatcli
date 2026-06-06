@@ -246,6 +246,7 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 
 	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions), cli.logger, 0)
 	runner.SetThinkingNotice(i18n.T("gateway.thinking"))
+	runner.SetVoicePrefs(gateway.SharedVoicePrefs())
 	cli.maybeEnableVoiceReplies(runner)
 	return runner.Run(ctx)
 }
@@ -379,6 +380,13 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
 	return func(ctx context.Context, session, text string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
+
+		// Stamp the session being served so the @voice tool knows which
+		// conversation asked to start/stop audio replies. Runs are serialized
+		// by mu, so exactly one session is active at a time.
+		prefs := gateway.SharedVoicePrefs()
+		prefs.SetActiveSession(session)
+		defer prefs.SetActiveSession("")
 
 		// Mirror the operator's current model: a /switch (or /model) in the REPL
 		// while the daemon runs lands here as a runtime-state change. Done under

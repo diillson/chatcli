@@ -98,6 +98,40 @@ func TestRunner_InKindTextMessageStaysTextOnly(t *testing.T) {
 	}
 }
 
+func TestRunner_SessionPrefOutranksGlobalMode(t *testing.T) {
+	prefs := NewVoicePrefs("")
+
+	// Pref "always" speaks a text message even in default in-kind mode.
+	rec := &recordingAdapter{}
+	r := newVoiceRunner(t, rec, "the answer")
+	setEchoSynthesizer(r)
+	r.SetVoicePrefs(prefs)
+	if err := prefs.Set("rec:1", VoicePrefAlways); err != nil {
+		t.Fatal(err)
+	}
+	r.handle(context.Background(), InboundMessage{Platform: "rec", ChatID: "1", Text: "hi"})
+	if final := finalReply(rec, "the answer"); final == nil || final.Audio == nil {
+		t.Fatal("session pref always must attach audio to a text message")
+	}
+
+	// Pref "never" silences even a voice message under global always mode.
+	rec2 := &recordingAdapter{}
+	r2 := newVoiceRunner(t, rec2, "the answer")
+	setEchoSynthesizer(r2)
+	r2.SetVoiceMode(VoiceModeAlways)
+	r2.SetVoicePrefs(prefs)
+	if err := prefs.Set("rec:2", VoicePrefNever); err != nil {
+		t.Fatal(err)
+	}
+	r2.handle(context.Background(), InboundMessage{
+		Platform: "rec", ChatID: "2", Text: "hi",
+		Audio: &InboundAudio{Data: []byte("note"), MimeType: "audio/ogg"},
+	})
+	if final := finalReply(rec2, "the answer"); final == nil || final.Audio != nil {
+		t.Fatal("session pref never must keep the reply text-only")
+	}
+}
+
 func TestRunner_AlwaysModeSpeaksTextMessages(t *testing.T) {
 	rec := &recordingAdapter{}
 	r := newVoiceRunner(t, rec, "the answer")
