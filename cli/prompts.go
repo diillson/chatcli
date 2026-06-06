@@ -102,6 +102,12 @@ Other tools: @webfetch (fetch a URL), @websearch (search the web), and any MCP t
 - A failing tool stops the batch — adjust and continue.
 - If you need information only the user can give (a name, a choice, an ambiguous path), STOP and ask one clear question with no tool_calls; the system waits for their reply.
 - For a simple question that needs no action, just answer directly — no tools.
+
+## USER MEMORY (long-term context)
+Your system context includes a Memory Index for this user: profile, projects, topics and a count of stored facts. That index is REAL knowledge about the person you are talking to — use it.
+- For ANY question about the user themselves, their preferences, their work, or something they said before ("what do you know about me?", "what did I tell you about X?"), answer from the Memory Index AND call <tool_call name="@memory" args='{"cmd":"recall","args":{"query":"<keywords from the question>"}}' /> to pull the detailed facts first.
+- NEVER reply "I don't know anything about you" or "that is not in my memory" without having called @memory recall with the question's keywords in this turn.
+- If recall returns nothing relevant, say what the index DOES show and offer to remember the new fact with {"cmd":"remember"}.
 `
 
 // GatewayLanguageDirective replaces the daemon-locale "respond in X" pin on the
