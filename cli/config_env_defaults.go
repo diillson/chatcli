@@ -169,7 +169,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_TTS_PROVIDER":        {Value: "auto", Source: "tts.NewFromEnv"},
 	"CHATCLI_TTS_MODEL":           {Value: "tts-1", Source: "tts.defaultTTSModel"},
 	"CHATCLI_TTS_VOICE":           {Value: "alloy", Source: "tts.defaultVoice"},
-	"CHATCLI_GATEWAY_VOICE_REPLY": {Value: "false", IsBool: true, Source: "gateway voice reply"},
+	"CHATCLI_GATEWAY_VOICE_REPLY": {Value: "auto", Source: "gateway voice reply: auto|always|never"},
 
 	// ─── Image generation (@image) ───────────────────────────────
 	"CHATCLI_IMAGE_PROVIDER": {Value: "auto", Source: "imagegen.NewFromEnv"},

@@ -16,6 +16,33 @@ import (
 	"go.uber.org/zap"
 )
 
+func TestVoiceReplyMode(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want string
+	}{
+		{"", voiceReplyAuto},
+		{"auto", voiceReplyAuto},
+		{"AUTO", voiceReplyAuto},
+		{"in-kind", voiceReplyAuto},
+		{"inkind", voiceReplyAuto},
+		{"always", voiceReplyAlways},
+		{"true", voiceReplyAlways},
+		{"1", voiceReplyAlways},
+		{"never", voiceReplyNever},
+		{"off", voiceReplyNever},
+		{"false", voiceReplyNever},
+		{"0", voiceReplyNever},
+		{"  always  ", voiceReplyAlways},
+		{"banana", voiceReplyAuto}, // typo must never silence the gateway
+	}
+	for _, tt := range tests {
+		if got := voiceReplyMode(tt.raw); got != tt.want {
+			t.Errorf("voiceReplyMode(%q) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
 func TestGatewayCleanLine(t *testing.T) {
 	cases := map[string]string{
 		"  hello  ": "hello",

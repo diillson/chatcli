@@ -250,17 +250,53 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	return runner.Run(ctx)
 }
 
+// Voice reply policy values parsed from CHATCLI_GATEWAY_VOICE_REPLY.
+const (
+	voiceReplyAuto   = "auto"   // reply in kind: voice in → voice out (default)
+	voiceReplyAlways = "always" // every final reply carries audio
+	voiceReplyNever  = "never"  // replies stay text-only
+)
+
+// voiceReplyMode parses CHATCLI_GATEWAY_VOICE_REPLY. Empty and "auto" reply in
+// kind; legacy boolean values keep their meaning: true → always, false → never.
+// Unrecognized values fall back to auto so a typo never silences the gateway.
+func voiceReplyMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", voiceReplyAuto, "in-kind", "inkind":
+		return voiceReplyAuto
+	case voiceReplyAlways:
+		return voiceReplyAlways
+	case voiceReplyNever, "off":
+		return voiceReplyNever
+	}
+	if enabled, err := strconv.ParseBool(strings.TrimSpace(raw)); err == nil {
+		if enabled {
+			return voiceReplyAlways
+		}
+		return voiceReplyNever
+	}
+	return voiceReplyAuto
+}
+
 // maybeEnableVoiceReplies wires a TTS-backed voice synthesizer onto the runner
-// when CHATCLI_GATEWAY_VOICE_REPLY is enabled and a TTS backend is configured.
-// The clip is requested as ogg/opus so Telegram delivers a native voice note;
-// other formats degrade to an audio file, and text-only adapters ignore it.
+// according to CHATCLI_GATEWAY_VOICE_REPLY: auto (default) answers voice
+// messages with voice, always speaks every final reply, never keeps replies
+// text-only. Any configured TTS backend works — the synthesizer is provider
+// agnostic. The clip is requested as ogg/opus so Telegram delivers a native
+// voice note; other formats degrade to an audio file, and text-only adapters
+// ignore it.
 func (cli *ChatCLI) maybeEnableVoiceReplies(runner *gateway.Runner) {
-	if enabled, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("CHATCLI_GATEWAY_VOICE_REPLY"))); !enabled {
+	mode := voiceReplyMode(os.Getenv("CHATCLI_GATEWAY_VOICE_REPLY"))
+	if mode == voiceReplyNever {
 		return
 	}
 	provider := tts.NewFromEnv(cli.logger)
 	if tts.IsNull(provider) {
-		cli.logger.Warn("gateway: voice reply requested but no TTS backend configured; replies stay text-only")
+		// In auto mode the absence of a backend is the unconfigured default —
+		// stay quiet. Only an explicit "always" earns a warning.
+		if mode == voiceReplyAlways {
+			cli.logger.Warn("gateway: voice reply requested but no TTS backend configured; replies stay text-only")
+		}
 		return
 	}
 	format := strings.TrimSpace(os.Getenv("CHATCLI_TTS_VOICE_FORMAT"))
@@ -268,13 +304,20 @@ func (cli *ChatCLI) maybeEnableVoiceReplies(runner *gateway.Runner) {
 		format = "ogg"
 	}
 	voice := strings.TrimSpace(os.Getenv("CHATCLI_TTS_VOICE"))
-	cli.logger.Info("gateway: voice replies enabled", zap.String("tts", provider.Name()), zap.String("format", format))
+	cli.logger.Info("gateway: voice replies enabled",
+		zap.String("tts", provider.Name()), zap.String("mode", mode), zap.String("format", format))
 
+	if mode == voiceReplyAlways {
+		runner.SetVoiceMode(gateway.VoiceModeAlways)
+	}
 	runner.SetVoiceSynthesizer(func(ctx context.Context, text string) *gateway.OutboundAudio {
-		if strings.TrimSpace(text) == "" {
+		// Replies are markdown; flatten to plain prose so no backend reads
+		// asterisks and pipes out loud.
+		spoken := tts.StripForSpeech(text)
+		if spoken == "" {
 			return nil
 		}
-		audio, err := provider.Synthesize(ctx, text, voice, format)
+		audio, err := provider.Synthesize(ctx, spoken, voice, format)
 		if err != nil {
 			cli.logger.Warn("gateway: TTS synthesis failed; sending text", zap.Error(err))
 			return nil

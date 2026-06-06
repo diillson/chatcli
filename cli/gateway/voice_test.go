@@ -44,27 +44,74 @@ func newVoiceRunner(t *testing.T, rec *recordingAdapter, reply string) *Runner {
 	return r
 }
 
-func TestRunner_VoiceAttachedToFinal(t *testing.T) {
-	rec := &recordingAdapter{}
-	r := newVoiceRunner(t, rec, "the answer")
+// finalReply returns the outbound message whose text matches reply, or nil.
+func finalReply(rec *recordingAdapter, reply string) *OutboundMessage {
+	for _, m := range rec.finals() {
+		if m.Text == reply {
+			final := m
+			return &final
+		}
+	}
+	return nil
+}
+
+// setEchoSynthesizer attaches a synthesizer that wraps the reply text so tests
+// can assert exactly which text reached synthesis.
+func setEchoSynthesizer(r *Runner) {
 	r.SetVoiceSynthesizer(func(_ context.Context, text string) *OutboundAudio {
 		return &OutboundAudio{Data: []byte("AUDIO:" + text), Mime: "audio/ogg", FileName: "reply.ogg"}
 	})
+}
 
-	r.handle(context.Background(), InboundMessage{Platform: "rec", ChatID: "1", Text: "hi"})
+func TestRunner_InKindVoiceMessageGetsAudio(t *testing.T) {
+	rec := &recordingAdapter{}
+	r := newVoiceRunner(t, rec, "the answer")
+	setEchoSynthesizer(r) // default mode: in-kind
 
-	var final *OutboundMessage
-	for i := range rec.finals() {
-		m := rec.finals()[i]
-		if m.Text == "the answer" {
-			final = &m
-		}
-	}
+	r.handle(context.Background(), InboundMessage{
+		Platform: "rec", ChatID: "1", Text: "hi",
+		Audio: &InboundAudio{Data: []byte("voice-note"), MimeType: "audio/ogg"},
+	})
+
+	final := finalReply(rec, "the answer")
 	if final == nil {
 		t.Fatal("no final reply sent")
 	}
 	if final.Audio == nil || string(final.Audio.Data) != "AUDIO:the answer" {
 		t.Fatalf("expected audio attached, got %+v", final.Audio)
+	}
+}
+
+func TestRunner_InKindTextMessageStaysTextOnly(t *testing.T) {
+	rec := &recordingAdapter{}
+	r := newVoiceRunner(t, rec, "the answer")
+	setEchoSynthesizer(r) // default mode: in-kind
+
+	r.handle(context.Background(), InboundMessage{Platform: "rec", ChatID: "1", Text: "hi"})
+
+	final := finalReply(rec, "the answer")
+	if final == nil {
+		t.Fatal("no final reply sent")
+	}
+	if final.Audio != nil {
+		t.Fatalf("text inbound must not get audio in in-kind mode, got %+v", final.Audio)
+	}
+}
+
+func TestRunner_AlwaysModeSpeaksTextMessages(t *testing.T) {
+	rec := &recordingAdapter{}
+	r := newVoiceRunner(t, rec, "the answer")
+	setEchoSynthesizer(r)
+	r.SetVoiceMode(VoiceModeAlways)
+
+	r.handle(context.Background(), InboundMessage{Platform: "rec", ChatID: "1", Text: "hi"})
+
+	final := finalReply(rec, "the answer")
+	if final == nil {
+		t.Fatal("no final reply sent")
+	}
+	if final.Audio == nil || string(final.Audio.Data) != "AUDIO:the answer" {
+		t.Fatalf("expected audio attached in always mode, got %+v", final.Audio)
 	}
 }
 
