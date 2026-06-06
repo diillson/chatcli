@@ -14,18 +14,18 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
 	"go.uber.org/zap"
 )
 
-// lookupFFmpegTTS returns the ffmpeg binary path, or "" when not installed.
-// Indirected so tests can exercise the transcode path without a real ffmpeg.
-var lookupFFmpegTTS = func() string {
-	p, _ := exec.LookPath("ffmpeg")
-	return p
+// hasFFmpegTTS reports whether ffmpeg is resolvable on PATH. Indirected so
+// tests can force the "not installed" branch; the affirmative branch resolves
+// the literal name through exec at run time (tests inject a fake via PATH).
+var hasFFmpegTTS = func() bool {
+	_, err := exec.LookPath("ffmpeg")
+	return err == nil
 }
 
 // ToVoiceNote converts a synthesized clip into OGG/Opus when the backend
@@ -43,12 +43,11 @@ func ToVoiceNote(ctx context.Context, a Audio, logger *zap.Logger) Audio {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	ffmpeg := lookupFFmpegTTS()
-	if ffmpeg == "" {
+	if !hasFFmpegTTS() {
 		logger.Warn("tts: ffmpeg not found; sending raw " + a.Ext + " audio that messengers may not play")
 		return a
 	}
-	ogg, err := toOpus(ctx, ffmpeg, a.Data, a.Ext)
+	ogg, err := toOpus(ctx, a.Data, a.Ext)
 	if err != nil {
 		logger.Warn("tts: voice-note transcode failed; sending original audio", zap.Error(err))
 		return a
@@ -59,49 +58,34 @@ func ToVoiceNote(ctx context.Context, a Audio, logger *zap.Logger) Audio {
 
 // wavToOpus transcodes a WAV clip to OGG/Opus tuned for speech: 48kHz mono at
 // 32kbps, the profile Telegram voice notes expect.
-func wavToOpus(ctx context.Context, ffmpeg string, wav []byte) ([]byte, error) {
-	return toOpus(ctx, ffmpeg, wav, "wav")
+func wavToOpus(ctx context.Context, wav []byte) ([]byte, error) {
+	return toOpus(ctx, wav, "wav")
 }
 
-// toOpus runs the actual ffmpeg transcode from srcExt (wav/aiff — ffmpeg
-// detects the container by content, the extension is a hint) to OGG/Opus.
-func toOpus(ctx context.Context, ffmpeg string, audio []byte, srcExt string) ([]byte, error) {
-	in, err := os.CreateTemp("", "chatcli-tts-in-*."+srcExt)
-	if err != nil {
-		return nil, fmt.Errorf("tts: temp input: %w", err)
-	}
-	inPath := in.Name()
-	defer func() { _ = os.Remove(inPath) }()
-	if _, err := in.Write(audio); err != nil {
-		_ = in.Close()
-		return nil, fmt.Errorf("tts: write temp input: %w", err)
-	}
-	if err := in.Close(); err != nil {
-		return nil, fmt.Errorf("tts: close temp input: %w", err)
-	}
-
-	outPath := inPath + ".ogg"
-	defer func() { _ = os.Remove(outPath) }()
-
-	cmd := exec.CommandContext(ctx, ffmpeg, "-nostdin", "-y", "-i", inPath,
-		"-c:a", "libopus", "-b:a", "32k", "-ar", "48000", "-ac", "1", "-f", "ogg", outPath)
-	var stderr bytes.Buffer
+// toOpus transcodes a raw clip to OGG/Opus by streaming through ffmpeg: audio
+// in on stdin, ogg out on stdout. No temp files and a fully literal argv —
+// the binary name resolves through PATH inside the exec package and ffmpeg
+// probes the input container (wav/aiff) from the stream itself, so there is
+// nothing variable in the command at all. srcExt is kept for error context.
+func toOpus(ctx context.Context, audio []byte, srcExt string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error",
+		"-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-ar", "48000", "-ac", "1",
+		"-f", "ogg", "pipe:1")
+	var out, stderr bytes.Buffer
+	cmd.Stdin = bytes.NewReader(audio)
+	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg != "" {
-			return nil, fmt.Errorf("tts: ffmpeg transcode failed: %w: %s", err, lastLine(msg))
+			return nil, fmt.Errorf("tts: ffmpeg transcode from %s failed: %w: %s", srcExt, err, lastLine(msg))
 		}
-		return nil, fmt.Errorf("tts: ffmpeg transcode failed: %w", err)
+		return nil, fmt.Errorf("tts: ffmpeg transcode from %s failed: %w", srcExt, err)
 	}
-	data, err := os.ReadFile(outPath) // #nosec G304 -- temp file we created
-	if err != nil {
-		return nil, fmt.Errorf("tts: read transcoded output: %w", err)
-	}
-	if len(data) == 0 {
+	if out.Len() == 0 {
 		return nil, fmt.Errorf("tts: ffmpeg produced no audio")
 	}
-	return data, nil
+	return out.Bytes(), nil
 }
 
 // lastLine trims ffmpeg's chatty stderr to its final line for error messages.

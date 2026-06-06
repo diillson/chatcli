@@ -16,7 +16,7 @@ import (
 
 // ErrDisabled is returned by the null provider. Callers compare against it
 // (errors.Is) to surface a configuration hint rather than a generic failure.
-var ErrDisabled = errors.New("tts: no backend configured — set CHATCLI_TTS_PROVIDER=embedded (keyless, any OS), CHATCLI_TTS_CMD (local), CHATCLI_TTS_URL (self-hosted), or install a local TTS CLI")
+var ErrDisabled = errors.New("tts: no backend configured — set CHATCLI_TTS_CMD (local), CHATCLI_TTS_URL (self-hosted), or install a local TTS CLI")
 
 // Null is the disabled provider.
 type Null struct{}

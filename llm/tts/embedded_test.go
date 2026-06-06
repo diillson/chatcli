@@ -159,15 +159,7 @@ func TestLibPathEnv_PrependsToExisting(t *testing.T) {
 func TestEmbedded_OpusTranscodeViaFakeFFmpeg(t *testing.T) {
 	root, _ := provisionFakeCache(t)
 	e := newTestEmbedded(t, root)
-
-	fake := filepath.Join(t.TempDir(), "fakeffmpeg")
-	script := "#!/bin/sh\nfor a in \"$@\"; do out=\"$a\"; done\nprintf 'OggSfake' > \"$out\"\n"
-	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil { // #nosec G306 -- test fixture must be executable
-		t.Fatal(err)
-	}
-	orig := lookupFFmpegTTS
-	lookupFFmpegTTS = func() string { return fake }
-	t.Cleanup(func() { lookupFFmpegTTS = orig })
+	installFakeFFmpeg(t, "OggSfake")
 
 	audio, err := e.Synthesize(context.Background(), "Voice note please, everything is done.", "", "ogg")
 	if err != nil {
@@ -181,10 +173,7 @@ func TestEmbedded_OpusTranscodeViaFakeFFmpeg(t *testing.T) {
 func TestEmbedded_NoFFmpegDegradesToWav(t *testing.T) {
 	root, _ := provisionFakeCache(t)
 	e := newTestEmbedded(t, root)
-
-	orig := lookupFFmpegTTS
-	lookupFFmpegTTS = func() string { return "" }
-	t.Cleanup(func() { lookupFFmpegTTS = orig })
+	stubNoFFmpeg(t)
 
 	audio, err := e.Synthesize(context.Background(), "Voice note please, everything is done.", "", "ogg")
 	if err != nil {

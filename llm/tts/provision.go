@@ -91,6 +91,13 @@ func sherpaAsset(goos, goarch string) (string, bool) {
 // useful for shared caches and air-gapped pre-seeding.
 func embeddedCacheDir() (string, error) {
 	if dir := strings.TrimSpace(os.Getenv("CHATCLI_TTS_CACHE_DIR")); dir != "" {
+		// Operator-supplied override: canonicalize and require an absolute
+		// path so a relative value can never resolve against an unexpected
+		// working directory (the daemon and the REPL have different cwds).
+		dir = filepath.Clean(dir)
+		if !filepath.IsAbs(dir) {
+			return "", fmt.Errorf("tts: CHATCLI_TTS_CACHE_DIR must be an absolute path, got %q", dir)
+		}
 		return dir, nil
 	}
 	base, err := os.UserCacheDir()
@@ -118,24 +125,33 @@ func isProvisionedDir(root string) bool {
 
 // locateProvisioned walks the cache root and resolves every artifact path.
 // The walk tolerates upstream layout changes (binary in bin/ today) by
-// searching for well-known names instead of assuming a directory shape.
+// searching for well-known names instead of assuming a directory shape. It
+// runs inside an os.Root, so traversal is kernel-confined to the cache
+// directory — a symlink or a hostile override can never lead it elsewhere.
 func locateProvisioned(root string) (provisionedPaths, bool) {
+	confined, err := os.OpenRoot(root)
+	if err != nil {
+		return provisionedPaths{}, false
+	}
+	defer func() { _ = confined.Close() }()
+
 	var p provisionedPaths
 	binName := sherpaBinName
 	if runtime.GOOS == "windows" {
 		binName += ".exe"
 	}
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(confined.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // unreadable entry: keep scanning the rest
 		}
+		abs := filepath.Join(root, filepath.FromSlash(rel))
 		switch {
 		case !d.IsDir() && d.Name() == binName && p.bin == "":
-			p.bin = path
+			p.bin = abs
 		case !d.IsDir() && d.Name() == "voices.bin" && p.voices == "":
-			p.voices = path
+			p.voices = abs
 		case d.IsDir() && d.Name() == "espeak-ng-data" && p.dataDir == "":
-			p.dataDir = path
+			p.dataDir = abs
 			return fs.SkipDir // thousands of phoneme files; nothing to find inside
 		}
 		return nil
@@ -292,10 +308,12 @@ func writeFileFromTar(target string, tr io.Reader, hdr *tar.Header, budget int64
 	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		return 0, err
 	}
-	// Preserve the executable bit but drop setuid/setgid and world-write.
-	mode := fs.FileMode(hdr.Mode).Perm() & 0o755
-	if mode == 0 {
-		mode = 0o644
+	// Archive entries become either a plain file or an executable — nothing
+	// from the tar header beyond the exec bit survives (no setuid/setgid, no
+	// world-write), and no integer conversion of untrusted header bits.
+	mode := fs.FileMode(0o644)
+	if hdr.Mode&0o111 != 0 {
+		mode = 0o755
 	}
 	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode) // #nosec G304 -- under our cache dir, safeJoin-validated
 	if err != nil {

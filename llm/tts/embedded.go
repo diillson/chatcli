@@ -187,9 +187,13 @@ func (e *embeddedSynth) provision(ctx context.Context) (provisionedPaths, error)
 	if !ok {
 		return provisionedPaths{}, fmt.Errorf("tts: provisioned cache is incomplete — remove %s and retry", root)
 	}
+	// The tar extractor preserves the executable bit, so the engine comes out
+	// of the archive ready to run — verify rather than mutate, and fail loud
+	// on a broken extraction instead of papering over it with a chmod.
 	if runtime.GOOS != "windows" {
-		if err := os.Chmod(p.bin, 0o755); err != nil {
-			return provisionedPaths{}, fmt.Errorf("tts: mark engine executable: %w", err)
+		fi, err := os.Stat(p.bin)
+		if err != nil || fi.Mode()&0o111 == 0 {
+			return provisionedPaths{}, fmt.Errorf("tts: provisioned engine is not executable (%s) — remove %s and retry", p.bin, root)
 		}
 	}
 	if err := os.WriteFile(readyMarker(root), nil, 0o600); err != nil {
@@ -265,12 +269,11 @@ func (e *embeddedSynth) runKokoro(ctx context.Context, paths provisionedPaths, v
 func (e *embeddedSynth) deliver(ctx context.Context, wav []byte, format string) (Audio, error) {
 	f := strings.ToLower(strings.TrimSpace(format))
 	if f == "ogg" || f == "opus" {
-		ffmpeg := lookupFFmpegTTS()
-		if ffmpeg == "" {
+		if !hasFFmpegTTS() {
 			e.warnFFmpegOnce.Do(func() {
 				e.logger.Warn("tts: ffmpeg not found; voice notes degrade to wav audio files")
 			})
-		} else if ogg, err := wavToOpus(ctx, ffmpeg, wav); err == nil {
+		} else if ogg, err := wavToOpus(ctx, wav); err == nil {
 			mime, ext := mimeFor("ogg")
 			return Audio{Data: ogg, Mime: mime, Ext: ext}, nil
 		} else {
