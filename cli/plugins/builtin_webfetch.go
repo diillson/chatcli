@@ -184,44 +184,68 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 	// Persist full *pre-filter* content to the session scratch dir when asked.
 	// This gives the agent the option to re-slice later via read_file without
 	// re-fetching. We write the unfiltered text so the full data is available.
-	var savedPath string
-	if parsed.SaveToFile {
-		scratch := os.Getenv("CHATCLI_AGENT_TMPDIR")
-		if scratch == "" {
-			scratch = os.TempDir()
-		}
-		// Always keep writes inside the scratch dir. Take only the base name
-		// of whatever the caller supplied so we can't be talked into writing
-		// /etc/passwd via an absolute path — this matches gosec G703
-		// guidance and is consistent with how the coder engine validates
-		// paths for the agent.
-		baseName := filepath.Base(strings.TrimSpace(parsed.SavePath))
-		if baseName == "" || baseName == "." || baseName == string(filepath.Separator) {
-			baseName = fmt.Sprintf("webfetch_%d.txt", time.Now().UnixNano())
-		}
-		target := filepath.Join(scratch, baseName)
-		// Defense-in-depth: resolve and double-check we stayed under scratch
-		// (Clean collapses any surviving ../ segments introduced by exotic
-		// basenames on platforms where Base keeps them).
-		cleaned := filepath.Clean(target)
-		absScratch, _ := filepath.Abs(scratch)
-		absCleaned, _ := filepath.Abs(cleaned)
-		if !strings.HasPrefix(absCleaned, absScratch+string(filepath.Separator)) && absCleaned != absScratch {
-			return "", fmt.Errorf("save_path %q escapes the session scratch directory", parsed.SavePath)
-		}
-		if err := os.WriteFile(cleaned, []byte(fullContent), 0o600); err != nil { //nolint:gosec // path confined to scratch dir above
-			return "", fmt.Errorf("saving response to %s: %w", cleaned, err)
-		}
-		savedPath = cleaned
+	savedPath, err := saveFetchToScratch(parsed, fullContent)
+	if err != nil {
+		return "", err
 	}
 
-	// Final output returned to the agent. Apply max_length as the last step.
+	output := buildFetchOutput(parsed, filtered, fullContent, savedPath, autoSaved)
+
+	if onOutput != nil {
+		for _, line := range strings.Split(output, "\n") {
+			if strings.TrimSpace(line) != "" {
+				onOutput(line)
+			}
+		}
+	}
+
+	return output, nil
+}
+
+// saveFetchToScratch writes fullContent to the session scratch dir when
+// parsed.SaveToFile is set, returning the absolute path written (empty
+// when no save was requested). All writes are confined to the scratch dir:
+// only the base name of the caller-supplied save_path is honored, and the
+// resolved path is re-checked against scratch as defense-in-depth.
+func saveFetchToScratch(parsed fetchArgs, fullContent string) (string, error) {
+	if !parsed.SaveToFile {
+		return "", nil
+	}
+	scratch := os.Getenv("CHATCLI_AGENT_TMPDIR")
+	if scratch == "" {
+		scratch = os.TempDir()
+	}
+	// Take only the base name so we can't be talked into writing /etc/passwd
+	// via an absolute path — matches gosec G703 guidance and how the coder
+	// engine validates agent paths.
+	baseName := filepath.Base(strings.TrimSpace(parsed.SavePath))
+	if baseName == "" || baseName == "." || baseName == string(filepath.Separator) {
+		baseName = fmt.Sprintf("webfetch_%d.txt", time.Now().UnixNano())
+	}
+	// Clean collapses any surviving ../ segments introduced by exotic
+	// basenames on platforms where Base keeps them.
+	cleaned := filepath.Clean(filepath.Join(scratch, baseName))
+	absScratch, _ := filepath.Abs(scratch)
+	absCleaned, _ := filepath.Abs(cleaned)
+	if !strings.HasPrefix(absCleaned, absScratch+string(filepath.Separator)) && absCleaned != absScratch {
+		return "", fmt.Errorf("save_path %q escapes the session scratch directory", parsed.SavePath)
+	}
+	if err := os.WriteFile(cleaned, []byte(fullContent), 0o600); err != nil { //nolint:gosec // path confined to scratch dir above
+		return "", fmt.Errorf("saving response to %s: %w", cleaned, err)
+	}
+	return cleaned, nil
+}
+
+// buildFetchOutput assembles the final string returned to the agent:
+// applies the auto-save preview cap and max_length truncation, then
+// prepends a pointer to the on-disk copy when one was written.
+func buildFetchOutput(parsed fetchArgs, filtered, fullContent, savedPath string, autoSaved bool) string {
 	output := filtered
 
 	// When we auto-saved to disk, ship only a compact preview back — full
-	// body is on disk and the model has been told where. Keeping the
-	// inline preview small is THE point of auto-save: otherwise we would
-	// be paying twice (inline bytes + disk) for the same content.
+	// body is on disk and the model has been told where. Keeping the inline
+	// preview small is THE point of auto-save: otherwise we pay twice
+	// (inline bytes + disk) for the same content.
 	if autoSaved {
 		previewSize := parsed.MaxLength / 4
 		if previewSize < 2000 {
@@ -237,32 +261,23 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 		truncated = true
 	}
 
-	// If we saved the full body to disk, tell the agent exactly where.
-	if savedPath != "" {
-		var prefix string
-		switch {
-		case autoSaved:
-			prefix = fmt.Sprintf("[auto-saved: response was %d bytes — too large to inline. Full body is at %s. Preview below; use read_file with start/end or rerun with filter/from_line/to_line for specific ranges.]\n\n",
-				len(fullContent), savedPath)
-		case truncated:
-			prefix = fmt.Sprintf("[response truncated inline at %d chars; full response saved to %s — %d bytes. Use read_file with start/end to examine specific ranges.]\n\n",
-				parsed.MaxLength, savedPath, len(fullContent))
-		default:
-			prefix = fmt.Sprintf("[full response saved to %s — %d bytes. Use read_file with start/end to examine specific ranges.]\n\n",
-				savedPath, len(fullContent))
-		}
-		output = prefix + output
+	if savedPath == "" {
+		return output
 	}
 
-	if onOutput != nil {
-		for _, line := range strings.Split(output, "\n") {
-			if strings.TrimSpace(line) != "" {
-				onOutput(line)
-			}
-		}
+	var prefix string
+	switch {
+	case autoSaved:
+		prefix = fmt.Sprintf("[auto-saved: response was %d bytes — too large to inline. Full body is at %s. Preview below; use read_file with start/end or rerun with filter/from_line/to_line for specific ranges.]\n\n",
+			len(fullContent), savedPath)
+	case truncated:
+		prefix = fmt.Sprintf("[response truncated inline at %d chars; full response saved to %s — %d bytes. Use read_file with start/end to examine specific ranges.]\n\n",
+			parsed.MaxLength, savedPath, len(fullContent))
+	default:
+		prefix = fmt.Sprintf("[full response saved to %s — %d bytes. Use read_file with start/end to examine specific ranges.]\n\n",
+			savedPath, len(fullContent))
 	}
-
-	return output, nil
+	return prefix + output
 }
 
 // parseFetchArgs accepts either a single JSON arg or positional --flag args.
@@ -297,6 +312,14 @@ func parseFetchArgs(args []string) (fetchArgs, error) {
 		start = 1
 	}
 
+	parsePositionalFetchArgs(args, start, &out)
+	return out, nil
+}
+
+// parsePositionalFetchArgs walks the --flag value pairs (snake_case and
+// kebab-case accepted) starting at index start, mutating out in place. A
+// bare http(s) token is treated as an implicit URL when none was set.
+func parsePositionalFetchArgs(args []string, start int, out *fetchArgs) {
 	for i := start; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -344,7 +367,6 @@ func parseFetchArgs(args []string) (fetchArgs, error) {
 			}
 		}
 	}
-	return out, nil
 }
 
 func mapToFetchArgs(m map[string]interface{}, out *fetchArgs) {
