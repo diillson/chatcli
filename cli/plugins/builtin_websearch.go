@@ -329,7 +329,14 @@ func searchSearxNG(ctx context.Context, query string, maxResults int, baseURL st
 
 	endpoint := baseURL + "/search?" + params.Encode()
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", endpoint, nil)
+	// SSRF guard: the SearxNG base URL is operator-supplied; validate and
+	// canonicalize it before it reaches the HTTP client.
+	safeEndpoint, err := validateWebTarget(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("refusing to query SearxNG endpoint: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(reqCtx, "GET", safeEndpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating SearxNG request: %w", err)
 	}
@@ -390,7 +397,13 @@ func searchDuckDuckGo(ctx context.Context, query string, maxResults int) ([]sear
 
 	searchURL := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(query)
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", searchURL, nil)
+	// SSRF guard (defense in depth — host is a fixed public endpoint).
+	safeURL, err := validateWebTarget(searchURL)
+	if err != nil {
+		return nil, fmt.Errorf("refusing to query DuckDuckGo: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(reqCtx, "GET", safeURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}

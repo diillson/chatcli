@@ -740,6 +740,9 @@ func (cli *ChatCLI) showConfigResilience() {
 	kv(p, "NO_PROXY", envOr("NO_PROXY"))
 	// Escape hatch for non-Basic proxy auth (Negotiate/NTLM/Kerberos/Bearer).
 	kv(p, "CHATCLI_PROXY_AUTH", presence(os.Getenv("CHATCLI_PROXY_AUTH")))
+	// SSRF guard: metadata/link-local is always blocked; private/loopback only
+	// when this is enabled (web tools legitimately fetch internal services).
+	kv(p, "CHATCLI_WEBFETCH_BLOCK_PRIVATE", envBool("CHATCLI_WEBFETCH_BLOCK_PRIVATE"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.resil.session_state")

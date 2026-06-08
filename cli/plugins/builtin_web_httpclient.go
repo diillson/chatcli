@@ -61,6 +61,9 @@ func webHTTPClient() *http.Client {
 	webClientOnce.Do(func() {
 		webClient = &http.Client{
 			Transport: &proxyAuthTransport{base: newWebTransport()},
+			// Re-validate every redirect hop so a 302 to an internal URL can't
+			// launder past the initial SSRF check.
+			CheckRedirect: validateRedirect,
 		}
 	})
 	return webClient
@@ -87,6 +90,9 @@ func newWebTransport() *http.Transport {
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
+			// Airtight SSRF enforcement: runs after DNS resolution on every
+			// connection (initial + each redirect hop), closing DNS-rebinding.
+			Control: ssrfDialControl,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
@@ -126,7 +132,15 @@ func (t *proxyAuthTransport) RoundTrip(req *http.Request) (*http.Response, error
 // so a domain login or a password with special characters still authenticates
 // instead of silently disabling the proxy.
 func webProxyForRequest(req *http.Request) (*url.URL, error) {
-	raw := rawProxyForScheme(req.URL.Scheme)
+	return webProxyForURL(req.URL)
+}
+
+// webProxyForURL is the URL-level core of webProxyForRequest, also used by the
+// SSRF guard to decide whether a target is reached through a proxy (in which
+// case the proxy is the egress control point and local IP resolution is both
+// ineffective and prone to false positives).
+func webProxyForURL(target *url.URL) (*url.URL, error) {
+	raw := rawProxyForScheme(target.Scheme)
 	if raw == "" {
 		return nil, nil
 	}
@@ -139,7 +153,7 @@ func webProxyForRequest(req *http.Request) (*url.URL, error) {
 	// Apply NO_PROXY using the standard matcher. We feed it a credential-
 	// stripped copy (which always parses cleanly) purely for the include/
 	// exclude decision, then return our credential-bearing URL.
-	if !proxyAppliesForHost(req.URL, proxyURL) {
+	if !proxyAppliesForHost(target, proxyURL) {
 		return nil, nil
 	}
 	return proxyURL, nil

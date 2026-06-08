@@ -129,7 +129,15 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", parsed.URL, nil)
+	// SSRF guard: validate (and canonicalize) the target before it reaches the
+	// HTTP client. Blocks cloud-metadata/link-local always; private/loopback
+	// only when CHATCLI_WEBFETCH_BLOCK_PRIVATE is set.
+	safeURL, err := validateWebTarget(parsed.URL)
+	if err != nil {
+		return "", fmt.Errorf("refusing to fetch %q: %w", parsed.URL, err)
+	}
+
+	req, err := http.NewRequestWithContext(reqCtx, "GET", safeURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("creating request: %w", err)
 	}
