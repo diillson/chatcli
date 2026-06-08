@@ -32,6 +32,17 @@ const (
 	defaultWebFetchAutoSaveSize = 10_000
 )
 
+// browserUserAgent mimics a mainstream desktop browser. Many docs/CDN
+// providers (Mintlify, Cloudflare-fronted sites, etc.) serve a 403 or a
+// JS challenge to anything that self-identifies as a bot/library. Using a
+// common browser UA — together with browser-like Accept/Accept-Language
+// headers — lets these pages return real HTML instead of a block page.
+// Shared across the webfetch and websearch builtins. A pinned Chrome UA
+// eventually ages out; CHATCLI_WEBFETCH_USER_AGENT lets users override it
+// without a rebuild (see browserUA).
+const browserUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+	"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
 // BuiltinWebFetchPlugin provides web page fetching functionality.
 type BuiltinWebFetchPlugin struct{}
 
@@ -122,8 +133,9 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 	if err != nil {
 		return "", fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("User-Agent", "chatcli-webfetch/1.1 (compatible; bot)")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain,*/*")
+	req.Header.Set("User-Agent", browserUA())
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -388,6 +400,17 @@ func webFetchAutoSaveThreshold() int {
 		}
 	}
 	return defaultWebFetchAutoSaveSize
+}
+
+// browserUA returns the User-Agent to send on outbound page/search
+// requests. Honors CHATCLI_WEBFETCH_USER_AGENT (power-user override, e.g.
+// to track a newer Chrome or impersonate a different browser); a blank or
+// whitespace-only value falls back to the pinned browserUserAgent.
+func browserUA() string {
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_WEBFETCH_USER_AGENT")); v != "" {
+		return v
+	}
+	return browserUserAgent
 }
 
 // applyLineFilters applies regex filter/exclude and line-range clipping.

@@ -923,6 +923,7 @@ func (cli *ChatCLI) showConfigIntegrations() {
 	kv(p, "CHATCLI_WEBSEARCH_PROVIDER", envOr("CHATCLI_WEBSEARCH_PROVIDER"))
 	kv(p, "SEARXNG_URL", envOr("SEARXNG_URL"))
 	kv(p, "CHATCLI_WEBFETCH_AUTOSAVE_BYTES", envOr("CHATCLI_WEBFETCH_AUTOSAVE_BYTES"))
+	kv(p, "CHATCLI_WEBFETCH_USER_AGENT", envOr("CHATCLI_WEBFETCH_USER_AGENT"))
 	chain := plugins.SelectSearchChainNames()
 	chainNames := make([]string, 0, len(chain))
 	for _, n := range chain {
