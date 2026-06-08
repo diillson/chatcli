@@ -99,8 +99,16 @@ func webGet(ctx context.Context, url string, extraHeaders map[string]string) (*h
 }
 
 // webGetWithUA performs a single GET with the given User-Agent and headers.
+//
+// gosec G704 flags the request/Do below as an SSRF taint flow because callers
+// may build the URL from operator config read via os.Getenv (e.g. SEARXNG_URL).
+// The egress is validated upstream by validateWebTarget and the ssrfDialControl
+// dial hook (which block cloud metadata/link-local, DNS rebinding and
+// redirects), and G704 has no sanitizer model to recognize that — so the sinks
+// are annotated as reviewed false positives, matching the repo convention for
+// G304/G204.
 func webGetWithUA(ctx context.Context, url, userAgent string, extraHeaders map[string]string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil) //#nosec G704 -- url validated upstream by validateWebTarget + ssrfDialControl (metadata/link-local, DNS rebinding, redirects)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -108,7 +116,7 @@ func webGetWithUA(ctx context.Context, url, userAgent string, extraHeaders map[s
 	for k, v := range extraHeaders {
 		req.Header.Set(k, v)
 	}
-	return webHTTPClient().Do(req)
+	return webHTTPClient().Do(req) //#nosec G704 -- request URL validated upstream (see above)
 }
 
 // newWebTransport builds the proxy-aware transport. The connection settings
