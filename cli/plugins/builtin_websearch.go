@@ -83,76 +83,111 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 		return "", fmt.Errorf("query required. Usage: @websearch search --query <query>")
 	}
 
-	var query string
-	maxResults := 10
-
-	// Try JSON args first
-	if len(args) == 1 {
-		var jsonArgs map[string]interface{}
-		if err := json.Unmarshal([]byte(args[0]), &jsonArgs); err == nil {
-			if cmd, ok := jsonArgs["cmd"].(string); ok && cmd == "search" {
-				// Format: {"cmd":"search","args":{"query":"..."}}
-				if a, ok := jsonArgs["args"].(map[string]interface{}); ok {
-					if q, ok := a["query"].(string); ok {
-						query = q
-					}
-					if m, ok := a["maxResults"].(float64); ok {
-						maxResults = int(m)
-					}
-				}
-			} else if q, ok := jsonArgs["query"].(string); ok && q != "" {
-				// Flat format from native tool calling: {"query":"...","max_results":10}
-				query = q
-				if m, ok := jsonArgs["max_results"].(float64); ok && m > 0 {
-					maxResults = int(m)
-				}
-				if m, ok := jsonArgs["maxResults"].(float64); ok && m > 0 {
-					maxResults = int(m)
-				}
-			}
-		}
-	}
-
-	// Positional args fallback
-	if query == "" {
-		subcmd := args[0]
-		if subcmd == "search" && len(args) > 1 {
-			var queryParts []string
-			for i := 1; i < len(args); i++ {
-				switch args[i] {
-				case "--query":
-					if i+1 < len(args) {
-						query = args[i+1]
-						i++
-					}
-				case "--maxResults":
-					if i+1 < len(args) {
-						_, _ = fmt.Sscanf(args[i+1], "%d", &maxResults)
-						i++
-					}
-				default:
-					queryParts = append(queryParts, args[i])
-				}
-			}
-			if query == "" && len(queryParts) > 0 {
-				query = strings.Join(queryParts, " ")
-			}
-		} else {
-			// Simple: @websearch golang context
-			query = strings.Join(args, " ")
-		}
-	}
-
+	query, maxResults := parseWebSearchArgs(args)
 	if query == "" {
 		return "", fmt.Errorf("query required")
 	}
 
+	results, provider, lastErr := runSearchChain(ctx, query, maxResults, onOutput)
+	if len(results) == 0 {
+		if lastErr != nil {
+			return "", fmt.Errorf("all search backends failed; last error: %w", lastErr)
+		}
+		return "No results found.", nil
+	}
+
+	return formatSearchResults(query, provider, results, onOutput), nil
+}
+
+// parseSearchArgs extracts the query and max-results from either a single
+// JSON arg (native tool call, two shapes) or positional flags. Returns an
+// empty query when nothing usable was supplied.
+func parseWebSearchArgs(args []string) (string, int) {
+	maxResults := 10
+
+	// JSON-arg form first.
+	if len(args) == 1 {
+		if q, m, ok := parseSearchJSON(args[0]); ok {
+			if m > 0 {
+				maxResults = m
+			}
+			if q != "" {
+				return q, maxResults
+			}
+		}
+	}
+
+	// Positional fallback.
+	subcmd := args[0]
+	if subcmd == "search" && len(args) > 1 {
+		var queryParts []string
+		query := ""
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--query":
+				if i+1 < len(args) {
+					query = args[i+1]
+					i++
+				}
+			case "--maxResults":
+				if i+1 < len(args) {
+					_, _ = fmt.Sscanf(args[i+1], "%d", &maxResults)
+					i++
+				}
+			default:
+				queryParts = append(queryParts, args[i])
+			}
+		}
+		if query == "" && len(queryParts) > 0 {
+			query = strings.Join(queryParts, " ")
+		}
+		return query, maxResults
+	}
+
+	// Simple: @websearch golang context
+	return strings.Join(args, " "), maxResults
+}
+
+// parseSearchJSON decodes the two accepted JSON shapes:
+//
+//	{"cmd":"search","args":{"query":"...","maxResults":N}}
+//	{"query":"...","max_results":N}   // flat, from native tool calling
+//
+// ok is false when the payload isn't JSON at all (caller falls back to
+// positional parsing).
+func parseSearchJSON(raw string) (query string, maxResults int, ok bool) {
+	var j map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &j); err != nil {
+		return "", 0, false
+	}
+	if cmd, isCmd := j["cmd"].(string); isCmd && cmd == "search" {
+		if a, isMap := j["args"].(map[string]interface{}); isMap {
+			if q, isStr := a["query"].(string); isStr {
+				query = q
+			}
+			if m, isNum := a["maxResults"].(float64); isNum {
+				maxResults = int(m)
+			}
+		}
+		return query, maxResults, true
+	}
+	if q, isStr := j["query"].(string); isStr && q != "" {
+		query = q
+		for _, key := range []string{"max_results", "maxResults"} {
+			if m, isNum := j[key].(float64); isNum && m > 0 {
+				maxResults = int(m)
+			}
+		}
+	}
+	return query, maxResults, true
+}
+
+// runSearchChain tries each provider in order, returning the first
+// non-empty result set plus the provider that produced it. lastErr holds
+// the final error when every backend failed.
+func runSearchChain(ctx context.Context, query string, maxResults int, onOutput func(string)) ([]searchResult, SearchProvider, error) {
 	chain := SelectSearchChain()
-	var (
-		results  []searchResult
-		provider SearchProvider
-		lastErr  error
-	)
+	var lastErr error
 
 	for i, p := range chain {
 		if onOutput != nil {
@@ -160,10 +195,7 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 		}
 		res, err := p.search(ctx, query, maxResults)
 		if err == nil && len(res) > 0 {
-			results = res
-			provider = p.name
-			lastErr = nil
-			break
+			return res, p.name, nil
 		}
 		lastErr = err
 		if onOutput != nil && i < len(chain)-1 {
@@ -174,14 +206,12 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 			}
 		}
 	}
+	return nil, "", lastErr
+}
 
-	if len(results) == 0 {
-		if lastErr != nil {
-			return "", fmt.Errorf("all search backends failed; last error: %w", lastErr)
-		}
-		return "No results found.", nil
-	}
-
+// formatSearchResults renders the result set for the agent and streams a
+// one-line-per-hit preview through onOutput.
+func formatSearchResults(query string, provider SearchProvider, results []searchResult, onOutput func(string)) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Search results for: %q (via %s)\n\n", query, provider))
 	for i, r := range results {
@@ -196,8 +226,7 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 			onOutput(fmt.Sprintf("%d. %s - %s", i+1, r.Title, r.URL))
 		}
 	}
-
-	return sb.String(), nil
+	return sb.String()
 }
 
 type searchResult struct {
@@ -304,7 +333,7 @@ func searchSearxNG(ctx context.Context, query string, maxResults int, baseURL st
 	if err != nil {
 		return nil, fmt.Errorf("creating SearxNG request: %w", err)
 	}
-	req.Header.Set("User-Agent", "chatcli-websearch/2.0")
+	req.Header.Set("User-Agent", browserUA())
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -365,7 +394,9 @@ func searchDuckDuckGo(ctx context.Context, query string, maxResults int) ([]sear
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("User-Agent", "chatcli-websearch/2.0 (compatible)")
+	req.Header.Set("User-Agent", browserUA())
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
