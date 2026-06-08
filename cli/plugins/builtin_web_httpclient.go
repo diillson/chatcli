@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/diillson/chatcli/version"
 	"golang.org/x/net/http/httpproxy"
 )
 
@@ -70,19 +69,13 @@ func webHTTPClient() *http.Client {
 	return webClient
 }
 
-// neutralUserAgent identifies ChatCLI as a non-browser tool. Corporate
-// TLS-intercepting gateways (Secure Web Gateways) routinely answer a
-// browser-looking User-Agent with 401/407 because they expect a real browser to
-// complete an interactive SSO/portal flow; a plain tool UA is treated as
-// non-interactive and let through — the same reason curl works on a network
-// where a spoofed Chrome UA is blocked.
-func neutralUserAgent() string {
-	v := version.Version
-	if v == "" {
-		v = "dev"
-	}
-	return "ChatCLI/" + v + " (+https://github.com/diillson/chatcli)"
-}
+// fallbackUserAgent is the non-browser User-Agent used when a gateway rejects
+// the browser UA. Corporate TLS-intercepting gateways (Secure Web Gateways)
+// routinely answer a browser-looking UA with 401/407 because they expect a real
+// browser to complete an interactive SSO/portal flow, while letting plain tools
+// through. A curl identity is the most widely accepted across such gateways.
+// Overridable via CHATCLI_WEBFETCH_USER_AGENT.
+const fallbackUserAgent = "curl/8.7.1"
 
 // webGet issues a GET to url through the shared proxy/SSRF-aware client with the
 // given extra headers (User-Agent is managed here, do not pass it). It sends a
@@ -100,7 +93,7 @@ func webGet(ctx context.Context, url string, extraHeaders map[string]string) (*h
 	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusProxyAuthRequired) &&
 		strings.TrimSpace(os.Getenv("CHATCLI_WEBFETCH_USER_AGENT")) == "" {
 		_ = resp.Body.Close()
-		return webGetWithUA(ctx, url, neutralUserAgent(), extraHeaders)
+		return webGetWithUA(ctx, url, fallbackUserAgent, extraHeaders)
 	}
 	return resp, nil
 }

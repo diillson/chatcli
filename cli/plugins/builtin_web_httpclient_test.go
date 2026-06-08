@@ -306,13 +306,12 @@ func TestWebGet_NoFallbackWhenUAOverridden(t *testing.T) {
 	}
 }
 
-func TestNeutralUserAgent_NotBrowserLike(t *testing.T) {
-	ua := neutralUserAgent()
-	if strings.Contains(ua, "Mozilla") || strings.Contains(ua, "Chrome") {
-		t.Fatalf("neutral UA must not look like a browser: %q", ua)
+func TestFallbackUserAgent_NotBrowserLike(t *testing.T) {
+	if strings.Contains(fallbackUserAgent, "Mozilla") || strings.Contains(fallbackUserAgent, "Chrome") {
+		t.Fatalf("fallback UA must not look like a browser: %q", fallbackUserAgent)
 	}
-	if !strings.HasPrefix(ua, "ChatCLI/") {
-		t.Fatalf("neutral UA should identify the tool: %q", ua)
+	if !strings.HasPrefix(fallbackUserAgent, "curl/") {
+		t.Fatalf("fallback UA should be the curl identity: %q", fallbackUserAgent)
 	}
 }
 
