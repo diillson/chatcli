@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.132.1](https://github.com/diillson/chatcli/compare/v1.132.0...v1.132.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* **webfetch:** use browser User-Agent to avoid bot blocks ([#1020](https://github.com/diillson/chatcli/issues/1020)) ([70b6f28](https://github.com/diillson/chatcli/commit/70b6f28135563a1551320e6992e8925fce1ac7e2))
+
 ## [1.132.0](https://github.com/diillson/chatcli/compare/v1.131.0...v1.132.0) (2026-06-06)
 
 
