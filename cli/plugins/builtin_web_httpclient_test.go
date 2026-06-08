@@ -243,10 +243,11 @@ func TestProxyAuthTransport_NoLeakWithoutProxy(t *testing.T) {
 }
 
 func TestWebHTTPClient_Singleton(t *testing.T) {
-	if c := webHTTPClient(); c == nil {
+	first := webHTTPClient()
+	if first == nil {
 		t.Fatal("expected non-nil client")
 	}
-	if webHTTPClient() != webHTTPClient() {
+	if second := webHTTPClient(); second != first {
 		t.Fatal("expected a stable singleton")
 	}
 }
