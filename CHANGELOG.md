@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.132.2](https://github.com/diillson/chatcli/compare/v1.132.1...v1.132.2) (2026-06-08)
+
+
+### Bug Fixes
+
+* **webfetch:** authenticate through corporate proxies with special-char credentials ([#1023](https://github.com/diillson/chatcli/issues/1023)) ([a2666ed](https://github.com/diillson/chatcli/commit/a2666ed861a44912483a34f96468b9fd4c31f399))
+
 ## [1.132.1](https://github.com/diillson/chatcli/compare/v1.132.0...v1.132.1) (2026-06-08)
 
 
