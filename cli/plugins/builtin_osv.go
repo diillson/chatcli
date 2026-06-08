@@ -256,6 +256,10 @@ func osvQuery(ctx context.Context, ecosystem, name, version string) ([]osvVuln, 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Send a stable, non-browser User-Agent so the request is predictable behind
+	// TLS-intercepting corporate gateways. This is an API call (no CDN
+	// bot-blocking to dodge), so it needs no browser UA / fallback dance.
+	req.Header.Set("User-Agent", fallbackUserAgent)
 	resp, err := osvHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
