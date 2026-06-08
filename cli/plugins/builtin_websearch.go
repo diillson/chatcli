@@ -336,7 +336,7 @@ func searchSearxNG(ctx context.Context, query string, maxResults int, baseURL st
 	req.Header.Set("User-Agent", browserUA())
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := webHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("SearxNG request failed: %w", err)
 	}
@@ -398,7 +398,7 @@ func searchDuckDuckGo(ctx context.Context, query string, maxResults int) ([]sear
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := webHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("search request failed: %w", err)
 	}

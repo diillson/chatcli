@@ -387,6 +387,18 @@ func presence(v string) string {
 	return "[SET]"
 }
 
+// firstNonEmptyEnvVal returns the value of the first set, non-blank env var
+// among names. Used to surface a setting that may be spelled upper- or
+// lower-case (e.g. HTTPS_PROXY / https_proxy) under one config line.
+func firstNonEmptyEnvVal(names ...string) string {
+	for _, n := range names {
+		if v := strings.TrimSpace(os.Getenv(n)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // getEnvFilePath retorna o caminho do arquivo .env configurado (expandido).
 func (cli *ChatCLI) getEnvFilePath() string {
 	envFilePath := os.Getenv("CHATCLI_DOTENV")
