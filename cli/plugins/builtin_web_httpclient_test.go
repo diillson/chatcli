@@ -6,10 +6,12 @@
 package plugins
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -239,6 +241,77 @@ func TestProxyAuthTransport_NoLeakWithoutProxy(t *testing.T) {
 
 	if gotAuth != "" {
 		t.Fatalf("Proxy-Authorization leaked on direct connection: %q", gotAuth)
+	}
+}
+
+// A TLS-intercepting gateway that 401s "browsers" but allows tool UAs must be
+// transparently handled: webGet retries once with the neutral UA and succeeds.
+func TestWebGet_RetriesNeutralUAOnGatewayChallenge(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv("CHATCLI_WEBFETCH_BLOCK_PRIVATE", "")
+	t.Setenv("CHATCLI_WEBFETCH_USER_AGENT", "")
+
+	var seenUAs []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua := r.Header.Get("User-Agent")
+		seenUAs = append(seenUAs, ua)
+		if strings.Contains(ua, "Mozilla") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	resp, err := webGet(context.Background(), srv.URL, nil)
+	if err != nil {
+		t.Fatalf("webGet failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 after UA fallback, got %d", resp.StatusCode)
+	}
+	if len(seenUAs) != 2 {
+		t.Fatalf("expected 2 attempts (browser then neutral), got %d: %v", len(seenUAs), seenUAs)
+	}
+	if strings.Contains(seenUAs[1], "Mozilla") {
+		t.Fatalf("retry must not use a browser UA, got %q", seenUAs[1])
+	}
+}
+
+// An explicit UA override disables the fallback — the user picked it on purpose.
+func TestWebGet_NoFallbackWhenUAOverridden(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv("CHATCLI_WEBFETCH_BLOCK_PRIVATE", "")
+	t.Setenv("CHATCLI_WEBFETCH_USER_AGENT", "Mozilla/5.0 custom")
+
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	resp, err := webGet(context.Background(), srv.URL, nil)
+	if err != nil {
+		t.Fatalf("webGet failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 passthrough, got %d", resp.StatusCode)
+	}
+	if attempts != 1 {
+		t.Fatalf("override must disable retry; expected 1 attempt, got %d", attempts)
+	}
+}
+
+func TestFallbackUserAgent_NotBrowserLike(t *testing.T) {
+	if strings.Contains(fallbackUserAgent, "Mozilla") || strings.Contains(fallbackUserAgent, "Chrome") {
+		t.Fatalf("fallback UA must not look like a browser: %q", fallbackUserAgent)
+	}
+	if !strings.HasPrefix(fallbackUserAgent, "curl/") {
+		t.Fatalf("fallback UA should be the curl identity: %q", fallbackUserAgent)
 	}
 }
 

@@ -69,6 +69,48 @@ func webHTTPClient() *http.Client {
 	return webClient
 }
 
+// fallbackUserAgent is the non-browser User-Agent used when a gateway rejects
+// the browser UA. Corporate TLS-intercepting gateways (Secure Web Gateways)
+// routinely answer a browser-looking UA with 401/407 because they expect a real
+// browser to complete an interactive SSO/portal flow, while letting plain tools
+// through. A curl identity is the most widely accepted across such gateways.
+// Overridable via CHATCLI_WEBFETCH_USER_AGENT.
+const fallbackUserAgent = "curl/8.7.1"
+
+// webGet issues a GET to url through the shared proxy/SSRF-aware client with the
+// given extra headers (User-Agent is managed here, do not pass it). It sends a
+// browser User-Agent by default so public CDNs (Cloudflare/Mintlify) don't
+// bot-block it with a 403. If the response is a gateway auth challenge
+// (401/407) — which TLS-intercepting corporate proxies return for
+// browser-looking clients — it retries ONCE with neutralUserAgent, which such
+// gateways allow through. An explicit CHATCLI_WEBFETCH_USER_AGENT disables the
+// fallback, since the user chose that UA deliberately.
+func webGet(ctx context.Context, url string, extraHeaders map[string]string) (*http.Response, error) {
+	resp, err := webGetWithUA(ctx, url, browserUA(), extraHeaders)
+	if err != nil {
+		return nil, err
+	}
+	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusProxyAuthRequired) &&
+		strings.TrimSpace(os.Getenv("CHATCLI_WEBFETCH_USER_AGENT")) == "" {
+		_ = resp.Body.Close()
+		return webGetWithUA(ctx, url, fallbackUserAgent, extraHeaders)
+	}
+	return resp, nil
+}
+
+// webGetWithUA performs a single GET with the given User-Agent and headers.
+func webGetWithUA(ctx context.Context, url, userAgent string, extraHeaders map[string]string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("User-Agent", userAgent)
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
+	return webHTTPClient().Do(req)
+}
+
 // newWebTransport builds the proxy-aware transport. The connection settings
 // mirror utils.NewHTTPClient so behavior is consistent with the LLM providers.
 func newWebTransport() *http.Transport {

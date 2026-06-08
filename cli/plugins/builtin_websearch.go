@@ -336,14 +336,9 @@ func searchSearxNG(ctx context.Context, query string, maxResults int, baseURL st
 		return nil, fmt.Errorf("refusing to query SearxNG endpoint: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", safeEndpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating SearxNG request: %w", err)
-	}
-	req.Header.Set("User-Agent", browserUA())
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := webHTTPClient().Do(req)
+	resp, err := webGet(reqCtx, safeEndpoint, map[string]string{
+		"Accept": "application/json",
+	})
 	if err != nil {
 		return nil, fmt.Errorf("SearxNG request failed: %w", err)
 	}
@@ -403,15 +398,10 @@ func searchDuckDuckGo(ctx context.Context, query string, maxResults int) ([]sear
 		return nil, fmt.Errorf("refusing to query DuckDuckGo: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", safeURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("User-Agent", browserUA())
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-
-	resp, err := webHTTPClient().Do(req)
+	resp, err := webGet(reqCtx, safeURL, map[string]string{
+		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"Accept-Language": "en-US,en;q=0.9",
+	})
 	if err != nil {
 		return nil, fmt.Errorf("search request failed: %w", err)
 	}
