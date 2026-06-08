@@ -83,7 +83,7 @@ func validateWebTarget(rawURL string) (string, error) {
 
 	host := parsed.Hostname()
 	if host == "" {
-		return "", fmt.Errorf("URL has no host")
+		return "", fmt.Errorf("missing host in URL")
 	}
 
 	if isMetadataHostname(host) {

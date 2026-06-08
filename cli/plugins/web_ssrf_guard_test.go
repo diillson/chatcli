@@ -25,7 +25,7 @@ func TestValidateWebTarget_SchemeAndHost(t *testing.T) {
 		{"file blocked", "file:///etc/passwd", "scheme"},
 		{"gopher blocked", "gopher://evil/", "scheme"},
 		{"ftp blocked", "ftp://host/", "scheme"},
-		{"no host", "https://", "no host"},
+		{"no host", "https://", "missing host"},
 		{"metadata hostname", "http://metadata.google.internal/computeMetadata/v1/", "metadata"},
 		{"instance-data", "http://instance-data/latest/", "metadata"},
 		{"literal metadata ip", "http://169.254.169.254/latest/meta-data/", "metadata/link-local"},
