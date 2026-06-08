@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.132.3](https://github.com/diillson/chatcli/compare/v1.132.2...v1.132.3) (2026-06-08)
+
+
+### Bug Fixes
+
+* **webfetch:** retry with curl User-Agent on gateway 401/407 ([#1025](https://github.com/diillson/chatcli/issues/1025)) ([065d05c](https://github.com/diillson/chatcli/commit/065d05ced96fd8ea447621eb8fb9193cf75f0e65))
+
 ## [1.132.2](https://github.com/diillson/chatcli/compare/v1.132.1...v1.132.2) (2026-06-08)
 
 
