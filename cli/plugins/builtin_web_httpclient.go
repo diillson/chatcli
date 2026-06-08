@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/version"
 	"golang.org/x/net/http/httpproxy"
 )
 
@@ -67,6 +68,54 @@ func webHTTPClient() *http.Client {
 		}
 	})
 	return webClient
+}
+
+// neutralUserAgent identifies ChatCLI as a non-browser tool. Corporate
+// TLS-intercepting gateways (Secure Web Gateways) routinely answer a
+// browser-looking User-Agent with 401/407 because they expect a real browser to
+// complete an interactive SSO/portal flow; a plain tool UA is treated as
+// non-interactive and let through — the same reason curl works on a network
+// where a spoofed Chrome UA is blocked.
+func neutralUserAgent() string {
+	v := version.Version
+	if v == "" {
+		v = "dev"
+	}
+	return "ChatCLI/" + v + " (+https://github.com/diillson/chatcli)"
+}
+
+// webGet issues a GET to url through the shared proxy/SSRF-aware client with the
+// given extra headers (User-Agent is managed here, do not pass it). It sends a
+// browser User-Agent by default so public CDNs (Cloudflare/Mintlify) don't
+// bot-block it with a 403. If the response is a gateway auth challenge
+// (401/407) — which TLS-intercepting corporate proxies return for
+// browser-looking clients — it retries ONCE with neutralUserAgent, which such
+// gateways allow through. An explicit CHATCLI_WEBFETCH_USER_AGENT disables the
+// fallback, since the user chose that UA deliberately.
+func webGet(ctx context.Context, url string, extraHeaders map[string]string) (*http.Response, error) {
+	resp, err := webGetWithUA(ctx, url, browserUA(), extraHeaders)
+	if err != nil {
+		return nil, err
+	}
+	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusProxyAuthRequired) &&
+		strings.TrimSpace(os.Getenv("CHATCLI_WEBFETCH_USER_AGENT")) == "" {
+		_ = resp.Body.Close()
+		return webGetWithUA(ctx, url, neutralUserAgent(), extraHeaders)
+	}
+	return resp, nil
+}
+
+// webGetWithUA performs a single GET with the given User-Agent and headers.
+func webGetWithUA(ctx context.Context, url, userAgent string, extraHeaders map[string]string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("User-Agent", userAgent)
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
+	return webHTTPClient().Do(req)
 }
 
 // newWebTransport builds the proxy-aware transport. The connection settings

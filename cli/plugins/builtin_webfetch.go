@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -137,15 +136,13 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 		return "", fmt.Errorf("refusing to fetch %q: %w", parsed.URL, err)
 	}
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", safeURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("User-Agent", browserUA())
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-
-	resp, err := webHTTPClient().Do(req)
+	// webGet sends a browser UA by default (avoids CDN bot-blocks) and
+	// auto-retries with a neutral tool UA on a 401/407 gateway challenge —
+	// the behavior of TLS-intercepting corporate proxies toward "browsers".
+	resp, err := webGet(reqCtx, safeURL, map[string]string{
+		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"Accept-Language": "en-US,en;q=0.9",
+	})
 	if err != nil {
 		return "", fmt.Errorf("fetching URL: %w", err)
 	}
