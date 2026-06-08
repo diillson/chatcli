@@ -731,6 +731,20 @@ func (cli *ChatCLI) showConfigResilience() {
 	kv(p, "AWS_EC2_METADATA_DISABLED", envOr("AWS_EC2_METADATA_DISABLED"))
 
 	fmt.Println(p)
+	subheader(p, "cfg.sub.resil.web_proxy")
+	// Standard proxy vars. A login:senha embedded in the URL is honored and
+	// parsed tolerantly (domain users / special-char passwords included), so we
+	// mask the value — it carries a secret.
+	kv(p, "HTTPS_PROXY", presence(firstNonEmptyEnvVal("HTTPS_PROXY", "https_proxy")))
+	kv(p, "HTTP_PROXY", presence(firstNonEmptyEnvVal("HTTP_PROXY", "http_proxy")))
+	kv(p, "NO_PROXY", envOr("NO_PROXY"))
+	// Escape hatch for non-Basic proxy auth (Negotiate/NTLM/Kerberos/Bearer).
+	kv(p, "CHATCLI_PROXY_AUTH", presence(os.Getenv("CHATCLI_PROXY_AUTH")))
+	// SSRF guard: metadata/link-local is always blocked; private/loopback only
+	// when this is enabled (web tools legitimately fetch internal services).
+	kv(p, "CHATCLI_WEBFETCH_BLOCK_PRIVATE", envBool("CHATCLI_WEBFETCH_BLOCK_PRIVATE"))
+
+	fmt.Println(p)
 	subheader(p, "cfg.sub.resil.session_state")
 	kv(p, i18n.T("cfg.kv.history_messages"), fmt.Sprintf("%d", len(cli.history)))
 	historyChars := 0

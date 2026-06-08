@@ -1834,6 +1834,7 @@
   "cfg.sub.resil.streaming": "── Streaming",
   "cfg.sub.resil.compaction": "── Compaction",
   "cfg.sub.resil.bedrock_proxy": "── Bedrock corporate proxy",
+  "cfg.sub.resil.web_proxy": "── Web tools corporate proxy (webfetch/websearch/osv)",
   "cfg.sub.resil.session_state": "── Session state",
   "cfg.sub.session.cost": "── Cost & budget",
   "cfg.sub.session.attached": "── Attached contexts",
