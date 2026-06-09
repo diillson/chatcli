@@ -92,6 +92,17 @@ type Config struct {
 	CompactionInterval int     `json:"compaction_interval_h"` // hours, default 24
 	RetrievalBudget    int     `json:"retrieval_budget"`      // max chars for system prompt, default 4000
 	DecayHalfLifeDays  float64 `json:"decay_half_life_days"`  // default 30
+
+	// Blended-ranking tunables (HyDE retrieval path). These govern how the
+	// semantic (cosine), lexical (keyword) and temporal (recency) signals are
+	// fused into a single fact ranking. Provider-agnostic by construction:
+	// cosine is computed identically for every embedding backend, so the same
+	// defaults hold whether the operator runs Voyage, OpenAI, Bedrock or any
+	// of the other supported providers.
+	MinCosineScore   float64     `json:"min_cosine_score"`   // floor for vector hits, default 0.25
+	VectorTopK       int         `json:"vector_top_k"`       // candidate vectors pulled per query, default 12
+	BackfillBatchMax int         `json:"backfill_batch_max"` // max facts embedded per retrieval, default 500
+	RankWeights      RankWeights `json:"rank_weights"`       // signal fusion weights
 }
 
 // DefaultConfig returns sensible defaults.
@@ -103,6 +114,10 @@ func DefaultConfig() Config {
 		CompactionInterval: 24,
 		RetrievalBudget:    4000,
 		DecayHalfLifeDays:  30.0,
+		MinCosineScore:     0.25,
+		VectorTopK:         12,
+		BackfillBatchMax:   500,
+		RankWeights:        DefaultRankWeights(),
 	}
 }
 

@@ -235,8 +235,12 @@ func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, 
 	// and ~50 tokens/fact average, 500 facts ≈ $0.001.
 	if m.vectors != nil && m.vectors.Enabled() {
 		all := m.Facts.GetAll()
-		if len(all) > 500 {
-			all = all[:500]
+		// Bound the per-retrieval embed batch so a cold cache can't bill an
+		// unbounded amount on a huge memory. Config-driven (was a hard-coded
+		// 500); GetAll returns highest-scoring facts first, so the cap keeps
+		// the most relevant vectors warm.
+		if batchMax := m.config.BackfillBatchMax; batchMax > 0 && len(all) > batchMax {
+			all = all[:batchMax]
 		}
 		ids := make([]string, 0, len(all))
 		for _, f := range all {

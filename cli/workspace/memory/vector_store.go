@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"sync"
 
 	"github.com/diillson/chatcli/llm/embedding"
@@ -158,9 +157,26 @@ func (v *VectorIndex) BackfillFacts(ctx context.Context, items map[string]string
 	return v.persist()
 }
 
-// SimilarFacts ranks stored entries by cosine similarity to a query
-// vector, returning the top-k fact ids. k <= 0 returns nothing.
-func (v *VectorIndex) SimilarFacts(query []float32, k int) []string {
+// ScoredFact pairs a fact id with the cosine similarity that surfaced it.
+// SimilarFactsScored returns these so the blended retriever can fuse the
+// semantic signal with lexical and temporal scores instead of discarding it.
+type ScoredFact struct {
+	ID    string
+	Score float64
+}
+
+// SimilarFactsScored ranks stored entries by cosine similarity to a query
+// vector and returns the top-k that clear minScore, strongest first.
+//
+// minScore is a relevance floor: cosine over normalized text embeddings is
+// almost always weakly positive, so the old "> 0" cutoff admitted near-orthogonal
+// noise into the candidate set. A floor around 0.25 keeps only genuinely related
+// facts. Selection uses a bounded min-heap (O(n log k)), so the cost scales with
+// k, not with the corpus size.
+//
+// k <= 0 or an empty query returns nothing. The result is deterministic across
+// platforms: ties break by ascending id, never by Go's randomized map order.
+func (v *VectorIndex) SimilarFactsScored(query []float32, k int, minScore float64) []ScoredFact {
 	if v == nil || !v.Enabled() || k <= 0 || len(query) == 0 {
 		return nil
 	}
@@ -169,30 +185,43 @@ func (v *VectorIndex) SimilarFacts(query []float32, k int) []string {
 	if len(v.entries) == 0 {
 		return nil
 	}
-	type scored struct {
-		id    string
-		score float32
-	}
-	hits := make([]scored, 0, len(v.entries))
-	for id, e := range v.entries {
+	sel := newTopKSelector(k)
+	for _, e := range v.entries {
 		if len(e.Vector) != len(query) {
 			continue
 		}
-		hits = append(hits, scored{id: id, score: embedding.CosineSimilarity(query, e.Vector)})
-	}
-	sort.Slice(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
-	if k > len(hits) {
-		k = len(hits)
-	}
-	out := make([]string, 0, k)
-	for i := 0; i < k; i++ {
-		if hits[i].score <= 0 {
-			break
+		score := float64(embedding.CosineSimilarity(query, e.Vector))
+		if score < minScore {
+			continue
 		}
-		out = append(out, hits[i].id)
+		sel.offer(e.FactID, score)
+	}
+	items := sel.sortedDesc()
+	out := make([]ScoredFact, 0, len(items))
+	for _, it := range items {
+		out = append(out, ScoredFact{ID: it.id, Score: it.score})
 	}
 	return out
 }
+
+// SimilarFacts is the id-only convenience wrapper over SimilarFactsScored,
+// kept for callers that only need the ids (e.g. the compactor). It applies a
+// minimal positive floor, matching the historical "> 0" cutoff.
+func (v *VectorIndex) SimilarFacts(query []float32, k int) []string {
+	scored := v.SimilarFactsScored(query, k, vectorScoreEpsilon)
+	if len(scored) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(scored))
+	for _, s := range scored {
+		out = append(out, s.ID)
+	}
+	return out
+}
+
+// vectorScoreEpsilon is the smallest cosine the id-only SimilarFacts admits,
+// preserving the historical "strictly positive" semantics without a config knob.
+const vectorScoreEpsilon = 1e-9
 
 // EmbedQuery delegates to the provider so the retriever can ask for
 // the query vector once and pass it to SimilarFacts.
@@ -247,18 +276,55 @@ func (v *VectorIndex) load() {
 		v.logger.Warn("vector_index unmarshal failed", zap.Error(err))
 		return
 	}
+
+	// Dimension mismatch: cosine between vectors of different arity is
+	// undefined, so the cache cannot be reused.
 	if v.dimension > 0 && f.Dimension > 0 && f.Dimension != v.dimension {
-		v.logger.Warn("vector_index dimension mismatch — discarding cache",
+		v.logger.Warn("vector_index dimension mismatch — auto-clearing cache for re-embed",
 			zap.Int("on_disk_dim", f.Dimension),
 			zap.Int("provider_dim", v.dimension),
-			zap.String("provider", v.provider.Name()))
+			zap.String("provider", v.provider.Name()),
+			zap.String("path", v.path))
+		v.discardStale()
 		return
 	}
+
+	// Provider mismatch at the SAME dimension (e.g. Voyage 1024 → Cohere 1024):
+	// cosine between two different embedding spaces is meaningless even though
+	// the arity matches, so the previous code silently served garbage matches.
+	// Detect it and re-embed rather than requiring the operator to hand-delete
+	// the file. We compare against the persisted provider name; an empty name
+	// is a pre-this-change file and is treated as a forced re-embed.
+	current := v.provider.Name()
+	if len(f.Entries) > 0 && f.Provider != current {
+		v.logger.Warn("vector_index provider changed — auto-clearing cache for re-embed",
+			zap.String("on_disk_provider", f.Provider),
+			zap.String("provider", current),
+			zap.String("path", v.path))
+		v.discardStale()
+		return
+	}
+
 	if f.Dimension > 0 {
 		v.dimension = f.Dimension
 	}
 	if f.Entries != nil {
 		v.entries = f.Entries
+	}
+}
+
+// discardStale drops the in-memory cache and removes the on-disk file so the
+// next BackfillFacts repopulates a clean, provider-consistent index. Leaving
+// the stale file in place was the old operational sharp edge — migration
+// required a manual `rm`. Removal failures are non-fatal: the in-memory reset
+// already prevents serving cross-space matches; the file is overwritten on the
+// next persist regardless.
+func (v *VectorIndex) discardStale() {
+	v.entries = make(map[string]*VectorEntry)
+	v.dimension = v.provider.Dimension()
+	if err := os.Remove(v.path); err != nil && !os.IsNotExist(err) {
+		v.logger.Warn("vector_index stale file removal failed (will be overwritten on next persist)",
+			zap.String("path", v.path), zap.Error(err))
 	}
 }
 
