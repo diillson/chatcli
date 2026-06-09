@@ -259,32 +259,30 @@ func (r *RemediationReconciler) executeAdjustHPA(ctx context.Context, resource p
 	modified := false
 
 	if minStr, ok := params["minReplicas"]; ok {
-		min, err := strconv.Atoi(minStr)
+		min32, err := parseInt32(minStr)
 		if err != nil {
 			return fmt.Errorf("invalid minReplicas %q: %w", minStr, err)
 		}
-		min32 := int32(min)
 		targetHPA.Spec.MinReplicas = &min32
 		modified = true
-		logger.Info("Adjusting HPA minReplicas", "hpa", targetHPA.Name, "min", min)
+		logger.Info("Adjusting HPA minReplicas", "hpa", targetHPA.Name, "min", min32)
 	}
 
 	if maxStr, ok := params["maxReplicas"]; ok {
-		max, err := strconv.Atoi(maxStr)
+		max32, err := parseInt32(maxStr)
 		if err != nil {
 			return fmt.Errorf("invalid maxReplicas %q: %w", maxStr, err)
 		}
-		targetHPA.Spec.MaxReplicas = int32(max)
+		targetHPA.Spec.MaxReplicas = max32
 		modified = true
-		logger.Info("Adjusting HPA maxReplicas", "hpa", targetHPA.Name, "max", max)
+		logger.Info("Adjusting HPA maxReplicas", "hpa", targetHPA.Name, "max", max32)
 	}
 
 	if targetStr, ok := params["targetCPUUtilization"]; ok {
-		target, err := strconv.Atoi(targetStr)
+		target32, err := parseInt32(targetStr)
 		if err != nil {
 			return fmt.Errorf("invalid targetCPUUtilization %q: %w", targetStr, err)
 		}
-		target32 := int32(target)
 		// Find or create CPU metric
 		found := false
 		for i := range targetHPA.Spec.Metrics {
@@ -671,11 +669,10 @@ func (r *RemediationReconciler) executeUpdateIngress(ctx context.Context, resour
 
 	// Update backend port
 	if portStr, ok := params["backendPort"]; ok {
-		port, err := strconv.Atoi(portStr)
+		port32, err := parseInt32(portStr)
 		if err != nil {
 			return fmt.Errorf("invalid backendPort %q: %w", portStr, err)
 		}
-		port32 := int32(port)
 		for i := range ingress.Spec.Rules {
 			if ingress.Spec.Rules[i].HTTP != nil {
 				for j := range ingress.Spec.Rules[i].HTTP.Paths {
@@ -734,7 +731,7 @@ func (r *RemediationReconciler) executePatchNetworkPolicy(ctx context.Context, r
 
 	// Allow adding specific ports
 	if portStr, ok := params["allowPort"]; ok {
-		port, err := strconv.Atoi(portStr)
+		portVal, err := parseInt32(portStr)
 		if err != nil {
 			return fmt.Errorf("invalid port %q: %w", portStr, err)
 		}
@@ -744,7 +741,6 @@ func (r *RemediationReconciler) executePatchNetworkPolicy(ctx context.Context, r
 			protocol = corev1.ProtocolUDP
 		}
 
-		portVal := int32(port)
 		newPort := networkingv1.NetworkPolicyPort{
 			Protocol: &protocol,
 			Port:     &intstr.IntOrString{IntVal: portVal},
@@ -971,7 +967,7 @@ func (r *RemediationReconciler) executeScaleStatefulSet(ctx context.Context, res
 	if !ok {
 		return fmt.Errorf("missing 'replicas' param")
 	}
-	replicas, err := strconv.Atoi(replicasStr)
+	r32, err := parseInt32(replicasStr)
 	if err != nil {
 		return fmt.Errorf("invalid replicas value %q: %w", replicasStr, err)
 	}
@@ -981,7 +977,6 @@ func (r *RemediationReconciler) executeScaleStatefulSet(ctx context.Context, res
 		return fmt.Errorf("failed to get StatefulSet %s/%s: %w", resource.Namespace, resource.Name, err)
 	}
 
-	r32 := int32(replicas)
 	sts.Spec.Replicas = &r32
 	return r.Update(ctx, &sts)
 }
@@ -1148,7 +1143,7 @@ func (r *RemediationReconciler) executePartitionStatefulSetUpdate(ctx context.Co
 	if !ok {
 		return fmt.Errorf("missing 'partition' param")
 	}
-	partition, err := strconv.Atoi(partitionStr)
+	p32, err := parseInt32(partitionStr)
 	if err != nil {
 		return fmt.Errorf("invalid partition value %q: %w", partitionStr, err)
 	}
@@ -1163,14 +1158,13 @@ func (r *RemediationReconciler) executePartitionStatefulSetUpdate(ctx context.Co
 	if sts.Spec.Replicas != nil {
 		desired = *sts.Spec.Replicas
 	}
-	if int32(partition) < 0 || int32(partition) >= desired {
-		return fmt.Errorf("partition (%d) must be >= 0 and < replicas (%d)", partition, desired)
+	if p32 < 0 || p32 >= desired {
+		return fmt.Errorf("partition (%d) must be >= 0 and < replicas (%d)", p32, desired)
 	}
 
 	if sts.Spec.UpdateStrategy.RollingUpdate == nil {
 		sts.Spec.UpdateStrategy.RollingUpdate = &appsv1.RollingUpdateStatefulSetStrategy{}
 	}
-	p32 := int32(partition)
 	sts.Spec.UpdateStrategy.RollingUpdate.Partition = &p32
 	sts.Spec.UpdateStrategy.Type = appsv1.RollingUpdateStatefulSetStrategyType
 
@@ -1471,8 +1465,8 @@ func (r *RemediationReconciler) executeAdjustJobParallelism(ctx context.Context,
 	if !ok {
 		return fmt.Errorf("missing 'parallelism' param")
 	}
-	p, err := strconv.Atoi(pStr)
-	if err != nil || p < 1 {
+	p32, err := parseInt32(pStr)
+	if err != nil || p32 < 1 {
 		return fmt.Errorf("invalid parallelism %q: must be >= 1", pStr)
 	}
 
@@ -1481,7 +1475,6 @@ func (r *RemediationReconciler) executeAdjustJobParallelism(ctx context.Context,
 		return fmt.Errorf("failed to get Job: %w", err)
 	}
 
-	p32 := int32(p)
 	job.Spec.Parallelism = &p32
 	return r.Update(ctx, &job)
 }
@@ -1510,8 +1503,8 @@ func (r *RemediationReconciler) executeAdjustJobBackoffLimit(ctx context.Context
 	if !ok {
 		return fmt.Errorf("missing 'backoffLimit' param")
 	}
-	b, err := strconv.Atoi(bStr)
-	if err != nil || b < 0 {
+	b32, err := parseInt32(bStr)
+	if err != nil || b32 < 0 {
 		return fmt.Errorf("invalid backoffLimit %q: must be >= 0", bStr)
 	}
 
@@ -1520,7 +1513,6 @@ func (r *RemediationReconciler) executeAdjustJobBackoffLimit(ctx context.Context
 		return fmt.Errorf("failed to get Job: %w", err)
 	}
 
-	b32 := int32(b)
 	job.Spec.BackoffLimit = &b32
 	return r.Update(ctx, &job)
 }
@@ -1676,20 +1668,18 @@ func (r *RemediationReconciler) executeAdjustCronJobHistory(ctx context.Context,
 
 	modified := false
 	if sStr, ok := params["successfulJobsHistoryLimit"]; ok {
-		s, err := strconv.Atoi(sStr)
-		if err != nil || s < 0 {
+		s32, err := parseInt32(sStr)
+		if err != nil || s32 < 0 {
 			return fmt.Errorf("invalid successfulJobsHistoryLimit %q: must be >= 0", sStr)
 		}
-		s32 := int32(s)
 		cj.Spec.SuccessfulJobsHistoryLimit = &s32
 		modified = true
 	}
 	if fStr, ok := params["failedJobsHistoryLimit"]; ok {
-		f, err := strconv.Atoi(fStr)
-		if err != nil || f < 0 {
+		f32, err := parseInt32(fStr)
+		if err != nil || f32 < 0 {
 			return fmt.Errorf("invalid failedJobsHistoryLimit %q: must be >= 0", fStr)
 		}
-		f32 := int32(f)
 		cj.Spec.FailedJobsHistoryLimit = &f32
 		modified = true
 	}

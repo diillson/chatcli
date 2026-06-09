@@ -224,7 +224,10 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		if role == "" {
 			role = "-"
 		}
-		log.Printf("[REST] %s %s %d %s role=%s",
+		// %q on the request-controlled fields escapes control characters so
+		// a crafted path cannot forge extra log lines. gosec's taint pass
+		// has no sanitizer model for fmt quoting, hence the annotation.
+		log.Printf("[REST] %q %q %d %s role=%s", // #nosec G706 -- method and path are %q-escaped above
 			r.Method, r.URL.Path, sc.statusCode, duration.Round(time.Microsecond), role)
 	})
 }

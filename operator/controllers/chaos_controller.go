@@ -147,7 +147,7 @@ func (r *ChaosReconciler) reconcilePending(ctx context.Context, exp *platformv1a
 			return ctrl.Result{}, fmt.Errorf("counting healthy pods: %w", err)
 		}
 		killCount := r.getParamInt(exp.Spec.Parameters, "count", 1)
-		remainingHealthy := healthyPods - int32(killCount)
+		remainingHealthy := healthyPods - clampInt32(killCount)
 		if remainingHealthy < exp.Spec.SafetyChecks.MinHealthyPods {
 			return r.transitionToFailed(ctx, exp, fmt.Sprintf(
 				"safety check failed: killing %d pods would leave %d healthy (min required: %d, total: %d)",
@@ -316,7 +316,7 @@ func (r *ChaosReconciler) executePodKill(ctx context.Context, exp *platformv1alp
 		}
 	}
 
-	exp.Status.PodsAffected = int32(len(selected))
+	exp.Status.PodsAffected = clampInt32(len(selected))
 	chaosPodsAffectedTotal.WithLabelValues(string(platformv1alpha1.ChaosTypePodKill)).Add(float64(len(selected)))
 	return nil
 }
@@ -347,7 +347,7 @@ func (r *ChaosReconciler) executePodFailure(ctx context.Context, exp *platformv1
 		}
 	}
 
-	exp.Status.PodsAffected = int32(len(selected))
+	exp.Status.PodsAffected = clampInt32(len(selected))
 	chaosPodsAffectedTotal.WithLabelValues(string(platformv1alpha1.ChaosTypePodFailure)).Add(float64(len(selected)))
 	return nil
 }
@@ -437,7 +437,7 @@ func (r *ChaosReconciler) executeNetworkDelay(ctx context.Context, exp *platform
 		logger.Info("annotated pod for network delay", "pod", pod.Name, "latency", latencyMs+"ms")
 	}
 
-	exp.Status.PodsAffected = int32(len(pods))
+	exp.Status.PodsAffected = clampInt32(len(pods))
 	chaosPodsAffectedTotal.WithLabelValues(string(platformv1alpha1.ChaosTypeNetworkDelay)).Add(float64(len(pods)))
 	return nil
 }
@@ -473,7 +473,7 @@ func (r *ChaosReconciler) executeNetworkLoss(ctx context.Context, exp *platformv
 		logger.Info("annotated pod for network loss", "pod", pod.Name, "percent", percent+"%")
 	}
 
-	exp.Status.PodsAffected = int32(len(pods))
+	exp.Status.PodsAffected = clampInt32(len(pods))
 	chaosPodsAffectedTotal.WithLabelValues(string(platformv1alpha1.ChaosTypeNetworkLoss)).Add(float64(len(pods)))
 	return nil
 }
@@ -948,7 +948,7 @@ func (r *ChaosReconciler) countHealthyPods(ctx context.Context, target platformv
 			healthy++
 		}
 	}
-	return healthy, int32(len(pods)), nil
+	return healthy, clampInt32(len(pods)), nil
 }
 
 // chaosPodReady checks if a pod has the Ready condition set to True.

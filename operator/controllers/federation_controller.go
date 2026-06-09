@@ -173,8 +173,8 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	cr.Status.Connected = true
 	cr.Status.LastHealthCheck = &now
 	cr.Status.KubernetesVersion = kubeVersion
-	cr.Status.NodeCount = int32(len(nodeList.Items))
-	cr.Status.NamespaceCount = int32(len(nsList.Items))
+	cr.Status.NodeCount = clampInt32(len(nodeList.Items))
+	cr.Status.NamespaceCount = clampInt32(len(nsList.Items))
 	cr.Status.ActiveIssues = activeIssues
 	cr.Status.ActiveRemediations = activeRemediations
 

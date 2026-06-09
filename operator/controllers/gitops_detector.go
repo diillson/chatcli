@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,7 +139,7 @@ func (g *GitOpsDetector) detectHelmRelease(ctx context.Context, resource platfor
 
 		rev := 0
 		if revStr, ok := s.Labels["version"]; ok {
-			fmt.Sscanf(revStr, "%d", &rev)
+			rev = leadingInt(revStr)
 		}
 
 		candidates = append(candidates, releaseEntry{
@@ -419,7 +420,9 @@ func (g *GitOpsDetector) ExecuteHelmRollback(ctx context.Context, resource platf
 
 	targetRevision := release.PreviousRevision
 	if rev, ok := params["revision"]; ok {
-		fmt.Sscanf(rev, "%d", &targetRevision)
+		if v, err := strconv.Atoi(strings.TrimSpace(rev)); err == nil {
+			targetRevision = v
+		}
 	}
 
 	// Find the target revision secret

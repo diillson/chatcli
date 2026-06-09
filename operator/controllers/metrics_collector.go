@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -250,9 +251,8 @@ func (mc *MetricsCollector) queryRange(ctx context.Context, query string, start,
 				ts, ok1 := val[0].(float64)
 				valStr, ok2 := val[1].(string)
 				if ok1 && ok2 {
-					var v float64
-					fmt.Sscanf(valStr, "%f", &v)
-					if !math.IsNaN(v) && !math.IsInf(v, 0) {
+					v, err := strconv.ParseFloat(strings.TrimSpace(valStr), 64)
+					if err == nil && !math.IsNaN(v) && !math.IsInf(v, 0) {
 						series.DataPoints = append(series.DataPoints, MetricDataPoint{
 							Timestamp: time.Unix(int64(ts), 0),
 							Value:     v,
