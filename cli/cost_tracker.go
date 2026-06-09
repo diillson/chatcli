@@ -458,10 +458,21 @@ func claudePricing(model string) (float64, float64, bool) {
 		return 0, 0, false
 	}
 	switch {
+	case strings.Contains(model, "fable"):
+		// Fable 5: $10/$50 per MTok (tier above Opus).
+		return 10.0, 50.0, true
+	case strings.Contains(model, "opus-4-5"), strings.Contains(model, "opus-4-6"),
+		strings.Contains(model, "opus-4-7"), strings.Contains(model, "opus-4-8"):
+		// Opus 4.5 onward dropped to $5/$25 per MTok; the 1M context on
+		// 4.6+ carries no long-context premium.
+		return 5.0, 25.0, true
 	case strings.Contains(model, "opus"):
+		// Opus 3 / 4.0 / 4.1 legacy pricing.
 		return 15.0, 75.0, true
 	case strings.Contains(model, "sonnet"):
 		return 3.0, 15.0, true
+	case strings.Contains(model, "haiku-4-5"):
+		return 1.0, 5.0, true
 	case strings.Contains(model, "haiku"):
 		return 0.25, 1.25, true
 	}

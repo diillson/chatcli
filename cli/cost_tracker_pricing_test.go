@@ -16,9 +16,16 @@ func TestGetModelPricing(t *testing.T) {
 		wantIn, wantOut float64
 	}{
 		// Anthropic
-		{"claude opus", "CLAUDEAI", "claude-3-opus", 15.0, 75.0},
+		{"claude fable 5", "CLAUDEAI", "claude-fable-5", 10.0, 50.0},
+		{"claude opus 4.8", "CLAUDEAI", "claude-opus-4-8", 5.0, 25.0},
+		{"claude opus 4.7", "CLAUDEAI", "claude-opus-4-7", 5.0, 25.0},
+		{"claude opus 4.6 bedrock id", "BEDROCK", "global.anthropic.claude-opus-4-6-20260115-v1:0", 5.0, 25.0},
+		{"claude opus 4.5", "CLAUDEAI", "claude-opus-4-5", 5.0, 25.0},
+		{"claude opus legacy", "CLAUDEAI", "claude-3-opus", 15.0, 75.0},
+		{"claude opus 4.1 legacy", "CLAUDEAI", "claude-opus-4-1", 15.0, 75.0},
 		{"claude sonnet", "CLAUDEAI", "claude-sonnet-4-6", 3.0, 15.0},
-		{"claude haiku", "CLAUDEAI", "claude-3-haiku", 0.25, 1.25},
+		{"claude haiku 4.5", "CLAUDEAI", "claude-haiku-4-5", 1.0, 5.0},
+		{"claude haiku legacy", "CLAUDEAI", "claude-3-haiku", 0.25, 1.25},
 
 		// OpenAI — specific before generic.
 		{"gpt-4o-mini before gpt-4o", "OPENAI", "gpt-4o-mini", 0.15, 0.60},
