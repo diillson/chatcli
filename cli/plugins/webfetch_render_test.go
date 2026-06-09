@@ -86,6 +86,14 @@ func TestResolveRenderBrowser_InstallHintWithoutAnyBrowser(t *testing.T) {
 	}
 }
 
+func TestResolveRenderBrowser_RelativeOverrideRejected(t *testing.T) {
+	t.Setenv("CHATCLI_WEBFETCH_RENDER_BROWSER", "chrome-in-cwd/../bin/chrome")
+	_, ok, err := resolveRenderBrowser()
+	if ok || err == nil || !strings.Contains(err.Error(), "absolute path") {
+		t.Fatalf("relative override must be rejected with the absolute-path hint, got ok=%v err=%v", ok, err)
+	}
+}
+
 func TestResolveRenderBrowser_ExplicitOverrideWins(t *testing.T) {
 	fake := t.TempDir() + "/my-chromium"
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\n"), 0o755); err != nil {

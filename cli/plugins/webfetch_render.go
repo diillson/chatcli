@@ -44,6 +44,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -125,6 +126,13 @@ func effectiveRenderMode(callFlag string) string {
 // with ok=true means "let rod download its pinned snapshot".
 func resolveRenderBrowser() (bin string, ok bool, err error) {
 	if explicit := strings.TrimSpace(os.Getenv("CHATCLI_WEBFETCH_RENDER_BROWSER")); explicit != "" {
+		// Canonicalize and require an absolute path: the override names one
+		// specific binary, so relative segments (PATH ambiguity, ../
+		// traversal) are rejected rather than resolved.
+		explicit = filepath.Clean(explicit)
+		if !filepath.IsAbs(explicit) {
+			return "", false, fmt.Errorf("render browser override %q must be an absolute path (check CHATCLI_WEBFETCH_RENDER_BROWSER)", explicit)
+		}
 		if _, statErr := os.Stat(explicit); statErr != nil {
 			return "", false, fmt.Errorf("render browser override %q is not accessible (check CHATCLI_WEBFETCH_RENDER_BROWSER): %w", explicit, statErr)
 		}
