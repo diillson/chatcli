@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+// stubNoSystemBrowser makes browser resolution behave like a host with no
+// Chromium anywhere: rod lookup stubbed out and fallback candidates
+// emptied, restored on cleanup.
+func stubNoSystemBrowser(t *testing.T) {
+	t.Helper()
+	prevLookup := systemBrowserLookup
+	prevCandidates := fallbackBrowserCandidates
+	systemBrowserLookup = func() (string, bool) { return "", false }
+	fallbackBrowserCandidates = nil
+	t.Cleanup(func() {
+		systemBrowserLookup = prevLookup
+		fallbackBrowserCandidates = prevCandidates
+	})
+}
+
 func TestRenderSession_CooldownGate(t *testing.T) {
 	s := &renderSession{cooldownUntil: time.Now().Add(time.Minute)}
 	if _, err := s.acquire(); err == nil || !strings.Contains(err.Error(), "suspended") {
@@ -52,13 +67,13 @@ func TestRenderSession_MissingBrowserDoesNotTripBreaker(t *testing.T) {
 }
 
 func TestResolveRenderBrowser_InstallHintWithoutAnyBrowser(t *testing.T) {
-	// No override, empty PATH and no fallback hit → the install hint must
-	// mention every recovery path the user has.
+	// No override, no system browser, no fallback hit → the install hint
+	// must mention every recovery path the user has. The system lookup is
+	// stubbed because rod probes absolute install paths (CI runners ship
+	// Chrome) and cannot be neutralized through the environment.
+	stubNoSystemBrowser(t)
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("CHATCLI_WEBFETCH_RENDER_AUTOPROVISION", "")
-	prev := fallbackBrowserCandidates
-	fallbackBrowserCandidates = nil
-	t.Cleanup(func() { fallbackBrowserCandidates = prev })
 
 	_, ok, err := resolveRenderBrowser()
 	if ok {

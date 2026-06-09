@@ -85,7 +85,7 @@ const (
 
 // webRenderMode resolves CHATCLI_WEBFETCH_RENDER (auto|always|never).
 // Unknown values collapse to auto so a typo degrades to the default
-// behaviour instead of silently disabling the feature.
+// behavior instead of silently disabling the feature.
 func webRenderMode() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_WEBFETCH_RENDER"))) {
 	case renderModeAlways, "on", "force":
@@ -126,11 +126,11 @@ func effectiveRenderMode(callFlag string) string {
 func resolveRenderBrowser() (bin string, ok bool, err error) {
 	if explicit := strings.TrimSpace(os.Getenv("CHATCLI_WEBFETCH_RENDER_BROWSER")); explicit != "" {
 		if _, statErr := os.Stat(explicit); statErr != nil {
-			return "", false, fmt.Errorf("CHATCLI_WEBFETCH_RENDER_BROWSER points to %q but it is not accessible: %w", explicit, statErr)
+			return "", false, fmt.Errorf("render browser override %q is not accessible (check CHATCLI_WEBFETCH_RENDER_BROWSER): %w", explicit, statErr)
 		}
 		return explicit, true, nil
 	}
-	if path, found := launcher.LookPath(); found {
+	if path, found := systemBrowserLookup(); found {
 		return path, true, nil
 	}
 	if path, found := lookupFallbackBrowser(); found {
@@ -142,6 +142,12 @@ func resolveRenderBrowser() (bin string, ok bool, err error) {
 	return "", false, fmt.Errorf(
 		"no Chrome/Chromium/Edge found for JS rendering: install one, point CHATCLI_WEBFETCH_RENDER_BROWSER at a Chromium-based binary, or set CHATCLI_WEBFETCH_RENDER_AUTOPROVISION=true to let chatcli download a pinned Chromium (~150 MB, one time)")
 }
+
+// systemBrowserLookup locates a rod-known system browser. A variable so
+// tests can simulate hosts with no browser installed — rod's LookPath
+// probes absolute install paths, not just PATH, so it cannot be
+// neutralized through the environment.
+var systemBrowserLookup = launcher.LookPath
 
 // fallbackBrowserCandidates lists Chromium-based browsers rod's LookPath
 // misses. Bare names are resolved via PATH; absolute paths via stat.
