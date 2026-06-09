@@ -90,12 +90,16 @@ type APIServer struct {
 	watcherBridge WatcherDedupInvalidator // optional, for dedup invalidation on manual resolve
 }
 
+// authHeaderName is the HTTP header clients use to present their API key.
+// This is the header NAME, not a credential.
+const authHeaderName = "X-API-Key"
+
 // NewAPIServer creates a new APIServer.
 func NewAPIServer(c client.Client, addr string) *APIServer {
 	return &APIServer{
 		client:       c,
 		listenAddr:   addr,
-		apiKeyHeader: "X-API-Key",
+		apiKeyHeader: authHeaderName,
 		apiKeys:      make(map[string]string),
 		limiter:      newRateLimiter(30), // Security (M3): 30 requests/minute (reduced from 100)
 		corsOrigin:   "",                 // Security (H6): deny-all CORS by default
@@ -166,7 +170,9 @@ func (s *APIServer) Start(ctx context.Context) error {
 	// Graceful shutdown.
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// The lifecycle ctx is already canceled here; WithoutCancel keeps
+		// its values while giving the shutdown its own fresh deadline.
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			log.Printf("[REST] shutdown error: %v", err)

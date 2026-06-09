@@ -638,7 +638,7 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 	if maxSteps == 0 {
 		maxSteps = defaultAgenticMaxSteps
 	}
-	currentStep := int32(len(plan.Spec.AgenticHistory)) + 1
+	currentStep := clampInt32(len(plan.Spec.AgenticHistory)) + 1
 
 	if res, terminal, err := r.applyAgenticSafetyGuards(ctx, plan, maxSteps, currentStep); terminal {
 		return res, err
@@ -819,7 +819,7 @@ func (r *RemediationReconciler) handleAgenticResolved(ctx context.Context, plan 
 	now := metav1.Now()
 	plan.Status.State = platformv1alpha1.RemediationStateVerifying
 	plan.Status.ActionsCompletedAt = &now
-	plan.Status.AgenticStepCount = int32(len(plan.Spec.AgenticHistory))
+	plan.Status.AgenticStepCount = clampInt32(len(plan.Spec.AgenticHistory))
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, r.Status().Update(ctx, plan)
 }
 
@@ -890,7 +890,7 @@ func (r *RemediationReconciler) runAgenticAction(ctx context.Context, resource p
 // AgenticStartedAt are set AFTER the spec write. Returns a non-zero Requeue
 // on conflict so the controller manager retries.
 func (r *RemediationReconciler) persistAgenticStep(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
-	agenticStepCount := int32(len(plan.Spec.AgenticHistory))
+	agenticStepCount := clampInt32(len(plan.Spec.AgenticHistory))
 	needStartedAt := plan.Status.AgenticStartedAt == nil
 
 	if err := r.Update(ctx, plan); err != nil {
@@ -969,7 +969,7 @@ func (r *RemediationReconciler) rejectDivergentAgenticAction(ctx context.Context
 		Timestamp:   metav1.Now(),
 	})
 
-	agenticStepCount := int32(len(plan.Spec.AgenticHistory))
+	agenticStepCount := clampInt32(len(plan.Spec.AgenticHistory))
 	needStartedAt := plan.Status.AgenticStartedAt == nil
 	if err := r.Update(ctx, plan); err != nil {
 		if errors.IsConflict(err) {
@@ -994,7 +994,7 @@ func (r *RemediationReconciler) executeScaleDeployment(ctx context.Context, reso
 	if !ok {
 		return fmt.Errorf("missing 'replicas' param")
 	}
-	replicas, err := strconv.Atoi(replicasStr)
+	r32, err := parseInt32(replicasStr)
 	if err != nil {
 		return fmt.Errorf("invalid replicas value %q: %w", replicasStr, err)
 	}
@@ -1004,7 +1004,6 @@ func (r *RemediationReconciler) executeScaleDeployment(ctx context.Context, reso
 		return fmt.Errorf("failed to get deployment %s/%s: %w", resource.Namespace, resource.Name, err)
 	}
 
-	r32 := int32(replicas)
 	deploy.Spec.Replicas = &r32
 	return r.Update(ctx, &deploy)
 }
@@ -1037,7 +1036,7 @@ func (r *RemediationReconciler) executeRollbackDeployment(ctx context.Context, r
 			if ref.Kind == "Deployment" && ref.Name == resource.Name {
 				rev := 0
 				if revStr, ok := rs.Annotations["deployment.kubernetes.io/revision"]; ok {
-					fmt.Sscanf(revStr, "%d", &rev)
+					rev = leadingInt(revStr)
 				}
 				owned = append(owned, rsInfo{revision: rev, rs: *rs})
 				break

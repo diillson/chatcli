@@ -250,7 +250,7 @@ func CalculateBlastRadius(
 			); err != nil {
 				return nil, fmt.Errorf("listing pods: %w", err)
 			}
-			affectedPods = int32(len(podList.Items))
+			affectedPods = clampInt32(len(podList.Items))
 
 			// Find services that select these pods
 			var serviceList corev1.ServiceList

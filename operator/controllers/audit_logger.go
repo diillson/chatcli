@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -46,7 +47,14 @@ func NewOperatorAuditLogger(zapLogger *zap.Logger) *OperatorAuditLogger {
 	}
 
 	if path := os.Getenv("CHATCLI_AUDIT_LOG_PATH"); path != "" {
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		// Operator-config path: canonicalize and require absolute so a
+		// relative value cannot traverse out of the intended log location.
+		path = filepath.Clean(path)
+		if !filepath.IsAbs(path) {
+			zapLogger.Error("CHATCLI_AUDIT_LOG_PATH must be an absolute path", zap.String("path", path))
+			return al
+		}
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 G703 -- operator-supplied absolute path, cleaned above
 		if err != nil {
 			zapLogger.Error("failed to open operator audit log file", zap.String("path", path), zap.Error(err))
 		} else {
@@ -142,9 +150,14 @@ func (al *OperatorAuditLogger) LogAPIAccess(method, path, clientIP, role, result
 	})
 }
 
-// Close shuts down the file writer.
+// Close shuts down the file writer. A flush failure is logged so a
+// truncated audit trail is surfaced instead of silently losing the
+// tail of the log.
 func (al *OperatorAuditLogger) Close() {
-	if al.fileWriter != nil {
-		al.fileWriter.Close()
+	if al.fileWriter == nil {
+		return
+	}
+	if err := al.fileWriter.Close(); err != nil {
+		al.zapLogger.Error("failed to close operator audit log file", zap.Error(err))
 	}
 }

@@ -191,8 +191,12 @@ func (bp *BlastRadiusPredictor) predictScaleImpact(ctx context.Context, resource
 	if !ok {
 		return
 	}
-	var target int32
-	fmt.Sscanf(replicasStr, "%d", &target)
+	target, err := parseInt32(replicasStr)
+	if err != nil {
+		prediction.Warnings = append(prediction.Warnings,
+			fmt.Sprintf("unparseable replicas %q; scale impact not predicted", replicasStr))
+		return
+	}
 
 	var deploy appsv1.Deployment
 	if err := bp.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &deploy); err != nil {
@@ -291,8 +295,12 @@ func (bp *BlastRadiusPredictor) predictScaleStatefulSetImpact(ctx context.Contex
 	if !ok {
 		return
 	}
-	var target int32
-	fmt.Sscanf(replicasStr, "%d", &target)
+	target, err := parseInt32(replicasStr)
+	if err != nil {
+		prediction.Warnings = append(prediction.Warnings,
+			fmt.Sprintf("unparseable replicas %q; scale impact not predicted", replicasStr))
+		return
+	}
 
 	var sts appsv1.StatefulSet
 	if err := bp.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &sts); err != nil {
@@ -414,10 +422,13 @@ func (bp *BlastRadiusPredictor) predictNodeImpact(ctx context.Context, res platf
 
 func (bp *BlastRadiusPredictor) predictHPAAdjustImpact(ctx context.Context, resource platformv1alpha1.ResourceRef, params map[string]string, prediction *BlastRadiusPrediction) {
 	if maxStr, ok := params["maxReplicas"]; ok {
-		var max int32
-		fmt.Sscanf(maxStr, "%d", &max)
-		prediction.Warnings = append(prediction.Warnings,
-			fmt.Sprintf("Adjusting HPA maxReplicas to %d — ensure cluster has capacity", max))
+		if maxReplicas, err := parseInt32(maxStr); err == nil {
+			prediction.Warnings = append(prediction.Warnings,
+				fmt.Sprintf("Adjusting HPA maxReplicas to %d — ensure cluster has capacity", maxReplicas))
+		} else {
+			prediction.Warnings = append(prediction.Warnings,
+				fmt.Sprintf("unparseable maxReplicas %q; capacity impact unknown", maxStr))
+		}
 	}
 }
 

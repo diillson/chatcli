@@ -553,7 +553,7 @@ func (r *ApprovalReconciler) isWithinChangeWindow(cw *platformv1alpha1.ChangeWin
 	}
 
 	// Check if current hour is within window
-	currentHour := int32(now.Hour())
+	currentHour := clampInt32(now.Hour())
 	if cw.StartHour <= cw.EndHour {
 		// Same day window: e.g., 09-17
 		return currentHour >= cw.StartHour && currentHour < cw.EndHour, nil

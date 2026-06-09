@@ -729,7 +729,7 @@ func (r *NotificationReconciler) handleEscalationTimer(ctx context.Context, issu
 	r.sendEscalationNotification(ctx, issue, &policy, nextLevel)
 
 	// Update active escalation on the policy status.
-	if err := r.recordActiveEscalation(ctx, &policy, issue, int32(nextLevel)); err != nil {
+	if err := r.recordActiveEscalation(ctx, &policy, issue, clampInt32(nextLevel)); err != nil {
 		logger.Error(err, "failed to record active escalation")
 	}
 

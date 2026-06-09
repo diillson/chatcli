@@ -1192,7 +1192,9 @@ func (r *IssueReconciler) handleEscalated(ctx context.Context, issue *platformv1
 	r.invalidateDedup(issue)
 
 	if r.AuditRecorder != nil {
-		r.AuditRecorder.RecordIssueResolved(ctx, issue)
+		if err := r.AuditRecorder.RecordIssueResolved(ctx, issue); err != nil {
+			log.Error(err, "Failed to record issue resolution in audit trail", "name", issue.Name)
+		}
 	}
 
 	issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateResolved)).Inc()
@@ -1440,7 +1442,7 @@ func planActionTimestamp(plan *platformv1alpha1.RemediationPlan, now metav1.Time
 // planActionOutcome returns (result, detail) for a plan action by index.
 func planActionOutcome(action platformv1alpha1.RemediationAction, idx int, plan *platformv1alpha1.RemediationPlan) (string, string) {
 	for _, cp := range plan.Status.ActionCheckpoints {
-		if cp.ActionIndex == int32(idx) && !cp.Success {
+		if cp.ActionIndex == clampInt32(idx) && !cp.Success {
 			return "failed", fmt.Sprintf("Action %s failed", action.Type)
 		}
 	}
@@ -1769,7 +1771,7 @@ func (r *IssueReconciler) buildTrendingInfo(ctx context.Context, issue *platform
 	}
 
 	return &platformv1alpha1.TrendingInfo{
-		OccurrenceCount:    int32(len(related)) + 1, // +1 for current
+		OccurrenceCount:    clampInt32(len(related)) + 1, // +1 for current
 		WindowDays:         windowDays,
 		RelatedPostMortems: related,
 		Pattern:            fmt.Sprintf("Recurring %s on %s/%s (%d occurrences in %d days)", issue.Spec.SignalType, issue.Spec.Resource.Kind, issue.Spec.Resource.Name, len(related)+1, windowDays),

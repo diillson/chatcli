@@ -114,7 +114,7 @@ func (e *RCAEnricher) findDeploymentChanges(ctx context.Context, resource platfo
 			if ref.Kind == "Deployment" && ref.Name == resource.Name {
 				rev := 0
 				if revStr, ok := rs.Annotations["deployment.kubernetes.io/revision"]; ok {
-					fmt.Sscanf(revStr, "%d", &rev)
+					rev = leadingInt(revStr)
 				}
 				owned = append(owned, rsInfo{revision: rev, rs: *rs})
 				break

@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -50,7 +51,9 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 	defer sc.mu.Unlock()
 
 	if sc.conn != nil {
-		sc.conn.Close()
+		// Best-effort teardown of the previous connection before dialing a
+		// new one; a close error on a stale conn is not actionable here.
+		_ = sc.conn.Close()
 	}
 
 	var dialOpts []grpc.DialOption
@@ -70,7 +73,13 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 		}
 		tlsCfg.RootCAs = certPool
 	} else if caCertPath := os.Getenv("CHATCLI_GRPC_TLS_CA"); caCertPath != "" {
-		caCert, err := os.ReadFile(caCertPath)
+		// Operator-config path: canonicalize and require absolute so a
+		// relative value cannot resolve against an unexpected working dir.
+		caCertPath = filepath.Clean(caCertPath)
+		if !filepath.IsAbs(caCertPath) {
+			return fmt.Errorf("CHATCLI_GRPC_TLS_CA must be an absolute path, got %q", caCertPath)
+		}
+		caCert, err := os.ReadFile(caCertPath) // #nosec G304 G703 -- operator-supplied absolute path, cleaned above
 		if err != nil {
 			return fmt.Errorf("failed to read CA cert from %s: %w", caCertPath, err)
 		}

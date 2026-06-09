@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -49,7 +50,9 @@ func (r *SourceRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if errors.IsNotFound(err) {
 			// Clean up local clone if the CR was deleted
 			localPath := filepath.Join(sourceRepoBaseDir, req.Namespace, req.Name)
-			os.RemoveAll(localPath)
+			if rmErr := os.RemoveAll(localPath); rmErr != nil {
+				logger.Error(rmErr, "Failed to remove local clone of deleted repository", "path", localPath)
+			}
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -149,7 +152,9 @@ func (r *SourceRepositoryReconciler) resolveAuth(ctx context.Context, repo *plat
 		}
 		// Write SSH key to temp file
 		keyFile := filepath.Join(sourceRepoBaseDir, ".ssh", repo.Name)
-		os.MkdirAll(filepath.Dir(keyFile), 0700)
+		if err := os.MkdirAll(filepath.Dir(keyFile), 0700); err != nil {
+			return nil, fmt.Errorf("creating SSH key dir: %w", err)
+		}
 		if err := os.WriteFile(keyFile, sshKey, 0600); err != nil {
 			return nil, fmt.Errorf("writing SSH key: %w", err)
 		}
@@ -167,18 +172,44 @@ func (r *SourceRepositoryReconciler) resolveAuth(ctx context.Context, repo *plat
 	return env, nil
 }
 
+// gitBranchPattern allows the conservative charset git branch names use in
+// practice; crucially it rejects a leading "-", which git would otherwise
+// parse as an option (e.g. --upload-pack=cmd runs an arbitrary binary).
+var gitBranchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+
+// validateGitInputs guards the git invocations against argument injection.
+// SourceRepository objects are namespace-scoped and may be authored by
+// tenants, so the URL and branch are treated as untrusted input.
+func validateGitInputs(repoURL, branch string) error {
+	if strings.HasPrefix(repoURL, "-") || strings.Contains(repoURL, "ext::") {
+		return fmt.Errorf("unsupported repository URL %q", repoURL)
+	}
+	if !strings.HasPrefix(repoURL, "https://") && !strings.HasPrefix(repoURL, "ssh://") && !strings.HasPrefix(repoURL, "git@") {
+		return fmt.Errorf("repository URL must use https://, ssh:// or git@ form, got %q", repoURL)
+	}
+	if branch != "" && !gitBranchPattern.MatchString(branch) {
+		return fmt.Errorf("invalid branch name %q", branch)
+	}
+	return nil
+}
+
 // cloneRepo performs a shallow clone of the repository.
 func (r *SourceRepositoryReconciler) cloneRepo(ctx context.Context, repo *platformv1alpha1.SourceRepository, localPath string, authEnv []string) error {
-	os.MkdirAll(filepath.Dir(localPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(localPath), 0750); err != nil {
+		return fmt.Errorf("creating clone parent dir: %w", err)
+	}
 
 	branch := repo.Spec.Branch
 	if branch == "" {
 		branch = "main"
 	}
+	if err := validateGitInputs(repo.Spec.URL, branch); err != nil {
+		return err
+	}
 
 	args := []string{"clone", "--depth", "50", "--single-branch", "--branch", branch, repo.Spec.URL, localPath}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- fixed git binary; URL/branch validated by validateGitInputs, localPath derived from k8s object names
 	cmd.Env = append(os.Environ(), authEnv...)
 
 	// Apply token auth for HTTPS
@@ -214,31 +245,34 @@ func (r *SourceRepositoryReconciler) applyTokenAuth(ctx context.Context, repoURL
 				newArgs[i] = authedURL
 			}
 		}
-		cmd := exec.CommandContext(ctx, "git", newArgs...)
+		cmd := exec.CommandContext(ctx, "git", newArgs...) // #nosec G204 -- fixed git binary; caller validated URL/branch via validateGitInputs
 		cmd.Env = os.Environ()
 		return cmd
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- fixed git binary; caller validated URL/branch via validateGitInputs
 	cmd.Env = append(os.Environ(), authEnv...)
 	return cmd
 }
 
 // pullRepo fetches latest changes.
 func (r *SourceRepositoryReconciler) pullRepo(ctx context.Context, repo *platformv1alpha1.SourceRepository, localPath string, authEnv []string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "fetch", "--depth", "50", "origin")
+	branch := repo.Spec.Branch
+	if branch == "" {
+		branch = "main"
+	}
+	if err := validateGitInputs(repo.Spec.URL, branch); err != nil {
+		return err
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "fetch", "--depth", "50", "origin") // #nosec G204 -- fixed git binary; localPath derived from k8s object names
 	cmd.Env = append(os.Environ(), authEnv...)
 
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch: %s: %w", string(output), err)
 	}
 
-	branch := repo.Spec.Branch
-	if branch == "" {
-		branch = "main"
-	}
-
-	cmd = exec.CommandContext(ctx, "git", "-C", localPath, "reset", "--hard", fmt.Sprintf("origin/%s", branch))
+	cmd = exec.CommandContext(ctx, "git", "-C", localPath, "reset", "--hard", fmt.Sprintf("origin/%s", branch)) // #nosec G204 -- fixed git binary; branch validated by validateGitInputs
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git reset: %s: %w", string(output), err)
 	}
@@ -273,7 +307,7 @@ func (r *SourceRepositoryReconciler) indexRepo(ctx context.Context, repo *platfo
 // getRecentCommits retrieves the last N commits with file change info.
 func (r *SourceRepositoryReconciler) getRecentCommits(ctx context.Context, localPath string) ([]platformv1alpha1.GitCommitInfo, error) {
 	// git log with format: SHA|author|timestamp|message
-	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "log",
+	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "log", // #nosec G204 -- fixed git binary and flags; localPath derived from k8s object names
 		fmt.Sprintf("-%d", maxRecentCommits),
 		"--format=%H|%an|%aI|%s",
 		"--name-only")
@@ -343,7 +377,9 @@ func detectLanguages(localPath string) []string {
 	}
 
 	langCount := make(map[string]int)
-	filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
+	// Walk errors mean a partially indexed tree — acceptable for language
+	// detection, which is advisory.
+	_ = filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			// Skip hidden directories and vendor/node_modules
 			if info != nil && info.IsDir() {
@@ -601,7 +637,7 @@ func extractRelevantCode(localPath string, relevantPaths []string, stackTraces [
 			}
 
 			// Read the file and extract context around the line
-			content, err := readLinesAround(fullPath, lineNum, 5)
+			content, err := readLinesAround(localPath, fullPath, lineNum, 5)
 			if err != nil {
 				continue
 			}
@@ -634,9 +670,7 @@ func parseStackFrame(frame, language string) (string, int) {
 		// format: package/file.go:123
 		if idx := strings.LastIndex(frame, ":"); idx > 0 {
 			path := frame[:idx]
-			var line int
-			fmt.Sscanf(frame[idx+1:], "%d", &line)
-			return path, line
+			return path, leadingInt(frame[idx+1:])
 		}
 
 	case "java":
@@ -647,9 +681,7 @@ func parseStackFrame(frame, language string) (string, int) {
 				fileInfo := frame[start+1 : end]
 				parts := strings.SplitN(fileInfo, ":", 2)
 				if len(parts) == 2 {
-					var line int
-					fmt.Sscanf(parts[1], "%d", &line)
-					return parts[0], line
+					return parts[0], leadingInt(parts[1])
 				}
 			}
 		}
@@ -662,7 +694,7 @@ func parseStackFrame(frame, language string) (string, int) {
 				path := parts[1]
 				var line int
 				if lineIdx := strings.Index(frame, "line "); lineIdx > 0 {
-					fmt.Sscanf(frame[lineIdx+5:], "%d", &line)
+					line = leadingInt(frame[lineIdx+5:])
 				}
 				return path, line
 			}
@@ -677,9 +709,7 @@ func parseStackFrame(frame, language string) (string, int) {
 		frame = strings.TrimSuffix(frame, ")")
 		parts := strings.SplitN(frame, ":", 3)
 		if len(parts) >= 2 {
-			var line int
-			fmt.Sscanf(parts[1], "%d", &line)
-			return parts[0], line
+			return parts[0], leadingInt(parts[1])
 		}
 	}
 
@@ -705,7 +735,9 @@ func findFileInRepo(localPath, fileName string, relevantPaths []string) string {
 	// Try finding just the filename
 	baseName := filepath.Base(fileName)
 	var found string
-	filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
+	// Walk errors mean some subtrees were unreadable; an empty result is
+	// the documented "not found" answer in that case.
+	_ = filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			if info != nil && info.IsDir() {
 				base := filepath.Base(path)
@@ -725,13 +757,25 @@ func findFileInRepo(localPath, fileName string, relevantPaths []string) string {
 	return found
 }
 
-// readLinesAround reads lines around a target line number.
-func readLinesAround(filePath string, targetLine, contextLines int) (string, error) {
-	f, err := os.Open(filePath)
+// readLinesAround reads lines around a target line number. filePath is
+// resolved against rootDir through os.Root, so a stack-frame path crafted
+// to traverse or symlink outside the repository clone cannot escape it —
+// stack traces arrive on Issue objects and are untrusted input.
+func readLinesAround(rootDir, filePath string, targetLine, contextLines int) (string, error) {
+	rel, err := filepath.Rel(rootDir, filePath)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = root.Close() }()
+	f, err := root.Open(rel)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
 
 	startLine := targetLine - contextLines
 	if startLine < 1 {
@@ -777,7 +821,12 @@ func readConfigFiles(localPath string, configFiles []string) []ConfigFileContent
 		}
 
 		fullPath := filepath.Join(localPath, cf)
-		data, err := os.ReadFile(fullPath)
+		// Confinement: config paths come from our own index, but re-check
+		// that the join did not escape the clone root before reading.
+		if !strings.HasPrefix(filepath.Clean(fullPath)+string(os.PathSeparator), filepath.Clean(localPath)+string(os.PathSeparator)) {
+			continue
+		}
+		data, err := os.ReadFile(fullPath) // #nosec G304 -- path confined to the repo clone root above
 		if err != nil {
 			continue
 		}
