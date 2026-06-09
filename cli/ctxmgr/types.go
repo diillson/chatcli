@@ -59,6 +59,11 @@ type AttachedContext struct {
 	AttachedAt     time.Time `json:"attached_at"`               // Quando foi anexado
 	Priority       int       `json:"priority"`                  // Prioridade na ordem de mensagens (menor = primeiro)
 	SelectedChunks []int     `json:"selected_chunks,omitempty"` // CORREÇÃO: Adicionado campo para chunks selecionados
+	// RetrievalTopK > 0 turns this attachment into semantic-retrieval mode:
+	// instead of injecting the whole content, only the top-K passages relevant
+	// to the current turn are injected (query-driven, so it lives in the
+	// volatile prompt zone, never the cached prefix). 0 = legacy whole-content.
+	RetrievalTopK int `json:"retrieval_top_k,omitempty"`
 }
 
 // ContextMetrics contém métricas sobre o uso de contextos
@@ -110,4 +115,5 @@ type FormatOptions struct {
 type AttachOptions struct {
 	Priority       int
 	SelectedChunks []int // Vazio = todos os chunks
+	RetrievalTopK  int   // > 0 ativa retrieval semântico (top-K passagens por turno)
 }

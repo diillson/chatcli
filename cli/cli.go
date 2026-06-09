@@ -512,6 +512,11 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		return nil, fmt.Errorf("erro ao inicializar o ContextHandler: %w", err)
 	}
 	cli.contextHandler = contextHandler
+	// Wire the shared embedding provider so `/context attach --rag` can retrieve
+	// only the passages relevant to each turn instead of dumping whole files. A
+	// Null/absent provider (no CHATCLI_EMBED_PROVIDER) leaves retrieval disabled,
+	// and --rag attachments transparently fall back to whole-content injection.
+	cli.contextHandler.GetManager().AttachEmbeddingProvider(cli.hydeProviderForSession())
 
 	// Initialize workspace context (bootstrap files + memory)
 	homeDir, _ := os.UserHomeDir()

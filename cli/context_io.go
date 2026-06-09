@@ -23,6 +23,7 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 	contextName := args[0]
 	priority := 100          // Prioridade padrão
 	var selectedChunks []int // Chunks específicos (vazio = todos)
+	retrievalTopK := 0       // > 0 ativa retrieval semântico (--rag)
 
 	// Processar flags
 	i := 1
@@ -70,9 +71,29 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 			}
 			i++
 
+		case arg == "--rag" || arg == "--retrieve" || arg == "-r":
+			// Semantic retrieval: inject only the top-K relevant passages per
+			// turn instead of the whole context. An optional number overrides K.
+			retrievalTopK = ctxmgr.DefaultRetrievalTopK
+			if i+1 < len(args) {
+				if n, err := strconv.Atoi(args[i+1]); err == nil {
+					if n > 0 {
+						retrievalTopK = n
+					}
+					i++
+				}
+			}
+			i++
+
 		default:
 			return fmt.Errorf("%s", i18n.T("context.io.error.unknown_flag", arg))
 		}
+	}
+
+	// --rag selects passages semantically; --chunk(s) selects them manually.
+	// Combining them is contradictory, so reject it early with a clear message.
+	if retrievalTopK > 0 && len(selectedChunks) > 0 {
+		return fmt.Errorf("%s", i18n.T("context.io.error.rag_with_chunks"))
 	}
 
 	// Buscar contexto por nome
@@ -99,6 +120,7 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 	attachOpts := ctxmgr.AttachOptions{
 		Priority:       priority,
 		SelectedChunks: selectedChunks,
+		RetrievalTopK:  retrievalTopK,
 	}
 
 	if err := h.manager.AttachContextWithOptions(sessionID, ctx.ID, attachOpts); err != nil {
@@ -108,6 +130,16 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 	// Feedback detalhado
 	fmt.Println(colorize(i18n.T("context.io.attach_success", ctx.Name), ColorGreen))
 	fmt.Printf("  %s %d\n", colorize(i18n.T("context.io.label.priority"), ColorCyan), priority)
+
+	if retrievalTopK > 0 {
+		if h.manager.RetrievalEnabled() {
+			fmt.Printf("  %s %d\n",
+				colorize(i18n.T("context.io.label.rag_topk"), ColorCyan), retrievalTopK)
+		} else {
+			// Provider absent: the attachment still works, but as whole content.
+			fmt.Println(colorize(i18n.T("context.io.warn.rag_no_provider"), ColorYellow))
+		}
+	}
 
 	if len(selectedChunks) > 0 {
 		fmt.Printf("  %s %v %s %d\n",

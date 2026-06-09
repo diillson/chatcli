@@ -6,6 +6,7 @@
 package ctxmgr
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/llm/embedding"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"github.com/google/uuid"
@@ -28,6 +30,31 @@ type Manager struct {
 	processor        *Processor
 	logger           *zap.Logger
 	mu               sync.RWMutex
+
+	// retrieval is the optional semantic-retrieval engine, wired post-construction
+	// via AttachEmbeddingProvider. nil/disabled → --rag attachments degrade to the
+	// legacy whole-content path, so retrieval is purely additive.
+	retrieval *RetrievalEngine
+}
+
+// AttachEmbeddingProvider wires (or rewires) the embedding provider that powers
+// semantic /context retrieval. Passing a Null/absent provider leaves retrieval
+// disabled. Safe to call once at startup; provider-agnostic across all backends.
+func (m *Manager) AttachEmbeddingProvider(provider embedding.Provider) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if embedding.IsNull(provider) {
+		m.retrieval = nil
+		return
+	}
+	m.retrieval = NewRetrievalEngine(provider, m.Storage.basePath, m.logger)
+}
+
+// RetrievalEnabled reports whether a real embedding provider backs retrieval.
+func (m *Manager) RetrievalEnabled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.retrieval.Enabled()
 }
 
 // NewManager cria uma nova instância do gerenciador de contextos
@@ -537,6 +564,15 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 	var messages []models.Message
 
 	for _, attachment := range attachments {
+		// Retrieval-mode attachments are query-driven and therefore volatile;
+		// they are injected separately via BuildRetrievedContextMessages so they
+		// never poison the cached prefix this method feeds. Only skip them when
+		// retrieval is actually enabled — otherwise a --rag attachment with no
+		// embedding provider must still appear here as whole content.
+		if attachment.RetrievalTopK > 0 && m.retrieval.Enabled() {
+			continue
+		}
+
 		ctx, exists := m.contexts[attachment.ContextID]
 		if !exists {
 			m.logger.Warn("Contexto anexado não encontrado durante a construção do prompt",
@@ -580,6 +616,58 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 		})
 	}
 
+	return messages, nil
+}
+
+// BuildRetrievedContextMessages runs semantic retrieval for every retrieval-mode
+// attachment in the session and returns one message per context holding only the
+// passages relevant to query. Returns nil when retrieval is disabled, no
+// attachment opted in, or the query is empty — so the caller can skip the
+// volatile block entirely.
+//
+// A failure on a single context is logged and skipped, never fatal: a flaky
+// embedding call must not break the turn. The query embedding happens outside
+// the manager lock because it does network I/O.
+func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, query string) ([]models.Message, error) {
+	m.mu.RLock()
+	engine := m.retrieval
+	attachments := append([]AttachedContext(nil), m.attachedContexts[sessionID]...)
+	wanted := make(map[string]*FileContext)
+	for _, a := range attachments {
+		if a.RetrievalTopK > 0 {
+			if c, ok := m.contexts[a.ContextID]; ok {
+				wanted[a.ContextID] = c
+			}
+		}
+	}
+	m.mu.RUnlock()
+
+	if !engine.Enabled() || len(wanted) == 0 || strings.TrimSpace(query) == "" {
+		return nil, nil
+	}
+
+	sort.Slice(attachments, func(i, j int) bool {
+		return attachments[i].Priority < attachments[j].Priority
+	})
+
+	var messages []models.Message
+	for _, a := range attachments {
+		fc, ok := wanted[a.ContextID]
+		if !ok {
+			continue
+		}
+		segs, err := engine.Retrieve(ctx, fc, query, a.RetrievalTopK)
+		if err != nil {
+			m.logger.Warn("context semantic retrieval failed; skipping",
+				zap.String("context", fc.Name), zap.Error(err))
+			continue
+		}
+		block := FormatSegmentsBlock(fc.Name, query, segs)
+		if block == "" {
+			continue
+		}
+		messages = append(messages, models.Message{Role: "system", Content: block})
+	}
 	return messages, nil
 }
 
