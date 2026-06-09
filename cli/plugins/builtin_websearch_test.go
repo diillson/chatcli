@@ -16,14 +16,16 @@ func TestSelectSearchChainFromEnv(t *testing.T) {
 		searxng  string
 		want     []SearchProvider
 	}{
-		{"no override, no searxng", "", "", []SearchProvider{ProviderDuckDuckGo}},
-		{"no override, searxng set → DDG first, SX fallback", "", "https://sx.example", []SearchProvider{ProviderDuckDuckGo, ProviderSearXNG}},
-		{"auto override = default (DDG first)", "auto", "https://sx.example", []SearchProvider{ProviderDuckDuckGo, ProviderSearXNG}},
-		{"explicit ddg, no searxng", "duckduckgo", "", []SearchProvider{ProviderDuckDuckGo}},
-		{"explicit ddg, with searxng (ddg first, sx follows)", "duckduckgo", "https://sx.example", []SearchProvider{ProviderDuckDuckGo, ProviderSearXNG}},
-		{"explicit searxng, with url (sx first, ddg follows)", "searxng", "https://sx.example", []SearchProvider{ProviderSearXNG, ProviderDuckDuckGo}},
-		{"explicit searxng, no url → ddg only", "searxng", "", []SearchProvider{ProviderDuckDuckGo}},
-		{"unknown override → fallback to default (DDG first)", "bogus", "https://sx.example", []SearchProvider{ProviderDuckDuckGo, ProviderSearXNG}},
+		{"no override, no searxng", "", "", []SearchProvider{ProviderDuckDuckGo, ProviderBrave, ProviderMojeek}},
+		{"no override, searxng set → DDG first, SX fallback", "", "https://sx.example", []SearchProvider{ProviderDuckDuckGo, ProviderSearXNG, ProviderBrave, ProviderMojeek}},
+		{"auto override = default (DDG first)", "auto", "https://sx.example", []SearchProvider{ProviderDuckDuckGo, ProviderSearXNG, ProviderBrave, ProviderMojeek}},
+		{"explicit ddg, no searxng", "duckduckgo", "", []SearchProvider{ProviderDuckDuckGo, ProviderBrave, ProviderMojeek}},
+		{"explicit ddg, with searxng (ddg first, sx follows)", "duckduckgo", "https://sx.example", []SearchProvider{ProviderDuckDuckGo, ProviderSearXNG, ProviderBrave, ProviderMojeek}},
+		{"explicit searxng, with url (sx first, ddg follows)", "searxng", "https://sx.example", []SearchProvider{ProviderSearXNG, ProviderDuckDuckGo, ProviderBrave, ProviderMojeek}},
+		{"explicit searxng, no url → chain without sx", "searxng", "", []SearchProvider{ProviderDuckDuckGo, ProviderBrave, ProviderMojeek}},
+		{"unknown override → fallback to default (DDG first)", "bogus", "https://sx.example", []SearchProvider{ProviderDuckDuckGo, ProviderSearXNG, ProviderBrave, ProviderMojeek}},
+		{"explicit brave moves to front", "brave", "https://sx.example", []SearchProvider{ProviderBrave, ProviderDuckDuckGo, ProviderSearXNG, ProviderMojeek}},
+		{"explicit mojeek moves to front", "mojeek", "", []SearchProvider{ProviderMojeek, ProviderDuckDuckGo, ProviderBrave}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

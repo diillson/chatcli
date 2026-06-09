@@ -23,13 +23,16 @@ const (
 	ProviderAuto       SearchProvider = "auto"
 	ProviderSearXNG    SearchProvider = "searxng"
 	ProviderDuckDuckGo SearchProvider = "duckduckgo"
+	ProviderBrave      SearchProvider = "brave"
+	ProviderMojeek     SearchProvider = "mojeek"
 )
 
 // KnownSearchProviders is the canonical list for the /websearch CLI
 // command. Default order: DuckDuckGo first (zero config, always available),
-// SearxNG as secondary (used when the user has an instance configured).
+// SearxNG as secondary (used when the user has an instance configured),
+// then the independent-index scrapers Brave and Mojeek as deep fallbacks.
 var KnownSearchProviders = []SearchProvider{
-	ProviderDuckDuckGo, ProviderSearXNG,
+	ProviderDuckDuckGo, ProviderSearXNG, ProviderBrave, ProviderMojeek,
 }
 
 // BuiltinWebSearchPlugin provides web search with a pluggable backend chain.
@@ -37,9 +40,12 @@ var KnownSearchProviders = []SearchProvider{
 // Default order (CHATCLI_WEBSEARCH_PROVIDER unset or "auto"):
 //  1. DuckDuckGo HTML — zero-config default
 //  2. SearxNG self-hosted (SEARXNG_URL) — used as fallback when configured
+//  3. Brave Search HTML — independent index, zero config
+//  4. Mojeek HTML — independent index, zero config
 //
-// Set CHATCLI_WEBSEARCH_PROVIDER=searxng to prefer SearxNG over DuckDuckGo.
-// On failure or empty results the chain falls through to the next backend.
+// Set CHATCLI_WEBSEARCH_PROVIDER to any provider name to move it to the
+// front of the chain. On failure or empty results the chain falls through
+// to the next backend.
 type BuiltinWebSearchPlugin struct{}
 
 func NewBuiltinWebSearchPlugin() *BuiltinWebSearchPlugin {
@@ -49,7 +55,7 @@ func NewBuiltinWebSearchPlugin() *BuiltinWebSearchPlugin {
 func (p *BuiltinWebSearchPlugin) Name() string        { return "@websearch" }
 func (p *BuiltinWebSearchPlugin) Description() string { return "Searches the web and returns results" }
 func (p *BuiltinWebSearchPlugin) Usage() string       { return "@websearch <query>" }
-func (p *BuiltinWebSearchPlugin) Version() string     { return "2.0.0" }
+func (p *BuiltinWebSearchPlugin) Version() string     { return "2.1.0" }
 func (p *BuiltinWebSearchPlugin) Path() string        { return "[builtin]" }
 
 func (p *BuiltinWebSearchPlugin) Schema() string {
@@ -284,18 +290,39 @@ func selectSearchChainFromEnv(override, searxngURL string) []providerEntry {
 	addDDG := func() {
 		chain = append(chain, providerEntry{name: ProviderDuckDuckGo, search: searchDuckDuckGo})
 	}
+	addBrave := func() {
+		chain = append(chain, providerEntry{name: ProviderBrave, search: searchBrave})
+	}
+	addMojeek := func() {
+		chain = append(chain, providerEntry{name: ProviderMojeek, search: searchMojeek})
+	}
 
+	// An explicit override moves that provider to the front; the remaining
+	// providers keep the default order behind it so a forced choice still
+	// degrades gracefully.
 	switch SearchProvider(override) {
 	case ProviderSearXNG:
 		addSearxNG()
 		addDDG()
-	case ProviderDuckDuckGo:
+		addBrave()
+		addMojeek()
+	case ProviderBrave:
+		addBrave()
 		addDDG()
 		addSearxNG()
+		addMojeek()
+	case ProviderMojeek:
+		addMojeek()
+		addDDG()
+		addSearxNG()
+		addBrave()
 	default:
-		// "", "auto", or anything unrecognized → default order (DDG first).
+		// "", "auto", "duckduckgo", or anything unrecognized → default
+		// order: DDG → SearxNG → Brave → Mojeek.
 		addDDG()
 		addSearxNG()
+		addBrave()
+		addMojeek()
 	}
 	return chain
 }

@@ -1972,6 +1972,8 @@
   "ws.cmd.sx_tagline": "self-hosted, ideal p/ ambiente corporativo, sem API key",
   "ws.cmd.ddg_available": "✓ sempre disponível",
   "ws.cmd.ddg_tagline": "scraping HTML, sem API key, pode falhar com CAPTCHA",
+  "ws.cmd.brave_tagline": "scraping HTML, índice independente, sem API key",
+  "ws.cmd.mojeek_tagline": "scraping HTML, índice independente, sem API key; algumas redes recebem 403",
   "ws.cmd.invalid_provider": "Provider inválido: %s",
   "ws.cmd.valid_options": "Opções: searxng, duckduckgo, auto",
   "ws.cmd.sx_missing_url_warn": "⚠ SearxNG selecionado mas SEARXNG_URL não está setado.",
@@ -2041,6 +2043,8 @@
   "complete.websearch.sub_reset": "Remove override e volta ao modo auto",
   "complete.websearch.prov_searxng": "Self-hosted (requer SEARXNG_URL) — preferido quando configurado",
   "complete.websearch.prov_duckduckgo": "Scraping HTML, sem API key — default",
+  "complete.websearch.prov_brave": "Scraping HTML, índice independente, sem API key",
+  "complete.websearch.prov_mojeek": "Scraping HTML, índice independente, sem API key",
   "complete.websearch.prov_auto": "Auto: DuckDuckGo primeiro, SearxNG como fallback se configurado",
 
   "hooks.cmd.not_initialized": "Hooks não inicializado.",
