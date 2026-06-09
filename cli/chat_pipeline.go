@@ -121,6 +121,10 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	if part, ok := cli.workspaceContextPart(ctx, userInput); ok { // Part 4
 		out.parts = append(out.parts, part)
 	}
+	// Part 4b: semantic /context retrieval (--rag). Query-driven, so it lives
+	// here in the volatile zone — never the cached prefix it would otherwise
+	// poison for every block after it.
+	out.parts = append(out.parts, cli.retrievedContextParts(ctx, userInput)...)
 	if manualSkill != nil { // Part 5
 		if block := renderManualSkillBlock(manualSkill, manualSkillArgs); block != "" {
 			out.parts = append(out.parts, models.ContentBlock{Type: "text", Text: block})
@@ -254,6 +258,28 @@ func (cli *ChatCLI) attachedContextParts() []models.ContentBlock {
 			Text:         msg.Content,
 			CacheControl: &models.CacheControl{Type: "ephemeral"},
 		})
+	}
+	return out
+}
+
+// retrievedContextParts runs semantic retrieval for any `--rag` attached context
+// and returns volatile (uncached) blocks holding only the passages relevant to
+// this turn. Volatile because the content is query-driven: placing it in the
+// cached prefix would defeat the cache for every block after it. Returns nil when
+// no context opted into retrieval or no embedding provider is configured.
+func (cli *ChatCLI) retrievedContextParts(ctx context.Context, userInput string) []models.ContentBlock {
+	sessionID := cli.currentSessionName
+	if sessionID == "" {
+		sessionID = "default"
+	}
+	msgs, err := cli.contextHandler.GetManager().BuildRetrievedContextMessages(ctx, sessionID, userInput)
+	if err != nil {
+		cli.logger.Warn("Erro ao recuperar contexto semântico", zap.Error(err))
+		return nil
+	}
+	out := make([]models.ContentBlock, 0, len(msgs))
+	for _, msg := range msgs {
+		out = append(out, models.ContentBlock{Type: "text", Text: msg.Content})
 	}
 	return out
 }
