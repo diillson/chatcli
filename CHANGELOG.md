@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.134.0](https://github.com/diillson/chatcli/compare/v1.133.0...v1.134.0) (2026-06-09)
+
+
+### Features
+
+* **webfetch:** render JS pages via headless browser escalation ([#1031](https://github.com/diillson/chatcli/issues/1031)) ([25e4bdc](https://github.com/diillson/chatcli/commit/25e4bdc867c4e1aa7d914a36b7aeb4dedebf2891))
+* **websearch:** keyless fallback providers + Claude Fable 5 in catalog ([#1032](https://github.com/diillson/chatcli/issues/1032)) ([aa51ca2](https://github.com/diillson/chatcli/commit/aa51ca2290bedb7ded2bd6d0b85775a6eb07b0ad))
+
+
+### Bug Fixes
+
+* **embedding:** rebuild embedding provider on /reload ([#1030](https://github.com/diillson/chatcli/issues/1030)) ([31821a2](https://github.com/diillson/chatcli/commit/31821a27b4796150111c5ab6831937bcb105c35b))
+* **operator:** resolve all 82 open gosec findings ([#1033](https://github.com/diillson/chatcli/issues/1033)) ([80aa68d](https://github.com/diillson/chatcli/commit/80aa68db9554490fa18566bab01575c81b129515))
+
 ## [1.133.0](https://github.com/diillson/chatcli/compare/v1.132.3...v1.133.0) (2026-06-09)
 
 
