@@ -187,10 +187,14 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_WEBHOOK_HOME_CHANNEL":  {Value: "(none)", Source: "send_adapter.go (@send default target)"},
 
 	// ─── Integrations ────────────────────────────────────────────
-	"CHATCLI_MCP_ENABLED":            {Value: "false", IsBool: true, Source: "mcp manager"},
-	"CHATCLI_ALLOW_UNSIGNED_PLUGINS": {Value: "false", IsBool: true, Source: "plugin manager"},
-	"CHATCLI_REGISTRY_DISABLE":       {Value: "false", IsBool: true, Source: "skill registry"},
-	"CHATCLI_WEBSEARCH_PROVIDER":     {Value: "auto", Source: "websearch_command.go"},
+	"CHATCLI_MCP_ENABLED":                   {Value: "false", IsBool: true, Source: "mcp manager"},
+	"CHATCLI_ALLOW_UNSIGNED_PLUGINS":        {Value: "false", IsBool: true, Source: "plugin manager"},
+	"CHATCLI_REGISTRY_DISABLE":              {Value: "false", IsBool: true, Source: "skill registry"},
+	"CHATCLI_WEBSEARCH_PROVIDER":            {Value: "auto", Source: "websearch_command.go"},
+	"CHATCLI_WEBFETCH_RENDER":               {Value: "auto", Source: "plugins/webfetch_render.go (auto|always|never)"},
+	"CHATCLI_WEBFETCH_RENDER_TIMEOUT":       {Value: "25", Source: "plugins/webfetch_render.go (seconds)"},
+	"CHATCLI_WEBFETCH_RENDER_BROWSER":       {Value: "(auto-detected)", Source: "plugins/webfetch_render.go (Chrome/Chromium/Edge/Brave lookup)"},
+	"CHATCLI_WEBFETCH_RENDER_AUTOPROVISION": {Value: "false", IsBool: true, Source: "plugins/webfetch_render.go (opt-in Chromium download)"},
 
 	// ─── Security ────────────────────────────────────────────────
 	"CHATCLI_AGENT_SECURITY_MODE":    {Value: "strict", Source: "agent.command_allowlist (default unless permissive)"},
