@@ -68,6 +68,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 		"CHATCLI_WEBFETCH_USER_AGENT", "CHATCLI_WEBFETCH_AUTOSAVE_BYTES",
 		"CHATCLI_WEBFETCH_RENDER", "CHATCLI_WEBFETCH_RENDER_TIMEOUT", "CHATCLI_WEBFETCH_RENDER_AUTOPROVISION",
 		"CHATCLI_WEBFETCH_RENDER_BROWSER",
+		"CHATCLI_EMBED_PROVIDER", "CHATCLI_EMBED_MODEL", "CHATCLI_EMBED_DIMENSIONS",
 	}
 
 	for _, variable := range variablesToUnset {
@@ -86,6 +87,13 @@ func (cli *ChatCLI) reloadConfiguration() {
 	config.Global.Reload(cli.logger)
 
 	cli.reconfigureLogger()
+
+	// Rebuild the embedding provider so a CHATCLI_EMBED_PROVIDER change in
+	// .env takes effect on reload — without this the session keeps the
+	// provider captured at boot until the process restarts.
+	if oldEmb, newEmb := cli.refreshEmbeddingProvider(); oldEmb != newEmb {
+		fmt.Println(i18n.T("status.reload_embed_provider", newEmb))
+	}
 
 	manager, err := manager.NewLLMManager(cli.logger)
 	if err != nil {

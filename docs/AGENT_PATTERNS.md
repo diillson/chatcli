@@ -109,7 +109,7 @@ Reflexion runs in a background goroutine — never blocks the user-facing turn.
 Long-term memory retrieval with two enhancements:
 
 - **3a — Hypothesis-as-keyword-expansion**: a cheap LLM call generates a 2-4 sentence "hypothetical answer" to the user query; keywords extracted from it widen the retrieval net.
-- **3b — Vector embeddings**: optional. When `CHATCLI_EMBED_PROVIDER=voyage` or `=openai` is set, the user query is embedded and cosine-matched against fact vectors. Lazy backfill: facts get embedded as they surface.
+- **3b — Vector embeddings**: optional. When `CHATCLI_EMBED_PROVIDER=voyage`, `=openai` or `=bedrock` is set, the user query is embedded and cosine-matched against fact vectors. Lazy backfill: facts get embedded as they surface.
 
 Vectors persisted as JSON (`~/.chatcli/memory/vector_index.json`) — pure-Go cosine, no CGO, no external deps.
 
@@ -117,8 +117,8 @@ Vectors persisted as JSON (`~/.chatcli/memory/vector_index.json`) — pure-Go co
 ```bash
 export CHATCLI_QUALITY_HYDE_ENABLED=true
 export CHATCLI_QUALITY_HYDE_USE_VECTORS=true        # optional
-export CHATCLI_EMBED_PROVIDER=voyage                # voyage|openai
-export VOYAGE_API_KEY=...                            # provider-specific
+export CHATCLI_EMBED_PROVIDER=voyage                # voyage|openai|bedrock
+export VOYAGE_API_KEY=...                            # provider-specific (bedrock uses the AWS credential chain)
 ```
 
 ## #5 — Self-Refine
