@@ -22,12 +22,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// ScoredFact pairs a fact id with the cosine similarity that surfaced it.
-type ScoredFact struct {
-	ID    string
-	Score float64
-}
-
 // VectorIndex backs HyDE Phase 3b. It is a thin wrapper translating between the
 // fact domain and the generic vector index.
 type VectorIndex struct {
@@ -81,6 +75,12 @@ func (v *VectorIndex) BackfillFacts(ctx context.Context, items map[string]string
 		return nil
 	}
 	return v.idx.Upsert(ctx, items)
+}
+
+// ScoredFact pairs a fact id with the cosine similarity that surfaced it.
+type ScoredFact struct {
+	ID    string
+	Score float64
 }
 
 // SimilarFactsScored ranks stored facts by cosine similarity to a query vector,
