@@ -422,9 +422,9 @@ func (bp *BlastRadiusPredictor) predictNodeImpact(ctx context.Context, res platf
 
 func (bp *BlastRadiusPredictor) predictHPAAdjustImpact(ctx context.Context, resource platformv1alpha1.ResourceRef, params map[string]string, prediction *BlastRadiusPrediction) {
 	if maxStr, ok := params["maxReplicas"]; ok {
-		if max, err := parseInt32(maxStr); err == nil {
+		if maxReplicas, err := parseInt32(maxStr); err == nil {
 			prediction.Warnings = append(prediction.Warnings,
-				fmt.Sprintf("Adjusting HPA maxReplicas to %d — ensure cluster has capacity", max))
+				fmt.Sprintf("Adjusting HPA maxReplicas to %d — ensure cluster has capacity", maxReplicas))
 		} else {
 			prediction.Warnings = append(prediction.Warnings,
 				fmt.Sprintf("unparseable maxReplicas %q; capacity impact unknown", maxStr))

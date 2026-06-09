@@ -150,12 +150,14 @@ func (al *OperatorAuditLogger) LogAPIAccess(method, path, clientIP, role, result
 	})
 }
 
-// Close shuts down the file writer. The flush error is reported so
-// callers can surface a truncated audit trail instead of silently
-// losing the tail of the log.
-func (al *OperatorAuditLogger) Close() error {
+// Close shuts down the file writer. A flush failure is logged so a
+// truncated audit trail is surfaced instead of silently losing the
+// tail of the log.
+func (al *OperatorAuditLogger) Close() {
 	if al.fileWriter == nil {
-		return nil
+		return
 	}
-	return al.fileWriter.Close()
+	if err := al.fileWriter.Close(); err != nil {
+		al.zapLogger.Error("failed to close operator audit log file", zap.Error(err))
+	}
 }
