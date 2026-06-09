@@ -1846,6 +1846,8 @@ func (cli *ChatCLI) getWebSearchSuggestions(d prompt.Document) []prompt.Suggest 
 			providers := []prompt.Suggest{
 				{Text: string(plugins.ProviderSearXNG), Description: i18n.T("complete.websearch.prov_searxng")},
 				{Text: string(plugins.ProviderDuckDuckGo), Description: i18n.T("complete.websearch.prov_duckduckgo")},
+				{Text: string(plugins.ProviderBrave), Description: i18n.T("complete.websearch.prov_brave")},
+				{Text: string(plugins.ProviderMojeek), Description: i18n.T("complete.websearch.prov_mojeek")},
 				{Text: string(plugins.ProviderAuto), Description: i18n.T("complete.websearch.prov_auto")},
 			}
 			return prompt.FilterHasPrefix(providers, word, true)

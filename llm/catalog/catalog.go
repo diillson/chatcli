@@ -300,6 +300,31 @@ var registry = []ModelMeta{
 	// loose prefix match fires. Reversing this order reintroduces a latent
 	// bug where "opus-4-6" silently resolves to the 4.0 entry (20K ctx).
 	{
+		// Fable 5 (claude-fable-5): Anthropic's most capable model — a new
+		// tier ABOVE Opus. 1M context, 128K max output, $10/$50 per MTok
+		// (see cli/cost_tracker.go claudePricing). Same API surface as
+		// Opus 4.7/4.8 (no temperature/top_p/top_k; adaptive thinking only —
+		// budgeted thinking returns 400) with one extra constraint: an
+		// explicit thinking:{type:"disabled"} ALSO returns 400 — the field
+		// must be omitted to run without thinking. The claudeai client
+		// already complies: it only attaches a thinking block when effort
+		// routing fires, and adaptive_thinking routes that to
+		// {type:"adaptive"}. No fast_mode: the speed parameter is not
+		// documented for Fable 5.
+		ID:              "claude-fable-5",
+		Aliases:         []string{"claude-fable-5", "fable-5", "fable"},
+		DisplayName:     "Claude Fable 5 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities: []string{
+			"json_mode", "tools",
+			"adaptive_thinking", "mid_conversation_system",
+		},
+	},
+	{
 		// Opus 4.8 (claude-opus-4-8, May 28 2026): 1M context by default on
 		// the Claude API, 128K max output. Same API constraints as 4.7
 		// (no temperature/top_p/top_k; adaptive thinking only — extended

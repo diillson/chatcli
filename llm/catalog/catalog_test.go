@@ -135,6 +135,34 @@ func TestGetPreferredAPI(t *testing.T) {
 //   - mid_conversation_system → role:"system" allowed mid-conversation
 //   - low_cache_minimum → 1,024-token cache floor
 //
+// TestClaudeFable5Specs pins the published Fable 5 specs: 1M context,
+// 128K max output, adaptive-thinking-only request surface. Fable 5 is the
+// tier above Opus; the "fable"/"fable-5" shorthands must resolve to it.
+// fast_mode must NOT be advertised — the speed parameter is not documented
+// for Fable 5, and advertising it would make the claudeai client emit
+// `speed:"fast"` on a model that may reject it.
+func TestClaudeFable5Specs(t *testing.T) {
+	for _, id := range []string{"claude-fable-5", "fable-5", "fable"} {
+		meta, ok := Resolve(ProviderClaudeAI, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderClaudeAI", id)
+		assert.Equal(t, "claude-fable-5", meta.ID, "alias %s must resolve to claude-fable-5", id)
+		assert.Equal(t, 1000000, meta.ContextWindow, "Fable 5 context window is 1M tokens")
+		assert.Equal(t, 128000, meta.MaxOutputTokens, "Fable 5 max output is 128K")
+		assert.Equal(t, APIAnthropicMessages, meta.PreferredAPI)
+	}
+
+	for _, capability := range []string{
+		"tools", "json_mode", "adaptive_thinking", "mid_conversation_system",
+	} {
+		assert.True(t,
+			HasCapability(ProviderClaudeAI, "claude-fable-5", capability),
+			"claude-fable-5 should advertise %q capability", capability)
+	}
+	assert.False(t,
+		HasCapability(ProviderClaudeAI, "claude-fable-5", "fast_mode"),
+		"claude-fable-5 must not advertise fast_mode (speed param undocumented)")
+}
+
 // Drift in these advertised capabilities is a request-shape change that
 // the client cares about, so we pin them here.
 func TestClaudeOpus48Specs(t *testing.T) {

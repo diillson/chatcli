@@ -103,6 +103,16 @@ func (cli *ChatCLI) showWebSearchList() {
 				ColorGray, name, ColorReset,
 				colorize(i18n.T("ws.cmd.ddg_available"), ColorGreen)))
 			fmt.Println(p + fmt.Sprintf("    %s%s%s", ColorGray, i18n.T("ws.cmd.ddg_tagline"), ColorReset))
+		case plugins.ProviderBrave:
+			fmt.Println(p + fmt.Sprintf("  %s%-12s%s %s",
+				ColorGray, name, ColorReset,
+				colorize(i18n.T("ws.cmd.ddg_available"), ColorGreen)))
+			fmt.Println(p + fmt.Sprintf("    %s%s%s", ColorGray, i18n.T("ws.cmd.brave_tagline"), ColorReset))
+		case plugins.ProviderMojeek:
+			fmt.Println(p + fmt.Sprintf("  %s%-12s%s %s",
+				ColorGray, name, ColorReset,
+				colorize(i18n.T("ws.cmd.ddg_available"), ColorGreen)))
+			fmt.Println(p + fmt.Sprintf("    %s%s%s", ColorGray, i18n.T("ws.cmd.mojeek_tagline"), ColorReset))
 		}
 	}
 	fmt.Println()
@@ -117,6 +127,8 @@ func (cli *ChatCLI) setWebSearchProvider(name string) {
 		string(plugins.ProviderAuto):       true,
 		string(plugins.ProviderSearXNG):    true,
 		string(plugins.ProviderDuckDuckGo): true,
+		string(plugins.ProviderBrave):      true,
+		string(plugins.ProviderMojeek):     true,
 	}
 	if !valid[name] {
 		fmt.Println(colorize("  "+i18n.T("ws.cmd.invalid_provider", name), ColorYellow))
