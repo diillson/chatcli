@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.133.0](https://github.com/diillson/chatcli/compare/v1.132.3...v1.133.0) (2026-06-09)
+
+
+### Features
+
+* **context:** semantic passage retrieval for /context attach ([#1029](https://github.com/diillson/chatcli/issues/1029)) ([e7f2f30](https://github.com/diillson/chatcli/commit/e7f2f3008bb2b2bcb70a71e040e64d4512f9733b))
+* **memory:** blend cosine, lexical and temporal signals in retrieval ranking ([#1027](https://github.com/diillson/chatcli/issues/1027)) ([ba4c4cb](https://github.com/diillson/chatcli/commit/ba4c4cb593ec2ec63d6e4c240ba2c169a1dd7741))
+
 ## [1.132.3](https://github.com/diillson/chatcli/compare/v1.132.2...v1.132.3) (2026-06-08)
 
 
