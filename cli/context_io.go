@@ -123,8 +123,9 @@ func parseAttachFlags(args []string) (attachFlags, error) {
 
 // parseChunkList parses a "1,2,3" chunk specifier into a slice of numbers.
 func parseChunkList(spec string) ([]int, error) {
-	var out []int
-	for _, part := range strings.Split(spec, ",") {
+	parts := strings.Split(spec, ",")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
 		n, err := strconv.Atoi(strings.TrimSpace(part))
 		if err != nil {
 			return nil, fmt.Errorf("%s", i18n.T("context.io.error.invalid_chunk_number", part))

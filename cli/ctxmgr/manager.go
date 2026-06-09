@@ -650,7 +650,7 @@ func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, 
 		return attachments[i].Priority < attachments[j].Priority
 	})
 
-	var messages []models.Message
+	messages := make([]models.Message, 0, len(wanted))
 	for _, a := range attachments {
 		fc, ok := wanted[a.ContextID]
 		if !ok {

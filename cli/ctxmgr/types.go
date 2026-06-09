@@ -115,5 +115,5 @@ type FormatOptions struct {
 type AttachOptions struct {
 	Priority       int
 	SelectedChunks []int // Vazio = todos os chunks
-	RetrievalTopK  int   // > 0 ativa retrieval semântico (top-K passagens por turno)
+	RetrievalTopK  int   // > 0 ativa retrieval semântico (top-K trechos por turno)
 }
