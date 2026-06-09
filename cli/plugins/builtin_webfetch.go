@@ -54,7 +54,7 @@ func (p *BuiltinWebFetchPlugin) Description() string {
 	return "Fetches content from a URL and returns the text (filtering + save-to-file supported)"
 }
 func (p *BuiltinWebFetchPlugin) Usage() string   { return "@webfetch <url>" }
-func (p *BuiltinWebFetchPlugin) Version() string { return "1.1.0" }
+func (p *BuiltinWebFetchPlugin) Version() string { return "1.2.0" }
 func (p *BuiltinWebFetchPlugin) Path() string    { return "[builtin]" }
 
 func (p *BuiltinWebFetchPlugin) Schema() string {
@@ -74,6 +74,7 @@ func (p *BuiltinWebFetchPlugin) Schema() string {
 					{"name": "to_line", "type": "integer", "description": "End at this line (1-based, inclusive). Applied after filter/exclude."},
 					{"name": "save_to_file", "type": "boolean", "description": "Save the full (pre-truncation) content to the session scratch dir and return a preview + absolute path. Use when you want to analyze later with read_file."},
 					{"name": "save_path", "type": "string", "description": "If save_to_file is true, override the generated filename (will be placed under CHATCLI_AGENT_TMPDIR)."},
+					{"name": "render", "type": "boolean", "description": "Force headless-browser rendering for pages that build their content with JavaScript (SPAs, dynamic tables). By default rendering happens automatically when the static HTML looks like a JS shell and a Chrome/Chromium is available. Use render=true when a page came back empty or render=false to stay static.", "default": "auto"},
 				},
 				"examples": []string{
 					`{"cmd":"fetch","args":{"url":"http://svc/metrics","filter":"^chatcli_"}}`,
@@ -98,6 +99,9 @@ type fetchArgs struct {
 	ToLine     int
 	SaveToFile bool
 	SavePath   string
+	// Render forces ("always") or suppresses ("never") the headless-browser
+	// escalation for this call; empty defers to CHATCLI_WEBFETCH_RENDER.
+	Render string
 }
 
 func (p *BuiltinWebFetchPlugin) Execute(ctx context.Context, args []string) (string, error) {
@@ -160,7 +164,7 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 
 	fullContent := string(body)
 	if !parsed.Raw {
-		fullContent = extractText(fullContent)
+		fullContent = p.extractWithRenderEscalation(reqCtx, parsed, safeURL, fullContent, onOutput)
 	}
 
 	// Apply line-level filters before truncation so the final output keeps
@@ -358,6 +362,10 @@ func parsePositionalFetchArgs(args []string, start int, out *fetchArgs) {
 				_, _ = fmt.Sscanf(args[i+1], "%d", &out.ToLine)
 				i++
 			}
+		case a == "--render":
+			out.Render = renderModeAlways
+		case a == "--no_render" || a == "--no-render":
+			out.Render = renderModeNever
 		case a == "--save_to_file" || a == "--save-to-file":
 			out.SaveToFile = true
 		case a == "--save_path" || a == "--save-path":
@@ -412,6 +420,18 @@ func mapToFetchArgs(m map[string]interface{}, out *fetchArgs) {
 		if v, ok := m[key].(string); ok {
 			out.SavePath = v
 		}
+	}
+	// render accepts a boolean (true → force, false → suppress) and the
+	// string forms "always"/"never"/"auto" for symmetry with the env knob.
+	if v, ok := m["render"].(bool); ok {
+		if v {
+			out.Render = renderModeAlways
+		} else {
+			out.Render = renderModeNever
+		}
+	}
+	if v, ok := m["render"].(string); ok {
+		out.Render = strings.ToLower(strings.TrimSpace(v))
 	}
 }
 
