@@ -1,5 +1,7 @@
 /*
  * ChatCLI - Long-term memory: configuration from the environment.
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
  *
  * The CHATCLI_MEMORY_* env vars already existed in the config package but were
  * never read on the structured-memory path — NewMemoryStore built the manager

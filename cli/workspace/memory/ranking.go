@@ -1,5 +1,7 @@
 /*
  * ChatCLI - Long-term memory: blended fact ranking.
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
  *
  * The retrieval critique this file answers: the original HyDE path embedded
  * the query, found the cosine top-K, then *threw the cosine score away* and

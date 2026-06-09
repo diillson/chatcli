@@ -1,5 +1,7 @@
 /*
  * ChatCLI - Long-term memory: bounded top-K selection.
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
  *
  * The vector store ranks fact_id → cosine over every stored vector. Sorting
  * the entire candidate set is O(n log n); we only ever want the top-K, so a

@@ -1,5 +1,7 @@
 /*
  * ChatCLI - Long-term memory: retrieval evaluation harness.
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
  *
  * The critique this package answers: the memory RAG had no way to PROVE its
  * retrieval was any good. Sophisticated plumbing (HyDE, embeddings, cosine) sat
