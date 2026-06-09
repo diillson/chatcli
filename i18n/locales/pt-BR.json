@@ -147,6 +147,7 @@
   "status.reloading_config": "Recarregando configurações...",
   "status.reload_success_preserved": "Configurações recarregadas com sucesso! (provedor/modelo atuais preservados)",
   "status.reload_fail_preserve": "Falha ao preservar provedor/modelo após recarregar; usando valores do .env",
+  "status.reload_embed_provider": "Provider de embeddings reconfigurado: %s",
   "status.reload_success": "Configurações recarregadas com sucesso!",
   "status.reload_fail_client": "Falha ao reconfigurar cliente LLM após recarregar.",
   "status.operation_canceled": "🛑 Operação cancelada com sucesso!",

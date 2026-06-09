@@ -19,28 +19,84 @@ import (
 	"go.uber.org/zap"
 )
 
-// hydeOnce makes sure the embedding provider is constructed once per
-// session — the vector index keeps a stable reference and on-disk
-// state stays consistent across calls.
-var hydeOnce sync.Once
+// hydeMu guards the session-cached embedding provider. The provider is
+// built lazily on first use — the vector index keeps a stable reference
+// and on-disk state stays consistent across calls — and rebuilt by
+// refreshEmbeddingProvider when /config reload re-reads the environment.
+// A plain sync.Once would latch a Null provider for the whole process
+// when CHATCLI_EMBED_PROVIDER only lands in .env after boot.
+var hydeMu sync.Mutex
 var hydeProvider embedding.Provider
+var hydeProviderReady bool
 
 // hydeProviderForSession returns the embedding provider configured
 // via CHATCLI_EMBED_PROVIDER, instantiating it on first use. Returns
 // the null provider when nothing is configured or when construction
-// fails (logged once).
+// fails (logged once per build).
 func (cli *ChatCLI) hydeProviderForSession() embedding.Provider {
-	hydeOnce.Do(func() {
-		p, err := embedding.NewFromEnv()
-		if err != nil {
-			cli.logger.Warn("HyDE: embedding provider construction failed; falling back to null",
-				zap.Error(err))
-			hydeProvider = embedding.NewNull()
-			return
-		}
-		hydeProvider = p
-	})
+	hydeMu.Lock()
+	defer hydeMu.Unlock()
+	if !hydeProviderReady {
+		hydeProvider = cli.buildEmbeddingProviderLocked()
+		hydeProviderReady = true
+	}
 	return hydeProvider
+}
+
+// buildEmbeddingProviderLocked constructs a provider from the current
+// environment. Callers must hold hydeMu.
+func (cli *ChatCLI) buildEmbeddingProviderLocked() embedding.Provider {
+	p, err := embedding.NewFromEnv()
+	if err != nil {
+		cli.logger.Warn("HyDE: embedding provider construction failed; falling back to null",
+			zap.Error(err))
+		return embedding.NewNull()
+	}
+	return p
+}
+
+// refreshEmbeddingProvider rebuilds the embedding provider from the
+// (re-loaded) environment and rewires every consumer that captured the
+// previous instance: /context semantic retrieval and the memory vector
+// index. Called by /config reload so a CHATCLI_EMBED_PROVIDER change
+// takes effect without restarting the process. Returns the previous and
+// current provider names so the caller can surface the transition.
+func (cli *ChatCLI) refreshEmbeddingProvider() (oldName, newName string) {
+	hydeMu.Lock()
+	old := hydeProvider
+	fresh := cli.buildEmbeddingProviderLocked()
+	hydeProvider = fresh
+	hydeProviderReady = true
+	hydeMu.Unlock()
+
+	if cli.contextHandler != nil {
+		if mgr := cli.contextHandler.GetManager(); mgr != nil {
+			mgr.AttachEmbeddingProvider(fresh)
+		}
+	}
+
+	// Swap the memory vector index only when one was already attached: a
+	// fresh index for the new provider (vindex auto-migrates on provider
+	// or dimension change), or a detach when embeddings were turned off.
+	// When none was attached, ensureHyDEVectors lazily attaches on the
+	// next turn and picks up the new provider by itself.
+	if cli.memoryStore != nil && cli.memoryStore.VectorIndex() != nil {
+		if embedding.IsNull(fresh) {
+			cli.memoryStore.AttachVectorIndex(nil)
+		} else if mgr := cli.memoryStore.Manager(); mgr != nil && mgr.MemoryDir() != "" {
+			cli.memoryStore.AttachVectorIndex(memory.NewVectorIndex(mgr.MemoryDir(), fresh, cli.logger))
+		}
+	}
+	return embeddingProviderLabel(old), embeddingProviderLabel(fresh)
+}
+
+// embeddingProviderLabel renders a provider name for status output;
+// nil/Null collapse to "null" so transitions compare cleanly.
+func embeddingProviderLabel(p embedding.Provider) string {
+	if embedding.IsNull(p) {
+		return "null"
+	}
+	return p.Name()
 }
 
 // hydeAugmenter constructs a per-call HyDE augmenter wrapping the
@@ -79,7 +135,7 @@ func (cli *ChatCLI) ensureHyDEVectors(qcfg quality.Config) {
 	provider := cli.hydeProviderForSession()
 	if embedding.IsNull(provider) {
 		cli.logger.Info("HyDE vectors requested but no embedding provider configured; using keyword-only retrieval",
-			zap.String("hint", "set CHATCLI_EMBED_PROVIDER=voyage|openai"))
+			zap.String("hint", "set CHATCLI_EMBED_PROVIDER=voyage|openai|bedrock"))
 		return
 	}
 	memDir := ""

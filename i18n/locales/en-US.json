@@ -147,6 +147,7 @@
   "status.reloading_config": "Reloading configurations...",
   "status.reload_success_preserved": "Configurations reloaded successfully! (current provider/model preserved)",
   "status.reload_fail_preserve": "Failed to preserve provider/model after reload; falling back to .env values",
+  "status.reload_embed_provider": "Embedding provider reconfigured: %s",
   "status.reload_success": "Configurations reloaded successfully!",
   "status.reload_fail_client": "Failed to reconfigure LLM client after reload.",
   "status.operation_canceled": "🛑 Operation canceled successfully!",
