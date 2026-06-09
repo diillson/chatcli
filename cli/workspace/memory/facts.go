@@ -137,12 +137,23 @@ func (fi *FactIndex) GetAll() []*Fact {
 	defer fi.mu.RUnlock()
 
 	fi.recalcScoresLocked()
+	return fi.sortedByScoreLocked()
+}
+
+// sortedByScoreLocked returns every fact ordered by temporal score descending,
+// with a deterministic id tie-break so output never depends on Go's randomized
+// map iteration order. The caller must hold at least a read lock and is
+// responsible for calling recalcScoresLocked first if fresh scores are needed.
+func (fi *FactIndex) sortedByScoreLocked() []*Fact {
 	facts := make([]*Fact, 0, len(fi.facts))
 	for _, f := range fi.facts {
 		facts = append(facts, f)
 	}
 	sort.Slice(facts, func(i, j int) bool {
-		return facts[i].Score > facts[j].Score
+		if facts[i].Score != facts[j].Score {
+			return facts[i].Score > facts[j].Score
+		}
+		return facts[i].ID < facts[j].ID
 	})
 	return facts
 }
@@ -213,6 +224,77 @@ func (fi *FactIndex) Search(keywords []string) []*Fact {
 		facts[i] = r.fact
 	}
 	return facts
+}
+
+// SearchBlended ranks facts by fusing three signals: semantic (cosine, passed
+// in as id→score), lexical (keyword/tag overlap) and temporal (recency ×
+// access). It is the ranking the HyDE path uses once a vector index is wired.
+//
+// Unlike Search (which multiplies temporal × lexical and is blind to cosine),
+// the candidate set here is the UNION of keyword matches and semantic hits, so
+// a fact found only by the vector store — the exact synonym/paraphrase case
+// keyword search misses — can still rank. Each signal is min-max normalized
+// across the candidates before the weighted sum (see blendCandidates), which is
+// what keeps the weights meaningful and provider-agnostic.
+//
+// semantic may be nil (no vector index / disabled); the blend then degrades to
+// lexical + temporal over the keyword matches. When both keywords and semantic
+// are empty it falls back to all facts by temporal score, matching Search's
+// empty-query behavior.
+func (fi *FactIndex) SearchBlended(keywords []string, semantic map[string]float64, w RankWeights) []*Fact {
+	fi.mu.RLock()
+	defer fi.mu.RUnlock()
+
+	fi.recalcScoresLocked()
+	w = w.normalized()
+
+	cands := make(map[string]*candidate, len(semantic)+8)
+
+	if len(keywords) > 0 {
+		for _, f := range fi.facts {
+			if rel := fi.computeRelevance(f, keywords); rel > 0 {
+				cands[f.ID] = &candidate{fact: f, lexical: rel, temporal: f.Score}
+			}
+		}
+	}
+
+	for id, sem := range semantic {
+		f, ok := fi.facts[id]
+		if !ok {
+			continue // vector for an archived/forgotten fact — skip
+		}
+		if c, exists := cands[id]; exists {
+			c.semantic = sem
+			continue
+		}
+		cands[id] = &candidate{fact: f, semantic: sem, temporal: f.Score}
+	}
+
+	if len(cands) == 0 {
+		if len(keywords) == 0 && len(semantic) == 0 {
+			return fi.sortedByScoreLocked()
+		}
+		return nil
+	}
+
+	list := make([]*candidate, 0, len(cands))
+	for _, c := range cands {
+		list = append(list, c)
+	}
+	blendCandidates(list, w)
+
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].final != list[j].final {
+			return list[i].final > list[j].final
+		}
+		return list[i].fact.ID < list[j].fact.ID // deterministic tie-break
+	})
+
+	out := make([]*Fact, len(list))
+	for i, c := range list {
+		out[i] = c.fact
+	}
+	return out
 }
 
 // MarkAccessed updates access metadata for retrieved facts.

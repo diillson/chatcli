@@ -54,38 +54,66 @@ func (r *RelevanceRetriever) SetWorkspaceDir(dir string) {
 // empty string to skip augmentation entirely (rare; callers usually
 // have at least one user message to feed in).
 func (r *RelevanceRetriever) RetrieveWithHyDE(ctx context.Context, query string, hints []string, augmenter *HyDEAugmenter, vectors *VectorIndex) string {
+	hasVectors := vectors != nil && vectors.Enabled()
+
+	// Strict no-regression: with neither augmenter nor a live vector index
+	// there is no semantic signal to fuse, so fall through to the exact
+	// keyword path callers relied on before HyDE existed.
+	if augmenter == nil && !hasVectors {
+		return r.Retrieve(hints)
+	}
+
+	// Phase 3a — widen the lexical net with hypothesis-derived keywords.
 	expanded := hints
 	if augmenter != nil {
 		expanded = augmenter.Augment(ctx, query, hints)
 	}
 
-	// Phase 3b: when a vector index is wired, embed the (augmented)
-	// query and union the cosine top-k fact ids with the keyword set.
-	// We surface vector hits by promoting them as additional keyword
-	// tokens (the fact id), but the truth is FactIndex.Search remains
-	// the canonical retriever — vectors only WIDEN the candidate set.
-	if vectors != nil && vectors.Enabled() && strings.TrimSpace(query) != "" {
+	// Phase 3b — embed the query and keep the cosine SCORES (not just the ids).
+	// Previously the top-k ids were dissolved back into keyword tokens, which
+	// threw away the very signal we paid an embedding call to compute. Now the
+	// scores flow straight into the blended ranker so a strong semantic match
+	// with zero keyword overlap can still surface.
+	var semantic map[string]float64
+	if hasVectors && strings.TrimSpace(query) != "" {
 		if vec, err := vectors.EmbedQuery(ctx, query); err == nil {
-			// Top-K cosine hits become additional hint tokens via the
-			// fact's content. We resolve ids to content here so the
-			// existing keyword scorer can re-rank cohesively.
-			topIDs := vectors.SimilarFacts(vec, 8)
-			if len(topIDs) > 0 {
-				for _, id := range topIDs {
-					if f, ok := r.facts.GetByID(id); ok {
-						expanded = mergeUniqueLowercase(expanded, ExtractKeywords([]string{f.Content}))
-					}
+			topK := r.config.VectorTopK
+			if topK <= 0 {
+				topK = 12
+			}
+			hits := vectors.SimilarFactsScored(vec, topK, r.config.MinCosineScore)
+			if len(hits) > 0 {
+				semantic = make(map[string]float64, len(hits))
+				for _, h := range hits {
+					semantic[h.ID] = h.Score
 				}
 			}
 		}
 	}
 
-	return r.Retrieve(expanded)
+	ranked := r.facts.SearchBlended(expanded, semantic, r.config.RankWeights)
+	return r.assemble(ranked)
 }
 
 // Retrieve returns memory context tailored to the current conversation.
 // hints are extracted from recent messages (keywords, topics mentioned).
+// It uses the lexical+temporal scorer (Search); the semantic blend is reserved
+// for the HyDE path, which is the only caller with a query to embed.
 func (r *RelevanceRetriever) Retrieve(hints []string) string {
+	var ranked []*Fact
+	if len(hints) > 0 {
+		ranked = r.facts.Search(hints)
+	} else {
+		ranked = r.facts.GetAll()
+	}
+	return r.assemble(ranked)
+}
+
+// assemble renders the budget-bounded memory context from a PRE-RANKED fact
+// list plus the always-on profile/projects/topics/daily/patterns sections.
+// Splitting this out lets Retrieve and RetrieveWithHyDE share one assembly path
+// while choosing their own fact ranking upstream.
+func (r *RelevanceRetriever) assemble(rankedFacts []*Fact) string {
 	budget := r.config.RetrievalBudget
 	if budget <= 0 {
 		budget = 4000
@@ -121,13 +149,9 @@ func (r *RelevanceRetriever) Retrieve(hints []string) string {
 		}
 	}
 
-	// 4. Relevant facts — the main section
-	var relevantFacts []*Fact
-	if len(hints) > 0 {
-		relevantFacts = r.facts.Search(hints)
-	} else {
-		relevantFacts = r.facts.GetAll()
-	}
+	// 4. Relevant facts — the main section. Already ranked by the caller
+	// (lexical+temporal via Retrieve, or the semantic blend via HyDE).
+	relevantFacts := rankedFacts
 
 	if len(relevantFacts) > 0 {
 		var factLines []string

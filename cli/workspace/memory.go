@@ -29,7 +29,9 @@ type MemoryStore struct {
 // NewMemoryStore creates a new memory store backed by the structured Manager.
 func NewMemoryStore(baseDir string, logger *zap.Logger) *MemoryStore {
 	memDir := filepath.Join(baseDir, "memory")
-	mgr := memory.NewManager(memDir, memory.DefaultConfig(), logger)
+	// ConfigFromEnv (not DefaultConfig) so the pre-existing CHATCLI_MEMORY_*
+	// overrides actually take effect on the structured-memory path.
+	mgr := memory.NewManager(memDir, memory.ConfigFromEnv(), logger)
 
 	return &MemoryStore{
 		manager:   mgr,
