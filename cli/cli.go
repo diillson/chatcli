@@ -451,6 +451,10 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// adapter is wired below once the memory store exists; until then
 		// the tool reports "memory not enabled" rather than panicking.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMemoryPlugin())
+		// @knowledge — pull-side of /context --mode knowledge: search, read
+		// and walk attached documentation corpora on demand. Adapter wired
+		// below once the context handler exists.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinKnowledgePlugin())
 		// Atomic read-only tools (Claude Code parity, Item 1). Narrow,
 		// flat-schema tools that route into the same engine as @coder
 		// read/search/tree but give the LLM a dedicated entry point —
@@ -556,6 +560,10 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// persist facts deterministically.
 		plugins.SetMemoryAdapter(&memoryPluginAdapter{cli: cli})
 	}
+
+	// Wire the @knowledge tool to this session's context manager so the agent
+	// can interrogate attached knowledge bases on demand.
+	plugins.SetKnowledgeAdapter(&knowledgePluginAdapter{cli: cli})
 
 	// Wire the @send tool to the gateway platform registry. Independent of
 	// the memory store and of the gateway daemon lifecycle: adapters are

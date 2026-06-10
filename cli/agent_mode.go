@@ -761,6 +761,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// Block 2 — tool descriptions (plugins) + session workspace hint.
 	// Merged into one cacheable block since they're always emitted as a pair.
 	toolsText := a.getToolContextString() + buildSessionWorkspaceHint()
+	// Attached knowledge bases ride in the same cacheable block: their index
+	// cards are deterministic (change only on attach/detach, like the plugin
+	// catalog) and they tell the model what the @knowledge tool can reach —
+	// the agent-mode counterpart of the chat pipeline's digest injection.
+	if kb := a.cli.knowledgeAgentBlock(); kb != "" {
+		toolsText += "\n\n" + kb
+	}
 
 	// Fase 5: Inject auto-activated skills (triggers + path globs) into the
 	// agent-mode system prompt. Also honors a `/<skill-name>` manual
