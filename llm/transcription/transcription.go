@@ -28,6 +28,14 @@ type Provider interface {
 	Transcribe(ctx context.Context, audio []byte, mimeType, filename, language string) (string, error)
 }
 
+// Provisioner is implemented by providers that download an engine or model on
+// first use. Callers with a startup phase (the gateway daemon) can invoke
+// EnsureReady in the background so the one-time download happens before the
+// first voice note arrives instead of during it.
+type Provisioner interface {
+	EnsureReady(ctx context.Context) error
+}
+
 // IsNull reports whether p is the disabled (no-op) provider — callers use it
 // to decide whether voice input is available without invoking it.
 func IsNull(p Provider) bool {

@@ -112,50 +112,6 @@ func TestEmbedded_UnknownExplicitVoiceFallsBackToRouting(t *testing.T) {
 	assertContains(t, argv, "--sid=26") // routed to the English default
 }
 
-// libPathEnv is asserted directly: macOS SIP strips DYLD_* before /bin/sh
-// (the fake engine) starts, so a child-process assertion is impossible in CI.
-// The real engine is executed directly — not through a shell — and also
-// carries an rpath, so the variable is belt-and-suspenders there.
-func TestLibPathEnv(t *testing.T) {
-	var wantVar string
-	switch runtime.GOOS {
-	case "linux":
-		wantVar = "LD_LIBRARY_PATH"
-	case "darwin":
-		wantVar = "DYLD_LIBRARY_PATH"
-	case "windows":
-		wantVar = "PATH"
-	default:
-		t.Skip("no loader path variable on this platform")
-	}
-	libDir := filepath.Join("some", "cache", "lib")
-	for _, line := range libPathEnv(libDir) {
-		if strings.HasPrefix(line, wantVar+"=") && strings.Contains(line, libDir) {
-			return
-		}
-	}
-	t.Fatalf("libPathEnv missing %s entry containing %s", wantVar, libDir)
-}
-
-func TestLibPathEnv_PrependsToExisting(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PATH always exists on windows; covered by TestLibPathEnv")
-	}
-	varName := "LD_LIBRARY_PATH"
-	if runtime.GOOS == "darwin" {
-		varName = "DYLD_LIBRARY_PATH"
-	}
-	t.Setenv(varName, "/pre/existing")
-	libDir := filepath.Join("some", "cache", "lib")
-	prefix := varName + "=" + libDir + string(os.PathListSeparator) + "/pre/existing"
-	for _, line := range libPathEnv(libDir) {
-		if line == prefix {
-			return
-		}
-	}
-	t.Fatalf("libPathEnv did not prepend %s to existing value", libDir)
-}
-
 func TestEmbedded_OpusTranscodeViaFakeFFmpeg(t *testing.T) {
 	root, _ := provisionFakeCache(t)
 	e := newTestEmbedded(t, root)

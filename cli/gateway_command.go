@@ -252,7 +252,26 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	sessions := newHubSessions(broker, cli.logger)
 	sessions.loadBindings(ctx)
 
-	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions), cli.logger, 0)
+	// Voice support: build the transcription provider once (self-hosted-first,
+	// per CHATCLI_TRANSCRIPTION_*). Null when nothing is usable — voice
+	// messages then get a friendly "enable transcription" reply instead of
+	// being silently dropped.
+	transcriber := transcription.NewFromEnv(cli.logger)
+	if !transcription.IsNull(transcriber) {
+		cli.logger.Info("gateway: voice transcription enabled", zap.String("provider", transcriber.Name()))
+	}
+	// Self-provisioning backends (embedded whisper) download their engine and
+	// model on first use; kick that off now, tied to the daemon lifetime, so
+	// the one-time fetch races startup instead of the first voice note.
+	if prov, ok := transcriber.(transcription.Provisioner); ok {
+		go func() {
+			if err := prov.EnsureReady(ctx); err != nil {
+				cli.logger.Warn("gateway: transcription engine provisioning failed", zap.Error(err))
+			}
+		}()
+	}
+
+	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions, transcriber), cli.logger, 0)
 	runner.SetThinkingNotice(i18n.T("gateway.thinking"))
 	runner.SetVoicePrefs(gateway.SharedVoicePrefs())
 	cli.maybeEnableVoiceReplies(runner)
@@ -381,18 +400,10 @@ func (cli *ChatCLI) teeLoggerToGatewayLog() func() {
 // while the gateway persona keeps the reply concise and chat-friendly. Runs
 // serialize because the loop mutates shared ChatCLI state (history,
 // lastAgentReply) and redirects os.Stdout for capture.
-func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions) gateway.AgentFunc {
+func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcription.Provider) gateway.AgentFunc {
 	var mu sync.Mutex
 
-	// Voice support: build the transcription provider once (self-hosted-first,
-	// per CHATCLI_TRANSCRIPTION_*). Null when nothing is configured — voice
-	// messages then get a friendly "enable transcription" reply instead of
-	// being silently dropped.
-	transcriber := transcription.NewFromEnv(cli.logger)
 	transcribeLang := strings.TrimSpace(os.Getenv("CHATCLI_TRANSCRIPTION_LANG"))
-	if !transcription.IsNull(transcriber) && cli.logger != nil {
-		cli.logger.Info("gateway: voice transcription enabled", zap.String("provider", transcriber.Name()))
-	}
 
 	// Voice output posture, resolved once: whether a synthesizer exists and the
 	// global mode. Per message this combines with the session preference so the

@@ -230,7 +230,7 @@
   "gateway.task_done": "Tarefa concluída.",
   "gateway.thinking": "🤔 Recebido — já estou processando…",
   "gateway.audio.transcribing": "🎙️ transcrevendo seu áudio…",
-  "gateway.audio.disabled": "🎙️ Recebi um áudio, mas a transcrição não está habilitada. Instale um whisper local (ex.: pipx install openai-whisper) que ele é usado automaticamente — ou configure CHATCLI_TRANSCRIPTION_URL / CHATCLI_TRANSCRIPTION_PROVIDER. Por enquanto, envie seu pedido em texto, por favor.",
+  "gateway.audio.disabled": "🎙️ Recebi um áudio, mas a transcrição não está habilitada. Configure CHATCLI_TRANSCRIPTION_PROVIDER=embedded para transcrição offline embutida (download único, sem API key) — ou instale um whisper local, ou configure CHATCLI_TRANSCRIPTION_URL. Por enquanto, envie seu pedido em texto, por favor.",
   "gateway.audio.failed": "🎙️ Não consegui transcrever esse áudio. Tente de novo ou envie em texto.",
   "gateway.audio.empty": "🎙️ Não identifiquei fala nesse áudio. Pode mandar em texto?",
   "gateway.persona_prompt": "You are answering through a messaging gateway: your reply is delivered as a chat message (Telegram, WhatsApp, Discord, Slack, …). Keep the final answer short, direct and in plain text — no tables, no banners, no ASCII art, and avoid long code blocks unless the user explicitly asked for code. Use your tools normally to read, create or edit files and run commands; the user only sees a brief action feed plus your final answer, so let the prose be a concise summary of what you did and the result.",

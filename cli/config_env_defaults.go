@@ -160,9 +160,10 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_BOOTSTRAP_ENABLED": {Value: "true", IsBool: true, Source: "bootstrap.go"},
 
 	// ─── Gateway: voice transcription ────────────────────────────
-	"CHATCLI_TRANSCRIPTION_PROVIDER":  {Value: "auto", Source: "transcription.NewFromEnv"},
-	"CHATCLI_TRANSCRIPTION_MODEL":     {Value: "whisper-1", Source: "transcription.defaultModel"},
+	"CHATCLI_TRANSCRIPTION_PROVIDER":  {Value: "auto", Source: "transcription.NewFromEnv: auto|embedded|command|url|groq|openai"},
+	"CHATCLI_TRANSCRIPTION_MODEL":     {Value: "whisper-1", Source: "transcription.defaultModel; embedded default base"},
 	"CHATCLI_TRANSCRIPTION_LANG":      {Value: "(auto)", Source: "transcription.NewFromEnv"},
+	"CHATCLI_TRANSCRIPTION_CACHE_DIR": {Value: "(os cache dir)", Source: "transcription embedded engine/model cache"},
 	"CHATCLI_GATEWAY_MAX_AUDIO_BYTES": {Value: "20971520", Source: "gateway.defaultMaxAudioBytes"},
 
 	// ─── Text-to-speech (@speak + gateway voice replies) ─────────
