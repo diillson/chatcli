@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.135.0](https://github.com/diillson/chatcli/compare/v1.134.0...v1.135.0) (2026-06-10)
+
+
+### Features
+
+* **transcription:** embedded offline Whisper STT via sherpa-onnx ([#1035](https://github.com/diillson/chatcli/issues/1035)) ([08749df](https://github.com/diillson/chatcli/commit/08749df172be14e807dbd95184b443a0cfe52940))
+
 ## [1.134.0](https://github.com/diillson/chatcli/compare/v1.133.0...v1.134.0) (2026-06-09)
 
 
