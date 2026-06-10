@@ -2,12 +2,14 @@
  * ChatCLI - Chat-mode controlled exception for ask_user.
  * Copyright (c) 2024 Edilson Freitas. License: Apache-2.0.
  *
- * Chat mode is tool-less by design. The ONE sanctioned exception: chat may use
- * EXACTLY ask_user (no exec/file/search tools). Native providers use a buffered
- * SendPromptWithTools turn; non-native ones (Claude OAuth) use a buffered XML
- * turn with the @ask format injected and the markup suppressed. In both cases
- * the turn is BUFFERED and the text RETURNED — handleChatTurnResult renders it;
- * printing here (after the alt-screen overlay) is what made the answer vanish.
+ * Chat mode is tool-less by design. Sanctioned exceptions only: ask_user
+ * (interactive choice) and — when a knowledge base is attached — read-only
+ * knowledge retrieval (chat_knowledge.go). No exec/file/search tools, ever.
+ * Native providers use a buffered SendPromptWithTools turn; non-native ones
+ * (Claude OAuth) use a buffered XML turn with the formats injected and the
+ * markup suppressed. In both cases the turn is BUFFERED and the text RETURNED
+ * — handleChatTurnResult renders it; printing here (after the alt-screen
+ * overlay) is what made the answer vanish.
  */
 package cli
 
@@ -47,7 +49,8 @@ func chatAskEnabled() bool {
 	}
 }
 
-// maybeChatAskTurn runs the chat ask_user exception when it is enabled. It
+// maybeChatAskTurn runs the chat-mode tool exceptions (ask_user and, when a
+// knowledge base is attached, read-only knowledge retrieval) when enabled. It
 // returns (response, handled, error): when handled is false the caller proceeds
 // with the normal streaming/buffered path.
 func (cli *ChatCLI) maybeChatAskTurn(
@@ -59,18 +62,21 @@ func (cli *ChatCLI) maybeChatAskTurn(
 	resolution SkillClientResolution,
 	stopSpinner func(),
 ) (string, bool, error) {
-	if !chatAskEnabled() {
+	askOn := chatAskEnabled()
+	kbOn := cli.chatKnowledgeActive()
+	if !askOn && !kbOn {
 		return "", false, nil
 	}
-	// Native tool-use providers: buffered decision turn offering only ask_user.
+	// Native tool-use providers: buffered decision turn offering only the
+	// sanctioned exception tools.
 	if tac, ok := client.AsToolAware(activeClient); ok && tac.SupportsNativeTools() {
 		out, err := cli.executeChatAskNative(ctx, tac, activeClient, userInput, additionalContext,
-			tempHistory, effectiveMaxTokens, resolution, stopSpinner)
+			tempHistory, effectiveMaxTokens, resolution, stopSpinner, askOn, kbOn)
 		return out, true, err
 	}
 	// Providers without native tools (e.g. Claude in OAuth mode): XML transport.
 	out, err := cli.executeChatAskXML(ctx, activeClient, userInput, additionalContext,
-		tempHistory, effectiveMaxTokens, stopSpinner)
+		tempHistory, effectiveMaxTokens, stopSpinner, askOn, kbOn)
 	return out, true, err
 }
 
@@ -86,7 +92,8 @@ func (cli *ChatCLI) finishSpinner(stopSpinner func()) {
 }
 
 // executeChatAskNative runs the buffered decision turn for native tool-use
-// providers, offering ONLY ask_user.
+// providers, offering only the enabled exception tools (ask_user, knowledge).
+// Knowledge calls loop for a bounded number of rounds before the answer.
 func (cli *ChatCLI) executeChatAskNative(
 	ctx context.Context,
 	tac client.ToolAwareClient,
@@ -96,50 +103,70 @@ func (cli *ChatCLI) executeChatAskNative(
 	effectiveMaxTokens int,
 	resolution SkillClientResolution,
 	stopSpinner func(),
+	askOn, kbOn bool,
 ) (string, error) {
-	tools := []models.ToolDefinition{workers.AskUserToolDefinition()}
+	var tools []models.ToolDefinition
+	if askOn {
+		tools = append(tools, workers.AskUserToolDefinition())
+	}
+	if kbOn {
+		tools = append(tools, knowledgeToolDefinition())
+	}
 	prompt := userInput + additionalContext
+	history := tempHistory
 
-	resp, err := tac.SendPromptWithTools(ctx, prompt, tempHistory, tools, effectiveMaxTokens)
-	if err != nil && cli.refreshClientOnAuthError(err) {
-		resp, err = tac.SendPromptWithTools(ctx, prompt, tempHistory, tools, effectiveMaxTokens)
-	}
-	if err != nil {
-		cli.finishSpinner(stopSpinner)
-		return "", err
-	}
-	if resp != nil && resp.Usage != nil && cli.costTracker != nil {
-		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, resp.Usage)
-	}
+	for round := 0; ; round++ {
+		resp, err := tac.SendPromptWithTools(ctx, prompt, history, tools, effectiveMaxTokens)
+		if err != nil && cli.refreshClientOnAuthError(err) {
+			resp, err = tac.SendPromptWithTools(ctx, prompt, history, tools, effectiveMaxTokens)
+		}
+		if err != nil {
+			cli.finishSpinner(stopSpinner)
+			return "", err
+		}
+		if resp != nil && resp.Usage != nil && cli.costTracker != nil {
+			cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, resp.Usage)
+		}
 
-	var askArgs string
-	if resp != nil {
-		for _, tc := range resp.ToolCalls {
-			if isAskToolName(tc.Name) {
-				askArgs = tc.ArgumentsJSON()
-				break
+		var askArgs, kbArgs string
+		if resp != nil {
+			for _, tc := range resp.ToolCalls {
+				switch {
+				case askOn && isAskToolName(tc.Name) && askArgs == "":
+					askArgs = tc.ArgumentsJSON()
+				case kbOn && isKnowledgeToolName(tc.Name) && kbArgs == "":
+					kbArgs = tc.ArgumentsJSON()
+				}
 			}
 		}
-	}
 
-	// No ask: the buffered content is the answer.
-	if askArgs == "" {
-		cli.finishSpinner(stopSpinner)
-		if resp != nil {
-			return resp.Content, nil
+		// Knowledge pull: execute, fold into the conversation, decide again.
+		if kbArgs != "" && round < chatKnowledgeMaxRounds {
+			result := cli.runChatKnowledge(ctx, kbArgs)
+			history, prompt = appendKnowledgeRound(history, prompt, kbArgs, result)
+			continue
 		}
-		return "", nil
-	}
 
-	// Ask: stop the spinner, render the overlay, then buffered follow-up.
-	cli.finishSpinner(stopSpinner)
-	result := cli.runChatAsk(ctx, askArgs)
-	return cli.chatAskFollowup(ctx, activeClient, userInput, additionalContext, tempHistory, result, effectiveMaxTokens)
+		// No ask: the buffered content is the answer.
+		if askArgs == "" {
+			cli.finishSpinner(stopSpinner)
+			if resp != nil {
+				return resp.Content, nil
+			}
+			return "", nil
+		}
+
+		// Ask: stop the spinner, render the overlay, then buffered follow-up.
+		// The accumulated history keeps any pulled passages in context.
+		cli.finishSpinner(stopSpinner)
+		result := cli.runChatAsk(ctx, askArgs)
+		return cli.chatAskFollowup(ctx, activeClient, prompt, "", history, result, effectiveMaxTokens)
+	}
 }
 
-// executeChatAskXML runs the buffered decision turn for providers WITHOUT native
-// tools, using an injected XML @ask format. Buffered so the raw <tool_call>
-// markup never streams to the screen.
+// executeChatAskXML runs the buffered decision turn for providers WITHOUT
+// native tools, using injected XML formats for the enabled exception tools.
+// Buffered so the raw <tool_call> markup never streams to the screen.
 func (cli *ChatCLI) executeChatAskXML(
 	ctx context.Context,
 	activeClient client.LLMClient,
@@ -147,42 +174,64 @@ func (cli *ChatCLI) executeChatAskXML(
 	tempHistory []models.Message,
 	effectiveMaxTokens int,
 	stopSpinner func(),
+	askOn, kbOn bool,
 ) (string, error) {
-	prompt := userInput + additionalContext + chatAskXMLInstruction()
-
-	resp, err := activeClient.SendPrompt(ctx, prompt, tempHistory, effectiveMaxTokens)
-	if cli.refreshClientOnAuthError(err) {
-		resp, err = activeClient.SendPrompt(ctx, prompt, tempHistory, effectiveMaxTokens)
+	instruction := ""
+	if askOn {
+		instruction += chatAskXMLInstruction()
 	}
-	if err != nil {
-		cli.finishSpinner(stopSpinner)
-		return "", err
+	if kbOn {
+		instruction += chatKnowledgeXMLInstruction()
 	}
+	prompt := userInput + additionalContext + instruction
+	history := tempHistory
 
-	calls, _ := agent.ParseToolCalls(resp)
-	var askArgs string
-	for _, tc := range calls {
-		if isAskToolName(tc.Name) {
-			askArgs = tc.Args
-			break
+	for round := 0; ; round++ {
+		resp, err := activeClient.SendPrompt(ctx, prompt, history, effectiveMaxTokens)
+		if cli.refreshClientOnAuthError(err) {
+			resp, err = activeClient.SendPrompt(ctx, prompt, history, effectiveMaxTokens)
 		}
-	}
+		if err != nil {
+			cli.finishSpinner(stopSpinner)
+			return "", err
+		}
 
-	// No ask: the buffered text is the answer, minus any stray tool-call markup.
-	if askArgs == "" {
-		cli.finishSpinner(stopSpinner)
-		clean := resp
+		calls, _ := agent.ParseToolCalls(resp)
+		var askArgs, kbArgs string
 		for _, tc := range calls {
-			if tc.Raw != "" {
-				clean = strings.ReplaceAll(clean, tc.Raw, "")
+			switch {
+			case askOn && isAskToolName(tc.Name) && askArgs == "":
+				askArgs = tc.Args
+			case kbOn && isKnowledgeToolName(tc.Name) && kbArgs == "":
+				kbArgs = tc.Args
 			}
 		}
-		return strings.TrimSpace(clean), nil
-	}
 
-	cli.finishSpinner(stopSpinner)
-	result := cli.runChatAsk(ctx, askArgs)
-	return cli.chatAskFollowup(ctx, activeClient, userInput, additionalContext, tempHistory, result, effectiveMaxTokens)
+		// Knowledge pull: execute, fold into the conversation, decide again.
+		// The continuation prompt re-pins the call format for the next round.
+		if kbArgs != "" && round < chatKnowledgeMaxRounds {
+			result := cli.runChatKnowledge(ctx, kbArgs)
+			history, prompt = appendKnowledgeRound(history, prompt, kbArgs, result)
+			prompt += chatKnowledgeXMLInstruction()
+			continue
+		}
+
+		// No ask: the buffered text is the answer, minus any stray tool-call markup.
+		if askArgs == "" {
+			cli.finishSpinner(stopSpinner)
+			clean := resp
+			for _, tc := range calls {
+				if tc.Raw != "" {
+					clean = strings.ReplaceAll(clean, tc.Raw, "")
+				}
+			}
+			return strings.TrimSpace(clean), nil
+		}
+
+		cli.finishSpinner(stopSpinner)
+		result := cli.runChatAsk(ctx, askArgs)
+		return cli.chatAskFollowup(ctx, activeClient, prompt, "", history, result, effectiveMaxTokens)
+	}
 }
 
 // runChatAsk renders the overlay for the parsed args and returns the formatted

@@ -40,6 +40,8 @@ func (cli *ChatCLI) routeConfigChat(args []string) {
 		cli.printConfigChatUsage()
 	case "ask":
 		cli.configChatAsk(args[1:])
+	case "knowledge", "kb":
+		cli.configChatKnowledge(args[1:])
 	case "on", "enable", "status", "off", "disable", "toggle":
 		// Allow the shorthand `/config chat on|off|toggle|status` too.
 		cli.configChatAsk(args)
@@ -70,23 +72,50 @@ func (cli *ChatCLI) configChatAsk(args []string) {
 	}
 }
 
+// configChatKnowledge handles `/config chat knowledge [on|off|toggle|status]`.
+func (cli *ChatCLI) configChatKnowledge(args []string) {
+	if len(args) == 0 {
+		cli.showConfigChat()
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "on", "enable", "true", "1", "yes":
+		cli.setChatToggle(chatKnowledgeEnvVar, "knowledge", chatKnowledgeEnabled(), true)
+	case "off", "disable", "false", "0", "no":
+		cli.setChatToggle(chatKnowledgeEnvVar, "knowledge", chatKnowledgeEnabled(), false)
+	case "toggle":
+		cli.setChatToggle(chatKnowledgeEnvVar, "knowledge", chatKnowledgeEnabled(), !chatKnowledgeEnabled())
+	case "status", "show":
+		cli.showConfigChat()
+	default:
+		fmt.Println(colorize("  ❌ "+i18n.T("cfg.chat.kb_invalid", args[0]), ColorRed))
+		fmt.Println(colorize("  "+i18n.T("cfg.chat.kb_valid"), ColorGray))
+	}
+}
+
 // setChatAsk flips CHATCLI_CHAT_ASK at runtime.
 func (cli *ChatCLI) setChatAsk(enable bool) {
-	prev := chatAskEnabled()
+	cli.setChatToggle(chatAskEnvVar, "ask_user", chatAskEnabled(), enable)
+}
+
+// setChatToggle flips one chat-exception env knob at runtime. The knobs are
+// read live each turn, so the change takes effect immediately; the hint points
+// to .env for a permanent default (user-owned territory, never rewritten).
+func (cli *ChatCLI) setChatToggle(envVar, feature string, prev, enable bool) {
 	val := "false"
 	if enable {
 		val = "true"
 	}
-	if err := os.Setenv(chatAskEnvVar, val); err != nil {
+	if err := os.Setenv(envVar, val); err != nil {
 		fmt.Println(colorize("  ❌ "+i18n.T("cfg.chat.set_failed", err.Error()), ColorRed))
 		return
 	}
 	if prev == enable {
-		fmt.Println(colorize("  ✔ "+i18n.T("cfg.chat.set_noop", chatStateLabel(enable)), ColorGray))
+		fmt.Println(colorize("  ✔ "+i18n.T("cfg.chat.set_noop_var", feature, chatStateLabel(enable)), ColorGray))
 	} else {
-		fmt.Println(colorize("  ✔ "+i18n.T("cfg.chat.set_ok", chatStateLabel(prev), chatStateLabel(enable)), ColorGreen))
+		fmt.Println(colorize("  ✔ "+i18n.T("cfg.chat.set_ok_var", feature, chatStateLabel(prev), chatStateLabel(enable)), ColorGreen))
 	}
-	fmt.Println(colorize("    "+i18n.T("cfg.chat.persist_hint", val), ColorGray))
+	fmt.Println(colorize("    "+i18n.T("cfg.chat.persist_hint_var", envVar, val), ColorGray))
 }
 
 // chatStateLabel maps a bool to the localized enabled/disabled label.
@@ -106,6 +135,8 @@ func (cli *ChatCLI) showConfigChat() {
 
 	kv(p, chatAskEnvVar, envBool(chatAskEnvVar))
 	kv(p, i18n.T("cfg.chat.ask_effective"), chatStateLabel(chatAskEnabled()))
+	kv(p, chatKnowledgeEnvVar, envBool(chatKnowledgeEnvVar))
+	kv(p, i18n.T("cfg.chat.kb_effective"), chatStateLabel(chatKnowledgeEnabled()))
 
 	// Both native (API key) and XML (OAuth) providers work; report which path
 	// the active provider will take so the user knows what to expect.
@@ -144,6 +175,7 @@ func (cli *ChatCLI) getConfigChatSuggestions(d prompt.Document) []prompt.Suggest
 	if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
 		subs := []prompt.Suggest{
 			{Text: "ask", Description: i18n.T("complete.config.chat_ask")},
+			{Text: "knowledge", Description: i18n.T("complete.config.chat_knowledge")},
 			{Text: "on", Description: i18n.T("complete.config.chat_on")},
 			{Text: "off", Description: i18n.T("complete.config.chat_off")},
 			{Text: "toggle", Description: i18n.T("complete.config.chat_toggle")},
@@ -152,8 +184,8 @@ func (cli *ChatCLI) getConfigChatSuggestions(d prompt.Document) []prompt.Suggest
 		return prompt.FilterHasPrefix(subs, word, true)
 	}
 
-	// /config chat ask <TAB>
-	if len(args) >= 3 && strings.ToLower(args[2]) == "ask" {
+	// /config chat ask|knowledge <TAB>
+	if len(args) >= 3 && (strings.ToLower(args[2]) == "ask" || strings.ToLower(args[2]) == "knowledge") {
 		if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
 			vals := []prompt.Suggest{
 				{Text: "on", Description: i18n.T("complete.config.chat_on")},
@@ -174,6 +206,8 @@ func (cli *ChatCLI) printConfigChatUsage() {
 	fmt.Println("  /config chat ask on           # " + i18n.T("cfg.chat.usage_on"))
 	fmt.Println("  /config chat ask off          # " + i18n.T("cfg.chat.usage_off"))
 	fmt.Println("  /config chat ask toggle       # " + i18n.T("cfg.chat.usage_toggle"))
+	fmt.Println("  /config chat knowledge on     # " + i18n.T("cfg.chat.usage_kb_on"))
+	fmt.Println("  /config chat knowledge off    # " + i18n.T("cfg.chat.usage_kb_off"))
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("cfg.chat.usage_note"), ColorGray))
 }
