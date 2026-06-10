@@ -35,6 +35,12 @@ type Manager struct {
 	// via AttachEmbeddingProvider. nil/disabled → --rag attachments degrade to the
 	// legacy whole-content path, so retrieval is purely additive.
 	retrieval *RetrievalEngine
+
+	// digestMu/digestCache memoize the knowledge index card per context
+	// revision: prompt assembly runs every turn and the digest walk is
+	// O(corpus), so recomputing it per turn scales with the corpus for free.
+	digestMu    sync.Mutex
+	digestCache map[string]knowledgeDigestEntry
 }
 
 // AttachEmbeddingProvider wires (or rewires) the embedding provider that powers
@@ -291,8 +297,13 @@ func (m *Manager) DeleteContext(contextID string) error {
 		return fmt.Errorf("erro ao deletar contexto do disco: %w", err)
 	}
 
-	// Deletar da memória
+	// Deletar da memória + caches derivados (lexical/vetorial em RAM, vetores
+	// persistidos em disco e o digest memoizado) — nada órfão sobrevive.
 	delete(m.contexts, contextID)
+	m.retrieval.DropCache(contextID)
+	m.digestMu.Lock()
+	delete(m.digestCache, contextID)
+	m.digestMu.Unlock()
 
 	m.logger.Info("Contexto deletado",
 		zap.String("id", contextID),
@@ -610,7 +621,7 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 		if ctx.Mode == ModeKnowledge {
 			messages = append(messages, models.Message{
 				Role:    promptRole(opts.Role),
-				Content: BuildKnowledgeDigest(ctx, 0),
+				Content: m.KnowledgeDigest(ctx),
 			})
 			continue
 		}

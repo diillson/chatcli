@@ -129,13 +129,14 @@ func (cli *ChatCLI) knowledgeAgentBlock() string {
 	if sessionID == "" {
 		sessionID = "default"
 	}
-	kbs := cli.contextHandler.GetManager().AttachedKnowledge(sessionID)
+	mgr := cli.contextHandler.GetManager()
+	kbs := mgr.AttachedKnowledge(sessionID)
 	if len(kbs) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	for _, fc := range kbs {
-		b.WriteString(ctxmgr.BuildKnowledgeDigest(fc, 0))
+		b.WriteString(mgr.KnowledgeDigest(fc))
 		b.WriteString("\n")
 	}
 	b.WriteString("Use the @knowledge tool to work with these bases: search passages, read full documents with get (paged), inspect coverage with toc. Ground answers in retrieved content and cite source paths.")
