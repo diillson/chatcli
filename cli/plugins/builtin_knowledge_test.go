@@ -7,6 +7,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -119,6 +120,34 @@ func TestKnowledgePlugin_Validation(t *testing.T) {
 	}
 	if _, err := p.Execute(context.Background(), nil); err == nil {
 		t.Error("empty args must error with an example")
+	}
+}
+
+func TestKnowledgePlugin_Metadata(t *testing.T) {
+	p := NewBuiltinKnowledgePlugin()
+	if p.Name() != "@knowledge" || p.Version() == "" || p.Path() != "" {
+		t.Errorf("metadata: name=%q version=%q path=%q", p.Name(), p.Version(), p.Path())
+	}
+	if d := p.Description(); !strings.Contains(d, "knowledge bases") {
+		t.Errorf("Description = %q", d)
+	}
+	if u := p.Usage(); !strings.Contains(u, `"cmd":"search"`) {
+		t.Errorf("Usage must show the envelope example, got %q", u)
+	}
+	var schema struct {
+		Subcommands []struct {
+			Name string `json:"name"`
+		} `json:"subcommands"`
+	}
+	if err := json.Unmarshal([]byte(p.Schema()), &schema); err != nil {
+		t.Fatalf("Schema is not valid JSON: %v", err)
+	}
+	got := make([]string, 0, len(schema.Subcommands))
+	for _, s := range schema.Subcommands {
+		got = append(got, s.Name)
+	}
+	if strings.Join(got, ",") != "search,get,toc,list" {
+		t.Errorf("Schema subcommands = %v", got)
 	}
 }
 

@@ -59,6 +59,7 @@ type envDefault struct {
 var envDefaults = map[string]envDefault{
 	// ─── General / process ───────────────────────────────────────
 	"CHATCLI_CHAT_ASK":              {Value: "true", IsBool: true, Source: "chat_ask.go"},
+	"CHATCLI_CHAT_KNOWLEDGE":        {Value: "true", IsBool: true, Source: "chat_knowledge.go"},
 	"CHATCLI_DEBUG":                 {Value: "false", IsBool: true, Source: "logger.SetupLogger"},
 	"CHATCLI_DISABLE_VERSION_CHECK": {Value: "false", IsBool: true, Source: "version_checker.go"},
 	"CHATCLI_LOG_COMPRESS":          {Value: "false", IsBool: true, Source: "logger.go"},
