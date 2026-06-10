@@ -245,7 +245,7 @@ func (cli *ChatCLI) renderChannelTriggerBanner() bool {
 	fmt.Println(uiBox("📡", i18n.T("chan.banner.title"), ColorPurple))
 	p := uiPrefix(ColorPurple)
 	if unread > 0 {
-		fmt.Println(p + colorize(fmt.Sprintf(i18n.T("chan.banner.unread"), unread), ColorYellow))
+		fmt.Println(p + colorize(i18n.T("chan.banner.unread", unread), ColorYellow))
 	}
 	for _, a := range notify {
 		fmt.Println(p + renderTriggerLine(a))
@@ -308,7 +308,7 @@ func (cli *ChatCLI) drainPendingAutoTriggers() bool {
 // unambiguous that the work was started by a trigger, not by user
 // input.
 func (cli *ChatCLI) runAutoTriggerAction(action triggers.Action) {
-	header := fmt.Sprintf(i18n.T("chan.trigger.auto_header"),
+	header := i18n.T("chan.trigger.auto_header",
 		action.Rule.Name, action.Event.ServerName, action.Event.Channel)
 	fmt.Println()
 	fmt.Println(uiBox("🤖", header, ColorCyan))

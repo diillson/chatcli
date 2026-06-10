@@ -89,7 +89,7 @@ func (cli *ChatCLI) runChannelInject(ch interface {
 func (cli *ChatCLI) runChannelAck() {
 	notify, unread := cli.channelTriggerAck()
 	fmt.Println(colorize(
-		fmt.Sprintf("  ✓ "+i18n.T("chan.cmd.ack_done"), notify, unread),
+		"  ✓ "+i18n.T("chan.cmd.ack_done", notify, unread),
 		ColorGreen))
 }
 
@@ -125,7 +125,7 @@ func (cli *ChatCLI) runChannelList(ch channelLister, channelFilter string) {
 
 	title := i18n.T("chan.cmd.box_title")
 	if channelFilter != "" {
-		title = fmt.Sprintf(i18n.T("chan.cmd.box_title_filtered"), channelFilter)
+		title = i18n.T("chan.cmd.box_title_filtered", channelFilter)
 	}
 
 	fmt.Println()
@@ -145,8 +145,9 @@ func (cli *ChatCLI) runChannelList(ch channelLister, channelFilter string) {
 				truncateStr(m.Content, 60)))
 		}
 		fmt.Println(p)
-		fmt.Println(p + fmt.Sprintf("  %s%s:%s "+i18n.T("chan.cmd.total_messages"),
-			ColorGray, i18n.T("chan.cmd.total_label"), ColorReset, ch.Count()))
+		fmt.Println(p + fmt.Sprintf("  %s%s:%s ",
+			ColorGray, i18n.T("chan.cmd.total_label"), ColorReset) +
+			i18n.T("chan.cmd.total_messages", ch.Count()))
 		if u := ch.Unread(); u > 0 {
 			fmt.Println(p + colorize(
 				fmt.Sprintf("  %s: %d", i18n.T("chan.cmd.unread_label"), u),
@@ -180,7 +181,7 @@ func (cli *ChatCLI) runChannelRules(args []string) {
 			fmt.Println(colorize("  ✗ "+err.Error(), ColorYellow))
 			return
 		}
-		fmt.Println(colorize(fmt.Sprintf("  ✓ "+i18n.T("chan.cmd.rules_reloaded"), n), ColorGreen))
+		fmt.Println(colorize("  ✓ "+i18n.T("chan.cmd.rules_reloaded", n), ColorGreen))
 		return
 	}
 	rules := cli.channelTriggerRules()
@@ -241,7 +242,7 @@ func (cli *ChatCLI) runChannelConfirm(args []string) {
 		return
 	}
 	if !accept {
-		fmt.Println(colorize(fmt.Sprintf("  "+i18n.T("chan.cmd.confirm_denied"), id), ColorGray))
+		fmt.Println(colorize("  "+i18n.T("chan.cmd.confirm_denied", id), ColorGray))
 	}
 }
 

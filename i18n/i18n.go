@@ -19,6 +19,16 @@ var printer *message.Printer
 var activeTag language.Tag
 var initOnce sync.Once
 
+// rawByTag holds the untemplated catalog strings per language. T consults it
+// for ARGLESS lookups: x/text's printer always formats the message, so asking
+// it for a string that contains verbs (%s, %d, %w error templates, a literal
+// "90%") without arguments stamps %!x(MISSING) into user-facing text and
+// corrupts fmt.Errorf wrapping templates. Argless reads must be verbatim.
+var rawByTag = map[language.Tag]map[string]string{}
+
+// rawTag is the registered tag whose raw catalog matches the active printer.
+var rawTag = defaultLang
+
 // defaultLang é o idioma padrão caso a detecção falhe.
 var defaultLang = language.English
 
@@ -85,6 +95,7 @@ func initI18n() {
 			continue
 		}
 
+		rawByTag[tag] = translations
 		for key, value := range translations {
 			if err := message.SetString(tag, key, value); err != nil {
 				fmt.Printf("aviso i18n: falha ao definir a string para a chave '%s': %v\n", key, err)
@@ -94,10 +105,15 @@ func initI18n() {
 
 	// 3. Criar um matcher para encontrar o melhor idioma disponível.
 	matcher := language.NewMatcher(registeredTags)
-	bestTag, _, _ := matcher.Match(userLang)
+	bestTag, idx, _ := matcher.Match(userLang)
 
-	// 4. Configurar o printer global para o melhor idioma encontrado.
+	// 4. Configurar o printer global para o melhor idioma encontrado. O raw
+	// catalog é indexado pela tag REGISTRADA (o matcher pode devolver uma tag
+	// com extensões que não é chave do mapa).
 	activeTag = bestTag
+	if idx >= 0 && idx < len(registeredTags) {
+		rawTag = registeredTags[idx]
+	}
 	printer = message.NewPrinter(bestTag)
 }
 
@@ -108,7 +124,11 @@ func ActiveTag() language.Tag {
 }
 
 // T é a função principal para obter uma string traduzida.
-// Ela usa o printer global para formatar a mensagem com a chave e os argumentos fornecidos.
+// Com args, usa o printer global para formatar a mensagem. SEM args, devolve
+// a string crua do catálogo (com %% desescapado): o Sprintf do x/text
+// formataria mesmo assim e estamparia %!s(MISSING) em qualquer valor com
+// verbos — incluindo os templates de erro com %w, que precisam chegar
+// intactos ao fmt.Errorf do chamador.
 // Se o sistema i18n não for inicializado, retorna a chave como fallback.
 func T(key string, args ...interface{}) string {
 	if printer == nil {
@@ -119,5 +139,26 @@ func T(key string, args ...interface{}) string {
 		}
 		return key
 	}
+	if len(args) == 0 {
+		if v, ok := rawLookup(key); ok {
+			return strings.ReplaceAll(v, "%%", "%")
+		}
+	}
 	return printer.Sprintf(key, args...)
+}
+
+// rawLookup resolves key in the active language's raw catalog, falling back
+// to the default language (mirroring the matcher's fallback chain).
+func rawLookup(key string) (string, bool) {
+	if m, ok := rawByTag[rawTag]; ok {
+		if v, ok := m[key]; ok {
+			return v, true
+		}
+	}
+	if m, ok := rawByTag[defaultLang]; ok {
+		if v, ok := m[key]; ok {
+			return v, true
+		}
+	}
+	return "", false
 }

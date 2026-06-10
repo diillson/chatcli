@@ -50,7 +50,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 
 	// Aplica overrides de provider/model
 	if err := cli.ApplyOverrides(cli.manager, opts.Provider, opts.Model); err != nil {
-		fmt.Fprintln(os.Stderr, i18n.T("manager.error_provider_not_supported")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
+		fmt.Fprintln(os.Stderr, i18n.T("manager.error_provider_not_supported", opts.Provider)+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
 		cli.logger.Fatal("Erro ao aplicar provider/model via flags", zap.Error(err))
 	}
 
