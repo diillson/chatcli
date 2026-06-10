@@ -54,10 +54,17 @@ type RetrievalEngine struct {
 	segOpts  SegmentOptions
 	logger   *zap.Logger
 
-	// lexMu guards lexCache, the per-context segment list + BM25 index reused
-	// across turns until the context changes (fingerprint mismatch).
-	lexMu    sync.Mutex
-	lexCache map[string]*lexCacheEntry
+	// lex memoizes per-context segment lists + BM25 indexes, reused across
+	// turns until the context changes (fingerprint mismatch). Held behind a
+	// pointer so the engine struct stays comparable — its published API shape
+	// — and so copies share one cache instead of tearing a mutex.
+	lex *lexCacheStore
+}
+
+// lexCacheStore is the shared, locked cache of lexical derivations.
+type lexCacheStore struct {
+	mu      sync.Mutex
+	entries map[string]*lexCacheEntry
 }
 
 // lexCacheEntry memoizes the expensive per-context derivations.
@@ -79,7 +86,7 @@ func NewRetrievalEngine(provider embedding.Provider, baseDir string, logger *zap
 		provider: provider,
 		baseDir:  baseDir,
 		logger:   logger,
-		lexCache: make(map[string]*lexCacheEntry),
+		lex:      &lexCacheStore{entries: make(map[string]*lexCacheEntry)},
 	}
 }
 
@@ -256,15 +263,20 @@ func (e *RetrievalEngine) vectorScores(ctx context.Context, fc *FileContext, seg
 // lexicalFor returns the cached segment list and BM25 index for fc, rebuilding
 // both when the context changed since the last call.
 func (e *RetrievalEngine) lexicalFor(fc *FileContext) ([]Segment, *lexicalIndex) {
+	if e.lex == nil {
+		// Engine built without the constructor (zero value): compute uncached.
+		segs := SegmentFiles(fc.Files, e.segOpts)
+		return segs, newLexicalIndex(segs)
+	}
 	fp := fmt.Sprintf("%s|%d|%d", fc.UpdatedAt.UTC().Format("20060102T150405.000"), fc.FileCount, fc.TotalSize)
-	e.lexMu.Lock()
-	defer e.lexMu.Unlock()
-	if entry, ok := e.lexCache[fc.ID]; ok && entry.fingerprint == fp {
+	e.lex.mu.Lock()
+	defer e.lex.mu.Unlock()
+	if entry, ok := e.lex.entries[fc.ID]; ok && entry.fingerprint == fp {
 		return entry.segs, entry.lex
 	}
 	segs := SegmentFiles(fc.Files, e.segOpts)
 	entry := &lexCacheEntry{fingerprint: fp, segs: segs, lex: newLexicalIndex(segs)}
-	e.lexCache[fc.ID] = entry
+	e.lex.entries[fc.ID] = entry
 	return entry.segs, entry.lex
 }
 
@@ -291,9 +303,11 @@ func (e *RetrievalEngine) DropCache(contextID string) {
 	if e == nil {
 		return
 	}
-	e.lexMu.Lock()
-	delete(e.lexCache, contextID)
-	e.lexMu.Unlock()
+	if e.lex != nil {
+		e.lex.mu.Lock()
+		delete(e.lex.entries, contextID)
+		e.lex.mu.Unlock()
+	}
 	idx := vindex.New(e.vectorPath(contextID), e.provider, vindex.WithLogger(e.logger))
 	idx.Prune(map[string]struct{}{}) // empty keep-set → drops all + removes file
 }

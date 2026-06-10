@@ -188,7 +188,7 @@ func (v *Validator) ValidateContext(ctx *FileContext) *ValidationResult {
 					float64(ctx.TotalSize)/1024/1024))
 		}
 
-		// Calcular uso estimado de tokens
+		// Uso estimado de tokens
 		estimatedTokens := int(ctx.TotalSize / 4) // ~4 chars por token
 		if estimatedTokens > 50000 {
 			result.Warnings = append(result.Warnings,
