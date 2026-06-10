@@ -17,7 +17,7 @@ import (
 
 // ErrDisabled is returned by the null provider. Callers compare against it
 // (errors.Is) to surface a configuration hint rather than a generic failure.
-var ErrDisabled = errors.New("transcription: no backend configured — set CHATCLI_TRANSCRIPTION_PROVIDER=embedded (offline, no key), CHATCLI_TRANSCRIPTION_URL (self-hosted) or a cloud key")
+var ErrDisabled = errors.New("transcription: no backend configured — set CHATCLI_TRANSCRIPTION_URL (self-hosted) or CHATCLI_TRANSCRIPTION_PROVIDER")
 
 // Null is the disabled provider.
 type Null struct{}
