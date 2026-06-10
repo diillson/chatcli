@@ -271,9 +271,12 @@ func describeFlag(command, flag string, values []prompt.Suggest) string {
 	if key, ok := flagDescriptionKeys[flag]; ok {
 		return i18n.T(key)
 	}
-	desc := fmt.Sprintf(i18n.T("complete.generic.option_for"), command)
+	// NOTE: format args must go THROUGH i18n.T — x/text's printer formats the
+	// message itself, so fetching the template argless renders %!d(MISSING)
+	// into the text before an outer fmt.Sprintf could fill it.
+	desc := i18n.T("complete.generic.option_for", command)
 	if len(values) > 0 {
-		desc += " " + fmt.Sprintf(i18n.T("complete.generic.values_suffix"),
+		desc += " " + i18n.T("complete.generic.values_suffix",
 			strings.Join(extractTexts(values), ", "))
 	}
 	return desc
@@ -789,7 +792,7 @@ func (cli *ChatCLI) getChunkNumberSuggestions(contextName string) []prompt.Sugge
 	for _, chunk := range ctx.Chunks {
 		suggestions = append(suggestions, prompt.Suggest{
 			Text: fmt.Sprintf("%d", chunk.Index),
-			Description: fmt.Sprintf(i18n.T("complete.context.chunk_desc_fmt"),
+			Description: i18n.T("complete.context.chunk_desc_fmt",
 				chunk.Index,
 				chunk.TotalChunks,
 				chunk.Description,
@@ -814,13 +817,13 @@ func (cli *ChatCLI) getContextNameSuggestions() []prompt.Suggest {
 		var descParts []string
 
 		// Adicionar modo
-		descParts = append(descParts, fmt.Sprintf(i18n.T("complete.context.name_mode_fmt"), ctx.Mode))
+		descParts = append(descParts, i18n.T("complete.context.name_mode_fmt", ctx.Mode))
 
 		// Adicionar contagem de arquivos ou chunks
 		if ctx.IsChunked {
-			descParts = append(descParts, fmt.Sprintf(i18n.T("complete.context.name_chunks_fmt"), len(ctx.Chunks)))
+			descParts = append(descParts, i18n.T("complete.context.name_chunks_fmt", len(ctx.Chunks)))
 		} else {
-			descParts = append(descParts, fmt.Sprintf(i18n.T("complete.context.name_files_fmt"), ctx.FileCount))
+			descParts = append(descParts, i18n.T("complete.context.name_files_fmt", ctx.FileCount))
 		}
 
 		// Adicionar tamanho
@@ -833,7 +836,7 @@ func (cli *ChatCLI) getContextNameSuggestions() []prompt.Suggest {
 
 		// Adicionar tags se houver
 		if len(ctx.Tags) > 0 {
-			descParts = append(descParts, fmt.Sprintf(i18n.T("complete.context.name_tags_fmt"), strings.Join(ctx.Tags, ",")))
+			descParts = append(descParts, i18n.T("complete.context.name_tags_fmt", strings.Join(ctx.Tags, ",")))
 		}
 
 		desc := strings.Join(descParts, " | ")
