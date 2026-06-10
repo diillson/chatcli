@@ -111,10 +111,11 @@ func (v *Validator) ValidateTags(tags []string) error {
 // ValidateMode valida o modo de processamento
 func (v *Validator) ValidateMode(mode ProcessingMode) error {
 	validModes := map[ProcessingMode]bool{
-		ModeFull:    true,
-		ModeSummary: true,
-		ModeChunked: true,
-		ModeSmart:   true,
+		ModeFull:      true,
+		ModeSummary:   true,
+		ModeChunked:   true,
+		ModeSmart:     true,
+		ModeKnowledge: true,
 	}
 
 	if !validModes[mode] {
@@ -178,18 +179,22 @@ func (v *Validator) ValidateContext(ctx *FileContext) *ValidationResult {
 			fmt.Sprintf("número alto de arquivos (%d) pode afetar performance", ctx.FileCount))
 	}
 
-	if ctx.TotalSize > 50*1024*1024 {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("tamanho grande (%.2f MB) pode consumir muitos tokens",
-				float64(ctx.TotalSize)/1024/1024))
-	}
+	// Knowledge mode nunca injeta o corpus inteiro (digest + top-K por turno),
+	// então os avisos de custo por tamanho não se aplicam.
+	if ctx.Mode != ModeKnowledge {
+		if ctx.TotalSize > 50*1024*1024 {
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("tamanho grande (%.2f MB) pode consumir muitos tokens",
+					float64(ctx.TotalSize)/1024/1024))
+		}
 
-	// Calcular uso estimado de tokens
-	estimatedTokens := int(ctx.TotalSize / 4) // ~4 chars por token
-	if estimatedTokens > 50000 {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("uso estimado de ~%d tokens pode exceder limites de alguns modelos",
-				estimatedTokens))
+		// Calcular uso estimado de tokens
+		estimatedTokens := int(ctx.TotalSize / 4) // ~4 chars por token
+		if estimatedTokens > 50000 {
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("uso estimado de ~%d tokens pode exceder limites de alguns modelos",
+					estimatedTokens))
+		}
 	}
 
 	return result

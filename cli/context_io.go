@@ -168,12 +168,31 @@ func (h *ContextHandler) printAttachFeedback(ctx *ctxmgr.FileContext, flags atta
 		}
 	}
 
+	if ctx.Mode == ctxmgr.ModeKnowledge {
+		printKnowledgeAttachFeedback(ctx)
+		return
+	}
+
 	if len(flags.selectedChunks) > 0 {
 		printSelectedChunksFeedback(ctx, flags.selectedChunks)
 	} else {
 		printWholeContextFeedback(ctx)
 	}
 	printTokenCostFeedback(ctx)
+}
+
+// printKnowledgeAttachFeedback reports the index-card economics of a knowledge
+// attachment: the corpus stays out of the prompt, only the digest plus the
+// per-turn retrieved passages are paid for.
+func printKnowledgeAttachFeedback(ctx *ctxmgr.FileContext) {
+	digestTokens := int64(len(ctxmgr.BuildKnowledgeDigest(ctx, 0))) / 4
+	fmt.Printf("  %s %s\n",
+		colorize(i18n.T("context.io.label.attached"), ColorCyan),
+		i18n.T("context.io.knowledge_attached", ctx.FileCount, float64(ctx.TotalSize)/1024/1024))
+	fmt.Printf("  %s ~%s tokens/turno %s\n",
+		colorize(i18n.T("context.io.label.estimated_cost"), ColorGray),
+		formatTokenCount(digestTokens),
+		i18n.T("context.io.knowledge_cost_note"))
 }
 
 func printSelectedChunksFeedback(ctx *ctxmgr.FileContext, selected []int) {

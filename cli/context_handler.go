@@ -167,10 +167,11 @@ func (h *ContextHandler) handleCreate(args []string) error {
 
 		// Validar modo
 		validModes := map[ctxmgr.ProcessingMode]bool{
-			ctxmgr.ModeFull:    true,
-			ctxmgr.ModeSummary: true,
-			ctxmgr.ModeChunked: true,
-			ctxmgr.ModeSmart:   true,
+			ctxmgr.ModeFull:      true,
+			ctxmgr.ModeSummary:   true,
+			ctxmgr.ModeChunked:   true,
+			ctxmgr.ModeSmart:     true,
+			ctxmgr.ModeKnowledge: true,
 		}
 
 		if !validModes[mode] {
