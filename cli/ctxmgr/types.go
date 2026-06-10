@@ -19,6 +19,10 @@ const (
 	ModeSummary ProcessingMode = "summary" // Apenas estrutura
 	ModeChunked ProcessingMode = "chunked" // Dividido em chunks
 	ModeSmart   ProcessingMode = "smart"   // Seleção inteligente
+	// ModeKnowledge é retrieval-first: o attach injeta só um index card e os
+	// trechos relevantes são recuperados por turno (BM25 keyless + embeddings
+	// quando configurados) — corpora de vários MB sem estourar a janela.
+	ModeKnowledge ProcessingMode = "knowledge"
 )
 
 // FileContext representa um contexto gerenciado contendo arquivos e metadados

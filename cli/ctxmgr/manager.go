@@ -38,15 +38,13 @@ type Manager struct {
 }
 
 // AttachEmbeddingProvider wires (or rewires) the embedding provider that powers
-// semantic /context retrieval. Passing a Null/absent provider leaves retrieval
-// disabled. Safe to call once at startup; provider-agnostic across all backends.
+// semantic /context retrieval. A Null/absent provider still yields a live
+// engine: Enabled() stays false (so --rag attachments degrade to whole content
+// exactly as before), while knowledge-mode hybrid retrieval keeps its keyless
+// BM25 floor. Safe to call once at startup; provider-agnostic across backends.
 func (m *Manager) AttachEmbeddingProvider(provider embedding.Provider) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if embedding.IsNull(provider) {
-		m.retrieval = nil
-		return
-	}
 	m.retrieval = NewRetrievalEngine(provider, m.Storage.basePath, m.logger)
 }
 
@@ -109,10 +107,44 @@ func (m *Manager) CreateContext(name, description string, paths []string, mode P
 		}
 	}
 
-	// Processar arquivos baseado no modo
-	files, scanOpts, err := m.processor.ProcessPaths(paths, mode)
-	if err != nil {
-		return nil, fmt.Errorf("erro ao processar arquivos: %w", err)
+	// Processar arquivos baseado no modo. Em knowledge mode, arquivos .jsonl
+	// são corpora docs-flatten e entram pelo parser nativo (um FileInfo por
+	// chunk, preservando source/título/proveniência); demais caminhos seguem
+	// pelo scanner normal, então diretórios de docs também viram knowledge.
+	knowledgeMeta := map[string]string{}
+	var files []utils.FileInfo
+	var scanPaths []string
+	if mode == ModeKnowledge {
+		for _, p := range paths {
+			if !isJSONLPath(p) {
+				scanPaths = append(scanPaths, p)
+				continue
+			}
+			expanded, expandErr := utils.ExpandPath(p)
+			if expandErr != nil {
+				expanded = p
+			}
+			kfiles, kmeta, ingestErr := ingestKnowledgeJSONL(expanded, m.logger)
+			if ingestErr != nil {
+				return nil, ingestErr
+			}
+			files = append(files, kfiles...)
+			for k, v := range kmeta {
+				knowledgeMeta[k] = v
+			}
+		}
+	} else {
+		scanPaths = paths
+	}
+
+	scanOpts := utils.DefaultDirectoryScanOptions(m.logger)
+	if len(scanPaths) > 0 {
+		scanned, opts, err := m.processor.ProcessPaths(scanPaths, mode)
+		if err != nil {
+			return nil, fmt.Errorf("erro ao processar arquivos: %w", err)
+		}
+		files = append(files, scanned...)
+		scanOpts = opts
 	}
 
 	// Validar tamanho total
@@ -137,7 +169,7 @@ func (m *Manager) CreateContext(name, description string, paths []string, mode P
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		Tags:        tags,
-		Metadata:    make(map[string]string),
+		Metadata:    knowledgeMeta,
 		ScanOptions: scanOpts,
 		ScanOptionsMetadata: ScanOptionsMetadata{
 			MaxTotalSize:      scanOpts.MaxTotalSize,
@@ -564,19 +596,31 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 	var messages []models.Message
 
 	for _, attachment := range attachments {
+		ctx, exists := m.contexts[attachment.ContextID]
+		if !exists {
+			m.logger.Warn("Contexto anexado não encontrado durante a construção do prompt",
+				zap.String("contextID", attachment.ContextID))
+			continue
+		}
+
+		// Knowledge contexts inject only their index card here (stable, cheap,
+		// cacheable); the corpus itself is reached per turn via the volatile
+		// hybrid-retrieval block. This is what keeps a multi-MB corpus at a
+		// fixed few-hundred-token cost.
+		if ctx.Mode == ModeKnowledge {
+			messages = append(messages, models.Message{
+				Role:    promptRole(opts.Role),
+				Content: BuildKnowledgeDigest(ctx, 0),
+			})
+			continue
+		}
+
 		// Retrieval-mode attachments are query-driven and therefore volatile;
 		// they are injected separately via BuildRetrievedContextMessages so they
 		// never poison the cached prefix this method feeds. Only skip them when
 		// retrieval is actually enabled — otherwise a --rag attachment with no
 		// embedding provider must still appear here as whole content.
 		if attachment.RetrievalTopK > 0 && m.retrieval.Enabled() {
-			continue
-		}
-
-		ctx, exists := m.contexts[attachment.ContextID]
-		if !exists {
-			m.logger.Warn("Contexto anexado não encontrado durante a construção do prompt",
-				zap.String("contextID", attachment.ContextID))
 			continue
 		}
 
@@ -602,16 +646,8 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 			content = m.formatContextContent(ctx, opts)
 		}
 
-		role := strings.TrimSpace(strings.ToLower(opts.Role))
-		if role == "" {
-			role = "user" // default seguro: contexto não deve competir com system prompt
-		}
-		if role != "user" && role != "system" {
-			role = "user"
-		}
-
 		messages = append(messages, models.Message{
-			Role:    role,
+			Role:    promptRole(opts.Role),
 			Content: content,
 		})
 	}
@@ -619,11 +655,22 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 	return messages, nil
 }
 
-// BuildRetrievedContextMessages runs semantic retrieval for every retrieval-mode
-// attachment in the session and returns one message per context holding only the
-// passages relevant to query. Returns nil when retrieval is disabled, no
-// attachment opted in, or the query is empty — so the caller can skip the
-// volatile block entirely.
+// promptRole normaliza o role das mensagens de contexto: default seguro "user"
+// (contexto não deve competir com system prompt) e somente user|system passam.
+func promptRole(role string) string {
+	role = strings.TrimSpace(strings.ToLower(role))
+	if role != "user" && role != "system" {
+		return "user"
+	}
+	return role
+}
+
+// BuildRetrievedContextMessages runs per-turn retrieval for every attachment
+// that is query-driven — knowledge contexts (always; hybrid BM25+vectors, no
+// API key required) and --rag attachments (vector-only, needs a provider) —
+// and returns one message per context holding only the passages relevant to
+// query. Returns nil when nothing opted in or the query is empty, so the
+// caller can skip the volatile block entirely.
 //
 // A failure on a single context is logged and skipped, never fatal: a flaky
 // embedding call must not break the turn. The query embedding happens outside
@@ -634,15 +681,17 @@ func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, 
 	attachments := append([]AttachedContext(nil), m.attachedContexts[sessionID]...)
 	wanted := make(map[string]*FileContext)
 	for _, a := range attachments {
-		if a.RetrievalTopK > 0 {
-			if c, ok := m.contexts[a.ContextID]; ok {
-				wanted[a.ContextID] = c
-			}
+		c, ok := m.contexts[a.ContextID]
+		if !ok {
+			continue
+		}
+		if c.Mode == ModeKnowledge || a.RetrievalTopK > 0 {
+			wanted[a.ContextID] = c
 		}
 	}
 	m.mu.RUnlock()
 
-	if !engine.Enabled() || len(wanted) == 0 || strings.TrimSpace(query) == "" {
+	if engine == nil || len(wanted) == 0 || strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
 
@@ -656,13 +705,27 @@ func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, 
 		if !ok {
 			continue
 		}
-		segs, err := engine.Retrieve(ctx, fc, query, a.RetrievalTopK)
-		if err != nil {
-			m.logger.Warn("context semantic retrieval failed; skipping",
-				zap.String("context", fc.Name), zap.Error(err))
-			continue
+		var block string
+		if fc.Mode == ModeKnowledge {
+			segs, err := engine.RetrieveHybrid(ctx, fc, query, a.RetrievalTopK)
+			if err != nil {
+				m.logger.Warn("knowledge retrieval failed; skipping",
+					zap.String("context", fc.Name), zap.Error(err))
+				continue
+			}
+			block = FormatKnowledgeSegmentsBlock(fc.Name, segs)
+		} else {
+			if !engine.Enabled() {
+				continue // --rag sem provider: degradou para conteúdo inteiro no prefixo
+			}
+			segs, err := engine.Retrieve(ctx, fc, query, a.RetrievalTopK)
+			if err != nil {
+				m.logger.Warn("context semantic retrieval failed; skipping",
+					zap.String("context", fc.Name), zap.Error(err))
+				continue
+			}
+			block = FormatSegmentsBlock(fc.Name, query, segs)
 		}
-		block := FormatSegmentsBlock(fc.Name, query, segs)
 		if block == "" {
 			continue
 		}

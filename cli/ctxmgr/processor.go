@@ -64,6 +64,15 @@ func (p *Processor) ProcessPaths(paths []string, mode ProcessingMode) ([]utils.F
 			zap.Int64("max_size", scanOpts.MaxTotalSize),
 			zap.Int("max_files", scanOpts.MaxFilesToProcess))
 
+	case ModeKnowledge:
+		// Retrieval-first: o conteúdo nunca é injetado inteiro, então o teto
+		// acompanha o modo chunked — o custo por turno é o digest + top-K.
+		scanOpts.MaxTotalSize = 100 * 1024 * 1024 // 100MB
+		scanOpts.MaxFilesToProcess = 5000
+		p.logger.Debug("Modo Knowledge configurado",
+			zap.Int64("max_size", scanOpts.MaxTotalSize),
+			zap.Int("max_files", scanOpts.MaxFilesToProcess))
+
 	default:
 		return nil, scanOpts, fmt.Errorf("modo de processamento inválido: %s", mode)
 	}
