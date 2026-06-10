@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/llm/internal/provision"
 	"go.uber.org/zap"
 )
 
@@ -162,7 +163,7 @@ func (e *embeddedSynth) provision(ctx context.Context) (provisionedPaths, error)
 		p, _ := locateProvisioned(root)
 		return p, nil
 	}
-	asset, ok := sherpaAsset(runtime.GOOS, runtime.GOARCH)
+	asset, ok := provision.SherpaAsset(runtime.GOOS, runtime.GOARCH)
 	if !ok {
 		return provisionedPaths{}, fmt.Errorf(
 			"tts: embedded voice has no prebuilt engine for %s/%s — set CHATCLI_TTS_CMD, CHATCLI_TTS_URL or a cloud key",
@@ -210,7 +211,7 @@ func (e *embeddedSynth) provisionPiece(ctx context.Context, url, targetDir strin
 		return nil
 	}
 	e.logger.Info("tts: downloading embedded voice "+what+" (one-time)", zap.String("url", url))
-	if err := provisionArchive(ctx, url, targetDir, minBytes); err != nil {
+	if err := provision.ProvisionArchive(ctx, url, targetDir, minBytes); err != nil {
 		return fmt.Errorf("tts: provision %s: %w", what, err)
 	}
 	return nil
@@ -243,7 +244,7 @@ func (e *embeddedSynth) runKokoro(ctx context.Context, paths provisionedPaths, v
 		text,
 	}
 	cmd := exec.CommandContext(ctx, paths.bin, args...) // #nosec G204 -- binary and args come from our own cache
-	cmd.Env = libPathEnv(paths.libDir)
+	cmd.Env = provision.LibPathEnv(paths.libDir)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -295,30 +296,4 @@ func synthThreads() int {
 		return 4
 	}
 	return n
-}
-
-// libPathEnv returns the process environment with the engine's shared-library
-// directory prepended to the platform's loader path. The upstream binaries
-// carry an rpath, so this is a belt-and-suspenders for stripped environments.
-func libPathEnv(libDir string) []string {
-	var name string
-	switch runtime.GOOS {
-	case "linux":
-		name = "LD_LIBRARY_PATH"
-	case "darwin":
-		name = "DYLD_LIBRARY_PATH"
-	case "windows":
-		name = "PATH"
-	default:
-		return os.Environ()
-	}
-	env := os.Environ()
-	sep := string(os.PathListSeparator)
-	for i, kv := range env {
-		if strings.HasPrefix(kv, name+"=") {
-			env[i] = name + "=" + libDir + sep + kv[len(name)+1:]
-			return env
-		}
-	}
-	return append(env, name+"="+libDir)
 }

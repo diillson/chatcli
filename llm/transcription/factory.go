@@ -12,23 +12,32 @@
  *      Keyless, serverless.
  *   2. CHATCLI_TRANSCRIPTION_URL  → a self-hosted OpenAI-compatible endpoint.
  *      Keyless (unless CHATCLI_TRANSCRIPTION_KEY is set).
- *   3. a local whisper CLI on PATH (openai-whisper or whisper.cpp) → used
+ *   3. the embedded Whisper engine, when already provisioned in the cache —
+ *      keyless and OS-agnostic; auto mode never triggers its one-time
+ *      download (pin CHATCLI_TRANSCRIPTION_PROVIDER=embedded for that).
+ *   4. a local whisper CLI on PATH (openai-whisper or whisper.cpp) → used
  *      automatically with zero config — "local by default" when installed.
- *   4. GROQ_API_KEY               → Groq Whisper (free tier).
- *   5. OPENAI_API_KEY             → OpenAI Whisper (paid).
- *   6. otherwise                  → Null (voice input disabled).
+ *   5. GROQ_API_KEY               → Groq Whisper (free tier).
+ *   6. OPENAI_API_KEY             → OpenAI Whisper (paid).
+ *   7. otherwise                  → the embedded Whisper engine, provisioned
+ *      on first use — voice input works with zero config on every platform
+ *      with a prebuilt sherpa-onnx engine (Null elsewhere).
  *
  * CHATCLI_TRANSCRIPTION_PROVIDER pins a specific backend
- * (command|url|groq|openai); a pinned backend whose config is missing degrades
- * to Null rather than silently switching.
+ * (command|url|embedded|groq|openai); a pinned backend whose config is missing
+ * degrades to Null rather than silently switching. Pinning embedded forces it
+ * over any detected backend; like the auto fallback, it provisions its engine
+ * and model lazily on first transcription.
  */
 package transcription
 
 import (
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
+	"github.com/diillson/chatcli/llm/internal/provision"
 	"go.uber.org/zap"
 )
 
@@ -58,6 +67,8 @@ func NewFromEnv(logger *zap.Logger) Provider {
 		return commandOrNull(cmdTmpl, logger, "CHATCLI_TRANSCRIPTION_PROVIDER=command set but CHATCLI_TRANSCRIPTION_CMD is empty")
 	case "url", "selfhosted":
 		return selfHostedOrNull(url, model, logger)
+	case "embedded", "whisper-onnx":
+		return NewEmbeddedWhisper(model, logger)
 	case "openai":
 		return cloudOrNull(openAIBaseURL, os.Getenv("OPENAI_API_KEY"), model, "openai", logger,
 			"CHATCLI_TRANSCRIPTION_PROVIDER=openai set but OPENAI_API_KEY is empty")
@@ -83,6 +94,12 @@ func NewFromEnv(logger *zap.Logger) Provider {
 	if url != "" {
 		return selfHostedOrNull(url, model, logger)
 	}
+	// Embedded whisper from cache: keyless and serverless, but only when its
+	// one-time download already happened — auto mode must never surprise the
+	// user with a ~200MB fetch (that requires an explicit provider pin).
+	if p := embeddedIfProvisioned(model, logger); p != nil {
+		return p
+	}
 	// Local by default: if a whisper CLI is installed, use it with zero config
 	// (keyless). This mirrors hermes-agent auto-using a local engine when present.
 	if p := detectLocalWhisper(model, logger); p != nil {
@@ -93,6 +110,13 @@ func NewFromEnv(logger *zap.Logger) Provider {
 	}
 	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
 		return cloudOrNull(openAIBaseURL, key, model, "openai", logger, "")
+	}
+	// Last resort: embedded whisper, provisioned on first use (the gateway
+	// daemon pre-downloads it at startup) — so a zero-config install still
+	// understands voice notes instead of asking for env vars.
+	if _, ok := provision.SherpaAsset(runtime.GOOS, runtime.GOARCH); ok {
+		logger.Info("transcription: defaulting to embedded whisper (engine+model download on first use)")
+		return NewEmbeddedWhisper(model, logger)
 	}
 	return NewNull()
 }
@@ -119,6 +143,17 @@ func detectLocalWhisper(model string, logger *zap.Logger) Provider {
 		return newLocalWhisperCpp(path, model, logger)
 	}
 	return nil
+}
+
+// embeddedIfProvisioned returns the embedded whisper provider only when its
+// cache is already complete, so auto-detection stays download-free.
+func embeddedIfProvisioned(model string, logger *zap.Logger) Provider {
+	e := NewEmbeddedWhisper(model, logger)
+	if !e.isProvisioned() {
+		return nil
+	}
+	logger.Info("transcription: using embedded whisper from cache", zap.String("model", e.size))
+	return e
 }
 
 // groqModel applies Groq's default whisper model when none is set.

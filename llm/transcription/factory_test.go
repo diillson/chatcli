@@ -7,6 +7,7 @@ package transcription
 
 import (
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -31,6 +32,9 @@ func clearEnv(t *testing.T) {
 	} {
 		t.Setenv(k, "")
 	}
+	// Point the embedded cache at an empty temp dir so a dev box with a real
+	// provisioned ~/.cache/chatcli/stt never changes auto-detection results.
+	t.Setenv("CHATCLI_TRANSCRIPTION_CACHE_DIR", t.TempDir())
 	orig := execLookPath
 	execLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	t.Cleanup(func() { execLookPath = orig })
@@ -127,10 +131,34 @@ func TestNewFromEnv_Selection(t *testing.T) {
 		}
 	})
 
-	t.Run("nothing configured is null", func(t *testing.T) {
+	t.Run("nothing configured defaults to embedded (zero-config voice)", func(t *testing.T) {
 		clearEnv(t)
-		if !IsNull(NewFromEnv(log)) {
-			t.Error("empty environment must yield the null provider")
+		p := NewFromEnv(log)
+		if IsNull(p) || !strings.HasPrefix(p.Name(), "embedded:whisper/") {
+			t.Errorf("empty environment must fall back to embedded whisper; got %q", name(p))
+		}
+	})
+
+	t.Run("explicit embedded provisions lazily, no env needed", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("CHATCLI_TRANSCRIPTION_PROVIDER", "embedded")
+		p := NewFromEnv(log)
+		if IsNull(p) || p.Name() != "embedded:whisper/"+defaultEmbeddedWhisperSize {
+			t.Errorf("embedded pin must yield the embedded provider; got %q", name(p))
+		}
+	})
+
+	t.Run("auto uses embedded only when already provisioned", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("fixture uses shell script")
+		}
+		clearEnv(t)
+		t.Setenv("OPENAI_API_KEY", "sk-test") // must NOT be used: a local engine exists
+		root, _ := provisionFakeSTTCache(t)
+		t.Setenv("CHATCLI_TRANSCRIPTION_CACHE_DIR", root)
+		p := NewFromEnv(log)
+		if IsNull(p) || !strings.HasPrefix(p.Name(), "embedded:whisper/") {
+			t.Errorf("provisioned embedded cache must win in auto; got %q", name(p))
 		}
 	})
 
