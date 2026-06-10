@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.136.0](https://github.com/diillson/chatcli/compare/v1.135.0...v1.136.0) (2026-06-10)
+
+
+### Features
+
+* **context:** [@knowledge](https://github.com/knowledge) tool — pull-side retrieval for agent/coder ([#1039](https://github.com/diillson/chatcli/issues/1039)) ([3e03ac8](https://github.com/diillson/chatcli/commit/3e03ac8c00722e90883dc449ca94c625a66a1261))
+* **context:** knowledge mode — index-card attach + keyless hybrid retrieval ([#1037](https://github.com/diillson/chatcli/issues/1037)) ([9c01a06](https://github.com/diillson/chatcli/commit/9c01a0612160934724058985a064b7593a847923))
+
+
+### Bug Fixes
+
+* **i18n:** stop x/text from stamping MISSING into argless lookups ([#1040](https://github.com/diillson/chatcli/issues/1040)) ([05fdda2](https://github.com/diillson/chatcli/commit/05fdda24f59759333c17b19dddc176f31758122d))
+
 ## [1.135.0](https://github.com/diillson/chatcli/compare/v1.134.0...v1.135.0) (2026-06-10)
 
 
