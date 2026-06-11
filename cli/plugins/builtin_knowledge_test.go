@@ -159,3 +159,44 @@ func TestKnowledgePlugin_NoAdapter(t *testing.T) {
 		t.Fatal("missing adapter must error, not panic")
 	}
 }
+
+func TestKnowledgePlugin_Capabilities(t *testing.T) {
+	p := NewBuiltinKnowledgePlugin()
+	if !p.IsReadOnly(nil) || !p.IsConcurrencySafe(nil) {
+		t.Fatal("@knowledge is read-only and concurrency-safe by construction")
+	}
+}
+
+// TestKnowledgePlugin_DescribeCall pins the spinner-label contract: short,
+// human one-liners — never the static description or the raw JSON envelope,
+// both of which overflow a terminal row and flood the screen via the
+// spinner's single-line repaint.
+func TestKnowledgePlugin_DescribeCall(t *testing.T) {
+	p := NewBuiltinKnowledgePlugin()
+	longQuery := strings.Repeat("kubernetes deployment strategy ", 10)
+
+	cases := []struct {
+		args []string
+		want string // substring expected in the label
+	}{
+		{[]string{`{"cmd":"search","args":{"query":"gateway env vars"}}`}, "gateway env vars"},
+		{[]string{`{"cmd":"get","args":{"source":"docs/install.md"}}`}, "docs/install.md"},
+		{[]string{`{"cmd":"toc","args":{"prefix":"docs/"}}`}, ""},
+		{[]string{`{"cmd":"list"}`}, ""},
+		{[]string{`not json`}, ""},
+		{[]string{`{"cmd":"search","args":{"query":"` + longQuery + `"}}`}, "…"},
+	}
+	for _, tc := range cases {
+		got := p.DescribeCall(tc.args)
+		if got == "" || got == p.Description() {
+			t.Errorf("DescribeCall(%q) must return a short dedicated label, got %q", tc.args, got)
+			continue
+		}
+		if len([]rune(got)) > 100 {
+			t.Errorf("label too long for a spinner row (%d runes): %q", len([]rune(got)), got)
+		}
+		if tc.want != "" && !strings.Contains(got, tc.want) {
+			t.Errorf("DescribeCall(%q) = %q, want substring %q", tc.args, got, tc.want)
+		}
+	}
+}
