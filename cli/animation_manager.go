@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/ui/theme"
+	"golang.org/x/term"
 )
 
 // spinnerFrames is the single source of the braille spinner animation, shared
@@ -87,10 +88,18 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 				// cards); the glyph carries the same accent so the spinner
 				// reads as one themed unit. Reset closes the span so nothing
 				// bleeds into following output.
+				//
+				// The message is clamped to ONE terminal line: the repaint
+				// protocol (\r + \033[K) only rewinds to the start of the
+				// current visual line, so a message wider than the terminal
+				// wraps and leaves a stale copy behind on EVERY tick — ten
+				// junk lines per second until the tool returns. Queried per
+				// tick so live terminal resizes are honored.
 				accent := theme.ANSI(theme.RoleReasoning)
 				reset := theme.Reset()
 				glyph := spinnerFrames[i%len(spinnerFrames)]
-				fmt.Printf("\r\033[K%s%s...%s %s%s%s", accent, currentMsg, reset, accent, glyph, reset)
+				display := clampSpinnerMessage(currentMsg, terminalCols())
+				fmt.Printf("\r\033[K%s%s...%s %s%s%s", accent, display, reset, accent, glyph, reset)
 				_ = os.Stdout.Sync() // Força flush
 
 				time.Sleep(100 * time.Millisecond)
@@ -98,6 +107,31 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 			}
 		}
 	}()
+}
+
+// terminalCols returns the current stdout width, with a conservative default
+// when stdout is not a terminal or the size cannot be determined.
+func terminalCols() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return w
+	}
+	return 100
+}
+
+// clampSpinnerMessage bounds msg so the rendered spinner line (message +
+// "... " + glyph) never exceeds one terminal row. Rune-aware so multibyte
+// labels (paths, queries, emoji) truncate cleanly.
+func clampSpinnerMessage(msg string, cols int) string {
+	const reserved = 8 // "... " + glyph + right margin
+	limit := cols - reserved
+	if limit < 16 {
+		limit = 16
+	}
+	r := []rune(msg)
+	if len(r) <= limit {
+		return msg
+	}
+	return string(r[:limit-1]) + "…"
 }
 
 // UpdateMessage atualiza a mensagem sem parar e reiniciar a animação
