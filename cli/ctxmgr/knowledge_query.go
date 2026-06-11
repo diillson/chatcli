@@ -33,6 +33,33 @@ type KnowledgeHit struct {
 	Seg         Segment
 }
 
+// knowledgeDigestEntry memoizes one rendered index card per context revision.
+type knowledgeDigestEntry struct {
+	fingerprint string
+	digest      string
+}
+
+// KnowledgeDigest returns fc's index card, memoized per context revision.
+// Prompt assembly calls this every turn; without the memo a 50k-passage
+// corpus would pay an O(corpus) walk and sort on each one.
+func (m *Manager) KnowledgeDigest(fc *FileContext) string {
+	if fc == nil {
+		return ""
+	}
+	fp := contextFingerprint(fc)
+	m.digestMu.Lock()
+	defer m.digestMu.Unlock()
+	if m.digestCache == nil {
+		m.digestCache = make(map[string]knowledgeDigestEntry)
+	}
+	if e, ok := m.digestCache[fc.ID]; ok && e.fingerprint == fp {
+		return e.digest
+	}
+	d := BuildKnowledgeDigest(fc, 0)
+	m.digestCache[fc.ID] = knowledgeDigestEntry{fingerprint: fp, digest: d}
+	return d
+}
+
 // AttachedKnowledge returns the knowledge-mode contexts attached to the
 // session, sorted by name for deterministic listings.
 func (m *Manager) AttachedKnowledge(sessionID string) []*FileContext {
@@ -182,21 +209,41 @@ func (m *Manager) KnowledgeTOC(sessionID, kb, prefix string) (string, error) {
 	return strings.TrimRight(b.String(), "\n"), nil
 }
 
+// searchSnippetChars bounds one passage inside a search result. Search is the
+// LOCATE step — it must stay skimmable in the action feed and cheap in the
+// conversation; the model reads full content through `get`. 8 hits land near
+// 3KB instead of 10KB+ of raw passages.
+const searchSnippetChars = 360
+
 // FormatKnowledgeHits renders search results for the tool transcript: each
-// passage cites its knowledge base, source path and position so the model can
-// follow up with `get` on the exact document.
+// passage cites its knowledge base, source path and position, with a bounded
+// snippet, so the model can follow up with `get` on the exact document.
 func FormatKnowledgeHits(query string, hits []KnowledgeHit) string {
 	if len(hits) == 0 {
 		return "No passages matched. Try different terms, or use toc to inspect what the knowledge base covers."
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d passage(s) for %q:\n\n", len(hits), query)
+	fmt.Fprintf(&b, "%d passage(s) for %q (snippets — read full documents with get):\n\n", len(hits), query)
 	for i, h := range hits {
 		fmt.Fprintf(&b, "[%d] %s :: %s (lines %d-%d)\n", i+1, h.ContextName, h.Seg.FilePath, h.Seg.StartLine, h.Seg.EndLine)
 		b.WriteString("```\n")
-		b.WriteString(h.Seg.Content)
+		b.WriteString(snippet(h.Seg.Content, searchSnippetChars))
 		b.WriteString("\n```\n\n")
 	}
 	b.WriteString("Use {\"cmd\":\"get\",\"args\":{\"source\":\"<path before the #>\"}} to read a full document.")
 	return b.String()
+}
+
+// snippet trims s to at most limit bytes, cutting at a word boundary and
+// flagging the elision so the model knows there is more behind `get`.
+func snippet(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= limit {
+		return s
+	}
+	cut := s[:limit]
+	if i := strings.LastIndexAny(cut, " \n\t"); i > limit/2 {
+		cut = cut[:i]
+	}
+	return cut + " […]"
 }

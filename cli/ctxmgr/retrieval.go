@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/diillson/chatcli/llm/embedding"
 	"github.com/diillson/chatcli/llm/embedding/vindex"
@@ -45,6 +46,12 @@ const (
 const (
 	hybridVecWeight = 0.55
 	hybridLexWeight = 0.45
+
+	// hybridMaxPool caps the BM25 candidate pool, which is also the per-call
+	// embedding budget of the rerank stage: the engine NEVER embeds more than
+	// this many passages for one query — corpus size does not enter the cost.
+	// Comfortably under every provider's batch limit (Voyage caps at 128).
+	hybridMaxPool = 96
 )
 
 // RetrievalEngine builds and queries per-context passage vectors.
@@ -67,11 +74,15 @@ type lexCacheStore struct {
 	entries map[string]*lexCacheEntry
 }
 
-// lexCacheEntry memoizes the expensive per-context derivations.
+// lexCacheEntry memoizes the expensive per-context derivations: segments,
+// BM25 index and the vector-index handle. Holding the vindex here is what
+// keeps the per-call cost flat — constructing it per query re-parses the
+// whole persisted JSON, which grows with everything ever embedded.
 type lexCacheEntry struct {
 	fingerprint string
 	segs        []Segment
 	lex         *lexicalIndex
+	vec         *vindex.Index
 }
 
 // NewRetrievalEngine wires an engine over an embedding provider. baseDir is the
@@ -157,6 +168,12 @@ func (e *RetrievalEngine) Retrieve(ctx context.Context, fc *FileContext, query s
 // configured. This is the knowledge-mode path: unlike Retrieve it never
 // requires an API key — without a provider it degrades to lexical-only, and a
 // failing embedding call degrades the same way instead of breaking the turn.
+//
+// Scalability contract: BM25 does RECALL over the whole corpus (in-memory,
+// fingerprint-cached); embeddings only RERANK the candidate pool. Per-query
+// embedding cost is bounded by hybridMaxPool regardless of corpus size — a
+// 60MB corpus is never embedded wholesale, and the vector cache only ever
+// holds passages that some query actually surfaced.
 func (e *RetrievalEngine) RetrieveHybrid(ctx context.Context, fc *FileContext, query string, k int) ([]Segment, error) {
 	if e == nil || fc == nil || strings.TrimSpace(query) == "" {
 		return nil, nil
@@ -164,18 +181,29 @@ func (e *RetrievalEngine) RetrieveHybrid(ctx context.Context, fc *FileContext, q
 	if k <= 0 {
 		k = DefaultRetrievalTopK
 	}
-	segs, lex := e.lexicalFor(fc)
-	if len(segs) == 0 {
+	entry := e.entryFor(fc)
+	if len(entry.segs) == 0 {
 		return nil, nil
 	}
-	// Over-fetch each signal so fusion has real candidates to rerank.
-	pool := k * 3
-	if pool < 24 {
-		pool = 24
+	// Over-fetch so the rerank has real candidates; the pool is also the
+	// per-query embedding budget.
+	pool := k * 6
+	if pool < 48 {
+		pool = 48
+	}
+	if pool > hybridMaxPool {
+		pool = hybridMaxPool
 	}
 
-	lexScores := normalizeHits(lex.search(query, pool))
-	vecScores := e.vectorScores(ctx, fc, segs, query, pool)
+	lexHits := entry.lex.search(query, pool)
+	if len(lexHits) == 0 {
+		// No lexical signal at all (query terms absent from the corpus): fall
+		// back to cosine over the vectors already cached by past queries.
+		// Cheap — one query embedding, zero new passage embeddings.
+		return e.semanticOnly(ctx, entry, query, k), nil
+	}
+	lexScores := normalizeHits(lexHits)
+	vecScores := e.rerankCandidates(ctx, entry, lexHits, query)
 
 	fused := make(map[int]float64, len(lexScores)+len(vecScores))
 	if len(vecScores) == 0 {
@@ -204,43 +232,42 @@ func (e *RetrievalEngine) RetrieveHybrid(ctx context.Context, fc *FileContext, q
 	}
 	out := make([]Segment, 0, len(order))
 	for _, i := range order {
-		out = append(out, segs[i])
+		out = append(out, entry.segs[i])
 	}
 	return out, nil
 }
 
-// vectorScores returns min-max-normalized cosine scores by segment index, or
-// nil when embeddings are unavailable or fail (the hybrid then runs lexical-only).
-func (e *RetrievalEngine) vectorScores(ctx context.Context, fc *FileContext, segs []Segment, query string, pool int) map[int]float64 {
-	if !e.Enabled() {
+// rerankCandidates embeds ONLY the BM25 candidates still missing from the
+// vector cache (≤ pool per query, one small provider batch), then returns
+// min-max-normalized cosine scores by segment index. Nil when embeddings are
+// unavailable or fail — the hybrid then runs lexical-only.
+func (e *RetrievalEngine) rerankCandidates(ctx context.Context, entry *lexCacheEntry, candidates []lexHit, query string) map[int]float64 {
+	if !e.Enabled() || entry.vec == nil {
 		return nil
 	}
-	idxByID := make(map[string]int, len(segs))
-	keep := make(map[string]struct{}, len(segs))
-	allIDs := make([]string, 0, len(segs))
-	for i, s := range segs {
-		idxByID[s.ID] = i
-		keep[s.ID] = struct{}{}
-		allIDs = append(allIDs, s.ID)
+	idxByID := make(map[string]int, len(candidates))
+	ids := make([]string, 0, len(candidates))
+	for _, h := range candidates {
+		s := entry.segs[h.idx]
+		idxByID[s.ID] = h.idx
+		ids = append(ids, s.ID)
 	}
-	idx := vindex.New(e.vectorPath(fc.ID), e.provider, vindex.WithLogger(e.logger))
-	idx.Prune(keep)
-	if missing := idx.MissingFor(allIDs); len(missing) > 0 {
+	if missing := entry.vec.MissingFor(ids); len(missing) > 0 {
 		sub := make(map[string]string, len(missing))
 		for _, id := range missing {
-			sub[id] = segs[idxByID[id]].Content
+			sub[id] = entry.segs[idxByID[id]].Content
 		}
-		if err := idx.Upsert(ctx, sub); err != nil {
+		if err := entry.vec.Upsert(ctx, sub); err != nil {
 			e.logger.Warn("knowledge: embedding unavailable; falling back to lexical retrieval", zap.Error(err))
 			return nil
 		}
 	}
-	qv, err := idx.EmbedQuery(ctx, query)
+	qv, err := entry.vec.EmbedQuery(ctx, query)
 	if err != nil {
 		e.logger.Warn("knowledge: query embedding failed; falling back to lexical retrieval", zap.Error(err))
 		return nil
 	}
-	hits := idx.Search(qv, pool, segmentScoreFloor)
+	hits := entry.vec.ScoreAgainst(qv, ids, segmentScoreFloor)
 	if len(hits) == 0 {
 		return nil
 	}
@@ -260,24 +287,76 @@ func (e *RetrievalEngine) vectorScores(ctx context.Context, fc *FileContext, seg
 	return out
 }
 
-// lexicalFor returns the cached segment list and BM25 index for fc, rebuilding
-// both when the context changed since the last call.
-func (e *RetrievalEngine) lexicalFor(fc *FileContext) ([]Segment, *lexicalIndex) {
+// semanticOnly answers queries with zero lexical overlap using the vectors
+// already accumulated by previous queries. It never embeds new passages.
+func (e *RetrievalEngine) semanticOnly(ctx context.Context, entry *lexCacheEntry, query string, k int) []Segment {
+	if !e.Enabled() || entry.vec == nil || entry.vec.Count() == 0 {
+		return nil
+	}
+	qv, err := entry.vec.EmbedQuery(ctx, query)
+	if err != nil {
+		e.logger.Warn("knowledge: query embedding failed; no results for non-lexical query", zap.Error(err))
+		return nil
+	}
+	byID := make(map[string]Segment, len(entry.segs))
+	for _, s := range entry.segs {
+		byID[s.ID] = s
+	}
+	hits := entry.vec.Search(qv, k, segmentScoreFloor)
+	out := make([]Segment, 0, len(hits))
+	for _, h := range hits {
+		if s, ok := byID[h.ID]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// entryFor returns the cached derivations for fc — segments, BM25 index and
+// the vector-index handle — rebuilding them when the context changed. The
+// vindex file is loaded ONCE per rebuild (not per query) and pruned of
+// segments that no longer exist at the same moment.
+func (e *RetrievalEngine) entryFor(fc *FileContext) *lexCacheEntry {
+	fp := contextFingerprint(fc)
 	if e.lex == nil {
 		// Engine built without the constructor (zero value): compute uncached.
-		segs := SegmentFiles(fc.Files, e.segOpts)
-		return segs, newLexicalIndex(segs)
+		return e.buildEntry(fc, fp)
 	}
-	fp := fmt.Sprintf("%s|%d|%d", fc.UpdatedAt.UTC().Format("20060102T150405.000"), fc.FileCount, fc.TotalSize)
 	e.lex.mu.Lock()
 	defer e.lex.mu.Unlock()
 	if entry, ok := e.lex.entries[fc.ID]; ok && entry.fingerprint == fp {
-		return entry.segs, entry.lex
+		return entry
 	}
+	entry := e.buildEntry(fc, fp)
+	e.lex.entries[fc.ID] = entry
+	return entry
+}
+
+// buildEntry performs the one-time-per-corpus derivations and logs their cost
+// so a multi-second first call on a large corpus is explainable, not mysterious.
+func (e *RetrievalEngine) buildEntry(fc *FileContext, fp string) *lexCacheEntry {
+	start := time.Now()
 	segs := SegmentFiles(fc.Files, e.segOpts)
 	entry := &lexCacheEntry{fingerprint: fp, segs: segs, lex: newLexicalIndex(segs)}
-	e.lex.entries[fc.ID] = entry
-	return entry.segs, entry.lex
+	if e.Enabled() {
+		entry.vec = vindex.New(e.vectorPath(fc.ID), e.provider, vindex.WithLogger(e.logger))
+		keep := make(map[string]struct{}, len(segs))
+		for _, s := range segs {
+			keep[s.ID] = struct{}{}
+		}
+		entry.vec.Prune(keep)
+	}
+	e.logger.Info("knowledge: corpus indexed",
+		zap.String("context", fc.Name),
+		zap.Int("passages", len(segs)),
+		zap.Duration("took", time.Since(start)))
+	return entry
+}
+
+// contextFingerprint identifies one revision of a context's content; caches
+// keyed by it invalidate exactly when the context is updated.
+func contextFingerprint(fc *FileContext) string {
+	return fmt.Sprintf("%s|%d|%d", fc.UpdatedAt.UTC().Format("20060102T150405.000"), fc.FileCount, fc.TotalSize)
 }
 
 // normalizeHits min-max-normalizes BM25 scores to [0,1] by segment index.

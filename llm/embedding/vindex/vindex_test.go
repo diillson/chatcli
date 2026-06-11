@@ -158,3 +158,48 @@ func TestIndex_ForgetRemoves(t *testing.T) {
 		t.Fatalf("Forget should drop a, count=%d", x.Count())
 	}
 }
+
+func TestIndex_ScoreAgainst(t *testing.T) {
+	x := New(filepath.Join(t.TempDir(), "v.json"), newProvider())
+	if err := x.Upsert(context.Background(), map[string]string{
+		"alpha": "alpha text",
+		"beta":  "beta text",
+		"gamma": "gamma text",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	qv, err := x.EmbedQuery(context.Background(), "alpha question")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Scores ONLY the requested ids; unknown ids are skipped silently.
+	hits := x.ScoreAgainst(qv, []string{"alpha", "beta", "nope"}, 0)
+	if len(hits) != 2 || hits[0].ID != "alpha" {
+		t.Fatalf("hits = %+v, want alpha first and nope skipped", hits)
+	}
+	if hits[0].Score <= hits[1].Score {
+		t.Fatalf("alpha must outscore beta: %+v", hits)
+	}
+
+	// gamma is in the index but not in the candidate set — never scored.
+	for _, h := range hits {
+		if h.ID == "gamma" {
+			t.Fatal("non-candidate id leaked into the rerank")
+		}
+	}
+
+	// The relevance floor applies per call.
+	if got := x.ScoreAgainst(qv, []string{"beta"}, 0.99); len(got) != 0 {
+		t.Fatalf("floor must filter weak candidates, got %+v", got)
+	}
+
+	// Disabled/empty inputs are nil-safe.
+	if x.ScoreAgainst(nil, []string{"alpha"}, 0) != nil || x.ScoreAgainst(qv, nil, 0) != nil {
+		t.Fatal("empty inputs must return nil")
+	}
+	off := New(filepath.Join(t.TempDir(), "v2.json"), embedding.NewNull())
+	if off.ScoreAgainst(qv, []string{"alpha"}, 0) != nil {
+		t.Fatal("disabled index must return nil")
+	}
+}

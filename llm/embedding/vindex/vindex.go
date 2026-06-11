@@ -203,6 +203,38 @@ func (x *Index) Search(query []float32, k int, minScore float64) []Hit {
 	return sel.sortedDesc()
 }
 
+// ScoreAgainst scores ONLY the given ids against query, returning hits that
+// clear minScore, strongest first (ties by ascending id). This is the rerank
+// primitive: callers that pre-filter candidates (e.g. BM25 recall) pay cosine
+// cost proportional to the candidate pool, never the index size. Ids without
+// a stored vector are skipped silently.
+func (x *Index) ScoreAgainst(query []float32, ids []string, minScore float64) []Hit {
+	if !x.Enabled() || len(query) == 0 || len(ids) == 0 {
+		return nil
+	}
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	out := make([]Hit, 0, len(ids))
+	for _, id := range ids {
+		vec, ok := x.entries[id]
+		if !ok || len(vec) != len(query) {
+			continue
+		}
+		score := float64(embedding.CosineSimilarity(query, vec))
+		if score < minScore {
+			continue
+		}
+		out = append(out, Hit{ID: id, Score: score})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
 // Forget removes the given ids and persists.
 func (x *Index) Forget(ids ...string) {
 	if !x.Enabled() || len(ids) == 0 {
@@ -310,7 +342,10 @@ func (x *Index) persist() error {
 	if err := os.MkdirAll(filepath.Dir(x.path), 0o750); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(f, "", "  ")
+	// Compact encoding on purpose: a corpus-scale index serializes to tens of
+	// MB, and indented JSON made every persist (and the file itself) several
+	// times heavier for zero benefit — nobody reads vectors by eye.
+	data, err := json.Marshal(f)
 	if err != nil {
 		return err
 	}
