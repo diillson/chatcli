@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.136.2](https://github.com/diillson/chatcli/compare/v1.136.1...v1.136.2) (2026-06-11)
+
+
+### Bug Fixes
+
+* **catalog:** stop StackSpot from falling back to the tiny 50K context default ([#1044](https://github.com/diillson/chatcli/issues/1044)) ([60fe8f5](https://github.com/diillson/chatcli/commit/60fe8f5fd0e760c0703366124d55890c906b8d83))
+* **completer:** offer the knowledge mode after /context --mode ([#1046](https://github.com/diillson/chatcli/issues/1046)) ([e36e800](https://github.com/diillson/chatcli/commit/e36e800a1fd67f53b04c97ab965a7c6f86694c45))
+
 ## [1.136.1](https://github.com/diillson/chatcli/compare/v1.136.0...v1.136.1) (2026-06-11)
 
 
