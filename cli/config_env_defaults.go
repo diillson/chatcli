@@ -128,6 +128,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_STREAM_IDLE_TIMEOUT_SECONDS": {Value: "90", Source: "client.DefaultWatchdogConfig"},
 
 	// ─── Resilience: compaction ──────────────────────────────────
+	"CHATCLI_CONTEXT_WINDOW":               {Value: "(auto from catalog)", Source: "catalog.GetContextWindow"},
 	"CHATCLI_MICROCOMPACT_TRUNCATE_TURNS":  {Value: "2", Source: "agent.DefaultMicrocompactConfig"},
 	"CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS": {Value: "4", Source: "agent.DefaultMicrocompactConfig"},
 	"CHATCLI_MICROCOMPACT_HEAD_CHARS":      {Value: "2000", Source: "agent.DefaultMicrocompactConfig"},

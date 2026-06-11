@@ -96,6 +96,43 @@ func TestGetContextWindow(t *testing.T) {
 	assert.Equal(t, 50000, GetContextWindow("UNKNOWN_PROVIDER", "x"))
 }
 
+func TestGetContextWindowEnvOverride(t *testing.T) {
+	// A positive CHATCLI_CONTEXT_WINDOW beats both the catalog and the
+	// provider fallbacks.
+	t.Setenv("CHATCLI_CONTEXT_WINDOW", "32000")
+	assert.Equal(t, 32000, GetContextWindow(ProviderClaudeAI, "claude-3-haiku"))
+	assert.Equal(t, 32000, GetContextWindow("UNKNOWN_PROVIDER", "x"))
+
+	// Garbage or non-positive values are ignored, not treated as 0.
+	t.Setenv("CHATCLI_CONTEXT_WINDOW", "not-a-number")
+	assert.Equal(t, 50000, GetContextWindow("UNKNOWN_PROVIDER", "x"))
+	t.Setenv("CHATCLI_CONTEXT_WINDOW", "-1")
+	assert.Equal(t, 50000, GetContextWindow("UNKNOWN_PROVIDER", "x"))
+}
+
+// TestStackSpotCatalogEntry pins the StackSpot defaults. The agent API does
+// not accept max_tokens, so these numbers only drive client-side bookkeeping
+// (compaction budget, ctx% footer, /metrics) — but before this entry existed
+// both lookups fell back to the generic 50K default and chat/agent history
+// compaction fired far too early.
+func TestStackSpotCatalogEntry(t *testing.T) {
+	meta, ok := Resolve(ProviderStackSpot, "StackSpotAI")
+	assert.True(t, ok, "default StackSpot model must resolve")
+	assert.Equal(t, 128000, meta.ContextWindow)
+	assert.Equal(t, 128000, meta.MaxOutputTokens)
+
+	// Both lookups must agree with the entry, and an unknown StackSpot
+	// variant must land on the raised provider fallbacks, not 50K.
+	assert.Equal(t, 128000, GetContextWindow(ProviderStackSpot, "StackSpotAI"))
+	assert.Equal(t, 128000, GetContextWindow(ProviderStackSpot, "some-future-model"))
+	assert.Equal(t, 128000, GetMaxTokens(ProviderStackSpot, "StackSpotAI", 0))
+	assert.Equal(t, 128000, GetMaxTokens(ProviderStackSpot, "some-future-model", 0))
+
+	// Explicit override (e.g. /max-tokens or STACKSPOT_MAX_TOKENS) still
+	// has the highest priority.
+	assert.Equal(t, 9000, GetMaxTokens(ProviderStackSpot, "StackSpotAI", 9000))
+}
+
 func TestMoonshotCatalogEntries(t *testing.T) {
 	// Pin the public specs of the Kimi K2.6/K2.5 entries so silent drift on
 	// the model card (e.g. catalog edits during a refactor) shows up here
