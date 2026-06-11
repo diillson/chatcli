@@ -135,6 +135,7 @@ func TestContextModeValueSuggestions_KnownValuesOnly(t *testing.T) {
 	got := contextModeValueSuggestions()
 	wantValues := map[string]bool{
 		"full": true, "summary": true, "chunked": true, "smart": true,
+		"knowledge": true,
 	}
 	if len(got) != len(wantValues) {
 		t.Errorf("len = %d, want %d", len(got), len(wantValues))

@@ -105,6 +105,29 @@ func TestContextCreateOrUpdateSuggestions_FlagPrefixOffersFlagList(t *testing.T)
 	}
 }
 
+// TestContextModeValueSuggestions_ListsEveryProcessingMode drives the
+// create-path completer to the position right after `--mode` and asserts
+// every mode the handler's validator accepts is offered — including
+// `knowledge`, which was missing from the value list (the flag's own
+// description already advertised it). The palette overlay reuses this same
+// completer output, so the gate here covers both surfaces.
+func TestContextModeValueSuggestions_ListsEveryProcessingMode(t *testing.T) {
+	cli := newCompleterTestCLI(t)
+	line := "/context create myctx ./src --mode "
+	d := docWithCursor(line, len(line))
+	out := cli.contextCreateOrUpdateSuggestions("create",
+		[]string{"/context", "create", "myctx", "./src", "--mode"}, line, d)
+	seen := map[string]bool{}
+	for _, s := range out {
+		seen[s.Text] = true
+	}
+	for _, want := range []string{"full", "summary", "chunked", "smart", "knowledge"} {
+		if !seen[want] {
+			t.Errorf("expected mode %q after --mode; got %+v", want, out)
+		}
+	}
+}
+
 func TestContextExportSuggestions_AfterNameSuggestsPath(t *testing.T) {
 	cli := newCompleterTestCLI(t)
 	line := "/context export myctx "

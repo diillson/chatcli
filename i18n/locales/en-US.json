@@ -2355,6 +2355,7 @@
   "complete.context.mode_summary": "Only directory structure and metadata",
   "complete.context.mode_chunked": "Split into manageable chunks",
   "complete.context.mode_smart": "AI selects files relevant to the prompt",
+  "complete.context.mode_knowledge": "Knowledge base: injects an index card + per-turn retrieval (BM25 + vectors)",
   "complete.context.prompt_name": "Type the context name (e.g. my-project)",
   "complete.context.prompt_merge_name": "Type the name of the new merged context",
   "complete.context.not_chunked_warning": "⚠️  This context is not split into chunks",

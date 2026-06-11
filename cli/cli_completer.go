@@ -694,6 +694,7 @@ func contextModeValueSuggestions() []prompt.Suggest {
 		{Text: "summary", Description: i18n.T("complete.context.mode_summary")},
 		{Text: "chunked", Description: i18n.T("complete.context.mode_chunked")},
 		{Text: "smart", Description: i18n.T("complete.context.mode_smart")},
+		{Text: "knowledge", Description: i18n.T("complete.context.mode_knowledge")},
 	}
 }
 
