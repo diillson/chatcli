@@ -96,6 +96,7 @@ func main() {
 
 	config.InitGlobal(logger)
 	config.Global.Load()
+	utils.ApplyGlobalTLSTrust(logger)
 	utils.LogStartupInfo(logger)
 
 	defer func() {
@@ -223,6 +224,7 @@ func runSubcommand(subcmd string, args []string) {
 
 	config.InitGlobal(logger)
 	config.Global.Load()
+	utils.ApplyGlobalTLSTrust(logger)
 
 	defer func() {
 		if err := logger.Sync(); err != nil {
@@ -308,6 +310,7 @@ func runDaemonSubcommand(args []string) {
 
 	config.InitGlobal(logger)
 	config.Global.Load()
+	utils.ApplyGlobalTLSTrust(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -1844,6 +1844,7 @@
   "cfg.sub.resil.payload": "── Payload & recovery",
   "cfg.sub.resil.streaming": "── Streaming",
   "cfg.sub.resil.compaction": "── Compactação",
+  "cfg.sub.resil.tls_trust": "── Confiança TLS global (CA de proxy corporativo)",
   "cfg.sub.resil.bedrock_proxy": "── Proxy corporativo do Bedrock",
   "cfg.sub.resil.web_proxy": "── Proxy corporativo das ferramentas web (webfetch/websearch/osv)",
   "cfg.sub.resil.session_state": "── Estado da sessão",

@@ -432,6 +432,17 @@ func buildCorporateHTTPClient(logger *zap.Logger) (aws.HTTPClient, string) {
 	insecure := strings.EqualFold(strings.TrimSpace(os.Getenv("CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY")), "true")
 	bundlePath := strings.TrimSpace(os.Getenv("CHATCLI_BEDROCK_CA_BUNDLE"))
 
+	// Bedrock goes through the AWS SDK's own HTTP client, so the global
+	// corporate-trust overrides applied by utils.ApplyGlobalTLSTrust don't
+	// reach it. Fall back to them per variable; the Bedrock-specific ones
+	// keep precedence.
+	if !insecure {
+		insecure = strings.EqualFold(strings.TrimSpace(os.Getenv("CHATCLI_TLS_INSECURE_SKIP_VERIFY")), "true")
+	}
+	if bundlePath == "" {
+		bundlePath = strings.TrimSpace(os.Getenv("CHATCLI_CA_BUNDLE"))
+	}
+
 	if !insecure && bundlePath == "" {
 		return nil, ""
 	}
@@ -441,7 +452,7 @@ func buildCorporateHTTPClient(logger *zap.Logger) (aws.HTTPClient, string) {
 
 	if insecure {
 		tlsCfg.InsecureSkipVerify = true
-		note = "Bedrock: CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY=true — TLS verification is DISABLED. Do NOT use in production; configure CHATCLI_BEDROCK_CA_BUNDLE with your corporate CA instead."
+		note = "Bedrock: TLS verification is DISABLED (CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY or CHATCLI_TLS_INSECURE_SKIP_VERIFY). Do NOT use in production; configure CHATCLI_BEDROCK_CA_BUNDLE or CHATCLI_CA_BUNDLE with your corporate CA instead."
 	} else {
 		pool, err := x509.SystemCertPool()
 		if err != nil || pool == nil {
