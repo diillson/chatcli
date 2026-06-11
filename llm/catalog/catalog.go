@@ -1,6 +1,8 @@
 package catalog
 
 import (
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -1384,6 +1386,24 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools", "json_mode"},
 	},
+
+	// ── StackSpot AI ─────────────────────────────────────────────────
+	{
+		// StackSpot's agent chat API does not accept max_tokens — the
+		// platform decides output limits server-side based on the agent's
+		// underlying foundation model. These values therefore only drive
+		// client-side bookkeeping (compaction budget, ctx% footer,
+		// /metrics); without this entry both fell back to the generic
+		// 50K default, which made history compaction fire far too early.
+		ID:              "StackSpotAI",
+		Aliases:         []string{"stackspot"},
+		DisplayName:     "StackSpot AI",
+		Provider:        ProviderStackSpot,
+		ContextWindow:   128000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools"},
+	},
 }
 
 // Resolve procura metadados por provedor e string de modelo (case-insensitive),
@@ -1472,7 +1492,10 @@ func GetMaxTokens(provider, model string, override int) int {
 		// 64K é o teto comum dos modelos atuais (sonnet 4.x, opus 4.5+).
 		return 64000
 	case ProviderStackSpot:
-		return 50000
+		// The StackSpot agent API ignores client-side max_tokens; this
+		// value only feeds local bookkeeping, so keep it aligned with
+		// the registry entry instead of artificially low.
+		return 128000
 	case ProviderGoogleAI:
 		// Gemini 2.x todos a 65K output.
 		return 65536
@@ -1500,8 +1523,17 @@ func GetMaxTokens(provider, model string, override int) int {
 }
 
 // GetContextWindow returns the context window size (in tokens) for the given
-// provider+model. Falls back to a conservative default if not found.
+// provider+model. CHATCLI_CONTEXT_WINDOW, when set to a positive integer,
+// overrides everything — the escape hatch for gateways/agents whose real
+// window differs from the catalog (e.g. a StackSpot agent backed by a
+// larger or smaller foundation model). Otherwise falls back to a
+// conservative per-provider default when the model is not in the registry.
 func GetContextWindow(provider, model string) int {
+	if raw := os.Getenv("CHATCLI_CONTEXT_WINDOW"); raw != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
+			return n
+		}
+	}
 	if meta, ok := Resolve(provider, model); ok && meta.ContextWindow > 0 {
 		return meta.ContextWindow
 	}
@@ -1511,6 +1543,11 @@ func GetContextWindow(provider, model string) int {
 	case ProviderClaudeAI:
 		return 200000
 	case ProviderOpenAI:
+		return 128000
+	case ProviderStackSpot:
+		// StackSpot agents sit on top of current frontier models (128K+
+		// windows); the generic 50K default made compaction fire on
+		// almost every agent turn.
 		return 128000
 	case ProviderXAI:
 		return 128000
