@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.136.1](https://github.com/diillson/chatcli/compare/v1.136.0...v1.136.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* **context:** bound knowledge retrieval cost by query, not corpus size ([#1041](https://github.com/diillson/chatcli/issues/1041)) ([50fc08e](https://github.com/diillson/chatcli/commit/50fc08e3d6b9914d85c32c57af51358d9f716a4a))
+* **ui:** clamp the spinner to one terminal row and give [@knowledge](https://github.com/knowledge) a short call label ([#1043](https://github.com/diillson/chatcli/issues/1043)) ([d57ea2c](https://github.com/diillson/chatcli/commit/d57ea2c094ac0a31a8af358e5eaa22757d635928))
+
 ## [1.136.0](https://github.com/diillson/chatcli/compare/v1.135.0...v1.136.0) (2026-06-10)
 
 
