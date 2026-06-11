@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.137.0](https://github.com/diillson/chatcli/compare/v1.136.2...v1.137.0) (2026-06-11)
+
+
+### Features
+
+* **tls:** global corporate TLS trust overrides for all outbound clients ([#1047](https://github.com/diillson/chatcli/issues/1047)) ([58fc594](https://github.com/diillson/chatcli/commit/58fc5940f082e16e1df80bc2028ad39ac67f44c7))
+
 ## [1.136.2](https://github.com/diillson/chatcli/compare/v1.136.1...v1.136.2) (2026-06-11)
 
 
