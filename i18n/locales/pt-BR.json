@@ -2355,6 +2355,7 @@
   "complete.context.mode_summary": "Apenas estrutura de diretórios e metadados",
   "complete.context.mode_chunked": "Divide em chunks gerenciáveis",
   "complete.context.mode_smart": "IA seleciona arquivos relevantes ao prompt",
+  "complete.context.mode_knowledge": "Base de conhecimento: injeta index card + retrieval por turno (BM25 + vetores)",
   "complete.context.prompt_name": "Digite o nome do contexto (ex: meu-projeto)",
   "complete.context.prompt_merge_name": "Digite o nome do novo contexto mesclado",
   "complete.context.not_chunked_warning": "⚠️  Este contexto não está dividido em chunks",

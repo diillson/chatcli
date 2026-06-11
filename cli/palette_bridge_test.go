@@ -54,3 +54,26 @@ func TestPaletteTriggerGating(t *testing.T) {
 		t.Error("suppressPaletteOnce was not cleared after use")
 	}
 }
+
+// TestPaletteSuggest_ContextModeValuesIncludeKnowledge pins the palette
+// surface for `/context … --mode`: the overlay renders whatever the live
+// completer returns, so every processing mode — knowledge included — must
+// come back through paletteSuggest with a human description attached.
+func TestPaletteSuggest_ContextModeValuesIncludeKnowledge(t *testing.T) {
+	c := newCompleterTestCLI(t)
+	out := c.paletteSuggest("/context create myctx ./src --mode ")
+	seen := map[string]string{}
+	for _, s := range out {
+		seen[s.Text] = s.Desc
+	}
+	for _, want := range []string{"full", "summary", "chunked", "smart", "knowledge"} {
+		desc, ok := seen[want]
+		if !ok {
+			t.Errorf("palette is missing mode %q after --mode; got %+v", want, out)
+			continue
+		}
+		if desc == "" {
+			t.Errorf("palette mode %q has an empty description", want)
+		}
+	}
+}
