@@ -122,8 +122,9 @@ func TestStackSpotCatalogEntry(t *testing.T) {
 	assert.Equal(t, 128000, meta.MaxOutputTokens)
 
 	// Both lookups must agree with the entry, and an unknown StackSpot
-	// variant must land on the raised provider fallback, not 50K.
+	// variant must land on the raised provider fallbacks, not 50K.
 	assert.Equal(t, 128000, GetContextWindow(ProviderStackSpot, "StackSpotAI"))
+	assert.Equal(t, 128000, GetContextWindow(ProviderStackSpot, "some-future-model"))
 	assert.Equal(t, 128000, GetMaxTokens(ProviderStackSpot, "StackSpotAI", 0))
 	assert.Equal(t, 128000, GetMaxTokens(ProviderStackSpot, "some-future-model", 0))
 
