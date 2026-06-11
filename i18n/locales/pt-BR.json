@@ -1997,7 +1997,7 @@
   "complete.config.general": "dotenv, locale, logging, version check",
   "complete.config.providers": "Env vars de todos os providers (OpenAI, Claude, Bedrock, etc)",
   "complete.config.agent": "Runtime do modo agente — workers, subagents, coder UI",
-  "complete.config.resilience": "Caps de payload, recovery, timeout de stream, proxy Bedrock",
+  "complete.config.resilience": "Caps de payload, recovery, timeout de stream, confiança TLS global, proxy Bedrock",
   "complete.config.session": "Sessão, custo, budget, contextos, memory",
   "complete.config.integrations": "MCP, hooks, plugins, websearch, skills, worktrees, watcher, remote",
   "complete.config.auth": "Status OAuth por provider + keychain",
