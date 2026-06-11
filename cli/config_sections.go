@@ -725,6 +725,11 @@ func (cli *ChatCLI) showConfigResilience() {
 	kv(p, "CHATCLI_TOOL_RESULT_MAX_CHARS", envOr("CHATCLI_TOOL_RESULT_MAX_CHARS"))
 
 	fmt.Println(p)
+	subheader(p, "cfg.sub.resil.tls_trust")
+	kv(p, "CHATCLI_CA_BUNDLE", envOr("CHATCLI_CA_BUNDLE"))
+	kv(p, "CHATCLI_TLS_INSECURE_SKIP_VERIFY", envBool("CHATCLI_TLS_INSECURE_SKIP_VERIFY"))
+
+	fmt.Println(p)
 	subheader(p, "cfg.sub.resil.bedrock_proxy")
 	kv(p, "CHATCLI_BEDROCK_CA_BUNDLE", envOr("CHATCLI_BEDROCK_CA_BUNDLE"))
 	kv(p, "CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY", envBool("CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY"))

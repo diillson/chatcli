@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/utils"
 	"golang.org/x/net/http/httpproxy"
 )
 
@@ -149,6 +150,10 @@ func newWebTransport() *http.Transport {
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+		// Corporate TLS trust overrides (CHATCLI_CA_BUNDLE /
+		// CHATCLI_TLS_INSECURE_SKIP_VERIFY) — web tools cross the same
+		// TLS-intercepting proxy as the LLM providers.
+		TLSClientConfig: utils.GlobalTLSConfig().Clone(),
 	}
 }
 

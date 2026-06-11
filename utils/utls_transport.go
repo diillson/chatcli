@@ -56,10 +56,17 @@ func (*chromeTLSTransport) dialUTLS(ctx context.Context, addr string) (*utls.UCo
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
 
-	uConn := utls.UClient(rawConn, &utls.Config{
+	uCfg := &utls.Config{
 		ServerName: host,
 		MinVersion: tls.VersionTLS12,
-	}, utls.HelloChrome_Auto)
+	}
+	// Propagate the corporate TLS trust overrides — uTLS has its own
+	// handshake and does not see http.Transport's TLSClientConfig.
+	if g := GlobalTLSConfig(); g != nil {
+		uCfg.RootCAs = g.RootCAs
+		uCfg.InsecureSkipVerify = g.InsecureSkipVerify // #nosec G402 -- mirrors the documented global opt-in
+	}
+	uConn := utls.UClient(rawConn, uCfg, utls.HelloChrome_Auto)
 
 	if err := uConn.HandshakeContext(ctx); err != nil {
 		_ = rawConn.Close()

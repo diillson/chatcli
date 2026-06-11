@@ -33,6 +33,12 @@ func NewHTTPClient(logger *zap.Logger, timeout time.Duration) *http.Client {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
+	// Corporate TLS trust overrides (CHATCLI_CA_BUNDLE /
+	// CHATCLI_TLS_INSECURE_SKIP_VERIFY). Cloned so each provider keeps its
+	// dedicated TLS session cache.
+	if tlsCfg := GlobalTLSConfig(); tlsCfg != nil {
+		transport.TLSClientConfig = tlsCfg.Clone()
+	}
 	return NewHTTPClientWithTransport(logger, timeout, transport)
 }
 

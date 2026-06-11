@@ -137,6 +137,10 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_TOOL_RESULT_BUDGET_CHARS":     {Value: "200000", Source: "agent.DefaultTurnBudgetChars"},
 	"CHATCLI_TOOL_RESULT_MAX_CHARS":        {Value: "20000", Source: "agent.DefaultPerResultMaxChars"},
 
+	// ─── Resilience: global TLS trust ────────────────────────────
+	"CHATCLI_CA_BUNDLE":                {Value: "(system trust store)", Source: "utils.ApplyGlobalTLSTrust"},
+	"CHATCLI_TLS_INSECURE_SKIP_VERIFY": {Value: "false", IsBool: true, Source: "utils.ApplyGlobalTLSTrust"},
+
 	// ─── Resilience: bedrock proxy ───────────────────────────────
 	"CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY": {Value: "false", IsBool: true, Source: "bedrock client"},
 	"CHATCLI_BEDROCK_ENABLE_IMDS":          {Value: "false", IsBool: true, Source: "bedrock client"},
