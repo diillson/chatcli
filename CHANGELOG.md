@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.138.0](https://github.com/diillson/chatcli/compare/v1.137.0...v1.138.0) (2026-06-12)
+
+
+### Features
+
+* **plugins:** bring [@docs-flatten](https://github.com/docs-flatten) in as a builtin tool ([#1049](https://github.com/diillson/chatcli/issues/1049)) ([9ddecc3](https://github.com/diillson/chatcli/commit/9ddecc3d4b32497c558716f8bd231079c3e1b40e))
+
 ## [1.137.0](https://github.com/diillson/chatcli/compare/v1.136.2...v1.137.0) (2026-06-11)
 
 
