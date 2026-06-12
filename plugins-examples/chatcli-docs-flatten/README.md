@@ -1,3 +1,5 @@
+> **Nota:** o ChatCLI agora traz o `@docs-flatten` como **tool builtin** (sem necessidade de compilar ou assinar plugin), com suporte adicional a `.mdx` (Mintlify/Docusaurus), globs `**` e chunking heading-aware. Este diretório permanece como **exemplo de autoria de plugin externo**.
+
 O **@docs-flatten** varre arquivos Markdown (`.md`) de um diretório local ou de um repositório Git remoto, gera *chunks* de texto e exporta em vários formatos (`text`, `jsonl`, `json`, `yaml`).
 
 ---

@@ -455,6 +455,10 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// and walk attached documentation corpora on demand. Adapter wired
 		// below once the context handler exists.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinKnowledgePlugin())
+		// @docs-flatten — push-side companion of @knowledge: flattens a
+		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
+		// corpus /context --mode knowledge ingests. Self-contained.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDocsFlattenPlugin())
 		// Atomic read-only tools (Claude Code parity, Item 1). Narrow,
 		// flat-schema tools that route into the same engine as @coder
 		// read/search/tree but give the LLM a dedicated entry point —
