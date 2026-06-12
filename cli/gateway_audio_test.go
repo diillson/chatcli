@@ -8,6 +8,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -83,5 +84,22 @@ func TestTranscribeInbound_ErrorAndEmpty(t *testing.T) {
 		&fakeTranscriber{out: "   "}, "", newAudioMsg(""))
 	if !handled || reply == "" {
 		t.Error("empty transcript must be handled with a reply")
+	}
+}
+
+func TestTranscribeInbound_NeedsFFmpegReplyIsActionable(t *testing.T) {
+	cli := &ChatCLI{logger: zap.NewNop()}
+	wrapped := fmt.Errorf("no decoder for audio/mpeg: %w", transcription.ErrNeedsFFmpeg)
+
+	_, handled, reply := cli.transcribeInbound(context.Background(),
+		&fakeTranscriber{err: wrapped}, "", newAudioMsg(""))
+	if !handled {
+		t.Fatal("ffmpeg-missing must be handled with a reply")
+	}
+	if !strings.Contains(reply, transcription.FFmpegInstallHint()) {
+		t.Errorf("reply must carry the platform install hint: %q", reply)
+	}
+	if reply == transcriptionFailureReply(errors.New("generic")) {
+		t.Error("ffmpeg-missing reply must differ from the generic failure")
 	}
 }
