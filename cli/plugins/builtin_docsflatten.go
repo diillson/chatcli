@@ -396,7 +396,7 @@ func resolveDocsFlattenRoot(ctx context.Context, cfg docsFlattenArgs, emit func(
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		cleanup()
-		return "", docsFlattenProvenance{}, noop, fmt.Errorf("git clone failed: %v\n%s", err, strings.TrimSpace(stderr.String()))
+		return "", docsFlattenProvenance{}, noop, fmt.Errorf("git clone failed: %w\n%s", err, strings.TrimSpace(stderr.String()))
 	}
 
 	prov := docsFlattenProvenance{RepoURL: cfg.Repo}
@@ -559,9 +559,10 @@ func parseDocsFlattenFrontMatter(data string) (title, body string, hasFM bool) {
 func normalizeDocsFlattenMarkdown(text string) string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
-	var out []string
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
 	blank := 0
-	for _, line := range strings.Split(text, "\n") {
+	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			blank++
 			if blank > 1 {
@@ -616,24 +617,21 @@ func chunkMarkdown(text string, maxChars int) []string {
 // splitMarkdownSections splits at ATX headings, tracking ``` / ~~~ fences so
 // a "# comment" line inside a shell snippet never opens a new section.
 func splitMarkdownSections(text string) []string {
+	lines := strings.Split(text, "\n")
 	var sections []string
-	var cur []string
+	start := 0
 	inFence := false
-	for _, line := range strings.Split(text, "\n") {
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			inFence = !inFence
 		}
-		if !inFence && docsFlattenHeading.MatchString(trimmed) && len(cur) > 0 {
-			sections = append(sections, strings.Join(cur, "\n"))
-			cur = nil
+		if !inFence && docsFlattenHeading.MatchString(trimmed) && i > start {
+			sections = append(sections, strings.Join(lines[start:i], "\n"))
+			start = i
 		}
-		cur = append(cur, line)
 	}
-	if len(cur) > 0 {
-		sections = append(sections, strings.Join(cur, "\n"))
-	}
-	return sections
+	return append(sections, strings.Join(lines[start:], "\n"))
 }
 
 // chunkLines is the line-boundary fallback packer for oversized sections.
@@ -667,11 +665,12 @@ var mdxComponentTag = regexp.MustCompile(`</?[A-Z][A-Za-z0-9.]*(\s[^<>]*)?/?>`)
 // code blocks pass through untouched. Multi-line component tags (attributes
 // spread across lines, as Mintlify emits) are joined before stripping.
 func sanitizeMDX(content string) string {
-	var out []string
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
 	inFence := false
 	var pendingTag []string
 
-	for _, line := range strings.Split(content, "\n") {
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			inFence = !inFence
@@ -746,8 +745,9 @@ func docsFlattenGlobAny(rel string, patterns []string) bool {
 // to "**" + "*X" so the historical advertised form `docs/**.md` keeps
 // working. Other segments use filepath.Match semantics.
 func matchDocsGlob(pattern, path string) bool {
-	var segs []string
-	for _, s := range strings.Split(pattern, "/") {
+	parts := strings.Split(pattern, "/")
+	segs := make([]string, 0, len(parts)+1)
+	for _, s := range parts {
 		if s != "**" && strings.Contains(s, "**") {
 			segs = append(segs, "**", strings.ReplaceAll(s, "**", "*"))
 			continue
