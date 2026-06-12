@@ -1111,6 +1111,8 @@
   "plugins.knowledge.describe_toc": "Listing knowledge base contents",
   "plugins.knowledge.describe_list": "Listing attached knowledge bases",
   "plugins.knowledge.describe_generic": "Querying the knowledge base",
+  "plugins.docsflatten.description": "Flatten Markdown/MDX documentation (local directory or git repo) into AI-ready chunks (text/jsonl/json/yaml); jsonl feeds /context --mode knowledge",
+  "plugins.docsflatten.describe": "Flattening docs: %s",
   "plugins.search.description": "Search workspace files for a regex pattern (Go regexp syntax) and return file:line matches",
   "plugins.search.describe": "Searching: %s",
   "plugins.tree.description": "List the workspace directory structure as an ASCII tree (depth-bounded)",
