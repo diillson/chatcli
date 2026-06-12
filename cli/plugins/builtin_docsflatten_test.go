@@ -245,6 +245,19 @@ func TestParseDocsFlattenArgs(t *testing.T) {
 			t.Error("expected error on flag-like repo URL")
 		}
 	})
+	t.Run("invalid branch rejected", func(t *testing.T) {
+		if _, err := parseDocsFlattenArgs([]string{`{"repo":"https://github.com/org/x","branch":"-evil"}`}); err == nil {
+			t.Error("expected error on flag-like branch")
+		}
+		for branch, want := range map[string]bool{
+			"main": true, "release/1.2": true, "v1.2.3": true,
+			"-evil": false, "has space": false, "ctl\tchar": false, "": false,
+		} {
+			if got := isValidGitBranch(branch); got != want {
+				t.Errorf("isValidGitBranch(%q) = %v, want %v", branch, got, want)
+			}
+		}
+	})
 }
 
 // writeDocsTree builds a small docs corpus for end-to-end tests.

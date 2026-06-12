@@ -272,7 +272,25 @@ func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
 	if out.Repo != "" && !isLikelyGitURL(out.Repo) {
 		return out, fmt.Errorf("repo %q does not look like a git URL (expected https://…, ssh://… or git@host:path)", out.Repo)
 	}
+	if !isValidGitBranch(out.Branch) {
+		return out, fmt.Errorf("invalid branch name %q", out.Branch)
+	}
 	return out, nil
+}
+
+// isValidGitBranch enforces the subset of git-check-ref-format rules that
+// matters before handing the value to a subprocess: no flag-like leading
+// dash, no whitespace or control characters.
+func isValidGitBranch(branch string) bool {
+	if branch == "" || strings.HasPrefix(branch, "-") {
+		return false
+	}
+	for _, r := range branch {
+		if r <= ' ' || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // docsFlattenArgvToMap converts `--flag value` argv form into the same raw
@@ -391,7 +409,7 @@ func resolveDocsFlattenRoot(ctx context.Context, cfg docsFlattenArgs, emit func(
 	emit(fmt.Sprintf("cloning %s (branch=%s)…", cfg.Repo, cfg.Branch))
 	var stderr bytes.Buffer
 	// "--" terminates flag parsing so a hostile URL/branch can't smuggle git flags.
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", cfg.Branch, "--", cfg.Repo, tmpDir)
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", cfg.Branch, "--", cfg.Repo, tmpDir) //#nosec G204 -- repo validated by isLikelyGitURL, branch by isValidGitBranch, "--" terminates flag parsing
 	cmd.Stdout = nil
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -400,7 +418,7 @@ func resolveDocsFlattenRoot(ctx context.Context, cfg docsFlattenArgs, emit func(
 	}
 
 	prov := docsFlattenProvenance{RepoURL: cfg.Repo}
-	if out, err := exec.CommandContext(ctx, "git", "-C", tmpDir, "rev-parse", "HEAD").Output(); err == nil {
+	if out, err := exec.CommandContext(ctx, "git", "-C", tmpDir, "rev-parse", "HEAD").Output(); err == nil { //#nosec G204 -- tmpDir comes from os.MkdirTemp, not user input
 		prov.Commit = strings.TrimSpace(string(out))
 	}
 
