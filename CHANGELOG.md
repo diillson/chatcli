@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.139.0](https://github.com/diillson/chatcli/compare/v1.138.0...v1.139.0) (2026-06-13)
+
+
+### Features
+
+* **transcription:** pure-Go OGG/Opus decoding and actionable ffmpeg guidance ([#1051](https://github.com/diillson/chatcli/issues/1051)) ([48d9def](https://github.com/diillson/chatcli/commit/48d9def5fe5f09f33416a86fb1565cdefbb4e4cd))
+
 ## [1.138.0](https://github.com/diillson/chatcli/compare/v1.137.0...v1.138.0) (2026-06-12)
 
 
