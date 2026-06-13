@@ -21,6 +21,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-runewidth v0.0.24
 	github.com/muesli/termenv v0.16.0
+	github.com/pion/opus v0.1.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/refraction-networking/utls v1.8.2
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1

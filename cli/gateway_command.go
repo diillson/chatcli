@@ -22,6 +22,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -81,6 +82,20 @@ func (cli *ChatCLI) gatewayStatus() {
 	}
 	fmt.Printf("  %s %s\n", colorize(i18n.T("gateway.registered"), ColorYellow), strings.Join(names, ", "))
 	fmt.Printf("  %s %d\n", colorize(i18n.T("gateway.configured"), ColorYellow), len(adapters))
+
+	// Voice capability probe: same env the daemon reads, quiet logger so the
+	// REPL doesn't see provider-selection chatter.
+	probe := transcription.NewFromEnv(zap.NewNop())
+	if transcription.IsNull(probe) {
+		fmt.Printf("  %s %s\n", colorize(i18n.T("gateway.status_voice"), ColorYellow), i18n.T("gateway.status_voice_off"))
+		return
+	}
+	fmt.Printf("  %s %s\n", colorize(i18n.T("gateway.status_voice"), ColorYellow), probe.Name())
+	if pf := transcription.PreflightVoice(probe); len(pf.NeedsFFmpegFormats) > 0 {
+		fmt.Printf("    %s\n", colorize(
+			i18n.T("gateway.status_voice_warn", strings.Join(pf.NeedsFFmpegFormats, ", "), transcription.FFmpegInstallHint()),
+			ColorYellow))
+	}
 }
 
 // gatewayStartDetached re-execs `chatcli gateway` as a detached background
@@ -259,6 +274,7 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	transcriber := transcription.NewFromEnv(cli.logger)
 	if !transcription.IsNull(transcriber) {
 		cli.logger.Info("gateway: voice transcription enabled", zap.String("provider", transcriber.Name()))
+		logVoicePreflight(cli.logger, transcriber)
 	}
 	// Self-provisioning backends (embedded whisper) download their engine and
 	// model on first use; kick that off now, tied to the daemon lifetime, so
@@ -511,7 +527,7 @@ func (cli *ChatCLI) transcribeInbound(ctx context.Context, t transcription.Provi
 	out, err := t.Transcribe(tctx, msg.Audio.Data, msg.Audio.MimeType, msg.Audio.FileName, lang)
 	if err != nil {
 		cli.logger.Warn("gateway: transcription failed", zap.Error(err))
-		return "", true, i18n.T("gateway.audio.failed")
+		return "", true, transcriptionFailureReply(err)
 	}
 	out = strings.TrimSpace(out)
 	if out == "" {
@@ -523,6 +539,29 @@ func (cli *ChatCLI) transcribeInbound(ctx context.Context, t transcription.Provi
 		return caption + "\n\n[voice transcript] " + out, false, ""
 	}
 	return out, false, ""
+}
+
+// transcriptionFailureReply maps a transcription error onto the user-facing
+// reply, surfacing actionable causes (a missing ffmpeg gets the per-platform
+// install command) instead of a generic failure.
+func transcriptionFailureReply(err error) string {
+	if errors.Is(err, transcription.ErrNeedsFFmpeg) {
+		return i18n.T("gateway.audio.needs_ffmpeg", transcription.FFmpegInstallHint())
+	}
+	return i18n.T("gateway.audio.failed")
+}
+
+// logVoicePreflight warns the operator at daemon startup about degraded voice
+// decoding, so the discovery moment is the log line — not the first user
+// voice note that fails.
+func logVoicePreflight(logger *zap.Logger, t transcription.Provider) {
+	pf := transcription.PreflightVoice(t)
+	if len(pf.NeedsFFmpegFormats) == 0 {
+		return
+	}
+	logger.Warn("gateway: voice preflight — ffmpeg not found; OGG/Opus voice notes decode in pure Go, other formats will be rejected",
+		zap.Strings("needs_ffmpeg", pf.NeedsFFmpegFormats),
+		zap.String("install", transcription.FFmpegInstallHint()))
 }
 
 // gatewayCleanLine trims a streamed line, strips box-drawing/decorative runes,

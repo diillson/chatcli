@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -29,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/llm/internal/audio"
 	"github.com/diillson/chatcli/llm/internal/provision"
 	"go.uber.org/zap"
 )
@@ -247,21 +249,46 @@ func (e *embeddedWhisper) Transcribe(ctx context.Context, audio []byte, mimeType
 	return e.run(ctx, paths, wav, language)
 }
 
-// toWAV converts the clip to the 16kHz mono WAV the engine wants. Without
-// ffmpeg a clip that is already WAV passes through; anything else gets an
-// actionable error instead of garbage recognition.
-func (e *embeddedWhisper) toWAV(ctx context.Context, audio []byte, mimeType, filename string) ([]byte, error) {
+// engineSampleRate is the PCM rate the sherpa-onnx whisper engine expects.
+const engineSampleRate = 16000
+
+// toWAV converts the clip to the 16kHz mono WAV the engine wants, walking a
+// graceful-degradation chain: ffmpeg when installed (the reference decoder,
+// covers every format), the pure-Go Opus decoder for the OGG/Opus voice notes
+// messaging platforms send (so the zero-config install needs no ffmpeg), WAV
+// passthrough, and finally an actionable per-platform error.
+func (e *embeddedWhisper) toWAV(ctx context.Context, clip []byte, mimeType, filename string) ([]byte, error) {
 	if ff := lookupFFmpeg(); ff != "" {
-		wav, err := ffmpegToWAV(ctx, ff, audio, mimeType)
+		wav, err := ffmpegToWAV(ctx, ff, clip, mimeType)
 		if err == nil {
 			return wav, nil
 		}
-		e.logger.Warn("transcription: ffmpeg transcode failed; passing original to the embedded engine", zap.Error(err))
+		e.logger.Warn("transcription: ffmpeg transcode failed; trying built-in decoders", zap.Error(err))
 	}
-	if looksLikeWAV(audio, mimeType, filename) {
-		return audio, nil
+	wav, err := audio.DecodeOggOpusToWAV(ctx, clip, engineSampleRate)
+	if err == nil {
+		e.logger.Info("transcription: voice note decoded with the pure-Go opus decoder")
+		return wav, nil
 	}
-	return nil, fmt.Errorf("transcription: embedded whisper decodes WAV only and ffmpeg is not installed — install ffmpeg (e.g. brew install ffmpeg) for Opus/MP3 voice notes")
+	if !errors.Is(err, audio.ErrNotOggOpus) {
+		e.logger.Warn("transcription: pure-Go opus decode failed", zap.Error(err))
+	}
+	if looksLikeWAV(clip, mimeType, filename) {
+		return clip, nil
+	}
+	return nil, fmt.Errorf("transcription: no decoder for %s on this machine — %s: %w",
+		describeClip(mimeType, filename), FFmpegInstallHint(), ErrNeedsFFmpeg)
+}
+
+// describeClip names the clip for error messages, preferring the MIME type.
+func describeClip(mimeType, filename string) string {
+	if m := strings.TrimSpace(mimeType); m != "" {
+		return m
+	}
+	if f := strings.TrimSpace(filename); f != "" {
+		return f
+	}
+	return "this audio format"
 }
 
 // looksLikeWAV reports whether the clip is plausibly RIFF/WAV already.
