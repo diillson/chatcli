@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.140.0](https://github.com/diillson/chatcli/compare/v1.139.0...v1.140.0) (2026-06-14)
+
+
+### Features
+
+* **context:** autonomous knowledge-base management via [@context](https://github.com/context) ([#1058](https://github.com/diillson/chatcli/issues/1058)) ([6fe30ec](https://github.com/diillson/chatcli/commit/6fe30ec866a51bfab228fb16eeb73d8e19c5ee3a))
+* **plugins:** add [@registry-tags](https://github.com/registry-tags) and [@wikipedia](https://github.com/wikipedia) builtins ([#1054](https://github.com/diillson/chatcli/issues/1054)) ([1cba9ae](https://github.com/diillson/chatcli/commit/1cba9aefb4ce899da5660acb51cb5a939a40b210))
+
 ## [1.139.0](https://github.com/diillson/chatcli/compare/v1.138.0...v1.139.0) (2026-06-13)
 
 
