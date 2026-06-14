@@ -348,7 +348,7 @@ func wikipediaGet(ctx context.Context, lang string, params url.Values) ([]byte, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Wikipedia API returned HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("wikipedia API returned HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 }

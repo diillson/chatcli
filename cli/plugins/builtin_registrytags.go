@@ -404,7 +404,7 @@ func fetchOCITags(ctx context.Context, registry, image string, cfg registryTagsA
 		if auth == "" {
 			auth = registryBasicAuth(cfg)
 		}
-		resp, err := registryGetResp(ctx, next, auth)
+		status, header, body, err := registryFetch(ctx, next, auth)
 		if err != nil {
 			return nil, false, err
 		}
@@ -412,23 +412,19 @@ func fetchOCITags(ctx context.Context, registry, image string, cfg registryTagsA
 		// Anonymous OCI registries (GHCR, Quay, GCR) gate even public reads
 		// behind a token: a 401 carries a WWW-Authenticate Bearer challenge we
 		// satisfy once, then retry the same page.
-		if resp.StatusCode == http.StatusUnauthorized && bearer == "" {
-			challenge := resp.Header.Get("WWW-Authenticate")
-			_ = resp.Body.Close()
-			tok, terr := negotiateBearerToken(ctx, challenge, cfg)
+		if status == http.StatusUnauthorized && bearer == "" {
+			tok, terr := negotiateBearerToken(ctx, header.Get("WWW-Authenticate"), cfg)
 			if terr != nil {
 				return nil, false, terr
 			}
 			bearer = "Bearer " + tok
-			resp, err = registryGetResp(ctx, next, bearer)
+			status, header, body, err = registryFetch(ctx, next, bearer)
 			if err != nil {
 				return nil, false, err
 			}
 		}
-
-		body, err := readRegistryBody(resp)
-		if err != nil {
-			return nil, false, err
+		if serr := registryStatusErr(status, body); serr != nil {
+			return nil, false, serr
 		}
 
 		var parsed struct {
@@ -443,7 +439,7 @@ func fetchOCITags(ctx context.Context, registry, image string, cfg registryTagsA
 				return tags[:cfg.Limit], true, nil
 			}
 		}
-		next = nextLinkURL(registry, resp.Header.Get("Link"))
+		next = nextLinkURL(registry, header.Get("Link"))
 	}
 	return tags, false, nil
 }
@@ -570,49 +566,65 @@ func registryBasicAuth(cfg registryTagsArgs) string {
 	return "Basic " + enc
 }
 
-// registryGet issues a GET and returns the body on a 2xx, mapping common
-// failures (401/403/404) to actionable errors.
+// registryGet returns the body for a 2xx response, mapping common failures
+// (401/403/404) to actionable errors.
 func registryGet(ctx context.Context, rawURL, authHeader string) ([]byte, error) {
-	resp, err := registryGetResp(ctx, rawURL, authHeader)
+	status, _, body, err := registryFetch(ctx, rawURL, authHeader)
 	if err != nil {
 		return nil, err
 	}
-	return readRegistryBody(resp)
+	if serr := registryStatusErr(status, body); serr != nil {
+		return nil, serr
+	}
+	return body, nil
 }
 
-// registryGetResp issues a single GET through the shared proxy/TLS-aware client.
+// registryFetch issues a single GET through the shared proxy/TLS-aware client
+// and returns the status, response headers and the fully-read body. It closes
+// the response body itself, so no caller can leak it.
 //
 // gosec G704 flags the request as an SSRF taint flow because the registry host
 // can come from operator/agent input; the egress is constrained by the shared
 // ssrfDialControl (metadata/link-local always refused) and validateRegistryURL
 // upstream, mirroring the @webfetch/@osv convention.
-func registryGetResp(ctx context.Context, rawURL, authHeader string) (*http.Response, error) {
+func registryFetch(ctx context.Context, rawURL, authHeader string) (int, http.Header, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil) //#nosec G704 -- registry URL validated by validateRegistryURL + ssrfDialControl (metadata/link-local refused)
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+		return 0, nil, nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "chatcli-registry-tags/2.0")
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}
-	return registryTagsHTTPClient.Do(req) //#nosec G704 -- see validateRegistryURL + ssrfDialControl
+	resp, err := registryTagsHTTPClient.Do(req) //#nosec G704 -- see validateRegistryURL + ssrfDialControl
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return resp.StatusCode, resp.Header, nil, err
+	}
+	return resp.StatusCode, resp.Header, body, nil
 }
 
-// readRegistryBody reads a response, returning an actionable error for the
-// non-2xx statuses registries use, and closing the body either way.
-func readRegistryBody(resp *http.Response) ([]byte, error) {
-	defer resp.Body.Close()
-	switch resp.StatusCode {
+// registryStatusErr maps the non-2xx statuses registries use to actionable
+// errors, or nil for a 200.
+func registryStatusErr(status int, body []byte) error {
+	switch status {
 	case http.StatusOK:
-		return io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		return nil
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return nil, fmt.Errorf("authentication failed (%d) — set username/password or token for this registry", resp.StatusCode)
+		return fmt.Errorf("authentication failed (%d) — set username/password or token for this registry", status)
 	case http.StatusNotFound:
-		return nil, fmt.Errorf("image or repository not found (404)")
+		return fmt.Errorf("image or repository not found (404)")
 	default:
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("registry returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+		snippet := body
+		if len(snippet) > 512 {
+			snippet = snippet[:512]
+		}
+		return fmt.Errorf("registry returned HTTP %d: %s", status, strings.TrimSpace(string(snippet)))
 	}
 }
 

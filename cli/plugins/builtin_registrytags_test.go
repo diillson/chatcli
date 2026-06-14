@@ -138,7 +138,7 @@ func TestFetchOCITagsTokenNegotiation(t *testing.T) {
 			if r.URL.Query().Get("scope") == "" {
 				t.Errorf("token request missing scope")
 			}
-			w.Write([]byte(`{"token":"abc123"}`))
+			_, _ = w.Write([]byte(`{"token":"abc123"}`))
 		case strings.HasSuffix(r.URL.Path, "/tags/list"):
 			if r.Header.Get("Authorization") != "Bearer abc123" {
 				// First (unauthenticated) hit → challenge.
@@ -150,11 +150,11 @@ func TestFetchOCITagsTokenNegotiation(t *testing.T) {
 			if r.URL.Query().Get("last") == "" {
 				// Page 1 → one tag + a next link.
 				w.Header().Set("Link", `</v2/team/app/tags/list?n=100&last=v1>; rel="next"`)
-				w.Write([]byte(`{"name":"team/app","tags":["v1"]}`))
+				_, _ = w.Write([]byte(`{"name":"team/app","tags":["v1"]}`))
 				return
 			}
 			// Page 2 → final tag, no link.
-			w.Write([]byte(`{"name":"team/app","tags":["v2"]}`))
+			_, _ = w.Write([]byte(`{"name":"team/app","tags":["v2"]}`))
 		default:
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
@@ -176,7 +176,7 @@ func TestFetchOCITagsTokenNegotiation(t *testing.T) {
 
 func TestFetchOCITagsTruncatesAtLimit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"tags":["a","b","c","d"]}`))
+		_, _ = w.Write([]byte(`{"tags":["a","b","c","d"]}`))
 	}))
 	defer server.Close()
 
@@ -194,10 +194,10 @@ func TestFetchDockerHubTagsPagination(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("page2") == "" {
-			w.Write([]byte(`{"next":"` + server.URL + `/v2/repositories/library/redis/tags/?page2=1","results":[{"name":"7"}]}`))
+			_, _ = w.Write([]byte(`{"next":"` + server.URL + `/v2/repositories/library/redis/tags/?page2=1","results":[{"name":"7"}]}`))
 			return
 		}
-		w.Write([]byte(`{"next":"","results":[{"name":"6"}]}`))
+		_, _ = w.Write([]byte(`{"next":"","results":[{"name":"6"}]}`))
 	}))
 	defer server.Close()
 
@@ -213,7 +213,7 @@ func TestFetchDockerHubTagsPagination(t *testing.T) {
 
 func TestRegistryTagsExecuteEndToEnd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"tags":["1.0","1.1"]}`))
+		_, _ = w.Write([]byte(`{"tags":["1.0","1.1"]}`))
 	}))
 	defer server.Close()
 

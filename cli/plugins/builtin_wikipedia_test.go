@@ -70,7 +70,7 @@ func TestWikipediaSearch(t *testing.T) {
 		if r.URL.Query().Get("action") != "opensearch" {
 			t.Errorf("unexpected action %q", r.URL.Query().Get("action"))
 		}
-		w.Write([]byte(`["turing",["Alan Turing","Turing machine"],["",""],["",""]]`))
+		_, _ = w.Write([]byte(`["turing",["Alan Turing","Turing machine"],["",""],["",""]]`))
 	}))
 	defer server.Close()
 
@@ -92,7 +92,7 @@ func TestWikipediaRead(t *testing.T) {
 		if r.URL.Query().Get("action") != "query" {
 			t.Errorf("unexpected action %q", r.URL.Query().Get("action"))
 		}
-		w.Write([]byte(`{"query":{"pages":{"123":{"title":"Alan Turing","extract":"A British mathematician."}}}}`))
+		_, _ = w.Write([]byte(`{"query":{"pages":{"123":{"title":"Alan Turing","extract":"A British mathematician."}}}}`))
 	}))
 	defer server.Close()
 
@@ -111,7 +111,7 @@ func TestWikipediaRead(t *testing.T) {
 
 func TestWikipediaSearchNoResults(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`["zzz",[],[],[]]`))
+		_, _ = w.Write([]byte(`["zzz",[],[],[]]`))
 	}))
 	defer server.Close()
 
