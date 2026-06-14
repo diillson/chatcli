@@ -102,7 +102,7 @@ func (tt *TopicTracker) GetTopTopics(limit int) []Topic {
 	}
 
 	now := time.Now()
-	var all []scored
+	all := make([]scored, 0, len(tt.topics))
 	for _, t := range tt.topics {
 		daysSince := now.Sub(t.LastSeen).Hours() / 24.0
 		if daysSince < 0 {
@@ -151,7 +151,7 @@ func (tt *TopicTracker) FormatForPrompt(limit int) string {
 		return ""
 	}
 
-	var parts []string
+	parts := make([]string, 0, len(top))
 	for _, t := range top {
 		parts = append(parts, t.Name)
 	}

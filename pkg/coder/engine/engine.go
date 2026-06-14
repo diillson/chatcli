@@ -210,15 +210,15 @@ func (e *Engine) Execute(ctx context.Context, cmd string, args []string) error {
 	case "clean":
 		return e.handleClean(args)
 	case "git-status":
-		return e.handleGitStatus(args)
+		return e.handleGitStatus(ctx, args)
 	case "git-diff":
-		return e.handleGitDiff(args)
+		return e.handleGitDiff(ctx, args)
 	case "git-log":
-		return e.handleGitLog(args)
+		return e.handleGitLog(ctx, args)
 	case "git-changed":
-		return e.handleGitChanged(args)
+		return e.handleGitChanged(ctx, args)
 	case "git-branch":
-		return e.handleGitBranch(args)
+		return e.handleGitBranch(ctx, args)
 	case "test":
 		return e.handleTest(ctx, args)
 	default:
@@ -244,7 +244,7 @@ func (e *Engine) printCommandOutput(out string, err error) error {
 	}
 	if err != nil {
 		e.printf("❌ Falhou: %v\n", err)
-		return fmt.Errorf("command failed: %v", err)
+		return fmt.Errorf("command failed: %w", err)
 	}
 	return nil
 }

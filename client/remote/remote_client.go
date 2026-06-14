@@ -51,7 +51,7 @@ type Config struct {
 }
 
 // NewClient creates a new remote gRPC client that implements LLMClient.
-func NewClient(cfg Config, logger *zap.Logger) (*Client, error) {
+func NewClient(ctx context.Context, cfg Config, logger *zap.Logger) (*Client, error) {
 	var dialOpts []grpc.DialOption
 
 	// Security (H4): TLS configuration with TLS 1.3 minimum.
@@ -136,8 +136,8 @@ func NewClient(cfg Config, logger *zap.Logger) (*Client, error) {
 	}
 
 	// Fetch server info to get the default model/provider
-	ctx := c.withAuth(context.Background())
-	info, err := grpcClient.GetServerInfo(ctx, &pb.GetServerInfoRequest{})
+	authCtx := c.withAuth(ctx)
+	info, err := grpcClient.GetServerInfo(authCtx, &pb.GetServerInfoRequest{})
 	if err != nil {
 		logger.Warn("Failed to fetch server info, using defaults", zap.Error(err))
 		c.model = "remote"

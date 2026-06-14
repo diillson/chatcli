@@ -88,7 +88,7 @@ func (cli *ChatCLI) makeLessonPersister() quality.PersistLessonFunc {
 //
 // Idempotent — safe to call multiple times; the second call is a
 // no-op returning the cached runner.
-func (cli *ChatCLI) ensureReflexionRunner(cfg quality.ReflexionQueueConfig) *lessonq.Runner {
+func (cli *ChatCLI) ensureReflexionRunner(ctx context.Context, cfg quality.ReflexionQueueConfig) *lessonq.Runner {
 	if cli == nil || !cfg.Enabled {
 		return nil
 	}
@@ -143,7 +143,10 @@ func (cli *ChatCLI) ensureReflexionRunner(cfg quality.ReflexionQueueConfig) *les
 	persist := cli.makeLessonPersister()
 	proc := lessonq.NewProcessor(llm, persist, lessonq.GetMetrics(), cli.logger)
 
-	if err := runner.Start(context.Background(), proc); err != nil {
+	// The durable runner must outlive the triggering request, so detach
+	// cancellation while inheriting context values.
+	runnerCtx := context.WithoutCancel(ctx)
+	if err := runner.Start(runnerCtx, proc); err != nil {
 		cli.logger.Warn("reflexion: failed to start durable runner, falling back to legacy mode",
 			zap.Error(err))
 		runner.DrainAndShutdown(time.Second)
@@ -152,7 +155,7 @@ func (cli *ChatCLI) ensureReflexionRunner(cfg quality.ReflexionQueueConfig) *les
 	// Replay pending WAL records from a previous session asynchronously
 	// so we don't block agent startup on a potentially large drain.
 	go func() {
-		n, err := runner.Replay(context.Background())
+		n, err := runner.Replay(runnerCtx)
 		if err != nil {
 			cli.logger.Warn("reflexion: replay failed", zap.Error(err))
 			return
@@ -168,8 +171,8 @@ func (cli *ChatCLI) ensureReflexionRunner(cfg quality.ReflexionQueueConfig) *les
 
 // reflexionEnqueuer returns the enqueuer to inject into the pipeline
 // deps. Returns nil when queue is disabled or construction failed.
-func (cli *ChatCLI) reflexionEnqueuer(cfg quality.ReflexionQueueConfig) quality.LessonEnqueuer {
-	runner := cli.ensureReflexionRunner(cfg)
+func (cli *ChatCLI) reflexionEnqueuer(ctx context.Context, cfg quality.ReflexionQueueConfig) quality.LessonEnqueuer {
+	runner := cli.ensureReflexionRunner(ctx, cfg)
 	if runner == nil {
 		return nil
 	}
@@ -194,7 +197,7 @@ func (a runnerEnqueuerAdapter) Enqueue(ctx context.Context, req quality.LessonRe
 //	/reflect retry <id>            — requeue a DLQ entry
 //	/reflect purge <id>            — permanently remove a DLQ entry
 //	/reflect drain                 — force replay of any WAL-pending jobs
-func (cli *ChatCLI) handleReflectCommand(userInput string) {
+func (cli *ChatCLI) handleReflectCommand(ctx context.Context, userInput string) {
 	rest := strings.TrimSpace(strings.TrimPrefix(userInput, "/reflect"))
 	parts := strings.Fields(rest)
 
@@ -220,7 +223,7 @@ func (cli *ChatCLI) handleReflectCommand(userInput string) {
 			fmt.Println(colorize("  "+i18n.T("reflect.retry_usage"), ColorYellow))
 			return
 		}
-		cli.reflectRetry(parts[1])
+		cli.reflectRetry(ctx, parts[1])
 		return
 	case "purge":
 		if len(parts) < 2 {
@@ -230,7 +233,7 @@ func (cli *ChatCLI) handleReflectCommand(userInput string) {
 		cli.reflectPurge(parts[1])
 		return
 	case "drain":
-		cli.reflectDrain()
+		cli.reflectDrain(ctx)
 		return
 	}
 
@@ -327,7 +330,7 @@ func (cli *ChatCLI) reflectListFailed() {
 	}
 }
 
-func (cli *ChatCLI) reflectRetry(id string) {
+func (cli *ChatCLI) reflectRetry(ctx context.Context, id string) {
 	cli.reflexionRunnerMu.Lock()
 	rnr := cli.reflexionRunner
 	cli.reflexionRunnerMu.Unlock()
@@ -335,7 +338,7 @@ func (cli *ChatCLI) reflectRetry(id string) {
 		fmt.Println(colorize("  "+i18n.T("reflect.queue_disabled"), ColorYellow))
 		return
 	}
-	if err := rnr.DLQReplay(context.Background(), lessonq.JobID(id)); err != nil {
+	if err := rnr.DLQReplay(ctx, lessonq.JobID(id)); err != nil {
 		fmt.Println(colorize(fmt.Sprintf("  ⚠  %s: %v", i18n.T("reflect.retry_failed"), err), ColorYellow))
 		return
 	}
@@ -357,7 +360,7 @@ func (cli *ChatCLI) reflectPurge(id string) {
 	fmt.Println(colorize("  "+i18n.T("reflect.purge_ok", id), ColorGreen))
 }
 
-func (cli *ChatCLI) reflectDrain() {
+func (cli *ChatCLI) reflectDrain(ctx context.Context) {
 	cli.reflexionRunnerMu.Lock()
 	rnr := cli.reflexionRunner
 	cli.reflexionRunnerMu.Unlock()
@@ -365,7 +368,7 @@ func (cli *ChatCLI) reflectDrain() {
 		fmt.Println(colorize("  "+i18n.T("reflect.queue_disabled"), ColorYellow))
 		return
 	}
-	n, err := rnr.Replay(context.Background())
+	n, err := rnr.Replay(ctx)
 	if err != nil {
 		fmt.Println(colorize(fmt.Sprintf("  ⚠  %s: %v", i18n.T("reflect.drain_failed"), err), ColorYellow))
 		return

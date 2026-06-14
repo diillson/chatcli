@@ -35,7 +35,7 @@ func (cli *ChatCLI) reconfigureLogger() {
 }
 
 // reloadConfiguration recarrega as variáveis de ambiente e reconfigura o LLMManager
-func (cli *ChatCLI) reloadConfiguration() {
+func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	fmt.Println(i18n.T("status.reloading_config"))
 
 	prevProvider := cli.Provider
@@ -108,7 +108,7 @@ func (cli *ChatCLI) reloadConfiguration() {
 			cli.Client = client
 			cli.Provider = prevProvider
 			cli.Model = prevModel
-			cli.refreshModelCache()
+			cli.refreshModelCache(ctx)
 			fmt.Println(i18n.T("status.reload_success_preserved"))
 			return
 		}
@@ -363,7 +363,7 @@ func (cli *ChatCLI) showHelp() {
 	fmt.Println()
 }
 
-func (cli *ChatCLI) ApplyOverrides(mgr manager.LLMManager, provider, model string) error {
+func (cli *ChatCLI) ApplyOverrides(ctx context.Context, mgr manager.LLMManager, provider, model string) error {
 	if provider == "" && model == "" {
 		return nil
 	}
@@ -385,7 +385,7 @@ func (cli *ChatCLI) ApplyOverrides(mgr manager.LLMManager, provider, model strin
 	cli.Client = newClient
 	cli.Provider = prov
 	cli.Model = mod
-	cli.refreshModelCache()
+	cli.refreshModelCache(ctx)
 	return nil
 }
 
@@ -423,11 +423,11 @@ func (cli *ChatCLI) getEnvFilePath() string {
 	return expanded
 }
 
-func (ch *CommandHandler) handleVersionCommand() {
+func (ch *CommandHandler) handleVersionCommand(ctx context.Context) {
 	versionInfo := version.GetCurrentVersion()
 
 	// Checagem com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	latest, hasUpdate, err := version.CheckLatestVersionWithContext(ctx)
 

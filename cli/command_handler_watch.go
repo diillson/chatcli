@@ -18,18 +18,18 @@ import (
 )
 
 // handleWatchCommand routes /watch subcommands: start, stop, status.
-func (ch *CommandHandler) handleWatchCommand(userInput string) {
+func (ch *CommandHandler) handleWatchCommand(ctx context.Context, userInput string) {
 	args := strings.Fields(userInput)
 
 	// /watch alone or /watch status
 	if len(args) < 2 || args[1] == "status" {
-		ch.handleWatchStatusCommand()
+		ch.handleWatchStatusCommand(ctx)
 		return
 	}
 
 	switch args[1] {
 	case "start":
-		ch.handleWatchStartCommand(args[2:])
+		ch.handleWatchStartCommand(ctx, args[2:])
 	case "stop":
 		ch.handleWatchStopCommand()
 	default:
@@ -41,7 +41,7 @@ func (ch *CommandHandler) handleWatchCommand(userInput string) {
 }
 
 // handleWatchStartCommand starts a K8s watcher in background from interactive mode.
-func (ch *CommandHandler) handleWatchStartCommand(args []string) {
+func (ch *CommandHandler) handleWatchStartCommand(ctx context.Context, args []string) {
 	if ch.cli.isWatching {
 		fmt.Println(colorize(i18n.T("watch.error.already_running"), ColorYellow))
 		return
@@ -123,7 +123,7 @@ func (ch *CommandHandler) handleWatchStartCommand(args []string) {
 	fmt.Println(colorize(i18n.T("watch.status.starting", cfg.Deployment, cfg.Namespace), ColorCyan))
 	fmt.Println(colorize(i18n.T("watch.status.config", cfg.Interval, cfg.Window, cfg.MaxLogLines), ColorCyan))
 
-	if err := ch.cli.StartWatcher(cfg); err != nil {
+	if err := ch.cli.StartWatcher(ctx, cfg); err != nil {
 		fmt.Println(colorize(i18n.T("watch.error.start_failed", err.Error()), ColorYellow))
 		return
 	}
@@ -144,7 +144,7 @@ func (ch *CommandHandler) handleWatchStopCommand() {
 }
 
 // handleWatchStatusCommand displays the current K8s watcher status.
-func (ch *CommandHandler) handleWatchStatusCommand() {
+func (ch *CommandHandler) handleWatchStatusCommand(ctx context.Context) {
 	// Check local watcher first
 	if ch.cli.isWatching {
 		if ch.cli.watchStatusFunc != nil {
@@ -159,7 +159,7 @@ func (ch *CommandHandler) handleWatchStatusCommand() {
 	// If connected to remote, query server's watcher status
 	if ch.cli.isRemote {
 		if rc, ok := ch.cli.Client.(*remote.Client); ok {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			ws, err := rc.GetWatcherStatus(ctx)
 			if err != nil {

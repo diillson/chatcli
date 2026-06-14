@@ -95,7 +95,7 @@ func (c *Compactor) RunWithLLM(ctx context.Context, sendPrompt func(ctx context.
 	c.lastCompaction = time.Now()
 
 	// Regenerate MEMORY.md
-	c.regenerateMemoryMD()
+	c.writeMemoryMD()
 
 	return nil
 }
@@ -119,7 +119,7 @@ func (c *Compactor) RunScoreBased() error {
 	}
 
 	c.lastCompaction = time.Now()
-	c.regenerateMemoryMD()
+	c.writeMemoryMD()
 
 	return nil
 }
@@ -129,8 +129,8 @@ func (c *Compactor) CleanupDailyNotes() (int, error) {
 	return c.daily.Cleanup(c.config.DailyNoteRetention)
 }
 
-// regenerateMemoryMD writes MEMORY.md from the current fact index.
-func (c *Compactor) regenerateMemoryMD() {
+// writeMemoryMD writes MEMORY.md from the current fact index.
+func (c *Compactor) writeMemoryMD() {
 	content := c.facts.GenerateMarkdown(c.config.MaxMemoryMDSize)
 	path := c.memDir + "/MEMORY.md"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -140,7 +140,7 @@ func (c *Compactor) regenerateMemoryMD() {
 
 // RegenerateMemoryMD is the public version for external callers.
 func (c *Compactor) RegenerateMemoryMD() {
-	c.regenerateMemoryMD()
+	c.writeMemoryMD()
 }
 
 // parseCompactionResponse parses the LLM consolidation output back into facts.
@@ -148,7 +148,7 @@ func (c *Compactor) parseCompactionResponse(response string, originalFacts []*Fa
 	response = strings.TrimSpace(response)
 	lines := strings.Split(response, "\n")
 
-	var consolidated []*Fact
+	consolidated := make([]*Fact, 0, len(lines))
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "---") {

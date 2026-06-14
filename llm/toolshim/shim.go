@@ -113,7 +113,7 @@ func (s *Shim) ParseToolResponse(text string, tools []models.ToolDefinition) []m
 		return nil
 	}
 
-	var result []models.ToolCall
+	result := make([]models.ToolCall, 0, len(parsed))
 	for i, tc := range parsed {
 		// Normalize the tool name — it might be "read_file" or "@coder" or just "read"
 		name := strings.TrimPrefix(tc.Name, "@")

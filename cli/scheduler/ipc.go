@@ -127,7 +127,7 @@ func readFrame(r io.Reader) (Frame, error) {
 	}
 	var f Frame
 	if err := json.Unmarshal(buf, &f); err != nil {
-		return Frame{}, fmt.Errorf("%w: %v", ErrIPCProtocol, err)
+		return Frame{}, fmt.Errorf("%w: %w", ErrIPCProtocol, err)
 	}
 	return f, nil
 }
@@ -158,7 +158,7 @@ func DefaultSocketPath(cfg Config) string {
 func CheckDaemon(socketPath string) error {
 	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrNoDaemon, err)
+		return fmt.Errorf("%w: %w", ErrNoDaemon, err)
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))

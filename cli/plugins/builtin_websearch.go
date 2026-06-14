@@ -246,7 +246,7 @@ type searchResult struct {
 // providerEntry binds a provider name to its search function.
 type providerEntry struct {
 	name   SearchProvider
-	search func(ctx context.Context, query string, max int) ([]searchResult, error)
+	search func(ctx context.Context, query string, maxN int) ([]searchResult, error)
 }
 
 // SelectSearchChain returns the ordered list of providers to try.

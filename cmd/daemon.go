@@ -39,7 +39,7 @@ func RunDaemon(ctx context.Context, args []string, logger *zap.Logger) error {
 	case "stop":
 		return daemonStop(rest, logger)
 	case "status":
-		return daemonStatus(rest)
+		return daemonStatus(ctx, rest)
 	case "ping":
 		return daemonPing(rest)
 	case "install":
@@ -169,7 +169,7 @@ func daemonStop(args []string, logger *zap.Logger) error {
 
 // ─── status / ping / install ──────────────────────────────────
 
-func daemonStatus(args []string) error {
+func daemonStatus(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("daemon status", flag.ContinueOnError)
 	socket := fs.String("socket", "", "override socket path")
 	if err := fs.Parse(args); err != nil {
@@ -189,7 +189,7 @@ func daemonStatus(args []string) error {
 		return err
 	}
 	defer func() { _ = c.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	stats, err := c.Stats(ctx)
 	if err != nil {

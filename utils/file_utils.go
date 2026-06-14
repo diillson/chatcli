@@ -142,7 +142,7 @@ func hasAllowedExtension(path string, extensions []string) bool {
 }
 
 // ProcessDirectory processa um diretório recursivamente de forma concorrente e segura.
-func ProcessDirectory(dirPath string, options DirectoryScanOptions) ([]FileInfo, error) {
+func ProcessDirectory(ctx context.Context, dirPath string, options DirectoryScanOptions) ([]FileInfo, error) {
 	dirPath, err := ExpandPath(dirPath)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao expandir o caminho: %w", err)
@@ -171,11 +171,11 @@ func ProcessDirectory(dirPath string, options DirectoryScanOptions) ([]FileInfo,
 	options.ExcludeDirs = append(options.ExcludeDirs, customExcludeDirs...)
 	options.ExcludePatterns = append(options.ExcludePatterns, customExcludePatterns...)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var (
-		result             []FileInfo
+		result             = make([]FileInfo, 0, options.MaxFilesToProcess)
 		totalSize          int64
 		fileCount          int
 		filesToProcessChan = make(chan string, 100)

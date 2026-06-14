@@ -19,7 +19,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/i18n"
-	"github.com/diillson/chatcli/llm/openai_assistant"
+	"github.com/diillson/chatcli/llm/openaiassistant"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 )
@@ -29,7 +29,7 @@ import (
 func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 	var commandBlocks []CommandBlock
 
-	_, isAssistant := a.cli.Client.(*openai_assistant.OpenAIAssistantClient)
+	_, isAssistant := a.cli.Client.(*openaiassistant.OpenAIAssistantClient)
 	if isAssistant {
 		return a.extractCommandBlocksForAssistant(response)
 	}
@@ -359,283 +359,340 @@ func (a *AgentMode) handleCommandBlocks(ctx context.Context, blocks []CommandBlo
 			continue
 
 		case strings.HasPrefix(answer, "v"):
-			nStr := strings.TrimPrefix(answer, "v")
-			n, err := strconv.Atoi(nStr)
-			if err != nil || n < 1 || n > len(outputs) || outputs[n-1] == nil {
-				fmt.Println(i18n.T("agent.status.no_output_to_show"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-			_ = renderer.ShowInPager(outputs[n-1].Output)
+			a.cmdViewOutput(renderer, outputs, answer)
 			continue
 
 		case strings.HasPrefix(answer, "w"):
-			nStr := strings.TrimPrefix(answer, "w")
-			n, err := strconv.Atoi(nStr)
-			if err != nil || n < 1 || n > len(outputs) || outputs[n-1] == nil {
-				fmt.Println(i18n.T("agent.status.no_output_to_save"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-			dir := filepath.Join(os.TempDir(), "chatcli-agent-logs")
-			_ = os.MkdirAll(dir, 0o700)
-			fpath := filepath.Join(dir, fmt.Sprintf("cmd-%d-%d.log", n, time.Now().Unix()))
-			if writeErr := os.WriteFile(fpath, []byte(outputs[n-1].Output), 0o600); writeErr != nil {
-				fmt.Println(i18n.T("agent.status.error_saving"), writeErr)
-			} else {
-				fmt.Println(i18n.T("agent.status.file_saved_at"), fpath)
-			}
-			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+			a.cmdSaveOutput(renderer, outputs, answer)
 			continue
 
 		case answer == "a":
-			hasDanger := false
-			for _, b := range blocks {
-				for _, c := range b.Commands {
-					if a.validator.IsDangerous(c) {
-						hasDanger = true
-						break
-					}
-				}
-				if hasDanger {
-					break
-				}
-			}
-
-			if hasDanger {
-				fmt.Println(i18n.T("agent.status.batch_warning"))
-				fmt.Println(i18n.T("agent.status.batch_check_individual"))
-			}
-
-			if runtime.GOOS != "windows" {
-				cmd := exec.Command(sttyPath, "sane")
-				cmd.Stdin = os.Stdin
-				cmd.Stdout = os.Stdout
-				_ = cmd.Run()
-			}
-
-			fmt.Print(i18n.T("agent.status.batch_confirm"))
-			confirmationInput := a.readLine()
-			confirmation := strings.ToLower(confirmationInput)
-			if confirmation != "s" && confirmation != "y" {
-				fmt.Println(i18n.T("agent.status.batch_canceled"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-
-			for i, block := range blocks {
-				fmt.Printf(i18n.T("agent.status.executing_command", i+1)+"\n", i+1)
-				fmt.Printf("  %s %s\n", i18n.T("agent.plan.field.type"), block.Language)
-				for j, cmd := range block.Commands {
-					fmt.Printf("  %s %d/%d: %s\n", i18n.T("agent.label.command"), j+1, len(block.Commands), cmd)
-				}
-
-				freshCtx, freshCancel := a.contextManager.CreateExecutionContext()
-				outStr, errStr := a.executeCommandsFunc(freshCtx, block)
-				freshCancel()
-
-				outputs[i] = &CommandOutput{
-					CommandBlock: block,
-					Output:       outStr,
-					ErrorMsg:     errStr,
-				}
-				lastExecuted = i
-			}
-
-			fmt.Println(i18n.T("agent.status.all_commands_executed"))
-			fmt.Println(i18n.T("agent.status.summary"))
-			for i, out := range outputs {
-				status := "OK"
-				if out == nil || strings.TrimSpace(out.ErrorMsg) != "" {
-					status = "ERRO"
-				}
-				fmt.Printf("- #%d: %s\n", i+1, status)
-			}
-			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+			a.cmdBatchExecute(ctx, renderer, blocks, outputs, &lastExecuted)
 			continue
 
 		case strings.HasPrefix(answer, "e"):
-			cmdNumStr := strings.TrimPrefix(answer, "e")
-			cmdNum, err := strconv.Atoi(cmdNumStr)
-			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_command_number_edit"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-			edited, err := a.editCommandBlock(blocks[cmdNum-1])
-			if err != nil {
-				fmt.Println(i18n.T("agent.error.error_editing_command"), err)
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-
-			freshCtx, freshCancel := a.contextManager.CreateExecutionContext()
-			editedBlock := blocks[cmdNum-1]
-			editedBlock.Commands = edited
-
-			outStr, errStr := a.executeCommandsFunc(freshCtx, editedBlock)
-			freshCancel()
-
-			outputs[cmdNum-1] = &CommandOutput{
-				CommandBlock: editedBlock,
-				Output:       outStr,
-				ErrorMsg:     errStr,
-			}
-			lastExecuted = cmdNum - 1
-			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+			a.cmdEditAndExecute(ctx, renderer, blocks, outputs, answer, &lastExecuted)
 			continue
 
 		case strings.HasPrefix(answer, "t"):
-			cmdNumStr := strings.TrimPrefix(answer, "t")
-			cmdNum, err := strconv.Atoi(cmdNumStr)
-			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_command_number_simulate"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-			a.simulateCommandBlock(ctx, blocks[cmdNum-1])
-
-			execNow := a.getInput(i18n.T("agent.status.confirm_exec_after_sim"))
-			if strings.ToLower(strings.TrimSpace(execNow)) == "s" || strings.ToLower(strings.TrimSpace(execNow)) == "y" {
-				freshCtx, freshCancel := a.contextManager.CreateExecutionContext()
-				outStr, errStr := a.executeCommandsFunc(freshCtx, blocks[cmdNum-1])
-				freshCancel()
-
-				outputs[cmdNum-1] = &CommandOutput{
-					CommandBlock: blocks[cmdNum-1],
-					Output:       outStr,
-					ErrorMsg:     errStr,
-				}
-				lastExecuted = cmdNum - 1
-			} else {
-				fmt.Println(i18n.T("agent.status.simulation_done"))
-			}
-			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+			a.cmdSimulateThenExecute(ctx, renderer, blocks, outputs, answer, &lastExecuted)
 			continue
 
 		case strings.HasPrefix(answer, "ac"):
-			cmdNumStr := strings.TrimPrefix(answer, "ac")
-			cmdNum, err := strconv.Atoi(cmdNumStr)
-			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_command_number_context"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
+			if a.cmdAddContextContinue(ctx, renderer, blocks, outputs, answer) {
+				return
 			}
-			if outputs[cmdNum-1] == nil {
-				fmt.Println(i18n.T("agent.status.command_not_executed"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-
-			fmt.Println(i18n.T("agent.output_header"))
-			fmt.Println("---------------------------------------")
-			fmt.Print(outputs[cmdNum-1].Output)
-			fmt.Println("---------------------------------------")
-
-			userContext := a.getMultilineInput(i18n.T("agent.prompt.additional_context"))
-
-			// Monta o prompt para a IA
-			toolContext := a.getToolContextString()
-			prompt := i18n.T("agent.llm_prompt.continuation_with_context",
-				strings.Join(blocks[cmdNum-1].Commands, "\n"),
-				outputs[cmdNum-1].Output,
-				outputs[cmdNum-1].ErrorMsg,
-				userContext,
-			) + toolContext
-
-			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
-
-			// Chama o loop de processamento unificado
-			a.continueWithNewAIResponse(ctx)
-
-			// Ao retornar do loop, o agente pode ter terminado ou apresentado um novo plano.
-			// Em ambos os casos, saímos do loop do plano de ação atual.
-			return
+			continue
 
 		case strings.HasPrefix(answer, "c"):
-			cmdNumStr := strings.TrimPrefix(answer, "c")
-			cmdNum, err := strconv.Atoi(cmdNumStr)
-			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_command_number_continue"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
+			if a.cmdContinue(ctx, renderer, blocks, outputs, answer) {
+				return
 			}
-			if outputs[cmdNum-1] == nil {
-				fmt.Println(i18n.T("agent.status.command_not_executed"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-
-			// Monta o prompt para a IA
-			toolContext := a.getToolContextString()
-			prompt := i18n.T("agent.llm_prompt.continuation",
-				strings.Join(blocks[cmdNum-1].Commands, "\n"),
-				strings.Join(blocks[cmdNum-1].Commands, "\n"),
-				outputs[cmdNum-1].Output,
-				outputs[cmdNum-1].ErrorMsg,
-			) + toolContext
-
-			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
-
-			// Chama o loop de processamento unificado
-			a.continueWithNewAIResponse(ctx)
-
-			// Sai do loop do plano de ação atual
-			return
+			continue
 
 		case strings.HasPrefix(answer, "pc"):
-			cmdNumStr := strings.TrimPrefix(answer, "pc")
-			cmdNum, err := strconv.Atoi(cmdNumStr)
-			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_command_number_context"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
+			if a.cmdPreContext(ctx, renderer, blocks, answer) {
+				return
 			}
-
-			userContext := a.getMultilineInput(i18n.T("agent.prompt.additional_context"))
-			if userContext == "" {
-				fmt.Println(i18n.T("agent.error.no_context_provided"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-
-			fmt.Println(i18n.T("agent.status.context_received"))
-			// Monta o prompt para a IA
-			toolContext := a.getToolContextString()
-			prompt := i18n.T("agent.llm_prompt.pre_execution_context",
-				strings.Join(blocks[cmdNum-1].Commands, "\n"),
-				userContext,
-			) + toolContext
-
-			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
-
-			// Chama o loop de processamento unificado
-			a.continueWithNewAIResponse(ctx)
-
-			// Sai do loop do plano de ação atual
-			return
+			continue
 
 		default:
-			cmdNum, err := strconv.Atoi(answer)
-			if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
-				fmt.Println(i18n.T("agent.error.invalid_option"))
-				_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
-				continue
-			}
-
-			execCtx, execCancel := a.contextManager.CreateExecutionContext()
-			outStr, errStr := a.executeCommandsFunc(execCtx, blocks[cmdNum-1])
-			execCancel()
-
-			outputs[cmdNum-1] = &CommandOutput{
-				CommandBlock: blocks[cmdNum-1],
-				Output:       outStr,
-				ErrorMsg:     errStr,
-			}
-			lastExecuted = cmdNum - 1
-			_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+			a.cmdExecuteSingle(ctx, renderer, blocks, outputs, answer, &lastExecuted)
 		}
 	}
+}
+
+// cmdViewOutput shows a previously captured output in the pager.
+func (a *AgentMode) cmdViewOutput(renderer *agent.UIRenderer, outputs []*CommandOutput, answer string) {
+	nStr := strings.TrimPrefix(answer, "v")
+	n, err := strconv.Atoi(nStr)
+	if err != nil || n < 1 || n > len(outputs) || outputs[n-1] == nil {
+		fmt.Println(i18n.T("agent.status.no_output_to_show"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return
+	}
+	_ = renderer.ShowInPager(outputs[n-1].Output)
+}
+
+// cmdSaveOutput writes a previously captured output to a temp log file.
+func (a *AgentMode) cmdSaveOutput(renderer *agent.UIRenderer, outputs []*CommandOutput, answer string) {
+	nStr := strings.TrimPrefix(answer, "w")
+	n, err := strconv.Atoi(nStr)
+	if err != nil || n < 1 || n > len(outputs) || outputs[n-1] == nil {
+		fmt.Println(i18n.T("agent.status.no_output_to_save"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return
+	}
+	dir := filepath.Join(os.TempDir(), "chatcli-agent-logs")
+	_ = os.MkdirAll(dir, 0o700)
+	fpath := filepath.Join(dir, fmt.Sprintf("cmd-%d-%d.log", n, time.Now().Unix()))
+	if writeErr := os.WriteFile(fpath, []byte(outputs[n-1].Output), 0o600); writeErr != nil {
+		fmt.Println(i18n.T("agent.status.error_saving"), writeErr)
+	} else {
+		fmt.Println(i18n.T("agent.status.file_saved_at"), fpath)
+	}
+	_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+}
+
+// cmdBatchExecute runs every block in sequence after a confirmation prompt.
+func (a *AgentMode) cmdBatchExecute(ctx context.Context, renderer *agent.UIRenderer, blocks []CommandBlock, outputs []*CommandOutput, lastExecuted *int) {
+	hasDanger := false
+	for _, b := range blocks {
+		for _, c := range b.Commands {
+			if a.validator.IsDangerous(c) {
+				hasDanger = true
+				break
+			}
+		}
+		if hasDanger {
+			break
+		}
+	}
+
+	if hasDanger {
+		fmt.Println(i18n.T("agent.status.batch_warning"))
+		fmt.Println(i18n.T("agent.status.batch_check_individual"))
+	}
+
+	if runtime.GOOS != "windows" {
+		cmd := exec.Command(sttyPath, "sane")
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		_ = cmd.Run()
+	}
+
+	fmt.Print(i18n.T("agent.status.batch_confirm"))
+	confirmationInput := a.readLine()
+	confirmation := strings.ToLower(confirmationInput)
+	if confirmation != "s" && confirmation != "y" {
+		fmt.Println(i18n.T("agent.status.batch_canceled"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return
+	}
+
+	for i, block := range blocks {
+		fmt.Printf(i18n.T("agent.status.executing_command", i+1)+"\n", i+1)
+		fmt.Printf("  %s %s\n", i18n.T("agent.plan.field.type"), block.Language)
+		for j, cmd := range block.Commands {
+			fmt.Printf("  %s %d/%d: %s\n", i18n.T("agent.label.command"), j+1, len(block.Commands), cmd)
+		}
+
+		freshCtx, freshCancel := context.WithTimeout(ctx, a.contextManager.GetDefaultTimeout())
+		outStr, errStr := a.executeCommandsFunc(freshCtx, block)
+		freshCancel()
+
+		outputs[i] = &CommandOutput{
+			CommandBlock: block,
+			Output:       outStr,
+			ErrorMsg:     errStr,
+		}
+		*lastExecuted = i
+	}
+
+	fmt.Println(i18n.T("agent.status.all_commands_executed"))
+	fmt.Println(i18n.T("agent.status.summary"))
+	for i, out := range outputs {
+		status := "OK"
+		if out == nil || strings.TrimSpace(out.ErrorMsg) != "" {
+			status = "ERRO"
+		}
+		fmt.Printf("- #%d: %s\n", i+1, status)
+	}
+	_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+}
+
+// cmdEditAndExecute lets the user edit a block then runs the edited version.
+func (a *AgentMode) cmdEditAndExecute(ctx context.Context, renderer *agent.UIRenderer, blocks []CommandBlock, outputs []*CommandOutput, answer string, lastExecuted *int) {
+	cmdNumStr := strings.TrimPrefix(answer, "e")
+	cmdNum, err := strconv.Atoi(cmdNumStr)
+	if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+		fmt.Println(i18n.T("agent.error.invalid_command_number_edit"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return
+	}
+	edited, err := a.editCommandBlock(blocks[cmdNum-1])
+	if err != nil {
+		fmt.Println(i18n.T("agent.error.error_editing_command"), err)
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return
+	}
+
+	freshCtx, freshCancel := context.WithTimeout(ctx, a.contextManager.GetDefaultTimeout())
+	editedBlock := blocks[cmdNum-1]
+	editedBlock.Commands = edited
+
+	outStr, errStr := a.executeCommandsFunc(freshCtx, editedBlock)
+	freshCancel()
+
+	outputs[cmdNum-1] = &CommandOutput{
+		CommandBlock: editedBlock,
+		Output:       outStr,
+		ErrorMsg:     errStr,
+	}
+	*lastExecuted = cmdNum - 1
+	_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+}
+
+// cmdSimulateThenExecute dry-runs a block, then optionally executes it.
+func (a *AgentMode) cmdSimulateThenExecute(ctx context.Context, renderer *agent.UIRenderer, blocks []CommandBlock, outputs []*CommandOutput, answer string, lastExecuted *int) {
+	cmdNumStr := strings.TrimPrefix(answer, "t")
+	cmdNum, err := strconv.Atoi(cmdNumStr)
+	if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+		fmt.Println(i18n.T("agent.error.invalid_command_number_simulate"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return
+	}
+	a.simulateCommandBlock(ctx, blocks[cmdNum-1])
+
+	execNow := a.getInput(i18n.T("agent.status.confirm_exec_after_sim"))
+	if strings.ToLower(strings.TrimSpace(execNow)) == "s" || strings.ToLower(strings.TrimSpace(execNow)) == "y" {
+		freshCtx, freshCancel := context.WithTimeout(ctx, a.contextManager.GetDefaultTimeout())
+		outStr, errStr := a.executeCommandsFunc(freshCtx, blocks[cmdNum-1])
+		freshCancel()
+
+		outputs[cmdNum-1] = &CommandOutput{
+			CommandBlock: blocks[cmdNum-1],
+			Output:       outStr,
+			ErrorMsg:     errStr,
+		}
+		*lastExecuted = cmdNum - 1
+	} else {
+		fmt.Println(i18n.T("agent.status.simulation_done"))
+	}
+	_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+}
+
+// cmdAddContextContinue feeds a block's output plus extra context back to the
+// LLM. Returns true when the action consumed the plan and the caller must exit.
+func (a *AgentMode) cmdAddContextContinue(ctx context.Context, renderer *agent.UIRenderer, blocks []CommandBlock, outputs []*CommandOutput, answer string) bool {
+	cmdNumStr := strings.TrimPrefix(answer, "ac")
+	cmdNum, err := strconv.Atoi(cmdNumStr)
+	if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+		fmt.Println(i18n.T("agent.error.invalid_command_number_context"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return false
+	}
+	if outputs[cmdNum-1] == nil {
+		fmt.Println(i18n.T("agent.status.command_not_executed"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return false
+	}
+
+	fmt.Println(i18n.T("agent.output_header"))
+	fmt.Println("---------------------------------------")
+	fmt.Print(outputs[cmdNum-1].Output)
+	fmt.Println("---------------------------------------")
+
+	userContext := a.getMultilineInput(i18n.T("agent.prompt.additional_context"))
+
+	// Monta o prompt para a IA
+	toolContext := a.getToolContextString()
+	prompt := i18n.T("agent.llm_prompt.continuation_with_context",
+		strings.Join(blocks[cmdNum-1].Commands, "\n"),
+		outputs[cmdNum-1].Output,
+		outputs[cmdNum-1].ErrorMsg,
+		userContext,
+	) + toolContext
+
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
+
+	// Chama o loop de processamento unificado
+	a.continueWithNewAIResponse(ctx)
+
+	// Ao retornar do loop, o agente pode ter terminado ou apresentado um novo plano.
+	// Em ambos os casos, saímos do loop do plano de ação atual.
+	return true
+}
+
+// cmdContinue feeds a block and its output back to the LLM for continuation.
+// Returns true when the action consumed the plan and the caller must exit.
+func (a *AgentMode) cmdContinue(ctx context.Context, renderer *agent.UIRenderer, blocks []CommandBlock, outputs []*CommandOutput, answer string) bool {
+	cmdNumStr := strings.TrimPrefix(answer, "c")
+	cmdNum, err := strconv.Atoi(cmdNumStr)
+	if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+		fmt.Println(i18n.T("agent.error.invalid_command_number_continue"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return false
+	}
+	if outputs[cmdNum-1] == nil {
+		fmt.Println(i18n.T("agent.status.command_not_executed"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return false
+	}
+
+	// Monta o prompt para a IA
+	toolContext := a.getToolContextString()
+	prompt := i18n.T("agent.llm_prompt.continuation",
+		strings.Join(blocks[cmdNum-1].Commands, "\n"),
+		strings.Join(blocks[cmdNum-1].Commands, "\n"),
+		outputs[cmdNum-1].Output,
+		outputs[cmdNum-1].ErrorMsg,
+	) + toolContext
+
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
+
+	// Chama o loop de processamento unificado
+	a.continueWithNewAIResponse(ctx)
+
+	// Sai do loop do plano de ação atual
+	return true
+}
+
+// cmdPreContext sends extra context before executing a block. Returns true
+// when the action consumed the plan and the caller must exit.
+func (a *AgentMode) cmdPreContext(ctx context.Context, renderer *agent.UIRenderer, blocks []CommandBlock, answer string) bool {
+	cmdNumStr := strings.TrimPrefix(answer, "pc")
+	cmdNum, err := strconv.Atoi(cmdNumStr)
+	if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+		fmt.Println(i18n.T("agent.error.invalid_command_number_context"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return false
+	}
+
+	userContext := a.getMultilineInput(i18n.T("agent.prompt.additional_context"))
+	if userContext == "" {
+		fmt.Println(i18n.T("agent.error.no_context_provided"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return false
+	}
+
+	fmt.Println(i18n.T("agent.status.context_received"))
+	// Monta o prompt para a IA
+	toolContext := a.getToolContextString()
+	prompt := i18n.T("agent.llm_prompt.pre_execution_context",
+		strings.Join(blocks[cmdNum-1].Commands, "\n"),
+		userContext,
+	) + toolContext
+
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
+
+	// Chama o loop de processamento unificado
+	a.continueWithNewAIResponse(ctx)
+
+	// Sai do loop do plano de ação atual
+	return true
+}
+
+// cmdExecuteSingle runs the single block referenced by a numeric answer.
+func (a *AgentMode) cmdExecuteSingle(ctx context.Context, renderer *agent.UIRenderer, blocks []CommandBlock, outputs []*CommandOutput, answer string, lastExecuted *int) {
+	cmdNum, err := strconv.Atoi(answer)
+	if err != nil || cmdNum < 1 || cmdNum > len(blocks) {
+		fmt.Println(i18n.T("agent.error.invalid_option"))
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return
+	}
+
+	execCtx, execCancel := context.WithTimeout(ctx, a.contextManager.GetDefaultTimeout())
+	outStr, errStr := a.executeCommandsFunc(execCtx, blocks[cmdNum-1])
+	execCancel()
+
+	outputs[cmdNum-1] = &CommandOutput{
+		CommandBlock: blocks[cmdNum-1],
+		Output:       outStr,
+		ErrorMsg:     errStr,
+	}
+	*lastExecuted = cmdNum - 1
+	_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 }
 
 // executeCommandsWithOutput executa comandos usando o CommandExecutor
@@ -664,161 +721,10 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 	}
 
 	if block.ContextInfo.IsScript {
-		scriptContent := block.Commands[0]
-		tmpFile, err := os.CreateTemp("", "chatcli-script-*.sh")
-		if err != nil {
-			errorMsg := i18n.T("agent.error.create_temp_file", err)
-			errMsg := fmt.Sprintf("%s\n", errorMsg)
-			fmt.Print(errMsg)
-			allOutput.WriteString(errMsg)
-			lastError = err.Error()
-		} else {
-			scriptPath := tmpFile.Name()
-			defer func() { _ = os.Remove(scriptPath) }()
-
-			if _, werr := tmpFile.WriteString(scriptContent); werr != nil {
-				errorMsg := i18n.T("agent.error.write_script", werr)
-				errMsg := fmt.Sprintf("%s\n", errorMsg)
-				fmt.Print(errMsg)
-				allOutput.WriteString(errMsg)
-				lastError = werr.Error()
-			}
-			_ = tmpFile.Close()
-			_ = os.Chmod(scriptPath, 0o700) //#nosec G302 -- intentional: script must be owner-executable to run
-
-			header := i18n.T("agent.status.executing_script", shell) + "\n"
-			fmt.Print(header)
-			allOutput.WriteString(header)
-
-			result, err := a.executor.Execute(ctx, scriptPath, false)
-
-			safe := utils.SanitizeSensitiveText(result.Output)
-			for _, line := range strings.Split(strings.TrimRight(safe, "\n"), "\n") {
-				fmt.Println("  " + line)
-			}
-			allOutput.WriteString(safe + "\n")
-
-			if err != nil {
-				errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
-				allOutput.WriteString(errMsg)
-				lastError = err.Error()
-			}
-
-			meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
-			fmt.Print(meta)
-			allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
-		}
+		a.runScriptBlock(ctx, block, shell, &allOutput, &lastError)
 	} else {
 		for i, cmd := range block.Commands {
-			if cmd == "" {
-				continue
-			}
-
-			trimmed := strings.TrimSpace(cmd)
-
-			if strings.HasPrefix(trimmed, "cd ") || trimmed == "cd" {
-				target := strings.TrimSpace(strings.TrimPrefix(trimmed, "cd"))
-				if target == "" {
-					target = "~"
-				}
-				if strings.HasPrefix(target, "~") {
-					if home, err := os.UserHomeDir(); err == nil {
-						if target == "~" {
-							target = home
-						} else if strings.HasPrefix(target, "~/") {
-							target = filepath.Join(home, target[2:])
-						}
-					}
-				}
-				if err := os.Chdir(target); err != nil {
-					errorMsg := i18n.T("agent.error.change_dir", target, err)
-					msg := fmt.Sprintf("%s\n", errorMsg)
-					fmt.Print(msg)
-					allOutput.WriteString(msg)
-					lastError = err.Error()
-				} else {
-					wd, _ := os.Getwd()
-					msg := fmt.Sprintf(i18n.T("agent.status.dir_changed", wd)+"\n", wd)
-					fmt.Print(msg)
-					allOutput.WriteString(msg)
-				}
-				continue
-			}
-
-			if a.validator.IsDangerous(trimmed) {
-				confirmPrompt := i18n.T("agent.status.dangerous_command_confirm")
-				confirm := a.getCriticalInput(confirmPrompt)
-				if confirm != "sim, quero executar conscientemente" {
-					outText := i18n.T("agent.status.dangerous_command_aborted") + "\n"
-					fmt.Print(renderer.Colorize(outText, agent.ColorYellow))
-					allOutput.WriteString(outText)
-					continue
-				}
-				fmt.Println(renderer.Colorize(i18n.T("agent.status.dangerous_command_confirmed"), agent.ColorYellow))
-			}
-
-			header := i18n.T("agent.status.executing_command_n", i+1, len(block.Commands), trimmed) + "\n"
-			fmt.Print(header)
-			allOutput.WriteString(header)
-
-			isInteractive := false
-			if strings.HasSuffix(trimmed, " --interactive") {
-				trimmed = strings.TrimSuffix(trimmed, " --interactive")
-				isInteractive = true
-			} else if strings.Contains(trimmed, "#interactive") {
-				trimmed = strings.ReplaceAll(trimmed, "#interactive", "")
-				trimmed = strings.TrimSpace(trimmed)
-				isInteractive = true
-			} else {
-				isInteractive = a.validator.IsLikelyInteractive(trimmed)
-			}
-
-			if !isInteractive && mightBeInteractive(trimmed, block.ContextInfo) {
-				isInteractive = a.askUserIfInteractive(trimmed, block.ContextInfo)
-			}
-
-			if isInteractive {
-				outText := i18n.T("agent.status.interactive_mode") + "\n"
-				fmt.Print(renderer.Colorize(outText, agent.ColorGray))
-				allOutput.WriteString(outText)
-
-				time.Sleep(1 * time.Second)
-
-				result, err := a.executor.Execute(ctx, trimmed, true)
-
-				if err != nil {
-					errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
-					fmt.Print(errMsg)
-					allOutput.WriteString(errMsg)
-					lastError = err.Error()
-				} else {
-					okMsg := i18n.T("agent.status.command_finished") + "\n"
-					fmt.Print(okMsg)
-					allOutput.WriteString(okMsg)
-				}
-
-				meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
-				fmt.Print(meta)
-				allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
-			} else {
-				result, err := a.executor.Execute(ctx, trimmed, false)
-
-				safe := utils.SanitizeSensitiveText(result.Output)
-				for _, line := range strings.Split(strings.TrimRight(safe, "\n"), "\n") {
-					fmt.Println("  " + line)
-				}
-				allOutput.WriteString(safe + "\n")
-
-				if err != nil {
-					errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
-					allOutput.WriteString(errMsg)
-					lastError = err.Error()
-				}
-
-				meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
-				fmt.Print(meta)
-				allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
-			}
+			a.runSingleCommand(ctx, block, renderer, i, cmd, &allOutput, &lastError)
 		}
 	}
 
@@ -840,6 +746,176 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 
 	allOutput.WriteString("Execução concluída.\n")
 	return allOutput.String(), lastError
+}
+
+// runScriptBlock writes the block's single script to a temp file and runs it,
+// streaming output to the terminal and accumulating it into allOutput.
+func (a *AgentMode) runScriptBlock(ctx context.Context, block agent.CommandBlock, shell string, allOutput *strings.Builder, lastError *string) {
+	scriptContent := block.Commands[0]
+	tmpFile, err := os.CreateTemp("", "chatcli-script-*.sh")
+	if err != nil {
+		errorMsg := i18n.T("agent.error.create_temp_file", err)
+		errMsg := fmt.Sprintf("%s\n", errorMsg)
+		fmt.Print(errMsg)
+		allOutput.WriteString(errMsg)
+		*lastError = err.Error()
+		return
+	}
+	scriptPath := tmpFile.Name()
+	defer func() { _ = os.Remove(scriptPath) }()
+
+	if _, werr := tmpFile.WriteString(scriptContent); werr != nil {
+		errorMsg := i18n.T("agent.error.write_script", werr)
+		errMsg := fmt.Sprintf("%s\n", errorMsg)
+		fmt.Print(errMsg)
+		allOutput.WriteString(errMsg)
+		*lastError = werr.Error()
+	}
+	_ = tmpFile.Close()
+	_ = os.Chmod(scriptPath, 0o700) //#nosec G302 -- intentional: script must be owner-executable to run
+
+	header := i18n.T("agent.status.executing_script", shell) + "\n"
+	fmt.Print(header)
+	allOutput.WriteString(header)
+
+	result, runErr := a.executor.Execute(ctx, scriptPath, false)
+
+	safe := utils.SanitizeSensitiveText(result.Output)
+	for _, line := range strings.Split(strings.TrimRight(safe, "\n"), "\n") {
+		fmt.Println("  " + line)
+	}
+	allOutput.WriteString(safe + "\n")
+
+	if runErr != nil {
+		errMsg := fmt.Sprintf("❌ Erro: %v\n", runErr)
+		allOutput.WriteString(errMsg)
+		*lastError = runErr.Error()
+	}
+
+	meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
+	fmt.Print(meta)
+	allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
+}
+
+// runSingleCommand executes one command from a non-script block, handling
+// cd changes, dangerous-command confirmation, and interactive detection.
+func (a *AgentMode) runSingleCommand(ctx context.Context, block agent.CommandBlock, renderer *agent.UIRenderer, i int, cmd string, allOutput *strings.Builder, lastError *string) {
+	if cmd == "" {
+		return
+	}
+
+	trimmed := strings.TrimSpace(cmd)
+
+	if strings.HasPrefix(trimmed, "cd ") || trimmed == "cd" {
+		a.runChangeDir(trimmed, allOutput, lastError)
+		return
+	}
+
+	if a.validator.IsDangerous(trimmed) {
+		confirmPrompt := i18n.T("agent.status.dangerous_command_confirm")
+		confirm := a.getCriticalInput(confirmPrompt)
+		if confirm != "sim, quero executar conscientemente" {
+			outText := i18n.T("agent.status.dangerous_command_aborted") + "\n"
+			fmt.Print(renderer.Colorize(outText, agent.ColorYellow))
+			allOutput.WriteString(outText)
+			return
+		}
+		fmt.Println(renderer.Colorize(i18n.T("agent.status.dangerous_command_confirmed"), agent.ColorYellow))
+	}
+
+	header := i18n.T("agent.status.executing_command_n", i+1, len(block.Commands), trimmed) + "\n"
+	fmt.Print(header)
+	allOutput.WriteString(header)
+
+	isInteractive := false
+	if strings.HasSuffix(trimmed, " --interactive") {
+		trimmed = strings.TrimSuffix(trimmed, " --interactive")
+		isInteractive = true
+	} else if strings.Contains(trimmed, "#interactive") {
+		trimmed = strings.ReplaceAll(trimmed, "#interactive", "")
+		trimmed = strings.TrimSpace(trimmed)
+		isInteractive = true
+	} else {
+		isInteractive = a.validator.IsLikelyInteractive(trimmed)
+	}
+
+	if !isInteractive && mightBeInteractive(trimmed, block.ContextInfo) {
+		isInteractive = a.askUserIfInteractive(trimmed, block.ContextInfo)
+	}
+
+	if isInteractive {
+		outText := i18n.T("agent.status.interactive_mode") + "\n"
+		fmt.Print(renderer.Colorize(outText, agent.ColorGray))
+		allOutput.WriteString(outText)
+
+		time.Sleep(1 * time.Second)
+
+		result, err := a.executor.Execute(ctx, trimmed, true)
+
+		if err != nil {
+			errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
+			fmt.Print(errMsg)
+			allOutput.WriteString(errMsg)
+			*lastError = err.Error()
+		} else {
+			okMsg := i18n.T("agent.status.command_finished") + "\n"
+			fmt.Print(okMsg)
+			allOutput.WriteString(okMsg)
+		}
+
+		meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
+		fmt.Print(meta)
+		allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
+		return
+	}
+
+	result, err := a.executor.Execute(ctx, trimmed, false)
+
+	safe := utils.SanitizeSensitiveText(result.Output)
+	for _, line := range strings.Split(strings.TrimRight(safe, "\n"), "\n") {
+		fmt.Println("  " + line)
+	}
+	allOutput.WriteString(safe + "\n")
+
+	if err != nil {
+		errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
+		allOutput.WriteString(errMsg)
+		*lastError = err.Error()
+	}
+
+	meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
+	fmt.Print(meta)
+	allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
+}
+
+// runChangeDir handles a `cd` command inside a command block, resolving ~ and
+// updating the process working directory.
+func (a *AgentMode) runChangeDir(trimmed string, allOutput *strings.Builder, lastError *string) {
+	target := strings.TrimSpace(strings.TrimPrefix(trimmed, "cd"))
+	if target == "" {
+		target = "~"
+	}
+	if strings.HasPrefix(target, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			if target == "~" {
+				target = home
+			} else if strings.HasPrefix(target, "~/") {
+				target = filepath.Join(home, target[2:])
+			}
+		}
+	}
+	if err := os.Chdir(target); err != nil {
+		errorMsg := i18n.T("agent.error.change_dir", target, err)
+		msg := fmt.Sprintf("%s\n", errorMsg)
+		fmt.Print(msg)
+		allOutput.WriteString(msg)
+		*lastError = err.Error()
+		return
+	}
+	wd, _ := os.Getwd()
+	msg := fmt.Sprintf(i18n.T("agent.status.dir_changed", wd)+"\n", wd)
+	fmt.Print(msg)
+	allOutput.WriteString(msg)
 }
 
 // getCriticalInput obtém entrada para decisões críticas

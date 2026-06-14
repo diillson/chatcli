@@ -27,7 +27,7 @@ func (cli *ChatCLI) RunAgentOnce(ctx context.Context, input string, autoExecute 
 	}
 
 	// Processar contextos especiais como @file, @git, etc.
-	query, additionalContext := cli.processSpecialCommands(query)
+	query, additionalContext := cli.processSpecialCommands(ctx, query)
 	fullQuery := query
 	if additionalContext != "" {
 		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
@@ -68,12 +68,13 @@ func askSessionChoice(optionKeys []string, validChoices map[string]string, defau
 	return defaultChoice
 }
 
-// remoteSessionCtx creates a context with a 10-second timeout for remote session operations.
-func remoteSessionCtx() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 10*time.Second)
+// remoteSessionCtx derives a 10-second-timeout context from the caller's
+// context for remote session operations.
+func remoteSessionCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, 10*time.Second)
 }
 
-func (cli *ChatCLI) handleSaveSession(name string) {
+func (cli *ChatCLI) handleSaveSession(ctx context.Context, name string) {
 	if cli.isRemote {
 		rc := cli.getRemoteClient()
 		if rc == nil {
@@ -92,9 +93,9 @@ func (cli *ChatCLI) handleSaveSession(name string) {
 
 		switch choice {
 		case "remote":
-			ctx, cancel := remoteSessionCtx()
+			reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
-			if err := rc.SaveSessionV2(ctx, name, sd); err != nil {
+			if err := rc.SaveSessionV2(reqCtx, name, sd); err != nil {
 				fmt.Println(i18n.T("session.error_save", err))
 			} else {
 				cli.currentSessionName = name
@@ -103,9 +104,9 @@ func (cli *ChatCLI) handleSaveSession(name string) {
 		case "both":
 			var localErr, remoteErr error
 			localErr = cli.sessionManager.SaveSessionV2(name, sd)
-			ctx, cancel := remoteSessionCtx()
+			reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
-			remoteErr = rc.SaveSessionV2(ctx, name, sd)
+			remoteErr = rc.SaveSessionV2(reqCtx, name, sd)
 
 			if localErr != nil {
 				fmt.Println(i18n.T("session.error_save", fmt.Errorf("local: %w", localErr)))
@@ -138,7 +139,7 @@ func (cli *ChatCLI) handleSaveSession(name string) {
 	}
 }
 
-func (cli *ChatCLI) handleLoadSession(name string) {
+func (cli *ChatCLI) handleLoadSession(ctx context.Context, name string) {
 	if cli.isRemote {
 		rc := cli.getRemoteClient()
 		if rc == nil {
@@ -148,7 +149,7 @@ func (cli *ChatCLI) handleLoadSession(name string) {
 
 		// Check both sources
 		localSD, localErr := cli.sessionManager.LoadSessionV2(name)
-		ctx, cancel := remoteSessionCtx()
+		ctx, cancel := remoteSessionCtx(ctx)
 		defer cancel()
 		remoteSD, remoteErr := rc.LoadSessionV2(ctx, name)
 
@@ -267,7 +268,7 @@ func (cli *ChatCLI) handleSearchSessions(query string) {
 	fmt.Println()
 }
 
-func (cli *ChatCLI) handleListSessions() {
+func (cli *ChatCLI) handleListSessions(ctx context.Context) {
 	if cli.isRemote {
 		rc := cli.getRemoteClient()
 
@@ -276,7 +277,7 @@ func (cli *ChatCLI) handleListSessions() {
 		var remoteSessions []string
 		var remoteErr error
 		if rc != nil {
-			ctx, cancel := remoteSessionCtx()
+			ctx, cancel := remoteSessionCtx(ctx)
 			defer cancel()
 			remoteSessions, remoteErr = rc.ListSessions(ctx)
 		}
@@ -331,7 +332,7 @@ func (cli *ChatCLI) handleListSessions() {
 	}
 }
 
-func (cli *ChatCLI) handleDeleteSession(name string) {
+func (cli *ChatCLI) handleDeleteSession(ctx context.Context, name string) {
 	if cli.isRemote {
 		rc := cli.getRemoteClient()
 		if rc == nil {
@@ -341,7 +342,7 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 
 		// Check both sources
 		_, localErr := cli.sessionManager.LoadSession(name)
-		ctx, cancel := remoteSessionCtx()
+		ctx, cancel := remoteSessionCtx(ctx)
 		defer cancel()
 		_, remoteErr := rc.LoadSession(ctx, name)
 
@@ -358,7 +359,7 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 			)
 			switch choice {
 			case "remote":
-				ctxDel, cancelDel := remoteSessionCtx()
+				ctxDel, cancelDel := remoteSessionCtx(ctx)
 				defer cancelDel()
 				if err := rc.DeleteSession(ctxDel, name); err != nil {
 					fmt.Println(i18n.T("session.error_delete", err))
@@ -367,7 +368,7 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 				}
 			case "both":
 				localDelErr := cli.sessionManager.DeleteSession(name)
-				ctxDel, cancelDel := remoteSessionCtx()
+				ctxDel, cancelDel := remoteSessionCtx(ctx)
 				defer cancelDel()
 				remoteDelErr := rc.DeleteSession(ctxDel, name)
 				if localDelErr != nil {
@@ -408,7 +409,7 @@ func (cli *ChatCLI) handleDeleteSession(name string) {
 				}
 			}
 		case foundRemote:
-			ctxDel, cancelDel := remoteSessionCtx()
+			ctxDel, cancelDel := remoteSessionCtx(ctx)
 			defer cancelDel()
 			if err := rc.DeleteSession(ctxDel, name); err != nil {
 				fmt.Println(i18n.T("session.error_delete", err))

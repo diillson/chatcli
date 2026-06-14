@@ -177,65 +177,71 @@ func DefaultConfig() Config {
 	}
 }
 
+// applyIntEnv parses key as an int and, when err==nil and the optional
+// validate predicate (nil ⇒ always true) holds, stores it via set.
+func applyIntEnv(key string, validate func(int) bool, set func(int)) {
+	v := os.Getenv(key)
+	if v == "" {
+		return
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return
+	}
+	if validate != nil && !validate(n) {
+		return
+	}
+	set(n)
+}
+
+// applyFloatEnv parses key as a float64 and, when err==nil and the optional
+// validate predicate (nil ⇒ always true) holds, stores it via set.
+func applyFloatEnv(key string, validate func(float64) bool, set func(float64)) {
+	v := os.Getenv(key)
+	if v == "" {
+		return
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return
+	}
+	if validate != nil && !validate(f) {
+		return
+	}
+	set(f)
+}
+
+// applyDurationEnv stores the parsed duration via set when key is set and valid.
+func applyDurationEnv(key string, set func(time.Duration)) {
+	if d, ok := parseEnvDuration(key); ok {
+		set(d)
+	}
+}
+
+func intPositive(n int) bool    { return n > 0 }
+func intNonNegative(n int) bool { return n >= 0 }
+
 // LoadConfigFromEnv applies CHATCLI_SCHEDULER_* overrides on top of
 // DefaultConfig().
 func LoadConfigFromEnv() Config {
 	c := DefaultConfig()
+	loadCoreEnv(&c)
+	loadDefaultsEnv(&c)
+	loadRateLimitEnv(&c)
+	loadBreakerEnv(&c)
+	loadAuditEnv(&c)
+	loadDaemonEnv(&c)
+	return c
+}
 
+func loadCoreEnv(c *Config) {
 	if v, ok := os.LookupEnv("CHATCLI_SCHEDULER_ENABLED"); ok {
 		c.Enabled = parseEnvBool(v, true)
 	}
 	if v, ok := os.LookupEnv("CHATCLI_SCHEDULER_DATA_DIR"); ok && strings.TrimSpace(v) != "" {
 		c.DataDir = v
 	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_MAX_JOBS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			c.MaxJobs = n
-		}
-	}
-	if d, ok := parseEnvDuration("CHATCLI_SCHEDULER_DEFAULT_ACTION_TIMEOUT"); ok {
-		c.DefaultActionTimeout = d
-	}
-	if d, ok := parseEnvDuration("CHATCLI_SCHEDULER_DEFAULT_POLL_INTERVAL"); ok {
-		c.DefaultPollInterval = d
-	}
-	if d, ok := parseEnvDuration("CHATCLI_SCHEDULER_DEFAULT_WAIT_TIMEOUT"); ok {
-		c.DefaultWaitTimeout = d
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_DEFAULT_MAX_POLLS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			c.DefaultMaxPolls = n
-		}
-	}
-	if d, ok := parseEnvDuration("CHATCLI_SCHEDULER_DEFAULT_BACKOFF_INITIAL"); ok {
-		c.DefaultBackoffInitial = d
-	}
-	if d, ok := parseEnvDuration("CHATCLI_SCHEDULER_DEFAULT_BACKOFF_MAX"); ok {
-		c.DefaultBackoffMax = d
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_DEFAULT_BACKOFF_MULT"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 1 {
-			c.DefaultBackoffMult = f
-		}
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_DEFAULT_BACKOFF_JITTER"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 0.5 {
-			c.DefaultBackoffJitter = f
-		}
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_DEFAULT_MAX_RETRIES"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			c.DefaultMaxRetries = n
-		}
-	}
-	if d, ok := parseEnvDuration("CHATCLI_SCHEDULER_DEFAULT_TTL"); ok {
-		c.DefaultTTL = d
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_HISTORY_LIMIT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			c.HistoryLimit = n
-		}
-	}
+	applyIntEnv("CHATCLI_SCHEDULER_MAX_JOBS", intPositive, func(n int) { c.MaxJobs = n })
 	if v, ok := os.LookupEnv("CHATCLI_SCHEDULER_ALLOW_AGENTS"); ok {
 		c.AllowAgents = parseEnvBool(v, true)
 	}
@@ -252,78 +258,55 @@ func LoadConfigFromEnv() Config {
 			c.ActionAllowlist = allow
 		}
 	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_RATE_LIMIT_GLOBAL_RPS"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.RateLimitGlobalRPS = f
-		}
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_RATE_LIMIT_GLOBAL_BURST"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.RateLimitGlobalBurst = n
-		}
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_RATE_LIMIT_OWNER_RPS"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.RateLimitOwnerRPS = f
-		}
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_RATE_LIMIT_OWNER_BURST"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.RateLimitOwnerBurst = n
-		}
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_BREAKER_FAILURE_THRESHOLD"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			c.BreakerConfig.FailureThreshold = n
-		}
-	}
-	if d, ok := parseEnvDuration("CHATCLI_SCHEDULER_BREAKER_WINDOW"); ok {
-		c.BreakerConfig.Window = d
-	}
-	if d, ok := parseEnvDuration("CHATCLI_SCHEDULER_BREAKER_COOLDOWN"); ok {
-		c.BreakerConfig.Cooldown = d
-	}
+}
+
+func loadDefaultsEnv(c *Config) {
+	applyDurationEnv("CHATCLI_SCHEDULER_DEFAULT_ACTION_TIMEOUT", func(d time.Duration) { c.DefaultActionTimeout = d })
+	applyDurationEnv("CHATCLI_SCHEDULER_DEFAULT_POLL_INTERVAL", func(d time.Duration) { c.DefaultPollInterval = d })
+	applyDurationEnv("CHATCLI_SCHEDULER_DEFAULT_WAIT_TIMEOUT", func(d time.Duration) { c.DefaultWaitTimeout = d })
+	applyIntEnv("CHATCLI_SCHEDULER_DEFAULT_MAX_POLLS", intNonNegative, func(n int) { c.DefaultMaxPolls = n })
+	applyDurationEnv("CHATCLI_SCHEDULER_DEFAULT_BACKOFF_INITIAL", func(d time.Duration) { c.DefaultBackoffInitial = d })
+	applyDurationEnv("CHATCLI_SCHEDULER_DEFAULT_BACKOFF_MAX", func(d time.Duration) { c.DefaultBackoffMax = d })
+	applyFloatEnv("CHATCLI_SCHEDULER_DEFAULT_BACKOFF_MULT", func(f float64) bool { return f >= 1 }, func(f float64) { c.DefaultBackoffMult = f })
+	applyFloatEnv("CHATCLI_SCHEDULER_DEFAULT_BACKOFF_JITTER", func(f float64) bool { return f >= 0 && f <= 0.5 }, func(f float64) { c.DefaultBackoffJitter = f })
+	applyIntEnv("CHATCLI_SCHEDULER_DEFAULT_MAX_RETRIES", intNonNegative, func(n int) { c.DefaultMaxRetries = n })
+	applyDurationEnv("CHATCLI_SCHEDULER_DEFAULT_TTL", func(d time.Duration) { c.DefaultTTL = d })
+	applyIntEnv("CHATCLI_SCHEDULER_HISTORY_LIMIT", intPositive, func(n int) { c.HistoryLimit = n })
+}
+
+func loadRateLimitEnv(c *Config) {
+	applyFloatEnv("CHATCLI_SCHEDULER_RATE_LIMIT_GLOBAL_RPS", nil, func(f float64) { c.RateLimitGlobalRPS = f })
+	applyIntEnv("CHATCLI_SCHEDULER_RATE_LIMIT_GLOBAL_BURST", nil, func(n int) { c.RateLimitGlobalBurst = n })
+	applyFloatEnv("CHATCLI_SCHEDULER_RATE_LIMIT_OWNER_RPS", nil, func(f float64) { c.RateLimitOwnerRPS = f })
+	applyIntEnv("CHATCLI_SCHEDULER_RATE_LIMIT_OWNER_BURST", nil, func(n int) { c.RateLimitOwnerBurst = n })
+}
+
+func loadBreakerEnv(c *Config) {
+	applyIntEnv("CHATCLI_SCHEDULER_BREAKER_FAILURE_THRESHOLD", intPositive, func(n int) { c.BreakerConfig.FailureThreshold = n })
+	applyDurationEnv("CHATCLI_SCHEDULER_BREAKER_WINDOW", func(d time.Duration) { c.BreakerConfig.Window = d })
+	applyDurationEnv("CHATCLI_SCHEDULER_BREAKER_COOLDOWN", func(d time.Duration) { c.BreakerConfig.Cooldown = d })
+}
+
+func loadAuditEnv(c *Config) {
 	if v, ok := os.LookupEnv("CHATCLI_SCHEDULER_AUDIT_ENABLED"); ok {
 		c.AuditEnabled = parseEnvBool(v, true)
 	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_AUDIT_MAX_SIZE_MB"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			c.AuditMaxSizeMB = n
-		}
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_AUDIT_MAX_BACKUPS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			c.AuditMaxBackups = n
-		}
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_AUDIT_MAX_AGE_DAYS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			c.AuditMaxAgeDays = n
-		}
-	}
+	applyIntEnv("CHATCLI_SCHEDULER_AUDIT_MAX_SIZE_MB", intPositive, func(n int) { c.AuditMaxSizeMB = n })
+	applyIntEnv("CHATCLI_SCHEDULER_AUDIT_MAX_BACKUPS", intPositive, func(n int) { c.AuditMaxBackups = n })
+	applyIntEnv("CHATCLI_SCHEDULER_AUDIT_MAX_AGE_DAYS", intPositive, func(n int) { c.AuditMaxAgeDays = n })
+}
+
+func loadDaemonEnv(c *Config) {
 	if v := os.Getenv("CHATCLI_SCHEDULER_DAEMON_SOCKET"); v != "" {
 		c.DaemonSocket = v
 	}
 	if v, ok := os.LookupEnv("CHATCLI_SCHEDULER_DAEMON_AUTO_CONNECT"); ok {
 		c.DaemonAutoConnect = parseEnvBool(v, true)
 	}
-	if d, ok := parseEnvDuration("CHATCLI_SCHEDULER_SNAPSHOT_INTERVAL"); ok {
-		c.SnapshotInterval = d
-	}
-	if d, ok := parseEnvDuration("CHATCLI_SCHEDULER_WAL_GC_INTERVAL"); ok {
-		c.WALGCInterval = d
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_WORKER_COUNT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			c.WorkerCount = n
-		}
-	}
-	if v := os.Getenv("CHATCLI_SCHEDULER_WAIT_WORKER_COUNT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			c.WaitWorkerCount = n
-		}
-	}
-	return c
+	applyDurationEnv("CHATCLI_SCHEDULER_SNAPSHOT_INTERVAL", func(d time.Duration) { c.SnapshotInterval = d })
+	applyDurationEnv("CHATCLI_SCHEDULER_WAL_GC_INTERVAL", func(d time.Duration) { c.WALGCInterval = d })
+	applyIntEnv("CHATCLI_SCHEDULER_WORKER_COUNT", intPositive, func(n int) { c.WorkerCount = n })
+	applyIntEnv("CHATCLI_SCHEDULER_WAIT_WORKER_COUNT", intPositive, func(n int) { c.WaitWorkerCount = n })
 }
 
 // parseEnvBool interprets "1/true/yes/on" as true and "0/false/no/off"

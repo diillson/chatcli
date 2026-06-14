@@ -65,7 +65,7 @@ func TestCallExtraction_FallbackProviderServes(t *testing.T) {
 		return fallback, nil
 	}
 
-	resp, err := mw.callExtraction("prompt", nil)
+	resp, err := mw.callExtraction(context.Background(), "prompt", nil)
 	if err != nil {
 		t.Fatalf("callExtraction: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestCallExtraction_AllProvidersFail(t *testing.T) {
 	t.Setenv("CHATCLI_MEMORY_FALLBACK_PROVIDERS", "")
 	t.Setenv("CHATCLI_FALLBACK_PROVIDERS", "")
 	mw := newResilienceWorker(t, &scriptedClient{name: "claude", failN: 99})
-	if _, err := mw.callExtraction("prompt", nil); err == nil {
+	if _, err := mw.callExtraction(context.Background(), "prompt", nil); err == nil {
 		t.Fatal("must fail when every provider fails")
 	}
 }
@@ -143,7 +143,7 @@ func TestDrainPending_ProcessesOldestAndStopsOnFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := mw.drainPending(); got != 2 {
+	if got := mw.drainPending(context.Background()); got != 2 {
 		t.Fatalf("drained = %d, want 2", got)
 	}
 	if got := len(mw.pendingFiles()); got != 0 {
@@ -156,7 +156,7 @@ func TestDrainPending_ProcessesOldestAndStopsOnFailure(t *testing.T) {
 	if _, err := mw.persistPending(segment); err != nil {
 		t.Fatal(err)
 	}
-	if got := mw.drainPending(); got != 0 {
+	if got := mw.drainPending(context.Background()); got != 0 {
 		t.Fatalf("drained = %d, want 0 while provider is down", got)
 	}
 	if got := len(mw.pendingFiles()); got != 1 {
@@ -173,7 +173,7 @@ func TestDrainPending_RemovesCorruptFiles(t *testing.T) {
 	if err := os.WriteFile(corrupt, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	mw.drainPending()
+	mw.drainPending(context.Background())
 	if _, err := os.Stat(corrupt); !os.IsNotExist(err) {
 		t.Fatal("corrupt pending file must be removed")
 	}

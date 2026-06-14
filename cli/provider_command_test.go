@@ -7,6 +7,7 @@
 package cli
 
 import (
+	"context"
 	"testing"
 
 	prompt "github.com/c-bata/go-prompt"
@@ -72,15 +73,15 @@ func TestHandleProviderCommand(t *testing.T) {
 
 	cli := newProviderTestCLI("OPENAI", []string{"OPENAI", "CLAUDEAI"})
 
-	cli.handleProviderCommand("/provider claudeai") // case-insensitive switch
+	cli.handleProviderCommand(context.Background(), "/provider claudeai") // case-insensitive switch
 	if cli.Provider != "CLAUDEAI" {
 		t.Fatalf("provider = %q, want CLAUDEAI", cli.Provider)
 	}
-	cli.handleProviderCommand("/provider NOPE") // unknown → unchanged
+	cli.handleProviderCommand(context.Background(), "/provider NOPE") // unknown → unchanged
 	if cli.Provider != "CLAUDEAI" {
 		t.Errorf("unknown provider changed it to %q", cli.Provider)
 	}
-	cli.handleProviderCommand("/provider") // bare lists, leaves it unchanged
+	cli.handleProviderCommand(context.Background(), "/provider") // bare lists, leaves it unchanged
 	if cli.Provider != "CLAUDEAI" {
 		t.Errorf("bare /provider changed it to %q", cli.Provider)
 	}

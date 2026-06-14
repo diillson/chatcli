@@ -90,11 +90,11 @@ func (e *Engine) handleWrite(args []string) error {
 
 	data, err := smartDecode(*content, *encoding)
 	if err != nil {
-		return fmt.Errorf("erro decode: %v", err)
+		return fmt.Errorf("erro decode: %w", err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(*file), 0700); err != nil {
-		return fmt.Errorf("erro ao criar diretório: %v", err)
+		return fmt.Errorf("erro ao criar diretório: %w", err)
 	}
 	if err := createBackup(*file); err != nil {
 		e.errorf("WARN: backup falhou para %s: %v\n", *file, err)
@@ -103,15 +103,15 @@ func (e *Engine) handleWrite(args []string) error {
 	if *appendMode {
 		f, err := os.OpenFile(*file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
-			return fmt.Errorf("erro escrita: %v", err)
+			return fmt.Errorf("erro escrita: %w", err)
 		}
 		defer func() { _ = f.Close() }()
 		if _, err := f.Write(data); err != nil {
-			return fmt.Errorf("erro escrita: %v", err)
+			return fmt.Errorf("erro escrita: %w", err)
 		}
 	} else {
 		if err := os.WriteFile(*file, data, 0600); err != nil {
-			return fmt.Errorf("erro escrita: %v", err)
+			return fmt.Errorf("erro escrita: %w", err)
 		}
 	}
 
@@ -144,18 +144,18 @@ func (e *Engine) handlePatch(args []string) error {
 
 	c, err := os.ReadFile(*file)
 	if err != nil {
-		return fmt.Errorf("erro leitura: %v", err)
+		return fmt.Errorf("erro leitura: %w", err)
 	}
 	content := string(c)
 
 	sBytes, err := smartDecode(*search, *encoding)
 	if err != nil {
-		return fmt.Errorf("search decode error: %v", err)
+		return fmt.Errorf("search decode error: %w", err)
 	}
 
 	rBytes, err := smartDecode(*replace, *encoding)
 	if err != nil {
-		return fmt.Errorf("replace decode error: %v", err)
+		return fmt.Errorf("replace decode error: %w", err)
 	}
 
 	content = strings.ReplaceAll(content, "\r\n", "\n")
@@ -171,7 +171,7 @@ func (e *Engine) handlePatch(args []string) error {
 	}
 	newContent := strings.Replace(content, searchStr, replaceStr, 1)
 	if err := os.WriteFile(*file, []byte(newContent), 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
-		return fmt.Errorf("erro escrita: %v", err)
+		return fmt.Errorf("erro escrita: %w", err)
 	}
 	e.printf("✅ Patch aplicado em '%s'.\n", *file)
 	return nil
@@ -191,10 +191,10 @@ func (e *Engine) handleRollback(args []string) error {
 	}
 	c, err := os.ReadFile(*file + ".bak")
 	if err != nil {
-		return fmt.Errorf("backup error: %v", err)
+		return fmt.Errorf("backup error: %w", err)
 	}
 	if err := os.WriteFile(*file, c, 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
-		return fmt.Errorf("erro ao restaurar arquivo: %v", err)
+		return fmt.Errorf("erro ao restaurar arquivo: %w", err)
 	}
 	e.println("✅ Rollback ok.")
 	return nil

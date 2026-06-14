@@ -25,7 +25,7 @@ func (h *Handler) GetAlerts(ctx context.Context, req *pb.GetAlertsRequest) (*pb.
 	}
 
 	alerts := h.watcherAlertsFunc()
-	var result []*pb.WatcherAlert
+	result := make([]*pb.WatcherAlert, 0, len(alerts))
 	for _, a := range alerts {
 		if req.Namespace != "" && a.Namespace != req.Namespace {
 			continue
@@ -93,7 +93,7 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 	}
 
 	// Map parsed actions to proto SuggestedAction
-	var suggestedActions []*pb.SuggestedAction
+	suggestedActions := make([]*pb.SuggestedAction, 0, len(analysis.Actions))
 	for _, a := range analysis.Actions {
 		suggestedActions = append(suggestedActions, &pb.SuggestedAction{
 			Name:        a.Name,

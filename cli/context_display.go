@@ -355,7 +355,7 @@ func (h *ContextHandler) printFileTree(files []utils.FileInfo, indent string) {
 	}
 
 	// Ordenar diretórios
-	var dirs []string
+	dirs := make([]string, 0, len(dirMap))
 	for dir := range dirMap {
 		dirs = append(dirs, dir)
 	}

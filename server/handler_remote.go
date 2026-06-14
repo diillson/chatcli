@@ -37,7 +37,7 @@ func (h *Handler) ListRemotePlugins(ctx context.Context, req *pb.ListRemotePlugi
 	}
 
 	plist := h.pluginManager.GetPlugins()
-	var result []*pb.PluginInfo
+	result := make([]*pb.PluginInfo, 0, len(plist))
 	for _, p := range plist {
 		// Filter internal plugins (prefixed with _) for non-admin users
 		if user != nil && user.Role != RoleAdmin && strings.HasPrefix(p.Name(), "_") {
@@ -66,7 +66,7 @@ func (h *Handler) ListRemoteAgents(ctx context.Context, req *pb.ListRemoteAgents
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.remote.agents_list_error", err))
 	}
 
-	var result []*pb.AgentInfo
+	result := make([]*pb.AgentInfo, 0, len(agents))
 	for _, a := range agents {
 		result = append(result, agentToProto(a))
 	}
@@ -104,7 +104,7 @@ func (h *Handler) ListRemoteSkills(ctx context.Context, req *pb.ListRemoteSkills
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.remote.skills_list_error", err))
 	}
 
-	var result []*pb.SkillInfo
+	result := make([]*pb.SkillInfo, 0, len(skills))
 	for _, s := range skills {
 		info := &pb.SkillInfo{
 			Name:         s.Name,

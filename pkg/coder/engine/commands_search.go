@@ -74,7 +74,7 @@ func (e *Engine) handleTree(args []string) error {
 	return nil
 }
 
-func (e *Engine) handleSearch(_ context.Context, args []string) error {
+func (e *Engine) handleSearch(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	term := fs.String("term", "", "")
 	dir := fs.String("dir", ".", "")
@@ -93,13 +93,13 @@ func (e *Engine) handleSearch(_ context.Context, args []string) error {
 	}
 
 	if rgPath, err := exec.LookPath("rg"); err == nil {
-		return e.runRipgrep(rgPath, *term, *dir, *useRegex, *caseSensitive, *contextLines, *maxResults, *glob)
+		return e.runRipgrep(ctx, rgPath, *term, *dir, *useRegex, *caseSensitive, *contextLines, *maxResults, *glob)
 	}
 
 	return e.fallbackSearch(*term, *dir, *useRegex, *caseSensitive, *contextLines, *maxResults, *glob, *maxBytes)
 }
 
-func (e *Engine) runRipgrep(rgPath, term, dir string, useRegex, caseSensitive bool, contextLines, maxResults int, glob string) error {
+func (e *Engine) runRipgrep(ctx context.Context, rgPath, term, dir string, useRegex, caseSensitive bool, contextLines, maxResults int, glob string) error {
 	args := []string{"--line-number", "--column", "--color", "never"}
 	if !caseSensitive {
 		args = append(args, "-i")
@@ -118,7 +118,7 @@ func (e *Engine) runRipgrep(rgPath, term, dir string, useRegex, caseSensitive bo
 	}
 	args = append(args, term, dir)
 
-	out, err := runCommand("", rgPath, args...)
+	out, err := runCommandCtx(ctx, "", rgPath, args...)
 	return e.printCommandOutput(out, err)
 }
 
@@ -131,7 +131,7 @@ func (e *Engine) fallbackSearch(term, dir string, useRegex, caseSensitive bool, 
 		}
 		re, err = regexp.Compile(term)
 		if err != nil {
-			return fmt.Errorf("regex inválida: %v", err)
+			return fmt.Errorf("regex inválida: %w", err)
 		}
 	}
 

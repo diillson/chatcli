@@ -101,7 +101,7 @@ func (h *ContextHandler) inspectContext(ctx *ctxmgr.FileContext) {
 	}
 
 	fmt.Printf("\n%s\n", colorize(i18n.T("context.inspect.extensions_header"), ColorCyan+ColorBold))
-	var exts []string
+	exts := make([]string, 0, len(languageMap))
 	for ext := range languageMap {
 		exts = append(exts, ext)
 	}

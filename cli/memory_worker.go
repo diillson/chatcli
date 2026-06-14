@@ -66,9 +66,11 @@ func newMemoryWorker(cli *ChatCLI) *memoryWorker {
 	return mw
 }
 
-// start begins the background memory worker loop.
-func (mw *memoryWorker) start() {
-	go mw.loop()
+// start begins the background memory worker loop. The passed context is
+// detached (cancellation governed by stopCh) and inherited by every
+// background-driven extraction/compaction.
+func (mw *memoryWorker) start(ctx context.Context) {
+	go mw.loop(context.WithoutCancel(ctx))
 }
 
 // stop signals the worker to stop.
@@ -83,7 +85,7 @@ func (mw *memoryWorker) stop() {
 
 // nudge is called after each LLM response to check if memory extraction should run.
 // It runs in a goroutine — non-blocking to the main flow.
-func (mw *memoryWorker) nudge() {
+func (mw *memoryWorker) nudge(ctx context.Context) {
 	if mw.cli.memoryStore == nil {
 		return
 	}
@@ -91,10 +93,13 @@ func (mw *memoryWorker) nudge() {
 	if mw.running.Load() {
 		return
 	}
-	go mw.maybeExtract()
+	// The extraction goroutine outlives the triggering request; detach
+	// cancellation while inheriting context values.
+	detached := context.WithoutCancel(ctx)
+	go mw.maybeExtract(detached)
 }
 
-func (mw *memoryWorker) loop() {
+func (mw *memoryWorker) loop(ctx context.Context) {
 	extractTicker := time.NewTicker(3 * time.Minute)
 	compactTicker := time.NewTicker(compactionCheckInterval)
 	cleanupTicker := time.NewTicker(dailyCleanupInterval)
@@ -107,16 +112,16 @@ func (mw *memoryWorker) loop() {
 		case <-mw.stopCh:
 			return
 		case <-extractTicker.C:
-			mw.maybeExtract()
+			mw.maybeExtract(ctx)
 		case <-compactTicker.C:
-			mw.maybeCompact()
+			mw.maybeCompact(ctx)
 		case <-cleanupTicker.C:
 			mw.cleanupDailyNotes()
 		}
 	}
 }
 
-func (mw *memoryWorker) maybeExtract() {
+func (mw *memoryWorker) maybeExtract(ctx context.Context) {
 	if !mw.running.CompareAndSwap(false, true) {
 		return
 	}
@@ -160,9 +165,9 @@ func (mw *memoryWorker) maybeExtract() {
 	mw.showStatus("updating memory...")
 
 	// Queued segments first (oldest dialog wins on causality), then the live one.
-	mw.drainPending()
+	mw.drainPending(ctx)
 
-	err := mw.extractAndSave(messagesToProcess)
+	err := mw.extractAndSave(ctx, messagesToProcess)
 
 	if err != nil {
 		mw.onExtractionFailure(err, messagesToProcess, historyLen)
@@ -221,7 +226,7 @@ func (mw *memoryWorker) onExtractionFailure(err error, segment []models.Message,
 	}
 }
 
-func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
+func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Message) error {
 	if mw.cli.memoryStore == nil {
 		return fmt.Errorf("memory store not available")
 	}
@@ -269,7 +274,7 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 
 	// Walk the provider chain (active client first, then fallbacks) so one
 	// provider's outage does not cost the conversation its memory.
-	response, err := mw.callExtraction(prompt, history)
+	response, err := mw.callExtraction(ctx, prompt, history)
 	if err != nil {
 		return fmt.Errorf("memory extraction LLM call failed: %w", err)
 	}
@@ -302,7 +307,7 @@ func (mw *memoryWorker) extractAndSave(messages []models.Message) error {
 }
 
 // maybeCompact checks if memory compaction should run and executes it.
-func (mw *memoryWorker) maybeCompact() {
+func (mw *memoryWorker) maybeCompact(ctx context.Context) {
 	if mw.cli.memoryStore == nil {
 		return
 	}
@@ -326,7 +331,7 @@ func (mw *memoryWorker) maybeCompact() {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	if err := mgr.RunCompaction(ctx, sendPrompt); err != nil {

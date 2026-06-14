@@ -47,7 +47,7 @@ import (
 //
 // Each cycle gets its own CycleNum on the resulting ExecutionResult so
 // /jobs logs can render them as distinct entries.
-func (s *Scheduler) handleJob(id JobID, workerID int) {
+func (s *Scheduler) handleJob(ctx context.Context, id JobID, workerID int) {
 	s.mu.RLock()
 	j, ok := s.jobs[id]
 	s.mu.RUnlock()
@@ -85,7 +85,7 @@ func (s *Scheduler) handleJob(id JobID, workerID int) {
 
 	// Wait phase (if any).
 	if j.Wait != nil {
-		if !s.runWait(j) {
+		if !s.runWait(ctx, j) {
 			return
 		}
 	}
@@ -93,7 +93,7 @@ func (s *Scheduler) handleJob(id JobID, workerID int) {
 	// Action phase. runAction handles recurring re-arm inline on the
 	// success path so a Running→Pending transition is taken before the
 	// (terminal) Completed state is reached.
-	s.runAction(j)
+	s.runAction(ctx, j)
 }
 
 // rearmRecurring closes one cycle of a recurring schedule and queues
@@ -144,7 +144,7 @@ func (s *Scheduler) rearmRecurring(j *Job, r ExecutionResult) {
 
 // runWait polls the condition until satisfied, timed out, or cancelled.
 // Returns true iff the caller should proceed to Action.
-func (s *Scheduler) runWait(j *Job) bool {
+func (s *Scheduler) runWait(ctx context.Context, j *Job) bool {
 	j.lock()
 	if j.Status.IsTerminal() {
 		j.unlock()
@@ -179,14 +179,14 @@ func (s *Scheduler) runWait(j *Job) bool {
 	}
 	maxPolls := budget.MaxPolls // 0 = unlimited
 
-	waitCtx, cancel := context.WithTimeout(s.ctx, timeout)
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	attempt := 0
 	for {
 		if waitCtx.Err() != nil {
 			// Timeout.
-			return s.waitTimeout(j, wait, startAt, attempt)
+			return s.waitTimeout(ctx, j, wait, startAt, attempt)
 		}
 		// Cancellation check — user may have cancelled the job.
 		j.lock()
@@ -210,7 +210,7 @@ func (s *Scheduler) runWait(j *Job) bool {
 			case <-waitCtx.Done():
 			}
 			if maxPolls > 0 && attempt >= maxPolls {
-				return s.waitTimeout(j, wait, startAt, attempt)
+				return s.waitTimeout(ctx, j, wait, startAt, attempt)
 			}
 			continue
 		}
@@ -272,7 +272,7 @@ func (s *Scheduler) runWait(j *Job) bool {
 
 		// Non-satisfied, permissible — wait for the next tick.
 		if maxPolls > 0 && attempt >= maxPolls {
-			return s.waitTimeout(j, wait, startAt, attempt)
+			return s.waitTimeout(ctx, j, wait, startAt, attempt)
 		}
 		select {
 		case <-time.After(pollInterval):
@@ -283,7 +283,7 @@ func (s *Scheduler) runWait(j *Job) bool {
 
 // waitTimeout applies the TimeoutBehavior policy. Returns true if the
 // caller should still run the Action (TimeoutFireAnyway).
-func (s *Scheduler) waitTimeout(j *Job, wait WaitSpec, startedAt time.Time, attempts int) bool {
+func (s *Scheduler) waitTimeout(ctx context.Context, j *Job, wait WaitSpec, startedAt time.Time, attempts int) bool {
 	behavior := wait.OnTimeout
 	if behavior == "" {
 		behavior = TimeoutFail
@@ -303,7 +303,7 @@ func (s *Scheduler) waitTimeout(j *Job, wait WaitSpec, startedAt time.Time, atte
 			origAction := j.Action
 			j.Action = *wait.Fallback
 			j.unlock()
-			s.runAction(j)
+			s.runAction(ctx, j)
 			j.lock()
 			j.Action = origAction
 			j.unlock()
@@ -318,7 +318,7 @@ func (s *Scheduler) waitTimeout(j *Job, wait WaitSpec, startedAt time.Time, atte
 
 // ─── Action phase ─────────────────────────────────────────────
 
-func (s *Scheduler) runAction(j *Job) {
+func (s *Scheduler) runAction(ctx context.Context, j *Job) {
 	j.lock()
 	if j.Status.IsTerminal() {
 		j.unlock()
@@ -350,7 +350,7 @@ func (s *Scheduler) runAction(j *Job) {
 	if timeout <= 0 {
 		timeout = s.cfg.DefaultActionTimeout
 	}
-	execCtx, cancel := context.WithTimeout(s.ctx, timeout)
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	br := s.actBreakers.Get(string(action.Type))

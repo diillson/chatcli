@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,7 +146,7 @@ func TestChannelTriggers_ConfirmDeniedIsCleanNoop(t *testing.T) {
 		t.Fatalf("no pending confirm action")
 	}
 
-	if err := cli.channelTriggerConfirm(id, false); err != nil {
+	if err := cli.channelTriggerConfirm(context.Background(), id, false); err != nil {
 		t.Fatalf("Confirm(deny): %v", err)
 	}
 	cli.channelTriggers.mu.Lock()
@@ -240,14 +241,14 @@ func TestChannelTriggers_LoadRulesInvalidJSON(t *testing.T) {
 
 func TestChannelTriggers_ConfirmInvalidID(t *testing.T) {
 	cli := newTestCLIWithMCP(t)
-	if err := cli.channelTriggerConfirm(9999, true); err == nil {
+	if err := cli.channelTriggerConfirm(context.Background(), 9999, true); err == nil {
 		t.Fatalf("expected error for nonexistent confirm id")
 	}
 }
 
 func TestChannelTriggers_RunMissingSeq(t *testing.T) {
 	cli := newTestCLIWithMCP(t)
-	if err := cli.channelTriggerRun(9999); err == nil {
+	if err := cli.channelTriggerRun(context.Background(), 9999); err == nil {
 		t.Fatalf("expected error for nonexistent seq")
 	}
 }
@@ -299,7 +300,7 @@ func TestChannelTriggers_RenderBannerEmptyReturnsFalse(t *testing.T) {
 
 func TestChannelTriggers_DrainPendingAutoEmptyReturnsFalse(t *testing.T) {
 	cli := newTestCLIWithMCP(t)
-	if cli.drainPendingAutoTriggers() {
+	if cli.drainPendingAutoTriggers(context.Background()) {
 		t.Errorf("drainPendingAutoTriggers with empty queue should return false")
 	}
 }
@@ -314,7 +315,7 @@ func TestChannelTriggers_NilGuards(t *testing.T) {
 	if cli.channelTriggerRules() != nil {
 		t.Errorf("nil triggers → Rules must be nil")
 	}
-	if cli.drainPendingAutoTriggers() {
+	if cli.drainPendingAutoTriggers(context.Background()) {
 		t.Errorf("nil triggers → drain must return false")
 	}
 	if cli.renderChannelTriggerBanner() {
@@ -328,10 +329,10 @@ func TestChannelTriggers_NilGuards(t *testing.T) {
 	if _, err := cli.reloadChannelTriggerRules(); err == nil {
 		t.Errorf("nil triggers → reload must return error")
 	}
-	if err := cli.channelTriggerConfirm(1, true); err == nil {
+	if err := cli.channelTriggerConfirm(context.Background(), 1, true); err == nil {
 		t.Errorf("nil triggers → confirm must return error")
 	}
-	if err := cli.channelTriggerRun(1); err == nil {
+	if err := cli.channelTriggerRun(context.Background(), 1); err == nil {
 		t.Errorf("nil mcp → run must return error")
 	}
 }

@@ -372,7 +372,7 @@ func (cli *ChatCLI) getUserInvocableSkillSuggestions() []prompt.Suggest {
 	if len(skills) == 0 {
 		return nil
 	}
-	var out []prompt.Suggest
+	out := make([]prompt.Suggest, 0, len(skills))
 	for _, s := range skills {
 		if !s.UserInvocable {
 			continue
@@ -472,8 +472,8 @@ func (cli *ChatCLI) GetContextCommands() []prompt.Suggest {
 
 // filePathCompleter é uma função dedicada para autocompletar caminhos de arquivo
 func (cli *ChatCLI) filePathCompleter(prefix string) []prompt.Suggest {
-	var suggestions []prompt.Suggest
 	completions := cli.completeFilePath(prefix)
+	suggestions := make([]prompt.Suggest, 0, len(completions))
 	for _, c := range completions {
 		suggestions = append(suggestions, prompt.Suggest{Text: c})
 	}
@@ -482,8 +482,8 @@ func (cli *ChatCLI) filePathCompleter(prefix string) []prompt.Suggest {
 
 // systemCommandCompleter é uma função dedicada para autocompletar comandos do sistema
 func (cli *ChatCLI) systemCommandCompleter(prefix string) []prompt.Suggest {
-	var suggestions []prompt.Suggest
 	completions := cli.completeSystemCommands(prefix)
+	suggestions := make([]prompt.Suggest, 0, len(completions))
 	for _, c := range completions {
 		suggestions = append(suggestions, prompt.Suggest{Text: c})
 	}

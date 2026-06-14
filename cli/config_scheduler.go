@@ -18,7 +18,7 @@ import (
 )
 
 // showConfigScheduler renders the /config scheduler section.
-func (cli *ChatCLI) showConfigScheduler() {
+func (cli *ChatCLI) showConfigScheduler(ctx context.Context) {
 	sectionHeader("⏲", "cfg.section.scheduler.title", ColorBlue)
 	p := uiPrefix(ColorBlue)
 
@@ -64,9 +64,9 @@ func (cli *ChatCLI) showConfigScheduler() {
 
 	// Live state.
 	fmt.Println(p)
-	kv(p, i18n.T("cfg.kv.scheduler_active"), fmt.Sprintf("%d", cli.schedulerActiveCount()))
-	kv(p, i18n.T("cfg.kv.scheduler_queue_depth"), fmt.Sprintf("%d", cli.schedulerQueueDepth()))
-	kv(p, i18n.T("cfg.kv.scheduler_wal_segments"), fmt.Sprintf("%d", cli.schedulerWALCount()))
+	kv(p, i18n.T("cfg.kv.scheduler_active"), fmt.Sprintf("%d", cli.schedulerActiveCount(ctx)))
+	kv(p, i18n.T("cfg.kv.scheduler_queue_depth"), fmt.Sprintf("%d", cli.schedulerQueueDepth(ctx)))
+	kv(p, i18n.T("cfg.kv.scheduler_wal_segments"), fmt.Sprintf("%d", cli.schedulerWALCount(ctx)))
 	kv(p, i18n.T("cfg.kv.scheduler_daemon"), cli.schedulerDaemonStatus())
 
 	sectionEnd(ColorBlue)
@@ -74,9 +74,9 @@ func (cli *ChatCLI) showConfigScheduler() {
 
 // schedulerActiveCount returns the current active-jobs count across
 // both in-process and remote scheduler.
-func (cli *ChatCLI) schedulerActiveCount() int {
+func (cli *ChatCLI) schedulerActiveCount(ctx context.Context) int {
 	if cli.schedulerRemote != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 		if stats, err := cli.schedulerRemote.Stats(ctx); err == nil {
 			return stats.JobsActive
@@ -90,9 +90,9 @@ func (cli *ChatCLI) schedulerActiveCount() int {
 	return len(list)
 }
 
-func (cli *ChatCLI) schedulerQueueDepth() int {
+func (cli *ChatCLI) schedulerQueueDepth(ctx context.Context) int {
 	if cli.schedulerRemote != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 		if stats, err := cli.schedulerRemote.Stats(ctx); err == nil {
 			return stats.QueueDepth
@@ -101,12 +101,12 @@ func (cli *ChatCLI) schedulerQueueDepth() int {
 	}
 	// In-process scheduler doesn't expose the heap len directly; report
 	// the active count as a stand-in.
-	return cli.schedulerActiveCount()
+	return cli.schedulerActiveCount(ctx)
 }
 
-func (cli *ChatCLI) schedulerWALCount() int {
+func (cli *ChatCLI) schedulerWALCount(ctx context.Context) int {
 	if cli.schedulerRemote != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 		if stats, err := cli.schedulerRemote.Stats(ctx); err == nil {
 			return stats.WALSegments

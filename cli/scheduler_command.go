@@ -20,7 +20,7 @@ import (
 )
 
 // handleScheduleCommand implements /schedule …
-func (cli *ChatCLI) handleScheduleCommand(input string) {
+func (cli *ChatCLI) handleScheduleCommand(ctx context.Context, input string) {
 	if !cli.schedulerEnabled() {
 		fmt.Println(colorize("  "+i18n.T("scheduler.disabled"), ColorYellow))
 		return
@@ -45,7 +45,7 @@ func (cli *ChatCLI) handleScheduleCommand(input string) {
 		return
 	}
 	owner := cli.currentSchedulerOwner()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	if cli.schedulerRemote != nil {
@@ -75,7 +75,7 @@ func (cli *ChatCLI) handleScheduleCommand(input string) {
 }
 
 // handleWaitCommand implements /wait …
-func (cli *ChatCLI) handleWaitCommand(input string) {
+func (cli *ChatCLI) handleWaitCommand(ctx context.Context, input string) {
 	if !cli.schedulerEnabled() {
 		fmt.Println(colorize("  "+i18n.T("scheduler.disabled"), ColorYellow))
 		return
@@ -97,7 +97,7 @@ func (cli *ChatCLI) handleWaitCommand(input string) {
 	}
 	owner := cli.currentSchedulerOwner()
 	// Wait blocks by default; use --async to fire-and-forget.
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Minute)
 	defer cancel()
 	if cli.schedulerRemote != nil {
 		out, err := cli.schedulerRemote.Enqueue(ctx, owner, in)
@@ -137,7 +137,7 @@ func (cli *ChatCLI) handleWaitCommand(input string) {
 }
 
 // handleJobsCommand implements /jobs …
-func (cli *ChatCLI) handleJobsCommand(input string) {
+func (cli *ChatCLI) handleJobsCommand(ctx context.Context, input string) {
 	if !cli.schedulerEnabled() {
 		fmt.Println(colorize("  "+i18n.T("scheduler.disabled"), ColorYellow))
 		return
@@ -154,27 +154,27 @@ func (cli *ChatCLI) handleJobsCommand(input string) {
 	case "help":
 		cli.printJobsUsage()
 	case "list":
-		cli.jobsList(args[1:])
+		cli.jobsList(ctx, args[1:])
 	case "show":
-		cli.jobsShow(args[1:])
+		cli.jobsShow(ctx, args[1:])
 	case "tree":
-		cli.jobsTree(args[1:])
+		cli.jobsTree(ctx, args[1:])
 	case "cancel":
-		cli.jobsCancel(args[1:])
+		cli.jobsCancel(ctx, args[1:])
 	case "pause":
-		cli.jobsPause(args[1:])
+		cli.jobsPause(ctx, args[1:])
 	case "resume":
-		cli.jobsResume(args[1:])
+		cli.jobsResume(ctx, args[1:])
 	case "logs":
-		cli.jobsLogs(args[1:])
+		cli.jobsLogs(ctx, args[1:])
 	case "history":
-		cli.jobsList([]string{"--all"})
+		cli.jobsList(ctx, []string{"--all"})
 	case "daemon":
-		cli.jobsDaemon(args[1:])
+		cli.jobsDaemon(ctx, args[1:])
 	case "gc":
-		cli.jobsGC()
+		cli.jobsGC(ctx)
 	case "clear", "clean", "prune":
-		cli.jobsClear(args[1:])
+		cli.jobsClear(ctx, args[1:])
 	default:
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.unknown", args[0]), ColorYellow))
 		cli.printJobsUsage()
@@ -183,7 +183,7 @@ func (cli *ChatCLI) handleJobsCommand(input string) {
 
 // ─── /jobs subcommands ────────────────────────────────────────
 
-func (cli *ChatCLI) jobsList(args []string) {
+func (cli *ChatCLI) jobsList(ctx context.Context, args []string) {
 	filter := scheduler.ListFilter{}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -215,17 +215,17 @@ func (cli *ChatCLI) jobsList(args []string) {
 			}
 		}
 	}
-	summaries := cli.schedulerList(filter)
+	summaries := cli.schedulerList(ctx, filter)
 	fmt.Println(scheduler.RenderList(summaries))
 }
 
-func (cli *ChatCLI) jobsShow(args []string) {
+func (cli *ChatCLI) jobsShow(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.show_usage"), ColorYellow))
 		return
 	}
 	id := scheduler.JobID(args[0])
-	j := cli.schedulerQuery(id)
+	j := cli.schedulerQuery(ctx, id)
 	if j == nil {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.not_found", id), ColorYellow))
 		return
@@ -233,11 +233,11 @@ func (cli *ChatCLI) jobsShow(args []string) {
 	fmt.Println(scheduler.RenderShow(j))
 }
 
-func (cli *ChatCLI) jobsTree(_ []string) {
-	summaries := cli.schedulerList(scheduler.ListFilter{IncludeTerminal: true})
+func (cli *ChatCLI) jobsTree(ctx context.Context, _ []string) {
+	summaries := cli.schedulerList(ctx, scheduler.ListFilter{IncludeTerminal: true})
 	jobs := make([]*scheduler.Job, 0, len(summaries))
 	for _, s := range summaries {
-		if j := cli.schedulerQuery(s.ID); j != nil {
+		if j := cli.schedulerQuery(ctx, s.ID); j != nil {
 			jobs = append(jobs, j)
 		}
 	}
@@ -249,7 +249,7 @@ func (cli *ChatCLI) jobsTree(_ []string) {
 	fmt.Println(out)
 }
 
-func (cli *ChatCLI) jobsCancel(args []string) {
+func (cli *ChatCLI) jobsCancel(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.cancel_usage"), ColorYellow))
 		return
@@ -259,7 +259,7 @@ func (cli *ChatCLI) jobsCancel(args []string) {
 	if len(args) > 1 {
 		reason = strings.Join(args[1:], " ")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var err error
 	if cli.schedulerRemote != nil {
@@ -274,13 +274,13 @@ func (cli *ChatCLI) jobsCancel(args []string) {
 	fmt.Println(colorize("  ✔ "+i18n.T("scheduler.jobs.cancelled", id), ColorGreen))
 }
 
-func (cli *ChatCLI) jobsPause(args []string) {
+func (cli *ChatCLI) jobsPause(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.pause_usage"), ColorYellow))
 		return
 	}
 	id := scheduler.JobID(args[0])
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var err error
 	if cli.schedulerRemote != nil {
@@ -295,13 +295,13 @@ func (cli *ChatCLI) jobsPause(args []string) {
 	fmt.Println(colorize("  ✔ "+i18n.T("scheduler.jobs.paused", id), ColorGreen))
 }
 
-func (cli *ChatCLI) jobsResume(args []string) {
+func (cli *ChatCLI) jobsResume(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.resume_usage"), ColorYellow))
 		return
 	}
 	id := scheduler.JobID(args[0])
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var err error
 	if cli.schedulerRemote != nil {
@@ -316,13 +316,13 @@ func (cli *ChatCLI) jobsResume(args []string) {
 	fmt.Println(colorize("  ✔ "+i18n.T("scheduler.jobs.resumed", id), ColorGreen))
 }
 
-func (cli *ChatCLI) jobsLogs(args []string) {
+func (cli *ChatCLI) jobsLogs(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.logs_usage"), ColorYellow))
 		return
 	}
 	id := scheduler.JobID(args[0])
-	j := cli.schedulerQuery(id)
+	j := cli.schedulerQuery(ctx, id)
 	if j == nil {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.not_found", id), ColorYellow))
 		return
@@ -363,7 +363,7 @@ func (cli *ChatCLI) jobsLogs(args []string) {
 	}
 }
 
-func (cli *ChatCLI) jobsDaemon(args []string) {
+func (cli *ChatCLI) jobsDaemon(ctx context.Context, args []string) {
 	sub := "status"
 	if len(args) > 0 {
 		sub = args[0]
@@ -371,7 +371,7 @@ func (cli *ChatCLI) jobsDaemon(args []string) {
 	switch sub {
 	case "status":
 		if cli.schedulerRemote != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
 			stats, err := cli.schedulerRemote.Stats(ctx)
 			if err != nil {
@@ -411,7 +411,7 @@ func (cli *ChatCLI) jobsDaemon(args []string) {
 //
 // Active jobs (pending/running/waiting/paused) are NEVER pruned — use
 // /jobs cancel <id> to stop them first.
-func (cli *ChatCLI) jobsClear(args []string) {
+func (cli *ChatCLI) jobsClear(_ context.Context, args []string) {
 	if cli.scheduler == nil && cli.schedulerRemote == nil {
 		fmt.Println(colorize("  "+i18n.T("scheduler.disabled"), ColorYellow))
 		return
@@ -504,19 +504,19 @@ func (cli *ChatCLI) jobsClear(args []string) {
 	if !skipConfirm {
 		desc := jobsClearDescription(statuses, olderThan, nameSubstr, ownerFilter)
 		fmt.Println(colorize(fmt.Sprintf("  Would delete %d terminal job(s)%s:", len(preview), desc), ColorYellow))
-		max := 10
-		if len(preview) < max {
-			max = len(preview)
+		maxN := 10
+		if len(preview) < maxN {
+			maxN = len(preview)
 		}
-		for i := 0; i < max; i++ {
+		for i := 0; i < maxN; i++ {
 			s := preview[i]
 			fmt.Printf("    %s  %s  %s\n",
 				colorize(string(s.Status), ColorGray),
 				colorize(string(s.ID), ColorGray),
 				s.Name)
 		}
-		if len(preview) > max {
-			fmt.Println(colorize(fmt.Sprintf("    … and %d more", len(preview)-max), ColorGray))
+		if len(preview) > maxN {
+			fmt.Println(colorize(fmt.Sprintf("    … and %d more", len(preview)-maxN), ColorGray))
 		}
 		fmt.Println(colorize("  Re-run the same command with --yes (or -y) to actually delete.", ColorYellow))
 		return
@@ -579,9 +579,9 @@ func jobsClearDescription(statuses []scheduler.JobStatus, olderThan time.Duratio
 	return " (" + strings.Join(parts, ", ") + ")"
 }
 
-func (cli *ChatCLI) jobsGC() {
+func (cli *ChatCLI) jobsGC(ctx context.Context) {
 	if cli.schedulerRemote != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 		_ = cli.schedulerRemote.Snapshot(ctx)
 	} else if cli.scheduler != nil {
@@ -596,9 +596,9 @@ func (cli *ChatCLI) jobsGC() {
 // belongs on *Scheduler; see scheduler.go.
 // (The exported wrapper is added for completeness.)
 
-func (cli *ChatCLI) schedulerList(filter scheduler.ListFilter) []scheduler.JobSummary {
+func (cli *ChatCLI) schedulerList(ctx context.Context, filter scheduler.ListFilter) []scheduler.JobSummary {
 	if cli.schedulerRemote != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		list, _ := cli.schedulerRemote.List(ctx, filter)
 		return list
@@ -609,9 +609,9 @@ func (cli *ChatCLI) schedulerList(filter scheduler.ListFilter) []scheduler.JobSu
 	return nil
 }
 
-func (cli *ChatCLI) schedulerQuery(id scheduler.JobID) *scheduler.Job {
+func (cli *ChatCLI) schedulerQuery(ctx context.Context, id scheduler.JobID) *scheduler.Job {
 	if cli.schedulerRemote != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		j, err := cli.schedulerRemote.Query(ctx, id)
 		if err != nil {

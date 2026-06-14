@@ -25,12 +25,12 @@ type diffLine struct {
 func (e *Engine) applyUnifiedDiff(fileArg, diffText, enc string) error {
 	decoded, err := smartDecode(diffText, enc)
 	if err != nil {
-		return fmt.Errorf("erro decode diff: %v", err)
+		return fmt.Errorf("erro decode diff: %w", err)
 	}
 
 	files, err := parseUnifiedDiff(string(decoded))
 	if err != nil {
-		return fmt.Errorf("diff inválido: %v", err)
+		return fmt.Errorf("diff inválido: %w", err)
 	}
 
 	if len(files) == 0 {
@@ -169,7 +169,7 @@ func normalizeDiffPath(p string) string {
 func (e *Engine) applyHunksToFile(path string, hunks []diffHunk) error {
 	content, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
-		return fmt.Errorf("erro leitura: %v", err)
+		return fmt.Errorf("erro leitura: %w", err)
 	}
 	text := strings.ReplaceAll(string(content), "\r\n", "\n")
 	lines := strings.Split(text, "\n")
@@ -213,7 +213,7 @@ func (e *Engine) applyHunksToFile(path string, hunks []diffHunk) error {
 
 	_ = createBackup(path)
 	if err := os.WriteFile(path, []byte(newText), 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
-		return fmt.Errorf("erro escrita: %v", err)
+		return fmt.Errorf("erro escrita: %w", err)
 	}
 	e.printf("✅ Diff aplicado em '%s'.\n", path)
 	return nil

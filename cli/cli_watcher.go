@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,7 +17,7 @@ func (cli *ChatCLI) SetWatching(active bool, statusFunc func() string) {
 }
 
 // StartWatcher creates and starts a K8s watcher in background from interactive mode.
-func (cli *ChatCLI) StartWatcher(cfg k8s.WatchConfig) error {
+func (cli *ChatCLI) StartWatcher(ctx context.Context, cfg k8s.WatchConfig) error {
 	if cli.isWatching {
 		return fmt.Errorf("watcher already running, use /watch stop first")
 	}
@@ -29,7 +30,11 @@ func (cli *ChatCLI) StartWatcher(cfg k8s.WatchConfig) error {
 	store := watcher.GetStore()
 	summarizer := k8s.NewSummarizer(store)
 
-	watchCtx, watchCancel := context.WithCancel(context.Background())
+	// The watcher runs in a detached background goroutine that must outlive
+	// the /watch start command; its lifetime is governed by cli.watcherCancel
+	// (invoked by StopWatcher), not by the per-command ctx. WithoutCancel
+	// keeps inherited values while decoupling from the command's cancellation.
+	watchCtx, watchCancel := context.WithCancel(context.WithoutCancel(ctx))
 	cli.watcherCancel = watchCancel
 
 	watcherReady := make(chan struct{}, 1)
@@ -52,7 +57,7 @@ func (cli *ChatCLI) StartWatcher(cfg k8s.WatchConfig) error {
 			}
 		}()
 
-		if err := watcher.Start(watchCtx); err != nil && err != context.Canceled {
+		if err := watcher.Start(watchCtx); err != nil && !errors.Is(err, context.Canceled) {
 			cli.logger.Error("K8s watcher stopped with error", zap.Error(err))
 		}
 	}()

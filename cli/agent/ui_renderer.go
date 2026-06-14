@@ -402,9 +402,9 @@ func (r *UIRenderer) PrintLastResult(outputs []*CommandOutput, lastIdx int) {
 
 	out := outputs[lastIdx].Output
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	max := 30
-	if len(lines) > max {
-		preview := strings.Join(lines[:max], "\n") + "\n...\n"
+	maxLines := 30
+	if len(lines) > maxLines {
+		preview := strings.Join(lines[:maxLines], "\n") + "\n...\n"
 		fmt.Print(preview)
 	} else {
 		fmt.Println(out)

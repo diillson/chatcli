@@ -21,7 +21,7 @@ func testProvider(key string) auth.TokenProvider {
 
 func newTestClient(url string) *ZAIClient {
 	logger, _ := zap.NewDevelopment()
-	c := NewZAIClient(testProvider("test-zai-key"), "glm-4.7", logger, 1, 0)
+	c := NewZAIClient(context.Background(), testProvider("test-zai-key"), "glm-4.7", logger, 1, 0)
 	c.apiURL = url
 	return c
 }
@@ -64,7 +64,7 @@ func TestZAIClient_SendPrompt_RetryOnTemporaryError(t *testing.T) {
 	defer server.Close()
 
 	logger, _ := zap.NewDevelopment()
-	c := NewZAIClient(testProvider("test-zai-key"), "glm-4.7", logger, 2, 10*time.Millisecond)
+	c := NewZAIClient(context.Background(), testProvider("test-zai-key"), "glm-4.7", logger, 2, 10*time.Millisecond)
 	c.apiURL = server.URL
 
 	resp, err := c.SendPrompt(context.Background(), "Test", []models.Message{{Role: "user", Content: "Test"}}, 0)
@@ -321,7 +321,7 @@ func TestZAIClient_ListModels_Success(t *testing.T) {
 
 func TestZAIClient_GetModelName(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	c := NewZAIClient(testProvider("key"), "glm-4.7", logger, 1, 0)
+	c := NewZAIClient(context.Background(), testProvider("key"), "glm-4.7", logger, 1, 0)
 	name := c.GetModelName()
 	// Should return display name from catalog or the model id itself
 	assert.NotEmpty(t, name)

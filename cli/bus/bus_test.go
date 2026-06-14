@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -114,7 +115,7 @@ func TestClose(t *testing.T) {
 	mb.Close()
 
 	err := mb.PublishInbound(context.Background(), InboundMessage{Content: "x"})
-	if err != ErrBusClosed {
+	if !errors.Is(err, ErrBusClosed) {
 		t.Errorf("expected ErrBusClosed, got %v", err)
 	}
 }
@@ -150,7 +151,7 @@ func TestRequestReplyTimeout(t *testing.T) {
 
 	// No handler — should timeout
 	_, err := mb.Request(context.Background(), InboundMessage{Content: "ping"}, 50*time.Millisecond)
-	if err != ErrTimeout {
+	if !errors.Is(err, ErrTimeout) {
 		t.Errorf("expected ErrTimeout, got %v", err)
 	}
 }

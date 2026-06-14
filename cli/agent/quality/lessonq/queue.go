@@ -50,12 +50,12 @@ type Queue struct {
 }
 
 // NewQueue builds a queue with the given capacity and overflow policy.
-// cap ≤ 0 disables the bound (unlimited); used mainly in tests.
-func NewQueue(cap int, policy OverflowPolicy, blockTimeout time.Duration, metrics *Metrics) *Queue {
+// capacity ≤ 0 disables the bound (unlimited); used mainly in tests.
+func NewQueue(capacity int, policy OverflowPolicy, blockTimeout time.Duration, metrics *Metrics) *Queue {
 	q := &Queue{
 		heap:         &scheduledHeap{},
 		byID:         make(map[JobID]*heapEntry),
-		cap:          cap,
+		cap:          capacity,
 		policy:       policy,
 		blockTimeout: blockTimeout,
 		m:            metrics,

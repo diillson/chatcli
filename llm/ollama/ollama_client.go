@@ -83,7 +83,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	}
 
 	// Monta mensagens a partir do histórico, sem duplicar o prompt (mesma lógica dos outros clientes)
-	var msgs []map[string]string
+	msgs := make([]map[string]string, 0, len(history))
 	for _, m := range history {
 		role := strings.ToLower(strings.TrimSpace(m.Role))
 		switch role {
@@ -244,7 +244,7 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.ollama.decode_response"), err)
 	}
 
-	var modelList []client.ModelInfo
+	modelList := make([]client.ModelInfo, 0, len(result.Models))
 	for _, m := range result.Models {
 		modelList = append(modelList, client.ModelInfo{
 			ID:          m.Name,

@@ -140,7 +140,7 @@ func (m *Manager) UnloadAgent() {
 // Pega todos os agentes em m.activeAgents e chama o Builder
 func (m *Manager) rebuildPromptInternal() (*ComposedPrompt, error) {
 	// Convert map to slice for the builder
-	var agents []*Agent
+	agents := make([]*Agent, 0, len(m.activeAgents))
 	for _, a := range m.activeAgents {
 		agents = append(agents, a)
 	}
@@ -158,7 +158,7 @@ func (m *Manager) GetActiveAgents() []*Agent {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var list []*Agent
+	list := make([]*Agent, 0, len(m.activeAgents))
 	for _, a := range m.activeAgents {
 		list = append(list, a)
 	}

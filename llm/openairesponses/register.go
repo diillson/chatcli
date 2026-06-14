@@ -1,4 +1,4 @@
-package openai_responses
+package openairesponses
 
 import (
 	"github.com/diillson/chatcli/auth"

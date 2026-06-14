@@ -10,12 +10,12 @@ func TestCommandRoutingCoverage(t *testing.T) {
 	ch := NewCommandHandler(&ChatCLI{})
 
 	// Commands resolved by the dispatch table (lookup). The mode-switch
-	// commands (/agent, /run, /coder, /plan) are handled separately in
-	// HandleCommand's switch — they panic to unwind — so they are not in the
-	// table and are asserted below.
+	// commands (/agent, /run, /coder, /plan) and /reload are handled
+	// separately in HandleCommand's switch — so they are not in the table and
+	// are asserted below.
 	known := []string{
-		"/exit", "exit", "/quit", "quit", "/reload", "/help",
-		"/version", "/v", "/nextchunk", "/retry", "/retryall", "/skipchunk",
+		"/exit", "exit", "/quit", "quit", "/help",
+		"/nextchunk", "/retry", "/retryall", "/skipchunk",
 		"/newsession", "/disconnect", "/rewind", "/metrics", "/cost",
 		"/reset", "/redraw", "/clear", "/switch openai",
 		"/config", "/config providers", "/status", "/settings",
@@ -32,8 +32,9 @@ func TestCommandRoutingCoverage(t *testing.T) {
 		}
 	}
 
-	// Mode-switch commands are intentionally NOT in the table.
-	for _, in := range []string{"/agent", "/run task", "/coder fix", "/plan x"} {
+	// Mode-switch commands, /reload and /version|/v are intentionally NOT in
+	// the table (handled by HandleCommand's switch so the per-command ctx flows).
+	for _, in := range []string{"/agent", "/run task", "/coder fix", "/plan x", "/reload", "/version", "/v"} {
 		if _, ok := ch.lookup(in); ok {
 			t.Errorf("%q should be handled by HandleCommand's switch, not the table", in)
 		}

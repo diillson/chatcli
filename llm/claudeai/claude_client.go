@@ -112,7 +112,7 @@ func NewClaudeClient(provider auth.TokenProvider, model string, logger *zap.Logg
 	var httpClient *http.Client
 	if provider.Mode() == auth.AuthModeOAuth {
 		// OAuth requests may be rejected by Cloudflare when using Go's standard TLS fingerprint.
-		// Use Chrome-like TLS fingerprint via uTLS, matching the approach in openai_responses.
+		// Use Chrome-like TLS fingerprint via uTLS, matching the approach in openairesponses.
 		httpClient = utils.NewHTTPClientWithTransport(logger, 900*time.Second, utils.NewChromeTLSTransport())
 	} else {
 		httpClient = utils.NewHTTPClient(logger, 900*time.Second)
@@ -732,7 +732,7 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "Anthropic"), err)
 	}
 
-	var modelList []client.ModelInfo
+	modelList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
 		displayName := m.DisplayName
 		if displayName == "" {

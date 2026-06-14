@@ -89,10 +89,10 @@ func WithMaxRetries(n int) Option {
 }
 
 // WithCooldown configures the cooldown parameters.
-func WithCooldown(base, max time.Duration, factor float64) Option {
+func WithCooldown(base, maxN time.Duration, factor float64) Option {
 	return func(c *Chain) {
 		c.cooldownBase = base
-		c.cooldownMax = max
+		c.cooldownMax = maxN
 		c.cooldownFactor = factor
 	}
 }

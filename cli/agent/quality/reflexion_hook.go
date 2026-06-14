@@ -118,7 +118,7 @@ func (h *ReflexionHook) PostRun(ctx context.Context, hc *HookContext, result *wo
 		// return. The enqueue call is sub-millisecond in practice
 		// (single fsync + rename), well under the user-noticeable
 		// latency budget for a turn.
-		if err := h.enqueuer.Enqueue(context.Background(), req); err != nil {
+		if err := h.enqueuer.Enqueue(ctx, req); err != nil {
 			h.logger.Warn("reflexion: enqueue failed; lesson may be lost",
 				zap.String("trigger", trigger),
 				zap.Error(err))
@@ -129,9 +129,10 @@ func (h *ReflexionHook) PostRun(ctx context.Context, hc *HookContext, result *wo
 	// Legacy path — kept verbatim from the pre-queue behavior so
 	// turning the queue off is a zero-regression operation.
 	//
-	// Background — never block the turn. Use a fresh context so the
+	// Background — never block the turn. Derive a detached context from
+	// the turn's ctx (inherits values, strips cancellation) so the
 	// per-worker timeout doesn't kill the lesson call mid-flight.
-	go h.runReflexion(context.Background(), req) //#nosec G118 -- detached on purpose; lesson gen outlives the turn
+	go h.runReflexion(context.WithoutCancel(ctx), req) //#nosec G118 -- detached on purpose; lesson gen outlives the turn
 	return nil
 }
 

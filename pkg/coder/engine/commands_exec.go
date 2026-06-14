@@ -81,7 +81,7 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start error: %v", err)
+		return fmt.Errorf("start error: %w", err)
 	}
 
 	var wg sync.WaitGroup
@@ -105,7 +105,7 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 
 	if err := cmd.Wait(); err != nil {
 		e.printf("❌ Falhou: %v\n", err)
-		return fmt.Errorf("command failed: %v", err)
+		return fmt.Errorf("command failed: %w", err)
 	}
 	e.println("✅ Sucesso.")
 	return nil
@@ -217,7 +217,11 @@ func IsUnsafeCommand(cmd string, allowSudo bool) (bool, string) {
 }
 
 func runCommand(dir, cmd string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	return runCommandCtx(context.Background(), dir, cmd, args...)
+}
+
+func runCommandCtx(ctx context.Context, dir, cmd string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	command := exec.CommandContext(ctx, cmd, args...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream

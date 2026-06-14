@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -205,11 +206,12 @@ func (b *schedulerBridge) ExecuteSlashCommand(ctx context.Context, line string, 
 				// errAgentModeRequest / errCoderModeRequest branch
 				// here means a different slash command unexpectedly
 				// requested mode-switch — surface it explicitly.
-				if rec == errExitRequest {
+				recErr, _ := rec.(error)
+				if errors.Is(recErr, errExitRequest) {
 					exit = true
 					return
 				}
-				if rec == errAgentModeRequest || rec == errCoderModeRequest {
+				if errors.Is(recErr, errAgentModeRequest) || errors.Is(recErr, errCoderModeRequest) {
 					panicErr = fmt.Errorf(
 						"scheduler: slash_cmd %q unexpectedly requested an agent/coder mode switch — "+
 							"only /run, /agent, /coder are routed through the agent loop from the scheduler",
@@ -224,7 +226,7 @@ func (b *schedulerBridge) ExecuteSlashCommand(ctx context.Context, line string, 
 			panicErr = fmt.Errorf("scheduler: commandHandler not initialized")
 			return
 		}
-		if b.cli.commandHandler.HandleCommand(line) {
+		if b.cli.commandHandler.HandleCommand(ctx, line) {
 			exit = true
 		}
 	}()
@@ -521,7 +523,7 @@ func (b *schedulerBridge) FireHook(event hooks.HookEvent) *hooks.HookResult {
 	if b.cli.hookManager == nil {
 		return nil
 	}
-	return b.cli.hookManager.Fire(event)
+	return b.cli.hookManager.Fire(context.Background(), event)
 }
 
 // RunShell executes a shell command with scheduler-scoped safety. When
@@ -590,7 +592,8 @@ func (b *schedulerBridge) RunShell(ctx context.Context, cmd string, envOverrides
 	err := execCmd.Run()
 	code := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			code = exitErr.ExitCode()
 			// Completed process — err is not a transport error.
 			return stdout.String(), stderr.String(), code, nil

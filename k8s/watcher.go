@@ -298,9 +298,8 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 			}
 		}
 	case "CronJob":
-		if r.Suspended {
-			// Don't alert for intentionally suspended CronJobs
-		} else if r.LastScheduleTime != nil && time.Since(*r.LastScheduleTime) > 2*time.Hour {
+		// Don't alert for intentionally suspended CronJobs.
+		if !r.Suspended && r.LastScheduleTime != nil && time.Since(*r.LastScheduleTime) > 2*time.Hour {
 			w.store.AddAlert(Alert{
 				Timestamp: now,
 				Severity:  SeverityWarning,

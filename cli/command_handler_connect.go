@@ -17,9 +17,51 @@ import (
 	"go.uber.org/zap"
 )
 
+// connectArgs holds the parsed flags of the /connect command.
+type connectArgs struct {
+	token, provider, model, llmKey, caCert         string
+	clientID, clientKey, realm, agentID, ollamaURL string
+	useLocalAuth, useTLS                           bool
+}
+
+// parseConnectArgs parses the flags of /connect <address> [flags] starting at
+// args[2]. Unknown flags are ignored (same lenient pattern as /switch).
+func parseConnectArgs(args []string) connectArgs {
+	var p connectArgs
+	// valueFlags maps each value-taking flag to the field it fills.
+	valueFlags := map[string]*string{
+		"--token":      &p.token,
+		"--provider":   &p.provider,
+		"--model":      &p.model,
+		"--llm-key":    &p.llmKey,
+		"--ca-cert":    &p.caCert,
+		"--client-id":  &p.clientID,
+		"--client-key": &p.clientKey,
+		"--realm":      &p.realm,
+		"--agent-id":   &p.agentID,
+		"--ollama-url": &p.ollamaURL,
+	}
+	for i := 2; i < len(args); i++ {
+		if dst, ok := valueFlags[args[i]]; ok {
+			if i+1 < len(args) {
+				*dst = args[i+1]
+				i++
+			}
+			continue
+		}
+		switch args[i] {
+		case "--use-local-auth":
+			p.useLocalAuth = true
+		case "--tls":
+			p.useTLS = true
+		}
+	}
+	return p
+}
+
 // handleConnectCommand handles the /connect <address> [flags] command.
 // It connects to a remote ChatCLI gRPC server and swaps the LLM client.
-func (ch *CommandHandler) handleConnectCommand(userInput string) {
+func (ch *CommandHandler) handleConnectCommand(ctx context.Context, userInput string) {
 	args := strings.Fields(userInput)
 
 	if len(args) < 2 {
@@ -37,72 +79,14 @@ func (ch *CommandHandler) handleConnectCommand(userInput string) {
 
 	// Parse arguments manually (same pattern as /switch)
 	address := args[1]
-	var token, provider, model, llmKey, caCert string
-	var clientID, clientKey, realm, agentID, ollamaURL string
-	var useLocalAuth, useTLS bool
-
-	for i := 2; i < len(args); i++ {
-		switch args[i] {
-		case "--token":
-			if i+1 < len(args) {
-				token = args[i+1]
-				i++
-			}
-		case "--provider":
-			if i+1 < len(args) {
-				provider = args[i+1]
-				i++
-			}
-		case "--model":
-			if i+1 < len(args) {
-				model = args[i+1]
-				i++
-			}
-		case "--llm-key":
-			if i+1 < len(args) {
-				llmKey = args[i+1]
-				i++
-			}
-		case "--ca-cert":
-			if i+1 < len(args) {
-				caCert = args[i+1]
-				i++
-			}
-		case "--client-id":
-			if i+1 < len(args) {
-				clientID = args[i+1]
-				i++
-			}
-		case "--client-key":
-			if i+1 < len(args) {
-				clientKey = args[i+1]
-				i++
-			}
-		case "--realm":
-			if i+1 < len(args) {
-				realm = args[i+1]
-				i++
-			}
-		case "--agent-id":
-			if i+1 < len(args) {
-				agentID = args[i+1]
-				i++
-			}
-		case "--ollama-url":
-			if i+1 < len(args) {
-				ollamaURL = args[i+1]
-				i++
-			}
-		case "--use-local-auth":
-			useLocalAuth = true
-		case "--tls":
-			useTLS = true
-		}
-	}
+	parsed := parseConnectArgs(args)
+	token, provider, model, llmKey, caCert := parsed.token, parsed.provider, parsed.model, parsed.llmKey, parsed.caCert
+	clientID, clientKey, realm, agentID, ollamaURL := parsed.clientID, parsed.clientKey, parsed.realm, parsed.agentID, parsed.ollamaURL
+	useLocalAuth, useTLS := parsed.useLocalAuth, parsed.useTLS
 
 	// Resolve local auth if requested
 	if useLocalAuth && llmKey == "" {
-		resolvedKey, resolvedProvider, err := ch.resolveLocalAuth(provider)
+		resolvedKey, resolvedProvider, err := ch.resolveLocalAuth(ctx, provider)
 		if err != nil {
 			fmt.Println(colorize(i18n.T("connect.error.resolve_local_auth", err), ColorRed))
 			return
@@ -145,17 +129,17 @@ func (ch *CommandHandler) handleConnectCommand(userInput string) {
 		ProviderConfig: providerConfig,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	remoteClient, err := remote.NewClient(cfg, ch.cli.logger)
+	remoteClient, err := remote.NewClient(dialCtx, cfg, ch.cli.logger)
 	if err != nil {
 		fmt.Println(colorize(i18n.T("connect.error.connection_failed", err), ColorRed))
 		return
 	}
 
 	// Health check
-	healthy, ver, err := remoteClient.Health(ctx)
+	healthy, ver, err := remoteClient.Health(dialCtx)
 	if err != nil {
 		_ = remoteClient.Close()
 		fmt.Println(colorize(i18n.T("connect.error.health_check_failed", err), ColorRed))
@@ -179,7 +163,7 @@ func (ch *CommandHandler) handleConnectCommand(userInput string) {
 	ch.cli.remoteConn = remoteClient
 	ch.cli.isRemote = true
 	ch.cli.remoteAddress = address
-	ch.cli.refreshModelCache()
+	ch.cli.refreshModelCache(ctx)
 
 	connInfo := fmt.Sprintf("version: %s, provider: %s, model: %s", ver, ch.cli.Provider, ch.cli.Model)
 	if useLocalAuth {
@@ -190,7 +174,7 @@ func (ch *CommandHandler) handleConnectCommand(userInput string) {
 	fmt.Println(colorize(i18n.T("connect.status.connected", connInfo), ColorGreen))
 
 	// Show watcher status and remote resources if server has them
-	infoCtx, infoCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	infoCtx, infoCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer infoCancel()
 	if info, err := remoteClient.GetServerInfo(infoCtx); err == nil {
 		if info.WatcherActive {
@@ -202,14 +186,14 @@ func (ch *CommandHandler) handleConnectCommand(userInput string) {
 	}
 
 	// Discover and register remote plugins
-	ch.discoverRemoteResources(remoteClient)
+	ch.discoverRemoteResources(ctx, remoteClient)
 
 	fmt.Println(colorize(i18n.T("connect.hint.disconnect"), ColorCyan))
 }
 
 // discoverRemoteResources fetches remote plugins/agents/skills and registers them.
-func (ch *CommandHandler) discoverRemoteResources(remoteClient *remote.Client) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (ch *CommandHandler) discoverRemoteResources(ctx context.Context, remoteClient *remote.Client) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	// Register remote plugins
@@ -232,7 +216,7 @@ func (ch *CommandHandler) discoverRemoteResources(remoteClient *remote.Client) {
 
 // handleDisconnectCommand handles the /disconnect command.
 // It closes the remote connection and restores the local LLM client.
-func (ch *CommandHandler) handleDisconnectCommand() {
+func (ch *CommandHandler) handleDisconnectCommand(ctx context.Context) {
 	if !ch.cli.isRemote {
 		fmt.Println(colorize(i18n.T("connect.error.not_connected"), ColorYellow))
 		return
@@ -260,7 +244,7 @@ func (ch *CommandHandler) handleDisconnectCommand() {
 	ch.cli.localClient = nil
 	ch.cli.localProvider = ""
 	ch.cli.localModel = ""
-	ch.cli.refreshModelCache()
+	ch.cli.refreshModelCache(ctx)
 
 	fmt.Println(colorize(i18n.T("connect.status.disconnected"), ColorGreen))
 	if ch.cli.Client != nil {
@@ -271,8 +255,8 @@ func (ch *CommandHandler) handleDisconnectCommand() {
 }
 
 // resolveLocalAuth reads the local auth store and returns the API key/OAuth token.
-func (ch *CommandHandler) resolveLocalAuth(provider string) (apiKey string, resolvedProvider string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (ch *CommandHandler) resolveLocalAuth(ctx context.Context, provider string) (apiKey string, resolvedProvider string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	if provider != "" {
@@ -329,7 +313,7 @@ func llmProviderToAuthProvider(provider string) (auth.ProviderID, bool) {
 }
 
 // autoSwitchProvider switches the active provider and model after a successful OAuth login.
-func (ch *CommandHandler) autoSwitchProvider(provider, model string) {
+func (ch *CommandHandler) autoSwitchProvider(ctx context.Context, provider, model string) {
 	newClient, err := ch.cli.manager.GetClient(provider, model)
 	if err != nil {
 		ch.cli.logger.Warn("Auto-switch after OAuth login failed, use /switch manually",
@@ -341,5 +325,5 @@ func (ch *CommandHandler) autoSwitchProvider(provider, model string) {
 	ch.cli.Provider = provider
 	ch.cli.Model = model
 	fmt.Println(i18n.T("status.provider_switched", ch.cli.Client.GetModelName(), ch.cli.Provider))
-	ch.cli.refreshModelCache()
+	ch.cli.refreshModelCache(ctx)
 }

@@ -280,7 +280,7 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenAI"), err)
 	}
 
-	var models []client.ModelInfo
+	models := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
 		// Filter to chat-capable models (gpt, o1, o3, o4, chatgpt)
 		id := strings.ToLower(m.ID)

@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
@@ -103,7 +104,7 @@ func TestManager_Fire_CommandHook(t *testing.T) {
 		},
 	}
 
-	result := m.Fire(HookEvent{
+	result := m.Fire(context.Background(), HookEvent{
 		Type:      EventPostToolUse,
 		Timestamp: time.Now(),
 		ToolName:  "test-tool",
@@ -127,7 +128,7 @@ func TestManager_Fire_PreToolUse_Block(t *testing.T) {
 		},
 	}
 
-	result := m.Fire(HookEvent{
+	result := m.Fire(context.Background(), HookEvent{
 		Type:      EventPreToolUse,
 		Timestamp: time.Now(),
 		ToolName:  "dangerous-tool",
@@ -153,7 +154,7 @@ func TestManager_Fire_PreToolUse_Allow(t *testing.T) {
 		},
 	}
 
-	result := m.Fire(HookEvent{
+	result := m.Fire(context.Background(), HookEvent{
 		Type:      EventPreToolUse,
 		Timestamp: time.Now(),
 		ToolName:  "safe-tool",
@@ -178,7 +179,7 @@ func TestManager_Fire_ToolPattern(t *testing.T) {
 	}
 
 	// MCP tool should be blocked
-	result := m.Fire(HookEvent{
+	result := m.Fire(context.Background(), HookEvent{
 		Type:     EventPreToolUse,
 		ToolName: "mcp_read_file",
 	})
@@ -187,7 +188,7 @@ func TestManager_Fire_ToolPattern(t *testing.T) {
 	}
 
 	// Non-MCP tool should pass
-	result = m.Fire(HookEvent{
+	result = m.Fire(context.Background(), HookEvent{
 		Type:     EventPreToolUse,
 		ToolName: "@coder",
 	})
@@ -209,7 +210,7 @@ func TestManager_Fire_DisabledHook(t *testing.T) {
 		},
 	}
 
-	result := m.Fire(HookEvent{
+	result := m.Fire(context.Background(), HookEvent{
 		Type:     EventPreToolUse,
 		ToolName: "any-tool",
 	})
@@ -229,7 +230,7 @@ func TestManager_Fire_EventMismatch(t *testing.T) {
 		},
 	}
 
-	result := m.Fire(HookEvent{
+	result := m.Fire(context.Background(), HookEvent{
 		Type:     EventPreToolUse,
 		ToolName: "any-tool",
 	})

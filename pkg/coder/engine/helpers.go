@@ -20,7 +20,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 		fs.VisitAll(func(f *flag.Flag) {
 			flags = append(flags, fmt.Sprintf("--%s (%s, default: %q)", f.Name, f.Usage, f.DefValue))
 		})
-		return fmt.Errorf("flag parse error in '%s': %v\nAvailable flags:\n  %s",
+		return fmt.Errorf("flag parse error in '%s': %w\nAvailable flags:\n  %s",
 			fs.Name(), err, strings.Join(flags, "\n  "))
 	}
 	return nil
@@ -54,7 +54,7 @@ func smartDecode(content, enc string) ([]byte, error) {
 }
 
 func collectFiles(primary string, extras []string) []string {
-	var files []string
+	files := make([]string, 0, len(extras)+1)
 	if primary != "" {
 		files = append(files, strings.Trim(primary, "\"'"))
 	}
@@ -129,8 +129,9 @@ func parseCSVSet(input string) map[string]bool {
 }
 
 func splitCSV(input string) []string {
-	var out []string
-	for _, item := range strings.Split(input, ",") {
+	parts := strings.Split(input, ",")
+	out := make([]string, 0, len(parts))
+	for _, item := range parts {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue

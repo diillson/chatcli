@@ -55,7 +55,7 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 
 	// A full ChatCLI gives the backend access to the agent/coder loops and the
 	// built-in tools. Failure is non-fatal: chat still works via the manager.
-	chatCLI, err := cli.NewChatCLI(mgr, logger)
+	chatCLI, err := cli.NewChatCLI(context.Background(), mgr, logger)
 	if err != nil {
 		logger.Warn("rpcserve: ChatCLI init failed; agent/coder/tools disabled", zap.Error(err))
 	}

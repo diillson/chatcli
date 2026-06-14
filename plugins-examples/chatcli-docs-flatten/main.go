@@ -528,12 +528,12 @@ func parseFlags() (config, bool, error) {
 
 	stripFrontMatter, err := strconv.ParseBool(stripFrontMatterStr)
 	if err != nil {
-		return config{}, false, fmt.Errorf("valor inválido para --strip-front-matter: %v (use true ou false)", err)
+		return config{}, false, fmt.Errorf("valor inválido para --strip-front-matter: %w (use true ou false)", err)
 	}
 
 	keepClone, err := strconv.ParseBool(keepCloneStr)
 	if err != nil {
-		return config{}, false, fmt.Errorf("valor inválido para --keep-clone: %v (use true ou false)", err)
+		return config{}, false, fmt.Errorf("valor inválido para --keep-clone: %w (use true ou false)", err)
 	}
 
 	splitCSV := func(s string) []string {
@@ -684,7 +684,7 @@ func gitClone(repoURL, branch, dest string, log *logger) error {
 	cmd.Stderr = &errBuf
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("falha ao clonar repositório: %v\nDetalhes: %s", err, errBuf.String())
+		return fmt.Errorf("falha ao clonar repositório: %w\nDetalhes: %s", err, errBuf.String())
 	}
 	return nil
 }
@@ -693,7 +693,7 @@ func gitGetCommit(dir string) (string, error) {
 	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD") //#nosec G204 -- example plugin / dev tool — subprocess invocation is the entire purpose
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("falha ao obter commit HEAD: %v", err)
+		return "", fmt.Errorf("falha ao obter commit HEAD: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -708,14 +708,14 @@ func prepareRootPath(cfg *config, log *logger) (string, string, func(), error) {
 		}
 		absRoot, err := filepath.Abs(cfg.RootPath)
 		if err != nil {
-			return "", "", cleanup, fmt.Errorf("falha ao resolver caminho absoluto de %s: %v", cfg.RootPath, err)
+			return "", "", cleanup, fmt.Errorf("falha ao resolver caminho absoluto de %s: %w", cfg.RootPath, err)
 		}
 		return absRoot, repoCommit, cleanup, nil
 	}
 
 	tmpDir, err := os.MkdirTemp("", "docs-flatten-*")
 	if err != nil {
-		return "", "", cleanup, fmt.Errorf("falha ao criar diretório temporário: %v", err)
+		return "", "", cleanup, fmt.Errorf("falha ao criar diretório temporário: %w", err)
 	}
 
 	if !cfg.KeepClone {
@@ -745,7 +745,7 @@ func prepareRootPath(cfg *config, log *logger) (string, string, func(), error) {
 	absRoot, err := filepath.Abs(finalRoot)
 	if err != nil {
 		cleanup()
-		return "", "", nil, fmt.Errorf("falha ao resolver caminho absoluto de %s: %v", finalRoot, err)
+		return "", "", nil, fmt.Errorf("falha ao resolver caminho absoluto de %s: %w", finalRoot, err)
 	}
 
 	return absRoot, repoCommit, cleanup, nil
@@ -794,7 +794,7 @@ func run(log *logger) error {
 	start := time.Now()
 	chunks, err := walkAndFlatten(cfg, log, cfg.RepoURL, repoCommit)
 	if err != nil {
-		return fmt.Errorf("falha ao processar documentação: %v", err)
+		return fmt.Errorf("falha ao processar documentação: %w", err)
 	}
 
 	duration := time.Since(start).Seconds()
@@ -810,11 +810,11 @@ func run(log *logger) error {
 	var out io.Writer = os.Stdout
 	if cfg.OutputPath != "" {
 		if err := os.MkdirAll(filepath.Dir(cfg.OutputPath), 0o755); err != nil { //#nosec G301 -- example plugin / dev tool — directory perms appropriate for the example
-			return fmt.Errorf("falha ao criar diretório de saída: %v", err)
+			return fmt.Errorf("falha ao criar diretório de saída: %w", err)
 		}
 		f, err := os.Create(cfg.OutputPath)
 		if err != nil {
-			return fmt.Errorf("falha ao criar arquivo de saída: %v", err)
+			return fmt.Errorf("falha ao criar arquivo de saída: %w", err)
 		}
 		defer func(f *os.File) {
 			if err := f.Close(); err != nil {
@@ -827,19 +827,19 @@ func run(log *logger) error {
 	switch cfg.Format {
 	case FormatText:
 		if err := outputText(chunks, out); err != nil {
-			return fmt.Errorf("falha na saída text: %v", err)
+			return fmt.Errorf("falha na saída text: %w", err)
 		}
 	case FormatJSONL:
 		if err := outputJSONL(chunks, out); err != nil {
-			return fmt.Errorf("falha na saída jsonl: %v", err)
+			return fmt.Errorf("falha na saída jsonl: %w", err)
 		}
 	case FormatJSON:
 		if err := outputJSON(chunks, out); err != nil {
-			return fmt.Errorf("falha na saída json: %v", err)
+			return fmt.Errorf("falha na saída json: %w", err)
 		}
 	case FormatYAML:
 		if err := outputYAML(chunks, out); err != nil {
-			return fmt.Errorf("falha na saída yaml: %v", err)
+			return fmt.Errorf("falha na saída yaml: %w", err)
 		}
 	default:
 		return fmt.Errorf("formato não suportado: %s", cfg.Format)

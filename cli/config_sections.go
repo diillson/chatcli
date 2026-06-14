@@ -52,14 +52,14 @@ import (
 
 // routeConfigCommand dispatches /config [section]. Args comes without the
 // leading "/config" token.
-func (cli *ChatCLI) routeConfigCommand(args []string) {
+func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		cli.showConfigPanorama()
 		return
 	}
 	switch strings.ToLower(args[0]) {
 	case "all", "full":
-		cli.showConfigAll()
+		cli.showConfigAll(ctx)
 	case "general":
 		cli.showConfigGeneral()
 	case "providers", "provider":
@@ -92,7 +92,7 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 	case "session":
 		cli.showConfigSession()
 	case "integrations", "integration":
-		cli.showConfigIntegrations()
+		cli.showConfigIntegrations(ctx)
 	case "auth":
 		cli.showConfigAuth()
 	case "security":
@@ -116,25 +116,25 @@ func (cli *ChatCLI) routeConfigCommand(args []string) {
 		// Hierarchical: bare form shows the @image panorama; provider/api/
 		// model/url/models/reset mutate the backend at runtime.
 		if len(args) == 1 {
-			cli.showConfigImage()
+			cli.showConfigImage(ctx)
 		} else {
-			cli.routeConfigImage(args[1:])
+			cli.routeConfigImage(ctx, args[1:])
 		}
 	case "quality":
 		cli.showConfigQuality()
 	case "memory", "mem":
 		cli.showConfigMemory()
 	case "scheduler", "schedule":
-		cli.showConfigScheduler()
+		cli.showConfigScheduler(ctx)
 	case "server":
 		cli.showConfigServer()
 	case "hub":
 		// Hierarchical like security: bare form shows the panorama; set/reset
 		// mutate the live, db-backed hub settings (read by the gateway too).
 		if len(args) == 1 {
-			cli.showConfigHub()
+			cli.showConfigHub(ctx)
 		} else {
-			cli.routeConfigHub(args[1:])
+			cli.routeConfigHub(ctx, args[1:])
 		}
 	default:
 		fmt.Println(colorize("  "+i18n.T("cfg.route.unknown_section", args[0]), ColorYellow))
@@ -257,14 +257,14 @@ func envBool(name string) string {
 }
 
 // shorten trims long values (paths, tokens) for display.
-func shorten(s string, max int) string {
-	if len(s) <= max {
+func shorten(s string, maxLen int) string {
+	if len(s) <= maxLen {
 		return s
 	}
-	if max < 8 {
-		return s[:max]
+	if maxLen < 8 {
+		return s[:maxLen]
 	}
-	return s[:max-3] + "..."
+	return s[:maxLen-3] + "..."
 }
 
 // humanDuration formats a duration as "2h 34m" / "12m 3s" / "45s".
@@ -384,7 +384,7 @@ func (cli *ChatCLI) showConfigPanorama() {
 }
 
 // showConfigAll runs every section in sequence. Used by `/config all`.
-func (cli *ChatCLI) showConfigAll() {
+func (cli *ChatCLI) showConfigAll(ctx context.Context) {
 	cli.showConfigPanorama()
 	cli.showConfigGeneral()
 	cli.showConfigProviders()
@@ -392,12 +392,12 @@ func (cli *ChatCLI) showConfigAll() {
 	cli.showConfigUI()
 	cli.showConfigResilience()
 	cli.showConfigSession()
-	cli.showConfigIntegrations()
+	cli.showConfigIntegrations(ctx)
 	cli.showConfigAuth()
 	cli.showConfigSecurity()
 	cli.showConfigChat()
 	cli.showConfigQuality()
-	cli.showConfigScheduler()
+	cli.showConfigScheduler(ctx)
 	// server block is conditional (see its own guard)
 	cli.showConfigServer()
 }
@@ -670,8 +670,9 @@ type perAgentEntry struct{ key, val string }
 // collectPerAgentOverrides scans os.Environ() for the per-agent override
 // pattern and returns the entries sorted for stable display.
 func collectPerAgentOverrides() []perAgentEntry {
-	var out []perAgentEntry
-	for _, e := range os.Environ() {
+	environ := os.Environ()
+	out := make([]perAgentEntry, 0, len(environ))
+	for _, e := range environ {
 		eq := strings.IndexByte(e, '=')
 		if eq < 0 {
 			continue
@@ -863,7 +864,7 @@ func budgetLevelString(l BudgetLevel) string {
 // showConfigIntegrations covers MCP, hooks, plugins, skill registries,
 // websearch, worktrees, and remote connection — everything that links the
 // CLI to an external subsystem.
-func (cli *ChatCLI) showConfigIntegrations() {
+func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 	sectionHeader("🔗", "cfg.section.integrations.title", ColorPurple)
 	p := uiPrefix(ColorPurple)
 
@@ -983,7 +984,7 @@ func (cli *ChatCLI) showConfigIntegrations() {
 	fmt.Println(p)
 	subheader(p, "cfg.sub.integ.imagegen")
 	imgStatus := i18n.T("cfg.val.imagegen_off")
-	if g := imagegen.NewFromEnv(cli.logger); !imagegen.IsNull(g) {
+	if g := imagegen.NewFromEnvContext(ctx, cli.logger); !imagegen.IsNull(g) {
 		imgStatus = g.Name()
 	}
 	kv(p, i18n.T("cfg.kv.imagegen"), imgStatus)
@@ -1063,14 +1064,14 @@ func (cli *ChatCLI) showConfigAuth() {
 		"github-models",
 	}
 
-	any := false
+	anyLoggedIn := false
 	for _, pid := range providers {
 		profileIDs := auth.ListProfilesForProvider(pid, cli.logger)
 		if len(profileIDs) == 0 {
 			kv(p, string(pid), i18n.T("cfg.msg.not_logged_in"))
 			continue
 		}
-		any = true
+		anyLoggedIn = true
 		for _, id := range profileIDs {
 			cred := auth.GetProfile(id, cli.logger)
 			if cred == nil {
@@ -1096,7 +1097,7 @@ func (cli *ChatCLI) showConfigAuth() {
 			kv(p, fmt.Sprintf("%s [%s]", string(pid), id), status)
 		}
 	}
-	if !any {
+	if !anyLoggedIn {
 		fmt.Println(p + colorize("  "+i18n.T("cfg.msg.auth_hint"), ColorGray))
 	}
 
@@ -1262,14 +1263,14 @@ func hubEffective(settings map[string]string, m hubSettingMeta) (val, source str
 // `/config hub set <key> <value>` (persisted in the shared db, read by the
 // gateway too); the value's source — setting/env/default — is shown so it's
 // clear where it came from.
-func (cli *ChatCLI) showConfigHub() {
+func (cli *ChatCLI) showConfigHub(ctx context.Context) {
 	sectionHeader("🔗", "cfg.section.hub.title", ColorBlue)
 	p := uiPrefix(ColorBlue)
 
 	var settings map[string]string
 	mutable := false
 	if cli.hubSync != nil {
-		if s, ok := cli.hubSync.allSettings(context.Background()); ok {
+		if s, ok := cli.hubSync.allSettings(ctx); ok {
 			settings = s
 			mutable = true
 		}
@@ -1309,12 +1310,12 @@ func (cli *ChatCLI) showConfigHub() {
 
 // routeConfigHub handles `/config hub set|reset <key> [value]`, mutating the
 // live db-backed settings.
-func (cli *ChatCLI) routeConfigHub(args []string) {
+func (cli *ChatCLI) routeConfigHub(ctx context.Context, args []string) {
 	if cli.hubSync == nil {
 		fmt.Println(colorize("  "+i18n.T("cfg.hub.no_session"), ColorYellow))
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	switch strings.ToLower(args[0]) {
@@ -1339,7 +1340,7 @@ func (cli *ChatCLI) routeConfigHub(args []string) {
 			return
 		}
 		fmt.Println(colorize("  "+i18n.T("cfg.hub.set_ok", key, value), ColorGreen))
-		cli.showConfigHub()
+		cli.showConfigHub(ctx)
 
 	case "reset", "unset":
 		if len(args) < 2 {
@@ -1356,7 +1357,7 @@ func (cli *ChatCLI) routeConfigHub(args []string) {
 			return
 		}
 		fmt.Println(colorize("  "+i18n.T("cfg.hub.reset_ok", key), ColorGreen))
-		cli.showConfigHub()
+		cli.showConfigHub(ctx)
 
 	default:
 		fmt.Println(colorize("  "+i18n.T("cfg.hub.set_usage"), ColorGray))

@@ -157,6 +157,9 @@ func New(cfg Config, bridge CLIBridge, deps SchedulerDeps, logger *zap.Logger) (
 		eventBus:    deps.EventBus,
 		hookManager: deps.Hooks,
 		rng:         rand.New(rand.NewSource(time.Now().UnixNano())), // #nosec G404 -- jitter, not security
+		// Seed a non-nil lifetime context so emit() can publish events that
+		// occur before Start() installs the worker-loop context.
+		ctx: context.Background(),
 	}
 
 	// Breaker group is wired after `s` exists so onStateChange can
@@ -237,7 +240,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// Worker pool.
 	for i := 0; i < s.cfg.WorkerCount; i++ {
 		s.workers.Add(1)
-		go s.workerLoop(i)
+		go s.workerLoop(loopCtx, i)
 	}
 
 	// Snapshot goroutine.
@@ -320,34 +323,30 @@ func (s *Scheduler) IsClosed() bool { return s.closed.Load() }
 // Enqueue admits a new job. On success the returned Job is a clone of
 // the one held inside the scheduler — callers may inspect but not
 // mutate.
-func (s *Scheduler) Enqueue(ctx context.Context, job *Job) (*Job, error) {
-	if s.closed.Load() {
-		return nil, ErrSchedulerClosed
-	}
-	if s.draining.Load() {
-		return nil, ErrSchedulerDraining
-	}
-	if job == nil {
-		return nil, fmt.Errorf("%w: nil job", ErrInvalidJob)
-	}
-
+// admitJob runs the owner/action allowlist and rate-limit gates that must
+// pass before a job is admitted. It records the relevant EnqueueErrors metric
+// and returns a wrapped sentinel on rejection.
+func (s *Scheduler) admitJob(job *Job) error {
 	// Owner / action allowlist.
 	if !s.cfg.AllowAgents && (job.Owner.Kind == OwnerAgent || job.Owner.Kind == OwnerWorker) {
 		s.metrics.EnqueueErrors.WithLabelValues("agents_disabled").Inc()
-		return nil, fmt.Errorf("%w: agent/worker scheduling disabled", ErrNotAuthorized)
+		return fmt.Errorf("%w: agent/worker scheduling disabled", ErrNotAuthorized)
 	}
 	if s.cfg.ActionAllowlist != nil && !s.cfg.ActionAllowlist[job.Action.Type] {
 		s.metrics.EnqueueErrors.WithLabelValues("action_disallowed").Inc()
-		return nil, fmt.Errorf("%w: action=%s", ErrActionDisallowed, job.Action.Type)
+		return fmt.Errorf("%w: action=%s", ErrActionDisallowed, job.Action.Type)
 	}
-
 	// Rate limit (outside the job mutex).
 	if allowed, retry := s.rateLim.Allow(job.Owner); !allowed {
 		s.metrics.EnqueueErrors.WithLabelValues("rate_limited").Inc()
-		return nil, fmt.Errorf("%w: retry after %s", ErrRateLimited, retry)
+		return fmt.Errorf("%w: retry after %s", ErrRateLimited, retry)
 	}
+	return nil
+}
 
-	// Fill defaults.
+// fillJobDefaults populates identity, timestamps, version, budget and TTL
+// fields that the caller left zero.
+func (s *Scheduler) fillJobDefaults(job *Job) {
 	if job.ID.IsZero() {
 		nonce := job.CreatedAt.UTC().Format(time.RFC3339Nano)
 		if nonce == "" {
@@ -371,6 +370,24 @@ func (s *Scheduler) Enqueue(ctx context.Context, job *Job) (*Job, error) {
 	if job.HistoryLimit <= 0 {
 		job.HistoryLimit = s.cfg.HistoryLimit
 	}
+}
+
+func (s *Scheduler) Enqueue(ctx context.Context, job *Job) (*Job, error) {
+	if s.closed.Load() {
+		return nil, ErrSchedulerClosed
+	}
+	if s.draining.Load() {
+		return nil, ErrSchedulerDraining
+	}
+	if job == nil {
+		return nil, fmt.Errorf("%w: nil job", ErrInvalidJob)
+	}
+
+	if err := s.admitJob(job); err != nil {
+		return nil, err
+	}
+
+	s.fillJobDefaults(job)
 
 	// Validate.
 	if err := job.Validate(); err != nil {
@@ -699,17 +716,17 @@ func (s *Scheduler) schedulePump() {
 	}
 }
 
-func (s *Scheduler) workerLoop(id int) {
+func (s *Scheduler) workerLoop(ctx context.Context, id int) {
 	defer s.workers.Done()
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		case jobID, ok := <-s.workCh:
 			if !ok {
 				return
 			}
-			s.handleJob(jobID, id)
+			s.handleJob(ctx, jobID, id)
 		}
 	}
 }
@@ -740,7 +757,7 @@ func (s *Scheduler) emit(evt Event) {
 				"status": string(evt.Status),
 			},
 		}
-		_ = s.eventBus.PublishOutbound(context.Background(), msg)
+		_ = s.eventBus.PublishOutbound(s.ctx, msg)
 	}
 	// Hooks.
 	if s.hookManager != nil {
@@ -754,7 +771,7 @@ func (s *Scheduler) emit(evt Event) {
 		if evt.Message != "" {
 			hookEvt.ToolOutput = evt.Message
 		}
-		s.hookManager.FireAsync(hookEvt)
+		s.hookManager.FireAsync(s.ctx, hookEvt)
 	}
 	// Bridge (so the live cli Ctrl+J overlay can redraw).
 	if s.bridge != nil {

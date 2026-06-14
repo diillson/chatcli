@@ -34,7 +34,7 @@ var pluginsSetAdapter = func(a plugins.SchedulerAdapter) {
 
 // initScheduler wires the scheduler into ChatCLI. Errors are logged,
 // not fatal — a scheduler outage must not break the chat loop.
-func (cli *ChatCLI) initScheduler() {
+func (cli *ChatCLI) initScheduler(parent context.Context) {
 	if cli.logger == nil {
 		return
 	}
@@ -75,7 +75,10 @@ func (cli *ChatCLI) initScheduler() {
 	}
 	builtins.RegisterAll(s)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// The scheduler outlives any single request; its lifecycle is governed
+	// by schedulerCancel (fired in cleanup). Detach request cancellation
+	// while inheriting context values.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	cli.schedulerCancel = cancel
 	if err := s.Start(ctx); err != nil {
 		cli.logger.Warn("scheduler: Start failed — feature disabled for session", zap.Error(err))

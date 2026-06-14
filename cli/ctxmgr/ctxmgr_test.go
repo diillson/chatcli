@@ -6,6 +6,7 @@
 package ctxmgr
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -814,7 +815,7 @@ func TestManagerUpdateContext_DescriptionAndTags(t *testing.T) {
 	m := newTestManager(t)
 	addTestContext(t, m, "update-me", sampleFiles(), ModeFull, []string{"old"})
 
-	updated, err := m.UpdateContext("update-me", nil, "", []string{"new-tag"}, "new description")
+	updated, err := m.UpdateContext(context.Background(), "update-me", nil, "", []string{"new-tag"}, "new description")
 	if err != nil {
 		t.Fatalf("UpdateContext failed: %v", err)
 	}
@@ -828,7 +829,7 @@ func TestManagerUpdateContext_DescriptionAndTags(t *testing.T) {
 
 func TestManagerUpdateContext_NotFound(t *testing.T) {
 	m := newTestManager(t)
-	_, err := m.UpdateContext("nonexistent", nil, "", nil, "desc")
+	_, err := m.UpdateContext(context.Background(), "nonexistent", nil, "", nil, "desc")
 	if err == nil {
 		t.Error("expected error updating nonexistent context")
 	}
@@ -989,7 +990,7 @@ func TestProcessorEstimateTokenCount(t *testing.T) {
 
 func TestProcessorProcessPaths_NoPaths(t *testing.T) {
 	p := NewProcessor(zap.NewNop())
-	_, _, err := p.ProcessPaths(nil, ModeFull)
+	_, _, err := p.ProcessPaths(context.Background(), nil, ModeFull)
 	if err == nil {
 		t.Error("expected error when no paths provided")
 	}
@@ -997,7 +998,7 @@ func TestProcessorProcessPaths_NoPaths(t *testing.T) {
 
 func TestProcessorProcessPaths_InvalidMode(t *testing.T) {
 	p := NewProcessor(zap.NewNop())
-	_, _, err := p.ProcessPaths([]string{"."}, "invalid-mode")
+	_, _, err := p.ProcessPaths(context.Background(), []string{"."}, "invalid-mode")
 	if err == nil {
 		t.Error("expected error for invalid processing mode")
 	}

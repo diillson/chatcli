@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,7 +42,7 @@ func BenchmarkProcessDirectory(b *testing.B) {
 	b.ResetTimer() // Inicia a contagem de tempo
 	for i := 0; i < b.N; i++ {
 		// A função a ser benchmarkada
-		_, err := ProcessDirectory(tempDir, options)
+		_, err := ProcessDirectory(context.Background(), tempDir, options)
 		if err != nil {
 			b.Fatalf("ProcessDirectory failed: %v", err)
 		}
@@ -57,7 +58,7 @@ func TestProcessDirectory(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	options := DefaultDirectoryScanOptions(logger)
 
-	files, err := ProcessDirectory(tempDir, options)
+	files, err := ProcessDirectory(context.Background(), tempDir, options)
 	require.NoError(t, err)
 
 	// Deve encontrar 3 arquivos: main.go, button.js, README.md
@@ -93,7 +94,7 @@ func TestProcessDirectory_WithLimits(t *testing.T) {
 
 	t.Run("MaxFiles limit", func(t *testing.T) {
 		options.MaxFilesToProcess = 3
-		files, err := ProcessDirectory(tempDir, options)
+		files, err := ProcessDirectory(context.Background(), tempDir, options)
 		require.NoError(t, err)
 		assert.Len(t, files, 3, "Should process only up to the max files limit")
 	})
@@ -101,7 +102,7 @@ func TestProcessDirectory_WithLimits(t *testing.T) {
 	t.Run("MaxTotalSize limit", func(t *testing.T) {
 		options.MaxFilesToProcess = 100 // Reset file limit
 		options.MaxTotalSize = 30       // Limite de 30 bytes
-		files, err := ProcessDirectory(tempDir, options)
+		files, err := ProcessDirectory(context.Background(), tempDir, options)
 		require.NoError(t, err)
 
 		var totalSize int64

@@ -246,7 +246,7 @@ func TestManager_CreateKnowledgeContextFromJSONL(t *testing.T) {
 		`{"id":"a.md#0001","source":"a.md","content":"# Alpha\ncontent"}`,
 		`{"id":"b.md#0001","source":"b.md","content":"# Beta\ncontent"}`,
 	})
-	fc, err := m.CreateContext("kb-docs", "docs corpus", []string{path}, ModeKnowledge, nil, false)
+	fc, err := m.CreateContext(context.Background(), "kb-docs", "docs corpus", []string{path}, ModeKnowledge, nil, false)
 	if err != nil {
 		t.Fatalf("CreateContext: %v", err)
 	}

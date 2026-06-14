@@ -140,7 +140,7 @@ func openControllingTTY() (int, func(), error) {
 func writeOneByte(fd int, b byte) error {
 	if err := tiocsti(fd, b); err != nil {
 		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.ENOTTY) || errors.Is(err, unix.EINVAL) {
-			return fmt.Errorf("%w: %v", errTTYInjectUnsupported, err)
+			return fmt.Errorf("%w: %w", errTTYInjectUnsupported, err)
 		}
 		return fmt.Errorf("tty inject byte: %w", err)
 	}

@@ -650,6 +650,7 @@ func (cli *ChatCLI) executeBufferedTurn(
 // elapsed is measured from just before executeLLMTurn so it covers both
 // latency to first byte and full streaming time.
 func (cli *ChatCLI) handleChatTurnResult(
+	ctx context.Context,
 	err error,
 	userMessage models.Message,
 	aiResponse string,
@@ -672,7 +673,7 @@ func (cli *ChatCLI) handleChatTurnResult(
 
 	// Mirror the turn onto the shared cross-channel conversation so other
 	// channels (Telegram/Slack) see it as context.
-	cli.mirrorHubTurn(context.Background(), userMessage.Content, aiResponse)
+	cli.mirrorHubTurn(ctx, userMessage.Content, aiResponse)
 
 	usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
 	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) {
@@ -681,7 +682,7 @@ func (cli *ChatCLI) handleChatTurnResult(
 	cli.renderAssistantResponse(activeClient, aiResponse, elapsed, usage)
 
 	if cli.memWorker != nil {
-		cli.memWorker.nudge()
+		cli.memWorker.nudge(ctx)
 	}
 }
 

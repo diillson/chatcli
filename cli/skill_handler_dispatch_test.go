@@ -10,6 +10,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -21,7 +22,7 @@ func TestSkillHandlerHandleCommand_PinSucceeds(t *testing.T) {
 	if sh.IsPinned("alpha") {
 		t.Fatal("pre-condition failed")
 	}
-	sh.HandleCommand("/skill pin alpha")
+	sh.HandleCommand(context.Background(), "/skill pin alpha")
 	if !sh.IsPinned("alpha") {
 		t.Error("HandleCommand /skill pin alpha did not pin")
 	}
@@ -32,7 +33,7 @@ func TestSkillHandlerHandleCommand_UnpinSucceeds(t *testing.T) {
 		"alpha": makeSkill("alpha", false),
 	})
 	sh.Pin("alpha")
-	sh.HandleCommand("/skill unpin alpha")
+	sh.HandleCommand(context.Background(), "/skill unpin alpha")
 	if sh.IsPinned("alpha") {
 		t.Error("HandleCommand /skill unpin alpha did not unpin")
 	}
@@ -44,7 +45,7 @@ func TestSkillHandlerHandleCommand_PinUsageError(t *testing.T) {
 	sh, _ := newPinTestFixture(t, map[string]string{
 		"alpha": makeSkill("alpha", false),
 	})
-	sh.HandleCommand("/skill pin")
+	sh.HandleCommand(context.Background(), "/skill pin")
 	if len(sh.PinnedNames()) != 0 {
 		t.Error("/skill pin (no arg) must not modify the pin set")
 	}
@@ -55,7 +56,7 @@ func TestSkillHandlerHandleCommand_UnpinUsageError(t *testing.T) {
 		"alpha": makeSkill("alpha", false),
 	})
 	sh.Pin("alpha")
-	sh.HandleCommand("/skill unpin")
+	sh.HandleCommand(context.Background(), "/skill unpin")
 	if !sh.IsPinned("alpha") {
 		t.Error("/skill unpin (no arg) must leave the existing pin alone")
 	}
@@ -67,7 +68,7 @@ func TestSkillHandlerHandleCommand_UnknownSubcommandIsNoop(t *testing.T) {
 	})
 	// Should print the unknown-subcommand notice and return — not crash,
 	// not modify state.
-	sh.HandleCommand("/skill nonexistent-subcmd")
+	sh.HandleCommand(context.Background(), "/skill nonexistent-subcmd")
 	if len(sh.PinnedNames()) != 0 {
 		t.Error("unknown subcommand must not alter pin set")
 	}

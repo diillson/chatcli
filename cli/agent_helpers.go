@@ -109,13 +109,6 @@ func findLastMeaningfulLine(text string) string {
 	return ""
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // detectHeredocs verifica presença de heredocs
 func detectHeredocs(script string) bool {
 	heredocPattern := regexp.MustCompile(`<<-?\s*['"]?(\w+)['"]?`)

@@ -1,4 +1,4 @@
-package github_models
+package githubmodels
 
 import (
 	"github.com/diillson/chatcli/auth"

@@ -65,7 +65,7 @@ func (cm *ContextManager) RequestLLMContinuation(
 		return "", fmt.Errorf("llmClient does not implement client.LLMClient interface")
 	}
 
-	newCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	newCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	// Sanitizar saídas
@@ -115,7 +115,7 @@ func (cm *ContextManager) RequestLLMWithPreExecutionContext(
 		return "", fmt.Errorf("llmClient does not implement client.LLMClient interface")
 	}
 
-	newCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	newCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	prompt := fmt.Sprintf(`O comando que você sugeriu foi:

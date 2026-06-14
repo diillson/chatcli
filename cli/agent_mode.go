@@ -666,51 +666,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	//      context) — varies between runs but stable within one Run().
 	//   4. Skills injection (auto-activated + manual) + Orchestrator
 	//      catalog. Added further down after auto-activation is decided.
-	var coreText string
-	if hasActivePersona {
-		personaPrompt := a.cli.personaHandler.GetManager().GetSystemPrompt()
-		activeAgent := a.cli.personaHandler.GetManager().GetActiveAgent()
-		if isCoder {
-			coreText = personaPrompt + "\n\n" + CoderFormatInstructions
-			a.logger.Info("Usando persona ativa + modo coder", zap.String("agent", activeAgent.Name))
-		} else {
-			coreText = personaPrompt + "\n\n" + AgentFormatInstructions
-			a.logger.Info("Usando persona ativa + modo agent", zap.String("agent", activeAgent.Name))
-		}
-	} else if isCoder {
-		// The gateway answers through a chat app: use the dedicated
-		// conversational base (same tools, friendlier voice) instead of the
-		// terse coder prompt. Only when no persona owns the core text.
-		coreText = coderBaseSystemPrompt(a.gatewayPersona)
-	} else {
-		osName := runtime.GOOS
-		shellName := utils.GetUserShell()
-		currentDir, _ := os.Getwd()
-		coreText = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
-	}
-	// Language directive. The interactive CLI pins the daemon/user locale; the
-	// gateway must instead MIRROR each incoming message's language (every user
-	// writes in their own). Apply the dynamic directive on EVERY gateway path —
-	// including when an active persona owns the core text and the
-	// GatewaySystemPrompt (which also says this) isn't used — so the reply is
-	// never statically pinned to one language.
-	if a.gatewayPersona {
-		coreText += "\n\n" + GatewayLanguageDirective
-		// The daemon answers strangers' questions about the user unless told
-		// the injected Memory Index is real knowledge — applied on every
-		// gateway path, including persona-owned core text.
-		coreText += "\n\n" + GatewayMemoryDirective
-	} else {
-		coreText += "\n\n" + i18n.T("ai.response_language")
-	}
-
-	// Gateway persona reinforcement: only needed when the core text is NOT
-	// already the dedicated GatewaySystemPrompt — i.e. when an active persona
-	// (or a non-coder profile) owns the core block. Steers those toward concise,
-	// plain-text chat replies. The GatewaySystemPrompt path already embeds this.
-	if a.gatewayPersona && (hasActivePersona || !isCoder) {
-		coreText += "\n\n" + i18n.T("gateway.persona_prompt")
-	}
+	coreText := a.composeCoreText(isCoder, hasActivePersona)
 
 	a.isCoderMode = isCoder
 	// isOneShot is set by the caller before Run (false for the interactive
@@ -725,38 +681,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// SEPARATELY from workspaceText: the timestamp changes every turn, so
 	// bundling it into the cacheable workspace block would bust the prefix
 	// cache. It is emitted as its own uncached trailing block instead.
-	var workspaceText string
-	var dynamicText string
-	if a.cli.contextBuilder != nil {
-		var hints []string
-		hintWindow := 3
-		if len(a.cli.history) < hintWindow {
-			hintWindow = len(a.cli.history)
-		}
-		if hintWindow > 0 {
-			var recentTexts []string
-			for _, msg := range a.cli.history[len(a.cli.history)-hintWindow:] {
-				recentTexts = append(recentTexts, msg.Content)
-			}
-			hints = memory.ExtractKeywords(recentTexts)
-		}
-		// Memory injection mode: "index" (pull) keeps the per-turn payload
-		// bounded — a small stable digest plus the recall directive — while
-		// "full" (push) injects the whole hint-driven retrieval. Agent/coder
-		// can pull, so they honor the configured mode directly.
-		mode := loadMemoryMode()
-		var aug *memory.HyDEAugmenter
-		if a.qualityConfig.HyDE.Enabled && a.qualityConfig.Enabled {
-			a.cli.ensureHyDEVectors(a.qualityConfig)
-			aug = a.cli.hydeAugmenter(a.qualityConfig)
-		}
-		recallHint := ""
-		if mode == memModeIndex {
-			recallHint = memoryRecallHint
-		}
-		workspaceText = a.cli.contextBuilder.BuildWorkspaceContextMode(ctx, query, hints, aug, mode, recallHint)
-		dynamicText = a.cli.contextBuilder.BuildDynamicContext()
-	}
+	workspaceText, dynamicText := a.buildWorkspaceBlocks(ctx, query)
 
 	// Block 2 — tool descriptions (plugins) + session workspace hint.
 	// Merged into one cacheable block since they're always emitted as a pair.
@@ -811,7 +736,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// sees exactly what will run (or why their preference is being
 	// ignored) before the agent loop starts burning turns.
 	if a.skillModelHint != "" {
-		a.cli.ensureModelCacheWarm()
+		a.cli.ensureModelCacheWarm(ctx)
 		preview := a.cli.resolveSkillClient(a.skillModelHint)
 		if preview.Changed {
 			fmt.Printf("  %s\n", colorize(
@@ -826,7 +751,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// Multi-Agent Orchestration: sempre ativo nos modos /agent e /coder.
 	// A env CHATCLI_AGENT_PARALLEL_MODE pode desativar explicitamente (=false ou =0).
 	var orchestratorText string
-	if a.initMultiAgent() {
+	if a.initMultiAgent(ctx) {
 		orchestratorText = workers.OrchestratorSystemPrompt(a.agentRegistry.CatalogString())
 	}
 
@@ -872,26 +797,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if isCoder {
 		currentModeName = ModeCoder
 	}
-	a.cli.history = purgeStaleModeSystems(a.cli.history, currentModeName)
-
-	if len(a.cli.history) == 0 {
-		a.cli.history = append(a.cli.history, sysMsg)
-	} else {
-		// Replace any surviving system message of the CURRENT mode with
-		// the freshly-built sysMsg (workspace/skills/orchestrator blocks
-		// may have changed across turns). Otherwise prepend.
-		foundSystem := false
-		for i, msg := range a.cli.history {
-			if msg.Role == "system" && modeOfSystemMessage(msg) == currentModeName {
-				a.cli.history[i] = sysMsg
-				foundSystem = true
-				break
-			}
-		}
-		if !foundSystem {
-			a.cli.history = append([]models.Message{sysMsg}, a.cli.history...)
-		}
-	}
+	a.installAgentSystemMessage(sysMsg, currentModeName)
 
 	currentQuery := query
 	if additionalContext != "" {
@@ -939,6 +845,118 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	return err
 }
 
+// installAgentSystemMessage purges stale mode system messages and installs the
+// freshly-built sysMsg for the current mode — replacing a surviving same-mode
+// system message in place, or prepending when none exists.
+func (a *AgentMode) installAgentSystemMessage(sysMsg models.Message, currentModeName string) {
+	a.cli.history = purgeStaleModeSystems(a.cli.history, currentModeName)
+
+	if len(a.cli.history) == 0 {
+		a.cli.history = append(a.cli.history, sysMsg)
+		return
+	}
+	// Replace any surviving system message of the CURRENT mode with
+	// the freshly-built sysMsg (workspace/skills/orchestrator blocks
+	// may have changed across turns). Otherwise prepend.
+	for i, msg := range a.cli.history {
+		if msg.Role == "system" && modeOfSystemMessage(msg) == currentModeName {
+			a.cli.history[i] = sysMsg
+			return
+		}
+	}
+	a.cli.history = append([]models.Message{sysMsg}, a.cli.history...)
+}
+
+// composeCoreText builds Block 1 of the agent system prompt (the stable core
+// behavior block): persona/coder/default base plus the language and gateway
+// directives. Split out of Run to keep its cyclomatic complexity in check.
+func (a *AgentMode) composeCoreText(isCoder, hasActivePersona bool) string {
+	var coreText string
+	if hasActivePersona {
+		personaPrompt := a.cli.personaHandler.GetManager().GetSystemPrompt()
+		activeAgent := a.cli.personaHandler.GetManager().GetActiveAgent()
+		if isCoder {
+			coreText = personaPrompt + "\n\n" + CoderFormatInstructions
+			a.logger.Info("Usando persona ativa + modo coder", zap.String("agent", activeAgent.Name))
+		} else {
+			coreText = personaPrompt + "\n\n" + AgentFormatInstructions
+			a.logger.Info("Usando persona ativa + modo agent", zap.String("agent", activeAgent.Name))
+		}
+	} else if isCoder {
+		// The gateway answers through a chat app: use the dedicated
+		// conversational base (same tools, friendlier voice) instead of the
+		// terse coder prompt. Only when no persona owns the core text.
+		coreText = coderBaseSystemPrompt(a.gatewayPersona)
+	} else {
+		osName := runtime.GOOS
+		shellName := utils.GetUserShell()
+		currentDir, _ := os.Getwd()
+		coreText = i18n.T("agent.system_prompt.default.base", osName, shellName, currentDir)
+	}
+	// Language directive. The interactive CLI pins the daemon/user locale; the
+	// gateway must instead MIRROR each incoming message's language (every user
+	// writes in their own). Apply the dynamic directive on EVERY gateway path —
+	// including when an active persona owns the core text and the
+	// GatewaySystemPrompt (which also says this) isn't used — so the reply is
+	// never statically pinned to one language.
+	if a.gatewayPersona {
+		coreText += "\n\n" + GatewayLanguageDirective
+		// The daemon answers strangers' questions about the user unless told
+		// the injected Memory Index is real knowledge — applied on every
+		// gateway path, including persona-owned core text.
+		coreText += "\n\n" + GatewayMemoryDirective
+	} else {
+		coreText += "\n\n" + i18n.T("ai.response_language")
+	}
+
+	// Gateway persona reinforcement: only needed when the core text is NOT
+	// already the dedicated GatewaySystemPrompt — i.e. when an active persona
+	// (or a non-coder profile) owns the core block. Steers those toward concise,
+	// plain-text chat replies. The GatewaySystemPrompt path already embeds this.
+	if a.gatewayPersona && (hasActivePersona || !isCoder) {
+		coreText += "\n\n" + i18n.T("gateway.persona_prompt")
+	}
+	return coreText
+}
+
+// buildWorkspaceBlocks builds Block 3 of the agent system prompt: the
+// workspace/retrieval context plus the separately-cached dynamic (wall-clock)
+// context. Returns empty strings when no context builder is configured.
+func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (string, string) {
+	if a.cli.contextBuilder == nil {
+		return "", ""
+	}
+	var hints []string
+	hintWindow := 3
+	if len(a.cli.history) < hintWindow {
+		hintWindow = len(a.cli.history)
+	}
+	if hintWindow > 0 {
+		var recentTexts []string
+		for _, msg := range a.cli.history[len(a.cli.history)-hintWindow:] {
+			recentTexts = append(recentTexts, msg.Content)
+		}
+		hints = memory.ExtractKeywords(recentTexts)
+	}
+	// Memory injection mode: "index" (pull) keeps the per-turn payload
+	// bounded — a small stable digest plus the recall directive — while
+	// "full" (push) injects the whole hint-driven retrieval. Agent/coder
+	// can pull, so they honor the configured mode directly.
+	mode := loadMemoryMode()
+	var aug *memory.HyDEAugmenter
+	if a.qualityConfig.HyDE.Enabled && a.qualityConfig.Enabled {
+		a.cli.ensureHyDEVectors(a.qualityConfig)
+		aug = a.cli.hydeAugmenter(a.qualityConfig)
+	}
+	recallHint := ""
+	if mode == memModeIndex {
+		recallHint = memoryRecallHint
+	}
+	workspaceText := a.cli.contextBuilder.BuildWorkspaceContextMode(ctx, query, hints, aug, mode, recallHint)
+	dynamicText := a.cli.contextBuilder.BuildDynamicContext()
+	return workspaceText, dynamicText
+}
+
 // RunCoderOnce executa o modo coder de forma não-interativa (one-shot),
 // mas mantendo o loop ReAct do AgentMode (com tool_calls/plugins).
 func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
@@ -967,7 +985,7 @@ func (cli *ChatCLI) runCoderQuery(ctx context.Context, query string, gatewayPers
 	defer cli.setExecutionProfile(ProfileNormal)
 
 	// Processar contextos especiais como @file, @git, etc.
-	query, additionalContext := cli.processSpecialCommands(query)
+	query, additionalContext := cli.processSpecialCommands(ctx, query)
 	fullQuery := query
 	if additionalContext != "" {
 		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
@@ -1121,7 +1139,7 @@ func (a *AgentMode) getToolContextString() string {
 		return ""
 	}
 
-	var toolDescriptions []string
+	toolDescriptions := make([]string, 0, len(plugins))
 	coderCheatSheet := ""
 	for _, plugin := range plugins {
 
@@ -2314,9 +2332,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								needsSchema = true
 							}
 						}
-						if needsSchema {
-							// schema returned to the model; skip execution this turn
-						} else {
+						// When needsSchema is set the schema was already returned to
+						// the model above; skip execution this turn.
+						if !needsSchema {
 							a.cli.animation.StopThinkingAnimation()
 							if !isCompact {
 								renderer.RenderStreamBoxStart("🔌", fmt.Sprintf("MCP: %s", mcpToolName), agent.ColorPurple)
@@ -2429,7 +2447,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// Fire PreToolUse hook — may block the action
 							if a.cli.hookManager != nil {
 								wd, _ := os.Getwd()
-								hookResult := a.cli.hookManager.Fire(hooks.HookEvent{
+								hookResult := a.cli.hookManager.Fire(ctx, hooks.HookEvent{
 									Type:       hooks.EventPreToolUse,
 									Timestamp:  time.Now(),
 									ToolName:   toolName,
@@ -2600,7 +2618,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					if len(hookOutput) > 2000 {
 						hookOutput = hookOutput[:2000] + "...(truncated)"
 					}
-					a.cli.hookManager.FireAsync(hooks.HookEvent{
+					a.cli.hookManager.FireAsync(ctx, hooks.HookEvent{
 						Type:       eventType,
 						Timestamp:  time.Now(),
 						ToolName:   toolName,
@@ -2649,25 +2667,25 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					// Garante flag de erro se veio de execErr
 					batchHasError = true
 					break // Fail-Fast: Para a execução do lote
-				} else {
-					// Per-tool truncation (Item 6). Plugins that
-					// implement plugins.TruncationAware get their own
-					// per-call cap; the rest use the global default.
-					// We look the plugin up again here because the
-					// inner-scope `plugin` variable from the dispatch
-					// block is no longer in scope at this site.
-					maxChars := plugins.DefaultMaxResultChars
-					if p, ok := a.cli.pluginManager.GetPlugin(tc.Name); ok && p != nil {
-						maxChars = plugins.EffectiveMaxResultChars(p)
-					}
-					toolOutput = plugins.TruncateForLLM(toolOutput, maxChars)
-
-					batchOutputBuilder.WriteString(toolOutput)
-					batchOutputBuilder.WriteString("\n\n")
-					successCount++
-					a.toolCallsExecd++
-					turnToolCalls++
 				}
+
+				// Per-tool truncation (Item 6). Plugins that
+				// implement plugins.TruncationAware get their own
+				// per-call cap; the rest use the global default.
+				// We look the plugin up again here because the
+				// inner-scope `plugin` variable from the dispatch
+				// block is no longer in scope at this site.
+				maxChars := plugins.DefaultMaxResultChars
+				if p, ok := a.cli.pluginManager.GetPlugin(tc.Name); ok && p != nil {
+					maxChars = plugins.EffectiveMaxResultChars(p)
+				}
+				toolOutput = plugins.TruncateForLLM(toolOutput, maxChars)
+
+				batchOutputBuilder.WriteString(toolOutput)
+				batchOutputBuilder.WriteString("\n\n")
+				successCount++
+				a.toolCallsExecd++
+				turnToolCalls++
 			}
 
 			// Log per-batch structured outcome at DEBUG so operators can
@@ -2901,7 +2919,7 @@ func (a *AgentMode) continueWithNewAIResponse(ctx context.Context) {
 // - "\" funciona como escape fora de aspas simples (ex: \" ou \n literal etc.)
 // - não interpreta sequências como \n => newline; mantém literal \ + n (quem interpreta é o plugin, se quiser)
 // - retorna erro se aspas não balanceadas ou escape pendente no final
-func (a *AgentMode) initMultiAgent() bool {
+func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 	modeStr := strings.TrimSpace(strings.ToLower(os.Getenv("CHATCLI_AGENT_PARALLEL_MODE")))
 	if modeStr == "false" || modeStr == "0" {
 		a.parallelMode = false
@@ -3030,7 +3048,7 @@ func (a *AgentMode) initMultiAgent() bool {
 	// survive process crashes; see cli/reflexion_setup.go.
 	lessonLLM := a.cli.makeLessonLLM()
 	persistLesson := a.cli.makeLessonPersister()
-	enqueuer := a.cli.reflexionEnqueuer(a.qualityConfig.Reflexion.Queue)
+	enqueuer := a.cli.reflexionEnqueuer(ctx, a.qualityConfig.Reflexion.Queue)
 	convChecker := a.cli.buildRefineConvergence(a.qualityConfig)
 	a.qualityPipeline = quality.BuildPipeline(a.qualityConfig, a.logger, quality.BuildPipelineDeps{
 		Dispatch:           dispatchOne,

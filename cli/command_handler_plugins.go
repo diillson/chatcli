@@ -21,7 +21,7 @@ import (
 	"github.com/diillson/chatcli/utils"
 )
 
-func (ch *CommandHandler) handleAuthCommand(userInput string) {
+func (ch *CommandHandler) handleAuthCommand(ctx context.Context, userInput string) {
 	args := strings.Fields(userInput)
 	if len(args) < 2 {
 		fmt.Println(i18n.T("auth.usage"))
@@ -37,7 +37,6 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			return
 		}
 		prov := strings.ToLower(args[2])
-		ctx := context.Background()
 		switch prov {
 		case "anthropic", "claude", "claudeai":
 			id, err := auth.LoginAnthropicOAuth(ctx, ch.cli.logger)
@@ -47,7 +46,7 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			}
 			fmt.Println(i18n.T("auth.login.success", "Anthropic", id))
 			ch.cli.manager.RefreshProviders()
-			ch.autoSwitchProvider("CLAUDEAI",
+			ch.autoSwitchProvider(ctx, "CLAUDEAI",
 				utils.GetEnvOrDefault("ANTHROPIC_MODEL", config.DefaultClaudeAIModel))
 			return
 		case "openai-codex", "codex":
@@ -58,7 +57,7 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			}
 			fmt.Println(i18n.T("auth.login.success", "OpenAI Codex", id))
 			ch.cli.manager.RefreshProviders()
-			ch.autoSwitchProvider("OPENAI",
+			ch.autoSwitchProvider(ctx, "OPENAI",
 				utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel))
 			return
 		case "github-copilot", "copilot", "gh-copilot":
@@ -69,7 +68,7 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			}
 			fmt.Println(i18n.T("auth.login.success", "GitHub Copilot", id))
 			ch.cli.manager.RefreshProviders()
-			ch.autoSwitchProvider("COPILOT",
+			ch.autoSwitchProvider(ctx, "COPILOT",
 				utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel))
 			return
 		case "github-models", "gh-models":
@@ -80,7 +79,7 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			}
 			fmt.Println(i18n.T("auth.login.success", "GitHub Models", id))
 			ch.cli.manager.RefreshProviders()
-			ch.autoSwitchProvider("GITHUB_MODELS",
+			ch.autoSwitchProvider(ctx, "GITHUB_MODELS",
 				utils.GetEnvOrDefault("GITHUB_MODELS_MODEL", config.DefaultGitHubModelsModel))
 			return
 		default:
@@ -93,8 +92,6 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 			return
 		}
 		prov := strings.ToLower(args[2])
-		ctx := context.Background()
-		_ = ctx // keep for symmetry
 		var pid auth.ProviderID
 		switch prov {
 		case "anthropic", "claude", "claudeai":
@@ -126,12 +123,12 @@ func (ch *CommandHandler) handleAuthCommand(userInput string) {
 	}
 }
 
-func (ch *CommandHandler) handleSkillCommand(userInput string) {
+func (ch *CommandHandler) handleSkillCommand(ctx context.Context, userInput string) {
 	if ch.cli.skillHandler == nil {
 		fmt.Println(colorize(" Skill registry not initialized.", ColorYellow))
 		return
 	}
-	ch.cli.skillHandler.HandleCommand(userInput)
+	ch.cli.skillHandler.HandleCommand(ctx, userInput)
 }
 
 func (ch *CommandHandler) handlePluginCommand(userInput string) {
@@ -196,110 +193,10 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 		}
 
 	case "install":
-		if len(args) < 3 {
-			fmt.Println(i18n.T("plugin.install.usage"))
-			return
-		}
-		rawURL := args[2]
-
-		// Parse the URL: detect GitHub/GitLab tree URLs and extract repo, branch, subdir.
-		cloneURL, branch, subDir := parseGitURL(rawURL)
-
-		// AVISO DE SEGURANÆA
-		fmt.Println(colorize(i18n.T("plugin.install.security_warning"), ColorYellow))
-
-		if runtime.GOOS != "windows" {
-			cmd := exec.Command("stty", "sane")
-			cmd.Stdin = os.Stdin
-			_ = cmd.Run()
-		}
-
-		fmt.Print(i18n.T("plugin.install.confirm", rawURL))
-		reader := bufio.NewReader(os.Stdin)
-		confirm, _ := reader.ReadString('\n')
-		if strings.ToLower(strings.TrimSpace(confirm)) != "s" {
-			fmt.Println(i18n.T("plugin.install.canceled"))
-			return
-		}
-
-		fmt.Println(i18n.T("plugin.install.installing", rawURL))
-
-		tempDir, err := os.MkdirTemp("", "chatcli-plugin-")
-		if err != nil {
-			fmt.Println(i18n.T("plugin.install.error.tempdir", err))
-			return
-		}
-		defer func() { _ = os.RemoveAll(tempDir) }()
-
-		// Build git clone args: use --branch if we parsed one from the URL.
-		cloneArgs := []string{"clone", "--depth=1"}
-		if branch != "" {
-			cloneArgs = append(cloneArgs, "--branch", branch)
-		}
-		cloneArgs = append(cloneArgs, cloneURL, tempDir)
-
-		cloneCmd := exec.Command("git", cloneArgs...)
-		if output, err := cloneCmd.CombinedOutput(); err != nil {
-			fmt.Println(i18n.T("plugin.install.error.clone", err))
-			fmt.Println(string(output))
-			return
-		}
-
-		// Determine the build directory (repo root or subdirectory).
-		buildDir := tempDir
-		if subDir != "" {
-			buildDir = filepath.Join(tempDir, subDir)
-			if info, err := os.Stat(buildDir); err != nil || !info.IsDir() {
-				fmt.Println(i18n.T("plugin.install.error.build",
-					fmt.Errorf("subdirectory '%s' not found in repository", subDir), ""))
-				return
-			}
-		}
-
-		// Plugin name comes from the subdirectory (if present) or the repo name.
-		pluginName := filepath.Base(buildDir)
-		pluginName = strings.TrimSuffix(pluginName, ".git")
-		if runtime.GOOS == "windows" {
-			pluginName += ".exe"
-		}
-
-		buildCmd := exec.Command("go", "build", "-o", filepath.Join(pluginManager.PluginsDir(), pluginName), ".") //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
-		buildCmd.Dir = buildDir
-		if output, err := buildCmd.CombinedOutput(); err != nil {
-			fmt.Println(i18n.T("plugin.install.error.build", err, string(output)))
-			return
-		}
-
-		// Torna o arquivo executável para garantir
-		if err := os.Chmod(filepath.Join(pluginManager.PluginsDir(), pluginName), 0o755); err != nil { //#nosec G302 -- plugin binary must be world-executable
-			fmt.Println(i18n.T("plugin.install.error.chmod", err))
-			return
-		}
-
-		fmt.Println(i18n.T("plugin.reloading"))
-		pluginManager.Reload()
-		fmt.Println(i18n.T("plugin.reload_success"))
+		ch.pluginInstall(args)
 
 	case "uninstall":
-		if len(args) < 3 {
-			fmt.Println(i18n.T("plugin.uninstall.usage"))
-			return
-		}
-		p, found := pluginManager.GetPlugin(args[2])
-		if !found {
-			fmt.Println(i18n.T("plugin.error.not_found", args[2]))
-			return
-		}
-		if p.Path() == "[builtin]" || p.Path() == "[remote]" {
-			fmt.Println(i18n.T("plugin.uninstall.error.not_local"))
-			return
-		}
-		if err := os.Remove(p.Path()); err != nil {
-			fmt.Println(i18n.T("plugin.uninstall.error", p.Name(), err))
-			return
-		}
-		fmt.Println(i18n.T("plugin.uninstall.success", p.Name()))
-		pluginManager.Reload()
+		ch.pluginUninstall(args)
 
 	case "reload":
 		fmt.Println(i18n.T("plugin.reloading"))
@@ -309,6 +206,118 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 	default:
 		fmt.Println(i18n.T("plugin.error.unknown_subcommand", subcommand))
 	}
+}
+
+// pluginInstall clona, compila e instala um plugin a partir de uma URL git.
+func (ch *CommandHandler) pluginInstall(args []string) {
+	pluginManager := ch.cli.pluginManager
+	if len(args) < 3 {
+		fmt.Println(i18n.T("plugin.install.usage"))
+		return
+	}
+	rawURL := args[2]
+
+	// Parse the URL: detect GitHub/GitLab tree URLs and extract repo, branch, subdir.
+	cloneURL, branch, subDir := parseGitURL(rawURL)
+
+	// AVISO DE SEGURANÆA
+	fmt.Println(colorize(i18n.T("plugin.install.security_warning"), ColorYellow))
+
+	if runtime.GOOS != "windows" {
+		cmd := exec.Command("stty", "sane")
+		cmd.Stdin = os.Stdin
+		_ = cmd.Run()
+	}
+
+	fmt.Print(i18n.T("plugin.install.confirm", rawURL))
+	reader := bufio.NewReader(os.Stdin)
+	confirm, _ := reader.ReadString('\n')
+	if strings.ToLower(strings.TrimSpace(confirm)) != "s" {
+		fmt.Println(i18n.T("plugin.install.canceled"))
+		return
+	}
+
+	fmt.Println(i18n.T("plugin.install.installing", rawURL))
+
+	tempDir, err := os.MkdirTemp("", "chatcli-plugin-")
+	if err != nil {
+		fmt.Println(i18n.T("plugin.install.error.tempdir", err))
+		return
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+
+	// Build git clone args: use --branch if we parsed one from the URL.
+	cloneArgs := []string{"clone", "--depth=1"}
+	if branch != "" {
+		cloneArgs = append(cloneArgs, "--branch", branch)
+	}
+	cloneArgs = append(cloneArgs, cloneURL, tempDir)
+
+	cloneCmd := exec.Command("git", cloneArgs...)
+	if output, err := cloneCmd.CombinedOutput(); err != nil {
+		fmt.Println(i18n.T("plugin.install.error.clone", err))
+		fmt.Println(string(output))
+		return
+	}
+
+	// Determine the build directory (repo root or subdirectory).
+	buildDir := tempDir
+	if subDir != "" {
+		buildDir = filepath.Join(tempDir, subDir)
+		if info, err := os.Stat(buildDir); err != nil || !info.IsDir() {
+			fmt.Println(i18n.T("plugin.install.error.build",
+				fmt.Errorf("subdirectory '%s' not found in repository", subDir), ""))
+			return
+		}
+	}
+
+	// Plugin name comes from the subdirectory (if present) or the repo name.
+	pluginName := filepath.Base(buildDir)
+	pluginName = strings.TrimSuffix(pluginName, ".git")
+	if runtime.GOOS == "windows" {
+		pluginName += ".exe"
+	}
+
+	buildCmd := exec.Command("go", "build", "-o", filepath.Join(pluginManager.PluginsDir(), pluginName), ".") //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
+	buildCmd.Dir = buildDir
+	if output, err := buildCmd.CombinedOutput(); err != nil {
+		fmt.Println(i18n.T("plugin.install.error.build", err, string(output)))
+		return
+	}
+
+	// Torna o arquivo executável para garantir
+	if err := os.Chmod(filepath.Join(pluginManager.PluginsDir(), pluginName), 0o755); err != nil { //#nosec G302 -- plugin binary must be world-executable
+		fmt.Println(i18n.T("plugin.install.error.chmod", err))
+		return
+	}
+
+	fmt.Println(i18n.T("plugin.reloading"))
+	pluginManager.Reload()
+	fmt.Println(i18n.T("plugin.reload_success"))
+}
+
+// pluginUninstall remove um plugin local instalado e recarrega o gerenciador.
+func (ch *CommandHandler) pluginUninstall(args []string) {
+	pluginManager := ch.cli.pluginManager
+	if len(args) < 3 {
+		fmt.Println(i18n.T("plugin.uninstall.usage"))
+		return
+	}
+	p, found := pluginManager.GetPlugin(args[2])
+	if !found {
+		fmt.Println(i18n.T("plugin.error.not_found", args[2]))
+		return
+	}
+	if p.Path() == "[builtin]" || p.Path() == "[remote]" {
+		fmt.Println(i18n.T("plugin.uninstall.error.not_local"))
+		return
+	}
+	if err := os.Remove(p.Path()); err != nil {
+		fmt.Println(i18n.T("plugin.uninstall.error", p.Name(), err))
+		return
+	}
+	fmt.Println(i18n.T("plugin.uninstall.success", p.Name()))
+	pluginManager.Reload()
 }
 
 // handleAgentPersonaSubcommand verifica se o comando /agent contém um subcomando de persona

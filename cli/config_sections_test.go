@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"strings"
@@ -74,7 +75,7 @@ func TestConfigSections_NoPanicWithMinimalCLI(t *testing.T) {
 		{"security", func(c *ChatCLI) { c.showConfigSecurity() }},
 		{"server", func(c *ChatCLI) { c.showConfigServer() }},
 		{"session", func(c *ChatCLI) { c.showConfigSession() }},
-		{"integrations", func(c *ChatCLI) { c.showConfigIntegrations() }},
+		{"integrations", func(c *ChatCLI) { c.showConfigIntegrations(context.Background()) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,7 +105,7 @@ func TestRouteConfigCommand(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out := captureStdout(t, func() { c.routeConfigCommand(tt.args) })
+			out := captureStdout(t, func() { c.routeConfigCommand(context.Background(), tt.args) })
 			if !strings.Contains(out, tt.wantToken) {
 				t.Errorf("expected output to contain %q, got:\n%s", tt.wantToken, out)
 			}
@@ -178,6 +179,25 @@ func TestCollectPerAgentOverrides(t *testing.T) {
 	}
 	if got[0].val != "gpt-4o" {
 		t.Errorf("unexpected value for ALPHA_MODEL: %s", got[0].val)
+	}
+}
+
+// shorten trims long display values, with an ellipsis when there's room.
+func TestShorten(t *testing.T) {
+	cases := []struct {
+		in     string
+		maxLen int
+		want   string
+	}{
+		{"short", 10, "short"},                 // under limit, unchanged
+		{"exactlyten", 10, "exactlyten"},       // exactly the limit
+		{"abcdef", 4, "abcd"},                  // maxLen < 8: hard cut, no ellipsis
+		{"abcdefghijklmnop", 10, "abcdefg..."}, // maxLen >= 8: ellipsis
+	}
+	for _, tc := range cases {
+		if got := shorten(tc.in, tc.maxLen); got != tc.want {
+			t.Errorf("shorten(%q, %d) = %q, want %q", tc.in, tc.maxLen, got, tc.want)
+		}
 	}
 }
 

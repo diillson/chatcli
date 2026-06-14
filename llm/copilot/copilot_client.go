@@ -306,7 +306,7 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "Copilot"), err)
 	}
 
-	var modelInfos []client.ModelInfo
+	modelInfos := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
 		displayName := m.Name
 		if displayName == "" {

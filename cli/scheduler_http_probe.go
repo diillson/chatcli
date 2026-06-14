@@ -9,6 +9,7 @@ package cli
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,7 +73,7 @@ func (c *httpProbeClient) Do(ctx context.Context, method, url string, headers ma
 	defer resp.Body.Close()
 
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, int64(httpProbeBodyCap+1)))
-	if readErr != nil && readErr != io.EOF {
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
 		return resp.StatusCode, string(body), readErr
 	}
 	bodyStr := string(body)

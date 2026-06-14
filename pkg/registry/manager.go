@@ -358,7 +358,7 @@ func (rm *RegistryManager) GetRegistries() []RegistryInfo {
 	defer rm.mu.RUnlock()
 
 	now := time.Now()
-	var infos []RegistryInfo
+	infos := make([]RegistryInfo, 0, len(rm.config.Registries))
 	for _, entry := range rm.config.Registries {
 		info := RegistryInfo{
 			Name:    entry.Name,
@@ -485,7 +485,7 @@ func (rm *RegistryManager) trackResult(registryName string, err error) {
 
 // enabledRegistries returns only enabled registries that are not in cooldown.
 func (rm *RegistryManager) enabledRegistries() []SkillRegistry {
-	var enabled []SkillRegistry
+	enabled := make([]SkillRegistry, 0, len(rm.registries))
 	now := time.Now()
 	for _, r := range rm.registries {
 		if !r.Enabled() {

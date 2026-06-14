@@ -50,14 +50,14 @@ func (cli *ChatCLI) knownHubPrincipals() []string {
 //	/hub whoami                  (alias of the above)
 //	/hub bind <platform> <id> [principal]   bind a channel identity (default: self)
 //	/hub bindings [principal]    list bindings (admins may filter; users see their own)
-func (cli *ChatCLI) handleHubCommand(input string) {
+func (cli *ChatCLI) handleHubCommand(ctx context.Context, input string) {
 	if cli.hubSync == nil {
 		fmt.Println(colorize("  "+i18n.T("hub.cmd.not_connected"), ColorYellow))
 		return
 	}
 
 	args := strings.Fields(strings.TrimSpace(strings.TrimPrefix(input, "/hub")))
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	sub := ""

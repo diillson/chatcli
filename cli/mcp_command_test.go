@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -119,7 +120,7 @@ func TestMCPCompleterReloadHasNoServerArg(t *testing.T) {
 
 func TestHandleMCPCommandWithoutManagerShowsHint(t *testing.T) {
 	cli := &ChatCLI{} // no manager
-	out := captureStdout(t, func() { cli.handleMCPCommand("/mcp") })
+	out := captureStdout(t, func() { cli.handleMCPCommand(context.Background(), "/mcp") })
 	if !strings.Contains(out, "MCP is not enabled") {
 		t.Errorf("expected not_enabled hint, got:\n%s", out)
 	}
@@ -168,7 +169,7 @@ func TestMcpStopUnknownServerTranslated(t *testing.T) {
 
 func TestMcpRestartOneUnknownServerTranslated(t *testing.T) {
 	cli := withConfiguredServers(t, "filesystem")
-	out := captureStdout(t, func() { cli.mcpRestart("ghost") })
+	out := captureStdout(t, func() { cli.mcpRestart(context.Background(), "ghost") })
 	if !strings.Contains(out, `"ghost" is not configured`) {
 		t.Errorf("expected unknown_server translation, got:\n%s", out)
 	}
@@ -259,7 +260,7 @@ func TestHandleMCPCommandDispatchesToSubcommands(t *testing.T) {
 		{"/mcp totally-unknown", "Usage: /mcp [status"},
 	}
 	for _, c := range cases {
-		out := captureStdout(t, func() { cli.handleMCPCommand(c.input) })
+		out := captureStdout(t, func() { cli.handleMCPCommand(context.Background(), c.input) })
 		if !strings.Contains(out, c.expectIn) {
 			t.Errorf("input %q: expected %q in output:\n%s", c.input, c.expectIn, out)
 		}

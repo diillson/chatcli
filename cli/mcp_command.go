@@ -33,7 +33,7 @@ func translateMCPError(err error) string {
 	}
 }
 
-func (cli *ChatCLI) handleMCPCommand(userInput string) {
+func (cli *ChatCLI) handleMCPCommand(ctx context.Context, userInput string) {
 	if cli.mcpManager == nil {
 		fmt.Println()
 		fmt.Println(uiBox("🔌", i18n.T("mcp.cmd.box_title"), ColorPurple))
@@ -73,7 +73,7 @@ func (cli *ChatCLI) handleMCPCommand(userInput string) {
 	case "tools":
 		cli.mcpShowTools(name)
 	case "restart":
-		cli.mcpRestart(name)
+		cli.mcpRestart(ctx, name)
 	case "start":
 		cli.mcpStart(name)
 	case "stop":
@@ -212,7 +212,7 @@ func (cli *ChatCLI) mcpShowTools(filter string) {
 	fmt.Println()
 }
 
-func (cli *ChatCLI) mcpRestart(name string) {
+func (cli *ChatCLI) mcpRestart(ctx context.Context, name string) {
 	if name != "" {
 		cli.mcpRestartOne(name)
 		return
@@ -223,14 +223,14 @@ func (cli *ChatCLI) mcpRestart(name string) {
 	p := uiPrefix(ColorYellow)
 	fmt.Println(p + colorize(i18n.T("mcp.cmd.restarting"), ColorGray))
 
-	stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+	stopCtx, cancelStop := context.WithTimeout(ctx, 5*time.Second)
 	cli.mcpManager.StopAll(stopCtx)
 	cancelStop()
 	if cli.mcpCancel != nil {
 		cli.mcpCancel()
 	}
 
-	mcpCtx, cancel := context.WithCancel(context.Background())
+	mcpCtx, cancel := context.WithCancel(ctx)
 	if err := cli.mcpManager.StartAll(mcpCtx); err != nil {
 		fmt.Println(p + colorize(i18n.T("mcp.cmd.restart_error", err), ColorRed))
 		fmt.Println(uiBoxEnd(ColorYellow))

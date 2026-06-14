@@ -399,7 +399,7 @@ func (c *MiniMaxClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "MiniMax"), err)
 	}
 
-	var modelsList []client.ModelInfo
+	modelsList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
 		id := strings.ToLower(m.ID)
 		if !strings.HasPrefix(id, "minimax") && !strings.HasPrefix(id, "abab") {

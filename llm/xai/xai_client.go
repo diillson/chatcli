@@ -246,7 +246,7 @@ func (c *XAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) 
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "xAI"), err)
 	}
 
-	var modelList []client.ModelInfo
+	modelList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
 		modelList = append(modelList, client.ModelInfo{
 			ID:          m.ID,

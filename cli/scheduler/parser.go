@@ -198,47 +198,13 @@ func ParseConditionDSL(input string) (Condition, error) {
 	}
 
 	// Combinators.
-	if m := dslCombinator.FindStringSubmatch(in); m != nil {
-		op := m[1]
-		if op == "and" {
-			op = "all_of"
-		}
-		if op == "or" {
-			op = "any_of"
-		}
-		parts := splitTopLevelArgs(m[2])
-		if len(parts) < 2 {
-			return Condition{}, fmt.Errorf("%s: need >=2 children", op)
-		}
-		children := make([]Condition, 0, len(parts))
-		for _, p := range parts {
-			c, err := ParseConditionDSL(p)
-			if err != nil {
-				return Condition{}, fmt.Errorf("%s child: %w", op, err)
-			}
-			children = append(children, c)
-		}
-		return Condition{Type: op, Children: children}, nil
+	if cond, ok, err := parseCombinatorCondition(in); ok {
+		return cond, err
 	}
 
 	// HTTP.
-	if m := dslHTTPEq.FindStringSubmatch(in); m != nil {
-		url, op, rhs := m[1], m[2], strings.TrimSpace(m[3])
-		spec := map[string]any{"url": url}
-		switch op {
-		case "==":
-			n, err := strconv.Atoi(rhs)
-			if err != nil {
-				return Condition{}, fmt.Errorf("http condition: expected numeric status, got %q", rhs)
-			}
-			spec["expected"] = n
-		case "~=":
-			if strings.HasPrefix(rhs, "/") && strings.HasSuffix(rhs, "/") && len(rhs) >= 2 {
-				rhs = rhs[1 : len(rhs)-1]
-			}
-			spec["expected_regex"] = rhs
-		}
-		return Condition{Type: "http_status", Spec: spec}, nil
+	if cond, ok, err := parseHTTPCondition(in); ok {
+		return cond, err
 	}
 
 	// TCP.
@@ -282,18 +248,81 @@ func ParseConditionDSL(input string) (Condition, error) {
 		return Condition{Type: "file_exists", Spec: spec}, nil
 	}
 
+	// Shell / LLM / regex-match prefix forms.
+	if cond, ok := parsePrefixCondition(in); ok {
+		return cond, nil
+	}
+
+	return Condition{}, fmt.Errorf("condition: cannot parse %q", in)
+}
+
+// parseCombinatorCondition handles all_of/any_of (and/or) forms. The bool
+// reports whether the combinator pattern matched.
+func parseCombinatorCondition(in string) (Condition, bool, error) {
+	m := dslCombinator.FindStringSubmatch(in)
+	if m == nil {
+		return Condition{}, false, nil
+	}
+	op := m[1]
+	if op == "and" {
+		op = "all_of"
+	}
+	if op == "or" {
+		op = "any_of"
+	}
+	parts := splitTopLevelArgs(m[2])
+	if len(parts) < 2 {
+		return Condition{}, true, fmt.Errorf("%s: need >=2 children", op)
+	}
+	children := make([]Condition, 0, len(parts))
+	for _, p := range parts {
+		c, err := ParseConditionDSL(p)
+		if err != nil {
+			return Condition{}, true, fmt.Errorf("%s child: %w", op, err)
+		}
+		children = append(children, c)
+	}
+	return Condition{Type: op, Children: children}, true, nil
+}
+
+// parseHTTPCondition handles http_status equality/regex forms. The bool
+// reports whether the HTTP pattern matched.
+func parseHTTPCondition(in string) (Condition, bool, error) {
+	m := dslHTTPEq.FindStringSubmatch(in)
+	if m == nil {
+		return Condition{}, false, nil
+	}
+	url, op, rhs := m[1], m[2], strings.TrimSpace(m[3])
+	spec := map[string]any{"url": url}
+	switch op {
+	case "==":
+		n, err := strconv.Atoi(rhs)
+		if err != nil {
+			return Condition{}, true, fmt.Errorf("http condition: expected numeric status, got %q", rhs)
+		}
+		spec["expected"] = n
+	case "~=":
+		if strings.HasPrefix(rhs, "/") && strings.HasSuffix(rhs, "/") && len(rhs) >= 2 {
+			rhs = rhs[1 : len(rhs)-1]
+		}
+		spec["expected_regex"] = rhs
+	}
+	return Condition{Type: "http_status", Spec: spec}, true, nil
+}
+
+// parsePrefixCondition handles the shell:/sh:/llm: prefix forms and the
+// cmd~=/pattern/ regex-match form. The bool reports whether any matched.
+func parsePrefixCondition(in string) (Condition, bool) {
 	// Shell.
 	if strings.HasPrefix(in, "shell:") || strings.HasPrefix(in, "sh:") {
 		cmd := strings.TrimSpace(in[strings.Index(in, ":")+1:])
-		return Condition{Type: "shell_exit", Spec: map[string]any{"cmd": cmd}}, nil
+		return Condition{Type: "shell_exit", Spec: map[string]any{"cmd": cmd}}, true
 	}
-
 	// LLM.
 	if strings.HasPrefix(in, "llm:") {
 		prompt := strings.TrimSpace(in[len("llm:"):])
-		return Condition{Type: "llm_check", Spec: map[string]any{"prompt": prompt}}, nil
+		return Condition{Type: "llm_check", Spec: map[string]any{"prompt": prompt}}, true
 	}
-
 	// Regex match (cmd~=/pattern/).
 	if idx := strings.Index(in, "~="); idx > 0 && !strings.HasPrefix(in, "http") {
 		cmd := strings.TrimSpace(in[:idx])
@@ -301,10 +330,9 @@ func ParseConditionDSL(input string) (Condition, error) {
 		if strings.HasPrefix(rest, "/") && strings.HasSuffix(rest, "/") && len(rest) >= 2 {
 			rest = rest[1 : len(rest)-1]
 		}
-		return Condition{Type: "regex_match", Spec: map[string]any{"cmd": cmd, "pattern": rest}}, nil
+		return Condition{Type: "regex_match", Spec: map[string]any{"cmd": cmd, "pattern": rest}}, true
 	}
-
-	return Condition{}, fmt.Errorf("condition: cannot parse %q", in)
+	return Condition{}, false
 }
 
 // splitTopLevelArgs splits "a, b, c(d, e), f" into ["a", "b", "c(d, e)", "f"].

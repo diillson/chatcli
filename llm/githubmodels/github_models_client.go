@@ -5,7 +5,7 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  */
-package github_models
+package githubmodels
 
 import (
 	"context"
@@ -244,7 +244,7 @@ func (c *GitHubModelsClient) ListModels(ctx context.Context) ([]client.ModelInfo
 		models = wrapped.Data
 	}
 
-	var modelList []client.ModelInfo
+	modelList := make([]client.ModelInfo, 0, len(models))
 	for _, m := range models {
 		// Filter to chat-capable models only
 		if m.Task != "" && m.Task != "chat-completion" {

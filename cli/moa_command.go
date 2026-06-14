@@ -29,7 +29,7 @@ import (
 	"github.com/diillson/chatcli/models"
 )
 
-func (cli *ChatCLI) handleMoACommand(input string) {
+func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
 	prompt := strings.TrimSpace(strings.TrimPrefix(input, "/moa"))
 	if prompt == "" {
 		fmt.Println(colorize("  "+i18n.T("moa.usage"), ColorGray))
@@ -67,10 +67,10 @@ func (cli *ChatCLI) handleMoACommand(input string) {
 
 	fmt.Printf("  %s\n", colorize(i18n.T("moa.running", len(refs)), ColorCyan))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	final, results, err := moa.RunWithHistory(ctx, prompt, cli.history, refs, factory, aggregator)
+	final, results, err := moa.RunWithHistory(runCtx, prompt, cli.history, refs, factory, aggregator)
 	if err != nil {
 		fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
 		return
@@ -91,5 +91,5 @@ func (cli *ChatCLI) handleMoACommand(input string) {
 	// context — same as a regular chat turn. Mirror onto the cross-channel hub.
 	cli.history = append(cli.history, models.Message{Role: "user", Content: prompt})
 	cli.history = append(cli.history, models.Message{Role: "assistant", Content: final})
-	cli.mirrorHubTurn(context.Background(), prompt, final)
+	cli.mirrorHubTurn(ctx, prompt, final)
 }

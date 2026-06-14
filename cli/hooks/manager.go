@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -99,7 +100,7 @@ func (m *Manager) LoadFromSettings() {
 // Fire dispatches an event to all matching hooks.
 // For PreToolUse events, returns a HookResult — if Blocked is true, the action should be prevented.
 // Other events are fire-and-forget (errors are logged but not returned).
-func (m *Manager) Fire(event HookEvent) *HookResult {
+func (m *Manager) Fire(ctx context.Context, event HookEvent) *HookResult {
 	m.mu.RLock()
 	hooks := make([]HookConfig, len(m.hooks))
 	copy(hooks, m.hooks)
@@ -120,7 +121,7 @@ func (m *Manager) Fire(event HookEvent) *HookResult {
 			}
 		}
 
-		result := m.executeHook(hook, event)
+		result := m.executeHook(ctx, hook, event)
 
 		// For PreToolUse, a blocking result (exit code 2) stops the action
 		if event.Type == EventPreToolUse && result.Blocked {
@@ -137,8 +138,11 @@ func (m *Manager) Fire(event HookEvent) *HookResult {
 
 // FireAsync dispatches an event asynchronously (non-blocking).
 // Use for events where the result doesn't matter (PostToolUse, Notification, etc.).
-func (m *Manager) FireAsync(event HookEvent) {
-	go m.Fire(event)
+func (m *Manager) FireAsync(ctx context.Context, event HookEvent) {
+	// Detach cancellation so a fire-and-forget hook runs to completion even
+	// after the triggering operation returns, while still inheriting any
+	// values carried on ctx.
+	go m.Fire(context.WithoutCancel(ctx), event)
 }
 
 // Count returns the number of loaded hooks.
@@ -158,14 +162,14 @@ func (m *Manager) GetHooks() []HookConfig {
 }
 
 // executeHook runs a single hook and returns the result.
-func (m *Manager) executeHook(hook HookConfig, event HookEvent) *HookResult {
+func (m *Manager) executeHook(ctx context.Context, hook HookConfig, event HookEvent) *HookResult {
 	timeout := time.Duration(hook.GetTimeout()) * time.Millisecond
 
 	switch hook.Type {
 	case HookTypeCommand:
-		return m.executeCommandHook(hook, event, timeout)
+		return m.executeCommandHook(ctx, hook, event, timeout)
 	case HookTypeHTTP:
-		return m.executeHTTPHook(hook, event, timeout)
+		return m.executeHTTPHook(ctx, hook, event, timeout)
 	default:
 		m.logger.Warn("Unknown hook type", zap.String("type", string(hook.Type)), zap.String("name", hook.Name))
 		return &HookResult{ExitCode: -1, Error: "unknown hook type"}
@@ -174,8 +178,8 @@ func (m *Manager) executeHook(hook HookConfig, event HookEvent) *HookResult {
 
 // executeCommandHook runs a shell command hook.
 // The event JSON is passed via stdin. Exit code 0 = allow, 2 = block.
-func (m *Manager) executeCommandHook(hook HookConfig, event HookEvent, timeout time.Duration) *HookResult {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func (m *Manager) executeCommandHook(ctx context.Context, hook HookConfig, event HookEvent, timeout time.Duration) *HookResult {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	eventJSON, _ := json.Marshal(event)
@@ -202,7 +206,8 @@ func (m *Manager) executeCommandHook(hook HookConfig, event HookEvent, timeout t
 	}
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()
 		} else {
 			result.ExitCode = -1
@@ -229,10 +234,10 @@ func (m *Manager) executeCommandHook(hook HookConfig, event HookEvent, timeout t
 }
 
 // executeHTTPHook sends the event as a POST request.
-func (m *Manager) executeHTTPHook(hook HookConfig, event HookEvent, timeout time.Duration) *HookResult {
+func (m *Manager) executeHTTPHook(ctx context.Context, hook HookConfig, event HookEvent, timeout time.Duration) *HookResult {
 	eventJSON, _ := json.Marshal(event)
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", hook.URL, bytes.NewReader(eventJSON))
