@@ -25,7 +25,7 @@ import (
 // 20_000 chars ≈ 5k tokens with standard BPE — roughly the point where
 // one fetch alone starts dwarfing the system prompt. The knob is
 // overridable via CHATCLI_WEBFETCH_AUTOSAVE_BYTES in case a user wants
-// looser or tighter behaviour.
+// looser or tighter behavior.
 const (
 	defaultWebFetchMaxLength    = 20_000
 	defaultWebFetchAutoSaveSize = 10_000

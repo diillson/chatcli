@@ -29,7 +29,7 @@ type trivialQueryClassification struct {
 	trivial bool
 	// reason is a short tag (for logs / telemetry) describing why the
 	// classifier reached its verdict. Useful when deciding whether the
-	// downgrade behaviour is working as intended.
+	// downgrade behavior is working as intended.
 	reason string
 }
 

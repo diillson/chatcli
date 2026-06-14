@@ -128,7 +128,7 @@ type AgentMode struct {
 //
 // Both '\n' and '\r' end a line. Cooked TTYs deliver '\n' (ICRNL converts
 // the user's CR), but a raw-mode TTY — or one left in a transient state
-// after a TIOCSTI inject for park auto-resume — delivers '\r'. Recognising
+// after a TIOCSTI inject for park auto-resume — delivers '\r'. Recognizing
 // both keeps the security prompt responsive in either mode. CRLF pairs are
 // collapsed into a single line (the trailing '\n' is consumed).
 func splitStdinChunk(chunk []byte, lineBuf *strings.Builder) []string {

@@ -94,9 +94,43 @@ linters-settings:
 
   misspell:
     locale: US
-    # Some pt-BR/portuguese strings in i18n bodies might trip
-    # misspell — keep US dictionary and rely on golangci to skip
-    # JSON-encoded blobs.
+    # ChatCLI is a bilingual (pt-BR/en) codebase: comments, log messages and
+    # i18n bodies are routinely Portuguese. The US dictionary reads many
+    # legitimate Portuguese words as English typos ("comando" -> "commando",
+    # "contextos" -> "contexts", ...). ignore-words whitelists those so the
+    # linter only flags genuine English mistakes — without it, every future
+    # edit to a Portuguese line gets a false positive.
+    #
+    # A few entries are deliberate ENGLISH vocabulary, not Portuguese:
+    #   - cancelled / cancelling: the scheduler's serialized job state
+    #     (StatusCancelled, the "job.cancelled" event) — renaming would break
+    #     persisted state and the event contract.
+    #   - instal: a fragment of the Portuguese regex alternative `instal[ae]r?`
+    #     in cli/agent_routing.go; "fixing" it would corrupt the pattern.
+    ignore-words:
+      - alternar
+      - argumentos
+      - autor
+      - calcular
+      - cancelled
+      - cancelling
+      - clientes
+      - comando
+      - comandos
+      - contextos
+      - duplicatas
+      - eles
+      - exclusivos
+      - exponencial
+      - instal
+      - operacional
+      - presentes
+      - problemas
+      - profissional
+      - progresso
+      - sucess
+      - tradicional
+      - variantes
 
 issues:
   # Don't enforce on generated files.

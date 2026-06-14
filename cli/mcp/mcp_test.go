@@ -101,10 +101,10 @@ func TestJSONRPCRequestMarshalWithParams(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), `"my_tool"`) {
-		t.Error("expected tool name in marshalled JSON")
+		t.Error("expected tool name in marshaled JSON")
 	}
 	if !strings.Contains(string(data), `"key"`) {
-		t.Error("expected arguments key in marshalled JSON")
+		t.Error("expected arguments key in marshaled JSON")
 	}
 }
 

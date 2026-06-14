@@ -5,7 +5,7 @@
  *   url              string — required
  *   method           string — optional (default POST)
  *   body             string — optional raw body
- *   json             any    — optional; when set, marshalled to JSON
+ *   json             any    — optional; when set, marshaled to JSON
  *                             and overrides body
  *   headers          map    — optional request headers
  *   expected_status  int    — optional (default any 2xx)
